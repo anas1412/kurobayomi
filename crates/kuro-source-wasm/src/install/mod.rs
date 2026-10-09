@@ -74,9 +74,9 @@ impl From<InstallError> for Stop {
 /// Where the installer reads and writes, and its limits. [`InstallConfig::new`] gives the production values.
 #[derive(Debug, Clone)]
 pub struct InstallConfig {
-    /// `$XDG_CACHE_HOME/kurobayomi/extensions/download`
+    /// `the platform cache directory/kurobayomi/extensions/download`
     pub download_dir: PathBuf,
-    /// `$XDG_DATA_HOME/kurobayomi/extensions`
+    /// `the platform data directory/kurobayomi/extensions`
     pub store_dir: PathBuf,
     pub connect_timeout: Duration,
     pub total_timeout: Duration,
