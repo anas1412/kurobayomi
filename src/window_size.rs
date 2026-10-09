@@ -1,0 +1,100 @@
+//! Window-size rules shared by the layouts (T-34a-062, `WindowSize.kt` and `DisplayExtensions.kt`).
+
+use std::cell::RefCell;
+
+use gtk::prelude::*;
+
+/// The smaller side, in logical pixels, from which the tablet layouts apply (`TABLET_UI_REQUIRED_SCREEN_WIDTH_DP`).
+pub const TABLET_UI_MIN: i32 = 720;
+
+/// True when `min(width, height)` is at least 720 logical pixels. Android uses the smallest screen width, so a
+/// window that is wide but short stays on the phone layouts.
+pub fn is_tablet_ui(width: i32, height: i32) -> bool {
+    width.min(height) >= TABLET_UI_MIN
+}
+
+/// The window's current size: the real one once it is shown, else the default one.
+pub fn size_of(window: &impl IsA<gtk::Window>) -> (i32, i32) {
+    let window = window.upcast_ref::<gtk::Window>();
+    (window.width().max(window.default_width()), window.height().max(window.default_height()))
+}
+
+/// Remembers the last tablet answer so a resize reports only when the answer flips.
+#[derive(Default)]
+pub struct Crossing(Option<bool>);
+
+impl Crossing {
+    /// `Some(now)` when the window crossed the threshold since the last call; the first call only sets the baseline.
+    pub fn update(&mut self, width: i32, height: i32) -> Option<bool> {
+        let now = is_tablet_ui(width, height);
+        let before = self.0.replace(now);
+        before.filter(|b| *b != now).map(|_| now)
+    }
+}
+
+/// A layout that depends on [`is_tablet_ui`]. It gets the new answer and returns `false` once it is gone.
+type Listener = Box<dyn Fn(bool) -> bool>;
+
+thread_local! {
+    static CROSSING: RefCell<Crossing> = RefCell::new(Crossing::default());
+    static LISTENERS: RefCell<Vec<Listener>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Runs `f` with the new answer every time a resize crosses the 720 px threshold, until it returns `false`.
+pub fn on_tablet_change(f: impl Fn(bool) -> bool + 'static) {
+    LISTENERS.with(|l| l.borrow_mut().push(Box::new(f)));
+}
+
+fn check(window: &gtk::Window) {
+    let (width, height) = size_of(window);
+    let Some(tablet) = CROSSING.with(|c| c.borrow_mut().update(width, height)) else { return };
+    // a listener may rebuild a page that registers another listener, so run a taken copy and merge back
+    let mut run = LISTENERS.with(|l| std::mem::take(&mut *l.borrow_mut()));
+    run.retain(|f| f(tablet));
+    LISTENERS.with(|l| {
+        let mut added = l.borrow_mut();
+        run.append(&mut added);
+        *added = run;
+    });
+}
+
+/// Starts watching `window`: a change of its size or maximized state re-evaluates the breakpoint. Call once.
+pub fn watch(window: &impl IsA<gtk::Window>) {
+    let window = window.upcast_ref::<gtk::Window>();
+    check(window);
+    window.connect_default_width_notify(check);
+    window.connect_default_height_notify(check);
+    window.connect_maximized_notify(check);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_smaller_side_decides_with_719_off_and_720_on() {
+        assert!(!is_tablet_ui(719, 719));
+        assert!(is_tablet_ui(720, 720));
+        assert!(!is_tablet_ui(1800, 719), "wide but short");
+        assert!(!is_tablet_ui(719, 1800), "tall but narrow");
+        assert!(is_tablet_ui(1800, 720));
+        assert!(is_tablet_ui(720, 1800));
+    }
+
+    #[test]
+    fn crossing_reports_only_a_flip() {
+        let mut c = Crossing::default();
+        assert_eq!(c.update(1180, 800), None, "the first call is the baseline");
+        assert_eq!(c.update(1000, 800), None, "still a tablet");
+        assert_eq!(c.update(1000, 719), Some(false));
+        assert_eq!(c.update(900, 600), None, "still a phone");
+        assert_eq!(c.update(720, 720), Some(true));
+    }
+
+    #[test]
+    fn resizing_across_the_threshold_flips_the_answer() {
+        let sizes = [(1180, 800), (1180, 719), (1180, 720), (719, 800), (720, 800), (1180, 800)];
+        let answers: Vec<bool> = sizes.iter().map(|&(w, h)| is_tablet_ui(w, h)).collect();
+        assert_eq!(answers, [true, false, true, false, true, true]);
+    }
+}

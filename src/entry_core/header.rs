@@ -4,8 +4,6 @@
 use crate::entry_core::detail::EntryState;
 use crate::entry_core::text::{artist_row, display_author, display_title, status_icon, status_text};
 
-/// The window width from which the header uses the large layout (a tablet-sized window).
-pub const LARGE_MIN_WIDTH: i32 = 720;
 /// The small layout never draws the cover wider than this.
 pub const SMALL_COVER_MAX: i32 = 100;
 /// The large layout draws the cover at this share of its column.
@@ -104,9 +102,9 @@ impl HeaderModel {
     }
 }
 
-/// True when a window of this width gets the large layout.
-pub fn is_large(window_width: i32) -> bool {
-    window_width >= LARGE_MIN_WIDTH
+/// True when a window of this size gets the large layout: the tablet UI (the smaller side is at least 720).
+pub fn is_large(window_width: i32, window_height: i32) -> bool {
+    crate::window_size::is_tablet_ui(window_width, window_height)
 }
 
 /// The cover size (width, height; 2:3) for a layout. `column_width` is the width of the column that holds it.
@@ -200,7 +198,8 @@ mod tests {
         assert_eq!(cover_size(false, 400), (100, 150));
         assert_eq!(cover_size(false, 80), (80, 120));
         assert_eq!(cover_size(true, 400), (260, 390));
-        assert!(!is_large(719));
-        assert!(is_large(720));
+        assert!(!is_large(719, 900));
+        assert!(is_large(720, 900));
+        assert!(!is_large(1200, 719), "a short window is not a tablet");
     }
 }

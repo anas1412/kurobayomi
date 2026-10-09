@@ -179,6 +179,12 @@ pub enum Command {
     CloseDialog,
 }
 
+/// Back and Escape clear a selection first and pop the page only when nothing is selected. A selection hidden by a
+/// filter still counts (E-04), so the check is over the whole selection, not the visible rows.
+pub fn back_clears_selection(selected_total: usize) -> bool {
+    selected_total > 0
+}
+
 /// Modifier keys held during a key press or click.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Mods {

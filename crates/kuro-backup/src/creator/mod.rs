@@ -2,6 +2,7 @@
 //! assembles the `Backup` container. Reads go through the reader only, so the database adapter owns the read
 //! transaction (E-05) and the gating of the non-favourite queries lives here (E-09).
 
+pub mod db;
 pub mod entries;
 pub mod extensions;
 pub mod meta;

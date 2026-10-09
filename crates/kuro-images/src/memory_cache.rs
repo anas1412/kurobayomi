@@ -91,6 +91,13 @@ impl MemoryCache {
         }
     }
 
+    /// Drops every cached image, for a change that alters how pictures decode (the display profile).
+    pub fn clear(&self) {
+        let mut inner = self.lock();
+        inner.entries.clear();
+        inner.bytes = 0;
+    }
+
     /// Bytes held by the cached images.
     pub fn size(&self) -> u64 {
         self.lock().bytes

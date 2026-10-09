@@ -40,6 +40,11 @@ impl Dialog {
     }
 }
 
+/// Return on the main block or the keypad.
+pub fn is_enter(key: gtk::gdk::Key) -> bool {
+    matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter | gtk::gdk::Key::ISO_Enter)
+}
+
 /// Builds and shows a dialog. `confirm` is the confirm label, or `None` for a Cancel-only dialog.
 /// `on_confirm` gets the dialog so it can run a veto and call [`Dialog::finish`] on acceptance.
 /// `on_cancel` runs once, on Escape, Cancel or the window close button, never after `finish`.
@@ -118,9 +123,17 @@ pub fn show(
 
     let keys = gtk::EventControllerKey::new();
     let cancel_key = cancel.clone();
+    let confirm_key = dialog.confirm.clone();
     keys.connect_key_pressed(move |_, key, _, _| {
         if key == gtk::gdk::Key::Escape {
             cancel_key();
+            return glib::Propagation::Stop;
+        }
+        // Enter submits an enabled dialog (T-19a-067); a field or button that handles Enter itself never gets here
+        if let Some(confirm) = confirm_key.as_ref().filter(|_| is_enter(key)) {
+            if confirm.is_sensitive() {
+                confirm.emit_clicked();
+            }
             return glib::Propagation::Stop;
         }
         glib::Propagation::Proceed
@@ -129,4 +142,16 @@ pub fn show(
 
     window.present();
     dialog
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t_19a_067_every_enter_key_submits_and_other_keys_do_not() {
+        use gtk::gdk::Key;
+        assert!(is_enter(Key::Return) && is_enter(Key::KP_Enter) && is_enter(Key::ISO_Enter));
+        assert!(!is_enter(Key::Escape) && !is_enter(Key::space) && !is_enter(Key::n));
+    }
 }

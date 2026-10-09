@@ -38,7 +38,7 @@ pub fn body(id: &str) -> Option<Built> {
         "settings_create_backup" => backup_pages::create_page(),
         "settings_restore_backup" => backup_pages::restore_page(),
         "settings_debug_info" => debug_info::page(),
-        "settings_data_storage" => spec_page(id),
+        "settings_data_storage" => spec_page(id).map(with_storage_rows),
         _ => None,
     }
 }
@@ -51,6 +51,12 @@ pub fn spec_page(id: &str) -> Option<Built> {
     let tree = registry.build(id, &store, &navigate)?;
     let body = page::body(&tree);
     Some(Built { content: body.widget, end: crate::ui::toolbar(&crate::ui::screen(id)) })
+}
+
+/// Data and storage with its usage row replaced by one real row per mounted storage root (T-22a-035).
+fn with_storage_rows(built: Built) -> Built {
+    super::storage_rows::replace_usage_row(&built.content, &super::storage_rows::rows());
+    built
 }
 
 fn anime_extension_stores() -> Option<Built> {

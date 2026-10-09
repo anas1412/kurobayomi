@@ -24,5 +24,6 @@ pub mod style;
 pub mod stores;
 pub mod stores_backend;
 pub mod stores_page;
+pub mod storage_rows;
 pub mod strings;
 pub mod widgets;

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Local};
 use flate2::{Compression, write::GzEncoder};
 
-use crate::creator::{CreateInputs, build_backup};
+use crate::creator::{CreateInputs, build_backup, build_backup_report};
 use crate::error::BackupError;
 use crate::format;
 use crate::options::BackupOptions;
@@ -36,6 +36,13 @@ pub enum Target {
 pub fn create_file(inputs: &CreateInputs<'_>, opts: &BackupOptions, target: &Target) -> Result<PathBuf, BackupError> {
     let backup = build_backup(inputs, opts)?;
     write_backup(&backup, target)
+}
+
+/// [`create_file`] that also returns the extension packages whose artifact was missing and skipped (E-16), for the
+/// completion notice (T-21a-019).
+pub fn create_file_report(inputs: &CreateInputs<'_>, opts: &BackupOptions, target: &Target) -> Result<(PathBuf, Vec<String>), BackupError> {
+    let (backup, skipped) = build_backup_report(inputs, opts)?;
+    Ok((write_backup(&backup, target)?, skipped))
 }
 
 /// Encodes, writes, self-checks and publishes `backup`. Returns the final path.

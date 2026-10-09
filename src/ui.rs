@@ -358,6 +358,9 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
             r
         }
         Item::Action { title, subtitle } => {
+            if crate::app_update::hides_row(title) {
+                return None;
+            }
             let r = row(title, subtitle.as_deref(), None);
             r.set_activatable(true);
             let t = title.clone();
@@ -370,7 +373,7 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
                 let owner = owner_screen(r.upcast_ref());
                 if let Some(id) = owner {
                     // the onboarding's Restore backup finishes onboarding and opens Data and storage
-                    if crate::pref_model::onboarding::on_action(&id, &t) {
+                    if crate::pref_model::onboarding::on_action(&id, &t) || crate::app_update::on_action(&id, &t) {
                         return;
                     }
                     resolve(&id, &t);

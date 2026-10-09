@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use kuro_core::hash::sha256_hex;
 
 use crate::error::LoadError;
+use crate::icon;
 use crate::manifest::Manifest;
+use crate::registry::{ExtensionRegistry, Installed, Untrusted};
 
 pub const MANIFEST_FILE: &str = "manifest.toml";
 pub const COMPONENT_FILE: &str = "component.wasm";
@@ -59,6 +61,56 @@ pub fn discover(extensions_dir: &Path, signed: &BTreeMap<String, String>) -> Vec
         .collect();
     dirs.sort();
     dirs.iter().map(|dir| load_package(dir, signed)).collect()
+}
+
+/// The load path of the manga packages (T-18a-011, T-18a-054): [`discover`]s `extensions_dir`, publishes what loaded to
+/// `registry`, copies each loaded package's `icon.png` into `icons` (once per version, see [`icon::extract`]), and keeps
+/// each folder's last load problem in the registry keyed by its folder name. A folder that loads again, or is gone,
+/// loses its problem.
+pub fn scan_into(
+    registry: &ExtensionRegistry,
+    extensions_dir: &Path,
+    signed: &BTreeMap<String, String>,
+    icons: &Path,
+) -> Vec<LoadResult> {
+    let results = discover(extensions_dir, signed);
+    let (mut installed, mut untrusted, mut seen) = (Vec::new(), Vec::new(), Vec::new());
+    for result in &results {
+        match result {
+            LoadResult::Verified { manifest, component } | LoadResult::Untrusted { manifest, component } => {
+                let dir = component.parent().unwrap_or(extensions_dir);
+                seen.push(folder_name(dir));
+                registry.clear_problem(&folder_name(dir));
+                icon::extract(icons, dir, &manifest.pkg);
+                if matches!(result, LoadResult::Verified { .. }) {
+                    installed.push(Installed {
+                        pkg: manifest.pkg.clone(),
+                        name: manifest.name.clone(),
+                        version_code: manifest.version_code,
+                        lib_version: manifest.api.parse().unwrap_or(0.0),
+                        has_update: false,
+                        is_obsolete: false,
+                    });
+                } else {
+                    untrusted.push(Untrusted { pkg: manifest.pkg.clone(), version_code: manifest.version_code });
+                }
+            }
+            LoadResult::Error { dir, error } => {
+                seen.push(folder_name(dir));
+                registry.set_problem(&folder_name(dir), error);
+            }
+        }
+    }
+    for gone in registry.snapshot().problems.keys().filter(|name| !seen.contains(name)) {
+        registry.clear_problem(gone);
+    }
+    registry.set_installed(installed);
+    registry.set_untrusted(untrusted);
+    results
+}
+
+fn folder_name(dir: &Path) -> String {
+    dir.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 fn is_hidden(path: &Path) -> bool {
@@ -156,5 +208,32 @@ mod tests {
     fn discovery_of_a_missing_extensions_folder_finds_nothing() {
         let root = tempfile::tempdir().unwrap();
         assert!(discover(&root.path().join("absent"), &BTreeMap::new()).is_empty());
+    }
+
+    #[test]
+    fn scan_into_publishes_packages_caches_icons_and_keeps_problems_by_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let icons = root.path().join("icons");
+        let exts = root.path().join("exts");
+        let good = package(&exts, "good", "1.0", Some(COMPONENT));
+        fs::write(good.join("icon.png"), b"png").unwrap();
+        let bad = package(&exts, "bad", "1.0", None);
+        let registry = ExtensionRegistry::new();
+        scan_into(&registry, &exts, &signed_with(&sha256_hex(COMPONENT)), &icons);
+        let snapshot = registry.snapshot();
+        assert!(snapshot.installed.contains_key(PKG));
+        assert_eq!(fs::read(icons.join(format!("{PKG}.png"))).unwrap(), b"png", "the icon is cached");
+        assert_eq!(snapshot.problems.get("bad").map(String::as_str), Some("component.wasm is missing"));
+        assert!(!snapshot.problems.contains_key("good"));
+
+        // the broken package gets its component and loads: its problem is cleared; a vanished folder loses its problem too
+        fs::write(bad.join(COMPONENT_FILE), COMPONENT).unwrap();
+        let other = package(&exts, "other", "2.0", Some(COMPONENT));
+        scan_into(&registry, &exts, &signed_with(&sha256_hex(COMPONENT)), &icons);
+        assert!(registry.snapshot().problems.contains_key("other"));
+        assert!(!registry.snapshot().problems.contains_key("bad"));
+        fs::remove_dir_all(other).unwrap();
+        scan_into(&registry, &exts, &signed_with(&sha256_hex(COMPONENT)), &icons);
+        assert!(registry.snapshot().problems.is_empty());
     }
 }

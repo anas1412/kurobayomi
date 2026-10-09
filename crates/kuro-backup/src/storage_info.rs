@@ -12,13 +12,19 @@ pub struct StorageRow {
     pub caption: String,
 }
 
-/// The row for one mount point.
+/// The row for one mount point, with sizes from [`format_size`].
 pub fn storage_row(path: &Path, total: u64, available: u64) -> StorageRow {
+    storage_row_with(path, total, available, &format_size)
+}
+
+/// The row for one mount point. The GTK layer passes `glib::format_size` as `format`, since this crate has no GTK
+/// (T-22a-035); [`format_size`] is the same rule for headless callers and tests.
+pub fn storage_row_with(path: &Path, total: u64, available: u64, format: &dyn Fn(u64) -> String) -> StorageRow {
     let used = (total > 0).then(|| (1.0 - available as f64 / total as f64).clamp(0.0, 1.0));
     StorageRow {
         path: path.to_path_buf(),
         used,
-        caption: format!("Available: {} / Total: {}", format_size(available), format_size(total)),
+        caption: format!("Available: {} / Total: {}", format(available), format(total)),
     }
 }
 
@@ -59,6 +65,13 @@ mod tests {
         let row = storage_row(Path::new("/data"), 2_500_000_000, 1_200_000);
         assert_eq!(row.caption, "Available: 1.2 MB / Total: 2.5 GB");
         assert_eq!(row.path, PathBuf::from("/data"));
+    }
+
+    #[test]
+    fn the_caller_can_supply_the_size_formatter() {
+        let row = storage_row_with(Path::new("/d"), 2000, 500, &|n| format!("<{n}>"));
+        assert_eq!(row.caption, "Available: <500> / Total: <2000>");
+        assert_eq!(row.used, Some(0.75));
     }
 
     #[test]

@@ -2,6 +2,7 @@
 //! longer than 300 ms (T-01a-043) and the launcher badge for unread updates (T-01a-025).
 
 use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -89,6 +90,17 @@ pub fn run_with_splash<T, S>(
         let splash = splash.borrow_mut().take();
         finish(result, splash);
     });
+}
+
+/// Empties the chapter cache directory once, on a worker thread, when `auto_clear_chapter_cache` is on (T-08a-037).
+/// The caller runs it after the main window is presented, so the window never waits for the deletion. Returns the
+/// worker, or `None` when the setting is off.
+pub fn clear_chapter_cache_on_launch(enabled: bool, cache_dir: PathBuf) -> Option<std::thread::JoinHandle<()>> {
+    enabled.then(|| {
+        std::thread::spawn(move || {
+            kuro_domain::storage::cache::clear_on_launch(true, &cache_dir);
+        })
+    })
 }
 
 /// The splash: a small undecorated window with the app name and a spinner. It takes no focus, and the caller
@@ -219,5 +231,16 @@ mod tests {
     #[test]
     fn the_desktop_file_is_the_application_id() {
         assert_eq!(desktop_file_name("io.github.blackbox.Kurobayomi"), "io.github.blackbox.Kurobayomi.desktop");
+    }
+
+    #[test]
+    fn the_chapter_cache_is_emptied_in_the_background_only_when_the_setting_is_on() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("page.jpg"), b"x").unwrap();
+        assert!(clear_chapter_cache_on_launch(false, dir.path().to_path_buf()).is_none());
+        assert!(dir.path().join("page.jpg").exists());
+        clear_chapter_cache_on_launch(true, dir.path().to_path_buf()).unwrap().join().unwrap();
+        assert!(dir.path().is_dir());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 }

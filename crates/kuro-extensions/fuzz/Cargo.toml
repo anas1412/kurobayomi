@@ -1,0 +1,29 @@
+[package]
+name = "kuro-extensions-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.9"
+kuro-extensions = { path = ".." }
+
+# not a member of the app workspace: `cargo fuzz` builds it on its own
+[workspace]
+
+[[bin]]
+name = "manifest"
+path = "fuzz_targets/manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "store_decoders"
+path = "fuzz_targets/store_decoders.rs"
+test = false
+doc = false
+bench = false

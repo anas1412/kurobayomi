@@ -33,13 +33,21 @@ pub fn decode_frames(bytes: &[u8], opts: &DecodeOptions) -> Result<Vec<Frame>, I
         Some(Sniffed::Webp) => {
             let decoder =
                 WebPDecoder::new(Cursor::new(bytes)).map_err(|_| ImageError::DecodeInit)?;
-            collect(decoder.into_frames(), opts)
+            if decoder.has_animation() {
+                collect(decoder.into_frames(), opts)
+            } else {
+                still(bytes, opts)
+            }
         }
-        _ => Ok(vec![Frame {
-            picture: decode(bytes, opts)?,
-            delay_ms: 0,
-        }]),
+        _ => still(bytes, opts),
     }
+}
+
+fn still(bytes: &[u8], opts: &DecodeOptions) -> Result<Vec<Frame>, ImageError> {
+    Ok(vec![Frame {
+        picture: decode(bytes, opts)?,
+        delay_ms: 0,
+    }])
 }
 
 fn collect(frames: Frames<'_>, opts: &DecodeOptions) -> Result<Vec<Frame>, ImageError> {
@@ -101,6 +109,24 @@ mod tests {
             (frames[0].picture.width, frames[0].picture.height),
             (64, 64)
         );
+    }
+
+    #[test]
+    fn an_animated_webp_gives_every_frame_in_order_with_its_delay() {
+        let frames = decode_frames(&fixture("webp_animated_3f.webp"), &opts()).expect("decodes");
+        assert_eq!(frames.len(), 3);
+        let first_pixel = |f: &Frame| [f.picture.rgba[0], f.picture.rgba[1], f.picture.rgba[2]];
+        assert!(first_pixel(&frames[0])[0] > 200, "red first");
+        assert!(first_pixel(&frames[1])[1] > 200, "green second");
+        assert!(first_pixel(&frames[2])[2] > 200, "blue third");
+        assert!(frames.iter().all(|f| f.delay_ms == 100));
+        assert_eq!((frames[0].picture.width, frames[0].picture.height), (64, 64));
+    }
+
+    #[test]
+    fn a_static_webp_gives_one_frame() {
+        let frames = decode_frames(&fixture("webp_lossy_50.webp"), &opts()).expect("decodes");
+        assert_eq!(frames.len(), 1);
     }
 
     #[test]

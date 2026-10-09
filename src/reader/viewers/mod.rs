@@ -17,6 +17,7 @@ pub mod nav;
 pub mod pager;
 pub mod settings;
 pub mod status;
+pub mod visible;
 pub mod webtoon;
 
 use std::cell::Cell;

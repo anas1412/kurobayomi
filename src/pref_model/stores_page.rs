@@ -99,6 +99,30 @@ pub fn fab_expanded_at(value: f64, previous: f64, page_size: f64, upper: f64) ->
     crate::entry_core::anime::layout::fab_expanded(first_visible, 0, value < previous, value + page_size < upper - 1.0)
 }
 
+/// What a key does on the stores page (T-19a-067, p1-ui-parity section 7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shortcut {
+    /// Ctrl+N: the Add dialog.
+    Add,
+    /// F5: refresh every entry.
+    Refresh,
+}
+
+/// The shortcut a key press means on this page, or `None`. Nothing works while the list loads or a dialog is open (the
+/// dialog has its own keys), and F5 does nothing during a refresh. Enter and Escape belong to the dialogs.
+pub fn shortcut_for(key: gtk::gdk::Key, state: gtk::gdk::ModifierType, ready: bool, refreshing: bool, dialog_open: bool) -> Option<Shortcut> {
+    use gtk::gdk::{Key, ModifierType};
+    if !ready || dialog_open {
+        return None;
+    }
+    let ctrl = state.contains(ModifierType::CONTROL_MASK);
+    match key {
+        Key::n | Key::N if ctrl => Some(Shortcut::Add),
+        Key::F5 if !refreshing => Some(Shortcut::Refresh),
+        _ => None,
+    }
+}
+
 /// Opens a link in the default browser. A failure is logged and nothing else happens.
 pub fn open_url(url: &str) {
     gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gio::Cancellable>, |result| {
@@ -240,6 +264,32 @@ pub fn build<T: Keyed + Send + 'static>(
         }));
     }
 
+    // Ctrl+N and F5 act while the page is on screen, wherever the focus is in the window
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    keys.connect_key_pressed({
+        let weak = weak.clone();
+        move |_, key, _, state| match weak.upgrade().and_then(|page| page.shortcut(key, state)) {
+            Some(()) => glib::Propagation::Stop,
+            None => glib::Propagation::Proceed,
+        }
+    });
+    let attached: Rc<RefCell<Option<(gtk::Widget, gtk::EventControllerKey)>>> = Rc::new(RefCell::new(None));
+    overlay.connect_map({
+        let (attached, keys) = (attached.clone(), keys.clone());
+        move |page| {
+            if let Some(root) = page.root().map(|r| r.upcast::<gtk::Widget>()) {
+                root.add_controller(keys.clone());
+                *attached.borrow_mut() = Some((root, keys.clone()));
+            }
+        }
+    });
+    overlay.connect_unmap(move |_| {
+        if let Some((root, keys)) = attached.borrow_mut().take() {
+            root.remove_controller(&keys);
+        }
+    });
+
     // the widget owns the state; closures reach it through a weak reference
     let keep = Rc::clone(&inner);
     let root: gtk::Widget = overlay.clone().upcast();
@@ -261,6 +311,20 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             }
         }
         self.run(effect);
+    }
+
+    /// Runs the shortcut a key press means on this page. `Some(())` when the key was used.
+    fn shortcut(self: &Rc<Self>, key: gtk::gdk::Key, state: gtk::gdk::ModifierType) -> Option<()> {
+        let (ready, refreshing) = match &*self.state.borrow() {
+            Page::Loading => (false, false),
+            Page::Ready { refreshing, .. } => (true, *refreshing),
+        };
+        let action = shortcut_for(key, state, ready, refreshing, self.dialog.borrow().is_some())?;
+        self.dispatch(match action {
+            Shortcut::Add => Event::Open(Dialog::Add(Entry::default())),
+            Shortcut::Refresh => Event::Refresh,
+        });
+        Some(())
     }
 
     fn open_deep_link(self: &Rc<Self>, url: &str) {
@@ -348,7 +412,16 @@ impl<T: Keyed + Send + 'static> Inner<T> {
         crate::ui::margins(&h, 10);
         let tag = gtk::Image::from_icon_name("tag-symbolic");
         h.append(&tag);
-        h.append(&gtk::Label::builder().label(&card.name).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build());
+        let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        text.set_hexpand(true);
+        let name = gtk::Label::builder().label(&card.name).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        // a long name keeps its full text in the tooltip
+        name.set_tooltip_text(Some(&card.name));
+        text.append(&name);
+        if let Some(note) = &card.note {
+            text.append(&gtk::Label::builder().label(note).xalign(0.0).css_classes(["dim-label", "caption"]).build());
+        }
+        h.append(&text);
 
         let globe = crate::ui::icon_button("web-browser-symbolic", &self.texts.open_website);
         globe.set_sensitive(actions.globe_enabled);
@@ -552,6 +625,21 @@ mod tests {
     }
 
     #[test]
+    fn t_19a_067_ctrl_n_opens_add_and_f5_refreshes_only_when_the_page_can() {
+        use gtk::gdk::{Key, ModifierType};
+        let none = ModifierType::empty();
+        let ctrl = ModifierType::CONTROL_MASK;
+        assert_eq!(shortcut_for(Key::n, ctrl, true, false, false), Some(Shortcut::Add));
+        assert_eq!(shortcut_for(Key::N, ctrl | ModifierType::SHIFT_MASK, true, false, false), Some(Shortcut::Add));
+        assert_eq!(shortcut_for(Key::n, none, true, false, false), None, "a plain n is not a shortcut");
+        assert_eq!(shortcut_for(Key::F5, none, true, false, false), Some(Shortcut::Refresh));
+        assert_eq!(shortcut_for(Key::F5, none, true, true, false), None, "no second refresh while one runs");
+        assert_eq!(shortcut_for(Key::n, ctrl, false, false, false), None, "nothing while the list loads");
+        assert_eq!(shortcut_for(Key::F5, none, true, false, true), None, "nothing under an open dialog");
+        assert_eq!(shortcut_for(Key::Return, none, true, false, false), None, "Enter belongs to the dialogs");
+    }
+
+    #[test]
     fn t_47b_011_reload_listeners_all_run() {
         let count = Rc::new(Cell::new(0));
         for _ in 0..2 {
@@ -602,7 +690,7 @@ mod tests {
 
     impl Ops<Item> for Fake {
         fn card(&self, item: &Item) -> Card {
-            Card { key: item.0.clone(), name: item.0.clone(), website: String::new(), discord: None, copy: item.0.clone() }
+            Card { key: item.0.clone(), name: item.0.clone(), website: String::new(), discord: None, copy: item.0.clone(), note: None }
         }
         fn add(&self, url: &str) -> AddOutcome {
             self.added.lock().unwrap().push(url.to_owned());

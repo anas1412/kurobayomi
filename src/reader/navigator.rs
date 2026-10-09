@@ -8,9 +8,6 @@ use gtk::prelude::*;
 
 use super::nav::Step;
 
-/// Window width from which the navigator uses tablet padding (PROPOSAL, `p1-ui-parity.md` section 14).
-pub const TABLET_WIDTH: i32 = 720;
-
 pub const ICON_PREVIOUS: &str = "media-skip-backward-symbolic";
 pub const ICON_NEXT: &str = "media-skip-forward-symbolic";
 
@@ -35,9 +32,9 @@ pub fn slider_target(value: f64, current_page: i32) -> Option<usize> {
     if page == current_page { None } else { Some((page - 1).max(0) as usize) }
 }
 
-/// The horizontal padding of the navigator for a window width: 24 px at tablet width, 8 px otherwise.
-pub fn horizontal_padding(window_width: i32) -> i32 {
-    if window_width >= TABLET_WIDTH { 24 } else { 8 }
+/// The horizontal padding of the navigator for a window size: 24 px in the tablet UI, 8 px otherwise.
+pub fn horizontal_padding(window_width: i32, window_height: i32) -> i32 {
+    if crate::window_size::is_tablet_ui(window_width, window_height) { 24 } else { 8 }
 }
 
 /// One of the two chapter buttons: the action it runs, whether it is enabled, its label and its icon.
@@ -170,9 +167,10 @@ impl Navigator {
     }
 
     /// Applies a state. Every value is computed from `state`; nothing here calls back into the reader.
-    pub fn update(&self, state: &NavigatorState, window_width: i32) {
-        self.root.set_margin_start(horizontal_padding(window_width));
-        self.root.set_margin_end(horizontal_padding(window_width));
+    pub fn update(&self, state: &NavigatorState, window_size: (i32, i32)) {
+        let padding = horizontal_padding(window_size.0, window_size.1);
+        self.root.set_margin_start(padding);
+        self.root.set_margin_end(padding);
         let plan = button_plan(state.rtl, state.previous_enabled, state.next_enabled);
         for (button, step, action) in [(&self.left, &self.left_step, plan[0]), (&self.right, &self.right_step, plan[1])] {
             step.set(action.step);
@@ -234,7 +232,8 @@ mod tests {
 
     #[test]
     fn tablet_width_uses_24_px_padding_otherwise_8() {
-        assert_eq!(horizontal_padding(1000), 24);
-        assert_eq!(horizontal_padding(719), 8);
+        assert_eq!(horizontal_padding(1000, 800), 24);
+        assert_eq!(horizontal_padding(719, 800), 8);
+        assert_eq!(horizontal_padding(1000, 719), 8, "the smaller side decides");
     }
 }

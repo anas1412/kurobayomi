@@ -129,7 +129,7 @@ fn every_key_renders_with_its_declared_arguments() {
 #[test]
 fn key_table_matches_english_file() {
     assert_eq!(MsgKey::ALL.len(), MSG_COUNT);
-    assert_eq!(MSG_COUNT, 1434);
+    assert_eq!(MSG_COUNT, 1444, "1434 from the Aniyomi base plus the 10 in kurobayomi-extra.ftl");
     let ids: HashSet<&str> = MsgKey::ALL.iter().map(|k| k.id()).collect();
     assert_eq!(ids.len(), MSG_COUNT, "ids are unique");
     assert_eq!(MsgKey::r#type.id(), "type");
@@ -162,8 +162,8 @@ fn english_file_has_no_android_escapes_or_entities() {
 fn every_plural_has_an_other_variant() {
     let selects = ENGLISH_FTL.matches("{ $count ->").count();
     let others = ENGLISH_FTL.matches("*[other]").count();
-    assert_eq!(selects, 34);
-    assert_eq!(others, 34);
+    assert_eq!(selects, 35, "34 from the Aniyomi base plus ext_store_not_runnable_hidden");
+    assert_eq!(others, 35);
 }
 
 #[test]

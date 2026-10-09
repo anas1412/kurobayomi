@@ -1,0 +1,5 @@
+pkg = "app.kurobayomi.ext.en.example"
+name = "Example"
+version = "1.0.0"
+version_code = 1
+api = "1.0"

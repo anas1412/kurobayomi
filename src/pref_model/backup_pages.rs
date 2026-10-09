@@ -10,17 +10,18 @@ use std::sync::OnceLock;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use kuro_backup::creator::SourceRegistry;
 use kuro_backup::error::BackupError;
 use kuro_backup::job::JobSlot;
 use kuro_backup::options::BackupOptions;
 use kuro_backup::restore::options::RestoreOptions;
-use kuro_backup::restore::screen::{CHECKING_TEXT, Check, RestoreScreen};
+use kuro_backup::restore::screen::{Check, RestoreScreen};
 use kuro_backup::screen::{Card, CreateScreen, DialogOutcome, OptionId, ScreenAction};
 use kuro_backup::schema::Backup;
-use kuro_backup::validate::{TrackerRegistry, check_file, preflight_file};
+use kuro_backup::text;
+use kuro_backup::validate::check_file;
 use kuro_i18n::{MsgKey, tr};
 
+use crate::backup_run::NothingInstalled;
 use crate::screens::Built;
 
 /// What starts a run. The app registers it with the adapters over its databases and preferences.
@@ -142,6 +143,10 @@ pub fn create_page() -> Option<Built> {
             rows.push((*id, row, check));
         }
         column.append(&list);
+        if card == Card::Extensions {
+            // Android APK extensions are replaced by Kurobayomi extension files in a backup (T-21a-019)
+            column.append(&crate::ui::dim(&crate::backup_host::shown(text::BACKUP_EXTENSIONS_INFO)));
+        }
     }
     let warning = crate::ui::dim(kuro_backup::screen::CREDENTIALS_WARNING);
     column.append(&warning);
@@ -218,31 +223,6 @@ fn start_backup(path: PathBuf, options: BackupOptions) {
 
 // ---------- restore ----------
 
-/// No source is installed and no tracker is signed in until the extension and tracker areas register theirs, so the
-/// check lists every source and tracker of the file as missing.
-struct NothingInstalled;
-
-impl SourceRegistry for NothingInstalled {
-    fn is_installed(&self, _source_id: i64) -> bool {
-        false
-    }
-    fn name_of(&self, _source_id: i64) -> String {
-        String::new()
-    }
-    fn stub_label(&self, source_id: i64) -> String {
-        source_id.to_string()
-    }
-}
-
-impl TrackerRegistry for NothingInstalled {
-    fn name(&self, _tracker_id: i32) -> Option<String> {
-        None
-    }
-    fn logged_in(&self, _tracker_id: i32) -> bool {
-        false
-    }
-}
-
 /// The Restore backup page. It checks the file on a worker thread: a spinner row shows meanwhile, the options stay
 /// hidden and Restore stays off. Closing the page drops a result that arrives late and shows nothing (RACE-07).
 pub fn restore_page() -> Option<Built> {
@@ -254,7 +234,7 @@ pub fn restore_page() -> Option<Built> {
     let column = crate::ui::column();
     let checking = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     checking.append(&gtk::Spinner::builder().spinning(true).build());
-    checking.append(&gtk::Label::new(Some(CHECKING_TEXT)));
+    checking.append(&gtk::Label::new(Some(&crate::backup_host::shown(text::CHECKING_BACKUP))));
     column.append(&checking);
     let choose = gtk::Button::with_label(&tr(MsgKey::file_select_backup));
     choose.set_halign(gtk::Align::Start);
@@ -286,7 +266,7 @@ pub fn restore_page() -> Option<Built> {
             let has_file = path.borrow().is_some();
             checking.set_visible(has_file && matches!(screen.check, Check::Validating));
             choose.set_visible(!has_file);
-            let text = screen.card_text();
+            let text = screen.card_text_with(&crate::backup_host::shown);
             frame.set_visible(text.is_some());
             card.set_text(text.as_deref().unwrap_or(""));
             options_list.set_visible(screen.options_visible());
@@ -369,6 +349,8 @@ pub fn restore_page() -> Option<Built> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuro_backup::creator::SourceRegistry;
+    use kuro_backup::validate::{TrackerRegistry, preflight_file};
 
     #[test]
     fn t_47b_029_the_three_cards_and_twelve_rows_come_from_the_string_table() {

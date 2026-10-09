@@ -546,6 +546,17 @@ pub fn open(deps: ReaderDeps, gate: &SourceGate, toaster: Toaster, on_close: imp
             }
         },
     );
+    // a resize across the tablet threshold changes the navigator padding
+    crate::window_size::on_tablet_change({
+        let weak = weak.clone();
+        move |_| match weak.upgrade() {
+            Some(s) => {
+                refresh(&s);
+                true
+            }
+            None => false,
+        }
+    });
     let (mode_weak, crop_weak, settings_weak) = (weak.clone(), weak.clone(), weak.clone());
     bottom_bar.connect(
         move || {
@@ -605,8 +616,8 @@ fn window_of(screen: &Screen) -> Option<gtk::Window> {
     screen.root.upgrade().and_then(|root| root.root()).and_then(|root| root.downcast::<gtk::Window>().ok())
 }
 
-fn width_of(screen: &Screen) -> i32 {
-    screen.root.upgrade().map_or(0, |root| root.width())
+fn size_of(screen: &Screen) -> (i32, i32) {
+    screen.root.upgrade().map_or((0, 0), |root| (root.width(), root.height()))
 }
 
 /// Takes or releases the keep-awake inhibit for the open reader (T-043a-051).
@@ -652,7 +663,7 @@ fn refresh(screen: &Screen) {
         rtl: screen.core.reading_mode() == ReadingMode::RightToLeft,
         loading: screen.stepping.get(),
     };
-    screen.navigator.update(&state, width_of(screen));
+    screen.navigator.update(&state, size_of(screen));
     let ui = *screen.ui.borrow();
     screen.indicator.update(page, total, ui.menu_visible, screen.core.show_page_number());
     screen.bottom_bar.update(screen.core.manga_mode(), screen.core.manga_orientation(), screen.core.crop_on());

@@ -13,7 +13,6 @@ pub mod exception;
 pub mod fetch;
 pub mod format;
 pub mod http;
-#[cfg(feature = "icc")]
 pub mod icc;
 pub mod invalidate;
 pub mod keys;

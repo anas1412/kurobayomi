@@ -2,6 +2,7 @@
 //! label, and which preference each overlay or tab switch writes.
 
 use kuro_domain::kind::EntryKind;
+use kuro_domain::library::columns::PORTRAIT_BREAKPOINT_PX;
 use kuro_prefs::library::{LibraryDisplayMode, LibraryPrefs};
 use kuro_i18n::MsgKey;
 use kuro_prefs::pref::Pref;
@@ -30,13 +31,19 @@ pub fn slider_value_text(value: i32) -> String {
     if value > 0 { value.to_string() } else { kuro_i18n::tr(MsgKey::label_auto) }
 }
 
-/// The columns preference for a kind. The desktop has no orientation (E-24), so it reads the portrait key the
-/// library view already uses.
-pub fn columns_pref(prefs: &LibraryPrefs, kind: EntryKind) -> &Pref<i32> {
+/// The portrait and landscape column preferences of a kind (T-08a-043).
+pub fn column_prefs(prefs: &LibraryPrefs, kind: EntryKind) -> (&Pref<i32>, &Pref<i32>) {
     match kind {
-        EntryKind::Anime => &prefs.anime_portrait_columns,
-        EntryKind::Manga => &prefs.manga_portrait_columns,
+        EntryKind::Anime => (&prefs.anime_portrait_columns, &prefs.anime_landscape_columns),
+        EntryKind::Manga => (&prefs.manga_portrait_columns, &prefs.manga_landscape_columns),
     }
+}
+
+/// The columns preference the slider edits at a window `width` pixels wide: the portrait key below 900 px, the
+/// landscape key from there on, the same split the grid reads (`columns_for_width`).
+pub fn columns_pref(prefs: &LibraryPrefs, kind: EntryKind, width: i32) -> &Pref<i32> {
+    let (portrait, landscape) = column_prefs(prefs, kind);
+    if width < PORTRAIT_BREAKPOINT_PX { portrait } else { landscape }
 }
 
 /// The five overlay switches and the two tab switches. Each writes its preference as soon as it changes.
@@ -158,9 +165,17 @@ mod tests {
     #[test]
     fn columns_preference_is_one_per_kind() {
         let prefs = LibraryPrefs::new(PrefStore::in_memory());
-        columns_pref(&prefs, EntryKind::Anime).set(4).unwrap();
+        columns_pref(&prefs, EntryKind::Anime, 800).set(4).unwrap();
         assert_eq!(prefs.anime_portrait_columns.get(), 4);
         assert_eq!(prefs.manga_portrait_columns.get(), 0);
+    }
+
+    #[test]
+    fn the_slider_edits_the_key_the_grid_reads_at_that_width() {
+        let prefs = LibraryPrefs::new(PrefStore::in_memory());
+        columns_pref(&prefs, EntryKind::Manga, 899).set(3).unwrap();
+        columns_pref(&prefs, EntryKind::Manga, 900).set(7).unwrap();
+        assert_eq!((prefs.manga_portrait_columns.get(), prefs.manga_landscape_columns.get()), (3, 7));
     }
 
     #[test]

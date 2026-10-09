@@ -28,6 +28,8 @@ pub struct App {
     pub base: BasePrefs,
     /// Lock and notification privacy switches.
     pub security: SecurityPrefs,
+    /// The `[library]` preferences, for the startup work that reads them (cache clear).
+    pub library: Arc<LibraryPrefs>,
 }
 
 impl App {
@@ -101,6 +103,7 @@ pub fn install(opened: Opened) -> Result<(), String> {
         anime_db,
         base,
         security: SecurityPrefs::new(prefs_store),
+        library: prefs,
     };
     APP.with(|cell| cell.set(Rc::new(app))).map_err(|_| "the app data is already open".to_owned())
 }

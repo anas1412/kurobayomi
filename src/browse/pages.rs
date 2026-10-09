@@ -24,7 +24,7 @@ use super::header::OverflowItem;
 use super::header_bar::{HeaderDeps, SourceHeader, build as build_header, stub_header};
 use super::icons::resolve;
 use super::listing::ListItem;
-use super::nav::{BackAction, LOCAL_HELP_URL, action_url, back_action, last_used_write};
+use super::nav::{BackAction, action_url, back_action, last_used_write};
 use super::listing_view::{ListingDeps, ListingView};
 use super::names::localized_display_name;
 use super::primitives::{ToastSpec, stub_source_label};
@@ -257,7 +257,11 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
         on_overflow: {
             let open_url = Rc::clone(&open_url);
             Rc::new(move |item| match (item, is_local) {
-                (OverflowItem::Help, true) => open_url(LOCAL_HELP_URL),
+                (OverflowItem::Help, true) => {
+                    if let Some(url) = super::nav::help_url() {
+                        open_url(url);
+                    }
+                }
                 _ => on_overflow(item),
             })
         },
@@ -918,14 +922,13 @@ pub(crate) mod tests {
         assert!(matches!(&filters.0[0], Filter::CheckBox { state: true, .. }), "and the sheet's values");
     }
 
-    fn both_help_actions_open_the_guide_and_other_actions_go_to_the_caller() {
+    fn there_is_no_help_action_and_other_actions_go_to_the_caller() {
         let rig = source_rig(false, false, FilterList::default(), vec![Err("offline".into())]);
         let SourcePage::Browse(page) = &rig.page else { panic!("browse page") };
         assert!(pump_until(|| page.listing.widget().first_child().is_some() && !all_buttons(page.listing.widget()).is_empty()));
-        let by_tip = |tip: String| all_buttons(page.listing.widget()).into_iter().find(|b| b.tooltip_text().as_deref() == Some(tip.as_str())).expect("button");
-        by_tip(EmptyAction::Help.label()).emit_clicked();
-        assert_eq!(*rig.log.borrow(), [format!("url {LOCAL_HELP_URL}")]);
-        by_tip(EmptyAction::OpenInWebView.label()).emit_clicked();
+        let tips = |tip: String| all_buttons(page.listing.widget()).into_iter().find(|b| b.tooltip_text().as_deref() == Some(tip.as_str()));
+        assert!(tips(EmptyAction::Help.label()).is_none(), "no help page, so no Help button (T-14a-047)");
+        tips(EmptyAction::OpenInWebView.label()).expect("button").emit_clicked();
         assert_eq!(rig.log.borrow().last().map(String::as_str), Some("action OpenInWebView"));
     }
 
@@ -935,7 +938,7 @@ pub(crate) mod tests {
         back_clears_the_search_text_first_and_then_leaves();
         popular_latest_and_a_search_from_them_start_from_fresh_defaults();
         the_filter_button_of_the_sheet_searches_with_the_sheet_values();
-        both_help_actions_open_the_guide_and_other_actions_go_to_the_caller();
+        there_is_no_help_action_and_other_actions_go_to_the_caller();
         no_sample_rows_in_an_empty_snapshot();
         migrate_sources_lists_the_snapshot_with_counts_and_marks_stubs();
         global_search_shows_each_state_of_a_source();

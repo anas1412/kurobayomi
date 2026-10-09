@@ -1,0 +1,8 @@
+{"data":{"Page":{"mediaList":[
+  {"id":9200,"status":"PAUSED","scoreRaw":0,"progress":4,"private":false,
+   "startedAt":{"year":null,"month":null,"day":null},"completedAt":{"year":null,"month":null,"day":null},
+   "media":{"id":40001,"title":{"userPreferred":"Main Show"},"coverImage":{"large":"https://img.test/m.jpg"},
+     "format":"TV","status":"FINISHED","episodes":24,"description":null,
+     "startDate":{"year":2019,"month":4,"day":1},
+     "studios":{"edges":[{"isMain":true,"node":{"name":"Main A"}}]}}}
+]}}}

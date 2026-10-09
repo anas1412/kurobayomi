@@ -60,6 +60,20 @@ pub fn start_manual<F>(
 where
     F: FnOnce() -> Result<PathBuf, BackupError> + Send + 'static,
 {
+    start_manual_report(slot, notifier, events, move || work().map(|path| (path, Vec::new())))
+}
+
+/// [`start_manual`] for work that also reports the extension packages it skipped; the completion notice counts them
+/// (T-21a-019).
+pub fn start_manual_report<F>(
+    slot: &JobSlot,
+    notifier: Arc<dyn Notifier>,
+    events: async_channel::Sender<JobEvent>,
+    work: F,
+) -> Result<(), BackupError>
+where
+    F: FnOnce() -> Result<(PathBuf, Vec<String>), BackupError> + Send + 'static,
+{
     let guard = slot.try_acquire().ok_or(BackupError::InProgress)?;
     std::thread::Builder::new()
         .name("kuro-backup-manual".into())
@@ -69,7 +83,11 @@ where
             let result = panic::catch_unwind(AssertUnwindSafe(work))
                 .unwrap_or_else(|_| Err(BackupError::Io(io::Error::other("backup worker panicked"))));
             drop(guard);
-            notify::manual_finished(notifier.as_ref(), &result);
+            let (result, skipped) = match result {
+                Ok((path, skipped)) => (Ok(path), skipped.len()),
+                Err(e) => (Err(e), 0),
+            };
+            notify::manual_finished_report(notifier.as_ref(), &result, skipped);
             let _ = events.send_blocking(JobEvent::Finished(result));
         })
         .map_err(BackupError::Io)?;

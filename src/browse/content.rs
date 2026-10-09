@@ -139,19 +139,19 @@ mod tests {
             plan,
             ContentPlan::Error {
                 message: "offline".into(),
-                actions: vec![EmptyAction::Retry, EmptyAction::OpenInWebView, EmptyAction::Help],
+                actions: error_actions(false),
             }
         );
         assert!(offers(&plan, EmptyAction::Retry));
     }
 
     #[test]
-    fn a_local_source_error_offers_only_the_local_help_guide() {
+    fn a_local_source_error_offers_only_the_local_help_guide_when_there_is_one() {
         let mut i = input();
         i.is_local = true;
         i.refresh_error = Some("no folder");
         match content_plan(&i) {
-            ContentPlan::Error { actions, .. } => assert_eq!(actions, vec![EmptyAction::LocalHelp]),
+            ContentPlan::Error { actions, .. } => assert_eq!(actions, error_actions(true)),
             other => panic!("unexpected plan {other:?}"),
         }
     }

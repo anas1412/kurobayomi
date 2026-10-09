@@ -3,10 +3,6 @@
 
 use kuro_prefs::library::LibraryDisplayMode;
 
-/// Minimum cell width of the adaptive grid, in pixels (`LazyLibraryGrid.kt`, 128 dp). Cards request this width, so
-/// `GridView` fits as many columns as the page allows when the column count is 0.
-pub const CELL_MIN_WIDTH: i32 = 128;
-
 /// Cover height for a cover of `width` pixels: the 2:3 book ratio.
 pub fn cover_height(width: i32) -> i32 {
     width * 3 / 2
@@ -16,11 +12,6 @@ pub fn cover_height(width: i32) -> i32 {
 /// The tab strip and the toolbar read this one answer.
 pub fn tabs_visible(category_tabs: bool, search_active: bool) -> bool {
     category_tabs || search_active
-}
-
-/// Grid column count: a configured count wins, 0 fits as many [`CELL_MIN_WIDTH`] columns as `width` allows (T2-UI-01).
-pub fn grid_columns(width: i32, configured: i32) -> i32 {
-    if configured > 0 { configured } else { (width / CELL_MIN_WIDTH).max(1) }
 }
 
 /// Height of one list row when `entries` rows share `page_height` pixels: `height / n - 3 / n` in floating point,
@@ -98,13 +89,6 @@ mod tests {
         assert!(tabs_visible(true, false));
         assert!(tabs_visible(false, true));
         assert!(!tabs_visible(false, false));
-    }
-
-    #[test]
-    fn auto_columns_come_from_the_width_with_a_128_pixel_minimum() {
-        assert_eq!(grid_columns(1000, 0), 7);
-        assert_eq!(grid_columns(100, 0), 1);
-        assert_eq!(grid_columns(1000, 3), 3);
     }
 
     #[test]

@@ -52,6 +52,13 @@ fn fmt_time(s: f64) -> String {
 
 pub fn player(title: &str, episode: &str) -> GBox {
     let id = "player";
+    // the custom-button scripts are written and checked at player start; the load commands wait for an mpv handle
+    if let (true, Ok(paths)) = (crate::data::is_installed(), kuro_platform::linux::LinuxPaths::system()) {
+        use kuro_platform::paths::Paths as _;
+        crate::player_scripts::start(crate::data::app().anime_db.clone(), paths.data_dir(), |load| {
+            tracing::debug!(scripts = load.len(), "custom button scripts are ready for mpv");
+        });
+    }
     let overlay = gtk::Overlay::new();
     let duration = 1420.0;
 

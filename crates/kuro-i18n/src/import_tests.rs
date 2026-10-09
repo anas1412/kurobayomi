@@ -80,14 +80,14 @@ fn parse_moko_counts_match_the_inventory() {
 }
 
 #[test]
-fn english_generation_counts_1434_messages() {
+fn english_generation_counts_1444_messages() {
     let (core, aniyomi) = base();
     let text = generate_english(&core, &aniyomi).expect("generates");
     let ids = text
         .lines()
         .filter(|l| l.contains(" =") && !l.starts_with('#') && !l.starts_with(' '))
         .count();
-    assert_eq!(ids, 1434);
+    assert_eq!(ids, 1444, "1434 from the Aniyomi base plus the 10 in kurobayomi-extra.ftl");
     assert_eq!(
         text, ENGLISH_FTL,
         "the committed English file is the generator output"

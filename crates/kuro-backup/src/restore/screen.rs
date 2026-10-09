@@ -11,10 +11,12 @@ use crate::error::BackupError;
 use crate::schema::Backup;
 use crate::validate::{Checked, Preflight};
 
-/// Status line while the check runs (PROPOSAL key, ui-parity 1.3).
-pub const CHECKING_TEXT: &str = "Checking backup file…";
+use crate::text::{self, Text};
+
+/// Status line while the check runs (ui-parity 1.3).
+pub const CHECKING_TEXT: &str = text::CHECKING_BACKUP.english;
 /// Missing-components card: first line (ui-parity 1.2).
-pub const MISSING_HINT: &str = "You may need to install any missing extensions and log in to tracking services afterwards to use them.";
+pub const MISSING_HINT: &str = text::MISSING_HINT.english;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Check {
@@ -79,12 +81,21 @@ impl RestoreScreen {
 
     /// Text of the error card, or `None` when there is no card. Plain text: the GTK page sets the headings in bold.
     pub fn card_text(&self) -> Option<String> {
+        self.card_text_with(&|t| t.english.to_owned())
+    }
+
+    /// [`card_text`](Self::card_text) with the headings looked up by `show`, which the GTK layer backs with the
+    /// catalogue (T-22a-043).
+    pub fn card_text_with(&self, show: &dyn Fn(Text) -> String) -> Option<String> {
         match &self.check {
             Check::Validating => None,
-            Check::Invalid { path, message } => {
-                Some(format!("Invalid backup file:\n{}\n\nFull error:\n{message}", path.display()))
-            }
-            Check::Ready(p) => missing_text(p),
+            Check::Invalid { path, message } => Some(format!(
+                "{}\n{}\n\n{}\n{message}",
+                show(text::INVALID_BACKUP_FILE),
+                path.display(),
+                show(text::INVALID_BACKUP_FILE_ERROR)
+            )),
+            Check::Ready(p) => missing_text(p, show),
         }
     }
 }
@@ -113,7 +124,7 @@ pub enum CloseAction {
 }
 
 /// The two choices of the close dialog while a restore runs.
-pub const CLOSE_CHOICES: [&str; 2] = ["Keep running", "Cancel restore and close"];
+pub const CLOSE_CHOICES: [&str; 2] = [text::KEEP_RUNNING.english, text::CANCEL_AND_CLOSE.english];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseChoice {
@@ -136,19 +147,19 @@ pub fn on_close_choice(choice: CloseChoice, stop: &StopFlag) -> CloseAction {
 }
 
 /// The missing-components card (X-203). Headings are separated from the lists by a blank line; each entry is `- name`.
-fn missing_text(p: &Preflight) -> Option<String> {
+fn missing_text(p: &Preflight, show: &dyn Fn(Text) -> String) -> Option<String> {
     if p.missing_sources.is_empty() && p.missing_trackers.is_empty() {
         return None;
     }
-    let mut lines = vec![MISSING_HINT.to_owned()];
+    let mut lines = vec![show(text::MISSING_HINT)];
     if !p.missing_sources.is_empty() {
         lines.push(String::new());
-        lines.push("Missing sources:".into());
+        lines.push(show(text::MISSING_SOURCES));
         lines.extend(p.missing_sources.iter().map(|s| format!("- {s}")));
     }
     if !p.missing_trackers.is_empty() {
         lines.push(String::new());
-        lines.push("Trackers not logged into:".into());
+        lines.push(show(text::TRACKERS_NOT_LOGGED_IN));
         lines.extend(p.missing_trackers.iter().map(|t| format!("- {t}")));
     }
     Some(lines.join("\n"))

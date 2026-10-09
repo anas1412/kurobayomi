@@ -1,0 +1,14 @@
+{"data":{"Page":{"media":[
+  {"id":40001,"title":{"userPreferred":"Main Show"},"coverImage":{"large":"https://img.test/m.jpg"},
+   "description":"Plot","format":"TV","status":"FINISHED","episodes":null,"startDate":{"year":2019,"month":4,"day":1},
+   "averageScore":80,
+   "studios":{"edges":[
+     {"isMain":false,"node":{"name":"Side Studio"}},
+     {"isMain":true,"node":{"name":"Main A"}},
+     {"isMain":true,"node":{"name":"Main B"}},
+     {"isMain":true,"node":{"name":"Main C"}},
+     {"isMain":true,"node":{"name":"Main D"}}]}},
+  {"id":40002,"title":{"userPreferred":"Side Only"},"coverImage":{"large":"https://img.test/s.jpg"},
+   "description":null,"format":"OVA","status":"FINISHED","episodes":2,"startDate":null,"averageScore":null,
+   "studios":{"edges":[{"isMain":false,"node":{"name":"Side Studio"}}]}}
+]}}}

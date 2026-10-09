@@ -4,6 +4,7 @@
 
 pub mod anime;
 pub mod error;
+pub mod fuzz;
 pub mod icon;
 pub mod install;
 pub mod loader;

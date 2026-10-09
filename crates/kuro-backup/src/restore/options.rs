@@ -17,8 +17,10 @@ pub const OPTION_COUNT: usize = 7;
 
 impl RestoreOptions {
     /// English labels in bit index order.
-    pub const LABELS: [&'static str; OPTION_COUNT] =
-        ["Library", "Categories", "App settings", "Extension stores", "Custom buttons", "Source settings", "Extensions"];
+    pub const LABELS: [&'static str; OPTION_COUNT] = {
+        let t = crate::text::RESTORE_OPTION_LABELS;
+        [t[0].english, t[1].english, t[2].english, t[3].english, t[4].english, t[5].english, t[6].english]
+    };
 
     /// Index order of the bit array: library, categories, app, stores, buttons, source, extensions.
     pub fn to_bits(self) -> [bool; OPTION_COUNT] {

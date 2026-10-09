@@ -1,8 +1,11 @@
 //! Navigation rules of a source's browse page: what Back does, which filters a search starts from, and the last-used
 //! source write (T-40b-036, T-40b-039). Pure: the page runs the effects.
 
-/// `LocalMangaSource.HELP_URL`: where the Help actions of a browse page go, for the local source and every other one.
-pub const LOCAL_HELP_URL: &str = "https://aniyomi.org/help/guides/local-manga/";
+/// Where the Help actions of a browse page go. `kuro-local` owns the answer: no Kurobayomi help page exists yet, so
+/// it is `None` and the Help actions are omitted. The Aniyomi guide is never opened (T-14a-047).
+pub fn help_url() -> Option<&'static str> {
+    kuro_local::ux::LOCAL_HELP_URL
+}
 
 /// What Back does on a browse page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,10 +39,10 @@ pub fn last_used_write(incognito: bool, source_id: i64) -> Option<i64> {
     (!incognito).then_some(source_id)
 }
 
-/// Where an error-state action opens a url, when it does: both Help actions open the local source guide (B-EC-14).
+/// Where an error-state action opens a url, when it does: both Help actions open the help page (B-EC-14), if there is one.
 pub fn action_url(action: super::primitives::EmptyAction) -> Option<&'static str> {
     use super::primitives::EmptyAction;
-    matches!(action, EmptyAction::Help | EmptyAction::LocalHelp).then_some(LOCAL_HELP_URL)
+    matches!(action, EmptyAction::Help | EmptyAction::LocalHelp).then(help_url).flatten()
 }
 
 #[cfg(test)]
@@ -47,13 +50,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn both_help_actions_open_the_local_source_guide_and_the_others_open_nothing() {
+    fn no_action_opens_an_aniyomi_guide_and_the_others_open_nothing() {
         use super::super::primitives::EmptyAction;
-        assert_eq!(action_url(EmptyAction::LocalHelp), Some(LOCAL_HELP_URL));
-        assert_eq!(action_url(EmptyAction::Help), Some(LOCAL_HELP_URL));
+        for action in [EmptyAction::LocalHelp, EmptyAction::Help, EmptyAction::Retry, EmptyAction::OpenInWebView] {
+            assert!(action_url(action).is_none_or(|url| !url.contains("aniyomi.org")), "{action:?}");
+        }
         assert_eq!(action_url(EmptyAction::Retry), None);
         assert_eq!(action_url(EmptyAction::OpenInWebView), None);
-        assert!(LOCAL_HELP_URL.starts_with("https://") && LOCAL_HELP_URL.ends_with("local-manga/"));
+        assert_eq!(action_url(EmptyAction::Help), help_url());
+        assert_eq!(action_url(EmptyAction::LocalHelp), help_url());
     }
 
     #[test]

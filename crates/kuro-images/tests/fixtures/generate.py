@@ -79,6 +79,10 @@ def main():
     frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:], duration=100, loop=0)
     write("gif_animated_3f.gif", buf.getvalue())  # F-05
 
+    webp_buf = io.BytesIO()
+    frames[0].save(webp_buf, format="WEBP", save_all=True, append_images=frames[1:], duration=100, loop=0, lossless=True)
+    write("webp_animated_3f.webp", webp_buf.getvalue())  # animated WebP, same three frames as F-05
+
     write("webp_lossy_50.webp", encode(fill_rgb(120, 90), "WEBP", quality=50))  # F-06
     write("bmp_24bit.bmp", encode(fill_rgb(96, 64), "BMP"))  # F-07
 

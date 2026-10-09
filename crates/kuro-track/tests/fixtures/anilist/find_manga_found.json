@@ -1,0 +1,7 @@
+{"data":{"Page":{"mediaList":[
+  {"id":9100,"status":"REPEATING","scoreRaw":85,"progress":12,"private":true,
+   "startedAt":{"year":2023,"month":null,"day":null},"completedAt":{"year":2024,"month":1,"day":15},
+   "media":{"id":30001,"title":{"userPreferred":"Story Art Manga"},"coverImage":{"large":"https://img.test/a.jpg"},
+     "format":"MANGA","status":"FINISHED","chapters":40,"description":null,
+     "startDate":{"year":2020,"month":1,"day":1},"staff":{"edges":[]}}}
+]}}}

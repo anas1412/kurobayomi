@@ -82,9 +82,8 @@ pub fn go_back() {
     }
 }
 
-fn window_width() -> i32 {
-    let window = crate::ui::window();
-    window.width().max(window.default_width())
+fn window_size() -> (i32, i32) {
+    crate::window_size::size_of(&crate::ui::window())
 }
 
 /// Opens settings on `dest`, or on the default page when it is `None`. A destination shows only its own page, with no
@@ -106,7 +105,8 @@ pub fn open_id(id: i64) {
 }
 
 fn two_pane_now() -> bool {
-    router::two_pane(window_width())
+    let (width, height) = window_size();
+    router::two_pane(width, height)
 }
 
 /// The body of the `settings` screen. A bare open lands on the main list (one pane) or Appearance beside the list
@@ -120,6 +120,24 @@ pub fn body() -> Option<Built> {
     let current = SHELL.with(|s| s.borrow().current()).unwrap_or(Page::Main);
     let content = if wide { two_pane(current) } else { main_list(Rc::new(|id| crate::ui::open(id))) };
     Some(Built { content, end: vec![search.upcast()] })
+}
+
+/// A resize across the tablet threshold: the shell's own page, when it is on top, is rebuilt for one pane or two.
+fn rebuild_for_resize() {
+    let (names, shown) = crate::ui::page_stack();
+    let root = widget_name("settings");
+    if names.get(shown) == Some(&root) && ROOT.with(|r| r.borrow().as_deref() == Some(root.as_str())) {
+        crate::ui::pop();
+        crate::ui::open("settings");
+    }
+}
+
+/// Registers the resize handler once, at startup.
+pub fn follow_resizes() {
+    crate::window_size::on_tablet_change(|_| {
+        rebuild_for_resize();
+        true
+    });
 }
 
 /// The settings list: one row per settings page. `on_select` gets the page's screen id.

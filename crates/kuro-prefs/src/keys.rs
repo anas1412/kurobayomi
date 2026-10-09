@@ -43,11 +43,16 @@ pub fn private_key(key: &str) -> String {
 /// the entry restores there as an ordinary value and changes nothing else.
 pub const KURO_PREFIX: &str = "kuro_";
 
-/// The backup key for a stored key. A key the Kotlin registry knows keeps its name. A Kurobayomi-only normal key
-/// gets [`KURO_PREFIX`]. App state and private keys are handled by their own rules and are returned unchanged.
+/// Registry rows that Aniyomi does not have (no match in its source; `anime_ext_last_check` is Aniyomi's
+/// `last_ext_check` under another name). They are exported with [`KURO_PREFIX`] like keys outside the registry.
+pub const KURO_ONLY_KEYS: &[&str] = &["show_not_runnable", "anime_ext_last_check"];
+
+/// The backup key for a stored key. A key Aniyomi knows keeps its name. A Kurobayomi-only normal key (outside the
+/// registry, or listed in [`KURO_ONLY_KEYS`]) gets [`KURO_PREFIX`]. App state and private keys are handled by their
+/// own rules and are returned unchanged.
 pub fn backup_key(key: &str) -> String {
     let normal = Namespace::of(key) == Namespace::Normal;
-    if normal && crate::registry::lookup(key).is_none() {
+    if normal && (KURO_ONLY_KEYS.contains(&key) || crate::registry::lookup(key).is_none()) {
         format!("{KURO_PREFIX}{key}")
     } else {
         key.to_owned()
@@ -91,5 +96,54 @@ mod tests {
         assert_eq!(backup_key("reader_tapping_inverted"), "reader_tapping_inverted", "a registry key keeps its name");
         assert_eq!(restored_key("reader_tapping_inverted"), "reader_tapping_inverted");
         assert_eq!(backup_key("__APP_STATE_incognito_mode"), "__APP_STATE_incognito_mode");
+    }
+
+    #[test]
+    fn registry_rows_that_only_kurobayomi_has_get_the_prefix() {
+        for key in KURO_ONLY_KEYS {
+            assert!(crate::registry::lookup(key).is_some(), "{key} is a registry row");
+            assert_eq!(backup_key(key), format!("kuro_{key}"));
+            assert_eq!(restored_key(&backup_key(key)), *key);
+        }
+    }
+
+    /// Port of Aniyomi `PreferenceRestorer.restorePreferences` for a store without category maps: a value is written
+    /// when the key is absent or holds the same kind; anything else is skipped.
+    fn aniyomi_restore(store: &mut std::collections::BTreeMap<String, crate::values::PrefValue>, backup: &[(String, crate::values::PrefValue)]) {
+        for (key, value) in backup {
+            let same_kind = store.get(key).is_none_or(|old| std::mem::discriminant(old) == std::mem::discriminant(value));
+            if same_kind {
+                store.insert(key.clone(), value.clone());
+            }
+        }
+    }
+
+    #[test]
+    fn the_aniyomi_restorer_takes_kuro_keys_as_plain_values_and_changes_nothing_else() {
+        use crate::values::PrefValue;
+        let exported: Vec<(String, PrefValue)> = [
+            ("reader_tapping_inverted".to_owned(), PrefValue::Bool(true)),
+            ("show_not_runnable".to_owned(), PrefValue::Bool(true)),
+            ("kuro_only_here".to_owned(), PrefValue::Int(9)),
+        ]
+        .into_iter()
+        .map(|(k, v)| (backup_key(&k), v))
+        .collect();
+        let keys: Vec<&str> = exported.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, ["reader_tapping_inverted", "kuro_show_not_runnable", "kuro_kuro_only_here"]);
+        let mut device: std::collections::BTreeMap<String, PrefValue> = [
+            ("reader_tapping_inverted".to_owned(), PrefValue::Bool(false)),
+            ("show_not_runnable".to_owned(), PrefValue::Bool(false)),
+            ("unrelated".to_owned(), PrefValue::Str("keep".into())),
+        ]
+        .into_iter()
+        .collect();
+        let before = device.clone();
+        aniyomi_restore(&mut device, &exported);
+        assert_eq!(device["reader_tapping_inverted"], PrefValue::Bool(true), "the Aniyomi key restores");
+        assert_eq!(device["kuro_show_not_runnable"], PrefValue::Bool(true), "a kuro_ key is stored as an ordinary value");
+        assert_eq!(device["show_not_runnable"], before["show_not_runnable"], "the unprefixed key is not touched");
+        assert_eq!(device["unrelated"], before["unrelated"]);
+        assert_eq!(device.len(), before.len() + 2, "only the two kuro_ entries are new");
     }
 }

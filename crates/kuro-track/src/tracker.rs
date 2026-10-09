@@ -1,6 +1,8 @@
 //! Tracker traits (`p1-rust-design.md` section 3.4). Object safe through `async-trait`, so trackers are
 //! held as `Arc<dyn Tracker>`.
 
+pub mod anilist;
+
 use async_trait::async_trait;
 use tokio::sync::watch;
 

@@ -5,6 +5,7 @@
 
 mod animation;
 mod borders;
+mod heif;
 mod raster;
 
 pub use animation::{Frame, decode_frames};
@@ -12,11 +13,14 @@ pub use animation::{Frame, decode_frames};
 #[cfg(feature = "jxl")]
 mod jxl;
 
+use std::sync::Arc;
+
 use bytes::Bytes;
 use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder, ImageFormat, imageops};
 
 use crate::error::ImageError;
+use crate::icc::DisplayProfile;
 use crate::options::{LoadOptions, RequestSize, Scale};
 use crate::sample::{sample_for, sampled_side};
 use crate::sniff::{self, ImageFormat as Sniffed};
@@ -46,7 +50,7 @@ pub fn select_decoder(custom_decoder: bool, sniffed: Option<Sniffed>) -> Decoder
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct DecodeOptions {
     pub size: RequestSize,
     pub scale: Scale,
@@ -55,7 +59,27 @@ pub struct DecodeOptions {
     /// (area:44 behavior section 9.4).
     pub crop_borders: bool,
     pub max_pixels: u64,
+    /// The display ICC profile (T-34a-031), loaded once when the setting changes. The picture is taken from sRGB to
+    /// it after decoding. `None` shows the picture as decoded.
+    pub display_profile: Option<Arc<DisplayProfile>>,
 }
+
+impl PartialEq for DecodeOptions {
+    fn eq(&self, other: &Self) -> bool {
+        self.size == other.size
+            && self.scale == other.scale
+            && self.custom_decoder == other.custom_decoder
+            && self.crop_borders == other.crop_borders
+            && self.max_pixels == other.max_pixels
+            && match (&self.display_profile, &other.display_profile) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }
+    }
+}
+
+impl Eq for DecodeOptions {}
 
 impl Default for DecodeOptions {
     fn default() -> Self {
@@ -65,6 +89,7 @@ impl Default for DecodeOptions {
             custom_decoder: false,
             crop_borders: false,
             max_pixels: COVER_MAX_PIXELS,
+            display_profile: None,
         }
     }
 }
@@ -77,6 +102,7 @@ impl From<&LoadOptions> for DecodeOptions {
             custom_decoder: opts.custom_decoder,
             crop_borders: opts.crop_borders,
             max_pixels: COVER_MAX_PIXELS,
+            display_profile: None,
         }
     }
 }
@@ -114,8 +140,8 @@ fn detect(bytes: &[u8]) -> Option<Codec> {
     })
 }
 
-/// Opens the decoder, which reads the header. An unreadable header is `DecodeInit` (Kotlin's decoder is null),
-/// and so is HEIF, which has no decoder in this build (T-34a-029).
+/// Opens the decoder, which reads the header. An unreadable header is `DecodeInit` (Kotlin's decoder is null).
+/// HEIF never gets here: it goes through `heif::decode`.
 fn open(codec: Codec, bytes: &[u8]) -> Result<Box<dyn ImageDecoder + '_>, ImageError> {
     let opened = match codec {
         Codec::Raster(format) => raster::open(bytes, format),
@@ -142,15 +168,13 @@ fn is_truncated_jpeg(bytes: &[u8]) -> bool {
     !bytes[..end].ends_with(&[0xFF, 0xD9])
 }
 
-/// Decodes the first frame of `bytes` to RGBA8 at the size the request asks for (behavior sections 14 and 15).
-pub fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Decoded, ImageError> {
-    let codec = detect(bytes).ok_or(ImageError::UnsupportedFormat)?;
-    // The platform path handles the raster formats only; anything else needs the custom decoder.
-    if select_decoder(opts.custom_decoder, sniff::sniff(bytes)) == DecoderPath::Platform
-        && !matches!(codec, Codec::Raster(_))
-    {
-        return Err(ImageError::UnsupportedFormat);
-    }
+/// Decodes through the `image` decoder of `codec`: header first, size checks, then the pixels turned by their EXIF
+/// orientation.
+fn decode_with_decoder(
+    codec: Codec,
+    bytes: &[u8],
+    opts: &DecodeOptions,
+) -> Result<image::RgbaImage, ImageError> {
     let mut decoder = open(codec, bytes)?;
     let (width, height) = decoder.dimensions();
     if width == 0 || height == 0 {
@@ -172,10 +196,26 @@ pub fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Decoded, ImageError>
         ImageError::DecodeFailed
     })?;
     turned.apply_orientation(orientation);
-    let mut image = turned.into_rgba8();
+    let image = turned.into_rgba8();
     if image.width() == 0 || image.height() == 0 {
         return Err(ImageError::DecodeFailed);
     }
+    Ok(image)
+}
+
+/// Decodes the first frame of `bytes` to RGBA8 at the size the request asks for (behavior sections 14 and 15).
+pub fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Decoded, ImageError> {
+    let codec = detect(bytes).ok_or(ImageError::UnsupportedFormat)?;
+    // The platform path handles the raster formats only; anything else needs the custom decoder.
+    if select_decoder(opts.custom_decoder, sniff::sniff(bytes)) == DecoderPath::Platform
+        && !matches!(codec, Codec::Raster(_))
+    {
+        return Err(ImageError::UnsupportedFormat);
+    }
+    let mut image = match codec {
+        Codec::Heif => heif::decode(bytes, opts.max_pixels)?,
+        _ => decode_with_decoder(codec, bytes, opts)?,
+    };
     if opts.crop_borders {
         image = borders::crop(image);
     }
@@ -188,11 +228,15 @@ pub fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Decoded, ImageError>
             sampled_side(image.height(), sample),
         );
     }
-    Ok(Decoded {
+    let decoded = Decoded {
         width: image.width(),
         height: image.height(),
         rgba: Bytes::from(image.into_raw()),
         is_sampled: sample > 1,
+    };
+    Ok(match &opts.display_profile {
+        Some(profile) => profile.apply(&decoded),
+        None => decoded,
     })
 }
 
@@ -384,6 +428,59 @@ mod tests {
             ..opts()
         };
         assert!(decode(&bytes, &exact).is_ok());
+    }
+
+    #[test]
+    fn options_with_no_profile_compare_equal_and_a_profile_compares_by_identity() {
+        assert_eq!(opts(), DecodeOptions::default());
+        let with = DecodeOptions {
+            crop_borders: true,
+            ..opts()
+        };
+        assert_ne!(with, opts());
+    }
+
+    #[cfg(feature = "icc")]
+    fn linear_gamma_profile_file(dir: &std::path::Path) -> std::path::PathBuf {
+        use lcms2::{CIExyY, CIExyYTRIPLE, Profile, ToneCurve};
+        let xyy = |x, y| CIExyY { x, y, Y: 1.0 };
+        let curve = ToneCurve::new(1.0);
+        let profile = Profile::new_rgb(
+            &xyy(0.3127, 0.3290),
+            &CIExyYTRIPLE {
+                Red: xyy(0.64, 0.33),
+                Green: xyy(0.30, 0.60),
+                Blue: xyy(0.15, 0.06),
+            },
+            &[&curve, &curve, &curve],
+        )
+        .unwrap();
+        let path = dir.join("linear.icc");
+        std::fs::write(&path, profile.icc().unwrap()).unwrap();
+        path
+    }
+
+    #[cfg(feature = "icc")]
+    #[test]
+    fn the_display_profile_is_applied_after_decoding_and_none_leaves_the_picture() {
+        let dir = tempfile::tempdir().unwrap();
+        let profile = crate::icc::load_setting(linear_gamma_profile_file(dir.path()).to_str().unwrap());
+        assert!(profile.is_some());
+        let gray = image::RgbaImage::from_pixel(4, 4, image::Rgba([128, 128, 128, 200]));
+        let bytes = encode(&gray, ImageFormat::Png);
+        let plain = decode(&bytes, &opts()).unwrap();
+        let managed = decode(
+            &bytes,
+            &DecodeOptions {
+                display_profile: profile,
+                ..opts()
+            },
+        )
+        .unwrap();
+        assert_eq!(&plain.rgba[..4], &[128, 128, 128, 200]);
+        assert!(managed.rgba[0] < 100, "a linear display makes mid grey darker: {:?}", &managed.rgba[..4]);
+        assert_eq!(managed.rgba[3], 200, "alpha is untouched");
+        assert_eq!((managed.width, managed.height), (4, 4));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! `[base]` preferences (Aniyomi `BasePreferences`).
+//! `[base]` preferences (Aniyomi `BasePreferences`), plus the two release-check keys Linux adds.
 //!
 //! `downloaded_only`, `incognito_mode` and `shown_onboarding_flow` are app state and live in
 //! `state.toml`. The extension installer is kept as the stored string: the Android installer
@@ -8,7 +8,7 @@ use crate::PrefError;
 use crate::registry::define_prefs;
 
 define_prefs! {
-    /// `[base]` section: the seven keys of Aniyomi `BasePreferences` that Linux keeps.
+    /// `[base]` section: the seven keys of Aniyomi `BasePreferences` that Linux keeps, then the two release-check keys.
     pub struct BasePrefs in "base" {
         extension_installer: String = "extension_installer" => String::from("PACKAGEINSTALLER");
         downloaded_only: bool = "__APP_STATE_pref_downloaded_only" => false;
@@ -17,6 +17,9 @@ define_prefs! {
         display_profile: String = "pref_display_profile_key" => String::new();
         hardware_bitmap_threshold: i32 = "pref_hardware_bitmap_threshold" => 2048;
         always_decode_long_strip_with_ssiv: bool = "pref_always_decode_long_strip_with_ssiv" => false;
+        // Linux additions (T-07a-036): the startup release check is opt-in, and its last successful lookup is app state
+        check_app_updates: bool = "check_app_updates" => false;
+        last_app_check: i64 = "__APP_STATE_last_app_check" => 0;
     }
 }
 
@@ -95,6 +98,8 @@ mod tests {
                     "always_decode_long_strip_with_ssiv",
                     "pref_always_decode_long_strip_with_ssiv",
                 ),
+                ("check_app_updates", "check_app_updates"),
+                ("last_app_check", "__APP_STATE_last_app_check"),
             ]
         );
         assert_eq!(BasePrefs::TABLE, "base");
@@ -116,6 +121,8 @@ mod tests {
         assert_eq!(base.display_profile.get(), "");
         assert_eq!(base.hardware_bitmap_threshold.get(), 2048);
         assert!(!base.always_decode_long_strip_with_ssiv.get());
+        assert!(!base.check_app_updates.get(), "the release check is opt-in");
+        assert_eq!(base.last_app_check.get(), 0);
     }
 
     #[test]

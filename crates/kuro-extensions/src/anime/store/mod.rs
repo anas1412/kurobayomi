@@ -180,6 +180,17 @@ fn decode_document(body: &[u8]) -> Result<Document, StoreError> {
     decode_store(body).map(Document::Store)
 }
 
+/// Runs every decoder of a store body once, for the fuzz targets (T-19a-068). The results are dropped; a decoder must
+/// answer with an error or a value for any bytes.
+#[doc(hidden)]
+pub fn decode_all(body: &[u8]) {
+    let _ = wire::decode_store_pb(body);
+    let _ = wire::decode_list_pb(body);
+    let _ = decode_store(body);
+    let _ = decode_list(body);
+    let _ = decode_document(body);
+}
+
 /// The first byte picks the format: `{` is JSON, anything else is protobuf. An empty body is an error, not a panic.
 fn decode_store(body: &[u8]) -> Result<StoreJson, StoreError> {
     match body.first() {

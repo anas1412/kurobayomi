@@ -39,9 +39,8 @@ fn t2_catscr_02_an_open_dialog_survives_a_refresh_while_its_category_exists() {
 }
 
 #[test]
-fn t2_catscr_03_the_hidden_setting_decides_what_the_management_list_shows() {
+fn t2_catscr_03_the_management_list_always_shows_hidden_categories() {
     let list = [cat(0, "", false), cat(1, "A", false), cat(2, "B", true), cat(3, "C", false)];
-    let ids = |hide| management_list(&list, hide).iter().map(|c| c.id).collect::<Vec<_>>();
-    assert_eq!(ids(false), vec![1, 2, 3], "hidden ones show, the system category never does");
-    assert_eq!(ids(true), vec![1, 3]);
+    let ids = management_list(&list).iter().map(|c| c.id).collect::<Vec<_>>();
+    assert_eq!(ids, vec![1, 2, 3], "hidden ones show, the system category never does");
 }

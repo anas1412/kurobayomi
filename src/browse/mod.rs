@@ -5,9 +5,12 @@
 //! passes real models in, the module has no caller outside its own tests, which is what the allow below covers.
 #![allow(dead_code)] // wired by the screen registration, which this lane does not own
 
+pub mod anime;
 pub mod content;
 pub mod dialogs;
 pub mod entries;
+pub mod ext_badges;
+pub mod ext_problems;
 pub mod extensions;
 pub mod extensions_page;
 pub mod favorite;

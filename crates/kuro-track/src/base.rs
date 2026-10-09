@@ -170,6 +170,29 @@ impl BaseTracker {
         result
     }
 
+    /// The server refused the stored token (HTTP 401, or a token past its expiry): deletes the token JSON and the
+    /// access token, keeps the username, sets the auth-expired flag, publishes `false` and sends
+    /// [`TrackEvent::LoginChanged`]. Idempotent.
+    pub fn mark_expired(&self) -> Result<(), TrackError> {
+        let cleared = self
+            .secrets
+            .delete(SECRET_SERVICE, &account(self.id, Field::Token))
+            .and_then(|()| {
+                self.secrets
+                    .delete(SECRET_SERVICE, &account(self.id, Field::Password))
+            });
+        let flagged = self.secrets.set(
+            SECRET_SERVICE,
+            &account(self.id, Field::Expired),
+            "true",
+        );
+        self.publish();
+        self.events.send(TrackEvent::LoginChanged {
+            tracker_id: self.id,
+        });
+        cleared.and(flagged).map_err(TrackError::from)
+    }
+
     fn clear(&self) -> Result<(), TrackError> {
         for field in [
             Field::Username,
@@ -479,6 +502,32 @@ mod tests {
         };
         assert_eq!(rx.try_recv().unwrap(), expected);
         assert_eq!(rx.try_recv().unwrap(), expected);
+    }
+
+    #[tokio::test]
+    async fn tr_27b_028_mark_expired_drops_the_token_keeps_the_username_and_sends_login_changed() {
+        let secrets = MemSecrets::new();
+        let bus = EventBus::default();
+        let mut events = bus.subscribe();
+        let b = BaseTracker::new(TrackerId::KITSU, "Kitsu", secrets.clone(), bus);
+        b.save_oauth("someone", "access-1", &serde_json::json!({"a": 1}))
+            .unwrap();
+        events.recv().await.unwrap();
+        let mut rx = b.login_state();
+        rx.borrow_and_update();
+        b.mark_expired().unwrap();
+        assert!(!b.is_logged_in());
+        assert!(b.auth_expired());
+        assert_eq!(b.username(), "someone");
+        assert!(secrets.raw(&kitsu(Field::Token)).is_none());
+        assert!(secrets.raw(&kitsu(Field::Password)).is_none());
+        assert!(rx.has_changed().unwrap());
+        assert_eq!(
+            events.recv().await.unwrap(),
+            TrackEvent::LoginChanged {
+                tracker_id: TrackerId::KITSU
+            }
+        );
     }
 
     #[test]

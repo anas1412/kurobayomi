@@ -1,0 +1,17 @@
+{"data":{"Page":{"media":[
+  {"id":30001,"title":{"userPreferred":"Story Art Manga"},"coverImage":{"large":"https://img.test/a.jpg"},
+   "description":"A line<br>with &amp; and &#39;quotes&#39; <i>here</i>","format":"ONE_SHOT","status":"NOT_YET_RELEASED",
+   "chapters":12,"startDate":{"year":2024,"month":null,"day":null},"averageScore":null,
+   "staff":{"edges":[
+     {"role":"Story & Art","id":1,"node":{"name":{"userPreferred":"Ann Author","full":"Ann A.","native":"Ann"}}},
+     {"role":"Story","id":2,"node":{"name":{"userPreferred":null,"full":"Bo Writer","native":null}}}]}},
+  {"id":30002,"title":{"userPreferred":"Second"},"coverImage":{"large":"https://img.test/b.jpg"},
+   "description":null,"format":"MANGA","status":"FINISHED","chapters":null,
+   "startDate":{"year":2010,"month":5,"day":7},"averageScore":72,
+   "staff":{"edges":[
+     {"role":"Art","id":3,"node":{"name":{"userPreferred":null,"full":null,"native":"Cy Artist"}}},
+     {"role":"Art","id":4,"node":{"name":null}}]}},
+  {"id":30003,"title":{"userPreferred":"Third"},"coverImage":{"large":"https://img.test/c.jpg"},
+   "description":"","format":null,"status":"RELEASING","chapters":5,
+   "startDate":{"year":null,"month":null,"day":null},"averageScore":55,"staff":null}
+]}}}

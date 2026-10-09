@@ -3,6 +3,7 @@
 
 use gtk::prelude::*;
 use gtk::{Align, Orientation as O};
+use kuro_domain::library::columns::COLUMN_WIDTH_PX;
 use kuro_domain::library::page::LibraryItem;
 use kuro_prefs::library::LibraryDisplayMode;
 
@@ -16,7 +17,7 @@ pub struct Card {
 
 /// Builds the card of `item`. `selected` styles it as selected; `show_continue` adds the continue button.
 pub fn build(item: &LibraryItem, mode: LibraryDisplayMode, selected: bool, show_continue: bool) -> Card {
-    let width = layout::CELL_MIN_WIDTH;
+    let width = COLUMN_WIDTH_PX;
     let cover = crate::ui::cover(width, layout::cover_height(width));
     cover.add_css_class("library-cover");
     if selected {

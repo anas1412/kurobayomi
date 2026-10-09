@@ -119,6 +119,8 @@ struct Inner {
     /// One entry per row on screen.
     rows: RefCell<Vec<RowWidgets>>,
     dialogs: DialogSlot,
+    /// The load problems of the packages, by folder; the list ends with them (T-18a-054).
+    problems: RefCell<Vec<(String, String)>>,
     /// The page was shown once, so its first fetch has started.
     opened: Cell<bool>,
     banner: gtk::Box,
@@ -196,6 +198,7 @@ impl ExtensionsPage {
             shown: RefCell::new(Vec::new()),
             enabled: RefCell::new(None),
             dialogs: DialogSlot::new(),
+            problems: RefCell::new(Vec::new()),
             opened: Cell::new(false),
             banner,
             query: RefCell::new(String::new()),
@@ -267,6 +270,12 @@ impl ExtensionsPage {
     /// The extensions from the models, replacing the list. Rows keep the install steps of their jobs.
     pub fn set_exts(&self, exts: Vec<Ext>) {
         *self.inner.exts.borrow_mut() = exts;
+        self.inner.rebuild();
+    }
+
+    /// The load problems to list under the extensions, as `(folder, message)`.
+    pub fn set_problems(&self, problems: Vec<(String, String)>) {
+        *self.inner.problems.borrow_mut() = problems;
         self.inner.rebuild();
     }
 
@@ -375,6 +384,7 @@ impl Inner {
     fn press(self: &Rc<Self>, pkg: &str, action: RowAction) {
         match action {
             RowAction::Cancel => self.input(Input::Row { pkg: pkg.to_owned(), event: Event::Cancel }),
+            RowAction::Install if super::ext_badges::of(pkg).is_some_and(|b| !b.install_enabled()) => {}
             RowAction::Retry | RowAction::Update | RowAction::Install => {
                 self.input(Input::Row { pkg: pkg.to_owned(), event: Event::Request });
             }
@@ -493,6 +503,10 @@ impl Inner {
             button.set_tooltip_text(Some(&label));
             button.update_property(&[gtk::accessible::Property::Label(&label)]);
             button.add_css_class("flat");
+            // install is off for a listing that cannot run here
+            if action == RowAction::Install && super::ext_badges::of(&row.ext.pkg).is_some_and(|b| !b.install_enabled()) {
+                button.set_sensitive(false);
+            }
             let (weak, pkg) = (Rc::downgrade(self), row.ext.pkg.clone());
             button.connect_clicked(move |_| {
                 if let Some(inner) = weak.upgrade() {
@@ -532,6 +546,9 @@ impl Inner {
                 let row = self.row(&exts[index]);
                 self.column.append(&row);
             }
+        }
+        if let Some(problems) = super::ext_problems::section(&self.problems.borrow()) {
+            self.column.append(&problems);
         }
         self.stack.set_visible_child_name("list");
     }
@@ -593,6 +610,14 @@ impl Inner {
         secondary.set_ellipsize(gtk::pango::EllipsizeMode::End);
         secondary.set_visible(!parts.is_empty());
         text.append(&secondary);
+        // a listing that cannot run here carries its badges (T-19a-066)
+        if let Some(badges) = super::ext_badges::of(&ext.pkg) {
+            let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            for label in super::ext_badges::labels(badges) {
+                line.append(&gtk::Label::builder().label(label).css_classes(["caption", "error"]).build());
+            }
+            text.append(&line);
+        }
         let status = gtk::Label::new(None);
         status.set_xalign(0.0);
         status.add_css_class("dim-label");

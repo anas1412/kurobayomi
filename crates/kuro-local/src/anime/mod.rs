@@ -17,6 +17,7 @@ use crate::format::is_anime_episode;
 use crate::fs::{FsEntry, file_url, find_child, list_dir};
 use crate::images::find_image;
 use crate::json_side::{AnimeDetails, apply_anime_details, details_file, read_details_json};
+use crate::media::FrameExtractor;
 use crate::sort::{LATEST_SORT, POPULAR_SORT, order_by, sort_from};
 
 /// `LocalAnimeSource.name`: `local_anime_source` in the i18n table.
@@ -26,11 +27,18 @@ pub const NAME: &str = "Local anime source";
 #[derive(Debug, Clone)]
 pub struct LocalAnimeSource {
     root: Option<PathBuf>,
+    /// Makes the video frames for thumbnails, covers and backgrounds (T-14a-026).
+    frames: FrameExtractor,
 }
 
 impl LocalAnimeSource {
+    /// Uses `ffmpeg` and `ffprobe` from `PATH` and the system temp folder. Without the tools no frame is made.
     pub fn new(root: Option<PathBuf>) -> Self {
-        Self { root }
+        Self::with_frames(root, FrameExtractor::from_path(std::env::temp_dir()))
+    }
+
+    pub fn with_frames(root: Option<PathBuf>, frames: FrameExtractor) -> Self {
+        Self { root, frames }
     }
 
     /// Kotlin `getOldAnimeDetails`: the cover and background steps (behavior 11.4), then `details.json` (T-14a-038).
@@ -162,8 +170,9 @@ impl AnimeSource for LocalAnimeSource {
     async fn episode_list(&self, anime: &SAnime) -> Result<Vec<SEpisode>, SourceError> {
         let root = self.root.clone();
         let anime = anime.clone();
+        let frames = self.frames.clone();
         let list = crate::blocking(move || match root {
-            Some(root) => episodes::episode_list(&root, &anime),
+            Some(root) => episodes::episode_list_with(&root, &anime, |video| frames.frame_io(video)),
             None => Ok(Vec::new()),
         })
         .await?;
@@ -282,6 +291,32 @@ mod tests {
             .map_err(io::Error::other)?;
         let numbers: Vec<f32> = got.iter().map(|e| e.episode_number).collect();
         assert_eq!(numbers, [2.0, 1.0]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_14_thumbnail_temp_removed() -> io::Result<()> {
+        use crate::media::Tool;
+        // fake tools: ffprobe says 10 s, ffmpeg writes a fake JPEG to its output argument ($9)
+        let tools = tempfile::tempdir()?;
+        let probe = tools.path().join("ffprobe.sh");
+        let ffmpeg = tools.path().join("ffmpeg.sh");
+        fs::write(&probe, "echo 10\n")?;
+        fs::write(&ffmpeg, "printf 'jpeg' > \"$9\"\n")?;
+        let temp = tempfile::tempdir()?;
+        let frames = FrameExtractor::new(
+            Some(Tool::new("sh").with_args([probe])),
+            Some(Tool::new("sh").with_args([ffmpeg])),
+            temp.path(),
+        );
+        let (root, source) = library(&[("Show", &["Show - 1.mkv"])])?;
+        let source = LocalAnimeSource::with_frames(Some(root.path().to_path_buf()), frames);
+        let anime = SAnime { url: "Show".into(), title: "Show".into(), ..SAnime::default() };
+        AnimeSource::episode_list(&source, &anime).await.map_err(io::Error::other)?;
+        let thumb = root.path().join("Show").join("Show - 1-thumbnail.jpg");
+        assert_eq!(fs::read(thumb)?, b"jpeg", "the frame was written next to the episode");
+        assert!(root.path().join("Show").join("cover.jpg").is_file(), "the lowest episode gives the cover too");
+        assert_eq!(fs::read_dir(temp.path())?.count(), 0, "no tmp_ file is left in the temp folder");
         Ok(())
     }
 

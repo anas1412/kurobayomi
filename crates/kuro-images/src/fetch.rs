@@ -5,7 +5,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use ::http::HeaderMap;
 use bytes::Bytes;
@@ -21,6 +21,7 @@ use crate::decode::{DecodeOptions, Decoded, decode};
 use crate::disk_image_cache::DiskImageCache;
 use crate::error::ImageError;
 use crate::http;
+use crate::icc::{self, DisplayProfile};
 use crate::keys;
 use crate::memory_cache::{DEFAULT_BUDGET_BYTES, MemoryCache};
 use crate::options::LoadOptions;
@@ -83,6 +84,8 @@ pub struct ImageService {
     fetch_permits: Semaphore,
     decode_permits: Semaphore,
     memory: MemoryCache,
+    /// The display ICC profile every decode applies, `None` for no colour management (T-34a-031).
+    display_profile: RwLock<Option<Arc<DisplayProfile>>>,
 }
 
 /// One image request for `ImageService::load`.
@@ -117,6 +120,7 @@ impl ImageService {
             fetch_permits: Semaphore::new(FETCH_CONCURRENCY),
             decode_permits: Semaphore::new(DECODE_CONCURRENCY),
             memory: MemoryCache::new(DEFAULT_BUDGET_BYTES),
+            display_profile: RwLock::new(None),
         })
     }
 
@@ -125,6 +129,15 @@ impl ImageService {
     pub fn with_memory_budget(mut self, bytes: u64) -> Self {
         self.memory = MemoryCache::new(bytes);
         self
+    }
+
+    /// The settings-change handler of `pref_display_profile_key`: loads the profile file once and applies it to every
+    /// later decode. An empty value, or a file that cannot be used, gives no profile and no error. Decoded images
+    /// cached under the old profile are dropped.
+    pub fn set_display_profile(&self, setting: &str) {
+        let profile = icc::load_setting(setting);
+        *self.display_profile.write().unwrap_or_else(|e| e.into_inner()) = profile;
+        self.memory.clear();
     }
 
     pub fn memory(&self) -> &MemoryCache {
@@ -178,7 +191,10 @@ impl ImageService {
         opts: &LoadOptions,
         cancel: &CancellationToken,
     ) -> Result<Arc<Decoded>, ImageError> {
-        let decode_opts = DecodeOptions::from(opts);
+        let decode_opts = DecodeOptions {
+            display_profile: self.display_profile.read().unwrap_or_else(|e| e.into_inner()).clone(),
+            ..DecodeOptions::from(opts)
+        };
         let permit = tokio::select! {
             biased;
             _ = cancel.cancelled() => return Err(ImageError::Cancelled),
@@ -841,6 +857,36 @@ mod tests {
         let second = svc.load(&req).await.unwrap();
         assert_eq!(second.source, DataSource::Memory);
         assert!(Arc::ptr_eq(&first.image, &second.image));
+    }
+
+    #[tokio::test]
+    async fn changing_the_display_profile_setting_drops_cached_images_and_a_bad_file_is_no_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = service(tmp.path(), Arc::new(NoSources)).await;
+        let req = request(&local_png(tmp.path(), 8, 8), LoadOptions::default());
+        svc.load(&req).await.unwrap();
+        assert!(!svc.memory().is_empty());
+        svc.set_display_profile("/no/such/profile.icc");
+        assert!(svc.memory().is_empty());
+        assert!(svc.display_profile.read().unwrap().is_none());
+        let again = svc.load(&req).await.unwrap();
+        assert_eq!(again.source, DataSource::Disk, "decoded afresh, without colour management");
+    }
+
+    #[cfg(feature = "icc")]
+    #[tokio::test]
+    async fn a_loaded_display_profile_is_applied_to_service_decodes() {
+        use lcms2::Profile;
+        let tmp = tempfile::tempdir().unwrap();
+        let profile_file = tmp.path().join("srgb.icc");
+        std::fs::write(&profile_file, Profile::new_srgb().icc().unwrap()).unwrap();
+        let svc = service(tmp.path(), Arc::new(NoSources)).await;
+        svc.set_display_profile(profile_file.to_str().unwrap());
+        assert!(svc.display_profile.read().unwrap().is_some());
+        let req = request(&local_png(tmp.path(), 8, 8), LoadOptions::default());
+        assert!(svc.load(&req).await.is_ok());
+        svc.set_display_profile("");
+        assert!(svc.display_profile.read().unwrap().is_none());
     }
 
     #[tokio::test]

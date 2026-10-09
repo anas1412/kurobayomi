@@ -23,6 +23,8 @@ kuro-prefs = { path = "crates/kuro-prefs" }
 kuro-source = { path = "crates/kuro-source" }
 kuro-extensions = { path = "crates/kuro-extensions" }
 kuro-backup = { path = "crates/kuro-backup" }
+kuro-local = { path = "crates/kuro-local" }
+kuro-images = { path = "crates/kuro-images" }
 libc = "0.2.189"
 reqwest = { workspace = true, features = ["blocking"] }
 async-channel = { workspace = true }
@@ -33,8 +35,12 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 
+[dev-dependencies]
+async-trait = { workspace = true }
+kuro-testkit = { path = "crates/kuro-testkit" }
+
 [workspace]
-members = ["crates/kuro-core", "crates/kuro-i18n", "crates/kuro-platform", "crates/kuro-testkit", "crates/kuro-prefs", "crates/kuro-db", "crates/kuro-data", "crates/kuro-domain", "crates/kuro-source", "crates/kuro-source-http", "crates/kuro-net", "crates/kuro-extensions", "crates/kuro-player", "crates/kuro-source-wasm", "crates/kuro-downloads", "crates/kuro-images", "crates/kuro-local", "crates/kuro-archive", "crates/kuro-track", "crates/kuro-backup"]
+members =["crates/kuro-core", "crates/kuro-i18n", "crates/kuro-platform", "crates/kuro-testkit", "crates/kuro-prefs", "crates/kuro-db", "crates/kuro-data", "crates/kuro-domain", "crates/kuro-source", "crates/kuro-source-http", "crates/kuro-net", "crates/kuro-extensions", "crates/kuro-player", "crates/kuro-source-wasm", "crates/kuro-downloads", "crates/kuro-images", "crates/kuro-local", "crates/kuro-archive", "crates/kuro-track", "crates/kuro-backup"]
 resolver = "3"
 
 [workspace.package]

@@ -1,0 +1,269 @@
+//! Reads the library for a pass from the shared databases (T-26a-004 and T-26a-005). Rows come from the views
+//! `kuro-db` already defines (`libraryView`, `animelibView`, `animeseasonsView`). Reads run on tokio's blocking pool.
+
+use std::future::Future;
+use std::sync::Arc;
+
+use kuro_db::handle::Db;
+use kuro_db::statements_anime::{LibraryAnimeRow, SeasonAnimeRow};
+use kuro_db::models::LibraryRow;
+use kuro_domain::kind::EntryKind;
+
+use crate::library_update::error::UpdateError;
+use crate::library_update::queue::{FetchType, LibraryEntry};
+
+pub trait LibraryStore: Send + Sync {
+    /// Every favourite entry, one row per category it is in.
+    fn library(&self, kind: EntryKind) -> impl Future<Output = Result<Vec<LibraryEntry>, UpdateError>> + Send;
+    /// The season children of an anime parent. Empty on a query error, which is logged (Q-16).
+    fn season_children(&self, parent_id: i64) -> impl Future<Output = Vec<LibraryEntry>> + Send;
+    fn is_favorite(&self, id: i64, kind: EntryKind) -> impl Future<Output = Result<bool, UpdateError>> + Send;
+    /// The category ids the entry is in (empty when it has none).
+    fn categories(&self, id: i64, kind: EntryKind) -> impl Future<Output = Result<Vec<i64>, UpdateError>> + Send;
+    /// The numbers of the read chapters or seen episodes that have a recognised number.
+    fn read_numbers(&self, id: i64, kind: EntryKind) -> impl Future<Output = Result<Vec<f64>, UpdateError>> + Send;
+}
+
+pub struct SqliteLibraryStore {
+    manga: Arc<Db>,
+    anime: Arc<Db>,
+}
+
+impl SqliteLibraryStore {
+    pub fn new(manga: Arc<Db>, anime: Arc<Db>) -> Self {
+        Self { manga, anime }
+    }
+
+    fn db(&self, kind: EntryKind) -> &Arc<Db> {
+        match kind {
+            EntryKind::Manga => &self.manga,
+            EntryKind::Anime => &self.anime,
+        }
+    }
+}
+
+fn manga_entry(row: LibraryRow) -> LibraryEntry {
+    LibraryEntry {
+        id: row.manga.id,
+        source: row.manga.source,
+        url: row.manga.url,
+        title: row.manga.title,
+        kind: EntryKind::Manga,
+        category: row.category,
+        update_strategy: row.manga.update_strategy,
+        status: row.manga.status,
+        favorite: row.manga.favorite,
+        total: row.total_count,
+        read: row.read_count,
+        next_update_ms: row.manga.next_update.unwrap_or(0),
+        fetch_type: FetchType::Episodes,
+        parent_id: None,
+        fetch_interval: row.manga.calculate_interval as i32,
+        last_update_ms: row.manga.last_update.unwrap_or(0),
+    }
+}
+
+fn anime_entry(row: LibraryAnimeRow) -> LibraryEntry {
+    LibraryEntry {
+        id: row.anime.id,
+        source: row.anime.source,
+        url: row.anime.url,
+        title: row.anime.title,
+        kind: EntryKind::Anime,
+        category: row.category,
+        update_strategy: row.anime.update_strategy,
+        status: row.anime.status,
+        favorite: row.anime.favorite,
+        total: row.total_count,
+        read: row.seen_count,
+        next_update_ms: row.anime.next_update.unwrap_or(0),
+        fetch_type: row.anime.fetch_type,
+        parent_id: row.anime.parent_id,
+        fetch_interval: row.anime.calculate_interval as i32,
+        last_update_ms: row.anime.last_update.unwrap_or(0),
+    }
+}
+
+fn season_entry(row: SeasonAnimeRow) -> LibraryEntry {
+    LibraryEntry {
+        id: row.anime.id,
+        source: row.anime.source,
+        url: row.anime.url,
+        title: row.anime.title,
+        kind: EntryKind::Anime,
+        category: -1,
+        update_strategy: row.anime.update_strategy,
+        status: row.anime.status,
+        favorite: row.anime.favorite,
+        total: row.total_count,
+        read: row.seen_count,
+        next_update_ms: row.anime.next_update.unwrap_or(0),
+        fetch_type: row.anime.fetch_type,
+        parent_id: row.anime.parent_id,
+        fetch_interval: row.anime.calculate_interval as i32,
+        last_update_ms: row.anime.last_update.unwrap_or(0),
+    }
+}
+
+impl LibraryStore for SqliteLibraryStore {
+    async fn library(&self, kind: EntryKind) -> Result<Vec<LibraryEntry>, UpdateError> {
+        let entries = match kind {
+            EntryKind::Manga => self
+                .manga
+                .read_async(|c| {
+                    let rows = kuro_db::statements_manga::views::library(c)?;
+                    Ok(rows.into_iter().map(manga_entry).collect::<Vec<_>>())
+                })
+                .await?,
+            EntryKind::Anime => self
+                .anime
+                .read_async(|c| {
+                    let rows = kuro_db::statements_anime::library(c)?;
+                    Ok(rows.into_iter().map(anime_entry).collect::<Vec<_>>())
+                })
+                .await?,
+        };
+        Ok(entries)
+    }
+
+    async fn season_children(&self, parent_id: i64) -> Vec<LibraryEntry> {
+        let result = self
+            .anime
+            .read_async(move |c| {
+                let rows = kuro_db::statements_anime::seasons_of(c, parent_id)?;
+                Ok(rows.into_iter().map(season_entry).collect::<Vec<_>>())
+            })
+            .await;
+        match result {
+            Ok(children) => children,
+            Err(error) => {
+                tracing::warn!(parent_id, %error, "season children query failed; treating as none");
+                Vec::new()
+            }
+        }
+    }
+
+    async fn is_favorite(&self, id: i64, kind: EntryKind) -> Result<bool, UpdateError> {
+        let table = match kind {
+            EntryKind::Manga => "mangas",
+            EntryKind::Anime => "animes",
+        };
+        let sql = format!("SELECT favorite FROM {table} WHERE _id = ?1");
+        let rows = self
+            .db(kind)
+            .read_async(move |c| {
+                let mut statement = c.prepare(&sql)?;
+                let mut rows: Vec<bool> = Vec::new();
+                for row in statement.query_map([id], |r| r.get(0))? {
+                    rows.push(row?);
+                }
+                Ok(rows)
+            })
+            .await?;
+        Ok(rows.first().copied().unwrap_or(false))
+    }
+
+    async fn categories(&self, id: i64, kind: EntryKind) -> Result<Vec<i64>, UpdateError> {
+        let sql = match kind {
+            EntryKind::Manga => "SELECT category_id FROM mangas_categories WHERE manga_id = ?1 ORDER BY category_id",
+            EntryKind::Anime => "SELECT category_id FROM animes_categories WHERE anime_id = ?1 ORDER BY category_id",
+        };
+        let ids = self
+            .db(kind)
+            .read_async(move |c| {
+                let mut statement = c.prepare(sql)?;
+                let mut ids: Vec<i64> = Vec::new();
+                for row in statement.query_map([id], |r| r.get(0))? {
+                    ids.push(row?);
+                }
+                Ok(ids)
+            })
+            .await?;
+        Ok(ids)
+    }
+
+    async fn read_numbers(&self, id: i64, kind: EntryKind) -> Result<Vec<f64>, UpdateError> {
+        let sql = match kind {
+            EntryKind::Manga => "SELECT chapter_number FROM chapters WHERE manga_id = ?1 AND read = 1 AND chapter_number >= 0",
+            EntryKind::Anime => "SELECT episode_number FROM episodes WHERE anime_id = ?1 AND seen = 1 AND episode_number >= 0",
+        };
+        let numbers = self
+            .db(kind)
+            .read_async(move |c| {
+                let mut statement = c.prepare(sql)?;
+                let mut numbers: Vec<f64> = Vec::new();
+                for row in statement.query_map([id], |r| r.get(0))? {
+                    numbers.push(row?);
+                }
+                Ok(numbers)
+            })
+            .await?;
+        Ok(numbers)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuro_db::codec::UpdateStrategy as DbUpdateStrategy;
+    use kuro_db::schema_anime::FetchType as DbFetchType;
+    use kuro_testkit::{AnimeBuilder, TempDir, TestDb};
+
+    #[test]
+    fn stored_update_strategy_maps_zero_and_one() {
+        // T-26a-004: 0 ALWAYS_UPDATE, 1 ONLY_FETCH_ONCE.
+        assert_eq!(DbUpdateStrategy::from_db(0), DbUpdateStrategy::AlwaysUpdate);
+        assert_eq!(DbUpdateStrategy::from_db(1), DbUpdateStrategy::OnlyFetchOnce);
+        assert_eq!(DbUpdateStrategy::OnlyFetchOnce.to_db(), 1);
+    }
+
+    #[test]
+    fn stored_fetch_type_maps_zero_to_seasons_and_one_to_episodes() {
+        assert_eq!(DbFetchType::from_db(0), DbFetchType::Seasons);
+        assert_eq!(DbFetchType::from_db(1), DbFetchType::Episodes);
+        // Shared with the queue model.
+        assert_eq!(FetchType::from_db(0), FetchType::Seasons);
+    }
+
+    #[tokio::test]
+    async fn calculate_interval_round_trips_a_negative_override() {
+        // T-26a-004: -3 written, -3 read.
+        let dir = TempDir::new().expect("temp dir");
+        let anime_db = TestDb::anime_handle(&dir);
+        let manga_db = TestDb::manga_handle(&dir);
+        anime_db
+            .write(|tx| {
+                AnimeBuilder::new().title("Show").source(1).url("/s").favorite(true).with(|a| a.calculate_interval = -3).insert(tx);
+                Ok(())
+            })
+            .expect("insert anime");
+        let store = SqliteLibraryStore::new(manga_db, anime_db);
+        let rows = store.library(EntryKind::Anime).await.expect("library");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].fetch_interval, -3);
+        assert_eq!(rows[0].fetch_type, FetchType::Episodes);
+    }
+
+    #[tokio::test]
+    async fn library_rows_carry_counts_and_favourite_checks_read_correctly() {
+        let dir = TempDir::new().expect("temp dir");
+        let anime_db = TestDb::anime_handle(&dir);
+        let manga_db = TestDb::manga_handle(&dir);
+        anime_db
+            .write(|tx| {
+                AnimeBuilder::new().title("Fav").source(1).url("/f").favorite(true).insert(tx);
+                AnimeBuilder::new().title("NotFav").source(1).url("/n").favorite(false).insert(tx);
+                Ok(())
+            })
+            .expect("insert anime");
+        let store = SqliteLibraryStore::new(manga_db, anime_db.clone());
+        let rows = store.library(EntryKind::Anime).await.expect("library");
+        // Only favourites are in the library view.
+        assert_eq!(rows.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), vec!["Fav"]);
+        let fav_id = rows[0].id;
+        assert!(store.is_favorite(fav_id, EntryKind::Anime).await.expect("favourite read"));
+        assert!(!store.is_favorite(999_999, EntryKind::Anime).await.expect("missing row"));
+        assert_eq!(rows[0].unread_or_unseen(), rows[0].total - rows[0].read);
+        assert!(store.season_children(999_999).await.is_empty());
+    }
+}

@@ -10,11 +10,21 @@ use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Label, Orientation as O, gio, glib};
 use kuro_downloads::DownloadState;
 
+use kuro_prefs::library::{ChapterSwipeAction, LibraryPrefs};
+
 use crate::entry_core::list_model::{Diff, RowItem, diff};
 use crate::entry_core::selection::Mods;
+use crate::entry_core::swipe::{action_for, menu, side_of_drag};
 
 /// A click or long press on a row: (chapter id, modifiers, long press or right click).
 pub type OnRow = Rc<dyn Fn(i64, Mods, bool)>;
+
+/// The swipe actions of a row (T-08a-029): the stored action per side, and what to run for one row.
+#[derive(Clone)]
+pub struct Swipe {
+    pub prefs: Rc<LibraryPrefs>,
+    pub run: Rc<dyn Fn(i64, ChapterSwipeAction)>,
+}
 
 pub struct ChapterList {
     pub widget: gtk::ListView,
@@ -74,6 +84,39 @@ impl RowWidgets {
     }
 }
 
+/// The right-click menu of a row: Select, then each swipe action that runs on this page.
+fn context_menu(root: &GBox, list_item: &gtk::ListItem, swipe: &Swipe, on_row: &OnRow, at: (f64, f64)) {
+    let Some(item) = item_of(list_item) else { return };
+    let id = item.borrow::<RowItem>().id;
+    let popover = gtk::Popover::new();
+    popover.set_parent(root);
+    popover.set_has_arrow(false);
+    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(at.0 as i32, at.1 as i32, 1, 1)));
+    let column = GBox::new(O::Vertical, 0);
+    let entry = |label: &str, run: Box<dyn Fn()>| {
+        let button = gtk::Button::builder().label(label).css_classes(["flat"]).build();
+        let popover = popover.clone();
+        button.connect_clicked(move |_| {
+            popover.popdown();
+            run();
+        });
+        column.append(&button);
+    };
+    let on_row = Rc::clone(on_row);
+    entry("Select", Box::new(move || on_row(id, Mods::default(), true)));
+    for (action, label) in menu(&swipe.prefs) {
+        let run = Rc::clone(&swipe.run);
+        entry(label, Box::new(move || run(id, action)));
+    }
+    popover.set_child(Some(&column));
+    // the popover is parented to the row, so it is removed once closed
+    popover.connect_closed(|p| {
+        let p = p.clone();
+        glib::idle_add_local_once(move || p.unparent());
+    });
+    popover.popup();
+}
+
 fn row_widgets() -> RowWidgets {
     let root = GBox::new(O::Horizontal, 10);
     root.set_margin_top(8);
@@ -119,7 +162,7 @@ fn bind(w: &RowWidgets, row: &RowItem) {
 }
 
 impl ChapterList {
-    pub fn new(on_row: OnRow) -> Rc<Self> {
+    pub fn new(on_row: OnRow, swipe: Option<Swipe>) -> Rc<Self> {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(move |_, object| {
@@ -142,8 +185,12 @@ impl ChapterList {
             });
             let right = gtk::GestureClick::builder().button(3).build();
             right.connect_pressed({
-                let (list_item, on_row) = (list_item.clone(), Rc::clone(&on_row));
-                move |g, _, _, _| report(&list_item, &on_row, g.current_event_state(), true)
+                let (list_item, on_row, swipe, root) = (list_item.clone(), Rc::clone(&on_row), swipe.clone(), widgets.root.clone());
+                move |g, _, x, y| match &swipe {
+                    // the context menu holds Select and the swipe actions of the two sides
+                    Some(swipe) => context_menu(&root, &list_item, swipe, &on_row, (x, y)),
+                    None => report(&list_item, &on_row, g.current_event_state(), true),
+                }
             });
             let long = gtk::GestureLongPress::new();
             long.connect_pressed({
@@ -155,6 +202,17 @@ impl ChapterList {
             });
             for c in [left.upcast_ref::<gtk::EventController>(), right.upcast_ref(), long.upcast_ref()] {
                 widgets.root.add_controller(c.clone());
+            }
+            if let Some(swipe) = swipe.clone() {
+                // a horizontal drag on a touch screen runs the action of the side it ends on
+                let drag = gtk::GestureDrag::new();
+                drag.set_touch_only(true);
+                let list_item = list_item.clone();
+                drag.connect_drag_end(move |_, dx, dy| {
+                    let (Some(side), Some(item)) = (side_of_drag(dx, dy), item_of(&list_item)) else { return };
+                    (swipe.run)(item.borrow::<RowItem>().id, action_for(&swipe.prefs, side));
+                });
+                widgets.root.add_controller(drag);
             }
             list_item.set_child(Some(&widgets.root));
         });

@@ -26,6 +26,8 @@ pub struct Ctx {
     pub set_sort: Rc<dyn Fn(LibrarySort)>,
     /// The spec's Filter tab, built by the caller.
     pub filter_tab: gtk::Widget,
+    /// The window width in pixels; it picks which of the portrait and landscape keys the columns slider edits.
+    pub window_width: i32,
 }
 
 /// Opens the sheet over the main window.
@@ -116,7 +118,7 @@ pub fn display_tab(ctx: &Ctx) -> gtk::Widget {
     col.append(&chips);
 
     col.append(&slider_title);
-    let pref = display_tab::columns_pref(&ctx.prefs, ctx.kind).clone();
+    let pref = display_tab::columns_pref(&ctx.prefs, ctx.kind, ctx.window_width).clone();
     let range = display_tab::SLIDER_RANGE;
     let slider = gtk::Scale::with_range(O::Horizontal, f64::from(*range.start()), f64::from(*range.end()), 1.0);
     slider.set_digits(0);
@@ -171,6 +173,7 @@ mod tests {
             current_sort: LibrarySort::DEFAULT,
             set_sort: Rc::new(move |s| written.set(Some(s))),
             filter_tab: gtk::Box::new(O::Vertical, 0).upcast(),
+            window_width: 1180,
         }
     }
 

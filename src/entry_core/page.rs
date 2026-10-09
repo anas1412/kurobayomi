@@ -2,6 +2,7 @@
 //! feeds it `StoreEvent`s and `UiAction`s and draws what it holds. Actions return `StoreCmd`s to send to the runner.
 //! Upstream: `MangaScreenModel.kt` (selection `:971-1057`, mark read `:788-840`, setters `:878-949`).
 
+use kuro_prefs::library::ChapterSwipeAction;
 use kuro_prefs::tristate::TriState;
 
 use crate::entry_core::banner::{Banners, Length};
@@ -31,6 +32,11 @@ pub enum UiAction {
     },
     MarkRead(bool),
     Bookmark(bool),
+    /// A swipe action on one row (T-08a-029): from a touch drag or the row's context menu.
+    Swipe {
+        id: i64,
+        action: ChapterSwipeAction,
+    },
     SetUnread(TriState),
     SetBookmarked(TriState),
     SetDownloaded(TriState),
@@ -181,6 +187,25 @@ impl Page {
                         chapter_ids,
                         bookmark,
                     });
+                }
+            }
+            UiAction::Swipe { id, action } => {
+                if let Some(chapter) = page.chapters.iter().find(|c| c.id == id) {
+                    match action {
+                        ChapterSwipeAction::ToggleRead => out.cmds.push(StoreCmd::MarkRead {
+                            manga_id,
+                            chapter_ids: vec![id],
+                            read: !chapter.read,
+                            remove_after_read,
+                        }),
+                        ChapterSwipeAction::ToggleBookmark => out.cmds.push(StoreCmd::SetBookmark {
+                            manga_id,
+                            chapter_ids: vec![id],
+                            bookmark: !chapter.bookmark,
+                        }),
+                        // there is no download call on this page yet
+                        ChapterSwipeAction::Download | ChapterSwipeAction::Disabled => {}
+                    }
                 }
             }
             UiAction::OpenDialog(dialog) => page.dialog.open(dialog),
@@ -472,5 +497,16 @@ mod tests {
             0,
         );
         assert_eq!(moved, Some(3), "focus goes to a visible neighbour");
+    }
+
+    #[test]
+    fn a_swipe_toggles_read_or_bookmark_on_that_one_row() {
+        let mut page = ready(3);
+        let out = page.act(UiAction::Swipe { id: 2, action: ChapterSwipeAction::ToggleRead });
+        assert_eq!(out.cmds, vec![StoreCmd::MarkRead { manga_id: 1, chapter_ids: vec![2], read: true, remove_after_read: false }]);
+        let out = page.act(UiAction::Swipe { id: 3, action: ChapterSwipeAction::ToggleBookmark });
+        assert_eq!(out.cmds, vec![StoreCmd::SetBookmark { manga_id: 1, chapter_ids: vec![3], bookmark: true }]);
+        assert!(page.act(UiAction::Swipe { id: 2, action: ChapterSwipeAction::Disabled }).cmds.is_empty());
+        assert!(page.act(UiAction::Swipe { id: 99, action: ChapterSwipeAction::ToggleRead }).cmds.is_empty(), "unknown row");
     }
 }

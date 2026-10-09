@@ -328,14 +328,20 @@ fn clear_db(id: &str) -> Option<Built> {
                     return;
                 }
                 let written = db.write(|tx| {
+                    let table = if anime { "episodes" } else { "chapters" };
+                    let sql = format!("SELECT count(*) FROM {table}");
+                    let before = tx.query_row(&sql, [], |r| r.get::<_, i64>(0))?;
                     if anime {
-                        Ok(kuro_db::statements_anime::clear_non_library_anime_by_sources(tx, &selected)?)
+                        kuro_db::statements_anime::clear_non_library_anime_by_sources(tx, &selected)?;
                     } else {
-                        Ok(kuro_db::statements_manga::clear_non_library_by_sources(tx, &selected)?)
+                        kuro_db::statements_manga::clear_non_library_by_sources(tx, &selected)?;
                     }
+                    let after = tx.query_row(&sql, [], |r| r.get::<_, i64>(0))?;
+                    Ok((before - after).max(0) as usize)
                 });
                 match written {
-                    Ok(()) => {
+                    Ok(removed) => {
+                        after_clear(anime, removed);
                         for (source, check, r) in entries.iter() {
                             if selected.contains(source) {
                                 list.remove(r);
@@ -360,6 +366,42 @@ fn clear_db(id: &str) -> Option<Built> {
     all.connect_clicked(move |_| e1.iter().for_each(|(_, c, _)| c.set_active(true)));
     inv.connect_clicked(move |_| e2.iter().for_each(|(_, c, _)| c.set_active(!c.is_active())));
     built(b, vec![inv.upcast(), all.upcast()])
+}
+
+/// Housekeeping after "Clear database" committed (T-03a-028): above 1000 removed chapters or episodes the WAL is
+/// checkpointed and the user is offered VACUUM. Both run on their own connection to the file, off the open handle.
+fn after_clear(anime: bool, removed: usize) {
+    use kuro_platform::paths::Paths as _;
+    let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return };
+    let path = if anime { kuro_db::schema_anime::db_path(&paths.data_dir()) } else { kuro_db::schema_manga::db_path(&paths.data_dir()) };
+    let open = move || if anime { kuro_db::schema_anime::open(&path) } else { kuro_db::schema_manga::open(&path) };
+    let after = match open().and_then(|c| kuro_db::maintenance::after_chapter_delete(&c, removed)) {
+        Ok(after) => after,
+        Err(e) => {
+            tracing::warn!(error = %e, "database housekeeping after the clear failed");
+            return;
+        }
+    };
+    if !after.offer_vacuum {
+        return;
+    }
+    let dialog = gtk::AlertDialog::builder()
+        .message("Compact the database to free the space?")
+        .detail("This can take a while. The app stays usable, but do not close it until it is done.")
+        .buttons(["Not now", "Compact"])
+        .default_button(0)
+        .cancel_button(0)
+        .modal(true)
+        .build();
+    dialog.choose(gtk::Window::list_toplevels().into_iter().find_map(|w| w.downcast::<gtk::Window>().ok()).as_ref(), None::<&gtk::gio::Cancellable>, move |picked| {
+        if picked == Ok(1) {
+            std::thread::spawn(move || {
+                if let Err(e) = open().and_then(|c| kuro_db::maintenance::vacuum(&c)) {
+                    tracing::warn!(error = %e, "VACUUM failed");
+                }
+            });
+        }
+    });
 }
 
 fn licenses() -> Option<Built> {

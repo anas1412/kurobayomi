@@ -21,6 +21,7 @@ use kuro_data::anime::{Anime, SeasonAnime};
 use kuro_data::episode::Episode;
 use kuro_db::schema_anime::FetchType;
 use kuro_domain::app::items::{ListFilters, apply_filters, episode_filters};
+use kuro_domain::entries::defaults::{episode_default_word, season_default_word};
 use kuro_domain::items::sorter::{SortKey, compare_items};
 use kuro_prefs::store::PrefStore;
 
@@ -56,6 +57,8 @@ pub struct AnimeEntryModel {
     pub selection: Selection,
     /// The error the last refresh ended with, shown by the page; `None` after a successful one.
     pub refresh_error: Option<DetailError>,
+    /// The in-memory library defaults of a non-library entry, `(episode, season)`. A snapshot re-applies them.
+    pub session_flags: Option<(i64, i64)>,
 }
 
 impl AnimeEntryModel {
@@ -75,11 +78,11 @@ impl AnimeEntryModel {
         let season_list = anime.fetch_type == FetchType::Seasons;
         let episodes = if season_list { Vec::new() } else { store.episodes(anime_id)? };
         let seasons = if episode_list { Vec::new() } else { store.seasons(anime_id)? };
-        if !anime.favorite
-            && store.apply_open_defaults(prefs, &anime)?
-            && let Some(fresh) = store.anime(anime_id)?
-        {
-            anime = fresh;
+        // A non-library entry shows the library defaults for this session only (T-39b-012): nothing is written to its row.
+        let session_flags = (!anime.favorite).then(|| (episode_default_word(prefs), season_default_word(prefs)));
+        if let Some((episode_flags, season_flags)) = session_flags {
+            anime.episode_flags = episode_flags;
+            anime.season_flags = season_flags;
         }
         let plan = refresh_on_open(anime.initialized, episodes.is_empty(), episode_list, seasons.is_empty(), season_list);
         let mut flow = EntryFlow::default();
@@ -98,6 +101,7 @@ impl AnimeEntryModel {
             downloaded_only: ctx.downloaded_only,
             selection: Selection::default(),
             refresh_error: None,
+            session_flags,
         }))
     }
 
@@ -108,9 +112,13 @@ impl AnimeEntryModel {
     }
 
     /// The subscription delivered a newer entry and episode list. A `Seasons` entry keeps an empty episode list.
-    pub fn apply_snapshot(&mut self, anime: Anime, episodes: Vec<Episode>) {
+    pub fn apply_snapshot(&mut self, mut anime: Anime, episodes: Vec<Episode>) {
         if anime.fetch_type == FetchType::Episodes {
             self.episodes = episodes;
+        }
+        if let Some((episode_flags, season_flags)) = self.session_flags {
+            anime.episode_flags = episode_flags;
+            anime.season_flags = season_flags;
         }
         self.anime = anime;
     }
@@ -148,12 +156,22 @@ impl AnimeEntryModel {
             .collect()
     }
 
-    /// What the FAB opens: the first unseen episode of the unfiltered list in the entry's sort key, oldest first.
+    /// The FAB and continue target (`getNextUnseen`): the filters apply, the list is taken in ascending order, and
+    /// `next_unseen_in` picks the first unseen one, or the last one for a descending sort.
     pub fn next_unseen(&self) -> Option<i64> {
-        let key = self.filters().map_or(SortKey::Number, |f| f.key);
-        let mut list: Vec<&Episode> = self.episodes.iter().collect();
-        list.sort_by(|a, b| compare_items(key, false, *a, *b));
-        list.into_iter().find(|e| !e.seen).map(|e| e.id)
+        let local = self.anime.source == kuro_source::local::LOCAL_SOURCE_ID;
+        let (ascending, descending) = match self.filters() {
+            Some(f) => {
+                let descending = f.descending;
+                (apply_filters(self.episodes.clone(), &ListFilters { descending: false, ..f }, local, |_| false), descending)
+            }
+            None => {
+                let mut list = self.episodes.clone();
+                list.sort_by(|a, b| compare_items(SortKey::Number, false, a, b));
+                (list, false)
+            }
+        };
+        next_unseen_in(&ascending, descending)
     }
 
     /// The FAB reads the unfiltered list (behaviour 9).
@@ -171,6 +189,13 @@ impl AnimeEntryModel {
         let missing = header_missing_count(&episode_numbers, &season_numbers);
         item_header(seasons, count, missing, self.selection.is_active())
     }
+}
+
+/// `getNextUnseen` over a list in ascending order: the first unseen episode, or the last one when the display is
+/// descending. The list is already filtered.
+pub fn next_unseen_in(ascending: &[Episode], descending: bool) -> Option<i64> {
+    let mut unseen = ascending.iter().filter(|e| !e.seen).map(|e| e.id);
+    if descending { unseen.last() } else { unseen.next() }
 }
 
 #[cfg(test)]
@@ -241,6 +266,8 @@ mod tests {
         let (_dir, store, id) = with_episodes(false, true, 2, 0);
         store.set_flag_bits(id, ep::SHOW_SEEN, ep::UNSEEN_MASK).unwrap();
         assert_eq!(load(&store, id).anime.episode_flags & ep::UNSEEN_MASK, 0);
+        let row = store.anime(id).unwrap().unwrap();
+        assert_eq!(row.episode_flags & ep::UNSEEN_MASK, ep::SHOW_SEEN, "the open writes nothing to the row (T-39b-012)");
 
         let (_dir, store, id) = with_episodes(true, true, 2, 0);
         store.set_flag_bits(id, ep::SHOW_SEEN, ep::UNSEEN_MASK).unwrap();
@@ -268,11 +295,29 @@ mod tests {
     }
 
     #[test]
-    fn the_fab_opens_the_oldest_unseen_episode_whatever_the_list_order() {
+    fn next_unseen_takes_the_last_unseen_for_a_descending_sort() {
+        let list: Vec<Episode> = (1..=4)
+            .map(|id| {
+                let mut e = Episode::create();
+                e.id = id;
+                e.seen = id <= 2;
+                e
+            })
+            .collect();
+        assert_eq!(next_unseen_in(&list, false), Some(3));
+        assert_eq!(next_unseen_in(&list, true), Some(4));
+        assert_eq!(next_unseen_in(&[], true), None);
+    }
+
+    #[test]
+    fn the_fab_opens_the_first_unseen_in_display_order() {
         let (_dir, store, id) = with_episodes(true, true, 4, 2);
+        store.set_flag_bits(id, ep::SORT_ASC, ep::SORT_DIR_MASK).unwrap();
         let model = load(&store, id);
         let by_number = |n: f64| model.episodes.iter().find(|e| e.episode_number == n).unwrap().id;
-        assert_eq!(model.next_unseen(), Some(by_number(3.0)));
+        assert_eq!(model.next_unseen(), Some(by_number(3.0)), "ascending: the oldest unseen");
+        store.set_flag_bits(id, ep::SORT_DESC, ep::SORT_DIR_MASK).unwrap();
+        assert_eq!(load(&store, id).next_unseen(), Some(by_number(4.0)), "descending: the newest unseen comes first");
         let (_dir, store, id) = with_episodes(true, true, 2, 2);
         assert_eq!(load(&store, id).next_unseen(), None);
     }

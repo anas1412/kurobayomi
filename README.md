@@ -39,7 +39,7 @@ Overall: about 33% of the plan's 3,800 tasks are done (41% handed out) and about
 | Manga reader | Open a chapter and page through it | 45% | 20% |
 | Video player (mpv) | Play episodes, remember your position | 37% | 5% |
 | Downloads | Save chapters and episodes for offline use | 51% | 0% |
-| AniList tracking | Sync your progress to AniList | 40% | 0% |
+| AniList tracking | Sync your progress to AniList | 10% | 0% |
 | Other trackers (MAL, Kitsu and so on) | The same for the other services | 0% | 0% |
 | Backup and restore | Export and import your library, including Aniyomi backups | 65% | 0% |
 | Auto-update library | Check for new chapters and episodes by itself | 5% | 0% |

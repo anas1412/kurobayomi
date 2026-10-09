@@ -570,6 +570,9 @@ fn base_entries<'a>(
     Ok((entries, aniyomi_ids))
 }
 
+/// `locales/en/kurobayomi-extra.ftl`: the English messages that have no Aniyomi source, appended after the generated ones.
+const EXTRA_ENGLISH: &str = include_str!("../locales/en/kurobayomi-extra.ftl");
+
 /// Builds `locales/en/kurobayomi.ftl` from the base files of both modules (T-51a-001).
 ///
 /// Order: all Aniyomi messages in source order, then core messages not defined by Aniyomi.
@@ -585,6 +588,8 @@ pub fn generate_english(core: &[Source], aniyomi: &[Source]) -> Result<String> {
         out.push_str(&render_entry(source, id)?);
         out.push('\n');
     }
+    // the messages only Kurobayomi has: they are not in the Aniyomi base, so a hand-written file follows the generated ones
+    out.push_str(EXTRA_ENGLISH);
 
     if let Err((_, errors)) = fluent_syntax::parser::parse(out.as_str()) {
         return err(format!("generated catalogue does not parse: {errors:?}"));

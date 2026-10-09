@@ -20,6 +20,7 @@ use super::options::RestoreOptions;
 use super::prefs::{Scheduler, category_maps, restore_app_prefs, restore_source_prefs};
 use super::progress::{Progress, ProgressEvent, amount};
 use super::sections::{Counts, Item, Restorer, Run, Section, plan, run_sections};
+use crate::text;
 use crate::schema::{Backup, BackupAnime, BackupAnimeSource, BackupManga, BackupSource};
 
 /// Where a restore writes. The caller owns the connections and the stores.
@@ -133,7 +134,7 @@ fn anime_source_name(sources: &[BackupAnimeSource], id: i64) -> String {
 
 impl DbRestorer<'_> {
     fn categories(&mut self, index: u32) -> Result<Item, RestoreError> {
-        let (kind, title) = if index == 0 { (Kind::Anime, "Anime categories") } else { (Kind::Manga, "Manga categories") };
+        let (kind, title) = if index == 0 { (Kind::Anime, text::PROGRESS_ANIME_CATEGORIES.english) } else { (Kind::Manga, text::PROGRESS_MANGA_CATEGORIES.english) };
         let (conn, list) = match kind {
             Kind::Anime => (&mut *self.t.anime, &self.backup.anime_categories),
             Kind::Manga => (&mut *self.t.manga, &self.backup.categories),
@@ -160,12 +161,12 @@ impl DbRestorer<'_> {
         let result = maps.map_err(|e| e.to_string()).map(|maps| {
             restore_app_prefs(self.t.app_prefs, &self.backup.preferences, &maps, self.display, self.t.scheduler);
         });
-        done("App settings".into(), result)
+        done(text::APP_SETTINGS.english.into(), result)
     }
 
     fn source_settings(&mut self) -> Result<Item, RestoreError> {
         restore_source_prefs(self.t.source_prefs, &self.backup.source_preferences);
-        done("Source settings".into(), Ok(()))
+        done(text::SOURCE_SETTINGS.english.into(), Ok(()))
     }
 
     fn manga_entry(&mut self, index: u32) -> Result<Item, RestoreError> {
@@ -224,7 +225,7 @@ impl DbRestorer<'_> {
 
     fn custom_buttons(&mut self) -> Result<Item, RestoreError> {
         let result = in_tx(self.t.anime, |tx| restore_custom_buttons(tx, &self.backup.custom_buttons)).map_err(|e| e.to_string());
-        done("Custom buttons".into(), result)
+        done(text::CUSTOM_BUTTON_SETTINGS.english.into(), result)
     }
 }
 
@@ -248,7 +249,7 @@ impl Restorer for DbRestorer<'_> {
             }
             Section::CustomButtons => self.custom_buttons(),
             // No installer exists yet: the step counts and writes nothing.
-            Section::Extensions => done("Extensions".into(), Ok(())),
+            Section::Extensions => done(text::LABEL_EXTENSIONS.english.into(), Ok(())),
         }
     }
 }

@@ -27,7 +27,7 @@ use crate::entry_core::dialog::{CategoryDialog, Dialog};
 use crate::entry_core::flags::ChapterFlags;
 use crate::entry_core::header::{HeaderModel, SearchRequest, is_large};
 use crate::entry_core::header_view::{self, Handlers};
-use crate::entry_core::list_view::ChapterList;
+use crate::entry_core::list_view::{ChapterList, Swipe};
 use crate::entry_core::page::{Page, UiAction};
 use crate::entry_core::runner::{self, Runner};
 use crate::entry_core::selection::{Key, Mods, key_command};
@@ -37,6 +37,7 @@ use crate::ui;
 
 /// The window width assumed before the page has a window: the app's default width.
 const FALLBACK_WIDTH: i32 = 1180;
+const FALLBACK_HEIGHT: i32 = 780;
 
 thread_local! {
     static TARGET: Cell<Option<i64>> = const { Cell::new(None) };
@@ -134,14 +135,28 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     let empty = ui::dim(&tr(MsgKey::no_chapters_error));
     empty.set_halign(Align::Center);
     let on_row_view: Rc<RefCell<Weak<View>>> = Rc::default();
-    let list = ChapterList::new({
-        let weak = Rc::clone(&on_row_view);
-        Rc::new(move |id: i64, mods: Mods, long: bool| {
-            if let Some(view) = weak.borrow().upgrade() {
-                view.act(UiAction::Row { id, mods, long_press_or_right: long });
-            }
-        })
+    let swipe = crate::data::is_installed().then(|| Swipe {
+        prefs: Rc::new((*data::app().library).clone()),
+        run: {
+            let weak = Rc::clone(&on_row_view);
+            Rc::new(move |id: i64, action| {
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.act(UiAction::Swipe { id, action });
+                }
+            })
+        },
     });
+    let list = ChapterList::new(
+        {
+            let weak = Rc::clone(&on_row_view);
+            Rc::new(move |id: i64, mods: Mods, long: bool| {
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.act(UiAction::Row { id, mods, long_press_or_right: long });
+                }
+            })
+        },
+        swipe,
+    );
     col.append(&header_slot);
     col.append(&description_slot);
     col.append(&count);
@@ -228,6 +243,16 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         }
     });
     list.widget.add_controller(key_controller(&weak));
+    // a resize across the tablet threshold rebuilds the header for the other layout
+    crate::window_size::on_tablet_change({
+        let weak = weak.clone();
+        move |_| {
+            let Some(view) = weak.upgrade() else { return false };
+            *view.shown_header.borrow_mut() = None;
+            view.render();
+            true
+        }
+    });
 
     // the pump owns the only strong reference to the view
     let events = runner.events();
@@ -440,7 +465,14 @@ impl View {
             .map(|w| if w.width() > 0 { w.width() } else { w.default_width() })
             .filter(|w| *w > 0)
             .unwrap_or(FALLBACK_WIDTH);
-        let large = is_large(width);
+        let height = self
+            .stack
+            .root()
+            .and_downcast::<gtk::Window>()
+            .map(|w| if w.height() > 0 { w.height() } else { w.default_height() })
+            .filter(|h| *h > 0)
+            .unwrap_or(FALLBACK_HEIGHT);
+        let large = is_large(width, height);
         if !self.ready_once.replace(true) {
             self.expansion.set(Expansion::new(large, from_source));
         }
@@ -708,7 +740,7 @@ mod tests {
                 progress: 0,
             })
             .collect();
-        let model_list = ChapterList::new(Rc::new(|_: i64, _: Mods, _: bool| {}));
+        let model_list = ChapterList::new(Rc::new(|_: i64, _: Mods, _: bool| {}), None);
         let signals = Rc::new(Cell::new(0));
         model_list.widget.model().expect("model").connect_items_changed({
             let signals = Rc::clone(&signals);

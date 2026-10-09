@@ -9,8 +9,6 @@ use kuro_data::anime::{Anime, AnimeRepo, SeasonAnime};
 use kuro_data::episode::{Episode, EpisodeRepo};
 use kuro_db::handle::Db;
 use kuro_db::subscribe::Subscription;
-use kuro_domain::entries::defaults::on_open_anime;
-use kuro_prefs::store::PrefStore;
 
 use super::settings::sort_click;
 
@@ -48,10 +46,6 @@ impl AnimeStore {
 
     /// The first open of an entry outside the library: the library's episode and season defaults overwrite its flags
     /// (behaviour 2.3 step 5.5). A favourite keeps its stored words. Returns whether a word was written.
-    pub fn apply_open_defaults(&self, prefs: &PrefStore, anime: &Anime) -> DataResult<bool> {
-        on_open_anime(&self.animes, prefs, anime)
-    }
-
     /// One masked UPDATE of `animes.episode_flags`: `(old & !mask) | (flag & mask)`.
     pub fn set_flag_bits(&self, anime_id: i64, flag: i64, mask: i64) -> DataResult<bool> {
         self.animes.set_episode_flags_masked(anime_id, flag, mask)
@@ -127,7 +121,6 @@ mod tests {
     use kuro_domain::entries::anime::episode_flags as ep;
 
     use super::fixture::with_episodes;
-    use super::*;
 
     #[test]
     fn reads_the_entry_and_its_episodes_and_a_missing_row_is_none() {
@@ -148,21 +141,5 @@ mod tests {
         assert_eq!(word & ep::UNSEEN_MASK, ep::SHOW_UNSEEN, "the filter group survives a sort");
         store.sort_by(id, ep::SORTING_NUMBER).unwrap();
         assert_eq!(store.anime(id).unwrap().unwrap().episode_flags & ep::SORT_DIR_MASK, ep::SORT_DESC);
-    }
-
-    #[test]
-    fn open_defaults_overwrite_a_non_favourite_and_keep_a_favourite() {
-        let prefs = PrefStore::in_memory();
-        let (_dir, store, id) = with_episodes(false, true, 0, 0);
-        store.set_flag_bits(id, ep::SHOW_BOOKMARKED, ep::BOOKMARKED_MASK).unwrap();
-        let anime = store.anime(id).unwrap().unwrap();
-        assert!(store.apply_open_defaults(&prefs, &anime).unwrap());
-        assert_eq!(store.anime(id).unwrap().unwrap().episode_flags & ep::BOOKMARKED_MASK, 0);
-
-        let (_dir, store, id) = with_episodes(true, true, 0, 0);
-        store.set_flag_bits(id, ep::SHOW_BOOKMARKED, ep::BOOKMARKED_MASK).unwrap();
-        let anime = store.anime(id).unwrap().unwrap();
-        assert!(!store.apply_open_defaults(&prefs, &anime).unwrap());
-        assert_eq!(store.anime(id).unwrap().unwrap().episode_flags & ep::BOOKMARKED_MASK, ep::SHOW_BOOKMARKED);
     }
 }

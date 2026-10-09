@@ -15,6 +15,12 @@ pub enum DetailError {
     NoChapters,
     /// The source extension is not installed.
     SourceNotInstalled,
+    /// `NoEpisodesException`: a refresh of an `Episodes` entry found no episodes.
+    NoEpisodes,
+    /// `NoSeasonsException`: a refresh of a `Seasons` entry found no seasons.
+    NoSeasons,
+    /// `CancellationException`: the page was closed or the refresh was replaced. Never shown.
+    Cancelled,
     /// Any other error: `class` is the simple class name, `message` the exception message.
     Other {
         class: String,
@@ -33,10 +39,21 @@ impl DetailError {
             }
             Self::NoChapters => tr(MsgKey::no_results_found),
             Self::SourceNotInstalled => tr(MsgKey::loader_not_implemented_error),
+            Self::NoEpisodes => tr(MsgKey::no_episodes_error),
+            Self::NoSeasons => tr(MsgKey::no_seasons_error),
+            Self::Cancelled => String::new(),
             Self::Other { class, message } => match class.as_str() {
                 "Exception" | "IOException" => message.clone().unwrap_or_else(|| class.clone()),
                 _ => format!("{class}: {}", message.as_deref().unwrap_or("null")),
             },
+        }
+    }
+
+    /// The snackbar text of a failed refresh (`AnimeScreenModel.kt:350-363`). `None` for a cancellation, which is not shown.
+    pub fn refresh_message(&self) -> Option<String> {
+        match self {
+            Self::Cancelled => None,
+            other => Some(other.user_message()),
         }
     }
 
@@ -97,6 +114,14 @@ mod tests {
             DetailError::Http(500).chapter_fetch_message(),
             DetailError::Http(500).user_message()
         );
+    }
+
+    #[test]
+    fn refresh_messages_for_empty_lists_and_cancellation() {
+        assert_eq!(DetailError::NoEpisodes.refresh_message().as_deref(), Some("No episodes found"));
+        assert_eq!(DetailError::NoSeasons.refresh_message().as_deref(), Some("No seasons found"));
+        assert_eq!(DetailError::Cancelled.refresh_message(), None);
+        assert_eq!(DetailError::Http(500).refresh_message().as_deref(), Some("HTTP 500, check website in WebView"));
     }
 
     #[test]

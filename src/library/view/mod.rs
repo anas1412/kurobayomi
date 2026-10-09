@@ -19,6 +19,7 @@ use kuro_db::handle::Db;
 use kuro_domain::category::service::CategoryService;
 use kuro_domain::kind::EntryKind;
 use kuro_domain::library::active::clamp_page;
+use kuro_domain::library::columns::columns_for_width;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::page::{LibraryItem, toolbar_title};
 use kuro_domain::library::sort::LibrarySort;
@@ -29,6 +30,7 @@ use kuro_prefs::library::LibraryPrefs;
 use crate::library::actions;
 use crate::library::cells::{self, Cell};
 use crate::library::category_dialog::CategoryDialog;
+use crate::library::display_tab;
 use crate::library::keys;
 use crate::library::layout;
 use crate::library::load;
@@ -210,6 +212,18 @@ impl LibraryView {
             bar_label,
         }));
         let view = Self { inner: inner.clone(), root };
+        // a resize across a column boundary or the 900 px breakpoint changes the count without a data change
+        let (weak, seen) = (Rc::downgrade(&inner), FlagCell::new(-1));
+        let scroller = inner.borrow().scroller.clone();
+        scroller.add_tick_callback(move |scroller, _| {
+            let width = window_width(scroller);
+            if seen.replace(width) != width {
+                if let Some(inner) = weak.upgrade() {
+                    apply_columns(&inner);
+                }
+            }
+            glib::ControlFlow::Continue
+        });
         view.wire(&replies_rx);
         view.refresh();
         Ok(view)
@@ -543,10 +557,6 @@ fn render(inner: &Rc<RefCell<Inner>>) {
             (n, 0) => format!("{n} selected"),
             (n, h) => format!("{n} selected ({h} hidden by the current view)"),
         };
-        let columns = match st.deps.kind {
-            EntryKind::Anime => st.deps.prefs.anime_portrait_columns.get(),
-            EntryKind::Manga => st.deps.prefs.manga_portrait_columns.get(),
-        };
         Rendered {
             title,
             labels,
@@ -559,17 +569,15 @@ fn render(inner: &Rc<RefCell<Inner>>) {
             bar_text,
             bar_open: !st.selection.is_empty(),
             download_visible: actions::download_visible(st.selection.rows()),
-            columns,
         }
     };
 
-    let (title_label, tabs, store, grid, scroller, empty, empty_label, global, bar, bar_label, header, sel_header, download) = {
+    let (title_label, tabs, store, scroller, empty, empty_label, global, bar, bar_label, header, sel_header, download) = {
         let st = inner.borrow();
         (
             st.title.clone(),
             st.tabs.clone(),
             st.store.clone(),
-            st.grid.clone(),
             st.scroller.clone(),
             st.empty.clone(),
             st.empty_label.clone(),
@@ -589,13 +597,7 @@ fn render(inner: &Rc<RefCell<Inner>>) {
     });
     tabs.set(&view.labels, view.index, on_select);
 
-    if view.columns > 0 {
-        grid.set_min_columns(view.columns as u32);
-        grid.set_max_columns(view.columns as u32);
-    } else {
-        grid.set_min_columns(1);
-        grid.set_max_columns(u32::MAX);
-    }
+    apply_columns(inner);
     let objects: Vec<glib::BoxedAnyObject> = view.grid_cells.iter().cloned().map(glib::BoxedAnyObject::new).collect();
     store.splice(0, store.n_items(), objects.as_slice());
     let has_items = !view.items.is_empty();
@@ -620,6 +622,24 @@ fn render(inner: &Rc<RefCell<Inner>>) {
     }
 }
 
+/// Width of the window that holds `widget`, or of the widget itself before it has a window.
+fn window_width(widget: &impl IsA<gtk::Widget>) -> i32 {
+    widget.root().map_or_else(|| widget.width(), |root| root.width())
+}
+
+/// Sets the grid's column count from the window width and the portrait and landscape keys of this kind (T-08a-043):
+/// below 900 px the portrait key, from 900 px the landscape key, 0 meaning `max(2, width / 160)`.
+fn apply_columns(inner: &Rc<RefCell<Inner>>) {
+    let (grid, columns) = {
+        let st = inner.borrow();
+        let (portrait, landscape) = display_tab::column_prefs(&st.deps.prefs, st.deps.kind);
+        let width = window_width(&st.scroller);
+        (st.grid.clone(), columns_for_width(width, portrait.get(), landscape.get()) as u32)
+    };
+    grid.set_min_columns(columns);
+    grid.set_max_columns(columns);
+}
+
 /// Everything `render` draws, read in one borrow and applied without it.
 struct Rendered {
     title: String,
@@ -633,7 +653,6 @@ struct Rendered {
     bar_text: String,
     bar_open: bool,
     download_visible: bool,
-    columns: i32,
 }
 
 /// Makes `index` the active tab and remembers its category.
@@ -869,7 +888,8 @@ fn open_settings(inner: &Rc<RefCell<Inner>>) {
         EntryKind::Manga => "manga_library",
     };
     let filter_tab = filter_tab(id);
-    sheet::show(sheet::Ctx { kind, prefs, has_tracker, current_sort, set_sort, filter_tab });
+    let window_width = window_width(&inner.borrow().scroller);
+    sheet::show(sheet::Ctx { kind, prefs, has_tracker, current_sort, set_sort, filter_tab, window_width });
 }
 
 /// The spec's Filter tab, shown as it is.

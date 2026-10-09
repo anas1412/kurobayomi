@@ -58,9 +58,9 @@ pub fn after_refresh(dialog: Option<Dialog>, categories: &[Category]) -> Option<
     })
 }
 
-/// The categories the management list shows, in order. The system category is never listed. With the
-/// "hide hidden categories" setting on, hidden ones are left out; with it off they show (E-43). The library page
-/// always uses the visible ones, whatever this setting says.
-pub fn management_list(categories: &[Category], hide_hidden: bool) -> Vec<&Category> {
-    categories.iter().filter(|c| !c.is_system()).filter(|c| !(hide_hidden && c.hidden)).collect()
+/// The categories the management list shows, in order. The system category is never listed; hidden ones always are
+/// (dimmed by the UI). The "hide hidden categories" setting applies to the Storage filter only
+/// (`kuro_domain::category::storage_view::storage_items`).
+pub fn management_list(categories: &[Category]) -> Vec<&Category> {
+    categories.iter().filter(|c| !c.is_system()).collect()
 }

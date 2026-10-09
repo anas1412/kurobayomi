@@ -544,6 +544,9 @@ define_prefs! {
     "pref_mpv_input", Normal, Str, "", "player.advanced", "mpv_input";
     "pref_player_statistics_page", Normal, Int, 0, "player.advanced", "player_statistics_page";
     "show_not_runnable", Normal, Bool, false, "sources", "show_not_runnable";
+    "anime_ext_last_check", Normal, Long, 0, "sources", "anime_ext_last_check";
+    "check_app_updates", Normal, Bool, false, "base", "check_app_updates";
+    "__APP_STATE_last_app_check", AppState, Long, 0, "base", "last_app_check";
 }
 
 #[cfg(test)]
@@ -647,9 +650,13 @@ mod tests {
     fn registry_has_the_327_plan_rows_in_order() {
         let rows = plan_rows();
         assert_eq!(rows.len(), 327, "the plan's 328 rows minus the derived animeext_updates_count");
-        // one Kurobayomi row after the plan's rows: `show_not_runnable` (T-19a-066)
-        assert_eq!(REGISTRY.len(), rows.len() + 1);
+        // four Kurobayomi rows after the plan's rows: `show_not_runnable` (T-19a-066), `anime_ext_last_check` (T-19a-064),
+        // `check_app_updates` and `last_app_check` (T-07a-036)
+        assert_eq!(REGISTRY.len(), rows.len() + 4);
         assert_eq!(REGISTRY[rows.len()].key, "show_not_runnable");
+        assert_eq!(REGISTRY[rows.len() + 1].key, "anime_ext_last_check");
+        assert_eq!(REGISTRY[rows.len() + 2].key, "check_app_updates");
+        assert_eq!(REGISTRY[rows.len() + 3].key, "__APP_STATE_last_app_check");
         let mut pinned = 0;
         for (meta, (key, store, kind, default)) in REGISTRY.iter().zip(&rows) {
             assert_eq!(meta.key, key);

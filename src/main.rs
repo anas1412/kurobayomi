@@ -1,3 +1,7 @@
+mod applock_host;
+mod app_update;
+mod backup_host;
+mod backup_run;
 mod bind;
 mod clamp;
 mod data;
@@ -5,18 +9,22 @@ mod entry;
 #[allow(dead_code)]
 mod entry_core;
 mod entry_model;
+mod ext_host;
 mod library;
+mod library_update;
 mod live;
 mod gio_notifier;
 mod incognito;
 mod locale;
 mod open_link;
 mod player;
+mod player_scripts;
 mod reader;
 mod reporter;
 mod screens;
 mod selection;
 mod settings;
+mod settings_ui;
 mod source_bridge;
 mod source_gate;
 mod toast;
@@ -26,6 +34,7 @@ mod startup;
 mod theme;
 mod ui;
 mod watch;
+mod window_size;
 mod pref_model;
 mod browse;
 
@@ -38,6 +47,10 @@ fn main() -> glib::ExitCode {
     if std::env::args().skip(1).any(|a| a == "--version") {
         println!("{}", kuro_core::app_info::version_line());
         return glib::ExitCode::SUCCESS;
+    }
+    // `--run-backup`: one automatic backup from the systemd timer, no window and no GTK
+    if std::env::args().skip(1).any(|a| a == "--run-backup") {
+        return glib::ExitCode::from(backup_run::run_backup_cli());
     }
     // the detached crash reporter started by the panic hook: a window over the report file, none of the app state below
     let mut args = std::env::args().skip(1);
@@ -98,6 +111,15 @@ fn main() -> glib::ExitCode {
     let unfinished = kuro_domain::history::repo::join_pending_flushes(std::time::Duration::from_secs(2));
     if unfinished > 0 {
         eprintln!("kurobayomi: {unfinished} history flush(es) were still running at exit");
+    }
+    // WAL checkpoint and PRAGMA optimize on both writers (T-03a-028)
+    if data::is_installed() {
+        let app = data::app();
+        for (name, db) in [("manga", &app.manga_db), ("anime", &app.anime_db)] {
+            if let Err(e) = db.close() {
+                eprintln!("kurobayomi: closing the {name} database failed: {e}");
+            }
+        }
     }
     kuro_core::runtime::shutdown(rt);
     code
@@ -181,6 +203,10 @@ fn build_window(app: &gtk::Application, link: Option<kuro_platform::deep_link::D
     // banner above everything; the stored incognito value is applied here (banner and notification)
     let base = &data::app().base;
     outer.prepend(&incognito::attach(app, base.incognito_mode.clone(), base.downloaded_only.clone()));
+    // the extension host: package scans, icons, load problems and the first-run languages
+    ext_host::start(base.store(), data::app().anime_db.clone());
+    // the restore banner, the Create and Restore hosts, and the close dialog of a running restore
+    outer.prepend(&backup_host::attach(app, &win));
     open_link::register(app, &win);
     if let Some(commands) = commands {
         let (app, win) = (app.clone(), win.clone());
@@ -196,7 +222,8 @@ fn build_window(app: &gtk::Application, link: Option<kuro_platform::deep_link::D
         let (win, nav) = (win.clone(), nav.clone());
         move || {
             let immersive = nav.visible_child().is_some_and(|c| matches!(c.widget_name().as_str(), "screen:reader" | "screen:player"));
-            let wide = win.default_width() >= 760 || win.is_maximized();
+            let (width, height) = window_size::size_of(&win);
+            let wide = window_size::is_tablet_ui(width, height);
             // the sidebar also hides while library entries are selected (B-1.4)
             let selecting = library::mount::selecting();
             sidebar.set_visible(wide && !immersive && !selecting);
@@ -209,11 +236,22 @@ fn build_window(app: &gtk::Application, link: Option<kuro_platform::deep_link::D
     let r = refresh.clone();
     win.connect_default_width_notify(move |_| r());
     let r = refresh.clone();
+    win.connect_default_height_notify(move |_| r());
+    let r = refresh.clone();
     win.connect_maximized_notify(move |_| r());
+    // the entry header and the settings shell follow the same breakpoint
+    pref_model::shell::follow_resizes();
+    window_size::watch(&win);
     library::mount::on_selection_change(refresh.clone());
     refresh();
+    applock_host::attach(&win, data::app().security.clone());
     win.present();
     startup::publish_launcher_badge(&win, &app.application_id().unwrap_or_default());
+    // background work that waits for the window: the chapter cache clear and the opt-in release check
+    if let Ok(paths) = kuro_platform::linux::LinuxPaths::system() {
+        startup::clear_chapter_cache_on_launch(data::app().library.auto_clear_item_cache.get(), kuro_images::platform::chapter_cache_dir(&paths));
+    }
+    app_update::startup(&data::app().base);
     if let Some(link) = &link {
         open_link::dispatch(app, &win, &link.to_arg());
     }

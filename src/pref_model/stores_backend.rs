@@ -22,6 +22,8 @@ pub struct Card {
     pub discord: Option<String>,
     /// What the copy button puts on the clipboard.
     pub copy: String,
+    /// A line under the name, such as "N entries not runnable on Linux" (T-19a-066).
+    pub note: Option<String>,
 }
 
 /// How an add ended.
@@ -64,6 +66,7 @@ impl Ops<AnimeExtensionStore> for StoreOps {
             website: store.contact.website.clone(),
             discord: store.contact.discord.clone().filter(|d| !d.is_empty()),
             copy: store.index_url.clone(),
+            note: crate::browse::ext_badges::store_note_for(&store.index_url),
         }
     }
 
@@ -135,6 +138,7 @@ impl Ops<ExtensionRepo> for RepoOps {
             website: repo.website.clone(),
             discord: None,
             copy: format!("{}/index.min.json", repo.base_url),
+            note: None,
         }
     }
 

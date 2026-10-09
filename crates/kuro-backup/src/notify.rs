@@ -65,9 +65,14 @@ impl Notice {
 
 /// Closes the progress notice, then shows the manual result: "Backup created" or "Backup failed".
 pub fn manual_finished(notifier: &dyn Notifier, result: &Result<PathBuf, BackupError>) {
+    manual_finished_report(notifier, result, 0);
+}
+
+/// [`manual_finished`] with the number of extension packages that were skipped, which the success notice names.
+pub fn manual_finished_report(notifier: &dyn Notifier, result: &Result<PathBuf, BackupError>, skipped: usize) {
     notifier.withdraw(ID_BACKUP_PROGRESS);
     match result {
-        Ok(path) => manual_created(path).show(notifier),
+        Ok(path) => manual_created_skipping(path, skipped).show(notifier),
         Err(e) => manual_failed(e).show(notifier),
     }
 }
@@ -92,6 +97,16 @@ pub fn create_progress() -> Notice {
 pub fn manual_created(path: &Path) -> Notice {
     let mut n = Notice::new(ID_BACKUP_RESULT, "Backup created", Some(path.display().to_string()), Urgency::Normal);
     n.action = Some(Action::ShowInFolder(path.to_path_buf()));
+    n
+}
+
+/// Manual success naming the skipped extension packages: a second body line "N extensions were skipped" (T-21a-019).
+pub fn manual_created_skipping(path: &Path, skipped: usize) -> Notice {
+    let mut n = manual_created(path);
+    if skipped > 0 {
+        let noun = if skipped == 1 { "extension was" } else { "extensions were" };
+        n.body = Some(format!("{}\n{skipped} {noun} skipped", path.display()));
+    }
     n
 }
 
@@ -304,6 +319,17 @@ mod tests {
         assert_eq!(n.title, "Backup created");
         assert_eq!(n.action, Some(Action::ShowInFolder(p.into())));
         assert_eq!(n.body.as_deref(), Some("/home/u/kurobayomi_2026-10-09_12-00-00.tachibk"));
+    }
+
+    #[test]
+    fn the_completion_notice_names_the_skipped_extensions_only_when_there_are_some() {
+        let p = Path::new("/home/u/a.tachibk");
+        assert_eq!(manual_created_skipping(p, 0), manual_created(p));
+        assert_eq!(manual_created_skipping(p, 1).body.as_deref(), Some("/home/u/a.tachibk\n1 extension was skipped"));
+        assert_eq!(manual_created_skipping(p, 3).body.as_deref(), Some("/home/u/a.tachibk\n3 extensions were skipped"));
+        let rec = Recorder::default();
+        manual_finished_report(&rec, &Ok(p.to_path_buf()), 2);
+        assert_eq!(rec.shown.lock().unwrap()[0].2.as_deref(), Some("/home/u/a.tachibk\n2 extensions were skipped"));
     }
 
     #[test]

@@ -29,13 +29,9 @@ impl Destination {
     }
 }
 
-/// The widest window, in pixels, that still shows one pane: from this width the main list and the page sit side by
-/// side (T-47b-002).
-pub const TWO_PANE_WIDTH: i32 = 720;
-
-/// Two panes from 720 px wide; 719 is one pane.
-pub fn two_pane(width: i32) -> bool {
-    width >= TWO_PANE_WIDTH
+/// Two panes in the tablet UI: the smaller side of the window is at least 720 px, so 719 is one pane (T-47b-002).
+pub fn two_pane(width: i32, height: i32) -> bool {
+    crate::window_size::is_tablet_ui(width, height)
 }
 
 /// A page of the settings shell.
@@ -155,8 +151,9 @@ mod tests {
 
     #[test]
     fn two_panes_start_at_720_px() {
-        assert!(two_pane(720));
-        assert!(!two_pane(719));
+        assert!(two_pane(720, 720));
+        assert!(!two_pane(719, 900));
+        assert!(!two_pane(1200, 719), "a short window has one pane");
     }
 
     #[test]
