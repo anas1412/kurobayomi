@@ -1,0 +1,2532 @@
+{
+ "screens": [
+  {
+   "id": "manga_entry_details",
+   "title": "Manga details",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Download",
+     "icon": "folder-download-symbolic"
+    },
+    {
+     "label": "Filter",
+     "icon": "view-filter-symbolic"
+    }
+   ],
+   "menu": [
+    "Refresh",
+    "Edit categories",
+    "Migrate",
+    "Share",
+    "Settings"
+   ],
+   "tabs": [],
+   "groups": [],
+   "sheets": [
+    {
+     "id": "chapter_settings",
+     "title": "Chapter settings",
+     "tabs": [
+      {
+       "title": "Filter",
+       "groups": [
+        {
+         "title": null,
+         "items": [
+          {
+           "type": "tristate",
+           "title": "Downloaded"
+          },
+          {
+           "type": "tristate",
+           "title": "Unread"
+          },
+          {
+           "type": "tristate",
+           "title": "Bookmarked"
+          },
+          {
+           "type": "action",
+           "title": "Scanlator",
+           "subtitle": "Opens 'Exclude scanlators' dialog; people icon tinted when active"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Sort",
+       "groups": [
+        {
+         "title": null,
+         "items": [
+          {
+           "type": "sort",
+           "title": "Sort",
+           "options": [
+            "By source",
+            "By chapter number",
+            "By upload date",
+            "Alphabetically"
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Display",
+       "groups": [
+        {
+         "title": null,
+         "items": [
+          {
+           "type": "list",
+           "title": "Display",
+           "options": [
+            "Source title",
+            "Chapter number"
+           ],
+           "default": "Source title"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "dialogs": [
+    {
+     "id": "download_menu",
+     "title": "Download",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Next chapter"
+        },
+        {
+         "type": "action",
+         "title": "Next 5 chapters"
+        },
+        {
+         "type": "action",
+         "title": "Next 10 chapters"
+        },
+        {
+         "type": "action",
+         "title": "Next 25 chapters"
+        },
+        {
+         "type": "action",
+         "title": "Unread"
+        }
+       ]
+      }
+     ],
+     "buttons": []
+    },
+    {
+     "id": "set_categories",
+     "title": "Set categories",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "multi",
+         "title": "Categories",
+         "options": [
+          "Default"
+         ],
+         "default": []
+        },
+        {
+         "type": "info",
+         "title": "You don't have any categories yet."
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Edit",
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "delete_items",
+     "title": "Are you sure?",
+     "text": "Are you sure you want to delete the selected chapters?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "duplicate_manga",
+     "title": "Are you sure?",
+     "text": "You have an entry in your library with the same name.\n\nDo you still wish to continue?",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Show manga"
+        },
+        {
+         "type": "action",
+         "title": "Migrate existing entry"
+        },
+        {
+         "type": "action",
+         "title": "Add anyway"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel"
+     ]
+    },
+    {
+     "id": "migrate_manga",
+     "title": "Select data to include",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "switch",
+         "title": "Chapters",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Categories",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Custom cover",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Delete downloaded",
+         "default": true
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Show manga",
+      "Copy",
+      "Migrate"
+     ]
+    },
+    {
+     "id": "full_cover",
+     "title": "Cover",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Close"
+        },
+        {
+         "type": "action",
+         "title": "Share"
+        },
+        {
+         "type": "action",
+         "title": "Save"
+        },
+        {
+         "type": "action",
+         "title": "Edit cover",
+         "subtitle": "Long-press/menu: Edit, Delete"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Edit",
+      "Delete"
+     ]
+    },
+    {
+     "id": "set_fetch_interval",
+     "title": "Smart update",
+     "text": "New chapters predicted to be released in around 3 days, checking around every 7 days.",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "info",
+         "title": "This manga is either completed, or there is no predicted release date."
+        },
+        {
+         "type": "list",
+         "title": "Custom update frequency:",
+         "options": [
+          "Default",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23",
+          "24",
+          "25",
+          "26",
+          "27",
+          "28"
+         ],
+         "default": "Default"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "set_as_default",
+     "title": "Chapter settings",
+     "text": "Are you sure you want to save these settings as default?",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "switch",
+         "title": "Also apply to all manga in my library",
+         "default": false
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "scanlator_filter",
+     "title": "Exclude scanlators",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "multi",
+         "title": "Scanlators",
+         "options": [
+          "Scanlator A",
+          "Scanlator B"
+         ],
+         "default": []
+        },
+        {
+         "type": "info",
+         "title": "No scanlators found"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Select all",
+      "Reset",
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "tag_menu",
+     "title": "Tag",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Search"
+        },
+        {
+         "type": "action",
+         "title": "Copy to clipboard"
+        }
+       ]
+      }
+     ],
+     "buttons": []
+    },
+    {
+     "id": "chapter_download_menu",
+     "title": "Download",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Start downloading now",
+         "subtitle": "queued/downloading state"
+        },
+        {
+         "type": "action",
+         "title": "Cancel",
+         "subtitle": "queued/downloading state"
+        },
+        {
+         "type": "action",
+         "title": "Delete",
+         "subtitle": "downloaded state"
+        }
+       ]
+      }
+     ],
+     "buttons": []
+    },
+    {
+     "id": "delete_downloads_snackbar",
+     "title": "Delete downloaded chapters?",
+     "text": "Snackbar shown after marking read / removing from library",
+     "groups": [],
+     "buttons": [
+      "Delete"
+     ]
+    },
+    {
+     "id": "add_to_library_snackbar",
+     "title": "Add manga to library?",
+     "text": "Snackbar shown when reading a non-library manga",
+     "groups": [],
+     "buttons": [
+      "Add"
+     ]
+    },
+    {
+     "id": "tracker_update_snackbar",
+     "title": "Update trackers to chapter 12?",
+     "text": "Snackbar; success message: 'Trackers updated to chapter 12'",
+     "groups": [],
+     "buttons": [
+      "OK"
+     ]
+    }
+   ],
+   "empty": "No chapters found",
+   "notes": "PHONE LAYOUT (single LazyColumn under a transparent top bar):\nTOP BAR: back arrow; title = manga title, alpha 0 while header row is visible and fades to 1 once scrolled; background surfaceColorAtElevation(3dp) also fades in on scroll. Actions: Download (icon, opens dropdown 'Next chapter', 'Next 5 chapters', 'Next 10 chapters', 'Next 25 chapters', 'Unread'; hidden for local source), Filter icon (tinted 'active' color when any chapter filter is set; opens Chapter settings sheet). Overflow: Refresh, Edit categories (library only), Migrate (library only), Share (http sources), Settings (configurable source -> Source preferences screen).\nSELECTION MODE TOP BAR: close (X) icon, title = selected count, actions 'Select all' (select-all icon) and 'Select inverse' (flip icon); background fully opaque. Back press clears selection.\n1) INFO BOX: full-width backdrop = cover image, ContentScale.Crop, blur 4dp, alpha 0.2, vertical gradient transparent->background. On top a Row (padding 16dp start/end, top = appbar height + 16dp, spacing 16dp): cover (book ratio 2:3, max width 100dp, rounded, tap -> full cover dialog) aligned top; Column (2dp spacing): title (titleLarge; tap = global search, long-press = copy; 'Unknown title' fallback); row [person icon 16dp] author (titleSmall, secondary alpha; 'Unknown author'; tap = global search); optional row [brush icon] artist if different; row [status icon 16dp] status text (bodyMedium: Ongoing/Completed/Licensed/Publishing finished/Cancelled/On hiatus/Unknown with icons schedule/done-all/attach-money/done/close/pause/block) ' • ' source name (tap = search in that source; red warning icon before it when source is missing/stub).\n2) ACTION ROW: Row padding 16dp start/end 8dp top, 4 equal-weight TextButtons, each a centered column: icon 20dp, 4dp gap, label 12sp. a) 'In library' (filled heart, primary color) / 'Add to library' (outline heart, disabled-alpha grey); long-press = Set categories. b) Next update: hourglass icon; label 'N/A' (null), 'Soon' (0 days) or '3 days'; primary-tinted when user set a custom interval; tap = Smart update interval dialog. c) Tracking: sync icon + 'Tracking' when no trackers, done icon + '1 tracker'/'2 trackers' in primary when tracked; tap = tracking sheet. d) 'WebView' (globe icon; only for http sources; long-press = open in browser).\n3) DESCRIPTION: bodyMedium, secondary alpha, selectable text, padding 16dp horizontal 8dp top; collapsed shows ~3 lines with a 24dp gradient scrim and animated caret (contentDescription 'More'/'Less'); tap toggles. 'No description' placeholder. Expanded by default when opened from a source. GENRE CHIPS below (8dp + 12dp vertical padding): collapsed = single horizontally scrolling LazyRow of small SuggestionChips (bodySmall, 4dp vertical padding, 4dp gaps, 16dp content padding); expanded = FlowRow wrapping. Tapping a chip opens a dropdown: 'Search' (search tag in source), 'Copy to clipboard'.\n4) LIST HEADER: clickable (opens chapter settings sheet) column padding 16dp/4dp: '12 chapters' (titleMedium; 'Chapters' if count unknown); under it in error color bodySmall 'Missing 3 items' when chapter numbers have gaps.\n5) CHAPTER ROWS: Row padding start 16 top 12 end 8 bottom 12, selected = tinted background. Left column (weight 1, 6dp spacing): line 1 = [unread dot: filled circle 8dp primary, only if unread] [bookmark icon filled, primary, sized to text height, only if bookmarked] title (bodyMedium, 1 line ellipsis; 'Chapter 12' when display mode = chapter number, else source name); read chapters drawn at disabled alpha (0.38). line 2 (bodySmall, secondary alpha, or disabled when read): upload date (relative: 'Today', 'Yesterday', '2 days ago' or date) • 'Page 5' progress (disabled alpha, only when partially read) • scanlator. Right: download indicator 48dp touch target: not downloaded = outlined download-circle icon; queued = indeterminate ring; downloading = determinate ring with arrow-down inside; downloaded = filled check-circle; error = error-outline icon. Tapping indicator: not downloaded -> start; queued/downloading -> menu 'Start downloading now'/'Cancel'; downloaded -> menu 'Delete'. Indicator hidden while selecting or for local source. Swipe left/right actions (configurable in settings): toggle read (done / remove-done icon), toggle bookmark, download/cancel/delete; swipe background primaryContainer, threshold 56dp. Long-press selects (range select with subsequent long-press), tap while selecting toggles. MISSING-COUNT divider row between gaps: [divider] 'Missing 3 items' (labelMedium, secondary alpha) [divider].\nFAB: ExtendedFloatingActionButton bottom-end, play icon + 'Start' (nothing read yet) / 'Resume'; hidden when all read or when selecting; collapses to icon-only while scrolling down.\nSELECTION BOTTOM BAR: Surface surfaceContainerHigh, large top corners, row of equal-weight 48dp icon buttons (8dp/12dp padding); only applicable ones appear: Bookmark (bookmark-add), Remove bookmark (bookmark-remove), Mark as read (done-all), Mark as unread (remove-done), Mark previous as read (done-prev; only when exactly 1 selected), Download, Delete (only when some downloaded). Long-press a button expands it (weight 2) and reveals its label for 1s.\nPull-to-refresh fetches chapters + metadata.\nTABLET (isTabletUi): two panels; left scrollable column = info box with cover centered at 65% width and text centered, action row, description expanded; right = chapter list with header. Bottom action bar takes half width aligned end."
+  },
+  {
+   "id": "anime_entry_details",
+   "title": "Anime details",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Download",
+     "icon": "folder-download-symbolic"
+    },
+    {
+     "label": "Filter",
+     "icon": "view-filter-symbolic"
+    }
+   ],
+   "menu": [
+    "Change intro length",
+    "Refresh",
+    "Edit categories",
+    "Migrate",
+    "Share",
+    "Settings"
+   ],
+   "tabs": [],
+   "groups": [],
+   "sheets": [
+    {
+     "id": "episode_settings",
+     "title": "Episode settings",
+     "tabs": [
+      {
+       "title": "Filter",
+       "groups": [
+        {
+         "title": null,
+         "items": [
+          {
+           "type": "tristate",
+           "title": "Downloaded"
+          },
+          {
+           "type": "tristate",
+           "title": "Unseen"
+          },
+          {
+           "type": "tristate",
+           "title": "Bookmarked"
+          },
+          {
+           "type": "tristate",
+           "title": "Fillermarked"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Sort",
+       "groups": [
+        {
+         "title": null,
+         "items": [
+          {
+           "type": "sort",
+           "title": "Sort",
+           "options": [
+            "By source",
+            "By episode number",
+            "By upload date",
+            "Alphabetically"
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Display",
+       "groups": [
+        {
+         "title": null,
+         "items": [
+          {
+           "type": "list",
+           "title": "Display",
+           "options": [
+            "Source title",
+            "Episode number"
+           ],
+           "default": "Source title"
+          },
+          {
+           "type": "switch",
+           "title": "Episode thumbnails",
+           "default": true
+          },
+          {
+           "type": "switch",
+           "title": "Episode summaries",
+           "default": true
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "season_settings",
+     "title": "Season settings",
+     "tabs": [
+      {
+       "title": "Filter",
+       "groups": [
+        {
+         "title": null,
+         "items": [
+          {
+           "type": "tristate",
+           "title": "Downloaded"
+          },
+          {
+           "type": "tristate",
+           "title": "Unseen"
+          },
+          {
+           "type": "tristate",
+           "title": "Started"
+          },
+          {
+           "type": "tristate",
+           "title": "Completed"
+          },
+          {
+           "type": "tristate",
+           "title": "Bookmarked"
+          },
+          {
+           "type": "tristate",
+           "title": "Fillermarked"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Sort",
+       "groups": [
+        {
+         "title": null,
+         "items": [
+          {
+           "type": "sort",
+           "title": "Sort",
+           "options": [
+            "By source",
+            "By season number",
+            "By upload date",
+            "Alphabetically",
+            "Unseen count",
+            "Last seen",
+            "Episode fetch date"
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Display",
+       "groups": [
+        {
+         "title": null,
+         "items": [
+          {
+           "type": "chips",
+           "title": "Display mode",
+           "options": [
+            "Compact grid",
+            "Comfortable grid",
+            "Cover-only grid",
+            "List"
+           ],
+           "default": "Compact grid"
+          },
+          {
+           "type": "slider",
+           "title": "Items per row",
+           "min": 0,
+           "max": 10,
+           "step": 1,
+           "default": 0,
+           "unit": "0 = Auto; shown as 'List size' when mode is List"
+          }
+         ]
+        },
+        {
+         "title": "Overlay",
+         "items": [
+          {
+           "type": "switch",
+           "title": "Downloaded episodes",
+           "default": false
+          },
+          {
+           "type": "switch",
+           "title": "Unseen episodes",
+           "default": false
+          },
+          {
+           "type": "switch",
+           "title": "Local source",
+           "default": false
+          },
+          {
+           "type": "switch",
+           "title": "Language",
+           "default": false
+          },
+          {
+           "type": "switch",
+           "title": "Continue watching button",
+           "default": false
+          }
+         ]
+        },
+        {
+         "title": "Grid display mode",
+         "items": [
+          {
+           "type": "list",
+           "title": "Grid display mode",
+           "options": [
+            "Source title",
+            "Season number"
+           ],
+           "default": "Source title"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "dialogs": [
+    {
+     "id": "download_menu",
+     "title": "Download",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Next episode"
+        },
+        {
+         "type": "action",
+         "title": "Next 5 episodes"
+        },
+        {
+         "type": "action",
+         "title": "Next 10 episodes"
+        },
+        {
+         "type": "action",
+         "title": "Next 25 episodes"
+        },
+        {
+         "type": "action",
+         "title": "Unseen"
+        }
+       ]
+      }
+     ],
+     "buttons": []
+    },
+    {
+     "id": "set_categories",
+     "title": "Set categories",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "multi",
+         "title": "Categories",
+         "options": [
+          "Default"
+         ],
+         "default": []
+        },
+        {
+         "type": "info",
+         "title": "You don't have any categories yet."
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Edit",
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "delete_items",
+     "title": "Are you sure?",
+     "text": "Are you sure you want to delete the selected episodes?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "duplicate_anime",
+     "title": "Are you sure?",
+     "text": "You have an entry in your library with the same name.\n\nDo you still wish to continue?",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Show anime"
+        },
+        {
+         "type": "action",
+         "title": "Migrate existing entry"
+        },
+        {
+         "type": "action",
+         "title": "Add anyway"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel"
+     ]
+    },
+    {
+     "id": "migrate_anime",
+     "title": "Select data to include",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "switch",
+         "title": "Episodes",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Categories",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Custom cover",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Custom background",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Delete downloaded",
+         "default": true
+        }
+       ]
+      },
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "info",
+         "title": "Unable to migrate season to episode"
+        },
+        {
+         "type": "info",
+         "title": "Unable to migrate episode to season, select season to continue"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Show anime",
+      "Show seasons",
+      "Copy",
+      "Migrate"
+     ]
+    },
+    {
+     "id": "full_images",
+     "title": "Cover",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Close"
+        },
+        {
+         "type": "action",
+         "title": "Share"
+        },
+        {
+         "type": "action",
+         "title": "Save"
+        },
+        {
+         "type": "action",
+         "title": "Edit cover",
+         "subtitle": "On page 2 (background) the button reads 'Edit background'; menu: Edit, Delete"
+        },
+        {
+         "type": "action",
+         "title": "Edit background"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Edit",
+      "Delete"
+     ]
+    },
+    {
+     "id": "set_fetch_interval",
+     "title": "Smart update",
+     "text": "New episodes predicted to be released in around 3 days, checking around every 7 days.",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "info",
+         "title": "This anime is either completed, or there is no predicted release date."
+        },
+        {
+         "type": "list",
+         "title": "Custom update frequency:",
+         "options": [
+          "Default",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23",
+          "24",
+          "25",
+          "26",
+          "27",
+          "28"
+         ],
+         "default": "Default"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "skip_intro_length",
+     "title": "Skip intro length",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "list",
+         "title": "Skip intro length",
+         "options": [
+          "0s",
+          "1s",
+          "2s",
+          "3s",
+          "4s",
+          "5s",
+          "6s",
+          "7s",
+          "8s",
+          "9s",
+          "10s",
+          "11s",
+          "12s",
+          "13s",
+          "14s",
+          "15s",
+          "16s",
+          "17s",
+          "18s",
+          "19s",
+          "20s",
+          "21s",
+          "22s",
+          "23s",
+          "24s",
+          "25s",
+          "26s",
+          "27s",
+          "28s",
+          "29s",
+          "30s",
+          "31s",
+          "32s",
+          "33s",
+          "34s",
+          "35s",
+          "36s",
+          "37s",
+          "38s",
+          "39s",
+          "40s",
+          "41s",
+          "42s",
+          "43s",
+          "44s",
+          "45s",
+          "46s",
+          "47s",
+          "48s",
+          "49s",
+          "50s",
+          "51s",
+          "52s",
+          "53s",
+          "54s",
+          "55s",
+          "56s",
+          "57s",
+          "58s",
+          "59s",
+          "60s",
+          "61s",
+          "62s",
+          "63s",
+          "64s",
+          "65s",
+          "66s",
+          "67s",
+          "68s",
+          "69s",
+          "70s",
+          "71s",
+          "72s",
+          "73s",
+          "74s",
+          "75s",
+          "76s",
+          "77s",
+          "78s",
+          "79s",
+          "80s",
+          "81s",
+          "82s",
+          "83s",
+          "84s",
+          "85s",
+          "86s",
+          "87s",
+          "88s",
+          "89s",
+          "90s",
+          "91s",
+          "92s",
+          "93s",
+          "94s",
+          "95s",
+          "96s",
+          "97s",
+          "98s",
+          "99s",
+          "100s",
+          "101s",
+          "102s",
+          "103s",
+          "104s",
+          "105s",
+          "106s",
+          "107s",
+          "108s",
+          "109s",
+          "110s",
+          "111s",
+          "112s",
+          "113s",
+          "114s",
+          "115s",
+          "116s",
+          "117s",
+          "118s",
+          "119s",
+          "120s",
+          "121s",
+          "122s",
+          "123s",
+          "124s",
+          "125s",
+          "126s",
+          "127s",
+          "128s",
+          "129s",
+          "130s",
+          "131s",
+          "132s",
+          "133s",
+          "134s",
+          "135s",
+          "136s",
+          "137s",
+          "138s",
+          "139s",
+          "140s",
+          "141s",
+          "142s",
+          "143s",
+          "144s",
+          "145s",
+          "146s",
+          "147s",
+          "148s",
+          "149s",
+          "150s",
+          "151s",
+          "152s",
+          "153s",
+          "154s",
+          "155s",
+          "156s",
+          "157s",
+          "158s",
+          "159s",
+          "160s",
+          "161s",
+          "162s",
+          "163s",
+          "164s",
+          "165s",
+          "166s",
+          "167s",
+          "168s",
+          "169s",
+          "170s",
+          "171s",
+          "172s",
+          "173s",
+          "174s",
+          "175s",
+          "176s",
+          "177s",
+          "178s",
+          "179s",
+          "180s",
+          "181s",
+          "182s",
+          "183s",
+          "184s",
+          "185s",
+          "186s",
+          "187s",
+          "188s",
+          "189s",
+          "190s",
+          "191s",
+          "192s",
+          "193s",
+          "194s",
+          "195s",
+          "196s",
+          "197s",
+          "198s",
+          "199s",
+          "200s",
+          "201s",
+          "202s",
+          "203s",
+          "204s",
+          "205s",
+          "206s",
+          "207s",
+          "208s",
+          "209s",
+          "210s",
+          "211s",
+          "212s",
+          "213s",
+          "214s",
+          "215s",
+          "216s",
+          "217s",
+          "218s",
+          "219s",
+          "220s",
+          "221s",
+          "222s",
+          "223s",
+          "224s",
+          "225s",
+          "226s",
+          "227s",
+          "228s",
+          "229s",
+          "230s",
+          "231s",
+          "232s",
+          "233s",
+          "234s",
+          "235s",
+          "236s",
+          "237s",
+          "238s",
+          "239s",
+          "240s",
+          "241s",
+          "242s",
+          "243s",
+          "244s",
+          "245s",
+          "246s",
+          "247s",
+          "248s",
+          "249s",
+          "250s",
+          "251s",
+          "252s",
+          "253s",
+          "254s",
+          "255s"
+         ],
+         "default": "85s"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "set_as_default",
+     "title": "Episode settings",
+     "text": "Are you sure you want to save these settings as default?",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "switch",
+         "title": "Also apply to all anime in my library",
+         "default": false
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "set_as_default_season",
+     "title": "Season settings",
+     "text": "Are you sure you want to save these settings as default?",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "switch",
+         "title": "Also apply to all anime in my library",
+         "default": false
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "episode_options",
+     "title": "Episode 1",
+     "text": "Choose video quality:",
+     "groups": [
+      {
+       "title": "Hoster (expandable rows, e.g. 'Server 1' with dropdown arrow)",
+       "items": [
+        {
+         "type": "list",
+         "title": "Video quality",
+         "options": [
+          "1080p",
+          "720p",
+          "480p"
+         ],
+         "default": "1080p"
+        }
+       ]
+      },
+      {
+       "title": "Quality options (shown for the tapped video)",
+       "items": [
+        {
+         "type": "action",
+         "title": "Copy"
+        },
+        {
+         "type": "action",
+         "title": "Use internal downloader"
+        },
+        {
+         "type": "action",
+         "title": "Use external downloader"
+        },
+        {
+         "type": "action",
+         "title": "Play externally"
+        },
+        {
+         "type": "action",
+         "title": "Play internally"
+        }
+       ]
+      }
+     ],
+     "buttons": []
+    },
+    {
+     "id": "tag_menu",
+     "title": "Tag",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Search"
+        },
+        {
+         "type": "action",
+         "title": "Copy to clipboard"
+        }
+       ]
+      }
+     ],
+     "buttons": []
+    },
+    {
+     "id": "episode_download_menu",
+     "title": "Download",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Start downloading now",
+         "subtitle": "queued/downloading state"
+        },
+        {
+         "type": "action",
+         "title": "Cancel",
+         "subtitle": "queued/downloading state"
+        },
+        {
+         "type": "action",
+         "title": "Delete",
+         "subtitle": "downloaded state"
+        }
+       ]
+      }
+     ],
+     "buttons": []
+    },
+    {
+     "id": "delete_downloads_snackbar",
+     "title": "Delete downloaded episodes?",
+     "text": "Snackbar",
+     "groups": [],
+     "buttons": [
+      "Delete"
+     ]
+    },
+    {
+     "id": "add_to_library_snackbar",
+     "title": "Add anime to library?",
+     "text": "Snackbar shown when watching a non-library anime",
+     "groups": [],
+     "buttons": [
+      "Add"
+     ]
+    },
+    {
+     "id": "tracker_update_snackbar",
+     "title": "Update trackers to episode 12?",
+     "text": "Snackbar; success: 'Trackers updated to episode 12'",
+     "groups": [],
+     "buttons": [
+      "OK"
+     ]
+    }
+   ],
+   "empty": "No episodes found",
+   "notes": "Same skeleton as manga_entry_details (transparent fading top bar, info box, action row, description, list header, rows, FAB, selection bottom bar, pull-to-refresh) with these differences. Content is a LazyVerticalGrid (14dp grid padding) so seasons can render as a grid; non-season items span the full width.\nTOP BAR overflow adds 'Change intro length' (first; opens Skip intro length wheel picker 0s..255s). Settings item -> anime source preferences.\nINFO BOX: backdrop uses the anime background image (falls back to cover). Author row shows the studio/author (person icon), artist row (brush icon) when different. Extra status 'Upcoming' (calendar-clock icon).\nACTION ROW identical: In library / Add to library, next-update days, Tracking (hidden when no trackers are logged in), WebView.\nDESCRIPTION: below genre chips, RELATED ANIME rows (when source provides relations): small groups packed into rows of up to N slots, each group = relation name (titleSmall) above its cover cards; larger groups get their own heading + horizontal LazyRow of cover cards (comfortable/compact/cover-only grid style per library display mode). Tap opens anime, long-press adds to library.\nLIST HEADER: '12 episodes' or '3 seasons' (anime with fetchType = Seasons), 'Missing N items' warning. Tap opens Episode settings or Season settings sheet respectively.\nSEASONS (fetchType Seasons): cards in the chosen Season display mode (compact/comfortable/cover-only grid with Items per row, or list with List size): cover, title ('Season 2' when display = season number), badges top-start = downloaded count + unseen count, top-end = language/local badge, optional 'continue watching' play button overlay bottom-end. Tap opens that season's anime screen.\nNEXT EPISODE AIRING row (before episodes, if source gives airing time and setting enabled and status != completed): primary-colored text at secondary alpha, line 1 'Episode 13', line 2 live countdown 'Airing in 02d 05h 13m 09s'.\nEPISODE ROWS: padding start 16 top 12 end 8 bottom 12. Simple form (no preview, no summary): title line (bodyMedium, disabled alpha when seen) then info line; right side = [bookmark icon primary] + download indicator. Info line (bodySmall): [label icon + 'Filler' in tertiary color if fillermarked] date • watch progress '12:34/24:00' (disabled alpha, only partially seen) • scanlator. No unread dot. Rich form (episode thumbnails and/or summaries enabled and available): Row [thumbnail 16:9, width = 40% screen max 250dp, 8dp end padding] [Column: title (2 lines when thumbnail present), summary text 10sp, 3 lines min, tap to expand]; below a full-width row with the info line and bookmark+download icons at end. Swipe actions add toggle fillermark (new-label / label-off icons). Tapping an episode plays it (internal or external player per preference). Long-press selects.\nDOWNLOAD (indicator or toolbar) may open the 'episode_options' quality dialog when the source has multiple hosters: episode title (bold titleSmall), italic 'Choose video quality:', expandable hoster rows each listing qualities; tapping a quality reveals Copy / Use internal downloader / Use external downloader / Play externally / Play internally rows with icons.\nSELECTION BOTTOM BAR adds: Fillermark episode (new-label icon) / Remove fillermark (label-off), labels 'Bookmark episode', 'Remove bookmark', 'Mark as seen', 'Mark as unseen', 'Mark previous as seen', and with exactly one selected 'Play externally' (open-in-new icon) or 'Play internally' (input icon) depending on the always-use-external-player preference.\nFAB: play icon + 'Start'/'Resume' (based on seen state)."
+  },
+  {
+   "id": "tracking_sheet",
+   "title": "Tracking",
+   "kind": "custom",
+   "toolbar": [],
+   "menu": [
+    "Open in browser",
+    "Copy link",
+    "Track privately",
+    "Track publicly",
+    "Remove"
+   ],
+   "tabs": [],
+   "groups": [
+    {
+     "title": "Tracker row (one per logged-in tracker)",
+     "items": [
+      {
+       "type": "action",
+       "title": "Add tracking",
+       "subtitle": "Shown for trackers without a binding; opens tracker search"
+      },
+      {
+       "type": "action",
+       "title": "Status",
+       "subtitle": "Opens status picker"
+      },
+      {
+       "type": "action",
+       "title": "Chapters",
+       "subtitle": "Shows '12 / 24'; opens number wheel; 'Episodes' for anime"
+      },
+      {
+       "type": "action",
+       "title": "Score",
+       "subtitle": "Placeholder text when unset; only if tracker supports scoring"
+      },
+      {
+       "type": "action",
+       "title": "Start date",
+       "subtitle": "Only if tracker supports dates"
+      },
+      {
+       "type": "action",
+       "title": "Finish date",
+       "subtitle": "Only if tracker supports dates"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "status",
+     "title": "Status",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "list",
+         "title": "Status (manga)",
+         "options": [
+          "Reading",
+          "Completed",
+          "On hold",
+          "Dropped",
+          "Plan to read",
+          "Rereading"
+         ],
+         "default": "Reading"
+        },
+        {
+         "type": "list",
+         "title": "Status (anime)",
+         "options": [
+          "Watching",
+          "Completed",
+          "On hold",
+          "Dropped",
+          "Plan to watch",
+          "Rewatching"
+         ],
+         "default": "Watching"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "chapters",
+     "title": "Chapters",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "list",
+         "title": "Chapters",
+         "options": [
+          "0",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23",
+          "24"
+         ],
+         "default": "0"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "episodes",
+     "title": "Episodes",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "list",
+         "title": "Episodes",
+         "options": [
+          "0",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23",
+          "24"
+         ],
+         "default": "0"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "score",
+     "title": "Score",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "list",
+         "title": "Score",
+         "options": [
+          "-",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10"
+         ],
+         "default": "-"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "start_date",
+     "title": "Start date",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Date picker"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Remove",
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "finish_date",
+     "title": "Finish date",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Date picker"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Remove",
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "remove_date",
+     "title": "Remove date?",
+     "text": "This will remove your previously selected start date from AniList",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "Remove"
+     ]
+    },
+    {
+     "id": "remove_tracking",
+     "title": "Remove AniList tracking?",
+     "text": "This will remove the tracking locally.",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "switch",
+         "title": "Also remove from AniList",
+         "default": false
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "notes": "Bottom sheet (AdaptiveSheet) opened from the Tracking action button. Column, padding 16dp, 24dp spacing between trackers, scrollable.\nBOUND TRACKER: header Row: tracker logo tile (48dp rounded square in tracker brand color; tap = open in browser, long-press = copy link; small primary badge with eye-off icon when 'Tracked privately') | title (titleMedium, 1 line, 48dp tall, weight 1, padding start 16; tap = re-search, long-press = copy title) | vertical divider | overflow (more-vert) menu: Open in browser, Copy link, Track privately/Track publicly (if supported), Remove. Below (12dp top): rounded card surfaceContainerHighest padding 8dp containing a grid of cells divided by thin dividers: row 1 = Status | '12 / 24' chapters (or episodes) | Score (only if tracker supports scoring); row 2 (if dates supported) = Start date | Finish date. Each cell: centered bodyMedium, 12dp padding, unset values show placeholder at 50% alpha. Tapping a cell opens its picker dialog.\nUNBOUND TRACKER: Row [logo] [full-width TextButton 'Add tracking'].\nPickers: Status = radio list in a scrolling column; Chapters/Episodes = wheel number picker (0..total or 0..10000); Score = wheel text picker (options come from the tracker, e.g. 0-10, 0-100, stars, smileys); Dates = Material date picker with Remove/Cancel/OK. Tracker error snackbar: 'AniList error: message'."
+  },
+  {
+   "id": "tracker_search",
+   "title": "Track search",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Clear",
+     "icon": "edit-clear-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": "Result card",
+     "items": [
+      {
+       "type": "info",
+       "title": "Type"
+      },
+      {
+       "type": "info",
+       "title": "Started"
+      },
+      {
+       "type": "info",
+       "title": "Status"
+      },
+      {
+       "type": "info",
+       "title": "Score"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "result_menu",
+     "title": "Result",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Copy to clipboard"
+        },
+        {
+         "type": "action",
+         "title": "Open in browser"
+        }
+       ]
+      }
+     ],
+     "buttons": []
+    }
+   ],
+   "empty": "No results found",
+   "notes": "Full-screen dialog. TOP APP BAR: back arrow, inline search text field (placeholder 'Search…', prefilled with entry title, IME search submits) and a clear (X) icon when text present.\nBODY: loading spinner, 'No results found', 'Unknown error' or error message, else LazyColumn (12dp vertical padding & spacing) of result cards: card = rounded 16dp, surface background, 12dp horizontal margin, 12dp inner padding; selected card gets a 2dp outline border and a primary check-circle icon at top-end. Content Row: cover (book ratio, 96dp tall), 12dp gap, Column: title (titleMedium, 2 lines, 28dp end padding), authors/artists joined (bodySmall secondary, 1 line), then detail lines 'Type: Manga', 'Started: 2020-01-01', 'Status: Publishing', 'Score: 8.4' where label is titleSmall and value bodyMedium. Below the row: description (bodySmall, secondary, 4 lines). Long-press card = menu (Copy to clipboard, Open in browser).\nBOTTOM BAR (animated in when a result is selected): Row padding 8dp: elevated Button 'Track' (weight 1) and, if tracker supports private tracking, an elevated icon Button with eye-off icon ('Track privately')."
+  },
+  {
+   "id": "browse",
+   "title": "Browse",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Global search",
+     "icon": "system-search-symbolic"
+    },
+    {
+     "label": "Filter",
+     "icon": "view-filter-symbolic"
+    },
+    {
+     "label": "Search",
+     "icon": "edit-find-symbolic"
+    },
+    {
+     "label": "Source migration guide",
+     "icon": "help-about-symbolic"
+    }
+   ],
+   "menu": [
+    "Filter",
+    "Extension repos",
+    "Extension stores"
+   ],
+   "tabs": [
+    "Anime Sources",
+    "Manga Sources",
+    "Anime Extensions",
+    "Manga Extensions",
+    "Migrate Anime",
+    "Migrate"
+   ],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "source_options",
+     "title": "Source name",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Pin",
+         "subtitle": "'Unpin' when pinned"
+        },
+        {
+         "type": "action",
+         "title": "Disable",
+         "subtitle": "hidden for local source"
+        },
+        {
+         "type": "action",
+         "title": "Exclude from data saver",
+         "subtitle": "manga only; 'Stop excluding from data saver' when excluded"
+        }
+       ]
+      }
+     ],
+     "buttons": []
+    },
+    {
+     "id": "extension_trust",
+     "title": "Untrusted extension",
+     "text": "Malicious extensions can read any stored login credentials or execute arbitrary code.\n\nBy trusting this extension, you accept these risks.",
+     "groups": [],
+     "buttons": [
+      "Uninstall",
+      "Trust"
+     ]
+    },
+    {
+     "id": "remove_private_extension",
+     "title": "Remove Extension?",
+     "text": "Do you really want to remove \"%s\" extension?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "Remove"
+     ]
+    }
+   ],
+   "empty": "No source found",
+   "notes": "Bottom-nav tab 'Browse' (TabbedScreen). Title 'Browse'; scrollable primary tab row with 6 tabs in this order: 'Anime Sources', 'Manga Sources', 'Anime Extensions', 'Manga Extensions' (extension tabs show a numeric badge = pending updates), 'Migrate Anime', 'Migrate'. Toolbar actions change per tab.\nSOURCES TABS (anime/manga): actions Global search (travel-explore icon) and Filter (filter-list icon -> Sources filter screen). LazyColumn of sections. Section header text (header typography, padding 16dp/8dp) in order: 'Last used' (single most recent source), 'Pinned', then one section per language sorted by display name ('Multi' for all-language sources, 'Other' for unknown, 'Local source'). Source row (BaseBrowseItem: padding 16dp/8dp, vertically centered): source icon (40dp, extension icon; red warning icon if missing) | column weight 1, padding 16dp: name (bodyMedium) + language (bodySmall, secondary alpha) | 'Latest' TextButton in primary color (only if source supports latest; opens Browse source in Latest) | pin IconButton (filled push-pin primary when pinned, outlined secondary alpha otherwise). Tap row = browse Popular; long-press = source options dialog. Empty: 'No source found'. Snackbar on failure: 'InternalError: Check crash logs for further information'.\nEXTENSIONS TABS: search icon in toolbar turns title into a search field (filters by name). Overflow: 'Filter' (-> Extension filter languages screen) and 'Extension repos' (manga) / 'Extension stores' (anime). Pull-to-refresh checks for updates. Optional warning banner at top: 'Permissions are needed to install extensions. Tap here to grant.' Sections: 'Updates pending' header with a filled Button 'Update all' at the end, 'Installed' (installed + untrusted), then available extensions grouped under language headers. Extension row: 40dp icon (circular progress ring around it while pending/downloading/installing, icon shrinks with 8dp padding) | column: name (bodyMedium) + FlowRow bodySmall secondary: language (installed only), version name, red uppercase warning 'UNTRUSTED' / 'ORPHANED' / '18+', and ' • Pending'/'Downloading'/'Installing' during install | trailing icon buttons: in progress = Cancel (X); error = Retry (refresh); installed = Settings (gear -> extension details) + Update (get-app icon) when update available; untrusted = Trust (verified-user icon -> trust dialog); available = 'Open in WebView' (globe) + Install (get-app). Tap: available = install, installed = details, untrusted = trust dialog. Long-press: available = install, installed = uninstall. Empty: 'Well, this is awkward' (or 'No results found' when searching) with action button 'Extension repos'.\nMIGRATE TABS: action 'Source migration guide' (help icon, opens web guide). Empty: 'Your library is empty'. Sticky header row: 'Select a source to migrate from' (header style, weight 1) + sort-mode IconButton (sort-by-alpha icon 'Alphabetically' / numbers icon 'Total entries') + direction IconButton (arrow-up 'Ascending' / arrow-down 'Descending'). Rows: source icon | name (or id) + language (secondary) and red 'Not installed' for stub sources | count badge pill (number of library entries). Tap -> migrate entries screen; long-press copies source id."
+  },
+  {
+   "id": "extension_details",
+   "title": "Extension info",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Open source repo",
+     "icon": "external-link-symbolic"
+    }
+   ],
+   "menu": [
+    "Enable all",
+    "Disable all",
+    "Clear cookies"
+   ],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "info",
+       "title": "Version"
+      },
+      {
+       "type": "info",
+       "title": "Language"
+      },
+      {
+       "type": "info",
+       "title": "Age rating"
+      },
+      {
+       "type": "action",
+       "title": "Uninstall"
+      },
+      {
+       "type": "action",
+       "title": "App info"
+      },
+      {
+       "type": "switch",
+       "title": "Incognito mode",
+       "subtitle": "Pause reading history for extension",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Sources",
+     "items": [
+      {
+       "type": "switch",
+       "title": "English",
+       "subtitle": "Per-source enable switch; gear button opens Source preferences when configurable",
+       "default": true
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "nsfw_warning",
+     "title": "",
+     "text": "Sources from this extension may contain NSFW (18+) content",
+     "groups": [],
+     "buttons": [
+      "OK"
+     ]
+    }
+   ],
+   "empty": "Well, this is awkward",
+   "notes": "Pushed from an installed extension row. Top bar: back, title 'Extension info', action 'Open source repo' (launch icon, only when repo URL known), overflow Enable all / Disable all / Clear cookies.\nLazyColumn: optional red WarningBanner 'This extension is not associated with any store. It will not receive updates, may not function properly, and can cause issues with the app. Uninstalling it is recommended.' (orphaned). HEADER: centered column (padding 16dp, tap copies debug info): extension icon 112dp, name (headlineSmall, centered), package name stripped of 'eu.kanade.tachiyomi.extension.' (bodySmall). Info row (SpaceEvenly, 32dp horizontal padding): stat columns separated by 20dp-tall vertical dividers, each = primary text bodyLarge over secondary text bodyMedium 50% alpha: '1.4.12' / 'Version', 'English' / 'Language', and if NSFW '18+' in error color / 'Age rating ⓘ' (tap -> NSFW warning dialog). Buttons row (16dp padding, 16dp gap): OutlinedButton 'Uninstall' (weight 1) and filled Button 'App info' (weight 1, only for shared/system-installed extensions). Preference row with glasses icon: 'Incognito mode' / 'Pause reading history for extension' + Switch. Divider. Then one preference row per source: title = language name (or source name when multiple sources share a language), trailing [gear IconButton 'Settings' if configurable] + Switch (enabled). Tap row toggles enabled."
+  },
+  {
+   "id": "source_preferences",
+   "title": "Source settings",
+   "kind": "settings",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "info",
+       "title": "Preferences are defined by the extension (EditTextPreference, ListPreference, MultiSelectListPreference, SwitchPreference, CheckBoxPreference)"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Top bar: back + title = source display name (e.g. 'MangaDex (EN)'). Body is a native PreferenceFragment populated by the extension's setupPreferenceScreen: standard preference rows (title + summary) — text inputs open edit dialogs, lists open single-choice dialogs, multi-select lists open checkbox dialogs, switches/checkboxes toggle inline. Same screen for anime and manga sources."
+  },
+  {
+   "id": "extension_filter",
+   "title": "Extensions",
+   "kind": "settings",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "switch",
+       "title": "English",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Japanese",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Multi",
+       "default": true
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "empty": "Well, this is awkward",
+   "notes": "Top bar back + 'Extensions'. LazyColumn of SwitchPreference rows, one per extension language (display name), checked = language enabled for the extension list. Same for anime and manga."
+  },
+  {
+   "id": "sources_filter",
+   "title": "Sources",
+   "kind": "settings",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "switch",
+       "title": "English",
+       "subtitle": "Language header switch; when on, its sources are listed below",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "MangaDex",
+       "subtitle": "Source row: icon + name + trailing checkbox (enabled)",
+       "default": true
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "empty": "No installed source found",
+   "notes": "Opened from Sources tab Filter action. Top bar back + 'Sources'. FastScroll LazyColumn: for each language a SwitchPreference header (language display name); if enabled, followed by source rows (BaseBrowseItem: 40dp icon, name bodyMedium, trailing Checkbox = source enabled; tap toggles)."
+  },
+  {
+   "id": "extension_repos",
+   "title": "Extension repos",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Refresh",
+     "icon": "view-refresh-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "add_repo",
+     "title": "Add repo",
+     "text": "Add additional repos to Aniyomi. This should be a URL that ends with \"index.min.json\".",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "text",
+         "title": "Repo URL",
+         "subtitle": "*required; error 'This repo already exists!'"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "Add"
+     ]
+    },
+    {
+     "id": "delete_repo",
+     "title": "Delete repo",
+     "text": "Do you wish to delete the repo \"%s\"?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "repo_conflict",
+     "title": "Signing Key Fingerprint Already Exists",
+     "text": "Repository %1$s has the same Signing Key Fingerprint as %2$s.\nIf this is expected, %2$s will be replaced, otherwise contact your repo maintainer.",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "Replace"
+     ]
+    },
+    {
+     "id": "confirm_add_repo",
+     "title": "Add repo",
+     "text": "Do you wish to add the repo \"%s\"?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "add_store",
+     "title": "Add extension store",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "text",
+         "title": "Store index URL",
+         "subtitle": "*required; 'This extension store already exists'; 'Processing…' while validating"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "Add"
+     ]
+    },
+    {
+     "id": "delete_store",
+     "title": "Remove extension store",
+     "text": "Do you wish to remove the extension store \"%1$s\" (%2$s)?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "store_deeplink",
+     "title": "Add extension store",
+     "text": "Do you wish to add the extension store below?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "Add"
+     ]
+    }
+   ],
+   "empty": "You have no repos set.",
+   "notes": "Two variants: MANGA 'Extension repos' (empty 'You have no repos set.') and ANIME 'Extension stores' (empty 'You haven't added an extension store yet'). Top bar: back, title, Refresh icon action. Extended FAB bottom-end: plus icon + 'Add' (opens add dialog). List of ElevatedCards (16dp horizontal padding, 8dp spacing): Row 1 (padding 16dp top/start): label icon + repo name / base URL (titleMedium); Row 2 aligned end: icon buttons Open in browser (open-in-new / globe), [Discord icon for anime stores when provided], Copy to clipboard, Delete."
+  },
+  {
+   "id": "migrate_entries",
+   "title": "Source name",
+   "kind": "custom",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [],
+   "empty": "Well, this is awkward",
+   "notes": "Step 2 of migration, pushed from a Migrate tab source row. Top bar: back + title = source name. FastScroll LazyColumn of library entries from that source; row height 76dp, padding 16dp horizontal 3dp vertical: cover thumbnail (book ratio, full row height, tap opens the entry) + title (bodyMedium, padding start 16dp). Tap row -> migrate search screen (global search seeded with the title). Same for anime."
+  },
+  {
+   "id": "migrate_search",
+   "title": "Migrate search",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Close",
+     "icon": "window-close-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "migrate_manga",
+     "title": "Select data to include",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "switch",
+         "title": "Chapters",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Categories",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Custom cover",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Delete downloaded",
+         "default": true
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Show manga",
+      "Copy",
+      "Migrate"
+     ]
+    },
+    {
+     "id": "migrate_anime",
+     "title": "Select data to include",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "switch",
+         "title": "Episodes",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Categories",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Custom cover",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Custom background",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Delete downloaded",
+         "default": true
+        }
+       ]
+      },
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "info",
+         "title": "Unable to migrate season to episode"
+        },
+        {
+         "type": "info",
+         "title": "Unable to migrate episode to season, select season to continue"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Show anime",
+      "Show seasons",
+      "Copy",
+      "Migrate"
+     ]
+    }
+   ],
+   "notes": "Step 3: global search across sources using the same layout as global_search (search toolbar, chips 'Pinned' / 'All' | 'Has results', progress bar). The current (old) source's result block is prefixed '▶ ' in its title. Tap a result card -> 'Select data to include' migrate dialog (checkboxes Chapters/Episodes, Categories, Custom cover, Custom background (anime), Delete downloaded; buttons Show manga/anime, [Show seasons for anime with seasons], Copy, Migrate). Anime: if fetch types differ, the checkboxes are replaced by the message 'Unable to migrate season to episode' / 'Unable to migrate episode to season, select season to continue' and Copy/Migrate are hidden. While migrating a full-screen loading overlay (background 70% alpha) is shown. Long-press opens entry details. Tapping a source header arrow -> migrate_source_search."
+  },
+  {
+   "id": "migrate_source_search",
+   "title": "Source search",
+   "kind": "custom",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "filter_sheet",
+     "title": "Filter",
+     "groups": [],
+     "buttons": [
+      "Reset",
+      "Filter"
+     ]
+    }
+   ],
+   "notes": "Search inside one source while migrating. Top bar = SearchToolbar (search field prefilled with query, close X pops). Extended FAB 'Filter' (filter-list icon) shown when the source has filters -> filter sheet. Body = browse_source content grid/list. Tap = migrate dialog, long-press = open details."
+  },
+  {
+   "id": "migrate_season_select",
+   "title": "Anime title",
+   "kind": "custom",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Anime-only: shown via 'Show seasons' in the migrate dialog when the target anime has seasons. Top bar back + anime title. Body = browse_source style grid of season cards; tap a season opens the migrate dialog for that season, long-press opens its details."
+  },
+  {
+   "id": "browse_source",
+   "title": "Source name",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    },
+    {
+     "label": "Display mode",
+     "icon": "view-grid-symbolic"
+    }
+   ],
+   "menu": [
+    "Open in WebView",
+    "Help",
+    "Settings"
+   ],
+   "tabs": [],
+   "groups": [],
+   "sheets": [
+    {
+     "id": "filter_sheet",
+     "title": "Filter",
+     "tabs": [
+      {
+       "title": "Filter",
+       "groups": [
+        {
+         "title": null,
+         "items": [
+          {
+           "type": "info",
+           "title": "Header (section heading)"
+          },
+          {
+           "type": "info",
+           "title": "Separator (divider)"
+          },
+          {
+           "type": "switch",
+           "title": "CheckBox filter",
+           "default": false
+          },
+          {
+           "type": "tristate",
+           "title": "TriState filter (include / exclude / ignore)"
+          },
+          {
+           "type": "text",
+           "title": "Text filter"
+          },
+          {
+           "type": "list",
+           "title": "Select filter",
+           "options": [
+            "Option 1",
+            "Option 2"
+           ],
+           "default": "Option 1"
+          },
+          {
+           "type": "sort",
+           "title": "Sort filter (collapsible)",
+           "options": [
+            "Popularity",
+            "Latest",
+            "Title"
+           ]
+          },
+          {
+           "type": "action",
+           "title": "Group filter (collapsible, contains nested filters)"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "dialogs": [
+    {
+     "id": "display_mode",
+     "title": "Display mode",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "list",
+         "title": "Display mode",
+         "options": [
+          "Comfortable grid",
+          "Compact grid",
+          "List"
+         ],
+         "default": "Compact grid"
+        }
+       ]
+      }
+     ],
+     "buttons": []
+    },
+    {
+     "id": "remove_from_library",
+     "title": "Are you sure?",
+     "text": "You are about to remove \"%s\" from your library",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "Remove"
+     ]
+    },
+    {
+     "id": "duplicate_manga",
+     "title": "Are you sure?",
+     "text": "You have an entry in your library with the same name.\n\nDo you still wish to continue?",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "action",
+         "title": "Show manga"
+        },
+        {
+         "type": "action",
+         "title": "Migrate existing entry"
+        },
+        {
+         "type": "action",
+         "title": "Add anyway"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel"
+     ]
+    },
+    {
+     "id": "migrate_manga",
+     "title": "Select data to include",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "switch",
+         "title": "Chapters",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Categories",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Custom cover",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Delete downloaded",
+         "default": true
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Show manga",
+      "Copy",
+      "Migrate"
+     ]
+    },
+    {
+     "id": "set_categories",
+     "title": "Set categories",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "multi",
+         "title": "Categories",
+         "options": [
+          "Default"
+         ],
+         "default": []
+        },
+        {
+         "type": "info",
+         "title": "You don't have any categories yet."
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Edit",
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "empty": "No results found",
+   "notes": "TOP: SearchToolbar: back arrow, title = source name; search icon expands to text field (IME search runs query). Actions: 'Display mode' icon (view-list icon when List, view-module otherwise) opening a dropdown of radio items 'Comfortable grid', 'Compact grid', 'List'; overflow 'Open in WebView' (non-local) or 'Help' (local source) and 'Settings' (configurable sources). Under the toolbar a horizontally scrolling row of FilterChips (8dp padding/spacing): 'Popular' (favorite heart icon), 'Latest' (new-releases icon, only if supported), 'Filter' (filter-list icon, only if source has filters; selected when a search/filter is active; opens filter sheet). Thin divider below.\nBODY (paged, infinite scroll): Comfortable grid = cover cards with title below (2 lines), Compact grid = title overlaid on cover bottom gradient, List = rows with small cover + title. Columns from library 'items per row' setting (adaptive when 0). Entries already in library show an 'in library' badge (collections-bookmark icon) at top-start and the cover is dimmed. Bottom loading spinner while appending. Tap opens entry details; long-press: in library -> 'Are you sure?' remove dialog; duplicate found -> duplicate dialog; else adds to library (category dialog if categories exist) with haptic.\nERRORS: if nothing loaded, EmptyScreen with error text and action buttons 'Retry' (refresh), 'Open in WebView' (globe), 'Help'; local source shows 'Local source guide'. If pages loaded, snackbar error with 'Retry' action. Missing source: top bar with name, body 'Source not installed: %1$s'.\nFILTER SHEET (AdaptiveSheet): sticky header row: 'Reset' TextButton (primary) left, spacer, filled 'Filter' Button right; divider; then the source's filter list rendered by type (heading, divider, checkbox row, tri-state checkbox row, text field, dropdown select, collapsible sort with asc/desc arrows, collapsible group). Same screen for anime sources."
+  },
+  {
+   "id": "global_search",
+   "title": "Global search",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Close",
+     "icon": "window-close-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": "Filter chips",
+     "items": [
+      {
+       "type": "chips",
+       "title": "Sources",
+       "options": [
+        "Pinned",
+        "All"
+       ],
+       "default": "All"
+      },
+      {
+       "type": "switch",
+       "title": "Has results",
+       "default": false
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "TOP (surface background): SearchToolbar with search field (back arrow / close X pops; IME search runs). Thin LinearProgressIndicator pinned to the toolbar bottom while sources are still searching (progress/total). Row of FilterChips (horizontal scroll, 8dp): 'Pinned' (push-pin icon), 'All' (done-all icon) - mutually exclusive; vertical divider; 'Has results' toggle (filter-list icon). Divider.\nBODY: LazyColumn with one block per source: header row (padding start 16, end 4): column [source name titleMedium, language below] + trailing arrow-forward IconButton (opens browse_source with the query). Below: loading = centered small circular progress; success = horizontal LazyRow (8dp padding, 4dp spacing) of 96dp-wide comfortable grid cards (cover + 3-line title, in-library badge and dimmed cover for favorites) or 'No results found' text; error = error icon + message ('Unknown error'). Tap card opens details, long-press also opens details. Reselecting the Browse nav tab opens this screen. Same for anime and manga."
+  },
+  {
+   "id": "webview",
+   "title": "WebView",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Back",
+     "icon": "go-previous-symbolic"
+    },
+    {
+     "label": "Forward",
+     "icon": "go-next-symbolic"
+    }
+   ],
+   "menu": [
+    "Refresh",
+    "Share",
+    "Open in browser",
+    "Clear cookies"
+   ],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Top app bar: navigation icon = Close (X); title = page title (fallback to initial/source name), subtitle = current URL (single line). Actions: Back and Forward arrow icons (disabled when history unavailable); overflow Refresh, Share, Open in browser, Clear cookies. Below the bar: a thin LinearProgressIndicator (indeterminate while initializing, determinate while loading). When a Cloudflare challenge page is detected, a WarningBanner 'Tap here for help with Cloudflare' appears under the bar (tap opens help). Body = full WebView with the source's headers/user agent."
+  }
+ ]
+}

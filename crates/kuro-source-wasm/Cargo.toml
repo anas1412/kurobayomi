@@ -1,0 +1,39 @@
+[package]
+name = "kuro-source-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+async-channel = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+# C-20: the repo-level package signature. Not in the workspace table yet, so the version is pinned here.
+ed25519-dalek = "3.0.0"
+futures = { workspace = true }
+http = { workspace = true }
+kuro-net = { workspace = true }
+kuro-prefs = { workspace = true }
+kuro-source = { path = "../kuro-source" }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+# Component runtime only (CRATE-MAP C-20): no default features, so no WASI. The WIT world is bound with bindgen.
+wasmtime = { version = "49.0.2", default-features = false, features = ["runtime", "component-model", "cranelift", "std"] }
+
+[dev-dependencies]
+kuro-platform = { workspace = true }
+tempfile = { workspace = true }
+wiremock = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net"] }
+# Test guests are WAT text (`wat` feature), so the tests need no guest toolchain and no binary fixtures.
+wasmtime = { version = "49.0.2", default-features = false, features = ["runtime", "component-model", "cranelift", "std", "wat"] }

@@ -1,0 +1,17 @@
+# build output
+/target
+
+# local screenshots and run notes
+/shots/
+/mockup-library.png
+/AUTONOMOUS-RUN.md
+
+# workflow tooling (task queues, generators)
+/.make-*.py
+/.m02-chunks.json
+/.p0-queue.json
+/plans/_tools/snap/
+
+# logs and OS files
+*.log
+.DS_Store

@@ -1,0 +1,17 @@
+[package]
+name = "kuro-prefs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+kuro-platform = { path = "../kuro-platform" }
+serde = { workspace = true }
+toml_edit = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

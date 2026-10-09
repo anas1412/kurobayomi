@@ -1,0 +1,7 @@
+{
+  "name": "Example Store",
+  "badgeLabel": "EXS",
+  "signingKey": "a1b2c3d4",
+  "contact": { "website": "https://example.test", "discord": "https://discord.test/invite" },
+  "extensionListUrl": "https://example.test/extensions.json"
+}

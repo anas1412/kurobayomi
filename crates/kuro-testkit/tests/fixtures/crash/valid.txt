@@ -1,0 +1,11 @@
+kurobayomi-crash-report 1
+time: 2026-10-08T14:03:22Z
+thread: kuro-rt
+location: crates/kuro-core/src/foo.rs:42:9
+message: boom
+[facts]
+app_id: io.github.blackbox.Kurobayomi
+app_version: 0.1.0 (abc1234, 1, 2026-10-08T14:00:00Z)
+os: linux x86_64
+[backtrace]
+   0: kuro_core::foo::bar

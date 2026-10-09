@@ -1,0 +1,14 @@
+[package]
+name = "kuro-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+kuro-data = { version = "0.1.0", path = "../kuro-data" }
+kuro-db = { version = "0.1.0", path = "../kuro-db" }
+kuro-platform = { version = "0.1.0", path = "../kuro-platform" }
+kuro-prefs = { version = "0.1.0", path = "../kuro-prefs" }
+rusqlite = { workspace = true }
+tempfile = { workspace = true }

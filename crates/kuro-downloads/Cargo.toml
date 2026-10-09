@@ -1,0 +1,29 @@
+[package]
+name = "kuro-downloads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = ["ntfs-names"]
+# Appends `_` to Windows device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) so folders copied to a Windows disk stay
+# valid. Decision D-DL-01, EC-76.
+ntfs-names = []
+
+[dependencies]
+async-trait = { workspace = true }
+futures = { workspace = true }
+kuro-archive = { path = "../kuro-archive" }
+kuro-core = { path = "../kuro-core" }
+kuro-source = { path = "../kuro-source" }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

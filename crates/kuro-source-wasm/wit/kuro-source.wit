@@ -1,0 +1,21 @@
+// ABI 1.4 (plans/18-extensions-manga/p1-rust-design.md section 2.2). Guests import `host` and export `invoke`.
+package kuro:source@1.4.0;
+
+interface host {
+    /// Performs an HTTP request on behalf of the guest. Allowed only for hosts in the manifest allow-list.
+    /// Request and response are JSON (see `bridge.rs`).
+    http: func(request-json: string) -> result<string, string>;
+    /// Reads a source preference by key. Returns "" when unset.
+    pref-get: func(key: string) -> string;
+    /// Writes a source preference. The value must be JSON text.
+    pref-set: func(key: string, value-json: string) -> result<_, string>;
+    /// Logs a message at level 0=debug, 1=info, 2=warn, 3=error.
+    log: func(level: u8, message: string);
+}
+
+world source {
+    import host;
+    /// op is one of: "info", "create-sources", "popular", "latest", "search", "details", "chapters", "pages".
+    /// Unknown op → Err("unknown op: <op>").
+    export invoke: func(op: string, input-json: string) -> result<string, string>;
+}

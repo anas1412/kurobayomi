@@ -1,0 +1,18 @@
+{
+  "_about": "Rows of area 17 test vectors: enabled_rows are section 2 (id, lang, name, in repository order); migration_rows are section 3 (a=1, b=2, c=3, d=4, e=5; count is the favourite count).",
+  "enabled_rows": [
+    { "id": 1, "lang": "en", "name": "Zeta" },
+    { "id": 2, "lang": "en", "name": "alpha" },
+    { "id": 3, "lang": "ja", "name": "Beta" },
+    { "id": 0, "lang": "other", "name": "Local manga source" },
+    { "id": 4, "lang": "en", "name": "Hidden" },
+    { "id": 5, "lang": "fr", "name": "Omega" }
+  ],
+  "migration_rows": [
+    { "id": 1, "lang": "en", "name": "Zeta", "count": 3, "stub": false },
+    { "id": 2, "lang": "en", "name": "alpha", "count": 10, "stub": false },
+    { "id": 3, "lang": "en", "name": "Beta", "count": 3, "stub": false },
+    { "id": 4, "lang": "", "name": "Gone", "count": 7, "stub": true },
+    { "id": 5, "lang": "en", "name": "Mid", "count": 10, "stub": false }
+  ]
+}

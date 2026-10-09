@@ -1,0 +1,460 @@
+//! Category writes for one kind: create, rename, hide, partial update, reorder, delete, entry membership and
+//! the sort-mode setters. Every write runs on a detached blocking task, so a closed screen cannot cancel a
+//! write that already started (`withNonCancellableContext`). Validation runs inside the same write
+//! transaction as the change, so two creates cannot both pass the duplicate check.
+
+use std::sync::Arc;
+
+use kuro_db::handle::Db;
+use kuro_db::open::DbResult;
+use kuro_db::statements_anime as anime;
+use kuro_db::statements_manga::{CategoryPatch, CategoryRow, categories as manga};
+use kuro_prefs::category::{CategoryKind, forget_category, write_sort_prefs};
+use kuro_prefs::library::LibraryPrefs;
+
+use super::model::{Category, CategoryUpdate};
+use super::repo::CategoryRepo;
+use crate::SYSTEM_CATEGORY_ID;
+use crate::error::DomainError;
+use crate::kind::EntryKind;
+use crate::library::display_mode::LibraryDisplayMode;
+use crate::library::sort::LibrarySort;
+
+/// A validation outcome inside a write transaction. `Err` is a domain rule, `Ok` carries the value.
+type Checked<T> = Result<T, DomainError>;
+
+fn manga_category(r: CategoryRow) -> Category {
+    Category { id: r.id, name: r.name, order: r.order, flags: r.flags, hidden: r.hidden }
+}
+
+fn anime_category(r: anime::AnimeCategory) -> Category {
+    Category { id: r.id, name: r.name, order: r.order, flags: r.flags, hidden: r.hidden }
+}
+
+/// Trims a name and rejects an empty result.
+fn validate_name(name: &str) -> Checked<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() { Err(DomainError::InvalidName) } else { Ok(trimmed.to_owned()) }
+}
+
+/// Another category (system and `except` excluded, hidden ones included) has this exact trimmed name.
+fn name_taken(all: &[Category], name: &str, except: Option<i64>) -> bool {
+    all.iter().any(|c| !c.is_system() && Some(c.id) != except && c.name.trim() == name)
+}
+
+/// The writes and the sort-mode setters of one kind.
+pub struct CategoryService {
+    repo: CategoryRepo,
+    prefs: Arc<LibraryPrefs>,
+    /// Serialises reorders and deletes of this kind (`ReorderXCategory`'s `Mutex`). Visible to the tests.
+    pub(super) reorder_lock: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl CategoryService {
+    pub fn new(db: Arc<Db>, kind: EntryKind, prefs: Arc<LibraryPrefs>) -> Self {
+        Self { repo: CategoryRepo::new(db, kind), prefs, reorder_lock: Arc::new(tokio::sync::Mutex::new(())) }
+    }
+
+    /// The read side (lists, lookups, live queries).
+    pub fn repo(&self) -> &CategoryRepo {
+        &self.repo
+    }
+
+    fn kind(&self) -> EntryKind {
+        self.repo.kind()
+    }
+
+    fn category_kind(&self) -> CategoryKind {
+        match self.kind() {
+            EntryKind::Manga => CategoryKind::Manga,
+            EntryKind::Anime => CategoryKind::Anime,
+        }
+    }
+
+    /// The global sort preference of this kind.
+    pub fn global_sort(&self) -> LibrarySort {
+        let stored = match self.kind() {
+            EntryKind::Manga => self.prefs.manga_sorting_mode.get().0,
+            EntryKind::Anime => self.prefs.anime_sorting_mode.get().0,
+        };
+        LibrarySort::deserialize(self.kind(), &stored)
+    }
+
+    /// `global.type + global.direction`: the flags a new category takes (`initialFlags`).
+    pub fn initial_flags(&self) -> i64 {
+        self.global_sort().flag()
+    }
+
+    /// Runs `f` on a blocking task that is detached from the caller: dropping the returned future does not
+    /// stop the write.
+    async fn detached<T, F>(&self, f: F) -> Result<T, DomainError>
+    where
+        F: FnOnce(&Db) -> Result<T, DomainError> + Send + 'static,
+        T: Send + 'static,
+    {
+        let db = self.repo.db().clone();
+        let out = tokio::task::spawn_blocking(move || f(&db)).await.map_err(DomainError::Join)?;
+        if let Err(e) = &out {
+            tracing::error!(error = ?e, "category write failed");
+        }
+        out
+    }
+
+    /// Creates a category at the end of the order. The name is trimmed; it must be non-empty and unused.
+    /// Flags are the global sort (`initial_flags`).
+    pub async fn create(&self, name: &str) -> Result<Category, DomainError> {
+        let name = validate_name(name)?;
+        let kind = self.kind();
+        let flags = self.initial_flags();
+        self.detached(move |db| {
+            let out = db.write(|tx| -> DbResult<Checked<Category>> {
+                let all: Vec<Category> = match kind {
+                    EntryKind::Manga => manga::get_categories(tx)?.into_iter().map(manga_category).collect(),
+                    EntryKind::Anime => anime::categories(tx)?.into_iter().map(anime_category).collect(),
+                };
+                if name_taken(&all, &name, None) {
+                    return Ok(Err(DomainError::DuplicateName));
+                }
+                let order = all.iter().map(|c| c.order).max().map_or(0, |max| max + 1);
+                let id = match kind {
+                    EntryKind::Manga => manga::insert(tx, &name, order, flags)?,
+                    EntryKind::Anime => anime::insert_category(tx, &name, order, flags)?,
+                };
+                Ok(Ok(Category { id, name: name.clone(), order, flags, hidden: false }))
+            })?;
+            out
+        })
+        .await
+    }
+
+    /// Renames a user category. Renaming to the current name is a successful no-op.
+    pub async fn rename(&self, id: i64, name: &str) -> Result<(), DomainError> {
+        let name = validate_name(name)?;
+        self.update_checked(CategoryUpdate { id, name: Some(name), ..Default::default() }).await
+    }
+
+    /// Flips `hidden` on a user category.
+    pub async fn toggle_hidden(&self, id: i64) -> Result<(), DomainError> {
+        let kind = self.kind();
+        self.detached(move |db| {
+            let out = db.write(|tx| -> DbResult<Checked<()>> {
+                let current = match kind {
+                    EntryKind::Manga => manga::get_category(tx, id)?.map(manga_category),
+                    EntryKind::Anime => anime::category_by_id(tx, id)?.map(anime_category),
+                };
+                let Some(current) = current else {
+                    return Ok(Err(DomainError::NotFound));
+                };
+                if current.is_system() {
+                    return Ok(Err(DomainError::SystemCategory));
+                }
+                let hidden = !current.hidden;
+                match kind {
+                    EntryKind::Manga => {
+                        manga::update(tx, &CategoryPatch { id, hidden: Some(hidden), ..Default::default() })?;
+                    }
+                    EntryKind::Anime => {
+                        anime::update_category(tx, id, None, None, None, Some(hidden))?;
+                    }
+                }
+                Ok(Ok(()))
+            })?;
+            out
+        })
+        .await
+    }
+
+    /// Generic partial update (`UpdateXCategory`). A name is trimmed and checked like `create`.
+    pub async fn update_partial(&self, update: CategoryUpdate) -> Result<(), DomainError> {
+        let update = match update.name.as_deref() {
+            Some(name) => CategoryUpdate { name: Some(validate_name(name)?), ..update },
+            None => update,
+        };
+        self.update_checked(update).await
+    }
+
+    /// Applies several partial updates in one transaction.
+    pub async fn update_partial_many(&self, updates: Vec<CategoryUpdate>) -> Result<(), DomainError> {
+        let kind = self.kind();
+        let mut checked = Vec::with_capacity(updates.len());
+        for u in updates {
+            checked.push(match u.name.as_deref() {
+                Some(name) => CategoryUpdate { name: Some(validate_name(name)?), ..u },
+                None => u,
+            });
+        }
+        self.detached(move |db| {
+            let out = db.write(|tx| -> DbResult<Checked<()>> {
+                for u in &checked {
+                    if let Err(e) = apply_update(tx, kind, u)? {
+                        return Ok(Err(e));
+                    }
+                }
+                Ok(Ok(()))
+            })?;
+            out
+        })
+        .await
+    }
+
+    /// One update with the name rule and the system-category rule, in one transaction.
+    async fn update_checked(&self, u: CategoryUpdate) -> Result<(), DomainError> {
+        let kind = self.kind();
+        self.detached(move |db| {
+            let out = db.write(|tx| -> DbResult<Checked<()>> { Ok(apply_update(tx, kind, &u)?) })?;
+            out
+        })
+        .await
+    }
+
+    /// Moves a user category before `before` (`None` moves it to the end). The moved id and the `before` id
+    /// must both be user categories; the result renumbers all user categories `0..n-1`. The system category's
+    /// `sort` is never written.
+    pub async fn move_before(&self, id: i64, before: Option<i64>) -> Result<(), DomainError> {
+        let kind = self.kind();
+        let guard = self.reorder_lock.clone().lock_owned().await;
+        self.detached(move |db| {
+            let _guard = guard;
+            let out = db.write(|tx| -> DbResult<Checked<()>> {
+                let all: Vec<Category> = match kind {
+                    EntryKind::Manga => manga::get_categories(tx)?.into_iter().map(manga_category).collect(),
+                    EntryKind::Anime => anime::categories(tx)?.into_iter().map(anime_category).collect(),
+                };
+                let mut ids: Vec<i64> = all.iter().filter(|c| !c.is_system()).map(|c| c.id).collect();
+                let Some(from) = ids.iter().position(|&c| c == id) else {
+                    return Ok(Err(DomainError::NotFound));
+                };
+                if before == Some(id) {
+                    return Ok(Ok(()));
+                }
+                let moved = ids.remove(from);
+                match before {
+                    None => ids.push(moved),
+                    Some(target) => {
+                        let Some(pos) = ids.iter().position(|&c| c == target) else {
+                            return Ok(Err(DomainError::NotFound));
+                        };
+                        ids.insert(pos, moved);
+                    }
+                }
+                for (order, category) in ids.iter().enumerate() {
+                    set_order(tx, kind, *category, order as i64)?;
+                }
+                Ok(Ok(()))
+            })?;
+            out
+        })
+        .await
+    }
+
+    /// Deletes a user category. Its links cascade; then every category, system included, is renumbered to its
+    /// index in display order in the same transaction (T-08a-010); then the preference sets forget the id.
+    /// Takes the reorder lock, so a delete never renumbers under a move in flight (T-08a-009). The system
+    /// category cannot be deleted.
+    pub async fn delete(&self, id: i64) -> Result<(), DomainError> {
+        if id == SYSTEM_CATEGORY_ID {
+            return Err(DomainError::SystemCategory);
+        }
+        let kind = self.kind();
+        let guard = self.reorder_lock.clone().lock_owned().await;
+        self.detached(move |db| {
+            let _guard = guard;
+            let out = db.write(|tx| -> DbResult<Checked<()>> {
+                match kind {
+                    EntryKind::Manga => {
+                        manga::delete(tx, id)?;
+                    }
+                    EntryKind::Anime => {
+                        anime::delete_category(tx, id)?;
+                    }
+                }
+                let all: Vec<i64> = match kind {
+                    EntryKind::Manga => manga::get_categories(tx)?.into_iter().map(|c| c.id).collect(),
+                    EntryKind::Anime => anime::categories(tx)?.into_iter().map(|c| c.id).collect(),
+                };
+                for (order, category) in all.iter().enumerate() {
+                    set_order(tx, kind, *category, order as i64)?;
+                }
+                Ok(Ok(()))
+            })?;
+            out
+        })
+        .await?;
+        forget_category(self.prefs.store(), &self.prefs, self.category_kind(), id);
+        Ok(())
+    }
+
+    /// Replaces the categories of one entry. The Default category (id 0) and ids that do not exist are dropped,
+    /// duplicates are removed, and an empty list means "Default". Errors are returned; callers may ignore them.
+    pub async fn set_entry_categories(&self, entry_id: i64, ids: &[i64]) -> Result<(), DomainError> {
+        let existing: Vec<i64> = self.repo.all()?.into_iter().map(|c| c.id).collect();
+        let mut wanted: Vec<i64> = ids
+            .iter()
+            .copied()
+            .filter(|id| *id != SYSTEM_CATEGORY_ID && existing.contains(id))
+            .collect();
+        wanted.sort_unstable();
+        wanted.dedup();
+        let db = self.repo.db().clone();
+        let kind = self.kind();
+        tokio::task::spawn_blocking(move || match kind {
+            EntryKind::Manga => kuro_data::manga::MangaRepo::new(db).set_categories(entry_id, &wanted),
+            EntryKind::Anime => kuro_data::anime::AnimeRepo::new(db).set_categories(entry_id, &wanted),
+        })
+        .await
+        .map_err(DomainError::Join)?
+        .map_err(DomainError::from)
+        .inspect_err(|e| tracing::error!(error = ?e, entry_id, "set entry categories failed"))
+    }
+
+    /// `SetSortModeForXCategory`. With `categorized_display` on and a category, only that category takes the
+    /// new flags. Otherwise the global sort is written and every category takes the same flags.
+    /// `draw_seed` is called once, and only for the Random sort; its value becomes the new random seed.
+    pub async fn set_sort_mode(
+        &self,
+        category: Option<i64>,
+        sort: LibrarySort,
+        draw_seed: impl FnOnce() -> i32,
+    ) -> Result<(), DomainError> {
+        let kind = self.kind();
+        let category = match category {
+            Some(id) => self.repo.get(id)?,
+            None => None,
+        };
+        let flags = sort.apply_to(category.as_ref().map_or(0, |c| c.flags));
+        if sort.ty == crate::library::sort::SortType::Random {
+            let seed = draw_seed();
+            let stored = match kind {
+                EntryKind::Manga => self.prefs.random_manga_sort_seed.set(seed),
+                EntryKind::Anime => self.prefs.random_anime_sort_seed.set(seed),
+            };
+            if let Err(e) = stored {
+                tracing::warn!("could not store the random sort seed: {e}");
+            }
+        }
+        let serialized = sort.serialize(kind);
+        let categorized = self.prefs.categorized_display_settings.get();
+        match category {
+            Some(cat) if categorized => {
+                let db = self.repo.db().clone();
+                tokio::task::spawn_blocking(move || write_flags(&db, kind, cat.id, flags))
+                    .await
+                    .map_err(DomainError::Join)??;
+            }
+            _ => {
+                write_sort_prefs(&self.prefs, self.category_kind(), &serialized, false, true);
+                let db = self.repo.db().clone();
+                tokio::task::spawn_blocking(move || write_all_flags(&db, kind, flags))
+                    .await
+                    .map_err(DomainError::Join)??;
+            }
+        }
+        Ok(())
+    }
+
+    /// `ResetXCategoryFlags`: every category takes the global `type + direction`.
+    pub async fn reset_category_flags(&self) -> Result<(), DomainError> {
+        let flags = self.global_sort().flag();
+        let db = self.repo.db().clone();
+        let kind = self.kind();
+        tokio::task::spawn_blocking(move || write_all_flags(&db, kind, flags)).await.map_err(DomainError::Join)?
+    }
+}
+
+/// `SetXDisplayMode`: one global key for both kinds.
+pub fn set_display_mode(prefs: &LibraryPrefs, mode: LibraryDisplayMode) {
+    prefs.display_mode.set(mode);
+}
+
+/// The categorized-display switch. Turning it off resets the flags of both kinds (regression test for Q9), so
+/// no per-category sort survives the switch.
+pub async fn categorized_display_changed(
+    manga: &CategoryService,
+    anime: &CategoryService,
+    enabled: bool,
+) -> Result<(), DomainError> {
+    if enabled {
+        return Ok(());
+    }
+    manga.reset_category_flags().await?;
+    anime.reset_category_flags().await
+}
+
+/// Applies one update inside a write transaction. A `None` field keeps the stored value.
+fn apply_update(tx: &kuro_db::Transaction<'_>, kind: EntryKind, u: &CategoryUpdate) -> DbResult<Checked<()>> {
+    let all: Vec<Category> = match kind {
+        EntryKind::Manga => manga::get_categories(tx)?.into_iter().map(manga_category).collect(),
+        EntryKind::Anime => anime::categories(tx)?.into_iter().map(anime_category).collect(),
+    };
+    let Some(current) = all.iter().find(|c| c.id == u.id) else {
+        return Ok(Err(DomainError::NotFound));
+    };
+    if current.is_system() && (u.name.is_some() || u.hidden.is_some()) {
+        return Ok(Err(DomainError::SystemCategory));
+    }
+    if let Some(name) = u.name.as_deref() {
+        if name_taken(&all, name, Some(u.id)) {
+            return Ok(Err(DomainError::DuplicateName));
+        }
+    }
+    match kind {
+        EntryKind::Manga => {
+            manga::update(
+                tx,
+                &CategoryPatch {
+                    id: u.id,
+                    name: u.name.clone(),
+                    order: u.order,
+                    flags: u.flags,
+                    hidden: u.hidden,
+                },
+            )?;
+        }
+        EntryKind::Anime => {
+            anime::update_category(tx, u.id, u.name.as_deref(), u.order, u.flags, u.hidden)?;
+        }
+    }
+    Ok(Ok(()))
+}
+
+fn set_order(tx: &kuro_db::Transaction<'_>, kind: EntryKind, id: i64, order: i64) -> DbResult<()> {
+    match kind {
+        EntryKind::Manga => {
+            manga::update(tx, &CategoryPatch { id, order: Some(order), ..Default::default() })?;
+        }
+        EntryKind::Anime => {
+            anime::update_category(tx, id, None, Some(order), None, None)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_flags(db: &Db, kind: EntryKind, id: i64, flags: i64) -> Result<(), DomainError> {
+    db.write(|tx| {
+        match kind {
+            EntryKind::Manga => {
+                manga::update(tx, &CategoryPatch { id, flags: Some(flags), ..Default::default() })?;
+            }
+            EntryKind::Anime => {
+                anime::update_category(tx, id, None, None, Some(flags), None)?;
+            }
+        }
+        Ok(())
+    })
+    .map_err(DomainError::from)
+}
+
+fn write_all_flags(db: &Db, kind: EntryKind, flags: i64) -> Result<(), DomainError> {
+    db.write(|tx| {
+        match kind {
+            EntryKind::Manga => {
+                manga::update_all_flags(tx, Some(flags))?;
+            }
+            EntryKind::Anime => {
+                anime::update_all_category_flags(tx, Some(flags))?;
+            }
+        }
+        Ok(())
+    })
+    .map_err(DomainError::from)
+}

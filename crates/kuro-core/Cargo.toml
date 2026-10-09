@@ -1,0 +1,41 @@
+[package]
+name = "kuro-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# libarchive binding for non-zip archives (T-13a-031).
+archive = []
+# AVIF and HEIF decoding. HEIF has no decoder yet; see image/mod.rs.
+heif = []
+# TorrServer client and supervisor (T-13a-040, T-13a-041).
+torrent = []
+# Built-in updater (T-54a-003). Off until the updater lands.
+updater = []
+
+[dependencies]
+image.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
+md-5 = { workspace = true }
+sha1 = "0.11.0"
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+unicode-normalization = { workspace = true }
+kuro-platform = { version = "0.1.0", path = "../kuro-platform" }
+icu_collator = "2"
+icu_locale = "2"
+jxl-oxide = { version = "0.11", features = ["image"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+proptest = { workspace = true }
+
+[[test]]
+name = "crash_main_thread"
+path = "tests/crash_main_thread.rs"
+harness = false

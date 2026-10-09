@@ -1,0 +1,8 @@
+legacy_flag = 1
+
+[general]
+verbose_logging = false
+future_option = "x"
+
+[experimental]
+whatever = [1, 2]

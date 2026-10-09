@@ -1,0 +1,3229 @@
+{
+ "main": [
+  {
+   "id": "settings_appearance",
+   "title": "Appearance",
+   "subtitle": "Theme, date & time format",
+   "icon": "preferences-desktop-appearance-symbolic"
+  },
+  {
+   "id": "settings_library",
+   "title": "Library",
+   "subtitle": "Categories, global update, chapter/episode swipe",
+   "icon": "view-grid-symbolic"
+  },
+  {
+   "id": "settings_reader",
+   "title": "Reader",
+   "subtitle": "Reading mode, display, navigation",
+   "icon": "x-office-document-symbolic"
+  },
+  {
+   "id": "settings_player",
+   "title": "Player",
+   "subtitle": "Internal player, gestures, decoders, subtitles",
+   "icon": "video-display-symbolic"
+  },
+  {
+   "id": "settings_downloads",
+   "title": "Downloads",
+   "subtitle": "Automatic download, download ahead",
+   "icon": "folder-download-symbolic"
+  },
+  {
+   "id": "settings_tracking",
+   "title": "Tracking",
+   "subtitle": "One-way progress sync, enhanced sync",
+   "icon": "emblem-synchronizing-symbolic"
+  },
+  {
+   "id": "settings_browse",
+   "title": "Browse",
+   "subtitle": "Sources, extensions, global search",
+   "icon": "compass-symbolic"
+  },
+  {
+   "id": "settings_data_storage",
+   "title": "Data and storage",
+   "subtitle": "Manual & automatic backups, storage space",
+   "icon": "drive-harddisk-symbolic"
+  },
+  {
+   "id": "settings_security",
+   "title": "Security and privacy",
+   "subtitle": "App lock, secure screen",
+   "icon": "security-high-symbolic"
+  },
+  {
+   "id": "settings_advanced",
+   "title": "Advanced",
+   "subtitle": "Dump crash logs, battery optimizations",
+   "icon": "utilities-terminal-symbolic"
+  },
+  {
+   "id": "settings_about",
+   "title": "About",
+   "subtitle": "Aniyomi Stable 0.18.2.1",
+   "icon": "help-about-symbolic"
+  }
+ ],
+ "screens": [
+  {
+   "id": "settings",
+   "title": "Settings",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Search settings",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "notes": "Settings main menu"
+  },
+  {
+   "id": "settings_search",
+   "title": "Search settings",
+   "kind": "custom",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [],
+   "empty": "No results found",
+   "notes": "Top app bar holds a single search text field with placeholder \"Search settings\" and a clear (X) button. Results list: each row shows the preference title, a breadcrumb line \"Category > Group\" and the preference subtitle; tapping opens that settings screen scrolled to the preference. Empty state shows \"No results found\"."
+  },
+  {
+   "id": "settings_appearance",
+   "title": "Appearance",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": "Theme",
+     "items": [
+      {
+       "type": "chips",
+       "title": "Theme mode",
+       "options": [
+        "System",
+        "Light",
+        "Dark"
+       ],
+       "default": "System"
+      },
+      {
+       "type": "chips",
+       "title": "App theme",
+       "options": [
+        "Default",
+        "Dynamic",
+        "Cloudflare",
+        "Cotton Candy",
+        "Doom",
+        "Green Apple",
+        "Lavender",
+        "Matrix",
+        "Midnight Dusk",
+        "Mocha",
+        "Sapphire",
+        "Nord",
+        "Strawberry Daiquiri",
+        "Tako",
+        "Teal & Turquoise",
+        "Tidal Wave",
+        "Yin & Yang",
+        "Yotsuba",
+        "Monochrome"
+       ],
+       "default": "Dynamic"
+      },
+      {
+       "type": "switch",
+       "title": "Pure black dark mode",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Display",
+     "items": [
+      {
+       "type": "link",
+       "title": "App language",
+       "target": "settings_app_language"
+      },
+      {
+       "type": "list",
+       "title": "Tablet UI",
+       "options": [
+        "Auto",
+        "Always",
+        "Landscape",
+        "Never"
+       ],
+       "default": "Auto"
+      },
+      {
+       "type": "list",
+       "title": "Start Screen",
+       "options": [
+        "Anime",
+        "Manga",
+        "Updates",
+        "History",
+        "Browse"
+       ],
+       "default": "Anime"
+      },
+      {
+       "type": "list",
+       "title": "Navigation Style",
+       "options": [
+        "Move Manga to the More tab",
+        "Move Updates to the More tab",
+        "Move History to the More tab",
+        "Move Browse to the More tab"
+       ],
+       "default": "Move History to the More tab"
+      },
+      {
+       "type": "list",
+       "title": "Date format",
+       "options": [
+        "Default (10/8/26)",
+        "MM/dd/yy (10/08/26)",
+        "dd/MM/yy (08/10/26)",
+        "yyyy-MM-dd (2026-10-08)",
+        "dd MMM yyyy (08 Oct 2026)",
+        "MMM dd, yyyy (Oct 08, 2026)"
+       ],
+       "default": "Default (10/8/26)"
+      },
+      {
+       "type": "switch",
+       "title": "Relative timestamps",
+       "subtitle": "\"Today\" instead of \"10/8/26\"",
+       "default": true
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "App theme row: a segmented button row (System / Light / Dark) above a horizontally scrolling row of theme preview cards (mini app mockups) with the theme name under each; selected card has a check badge. \"Dynamic\" (Monet) only on Android 12+. Pure black switch is disabled when theme mode is Light. Changing tablet UI / start screen shows a \"Requires app restart to take effect\" toast. Search toolbar action exists on every SearchableSettings screen in two-pane mode only; listed for completeness."
+  },
+  {
+   "id": "settings_app_language",
+   "title": "App language",
+   "kind": "custom",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Plain list of languages. First row \"Default\" (follow system), then every locale from locales_config sorted by display name. Each row: headline = language name in its own locale, supporting text = name in current locale; trailing primary-coloured check icon on the active language. Tapping applies immediately."
+  },
+  {
+   "id": "settings_library",
+   "title": "Library",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": "Categories",
+     "items": [
+      {
+       "type": "action",
+       "title": "Edit anime categories",
+       "subtitle": "0 categories"
+      },
+      {
+       "type": "list",
+       "title": "Default anime category",
+       "options": [
+        "Always ask"
+       ],
+       "default": "Always ask"
+      },
+      {
+       "type": "action",
+       "title": "Edit manga categories",
+       "subtitle": "0 categories"
+      },
+      {
+       "type": "list",
+       "title": "Default manga category",
+       "options": [
+        "Always ask"
+       ],
+       "default": "Always ask"
+      },
+      {
+       "type": "switch",
+       "title": "Per-category settings for sort",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Hide hidden categories from categories and storage screen",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Global update",
+     "items": [
+      {
+       "type": "list",
+       "title": "Automatic updates",
+       "options": [
+        "Off",
+        "Every 12 hours",
+        "Daily",
+        "Every 2 days",
+        "Every 3 days",
+        "Weekly"
+       ],
+       "default": "Off"
+      },
+      {
+       "type": "multi",
+       "title": "Automatic updates device restrictions",
+       "subtitle": "Restrictions: Only on Wi-Fi",
+       "options": [
+        "Only on Wi-Fi",
+        "Only on unmetered network",
+        "When charging"
+       ],
+       "default": [
+        "Only on Wi-Fi"
+       ]
+      },
+      {
+       "type": "action",
+       "title": "Anime Categories",
+       "subtitle": "Include: All\nExclude: None"
+      },
+      {
+       "type": "action",
+       "title": "Manga Categories",
+       "subtitle": "Include: All\nExclude: None"
+      },
+      {
+       "type": "switch",
+       "title": "Automatically refresh metadata",
+       "subtitle": "Check for new cover and details when updating library",
+       "default": false
+      },
+      {
+       "type": "multi",
+       "title": "Smart update",
+       "options": [
+        "Skip entries with unseen episode(s)/unread chapter(s)",
+        "Skip unstarted entries",
+        "Skip entries with \"Completed\" status",
+        "Predict next release time"
+       ],
+       "default": [
+        "Skip entries with unseen episode(s)/unread chapter(s)",
+        "Skip unstarted entries",
+        "Skip entries with \"Completed\" status",
+        "Predict next release time"
+       ]
+      },
+      {
+       "type": "switch",
+       "title": "Show unseen/unread count on Updates icon",
+       "default": true
+      }
+     ]
+    },
+    {
+     "title": "Season",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Update seasons with episodes on refresh",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Update seasons with episodes on library update",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Episode behavior",
+     "items": [
+      {
+       "type": "list",
+       "title": "Episode on swipe to left",
+       "options": [
+        "Disabled",
+        "Bookmark episode",
+        "Fillermark episode",
+        "Mark as watched",
+        "Download"
+       ],
+       "default": "Mark as watched"
+      },
+      {
+       "type": "list",
+       "title": "Episode on swipe to right",
+       "options": [
+        "Disabled",
+        "Bookmark episode",
+        "Fillermark episode",
+        "Mark as watched",
+        "Download"
+       ],
+       "default": "Bookmark episode"
+      },
+      {
+       "type": "multi",
+       "title": "Mark duplicate seen episode as seen",
+       "options": [
+        "After watching an episode",
+        "After fetching new episode"
+       ],
+       "default": []
+      }
+     ]
+    },
+    {
+     "title": "Chapter behavior",
+     "items": [
+      {
+       "type": "list",
+       "title": "Chapter on swipe to left",
+       "options": [
+        "Disabled",
+        "Bookmark chapter",
+        "Mark as read",
+        "Download"
+       ],
+       "default": "Mark as read"
+      },
+      {
+       "type": "list",
+       "title": "Chapter on swipe to right",
+       "options": [
+        "Disabled",
+        "Bookmark chapter",
+        "Mark as read",
+        "Download"
+       ],
+       "default": "Bookmark chapter"
+      },
+      {
+       "type": "multi",
+       "title": "Mark duplicate read chapter as read",
+       "options": [
+        "After reading a chapter",
+        "After fetching new chapter"
+       ],
+       "default": []
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "anime_update_categories",
+     "title": "Anime Categories",
+     "text": "Anime in excluded categories will not be updated even if they are also in included categories.",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "manga_update_categories",
+     "title": "Manga Categories",
+     "text": "Manga in excluded categories will not be updated even if they are also in included categories.",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "notes": "Edit categories rows open the Categories screen (anime / manga tab) outside settings. Default category list options are \"Always ask\" followed by every user category. Update restriction is disabled when interval is Never. The Anime/Manga categories rows open a tri-state checklist dialog (one row per category: unchecked / include check / exclude cross); subtitle summarises \"Include: ...\\nExclude: ...\"."
+  },
+  {
+   "id": "settings_reader",
+   "title": "Reader",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "list",
+       "title": "Default reading mode",
+       "options": [
+        "Paged (left to right)",
+        "Paged (right to left)",
+        "Paged (vertical)",
+        "Long strip",
+        "Long strip with gaps"
+       ],
+       "default": "Paged (right to left)"
+      },
+      {
+       "type": "list",
+       "title": "Double tap animation speed",
+       "options": [
+        "No animation",
+        "Normal",
+        "Fast"
+       ],
+       "default": "Normal"
+      },
+      {
+       "type": "switch",
+       "title": "Show reading mode",
+       "subtitle": "Briefly show current mode when reader is opened",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Show tap zones overlay",
+       "subtitle": "Briefly show when reader is opened",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Animate page transitions",
+       "default": true
+      }
+     ]
+    },
+    {
+     "title": "Display",
+     "items": [
+      {
+       "type": "list",
+       "title": "Default rotation",
+       "options": [
+        "Free",
+        "Portrait",
+        "Landscape",
+        "Locked portrait",
+        "Locked landscape",
+        "Reverse portrait"
+       ],
+       "default": "Free"
+      },
+      {
+       "type": "list",
+       "title": "Background color",
+       "options": [
+        "Black",
+        "Gray",
+        "White",
+        "Auto"
+       ],
+       "default": "Black"
+      },
+      {
+       "type": "switch",
+       "title": "Fullscreen",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Show content in cutout area",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Keep screen on",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Show page number",
+       "default": true
+      }
+     ]
+    },
+    {
+     "title": "E-Ink",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Flash on page change",
+       "subtitle": "Reduces ghosting on e-ink displays",
+       "default": false
+      },
+      {
+       "type": "slider",
+       "title": "Flash duration",
+       "min": 1,
+       "max": 15,
+       "step": 1,
+       "default": 1,
+       "unit": "x100 ms"
+      },
+      {
+       "type": "slider",
+       "title": "Flash every",
+       "min": 1,
+       "max": 10,
+       "step": 1,
+       "default": 1,
+       "unit": "pages"
+      },
+      {
+       "type": "list",
+       "title": "Flash with",
+       "options": [
+        "Black",
+        "White",
+        "White and Black"
+       ],
+       "default": "Black"
+      }
+     ]
+    },
+    {
+     "title": "Reading",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Skip chapters marked read",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Skip filtered chapters",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Skip duplicate chapters",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Always show chapter transition",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Preserve reading position on read chapters",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Paged",
+     "items": [
+      {
+       "type": "list",
+       "title": "Tap zones",
+       "options": [
+        "Default",
+        "L shaped",
+        "Kindle-ish",
+        "Edge",
+        "Right and Left",
+        "Disabled"
+       ],
+       "default": "Default"
+      },
+      {
+       "type": "list",
+       "title": "Invert tap zones",
+       "options": [
+        "None",
+        "Horizontal",
+        "Vertical",
+        "Both"
+       ],
+       "default": "None"
+      },
+      {
+       "type": "list",
+       "title": "Scale type",
+       "options": [
+        "Fit screen",
+        "Stretch",
+        "Fit width",
+        "Fit height",
+        "Original size",
+        "Smart fit"
+       ],
+       "default": "Fit screen"
+      },
+      {
+       "type": "list",
+       "title": "Zoom start position",
+       "options": [
+        "Automatic",
+        "Left",
+        "Right",
+        "Center"
+       ],
+       "default": "Automatic"
+      },
+      {
+       "type": "switch",
+       "title": "Crop borders",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Automatically zoom into wide images",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Pan wide images",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Split wide pages",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Invert split page placement",
+       "subtitle": "If the placement of the split wide pages don't match reading direction",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Rotate wide pages to fit",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Flip orientation of rotated wide pages",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Long strip",
+     "items": [
+      {
+       "type": "list",
+       "title": "Tap zones",
+       "options": [
+        "Default",
+        "L shaped",
+        "Kindle-ish",
+        "Edge",
+        "Right and Left",
+        "Disabled"
+       ],
+       "default": "Default"
+      },
+      {
+       "type": "list",
+       "title": "Invert tap zones",
+       "options": [
+        "None",
+        "Horizontal",
+        "Vertical",
+        "Both"
+       ],
+       "default": "None"
+      },
+      {
+       "type": "slider",
+       "title": "Side padding",
+       "min": 0,
+       "max": 25,
+       "step": 1,
+       "default": 0,
+       "unit": "%"
+      },
+      {
+       "type": "list",
+       "title": "Sensitivity for hiding menu on scroll",
+       "options": [
+        "Highest",
+        "High",
+        "Low",
+        "Lowest"
+       ],
+       "default": "Low"
+      },
+      {
+       "type": "switch",
+       "title": "Crop borders",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Split wide pages",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Invert split page placement",
+       "subtitle": "If the placement of the split wide pages don't match reading direction",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Rotate wide pages to fit",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Flip orientation of rotated wide pages",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Double tap to zoom",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Disable zoom out",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Navigation",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Volume keys",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Invert volume keys",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Actions",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Show actions on long tap",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Save pages into separate folders",
+       "subtitle": "Creates folders according to entries' title",
+       "default": false
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Short-edge cutout switch only enabled when fullscreen is on, Android 9+ and the device has a display cutout. Flash sliders/list enabled only when flash on page change is on; flash duration subtitle \"100 ms\", interval subtitle \"1 page\". Tap-inversion and pan rows disabled when navigation layout is Disabled; landscape zoom only for Fit screen; dual-page invert only when split is on; rotate-invert only when rotate is on. Split and rotate are mutually exclusive. Webtoon side padding subtitle shows a percentage (0%)."
+  },
+  {
+   "id": "settings_player",
+   "title": "Player",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "link",
+       "title": "Internal player",
+       "subtitle": "Progress, controls, orientation",
+       "target": "settings_player_internal"
+      },
+      {
+       "type": "link",
+       "title": "Gestures",
+       "subtitle": "Seeking, double tap, media controls",
+       "target": "settings_player_gestures"
+      },
+      {
+       "type": "link",
+       "title": "Decoder",
+       "subtitle": "Hardware decoding, pixel format, debanding",
+       "target": "settings_player_decoder"
+      },
+      {
+       "type": "link",
+       "title": "Subtitles",
+       "subtitle": "Preferred languages, whitelist, blacklist",
+       "target": "settings_player_subtitle"
+      },
+      {
+       "type": "link",
+       "title": "Audio",
+       "subtitle": "Preferred languages, pitch correction, audio channels",
+       "target": "settings_player_audio"
+      },
+      {
+       "type": "link",
+       "title": "Custom buttons",
+       "subtitle": "Execute lua code with custom buttons",
+       "target": "settings_player_custom_buttons"
+      },
+      {
+       "type": "link",
+       "title": "Script editor",
+       "subtitle": "Edit and create new scripts and script options",
+       "target": "settings_player_editor"
+      },
+      {
+       "type": "link",
+       "title": "Torrent",
+       "subtitle": "TorrServer options",
+       "target": "settings_player_torrents"
+      },
+      {
+       "type": "link",
+       "title": "Advanced",
+       "subtitle": "User files, mpv.conf, input.conf",
+       "target": "settings_player_advanced"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Second-level menu styled like the main settings menu: each row has a leading icon (play-circle, gesture, memory chip, subtitles, audio track, terminal, edit-note, magnet, code), title and summary. Title is \"Player\" when opened from Settings and \"Player settings\" when opened from inside the player. Search opens player-only settings search (placeholder \"Search player settings\")."
+  },
+  {
+   "id": "settings_player_internal",
+   "title": "Internal player",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "list",
+       "title": "At what point to mark the episode as seen",
+       "options": [
+        "100%",
+        "95%",
+        "90%",
+        "85%",
+        "80%",
+        "75%",
+        "70%"
+       ],
+       "default": "85%"
+      },
+      {
+       "type": "switch",
+       "title": "Preserve watch position on seen episodes",
+       "default": false
+      },
+      {
+       "type": "list",
+       "title": "Orientation",
+       "options": [
+        "Free",
+        "Video",
+        "Portrait",
+        "Reverse portrait",
+        "Sensor portrait",
+        "Landscape",
+        "Reverse landscape",
+        "Sensor landscape"
+       ],
+       "default": "Sensor landscape"
+      }
+     ]
+    },
+    {
+     "title": "Controls",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Allow gesture in panels",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Show loading circle",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Show current chapter indicator",
+       "subtitle": "Only appears if the video has chapters",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Remember and switch to the last used brightness",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Remember and switch to the last used volume",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Hosters",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Display failed hosters",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Display empty hosters",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Display",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Show content in display cutout",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Hide player controls when opening the player",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Display volume as percentage",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Show system status bar with controls",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Reduce player animation",
+       "default": false
+      },
+      {
+       "type": "list",
+       "title": "Hide player controls time",
+       "options": [
+        "500 ms",
+        "1000 ms",
+        "1500 ms",
+        "2000 ms",
+        "2500 ms",
+        "3000 ms",
+        "3500 ms",
+        "4000 ms",
+        "4500 ms",
+        "5000 ms"
+       ],
+       "default": "4000 ms"
+      },
+      {
+       "type": "slider",
+       "title": "Panel opacity",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "default": 60,
+       "unit": "%"
+      }
+     ]
+    },
+    {
+     "title": "Intro skip",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Enable intro skip",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Enable auto skip",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Enable Netflix style",
+       "default": false
+      },
+      {
+       "type": "list",
+       "title": "Button timeout",
+       "options": [
+        "5 seconds",
+        "6 seconds",
+        "7 seconds",
+        "8 seconds",
+        "9 seconds",
+        "10 seconds"
+       ],
+       "default": "5 seconds"
+      },
+      {
+       "type": "switch",
+       "title": "Enable AniSkip",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Disable AniSkip if video already contains chapters",
+       "default": true
+      },
+      {
+       "type": "info",
+       "title": "AniSkip requires the anime to be tracked with MAL or Anilist to work"
+      }
+     ]
+    },
+    {
+     "title": "Picture-in-Picture (PiP)",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Enable the use of PiP mode",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Show episode toasts when switching episodes in PiP mode",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Automatically switch to PiP mode on exiting the player",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Replaces the \"Skip 10 seconds\" option with \"Previous episode\"",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "External player",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Always use external player",
+       "default": false
+      },
+      {
+       "type": "list",
+       "title": "External player preference",
+       "options": [
+        "None"
+       ],
+       "default": "None"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Fullscreen switch enabled only on Android 9+. Picture-in-picture group only shown when the device supports PiP. Intro-skip children disabled while intro skip is off; \"disable AniSkip on chapters\" also needs AniSkip on. PiP children disabled while PiP is off. External player list = \"None\" plus installed supported players (mpv, MX Player, VLC, mpvKt, Just Player, Next Player, XPlayer, Web Video Caster...). Panel opacity subtitle shows a percentage."
+  },
+  {
+   "id": "settings_player_gestures",
+   "title": "Gestures",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": "Sliders",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Enable Volume and Brightness Gestures",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Swap volume and brightness slider",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Seeking",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Enable Horizontal Seek Gesture",
+       "subtitle": "Swipe left or right to rewind or fast-forward",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Show seekbar when seeking",
+       "default": false
+      },
+      {
+       "type": "action",
+       "title": "Default skip intro length",
+       "subtitle": "85s"
+      },
+      {
+       "type": "list",
+       "title": "Double tap to skip length",
+       "options": [
+        "30s",
+        "20s",
+        "10s",
+        "5s",
+        "3s",
+        "Disable"
+       ],
+       "default": "10s"
+      },
+      {
+       "type": "switch",
+       "title": "Enable precise seeking",
+       "subtitle": "When enabled, seeking will not focus on keyframes, leading to slower but precise seeking",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Double tap",
+     "items": [
+      {
+       "type": "list",
+       "title": "Double tap (left)",
+       "options": [
+        "None",
+        "Seek",
+        "Play/Pause",
+        "Change episode",
+        "Custom"
+       ],
+       "default": "Seek"
+      },
+      {
+       "type": "list",
+       "title": "Double tap (center)",
+       "options": [
+        "None",
+        "Play/Pause",
+        "Custom"
+       ],
+       "default": "Play/Pause"
+      },
+      {
+       "type": "list",
+       "title": "Double tap (right)",
+       "options": [
+        "None",
+        "Seek",
+        "Play/Pause",
+        "Change episode",
+        "Custom"
+       ],
+       "default": "Seek"
+      },
+      {
+       "type": "info",
+       "title": "When a tap gesture is set to \"Custom\", it can be bound through input.conf. The key codes are 0x10001 for left, 0x10002 for center, and 0x10003 for right."
+      }
+     ]
+    },
+    {
+     "title": "Media controls",
+     "items": [
+      {
+       "type": "list",
+       "title": "Previous",
+       "options": [
+        "None",
+        "Seek",
+        "Play/Pause",
+        "Change episode",
+        "Custom"
+       ],
+       "default": "Change episode"
+      },
+      {
+       "type": "list",
+       "title": "Play/Pause",
+       "options": [
+        "None",
+        "Play/Pause",
+        "Custom"
+       ],
+       "default": "Play/Pause"
+      },
+      {
+       "type": "list",
+       "title": "Next",
+       "options": [
+        "None",
+        "Seek",
+        "Play/Pause",
+        "Change episode",
+        "Custom"
+       ],
+       "default": "Change episode"
+      },
+      {
+       "type": "info",
+       "title": "When a media control is set to \"Custom\", it can be bound through input.conf. The key codes are 0x10004 for previous, 0x10005 for play/pause, and 0x10006 for next."
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "intro_length",
+     "title": "Skip intro length",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "slider",
+         "title": "Skip intro length",
+         "min": 0,
+         "max": 255,
+         "step": 1,
+         "default": 85,
+         "unit": "s"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "notes": "Default intro length row opens a dialog with a vertical wheel picker of values \"0s\"..\"255s\" (85s preselected)."
+  },
+  {
+   "id": "settings_player_decoder",
+   "title": "Decoder",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "switch",
+       "title": "Try hardware decoding",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Enable gpu-next",
+       "subtitle": "A new video rendering backend",
+       "default": false
+      },
+      {
+       "type": "list",
+       "title": "Debanding",
+       "options": [
+        "None",
+        "CPU",
+        "GPU"
+       ],
+       "default": "None"
+      },
+      {
+       "type": "switch",
+       "title": "Use YUV420P pixel format",
+       "subtitle": "May fix black screens on some video codecs, can also improve performance at the cost of quality",
+       "default": true
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": ""
+  },
+  {
+   "id": "settings_player_subtitle",
+   "title": "Subtitles",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "text",
+       "title": "Preferred languages",
+       "default": ""
+      },
+      {
+       "type": "text",
+       "title": "Whitelist",
+       "default": ""
+      },
+      {
+       "type": "text",
+       "title": "Blacklist",
+       "default": ""
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Each row opens an edit-text dialog with an explanatory line under the title: language = \"Subtitle language(s) to be selected by default on a video with multiple subtitles, Two- or three-letter languages codes work. Multiple values can be delimited by a comma.\"; whitelist = \"Whitelist for subtitles. If a whitelist is defined, the first subtitle that contains a whitelisted word will be used. Multiple values can be delimited by a comma.\"; blacklist = \"Blacklist for subtitles. If a blacklist is defined, all subtitles that contains a blacklisted word will be filtered out. Multiple values can be delimited by a comma.\". Invalid language codes show \"Invalid code: \"xx\"\" under the field."
+  },
+  {
+   "id": "settings_player_audio",
+   "title": "Audio",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "text",
+       "title": "Preferred languages",
+       "default": ""
+      },
+      {
+       "type": "switch",
+       "title": "Enable audio pitch correction",
+       "subtitle": "Prevents the audio from becoming high-pitched at faster speeds and low-pitched at slower speeds",
+       "default": true
+      },
+      {
+       "type": "list",
+       "title": "Audio channels",
+       "options": [
+        "Auto",
+        "Auto-safe",
+        "Mono",
+        "Stereo",
+        "Reverse stereo"
+       ],
+       "default": "Auto-safe"
+      },
+      {
+       "type": "slider",
+       "title": "Volume boost cap",
+       "min": 0,
+       "max": 200,
+       "step": 1,
+       "default": 30
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Audio language row opens an edit-text dialog with info line \"Audio language(s) to be selected by default on a video with multiple audio streams, Two- or three-letter languages codes work. Multiple values can be delimited by a comma.\". Boost cap subtitle shows the raw number."
+  },
+  {
+   "id": "settings_player_custom_buttons",
+   "title": "Edit custom buttons",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Custom buttons guide",
+     "icon": "help-browser-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "add_button",
+     "title": "Add button",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "text",
+         "title": "Title"
+        },
+        {
+         "type": "text",
+         "title": "Lua code"
+        },
+        {
+         "type": "text",
+         "title": "Lua code (on long press)",
+         "subtitle": "(optional)"
+        },
+        {
+         "type": "text",
+         "title": "On startup",
+         "subtitle": "(optional)"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "Add"
+     ]
+    },
+    {
+     "id": "edit_button",
+     "title": "Edit button",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "text",
+         "title": "Title"
+        },
+        {
+         "type": "text",
+         "title": "Lua code"
+        },
+        {
+         "type": "text",
+         "title": "Lua code (on long press)",
+         "subtitle": "(optional)"
+        },
+        {
+         "type": "text",
+         "title": "On startup",
+         "subtitle": "(optional)"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "Edit"
+     ]
+    },
+    {
+     "id": "delete_button",
+     "title": "Delete button",
+     "text": "Do you wish to delete the button \"Button\"?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "empty": "You have no custom buttons. Tap the plus button to create a custom button.",
+   "notes": "Reorderable list of custom player buttons (Lua). Each item is an outlined card: drag handle + button title on top row; bottom row has a star toggle (filled = primary/favourite button shown in player), edit (pencil) and delete (trash) icon buttons. Extended FAB bottom-right \"Add\". Edit dialog title row also shows \"(ID: 1)\". Title field errors: \"Button already exists!\" / \"*required\". Lua content fields are multi-line monospace."
+  },
+  {
+   "id": "settings_player_editor",
+   "title": "Script editor",
+   "kind": "custom",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "create_file",
+     "title": "Create file",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "text",
+         "title": "Filename"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "Add"
+     ]
+    },
+    {
+     "id": "rename_file",
+     "title": "Edit filename",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "text",
+         "title": "Filename"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "Edit"
+     ]
+    },
+    {
+     "id": "delete_file",
+     "title": "Delete file",
+     "text": "Do you wish to delete the file \"file\"?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "empty": "Directory contains no items. Tap the plus button to add a new file.",
+   "notes": "App bar title is a dropdown selector switching between \"Scripts\" (lua files) and \"Script options\" (conf files). Body: list of files, each row has a type icon (lua = code icon, conf = settings icon), file name, and a trailing \"...\" button expanding a menu with \"Rename file\" and \"Delete file\". Tapping a file opens the code editor. FAB \"+\" adds a file. Filename errors: \"File already exists\", \"Invalid filename\"."
+  },
+  {
+   "id": "settings_player_code_editor",
+   "title": "file.lua",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Save",
+     "icon": "document-save-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "unsaved",
+     "title": "Warning",
+     "text": "You have unsaved changes. Do you still wish to go back?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "notes": "Reached by tapping a file in the mpv script editor (not via a settings link). Title = file name. Full-screen monospace code editor with line numbers and Lua/conf syntax highlighting. Save action enabled only after modification; back with unsaved changes shows the warning dialog."
+  },
+  {
+   "id": "settings_player_torrents",
+   "title": "Torrent",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "switch",
+       "title": "Enable TorrServer",
+       "default": false
+      },
+      {
+       "type": "text",
+       "title": "TorrServer port",
+       "default": "8090"
+      },
+      {
+       "type": "text",
+       "title": "Torrent trackers",
+       "default": "http://nyaa.tracker.wf:7777/announce\nhttp://anidex.moe:6969/announce\n..."
+      },
+      {
+       "type": "action",
+       "title": "Reset default torrent trackers string"
+      },
+      {
+       "type": "list",
+       "title": "Proxy mode",
+       "options": [
+        "None",
+        "Tracker",
+        "Peers",
+        "Full"
+       ],
+       "default": "None"
+      },
+      {
+       "type": "text",
+       "title": "Proxy url",
+       "default": ""
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "torrent_notice",
+     "title": "Legal Notice",
+     "text": "TorrServer relies on peer to peer file sharing to access content. By doing so, you also upload files to others. Any content you share is your sole responsibility.\n\nNo further notices will be issued.",
+     "groups": [],
+     "buttons": [
+      "OK"
+     ]
+    }
+   ],
+   "notes": "Notice dialog shown the first time torrents are enabled. All other rows disabled while torrents are off; proxy URL also disabled when proxy mode is None. Port dialog info \"Enter 0 to let system choose a port\", error \"Port must be a number between 0 and 65535\". Trackers is a multi-line edit (subtitle shows first two lines + \"...\"); default is a 26-line tracker list. Reset is enabled only when trackers differ from default. Proxy URL dialog info \"Supports http, https, socks4, socks4a, socks5, socks5h\"."
+  },
+  {
+   "id": "settings_player_advanced",
+   "title": "Advanced",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "switch",
+       "title": "Use user MPV files",
+       "subtitle": "Use files in mpv-config directory",
+       "default": false
+      },
+      {
+       "type": "text",
+       "title": "Edit MPV configuration file for further player settings",
+       "default": ""
+      },
+      {
+       "type": "text",
+       "title": "Edit MPV input file for keyboard mapping configuration",
+       "default": ""
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "mpv.conf and input.conf rows open a multi-line monospace text editor dialog; value is also written to the corresponding file in the mpv config dir."
+  },
+  {
+   "id": "settings_downloads",
+   "title": "Downloads",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "switch",
+       "title": "Only on Wi-Fi",
+       "default": true
+      },
+      {
+       "type": "action",
+       "title": "Chapter download speed limit",
+       "subtitle": "Off"
+      },
+      {
+       "type": "switch",
+       "title": "Save as CBZ archive",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Split tall images",
+       "subtitle": "Improves reader performance",
+       "default": true
+      },
+      {
+       "type": "list",
+       "title": "Maximum downloads",
+       "options": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+       ],
+       "default": "1"
+      },
+      {
+       "type": "info",
+       "title": "Will only download concurrently from self-hosted or unmetered sources"
+      }
+     ]
+    },
+    {
+     "title": "Delete chapters/episodes",
+     "items": [
+      {
+       "type": "switch",
+       "title": "After manually marked as read/watched",
+       "default": false
+      },
+      {
+       "type": "list",
+       "title": "After reading/watching automatically delete",
+       "options": [
+        "Disabled",
+        "Last read chapter",
+        "Second to last read chapter",
+        "Third to last read chapter",
+        "Fourth to last read chapter",
+        "Fifth to last read chapter"
+       ],
+       "default": "Disabled"
+      },
+      {
+       "type": "switch",
+       "title": "Allow deleting bookmarked chapters/episodes",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Allow downloading of fillermarked episodes",
+       "default": false
+      },
+      {
+       "type": "multi",
+       "title": "Excluded anime categories",
+       "options": [],
+       "default": []
+      },
+      {
+       "type": "multi",
+       "title": "Excluded manga categories",
+       "options": [],
+       "default": []
+      }
+     ]
+    },
+    {
+     "title": "Auto-download",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Download new episodes",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Skip downloading duplicate seen episodes",
+       "default": false
+      },
+      {
+       "type": "action",
+       "title": "Anime Categories",
+       "subtitle": "Include: All\nExclude: None"
+      },
+      {
+       "type": "switch",
+       "title": "Download new chapters",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Skip downloading duplicate read chapters",
+       "default": false
+      },
+      {
+       "type": "action",
+       "title": "Manga Categories",
+       "subtitle": "Include: All\nExclude: None"
+      }
+     ]
+    },
+    {
+     "title": "Download ahead",
+     "items": [
+      {
+       "type": "list",
+       "title": "Auto download while watching",
+       "options": [
+        "Disabled",
+        "Next 2 unseen episodes",
+        "Next 3 unseen episodes",
+        "Next 5 unseen episodes",
+        "Next 10 unseen episodes"
+       ],
+       "default": "Disabled"
+      },
+      {
+       "type": "list",
+       "title": "Auto download while reading",
+       "options": [
+        "Disabled",
+        "Next 2 unread chapters",
+        "Next 3 unread chapters",
+        "Next 5 unread chapters",
+        "Next 10 unread chapters"
+       ],
+       "default": "Disabled"
+      },
+      {
+       "type": "info",
+       "title": "Only works if the current chapter/episode + the next one are already downloaded."
+      }
+     ]
+    },
+    {
+     "title": "External downloader",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Always use external downloader for anime",
+       "default": false
+      },
+      {
+       "type": "list",
+       "title": "Downloader app preference",
+       "options": [
+        "None"
+       ],
+       "default": "None"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "speed_limit",
+     "title": "Chapter download speed limit",
+     "text": "Set to 0 to disable the speed limit.",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "slider",
+         "title": "Chapter download speed limit",
+         "min": 0,
+         "max": 100000,
+         "step": 100,
+         "default": 0,
+         "unit": "KiB/s"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "auto_download_anime_categories",
+     "title": "Anime Categories",
+     "text": "Entries in excluded categories will not be downloaded even if they are also in included categories.",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "auto_download_manga_categories",
+     "title": "Manga Categories",
+     "text": "Entries in excluded categories will not be downloaded even if they are also in included categories.",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "notes": "Speed limit subtitle is \"Off\" or \"N KiB/s\"; its dialog uses an outlined numeric chooser (+/- buttons, step 100, suffix KiB/s). Excluded-category multi lists contain the user's categories (dynamic). Auto-download sub-rows disabled while their parent switch is off. External downloader list = \"None\" plus installed IDM / ADM apps."
+  },
+  {
+   "id": "settings_tracking",
+   "title": "Tracking",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Tracking guide",
+     "icon": "help-about-symbolic"
+    },
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "switch",
+       "title": "Update progress after reading/watching",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Open track menu on adding to library",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Show next episode's airing time ",
+       "default": true
+      },
+      {
+       "type": "list",
+       "title": "Update progress when marked as read/watched",
+       "options": [
+        "Always",
+        "Always ask",
+        "Never"
+       ],
+       "default": "Always"
+      }
+     ]
+    },
+    {
+     "title": "Trackers",
+     "items": [
+      {
+       "type": "action",
+       "title": "MyAnimeList"
+      },
+      {
+       "type": "action",
+       "title": "AniList"
+      },
+      {
+       "type": "action",
+       "title": "Kitsu"
+      },
+      {
+       "type": "action",
+       "title": "MangaUpdates"
+      },
+      {
+       "type": "action",
+       "title": "Shikimori"
+      },
+      {
+       "type": "action",
+       "title": "Simkl"
+      },
+      {
+       "type": "action",
+       "title": "Bangumi"
+      },
+      {
+       "type": "info",
+       "title": "One-way sync to update the chapter progress in external tracker services. Set up tracking for individual entries from their tracking button."
+      }
+     ]
+    },
+    {
+     "title": "Enhanced trackers",
+     "items": [
+      {
+       "type": "action",
+       "title": "Komga"
+      },
+      {
+       "type": "action",
+       "title": "Kavita"
+      },
+      {
+       "type": "action",
+       "title": "Suwayomi"
+      },
+      {
+       "type": "action",
+       "title": "Jellyfin"
+      },
+      {
+       "type": "info",
+       "title": "Provides enhanced features for specific sources. Entries are automatically tracked when added to your library."
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "tracker_login",
+     "title": "Log in to Kitsu",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "text",
+         "title": "Email address"
+        },
+        {
+         "type": "text",
+         "title": "Password"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Login"
+     ]
+    },
+    {
+     "id": "tracker_logout",
+     "title": "Log out from Kitsu?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "Log out"
+     ]
+    }
+   ],
+   "notes": "Tracker rows: leading tracker logo in a rounded square, tracker name, trailing green check icon when logged in. Tap logs in (OAuth in browser for MAL/AniList/Shikimori/Simkl/Bangumi; username/email + password dialog for Kitsu (Email) and MangaUpdates (Username)), or opens the logout dialog when logged in (logout button is error-coloured, both buttons fill width). Login dialog has a close (X) icon in the title row and a password visibility toggle. Enhanced trackers are only listed if a matching source is installed; otherwise the info text appends \"Available but source not installed: Komga, Kavita\". Help action opens the tracking guide in a browser."
+  },
+  {
+   "id": "settings_browse",
+   "title": "Browse",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": "Sources",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Hide anime entries already in library",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Hide manga entries already in library",
+       "default": false
+      },
+      {
+       "type": "link",
+       "title": "Anime extension repos",
+       "subtitle": "0 stores",
+       "target": "settings_anime_extension_stores"
+      },
+      {
+       "type": "link",
+       "title": "Manga extension repos",
+       "subtitle": "0 stores",
+       "target": "settings_manga_extension_repos"
+      }
+     ]
+    },
+    {
+     "title": "NSFW (18+) sources",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Show in sources and extensions lists",
+       "subtitle": "Requires app restart to take effect",
+       "default": true
+      },
+      {
+       "type": "info",
+       "title": "This does not prevent unofficial or potentially incorrectly flagged extensions from surfacing NSFW (18+) content within the app."
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Toggling the NSFW switch requires device authentication."
+  },
+  {
+   "id": "settings_anime_extension_stores",
+   "title": "Extension stores",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Refresh",
+     "icon": "view-refresh-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "add_store",
+     "title": "Add extension store",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "text",
+         "title": "Store index URL"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "Add"
+     ]
+    },
+    {
+     "id": "add_store_deeplink",
+     "title": "Add extension store",
+     "text": "Do you wish to add the extension store below?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "Add"
+     ]
+    },
+    {
+     "id": "delete_store",
+     "title": "Remove extension store",
+     "text": "Do you wish to remove the extension store \"Store\" (https://example.org/index.min.json)?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "empty": "You haven't added an extension store yet",
+   "notes": "List of anime extension stores as elevated cards: top row = label icon + store name; bottom row of icon buttons: open website (globe), Discord (only if the store has one), copy URL, delete. Extended FAB \"Add\" bottom-right. While adding, the confirm button reads \"Processing…\"; duplicate error \"This extension store already exists\"."
+  },
+  {
+   "id": "settings_manga_extension_repos",
+   "title": "Extension repos",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Refresh",
+     "icon": "view-refresh-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "add_repo",
+     "title": "Add repo",
+     "text": "Add additional repos to Aniyomi. This should be a URL that ends with \"index.min.json\".",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "text",
+         "title": "Repo URL"
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "Add"
+     ]
+    },
+    {
+     "id": "delete_repo",
+     "title": "Delete repo",
+     "text": "Do you wish to delete the repo \"https://example.org\"?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    },
+    {
+     "id": "replace_repo",
+     "title": "Signing Key Fingerprint Already Exists",
+     "text": "Repository New has the same Signing Key Fingerprint as Old.\nIf this is expected, Old will be replaced, otherwise contact your repo maintainer.",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "Replace"
+     ]
+    },
+    {
+     "id": "confirm_add_repo",
+     "title": "Add repo",
+     "text": "Do you wish to add the repo \"https://example.org\"?",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "Add"
+     ]
+    }
+   ],
+   "empty": "You have no repos set.",
+   "notes": "List of manga extension repos as elevated cards: label icon + repo name; icon buttons open in browser, copy to clipboard, delete. Extended FAB \"Add\". Errors: \"Invalid repo URL\", \"This repo already exists!\"."
+  },
+  {
+   "id": "settings_data_storage",
+   "title": "Data and storage",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Tracking guide",
+     "icon": "help-about-symbolic"
+    },
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "action",
+       "title": "Storage location",
+       "subtitle": "No storage location set"
+      },
+      {
+       "type": "info",
+       "title": "Used for automatic backups, chapter downloads, and local source."
+      }
+     ]
+    },
+    {
+     "title": "Backup and restore",
+     "items": [
+      {
+       "type": "link",
+       "title": "Create backup",
+       "target": "settings_create_backup"
+      },
+      {
+       "type": "action",
+       "title": "Restore backup"
+      },
+      {
+       "type": "list",
+       "title": "Automatic backup frequency",
+       "options": [
+        "Off",
+        "Every 6 hours",
+        "Every 12 hours",
+        "Daily",
+        "Every 2 days",
+        "Weekly"
+       ],
+       "default": "Every 12 hours"
+      },
+      {
+       "type": "info",
+       "title": "You should keep copies of backups in other places as well. Backups may contain sensitive data including any stored passwords; be careful if sharing.\n\nLast automatically backed up: Today"
+      }
+     ]
+    },
+    {
+     "title": "Storage usage",
+     "items": [
+      {
+       "type": "info",
+       "title": "Available: 12.3 GB / Total: 64 GB"
+      },
+      {
+       "type": "action",
+       "title": "Storage"
+      },
+      {
+       "type": "action",
+       "title": "Clear chapter and episode cache",
+       "subtitle": "Used: 0 B"
+      },
+      {
+       "type": "switch",
+       "title": "Clear episode/chapter cache on app launch",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Export",
+     "items": [
+      {
+       "type": "action",
+       "title": "Library List"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "export_columns",
+     "title": "Select data to include",
+     "groups": [
+      {
+       "title": null,
+       "items": [
+        {
+         "type": "switch",
+         "title": "Title",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Type",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Author",
+         "default": true
+        },
+        {
+         "type": "switch",
+         "title": "Artist",
+         "default": true
+        }
+       ]
+      }
+     ],
+     "buttons": [
+      "Cancel",
+      "Save"
+     ]
+    }
+   ],
+   "notes": "Backup row is a full-width two-segment button: \"Create backup\" (opens Create backup screen) | \"Restore backup\" (opens a file chooser, then the Restore backup screen). Storage usage row shows a progress bar of used/total disk space with the text above. \"Storage\" (with storage icon) opens the Storage tab (outside settings). Export opens a checkbox dialog (Type/Author/Artist require Title), then a CSV save picker (aniyomi_library.csv). Help action opens the storage FAQ."
+  },
+  {
+   "id": "settings_create_backup",
+   "title": "Create backup",
+   "kind": "settings",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": "Library",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Library entries",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Chapters and episodes",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Tracking",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "History",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Categories",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "All read/watched entries",
+       "default": true
+      }
+     ]
+    },
+    {
+     "title": "Settings",
+     "items": [
+      {
+       "type": "switch",
+       "title": "App settings",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Extension stores",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Custom buttons",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Source settings",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Include sensitive settings (e.g., tracker login tokens)",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": "Extensions",
+     "items": [
+      {
+       "type": "switch",
+       "title": "Extensions",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "action",
+       "title": "Create"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Rows are labeled checkboxes inside section cards (titles Library / Settings / Extensions). Chapters, tracking, history and non-library entries are disabled unless Entries is checked; private settings disabled unless app or source settings are checked. A full-width \"Create\" button is pinned at the bottom (opens a save-file picker). On MIUI with optimization disabled a warning banner \"Backup/restore may not function properly if MIUI Optimization is disabled.\" is shown on top."
+  },
+  {
+   "id": "settings_restore_backup",
+   "title": "Restore backup",
+   "kind": "settings",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "switch",
+       "title": "Library",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Categories",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "App settings",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Extension stores",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Custom buttons",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Source settings",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Extensions",
+       "default": false
+      }
+     ]
+    },
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "action",
+       "title": "Restore"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Checkboxes in one section card, full-width \"Restore\" button pinned at the bottom. If the backup is incomplete an extra card lists \"You may need to install any missing extensions and log in to tracking services afterwards to use them.\" plus missing sources (\"Missing sources:\") and trackers (\"Trackers not logged into:\"); invalid files show \"Invalid backup file:\" with the error."
+  },
+  {
+   "id": "settings_security",
+   "title": "Security and privacy",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "switch",
+       "title": "Require unlock",
+       "default": false
+      },
+      {
+       "type": "list",
+       "title": "Lock when idle",
+       "options": [
+        "Always",
+        "After 1 minute",
+        "After 2 minutes",
+        "After 5 minutes",
+        "After 10 minutes",
+        "Never"
+       ],
+       "default": "Always"
+      },
+      {
+       "type": "switch",
+       "title": "Hide notification content",
+       "default": false
+      },
+      {
+       "type": "list",
+       "title": "Secure screen",
+       "options": [
+        "Always",
+        "Incognito mode",
+        "Never"
+       ],
+       "default": "Incognito mode"
+      },
+      {
+       "type": "info",
+       "title": "Secure screen hides app contents when switching apps and block screenshots"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Biometric lock disabled if the device has no authentication; lock-when-idle enabled only when biometric lock is on. Changing either requires authentication."
+  },
+  {
+   "id": "settings_advanced",
+   "title": "Advanced",
+   "kind": "settings",
+   "toolbar": [
+    {
+     "label": "Search",
+     "icon": "system-search-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "action",
+       "title": "Share crash logs",
+       "subtitle": "Saves error logs to a file for sharing with the developers"
+      },
+      {
+       "type": "switch",
+       "title": "Verbose logging",
+       "subtitle": "Print verbose logs to system log (reduces app performance)",
+       "default": false
+      },
+      {
+       "type": "link",
+       "title": "Debug info",
+       "target": "settings_debug_info"
+      },
+      {
+       "type": "action",
+       "title": "Onboarding guide"
+      },
+      {
+       "type": "action",
+       "title": "Manage notifications"
+      }
+     ]
+    },
+    {
+     "title": "Background activity",
+     "items": [
+      {
+       "type": "action",
+       "title": "Disable battery optimization",
+       "subtitle": "Helps with background library updates and backups"
+      },
+      {
+       "type": "action",
+       "title": "Don't kill my app!",
+       "subtitle": "Some manufacturers have additional app restrictions that kill background services. This website has more info on how to fix it."
+      }
+     ]
+    },
+    {
+     "title": "Data",
+     "items": [
+      {
+       "type": "action",
+       "title": "Reindex downloads",
+       "subtitle": "Force app to recheck downloaded chapters and episodes"
+      },
+      {
+       "type": "link",
+       "title": "Clear Manga database",
+       "subtitle": "Delete history for manga that are not saved in your library",
+       "target": "settings_clear_manga_database"
+      },
+      {
+       "type": "link",
+       "title": "Clear Anime database",
+       "subtitle": "Delete history for anime that are not saved in your library",
+       "target": "settings_clear_anime_database"
+      }
+     ]
+    },
+    {
+     "title": "Networking",
+     "items": [
+      {
+       "type": "action",
+       "title": "Clear cookies"
+      },
+      {
+       "type": "action",
+       "title": "Clear WebView data"
+      },
+      {
+       "type": "list",
+       "title": "DNS over HTTPS (DoH)",
+       "options": [
+        "Disabled",
+        "Cloudflare",
+        "Google",
+        "AdGuard",
+        "Quad9",
+        "AliDNS",
+        "DNSPod",
+        "360",
+        "Quad 101",
+        "Mullvad",
+        "Control D",
+        "Njalla",
+        "Shecan",
+        "LibreDNS"
+       ],
+       "default": "Disabled"
+      },
+      {
+       "type": "text",
+       "title": "Default user agent string",
+       "default": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0"
+      },
+      {
+       "type": "action",
+       "title": "Reset default user agent string"
+      }
+     ]
+    },
+    {
+     "title": "Library",
+     "items": [
+      {
+       "type": "action",
+       "title": "Refresh library covers"
+      },
+      {
+       "type": "action",
+       "title": "Reset per-series reader settings",
+       "subtitle": "Resets reading mode and orientation of all series"
+      }
+     ]
+    },
+    {
+     "title": "Reader",
+     "items": [
+      {
+       "type": "list",
+       "title": "Custom hardware bitmap threshold",
+       "subtitle": "If reader loads a blank image incrementally reduce the threshold.\nSelected: Default (4096)",
+       "options": [
+        "Default (4096)",
+        "3072",
+        "2048"
+       ],
+       "default": "Default (4096)"
+      },
+      {
+       "type": "switch",
+       "title": "Use legacy decoder for long strip reader",
+       "subtitle": "Affects performance. Only enable if reducing bitmap threshold doesn't fix blank image issues",
+       "default": false
+      },
+      {
+       "type": "action",
+       "title": "Custom display profile",
+       "subtitle": ""
+      }
+     ]
+    },
+    {
+     "title": "Extensions",
+     "items": [
+      {
+       "type": "list",
+       "title": "Installer",
+       "options": [
+        "Legacy",
+        "PackageInstaller",
+        "Shizuku",
+        "Private"
+       ],
+       "default": "PackageInstaller"
+      },
+      {
+       "type": "action",
+       "title": "Revoke trusted unknown extensions"
+      }
+     ]
+    },
+    {
+     "title": "Data Saver",
+     "items": [
+      {
+       "type": "list",
+       "title": "Data Saver",
+       "subtitle": "Compress images before downloading or loading in reader",
+       "options": [
+        "Disabled",
+        "Bandwidth Hero (requires a Bandwidth Hero Proxy server)",
+        "wsrv.nl",
+        "resmush.it"
+       ],
+       "default": "Disabled"
+      },
+      {
+       "type": "text",
+       "title": "Bandwidth Hero Proxy Server",
+       "subtitle": "Put Bandwidth Hero Proxy server url here",
+       "default": ""
+      },
+      {
+       "type": "switch",
+       "title": "Use data saver in the downloader",
+       "default": true
+      },
+      {
+       "type": "switch",
+       "title": "Ignore Jpeg Images",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Ignore Gif Animations",
+       "default": true
+      },
+      {
+       "type": "list",
+       "title": "Image Quality",
+       "subtitle": "Higher values mean that a higher percentage of the image quality is saved, but it also means the file size is larger, 80 percent is a good median between file size and image quality",
+       "options": [
+        "10%",
+        "20%",
+        "40%",
+        "50%",
+        "70%",
+        "80%",
+        "90%",
+        "95%"
+       ],
+       "default": "80%"
+      },
+      {
+       "type": "switch",
+       "title": "Compress to Jpeg",
+       "subtitle": "The Jpeg file size is considerably smaller then Webp is(meaning more data is saved), but it makes the images lose more quality as well.\nCurrently compresses to Webp",
+       "default": false
+      },
+      {
+       "type": "switch",
+       "title": "Convert to Black And White",
+       "default": false
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "shizuku_missing",
+     "title": "Shizuku",
+     "text": "Install and start Shizuku to use Shizuku as extension installer.",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "notes": "Onboarding guide opens the onboarding flow (outside settings); manage notifications opens the system notification settings. Reset user agent enabled only when the UA differs from default. Hardware bitmap threshold options are device-dependent multiples of 1024 (first = device max, marked default) and the row is disabled if the device limit <= 2048. \"Private\" installer is hidden on release builds; Package installer is hidden on MIUI. Data saver children: server + B/W only for Bandwidth Hero, image format disabled for reSmush.it, others disabled when Disabled. Image format subtitle switches to \"The Jpeg file size is considerably smaller then Webp is(meaning more data is saved), but it makes the images lose more quality as well.\nCurrently compresses to Jpeg\" when on."
+  },
+  {
+   "id": "settings_debug_info",
+   "title": "Debug info",
+   "kind": "settings",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "link",
+       "title": "Worker info",
+       "target": "settings_worker_info"
+      },
+      {
+       "type": "link",
+       "title": "Backup file schema",
+       "target": "settings_backup_schema"
+      }
+     ]
+    },
+    {
+     "title": "App info",
+     "items": [
+      {
+       "type": "action",
+       "title": "Version",
+       "subtitle": "Stable 0.18.2.1"
+      },
+      {
+       "type": "action",
+       "title": "Build time",
+       "subtitle": "10/8/26 12:00 PM"
+      },
+      {
+       "type": "action",
+       "title": "Profile compilation status",
+       "subtitle": "Compiled"
+      },
+      {
+       "type": "action",
+       "title": "WebView version",
+       "subtitle": "Android System WebView 130.0"
+      }
+     ]
+    },
+    {
+     "title": "Device info",
+     "items": [
+      {
+       "type": "action",
+       "title": "Model",
+       "subtitle": "Google Pixel 8 (shiba)"
+      },
+      {
+       "type": "action",
+       "title": "Android version",
+       "subtitle": "15 (AP4A.250105.002)"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Info rows are plain title/subtitle rows with no action. Device info may include a \"OneUI version\" or \"MIUI version\" row after Model on those devices."
+  },
+  {
+   "id": "settings_worker_info",
+   "title": "Worker info",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Copy to clipboard",
+     "icon": "edit-copy-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Horizontally scrollable monospace text dump with three sections, each a titleMedium heading followed by text: \"Enqueued\", \"Finished\", \"Running\". Each WorkManager job lists Id, Tags, State, next schedule; \"-\" when empty. Copy action copies all text."
+  },
+  {
+   "id": "settings_backup_schema",
+   "title": "Backup file schema",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Copy to clipboard",
+     "icon": "edit-copy-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Vertically scrollable monospace text showing the generated protobuf schema of the backup format, 16dp padding. Copy action copies it."
+  },
+  {
+   "id": "settings_clear_manga_database",
+   "title": "Clear Manga database",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Select all",
+     "icon": "edit-select-all-symbolic"
+    },
+    {
+     "label": "Select inverse",
+     "icon": "object-flip-horizontal-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "confirm_clear",
+     "title": "Are you sure? Completed episodes and chapters and progress of non-library entries will be lost",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "empty": "Nothing to clear",
+   "notes": "List of sources that have non-library entries in the database. Each 56dp row: source icon, source name (bodyMedium) with \"12 non-library entries in database\" below, trailing checkbox; selected rows get a tinted background. Full-width \"Delete\" button pinned at the bottom, enabled when something is selected. The confirm dialog shows only the text as its body. Toast after clearing: \"Entries deleted\"."
+  },
+  {
+   "id": "settings_clear_anime_database",
+   "title": "Clear Anime database",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Select all",
+     "icon": "edit-select-all-symbolic"
+    },
+    {
+     "label": "Select all",
+     "icon": "object-flip-horizontal-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [
+    {
+     "id": "confirm_clear",
+     "title": "Are you sure? Completed episodes and chapters and progress of non-library entries will be lost",
+     "groups": [],
+     "buttons": [
+      "Cancel",
+      "OK"
+     ]
+    }
+   ],
+   "empty": "Nothing to clear",
+   "notes": "List of sources that have non-library entries in the database. Each 56dp row: source icon, source name (bodyMedium) with \"12 non-library entries in database\" below, trailing checkbox; selected rows get a tinted background. Full-width \"Delete\" button pinned at the bottom, enabled when something is selected. The confirm dialog shows only the text as its body. Toast after clearing: \"Entries deleted\". (Note: the anime screen labels both toolbar actions \"Select all\" in source.)"
+  },
+  {
+   "id": "settings_about",
+   "title": "About",
+   "kind": "settings",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [
+    {
+     "title": null,
+     "items": [
+      {
+       "type": "action",
+       "title": "Version",
+       "subtitle": "Stable 0.18.2.1 (10/8/26 12:00 PM)"
+      },
+      {
+       "type": "action",
+       "title": "Check for updates"
+      },
+      {
+       "type": "action",
+       "title": "What's new"
+      },
+      {
+       "type": "action",
+       "title": "Help translate"
+      },
+      {
+       "type": "link",
+       "title": "Open source licenses",
+       "target": "settings_open_source_licenses"
+      },
+      {
+       "type": "action",
+       "title": "Privacy policy"
+      }
+     ]
+    }
+   ],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Top: centred app logo header with divider. Version row copies debug info to clipboard. Check-for-updates row (only when updater is enabled) shows a trailing spinner while checking, then toasts \"No new updates available\" or opens the new-update screen. What's new is hidden on debug builds. Bottom: centred row of three icon links: \"Website\" (globe), Discord, GitHub."
+  },
+  {
+   "id": "settings_open_source_licenses",
+   "title": "Open source licenses",
+   "kind": "custom",
+   "toolbar": [],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "AboutLibraries list: each row shows library name, author, version on the right, and license chips. Tap opens the library license screen."
+  },
+  {
+   "id": "settings_open_source_library_license",
+   "title": "Library name",
+   "kind": "custom",
+   "toolbar": [
+    {
+     "label": "Website",
+     "icon": "web-browser-symbolic"
+    }
+   ],
+   "menu": [],
+   "tabs": [],
+   "groups": [],
+   "sheets": [],
+   "dialogs": [],
+   "notes": "Title = library name. Body = HTML-rendered license text, scrollable, padded. Website action shown when the library has a URL."
+  }
+ ]
+}

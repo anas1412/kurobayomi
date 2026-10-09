@@ -1,0 +1,19 @@
+[package]
+name = "kuro-db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+kuro-platform = { path = "../kuro-platform", default-features = false }
+rusqlite = { workspace = true, features = ["hooks", "backup"] }
+serde_json = "1.0.151"
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+kuro-testkit = { path = "../kuro-testkit" }
+tempfile = { workspace = true }
+tracing-subscriber = "0.3.23"

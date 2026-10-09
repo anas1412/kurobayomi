@@ -1,0 +1,295 @@
+mod bind;
+mod clamp;
+mod data;
+mod entry;
+mod entry_model;
+mod live;
+mod locale;
+mod player;
+mod reader;
+mod reporter;
+mod screens;
+mod selection;
+mod settings;
+mod source_bridge;
+mod source_gate;
+mod toast;
+mod spec;
+mod ui;
+mod watch;
+
+use gtk::prelude::*;
+use kuro_platform::paths::Paths as _;
+use gtk::{glib, Box as GBox, Orientation as O};
+
+fn main() -> glib::ExitCode {
+    // before GTK is initialised, so this works without a display
+    if std::env::args().skip(1).any(|a| a == "--version") {
+        println!("{}", kuro_core::app_info::version_line());
+        return glib::ExitCode::SUCCESS;
+    }
+    // the detached crash reporter started by the panic hook: a window over the report file, none of the app state below
+    let mut args = std::env::args().skip(1);
+    if args.any(|a| a == "--crash-report") {
+        return reporter::run(args.next().unwrap_or_default().into());
+    }
+    let paths = kuro_platform::linux::LinuxPaths::system().expect("resolve app directories");
+    // the hook goes in first so a panic during the rest of startup is reported too
+    kuro_core::crash::install(paths.crash_dir());
+    let _log = match kuro_core::logging::init(cfg!(debug_assertions), &paths.log_dir()) {
+        Ok(log) => Some(log),
+        Err(e) => {
+            eprintln!("kurobayomi: file logging is off: {e}");
+            None
+        }
+    };
+    if let Err(e) = kuro_core::crash::prune(&paths.crash_dir(), kuro_core::crash::now_ms()) {
+        eprintln!("kurobayomi: could not prune crash reports: {e}");
+    }
+    let rt = kuro_core::runtime::build().expect("tokio runtime");
+
+    let app = gtk::Application::builder().application_id("io.github.blackbox.Kurobayomi").build();
+    // dev runs must not get handed off to an already-open window
+    if ["KUROBAYOMI_SMOKE", "KUROBAYOMI_OPEN", "KUROBAYOMI_SHOT"].iter().any(|v| std::env::var(v).is_ok()) {
+        app.set_flags(gtk::gio::ApplicationFlags::NON_UNIQUE);
+    }
+    app.connect_activate(build_ui);
+    // live queries of the entry screens are spawned on the runtime, so the GTK thread enters it while the app runs
+    let code = {
+        let _entered = rt.enter();
+        app.run()
+    };
+    // detached history flushes get up to 2 s to finish before the runtime goes away
+    let unfinished = kuro_domain::history::repo::join_pending_flushes(std::time::Duration::from_secs(2));
+    if unfinished > 0 {
+        eprintln!("kurobayomi: {unfinished} history flush(es) were still running at exit");
+    }
+    kuro_core::runtime::shutdown(rt);
+    code
+}
+
+fn build_ui(app: &gtk::Application) {
+    if let Err(e) = data::init() {
+        eprintln!("kurobayomi: cannot open the library databases: {e}");
+        app.quit();
+        return;
+    }
+    let win = gtk::ApplicationWindow::builder()
+        .application(app)
+        .title("Kurobayomi")
+        .default_width(1180)
+        .default_height(780)
+        .build();
+    // each page brings its own header bar, so the window titlebar stays empty
+    win.set_titlebar(Some(&GBox::new(O::Horizontal, 0)));
+
+    // [sidebar | content nav stack], plus a bottom tab bar that replaces the sidebar when narrow
+    let nav = gtk::Stack::new();
+    nav.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
+    nav.set_vexpand(true);
+    nav.set_hexpand(true);
+    nav.set_hhomogeneous(false);
+    ui::nav_init(&nav, &win);
+    let tabs = tabs();
+    nav.add_child(&tabs);
+    let sidebar = sidebar(&tabs);
+    let sep = gtk::Separator::new(O::Vertical);
+    let row = GBox::new(O::Horizontal, 0);
+    row.append(&sidebar);
+    row.append(&sep);
+    row.append(&nav);
+    let bottom = gtk::StackSwitcher::builder().stack(&tabs).halign(gtk::Align::Center).margin_top(6).margin_bottom(6).build();
+    let outer = GBox::new(O::Vertical, 0);
+    row.set_vexpand(true);
+    outer.append(&row);
+    outer.append(&bottom);
+    // the toast layer sits over the whole window (T-12a-014)
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(&outer));
+    let _toaster = toast::attach(&overlay);
+    win.set_child(Some(&overlay));
+
+    // reader/player are immersive: no sidebar or tab bar while they're on screen
+    let refresh = {
+        let (win, nav) = (win.clone(), nav.clone());
+        move || {
+            let immersive = nav.visible_child().is_some_and(|c| matches!(c.widget_name().as_str(), "screen:reader" | "screen:player"));
+            let wide = win.default_width() >= 760 || win.is_maximized();
+            sidebar.set_visible(wide && !immersive);
+            sep.set_visible(wide && !immersive);
+            bottom.set_visible(!wide && !immersive && nav.visible_child().as_ref() == Some(tabs.upcast_ref()));
+        }
+    };
+    let r = refresh.clone();
+    nav.connect_visible_child_notify(move |_| r());
+    let r = refresh.clone();
+    win.connect_default_width_notify(move |_| r());
+    let r = refresh.clone();
+    win.connect_maximized_notify(move |_| r());
+    refresh();
+    win.present();
+    // no keyboard focus ring on the first header button at startup
+    GtkWindowExt::set_focus(&win, None::<&gtk::Widget>);
+
+    // Escape / Alt+Left goes back, like Aniyomi's back gesture
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(|_, key, _, state| {
+        let back = key == gtk::gdk::Key::Escape || (key == gtk::gdk::Key::Left && state.contains(gtk::gdk::ModifierType::ALT_MASK));
+        if back {
+            ui::pop();
+        }
+        if back { glib::Propagation::Stop } else { glib::Propagation::Proceed }
+    });
+    win.add_controller(keys);
+
+    // dev hooks: KUROBAYOMI_OPEN=<screen id> starts on that screen; KUROBAYOMI_SMOKE=1 opens every
+    // screen, sheet and dialog once and quits (a panic or GTK critical shows up in the output)
+    if let Some((w, h)) = std::env::var("KUROBAYOMI_SIZE").ok().and_then(|v| v.split_once('x').map(|(w, h)| (w.parse().unwrap_or(1180), h.parse().unwrap_or(780)))) {
+        win.set_default_size(w, h);
+    }
+    if let Ok(id) = std::env::var("KUROBAYOMI_OPEN") {
+        ui::open(&id);
+        if let Some(sh) = std::env::var("KUROBAYOMI_SHEET").ok().and_then(|n| ui::screen(&id).sheets.into_iter().find(|s| s.id == n)) {
+            ui::show_sheet(&sh);
+        }
+    }
+    // KUROBAYOMI_SHOT=file.png renders the window to a PNG and quits (no focus-dependent screenshots)
+    if let Ok(path) = std::env::var("KUROBAYOMI_SHOT") {
+        let (w, app) = (win.clone(), app.clone());
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1200), move || {
+            let snap = gtk::Snapshot::new();
+            gtk::WidgetPaintable::new(Some(&w)).snapshot(&snap, w.width() as f64, w.height() as f64);
+            if let (Some(node), Some(r)) = (snap.to_node(), w.renderer()) {
+                r.render_texture(&node, None).save_to_png(&path).expect("save png");
+            }
+            app.quit();
+        });
+    }
+    if std::env::var("KUROBAYOMI_SMOKE").is_ok() {
+        let mut ids: Vec<String> = ui::with_spec(|s| s.screens.keys().cloned().collect());
+        ids.sort();
+        let (mut sheets, mut dialogs) = (0, 0);
+        for id in &ids {
+            ui::open(id);
+            let s = ui::screen(id);
+            for sh in &s.sheets {
+                ui::show_sheet(sh);
+                sheets += 1;
+            }
+            for d in &s.dialogs {
+                ui::show_dialog(d);
+                dialogs += 1;
+            }
+            for w in gtk::Window::list_toplevels() {
+                if let Ok(w) = w.downcast::<gtk::Window>() {
+                    if w != *win.upcast_ref::<gtk::Window>() {
+                        w.destroy();
+                    }
+                }
+            }
+        }
+        screens::open_entry("Title 1", true);
+        screens::open_entry("Title 1", false);
+        println!("smoke: {} screens, {sheets} sheets, {dialogs} dialogs opened", ids.len());
+        app.quit();
+    }
+}
+
+/// One page per Aniyomi nav destination, each with its own header (title + that tab's actions).
+fn tabs() -> gtk::Stack {
+    let tabs = gtk::Stack::new();
+    tabs.set_transition_type(gtk::StackTransitionType::Crossfade);
+    tabs.set_hhomogeneous(false);
+    for n in ui::with_spec(|s| s.nav.clone()) {
+        let Some(b) = screens::body(&n.id) else { continue };
+        let title = if n.id == "library" { n.title.clone() } else { ui::screen(&n.id).title };
+        tabs.add_titled(&ui::page(&title, &b.content, b.end, false), Some(&n.id), &n.title).set_icon_name(&n.icon);
+    }
+    tabs
+}
+
+/// GNOME-style navigation sidebar with Aniyomi's badges (new updates, extension updates).
+fn sidebar(tabs: &gtk::Stack) -> GBox {
+    let header = gtk::HeaderBar::new();
+    header.set_decoration_layout(Some(&ui::decoration(true)));
+    let title = gtk::Label::builder().label("Kurobayomi").css_classes(["title"]).build();
+    header.set_title_widget(Some(&title));
+    let toggle = gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Collapse sidebar").build();
+    header.pack_start(&toggle);
+
+    let list = gtk::ListBox::new();
+    list.add_css_class("navigation-sidebar");
+    list.set_valign(gtk::Align::Center);
+    let ids: Vec<String> = ui::with_spec(|s| s.nav.iter().map(|n| n.id.clone()).collect());
+    // widgets that hide in icon-only mode, and the dots that replace badges there
+    let (mut expanded, mut dots, mut rows): (Vec<gtk::Widget>, Vec<gtk::Widget>, Vec<GBox>) = (vec![], vec![], vec![]);
+    let mut squares: Vec<(gtk::Image, gtk::ListBoxRow)> = vec![]; // bigger icon + square selection in icon-only mode
+    for n in ui::with_spec(|s| s.nav.clone()) {
+        let h = GBox::new(O::Horizontal, 8);
+        h.set_margin_start(6);
+        h.set_margin_end(6);
+        h.set_margin_top(6);
+        h.set_margin_bottom(6);
+        let badge = match n.id.as_str() { "updates" => "8", "browse" => "1", _ => "" };
+        let icon = gtk::Overlay::new();
+        let img = gtk::Image::from_icon_name(&n.icon);
+        icon.set_child(Some(&img));
+        h.append(&icon);
+        let label = gtk::Label::builder().label(&n.title).xalign(0.0).hexpand(true).build();
+        h.append(&label);
+        expanded.push(label.upcast());
+        if !badge.is_empty() {
+            let b = gtk::Label::builder().label(badge).css_classes(["accent", "caption-heading"]).width_chars(3).xalign(1.0).build();
+            h.append(&b);
+            expanded.push(b.upcast());
+            let dot = gtk::Label::builder().use_markup(true).label("<span size=\"5pt\">●</span>").css_classes(["accent"]).halign(gtk::Align::End).valign(gtk::Align::Start).visible(false).build();
+            icon.add_overlay(&dot);
+            dots.push(dot.upcast());
+        }
+        let tip = if badge.is_empty() { n.title.clone() } else { format!("{} ({badge})", n.title) };
+        let row = gtk::ListBoxRow::builder().child(&h).tooltip_text(tip).build();
+        list.append(&row);
+        squares.push((img, row));
+        rows.push(h);
+    }
+    {
+        let (tabs, ids) = (tabs.clone(), ids.clone());
+        list.connect_row_activated(move |_, r| {
+            ui::pop_to_root();
+            tabs.set_visible_child_name(&ids[r.index() as usize]);
+        });
+    }
+    // keep the selection in sync when the bottom bar (narrow mode) switches tabs
+    let l2 = list.clone();
+    tabs.connect_visible_child_name_notify(move |t| {
+        let i = t.visible_child_name().and_then(|n| ids.iter().position(|x| *x == n));
+        if let Some(r) = i.and_then(|i| l2.row_at_index(i as i32)) {
+            l2.select_row(Some(&r));
+        }
+    });
+    list.select_row(list.row_at_index(0).as_ref());
+
+    let b = GBox::new(O::Vertical, 0);
+    b.append(&header);
+    b.append(&gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_width(true).vexpand(true).build());
+
+    // icon-only rail: hide labels/badges/title, show badge dots, drop the app-icon decoration
+    toggle.connect_toggled(move |t| {
+        let rail = t.is_active();
+        expanded.iter().for_each(|w| w.set_visible(!rail));
+        dots.iter().for_each(|w| w.set_visible(rail));
+        rows.iter().for_each(|h| h.set_halign(if rail { gtk::Align::Center } else { gtk::Align::Fill }));
+        for (img, row) in &squares {
+            img.set_pixel_size(if rail { 24 } else { -1 });
+            row.set_halign(if rail { gtk::Align::Center } else { gtk::Align::Fill });
+            row.set_size_request(if rail { 48 } else { -1 }, if rail { 48 } else { -1 });
+        }
+        title.set_visible(!rail);
+        header.set_decoration_layout(Some(if rail { ":".to_string() } else { ui::decoration(true) }.as_str()));
+        t.set_tooltip_text(Some(if rail { "Expand sidebar" } else { "Collapse sidebar" }));
+    });
+    if std::env::var("KUROBAYOMI_RAIL").is_ok() {
+        toggle.set_active(true);
+    }
+    b
+}

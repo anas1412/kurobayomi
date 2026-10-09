@@ -1,0 +1,1634 @@
+{
+  "screens": [
+    {
+      "id": "reader",
+      "title": "Reader",
+      "kind": "custom",
+      "toolbar": [
+        {
+          "label": "Bookmark chapter",
+          "icon": "bookmark-new-symbolic"
+        }
+      ],
+      "menu": [
+        "Open in WebView",
+        "Open in browser",
+        "Share"
+      ],
+      "tabs": [],
+      "groups": [
+        {
+          "title": "Top app bar",
+          "items": [
+            {
+              "type": "info",
+              "title": "Manga title (title line)"
+            },
+            {
+              "type": "info",
+              "title": "Chapter name (subtitle line)"
+            },
+            {
+              "type": "action",
+              "title": "Bookmark chapter",
+              "subtitle": "Toggles; label becomes \"Unbookmark chapter\" and icon filled when bookmarked"
+            }
+          ]
+        },
+        {
+          "title": "Chapter navigator",
+          "items": [
+            {
+              "type": "action",
+              "title": "Previous chapter"
+            },
+            {
+              "type": "slider",
+              "title": "Page",
+              "min": 1,
+              "max": 20,
+              "step": 1,
+              "default": 1
+            },
+            {
+              "type": "action",
+              "title": "Next chapter"
+            }
+          ]
+        },
+        {
+          "title": "Bottom bar",
+          "items": [
+            {
+              "type": "action",
+              "title": "Reading mode",
+              "subtitle": "Opens reading mode sheet"
+            },
+            {
+              "type": "action",
+              "title": "Rotation",
+              "subtitle": "Opens orientation sheet"
+            },
+            {
+              "type": "action",
+              "title": "Crop borders",
+              "subtitle": "Toggles crop borders for current viewer type; toasts \"On\" / \"Off\""
+            },
+            {
+              "type": "action",
+              "title": "Settings",
+              "subtitle": "Opens reader settings dialog"
+            }
+          ]
+        },
+        {
+          "title": "Chapter transition",
+          "items": [
+            {
+              "type": "info",
+              "title": "Previous:"
+            },
+            {
+              "type": "info",
+              "title": "Current:"
+            },
+            {
+              "type": "info",
+              "title": "Finished:"
+            },
+            {
+              "type": "info",
+              "title": "Next:"
+            },
+            {
+              "type": "info",
+              "title": "There's no previous chapter"
+            },
+            {
+              "type": "info",
+              "title": "There's no next chapter"
+            },
+            {
+              "type": "info",
+              "title": "Skipping 3 chapters, either the source is missing them or they have been filtered out"
+            },
+            {
+              "type": "info",
+              "title": "Loading pages…"
+            },
+            {
+              "type": "info",
+              "title": "Failed to load pages: %s"
+            },
+            {
+              "type": "action",
+              "title": "Retry"
+            }
+          ]
+        },
+        {
+          "title": "Tap zone overlay",
+          "items": [
+            {
+              "type": "info",
+              "title": "Menu"
+            },
+            {
+              "type": "info",
+              "title": "Prev"
+            },
+            {
+              "type": "info",
+              "title": "Next"
+            },
+            {
+              "type": "info",
+              "title": "Left"
+            },
+            {
+              "type": "info",
+              "title": "Right"
+            }
+          ]
+        },
+        {
+          "title": "Page indicator",
+          "items": [
+            {
+              "type": "info",
+              "title": "10 / 69"
+            }
+          ]
+        }
+      ],
+      "sheets": [
+        {
+          "id": "reader_settings",
+          "title": "Settings",
+          "tabs": [
+            {
+              "title": "Reading mode",
+              "groups": [
+                {
+                  "title": "For this series",
+                  "items": [
+                    {
+                      "type": "chips",
+                      "title": "Reading mode",
+                      "options": [
+                        "Default",
+                        "Paged (left to right)",
+                        "Paged (right to left)",
+                        "Paged (vertical)",
+                        "Long strip",
+                        "Long strip with gaps"
+                      ],
+                      "default": "Default"
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Rotation",
+                      "options": [
+                        "Default",
+                        "Free",
+                        "Portrait",
+                        "Landscape",
+                        "Locked portrait",
+                        "Locked landscape",
+                        "Reverse portrait"
+                      ],
+                      "default": "Default"
+                    }
+                  ]
+                },
+                {
+                  "title": "Paged",
+                  "items": [
+                    {
+                      "type": "chips",
+                      "title": "Tap zones",
+                      "options": [
+                        "Default",
+                        "L shaped",
+                        "Kindle-ish",
+                        "Edge",
+                        "Right and Left",
+                        "Disabled"
+                      ],
+                      "default": "Default"
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Invert tap zones",
+                      "options": [
+                        "None",
+                        "Horizontal",
+                        "Vertical",
+                        "Both"
+                      ],
+                      "default": "None"
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Scale type",
+                      "options": [
+                        "Fit screen",
+                        "Stretch",
+                        "Fit width",
+                        "Fit height",
+                        "Original size",
+                        "Smart fit"
+                      ],
+                      "default": "Fit screen"
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Zoom start position",
+                      "options": [
+                        "Automatic",
+                        "Left",
+                        "Right",
+                        "Center"
+                      ],
+                      "default": "Automatic"
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Crop borders",
+                      "default": false
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Automatically zoom into wide images",
+                      "default": true
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Pan wide images",
+                      "default": true
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Split wide pages",
+                      "default": false
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Invert split page placement",
+                      "default": false,
+                      "subtitle": "Only shown when Split wide pages is on"
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Rotate wide pages to fit",
+                      "default": false
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Flip orientation of rotated wide pages",
+                      "default": false,
+                      "subtitle": "Only shown when Rotate wide pages to fit is on"
+                    }
+                  ]
+                },
+                {
+                  "title": "Long strip",
+                  "items": [
+                    {
+                      "type": "chips",
+                      "title": "Tap zones",
+                      "options": [
+                        "Default",
+                        "L shaped",
+                        "Kindle-ish",
+                        "Edge",
+                        "Right and Left",
+                        "Disabled"
+                      ],
+                      "default": "Default"
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Invert tap zones",
+                      "options": [
+                        "None",
+                        "Horizontal",
+                        "Vertical",
+                        "Both"
+                      ],
+                      "default": "None"
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Side padding",
+                      "min": 0,
+                      "max": 25,
+                      "step": 1,
+                      "default": 0,
+                      "unit": "%"
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Crop borders",
+                      "default": false
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Split wide pages",
+                      "default": false
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Invert split page placement",
+                      "default": false,
+                      "subtitle": "Only shown when Split wide pages is on"
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Rotate wide pages to fit",
+                      "default": false
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Flip orientation of rotated wide pages",
+                      "default": false,
+                      "subtitle": "Only shown when Rotate wide pages to fit is on"
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Double tap to zoom",
+                      "default": true
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Disable zoom out",
+                      "default": false
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "General",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "chips",
+                      "title": "Background color",
+                      "options": [
+                        "Black",
+                        "Gray",
+                        "White",
+                        "Auto"
+                      ],
+                      "default": "Black"
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Show page number",
+                      "default": true
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Fullscreen",
+                      "default": true
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Show content in cutout area",
+                      "default": true,
+                      "subtitle": "Only shown when device has a display cutout and Fullscreen is on"
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Keep screen on",
+                      "default": true
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Show actions on long tap",
+                      "default": true
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Always show chapter transition",
+                      "default": true
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Animate page transitions",
+                      "default": true
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Flash on page change",
+                      "default": false
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Flash duration",
+                      "min": 100,
+                      "max": 1500,
+                      "step": 100,
+                      "default": 100,
+                      "unit": "ms"
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Flash every",
+                      "min": 1,
+                      "max": 10,
+                      "step": 1,
+                      "default": 1,
+                      "unit": "pages"
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Flash with",
+                      "options": [
+                        "Black",
+                        "White",
+                        "White and Black"
+                      ],
+                      "default": "Black"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "Custom filter",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "switch",
+                      "title": "Custom brightness",
+                      "default": false
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Custom brightness",
+                      "min": -75,
+                      "max": 100,
+                      "step": 1,
+                      "default": 0
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Custom color filter",
+                      "default": false
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Red",
+                      "min": 0,
+                      "max": 255,
+                      "step": 1,
+                      "default": 0
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Green",
+                      "min": 0,
+                      "max": 255,
+                      "step": 1,
+                      "default": 0
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Blue",
+                      "min": 0,
+                      "max": 255,
+                      "step": 1,
+                      "default": 0
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Alpha",
+                      "min": 0,
+                      "max": 255,
+                      "step": 1,
+                      "default": 0
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Color filter blend mode",
+                      "options": [
+                        "Default",
+                        "Multiply",
+                        "Screen",
+                        "Overlay",
+                        "Dodge / Lighten",
+                        "Burn / Darken"
+                      ],
+                      "default": "Default"
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Grayscale",
+                      "default": false
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Inverted",
+                      "default": false
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "dialogs": [
+        {
+          "id": "reading_mode_select",
+          "title": "Reading mode",
+          "groups": [
+            {
+              "title": null,
+              "items": [
+                {
+                  "type": "chips",
+                  "title": "Reading mode",
+                  "options": [
+                    "Paged (left to right)",
+                    "Paged (right to left)",
+                    "Paged (vertical)",
+                    "Long strip",
+                    "Long strip with gaps"
+                  ]
+                }
+              ]
+            }
+          ],
+          "buttons": [
+            "Revert to default",
+            "Apply"
+          ]
+        },
+        {
+          "id": "orientation_select",
+          "title": "Rotation",
+          "groups": [
+            {
+              "title": null,
+              "items": [
+                {
+                  "type": "chips",
+                  "title": "Rotation",
+                  "options": [
+                    "Free",
+                    "Portrait",
+                    "Landscape",
+                    "Locked portrait",
+                    "Locked landscape",
+                    "Reverse portrait"
+                  ]
+                }
+              ]
+            }
+          ],
+          "buttons": [
+            "Revert to default",
+            "Apply"
+          ]
+        },
+        {
+          "id": "page_actions",
+          "title": "",
+          "groups": [
+            {
+              "title": null,
+              "items": [
+                {
+                  "type": "action",
+                  "title": "Set as cover"
+                },
+                {
+                  "type": "action",
+                  "title": "Copy to clipboard"
+                },
+                {
+                  "type": "action",
+                  "title": "Share"
+                },
+                {
+                  "type": "action",
+                  "title": "Save"
+                }
+              ]
+            }
+          ],
+          "buttons": []
+        },
+        {
+          "id": "set_cover_confirm",
+          "title": "",
+          "text": "Use this image as cover art?",
+          "groups": [],
+          "buttons": [
+            "Cancel",
+            "OK"
+          ]
+        },
+        {
+          "id": "loading",
+          "title": "",
+          "text": "Loading…",
+          "groups": [],
+          "buttons": []
+        }
+      ],
+      "notes": "Full-screen page viewer (Paged L2R/R2L/vertical pager, or Long strip/Long strip with gaps recycler). Tapping the center tap zone toggles the menus; menus slide in/out vertically (200 ms). Menu bars use surface elevated 3dp at 90% (dark) / 95% (light) opacity; status/nav bars tinted the same. TOP: standard app bar — back arrow left, two-line title (manga title, chapter name below as subtitle); tapping the bar opens the manga details screen. Right side: Bookmark icon button (outline BookmarkBorder / filled Bookmark when bookmarked), then overflow ⋮ menu with Open in WebView, Open in browser, Share (overflow items only for HTTP sources). BOTTOM (stacked, 8dp gap): (1) Chapter navigator row, 8dp side padding (24dp tablet): round filled icon button SkipPrevious on the left, then a rounded-24dp pill (same translucent bg) containing current page number, a slider (1..totalPages, haptic tick while dragging) and total page count, then round SkipNext button on the right. In R2L mode the pill's direction flips and the left button becomes Next chapter / right button Previous chapter. Pill is hidden (spacer) if only 1 page. (2) Bottom bar: full-width row, 8dp padding, 4 icon buttons spaced evenly: Reading mode (icon of current mode), Rotation (icon of current orientation), Crop borders (crop / crop-off icon), Settings (gear). PAGE INDICATOR: when menus are hidden and Show page number is on, text \"current / total\" centered at the bottom, small bold light text (235,235,235) with dark 4px stroke outline, letterSpacing 1sp. SETTINGS DIALOG: tabbed dialog (max 75% height) with tabs Reading mode | General | Custom filter, vertically scrollable content. On the Custom filter tab the dim is removed and menus hidden so the page is visible. Reading mode tab: heading 'For this series' then two chip rows (per-series values), then heading 'Paged' or 'Long strip' depending on current viewer with its settings. Checkbox rows (CheckboxItem) are modeled as switches. Invert tap zones row hidden when Tap zones = Disabled. Upstream bug: in Paged, the 'Split wide pages' checkbox is bound to the invert pref and 'Invert split page placement' to the rotate-invert pref. General tab: Flash duration / Flash every / Flash with only shown while Flash on page change is on; Flash duration slider is 1..15 (x100 ms), value text '%s ms'; Flash every value text '1 page' / 'N pages'. Custom filter tab: brightness slider shown only while Custom brightness is on (-75..-1 darkens with black overlay, 0 = system, 1..100 sets brightness); RGBA sliders + blend mode chips only while Custom color filter is on (Overlay/Lighten/Darken only on Android 9+). Sliders show value pill. READING MODE / ROTATION SHEETS: adaptive bottom sheet with titled icon grid (icon above label toggle buttons) of options excluding Default; footer row: outlined 'Revert to default' (left, only if per-series value is not Default) and tonal 'Apply' with check icon (right). Choosing shows a toast with the mode name. PAGE ACTIONS (long-press a page, if Show actions on long tap): adaptive sheet with one row of 4 equal-width icon+label action buttons: Set as cover (photo), Copy to clipboard, Share, Save; Set as cover asks confirmation alert. Toasts: Picture saved, Cover updated, Please add the entry to your library before doing this, Failed to update cover. CHAPTER TRANSITION page (between chapters, max width 460dp, centered): Next transition = 'Finished:' header + current chapter name (titleLarge 20sp, max 5 lines, CheckCircle icon inline before name if downloaded) + scanlator (small, dimmed), 24dp gap, optional outlined warning card (warning icon, error tint) with missing-chapters text, then 'Next:' + next chapter. Prev transition = 'Previous:' + previous chapter, then 'Current:' + current. Missing side replaced by outlined info card 'There's no next/previous chapter'. Below it in pager: spinner + 'Loading pages…' or error text + Retry button. TAP ZONE OVERLAY: shown on first open / tap-zone change: colored translucent regions labelled Menu (gray-mauve), Prev (orange), Next (green), Left (dark red), Right (light blue) in 64px white text with black border. Loading dialog: spinner + 'Loading…' while switching chapters."
+    },
+    {
+      "id": "player",
+      "title": "Player",
+      "kind": "custom",
+      "toolbar": [
+        {
+          "label": "Back",
+          "icon": "go-previous-symbolic"
+        },
+        {
+          "label": "Auto-play",
+          "icon": "media-playback-start-symbolic"
+        },
+        {
+          "label": "Subtitles",
+          "icon": "media-view-subtitles-symbolic"
+        },
+        {
+          "label": "Audio",
+          "icon": "audio-x-generic-symbolic"
+        },
+        {
+          "label": "Qualities",
+          "icon": "video-display-symbolic"
+        },
+        {
+          "label": "More",
+          "icon": "view-more-symbolic"
+        }
+      ],
+      "menu": [],
+      "tabs": [],
+      "groups": [
+        {
+          "title": "Top left",
+          "items": [
+            {
+              "type": "action",
+              "title": "Back"
+            },
+            {
+              "type": "info",
+              "title": "Anime title"
+            },
+            {
+              "type": "info",
+              "title": "Episode title"
+            }
+          ]
+        },
+        {
+          "title": "Top right",
+          "items": [
+            {
+              "type": "switch",
+              "title": "Auto-play",
+              "default": false,
+              "subtitle": "Toast: Auto-play is on / Auto-play is off"
+            },
+            {
+              "type": "action",
+              "title": "Subtitles",
+              "subtitle": "Tap: Subtitles sheet; long press: Subtitles settings panel"
+            },
+            {
+              "type": "action",
+              "title": "Audio",
+              "subtitle": "Tap: Audio sheet; long press: Audio delay panel"
+            },
+            {
+              "type": "action",
+              "title": "Qualities",
+              "subtitle": "Only for online episodes; tap or long press opens Qualities sheet"
+            },
+            {
+              "type": "action",
+              "title": "More",
+              "subtitle": "Tap: More sheet; long press: Filters panel"
+            }
+          ]
+        },
+        {
+          "title": "Middle",
+          "items": [
+            {
+              "type": "action",
+              "title": "Previous episode"
+            },
+            {
+              "type": "action",
+              "title": "Play / Pause"
+            },
+            {
+              "type": "action",
+              "title": "Next episode"
+            }
+          ]
+        },
+        {
+          "title": "Bottom left",
+          "items": [
+            {
+              "type": "action",
+              "title": "Lock controls"
+            },
+            {
+              "type": "action",
+              "title": "Rotate",
+              "subtitle": "Cycles screen orientation"
+            },
+            {
+              "type": "action",
+              "title": "1.00x",
+              "subtitle": "Tap: +0.25x (wraps 2.00x -> 0.25x) and saves as default speed; long press: Playback speed sheet"
+            },
+            {
+              "type": "action",
+              "title": "Current chapter",
+              "subtitle": "Chip with chapter start time • chapter name; opens Chapters sheet"
+            }
+          ]
+        },
+        {
+          "title": "Bottom right",
+          "items": [
+            {
+              "type": "action",
+              "title": "Skip Opening",
+              "subtitle": "Skip-intro button (Skip %s with Opening/Ending/Recap/Mixed opening, or \"Don't skip\"); replaces the custom button while active"
+            },
+            {
+              "type": "action",
+              "title": "Custom button",
+              "subtitle": "Primary (favorite) custom button; tap executes, long press runs long-press action"
+            },
+            {
+              "type": "action",
+              "title": "Picture-in-picture",
+              "subtitle": "Only when PiP is supported and enabled"
+            },
+            {
+              "type": "action",
+              "title": "Aspect ratio",
+              "subtitle": "Cycles Fit to screen -> Stretched to screen -> Cropped to screen; shows toast-pill with name"
+            }
+          ]
+        },
+        {
+          "title": "Seekbar",
+          "items": [
+            {
+              "type": "info",
+              "title": "00:00"
+            },
+            {
+              "type": "slider",
+              "title": "Position",
+              "min": 0,
+              "max": 1440,
+              "step": 1,
+              "default": 0,
+              "unit": "s"
+            },
+            {
+              "type": "info",
+              "title": "23:40"
+            }
+          ]
+        },
+        {
+          "title": "Gesture overlays",
+          "items": [
+            {
+              "type": "info",
+              "title": "+10 seconds"
+            },
+            {
+              "type": "info",
+              "title": "+01:30\n[12:34]"
+            },
+            {
+              "type": "info",
+              "title": "Volume slider"
+            },
+            {
+              "type": "info",
+              "title": "Brightness slider"
+            },
+            {
+              "type": "info",
+              "title": "Unlock"
+            },
+            {
+              "type": "info",
+              "title": "Fit to screen"
+            }
+          ]
+        }
+      ],
+      "sheets": [
+        {
+          "id": "subtitle_tracks",
+          "title": "Subtitles",
+          "tabs": [
+            {
+              "title": "Subtitles",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "action",
+                      "title": "Palette",
+                      "subtitle": "Opens Subtitles settings panel"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Delay",
+                      "subtitle": "Opens Subtitle delay panel"
+                    }
+                  ]
+                },
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "action",
+                      "title": "Add external subtitles"
+                    }
+                  ]
+                },
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "multi",
+                      "title": "Tracks",
+                      "options": [
+                        "Off",
+                        "#1: English (eng)",
+                        "#2: Signs (eng)"
+                      ],
+                      "default": []
+                    }
+                  ]
+                },
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "info",
+                      "title": "Secondary subtitles will have no ASS/SSA Styling."
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "audio_tracks",
+          "title": "Audio",
+          "tabs": [
+            {
+              "title": "Audio",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "action",
+                      "title": "Delay",
+                      "subtitle": "Opens Audio delay panel"
+                    }
+                  ]
+                },
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "action",
+                      "title": "Add external audio tracks"
+                    }
+                  ]
+                },
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "list",
+                      "title": "Tracks",
+                      "options": [
+                        "Off",
+                        "#1: Japanese (jpn)",
+                        "#2: English (eng)"
+                      ],
+                      "default": "#1: Japanese (jpn)"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "quality_tracks",
+          "title": "Qualities",
+          "tabs": [
+            {
+              "title": "Qualities",
+              "groups": [
+                {
+                  "title": "Hoster A",
+                  "items": [
+                    {
+                      "type": "info",
+                      "title": "3 videos"
+                    },
+                    {
+                      "type": "list",
+                      "title": "Videos",
+                      "options": [
+                        "1080p",
+                        "720p",
+                        "480p"
+                      ],
+                      "default": "1080p"
+                    }
+                  ]
+                },
+                {
+                  "title": "Hoster B",
+                  "items": [
+                    {
+                      "type": "info",
+                      "title": "Tap to load videos"
+                    }
+                  ]
+                },
+                {
+                  "title": "Hoster C",
+                  "items": [
+                    {
+                      "type": "info",
+                      "title": "Failed to load videos"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "chapters",
+          "title": "Chapters",
+          "tabs": [
+            {
+              "title": "Chapters",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "list",
+                      "title": "Chapters",
+                      "options": [
+                        "#1: Intro  00:00",
+                        "#2: Opening  01:30",
+                        "#3: Part A  03:00",
+                        "#4: Ending  21:30"
+                      ],
+                      "default": "#1: Intro  00:00"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "playback_speed",
+          "title": "Speed",
+          "tabs": [
+            {
+              "title": "Speed",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "slider",
+                      "title": "Speed",
+                      "min": 0.01,
+                      "max": 6,
+                      "step": 0.01,
+                      "default": 1,
+                      "unit": "x"
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Presets",
+                      "options": [
+                        "0.25x",
+                        "0.50x",
+                        "0.75x",
+                        "1.00x",
+                        "1.25x",
+                        "1.50x",
+                        "1.75x",
+                        "2.00x",
+                        "2.50x",
+                        "3.00x",
+                        "3.50x",
+                        "4.00x"
+                      ],
+                      "default": "1.00x"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Reset presets"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Add current speed as preset"
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Enable audio pitch correction",
+                      "default": true,
+                      "subtitle": "Prevents the audio from becoming high-pitched at faster speeds and low-pitched at slower speeds"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Make default speed"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Reset speed",
+                      "subtitle": "Resets default speed and sets 1.00x"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "more",
+          "title": "More",
+          "tabs": [
+            {
+              "title": "More",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "action",
+                      "title": "Sleep Timer",
+                      "subtitle": "Shows \"05:00 remaining\" while a timer runs; opens Sleep timer dialog"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Filters",
+                      "subtitle": "Opens Filters panel"
+                    }
+                  ]
+                },
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "chips",
+                      "title": "Hardware decoding mode",
+                      "options": [
+                        "Auto",
+                        "SW",
+                        "HW",
+                        "HW+"
+                      ],
+                      "default": "Auto"
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Default statistics page",
+                      "options": [
+                        "Off",
+                        "Page 1",
+                        "Page 2",
+                        "Page 3",
+                        "Page 4",
+                        "Page 5"
+                      ],
+                      "default": "Off"
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Custom buttons",
+                      "options": []
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Audio channels",
+                      "options": [
+                        "Auto",
+                        "Auto-safe",
+                        "Mono",
+                        "Stereo",
+                        "Reverse stereo"
+                      ],
+                      "default": "Auto-safe"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "screenshot",
+          "title": "Screenshot",
+          "tabs": [
+            {
+              "title": "Screenshot",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "action",
+                      "title": "Set as cover"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Set as background"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Set as thumbnail",
+                      "subtitle": "Local source only"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Share"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Save"
+                    }
+                  ]
+                },
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "switch",
+                      "title": "Include Subtitles",
+                      "default": false,
+                      "subtitle": "Only when subtitle tracks exist"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "panel_subtitle_settings",
+          "title": "Subtitles settings",
+          "tabs": [
+            {
+              "title": "Typography",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "switch",
+                      "title": "Bold",
+                      "default": false
+                    },
+                    {
+                      "type": "switch",
+                      "title": "Italic",
+                      "default": false
+                    },
+                    {
+                      "type": "chips",
+                      "title": "Justification",
+                      "options": [
+                        "Left",
+                        "Center",
+                        "Right"
+                      ]
+                    },
+                    {
+                      "type": "action",
+                      "title": "Reset"
+                    },
+                    {
+                      "type": "list",
+                      "title": "Font",
+                      "options": [
+                        "Sans Serif"
+                      ],
+                      "default": "Sans Serif",
+                      "subtitle": "Plus .ttf/.otf fonts found in the app fonts directory"
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Font size",
+                      "min": 1,
+                      "max": 100,
+                      "step": 1,
+                      "default": 55
+                    },
+                    {
+                      "type": "list",
+                      "title": "Border style",
+                      "options": [
+                        "Outline and shadow",
+                        "Opaque box",
+                        "Background box"
+                      ],
+                      "default": "Outline and shadow"
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Border size",
+                      "min": 0,
+                      "max": 100,
+                      "step": 1,
+                      "default": 3
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Shadow offset",
+                      "min": 0,
+                      "max": 100,
+                      "step": 1,
+                      "default": 0
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "Colors",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "chips",
+                      "title": "Color target",
+                      "options": [
+                        "Text",
+                        "Border",
+                        "Background"
+                      ],
+                      "default": "Text"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Reset",
+                      "subtitle": "Resets the selected color target"
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Red",
+                      "min": 0,
+                      "max": 255,
+                      "step": 1,
+                      "default": 255
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Green",
+                      "min": 0,
+                      "max": 255,
+                      "step": 1,
+                      "default": 255
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Blue",
+                      "min": 0,
+                      "max": 255,
+                      "step": 1,
+                      "default": 255
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Alpha",
+                      "min": 0,
+                      "max": 255,
+                      "step": 1,
+                      "default": 255
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "Miscellaneous",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "switch",
+                      "title": "Override ASS/SSA subtitles",
+                      "default": false
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Scale",
+                      "min": 0,
+                      "max": 5,
+                      "step": 0.01,
+                      "default": 1
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Position",
+                      "min": 0,
+                      "max": 150,
+                      "step": 1,
+                      "default": 100
+                    },
+                    {
+                      "type": "action",
+                      "title": "Reset"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "panel_subtitle_delay",
+          "title": "Subtitle delay",
+          "tabs": [
+            {
+              "title": "Subtitle delay",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "list",
+                      "title": "Subtitle",
+                      "options": [
+                        "Primary",
+                        "Secondary",
+                        "Both"
+                      ],
+                      "default": "Primary"
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Delay",
+                      "min": -600000,
+                      "max": 600000,
+                      "step": 50,
+                      "default": 0,
+                      "unit": "ms"
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Speed",
+                      "min": 0.1,
+                      "max": 10,
+                      "step": 0.01,
+                      "default": 1
+                    },
+                    {
+                      "type": "action",
+                      "title": "Voice heard"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Text seen"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Set as default"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Reset"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "panel_audio_delay",
+          "title": "Audio delay",
+          "tabs": [
+            {
+              "title": "Audio delay",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "slider",
+                      "title": "Delay",
+                      "min": -600000,
+                      "max": 600000,
+                      "step": 50,
+                      "default": 0,
+                      "unit": "ms"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Sound heard"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Sound spotted"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Set as default"
+                    },
+                    {
+                      "type": "action",
+                      "title": "Reset"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "panel_video_filters",
+          "title": "Filters",
+          "tabs": [
+            {
+              "title": "Filters",
+              "groups": [
+                {
+                  "title": null,
+                  "items": [
+                    {
+                      "type": "action",
+                      "title": "Reset"
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Brightness",
+                      "min": -100,
+                      "max": 100,
+                      "step": 1,
+                      "default": 0
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Saturation",
+                      "min": -100,
+                      "max": 100,
+                      "step": 1,
+                      "default": 0
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Contrast",
+                      "min": -100,
+                      "max": 100,
+                      "step": 1,
+                      "default": 0
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Gamma",
+                      "min": -100,
+                      "max": 100,
+                      "step": 1,
+                      "default": 0
+                    },
+                    {
+                      "type": "slider",
+                      "title": "Hue",
+                      "min": -100,
+                      "max": 100,
+                      "step": 1,
+                      "default": 0
+                    },
+                    {
+                      "type": "info",
+                      "title": "Some filters may not work on your current video driver"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "dialogs": [
+        {
+          "id": "episode_list",
+          "title": "Episodes",
+          "groups": [
+            {
+              "title": null,
+              "items": [
+                {
+                  "type": "info",
+                  "title": "Episode 12"
+                },
+                {
+                  "type": "info",
+                  "title": "Episode 11"
+                },
+                {
+                  "type": "info",
+                  "title": "Episode 10"
+                }
+              ]
+            }
+          ],
+          "buttons": []
+        },
+        {
+          "id": "sleep_timer",
+          "title": "Enter duration",
+          "text": "Toggle to clock picker: title becomes \"Pick duration\"",
+          "groups": [
+            {
+              "title": null,
+              "items": [
+                {
+                  "type": "text",
+                  "title": "Hours : Minutes",
+                  "default": "00:00"
+                }
+              ]
+            }
+          ],
+          "buttons": [
+            "Cancel current timer",
+            "OK"
+          ]
+        },
+        {
+          "id": "set_art_confirm",
+          "title": "Use this image as cover art?",
+          "groups": [],
+          "buttons": [
+            "Cancel",
+            "OK"
+          ]
+        },
+        {
+          "id": "integer_picker",
+          "title": "Change intro length",
+          "text": "Wheel picker launched by mpv scripts (launch_int_picker); title/format/range come from the script; value applied on dismiss",
+          "groups": [
+            {
+              "title": null,
+              "items": [
+                {
+                  "type": "list",
+                  "title": "Value",
+                  "options": [
+                    "85 s"
+                  ],
+                  "default": "85 s"
+                }
+              ]
+            }
+          ],
+          "buttons": []
+        }
+      ],
+      "notes": "Full-screen black mpv video surface; controls are white, drawn LTR always, over a vertical gradient scrim (black at top 0-20% and bottom 70-100%, 80% alpha) while shown. Controls auto-hide after 4000 ms (pref) unless paused/seeking; single tap anywhere toggles them. Animations: enter 100 ms, exit 300 ms; top-left/bottom-left slide in from left, top-right/bottom-right from right, seekbar from bottom (fade only with Reduce motion). TOP-LEFT (16dp from top): back arrow button, then clickable two-line title column: anime title (16sp white, 1 line) and episode/media title below (14sp, 50% white, italic); tapping the titles opens the Episodes dialog. TOP-RIGHT row: Auto-play switch (48x24 pill track with PlayCircle thumb when on [primary color] / PauseCircle thumb when off [white on light gray]), Subtitles (CC icon), Audio (music note), HighQuality (HQ icon, online episodes only), More (⋮). CENTER: Row with SkipPrevious (48dp icon, disabled if no previous), 96dp animated play<->pause circle button, SkipNext (48dp). While loading, center shows a 96dp spinner (if Show loading circle). During horizontal-drag seek, prev/next hide and center shows bold headlineMedium text like '+01:30' newline '[12:34]'. BOTTOM: seekbar row 48dp tall at bottom (16dp margin): position timer (92dp wide, left), Seeker slider with chapter segment gaps (AniSkip opening/ending segments tinted #D8BBDF) and read-ahead buffer (inversePrimary), duration timer (92dp, right; tap toggles remaining-time '-mm:ss'). Above seekbar, left-aligned row: LockOpen button, ScreenRotation button, speed text button '1.00x', then current-chapter chip (rounded 25%, background 60% alpha: Bookmarks icon, start time in tertiary bold, bullet, chapter name bold). Above seekbar, right-aligned row: optional filled pill button (skip-intro text 'Skip Opening' / custom button title), PiP button (if enabled), AspectRatio button. Thumbnail preview floats above the seekbar while scrubbing. LOCKED: all controls hidden; tapping shows only a Lock button top-left that unlocks. GESTURES: double-tap left 2/5 = seek back, right 2/5 = seek forward (default 10s, configurable action), center = play/pause; shows translucent white oval (40% width) on that side with 3 animated chevron triangles and text '10 seconds' (or custom text e.g. AniSkip '%s skipped'). Horizontal drag = seek (seekbar optional). Vertical drag on left half = volume, right half = brightness (swappable): vertical slider 120dp tall pill (tertiary fill, errorContainer overflow for volume boost up to 30 / brightness below 0 down to -75%) with value text on top and icon below (volume off/mute/down/up; brightness night/low/medium/high), placed at screen edge, auto-hides 2 s. Negative brightness draws a black overlay. Long press = pause and open Screenshot sheet. Player update pill (black 40%, 16dp rounded) at 20% height shows texts like aspect name, 'Sleep timer ended', 'Previous Episode not found!', 'Next Episode not found!'. SHEETS: bottom-anchored draggable sheet, max width 420dp portrait / 720dp landscape, max height 95%; headlineMedium title at top-left with text-button actions at top-right. Subtitles sheet: title 'Subtitles' with 'Palette' (palette icon) and 'Delay' (clock icon) text buttons; '+ Add external subtitles' row (48dp, plus icon 32dp); track rows with checkbox (up to 2 selected; selected rows italic extra-bold with '#1'/'#2' badge on right); footer info icon + secondary-subtitles note. Audio sheet: title 'Audio' with 'Delay' button; '+ Add external audio tracks'; radio-button rows. Track label format '#id: name (lang)'. Qualities sheet: title 'Qualities'; spinner while loading hosters; if source has no hosters, flat list of videos (selected italic bold, error icon/spinner at right); else hoster rows (32dp: name, dimmed status 'Tap to load videos' / 'N videos' / 'Failed to load videos' + error icon, spinner while loading, chevron up/down) that expand to indented video rows. Failed/empty hosters hidden unless enabled in settings. Chapters sheet: rows '#n: name' (left, ellipsized) and start time (right); current one italic bold; tapping seeks and resumes. Speed sheet: Speed slider 0.01..6 with value pill '1.00x'; row: reset-presets tonal icon button, horizontally scrolling preset input chips with close (x) to remove, '+' tonal icon button to add current speed; pitch-correction switch row; full-width 'Make default speed' button + filled reset icon button. More sheet: header row 'More' with 'Sleep Timer' (timer icon) and 'Filters' (tune icon) text buttons; then labelled horizontally scrolling chip rows: Hardware decoding mode, Default statistics page, Custom buttons (flow row of chips; only if any exist; tap/long-press execute), Audio channels. Screenshot sheet: one row of equal-width icon+label actions (Set as cover, Set as background, [Set as thumbnail], Share, Save), then 'Include Subtitles' switch; set-as actions confirm with dialog; toasts Picture saved / Cover updated / Background updated / Thumbnail updated. PANELS (sheets prefixed panel_): slide in from the right, cards max 420dp wide using surface color at 60% opacity (Panel opacity pref), anchored right at ~80% height. Subtitles settings panel: portrait = transparent top app bar (back arrow + 'Subtitles settings') above a horizontal pager of 3 cards at 90% screen width; landscape = right-aligned scrolling column, title + close X, all 3 expandable cards stacked. Typography card (FormatColorText icon): row of toggle icons Bold, Italic, align Left/Center/Right (none = Auto), 'Reset' text button; Font dropdown (brand-family icon) ; Font size slider; Border style row opening dropdown; Border size and Shadow offset sliders. Colors card (palette icon): toggle icons for Text/Border/Background with current target label, 'Reset' button; tinted R/G/B/A sliders 0..255 (defaults: text white #FFFFFFFF, border black #FF000000, background transparent #00000000). Miscellaneous card (tune icon): Override ASS/SSA switch, Scale slider 0..5 (value 2 decimals), Position slider 0..150, right-aligned 'Reset'. Delay panels: card with headlineMedium title (subtitle variant has dropdown 'Primary/Secondary/Both' next to title) and close X; numeric stepper field 'Delay' with -/+ buttons, step 50, suffix 'ms'; subtitle Primary also has 'Speed' stepper 0.1..10 step 0.01; two full-width buttons for timing by ear (Voice heard / Text seen, or Sound heard / Sound spotted) that start a live stopwatch; row 'Set as default' button + filled refresh icon (reset to 0). Filters panel: card titled 'Filters' with 'Reset' text button and close X; sliders -100..100 for Brightness, Saturation, Contrast, Gamma, Hue; info note when gpu-next is off. Episodes dialog: 80%x80% dialog titled 'Episodes', fast-scroll list newest first scrolled to current; each row: bookmark icon toggle (primary when on), filler label icon toggle (tertiary when on), title ('Episode 12' or name; bold italic if current, dimmed if seen) and below date • scanlator. PiP window actions: Previous episode, 10s, Play/Pause, Next episode."
+    }
+  ]
+}

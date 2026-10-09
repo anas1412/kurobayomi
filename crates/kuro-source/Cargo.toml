@@ -1,0 +1,23 @@
+[package]
+name = "kuro-source"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bytes = { workspace = true }
+# `catch_unwind` on futures, for the panic boundary of a source call (no executor is pulled in).
+futures = { workspace = true, default-features = false, features = ["std"] }
+md-5 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Watch channels for the page state. No runtime is started here.
+tokio = { version = "1.53.2", default-features = false, features = ["sync"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { version = "1.53.2", default-features = false, features = ["macros", "rt", "sync", "time", "test-util"] }

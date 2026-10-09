@@ -1,0 +1,33 @@
+{
+  "source": "Hand-written sync cases for steps 1 and 2 of SyncChaptersWithSource (EC-CH-01, EC-CH-02, EC-CH-08). URL: none. Capture date: none. The stored-database states are not covered yet.",
+  "cases": [
+    {
+      "name": "duplicates keep the first and the order is the position after that",
+      "manga_title": "M",
+      "is_local": false,
+      "raw": [
+        {"url": "c3", "name": "M - Chapter 3"},
+        {"url": "c2", "name": "Chapter 2"},
+        {"url": "c2", "name": "Chapter 2 again"}
+      ],
+      "expected": [
+        {"url": "c3", "name": "Chapter 3", "source_order": 0},
+        {"url": "c2", "name": "Chapter 2", "source_order": 1}
+      ]
+    },
+    {
+      "name": "an empty remote list is NoChapters",
+      "manga_title": "M",
+      "is_local": false,
+      "raw": [],
+      "expected_error": "NoChapters"
+    },
+    {
+      "name": "an empty local list is fine",
+      "manga_title": "M",
+      "is_local": true,
+      "raw": [],
+      "expected": []
+    }
+  ]
+}

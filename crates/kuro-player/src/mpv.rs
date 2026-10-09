@@ -1,0 +1,304 @@
+//! Safe wrapper over libmpv2 (area 45 p1-rust-design section 3.5). One handle per player window,
+//! used only on the GTK main thread. The GL render context is created here from a caller-supplied
+//! `get_proc_address`; the `gtk::GLArea` wiring lives in the GTK crate, not in this library.
+
+use std::ffi::c_void;
+
+use libmpv2::Format;
+use libmpv2::events::{Event, PropertyData};
+use libmpv2::render::{OpenGLInitParams, RenderContext, RenderParam, RenderParamApiType};
+
+use crate::observer::{MpvCommands, MpvEvent, PropFormat, RawValue, format_of, property_event};
+use crate::options::MpvSetting;
+use crate::tracks::TrackValue;
+
+/// Video output required by the render API. `startup_settings` still carries the preferred
+/// `gpu`/`gpu-next` value (Kotlin contract); `create` overrides it with this one so the frames
+/// reach the GL render context instead of an mpv-owned window.
+pub const RENDER_VO: &str = "libmpv";
+
+/// Resolves a GL function name. Passed as a plain function pointer so no state is captured.
+pub type GetProcAddress = fn(&str) -> *mut c_void;
+
+#[derive(Debug, thiserror::Error)]
+pub enum MpvError {
+    #[error("libmpv: {0}")]
+    Mpv(#[from] libmpv2::Error),
+    #[error("render context already created")]
+    RenderExists,
+    #[error("render context not created")]
+    NoRenderContext,
+    #[error("empty mpv command")]
+    EmptyCommand,
+}
+
+/// Map from the observation format class to the libmpv2 format. libmpv2 has no `NONE` format and
+/// drops `NONE` notifications, so `None` observations use `String`; the value is then ignored.
+fn libmpv_format(format: PropFormat) -> Format {
+    match format {
+        PropFormat::None | PropFormat::Str => Format::String,
+        PropFormat::Int => Format::Int64,
+        PropFormat::Flag => Format::Flag,
+        PropFormat::Double => Format::Double,
+    }
+}
+
+pub struct MpvHandle {
+    // Declared before `inner`, so the render context is freed before `mpv_destroy` runs.
+    render: Option<RenderContext<'static>>,
+    inner: Box<libmpv2::Mpv>,
+    next_observe_id: u64,
+}
+
+impl MpvHandle {
+    /// Creates the core with every setting applied before initialisation, in order.
+    pub fn create(settings: &[MpvSetting]) -> Result<Self, MpvError> {
+        let inner = libmpv2::Mpv::with_initializer(|init| {
+            for setting in settings {
+                init.set_option(setting.name, setting.value.as_str())?;
+            }
+            // Set last so it wins over the preference table (see `RENDER_VO`).
+            init.set_option("vo", RENDER_VO)?;
+            Ok(())
+        })?;
+        Ok(Self {
+            render: None,
+            inner: Box::new(inner),
+            next_observe_id: 1,
+        })
+    }
+
+    pub fn set_property_str(&self, name: &str, value: &str) -> Result<(), MpvError> {
+        Ok(self.inner.set_property(name, value)?)
+    }
+
+    pub fn set_property_i64(&self, name: &str, value: i64) -> Result<(), MpvError> {
+        Ok(self.inner.set_property(name, value)?)
+    }
+
+    pub fn set_property_f64(&self, name: &str, value: f64) -> Result<(), MpvError> {
+        Ok(self.inner.set_property(name, value)?)
+    }
+
+    pub fn set_property_flag(&self, name: &str, value: bool) -> Result<(), MpvError> {
+        Ok(self.inner.set_property(name, value)?)
+    }
+
+    pub fn get_i64(&self, name: &str) -> Option<i64> {
+        self.inner.get_property(name).ok()
+    }
+
+    pub fn get_f64(&self, name: &str) -> Option<f64> {
+        self.inner.get_property(name).ok()
+    }
+
+    pub fn get_flag(&self, name: &str) -> Option<bool> {
+        self.inner.get_property(name).ok()
+    }
+
+    pub fn get_string(&self, name: &str) -> Option<String> {
+        self.inner.get_property(name).ok()
+    }
+
+    /// Selects a track (`aid`, `sid`, `secondary-sid`). `TRACK_NONE` disables it.
+    pub fn set_track(&self, property: &str, id: i64) -> Result<(), MpvError> {
+        match TrackValue::for_id(id) {
+            TrackValue::No => self.set_property_str(property, "no"),
+            TrackValue::Id(id) => self.set_property_i64(property, id),
+        }
+    }
+
+    /// Runs an mpv command; `args[0]` is the command name.
+    pub fn command(&self, args: &[&str]) -> Result<(), MpvError> {
+        let (name, rest) = args.split_first().ok_or(MpvError::EmptyCommand)?;
+        Ok(self.inner.command(name, rest)?)
+    }
+
+    /// Registers the wakeup callback. The GTK side uses it to schedule `drain_events` on the
+    /// main loop; the callback may run on any thread, so it should only signal.
+    pub fn set_wakeup_callback<F: Fn() + Send + 'static>(&mut self, callback: F) {
+        self.inner.set_wakeup_callback(callback);
+    }
+
+    /// Pulls every queued event and converts it. Main thread only.
+    pub fn drain_events(&mut self) -> Vec<MpvEvent> {
+        let mut out = Vec::new();
+        while let Some(next) = self.inner.wait_event(0.0) {
+            match next {
+                Ok(event) => out.extend(convert(event)),
+                Err(e) => tracing::warn!(error = %e, "mpv event decode failed"),
+            }
+        }
+        out
+    }
+
+    /// Creates the OpenGL render context. Must run on the thread that owns the GL context, after
+    /// the GL area is realized. Fails if one already exists.
+    pub fn create_render_context(
+        &mut self,
+        get_proc_address: GetProcAddress,
+    ) -> Result<(), MpvError> {
+        if self.render.is_some() {
+            return Err(MpvError::RenderExists);
+        }
+        let params = [
+            RenderParam::ApiType(RenderParamApiType::OpenGl),
+            RenderParam::InitParams(OpenGLInitParams {
+                get_proc_address: |resolve: &GetProcAddress, name: &str| resolve(name),
+                ctx: get_proc_address,
+            }),
+        ];
+        let context = self.inner.create_render_context(params)?;
+        // SAFETY: the context only holds a raw mpv_render_context pointer and a marker for the
+        // borrow of `inner`. `inner` is boxed, so its address is stable, and the field order makes
+        // `render` drop before `inner`. The `'static` lifetime only records that order.
+        let context: RenderContext<'static> = unsafe { std::mem::transmute(context) };
+        self.render = Some(context);
+        Ok(())
+    }
+
+    /// Draws one frame into `fbo`, with the GL origin at the bottom-left (`flip` = true).
+    pub fn render(&self, fbo: i32, width: i32, height: i32) -> Result<(), MpvError> {
+        let context = self.render.as_ref().ok_or(MpvError::NoRenderContext)?;
+        Ok(context.render::<()>(fbo, width, height, true)?)
+    }
+
+    /// Registers the callback mpv calls when a new frame is wanted (the GTK side queues a redraw).
+    pub fn set_render_update_callback<F: Fn() + Send + 'static>(
+        &mut self,
+        callback: F,
+    ) -> Result<(), MpvError> {
+        let context = self.render.as_mut().ok_or(MpvError::NoRenderContext)?;
+        context.set_update_callback(callback);
+        Ok(())
+    }
+}
+
+impl MpvCommands for MpvHandle {
+    fn observe(&mut self, name: &str, format: PropFormat) -> Result<(), MpvError> {
+        let id = self.next_observe_id;
+        self.next_observe_id += 1;
+        self.inner
+            .observe_property(name, libmpv_format(format), id)?;
+        Ok(())
+    }
+}
+
+/// Converts one libmpv event. Events the player does not use map to `None`.
+fn convert(event: Event<'_>) -> Option<MpvEvent> {
+    match event {
+        Event::FileLoaded => Some(MpvEvent::FileLoaded),
+        Event::Seek => Some(MpvEvent::Seek),
+        Event::PlaybackRestart => Some(MpvEvent::PlaybackRestart),
+        Event::EndFile(reason) => {
+            // mpv_end_file_reason: 0 = EOF, 4 = ERROR. The error text is not exposed by libmpv2.
+            let reason: u32 = reason;
+            Some(MpvEvent::EndFile {
+                eof_reached: reason == 0,
+                error: (reason == 4).then(String::new),
+            })
+        }
+        Event::PropertyChange { name, change, .. } => {
+            let format = format_of(name)?;
+            property_event(name, format, raw_value(change)?)
+        }
+        _ => None,
+    }
+}
+
+fn raw_value(data: PropertyData<'_>) -> Option<RawValue> {
+    Some(match data {
+        PropertyData::Str(s) | PropertyData::OsdStr(s) => RawValue::Str(s.to_owned()),
+        PropertyData::Flag(b) => RawValue::Flag(b),
+        PropertyData::Int64(i) => RawValue::Int(i),
+        PropertyData::Double(d) => RawValue::Double(d),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::options::{PlayerPrefs, startup_settings};
+    use std::path::Path;
+
+    /// Headless handle whose data directory is `data_dir`: no window is opened because no render
+    /// context is created.
+    fn headless_in(data_dir: &Path) -> MpvHandle {
+        let prefs = PlayerPrefs {
+            data_dir: data_dir.to_owned(),
+            ..PlayerPrefs::default()
+        };
+        let mut settings = startup_settings(&prefs);
+        settings.push(MpvSetting {
+            name: "ao",
+            value: "null".to_owned(),
+        });
+        MpvHandle::create(&settings).expect("libmpv must initialise headless")
+    }
+
+    fn headless() -> MpvHandle {
+        let dir = tempfile::tempdir().expect("temp data dir");
+        headless_in(dir.path())
+    }
+
+    #[test]
+    fn mpv_conf_in_config_dir_is_applied() {
+        let data = tempfile::tempdir().unwrap();
+        let mpv_dir = data.path().join("mpv");
+        crate::config::write_mpv_config(&mpv_dir, "volume=37\n", "").unwrap();
+        let handle = headless_in(data.path());
+        assert_eq!(handle.get_flag("config"), Some(true));
+        assert_eq!(handle.get_string("config-dir").as_deref(), mpv_dir.to_str());
+        assert_eq!(handle.get_f64("volume"), Some(37.0));
+    }
+
+    #[test]
+    fn without_mpv_conf_volume_keeps_mpv_default() {
+        let handle = headless();
+        assert_eq!(handle.get_f64("volume"), Some(100.0));
+    }
+
+    #[test]
+    fn create_starts_paused_and_forces_render_vo() {
+        let handle = headless();
+        assert_eq!(handle.get_flag("pause"), Some(true));
+        assert_eq!(handle.get_string("vo").as_deref(), Some(RENDER_VO));
+    }
+
+    #[test]
+    fn create_and_drop_twenty_times() {
+        for _ in 0..20 {
+            let handle = headless();
+            drop(handle);
+        }
+    }
+
+    #[test]
+    fn empty_command_is_rejected() {
+        let handle = headless();
+        assert!(matches!(handle.command(&[]), Err(MpvError::EmptyCommand)));
+    }
+
+    #[test]
+    fn render_calls_fail_without_context() {
+        let handle = headless();
+        assert!(matches!(
+            handle.render(0, 1, 1),
+            Err(MpvError::NoRenderContext)
+        ));
+    }
+
+    #[test]
+    fn disabled_track_is_written_as_no() {
+        let handle = headless();
+        handle.set_track("aid", -1).unwrap();
+        assert_eq!(handle.get_string("aid").as_deref(), Some("no"));
+    }
+
+    #[test]
+    fn observe_registers_properties() {
+        let mut handle = headless();
+        crate::observer::observe_all(&mut handle).expect("observe all 34");
+        assert_eq!(handle.next_observe_id, 35);
+    }
+}

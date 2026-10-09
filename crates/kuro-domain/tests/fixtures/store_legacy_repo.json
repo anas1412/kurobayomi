@@ -1,0 +1,9 @@
+{
+  "index_v2": "https://example.test/v2/index.min.json",
+  "meta": {
+    "name": "Legacy Store",
+    "shortName": "LS",
+    "website": "https://legacy.test",
+    "signingKeyFingerprint": "ff00ee11"
+  }
+}

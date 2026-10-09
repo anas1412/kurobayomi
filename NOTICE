@@ -1,0 +1,11 @@
+Kurobayomi
+Copyright the Kurobayomi contributors.
+
+Kurobayomi is a Rust and GTK4 rewrite of Aniyomi, which is a fork of Mihon (formerly Tachiyomi).
+It reimplements their behaviour from their public source code and keeps their licence terms.
+
+Aniyomi   https://github.com/aniyomiorg/aniyomi   Apache License 2.0
+Mihon     https://github.com/mihonapp/mihon        Apache License 2.0
+Tachiyomi https://github.com/tachiyomiorg/tachiyomi Apache License 2.0
+
+The full licence text is in LICENSE.

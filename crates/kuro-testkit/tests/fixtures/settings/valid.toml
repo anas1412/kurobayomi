@@ -1,0 +1,6 @@
+[general]
+verbose_logging = true
+download_dir = "/home/user/Downloads/Kurobayomi"
+
+[appearance]
+theme = "tokyo-night"

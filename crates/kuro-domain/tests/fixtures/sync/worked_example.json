@@ -1,0 +1,21 @@
+{
+  "_comment": "The worked example of plans/10-app-domain-layer/p1-topic-chapter-episode-sync.md section 3. The values are copied from that section, not from running the code.",
+  "manga_title": "Foo",
+  "now_ms": 1000000,
+  "stored": [
+    {"id": 1, "url": "/c1", "name": "Ch 1", "number": 1.0, "read": true, "bookmark": false, "date_fetch": 100, "source_order": 4},
+    {"id": 2, "url": "/c2", "name": "Ch 2", "number": 2.0, "read": false, "bookmark": false, "date_fetch": 200, "source_order": 1},
+    {"id": 3, "url": "/c3", "name": "Ch 3", "number": 3.0, "read": true, "bookmark": true, "date_fetch": 500, "source_order": 2}
+  ],
+  "source": [
+    {"url": "/c5", "name": "Ch 5", "date_upload": 0},
+    {"url": "/c4", "name": "Ch 4", "date_upload": 900},
+    {"url": "/c3b", "name": "Ch 3", "date_upload": 0},
+    {"url": "/c2", "name": "Ch 2", "date_upload": 0},
+    {"url": "/c1", "name": "Ch 1", "date_upload": 0}
+  ],
+  "expected_returned_urls": ["/c5", "/c4"],
+  "expected_date_fetch": {"/c5": 1000003, "/c4": 1000002, "/c3b": 500},
+  "expected_removed_urls": ["/c3"],
+  "expected_c3b": {"read": true, "bookmark": true}
+}

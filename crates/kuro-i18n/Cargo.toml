@@ -1,0 +1,20 @@
+[package]
+name = "kuro-i18n"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "kuro-i18n-import"
+path = "src/bin/kuro_i18n_import.rs"
+
+[dependencies]
+fluent-bundle = "0.16.0"
+fluent-syntax = "0.12.0"
+unic-langid = "0.9.6"
+quick-xml = "0.41.0"
+tracing = { workspace = true }
+
+[build-dependencies]
+fluent-syntax = "0.12.0"

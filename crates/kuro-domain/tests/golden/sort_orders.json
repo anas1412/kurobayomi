@@ -1,0 +1,35 @@
+{
+  "fixture": "p1-edge-cases-and-tests.md 2.2: id 1 Alpha, 2 beta, 3 Gamma, 4 Emile (the title is written with an accent in the library)",
+  "default_page": {
+    "ALPHABETICAL,ASCENDING": [1, 2, 4],
+    "ALPHABETICAL,DESCENDING": [4, 2, 1],
+    "LAST_READ,ASCENDING": [4, 1, 2],
+    "LAST_READ,DESCENDING": [2, 1, 4],
+    "UNREAD_COUNT,ASCENDING": [2, 1, 4],
+    "UNREAD_COUNT,DESCENDING": [2, 1, 4],
+    "TOTAL_CHAPTERS,ASCENDING": [4, 2, 1],
+    "TOTAL_CHAPTERS,DESCENDING": [1, 2, 4],
+    "LATEST_CHAPTER,ASCENDING": [4, 1, 2],
+    "LATEST_CHAPTER,DESCENDING": [2, 1, 4],
+    "CHAPTER_FETCH_DATE,ASCENDING": [4, 1, 2],
+    "CHAPTER_FETCH_DATE,DESCENDING": [2, 1, 4],
+    "DATE_ADDED,ASCENDING": [1, 2, 4],
+    "DATE_ADDED,DESCENDING": [4, 2, 1]
+  },
+  "hold_page": {
+    "ALPHABETICAL,ASCENDING": [2, 3],
+    "ALPHABETICAL,DESCENDING": [3, 2],
+    "LAST_READ,ASCENDING": [3, 2],
+    "LAST_READ,DESCENDING": [2, 3],
+    "UNREAD_COUNT,ASCENDING": [3, 2],
+    "UNREAD_COUNT,DESCENDING": [2, 3],
+    "TOTAL_CHAPTERS,ASCENDING": [3, 2],
+    "TOTAL_CHAPTERS,DESCENDING": [2, 3],
+    "LATEST_CHAPTER,ASCENDING": [3, 2],
+    "LATEST_CHAPTER,DESCENDING": [2, 3],
+    "CHAPTER_FETCH_DATE,ASCENDING": [2, 3],
+    "CHAPTER_FETCH_DATE,DESCENDING": [3, 2],
+    "DATE_ADDED,ASCENDING": [2, 3],
+    "DATE_ADDED,DESCENDING": [3, 2]
+  }
+}

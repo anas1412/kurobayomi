@@ -1,0 +1,19 @@
+[package]
+name = "kuro-local"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+kuro-core = { path = "../kuro-core" }
+kuro-domain = { path = "../kuro-domain" }
+kuro-source = { path = "../kuro-source" }
+async-trait = { workspace = true }
+thiserror.workspace = true
+tokio = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+kuro-prefs = { path = "../kuro-prefs" }
+tempfile = { workspace = true }

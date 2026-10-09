@@ -1,0 +1,8 @@
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS Linux"
+ID=cachyos
+ID_LIKE=arch
+BUILD_ID=rolling
+ANSI_COLOR="38;2;23;147;209"
+HOME_URL="https://cachyos.org/"
+LOGO=cachyos

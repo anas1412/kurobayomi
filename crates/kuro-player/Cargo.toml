@@ -1,0 +1,19 @@
+[package]
+name = "kuro-player"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+async-channel = { workspace = true }
+kuro-domain = { path = "../kuro-domain" }
+kuro-net = { path = "../kuro-net" }
+kuro-platform = { path = "../kuro-platform" }
+libmpv2 = { version = "6.0.0", features = ["render"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

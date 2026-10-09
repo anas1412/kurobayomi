@@ -1,0 +1,4 @@
+kurobayomi-crash-report 2
+time: 2026-10-08T14:03:22Z
+[backtrace]
+   0: kuro_core::foo::bar

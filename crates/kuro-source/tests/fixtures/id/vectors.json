@@ -1,0 +1,9 @@
+{
+  "source": "Three id vectors of behaviour 1.1 (EC-ID-01..03, T-15a-012), hand-written, plus one more. The Google Drive vector was produced on 2026-10-09 by running the Kotlin generateId formula (HttpSource.kt) on a JVM MessageDigest MD5 for name 'Google Drive', lang 'all', version 1. It is the formula's output for that input, not a confirmed id of the real Google Drive source. OPEN BLOCKER (T-20a-011, T-20a-094): the observed index candidate 4222017068256633289 (sources[].id of 'Aniyomi: Google Drive' in index.min.json, version 14.15) is NOT reproduced by name spellings 'Google Drive', 'GoogleDrive', 'Google drive', 'Google drive ', 'google drive', 'Googledrive' x 16 languages x versions 0 to 49. Resolve it with the real name, lang and version, or a real backup id, before T-20a-094 relies on the id rule. URL: none.",
+  "vectors": [
+    {"name": "Example", "lang": "en", "version_id": 1, "id": 4851548778462321757},
+    {"name": "MangaDex", "lang": "en", "version_id": 1, "id": 2499283573021220255},
+    {"name": "Ünïcode Src", "lang": "ja", "version_id": 2, "id": 8842957433569127029},
+    {"name": "Google Drive", "lang": "all", "version_id": 1, "id": 1634509943585349172}
+  ]
+}

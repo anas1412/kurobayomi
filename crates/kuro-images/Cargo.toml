@@ -1,0 +1,35 @@
+[package]
+name = "kuro-images"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = ["avif", "jxl"]
+# AVIF stills through the image crate's dav1d backend. avif-decode (CRATE-MAP C-23) needs `nasm` to build rav1d on
+# x86_64, and the workspace already links dav1d through kuro-core's image dependency. Without the feature an AVIF
+# file is `UnsupportedFormat`.
+avif = ["image/avif-native"]
+# JPEG XL stills through jxl-oxide. Without it a JXL file is `UnsupportedFormat`.
+jxl = ["dep:jxl-oxide"]
+
+[dependencies]
+bytes.workspace = true
+http.workspace = true
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
+jxl-oxide = { version = "0.11", features = ["image"], optional = true }
+kuro-net = { path = "../kuro-net" }
+kuro-platform = { path = "../kuro-platform" }
+md-5.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+kuro-prefs = { path = "../kuro-prefs" }
+tempfile.workspace = true
+wiremock.workspace = true
