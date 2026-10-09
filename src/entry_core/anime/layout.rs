@@ -10,6 +10,11 @@ pub fn two_pane(window_width: i32) -> bool {
     window_width >= TWO_PANE_MIN_WIDTH
 }
 
+/// The width of the bottom action bar: the whole window narrow, half of it in the two-pane layout.
+pub fn bottom_bar_width(window_width: i32) -> Option<i32> {
+    two_pane(window_width).then_some(window_width / 2)
+}
+
 /// The FAB state. The rule uses the unfiltered list for both the visibility and the label, so a filter never hides the
 /// button. This resolves the upstream inconsistency recorded in behaviour section 9.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +58,13 @@ mod tests {
         assert!(!two_pane(899));
         assert!(two_pane(900));
         assert!(!two_pane(360));
+    }
+
+    #[test]
+    fn the_bottom_bar_is_full_width_narrow_and_half_width_wide() {
+        assert_eq!(bottom_bar_width(360), None);
+        assert_eq!(bottom_bar_width(899), None);
+        assert_eq!(bottom_bar_width(1000), Some(500));
     }
 
     #[test]

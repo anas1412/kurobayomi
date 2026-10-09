@@ -5,6 +5,7 @@
 //! and the download lanes implement. Tests run with `cargo test -p kurobayomi library_update`.
 #![allow(dead_code)] // the pass is wired by the screens lane; some helpers are tested but not called yet
 
+pub mod counters;
 pub mod download;
 pub mod entry;
 pub mod error;

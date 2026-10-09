@@ -64,6 +64,7 @@ use crate::anime::queue_view::{SortKey, sorted_order};
 use crate::anime::pending::{AnimePendingStore, PendingGroup};
 use crate::anime::store::AnimeQueueStore;
 use crate::error::DownloadError;
+use crate::queue_model::normalize_order;
 use crate::events::{DownloadEvent, EVENT_CAPACITY};
 use crate::model::DownloadState;
 use crate::pipeline::FreeSpaceFn;
@@ -115,6 +116,9 @@ pub struct EnqueueOutcome {
     pub started: bool,
     /// The queue-size warning to show, when the run starts over a large queue.
     pub warning: Option<QueueWarning>,
+    /// Items were added to a queue that was not empty while the runner is stopped: show "Queued. Press Continue to
+    /// start." (T-24a-069, E-Q07).
+    pub continue_toast: bool,
 }
 
 pub enum Command {
@@ -350,7 +354,7 @@ pub fn spawn(params: AnimeQueueParams) -> AnimeQueue {
             params.restored.iter().flat_map(|e| params.layout.staging_dirs(&e.source, &e.anime, &e.episode)).collect();
         let removed = sweep_staging(root, &keep);
         if removed > 0 {
-            debug!(target: "kuro::downloads", removed, "startup sweep removed orphaned staging entries");
+            debug!(target: "kuro_downloads", removed, "startup sweep removed orphaned staging entries");
         }
     }
     let restored: Vec<Arc<AnimeDownload>> = params.restored.into_iter().map(|e| Arc::new(e.into_download())).collect();
@@ -369,6 +373,7 @@ pub fn spawn(params: AnimeQueueParams) -> AnimeQueue {
         runner: params.runner,
         settings: params.settings,
         next_generation: 0,
+        series: Arc::new(crate::manager::SeriesLocks::default()),
         done_tx,
         queue_tx,
         state_tx,
@@ -378,7 +383,7 @@ pub fn spawn(params: AnimeQueueParams) -> AnimeQueue {
     tokio::spawn(actor.run(commands, done_rx));
     let ffmpeg_notice = startup_notice(&std::env::var_os("PATH").unwrap_or_default());
     if ffmpeg_notice.is_some() {
-        warn!(target: "kuro::downloads", "ffmpeg or ffprobe is not on PATH: anime downloads will fail");
+        warn!(target: "kuro_downloads", "ffmpeg or ffprobe is not on PATH: anime downloads will fail");
     }
     AnimeQueue { tx, queue: queue_rx, state: state_rx, events, ffmpeg_notice }
 }
@@ -408,6 +413,8 @@ struct Actor {
     runner: Arc<dyn EpisodeRunner>,
     settings: AnimeSettings,
     next_generation: u64,
+    /// Per-series locks for the delete steps that run on the blocking pool (E-22).
+    series: Arc<crate::manager::SeriesLocks>,
     done_tx: mpsc::UnboundedSender<Done>,
     queue_tx: watch::Sender<Arc<Vec<Arc<AnimeDownload>>>>,
     state_tx: watch::Sender<RunnerState>,
@@ -489,7 +496,9 @@ impl Actor {
                 // The folders go on the blocking pool, so the actor keeps serving commands. The task owns the reply, so a
                 // caller that gives up does not stop the delete half way (T-25a-016).
                 let (layout, index) = (self.layout.clone(), self.index.clone());
+                let (series, anime_id) = (self.series.clone(), anime.id);
                 tokio::spawn(async move {
+                    let _series = series.lock(crate::queue_model::EntryKind::Anime, anime_id).await;
                     let result =
                         tokio::task::spawn_blocking(move || delete_episodes_on_disk(&layout, &index, &source, &anime, &episodes))
                             .await
@@ -523,6 +532,9 @@ impl Actor {
             }
             Command::RenameEpisode { source, anime, old, new, reply } => {
                 let result = self.layout.rename_episode(&source, &anime, &old, &new);
+                if let Err(err) = &result {
+                    self.warn_rename(err);
+                }
                 if let Ok(Some(_)) = result {
                     let folder = episode_dir_name(&new.name, new.scanlator.as_deref());
                     self.index.remove_episodes(source.id, &anime, std::slice::from_ref(&old));
@@ -532,6 +544,9 @@ impl Actor {
             }
             Command::RenameSource { old, new, reply } => {
                 let result = self.layout.rename_source(&old, &new);
+                if let Err(err) = &result {
+                    self.warn_rename(err);
+                }
                 if let Ok(true) = result {
                     // The index keys sources by folder name, so it is rebuilt on the next renewal (proposal, 6.4).
                     self.index.invalidate();
@@ -612,7 +627,7 @@ impl Actor {
     /// Puts a taken group back into the pending table.
     fn restore_pending(&self, group: &PendingGroup) {
         if let Err(err) = self.pending.add_episodes(&group.anime, &group.episodes) {
-            error!(target: "kuro::downloads", error = %err, "could not restore a pending delete group");
+            error!(target: "kuro_downloads", error = %err, "could not restore a pending delete group");
         }
     }
 
@@ -629,7 +644,7 @@ impl Actor {
             return EnqueueOutcome::default();
         }
         if !source.is_http {
-            debug!(target: "kuro::downloads", source = source.id, "anime enqueue ignored: source is not HTTP");
+            debug!(target: "kuro_downloads", source = source.id, "anime enqueue ignored: source is not HTTP");
             return EnqueueOutcome::default();
         }
         let was_empty = self.queue.is_empty();
@@ -647,10 +662,17 @@ impl Actor {
             self.queue.push(Arc::new(item));
         }
         self.persist();
-        let mut outcome = EnqueueOutcome { added, started: false, warning: None };
+        let continue_toast = !was_empty && !self.runner_on && !added.is_empty();
+        let mut outcome = EnqueueOutcome { added, started: false, warning: None, continue_toast };
         if auto_start && was_empty {
             if needs_queue_warning(self.queue.iter().map(|d| (d.source.id, d.source.unmetered))) {
-                outcome.warning = Some(queue_warning());
+                let warning = queue_warning();
+                let _ = self.events.send(DownloadEvent::Warning {
+                    text: warning.text.to_owned(),
+                    timeout_secs: Some(warning.timeout_secs),
+                    help_url: Some(warning.help_url.to_owned()),
+                });
+                outcome.warning = Some(warning);
             }
             outcome.started = self.start();
         }
@@ -682,6 +704,15 @@ impl Actor {
                 item.set_status(DownloadState::Queue);
             }
         }
+    }
+
+    /// A failed rename is a warning for the user, not only a log line (T-24a-071, E-F23).
+    fn warn_rename(&self, err: &DownloadError) {
+        let _ = self.events.send(DownloadEvent::Warning {
+            text: format!("Could not rename the download folder: {err}"),
+            timeout_secs: Some(WARNING_TIMEOUT_SECS),
+            help_url: None,
+        });
     }
 
     /// `stop(reason)` with a reason: every running episode is cancelled and goes to ERROR, the run is off, and the reason
@@ -747,12 +778,14 @@ impl Actor {
     /// ids are ignored, live items that are not listed follow in their current order, and an empty list does nothing
     /// (E-15).
     fn reorder(&mut self, episode_ids: &[i64]) {
-        if episode_ids.is_empty() {
+        let current: Vec<i64> = self.queue.iter().map(|d| d.episode.id).collect();
+        // An empty request, or one that leaves the order as it is, changes nothing: no pause, no restart (T-24a-052).
+        if normalize_order(&current, episode_ids).is_none() {
             return;
         }
         let was_running = self.runner_on;
         self.pause();
-        let current: Vec<Arc<AnimeDownload>> = self.queue.drain(..).collect();
+        let current: Vec<Arc<AnimeDownload>> = std::mem::take(&mut self.queue);
         let mut by_id: HashMap<i64, Arc<AnimeDownload>> = current.iter().map(|d| (d.episode.id, d.clone())).collect();
         for id in episode_ids {
             if let Some(item) = by_id.remove(id) {
@@ -781,6 +814,7 @@ impl Actor {
         self.cancel_running_for(&ids);
         self.queue.retain(|d| {
             if ids.contains(&d.episode.id) {
+                // Only QUEUE and DOWNLOADING items become NOT_DOWNLOADED; an ERROR item keeps its status.
                 d.set_status(DownloadState::NotDownloaded);
                 false
             } else {
@@ -890,7 +924,7 @@ impl Actor {
                 }
             }
             Err(err) => {
-                warn!(target: "kuro::downloads", episode = done.episode_id, error = %err, "anime episode failed");
+                warn!(target: "kuro_downloads", episode = done.episode_id, error = %err, "anime episode failed");
                 item.set_status(DownloadState::Error);
                 let _ = self.events.send(DownloadEvent::Error {
                     chapter_id: Some(item.episode.id),
@@ -906,7 +940,7 @@ impl Actor {
     fn persist(&self) {
         let rows: Vec<(i64, i64)> = self.queue.iter().map(|d| (d.episode.id, d.anime.id)).collect();
         if let Err(err) = self.store.replace_all(&rows) {
-            error!(target: "kuro::downloads", error = %err, "anime queue store write failed");
+            error!(target: "kuro_downloads", error = %err, "anime queue store write failed");
         }
     }
 
@@ -1223,6 +1257,25 @@ mod tests {
         settle(&env.queue, |q| ids(q) == vec![3, 1, 2]).await;
         assert_eq!(env.store.rows().unwrap(), vec![(3, 1, 0), (1, 1, 1), (2, 1, 2)]);
         assert!(!env.queue.running(), "it was not running before the reorder");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn adding_to_a_stopped_queue_asks_the_user_to_press_continue() {
+        let env = setup(LONG, &[], AnimeSettings::default(), Vec::new());
+        let first = env.queue.enqueue(src(1), anime(1, 1), vec![ep(1, 1, 1)], false, false, None).await.unwrap();
+        assert!(!first.continue_toast, "an empty queue has nothing to continue");
+        let second = env.queue.enqueue(src(1), anime(1, 1), vec![ep(2, 1, 2)], false, false, None).await.unwrap();
+        assert!(second.continue_toast, "a stopped run over a non-empty queue");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_same_order_is_no_reorder() {
+        let env = setup(LONG, &[], AnimeSettings::default(), Vec::new());
+        env.queue.enqueue(src(1), anime(1, 1), vec![ep(1, 1, 1), ep(2, 1, 2)], false, false, None).await.unwrap();
+        env.queue.send(Command::Reorder { episode_ids: vec![1, 2] }).unwrap();
+        env.queue.send(Command::Reorder { episode_ids: vec![2, 1] }).unwrap();
+        settle(&env.queue, |q| ids(q) == vec![2, 1]).await;
+        assert_eq!(env.store.rows().unwrap(), vec![(2, 1, 0), (1, 1, 1)]);
     }
 
     #[tokio::test(start_paused = true)]

@@ -32,9 +32,11 @@ mod tri_check;
 mod spec;
 mod startup;
 mod theme;
+mod widgets;
 mod ui;
 mod watch;
 mod window_size;
+mod updates;
 mod pref_model;
 mod browse;
 
@@ -185,6 +187,7 @@ fn build_window(app: &gtk::Application, link: Option<kuro_platform::deep_link::D
     let tabs = tabs();
     nav.add_child(&tabs);
     let sidebar = sidebar(&tabs);
+    settings_ui::appearance::open_start_tab(&tabs, &settings_ui::route::prefs());
     let sep = gtk::Separator::new(O::Vertical);
     let row = GBox::new(O::Horizontal, 0);
     row.append(&sidebar);
@@ -242,6 +245,7 @@ fn build_window(app: &gtk::Application, link: Option<kuro_platform::deep_link::D
     // the entry header and the settings shell follow the same breakpoint
     pref_model::shell::follow_resizes();
     window_size::watch(&win);
+    theme::attach_window(&win);
     library::mount::on_selection_change(refresh.clone());
     refresh();
     applock_host::attach(&win, data::app().security.clone());
@@ -393,6 +397,7 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
             if id == "library" && tabs.visible_child_name().as_deref() == Some("library") {
                 library::mount::reselect();
             }
+            updates::mount::reselect(id, tabs.visible_child_name().as_deref() == Some(id.as_str()));
             tabs.set_visible_child_name(id);
         });
     }

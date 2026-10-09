@@ -213,8 +213,8 @@ fn compare(a: &QueueItem, b: &QueueItem, key: SortKey) -> Ordering {
 }
 
 /// The order the engine receives for a `reorder` call (E-15). Unknown ids are dropped, repeats keep their first place,
-/// and live ids that were not listed follow in their current order. An empty request is `None`: it is a no-op, and it
-/// never clears the queue.
+/// and live ids that were not listed follow in their current order. `None` when nothing has to be sent: an empty request
+/// never clears the queue, and a result equal to `current` (a drop at the original position) is no reorder (T-25a-028).
 pub fn normalize_order(current: &[i64], requested: &[i64]) -> Option<Vec<i64>> {
     if requested.is_empty() {
         return None;
@@ -230,7 +230,7 @@ pub fn normalize_order(current: &[i64], requested: &[i64]) -> Option<Vec<i64>> {
             out.push(*id);
         }
     }
-    Some(out)
+    (out != current).then_some(out)
 }
 
 #[cfg(test)]
@@ -395,5 +395,7 @@ mod tests {
         assert_eq!(normalize_order(&[1, 2, 3], &[]), None, "an empty list never clears the queue");
         assert_eq!(normalize_order(&[1, 2, 3], &[3, 99, 1]), Some(vec![3, 1, 2]), "E-15");
         assert_eq!(normalize_order(&[1, 2, 3], &[2, 2]), Some(vec![2, 1, 3]), "repeats keep their first place");
+        assert_eq!(normalize_order(&[1, 2, 3], &[1, 2, 3]), None, "the same order is no reorder");
+        assert_eq!(normalize_order(&[1, 2, 3], &[1, 99]), None, "unknown ids and the rest keep the order");
     }
 }

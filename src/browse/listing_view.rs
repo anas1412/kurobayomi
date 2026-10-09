@@ -643,7 +643,7 @@ pub(crate) mod tests {
         assert!(pump(|| rig.view.inner.store.n_items() == 1 && rig.view.query() == BrowseQuery::Search(String::new())));
     }
 
-    fn an_error_without_items_shows_three_actions_and_retry_loads_again() {
+    fn an_error_without_items_shows_its_actions_and_retry_loads_again() {
         let rig = rig(vec![Err("offline".into()), items(&["a"], false)], true, false, false);
         assert!(pump(|| shown(&rig) == "error"));
         let mut found = Vec::new();
@@ -658,14 +658,14 @@ pub(crate) mod tests {
             }
         }
         buttons(rig.view.inner.error_slot.upcast_ref(), &mut found);
-        assert_eq!(found.len(), 3, "retry, open in web view and help");
+        assert_eq!(found.len(), 2, "retry and open in web view; there is no help page to open");
         found[1].emit_clicked();
         assert_eq!(*rig.actions.borrow(), [EmptyAction::OpenInWebView], "only retry is handled inside the view");
         found[0].emit_clicked();
         assert!(pump(|| shown(&rig) == "items"), "retry asks the failed page again");
     }
 
-    fn a_local_source_error_offers_only_its_help_guide() {
+    fn a_local_source_error_offers_retry_and_is_never_empty() {
         let rig = rig(vec![Err("no folder".into())], true, false, true);
         assert!(pump(|| shown(&rig) == "error"));
         let mut count = 0;
@@ -832,8 +832,8 @@ pub(crate) mod tests {
     pub(crate) fn smoke() {
         the_spinner_shows_until_the_registry_is_ready_then_the_items_appear_without_reopening();
         a_search_is_a_new_listing_and_the_old_pages_are_dropped();
-        an_error_without_items_shows_three_actions_and_retry_loads_again();
-        a_local_source_error_offers_only_its_help_guide();
+        an_error_without_items_shows_its_actions_and_retry_loads_again();
+        a_local_source_error_offers_retry_and_is_never_empty();
         a_later_page_failure_keeps_the_items_and_shows_a_toast_that_stays_up();
         an_empty_first_page_is_the_error_state_and_an_empty_later_page_is_a_toast();
         a_search_hands_its_own_filters_to_the_loader();

@@ -7,17 +7,31 @@ use std::rc::Rc;
 
 use gtk::gdk::ModifierType;
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Label, Orientation as O, gio, glib};
+use gtk::{Align, Box as GBox, Label, Orientation as O, gio, glib, pango};
 use kuro_downloads::DownloadState;
 
+use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::library::{ChapterSwipeAction, LibraryPrefs};
 
-use crate::entry_core::list_model::{Diff, RowItem, diff};
+use crate::entry_core::list_model::{DOT_SIZE, Diff, ROW_PADDING, RowItem, diff, row_alpha};
 use crate::entry_core::selection::Mods;
 use crate::entry_core::swipe::{action_for, menu, side_of_drag};
 
 /// A click or long press on a row: (chapter id, modifiers, long press or right click).
 pub type OnRow = Rc<dyn Fn(i64, Mods, bool)>;
+
+/// What a row reports by chapter id and its download state: a click on the download indicator.
+pub type OnIndicator = Rc<dyn Fn(i64, DownloadState)>;
+
+/// What a row reports by chapter id alone: "Mark previous as read" from the context menu.
+pub type OnChapter = Rc<dyn Fn(i64)>;
+
+/// The row callbacks besides a click: the download indicator and the context menu's mark-previous item.
+#[derive(Clone)]
+pub struct RowActions {
+    pub on_indicator: OnIndicator,
+    pub on_previous: OnChapter,
+}
 
 /// The swipe actions of a row (T-08a-029): the stored action per side, and what to run for one row.
 #[derive(Clone)]
@@ -45,7 +59,7 @@ fn mods_of(state: ModifierType) -> Mods {
 
 fn download_icon(state: DownloadState) -> Option<&'static str> {
     match state {
-        DownloadState::NotDownloaded => None,
+        DownloadState::NotDownloaded => Some("document-save-symbolic"),
         DownloadState::Queue => Some("content-loading-symbolic"),
         DownloadState::Downloading => Some("folder-download-symbolic"),
         DownloadState::Downloaded => Some("emblem-ok-symbolic"),
@@ -53,41 +67,73 @@ fn download_icon(state: DownloadState) -> Option<&'static str> {
     }
 }
 
-/// The row widget: check mark, title and subtitle, download icon, bookmark icon.
+/// The unread dot and the bookmark icon take the theme's primary colour (`kuro_primary`, looked up across every
+/// provider of the display).
+const CSS: &str = ".chapter-primary { color: @kuro_primary; }";
+
+pub fn ensure_css() {
+    thread_local! {
+        static DONE: Cell<bool> = const { Cell::new(false) };
+    }
+    if DONE.with(|d| d.replace(true)) {
+        return;
+    }
+    if let Some(display) = gtk::gdk::Display::default() {
+        let provider = gtk::CssProvider::new();
+        provider.load_from_string(CSS);
+        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+}
+
+/// The row widget: unread dot, check mark, title and subtitle, download icon, bookmark icon, and the label a
+/// missing-count marker row shows instead of all of them.
 struct RowWidgets {
     root: GBox,
+    dot: gtk::Image,
     check: gtk::Image,
+    text: GBox,
     title: Label,
     subtitle: Label,
+    download_button: gtk::Button,
     download: gtk::Image,
     bookmark: gtk::Image,
+    marker: Label,
 }
 
 impl RowWidgets {
     /// Finds the inner widgets again from the root, in the order `row_widgets` appended them.
     fn of(root: &gtk::Widget) -> Option<Self> {
         let root = root.clone().downcast::<GBox>().ok()?;
-        let check = root.first_child()?;
+        let dot = root.first_child()?;
+        let check = dot.next_sibling()?;
         let text = check.next_sibling()?;
         let title = text.first_child()?;
         let subtitle = title.next_sibling()?;
-        let download = text.next_sibling()?;
-        let bookmark = download.next_sibling()?;
+        let download_button = text.next_sibling()?;
+        let bookmark = download_button.next_sibling()?;
+        let marker = bookmark.next_sibling()?;
         Some(Self {
+            dot: dot.downcast().ok()?,
             check: check.downcast().ok()?,
+            text: text.downcast().ok()?,
             title: title.downcast().ok()?,
             subtitle: subtitle.downcast().ok()?,
-            download: download.downcast().ok()?,
+            download: download_button.clone().downcast::<gtk::Button>().ok()?.child()?.downcast().ok()?,
+            download_button: download_button.downcast().ok()?,
             bookmark: bookmark.downcast().ok()?,
+            marker: marker.downcast().ok()?,
             root,
         })
     }
 }
 
 /// The right-click menu of a row: Select, then each swipe action that runs on this page.
-fn context_menu(root: &GBox, list_item: &gtk::ListItem, swipe: &Swipe, on_row: &OnRow, at: (f64, f64)) {
+fn context_menu(root: &GBox, list_item: &gtk::ListItem, swipe: &Swipe, on_row: &OnRow, on_previous: &OnChapter, at: (f64, f64)) {
     let Some(item) = item_of(list_item) else { return };
     let id = item.borrow::<RowItem>().id;
+    if item.borrow::<RowItem>().missing.is_some() {
+        return;
+    }
     let popover = gtk::Popover::new();
     popover.set_parent(root);
     popover.set_has_arrow(false);
@@ -108,6 +154,8 @@ fn context_menu(root: &GBox, list_item: &gtk::ListItem, swipe: &Swipe, on_row: &
         let run = Rc::clone(&swipe.run);
         entry(label, Box::new(move || run(id, action)));
     }
+    let on_previous = Rc::clone(on_previous);
+    entry(&tr(MsgKey::action_mark_previous_as_read), Box::new(move || on_previous(id)));
     popover.set_child(Some(&column));
     // the popover is parented to the row, so it is removed once closed
     popover.connect_closed(|p| {
@@ -118,51 +166,76 @@ fn context_menu(root: &GBox, list_item: &gtk::ListItem, swipe: &Swipe, on_row: &
 }
 
 fn row_widgets() -> RowWidgets {
+    ensure_css();
     let root = GBox::new(O::Horizontal, 10);
-    root.set_margin_top(8);
-    root.set_margin_bottom(8);
-    root.set_margin_start(12);
-    root.set_margin_end(12);
+    let (start, top, end, bottom) = ROW_PADDING;
+    root.set_margin_start(start);
+    root.set_margin_top(top);
+    root.set_margin_end(end);
+    root.set_margin_bottom(bottom);
+    let dot = gtk::Image::from_icon_name("media-record-symbolic");
+    dot.set_pixel_size(DOT_SIZE);
+    dot.add_css_class("chapter-primary");
     let check = gtk::Image::from_icon_name("object-select-symbolic");
     let text = GBox::new(O::Vertical, 2);
     text.set_hexpand(true);
     text.set_valign(Align::Center);
-    let title = Label::builder().xalign(0.0).wrap(true).build();
-    let subtitle = Label::builder().xalign(0.0).css_classes(["dim-label", "caption"]).build();
+    let title = Label::builder().xalign(0.0).ellipsize(pango::EllipsizeMode::End).single_line_mode(true).build();
+    let subtitle = Label::builder().xalign(0.0).ellipsize(pango::EllipsizeMode::End).css_classes(["dim-label", "caption"]).build();
     text.append(&title);
     text.append(&subtitle);
     let download = gtk::Image::new();
+    let download_button = gtk::Button::builder().child(&download).css_classes(["flat", "circular"]).focus_on_click(false).valign(Align::Center).build();
     let bookmark = gtk::Image::from_icon_name("starred-symbolic");
-    for w in [check.upcast_ref::<gtk::Widget>(), download.upcast_ref(), bookmark.upcast_ref()] {
+    bookmark.add_css_class("chapter-primary");
+    let marker = Label::builder().xalign(0.0).hexpand(true).visible(false).css_classes(["dim-label"]).build();
+    for w in [dot.upcast_ref::<gtk::Widget>(), check.upcast_ref(), bookmark.upcast_ref()] {
         w.set_valign(Align::Center);
     }
+    root.append(&dot);
     root.append(&check);
     root.append(&text);
-    root.append(&download);
+    root.append(&download_button);
     root.append(&bookmark);
-    RowWidgets { root, check, title, subtitle, download, bookmark }
+    root.append(&marker);
+    RowWidgets { root, dot, check, text, title, subtitle, download_button, download, bookmark, marker }
 }
 
 fn bind(w: &RowWidgets, row: &RowItem) {
-    w.root.set_widget_name(&format!("row:{}", row.id));
+    w.root.set_widget_name(&if row.missing.is_some() { row.key() } else { format!("row:{}", row.id) });
+    let chapter = row.missing.is_none();
+    for widget in [w.dot.upcast_ref::<gtk::Widget>(), w.check.upcast_ref(), w.text.upcast_ref()] {
+        widget.set_visible(chapter);
+    }
+    w.marker.set_visible(!chapter);
+    if !chapter {
+        // a marker is text only: no download or bookmark, nothing to select
+        w.marker.set_label(&row.subtitle);
+        w.download_button.set_visible(false);
+        w.bookmark.set_visible(false);
+        w.root.set_opacity(1.0);
+        return;
+    }
     w.title.set_label(&row.title);
     w.subtitle.set_label(&row.subtitle);
     w.subtitle.set_visible(!row.subtitle.is_empty());
+    // the dot marks an unread chapter; it keeps its space when read, so the titles line up
+    w.dot.set_opacity(if row.read { 0.0 } else { 1.0 });
     w.check.set_opacity(if row.selected { 1.0 } else { 0.0 });
     w.bookmark.set_visible(row.bookmark);
-    w.root.set_opacity(if row.read { 0.6 } else { 1.0 });
-    match download_icon(row.download) {
+    w.root.set_opacity(row_alpha(row.read));
+    match download_icon(row.download).filter(|_| row.indicator) {
         Some(icon) => {
             w.download.set_icon_name(Some(icon));
-            w.download.set_visible(true);
-            w.download.set_tooltip_text((row.progress > 0).then(|| format!("{}%", row.progress)).as_deref());
+            w.download_button.set_visible(true);
+            w.download_button.set_tooltip_text((row.progress > 0).then(|| format!("{}%", row.progress)).as_deref());
         }
-        None => w.download.set_visible(false),
+        None => w.download_button.set_visible(false),
     }
 }
 
 impl ChapterList {
-    pub fn new(on_row: OnRow, swipe: Option<Swipe>) -> Rc<Self> {
+    pub fn new(on_row: OnRow, swipe: Option<Swipe>, actions: RowActions) -> Rc<Self> {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(move |_, object| {
@@ -171,7 +244,11 @@ impl ChapterList {
             let long_fired = Rc::new(Cell::new(false));
             let report = |list_item: &gtk::ListItem, on_row: &OnRow, state: ModifierType, long: bool| {
                 if let Some(item) = item_of(list_item) {
-                    on_row(item.borrow::<RowItem>().id, mods_of(state), long);
+                    let row = item.borrow::<RowItem>();
+                    // a missing-count marker is not a chapter
+                    if row.missing.is_none() {
+                        on_row(row.id, mods_of(state), long);
+                    }
                 }
             };
             let left = gtk::GestureClick::builder().button(1).build();
@@ -185,10 +262,10 @@ impl ChapterList {
             });
             let right = gtk::GestureClick::builder().button(3).build();
             right.connect_pressed({
-                let (list_item, on_row, swipe, root) = (list_item.clone(), Rc::clone(&on_row), swipe.clone(), widgets.root.clone());
+                let (list_item, on_row, swipe, root, actions) = (list_item.clone(), Rc::clone(&on_row), swipe.clone(), widgets.root.clone(), actions.clone());
                 move |g, _, x, y| match &swipe {
                     // the context menu holds Select and the swipe actions of the two sides
-                    Some(swipe) => context_menu(&root, &list_item, swipe, &on_row, (x, y)),
+                    Some(swipe) => context_menu(&root, &list_item, swipe, &on_row, &actions.on_previous, (x, y)),
                     None => report(&list_item, &on_row, g.current_event_state(), true),
                 }
             });
@@ -210,10 +287,23 @@ impl ChapterList {
                 let list_item = list_item.clone();
                 drag.connect_drag_end(move |_, dx, dy| {
                     let (Some(side), Some(item)) = (side_of_drag(dx, dy), item_of(&list_item)) else { return };
-                    (swipe.run)(item.borrow::<RowItem>().id, action_for(&swipe.prefs, side));
+                    let row = item.borrow::<RowItem>();
+                    if row.missing.is_none() {
+                        (swipe.run)(row.id, action_for(&swipe.prefs, side));
+                    }
                 });
                 widgets.root.add_controller(drag);
             }
+            // a click on the indicator starts, cancels or deletes by the state of its row
+            widgets.download_button.connect_clicked({
+                let (list_item, on_indicator) = (list_item.clone(), Rc::clone(&actions.on_indicator));
+                move |_| {
+                    if let Some(item) = item_of(&list_item) {
+                        let row = item.borrow::<RowItem>();
+                        on_indicator(row.id, row.download);
+                    }
+                }
+            });
             list_item.set_child(Some(&widgets.root));
         });
         factory.connect_bind(|_, object| {

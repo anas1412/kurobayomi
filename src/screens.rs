@@ -19,14 +19,15 @@ pub fn body(id: &str) -> Option<Built> {
         "library" => libraries(),
         "anime_library" => Some(library(id, true)),
         "manga_library" => Some(library(id, false)),
-        "updates" => updates(),
-        "history" => history(),
+        "updates" => crate::updates::mount::updates().or_else(updates),
+        "history" => crate::updates::mount::history().or_else(history),
         "more" => more(),
         "download_queue" => downloads(),
         "categories" => categories(),
         "stats" => stats(),
         "storage" => storage(),
         "onboarding" | "new_update" | "crash" => info_screen(id),
+        id if crate::settings_ui::handles(id) => crate::settings_ui::body(id),
         _ => crate::entry::body(id),
     }
 }

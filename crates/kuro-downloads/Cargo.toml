@@ -10,6 +10,8 @@ default = ["ntfs-names"]
 # Appends `_` to Windows device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) so folders copied to a Windows disk stay
 # valid. Decision D-DL-01, EC-76.
 ntfs-names = []
+# Torrent links go through TorrServer (T-24a-023). Without it a torrent link fails with `TorrentUnavailable` (E-X04).
+torrent-server = []
 
 [dependencies]
 async-trait = { workspace = true }
@@ -18,17 +20,18 @@ image = { workspace = true }
 kuro-archive = { path = "../kuro-archive" }
 kuro-core = { path = "../kuro-core" }
 kuro-platform = { path = "../kuro-platform" }
+kuro-prefs = { path = "../kuro-prefs" }
+notify = "8.2.0"
 kuro-source = { path = "../kuro-source" }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["process", "io-util"] }
+tokio = { workspace = true, features = ["process", "io-util", "net"] }
 url = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-kuro-prefs = { path = "../kuro-prefs" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

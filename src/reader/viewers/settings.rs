@@ -1,4 +1,4 @@
-//! Viewer settings (T-44a-004, T-44a-005, T-44a-018, B§1, D§3). The initial values come from the preference store,
+//! Viewer settings (T-44a-004, T-43b-005 clamps on read, T-44a-005, T-44a-018, B§1, D§3). The initial values come from the preference store,
 //! never from Kotlin field initialisers. `diff` is the reaction table of B§1.2: a change-only reaction fires for a
 //! value that differs from the one the viewer holds, and never for the first value it reads.
 
@@ -8,6 +8,7 @@ use kuro_prefs::reader::{ReaderHideThreshold, ReaderPrefs, TappingInvertMode};
 use kuro_prefs::store::Changed;
 
 use super::nav::NavMode;
+use crate::reader::pref_rules::{self, NAVIGATION_MODE, READER_THEME, ZOOM_START, clamp_to};
 
 /// The settings a viewer reads, as plain values.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,19 +79,19 @@ impl ViewerSettings {
             volume_keys_inverted: p.read_with_volume_keys_inverted.get(),
             always_show_transition: p.always_show_chapter_transition.get(),
             overlay_on_start: p.show_navigation_overlay_on_start.get(),
-            nav_mode_pager: NavMode::from_stored(p.navigation_mode_pager.get()),
-            nav_mode_webtoon: NavMode::from_stored(p.navigation_mode_webtoon.get()),
+            nav_mode_pager: NavMode::from_stored(clamp_to(p.navigation_mode_pager.get(), NAVIGATION_MODE)),
+            nav_mode_webtoon: NavMode::from_stored(clamp_to(p.navigation_mode_webtoon.get(), NAVIGATION_MODE)),
             tapping_pager: p.pager_nav_inverted.get(),
             tapping_webtoon: p.webtoon_nav_inverted.get(),
             hide_threshold: p.reader_hide_threshold.get().threshold(),
             navigate_pan: p.navigate_to_pan.get(),
             landscape_zoom: p.landscape_zoom.get(),
             image_scale_type: p.image_scale_type.get(),
-            zoom_start: p.zoom_start.get(),
-            reader_theme: p.reader_theme.get(),
+            zoom_start: clamp_to(p.zoom_start.get(), ZOOM_START),
+            reader_theme: clamp_to(p.reader_theme.get(), READER_THEME),
             crop_pager: p.crop_borders.get(),
             crop_webtoon: p.crop_borders_webtoon.get(),
-            side_padding: p.webtoon_side_padding.get(),
+            side_padding: pref_rules::side_padding(p.webtoon_side_padding.get()),
             zoom_out_disabled: p.webtoon_disable_zoom_out.get(),
             double_tap_zoom: p.webtoon_double_tap_zoom_enabled.get(),
             dual_split_pager: p.dual_page_split_paged.get(),
@@ -102,6 +103,15 @@ impl ViewerSettings {
             dual_rotate_webtoon: p.dual_page_rotate_to_fit_webtoon.get(),
             dual_rotate_invert_webtoon: p.dual_page_rotate_to_fit_invert_webtoon.get(),
         }
+    }
+}
+
+impl ViewerSettings {
+    /// The settings before the store's first emission: `use_page_transitions` starts false and takes the stored value
+    /// with the first emission (E-22, T-43b-035). Everything else is read from the store at once (T-44a-004).
+    pub fn before_first_emission(mut self) -> Self {
+        self.page_transitions = false;
+        self
     }
 }
 
@@ -240,12 +250,37 @@ mod tests {
     fn stored_values_are_read_and_unknown_codes_fall_back() {
         let p = prefs();
         p.navigation_mode_pager.set(3).unwrap();
-        p.navigation_mode_webtoon.set(77).unwrap();
+        p.navigation_mode_webtoon.set(-4).unwrap();
         p.reader_hide_threshold.set(ReaderHideThreshold::HIGHEST).unwrap();
         let s = ViewerSettings::from_prefs(&p);
         assert_eq!(s.nav_mode_pager, NavMode::Edge);
         assert_eq!(s.nav_mode_webtoon, NavMode::Default);
         assert_eq!(s.hide_threshold, 5);
+    }
+
+    #[test]
+    fn out_of_range_stored_values_are_clamped_on_read() {
+        let p = prefs();
+        p.webtoon_side_padding.set(30).unwrap();
+        p.navigation_mode_pager.set(77).unwrap();
+        p.zoom_start.set(9).unwrap();
+        p.reader_theme.set(7).unwrap();
+        let s = ViewerSettings::from_prefs(&p);
+        assert_eq!(s.side_padding, 25);
+        assert_eq!(s.nav_mode_pager, NavMode::Disabled);
+        assert_eq!((s.zoom_start, s.reader_theme), (4, 3));
+        p.webtoon_side_padding.set(-3).unwrap();
+        p.zoom_start.set(0).unwrap();
+        assert_eq!((ViewerSettings::from_prefs(&p).side_padding, ViewerSettings::from_prefs(&p).zoom_start), (0, 1));
+    }
+
+    #[test]
+    fn e22_page_transitions_start_false_then_take_the_stored_value() {
+        let s = ViewerSettings::from_prefs(&prefs());
+        assert!(s.page_transitions, "the stored default");
+        let start = s.clone().before_first_emission();
+        assert!(!start.page_transitions);
+        assert_eq!(ViewerSettings { page_transitions: true, ..start }, s);
     }
 
     #[test]

@@ -121,6 +121,19 @@ pub fn bookmarked_write(state: TriState) -> Write {
     )
 }
 
+/// `scanlatorFilterActive`: some excluded scanlator is also one the chapters have (E-43). A stale excluded name, one
+/// no chapter carries, does not tint the filter row.
+pub fn scanlator_filter_active(available: &[String], excluded: &std::collections::BTreeSet<String>) -> bool {
+    available.iter().any(|name| excluded.contains(name))
+}
+
+/// "Set as default": stores the groups of `flags` as the library's default chapter flags, and returns the text of the
+/// "Updated default chapter settings" message (`ChapterSettingsDialog`, `SetMangaDefaultChapterFlags`).
+pub fn save_as_default(store: &kuro_prefs::store::PrefStore, flags: ChapterFlags) -> String {
+    kuro_domain::entries::defaults::set_chapter_settings_default(store, flags.0);
+    kuro_i18n::tr(kuro_i18n::MsgKey::chapter_settings_updated)
+}
+
 /// `setDisplayMode` (MSM:931-949).
 pub fn display_write(number: bool) -> Write {
     (
@@ -136,6 +149,25 @@ pub fn display_write(number: bool) -> Write {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_as_default_stores_the_flags_and_says_so() {
+        let store = kuro_prefs::store::PrefStore::in_memory();
+        let flags = ChapterFlags(c::SORTING_NUMBER | c::SORT_ASC | c::SHOW_UNREAD | c::DISPLAY_NUMBER);
+        assert_eq!(save_as_default(&store, flags), "Updated default chapter settings");
+        let stored = ChapterFlags(kuro_domain::entries::defaults::chapter_default_word(&store));
+        assert_eq!(stored, flags, "a new manga opens with what was saved");
+    }
+
+    #[test]
+    fn the_scanlator_filter_is_active_on_an_intersection_only() {
+        let available = vec!["A".to_owned(), "B".to_owned()];
+        let set = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<std::collections::BTreeSet<_>>();
+        assert!(scanlator_filter_active(&available, &set(&["B", "Gone"])));
+        assert!(!scanlator_filter_active(&available, &set(&["Gone"])), "a stale name is kept but does not count");
+        assert!(!scanlator_filter_active(&available, &set(&[])));
+        assert!(!scanlator_filter_active(&[], &set(&["A"])));
+    }
 
     #[test]
     fn flag_masks_are_disjoint() {

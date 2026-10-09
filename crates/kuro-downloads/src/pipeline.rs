@@ -13,8 +13,11 @@ use futures::stream::FuturesUnordered;
 use kuro_source::SourceError;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
-use tracing::debug;
+use tracing::error;
 
+use crate::error::error_chain;
+
+use crate::comicinfo::{ComicInfo, FILE_NAME, to_xml, web_value};
 use crate::data_saver::DataSaver;
 use crate::error::DownloadError;
 use crate::images::{
@@ -22,7 +25,7 @@ use crate::images::{
     split_part_name, split_tall_image, tmp_dir_name,
 };
 use crate::index::DownloadIndex;
-use crate::layout::{DownloadLayout, chapter_dir_name};
+use crate::layout::{CBZ_EXTENSION, CBZ_PART_SUFFIX, DownloadLayout, chapter_dir_name};
 use crate::model::{ChapterRef, DownloadState, MangaRef, Page, PageState, SourceRef};
 use crate::source::ChapterSource;
 
@@ -71,6 +74,10 @@ pub struct PipelineCtx {
     pub optimal_height: u32,
     /// Data-saver proxy for the page requests (T-23a-017). The default fetches the original URL.
     pub data_saver: DataSaver,
+    /// Shared speed limit of the downloader (T-23a-015).
+    pub speed: Arc<crate::throttle::SpeedLimiter>,
+    /// `save_chapter_as_cbz`: pack the finished chapter as a `.cbz` instead of keeping the folder (T-23a-022).
+    pub save_as_cbz: bool,
 }
 
 impl PipelineCtx {
@@ -152,7 +159,14 @@ async fn run_steps(ctx: &PipelineCtx, job: ChapterJob) -> Result<(), DownloadErr
         return Err(DownloadError::Incomplete(chapter_dir));
     }
 
-    finalise_folder(&tmp, &manga_dir.join(&chapter_dir))?;
+    // ComicInfo.xml is written before archiving only (behaviour 10.9); a folder keeps its files as they are.
+    if ctx.save_as_cbz {
+        write_comic_info(&tmp, &manga, &chapter, &source_name)?;
+        finalise_cbz(&tmp, &manga_dir.join(format!("{chapter_dir}.{CBZ_EXTENSION}")))?;
+    } else {
+        finalise_folder(&tmp, &manga_dir.join(&chapter_dir))?;
+    }
+    // The index gets the bare name, with or without `.cbz` on disk (TST-49 covers rename, this covers add).
     ctx.index.add_chapter(source.id(), &DownloadLayout::source_dir_name(&source_name), &manga.title, &chapter_dir);
     Ok(())
 }
@@ -182,6 +196,48 @@ fn finalise_folder(tmp: &Path, target: &Path) -> Result<(), DownloadError> {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists", target.display())).into());
     }
     std::fs::rename(tmp, target)?;
+    Ok(())
+}
+
+/// Writes `ComicInfo.xml` into the finished tmp folder, replacing an older one (behaviour 10.9). Tracker URLs and
+/// category names are not carried by the queue yet, so `Web` holds the chapter URL only and `Categories` is omitted.
+fn write_comic_info(tmp: &Path, manga: &MangaRef, chapter: &ChapterRef, source_name: &str) -> io::Result<()> {
+    let web = web_value(&[], &chapter.url);
+    let info = ComicInfo {
+        chapter_name: &chapter.name,
+        series: &manga.title,
+        number: Some(chapter.chapter_number),
+        summary: manga.description.as_deref(),
+        writer: manga.author.as_deref(),
+        penciller: manga.artist.as_deref(),
+        translator: chapter.scanlator.as_deref(),
+        genre: manga.genre.as_deref(),
+        web: &web,
+        status: manga.status,
+        categories: &[],
+        source_name,
+    };
+    let path = tmp.join(FILE_NAME);
+    let _ = std::fs::remove_file(&path);
+    std::fs::write(path, to_xml(&info))
+}
+
+/// Packs the finished tmp folder as a stored CBZ at `target` (`<name>.cbz`). The archive is written to `<name>.cbz.part`
+/// and renamed when complete, then the tmp folder is removed. An existing target is an error (EC-63).
+fn finalise_cbz(tmp: &Path, target: &Path) -> Result<(), DownloadError> {
+    if target.exists() {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists", target.display())).into());
+    }
+    let part = PathBuf::from(format!("{}{CBZ_PART_SUFFIX}", target.display()));
+    let mut writer = kuro_archive::CbzWriter::create(&part)?;
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(tmp)?.map(|e| e.map(|e| e.path())).collect::<io::Result<_>>()?;
+    entries.retain(|p| p.is_file());
+    for entry in &entries {
+        writer.add_file(entry)?;
+    }
+    writer.finish()?;
+    std::fs::rename(&part, target)?;
+    std::fs::remove_dir_all(tmp)?;
     Ok(())
 }
 
@@ -305,7 +361,7 @@ fn split_if_tall(ctx: &PipelineCtx, tmp: &Path, number: u32, width: usize, file:
         Ok(true) => tmp.join(split_part_name(&prefix, 1)),
         Ok(false) => file,
         Err(err) => {
-            debug!(target: "kuro::downloads", page = number, error = %err, "tall page split failed; page kept");
+            error!(target: "kuro_downloads", page = number, error = %error_chain(&err), "tall page split failed; page kept");
             file
         }
     }
@@ -370,6 +426,7 @@ async fn stream_to_file(
             head.extend_from_slice(&chunk[..take]);
         }
         read += chunk.len() as u64;
+        ctx.speed.take(chunk.len() as u64).await;
         let progress = total.map_or(-1, |t| (100 * read / t).min(100) as i32);
         if progress != reported {
             reported = progress;
@@ -441,6 +498,8 @@ mod tests {
             split_tall_images: false,
             optimal_height: crate::images::DEFAULT_OPTIMAL_HEIGHT,
             data_saver: DataSaver::default(),
+            speed: Arc::new(crate::throttle::SpeedLimiter::new(None)),
+            save_as_cbz: false,
         }
     }
 
@@ -454,6 +513,25 @@ mod tests {
 
     fn chapter_dir(h: &Harness) -> PathBuf {
         h.root.path().join("Source 1 (EN)").join("Manga 1").join("Chapter 7")
+    }
+
+
+    #[tokio::test]
+    async fn a_chapter_is_packed_as_a_cbz_with_comic_info_and_the_folder_goes() {
+        let h = harness();
+        let source = fake(1);
+        let mut ctx = ctx(&h, plenty);
+        ctx.save_as_cbz = true;
+        let outcome = run_chapter(ctx, job(source.clone())).await;
+        assert!(matches!(outcome, ChapterOutcome::Downloaded), "{outcome:?}");
+        let manga_dir = h.root.path().join("Source 1 (EN)").join("Manga 1");
+        let cbz = manga_dir.join("Chapter 7.cbz");
+        assert!(cbz.is_file(), "the archive is renamed into place");
+        assert!(!manga_dir.join("Chapter 7.cbz.part").exists(), "no part file is left");
+        assert!(!chapter_dir(&h).exists(), "the tmp folder is removed after packing");
+        let bytes = std::fs::read(&cbz).unwrap();
+        assert!(bytes.windows(b"ComicInfo.xml".len()).any(|w| w == b"ComicInfo.xml"), "the archive holds ComicInfo.xml");
+        assert!(h.index.is_chapter_downloaded(1, "Manga 1", "Chapter 7", None), "the index gets the bare name");
     }
 
     #[tokio::test]
@@ -499,6 +577,7 @@ mod tests {
         assert!(chapter_dir(&h).with_file_name("Chapter 7_tmp").is_dir());
     }
 
+    // TST-33
     #[tokio::test]
     async fn resume_keeps_finished_pages_and_removes_partial_ones() {
         let h = harness();
@@ -513,6 +592,7 @@ mod tests {
         assert!(!chapter_dir(&h).join("002.tmp").exists(), "partial files go before fetching");
     }
 
+    // TST-24
     #[tokio::test(start_paused = true)]
     async fn retries_follow_two_four_eight_seconds_and_stop_after_four_attempts() {
         let h = harness();
@@ -554,6 +634,7 @@ mod tests {
         assert_eq!(source.calls(), 1);
     }
 
+    // TST-14
     #[tokio::test(start_paused = true)]
     async fn at_most_two_pages_are_in_flight_per_chapter() {
         let h = harness();
@@ -715,6 +796,8 @@ mod cache_and_split_tests {
             split_tall_images: true,
             optimal_height: 2000,
             data_saver: DataSaver::default(),
+            speed: Arc::new(crate::throttle::SpeedLimiter::new(None)),
+            save_as_cbz: false,
         };
         std::mem::forget(index_cache);
         (ctx, rx)
@@ -792,4 +875,26 @@ mod cache_and_split_tests {
         assert_eq!(split_if_tall(&ctx, &tmp, 1, 3, part.clone()), part);
         assert!(part.is_file());
     }
+
 }
+
+#[cfg(test)]
+mod archive_tests {
+    // TST-30
+    #[test]
+    fn tst_30_a_cbz_is_stored_flat_with_utf8_names() {
+        let base = tempfile::tempdir().unwrap();
+        let page = base.path().join("ページ.jpg");
+        std::fs::write(&page, b"not really a jpeg").unwrap();
+        let target = base.path().join("Chapter 1.cbz");
+        let mut writer = kuro_archive::CbzWriter::create(&target).unwrap();
+        writer.add_file(&page).unwrap();
+        writer.finish().unwrap();
+        let bytes = std::fs::read(&target).unwrap();
+        assert_eq!(&bytes[..4], b"PK\x03\x04", "a ZIP local header starts the file");
+        assert_eq!(&bytes[8..10], &[0, 0], "method 0 is STORE");
+        let name = "ページ.jpg".as_bytes();
+        assert!(bytes.windows(name.len()).any(|w| w == name), "the UTF-8 name is stored as written");
+    }
+}
+

@@ -18,9 +18,14 @@ pub fn reading_mode_of(viewer_flags: i64) -> ReadingMode {
 }
 
 /// `getMangaReadingMode(resolveDefault = true)`: the manga's mode, or the preference when the manga has none.
+/// A corrupt global preference that is itself DEFAULT falls back to right-to-left (D-4, E-21), so this never returns
+/// [`ReadingMode::Default`].
 pub fn resolve_reading_mode(viewer_flags: i64, default_pref: i32) -> ReadingMode {
     match reading_mode_of(viewer_flags) {
-        ReadingMode::Default => ReadingMode::from_preference(default_pref),
+        ReadingMode::Default => match ReadingMode::from_preference(default_pref) {
+            ReadingMode::Default => ReadingMode::from_preference(DEFAULT_READING_MODE_PREF),
+            mode => mode,
+        },
         mode => mode,
     }
 }
@@ -125,6 +130,20 @@ mod tests {
         assert_eq!(resolve_reading_mode(0x3, DEFAULT_READING_MODE_PREF), ReadingMode::Vertical);
         assert_eq!(resolve_orientation(0, DEFAULT_ORIENTATION_PREF), ReaderOrientation::Free);
         assert_eq!(resolve_orientation(0x10, DEFAULT_ORIENTATION_PREF), ReaderOrientation::Portrait);
+    }
+
+    #[test]
+    fn e21_resolve_never_returns_default_even_with_a_corrupt_global() {
+        assert_eq!(resolve_reading_mode(0, 1), ReadingMode::LeftToRight);
+        assert_eq!(resolve_reading_mode(0, 0), ReadingMode::RightToLeft, "corrupt global falls back to RTL (D-4)");
+        assert_eq!(resolve_reading_mode(0, 9), ReadingMode::RightToLeft);
+        assert_ne!(resolve_reading_mode(0, 0), ReadingMode::Default);
+    }
+
+    #[test]
+    fn e20b_writing_a_mode_keeps_the_orientation_bits() {
+        assert_eq!(set_reading_mode(0x38, ReadingMode::RightToLeft), 0x3A);
+        assert_eq!(reading_mode_of(set_reading_mode(0x38, ReadingMode::Webtoon) as i64), ReadingMode::Webtoon);
     }
 
     #[test]

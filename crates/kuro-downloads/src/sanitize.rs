@@ -49,6 +49,7 @@ fn reserve_device_name(name: String) -> String {
 mod tests {
     use super::*;
 
+    // TST-34
     #[test]
     fn edge_case_table_ec_71_to_ec_79() {
         // EC-71: dots and spaces at both ends.

@@ -11,7 +11,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tracing::debug;
+use tracing::{debug, error};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -20,6 +20,7 @@ use tokio_util::sync::CancellationToken;
 use crate::anime::model::{Track, Video};
 use crate::anime::progress::{ProgressCell, ffmpeg_percent};
 use crate::error::DownloadError;
+use crate::redact::{redact_line};
 
 /// Binary names on `PATH`. The binary is the contract (design 2).
 pub const FFMPEG: &str = "ffmpeg";
@@ -41,13 +42,22 @@ pub fn sanitize_headers(headers: &[(String, String)]) -> Vec<(String, String)> {
         .iter()
         .filter_map(|(name, value)| {
             if !is_token(name) {
-                debug!(target: "kuro::downloads", header = %name, "header dropped: name is not a token");
+                debug!(target: "kuro_downloads", header = %name, "header dropped: name is not a token");
                 return None;
             }
             let value = value.chars().filter(|c| !matches!(c, '\r' | '\n' | '\0')).collect();
             Some((name.clone(), value))
         })
         .collect()
+}
+
+/// One ffmpeg stderr line. Lines at warning level and above are logged at error level, with URLs redacted (behaviour 5.7,
+/// T-24a-060). Other lines are not logged.
+pub fn log_ffmpeg_line(line: &str) {
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("error") || lower.contains("warning") || lower.contains("fatal") {
+        error!(target: "kuro_downloads", ffmpeg = %redact_line(line), "ffmpeg reported a problem");
+    }
 }
 
 /// Header pairs as one `-headers` value: `Name: value\r\n` per pair, in order, after [`sanitize_headers`].
@@ -229,13 +239,22 @@ pub async fn run_remux(
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .map_err(spawn_error)?;
     let Some(stdout) = child.stdout.take() else {
         return Err(DownloadError::Internal("ffmpeg stdout was not piped".into()));
     };
+    // stderr is drained while ffmpeg runs, so a full pipe never blocks it. It ends when ffmpeg exits.
+    let stderr_log = child.stderr.take().map(|stderr| {
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                log_ffmpeg_line(&line);
+            }
+        })
+    });
     let (tx, mut ticks) = mpsc::unbounded_channel::<ProgressTick>();
     let reader = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
@@ -271,10 +290,16 @@ pub async fn run_remux(
         let _ = child.start_kill();
         let _ = child.wait().await;
         reader.abort();
+        if let Some(log) = &stderr_log {
+            log.abort();
+        }
         let _ = std::fs::remove_file(output);
         return Err(DownloadError::Cancelled);
     }
     let status = child.wait().await?;
+    if let Some(log) = stderr_log {
+        let _ = log.await;
+    }
     // An exit of 0 with an empty file is a failure too (T-24a-067, E-F07).
     if status.success() && std::fs::metadata(output).is_ok_and(|m| m.len() > 0) {
         return Ok(());
@@ -477,10 +502,10 @@ mod tests {
 
     /// Script tests fork children. A script written by one test while another forks can fail to run with "Text file
     /// busy", so these tests run one at a time.
-    static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static SPAWN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-    fn spawn_guard() -> std::sync::MutexGuard<'static, ()> {
-        SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    async fn spawn_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        SPAWN_LOCK.lock().await
     }
 
     /// Writes an executable shell script into `dir` and returns its path.
@@ -493,7 +518,7 @@ mod tests {
 
     #[tokio::test]
     async fn fake_ffmpeg_reports_progress_and_gets_the_argv_in_order() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("argv.log");
         let out = dir.path().join("Episode 1.tmp");
@@ -515,7 +540,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failing_ffmpeg_is_an_error_and_removes_the_partial_output() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let dir = tempfile::tempdir().unwrap();
         let bin = script(dir.path(), "ffmpeg", "for last; do :; done\nprintf partial > \"$last\"\nexit 1");
         let out = dir.path().join("Episode 1.tmp");
@@ -530,7 +555,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_kills_the_child_and_reports_cancelled() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let dir = tempfile::tempdir().unwrap();
         let bin = script(dir.path(), "ffmpeg", "sleep 5");
         let out = dir.path().join("x.tmp");
@@ -550,7 +575,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_missing_binary_is_ffmpeg_missing() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let dir = tempfile::tempdir().unwrap();
         let err = run_remux(OsStr::new("/nonexistent/ffmpeg-x"), &[], 0, &dir.path().join("o"), &ProgressCell::new(), &CancellationToken::new())
             .await
@@ -560,7 +585,7 @@ mod tests {
 
     #[tokio::test]
     async fn ffprobe_failure_carries_the_first_stderr_line() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let dir = tempfile::tempdir().unwrap();
         let bin = script(dir.path(), "ffprobe", "echo 'Invalid data found' >&2\necho 'second' >&2\nexit 1");
         let err = probe_duration(bin.as_os_str(), "https://cdn.example/v.m3u8", &[]).await.unwrap_err();
@@ -569,7 +594,7 @@ mod tests {
 
     #[tokio::test]
     async fn ffprobe_na_is_duration_zero() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let dir = tempfile::tempdir().unwrap();
         let bin = script(dir.path(), "ffprobe", "echo N/A");
         assert_eq!(probe_duration(bin.as_os_str(), "/v.mkv", &[]).await.unwrap(), 0);
@@ -609,7 +634,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_output_after_exit_zero_is_an_ffmpeg_error() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let dir = tempfile::tempdir().unwrap();
         let bin = script(dir.path(), "ffmpeg", "exit 0");
         let out = dir.path().join("Episode 1.tmp");
@@ -623,7 +648,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_run_cancelled_before_the_spawn_starts_no_ffmpeg_and_keeps_the_partial() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("ffmpeg.log");
         let bin = script(dir.path(), "ffmpeg", &format!("echo run >> '{}'", log.display()));

@@ -1,6 +1,6 @@
 //! Anime entry details (plan areas 39a and 39b). Pure rules and state: `airing`, `entry_state`, `episode_row`, `format`,
-//! `gesture`, `header`, `info`, `layout`, `model` (the load sequence), `runner` (the store runner), `settings` and
-//! `store`. The thin widgets are `info_view`, `row_view`, `settings_view` and `route`; they read those values.
+//! `gesture`, `header`, `info`, `layout`, `model` (the load sequence), `remote` (the source refresh), `runner` (the store
+//! runner), `settings` and `store`. The thin widgets are `info_view`, `row_view`, `settings_view` and `route`; they read those values.
 //!
 //! Reused from the domain layer, not copied here: episode and season flag masks and codecs
 //! (`kuro_domain::entries::anime`), the flag setters (`kuro_domain::entries::flag_setters`), the episode sorter
@@ -22,6 +22,7 @@ pub mod actions;
 pub mod bottom;
 pub mod library;
 pub mod refresh;
+pub mod remote;
 pub mod model;
 pub mod route;
 pub mod row_view;
@@ -29,3 +30,4 @@ pub mod runner;
 pub mod settings;
 pub mod settings_view;
 pub mod store;
+pub mod viewer;

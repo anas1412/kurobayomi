@@ -2,9 +2,10 @@
 //! out the controller's effects on widgets, and routes pointer, key and scroll input to the controller. Logic stays
 //! in the controllers; this module only decides where an effect lands on screen.
 //!
-//! Page content is a placeholder label for now, kept current by the row's status subscriptions (`holder`). Image
-//! decoding belongs to later tasks, and so do long-tap actions (T-44a-012) and webtoon zoom (T-44a-039), which the
-//! recogniser's events do not reach here.
+//! A page that can be read from disk shows its image in a `PageView`, fitted by the stored scale type and zoom start
+//! and following later changes in place (`holder`, `page_opts`). A page that cannot be read here keeps a label that
+//! follows the page's status. The page view reports long presses (when `reader_long_tap` is on) as
+//! `ViewerEvent::LongTap`; webtoon zoom (T-44a-039) is not wired yet.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -17,10 +18,11 @@ use gtk::prelude::*;
 
 use super::effect::Effect;
 use super::gesture::{self, DragTracker, Gesture, TapRecognizer};
-use super::holder::{self, Row, Tasks};
+use super::holder::{self, PageHost, Row, Tasks};
 use super::keys::{self, InputKey, KeyAction, KeyContext, KeyEvent};
 use super::model::{ChapterKey, ChapterSet, ItemKey, PageKind, PageRef};
 use super::nav::{self, TapOutcome};
+use super::page_opts::page_opts;
 use super::pager::controller::{PagerController, PagerOptions};
 use super::settings::{self, Family, Reaction, SettingsWatch, ViewerSettings};
 use super::webtoon::controller::{WebtoonController, WebtoonOptions};
@@ -124,7 +126,7 @@ fn scrolled(horizontal: bool) -> gtk::ScrolledWindow {
 
 /// The row for an item: a label until page content exists, following the page's status or the destination
 /// chapter's state (T-44a-006). An insert page follows its parent, whose bytes it shares.
-fn item_row(item: &ItemKey, lookup: &Lookup) -> Row {
+fn item_row(item: &ItemKey, lookup: &Lookup, host: &PageHost) -> Row {
     match item {
         ItemKey::Page(p) => {
             let text = if p.is_insert() {
@@ -133,7 +135,8 @@ fn item_row(item: &ItemKey, lookup: &Lookup) -> Row {
                 format!("Chapter {} page {}", p.chapter.id, p.number())
             };
             let parent = PageRef { kind: PageKind::Normal, ..p.clone() };
-            holder::page_row(text, lookup.pages.get(&parent).cloned())
+            // A split insert would show the whole page twice until decode-time splitting exists, so it keeps its label.
+            holder::page_row(text, lookup.pages.get(&parent).cloned(), (!p.is_insert()).then_some(host))
         }
         ItemKey::Transition(t) => {
             let text = match (&t.to, t.dir) {
@@ -144,6 +147,15 @@ fn item_row(item: &ItemKey, lookup: &Lookup) -> Row {
             };
             holder::transition_row(text, t.to.as_ref().and_then(|to| lookup.chapter(to)))
         }
+    }
+}
+
+/// What a new page row is handed: the options of the current settings and the long-press report (T-43b-013).
+fn page_host(settings: &ViewerSettings, kind: ViewerKind, emit: &Emitter) -> PageHost {
+    let emit = emit.clone();
+    PageHost {
+        opts: page_opts(settings, kind, crate::reader::theme::system_prefers_dark()),
+        on_long_tap: Rc::new(move |page, _x, _y| emit.send(ViewerEvent::LongTap(page))),
     }
 }
 
@@ -365,7 +377,7 @@ impl PagerInner {
             kind,
             root,
             fixed,
-            ctl: RefCell::new(PagerController::new(kind, pager_options(&settings))),
+            ctl: RefCell::new(PagerController::new(kind, pager_options(&settings.clone().before_first_emission()))),
             lookup: RefCell::default(),
             settings: RefCell::new(settings.clone()),
             emit: ctx.emit,
@@ -379,6 +391,13 @@ impl PagerInner {
             laid_size: Cell::new((-1, -1)),
         });
         wire_surface(&inner);
+        // The first emission of the store gives page transitions their stored value (E-22).
+        let weak = Rc::downgrade(&inner);
+        glib::idle_add_local_once(move || {
+            if let Some(s) = weak.upgrade() {
+                s.ctl.borrow_mut().set_options(pager_options(&s.settings.borrow()));
+            }
+        });
         inner.wire_drag();
         inner.wire_resize();
         inner
@@ -471,7 +490,7 @@ impl PagerInner {
             let widget = slots
                 .entry(i)
                 .or_insert_with(|| {
-                    let row = item_row(&items[i], &self.lookup.borrow());
+                    let row = item_row(&items[i], &self.lookup.borrow(), &page_host(&self.settings.borrow(), self.kind, &self.emit));
                     self.fixed.put(&row.widget, 0.0, 0.0);
                     (items[i].clone(), row)
                 })
@@ -614,6 +633,8 @@ impl PagerInner {
     fn apply_settings(&self, new: ViewerSettings) {
         let old = std::mem::replace(&mut *self.settings.borrow_mut(), new.clone());
         self.ctl.borrow_mut().set_options(pager_options(&new));
+        let opts = page_opts(&new, self.kind, crate::reader::theme::system_prefers_dark());
+        self.slots.borrow().values().for_each(|(_, row)| row.apply(&opts));
         for reaction in settings::diff(&old, &new, Family::Pager) {
             match reaction {
                 Reaction::RefreshImages => {
@@ -684,7 +705,7 @@ impl Surface for PagerInner {
     }
 
     fn tap(&self, gesture: Gesture) {
-        // Long presses (T-44a-012) have no pager action in this slice, and a pager double tap is swallowed (E-20).
+        // Long presses reach the page view, and a pager double tap is swallowed (E-20).
         let Gesture::Tap { x, y } = gesture else { return };
         let (nx, ny) = normalised(x, y, f64::from(self.root.width()), f64::from(self.root.height()));
         let outcome = {
@@ -783,6 +804,8 @@ struct WebtoonInner {
     original_height: Cell<i32>,
     recognizer: RefCell<TapRecognizer>,
     anim: Rc<Cell<u64>>,
+    /// False until the store's first emission, so page transitions start off (E-22).
+    transitions_live: Cell<bool>,
 }
 
 fn webtoon_options(s: &ViewerSettings) -> WebtoonOptions {
@@ -802,7 +825,7 @@ impl WebtoonInner {
             kind,
             root,
             fixed,
-            ctl: RefCell::new(WebtoonController::new(webtoon_options(&settings))),
+            ctl: RefCell::new(WebtoonController::new(webtoon_options(&settings.clone().before_first_emission()))),
             lookup: RefCell::default(),
             settings: RefCell::new(settings.clone()),
             emit: ctx.emit,
@@ -818,8 +841,16 @@ impl WebtoonInner {
             original_height: Cell::new(0),
             recognizer: RefCell::new(recognizer(false)),
             anim: Rc::default(),
+            transitions_live: Cell::new(false),
         });
         wire_surface(&inner);
+        let weak = Rc::downgrade(&inner);
+        glib::idle_add_local_once(move || {
+            if let Some(s) = weak.upgrade() {
+                s.transitions_live.set(true);
+                s.ctl.borrow_mut().set_options(webtoon_options(&s.settings.borrow()));
+            }
+        });
         let weak = inner.me.clone();
         let adj = inner.root.vadjustment();
         adj.connect_value_changed(move |_| {
@@ -997,7 +1028,7 @@ impl WebtoonInner {
             let widget = realised
                 .entry(key.clone())
                 .or_insert_with(|| {
-                    let row = item_row(key, &self.lookup.borrow());
+                    let row = item_row(key, &self.lookup.borrow(), &page_host(&self.settings.borrow(), self.kind, &self.emit));
                     self.fixed.put(&row.widget, 0.0, 0.0);
                     row
                 })
@@ -1015,7 +1046,7 @@ impl WebtoonInner {
     fn scroll_by(&self, delta: f64) {
         let adj = self.root.vadjustment();
         let target = adj.value() + delta;
-        let smooth = self.settings.borrow().page_transitions;
+        let smooth = self.transitions_live.get() && self.settings.borrow().page_transitions;
         animate(&self.root, adj, Rc::clone(&self.anim), target, smooth, || {});
     }
 
@@ -1042,6 +1073,8 @@ impl WebtoonInner {
     fn apply_settings(&self, new: ViewerSettings) {
         let old = std::mem::replace(&mut *self.settings.borrow_mut(), new.clone());
         self.ctl.borrow_mut().set_options(webtoon_options(&new));
+        let opts = page_opts(&new, self.kind, crate::reader::theme::system_prefers_dark());
+        self.realised.borrow().values().for_each(|row| row.apply(&opts));
         for reaction in settings::diff(&old, &new, Family::Webtoon) {
             match reaction {
                 Reaction::RefreshImages => self.refresh_images(),
@@ -1104,7 +1137,7 @@ impl Surface for WebtoonInner {
     }
 
     fn tap(&self, gesture: Gesture) {
-        // Double tap zoom (T-44a-039) and long presses (T-44a-012) are not wired in this slice.
+        // Double tap zoom (T-44a-039) is not wired in this slice. Long presses reach the page view.
         let Gesture::Tap { x, y } = gesture else { return };
         let original = f64::from(self.original_height.get());
         let (nx, ny) = normalised(x, y, f64::from(self.root.width()), original);

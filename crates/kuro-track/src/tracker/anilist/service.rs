@@ -6,6 +6,7 @@
 use crate::model::{AnimeTrack, MangaTrack, copy_personal_from_anime, copy_personal_from_manga};
 
 use super::AniList;
+use super::convert::{anime_url, manga_url};
 use super::error::AniListError;
 use super::status::{AnimeStatus, MangaStatus};
 
@@ -79,7 +80,9 @@ pub async fn update_manga(
 ) -> Result<(), AniListError> {
     resolve_manga_library_id(api, t).await?;
     apply_manga_read(t, did_read, now_ms);
-    api.save_manga(t).await
+    api.save_manga(t).await?;
+    t.remote_url = manga_url(t.remote_id);
+    Ok(())
 }
 
 /// Update flow for an anime: resolve `library_id`, apply the watch rules, then save.
@@ -91,7 +94,9 @@ pub async fn update_anime(
 ) -> Result<(), AniListError> {
     resolve_anime_library_id(api, t).await?;
     apply_anime_watch(t, did_watch, now_ms);
-    api.save_anime(t).await
+    api.save_anime(t).await?;
+    t.remote_url = anime_url(t.remote_id);
+    Ok(())
 }
 
 /// Bind of a manga to the local entry (`p1-behavior.md` 10.3). A remote entry copies the personal fields,
@@ -107,7 +112,7 @@ pub async fn bind_manga(api: &AniList, t: &mut MangaTrack, has_read: bool) -> Re
                     t.status = MangaStatus::Reading.to_db();
                 }
             }
-            api.save_manga(t).await
+            api.save_manga(t).await?;
         }
         None => {
             let status = if has_read {
@@ -118,9 +123,10 @@ pub async fn bind_manga(api: &AniList, t: &mut MangaTrack, has_read: bool) -> Re
             t.status = status.to_db();
             t.score = 0.0;
             t.library_id = Some(api.add_manga(t).await?);
-            Ok(())
         }
     }
+    t.remote_url = manga_url(t.remote_id);
+    Ok(())
 }
 
 /// Bind of an anime. Same rules as [`bind_manga`], with WATCHING, PLAN_TO_WATCH and REWATCHING.
@@ -135,7 +141,7 @@ pub async fn bind_anime(api: &AniList, t: &mut AnimeTrack, has_seen: bool) -> Re
                     t.status = AnimeStatus::Watching.to_db();
                 }
             }
-            api.save_anime(t).await
+            api.save_anime(t).await?;
         }
         None => {
             let status = if has_seen {
@@ -146,9 +152,51 @@ pub async fn bind_anime(api: &AniList, t: &mut AnimeTrack, has_seen: bool) -> Re
             t.status = status.to_db();
             t.score = 0.0;
             t.library_id = Some(api.add_anime(t).await?);
-            Ok(())
         }
     }
+    t.remote_url = anime_url(t.remote_id);
+    Ok(())
+}
+
+/// Remote delete of a manga entry (T-28a-028). The MediaList id is `library_id`, looked up first when it is
+/// missing (E-20). An entry that is not on the list is already absent: `Ok`, with an info log (E-21).
+pub async fn delete_manga(api: &AniList, t: &MangaTrack) -> Result<(), AniListError> {
+    let list_id = match t.library_id.filter(|id| *id != 0) {
+        Some(id) => id,
+        None => match api.find_manga_entry(t.remote_id).await? {
+            Some(found) => match found.library_id {
+                Some(id) => id,
+                None => return Ok(absent_on_remote(t.remote_id)),
+            },
+            None => return Ok(absent_on_remote(t.remote_id)),
+        },
+    };
+    if !api.delete_entry(list_id).await? {
+        return Ok(absent_on_remote(t.remote_id));
+    }
+    Ok(())
+}
+
+/// Anime form of [`delete_manga`].
+pub async fn delete_anime(api: &AniList, t: &AnimeTrack) -> Result<(), AniListError> {
+    let list_id = match t.library_id.filter(|id| *id != 0) {
+        Some(id) => id,
+        None => match api.find_anime_entry(t.remote_id).await? {
+            Some(found) => match found.library_id {
+                Some(id) => id,
+                None => return Ok(absent_on_remote(t.remote_id)),
+            },
+            None => return Ok(absent_on_remote(t.remote_id)),
+        },
+    };
+    if !api.delete_entry(list_id).await? {
+        return Ok(absent_on_remote(t.remote_id));
+    }
+    Ok(())
+}
+
+fn absent_on_remote(media_id: i64) {
+    tracing::info!(target: "kurobayomi::tracker::anilist", media_id, "entry already absent on AniList");
 }
 
 /// Refresh of a manga from the list (`p1-behavior.md` 10.4). Copies the personal fields including
@@ -198,6 +246,8 @@ mod tests {
     const FIND_EMPTY: &str = include_str!("../../../tests/fixtures/anilist/find_manga_empty.json");
     const SAVE_OK: &str = include_str!("../../../tests/fixtures/anilist/save_entry_ok.json");
     const UPDATE_OK: &str = include_str!("../../../tests/fixtures/anilist/update_entry_ok.json");
+    const DELETE_OK: &str = include_str!("../../../tests/fixtures/anilist/delete_entry_ok.json");
+    const DELETE_ABSENT: &str = include_str!("../../../tests/fixtures/anilist/delete_entry_absent.json");
     const FIND_ANIME: &str = include_str!("../../../tests/fixtures/anilist/find_anime_found.json");
 
     fn client(responses: Vec<RawResponse>) -> (AniList, Arc<FakeTransport>) {
@@ -287,6 +337,15 @@ mod tests {
         let mut t = anime(AnimeStatus::OnHold, 3.0, 24);
         apply_anime_watch(&mut t, true, NOW);
         assert_eq!(t.status, AnimeStatus::Watching.to_db(), "test 36, E-25");
+    }
+
+    #[test]
+    fn t_28a_038_rewatching_on_the_last_episode_completes_e26() {
+        // E-26 documents the quirk: the final episode completes the entry even while rewatching.
+        let mut t = anime(AnimeStatus::Rewatching, 24.0, 24);
+        apply_anime_watch(&mut t, true, NOW);
+        assert_eq!(t.status, AnimeStatus::Completed.to_db());
+        assert_eq!(t.finish_date, NOW);
     }
 
     #[test]
@@ -499,6 +558,68 @@ mod tests {
         let vars = body(&fake, 0)["variables"].clone();
         assert_eq!(vars["id"], json!(4242));
         assert_eq!(vars["manga_id"], json!(30001));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_28a_028_delete_sends_the_media_list_id_from_library_id() -> TestResult {
+        let (api, fake) = client(vec![ok(DELETE_OK)]);
+        let mut t = manga(MangaStatus::Reading, 3.0, 40);
+        t.library_id = Some(9100);
+        delete_manga(&api, &t).await?;
+        assert_eq!(fake.calls(), 1);
+        assert_eq!(body(&fake, 0)["variables"]["listId"], json!(9100));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_28a_028_missing_library_id_is_found_before_the_delete() -> TestResult {
+        let (api, fake) = client(vec![ok(FIND_FOUND), ok(DELETE_OK)]);
+        let mut t = manga(MangaStatus::Reading, 3.0, 40);
+        t.library_id = None;
+        delete_manga(&api, &t).await?;
+        assert_eq!(body(&fake, 1)["variables"]["listId"], json!(9100));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_28a_028_entry_not_on_the_list_is_ok_with_no_delete() -> TestResult {
+        let (api, fake) = client(vec![ok(FIND_EMPTY)]);
+        let mut t = manga(MangaStatus::Reading, 3.0, 40);
+        t.library_id = None;
+        delete_manga(&api, &t).await?;
+        assert_eq!(fake.calls(), 1, "only the lookup was sent");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_28a_028_remote_reports_nothing_deleted_is_ok() -> TestResult {
+        let (api, _fake) = client(vec![ok(DELETE_ABSENT)]);
+        let mut t = anime(AnimeStatus::Watching, 2.0, 12);
+        t.library_id = Some(7);
+        delete_anime(&api, &t).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_28a_028_graphql_error_on_delete_is_returned() -> TestResult {
+        let (api, _fake) = client(vec![ok(r#"{"errors":[{"message":"denied"}]}"#)]);
+        let mut t = manga(MangaStatus::Reading, 3.0, 40);
+        t.library_id = Some(9100);
+        let r = delete_manga(&api, &t).await;
+        assert!(matches!(r, Err(AniListError::GraphQl(_))), "{r:?}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_28a_039_a_write_sets_the_link_from_the_remote_id() -> TestResult {
+        let (api, _fake) = client(vec![ok(FIND_FOUND), ok(UPDATE_OK)]);
+        let mut t = manga(MangaStatus::Reading, 3.0, 40);
+        t.library_id = None;
+        t.remote_url = "stale".into();
+        update_manga(&api, &mut t, false, NOW).await?;
+        assert_eq!(t.remote_url, manga_url(t.remote_id));
+        assert!(t.remote_url.starts_with("https://anilist.co/manga/"));
         Ok(())
     }
 }

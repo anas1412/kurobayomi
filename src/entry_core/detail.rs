@@ -189,6 +189,18 @@ pub enum StoreCmd {
     AddToLibrary { manga_id: i64, category_ids: Vec<i64> },
     /// `CategoryConfirm::SetCategories`: the links in one transaction. Categories reload after.
     SetCategories { manga_id: i64, category_ids: Vec<i64> },
+    /// The library button: removes a favorite, or adds a manga that is not one, after the duplicate check and the
+    /// default-category routing (`toggleFavorite`, behaviour 4.2). `default_category` is the stored preference, and
+    /// `skip_duplicate` is the "Add anyway" answer to the duplicate dialog.
+    ToggleFavorite { manga_id: i64, default_category: i64, skip_duplicate: bool },
+    /// Queues chapters for download. The page decided which rows may start (`chapter_actions::acts_on`).
+    Download { manga_id: i64, chapter_ids: Vec<i64>, start_now: bool },
+    /// Takes one chapter out of the download queue.
+    CancelDownload { manga_id: i64, chapter_id: i64 },
+    /// Deletes the downloads of these chapters.
+    DeleteDownloads { manga_id: i64, chapter_ids: Vec<i64> },
+    /// Writes the library's default chapter flags to this manga (the Reset item of the settings sheet).
+    ResetFlags { manga_id: i64 },
     /// Drops the subscriptions and stops the runner. Detached writes keep running.
     Shutdown,
 }
@@ -224,6 +236,14 @@ pub enum StoreEvent {
     },
     /// A mark-read asked for these downloads to go, and the backend removed them.
     DownloadsDeleted(Vec<i64>),
+    /// The library button found another favorite with the same title. Nothing was written (E-FAV-2).
+    Duplicate { duplicate_id: i64 },
+    /// The default category is unset or deleted: the page opens the category dialog. Nothing was written (E-FAV-3).
+    ChooseCategory,
+    /// The manga left the library. `ask_delete_downloads` is true when downloads exist (the delete prompt).
+    Removed { ask_delete_downloads: bool },
+    /// A download call queued chapters. The page may offer to add the manga to the library.
+    Queued,
 }
 
 /// A single slot that keeps only the newest value. A producer `put`s, the consumer `take`s, and an older value is

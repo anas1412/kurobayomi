@@ -21,7 +21,10 @@ pub fn set_auto_play(enabled: bool) -> (PlayerMessage, Write) {
     } else {
         PlayerMessage::AutoPlayOff
     };
-    (message, Write::pref("pref_auto_play_enabled", enabled.to_string()))
+    (
+        message,
+        Write::pref("pref_auto_play_enabled", enabled.to_string()),
+    )
 }
 
 /// `endFile(eofReached)`: autoplay runs only at the real end of the file, with the preference on.
@@ -98,11 +101,17 @@ mod tests {
     fn set_auto_play_shows_the_matching_pill_and_saves_the_value() {
         assert_eq!(
             set_auto_play(true),
-            (PlayerMessage::AutoPlayOn, Write::pref("pref_auto_play_enabled", "true"))
+            (
+                PlayerMessage::AutoPlayOn,
+                Write::pref("pref_auto_play_enabled", "true")
+            )
         );
         assert_eq!(
             set_auto_play(false),
-            (PlayerMessage::AutoPlayOff, Write::pref("pref_auto_play_enabled", "false"))
+            (
+                PlayerMessage::AutoPlayOff,
+                Write::pref("pref_auto_play_enabled", "false")
+            )
         );
     }
 

@@ -48,12 +48,40 @@ impl From<AniListError> for crate::error::TrackError {
         match e {
             AniListError::Track(t) => t,
             AniListError::Prefs(p) => crate::error::TrackError::Prefs(p),
-            other => crate::error::TrackError::Message(other.to_string()),
+            AniListError::Secret(s) => crate::error::TrackError::from(s),
+            other => crate::error::TrackError::Key(other.message()),
         }
     }
 }
 
 impl AniListError {
+    /// The user-facing message of this failure (T-28a-045). Never the `Display` or `Debug` text: those are for logs.
+    /// The GraphQL text is the server's own message and is shown as sent.
+    pub fn message(&self) -> crate::messages::MsgKey {
+        use crate::messages::MsgKey;
+        match self {
+            AniListError::NotAuthenticated => MsgKey::AniListNotAuthenticated,
+            AniListError::AuthExpired => MsgKey::AniListSessionExpired,
+            AniListError::NotInList => MsgKey::AniListNotInList,
+            AniListError::RateLimited { .. } => MsgKey::AniListRateLimited,
+            AniListError::Offline => MsgKey::AniListOffline,
+            AniListError::UnknownStatus(_) => MsgKey::AniListUnknownStatus,
+            AniListError::GraphQl(text) => MsgKey::TrackerError {
+                tracker: "AniList".to_owned(),
+                detail: text.clone(),
+            },
+            AniListError::Track(t) => MsgKey::Raw(t.to_string()),
+            AniListError::Prefs(_)
+            | AniListError::Secret(_)
+            | AniListError::Http(_)
+            | AniListError::Transient
+            | AniListError::Decode(_)
+            | AniListError::UnknownScoreFormat(_)
+            | AniListError::ScoreOutOfRange
+            | AniListError::Transport(_) => MsgKey::UnknownError,
+        }
+    }
+
     /// Maps a transport failure. A failed connection is reported as [`AniListError::Offline`].
     pub fn from_transport(e: reqwest::Error) -> Self {
         if e.is_connect() {
@@ -61,5 +89,45 @@ impl AniListError {
         } else {
             AniListError::Transport(e)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::messages::{MsgKey, english};
+
+    #[test]
+    fn t_28a_045_every_failure_has_a_user_message_and_no_debug_text() {
+        let cases = [
+            AniListError::NotAuthenticated,
+            AniListError::AuthExpired,
+            AniListError::NotInList,
+            AniListError::RateLimited { retry_after: None },
+            AniListError::Offline,
+            AniListError::UnknownStatus("X".into()),
+            AniListError::Transient,
+        ];
+        for e in cases {
+            let key = e.message();
+            let text = english(&key);
+            for debug in ["AuthExpired", "NotInList", "RateLimited", "UnknownStatus", "NotAuthenticated"] {
+                assert!(!text.contains(debug), "{text}");
+            }
+            let tracked: crate::error::TrackError = e.into();
+            assert_eq!(tracked.to_string(), text);
+            assert_eq!(tracked.toast("AniList"), key);
+        }
+        assert_eq!(AniListError::AuthExpired.message(), MsgKey::AniListSessionExpired);
+    }
+
+    #[test]
+    fn t_28a_042_not_in_list_and_expired_login_are_not_queued() {
+        use crate::error::TrackError;
+        assert!(TrackError::from(AniListError::NotInList).is_retry_futile());
+        assert!(TrackError::from(AniListError::AuthExpired).is_retry_futile());
+        assert!(!TrackError::from(AniListError::Offline).is_retry_futile());
+        assert!(!TrackError::from(AniListError::Transient).is_retry_futile());
+        assert!(!TrackError::from(AniListError::RateLimited { retry_after: None }).is_retry_futile());
     }
 }

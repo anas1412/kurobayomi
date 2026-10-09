@@ -78,7 +78,7 @@ pub fn tokens_for(scheme: &SchemeDef, dark: bool, amoled: bool) -> Tokens {
 }
 
 /// The 10 AMOLED overrides of `BaseColorScheme.getColorScheme`. Nothing else changes.
-fn apply_amoled(colors: &mut [Rgba; ROLE_COUNT]) {
+pub fn apply_amoled(colors: &mut [Rgba; ROLE_COUNT]) {
     let black = Rgba::argb(0xFF00_0000);
     let white = Rgba::argb(0xFFFF_FFFF);
     let container = Rgba::argb(0xFF0C_0C0C);

@@ -48,13 +48,9 @@ pub fn capitalise_lower(text: &str) -> String {
     }
 }
 
-/// A score as Kotlin prints a `Double`: whole numbers keep one decimal (`8.0`).
+/// A score as a whole number (E-56, a deliberate change from the Double text of the source). Truncates like `toInt()`.
 pub fn score_text(score: f64) -> String {
-    if score.fract() == 0.0 {
-        format!("{score:.1}")
-    } else {
-        format!("{score}")
-    }
+    (score.trunc() as i64).to_string()
 }
 
 /// Fields of one result that the card reads. Anime and manga results both map to it.
@@ -93,7 +89,8 @@ fn card(f: CardFields<'_>) -> CardView {
             value: f.start_date.to_owned(),
         });
     }
-    let status = capitalise_lower(f.publishing_status);
+    // E-37: the API's underscores read as spaces ("ON_HOLD" is "On hold").
+    let status = capitalise_lower(&f.publishing_status.replace('_', " "));
     if !status.is_empty() {
         details.push(DetailLine {
             label_key: "track_status",
@@ -193,28 +190,32 @@ pub enum SearchState<R> {
 pub struct SearchScreen<R: SearchHit> {
     pub query: String,
     supports_private: bool,
-    current_url: Option<String>,
+    /// The `(tracker, remote id)` of the binding being edited; its result is preselected (E-57).
+    bound: Option<(TrackerId, i64)>,
     state: SearchState<R>,
     selected: Option<(TrackerId, i64)>,
     /// Counts the queries started. Only the latest one may write results (D-6, E-32, E-33).
     generation: u64,
+    /// True while a bind is being written. Both Track buttons are disabled then (T-28a-057).
+    in_flight: bool,
 }
 
 impl<R: SearchHit> SearchScreen<R> {
     /// The screen opens with the title in the field. The returned query runs once when the title is not blank.
-    /// `current_url` is the URL of the binding being edited, if any (076).
+    /// `bound` is the `(tracker, remote id)` of the binding being edited, if any (076, E-57).
     pub fn open(
         initial_title: &str,
-        current_url: Option<&str>,
+        bound: Option<(TrackerId, i64)>,
         supports_private: bool,
     ) -> (Self, Option<String>) {
         let mut screen = Self {
             query: initial_title.to_owned(),
             supports_private,
-            current_url: current_url.map(str::to_owned),
+            bound,
             state: SearchState::Idle,
             selected: None,
             generation: 0,
+            in_flight: false,
         };
         let first = screen.begin(initial_title);
         (screen, first)
@@ -250,7 +251,7 @@ impl<R: SearchHit> SearchScreen<R> {
     }
 
     /// Applies the result of the query `generation`. A result of an earlier query is dropped and `false` is
-    /// returned (D-6). Otherwise the bound result with the same URL as `current_url` is selected (076).
+    /// returned (D-6). Otherwise the result whose key equals `bound` is selected (076, E-57).
     pub fn finish_for(&mut self, generation: u64, result: Result<Vec<R>, TrackError>) -> bool {
         if generation != self.generation {
             return false;
@@ -281,10 +282,8 @@ impl<R: SearchHit> SearchScreen<R> {
     }
 
     fn auto_select(&self, hits: &[R]) -> Option<(TrackerId, i64)> {
-        let url = self.current_url.as_deref().filter(|u| !u.is_empty())?;
-        hits.iter()
-            .find(|h| h.tracking_url() == url)
-            .map(SearchHit::list_key)
+        let bound = self.bound?;
+        hits.iter().map(SearchHit::list_key).find(|k| *k == bound)
     }
 
     pub fn state(&self) -> &SearchState<R> {
@@ -319,9 +318,22 @@ impl<R: SearchHit> SearchScreen<R> {
         self.bottom_bar_shown() && self.supports_private
     }
 
+    /// Marks a bind as being written (`true`) or finished (`false`). The GUI calls it around the bind.
+    pub fn set_in_flight(&mut self, in_flight: bool) {
+        self.in_flight = in_flight;
+    }
+
+    /// Both Track buttons are enabled: a card is selected and no bind is in flight (T-28a-057).
+    pub fn track_buttons_enabled(&self) -> bool {
+        self.bottom_bar_shown() && !self.in_flight
+    }
+
     /// "Track" (`private` false) or the private button (`true`). Returns the result to register. Private is set
-    /// only when the tracker supports it.
+    /// only when the tracker supports it. `None` while a bind is in flight.
     pub fn confirm(&self, private: bool) -> Option<R> {
+        if self.in_flight {
+            return None;
+        }
         let mut hit = self.selected()?.clone();
         hit.set_private(private && self.supports_private);
         Some(hit)
@@ -484,9 +496,9 @@ mod tests {
     }
 
     #[test]
-    fn tr_27_076_current_url_auto_selects_and_a_new_query_clears_it() {
+    fn tr_27_076_bound_remote_id_auto_selects_and_a_new_query_clears_it() {
         let (mut screen, _) =
-            SearchScreen::<AnimeTrackSearch>::open("x", Some("https://a.test/2"), true);
+            SearchScreen::<AnimeTrackSearch>::open("x", Some((TrackerId::ANILIST, 2)), true);
         screen.finish(Ok(results()));
         assert_eq!(screen.selected().map(|h| h.remote_id), Some(2));
         screen.start_loading();
@@ -495,13 +507,26 @@ mod tests {
     }
 
     #[test]
-    fn tr_27_076_no_current_url_means_no_selection() {
+    fn tr_27_076_no_bound_id_means_no_selection() {
         let (mut screen, _) = SearchScreen::<AnimeTrackSearch>::open("x", None, true);
         screen.finish(Ok(results()));
         assert!(screen.selected().is_none());
-        let (mut blank, _) = SearchScreen::<AnimeTrackSearch>::open("x", Some(""), true);
-        blank.finish(Ok(vec![hit(TrackerId::ANILIST, 5, "")]));
-        assert!(blank.selected().is_none(), "an empty URL never matches");
+        let (mut other, _) =
+            SearchScreen::<AnimeTrackSearch>::open("x", Some((TrackerId::ANILIST, 5)), true);
+        other.finish(Ok(results()));
+        assert!(other.selected().is_none(), "an id absent from the results never matches");
+        let (mut kitsu, _) =
+            SearchScreen::<AnimeTrackSearch>::open("x", Some((TrackerId::KITSU, 1)), true);
+        kitsu.finish(Ok(results()));
+        assert_eq!(
+            kitsu.selected().map(|h| h.list_key()),
+            Some((TrackerId::KITSU, 1)),
+            "the same remote id of another tracker is not chosen"
+        );
+        let (mut empty_url, _) =
+            SearchScreen::<AnimeTrackSearch>::open("x", Some((TrackerId::ANILIST, 5)), true);
+        empty_url.finish(Ok(vec![hit(TrackerId::ANILIST, 5, "")]));
+        assert!(empty_url.selected().is_some(), "selection does not depend on the URL");
     }
 
     #[test]
@@ -556,7 +581,7 @@ mod tests {
                 ("Type", "Ova"),
                 ("Started", "2026-01-02"),
                 ("Status", "Ongoing"),
-                ("Score", "8.0"),
+                ("Score", "8"),
             ]
         );
         assert_eq!(card.summary.as_deref(), Some("A story."));
@@ -570,7 +595,7 @@ mod tests {
         assert!(card.details.is_empty());
         assert_eq!(card.byline, None);
         assert_eq!(card.summary, None);
-        assert_eq!(score_text(7.5), "7.5");
+        assert_eq!(score_text(7.5), "7");
     }
 
     #[test]
@@ -595,5 +620,31 @@ mod tests {
             card_action(CardMenuItem::OpenInBrowser, &h),
             Some(CardEffect::Open("https://a.test/3".into()))
         );
+    }
+
+    #[test]
+    fn t_28a_057_track_buttons_are_disabled_while_a_bind_is_in_flight() {
+        let (mut screen, _) = SearchScreen::<AnimeTrackSearch>::open("x", None, true);
+        screen.finish(Ok(results()));
+        screen.select((TrackerId::ANILIST, 1));
+        assert!(screen.track_buttons_enabled());
+        assert!(screen.confirm(false).is_some());
+        screen.set_in_flight(true);
+        assert!(!screen.track_buttons_enabled());
+        assert!(screen.confirm(true).is_none(), "no second bind while one is written");
+        screen.set_in_flight(false);
+        assert!(screen.confirm(true).is_some());
+    }
+
+    #[test]
+    fn t_28a_030_status_underscores_read_as_spaces_and_the_score_is_whole() {
+        let mut hit = hit(TrackerId::ANILIST, 5, "https://a.test/5");
+        hit.publishing_status = "ON_HOLD".into();
+        hit.score = Some(85.9);
+        let card = hit.card();
+        let status = card.details.iter().find(|d| d.label == "Status").map(|d| d.value.clone());
+        assert_eq!(status.as_deref(), Some("On hold"));
+        let score = card.details.iter().find(|d| d.label == "Score").map(|d| d.value.clone());
+        assert_eq!(score.as_deref(), Some("85"));
     }
 }

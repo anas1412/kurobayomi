@@ -29,6 +29,20 @@ pub trait Backend: Send + Sync + 'static {
     }
     /// Removes the downloads of these chapters (after a mark-read with "remove after read").
     fn delete_downloads(&self, _manga_id: i64, _chapter_ids: &[i64]) {}
+    /// Queues these chapters for download. With `start_now` the one chapter goes to the front and the queue starts.
+    /// `false` when the downloads layer is not there, or refused: nothing was queued.
+    fn enqueue_downloads(&self, _manga_id: i64, _chapter_ids: &[i64], _start_now: bool) -> bool {
+        false
+    }
+    /// Takes one chapter out of the download queue.
+    fn cancel_download(&self, _chapter_id: i64) {}
+    /// Binds the enhanced trackers of the source to a manga that just joined the library (`bindEnhancedTrackers`).
+    fn bind_enhanced(&self, _manga_id: i64) {}
+    /// Deletes the cover files of a manga that just left the library (`removeCovers`), after the write succeeded.
+    /// `true` when a file was removed.
+    fn remove_cover(&self, _manga_id: i64) -> bool {
+        false
+    }
 }
 
 /// The backend of an app with no source registry yet: every source reads as not installed, the local source reads

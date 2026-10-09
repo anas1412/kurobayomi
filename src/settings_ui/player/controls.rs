@@ -1,5 +1,7 @@
 //! Internal player page rows: progress and preserve position (T-48a-015), Controls and Hosters (T-48a-013) and the
 //! Display group (T-48a-014). Intro skip, PiP and external player rows belong to tasks 016 to 018.
+// Not reachable from `route.rs` yet: the Internal player page is still the spec page.
+#![allow(dead_code)]
 use kuro_prefs::pref::Pref;
 use kuro_prefs::prefs::Prefs;
 

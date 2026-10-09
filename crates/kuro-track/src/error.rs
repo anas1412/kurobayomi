@@ -26,6 +26,9 @@ pub enum TrackError {
     Db(#[from] kuro_db::DbError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    /// A failure with its own message key (AniList errors, T-28a-045). Shown in the user's language.
+    #[error("{}", crate::messages::english(.0))]
+    Key(crate::messages::MsgKey),
 }
 
 impl From<SecretError> for TrackError {
@@ -39,7 +42,20 @@ impl From<SecretError> for TrackError {
 
 impl TrackError {
     /// The toast for this failure: "<tracker> error: <message>" (B§3.3 step 2). An empty message keeps the colon.
+    /// True for failures a retry cannot fix: the entry is not on the list, or the login expired (T-28a-042). Such a
+    /// progress update is reported, not put in the retry queue.
+    pub fn is_retry_futile(&self) -> bool {
+        matches!(
+            self,
+            TrackError::Key(crate::messages::MsgKey::AniListNotInList)
+                | TrackError::Key(crate::messages::MsgKey::AniListSessionExpired)
+        )
+    }
+
     pub fn toast(&self, tracker: &str) -> crate::messages::MsgKey {
+        if let TrackError::Key(key) = self {
+            return key.clone();
+        }
         crate::messages::MsgKey::TrackerError {
             tracker: tracker.to_owned(),
             detail: self.to_string(),

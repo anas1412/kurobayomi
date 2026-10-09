@@ -149,7 +149,7 @@ pub fn next_update<Tz: TimeZone>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Duration, Utc};
+    use chrono::{Duration, FixedOffset, LocalResult, NaiveDateTime, NaiveTime, Utc};
 
     /// Epoch ms of a UTC wall time.
     fn at(y: i32, m: u32, d: u32, h: u32) -> i64 {
@@ -344,5 +344,78 @@ mod tests {
         let cycle = days_since.div_euclid(effective);
         let expected = start_of_day(latest.checked_add_signed(TimeDelta::days((cycle + 1) * 16)).unwrap(), &Utc);
         assert_eq!(next, expected.timestamp_millis());
+    }
+
+    /// A zone with one spring-forward change (CET, +01:00, until 2026-03-29 02:00 local; CEST, +02:00, after). It
+    /// stands in for Europe/Paris, which the crate does not link.
+    #[derive(Clone, Copy, Debug)]
+    struct SpringZone;
+
+    fn cet() -> FixedOffset {
+        FixedOffset::east_opt(3_600).unwrap()
+    }
+
+    fn cest() -> FixedOffset {
+        FixedOffset::east_opt(7_200).unwrap()
+    }
+
+    fn transition_utc() -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(2026, 3, 29).unwrap().and_hms_opt(1, 0, 0).unwrap()
+    }
+
+    impl TimeZone for SpringZone {
+        type Offset = FixedOffset;
+
+        fn from_offset(_: &FixedOffset) -> Self {
+            SpringZone
+        }
+
+        fn offset_from_local_date(&self, local: &NaiveDate) -> LocalResult<FixedOffset> {
+            self.offset_from_local_datetime(&local.and_time(NaiveTime::from_hms_opt(12, 0, 0).unwrap()))
+        }
+
+        fn offset_from_local_datetime(&self, local: &NaiveDateTime) -> LocalResult<FixedOffset> {
+            let gap_start = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap().and_hms_opt(2, 0, 0).unwrap();
+            let gap_end = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap().and_hms_opt(3, 0, 0).unwrap();
+            if *local < gap_start {
+                LocalResult::Single(cet())
+            } else if *local < gap_end {
+                LocalResult::None
+            } else {
+                LocalResult::Single(cest())
+            }
+        }
+
+        fn offset_from_utc_date(&self, utc: &NaiveDate) -> FixedOffset {
+            self.offset_from_utc_datetime(&utc.and_time(NaiveTime::MIN))
+        }
+
+        fn offset_from_utc_datetime(&self, utc: &NaiveDateTime) -> FixedOffset {
+            if *utc < transition_utc() { cet() } else { cest() }
+        }
+    }
+
+    #[test]
+    fn fi22_day_counts_are_calendar_days_across_a_dst_change() {
+        // Last change 2026-03-27 00:00 CET; now 2026-03-29 12:00 CEST. The day in between is 23 hours long, but the
+        // count is calendar days: 2.
+        let now = SpringZone.with_ymd_and_hms(2026, 3, 29, 12, 0, 0).single().unwrap();
+        let last = SpringZone.with_ymd_and_hms(2026, 3, 27, 0, 0, 0).single().unwrap().timestamp_millis();
+        let next = next_update_ms(0, 7, last, &now, window_for(&now));
+        // cycle = 2 div 7 = 0, next = 2026-03-27 + 7 days = 2026-04-03 00:00 CEST = 2026-04-02 22:00 UTC.
+        assert_eq!(next, Utc.with_ymd_and_hms(2026, 4, 2, 22, 0, 0).unwrap().timestamp_millis());
+        // The DST day starts at local midnight CET, which is 23:00 UTC of the day before.
+        let dst_day = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap();
+        let expected_start = Utc.with_ymd_and_hms(2026, 3, 28, 23, 0, 0).unwrap().timestamp_millis();
+        assert_eq!(start_of_day(dst_day, &SpringZone).timestamp_millis(), expected_start);
+    }
+
+    #[test]
+    fn fi23_a_last_update_in_the_future_gives_that_day_and_never_an_earlier_one() {
+        let now = Utc.with_ymd_and_hms(2020, 1, 10, 12, 0, 0).unwrap();
+        let last = now + Duration::days(3);
+        let next = next_update_ms(0, 7, last.timestamp_millis(), &now, window_for(&now));
+        // days_since truncates to -2, cycle = -2 div 7 = -1, step 0: the next date is the future day itself.
+        assert_eq!(next, at(2020, 1, 13, 0));
     }
 }

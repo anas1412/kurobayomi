@@ -432,12 +432,11 @@ fn record_entry<H: Host>(
     match result {
         Ok(outcome) => {
             if !outcome.new_items.is_empty() {
+                // The counter write happens under the same lock that orders the updates, so concurrent entries
+                // add to the app counter one at a time (T-26a-025).
+                let mut updates = shared.updates.lock().unwrap_or_else(|p| p.into_inner());
                 host.add_new_updates(kind, outcome.new_items.len());
-                shared.updates.lock().unwrap_or_else(|p| p.into_inner()).push(EntryUpdate {
-                    entry_id: entry.id,
-                    title: entry.title.clone(),
-                    items: outcome.new_items,
-                });
+                updates.push(EntryUpdate { entry_id: entry.id, title: entry.title.clone(), items: outcome.new_items });
             }
             shared.queued.fetch_add(outcome.downloads, Ordering::SeqCst);
         }

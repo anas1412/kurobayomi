@@ -17,13 +17,7 @@ pub struct DeleteRules {
 /// The episodes a delete may remove. When the anime sits in an excluded category its watched episodes are kept. The
 /// bookmarked ones are kept unless `remove_bookmarked` is set. The category rule keeps the Kotlin logic as written.
 pub fn episodes_to_delete(episodes: Vec<EpisodeRef>, rules: &DeleteRules) -> Vec<EpisodeRef> {
-    let categories: &[i64] = if rules.item_categories.is_empty() { &[0] } else { &rules.item_categories };
-    let watched_kept = categories.iter().any(|c| rules.exclude_categories.contains(c));
-    episodes
-        .into_iter()
-        .filter(|e| !(watched_kept && e.seen))
-        .filter(|e| rules.remove_bookmarked || !e.bookmark)
-        .collect()
+    crate::delete::select_for_delete(episodes, &rules.exclude_categories, &rules.item_categories, rules.remove_bookmarked)
 }
 
 #[cfg(test)]

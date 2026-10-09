@@ -1,7 +1,6 @@
 //! The per-entry flow of a pass (behaviour 6.2): favourite gate, fetch, empty check, favourite re-read, sync, sort,
 //! download hand-off. Manga and anime share it; season children (anime, `parent_id` set) skip the favourite gate.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use kuro_domain::kind::EntryKind;
@@ -116,6 +115,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use kuro_domain::kind::EntryKind;

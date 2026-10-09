@@ -2,6 +2,8 @@
 //! `ChapterUtils.mergeChapters`, T-45a-017). The merged list replaces the chapter model; the caller
 //! then sets the current chapter to the playback position.
 
+use kuro_i18n::{Arg, MsgKey, tr, trf};
+
 use crate::types::{ChapterType, TimeStamp};
 
 /// `index` of a chapter taken from the video's timestamps (`IndexedSegment` index -2).
@@ -29,22 +31,23 @@ pub fn color(segment: &Segment) -> Option<i32> {
     (segment.index == EXTERNAL && segment.kind != ChapterType::Other).then_some(EXTERNAL_COLOR)
 }
 
-/// The English label of a chapter type (`player_chapter_type_*`). `Other` has none. Localised text
-/// is the UI layer's job, keyed by the same type.
-pub fn type_label(kind: ChapterType) -> Option<&'static str> {
-    match kind {
-        ChapterType::Opening => Some("Opening"),
-        ChapterType::Ending => Some("Ending"),
-        ChapterType::Recap => Some("Recap"),
-        ChapterType::MixedOp => Some("Mixed opening"),
-        ChapterType::Other => None,
-    }
+/// The localised label of a chapter type (`player_chapter_type_*`, from the i18n catalogue).
+/// `Other` has none.
+pub fn type_label(kind: ChapterType) -> Option<String> {
+    let key = match kind {
+        ChapterType::Opening => MsgKey::player_chapter_type_opening,
+        ChapterType::Ending => MsgKey::player_chapter_type_ending,
+        ChapterType::Recap => MsgKey::player_chapter_type_recap,
+        ChapterType::MixedOp => MsgKey::player_chapter_type_mixedop,
+        ChapterType::Other => return None,
+    };
+    Some(tr(key))
 }
 
-/// The skip button text for a chapter type (`player_skip_action` with the type label, English
-/// wording). `None` for `Other`, which has no skip button.
+/// The skip button text for a chapter type (`player_skip_action` with the type label). `None` for
+/// `Other`, which has no skip button.
 pub fn skip_label(kind: ChapterType) -> Option<String> {
-    type_label(kind).map(|label| format!("Skip {label}"))
+    type_label(kind).map(|label| trf(MsgKey::player_skip_action, &[("arg1", Arg::Str(&label))]))
 }
 
 /// Gives an unnamed timestamp the label of its type. A named one, or one of type `Other`, is kept.
@@ -53,7 +56,7 @@ pub fn named(stamps: &[TimeStamp]) -> Vec<TimeStamp> {
         .iter()
         .map(|stamp| match type_label(stamp.kind) {
             Some(label) if stamp.name.is_empty() => TimeStamp {
-                name: label.to_owned(),
+                name: label,
                 ..stamp.clone()
             },
             _ => stamp.clone(),
@@ -174,9 +177,101 @@ pub fn merge(current: &[Segment], stamps: &[TimeStamp], duration: Option<i32>) -
         .collect()
 }
 
+/// `chapter-list` as the caller reads it. A missing title becomes empty, where Kotlin would reject
+/// the null. The list is sorted by start and each entry is indexed 0, like mpv's own chapters.
+pub fn load(raw: &[(Option<String>, f32)]) -> Vec<Segment> {
+    let mut list: Vec<Segment> = raw
+        .iter()
+        .map(|(title, start)| Segment {
+            index: 0,
+            name: title.clone().unwrap_or_default(),
+            start: *start,
+            kind: ChapterType::Other,
+        })
+        .collect();
+    list.sort_by(|a, b| a.start.total_cmp(&b.start));
+    list
+}
+
+/// The current chapter: the last one whose start is at or before `pos`. `None` before the first
+/// chapter or when the list is empty.
+pub fn current_chapter(chapters: &[Segment], pos: f32) -> Option<usize> {
+    chapters.iter().rposition(|c| c.start <= pos)
+}
+
+/// `updateChapter(index)` (behaviour 6.3): the chapter to make current. An empty list or index
+/// `-1` changes nothing, and so does an index past the end. The window calls it with `0` after
+/// the chapter list is loaded.
+pub fn update_chapter(chapters: &[Segment], index: i64) -> Option<usize> {
+    if chapters.is_empty() || index == -1 {
+        return None;
+    }
+    usize::try_from(index).ok().filter(|i| *i < chapters.len())
+}
+
+/// The seek target for choosing a chapter, its start in whole seconds. The caller seeks with the
+/// precise flag, as `selectChapter` does.
+pub fn select_chapter_target(chapters: &[Segment], index: usize) -> Option<i64> {
+    chapters.get(index).map(|c| c.start as i64)
+}
+
+/// The chapter row label `#N: name`. `ordinal` is the 0-based position stored at load (E49); a
+/// missing name was already made empty by `load`, so it never reads `null` (E48).
+pub fn row_label(ordinal: usize, name: &str) -> String {
+    format!("#{}: {name}", ordinal + 1)
+}
+
+/// The chapter row time: `pretty_time` of the whole seconds of the start (E50).
+pub fn row_time(start: f32) -> String {
+    crate::time::pretty_time(start as i64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn row_labels_count_from_one_and_keep_empty_names_empty() {
+        assert_eq!(row_label(0, "Opening"), "#1: Opening");
+        assert_eq!(row_label(2, ""), "#3: ");
+    }
+
+    #[test]
+    fn row_time_uses_the_whole_seconds_of_the_start() {
+        assert_eq!(row_time(59.9), "00:59");
+        assert_eq!(row_time(3600.0), "1:00:00");
+    }
+
+    #[test]
+    fn load_sorts_by_start_and_blanks_missing_titles() {
+        let raw = [
+            (Some("Op".to_owned()), 85.0),
+            (None, 0.0),
+            (Some("Ep".to_owned()), 1330.0),
+        ];
+        let list = load(&raw);
+        let starts: Vec<f32> = list.iter().map(|c| c.start).collect();
+        assert_eq!(starts, vec![0.0, 85.0, 1330.0]);
+        assert_eq!(list[0].name, "");
+        assert_eq!(list[1].name, "Op");
+    }
+
+    #[test]
+    fn current_chapter_is_the_last_one_started() {
+        let list = load(&[(Some("A".into()), 0.0), (Some("B".into()), 85.0)]);
+        assert_eq!(current_chapter(&list, 0.0), Some(0));
+        assert_eq!(current_chapter(&list, 84.9), Some(0));
+        assert_eq!(current_chapter(&list, 85.0), Some(1));
+        assert_eq!(current_chapter(&[], 10.0), None);
+        assert_eq!(current_chapter(&list, -1.0), None);
+    }
+
+    #[test]
+    fn selecting_a_chapter_targets_its_start() {
+        let list = load(&[(Some("A".into()), 0.0), (Some("B".into()), 85.7)]);
+        assert_eq!(select_chapter_target(&list, 1), Some(85));
+        assert_eq!(select_chapter_target(&list, 5), None);
+    }
 
     fn stamp(start: f64, end: f64, name: &str, kind: ChapterType) -> TimeStamp {
         TimeStamp {
@@ -205,10 +300,27 @@ mod tests {
 
     #[test]
     fn every_chapter_type_has_a_label_except_other() {
-        assert_eq!(type_label(ChapterType::Ending), Some("Ending"));
-        assert_eq!(type_label(ChapterType::Recap), Some("Recap"));
-        assert_eq!(type_label(ChapterType::MixedOp), Some("Mixed opening"));
+        assert_eq!(type_label(ChapterType::Ending).as_deref(), Some("Ending"));
+        assert_eq!(type_label(ChapterType::Recap).as_deref(), Some("Recap"));
+        assert_eq!(
+            type_label(ChapterType::MixedOp).as_deref(),
+            Some("Mixed opening")
+        );
         assert_eq!(type_label(ChapterType::Other), None);
+        assert_eq!(
+            skip_label(ChapterType::Opening).as_deref(),
+            Some("Skip Opening")
+        );
+    }
+
+    #[test]
+    fn update_chapter_guards_empty_list_minus_one_and_out_of_range() {
+        let list = load(&[(Some("A".into()), 0.0), (Some("B".into()), 85.0)]);
+        assert_eq!(update_chapter(&list, 0), Some(0));
+        assert_eq!(update_chapter(&list, 1), Some(1));
+        assert_eq!(update_chapter(&list, -1), None);
+        assert_eq!(update_chapter(&list, 2), None);
+        assert_eq!(update_chapter(&[], 0), None);
     }
 
     #[test]

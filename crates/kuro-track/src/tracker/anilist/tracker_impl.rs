@@ -65,6 +65,10 @@ impl Tracker for AniList {
         AniList::is_logged_in(self)
     }
 
+    fn auth_expired(&self) -> bool {
+        self.base.auth_expired()
+    }
+
     fn login_state(&self) -> watch::Receiver<bool> {
         self.base.login_state()
     }
@@ -89,6 +93,14 @@ impl Tracker for AniList {
     }
 
     fn as_manga(&self) -> Option<&dyn MangaTracker> {
+        Some(self)
+    }
+
+    fn as_deletable_anime(&self) -> Option<&dyn DeletableAnimeTracker> {
+        Some(self)
+    }
+
+    fn as_deletable_manga(&self) -> Option<&dyn DeletableMangaTracker> {
         Some(self)
     }
 }
@@ -194,5 +206,19 @@ impl MangaTracker for AniList {
         let mut next = t.clone();
         service::refresh_manga(self, &mut next).await?;
         Ok(next)
+    }
+}
+
+#[async_trait]
+impl DeletableAnimeTracker for AniList {
+    async fn delete(&self, t: &AnimeTrack) -> Result<(), TrackError> {
+        Ok(service::delete_anime(self, t).await?)
+    }
+}
+
+#[async_trait]
+impl DeletableMangaTracker for AniList {
+    async fn delete(&self, t: &MangaTrack) -> Result<(), TrackError> {
+        Ok(service::delete_manga(self, t).await?)
     }
 }

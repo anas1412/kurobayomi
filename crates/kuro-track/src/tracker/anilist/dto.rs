@@ -189,6 +189,30 @@ pub struct SaveEntryData {
     pub entry: SaveEntry,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DeleteResult {
+    pub deleted: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteData {
+    #[serde(rename = "DeleteMediaListEntry")]
+    pub result: DeleteResult,
+}
+
+/// `Media` of the MAL id lookup. `idMal` is null for a media without a MyAnimeList entry.
+#[derive(Debug, Deserialize)]
+pub struct MalMedia {
+    #[serde(rename = "idMal")]
+    pub id_mal: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MalMediaData {
+    #[serde(rename = "Media")]
+    pub media: Option<MalMedia>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

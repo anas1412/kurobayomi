@@ -115,16 +115,26 @@ impl AnimeDownload {
         *self.state.borrow()
     }
 
-    /// Sets the status. Subscribers are woken only when the value changes (T-24a-046).
-    pub fn set_status(&self, status: DownloadState) {
-        self.state.send_if_modified(|current| {
+    /// Sets the status when the state diagram allows the move ([`DownloadState::can_become`]) and returns whether it
+    /// changed. A refused move leaves the status as it is and is logged. Subscribers are woken only when the value
+    /// changes (T-24a-046).
+    pub fn set_status(&self, status: DownloadState) -> bool {
+        let mut refused = None;
+        let changed = self.state.send_if_modified(|current| {
             if *current == status {
+                false
+            } else if !current.can_become(status) {
+                refused = Some(*current);
                 false
             } else {
                 *current = status;
                 true
             }
         });
+        if let Some(from) = refused {
+            tracing::error!(target: "kuro_downloads", episode = self.episode.id, ?from, to = ?status, "refused an anime status change the state diagram does not have");
+        }
+        changed
     }
 
     /// A receiver for this item's status. Its first value is the current status, and `changed()` wakes only on a later
@@ -168,6 +178,30 @@ mod tests {
             episode_number: 0.0,
         };
         Arc::new(AnimeDownload::new(source, anime, episode, false, None))
+    }
+
+    #[test]
+    fn set_status_follows_the_diagram_and_refuses_the_other_moves() {
+        use DownloadState::*;
+        let d = item(1);
+        assert_eq!(d.status(), Queue, "a new item is QUEUE");
+        assert!(d.set_status(Downloading), "QUEUE -> DOWNLOADING");
+        assert!(d.set_status(Error), "DOWNLOADING -> ERROR");
+        assert!(!d.set_status(Downloading), "ERROR -> DOWNLOADING needs QUEUE first");
+        assert_eq!(d.status(), Error);
+        assert!(d.set_status(Queue), "ERROR -> QUEUE on start");
+        assert!(d.set_status(Downloading));
+        assert!(d.set_status(Queue), "DOWNLOADING -> QUEUE on pause");
+        assert!(d.set_status(Downloading));
+        assert!(d.set_status(Downloaded), "DOWNLOADING -> DOWNLOADED");
+        assert!(!d.set_status(Queue), "DOWNLOADED is final");
+        let removed = item(2);
+        assert!(removed.set_status(NotDownloaded), "QUEUE -> NOT_DOWNLOADED on removal");
+        let failed = item(3);
+        failed.set_status(Downloading);
+        failed.set_status(Error);
+        assert!(!failed.set_status(NotDownloaded), "an ERROR item keeps its status when removed");
+        assert!(!failed.set_status(Error), "no change is not a change");
     }
 
     #[test]

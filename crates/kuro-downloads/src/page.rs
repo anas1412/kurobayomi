@@ -3,6 +3,9 @@
 
 use std::time::{Duration, Instant};
 
+use tokio::sync::broadcast;
+
+use crate::events::DownloadEvent;
 use crate::model::DownloadState;
 use crate::queue_model::{EntryKind, QueueItem, QueueModel, Section, SortKey};
 use crate::throttle::{PROGRESS_INTERVAL, ProgressThrottle};
@@ -409,10 +412,109 @@ impl PagesPoll {
     }
 }
 
+/// One kind's pane: its queue model and its single event feed.
+#[derive(Default)]
+struct Pane {
+    model: QueueModel,
+    feed: Option<broadcast::Receiver<DownloadEvent>>,
+}
+
+/// The Download page owns exactly one [`QueueModel`] per kind and at most one engine subscription per kind (T-25a-032;
+/// Kotlin creates two models, E-36). Opening a kind that is already open keeps its model and its subscription.
+#[derive(Default)]
+pub struct DownloadPage {
+    anime: Pane,
+    manga: Pane,
+}
+
+impl DownloadPage {
+    fn pane(&self, kind: EntryKind) -> &Pane {
+        match kind {
+            EntryKind::Anime => &self.anime,
+            EntryKind::Manga => &self.manga,
+        }
+    }
+
+    fn pane_mut(&mut self, kind: EntryKind) -> &mut Pane {
+        match kind {
+            EntryKind::Anime => &mut self.anime,
+            EntryKind::Manga => &mut self.manga,
+        }
+    }
+
+    /// Subscribes `kind` to the engine through `subscribe`, once. A second open does not call it again.
+    pub fn open(&mut self, kind: EntryKind, subscribe: impl FnOnce() -> broadcast::Receiver<DownloadEvent>) {
+        let pane = self.pane_mut(kind);
+        if pane.feed.is_none() {
+            pane.feed = Some(subscribe());
+        }
+    }
+
+    /// Drops the subscription of `kind`. The model stays, so the next open shows the last queue at once.
+    pub fn close(&mut self, kind: EntryKind) {
+        self.pane_mut(kind).feed = None;
+    }
+
+    pub fn is_open(&self, kind: EntryKind) -> bool {
+        self.pane(kind).feed.is_some()
+    }
+
+    pub fn model(&self, kind: EntryKind) -> &QueueModel {
+        &self.pane(kind).model
+    }
+
+    pub fn model_mut(&mut self, kind: EntryKind) -> &mut QueueModel {
+        &mut self.pane_mut(kind).model
+    }
+
+    /// The event feed of `kind`, `None` while the page is closed for it.
+    pub fn feed(&mut self, kind: EntryKind) -> Option<&mut broadcast::Receiver<DownloadEvent>> {
+        self.pane_mut(kind).feed.as_mut()
+    }
+}
+
+/// The FAB fade and the label slide times (T-25a-040). With the GTK reduced-motion setting on, both are zero.
+pub fn fab_motion(reduced_motion: bool) -> (Duration, Duration) {
+    if reduced_motion { (Duration::ZERO, Duration::ZERO) } else { (FAB_FADE, FAB_LABEL_SLIDE) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::DownloadState;
+
+    #[test]
+    fn opening_the_page_twice_keeps_one_subscriber_and_one_model_per_kind() {
+        let (anime_tx, _anime_rx) = broadcast::channel::<DownloadEvent>(8);
+        let (manga_tx, _manga_rx) = broadcast::channel::<DownloadEvent>(8);
+        let base_anime = anime_tx.receiver_count();
+        let base_manga = manga_tx.receiver_count();
+        let mut page = DownloadPage::default();
+        for _ in 0..2 {
+            page.open(EntryKind::Anime, || anime_tx.subscribe());
+            page.open(EntryKind::Manga, || manga_tx.subscribe());
+        }
+        assert_eq!(anime_tx.receiver_count(), base_anime + 1, "one anime subscriber");
+        assert_eq!(manga_tx.receiver_count(), base_manga + 1, "one manga subscriber");
+
+        // The model survives a second open, and a close drops only the subscription.
+        let item = row(EntryKind::Anime, 0, 0, None);
+        *page.model_mut(EntryKind::Anime) = QueueModel::from_flat(vec![item]);
+        page.open(EntryKind::Anime, || anime_tx.subscribe());
+        assert_eq!(page.model(EntryKind::Anime).len(), 1);
+        assert!(page.model(EntryKind::Manga).is_empty(), "the kinds do not share a model");
+        page.close(EntryKind::Anime);
+        assert!(!page.is_open(EntryKind::Anime));
+        assert_eq!(anime_tx.receiver_count(), base_anime);
+        assert_eq!(page.model(EntryKind::Anime).len(), 1);
+        assert_eq!(manga_tx.receiver_count(), base_manga + 1, "the other kind is untouched");
+    }
+
+    #[test]
+    fn reduced_motion_turns_both_fab_animations_off() {
+        assert_eq!(fab_motion(false), (Duration::from_millis(200), Duration::from_millis(150)));
+        assert_eq!(fab_motion(true), (Duration::ZERO, Duration::ZERO));
+    }
 
     fn row(kind: EntryKind, progress: i64, pages_done: u32, pages_total: Option<u32>) -> QueueItem {
         QueueItem {

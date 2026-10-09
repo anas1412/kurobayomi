@@ -192,61 +192,65 @@ impl Inner {
         row
     }
 
-    /// The options of a source (long press, right click or the menu key): a popover titled with its visual name and a
-    /// row for Pin or Unpin and, except for the local source, Disable. A choice closes the popover, then applies.
+    /// The options of a source (long press, right click or the menu key); see `options_popover`.
     fn options_popover(self: &Rc<Self>, row: &gtk::Box, source: &Source) -> gtk::Popover {
-        let popover = gtk::Popover::new();
-        popover.set_parent(row);
-        let column = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        column.append(&gtk::Label::builder().label(options_title(source)).xalign(0.0).css_classes(["heading"]).margin_bottom(4).build());
-        for action in options_actions(source) {
-            let button = gtk::Button::with_label(&options_label(action));
-            button.add_css_class("flat");
-            let (weak, popover, id) = (Rc::downgrade(self), popover.clone(), source.id);
-            button.connect_clicked(move |_| {
-                popover.popdown();
-                if let Some(inner) = weak.upgrade() {
-                    match options_effect(action) {
-                        OptionsEffect::TogglePin => (inner.nav.toggle_pin)(id),
-                        OptionsEffect::ToggleDisabled => (inner.nav.toggle_disabled)(id),
-                    }
-                }
-            });
-            column.append(&button);
-        }
-        popover.set_child(Some(&column));
-        popover.connect_closed(|popover| popover.unparent());
-        // a row that is not inside a window has no surface to show the popover on
-        if row.root().is_some() {
-            popover.popup();
-        }
-        popover
+        options_popover(row, source, Rc::clone(&self.nav.toggle_pin), Rc::clone(&self.nav.toggle_disabled))
     }
 
-    /// Filled and full strength when pinned, outline at the secondary alpha (78 %) otherwise; named `action_pin` or `action_unpin`.
     fn pin_button(self: &Rc<Self>, source: &Source) -> gtk::Button {
-        let pinned = is_pinned(source);
-        let (filled, alpha) = pin_button_style(pinned);
-        let button = gtk::Button::from_icon_name("view-pin-symbolic");
-        button.add_css_class("flat");
-        if filled {
-            button.add_css_class("pinned");
-        }
-        button.set_opacity(alpha);
-        let name = tr(if pinned { MsgKey::action_unpin } else { MsgKey::action_pin });
-        button.set_tooltip_text(Some(&name));
-        button.update_property(&[gtk::accessible::Property::Label(&name)]);
-        let (weak, id) = (Rc::downgrade(self), source.id);
-        button.connect_clicked(move |_| {
-            if let Some(inner) = weak.upgrade() {
-                (inner.nav.toggle_pin)(id);
-            }
-        });
-        button
+        pin_button(source, Rc::clone(&self.nav.toggle_pin))
     }
 }
 
-fn header_label(text: &str) -> gtk::Label {
+/// The options of a source: a popover titled with its visual name and a row for Pin or Unpin and, except for the local
+/// source, Disable. A choice closes the popover, then applies. The anime Sources tab uses it too.
+pub(super) fn options_popover(row: &gtk::Box, source: &Source, toggle_pin: Rc<dyn Fn(i64)>, toggle_disabled: Rc<dyn Fn(i64)>) -> gtk::Popover {
+    let popover = gtk::Popover::new();
+    popover.set_parent(row);
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    column.append(&gtk::Label::builder().label(options_title(source)).xalign(0.0).css_classes(["heading"]).margin_bottom(4).build());
+    for action in options_actions(source) {
+        let button = gtk::Button::with_label(&options_label(action));
+        button.add_css_class("flat");
+        let (popover, id) = (popover.clone(), source.id);
+        let (toggle_pin, toggle_disabled) = (Rc::clone(&toggle_pin), Rc::clone(&toggle_disabled));
+        button.connect_clicked(move |_| {
+            popover.popdown();
+            match options_effect(action) {
+                OptionsEffect::TogglePin => toggle_pin(id),
+                OptionsEffect::ToggleDisabled => toggle_disabled(id),
+            }
+        });
+        column.append(&button);
+    }
+    popover.set_child(Some(&column));
+    popover.connect_closed(|popover| popover.unparent());
+    // a row that is not inside a window has no surface to show the popover on
+    if row.root().is_some() {
+        popover.popup();
+    }
+    popover
+}
+
+/// Filled and full strength when pinned, outline at the secondary alpha (78 %) otherwise; named `action_pin` or `action_unpin`.
+pub(super) fn pin_button(source: &Source, toggle_pin: Rc<dyn Fn(i64)>) -> gtk::Button {
+    let pinned = is_pinned(source);
+    let (filled, alpha) = pin_button_style(pinned);
+    let button = gtk::Button::from_icon_name("view-pin-symbolic");
+    button.add_css_class("flat");
+    if filled {
+        button.add_css_class("pinned");
+    }
+    button.set_opacity(alpha);
+    let name = tr(if pinned { MsgKey::action_unpin } else { MsgKey::action_pin });
+    button.set_tooltip_text(Some(&name));
+    button.update_property(&[gtk::accessible::Property::Label(&name)]);
+    let id = source.id;
+    button.connect_clicked(move |_| toggle_pin(id));
+    button
+}
+
+pub(super) fn header_label(text: &str) -> gtk::Label {
     let label = gtk::Label::new(Some(text));
     label.set_xalign(0.0);
     label.add_css_class("heading");

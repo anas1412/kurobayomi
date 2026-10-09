@@ -68,6 +68,8 @@ struct Shared {
     snapshot_path: PathBuf,
     state: RwLock<State>,
     scanning: AtomicBool,
+    /// When the running scan began. `None` when no scan runs (T-23a-040).
+    scan_started: Mutex<Option<Instant>>,
     generation: AtomicU64,
     /// When the last change was noted. The snapshot timer runs from here, so every change restarts it.
     last_change: Mutex<Instant>,
@@ -96,6 +98,7 @@ impl DownloadIndex {
                 snapshot_path,
                 state: RwLock::new(state),
                 scanning: AtomicBool::new(false),
+                scan_started: Mutex::new(None),
                 generation: AtomicU64::new(0),
                 last_change: Mutex::new(Instant::now()),
                 persist_scheduled: AtomicBool::new(false),
@@ -105,6 +108,17 @@ impl DownloadIndex {
 
     pub fn root(&self) -> &Path {
         &self.shared.root
+    }
+
+    /// How long the running scan has been going, `None` when no scan runs (T-23a-040).
+    pub fn scan_elapsed(&self) -> Option<Duration> {
+        let started = *self.shared.scan_started.lock().unwrap_or_else(|e| e.into_inner());
+        started.map(|t| t.elapsed())
+    }
+
+    /// Whether the "Checking downloads" indicator should show now (T-23a-040).
+    pub fn checking_indicator_visible(&self) -> bool {
+        checking_indicator_visible(self.scan_elapsed())
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, State> {
@@ -231,6 +245,11 @@ impl DownloadIndex {
         self.touch();
     }
 
+    /// When the tree was last scanned or loaded from a snapshot. `None` after [`Self::invalidate`] or before any scan.
+    pub fn last_renew_ms(&self) -> Option<i64> {
+        self.read().last_renew_ms
+    }
+
     /// Forces a rescan on the next [`Self::renew_if_stale`] and deletes the snapshot file.
     pub fn invalidate(&self) {
         self.write().last_renew_ms = None;
@@ -255,7 +274,8 @@ impl DownloadIndex {
         if self.shared.scanning.swap(true, Ordering::SeqCst) {
             return false;
         }
-        let _scan = ScanGuard(&self.shared.scanning);
+        *self.shared.scan_started.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        let _scan = ScanGuard(&self.shared);
         match tokio::time::timeout(SOURCE_WAIT, ready.wait_for(|v| *v)).await {
             Ok(Ok(_)) => {}
             _ => {
@@ -272,6 +292,7 @@ impl DownloadIndex {
                 return false;
             }
         };
+        tracing::debug!(target: "kuro_downloads", sources = tree.sources.len(), "index scan finished");
         {
             let mut st = self.write();
             st.tree = tree;
@@ -289,12 +310,21 @@ impl DownloadIndex {
     }
 }
 
-struct ScanGuard<'a>(&'a AtomicBool);
+struct ScanGuard<'a>(&'a Shared);
 
 impl Drop for ScanGuard<'_> {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
+        *self.0.scan_started.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.0.scanning.store(false, Ordering::SeqCst);
     }
+}
+
+/// A scan that runs longer than this shows the "Checking downloads" indicator (EC-80, T-23a-040).
+pub const INDICATOR_DELAY: Duration = Duration::from_secs(1);
+
+/// Whether the indicator shows for a scan that has run for `elapsed` (`None` when no scan runs).
+pub fn checking_indicator_visible(elapsed: Option<Duration>) -> bool {
+    elapsed.is_some_and(|e| e > INDICATOR_DELAY)
 }
 
 fn bare_name(name: &str) -> &str {
@@ -488,6 +518,7 @@ mod tests {
         assert!(!tree.sources.values().any(|s| s.manga.contains_key("Other")), "unknown source folders are ignored");
     }
 
+    // TST-41
     #[test]
     fn source_folder_matching_ignores_case() {
         let tmp = tempfile::tempdir().unwrap();
@@ -521,6 +552,7 @@ mod tests {
         assert_eq!(index.chapter_count_total(), 0, "source 2 in the fixture has no chapters");
     }
 
+    // TST-38
     #[tokio::test(start_paused = true)]
     async fn renew_runs_once_per_hour() {
         let tmp = tempfile::tempdir().unwrap();
@@ -545,6 +577,7 @@ mod tests {
         assert!(index.renew_if_stale(11, rx, installed).await);
     }
 
+    // TST-39
     #[tokio::test(start_paused = true)]
     async fn a_source_wait_timeout_keeps_the_previous_tree() {
         let tmp = tempfile::tempdir().unwrap();
@@ -564,13 +597,14 @@ mod tests {
         assert_eq!(index.read().tree, before, "the old tree survives a failed wait");
     }
 
+    // TST-40
     #[tokio::test(start_paused = true)]
     async fn corrupt_snapshot_is_deleted_and_the_tree_rebuilt() {
         let tmp = tempfile::tempdir().unwrap();
         fixture(tmp.path());
         let cache = tempfile::tempdir().unwrap();
         let snapshot = cache.path().join(SNAPSHOT_FILE);
-        fs::write(&snapshot, [0x13u8, 0x37, 0x42, 0x99, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c]).unwrap();
+        fs::write(&snapshot, include_bytes!("../testdata/index/corrupt.bin")).unwrap();
         let index = DownloadIndex::open(tmp.path(), cache.path());
         assert!(!snapshot.exists(), "corrupt snapshot removed on open");
         let (_tx, rx) = watch::channel(true);
@@ -628,3 +662,26 @@ mod tests {
         assert_eq!(index.size_manga(1, "Missing").await, 0);
     }
 }
+
+#[cfg(test)]
+mod indicator_tests {
+    use super::*;
+
+    #[test]
+    fn the_checking_indicator_waits_for_a_scan_longer_than_one_second() {
+        assert!(!checking_indicator_visible(None), "no scan, no indicator");
+        assert!(!checking_indicator_visible(Some(Duration::from_millis(900))), "EC-80: short scans show nothing");
+        assert!(checking_indicator_visible(Some(Duration::from_millis(1100))));
+    }
+
+    #[test]
+    fn a_finished_scan_clears_the_start_time() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("downloads");
+        std::fs::create_dir_all(&root).unwrap();
+        let index = DownloadIndex::open(&root, base.path());
+        assert!(index.scan_elapsed().is_none());
+        assert!(!index.checking_indicator_visible());
+    }
+}
+

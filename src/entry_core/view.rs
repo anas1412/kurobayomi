@@ -39,6 +39,14 @@ fn apply(filter: TriState, predicate: impl FnOnce() -> bool) -> bool {
     filter.apply_filter(predicate)
 }
 
+/// `(selected_total, selected_visible)`: every selected chapter, then the selected ones the view shows. The two are
+/// counted separately, so a selection hidden by a filter still counts in the total (E-04).
+pub fn selection_counts(selected: &[i64], view: &[&ChapterRow]) -> (usize, usize) {
+    let picked: std::collections::HashSet<i64> = selected.iter().copied().collect();
+    let visible = view.iter().filter(|r| picked.contains(&r.id)).count();
+    (picked.len(), visible)
+}
+
 /// `getNextUnread`: the first unread row in view order, or the last one when the view is descending.
 /// `view` must already have the view filters applied. Returns the chapter id.
 pub fn next_unread(view: &[&ChapterRow], descending: bool) -> Option<i64> {
@@ -93,6 +101,32 @@ mod tests {
             .with_masked(u, um)
             .with_masked(d, dm)
             .with_masked(b, bm)
+    }
+
+    #[test]
+    fn selection_total_and_visible_are_counted_separately() {
+        let rows = fixture();
+        // Only the unread rows are in the view; the selection holds one visible and one hidden chapter.
+        let flags = word(TriState::ENABLED_IS, TriState::DISABLED, TriState::DISABLED);
+        let shown = view(&rows, flags, false, false);
+        let visible_id = shown[0].id;
+        let hidden_id = rows.iter().find(|r| r.read).map(|r| r.id).unwrap();
+        assert_eq!(selection_counts(&[visible_id, hidden_id], &shown), (2, 1));
+        assert_eq!(selection_counts(&[hidden_id], &shown), (1, 0), "a hidden selection still counts in the total");
+        assert_eq!(selection_counts(&[], &shown), (0, 0));
+    }
+
+    #[test]
+    fn ten_thousand_rows_process_under_twenty_milliseconds() {
+        let rows: Vec<ChapterRow> = (0..10_000).map(|i| row(i, i as f64, i % 3 == 0, i % 5 == 0, DownloadState::NotDownloaded)).collect();
+        let started = std::time::Instant::now();
+        let shown = view(&rows, ChapterFlags(0), false, false);
+        let elapsed = started.elapsed();
+        assert_eq!(shown.len(), rows.len());
+        // The 20 ms bound is for release builds only; debug builds are not timed.
+        if !cfg!(debug_assertions) {
+            assert!(elapsed < std::time::Duration::from_millis(20), "took {elapsed:?}");
+        }
     }
 
     fn keep(state: TriState, value: bool) -> bool {

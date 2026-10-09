@@ -26,8 +26,10 @@ kuro-backup = { path = "crates/kuro-backup" }
 kuro-local = { path = "crates/kuro-local" }
 kuro-images = { path = "crates/kuro-images" }
 libc = "0.2.189"
+material-colors = "0.5.0"
 reqwest = { workspace = true, features = ["blocking"] }
 async-channel = { workspace = true }
+base64 = { workspace = true }
 chrono = { workspace = true }
 image = { workspace = true }
 tempfile = { workspace = true }

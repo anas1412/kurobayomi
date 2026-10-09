@@ -6,7 +6,7 @@
 //! the parent module's and are used as they are.
 
 use kuro_domain::source::browse::BrowseQuery;
-use kuro_i18n::{Arg, MsgKey, trf};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 use kuro_prefs::library::LibraryDisplayMode;
 use kuro_source::SourceError;
 use kuro_source::messages::source_error_message;
@@ -168,6 +168,49 @@ pub fn browse_error_text(error: &SourceError, online: bool) -> String {
     source_error_message(error, online)
 }
 
+/// What the toolbar search field does on submit. A non-empty text searches, even for the same text as before; an empty
+/// field clears the query and does not reload the listing (T-41b-016).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ToolbarSubmit {
+    Search(String),
+    Clear,
+}
+
+pub fn toolbar_submit(text: &str) -> ToolbarSubmit {
+    if text.is_empty() { ToolbarSubmit::Clear } else { ToolbarSubmit::Search(text.to_owned()) }
+}
+
+/// The display-mode menu's three radio items, in menu order: Comfortable grid, Compact grid, List. Cover only is not
+/// offered, and renders as the compact grid (`p2-ui-parity.md` B5).
+pub const DISPLAY_MENU: [LibraryDisplayMode; 3] = [LibraryDisplayMode::ComfortableGrid, LibraryDisplayMode::CompactGrid, LibraryDisplayMode::List];
+
+/// The label of one display-mode radio item.
+pub fn display_menu_label(mode: LibraryDisplayMode) -> String {
+    tr(match mode {
+        LibraryDisplayMode::ComfortableGrid => MsgKey::action_display_comfortable_grid,
+        LibraryDisplayMode::List => MsgKey::action_display_list,
+        LibraryDisplayMode::CompactGrid | LibraryDisplayMode::CoverOnlyGrid => MsgKey::action_display_grid,
+    })
+}
+
+/// The label of one overflow item.
+pub fn overflow_label(item: Overflow) -> String {
+    tr(match item {
+        Overflow::OpenInWebView => MsgKey::action_open_in_web_view,
+        Overflow::Help => MsgKey::label_help,
+        Overflow::Settings => MsgKey::action_settings,
+    })
+}
+
+/// Opens an external page in the default browser through `gtk::UriLauncher`. A launch that fails is logged, not shown.
+pub fn open_external(url: &str, parent: Option<&gtk::Window>) {
+    gtk::UriLauncher::new(url).launch(parent, gtk::gio::Cancellable::NONE, |result| {
+        if let Err(error) = result {
+            tracing::warn!(%error, "could not open an external link");
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +342,35 @@ mod tests {
         assert_eq!(toast.action, Some(ToastAction::Retry));
         assert_eq!(toast.duration, ToastDuration::Indefinite);
         assert!(EmptyAction::Retry.label().len() > 0);
+    }
+
+    #[test]
+    fn toolbar_submit_searches_with_the_text_and_an_empty_field_only_clears() {
+        assert_eq!(toolbar_submit("one piece"), ToolbarSubmit::Search("one piece".into()));
+        assert_eq!(toolbar_submit(""), ToolbarSubmit::Clear);
+    }
+
+    #[test]
+    fn the_display_menu_has_three_radio_items_in_menu_order_and_cover_only_is_not_one() {
+        assert_eq!(DISPLAY_MENU, [LibraryDisplayMode::ComfortableGrid, LibraryDisplayMode::CompactGrid, LibraryDisplayMode::List]);
+        let labels: Vec<String> = DISPLAY_MENU.iter().map(|mode| display_menu_label(*mode)).collect();
+        assert_eq!(labels, ["Comfortable grid", "Compact grid", "List"]);
+        assert_eq!(display_menu_label(LibraryDisplayMode::CoverOnlyGrid), "Compact grid");
+    }
+
+    #[test]
+    fn the_overflow_items_have_their_labels() {
+        assert_eq!(overflow_label(Overflow::OpenInWebView), "Open in WebView");
+        assert_eq!(overflow_label(Overflow::Help), "Help");
+        assert_eq!(overflow_label(Overflow::Settings), "Settings");
+    }
+
+    #[test]
+    fn source_error_texts_follow_the_formatter_for_each_kind() {
+        assert_eq!(browse_error_text(&SourceError::Http(503), true), "HTTP 503, check website in WebView");
+        assert_eq!(browse_error_text(&SourceError::Transport("reset".into()), false), "No Internet connection");
+        assert_eq!(browse_error_text(&SourceError::Transport("reset".into()), true), "reset", "a transport error keeps its text online");
+        assert_eq!(browse_error_text(&SourceError::EmptyPageList, true), "No pages found");
+        assert_eq!(browse_error_text(&SourceError::Unsupported("search"), true), "not supported: search", "other errors keep their message");
     }
 }

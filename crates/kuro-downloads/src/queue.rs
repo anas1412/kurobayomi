@@ -83,6 +83,14 @@ impl QueueState {
         added
     }
 
+    /// Adds the chapters at the front, in the order given (`addAllToQueue` with `addFirst`, EC-11). Chapters already in
+    /// the queue are skipped, as in [`Self::add_all`].
+    pub fn add_front(&mut self, downloads: Vec<QueuedDownload>) -> Vec<i64> {
+        let added = self.add_all(downloads);
+        self.items.rotate_right(added.len());
+        added
+    }
+
     /// Removes the chapters. Returned copies carry the status they had when removed, but DOWNLOADING and QUEUE
     /// become NOT_DOWNLOADED (`Dl.removeFromQueueIf`).
     pub fn remove_chapters(&mut self, ids: &[i64]) -> Vec<QueuedDownload> {
@@ -249,6 +257,16 @@ mod tests {
     }
 
     #[test]
+    fn add_front_puts_the_new_chapters_first_in_the_given_order() {
+        let mut q = queue_with(&[(1, Queue), (2, Queue)]);
+        let src = fake_source(1);
+        let added = q.add_front(vec![download(&src, 7, 1, Queue), download(&src, 8, 1, Queue), download(&src, 1, 1, Queue)]);
+        assert_eq!(added, vec![7, 8], "a chapter already queued is skipped");
+        assert_eq!(statuses(&q), vec![(7, Queue), (8, Queue), (1, Queue), (2, Queue)]);
+    }
+
+    // TST-01
+    #[test]
     fn add_all_sets_queue_status_and_appends_in_order() {
         let mut q = QueueState::new();
         let src = fake_source(1);
@@ -266,6 +284,7 @@ mod tests {
         assert_eq!(q.len(), 2);
     }
 
+    // TST-02
     #[test]
     fn remove_resets_downloading_and_queue_but_not_error() {
         let mut q = queue_with(&[(1, Downloading), (2, Queue), (3, Error)]);
@@ -275,6 +294,7 @@ mod tests {
         assert!(q.is_empty());
     }
 
+    // TST-03
     #[test]
     fn pause_running_sets_queue_and_the_paused_flag() {
         let mut q = queue_with(&[(1, Downloading), (2, Downloading), (3, Queue)]);
@@ -283,6 +303,7 @@ mod tests {
         assert!(q.is_paused());
     }
 
+    // TST-04
     #[test]
     fn stop_running_sets_error() {
         let mut q = queue_with(&[(1, Downloading), (2, Queue)]);
@@ -290,6 +311,7 @@ mod tests {
         assert_eq!(statuses(&q), vec![(1, Error), (2, Queue)]);
     }
 
+    // TST-05
     #[test]
     fn reset_for_start_retries_error_and_not_downloaded() {
         let mut q = queue_with(&[(1, Error), (2, NotDownloaded), (3, Queue), (4, Downloading)]);
@@ -306,6 +328,7 @@ mod tests {
         assert_eq!(statuses(&q), vec![(1, Error), (2, Queue), (3, Queue)]);
     }
 
+    // TST-09
     #[test]
     fn reorder_ignores_unknown_and_repeats_and_appends_unlisted_in_current_order() {
         let mut q = queue_with(&[(1, Queue), (2, Queue), (3, Queue)]);
@@ -315,11 +338,40 @@ mod tests {
         assert_eq!(statuses(&q), vec![(3, Queue), (1, Queue), (2, Queue)], "an empty list is a no-op");
     }
 
+    // TST-10
     #[test]
     fn reorder_keeps_error_status() {
         let mut q = queue_with(&[(1, Error), (2, Queue)]);
         q.reorder(&[2, 1]);
         assert_eq!(statuses(&q), vec![(2, Queue), (1, Error)]);
+    }
+
+    #[test]
+    fn every_edge_of_the_state_diagram_is_allowed_and_the_others_are_refused() {
+        // QUEUE -> DOWNLOADING -> ERROR -> QUEUE (start re-queues an error), then DOWNLOADING -> QUEUE (pause).
+        let mut q = queue_with(&[(1, Queue)]);
+        assert_eq!(q.set_status(1, Downloading), Ok(true));
+        assert_eq!(q.set_status(1, Error), Ok(true));
+        assert_eq!(q.set_status(1, Queue), Ok(true));
+        assert_eq!(q.set_status(1, Downloading), Ok(true));
+        assert_eq!(q.set_status(1, Queue), Ok(true));
+        // ERROR -> DOWNLOADING is refused: it has to go through QUEUE first.
+        q.set_status(1, Error).unwrap();
+        assert!(matches!(q.set_status(1, Downloading), Err(QueueError::Transition { .. })));
+        // DOWNLOADING -> DOWNLOADED is completion: the item leaves the queue.
+        let mut q = queue_with(&[(2, Queue)]);
+        q.set_status(2, Downloading).unwrap();
+        let done = q.mark_downloaded(2).expect("the item is queued");
+        assert_eq!(done.status, Downloaded);
+        assert!(q.is_empty());
+        // QUEUE and DOWNLOADING -> NOT_DOWNLOADED is removal.
+        let mut q = queue_with(&[(3, Queue), (4, Downloading)]);
+        let removed = q.remove_chapters(&[3, 4]);
+        assert!(removed.iter().all(|d| d.status == NotDownloaded));
+        // NOT_DOWNLOADED and DOWNLOADED are never set directly.
+        let mut q = queue_with(&[(5, Queue)]);
+        assert!(matches!(q.set_status(5, Downloaded), Err(QueueError::Transition { .. })));
+        assert!(matches!(q.set_status(5, NotDownloaded), Err(QueueError::Transition { .. })));
     }
 
     #[test]

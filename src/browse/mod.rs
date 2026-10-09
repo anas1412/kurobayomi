@@ -6,6 +6,7 @@
 #![allow(dead_code)] // wired by the screen registration, which this lane does not own
 
 pub mod anime;
+pub mod banner;
 pub mod content;
 pub mod dialogs;
 pub mod entries;

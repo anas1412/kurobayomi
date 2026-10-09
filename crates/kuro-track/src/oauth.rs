@@ -14,14 +14,10 @@ use crate::model::TrackerId;
 /// A login attempt stays valid this long after its authorise URL was opened (`p1-topic-tracker-oauth.md` section 4).
 pub const PENDING_TTL_MS: i64 = 5 * 60 * 1000;
 
-/// Verifier bytes. 50 bytes encode to the 67-character PKCE verifier of `PkceUtil.kt`.
-const VERIFIER_BYTES: usize = 50;
-
 /// `state` bytes. 32 bytes encode to 43 URL-safe characters.
 const STATE_BYTES: usize = 32;
 
 const ANILIST_CLIENT_ID: &str = "5338";
-const MYANIMELIST_CLIENT_ID: &str = "686b980ff4240fccce7f6a654cea07ce";
 const SHIKIMORI_CLIENT_ID: &str = "aOAYRqOLwxpA8skpcQIXetNy4cw2rn2fRzScawlcQ5U";
 const BANGUMI_CLIENT_ID: &str = "bgm293165b66d7e58156";
 const SIMKL_CLIENT_ID: &str = "aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e";
@@ -33,27 +29,14 @@ fn random_token(n: usize) -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// The PKCE verifier of one MyAnimeList attempt. The challenge is the verifier itself (plain method, as in source).
-fn new_verifier() -> String {
-    random_token(VERIFIER_BYTES)
-}
-
-/// The authorise URL of a browser login, with the source's query order and `state` last. `verifier` is the MyAnimeList
-/// PKCE challenge. `None` for trackers without a browser login (Kitsu, MangaUpdates, enhanced trackers), or when
-/// MyAnimeList has no verifier.
-pub fn authorize_url(tracker: TrackerId, state: &str, verifier: Option<&str>) -> Option<String> {
+/// The authorise URL of a browser login, with the source's query order and `state` last. `None` for trackers
+/// without a browser login here (Kitsu, MangaUpdates, enhanced trackers). MyAnimeList is not listed: its URL needs the
+/// user's client id and a PKCE verifier, and comes from `mal::MalTracker::begin_login` (T-29a-040).
+pub fn authorize_url(tracker: TrackerId, state: &str) -> Option<String> {
     let (base, params): (&str, Vec<(&str, &str)>) = match tracker {
         TrackerId::ANILIST => (
             "https://anilist.co/api/v2/oauth/authorize",
             vec![("client_id", ANILIST_CLIENT_ID), ("response_type", "token")],
-        ),
-        TrackerId::MYANIMELIST => (
-            "https://myanimelist.net/v1/oauth2/authorize",
-            vec![
-                ("client_id", MYANIMELIST_CLIENT_ID),
-                ("code_challenge", verifier?),
-                ("response_type", "code"),
-            ],
         ),
         TrackerId::SHIKIMORI => (
             "https://shikimori.one/oauth/authorize",
@@ -150,14 +133,13 @@ impl PendingLogins {
     /// Opens an attempt for `tracker` and returns its authorise URL. `None` when the tracker has no browser login.
     pub fn begin(&mut self, tracker: TrackerId, now_ms: i64) -> Option<String> {
         let state = random_token(STATE_BYTES);
-        let verifier = (tracker == TrackerId::MYANIMELIST).then(new_verifier);
-        let url = authorize_url(tracker, &state, verifier.as_deref())?;
+        let url = authorize_url(tracker, &state)?;
         self.0.insert(
             tracker,
             PendingLogin {
                 tracker,
                 state,
-                verifier,
+                verifier: None,
                 started_at_ms: now_ms,
             },
         );
@@ -238,6 +220,12 @@ pub fn handle_redirect(
     now_ms: i64,
 ) -> Handled {
     let route = pending.route(uri, now_ms);
+    // A repeated redirect after the login already succeeded is ignored (R-5), not reported as expired.
+    if let Route::NotAllowed(t) = &route {
+        if trackers.get(*t).is_some_and(|tr| tr.is_logged_in()) {
+            return Handled::Ignored;
+        }
+    }
     let name = match &route {
         Route::Cancelled(t) | Route::NotAllowed(t) | Route::Expired(t) | Route::StateMismatch(t) => {
             trackers
@@ -276,7 +264,6 @@ pub enum Redirect {
 fn tracker_of(host: &str) -> Option<TrackerId> {
     Some(match host.strip_suffix("-auth")? {
         "anilist" => TrackerId::ANILIST,
-        "myanimelist" => TrackerId::MYANIMELIST,
         "shikimori" => TrackerId::SHIKIMORI,
         "bangumi" => TrackerId::BANGUMI,
         "simkl" => TrackerId::SIMKL,
@@ -298,7 +285,8 @@ pub fn parse_callback(uri: &str) -> Redirect {
     let Ok(url) = Url::parse(uri) else {
         return Redirect::Ignored;
     };
-    if url.scheme() != "aniyomi" {
+    // AniList's registered redirect for the shared client id is `aniyomi://`; `kurobayomi://` is accepted too (T-28a-040).
+    if !matches!(url.scheme(), "aniyomi" | "kurobayomi") {
         return Redirect::Ignored;
     }
     let Some(tracker) = url.host_str().and_then(tracker_of) else {
@@ -454,7 +442,8 @@ mod tests {
         );
         assert_eq!(
             parse_callback("aniyomi://myanimelist-auth"),
-            Redirect::Cancelled(TrackerId::MYANIMELIST)
+            Redirect::Unexpected,
+            "MyAnimeList logs in through its loopback redirect, not this scheme"
         );
     }
 
@@ -480,17 +469,6 @@ mod tests {
     }
 
     #[test]
-    fn tr_27b_025_the_pkce_verifier_is_67_url_safe_characters() {
-        let v = new_verifier();
-        assert_eq!(v.len(), 67);
-        assert!(
-            v.bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        );
-        assert_ne!(v, new_verifier(), "each attempt draws its own verifier");
-    }
-
-    #[test]
     fn tr_27a_021_state_is_43_url_safe_characters_per_request() {
         let mut pending = PendingLogins::default();
         let first = pending.begin(TrackerId::ANILIST, 0).unwrap();
@@ -504,31 +482,33 @@ mod tests {
     #[test]
     fn tr_27a_021_authorize_urls_keep_the_source_order_and_add_state_last() {
         assert_eq!(
-            authorize_url(TrackerId::ANILIST, "S", None).unwrap(),
+            authorize_url(TrackerId::ANILIST, "S").unwrap(),
             "https://anilist.co/api/v2/oauth/authorize?client_id=5338&response_type=token&state=S"
         );
         assert_eq!(
-            authorize_url(TrackerId::BANGUMI, "S", None).unwrap(),
+            authorize_url(TrackerId::BANGUMI, "S").unwrap(),
             "https://bgm.tv/oauth/authorize?client_id=bgm293165b66d7e58156&response_type=code&redirect_uri=aniyomi%3A%2F%2Fbangumi-auth&state=S"
         );
         assert_eq!(
-            authorize_url(TrackerId::SIMKL, "S", None).unwrap(),
+            authorize_url(TrackerId::SIMKL, "S").unwrap(),
             "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=aniyomi%3A%2F%2Fsimkl-auth&state=S"
         );
     }
 
     #[test]
-    fn tr_27a_021_mal_url_carries_the_challenge_and_no_method() {
-        let url = authorize_url(TrackerId::MYANIMELIST, "S", Some("VERIFIER")).unwrap();
-        assert!(url.contains("code_challenge=VERIFIER&response_type=code"));
-        assert!(!url.contains("code_challenge_method"));
-        assert!(authorize_url(TrackerId::MYANIMELIST, "S", None).is_none());
+    fn tr_27a_021_mal_has_no_url_here_and_no_embedded_client_id() {
+        assert!(authorize_url(TrackerId::MYANIMELIST, "S").is_none());
+        assert!(
+            PendingLogins::default()
+                .begin(TrackerId::MYANIMELIST, 0)
+                .is_none()
+        );
     }
 
     #[test]
     fn tr_27a_021_trackers_without_a_browser_login_have_no_url() {
-        assert!(authorize_url(TrackerId::KITSU, "S", None).is_none());
-        assert!(authorize_url(TrackerId::MANGAUPDATES, "S", None).is_none());
+        assert!(authorize_url(TrackerId::KITSU, "S").is_none());
+        assert!(authorize_url(TrackerId::MANGAUPDATES, "S").is_none());
         assert!(
             PendingLogins::default()
                 .begin(TrackerId::KITSU, 0)
@@ -592,24 +572,12 @@ mod tests {
     }
 
     #[test]
-    fn tr_27b_025_mal_verifier_travels_with_the_accepted_code() {
+    fn tr_27b_025_mal_redirects_are_not_routed_by_this_module() {
         let mut pending = PendingLogins::default();
-        pending.begin(TrackerId::MYANIMELIST, 0).unwrap();
-        let attempt = pending.0[&TrackerId::MYANIMELIST].clone();
-        let uri = format!(
-            "aniyomi://myanimelist-auth?code=abc&state={}",
-            attempt.state
-        );
         assert_eq!(
-            pending.route(&uri, 0),
-            Route::Accepted(Credential {
-                tracker: TrackerId::MYANIMELIST,
-                value: "abc".into(),
-                verifier: attempt.verifier,
-                expires_in: None,
-            })
+            pending.route("aniyomi://myanimelist-auth?code=abc", 0),
+            Route::Unrecognized
         );
-        assert!(pending.0.is_empty(), "the attempt is consumed");
     }
 
     #[test]
@@ -654,5 +622,36 @@ mod tests {
             Some(MsgKey::LoginExpired)
         );
         assert_eq!(Route::Ignored.message("x"), None);
+    }
+
+    #[tokio::test]
+    async fn t_28a_040_the_kurobayomi_scheme_carries_the_anilist_fragment() {
+        assert_eq!(
+            parse_callback("kurobayomi://anilist-auth#access_token=abc"),
+            Redirect::Credential {
+                tracker: TrackerId::ANILIST,
+                value: "abc".into(),
+                state: None,
+                expires_in: None,
+            }
+        );
+        let h = crate::fakes::Harness::new();
+        let mut pending = PendingLogins::default();
+        assert_eq!(
+            handle_redirect(&mut pending, &h.ctx.trackers, "kurobayomi://simkl-auth?code=x", 0),
+            Handled::Toast(MsgKey::LoginExpired),
+            "routed like aniyomi://, with no attempt pending"
+        );
+    }
+
+    #[tokio::test]
+    async fn t_28a_040_a_repeat_redirect_after_a_login_is_ignored() {
+        let h = crate::fakes::Harness::new();
+        h.login(TrackerId::SIMKL);
+        let mut pending = PendingLogins::default();
+        assert_eq!(
+            handle_redirect(&mut pending, &h.ctx.trackers, "aniyomi://simkl-auth?code=x", 0),
+            Handled::Ignored
+        );
     }
 }

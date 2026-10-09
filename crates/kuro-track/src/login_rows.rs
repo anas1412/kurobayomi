@@ -2,8 +2,10 @@
 //! draws the check mark from the stored login state, and runs the action.
 
 use crate::manager::TrackerManager;
+use crate::messages::MsgKey;
 use crate::model::TrackerId;
 use crate::oauth::PendingLogins;
+use crate::tracker::Tracker;
 
 /// What a row does when tapped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,11 +67,14 @@ pub const LOGIN_ROWS: [LoginRow; 7] = [
 /// Fluent id of the info text under the rows ("tracking_info"). The GUI resolves it with the i18n crate.
 pub const INFO_TEXT_ID: &str = "tracking_info";
 
-/// A login row with its check mark: shown when the tracker is logged in.
+/// A login row with its check mark: shown when the tracker is logged in. `expired` is the stored auth-expired flag;
+/// `configured` is false while the tracker cannot start a login (MyAnimeList without a client id).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoginRowView {
     pub row: LoginRow,
     pub logged_in: bool,
+    pub expired: bool,
+    pub configured: bool,
 }
 
 /// The rows in order, each with the login state read from `trackers`. A tracker missing from the registry shows no
@@ -77,11 +82,42 @@ pub struct LoginRowView {
 pub fn login_row_views(trackers: &TrackerManager) -> Vec<LoginRowView> {
     LOGIN_ROWS
         .iter()
-        .map(|&row| LoginRowView {
-            row,
-            logged_in: trackers.get(row.tracker).is_some_and(|t| t.is_logged_in()),
+        .map(|&row| {
+            let tracker = trackers.get(row.tracker);
+            LoginRowView {
+                row,
+                logged_in: tracker.as_ref().is_some_and(|t| t.is_logged_in()),
+                expired: tracker.as_ref().is_some_and(|t| t.auth_expired()),
+                configured: tracker.as_ref().is_none_or(|t| t.setup_message().is_none()),
+            }
         })
         .collect()
+}
+
+/// The subtitle of a login row (T-28a-048). "Logging in..." while `in_progress` (AniList, the Viewer query runs), and
+/// "Session expired, log in again" when the stored login expired. MyAnimeList (T-29a-047) shows its setup hint first,
+/// then "Waiting for MyAnimeList..." while the loopback login waits, then "Log in again" when the login expired, and
+/// keeps its check mark in that case. `None` shows no subtitle.
+pub fn row_subtitle(tracker: &dyn Tracker, in_progress: bool) -> Option<MsgKey> {
+    if tracker.id() == TrackerId::MYANIMELIST {
+        if let Some(hint) = tracker.setup_message() {
+            return Some(hint);
+        }
+        if in_progress {
+            return Some(MsgKey::MalWaitingForLogin);
+        }
+        if tracker.auth_expired() {
+            return Some(MsgKey::MalLogInAgain);
+        }
+        return None;
+    }
+    if in_progress && tracker.id() == TrackerId::ANILIST {
+        return Some(MsgKey::AniListLoggingIn);
+    }
+    if tracker.auth_expired() && !tracker.is_logged_in() {
+        return Some(MsgKey::AniListSessionExpired);
+    }
+    None
 }
 
 /// What tapping a row does.
@@ -93,16 +129,22 @@ pub enum RowTap {
     OpenCredentials,
     /// Show the logout dialog. A logged-in row never starts a new login.
     ConfirmLogout,
+    /// Start the MyAnimeList login with `mal::MalTracker::begin_login` (loopback listener plus paste field).
+    StartMalLogin,
 }
 
 /// The effect of tapping `view`. A browser row begins an attempt in `pending`. `None` when the tracker has no
 /// authorise URL, so nothing opens.
 pub fn tap_row(view: &LoginRowView, pending: &mut PendingLogins, now_ms: i64) -> Option<RowTap> {
-    if view.logged_in {
+    // An expired MyAnimeList login is shown checked, and a tap starts a new login ("Log in again").
+    if view.logged_in && !view.expired {
         return Some(RowTap::ConfirmLogout);
     }
     match view.row.action {
         LoginAction::Credentials => Some(RowTap::OpenCredentials),
+        LoginAction::Browser if view.row.tracker == TrackerId::MYANIMELIST => {
+            view.configured.then_some(RowTap::StartMalLogin)
+        }
         LoginAction::Browser => pending
             .begin(view.row.tracker, now_ms)
             .map(RowTap::OpenBrowser),
@@ -172,5 +214,122 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), LOGIN_ROWS.len());
+    }
+
+    #[test]
+    fn t_28a_048_row_subtitle_shows_the_login_progress_and_the_expiry()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::fakes::MemSecrets;
+        use crate::tracker::anilist::AniList;
+        use crate::tracker::anilist::auth::AuthState;
+        use crate::tracker::anilist::testkit::FakeTransport;
+        use kuro_prefs::store::PrefStore;
+
+        let api = AniList::from_parts(
+            FakeTransport::new(vec![]),
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            AuthState::LoggedOut,
+        );
+        assert_eq!(row_subtitle(&api, true), Some(MsgKey::AniListLoggingIn));
+        assert_eq!(row_subtitle(&api, false), None);
+        api.base().set_auth_expired(true)?;
+        assert_eq!(
+            row_subtitle(&api, false),
+            Some(MsgKey::AniListSessionExpired)
+        );
+        Ok(())
+    }
+
+    fn mal_view(logged_in: bool, expired: bool, configured: bool) -> LoginRowView {
+        LoginRowView {
+            row: LOGIN_ROWS[0],
+            logged_in,
+            expired,
+            configured,
+        }
+    }
+
+    #[test]
+    fn t_29a_047_the_mal_row_states_follow_the_login_and_expiry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let secrets = crate::fakes::MemSecrets::new();
+        let tokens: std::sync::Arc<dyn crate::mal::store::TokenStore> =
+            std::sync::Arc::new(crate::mal::store::SecretTokenStore::new(secrets));
+        let mal = crate::mal::tracker::MalTracker::new(dir.path(), tokens, Some("cid".into()))
+            .expect("tracker builds");
+        assert_eq!(
+            row_subtitle(&mal, false),
+            None,
+            "logged out, ready: no subtitle"
+        );
+        assert_eq!(
+            row_subtitle(&mal, true),
+            Some(MsgKey::MalWaitingForLogin),
+            "the loopback login waits"
+        );
+
+        let mut pending = PendingLogins::default();
+        let logged_out = mal_view(false, false, true);
+        assert_eq!(
+            tap_row(&logged_out, &mut pending, 0),
+            Some(RowTap::StartMalLogin),
+            "a logged-out MAL row starts the loopback login"
+        );
+        let expired = mal_view(true, true, true);
+        assert_eq!(
+            tap_row(&expired, &mut pending, 0),
+            Some(RowTap::StartMalLogin),
+            "an expired login is started again"
+        );
+        let logged_in = mal_view(true, false, true);
+        assert_eq!(
+            tap_row(&logged_in, &mut pending, 0),
+            Some(RowTap::ConfirmLogout)
+        );
+        assert_eq!(
+            tap_row(&mal_view(false, false, false), &mut pending, 0),
+            None,
+            "no client id: the flow does not start"
+        );
+    }
+
+    #[test]
+    fn t_29a_047_an_expired_mal_login_shows_log_in_again_and_stays_checked() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let secrets = crate::fakes::MemSecrets::new();
+        let tokens: std::sync::Arc<dyn crate::mal::store::TokenStore> =
+            std::sync::Arc::new(crate::mal::store::SecretTokenStore::new(secrets));
+        let mal = crate::mal::tracker::MalTracker::new(dir.path(), tokens, Some("cid".into()))
+            .expect("tracker builds");
+        mal.settings_for_test().set_username("ann").unwrap();
+        mal.auth()
+            .set_token(crate::mal::testkit::fresh_token("a"))
+            .unwrap();
+        mal.auth().set_expired(true).unwrap();
+        assert!(
+            mal.is_logged_in(),
+            "the row reads username and token, so it stays checked"
+        );
+        assert_eq!(row_subtitle(&mal, false), Some(MsgKey::MalLogInAgain));
+    }
+
+    #[test]
+    fn t_29a_029_a_mal_without_client_id_shows_the_setup_hint() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let secrets = crate::fakes::MemSecrets::new();
+        let tokens: std::sync::Arc<dyn crate::mal::store::TokenStore> =
+            std::sync::Arc::new(crate::mal::store::SecretTokenStore::new(secrets));
+        let mal =
+            crate::mal::tracker::MalTracker::new(dir.path(), tokens, None).expect("tracker builds");
+        assert_eq!(
+            row_subtitle(&mal, true),
+            Some(MsgKey::MalNoClientId),
+            "the hint wins over the waiting text"
+        );
+        assert_eq!(
+            crate::messages::english(&MsgKey::MalNoClientId),
+            "Set a MyAnimeList client id to log in"
+        );
     }
 }

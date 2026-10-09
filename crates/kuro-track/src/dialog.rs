@@ -85,11 +85,23 @@ pub async fn run_login(
 
 /// The text of a failure. An empty message shows "Login failed", never the text "null" (defect D14).
 pub fn failure_message(e: &TrackError) -> MsgKey {
+    if let TrackError::Key(key) = e {
+        return key.clone();
+    }
     let text = e.to_string();
     if text.trim().is_empty() {
         MsgKey::LoginFailed
     } else {
         MsgKey::Raw(text)
+    }
+}
+
+/// The toast of a successful login (T-28a-048): "Logged in to AniList" for AniList, "<name> logged in" otherwise.
+pub fn login_success_message(tracker: TrackerId, name: &str) -> MsgKey {
+    if tracker == TrackerId::ANILIST {
+        MsgKey::AniListLoggedIn
+    } else {
+        MsgKey::TrackerLoggedIn(name.to_owned())
     }
 }
 
@@ -211,5 +223,20 @@ mod tests {
         assert_eq!(LOGOUT_DEFAULT_FOCUS, DialogButton::Cancel);
         assert_eq!(run_logout(&t), Ok(MsgKey::LogoutSuccess));
         assert!(!t.is_logged_in());
+    }
+
+    #[test]
+    fn t_28a_048_login_success_toast_names_anilist_and_others_keep_the_generic_text() {
+        assert_eq!(login_success_message(TrackerId::ANILIST, "AniList"), MsgKey::AniListLoggedIn);
+        assert_eq!(
+            login_success_message(TrackerId::KITSU, "Kitsu"),
+            MsgKey::TrackerLoggedIn("Kitsu".into())
+        );
+    }
+
+    #[test]
+    fn t_28a_045_a_keyed_failure_shows_its_own_message() {
+        let e = TrackError::Key(MsgKey::AniListLoginFailed);
+        assert_eq!(failure_message(&e), MsgKey::AniListLoginFailed);
     }
 }

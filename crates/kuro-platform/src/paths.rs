@@ -29,6 +29,60 @@ pub trait Paths {
     fn covers_dir(&self) -> PathBuf;
     /// Installed plugins (extensions).
     fn plugin_dir(&self) -> PathBuf;
+
+    // The roles below have defaults built from the base directories, so an implementation only overrides one to
+    // relocate it. They exist so no other crate joins a literal onto a base directory (T-req-platform-001).
+
+    /// Decoded page and image cache (Aniyomi's `image_cache`).
+    fn image_cache_dir(&self) -> PathBuf {
+        self.cache_dir().join("image_cache")
+    }
+    /// Chapter page cache (Aniyomi's `chapter_disk_cache`).
+    fn chapter_cache_dir(&self) -> PathBuf {
+        self.cache_dir().join("chapter_disk_cache")
+    }
+    /// Where a shared image is staged before it is handed to another app.
+    fn share_staging_dir(&self) -> PathBuf {
+        self.cache_dir().join("shared_image")
+    }
+    /// Installed manga extensions.
+    fn extensions_dir(&self) -> PathBuf {
+        self.data_dir().join("extensions")
+    }
+    /// Installed anime extensions.
+    fn anime_extensions_dir(&self) -> PathBuf {
+        self.extensions_dir().join("anime")
+    }
+    /// Cached manga extension icons.
+    fn extension_icons_dir(&self) -> PathBuf {
+        self.cache_dir().join("extensions").join("icons")
+    }
+    /// Cached anime extension icons.
+    fn anime_extension_icons_dir(&self) -> PathBuf {
+        self.cache_dir().join("ext-icons")
+    }
+    /// Extension packages while they download.
+    fn extension_download_dir(&self) -> PathBuf {
+        self.cache_dir().join("ext-download")
+    }
+    /// Automatic backups when the user has not picked a folder.
+    fn auto_backups_dir(&self) -> PathBuf {
+        self.data_dir().join("autobackup")
+    }
+    /// Scratch folder for page bytes written for another reader. It lives under the system temporary directory and
+    /// carries the process id, so two running copies do not share it.
+    fn page_bytes_dir(&self) -> PathBuf {
+        std::env::temp_dir().join(format!("kuro-page-bytes-{}", std::process::id()))
+    }
+    /// The `cookies.txt` export the user drops in for a source that needs a browser challenge solved by hand.
+    fn cookies_import_file(&self) -> PathBuf {
+        self.config_dir().join("cookies.txt")
+    }
+    /// The desktop's own configuration folder, which holds files the app only reads (the KDE colour scheme).
+    /// `None` when no home directory exists.
+    fn host_config_dir(&self) -> Option<PathBuf> {
+        directories::BaseDirs::new().map(|base| base.config_dir().to_path_buf())
+    }
 }
 
 /// The default download folder as a path and as a `file://` URL.
@@ -116,5 +170,48 @@ mod byte_path_tests {
     fn a_non_utf8_path_round_trips_through_its_bytes() {
         let original = PathBuf::from(std::ffi::OsString::from_vec(vec![b'/', b'x', 0xff, b'/', b'y']));
         assert_eq!(path_from_bytes(path_bytes(&original)), Some(original));
+    }
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::*;
+
+    struct Fixed;
+
+    impl Paths for Fixed {
+        fn data_dir(&self) -> PathBuf { "/d".into() }
+        fn config_dir(&self) -> PathBuf { "/c".into() }
+        fn state_dir(&self) -> PathBuf { "/s".into() }
+        fn cache_dir(&self) -> PathBuf { "/k".into() }
+        fn log_dir(&self) -> PathBuf { "/l".into() }
+        fn temp_dir(&self) -> PathBuf { "/t".into() }
+        fn crash_dir(&self) -> PathBuf { "/cr".into() }
+        fn default_downloads_dir(&self) -> PathBuf { "/dl".into() }
+        fn default_backups_dir(&self) -> PathBuf { "/b".into() }
+        fn covers_dir(&self) -> PathBuf { "/k/covers".into() }
+        fn plugin_dir(&self) -> PathBuf { "/d/plugins".into() }
+    }
+
+    #[test]
+    fn default_roles_hang_off_the_base_directories() {
+        let p = Fixed;
+        assert_eq!(p.image_cache_dir(), PathBuf::from("/k/image_cache"));
+        assert_eq!(p.chapter_cache_dir(), PathBuf::from("/k/chapter_disk_cache"));
+        assert_eq!(p.share_staging_dir(), PathBuf::from("/k/shared_image"));
+        assert_eq!(p.extensions_dir(), PathBuf::from("/d/extensions"));
+        assert_eq!(p.anime_extensions_dir(), PathBuf::from("/d/extensions/anime"));
+        assert_eq!(p.extension_icons_dir(), PathBuf::from("/k/extensions/icons"));
+        assert_eq!(p.anime_extension_icons_dir(), PathBuf::from("/k/ext-icons"));
+        assert_eq!(p.extension_download_dir(), PathBuf::from("/k/ext-download"));
+        assert_eq!(p.auto_backups_dir(), PathBuf::from("/d/autobackup"));
+        assert_eq!(p.cookies_import_file(), PathBuf::from("/c/cookies.txt"));
+    }
+
+    #[test]
+    fn page_bytes_dir_is_under_the_system_temp_dir_and_per_process() {
+        let dir = Fixed.page_bytes_dir();
+        assert!(dir.starts_with(std::env::temp_dir()));
+        assert!(dir.to_string_lossy().ends_with(&std::process::id().to_string()));
     }
 }

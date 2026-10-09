@@ -1,11 +1,22 @@
 //! The snackbar, toast and message-key layer of the entry pages (T-39b-019). Upstream: `AnimeScreenModel.kt` (the
 //! `showSnackbar` and toast calls) and behaviour section 19 of the anime plan. Pure: the GTK side takes a
-//! [`Presentation`] and draws it, and [`Notices`] keeps the one-at-a-time order (E-UI-3).
+//! [`Presentation`] and draws it with `banner_view`, and [`Notices`] is the one-at-a-time host.
+//!
+//! Decision, queue versus replace (E-UI-3): the plan says both. `p2-edge-cases` E-UI-3 and `p2-rust-design` say a new
+//! message replaces the one on screen and its action is dropped (Compose queues them; a documented difference),
+//! while the first draft of this file queued them. The page shows what just happened, so a new message replaces:
+//! [`Notices::show`] keeps one.
+//!
+//! The "16 keys" of the task: section 19 of the behaviour plan has 28 rows. Twelve of them are messages with text of
+//! their own, and they are the variants of [`UserMessage`]. The other sixteen are labels of buttons, titles and
+//! texts of dialogs that other modules own (the tracking sheet, the date remover, the share chooser, Cancel, OK,
+//! Delete and Add), so there are twelve message keys, not sixteen.
 
-use std::collections::VecDeque;
 use std::time::Duration;
 
 use kuro_i18n::{Arg, MsgKey, tr, trf};
+
+use crate::entry_core::banner::{Banner, Banners, Length};
 
 /// Every user-visible message of the details pages that carries text of its own.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,31 +109,51 @@ pub fn present(message: UserMessage) -> Presentation {
     }
 }
 
-/// Snackbars are shown one at a time (E-UI-3): later ones wait in order.
-#[derive(Default)]
-pub struct Notices {
-    waiting: VecDeque<Snack>,
+/// The host of the snackbar layer: one message at a time (E-UI-3). A new message replaces the one on screen and
+/// drops its action. `A` is the page command an action button runs.
+pub struct Notices<A: Clone> {
+    host: Banners<A>,
+    /// The current snack has a dismiss button. A toast and the plain snacks have none.
+    dismissible: bool,
 }
 
-impl Notices {
-    /// Queues a presentation. A toast is not queued here; the caller shows it at once.
-    pub fn push(&mut self, presentation: Presentation) -> Option<UserMessage> {
-        match presentation {
-            Presentation::Snack(snack) => {
-                self.waiting.push_back(snack);
-                None
-            }
-            Presentation::Toast(message) => Some(message),
-        }
+impl<A: Clone> Default for Notices<A> {
+    fn default() -> Self {
+        Self { host: Banners::default(), dismissible: false }
+    }
+}
+
+impl<A: Clone> Notices<A> {
+    /// Shows `presentation` now. `action` is what the snack's button runs; a toast has no button and a snack without
+    /// an action label ignores it. The length is 4 s for a snack and 2 s for a toast.
+    pub fn show(&mut self, presentation: Presentation, action: Option<A>, now_ms: u64) {
+        let (message, label, dismiss, duration) = match &presentation {
+            Presentation::Snack(snack) => (&snack.message, snack.action.map(SnackAction::label), snack.dismiss, snack.duration),
+            Presentation::Toast(message) => (message, None, false, TOAST_DURATION),
+        };
+        self.host = Banners::default();
+        self.dismissible = dismiss;
+        self.host.push(text(message), label.zip(action), Length::Millis(duration.as_millis() as u64), now_ms);
     }
 
-    /// The snackbar to show now, once the previous one is dismissed or timed out.
-    pub fn next(&mut self) -> Option<Snack> {
-        self.waiting.pop_front()
+    /// Expires the message when its time is up.
+    pub fn tick(&mut self, now_ms: u64) {
+        self.host.tick(now_ms);
     }
 
-    pub fn pending(&self) -> usize {
-        self.waiting.len()
+    /// The close button.
+    pub fn dismiss(&mut self, now_ms: u64) {
+        self.host.dismiss(now_ms);
+    }
+
+    /// The action button: the page command to run. The message goes away with it.
+    pub fn activate(&mut self, now_ms: u64) -> Option<A> {
+        self.host.activate_action(true, now_ms)
+    }
+
+    /// The message on screen and whether it has a dismiss button.
+    pub fn current(&self) -> Option<(&Banner<A>, bool)> {
+        self.host.current().map(|banner| (banner, self.dismissible))
     }
 }
 
@@ -171,14 +202,80 @@ mod tests {
     }
 
     #[test]
-    fn snackbars_queue_one_after_another_and_toasts_skip_the_queue() {
-        let mut notices = Notices::default();
-        assert_eq!(notices.push(present(UserMessage::NoEpisodes)), None);
-        assert_eq!(notices.push(present(UserMessage::NoSeasons)), None);
-        assert_eq!(notices.pending(), 2);
-        assert_eq!(notices.push(present(UserMessage::NoMatchFound)), Some(UserMessage::NoMatchFound));
-        assert_eq!(notices.next().map(|s| s.message), Some(UserMessage::NoEpisodes));
-        assert_eq!(notices.next().map(|s| s.message), Some(UserMessage::NoSeasons));
-        assert_eq!(notices.next(), None);
+    fn a_new_message_replaces_the_one_on_screen_and_drops_its_action() {
+        let mut notices: Notices<&'static str> = Notices::default();
+        notices.show(present(UserMessage::DeleteDownloadsForAnime), Some("delete"), 0);
+        let (banner, dismissible) = notices.current().expect("the prompt");
+        assert_eq!((banner.text.as_str(), dismissible), ("Delete downloaded episodes?", true));
+        assert_eq!(banner.action.as_ref().map(|(label, cmd)| (label.as_str(), *cmd)), Some(("Delete", "delete")));
+        notices.show(present(UserMessage::NoEpisodes), None, 10);
+        let (banner, dismissible) = notices.current().expect("the second message");
+        assert_eq!((banner.text.as_str(), dismissible, banner.action.is_none()), ("No episodes found", false, true));
+        assert_eq!(notices.activate(11), None, "the first one's action is gone (E-UI-3)");
+    }
+
+    #[test]
+    fn a_snack_lasts_four_seconds_and_a_toast_two_and_a_toast_has_no_action() {
+        let mut notices: Notices<u8> = Notices::default();
+        notices.show(present(UserMessage::EpisodeSettingsUpdated), Some(1), 100);
+        assert!(notices.current().is_some_and(|(b, _)| b.action.is_none()), "no label, so no action even when one is passed");
+        notices.tick(4099);
+        assert!(notices.current().is_some());
+        notices.tick(4100);
+        assert!(notices.current().is_none(), "short is 4 s (T-UI-1)");
+        notices.show(present(UserMessage::NoMatchFound), Some(1), 0);
+        let (banner, dismissible) = notices.current().expect("the toast");
+        assert!(banner.action.is_none() && !dismissible);
+        notices.tick(1999);
+        assert!(notices.current().is_some());
+        notices.tick(2000);
+        assert!(notices.current().is_none(), "a toast is 2 s");
+    }
+
+    #[test]
+    fn the_action_button_runs_once_and_closes_the_message() {
+        let mut notices: Notices<&'static str> = Notices::default();
+        notices.show(present(UserMessage::AddAnimeToLibrary), Some("add"), 0);
+        assert_eq!(notices.activate(1), Some("add"));
+        assert!(notices.current().is_none());
+        notices.show(present(UserMessage::ConfirmTrackerUpdateAnime(3)), Some("ok"), 0);
+        notices.dismiss(1);
+        assert!(notices.current().is_none());
+    }
+
+    #[test]
+    fn section_19_has_twelve_message_keys() {
+        // one value per variant: a new variant fails to compile here until it is counted
+        let all = [
+            UserMessage::NoEpisodes,
+            UserMessage::NoSeasons,
+            UserMessage::DeleteDownloadsForAnime,
+            UserMessage::AddAnimeToLibrary,
+            UserMessage::TrackersUpdatedAnime(1),
+            UserMessage::ConfirmTrackerUpdateAnime(1),
+            UserMessage::EpisodeSettingsUpdated,
+            UserMessage::SeasonSettingsUpdated,
+            UserMessage::DisplayModeEpisode(String::new()),
+            UserMessage::TrackError { tracker: String::new(), detail: String::new() },
+            UserMessage::NoMatchFound,
+            UserMessage::Plain(String::new()),
+        ];
+        for message in &all {
+            match message {
+                UserMessage::NoEpisodes
+                | UserMessage::NoSeasons
+                | UserMessage::DeleteDownloadsForAnime
+                | UserMessage::AddAnimeToLibrary
+                | UserMessage::TrackersUpdatedAnime(_)
+                | UserMessage::ConfirmTrackerUpdateAnime(_)
+                | UserMessage::EpisodeSettingsUpdated
+                | UserMessage::SeasonSettingsUpdated
+                | UserMessage::DisplayModeEpisode(_)
+                | UserMessage::TrackError { .. }
+                | UserMessage::NoMatchFound
+                | UserMessage::Plain(_) => {}
+            }
+        }
+        assert_eq!(all.len(), 12);
     }
 }

@@ -6,12 +6,12 @@ use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O, Revealer};
 
 use crate::entry_core::banner::Banner;
-use crate::entry_core::detail::StoreCmd;
 
 pub struct BannerView {
     pub widget: Revealer,
     label: Label,
     action: Button,
+    close: Button,
 }
 
 fn unfocusable(w: &impl IsA<gtk::Widget>) {
@@ -47,12 +47,18 @@ pub fn build(on_action: impl Fn() + 'static, on_close: impl Fn() + 'static) -> B
     }
     action.connect_clicked(move |_| on_action());
     close.connect_clicked(move |_| on_close());
-    BannerView { widget, label, action }
+    BannerView { widget, label, action, close }
 }
 
 impl BannerView {
-    /// Shows `banner`, or hides the view when there is none.
-    pub fn show(&self, banner: Option<&Banner<StoreCmd>>) {
+    /// Shows `banner`, or hides the view when there is none. The close button is there.
+    pub fn show<A>(&self, banner: Option<&Banner<A>>) {
+        self.show_with(banner, true);
+    }
+
+    /// As `show`, with the close button only when `dismissible` (the anime snack layer has it on three prompts).
+    pub fn show_with<A>(&self, banner: Option<&Banner<A>>, dismissible: bool) {
+        self.close.set_visible(dismissible);
         match banner {
             Some(b) => {
                 self.label.set_label(&b.text);

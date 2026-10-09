@@ -26,9 +26,10 @@ pub fn action_for(prefs: &LibraryPrefs, side: Side) -> ChapterSwipeAction {
     }
 }
 
-/// Whether the manga page can run `action`. Download has no download call on this page yet, and Disabled is nothing.
+/// Whether the manga page can run `action`: every action but Disabled, which is nothing. Download goes to the
+/// downloads layer by the state of the row (`chapter_actions::indicator_action`).
 pub fn runs_here(action: ChapterSwipeAction) -> bool {
-    matches!(action, ChapterSwipeAction::ToggleRead | ChapterSwipeAction::ToggleBookmark)
+    !matches!(action, ChapterSwipeAction::Disabled)
 }
 
 /// The context menu: the action of each side that runs here, once each, with its settings label.
@@ -73,6 +74,8 @@ mod tests {
         assert_eq!(menu(&prefs).len(), 1, "the same action on both sides is one item");
         prefs.swipe_left_chapter.set(ChapterSwipeAction::Download).unwrap();
         prefs.swipe_right_chapter.set(ChapterSwipeAction::Disabled).unwrap();
-        assert!(menu(&prefs).is_empty());
+        assert_eq!(menu(&prefs).into_iter().map(|(a, _)| a).collect::<Vec<_>>(), [ChapterSwipeAction::Download], "Download runs here now");
+        prefs.swipe_left_chapter.set(ChapterSwipeAction::Disabled).unwrap();
+        assert!(menu(&prefs).is_empty(), "Disabled is never offered");
     }
 }

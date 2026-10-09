@@ -263,3 +263,59 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod mal_handle_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::fakes::{FakeManga, MemSecrets, new_log};
+    use crate::mal::store::{SecretTokenStore, TokenStore};
+    use crate::mal::testkit::fresh_token;
+    use crate::mal::tracker::MalTracker;
+
+    #[tokio::test]
+    async fn t_29a_059_every_reader_of_the_registry_shares_one_mal_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let secrets = MemSecrets::new();
+        let tokens: Arc<dyn TokenStore> = Arc::new(SecretTokenStore::new(secrets.clone()));
+        let mal =
+            Arc::new(MalTracker::new(dir.path(), tokens, Some("cid".into())).expect("tracker"));
+        let mut trackers: Vec<Arc<dyn Tracker>> = vec![mal.clone()];
+        for id in REGISTRY_ORDER
+            .into_iter()
+            .filter(|id| *id != TrackerId::MYANIMELIST)
+        {
+            trackers.push(Arc::new(FakeManga::new(
+                id,
+                "Fake",
+                secrets.clone(),
+                new_log(),
+            )));
+        }
+        let manager = TrackerManager::new(trackers).expect("registry");
+
+        let first = manager
+            .get(TrackerId::MYANIMELIST)
+            .expect("MAL is registered");
+        let second = manager
+            .get(TrackerId::MYANIMELIST)
+            .expect("MAL is registered");
+        assert!(Arc::ptr_eq(&first, &second), "the same handle every time");
+
+        let mut logged_in = manager.logged_in_stream();
+        mal.settings_for_test()
+            .set_username("ann")
+            .expect("username");
+        mal.auth().set_token(fresh_token("a")).expect("token");
+        mal.sync_login_state();
+        logged_in.changed().await.expect("a login is announced");
+        assert_eq!(*logged_in.borrow(), vec![TrackerId::MYANIMELIST]);
+        assert!(first.is_logged_in(), "the handle reads the same state");
+
+        mal.logout().expect("logout");
+        logged_in.changed().await.expect("a logout is announced");
+        assert!(logged_in.borrow().is_empty());
+        assert!(!second.is_logged_in());
+    }
+}

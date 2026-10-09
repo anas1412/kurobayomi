@@ -79,6 +79,72 @@ pub trait AnimeSourceResolver: Send + Sync {
     fn anime_source(&self, source_id: i64) -> Option<AnimeSource>;
 }
 
+/// What the delete filter reads from one downloaded item: a chapter (`read`, `bookmark`) or an episode (`seen`,
+/// `bookmark`).
+pub trait DeleteCandidate {
+    fn watched(&self) -> bool;
+    fn bookmarked(&self) -> bool;
+}
+
+impl DeleteCandidate for ChapterRef {
+    fn watched(&self) -> bool {
+        self.read
+    }
+    fn bookmarked(&self) -> bool {
+        self.bookmark
+    }
+}
+
+impl DeleteCandidate for EpisodeRef {
+    fn watched(&self) -> bool {
+        self.seen
+    }
+    fn bookmarked(&self) -> bool {
+        self.bookmark
+    }
+}
+
+/// The pure delete filter of p1-behavior 1.4, the same for both kinds (T-25a-012). An empty `categories` counts as
+/// `[0]`. When one of the categories is in `exclude`, watched items are kept. Bookmarked items are kept unless
+/// `remove_bookmarked` is set. Empty input gives empty output (E-01).
+pub fn select_for_delete<T: DeleteCandidate>(
+    items: Vec<T>,
+    exclude: &[i64],
+    categories: &[i64],
+    remove_bookmarked: bool,
+) -> Vec<T> {
+    let categories: &[i64] = if categories.is_empty() { &[0] } else { categories };
+    let protect_watched = categories.iter().any(|c| exclude.contains(c));
+    items
+        .into_iter()
+        .filter(|item| !(protect_watched && item.watched()))
+        .filter(|item| remove_bookmarked || !item.bookmarked())
+        .collect()
+}
+
+/// The remove-after-marked-as-read hook (T-25a-014, consumer contract of `SetReadStatus` and `SetSeenStatus`). A delete
+/// is requested only when the item was marked read or seen and `pref_remove_after_marked_as_read_key` is on. Only the
+/// items this change touched are passed in. They are grouped by parent id, one call per series, in first-seen order.
+pub fn removal_calls<T>(
+    changed: Vec<T>,
+    marked_read: bool,
+    preference_on: bool,
+    parent_id: impl Fn(&T) -> i64,
+) -> Vec<(i64, Vec<T>)> {
+    if !marked_read || !preference_on {
+        return Vec::new();
+    }
+    let mut calls: Vec<(i64, Vec<T>)> = Vec::new();
+    for item in changed {
+        let parent = parent_id(&item);
+        match calls.iter_mut().find(|(p, _)| *p == parent) {
+            Some((_, items)) => items.push(item),
+            None => calls.push((parent, vec![item])),
+        }
+    }
+    calls
+}
+
 /// `DeleteChapterDownload.awaitAll`.
 pub struct DeleteChapterDownload {
     sources: Arc<dyn ChapterSourceResolver>,
@@ -257,3 +323,67 @@ mod tests {
         assert!(dir.join("Chapter 1").is_dir(), "no file is touched");
     }
 }
+
+#[cfg(test)]
+mod select_tests {
+    use super::*;
+    use crate::testing::chapter;
+
+    fn read(id: i64) -> ChapterRef {
+        let mut c = chapter(id, 1, "c");
+        c.read = true;
+        c
+    }
+
+    fn bookmarked(id: i64) -> ChapterRef {
+        let mut c = chapter(id, 1, "c");
+        c.bookmark = true;
+        c
+    }
+
+    fn ids(items: Vec<ChapterRef>) -> Vec<i64> {
+        items.iter().map(|c| c.id).collect()
+    }
+
+    #[test]
+    fn empty_input_gives_empty_output() {
+        assert!(select_for_delete(Vec::<ChapterRef>::new(), &[1], &[1], true).is_empty(), "E-01");
+    }
+
+    #[test]
+    fn no_categories_counts_as_category_zero_for_the_exclusion() {
+        let out = select_for_delete(vec![read(1), chapter(2, 1, "c")], &[0], &[], true);
+        assert_eq!(ids(out), vec![2], "T-E04: the watched item is protected through category 0");
+    }
+
+    #[test]
+    fn a_watched_item_in_an_excluded_category_is_not_selected() {
+        let out = select_for_delete(vec![read(1), chapter(2, 1, "c")], &[5], &[5, 6], true);
+        assert_eq!(ids(out), vec![2], "T-E18 and T-E18b");
+    }
+
+    #[test]
+    fn bookmarks_are_kept_unless_removal_of_bookmarks_is_allowed() {
+        assert!(select_for_delete(vec![bookmarked(3)], &[], &[], false).is_empty(), "T-E19: kept");
+        assert_eq!(ids(select_for_delete(vec![bookmarked(3)], &[], &[], true)), vec![3], "T-E19: deleted");
+    }
+}
+
+#[cfg(test)]
+mod removal_hook_tests {
+    use super::*;
+
+    #[test]
+    fn nothing_is_requested_unless_marked_and_the_preference_is_on() {
+        assert!(removal_calls(vec![1, 2], false, true, |_| 1).is_empty());
+        assert!(removal_calls(vec![1, 2], true, false, |_| 1).is_empty(), "the preference gates the hook");
+    }
+
+    #[test]
+    fn changed_items_are_grouped_one_call_per_parent_in_first_seen_order() {
+        let changed = vec![(10, 1), (20, 2), (11, 1)];
+        let calls = removal_calls(changed, true, true, |&(_, parent)| parent);
+        assert_eq!(calls, vec![(1, vec![(10, 1), (11, 1)]), (2, vec![(20, 2)])]);
+    }
+}
+

@@ -3,6 +3,9 @@
 //! `AnimeScreen.kt:136-144`. Behaviour 11.2 and 17.4 and 17.5. The caller writes the flags and clears the selection.
 
 use kuro_data::episode::Episode;
+use kuro_prefs::library::{EpisodeSwipeAction, LibraryPrefs};
+
+use crate::entry_core::swipe::Side;
 
 /// The per-episode flags a bulk action sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,9 +42,94 @@ pub fn starts_torrent_server(is_torrent: bool) -> bool {
     is_torrent
 }
 
+/// What a swipe on a row does (T-39b-015): the stored action of the side the drag ended on. A swipe on a left drag reads
+/// the left preference, as the manga rows do.
+pub fn swipe_action(prefs: &LibraryPrefs, side: Side) -> EpisodeSwipeAction {
+    match side {
+        Side::Left => prefs.swipe_left_episode.get(),
+        Side::Right => prefs.swipe_right_episode.get(),
+    }
+}
+
+/// The write of a swipe action on one episode, or `None` when it writes nothing: Disabled, and Download while the page
+/// has no anime download queue. Bookmark and fillermark go through `bulk_mark_targets`, as the bottom bar does, so
+/// a swipe and a bulk action write the same way.
+pub fn swipe_effect(action: EpisodeSwipeAction, episode: &Episode) -> Option<SwipeEffect> {
+    let one = std::slice::from_ref(episode);
+    match action {
+        EpisodeSwipeAction::ToggleSeen => Some(SwipeEffect::Seen { id: episode.id, seen: !episode.seen }),
+        EpisodeSwipeAction::ToggleBookmark => {
+            let on = !episode.bookmark;
+            Some(SwipeEffect::Mark { ids: bulk_mark_targets(one, Mark::Bookmark, on), mark: Mark::Bookmark, on })
+        }
+        EpisodeSwipeAction::ToggleFillermark => {
+            let on = !episode.fillermark;
+            Some(SwipeEffect::Mark { ids: bulk_mark_targets(one, Mark::Fillermark, on), mark: Mark::Fillermark, on })
+        }
+        EpisodeSwipeAction::Download | EpisodeSwipeAction::Disabled => None,
+    }
+}
+
+/// The write a swipe asks for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SwipeEffect {
+    Seen { id: i64, seen: bool },
+    Mark { ids: Vec<i64>, mark: Mark, on: bool },
+}
+
+/// How an episode is opened: the player, and whether the torrent server starts first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpenPlan {
+    pub external: bool,
+    pub torrent_server: bool,
+}
+
+/// What a tap on a row does (17.4): external is `always_external XOR alt`. The torrent server starts only when the
+/// torrent setting is on and the source is a torrent source (17.5).
+pub fn tap_plan(always_external: bool, alt: bool, torrent_enabled: bool, torrent_source: bool) -> OpenPlan {
+    OpenPlan { external: tap_opens_external(always_external, alt), torrent_server: starts_torrent_server(torrent_enabled && torrent_source) }
+}
+
+/// What continue watching and the season continue button do (17.2, 17.3): the setting as it is, with no inversion.
+pub fn continue_plan(always_external: bool, torrent_enabled: bool, torrent_source: bool) -> OpenPlan {
+    OpenPlan { external: continue_opens_external(always_external), torrent_server: starts_torrent_server(torrent_enabled && torrent_source) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_swipe_toggles_the_mark_it_names_through_the_same_targets_as_the_bar() {
+        let marked = ep(1, true, false);
+        assert_eq!(swipe_effect(EpisodeSwipeAction::ToggleBookmark, &marked), Some(SwipeEffect::Mark { ids: vec![1], mark: Mark::Bookmark, on: false }));
+        assert_eq!(swipe_effect(EpisodeSwipeAction::ToggleFillermark, &marked), Some(SwipeEffect::Mark { ids: vec![1], mark: Mark::Fillermark, on: true }));
+        assert_eq!(swipe_effect(EpisodeSwipeAction::ToggleSeen, &marked), Some(SwipeEffect::Seen { id: 1, seen: true }));
+        assert_eq!(swipe_effect(EpisodeSwipeAction::Disabled, &marked), None, "Disabled never dispatches");
+        assert_eq!(swipe_effect(EpisodeSwipeAction::Download, &marked), None, "no anime download queue yet");
+    }
+
+    #[test]
+    fn each_side_reads_its_own_episode_preference() {
+        let prefs = LibraryPrefs::new(kuro_prefs::store::PrefStore::in_memory());
+        assert_eq!(swipe_action(&prefs, Side::Left), EpisodeSwipeAction::ToggleSeen);
+        assert_eq!(swipe_action(&prefs, Side::Right), EpisodeSwipeAction::ToggleBookmark);
+    }
+
+    #[test]
+    fn a_tap_plan_inverts_the_setting_with_alt_and_starts_the_server_only_for_torrents() {
+        assert_eq!(tap_plan(false, false, true, false), OpenPlan { external: false, torrent_server: false });
+        assert_eq!(tap_plan(false, true, false, true), OpenPlan { external: true, torrent_server: false }, "the setting is off");
+        assert_eq!(tap_plan(true, true, true, true), OpenPlan { external: false, torrent_server: true });
+        assert_eq!(tap_plan(true, false, true, true).external, true);
+    }
+
+    #[test]
+    fn a_continue_plan_never_inverts() {
+        assert!(continue_plan(true, false, false).external);
+        assert!(!continue_plan(false, false, false).external);
+        assert!(continue_plan(false, true, true).torrent_server);
+    }
 
     fn ep(id: i64, bookmark: bool, fillermark: bool) -> Episode {
         let mut e = Episode::create();

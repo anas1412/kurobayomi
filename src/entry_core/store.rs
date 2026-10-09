@@ -230,6 +230,28 @@ impl DbStore {
         })
     }
 
+    /// Removes the manga from the library: `favorite = false` and `date_added = 0` in one write (E-FAV-7). The cover is
+    /// deleted by the caller after this succeeds. `Ok(false)` when the row is gone.
+    pub fn remove_from_library(&self, manga_id: i64) -> DataResult<bool> {
+        let patch = MangaPatch {
+            id: manga_id,
+            favorite: Some(false),
+            date_added: Some(0),
+            ..MangaPatch::default()
+        };
+        self.db.write(|tx| Ok(sm::mangas::update(tx, &patch)? > 0))
+    }
+
+    /// `(id, title)` of every favorite, for the duplicate check.
+    pub fn favorite_titles(&self) -> DataResult<Vec<(i64, String)>> {
+        Ok(self.mangas.favorites()?.into_iter().map(|m| (m.id, m.title)).collect())
+    }
+
+    /// The user categories (the default row `0` is left out), for the default-category routing.
+    pub fn user_categories(&self) -> DataResult<Vec<kuro_data::category::Category>> {
+        Ok(self.categories.all()?.into_iter().filter(|c| c.id != 0).collect())
+    }
+
     /// Replaces the category links in one transaction (`CategoryConfirm::SetCategories`).
     pub fn set_categories(&self, manga_id: i64, category_ids: &[i64]) -> DataResult<()> {
         self.mangas.set_categories(manga_id, category_ids)
@@ -291,6 +313,22 @@ pub(crate) mod fixture {
                 ..kuro_data::manga::MangaUpdate::new(manga_id)
             };
             self.mangas.update(&update).expect("update");
+        }
+    }
+
+    impl DbStore {
+        /// Another manga in the same database, with the given title and favorite flag.
+        pub fn insert_manga_for_test(&self, title: &str, favorite: bool) -> i64 {
+            self.mangas
+                .insert(&Manga { source: 8, url: format!("/{title}"), title: title.into(), favorite, ..Manga::create() })
+                .expect("insert manga")
+        }
+
+        /// A user category.
+        pub fn insert_category_for_test(&self, name: &str) -> i64 {
+            self.categories
+                .insert(&kuro_data::category::Category { id: 0, name: name.into(), order: 1, flags: 0, hidden: false })
+                .expect("insert category")
         }
     }
 
@@ -413,6 +451,31 @@ mod tests {
         let (_dir2, store2, id2) = store_fresh();
         assert!(store2.add_to_library(id2, &[4242], 1_000).is_err(), "unknown category");
         assert!(!store2.manga(id2).unwrap().unwrap().favorite, "the favorite write rolled back too");
+    }
+
+    #[test]
+    fn remove_from_library_clears_favorite_and_date_added_in_one_write() {
+        let (_dir, store, id) = store(false, 0);
+        store.add_to_library(id, &[], 5_000).unwrap();
+        assert_eq!(store.mangas.by_id(id).unwrap().date_added, 5_000);
+        let before = version(&store, id);
+        assert!(store.remove_from_library(id).unwrap());
+        let row = store.mangas.by_id(id).unwrap();
+        assert!(!row.favorite);
+        assert_eq!(row.date_added, 0, "E-FAV-7");
+        assert!(version(&store, id) > before);
+        assert!(!store.remove_from_library(999).unwrap(), "a missing row changes nothing");
+    }
+
+    #[test]
+    fn favorite_titles_and_user_categories_feed_the_add_routing() {
+        let (_dir, store, id) = store(true, 0);
+        let other = store.insert_manga_for_test("Other", false);
+        assert_eq!(store.favorite_titles().unwrap(), vec![(id, "Title".to_owned())], "only favorites are checked for duplicates");
+        let cat = store.insert_category_for_test("Reading");
+        let users = store.user_categories().unwrap();
+        assert_eq!(users.iter().map(|c| c.id).collect::<Vec<_>>(), vec![cat], "the default row 0 is left out");
+        let _ = other;
     }
 
     fn store_fresh() -> (tempfile::TempDir, DbStore, i64) {

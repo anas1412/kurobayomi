@@ -1,5 +1,7 @@
 //! The settings main menu (task T-47a-003) and the two-pane background rule.
 //! Titles, subtitles and icons follow the Linux spec (`spec/settings.json`, `main`); About shows the build.
+// Not reachable from `route.rs` yet: the main list in `pref_model/shell.rs` still reads `spec/settings.json`.
+#![allow(dead_code)]
 
 /// One row of the main menu. `target` is the screen id the row opens.
 #[derive(Clone, Debug, PartialEq, Eq)]

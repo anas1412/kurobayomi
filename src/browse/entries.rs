@@ -14,7 +14,7 @@ use super::favorite::{AddOutcome, FavoriteWrite, add, cover_stamp_after_remove, 
 pub struct LocalEntry {
     pub id: i64,
     pub favorite: bool,
-    /// The row's own title. A non-favourite shows the source's title, a favourite its stored one.
+    /// The title the row shows. An existing row shows its stored title; a row the listing just inserted has the listed one.
     pub title: String,
 }
 

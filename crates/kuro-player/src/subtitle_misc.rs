@@ -47,7 +47,10 @@ impl Misc {
     pub fn set_override(&mut self, on: bool) -> Vec<Write> {
         self.override_ass = on;
         vec![
-            Write::pref("pref_override_subtitles_ass", if on { "true" } else { "false" }),
+            Write::pref(
+                "pref_override_subtitles_ass",
+                if on { "true" } else { "false" },
+            ),
             Write::mpv("sub-ass-override", if on { "force" } else { "scale" }),
         ]
     }
@@ -140,7 +143,10 @@ mod tests {
     #[test]
     fn position_slider_is_zero_to_one_fifty() {
         let mut misc = Misc::read(&FakeMpv::default(), &SubtitlePrefs::default());
-        assert_eq!(misc.set_pos(200).last(), Some(&Write::mpv("sub-pos", "150")));
+        assert_eq!(
+            misc.set_pos(200).last(),
+            Some(&Write::mpv("sub-pos", "150"))
+        );
         assert_eq!(misc.pos, 150);
         misc.set_pos(-3);
         assert_eq!(misc.pos, 0);
@@ -148,7 +154,11 @@ mod tests {
 
     #[test]
     fn reset_restores_position_scale_and_override_and_writes_scale_mode() {
-        let mpv = FakeMpv::with(&[("sub-pos", "20"), ("sub-scale", "3"), ("sub-ass-override", "force")]);
+        let mpv = FakeMpv::with(&[
+            ("sub-pos", "20"),
+            ("sub-scale", "3"),
+            ("sub-ass-override", "force"),
+        ]);
         let mut misc = Misc::read(&mpv, &SubtitlePrefs::default());
         let writes = misc.reset();
         assert_eq!((misc.pos, misc.scale, misc.override_ass), (100, 1.0, false));

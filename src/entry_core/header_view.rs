@@ -9,6 +9,35 @@ use gtk::{Align, Box as GBox, Label, Orientation as O};
 
 use crate::entry_core::header::{Field, HeaderModel, SearchRequest, cover_size};
 
+/// The library button of an entry page: a heart and "In library" for a favorite, an empty star and "Add to library"
+/// otherwise. It is a plain button with an icon and a label as its child, because a button holds either its own
+/// label or its own icon, not both.
+#[derive(Clone)]
+pub struct LibraryButton {
+    pub button: gtk::Button,
+    icon: gtk::Image,
+    label: Label,
+}
+
+impl LibraryButton {
+    pub fn new() -> Self {
+        let icon = gtk::Image::new();
+        let label = Label::new(None);
+        let row = GBox::new(O::Horizontal, 8);
+        row.append(&icon);
+        row.append(&label);
+        let button = gtk::Button::builder().child(&row).css_classes(["flat"]).halign(Align::Start).margin_start(8).margin_end(8).focus_on_click(false).build();
+        let this = Self { button, icon, label };
+        this.set(false);
+        this
+    }
+
+    pub fn set(&self, favorite: bool) {
+        self.label.set_label(&kuro_i18n::tr(if favorite { kuro_i18n::MsgKey::in_library } else { kuro_i18n::MsgKey::add_to_library }));
+        self.icon.set_icon_name(Some(if favorite { "emblem-favorite-symbolic" } else { "non-starred-symbolic" }));
+    }
+}
+
 /// What the header reports back to the page.
 #[derive(Clone)]
 pub struct Handlers {

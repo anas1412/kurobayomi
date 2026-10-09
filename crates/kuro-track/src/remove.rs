@@ -1,6 +1,6 @@
-//! Remove-tracking flow (`AnimeTrackInfoDialog.kt`, behaviour section 16). The local row goes first. The remote delete
-//! runs only when the checkbox is ticked and the local delete worked, so a remote failure never leaves a remote
-//! entry that could be re-bound silently by a local row (E-41, a change from the source).
+//! Remove-tracking flow (`AnimeTrackInfoDialog.kt`, behaviour section 16). The remote delete runs first, only when
+//! the checkbox is ticked and the tracker can delete. The local row is unregistered after the remote delete worked or
+//! the entry was already absent. A remote failure keeps the local row and is shown as a toast (E-19, E-47).
 
 use std::sync::Arc;
 
@@ -56,18 +56,15 @@ impl RemoveDialog {
     }
 }
 
-/// Removes the anime binding of `track`. The local row is deleted first; if that fails, nothing else runs and
-/// [`MsgKey::LocalRemovalFailed`] is returned. With `also_remote` set and a deletable tracker, the remote delete
-/// runs next. Its failure is returned as the tracker's toast and the local row stays deleted.
+/// Removes the anime binding of `track`. With `also_remote` set and a deletable tracker, the remote delete runs
+/// first. Its failure is returned as the tracker's toast and the local row stays. An entry already absent on the
+/// remote counts as success. The local row is deleted next; its failure returns [`MsgKey::LocalRemovalFailed`].
 pub async fn remove_anime(
     track: &AnimeTrack,
     tracker: &dyn Tracker,
     also_remote: bool,
     repo: &dyn AnimeTrackRepo,
 ) -> Result<(), MsgKey> {
-    repo.delete(track.anime_id, track.tracker_id)
-        .await
-        .map_err(|e| local_failure(&e))?;
     if also_remote {
         if let Some(deletable) = tracker.as_deletable_anime() {
             deletable
@@ -76,7 +73,9 @@ pub async fn remove_anime(
                 .map_err(|e| remote_failure(tracker, &e))?;
         }
     }
-    Ok(())
+    repo.delete(track.anime_id, track.tracker_id)
+        .await
+        .map_err(|e| local_failure(&e))
 }
 
 /// Manga form of [`remove_anime`].
@@ -86,9 +85,6 @@ pub async fn remove_manga(
     also_remote: bool,
     repo: &dyn MangaTrackRepo,
 ) -> Result<(), MsgKey> {
-    repo.delete(track.manga_id, track.tracker_id)
-        .await
-        .map_err(|e| local_failure(&e))?;
     if also_remote {
         if let Some(deletable) = tracker.as_deletable_manga() {
             deletable
@@ -97,7 +93,9 @@ pub async fn remove_manga(
                 .map_err(|e| remote_failure(tracker, &e))?;
         }
     }
-    Ok(())
+    repo.delete(track.manga_id, track.tracker_id)
+        .await
+        .map_err(|e| local_failure(&e))
 }
 
 fn local_failure(e: &TrackError) -> MsgKey {
@@ -106,12 +104,12 @@ fn local_failure(e: &TrackError) -> MsgKey {
 }
 
 fn remote_failure(tracker: &dyn Tracker, e: &TrackError) -> MsgKey {
-    tracing::error!(error = %redact(&e.to_string()), "remote delete failed, local row already removed");
+    tracing::error!(error = %redact(&e.to_string()), "remote delete failed, local row kept");
     e.toast(tracker.name())
 }
 
 /// Removes the anime binding under the binding's lock (T-27b-041). A queued write for the same row finishes first, so
-/// the remove runs after it (E-42). [`TrackEvent::TrackChanged`] is sent unless the local delete failed.
+/// the remove runs after it (E-42). [`TrackEvent::TrackChanged`] is sent once the local row is gone.
 pub async fn remove_anime_serialized(
     ctx: &TrackCtx,
     track: &AnimeTrack,
@@ -155,7 +153,7 @@ async fn remove_anime_locked(
         ctx.anime_tracks.as_ref(),
     )
     .await;
-    if !matches!(result, Err(MsgKey::LocalRemovalFailed)) {
+    if result.is_ok() {
         ctx.events.send(TrackEvent::TrackChanged {
             entry_id: track.anime_id,
         });
@@ -207,7 +205,7 @@ async fn remove_manga_locked(
         ctx.manga_tracks.as_ref(),
     )
     .await;
-    if !matches!(result, Err(MsgKey::LocalRemovalFailed)) {
+    if result.is_ok() {
         ctx.events.send(TrackEvent::TrackChanged {
             entry_id: track.manga_id,
         });
@@ -270,7 +268,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tr_27_059_checked_remove_deletes_locally_then_remotely() {
+    async fn tr_27_059_checked_remove_deletes_remotely_then_locally() {
         let log = new_log();
         let tracker = deletable(log.clone());
         let repo = MemAnimeRepo {
@@ -288,7 +286,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tr_27_d16_a_failed_remote_delete_is_a_toast_and_the_local_row_stays_removed() {
+    async fn tr_27_d16_a_failed_remote_delete_is_a_toast_and_the_local_row_stays() {
         let log = new_log();
         let tracker = deletable(log.clone());
         *tracker.fail.lock().unwrap() = Some("delete refused".into());
@@ -308,14 +306,15 @@ mod tests {
             crate::messages::english(&err),
             "Jellyfin error: delete refused"
         );
-        assert!(
-            repo.list_for_entry(9).await.unwrap().is_empty(),
-            "E-38: local removed"
+        assert_eq!(
+            repo.list_for_entry(9).await.unwrap().len(),
+            1,
+            "E-47: remote first, so the local row is kept"
         );
     }
 
     #[tokio::test]
-    async fn tr_27_t19_a_failed_local_delete_stops_before_the_remote_call() {
+    async fn tr_27_t19_a_failed_local_delete_after_the_remote_delete_is_the_local_failure() {
         let log = new_log();
         let tracker = deletable(log.clone());
         let repo = crate::fakes::FlakyAnimeRepo {
@@ -331,9 +330,10 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err, MsgKey::LocalRemovalFailed);
-        assert!(
-            !log.lock().unwrap().iter().any(|e| e == "delete"),
-            "E-39: no remote call"
+        assert_eq!(
+            log.lock().unwrap().iter().filter(|e| *e == "delete").count(),
+            1,
+            "the remote delete ran first"
         );
         assert_eq!(
             repo.inner.list_for_entry(9).await.unwrap().len(),
@@ -407,5 +407,33 @@ mod tests {
         drop(held);
         job.await.unwrap().unwrap();
         assert!(h.anime_repo.list_for_entry(1).await.unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod mal_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::fakes::MemSecrets;
+    use crate::mal::store::{SecretTokenStore, TokenStore};
+    use crate::mal::tracker::MalTracker;
+
+    fn mal() -> (tempfile::TempDir, MalTracker) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tokens: Arc<dyn TokenStore> = Arc::new(SecretTokenStore::new(MemSecrets::new()));
+        let tracker = MalTracker::new(dir.path(), tokens, Some("cid".into())).expect("tracker");
+        (dir, tracker)
+    }
+
+    #[test]
+    fn t_29a_031_the_mal_delete_dialog_has_the_source_texts_and_a_remote_option() {
+        let (_dir, tracker) = mal();
+        let dialog = RemoveDialog::for_manga(&tracker);
+        assert_eq!(dialog.title(), "Remove MyAnimeList tracking?");
+        assert_eq!(dialog.text(), "This will remove the tracking locally.");
+        assert!(dialog.checkbox_shown(), "MAL can delete remotely");
+        assert_eq!(dialog.checkbox_label(), "Also remove from MyAnimeList");
+        assert!(RemoveDialog::for_anime(&tracker).checkbox_shown());
     }
 }

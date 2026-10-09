@@ -67,6 +67,25 @@ impl DelayPanel {
     }
 }
 
+/// Coalesces `audio-delay` writes during fast changes: only the latest value is kept until the mpv
+/// thread takes it (E-46-081, test 44).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AudioDelayCoalescer {
+    pending: Option<f64>,
+}
+
+impl AudioDelayCoalescer {
+    /// A new value replaces any value not yet taken.
+    pub fn push(&mut self, seconds: f64) {
+        self.pending = Some(seconds);
+    }
+
+    /// The value to write now, if any. Taking empties the slot.
+    pub fn take(&mut self) -> Option<f64> {
+        self.pending.take()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +122,17 @@ mod tests {
         assert_eq!(panel.finish_tap(value.unwrap()), 0.45);
         assert_eq!(panel.live_ms(), 450);
         assert_eq!(panel.persisted_ms(), 0);
+    }
+
+    #[test]
+    fn audio_delay_coalescing_keeps_only_the_last_value() {
+        let mut c = AudioDelayCoalescer::default();
+        assert_eq!(c.take(), None);
+        c.push(0.1);
+        c.push(0.2);
+        c.push(-0.35);
+        assert_eq!(c.take(), Some(-0.35));
+        assert_eq!(c.take(), None);
     }
 
     #[test]

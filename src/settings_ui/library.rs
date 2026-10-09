@@ -1,13 +1,17 @@
 //! Library rows this module owns: the default category lists (task T-47a-020) and the chapter and episode swipe
 //! actions (task T-47a-028).
+use std::rc::Rc;
+
+use kuro_domain::kind::EntryKind;
 use kuro_domain::library::swipe::{chapter_swipe_label, episode_swipe_label};
 use kuro_prefs::library::{ChapterSwipeAction, EpisodeSwipeAction};
 use kuro_prefs::prefs::Prefs;
 use kuro_prefs::pref::Pref;
 
+use crate::pref_model::bind;
 use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::settings_ui::category::Category;
-use crate::settings_ui::rows::{enum_choice, group, int_choice, item, text};
+use crate::settings_ui::rows::{enum_choice, group, int_choice, item, switch, switch_with, text};
 
 /// Stored value meaning "ask every time" for the default category.
 pub const ALWAYS_ASK: i32 = -1;
@@ -25,9 +29,37 @@ pub fn normalize_default(value: i32, ids: &[i32]) -> i32 {
     if value == ALWAYS_ASK || ids.contains(&value) { value } else { ALWAYS_ASK }
 }
 
-/// `Edit anime categories`-style row: the subtitle is the count of user categories.
-pub fn edit_categories_row(title: &str, user_categories: usize) -> PreferenceItem {
-    text(title, Some(&category_count(user_categories)), true)
+/// The per-category sort switch. Turning it off first resets every manga category's flags to the global sort (Kotlin
+/// `ResetMangaCategoryFlags`, the domain `reset_category_flags`); a failed reset refuses the change with its message.
+/// Turning it on only stores the value.
+pub fn categorized_row(prefs: &Prefs) -> PreferenceItem {
+    let veto = bind::veto(|on: bool| {
+        let app = crate::data::app();
+        async move {
+            if on {
+                return Ok(true);
+            }
+            app.categories(EntryKind::Manga).reset_category_flags().await.map(|()| true).map_err(|err| err.to_string())
+        }
+    });
+    switch_with("Per-category settings for sort", None, &prefs.library.categorized_display_settings, true, veto)
+}
+
+/// The page of the Categories screen a kind opens on (`kind_tabs` names its pages `anime` and `manga`).
+pub fn categories_tab(kind: EntryKind) -> &'static str {
+    match kind {
+        EntryKind::Anime => "anime",
+        EntryKind::Manga => "manga",
+    }
+}
+
+/// `Edit anime categories`-style row: the subtitle is the count of user categories, a tap runs `open`.
+pub fn edit_categories_row(title: &str, user_categories: usize, open: Rc<dyn Fn()>) -> PreferenceItem {
+    let mut row = text(title, Some(&category_count(user_categories)), true);
+    if let PreferenceItem::Text { on_click, .. } = &mut row {
+        *on_click = Some(open);
+    }
+    row
 }
 
 /// A "Default ... category" list: "Always ask" first, then each category in list order. A stored id that was
@@ -59,26 +91,37 @@ pub fn episode_swipe_options() -> [(EpisodeSwipeAction, &'static str); 5] {
     [Disabled, ToggleBookmark, ToggleFillermark, ToggleSeen, Download].map(|action| (action, episode_swipe_label(action)))
 }
 
-/// The chapter swipe group (left and right).
+/// The chapter swipe rows, titled as `spec/settings.json` titles them.
 pub fn chapter_swipe_group(prefs: &Prefs) -> Preference {
     let l = &prefs.library;
     group(
-        "Chapter",
+        "Chapter behavior",
         vec![
-            enum_choice("Swipe to left", &l.swipe_left_chapter, &chapter_swipe_options(), true),
-            enum_choice("Swipe to right", &l.swipe_right_chapter, &chapter_swipe_options(), true),
+            enum_choice("Chapter on swipe to left", &l.swipe_left_chapter, &chapter_swipe_options(), true),
+            enum_choice("Chapter on swipe to right", &l.swipe_right_chapter, &chapter_swipe_options(), true),
         ],
     )
 }
 
-/// The episode swipe group (left and right).
+/// The episode swipe rows, titled as `spec/settings.json` titles them.
 pub fn episode_swipe_group(prefs: &Prefs) -> Preference {
     let l = &prefs.library;
     group(
-        "Episode",
+        "Episode behavior",
         vec![
-            enum_choice("Swipe to left", &l.swipe_left_episode, &episode_swipe_options(), true),
-            enum_choice("Swipe to right", &l.swipe_right_episode, &episode_swipe_options(), true),
+            enum_choice("Episode on swipe to left", &l.swipe_left_episode, &episode_swipe_options(), true),
+            enum_choice("Episode on swipe to right", &l.swipe_right_episode, &episode_swipe_options(), true),
+        ],
+    )
+}
+
+/// The Season group: whether refresh and library update also refresh the seasons with episodes (task T-47a-027).
+pub fn season_group(prefs: &Prefs) -> Preference {
+    group(
+        "Season",
+        vec![
+            switch("Update seasons with episodes on refresh", &prefs.library.update_season_on_refresh, true),
+            switch("Update seasons with episodes on library update", &prefs.library.update_season_on_library_update, true),
         ],
     )
 }
@@ -88,12 +131,38 @@ pub fn swipe_rows(prefs: &Prefs) -> Vec<Preference> {
     vec![chapter_swipe_group(prefs), episode_swipe_group(prefs)]
 }
 
+/// The rows of the library page this module builds: the Categories group (edit rows that open the Categories screen,
+/// default category lists) and the swipe groups. `open` shows the Categories screen of a kind.
+pub fn page_rows(prefs: &Prefs, anime: &[Category], manga: &[Category], open: Rc<dyn Fn(EntryKind)>) -> Vec<Preference> {
+    let edit = |title: &str, kind: EntryKind, count: usize| {
+        let open = Rc::clone(&open);
+        edit_categories_row(title, count, Rc::new(move || open(kind)))
+    };
+    let l = &prefs.library;
+    let mut tree = vec![group(
+        "Categories",
+        vec![
+            edit("Edit anime categories", EntryKind::Anime, anime.len()),
+            default_category_row("Default anime category", &l.default_anime_category, anime),
+            edit("Edit manga categories", EntryKind::Manga, manga.len()),
+            default_category_row("Default manga category", &l.default_manga_category, manga),
+            categorized_row(prefs),
+            switch("Hide hidden categories from categories and storage screen", &l.hide_hidden_categories_settings, true),
+        ],
+    )];
+    tree.push(season_group(prefs));
+    tree.extend(swipe_rows(prefs));
+    tree
+}
+
 /// Default anime category row, from the anime category list.
+#[allow(dead_code)] // `page_rows` builds both default rows itself
 pub fn default_anime_category(prefs: &Prefs, categories: &[Category]) -> Preference {
     item(default_category_row("Default anime category", &prefs.library.default_anime_category, categories))
 }
 
 /// Default manga category row, from the manga category list.
+#[allow(dead_code)] // `page_rows` builds both default rows itself
 pub fn default_manga_category(prefs: &Prefs, categories: &[Category]) -> Preference {
     item(default_category_row("Default manga category", &prefs.library.default_manga_category, categories))
 }
@@ -163,10 +232,66 @@ mod tests {
     }
 
     #[test]
-    fn edit_categories_row_subtitle_is_the_count() {
-        let PreferenceItem::Text { common, .. } = edit_categories_row("Edit manga categories", 1) else {
+    fn edit_categories_row_subtitle_is_the_count_and_a_tap_opens_the_screen() {
+        let opened = Rc::new(std::cell::Cell::new(false));
+        let seen = Rc::clone(&opened);
+        let PreferenceItem::Text { common, on_click, .. } =
+            edit_categories_row("Edit manga categories", 1, Rc::new(move || seen.set(true)))
+        else {
             panic!("text row")
         };
         assert_eq!(common.subtitle.as_deref(), Some("1 category"));
+        (on_click.expect("tapping the row does something"))();
+        assert!(opened.get());
+    }
+
+    #[test]
+    fn the_page_rows_open_the_tab_of_their_kind() {
+        let prefs = Prefs::in_memory();
+        let opened = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = Rc::clone(&opened);
+        let tree = page_rows(&prefs, &categories(), &[], Rc::new(move |kind| sink.borrow_mut().push(categories_tab(kind))));
+        let Preference::Group(g) = &tree[0] else { panic!("categories group") };
+        assert_eq!(g.title, "Categories");
+        let titles: Vec<&str> = g.items.iter().map(|i| i.title()).collect();
+        assert_eq!(
+            titles,
+            [
+                "Edit anime categories",
+                "Default anime category",
+                "Edit manga categories",
+                "Default manga category",
+                "Per-category settings for sort",
+                "Hide hidden categories from categories and storage screen",
+            ]
+        );
+        for row in [&g.items[2], &g.items[0]] {
+            let PreferenceItem::Text { on_click, .. } = row else { panic!("text row") };
+            (on_click.as_ref().expect("a tap handler"))();
+        }
+        assert_eq!(*opened.borrow(), ["manga", "anime"]);
+        let PreferenceItem::Text { common, .. } = &g.items[0] else { panic!("text row") };
+        assert_eq!(common.subtitle.as_deref(), Some("2 categories"));
+        assert_eq!(tree.len(), 4, "Categories, Season, Chapter behavior, Episode behavior");
+    }
+
+    #[test]
+    fn the_categorized_switch_is_the_per_category_sort_setting_and_stores_its_value() {
+        let prefs = Prefs::in_memory();
+        let PreferenceItem::Switch { common, pref, .. } = categorized_row(&prefs) else { panic!("switch") };
+        assert_eq!(common.title, "Per-category settings for sort");
+        assert!(!pref.get());
+        assert_eq!(pref.key(), prefs.library.categorized_display_settings.key());
+    }
+
+    #[test]
+    fn the_season_group_holds_the_two_update_switches_under_the_season_heading() {
+        let prefs = Prefs::in_memory();
+        let Preference::Group(g) = season_group(&prefs) else { panic!("group") };
+        assert_eq!(g.title, "Season");
+        let titles: Vec<&str> = g.items.iter().map(|i| i.title()).collect();
+        assert_eq!(titles, ["Update seasons with episodes on refresh", "Update seasons with episodes on library update"]);
+        let PreferenceItem::Switch { pref, .. } = &g.items[1] else { panic!("switch") };
+        assert_eq!(pref.key(), prefs.library.update_season_on_library_update.key());
     }
 }

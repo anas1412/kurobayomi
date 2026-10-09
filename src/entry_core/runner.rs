@@ -20,6 +20,7 @@ use crate::entry_core::detail::{
     LatestWins, LoadContext, LoadState, MangaRow, StoreCmd, StoreEvent, finish_load,
 };
 use crate::entry_core::errors::DetailError;
+use crate::entry_core::favorite::{AddRoute, find_duplicate, route_add};
 use crate::entry_core::store::{DbStore, chapter_rows, manga_row};
 
 /// The newest published rows of the page.
@@ -311,22 +312,104 @@ impl Shared {
             } => {
                 self.write_result(move |s, _| s.set_bookmark(manga_id, &chapter_ids, bookmark).map(drop)).await;
             }
-            StoreCmd::AddToLibrary { manga_id, category_ids } => {
-                let now = chrono::Utc::now().timestamp_millis();
-                self.write_result(move |s, _| s.add_to_library(manga_id, &category_ids, now)).await;
-                self.reload_categories(manga_id).await;
-            }
+            StoreCmd::AddToLibrary { manga_id, category_ids } => self.add_to_library(manga_id, category_ids).await,
             StoreCmd::SetCategories { manga_id, category_ids } => {
                 self.write_result(move |s, _| s.set_categories(manga_id, &category_ids)).await;
                 self.reload_categories(manga_id).await;
+            }
+            StoreCmd::ToggleFavorite { manga_id, default_category, skip_duplicate } => {
+                self.toggle_favorite(manga_id, default_category, skip_duplicate).await;
+            }
+            StoreCmd::Download { manga_id, chapter_ids, start_now } => {
+                let queued = self.blocking(move |_, backend| backend.enqueue_downloads(manga_id, &chapter_ids, start_now)).await;
+                if queued {
+                    self.emit(StoreEvent::Queued);
+                }
+            }
+            StoreCmd::CancelDownload { chapter_id, .. } => {
+                self.blocking(move |_, backend| backend.cancel_download(chapter_id)).await;
+            }
+            StoreCmd::DeleteDownloads { manga_id, chapter_ids } => {
+                let removed = chapter_ids.clone();
+                self.blocking(move |_, backend| backend.delete_downloads(manga_id, &chapter_ids)).await;
+                self.emit(StoreEvent::DownloadsDeleted(removed));
+            }
+            StoreCmd::ResetFlags { manga_id } => {
+                let defaults = self.ctx.library_defaults;
+                self.write_result(move |s, _| s.write_defaults(manga_id, defaults).map(drop)).await;
             }
             StoreCmd::Load { .. } | StoreCmd::FetchAll { .. } | StoreCmd::Shutdown => {}
         }
     }
 
-    async fn write_result(&self, work: impl FnOnce(&DbStore, &Arc<dyn Backend>) -> kuro_data::DataResult<()> + Send + 'static) {
-        if let Err(e) = self.blocking(move |store, backend| work(&store, &backend)).await {
-            self.fail("SQLiteException", e);
+    /// Favorite and categories in one transaction, then the enhanced trackers bind. Every add branch ends here: the
+    /// default category, no categories, and the category dialog's confirm (`bindEnhancedTrackers`, behaviour 4.2 step 6).
+    async fn add_to_library(&self, manga_id: i64, category_ids: Vec<i64>) {
+        let now = chrono::Utc::now().timestamp_millis();
+        if self.write_result(move |s, _| s.add_to_library(manga_id, &category_ids, now)).await {
+            self.blocking(move |_, backend| backend.bind_enhanced(manga_id)).await;
+        }
+        self.reload_categories(manga_id).await;
+    }
+
+    /// `toggleFavorite` (behaviour 4.2). A favorite is removed: `favorite = false` and `date_added = 0` first, the cover
+    /// after that write succeeded. A manga that is not one is checked for a duplicate (no write when found), then
+    /// routed by the default category.
+    async fn toggle_favorite(&self, manga_id: i64, default_category: i64, skip_duplicate: bool) {
+        let read = self.blocking(move |store, _| store.manga(manga_id)).await;
+        let manga = match read {
+            Ok(Some(manga)) => manga,
+            Ok(None) => return,
+            Err(e) => return self.fail("SQLiteException", e),
+        };
+        if manga.favorite {
+            let removed = self.blocking(move |store, _| store.remove_from_library(manga_id)).await;
+            match removed {
+                Ok(true) => {
+                    let ask = self
+                        .blocking(move |_, backend| {
+                            backend.remove_cover(manga_id);
+                            backend.downloads(manga_id).values().any(|s| *s == kuro_downloads::DownloadState::Downloaded)
+                        })
+                        .await;
+                    self.emit(StoreEvent::Removed { ask_delete_downloads: ask });
+                }
+                Ok(false) => {}
+                Err(e) => self.fail("SQLiteException", e),
+            }
+            return;
+        }
+        let title = manga.title;
+        let read = self
+            .blocking(move |store, _| {
+                let titles = store.favorite_titles()?;
+                let refs: Vec<(i64, &str)> = titles.iter().map(|(id, t)| (*id, t.as_str())).collect();
+                let duplicate = if skip_duplicate { None } else { find_duplicate(manga_id, &title, &refs) };
+                kuro_data::DataResult::Ok((duplicate, store.user_categories()?))
+            })
+            .await;
+        let (duplicate, categories) = match read {
+            Ok(read) => read,
+            Err(e) => return self.fail("SQLiteException", e),
+        };
+        if let Some(duplicate_id) = duplicate {
+            self.emit(StoreEvent::Duplicate { duplicate_id });
+            return;
+        }
+        match route_add(default_category, &categories) {
+            AddRoute::AddDefaultCategory(category) => self.add_to_library(manga_id, category.into_iter().collect()).await,
+            AddRoute::ChooseCategory => self.emit(StoreEvent::ChooseCategory),
+        }
+    }
+
+    /// Runs a write on the blocking pool. `true` when it succeeded; a failure is reported to the page.
+    async fn write_result(&self, work: impl FnOnce(&DbStore, &Arc<dyn Backend>) -> kuro_data::DataResult<()> + Send + 'static) -> bool {
+        match self.blocking(move |store, backend| work(&store, &backend)).await {
+            Ok(()) => true,
+            Err(e) => {
+                self.fail("SQLiteException", e);
+                false
+            }
         }
     }
 
@@ -359,6 +442,11 @@ mod tests {
         hold_ms: u64,
         /// Fetches that ran to the end. A cancelled fetch is dropped before it counts.
         finished: Arc<AtomicUsize>,
+        bound: AtomicUsize,
+        covers: AtomicUsize,
+        queued: Mutex<Vec<(Vec<i64>, bool)>>,
+        cancelled: Mutex<Vec<i64>>,
+        stored_downloads: std::collections::HashMap<i64, kuro_downloads::DownloadState>,
     }
 
     impl Fake {
@@ -370,6 +458,11 @@ mod tests {
                 detail_error: None,
                 hold_ms: 0,
                 finished: Arc::default(),
+                bound: AtomicUsize::new(0),
+                covers: AtomicUsize::new(0),
+                queued: Mutex::default(),
+                cancelled: Mutex::default(),
+                stored_downloads: Default::default(),
             })
         }
     }
@@ -390,6 +483,28 @@ mod tests {
                 finished.fetch_add(1, Ordering::SeqCst);
                 error.map_or(Ok(()), Err)
             })
+        }
+
+        fn downloads(&self, _: i64) -> std::collections::HashMap<i64, kuro_downloads::DownloadState> {
+            self.stored_downloads.clone()
+        }
+
+        fn enqueue_downloads(&self, _: i64, ids: &[i64], start_now: bool) -> bool {
+            self.queued.lock().unwrap().push((ids.to_vec(), start_now));
+            true
+        }
+
+        fn cancel_download(&self, chapter_id: i64) {
+            self.cancelled.lock().unwrap().push(chapter_id);
+        }
+
+        fn bind_enhanced(&self, _: i64) {
+            self.bound.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn remove_cover(&self, _: i64) -> bool {
+            self.covers.fetch_add(1, Ordering::SeqCst);
+            true
         }
 
         fn fetch_chapters(&self, _: i64) -> Fetch {
@@ -624,6 +739,147 @@ mod tests {
             };
             assert!(membership.is_empty());
             assert!(store.manga(id).unwrap().unwrap().favorite);
+        });
+    }
+
+    fn toggle(manga_id: i64, default_category: i64, skip_duplicate: bool) -> StoreCmd {
+        StoreCmd::ToggleFavorite { manga_id, default_category, skip_duplicate }
+    }
+
+    #[test]
+    fn the_library_button_adds_with_the_default_category_in_one_write_and_binds_the_trackers() {
+        let rt = rt();
+        let (_dir, store, id) = store(false, 0);
+        let cat = store.insert_category_for_test("Reading");
+        let backend = Fake::ok();
+        rt.block_on(async {
+            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            runner.send(toggle(id, cat, false));
+            let rx = runner.events();
+            let StoreEvent::Categories { membership, .. } = until(&rx, |e| matches!(e, StoreEvent::Categories { .. })).await else { unreachable!() };
+            assert_eq!(membership, vec![cat], "branch A: the default category");
+            let row = store.manga(id).unwrap().unwrap();
+            assert!(row.favorite);
+            assert_eq!(backend.bound.load(Ordering::SeqCst), 1, "bind_enhanced ran");
+        });
+    }
+
+    #[test]
+    fn uncategorized_default_adds_with_no_category_and_also_binds() {
+        let rt = rt();
+        let (_dir, store, id) = store(false, 0);
+        store.insert_category_for_test("Reading");
+        let backend = Fake::ok();
+        rt.block_on(async {
+            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            runner.send(toggle(id, 0, false));
+            let rx = runner.events();
+            let StoreEvent::Categories { membership, .. } = until(&rx, |e| matches!(e, StoreEvent::Categories { .. })).await else { unreachable!() };
+            assert!(membership.is_empty(), "branch B: no category");
+            assert!(store.manga(id).unwrap().unwrap().favorite);
+            assert_eq!(backend.bound.load(Ordering::SeqCst), 1);
+        });
+    }
+
+    #[test]
+    fn an_unset_default_asks_for_the_category_and_writes_nothing_until_confirmed() {
+        let rt = rt();
+        let (_dir, store, id) = store(false, 0);
+        let cat = store.insert_category_for_test("Reading");
+        let backend = Fake::ok();
+        rt.block_on(async {
+            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            runner.send(toggle(id, -1, false));
+            let rx = runner.events();
+            until(&rx, |e| matches!(e, StoreEvent::ChooseCategory)).await;
+            assert!(!store.manga(id).unwrap().unwrap().favorite, "E-FAV-3: favorite is not written yet");
+            assert_eq!(backend.bound.load(Ordering::SeqCst), 0);
+            // the dialog's confirm is the third branch, and it binds too
+            runner.send(StoreCmd::AddToLibrary { manga_id: id, category_ids: vec![cat] });
+            until(&rx, |e| matches!(e, StoreEvent::Categories { .. })).await;
+            assert!(store.manga(id).unwrap().unwrap().favorite);
+            assert_eq!(backend.bound.load(Ordering::SeqCst), 1, "bind_enhanced runs in all three branches");
+        });
+    }
+
+    #[test]
+    fn a_duplicate_title_in_any_source_stops_before_any_write_and_add_anyway_goes_on() {
+        let rt = rt();
+        let (_dir, store, id) = store(false, 0);
+        let other = store.insert_manga_for_test("TITLE", true); // same title, other case, other source
+        let backend = Fake::ok();
+        rt.block_on(async {
+            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            runner.send(toggle(id, 0, false));
+            let rx = runner.events();
+            let StoreEvent::Duplicate { duplicate_id } = until(&rx, |e| matches!(e, StoreEvent::Duplicate { .. })).await else { unreachable!() };
+            assert_eq!(duplicate_id, other);
+            assert!(!store.manga(id).unwrap().unwrap().favorite, "E-FAV-2: no write on a duplicate");
+            runner.send(toggle(id, 0, true));
+            until(&rx, |e| matches!(e, StoreEvent::Categories { .. })).await;
+            assert!(store.manga(id).unwrap().unwrap().favorite);
+        });
+    }
+
+    #[test]
+    fn removing_a_favorite_clears_it_then_deletes_the_cover_and_asks_about_downloads() {
+        let rt = rt();
+        let (_dir, store, id) = store(true, 1);
+        let chapter_id = store.chapter_list(id, &Default::default()).unwrap()[0].id;
+        let backend = Arc::new(Fake {
+            stored_downloads: [(chapter_id, kuro_downloads::DownloadState::Downloaded)].into(),
+            ..Arc::into_inner(Fake::ok()).unwrap()
+        });
+        rt.block_on(async {
+            let runner = spawn(rt.handle(), store.clone(), backend.clone(), ctx());
+            runner.send(toggle(id, 0, false));
+            let rx = runner.events();
+            let StoreEvent::Removed { ask_delete_downloads } = until(&rx, |e| matches!(e, StoreEvent::Removed { .. })).await else { unreachable!() };
+            assert!(ask_delete_downloads, "a downloaded chapter exists");
+            assert!(!store.manga(id).unwrap().unwrap().favorite);
+            assert_eq!(backend.covers.load(Ordering::SeqCst), 1, "the cover goes after the write succeeded");
+            assert_eq!(backend.bound.load(Ordering::SeqCst), 0);
+        });
+    }
+
+    #[test]
+    fn download_commands_reach_the_downloads_layer_and_report_a_queue() {
+        let rt = rt();
+        let (_dir, store, id) = store(true, 2);
+        let backend = Fake::ok();
+        rt.block_on(async {
+            let runner = spawn(rt.handle(), store, backend.clone(), ctx());
+            let rx = runner.events();
+            runner.send(StoreCmd::Download { manga_id: id, chapter_ids: vec![7], start_now: true });
+            until(&rx, |e| matches!(e, StoreEvent::Queued)).await;
+            assert_eq!(*backend.queued.lock().unwrap(), vec![(vec![7], true)]);
+            runner.send(StoreCmd::CancelDownload { manga_id: id, chapter_id: 7 });
+            runner.send(StoreCmd::DeleteDownloads { manga_id: id, chapter_ids: vec![7] });
+            until(&rx, |e| matches!(e, StoreEvent::DownloadsDeleted(_))).await;
+            // each command runs in its own task, so the cancel may land just after the delete
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while backend.cancelled.lock().unwrap().is_empty() {
+                assert!(std::time::Instant::now() < deadline, "the cancel never reached the downloads layer");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(*backend.cancelled.lock().unwrap(), vec![7]);
+        });
+    }
+
+    #[test]
+    fn reset_writes_the_library_defaults_to_the_manga() {
+        let rt = rt();
+        let (_dir, store, id) = store(true, 0);
+        store.set_flag_bits(id, c::SHOW_UNREAD, c::UNREAD_MASK).unwrap();
+        let defaults = crate::entry_core::flags::ChapterFlags(c::SORTING_NUMBER | c::SORT_ASC);
+        rt.block_on(async {
+            let runner = spawn(rt.handle(), store.clone(), Fake::ok(), LoadContext { library_defaults: defaults, ..ctx() });
+            runner.send(StoreCmd::ResetFlags { manga_id: id });
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while store.manga(id).unwrap().unwrap().flags != defaults {
+                assert!(std::time::Instant::now() < deadline, "the reset never landed");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
         });
     }
 

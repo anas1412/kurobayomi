@@ -3,6 +3,7 @@
 //! The downloader writes the whole queue after each membership or order change, inside one transaction, so
 //! `position` values stay dense by construction. Rows are read back `ORDER BY position`.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::{Connection, params};
@@ -16,6 +17,9 @@ pub enum StoreError {
     Sql(#[from] rusqlite::Error),
     #[error("queue store lock was poisoned")]
     Poisoned,
+    /// The last [`QueueStore::load`] failed, so the saved rows are unknown. Writing would delete them.
+    #[error("the saved queue could not be read, so it is left as it is")]
+    Unreadable,
 }
 
 /// One row of `manga_download_queue`.
@@ -32,13 +36,16 @@ pub struct QueueRow {
 
 pub struct QueueStore {
     conn: Mutex<Connection>,
+    /// Set when `load` fails and cleared when it succeeds. While set, `replace_all` refuses, because it deletes the
+    /// whole table and would drop every saved row the load could not read (T-23a-035).
+    unreadable: AtomicBool,
 }
 
 impl QueueStore {
     /// Creates the tables when missing. The connection is used as given, so the caller owns the pragmas.
     pub fn open(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(SCHEMA)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self { conn: Mutex::new(conn), unreadable: AtomicBool::new(false) })
     }
 
     pub fn open_in_memory() -> Result<Self, StoreError> {
@@ -51,6 +58,12 @@ impl QueueStore {
 
     /// Every row, ordered by `position`.
     pub fn load(&self) -> Result<Vec<QueueRow>, StoreError> {
+        let rows = self.read_rows();
+        self.unreadable.store(rows.is_err(), Ordering::SeqCst);
+        rows
+    }
+
+    fn read_rows(&self) -> Result<Vec<QueueRow>, StoreError> {
         let conn = self.lock()?;
         let mut stmt = conn.prepare(
             "SELECT chapter_id, manga_id, source_id, position, status, enqueued_at \
@@ -74,6 +87,9 @@ impl QueueStore {
     /// Replaces the whole queue in one transaction. Positions are renumbered `0..n` in slice order. A failure in
     /// any row rolls the whole change back, so the table keeps its previous contents.
     pub fn replace_all(&self, rows: &[QueueRow]) -> Result<(), StoreError> {
+        if self.unreadable.load(Ordering::SeqCst) {
+            return Err(StoreError::Unreadable);
+        }
         let mut conn = self.lock()?;
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM manga_download_queue", [])?;
@@ -119,6 +135,7 @@ mod tests {
         assert_eq!(ids, vec![10, 11, 12]);
     }
 
+    // TST-43
     #[test]
     fn positions_are_renumbered_densely_on_write() {
         let store = store_with_chapters();
@@ -127,6 +144,7 @@ mod tests {
         assert_eq!(positions, vec![0, 1, 2]);
     }
 
+    // TST-42
     #[test]
     fn a_failing_row_leaves_the_previous_contents_untouched() {
         let store = store_with_chapters();
@@ -144,6 +162,22 @@ mod tests {
         store.replace_all(&[row(10, 0)]).unwrap();
         store.replace_all(&[]).unwrap();
         assert!(store.load().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_failed_load_stops_replace_all_from_wiping_the_table() {
+        let store = store_with_chapters();
+        store.replace_all(&[row(10, 0)]).unwrap();
+        // A status the row mapper cannot read: the load fails, but a DELETE would still succeed.
+        store.lock().unwrap().execute("UPDATE manga_download_queue SET status = 'bad'", []).unwrap();
+        assert!(store.load().is_err());
+        assert!(matches!(store.replace_all(&[row(11, 0)]), Err(StoreError::Unreadable)));
+        let kept: i64 =
+            store.lock().unwrap().query_row("SELECT COUNT(*) FROM manga_download_queue", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, 1, "the unreadable row is still there");
+        store.lock().unwrap().execute("UPDATE manga_download_queue SET status = 1", []).unwrap();
+        assert!(store.load().is_ok(), "a later good load lifts the guard");
+        store.replace_all(&[row(11, 0)]).unwrap();
     }
 
     #[test]

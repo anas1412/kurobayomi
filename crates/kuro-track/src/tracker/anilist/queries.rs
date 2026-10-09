@@ -223,6 +223,20 @@ pub const UPDATE_ANIME: &str = "mutation UpdateAnime(
   }
 }";
 
+/// Deletes one MediaList entry. `listId` is the MediaList id (`library_id`), never the local row id (E-20).
+pub const DELETE_ENTRY: &str = "mutation DeleteMediaListEntry($listId: Int) {
+  DeleteMediaListEntry(id: $listId) {
+    deleted
+  }
+}";
+
+/// The MAL id of an AniList media. Sent without a token (AniSkip lookup, E-43).
+pub const MAL_ID: &str = "query ($id: Int) {
+  Media(id: $id) {
+    idMal
+  }
+}";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +270,17 @@ mod tests {
             assert!(q.contains("$status: MediaListStatus"));
             assert!(q.contains("$private: Boolean"));
         }
+    }
+
+    #[test]
+    fn t_28a_022_delete_mutation_takes_the_media_list_id() {
+        assert!(DELETE_ENTRY.contains("DeleteMediaListEntry(id: $listId)"));
+        assert!(DELETE_ENTRY.contains("deleted"));
+    }
+
+    #[test]
+    fn t_28a_034_mal_lookup_asks_for_id_mal_only() {
+        assert!(MAL_ID.contains("Media(id: $id)"));
+        assert!(MAL_ID.contains("idMal"));
     }
 }

@@ -9,6 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::anime::ffmpeg::FFMPEG_HELP_URL;
+use crate::downloader::BULK_WARNING_HELP_URL;
 use crate::events::DownloadEvent;
 use crate::notify::{Action, NotificationSink, Notice, Priority, DOWNLOADER_TITLE, UNKNOWN_ERROR_TEXT, progress_title};
 
@@ -44,7 +46,7 @@ pub fn progress_notice(anime_title: &str, episode_name: &str, percent: i32, hide
         title,
         body,
         ongoing: true,
-        actions: vec![Action::Pause, Action::ShowAnime],
+        actions: vec![Action::Stop, Action::ShowAnime],
         expire_secs: None,
     }
 }
@@ -62,17 +64,23 @@ pub fn paused_notice() -> Notice {
     }
 }
 
-/// The warning notice: title "Downloader", the reason as the body, auto-expiring after 30 s.
-pub fn warning_notice(text: &str) -> Notice {
+/// The warning notice: title "Downloader", the reason as the body, auto-expiring after 30 s. With a help link it offers
+/// the help action (T-24a-065).
+pub fn warning_notice(text: &str, help_url: Option<&'static str>) -> Notice {
     Notice {
         id: ERROR_ID,
         priority: Priority::Low,
         title: DOWNLOADER_TITLE.into(),
         body: Some(text.to_owned()),
         ongoing: false,
-        actions: Vec::new(),
+        actions: help_url.map(Action::OpenHelp).into_iter().collect(),
         expire_secs: Some(WARNING_TIMEOUT_SECS),
     }
+}
+
+/// The help link of a warning, when it is one this app knows (the queue-size warning or the ffmpeg help page).
+pub fn known_help_url(url: Option<&str>) -> Option<&'static str> {
+    [BULK_WARNING_HELP_URL, FFMPEG_HELP_URL].into_iter().find(|known| Some(*known) == url)
 }
 
 /// The error notice for one episode: `"<anime>: <episode>"`, or the plain anime title, or "Downloader" (behaviour 10.6).
@@ -186,9 +194,9 @@ impl AnimeNotifier {
         self.sink.withdraw(PROGRESS_ID);
     }
 
-    /// A non-fatal reason to stop, such as "No Wi-Fi connection available".
-    pub fn warning(&mut self, text: &str) {
-        self.sink.show(&warning_notice(text));
+    /// A non-fatal reason to stop, such as "No Wi-Fi connection available", with an optional help link.
+    pub fn warning(&mut self, text: &str, help_url: Option<&'static str>) {
+        self.sink.show(&warning_notice(text, help_url));
     }
 
     /// One episode failed. The first in a window is shown alone, later ones in the window are summarised.
@@ -206,7 +214,7 @@ impl AnimeNotifier {
             DownloadEvent::Error { manga_title, chapter_name, message, .. } => {
                 self.error(now, manga_title.as_deref(), chapter_name.as_deref(), message);
             }
-            DownloadEvent::Warning { text, .. } => self.warning(text),
+            DownloadEvent::Warning { text, help_url, .. } => self.warning(text, known_help_url(help_url.as_deref())),
             DownloadEvent::Paused => self.paused(),
             DownloadEvent::Complete | DownloadEvent::Dismiss => self.complete(),
             _ => {}
@@ -250,7 +258,7 @@ mod tests {
         assert_eq!(n.title, "A very long an… - Episode 3");
         assert_eq!(n.body.as_deref(), Some("Downloading (10%)"));
         assert!(n.ongoing);
-        assert_eq!(n.actions, vec![Action::Pause, Action::ShowAnime]);
+        assert_eq!(n.actions, vec![Action::Stop, Action::ShowAnime]);
     }
 
     #[test]
@@ -285,7 +293,8 @@ mod tests {
 
     #[test]
     fn warning_uses_the_error_slot_and_expires_after_thirty_seconds() {
-        let w = warning_notice("No Wi-Fi connection available");
+        let w = warning_notice("No Wi-Fi connection available", None);
+        assert!(w.actions.is_empty(), "no help link, no action");
         assert_eq!(w.id, ERROR_ID);
         assert_eq!(w.title, "Downloader");
         assert_eq!(w.expire_secs, Some(30));
@@ -314,6 +323,25 @@ mod tests {
         assert_eq!(digest.count(), 2);
         assert!(digest.record(t0 + Duration::from_secs(9)));
         assert_eq!(digest.count(), 1);
+    }
+
+    #[test]
+    fn a_queue_size_warning_offers_the_help_link_and_others_do_not() {
+        let url = crate::downloader::BULK_WARNING_HELP_URL;
+        assert_eq!(warning_notice("Large bulk downloads", Some(url)).actions, vec![Action::OpenHelp(url)]);
+        assert_eq!(known_help_url(Some(url)), Some(url));
+        assert_eq!(known_help_url(Some("https://example.org/unknown")), None, "only known help links are offered");
+        assert_eq!(known_help_url(None), None);
+    }
+
+    #[test]
+    fn the_anime_actions_use_the_kotlin_labels() {
+        assert_eq!(Action::Stop.label(), "Stop");
+        assert_eq!(Action::Pause.label(), "Pause");
+        assert_eq!(Action::ShowAnime.label(), "Show anime");
+        assert_eq!(Action::Resume.label(), "Resume");
+        assert_eq!(Action::CancelAll.label(), "Cancel all");
+        assert_eq!(Action::OpenHelp("https://x").label(), "Help");
     }
 
     #[test]

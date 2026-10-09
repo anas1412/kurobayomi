@@ -154,7 +154,10 @@ impl Typography {
             self.justify = SubtitleJustification::Auto;
             vec![
                 Write::mpv("sub-ass-justify", "no"),
-                Write::pref("pref_sub_justify", justify_pref(SubtitleJustification::Auto)),
+                Write::pref(
+                    "pref_sub_justify",
+                    justify_pref(SubtitleJustification::Auto),
+                ),
                 Write::mpv("sub-justify", SubtitleJustification::Auto.value()),
             ]
         }
@@ -261,8 +264,8 @@ impl Typography {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pref_write::test_support::FakeMpv;
     use crate::pref_write::apply_mpv;
+    use crate::pref_write::test_support::FakeMpv;
 
     fn prefs() -> SubtitlePrefs {
         SubtitlePrefs {

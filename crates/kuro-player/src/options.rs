@@ -378,16 +378,38 @@ fn yes_no(v: bool) -> String {
     if v { "yes" } else { "no" }.to_owned()
 }
 
-/// Property writes for a channel layout picked at runtime (`MoreSheet.kt:246-256`). The reverse
-/// layout first resets `audio-channels` to auto. Any other layout clears the `af` filter first,
-/// then writes its own property. Both cases end with the layout's own `setting()`.
-pub fn channel_change_writes(next: AudioChannels) -> Vec<(&'static str, &'static str)> {
+/// The pan filter that reverses the stereo channels (`AudioChannels::ReverseStereo`).
+pub const PAN_FILTER: &str = "pan=[stereo|c0=c1|c1=c0]";
+
+/// The `af` chain without the pan filter. Every other filter (from `mpv.conf` or a script) stays
+/// (E77): only the reverse-stereo entry is removed.
+pub fn af_without_pan(af: &str) -> String {
+    af.split(',')
+        .map(str::trim)
+        .filter(|f| !f.is_empty() && *f != PAN_FILTER)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Property writes for a channel layout picked at runtime (`MoreSheet.kt:246-256`), given the
+/// current `af` chain. Reverse stereo sets `audio-channels` to auto and appends the pan filter to
+/// `af`. Any other layout removes only the pan filter from `af` (the Kotlin `af=""` cleared every
+/// filter, E77), then writes its own property.
+pub fn channel_change_writes(next: AudioChannels, current_af: &str) -> Vec<(&'static str, String)> {
+    let kept = af_without_pan(current_af);
     match next {
-        AudioChannels::ReverseStereo => vec![
-            AudioChannels::AutoSafe.setting(),
-            AudioChannels::ReverseStereo.setting(),
-        ],
-        other => vec![("af", ""), other.setting()],
+        AudioChannels::ReverseStereo => {
+            let af = if kept.is_empty() {
+                PAN_FILTER.to_owned()
+            } else {
+                format!("{kept},{PAN_FILTER}")
+            };
+            vec![("audio-channels", "auto".to_owned()), ("af", af)]
+        }
+        other => {
+            let (name, value) = other.setting();
+            vec![("af", kept), (name, value.to_owned())]
+        }
     }
 }
 
@@ -808,20 +830,44 @@ mod tests {
     #[test]
     fn runtime_channel_change_for_reverse_resets_auto_first() {
         assert_eq!(
-            channel_change_writes(AudioChannels::ReverseStereo),
+            channel_change_writes(AudioChannels::ReverseStereo, ""),
             vec![
-                ("audio-channels", "auto"),
-                ("af", "pan=[stereo|c0=c1|c1=c0]"),
+                ("audio-channels", "auto".to_owned()),
+                ("af", "pan=[stereo|c0=c1|c1=c0]".to_owned()),
             ]
         );
     }
 
     #[test]
-    fn runtime_channel_change_for_others_clears_af_first() {
+    fn reverse_stereo_keeps_the_other_filters_in_af() {
         assert_eq!(
-            channel_change_writes(AudioChannels::Mono),
-            vec![("af", ""), ("audio-channels", "mono")]
+            channel_change_writes(
+                AudioChannels::ReverseStereo,
+                "lavfi=eq,pan=[stereo|c0=c1|c1=c0]"
+            ),
+            vec![
+                ("audio-channels", "auto".to_owned()),
+                ("af", "lavfi=eq,pan=[stereo|c0=c1|c1=c0]".to_owned()),
+            ]
         );
+    }
+
+    #[test]
+    fn runtime_channel_change_for_others_removes_only_the_pan_filter() {
+        assert_eq!(
+            channel_change_writes(AudioChannels::Mono, "lavfi=eq,pan=[stereo|c0=c1|c1=c0]"),
+            vec![
+                ("af", "lavfi=eq".to_owned()),
+                ("audio-channels", "mono".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn af_without_pan_drops_only_the_pan_entry() {
+        assert_eq!(af_without_pan(""), "");
+        assert_eq!(af_without_pan(PAN_FILTER), "");
+        assert_eq!(af_without_pan("a, pan=[stereo|c0=c1|c1=c0] ,b"), "a,b");
     }
 
     #[test]

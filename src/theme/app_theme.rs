@@ -146,6 +146,23 @@ impl AppTheme {
         AppTheme::parse(stored).is_some_and(AppTheme::is_deprecated)
     }
 
+    /// The picker entries for the current Monet availability: Monet is listed only with a seed
+    /// (E-49-06, T-49a-007).
+    pub fn picker(monet_available: bool) -> Vec<AppTheme> {
+        AppTheme::PICKER
+            .into_iter()
+            .filter(|t| *t != AppTheme::Monet || monet_available)
+            .collect()
+    }
+
+    /// The entry the picker marks selected: a stored Monet without a seed shows System (`GtkTheme`).
+    pub fn selected_in_picker(stored: AppTheme, monet_available: bool) -> AppTheme {
+        match stored.effective() {
+            AppTheme::Monet if !monet_available => AppTheme::GtkTheme,
+            other => other,
+        }
+    }
+
     /// The picker title, from the translation catalogue. `None` for the deprecated names.
     pub fn title(self) -> Option<String> {
         let key = match self {
@@ -175,12 +192,13 @@ impl AppTheme {
         Some(tr(key))
     }
 
-    /// The colour scheme this theme uses. Monet has no scheme of its own until the dynamic colour
-    /// generation lands, so it uses Default. `None` means no palette: `GtkTheme` and the deprecated names.
+    /// The colour scheme this theme uses. Monet maps to its own `MONET` choice, which resolves from
+    /// the seed (`monet`). `None` means no palette: `GtkTheme` and the deprecated names.
     pub fn scheme(self) -> Option<Scheme> {
         Some(match self {
             AppTheme::GtkTheme | AppTheme::DarkBlue | AppTheme::HotPink | AppTheme::Blue => return None,
-            AppTheme::Default | AppTheme::Monet => Scheme::DEFAULT,
+            AppTheme::Default => Scheme::DEFAULT,
+            AppTheme::Monet => Scheme::MONET,
             AppTheme::Cloudflare => Scheme::CLOUDFLARE,
             AppTheme::CottonCandy => Scheme::COTTONCANDY,
             AppTheme::Doom => Scheme::DOOM,
@@ -221,7 +239,7 @@ mod tests {
                 assert!(theme.scheme().is_some(), "{theme:?}");
             }
         }
-        assert_eq!(AppTheme::Monet.scheme(), Some(Scheme::DEFAULT));
+        assert_eq!(AppTheme::Monet.scheme(), Some(Scheme::MONET));
         assert_eq!(AppTheme::GtkTheme.scheme(), None);
     }
 
@@ -267,5 +285,23 @@ mod tests {
     fn mocha_and_cotton_candy_keep_their_schemes() {
         assert_eq!(AppTheme::from_stored("MOCHA").scheme(), Some(Scheme::MOCHA));
         assert_eq!(AppTheme::from_stored("COTTONCANDY").scheme(), Some(Scheme::COTTONCANDY));
+    }
+}
+
+#[cfg(test)]
+mod monet_picker_tests {
+    use super::AppTheme;
+
+    #[test]
+    fn monet_is_listed_only_when_a_seed_exists() {
+        assert!(!AppTheme::picker(false).contains(&AppTheme::Monet));
+        assert!(AppTheme::picker(true).contains(&AppTheme::Monet));
+    }
+
+    #[test]
+    fn a_stored_monet_without_a_seed_selects_system() {
+        assert_eq!(AppTheme::selected_in_picker(AppTheme::Monet, false), AppTheme::GtkTheme);
+        assert_eq!(AppTheme::selected_in_picker(AppTheme::Monet, true), AppTheme::Monet);
+        assert_eq!(AppTheme::selected_in_picker(AppTheme::Nord, false), AppTheme::Nord);
     }
 }

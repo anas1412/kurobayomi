@@ -57,6 +57,12 @@ pub enum DownloadError {
     /// The staging folder does not hold exactly one finished video (E-F06, behaviour 5.8).
     #[error("Download incomplete: {0}")]
     DownloadIncomplete(String),
+    /// A folder move would cross filesystems. Holds the target path. No copy fallback (T-24a-071, E-F16).
+    #[error("Cannot move the download to another disk: {0}")]
+    CrossDevice(String),
+    /// A torrent link while the build has no `torrent-server` feature, or the server is not reachable (E-X04).
+    #[error("Torrent server is not available")]
+    TorrentUnavailable,
 }
 
 /// How a chapter failure is handled by the scheduler.
@@ -130,3 +136,30 @@ mod tests {
         assert_eq!(DownloadError::Source(SourceError::Http(404)).to_string(), "HTTP error 404");
     }
 }
+
+/// The message of an error and of each error it wraps, joined with `: ` (T-23a-041: failures are logged with the full
+/// chain, not only the top message).
+pub fn error_chain(err: &dyn std::error::Error) -> String {
+    let mut text = err.to_string();
+    let mut source = err.source();
+    while let Some(next) = source {
+        text.push_str(": ");
+        text.push_str(&next.to_string());
+        source = next.source();
+    }
+    text
+}
+
+#[cfg(test)]
+mod chain_tests {
+    use super::*;
+
+    #[test]
+    fn the_chain_lists_every_source() {
+        let inner = std::io::Error::other("disk full");
+        let outer = DownloadError::from(inner);
+        assert!(error_chain(&outer).contains("disk full"));
+        assert_eq!(error_chain(&std::io::Error::other("alone")), "alone");
+    }
+}
+

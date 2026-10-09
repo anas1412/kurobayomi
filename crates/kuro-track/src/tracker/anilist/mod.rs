@@ -30,6 +30,7 @@ use async_trait::async_trait;
 use kuro_platform::secrets::SecretStore;
 use kuro_prefs::pref::Pref;
 use kuro_prefs::store::PrefStore;
+use kuro_prefs::values::PrefValue;
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -40,12 +41,14 @@ use crate::events::EventBus;
 use crate::model::search::{AnimeTrackSearch, MangaTrackSearch};
 use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 use crate::prefs::{AniListScoreType, TrackPrefs};
-use crate::tracker::{AnimeTracker, LogoRef, MangaTracker, Tracker};
+use crate::tracker::{
+    AnimeTracker, DeletableAnimeTracker, DeletableMangaTracker, LogoRef, MangaTracker, Tracker,
+};
 
 use api::{Api, HttpTransport, Transport};
 use auth::{AccessToken, AuthState, DEFAULT_LIFETIME_S, is_expired, normalize_expiry_s};
 use date::{FuzzyDateInput, create_date};
-use dto::{FindData, SaveEntryData, SearchData, ViewerData};
+use dto::{DeleteData, FindData, SaveEntryData, SearchData, ViewerData};
 use error::AniListError;
 use score::ScoreFormat;
 use status::{AnimeStatus, MangaStatus};
@@ -79,6 +82,9 @@ const FORMATS: [ScoreFormat; 5] = [
     ScoreFormat::Point3,
 ];
 
+/// Preference key of the score scale. Before the string scale it held an integer (T-28a-013).
+const SCORE_KEY: &str = "anilist_score_type";
+
 /// The AniList tracker: login, search, find, add, save.
 pub struct AniList {
     api: Api,
@@ -86,6 +92,8 @@ pub struct AniList {
     score_type: Pref<AniListScoreType>,
     /// Picker labels of every score format, in [`FORMATS`] order, so `score_list` can lend a slice.
     scores: Vec<Vec<String>>,
+    /// Set when [`AniList::open`] found a legacy score preference and logged the user out once.
+    relogin_required: bool,
 }
 
 #[derive(Serialize)]
@@ -112,6 +120,12 @@ struct AddVars {
     progress: i32,
     status: &'static str,
     private: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteVars {
+    list_id: i64,
 }
 
 #[derive(Serialize)]
@@ -161,8 +175,22 @@ impl AniList {
             events,
         ));
         let score_type = TrackPrefs::new(prefs.clone()).anilist_score_type;
+        if legacy_score_pref(prefs) {
+            // The old integer scale is gone, so the login is renewed once: logout, drop the key, tell the user.
+            base.logout()?;
+            score_type.delete()?;
+            let mut api = Self::assemble(transport, base, score_type, AuthState::LoggedOut);
+            api.relogin_required = true;
+            return Ok(api);
+        }
         let state = restore(&base, score_type.get(), now_s())?;
         Ok(Self::assemble(transport, base, score_type, state))
+    }
+
+    /// True when [`AniList::open`] logged the user out because of a legacy score preference. The GUI shows
+    /// [`crate::messages::MsgKey::AniListReloginRequired`] once.
+    pub fn relogin_required(&self) -> bool {
+        self.relogin_required
     }
 
     fn assemble(
@@ -176,6 +204,7 @@ impl AniList {
             base,
             score_type,
             scores: FORMATS.iter().map(|f| f.options()).collect(),
+            relogin_required: false,
         }
     }
 
@@ -372,6 +401,16 @@ impl AniList {
         Ok(data.entry.id)
     }
 
+    /// Deletes the MediaList entry `list_id`. `Ok(false)` when AniList reports nothing was deleted, which means the
+    /// entry was already absent (E-21). The id is the MediaList id, never the local row id (E-20).
+    pub async fn delete_entry(&self, list_id: i64) -> Result<bool, AniListError> {
+        let data: DeleteData = self
+            .api
+            .execute(queries::DELETE_ENTRY, Some(DeleteVars { list_id }))
+            .await?;
+        Ok(data.result.deleted)
+    }
+
     /// Writes progress, status, score, dates and privacy of an entry that has a `library_id`.
     pub async fn save_manga(&self, t: &MangaTrack) -> Result<(), AniListError> {
         let list_id = list_id(t.library_id)?;
@@ -405,6 +444,14 @@ impl AniList {
         let _: IgnoredAny = self.api.execute(queries::UPDATE_ANIME, Some(vars)).await?;
         Ok(())
     }
+}
+
+/// True when the stored score preference still holds an integer (the scale before the string names).
+fn legacy_score_pref(prefs: &PrefStore) -> bool {
+    matches!(
+        prefs.get_raw(SCORE_KEY),
+        Some(PrefValue::Int(_) | PrefValue::Long(_))
+    )
 }
 
 fn list_id(library_id: Option<i64>) -> Result<i64, AniListError> {
@@ -765,5 +812,60 @@ mod tests {
         api.logout()?;
         assert!(!api.is_logged_in());
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_28a_013_a_legacy_integer_score_logs_out_once_and_drops_the_key() -> TestResult {
+        let secrets = MemSecrets::new();
+        seed(&secrets, "tok", 5, 4_000_000_000)?;
+        let prefs = PrefStore::in_memory();
+        prefs.set_raw("anilist_score_type", PrefValue::Int(10));
+        let api = AniList::open(FakeTransport::new(vec![]), secrets.clone(), &prefs, EventBus::default())?;
+        assert!(api.relogin_required());
+        assert!(!api.is_logged_in());
+        assert!(prefs.get_raw("anilist_score_type").is_none(), "the key is removed");
+        assert_eq!(secrets.raw("tracker/2/oauth"), None);
+        let again = AniList::open(FakeTransport::new(vec![]), MemSecrets::new(), &prefs, EventBus::default())?;
+        assert!(!again.relogin_required(), "the logout happens once");
+        Ok(())
+    }
+
+    #[test]
+    fn t_28a_013_a_string_score_does_not_trigger_the_relogin() -> TestResult {
+        let prefs = PrefStore::in_memory();
+        prefs.set_raw("anilist_score_type", PrefValue::Str("POINT_5".into()));
+        let api = AniList::open(FakeTransport::new(vec![]), MemSecrets::new(), &prefs, EventBus::default())?;
+        assert!(!api.relogin_required());
+        Ok(())
+    }
+
+    #[test]
+    fn t_28a_022_the_tracker_exposes_the_remote_delete_for_both_kinds() {
+        let api = AniList::from_parts(
+            FakeTransport::new(vec![]),
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            AuthState::LoggedOut,
+        );
+        assert!(api.as_deletable_anime().is_some());
+        assert!(api.as_deletable_manga().is_some());
+    }
+
+    #[tokio::test]
+    async fn t_28a_022_delete_entry_reports_whether_anything_was_deleted() -> TestResult {
+        let fake = FakeTransport::new(vec![ok(r#"{"data":{"DeleteMediaListEntry":{"deleted":true}}}"#)]);
+        let api = AniList::from_parts(fake.clone(), MemSecrets::new(), &PrefStore::in_memory(), logged_in());
+        assert!(api.delete_entry(9001).await?);
+        assert_eq!(fake.bodies()[0]["variables"]["listId"], serde_json::json!(9001));
+        Ok(())
+    }
+
+    fn logged_in() -> AuthState {
+        AuthState::LoggedIn {
+            token: token(),
+            viewer_id: 4242,
+            expires_at: i64::MAX,
+            score_format: ScoreFormat::Point10,
+        }
     }
 }

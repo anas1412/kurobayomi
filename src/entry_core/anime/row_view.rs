@@ -11,10 +11,19 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Label, Orientation as O, gio, glib, pango};
 
+use super::actions::swipe_action;
 use super::episode_row::{Diff, EpisodeRow, PADDING, RowLayout, diff, info_alpha, title_alpha, title_gap};
+use crate::entry_core::swipe::side_of_drag;
 
-/// A press on a row: (episode id, long press or right click).
-pub type OnRow = Rc<dyn Fn(i64, bool)>;
+/// The swipe actions of a row (T-39b-015): the stored actions, and what to run for one row on a touch drag.
+#[derive(Clone)]
+pub struct EpisodeSwipe {
+    pub prefs: Rc<kuro_prefs::library::LibraryPrefs>,
+    pub run: Rc<dyn Fn(i64, kuro_prefs::library::EpisodeSwipeAction)>,
+}
+
+/// A press on a row: (episode id, long press or right click, Alt held). Alt opens in the other player.
+pub type OnRow = Rc<dyn Fn(i64, bool, bool)>;
 
 /// The class of the filler label and the bookmark icon colours. They resolve the theme's `kuro_tertiary` and
 /// `kuro_primary` named colours, which GTK looks up across every provider of the display.
@@ -184,46 +193,58 @@ pub struct EpisodeList {
 
 impl EpisodeList {
     /// `on_row` gets row presses. `on_activate` gets the id of the row that Enter or a double click activated.
-    pub fn new(on_row: OnRow, on_activate: Rc<dyn Fn(i64)>) -> Rc<Self> {
+    pub fn new(on_row: OnRow, on_activate: Rc<dyn Fn(i64)>, swipe: Option<EpisodeSwipe>) -> Rc<Self> {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let registry: Rc<RefCell<HashMap<usize, Rc<RowWidgets>>>> = Rc::default();
         let list: Rc<RefCell<Option<std::rc::Weak<Self>>>> = Rc::default();
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup({
             let registry = Rc::clone(&registry);
+            let swipe = swipe.clone();
             move |_, object| {
                 let Some(list_item) = object.downcast_ref::<gtk::ListItem>() else { return };
                 let widgets = Rc::new(row_widgets());
                 let long_fired = Rc::new(Cell::new(false));
-                let press = |list_item: &gtk::ListItem, on_row: &OnRow, long: bool| {
+                let press = |list_item: &gtk::ListItem, on_row: &OnRow, long: bool, alt: bool| {
                     if let Some(Item::Episode(row)) = item_of(list_item) {
-                        on_row(row.id, long);
+                        on_row(row.id, long, alt);
                     }
                 };
                 let left = gtk::GestureClick::builder().button(1).build();
                 left.connect_released({
                     let (list_item, on_row, long_fired) = (list_item.clone(), Rc::clone(&on_row), Rc::clone(&long_fired));
-                    move |_, _, _, _| {
+                    move |g, _, _, _| {
                         if !long_fired.replace(false) {
-                            press(&list_item, &on_row, false);
+                            press(&list_item, &on_row, false, g.current_event_state().contains(gtk::gdk::ModifierType::ALT_MASK));
                         }
                     }
                 });
                 let right = gtk::GestureClick::builder().button(3).build();
                 right.connect_pressed({
                     let (list_item, on_row) = (list_item.clone(), Rc::clone(&on_row));
-                    move |_, _, _, _| press(&list_item, &on_row, true)
+                    move |_, _, _, _| press(&list_item, &on_row, true, false)
                 });
                 let long = gtk::GestureLongPress::new();
                 long.connect_pressed({
                     let (list_item, on_row, long_fired) = (list_item.clone(), Rc::clone(&on_row), Rc::clone(&long_fired));
                     move |_, _, _| {
                         long_fired.set(true);
-                        press(&list_item, &on_row, true);
+                        press(&list_item, &on_row, true, false);
                     }
                 });
                 for c in [left.upcast_ref::<gtk::EventController>(), right.upcast_ref(), long.upcast_ref()] {
                     widgets.row.add_controller(c.clone());
+                }
+                if let Some(swipe) = swipe.clone() {
+                    // a horizontal drag on a touch screen runs the action of the side it ends on, selected or not
+                    let drag = gtk::GestureDrag::new();
+                    drag.set_touch_only(true);
+                    let list_item = list_item.clone();
+                    drag.connect_drag_end(move |_, dx, dy| {
+                        let (Some(side), Some(Item::Episode(row))) = (side_of_drag(dx, dy), item_of(&list_item)) else { return };
+                        (swipe.run)(row.id, swipe_action(&swipe.prefs, side));
+                    });
+                    widgets.row.add_controller(drag);
                 }
                 list_item.set_child(Some(&widgets.stack));
                 registry.borrow_mut().insert(list_item.as_ptr() as usize, widgets);

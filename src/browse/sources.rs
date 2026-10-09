@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use kuro_domain::source::model::Source;
 use kuro_domain::source::pin::{Pin, Pins};
-use kuro_domain::source::toggles::{flip_disabled, toggle_pin};
+use kuro_domain::source::toggles::{flip_disabled, set_disabled, toggle_pin};
 use kuro_prefs::PrefError;
 use kuro_prefs::pref::Pref;
 
@@ -222,6 +222,15 @@ impl SourceToggles {
 
     pub fn toggle_disabled(&self, id: i64) -> Result<bool, PrefError> {
         toggle_disabled_serialized(&self.lock, &self.disabled, id)
+    }
+
+    /// Hides every id in `ids`, or shows them, in one write under the same lock (`set_disabled`, bulk enable and disable).
+    pub fn set_disabled_many(&self, ids: &[i64], disable: bool) -> Result<bool, PrefError> {
+        let _guard = self.lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut set = self.disabled.get();
+        let applied = set_disabled(&mut set, ids, disable);
+        self.disabled.set(set)?;
+        Ok(applied)
     }
 
     /// Runs the effect of an options row for source `id`.

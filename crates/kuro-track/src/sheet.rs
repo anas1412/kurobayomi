@@ -18,6 +18,8 @@ pub enum TrackMenuItem {
     TogglePrivate {
         to_private: bool,
     },
+    /// Opens the tracker search again for this entry (T-28a-031).
+    SearchAgain,
     Remove,
 }
 
@@ -29,6 +31,7 @@ impl TrackMenuItem {
             TrackMenuItem::CopyLink => "action_copy_link",
             TrackMenuItem::TogglePrivate { to_private: true } => "action_toggle_private_on",
             TrackMenuItem::TogglePrivate { to_private: false } => "action_toggle_private_off",
+            TrackMenuItem::SearchAgain => "action_search_again",
             TrackMenuItem::Remove => "action_remove",
         }
     }
@@ -40,6 +43,7 @@ impl TrackMenuItem {
             TrackMenuItem::CopyLink => "Copy link",
             TrackMenuItem::TogglePrivate { to_private: true } => "Track privately",
             TrackMenuItem::TogglePrivate { to_private: false } => "Track publicly",
+            TrackMenuItem::SearchAgain => "Search again",
             TrackMenuItem::Remove => "Remove",
         }
     }
@@ -54,6 +58,7 @@ pub fn track_menu(supports_private: bool, private: bool) -> Vec<TrackMenuItem> {
             to_private: !private,
         });
     }
+    items.push(TrackMenuItem::SearchAgain);
     items.push(TrackMenuItem::Remove);
     items
 }
@@ -267,13 +272,20 @@ mod tests {
                 TrackMenuItem::OpenInBrowser,
                 TrackMenuItem::CopyLink,
                 TrackMenuItem::TogglePrivate { to_private: true },
+                TrackMenuItem::SearchAgain,
                 TrackMenuItem::Remove,
             ]
         );
         let labels: Vec<&str> = items.iter().map(|i| i.label()).collect();
         assert_eq!(
             labels,
-            ["Open in browser", "Copy link", "Track privately", "Remove"]
+            [
+                "Open in browser",
+                "Copy link",
+                "Track privately",
+                "Search again",
+                "Remove"
+            ]
         );
     }
 
@@ -284,7 +296,7 @@ mod tests {
         let without = track_menu(false, false);
         assert_eq!(
             without.len(),
-            3,
+            4,
             "no toggle for trackers without private support"
         );
         assert!(
@@ -481,5 +493,33 @@ mod tests {
             "an unknown total shows the number alone"
         );
         assert_eq!(progress_text(0.0, 0), "0");
+    }
+}
+
+#[cfg(test)]
+mod mal_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::fakes::MemSecrets;
+    use crate::mal::store::{SecretTokenStore, TokenStore};
+    use crate::mal::tracker::MalTracker;
+
+    #[test]
+    fn t_29a_050_the_mal_menu_has_no_private_entries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tokens: Arc<dyn TokenStore> = Arc::new(SecretTokenStore::new(MemSecrets::new()));
+        let tracker = MalTracker::new(dir.path(), tokens, Some("cid".into())).expect("tracker");
+        let supports = crate::tracker::Tracker::supports_private_tracking(&tracker);
+        assert!(!supports);
+        for private in [false, true] {
+            let items = track_menu(supports, private);
+            assert!(
+                !items
+                    .iter()
+                    .any(|item| matches!(item, TrackMenuItem::TogglePrivate { .. })),
+                "no private toggle for MAL (private={private})"
+            );
+        }
     }
 }

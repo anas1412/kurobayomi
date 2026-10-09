@@ -40,7 +40,8 @@ impl EmptyAction {
 }
 
 /// The actions of an error empty state. A local source offers its help guide only; any other source offers retry,
-/// open in web view, and help, in that order (B§2.4). Help is left out while there is no help page to open.
+/// open in web view, and help, in that order (B§2.4). Help is left out while there is no help page to open, and a local
+/// source then offers Retry, so its error state is never empty (decision: T-14a-047 forbids opening the Aniyomi guide).
 pub fn error_actions(is_local: bool) -> Vec<EmptyAction> {
     error_actions_with(is_local, super::nav::help_url().is_some())
 }
@@ -53,6 +54,9 @@ fn error_actions_with(is_local: bool, has_help: bool) -> Vec<EmptyAction> {
     };
     if !has_help {
         actions.retain(|a| !matches!(a, EmptyAction::Help | EmptyAction::LocalHelp));
+    }
+    if actions.is_empty() {
+        actions.push(EmptyAction::Retry);
     }
     actions
 }
@@ -135,7 +139,7 @@ mod tests {
     #[test]
     fn without_a_help_page_the_help_actions_are_left_out() {
         assert_eq!(error_actions_with(false, false), vec![EmptyAction::Retry, EmptyAction::OpenInWebView]);
-        assert!(error_actions_with(true, false).is_empty());
+        assert_eq!(error_actions_with(true, false), vec![EmptyAction::Retry], "a local error state is never empty");
         // kuro-local has no Kurobayomi help page yet, so the shipped lists have none either
         assert!(!error_actions(true).contains(&EmptyAction::LocalHelp));
         assert!(!error_actions(false).contains(&EmptyAction::Help));

@@ -7,12 +7,26 @@
 //!
 //! Dropped (user loss stated): the resmush.it data-saver service (D-DL-09, T-23a-017). Its Kotlin code is plain HTTP and
 //! reads JSON by string search. Bandwidth Hero and wsrv.nl stay, off unless the user chose one.
+//!
+//! Dropped Android machinery (T-23a-038): WorkManager and its foreground service types, FlexibleAdapter, the Voyager
+//! ScreenModel, Compose AndroidView, MediaScannerConnection, and the SAF and UniFile document trees. Nothing visible is
+//! lost: the replacements are the tokio actor (T-23a-023) and the GTK page (T-23a-033). This decision is also the PR
+//! description of that task.
+//!
+//! Dropped Android download state (T-23a-039): the SharedPreferences `active_downloads`, `chapters_to_delete` and
+//! `dl_index_cache_v3`. The Android queue and pending deletes were short-lived, so the user loses nothing durable. The
+//! downloaded folders themselves are reused: a copied Aniyomi download folder is indexed on the first scan (TST-37, see
+//! `index`).
+//!
+//! Dropped anime range model (T-24a-003): `AnimeDownloadPart` had no references, so no range-part type exists here, and
+//! multi-part range downloads are not offered for anime.
 
 pub mod anime;
 pub mod archive;
 pub mod comicinfo;
 pub mod data_saver;
 pub mod delete;
+pub mod download_prefs;
 pub mod downloader;
 pub mod engine;
 pub mod error;
@@ -20,7 +34,9 @@ pub mod events;
 pub mod images;
 pub mod index;
 pub mod layout;
+pub mod local;
 pub mod manager;
+pub mod messages;
 pub mod model;
 pub mod notify;
 pub mod page;
@@ -28,6 +44,7 @@ pub mod pending;
 pub mod pipeline;
 pub mod queue;
 pub mod queue_model;
+pub mod redact;
 pub mod retry;
 pub mod sanitize;
 pub mod scheduler;
@@ -36,7 +53,10 @@ pub mod source;
 pub mod store;
 pub mod throttle;
 pub mod view_model;
+pub mod watch;
 
+#[cfg(test)]
+mod testdata_tests;
 #[cfg(test)]
 mod testing;
 

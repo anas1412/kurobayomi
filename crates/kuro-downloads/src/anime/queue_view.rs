@@ -311,7 +311,8 @@ pub fn same_group(items: &[Arc<AnimeDownload>], a: i64, b: i64) -> bool {
 }
 
 /// A row dragged onto `target` inside its own group. The dragged row takes the target's place in that group, and the
-/// result is the flat list across groups. `None` when the target is in another group (the drop is rejected).
+/// result is the flat list across groups. `None` when the drop is rejected (the target is in another group) or lands on
+/// the row's own position: then no reorder is sent (T-25a-028).
 pub fn drag_within_group(items: &[Arc<AnimeDownload>], dragged: i64, target: i64) -> Option<Vec<i64>> {
     if !same_group(items, dragged, target) {
         return None;
@@ -320,6 +321,9 @@ pub fn drag_within_group(items: &[Arc<AnimeDownload>], dragged: i64, target: i64
     let (_, ids) = groups.iter_mut().find(|(_, ids)| ids.contains(&dragged))?;
     let from = ids.iter().position(|id| *id == dragged)?;
     let to = ids.iter().position(|id| *id == target)?;
+    if from == to {
+        return None;
+    }
     let moved = ids.remove(from);
     ids.insert(to, moved);
     Some(flatten(&groups))

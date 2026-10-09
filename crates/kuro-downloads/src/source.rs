@@ -30,6 +30,11 @@ pub trait ChapterSource: Send + Sync {
     fn is_unmetered(&self) -> bool {
         false
     }
+    /// The manga folder of the local source, whose chapters are the folders and archives inside it. `None` for every
+    /// other source, which the download index counts (T-23a-042).
+    fn local_manga_dir(&self, _manga_title: &str) -> Option<std::path::PathBuf> {
+        None
+    }
     async fn page_list(&self, chapter: &ChapterRef) -> Result<Vec<Page>, SourceError>;
     async fn image_url(&self, page: &Page) -> Result<String, SourceError>;
     async fn fetch_image(&self, image_url: &str) -> Result<ImageResponse, SourceError>;

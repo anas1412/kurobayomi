@@ -1,7 +1,9 @@
 //! The WebView port (area 12 section 3.3, area 36). This module holds the trait, the value types and the
 //! no-WebView fallback. Nothing here touches GTK or WebKit, so `kuro-net` compiles and tests without a display.
-//! The WebKitGTK implementation is a separate module behind a feature (not built yet, see T-12a-017).
+//! The WebKitGTK implementation is a separate module behind a feature (not built yet, see T-12a-017). Without a view the
+//! browser fallback in [`browser`] takes over: system browser, loopback redirect, cookie import.
 
+pub mod browser;
 pub mod data;
 pub mod solve_state;
 pub mod view;

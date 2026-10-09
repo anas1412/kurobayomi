@@ -180,6 +180,13 @@ impl MpvHandle {
         Ok(())
     }
 
+    /// Frees the render context. The GL area calls this on unrealize, on the thread that owns the
+    /// GL context, so a later realize can create a new one. Returns whether one existed. Dropping
+    /// the handle frees it too, but only this runs while the window stays open.
+    pub fn destroy_render_context(&mut self) -> bool {
+        self.render.take().is_some()
+    }
+
     /// Draws one frame into `fbo`, with the GL origin at the bottom-left (`flip` = true).
     pub fn render(&self, fbo: i32, width: i32, height: i32) -> Result<(), MpvError> {
         let context = self.render.as_ref().ok_or(MpvError::NoRenderContext)?;
@@ -305,6 +312,17 @@ mod tests {
     #[test]
     fn render_calls_fail_without_context() {
         let handle = headless();
+        assert!(matches!(
+            handle.render(0, 1, 1),
+            Err(MpvError::NoRenderContext)
+        ));
+    }
+
+    #[test]
+    fn destroying_the_render_context_is_safe_without_one_and_leaves_render_unavailable() {
+        let mut handle = headless();
+        assert!(!handle.destroy_render_context());
+        assert!(!handle.destroy_render_context());
         assert!(matches!(
             handle.render(0, 1, 1),
             Err(MpvError::NoRenderContext)

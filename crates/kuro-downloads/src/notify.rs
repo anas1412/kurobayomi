@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use kuro_core::text::chop;
-use kuro_platform::notifier::{APP_NAME, Notifier, send};
+use kuro_platform::notifier::Notifier;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -46,10 +46,29 @@ pub struct Notice {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Pause,
+    /// The anime progress line's pause button, labelled "Stop" (T-24a-064). It pauses the run like [`Action::Pause`].
+    Stop,
     Resume,
     CancelAll,
     ShowManga,
     ShowAnime,
+    /// Opens the help link of a warning in the default browser (T-24a-065). Carries the link.
+    OpenHelp(&'static str),
+}
+
+impl Action {
+    /// The button text. Handled inside the app: the GUI maps each action to a desktop action, not a broadcast.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Pause => "Pause",
+            Self::Stop => "Stop",
+            Self::Resume => "Resume",
+            Self::CancelAll => "Cancel all",
+            Self::ShowManga => "Show manga",
+            Self::ShowAnime => "Show anime",
+            Self::OpenHelp(_) => "Help",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,27 +83,23 @@ pub trait NotificationSink: Send + Sync {
     fn withdraw(&self, id: &'static str);
 }
 
-/// The body of a download notice while `hide_notification_content` is on.
-pub const GENERIC_TEXT: &str = "Downloads in progress";
-
-/// A [`NotificationSink`] over the platform [`Notifier`]. Every download notice is sensitive (T-01a-034): with
-/// `hide_content` set, the title is the app name and the body is [`GENERIC_TEXT`]. The flag is read per notice.
+/// A [`NotificationSink`] over the platform [`Notifier`]. The text is already final: [`effect_for`] and the anime
+/// notice builder hide names under `hide_content` ("Downloading (x/y)", empty body), so the notice goes out as built.
+/// The platform's blanket replacement (`send` with `sensitive`) is not used: it would overwrite the counts with a
+/// generic text (T-23a-043, T-24a-028).
 pub struct NotifierSink {
     notifier: Arc<dyn Notifier>,
-    hide_content: Arc<AtomicBool>,
 }
 
 impl NotifierSink {
-    pub fn new(notifier: Arc<dyn Notifier>, hide_content: Arc<AtomicBool>) -> Self {
-        Self { notifier, hide_content }
+    pub fn new(notifier: Arc<dyn Notifier>) -> Self {
+        Self { notifier }
     }
 }
 
 impl NotificationSink for NotifierSink {
     fn show(&self, notice: &Notice) {
-        let body = notice.body.as_deref().unwrap_or_default();
-        let hide = self.hide_content.load(Ordering::Relaxed);
-        send(self.notifier.as_ref(), hide, true, notice.id, APP_NAME, &notice.title, body, GENERIC_TEXT);
+        self.notifier.show(notice.id, &notice.title, notice.body.as_deref());
     }
 
     fn withdraw(&self, id: &'static str) {
@@ -238,6 +253,7 @@ mod tests {
         }
     }
 
+    // TST-51
     #[test]
     fn progress_title_rules_ec_107_to_ec_109() {
         // EC-109: the manga title is removed from the chapter name, ignoring case and separators.
@@ -349,17 +365,16 @@ mod tests {
     }
 
     #[test]
-    fn the_platform_sink_marks_download_notices_sensitive() {
+    fn the_platform_sink_keeps_the_hidden_progress_text() {
         let fake = Arc::new(FakeNotifier::default());
-        let hide = Arc::new(AtomicBool::new(false));
-        let sink = NotifierSink::new(fake.clone(), hide.clone());
-        let notice = shown(&progress("Berserk", "Chapter 1", 3, 10), false);
-        sink.show(&notice);
-        hide.store(true, Ordering::Relaxed);
-        sink.show(&notice);
+        let sink = NotifierSink::new(fake.clone());
+        let event = progress("Berserk", "Chapter 1", 3, 10);
+        sink.show(&shown(&event, false));
+        sink.show(&shown(&event, true));
         let calls = fake.0.lock().unwrap();
-        assert_eq!(calls[0], (PROGRESS_ID.into(), notice.title.clone(), notice.body.clone()));
-        assert_eq!(calls[1], (PROGRESS_ID.into(), APP_NAME.into(), Some(GENERIC_TEXT.into())));
+        assert_eq!(calls[0], (PROGRESS_ID.into(), "Berserk - Chapter 1".into(), Some("Downloading (3/10)".into())));
+        // hide_notification_content on: the counts stay, names and body are gone (T-23a-043, T-24a-028).
+        assert_eq!(calls[1], (PROGRESS_ID.into(), "Downloading (3/10)".into(), None));
     }
 
     #[derive(Default)]

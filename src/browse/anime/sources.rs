@@ -1,17 +1,22 @@
 //! The anime sources list and the Sources tab state (T-41b-001 to T-41b-005, T-41b-007, T-41b-008, T-41b-041,
-//! T-41a-042, T-41a-043). Ports `GetEnabledAnimeSources`, `AnimeSourcesScreenModel` and the visibility page model. The
-//! grouping, the pin and disable writers and the header actions are the parent module's, fed with the anime keys.
+//! T-41a-017, T-41a-042, T-41a-043). Ports `GetEnabledAnimeSources`, `AnimeSourcesScreenModel` and the visibility page
+//! model. The row filter and the rows come from the parent module; the section order is the anime one (decision D-1 of
+//! `p2-topic-sources-list.md`): last used, pinned, then languages with `all` first, the labels in English, and the empty
+//! language last.
 
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use kuro_domain::source::browse::BrowseQuery;
+use kuro_domain::source::languages::{display_tag, utf16_cmp};
 use kuro_domain::source::model::Source;
+use kuro_i18n::names::english_name;
 use kuro_i18n::{MsgKey, tr};
-use kuro_prefs::source::SourcePrefs;
+use kuro_prefs::source::{SourcePrefs, system_locale};
 
-use crate::browse::names::{case_insensitive_cmp, compare_languages};
+use crate::browse::names::{case_insensitive_cmp, source_display_name};
 use crate::browse::primitives::{ToastDuration, ToastSpec};
-use crate::browse::sources::{HEADER_ACTIONS, ListInput, LOCAL_SOURCE_ID, SourceRow, SourceToggles, SourcesTabAction, source_list};
+use crate::browse::sources::{HEADER_ACTIONS, ListInput, LOCAL_SOURCE_ID, Section, SourceRow, SourceToggles, SourcesTabAction, source_list};
 
 /// The stored source sets the anime sources list reads. Ids are decimal strings, as stored.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -20,6 +25,8 @@ pub struct ListPrefs {
     pub hidden: BTreeSet<String>,
     pub pinned: BTreeSet<String>,
     pub last_used: i64,
+    /// The system locale, which names the empty language (E-SRC-04).
+    pub locale: String,
 }
 
 impl ListPrefs {
@@ -30,6 +37,7 @@ impl ListPrefs {
             hidden: prefs.disabled_anime_sources.get(),
             pinned: prefs.pinned_anime_sources.get(),
             last_used: prefs.last_used_anime_source.get(),
+            locale: system_locale(),
         }
     }
 }
@@ -38,13 +46,14 @@ impl ListPrefs {
 /// hidden source is dropped. Rows sort by name ignoring case. A pinned source sits under Pinned, and the last-used
 /// source also appears once under Last used (E-SRC-03).
 pub fn enabled_source_rows(sources: &[Source], prefs: &ListPrefs) -> Vec<SourceRow> {
-    source_list(&ListInput {
+    let rows = source_list(&ListInput {
         sources,
         enabled_languages: &prefs.enabled_langs,
         disabled: &prefs.hidden,
         pinned: &prefs.pinned,
         last_used: prefs.last_used,
-    })
+    });
+    regroup(rows, &prefs.locale)
 }
 
 /// The integers of a stored id set. An entry that is not an integer is skipped with a log line and never rewritten
@@ -61,6 +70,86 @@ pub fn parse_ids(raw: &BTreeSet<String>) -> BTreeSet<i64> {
         .collect()
 }
 
+/// The header text of a language tag (T-41a-017, T-41b-041). `all` reads Multi, `other` reads Other, the empty tag
+/// reads the system language (`system_language_label`), and the rest read their English display names. `zh-CN` and
+/// `zh-TW` are looked up as Hans and Hant, where the name table keys them by their own tags.
+pub fn language_label(tag: &str, locale: &str) -> String {
+    match tag {
+        "" => system_language_label(locale),
+        "all" | "other" => source_display_name(tag),
+        other => {
+            let named = english_name(other);
+            if named == other { english_name(display_tag(other)) } else { named }
+        }
+    }
+}
+
+/// The English name of the system language, which labels the empty language (E-SRC-04). `Other` when the locale names no
+/// language the name table knows.
+pub fn system_language_label(locale: &str) -> String {
+    let tag = locale.split(['.', '@', '_', '-']).next().unwrap_or_default().to_ascii_lowercase();
+    let named = english_name(&tag);
+    if tag.is_empty() || named == tag { source_display_name("other") } else { named }
+}
+
+/// The header text of a section: the two special names, or the language label.
+pub fn anime_section_title(section: &Section, locale: &str) -> String {
+    match section {
+        Section::LastUsed => source_display_name("last_used"),
+        Section::Pinned => source_display_name("pinned"),
+        Section::Language(tag) => language_label(tag, locale),
+    }
+}
+
+/// Section order: last used, pinned, then the languages (`language_cmp`).
+pub fn anime_section_cmp(a: &Section, b: &Section, locale: &str) -> Ordering {
+    fn rank(section: &Section) -> u8 {
+        match section {
+            Section::LastUsed => 0,
+            Section::Pinned => 1,
+            Section::Language(_) => 2,
+        }
+    }
+    match (a, b) {
+        (Section::Language(x), Section::Language(y)) => language_cmp(x, y, locale),
+        _ => rank(a).cmp(&rank(b)),
+    }
+}
+
+/// Decision D-1: the empty language is last, `all` is first, and the others order by their English labels, with the tag
+/// breaking a tie between two tags that share a label.
+pub fn language_cmp(x: &str, y: &str, locale: &str) -> Ordering {
+    match (x.is_empty(), y.is_empty()) {
+        (true, false) => return Ordering::Greater,
+        (false, true) => return Ordering::Less,
+        (true, true) => return Ordering::Equal,
+        _ => {}
+    }
+    match (x == "all", y == "all") {
+        (true, false) => return Ordering::Less,
+        (false, true) => return Ordering::Greater,
+        _ => {}
+    }
+    utf16_cmp(&language_label(x, locale), &language_label(y, locale)).then_with(|| utf16_cmp(x, y))
+}
+
+/// Puts the section groups of `rows` in the anime order, each group keeping its rows in the order it had.
+fn regroup(rows: Vec<SourceRow>, locale: &str) -> Vec<SourceRow> {
+    let mut groups: Vec<(Section, Vec<SourceRow>)> = Vec::new();
+    for row in rows {
+        match row {
+            SourceRow::Header(section) => groups.push((section, Vec::new())),
+            item => {
+                if let Some((_, items)) = groups.last_mut() {
+                    items.push(item);
+                }
+            }
+        }
+    }
+    groups.sort_by(|(a, _), (b, _)| anime_section_cmp(a, b, locale));
+    groups.into_iter().flat_map(|(section, items)| std::iter::once(SourceRow::Header(section)).chain(items)).collect()
+}
+
 /// One language section of the visibility page. Each source is paired with its visible flag (not hidden).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VisibilityGroup {
@@ -70,9 +159,9 @@ pub struct VisibilityGroup {
 }
 
 /// The visibility page's sections. Only installed sources count: stubs and the local source are left out (E-VIS-04).
-/// Enabled languages come first, then `all`, then the other languages by display name. Inside a section, visible
-/// sources come first, then the rest, each by name.
-pub fn visibility_groups(sources: &[Source], enabled_langs: &BTreeSet<String>, hidden: &BTreeSet<i64>) -> Vec<VisibilityGroup> {
+/// Enabled languages come first, then `all`, then the other languages by label (`language_cmp`). Inside a section,
+/// visible sources come first, then the rest, each by name.
+pub fn visibility_groups(sources: &[Source], enabled_langs: &BTreeSet<String>, hidden: &BTreeSet<i64>, locale: &str) -> Vec<VisibilityGroup> {
     let mut groups: Vec<VisibilityGroup> = Vec::new();
     for source in sources.iter().filter(|s| !s.is_stub && s.id != LOCAL_SOURCE_ID) {
         let visible = !hidden.contains(&source.id);
@@ -88,7 +177,7 @@ pub fn visibility_groups(sources: &[Source], enabled_langs: &BTreeSet<String>, h
     for group in &mut groups {
         group.sources.sort_by(|(a, va), (b, vb)| (!*va).cmp(&!*vb).then_with(|| case_insensitive_cmp(&a.name, &b.name)));
     }
-    groups.sort_by(|a, b| (!a.enabled).cmp(&!b.enabled).then_with(|| compare_languages(&a.lang, &b.lang)));
+    groups.sort_by(|a, b| (!a.enabled).cmp(&!b.enabled).then_with(|| language_cmp(&a.lang, &b.lang, locale)));
     groups
 }
 
@@ -98,7 +187,7 @@ pub fn visibility_groups(sources: &[Source], enabled_langs: &BTreeSet<String>, h
 pub struct SourcesTab {
     pub loading: bool,
     pub rows: Vec<SourceRow>,
-    /// The options dialog of one source, while it is open.
+    /// The options dialog of one source, while it is open. A header never opens one, so the payload is the source.
     pub dialog: Option<Source>,
     /// The inline error row with Retry. Only shown before the first emission.
     pub inline_error: bool,
@@ -189,7 +278,7 @@ pub fn anime_toggles(prefs: &SourcePrefs) -> SourceToggles {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::browse::sources::{HEADER_ACTIONS, Section};
+    use crate::browse::anime::fixtures::worked_example;
     use kuro_domain::source::pin::{Pin, Pins};
     use kuro_prefs::source::default_enabled_languages;
     use kuro_prefs::store::PrefStore;
@@ -199,7 +288,7 @@ mod tests {
     }
 
     fn prefs(langs: &[&str], hidden: &[&str], pinned: &[&str], last_used: i64) -> ListPrefs {
-        ListPrefs { enabled_langs: set(langs), hidden: set(hidden), pinned: set(pinned), last_used }
+        ListPrefs { enabled_langs: set(langs), hidden: set(hidden), pinned: set(pinned), last_used, locale: "en_US.UTF-8".into() }
     }
 
     fn item_ids(rows: &[SourceRow]) -> Vec<(i64, bool)> {
@@ -218,6 +307,10 @@ mod tests {
                 SourceRow::Item(_) => None,
             })
             .collect()
+    }
+
+    fn lang(tag: &str) -> Section {
+        Section::Language(tag.into())
     }
 
     #[test]
@@ -242,10 +335,17 @@ mod tests {
     }
 
     #[test]
+    fn two_sources_with_one_name_and_language_keep_their_input_order() {
+        let sources = [Source::new(3, "Same", "en"), Source::new(4, "Same", "en")];
+        let rows = enabled_source_rows(&sources, &prefs(&["en"], &[], &[], -1));
+        assert_eq!(item_ids(&rows), [(3, false), (4, false)]);
+    }
+
+    #[test]
     fn the_last_used_source_adds_one_copy_under_last_used_before_its_language_group() {
         let sources = [Source::new(1, "Alpha", "en")];
         let rows = enabled_source_rows(&sources, &prefs(&["en"], &[], &[], 1));
-        assert_eq!(headers(&rows), [Section::LastUsed, Section::Language("en".into())]);
+        assert_eq!(headers(&rows), [Section::LastUsed, lang("en")]);
         assert_eq!(item_ids(&rows), [(1, true), (1, false)]);
     }
 
@@ -258,17 +358,118 @@ mod tests {
     }
 
     #[test]
-    fn pinned_sources_come_before_the_language_groups() {
-        let sources = [Source::new(1, "x", "fr"), Source::new(2, "y", "en")];
-        let rows = enabled_source_rows(&sources, &prefs(&["en", "fr"], &[], &["1"], -1));
-        assert_eq!(headers(&rows), [Section::Pinned, Section::Language("en".into())], "the pinned fr source leaves no fr group");
+    fn a_pinned_id_for_a_source_that_is_not_installed_makes_no_row() {
+        let sources = [Source::new(1, "Alpha", "en")];
+        let rows = enabled_source_rows(&sources, &prefs(&["en"], &[], &["99"], -1));
+        assert_eq!(headers(&rows), [lang("en")]);
+        assert_eq!(item_ids(&rows), [(1, false)]);
     }
 
     #[test]
-    fn language_sections_put_all_first_and_the_unknown_language_last() {
+    fn pinned_sources_come_before_the_language_groups() {
+        let sources = [Source::new(1, "x", "fr"), Source::new(2, "y", "en")];
+        let rows = enabled_source_rows(&sources, &prefs(&["en", "fr"], &[], &["1"], -1));
+        assert_eq!(headers(&rows), [Section::Pinned, lang("en")], "the pinned fr source leaves no fr group");
+    }
+
+    #[test]
+    fn language_sections_put_all_first_and_the_empty_language_last() {
         let sources = [Source::new(1, "a", ""), Source::new(2, "b", "fr"), Source::new(3, "c", "all")];
         let rows = enabled_source_rows(&sources, &prefs(&["all", "fr", ""], &[], &[], -1));
-        assert_eq!(headers(&rows), [Section::Language("all".into()), Section::Language("fr".into()), Section::Language(String::new())]);
+        assert_eq!(headers(&rows), [lang("all"), lang("fr"), lang("")]);
+    }
+
+    #[test]
+    fn languages_order_by_english_label_not_by_tag() {
+        let sources = [Source::new(1, "Japan", "ja"), Source::new(2, "China", "zh-CN")];
+        let rows = enabled_source_rows(&sources, &prefs(&["ja", "zh-CN"], &[], &[], -1));
+        assert_eq!(headers(&rows), [lang("zh-CN"), lang("ja")], "Chinese (Simplified) sorts before Japanese");
+    }
+
+    #[test]
+    fn the_worked_example_gives_the_listed_sections_and_members() {
+        let rows = enabled_source_rows(&worked_example(), &prefs(&["all", "en", "ar"], &[], &["12"], 12));
+        assert_eq!(headers(&rows), [Section::LastUsed, Section::Pinned, lang("all"), lang("ar"), lang("en"), lang("other")]);
+        assert_eq!(
+            item_ids(&rows),
+            [(12, true), (12, false), (13, false), (14, false), (11, false), (16, false), (0, false)],
+            "Epsilon with the empty language is dropped; Alpha before Zeta"
+        );
+    }
+
+    #[test]
+    fn no_enabled_language_and_no_local_source_leaves_the_list_empty() {
+        let sources = [Source::new(1, "Alpha", "en")];
+        let rows = enabled_source_rows(&sources, &prefs(&["fr"], &[], &[], -1));
+        let mut tab = SourcesTab::new();
+        tab.emit(rows);
+        assert!(tab.is_empty(), "the page says No source found");
+    }
+
+    #[test]
+    fn a_disabled_local_source_id_hides_the_local_source_from_the_list() {
+        let sources = [Source::new(0, "Local", "other"), Source::new(1, "Alpha", "en")];
+        let rows = enabled_source_rows(&sources, &prefs(&["en"], &["0"], &[], -1));
+        assert_eq!(item_ids(&rows), [(1, false)], "the hidden set applies to id 0 too; only the menu hides Disable");
+    }
+
+    #[test]
+    fn the_last_used_duplicate_follows_the_pin_toggle() {
+        let store = PrefStore::in_memory();
+        let source_prefs = SourcePrefs::new(store);
+        source_prefs.enabled_languages.set(set(&["en"])).expect("store");
+        source_prefs.last_used_anime_source.set(1).expect("store");
+        let sources = [Source::new(1, "Alpha", "en")];
+        let toggles = anime_toggles(&source_prefs);
+        assert!(toggles.toggle_pin(1).expect("pin on"));
+        let pinned = enabled_source_rows(&sources, &ListPrefs::read(&source_prefs));
+        assert_eq!(headers(&pinned), [Section::LastUsed, Section::Pinned]);
+        assert!(!toggles.toggle_pin(1).expect("pin off"));
+        let unpinned = enabled_source_rows(&sources, &ListPrefs::read(&source_prefs));
+        assert_eq!(headers(&unpinned), [Section::LastUsed, lang("en")]);
+    }
+
+    #[test]
+    fn a_bulk_disable_and_enable_write_every_id_in_one_set() {
+        let store = PrefStore::in_memory();
+        let source_prefs = SourcePrefs::new(store);
+        let toggles = anime_toggles(&source_prefs);
+        assert!(toggles.set_disabled_many(&[1, 2], true).expect("hide"));
+        assert_eq!(source_prefs.disabled_anime_sources.get(), set(&["1", "2"]));
+        assert!(!toggles.set_disabled_many(&[1, 2], false).expect("show"));
+        assert!(source_prefs.disabled_anime_sources.get().is_empty());
+    }
+
+    #[test]
+    fn the_empty_language_reads_the_system_language_or_other() {
+        assert_eq!(language_label("", "de_DE.UTF-8"), "German");
+        assert_eq!(language_label("", "C"), "Other");
+        assert_eq!(language_label("", ""), "Other");
+    }
+
+    #[test]
+    fn the_special_languages_have_their_labels_and_zh_tags_read_as_their_names() {
+        assert_eq!(language_label("all", "C"), "Multi");
+        assert_eq!(language_label("other", "C"), "Other");
+        assert_eq!(language_label("zh-CN", "C"), "Chinese (Simplified)");
+        assert_eq!(language_label("zh-TW", "C"), "Chinese (Traditional)");
+        assert_eq!(language_label("ar", "C"), "Arabic");
+    }
+
+    #[test]
+    fn section_titles_are_the_special_names_or_the_language_label() {
+        assert_eq!(anime_section_title(&Section::LastUsed, "C"), "Last used");
+        assert_eq!(anime_section_title(&Section::Pinned, "C"), "Pinned");
+        assert_eq!(anime_section_title(&lang("all"), "C"), "Multi");
+        assert_eq!(anime_section_title(&lang(""), "es_ES.UTF-8"), "Spanish");
+    }
+
+    #[test]
+    fn section_order_is_all_first_then_labels_then_empty_last() {
+        assert_eq!(language_cmp("all", "en", "C"), Ordering::Less);
+        assert_eq!(language_cmp("ar", "", "C"), Ordering::Less, "the empty language is last");
+        assert_eq!(language_cmp("", "all", "C"), Ordering::Greater);
+        assert_eq!(anime_section_cmp(&Section::Pinned, &lang("all"), "C"), Ordering::Less);
     }
 
     #[test]
@@ -285,7 +486,7 @@ mod tests {
         ];
         let enabled = set(&["all", "en"]);
         let hidden = BTreeSet::from([2_i64]);
-        let groups = visibility_groups(&sources, &enabled, &hidden);
+        let groups = visibility_groups(&sources, &enabled, &hidden, "C");
         let langs: Vec<&str> = groups.iter().map(|g| g.lang.as_str()).collect();
         assert_eq!(langs, ["all", "en", "fr"]);
         let en = &groups[1];
@@ -296,13 +497,14 @@ mod tests {
 
     #[test]
     fn an_empty_source_set_gives_no_visibility_groups() {
-        assert!(visibility_groups(&[], &set(&["en"]), &BTreeSet::new()).is_empty());
+        assert!(visibility_groups(&[], &set(&["en"]), &BTreeSet::new(), "C").is_empty());
     }
 
     #[test]
     fn the_tab_starts_loading_and_an_emission_clears_loading_and_sets_empty_when_no_item() {
         let mut tab = SourcesTab::new();
         assert!(tab.loading && tab.is_empty());
+        assert!(tab.dialog.is_none());
         tab.emit(vec![SourceRow::Header(Section::Pinned)]);
         assert!(!tab.loading);
         assert!(tab.is_empty(), "a header alone is not a source");
@@ -345,18 +547,6 @@ mod tests {
         assert_eq!(header_route(SourcesTabAction::Filter), TabRoute::Visibility);
         assert_eq!(row_route(7, false), TabRoute::Browse { source_id: 7, query: BrowseQuery::Popular });
         assert_eq!(row_route(7, true), TabRoute::Browse { source_id: 7, query: BrowseQuery::Latest });
-    }
-
-    #[test]
-    fn section_titles_and_language_order_follow_the_locale_rules() {
-        assert_eq!(crate::browse::sources::section_title(&Section::LastUsed), "Last used");
-        assert_eq!(crate::browse::sources::section_title(&Section::Pinned), "Pinned");
-        assert_eq!(crate::browse::sources::section_title(&Section::Language("all".into())), "Multi");
-        assert_eq!(crate::browse::sources::section_title(&Section::Language(String::new())), "Other");
-        let hans = crate::browse::sources::section_title(&Section::Language("zh-CN".into()));
-        assert_eq!(hans, crate::browse::sources::section_title(&Section::Language("zh-Hans".into())));
-        assert_ne!(hans, "zh-CN");
-        assert_eq!(compare_languages("all", "en"), std::cmp::Ordering::Less);
     }
 
     #[test]

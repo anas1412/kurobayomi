@@ -1,5 +1,7 @@
 //! Single-action gestures: which action each slot offers, what each action does, and the mpv key names that the
 //! `Custom` action sends (tasks T-48a-025 and the option lists of T-48a-023).
+// Not reachable from `route.rs` yet: the player runtime has not taken the gesture dispatch yet.
+#![allow(dead_code)]
 use kuro_prefs::player::SingleActionGesture;
 
 /// A place a gesture can happen: the double-tap sides and centre, and the three media buttons.

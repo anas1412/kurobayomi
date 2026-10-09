@@ -18,13 +18,13 @@ notification delivery are injected by the GUI crate.
 | `layout` | folder names and lookups (never creates folders, except `manga_dir`); the startup sweep of stray `_tmp` folders and `.cbz.part` files (T-23a-044) |
 | `data_saver` | data-saver proxy for page requests: Bandwidth Hero and wsrv.nl, off by default (T-23a-017) |
 | `queue_model` | pure queue model of the Download page: sections, stable sort and reverse, moves, series moves, removals (T-25a-020, T-25a-031) |
-| `page` | pure rules of the Download page: FAB, sort menu, row menu, row text and progress phase, empty state, keyboard; `RowProgressGate` (one repaint per 50 ms per row) and `poll_for_pages` (600 ticks of 50 ms, then a warning) for the row loops (T-25a-021 to T-25a-030) |
+| `page` | `DownloadPage` (one `QueueModel` and at most one engine subscription per kind, T-25a-032) and the pure rules of the Download page: FAB, sort menu, row menu, row text and progress phase, empty state, keyboard; `RowProgressGate` (one repaint per 50 ms per row) and `poll_for_pages` (600 ticks of 50 ms, then a warning) for the row loops (T-25a-021 to T-25a-030) |
 | `sanitize` | `build_valid_filename` port and the Windows reserved-name rule |
 | `store` | SQLite queue table, written whole in one transaction; `manager::restore_queue` reads it back at startup and `ManagerParams::restored` keeps the staging folders of restored chapters through the startup sweep (T-23a-044) |
 | `notify` | pure event-to-notice mapping and the `NotificationSink` trait |
 | `events` | `DownloadEvent` (broadcast, capacity 64) |
 | `view_model` | manga queue view: source groups, counts, row progress, `Msg` per event (T-23a-032, T-23a-034) |
-| `throttle` | `ProgressThrottle`: one update per 50 ms per chapter (T-23a-034) |
+| `throttle` | `ProgressThrottle`: one update per 50 ms per chapter (T-23a-034); `SpeedLimiter`: one shared byte budget for page downloads (T-23a-015) |
 | `retry` | shared 4-attempt schedule, 2 s, 4 s, 8 s, with cancellable waits (T-24a-015) |
 | `anime::naming` | `fat_safe`, episode, legacy and source folder names (T-24a-004, T-24a-005) |
 | `anime::layout` | anime folder lookups, creation, episode and source rename, free-space precheck (T-24a-006 to T-24a-008, T-24a-017) |
@@ -42,12 +42,69 @@ notification delivery are injected by the GUI crate.
 | `anime::delete_rules` | bookmark and excluded-category filter for deletes (T-24a-033) |
 | `anime::cache` | downloaded-episode index: scan, hourly renewal, debounced atomic snapshot, sizes (T-24a-035 to T-24a-037) |
 | `anime::offline` | offline playback file choice and `file://` video (T-24a-039) |
+| `anime::torrent` | torrent links: `is_torrent`, the `link=`/`index=` to magnet conversion, `check_torrent` (`TorrentUnavailable` without the `torrent-server` feature) (T-24a-023) |
+| `anime::handoff` | external downloader: location copy with its label (T-24a-025), aria2 `addUri` request and a plain HTTP JSON-RPC post (T-24a-024); routed from `EpisodeEngine::run` through `ExternalHandoff` |
 | `anime::queue_view` | queue page rules: source groups, row text and bar, menu visibility and plans, drag rules (T-24a-040 to T-24a-043); sort helper, footer Stop/Continue, 200 ms rebuild gate (T-24a-044 to T-24a-046) |
 | `anime::downloader` | `EpisodeEngine`, the `EpisodeRunner` for one episode: staging, resume, retry, success check, finalise with collision handling; startup `sweep_staging` (T-24a-016, T-24a-049, T-24a-062, T-24a-066) |
 | `engine` | `QueueEngine` adapters for the two kinds (start, stop, pause_and_stop, clear, reorder, remove) (T-25a-017) |
+| `download_prefs` | typed download preferences: 23 accessors returning `Pref<T>` on the area 02 store (T-25a-001) |
+| `pending` | manga remove-after-read list: `manga_pending_delete` store, take-all transaction, flush plan (T-23a-028) |
+| `watch` | `notify` watcher on the downloads root and a 2 s debouncer that invalidates the index (T-23a-045) |
+| `local` | local manga source counts (directories and archives) and recursive size (T-23a-042) |
+| `redact` | log redaction: URL query, fragment and userinfo removed, header values replaced by `<redacted>` (T-24a-060) |
+| `comicinfo` | `ComicInfo.xml` writer: element order, number and status text, `Web` value (T-23a-021) |
+| `messages` | English texts and i18n keys of the new messages (T-24a-074) |
 | `settings` | download preference keys and defaults (`PREFERENCE_KEYS`, data section 3), speed limit KiB/s to bytes/s (T-24a-054, T-25a-002, T-25a-003, T-25a-005) |
 
 ## Decisions
+
+- **Android machinery and state (T-23a-038, T-23a-039, T-24a-003).** Dropped; the reasons are in the `lib.rs` doc comment.
+  `AnimeDownloadPart` had no references, so no range-part type exists.
+- **Android-only drops (T-24a-047, T-24a-048, T-24a-063, T-25a-034).** No `ensureSuccessfulAnimeDownload` port: it was never
+  called in Kotlin, and the success check is `is_download_successful` (T-24a-049). No WorkManager, foreground info or
+  notification channel: the runner (`anime::lifecycle`) and the notifier (`anime::notify`) replace them. No MediaScanner
+  call: the per-episode `.nomedia` replaces it. The downloads tab's animated icon, Compose dark-theme alpha and
+  `HorizontalPager` are GUI items, not in this crate: the static icon is dropped, the alpha comes from GTK theme CSS, and the
+  pager is meant to become `gtk::Notebook`. This crate keeps the pager order (Anime, then Manga) and the scroll collapse rule
+  in `page.rs` (`FabState::on_scroll`). **Still open (T-25a-034 bullets 3 and 4):** no GTK code calls `on_scroll` from a
+  `gtk::EventControllerScroll`, and the downloads page in the root `src/screens.rs` still uses `gtk::Stack` plus
+  `gtk::StackSwitcher`, not `gtk::Notebook`. This crate has no GTK dependency, so the wiring belongs to the app page (T-25a-023).
+- **Per-episode `.nomedia` (T-24a-056).** Written into each finished episode folder by `finalise`. The root-level
+  `.nomedia` stays dropped (DM-29, D-DL-10).
+- **Anime notifications (T-24a-028, T-24a-029, T-24a-064, T-24a-065).** The progress pause button is `Action::Stop`
+  (label "Stop"); manga keeps `Action::Pause` ("Pause"). `Action::OpenHelp(url)` is offered only for a known help link
+  (`known_help_url`). The help button label "Help" is a decision: the Kotlin text was not checked. The queue-size warning
+  is also sent as a `DownloadEvent::Warning` with its help link, so the notifier can show it.
+- **Stopped queue toast (T-24a-069).** `EnqueueOutcome::continue_toast` is set when items join a non-empty queue while the
+  runner is stopped. The GUI shows `download_queued_press_continue`.
+- **Reorder no-op (T-24a-052, T-25a-028).** `normalize_order` returns `None` when the result equals the current order, and
+  the engine returns before any pause or persist. A drop at the same position in `drag_within_group` is `None` too.
+- **Rename failures (T-24a-071).** A cross-device rename is `DownloadError::CrossDevice` (no copy). Any failed folder rename
+  also emits a `DownloadEvent::Warning`, not only the `Err` reply. A missing episode folder stays a logged no-op (Kotlin).
+- **Torrent path (T-24a-023).** `TORRENT_SERVER_HOST` defaults to `http://127.0.0.1:8090`. With the feature, a torrent link
+  fails with an internal error because the TorrServer stream client is not in this crate yet. The engine calls `check_torrent`
+  after the hoster resolve.
+- **Local anime count (T-24a-038).** `local::anime_episode_count` counts the supported files directly in the anime folder,
+  matched case-sensitively. `AnimeIndex::episode_count_anime` routes `LOCAL_SOURCE_ID` to it, reading the folder set by
+  `AnimeIndex::with_local_anime_root` (the argument is the anime url, as in Kotlin). Without a local root the count is 0.
+- **External downloader (T-24a-024, T-24a-025).** `EpisodeEngine::with_external(ExternalHandoff)` enables it. Per episode,
+  after the hoster resolve and the torrent check, `use_external_downloader` on and a non-empty
+  `external_downloader_selection` (the aria2 endpoint, `http://host:port/jsonrpc`) send `aria2.addUri` with the video URL,
+  its headers and the final episode folder as `dir`; the folder path is copied through the injected `Clipboard`
+  (a failed copy is only logged), no staging folder is made and nothing is finalised. aria2 writes into the final
+  folder, not `<name>_tmp`, so the startup sweep of `_tmp` folders cannot remove its files. A refused or failed post is
+  an error and the item goes to ERROR. The episode then counts as downloaded in the queue (it leaves the queue), as
+  the engine returned `Ok`.
+- **Drag across sections (T-25a-028, E-34).** Decision: refused, as in Kotlin. `AnimeDownloadAdapter.shouldMove`
+  returns true only when both rows have the same header, so a cross-section drop never reaches `onItemReleased`.
+  The plan bullet ("cross-section drops are allowed") and E-34 assumed the opposite; the Kotlin behaviour wins by the
+  port rule, and `queue_view::drag_within_group` keeps returning `None` for a cross-group target. The plans are read-only
+  here, so the bullet is not amended in place.
+- **Hidden notification content (T-23a-043, T-24a-028).** `NotifierSink` passes each notice through as built. The text
+  rules (`effect_for`, `progress_notice`) already hide names under `hide_notification_content` ("Downloading (x/y)" or
+  "Downloading…", empty body), so the platform's blanket replacement is not used on download notices.
+- **Logs (T-24a-060).** ffmpeg stderr is read; a line that says error, warning or fatal is logged at error level with its
+  URLs redacted. Headers are logged only by name.
 
 - **New-item filter (T-25a-004) has one owner: `kuro-domain::download::filter`** (`should_download_new`, `filter_new`),
   which is also where `remove_after_read_index` lives. The copy that was here had no caller and is gone. Nothing

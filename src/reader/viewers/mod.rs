@@ -14,6 +14,8 @@ pub mod items;
 pub mod keys;
 pub mod model;
 pub mod nav;
+pub mod page_bytes;
+pub mod page_opts;
 pub mod pager;
 pub mod settings;
 pub mod status;
@@ -88,8 +90,8 @@ pub trait ViewerEngine {
     fn handle_key(&self, ev: KeyEvent) -> bool;
     /// A pointer scroll, `dy > 0` for scrolling down. `true` when the viewer used it.
     fn handle_scroll(&self, dy: f64) -> bool;
-    /// Releases everything. No event is sent after this (E-78).
-    fn destroy(&self);
+    /// Releases everything. No event is sent after this (E-78). A viewer with nothing to release keeps the default.
+    fn destroy(&self) {}
 }
 
 /// Sends viewer events to the core, and nothing once the viewer is destroyed (E-78).
@@ -140,6 +142,7 @@ pub fn make_viewer(kind: ViewerKind, ctx: ViewerContext) -> Box<dyn ViewerEngine
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gtk::prelude::Cast;
 
     #[test]
     fn reading_mode_values_map_to_the_five_viewers() {
@@ -162,6 +165,44 @@ mod tests {
     fn the_family_split_is_pager_then_webtoon() {
         assert!(ViewerKind::Vertical.is_pager());
         assert!(!ViewerKind::WebtoonGapped.is_pager());
+    }
+
+    /// A minimal viewer: it claims the right arrow key and records what it was sent (T-43b-034).
+    struct Probe {
+        root: gtk::Box,
+        keys: Cell<u32>,
+    }
+
+    impl ViewerEngine for Probe {
+        fn kind(&self) -> ViewerKind {
+            ViewerKind::LeftToRight
+        }
+        fn widget(&self) -> &gtk::Widget {
+            self.root.upcast_ref()
+        }
+        fn set_chapters(&self, _chapters: ViewerChapters) {}
+        fn move_to_page(&self, _page: &Rc<ReaderPage>) {}
+        fn handle_key(&self, ev: KeyEvent) -> bool {
+            self.keys.set(self.keys.get() + 1);
+            ev.key == keys::InputKey::Right
+        }
+        fn handle_scroll(&self, _dy: f64) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    #[ignore = "needs a display; run alone: cargo test -p kurobayomi viewers::tests::a_test_viewer -- --ignored"]
+    fn a_test_viewer_receives_a_key_and_reports_it_handled() {
+        if gtk::init().is_err() {
+            eprintln!("no display: skipping the viewer contract probe");
+            return;
+        }
+        let viewer: Box<dyn ViewerEngine> = Box::new(Probe { root: gtk::Box::new(gtk::Orientation::Vertical, 0), keys: Cell::new(0) });
+        assert!(viewer.handle_key(KeyEvent { key: keys::InputKey::Right, ctrl: false, released: false }));
+        assert!(!viewer.handle_key(KeyEvent { key: keys::InputKey::Left, ctrl: false, released: false }));
+        viewer.destroy();
+        assert_eq!(viewer.kind(), ViewerKind::LeftToRight);
     }
 
     #[test]

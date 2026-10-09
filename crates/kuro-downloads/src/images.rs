@@ -188,7 +188,7 @@ pub fn split_tall_image(tmp: &Path, file: &Path, prefix: &str, optimal: u32) -> 
         return Ok(false);
     }
     if exceeds_split_memory(width, height) {
-        debug!(target: "kuro::downloads", page = %prefix, "tall page not split: decoded size over 256 MiB");
+        debug!(target: "kuro_downloads", page = %prefix, "tall page not split: decoded size over 256 MiB");
         return Ok(false);
     }
     let img = decode_rgba(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
@@ -249,6 +249,7 @@ mod tests {
         assert_eq!(page_stem(9, page_digits(9)), "009");
     }
 
+    // TST-21
     #[test]
     fn extension_follows_sniffing_then_content_type_then_jpg() {
         let jpeg = [0xFF, 0xD8, 0xFF, 0xE0];
@@ -333,6 +334,7 @@ mod split_tests {
         out.into_inner()
     }
 
+    // TST-22
     #[test]
     fn split_geometry_matches_kotlin() {
         // Behaviour 10.7: 5000 px at 2000 px gives three parts, the last one absorbs the remainder.
@@ -405,6 +407,7 @@ mod split_tests {
         assert!(file.exists());
     }
 
+    // TST-29
     #[test]
     fn animated_gif_is_not_split() {
         let tmp = tempfile::tempdir().unwrap();

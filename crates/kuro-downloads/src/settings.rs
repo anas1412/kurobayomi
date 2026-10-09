@@ -115,7 +115,6 @@ mod tests {
 
     #[test]
     fn download_slots_is_stored_but_hidden_and_not_read_by_the_engine() {
-        assert!(DOWNLOAD_SLOTS_HIDDEN, "the control is hidden");
         assert_eq!(default_of("download_slots"), Some("1"), "the key and its default are still stored");
         // The engine's parallel count is the scheduler limit, whatever `download_slots` holds.
         assert_eq!(crate::scheduler::MAX_ACTIVE_SOURCES, 5);

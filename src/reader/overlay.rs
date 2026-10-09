@@ -17,6 +17,7 @@ use kuro_prefs::reader::{FlashColor, ReaderPrefs};
 
 use super::blend_box::BlendBox;
 
+use super::pref_rules;
 use super::rules;
 
 /// The custom brightness slider range (`ColorFilterPage.kt:41`).
@@ -160,10 +161,10 @@ impl Tint {
     /// A page changed. Counts it toward the flash interval and starts a flash when it is due. Called only while the
     /// flash feature is on (E-FLASH-1), so a later enable does not flash at once.
     pub fn on_page_changed(&self, prefs: &ReaderPrefs) {
-        let (due, next) = rules::flash_due(self.flash_trigger.get(), prefs.flash_page_interval.get());
+        let (due, next) = rules::flash_due(self.flash_trigger.get(), pref_rules::flash_interval(prefs.flash_page_interval.get()));
         self.flash_trigger.set(next);
         if due {
-            self.start_flash(prefs.flash_color.get(), prefs.flash_duration_millis.get());
+            self.start_flash(prefs.flash_color.get(), pref_rules::flash_duration_ms(prefs.flash_duration_millis.get()));
         }
     }
 

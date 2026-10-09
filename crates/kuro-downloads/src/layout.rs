@@ -175,6 +175,7 @@ mod tests {
         }
     }
 
+    // TST-35
     #[test]
     fn chapter_dir_name_with_scanlator() {
         assert_eq!(chapter_dir_name("Chapter 1", Some("Scan")), "Scan_Chapter 1");
@@ -184,6 +185,7 @@ mod tests {
         assert_eq!(chapter_dir_name("a/b", Some("S")), "S_a_b");
     }
 
+    // TST-36
     #[test]
     fn valid_names_include_cbz_after_the_folder() {
         assert_eq!(valid_chapter_names("Ch 1", None), ["Ch 1".to_owned(), "Ch 1.cbz".to_owned()]);

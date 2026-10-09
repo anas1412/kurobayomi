@@ -16,9 +16,9 @@ use tokio::time::Instant;
 
 use super::auth::{AccessToken, AuthState, is_expired};
 use super::date::now_ms;
-use super::dto::GraphQlEnvelope;
+use super::dto::{GraphQlEnvelope, MalMediaData};
 use super::error::AniListError;
-use super::endpoint;
+use super::{endpoint, queries};
 use crate::base::BaseTracker;
 
 /// Requests allowed in any rolling window (`API:42`).
@@ -238,6 +238,19 @@ impl Api {
     }
 }
 
+/// The MyAnimeList id of an AniList media, for the AniSkip lookup (E-43, E-44). Sent without a token. A failed
+/// call, a null `idMal` and a zero id all give `None`, so the caller skips AniSkip instead of querying it with 0.
+pub async fn anilist_to_mal_id(transport: &dyn Transport, media_id: i64) -> Option<i64> {
+    let body = json!({ "query": queries::MAL_ID, "variables": { "id": media_id } });
+    let raw = transport.post(&body, None).await.ok()?;
+    if !(200..300).contains(&raw.status) {
+        return None;
+    }
+    let envelope: GraphQlEnvelope = serde_json::from_slice(&raw.body).ok()?;
+    let data: MalMediaData = envelope.into_data().ok()?;
+    data.media?.id_mal.filter(|id| *id != 0)
+}
+
 /// Seconds since the epoch, the clock of every expiry check.
 pub fn now_s() -> i64 {
     now_ms() / 1000
@@ -420,5 +433,30 @@ mod tests {
         let r: Result<Value, _> = api.execute("q", None::<()>).await;
         assert!(matches!(r, Err(AniListError::GraphQl(s)) if s == "Invalid id"));
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_28a_034_mal_id_is_read_without_a_token() -> TestResult {
+        let fake = crate::tracker::anilist::testkit::FakeTransport::new(vec![
+            crate::tracker::anilist::testkit::ok(include_str!("../../../tests/fixtures/anilist/media_mal_16498.json")),
+        ]);
+        assert_eq!(anilist_to_mal_id(fake.as_ref(), 9253).await, Some(16498));
+        assert_eq!(fake.bearers(), vec![None]);
+        assert_eq!(fake.bodies()[0]["variables"]["id"], 9253);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_28a_034_null_mal_id_and_failures_give_none() {
+        let null = crate::tracker::anilist::testkit::FakeTransport::new(vec![
+            crate::tracker::anilist::testkit::ok(include_str!("../../../tests/fixtures/anilist/media_mal_null.json")),
+        ]);
+        assert_eq!(anilist_to_mal_id(null.as_ref(), 1).await, None);
+        let failing = crate::tracker::anilist::testkit::FakeTransport::new(vec![
+            crate::tracker::anilist::testkit::status(500, "boom"),
+        ]);
+        assert_eq!(anilist_to_mal_id(failing.as_ref(), 1).await, None);
+        let empty = crate::tracker::anilist::testkit::FakeTransport::new(vec![]);
+        assert_eq!(anilist_to_mal_id(empty.as_ref(), 1).await, None);
     }
 }

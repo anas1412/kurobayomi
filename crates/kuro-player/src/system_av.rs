@@ -67,6 +67,58 @@ impl SystemVolume for Wpctl {
     }
 }
 
+/// Parses `pactl get-sink-volume` output into steps. The first `NN%` value is the sink volume, for
+/// example `Volume: front-left: 9830 /  15% / -49.00 dB, ...`.
+pub fn parse_pactl_volume(output: &str) -> Option<i32> {
+    let line = output
+        .lines()
+        .find(|l| l.trim_start().starts_with("Volume:"))?;
+    let percent: f32 = line
+        .split_whitespace()
+        .find_map(|token| token.strip_suffix('%'))?
+        .parse()
+        .ok()?;
+    Some((percent / 100.0 * VOLUME_STEPS as f32).round() as i32)
+}
+
+/// The default sink through `pactl`, the PulseAudio fallback when `wpctl` is missing or fails.
+pub struct Pactl;
+
+impl SystemVolume for Pactl {
+    fn read(&self) -> io::Result<i32> {
+        let out = Command::new("pactl")
+            .args(["get-sink-volume", DEFAULT_SINK])
+            .output()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        parse_pactl_volume(&text)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "unreadable pactl output"))
+    }
+
+    fn write(&self, step: i32) -> io::Result<()> {
+        let percent = step.clamp(0, VOLUME_STEPS) * 100 / VOLUME_STEPS;
+        let status = Command::new("pactl")
+            .args(["set-sink-volume", DEFAULT_SINK, &format!("{percent}%")])
+            .status()?;
+        status
+            .success()
+            .then_some(())
+            .ok_or_else(|| io::Error::other("pactl set-sink-volume failed"))
+    }
+}
+
+/// Tries the first backend and falls back to the second when it fails (PipeWire, then PulseAudio).
+pub struct Fallback<P, Q>(pub P, pub Q);
+
+impl<P: SystemVolume, Q: SystemVolume> SystemVolume for Fallback<P, Q> {
+    fn read(&self) -> io::Result<i32> {
+        self.0.read().or_else(|_| self.1.read())
+    }
+
+    fn write(&self, step: i32) -> io::Result<()> {
+        self.0.write(step).or_else(|_| self.1.write(step))
+    }
+}
+
 /// The last good volume reading. A failed read keeps the last value and logs once (E-46-091).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VolumeReading {
@@ -279,6 +331,55 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         assert!(Backlight::find(root.path()).is_none());
         assert!(Backlight::find(&root.path().join("absent")).is_none());
+    }
+
+    #[test]
+    fn pactl_percent_becomes_steps() {
+        let out =
+            "Volume: front-left: 9830 /  15% / -49.00 dB,   front-right: 9830 /  15% / -49.00 dB\n";
+        assert_eq!(parse_pactl_volume(out), Some(2));
+        assert_eq!(parse_pactl_volume("nothing here"), None);
+    }
+
+    struct Backend(io::Result<i32>, std::cell::Cell<bool>);
+
+    impl SystemVolume for Backend {
+        fn read(&self) -> io::Result<i32> {
+            match &self.0 {
+                Ok(v) => Ok(*v),
+                Err(e) => Err(io::Error::new(e.kind(), "down")),
+            }
+        }
+        fn write(&self, _: i32) -> io::Result<()> {
+            self.1.set(true);
+            if self.0.is_ok() {
+                Ok(())
+            } else {
+                Err(io::Error::other("down"))
+            }
+        }
+    }
+
+    #[test]
+    fn fallback_uses_the_second_backend_when_the_first_fails() {
+        let first = Backend(
+            Err(io::Error::other("no wpctl")),
+            std::cell::Cell::new(false),
+        );
+        let second = Backend(Ok(7), std::cell::Cell::new(false));
+        let both = Fallback(first, second);
+        assert_eq!(both.read().unwrap(), 7);
+        assert!(both.write(3).is_ok());
+        assert!(both.1.1.get());
+    }
+
+    #[test]
+    fn fallback_keeps_the_first_backend_when_it_works() {
+        let first = Backend(Ok(4), std::cell::Cell::new(false));
+        let second = Backend(Ok(9), std::cell::Cell::new(false));
+        let both = Fallback(first, second);
+        assert_eq!(both.read().unwrap(), 4);
+        assert!(!both.1.1.get());
     }
 
     #[test]

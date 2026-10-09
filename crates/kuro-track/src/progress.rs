@@ -96,6 +96,7 @@ async fn track_episode_with(
                     settle(ctx, Kind::Anime, entry_id, id, episode);
                     TrackOutcome::Updated
                 }
+                Err(e) if e.is_retry_futile() => TrackOutcome::Failed(e.to_string()),
                 Err(e) => {
                     tracing::info!(entry = entry_id, tracker = id.0, error = %redact(&e.to_string()), "episode update queued");
                     queue_progress(ctx, Kind::Anime, entry_id, id, episode)
@@ -172,6 +173,7 @@ async fn track_chapter_with(
                     settle(ctx, Kind::Manga, manga_id, id, chapter);
                     TrackOutcome::Updated
                 }
+                Err(e) if e.is_retry_futile() => TrackOutcome::Failed(e.to_string()),
                 Err(e) => {
                     tracing::info!(entry = manga_id, tracker = id.0, error = %redact(&e.to_string()), "chapter update queued");
                     queue_progress(ctx, Kind::Manga, manga_id, id, chapter)

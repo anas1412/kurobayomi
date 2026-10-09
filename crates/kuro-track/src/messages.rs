@@ -2,6 +2,8 @@
 //! keys; the GUI resolves them with the i18n crate. `english` gives the source's English text, used by the tests
 //! and as the fallback. Every key maps to a Fluent id in the English catalogue, checked at build time.
 
+use crate::mal::messages as mal_text;
+
 /// The English catalogue. Included so that a missing file fails the build of this crate.
 pub const EN_CATALOGUE: &str = include_str!("../../kuro-i18n/locales/en/kurobayomi.ftl");
 
@@ -98,7 +100,7 @@ pub enum MsgKey {
     UnknownError,
     /// "Copied to clipboard:\n%1$s". The text is already truncated, see [`MsgKey::copied`].
     CopiedToClipboard(String),
-    /// "Could not remove the local tracking". Nothing else runs after it (E-39).
+    /// "Could not remove the local tracking". Shown when the local delete fails after the remote step (E-39).
     LocalRemovalFailed,
     /// "No link stored for this entry". The tracker page cannot be opened or copied (E-43).
     NoTrackingLink,
@@ -146,6 +148,38 @@ pub enum MsgKey {
     Chapters,
     /// "Episodes" (anime progress title).
     Episodes,
+    /// "You are not logged in to AniList" (T-28a-045).
+    AniListNotAuthenticated,
+    /// "Session expired, log in again". Also the subtitle of the AniList login row (T-28a-048).
+    AniListSessionExpired,
+    /// "This entry is not on your AniList list".
+    AniListNotInList,
+    /// "AniList rate limit reached, try again in a minute".
+    AniListRateLimited,
+    /// "No network connection to AniList".
+    AniListOffline,
+    /// "Unknown AniList status".
+    AniListUnknownStatus,
+    /// "AniList login failed".
+    AniListLoginFailed,
+    /// "Could not remove the entry from AniList".
+    AniListRemoteDeleteFailed,
+    /// "Logged in to AniList" (T-28a-048).
+    AniListLoggedIn,
+    /// "Logging in…", the AniList login row while the Viewer query runs.
+    AniListLoggingIn,
+    /// "AniList login must be renewed", after the legacy score preference forced a logout (T-28a-013).
+    AniListReloginRequired,
+    /// "Re-added to MyAnimeList": a refresh found the title missing and added it again (D-10).
+    MalReAdded,
+    /// "Waiting for MyAnimeList...": the Settings row while the loopback login waits (T-29a-047).
+    MalWaitingForLogin,
+    /// "Set a MyAnimeList client id to log in": the Settings row when no client id is configured (T-29a-040).
+    MalNoClientId,
+    /// "Log in again": the Settings row when the MAL login expired (E-UI-2, T-29a-047).
+    MalLogInAgain,
+    /// "Login was not completed": consent refused or no code (D-04, T-29a-051).
+    MalLoginNotCompleted,
     /// Raw text of a failure, shown as is.
     Raw(String),
 }
@@ -197,6 +231,22 @@ impl MsgKey {
             | MsgKey::TrackerNotConfigured(_)
             | MsgKey::LoginExpired
             | MsgKey::NoTrackingData
+            | MsgKey::AniListNotAuthenticated
+            | MsgKey::AniListSessionExpired
+            | MsgKey::AniListNotInList
+            | MsgKey::AniListRateLimited
+            | MsgKey::AniListOffline
+            | MsgKey::AniListUnknownStatus
+            | MsgKey::AniListLoginFailed
+            | MsgKey::AniListRemoteDeleteFailed
+            | MsgKey::AniListLoggedIn
+            | MsgKey::AniListLoggingIn
+            | MsgKey::AniListReloginRequired
+            | MsgKey::MalNoClientId
+            | MsgKey::MalReAdded
+            | MsgKey::MalWaitingForLogin
+            | MsgKey::MalLogInAgain
+            | MsgKey::MalLoginNotCompleted
             | MsgKey::Raw(_) => return None,
         })
     }
@@ -258,6 +308,22 @@ pub fn english(key: &MsgKey) -> String {
         MsgKey::Score => "Score".into(),
         MsgKey::Chapters => "Chapters".into(),
         MsgKey::Episodes => "Episodes".into(),
+        MsgKey::AniListNotAuthenticated => "You are not logged in to AniList".into(),
+        MsgKey::AniListSessionExpired => "Session expired, log in again".into(),
+        MsgKey::AniListNotInList => "This entry is not on your AniList list".into(),
+        MsgKey::AniListRateLimited => "AniList rate limit reached, try again in a minute".into(),
+        MsgKey::AniListOffline => "No network connection to AniList".into(),
+        MsgKey::AniListUnknownStatus => "Unknown AniList status".into(),
+        MsgKey::AniListLoginFailed => "AniList login failed".into(),
+        MsgKey::AniListRemoteDeleteFailed => "Could not remove the entry from AniList".into(),
+        MsgKey::AniListLoggedIn => "Logged in to AniList".into(),
+        MsgKey::AniListLoggingIn => "Logging in\u{2026}".into(),
+        MsgKey::AniListReloginRequired => "AniList login must be renewed".into(),
+        MsgKey::MalReAdded => mal_text::RE_ADDED.into(),
+        MsgKey::MalWaitingForLogin => mal_text::WAITING_FOR_LOGIN.into(),
+        MsgKey::MalNoClientId => mal_text::NO_CLIENT_ID.into(),
+        MsgKey::MalLogInAgain => mal_text::LOG_IN_AGAIN.into(),
+        MsgKey::MalLoginNotCompleted => mal_text::LOGIN_NOT_COMPLETED.into(),
         MsgKey::Raw(text) => text.clone(),
     }
 }
@@ -378,6 +444,22 @@ mod tests {
                         | MsgKey::TrackerNotConfigured(_)
                         | MsgKey::LoginExpired
                         | MsgKey::NoTrackingData
+                        | MsgKey::AniListNotAuthenticated
+                        | MsgKey::AniListSessionExpired
+                        | MsgKey::AniListNotInList
+                        | MsgKey::AniListRateLimited
+                        | MsgKey::AniListOffline
+                        | MsgKey::AniListUnknownStatus
+                        | MsgKey::AniListLoginFailed
+                        | MsgKey::AniListRemoteDeleteFailed
+                        | MsgKey::AniListLoggedIn
+                        | MsgKey::AniListLoggingIn
+                        | MsgKey::AniListReloginRequired
+                        | MsgKey::MalNoClientId
+                        | MsgKey::MalReAdded
+                        | MsgKey::MalWaitingForLogin
+                        | MsgKey::MalLogInAgain
+                        | MsgKey::MalLoginNotCompleted
                 ));
                 continue;
             };
@@ -388,6 +470,24 @@ mod tests {
             );
         }
         assert_eq!(MsgKey::Raw("x".into()).resource_id(), None);
+    }
+
+    #[test]
+    fn mal_keys_read_the_mal_text_table() {
+        assert_eq!(
+            english(&MsgKey::MalWaitingForLogin),
+            "Waiting for MyAnimeList..."
+        );
+        assert_eq!(english(&MsgKey::MalLogInAgain), "Log in again");
+        assert_eq!(
+            english(&MsgKey::MalNoClientId),
+            "Set a MyAnimeList client id to log in"
+        );
+        assert_eq!(english(&MsgKey::MalReAdded), "Re-added to MyAnimeList");
+        assert_eq!(
+            english(&MsgKey::MalLoginNotCompleted),
+            "Login was not completed"
+        );
     }
 
     #[test]

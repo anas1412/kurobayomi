@@ -177,11 +177,13 @@ pub fn tint_text(resolved: &Resolved) -> String {
     }
 }
 
-/// Resolves the settings, renders the CSS, and installs it on `display`.
+/// Resolves the settings, renders the CSS, and installs it on `display`. The player state layer
+/// (T-49a-010) follows the system dark flag, so its rules ride on the tint provider for every choice.
 pub fn apply(display: &gdk::Display, settings: &ThemeSettings, system_dark: bool) -> bool {
     let resolved = resolve(settings, system_dark);
     let ok = reapply(display, &palette_text(&resolved));
-    set_tints(display, &tint_text(&resolved)) && ok
+    let tints = format!("{}{}", tint_text(&resolved), style::widget_rules(system_dark));
+    set_tints(display, &tints) && ok
 }
 
 /// Sets the GTK dark preference for a mode: Light and Dark force it; System follows `system_dark`.
@@ -200,6 +202,11 @@ pub fn sync_gtk_preference(mode: ThemeMode, system_dark: bool) {
 /// Stores the settings, then applies them with the last known system value.
 pub fn set_settings(display: &gdk::Display, settings: ThemeSettings) -> bool {
     CURRENT.with(|c| *c.borrow_mut() = Some((display.clone(), settings)));
+    apply_current()
+}
+
+/// Re-applies the stored settings with the last known system value (after a Monet seed arrives).
+pub fn refresh() -> bool {
     apply_current()
 }
 

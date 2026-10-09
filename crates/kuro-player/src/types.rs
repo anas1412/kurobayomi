@@ -155,6 +155,32 @@ impl HosterState {
             Self::Ready(ready) => &ready.name,
         }
     }
+
+    /// The state of video `index`. A missing index, or a hoster that is not Ready, is `Queue` (E52).
+    pub fn video_state(&self, index: usize) -> VideoState {
+        match self {
+            Self::Ready(ready) => ready.video_state.get(index).copied().unwrap_or_default(),
+            _ => VideoState::Queue,
+        }
+    }
+}
+
+/// The icon after a video row in the quality sheet (T-46b-014).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StateIcon {
+    Spinner,
+    Error,
+}
+
+impl VideoState {
+    /// Spinner while loading, an error mark on failure, nothing for queued or ready videos.
+    pub fn icon(self) -> Option<StateIcon> {
+        match self {
+            Self::LoadVideo => Some(StateIcon::Spinner),
+            Self::Error => Some(StateIcon::Error),
+            Self::Queue | Self::Ready => None,
+        }
+    }
 }
 
 /// A chapter-thumbnail tile (`TileInfo`, ThumbnailInfo.kt:24-31). Time is in milliseconds.
@@ -269,5 +295,45 @@ mod tests {
     #[test]
     fn chapter_type_default_is_other() {
         assert_eq!(ChapterType::default(), ChapterType::Other);
+    }
+}
+
+#[cfg(test)]
+mod state_lookup_tests {
+    use super::*;
+
+    fn ready(videos: usize) -> HosterState {
+        HosterState::Ready(ReadyHoster {
+            name: "H".to_owned(),
+            video_list: vec![Video::default(); videos],
+            video_state: vec![VideoState::Ready; videos],
+        })
+    }
+
+    #[test]
+    fn a_missing_video_index_is_queue() {
+        assert_eq!(ready(1).video_state(0), VideoState::Ready);
+        assert_eq!(ready(1).video_state(5), VideoState::Queue);
+        assert_eq!(
+            HosterState::Idle("A".to_owned()).video_state(0),
+            VideoState::Queue
+        );
+    }
+
+    #[test]
+    fn changing_a_missing_index_leaves_the_lists_alone() {
+        let before = ready(1);
+        let after = before
+            .with_video(9, Video::default(), VideoState::Error)
+            .unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn only_loading_and_failed_videos_show_an_icon() {
+        assert_eq!(VideoState::LoadVideo.icon(), Some(StateIcon::Spinner));
+        assert_eq!(VideoState::Error.icon(), Some(StateIcon::Error));
+        assert_eq!(VideoState::Queue.icon(), None);
+        assert_eq!(VideoState::Ready.icon(), None);
     }
 }

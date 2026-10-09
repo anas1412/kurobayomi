@@ -18,16 +18,12 @@ pub fn pretty_time_signed(seconds: i64) -> String {
     format!("{sign}{}", pretty_time(seconds))
 }
 
-/// Episode number as `DecimalFormat("#.###")` prints it: at most three decimals, no trailing zeros,
-/// and no leading zero before the point (`0.5` gives `.5`, E-46-022). Rounds half to even on the
-/// binary value, so `1.2345` gives `1.234`.
+/// Episode number as `DecimalFormat("#.###")` prints it: at most three decimals and no trailing
+/// zeros. The leading zero is kept (`0.5` gives `0.5`, D-10 and E-46-022). Rounds half to even on
+/// the binary value, so `1.2345` gives `1.234`.
 pub fn format_episode_number(value: f64) -> String {
     let fixed = format!("{:.3}", value.abs());
-    let trimmed = fixed.trim_end_matches('0').trim_end_matches('.');
-    let body = match trimmed.strip_prefix('0') {
-        Some(rest) if rest.starts_with('.') => rest,
-        _ => trimmed,
-    };
+    let body = fixed.trim_end_matches('0').trim_end_matches('.');
     if value < 0.0 && body != "0" {
         format!("-{body}")
     } else {
@@ -71,11 +67,11 @@ mod tests {
     }
 
     #[test]
-    fn episode_numbers_drop_trailing_zeros_and_the_leading_zero() {
+    fn episode_numbers_drop_trailing_zeros_but_keep_the_leading_zero() {
         assert_eq!(format_episode_number(1.0), "1");
         assert_eq!(format_episode_number(12.5), "12.5");
         assert_eq!(format_episode_number(1.2345), "1.234");
-        assert_eq!(format_episode_number(0.5), ".5");
+        assert_eq!(format_episode_number(0.5), "0.5");
         assert_eq!(format_episode_number(0.0), "0");
         assert_eq!(format_episode_number(-2.25), "-2.25");
     }

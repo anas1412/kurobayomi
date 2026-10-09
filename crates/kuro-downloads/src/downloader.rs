@@ -40,6 +40,9 @@ pub const NO_NETWORK_TEXT: &str = "No network connection available";
 pub const NO_WIFI_TEXT: &str = "No Wi-Fi connection available";
 pub const COMMAND_CAPACITY: usize = 64;
 
+/// Returns the current `download_speed_limit` in KiB/s. The downloader calls it at each chapter start (T-23a-015).
+pub type SpeedLimitFn = Arc<dyn Fn() -> i32 + Send + Sync>;
+
 /// Network state as the GUI reports it from `gio::NetworkMonitor`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Connectivity {
@@ -123,6 +126,15 @@ pub enum Command {
     Reorder {
         chapter_ids: Vec<i64>,
     },
+    /// Adds chapters at the front of the queue (EC-09, EC-10, EC-11). `start` starts the run; a running queue is
+    /// restarted so the new chapters are taken first.
+    EnqueueFront {
+        source: SourceRef,
+        manga: MangaRef,
+        chapters: Vec<ChapterRef>,
+        start: bool,
+        reply: oneshot::Sender<Result<EnqueueOutcome, DownloadError>>,
+    },
     Remove {
         target: RemoveTarget,
         reply: oneshot::Sender<Vec<i64>>,
@@ -185,10 +197,14 @@ pub struct Downloader {
     hold: Option<Box<dyn Any + Send>>,
     hold_source: Arc<dyn ProcessHold>,
     store: Arc<QueueStore>,
+    /// Saved rows whose source was missing at startup. They stay in the store after the queue rows (T-23a-035).
+    kept_rows: Vec<QueueRow>,
     layout: Arc<DownloadLayout>,
     index: Arc<DownloadIndex>,
     free_space: FreeSpaceFn,
     settings: DownloadSettings,
+    /// Where the speed limit is read at each chapter start. `None` keeps `settings.speed_limit_kib_s`.
+    speed_limit: Option<SpeedLimitFn>,
     page_cache: Option<Arc<dyn PageImageCache>>,
     connectivity: watch::Receiver<Connectivity>,
     connectivity_open: bool,
@@ -197,6 +213,8 @@ pub struct Downloader {
     events: broadcast::Sender<DownloadEvent>,
     dirty_progress: HashSet<i64>,
     shared: Arc<Shared>,
+    /// The shared speed limit, set from `download_speed_limit` at each chapter start (T-23a-015).
+    speed: Arc<crate::throttle::SpeedLimiter>,
 }
 
 impl Downloader {
@@ -214,10 +232,12 @@ impl Downloader {
             hold: None,
             hold_source: params.hold,
             store: params.store,
+            kept_rows: params.kept_rows,
             layout: params.layout,
             index: params.index,
             free_space: params.free_space,
             settings: params.settings,
+            speed_limit: params.speed_limit_kib_s,
             page_cache: params.page_cache,
             connectivity: params.connectivity,
             connectivity_open: true,
@@ -226,6 +246,7 @@ impl Downloader {
             events,
             dirty_progress: HashSet::new(),
             shared,
+            speed: Arc::new(crate::throttle::SpeedLimiter::new(None)),
         }
     }
 
@@ -270,6 +291,10 @@ impl Downloader {
             Command::Pause => self.pause().await,
             Command::Clear => self.clear().await,
             Command::Reorder { chapter_ids } => self.reorder(&chapter_ids).await,
+            Command::EnqueueFront { source, manga, chapters, start, reply } => {
+                let outcome = self.enqueue_placed(source, manga, chapters, start, true).await;
+                let _ = reply.send(outcome);
+            }
             Command::Remove { target, reply } => {
                 let ids = self.remove(target).await;
                 let _ = reply.send(ids);
@@ -289,6 +314,17 @@ impl Downloader {
         manga: MangaRef,
         chapters: Vec<ChapterRef>,
         auto_start: bool,
+    ) -> Result<EnqueueOutcome, DownloadError> {
+        self.enqueue_placed(source, manga, chapters, auto_start, false).await
+    }
+
+    async fn enqueue_placed(
+        &mut self,
+        source: SourceRef,
+        manga: MangaRef,
+        chapters: Vec<ChapterRef>,
+        auto_start: bool,
+        front: bool,
     ) -> Result<EnqueueOutcome, DownloadError> {
         if chapters.is_empty() {
             return Ok(EnqueueOutcome::NothingToDo);
@@ -316,13 +352,17 @@ impl Downloader {
                 pages: None,
             })
             .collect();
-        let added = self.queue.add_all(downloads).len();
+        let added = if front { self.queue.add_front(downloads) } else { self.queue.add_all(downloads) }.len();
         if added == 0 {
             return Ok(EnqueueOutcome::NothingToDo);
         }
         self.persist().await;
         self.emit(DownloadEvent::QueueChanged);
-        if auto_start && was_empty {
+        if auto_start && (was_empty || front) {
+            // A running queue is restarted so the front chapters are taken first (EC-14).
+            if front {
+                self.pause_run();
+            }
             self.warn_if_bulk();
             self.start_run(true).await;
         }
@@ -412,13 +452,18 @@ impl Downloader {
     }
 
     /// Puts the queue in the given order. Unknown ids are ignored and unlisted chapters follow (E-15).
+    /// Reorders the queue. A running queue is paused, reordered and started again (EC-14).
     async fn reorder(&mut self, chapter_ids: &[i64]) {
         if chapter_ids.is_empty() {
             return;
         }
+        let was_running = self.pause_run();
         self.queue.reorder(chapter_ids);
         self.persist().await;
         self.emit(DownloadEvent::QueueChanged);
+        if was_running {
+            self.resume_run().await;
+        }
     }
 
     /// Removes chapters or a manga from the queue. A running queue is paused first and restarted afterwards, so a
@@ -493,6 +538,12 @@ impl Downloader {
         let Some(item) = self.queue.get(chapter_id).cloned() else { return };
         self.next_gen += 1;
         let generation = self.next_gen;
+        // Read at each chapter start (T-23a-015). Zero is unlimited.
+        let limit_kib_s = match &self.speed_limit {
+            Some(read) => i64::from(read()),
+            None => i64::from(self.settings.speed_limit_kib_s),
+        };
+        self.speed.set_rate(crate::settings::speed_limit_bytes_per_sec(limit_kib_s));
         let ctx = PipelineCtx {
             layout: self.layout.clone(),
             index: self.index.clone(),
@@ -504,6 +555,8 @@ impl Downloader {
             split_tall_images: self.settings.split_tall_images,
             optimal_height: self.settings.optimal_image_height,
             data_saver: self.settings.data_saver.clone(),
+            speed: self.speed.clone(),
+            save_as_cbz: self.settings.save_as_cbz,
         };
         let job = ChapterJob {
             source: item.source.clone(),
@@ -692,6 +745,9 @@ impl Downloader {
                 enqueued_at: now,
             })
             .collect();
+        let mut rows = rows;
+        let base = rows.len() as i64;
+        rows.extend(self.kept_rows.iter().enumerate().map(|(i, row)| QueueRow { position: base + i as i64, ..row.clone() }));
         let store = self.store.clone();
         match tokio::task::spawn_blocking(move || store.replace_all(&rows)).await {
             Ok(Ok(())) => {}
@@ -814,11 +870,14 @@ mod tests {
             index: Arc::new(DownloadIndex::open(&root, &base.path().join("cache"))),
             store: Arc::new(QueueStore::open_in_memory().unwrap()),
             free_space: plenty,
-            settings: DownloadSettings::default(),
+            settings: DownloadSettings { save_as_cbz: false, ..DownloadSettings::default() },
             page_cache: None,
             connectivity,
             hold,
             restored: Vec::new(),
+        kept_rows: Vec::new(),
+        speed_limit_kib_s: None,
+        pending: Arc::new(crate::pending::MangaPendingStore::open_in_memory().unwrap()),
         };
         let dl = Downloader::new(params, events_tx, Arc::new(Shared::new()));
         Harness { dl, events, conn, _base: base }
@@ -833,6 +892,23 @@ mod tests {
 
     fn drain(events: &mut broadcast::Receiver<DownloadEvent>) -> Vec<DownloadEvent> {
         std::iter::from_fn(|| events.try_recv().ok()).collect()
+    }
+
+    #[tokio::test]
+    async fn the_speed_limit_is_read_again_at_each_chapter_start() {
+        let mut h = harness(Arc::new(NoHold));
+        let limit = Arc::new(std::sync::atomic::AtomicI32::new(0));
+        let read = limit.clone();
+        h.dl.speed_limit = Some(Arc::new(move || read.load(Ordering::SeqCst)));
+        enqueue_chapters(&mut h.dl, &[1]).await;
+        let paid = |dl: &Downloader| dl.speed.book(1024, tokio::time::Instant::now().into_std()).map(|t| t.elapsed());
+        h.dl.spawn_chapter(1);
+        h.dl.abort_running_tasks();
+        assert!(paid(&h.dl).is_none(), "T-23a-015: zero is unlimited");
+        limit.store(1, Ordering::SeqCst);
+        h.dl.spawn_chapter(1);
+        h.dl.abort_running_tasks();
+        assert!(paid(&h.dl).is_some(), "T-23a-015: the new value applies at the next chapter start, without a restart");
     }
 
     #[tokio::test]
@@ -866,6 +942,18 @@ mod tests {
             .iter()
             .any(|e| matches!(e, DownloadEvent::Warning { text, .. } if text.as_str() == NO_NETWORK_TEXT));
         assert!(warned, "EC-17: the network warning is shown");
+    }
+
+    #[tokio::test]
+    async fn reorder_while_running_pauses_reorders_and_restarts() {
+        let mut h = harness(Arc::new(NoHold));
+        enqueue_chapters(&mut h.dl, &[1, 2]).await;
+        h.dl.start_run(true).await;
+        assert!(h.dl.running);
+        h.dl.reorder(&[2]).await;
+        let order: Vec<i64> = h.dl.queue.items().iter().map(|d| d.chapter.id).collect();
+        assert_eq!(order, vec![2, 1], "EC-14: the new order is applied");
+        assert!(h.dl.running, "EC-14: the run starts again after the reorder");
     }
 
     #[tokio::test]

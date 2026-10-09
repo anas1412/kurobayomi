@@ -2,7 +2,11 @@
 //! 9.3 `changeVideoAspect`; T-45a-034). This module only computes values and property writes. The
 //! app sends them to mpv, and the GL area applies them.
 
+use kuro_i18n::{MsgKey, tr};
+
 use crate::enums::VideoAspect;
+use crate::player_prefs::{PrefStore, enum_text, get_enum, keys};
+use crate::pref_write::Write;
 
 /// `getVideoOutAspect()`. `None` when `video-params/aspect` is unknown. Below 0.001 the aspect is
 /// `0`. A 90 or 270 degree rotation swaps width and height, so the aspect is inverted.
@@ -30,9 +34,66 @@ pub fn aspect_property_writes(mode: VideoAspect, stretch_ratio: f64) -> [(&'stat
     [("panscan", pan), ("video-aspect-override", ratio)]
 }
 
+/// The catalogue key of the pill text of a mode (`video_fit_screen`, `video_crop_screen`,
+/// `video_stretch_screen`).
+pub const fn pill_key(mode: VideoAspect) -> MsgKey {
+    match mode {
+        VideoAspect::Fit => MsgKey::video_fit_screen,
+        VideoAspect::Crop => MsgKey::video_crop_screen,
+        VideoAspect::Stretch => MsgKey::video_stretch_screen,
+    }
+}
+
+/// The pill text of a mode, in the active language.
+pub fn pill_text(mode: VideoAspect) -> String {
+    tr(pill_key(mode))
+}
+
+/// The stored aspect mode (`pref_player_aspect_state`). Missing or unknown gives `Fit`.
+pub fn stored_aspect(store: &impl PrefStore) -> VideoAspect {
+    get_enum(store, keys::PREF_PLAYER_ASPECT_STATE)
+}
+
+/// `changeVideoAspect`: the preference write (the mode name) followed by the two mpv writes.
+pub fn change_aspect_writes(mode: VideoAspect, stretch_ratio: f64) -> Vec<Write> {
+    let mut writes = vec![Write::pref(keys::PREF_PLAYER_ASPECT_STATE, enum_text(mode))];
+    writes.extend(
+        aspect_property_writes(mode, stretch_ratio)
+            .into_iter()
+            .map(|(name, value)| Write::mpv(name, value.to_string())),
+    );
+    writes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::player_prefs::NamedEnum;
+    use std::collections::HashMap;
+
+    /// T50 to T52
+    #[test]
+    fn each_mode_has_its_own_pill_string() {
+        assert_eq!(pill_text(VideoAspect::Fit), "Fit to screen");
+        assert_eq!(pill_text(VideoAspect::Crop), "Cropped to screen");
+        assert_eq!(pill_text(VideoAspect::Stretch), "Stretched to screen");
+    }
+
+    #[test]
+    fn the_mode_is_stored_by_name_and_read_back() {
+        let writes = change_aspect_writes(VideoAspect::Stretch, 1.78);
+        assert_eq!(
+            writes[0],
+            Write::pref("pref_player_aspect_state", "Stretch")
+        );
+        assert_eq!(writes[1], Write::mpv("panscan", "0"));
+        assert_eq!(writes[2], Write::mpv("video-aspect-override", "1.78"));
+        let mut store = HashMap::new();
+        assert_eq!(stored_aspect(&store), VideoAspect::Fit);
+        store.insert("pref_player_aspect_state".to_owned(), "Stretch".to_owned());
+        assert_eq!(stored_aspect(&store), VideoAspect::Stretch);
+        assert_eq!(VideoAspect::from_name("Crop"), Some(VideoAspect::Crop));
+    }
 
     #[test]
     fn unknown_aspect_gives_none() {

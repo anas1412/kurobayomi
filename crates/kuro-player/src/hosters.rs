@@ -3,12 +3,13 @@
 //! `VideoSource`, so the logic is tested with a fake and the app implements the trait over the
 //! real source. Calls are synchronous; cancellation is the caller's job (drop the call).
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
 use url::Url;
 
-use crate::types::{Hoster, HosterState, ReadyHoster, Video, VideoState};
+use crate::types::{Hoster, HosterState, NO_HOSTER_LIST, ReadyHoster, Video, VideoState};
 
 /// The source calls the player makes on a hoster or a video (`AnimeSource` / `AnimeHttpSource`).
 pub trait VideoSource {
@@ -173,12 +174,105 @@ fn first_match(
     })
 }
 
+/// The quality sheet's hoster rows, as indices into the input list (QualitySheet grouping, T-46b-007).
+/// `valid` holds Idle, Loading and Ready hosters with videos, `failed` the Error hosters and `empty`
+/// the Ready hosters without videos. Each list keeps the input order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HosterGroups {
+    pub valid: Vec<usize>,
+    pub failed: Vec<usize>,
+    pub empty: Vec<usize>,
+}
+
+impl HosterGroups {
+    /// The failed rows the sheet shows: only with `pref_show_failed_hosters` (E58). Grouping keeps
+    /// them all, so the flag is applied here, in the view.
+    pub fn failed_shown(&self, show_failed: bool) -> &[usize] {
+        if show_failed { &self.failed } else { &[] }
+    }
+
+    /// The empty rows the sheet shows: only with `pref_show_empty_hosters` (E58).
+    pub fn empty_shown(&self, show_empty: bool) -> &[usize] {
+        if show_empty { &self.empty } else { &[] }
+    }
+}
+
+/// Quality sheet selection and expansion, keyed by hoster name and `(hoster name, video index)`, so
+/// a re-sorted or reloaded hoster list keeps them (E55, R4; T-46b-014).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct QualityKeys {
+    expanded: HashSet<String>,
+    selected: Option<(String, usize)>,
+}
+
+impl QualityKeys {
+    /// The row arrow was clicked: flips the expansion of that hoster.
+    pub fn toggle_expanded(&mut self, hoster_name: &str) {
+        if !self.expanded.remove(hoster_name) {
+            self.expanded.insert(hoster_name.to_owned());
+        }
+    }
+
+    pub fn is_expanded(&self, hoster_name: &str) -> bool {
+        self.expanded.contains(hoster_name)
+    }
+
+    pub fn select(&mut self, hoster_name: &str, video_index: usize) {
+        self.selected = Some((hoster_name.to_owned(), video_index));
+    }
+
+    pub fn is_selected(&self, hoster_name: &str, video_index: usize) -> bool {
+        self.selected
+            .as_ref()
+            .is_some_and(|(name, index)| name == hoster_name && *index == video_index)
+    }
+
+    /// Selects what `select_best_video` picks in `states`.
+    pub fn select_best(&mut self, states: &[HosterState]) {
+        self.selected = select_best_video(states)
+            .map(|(hoster, video)| (states[hoster].name().to_owned(), video));
+    }
+
+    /// The selection as positions in `states`, `None` when its hoster is gone.
+    pub fn selected_position(&self, states: &[HosterState]) -> Option<(usize, usize)> {
+        let (name, video) = self.selected.as_ref()?;
+        let hoster = states.iter().position(|state| state.name() == name)?;
+        Some((hoster, *video))
+    }
+}
+
+/// Groups hoster states for the quality sheet (`group_hosters`, H1-H3).
+pub fn group_hosters(states: &[HosterState]) -> HosterGroups {
+    let mut groups = HosterGroups::default();
+    for (index, state) in states.iter().enumerate() {
+        match state {
+            HosterState::Idle(_) | HosterState::Loading(_) => groups.valid.push(index),
+            HosterState::Error(_) => groups.failed.push(index),
+            HosterState::Ready(ready) if ready.video_list.is_empty() => groups.empty.push(index),
+            HosterState::Ready(_) => groups.valid.push(index),
+        }
+    }
+    groups
+}
+
+/// The flat list replaces the groups only when the single hoster is the no-hoster list and it is
+/// Ready (`no_hoster_list`, T-46b-007).
+pub fn is_flat(states: &[HosterState]) -> bool {
+    matches!(states, [HosterState::Ready(ready)] if ready.name == NO_HOSTER_LIST)
+}
+
 /// `loadHosterVideos(source, hoster)` (behaviour 3.8, not forced). A lazy hoster stays `Idle`. A
 /// hoster whose videos cannot be listed is `Error`. Every other video starts `Queue`.
 pub fn load_hoster_state<S: VideoSource>(source: &S, hoster: &Hoster) -> HosterState {
     if hoster.lazy {
         return HosterState::Idle(hoster.hoster_name.clone());
     }
+    load_hoster_state_forced(source, hoster)
+}
+
+/// `loadHosterVideos(source, hoster, force = true)`: the videos are listed even for a lazy hoster,
+/// which is how a click on an `Idle` hoster loads it (behaviour 4.4).
+pub fn load_hoster_state_forced<S: VideoSource>(source: &S, hoster: &Hoster) -> HosterState {
     match get_videos(source, hoster) {
         Ok(videos) => HosterState::Ready(ReadyHoster {
             name: hoster.hoster_name.clone(),
@@ -737,5 +831,79 @@ mod local_tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(local_videos(dir.path(), "Show/none.mkv").is_empty());
         assert!(local_videos(dir.path(), "no-slash").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+    use crate::types::{ReadyHoster, Video, VideoState};
+
+    fn ready(name: &str, videos: usize) -> HosterState {
+        HosterState::Ready(ReadyHoster {
+            name: name.to_owned(),
+            video_list: vec![Video::default(); videos],
+            video_state: vec![VideoState::Queue; videos],
+        })
+    }
+
+    fn sample() -> Vec<HosterState> {
+        vec![
+            HosterState::Idle("A".to_owned()),
+            HosterState::Loading("B".to_owned()),
+            ready("C", 2),
+            HosterState::Error("D".to_owned()),
+            ready("E", 0),
+        ]
+    }
+
+    #[test]
+    fn groups_are_valid_failed_and_empty_in_input_order() {
+        let g = group_hosters(&sample());
+        assert_eq!(g.valid, vec![0, 1, 2]);
+        assert_eq!(g.failed, vec![3]);
+        assert_eq!(g.empty, vec![4]);
+    }
+
+    #[test]
+    fn the_view_applies_the_failed_and_empty_flags_not_the_grouping() {
+        let g = group_hosters(&sample());
+        assert_eq!(g.failed_shown(true), &[3]);
+        assert!(g.failed_shown(false).is_empty());
+        assert_eq!(g.empty_shown(true), &[4]);
+        assert!(g.empty_shown(false).is_empty());
+    }
+
+    #[test]
+    fn no_hosters_give_empty_groups() {
+        assert_eq!(group_hosters(&[]), HosterGroups::default());
+    }
+
+    #[test]
+    fn flat_mode_needs_one_ready_no_hoster_list() {
+        assert!(is_flat(&[ready(NO_HOSTER_LIST, 3)]));
+        assert!(!is_flat(&[HosterState::Loading(NO_HOSTER_LIST.to_owned())]));
+        assert!(!is_flat(&[ready("C", 1)]));
+        assert!(!is_flat(&[ready(NO_HOSTER_LIST, 1), ready("C", 1)]));
+    }
+
+    #[test]
+    fn selection_and_expansion_follow_the_hoster_name_not_the_position() {
+        let mut keys = QualityKeys::default();
+        keys.toggle_expanded("C");
+        keys.select("C", 1);
+        assert!(keys.is_expanded("C") && !keys.is_expanded("A"));
+        assert!(keys.is_selected("C", 1) && !keys.is_selected("C", 0));
+        let states = sample();
+        assert_eq!(keys.selected_position(&states), Some((2, 1)));
+        let mut reordered = states.clone();
+        reordered.reverse();
+        assert_eq!(keys.selected_position(&reordered), Some((2, 1)));
+        reordered.insert(0, HosterState::Idle("Z".to_owned()));
+        assert_eq!(keys.selected_position(&reordered), Some((3, 1)));
+        assert!(keys.is_expanded("C"));
+        keys.toggle_expanded("C");
+        assert!(!keys.is_expanded("C"));
+        assert_eq!(keys.selected_position(&states[..2]), None);
     }
 }

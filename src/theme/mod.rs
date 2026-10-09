@@ -18,8 +18,10 @@ pub mod dark;
 pub mod empty_state;
 pub mod icons;
 pub mod loading;
+pub mod monet;
 pub mod prefs;
 pub mod resolve;
+pub mod size_class;
 mod schemes;
 #[cfg(test)]
 mod schemes_xml;
@@ -37,7 +39,7 @@ pub use tokens::Tokens;
 pub enum SchemeSel {
     /// Linux default for new installs. Emits no GTK named-colour overrides.
     System,
-    /// One of the Aniyomi schemes (Monet resolves to Default until HCT generation lands).
+    /// One of the Aniyomi schemes. `Scheme(MONET)` is the dynamic choice (see `monet`).
     Scheme(Scheme),
 }
 
@@ -69,16 +71,39 @@ impl Default for ThemeSettings {
     }
 }
 
-/// Installs the theme before the first window: the icon bundle, the stylesheets, then the portal
-/// follower. Uses the default settings (the GTK theme, system mode); the stored choice joins them
-/// once the preference store is reachable from the window lane.
+thread_local! {
+    /// The window's size class, updated by `attach_window`. `Compact` until the first layout.
+    static WINDOW_CLASS: std::cell::Cell<size_class::WindowClass> =
+        const { std::cell::Cell::new(size_class::WindowClass::Compact) };
+}
+
+/// The current window size class (T-49a-021). Read by the layouts that branch on it.
+pub fn window_class() -> size_class::WindowClass {
+    WINDOW_CLASS.with(std::cell::Cell::get)
+}
+
+/// Installs the theme before the first window: the icon bundle, the stored choice (read from the
+/// preference store), the stylesheets, the portal follower, and the Monet seed read. A seed that
+/// arrives later re-renders the palette (T-49a-005, T-49a-058).
 pub fn startup() {
     let Some(display) = gtk::gdk::Display::default() else {
         return;
     };
     icons::register(&display);
-    apply::install(&display, ThemeSettings::default());
+    let store = crate::data::app().base.store().clone();
+    apply::install(&display, prefs::read_settings(&store));
     apply::follow_system();
+    monet::read_seed(|_seed| {
+        apply::refresh();
+    });
+}
+
+/// Tracks the window's size class and records each change (T-49a-058). Call once the window exists.
+pub fn attach_window(window: &impl gtk::prelude::IsA<gtk::Window>) {
+    size_class::attach(window, |class| {
+        WINDOW_CLASS.with(|c| c.set(class));
+        tracing::debug!(?class, "window size class changed");
+    });
 }
 
 /// A resolved palette, ready for CSS.
@@ -98,17 +123,41 @@ pub fn is_dark(mode: ThemeMode, system_dark: bool) -> bool {
     }
 }
 
-/// Pure entry point: settings and the system dark flag in, tokens out. No GTK calls.
+/// Entry point: settings and the system dark flag in, tokens out. Reads the stored Monet seed,
+/// then calls `resolve_with_seed`; the seed lives in `monet` and is set by the startup read.
 pub fn resolve(settings: &ThemeSettings, system_dark: bool) -> Resolved {
+    resolve_with_seed(settings, system_dark, monet::seed(), monet::contrast())
+}
+
+/// Pure resolution with an explicit Monet seed (no GTK calls, unit-tested).
+/// Monet with a seed generates its palette; Monet without one resolves to `System` (E-49-06).
+pub fn resolve_with_seed(
+    settings: &ThemeSettings,
+    system_dark: bool,
+    seed: Option<tokens::Rgba>,
+    contrast: f64,
+) -> Resolved {
     let dark = is_dark(settings.mode, system_dark);
+    let monet_choice = settings.scheme == SchemeSel::Scheme(Scheme::MONET);
+    if let (true, Some(seed)) = (monet_choice, seed) {
+        let mut tokens = monet::generate(seed, dark, contrast);
+        if dark && settings.amoled {
+            resolve::apply_amoled(&mut tokens.colors);
+        }
+        tokens.amoled = dark && settings.amoled;
+        return Resolved {
+            tokens,
+            system_scheme: false,
+        };
+    }
     let app = match settings.scheme {
-        SchemeSel::System => Scheme::DEFAULT,
-        SchemeSel::Scheme(app) => app,
+        SchemeSel::Scheme(app) if !monet_choice => app,
+        _ => Scheme::DEFAULT,
     };
     let scheme = resolve::scheme_for(app);
     Resolved {
         tokens: resolve::tokens_for(scheme, dark, settings.amoled),
-        system_scheme: settings.scheme == SchemeSel::System,
+        system_scheme: settings.scheme == SchemeSel::System || monet_choice,
     }
 }
 
@@ -151,6 +200,21 @@ mod tests {
             ..ThemeSettings::default()
         };
         assert!(!resolve(&s, false).system_scheme);
+    }
+
+    // T-49a-007: a stored Monet with no seed resolves to System.
+    #[test]
+    fn monet_without_a_seed_resolves_to_system() {
+        let s = ThemeSettings {
+            scheme: SchemeSel::Scheme(Scheme::MONET),
+            mode: ThemeMode::LIGHT,
+            ..ThemeSettings::default()
+        };
+        let none = resolve_with_seed(&s, false, None, 0.0);
+        assert!(none.system_scheme);
+        assert_eq!(none.tokens, resolve_with_seed(&ThemeSettings::default(), false, None, 0.0).tokens);
+        let seeded = resolve_with_seed(&s, false, Some(Rgba::argb(0xFF1E_88E5)), 0.0);
+        assert!(!seeded.system_scheme);
     }
 
     #[test]

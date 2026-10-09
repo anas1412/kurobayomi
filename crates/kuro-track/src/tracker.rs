@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use tokio::sync::watch;
 
 use crate::error::TrackError;
+use crate::messages::MsgKey;
 use crate::model::search::{AnimeTrackSearch, MangaTrackSearch};
 use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 
@@ -25,6 +26,11 @@ pub trait Tracker: Send + Sync {
     fn logo(&self) -> LogoRef;
     /// `0xAARRGGBB`.
     fn logo_color(&self) -> u32;
+    /// The message the Settings row shows instead of its login state while the tracker cannot log in yet, for
+    /// example MyAnimeList without a client id (T-29a-040). `None` when the tracker is ready.
+    fn setup_message(&self) -> Option<MsgKey> {
+        None
+    }
     fn supports_reading_dates(&self) -> bool {
         false
     }
@@ -39,6 +45,11 @@ pub trait Tracker: Send + Sync {
     /// Clears the stored credentials, token and auth-expired flag.
     fn logout(&self) -> Result<(), TrackError>;
     fn is_logged_in(&self) -> bool;
+    /// True when the stored login expired (the token was refused or is past its expiry). The login row then shows
+    /// "Session expired, log in again".
+    fn auth_expired(&self) -> bool {
+        false
+    }
     /// Emits the login state. Only changes are sent.
     fn login_state(&self) -> watch::Receiver<bool>;
     fn save_credentials(&self, username: &str, password: &str) -> Result<(), TrackError>;

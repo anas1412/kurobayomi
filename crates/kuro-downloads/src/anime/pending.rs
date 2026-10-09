@@ -115,7 +115,7 @@ impl AnimePendingStore {
             let (anime, episode) = match decoded {
                 Ok(pair) => pair,
                 Err(err) => {
-                    tracing::error!(target: "kuro::downloads", rowid, error = %err, "pending delete row is corrupt, moved aside");
+                    tracing::error!(target: "kuro_downloads", rowid, error = %err, "pending delete row is corrupt, moved aside");
                     tx.execute(
                         "INSERT INTO anime_download_pending_corrupt(source_rowid, reason, recorded_at) \
                          VALUES (?1, ?2, strftime('%s','now'))",

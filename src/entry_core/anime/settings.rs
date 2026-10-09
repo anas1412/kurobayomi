@@ -9,6 +9,7 @@ use kuro_domain::flags::{TriState, set_flag, tri};
 use kuro_i18n::MsgKey;
 
 use crate::entry_core::flags::{Write, filter_write};
+use crate::entry_core::message::UserMessage;
 
 /// Applies one masked write to an episode flag word.
 pub fn apply(word: i64, write: Write) -> i64 {
@@ -175,9 +176,33 @@ pub fn summaries_write(currently_shown: bool) -> Write {
     (value, ep::SUMMARIES_MASK)
 }
 
+/// The line the settings window shows for an entry outside the library (T-39b-012): what is set there lives in memory
+/// while the page is open, and nothing is written to the entry. Not in the string catalogue yet, so it is a literal.
+pub fn session_note(favorite: bool) -> Option<&'static str> {
+    (!favorite).then_some("Settings are kept for this session")
+}
+
+/// The snackbar after "set as default" for episodes (T-39b-010): once per successful save. A failed save shows
+/// nothing, and the list itself is never changed by the save (no optimistic write).
+pub fn default_saved_message(saved: bool) -> Option<UserMessage> {
+    saved.then_some(UserMessage::EpisodeSettingsUpdated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_entry_outside_the_library_keeps_its_settings_for_the_session() {
+        assert_eq!(session_note(false), Some("Settings are kept for this session"));
+        assert_eq!(session_note(true), None);
+    }
+
+    #[test]
+    fn set_as_default_announces_only_a_successful_save() {
+        assert_eq!(default_saved_message(true), Some(UserMessage::EpisodeSettingsUpdated));
+        assert_eq!(default_saved_message(false), None);
+    }
 
     #[test]
     fn downloaded_only_forces_enabled_is_without_touching_the_bits() {

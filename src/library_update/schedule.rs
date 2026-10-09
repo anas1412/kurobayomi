@@ -112,4 +112,25 @@ mod tests {
         assert_eq!(runs.load(Ordering::SeqCst), 0);
         drop(tx);
     }
+
+    #[tokio::test]
+    async fn a_changed_interval_replaces_the_wait_and_closing_the_setting_ends_the_loop() {
+        // SC-03: a new interval replaces the wait without running a pass. Closing the setting ends the loop.
+        let (tx, rx) = watch::channel(1_000u32);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&runs);
+        let handle = tokio::spawn(run_schedule(rx, move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async { PassStatus::Success }
+        }));
+        tx.send(2_000).expect("the loop is listening");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+        drop(tx);
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("the loop ends when its setting is dropped")
+            .expect("the loop does not panic");
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+    }
 }

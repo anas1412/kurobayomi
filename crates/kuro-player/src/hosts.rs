@@ -4,6 +4,7 @@
 //! top one first.
 
 use crate::enums::{Dialogs, Panels, Sheets};
+use crate::overlay::ControlsModel;
 use crate::state::PlayerState;
 
 /// A layer of the overlay, from the top of the stack.
@@ -14,12 +15,21 @@ pub enum Layer {
     Dialog,
 }
 
-/// Opens a sheet. The chapter sheet does nothing and closes when there is no chapter (E-46-065).
-pub fn open_sheet(state: &mut PlayerState, sheet: Sheets, has_chapter: bool) {
-    state.sheet = match sheet {
-        Sheets::Chapters if !has_chapter => Sheets::None,
-        other => other,
-    };
+/// Opens a sheet. A sheet replaces any other sheet, and closes the panel and dialog (VM:721-730).
+/// The chapter sheet does nothing and closes when there is no chapter (E-46-065). Returns `true`
+/// when a sheet opened, which means the controls must be hidden.
+pub fn open_sheet(state: &mut PlayerState, sheet: Sheets, has_chapter: bool) -> bool {
+    if sheet == Sheets::Chapters && !has_chapter {
+        state.sheet = Sheets::None;
+        return false;
+    }
+    state.sheet = sheet;
+    if sheet == Sheets::None {
+        return false;
+    }
+    state.panel = Panels::None;
+    state.dialog = Dialogs::None;
+    true
 }
 
 /// Opens a panel. A panel hides the controls and closes any sheet or dialog (VM:721-730). Returns
@@ -45,8 +55,21 @@ pub fn has_overlay(state: &PlayerState) -> bool {
     state.sheet != Sheets::None || state.panel != Panels::None || state.dialog != Dialogs::None
 }
 
-/// Escape or back: closes the top layer and reports which one. `None` when nothing is open. The
-/// controls are shown once `has_overlay` is false again.
+/// Escape or back, then the controls come back once nothing is open (E-46-076): `close_top`, and
+/// `show` when no layer is left. The countdown restarts from `now_ms`.
+pub fn close_top_and_show(
+    state: &mut PlayerState,
+    controls: &mut ControlsModel,
+    now_ms: u64,
+) -> Option<Layer> {
+    let layer = close_top(state)?;
+    if !has_overlay(state) {
+        controls.show(now_ms, false);
+    }
+    Some(layer)
+}
+
+/// Closes the top layer and reports which one. `None` when nothing is open.
 pub fn close_top(state: &mut PlayerState) -> Option<Layer> {
     if state.sheet != Sheets::None {
         state.sheet = Sheets::None;
@@ -62,10 +85,11 @@ pub fn close_top(state: &mut PlayerState) -> Option<Layer> {
     }
 }
 
-/// Choosing a chapter closes the sheet and seeks to the chapter start. The caller then unpauses
-/// (PC:612-616).
-pub fn choose_chapter(state: &mut PlayerState) {
+/// Choosing a chapter closes the sheet. The caller seeks to the chapter start and then unpauses:
+/// returns `true` for the unpause (PC:612-616).
+pub fn choose_chapter(state: &mut PlayerState) -> bool {
     state.sheet = Sheets::None;
+    true
 }
 
 /// Dismissing the screenshot sheet closes it and says whether to unpause. Only playback that was
@@ -146,10 +170,42 @@ mod tests {
     }
 
     #[test]
-    fn choosing_a_chapter_closes_the_sheet() {
+    fn choosing_a_chapter_closes_the_sheet_and_asks_for_an_unpause() {
         let mut s = PlayerState::default();
         s.sheet = Sheets::Chapters;
-        choose_chapter(&mut s);
+        assert!(choose_chapter(&mut s));
         assert_eq!(s.sheet, Sheets::None);
+    }
+
+    #[test]
+    fn opening_a_sheet_closes_the_panel_and_dialog_and_hides_controls() {
+        let mut s = PlayerState::default();
+        s.panel = Panels::VideoFilters;
+        s.dialog = Dialogs::EpisodeList;
+        assert!(open_sheet(&mut s, Sheets::More, true));
+        assert_eq!(s.sheet, Sheets::More);
+        assert_eq!(s.panel, Panels::None);
+        assert_eq!(s.dialog, Dialogs::None);
+        assert!(!open_sheet(&mut s, Sheets::None, true));
+        assert_eq!(s.sheet, Sheets::None);
+    }
+
+    #[test]
+    fn escape_shows_the_controls_only_after_the_last_layer_closes() {
+        let mut s = PlayerState::default();
+        let mut controls = ControlsModel::new(true, 4000);
+        s.sheet = Sheets::More;
+        s.panel = Panels::AudioDelay;
+        assert_eq!(
+            close_top_and_show(&mut s, &mut controls, 100),
+            Some(Layer::Sheet)
+        );
+        assert!(!controls.shown());
+        assert_eq!(
+            close_top_and_show(&mut s, &mut controls, 200),
+            Some(Layer::Panel)
+        );
+        assert!(controls.shown());
+        assert_eq!(close_top_and_show(&mut s, &mut controls, 300), None);
     }
 }

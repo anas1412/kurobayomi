@@ -2,6 +2,9 @@
 //! mode menu. Upstream: `presentation/entries/components/EntryToolbar.kt` and `MangaScreen.kt:295-308, 567-568`.
 //! Pure: the widget reads these and sets the opacity or the menu items.
 
+use crate::entry_core::detail::EntryState;
+use crate::entry_core::view::{selection_counts, view};
+
 /// The overflow entries in the order they are shown (behaviour: Refresh, Edit categories, Migrate, Share, Settings).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Overflow {
@@ -50,9 +53,89 @@ pub fn action_menu(selected_visible: usize) -> ActionMenu {
     if selected_visible > 0 { ActionMenu::Selection } else { ActionMenu::Normal }
 }
 
+/// What the header bar of a ready page shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BarState {
+    pub menu: ActionMenu,
+    /// Every selected chapter, the ones a filter hides included (Back and Escape read this).
+    pub selected_total: usize,
+    /// The selected chapters the list shows: the count in the action mode title.
+    pub selected_visible: usize,
+    /// The Download menu is there for a manga that is not local.
+    pub download_menu: bool,
+    /// A filter is on: the Filter button is tinted (the forced downloaded-only filter counts).
+    pub filter_active: bool,
+    /// The overflow entries, in order.
+    pub overflow: Vec<Overflow>,
+}
+
+/// The header bar state of `page`. `http_source` and `configurable_source` come from the source, which the page does
+/// not hold: Share needs an HTTP source and Settings a configurable one.
+pub fn bar_state(page: &EntryState, http_source: bool, configurable_source: bool) -> BarState {
+    let ids: Vec<i64> = page.selection.ids().collect();
+    let shown = view(&page.chapters, page.manga.flags, page.downloaded_only, page.manga.local);
+    let (selected_total, selected_visible) = selection_counts(&ids, &shown);
+    BarState {
+        menu: action_menu(selected_visible),
+        selected_total,
+        selected_visible,
+        download_menu: !page.manga.local,
+        filter_active: page.manga.flags.filter_active(page.downloaded_only),
+        overflow: overflow_items(page.manga.favorite, http_source, configurable_source),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entry_core::chapter::ChapterRow;
+    use crate::entry_core::detail::{LoadContext, LoadState, MangaRow, SourceInfo, finish_load};
+    use crate::entry_core::flags::ChapterFlags;
+
+    fn page(flags: i64, local: bool, favorite: bool, rows: Vec<ChapterRow>) -> Box<EntryState> {
+        let manga = MangaRow {
+            id: 1,
+            source: 1,
+            url: String::new(),
+            title: "t".into(),
+            author: None,
+            artist: None,
+            description: None,
+            genres: vec![],
+            status: 0,
+            thumbnail_url: None,
+            initialized: true,
+            favorite,
+            local,
+            flags: ChapterFlags(flags),
+        };
+        match finish_load(Some(manga), rows, SourceInfo::default(), &LoadContext::default()).state {
+            LoadState::Ready(page) => page,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn the_bar_follows_the_page() {
+        let rows = vec![ChapterRow::new(1, "a", 1.0), ChapterRow { read: true, ..ChapterRow::new(2, "b", 2.0) }];
+        let mut p = page(0x100, false, true, rows.clone());
+        let bar = bar_state(&p, false, false);
+        assert_eq!((bar.menu, bar.download_menu, bar.filter_active), (ActionMenu::Normal, true, false));
+        assert_eq!(bar.overflow, vec![Overflow::Refresh, Overflow::EditCategories, Overflow::Migrate]);
+        // the Download menu is not offered for a local manga, and a library filter tints the Filter button
+        let local = page(0x100 | kuro_db::flags::chapter::SHOW_UNREAD, true, true, rows);
+        let bar = bar_state(&local, true, true);
+        assert!(!bar.download_menu && bar.filter_active);
+        assert_eq!(bar.overflow, vec![Overflow::Refresh, Overflow::EditCategories, Overflow::Migrate, Overflow::Share, Overflow::Settings]);
+        // a selection on a visible row switches to the action mode; one the filter hides counts in the total only
+        p.selection.set_all(&[1, 2], true);
+        let bar = bar_state(&p, false, false);
+        assert_eq!((bar.menu, bar.selected_total, bar.selected_visible), (ActionMenu::Selection, 2, 2));
+        let mut hidden = page(0x100 | kuro_db::flags::chapter::SHOW_UNREAD, false, true, vec![ChapterRow { read: true, ..ChapterRow::new(2, "b", 2.0) }]);
+        hidden.selection.set_all(&[2], true);
+        let bar = bar_state(&hidden, false, false);
+        assert_eq!((bar.menu, bar.selected_total, bar.selected_visible), (ActionMenu::Normal, 1, 0));
+    }
 
     #[test]
     fn overflow_order_and_conditions() {

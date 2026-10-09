@@ -24,6 +24,8 @@ pub struct FakeSource {
     /// Overrides the display name, for rename tests.
     pub name: Option<String>,
     pub http: bool,
+    /// Makes this the local source: the manga folder is `<dir>/<title>`.
+    pub local_dir: Option<std::path::PathBuf>,
     pub unmetered: bool,
     pub page_count: usize,
     pub page_list_error: Option<SourceError>,
@@ -46,6 +48,7 @@ impl FakeSource {
             id,
             name: None,
             http: true,
+            local_dir: None,
             unmetered: false,
             page_count: 3,
             page_list_error: None,
@@ -81,6 +84,10 @@ impl ChapterSource for FakeSource {
 
     fn is_unmetered(&self) -> bool {
         self.unmetered
+    }
+
+    fn local_manga_dir(&self, manga_title: &str) -> Option<std::path::PathBuf> {
+        self.local_dir.as_ref().map(|d| d.join(manga_title))
     }
 
     async fn page_list(&self, _chapter: &ChapterRef) -> Result<Vec<Page>, SourceError> {
@@ -227,10 +234,13 @@ pub fn manga_manager(base: &std::path::Path) -> Arc<crate::manager::DownloadMana
         index,
         store,
         free_space: |_| Some(u64::MAX),
-        settings: crate::downloader::DownloadSettings::default(),
+        settings: crate::downloader::DownloadSettings { save_as_cbz: false, ..crate::downloader::DownloadSettings::default() },
         page_cache: None,
         connectivity,
         hold: Arc::new(crate::downloader::NoHold),
         restored: Vec::new(),
+        kept_rows: Vec::new(),
+        speed_limit_kib_s: None,
+        pending: Arc::new(crate::pending::MangaPendingStore::open_in_memory().unwrap()),
     }))
 }

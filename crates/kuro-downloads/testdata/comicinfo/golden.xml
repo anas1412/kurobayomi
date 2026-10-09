@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ComicInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ty="http://www.w3.org/2001/XMLSchema" xmlns:ay="http://www.w3.org/2001/XMLSchema">
+  <Title>Chapter 12.5</Title>
+  <Series>Test: Manga/1</Series>
+  <Number>12.5</Number>
+  <Summary>A &amp; B &lt;tag&gt;</Summary>
+  <Writer>Writer</Writer>
+  <Translator>Group</Translator>
+  <Genre>Action, Drama</Genre>
+  <Web>https://tracker.example/1 https://example.com/ch</Web>
+  <ty:PublishingStatusTachiyomi>Completed</ty:PublishingStatusTachiyomi>
+  <ty:Categories>Reading</ty:Categories>
+  <ay:SourceAniyomi>Source (EN)</ay:SourceAniyomi>
+</ComicInfo>

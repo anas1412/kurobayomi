@@ -27,6 +27,21 @@ pub enum VideoAspect {
     Stretch,
 }
 
+/// Orientation the player locks to (`PlayerEnums.kt:41-50`). Default `SensorLandscape`. Desktop
+/// windows ignore it, but the preference is stored and read by name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PlayerOrientation {
+    Free,
+    Video,
+    Portrait,
+    ReversePortrait,
+    SensorPortrait,
+    Landscape,
+    ReverseLandscape,
+    #[default]
+    SensorLandscape,
+}
+
 /// Single-tap action bound to a media key or gesture (`PlayerEnums.kt:61-67`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SingleActionGesture {
@@ -52,6 +67,20 @@ pub enum Sheets {
 }
 
 impl Sheets {
+    /// The id the mockup spec uses for each sheet (`spec/reader_player.json`).
+    pub const fn spec_id(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::PlaybackSpeed => "playback_speed",
+            Self::SubtitleTracks => "subtitle_tracks",
+            Self::AudioTracks => "audio_tracks",
+            Self::QualityTracks => "quality_tracks",
+            Self::Chapters => "chapters",
+            Self::More => "more",
+            Self::Screenshot => "screenshot",
+        }
+    }
+
     pub const ALL: [Self; 8] = [
         Self::None,
         Self::PlaybackSpeed,
@@ -114,6 +143,9 @@ pub enum Decoder {
 }
 
 impl Decoder {
+    /// The chips of the hardware decoding row. `Auto` is never shown (DC5).
+    pub const CHIPS: [Self; 4] = [Self::AutoCopy, Self::Sw, Self::Hw, Self::HwPlus];
+
     pub const fn title(self) -> &'static str {
         match self {
             Self::AutoCopy | Self::Auto => "Auto",
@@ -137,12 +169,42 @@ impl Decoder {
     /// names map to the choice they came from: VA-API and NVDEC zero-copy to `HwPlus`, their copy
     /// modes to `Hw`. Anything unknown is `Auto` (E-07).
     pub fn from_active(value: &str) -> Self {
+        Self::from_hwdec_current(value).unwrap_or(Self::Auto)
+    }
+
+    /// The decoder for a `hwdec-current` string, or `None` for a string this port does not know
+    /// (DC4). `no` is software, the copy modes are `Hw` and the zero-copy modes are `HwPlus`.
+    pub fn from_hwdec_current(value: &str) -> Option<Self> {
         match value {
-            "auto-copy" => Self::AutoCopy,
-            "no" => Self::Sw,
-            "vaapi-copy" | "nvdec-copy" | "mediacodec-copy" => Self::Hw,
-            "vaapi" | "nvdec" | "mediacodec" => Self::HwPlus,
-            _ => Self::Auto,
+            "auto-copy" => Some(Self::AutoCopy),
+            "auto" => Some(Self::Auto),
+            "no" => Some(Self::Sw),
+            "vaapi-copy" | "nvdec-copy" | "vulkan-copy" | "mediacodec-copy" => Some(Self::Hw),
+            "vaapi" | "nvdec" | "vulkan" | "mediacodec" => Some(Self::HwPlus),
+            _ => None,
+        }
+    }
+
+    /// The chip that is selected for the `hwdec-current` value mpv reports (E71). Unknown values and
+    /// `auto` select no chip, so the More sheet shows nothing selected instead of failing.
+    pub fn selected_chip(value: &str) -> Option<Self> {
+        Self::from_hwdec_current(value).filter(|d| Self::CHIPS.contains(d))
+    }
+
+    /// The Linux `hwdec` value for a chip, from the GPU vendor (design table, §8.1). Android values
+    /// never reach Linux, so this replaces `mpv_value` when a chip is written.
+    pub fn linux_value(self, gpu: GpuKind) -> &'static str {
+        let vendor_va = matches!(gpu, GpuKind::Intel | GpuKind::Amd);
+        match self {
+            Self::AutoCopy => "auto-copy",
+            Self::Auto => "auto",
+            Self::Sw => "no",
+            Self::Hw if vendor_va => "vaapi-copy",
+            Self::Hw if gpu == GpuKind::Nvidia => "nvdec-copy",
+            Self::Hw => "auto-copy",
+            Self::HwPlus if vendor_va => "vaapi",
+            Self::HwPlus if gpu == GpuKind::Nvidia => "nvdec",
+            Self::HwPlus => "auto",
         }
     }
 
@@ -154,6 +216,15 @@ impl Decoder {
             .find(|d| d.mpv_value() == value)
             .unwrap_or(Self::Auto)
     }
+}
+
+/// The GPU vendor that picks the Linux `hwdec` names (design table §8.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GpuKind {
+    Intel,
+    Amd,
+    Nvidia,
+    Other,
 }
 
 /// Video debanding filter (`PlayerEnums.kt:93-97`).
@@ -245,6 +316,29 @@ pub enum AudioChannels {
 }
 
 impl AudioChannels {
+    /// Label in the chip row. `Auto` and `AutoSafe` are the swapped pair (A6).
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::AutoSafe => "Auto-safe",
+            Self::Mono => "Mono",
+            Self::Stereo => "Stereo",
+            Self::ReverseStereo => "Reverse stereo",
+        }
+    }
+
+    /// The stored name (`getEnum`). An unknown name falls back to the default, `AutoSafe`.
+    pub fn from_stored(name: &str) -> Self {
+        match name {
+            "Auto" => Self::Auto,
+            "AutoSafe" => Self::AutoSafe,
+            "Mono" => Self::Mono,
+            "Stereo" => Self::Stereo,
+            "ReverseStereo" => Self::ReverseStereo,
+            _ => Self::default(),
+        }
+    }
+
     pub const fn setting(self) -> (&'static str, &'static str) {
         match self {
             Self::Auto => ("audio-channels", "auto-safe"),
@@ -269,6 +363,24 @@ mod tests {
                 .collect::<std::collections::HashSet<_>>()
                 .len(),
             8
+        );
+    }
+
+    #[test]
+    fn sheet_spec_ids_match_the_mockup() {
+        let ids: Vec<&str> = Sheets::ALL.iter().map(|s| s.spec_id()).collect();
+        assert_eq!(
+            ids,
+            [
+                "none",
+                "playback_speed",
+                "subtitle_tracks",
+                "audio_tracks",
+                "quality_tracks",
+                "chapters",
+                "more",
+                "screenshot",
+            ]
         );
     }
 
@@ -313,6 +425,42 @@ mod tests {
     }
 
     #[test]
+    fn hwdec_current_returns_none_for_unknown_strings() {
+        assert_eq!(Decoder::from_hwdec_current("no"), Some(Decoder::Sw));
+        assert_eq!(Decoder::from_hwdec_current("vaapi-copy"), Some(Decoder::Hw));
+        assert_eq!(Decoder::from_hwdec_current("vaapi"), Some(Decoder::HwPlus));
+        assert_eq!(Decoder::from_hwdec_current("bogus"), None);
+    }
+
+    #[test]
+    fn chips_are_the_four_visible_decoders_in_order() {
+        assert_eq!(
+            Decoder::CHIPS,
+            [Decoder::AutoCopy, Decoder::Sw, Decoder::Hw, Decoder::HwPlus]
+        );
+        assert!(!Decoder::CHIPS.contains(&Decoder::Auto));
+    }
+
+    #[test]
+    fn auto_writes_auto_safe_and_auto_safe_writes_auto() {
+        assert_eq!(
+            AudioChannels::Auto.setting(),
+            ("audio-channels", "auto-safe")
+        );
+        assert_eq!(
+            AudioChannels::AutoSafe.setting(),
+            ("audio-channels", "auto")
+        );
+    }
+
+    #[test]
+    fn audio_channel_labels_are_not_swapped() {
+        assert_eq!(AudioChannels::Auto.label(), "Auto");
+        assert_eq!(AudioChannels::AutoSafe.label(), "Auto-safe");
+        assert_eq!(AudioChannels::ReverseStereo.label(), "Reverse stereo");
+    }
+
+    #[test]
     fn custom_key_codes_round_trip() {
         assert_eq!(
             CustomKeyCode::from_code(0x10001),
@@ -332,5 +480,39 @@ mod tests {
             ("audio-channels", "auto")
         );
         assert_eq!(AudioChannels::ReverseStereo.setting().0, "af");
+    }
+}
+
+#[cfg(test)]
+mod decoder_chip_tests {
+    use super::*;
+
+    #[test]
+    fn dc6_linux_values_follow_the_vendor_table() {
+        assert_eq!(Decoder::Hw.linux_value(GpuKind::Nvidia), "nvdec-copy");
+        assert_eq!(Decoder::Hw.linux_value(GpuKind::Intel), "vaapi-copy");
+        assert_eq!(Decoder::HwPlus.linux_value(GpuKind::Amd), "vaapi");
+        assert_eq!(Decoder::Hw.linux_value(GpuKind::Other), "auto-copy");
+        assert_eq!(Decoder::HwPlus.linux_value(GpuKind::Other), "auto");
+        assert_eq!(Decoder::Sw.linux_value(GpuKind::Nvidia), "no");
+    }
+
+    #[test]
+    fn unknown_and_auto_values_select_no_chip() {
+        assert_eq!(Decoder::selected_chip("bogus"), None);
+        assert_eq!(Decoder::selected_chip("auto"), None);
+        assert_eq!(Decoder::selected_chip("vulkan-copy"), Some(Decoder::Hw));
+        assert_eq!(Decoder::selected_chip("nvdec"), Some(Decoder::HwPlus));
+        assert_eq!(Decoder::selected_chip("auto-copy"), Some(Decoder::AutoCopy));
+    }
+
+    #[test]
+    fn audio_channels_from_stored_falls_back_to_auto_safe() {
+        assert_eq!(AudioChannels::from_stored("Bogus"), AudioChannels::AutoSafe);
+        assert_eq!(
+            AudioChannels::from_stored("ReverseStereo"),
+            AudioChannels::ReverseStereo
+        );
+        assert_eq!(AudioChannels::from_stored("Auto"), AudioChannels::Auto);
     }
 }

@@ -32,18 +32,21 @@ mod tests {
     use super::*;
     use DownloadState::*;
 
+    // TST-06
     #[test]
     fn seven_sources_two_chapters_each_gives_five_first_chapters() {
         let items: Vec<_> = (1..=7).flat_map(|s| [(s, s * 10, Queue), (s, s * 10 + 1, Queue)]).collect();
         assert_eq!(pick_active(items, MAX_ACTIVE_SOURCES), vec![10, 20, 30, 40, 50]);
     }
 
+    // TST-07
     #[test]
     fn an_error_chapter_is_skipped_for_its_source() {
         let items = vec![(1, 10, Error), (1, 11, Queue), (2, 20, Downloading), (2, 21, Queue)];
         assert_eq!(pick_active(items, MAX_ACTIVE_SOURCES), vec![11, 20]);
     }
 
+    // TST-08
     #[test]
     fn nothing_is_picked_when_every_item_is_finished() {
         let items = vec![(1, 10, Downloaded), (2, 20, Error)];

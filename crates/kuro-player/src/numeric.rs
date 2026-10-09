@@ -42,6 +42,13 @@ impl IntChooser {
     }
 }
 
+/// Integer slider (T-46b-002): the float position truncated toward zero. Writes only when the
+/// integer changes, so `None` means nothing to write.
+pub fn int_slider_write(current: i32, position: f64) -> Option<i32> {
+    let next = position as i32;
+    (next != current).then_some(next)
+}
+
 /// Float chooser.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FloatChooser {
@@ -101,6 +108,13 @@ fn range_error(too_small: bool, too_big: bool) -> Option<PlayerMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn integer_slider_truncates_toward_zero_and_writes_only_changes() {
+        assert_eq!(int_slider_write(5, 7.9), Some(7));
+        assert_eq!(int_slider_write(5, 5.4), None);
+        assert_eq!(int_slider_write(0, -2.9), Some(-2));
+    }
 
     #[test]
     fn min_greater_than_max_is_rejected() {

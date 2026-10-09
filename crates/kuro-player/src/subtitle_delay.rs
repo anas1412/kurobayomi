@@ -170,7 +170,10 @@ impl SubtitleDelayPanel {
         let mut writes = Vec::new();
         match self.target {
             DelayTarget::Primary => {
-                writes.push(Write::pref("pref_subtitles_delay", self.delay_ms.to_string()));
+                writes.push(Write::pref(
+                    "pref_subtitles_delay",
+                    self.delay_ms.to_string(),
+                ));
             }
             DelayTarget::Secondary => {
                 writes.push(Write::pref(
@@ -179,7 +182,10 @@ impl SubtitleDelayPanel {
                 ));
             }
             DelayTarget::Both => {
-                writes.push(Write::pref("pref_subtitles_delay", self.delay_ms.to_string()));
+                writes.push(Write::pref(
+                    "pref_subtitles_delay",
+                    self.delay_ms.to_string(),
+                ));
                 writes.push(Write::pref(
                     "pref_subtitles_secondary_delay",
                     self.delay_ms.to_string(),
@@ -308,7 +314,10 @@ mod tests {
         );
 
         panel.set_speed(20.0);
-        assert_eq!(panel.apply(), vec![Write::pref("pref_subtitles_delay", "120")]);
+        assert_eq!(
+            panel.apply(),
+            vec![Write::pref("pref_subtitles_delay", "120")]
+        );
     }
 
     #[test]

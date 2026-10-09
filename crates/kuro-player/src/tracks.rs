@@ -129,6 +129,39 @@ pub fn select_sub(current: (i64, i64), id: i64) -> (i64, i64) {
     }
 }
 
+/// Footer of the subtitle sheet, shown under the list (T-46b-012).
+pub const SECONDARY_FOOTER: &str = "Secondary subtitles will have no ASS/SSA Styling.";
+
+/// The row label of a track (`getTrackTitle`, behaviour 1.4). Off (`-1`) is its name verbatim.
+/// Otherwise: `#id: name` when there is no language, `#id: name (lang)` with both, `#id: lang` with
+/// only a language, and `#id: ` when both are blank. Blank means empty or whitespace.
+pub fn track_label(id: i64, name: &str, language: Option<&str>) -> String {
+    if id == TRACK_NONE {
+        return name.to_owned();
+    }
+    let has_name = !name.trim().is_empty();
+    let lang = language.filter(|l| !l.trim().is_empty());
+    match (lang, has_name) {
+        (None, true) => format!("#{id}: {name}"),
+        (Some(lang), true) => format!("#{id}: {name} ({lang})"),
+        (Some(lang), false) => format!("#{id}: {lang}"),
+        (None, false) => format!("#{id}: "),
+    }
+}
+
+/// The slot badge of a checked row in the two-slot subtitle list: `#1` for the primary, `#2` for
+/// the secondary, `None` for an unselected track (T-46b-012).
+pub fn slot_label(current: (i64, i64), id: i64) -> Option<&'static str> {
+    let (primary, secondary) = current;
+    if id != TRACK_NONE && id == primary {
+        Some("#1")
+    } else if id != TRACK_NONE && id == secondary {
+        Some("#2")
+    } else {
+        None
+    }
+}
+
 /// Picks the default tracks. `prefer` is the TrackSelect seam: given a list and whether it is the
 /// subtitle list, it returns the index of the preferred track. Subtitles fall back to the first
 /// track. Audio falls back to index 1, the first real track after "Off".
@@ -204,6 +237,69 @@ pub fn add_file_args(kind: AddKind, path: &Path) -> Option<Vec<String>> {
     let text = path.to_str()?;
     let title = path.file_name().and_then(|name| name.to_str());
     Some(add_track_args(kind, text, title))
+}
+
+/// The command for the result of the file dialog. A cancelled pick (`None`) sends nothing
+/// (T-46a-027). The dialog has no filter, so any file is accepted.
+pub fn picked_file_args(kind: AddKind, picked: Option<&Path>) -> Option<Vec<String>> {
+    add_file_args(kind, picked?)
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    #[test]
+    fn a_cancelled_pick_sends_nothing_and_a_pick_adds_the_file() {
+        assert_eq!(picked_file_args(AddKind::Subtitle, None), None);
+        assert_eq!(
+            picked_file_args(AddKind::Audio, Some(Path::new("/a/b.mka"))),
+            Some(vec![
+                "audio-add".into(),
+                "/a/b.mka".into(),
+                "cached".into(),
+                "b.mka".into()
+            ])
+        );
+    }
+
+    #[test]
+    fn off_is_the_name_verbatim() {
+        assert_eq!(track_label(-1, "Off", None), "Off");
+    }
+
+    #[test]
+    fn the_label_rule_table() {
+        assert_eq!(track_label(1, "Japanese", None), "#1: Japanese");
+        assert_eq!(
+            track_label(2, "Commentary", Some("eng")),
+            "#2: Commentary (eng)"
+        );
+        assert_eq!(track_label(3, "", Some("eng")), "#3: eng");
+        assert_eq!(track_label(4, "  ", Some(" ")), "#4: ");
+        assert_eq!(track_label(5, "", None), "#5: ");
+    }
+
+    #[test]
+    fn a_blank_language_counts_as_no_language() {
+        assert_eq!(track_label(6, "Dub", Some("  ")), "#6: Dub");
+    }
+
+    #[test]
+    fn slots_mark_the_primary_then_the_secondary() {
+        assert_eq!(slot_label((3, 7), 3), Some("#1"));
+        assert_eq!(slot_label((3, 7), 7), Some("#2"));
+        assert_eq!(slot_label((3, 7), 9), None);
+        assert_eq!(slot_label((-1, -1), -1), None);
+    }
+
+    #[test]
+    fn the_subtitle_footer_text_is_exact() {
+        assert_eq!(
+            SECONDARY_FOOTER,
+            "Secondary subtitles will have no ASS/SSA Styling."
+        );
+    }
 }
 
 #[cfg(test)]

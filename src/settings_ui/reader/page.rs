@@ -6,7 +6,7 @@ use kuro_prefs::reader::{ReaderHideThreshold, TappingInvertMode};
 use super::rules::{row_enabled, ReaderState, Row};
 use crate::settings_ui::search::SearchableSettings;
 use crate::settings_ui::rows::{enum_choice, exclusive_switch, group, int_choice, item, slider, switch, switch_sub, visible};
-use crate::pref_model::model::Preference;
+use crate::pref_model::model::{Preference, PreferenceItem};
 
 /// `ReadingMode` codes (`pref_default_reading_mode_key`); 0 (Default) is not offered.
 pub const READING_MODES: [(i32, &str); 5] = [
@@ -61,6 +61,7 @@ pub const HIDE_THRESHOLDS: [(ReaderHideThreshold, &str); 4] = [
 ];
 
 /// The reader screen, for the settings search contract.
+#[allow(dead_code)] // the settings search is not routed yet
 pub struct ReaderScreen;
 
 impl SearchableSettings for ReaderScreen {
@@ -73,11 +74,23 @@ impl SearchableSettings for ReaderScreen {
     }
 }
 
-/// The whole reader page as a preference tree.
+/// The whole reader page as a preference tree, with the rows the rule table disables left out.
+#[allow(dead_code)] // the settings search is not routed yet
 pub fn rows(prefs: &Prefs) -> Vec<Preference> {
+    tree(prefs, true)
+}
+
+/// The same tree with the disabled rows kept (flagged), so a page built from the spec can tell a hidden row from one
+/// this module does not build.
+pub fn rows_all(prefs: &Prefs) -> Vec<Preference> {
+    tree(prefs, false)
+}
+
+fn tree(prefs: &Prefs, hide: bool) -> Vec<Preference> {
+    let vis = |items: Vec<PreferenceItem>| if hide { visible(items) } else { items };
     let r = &prefs.reader;
     let s = ReaderState::from_prefs(r);
-    let mut tree = vec![
+    let mut tree: Vec<Preference> = vec![
         item(int_choice("Default reading mode", &r.default_reading_mode, &READING_MODES, true)),
         item(switch_sub("Show reading mode", "Briefly show current mode when reader is opened", &r.show_reading_mode, true)),
         item(switch_sub(
@@ -90,9 +103,9 @@ pub fn rows(prefs: &Prefs) -> Vec<Preference> {
     ];
     tree.push(group(
         "Display",
-        visible(vec![
+        vis(vec![
             int_choice("Default rotation", &r.default_orientation_type, &ROTATIONS, true),
-            int_choice("Background", &r.reader_theme, &BACKGROUNDS, true),
+            int_choice("Background color", &r.reader_theme, &BACKGROUNDS, true),
             switch("Fullscreen", &r.fullscreen, true),
             switch("Keep screen on", &r.keep_screen_on, true),
             switch("Show page number", &r.show_page_number, true),
@@ -100,7 +113,7 @@ pub fn rows(prefs: &Prefs) -> Vec<Preference> {
     ));
     tree.push(group(
         "Reading",
-        visible(vec![
+        vis(vec![
             switch("Skip chapters marked read", &r.skip_read, true),
             switch("Skip filtered chapters", &r.skip_filtered, true),
             switch("Skip duplicate chapters", &r.skip_dupe, true),
@@ -110,7 +123,7 @@ pub fn rows(prefs: &Prefs) -> Vec<Preference> {
     ));
     tree.push(group(
         "Paged",
-        visible(vec![
+        vis(vec![
             int_choice("Tap zones", &r.navigation_mode_pager, &TAP_ZONES, true),
             enum_choice(
                 "Invert tap zones",
@@ -119,9 +132,9 @@ pub fn rows(prefs: &Prefs) -> Vec<Preference> {
                 row_enabled(Row::PagerInvertTapZones, &s),
             ),
             int_choice("Scale type", &r.image_scale_type, &SCALE_TYPES, true),
-            int_choice("Zoom start", &r.zoom_start, &ZOOM_STARTS, true),
+            int_choice("Zoom start position", &r.zoom_start, &ZOOM_STARTS, true),
             switch("Crop borders", &r.crop_borders, true),
-            switch("Zoom into wide images", &r.landscape_zoom, row_enabled(Row::PagerLandscapeZoom, &s)),
+            switch("Automatically zoom into wide images", &r.landscape_zoom, row_enabled(Row::PagerLandscapeZoom, &s)),
             switch("Pan wide images", &r.navigate_to_pan, row_enabled(Row::PagerPanWide, &s)),
             exclusive_switch("Split wide pages", &r.dual_page_split_paged, &r.dual_page_rotate_to_fit, true),
             switch(
@@ -131,7 +144,7 @@ pub fn rows(prefs: &Prefs) -> Vec<Preference> {
             ),
             exclusive_switch("Rotate wide pages to fit", &r.dual_page_rotate_to_fit, &r.dual_page_split_paged, true),
             switch(
-                "Flip orientation of rotated pages",
+                "Flip orientation of rotated wide pages",
                 &r.dual_page_rotate_to_fit_invert,
                 row_enabled(Row::PagerFlipRotated, &s),
             ),
@@ -140,7 +153,7 @@ pub fn rows(prefs: &Prefs) -> Vec<Preference> {
     let padding = format!("{}%", r.webtoon_side_padding.get());
     tree.push(group(
         "Long strip",
-        visible(vec![
+        vis(vec![
             int_choice("Tap zones", &r.navigation_mode_webtoon, &TAP_ZONES, true),
             enum_choice(
                 "Invert tap zones",
@@ -165,7 +178,7 @@ pub fn rows(prefs: &Prefs) -> Vec<Preference> {
             ),
             exclusive_switch("Rotate wide pages to fit", &r.dual_page_rotate_to_fit_webtoon, &r.dual_page_split_webtoon, true),
             switch(
-                "Flip orientation of rotated pages",
+                "Flip orientation of rotated wide pages",
                 &r.dual_page_rotate_to_fit_invert_webtoon,
                 row_enabled(Row::WebtoonFlipRotated, &s),
             ),
@@ -179,7 +192,6 @@ pub fn rows(prefs: &Prefs) -> Vec<Preference> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pref_model::model::PreferenceItem;
 
     fn group_titles(tree: &[Preference]) -> Vec<&str> {
         tree.iter()
@@ -219,7 +231,7 @@ mod tests {
         let tree = rows(&Prefs::in_memory());
         assert_eq!(
             titles_of(&tree, "Display"),
-            ["Default rotation", "Background", "Fullscreen", "Keep screen on", "Show page number"]
+            ["Default rotation", "Background color", "Fullscreen", "Keep screen on", "Show page number"]
         );
     }
 
@@ -228,7 +240,7 @@ mod tests {
         let prefs = Prefs::in_memory();
         let before = titles_of(&rows(&prefs), "Paged");
         assert!(!before.iter().any(|t| t == "Invert split page placement"));
-        assert!(!before.iter().any(|t| t == "Flip orientation of rotated pages"));
+        assert!(!before.iter().any(|t| t == "Flip orientation of rotated wide pages"));
         prefs.reader.dual_page_split_paged.set(true).unwrap();
         let after = titles_of(&rows(&prefs), "Paged");
         assert!(after.iter().any(|t| t == "Invert split page placement"));

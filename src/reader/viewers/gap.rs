@@ -27,6 +27,12 @@ mod tests {
     }
 
     #[test]
+    fn t027_the_plan_vectors_including_the_half_chapter_case() {
+        assert_eq!(calculate_chapter_gap(Some(5.0), Some(5.5)), -1);
+        assert!(calculate_chapter_gap(Some(5.0), Some(5.5)) <= 0, "callers hide values not above 0 (E-29)");
+    }
+
+    #[test]
     fn absent_chapters_give_no_gap() {
         assert_eq!(calculate_chapter_gap(None, Some(3.0)), 0);
         assert_eq!(calculate_chapter_gap(Some(3.0), None), 0);

@@ -15,6 +15,8 @@ pub enum Length {
     Short,
     Toast,
     Indefinite,
+    /// An exact length: the anime snack layer shows its toasts for 2 s (`message::TOAST_DURATION`).
+    Millis(u64),
 }
 
 impl Length {
@@ -23,6 +25,7 @@ impl Length {
             Self::Short => Some(SHORT_MS),
             Self::Toast => Some(TOAST_MS),
             Self::Indefinite => None,
+            Self::Millis(ms) => Some(ms),
         }
     }
 }

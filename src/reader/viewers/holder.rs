@@ -2,18 +2,29 @@
 //! download progress through `watch` receivers; a transition row follows the destination chapter's load state. A
 //! row's subscriptions end when the row is dropped.
 //!
-//! The row content is a label until page decoding exists; the state it shows comes from the pure functions here.
+//! A page whose bytes can be read (a file or an archive entry) shows a `PageView` once its status is ready, fitted by
+//! the viewer's settings; any other page keeps the label. The state the label shows comes from the pure functions here.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk::glib;
 use gtk::prelude::*;
 use tokio::sync::watch;
 
+use super::page_bytes;
+use super::page_opts::{PageOpts, background_rgb};
 use super::status::{PageView, StatusBranch};
 use crate::reader::model::{ChapterState, ReaderChapter, ReaderPage, ViewerChapters};
+use crate::reader::page_view::PageView as PageWidget;
 use crate::reader::strings;
+
+/// What a viewer hands a page row: the options it shows with and what a long press does (position in the page view).
+#[derive(Clone)]
+pub struct PageHost {
+    pub opts: PageOpts,
+    pub on_long_tap: Rc<dyn Fn(Rc<ReaderPage>, f64, f64)>,
+}
 
 /// Running subscriptions. Dropping the guard stops them.
 #[derive(Default)]
@@ -40,7 +51,30 @@ impl Tasks {
 /// A realised row: the widget in the strip and the subscriptions that keep it current.
 pub struct Row {
     pub widget: gtk::Widget,
+    page: Option<(PageWidget, Rc<Cell<PageOpts>>)>,
     _tasks: Tasks,
+}
+
+impl Row {
+    /// Applies changed settings to the shown page without reloading it (D-11): only what differs from the options the
+    /// page holds is applied, so an unrelated change does not reset the user's zoom.
+    pub fn apply(&self, new: &PageOpts) {
+        let Some((view, held)) = &self.page else { return };
+        let old = held.replace(*new);
+        if old.config != new.config {
+            view.set_config(new.config);
+        }
+        if old.background != new.background {
+            view.set_page_background(Some(rgba(*new)));
+        }
+        view.set_double_tap_anim_ms(new.double_tap_ms);
+        view.set_long_tap_enabled(new.long_tap);
+    }
+}
+
+fn rgba(opts: PageOpts) -> gtk::gdk::RGBA {
+    let (r, g, b) = background_rgb(opts.background);
+    gtk::gdk::RGBA::new(r, g, b, 1.0)
 }
 
 fn label(text: &str) -> gtk::Label {
@@ -52,7 +86,7 @@ fn label(text: &str) -> gtk::Label {
 
 /// A row with no state to follow.
 pub fn plain_row(text: &str) -> Row {
-    Row { widget: label(text).upcast(), _tasks: Tasks::default() }
+    Row { widget: label(text).upcast(), page: None, _tasks: Tasks::default() }
 }
 
 /// The line a page row shows for its holder view.
@@ -84,16 +118,53 @@ pub fn transition_text(base: &str, state: Option<&ChapterState>) -> String {
     }
 }
 
-/// A page row. The row follows `page` (the parent of an insert page) when there is one.
-pub fn page_row(base: String, page: Option<Rc<ReaderPage>>) -> Row {
+/// A page row. The row follows `page` (the parent of an insert page) when there is one. With a `host` and a page
+/// whose bytes can be read, the ready page is shown as an image (T-43b-014).
+pub fn page_row(base: String, page: Option<Rc<ReaderPage>>, host: Option<&PageHost>) -> Row {
     let Some(page) = page else { return plain_row(&base) };
     let text = label(&base);
+    let shown = host.and_then(|h| page_bytes::byte_source(&page.source).map(|src| (h.clone(), src)));
+    let (widget, view_slot): (gtk::Widget, Option<PageSlot>) = match &shown {
+        Some((host, _)) => {
+            let (stack, slot) = page_stack(&text, &base, &page, host);
+            (stack.upcast(), Some(slot))
+        }
+        None => (text.clone().upcast(), None),
+    };
+    let start_load = {
+        let (slot, src) = (view_slot.clone(), shown.as_ref().map(|(_, src)| src.clone()));
+        let started = Cell::new(false);
+        let (text, base) = (text.downgrade(), base.clone());
+        move || {
+            let (Some((view, opts)), Some(src)) = (slot.clone(), src.clone()) else { return };
+            if started.replace(true) {
+                return;
+            }
+            let (view, text, base) = (view.downgrade(), text.clone(), base.clone());
+            glib::spawn_future_local(async move {
+                let bytes = gtk::gio::spawn_blocking(move || page_bytes::read(&src)).await;
+                let (Some(view), Some(text)) = (view.upgrade(), text.upgrade()) else { return };
+                match bytes {
+                    Ok(Ok(bytes)) => view.set_image(bytes, opts.get().config),
+                    _ => {
+                        text.set_text(&page_text(&base, PageView::Error));
+                        if let Some(stack) = view.parent().and_downcast::<gtk::Stack>() {
+                            stack.set_visible_child_name("status");
+                        }
+                    }
+                }
+            });
+        }
+    };
     let branch = Rc::new(RefCell::new(StatusBranch::default()));
     let show = {
         let (weak, base) = (text.downgrade(), base.clone());
         move |view: PageView| {
             if let Some(text) = weak.upgrade() {
                 text.set_text(&page_text(&base, view));
+            }
+            if view == PageView::Ready {
+                start_load();
             }
         }
     };
@@ -115,7 +186,38 @@ pub fn page_row(base: String, page: Option<Rc<ReaderPage>>) -> Row {
     };
     on_progress(&page.progress.get());
     tasks.follow(page.progress.subscribe(), on_progress);
-    Row { widget: text.upcast(), _tasks: tasks }
+    Row { widget, page: view_slot, _tasks: tasks }
+}
+
+/// The page view of a row and the options it holds.
+type PageSlot = (PageWidget, Rc<Cell<PageOpts>>);
+
+/// The stack of a page row: the status label, and the page view that replaces it once the image has loaded.
+fn page_stack(text: &gtk::Label, base: &str, page: &Rc<ReaderPage>, host: &PageHost) -> (gtk::Stack, PageSlot) {
+    let stack = gtk::Stack::new();
+    stack.add_named(text, Some("status"));
+    let view = PageWidget::new();
+    stack.add_named(&view, Some("page"));
+    let opts = Rc::new(Cell::new(host.opts));
+    view.set_page_background(Some(rgba(host.opts)));
+    view.set_double_tap_anim_ms(host.opts.double_tap_ms);
+    view.set_long_tap_enabled(host.opts.long_tap);
+    let weak = stack.downgrade();
+    view.connect_image_loaded(move || {
+        if let Some(stack) = weak.upgrade() {
+            stack.set_visible_child_name("page");
+        }
+    });
+    let (weak, text, base) = (stack.downgrade(), text.downgrade(), base.to_owned());
+    view.connect_image_load_error(move || {
+        if let (Some(stack), Some(text)) = (weak.upgrade(), text.upgrade()) {
+            text.set_text(&page_text(&base, PageView::Error));
+            stack.set_visible_child_name("status");
+        }
+    });
+    let (on_long_tap, page) = (Rc::clone(&host.on_long_tap), Rc::clone(page));
+    view.connect_long_tap(move |x, y| on_long_tap(Rc::clone(&page), x, y));
+    (stack, (view, opts))
 }
 
 /// A transition card. The row follows the destination chapter's state when there is one.
@@ -129,7 +231,7 @@ pub fn transition_row(base: String, to: Option<Rc<ReaderChapter>>) -> Row {
             text.set_text(&transition_text(&base, Some(state)));
         }
     });
-    Row { widget: text.upcast(), _tasks: tasks }
+    Row { widget: text.upcast(), page: None, _tasks: tasks }
 }
 
 /// Calls `on_change` on the main loop whenever the load state of the current chapter or a neighbour changes

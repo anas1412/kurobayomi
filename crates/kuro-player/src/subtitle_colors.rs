@@ -212,6 +212,12 @@ mod tests {
     }
 
     #[test]
+    fn a_red_write_keeps_the_other_channels_and_word_names_are_rejected() {
+        assert_eq!(with_channel(0, Channel::Red, 255), 0x00FF_0000);
+        assert_eq!(parse_color("red"), None);
+    }
+
+    #[test]
     fn colors_parse_in_both_hex_forms_and_reject_the_rest() {
         assert_eq!(parse_color("#FFFFFFFF"), Some(-1));
         assert_eq!(parse_color("#00ff00"), Some(0xFF00FF00u32 as i32));
@@ -228,7 +234,10 @@ mod tests {
         assert_eq!(channel_value(argb, Channel::Red), 0x22);
         assert_eq!(channel_value(argb, Channel::Green), 0x33);
         assert_eq!(channel_value(argb, Channel::Blue), 0x44);
-        assert_eq!(with_channel(argb, Channel::Green, 0xAA), 0x1122AA44u32 as i32);
+        assert_eq!(
+            with_channel(argb, Channel::Green, 0xAA),
+            0x1122AA44u32 as i32
+        );
     }
 
     #[test]
@@ -291,10 +300,26 @@ mod tests {
         let start = Instant::now();
         let at = |ms: u64| start + Duration::from_millis(ms);
         let mut throttle = WriteThrottle::default();
-        assert!(throttle.offer(at(0), vec![Write::mpv("sub-color", "a")]).is_some());
-        assert!(throttle.offer(at(10), vec![Write::mpv("sub-color", "b")]).is_none());
-        assert!(throttle.offer(at(20), vec![Write::mpv("sub-color", "c")]).is_none());
-        assert!(throttle.offer(at(60), vec![Write::mpv("sub-color", "d")]).is_some());
+        assert!(
+            throttle
+                .offer(at(0), vec![Write::mpv("sub-color", "a")])
+                .is_some()
+        );
+        assert!(
+            throttle
+                .offer(at(10), vec![Write::mpv("sub-color", "b")])
+                .is_none()
+        );
+        assert!(
+            throttle
+                .offer(at(20), vec![Write::mpv("sub-color", "c")])
+                .is_none()
+        );
+        assert!(
+            throttle
+                .offer(at(60), vec![Write::mpv("sub-color", "d")])
+                .is_some()
+        );
         assert!(throttle.flush(at(61)).is_none());
         throttle.offer(at(70), vec![Write::mpv("sub-color", "e")]);
         assert_eq!(

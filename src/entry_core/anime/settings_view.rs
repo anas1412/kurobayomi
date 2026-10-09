@@ -11,8 +11,8 @@ use kuro_domain::flags::TriState;
 use kuro_i18n::{MsgKey, tr};
 
 use super::settings::{
-    DisplayRows, FilterRow, SortRow, display_mode_write, display_rows, filter_click, filter_rows, previews_write, sort_rows,
-    summaries_write,
+    DisplayRows, FilterRow, SortRow, display_mode_write, display_rows, filter_click, filter_rows, previews_write, session_note,
+    sort_rows, summaries_write,
 };
 use crate::entry_core::flags::Write;
 use crate::ui;
@@ -24,6 +24,9 @@ pub enum Change {
     Flag(Write),
     /// Sort by this key, or flip the direction when it is already the key.
     Sort(i64),
+    /// "Set as default" was confirmed: store the flags of this entry as the library default, and with `apply_all`
+    /// write them to every favorite too.
+    SetDefault { apply_all: bool },
 }
 
 pub struct SettingsWindow {
@@ -51,6 +54,36 @@ fn icon_row(label: &str, icon: &str) -> (Button, gtk::Image) {
     (Button::builder().child(&content).css_classes(["flat"]).build(), image)
 }
 
+/// The confirm dialog of "Set as default": the text, the library checkbox (off), Cancel and OK. OK reports
+/// `Change::SetDefault`.
+fn confirm_default(parent: &gtk::Window, on_change: Rc<dyn Fn(Change)>) {
+    let also = gtk::CheckButton::builder().label(tr(MsgKey::also_set_episode_settings_for_library)).build();
+    let ok = Button::builder().label(tr(MsgKey::action_ok)).css_classes(["suggested-action"]).build();
+    let cancel = Button::with_label(&tr(MsgKey::action_cancel));
+    let buttons = GBox::new(O::Horizontal, 8);
+    buttons.set_halign(Align::End);
+    buttons.append(&cancel);
+    buttons.append(&ok);
+    let col = ui::column();
+    col.append(&Label::builder().label(tr(MsgKey::confirm_set_chapter_settings)).wrap(true).xalign(0.0).build());
+    col.append(&also);
+    col.append(&buttons);
+    let dialog = ui::modal(Label::new(Some(&tr(MsgKey::episode_settings))).upcast_ref(), &col, 360, 200);
+    dialog.set_transient_for(Some(parent));
+    cancel.connect_clicked({
+        let dialog = dialog.clone();
+        move |_| dialog.close()
+    });
+    ok.connect_clicked({
+        let dialog = dialog.clone();
+        move |_| {
+            dialog.close();
+            on_change(Change::SetDefault { apply_all: also.is_active() });
+        }
+    });
+    dialog.present();
+}
+
 fn clear(page: &GBox) {
     while let Some(child) = page.first_child() {
         page.remove(&child);
@@ -58,8 +91,9 @@ fn clear(page: &GBox) {
 }
 
 impl SettingsWindow {
-    /// Builds the window. `on_change` is called for each click.
-    pub fn new(word: i64, downloaded_only: bool, on_change: Rc<dyn Fn(Change)>) -> Rc<Self> {
+    /// Builds the window. `on_change` is called for each click. An entry outside the library (`favorite` false) shows
+    /// that its settings are kept for this session.
+    pub fn new(word: i64, downloaded_only: bool, favorite: bool, on_change: Rc<dyn Fn(Change)>) -> Rc<Self> {
         let page = || {
             let b = GBox::new(O::Vertical, 2);
             ui::margins(&b, 8);
@@ -72,7 +106,20 @@ impl SettingsWindow {
         stack.add_titled(&display, Some("display"), &tr(MsgKey::action_display));
         let switcher = gtk::StackSwitcher::new();
         switcher.set_stack(Some(&stack));
-        let window = ui::modal(switcher.upcast_ref(), &stack, 360, 380);
+        // under the tabs: the session note of an entry outside the library, and Set as default
+        let body = GBox::new(O::Vertical, 6);
+        stack.set_vexpand(true);
+        body.append(&stack);
+        if let Some(note) = session_note(favorite) {
+            body.append(&Label::builder().label(note).wrap(true).xalign(0.0).css_classes(["dim-label", "caption"]).margin_start(8).margin_end(8).build());
+        }
+        let set_default = Button::builder().label(tr(MsgKey::set_chapter_settings_as_default)).css_classes(["flat"]).halign(Align::End).build();
+        body.append(&set_default);
+        let window = ui::modal(switcher.upcast_ref(), &body, 360, 420);
+        set_default.connect_clicked({
+            let (window, on_change) = (window.clone(), Rc::clone(&on_change));
+            move |_| confirm_default(&window, Rc::clone(&on_change))
+        });
         let keys = gtk::EventControllerKey::new();
         keys.connect_key_pressed({
             let window = window.clone();

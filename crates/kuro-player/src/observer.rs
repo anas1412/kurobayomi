@@ -123,6 +123,24 @@ pub fn route(event: &MpvEvent) -> Route {
     }
 }
 
+/// Passes a `time-pos` value on only when the whole second changes (T-45b-073). The caller sends
+/// the position events to the GTK loop through this gate.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WholeSecondGate {
+    last: Option<i64>,
+}
+
+impl WholeSecondGate {
+    /// `true` for the first value and for each new whole second. Repeats are dropped.
+    pub fn accept(&mut self, whole_second: i64) -> bool {
+        if self.last == Some(whole_second) {
+            return false;
+        }
+        self.last = Some(whole_second);
+        true
+    }
+}
+
 /// The subset of the mpv handle that observation needs. `MpvHandle` implements it; tests use a
 /// fake that records calls.
 pub trait MpvCommands {
@@ -135,6 +153,38 @@ pub fn observe_all(target: &mut impl MpvCommands) -> Result<(), MpvError> {
         target.observe(name, format)?;
     }
     Ok(())
+}
+
+/// The level of a forwarded mpv log line in the Rust logger (T-45a-008). `fatal` and `error` are
+/// errors, `warn` is a warning, `info` is info, and every other level (`v`, `debug`, `trace`) is
+/// debug.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+}
+
+pub fn log_level(mpv_level: &str) -> LogLevel {
+    match mpv_level {
+        "fatal" | "error" => LogLevel::Error,
+        "warn" => LogLevel::Warn,
+        "info" => LogLevel::Info,
+        _ => LogLevel::Debug,
+    }
+}
+
+/// Forwards one mpv log line to the Rust logger. The target is `mpv`, and the mpv module prefix is
+/// the `prefix` field (a tracing target must be a constant, so `mpv/<prefix>` cannot be built).
+pub fn forward_log(prefix: &str, mpv_level: &str, text: &str) {
+    let text = text.trim_end();
+    match log_level(mpv_level) {
+        LogLevel::Error => tracing::error!(target: "mpv", prefix, "{text}"),
+        LogLevel::Warn => tracing::warn!(target: "mpv", prefix, "{text}"),
+        LogLevel::Info => tracing::info!(target: "mpv", prefix, "{text}"),
+        LogLevel::Debug => tracing::debug!(target: "mpv", prefix, "{text}"),
+    }
 }
 
 /// Error text for end-file events and the last HTTP error from the mpv log (T-45a-008 / 009).
@@ -183,6 +233,16 @@ pub fn event_channel() -> (
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn position_events_fire_only_on_a_whole_second_change() {
+        let mut gate = WholeSecondGate::default();
+        let fired: Vec<bool> = [3, 3, 3, 4, 4, 5]
+            .into_iter()
+            .map(|s| gate.accept(s))
+            .collect();
+        assert_eq!(fired, vec![true, false, false, true, false, true]);
+    }
 
     #[derive(Default)]
     struct FakeMpv {
@@ -300,5 +360,29 @@ mod tests {
         handle.join().unwrap();
         assert_eq!(rx.try_recv().unwrap(), MpvEvent::FileLoaded);
         assert_eq!(rx.try_recv().unwrap(), MpvEvent::Seek);
+    }
+}
+
+#[cfg(test)]
+mod log_level_tests {
+    use super::*;
+
+    #[test]
+    fn t_fatal_and_error_are_errors_warn_is_warn_info_is_info_rest_is_debug() {
+        assert_eq!(log_level("fatal"), LogLevel::Error);
+        assert_eq!(log_level("error"), LogLevel::Error);
+        assert_eq!(log_level("warn"), LogLevel::Warn);
+        assert_eq!(log_level("info"), LogLevel::Info);
+        assert_eq!(log_level("v"), LogLevel::Debug);
+        assert_eq!(log_level("debug"), LogLevel::Debug);
+        assert_eq!(log_level("trace"), LogLevel::Debug);
+        assert_eq!(log_level("unknown"), LogLevel::Debug);
+    }
+
+    #[test]
+    fn forwarding_a_line_does_not_panic_at_any_level() {
+        forward_log("cplayer", "fatal", "boom\n");
+        forward_log("ffmpeg", "info", "ready");
+        forward_log("ffmpeg", "v", "chatter");
     }
 }

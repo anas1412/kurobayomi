@@ -58,6 +58,23 @@ pub fn handle(state: &mut PlayerState, input: DialogInput, confirm: impl FnOnce(
     }
 }
 
+/// The values of an integer picker: `min`, `min + step`, and so on up to `max` (`min..=max step`).
+/// `None` when `step` is not positive, which Kotlin rejects (E-46-028b).
+pub fn picker_values(min: i32, max: i32, step: i32) -> Option<Vec<i32>> {
+    (step > 0).then(|| (min..=max).step_by(step as usize).collect())
+}
+
+/// The row the picker opens on: the default's row, or row 0 when the default is not in `values`
+/// (E-46-028).
+pub fn picker_start_index(values: &[i32], default: i32) -> usize {
+    values.iter().position(|v| *v == default).unwrap_or(0)
+}
+
+/// What a dismissal commits: the value of the displayed row, never the default (E-46-027).
+pub fn commit_value(values: &[i32], selection: usize) -> Option<i32> {
+    values.get(selection).copied()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +139,37 @@ mod tests {
         assert_eq!(PADDING_PX, 16);
         assert!(!DECORATED);
         assert_eq!(DEFAULT_WIDTH, None);
+    }
+}
+
+#[cfg(test)]
+mod picker_tests {
+    use super::*;
+
+    #[test]
+    fn values_step_up_to_the_maximum_and_skip_past_it() {
+        assert_eq!(picker_values(0, 10, 3), Some(vec![0, 3, 6, 9]));
+        assert_eq!(picker_values(5, 5, 1), Some(vec![5]));
+        assert_eq!(picker_values(10, 0, 1), Some(vec![]));
+    }
+
+    #[test]
+    fn a_zero_or_negative_step_is_rejected() {
+        assert_eq!(picker_values(0, 10, 0), None);
+        assert_eq!(picker_values(0, 10, -2), None);
+    }
+
+    #[test]
+    fn the_picker_starts_on_the_default_or_the_first_row() {
+        let values = [0, 3, 6, 9];
+        assert_eq!(picker_start_index(&values, 6), 2);
+        assert_eq!(picker_start_index(&values, 7), 0);
+    }
+
+    #[test]
+    fn the_commit_is_the_displayed_row() {
+        let values = [0, 3, 6, 9];
+        assert_eq!(commit_value(&values, 1), Some(3));
+        assert_eq!(commit_value(&values, 9), None);
     }
 }

@@ -2,8 +2,12 @@
 //! `onDestroy`, fullscreen; behaviour 1.2, 1.5, 1.6, 1.8, 14). Pure decisions. The GTK window keeps
 //! one `PlayerState`, applies the returned steps, and performs the mpv and GTK calls.
 
+use std::future::Future;
+use std::time::Duration;
+
 use crate::hosts::close_top;
 use crate::mpv::{MpvError, MpvHandle};
+use crate::session_file::{FINAL_SAVE_DEADLINE_MS, SHUTDOWN_TIMEOUT_MS};
 use crate::state::PlayerState;
 
 /// One step of an open request (`onNewIntent`, behaviour 1.2), listed in the order to run.
@@ -140,6 +144,8 @@ pub fn execute(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShutdownStep {
     SetExiting,
+    /// The last progress save, under `final_save`'s 2 s deadline (E-29).
+    FinalSave,
     StopHttpServer,
     ReleaseAudioFocus,
     ReleaseMediaSession,
@@ -149,8 +155,9 @@ pub enum ShutdownStep {
 }
 
 /// The order of shutdown. The render context is destroyed before the handle.
-pub const SHUTDOWN_ORDER: [ShutdownStep; 7] = [
+pub const SHUTDOWN_ORDER: [ShutdownStep; 8] = [
     ShutdownStep::SetExiting,
+    ShutdownStep::FinalSave,
     ShutdownStep::StopHttpServer,
     ShutdownStep::ReleaseAudioFocus,
     ShutdownStep::ReleaseMediaSession,
@@ -158,6 +165,23 @@ pub const SHUTDOWN_ORDER: [ShutdownStep; 7] = [
     ShutdownStep::DestroyRenderContext,
     ShutdownStep::DestroyHandle,
 ];
+
+/// Runs `save` for at most `deadline`. Returns whether it finished in time. A save that runs over
+/// is dropped, so a stuck database never holds the window open.
+pub async fn save_within(deadline: Duration, save: impl Future<Output = ()>) -> bool {
+    tokio::time::timeout(deadline, save).await.is_ok()
+}
+
+/// The final progress save of a closing window, with the 2 s deadline (E-29).
+pub async fn final_save(save: impl Future<Output = ()>) -> bool {
+    save_within(Duration::from_millis(FINAL_SAVE_DEADLINE_MS), save).await
+}
+
+/// How long the runtime may take to shut down after the final save (E-29): 3 s. The caller passes
+/// this to `Runtime::shutdown_timeout`.
+pub const fn runtime_shutdown_timeout() -> Duration {
+    Duration::from_millis(SHUTDOWN_TIMEOUT_MS)
+}
 
 /// Starts shutdown: sets `is_exiting` and returns the steps to run in order.
 pub fn begin_shutdown(state: &mut PlayerState) -> &'static [ShutdownStep] {
@@ -319,6 +343,32 @@ mod tests {
     }
 
     #[test]
+    fn final_save_runs_right_after_the_exiting_flag_and_before_teardown() {
+        let pos = |s: ShutdownStep| SHUTDOWN_ORDER.iter().position(|x| *x == s).unwrap();
+        assert!(pos(ShutdownStep::SetExiting) < pos(ShutdownStep::FinalSave));
+        assert!(pos(ShutdownStep::FinalSave) < pos(ShutdownStep::StopHttpServer));
+    }
+
+    #[tokio::test]
+    async fn a_save_past_its_deadline_is_dropped() {
+        let quick = save_within(Duration::from_millis(500), async {}).await;
+        assert!(quick);
+        let slow = save_within(
+            Duration::from_millis(20),
+            tokio::time::sleep(Duration::from_secs(30)),
+        )
+        .await;
+        assert!(!slow);
+        assert!(final_save(async {}).await);
+    }
+
+    #[test]
+    fn runtime_shutdown_waits_three_seconds() {
+        assert_eq!(runtime_shutdown_timeout(), Duration::from_secs(3));
+        assert_eq!(FINAL_SAVE_DEADLINE_MS, 2000);
+    }
+
+    #[test]
     fn fullscreen_defaults_on() {
         assert!(opens_fullscreen(None));
         assert!(opens_fullscreen(Some(true)));
@@ -341,7 +391,10 @@ mod tests {
         assert_eq!(escape(&mut state, false), None);
         assert_eq!(state.panel, Panels::None);
         assert_eq!(escape(&mut state, false), Some(EscapeAction::Close));
-        assert_eq!(escape(&mut state, true), Some(EscapeAction::LeaveFullscreen));
+        assert_eq!(
+            escape(&mut state, true),
+            Some(EscapeAction::LeaveFullscreen)
+        );
     }
 
     #[test]

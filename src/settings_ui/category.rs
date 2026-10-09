@@ -1,4 +1,6 @@
 //! Include and exclude summary of category sets (task T-47a-005).
+// Not reachable from `route.rs` yet: the include/exclude summary is for the update-category rows, which are still spec rows.
+#![allow(dead_code)]
 use std::collections::BTreeSet;
 
 /// A library category as the settings need it: its stored id, display name and sort order.
@@ -98,5 +100,36 @@ mod tests {
     fn unknown_ids_are_dropped_before_counting() {
         assert_eq!(label(&set(&[1, 99]), &set(&[]), &cats()), "Include: Action\nExclude: None");
         assert_eq!(label(&set(&[]), &set(&[1, 2, 99]), &cats()), "Include: None\nExclude: All");
+    }
+
+    /// The ten rows of `p1-edge-cases-and-tests.md` section 3 (categories A, B, C with orders 0, 1, 2).
+    #[test]
+    fn the_spec_combinations_for_three_categories() {
+        let abc = vec![
+            Category { id: 1, name: "A".into(), order: 0 },
+            Category { id: 2, name: "B".into(), order: 1 },
+            Category { id: 3, name: "C".into(), order: 2 },
+        ];
+        let case = |inc: &[i32], exc: &[i32], categories: &[Category]| label(&set(inc), &set(exc), categories);
+        assert_eq!(case(&[], &[], &abc), "Include: All\nExclude: None");
+        assert_eq!(case(&[1], &[], &abc), "Include: A\nExclude: None");
+        assert_eq!(case(&[1, 2, 3], &[], &abc), "Include: All\nExclude: None");
+        assert_eq!(case(&[], &[1, 2, 3], &abc), "Include: None\nExclude: All");
+        assert_eq!(case(&[1], &[2], &abc), "Include: A\nExclude: B");
+        assert_eq!(case(&[1, 2], &[1], &abc), "Include: A, B\nExclude: A");
+        assert_eq!(case(&[], &[1], &abc), "Include: All\nExclude: A");
+        assert_eq!(case(&[], &[], &[]), "Include: All\nExclude: None");
+        assert_eq!(case(&[1, 2, 3], &[1, 2, 3], &abc), "Include: All\nExclude: All");
+        assert_eq!(case(&[99, 1], &[], &abc), "Include: A\nExclude: None");
+    }
+
+    #[test]
+    fn joined_names_follow_the_category_order_not_the_id_order() {
+        let stored_reversed = vec![
+            Category { id: 2, name: "B".into(), order: 1 },
+            Category { id: 1, name: "A".into(), order: 0 },
+            Category { id: 3, name: "C".into(), order: 2 },
+        ];
+        assert_eq!(label(&set(&[2, 1]), &set(&[]), &stored_reversed), "Include: A, B\nExclude: None");
     }
 }

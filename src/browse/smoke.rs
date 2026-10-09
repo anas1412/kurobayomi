@@ -21,4 +21,6 @@ fn browse_widgets_smoke() {
     super::pages::tests::smoke();
     super::listing_view::tests::smoke();
     super::migrate_nav::tests::smoke();
+    super::anime::sources_view::tests::smoke();
+    super::anime::browse_view::tests::smoke();
 }

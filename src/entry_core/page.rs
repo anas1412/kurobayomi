@@ -2,16 +2,18 @@
 //! feeds it `StoreEvent`s and `UiAction`s and draws what it holds. Actions return `StoreCmd`s to send to the runner.
 //! Upstream: `MangaScreenModel.kt` (selection `:971-1057`, mark read `:788-840`, setters `:878-949`).
 
+use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::library::ChapterSwipeAction;
 use kuro_prefs::tristate::TriState;
 
 use crate::entry_core::banner::{Banners, Length};
+use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, acts_on, download_targets, indicator_action, previous_ids, state_after_cancel};
 use crate::entry_core::detail::{EntryState, LoadState, StoreCmd, StoreEvent, apply_snapshot};
 use crate::entry_core::dialog::{CategoryConfirm, Dialog};
 use crate::entry_core::flags::{bookmarked_write, display_write, downloaded_write, unread_write};
 use crate::entry_core::list_model::{RowItem, focus_after, row_items};
 use crate::entry_core::live::{DownloadEvent, ProgressThrottle, apply_event};
-use crate::entry_core::selection::{Command, Key, Mods, Pick, click_command, key_command};
+use crate::entry_core::selection::{Command, Key, Mods, Pick, back_clears_selection, click_command, key_command};
 use crate::entry_core::view::view;
 
 /// A user action on the page.
@@ -45,6 +47,23 @@ pub enum UiAction {
     OpenDialog(Dialog),
     ConfirmCategory(CategoryConfirm),
     DismissDialog,
+    /// The Back button or Escape: a selection is cleared first, and the page pops only when nothing is selected.
+    Back,
+    /// A download action on rows: the indicator of one row, or the Download swipe (`runChapterDownloadActions`).
+    Download {
+        ids: Vec<i64>,
+        action: IndicatorAction,
+    },
+    /// Marks every chapter before this one, in view order, as read (`markPreviousChapterRead`).
+    MarkPrevious(i64),
+    /// The library button. `skip_duplicate` is the "Add anyway" answer to the duplicate dialog.
+    ToggleFavorite {
+        skip_duplicate: bool,
+    },
+    /// Writes the library's default chapter flags to this manga.
+    ResetFlags,
+    /// An entry of the Download menu: the next chapters, or every unread one.
+    DownloadMenu(DownloadAction),
 }
 
 /// What the widget layer does after an action.
@@ -55,6 +74,8 @@ pub struct Outcome {
     pub open_chapter: Option<i64>,
     /// The row that should hold keyboard focus.
     pub focus: Option<i64>,
+    /// Back or Escape found nothing selected: pop the page.
+    pub pop: bool,
 }
 
 #[derive(Debug)]
@@ -64,8 +85,12 @@ pub struct Page {
     pub banners: Banners<StoreCmd>,
     /// The `removeAfterMarkedAsRead` preference.
     pub remove_after_read: bool,
+    /// The stored default category of the library (`-1` when unset), read once at open.
+    pub default_category: i64,
     throttle: ProgressThrottle,
     focused: Option<i64>,
+    /// The store asked for the category dialog (E-FAV-3); the widget layer takes the request once.
+    choose_category: bool,
 }
 
 impl Page {
@@ -75,9 +100,16 @@ impl Page {
             state: LoadState::Loading,
             banners: Banners::default(),
             remove_after_read,
+            default_category: -1,
             throttle: ProgressThrottle::default(),
             focused: None,
+            choose_category: false,
         }
+    }
+
+    /// True once after the store asked for the category dialog.
+    pub fn take_category_request(&mut self) -> bool {
+        std::mem::take(&mut self.choose_category)
     }
 
     pub fn ready(&self) -> Option<&EntryState> {
@@ -137,6 +169,33 @@ impl Page {
                 }
             }
             StoreEvent::DownloadsDeleted(_) => {}
+            StoreEvent::Duplicate { duplicate_id } => {
+                let manga_id = self.manga_id;
+                if let Some(page) = self.ready_mut() {
+                    page.dialog.open(Dialog::DuplicateManga { manga_id, duplicate_id });
+                }
+            }
+            StoreEvent::ChooseCategory => self.choose_category = true,
+            StoreEvent::Removed { ask_delete_downloads } => {
+                let manga_id = self.manga_id;
+                let downloaded: Vec<i64> = self
+                    .ready()
+                    .map(|p| p.chapters.iter().filter(|c| c.download == kuro_downloads::DownloadState::Downloaded).map(|c| c.id).collect())
+                    .unwrap_or_default();
+                if ask_delete_downloads && !downloaded.is_empty() {
+                    let action = (tr(MsgKey::action_delete), StoreCmd::DeleteDownloads { manga_id, chapter_ids: downloaded });
+                    self.banners.push(tr(MsgKey::delete_downloads_for_manga), Some(action), Length::Short, now_ms);
+                }
+            }
+            StoreEvent::Queued => {
+                // the add-to-library prompt: once per open, and only for a manga that is not in the library
+                let (manga_id, default_category) = (self.manga_id, self.default_category);
+                let prompt = self.ready_mut().is_some_and(|p| !p.manga.favorite && !std::mem::replace(&mut p.has_prompted_add, true));
+                if prompt {
+                    let action = (tr(MsgKey::action_add), StoreCmd::ToggleFavorite { manga_id, default_category, skip_duplicate: false });
+                    self.banners.push(tr(MsgKey::snack_add_to_manga_library), Some(action), Length::Short, now_ms);
+                }
+            }
         }
         let after = self.view_ids();
         let focused = self.focused?;
@@ -158,6 +217,8 @@ impl Page {
     pub fn act(&mut self, action: UiAction) -> Outcome {
         let manga_id = self.manga_id;
         let remove_after_read = self.remove_after_read;
+        let default_category = self.default_category;
+        let view_ids = if matches!(action, UiAction::MarkPrevious(_)) { self.view_ids() } else { Vec::new() };
         let mut out = Outcome::default();
         let Some(page) = self.ready_mut() else {
             return out;
@@ -190,22 +251,50 @@ impl Page {
                 }
             }
             UiAction::Swipe { id, action } => {
-                if let Some(chapter) = page.chapters.iter().find(|c| c.id == id) {
+                if let Some((read, bookmark, download)) = page.chapters.iter().find(|c| c.id == id).map(|c| (c.read, c.bookmark, c.download)) {
                     match action {
                         ChapterSwipeAction::ToggleRead => out.cmds.push(StoreCmd::MarkRead {
                             manga_id,
                             chapter_ids: vec![id],
-                            read: !chapter.read,
+                            read: !read,
                             remove_after_read,
                         }),
                         ChapterSwipeAction::ToggleBookmark => out.cmds.push(StoreCmd::SetBookmark {
                             manga_id,
                             chapter_ids: vec![id],
-                            bookmark: !chapter.bookmark,
+                            bookmark: !bookmark,
                         }),
-                        // there is no download call on this page yet
-                        ChapterSwipeAction::Download | ChapterSwipeAction::Disabled => {}
+                        ChapterSwipeAction::Download => download_cmd(page, manga_id, vec![id], indicator_action(download), &mut out),
+                        ChapterSwipeAction::Disabled => {}
                     }
+                }
+            }
+            UiAction::Download { ids, action } => download_cmd(page, manga_id, ids, action, &mut out),
+            UiAction::MarkPrevious(pointer) => {
+                let chapter_ids = previous_ids(&view_ids, pointer, page.manga.flags.sort_descending());
+                page.selection.clear();
+                if !chapter_ids.is_empty() {
+                    out.cmds.push(StoreCmd::MarkRead { manga_id, chapter_ids, read: true, remove_after_read });
+                }
+            }
+            UiAction::ToggleFavorite { skip_duplicate } => {
+                page.dialog.dismiss();
+                out.cmds.push(StoreCmd::ToggleFavorite { manga_id, default_category, skip_duplicate });
+            }
+            UiAction::ResetFlags => out.cmds.push(StoreCmd::ResetFlags { manga_id }),
+            UiAction::DownloadMenu(menu) => {
+                let chapter_ids = download_targets(page, menu);
+                if !chapter_ids.is_empty() {
+                    out.cmds.push(StoreCmd::Download { manga_id, chapter_ids, start_now: false });
+                }
+            }
+            UiAction::Back => {
+                if page.dialog.current().is_some() {
+                    page.dialog.dismiss();
+                } else if back_clears_selection(page.selection.len()) {
+                    page.selection.clear();
+                } else {
+                    out.pop = true;
                 }
             }
             UiAction::OpenDialog(dialog) => page.dialog.open(dialog),
@@ -270,6 +359,27 @@ impl Page {
         let selected = !page.selection.contains(id);
         let pick = if command == Command::LongPress { Pick::LongPress } else { Pick::Tap };
         page.selection.toggle(&ids, id, selected, pick);
+    }
+}
+
+/// One download action on `ids` (`runChapterDownloadActions`). START_NOW and CANCEL act on exactly one row and do
+/// nothing for several (E-DL-1, E-DL-2), so the add prompt is skipped too. A cancel shows `NOT_DOWNLOADED` at once; a
+/// later downloader event overrides it (E-CANCEL-1).
+fn download_cmd(page: &mut EntryState, manga_id: i64, ids: Vec<i64>, action: IndicatorAction, out: &mut Outcome) {
+    if !acts_on(action, ids.len()) {
+        return;
+    }
+    match action {
+        IndicatorAction::StartNow => out.cmds.push(StoreCmd::Download { manga_id, chapter_ids: ids, start_now: true }),
+        IndicatorAction::Cancel => {
+            let chapter_id = ids[0];
+            if let Some(row) = page.chapters.iter_mut().find(|c| c.id == chapter_id) {
+                row.download = state_after_cancel();
+                row.download_progress = 0;
+            }
+            out.cmds.push(StoreCmd::CancelDownload { manga_id, chapter_id });
+        }
+        IndicatorAction::Delete => out.cmds.push(StoreCmd::DeleteDownloads { manga_id, chapter_ids: ids }),
     }
 }
 
@@ -508,5 +618,136 @@ mod tests {
         assert_eq!(out.cmds, vec![StoreCmd::SetBookmark { manga_id: 1, chapter_ids: vec![3], bookmark: true }]);
         assert!(page.act(UiAction::Swipe { id: 2, action: ChapterSwipeAction::Disabled }).cmds.is_empty());
         assert!(page.act(UiAction::Swipe { id: 99, action: ChapterSwipeAction::ToggleRead }).cmds.is_empty(), "unknown row");
+    }
+
+    #[test]
+    fn back_clears_any_selection_first_even_one_a_filter_hides_and_pops_only_when_nothing_is_selected() {
+        let mut page = ready(3);
+        assert!(page.act(UiAction::Back).pop, "nothing selected: pop");
+        page.act(UiAction::Key { key: Key::Space, mods: Mods::default(), focused: Some(2) });
+        let out = page.act(UiAction::Back);
+        assert!(!out.pop && page.ready().unwrap().selection.is_empty(), "selection cleared, no pop");
+        // chapter 2 is selected, then a filter hides every read row, and 2 is read
+        page.act(UiAction::Key { key: Key::Space, mods: Mods::default(), focused: Some(2) });
+        let rows = vec![ChapterRow::new(1, "c1", 1.0), ChapterRow { read: true, ..ChapterRow::new(2, "c2", 2.0) }, ChapterRow::new(3, "c3", 3.0)];
+        page.apply(StoreEvent::Snapshot { manga: Box::new(manga(0x101 | c::SHOW_UNREAD)), chapters: rows }, 0);
+        assert_eq!(page.rows().iter().filter(|r| r.selected).count(), 0, "the selected row is hidden");
+        assert!(!page.act(UiAction::Back).pop, "a hidden selection still counts (E-04)");
+        assert!(page.ready().unwrap().selection.is_empty());
+        // a dialog closes before the selection
+        page.act(UiAction::OpenDialog(Dialog::FullCover));
+        assert!(!page.act(UiAction::Back).pop);
+        assert!(page.ready().unwrap().dialog.current().is_none());
+    }
+
+    #[test]
+    fn the_download_indicator_maps_each_state_and_several_rows_do_nothing() {
+        let mut page = ready(3);
+        let dl = |ids: Vec<i64>, action| UiAction::Download { ids, action };
+        assert_eq!(page.act(dl(vec![1], IndicatorAction::StartNow)).cmds, vec![StoreCmd::Download { manga_id: 1, chapter_ids: vec![1], start_now: true }]);
+        assert!(page.act(dl(vec![1, 2], IndicatorAction::StartNow)).cmds.is_empty(), "E-DL-2");
+        assert!(page.act(dl(vec![1, 2], IndicatorAction::Cancel)).cmds.is_empty(), "E-DL-1");
+        assert_eq!(page.act(dl(vec![1, 2], IndicatorAction::Delete)).cmds, vec![StoreCmd::DeleteDownloads { manga_id: 1, chapter_ids: vec![1, 2] }]);
+        // a cancel shows NOT_DOWNLOADED at once, and a later downloader event overrides it
+        page.apply_download(DownloadEvent::Status { chapter_id: 2, state: DownloadState::Downloading }, 0);
+        let out = page.act(dl(vec![2], IndicatorAction::Cancel));
+        assert_eq!(out.cmds, vec![StoreCmd::CancelDownload { manga_id: 1, chapter_id: 2 }]);
+        assert_eq!(page.rows()[1].download, DownloadState::NotDownloaded);
+        page.apply_download(DownloadEvent::Status { chapter_id: 2, state: DownloadState::Queue }, 0);
+        assert_eq!(page.rows()[1].download, DownloadState::Queue);
+    }
+
+    #[test]
+    fn the_download_swipe_follows_the_state_of_the_row() {
+        let mut page = ready(2);
+        let swipe = |id| UiAction::Swipe { id, action: ChapterSwipeAction::Download };
+        assert_eq!(page.act(swipe(1)).cmds, vec![StoreCmd::Download { manga_id: 1, chapter_ids: vec![1], start_now: true }]);
+        page.apply_download(DownloadEvent::Status { chapter_id: 2, state: DownloadState::Downloaded }, 0);
+        assert_eq!(page.act(swipe(2)).cmds, vec![StoreCmd::DeleteDownloads { manga_id: 1, chapter_ids: vec![2] }]);
+        page.apply_download(DownloadEvent::Status { chapter_id: 1, state: DownloadState::Queue }, 0);
+        assert_eq!(page.act(swipe(1)).cmds, vec![StoreCmd::CancelDownload { manga_id: 1, chapter_id: 1 }]);
+    }
+
+    #[test]
+    fn mark_previous_follows_the_view_order() {
+        // number ascending (0x101): the earlier chapters are the ones above
+        let mut page = ready(4);
+        let out = page.act(UiAction::MarkPrevious(3));
+        assert_eq!(out.cmds, vec![StoreCmd::MarkRead { manga_id: 1, chapter_ids: vec![1, 2], read: true, remove_after_read: false }]);
+        assert!(page.act(UiAction::MarkPrevious(1)).cmds.is_empty(), "nothing is before the first");
+        assert!(page.act(UiAction::MarkPrevious(99)).cmds.is_empty(), "a pointer outside the view marks nothing (E-PREV-1)");
+        // number descending (0x100): the earlier chapters are the ones below, in chronological order
+        let rows = (1..=4).map(|i| ChapterRow::new(i, &format!("c{i}"), i as f64)).collect();
+        page.apply(StoreEvent::Snapshot { manga: Box::new(manga(0x100)), chapters: rows }, 0);
+        let out = page.act(UiAction::MarkPrevious(3));
+        assert_eq!(out.cmds, vec![StoreCmd::MarkRead { manga_id: 1, chapter_ids: vec![1, 2], read: true, remove_after_read: false }]);
+    }
+
+    #[test]
+    fn the_library_button_sends_the_toggle_with_the_stored_default_category() {
+        let mut page = ready(1);
+        page.default_category = 4;
+        assert_eq!(page.act(UiAction::ToggleFavorite { skip_duplicate: false }).cmds, vec![StoreCmd::ToggleFavorite { manga_id: 1, default_category: 4, skip_duplicate: false }]);
+        page.act(UiAction::OpenDialog(Dialog::DuplicateManga { manga_id: 1, duplicate_id: 9 }));
+        let out = page.act(UiAction::ToggleFavorite { skip_duplicate: true });
+        assert_eq!(out.cmds, vec![StoreCmd::ToggleFavorite { manga_id: 1, default_category: 4, skip_duplicate: true }]);
+        assert!(page.ready().unwrap().dialog.current().is_none(), "Add anyway closes the duplicate dialog");
+    }
+
+    #[test]
+    fn the_store_answers_of_the_favorite_toggle_open_the_dialogs() {
+        let mut page = ready(1);
+        page.apply(StoreEvent::Duplicate { duplicate_id: 9 }, 0);
+        assert_eq!(page.ready().unwrap().dialog.current(), Some(&Dialog::DuplicateManga { manga_id: 1, duplicate_id: 9 }));
+        assert!(!page.take_category_request());
+        page.apply(StoreEvent::ChooseCategory, 0);
+        assert!(page.take_category_request());
+        assert!(!page.take_category_request(), "the request is taken once");
+    }
+
+    #[test]
+    fn a_removed_favorite_with_downloads_asks_to_delete_them() {
+        let mut page = ready(2);
+        page.apply_download(DownloadEvent::Status { chapter_id: 2, state: DownloadState::Downloaded }, 0);
+        page.apply(StoreEvent::Removed { ask_delete_downloads: false }, 0);
+        assert!(page.banners.current().is_none());
+        page.apply(StoreEvent::Removed { ask_delete_downloads: true }, 0);
+        let banner = page.banners.current().expect("the prompt");
+        assert_eq!(banner.text, "Delete downloaded chapters?");
+        assert_eq!(banner.action.as_ref().map(|(label, _)| label.as_str()), Some("Delete"));
+        assert_eq!(page.banners.activate_action(true, 1), Some(StoreCmd::DeleteDownloads { manga_id: 1, chapter_ids: vec![2] }));
+    }
+
+    #[test]
+    fn the_first_queued_download_of_a_non_favorite_offers_to_add_it_once() {
+        let mut page = ready(1);
+        page.state = finish_load(Some(MangaRow { favorite: false, ..manga(0x101) }), vec![ChapterRow::new(1, "c1", 1.0)], SourceInfo::default(), &LoadContext::default()).state;
+        page.apply(StoreEvent::Queued, 0);
+        let banner = page.banners.current().expect("the add prompt");
+        assert_eq!(banner.text, "Add manga to library?");
+        assert_eq!(banner.action.as_ref().map(|(label, _)| label.as_str()), Some("Add"));
+        page.banners.dismiss(1);
+        page.apply(StoreEvent::Queued, 2);
+        assert!(page.banners.current().is_none(), "once per open (E-DL-3)");
+        // a favorite is never asked
+        let mut favorite = ready(1);
+        favorite.apply(StoreEvent::Queued, 0);
+        assert!(favorite.banners.current().is_none());
+    }
+
+    #[test]
+    fn the_download_menu_queues_the_next_unread_chapters_and_nothing_when_there_are_none() {
+        let mut page = ready(3);
+        let out = page.act(UiAction::DownloadMenu(DownloadAction::Next(2)));
+        assert_eq!(out.cmds, vec![StoreCmd::Download { manga_id: 1, chapter_ids: vec![1, 2], start_now: false }]);
+        for id in 1..=3 {
+            page.apply_download(DownloadEvent::Status { chapter_id: id, state: DownloadState::Downloaded }, 0);
+        }
+        assert!(page.act(UiAction::DownloadMenu(DownloadAction::Unread)).cmds.is_empty());
+    }
+
+    #[test]
+    fn reset_sends_the_defaults_write() {
+        assert_eq!(ready(1).act(UiAction::ResetFlags).cmds, vec![StoreCmd::ResetFlags { manga_id: 1 }]);
     }
 }

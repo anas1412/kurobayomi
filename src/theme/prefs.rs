@@ -27,13 +27,8 @@ fn decode_scheme(raw: &str) -> Option<SchemeSel> {
     if DEPRECATED.contains(&raw) {
         return Some(SchemeSel::System);
     }
-    let app = AppTheme::from_name(raw)?;
-    Some(match app {
-        // Monet needs a seed and HCT generation (not built yet), so it is unavailable and shows
-        // the System card, as the design requires for an unavailable Monet.
-        AppTheme::MONET => SchemeSel::System,
-        other => SchemeSel::Scheme(other),
-    })
+    // A stored Monet is kept; it resolves to System while no seed is available (E-49-06).
+    AppTheme::from_name(raw).map(SchemeSel::Scheme)
 }
 
 /// Reads the theme settings. An unset `pref_app_theme` is the Linux default (`System`) and is
@@ -170,8 +165,11 @@ mod tests {
     }
 
     #[test]
-    fn stored_monet_resolves_to_system_while_unavailable() {
-        assert_eq!(read_settings(&store_with(Some("MONET"))).scheme, SchemeSel::System);
+    fn stored_monet_is_kept_and_read_as_the_monet_choice() {
+        assert_eq!(
+            read_settings(&store_with(Some("MONET"))).scheme,
+            SchemeSel::Scheme(AppTheme::MONET)
+        );
     }
 
     #[test]

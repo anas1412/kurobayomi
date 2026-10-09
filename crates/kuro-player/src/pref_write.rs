@@ -11,6 +11,11 @@ pub enum Write {
     /// Stores a preference. The value is the text the store parses back (`true`, `-1`, `1.5`, a
     /// variant name).
     Pref { key: &'static str, value: String },
+    /// Stores a string set (`getStringSet(...).set(...)`, for example the speed presets).
+    PrefSet {
+        key: &'static str,
+        values: Vec<String>,
+    },
     /// `deleteAndGet`: removes the stored value so the default applies again.
     PrefDelete { key: &'static str },
     /// Sets an mpv property to the text mpv parses (`yes`, `#AARRGGBB`, `55`).
@@ -64,7 +69,9 @@ pub(crate) mod test_support {
         pub fn with(pairs: &[(&str, &str)]) -> Self {
             let fake = Self::default();
             for (k, v) in pairs {
-                fake.values.borrow_mut().insert((*k).to_owned(), (*v).to_owned());
+                fake.values
+                    .borrow_mut()
+                    .insert((*k).to_owned(), (*v).to_owned());
             }
             fake
         }
@@ -72,7 +79,9 @@ pub(crate) mod test_support {
 
     impl PropertySink for FakeMpv {
         fn set_str(&self, name: &str, value: &str) -> Result<(), MpvError> {
-            self.writes.borrow_mut().push((name.to_owned(), value.to_owned()));
+            self.writes
+                .borrow_mut()
+                .push((name.to_owned(), value.to_owned()));
             self.values
                 .borrow_mut()
                 .insert(name.to_owned(), value.to_owned());

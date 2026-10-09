@@ -30,6 +30,7 @@ use super::episode_row::{EpisodeRow, row};
 use super::gesture::Selection;
 use super::header::{ItemHeader, header_missing_count, item_header};
 use super::layout::{Fab, fab};
+use super::refresh::open_refresh_due;
 use super::settings::display_rows;
 use super::store::AnimeStore;
 use crate::entry_core::detail::SourceInfo;
@@ -40,6 +41,10 @@ use crate::entry_core::errors::DetailError;
 pub struct AnimeLoadContext {
     pub from_source: bool,
     pub downloaded_only: bool,
+    /// When an open-time refresh last found this entry with no episodes (`refresh::last_empty_open_fetch`).
+    pub last_empty_open_fetch_ms: Option<i64>,
+    /// The current time, for the 10-minute guard of an entry with no episodes.
+    pub now_ms: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -85,6 +90,12 @@ impl AnimeEntryModel {
             anime.season_flags = season_flags;
         }
         let plan = refresh_on_open(anime.initialized, episodes.is_empty(), episode_list, seasons.is_empty(), season_list);
+        // An entry with no episodes refreshes on open at most once per 10 minutes (fix 23.24).
+        let plan = if plan.episodes && !open_refresh_due(true, ctx.last_empty_open_fetch_ms, ctx.now_ms) {
+            RefreshPlan { episodes: false, ..plan }
+        } else {
+            plan
+        };
         let mut flow = EntryFlow::default();
         flow.loaded(true);
         if plan.any() {
@@ -115,6 +126,10 @@ impl AnimeEntryModel {
     pub fn apply_snapshot(&mut self, mut anime: Anime, episodes: Vec<Episode>) {
         if anime.fetch_type == FetchType::Episodes {
             self.episodes = episodes;
+        }
+        // an entry that joined the library has its defaults written to the row: the session copy has done its job
+        if anime.favorite {
+            self.session_flags = None;
         }
         if let Some((episode_flags, season_flags)) = self.session_flags {
             anime.episode_flags = episode_flags;
@@ -157,21 +172,19 @@ impl AnimeEntryModel {
     }
 
     /// The FAB and continue target (`getNextUnseen`): the filters apply, the list is taken in ascending order, and
-    /// `next_unseen_in` picks the first unseen one, or the last one for a descending sort.
+    /// `next_unseen_in` picks its first unseen episode. Upstream calls `findLast` on the descending display list,
+    /// which is the same episode (T-EPS-NEXT-1, T-EPS-NEXT-2).
     pub fn next_unseen(&self) -> Option<i64> {
         let local = self.anime.source == kuro_source::local::LOCAL_SOURCE_ID;
-        let (ascending, descending) = match self.filters() {
-            Some(f) => {
-                let descending = f.descending;
-                (apply_filters(self.episodes.clone(), &ListFilters { descending: false, ..f }, local, |_| false), descending)
-            }
+        let ascending = match self.filters() {
+            Some(f) => apply_filters(self.episodes.clone(), &ListFilters { descending: false, ..f }, local, |_| false),
             None => {
                 let mut list = self.episodes.clone();
                 list.sort_by(|a, b| compare_items(SortKey::Number, false, a, b));
-                (list, false)
+                list
             }
         };
-        next_unseen_in(&ascending, descending)
+        next_unseen_in(&ascending)
     }
 
     /// The FAB reads the unfiltered list (behaviour 9).
@@ -191,11 +204,10 @@ impl AnimeEntryModel {
     }
 }
 
-/// `getNextUnseen` over a list in ascending order: the first unseen episode, or the last one when the display is
-/// descending. The list is already filtered.
-pub fn next_unseen_in(ascending: &[Episode], descending: bool) -> Option<i64> {
-    let mut unseen = ascending.iter().filter(|e| !e.seen).map(|e| e.id);
-    if descending { unseen.last() } else { unseen.next() }
+/// `getNextUnseen` over a list in ascending order: the first unseen episode, for either display order (upstream's
+/// `findLast` over the descending list lands on the same one). The list is already filtered.
+pub fn next_unseen_in(ascending: &[Episode]) -> Option<i64> {
+    ascending.iter().find(|e| !e.seen).map(|e| e.id)
 }
 
 #[cfg(test)]
@@ -203,6 +215,7 @@ mod tests {
     use kuro_domain::entries::anime::episode_flags as ep;
 
     use super::super::entry_state::LoadState;
+    use super::super::refresh::EMPTY_OPEN_REFRESH_GAP_MS;
     use super::super::store::fixture::with_episodes;
     use super::*;
 
@@ -233,6 +246,19 @@ mod tests {
         let (_dir, store, _) = with_episodes(true, true, 0, 0);
         let none = AnimeEntryModel::load(&store, &PrefStore::in_memory(), 4242, AnimeLoadContext::default(), |_| SourceInfo::default());
         assert!(none.unwrap().is_none());
+    }
+
+    #[test]
+    fn an_empty_entry_refreshes_on_open_at_most_once_per_ten_minutes() {
+        let (_dir, store, id) = with_episodes(true, true, 0, 0);
+        let source = |_| SourceInfo { name: "Fake".into(), stub: false };
+        let load_at = |last: Option<i64>, now: i64| {
+            let ctx = AnimeLoadContext { last_empty_open_fetch_ms: last, now_ms: now, ..Default::default() };
+            AnimeEntryModel::load(&store, &PrefStore::in_memory(), id, ctx, source).unwrap().unwrap()
+        };
+        assert!(load_at(None, 0).plan.episodes, "never fetched: fetch");
+        assert!(!load_at(Some(1_000), 1_001).plan.episodes, "a second open within ten minutes waits");
+        assert!(load_at(Some(1_000), 1_000 + EMPTY_OPEN_REFRESH_GAP_MS).plan.episodes, "ten minutes later: fetch again");
     }
 
     #[test]
@@ -295,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn next_unseen_takes_the_last_unseen_for_a_descending_sort() {
+    fn next_unseen_is_the_first_unseen_of_the_ascending_list() {
         let list: Vec<Episode> = (1..=4)
             .map(|id| {
                 let mut e = Episode::create();
@@ -304,9 +330,8 @@ mod tests {
                 e
             })
             .collect();
-        assert_eq!(next_unseen_in(&list, false), Some(3));
-        assert_eq!(next_unseen_in(&list, true), Some(4));
-        assert_eq!(next_unseen_in(&[], true), None);
+        assert_eq!(next_unseen_in(&list), Some(3), "the lowest-numbered unseen, in either display order");
+        assert_eq!(next_unseen_in(&[]), None);
     }
 
     #[test]
@@ -315,11 +340,26 @@ mod tests {
         store.set_flag_bits(id, ep::SORT_ASC, ep::SORT_DIR_MASK).unwrap();
         let model = load(&store, id);
         let by_number = |n: f64| model.episodes.iter().find(|e| e.episode_number == n).unwrap().id;
-        assert_eq!(model.next_unseen(), Some(by_number(3.0)), "ascending: the oldest unseen");
+        assert_eq!(model.next_unseen(), Some(by_number(3.0)), "ascending: the oldest unseen (T-EPS-NEXT-1)");
         store.set_flag_bits(id, ep::SORT_DESC, ep::SORT_DIR_MASK).unwrap();
-        assert_eq!(load(&store, id).next_unseen(), Some(by_number(4.0)), "descending: the newest unseen comes first");
+        assert_eq!(load(&store, id).next_unseen(), Some(by_number(3.0)), "descending: findLast of the display list is the oldest unseen (T-EPS-NEXT-2)");
         let (_dir, store, id) = with_episodes(true, true, 2, 2);
         assert_eq!(load(&store, id).next_unseen(), None);
+    }
+
+    #[test]
+    fn a_snapshot_of_an_entry_that_joined_the_library_ends_the_session_flags() {
+        let (_dir, store, id) = with_episodes(false, true, 1, 0);
+        let mut model = load(&store, id);
+        assert!(model.session_flags.is_some());
+        let mut stored = model.anime.clone();
+        stored.episode_flags = ep::SHOW_UNSEEN;
+        model.apply_snapshot(stored.clone(), model.episodes.clone());
+        assert_eq!(model.anime.episode_flags, 0, "still a non-favorite: the session flags win over the row");
+        stored.favorite = true;
+        model.apply_snapshot(stored, model.episodes.clone());
+        assert!(model.session_flags.is_none());
+        assert_eq!(model.anime.episode_flags, ep::SHOW_UNSEEN, "now the stored defaults show");
     }
 
     #[test]

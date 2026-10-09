@@ -1,13 +1,17 @@
 //! The anime Browse tab (area 41, part 2). The anime sources list and its tab state, the browse page's rules, the anime
-//! extension list model and the anime page loader. The kind-agnostic pieces (grouping, listing state, content plan,
-//! toasts, favourites, nav rules, languages) are the parent module's and are reused unchanged. Nothing here builds a GTK
-//! view or registers a screen yet, so the models have no caller outside their tests.
-#![allow(dead_code)] // no view registers these yet, see the module note above
+//! extension list model and the anime page loader, with the thin GTK views over them: the Sources tab (`sources_view`)
+//! and the browse page (`browse_view`). The kind-agnostic pieces (grouping, listing state, content plan, toasts,
+//! favourites, nav rules, languages) and the shared widgets are the parent module's and are reused unchanged. The
+//! screen lane registers the two views; until it does they have no caller outside their tests.
+#![allow(dead_code)] // wired by the screen registration, which this lane does not own
 
 pub mod browse;
+pub mod browse_view;
 pub mod extensions;
 pub mod loader;
+pub mod prefs;
 pub mod sources;
+pub mod sources_view;
 
 #[cfg(test)]
 mod fixtures;

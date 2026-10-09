@@ -151,7 +151,10 @@ mod tests {
         i.is_local = true;
         i.refresh_error = Some("no folder");
         match content_plan(&i) {
-            ContentPlan::Error { actions, .. } => assert_eq!(actions, error_actions(true)),
+            ContentPlan::Error { actions, .. } => {
+                assert_eq!(actions, error_actions(true));
+                assert!(!actions.is_empty(), "a local error state always offers something");
+            }
             other => panic!("unexpected plan {other:?}"),
         }
     }

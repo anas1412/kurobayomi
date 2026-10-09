@@ -79,4 +79,4 @@ window { background-color: @kuro_background; color: @kuro_on_background; }
 .kb-selected { background-color: rgba(0, 88, 202, 0.22); }
 .kb-header { font-weight: 600; color: rgba(68, 70, 79, 1); }
 .kb-active { color: rgba(255, 193, 7, 1); }
-.kb-pill { background-color: rgba(27, 27, 31, 0.08); border-radius: 999px; padding: 1px 6px; font-size: 10pt; margin-left: 4px; }
+.kb-pill { background-color: rgba(252, 247, 255, 1); color: rgba(27, 27, 31, 1); }

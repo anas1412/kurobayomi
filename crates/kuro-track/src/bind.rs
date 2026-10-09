@@ -463,6 +463,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tr_27_r3_concurrent_binds_of_the_same_media_for_the_same_id_give_one_row() {
+        let h = Harness::new();
+        h.login(TrackerId::ANILIST);
+        let first = AnimeTrackSearch::new(TrackerId::ANILIST, 3, "Show", "https://x");
+        let second = first.clone();
+        let a = spawn_register_anime(Arc::clone(&h.ctx), 42, first, TrackerId::ANILIST, false);
+        let b = spawn_register_anime(Arc::clone(&h.ctx), 42, second, TrackerId::ANILIST, false);
+        let (a, b) = (a.await.unwrap().unwrap(), b.await.unwrap().unwrap());
+        assert_eq!(a.id, b.id, "both binds resolve to the same row");
+        let rows = h.anime_repo.list_for_entry(42).await.unwrap();
+        assert_eq!(rows.len(), 1, "R-3: one row for the same media and local id");
+        assert_eq!(rows[0].remote_id, 3);
+
+        h.login(TrackerId::KAVITA);
+        let m1 = MangaTrackSearch::new(TrackerId::KAVITA, 8, "Book", "https://x");
+        let m2 = m1.clone();
+        let a = spawn_register_manga(Arc::clone(&h.ctx), 7, m1, TrackerId::KAVITA, false);
+        let b = spawn_register_manga(Arc::clone(&h.ctx), 7, m2, TrackerId::KAVITA, false);
+        let (a, b) = (a.await.unwrap().unwrap(), b.await.unwrap().unwrap());
+        assert_eq!(a.id, b.id, "both binds resolve to the same row");
+        assert_eq!(h.ctx.manga_tracks.list_for_entry(7).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn tr_27_011_bind_failure_returns_the_raw_message_and_stores_nothing() {
         let tr = FakeAnime::new(TrackerId::ANILIST, "AniList", MemSecrets::new(), new_log());
         *tr.fail.lock().unwrap() = Some("Not found".into());

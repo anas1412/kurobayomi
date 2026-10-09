@@ -69,6 +69,13 @@ pub fn channel_for(x: f32, width: f32, swap: bool) -> Channel {
     }
 }
 
+/// The mpv `brightness` property for a brightness state (T-45b-032). The state is clamped to
+/// `BRIGHTNESS_MIN..=BRIGHTNESS_MAX` and scaled to -100..=100. This replaces the Android window
+/// backlight, which Linux has no equivalent for.
+pub fn mpv_brightness(state: f32) -> i64 {
+    (state.clamp(BRIGHTNESS_MIN, BRIGHTNESS_MAX) * 100.0).round() as i64
+}
+
 /// Window brightness for a brightness state: clamped to 0..=1. Negative states do not change the
 /// hardware.
 pub fn window_brightness(state: f32) -> f32 {
@@ -208,6 +215,14 @@ impl VerticalDrag {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mpv_brightness_is_clamped_and_scaled_to_a_hundred() {
+        assert_eq!(mpv_brightness(-1.0), -75);
+        assert_eq!(mpv_brightness(0.0), 0);
+        assert_eq!(mpv_brightness(0.33), 33);
+        assert_eq!(mpv_brightness(2.0), 100);
+    }
 
     fn config() -> Config {
         Config {

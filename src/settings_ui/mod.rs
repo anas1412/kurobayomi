@@ -2,16 +2,25 @@
 //!
 //! Each builder returns `pref_model::model` items bound to typed `kuro-prefs` handles. The rules (what is shown,
 //! what is enabled, which values a list offers, which key a Custom gesture sends) are plain functions with tests.
-//! Rendering goes through `pref_model::page::body`. Disabled rows of the reader are left out of the tree (Android
-//! `StatusWrapper` hides them); the player keeps disabled rows and greys them (task T-48a-012).
-#![allow(dead_code)]
+//! Rendering goes through `pref_model::page::body`. Hide or grey (tasks T-47a-002 and T-48a-012): the reader hides a
+//! row its rules disable by leaving it out of the tree (Android `StatusWrapper`); the player keeps its disabled rows
+//! and greys them, because the shared renderer greys every row whose `enabled` is false. The 300 ms reveal and
+//! collapse is not drawn: the page is rebuilt (`view.rs`) when a rule input changes.
+//! `route.rs` is what `screens::body` calls, so the screens here are the ones the app shows.
 
 pub mod appearance;
+pub mod browse;
 pub mod category;
+pub mod lang;
 pub mod library;
 pub mod menu;
+pub mod merge;
 pub mod player;
 pub mod reader;
+pub mod route;
 pub mod rows;
 pub mod search;
 pub mod storage;
+pub mod view;
+
+pub use route::{body, handles};

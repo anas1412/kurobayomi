@@ -16,13 +16,17 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::anime::ffmpeg::{FFMPEG, FFPROBE, build_remux_args, probe_duration, run_remux};
-use crate::anime::layout::{AnimeLayout, episode_folder_names};
+use crate::anime::handoff::{Clipboard, aria2_add_uri, copy_location, handoff_location, post_rpc};
+use crate::anime::layout::{AnimeLayout, episode_folder_names, rename_dir};
 use crate::anime::manager::EpisodeRunner;
 use crate::anime::model::{AnimeDownload, Video};
 use crate::anime::naming::{episode_dir_name, fat_safe, file_component, unique_episode_dir_name};
 use crate::anime::resolve::{HosterResolver, resolve_video};
+use crate::anime::torrent::{TORRENT_SERVER_HOST, check_torrent};
+use crate::download_prefs::DownloadPrefs;
 use crate::error::DownloadError;
 use crate::layout::TMP_DIR_SUFFIX;
+use crate::redact::redacted_headers;
 use crate::retry::with_retry;
 
 /// The name ffmpeg's output is finished under (`<name>.mkv`), and the partial name it is written under (`<name>.tmp`).
@@ -31,17 +35,48 @@ const PARTIAL_EXT: &str = ".tmp";
 /// Written into every finished episode folder so media indexers skip it (behaviour 5.9, T-24a-056).
 const NOMEDIA: &str = ".nomedia";
 
+/// The desktop external-downloader option (T-24a-024, T-24a-025). Off unless `use_external_downloader` is on and
+/// `external_downloader_selection` holds the aria2 JSON-RPC endpoint (`http://host:port/jsonrpc`). Both are read per
+/// episode, so a settings change applies to the next run.
+pub struct ExternalHandoff {
+    prefs: DownloadPrefs,
+    clipboard: Arc<dyn Clipboard>,
+}
+
+impl ExternalHandoff {
+    pub fn new(prefs: DownloadPrefs, clipboard: Arc<dyn Clipboard>) -> Self {
+        Self { prefs, clipboard }
+    }
+
+    /// The aria2 endpoint, or `None` when the option is off or no endpoint is configured.
+    fn endpoint(&self) -> Option<String> {
+        if !self.prefs.use_external_downloader().get() {
+            return None;
+        }
+        let selection = self.prefs.external_downloader_selection().get();
+        let endpoint = selection.trim();
+        (!endpoint.is_empty()).then(|| endpoint.to_owned())
+    }
+}
+
 /// Downloads one episode with ffmpeg. `ffmpeg` and `ffprobe` are program names or paths.
 pub struct EpisodeEngine {
     layout: AnimeLayout,
     resolver: Arc<dyn HosterResolver>,
     ffmpeg: OsString,
     ffprobe: OsString,
+    external: Option<ExternalHandoff>,
 }
 
 impl EpisodeEngine {
     pub fn new(layout: AnimeLayout, resolver: Arc<dyn HosterResolver>) -> Self {
-        Self { layout, resolver, ffmpeg: FFMPEG.into(), ffprobe: FFPROBE.into() }
+        Self { layout, resolver, ffmpeg: FFMPEG.into(), ffprobe: FFPROBE.into(), external: None }
+    }
+
+    /// Enables the aria2 handoff (still off until the preferences turn it on).
+    pub fn with_external(mut self, external: ExternalHandoff) -> Self {
+        self.external = Some(external);
+        self
     }
 
     /// Replaces the ffmpeg and ffprobe programs. Used by tests and by a user-chosen binary.
@@ -67,6 +102,7 @@ impl EpisodeEngine {
             duration = probe_duration(&self.ffprobe, &video.url, &headers) => duration?,
         };
         let args = build_remux_args(video, &[], partial);
+        debug!(target: "kuro_downloads", episode = item.episode.id, headers = %redacted_headers(&headers), "remuxing episode");
         run_remux(&self.ffmpeg, &args, duration, partial, &item.progress, cancel).await
     }
 
@@ -82,7 +118,7 @@ impl EpisodeEngine {
         let stem = fat_safe(&item.episode.name);
         let finished = staging.join(file_component(&stem, FINISHED_EXT));
         if finished.is_file() {
-            debug!(target: "kuro::downloads", episode = item.episode.id, "resuming a finished remux");
+            debug!(target: "kuro_downloads", episode = item.episode.id, "resuming a finished remux");
             return Ok(());
         }
         let partial = staging.join(file_component(&stem, PARTIAL_EXT));
@@ -116,9 +152,21 @@ impl EpisodeRunner for EpisodeEngine {
         let anime_dir = self.layout.anime_dir(&item.source, &item.anime.title)?;
         let target = self.target_name(&item, &anime_dir);
         let staging = anime_dir.join(format!("{target}{TMP_DIR_SUFFIX}"));
-        fs::create_dir_all(&staging)?;
 
         let video = resolve_video(&item, self.resolver.as_ref(), &cancel).await?;
+        check_torrent(&video.url, TORRENT_SERVER_HOST)?;
+        if let Some(external) = &self.external
+            && let Some(endpoint) = external.endpoint()
+        {
+            // Handoff: aria2 saves into the final folder, so the startup sweep of `_tmp` folders never touches it, and
+            // the episode is not finalised here (T-24a-024).
+            let headers = video.headers.clone().unwrap_or_default();
+            let request = aria2_add_uri(&video.url, &headers, &handoff_location(&staging));
+            post_rpc(&endpoint, &request).await?;
+            copy_location(external.clipboard.as_ref(), &staging);
+            return Ok(());
+        }
+        fs::create_dir_all(&staging)?;
         self.fetch(&item, &video, &staging, &cancel).await?;
         if !is_download_successful(&staging) {
             return Err(DownloadError::DownloadIncomplete(format!("{} is not a single video file", staging.display())));
@@ -157,9 +205,9 @@ fn finalise(staging: &Path, dest: &Path) -> Result<(), DownloadError> {
     if dest.is_dir() {
         fs::remove_dir(dest)?;
     }
-    fs::rename(staging, dest)?;
+    rename_dir(staging, dest)?;
     if let Err(err) = fs::write(dest.join(NOMEDIA), b"") {
-        warn!(target: "kuro::downloads", error = %err, "could not write .nomedia");
+        warn!(target: "kuro_downloads", error = %err, "could not write .nomedia");
     }
     Ok(())
 }
@@ -213,14 +261,13 @@ mod tests {
     use crate::model::DownloadState;
     use async_trait::async_trait;
     use std::os::unix::fs::PermissionsExt;
-    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    static SPAWN_LOCK: Mutex<()> = Mutex::new(());
+    static SPAWN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-    fn spawn_guard() -> std::sync::MutexGuard<'static, ()> {
-        SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    async fn spawn_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        SPAWN_LOCK.lock().await
     }
 
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -377,7 +424,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_download_is_remuxed_then_finalised_with_nomedia() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let tmp = tempfile::tempdir().unwrap();
         let folder = anime_folder(tmp.path());
         fs::create_dir_all(&folder).unwrap();
@@ -399,7 +446,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_failing_ffmpeg_is_tried_four_times_and_keeps_no_partial() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let tmp = tempfile::tempdir().unwrap();
         let folder = anime_folder(tmp.path());
         let partial = folder.join("Episode 1_tmp").join("Episode 1.tmp");
@@ -416,7 +463,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_finished_remux_from_an_earlier_run_is_resumed_without_ffmpeg() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let tmp = tempfile::tempdir().unwrap();
         let folder = anime_folder(tmp.path());
         let staging = folder.join("Episode 1_tmp");
@@ -433,7 +480,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn an_existing_non_empty_episode_folder_is_an_error_and_staging_is_kept() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let tmp = tempfile::tempdir().unwrap();
         let folder = anime_folder(tmp.path());
         fs::create_dir_all(folder.join("Episode 1")).unwrap();
@@ -461,7 +508,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn the_file_component_is_cut_to_200_bytes_and_the_folder_keeps_its_name() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let tmp = tempfile::tempdir().unwrap();
         let folder = anime_folder(tmp.path());
         // 120 two-byte characters: a 240-byte folder name, but a file name that must be cut to 200 bytes.
@@ -486,6 +533,62 @@ mod tests {
         assert!(matches!(err, DownloadError::FfmpegMissing), "got {err:?}");
     }
 
+    struct Clip(std::sync::Mutex<Vec<(String, String)>>);
+
+    impl Clipboard for Clip {
+        fn set_text(&self, label: &str, text: &str) -> Result<(), String> {
+            self.0.lock().unwrap().push((label.into(), text.into()));
+            Ok(())
+        }
+    }
+
+    /// T-24a-024, T-24a-025: with the option on and an endpoint set, the episode goes to aria2, the final-folder path is
+    /// copied with its label, nothing runs ffmpeg and nothing is finalised.
+    #[tokio::test]
+    async fn the_external_path_posts_to_aria2_copies_the_location_and_does_not_finalise() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let tmp = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/jsonrpc", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 8192];
+            let n = socket.read(&mut buf).await.unwrap();
+            let reply = r#"{"jsonrpc":"2.0","id":"kurobayomi","result":"gid1"}"#;
+            let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{reply}", reply.len());
+            socket.write_all(head.as_bytes()).await.unwrap();
+            String::from_utf8_lossy(&buf[..n]).into_owned()
+        });
+        let prefs = DownloadPrefs::new(kuro_prefs::store::PrefStore::in_memory());
+        prefs.use_external_downloader().set(true).unwrap();
+        prefs.external_downloader_selection().set(endpoint).unwrap();
+        let clipboard = Arc::new(Clip(Default::default()));
+        let (engine, _) = engine(tmp.path(), Path::new("/nonexistent/kuro-ffmpeg"), Path::new("/nonexistent/kuro-ffprobe"));
+        let engine = engine.with_external(ExternalHandoff::new(prefs, clipboard.clone()));
+
+        engine.run(download(1, "Episode 1"), CancellationToken::new()).await.unwrap();
+
+        let request = server.await.unwrap();
+        assert!(request.contains("aria2.addUri") && request.contains("/local/source.mkv"), "{request}");
+        let folder = anime_folder(tmp.path());
+        let copied = clipboard.0.lock().unwrap().clone();
+        assert_eq!(copied, vec![("Episode download location".to_owned(), folder.join("Episode 1").display().to_string())]);
+        assert!(!folder.join("Episode 1_tmp").exists(), "no staging folder");
+        assert!(!folder.join("Episode 1").exists(), "not finalised");
+    }
+
+    /// The option is off by default, and on without an endpoint it is still off.
+    #[test]
+    fn the_handoff_needs_the_option_and_an_endpoint() {
+        let prefs = DownloadPrefs::new(kuro_prefs::store::PrefStore::in_memory());
+        let handoff = ExternalHandoff::new(prefs.clone(), Arc::new(Clip(Default::default())));
+        assert_eq!(handoff.endpoint(), None, "off by default");
+        prefs.use_external_downloader().set(true).unwrap();
+        assert_eq!(handoff.endpoint(), None, "no endpoint");
+        prefs.external_downloader_selection().set(" http://127.0.0.1:6800/jsonrpc ".to_owned()).unwrap();
+        assert_eq!(handoff.endpoint().as_deref(), Some("http://127.0.0.1:6800/jsonrpc"));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn no_video_from_the_hoster_is_no_video() {
         let tmp = tempfile::tempdir().unwrap();
@@ -499,7 +602,7 @@ mod tests {
     /// meanwhile is left alone (T-24a-058).
     #[tokio::test]
     async fn cancel_during_the_probe_starts_no_ffmpeg_and_leaves_a_newer_partial() {
-        let _guard = spawn_guard();
+        let _guard = spawn_guard().await;
         let tmp = tempfile::tempdir().unwrap();
         let folder = anime_folder(tmp.path());
         let partial = folder.join("Episode 1_tmp").join("Episode 1.tmp");
@@ -584,7 +687,7 @@ mod tests {
 
         #[tokio::test(start_paused = true)]
         async fn download_recovers_on_retry() {
-            let _guard = spawn_guard();
+            let _guard = spawn_guard().await;
             let tmp = tempfile::tempdir().unwrap();
             let partial = anime_folder(tmp.path()).join("Episode 1_tmp").join("Episode 1.tmp");
             let log = tmp.path().join("ffmpeg.log");
@@ -612,7 +715,7 @@ mod tests {
 
         #[tokio::test(start_paused = true)]
         async fn pause_discards_partial_and_resume_restarts_from_zero() {
-            let _guard = spawn_guard();
+            let _guard = spawn_guard().await;
             let tmp = tempfile::tempdir().unwrap();
             let partial = anime_folder(tmp.path()).join("Episode 1_tmp").join("Episode 1.tmp");
             let log = tmp.path().join("ffmpeg.log");
@@ -642,7 +745,7 @@ mod tests {
 
         #[tokio::test(start_paused = true)]
         async fn reorder_while_running_requeues_the_item_and_restarts_in_the_new_order() {
-            let _guard = spawn_guard();
+            let _guard = spawn_guard().await;
             let tmp = tempfile::tempdir().unwrap();
             let folder = anime_folder(tmp.path());
             let log = tmp.path().join("ffmpeg.log");

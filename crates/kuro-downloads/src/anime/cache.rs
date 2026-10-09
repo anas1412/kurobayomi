@@ -16,11 +16,13 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use kuro_source::local::is_local;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
 use crate::anime::model::{AnimeRef, EpisodeRef};
 use crate::anime::naming::{anime_dir_name, valid_episode_dir_names};
+use crate::local::anime_episode_count;
 
 /// The index is trusted this long after a scan (`renewInterval`, 1 hour).
 pub const RENEW_INTERVAL_MS: i64 = 3_600_000;
@@ -79,6 +81,7 @@ struct Shared {
 #[derive(Clone)]
 pub struct AnimeIndex {
     shared: Arc<Shared>,
+    local_anime_root: Option<PathBuf>,
 }
 
 fn now_ms() -> i64 {
@@ -105,7 +108,15 @@ impl AnimeIndex {
                 scanning_since: Mutex::new(None),
                 scanning: AtomicBool::new(false),
             }),
+            local_anime_root: None,
         }
+    }
+
+    /// Sets the local anime folder (the folder that holds one sub-folder per local anime). The index does not scan it:
+    /// [`episode_count_anime`](Self::episode_count_anime) reads it for the local source (T-24a-038).
+    pub fn with_local_anime_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.local_anime_root = Some(root.into());
+        self
     }
 
     pub fn root(&self) -> &Path {
@@ -136,8 +147,16 @@ impl AnimeIndex {
         self.tree().sources.values().flat_map(|s| s.animes.values()).map(|a| a.episodes.len()).sum()
     }
 
-    /// `getDownloadCount(anime)`: episodes in one anime folder, 0 when it is not indexed.
+    /// `getDownloadCount(anime)`: episodes in one anime folder, 0 when it is not indexed. For the local source the count
+    /// comes from the supported files in the anime folder under the local root, not from the index, and `anime_title`
+    /// is the anime's url, which names that folder (`getFilesInAnimeDirectory(anime.url)`). T-24a-038.
     pub fn episode_count_anime(&self, source_id: i64, anime_title: &str) -> usize {
+        if is_local(source_id) {
+            let Some(root) = &self.local_anime_root else {
+                return 0;
+            };
+            return anime_episode_count(&root.join(anime_title)).unwrap_or(0);
+        }
         self.tree()
             .sources
             .get(&source_id)
@@ -443,6 +462,24 @@ mod tests {
             upload_date: 0,
             episode_number: 0.0,
         }
+    }
+
+    #[test]
+    fn the_local_source_counts_files_in_its_folder_not_the_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path().join("local");
+        fs::create_dir_all(local.join("Show")).unwrap();
+        fs::write(local.join("Show").join("Ep 1.mkv"), b"v").unwrap();
+        fs::write(local.join("Show").join("Ep 2.mp4"), b"v").unwrap();
+        fs::write(local.join("Show").join("cover.jpg"), b"x").unwrap();
+        let index = AnimeIndex::open(dir.path().join("downloads"), dir.path()).with_local_anime_root(&local);
+        // An index entry for source 0 must not be used.
+        index.add_episode(0, "Local (OTHER)", "Show", "Indexed 1");
+        assert_eq!(index.episode_count_anime(0, "Show"), 2, "two supported files on disk");
+        assert_eq!(index.episode_count_anime(0, "Missing"), 0);
+        assert_eq!(index.episode_count_anime(7, "Show"), 0, "other sources still use the index");
+        let no_root = AnimeIndex::open(dir.path().join("downloads"), dir.path());
+        assert_eq!(no_root.episode_count_anime(0, "Show"), 0, "no local root, no count");
     }
 
     /// `<root>/Demo (EN)/Show/{Episode 1.mkv, Episode 2/, Episode 3_tmp/, notes.txt}` plus an uninstalled source.

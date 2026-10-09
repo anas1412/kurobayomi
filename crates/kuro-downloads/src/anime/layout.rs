@@ -19,6 +19,21 @@ use crate::pipeline::MIN_FREE_BYTES;
 /// Shown in the error when no downloads root is set.
 const UNSET_ROOT: &str = "(unset)";
 
+/// `rename` for a download folder. A rename that would cross filesystems is named as such (T-24a-071, E-F16). There is no
+/// copy fallback: the folder is left where it is and the error is shown.
+pub fn rename_dir(from: &Path, to: &Path) -> Result<(), DownloadError> {
+    fs::rename(from, to).map_err(|err| rename_error(err, to))
+}
+
+/// The error of a failed rename: a cross-device move is `CrossDevice` with the target, anything else is I/O.
+fn rename_error(err: std::io::Error, to: &Path) -> DownloadError {
+    if err.kind() == std::io::ErrorKind::CrossesDevices {
+        DownloadError::CrossDevice(to.display().to_string())
+    } else {
+        DownloadError::Io(err)
+    }
+}
+
 /// Every folder name an episode may have on disk, first the current name, then the legacy name, then the unique name
 /// with the episode id (T-24a-066). Lookups try them in this order.
 pub fn episode_folder_names(episode: &EpisodeRef) -> Vec<String> {
@@ -157,14 +172,14 @@ impl AnimeLayout {
         let new_name = episode_dir_name(&new.name, new.scanlator.as_deref());
         let found = episode_folder_names(old).into_iter().map(|n| anime_dir.join(n)).find(|p| p.exists());
         let Some(old_folder) = found else {
-            error!(target: "kuro::downloads", episode = old.id, "could not rename downloaded episode: no folder");
+            error!(target: "kuro_downloads", episode = old.id, "could not rename downloaded episode: no folder");
             return Ok(None);
         };
         if old_folder.file_name().is_some_and(|n| n == new_name.as_str()) {
             return Ok(None);
         }
         let target = anime_dir.join(&new_name);
-        fs::rename(&old_folder, &target)?;
+        rename_dir(&old_folder, &target)?;
         Ok(Some(target))
     }
 
@@ -184,10 +199,10 @@ impl AnimeLayout {
             old_folder.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase() == new_name.to_lowercase());
         if case_only {
             let staging = root.join(format!("{new_name}{TMP_DIR_SUFFIX}"));
-            fs::rename(&old_folder, &staging)?;
-            fs::rename(&staging, &target)?;
+            rename_dir(&old_folder, &staging)?;
+            rename_dir(&staging, &target)?;
         } else {
-            fs::rename(&old_folder, &target)?;
+            rename_dir(&old_folder, &target)?;
         }
         Ok(true)
     }
@@ -329,6 +344,14 @@ mod tests {
         assert!(tmp.path().join("new (EN)").is_dir());
         assert!(!tmp.path().join("New (EN)_tmp").exists(), "staging name is gone");
         assert!(!layout.rename_source(&source("Missing"), &source("X")).unwrap());
+    }
+
+    #[test]
+    fn a_cross_device_rename_is_named_and_other_failures_stay_io() {
+        let to = Path::new("/mnt/other/Ep 1");
+        let cross = rename_error(std::io::Error::new(std::io::ErrorKind::CrossesDevices, "EXDEV"), to);
+        assert_eq!(cross.to_string(), "Cannot move the download to another disk: /mnt/other/Ep 1");
+        assert!(matches!(rename_error(std::io::Error::other("busy"), to), DownloadError::Io(_)));
     }
 
     #[test]

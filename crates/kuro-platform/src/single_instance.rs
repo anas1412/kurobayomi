@@ -75,6 +75,30 @@ pub fn acquire(socket: &Path, command: &str) -> io::Result<Acquired> {
     Ok(Acquired::Primary(Listener { commands: rx, socket: socket.to_path_buf() }))
 }
 
+/// Decides whether this launch runs the app or forwards its command to the running instance (T-req-platform-007).
+pub trait SingleInstance {
+    /// Forwards `command` to a running instance, or becomes the primary instance when none answers.
+    fn acquire(&self, command: &str) -> io::Result<Acquired>;
+}
+
+/// The Unix-socket implementation of [`SingleInstance`], with its socket under the state directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SocketInstance {
+    socket: PathBuf,
+}
+
+impl SocketInstance {
+    pub fn in_state_dir(state_dir: &Path) -> Self {
+        Self { socket: socket_path(state_dir) }
+    }
+}
+
+impl SingleInstance for SocketInstance {
+    fn acquire(&self, command: &str) -> io::Result<Acquired> {
+        acquire(&self.socket, command)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,6 +134,18 @@ mod tests {
         assert!(socket.exists());
         drop(listener);
         assert!(!socket.exists());
+    }
+
+    #[test]
+    fn the_trait_forwards_through_the_same_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let instance = SocketInstance::in_state_dir(dir.path());
+        let first = match instance.acquire("").unwrap() {
+            Acquired::Primary(listener) => listener,
+            Acquired::Forwarded => panic!("first launch must be primary"),
+        };
+        assert!(matches!(instance.acquire("updates").unwrap(), Acquired::Forwarded));
+        assert_eq!(first.commands.recv_blocking().unwrap(), "updates");
     }
 
     #[test]
