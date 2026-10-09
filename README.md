@@ -10,7 +10,7 @@ The name is *kurobako* (黒箱, "black box") plus *-yomi* ("reading"), like Tach
 ## Status: early work in progress
 
 The window you see is a **mockup with placeholder data**. The real features are being built underneath it, crate by crate.
-The plan has about 3,800 tasks; roughly 11% are reported done. Treat everything as unfinished.
+The plan has about 3,800 tasks. Treat everything as unfinished.
 
 What exists today (library crates with tests, not yet wired to the screens):
 - preference store, databases (manga and anime SQLite schemas), repositories and domain rules
@@ -20,6 +20,32 @@ What exists today (library crates with tests, not yet wired to the screens):
 - 67 mockup screens, sheets and dialogs that match Aniyomi's layout
 
 What does not work yet: reading and playing from a real source, tracking, backups, downloads in the app.
+
+### Progress (estimate, 2026-10-09)
+
+Rough estimates from code size and task queues, not verified task by task. "Code written" is the library code and its tests. "Works in the app" means you can use it from the window.
+Overall: about 25-30% of the code is written and about 12% works end to end.
+
+| Feature | What it means for you | Code written | Works in the app |
+|---|---|---|---|
+| App start, folders, logs, crash report | Opens cleanly, keeps files in the right places, tells you if it crashes | 85% | 60% |
+| Settings storage | Your choices are saved and survive restarts | 80% | 30% |
+| Databases (manga and anime) | Library, chapters, episodes and history are stored on disk | 85% | 40% |
+| Library logic | Categories, sorting, filters, read/unread, history | 70% | 35% |
+| Network | Talking to websites and APIs | 55% | 0% |
+| Sources: add a repo link and browse | Paste a source repository link, then browse and search titles | 55% | 15% |
+| Local files | Read your own CBZ files, image folders and video files | 60% | 10% |
+| Covers and images | Cover art, image decoding and caching | 55% | 15% |
+| Manga reader | Open a chapter and page through it | 30% | 10% |
+| Video player (mpv) | Play episodes, remember your position | 40% | 5% |
+| Downloads | Save chapters and episodes for offline use | 35% | 0% |
+| AniList tracking | Sync your progress to AniList | 10% | 0% |
+| Other trackers (MAL, Kitsu and so on) | The same for the other services | 0% | 0% |
+| Backup and restore | Export and import your library, including Aniyomi backups | 20% | 0% |
+| Auto-update library | Check for new chapters and episodes by itself | 5% | 0% |
+| Screens (what you see) | Real screens driven by real data | 15% | 10% |
+| Translations, CI, docs | Languages, automated checks, README | 45% | 30% |
+| Windows port | Later | 0% | 0% |
 
 ## Sources
 
