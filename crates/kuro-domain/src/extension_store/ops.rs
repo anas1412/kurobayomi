@@ -29,9 +29,9 @@ pub fn add_store(
     Ok(())
 }
 
-/// `insert_from_preference`: a store from an old preference entry, with placeholder metadata and no network call
+/// `insert_from_legacy`: a store from an old preference entry, with placeholder metadata and no network call
 /// (TC-STO-07). A row that already has a real signing key is kept as it is (E-STO-08).
-pub fn insert_from_preference(
+pub fn insert_from_legacy(
     repo: &ExtensionStoreRepo,
     index_url: &str,
     name: &str,
@@ -41,7 +41,7 @@ pub fn insert_from_preference(
             return Ok(());
         }
     }
-    repo.insert_from_preference(index_url, name)?;
+    repo.insert_from_legacy(index_url, name)?;
     Ok(())
 }
 
@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn a_preference_entry_gets_placeholders_and_does_not_overwrite_a_real_key() {
         let (_dir, _db, repo) = repo();
-        insert_from_preference(&repo, "https://p.test/index.min.json", "Pref").expect("insert");
+        insert_from_legacy(&repo, "https://p.test/index.min.json", "Pref").expect("insert");
         let stored = repo
             .get("https://p.test/index.min.json")
             .expect("get")
@@ -317,7 +317,7 @@ mod tests {
 
         repo.add(&row("https://real.test/index.min.json", "Real", "realkey"))
             .expect("real");
-        insert_from_preference(&repo, "https://real.test/index.min.json", "Other").expect("no-op");
+        insert_from_legacy(&repo, "https://real.test/index.min.json", "Other").expect("no-op");
         let kept = repo
             .get("https://real.test/index.min.json")
             .expect("get")

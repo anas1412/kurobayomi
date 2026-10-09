@@ -30,6 +30,33 @@ pub enum DownloadError {
     /// A chapter task panicked, or the downloader is gone.
     #[error("internal error: {0}")]
     Internal(String),
+    /// The hoster list is empty or holds no playable video (anime, `video_list_empty_error`).
+    #[error("No video found")]
+    NoVideo,
+    /// The operation was cancelled by the user. Never shown to the user.
+    #[error("Cancelled")]
+    Cancelled,
+    /// `ffmpeg` or `ffprobe` is not on `PATH` (design 7).
+    #[error("ffmpeg is not installed or not on PATH")]
+    FfmpegMissing,
+    /// ffmpeg exited with a failure status (behaviour 5.7 step 6).
+    #[error("Error in ffmpeg!")]
+    FfmpegFailed,
+    /// ffprobe failed. Holds the first line of its output, as the Kotlin exception does.
+    #[error("{0}")]
+    Ffprobe(String),
+    /// The local HTTP server for `localhost:1` URLs did not start, or gave port 0 (behaviour 5.3, E-X07).
+    #[error("Failed to start server")]
+    HttpServer(String),
+    /// `StartNow` for an episode already in the downloads folder (E-Q06). Nothing is queued.
+    #[error("Episode is already downloaded")]
+    AlreadyDownloaded,
+    /// The finished folder name is taken by a non-empty folder at finalise (E-F02). The staging folder is kept.
+    #[error("Episode already exists")]
+    EpisodeExists,
+    /// The staging folder does not hold exactly one finished video (E-F06, behaviour 5.8).
+    #[error("Download incomplete: {0}")]
+    DownloadIncomplete(String),
 }
 
 /// How a chapter failure is handled by the scheduler.
@@ -48,6 +75,7 @@ impl DownloadError {
             Self::InvalidLocation(_) => Some("invalid_location"),
             Self::NoPages => Some("page_list_empty_error"),
             Self::LowSpace { .. } => Some("download_insufficient_space"),
+            Self::NoVideo => Some("video_list_empty_error"),
             _ => None,
         }
     }
@@ -80,6 +108,20 @@ mod tests {
         );
         assert_eq!(DownloadError::Source(SourceError::Http(404)).failure_kind(), FailureKind::Other);
         assert_eq!(DownloadError::NoPages.failure_kind(), FailureKind::Other);
+    }
+
+    #[test]
+    fn ffmpeg_and_server_failures_use_the_kotlin_text() {
+        assert_eq!(DownloadError::FfmpegFailed.to_string(), "Error in ffmpeg!");
+        assert_eq!(DownloadError::HttpServer("port 0".into()).to_string(), "Failed to start server");
+        assert_eq!(DownloadError::Ffprobe("Invalid data".into()).failure_kind(), FailureKind::Other);
+    }
+
+    #[test]
+    fn episode_failures_have_their_english_text() {
+        assert_eq!(DownloadError::AlreadyDownloaded.to_string(), "Episode is already downloaded");
+        assert_eq!(DownloadError::EpisodeExists.to_string(), "Episode already exists");
+        assert_eq!(DownloadError::DownloadIncomplete("2 files".into()).to_string(), "Download incomplete: 2 files");
     }
 
     #[test]

@@ -5,8 +5,11 @@ use std::io;
 use error::LocalSourceError;
 
 pub mod anime;
+pub mod archive;
 pub mod bridge;
 pub mod browse;
+pub mod comicinfo;
+pub mod dates;
 pub mod epub;
 pub mod error;
 pub mod format;
@@ -14,6 +17,7 @@ pub mod fs;
 pub mod ids;
 pub mod images;
 pub mod json_side;
+pub mod locks;
 pub mod manga;
 pub mod media;
 pub mod names;
@@ -21,6 +25,7 @@ pub mod natsort;
 pub mod recognition;
 pub mod roots;
 pub mod sort;
+pub mod ux;
 
 pub use anime::LocalAnimeSource;
 pub use ids::{LOCAL_SOURCE_ID, is_local_source};

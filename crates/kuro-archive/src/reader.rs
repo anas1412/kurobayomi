@@ -1,17 +1,19 @@
 //! `ArchiveReader`: opens a memory-mapped archive, lists its entries and streams one entry by name.
 //!
-//! Every operation opens its own libarchive handle over the shared mapping, so the reader keeps
-//! no mutable state and is `Send + Sync`. Port of `core/archive/.../ArchiveReader.kt` and the page
-//! filter of `ArchivePageLoader.kt` (T-13a-031, T-13a-032).
+//! Listing opens its own libarchive handle over the shared mapping. A zip archive also gets its
+//! central directory parsed once at `open` (T-43a-009), so `open_entry` finds an entry by name
+//! without scanning headers. Port of `core/archive/.../ArchiveReader.kt` and the page filter of
+//! `ArchivePageLoader.kt` (T-13a-031, T-13a-032, T-43a-009).
 
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use kuro_core::image::is_image_name;
 use kuro_core::text::natural_cmp;
 use memmap2::Mmap;
+use zip::ZipArchive;
 
 use crate::libarchive::{Handle, Header};
 
@@ -26,6 +28,10 @@ pub enum ArchiveError {
     /// libarchive failed while an entry was being scanned.
     #[error("libarchive: {0}")]
     Backend(String),
+    /// An EPUB package document named by the container (or the `OEBPS/content.opf` fallback) is
+    /// not in the archive.
+    #[error("epub package missing: {0}")]
+    PackageMissing(String),
 }
 
 /// One entry of an archive listing.
@@ -39,29 +45,56 @@ pub struct EntryInfo {
 pub struct ArchiveReader {
     map: Arc<Mmap>,
     path: PathBuf,
+    /// Zip central directory, parsed once at `open`; `None` when the archive is not a zip that the
+    /// `zip` crate reads. Its name index gives the position of an entry without a header scan.
+    zip: Option<Mutex<ZipArchive<Cursor<MapBytes>>>>,
 }
 
-/// Streams the bytes of one entry. Owns its libarchive handle; the handle is freed on drop.
+/// The mapping as bytes for the `zip` crate. Shares the `Arc`, so the reader holds one mapping.
+struct MapBytes(Arc<Mmap>);
+
+impl AsRef<[u8]> for MapBytes {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// Streams the bytes of one entry. A zip entry is decoded into memory once; any other entry is
+/// streamed from its own libarchive handle, which is freed on drop.
 pub struct EntryReader {
-    handle: Handle,
+    bytes: EntryBytes,
+}
+
+enum EntryBytes {
+    Buffered(Cursor<Vec<u8>>),
+    Stream(Handle),
 }
 
 impl Read for EntryReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.handle.read_data(buf)
+        match &mut self.bytes {
+            EntryBytes::Buffered(cursor) => cursor.read(buf),
+            EntryBytes::Stream(handle) => handle.read_data(buf),
+        }
     }
 }
 
 impl ArchiveReader {
-    /// Maps `path` read-only. A missing or empty file is an `Open` error.
+    /// Maps `path` read-only and, for a zip, parses its central directory. A missing or empty file
+    /// is an `Open` error.
     pub fn open(path: &Path) -> Result<Self, ArchiveError> {
         let map = map_file(path).map_err(|e| ArchiveError::Open {
             path: path.to_owned(),
             reason: e.to_string(),
         })?;
+        let map = Arc::new(map);
+        let zip = ZipArchive::new(Cursor::new(MapBytes(Arc::clone(&map))))
+            .ok()
+            .map(Mutex::new);
         Ok(Self {
-            map: Arc::new(map),
+            map,
             path: path.to_owned(),
+            zip,
         })
     }
 
@@ -105,13 +138,39 @@ impl ArchiveReader {
         Ok(pages)
     }
 
-    /// Streams the entry whose name equals `name` exactly (case-sensitive, no normalisation).
-    /// `Ok(None)` when no entry matches; the handle is freed in that case too.
+    /// Opens the entry whose name equals `name` exactly (case-sensitive, no normalisation).
+    /// `Ok(None)` when no entry matches.
+    ///
+    /// A zip entry found in the central-directory index is decoded directly, so a page costs one
+    /// lookup and one decode, not a header scan. Anything else (other formats, a name the index
+    /// does not hold, an entry the index cannot read) is answered by a scan from the first header,
+    /// so libarchive's own name rules still decide the result.
+    ///
+    // Decision (E-ARC-1): the once-built name index covers zip/cbz only. libarchive has no seek
+    // for rar, 7z or tar (solid or streamed formats), so those open a fresh handle and scan
+    // headers per page; a chapter is O(n^2) headers for them. Accepted: the mapping is shared and
+    // read-only and chapter archives are small.
+    // ponytail: index keys are the names the zip crate reports; libarchive normalises some names
+    // differently (backslash separators), so those misses scan too. Upgrade path for non-zip:
+    // cache the decoded bytes of the most recent entry, or extract the chapter once.
     pub fn open_entry(&self, name: &str) -> Result<Option<EntryReader>, ArchiveError> {
+        if let Some(bytes) = self.zip.as_ref().and_then(|zip| read_zip_entry(zip, name)) {
+            return Ok(Some(EntryReader {
+                bytes: EntryBytes::Buffered(Cursor::new(bytes)),
+            }));
+        }
+        self.scan_entry(name)
+    }
+
+    /// Scans headers from the first one until `name` matches. The handle is freed when no match
+    /// is found.
+    fn scan_entry(&self, name: &str) -> Result<Option<EntryReader>, ArchiveError> {
         let mut handle = Handle::open(Arc::clone(&self.map)).map_err(ArchiveError::Backend)?;
         while let Some(header) = handle.next_header().map_err(ArchiveError::Backend)? {
             if header.name.as_deref() == Some(name) {
-                return Ok(Some(EntryReader { handle }));
+                return Ok(Some(EntryReader {
+                    bytes: EntryBytes::Stream(handle),
+                }));
             }
         }
         Ok(None)
@@ -133,6 +192,18 @@ impl ArchiveReader {
             reason,
         }
     }
+}
+
+/// Decodes the zip entry `name` through the central-directory index. `None` when the index does
+/// not hold the name or cannot read it. The lock is held only for this call.
+fn read_zip_entry(zip: &Mutex<ZipArchive<Cursor<MapBytes>>>, name: &str) -> Option<Vec<u8>> {
+    let mut archive = zip.lock().unwrap_or_else(PoisonError::into_inner);
+    let index = archive.index_for_name(name)?;
+    let mut file = archive.by_index(index).ok()?;
+    // No capacity hint: the size comes from the archive and is not trusted for an allocation.
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 /// Reads up to `len` bytes of the current entry. `None` on a read error, or when no byte is read.
@@ -343,6 +414,33 @@ mod tests {
                 assert_eq!(h.join().unwrap(), expected);
             }
         });
+    }
+
+    #[test]
+    fn only_zip_archives_get_a_central_directory_index() {
+        assert!(open("deflate.cbz").zip.is_some());
+        assert!(open("stored.zip").zip.is_some());
+        assert!(open("sample.cbr").zip.is_none());
+        assert!(open("sample.7z").zip.is_none());
+        assert!(open("sample.tar").zip.is_none());
+    }
+
+    #[test]
+    fn indexed_zip_lookup_matches_the_header_scan_for_every_entry() {
+        for name in ["stored.zip", "deflate.cbz"] {
+            let reader = open(name);
+            for entry in reader.entries().unwrap() {
+                let indexed = reader.open_entry(&entry.name).unwrap();
+                let scanned = reader.scan_entry(&entry.name).unwrap();
+                match (indexed, scanned) {
+                    (Some(a), Some(b)) => {
+                        assert_eq!(read_all(a), read_all(b), "{name}: {}", entry.name);
+                    }
+                    (None, None) => {}
+                    _ => panic!("{name}: index and scan disagree on {}", entry.name),
+                }
+            }
+        }
     }
 
     #[test]

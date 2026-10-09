@@ -30,13 +30,15 @@ pub mod image;
 pub mod logging;
 pub mod prefs;
 pub mod runtime;
+pub mod serde_conv;
 pub mod sources;
 pub mod storage;
 pub mod torrent;
 pub mod util;
 pub mod utc;
+pub mod xml;
 
-pub use util::{hash, text};
+pub use util::{hash, json, text};
 
 #[cfg(test)]
 mod build_support;

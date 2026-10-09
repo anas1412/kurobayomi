@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use kuro_platform::paths::Paths;
 use rusqlite::Connection;
 
-pub use crate::schema::{BASELINE_SQL, MANGA_SCHEMA, SCHEMA_VERSION as BASELINE_VERSION};
+pub use crate::schema::{BASELINE_SQL, BASELINE_VERSION, MANGA_SCHEMA, SCHEMA_VERSION};
 use crate::flags::library_sort;
 use crate::open::{DbResult, open_and_migrate};
 use crate::statements_manga::{chapters, mangas};
@@ -12,8 +12,7 @@ use crate::statements_manga::{chapters, mangas};
 pub const MANGA_DB_FILE: &str = "manga.db";
 
 /// Kurobayomi migrations after the baseline: `(target version, SQL)`, ascending and contiguous.
-/// Empty until the first post-33 change (migration 34 is T-03a-024).
-pub const MIGRATIONS: &[(i64, &str)] = &[];
+pub const MIGRATIONS: &[(i64, &str)] = crate::schema::MANGA_MIGRATIONS;
 
 /// `<data_dir>/manga.db`.
 pub fn db_path(data_dir: &Path) -> PathBuf {
@@ -45,7 +44,7 @@ pub fn open(path: &Path) -> DbResult<Connection> {
 pub(crate) fn test_db() -> rusqlite::Connection {
     let c = rusqlite::Connection::open_in_memory().expect("in-memory database");
     c.pragma_update(None, "foreign_keys", "ON").expect("foreign keys");
-    crate::open::register_functions(&c).expect("lower_unicode");
+    crate::open::register_functions(&c).expect("kuro_lower");
     c.execute_batch(BASELINE_SQL).expect("baseline schema");
     c
 }
@@ -97,6 +96,65 @@ mod tests {
         assert_eq!(syncing, 0);
         let version: i64 = c.query_row("SELECT version FROM mangas", [], |r| r.get(0)).unwrap();
         assert_eq!(version, version_before);
-        assert_eq!(c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 33);
+        assert_eq!(c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migration_34_adds_the_url_index_and_keeps_library_rows_identical() {
+        let c = test_db();
+        let a = mangas::insert(&c, &manga("/a")).unwrap();
+        let b = mangas::insert(&c, &manga("/b")).unwrap();
+        let hidden = mangas::insert(&c, &manga("/c")).unwrap();
+        c.execute("UPDATE mangas SET favorite = 0 WHERE _id = ?1", [hidden]).unwrap();
+        for (id, url) in [(a, "/a/1"), (a, "/a/2"), (b, "/b/1"), (hidden, "/c/1")] {
+            chapters::insert(&c, &chapter(id, url)).unwrap();
+        }
+        let rows = |c: &Connection| -> Vec<(i64, i64, i64, i64)> {
+            let mut st = c
+                .prepare("SELECT _id, totalCount, readCount, category FROM libraryView ORDER BY _id")
+                .unwrap();
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        let before = rows(&c);
+        assert_eq!(before.len(), 2, "only the favourites are in the library view");
+        c.execute_batch(crate::schema::MANGA_MIGRATIONS[0].1).unwrap();
+        assert_eq!(rows(&c), before, "migration 34 keeps the library view rows");
+        let url_index: i64 = c
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'chapters_url_index'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(url_index, 1);
+    }
+
+    #[test]
+    fn the_latest_manga_version_is_34_and_fresh_files_get_it() {
+        assert_eq!(SCHEMA_VERSION, 34);
+        assert_eq!(BASELINE_VERSION, 33);
+        assert_eq!(MANGA_SCHEMA.migrations.len(), 1);
+        assert_eq!(MANGA_SCHEMA.migrations[0].0, 34);
+        let dir = tempfile::tempdir().unwrap();
+        let c = open(&dir.path().join("manga.db")).unwrap();
+        assert_eq!(c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 34);
+    }
+
+    #[test]
+    fn duplicate_title_match_folds_unicode_case_on_both_sides() {
+        let c = test_db();
+        let stored = mangas::insert(&c, &manga("/a")).unwrap();
+        let adding = mangas::insert(&c, &manga("/b")).unwrap();
+        c.execute("UPDATE mangas SET title = 'Ärger' WHERE _id = ?1", [stored]).unwrap();
+        for input in ["ärger", "ÄRGER", "Ärger"] {
+            let found = mangas::get_duplicate_library_manga(&c, input, adding).unwrap();
+            assert_eq!(found.len(), 1, "input {input}");
+        }
+        c.execute("UPDATE mangas SET title = 'Naruto' WHERE _id = ?1", [stored]).unwrap();
+        assert_eq!(mangas::get_duplicate_library_manga(&c, "NARUTO", adding).unwrap().len(), 1);
+        assert!(mangas::get_duplicate_library_manga(&c, "naruto", stored).unwrap().is_empty(), "the same row is excluded");
     }
 }

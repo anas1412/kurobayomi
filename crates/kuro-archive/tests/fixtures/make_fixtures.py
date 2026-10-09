@@ -46,6 +46,52 @@ def rar4(entries):
     return bytes(out)
 
 
+CONTAINER_XML = """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"""
+
+PACKAGE_OPF = """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+<manifest>
+<item id="p2" href="text/p2.xhtml" media-type="application/xhtml+xml"/>
+<item id="p1" href="text/p1.xhtml" media-type="application/xhtml+xml"/>
+<item id="notes" href="text/notes.html" media-type="text/html"/>
+</manifest>
+<spine>
+<itemref idref="p1"/>
+<itemref idref="notes"/>
+<itemref idref="p2"/>
+</spine>
+</package>"""
+
+PAGE1_XHTML = """<html><body>
+<img src="../images/a.jpg"/>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<image xlink:href="../images/b.png"/>
+</svg>
+</body></html>"""
+
+PAGE2_XHTML = """<html><body>
+<img src="../images/a.jpg"/><img src="../images/c.png"/>
+</body></html>"""
+
+
+def write_epub(path):
+    """Minimal EPUB: container, package with a text/html spine item, two XHTML pages. Page 1
+    has an SVG `<image xlink:href>`; `a.jpg` is shared by both pages and listed once."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr("META-INF/container.xml", CONTAINER_XML)
+        z.writestr("OEBPS/content.opf", PACKAGE_OPF)
+        z.writestr("OEBPS/text/p1.xhtml", PAGE1_XHTML)
+        z.writestr("OEBPS/text/p2.xhtml", PAGE2_XHTML)
+        z.writestr("OEBPS/text/notes.html", "<html><body><img src='../images/x.jpg'/></body></html>")
+        z.writestr("OEBPS/images/a.jpg", entry(JPEG, 64))
+        z.writestr("OEBPS/images/b.png", entry(PNG, 64))
+        z.writestr("OEBPS/images/c.png", entry(PNG, 80))
+
+
 def main():
     jp = {
         "1.jpg": entry(JPEG, 300),
@@ -86,6 +132,8 @@ def main():
         info = tarfile.TarInfo("a.jpg")
         info.size = len(entry(JPEG, 64))
         t.addfile(info, io.BytesIO(entry(JPEG, 64)))
+
+    write_epub(os.path.join(HERE, "sample.epub"))
 
     # 7z packs files from a directory, so write the pages into a scratch folder first.
     with tempfile.TemporaryDirectory() as work:

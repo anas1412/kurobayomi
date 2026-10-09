@@ -1,0 +1,94 @@
+//! Display ICC profile (area:34 behavior section 14.6, design section 9 deviation D-3, T-34a-031). Built with the `icc`
+//! feature only, through lcms2.
+//!
+//! The profile is read once when the setting changes. Pictures are taken from sRGB to the display profile. A profile
+//! that cannot be read or used gives `None`, and the picture is then shown without colour management.
+
+use std::path::Path;
+
+use lcms2::{Intent, PixelFormat, Profile, Transform};
+
+use crate::decode::Decoded;
+
+/// The sRGB-to-display transform of one display profile.
+pub struct DisplayProfile {
+    transform: Transform<[u8; 4], [u8; 4]>,
+}
+
+impl DisplayProfile {
+    /// Reads the profile at `path` and builds the transform. `None` when the file cannot be read or is not a profile.
+    pub fn load(path: &Path) -> Option<Self> {
+        let display = Profile::new_file(path).ok()?;
+        let srgb = Profile::new_srgb();
+        let transform = Transform::new(
+            &srgb,
+            PixelFormat::RGBA_8,
+            &display,
+            PixelFormat::RGBA_8,
+            Intent::Perceptual,
+        )
+        .ok()?;
+        Some(Self { transform })
+    }
+
+    /// The picture converted to the display profile. Alpha is copied as it is.
+    pub fn apply(&self, picture: &Decoded) -> Decoded {
+        let src: Vec<[u8; 4]> = picture
+            .rgba
+            .chunks_exact(4)
+            .map(|px| [px[0], px[1], px[2], px[3]])
+            .collect();
+        let mut dst = vec![[0u8; 4]; src.len()];
+        self.transform.transform_pixels(&src, &mut dst);
+        // lcms2 does not write the extra alpha channel here, so the source alpha is put back.
+        for (out, input) in dst.iter_mut().zip(&src) {
+            out[3] = input[3];
+        }
+        Decoded {
+            width: picture.width,
+            height: picture.height,
+            rgba: bytes::Bytes::from(dst.concat()),
+            is_sampled: picture.is_sampled,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+
+    fn one_pixel(rgba: [u8; 4]) -> Decoded {
+        Decoded {
+            width: 1,
+            height: 1,
+            rgba: Bytes::copy_from_slice(&rgba),
+            is_sampled: false,
+        }
+    }
+
+    #[test]
+    fn an_srgb_display_profile_leaves_the_colours_alone() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("display.icc");
+        let bytes = Profile::new_srgb().icc().map_err(std::io::Error::other)?;
+        std::fs::write(&path, bytes)?;
+        let profile = DisplayProfile::load(&path)
+            .ok_or_else(|| std::io::Error::other("profile not loaded"))?;
+        let out = profile.apply(&one_pixel([200, 40, 10, 128]));
+        for (got, want) in out.rgba.iter().zip([200u8, 40, 10, 128]) {
+            assert!(got.abs_diff(want) <= 2, "{:?}", out.rgba);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_profile_gives_no_profile() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("junk.icc");
+        std::fs::write(&path, b"not a profile at all")?;
+        assert!(DisplayProfile::load(&path).is_none());
+        assert!(DisplayProfile::load(&dir.path().join("missing.icc")).is_none());
+        Ok(())
+    }
+}

@@ -22,7 +22,8 @@ fn main() {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
     let git_time = git(&["log", "-1", "--format=%ct"]).and_then(|t| t.parse::<i64>().ok());
     let epoch = build_support::build_time_from_epoch(std::env::var("SOURCE_DATE_EPOCH").ok().as_deref(), git_time, now);
-    let build_type = std::env::var("PROFILE").unwrap_or_else(|_| "release".into());
+    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "release".into());
+    let build_type = build_support::build_type_from_out_dir(&std::env::var("OUT_DIR").unwrap_or_default(), &profile);
     println!("cargo:rustc-env=KB_GIT_SHA={sha}");
     println!("cargo:rustc-env=KB_COMMIT_COUNT={count}");
     println!("cargo:rustc-env=KB_BUILD_TIME={}", utc::rfc3339(epoch));

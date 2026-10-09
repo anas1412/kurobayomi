@@ -3,8 +3,11 @@
 //! redirect to another store at most four times, and a document is limited to 16 MiB. Each request gives up cleanly
 //! when its cancel token fires.
 
+pub mod add;
+pub mod link;
 pub mod map;
 pub mod refresh;
+pub mod rules;
 pub mod wire;
 
 use std::io::Read;
@@ -48,6 +51,8 @@ pub enum StoreError {
     RedirectLoop,
     #[error("the refresh was cancelled")]
     Cancelled,
+    #[error("this extension store already exists")]
+    AlreadyExists,
 }
 
 /// The transport limits of a store request: the kuro-net values, with the 30 second call timeout of data section 6.
@@ -428,6 +433,20 @@ mod tests {
         serde_json::to_vec(value).unwrap()
     }
 
+    /// Key rule (T-19a-020, TST-19-012): the row is keyed by the FINAL url, after the legacy rewrite. The same repo
+    /// entered as `index.min.json` or as `repo.json` is one key, so it is one row.
+    #[tokio::test]
+    async fn tst_19_012_a_legacy_index_min_json_input_and_its_repo_json_give_the_same_key() {
+        let server = MockServer::start().await;
+        serve(&server, "/index.min.json", json_bytes(&json!([]))).await;
+        serve(&server, "/repo.json", json_bytes(&legacy_repo(None))).await;
+        let cancel = CancellationToken::new();
+        let typed_list = fetch_row(&test_client(), &format!("{}/index.min.json", server.uri()), &cancel).await.unwrap();
+        let typed_repo = fetch_row(&test_client(), &format!("{}/repo.json", server.uri()), &cancel).await.unwrap();
+        assert_eq!(typed_list.row.index_url, format!("{}/repo.json", server.uri()));
+        assert_eq!(typed_list.row.index_url, typed_repo.row.index_url, "one key, so one row");
+    }
+
     #[tokio::test]
     async fn tst_19_010_a_legacy_list_fetches_repo_json_and_is_stored_as_legacy() {
         let server = MockServer::start().await;
@@ -739,6 +758,58 @@ mod tests {
             contact: Some(PbContact { website: "https://example.org".into(), discord: None }),
             extension_list: list.map(|extensions| PbExtensionList { extensions }),
             extension_list_url: list_url,
+        }
+    }
+
+    /// Golden bytes of `pb_store(Some(vec![pb_extension("p.golden", 7, 1)]), None)`, captured from `prost` with the
+    /// tag table of `wire.rs` (T-19a-068). A change to a tag number fails this test.
+    const GOLDEN_STORE_PB: &str = "0a0d4578616d706c652053746f7265120245581a016b22150a1368747470733a2f2f6578616d706c652e6f7267aa069d010a9a010a0d416e69796f6d693a2044656d6f1208702e676f6c64656e1a450a2068747470733a2f2f6578616d706c652e6f72672f61706b2f64656d6f2e61706b122168747470733a2f2f6578616d706c652e6f72672f69636f6e2f64656d6f2e706e672202313628073205312e302e3738014a29089582a6efc79e849111120444656d6f1a02656e221368747470733a2f2f6578616d706c652e6f7267";
+
+    fn from_hex(text: &str) -> Vec<u8> {
+        (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap()).collect()
+    }
+
+    #[test]
+    fn tst_19_068_the_golden_protobuf_store_decodes_to_the_expected_values() {
+        let store = wire::decode_store_pb(&from_hex(GOLDEN_STORE_PB)).expect("the golden store decodes");
+        assert_eq!((store.name.as_str(), store.badge_label.as_str(), store.signing_key.as_str()), ("Example Store", "EX", "k"));
+        assert_eq!(store.contact.website, "https://example.org");
+        let listed = &store.extension_list.expect("the inline list").extensions[0];
+        assert_eq!((listed.package_name.as_str(), listed.version_code), ("p.golden", 7));
+        assert_eq!(listed.content_warning, wire::ContentWarning::from_number(1).unwrap());
+        assert_eq!(listed.sources[0].name, "Demo");
+    }
+
+    #[test]
+    fn tst_19_068_mutated_and_random_bodies_never_panic_the_decoders() {
+        // A fixed-seed xorshift keeps the run deterministic. The decoders must return an error or a value, never panic.
+        let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let golden = from_hex(GOLDEN_STORE_PB);
+        for round in 0..20_000 {
+            let body: Vec<u8> = if round % 2 == 0 {
+                let mut bytes = golden.clone();
+                let cut = (next() as usize) % (bytes.len() + 1);
+                bytes.truncate(cut);
+                for _ in 0..(next() % 4) {
+                    if !bytes.is_empty() {
+                        let at = (next() as usize) % bytes.len();
+                        bytes[at] = next() as u8;
+                    }
+                }
+                bytes
+            } else {
+                (0..(next() % 96)).map(|_| next() as u8).collect()
+            };
+            let _ = wire::decode_store_pb(&body);
+            let _ = wire::decode_list_pb(&body);
+            let _ = decode_store(&body);
+            let _ = decode_list(&body);
         }
     }
 

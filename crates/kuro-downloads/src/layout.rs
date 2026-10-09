@@ -108,9 +108,52 @@ impl DownloadLayout {
         (Some(manga_dir), found)
     }
 
+    /// The staging folder (`<chapter dir>_tmp`) of a chapter. Pure path building: nothing is created or checked.
+    pub fn staging_dir(
+        &self,
+        source_display_name: &str,
+        manga_title: &str,
+        name: &str,
+        scanlator: Option<&str>,
+    ) -> PathBuf {
+        self.manga_path(source_display_name, manga_title).join(format!("{}{TMP_DIR_SUFFIX}", chapter_dir_name(name, scanlator)))
+    }
+
     fn manga_path(&self, source_display_name: &str, manga_title: &str) -> PathBuf {
         self.root.join(Self::source_dir_name(source_display_name)).join(Self::manga_dir_name(manga_title))
     }
+}
+
+/// Suffix of a CBZ archive that is still being written (`<name>.cbz.part`).
+pub const CBZ_PART_SUFFIX: &str = ".cbz.part";
+
+/// Startup sweep (T-23a-044). Under `root`, every chapter staging folder (`<name>_tmp`) and every `.cbz.part` file is
+/// removed, except the staging folders in `keep`, which belong to queued chapters and wait for a resume. Only the
+/// `<source>/<manga>` levels are walked. Returns how many entries were removed.
+pub fn sweep_stray_chapters(root: &Path, keep: &[PathBuf]) -> usize {
+    let mut removed = 0;
+    for source in children(root).into_iter().filter(|p| p.is_dir()) {
+        for manga in children(&source).into_iter().filter(|p| p.is_dir()) {
+            for entry in children(&manga) {
+                let name = entry.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let stray_tmp = entry.is_dir() && name.ends_with(TMP_DIR_SUFFIX) && !keep.contains(&entry);
+                let stray_part = entry.is_file() && name.ends_with(CBZ_PART_SUFFIX);
+                let gone = if stray_tmp {
+                    fs::remove_dir_all(&entry).is_ok()
+                } else {
+                    stray_part && fs::remove_file(&entry).is_ok()
+                };
+                if gone {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    removed
+}
+
+fn children(path: &Path) -> Vec<PathBuf> {
+    fs::read_dir(path).into_iter().flatten().flatten().map(|e| e.path()).collect()
 }
 
 #[cfg(test)]
@@ -186,5 +229,25 @@ mod tests {
         let (found_dir, found) = layout.find_chapter_dirs("S (EN)", "M", &chapters);
         assert_eq!(found_dir, Some(dir.clone()));
         assert_eq!(found, vec![dir.join("Ch 1")]);
+    }
+
+    #[test]
+    fn the_startup_sweep_removes_stray_staging_folders_and_part_files_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let layout = DownloadLayout::new(tmp.path());
+        let dir = layout.manga_dir("S (EN)", "M").unwrap();
+        fs::create_dir(dir.join("Ch 1_tmp")).unwrap();
+        fs::write(dir.join("Ch 1_tmp").join("0001.jpg.tmp"), b"x").unwrap();
+        fs::create_dir(dir.join("Ch 2_tmp")).unwrap();
+        fs::write(dir.join("Ch 3.cbz.part"), b"x").unwrap();
+        fs::write(dir.join("Ch 4.cbz"), b"x").unwrap();
+        fs::create_dir(dir.join("Ch 5")).unwrap();
+        let kept = dir.join("Ch 2_tmp");
+        assert_eq!(sweep_stray_chapters(tmp.path(), std::slice::from_ref(&kept)), 2, "Ch 1_tmp and Ch 3.cbz.part");
+        assert!(!dir.join("Ch 1_tmp").exists());
+        assert!(kept.is_dir(), "a queued chapter's staging folder waits for the resume");
+        assert!(!dir.join("Ch 3.cbz.part").exists());
+        assert!(dir.join("Ch 4.cbz").is_file() && dir.join("Ch 5").is_dir(), "finished chapters are never touched");
+        assert_eq!(sweep_stray_chapters(tmp.path(), &[]), 1, "the kept folder goes once it is no longer queued");
     }
 }

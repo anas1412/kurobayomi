@@ -21,7 +21,7 @@ pub fn migrate(store: &PrefStore, current: i32) -> Result<(), PrefError> {
     run(store, current, list::MIGRATIONS)
 }
 
-fn run(store: &PrefStore, current: i32, steps: &[Migration]) -> Result<(), PrefError> {
+pub(crate) fn run(store: &PrefStore, current: i32, steps: &[Migration]) -> Result<(), PrefError> {
     let stored = store.pref(LAST_VERSION_CODE, 0i32);
     let old = stored.get();
     if old > current {

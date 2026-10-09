@@ -4,6 +4,7 @@
 //! `Paths` has no getter for the anime folders yet, so the three family folder names are the only path
 //! literals in this crate.
 
+use std::io;
 use std::path::{Path, PathBuf};
 
 use kuro_platform::paths::Paths;
@@ -75,6 +76,27 @@ pub fn custom_file_for(paths: &dyn Paths, art: &ArtRef) -> PathBuf {
 /// Whether the custom file exists. This is a blocking `stat`; async callers use `tokio::fs::try_exists`.
 pub fn has_custom(paths: &dyn Paths, art: &ArtRef) -> bool {
     custom_file_for(paths, art).exists()
+}
+
+/// The marker that keeps Android's media scanner out of a folder (behavior section 18, `DiskUtil.NOMEDIA_FILE`).
+pub const NOMEDIA_FILE: &str = ".nomedia";
+
+/// Creates an empty `.nomedia` in `dir` when the folder exists and the marker is absent (behavior section 21.6
+/// analog, `DiskUtil.createNoMediaFile`). A folder that does not exist is left alone. `true` when the file was
+/// created, so a second call changes nothing.
+pub fn create_nomedia(dir: &Path) -> io::Result<bool> {
+    if !dir.is_dir() {
+        return Ok(false);
+    }
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dir.join(NOMEDIA_FILE))
+    {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]
@@ -172,5 +194,26 @@ mod tests {
         assert!(!has_custom(&paths, &art));
         std::fs::write(custom_file_for(&paths, &art), b"x").unwrap();
         assert!(has_custom(&paths, &art));
+    }
+
+    #[test]
+    fn nomedia_is_created_once_in_an_existing_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("library");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(create_nomedia(&folder).unwrap());
+        let marker = folder.join(".nomedia");
+        assert_eq!(std::fs::metadata(&marker).unwrap().len(), 0);
+        std::fs::write(&marker, b"kept").unwrap();
+        assert!(!create_nomedia(&folder).unwrap());
+        assert_eq!(std::fs::read(&marker).unwrap(), b"kept");
+    }
+
+    #[test]
+    fn nomedia_is_not_created_in_a_missing_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("missing");
+        assert!(!create_nomedia(&folder).unwrap());
+        assert!(!folder.exists());
     }
 }

@@ -12,6 +12,7 @@ kuro-data = { path = "../kuro-data" }
 kuro-platform = { path = "../kuro-platform" }
 kuro-prefs = { path = "../kuro-prefs" }
 kuro-source = { workspace = true }
+rusqlite = { workspace = true }
 chrono = { workspace = true }
 icu_collator = { workspace = true }
 icu_locale = { workspace = true }
@@ -19,12 +20,14 @@ regex = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = "1.0.151"
+semver = "1.0.28"
 url = { workspace = true }
 flate2 = { workspace = true }
 base64 = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+mlua = { version = "0.10", features = ["lua51", "vendored"] }
 
 [dev-dependencies]
 wiremock = { workspace = true }

@@ -73,6 +73,13 @@ mod tests {
     }
 
     #[test]
+    fn the_build_type_follows_the_profile() {
+        // dev builds (debug assertions on) report "debug"; release, preview and dist report their own name
+        assert_eq!(APP_INFO.build_type == "debug", cfg!(debug_assertions), "{}", APP_INFO.build_type);
+        assert!(!APP_INFO.build_type.is_empty());
+    }
+
+    #[test]
     fn updater_flag_follows_the_cargo_feature() {
         assert_eq!(APP_INFO.updater_enabled, cfg!(feature = "updater"));
     }

@@ -123,6 +123,20 @@ impl MangaStatus {
         }
     }
 
+    /// The icon of the status badge (`MangaInfoHeader.kt`, behaviour section 12), by Material icon name. `Unknown`
+    /// uses the block icon, which is also the icon of any other stored code.
+    pub fn icon_name(self) -> &'static str {
+        match self {
+            Self::Unknown => "block",
+            Self::Ongoing => "schedule",
+            Self::Completed => "done_all",
+            Self::Licensed => "attach_money",
+            Self::PublishingFinished => "done",
+            Self::Cancelled => "close",
+            Self::OnHiatus => "pause",
+        }
+    }
+
     /// The English text for the key, as in `p1-behavior.md` section 12.
     pub fn english_text(self) -> &'static str {
         match self {
@@ -133,6 +147,31 @@ impl MangaStatus {
             Self::PublishingFinished => "Publishing finished",
             Self::Cancelled => "Cancelled",
             Self::OnHiatus => "On hiatus",
+        }
+    }
+}
+
+/// What the status badge of the entry screen shows (`MangaInfoHeader.kt`, T-15a-042): one icon and one line of text,
+/// plus a warning icon when the entry comes from a stub source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusBadge {
+    pub status: MangaStatus,
+    pub icon_name: &'static str,
+    pub text_key: &'static str,
+    pub english_text: &'static str,
+    pub stub_warning: bool,
+}
+
+impl StatusBadge {
+    /// The badge for a stored status code. Any code outside 0 to 6 shows the unknown text and icon.
+    pub fn for_raw(raw: i32, stub_source: bool) -> Self {
+        let status = MangaStatus::from_raw(raw);
+        Self {
+            status,
+            icon_name: status.icon_name(),
+            text_key: status.text_key(),
+            english_text: status.english_text(),
+            stub_warning: stub_source,
         }
     }
 }
@@ -221,5 +260,30 @@ mod tests {
     #[test]
     fn genres_are_trimmed_and_blank_parts_dropped() {
         assert_eq!(with_genre(Some(" , Action ,  ")).genres(), Some(vec!["Action".to_owned()]));
+    }
+
+    #[test]
+    fn the_badge_has_the_icon_and_text_of_each_status() {
+        let rows = [
+            (0, "block", "unknown", "Unknown"),
+            (1, "schedule", "ongoing", "Ongoing"),
+            (2, "done_all", "completed", "Completed"),
+            (3, "attach_money", "licensed", "Licensed"),
+            (4, "done", "publishing_finished", "Publishing finished"),
+            (5, "close", "cancelled", "Cancelled"),
+            (6, "pause", "on_hiatus", "On hiatus"),
+        ];
+        for (raw, icon, key, text) in rows {
+            let badge = StatusBadge::for_raw(raw, false);
+            assert_eq!((badge.icon_name, badge.text_key, badge.english_text), (icon, key, text), "status {raw}");
+            assert!(!badge.stub_warning);
+        }
+    }
+
+    #[test]
+    fn an_unknown_code_shows_the_unknown_badge_and_a_stub_source_adds_the_warning() {
+        let badge = StatusBadge::for_raw(42, true);
+        assert_eq!((badge.status, badge.icon_name, badge.text_key), (MangaStatus::Unknown, "block", "unknown"));
+        assert!(badge.stub_warning);
     }
 }

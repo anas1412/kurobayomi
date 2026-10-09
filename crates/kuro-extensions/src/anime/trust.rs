@@ -4,6 +4,7 @@
 
 use std::collections::BTreeSet;
 
+use kuro_prefs::PrefError;
 use kuro_prefs::pref::Pref;
 
 use crate::anime::model::{SignerDigest, StoreRow};
@@ -37,6 +38,22 @@ impl TrustStore {
         let entries = self.entries.get();
         signers.iter().any(|signer| entries.contains(&Self::version_key(pkg, version_code, signer)))
     }
+
+    /// Trusts one version of a package by writing its `<pkg>:<versionCode>:<digest>` entry (T-19a-051). The older
+    /// entries of the same package are replaced (E-TRU-01, design 4.3), so a superseded version is no longer trusted.
+    /// Entries of other packages and the store trust are not touched.
+    pub fn trust_version(&self, pkg: &str, version_code: i64, signer: &SignerDigest) -> Result<(), PrefError> {
+        let own = format!("{pkg}:");
+        let mut entries = self.entries.get();
+        entries.retain(|entry| !entry.starts_with(&own));
+        entries.insert(Self::version_key(pkg, version_code, signer));
+        self.entries.set(entries)
+    }
+
+    /// Forgets every per-version entry (T-19a-010, E-TRU-03). The store rule is not stored here, so it still applies.
+    pub fn revoke_all(&self) -> Result<(), PrefError> {
+        self.entries.set(BTreeSet::new())
+    }
 }
 
 #[cfg(test)]
@@ -67,6 +84,39 @@ mod tests {
 
     fn signer() -> SignerDigest {
         SignerDigest(signer_hex(&fixture_key()))
+    }
+
+    #[test]
+    fn trusting_a_version_trusts_only_that_version_and_keeps_other_entries() {
+        let trust = trust_with(&["other:1:abc".to_owned()]);
+        trust.trust_version("pkg.one", 3, &signer()).unwrap();
+        assert!(trust.is_trusted("pkg.one", 3, &[signer()], &[]));
+        assert!(!trust.is_trusted("pkg.one", 4, &[signer()], &[]));
+        assert!(trust.entries.get().contains("other:1:abc"));
+    }
+
+    #[test]
+    fn tst_19_092_trusting_n_then_n_plus_1_leaves_only_the_newer_entry() {
+        let trust = trust_with_entries_for_replace();
+        trust.trust_version("pkg.one", 3, &signer()).unwrap();
+        trust.trust_version("pkg.one", 4, &signer()).unwrap();
+        assert!(!trust.is_trusted("pkg.one", 3, &[signer()], &[]), "the superseded version is no longer trusted");
+        assert!(trust.is_trusted("pkg.one", 4, &[signer()], &[]));
+        assert!(trust.entries.get().contains("other:1:abc"), "another package's entry stays");
+        assert_eq!(trust.entries.get().len(), 2);
+    }
+
+    #[test]
+    fn replacing_entries_does_not_touch_a_package_whose_name_starts_the_same() {
+        let trust = trust_with_entries_for_replace();
+        trust.trust_version("pkg.one", 1, &signer()).unwrap();
+        trust.trust_version("pkg.one.extra", 1, &signer()).unwrap();
+        trust.trust_version("pkg.one", 2, &signer()).unwrap();
+        assert!(trust.is_trusted("pkg.one.extra", 1, &[signer()], &[]));
+    }
+
+    fn trust_with_entries_for_replace() -> TrustStore {
+        trust_with(&["other:1:abc".to_owned()])
     }
 
     #[test]
@@ -113,5 +163,15 @@ mod tests {
     fn an_aniyomi_style_entry_with_another_digest_never_matches() {
         let trust = trust_with(&["p.demo:7:0000000000000000000000000000000000000000000000000000000000000000".into()]);
         assert!(!trust.is_trusted("p.demo", 7, &[signer()], &[]));
+    }
+
+    #[test]
+    fn tst_19_094_revoke_all_removes_version_entries_and_the_store_rule_still_works() {
+        let trust = trust_with(&[]);
+        trust.trust_version("p.demo", 7, &signer()).expect("trusted");
+        assert!(trust.is_trusted("p.demo", 7, &[signer()], &[]));
+        trust.revoke_all().expect("revoked");
+        assert!(!trust.is_trusted("p.demo", 7, &[signer()], &[]), "the version entry is gone");
+        assert!(trust.is_trusted("p.demo", 7, &[signer()], &[store(&signer().0)]), "the repo rule still works");
     }
 }

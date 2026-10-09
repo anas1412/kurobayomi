@@ -28,6 +28,11 @@ pub const FAILURES_BEFORE_NOTICE: u32 = 3;
 pub trait Backend: Send + Sync {
     fn load(&self) -> Result<BTreeMap<String, PrefValue>, PrefError>;
     fn save(&self, all: &BTreeMap<String, PrefValue>) -> Result<(), PrefError>;
+    /// Whether the store runs a background flusher for this backend. A backend with nothing to write to (memory)
+    /// answers false, so no thread is started.
+    fn flushes(&self) -> bool {
+        true
+    }
 }
 
 /// A change notification. `key` is `None` when many keys changed at once.
@@ -59,6 +64,7 @@ impl PrefStore {
     /// Loads the values from `backend` and starts the flusher.
     pub fn new(backend: Box<dyn Backend>) -> Result<Self, PrefError> {
         let values = backend.load()?;
+        let flushes = backend.flushes();
         let shared = Arc::new(Shared {
             values: RwLock::new(values),
             backend,
@@ -69,7 +75,9 @@ impl PrefStore {
             save_error: Mutex::new(None),
             failure_subscribers: Mutex::new(Vec::new()),
         });
-        spawn_flusher(Arc::downgrade(&shared));
+        if flushes {
+            spawn_flusher(Arc::downgrade(&shared));
+        }
         Ok(Self(shared))
     }
 
@@ -248,10 +256,23 @@ mod tests {
 
     use super::*;
 
+    /// A memory backend that runs the flusher, so the debounce window can be observed.
+    #[derive(Clone, Default)]
+    struct Flushing(MemoryBackend);
+
+    impl Backend for Flushing {
+        fn load(&self) -> Result<BTreeMap<String, PrefValue>, PrefError> {
+            self.0.load()
+        }
+        fn save(&self, all: &BTreeMap<String, PrefValue>) -> Result<(), PrefError> {
+            self.0.save(all)
+        }
+    }
+
     fn counted() -> (PrefStore, MemoryBackend) {
-        let backend = MemoryBackend::default();
+        let backend = Flushing::default();
         let store = PrefStore::new(Box::new(backend.clone())).unwrap();
-        (store, backend)
+        (store, backend.0)
     }
 
     /// Backend whose saves fail while the flag is set.

@@ -13,7 +13,10 @@ path = "src/bin/kuro_i18n_import.rs"
 fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
 unic-langid = "0.9.6"
-quick-xml = "0.41.0"
+quick-xml = "0.42.0"
+chrono = { workspace = true }
+icu_datetime = "2.3.0"
+icu_locale = "2.3.1"
 tracing = { workspace = true }
 
 [build-dependencies]

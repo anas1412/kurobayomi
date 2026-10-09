@@ -2439,4 +2439,13 @@ mod tests {
         assert_eq!(left, [keep, other], "the library row and the other source survive");
         assert!(!left.contains(&gone), "the listed source's non-library row is deleted");
     }
+
+    #[test]
+    fn a_fresh_anime_database_has_the_seed_custom_button_with_id_one() {
+        let c = open_in_memory().unwrap();
+        let buttons = custom_buttons(&c).unwrap();
+        let seed = buttons.iter().find(|b| b.id == 1).expect("seed button 1");
+        assert!(seed.is_favorite, "the seed row ships as the favourite");
+        assert_eq!(seed.sort_index, 0);
+    }
 }

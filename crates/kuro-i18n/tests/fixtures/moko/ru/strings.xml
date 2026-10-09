@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pref_relative_format_summary">\"%2$s\" вместо \"%1$s\"</string>
+    <string name="onboarding_storage_info">Выберите папку для %1$s.</string>
+    <string name="app_name" translatable="false">Переведено</string>
+    <string name="zz_not_in_base">Лишняя строка</string>
+    <string name="pref_appearance_summary">Тема, дата и время</string>
+</resources>

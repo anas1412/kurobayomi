@@ -81,6 +81,18 @@ where
     Ok(())
 }
 
+/// Copies a picked local image into the custom file of the entry, replacing the old one (behavior section 24.2).
+/// The bytes are not checked (behavior section 24.3). A missing source is an error and changes nothing.
+pub async fn set_custom_from_file(
+    paths: &dyn Paths,
+    family: Family,
+    entry_id: i64,
+    source: &Path,
+) -> io::Result<()> {
+    let file = tokio::fs::File::open(source).await?;
+    set_custom(paths, family, entry_id, file).await
+}
+
 /// Deletes the custom file of an entry. `true` only when the file existed and was removed (behavior section 18.7).
 pub fn delete_custom_cover(paths: &dyn Paths, family: Family, entry_id: i64) -> bool {
     remove_if_exists(&cover_paths::custom_file(paths, family, entry_id))
@@ -99,6 +111,26 @@ pub fn delete_from_cache(paths: &dyn Paths, art: &ArtRef, delete_custom: bool) -
         deleted += 1;
     }
     deleted
+}
+
+/// Copies the custom file of `from_id` to `to_id` during a migration (behavior section 24.5, T-34a-051). The manga
+/// migration copies its cover. The anime migration calls it for the cover and for the background. A missing source is
+/// not an error. A failed copy is logged, the partial target is removed, and `false` is returned, so the migration
+/// carries on.
+pub fn copy_custom(paths: &dyn Paths, family: Family, from_id: i64, to_id: i64) -> bool {
+    let from = cover_paths::custom_file(paths, family, from_id);
+    if !from.is_file() {
+        return false;
+    }
+    let to = cover_paths::custom_file(paths, family, to_id);
+    match std::fs::copy(&from, &to) {
+        Ok(_) => true,
+        Err(e) => {
+            tracing::warn!(path = %to.display(), error = %e, "cannot copy custom cover during migration");
+            let _ = std::fs::remove_file(&to);
+            false
+        }
+    }
 }
 
 fn remove_if_exists(path: &Path) -> bool {
@@ -179,5 +211,72 @@ mod tests {
         .unwrap();
         assert!(delete_custom_cover(&paths, Family::AnimeCover, 5));
         assert!(!delete_custom_cover(&paths, Family::AnimeCover, 5));
+    }
+
+    #[tokio::test]
+    async fn a_picked_file_replaces_the_custom_cover() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        let picked = tmp.path().join("picked.jpg");
+        std::fs::write(&picked, b"new picture bytes").unwrap();
+        let custom = cover_paths::custom_file(&paths, Family::MangaCover, 9);
+        std::fs::write(&custom, b"an older, longer custom cover").unwrap();
+        set_custom_from_file(&paths, Family::MangaCover, 9, &picked)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&custom).unwrap(), b"new picture bytes");
+    }
+
+    #[tokio::test]
+    async fn a_missing_picked_file_changes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        let custom = cover_paths::custom_file(&paths, Family::MangaCover, 9);
+        std::fs::write(&custom, b"kept").unwrap();
+        let missing = tmp.path().join("gone.jpg");
+        assert!(
+            set_custom_from_file(&paths, Family::MangaCover, 9, &missing)
+                .await
+                .is_err()
+        );
+        assert_eq!(std::fs::read(&custom).unwrap(), b"kept");
+    }
+
+    #[test]
+    fn delete_custom_reports_whether_a_file_was_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        let custom = cover_paths::custom_file(&paths, Family::AnimeBackground, 4);
+        std::fs::write(&custom, b"bg").unwrap();
+        assert!(delete_custom_cover(&paths, Family::AnimeBackground, 4));
+        assert!(!delete_custom_cover(&paths, Family::AnimeBackground, 4));
+    }
+
+    #[test]
+    fn a_migration_copies_the_custom_file_to_the_new_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        let from = cover_paths::custom_file(&paths, Family::AnimeBackground, 1);
+        std::fs::create_dir_all(from.parent().unwrap()).unwrap();
+        std::fs::write(&from, b"custom").unwrap();
+        assert!(copy_custom(&paths, Family::AnimeBackground, 1, 2));
+        let to = cover_paths::custom_file(&paths, Family::AnimeBackground, 2);
+        assert_eq!(std::fs::read(&to).unwrap(), b"custom");
+        assert!(from.is_file(), "the source stays");
+    }
+
+    #[test]
+    fn a_missing_source_or_a_failed_copy_is_reported_and_leaves_no_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        assert!(!copy_custom(&paths, Family::MangaCover, 1, 2));
+        let to = cover_paths::custom_file(&paths, Family::MangaCover, 2);
+        assert!(!to.exists());
+        // A target name that is already a folder makes the copy fail.
+        let from = cover_paths::custom_file(&paths, Family::MangaCover, 3);
+        std::fs::create_dir_all(from.parent().unwrap()).unwrap();
+        std::fs::write(&from, b"x").unwrap();
+        std::fs::create_dir_all(cover_paths::custom_file(&paths, Family::MangaCover, 4)).unwrap();
+        assert!(!copy_custom(&paths, Family::MangaCover, 3, 4));
     }
 }

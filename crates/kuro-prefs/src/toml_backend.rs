@@ -25,9 +25,11 @@ const CONFIG_FILE: &str = "config.toml";
 const STATE_FILE: &str = "state.toml";
 const LOCK_FILE: &str = ".lock";
 const EXTRA_TABLE: &str = "extra";
+/// Version of the layout written to both files as a top-level `schema = 1`.
+pub(crate) const SCHEMA_VERSION: i64 = 1;
 
 /// `config.toml` inside the config directory.
-pub(crate) fn config_file(config_dir: &Path) -> PathBuf {
+pub fn config_file(config_dir: &Path) -> PathBuf {
     config_dir.join(CONFIG_FILE)
 }
 
@@ -111,6 +113,8 @@ impl Backend for TomlBackend {
             config: read_doc(&self.config)?,
             state: read_doc(&self.state)?,
         };
+        check_schema(&docs.config, &self.config);
+        check_schema(&docs.state, &self.state);
         let mut out = BTreeMap::new();
         for t in [Target::Config, Target::State] {
             load_known(docs.get(t), t, &mut out);
@@ -123,6 +127,7 @@ impl Backend for TomlBackend {
     fn save(&self, all: &BTreeMap<String, PrefValue>) -> Result<(), PrefError> {
         let mut docs = lock(&self.docs);
         for t in [Target::Config, Target::State] {
+            stamp_schema(docs.get_mut(t));
             let root = docs.get_mut(t).as_table_mut();
             write_known(root, t, all);
             write_families(root, t, all);
@@ -132,6 +137,30 @@ impl Backend for TomlBackend {
         // two overlapping saves could rename each other's half-written temp file into place.
         write_atomic(&self.config, &docs.config.to_string())?;
         write_atomic(&self.state, &docs.state.to_string())
+    }
+}
+
+fn schema_of(doc: &DocumentMut) -> Option<i64> {
+    doc.get("schema")?.as_integer()
+}
+
+/// A file from a newer app is still loaded for the fields this build knows; its unknown fields are left alone.
+fn check_schema(doc: &DocumentMut, file: &Path) {
+    if let Some(found) = schema_of(doc).filter(|found| *found > SCHEMA_VERSION) {
+        tracing::warn!(
+            file = %file.display(),
+            found,
+            supported = SCHEMA_VERSION,
+            "preferences file has a newer schema; loading the known fields only"
+        );
+    }
+}
+
+/// Writes `schema = 1` at the top of the file. A newer schema already in the file is kept, never lowered.
+fn stamp_schema(doc: &mut DocumentMut) {
+    let version = schema_of(doc).unwrap_or(0).max(SCHEMA_VERSION);
+    if schema_of(doc) != Some(version) {
+        doc.as_table_mut().insert("schema", Item::Value(Value::from(version)));
     }
 }
 
@@ -503,6 +532,27 @@ mod tests {
         m.insert("legacy_long".into(), PrefValue::Long(5));
         m.insert("legacy_flag".into(), PrefValue::Bool(true));
         m
+    }
+
+    #[test]
+    fn both_files_carry_schema_one_after_a_save() {
+        let dir = TestDir::new("schema-stamp");
+        let b = backend(&dir).unwrap();
+        b.save(&sample()).unwrap();
+        assert!(file(&dir, CONFIG_FILE).starts_with("schema = 1"), "{}", file(&dir, CONFIG_FILE));
+        assert!(file(&dir, STATE_FILE).starts_with("schema = 1"), "{}", file(&dir, STATE_FILE));
+    }
+
+    #[test]
+    fn a_newer_schema_loads_known_fields_and_is_not_lowered_on_save() {
+        let dir = TestDir::new("schema-newer");
+        write_file(&dir, CONFIG_FILE, "schema = 2\n[player]\nsome_future_field = 1\n");
+        let b = backend(&dir).unwrap();
+        let loaded = b.load().unwrap();
+        assert!(loaded.is_empty(), "unknown fields are not loaded as values: {loaded:?}");
+        b.save(&sample()).unwrap();
+        assert!(file(&dir, CONFIG_FILE).starts_with("schema = 2"), "{}", file(&dir, CONFIG_FILE));
+        assert!(file(&dir, CONFIG_FILE).contains("some_future_field = 1"));
     }
 
     #[test]

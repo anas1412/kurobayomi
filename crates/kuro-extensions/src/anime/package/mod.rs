@@ -68,6 +68,14 @@ pub fn open_reader<R: Read + Seek>(reader: R) -> Result<Package, LoadError> {
     Ok(Package { manifest, icon_entry })
 }
 
+/// The icon bytes of the package at `path`, or `None` when it has no icon, the icon is over [`MAX_ICON_BYTES`], or the
+/// file cannot be read. Never an error: a package without an icon shows the generic one.
+pub fn read_icon(path: &Path) -> Option<Vec<u8>> {
+    let name = open(path).ok()?.icon_entry?;
+    let mut archive = ZipArchive::new(File::open(path).ok()?).ok()?;
+    read_capped(&mut archive, &name, MAX_ICON_BYTES).ok().flatten()
+}
+
 /// `..` components, absolute names and backslashes are refused before any entry is read.
 fn unsafe_name(name: &str) -> bool {
     name.starts_with('/') || name.contains('\\') || name.split('/').any(|part| part == "..")

@@ -34,6 +34,12 @@ pub enum ImageError {
     /// More pixels than the request allows, or a side that does not fit a texture (design section 4.6).
     #[error("Image too large")]
     TooLarge,
+    /// The bytes to save are not an image by sniffing (behavior section 21.4).
+    #[error("Not an image")]
+    NotAnImage,
+    /// The file could not be written under the save folder (behavior section 21.6, key `error_saving_picture`).
+    #[error("Error saving picture")]
+    SaveFailed,
 }
 
 impl From<NetError> for ImageError {

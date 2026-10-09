@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 use tokio::sync::watch;
 
+use crate::error::LoadError;
+
 /// An installed package and its status flags.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Installed {
@@ -40,6 +42,9 @@ pub struct Snapshot {
     pub installed: BTreeMap<String, Installed>,
     pub available: BTreeMap<String, Available>,
     pub untrusted: BTreeMap<String, Untrusted>,
+    /// The last load problem of each package directory, keyed by its file name (T-18a-054). A package that loads again
+    /// loses its entry.
+    pub problems: BTreeMap<String, String>,
 }
 
 /// The writer side of the extension state. Each setter publishes the new snapshot.
@@ -88,6 +93,20 @@ impl ExtensionRegistry {
     pub fn set_untrusted(&self, untrusted: Vec<Untrusted>) {
         self.tx.send_modify(|state| {
             state.untrusted = untrusted.into_iter().map(|ext| (ext.pkg.clone(), ext)).collect();
+        });
+    }
+
+    /// Keeps the problem of a package directory, replacing its earlier one.
+    pub fn set_problem(&self, file_name: &str, error: &LoadError) {
+        self.tx.send_modify(|state| {
+            state.problems.insert(file_name.to_owned(), error.to_string());
+        });
+    }
+
+    /// Removes the problem of a package directory that loaded successfully.
+    pub fn clear_problem(&self, file_name: &str) {
+        self.tx.send_modify(|state| {
+            state.problems.remove(file_name);
         });
     }
 
@@ -177,6 +196,19 @@ mod tests {
         let state = registry.snapshot();
         assert_eq!(state.untrusted.keys().collect::<Vec<_>>(), ["y"]);
         assert_eq!(state.untrusted["y"].version_code, 3);
+    }
+
+    #[test]
+    fn a_load_problem_is_kept_by_file_name_until_that_package_loads_again() {
+        let registry = ExtensionRegistry::new();
+        registry.set_problem("a.kuroext", &LoadError::MissingComponent);
+        registry.set_problem("a.kuroext", &LoadError::UnsupportedApi("2.0".into()));
+        registry.set_problem("b", &LoadError::MissingComponent);
+        let state = registry.snapshot();
+        assert_eq!(state.problems["a.kuroext"], "the api version 2.0 is not supported; only 1.x is", "the last one wins");
+        assert_eq!(state.problems.len(), 2);
+        registry.clear_problem("a.kuroext");
+        assert_eq!(registry.snapshot().problems.keys().collect::<Vec<_>>(), ["b"]);
     }
 
     #[tokio::test]

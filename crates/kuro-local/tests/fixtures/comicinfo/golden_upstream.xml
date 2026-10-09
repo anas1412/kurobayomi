@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ComicInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Title>Chapter 12</Title>
+  <Series>Foo</Series>
+  <Number>12</Number>
+  <Summary>A &amp; B &lt;c&gt;</Summary>
+  <Writer>W</Writer>
+  <Penciller>P</Penciller>
+  <Translator>Team</Translator>
+  <Genre>Action, Drama</Genre>
+  <Web>https://a.example/1</Web>
+  <ty:PublishingStatusTachiyomi xmlns:ty="http://www.w3.org/2001/XMLSchema">Ongoing</ty:PublishingStatusTachiyomi>
+  <ty:Categories xmlns:ty="http://www.w3.org/2001/XMLSchema">Read</ty:Categories>
+  <ay:SourceAniyomi xmlns:ay="http://www.w3.org/2001/XMLSchema">Source A</ay:SourceAniyomi>
+</ComicInfo>

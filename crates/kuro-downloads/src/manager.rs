@@ -16,11 +16,11 @@ use crate::downloader::{
 use crate::error::DownloadError;
 use crate::events::{DownloadEvent, EVENT_CAPACITY};
 use crate::index::DownloadIndex;
-use crate::layout::{CBZ_EXTENSION, DownloadLayout, TMP_DIR_SUFFIX, chapter_dir_name};
+use crate::layout::{CBZ_EXTENSION, DownloadLayout, TMP_DIR_SUFFIX, chapter_dir_name, sweep_stray_chapters};
 use crate::model::{ChapterRef, MangaRef, QueuedDownload, SourceRef};
 use crate::pipeline::FreeSpaceFn;
 use crate::source::ChapterSource;
-use crate::store::QueueStore;
+use crate::store::{QueueRow, QueueStore};
 
 /// Result of an enqueue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,8 +51,25 @@ pub struct ManagerParams {
     pub store: Arc<QueueStore>,
     pub free_space: FreeSpaceFn,
     pub settings: DownloadSettings,
+    /// Reader page cache (area 34). `None` when the reader does not share its cache.
+    pub page_cache: Option<Arc<dyn crate::images::PageImageCache>>,
     pub connectivity: watch::Receiver<Connectivity>,
     pub hold: Arc<dyn ProcessHold>,
+    /// The queue read back at startup, in order ([`restore_queue`]). They come back as QUEUE, nothing starts until `Start`,
+    /// and their staging folders survive the startup sweep so a resume continues them (T-23a-044).
+    pub restored: Vec<QueuedDownload>,
+}
+
+/// Reads the persisted queue and turns each row into a download with `resolve` (source, manga and chapter from the
+/// library). Rows `resolve` cannot answer are dropped, and a store that cannot be read gives an empty queue.
+pub fn restore_queue(store: &QueueStore, resolve: impl Fn(&QueueRow) -> Option<QueuedDownload>) -> Vec<QueuedDownload> {
+    match store.load() {
+        Ok(rows) => rows.iter().filter_map(resolve).collect(),
+        Err(err) => {
+            tracing::error!(target: "kuro_downloads", error = %err, "could not read the saved queue");
+            Vec::new()
+        }
+    }
 }
 
 /// Which chapters a delete applies to, from the category and bookmark settings (`getChaptersToDelete`).
@@ -94,6 +111,19 @@ impl DownloadManager {
         let shared = Arc::new(Shared::new());
         let layout = params.layout.clone();
         let index = params.index.clone();
+        // Startup sweep (T-23a-044): staging folders of restored chapters are kept for resume, the rest go.
+        let keep: Vec<PathBuf> = params
+            .restored
+            .iter()
+            .map(|d| layout.staging_dir(&d.source.display_name(), &d.manga.title, &d.chapter.name, d.chapter.scanlator.as_deref()))
+            .collect();
+        let removed = sweep_stray_chapters(layout.root(), &keep);
+        tracing::info!(
+            target: "kuro_downloads",
+            removed,
+            kept = keep.len(),
+            "startup sweep of stray chapter folders and archive parts"
+        );
         let downloader = Downloader::new(params, events.clone(), shared.clone());
         tokio::spawn(downloader.run(command_rx));
         Self { commands, layout, index, events, shared }
@@ -115,6 +145,12 @@ impl DownloadManager {
         let (reply, rx) = oneshot::channel();
         self.send(Command::Enqueue { source, manga, chapters, auto_start, reply }).await?;
         rx.await.map_err(|_| stopped())?
+    }
+
+    /// Sends a command without waiting for the actor, for callers on the GTK main thread. Fails only when the actor is
+    /// gone or its queue of 64 commands is full (the command is then dropped and the error says so).
+    pub fn post(&self, cmd: Command) -> Result<(), DownloadError> {
+        self.commands.try_send(cmd).map_err(|_| stopped())
     }
 
     pub async fn start(&self) -> Result<(), DownloadError> {
@@ -492,7 +528,7 @@ mod tests {
 mod run_tests {
     use super::*;
     use crate::downloader::{BULK_WARNING_TEXT, NO_NETWORK_TEXT, NO_WIFI_TEXT};
-    use crate::model::DownloadState;
+    use crate::model::{DownloadState, SourceRef};
     use crate::testing::{FakeSource, chapter, fake, manga};
     use kuro_source::SourceError;
     use std::collections::HashSet;
@@ -527,9 +563,11 @@ mod run_tests {
             index,
             store,
             free_space: free,
-            settings: DownloadSettings { only_over_wifi },
+            settings: DownloadSettings { only_over_wifi, ..DownloadSettings::default() },
+            page_cache: None,
             connectivity: rx,
             hold: Arc::new(crate::downloader::NoHold),
+            restored: Vec::new(),
         });
         Env { mgr, conn, root, _base: base }
     }
@@ -853,8 +891,10 @@ mod run_tests {
             store: Arc::new(QueueStore::open_in_memory().unwrap()),
             free_space: plenty,
             settings: DownloadSettings::default(),
+            page_cache: None,
             connectivity: rx,
             hold: Arc::new(crate::downloader::NoHold),
+            restored: Vec::new(),
         });
         let log = record(&mgr);
         let src = fake(1);
@@ -1176,5 +1216,64 @@ mod run_tests {
         let outcome = env.mgr.enqueue(source_ref(&src), manga_title(1), chapters(&[1]), false).await.unwrap();
         assert_eq!(outcome, EnqueueOutcome::NothingToDo, "a chapter on disk is not queued again");
         assert!(env.mgr.snapshot().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_restored_queue_keeps_its_staging_folder_through_the_startup_sweep() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("downloads");
+        let src = fake(1);
+        let source: SourceRef = src.clone();
+        let queued = crate::testing::download(&source, 5, 1, DownloadState::Queue);
+        let manga_dir = root.join("Source 1 (EN)").join("Manga 1");
+        let kept = manga_dir.join("Chapter 5_tmp");
+        let stray = manga_dir.join("Chapter 6_tmp");
+        let part = manga_dir.join("Chapter 7.cbz.part");
+        std::fs::create_dir_all(&kept).unwrap();
+        std::fs::create_dir_all(&stray).unwrap();
+        std::fs::write(kept.join("001.jpg"), b"x").unwrap();
+        std::fs::write(&part, b"x").unwrap();
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE mangas(_id INTEGER PRIMARY KEY); CREATE TABLE chapters(_id INTEGER PRIMARY KEY);
+             INSERT INTO mangas(_id) VALUES (1); INSERT INTO chapters(_id) VALUES (5), (9);",
+        )
+        .unwrap();
+        let store = Arc::new(QueueStore::open(conn).unwrap());
+        store
+            .replace_all(&[
+                QueueRow { chapter_id: 5, manga_id: 1, source_id: 1, position: 0, status: 1, enqueued_at: 0 },
+                QueueRow { chapter_id: 9, manga_id: 1, source_id: 1, position: 1, status: 1, enqueued_at: 0 },
+            ])
+            .unwrap();
+        let restored = restore_queue(&store, |row| (row.chapter_id == 5).then(|| queued.clone()));
+        assert_eq!(restored.len(), 1, "a row that cannot be resolved is dropped");
+
+        let (_conn, rx) = watch::channel(Connectivity { online: true, metered: false });
+        let mgr = DownloadManager::spawn(ManagerParams {
+            layout: Arc::new(DownloadLayout::new(&root)),
+            index: Arc::new(DownloadIndex::open(&root, &base.path().join("cache"))),
+            store,
+            free_space: plenty,
+            settings: DownloadSettings::default(),
+            page_cache: None,
+            connectivity: rx,
+            hold: Arc::new(crate::downloader::NoHold),
+            restored,
+        });
+
+        assert!(kept.join("001.jpg").is_file(), "the staging folder of a queued chapter stays for resume (EC-62)");
+        assert!(!stray.exists(), "a staging folder with no queue row is removed");
+        assert!(!part.exists(), ".cbz.part files are removed");
+        for _ in 0..200 {
+            if !mgr.snapshot().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let ids: Vec<i64> = mgr.snapshot().iter().map(|d| d.chapter.id).collect();
+        assert_eq!(ids, vec![5], "the restored chapter is queued");
+        assert_eq!(mgr.snapshot()[0].status, DownloadState::Queue);
     }
 }

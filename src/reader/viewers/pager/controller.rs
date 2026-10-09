@@ -1,0 +1,437 @@
+//! The pager's state machine (T-44a-025, T-44a-026, T-44a-027, T-44a-028, B§6). Pure: every method returns the
+//! effects the view and the engine must carry out. Nothing here touches GTK.
+//!
+//! Selection side effects (B§6.4): a settled page hides the menu unless the slider is moving, reports the page,
+//! runs the zoom-start hook, and may ask for the next chapter. A transition asks for its destination, and the
+//! terminal `Next` shows the menu.
+
+use std::collections::BTreeMap;
+
+use super::items::{build_pager_items, place_insert};
+use super::nav::{MoveDecision, PageCmd, Phys, decide};
+use crate::reader::viewers::effect::Effect;
+use crate::reader::viewers::ViewerKind;
+use crate::reader::viewers::model::{ChapterKey, ChapterSet, Dir, ItemKey, PageRef, Transition};
+
+/// Settings the pager reads on every decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PagerOptions {
+    pub always_show_transition: bool,
+    pub use_transitions: bool,
+    pub navigate_pan: bool,
+}
+
+/// The chapter whose pages are in the list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CurrentChapter {
+    key: ChapterKey,
+    page_count: u32,
+    loaded: bool,
+}
+
+pub struct PagerController {
+    kind: ViewerKind,
+    opts: PagerOptions,
+    items: Vec<ItemKey>,
+    preprocessed: BTreeMap<u32, PageRef>,
+    next: Option<Transition>,
+    chapter: Option<CurrentChapter>,
+    current: Option<ItemKey>,
+    /// The index the strip shows (`pager.currentItem`).
+    view_index: usize,
+    idle: bool,
+    awaiting: Option<ChapterSet>,
+    laid_out: bool,
+    slider_moving: bool,
+}
+
+impl PagerController {
+    pub fn new(kind: ViewerKind, opts: PagerOptions) -> Self {
+        Self {
+            kind,
+            opts,
+            items: Vec::new(),
+            preprocessed: BTreeMap::new(),
+            next: None,
+            chapter: None,
+            current: None,
+            view_index: 0,
+            idle: true,
+            awaiting: None,
+            laid_out: false,
+            slider_moving: false,
+        }
+    }
+
+    pub fn set_options(&mut self, opts: PagerOptions) {
+        self.opts = opts;
+    }
+
+    pub fn items(&self) -> &[ItemKey] {
+        &self.items
+    }
+
+    pub fn current(&self) -> Option<&ItemKey> {
+        self.current.as_ref()
+    }
+
+    pub fn view_index(&self) -> usize {
+        self.view_index
+    }
+
+    /// The `Next` transition's destination, the preload target (`adapter.nextTransition.to`).
+    fn next_to(&self) -> Option<&ChapterKey> {
+        self.next.as_ref().and_then(|t| t.to.as_ref())
+    }
+
+    /// `setChapters`: applied now when the strip is idle, otherwise kept until it settles (E-75: last one wins).
+    pub fn set_chapters(&mut self, set: ChapterSet) -> Vec<Effect> {
+        if self.idle {
+            self.apply(set)
+        } else {
+            self.awaiting = Some(set);
+            Vec::new()
+        }
+    }
+
+    /// The strip's idle state. Becoming idle applies a pending chapter set, and a single-page chapter then asks
+    /// for the next chapter (E-76).
+    pub fn set_idle(&mut self, idle: bool) -> Vec<Effect> {
+        self.idle = idle;
+        if !idle {
+            return Vec::new();
+        }
+        let Some(set) = self.awaiting.take() else { return Vec::new() };
+        let mut fx = self.apply(set);
+        if let (Some(chapter), Some(to)) = (&self.chapter, self.next_to()) {
+            if chapter.loaded && chapter.page_count == 1 {
+                fx.push(Effect::Preload(to.clone()));
+            }
+        }
+        fx
+    }
+
+    fn apply(&mut self, set: ChapterSet) -> Vec<Effect> {
+        let force = self.opts.always_show_transition || self.current.as_ref().is_some_and(|c| c.transition().is_some());
+        let list = build_pager_items(&set, force, &mut self.preprocessed, self.kind);
+        self.items = list.items;
+        self.next = Some(list.next);
+        self.chapter = Some(CurrentChapter {
+            key: set.curr.key.clone(),
+            page_count: set.curr.page_count,
+            loaded: set.curr.is_loaded(),
+        });
+        self.view_index = self.view_index.min(self.items.len().saturating_sub(1));
+        let mut fx = vec![Effect::Rebuilt];
+        if let Some(jump) = list.jump {
+            fx.extend(self.move_to_page(&jump));
+        }
+        // The first layout waits for a loaded chapter (`curr.pages ?: return`), then shows the strip. A chapter
+        // with no pages shows the strip on its transition without a move (E-01).
+        if !self.laid_out && set.curr.is_loaded() {
+            if set.curr.page_count > 0 {
+                let index = set.curr.requested_page.min(set.curr.page_count - 1);
+                fx.extend(self.move_to_page(&ItemKey::Page(set.curr.page(index))));
+            }
+            self.laid_out = true;
+            fx.push(Effect::Show);
+        }
+        fx
+    }
+
+    /// The strip settled on `index` (ViewPager `onPageSelected`): hides the menu unless the slider is moving. The
+    /// slider flag is spent on this selection (E-82 proposal), so later swipes hide the menu again.
+    pub fn on_settled(&mut self, index: usize) -> Vec<Effect> {
+        self.view_index = index;
+        let mut fx = Vec::new();
+        if !self.slider_moving {
+            fx.push(Effect::HideMenu);
+        }
+        self.slider_moving = false;
+        fx.extend(self.on_page_change(index));
+        fx
+    }
+
+    /// Set while the page slider drags, so the page it lands on keeps the menu open.
+    pub fn set_slider_moving(&mut self, moving: bool) {
+        self.slider_moving = moving;
+    }
+
+    /// `onPageChange` (B§6.4): a new item becomes the current one.
+    pub fn on_page_change(&mut self, index: usize) -> Vec<Effect> {
+        let Some(item) = self.items.get(index).cloned() else { return Vec::new() };
+        if self.current.as_ref() == Some(&item) {
+            return Vec::new();
+        }
+        let allow = allow_preload(&item, self.current.as_ref(), self.next_to());
+        let forward = forward_flag(self.current.as_ref(), &item);
+        self.current = Some(item.clone());
+        match &item {
+            ItemKey::Page(page) => self.on_page_selected(page, allow, forward),
+            ItemKey::Transition(t) => self.on_transition_selected(t),
+        }
+    }
+
+    fn on_page_selected(&self, page: &PageRef, allow: bool, forward: bool) -> Vec<Effect> {
+        let mut fx = vec![Effect::PageSelected(page.clone()), Effect::ZoomStart { page: page.clone(), forward }];
+        if page.is_insert() {
+            return fx;
+        }
+        let Some(chapter) = &self.chapter else { return fx };
+        // The last five pages of the current chapter (`size - number < 5`).
+        let in_range = i64::from(chapter.page_count) - i64::from(page.number()) < 5;
+        if in_range && allow && chapter.key == page.chapter {
+            if let Some(to) = self.next_to() {
+                fx.push(Effect::Preload(to.clone()));
+            }
+        }
+        fx
+    }
+
+    fn on_transition_selected(&self, t: &Transition) -> Vec<Effect> {
+        match (&t.to, t.dir) {
+            (Some(to), _) => vec![Effect::Preload(to.clone())],
+            (None, Dir::Next) => vec![Effect::ShowMenu],
+            (None, Dir::Prev) => Vec::new(),
+        }
+    }
+
+    /// `moveToPage` (B§6.6). A move to the index already shown runs the page change directly, since no
+    /// settle will follow.
+    pub fn move_to_page(&mut self, key: &ItemKey) -> Vec<Effect> {
+        let Some(index) = self.items.iter().position(|i| i == key) else { return Vec::new() };
+        if self.view_index == index {
+            return self.on_page_change(index);
+        }
+        self.view_index = index;
+        vec![Effect::ScrollTo { index, smooth: self.opts.use_transitions }]
+    }
+
+    /// A move command from a key, tap or wheel (B§6.3). `can_pan` is the current page's pan capability in the
+    /// direction the command moves.
+    pub fn command(&mut self, cmd: PageCmd, can_pan: bool) -> Vec<Effect> {
+        match decide(self.kind, cmd, self.view_index, self.items.len(), self.opts.navigate_pan, can_pan, self.opts.use_transitions) {
+            MoveDecision::Pan(dir) => vec![Effect::Pan(dir)],
+            MoveDecision::Turn { index, smooth } => {
+                self.view_index = index;
+                vec![Effect::ScrollTo { index, smooth }]
+            }
+            MoveDecision::Nothing => Vec::new(),
+        }
+    }
+
+    /// The first-layout and refresh rebuild (B§6.7): keeps the index and recreates the visible slots.
+    pub fn refresh(&self) -> Vec<Effect> {
+        vec![Effect::Rebuilt, Effect::ScrollTo { index: self.view_index, smooth: false }]
+    }
+
+    /// Removes every dual-page insert (`cleanupPageSplit`, B§5.6), used when splitting is switched off.
+    pub fn remove_splits(&mut self) -> Vec<Effect> {
+        let before = self.items.len();
+        self.items.retain(|i| !i.page().is_some_and(PageRef::is_insert));
+        self.preprocessed.clear();
+        if self.items.len() == before { Vec::new() } else { vec![Effect::Rebuilt] }
+    }
+
+    /// A dual-page split of `parent` (B§5.6). A split of a neighbour's page waits in `preprocessed`.
+    pub fn on_page_split(&mut self, parent: &PageRef, insert: PageRef) -> Vec<Effect> {
+        let is_current = self.chapter.as_ref().is_some_and(|c| c.key == parent.chapter);
+        if !is_current {
+            self.preprocessed.insert(insert.index, insert);
+            return Vec::new();
+        }
+        let Some(index) = self.items.iter().position(|i| i.page() == Some(parent)) else { return Vec::new() };
+        if place_insert(&mut self.items, index, self.kind, insert) { vec![Effect::Rebuilt] } else { Vec::new() }
+    }
+}
+
+/// `checkAllowPreload` (B§6.4). Transitions and a missing current page always allow it.
+fn allow_preload(item: &ItemKey, current: Option<&ItemKey>, next_to: Option<&ChapterKey>) -> bool {
+    let (Some(current), ItemKey::Page(page)) = (current, item) else { return true };
+    let from_next = current.transition().filter(|t| t.dir == Dir::Next).and_then(|t| t.to.as_ref());
+    Some(&page.chapter) == from_next
+        || current.page().is_some_and(|c| c.chapter == page.chapter)
+        || next_to == Some(&page.chapter)
+}
+
+/// The `forward` flag of a selection (B§6.4 step 3, E-11, E-12).
+fn forward_flag(current: Option<&ItemKey>, item: &ItemKey) -> bool {
+    match (current, item) {
+        (Some(ItemKey::Page(c)), ItemKey::Page(p)) => {
+            if p.number() == c.number() {
+                p.is_insert()
+            } else {
+                p.number() > c.number()
+            }
+        }
+        (Some(ItemKey::Transition(t)), ItemKey::Page(_)) => t.dir != Dir::Prev,
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reader::viewers::items::tests::snap;
+    use crate::reader::viewers::model::{ChapterSnap, LoadState};
+
+    const OPTS: PagerOptions = PagerOptions { always_show_transition: true, use_transitions: true, navigate_pan: false };
+
+    fn loaded(id: i64, number: f64, pages: u32) -> ChapterSnap {
+        snap(id, number, LoadState::Loaded, pages)
+    }
+
+    fn set(curr: ChapterSnap, prev: Option<ChapterSnap>, next: Option<ChapterSnap>) -> ChapterSet {
+        ChapterSet { curr, prev, next }
+    }
+
+    fn selected(fx: &[Effect]) -> Vec<String> {
+        fx.iter()
+            .filter_map(|e| match e {
+                Effect::PageSelected(p) => Some(format!("sel:{}:{}", p.chapter.id, p.index)),
+                Effect::Preload(k) => Some(format!("preload:{}", k.id)),
+                Effect::ShowMenu => Some("show".into()),
+                Effect::HideMenu => Some("hide".into()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A pager on a 20-page chapter 2 with chapter 3 loaded next, settled on its first page.
+    fn settled_pager(kind: ViewerKind) -> PagerController {
+        let mut c = PagerController::new(kind, OPTS);
+        c.set_chapters(set(loaded(2, 2.0, 20), None, Some(loaded(3, 3.0, 4))));
+        c.on_settled(0);
+        c
+    }
+
+    #[test]
+    fn the_first_layout_moves_to_the_requested_page_clamped_to_the_last() {
+        let mut curr = loaded(2, 2.0, 5);
+        curr.requested_page = 99;
+        let mut c = PagerController::new(ViewerKind::LeftToRight, OPTS);
+        let fx = c.set_chapters(set(curr, None, None));
+        assert!(fx.contains(&Effect::Show));
+        let target = c.items().iter().position(|i| i == &ItemKey::Page(snap(2, 2.0, LoadState::Loaded, 5).page(4))).unwrap();
+        assert!(fx.contains(&Effect::ScrollTo { index: target, smooth: true }));
+    }
+
+    #[test]
+    fn an_empty_chapter_shows_the_strip_without_a_move() {
+        let mut c = PagerController::new(ViewerKind::LeftToRight, OPTS);
+        let fx = c.set_chapters(set(loaded(2, 2.0, 0), None, None));
+        assert!(fx.contains(&Effect::Show));
+        assert!(!fx.iter().any(|e| matches!(e, Effect::ScrollTo { .. })));
+    }
+
+    #[test]
+    fn a_chapter_set_during_settling_is_kept_and_the_last_one_wins() {
+        let mut c = PagerController::new(ViewerKind::LeftToRight, OPTS);
+        c.set_chapters(set(loaded(2, 2.0, 3), None, None));
+        c.set_idle(false);
+        assert!(c.set_chapters(set(loaded(5, 5.0, 2), None, None)).is_empty());
+        assert!(c.set_chapters(set(loaded(7, 7.0, 4), None, None)).is_empty());
+        let fx = c.set_idle(true);
+        assert!(fx.contains(&Effect::Rebuilt));
+        assert_eq!(c.items().iter().find_map(ItemKey::page).map(|p| p.chapter.id), Some(7));
+    }
+
+    #[test]
+    fn a_single_page_chapter_on_idle_preloads_the_next_chapter() {
+        let mut c = PagerController::new(ViewerKind::LeftToRight, OPTS);
+        c.set_idle(false);
+        c.set_chapters(set(loaded(2, 2.0, 1), None, Some(loaded(3, 3.0, 1))));
+        let fx = c.set_idle(true);
+        assert!(selected(&fx).contains(&"preload:3".to_string()));
+    }
+
+    #[test]
+    fn the_last_five_pages_preload_the_next_chapter_and_earlier_pages_do_not() {
+        let mut c = settled_pager(ViewerKind::LeftToRight);
+        let mut preloads = Vec::new();
+        for page in 0..20usize {
+            let index = c.items().iter().position(|i| i.page().is_some_and(|p| p.index as usize == page && p.chapter.id == 2)).unwrap();
+            let fx = c.on_page_change(index);
+            if selected(&fx).contains(&"preload:3".to_string()) {
+                preloads.push(page + 1);
+            }
+        }
+        assert_eq!(preloads, vec![16, 17, 18, 19, 20]);
+    }
+
+    #[test]
+    fn a_next_transition_with_no_destination_shows_the_menu_and_a_prev_one_does_nothing() {
+        let mut c = PagerController::new(ViewerKind::LeftToRight, OPTS);
+        c.set_chapters(set(loaded(2, 2.0, 1), None, None));
+        let last = c.items().len() - 1;
+        assert!(selected(&c.on_page_change(last)).contains(&"show".to_string()));
+        let mut d = PagerController::new(ViewerKind::LeftToRight, OPTS);
+        d.set_chapters(set(loaded(2, 2.0, 1), None, None));
+        assert!(!selected(&d.on_page_change(0)).contains(&"show".to_string()));
+        assert!(!selected(&d.on_page_change(0)).contains(&"hide".to_string()));
+    }
+
+    #[test]
+    fn a_transition_with_a_destination_preloads_it() {
+        let mut c = settled_pager(ViewerKind::LeftToRight);
+        let next = c.items().iter().position(|i| i.transition().is_some_and(|t| t.dir == Dir::Next)).unwrap();
+        assert_eq!(selected(&c.on_page_change(next)), ["preload:3".to_string()]);
+    }
+
+    #[test]
+    fn a_settled_page_hides_the_menu_except_while_the_slider_moves_once() {
+        let mut c = settled_pager(ViewerKind::LeftToRight);
+        assert!(selected(&c.on_settled(2)).contains(&"hide".to_string()));
+        c.set_slider_moving(true);
+        assert!(!selected(&c.on_settled(3)).contains(&"hide".to_string()));
+        assert!(selected(&c.on_settled(4)).contains(&"hide".to_string()));
+    }
+
+    #[test]
+    fn the_forward_flag_follows_split_pairs_and_transitions() {
+        let page = |i: u32| ItemKey::Page(loaded(2, 2.0, 3).page(i));
+        let insert = ItemKey::Page(PageRef::insert_of(&loaded(2, 2.0, 3).page(1)));
+        assert!(forward_flag(Some(&page(1)), &insert));
+        assert!(!forward_flag(Some(&insert), &page(1)));
+        let prev = ItemKey::Transition(Transition { dir: Dir::Prev, from: loaded(2, 2.0, 1).key, to: None });
+        assert!(!forward_flag(Some(&prev), &page(0)));
+        assert!(forward_flag(None, &page(0)));
+    }
+
+    #[test]
+    fn a_split_of_the_current_page_is_placed_and_a_neighbours_is_kept_for_later() {
+        let mut c = settled_pager(ViewerKind::LeftToRight);
+        let parent = loaded(2, 2.0, 20).page(0);
+        assert_eq!(c.on_page_split(&parent, PageRef::insert_of(&parent)), vec![Effect::Rebuilt]);
+        assert!(c.items().iter().any(|i| i.page().is_some_and(PageRef::is_insert)));
+        let neighbour = loaded(9, 9.0, 4).page(1);
+        assert!(c.on_page_split(&neighbour, PageRef::insert_of(&neighbour)).is_empty());
+    }
+
+    #[test]
+    fn moves_at_the_boundary_do_nothing_and_turns_use_the_transition_setting() {
+        let mut c = settled_pager(ViewerKind::LeftToRight);
+        assert!(c.command(PageCmd::Prev, false).is_empty());
+        let fx = c.command(PageCmd::Next, false);
+        assert_eq!(fx, vec![Effect::ScrollTo { index: 1, smooth: true }]);
+    }
+
+    #[test]
+    fn switching_splits_off_removes_only_the_inserts() {
+        let mut c = settled_pager(ViewerKind::LeftToRight);
+        let parent = loaded(2, 2.0, 20).page(0);
+        c.on_page_split(&parent, PageRef::insert_of(&parent));
+        assert_eq!(c.remove_splits(), vec![Effect::Rebuilt]);
+        assert!(!c.items().iter().any(|i| i.page().is_some_and(PageRef::is_insert)));
+        assert!(c.remove_splits().is_empty());
+    }
+
+    #[test]
+    fn move_to_the_shown_index_runs_the_page_change_without_scrolling() {
+        let mut c = settled_pager(ViewerKind::LeftToRight);
+        let first = c.items()[0].clone();
+        assert!(c.move_to_page(&first).is_empty());
+        let second = c.items()[1].clone();
+        assert_eq!(c.move_to_page(&second), vec![Effect::ScrollTo { index: 1, smooth: true }]);
+    }
+}

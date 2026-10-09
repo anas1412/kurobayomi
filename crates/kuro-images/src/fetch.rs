@@ -63,12 +63,6 @@ impl Fetched {
     }
 }
 
-/// Crossfade of a cover fade: 300 ms at the system animator scale, truncated. 0 when animations are off
-/// (behavior section 2.4).
-pub fn crossfade_ms(animator_scale: f64) -> u32 {
-    (300.0 * animator_scale.max(0.0)) as u32
-}
-
 /// The HTTP side of a source: its client and its headers (behavior section 7.1).
 pub struct SourceClient {
     pub client: NetworkClient,
@@ -366,16 +360,6 @@ mod tests {
         ImageService::new(test_client(root), sources, paths)
             .await
             .unwrap()
-    }
-
-    #[test]
-    fn crossfade_follows_the_animator_scale() {
-        assert_eq!(crossfade_ms(1.0), 300);
-        assert_eq!(crossfade_ms(0.5), 150);
-        assert_eq!(crossfade_ms(0.1), 30);
-        assert_eq!(crossfade_ms(0.0), 0);
-        assert_eq!(crossfade_ms(-1.0), 0);
-        assert_eq!(crossfade_ms(0.003), 0);
     }
 
     #[test]

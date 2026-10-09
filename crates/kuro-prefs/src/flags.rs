@@ -2,7 +2,7 @@
 //!
 //! Values come from `p1-data-and-config.md` sections 3.1 and 3.2 (`Manga.kt` and `Anime.kt`). The
 //! database area stores the same integers in `mangas.chapter_flags` and `animes.episode_flags`.
-//! Season flags (section 3.3) are not here yet.
+//! Season flags (section 3.3) are at the end of this file.
 
 /// One field of a flag integer: the bits in `mask` hold `flag`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,6 +92,62 @@ pub const EPISODE_SHOW_NOT_SUMMARIES: i64 = 0x1000;
 pub const EPISODE_DISPLAY_MASK: i64 = 0x100000;
 pub const EPISODE_DISPLAY_NAME: i64 = 0x0;
 pub const EPISODE_DISPLAY_NUMBER: i64 = 0x100000;
+
+// Anime `season_flags` (p1-data-and-config.md section 3.3, `Anime.kt`). Bit set means on for the overlays.
+
+pub const SEASON_SORT_DIR_MASK: i64 = 0x1;
+pub const SEASON_SORT_DESC: i64 = 0x0;
+pub const SEASON_SORT_ASC: i64 = 0x1;
+
+pub const SEASON_DOWNLOADED_MASK: i64 = 0x6;
+pub const SEASON_SHOW_DOWNLOADED: i64 = 0x2;
+pub const SEASON_SHOW_NOT_DOWNLOADED: i64 = 0x4;
+
+pub const SEASON_UNSEEN_MASK: i64 = 0x18;
+pub const SEASON_SHOW_UNSEEN: i64 = 0x8;
+pub const SEASON_SHOW_SEEN: i64 = 0x10;
+
+pub const SEASON_STARTED_MASK: i64 = 0x60;
+pub const SEASON_SHOW_STARTED: i64 = 0x20;
+pub const SEASON_SHOW_NOT_STARTED: i64 = 0x40;
+
+pub const SEASON_COMPLETED_MASK: i64 = 0x180;
+pub const SEASON_SHOW_COMPLETED: i64 = 0x80;
+pub const SEASON_SHOW_NOT_COMPLETED: i64 = 0x100;
+
+pub const SEASON_BOOKMARKED_MASK: i64 = 0x600;
+pub const SEASON_SHOW_BOOKMARKED: i64 = 0x200;
+pub const SEASON_SHOW_NOT_BOOKMARKED: i64 = 0x400;
+
+pub const SEASON_FILLERMARKED_MASK: i64 = 0x1800;
+pub const SEASON_SHOW_FILLERMARKED: i64 = 0x800;
+pub const SEASON_SHOW_NOT_FILLERMARKED: i64 = 0x1000;
+
+pub const SEASON_SORT_MASK: i64 = 0xE000;
+pub const SEASON_SORT_SOURCE: i64 = 0x0;
+pub const SEASON_SORT_SEASON: i64 = 0x2000;
+pub const SEASON_SORT_UPLOAD: i64 = 0x4000;
+pub const SEASON_SORT_ALPHABET: i64 = 0x6000;
+pub const SEASON_SORT_COUNT: i64 = 0x8000;
+pub const SEASON_SORT_LAST_SEEN: i64 = 0xA000;
+pub const SEASON_SORT_FETCHED: i64 = 0xC000;
+
+/// Grid mode: 0 CompactGrid, 1 ComfortableGrid, 2 CoverOnlyGrid, 3 List. Shifted down by [`SEASON_GRID_DISPLAY_MODE_SHIFT`].
+pub const SEASON_GRID_DISPLAY_MODE_MASK: i64 = 0x30000;
+pub const SEASON_GRID_DISPLAY_MODE_SHIFT: u32 = 16;
+/// Grid size: 0 is automatic. Shifted down by [`SEASON_GRID_DISPLAY_SIZE_SHIFT`].
+pub const SEASON_GRID_DISPLAY_SIZE_MASK: i64 = 0x3C0000;
+pub const SEASON_GRID_DISPLAY_SIZE_SHIFT: u32 = 18;
+
+pub const SEASON_OVERLAY_DOWNLOADED_MASK: i64 = 0x400000;
+pub const SEASON_OVERLAY_UNSEEN_MASK: i64 = 0x800000;
+pub const SEASON_OVERLAY_LOCAL_MASK: i64 = 0x1000000;
+pub const SEASON_OVERLAY_LANG_MASK: i64 = 0x2000000;
+pub const SEASON_OVERLAY_CONT_MASK: i64 = 0x4000000;
+
+pub const SEASON_DISPLAY_MODE_MASK: i64 = 0x8000000;
+pub const SEASON_DISPLAY_MODE_SOURCE: i64 = 0x0;
+pub const SEASON_DISPLAY_MODE_NUMBER: i64 = 0x8000000;
 
 #[cfg(test)]
 mod tests {

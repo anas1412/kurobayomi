@@ -1,7 +1,7 @@
 //! The preference aggregate: every section built once over one shared store.
 //!
 //! Built in the application context at startup, before any widget is created. Sections that are
-//! not in this file yet (tracking, downloads, backup, storage, torrent, the subtitle, audio and
+//! not in this file yet (tracking, downloads, backup, storage, the subtitle, audio and
 //! advanced player sections) are added with their own tasks.
 
 use std::sync::Arc;
@@ -12,6 +12,7 @@ use kuro_platform::secrets::SecretStore;
 use crate::PrefError;
 use crate::base::BasePrefs;
 use crate::library::LibraryPrefs;
+use crate::migrate::{self, Migration};
 use crate::network::NetworkPrefs;
 use crate::player::{DecoderPrefs, GesturePrefs, PlayerPrefs};
 use crate::reader::ReaderPrefs;
@@ -19,6 +20,7 @@ use crate::security::SecurityPrefs;
 use crate::settings_load;
 use crate::source::SourcePrefs;
 use crate::store::PrefStore;
+use crate::torrent::TorrentPrefs;
 use crate::ui::UiPrefs;
 
 /// Every preference section. Clones of a section share the store.
@@ -33,16 +35,31 @@ pub struct Prefs {
     pub player: PlayerPrefs,
     pub gestures: GesturePrefs,
     pub decoder: DecoderPrefs,
+    /// `[torrent]`: the embedded torrent server settings (T-02a-021).
+    pub torrent: TorrentPrefs,
     /// Credential storage for tracker secrets (area 02, part 2 reads through it).
     pub secrets: Arc<dyn SecretStore>,
     store: PrefStore,
 }
 
 impl Prefs {
-    /// Opens `config.toml` and `state.toml` from `paths`, builds every section and repairs invalid
-    /// stored enum and object values to their defaults.
-    pub fn open(paths: &dyn Paths, secrets: Arc<dyn SecretStore>) -> Result<Self, PrefError> {
-        let prefs = Self::with_store(settings_load::open(paths)?, secrets);
+    /// Opens `config.toml` and `state.toml` from `paths`, runs the startup migrations for
+    /// `version_code` on the raw store, builds every section and repairs invalid stored enum and
+    /// object values to their defaults.
+    pub fn open(paths: &dyn Paths, secrets: Arc<dyn SecretStore>, version_code: i32) -> Result<Self, PrefError> {
+        Self::open_with(paths, secrets, version_code, migrate::list::MIGRATIONS)
+    }
+
+    /// [`Prefs::open`] with an explicit step list. The steps see the raw keys before any section exists.
+    pub(crate) fn open_with(
+        paths: &dyn Paths,
+        secrets: Arc<dyn SecretStore>,
+        version_code: i32,
+        steps: &[Migration],
+    ) -> Result<Self, PrefError> {
+        let store = settings_load::open(paths)?;
+        migrate::run(&store, version_code, steps)?;
+        let prefs = Self::with_store(store, secrets);
         prefs.repair()?;
         Ok(prefs)
     }
@@ -60,9 +77,16 @@ impl Prefs {
             player: PlayerPrefs::new(store.clone()),
             gestures: GesturePrefs::new(store.clone()),
             decoder: DecoderPrefs::new(store.clone()),
+            torrent: TorrentPrefs::new(store.clone()),
             secrets,
             store,
         }
+    }
+
+    /// Every section over an in-memory store and an in-memory secret store (T-02a-033). No file and no thread is
+    /// involved, so a test or preview needs no runtime.
+    pub fn in_memory() -> Self {
+        Self::with_store(PrefStore::in_memory(), Arc::new(crate::memory::MemorySecrets::default()))
     }
 
     /// The store every section reads and writes.
@@ -81,7 +105,8 @@ impl Prefs {
         self.reader.repair()?;
         self.player.repair()?;
         self.gestures.repair()?;
-        self.decoder.repair()
+        self.decoder.repair()?;
+        self.torrent.repair()
     }
 }
 
@@ -114,9 +139,19 @@ mod tests {
     }
 
     #[test]
+    fn in_memory_prefs_keep_values_and_publish_change_events() {
+        let prefs = Prefs::in_memory();
+        let changes = prefs.store().subscribe();
+        prefs.base.incognito_mode.set(true).unwrap();
+        assert!(prefs.base.incognito_mode.get());
+        assert!(prefs.torrent.torr_server_port.get() == "8090");
+        assert!(changes.try_recv().is_ok(), "a set publishes a change event");
+    }
+
+    #[test]
     fn open_builds_defaults_on_first_run() {
         let paths = TestPaths(TestDir::new("prefs-first-run"));
-        let prefs = Prefs::open(&paths, secrets()).unwrap();
+        let prefs = Prefs::open(&paths, secrets(), 1).unwrap();
         assert_eq!(prefs.reader.reader_hide_threshold.get(), ReaderHideThreshold::LOW);
         assert_eq!(prefs.library.manga_sorting_mode.get().sort(), MangaLibrarySort::default_sort());
     }
@@ -130,7 +165,7 @@ mod tests {
             "[reader]\nreader_hide_threshold = \"NOPE\"\n\n[library]\nmanga_sorting_mode = \"ALPHABETICAL\"\n",
         )
         .unwrap();
-        let prefs = Prefs::open(&paths, secrets()).unwrap();
+        let prefs = Prefs::open(&paths, secrets(), 1).unwrap();
         assert_eq!(
             prefs.store().get_raw("reader_hide_threshold"),
             Some(PrefValue::Str("LOW".into()))
@@ -139,6 +174,22 @@ mod tests {
             prefs.store().get_raw("library_sorting_mode"),
             Some(PrefValue::Str("ALPHABETICAL,ASCENDING".into()))
         );
+    }
+
+    fn migrate_bad_threshold(s: &PrefStore) {
+        assert_eq!(s.get_raw("reader_hide_threshold"), Some(PrefValue::Str("HIGH".into())));
+        s.remove("reader_hide_threshold");
+        s.set_raw("reader_hide_threshold", PrefValue::Str("LOWEST".into()));
+    }
+
+    #[test]
+    fn a_migration_edit_of_a_raw_key_is_seen_by_the_typed_section() {
+        let paths = TestPaths(TestDir::new("prefs-migrate"));
+        std::fs::create_dir_all(paths.config_dir()).unwrap();
+        std::fs::write(config_file(&paths.config_dir()), "[reader]\nreader_hide_threshold = \"HIGH\"\n").unwrap();
+        let steps = [Migration { version: 1, run: migrate_bad_threshold }];
+        let prefs = Prefs::open_with(&paths, secrets(), 1, &steps).unwrap();
+        assert_eq!(prefs.reader.reader_hide_threshold.get(), ReaderHideThreshold::LOWEST);
     }
 
     #[test]
@@ -150,7 +201,7 @@ mod tests {
             "[reader]\nreader_hide_threshold = \"HIGH\"\n",
         )
         .unwrap();
-        let prefs = Prefs::open(&paths, secrets()).unwrap();
+        let prefs = Prefs::open(&paths, secrets(), 1).unwrap();
         assert_eq!(prefs.reader.reader_hide_threshold.get(), ReaderHideThreshold::HIGH);
     }
 }

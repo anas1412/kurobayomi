@@ -49,7 +49,7 @@ pub(super) async fn download(
     let mut retried = false;
     loop {
         match attempt(client, config, url, part, token, progress).await {
-            Ok(()) => return tokio::fs::read(part).await.map_err(io),
+            Ok(()) => return read_downloaded(part).await.map_err(Stop::from),
             Err(Attempt::Stop(stop)) => return Err(stop),
             Err(Attempt::Network(reason)) if retried => {
                 return Err(Stop::Failed(InstallError::Network(reason)));
@@ -146,4 +146,24 @@ fn sync_dir(dir: &Path) -> std::io::Result<()> {
 fn copy_failed(err: std::io::Error) -> InstallError {
     tracing::warn!("{}: {err}", InstallError::CopyFailed);
     InstallError::CopyFailed
+}
+
+/// Reads the finished `.part` file back. A failure is the Kotlin text `Failed to read downloaded extension file.`
+async fn read_downloaded(part: &Path) -> Result<Vec<u8>, InstallError> {
+    tokio::fs::read(part).await.map_err(|err| {
+        tracing::warn!("{}: {err}", InstallError::ReadDownload);
+        InstallError::ReadDownload
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_download_that_cannot_be_read_back_gives_the_kotlin_text() {
+        let err = read_downloaded(Path::new("/nonexistent/kuro/download.kuroext.part")).await.unwrap_err();
+        assert_eq!(err, InstallError::ReadDownload);
+        assert_eq!(err.to_string(), "Failed to read downloaded extension file.");
+    }
 }

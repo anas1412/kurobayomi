@@ -16,9 +16,31 @@ pub fn is_hidden(name: &str) -> bool {
     name.starts_with('.')
 }
 
+/// Characters Windows refuses in a file name, plus control characters. Each becomes `_`; a name without them is
+/// returned unchanged (E-IMG-8, behavior 27.4).
+pub fn sanitize_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_control() || "<>:\"/\\|?*".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_replaces_only_forbidden_characters() {
+        assert_eq!(sanitize_name("Show - 01"), "Show - 01");
+        assert_eq!(sanitize_name("Ep: 1?/x*"), "Ep_ 1__x_");
+        assert_eq!(sanitize_name("a\tb"), "a_b");
+        assert_eq!(sanitize_name("α β"), "α β");
+    }
 
     #[test]
     fn extension_takes_the_text_after_the_last_dot() {

@@ -4,20 +4,27 @@
 //! whatever the language filter says (`kuro-domain` owns that rule).
 
 pub mod chapters;
+pub mod cover;
 pub mod reader;
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use kuro_source::model::{MangasPage, Page, SChapter, SManga};
 use kuro_source::{CatalogueSource, FilterList, MangaSource, SortSelection, SourceError};
 
 use crate::LOCAL_SOURCE_ID;
+use crate::bridge;
 use crate::browse::browse;
+use crate::comicinfo::COMIC_INFO_FILE;
 use crate::error::LocalSourceError;
 use crate::format::Format;
-use crate::fs::{FsEntry, file_url, find_child};
+use crate::fs::{FsEntry, file_url, find_child, list_dir};
 use crate::images::find_image;
+use crate::json_side::{MangaDetails, apply_manga_details, details_file, read_details_json};
+use crate::locks::KeyedLocks;
 use crate::sort::{LATEST_SORT, POPULAR_SORT, order_by, sort_from};
 
 /// `LocalMangaSource.name`: `local_manga_source` in the i18n table.
@@ -28,11 +35,16 @@ pub const NAME: &str = "Local manga source";
 #[derive(Debug, Clone)]
 pub struct LocalMangaSource {
     root: Option<PathBuf>,
+    /// One lock per manga URL, so two details fetches for the same manga never write its files at once (RC-3).
+    details_locks: Arc<KeyedLocks>,
 }
 
 impl LocalMangaSource {
     pub fn new(root: Option<PathBuf>) -> Self {
-        Self { root }
+        Self {
+            root,
+            details_locks: Arc::new(KeyedLocks::default()),
+        }
     }
 
     /// Kotlin `getFormat`: how the chapter at `chapter_url` is stored, for the reader.
@@ -43,27 +55,37 @@ impl LocalMangaSource {
     }
 
     /// The reader's entry point for a local chapter: its pages through the loader matching its format.
-    pub async fn page_source(&self, chapter_url: &str) -> Result<reader::PageSource, LocalSourceError> {
+    pub async fn page_source(
+        &self,
+        chapter_url: &str,
+    ) -> Result<reader::PageSource, LocalSourceError> {
         let root = self.root.clone();
         let url = chapter_url.to_owned();
         crate::blocking(move || reader::page_source(root.as_deref(), &url)).await
     }
 
-    /// Kotlin `getMangaDetails`, cover step only (behavior 7.1 step 1). The ComicInfo and legacy JSON branches are
-    /// T-14a-035 and later, and are not in this step.
+    /// Kotlin `getMangaDetails`: the cover step (behavior 7.1 step 1), then the legacy `details.json` branch (T-14a-037).
+    /// The ComicInfo branch (T-14a-035) and the archive copy (T-14a-036) are not in this step.
     async fn details(&self, manga: &SManga) -> Result<SManga, LocalSourceError> {
         let root = self.root.clone();
-        let url = manga.url.clone();
-        let cover = crate::blocking(move || {
-            let dir = root.and_then(|root| find_child(&root, &url));
-            Ok(dir.and_then(|dir| find_image(&dir, "cover")).and_then(|p| file_url(&p)))
+        let manga = manga.clone();
+        crate::blocking(move || {
+            let mut updated = manga;
+            let dir = root.and_then(|root| find_child(&root, &updated.url));
+            let Some(dir) = dir else {
+                tracing::error!(
+                    "Error setting manga details from local metadata: folder not found ({})",
+                    updated.url
+                );
+                return Ok(updated);
+            };
+            if let Some(cover) = find_image(&dir, "cover").and_then(|p| file_url(&p)) {
+                updated.thumbnail_url = Some(cover);
+            }
+            apply_legacy_details(&dir, &mut updated);
+            Ok(updated)
         })
-        .await?;
-        let mut updated = manga.clone();
-        if cover.is_some() {
-            updated.thumbnail_url = cover;
-        }
-        Ok(updated)
+        .await
     }
 
     async fn browse_page(
@@ -81,6 +103,54 @@ impl LocalMangaSource {
 }
 
 /// One browse row: the folder name is both title and URL, and the cover is `cover.*` when there is one.
+/// Kotlin `getMangaDetails`, legacy `details.json` branch (behavior 7.1, E-MANGA-6). It runs only when the folder has no
+/// top-level `ComicInfo.xml`. The fields are applied, `ComicInfo.xml` is written from the manga, and `details.json` is
+/// deleted only after that write succeeds. A decode or write failure is logged and the file is kept.
+fn apply_legacy_details(dir: &Path, manga: &mut SManga) {
+    let entries = match list_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            tracing::error!(
+                "Error reading manga folder for details: {error} ({})",
+                dir.display()
+            );
+            return;
+        }
+    };
+    if entries.iter().any(|e| e.name == COMIC_INFO_FILE) {
+        return;
+    }
+    let Some(json) = details_file(&entries) else {
+        return;
+    };
+    let details = match read_details_json::<MangaDetails>(&json.path) {
+        Ok(details) => details,
+        Err(error) => {
+            tracing::error!(
+                "Error reading details.json: {error} ({})",
+                json.path.display()
+            );
+            return;
+        }
+    };
+    apply_manga_details(manga, &details);
+    let xml = bridge::manga_to_comic_info(manga).to_xml();
+    match fs::write(dir.join(COMIC_INFO_FILE), xml) {
+        Ok(()) => {
+            if let Err(error) = fs::remove_file(&json.path) {
+                tracing::error!(
+                    "Error deleting details.json: {error} ({})",
+                    json.path.display()
+                );
+            }
+        }
+        Err(error) => tracing::error!(
+            "Error writing ComicInfo.xml from details.json: {error} ({})",
+            dir.display()
+        ),
+    }
+}
+
 fn manga_entry(entry: &FsEntry) -> SManga {
     let mut manga = SManga::new(entry.name.clone(), entry.name.clone());
     manga.thumbnail_url = find_image(&entry.path, "cover").and_then(|p| file_url(&p));
@@ -105,15 +175,31 @@ impl MangaSource for LocalMangaSource {
         true
     }
 
+    /// A failed details read is logged and the manga comes back unchanged (behavior 31, E-MANGA-1).
     async fn get_manga_details(&self, manga: &SManga) -> Result<SManga, SourceError> {
-        Ok(self.details(manga).await?)
+        let _serialised = self.details_locks.lock(&manga.url).await;
+        match self.details(manga).await {
+            Ok(updated) => Ok(updated),
+            Err(error) => {
+                tracing::error!(
+                    "Error setting manga details from local metadata for {}: {error} ({})",
+                    manga.title,
+                    manga.url
+                );
+                Ok(manga.clone())
+            }
+        }
     }
 
     async fn get_chapter_list(&self, manga: &SManga) -> Result<Vec<SChapter>, SourceError> {
         let root = self.root.clone();
-        let manga = manga.clone();
+        let mut manga = manga.clone();
         let list = crate::blocking(move || match root {
-            Some(root) => chapters::chapters(&root, &manga),
+            Some(root) => {
+                let list = chapters::chapters(&root, &mut manga)?;
+                cover::cover_from_lowest_chapter(&root, &manga, &list);
+                Ok(list)
+            }
             None => Ok(Vec::new()),
         })
         .await?;
@@ -137,15 +223,26 @@ impl CatalogueSource for LocalMangaSource {
     }
 
     async fn popular(&self, _page: i32) -> Result<MangasPage, SourceError> {
-        Ok(self.browse_page(String::new(), false, Some(POPULAR_SORT)).await?)
+        Ok(self
+            .browse_page(String::new(), false, Some(POPULAR_SORT))
+            .await?)
     }
 
     async fn latest(&self, _page: i32) -> Result<MangasPage, SourceError> {
-        Ok(self.browse_page(String::new(), true, Some(LATEST_SORT)).await?)
+        Ok(self
+            .browse_page(String::new(), true, Some(LATEST_SORT))
+            .await?)
     }
 
-    async fn search(&self, _page: i32, query: &str, filters: &FilterList) -> Result<MangasPage, SourceError> {
-        Ok(self.browse_page(query.to_owned(), false, sort_from(filters)).await?)
+    async fn search(
+        &self,
+        _page: i32,
+        query: &str,
+        filters: &FilterList,
+    ) -> Result<MangasPage, SourceError> {
+        Ok(self
+            .browse_page(query.to_owned(), false, sort_from(filters))
+            .await?)
     }
 }
 
@@ -178,7 +275,9 @@ mod tests {
     #[tokio::test]
     async fn popular_is_title_ascending_with_no_next_page() -> io::Result<()> {
         let (_root, source) = source_with(&["9", "10", "a"])?;
-        let page = CatalogueSource::popular(&source, 1).await.map_err(io::Error::other)?;
+        let page = CatalogueSource::popular(&source, 1)
+            .await
+            .map_err(io::Error::other)?;
         let titles: Vec<&str> = page.mangas.iter().map(|m| m.title.as_str()).collect();
         assert_eq!(titles, ["10", "9", "a"]);
         assert!(!page.has_next_page);
@@ -189,7 +288,9 @@ mod tests {
     async fn a_cover_file_becomes_the_thumbnail() -> io::Result<()> {
         let (root, source) = source_with(&["Show"])?;
         fs::write(root.path().join("Show").join("cover.jpg"), b"\xFF\xD8\xFF")?;
-        let page = CatalogueSource::popular(&source, 1).await.map_err(io::Error::other)?;
+        let page = CatalogueSource::popular(&source, 1)
+            .await
+            .map_err(io::Error::other)?;
         let thumb = page.mangas[0].thumbnail_url.clone().unwrap_or_default();
         assert!(
             thumb.starts_with("file://") && thumb.ends_with("/Show/cover.jpg"),
@@ -216,7 +317,9 @@ mod tests {
     #[tokio::test]
     async fn a_missing_root_lists_nothing() -> io::Result<()> {
         let source = LocalMangaSource::new(None);
-        let page = CatalogueSource::latest(&source, 1).await.map_err(io::Error::other)?;
+        let page = CatalogueSource::latest(&source, 1)
+            .await
+            .map_err(io::Error::other)?;
         assert!(page.mangas.is_empty());
         assert!(!page.has_next_page);
         Ok(())
@@ -261,11 +364,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_details_json_is_applied_then_replaced_by_comicinfo() -> io::Result<()> {
+        let (root, source) = source_with(&["Show"])?;
+        let show = root.path().join("Show");
+        fs::write(
+            show.join("details.json"),
+            r#"{"title":"Real","author":"A","genre":["Action","Drama"],"status":1}"#,
+        )?;
+        let updated = MangaSource::get_manga_details(&source, &SManga::new("Show", "Show"))
+            .await
+            .map_err(io::Error::other)?;
+        assert_eq!(updated.title, "Real");
+        assert_eq!(updated.genre.as_deref(), Some("Action, Drama"));
+        assert_eq!(updated.status, 1);
+        assert!(show.join("ComicInfo.xml").is_file());
+        assert!(!show.join("details.json").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_bad_legacy_details_json_is_kept_and_changes_nothing() -> io::Result<()> {
+        let (root, source) = source_with(&["Show"])?;
+        let show = root.path().join("Show");
+        fs::write(show.join("details.json"), r#"{"title": 5"#)?;
+        let updated = MangaSource::get_manga_details(&source, &SManga::new("Show", "Show"))
+            .await
+            .map_err(io::Error::other)?;
+        assert_eq!(updated.title, "Show");
+        assert!(show.join("details.json").is_file());
+        assert!(!show.join("ComicInfo.xml").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_14_details_concurrent_same_manga_single_write() -> io::Result<()> {
+        let (_root, source) = source_with(&["Show", "Other"])?;
+        // Another details write holds `Show`: a second fetch for `Show` waits, a fetch for `Other` does not.
+        let held = source.details_locks.lock("Show").await;
+        let same = source.clone();
+        let waiting = tokio::spawn(async move {
+            MangaSource::get_manga_details(&same, &SManga::new("Show", "Show")).await
+        });
+        let other = MangaSource::get_manga_details(&source, &SManga::new("Other", "Other"))
+            .await
+            .map_err(io::Error::other)?;
+        assert_eq!(other.title, "Other");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !waiting.is_finished(),
+            "the second fetch must wait for the first"
+        );
+        drop(held);
+        waiting
+            .await
+            .map_err(io::Error::other)?
+            .map_err(io::Error::other)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_missing_manga_folder_returns_the_manga_unchanged() -> io::Result<()> {
+        let (_root, source) = source_with(&[])?;
+        let manga = SManga::new("Gone", "Gone");
+        let updated = MangaSource::get_manga_details(&source, &manga)
+            .await
+            .map_err(io::Error::other)?;
+        assert_eq!(updated, manga);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn format_of_chapter_goes_through_the_root() -> io::Result<()> {
         let (root, source) = source_with(&["Show"])?;
         fs::create_dir(root.path().join("Show").join("Ch 1"))?;
         let format = source.format_of_chapter("Show/Ch 1").await.ok();
-        assert_eq!(format, Some(Format::Directory(root.path().join("Show").join("Ch 1"))));
+        assert_eq!(
+            format,
+            Some(Format::Directory(root.path().join("Show").join("Ch 1")))
+        );
         Ok(())
     }
 }

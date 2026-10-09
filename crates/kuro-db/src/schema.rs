@@ -4,7 +4,15 @@
 use crate::error::DbError;
 
 /// `PRAGMA user_version` of the manga baseline, the Aniyomi schema version 33.
-pub const SCHEMA_VERSION: i64 = 33;
+pub const BASELINE_VERSION: i64 = 33;
+
+/// `PRAGMA user_version` of the latest manga schema: the baseline plus [`MANGA_MIGRATIONS`]. A fresh file is
+/// created at this version (baseline and migrations in one transaction).
+pub const SCHEMA_VERSION: i64 = 34;
+
+/// Kurobayomi migrations after the baseline (`(target version, SQL)`, ascending, contiguous from 34).
+/// Migration 34 is `T-03a-024`: the `chapters.url` index and the favourites-first `libraryView`.
+pub const MANGA_MIGRATIONS: &[(i64, &str)] = &[(34, include_str!("../sql/migrations/34.sql"))];
 
 /// Manga baseline text (`sql/schema_v33.sql`): tables, indexes, triggers, views and the system
 /// category row, exactly as the plan's section 2 lists them.
@@ -38,11 +46,11 @@ pub struct SchemaBundle {
     pub refuse_foreign: fn(i64) -> DbError,
 }
 
-/// The manga file: the baseline at version 33 and no migrations yet.
+/// The manga file: the baseline at version 33 and the migrations of [`MANGA_MIGRATIONS`].
 pub const MANGA_SCHEMA: SchemaBundle = SchemaBundle {
     baseline_sql: BASELINE_SQL,
-    baseline_version: SCHEMA_VERSION,
-    migrations: &[],
+    baseline_version: BASELINE_VERSION,
+    migrations: MANGA_MIGRATIONS,
     application_id: crate::open::APPLICATION_ID,
     tables: MANGA_TABLES,
     refuse_foreign: |found| DbError::LegacyFile { found },

@@ -17,6 +17,13 @@ use crate::flags::{
     EPISODE_DOWNLOADED_MASK, EPISODE_FILLERMARKED_MASK, EPISODE_PREVIEWS_MASK, EPISODE_SORTING_MASK,
     EPISODE_SORT_DIR_MASK, EPISODE_SUMMARIES_MASK, EPISODE_UNSEEN_MASK,
 };
+use crate::flags::{
+    SEASON_BOOKMARKED_MASK, SEASON_COMPLETED_MASK, SEASON_DISPLAY_MODE_MASK, SEASON_DOWNLOADED_MASK,
+    SEASON_FILLERMARKED_MASK, SEASON_GRID_DISPLAY_MODE_MASK, SEASON_GRID_DISPLAY_MODE_SHIFT,
+    SEASON_GRID_DISPLAY_SIZE_MASK, SEASON_GRID_DISPLAY_SIZE_SHIFT, SEASON_OVERLAY_CONT_MASK,
+    SEASON_OVERLAY_DOWNLOADED_MASK, SEASON_OVERLAY_LANG_MASK, SEASON_OVERLAY_LOCAL_MASK,
+    SEASON_OVERLAY_UNSEEN_MASK, SEASON_SORT_DIR_MASK, SEASON_SORT_MASK, SEASON_STARTED_MASK, SEASON_UNSEEN_MASK,
+};
 use crate::registry::define_prefs;
 use crate::sort::{AnimeLibrarySort, MangaLibrarySort};
 use crate::store::PrefStore;
@@ -353,6 +360,38 @@ impl LibraryPrefs {
         self.sort_episode_by_ascending_or_descending.set(episode_flags & EPISODE_SORT_DIR_MASK)?;
         self.show_episode_thumbnail_previews.set(episode_flags & EPISODE_PREVIEWS_MASK)?;
         self.show_episode_summaries.set(episode_flags & EPISODE_SUMMARIES_MASK)?;
+        Ok(())
+    }
+}
+
+impl LibraryPrefs {
+    /// The season grid mode as a typed value. An invalid stored number reads as `CompactGrid`.
+    pub fn season_grid_mode(&self) -> SeasonDisplayMode {
+        SeasonDisplayMode::from_stored(self.season_display_grid_mode.get())
+    }
+
+    /// `setSeasonSettingsDefault` for an anime's `season_flags`: copies the filters, sort, grid, overlay and title
+    /// bits into the default templates. Deviation from Kotlin (quirk Q3): the downloaded filter is taken from the
+    /// downloaded mask, not from the unseen mask.
+    pub fn set_season_settings_default(&self, season_flags: i64) -> Result<(), PrefError> {
+        self.filter_season_by_download.set(season_flags & SEASON_DOWNLOADED_MASK)?;
+        self.filter_season_by_unseen.set(season_flags & SEASON_UNSEEN_MASK)?;
+        self.filter_season_by_started.set(season_flags & SEASON_STARTED_MASK)?;
+        self.filter_season_by_completed.set(season_flags & SEASON_COMPLETED_MASK)?;
+        self.filter_season_by_bookmarked.set(season_flags & SEASON_BOOKMARKED_MASK)?;
+        self.filter_season_by_fillermarked.set(season_flags & SEASON_FILLERMARKED_MASK)?;
+        self.sort_season_by_source_or_number.set(season_flags & SEASON_SORT_MASK)?;
+        self.sort_season_by_ascending_or_descending.set(season_flags & SEASON_SORT_DIR_MASK)?;
+        self.season_display_grid_mode
+            .set((season_flags & SEASON_GRID_DISPLAY_MODE_MASK) >> SEASON_GRID_DISPLAY_MODE_SHIFT)?;
+        self.season_display_grid_size
+            .set(((season_flags & SEASON_GRID_DISPLAY_SIZE_MASK) >> SEASON_GRID_DISPLAY_SIZE_SHIFT) as i32)?;
+        self.season_download_overlay.set(season_flags & SEASON_OVERLAY_DOWNLOADED_MASK != 0)?;
+        self.season_unseen_overlay.set(season_flags & SEASON_OVERLAY_UNSEEN_MASK != 0)?;
+        self.season_local_overlay.set(season_flags & SEASON_OVERLAY_LOCAL_MASK != 0)?;
+        self.season_lang_overlay.set(season_flags & SEASON_OVERLAY_LANG_MASK != 0)?;
+        self.season_continue_overlay.set(season_flags & SEASON_OVERLAY_CONT_MASK != 0)?;
+        self.season_display_mode.set(season_flags & SEASON_DISPLAY_MODE_MASK)?;
         Ok(())
     }
 }
@@ -701,5 +740,50 @@ mod tests {
         assert_eq!(lib.sort_episode_by_ascending_or_descending.get(), 1);
         assert_eq!(lib.show_episode_thumbnail_previews.get(), 0x800);
         assert_eq!(lib.show_episode_summaries.get(), 0);
+    }
+}
+
+#[cfg(test)]
+mod season_tests {
+    use super::*;
+    use crate::flags::{SEASON_GRID_DISPLAY_MODE_SHIFT, SEASON_GRID_DISPLAY_SIZE_SHIFT, SEASON_OVERLAY_LOCAL_MASK, SEASON_SHOW_DOWNLOADED, SEASON_SHOW_SEEN};
+    use crate::store::PrefStore;
+    use crate::values::PrefValue;
+
+    #[test]
+    fn the_downloaded_filter_comes_from_the_downloaded_mask_not_the_unseen_mask() {
+        let store = PrefStore::in_memory();
+        let lib = LibraryPrefs::new(store.clone());
+        // Downloaded bits 0x2 and unseen bits 0x10 (quirk Q3 regression guard).
+        lib.set_season_settings_default(SEASON_SHOW_DOWNLOADED | SEASON_SHOW_SEEN).unwrap();
+        assert_eq!(lib.filter_season_by_download.get(), SEASON_SHOW_DOWNLOADED);
+        assert_eq!(lib.filter_season_by_unseen.get(), SEASON_SHOW_SEEN);
+    }
+
+    #[test]
+    fn grid_mode_and_size_are_read_from_their_shifted_fields() {
+        let store = PrefStore::in_memory();
+        let lib = LibraryPrefs::new(store.clone());
+        lib.set_season_settings_default((2 << SEASON_GRID_DISPLAY_MODE_SHIFT) | (5 << SEASON_GRID_DISPLAY_SIZE_SHIFT)).unwrap();
+        assert_eq!(lib.season_display_grid_mode.get(), 2);
+        assert_eq!(lib.season_display_grid_size.get(), 5);
+        assert_eq!(lib.season_grid_mode(), SeasonDisplayMode::CoverOnlyGrid);
+    }
+
+    #[test]
+    fn overlays_are_on_when_their_bit_is_set() {
+        let lib = LibraryPrefs::new(PrefStore::in_memory());
+        lib.set_season_settings_default(SEASON_OVERLAY_LOCAL_MASK).unwrap();
+        assert!(lib.season_local_overlay.get());
+        assert!(!lib.season_unseen_overlay.get(), "unset bit means off, the default of true is overwritten");
+        assert!(!lib.season_continue_overlay.get());
+    }
+
+    #[test]
+    fn an_invalid_stored_grid_number_reads_as_compact_grid() {
+        let store = PrefStore::in_memory();
+        store.set_raw("default_season_grid_display_mode", PrefValue::Long(7));
+        let lib = LibraryPrefs::new(store);
+        assert_eq!(lib.season_grid_mode(), SeasonDisplayMode::CompactGrid);
     }
 }

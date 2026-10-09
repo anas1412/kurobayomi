@@ -32,6 +32,29 @@ pub enum MpvError {
     EmptyCommand,
 }
 
+/// String property writes, so code that sends them (metadata options, fonts, filters) can be tested
+/// with a recording fake. `MpvHandle` is the real sink.
+pub trait PropertySink {
+    fn set_str(&self, name: &str, value: &str) -> Result<(), MpvError>;
+}
+
+impl PropertySink for MpvHandle {
+    fn set_str(&self, name: &str, value: &str) -> Result<(), MpvError> {
+        self.set_property_str(name, value)
+    }
+}
+
+/// String property reads, so the `metadata` read after `FILE_LOADED` can be tested with a fake.
+pub trait PropertySource {
+    fn get_str(&self, name: &str) -> Option<String>;
+}
+
+impl PropertySource for MpvHandle {
+    fn get_str(&self, name: &str) -> Option<String> {
+        self.get_string(name)
+    }
+}
+
 /// Map from the observation format class to the libmpv2 format. libmpv2 has no `NONE` format and
 /// drops `NONE` notifications, so `None` observations use `String`; the value is then ignored.
 fn libmpv_format(format: PropFormat) -> Format {

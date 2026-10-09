@@ -4,9 +4,12 @@ use std::path::Path;
 
 use kuro_source::model::{SChapter, SManga};
 
+use crate::dates::parse_local_date;
+use crate::epub;
 use crate::error::LocalSourceError;
 use crate::format::{is_epub, is_manga_archive};
 use crate::fs::{FsEntry, find_child, list_dir};
+use crate::json_side::{ChapterDetails, read_chapters_json, same_number, side_file};
 use crate::names::{is_hidden, stem};
 use crate::natsort::natural_cmp_ci;
 use crate::recognition::chapter_number;
@@ -14,17 +17,36 @@ use crate::recognition::chapter_number;
 /// The chapters of the folder named by `manga.url`: non-hidden folders, manga archives and EPUB files. Newest number
 /// first, then name descending, natural and case-insensitive. A missing folder gives an empty list.
 ///
-/// The EPUB metadata fill (T-14a-041) and the `chapters.json` overrides (T-14a-039) are not in this step: an EPUB
-/// keeps its file-name title and modification date.
-pub fn chapters(root: &Path, manga: &SManga) -> Result<Vec<SChapter>, LocalSourceError> {
+/// Kotlin order: the EPUB metadata fill (T-14a-041) sets the manga author and description and the chapter fields, then
+/// the `chapters.json` override (T-14a-039) replaces them. A bad EPUB keeps its file-name title and date and is logged
+/// (E-MANGA-3).
+pub fn chapters(root: &Path, manga: &mut SManga) -> Result<Vec<SChapter>, LocalSourceError> {
     let Some(dir) = find_child(root, &manga.url).filter(|p| p.is_dir()) else {
         return Ok(Vec::new());
     };
-    let mut chapters: Vec<SChapter> = list_dir(&dir)?
-        .iter()
-        .filter(|e| is_chapter_entry(e))
-        .map(|e| chapter_of(manga, e))
-        .collect();
+    let entries = list_dir(&dir)?;
+    let overrides = chapter_overrides(&entries);
+    let mut chapters: Vec<SChapter> = Vec::new();
+    for entry in entries.iter().filter(|e| is_chapter_entry(e)) {
+        let mut chapter = chapter_of(manga, entry);
+        if is_epub(&entry.name) {
+            match epub::read_metadata(&entry.path) {
+                Ok(meta) => epub::fill_metadata(manga, &mut chapter, &meta),
+                Err(error) => tracing::warn!(
+                    "EPUB metadata skipped for {}: {error}",
+                    entry.path.display()
+                ),
+            }
+        }
+        if let Some(data) = overrides
+            .iter()
+            .flatten()
+            .find(|d| same_number(chapter.chapter_number, d.chapter_number))
+        {
+            apply_override(&mut chapter, data);
+        }
+        chapters.push(chapter);
+    }
     chapters.sort_by(|a, b| {
         b.chapter_number
             .total_cmp(&a.chapter_number)
@@ -33,9 +55,27 @@ pub fn chapters(root: &Path, manga: &SManga) -> Result<Vec<SChapter>, LocalSourc
     Ok(chapters)
 }
 
+/// The first `chapters.json` in the folder (name order). A file that does not decode is ignored (E-CHAPTERS-1).
+fn chapter_overrides(entries: &[FsEntry]) -> Option<Vec<ChapterDetails>> {
+    read_chapters_json(&side_file(entries, "chapters")?.path)
+}
+
+/// The override's name and date when present; a date that does not parse keeps the file date (E-DATE-2). The scanlator
+/// is replaced even when the override has none (E-CHAPTERS-4).
+fn apply_override(chapter: &mut SChapter, data: &ChapterDetails) {
+    if let Some(name) = &data.name {
+        chapter.name = name.clone();
+    }
+    if let Some(millis) = data.date_upload.as_deref().and_then(parse_local_date) {
+        chapter.date_upload = millis;
+    }
+    chapter.scanlator = data.scanlator.clone();
+}
+
 /// Kotlin's chapter filter: `!startsWith('.') && (isDirectory || manga archive || epub)`.
 fn is_chapter_entry(entry: &FsEntry) -> bool {
-    !is_hidden(&entry.name) && (entry.is_dir || is_manga_archive(&entry.name) || is_epub(&entry.name))
+    !is_hidden(&entry.name)
+        && (entry.is_dir || is_manga_archive(&entry.name) || is_epub(&entry.name))
 }
 
 fn chapter_of(manga: &SManga, entry: &FsEntry) -> SChapter {
@@ -53,6 +93,7 @@ fn chapter_of(manga: &SManga, entry: &FsEntry) -> SChapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dates;
     use std::fs;
     use std::io;
 
@@ -76,7 +117,7 @@ mod tests {
 
     #[test]
     fn only_folders_manga_archives_and_epubs_are_chapters() -> io::Result<()> {
-        let (root, manga) = manga_with(&[
+        let (root, mut manga) = manga_with(&[
             "Ch 01/",
             "Ch 02.cbz",
             "Ch 03.EPUB",
@@ -85,7 +126,7 @@ mod tests {
             ".x.cbz",
             "page.jpg",
         ])?;
-        let got = chapters(root.path(), &manga).map_err(io::Error::other)?;
+        let got = chapters(root.path(), &mut manga).map_err(io::Error::other)?;
         assert_eq!(got.len(), 3, "{:?}", names(&got));
         let mut sorted = names(&got);
         sorted.sort_unstable();
@@ -95,8 +136,8 @@ mod tests {
 
     #[test]
     fn the_url_is_manga_folder_slash_entry_name_with_extension() -> io::Result<()> {
-        let (root, manga) = manga_with(&["Ch 02.cbz"])?;
-        let got = chapters(root.path(), &manga).map_err(io::Error::other)?;
+        let (root, mut manga) = manga_with(&["Ch 02.cbz"])?;
+        let got = chapters(root.path(), &mut manga).map_err(io::Error::other)?;
         assert_eq!(got[0].url, "Show/Ch 02.cbz");
         assert_eq!(got[0].name, "Ch 02");
         assert_eq!(got[0].chapter_number, 2.0);
@@ -106,8 +147,9 @@ mod tests {
 
     #[test]
     fn newest_number_first_and_unrecognised_last() -> io::Result<()> {
-        let (root, manga) = manga_with(&["Show 2.cbz", "Show 10.cbz", "Show 1.cbz", "Notes.cbz"])?;
-        let got = chapters(root.path(), &manga).map_err(io::Error::other)?;
+        let (root, mut manga) =
+            manga_with(&["Show 2.cbz", "Show 10.cbz", "Show 1.cbz", "Notes.cbz"])?;
+        let got = chapters(root.path(), &mut manga).map_err(io::Error::other)?;
         assert_eq!(names(&got), ["Show 10", "Show 2", "Show 1", "Notes"]);
         assert_eq!(got.last().map(|c| c.chapter_number), Some(-1.0));
         Ok(())
@@ -116,8 +158,64 @@ mod tests {
     #[test]
     fn a_missing_manga_folder_is_an_empty_list() -> io::Result<()> {
         let (root, _) = manga_with(&[])?;
-        let gone = SManga::new("Gone", "Gone");
-        assert!(chapters(root.path(), &gone).map_err(io::Error::other)?.is_empty());
+        let mut gone = SManga::new("Gone", "Gone");
+        assert!(
+            chapters(root.path(), &mut gone)
+                .map_err(io::Error::other)?
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn chapters_json_overrides_name_date_and_scanlator_by_number() -> io::Result<()> {
+        let (root, mut manga) = manga_with(&["Ch 01.cbz", "Ch 02.cbz"])?;
+        fs::write(
+            root.path().join("Show").join("chapters.json"),
+            r#"[{"chapter_number":1,"name":"Prologue","date_upload":"2024-03-01T12:00:00","scanlator":"A"},{"chapter_number":2,"date_upload":"2024-02-31T12:00:00"}]"#,
+        )?;
+        let got = chapters(root.path(), &mut manga).map_err(io::Error::other)?;
+        let one = got
+            .iter()
+            .find(|c| c.chapter_number == 1.0)
+            .expect("chapter 1");
+        assert_eq!(one.name, "Prologue");
+        assert_eq!(one.scanlator.as_deref(), Some("A"));
+        assert!(one.date_upload > 0);
+        let two = got
+            .iter()
+            .find(|c| c.chapter_number == 2.0)
+            .expect("chapter 2");
+        assert_eq!(two.name, "Ch 02");
+        assert_eq!(two.scanlator, None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_bad_chapters_json_is_ignored_and_the_list_still_comes() -> io::Result<()> {
+        let (root, mut manga) = manga_with(&["Ch 01.cbz"])?;
+        fs::write(root.path().join("Show").join("chapters.json"), "{")?;
+        let got = chapters(root.path(), &mut manga).map_err(io::Error::other)?;
+        assert_eq!(names(&got), ["Ch 01"]);
+        Ok(())
+    }
+
+    #[test]
+    fn an_epub_chapter_takes_its_title_and_date_from_the_package() -> io::Result<()> {
+        let (root, mut manga) = manga_with(&[])?;
+        let fixture =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/metadata.epub");
+        fs::copy(fixture, root.path().join("Show").join("Vol 1.epub"))?;
+        let got = chapters(root.path(), &mut manga).map_err(io::Error::other)?;
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].name, "Chapter Title");
+        assert_eq!(got[0].scanlator.as_deref(), Some("Team X"));
+        assert_eq!(manga.author.as_deref(), Some("Writer"));
+        assert_eq!(manga.description.as_deref(), Some("About & more"));
+        assert_eq!(
+            dates::parse_epub_date("2024-01-02T03:04:05+0100"),
+            Some(got[0].date_upload)
+        );
         Ok(())
     }
 }

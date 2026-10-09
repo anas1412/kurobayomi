@@ -14,5 +14,5 @@ pub mod wire;
 
 pub use fetch::{ListSource, StoreHttp, fetch_store, legacy_base, legacy_extensions, list_source};
 pub use model::{AnimeExtensionStore, Contact, NO_SIGNING_KEY};
-pub use ops::{add_store, fetch_extensions, insert_from_preference, refresh_all, subscribe_all, subscribe_count};
+pub use ops::{add_store, fetch_extensions, insert_from_legacy, refresh_all, subscribe_all, subscribe_count};
 pub use wire::{StoreWire, gunzip_if_needed, sniff};

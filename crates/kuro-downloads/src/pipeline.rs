@@ -7,16 +7,20 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use kuro_source::SourceError;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
+use tracing::debug;
 
+use crate::data_saver::DataSaver;
 use crate::error::DownloadError;
-use crate::images::{find_finished, is_complete, page_digits, page_stem, resolve_extension, tmp_dir_name};
+use crate::images::{
+    PageImageCache, copy_from_cache, find_finished, is_complete, page_digits, page_stem, resolve_extension,
+    split_part_name, split_tall_image, tmp_dir_name,
+};
 use crate::index::DownloadIndex;
 use crate::layout::{DownloadLayout, chapter_dir_name};
 use crate::model::{ChapterRef, DownloadState, MangaRef, Page, PageState, SourceRef};
@@ -27,7 +31,7 @@ pub const MIN_FREE_BYTES: u64 = 200 * 1024 * 1024;
 /// Pages in flight per chapter (`flatMapMerge(concurrency = 2)`).
 pub const PAGE_CONCURRENCY: usize = 2;
 /// Waits before retries 1, 2 and 3. Four attempts in total (`(2L shl attempt) * 1000`).
-pub const RETRY_DELAYS: [Duration; 3] = [Duration::from_secs(2), Duration::from_secs(4), Duration::from_secs(8)];
+pub use crate::retry::RETRY_DELAYS;
 /// Bytes read to decide the image type.
 const HEAD_LEN: usize = 32;
 const TMP_FILE_SUFFIX: &str = ".tmp";
@@ -59,6 +63,14 @@ pub struct PipelineCtx {
     pub chapter_id: i64,
     pub generation: u64,
     pub tx: mpsc::UnboundedSender<PipelineMsg>,
+    /// Reader page cache, checked before the network (T-23a-016). `None` when the reader cache is not wired.
+    pub page_cache: Option<Arc<dyn PageImageCache>>,
+    /// `split_tall_images` (T-23a-018).
+    pub split_tall_images: bool,
+    /// Part height for the tall split, `2 * max(monitor)` from GDK, or `DEFAULT_OPTIMAL_HEIGHT`.
+    pub optimal_height: u32,
+    /// Data-saver proxy for the page requests (T-23a-017). The default fetches the original URL.
+    pub data_saver: DataSaver,
 }
 
 impl PipelineCtx {
@@ -227,7 +239,11 @@ async fn fetch_page_steps(
 
     let _ = std::fs::remove_file(tmp.join(format!("{stem}{TMP_FILE_SUFFIX}")));
     if let Some(file) = find_finished(tmp, &stem) {
-        mark_ready(ctx, index, page, file);
+        finish_page(ctx, index, page, file, tmp, width);
+        return Ok(());
+    }
+    if let Some(file) = take_from_cache(ctx, &url, tmp, &stem)? {
+        finish_page(ctx, index, page, file, tmp, width);
         return Ok(());
     }
 
@@ -235,7 +251,7 @@ async fn fetch_page_steps(
     loop {
         match download_once(ctx, source, index, page, &url, tmp, &stem).await {
             Ok(file) => {
-                mark_ready(ctx, index, page, file);
+                finish_page(ctx, index, page, file, tmp, width);
                 return Ok(());
             }
             Err(err) if is_retryable(&err) && attempt < RETRY_DELAYS.len() => {
@@ -256,6 +272,42 @@ fn is_retryable(err: &DownloadError) -> bool {
         }
         DownloadError::Source(_) | DownloadError::Io(_) => true,
         _ => false,
+    }
+}
+
+/// Copies a reader-cache hit into the chapter. `None` when there is no cache, no entry, or an unknown image type, in
+/// which case the page is downloaded (EC-47, EC-48). The cache entry is removed only after a successful copy.
+fn take_from_cache(ctx: &PipelineCtx, url: &str, tmp: &Path, stem: &str) -> Result<Option<PathBuf>, DownloadError> {
+    let Some(cache) = ctx.page_cache.as_ref() else { return Ok(None) };
+    let Some(cached) = cache.cached_file(url) else { return Ok(None) };
+    let copied = copy_from_cache(&cached, tmp, stem)?;
+    if copied.is_some() {
+        cache.remove(url);
+    }
+    Ok(copied)
+}
+
+/// Splits a tall page when enabled, then marks it ready with the file to record.
+fn finish_page(ctx: &PipelineCtx, index: usize, page: &mut Page, file: PathBuf, tmp: &Path, width: usize) {
+    let file = if ctx.split_tall_images { split_if_tall(ctx, tmp, page.number(), width, file) } else { file };
+    mark_ready(ctx, index, page, file);
+}
+
+/// `splitTallImageIfNeeded`: the prefix has the same width as the page file name, so page 1 of a 1000-page chapter
+/// never matches page 10 (EC-55). A split failure is logged and the whole page is kept (Kotlin logs only).
+fn split_if_tall(ctx: &PipelineCtx, tmp: &Path, number: u32, width: usize, file: PathBuf) -> PathBuf {
+    let prefix = page_stem(number, width);
+    let already_split = file.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&format!("{prefix}__")));
+    if already_split {
+        return file;
+    }
+    match split_tall_image(tmp, &file, &prefix, ctx.optimal_height) {
+        Ok(true) => tmp.join(split_part_name(&prefix, 1)),
+        Ok(false) => file,
+        Err(err) => {
+            debug!(target: "kuro::downloads", page = number, error = %err, "tall page split failed; page kept");
+            file
+        }
     }
 }
 
@@ -303,7 +355,8 @@ async fn stream_to_file(
     url: &str,
     partial: &Path,
 ) -> Result<(Option<String>, Vec<u8>), DownloadError> {
-    let mut response = source.fetch_image(url).await?;
+    let request = ctx.data_saver.request_url(source.id(), url);
+    let mut response = source.fetch_image(&request).await?;
     let total = response.content_length.filter(|t| *t > 0);
     let mut file = tokio::fs::File::create(partial).await?;
     let mut head = Vec::with_capacity(HEAD_LEN);
@@ -337,6 +390,7 @@ mod tests {
     use super::*;
     use crate::testing::{FakeSource, fake, jpeg_bytes};
     use std::sync::atomic::Ordering;
+    use std::time::Duration;
 
     struct Harness {
         root: tempfile::TempDir,
@@ -383,6 +437,10 @@ mod tests {
             chapter_id: 7,
             generation: 1,
             tx: h.tx.clone(),
+            page_cache: None,
+            split_tall_images: false,
+            optimal_height: crate::images::DEFAULT_OPTIMAL_HEIGHT,
+            data_saver: DataSaver::default(),
         }
     }
 
@@ -604,5 +662,134 @@ mod tests {
         let outcome = run_chapter(ctx(&h, plenty), job(source.clone())).await;
         assert!(matches!(outcome, ChapterOutcome::Errored(DownloadError::PagesFailed(1))));
         assert_eq!(source.calls(), 0);
+    }
+}
+
+#[cfg(test)]
+mod cache_and_split_tests {
+    use super::*;
+    use crate::testing::{FakeSource, jpeg_bytes};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    /// A reader cache holding fixed entries and recording removals.
+    struct FakeCache {
+        files: HashMap<String, PathBuf>,
+        removed: Mutex<Vec<String>>,
+    }
+
+    impl PageImageCache for FakeCache {
+        fn cached_file(&self, image_url: &str) -> Option<PathBuf> {
+            self.files.get(image_url).cloned()
+        }
+        fn remove(&self, image_url: &str) {
+            self.removed.lock().unwrap().push(image_url.to_owned());
+        }
+    }
+
+    fn plenty(_: &Path) -> Option<u64> {
+        Some(10 * 1024 * 1024 * 1024)
+    }
+
+    fn chapter_job(source: Arc<FakeSource>) -> ChapterJob {
+        let source_ref: SourceRef = source;
+        ChapterJob {
+            source: source_ref,
+            manga: crate::testing::manga(1, 1, "Manga 1"),
+            chapter: crate::testing::chapter(7, 1, "Chapter 7"),
+            pages: None,
+        }
+    }
+
+    fn setup(root: &Path, cache: Option<Arc<dyn PageImageCache>>) -> (PipelineCtx, mpsc::UnboundedReceiver<PipelineMsg>) {
+        let index_cache = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let ctx = PipelineCtx {
+            layout: Arc::new(DownloadLayout::new(root)),
+            index: Arc::new(DownloadIndex::open(root, index_cache.path())),
+            free_space: plenty,
+            chapter_id: 7,
+            generation: 1,
+            tx,
+            page_cache: cache,
+            split_tall_images: true,
+            optimal_height: 2000,
+            data_saver: DataSaver::default(),
+        };
+        std::mem::forget(index_cache);
+        (ctx, rx)
+    }
+
+    #[tokio::test]
+    async fn a_cache_hit_is_copied_and_the_entry_removed_without_a_fetch() {
+        let root = tempfile::tempdir().unwrap();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let cached = cache_dir.path().join("entry.0");
+        std::fs::write(&cached, jpeg_bytes(64)).unwrap();
+        let url = "https://fake/img/0".to_owned();
+        let cache = Arc::new(FakeCache { files: HashMap::from([(url.clone(), cached)]), removed: Mutex::new(Vec::new()) });
+        let (ctx, _rx) = setup(root.path(), Some(cache.clone()));
+        let source = Arc::new(FakeSource { page_count: 1, ..FakeSource::new(1) });
+        let outcome = run_chapter(ctx, chapter_job(source.clone())).await;
+        assert!(matches!(outcome, ChapterOutcome::Downloaded), "{outcome:?}");
+        assert_eq!(source.calls(), 0, "EC-47: the cache serves the page");
+        assert_eq!(*cache.removed.lock().unwrap(), vec![url]);
+        assert!(root.path().join("Source 1 (EN)/Manga 1/Chapter 7/001.jpg").is_file());
+    }
+
+    #[tokio::test]
+    async fn an_unknown_cached_type_falls_back_to_the_network() {
+        let root = tempfile::tempdir().unwrap();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let cached = cache_dir.path().join("entry.0");
+        std::fs::write(&cached, b"junk").unwrap();
+        let url = "https://fake/img/0".to_owned();
+        let cache = Arc::new(FakeCache { files: HashMap::from([(url, cached)]), removed: Mutex::new(Vec::new()) });
+        let (ctx, _rx) = setup(root.path(), Some(cache.clone()));
+        let source = Arc::new(FakeSource { page_count: 1, ..FakeSource::new(1) });
+        let outcome = run_chapter(ctx, chapter_job(source.clone())).await;
+        assert!(matches!(outcome, ChapterOutcome::Downloaded), "TST-27: {outcome:?}");
+        assert_eq!(source.calls(), 1);
+        assert!(cache.removed.lock().unwrap().is_empty(), "the entry is kept when it was not used");
+        let names: Vec<String> = std::fs::read_dir(root.path().join("Source 1 (EN)/Manga 1/Chapter 7"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["001.jpg"]);
+    }
+
+    #[test]
+    fn page_one_never_splits_page_ten() {
+        // TST-25 / EC-55: a 1234-page chapter. Page 1 is ordinary, page 10 is tall and must stay whole.
+        let root = tempfile::tempdir().unwrap();
+        let (ctx, _rx) = setup(root.path(), None);
+        let tmp = root.path().join("chapter_tmp");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let normal = tmp.join("0001.png");
+        let tall = tmp.join("0010.png");
+        let small = image::RgbaImage::from_pixel(10, 10, image::Rgba([1, 2, 3, 255]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(small).write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        std::fs::write(&normal, bytes.get_ref()).unwrap();
+        let tall_img = image::RgbaImage::from_pixel(10, 400, image::Rgba([1, 2, 3, 255]));
+        let mut tall_bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(tall_img).write_to(&mut tall_bytes, image::ImageFormat::Png).unwrap();
+        std::fs::write(&tall, tall_bytes.get_ref()).unwrap();
+        let kept = split_if_tall(&ctx, &tmp, 1, 4, normal.clone());
+        assert_eq!(kept, normal);
+        assert!(tall.is_file(), "page 10 is untouched");
+        assert!(!tmp.join("0001__001.jpg").exists());
+    }
+
+    #[test]
+    fn an_already_split_page_is_not_split_again() {
+        let root = tempfile::tempdir().unwrap();
+        let (ctx, _rx) = setup(root.path(), None);
+        let tmp = root.path().join("chapter_tmp");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let part = tmp.join("001__001.jpg");
+        std::fs::write(&part, jpeg_bytes(16)).unwrap();
+        assert_eq!(split_if_tall(&ctx, &tmp, 1, 3, part.clone()), part);
+        assert!(part.is_file());
     }
 }

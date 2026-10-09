@@ -1,0 +1,132 @@
+//! The one dialog helper every preference dialog uses: transient, modal, fixed width, Escape = Cancel,
+//! and a confirm button that the caller enables or disables.
+
+use std::cell::Cell;
+use std::rc::Rc;
+
+use gtk::prelude::*;
+use gtk::{glib, Align, Box as GBox, Button, Label, Orientation};
+
+use super::super::strings;
+use super::DIALOG_WIDTH;
+
+/// A dialog built by [`show`]. The caller owns the body and decides when to close it.
+#[derive(Clone)]
+pub struct Dialog {
+    pub window: gtk::Window,
+    pub confirm: Option<Button>,
+    error: Label,
+    done: Rc<Cell<bool>>,
+}
+
+impl Dialog {
+    /// Enables or disables the confirm button. Call on every change that affects the rule.
+    pub fn set_confirm_enabled(&self, enabled: bool) {
+        if let Some(confirm) = &self.confirm {
+            confirm.set_sensitive(enabled);
+        }
+    }
+
+    /// Shows `message` under the body (a failed or vetoed-with-error write), or hides it for `None`.
+    pub fn set_error(&self, message: Option<&str>) {
+        self.error.set_text(message.unwrap_or(""));
+        self.error.set_visible(message.is_some());
+    }
+
+    /// Closes the dialog after an accepted write. The cancel callback does not run.
+    pub fn finish(&self) {
+        self.done.set(true);
+        self.window.destroy();
+    }
+}
+
+/// Builds and shows a dialog. `confirm` is the confirm label, or `None` for a Cancel-only dialog.
+/// `on_confirm` gets the dialog so it can run a veto and call [`Dialog::finish`] on acceptance.
+/// `on_cancel` runs once, on Escape, Cancel or the window close button, never after `finish`.
+pub fn show(
+    parent: &impl IsA<gtk::Window>,
+    title: &str,
+    body: &impl IsA<gtk::Widget>,
+    confirm: Option<&str>,
+    on_confirm: impl Fn(Dialog) + 'static,
+    on_cancel: impl Fn() + 'static,
+) -> Dialog {
+    let window = gtk::Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .resizable(false)
+        .default_width(DIALOG_WIDTH)
+        .title(title)
+        .build();
+    let done = Rc::new(Cell::new(false));
+    let on_cancel: Rc<dyn Fn()> = Rc::new(on_cancel);
+    let cancel: Rc<dyn Fn()> = {
+        let (done, window, on_cancel) = (done.clone(), window.clone(), on_cancel.clone());
+        Rc::new(move || {
+            if !done.get() {
+                done.set(true);
+                on_cancel();
+                window.destroy();
+            }
+        })
+    };
+
+    let column = GBox::new(Orientation::Vertical, 16);
+    column.set_margin_top(24);
+    column.set_margin_bottom(16);
+    column.set_margin_start(24);
+    column.set_margin_end(24);
+    let heading = Label::new(Some(title));
+    heading.add_css_class("title-4");
+    heading.set_halign(Align::Start);
+    heading.set_wrap(true);
+    column.append(&heading);
+    column.append(body);
+    let error = Label::new(None);
+    error.add_css_class("pref-error");
+    error.set_wrap(true);
+    error.set_xalign(0.0);
+    error.set_visible(false);
+    column.append(&error);
+
+    let buttons = GBox::new(Orientation::Horizontal, 8);
+    buttons.set_halign(Align::End);
+    let cancel_button = Button::with_label(&strings::cancel());
+    buttons.append(&cancel_button);
+    let mut dialog = Dialog { window: window.clone(), confirm: None, error, done: done.clone() };
+    if let Some(label) = confirm {
+        let confirm_button = Button::with_label(label);
+        confirm_button.add_css_class("suggested-action");
+        buttons.append(&confirm_button);
+        dialog.confirm = Some(confirm_button.clone());
+        let handle = dialog.clone();
+        confirm_button.connect_clicked(move |_| on_confirm(handle.clone()));
+    }
+    column.append(&buttons);
+    window.set_child(Some(&column));
+
+    let cancel_click = cancel.clone();
+    cancel_button.connect_clicked(move |_| cancel_click());
+    let (close_done, close_cancel) = (done.clone(), on_cancel.clone());
+    window.connect_close_request(move |_| {
+        if !close_done.get() {
+            close_done.set(true);
+            close_cancel();
+        }
+        glib::Propagation::Proceed
+    });
+
+    let keys = gtk::EventControllerKey::new();
+    let cancel_key = cancel.clone();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk::gdk::Key::Escape {
+            cancel_key();
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+    window.add_controller(keys);
+
+    window.present();
+    dialog
+}

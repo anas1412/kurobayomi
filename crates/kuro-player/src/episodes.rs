@@ -4,12 +4,24 @@
 
 use crate::enums::{Panels, Sheets};
 use crate::errors::{InitError, PlayerMessage};
+use crate::pref_write::Write;
 use crate::state::PlayerState;
 
 /// `hasPreviousEpisode = index != 0` and `hasNextEpisode = index != size - 1`. An index of `-1`
 /// (not found) counts as having both neighbours, as in Kotlin.
 pub fn neighbour_flags(index: i64, len: usize) -> (bool, bool) {
     (index != 0, index != len as i64 - 1)
+}
+
+/// `setAutoPlay(enable)` (behaviour 9.5, T-45b-055): the pill text for the new state and the write
+/// that saves `pref_auto_play_enabled`. The default is off.
+pub fn set_auto_play(enabled: bool) -> (PlayerMessage, Write) {
+    let message = if enabled {
+        PlayerMessage::AutoPlayOn
+    } else {
+        PlayerMessage::AutoPlayOff
+    };
+    (message, Write::pref("pref_auto_play_enabled", enabled.to_string()))
 }
 
 /// `endFile(eofReached)`: autoplay runs only at the real end of the file, with the preference on.
@@ -80,6 +92,18 @@ mod tests {
         assert!(autoplay_on_eof(true, true));
         assert!(!autoplay_on_eof(true, false));
         assert!(!autoplay_on_eof(false, true));
+    }
+
+    #[test]
+    fn set_auto_play_shows_the_matching_pill_and_saves_the_value() {
+        assert_eq!(
+            set_auto_play(true),
+            (PlayerMessage::AutoPlayOn, Write::pref("pref_auto_play_enabled", "true"))
+        );
+        assert_eq!(
+            set_auto_play(false),
+            (PlayerMessage::AutoPlayOff, Write::pref("pref_auto_play_enabled", "false"))
+        );
     }
 
     #[test]

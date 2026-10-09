@@ -2,6 +2,7 @@
 //! no-WebView fallback. Nothing here touches GTK or WebKit, so `kuro-net` compiles and tests without a display.
 //! The WebKitGTK implementation is a separate module behind a feature (not built yet, see T-12a-017).
 
+pub mod data;
 pub mod solve_state;
 pub mod view;
 

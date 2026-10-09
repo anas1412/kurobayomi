@@ -69,7 +69,7 @@ impl Default for LoadOptions {
 
 impl LoadOptions {
     /// Options of a webtoon reader page: no memory or disk cache, the native decoder, and the crop setting
-    /// (behavior section 3.2). The caller passes a zero animator scale to turn the crossfade off.
+    /// (behavior section 3.2). The crossfade length comes from `motion::crossfade`.
     pub fn webtoon_page(crop_borders: bool) -> Self {
         Self {
             crop_borders,

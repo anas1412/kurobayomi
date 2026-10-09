@@ -228,3 +228,83 @@ fn concurrent_init_sets_exactly_one_catalogue() {
 fn bare_percent_label_renders_literally() {
     assert_eq!(tr(MsgKey::pref_progress_70), "70%");
 }
+
+#[test]
+fn from_id_round_trips_every_key_and_rejects_unknown_ids() {
+    // T-51a-030: spec files name keys by Fluent id, and an unknown id must not resolve.
+    for key in MsgKey::ALL {
+        assert_eq!(MsgKey::from_id(key.id()), Some(*key), "{}", key.id());
+    }
+    assert_eq!(MsgKey::from_id("no_such_message"), None);
+    assert_eq!(MsgKey::from_id(""), None);
+    assert_eq!(MsgKey::from_id("type"), Some(MsgKey::r#type));
+}
+
+#[test]
+fn every_plain_message_renders_without_unfilled_placeholders() {
+    // T-51a-028 (test 3): a message with no arguments renders non-empty text with no `{$`.
+    for key in MsgKey::ALL {
+        if !key.args().is_empty() {
+            continue;
+        }
+        let text = tr(*key);
+        assert!(!text.is_empty(), "{}", key.id());
+        assert!(!text.contains("{$"), "{}: {text}", key.id());
+    }
+}
+
+#[test]
+fn english_plural_categories_select_one_or_other() {
+    // T-51a-028 (test 5): in English only 1 takes the `one` form.
+    assert_eq!(tr_plural(MsgKey::relative_time, 0, &[]), "0 days ago");
+    assert_eq!(tr_plural(MsgKey::relative_time, 1, &[]), "Yesterday");
+    assert_eq!(tr_plural(MsgKey::relative_time, 2, &[]), "2 days ago");
+    assert_eq!(tr_plural(MsgKey::relative_time, 5, &[]), "5 days ago");
+}
+
+#[test]
+fn plural_without_a_category_falls_back_to_other() {
+    // T-51a-028 (test 7): a locale that has only one and other uses other for a count of 3.
+    let catalog = Catalog::build(
+        &["de"],
+        &[(
+            "de",
+            "n =\n    { $count ->\n        [one] eins\n       *[other] viele\n    }\n",
+        )],
+    );
+    let mut args = FluentArgs::new();
+    args.set("count", 3_i64);
+    assert_eq!(catalog.format("n", Some(&args)).unwrap().0, "viele");
+}
+
+#[test]
+fn integers_have_no_grouping_and_padding_is_kept() {
+    // T-51a-028 (test 8) and F2: 1000 prints without a separator, and %02d pads a zero.
+    assert_eq!(
+        tr_plural(MsgKey::notification_chapters_generic, 1000, &[]),
+        "1000 new chapters"
+    );
+    assert_eq!(
+        trf(
+            MsgKey::restore_duration,
+            &[("arg1", Arg::Int(0)), ("arg2", Arg::Int(5))]
+        ),
+        "00 min, 05 sec"
+    );
+}
+
+#[test]
+fn decimals_keep_two_places() {
+    // T-51a-028 (test 9): %.2f with 1.5 is 1.50.
+    assert_eq!(
+        trf(MsgKey::player_speed, &[("arg1", Arg::Dec(1.5))]),
+        "1.50x"
+    );
+}
+
+#[test]
+fn offered_locales_lists_english_and_has_no_empty_tag() {
+    let offered = crate::offered_locales();
+    assert!(offered.contains(&"en"));
+    assert!(offered.iter().all(|tag| !tag.is_empty()));
+}

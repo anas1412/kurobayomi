@@ -3,6 +3,11 @@
 //! `VideoSource`, so the logic is tested with a fake and the app implements the trait over the
 //! real source. Calls are synchronous; cancellation is the caller's job (drop the call).
 
+use std::path::Path;
+use std::sync::Arc;
+
+use url::Url;
+
 use crate::types::{Hoster, HosterState, ReadyHoster, Video, VideoState};
 
 /// The source calls the player makes on a hoster or a video (`AnimeSource` / `AnimeHttpSource`).
@@ -166,6 +171,125 @@ fn first_match(
             .position(|(video, state)| pred(video, *state))
             .map(|video_index| (*hoster_index, video_index))
     })
+}
+
+/// `loadHosterVideos(source, hoster)` (behaviour 3.8, not forced). A lazy hoster stays `Idle`. A
+/// hoster whose videos cannot be listed is `Error`. Every other video starts `Queue`.
+pub fn load_hoster_state<S: VideoSource>(source: &S, hoster: &Hoster) -> HosterState {
+    if hoster.lazy {
+        return HosterState::Idle(hoster.hoster_name.clone());
+    }
+    match get_videos(source, hoster) {
+        Ok(videos) => HosterState::Ready(ReadyHoster {
+            name: hoster.hoster_name.clone(),
+            video_state: vec![VideoState::Queue; videos.len()],
+            video_list: videos,
+        }),
+        Err(_) => HosterState::Error(hoster.hoster_name.clone()),
+    }
+}
+
+fn set_video_state(ready: &mut ReadyHoster, index: usize, state: VideoState) {
+    if let Some(slot) = ready.video_state.get_mut(index) {
+        *slot = state;
+    }
+}
+
+/// Step 2a of `getBestVideo`: the hoster's first preferred video that is not initialised. It is
+/// marked `LoadVideo` and resolved. A non-empty URL wins. Otherwise it is marked `Error`.
+fn preferred_winner<S: VideoSource>(source: &S, state: &mut HosterState) -> Option<Video> {
+    let HosterState::Ready(ready) = state else {
+        return None;
+    };
+    let index = ready
+        .video_list
+        .iter()
+        .position(|video| video.preferred && !video.initialized)?;
+    set_video_state(ready, index, VideoState::LoadVideo);
+    let video = ready.video_list.get(index)?.clone();
+    match get_resolved_video(source, &video) {
+        Some(resolved) if !resolved.video_url.is_empty() => Some(resolved),
+        _ => {
+            set_video_state(ready, index, VideoState::Error);
+            None
+        }
+    }
+}
+
+/// Step 2c of `getBestVideo`: the first resolvable video that `select_best_video` picks. Each failed
+/// pick is marked `Error`, so the loop ends.
+fn fallback_winner<S: VideoSource>(source: &S, mut states: Vec<HosterState>) -> Option<Video> {
+    loop {
+        let (hoster, index) = select_best_video(&states)?;
+        let HosterState::Ready(ready) = states.get_mut(hoster)? else {
+            return None;
+        };
+        set_video_state(ready, index, VideoState::LoadVideo);
+        let video = ready.video_list.get(index)?.clone();
+        match get_resolved_video(source, &video) {
+            Some(resolved) if !resolved.video_url.is_empty() => return Some(resolved),
+            _ => set_video_state(ready, index, VideoState::Error),
+        }
+    }
+}
+
+/// `HosterLoader.getBestVideo` (behaviour 3.11, T-45b-011): the external-player path. Every hoster
+/// loads in parallel on a blocking thread. The first preferred video that resolves to a non-empty
+/// URL wins, and the other loads are dropped. A blocking call that already started runs to its end
+/// on its thread, so it cannot be cancelled. If no preferred video wins, the hosters are searched in
+/// order. `None` when nothing resolves.
+pub async fn get_best_video<S>(source: Arc<S>, hosters: Vec<Hoster>) -> Option<Video>
+where
+    S: VideoSource + Send + Sync + 'static,
+{
+    let names: Vec<String> = hosters.iter().map(|h| h.hoster_name.clone()).collect();
+    let mut races = tokio::task::JoinSet::new();
+    for (index, hoster) in hosters.into_iter().enumerate() {
+        let source = Arc::clone(&source);
+        races.spawn_blocking(move || {
+            let mut state = load_hoster_state(source.as_ref(), &hoster);
+            let winner = preferred_winner(source.as_ref(), &mut state);
+            (index, state, winner)
+        });
+    }
+
+    let mut states: Vec<HosterState> = names.into_iter().map(HosterState::Idle).collect();
+    while let Some(joined) = races.join_next().await {
+        // A task that panicked contributes no state, as a failed load would.
+        let Ok((index, state, winner)) = joined else {
+            continue;
+        };
+        if let Some(slot) = states.get_mut(index) {
+            *slot = state;
+        }
+        if let Some(video) = winner {
+            races.abort_all();
+            return Some(video);
+        }
+    }
+    fallback_winner(source.as_ref(), states)
+}
+
+/// The videos of a local-source episode (behaviour 3.5, T-45b-063). `episode_url` is
+/// `<anime dir>/<episode file>` under the local source base directory. The video URL is the file's
+/// `file://` URI, and the title names the episode URL. A URL without a slash or a missing file gives
+/// an empty list, which the caller reports as an empty hoster list.
+pub fn local_videos(base_dir: &Path, episode_url: &str) -> Vec<Video> {
+    let Some((anime_dir, episode_name)) = episode_url.split_once('/') else {
+        return Vec::new();
+    };
+    let file = base_dir.join(anime_dir).join(episode_name);
+    if !file.is_file() {
+        return Vec::new();
+    }
+    let Ok(uri) = Url::from_file_path(&file) else {
+        return Vec::new();
+    };
+    vec![Video {
+        video_url: uri.to_string(),
+        video_title: format!("Local source: {episode_url}"),
+        ..Video::default()
+    }]
 }
 
 #[cfg(test)]
@@ -444,5 +568,174 @@ mod tests {
             .map(|v| v.video_url.as_str())
             .collect();
         assert_eq!(urls, ["b", "a"]);
+    }
+}
+
+#[cfg(test)]
+mod race_tests {
+    use super::*;
+    use crate::types::NO_HOSTER_LIST;
+
+    /// A source whose resolve step maps a video URL to a resolved URL. Plain sources (`http` false)
+    /// skip the resolve step.
+    #[derive(Default)]
+    struct Fake {
+        resolved: Vec<(String, String)>,
+        listed: Vec<Video>,
+        http: bool,
+    }
+
+    impl VideoSource for Fake {
+        type Error = ();
+        type Episode = ();
+
+        fn is_http(&self) -> bool {
+            self.http
+        }
+        fn has_hoster_list(&self) -> bool {
+            false
+        }
+        fn hoster_list(&self, _episode: &()) -> Result<Vec<Hoster>, ()> {
+            Ok(Vec::new())
+        }
+        fn sort_hosters(&self, hosters: Vec<Hoster>) -> Vec<Hoster> {
+            hosters
+        }
+        fn episode_video_list(&self, _episode: &()) -> Result<Vec<Video>, ()> {
+            Ok(Vec::new())
+        }
+        fn video_list(&self, _hoster: &Hoster) -> Result<Vec<Video>, ()> {
+            Ok(self.listed.clone())
+        }
+        fn video_url(&self, _video: &Video) -> Result<String, ()> {
+            Ok(String::new())
+        }
+        fn sort_videos(&self, videos: Vec<Video>) -> Vec<Video> {
+            videos
+        }
+        fn resolve_video(&self, video: &Video) -> Result<Video, ()> {
+            self.resolved
+                .iter()
+                .find(|(from, _)| *from == video.video_url)
+                .map(|(_, to)| Video {
+                    video_url: to.clone(),
+                    ..video.clone()
+                })
+                .ok_or(())
+        }
+    }
+
+    fn video(url: &str, preferred: bool) -> Video {
+        Video {
+            video_url: url.to_owned(),
+            preferred,
+            ..Video::default()
+        }
+    }
+
+    fn hoster(name: &str, videos: Vec<Video>) -> Hoster {
+        Hoster {
+            hoster_name: name.to_owned(),
+            video_list: Some(videos),
+            ..Hoster::default()
+        }
+    }
+
+    #[test]
+    fn listing_a_lazy_hoster_gives_idle() {
+        let lazy = Hoster {
+            hoster_name: "lazy".to_owned(),
+            lazy: true,
+            ..Hoster::default()
+        };
+        assert_eq!(
+            load_hoster_state(&Fake::default(), &lazy),
+            HosterState::Idle("lazy".to_owned())
+        );
+    }
+
+    #[test]
+    fn listing_videos_gives_ready_with_queue_states() {
+        let source = Fake {
+            listed: vec![video("a", false), video("b", true)],
+            http: true,
+            ..Fake::default()
+        };
+        let plain = Hoster {
+            hoster_name: NO_HOSTER_LIST.to_owned(),
+            ..Hoster::default()
+        };
+        let HosterState::Ready(ready) = load_hoster_state(&source, &plain) else {
+            panic!("expected Ready");
+        };
+        assert_eq!(ready.video_list.len(), 2);
+        assert_eq!(ready.video_state, vec![VideoState::Queue; 2]);
+    }
+
+    #[tokio::test]
+    async fn preferred_resolved_video_wins_the_race() {
+        let source = Arc::new(Fake {
+            resolved: vec![("p".to_owned(), "p-final".to_owned())],
+            http: true,
+            ..Fake::default()
+        });
+        let hosters = vec![
+            hoster("first", vec![video("a", false)]),
+            hoster("second", vec![video("p", true)]),
+        ];
+        let winner = get_best_video(source, hosters).await.unwrap();
+        assert_eq!(winner.video_url, "p-final");
+        assert!(winner.initialized);
+    }
+
+    #[tokio::test]
+    async fn failed_preferred_video_falls_back_to_the_first_valid_one() {
+        let source = Arc::new(Fake::default());
+        let hosters = vec![
+            hoster("first", vec![video("a", false)]),
+            hoster("second", vec![video("", true)]),
+        ];
+        let winner = get_best_video(source, hosters).await.unwrap();
+        assert_eq!(winner.video_url, "a");
+    }
+
+    #[tokio::test]
+    async fn nothing_resolvable_gives_none() {
+        let source = Arc::new(Fake::default());
+        let hosters = vec![hoster("only", vec![video("", false), video("", true)])];
+        assert_eq!(get_best_video(source, hosters).await, None);
+    }
+
+    #[tokio::test]
+    async fn no_hosters_gives_none() {
+        assert_eq!(
+            get_best_video(Arc::new(Fake::default()), Vec::new()).await,
+            None
+        );
+    }
+}
+
+#[cfg(test)]
+mod local_tests {
+    use super::*;
+
+    #[test]
+    fn a_local_episode_becomes_one_file_video_named_after_its_url() {
+        let dir = tempfile::tempdir().unwrap();
+        let anime = dir.path().join("Show");
+        std::fs::create_dir(&anime).unwrap();
+        std::fs::write(anime.join("01.mkv"), b"x").unwrap();
+        let videos = local_videos(dir.path(), "Show/01.mkv");
+        assert_eq!(videos.len(), 1);
+        assert!(videos[0].video_url.starts_with("file://"));
+        assert!(videos[0].video_url.ends_with("/Show/01.mkv"));
+        assert_eq!(videos[0].video_title, "Local source: Show/01.mkv");
+    }
+
+    #[test]
+    fn a_missing_file_or_a_url_without_a_slash_gives_no_videos() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(local_videos(dir.path(), "Show/none.mkv").is_empty());
+        assert!(local_videos(dir.path(), "no-slash").is_empty());
     }
 }

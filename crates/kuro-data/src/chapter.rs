@@ -329,6 +329,39 @@ mod tests {
         assert_eq!(filtered, ["a", "c"]);
     }
 
+    /// T-05a-021: a chapter without a scanlator is never excluded, even when a NULL-like name is listed.
+    #[test]
+    fn a_null_scanlator_chapter_is_never_excluded() {
+        let (_dir, db) = manga_db();
+        let m = insert_manga(&db, "m", false);
+        let repo = ChapterRepo::new(db.clone());
+        repo.add_all(&[chapter(m, "c", None)]).unwrap();
+        db.write(|tx| Ok(kuro_db::statements_manga::excluded_scanlators::insert(tx, m, "")?)).unwrap();
+        let filtered: Vec<String> = repo.by_manga_id(m, true).unwrap().into_iter().map(|c| c.url).collect();
+        assert_eq!(filtered, ["c"]);
+    }
+
+    /// EC-12: duplicate exclusion rows inserted by hand multiply the rows of a non-excluded chapter when the
+    /// filter flag is 0, because the join runs regardless of the flag. With the flag set, the row is kept once.
+    #[test]
+    fn duplicate_exclusion_rows_multiply_chapters_only_when_the_filter_flag_is_zero() {
+        let (_dir, db) = manga_db();
+        let m = insert_manga(&db, "m", false);
+        let repo = ChapterRepo::new(db.clone());
+        repo.add_all(&[chapter(m, "a", Some("Group A"))]).unwrap();
+        db.write(|tx| {
+            kuro_db::statements_manga::excluded_scanlators::insert(tx, m, "Group B")?;
+            kuro_db::statements_manga::excluded_scanlators::insert(tx, m, "Group B")?;
+            kuro_db::statements_manga::excluded_scanlators::insert(tx, m, "Group A")?;
+            kuro_db::statements_manga::excluded_scanlators::insert(tx, m, "Group A")?;
+            Ok(())
+        })
+        .unwrap();
+        // Group A is excluded twice: the flag-set query drops it, the flag-clear query still multiplies it.
+        assert_eq!(repo.by_manga_id(m, false).unwrap().len(), 2);
+        assert!(repo.by_manga_id(m, true).unwrap().is_empty());
+    }
+
     #[test]
     fn scanlators_map_null_to_empty_and_keep_duplicates() {
         let (_dir, db) = manga_db();

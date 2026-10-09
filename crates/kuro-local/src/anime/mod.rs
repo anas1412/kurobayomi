@@ -16,6 +16,7 @@ use crate::error::LocalSourceError;
 use crate::format::is_anime_episode;
 use crate::fs::{FsEntry, file_url, find_child, list_dir};
 use crate::images::find_image;
+use crate::json_side::{AnimeDetails, apply_anime_details, details_file, read_details_json};
 use crate::sort::{LATEST_SORT, POPULAR_SORT, order_by, sort_from};
 
 /// `LocalAnimeSource.name`: `local_anime_source` in the i18n table.
@@ -32,28 +33,30 @@ impl LocalAnimeSource {
         Self { root }
     }
 
-    /// Kotlin `getOldAnimeDetails`, cover and background steps only (behavior 11.4). `details.json` is T-14a-038.
+    /// Kotlin `getOldAnimeDetails`: the cover and background steps (behavior 11.4), then `details.json` (T-14a-038).
+    /// A decode failure propagates to the caller (E-ANIME-2).
     async fn details(&self, anime: &SAnime) -> Result<SAnime, LocalSourceError> {
         let root = self.root.clone();
-        let url = anime.url.clone();
-        let (cover, background) = crate::blocking(move || {
-            let Some(dir) = root.and_then(|root| find_child(&root, &url)) else {
-                return Ok((None, None));
+        let anime = anime.clone();
+        crate::blocking(move || {
+            let mut updated = anime;
+            let Some(dir) = root.and_then(|root| find_child(&root, &updated.url)) else {
+                return Ok(updated);
             };
-            Ok((
-                find_image(&dir, "cover").and_then(|p| file_url(&p)),
-                find_image(&dir, "background").and_then(|p| file_url(&p)),
-            ))
+            if let Some(cover) = find_image(&dir, "cover").and_then(|p| file_url(&p)) {
+                updated.thumbnail_url = Some(cover);
+            }
+            if let Some(background) = find_image(&dir, "background").and_then(|p| file_url(&p)) {
+                updated.background_url = Some(background);
+            }
+            let entries = list_dir(&dir)?;
+            if let Some(json) = details_file(&entries) {
+                let details = read_details_json::<AnimeDetails>(&json.path)?;
+                apply_anime_details(&mut updated, &details);
+            }
+            Ok(updated)
         })
-        .await?;
-        let mut updated = anime.clone();
-        if cover.is_some() {
-            updated.thumbnail_url = cover;
-        }
-        if background.is_some() {
-            updated.background_url = background;
-        }
-        Ok(updated)
+        .await
     }
 
     async fn browse_page(
@@ -130,15 +133,26 @@ impl AnimeSource for LocalAnimeSource {
     }
 
     async fn popular(&self, _page: i32) -> Result<AnimesPage, SourceError> {
-        Ok(self.browse_page(String::new(), false, Some(POPULAR_SORT)).await?)
+        Ok(self
+            .browse_page(String::new(), false, Some(POPULAR_SORT))
+            .await?)
     }
 
     async fn latest(&self, _page: i32) -> Result<AnimesPage, SourceError> {
-        Ok(self.browse_page(String::new(), true, Some(LATEST_SORT)).await?)
+        Ok(self
+            .browse_page(String::new(), true, Some(LATEST_SORT))
+            .await?)
     }
 
-    async fn search(&self, _page: i32, query: &str, filters: &FilterList) -> Result<AnimesPage, SourceError> {
-        Ok(self.browse_page(query.to_owned(), false, sort_from(filters)).await?)
+    async fn search(
+        &self,
+        _page: i32,
+        query: &str,
+        filters: &FilterList,
+    ) -> Result<AnimesPage, SourceError> {
+        Ok(self
+            .browse_page(query.to_owned(), false, sort_from(filters))
+            .await?)
     }
 
     async fn anime_details(&self, anime: &SAnime) -> Result<SAnime, SourceError> {
@@ -215,15 +229,27 @@ mod tests {
             FetchType::Seasons
         );
         assert_eq!(fetch_type_of(&[file("readme", false)]), FetchType::Episodes);
-        assert_eq!(fetch_type_of(&[file("Extra.mkv", true)]), FetchType::Episodes);
+        assert_eq!(
+            fetch_type_of(&[file("Extra.mkv", true)]),
+            FetchType::Episodes
+        );
     }
 
     #[tokio::test]
     async fn browse_lists_folders_with_their_fetch_type_and_images() -> io::Result<()> {
-        let (root, source) = library(&[("Show", &["ep.mkv", "cover.jpg"]), ("Seasoned", &[]), ("Empty", &[])])?;
+        let (root, source) = library(&[
+            ("Show", &["ep.mkv", "cover.jpg"]),
+            ("Seasoned", &[]),
+            ("Empty", &[]),
+        ])?;
         fs::create_dir(root.path().join("Seasoned").join("S1"))?;
-        fs::write(root.path().join("Show").join("background.png"), b"\x89PNG\r\n\x1a\n")?;
-        let page = AnimeSource::popular(&source, 1).await.map_err(io::Error::other)?;
+        fs::write(
+            root.path().join("Show").join("background.png"),
+            b"\x89PNG\r\n\x1a\n",
+        )?;
+        let page = AnimeSource::popular(&source, 1)
+            .await
+            .map_err(io::Error::other)?;
         let by_title = |t: &str| page.animes.iter().find(|a| a.title == t).cloned().expect(t);
         let show = by_title("Show");
         assert_eq!(show.url, "Show");
@@ -287,9 +313,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn anime_details_json_fills_the_six_fields_without_comicinfo() -> io::Result<()> {
+        let (root, source) = library(&[("Show", &[])])?;
+        fs::write(
+            root.path().join("Show").join("details.json"),
+            r#"{"title":"Real","artist":"Art","genre":["A","B"],"status":2}"#,
+        )?;
+        let anime = SAnime {
+            url: "Show".into(),
+            title: "Show".into(),
+            ..SAnime::default()
+        };
+        let updated = AnimeSource::anime_details(&source, &anime)
+            .await
+            .map_err(io::Error::other)?;
+        assert_eq!(updated.title, "Real");
+        assert_eq!(updated.artist.as_deref(), Some("Art"));
+        assert_eq!(updated.genre.as_deref(), Some("A, B"));
+        assert!(!root.path().join("Show").join("ComicInfo.xml").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_bad_anime_details_json_fails_the_details() -> io::Result<()> {
+        let (root, source) = library(&[("Show", &[])])?;
+        fs::write(root.path().join("Show").join("details.json"), "{")?;
+        let anime = SAnime {
+            url: "Show".into(),
+            title: "Show".into(),
+            ..SAnime::default()
+        };
+        assert!(AnimeSource::anime_details(&source, &anime).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn a_missing_root_lists_nothing() -> io::Result<()> {
         let source = LocalAnimeSource::new(None);
-        let page = AnimeSource::latest(&source, 1).await.map_err(io::Error::other)?;
+        let page = AnimeSource::latest(&source, 1)
+            .await
+            .map_err(io::Error::other)?;
         assert!(page.animes.is_empty());
         Ok(())
     }

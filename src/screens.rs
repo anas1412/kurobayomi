@@ -34,10 +34,10 @@ pub fn body(id: &str) -> Option<Built> {
 /// A pushed page for `id`.
 pub fn build(id: &str) -> GBox {
     match id {
-        "reader" => return crate::player::reader("Title 1", "Chapter 1"),
+        "reader" => return crate::reader::launch::page_for("Title 1", "Chapter 1"),
         "player" => return crate::player::player("Title 1", "Episode 1"),
-        "anime_entry_details" => return crate::entry::entry("Title 1", true),
-        "manga_entry_details" => return crate::entry::entry("Title 1", false),
+        "anime_entry_details" => return crate::entry_core::anime::route::build(),
+        "manga_entry_details" => return crate::entry_core::route::build(),
         _ => {}
     }
     let s = screen(id);
@@ -62,7 +62,7 @@ pub fn open_entry(title: &str, anime: bool) {
 }
 
 pub fn open_media(anime: bool, title: &str, unit: &str) {
-    push(&if anime { crate::player::player(title, unit) } else { crate::player::reader(title, unit) });
+    push(&if anime { crate::player::player(title, unit) } else { crate::reader::launch::page_for(title, unit) });
 }
 
 /// Top "Anime | Manga" switcher with one page per kind (Updates, History, Downloads, …).
@@ -153,6 +153,10 @@ fn libraries() -> Option<Built> {
 }
 
 fn library(id: &str, anime: bool) -> Built {
+    // the live library view; the prototype below stays as the fallback when its worker cannot start
+    if let Some(b) = crate::library::mount::build(anime) {
+        return b;
+    }
     let s = screen(id);
     let body = GBox::new(O::Vertical, 0);
 

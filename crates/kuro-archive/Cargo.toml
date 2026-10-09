@@ -12,9 +12,13 @@ unsafe_code = "deny"
 
 [dependencies]
 kuro-core = { version = "0.1.0", path = "../kuro-core" }
+chrono.workspace = true
 memmap2 = "0.9.11"
+scraper.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+# Stored (uncompressed) CBZ writing only; deflate reading is not used here.
+zip = { version = "8.6.0", default-features = false, features = ["deflate", "chrono"] }
 
 [dev-dependencies]
 tempfile.workspace = true

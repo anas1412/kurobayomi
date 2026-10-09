@@ -33,8 +33,8 @@ pub const DOWNLOAD_PERMITS: usize = 3;
 /// Largest download body, 64 MiB (data file section 6.5).
 pub const MAX_DOWNLOAD_BYTES: u64 = 64 << 20;
 
-/// Why an install ended in `Error`. The `Downgrade`, `SignerMismatch` and `CopyFailed` texts are the Kotlin log texts
-/// (data file section 13).
+/// Why an install ended in `Error`. The `Downgrade`, `SignerMismatch`, `CopyFailed` and `ReadDownload` texts are the
+/// Kotlin log texts (data file section 13).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InstallError {
     #[error("download failed: {0}")]
@@ -53,6 +53,8 @@ pub enum InstallError {
     SignerMismatch,
     #[error("Failed to copy extension file.")]
     CopyFailed,
+    #[error("Failed to read downloaded extension file.")]
+    ReadDownload,
     #[error("io: {0}")]
     Io(String),
     #[error("invalid install request: {0}")]
@@ -211,6 +213,24 @@ impl Installer {
                 Ok(Enqueued::NoEntry)
             }
         }
+    }
+
+    /// Update all (T-18a-053): one update per request, in the order given (the store's `updates` order). A package
+    /// that already has a job is skipped. Returns the packages that were enqueued.
+    pub fn update_all(self: &Arc<Self>, requests: Vec<InstallRequest>) -> Vec<String> {
+        let mut started = Vec::new();
+        for request in requests {
+            if self.step(&request.pkg) != InstallStep::Idle {
+                continue;
+            }
+            let pkg = request.pkg.clone();
+            match self.update(&pkg, Some(request)) {
+                Ok(Enqueued::Started) => started.push(pkg),
+                Ok(_) => {}
+                Err(err) => tracing::warn!(%pkg, "{err}"),
+            }
+        }
+        started
     }
 
     /// Cancels a queued or downloading job; the job then ends in `Idle`. Once the commit has started the cancel is

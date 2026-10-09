@@ -6,6 +6,8 @@
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 
@@ -106,6 +108,147 @@ pub fn create_file_in_cache_dir(cache_dir: &Path, name: &str) -> io::Result<Path
     Ok(path)
 }
 
+/// `UniFile.extension`: the text after the last `.`, or the whole name when there is no `.`
+/// (`"README"` gives `"README"`, `".hidden"` gives `"hidden"`). Kept only for ported UI text; new code uses
+/// `Path::extension`.
+pub fn extension_quirk(name: &str) -> &str {
+    name.rsplit('.').next().unwrap_or(name)
+}
+
+/// `UniFile.nameWithoutExtension`: the text before the last `.`, or the whole name when there is no `.`
+/// (`".hidden"` gives `""`). Kept only for ported UI text.
+pub fn name_without_extension_quirk(name: &str) -> &str {
+    name.rfind('.').map_or(name, |i| &name[..i])
+}
+
+/// An open temporary file created by [`TempFiles::create_from`]. The handle closes on drop; the file stays on
+/// disk until [`TempFiles::clear`] (like `File.createTempFile`).
+#[derive(Debug)]
+pub struct TempFile {
+    pub path: PathBuf,
+    pub file: File,
+}
+
+/// The temporary file manager (`UniFileTempFileManager`): files live in `<cache>/tmp`.
+#[derive(Debug, Clone)]
+pub struct TempFiles {
+    dir: PathBuf,
+}
+
+impl TempFiles {
+    pub fn new(cache_dir: &Path) -> Self {
+        Self { dir: cache_dir.join("tmp") }
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Copies `source` into a new `<prefix><unique>.tmp` file, where the prefix is the source name without
+    /// its extension padded with spaces to at least three bytes.
+    pub fn create_from(&self, source: &Path) -> io::Result<TempFile> {
+        fs::create_dir_all(&self.dir)?;
+        let mut input = File::open(source)?;
+        let file_name = source.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+        let mut prefix = name_without_extension_quirk(&file_name).to_owned();
+        while prefix.len() < 3 {
+            prefix.push(' ');
+        }
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        loop {
+            let unique = (nanos as u64) ^ COUNTER.fetch_add(1, Ordering::Relaxed).rotate_left(40);
+            let path = self.dir.join(format!("{prefix}{unique}.tmp"));
+            match File::options().write(true).create_new(true).open(&path) {
+                Ok(mut file) => {
+                    if let Err(e) = io::copy(&mut input, &mut file) {
+                        drop(file);
+                        let _ = fs::remove_file(&path);
+                        return Err(e);
+                    }
+                    return Ok(TempFile { path, file });
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// Removes the temporary folder and everything in it. A missing folder is fine.
+    pub fn clear(&self) -> io::Result<()> {
+        match fs::remove_dir_all(&self.dir) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum CopyError {
+    #[error("the source file doesn't exist: {}", .0.display())]
+    SourceMissing(PathBuf),
+    #[error("the destination file already exists: {}", .0.display())]
+    DestinationExists(PathBuf),
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
+#[cfg(unix)]
+fn set_read_only(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o444))
+}
+
+#[cfg(not(unix))]
+fn set_read_only(path: &Path) -> io::Result<()> {
+    let mut perms = fs::metadata(path)?.permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(path, perms)
+}
+
+/// `File.copyAndSetReadOnlyTo`. A file is copied to `<dst>.tmp`, made read-only (mode `0o444`, deviation D-5)
+/// and renamed to `dst`, so a failure never leaves a read-only partial file. A directory source creates the
+/// destination directory and copies no content.
+pub fn copy_read_only(src: &Path, dst: &Path, overwrite: bool) -> Result<PathBuf, CopyError> {
+    let meta = fs::metadata(src).map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound => CopyError::SourceMissing(src.to_owned()),
+        _ => CopyError::Io(e),
+    })?;
+    if let Ok(existing) = fs::symlink_metadata(dst) {
+        if !overwrite {
+            return Err(CopyError::DestinationExists(dst.to_owned()));
+        }
+        if existing.is_dir() {
+            fs::remove_dir(dst)?;
+        } else {
+            fs::remove_file(dst)?;
+        }
+    }
+    if meta.is_dir() {
+        fs::create_dir_all(dst)?;
+        return Ok(dst.to_owned());
+    }
+    if let Some(parent) = dst.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+    let mut part_name = dst.as_os_str().to_owned();
+    part_name.push(".tmp");
+    let part = PathBuf::from(part_name);
+    let result = File::open(src)
+        .and_then(|mut input| {
+            let mut out = File::create(&part)?;
+            io::copy(&mut input, &mut out)?;
+            out.sync_all()
+        })
+        .and_then(|()| set_read_only(&part))
+        .and_then(|()| fs::rename(&part, dst));
+    if let Err(e) = result {
+        let _ = fs::remove_file(&part);
+        return Err(e.into());
+    }
+    Ok(dst.to_owned())
+}
+
 const MAX_COMPONENT_UTF16: usize = 240;
 /// Byte budget for a name before the page suffix is added (safe for 255-byte file names).
 pub const MAX_FILE_NAME_BYTES: usize = 250;
@@ -164,6 +307,139 @@ pub fn page_filename(title: &str, chapter: &str, page: u32) -> String {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn name_quirks_match_unifile() {
+        assert_eq!(extension_quirk("README"), "README");
+        assert_eq!(extension_quirk("a.tar.gz"), "gz");
+        assert_eq!(extension_quirk(".hidden"), "hidden");
+        assert_eq!(name_without_extension_quirk(".hidden"), "");
+        assert_eq!(name_without_extension_quirk("README"), "README");
+        assert_eq!(name_without_extension_quirk("a.tar.gz"), "a.tar");
+    }
+
+    #[test]
+    fn temp_file_copies_source_under_cache_tmp_with_padded_prefix() {
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("ab.cbz");
+        fs::write(&src, b"payload").unwrap();
+        let temp = TempFiles::new(root.path());
+        let made = temp.create_from(&src).unwrap();
+        assert_eq!(made.path.parent().unwrap(), root.path().join("tmp"));
+        let name = made.path.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with("ab "), "{name}");
+        assert!(name.ends_with(".tmp"), "{name}");
+        assert_eq!(fs::read(&made.path).unwrap(), b"payload");
+        let long = root.path().join("chapter.cbz");
+        fs::write(&long, b"x").unwrap();
+        let name = temp.create_from(&long).unwrap().path;
+        assert!(name.file_name().unwrap().to_str().unwrap().starts_with("chapter"));
+    }
+
+    #[test]
+    fn temp_clear_removes_the_folder_and_is_repeatable() {
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("a.bin");
+        fs::write(&src, b"x").unwrap();
+        let temp = TempFiles::new(root.path());
+        assert!(temp.clear().is_ok(), "nothing created yet");
+        temp.create_from(&src).unwrap();
+        assert!(temp.dir().is_dir());
+        temp.clear().unwrap();
+        assert!(!temp.dir().exists());
+        temp.clear().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temp_handles_close_on_drop() {
+        if !Path::new("/proc/self/fd").is_dir() {
+            return;
+        }
+        let open_fds = || fs::read_dir("/proc/self/fd").unwrap().count();
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("a.bin");
+        fs::write(&src, b"x").unwrap();
+        let temp = TempFiles::new(root.path());
+        let before = open_fds();
+        for _ in 0..100 {
+            drop(temp.create_from(&src).unwrap());
+        }
+        // Other tests may open descriptors at the same time; 100 leaks would show as far more than that.
+        assert!(open_fds() < before + 50, "descriptors leaked");
+        assert_eq!(fs::read_dir(temp.dir()).unwrap().count(), 100, "names are unique");
+    }
+
+    #[test]
+    fn copy_read_only_refuses_existing_destination_without_overwrite() {
+        let root = tempfile::tempdir().unwrap();
+        let (src, dst) = (root.path().join("s"), root.path().join("d"));
+        fs::write(&src, b"new").unwrap();
+        fs::write(&dst, b"old").unwrap();
+        assert!(matches!(copy_read_only(&src, &dst, false), Err(CopyError::DestinationExists(_))));
+        assert_eq!(fs::read(&dst).unwrap(), b"old");
+        copy_read_only(&src, &dst, true).unwrap();
+        assert_eq!(fs::read(&dst).unwrap(), b"new");
+    }
+
+    #[test]
+    fn copy_read_only_reports_missing_source() {
+        let root = tempfile::tempdir().unwrap();
+        let err = copy_read_only(&root.path().join("nope"), &root.path().join("d"), false);
+        assert!(matches!(err, Err(CopyError::SourceMissing(_))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_read_only_sets_mode_0o444_and_leaves_no_partial() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let (src, dst) = (root.path().join("s"), root.path().join("sub").join("d"));
+        fs::write(&src, b"bytes").unwrap();
+        copy_read_only(&src, &dst, false).unwrap();
+        assert_eq!(fs::metadata(&dst).unwrap().permissions().mode() & 0o777, 0o444);
+        assert_eq!(fs::read(&dst).unwrap(), b"bytes");
+        assert!(!dst.with_file_name("d.tmp").exists());
+        // Overwriting a read-only destination works.
+        copy_read_only(&src, &dst, true).unwrap();
+    }
+
+    #[test]
+    fn copy_read_only_failure_leaves_no_destination_or_partial() {
+        let root = tempfile::tempdir().unwrap();
+        // A file where the destination folder should be makes create_dir_all fail.
+        let blocker = root.path().join("blocker");
+        fs::write(&blocker, b"x").unwrap();
+        let src = root.path().join("s");
+        fs::write(&src, b"x").unwrap();
+        let dst = blocker.join("d");
+        assert!(matches!(copy_read_only(&src, &dst, false), Err(CopyError::Io(_))));
+        assert!(!dst.exists());
+    }
+
+    #[test]
+    fn copy_read_only_directory_source_creates_directory_without_content() {
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("srcdir");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("inner"), b"x").unwrap();
+        let dst = root.path().join("dstdir");
+        copy_read_only(&src, &dst, false).unwrap();
+        assert!(dst.is_dir());
+        assert_eq!(fs::read_dir(&dst).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn copy_read_only_failure_while_writing_leaves_no_destination() {
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("s");
+        fs::write(&src, b"x").unwrap();
+        // A folder in the place of the part file makes the write fail after the checks passed.
+        let dst = root.path().join("d");
+        fs::create_dir(root.path().join("d.tmp")).unwrap();
+        assert!(matches!(copy_read_only(&src, &dst, false), Err(CopyError::Io(_))));
+        assert!(!dst.exists());
+    }
 
     #[test]
     fn filename_trims_dots_and_spaces() {

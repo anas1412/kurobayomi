@@ -10,8 +10,14 @@ use fluent_bundle::{FluentArgs, FluentValue};
 use tracing::{debug, warn};
 
 pub mod catalog;
+pub mod date;
 pub mod import;
 pub mod locale;
+pub mod names;
+pub mod notice;
+pub mod picker;
+pub mod source_names;
+pub mod time;
 
 mod keys {
     include!(concat!(env!("OUT_DIR"), "/keys.rs"));
@@ -41,12 +47,18 @@ static WARNED: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
 /// Default). `system` is the list from `glib::language_names()`, in priority order. A second call,
 /// or a call after the first `tr`, is ignored with a warning.
 pub fn init(pref: &str, system: &[String]) {
-    let offered: Vec<&'static str> = sources::LOCALE_SOURCES
-        .iter()
-        .map(|(tag, _)| *tag)
-        .collect();
+    let offered = offered_locales();
     let chain = locale::resolve(pref, system, &offered);
     install(&CATALOG, &chain, sources::LOCALE_SOURCES);
+}
+
+/// The language tags the catalogue ships, for the language picker (`picker::rows`,
+/// `picker::settings_subtitle`) and for [`init`].
+pub fn offered_locales() -> Vec<&'static str> {
+    sources::LOCALE_SOURCES
+        .iter()
+        .map(|(tag, _)| *tag)
+        .collect()
 }
 
 fn install(slot: &OnceLock<Catalog>, chain: &[&'static str], sources: &[(&str, &str)]) -> bool {
@@ -134,5 +146,7 @@ fn warn_once(id: &'static str) -> bool {
     guard.get_or_insert_with(HashSet::new).insert(id)
 }
 
+#[cfg(test)]
+mod import_tests;
 #[cfg(test)]
 mod tests;

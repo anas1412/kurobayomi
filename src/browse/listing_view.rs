@@ -1,0 +1,846 @@
+//! The content area of one source listing: the widget that draws `ContentPlan` and pages the grid or list through a
+//! `gio::ListStore` (T-40a-003, T-40a-004, T-40b-003, T-40b-004). The rules are in `listing` and `content`; this file
+//! only maps their output to widgets and runs the loaders on the runtime.
+
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
+
+use gtk::glib;
+use gtk::prelude::*;
+use kuro_domain::source::browse::BrowseQuery;
+use kuro_i18n::{Arg, MsgKey, tr, trf};
+use kuro_prefs::library::LibraryDisplayMode;
+use kuro_source::filter_list::FilterList;
+use tokio::sync::watch;
+
+use super::content::ContentPlan;
+use super::glue::{consume_events, follow_changes, follow_ready, keep_alive, own_tasks};
+use super::grid::{COVER_WIDTH_PX, CONTAINER_MARGIN_PX, CoverBinds, GridColumns, cover_width, grid_columns, last_visible_index};
+use super::listing::{ListItem, ListedPage, Listing, PageLoader};
+use super::prefs::BrowsePrefs;
+use super::primitives::{EmptyAction, ToastSpec, stub_source_label};
+use super::tasks::{PageTasks, Tagged};
+use super::view::{CoverGuard, CoverLoader, attach_long_press, empty_state, grid_cell, list_cell, spinner_row, toast_bar, toast_timeout_ms};
+
+/// What the listing needs from the app.
+pub struct ListingDeps {
+    pub loader: Arc<dyn PageLoader>,
+    pub prefs: Rc<BrowsePrefs>,
+    /// `SourceRegistry::subscribe_initialized()`.
+    pub ready: watch::Receiver<bool>,
+    /// The source is not installed.
+    pub stub: bool,
+    pub is_local: bool,
+    /// The source's id, name and language; a stub page names the source from them (`stub_source_label`).
+    pub source_id: i64,
+    pub source_name: String,
+    pub source_lang: String,
+    pub load_cover: CoverLoader,
+    /// A cover was activated.
+    pub open_entry: Rc<dyn Fn(&ListItem)>,
+    /// A cover was long-pressed (or right-clicked).
+    pub on_long_press: Rc<dyn Fn(ListItem)>,
+    /// The urls of this source's library entries, published again on every change: covers observe their favourite flag
+    /// live (T-40b-033).
+    pub favorite_urls: Option<watch::Receiver<BTreeSet<String>>>,
+    /// An error-state button other than retry was pressed.
+    pub on_action: Rc<dyn Fn(EmptyAction)>,
+}
+
+/// What a loader reports. The page tag is the pager's generation of the request.
+struct Loaded {
+    ask_generation: u64,
+    result: Result<ListedPage, String>,
+}
+
+struct Inner {
+    deps: ListingDeps,
+    listing: RefCell<Listing>,
+    tasks: Rc<RefCell<PageTasks<Loaded>>>,
+    ready: Cell<bool>,
+    display: Cell<LibraryDisplayMode>,
+    toast_dismissed: Cell<bool>,
+    /// The cover width the grid cells were last built for.
+    cover_px: Cell<i32>,
+    stack: gtk::Stack,
+    error_slot: gtk::Box,
+    toast_slot: gtk::Box,
+    items_stack: gtk::Stack,
+    store: gtk::gio::ListStore,
+    grid: gtk::GridView,
+    list: gtk::ListView,
+    scroller: gtk::ScrolledWindow,
+}
+
+/// The listing widget. Cloning shares the same listing.
+#[derive(Clone)]
+pub struct ListingView {
+    inner: Rc<Inner>,
+    root: gtk::Overlay,
+}
+
+/// A listing that does not keep itself alive, for callbacks that the listing's own deps reach.
+#[derive(Clone)]
+pub struct WeakListingView {
+    inner: Weak<Inner>,
+    root: glib::WeakRef<gtk::Overlay>,
+}
+
+impl WeakListingView {
+    pub fn upgrade(&self) -> Option<ListingView> {
+        Some(ListingView { inner: self.inner.upgrade()?, root: self.root.upgrade()? })
+    }
+}
+
+impl ListingView {
+    pub fn new(deps: ListingDeps, query: BrowseQuery) -> Self {
+        let store = gtk::gio::ListStore::new::<glib::BoxedAnyObject>();
+        let selection = gtk::NoSelection::new(Some(store.clone()));
+        let grid = gtk::GridView::new(Some(selection.clone()), None::<gtk::ListItemFactory>);
+        grid.set_single_click_activate(true);
+        for set in [gtk::GridView::set_margin_start, gtk::GridView::set_margin_end, gtk::GridView::set_margin_top, gtk::GridView::set_margin_bottom] {
+            set(&grid, CONTAINER_MARGIN_PX);
+        }
+        let list = gtk::ListView::new(Some(selection), None::<gtk::ListItemFactory>);
+        list.set_single_click_activate(true);
+
+        let items_stack = gtk::Stack::new();
+        items_stack.add_named(&grid, Some("grid"));
+        items_stack.add_named(&list, Some("list"));
+        let scroller = gtk::ScrolledWindow::builder().child(&items_stack).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+
+        let error_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let stub = gtk::Label::new(Some(&trf(
+            MsgKey::source_not_installed,
+            &[("arg1", Arg::Str(&stub_source_label(&deps.source_name, &deps.source_lang, deps.source_id)))],
+        )));
+        stub.set_wrap(true);
+        let empty = gtk::Label::new(Some(&tr(MsgKey::empty_screen)));
+        let stack = gtk::Stack::new();
+        stack.add_named(&spinner_row(), Some("spinner"));
+        stack.add_named(&stub, Some("stub"));
+        stack.add_named(&error_slot, Some("error"));
+        stack.add_named(&empty, Some("empty"));
+        stack.add_named(&scroller, Some("items"));
+
+        let toast_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        toast_slot.set_valign(gtk::Align::End);
+        toast_slot.set_halign(gtk::Align::Center);
+        toast_slot.set_margin_bottom(16);
+        let root = gtk::Overlay::new();
+        root.set_child(Some(&stack));
+        root.add_overlay(&toast_slot);
+
+        let display = deps.prefs.display_mode();
+        let ready = *deps.ready.borrow();
+        let inner = Rc::new(Inner {
+            ready: Cell::new(ready),
+            display: Cell::new(display),
+            listing: RefCell::new(Listing::new(query)),
+            tasks: Rc::new(RefCell::new(PageTasks::new())),
+            toast_dismissed: Cell::new(false),
+            cover_px: Cell::new(COVER_WIDTH_PX),
+            deps,
+            stack,
+            error_slot,
+            toast_slot,
+            items_stack,
+            store,
+            grid,
+            list,
+            scroller,
+        });
+        let view = Self { inner, root };
+        view.wire();
+        view
+    }
+
+    pub fn widget(&self) -> &gtk::Overlay {
+        &self.root
+    }
+
+    pub fn downgrade(&self) -> WeakListingView {
+        WeakListingView { inner: Rc::downgrade(&self.inner), root: self.root.downgrade() }
+    }
+
+    /// Starts a new listing with the filters it had: a Popular or Latest switch or a refresh (B-EC-08). Loaders of
+    /// the old one are aborted and their late pages dropped.
+    pub fn restart(&self, query: BrowseQuery) {
+        let filters = self.inner.listing.borrow().filters().clone();
+        self.inner.restart(query, filters);
+    }
+
+    /// `search(query, filters)` (B§4.6.1): a new listing that searches with its own copy of `filters`.
+    pub fn restart_with(&self, query: BrowseQuery, filters: FilterList) {
+        self.inner.restart(query, filters);
+    }
+
+    /// The display-mode button was used.
+    pub fn set_display_mode(&self, mode: LibraryDisplayMode) {
+        self.inner.display.set(mode);
+        self.inner.apply_display();
+        self.inner.render();
+    }
+
+    pub fn query(&self) -> BrowseQuery {
+        self.inner.listing.borrow().query().clone()
+    }
+
+    /// The listing's filters, as its running search holds them.
+    pub fn filters(&self) -> FilterList {
+        self.inner.listing.borrow().filters().clone()
+    }
+
+    /// Shows the favourite flag of the entry with library id `id` (an optimistic flip or its undo).
+    pub fn set_favorite(&self, id: i64, favorite: bool) {
+        self.inner.set_favorite_where(|item| item.id == id, favorite);
+    }
+
+    /// Makes the list fill the window below the top bar (B§2.8): the content never gets shorter than this.
+    pub fn set_min_content_height(&self, px: i32) {
+        self.inner.scroller.set_min_content_height(if self.inner.display.get() == LibraryDisplayMode::List { px } else { 0 });
+    }
+
+    fn wire(&self) {
+        let inner = &self.inner;
+        // a destroyed page aborts its loaders; the closure also keeps the state alive for as long as the widget lives
+        own_tasks(&self.root, &inner.tasks);
+        keep_alive(&self.root, inner);
+
+        let weak = Rc::downgrade(inner);
+        consume_events(&inner.tasks, move |loaded| {
+            if let Some(inner) = weak.upgrade() {
+                inner.arrived(loaded);
+            }
+        });
+        let weak = Rc::downgrade(inner);
+        follow_ready(inner.deps.ready.clone(), move |ready| {
+            let Some(inner) = weak.upgrade() else { return false };
+            inner.ready.set(ready);
+            inner.render();
+            inner.pump();
+            true
+        });
+        if let Some(urls) = inner.deps.favorite_urls.clone() {
+            let weak = Rc::downgrade(inner);
+            follow_changes(urls, move |urls| match weak.upgrade() {
+                Some(inner) => {
+                    inner.apply_favorite_urls(&urls);
+                    true
+                }
+                None => false,
+            });
+        }
+
+        let weak = Rc::downgrade(inner);
+        let scrolled = move |_: &gtk::Adjustment| {
+            if let Some(inner) = weak.upgrade() {
+                inner.pump_if_near_end();
+            }
+        };
+        let adjustment = inner.scroller.vadjustment();
+        adjustment.connect_value_changed(scrolled.clone());
+        adjustment.connect_upper_notify(scrolled);
+        // the grid's columns follow the size of the window
+        for adjustment in [inner.scroller.hadjustment(), inner.scroller.vadjustment()] {
+            let weak = Rc::downgrade(inner);
+            adjustment.connect_page_size_notify(move |_| {
+                if let Some(inner) = weak.upgrade() {
+                    inner.apply_columns();
+                }
+            });
+        }
+
+        let weak = Rc::downgrade(inner);
+        let open = move |position: u32| {
+            let Some(inner) = weak.upgrade() else { return };
+            if let Some(item) = inner.item_at(position) {
+                (inner.deps.open_entry)(&item);
+            }
+        };
+        inner.grid.connect_activate({
+            let open = open.clone();
+            move |_, position| open(position)
+        });
+        inner.list.connect_activate(move |_, position| open(position));
+
+        inner.apply_display();
+        inner.render();
+        inner.pump();
+    }
+}
+
+impl Inner {
+    fn restart(self: &Rc<Self>, query: BrowseQuery, filters: FilterList) {
+        self.tasks.borrow_mut().restart();
+        self.listing.borrow_mut().restart_with(query, filters);
+        self.store.remove_all();
+        self.toast_dismissed.set(false);
+        self.render();
+        self.pump();
+    }
+
+    /// The loaded item at a store position.
+    fn item_at(&self, position: u32) -> Option<ListItem> {
+        let object = self.store.item(position).and_downcast::<glib::BoxedAnyObject>()?;
+        let item = object.borrow::<Option<ListItem>>().clone();
+        item
+    }
+
+    /// Sets the favourite flag of every loaded item that `matches`, in the listing and in the store.
+    fn set_favorite_where(&self, matches: impl Fn(&ListItem) -> bool, favorite: bool) {
+        for index in 0..self.store.n_items() {
+            let Some(item) = self.item_at(index) else { continue };
+            if item.favorite == favorite || !matches(&item) {
+                continue;
+            }
+            if self.listing.borrow_mut().set_favorite(index as usize, favorite) {
+                let updated = self.listing.borrow().slots()[index as usize].clone();
+                self.store.splice(index, 1, &[glib::BoxedAnyObject::new(updated)]);
+            }
+        }
+    }
+
+    /// Every loaded item shows the flag the library holds for its url.
+    fn apply_favorite_urls(&self, urls: &BTreeSet<String>) {
+        for favorite in [true, false] {
+            self.set_favorite_where(|item| urls.contains(&item.url) == favorite, favorite);
+        }
+    }
+
+    /// Asks for the next page when none is in flight. Loaders run on the runtime and report through the channel.
+    fn pump(self: &Rc<Self>) {
+        if !self.ready.get() || self.deps.stub {
+            return;
+        }
+        let Some(ask) = self.listing.borrow_mut().ask() else { return };
+        let (query, filters) = {
+            let listing = self.listing.borrow();
+            (listing.query().clone(), listing.filters().clone())
+        };
+        let load = self.deps.loader.load(query, filters, ask.page);
+        let (generation, tx) = self.tasks.borrow().sender();
+        self.tasks.borrow_mut().spawn(async move {
+            let result = load.await;
+            let _ = tx.send(Tagged { generation, event: Loaded { ask_generation: ask.generation, result } }).await;
+        });
+        self.render();
+    }
+
+    fn pump_if_near_end(self: &Rc<Self>) {
+        let adjustment = self.scroller.vadjustment();
+        let cells = self.store.n_items() as usize;
+        let last = last_visible_index(adjustment.value(), adjustment.page_size(), adjustment.upper(), cells);
+        if self.listing.borrow().wants_more(last) {
+            self.pump();
+        }
+    }
+
+    fn arrived(self: &Rc<Self>, loaded: Loaded) {
+        match loaded.result {
+            Ok(page) => {
+                let first_new = self.listing.borrow().slots().len();
+                let delivered = self.listing.borrow_mut().deliver(loaded.ask_generation, page);
+                match delivered {
+                    // an empty page was recorded as an error
+                    Some(0) => self.toast_dismissed.set(false),
+                    Some(_) => {
+                        let listing = self.listing.borrow();
+                        let added: Vec<glib::BoxedAnyObject> =
+                            listing.slots()[first_new..].iter().map(|slot| glib::BoxedAnyObject::new(slot.clone())).collect();
+                        drop(listing);
+                        self.store.extend_from_slice(&added);
+                    }
+                    None => {}
+                }
+            }
+            Err(message) => {
+                if self.listing.borrow_mut().fail(loaded.ask_generation, message) {
+                    self.toast_dismissed.set(false);
+                }
+            }
+        }
+        self.render();
+        self.pump_if_near_end();
+    }
+
+    /// The columns of the grid for the size of the window (B§4.5): the landscape key when the window is at least as
+    /// wide as it is high, the portrait key otherwise; 0 means adaptive cells and `n` means exactly `n` columns.
+    fn columns(&self) -> Option<(GridColumns, i32)> {
+        let viewport = self.scroller.hadjustment().page_size() as i32;
+        if viewport <= 0 {
+            return None;
+        }
+        let (width, height) = self
+            .scroller
+            .root()
+            .map(|root| root.upcast::<gtk::Widget>())
+            .map_or((viewport, self.scroller.vadjustment().page_size() as i32), |window| (window.width(), window.height()));
+        let prefs = &self.deps.prefs;
+        let columns = grid_columns(
+            width,
+            height,
+            BrowsePrefs::columns(prefs.library_columns_portrait.get()),
+            BrowsePrefs::columns(prefs.library_columns_landscape.get()),
+        );
+        Some((columns, viewport))
+    }
+
+    fn apply_columns(self: &Rc<Self>) {
+        let Some((columns, viewport)) = self.columns() else { return };
+        match columns {
+            GridColumns::Fixed(n) => {
+                self.grid.set_min_columns(n as u32);
+                self.grid.set_max_columns(n as u32);
+            }
+            GridColumns::Adaptive { .. } => {
+                self.grid.set_min_columns(1);
+                self.grid.set_max_columns(64);
+            }
+        }
+        let px = cover_width(columns, viewport);
+        if px != self.cover_px.replace(px) {
+            self.apply_display();
+        }
+    }
+
+    /// Gives the grid and the list a factory for the current display mode and shows the right one.
+    fn apply_display(self: &Rc<Self>) {
+        let mode = self.display.get();
+        let load = Rc::clone(&self.deps.load_cover);
+        let on_long = Rc::clone(&self.deps.on_long_press);
+        let cover_px = self.cover_px.get();
+        // one ticket per recycled cell: a cover that arrives after its cell was rebound is dropped (edge R10)
+        let binds: Rc<RefCell<CoverBinds>> = Rc::default();
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup(move |_, object| {
+            let Some(item) = object.downcast_ref::<gtk::ListItem>() else { return };
+            let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            let (weak, on_long) = (item.downgrade(), Rc::clone(&on_long));
+            attach_long_press(&holder, move || {
+                let entry = weak.upgrade().and_then(|row| row.item()).and_downcast::<glib::BoxedAnyObject>();
+                if let Some(entry) = entry {
+                    let item = entry.borrow::<Option<ListItem>>().clone();
+                    if let Some(item) = item {
+                        on_long(item);
+                    }
+                }
+            });
+            item.set_child(Some(&holder));
+        });
+        factory.connect_bind({
+            let binds = Rc::clone(&binds);
+            move |_, object| {
+                let Some(row) = object.downcast_ref::<gtk::ListItem>() else { return };
+                let Some(boxed) = row.item().and_downcast::<glib::BoxedAnyObject>() else { return };
+                let Some(holder) = row.child().and_downcast::<gtk::Box>() else { return };
+                let key = glib::object::ObjectType::as_ptr(row) as usize;
+                let ticket = binds.borrow_mut().bind(key);
+                let guard: CoverGuard = {
+                    let binds = Rc::clone(&binds);
+                    Rc::new(move || binds.borrow().accepts(key, ticket))
+                };
+                let slot = boxed.borrow::<Option<ListItem>>();
+                let cell = if mode == LibraryDisplayMode::List {
+                    list_cell(slot.as_ref(), &load, &guard)
+                } else {
+                    grid_cell(slot.as_ref(), mode, &load, &guard, cover_px)
+                };
+                while let Some(old) = holder.first_child() {
+                    holder.remove(&old);
+                }
+                holder.append(&cell);
+            }
+        });
+        factory.connect_teardown(move |_, object| {
+            binds.borrow_mut().release(glib::object::ObjectType::as_ptr(object) as usize);
+        });
+        if mode == LibraryDisplayMode::List {
+            self.list.set_factory(Some(&factory));
+            self.items_stack.set_visible_child_name("list");
+        } else {
+            self.grid.set_factory(Some(&factory));
+            self.items_stack.set_visible_child_name("grid");
+        }
+    }
+
+    fn render(self: &Rc<Self>) {
+        let plan = self.listing.borrow().plan(self.ready.get(), self.deps.stub, self.deps.is_local, self.display.get());
+        self.clear(&self.toast_slot);
+        match plan {
+            ContentPlan::Spinner => self.stack.set_visible_child_name("spinner"),
+            ContentPlan::Stub => self.stack.set_visible_child_name("stub"),
+            ContentPlan::Empty => self.stack.set_visible_child_name("empty"),
+            ContentPlan::Error { message, actions } => {
+                self.clear(&self.error_slot);
+                let weak = Rc::downgrade(self);
+                let on_action = Rc::clone(&self.deps.on_action);
+                self.error_slot.append(&empty_state(&message, &actions, move |action| {
+                    match (action, weak.upgrade()) {
+                        (EmptyAction::Retry, Some(inner)) => inner.retry(),
+                        _ => on_action(action),
+                    }
+                }));
+                self.stack.set_visible_child_name("error");
+            }
+            ContentPlan::Items { toast, .. } => {
+                self.stack.set_visible_child_name("items");
+                if let Some(spec) = toast.filter(|_| !self.toast_dismissed.get()) {
+                    self.show_toast(&spec);
+                }
+            }
+        }
+    }
+
+    fn show_toast(self: &Rc<Self>, spec: &ToastSpec) {
+        let (retry, dismiss) = (Rc::downgrade(self), Rc::downgrade(self));
+        let bar = toast_bar(
+            spec,
+            move || {
+                if let Some(inner) = retry.upgrade() {
+                    inner.retry();
+                }
+            },
+            move || {
+                if let Some(inner) = dismiss.upgrade() {
+                    inner.toast_dismissed.set(true);
+                    inner.render();
+                }
+            },
+        );
+        self.toast_slot.append(&bar);
+        if let Some(ms) = toast_timeout_ms(spec) {
+            let weak = Rc::downgrade(self);
+            glib::timeout_add_local_once(std::time::Duration::from_millis(u64::from(ms)), move || {
+                if let Some(inner) = weak.upgrade() {
+                    inner.toast_dismissed.set(true);
+                    inner.render();
+                }
+            });
+        }
+    }
+
+    fn retry(self: &Rc<Self>) {
+        self.toast_dismissed.set(false);
+        self.listing.borrow_mut().clear_errors();
+        self.pump();
+    }
+
+    fn clear(&self, slot: &gtk::Box) {
+        while let Some(child) = slot.first_child() {
+            slot.remove(&child);
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use kuro_prefs::store::PrefStore;
+
+    /// Serves pages from a script: each call takes the next entry.
+    struct Script {
+        pages: Mutex<Vec<Result<ListedPage, String>>>,
+        calls: Mutex<Vec<(BrowseQuery, u32)>>,
+        filters: Mutex<Vec<FilterList>>,
+    }
+
+    impl PageLoader for Script {
+        fn load(&self, query: BrowseQuery, filters: FilterList, page: u32) -> super::super::listing::LoadFuture {
+            self.calls.lock().expect("lock").push((query, page));
+            self.filters.lock().expect("lock").push(filters);
+            let next = {
+                let mut pages = self.pages.lock().expect("lock");
+                if pages.is_empty() { Ok(ListedPage { items: vec![], has_next: false }) } else { pages.remove(0) }
+            };
+            Box::pin(async move { next })
+        }
+    }
+
+    fn items(titles: &[&str], has_next: bool) -> Result<ListedPage, String> {
+        Ok(ListedPage {
+            items: titles.iter().map(|t| ListItem { title: (*t).into(), url: format!("/{t}"), ..ListItem::default() }).collect(),
+            has_next,
+        })
+    }
+
+    struct Rig {
+        view: ListingView,
+        script: Arc<Script>,
+        ready: watch::Sender<bool>,
+        opened: Rc<RefCell<Vec<String>>>,
+        actions: Rc<RefCell<Vec<EmptyAction>>>,
+        /// The runtime stays entered while the rig lives, as `main` keeps it for the app. Leaked: it is a test.
+        _entered: tokio::runtime::EnterGuard<'static>,
+    }
+
+    fn rig(pages: Vec<Result<ListedPage, String>>, ready: bool, stub: bool, is_local: bool) -> Rig {
+        let rt: &'static tokio::runtime::Runtime =
+            Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_time().build().expect("runtime")));
+        let entered = rt.enter();
+        let script = Arc::new(Script { pages: Mutex::new(pages), calls: Mutex::default(), filters: Mutex::default() });
+        let (ready_tx, ready_rx) = watch::channel(ready);
+        let opened: Rc<RefCell<Vec<String>>> = Rc::default();
+        let actions: Rc<RefCell<Vec<EmptyAction>>> = Rc::default();
+        let (open_log, action_log) = (Rc::clone(&opened), Rc::clone(&actions));
+        let deps = ListingDeps {
+            loader: Arc::clone(&script) as Arc<dyn PageLoader>,
+            prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory())),
+            ready: ready_rx,
+            stub,
+            is_local,
+            source_id: 9,
+            source_name: "Gone Source".into(),
+            source_lang: "en".into(),
+            load_cover: Rc::new(|_, _| {}),
+            open_entry: Rc::new(move |item| open_log.borrow_mut().push(item.title.clone())),
+            on_long_press: Rc::new(|_| {}),
+            favorite_urls: None,
+            on_action: Rc::new(move |action| action_log.borrow_mut().push(action)),
+        };
+        let view = ListingView::new(deps, BrowseQuery::Popular);
+        Rig { view, script, ready: ready_tx, opened, actions, _entered: entered }
+    }
+
+    fn pump(mut done: impl FnMut() -> bool) -> bool {
+        let context = glib::MainContext::default();
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(3) {
+            while context.iteration(false) {}
+            if done() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        done()
+    }
+
+    fn shown(rig: &Rig) -> String {
+        rig.view.inner.stack.visible_child_name().map(|n| n.to_string()).unwrap_or_default()
+    }
+
+    fn the_spinner_shows_until_the_registry_is_ready_then_the_items_appear_without_reopening() {
+        let rig = rig(vec![items(&["a", "b", "c"], false)], false, false, false);
+        assert_eq!(shown(&rig), "spinner");
+        assert!(rig.script.calls.lock().expect("lock").is_empty(), "nothing loads before the registry is ready");
+        rig.ready.send_replace(true);
+        assert!(pump(|| shown(&rig) == "items"), "initialisation finishing updates the open page");
+        assert_eq!(rig.view.inner.store.n_items(), 3);
+        assert_eq!(rig.script.calls.lock().expect("lock")[0], (BrowseQuery::Popular, 1));
+    }
+
+    fn a_search_is_a_new_listing_and_the_old_pages_are_dropped() {
+        let rig = rig(vec![items(&["a"], false), items(&["found"], false)], true, false, false);
+        assert!(pump(|| rig.view.inner.store.n_items() == 1));
+        rig.view.restart(BrowseQuery::Search(String::new()));
+        assert!(pump(|| rig.script.calls.lock().expect("lock").len() == 2));
+        assert_eq!(rig.script.calls.lock().expect("lock")[1], (BrowseQuery::Search(String::new()), 1), "a blank search is still sent");
+        assert!(pump(|| rig.view.inner.store.n_items() == 1 && rig.view.query() == BrowseQuery::Search(String::new())));
+    }
+
+    fn an_error_without_items_shows_three_actions_and_retry_loads_again() {
+        let rig = rig(vec![Err("offline".into()), items(&["a"], false)], true, false, false);
+        assert!(pump(|| shown(&rig) == "error"));
+        let mut found = Vec::new();
+        fn buttons(widget: &gtk::Widget, out: &mut Vec<gtk::Button>) {
+            if let Some(b) = widget.downcast_ref::<gtk::Button>() {
+                out.push(b.clone());
+            }
+            let mut child = widget.first_child();
+            while let Some(w) = child {
+                buttons(&w, out);
+                child = w.next_sibling();
+            }
+        }
+        buttons(rig.view.inner.error_slot.upcast_ref(), &mut found);
+        assert_eq!(found.len(), 3, "retry, open in web view and help");
+        found[1].emit_clicked();
+        assert_eq!(*rig.actions.borrow(), [EmptyAction::OpenInWebView], "only retry is handled inside the view");
+        found[0].emit_clicked();
+        assert!(pump(|| shown(&rig) == "items"), "retry asks the failed page again");
+    }
+
+    fn a_local_source_error_offers_only_its_help_guide() {
+        let rig = rig(vec![Err("no folder".into())], true, false, true);
+        assert!(pump(|| shown(&rig) == "error"));
+        let mut count = 0;
+        let mut child = rig.view.inner.error_slot.first_child();
+        while let Some(w) = child {
+            let mut inner = w.first_child();
+            while let Some(i) = inner {
+                if i.is::<gtk::Box>() {
+                    let mut b = i.first_child();
+                    while let Some(x) = b {
+                        count += usize::from(x.is::<gtk::Button>());
+                        b = x.next_sibling();
+                    }
+                }
+                inner = i.next_sibling();
+            }
+            child = w.next_sibling();
+        }
+        assert_eq!(count, 1);
+    }
+
+    fn a_later_page_failure_keeps_the_items_and_shows_a_toast_that_stays_up() {
+        let rig = rig(vec![items(&["a"], true), Err("page 2 failed".into())], true, false, false);
+        assert!(pump(|| rig.view.inner.toast_slot.first_child().is_some()));
+        assert_eq!(shown(&rig), "items");
+        assert_eq!(rig.view.inner.store.n_items(), 1);
+        let _ = pump(|| false);
+        assert!(rig.view.inner.toast_slot.first_child().is_some(), "no auto-hide for an error toast");
+    }
+
+    fn texts(root: &gtk::Widget, out: &mut Vec<String>) {
+        if let Some(label) = root.downcast_ref::<gtk::Label>() {
+            out.push(label.label().to_string());
+        }
+        let mut child = root.first_child();
+        while let Some(w) = child {
+            texts(&w, out);
+            child = w.next_sibling();
+        }
+    }
+
+    fn an_empty_first_page_is_the_error_state_and_an_empty_later_page_is_a_toast() {
+        let rig = rig(vec![items(&[], false)], true, false, false);
+        assert!(pump(|| shown(&rig) == "error"), "an empty page 1 is an error, not the plain empty screen");
+        let mut found = Vec::new();
+        texts(rig.view.inner.error_slot.upcast_ref(), &mut found);
+        assert!(found.contains(&tr(MsgKey::no_results_found)), "{found:?}");
+
+        let rig = rig_second(vec![items(&["a"], true), items(&[], true)]);
+        assert!(pump(|| rig.view.inner.toast_slot.first_child().is_some()), "an empty later page raises the retry toast");
+        assert_eq!(shown(&rig), "items");
+        assert_eq!(rig.view.inner.store.n_items(), 1);
+        let calls = rig.script.calls.lock().expect("lock").len();
+        let _ = pump(|| false);
+        assert_eq!(rig.script.calls.lock().expect("lock").len(), calls, "the pager does not keep asking");
+    }
+
+    fn rig_second(pages: Vec<Result<ListedPage, String>>) -> Rig {
+        rig(pages, true, false, false)
+    }
+
+    fn a_search_hands_its_own_filters_to_the_loader() {
+        use kuro_source::filter::Filter;
+        let rig = rig(vec![items(&["a"], false), items(&["b"], false)], true, false, false);
+        assert!(pump(|| rig.view.inner.store.n_items() == 1));
+        let filters = FilterList(vec![Filter::check_box("Flag")]);
+        rig.view.restart_with(BrowseQuery::Search("x".into()), filters.clone());
+        assert!(pump(|| rig.script.calls.lock().expect("lock").len() == 2));
+        assert_eq!(rig.script.filters.lock().expect("lock")[1], filters);
+        assert_eq!(rig.view.filters(), filters);
+        rig.view.restart(BrowseQuery::Latest);
+        assert_eq!(rig.view.filters(), filters, "a Popular or Latest switch through restart keeps the filter list");
+    }
+
+    fn covers_observe_the_favourite_flag_of_their_entry() {
+        let rig = rig(vec![items(&["a", "b"], false)], true, false, false);
+        assert!(pump(|| rig.view.inner.store.n_items() == 2));
+        let flag = |i: u32| rig.view.inner.item_at(i).map(|item| item.favorite);
+        assert_eq!((flag(0), flag(1)), (Some(false), Some(false)));
+        rig.view.inner.apply_favorite_urls(&["/b".to_owned()].into());
+        assert_eq!((flag(0), flag(1)), (Some(false), Some(true)), "the library's url set decides");
+        rig.view.inner.apply_favorite_urls(&BTreeSet::new());
+        assert_eq!(flag(1), Some(false), "removing from the library clears the flag");
+        let id = {
+            let mut listing = rig.view.inner.listing.borrow_mut();
+            assert!(listing.set_favorite(0, false));
+            7
+        };
+        rig.view.inner.set_favorite_where(|item| item.title == "a", true);
+        assert_eq!(flag(0), Some(true));
+        rig.view.set_favorite(id, false);
+        assert_eq!(flag(0), Some(true), "no entry has id 7, nothing changes");
+    }
+
+    fn a_stub_shows_its_label_and_never_loads() {
+        let rig = rig(vec![items(&["a"], false)], true, true, false);
+        assert_eq!(shown(&rig), "stub");
+        let mut found = Vec::new();
+        texts(rig.view.inner.stack.upcast_ref(), &mut found);
+        let expected = trf(MsgKey::source_not_installed, &[("arg1", Arg::Str("Gone Source (EN)"))]);
+        assert!(found.contains(&expected), "the stub names the source from name and language: {found:?}");
+        let _ = pump(|| false);
+        assert!(rig.script.calls.lock().expect("lock").is_empty());
+    }
+
+    fn the_display_mode_picks_the_grid_or_the_list_and_activation_opens_the_entry() {
+        let rig = rig(vec![items(&["a", "b"], false)], true, false, false);
+        assert!(pump(|| rig.view.inner.store.n_items() == 2));
+        assert_eq!(rig.view.inner.items_stack.visible_child_name().as_deref(), Some("grid"), "compact grid is the default");
+        rig.view.set_display_mode(LibraryDisplayMode::List);
+        assert_eq!(rig.view.inner.items_stack.visible_child_name().as_deref(), Some("list"));
+        rig.view.set_display_mode(LibraryDisplayMode::CoverOnlyGrid);
+        assert_eq!(rig.view.inner.items_stack.visible_child_name().as_deref(), Some("grid"));
+        rig.view.inner.grid.emit_by_name::<()>("activate", &[&1_u32]);
+        assert_eq!(*rig.opened.borrow(), ["b"]);
+    }
+
+    fn dropping_the_view_aborts_its_loader() {
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_time().build().expect("runtime");
+        let _guard = rt.enter();
+        struct Hang(Arc<std::sync::atomic::AtomicUsize>);
+        struct Live(Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for Live {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        impl PageLoader for Hang {
+            fn load(&self, _query: BrowseQuery, _filters: FilterList, _page: u32) -> super::super::listing::LoadFuture {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let guard = Live(Arc::clone(&self.0));
+                Box::pin(async move {
+                    let _guard = guard;
+                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                    Err(String::new())
+                })
+            }
+        }
+        let live = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (_tx, ready) = watch::channel(true);
+        let view = ListingView::new(
+            ListingDeps {
+                loader: Arc::new(Hang(Arc::clone(&live))),
+                prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory())),
+                ready,
+                stub: false,
+                is_local: false,
+                source_id: 1,
+                source_name: String::new(),
+                source_lang: String::new(),
+                load_cover: Rc::new(|_, _| {}),
+                open_entry: Rc::new(|_| {}),
+                on_long_press: Rc::new(|_| {}),
+                favorite_urls: None,
+                on_action: Rc::new(|_| {}),
+            },
+            BrowseQuery::Popular,
+        );
+        assert_eq!(live.load(std::sync::atomic::Ordering::SeqCst), 1);
+        drop(view);
+        assert!(pump(|| live.load(std::sync::atomic::Ordering::SeqCst) == 0), "popping the page aborts its loader");
+    }
+
+    pub(crate) fn smoke() {
+        the_spinner_shows_until_the_registry_is_ready_then_the_items_appear_without_reopening();
+        a_search_is_a_new_listing_and_the_old_pages_are_dropped();
+        an_error_without_items_shows_three_actions_and_retry_loads_again();
+        a_local_source_error_offers_only_its_help_guide();
+        a_later_page_failure_keeps_the_items_and_shows_a_toast_that_stays_up();
+        an_empty_first_page_is_the_error_state_and_an_empty_later_page_is_a_toast();
+        a_search_hands_its_own_filters_to_the_loader();
+        covers_observe_the_favourite_flag_of_their_entry();
+        a_stub_shows_its_label_and_never_loads();
+        the_display_mode_picks_the_grid_or_the_list_and_activation_opens_the_entry();
+        dropping_the_view_aborts_its_loader();
+    }
+}
+

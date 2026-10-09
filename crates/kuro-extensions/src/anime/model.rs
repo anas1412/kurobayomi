@@ -120,6 +120,7 @@ pub struct Untrusted {
     pub version_name: String,
     pub version_code: i64,
     pub abi: AbiVersion,
+    pub nsfw: bool,
     pub signer: SignerDigest,
 }
 
@@ -186,6 +187,8 @@ pub struct Buckets {
     pub installed: Vec<Installed>,
     pub available: Vec<AvailableRow>,
     pub untrusted: Vec<Untrusted>,
+    /// Listed packages hidden because they cannot run on Linux (`show_not_runnable` is off).
+    pub not_runnable_hidden: usize,
 }
 
 /// One Browse row for a listed package. Split rows carry one source each.

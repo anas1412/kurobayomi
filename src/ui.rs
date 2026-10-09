@@ -46,6 +46,35 @@ pub fn pop() {
     glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || stack.remove(&cur));
 }
 
+/// The widget names of the stacked pages from the root up, and the index of the page on show. A page that was just
+/// popped stays in the list for a moment, so the index, not the length, says how deep the user is.
+pub fn page_stack() -> (Vec<String>, usize) {
+    let stack = nav().0;
+    let mut names = Vec::new();
+    let mut shown = 0;
+    let visible = stack.visible_child();
+    let mut child = stack.first_child();
+    while let Some(c) = child {
+        if visible.as_ref() == Some(&c) {
+            shown = names.len();
+        }
+        names.push(c.widget_name().to_string());
+        child = c.next_sibling();
+    }
+    (names, shown)
+}
+
+/// Pops pages until `stop` accepts the page on top, or only the root is left (Voyager `popUntil`). `stop` is asked
+/// about the visible page first, so a page that already satisfies it is not popped.
+pub fn pop_until(stop: impl Fn(&gtk::Widget) -> bool) {
+    while let Some(cur) = nav().0.visible_child() {
+        if stop(&cur) || cur.prev_sibling().is_none() {
+            break;
+        }
+        pop();
+    }
+}
+
 /// Drop every pushed page and show the root (sidebar destination clicked).
 pub fn pop_to_root() {
     let stack = nav().0;
@@ -64,6 +93,18 @@ pub fn decoration(sidebar: bool) -> String {
     if sidebar { format!("{left}:") } else { format!(":{right}") }
 }
 
+/// A clicked header button keeps keyboard focus, and some GTK themes paint a focused header button like a pressed one, so it looks stuck.
+pub fn no_sticky_focus(header: &impl IsA<gtk::Widget>) {
+    let mut child = header.as_ref().first_child();
+    while let Some(w) = child {
+        if w.is::<Button>() || w.is::<gtk::MenuButton>() {
+            w.set_focus_on_click(false);
+        }
+        no_sticky_focus(&w);
+        child = w.next_sibling();
+    }
+}
+
 /// A navigation page: its own header bar (title, optional back button, end widgets) above `content`.
 pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>, back: bool) -> GBox {
     let header = gtk::HeaderBar::new();
@@ -78,6 +119,7 @@ pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>,
     for w in end.iter().rev() {
         header.pack_end(w);
     }
+    no_sticky_focus(&header);
     let b = GBox::new(O::Vertical, 0);
     b.append(&header);
     content.set_vexpand(true);
@@ -224,6 +266,10 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
         Item::Switch { title, subtitle, default } => {
             let s = gtk::Switch::new();
             s.set_active(default.as_bool().unwrap_or(false));
+            // the More screen's incognito switch is the real preference (T-01a-020)
+            if title == "Incognito mode" && subtitle.as_deref() == Some("Pauses your history") {
+                crate::incognito::bind_switch(&s);
+            }
             let r = row(title, subtitle.as_deref(), Some(s.clone().upcast()));
             r.set_activatable(true);
             r.connect_activate(move |_| s.set_active(!s.is_active()));
@@ -265,25 +311,10 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
         }
         Item::Tristate { title } => {
             // off → include (checked) → exclude (dash), like Aniyomi's TriStateItem
-            let c = gtk::CheckButton::new();
-            let r = row(title, None, Some(c.clone().upcast()));
-            let state = std::rc::Rc::new(std::cell::Cell::new(0u8));
-            c.connect_toggled(move |c| {
-                if c.is_inconsistent() && c.is_active() {
-                    return; // our own set_active below
-                }
-                let next = (state.get() + 1) % 3;
-                state.set(next);
-                c.set_inconsistent(next == 2);
-                if next == 2 {
-                    c.set_active(true);
-                }
-            });
+            let t = crate::tri_check::tri_check(kuro_prefs::checkbox::TriState::None(()), |_| {});
+            let r = row(title, None, Some(t.widget().clone().upcast()));
             r.set_activatable(true);
-            let c2 = c.clone();
-            r.connect_activate(move |_| {
-                c2.activate();
-            });
+            r.connect_activate(move |_| t.activate());
             r
         }
         Item::Sort { title, options } => {
@@ -331,9 +362,17 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
             r.set_activatable(true);
             let t = title.clone();
             r.connect_activate(move |r| {
+                if t == "Clear WebView data" {
+                    crate::settings::clear_webview_data();
+                    return;
+                }
                 // an action whose title names a dialog/sheet/screen of the current spec opens it
                 let owner = owner_screen(r.upcast_ref());
                 if let Some(id) = owner {
+                    // the onboarding's Restore backup finishes onboarding and opens Data and storage
+                    if crate::pref_model::onboarding::on_action(&id, &t) {
+                        return;
+                    }
                     resolve(&id, &t);
                 }
             });

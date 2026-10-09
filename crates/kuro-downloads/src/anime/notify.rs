@@ -1,0 +1,340 @@
+//! Anime download notifications (T-24a-026, T-24a-027, T-24a-028, T-24a-029; behaviour 10.2 to 10.6).
+//!
+//! One progress slot, one error slot. Progress is refreshed at most once per second, and at once on a state change.
+//! Warnings and errors each build a fresh [`Notice`], so no state leaks from one into the next (E-U03). Errors that
+//! arrive within five seconds are summarised into one count (E-U02). The title rules are the manga ones in
+//! [`crate::notify::progress_title`], which strip the episode prefix before the title is cut (E-U01).
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use crate::events::DownloadEvent;
+use crate::notify::{Action, NotificationSink, Notice, Priority, DOWNLOADER_TITLE, UNKNOWN_ERROR_TEXT, progress_title};
+
+/// Progress slot (`ID_DOWNLOAD_EPISODE_PROGRESS`, -203). Kept apart from the manga progress id.
+pub const PROGRESS_ID: &str = "dl-anime-progress";
+/// Error slot (`ID_DOWNLOAD_EPISODE_ERROR`, -204). Warnings share it, as on Android.
+pub const ERROR_ID: &str = "dl-anime-error";
+/// Shortest gap between two progress updates (proposal, behaviour 10.2).
+pub const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
+/// Warning timeout (`AnimeDownloader.kt:941`).
+pub const WARNING_TIMEOUT_SECS: u32 = 30;
+/// Errors inside this window are summarised (proposal, E-U02).
+pub const ERROR_WINDOW: Duration = Duration::from_secs(5);
+pub const PAUSED_TEXT: &str = "Episode download paused";
+pub const DOWNLOADING_TEXT: &str = "Downloading…";
+
+/// The text of the progress line: `Downloading…` at 0, else `Downloading (N%)`.
+pub fn progress_text(percent: i32) -> String {
+    if percent <= 0 { DOWNLOADING_TEXT.to_owned() } else { format!("Downloading ({percent}%)") }
+}
+
+/// The progress notice. With `hide_content` the title is the progress text and the body is empty (T-24a-028).
+pub fn progress_notice(anime_title: &str, episode_name: &str, percent: i32, hide_content: bool) -> Notice {
+    let text = progress_text(percent);
+    let (title, body) = if hide_content {
+        (text, None)
+    } else {
+        (progress_title(anime_title, episode_name), Some(text))
+    };
+    Notice {
+        id: PROGRESS_ID,
+        priority: Priority::Low,
+        title,
+        body,
+        ongoing: true,
+        actions: vec![Action::Pause, Action::ShowAnime],
+        expire_secs: None,
+    }
+}
+
+/// The paused notice: "Paused" with Resume and Cancel all, not ongoing.
+pub fn paused_notice() -> Notice {
+    Notice {
+        id: PROGRESS_ID,
+        priority: Priority::Low,
+        title: crate::notify::PAUSED_TITLE.into(),
+        body: Some(PAUSED_TEXT.into()),
+        ongoing: false,
+        actions: vec![Action::Resume, Action::CancelAll],
+        expire_secs: None,
+    }
+}
+
+/// The warning notice: title "Downloader", the reason as the body, auto-expiring after 30 s.
+pub fn warning_notice(text: &str) -> Notice {
+    Notice {
+        id: ERROR_ID,
+        priority: Priority::Low,
+        title: DOWNLOADER_TITLE.into(),
+        body: Some(text.to_owned()),
+        ongoing: false,
+        actions: Vec::new(),
+        expire_secs: Some(WARNING_TIMEOUT_SECS),
+    }
+}
+
+/// The error notice for one episode: `"<anime>: <episode>"`, or the plain anime title, or "Downloader" (behaviour 10.6).
+pub fn error_notice(anime_title: Option<&str>, episode: Option<&str>, message: &str) -> Notice {
+    let title = match (anime_title, episode) {
+        (Some(anime), Some(episode)) => format!("{anime}: {episode}"),
+        (Some(anime), None) => anime.to_owned(),
+        (None, _) => DOWNLOADER_TITLE.into(),
+    };
+    let body = if message.is_empty() { UNKNOWN_ERROR_TEXT.to_owned() } else { message.to_owned() };
+    Notice {
+        id: ERROR_ID,
+        priority: Priority::Low,
+        title,
+        body: Some(body),
+        ongoing: false,
+        actions: if anime_title.is_some() { vec![Action::ShowAnime] } else { Vec::new() },
+        expire_secs: None,
+    }
+}
+
+/// The summary that replaces the single error when a second one arrives inside [`ERROR_WINDOW`].
+pub fn error_summary_notice(count: usize) -> Notice {
+    Notice {
+        id: ERROR_ID,
+        priority: Priority::Low,
+        title: DOWNLOADER_TITLE.into(),
+        body: Some(format!("{count} episode downloads failed")),
+        ongoing: false,
+        actions: Vec::new(),
+        expire_secs: None,
+    }
+}
+
+/// Counts errors in a window that starts at the first one. The first error in a window is shown on its own; each
+/// later one in the same window turns the notice into a summary.
+#[derive(Debug, Default)]
+pub struct ErrorDigest {
+    window_start: Option<Instant>,
+    count: usize,
+}
+
+impl ErrorDigest {
+    /// Records an error at `now`. Returns `true` when this error opens a new window (show the single notice), `false`
+    /// when it is part of one (show the summary of [`ErrorDigest::count`]).
+    pub fn record(&mut self, now: Instant) -> bool {
+        match self.window_start {
+            Some(start) if now.saturating_duration_since(start) <= ERROR_WINDOW => {
+                self.count += 1;
+                false
+            }
+            _ => {
+                self.window_start = Some(now);
+                self.count = 1;
+                true
+            }
+        }
+    }
+
+    pub fn count(&self) -> usize {
+        self.count
+    }
+}
+
+/// Feeds the anime notifications to a sink. Created once per queue; the engine calls the progress method.
+pub struct AnimeNotifier {
+    sink: Arc<dyn NotificationSink>,
+    hide_content: Arc<AtomicBool>,
+    last_progress: Option<Instant>,
+    errors: ErrorDigest,
+}
+
+impl AnimeNotifier {
+    pub fn new(sink: Arc<dyn NotificationSink>, hide_content: Arc<AtomicBool>) -> Self {
+        Self { sink, hide_content, last_progress: None, errors: ErrorDigest::default() }
+    }
+
+    fn hide(&self) -> bool {
+        self.hide_content.load(Ordering::Relaxed)
+    }
+
+    /// Shows the progress line. Without `state_changed` it is skipped while the last update is under one second old.
+    /// Returns `true` when a notice was sent.
+    pub fn progress(
+        &mut self,
+        now: Instant,
+        anime_title: &str,
+        episode_name: &str,
+        percent: i32,
+        state_changed: bool,
+    ) -> bool {
+        let due = self.last_progress.is_none_or(|t| now.saturating_duration_since(t) >= PROGRESS_INTERVAL);
+        if !state_changed && !due {
+            return false;
+        }
+        self.last_progress = Some(now);
+        let notice = progress_notice(anime_title, episode_name, percent, self.hide());
+        self.sink.show(&notice);
+        true
+    }
+
+    /// The run was paused by the user: replace the progress line with the paused notice.
+    pub fn paused(&mut self) {
+        self.last_progress = None;
+        self.sink.show(&paused_notice());
+    }
+
+    /// The run finished. No completion message is shown: the progress line goes away.
+    pub fn complete(&mut self) {
+        self.last_progress = None;
+        self.sink.withdraw(PROGRESS_ID);
+    }
+
+    /// A non-fatal reason to stop, such as "No Wi-Fi connection available".
+    pub fn warning(&mut self, text: &str) {
+        self.sink.show(&warning_notice(text));
+    }
+
+    /// One episode failed. The first in a window is shown alone, later ones in the window are summarised.
+    pub fn error(&mut self, now: Instant, anime_title: Option<&str>, episode: Option<&str>, message: &str) {
+        if self.errors.record(now) {
+            self.sink.show(&error_notice(anime_title, episode, message));
+        } else {
+            self.sink.show(&error_summary_notice(self.errors.count()));
+        }
+    }
+
+    /// Maps a queue event to its notification. Events the anime queue does not show are ignored.
+    pub fn dispatch(&mut self, now: Instant, event: &DownloadEvent) {
+        match event {
+            DownloadEvent::Error { manga_title, chapter_name, message, .. } => {
+                self.error(now, manga_title.as_deref(), chapter_name.as_deref(), message);
+            }
+            DownloadEvent::Warning { text, .. } => self.warning(text),
+            DownloadEvent::Paused => self.paused(),
+            DownloadEvent::Complete | DownloadEvent::Dismiss => self.complete(),
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<Notice>>, Mutex<Vec<&'static str>>);
+
+    impl NotificationSink for Recorder {
+        fn show(&self, notice: &Notice) {
+            self.0.lock().unwrap().push(notice.clone());
+        }
+        fn withdraw(&self, id: &'static str) {
+            self.1.lock().unwrap().push(id);
+        }
+    }
+
+    fn notifier(hide: bool) -> (AnimeNotifier, Arc<Recorder>) {
+        let rec = Arc::new(Recorder::default());
+        let sink: Arc<dyn NotificationSink> = rec.clone();
+        (AnimeNotifier::new(sink, Arc::new(AtomicBool::new(hide))), rec)
+    }
+
+    #[test]
+    fn progress_text_is_indeterminate_at_zero() {
+        assert_eq!(progress_text(0), "Downloading…");
+        assert_eq!(progress_text(42), "Downloading (42%)");
+    }
+
+    #[test]
+    fn progress_title_strips_the_untruncated_episode_prefix() {
+        // E-U01: the prefix is removed with the full title, then the title is cut to 15 and the line to 30.
+        let n = progress_notice("A very long anime title here", "A very long anime title here - Episode 3", 10, false);
+        assert_eq!(n.title, "A very long an… - Episode 3");
+        assert_eq!(n.body.as_deref(), Some("Downloading (10%)"));
+        assert!(n.ongoing);
+        assert_eq!(n.actions, vec![Action::Pause, Action::ShowAnime]);
+    }
+
+    #[test]
+    fn hidden_content_puts_the_progress_text_in_the_title() {
+        let n = progress_notice("Show", "Episode 1", 0, true);
+        assert_eq!(n.title, "Downloading…");
+        assert_eq!(n.body, None);
+    }
+
+    #[test]
+    fn progress_updates_are_rate_limited_to_one_per_second() {
+        let (mut n, rec) = notifier(false);
+        let t0 = Instant::now();
+        assert!(n.progress(t0, "Show", "Episode 1", 1, false));
+        assert!(!n.progress(t0 + Duration::from_millis(400), "Show", "Episode 1", 2, false));
+        assert!(n.progress(t0 + Duration::from_millis(1100), "Show", "Episode 1", 3, false));
+        assert!(n.progress(t0 + Duration::from_millis(1200), "Show", "Episode 1", 4, true), "a state change is never held back");
+        assert_eq!(rec.0.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn paused_replaces_progress_and_complete_withdraws_it() {
+        let (mut n, rec) = notifier(false);
+        n.paused();
+        n.complete();
+        let shown = rec.0.lock().unwrap();
+        assert_eq!(shown[0].id, PROGRESS_ID);
+        assert_eq!(shown[0].title, "Paused");
+        assert_eq!(shown[0].actions, vec![Action::Resume, Action::CancelAll]);
+        assert_eq!(*rec.1.lock().unwrap(), vec![PROGRESS_ID]);
+    }
+
+    #[test]
+    fn warning_uses_the_error_slot_and_expires_after_thirty_seconds() {
+        let w = warning_notice("No Wi-Fi connection available");
+        assert_eq!(w.id, ERROR_ID);
+        assert_eq!(w.title, "Downloader");
+        assert_eq!(w.expire_secs, Some(30));
+        assert!(!w.ongoing);
+    }
+
+    #[test]
+    fn a_single_error_names_the_episode_and_a_second_one_summarises() {
+        let (mut n, rec) = notifier(false);
+        let t0 = Instant::now();
+        n.error(t0, Some("Show"), Some("Episode 2"), "HTTP error 500");
+        n.error(t0 + Duration::from_secs(2), Some("Show"), Some("Episode 3"), "timeout");
+        let shown = rec.0.lock().unwrap();
+        assert_eq!(shown[0].title, "Show: Episode 2");
+        assert_eq!(shown[0].body.as_deref(), Some("HTTP error 500"));
+        assert_eq!(shown[1].body.as_deref(), Some("2 episode downloads failed"));
+        assert!(shown.iter().all(|x| x.id == ERROR_ID));
+    }
+
+    #[test]
+    fn an_error_after_the_window_starts_a_new_single_notice() {
+        let mut digest = ErrorDigest::default();
+        let t0 = Instant::now();
+        assert!(digest.record(t0));
+        assert!(!digest.record(t0 + Duration::from_secs(1)));
+        assert_eq!(digest.count(), 2);
+        assert!(digest.record(t0 + Duration::from_secs(9)));
+        assert_eq!(digest.count(), 1);
+    }
+
+    #[test]
+    fn errors_without_a_title_or_message_fall_back_to_the_plain_text() {
+        let bare = error_notice(None, None, "");
+        assert_eq!(bare.title, "Downloader");
+        assert_eq!(bare.body.as_deref(), Some(UNKNOWN_ERROR_TEXT));
+        assert!(bare.actions.is_empty());
+        assert!(!bare.title.contains("null"));
+    }
+
+    #[test]
+    fn dispatch_maps_queue_events_and_ignores_the_rest() {
+        let (mut n, rec) = notifier(false);
+        let t0 = Instant::now();
+        n.dispatch(t0, &DownloadEvent::Started);
+        n.dispatch(t0, &DownloadEvent::Warning { text: "No network connection available".into(), timeout_secs: Some(30), help_url: None });
+        n.dispatch(t0, &DownloadEvent::Complete);
+        let shown = rec.0.lock().unwrap();
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].body.as_deref(), Some("No network connection available"));
+        assert_eq!(*rec.1.lock().unwrap(), vec![PROGRESS_ID]);
+    }
+}

@@ -1,0 +1,178 @@
+//! The reader's sheet and dialog framework (T-043a-079). A bottom sheet is a revealer over a scrim inside the
+//! reader's overlay. Escape and a click outside the sheet dismiss it. The modal window is for the settings dialog.
+//! The confirm prompt uses `gtk::AlertDialog`. No libadwaita.
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
+use gtk::glib;
+use gtk::prelude::*;
+
+use super::strings;
+
+/// A bottom sheet over `base`. Only one content is shown at a time; `show` replaces it.
+pub struct Sheet {
+    overlay: gtk::Overlay,
+    scrim: gtk::Box,
+    revealer: gtk::Revealer,
+    container: gtk::Box,
+    open: Cell<bool>,
+    on_dismissed: RefCell<Option<Rc<dyn Fn()>>>,
+}
+
+impl Sheet {
+    pub fn new(base: &impl IsA<gtk::Widget>) -> Rc<Self> {
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(base.as_ref()));
+        let scrim = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        scrim.add_css_class("reader-scrim");
+        scrim.set_hexpand(true);
+        scrim.set_vexpand(true);
+        scrim.set_visible(false);
+        let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        container.set_margin_top(16);
+        container.set_margin_bottom(16);
+        container.set_margin_start(16);
+        container.set_margin_end(16);
+        container.add_css_class("background");
+        let revealer = gtk::Revealer::new();
+        revealer.set_transition_type(gtk::RevealerTransitionType::SlideUp);
+        revealer.set_transition_duration(200);
+        revealer.set_valign(gtk::Align::End);
+        revealer.set_halign(gtk::Align::Fill);
+        revealer.set_child(Some(&container));
+        overlay.add_overlay(&scrim);
+        overlay.add_overlay(&revealer);
+
+        let sheet = Rc::new(Self {
+            overlay: overlay.clone(),
+            scrim: scrim.clone(),
+            revealer,
+            container,
+            open: Cell::new(false),
+            on_dismissed: RefCell::new(None),
+        });
+        let click = gtk::GestureClick::new();
+        let weak = Rc::downgrade(&sheet);
+        click.connect_pressed(move |_, _, _, _| {
+            if let Some(sheet) = weak.upgrade() {
+                sheet.dismiss();
+            }
+        });
+        scrim.add_controller(click);
+        let keys = gtk::EventControllerKey::new();
+        let weak = Rc::downgrade(&sheet);
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if key != gtk::gdk::Key::Escape {
+                return glib::Propagation::Proceed;
+            }
+            match weak.upgrade() {
+                Some(sheet) if sheet.is_open() => {
+                    sheet.dismiss();
+                    glib::Propagation::Stop
+                }
+                _ => glib::Propagation::Proceed,
+            }
+        });
+        overlay.add_controller(keys);
+        sheet
+    }
+
+    /// The widget to put in the reader in place of the base.
+    pub fn root(&self) -> &gtk::Overlay {
+        &self.overlay
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open.get()
+    }
+
+    /// Runs when the sheet is dismissed by Escape, a click outside, or [`Sheet::dismiss`].
+    pub fn connect_dismissed(&self, f: impl Fn() + 'static) {
+        *self.on_dismissed.borrow_mut() = Some(Rc::new(f));
+    }
+
+    /// Shows `content` in the sheet, replacing the previous content.
+    pub fn show(&self, content: &impl IsA<gtk::Widget>) {
+        while let Some(child) = self.container.first_child() {
+            self.container.remove(&child);
+        }
+        self.container.append(content.as_ref());
+        self.scrim.set_visible(true);
+        self.revealer.set_reveal_child(true);
+        self.open.set(true);
+        // the focus goes into the sheet, so Enter and the arrows reach it and Escape is not left to the bottom bar
+        let container = self.container.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(first) = first_focusable(container.upcast_ref()) {
+                first.grab_focus();
+            }
+        });
+    }
+
+    /// Hides the sheet and runs the dismissed callback once. A sheet that is not open does nothing.
+    pub fn dismiss(&self) {
+        if !self.open.replace(false) {
+            return;
+        }
+        self.revealer.set_reveal_child(false);
+        self.scrim.set_visible(false);
+        let callback = self.on_dismissed.borrow().clone();
+        if let Some(callback) = callback {
+            callback();
+        }
+    }
+}
+
+/// The first widget under `root`, in tree order, that can take the focus.
+fn first_focusable(root: &gtk::Widget) -> Option<gtk::Widget> {
+    let mut child = root.first_child();
+    while let Some(widget) = child {
+        if widget.is_visible() && widget.is_sensitive() && widget.is_focusable() && widget.can_focus() {
+            return Some(widget);
+        }
+        if let Some(found) = first_focusable(&widget) {
+            return Some(found);
+        }
+        child = widget.next_sibling();
+    }
+    None
+}
+
+/// A modal window over `parent`, capped at 75 percent of the parent's height (`ReaderSettingsDialog.kt:38`).
+/// Escape closes it.
+pub fn modal_window(parent: &impl IsA<gtk::Window>, title: &str, child: &impl IsA<gtk::Widget>) -> gtk::Window {
+    let window = gtk::Window::builder().transient_for(parent).modal(true).title(title).child(child).build();
+    let max_height = parent.as_ref().height().max(1) * 3 / 4;
+    window.set_default_height(max_height);
+    let keys = gtk::EventControllerKey::new();
+    let weak = window.downgrade();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk::gdk::Key::Escape {
+            if let Some(window) = weak.upgrade() {
+                window.close();
+            }
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+    window.add_controller(keys);
+    window
+}
+
+/// Asks a yes or no question with `gtk::AlertDialog`. `on_ok` runs only for OK. Cancel and outside dismissal do
+/// nothing.
+pub fn confirm(parent: &impl IsA<gtk::Window>, message: &str, on_ok: impl FnOnce() + 'static) {
+    let dialog = gtk::AlertDialog::builder()
+        .message(message)
+        .buttons([strings::ACTION_CANCEL, strings::ACTION_OK])
+        .cancel_button(0)
+        .default_button(1)
+        .modal(true)
+        .build();
+    dialog.choose(Some(parent.as_ref()), None::<&gtk::gio::Cancellable>, move |result| {
+        if result == Ok(1) {
+            on_ok();
+        }
+    });
+}

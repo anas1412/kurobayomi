@@ -5,6 +5,7 @@ use futures::stream::{self, StreamExt};
 use tokio_util::sync::CancellationToken;
 
 use super::{FetchedStore, StoreError, fetch_store};
+use crate::anime::logs;
 use crate::anime::model::{Available, StoreRow};
 
 pub const MAX_CONCURRENT_STORES: usize = 4;
@@ -25,14 +26,25 @@ pub struct Aggregate {
     pub failures: Vec<StoreFailure>,
 }
 
+/// One store of a refresh. It is a named function over an owned URL so the stream's future is `Send` when spawned on the
+/// runtime, which a closure over `&String` cannot show to the compiler.
+async fn fetch_one<'a>(
+    client: &'a reqwest::Client,
+    url: String,
+    cancel: &'a CancellationToken,
+) -> (String, Result<FetchedStore, StoreError>) {
+    let result = fetch_store(client, &url, cancel).await;
+    (url, result)
+}
+
 /// Fetches every store in `index_urls`. Returns `Err(Cancelled)` when the token fired, so no partial list is returned.
 pub async fn fetch_all(
     client: &reqwest::Client,
     index_urls: &[String],
     cancel: &CancellationToken,
 ) -> Result<Aggregate, StoreError> {
-    let results: Vec<(String, Result<FetchedStore, StoreError>)> = stream::iter(index_urls)
-        .map(|url| async move { (url.clone(), fetch_store(client, url, cancel).await) })
+    let results: Vec<(String, Result<FetchedStore, StoreError>)> = stream::iter(index_urls.iter().cloned())
+        .map(|url| fetch_one(client, url, cancel))
         .buffered(MAX_CONCURRENT_STORES)
         .collect()
         .await;
@@ -47,7 +59,7 @@ pub async fn fetch_all(
                 aggregate.stores.push(fetched.row);
             }
             Err(err) => {
-                tracing::error!(index_url = %index_url, "Failed to fetch extensions for store");
+                tracing::error!(index_url = %index_url, "{}", logs::fetch_store_failed(&index_url, &index_url));
                 aggregate.failures.push(StoreFailure { index_url, message: err.to_string() });
             }
         }
@@ -84,6 +96,21 @@ mod tests {
         assert_eq!(aggregate.failures.len(), 1);
         assert_eq!(aggregate.failures[0].index_url, urls[1]);
         assert_eq!(aggregate.failures[0].message, "the store answered HTTP 500");
+    }
+
+    #[tokio::test]
+    async fn tst_19_060_a_failed_store_is_logged_once_with_the_fetch_text_and_the_store_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/bad.json")).respond_with(ResponseTemplate::new(500)).mount(&server).await;
+        let urls = vec![format!("{}/bad.json", server.uri())];
+        let recording = crate::anime::testkit::start_capture();
+        fetch_all(&test_client(), &urls, &CancellationToken::new()).await.unwrap();
+        // The HTTP client logs its own debug lines, so only the warnings and errors count.
+        let logged: Vec<_> = recording.events().into_iter().filter(|event| event.level <= tracing::Level::WARN).collect();
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert_eq!(logged[0].level, tracing::Level::ERROR);
+        assert_eq!(logged[0].message, format!("Failed to fetch extensions for store '{0} ({0})'", urls[0]));
+        assert!(logged[0].fields.iter().any(|(name, value)| name == "index_url" && *value == urls[0]));
     }
 
     #[tokio::test]

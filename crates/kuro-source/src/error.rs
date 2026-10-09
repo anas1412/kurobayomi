@@ -9,6 +9,10 @@ pub enum SourceError {
     /// Connection, TLS, timeout or body read failure. The message is the transport error text.
     #[error("{0}")]
     Transport(String),
+    /// The host name did not resolve (`UnknownHostException`). The UI shows "No Internet connection" when the device is
+    /// offline and "Couldn't reach {host}" otherwise (`exception_unknown_host`).
+    #[error("unknown host {host}")]
+    UnknownHost { host: String },
     /// HTML or JSON structure did not match what the source expects.
     #[error("parse error: {0}")]
     Parse(String),
@@ -53,6 +57,7 @@ mod tests {
             SourceError::LocalServer("bind".into()),
             SourceError::Http(503),
             SourceError::Transport("reset".into()),
+            SourceError::UnknownHost { host: "x.example".into() },
             SourceError::Parse("bad html".into()),
             SourceError::Url("no host".into()),
             SourceError::MissingImageUrl,

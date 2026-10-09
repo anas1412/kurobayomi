@@ -103,7 +103,21 @@ fn main() {
         )
         .unwrap();
     }
-    keys.push_str("        }\n    }\n}\n");
+    keys.push_str("        }\n    }\n\n");
+    keys.push_str(
+        "    /// The key for a Fluent id (for example a spec file's `title`), or `None` if the English\n",
+    );
+    keys.push_str("    /// file has no such message.\n");
+    keys.push_str("    pub fn from_id(id: &str) -> Option<MsgKey> {\n        match id {\n");
+    for (id, _) in &messages {
+        writeln!(
+            keys,
+            "            {id:?} => Some(MsgKey::{}),",
+            variant_name(id)
+        )
+        .unwrap();
+    }
+    keys.push_str("            _ => None,\n        }\n    }\n}\n");
     fs::write(out_dir.join("keys.rs"), keys).expect("writing keys.rs");
 
     let mut table = String::from(

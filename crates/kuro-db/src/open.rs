@@ -2,11 +2,11 @@
 //! and creation of the baseline. Migrations are applied by `migrate`. The error type and the schema
 //! description live in `error` and `schema`; they are re-exported here for existing callers.
 
-use std::path::Path;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::functions::FunctionFlags;
-use rusqlite::Connection;
+use rusqlite::{Connection, ErrorCode};
 
 pub use crate::error::{DbError, DbResult};
 pub use crate::schema::SchemaBundle;
@@ -18,6 +18,9 @@ pub const APPLICATION_ID: i64 = 0x4B55_5230;
 
 /// Busy timeout of every connection, in milliseconds (`PRAGMA busy_timeout`).
 pub const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
+
+/// Files above this size skip the `quick_check` at open, because the check reads every page.
+pub const QUICK_CHECK_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Prepared-statement cache capacity per connection; the manga statements alone exceed the default 16.
 const STATEMENT_CACHE: usize = 64;
@@ -43,12 +46,12 @@ pub fn configure(c: &Connection) -> DbResult<()> {
     register_functions(c)
 }
 
-/// Registers the scalar SQL function `lower_unicode(text)`, which lowercases with Rust's
+/// Registers the scalar SQL function `kuro_lower(text)`, which lowercases with Rust's
 /// `str::to_lowercase`. SQLite's `lower()` only folds ASCII, so "Éclair" and "éCLAIR" would not match
 /// through it. `configure` calls this on every file connection; the in-memory helpers call it too.
 pub fn register_functions(c: &Connection) -> DbResult<()> {
     c.create_scalar_function(
-        "lower_unicode",
+        "kuro_lower",
         1,
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
         |ctx| {
@@ -63,9 +66,25 @@ pub fn register_functions(c: &Connection) -> DbResult<()> {
 /// bundle's latest version. The gate runs before any write: a `user_version` above the bundle, or a
 /// file with another application id (an Aniyomi file), is refused and left untouched.
 pub fn open_and_migrate(path: &Path, bundle: &SchemaBundle) -> DbResult<Connection> {
+    Ok(open_and_migrate_report(path, bundle)?.conn)
+}
+
+/// The result of [`open_and_migrate_report`].
+pub struct Opened {
+    pub conn: Connection,
+    /// Where a corrupt file was moved. The connection is then on a new, empty database, and the caller shows
+    /// the restore-from-backup dialog.
+    pub quarantined: Option<PathBuf>,
+}
+
+/// [`open_and_migrate`] with the corruption report. A file whose `quick_check` fails is renamed to
+/// `<file>.corrupt-<unix seconds>` (with its `-wal` and `-shm` siblings) and a new database is created in its
+/// place. Files above [`QUICK_CHECK_MAX_BYTES`] are not checked.
+pub fn open_and_migrate_report(path: &Path, bundle: &SchemaBundle) -> DbResult<Opened> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
+    let quarantined = if is_corrupt(path)? { Some(quarantine(path)?) } else { None };
     let mut c = Connection::open(path)?;
     let tables: i64 = c.query_row(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table'",
@@ -95,16 +114,65 @@ pub fn open_and_migrate(path: &Path, bundle: &SchemaBundle) -> DbResult<Connecti
     } else {
         migrate::run(&mut c, path, user_version, bundle.migrations)?;
     }
-    Ok(c)
+    Ok(Opened { conn: c, quarantined })
+}
+
+/// True when `PRAGMA quick_check` reports anything but `ok`, or the file is not a database at all. A missing,
+/// empty or oversized file is not checked (false).
+fn is_corrupt(path: &Path) -> DbResult<bool> {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Ok(false);
+    };
+    if meta.len() == 0 {
+        return Ok(false);
+    }
+    if meta.len() > QUICK_CHECK_MAX_BYTES {
+        tracing::info!(file = %path.display(), bytes = meta.len(), "skipping quick_check on a large database");
+        return Ok(false);
+    }
+    let c = Connection::open(path)?;
+    match c.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0)) {
+        Ok(first) => Ok(first != "ok"),
+        Err(rusqlite::Error::SqliteFailure(e, _))
+            if matches!(e.code, ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) =>
+        {
+            Ok(true)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Moves a corrupt database and its WAL and shared-memory files aside. Nothing is deleted.
+fn quarantine(path: &Path) -> DbResult<PathBuf> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let file = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| std::io::Error::other("database file name is not UTF-8"))?;
+    let dest = path.with_file_name(format!("{file}.corrupt-{stamp}"));
+    std::fs::rename(path, &dest)?;
+    for side in ["-wal", "-shm"] {
+        let from = path.with_file_name(format!("{file}{side}"));
+        if from.exists() {
+            std::fs::rename(&from, dest.with_file_name(format!("{file}.corrupt-{stamp}{side}")))?;
+        }
+    }
+    tracing::error!(from = %path.display(), to = %dest.display(), "database failed quick_check; moved aside");
+    Ok(dest)
 }
 
 /// Runs the baseline and stamps the application id and version in one transaction, so a failing
 /// baseline leaves no tables and version 0.
+/// Creates a fresh file: the baseline, then every migration, so a new file has the same shape as an upgraded
+/// one. `user_version` is the latest version of the bundle.
 pub(crate) fn create_baseline(c: &mut Connection, bundle: &SchemaBundle) -> DbResult<()> {
     let tx = c.transaction()?;
     tx.execute_batch(bundle.baseline_sql)?;
+    for (_, sql) in bundle.migrations {
+        tx.execute_batch(sql)?;
+    }
     tx.pragma_update(None, "application_id", bundle.application_id)?;
-    tx.pragma_update(None, "user_version", bundle.baseline_version)?;
+    tx.pragma_update(None, "user_version", migrate::latest_version(bundle.baseline_version, bundle.migrations))?;
     tx.commit()?;
     Ok(())
 }
@@ -139,6 +207,16 @@ mod tests {
         refuse_foreign: |found| DbError::LegacyFile { found },
     };
 
+    /// The baseline alone (version 33, no migrations): a file that still needs migration 34.
+    const BASELINE_ONLY: SchemaBundle = SchemaBundle {
+        baseline_sql: BASELINE_SQL,
+        baseline_version: 33,
+        migrations: &[],
+        application_id: APPLICATION_ID,
+        tables: &[],
+        refuse_foreign: |found| DbError::LegacyFile { found },
+    };
+
     fn pragma_i64(c: &Connection, name: &str) -> i64 {
         c.pragma_query_value(None, name, |r| r.get(0)).unwrap()
     }
@@ -151,10 +229,10 @@ mod tests {
             .collect()
     }
 
-    /// Creates a Kurobayomi file at version 33 and closes it.
+    /// Creates a Kurobayomi file at version 33 (baseline only) and closes it.
     fn kur_file(dir: &Path) -> std::path::PathBuf {
         let p = dir.join("manga.db");
-        drop(open_and_migrate(&p, &MANGA_SCHEMA).unwrap());
+        drop(open_and_migrate(&p, &BASELINE_ONLY).unwrap());
         p
     }
 
@@ -162,7 +240,7 @@ mod tests {
     fn new_file_gets_baseline_pragmas_and_seed_row() {
         let dir = tempfile::tempdir().unwrap();
         let c = open_and_migrate(&dir.path().join("manga.db"), &MANGA_SCHEMA).unwrap();
-        assert_eq!(pragma_i64(&c, "user_version"), 33);
+        assert_eq!(pragma_i64(&c, "user_version"), 34);
         assert_eq!(pragma_i64(&c, "application_id"), APPLICATION_ID);
         assert_eq!(pragma_i64(&c, "foreign_keys"), 1);
         assert_eq!(pragma_i64(&c, "recursive_triggers"), 0);
@@ -179,6 +257,34 @@ mod tests {
     }
 
     #[test]
+    fn a_healthy_file_is_not_quarantined() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = kur_file(dir.path());
+        let opened = open_and_migrate_report(&p, &MANGA_SCHEMA).unwrap();
+        assert!(opened.quarantined.is_none());
+    }
+
+    #[test]
+    fn a_corrupt_file_is_moved_aside_and_a_fresh_database_takes_its_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("manga.db");
+        std::fs::write(&p, b"this is not a sqlite database, just bytes ".repeat(200)).unwrap();
+        let opened = open_and_migrate_report(&p, &MANGA_SCHEMA).unwrap();
+        let moved = opened.quarantined.expect("corrupt file is quarantined");
+        assert!(moved.file_name().unwrap().to_string_lossy().starts_with("manga.db.corrupt-"));
+        assert!(std::fs::read(&moved).unwrap().starts_with(b"this is not"), "bytes are kept, not deleted");
+        assert_eq!(pragma_i64(&opened.conn, "user_version"), 34);
+    }
+
+    #[test]
+    fn an_empty_file_is_not_treated_as_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("manga.db");
+        std::fs::write(&p, b"").unwrap();
+        assert!(open_and_migrate_report(&p, &MANGA_SCHEMA).unwrap().quarantined.is_none());
+    }
+
+    #[test]
     fn creates_parent_directory() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("nested").join("manga.db");
@@ -189,9 +295,10 @@ mod tests {
     #[test]
     fn reopen_keeps_version_and_writes_no_backup() {
         let dir = tempfile::tempdir().unwrap();
-        let p = kur_file(dir.path());
+        let p = dir.path().join("manga.db");
+        drop(open_and_migrate(&p, &MANGA_SCHEMA).unwrap());
         let c = open_and_migrate(&p, &MANGA_SCHEMA).unwrap();
-        assert_eq!(pragma_i64(&c, "user_version"), 33);
+        assert_eq!(pragma_i64(&c, "user_version"), 34);
         assert!(backup_files(dir.path()).is_empty());
     }
 
@@ -210,14 +317,14 @@ mod tests {
     }
 
     #[test]
-    fn lower_unicode_is_registered_on_every_file_connection() {
+    fn kuro_lower_is_registered_on_every_file_connection() {
         let dir = tempfile::tempdir().unwrap();
         let p = kur_file(dir.path());
         let writer = crate::schema_manga::open(&p).unwrap();
         for c in [writer, open_connection(&p).unwrap()] {
-            let folded: String = c.query_row("SELECT lower_unicode('ÉCLAIR')", [], |r| r.get(0)).unwrap();
+            let folded: String = c.query_row("SELECT kuro_lower('ÉCLAIR')", [], |r| r.get(0)).unwrap();
             assert_eq!(folded, "éclair");
-            let nothing: Option<String> = c.query_row("SELECT lower_unicode(NULL)", [], |r| r.get(0)).unwrap();
+            let nothing: Option<String> = c.query_row("SELECT kuro_lower(NULL)", [], |r| r.get(0)).unwrap();
             assert_eq!(nothing, None);
         }
     }
@@ -244,7 +351,7 @@ mod tests {
         Connection::open(&p).unwrap().pragma_update(None, "user_version", 99).unwrap();
         let before = std::fs::read(&p).unwrap();
         let err = open_and_migrate(&p, &MANGA_SCHEMA).unwrap_err();
-        assert!(matches!(err, DbError::TooNew { found: 99, supported: 33 }), "TC-O04: {err}");
+        assert!(matches!(err, DbError::TooNew { found: 99, supported: 34 }), "TC-O04: {err}");
         assert_eq!(std::fs::read(&p).unwrap(), before);
     }
 

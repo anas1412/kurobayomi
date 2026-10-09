@@ -160,3 +160,142 @@ pub fn trust_with_entries(entries: &[String]) -> crate::anime::trust::TrustStore
     pref.extend(entries.iter().cloned());
     crate::anime::trust::TrustStore::new(pref)
 }
+
+/// One event a [`capture`] call recorded: its level, its message and its fields as text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Logged {
+    pub level: tracing::Level,
+    pub message: String,
+    pub fields: Vec<(String, String)>,
+}
+
+#[derive(Clone, Default)]
+struct Recorder(std::sync::Arc<std::sync::Mutex<Vec<Logged>>>);
+
+#[derive(Default)]
+struct Fields {
+    message: String,
+    fields: Vec<(String, String)>,
+}
+
+impl tracing::field::Visit for Fields {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{value:?}");
+        } else {
+            self.fields.push((field.name().to_owned(), format!("{value:?}")));
+        }
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.message = value.to_owned();
+        } else {
+            self.fields.push((field.name().to_owned(), value.to_owned()));
+        }
+    }
+}
+
+thread_local! {
+    /// The recorder of the capture that is active on this thread, if any.
+    static SINK: std::cell::RefCell<Option<Recorder>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The one global layer of the test binary. It hands each event to the capture of the logging thread, so a callsite hit
+/// first by a test with no capture is never cached as disabled for the tests that do capture.
+struct Router;
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Router {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+        SINK.with(|sink| {
+            if let Some(recorder) = &*sink.borrow() {
+                let mut fields = Fields::default();
+                event.record(&mut fields);
+                let logged =
+                    Logged { level: *event.metadata().level(), message: fields.message, fields: fields.fields };
+                recorder.0.lock().expect("the recorder lock").push(logged);
+            }
+        });
+    }
+}
+
+/// Records the events logged on this thread until it is dropped. Use it in async tests, where the logs happen across
+/// awaits on the same thread.
+pub struct Capture {
+    recorder: Recorder,
+}
+
+impl Capture {
+    /// Every event recorded so far.
+    pub fn events(&self) -> Vec<Logged> {
+        self.recorder.0.lock().expect("the recorder lock").clone()
+    }
+}
+
+impl Drop for Capture {
+    fn drop(&mut self) {
+        SINK.with(|sink| *sink.borrow_mut() = None);
+    }
+}
+
+/// Starts recording the events logged on this thread.
+pub fn start_capture() -> Capture {
+    use tracing_subscriber::layer::SubscriberExt;
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry().with(Router));
+    });
+    let recorder = Recorder::default();
+    SINK.with(|sink| *sink.borrow_mut() = Some(recorder.clone()));
+    Capture { recorder }
+}
+
+/// Runs `f` with a recording subscriber on this thread and returns its result with every event `f` logged.
+pub fn capture<T>(f: impl FnOnce() -> T) -> (T, Vec<Logged>) {
+    let recording = start_capture();
+    let result = f();
+    (result, recording.events())
+}
+
+/// A one-connection HTTP server for a download that stalls mid-body. It sends the headers and `first`, then waits.
+/// Sending on the returned handle releases `rest`; dropping it leaves the body unfinished and closes the connection.
+/// The URL is `http://127.0.0.1:<port>/pkg.kuroext`.
+pub async fn stalled_server(first: Vec<u8>, rest: Vec<u8>) -> (String, tokio::sync::oneshot::Sender<()>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("the test server binds");
+    let url = format!("http://{}/pkg.kuroext", listener.local_addr().expect("the test server has an address"));
+    let (release, released) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let Ok((mut socket, _)) = listener.accept().await else {
+            return;
+        };
+        let mut request = [0u8; 4096];
+        let _ = socket.read(&mut request).await;
+        let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", first.len() + rest.len());
+        if socket.write_all(head.as_bytes()).await.is_err() || socket.write_all(&first).await.is_err() {
+            return;
+        }
+        if released.await.is_ok() {
+            let _ = socket.write_all(&rest).await;
+        }
+    });
+    (url, release)
+}
+
+/// Polls `condition` every 5 ms and panics after five seconds, so a test that waits for a state cannot hang.
+pub async fn wait_until(mut condition: impl FnMut() -> bool) {
+    for _ in 0..1000 {
+        if condition() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    panic!("the awaited state never came");
+}
+
+/// True when `dir` holds a file with at least one byte.
+pub fn has_nonempty_file(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|entries| entries.filter_map(Result::ok).any(|entry| entry.metadata().is_ok_and(|meta| meta.len() > 0)))
+        .unwrap_or(false)
+}

@@ -4,11 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use std::collections::BTreeMap;
-use std::sync::Mutex;
-
 use kuro_platform::paths::Paths;
-use kuro_platform::secrets::{SecretError, SecretStore};
 use toml_edit::DocumentMut;
 
 use crate::registry;
@@ -126,25 +122,4 @@ pub fn assert_section_registered(
     }
 }
 
-/// An in-memory [`SecretStore`] for tests.
-#[derive(Default)]
-pub struct MemorySecrets(Mutex<BTreeMap<(String, String), String>>);
-
-impl SecretStore for MemorySecrets {
-    fn get(&self, service: &str, account: &str) -> Result<Option<String>, SecretError> {
-        let map = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        Ok(map.get(&(service.to_owned(), account.to_owned())).cloned())
-    }
-
-    fn set(&self, service: &str, account: &str, secret: &str) -> Result<(), SecretError> {
-        let mut map = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        map.insert((service.to_owned(), account.to_owned()), secret.to_owned());
-        Ok(())
-    }
-
-    fn delete(&self, service: &str, account: &str) -> Result<(), SecretError> {
-        let mut map = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        map.remove(&(service.to_owned(), account.to_owned()));
-        Ok(())
-    }
-}
+pub use crate::memory::MemorySecrets;

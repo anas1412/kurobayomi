@@ -133,6 +133,19 @@ impl Decoder {
         }
     }
 
+    /// The decoder for the `hwdec` value mpv reports as active (`hwdec-current`, T-45b-068). Linux
+    /// names map to the choice they came from: VA-API and NVDEC zero-copy to `HwPlus`, their copy
+    /// modes to `Hw`. Anything unknown is `Auto` (E-07).
+    pub fn from_active(value: &str) -> Self {
+        match value {
+            "auto-copy" => Self::AutoCopy,
+            "no" => Self::Sw,
+            "vaapi-copy" | "nvdec-copy" | "mediacodec-copy" => Self::Hw,
+            "vaapi" | "nvdec" | "mediacodec" => Self::HwPlus,
+            _ => Self::Auto,
+        }
+    }
+
     /// Finds the decoder whose stored value matches. Kotlin throws on an unknown value; the
     /// Rust port falls back to `Auto` so a stale preference cannot stop playback.
     pub fn from_value(value: &str) -> Self {
@@ -287,6 +300,16 @@ mod tests {
         assert_eq!(Decoder::from_value("mediacodec-copy"), Decoder::Hw);
         assert_eq!(Decoder::from_value("garbage"), Decoder::Auto);
         assert_eq!(Decoder::HwPlus.title(), "HW+");
+    }
+
+    #[test]
+    fn active_hwdec_maps_linux_names_and_falls_back_to_auto() {
+        assert_eq!(Decoder::from_active("vaapi-copy"), Decoder::Hw);
+        assert_eq!(Decoder::from_active("nvdec"), Decoder::HwPlus);
+        assert_eq!(Decoder::from_active("no"), Decoder::Sw);
+        assert_eq!(Decoder::from_active("auto-copy"), Decoder::AutoCopy);
+        assert_eq!(Decoder::from_active("something-new"), Decoder::Auto);
+        assert_eq!(Decoder::from_active("vaapi").title(), "HW+");
     }
 
     #[test]

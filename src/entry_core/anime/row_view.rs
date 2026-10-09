@@ -1,0 +1,336 @@
+//! The episode list widget: a `gio::ListStore` behind a `gtk::ListView`, so only the rows on screen exist (3000 rows
+//! cost the same as 30). The store holds leading slots (the info block and the item header, which scroll with the
+//! list in the single-column layout) followed by one item per episode row. `sync` diffs the new rows against the
+//! shown ones: a changed row gets one `items_changed`, a changed structure one splice. Rows report clicks, long
+//! presses and right clicks; the page decides what they mean (`gesture::Selection`).
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use gtk::prelude::*;
+use gtk::{Align, Box as GBox, Label, Orientation as O, gio, glib, pango};
+
+use super::episode_row::{Diff, EpisodeRow, PADDING, RowLayout, diff, info_alpha, title_alpha, title_gap};
+
+/// A press on a row: (episode id, long press or right click).
+pub type OnRow = Rc<dyn Fn(i64, bool)>;
+
+/// The class of the filler label and the bookmark icon colours. They resolve the theme's `kuro_tertiary` and
+/// `kuro_primary` named colours, which GTK looks up across every provider of the display.
+const CSS: &str = ".episode-primary { color: @kuro_primary; } .episode-tertiary { color: @kuro_tertiary; }";
+
+fn ensure_css() {
+    thread_local! {
+        static DONE: Cell<bool> = const { Cell::new(false) };
+    }
+    if DONE.with(|d| d.replace(true)) {
+        return;
+    }
+    if let Some(display) = gtk::gdk::Display::default() {
+        let provider = gtk::CssProvider::new();
+        provider.load_from_string(CSS);
+        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+}
+
+/// A thumbnail is 40% of the window wide, at most 250 px (behaviour 3.7), and 16:9.
+pub fn thumbnail_size(window_width: i32) -> (i32, i32) {
+    let width = (window_width * 2 / 5).clamp(1, 250);
+    (width, width * 9 / 16)
+}
+
+/// One item of the store.
+#[derive(Clone)]
+enum Item {
+    /// The n-th leading widget.
+    Slot(usize),
+    Episode(EpisodeRow),
+}
+
+fn item_of(list_item: &gtk::ListItem) -> Option<Item> {
+    list_item.item().and_downcast::<glib::BoxedAnyObject>().map(|o| o.borrow::<Item>().clone())
+}
+
+/// The widgets of one recycled list item: the episode row, or a host for a leading slot.
+struct RowWidgets {
+    stack: gtk::Stack,
+    row: GBox,
+    check: gtk::Image,
+    thumb: gtk::Frame,
+    text: GBox,
+    title: Label,
+    filler_icon: gtk::Image,
+    filler: Label,
+    info: Label,
+    info_line: GBox,
+    summary: Label,
+    bookmark: gtk::Image,
+    slot: GBox,
+}
+
+fn row_widgets() -> RowWidgets {
+    ensure_css();
+    let [start, top, end, bottom] = PADDING;
+    let row = GBox::new(O::Horizontal, 8);
+    row.set_margin_start(start);
+    row.set_margin_top(top);
+    row.set_margin_end(end);
+    row.set_margin_bottom(bottom);
+    let check = gtk::Image::from_icon_name("object-select-symbolic");
+    let thumb = gtk::Frame::new(None);
+    thumb.set_valign(Align::Start);
+    let text = GBox::new(O::Vertical, 0);
+    text.set_hexpand(true);
+    text.set_valign(Align::Center);
+    let title = Label::builder().xalign(0.0).ellipsize(pango::EllipsizeMode::End).build();
+    let filler_icon = gtk::Image::from_icon_name("tag-symbolic");
+    filler_icon.add_css_class("episode-tertiary");
+    let filler = Label::builder().label(kuro_i18n::tr(kuro_i18n::MsgKey::filler)).css_classes(["caption", "episode-tertiary"]).build();
+    let info = Label::builder().xalign(0.0).ellipsize(pango::EllipsizeMode::End).css_classes(["caption"]).build();
+    let info_line = GBox::new(O::Horizontal, 4);
+    info_line.append(&filler_icon);
+    info_line.append(&filler);
+    info_line.append(&info);
+    let summary = Label::builder().xalign(0.0).wrap(true).lines(3).ellipsize(pango::EllipsizeMode::End).css_classes(["caption"]).build();
+    let bookmark = gtk::Image::from_icon_name("user-bookmarks-symbolic");
+    bookmark.add_css_class("episode-primary");
+    for w in [check.upcast_ref::<gtk::Widget>(), bookmark.upcast_ref()] {
+        w.set_valign(Align::Center);
+    }
+    text.append(&title);
+    text.append(&info_line);
+    text.append(&summary);
+    row.append(&check);
+    row.append(&thumb);
+    row.append(&text);
+    row.append(&bookmark);
+    let slot = GBox::new(O::Vertical, 0);
+    let stack = gtk::Stack::new();
+    stack.add_named(&row, Some("row"));
+    stack.add_named(&slot, Some("slot"));
+    RowWidgets { stack, row, check, thumb, text, title, filler_icon, filler, info, info_line, summary, bookmark, slot }
+}
+
+impl RowWidgets {
+    fn show_row(&self, row: &EpisodeRow, window_width: i32) {
+        self.empty_slot();
+        self.stack.set_visible_child_name("row");
+        self.row.set_widget_name(&format!("row:{}", row.id));
+        self.check.set_opacity(if row.selected { 1.0 } else { 0.0 });
+        self.title.set_label(&row.title);
+        self.title.set_opacity(title_alpha(row.seen));
+        let alpha = info_alpha(row.seen);
+        for w in [self.info_line.upcast_ref::<gtk::Widget>(), self.summary.upcast_ref()] {
+            w.set_opacity(alpha);
+        }
+        self.filler_icon.set_visible(row.indicators.filler);
+        self.filler.set_visible(row.indicators.filler);
+        self.info.set_label(&row.info);
+        self.info.set_visible(!row.info.is_empty());
+        self.info_line.set_visible(row.indicators.filler || !row.info.is_empty());
+        self.bookmark.set_visible(row.indicators.bookmark);
+        match row.layout {
+            RowLayout::Simple => {
+                // one title line; the gap under it is 6 px, or 0 when the filler label sits there
+                self.text.set_spacing(0);
+                self.title.set_wrap(false);
+                self.title.set_lines(1);
+                self.info_line.set_margin_top(title_gap(row.indicators.filler));
+            }
+            RowLayout::Rich { title_lines } => {
+                self.text.set_spacing(2);
+                self.title.set_wrap(true);
+                self.title.set_lines(i32::from(title_lines));
+                self.info_line.set_margin_top(0);
+            }
+        }
+        let rich = matches!(row.layout, RowLayout::Rich { .. });
+        match (&row.preview_url, rich) {
+            (Some(_), true) => {
+                let (w, h) = thumbnail_size(window_width);
+                self.thumb.set_size_request(w, h);
+                self.thumb.set_visible(true);
+            }
+            _ => self.thumb.set_visible(false),
+        }
+        self.summary.set_visible(row.summary.is_some());
+        self.summary.set_label(row.summary.as_deref().unwrap_or(""));
+    }
+
+    fn show_slot(&self, widget: &gtk::Widget) {
+        self.empty_slot();
+        self.row.set_widget_name("");
+        if let Some(parent) = widget.parent().and_downcast::<GBox>() {
+            parent.remove(widget);
+        }
+        self.slot.append(widget);
+        self.stack.set_visible_child_name("slot");
+    }
+
+    fn empty_slot(&self) {
+        while let Some(child) = self.slot.first_child() {
+            self.slot.remove(&child);
+        }
+    }
+}
+
+pub struct EpisodeList {
+    pub widget: gtk::ListView,
+    store: gio::ListStore,
+    leading: RefCell<Vec<gtk::Widget>>,
+    shown: RefCell<Vec<EpisodeRow>>,
+}
+
+impl EpisodeList {
+    /// `on_row` gets row presses. `on_activate` gets the id of the row that Enter or a double click activated.
+    pub fn new(on_row: OnRow, on_activate: Rc<dyn Fn(i64)>) -> Rc<Self> {
+        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let registry: Rc<RefCell<HashMap<usize, Rc<RowWidgets>>>> = Rc::default();
+        let list: Rc<RefCell<Option<std::rc::Weak<Self>>>> = Rc::default();
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup({
+            let registry = Rc::clone(&registry);
+            move |_, object| {
+                let Some(list_item) = object.downcast_ref::<gtk::ListItem>() else { return };
+                let widgets = Rc::new(row_widgets());
+                let long_fired = Rc::new(Cell::new(false));
+                let press = |list_item: &gtk::ListItem, on_row: &OnRow, long: bool| {
+                    if let Some(Item::Episode(row)) = item_of(list_item) {
+                        on_row(row.id, long);
+                    }
+                };
+                let left = gtk::GestureClick::builder().button(1).build();
+                left.connect_released({
+                    let (list_item, on_row, long_fired) = (list_item.clone(), Rc::clone(&on_row), Rc::clone(&long_fired));
+                    move |_, _, _, _| {
+                        if !long_fired.replace(false) {
+                            press(&list_item, &on_row, false);
+                        }
+                    }
+                });
+                let right = gtk::GestureClick::builder().button(3).build();
+                right.connect_pressed({
+                    let (list_item, on_row) = (list_item.clone(), Rc::clone(&on_row));
+                    move |_, _, _, _| press(&list_item, &on_row, true)
+                });
+                let long = gtk::GestureLongPress::new();
+                long.connect_pressed({
+                    let (list_item, on_row, long_fired) = (list_item.clone(), Rc::clone(&on_row), Rc::clone(&long_fired));
+                    move |_, _, _| {
+                        long_fired.set(true);
+                        press(&list_item, &on_row, true);
+                    }
+                });
+                for c in [left.upcast_ref::<gtk::EventController>(), right.upcast_ref(), long.upcast_ref()] {
+                    widgets.row.add_controller(c.clone());
+                }
+                list_item.set_child(Some(&widgets.stack));
+                registry.borrow_mut().insert(list_item.as_ptr() as usize, widgets);
+            }
+        });
+        factory.connect_bind({
+            let (registry, list) = (Rc::clone(&registry), Rc::clone(&list));
+            move |_, object| {
+                let Some(list_item) = object.downcast_ref::<gtk::ListItem>() else { return };
+                let (Some(item), Some(widgets)) = (item_of(list_item), registry.borrow().get(&(list_item.as_ptr() as usize)).cloned()) else { return };
+                let Some(this) = list.borrow().as_ref().and_then(std::rc::Weak::upgrade) else { return };
+                match item {
+                    Item::Episode(row) => {
+                        let width = this.widget.root().map_or(1180, |r| r.width());
+                        widgets.show_row(&row, width);
+                    }
+                    Item::Slot(i) => {
+                        if let Some(w) = this.leading.borrow().get(i) {
+                            widgets.show_slot(w);
+                        }
+                    }
+                }
+            }
+        });
+        factory.connect_unbind({
+            let registry = Rc::clone(&registry);
+            move |_, object| {
+                if let Some(list_item) = object.downcast_ref::<gtk::ListItem>()
+                    && let Some(widgets) = registry.borrow().get(&(list_item.as_ptr() as usize))
+                {
+                    widgets.empty_slot();
+                }
+            }
+        });
+        factory.connect_teardown({
+            let registry = Rc::clone(&registry);
+            move |_, object| {
+                if let Some(list_item) = object.downcast_ref::<gtk::ListItem>() {
+                    registry.borrow_mut().remove(&(list_item.as_ptr() as usize));
+                }
+            }
+        });
+        let widget = gtk::ListView::new(Some(gtk::NoSelection::new(Some(store.clone()))), Some(factory));
+        widget.set_focusable(true);
+        let this = Rc::new(Self { widget, store, leading: RefCell::new(Vec::new()), shown: RefCell::new(Vec::new()) });
+        *list.borrow_mut() = Some(Rc::downgrade(&this));
+        this.widget.connect_activate({
+            let weak = Rc::downgrade(&this);
+            move |_, position| {
+                if let Some(this) = weak.upgrade()
+                    && let Some(item) = this.store.item(position).and_downcast::<glib::BoxedAnyObject>()
+                    && let Item::Episode(row) = item.borrow::<Item>().clone()
+                {
+                    on_activate(row.id);
+                }
+            }
+        });
+        this
+    }
+
+    /// Replaces the leading slots (widgets that scroll with the rows). One splice of the head of the store.
+    pub fn set_leading(&self, widgets: Vec<gtk::Widget>) {
+        let old = self.leading.borrow().len() as u32;
+        let objects: Vec<glib::BoxedAnyObject> = (0..widgets.len()).map(|i| glib::BoxedAnyObject::new(Item::Slot(i))).collect();
+        *self.leading.borrow_mut() = widgets;
+        self.store.splice(0, old, &objects);
+    }
+
+    /// Shows `rows`. A changed row is updated in place with one `items_changed`; a different set of rows replaces the
+    /// episode part of the store with one splice.
+    pub fn sync(&self, rows: Vec<EpisodeRow>) {
+        let offset = self.leading.borrow().len() as u32;
+        match diff(&self.shown.borrow(), &rows) {
+            Diff::Same => {}
+            Diff::Rows(indices) => {
+                for i in indices {
+                    let at = offset + i as u32;
+                    if let Some(item) = self.store.item(at).and_downcast::<glib::BoxedAnyObject>() {
+                        *item.borrow_mut::<Item>() = Item::Episode(rows[i].clone());
+                    }
+                    self.store.items_changed(at, 1, 1);
+                }
+            }
+            Diff::Reset => {
+                let objects: Vec<glib::BoxedAnyObject> =
+                    rows.iter().cloned().map(|r| glib::BoxedAnyObject::new(Item::Episode(r))).collect();
+                self.store.splice(offset, self.store.n_items() - offset, &objects);
+            }
+        }
+        *self.shown.borrow_mut() = rows;
+    }
+
+    /// The model, for tests and for the page's scroll tracking.
+    pub fn n_items(&self) -> u32 {
+        self.store.n_items()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thumbnails_take_40_percent_of_the_window_up_to_250_px() {
+        assert_eq!(thumbnail_size(360), (144, 81));
+        assert_eq!(thumbnail_size(1180).0, 250);
+        assert_eq!(thumbnail_size(625).0, 250);
+        assert_eq!(thumbnail_size(0).0, 1);
+    }
+}

@@ -4,6 +4,7 @@
 //! `state.toml`. The extension installer is kept as the stored string: the Android installer
 //! choice is dropped on Linux, and the string survives backups unchanged.
 
+use crate::PrefError;
 use crate::registry::define_prefs;
 
 define_prefs! {
@@ -16,6 +17,49 @@ define_prefs! {
         display_profile: String = "pref_display_profile_key" => String::new();
         hardware_bitmap_threshold: i32 = "pref_hardware_bitmap_threshold" => 2048;
         always_decode_long_strip_with_ssiv: bool = "pref_always_decode_long_strip_with_ssiv" => false;
+    }
+}
+
+impl BasePrefs {
+    /// First launch: when `pref_hardware_bitmap_threshold` is unset it is stored as `device_limit`. Later launches
+    /// keep the stored value. The value is then published to the atomic that the image pipeline reads.
+    pub fn seed_hardware_bitmap_threshold(&self, device_limit: i32) -> Result<(), PrefError> {
+        if !self.hardware_bitmap_threshold.is_set() {
+            self.hardware_bitmap_threshold.set(device_limit)?;
+        }
+        kuro_platform::device::set_hardware_bitmap_threshold(self.hardware_bitmap_threshold.get());
+        Ok(())
+    }
+
+    /// Stores a new threshold and publishes it. Readers of the atomic see it at once, with no restart.
+    pub fn set_hardware_bitmap_threshold(&self, value: i32) -> Result<(), PrefError> {
+        self.hardware_bitmap_threshold.set(value)?;
+        kuro_platform::device::set_hardware_bitmap_threshold(value);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod threshold_tests {
+    use super::*;
+    use crate::store::PrefStore;
+    use crate::values::PrefValue;
+
+    #[test]
+    fn first_launch_stores_the_device_limit_and_later_launches_keep_it() {
+        let store = PrefStore::in_memory();
+        BasePrefs::new(store.clone()).seed_hardware_bitmap_threshold(8192).unwrap();
+        assert_eq!(store.get_raw("pref_hardware_bitmap_threshold"), Some(PrefValue::Int(8192)));
+        BasePrefs::new(store.clone()).seed_hardware_bitmap_threshold(16384).unwrap();
+        assert_eq!(store.get_raw("pref_hardware_bitmap_threshold"), Some(PrefValue::Int(8192)));
+    }
+
+    #[test]
+    fn a_changed_threshold_is_published_without_a_restart() {
+        let base = BasePrefs::new(PrefStore::in_memory());
+        base.set_hardware_bitmap_threshold(4096).unwrap();
+        assert_eq!(kuro_platform::device::hardware_bitmap_threshold(), 4096);
+        assert_eq!(base.hardware_bitmap_threshold.get(), 4096);
     }
 }
 

@@ -30,4 +30,6 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
+tracing-subscriber = { workspace = true }
 wiremock = { workspace = true }

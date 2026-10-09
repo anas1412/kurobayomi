@@ -151,6 +151,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tst_19_075_a_cancel_while_the_body_streams_returns_cancelled_and_deletes_the_part() {
+        use crate::anime::testkit::{has_nonempty_file, stalled_server, wait_until};
+        let (url, _held) = stalled_server(vec![7u8; 4096], vec![0u8; 4096]).await;
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("p-1.kuroext.part");
+        let cancel = CancellationToken::new();
+        let client = test_client();
+        let (result, ()) = tokio::join!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                download(&client, &url, &part, &cancel, |_| {})
+            ),
+            async {
+                wait_until(|| has_nonempty_file(dir.path())).await;
+                cancel.cancel();
+            }
+        );
+        assert_eq!(result.expect("the cancel ends the download, no hang"), Err(DownloadError::Cancelled));
+        assert!(!part.exists(), "the half-written part file is deleted");
+    }
+
+    #[tokio::test]
     async fn a_package_over_64_mib_is_too_large_and_leaves_no_part_file() {
         let server = MockServer::start().await;
         serve(&server, 200, vec![0u8; (MAX_PACKAGE_BYTES + 1) as usize]).await;

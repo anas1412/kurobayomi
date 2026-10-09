@@ -4,13 +4,37 @@
 //! Everything here lives on the GTK main thread, so shared ownership is `Rc` and mutation is `Cell` or `RefCell`.
 //! Background loaders report through events and never touch these types (plan 43, section 2).
 
-use std::cell::{Cell, Ref, RefCell};
+use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
 use kuro_data::chapter::Chapter;
+use tokio::sync::watch;
+
+/// A value many watchers follow (a `StateFlow`): `set` wakes the receivers only when the value changed, and a
+/// receiver that missed several values sees the latest one.
+#[derive(Debug)]
+pub struct Observable<T>(watch::Sender<T>);
+
+impl<T: Copy + PartialEq> Observable<T> {
+    pub fn new(value: T) -> Self {
+        Self(watch::channel(value).0)
+    }
+
+    pub fn get(&self) -> T {
+        *self.0.borrow()
+    }
+
+    pub fn set(&self, value: T) {
+        self.0.send_if_modified(|v| std::mem::replace(v, value) != value);
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<T> {
+        self.0.subscribe()
+    }
+}
 
 /// Why a chapter or a page failed to load. Shown to the user as `message`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +59,8 @@ impl std::error::Error for LoadError {}
 /// What a chapter's page loader must be able to do when the chapter is let go (`PageLoader.recycle`).
 pub trait PageLoader {
     fn recycle(&self);
+    /// `isLocal`: false for the HTTP loader, whose chapters a downloaded copy can replace.
+    fn is_local(&self) -> bool;
 }
 
 /// Identity of a chapter: its row id and url, the fields `ChapterImpl.equals` compares.
@@ -56,34 +82,63 @@ pub enum ChapterState {
 /// A chapter open in the reader.
 pub struct ReaderChapter {
     pub chapter: Chapter,
-    state: RefCell<ChapterState>,
+    state: watch::Sender<ChapterState>,
     loader: RefCell<Option<Box<dyn PageLoader>>>,
     /// The page the viewer scrolls to when the chapter is shown.
     pub requested_page: Cell<i64>,
+    /// The read flag as the reader sees it. Starts from `chapter.read` and only the reader changes it.
+    pub read: Cell<bool>,
+    /// The last page the reader saw, 0-based. Starts from `chapter.last_page_read`.
+    pub last_page_read: Cell<i64>,
+    /// The bookmark flag as the reader sees it. Starts from `chapter.bookmark`; the top bar's toggle changes it.
+    pub bookmark: Cell<bool>,
     refs: Cell<i32>,
 }
 
 impl ReaderChapter {
     pub fn new(chapter: Chapter) -> Rc<Self> {
         Rc::new(Self {
+            read: Cell::new(chapter.read),
+            last_page_read: Cell::new(chapter.last_page_read),
+            bookmark: Cell::new(chapter.bookmark),
             chapter,
-            state: RefCell::new(ChapterState::Wait),
+            state: watch::channel(ChapterState::Wait).0,
             loader: RefCell::new(None),
             requested_page: Cell::new(0),
             refs: Cell::new(0),
         })
     }
 
+    /// `isLocal` of the attached loader, `None` when no loader is attached.
+    pub fn attached_is_local(&self) -> Option<bool> {
+        self.loader.borrow().as_ref().map(|l| l.is_local())
+    }
+
+    /// Recycles the attached loader and goes back to `Wait`, without touching the reference count. Used when a
+    /// downloaded copy should replace an online loader (`ReaderViewModel.preload`, step 2).
+    pub fn reset(&self) {
+        if let Some(loader) = self.loader.borrow_mut().take() {
+            loader.recycle();
+        }
+        self.set_state(ChapterState::Wait);
+    }
+
     pub fn key(&self) -> ChapterKey {
         ChapterKey { id: self.chapter.id, url: self.chapter.url.clone() }
     }
 
-    pub fn state(&self) -> Ref<'_, ChapterState> {
+    /// The current state. Do not hold it across `set_state`.
+    pub fn state(&self) -> watch::Ref<'_, ChapterState> {
         self.state.borrow()
     }
 
     pub fn set_state(&self, state: ChapterState) {
-        *self.state.borrow_mut() = state;
+        self.state.send_replace(state);
+    }
+
+    /// The state as a watch receiver (`ReaderChapter.stateFlow`): `Wait`, `Loading`, `Error` or `Loaded`.
+    pub fn subscribe_state(&self) -> watch::Receiver<ChapterState> {
+        self.state.subscribe()
     }
 
     /// The pages, or `None` unless the chapter is `Loaded`.
@@ -195,9 +250,9 @@ pub struct ReaderPage {
     pub index: u32,
     pub url: String,
     pub image_url: RefCell<Option<String>>,
-    pub status: Cell<PageStatus>,
+    pub status: Observable<PageStatus>,
     /// 0 to 100, or -1 when the length is unknown.
-    pub progress: Cell<i32>,
+    pub progress: Observable<i32>,
     pub source: PageSource,
     chapter: RefCell<Weak<ReaderChapter>>,
 }
@@ -209,8 +264,8 @@ impl ReaderPage {
             index,
             url: url.into(),
             image_url: RefCell::new(image_url),
-            status: Cell::new(PageStatus::Queued),
-            progress: Cell::new(0),
+            status: Observable::new(PageStatus::Queued),
+            progress: Observable::new(0),
             source,
             chapter: RefCell::new(Weak::new()),
         })
@@ -222,8 +277,8 @@ impl ReaderPage {
             index: parent.index,
             url: parent.url.clone(),
             image_url: RefCell::new(parent.image_url.borrow().clone()),
-            status: Cell::new(PageStatus::Ready),
-            progress: Cell::new(0),
+            status: Observable::new(PageStatus::Ready),
+            progress: Observable::new(0),
             source: PageSource::Shared(Rc::clone(parent)),
             chapter: RefCell::new(parent.chapter.borrow().clone()),
         })
@@ -332,6 +387,10 @@ mod tests {
 
     struct CountingLoader(Rc<Cell<u32>>);
     impl PageLoader for CountingLoader {
+        fn is_local(&self) -> bool {
+            true
+        }
+
         fn recycle(&self) {
             self.0.set(self.0.get() + 1);
         }

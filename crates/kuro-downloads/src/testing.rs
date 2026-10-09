@@ -162,3 +162,75 @@ pub fn download(source: &SourceRef, chapter_id: i64, manga_id: i64, status: Down
         pages: None,
     }
 }
+
+/// A copy of `tests/fixtures/dl/<name>` in a fresh temp folder (edge-cases section 5). The tests change the copy, never
+/// the checked-in tree. The copy's folder is the downloads root.
+pub fn dl_fixture(name: &str) -> tempfile::TempDir {
+    fn copy(from: &std::path::Path, to: &std::path::Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap().flatten() {
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dl").join(name);
+    assert!(from.is_dir(), "missing fixture {}", from.display());
+    let dir = tempfile::tempdir().unwrap();
+    copy(&from, dir.path());
+    dir
+}
+
+/// An episode runner that holds each item until it is cancelled, so a queue stays put while a test looks at it.
+pub struct ParkedRunner;
+
+#[async_trait]
+impl crate::anime::manager::EpisodeRunner for ParkedRunner {
+    async fn run(
+        &self,
+        _item: Arc<crate::anime::model::AnimeDownload>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<(), crate::error::DownloadError> {
+        cancel.cancelled().await;
+        Err(crate::error::DownloadError::Cancelled)
+    }
+}
+
+/// An anime queue whose stores and index live under `root`. Episodes wait until the queue is started.
+pub fn anime_queue(root: &std::path::Path) -> crate::anime::manager::AnimeQueue {
+    crate::anime::manager::spawn(crate::anime::manager::AnimeQueueParams {
+        layout: crate::anime::layout::AnimeLayout::new(Some(root.to_path_buf())),
+        store: Arc::new(crate::anime::store::AnimeQueueStore::open_in_memory().unwrap()),
+        pending: Arc::new(crate::anime::pending::AnimePendingStore::open_in_memory().unwrap()),
+        free_space: |_| Some(u64::MAX),
+        runner: Arc::new(ParkedRunner),
+        settings: crate::anime::manager::AnimeSettings::default(),
+        restored: Vec::new(),
+        index: crate::anime::cache::AnimeIndex::open(root, &root.join("cache")),
+    })
+}
+
+/// A manga download manager. The folders are `<base>/downloads` and the index cache is `<base>/cache`, outside the
+/// folders the tests inspect. The queue store is empty.
+pub fn manga_manager(base: &std::path::Path) -> Arc<crate::manager::DownloadManager> {
+    let root = base.join("downloads");
+    std::fs::create_dir_all(&root).unwrap();
+    let index = Arc::new(crate::index::DownloadIndex::open(&root, &base.join("cache")));
+    let store = Arc::new(crate::store::QueueStore::open_in_memory().unwrap());
+    let (_conn, connectivity) =
+        tokio::sync::watch::channel(crate::downloader::Connectivity { online: true, metered: false });
+    Arc::new(crate::manager::DownloadManager::spawn(crate::manager::ManagerParams {
+        layout: Arc::new(crate::layout::DownloadLayout::new(&root)),
+        index,
+        store,
+        free_space: |_| Some(u64::MAX),
+        settings: crate::downloader::DownloadSettings::default(),
+        page_cache: None,
+        connectivity,
+        hold: Arc::new(crate::downloader::NoHold),
+        restored: Vec::new(),
+    }))
+}

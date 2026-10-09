@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="relative_time">
+        <item quantity="one">Вчера</item>
+        <item quantity="few">%d дня назад</item>
+        <item quantity="many">%d дней назад</item>
+        <item quantity="other">%d дня назад</item>
+    </plurals>
+    <plurals name="upcoming_relative_time">
+        <item quantity="one">Завтра</item>
+        <item quantity="other">Через %d дн.</item>
+    </plurals>
+</resources>

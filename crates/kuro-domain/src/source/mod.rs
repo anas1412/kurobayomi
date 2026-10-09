@@ -17,5 +17,6 @@ pub mod pin;
 pub mod registry;
 pub mod remote_update;
 pub mod repo;
+pub mod settings;
 pub mod stub;
 pub mod toggles;

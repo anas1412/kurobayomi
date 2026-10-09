@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use kuro_platform::paths::Paths;
 use serde::{Deserialize, Serialize};
 
+use crate::cover_file::write_atomic;
 use crate::disk_image_cache::DiskImageCache;
+use crate::sniff::sniff;
 
 /// The folder under `Paths::cache_dir()` (behavior section 20.1).
 pub const FOLDER: &str = "chapter_disk_cache";
@@ -101,6 +103,30 @@ impl ChapterCache {
     /// page then ends in the error state.
     pub async fn put_image(&self, image_url: &str, bytes: &[u8]) -> io::Result<()> {
         self.disk.put(image_url, bytes).await.map(|_| ())
+    }
+
+    /// Copies the cached page image of `image_url` into `dir` as `<stem>.<ext>`. The extension comes from sniffing
+    /// the bytes, and `jpg` when nothing is recognised (behavior sections 17.4 and 20.8). `None` when the image is
+    /// not cached, so the caller downloads it instead.
+    pub async fn copy_image_to(
+        &self,
+        image_url: &str,
+        dir: &Path,
+        stem: &str,
+    ) -> io::Result<Option<PathBuf>> {
+        let Some(source) = self.disk.get(image_url).await else {
+            return Ok(None);
+        };
+        let bytes = tokio::fs::read(&source).await?;
+        let extension = sniff(&bytes).map_or("jpg", |format| format.extension());
+        let target = dir.join(format!("{stem}.{extension}"));
+        write_atomic(&target, &bytes).await?;
+        Ok(Some(target))
+    }
+
+    /// Removes every cached page list and image and returns how many entries went (behavior section 20.6).
+    pub async fn clear(&self) -> io::Result<usize> {
+        self.disk.clear().await
     }
 
     /// Bytes held by the cache.
@@ -284,6 +310,67 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, vec![format!("{}.0", hash_key("u"))]);
+    }
+
+    #[tokio::test]
+    async fn clear_removes_every_entry_and_counts_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = cache(tmp.path(), CACHE_SIZE).await;
+        cache.put_page_list(1, "c", &pages()).await;
+        cache.put_image("a", &[1u8; 30]).await.unwrap();
+        cache.put_image("b", &[2u8; 20]).await.unwrap();
+        assert_eq!(cache.clear().await.unwrap(), 3);
+        assert_eq!(cache.size().await, 0);
+        assert!(!cache.is_image_cached("a").await);
+        assert_eq!(cache.get_page_list(1, "c").await, None);
+        // Nothing left, so a second clear removes nothing.
+        assert_eq!(cache.clear().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn clear_leaves_part_files_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = cache(tmp.path(), CACHE_SIZE).await;
+        std::fs::write(cache.root().join("inflight.0.part"), b"half").unwrap();
+        cache.put_image("a", &[1u8; 8]).await.unwrap();
+        assert_eq!(cache.clear().await.unwrap(), 1);
+        assert!(cache.root().join("inflight.0.part").exists());
+    }
+
+    #[tokio::test]
+    async fn copy_of_a_cached_image_keeps_its_sniffed_extension() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = cache(tmp.path(), CACHE_SIZE).await;
+        let png = crate::testing::encode(&crate::testing::gradient(4, 4), image::ImageFormat::Png);
+        cache
+            .put_image("https://example.invalid/p/1", &png)
+            .await
+            .unwrap();
+        let dest = tmp.path().join("downloads");
+        let copied = cache
+            .copy_image_to("https://example.invalid/p/1", &dest, "001")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(copied, dest.join("001.png"));
+        assert_eq!(std::fs::read(&copied).unwrap(), png);
+    }
+
+    #[tokio::test]
+    async fn copy_of_an_unknown_format_uses_jpg_and_a_miss_is_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = cache(tmp.path(), CACHE_SIZE).await;
+        cache.put_image("u", b"not a known header").await.unwrap();
+        let dest = tmp.path().join("out");
+        let copied = cache.copy_image_to("u", &dest, "9").await.unwrap().unwrap();
+        assert_eq!(copied, dest.join("9.jpg"));
+        assert!(
+            cache
+                .copy_image_to("missing", &dest, "1")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]

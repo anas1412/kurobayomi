@@ -10,6 +10,8 @@ use std::time::Duration;
 use rusqlite::{Connection, ErrorCode};
 
 pub mod anime;
+pub mod anime_relation;
+pub mod custom_button;
 pub mod category;
 pub mod chapter;
 pub mod columns;
@@ -48,7 +50,7 @@ pub enum LookupOrInsert<T> {
 pub type LibraryState<T> = Result<Vec<T>, String>;
 
 /// Retries a library query makes after a transient SQLite lock (`GetLibraryManga.kt` retries after 0.5 s).
-pub(crate) const LIBRARY_RETRIES: u32 = 20;
+pub const LIBRARY_RETRIES: u32 = 20;
 
 /// Wait before each library retry.
 pub(crate) const LIBRARY_RETRY_DELAY: Duration = Duration::from_millis(500);

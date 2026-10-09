@@ -2,6 +2,7 @@
 //! model and repository, and the pure page builder that groups rows by category.
 
 pub mod active;
+pub mod columns;
 pub mod display_mode;
 pub mod filter;
 pub mod flags;
@@ -11,4 +12,5 @@ pub mod page;
 pub mod repo;
 pub mod restrictions;
 pub mod search;
+pub mod swipe;
 pub mod sort;

@@ -30,6 +30,9 @@ kuro-platform = { version = "0.1.0", path = "../kuro-platform" }
 icu_collator = "2"
 icu_locale = "2"
 jxl-oxide = { version = "0.11", features = ["image"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+quick-xml = "0.42.0"
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -15,7 +15,10 @@ use crate::natsort::natural_cmp_ci;
 /// Kotlin `getFormat(chapter)`: the chapter URL `<manga>/<entry>` resolved under `root` and classified. A URL without
 /// a `/`, a missing entry, or an unsafe URL is `ChapterNotFound`. An entry that is no folder, EPUB or archive is
 /// `InvalidFormat`.
-pub fn format_of_chapter(root: Option<&Path>, chapter_url: &str) -> Result<Format, LocalSourceError> {
+pub fn format_of_chapter(
+    root: Option<&Path>,
+    chapter_url: &str,
+) -> Result<Format, LocalSourceError> {
     if !chapter_url.contains('/') {
         return Err(LocalSourceError::ChapterNotFound);
     }
@@ -148,7 +151,10 @@ mod tests {
         let dir = show.join("Ch 1");
         assert_eq!(
             page_source(r, "Show/Ch 1").ok(),
-            Some(PageSource::Directory(vec![dir.join("2.jpg"), dir.join("10.png")]))
+            Some(PageSource::Directory(vec![
+                dir.join("2.jpg"),
+                dir.join("10.png")
+            ]))
         );
         assert_eq!(
             page_source(r, "Show/Ch 2.cbz").ok(),

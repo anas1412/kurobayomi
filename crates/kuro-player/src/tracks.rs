@@ -1,6 +1,10 @@
 //! Track selection values for `aid`, `sid` and `secondary-sid` (area 45, T-45a-015). mpv writes
 //! `no` for a disabled track and `auto` while it chooses one; the app uses `-1` for disabled.
 
+use std::path::Path;
+
+use crate::types::Track;
+
 /// Track id meaning "disabled" (`no` in mpv).
 pub const TRACK_NONE: i64 = -1;
 
@@ -109,6 +113,22 @@ pub struct DefaultTracks {
     pub aid: Option<i64>,
 }
 
+/// Subtitle choice for `id` (`selectSub`, behaviour 5.6). `current` is `(sid, secondary-sid)` and the
+/// result is the new pair. Picking the primary promotes the secondary, picking the secondary clears
+/// it, a new id becomes the secondary while a primary exists and the primary otherwise.
+pub fn select_sub(current: (i64, i64), id: i64) -> (i64, i64) {
+    let (primary, secondary) = current;
+    if id == primary {
+        (secondary, TRACK_NONE)
+    } else if id == secondary {
+        (primary, TRACK_NONE)
+    } else if primary != TRACK_NONE {
+        (primary, id)
+    } else {
+        (id, TRACK_NONE)
+    }
+}
+
 /// Picks the default tracks. `prefer` is the TrackSelect seam: given a list and whether it is the
 /// subtitle list, it returns the index of the preferred track. Subtitles fall back to the first
 /// track. Audio falls back to index 1, the first real track after "Off".
@@ -128,6 +148,138 @@ pub fn default_tracks(
         .and_then(|i| lists.audio.get(i))
         .map(|track| track.id);
     out
+}
+
+/// The commands that add a video's side tracks (T-45a-016), in Kotlin order: every audio track,
+/// then every subtitle track. `finish_now` is set when both lists are empty: nothing is loaded, so
+/// the caller finishes track loading at once (`onFinishLoadingTracks`, T-45a-084).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExternalTracks {
+    pub commands: Vec<Vec<String>>,
+    pub finish_now: bool,
+}
+
+pub fn external_track_commands(audio: &[Track], subtitles: &[Track]) -> ExternalTracks {
+    let add = |command: &str, track: &Track| {
+        vec![
+            command.to_owned(),
+            track.url.clone(),
+            "auto".to_owned(),
+            track.lang.clone(),
+        ]
+    };
+    let commands = audio
+        .iter()
+        .map(|track| add("audio-add", track))
+        .chain(subtitles.iter().map(|track| add("sub-add", track)))
+        .collect();
+    ExternalTracks {
+        commands,
+        finish_now: audio.is_empty() && subtitles.is_empty(),
+    }
+}
+
+/// The kind of track a user adds from a file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddKind {
+    Audio,
+    Subtitle,
+}
+
+/// The command that adds a track from a file (D section 7.3, behaviour 5.4): `audio-add` or
+/// `sub-add`, the path, `cached`, and the title when there is one.
+pub fn add_track_args(kind: AddKind, path: &str, title: Option<&str>) -> Vec<String> {
+    let command = match kind {
+        AddKind::Audio => "audio-add",
+        AddKind::Subtitle => "sub-add",
+    };
+    let mut args = vec![command.to_owned(), path.to_owned(), "cached".to_owned()];
+    args.extend(title.map(str::to_owned));
+    args
+}
+
+/// The command for a file the user picked (T-45b-072): the file name is the title. `None` when the
+/// path is not valid text, so no command is sent.
+pub fn add_file_args(kind: AddKind, path: &Path) -> Option<Vec<String>> {
+    let text = path.to_str()?;
+    let title = path.file_name().and_then(|name| name.to_str());
+    Some(add_track_args(kind, text, title))
+}
+
+#[cfg(test)]
+mod add_track_tests {
+    use super::*;
+
+    #[test]
+    fn add_commands_use_the_cached_form_with_an_optional_title() {
+        assert_eq!(
+            add_track_args(AddKind::Audio, "/m/a.aac", Some("a.aac")),
+            vec!["audio-add", "/m/a.aac", "cached", "a.aac"]
+        );
+        assert_eq!(
+            add_track_args(AddKind::Subtitle, "/m/s.ass", None),
+            vec!["sub-add", "/m/s.ass", "cached"]
+        );
+    }
+
+    #[test]
+    fn a_picked_file_takes_its_name_as_the_title() {
+        assert_eq!(
+            add_file_args(AddKind::Subtitle, Path::new("/home/u/subs/en.srt")),
+            Some(vec![
+                "sub-add".to_owned(),
+                "/home/u/subs/en.srt".to_owned(),
+                "cached".to_owned(),
+                "en.srt".to_owned(),
+            ])
+        );
+    }
+}
+
+#[cfg(test)]
+mod external_track_tests {
+    use super::*;
+
+    fn track(url: &str, lang: &str) -> Track {
+        Track {
+            url: url.to_owned(),
+            lang: lang.to_owned(),
+        }
+    }
+
+    #[test]
+    fn audio_then_subtitles_in_order() {
+        let out = external_track_commands(
+            &[track("https://a/1.aac", "ja")],
+            &[
+                track("https://s/1.vtt", "en"),
+                track("https://s/2.vtt", "fr"),
+            ],
+        );
+        assert_eq!(
+            out.commands,
+            vec![
+                vec!["audio-add", "https://a/1.aac", "auto", "ja"],
+                vec!["sub-add", "https://s/1.vtt", "auto", "en"],
+                vec!["sub-add", "https://s/2.vtt", "auto", "fr"],
+            ]
+        );
+        assert!(!out.finish_now);
+    }
+
+    #[test]
+    fn empty_lists_finish_loading_at_once() {
+        let out = external_track_commands(&[], &[]);
+        assert!(out.commands.is_empty());
+        assert!(out.finish_now);
+    }
+
+    #[test]
+    fn one_empty_list_still_sends_the_other() {
+        let out = external_track_commands(&[], &[track("https://s/1.vtt", "en")]);
+        assert_eq!(out.commands.len(), 1);
+        assert!(!out.finish_now);
+    }
 }
 
 #[cfg(test)]
@@ -281,5 +433,26 @@ mod tests {
         };
         let out = default_tracks(&load_track_lists(&fake), |_, _| None);
         assert_eq!(out, DefaultTracks::default());
+    }
+
+    #[test]
+    fn picking_the_primary_promotes_the_secondary() {
+        assert_eq!(select_sub((2, 5), 2), (5, TRACK_NONE));
+    }
+
+    #[test]
+    fn picking_the_secondary_clears_it() {
+        assert_eq!(select_sub((2, 5), 5), (2, TRACK_NONE));
+    }
+
+    #[test]
+    fn a_new_id_is_the_secondary_when_a_primary_exists() {
+        assert_eq!(select_sub((2, TRACK_NONE), 7), (2, 7));
+    }
+
+    #[test]
+    fn a_new_id_is_the_primary_when_none_is_set() {
+        assert_eq!(select_sub((TRACK_NONE, TRACK_NONE), 3), (3, TRACK_NONE));
+        assert_eq!(select_sub((TRACK_NONE, 4), 3), (3, TRACK_NONE));
     }
 }

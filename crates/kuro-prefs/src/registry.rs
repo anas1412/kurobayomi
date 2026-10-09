@@ -169,6 +169,13 @@ pub fn lookup(key: &str) -> Option<(&'static PrefMeta, Option<&str>)> {
         })
 }
 
+/// Hidden search terms of a preference: its TOML table and its Rust field name. The settings search matches them
+/// too, so "tapping" finds `reader.pager_nav_inverted`. `None` for a key the registry does not know.
+pub fn search_terms(key: &str) -> Option<[&'static str; 2]> {
+    let (meta, _) = lookup(key)?;
+    Some([meta.table, meta.field])
+}
+
 /// Finds the registry row for a `table.field` path (`library.display_mode`,
 /// `player.gestures.gesture_horizontal_seek`). The field is the TOML name after the last dot.
 pub fn find_path(path: &str) -> Option<&'static PrefMeta> {
@@ -178,7 +185,7 @@ pub fn find_path(path: &str) -> Option<&'static PrefMeta> {
 
 /// Plan `pref_torrserver_tackers` default: 26 announce URLs, spaces removed, newline-joined,
 /// no trailing newline (p1-data-and-config.md section 6.1).
-const TORRSERVER_TRACKERS: &str = concat!(
+pub const TORRSERVER_TRACKERS: &str = concat!(
     "http://nyaa.tracker.wf:7777/announce\n",
     "http://anidex.moe:6969/announce\n",
     "http://tracker.anirena.com:80/announce\n",
@@ -241,7 +248,6 @@ define_prefs! {
     "pinned_catalogues", Normal, Set, &[], "sources", "pinned_manga_sources";
     "__APP_STATE_last_anime_catalogue_source", AppState, Long, -1, "sources", "last_used_anime_source";
     "__APP_STATE_last_catalogue_source", AppState, Long, -1, "sources", "last_used_manga_source";
-    "animeext_updates_count", Normal, Int, 0, "sources", "anime_extension_updates_count";
     "ext_updates_count", Normal, Int, 0, "sources", "manga_extension_updates_count";
     "browse_hide_in_anime_library_items", Normal, Bool, false, "sources", "hide_in_anime_library_items";
     "browse_hide_in_library_items", Normal, Bool, false, "sources", "hide_in_manga_library_items";
@@ -537,6 +543,7 @@ define_prefs! {
     "pref_mpv_conf", Normal, Str, "", "player.advanced", "mpv_conf";
     "pref_mpv_input", Normal, Str, "", "player.advanced", "mpv_input";
     "pref_player_statistics_page", Normal, Int, 0, "player.advanced", "player_statistics_page";
+    "show_not_runnable", Normal, Bool, false, "sources", "show_not_runnable";
 }
 
 #[cfg(test)]
@@ -565,7 +572,8 @@ mod tests {
                     .trim_matches('`')
                     .replace("${tracker.id}", "{id}")
                     .replace("${id}", "{id}");
-                Some((
+                // T-19a-064: the anime update badge count is derived in memory, never registered
+                (key != "animeext_updates_count").then(|| (
                     key,
                     cells[4].to_owned(),
                     cells[5].to_owned(),
@@ -636,10 +644,12 @@ mod tests {
     ];
 
     #[test]
-    fn registry_has_the_328_plan_rows_in_order() {
+    fn registry_has_the_327_plan_rows_in_order() {
         let rows = plan_rows();
-        assert_eq!(rows.len(), 328);
-        assert_eq!(REGISTRY.len(), rows.len());
+        assert_eq!(rows.len(), 327, "the plan's 328 rows minus the derived animeext_updates_count");
+        // one Kurobayomi row after the plan's rows: `show_not_runnable` (T-19a-066)
+        assert_eq!(REGISTRY.len(), rows.len() + 1);
+        assert_eq!(REGISTRY[rows.len()].key, "show_not_runnable");
         let mut pinned = 0;
         for (meta, (key, store, kind, default)) in REGISTRY.iter().zip(&rows) {
             assert_eq!(meta.key, key);
@@ -665,6 +675,12 @@ mod tests {
             }
         }
         assert_eq!(pinned, PROSE_DEFAULTS.len());
+    }
+
+    #[test]
+    fn search_terms_name_the_table_and_the_field_of_a_key() {
+        assert_eq!(search_terms("reader_tapping_inverted"), Some(["reader", "pager_nav_inverted"]));
+        assert_eq!(search_terms("no_such_key"), None);
     }
 
     #[test]

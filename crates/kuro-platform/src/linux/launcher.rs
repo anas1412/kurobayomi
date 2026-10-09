@@ -1,0 +1,69 @@
+//! Launcher badge for unread updates (T-01a-025). The count goes out as the `com.canonical.Unity.LauncherEntry`
+//! `Update` signal, which docks and taskbars read for the badge. Without a known desktop file name nothing is sent.
+
+use std::collections::HashMap;
+
+use zbus::zvariant::Value;
+use zbus::Connection;
+
+const INTERFACE: &str = "com.canonical.Unity.LauncherEntry";
+const SIGNAL: &str = "Update";
+
+/// The badge at one moment: the unread count and whether the badge shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Badge {
+    pub count: i64,
+    pub visible: bool,
+}
+
+/// The badge for `unread` updates in the 3-month window. The badge is hidden when the count is 0 (cleared) and
+/// while the app lock is on, as the locked widget state does.
+pub fn badge(unread: i64, app_locked: bool) -> Badge {
+    Badge { count: unread.max(0), visible: unread > 0 && !app_locked }
+}
+
+/// The `application://` URI of a desktop file name (`kurobayomi.desktop`).
+pub fn app_uri(desktop_file: &str) -> String {
+    format!("application://{desktop_file}")
+}
+
+/// The signal properties for a badge: `count` and `count-visible`.
+pub fn properties(badge: Badge) -> HashMap<&'static str, Value<'static>> {
+    HashMap::from([("count", Value::from(badge.count)), ("count-visible", Value::from(badge.visible))])
+}
+
+/// Publishes the badge on the session bus. A failure to reach the bus is logged at DEBUG and otherwise ignored.
+pub async fn publish(desktop_file: &str, badge: Badge) {
+    let Ok(conn) = Connection::session().await else {
+        tracing::debug!("launcher badge: no session bus");
+        return;
+    };
+    let body = (app_uri(desktop_file), properties(badge));
+    let sent = conn
+        .emit_signal(None::<&str>, "/", INTERFACE, SIGNAL, &body)
+        .await;
+    if let Err(err) = sent {
+        tracing::debug!(%err, "launcher badge signal not sent");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_badge_is_cleared_at_zero_and_hidden_while_locked() {
+        assert_eq!(badge(0, false), Badge { count: 0, visible: false });
+        assert_eq!(badge(4, true), Badge { count: 4, visible: false });
+        assert_eq!(badge(4, false), Badge { count: 4, visible: true });
+        assert_eq!(badge(-2, false), Badge { count: 0, visible: false });
+    }
+
+    #[test]
+    fn the_uri_and_the_properties_carry_the_count() {
+        assert_eq!(app_uri("kurobayomi.desktop"), "application://kurobayomi.desktop");
+        let props = properties(Badge { count: 3, visible: true });
+        assert_eq!(props.get("count"), Some(&Value::from(3_i64)));
+        assert_eq!(props.get("count-visible"), Some(&Value::from(true)));
+    }
+}

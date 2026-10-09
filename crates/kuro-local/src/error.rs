@@ -13,6 +13,12 @@ pub enum LocalSourceError {
     /// The entry exists but is neither a folder, an EPUB nor a manga archive (behavior 10.1).
     #[error("Invalid chapter format")]
     InvalidFormat,
+    /// `ComicInfo.xml` is malformed, has the wrong root, or is empty (behavior 19.4, E-CI-7, E-CI-8).
+    #[error("invalid ComicInfo.xml: {0}")]
+    Xml(String),
+    /// `chapters.json`, `episodes.json` or `details.json` does not decode (area:14 section 20).
+    #[error("invalid JSON: {0}")]
+    Json(#[from] serde_json::Error),
     #[error(transparent)]
     Io(#[from] io::Error),
 }

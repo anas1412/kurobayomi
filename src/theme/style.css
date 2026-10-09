@@ -1,0 +1,5 @@
+/* Base stylesheet: loaded once at APPLICATION priority, before the palette (T-49ba-001).
+ * Only GTK default named colours are referenced here (T-49ba-045). Palette rules override these. */
+.kb-secondary-item { opacity: 0.78; }
+.kb-cover-placeholder { background-color: rgba(136, 136, 136, 0.1216); }
+/* The selection and active tints are dark-aware: style::system_rules or style::palette_rules emit them. */

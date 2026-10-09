@@ -453,6 +453,24 @@ async fn an_update_without_an_available_entry_emits_nothing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn update_all_enqueues_in_order_and_skips_rows_already_installing() {
+    let bytes = package(PKG, 7);
+    let server = serve(vec![Reply::Stall]).await;
+    let rig = new_rig(|_| {});
+    let row = |pkg: &str| request_for(pkg, &bytes, &key(1), &server.url);
+    assert_eq!(rig.installer.install(row("eu.example.a")).unwrap(), Enqueued::Started);
+    let started = rig.installer.update_all(vec![row("eu.example.a"), row("eu.example.b"), row("eu.example.c")]);
+    assert_eq!(started, vec!["eu.example.b", "eu.example.c"]);
+    let pending: Vec<String> = std::iter::from_fn(|| rig.rx.try_recv().ok())
+        .filter_map(|e| match e {
+            InstallEvent::Step { pkg, step: InstallStep::Pending } => Some(pkg),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(pending, vec!["eu.example.a", "eu.example.b", "eu.example.c"], "one Pending per package, in order");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_request_that_could_climb_out_of_the_cache_is_refused() {
     let bytes = package(PKG, 7);
     let server = serve(vec![Reply::Ok(bytes.clone())]).await;

@@ -34,6 +34,16 @@ impl<T> TriState<T> {
             Self::Exclude(v) => Self::None(v),
         }
     }
+
+    /// The GTK check button state for this value: `(active, inconsistent)`. None is off, Include is ticked and
+    /// Exclude shows the dash (inconsistent).
+    pub fn gtk_flags(&self) -> (bool, bool) {
+        match self {
+            Self::None(_) => (false, false),
+            Self::Include(_) => (true, false),
+            Self::Exclude(_) => (false, true),
+        }
+    }
 }
 
 /// `Checked` exactly when `condition` holds for the value.
@@ -68,6 +78,13 @@ mod tests {
         assert_eq!(TriState::None(1).next(), TriState::Include(1));
         assert_eq!(TriState::Include(1).next(), TriState::Exclude(1));
         assert_eq!(TriState::Exclude(1).next(), TriState::None(1));
+    }
+
+    #[test]
+    fn gtk_flags_show_off_tick_and_dash() {
+        assert_eq!(TriState::None(1).gtk_flags(), (false, false));
+        assert_eq!(TriState::Include(1).gtk_flags(), (true, false));
+        assert_eq!(TriState::Exclude(1).gtk_flags(), (false, true));
     }
 
     #[test]

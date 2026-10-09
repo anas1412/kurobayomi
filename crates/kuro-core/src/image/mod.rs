@@ -17,8 +17,9 @@
 //!   wrapper under the `archive` feature; the spike T-13a-031 has not run, so no binding exists yet.
 
 use std::io::Cursor;
+use std::path::{Path, PathBuf};
 
-use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, RgbImage, RgbaImage};
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, RgbImage, RgbaImage, imageops};
 use jxl_oxide::integration::JxlDecoder;
 
 /// Size of the head buffer the Kotlin decoder reads (`ImageUtil.getImageType`).
@@ -248,6 +249,191 @@ pub fn is_wide_image(bytes: &[u8]) -> Result<bool, ImageError> {
     dimensions(bytes).map(|(w, h)| is_wide(w, h))
 }
 
+/// Which half of a spread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+impl Side {
+    fn swapped(self) -> Self {
+        match self {
+            Side::Left => Side::Right,
+            Side::Right => Side::Left,
+        }
+    }
+}
+
+/// Half `part` of a `width` x `height` image as a crop rectangle `(x, 0, width / 2, height)`. For an odd width
+/// the middle column belongs to neither half.
+fn half_rect(width: u32, side: Side) -> (u32, u32) {
+    let half = width / 2;
+    (if side == Side::Right { width - half } else { 0 }, half)
+}
+
+/// `splitInHalf`: the `W/2 x H` half of a spread (`5 x 1` Right gives columns 3 and 4).
+pub fn split_in_half(img: &RgbaImage, side: Side) -> RgbaImage {
+    let (x, half) = half_rect(img.width(), side);
+    imageops::crop_imm(img, x, 0, half, img.height()).to_image()
+}
+
+/// Which half the pager shows for a page of a spread (`PagerPageHolder`): a left-to-right viewer shows the
+/// first (non-inserted) half on the left and the inserted page on the right; every other viewer is the
+/// reverse. `dual_page_invert` swaps the result.
+pub fn pager_split_side(left_to_right_viewer: bool, is_insert_page: bool, dual_page_invert: bool) -> Side {
+    let side = if left_to_right_viewer == is_insert_page { Side::Right } else { Side::Left };
+    if dual_page_invert { side.swapped() } else { side }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rotation {
+    Cw90,
+    Ccw90,
+}
+
+impl Rotation {
+    /// The signed angle the Kotlin caller passes (positive is clockwise).
+    pub fn degrees(self) -> i32 {
+        match self {
+            Rotation::Cw90 => 90,
+            Rotation::Ccw90 => -90,
+        }
+    }
+}
+
+/// `rotateImage` for the two angles any caller uses: exact quarter turns, no resampling.
+pub fn rotate_quarter(img: &RgbaImage, rotation: Rotation) -> RgbaImage {
+    match rotation {
+        Rotation::Cw90 => imageops::rotate90(img),
+        Rotation::Ccw90 => imageops::rotate270(img),
+    }
+}
+
+/// The sign rule of dual-page rotate-to-fit: `-90` when `dualPageRotateToFitInvert`, else `90`.
+pub fn rotation_for_fit(invert: bool) -> Rotation {
+    if invert { Rotation::Ccw90 } else { Rotation::Cw90 }
+}
+
+/// `splitAndMerge`: a `W/2 x 2H` page with the `upper` half on top and the other half below.
+pub fn split_and_merge(img: &RgbaImage, upper: Side) -> RgbaImage {
+    let (w, h) = (img.width() / 2, img.height());
+    let mut out = RgbaImage::new(w, h * 2);
+    imageops::replace(&mut out, &split_in_half(img, upper), 0, 0);
+    imageops::replace(&mut out, &split_in_half(img, upper.swapped()), 0, i64::from(h));
+    out
+}
+
+/// The webtoon side rule: `upper = Left` when `dualPageInvert`, else `Right`.
+pub fn webtoon_upper_side(dual_page_invert: bool) -> Side {
+    if dual_page_invert { Side::Left } else { Side::Right }
+}
+
+/// One part of a tall image: rows `top..bottom`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TallPart {
+    pub index: u32,
+    pub top: u32,
+    pub bottom: u32,
+}
+
+/// `isTallImage`: `H / W > 3` with integer division (500 x 2000 splits, 500 x 1999 does not).
+pub fn is_tall(width: u32, height: u32) -> bool {
+    width > 0 && height / width > 3
+}
+
+/// The `splitData` loop. `optimal_height` is twice the largest monitor side in pixels. The last part takes the
+/// remainder, and an image exactly `optimal_height` tall is one part.
+pub fn tall_split_plan(height: u32, optimal_height: u32) -> Vec<TallPart> {
+    if height == 0 {
+        return Vec::new();
+    }
+    let part_count = (height - 1) / optimal_height.max(1) + 1;
+    let each = height / part_count;
+    (0..part_count)
+        .map(|index| {
+            let top = index * each;
+            let bottom = if index == part_count - 1 { height } else { top + each };
+            TallPart { index, top, bottom }
+        })
+        .collect()
+}
+
+/// `007__001.jpg` for prefix `007` and index 0 (`%03d`, so four digits past 999).
+pub fn split_part_name(prefix: &str, index: u32) -> String {
+    format!("{prefix}__{:03}.jpg", index + 1)
+}
+
+fn io_err(e: std::io::Error) -> ImageError {
+    ImageError::Encode(e.to_string())
+}
+
+/// `splitTallImage`: splits the page file `src` into `<prefix>__NNN.jpg` parts (JPEG quality 100) in `dst_dir`
+/// and removes `src`. Returns the part paths, or an empty list when nothing needed splitting (animated or not
+/// tall). A failure removes every part for the prefix, keeps `src` and returns the error; the download caller
+/// ignores it, as the Kotlin ignores the boolean.
+pub fn split_tall(
+    src: &Path,
+    dst_dir: &Path,
+    prefix: &str,
+    optimal_height: u32,
+) -> Result<Vec<PathBuf>, ImageError> {
+    let bytes = std::fs::read(src).map_err(|e| ImageError::Decode(e.to_string()))?;
+    if is_animated_supported(sniff(&bytes)) {
+        return Ok(Vec::new());
+    }
+    let (w, h) = dimensions(&bytes)?;
+    if !is_tall(w, h) {
+        return Ok(Vec::new());
+    }
+    let plan = tall_split_plan(h, optimal_height);
+    let result = write_parts(&bytes, dst_dir, prefix, &plan);
+    match result {
+        Ok(paths) => {
+            std::fs::remove_file(src).map_err(io_err)?;
+            Ok(paths)
+        }
+        Err(e) => {
+            for part in &plan {
+                let _ = std::fs::remove_file(dst_dir.join(split_part_name(prefix, part.index)));
+            }
+            Err(e)
+        }
+    }
+}
+
+fn write_parts(bytes: &[u8], dst_dir: &Path, prefix: &str, plan: &[TallPart]) -> Result<Vec<PathBuf>, ImageError> {
+    let img = decode_rgba(bytes)?;
+    std::fs::create_dir_all(dst_dir).map_err(io_err)?;
+    let mut paths = Vec::with_capacity(plan.len());
+    for part in plan {
+        let strip = imageops::crop_imm(&img, 0, part.top, img.width(), part.bottom - part.top).to_image();
+        let path = dst_dir.join(split_part_name(prefix, part.index));
+        let temp = path.with_extension("jpg.tmp");
+        std::fs::write(&temp, encode_jpeg_q100(&strip)?).map_err(io_err)?;
+        if let Err(e) = std::fs::rename(&temp, &path) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(io_err(e));
+        }
+        paths.push(path);
+    }
+    Ok(paths)
+}
+
+/// `split_tall` behind the `split_tall_images` download preference: when it is off nothing is read or changed.
+pub fn split_tall_if_enabled(
+    enabled: bool,
+    src: &Path,
+    dst_dir: &Path,
+    prefix: &str,
+    optimal_height: u32,
+) -> Result<Vec<PathBuf>, ImageError> {
+    if !enabled {
+        return Ok(Vec::new());
+    }
+    split_tall(src, dst_dir, prefix, optimal_height)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,5 +658,182 @@ mod tests {
         assert!(!is_wide(800, 1200));
         // The edge-case table lists 1000 x 800 as false. That contradicts width > height and is not applied.
         assert!(is_wide(1000, 800));
+    }
+
+    /// A `w` x 1 image whose red channel is the column number.
+    fn columns(w: u32, h: u32) -> RgbaImage {
+        RgbaImage::from_fn(w, h, |x, _| Rgba([(x as u8).wrapping_mul(10), 0, 0, 255]))
+    }
+
+    fn first_row_reds(img: &RgbaImage) -> Vec<u8> {
+        (0..img.width()).map(|x| img.get_pixel(x, 0)[0]).collect()
+    }
+
+    #[test]
+    fn split_in_half_takes_the_column_ranges_of_the_spec() {
+        let img = columns(25, 2);
+        assert_eq!(first_row_reds(&split_in_half(&img, Side::Left)), (0..12).map(|x| x * 10).collect::<Vec<u8>>());
+        // 25 wide: Right starts at 25 - 12 = 13, the middle column 12 is dropped.
+        assert_eq!(first_row_reds(&split_in_half(&img, Side::Right)), (13..25).map(|x| x * 10).collect::<Vec<u8>>());
+        let five = columns(5, 1);
+        let right = split_in_half(&five, Side::Right);
+        assert_eq!((right.width(), right.height()), (2, 1));
+        assert_eq!(first_row_reds(&right), vec![30, 40]);
+        assert_eq!(first_row_reds(&split_in_half(&five, Side::Left)), vec![0, 10]);
+        let wide = split_in_half(&RgbaImage::new(1000, 600), Side::Right);
+        assert_eq!((wide.width(), wide.height()), (500, 600));
+    }
+
+    #[test]
+    fn split_output_encodes_as_jpeg_q100() {
+        let jpg = encode_jpeg_q100(&split_in_half(&columns(20, 4), Side::Left)).unwrap();
+        assert_eq!(sniff(&jpg).map(|s| s.kind), Some(ImageKind::Jpeg));
+        assert_eq!(dimensions(&jpg).unwrap(), (10, 4));
+    }
+
+    #[test]
+    fn pager_side_table_covers_all_eight_combinations() {
+        use Side::{Left, Right};
+        // (left_to_right_viewer, is_insert_page, invert) -> side
+        let table = [
+            (true, true, false, Right),
+            (false, true, false, Left),
+            (true, false, false, Left),
+            (false, false, false, Right),
+            (true, true, true, Left),
+            (false, true, true, Right),
+            (true, false, true, Right),
+            (false, false, true, Left),
+        ];
+        for (l2r, insert, invert, want) in table {
+            assert_eq!(pager_split_side(l2r, insert, invert), want, "{l2r} {insert} {invert}");
+        }
+    }
+
+    #[test]
+    fn rotate_quarter_swaps_dimensions_and_ccw_reverses_cw() {
+        let img = columns(300, 200);
+        let cw = rotate_quarter(&img, Rotation::Cw90);
+        assert_eq!((cw.width(), cw.height()), (200, 300));
+        assert_eq!(rotate_quarter(&cw, Rotation::Ccw90), img);
+        // Clockwise: the top-left pixel moves to the top-right corner.
+        assert_eq!(cw.get_pixel(199, 0), img.get_pixel(0, 0));
+        let ccw = rotate_quarter(&img, Rotation::Ccw90);
+        assert_eq!(ccw.get_pixel(0, 299), img.get_pixel(0, 0));
+    }
+
+    #[test]
+    fn rotation_sign_rule() {
+        assert_eq!(rotation_for_fit(false), Rotation::Cw90);
+        assert_eq!(rotation_for_fit(true), Rotation::Ccw90);
+        assert_eq!(rotation_for_fit(false).degrees(), 90);
+        assert_eq!(rotation_for_fit(true).degrees(), -90);
+    }
+
+    #[test]
+    fn split_and_merge_puts_the_named_half_on_top() {
+        let img = RgbaImage::from_fn(1000, 600, |x, _| if x < 500 { Rgba([255, 0, 0, 255]) } else { Rgba([0, 0, 255, 255]) });
+        let right_top = split_and_merge(&img, Side::Right);
+        assert_eq!((right_top.width(), right_top.height()), (500, 1200));
+        assert_eq!(right_top.get_pixel(0, 0), &Rgba([0, 0, 255, 255]));
+        assert_eq!(right_top.get_pixel(499, 599), &Rgba([0, 0, 255, 255]));
+        assert_eq!(right_top.get_pixel(0, 600), &Rgba([255, 0, 0, 255]));
+        let left_top = split_and_merge(&img, Side::Left);
+        assert_eq!(left_top.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+        assert_eq!(left_top.get_pixel(0, 1199), &Rgba([0, 0, 255, 255]));
+    }
+
+    #[test]
+    fn webtoon_side_rule() {
+        assert_eq!(webtoon_upper_side(false), Side::Right);
+        assert_eq!(webtoon_upper_side(true), Side::Left);
+    }
+
+    fn plan(h: u32, optimal: u32) -> Vec<(u32, u32, u32)> {
+        tall_split_plan(h, optimal).iter().map(|p| (p.index, p.top, p.bottom)).collect()
+    }
+
+    #[test]
+    fn tall_split_plan_matches_section_10_4() {
+        assert_eq!(plan(10000, 4320), vec![(0, 0, 3333), (1, 3333, 6666), (2, 6666, 10000)]);
+        assert_eq!(plan(4320, 4320), vec![(0, 0, 4320)]);
+        assert_eq!(plan(4321, 4320), vec![(0, 0, 2160), (1, 2160, 4321)]);
+        assert!(plan(0, 4320).is_empty());
+    }
+
+    #[test]
+    fn tall_trigger_is_integer_division_greater_than_three() {
+        assert!(is_tall(500, 2000));
+        assert!(!is_tall(500, 1999));
+        assert!(!is_tall(0, 1000));
+    }
+
+    #[test]
+    fn split_part_names_use_three_digits_then_grow() {
+        assert_eq!(split_part_name("007", 0), "007__001.jpg");
+        assert_eq!(split_part_name("007", 999), "007__1000.jpg");
+    }
+
+    fn write_png(dir: &Path, name: &str, w: u32, h: u32) -> PathBuf {
+        let path = dir.join(name);
+        let img = RgbaImage::from_fn(w, h, |x, y| Rgba([(x * 7) as u8, (y * 3) as u8, 128, 255]));
+        std::fs::write(&path, encode(DynamicImage::ImageRgba8(img), ImageFormat::Png)).unwrap();
+        path
+    }
+
+    #[test]
+    fn split_tall_writes_parts_and_removes_the_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = write_png(dir.path(), "007.png", 10, 100);
+        let parts = split_tall(&src, dir.path(), "007", 40).unwrap();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].file_name().unwrap(), "007__001.jpg");
+        assert!(!src.exists());
+        let heights: Vec<u32> = parts.iter().map(|p| dimensions(&std::fs::read(p).unwrap()).unwrap().1).collect();
+        assert_eq!(heights, vec![33, 33, 34]);
+    }
+
+    #[test]
+    fn split_tall_leaves_wide_enough_and_animated_images_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let squat = write_png(dir.path(), "a.png", 10, 39);
+        assert!(split_tall(&squat, dir.path(), "a", 40).unwrap().is_empty());
+        assert!(squat.exists());
+        let gif = dir.path().join("b.gif");
+        std::fs::write(&gif, b"GIF89a").unwrap();
+        assert!(split_tall(&gif, dir.path(), "b", 40).unwrap().is_empty());
+        assert!(gif.exists());
+    }
+
+    #[test]
+    fn split_tall_failure_removes_the_parts_and_keeps_the_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = write_png(dir.path(), "007.png", 10, 100);
+        // A folder where part 2 belongs makes the rename of that part fail after part 1 was written.
+        std::fs::create_dir(dir.path().join("007__002.jpg")).unwrap();
+        assert!(split_tall(&src, dir.path(), "007", 40).is_err());
+        assert!(src.exists());
+        assert!(!dir.path().join("007__001.jpg").exists());
+        assert!(!dir.path().join("007__003.jpg").exists());
+    }
+
+    #[test]
+    fn split_tall_keeps_a_corrupted_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = write_png(dir.path(), "007.png", 10, 100);
+        let bytes = std::fs::read(&src).unwrap();
+        std::fs::write(&src, &bytes[..bytes.len() / 2]).unwrap();
+        assert!(split_tall(&src, dir.path(), "007", 40).is_err());
+        assert!(src.exists());
+        assert!(!dir.path().join("007__001.jpg").exists());
+    }
+
+    #[test]
+    fn split_tall_setting_off_does_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = write_png(dir.path(), "007.png", 10, 100);
+        assert!(split_tall_if_enabled(false, &src, dir.path(), "007", 40).unwrap().is_empty());
+        assert!(src.exists());
+        assert_eq!(split_tall_if_enabled(true, &src, dir.path(), "007", 40).unwrap().len(), 3);
     }
 }

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use kuro_platform::paths::Paths;
 
 use crate::anime::abi::{AbiVersion, SUPPORTED_ABI};
+use crate::anime::logs;
 use crate::anime::model::{AnimeSourceRef, Installed, LoadError, LoadResult, SignerDigest, StoreRow, Untrusted};
 use crate::anime::package;
 use crate::anime::store::wire::ContentWarning;
@@ -125,15 +126,22 @@ pub fn load_package(path: &Path, ctx: &LoadContext<'_>) -> LoadResult {
     }
 }
 
-/// The log text of each failure, as Aniyomi writes it (`p1-data-and-config.md` section 11).
+/// The log text of each failure, as Aniyomi writes it (`p1-data-and-config.md` section 11). `NotSigned` and
+/// `NsfwNotAllowed` are logged as WARN inside `check`, so they get no second event here. The extension name is only
+/// known once the manifest is read, so a failure before that (an unreadable container or manifest) fills `extName`
+/// with the package name taken from the file name.
 fn log_load_error(error: &LoadError, path: &Path) {
+    let file_pkg = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
     match error {
-        LoadError::MissingVersionName(name) => tracing::warn!("Missing versionName for extension {name}"),
+        LoadError::NotFound(pkg) => tracing::error!(pkg = %pkg, "{}", logs::package_not_found(pkg)),
+        // The variant carries the extension name, as the Kotlin text does.
+        LoadError::MissingVersionName(name) => tracing::warn!(pkg = %file_pkg, "{}", logs::missing_version_name(name)),
         LoadError::UnsupportedAbi(abi) => {
             let supported: Vec<String> = SUPPORTED_ABI.iter().map(ToString::to_string).collect();
-            tracing::warn!("Lib version is {abi}, while only version(s) {} are supported", supported.join(", "));
+            tracing::warn!(pkg = %file_pkg, "{}", logs::lib_version(abi, &supported));
         }
-        other => tracing::error!(path = %path.display(), "Extension load error: {other}"),
+        LoadError::NotSigned(_) | LoadError::NsfwNotAllowed(_) => {}
+        other => tracing::error!(pkg = %file_pkg, reason = %other, "{}", logs::load_error(&file_pkg, &file_pkg)),
     }
 }
 
@@ -142,26 +150,27 @@ fn check(path: &Path, ctx: &LoadContext<'_>) -> Result<LoadResult, LoadError> {
     let manifest = package.manifest;
     let pkg = manifest.pkg.clone();
     let Some(signer) = read_signer(&path.with_extension(SIGNER_EXT)) else {
-        tracing::warn!("Package {pkg} isn't signed");
+        tracing::warn!(pkg = %pkg, "{}", logs::not_signed(&pkg));
         return Err(LoadError::NotSigned(pkg));
     };
     let abi = AbiVersion::parse(&manifest.abi).ok_or_else(|| LoadError::Manifest("abi".into()))?;
     let name = manifest.name.trim().to_owned();
+    // The same rule the store listing applies to a content warning (TST-19-036).
+    let nsfw = ContentWarning::from(manifest.nsfw).is_nsfw();
     if !ctx.trust.is_trusted(&pkg, manifest.version_code, std::slice::from_ref(&signer), ctx.stores) {
-        tracing::warn!("Extension {pkg} isn't trusted");
+        tracing::warn!(pkg = %pkg, "{}", logs::untrusted(&pkg));
         return Ok(LoadResult::Untrusted(Untrusted {
             name,
             pkg,
             version_name: manifest.version_name,
             version_code: manifest.version_code,
             abi,
+            nsfw,
             signer,
         }));
     }
-    // The same rule the store listing applies to a content warning (TST-19-036).
-    let nsfw = ContentWarning::from(manifest.nsfw).is_nsfw();
     if nsfw && !ctx.nsfw_allowed {
-        tracing::warn!("NSFW extension {pkg} not allowed");
+        tracing::warn!(pkg = %pkg, "{}", logs::nsfw_not_allowed(&pkg));
         return Err(LoadError::NsfwNotAllowed(pkg));
     }
     let sources = manifest
@@ -272,6 +281,56 @@ mod tests {
         let trust = trust_with_entries(&[]);
         let ctx = LoadContext { trust: &trust, stores: &[], nsfw_allowed: true };
         assert_eq!(load_package(&path, &ctx), LoadResult::Error(LoadError::NotSigned(PKG.into())));
+    }
+
+    #[test]
+    fn tst_19_060_a_load_failure_logs_the_kotlin_text_with_the_package_field() {
+        use crate::anime::testkit::capture;
+        let root = tempfile::tempdir().unwrap();
+        let fixture = signed_package(&fixture_key(), MANIFEST, b"\0asm");
+        let path = place(root.path(), PKG, &fixture);
+        fs::remove_file(path.with_extension(SIGNER_EXT)).unwrap();
+        let trust = trust_with_entries(&[]);
+        let ctx = LoadContext { trust: &trust, stores: &[], nsfw_allowed: true };
+        let (_, logged) = capture(|| load_package(&path, &ctx));
+        let message = format!("Package {PKG} isn't signed");
+        assert_eq!(logged.len(), 1, "one event per failure: {logged:?}");
+        let event = &logged[0];
+        assert_eq!(event.message, message);
+        assert_eq!(event.level, tracing::Level::WARN);
+        assert!(event.fields.iter().any(|(name, value)| name == "pkg" && value == PKG));
+    }
+
+    #[test]
+    fn tst_19_060_a_nsfw_refusal_logs_one_warn_and_no_error() {
+        use crate::anime::testkit::capture;
+        let root = tempfile::tempdir().unwrap();
+        let manifest = MANIFEST.replace("\"nsfw\": false", "\"nsfw\": true");
+        assert_ne!(manifest, MANIFEST, "the package was made NSFW");
+        let fixture = signed_package(&fixture_key(), &manifest, b"\0asm");
+        let path = place(root.path(), PKG, &fixture);
+        let stores = [store_for(&fixture.signer_hex)];
+        let trust = trust_with_entries(&[]);
+        let ctx = LoadContext { trust: &trust, stores: &stores, nsfw_allowed: false };
+        let (result, logged) = capture(|| load_package(&path, &ctx));
+        assert!(matches!(result, LoadResult::Error(LoadError::NsfwNotAllowed(_))), "{result:?}");
+        assert_eq!(logged.len(), 1, "one event per failure: {logged:?}");
+        assert_eq!(logged[0].message, format!("NSFW extension {PKG} not allowed"));
+        assert_eq!(logged[0].level, tracing::Level::WARN);
+    }
+
+    #[test]
+    fn tst_19_060_an_unreadable_container_logs_the_load_error_text_once() {
+        use crate::anime::testkit::capture;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("eu.example.broken.kuroext");
+        fs::write(&path, b"not a zip").unwrap();
+        let trust = trust_with_entries(&[]);
+        let ctx = LoadContext { trust: &trust, stores: &[], nsfw_allowed: true };
+        let (_, logged) = capture(|| load_package(&path, &ctx));
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert_eq!(logged[0].level, tracing::Level::ERROR);
+        assert_eq!(logged[0].message, "Extension load error: eu.example.broken (eu.example.broken)");
     }
 
     #[test]

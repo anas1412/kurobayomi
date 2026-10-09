@@ -5,6 +5,7 @@ pub mod backup;
 pub mod bulk;
 pub mod model;
 pub mod repo;
+pub mod storage_view;
 pub mod service;
 pub mod target;
 #[cfg(test)]

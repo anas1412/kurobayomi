@@ -36,5 +36,10 @@ fn main() {
     let text = std::fs::read_to_string(&reports[0]).unwrap();
     assert!(text.lines().any(|l| l == "thread: main"), "{text}");
     assert!(text.contains("message: boom on the main thread\n"), "{text}");
+    // file and line numbers survive in release builds: `debug = "line-tables-only"` and no strip (T-01a-040)
+    assert!(
+        text.lines().any(|l| l.trim_start().starts_with("at ") && l.contains("crash_main_thread.rs:")),
+        "the backtrace has no file and line for this test: {text}"
+    );
     println!("ok: a main-thread panic wrote one report and exited 101");
 }

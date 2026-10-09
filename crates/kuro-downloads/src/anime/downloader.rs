@@ -1,0 +1,669 @@
+//! The anime episode engine: one episode from the hoster to the finished folder (T-24a-016, with T-24a-049, T-24a-062,
+//! T-24a-066 and T-24a-067; behaviour 5.1 to 5.9, edge cases E-F01 to E-F08).
+//!
+//! The queue actor runs one [`EpisodeEngine`] per active item through the [`EpisodeRunner`] trait. The engine works in
+//! a staging folder `<episode folder>_tmp` under the anime folder. ffmpeg writes `<name>.tmp`, which becomes
+//! `<name>.mkv` when the remux ends. Finalise renames the staging folder to the episode folder and writes `.nomedia`.
+//! A finished `<name>.mkv` in the staging folder is kept, so a restart resumes without running ffmpeg again.
+
+use std::ffi::OsString;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, warn};
+
+use crate::anime::ffmpeg::{FFMPEG, FFPROBE, build_remux_args, probe_duration, run_remux};
+use crate::anime::layout::{AnimeLayout, episode_folder_names};
+use crate::anime::manager::EpisodeRunner;
+use crate::anime::model::{AnimeDownload, Video};
+use crate::anime::naming::{episode_dir_name, fat_safe, file_component, unique_episode_dir_name};
+use crate::anime::resolve::{HosterResolver, resolve_video};
+use crate::error::DownloadError;
+use crate::layout::TMP_DIR_SUFFIX;
+use crate::retry::with_retry;
+
+/// The name ffmpeg's output is finished under (`<name>.mkv`), and the partial name it is written under (`<name>.tmp`).
+const FINISHED_EXT: &str = ".mkv";
+const PARTIAL_EXT: &str = ".tmp";
+/// Written into every finished episode folder so media indexers skip it (behaviour 5.9, T-24a-056).
+const NOMEDIA: &str = ".nomedia";
+
+/// Downloads one episode with ffmpeg. `ffmpeg` and `ffprobe` are program names or paths.
+pub struct EpisodeEngine {
+    layout: AnimeLayout,
+    resolver: Arc<dyn HosterResolver>,
+    ffmpeg: OsString,
+    ffprobe: OsString,
+}
+
+impl EpisodeEngine {
+    pub fn new(layout: AnimeLayout, resolver: Arc<dyn HosterResolver>) -> Self {
+        Self { layout, resolver, ffmpeg: FFMPEG.into(), ffprobe: FFPROBE.into() }
+    }
+
+    /// Replaces the ffmpeg and ffprobe programs. Used by tests and by a user-chosen binary.
+    pub fn with_programs(mut self, ffmpeg: impl Into<OsString>, ffprobe: impl Into<OsString>) -> Self {
+        self.ffmpeg = ffmpeg.into();
+        self.ffprobe = ffprobe.into();
+        self
+    }
+
+    /// One attempt: probe the duration, then remux into the partial file. A failure is retried by the caller.
+    async fn remux_once(
+        &self,
+        item: &AnimeDownload,
+        video: &Video,
+        partial: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<(), DownloadError> {
+        let headers = video.headers.clone().unwrap_or_default();
+        // Dropping the probe on cancel kills ffprobe (`kill_on_drop`), so a paused run never reaches ffmpeg.
+        let duration = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(DownloadError::Cancelled),
+            duration = probe_duration(&self.ffprobe, &video.url, &headers) => duration?,
+        };
+        let args = build_remux_args(video, &[], partial);
+        run_remux(&self.ffmpeg, &args, duration, partial, &item.progress, cancel).await
+    }
+
+    /// Makes sure `<stem>.mkv` exists in the staging folder: a finished file from an earlier run is kept (resume), else
+    /// the video is remuxed under the retry schedule and the partial file is renamed when it ends.
+    async fn fetch(
+        &self,
+        item: &AnimeDownload,
+        video: &Video,
+        staging: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<(), DownloadError> {
+        let stem = fat_safe(&item.episode.name);
+        let finished = staging.join(file_component(&stem, FINISHED_EXT));
+        if finished.is_file() {
+            debug!(target: "kuro::downloads", episode = item.episode.id, "resuming a finished remux");
+            return Ok(());
+        }
+        let partial = staging.join(file_component(&stem, PARTIAL_EXT));
+        let _ = fs::remove_file(&partial);
+        with_retry(cancel, || self.remux_once(item, video, &partial, cancel)).await?;
+        fs::rename(&partial, &finished)?;
+        Ok(())
+    }
+
+    /// The staging folder's episode name. A staging folder left by an earlier attempt keeps its name, so the resume finds
+    /// it. Otherwise the plain name is used, or `<name> (<episode id>)` when another non-empty folder has the plain name
+    /// (T-24a-066, E-F03).
+    fn target_name(&self, item: &AnimeDownload, anime_dir: &Path) -> String {
+        for candidate in episode_folder_names(&item.episode) {
+            if anime_dir.join(format!("{candidate}{TMP_DIR_SUFFIX}")).is_dir() {
+                return candidate;
+            }
+        }
+        let plain = episode_dir_name(&item.episode.name, item.episode.scanlator.as_deref());
+        if is_non_empty_dir(&anime_dir.join(&plain)) {
+            unique_episode_dir_name(&item.episode.name, item.episode.scanlator.as_deref(), item.episode.id)
+        } else {
+            plain
+        }
+    }
+}
+
+#[async_trait]
+impl EpisodeRunner for EpisodeEngine {
+    async fn run(&self, item: Arc<AnimeDownload>, cancel: CancellationToken) -> Result<(), DownloadError> {
+        let anime_dir = self.layout.anime_dir(&item.source, &item.anime.title)?;
+        let target = self.target_name(&item, &anime_dir);
+        let staging = anime_dir.join(format!("{target}{TMP_DIR_SUFFIX}"));
+        fs::create_dir_all(&staging)?;
+
+        let video = resolve_video(&item, self.resolver.as_ref(), &cancel).await?;
+        self.fetch(&item, &video, &staging, &cancel).await?;
+        if !is_download_successful(&staging) {
+            return Err(DownloadError::DownloadIncomplete(format!("{} is not a single video file", staging.display())));
+        }
+        finalise(&staging, &anime_dir.join(&target))
+    }
+}
+
+/// `isDownloadSuccessful` (T-24a-049, E-F06): leftover `.tmp` files are removed first, then the folder must hold
+/// exactly one entry, a file whose name does not end in `.tmp`. A `.mkv` alone is a success, two `.mkv` files a failure.
+pub fn is_download_successful(staging: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(staging) else {
+        return false;
+    };
+    let mut kept: Vec<PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.file_name().is_some_and(|n| n.to_string_lossy().ends_with(PARTIAL_EXT)) {
+            let _ = fs::remove_file(&path);
+        } else {
+            kept.push(path);
+        }
+    }
+    match kept.as_slice() {
+        [only] => only.is_file() && !only.to_string_lossy().ends_with(PARTIAL_EXT),
+        _ => false,
+    }
+}
+
+/// Renames the staging folder to its episode folder and writes `.nomedia` into it (behaviour 5.9). An episode folder that
+/// already holds files is `EpisodeExists`, and the staging folder is kept (T-24a-066, E-F02).
+fn finalise(staging: &Path, dest: &Path) -> Result<(), DownloadError> {
+    if is_non_empty_dir(dest) {
+        return Err(DownloadError::EpisodeExists);
+    }
+    if dest.is_dir() {
+        fs::remove_dir(dest)?;
+    }
+    fs::rename(staging, dest)?;
+    if let Err(err) = fs::write(dest.join(NOMEDIA), b"") {
+        warn!(target: "kuro::downloads", error = %err, "could not write .nomedia");
+    }
+    Ok(())
+}
+
+/// Startup sweep (T-24a-062, E-F05). Under `root`, every `<name>_tmp` staging folder is removed, except the ones in
+/// `keep`, which belong to restored queue items. In a kept folder only the partial `.tmp` files go, so a finished
+/// `.mkv` is left for the resume. Returns how many entries were removed.
+pub fn sweep_staging(root: &Path, keep: &[PathBuf]) -> usize {
+    let mut removed = 0;
+    for source in subdirs(root) {
+        for anime in subdirs(&source) {
+            for staging in subdirs(&anime) {
+                if !staging.file_name().is_some_and(|n| n.to_string_lossy().ends_with(TMP_DIR_SUFFIX)) {
+                    continue;
+                }
+                if keep.contains(&staging) {
+                    for file in subdirs_and_files(&staging) {
+                        if file.is_file()
+                            && file.to_string_lossy().ends_with(PARTIAL_EXT)
+                            && fs::remove_file(&file).is_ok()
+                        {
+                            removed += 1;
+                        }
+                    }
+                } else if fs::remove_dir_all(&staging).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    removed
+}
+
+fn subdirs(path: &Path) -> Vec<PathBuf> {
+    subdirs_and_files(path).into_iter().filter(|p| p.is_dir()).collect()
+}
+
+fn subdirs_and_files(path: &Path) -> Vec<PathBuf> {
+    fs::read_dir(path).map(|rd| rd.flatten().map(|e| e.path()).collect()).unwrap_or_default()
+}
+
+/// `true` for a folder with at least one entry.
+fn is_non_empty_dir(path: &Path) -> bool {
+    fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::anime::model::{AnimeRef, AnimeSource, EpisodeRef};
+    use crate::model::DownloadState;
+    use async_trait::async_trait;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    static SPAWN_LOCK: Mutex<()> = Mutex::new(());
+
+    fn spawn_guard() -> std::sync::MutexGuard<'static, ()> {
+        SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    struct Hoster {
+        answer: Option<Video>,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl HosterResolver for Hoster {
+        async fn best_video(
+            &self,
+            _: &AnimeRef,
+            _: &EpisodeRef,
+            _: &AnimeSource,
+        ) -> Result<Option<Video>, DownloadError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.answer.clone())
+        }
+    }
+
+    fn video() -> Video {
+        Video { url: "/local/source.mkv".into(), title: "v".into(), ..Default::default() }
+    }
+
+    fn source(root_name: &str) -> AnimeSource {
+        AnimeSource { id: 1, name: root_name.into(), lang: "en".into(), is_http: true, unmetered: false }
+    }
+
+    fn anime() -> AnimeRef {
+        AnimeRef { id: 10, source_id: 1, url: "/a".into(), title: "Show".into() }
+    }
+
+    fn episode(id: i64, name: &str) -> EpisodeRef {
+        EpisodeRef {
+            id,
+            anime_id: 10,
+            url: format!("/e/{id}"),
+            name: name.into(),
+            scanlator: None,
+            seen: false,
+            bookmark: false,
+            fillermark: false,
+            source_order: id,
+            upload_date: 0,
+            episode_number: id as f64,
+        }
+    }
+
+    fn download(id: i64, name: &str) -> Arc<AnimeDownload> {
+        Arc::new(AnimeDownload::new(source("Src"), anime(), episode(id, name), false, None))
+    }
+
+    /// A fake ffprobe that prints a duration, and a fake ffmpeg that logs each run and writes the partial file.
+    /// `exit_code` is the ffmpeg exit status.
+    fn programs(dir: &Path, exit_code: i32, partial: &Path) -> (PathBuf, PathBuf, PathBuf) {
+        let log = dir.join("ffmpeg.log");
+        let ffprobe = script(dir, "ffprobe", "echo 30.0");
+        let body = format!(
+            "echo run >> '{}'\nprintf 'video' > '{}'\nprintf 'out_time_us=30000000\\nprogress=end\\n'\nexit {exit_code}",
+            log.display(),
+            partial.display()
+        );
+        let ffmpeg = script(dir, "ffmpeg", &body);
+        (ffmpeg, ffprobe, log)
+    }
+
+    fn runs(log: &Path) -> usize {
+        fs::read_to_string(log).map(|s| s.lines().count()).unwrap_or(0)
+    }
+
+    fn engine(root: &Path, ffmpeg: &Path, ffprobe: &Path) -> (EpisodeEngine, Arc<Hoster>) {
+        let hoster = Arc::new(Hoster { answer: Some(video()), calls: AtomicUsize::new(0) });
+        let engine = EpisodeEngine::new(AnimeLayout::new(Some(root.to_path_buf())), hoster.clone())
+            .with_programs(ffmpeg.as_os_str(), ffprobe.as_os_str());
+        (engine, hoster)
+    }
+
+    /// The anime folder that the engine uses for `download(…, "Show")` under the fake source.
+    fn anime_folder(root: &Path) -> PathBuf {
+        root.join("Src (EN)").join("Show")
+    }
+
+    #[test]
+    fn a_single_mkv_is_a_successful_download() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("Episode 1.mkv"), b"x").unwrap();
+        assert!(is_download_successful(tmp.path()));
+    }
+
+    #[test]
+    fn a_leftover_tmp_is_removed_before_the_check() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("Episode 1.mkv"), b"x").unwrap();
+        fs::write(tmp.path().join("Episode 1.tmp"), b"partial").unwrap();
+        assert!(is_download_successful(tmp.path()));
+        assert!(!tmp.path().join("Episode 1.tmp").exists(), "the leftover is gone");
+    }
+
+    #[test]
+    fn two_files_or_only_a_tmp_is_a_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.mkv"), b"x").unwrap();
+        fs::write(tmp.path().join("b.mkv"), b"x").unwrap();
+        assert!(!is_download_successful(tmp.path()));
+        let only_tmp = tempfile::tempdir().unwrap();
+        fs::write(only_tmp.path().join("a.tmp"), b"x").unwrap();
+        assert!(!is_download_successful(only_tmp.path()));
+    }
+
+    #[test]
+    fn the_startup_sweep_removes_orphans_and_keeps_restored_staging() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let anime_dir = root.join("Src (EN)").join("Show");
+        let kept = anime_dir.join("Episode 1_tmp");
+        let orphan = anime_dir.join("Episode 2_tmp");
+        let finished_dir = anime_dir.join("Episode 3");
+        fs::create_dir_all(&kept).unwrap();
+        fs::create_dir_all(&orphan).unwrap();
+        fs::create_dir_all(&finished_dir).unwrap();
+        fs::write(kept.join("Episode 1.mkv"), b"x").unwrap();
+        fs::write(kept.join("Episode 1.tmp"), b"partial").unwrap();
+        fs::write(orphan.join("Episode 2.mkv"), b"x").unwrap();
+        fs::write(finished_dir.join("Episode 3.mkv"), b"x").unwrap();
+
+        let removed = sweep_staging(root, std::slice::from_ref(&kept));
+
+        assert!(!orphan.exists(), "a staging folder of no restored item is removed");
+        assert!(kept.join("Episode 1.mkv").is_file(), "the finished remux of a restored item stays for resume");
+        assert!(!kept.join("Episode 1.tmp").exists(), "the partial file goes");
+        assert!(finished_dir.join("Episode 3.mkv").is_file(), "finished episodes are never touched");
+        assert_eq!(removed, 2, "one orphan folder and one partial file");
+    }
+
+    #[test]
+    fn the_startup_sweep_on_the_tmp_fixture_tree_keeps_the_finished_remux_of_a_restored_item() {
+        let tree = crate::testing::dl_fixture("tree_tmp");
+        let show = tree.path().join("Example (EN)").join("Show");
+        let kept = show.join("Episode 4_tmp");
+
+        let removed = sweep_staging(tree.path(), std::slice::from_ref(&kept));
+
+        assert!(!show.join("Episode 3_tmp").exists(), "the orphan with a partial file is removed");
+        assert!(kept.join("Episode 4.mkv").is_file(), "the restored item keeps its finished remux");
+        assert_eq!(removed, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_download_is_remuxed_then_finalised_with_nomedia() {
+        let _guard = spawn_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = anime_folder(tmp.path());
+        fs::create_dir_all(&folder).unwrap();
+        let partial = folder.join("Episode 1_tmp").join("Episode 1.tmp");
+        fs::create_dir_all(partial.parent().unwrap()).unwrap();
+        let (ffmpeg, ffprobe, log) = programs(tmp.path(), 0, &partial);
+        let (engine, hoster) = engine(tmp.path(), &ffmpeg, &ffprobe);
+        let item = download(1, "Episode 1");
+
+        engine.run(item.clone(), CancellationToken::new()).await.unwrap();
+
+        assert_eq!(runs(&log), 1);
+        assert_eq!(hoster.calls.load(Ordering::SeqCst), 1);
+        assert!(folder.join("Episode 1").join("Episode 1.mkv").is_file(), "the finished file is in the episode folder");
+        assert!(folder.join("Episode 1").join(NOMEDIA).is_file(), "the .nomedia file is written");
+        assert!(!folder.join("Episode 1_tmp").exists(), "staging is gone");
+        assert_eq!(item.status(), DownloadState::Queue, "the engine does not set the queue status itself");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failing_ffmpeg_is_tried_four_times_and_keeps_no_partial() {
+        let _guard = spawn_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = anime_folder(tmp.path());
+        let partial = folder.join("Episode 1_tmp").join("Episode 1.tmp");
+        fs::create_dir_all(partial.parent().unwrap()).unwrap();
+        let (ffmpeg, ffprobe, log) = programs(tmp.path(), 1, &partial);
+        let (engine, _) = engine(tmp.path(), &ffmpeg, &ffprobe);
+
+        let err = engine.run(download(1, "Episode 1"), CancellationToken::new()).await.unwrap_err();
+
+        assert_eq!(err.to_string(), "Error in ffmpeg!");
+        assert_eq!(runs(&log), 4, "one attempt and three retries");
+        assert!(!partial.exists(), "the partial file is removed");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_finished_remux_from_an_earlier_run_is_resumed_without_ffmpeg() {
+        let _guard = spawn_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = anime_folder(tmp.path());
+        let staging = folder.join("Episode 1_tmp");
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("Episode 1.mkv"), b"done").unwrap();
+        let (ffmpeg, ffprobe, log) = programs(tmp.path(), 1, &staging.join("Episode 1.tmp"));
+        let (engine, _) = engine(tmp.path(), &ffmpeg, &ffprobe);
+
+        engine.run(download(1, "Episode 1"), CancellationToken::new()).await.unwrap();
+
+        assert_eq!(runs(&log), 0, "ffmpeg is not run again");
+        assert!(folder.join("Episode 1").join("Episode 1.mkv").is_file());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_existing_non_empty_episode_folder_is_an_error_and_staging_is_kept() {
+        let _guard = spawn_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = anime_folder(tmp.path());
+        fs::create_dir_all(folder.join("Episode 1")).unwrap();
+        fs::write(folder.join("Episode 1").join("old.mkv"), b"old").unwrap();
+        let partial = folder.join("Episode 1 (1)_tmp").join("Episode 1.tmp");
+        let (ffmpeg, ffprobe, _) = programs(tmp.path(), 0, &partial);
+        let (engine, _) = engine(tmp.path(), &ffmpeg, &ffprobe);
+
+        // The plain name is taken by another non-empty folder, so the download goes to `<name> (<id>)` (T-24a-066).
+        let outcome = engine.run(download(1, "Episode 1"), CancellationToken::new()).await;
+        assert!(outcome.is_ok(), "the unique name is used: {outcome:?}");
+        assert!(folder.join("Episode 1 (1)").join("Episode 1.mkv").is_file());
+        assert!(folder.join("Episode 1").join("old.mkv").is_file(), "the old folder is untouched");
+
+        // A finalise onto a non-empty folder is refused and the staging folder is kept (E-F02).
+        let staging = folder.join("Episode 2_tmp");
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("Episode 2.mkv"), b"new").unwrap();
+        fs::create_dir_all(folder.join("Episode 2")).unwrap();
+        fs::write(folder.join("Episode 2").join("old.mkv"), b"old").unwrap();
+        let result = finalise(&staging, &folder.join("Episode 2"));
+        assert!(matches!(result, Err(DownloadError::EpisodeExists)));
+        assert!(staging.join("Episode 2.mkv").is_file(), "staging is kept");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_file_component_is_cut_to_200_bytes_and_the_folder_keeps_its_name() {
+        let _guard = spawn_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = anime_folder(tmp.path());
+        // 120 two-byte characters: a 240-byte folder name, but a file name that must be cut to 200 bytes.
+        let long = "\u{e9}".repeat(120);
+        let partial = folder.join(format!("{long}_tmp")).join(file_component(&long, PARTIAL_EXT));
+        let (ffmpeg, ffprobe, _) = programs(tmp.path(), 0, &partial);
+        let (engine, _) = engine(tmp.path(), &ffmpeg, &ffprobe);
+
+        engine.run(download(1, &long), CancellationToken::new()).await.unwrap();
+
+        let finished = folder.join(&long).join(file_component(&long, FINISHED_EXT));
+        assert!(finished.is_file(), "the finished file exists under the cut name");
+        assert!(finished.file_name().unwrap().len() <= 200, "the file component is at most 200 bytes");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_missing_ffmpeg_fails_at_once_with_ffmpeg_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, _) =
+            engine(tmp.path(), Path::new("/nonexistent/kuro-ffmpeg"), Path::new("/nonexistent/kuro-ffprobe"));
+        let err = engine.run(download(1, "Episode 1"), CancellationToken::new()).await.unwrap_err();
+        assert!(matches!(err, DownloadError::FfmpegMissing), "got {err:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_video_from_the_hoster_is_no_video() {
+        let tmp = tempfile::tempdir().unwrap();
+        let hoster = Arc::new(Hoster { answer: None, calls: AtomicUsize::new(0) });
+        let engine = EpisodeEngine::new(AnimeLayout::new(Some(tmp.path().to_path_buf())), hoster);
+        let err = engine.run(download(1, "Episode 1"), CancellationToken::new()).await.unwrap_err();
+        assert!(matches!(err, DownloadError::NoVideo));
+    }
+
+    /// A pause during the probe kills ffprobe: ffmpeg never starts, and the partial file that a newer run has started
+    /// meanwhile is left alone (T-24a-058).
+    #[tokio::test]
+    async fn cancel_during_the_probe_starts_no_ffmpeg_and_leaves_a_newer_partial() {
+        let _guard = spawn_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = anime_folder(tmp.path());
+        let partial = folder.join("Episode 1_tmp").join("Episode 1.tmp");
+        let (ffmpeg, _, log) = programs(tmp.path(), 0, &partial);
+        let slow_probe = script(tmp.path(), "slow-ffprobe", "exec sleep 5");
+        let (engine, _) = engine(tmp.path(), &ffmpeg, &slow_probe);
+        let cancel = CancellationToken::new();
+        let trigger = cancel.clone();
+        let newer = partial.clone();
+        tokio::spawn(async move {
+            // The newer run's partial appears while the older run is still probing, then the older run is cancelled.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            fs::write(&newer, b"newer run").unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            trigger.cancel();
+        });
+
+        let started = std::time::Instant::now();
+        let err = engine.run(download(1, "Episode 1"), cancel).await.unwrap_err();
+
+        assert!(matches!(err, DownloadError::Cancelled), "got {err:?}");
+        assert!(started.elapsed() < Duration::from_secs(4), "the probe is killed, not waited for");
+        assert_eq!(runs(&log), 0, "ffmpeg was never started");
+        assert_eq!(fs::read(&partial).unwrap(), b"newer run", "the newer run's partial is untouched");
+    }
+
+    /// Engine and queue together, with fake ffmpeg and ffprobe (edge-cases 4.2).
+    mod with_queue {
+        use super::*;
+        use crate::anime::cache::AnimeIndex;
+        use crate::anime::manager::{AnimeQueue, AnimeQueueParams, Command, QueueEntry, spawn};
+        use crate::anime::pending::AnimePendingStore;
+        use crate::anime::store::AnimeQueueStore;
+
+        fn plenty(_: &Path) -> Option<u64> {
+            Some(u64::MAX)
+        }
+
+        fn entry(id: i64, name: &str) -> QueueEntry {
+            QueueEntry { source: source("Src"), anime: anime(), episode: episode(id, name), alt: false, video: None }
+        }
+
+        fn start_queue(root: &Path, ffmpeg: &Path, ffprobe: &Path, restored: Vec<QueueEntry>) -> AnimeQueue {
+            let (engine, _) = engine(root, ffmpeg, ffprobe);
+            spawn(AnimeQueueParams {
+                layout: AnimeLayout::new(Some(root.to_path_buf())),
+                store: Arc::new(AnimeQueueStore::open_in_memory().unwrap()),
+                pending: Arc::new(AnimePendingStore::open_in_memory().unwrap()),
+                free_space: plenty,
+                runner: Arc::new(engine),
+                settings: Default::default(),
+                restored,
+                index: AnimeIndex::open(root, &root.join("cache")),
+            })
+        }
+
+        /// Waits for `cond` while real child processes run: each turn moves the paused clock 100 ms (so retry waits
+        /// elapse) and sleeps 5 ms of real time.
+        async fn until(what: &str, cond: impl Fn() -> bool) {
+            for _ in 0..2000 {
+                if cond() {
+                    return;
+                }
+                tokio::time::advance(Duration::from_millis(100)).await;
+                std::thread::sleep(Duration::from_millis(5));
+                tokio::task::yield_now().await;
+            }
+            panic!("never held: {what}");
+        }
+
+        fn status_of(q: &AnimeQueue, id: i64) -> Option<DownloadState> {
+            q.snapshot().iter().find(|d| d.episode.id == id).map(|d| d.status())
+        }
+
+        /// ffmpeg that logs the output path of each run, writes the partial file and then stays alive.
+        const SLEEPING_FFMPEG: &str = "prev=; last=; for a; do prev=$last; last=$a; done\n\
+            echo \"$prev\" >> \"$KURO_LOG\"\nprintf partial > \"$prev\"\nexec sleep 30";
+
+        fn sleeping_ffmpeg(dir: &Path, log: &Path) -> PathBuf {
+            script(dir, "ffmpeg", &SLEEPING_FFMPEG.replace("$KURO_LOG", &log.display().to_string()))
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn download_recovers_on_retry() {
+            let _guard = spawn_guard();
+            let tmp = tempfile::tempdir().unwrap();
+            let partial = anime_folder(tmp.path()).join("Episode 1_tmp").join("Episode 1.tmp");
+            let log = tmp.path().join("ffmpeg.log");
+            // The first run exits 1, the second one produces the file.
+            let body = format!(
+                "echo run >> '{log}'\nif [ \"$(wc -l < '{log}')\" -lt 2 ]; then exit 1; fi\nprintf video > '{p}'\n\
+                 printf 'out_time_us=30000000\\nprogress=end\\n'",
+                log = log.display(),
+                p = partial.display()
+            );
+            let ffmpeg = script(tmp.path(), "ffmpeg", &body);
+            let ffprobe = script(tmp.path(), "ffprobe", "echo 30.0");
+            let q = start_queue(tmp.path(), &ffmpeg, &ffprobe, vec![entry(1, "Episode 1")]);
+            let item = q.snapshot()[0].clone();
+            let started = tokio::time::Instant::now();
+
+            q.send(Command::Start).unwrap();
+            until("downloaded", || item.status() == DownloadState::Downloaded).await;
+
+            assert_eq!(runs(&log), 2, "one failed attempt and one retry");
+            assert!(started.elapsed() >= Duration::from_secs(2), "the retry waited the 2 s delay");
+            assert!(anime_folder(tmp.path()).join("Episode 1").join("Episode 1.mkv").is_file());
+            until("queue empty", || q.snapshot().is_empty()).await;
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn pause_discards_partial_and_resume_restarts_from_zero() {
+            let _guard = spawn_guard();
+            let tmp = tempfile::tempdir().unwrap();
+            let partial = anime_folder(tmp.path()).join("Episode 1_tmp").join("Episode 1.tmp");
+            let log = tmp.path().join("ffmpeg.log");
+            // The first run stays alive; the second one finishes.
+            let body = format!(
+                "echo run >> '{log}'\nprintf partial > '{p}'\nif [ \"$(wc -l < '{log}')\" -ge 2 ]; then\n\
+                 printf 'out_time_us=30000000\\nprogress=end\\n'\nexit 0\nfi\nexec sleep 30",
+                log = log.display(),
+                p = partial.display()
+            );
+            let ffmpeg = script(tmp.path(), "ffmpeg", &body);
+            let ffprobe = script(tmp.path(), "ffprobe", "echo 30.0");
+            let q = start_queue(tmp.path(), &ffmpeg, &ffprobe, vec![entry(1, "Episode 1")]);
+            let item = q.snapshot()[0].clone();
+
+            q.send(Command::Start).unwrap();
+            until("ffmpeg running", || runs(&log) == 1 && partial.exists()).await;
+            q.send(Command::Pause).unwrap();
+            until("partial removed", || !partial.exists() && item.status() == DownloadState::Queue).await;
+            assert_eq!(runs(&log), 1, "no second run while paused");
+
+            q.send(Command::Start).unwrap();
+            until("downloaded", || item.status() == DownloadState::Downloaded).await;
+            assert_eq!(runs(&log), 2, "the resume runs ffmpeg again from the start");
+            assert!(anime_folder(tmp.path()).join("Episode 1").join("Episode 1.mkv").is_file());
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn reorder_while_running_requeues_the_item_and_restarts_in_the_new_order() {
+            let _guard = spawn_guard();
+            let tmp = tempfile::tempdir().unwrap();
+            let folder = anime_folder(tmp.path());
+            let log = tmp.path().join("ffmpeg.log");
+            let ffmpeg = sleeping_ffmpeg(tmp.path(), &log);
+            let ffprobe = script(tmp.path(), "ffprobe", "echo 30.0");
+            let p1 = folder.join("Episode 1_tmp").join("Episode 1.tmp");
+            let p2 = folder.join("Episode 2_tmp").join("Episode 2.tmp");
+            let q = start_queue(tmp.path(), &ffmpeg, &ffprobe, vec![entry(1, "Episode 1"), entry(2, "Episode 2")]);
+
+            q.send(Command::Start).unwrap();
+            until("episode 1 running", || p1.exists() && status_of(&q, 1) == Some(DownloadState::Downloading)).await;
+
+            q.send(Command::Reorder { episode_ids: vec![2, 1] }).unwrap();
+            until("episode 2 running", || p2.exists() && status_of(&q, 2) == Some(DownloadState::Downloading)).await;
+
+            assert!(!p1.exists(), "the partial of the interrupted item is removed");
+            assert_eq!(status_of(&q, 1), Some(DownloadState::Queue), "the interrupted item waits in QUEUE");
+            let order: Vec<i64> = q.snapshot().iter().map(|d| d.episode.id).collect();
+            assert_eq!(order, vec![2, 1]);
+            assert_eq!(runs(&log), 2, "episode 1 once, then episode 2");
+            q.send(Command::Pause).unwrap();
+        }
+    }
+}

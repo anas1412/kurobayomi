@@ -2,6 +2,7 @@
 //! `onDestroy`, fullscreen; behaviour 1.2, 1.5, 1.6, 1.8, 14). Pure decisions. The GTK window keeps
 //! one `PlayerState`, applies the returned steps, and performs the mpv and GTK calls.
 
+use crate::hosts::close_top;
 use crate::mpv::{MpvError, MpvHandle};
 use crate::state::PlayerState;
 
@@ -88,7 +89,18 @@ pub fn on_pause(state: &mut PlayerState, kind: PauseKind) -> Vec<PauseStep> {
 /// `onResume` clears `isExiting`, and only `onResume` does. A `PLAYBACK_RESTART` cannot clear it,
 /// because the event gate drops events while it is set (behaviour 6.4).
 pub fn on_resume(state: &mut PlayerState) {
+    // Coming back from a hidden window asks for the remembered volume to be restored (T-45a-083).
+    state.restore_volume_on_resume = state.is_exiting;
     state.is_exiting = false;
+}
+
+/// The volume to write after a resume from a hidden window (T-45a-083). It is the remembered value,
+/// and it is taken once. No brightness step runs here (T-45a-045 is dropped on desktop).
+pub fn take_volume_restore(state: &mut PlayerState, remembered: Option<i64>) -> Option<i64> {
+    if !std::mem::take(&mut state.restore_volume_on_resume) {
+        return None;
+    }
+    remembered
 }
 
 /// The event gate. While the window is exiting, observer events are dropped, and `execute` drops
@@ -170,6 +182,15 @@ pub fn escape_action(fullscreen: bool) -> EscapeAction {
         EscapeAction::LeaveFullscreen
     } else {
         EscapeAction::Close
+    }
+}
+
+/// What Escape does given the whole state. An open sheet, panel or dialog closes first and the
+/// window stays; with none open it falls back to `escape_action`.
+pub fn escape(state: &mut PlayerState, fullscreen: bool) -> Option<EscapeAction> {
+    match close_top(state) {
+        Some(_) => None,
+        None => Some(escape_action(fullscreen)),
     }
 }
 
@@ -308,5 +329,36 @@ mod tests {
     fn escape_leaves_fullscreen_or_closes() {
         assert_eq!(escape_action(true), EscapeAction::LeaveFullscreen);
         assert_eq!(escape_action(false), EscapeAction::Close);
+    }
+
+    #[test]
+    fn escape_closes_the_open_panel_and_keeps_the_window() {
+        use crate::enums::Panels;
+        let mut state = PlayerState {
+            panel: Panels::SubtitleSettings,
+            ..PlayerState::default()
+        };
+        assert_eq!(escape(&mut state, false), None);
+        assert_eq!(state.panel, Panels::None);
+        assert_eq!(escape(&mut state, false), Some(EscapeAction::Close));
+        assert_eq!(escape(&mut state, true), Some(EscapeAction::LeaveFullscreen));
+    }
+
+    #[test]
+    fn resume_from_hidden_restores_the_remembered_volume_once() {
+        let mut state = PlayerState {
+            is_exiting: true,
+            ..PlayerState::default()
+        };
+        on_resume(&mut state);
+        assert_eq!(take_volume_restore(&mut state, Some(70)), Some(70));
+        assert_eq!(take_volume_restore(&mut state, Some(70)), None);
+    }
+
+    #[test]
+    fn plain_resume_restores_nothing() {
+        let mut state = PlayerState::default();
+        on_resume(&mut state);
+        assert_eq!(take_volume_restore(&mut state, Some(70)), None);
     }
 }

@@ -3,19 +3,17 @@
 //! Keys that are not listed here are forwarded to `keys::map_key`.
 
 use crate::enums::CustomKeyCode;
+use crate::keys::Modifiers;
+use crate::shortcuts::{Action, ShortcutMap};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WindowKey {
-    /// Up arrow: volume +1 and show the volume slider.
-    VolumeUp,
-    /// Down arrow: volume -1 and show the volume slider.
-    VolumeDown,
-    /// Left arrow and the rewind media key: the left double-tap action.
+    /// A key of the shortcut table (`shortcuts`): Space, the arrows, letters and so on.
+    Shortcut(Action),
+    /// The rewind media key: the left double-tap action.
     DoubleTapLeft,
-    /// Right arrow and the fast-forward media key: the right double-tap action.
+    /// The fast-forward media key: the right double-tap action.
     DoubleTapRight,
-    /// Space.
-    TogglePause,
     /// Media stop: closes the window.
     CloseWindow,
     /// Custom gesture code (`0x10001`..`0x10006`), sent through `keypress`.
@@ -24,25 +22,81 @@ pub enum WindowKey {
     Forward,
 }
 
-// X11 keysyms (`X11/keysymdef.h`, `X11/XF86keysym.h`).
-const KS_LEFT: u32 = 0xff51;
-const KS_UP: u32 = 0xff52;
-const KS_RIGHT: u32 = 0xff53;
-const KS_DOWN: u32 = 0xff54;
-const KS_SPACE: u32 = 0x0020;
+// X11 keysyms (`X11/XF86keysym.h`).
 const KS_XF86_AUDIO_STOP: u32 = 0x1008ff15;
 const KS_XF86_AUDIO_REWIND: u32 = 0x1008ff3e;
 const KS_XF86_AUDIO_FORWARD: u32 = 0x1008ff97;
 
-pub fn window_key(keyval: u32) -> WindowKey {
+/// The window answers from one table: the shortcut map, then the media keys and custom codes.
+pub fn window_key(
+    map: &ShortcutMap,
+    keyval: u32,
+    mods: Modifiers,
+    text_entry_focused: bool,
+) -> WindowKey {
+    if let Some(action) = map.action_for(keyval, mods, text_entry_focused) {
+        return WindowKey::Shortcut(action);
+    }
     match keyval {
-        KS_UP => WindowKey::VolumeUp,
-        KS_DOWN => WindowKey::VolumeDown,
-        KS_LEFT | KS_XF86_AUDIO_REWIND => WindowKey::DoubleTapLeft,
-        KS_RIGHT | KS_XF86_AUDIO_FORWARD => WindowKey::DoubleTapRight,
-        KS_SPACE => WindowKey::TogglePause,
+        KS_XF86_AUDIO_REWIND => WindowKey::DoubleTapLeft,
+        KS_XF86_AUDIO_FORWARD => WindowKey::DoubleTapRight,
         KS_XF86_AUDIO_STOP => WindowKey::CloseWindow,
         code => CustomKeyCode::from_code(code).map_or(WindowKey::Forward, WindowKey::Custom),
+    }
+}
+
+/// The double-tap zone a gesture came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Zone {
+    Left,
+    Center,
+    Right,
+}
+
+/// The custom key code a zone sends when its action is `Custom` (`keypress`, behaviour 8.3).
+pub fn zone_key_code(zone: Zone) -> CustomKeyCode {
+    match zone {
+        Zone::Left => CustomKeyCode::DoubleTapLeft,
+        Zone::Center => CustomKeyCode::DoubleTapCenter,
+        Zone::Right => CustomKeyCode::DoubleTapRight,
+    }
+}
+
+/// Window key bindings with per-key overrides (T-45b-057). The defaults are `window_key`. An
+/// override replaces the default for one key; `unbind` makes a key fall through to `Forward`.
+/// Conflicts with desktop shortcuts are not detected here: the window only sees keys while it has
+/// focus, so global KDE shortcuts take precedence over these bindings.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct KeyBindings {
+    overrides: Vec<(u32, WindowKey)>,
+}
+
+impl KeyBindings {
+    /// Binds `keyval` to `key`, replacing any earlier binding for it.
+    pub fn bind(&mut self, keyval: u32, key: WindowKey) {
+        self.overrides.retain(|(k, _)| *k != keyval);
+        self.overrides.push((keyval, key));
+    }
+
+    /// Removes a binding, so the key uses the default.
+    pub fn reset(&mut self, keyval: u32) {
+        self.overrides.retain(|(k, _)| *k != keyval);
+    }
+
+    pub fn lookup(
+        &self,
+        map: &ShortcutMap,
+        keyval: u32,
+        mods: Modifiers,
+        text_entry_focused: bool,
+    ) -> WindowKey {
+        self.overrides
+            .iter()
+            .find(|(k, _)| *k == keyval)
+            .map_or_else(
+                || window_key(map, keyval, mods, text_entry_focused),
+                |(_, key)| *key,
+            )
     }
 }
 
@@ -50,42 +104,134 @@ pub fn window_key(keyval: u32) -> WindowKey {
 mod tests {
     use super::*;
 
-    #[test]
-    fn volume_arrows_and_space() {
-        assert_eq!(window_key(KS_UP), WindowKey::VolumeUp);
-        assert_eq!(window_key(KS_DOWN), WindowKey::VolumeDown);
-        assert_eq!(window_key(KS_SPACE), WindowKey::TogglePause);
+    const KS_LEFT: u32 = 0xff51;
+    const KS_UP: u32 = 0xff52;
+    const KS_SPACE: u32 = 0x0020;
+
+    const NONE: Modifiers = Modifiers {
+        shift: false,
+        ctrl: false,
+        alt: false,
+        meta: false,
+    };
+    const SHIFT: Modifiers = Modifiers {
+        shift: true,
+        ..NONE
+    };
+
+    fn key(keyval: u32, mods: Modifiers) -> WindowKey {
+        window_key(&ShortcutMap::default(), keyval, mods, false)
     }
 
     #[test]
-    fn horizontal_keys_and_media_rewind_forward_run_double_taps() {
-        assert_eq!(window_key(KS_LEFT), WindowKey::DoubleTapLeft);
-        assert_eq!(window_key(KS_XF86_AUDIO_REWIND), WindowKey::DoubleTapLeft);
-        assert_eq!(window_key(KS_RIGHT), WindowKey::DoubleTapRight);
-        assert_eq!(window_key(KS_XF86_AUDIO_FORWARD), WindowKey::DoubleTapRight);
+    fn volume_arrows_and_space_come_from_the_shortcut_table() {
+        assert_eq!(key(KS_UP, NONE), WindowKey::Shortcut(Action::VolumeStep(1)));
+        assert_eq!(
+            key(KS_SPACE, NONE),
+            WindowKey::Shortcut(Action::TogglePause)
+        );
+        assert_eq!(
+            key(u32::from('f'), NONE),
+            WindowKey::Shortcut(Action::ToggleFullscreen)
+        );
     }
 
     #[test]
-    fn media_stop_closes_window() {
-        assert_eq!(window_key(KS_XF86_AUDIO_STOP), WindowKey::CloseWindow);
+    fn shift_left_is_the_long_seek_and_plain_left_the_short_one() {
+        assert_eq!(
+            key(KS_LEFT, SHIFT),
+            WindowKey::Shortcut(Action::Seek {
+                forward: false,
+                long: true
+            })
+        );
+        assert_eq!(
+            key(KS_LEFT, NONE),
+            WindowKey::Shortcut(Action::Seek {
+                forward: false,
+                long: false
+            })
+        );
+    }
+
+    #[test]
+    fn media_keys_run_double_taps_and_stop_closes() {
+        assert_eq!(key(KS_XF86_AUDIO_REWIND, NONE), WindowKey::DoubleTapLeft);
+        assert_eq!(key(KS_XF86_AUDIO_FORWARD, NONE), WindowKey::DoubleTapRight);
+        assert_eq!(key(KS_XF86_AUDIO_STOP, NONE), WindowKey::CloseWindow);
     }
 
     #[test]
     fn custom_codes_are_sent() {
         assert_eq!(
-            window_key(0x10001),
+            key(0x10001, NONE),
             WindowKey::Custom(CustomKeyCode::DoubleTapLeft)
         );
         assert_eq!(
-            window_key(0x10006),
+            key(0x10006, NONE),
             WindowKey::Custom(CustomKeyCode::MediaNext)
         );
-        assert_eq!(window_key(0x10007), WindowKey::Forward);
+        assert_eq!(key(0x10007, NONE), WindowKey::Forward);
     }
 
     #[test]
-    fn other_keys_are_forwarded() {
-        assert_eq!(window_key(u32::from('a')), WindowKey::Forward);
-        assert_eq!(window_key(0xff1b), WindowKey::Forward);
+    fn other_keys_are_forwarded_and_text_focus_forwards_shortcuts() {
+        assert_eq!(key(u32::from('z'), NONE), WindowKey::Forward);
+        assert_eq!(
+            window_key(&ShortcutMap::default(), KS_SPACE, NONE, true),
+            WindowKey::Forward
+        );
+    }
+
+    #[test]
+    fn the_settings_file_changes_what_the_window_answers() {
+        let map = ShortcutMap::from_toml("[shortcuts]\n\"Shift+Left\" = \"seek-back\"\n");
+        assert_eq!(
+            window_key(&map, KS_LEFT, SHIFT, false),
+            WindowKey::Shortcut(Action::Seek {
+                forward: false,
+                long: false
+            })
+        );
+    }
+
+    #[test]
+    fn bindings_default_to_window_key_and_can_be_overridden() {
+        let map = ShortcutMap::default();
+        let look = |b: &KeyBindings| b.lookup(&map, KS_SPACE, NONE, false);
+        let mut bindings = KeyBindings::default();
+        assert_eq!(look(&bindings), WindowKey::Shortcut(Action::TogglePause));
+        bindings.bind(KS_SPACE, WindowKey::CloseWindow);
+        assert_eq!(look(&bindings), WindowKey::CloseWindow);
+        bindings.bind(KS_SPACE, WindowKey::DoubleTapLeft);
+        assert_eq!(look(&bindings), WindowKey::DoubleTapLeft);
+        bindings.reset(KS_SPACE);
+        assert_eq!(look(&bindings), WindowKey::Shortcut(Action::TogglePause));
+    }
+
+    #[test]
+    fn a_new_binding_can_use_any_key() {
+        let map = ShortcutMap::default();
+        let mut bindings = KeyBindings::default();
+        bindings.bind(u32::from('x'), WindowKey::Custom(CustomKeyCode::MediaPlay));
+        assert_eq!(
+            bindings.lookup(&map, u32::from('x'), NONE, false),
+            WindowKey::Custom(CustomKeyCode::MediaPlay)
+        );
+        assert_eq!(
+            bindings.lookup(&map, u32::from('y'), NONE, false),
+            WindowKey::Forward
+        );
+    }
+
+    #[test]
+    fn zones_send_their_custom_codes() {
+        assert_eq!(zone_key_code(Zone::Left), CustomKeyCode::DoubleTapLeft);
+        assert_eq!(zone_key_code(Zone::Center), CustomKeyCode::DoubleTapCenter);
+        assert_eq!(zone_key_code(Zone::Right), CustomKeyCode::DoubleTapRight);
+        assert_eq!(
+            crate::mpris::keypress_args(zone_key_code(Zone::Center)),
+            ["keypress", "0x10002"]
+        );
     }
 }

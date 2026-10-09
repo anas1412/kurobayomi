@@ -4,6 +4,7 @@
 //! The base directory is a local path. Android content URIs and remote locations are refused with
 //! `StorageUnavailable`; the directory picker returns local paths only.
 
+pub mod cache;
 mod manager;
 
 pub use manager::{STORAGE_DIR_KEY, StorageManager};

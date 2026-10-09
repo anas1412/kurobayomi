@@ -435,7 +435,7 @@ mod publication_tests {
         assert_eq!(DbKind::Anime.file_name(), "anime.db");
         assert_eq!(DbKind::Anime.schema_version(), 139);
         assert_eq!(DbKind::Manga.file_name(), "manga.db");
-        assert_eq!(DbKind::Manga.schema_version(), 33);
+        assert_eq!(DbKind::Manga.schema_version(), 34);
     }
 
     #[tokio::test]

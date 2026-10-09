@@ -99,6 +99,7 @@ fn load(
         vec![serde_json::from_str(&text).map_err(|e| WasmError::Instantiate(format!("{op}: {e}")))?]
     };
 
+    reject_duplicate_ids(&descriptors)?;
     Ok(descriptors
         .into_iter()
         .map(|info| {
@@ -109,6 +110,15 @@ fn load(
             }) as Arc<dyn CatalogueSource>
         })
         .collect())
+}
+
+/// Two sources of one package may not share an id, so a lookup by id has one answer (T-18a-007).
+fn reject_duplicate_ids(descriptors: &[SourceDescriptor]) -> Result<(), WasmError> {
+    let mut seen = std::collections::HashSet::new();
+    match descriptors.iter().find(|info| !seen.insert(info.id)) {
+        Some(info) => Err(WasmError::Manifest(format!("duplicate source id {}", info.id))),
+        None => Ok(()),
+    }
 }
 
 /// One source's call channel. The mutex serialises calls, and holds the instance between them.
@@ -457,6 +467,26 @@ mod tests {
     async fn a_listing_that_is_not_json_is_a_parse_error() {
         let source = direct(guest(Behaviour::Returns("not json".into())), 1, CALL_DEADLINE_TICKS);
         assert!(matches!(source.popular(1).await, Err(SourceError::Parse(_))));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_factory_with_a_duplicate_source_id_is_a_manifest_error() {
+        let list = r#"[{"id":1,"name":"A","lang":"en"},{"id":2,"name":"B","lang":"ja"},{"id":1,"name":"C","lang":"en"}]"#;
+        // The duplicate is the third entry, so the first two are still a valid list.
+        let (host_env, _dir) = env();
+        let outcome = instantiate(guest(Behaviour::Returns(list.into())), Vec::new(), true, host_env)
+            .await
+            .map(|sources| sources.len());
+        assert_eq!(outcome.err(), Some(WasmError::Manifest("duplicate source id 1".into())));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_factory_with_no_entries_loads_zero_sources() {
+        let (host_env, _dir) = env();
+        let sources = instantiate(guest(Behaviour::Returns("[]".into())), Vec::new(), true, host_env)
+            .await
+            .expect("loads");
+        assert!(sources.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]

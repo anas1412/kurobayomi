@@ -1,13 +1,31 @@
-//! One extension package, many sources (`SourceFactory.kt` and `AnimeSourceFactory.kt`, T-20a-012). A package declares
-//! its sources through a factory. The loader calls `create_sources` once per load and keeps nothing from the result,
-//! so every source's id comes from its own name, language and version (see [`crate::id::generate_id`]).
+//! One extension package, many sources (`SourceFactory.kt` and `AnimeSourceFactory.kt`, T-20a-012, T-15a-015). A package
+//! declares its sources through a factory. The loader calls `create_sources` once per load and keeps nothing from the
+//! result, so every source's id comes from its own name, language and version (see [`crate::id::generate_id`]).
+
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
 
 use crate::anime::AnimeSource;
-use crate::source::MangaSource;
+use crate::source::CatalogueSource;
 
-/// The manga sources one package declares. Each entry becomes a separate source with its own id.
+/// The manga sources one package declares. Each entry becomes a separate source with its own id. A factory may return
+/// no sources; that is accepted and logged by [`load_factories`].
 pub trait MangaSourceFactory: Send + Sync {
-    fn create_sources(&self) -> Vec<Box<dyn MangaSource>>;
+    fn create_sources(&self) -> Vec<Arc<dyn CatalogueSource>>;
+}
+
+/// Calls each named factory in order and keeps every source they return. A factory that returns nothing is logged and
+/// loads nothing. A factory that panics is logged and skipped, and the entries after it still load (T-15a-015).
+pub fn load_factories(entries: &[(&str, &dyn MangaSourceFactory)]) -> Vec<Arc<dyn CatalogueSource>> {
+    let mut loaded = Vec::new();
+    for (name, factory) in entries {
+        match std::panic::catch_unwind(AssertUnwindSafe(|| factory.create_sources())) {
+            Ok(sources) if sources.is_empty() => tracing::warn!(package = name, "factory returned no sources"),
+            Ok(sources) => loaded.extend(sources),
+            Err(_) => tracing::error!(package = name, "factory failed; its sources are skipped"),
+        }
+    }
+    loaded
 }
 
 /// The anime sources one package declares, the anime twin of [`MangaSourceFactory`].
@@ -24,9 +42,10 @@ mod tests {
     use crate::error::SourceError;
     use crate::filter_list::FilterList;
     use crate::id::generate_id;
-    use crate::model::{Page, SChapter, SManga};
+    use crate::model::{MangasPage, Page, SChapter, SManga};
+    use crate::source::MangaSource;
 
-    /// A manga source that only has an identity.
+    /// A catalogue source that only has an identity.
     struct NamedManga {
         name: String,
         lang: String,
@@ -56,6 +75,29 @@ mod tests {
 
         async fn get_page_list(&self, _chapter: &SChapter) -> Result<Vec<Page>, SourceError> {
             Ok(Vec::new())
+        }
+    }
+
+    #[async_trait]
+    impl CatalogueSource for NamedManga {
+        fn supports_latest(&self) -> bool {
+            false
+        }
+
+        fn filter_list(&self) -> FilterList {
+            FilterList::default()
+        }
+
+        async fn popular(&self, _page: i32) -> Result<MangasPage, SourceError> {
+            Err(SourceError::Unsupported("popular"))
+        }
+
+        async fn search(&self, _page: i32, _query: &str, _filters: &FilterList) -> Result<MangasPage, SourceError> {
+            Err(SourceError::Unsupported("search"))
+        }
+
+        async fn latest(&self, _page: i32) -> Result<MangasPage, SourceError> {
+            Err(SourceError::Unsupported("latest"))
         }
     }
 
@@ -104,10 +146,10 @@ mod tests {
     struct Package;
 
     impl MangaSourceFactory for Package {
-        fn create_sources(&self) -> Vec<Box<dyn MangaSource>> {
+        fn create_sources(&self) -> Vec<Arc<dyn CatalogueSource>> {
             vec![
-                Box::new(NamedManga { name: "Alpha".into(), lang: "en".into() }),
-                Box::new(NamedManga { name: "Alpha".into(), lang: "ja".into() }),
+                Arc::new(NamedManga { name: "Alpha".into(), lang: "en".into() }),
+                Arc::new(NamedManga { name: "Alpha".into(), lang: "ja".into() }),
             ]
         }
     }
@@ -118,6 +160,22 @@ mod tests {
                 Box::new(NamedAnime { name: "Alpha".into(), lang: "en".into() }),
                 Box::new(NamedAnime { name: "Alpha".into(), lang: "ja".into() }),
             ]
+        }
+    }
+
+    struct Empty;
+
+    impl MangaSourceFactory for Empty {
+        fn create_sources(&self) -> Vec<Arc<dyn CatalogueSource>> {
+            Vec::new()
+        }
+    }
+
+    struct Broken;
+
+    impl MangaSourceFactory for Broken {
+        fn create_sources(&self) -> Vec<Arc<dyn CatalogueSource>> {
+            panic!("broken package")
         }
     }
 
@@ -135,5 +193,18 @@ mod tests {
         assert_eq!(sources.len(), 2);
         assert_ne!(sources[0].id(), sources[1].id(), "the language is part of the id");
         assert_eq!(sources[1].id(), generate_id("Alpha", "ja", 1));
+    }
+
+    #[test]
+    fn a_factory_with_no_sources_is_accepted_and_loads_nothing() {
+        assert!(load_factories(&[("empty", &Empty)]).is_empty());
+    }
+
+    /// One failing fake does not stop the entries after it.
+    #[test]
+    fn a_failing_entry_is_skipped_and_the_others_still_load() {
+        let loaded = load_factories(&[("broken", &Broken), ("ok", &Package)]);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[1].id(), generate_id("Alpha", "ja", 1));
     }
 }

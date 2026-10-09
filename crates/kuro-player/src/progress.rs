@@ -26,25 +26,41 @@ pub fn is_completed(last_second_seen: i64, total_seconds: i64, threshold: f64) -
     last_second_seen as f64 >= total_seconds as f64 * threshold
 }
 
-/// Plans one save of the current episode (T-45a-063, T-45a-064). Incognito writes nothing. Otherwise
-/// the history gets `now_ms`. Progress is written only when `total_seconds > 0`. An unseen episode
-/// becomes seen when it is completed, and a seen episode stays seen.
+/// Whether progress is written in a save: `!incognito_source || has_trackers` (T56, T57). A source
+/// in incognito keeps progress only for a tracked entry, so the tracker can still read it.
+pub fn progress_allowed(incognito_source: bool, has_trackers: bool) -> bool {
+    !incognito_source || has_trackers
+}
+
+/// Whether history is written: never for a source in incognito (T56, T57).
+pub fn history_allowed(incognito_source: bool) -> bool {
+    !incognito_source
+}
+
+/// Whether tracker sync runs. It reads the app-wide incognito flag, not the per-source one (E-17).
+pub fn tracker_sync_allowed(incognito_global: bool, has_trackers: bool, auto_update: bool) -> bool {
+    !incognito_global && has_trackers && auto_update
+}
+
+/// Plans one save of the current episode (T-45a-063, T-45a-064, T-45b-056). `incognito_source` is
+/// the per-source state read for the current anime. History gets `now_ms` unless incognito. Progress
+/// is written when `progress_allowed` and `total_seconds > 0`. An unseen episode becomes seen when it
+/// is completed, and a seen episode stays seen.
 pub fn plan_save(
-    incognito: bool,
+    incognito_source: bool,
+    has_trackers: bool,
     now_ms: i64,
     episode: &EpisodeProgress,
     threshold: f64,
 ) -> SavePlan {
-    if incognito {
-        return SavePlan::default();
-    }
-    let progress = (episode.total_seconds > 0).then(|| EpisodeProgress {
-        seen: episode.seen
-            || is_completed(episode.last_second_seen, episode.total_seconds, threshold),
-        ..episode.clone()
-    });
+    let progress = (progress_allowed(incognito_source, has_trackers) && episode.total_seconds > 0)
+        .then(|| EpisodeProgress {
+            seen: episode.seen
+                || is_completed(episode.last_second_seen, episode.total_seconds, threshold),
+            ..episode.clone()
+        });
     SavePlan {
-        history_seen_at: Some(now_ms),
+        history_seen_at: history_allowed(incognito_source).then_some(now_ms),
         episode: progress,
     }
 }
@@ -64,14 +80,29 @@ mod tests {
     }
 
     #[test]
-    fn incognito_writes_neither_history_nor_progress() {
-        let plan = plan_save(true, 42, &episode(false, 500, 1000), 0.85);
+    fn incognito_without_trackers_writes_neither_history_nor_progress() {
+        let plan = plan_save(true, false, 42, &episode(false, 500, 1000), 0.85);
         assert_eq!(plan, SavePlan::default());
     }
 
     #[test]
+    fn incognito_with_a_tracker_writes_progress_but_not_history() {
+        let plan = plan_save(true, true, 42, &episode(false, 500, 1000), 0.85);
+        assert_eq!(plan.history_seen_at, None);
+        assert_eq!(plan.episode.unwrap().last_second_seen, 500);
+    }
+
+    #[test]
+    fn tracker_sync_follows_the_global_flag_only() {
+        assert!(tracker_sync_allowed(false, true, true));
+        assert!(!tracker_sync_allowed(true, true, true));
+        assert!(!tracker_sync_allowed(false, false, true));
+        assert!(!tracker_sync_allowed(false, true, false));
+    }
+
+    #[test]
     fn normal_save_upserts_history_at_now_and_writes_fields() {
-        let plan = plan_save(false, 42, &episode(false, 100, 1000), 0.85);
+        let plan = plan_save(false, false, 42, &episode(false, 100, 1000), 0.85);
         assert_eq!(plan.history_seen_at, Some(42));
         let written = plan.episode.unwrap();
         assert!(written.bookmark);
@@ -82,22 +113,22 @@ mod tests {
 
     #[test]
     fn zero_total_skips_progress_but_keeps_history() {
-        let plan = plan_save(false, 7, &episode(false, 0, 0), 0.85);
+        let plan = plan_save(false, false, 7, &episode(false, 0, 0), 0.85);
         assert_eq!(plan.history_seen_at, Some(7));
         assert_eq!(plan.episode, None);
     }
 
     #[test]
     fn unseen_becomes_seen_at_threshold() {
-        let at = plan_save(false, 1, &episode(false, 850, 1000), 0.85);
+        let at = plan_save(false, false, 1, &episode(false, 850, 1000), 0.85);
         assert!(at.episode.unwrap().seen);
-        let before = plan_save(false, 1, &episode(false, 849, 1000), 0.85);
+        let before = plan_save(false, false, 1, &episode(false, 849, 1000), 0.85);
         assert!(!before.episode.unwrap().seen);
     }
 
     #[test]
     fn seen_stays_seen_even_below_threshold() {
-        let plan = plan_save(false, 1, &episode(true, 10, 1000), 0.85);
+        let plan = plan_save(false, false, 1, &episode(true, 10, 1000), 0.85);
         assert!(plan.episode.unwrap().seen);
     }
 

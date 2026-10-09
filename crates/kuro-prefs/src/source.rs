@@ -35,11 +35,13 @@ pub fn source_setting_key(source_id: i64, key: &str) -> String {
 }
 
 define_prefs! {
-    /// `[sources]` section: the thirty keys of Aniyomi `SourcePreferences`.
+    /// `[sources]` section: the keys of Aniyomi `SourcePreferences`, minus the derived `animeext_updates_count` (T-19a-064).
     pub struct SourcePrefs in "sources" {
         source_display_mode: LibraryDisplayMode = "pref_display_mode_catalogue" => LibraryDisplayMode::DEFAULT;
         enabled_languages: BTreeSet<String> = "source_languages" => default_enabled_languages(&system_locale());
         show_nsfw_source: bool = "show_nsfw_source" => true;
+        /// Kurobayomi only (T-19a-066): shows the store entries that cannot run on Linux, with badges and no install.
+        show_not_runnable: bool = "show_not_runnable" => false;
         migration_sorting_mode: MigrationSortingMode = "pref_migration_sorting" => MigrationSortingMode::ALPHABETICAL;
         migration_sorting_direction: MigrationDirection = "pref_migration_direction" => MigrationDirection::ASCENDING;
         anime_extension_repos: BTreeSet<String> = "anime_extension_repos" => BTreeSet::new();
@@ -54,7 +56,6 @@ define_prefs! {
         pinned_manga_sources: BTreeSet<String> = "pinned_catalogues" => BTreeSet::new();
         last_used_anime_source: i64 = "__APP_STATE_last_anime_catalogue_source" => -1;
         last_used_manga_source: i64 = "__APP_STATE_last_catalogue_source" => -1;
-        anime_extension_updates_count: i32 = "animeext_updates_count" => 0;
         manga_extension_updates_count: i32 = "ext_updates_count" => 0;
         hide_in_anime_library_items: bool = "browse_hide_in_anime_library_items" => false;
         hide_in_manga_library_items: bool = "browse_hide_in_library_items" => false;
@@ -70,13 +71,14 @@ define_prefs! {
     }
 }
 
-/// The locale the process runs in, from the usual environment variables (`LC_ALL`, `LC_MESSAGES`, `LANG`). Empty when
-/// none is set.
+/// The locale the process runs in: `LC_MESSAGES`, then `LANG` (T-18a-023). Empty when neither is set.
 pub fn system_locale() -> String {
-    ["LC_ALL", "LC_MESSAGES", "LANG"]
-        .iter()
-        .find_map(|name| std::env::var(name).ok().filter(|v| !v.is_empty()))
-        .unwrap_or_default()
+    locale_from(|name| std::env::var(name).ok())
+}
+
+/// [`system_locale`] over any variable lookup.
+fn locale_from(var: impl Fn(&str) -> Option<String>) -> String {
+    ["LC_MESSAGES", "LANG"].iter().find_map(|name| var(name).filter(|v| !v.is_empty())).unwrap_or_default()
 }
 
 /// `LocaleHelper.getDefaultEnabledLanguages()`: `all`, `en` and the language subtag of `locale` in lower case. A locale
@@ -101,11 +103,21 @@ mod tests {
     #[test]
     fn every_field_is_a_registered_sources_key_with_the_same_name() {
         assert_eq!(SourcePrefs::TABLE, "sources");
-        assert_eq!(SourcePrefs::FIELDS.len(), 30, "the thirty keys of section 4.1");
+        assert_eq!(SourcePrefs::FIELDS.len(), 30, "the thirty keys of section 4.1, minus the derived animeext_updates_count, plus show_not_runnable");
         for (field, key) in SourcePrefs::FIELDS {
             let row = REGISTRY.iter().find(|m| m.key == *key).unwrap_or_else(|| panic!("{field}: {key} not registered"));
             assert_eq!(row.table, "sources", "{key}");
         }
+    }
+
+    #[test]
+    fn the_locale_reads_lc_messages_before_lang_and_skips_empty_values() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| pairs.iter().find(|(k, _)| *k == name).map(|(_, v)| (*v).to_owned())
+        };
+        assert_eq!(locale_from(env(&[("LANG", "de_DE.UTF-8"), ("LC_MESSAGES", "fr_FR.UTF-8")])), "fr_FR.UTF-8");
+        assert_eq!(locale_from(env(&[("LANG", "de_DE.UTF-8"), ("LC_MESSAGES", "")])), "de_DE.UTF-8");
+        assert_eq!(locale_from(env(&[("LC_ALL", "ja_JP.UTF-8")])), "", "LC_ALL is not read");
     }
 
     #[test]
@@ -129,6 +141,7 @@ mod tests {
         assert_eq!(prefs.last_used_manga_source.get(), -1);
         assert_eq!(prefs.data_saver_image_quality.get(), 80);
         assert!(prefs.show_nsfw_source.get());
+        assert!(!prefs.show_not_runnable.get());
         assert!(!prefs.data_saver_ignore_jpeg.get());
         assert!(prefs.data_saver_ignore_gif.get());
         assert!(prefs.data_saver_downloader.get());
@@ -182,7 +195,6 @@ mod tests {
         assert!(prefs.trusted_extensions.get().is_empty());
         assert!(!prefs.global_search_filter_state.get());
         assert_eq!(prefs.last_used_anime_source.get(), -1);
-        assert_eq!(prefs.anime_extension_updates_count.get(), 0);
         assert_eq!(prefs.manga_extension_updates_count.get(), 0);
         assert!(!prefs.hide_in_anime_library_items.get());
         assert!(!prefs.hide_in_manga_library_items.get());

@@ -72,12 +72,18 @@
 //! Traits: [`paths::Paths`] (directories) and [`secrets::SecretStore`] (credentials).
 //! Linux implementations: [`linux::LinuxPaths`] and [`linux::SecretService`].
 
+pub mod deep_link;
 pub mod device;
+pub mod incognito;
+pub mod lifecycle;
+pub mod links;
+pub mod notifications;
 pub mod notifier;
 pub mod opener;
 pub mod paths;
 pub mod process;
 pub mod secrets;
+pub mod single_instance;
 pub mod system;
 pub mod toast;
 pub mod webview;

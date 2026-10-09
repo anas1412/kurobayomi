@@ -1,9 +1,51 @@
 //! Remove-after-read slot arithmetic (`ReaderViewModel.deleteChapterIfNeeded`, `PlayerViewModel`) and the speed-limit
 //! conversion (`MangaDownloader.kt`). Pure functions; the callers hold the lists.
 
+/// Milliseconds a download-queue notification stays up (`MangaDownloader.kt`, behaviour section 17).
+pub const DOWNLOAD_NOTIFICATION_TIMEOUT_MS: u64 = 30_000;
+
+/// Chapters in the download queue (unmetered sources left out) above which the bulk warning shows.
+pub const DOWNLOADS_QUEUED_WARNING_THRESHOLD: usize = 30;
+
+/// Chapters from one source in the download queue above which the bulk warning shows.
+pub const CHAPTERS_PER_SOURCE_QUEUE_WARNING_THRESHOLD: usize = 15;
+
+/// Chapters per source that a library update may queue before its warning shows (behaviour section 17). Unmetered
+/// sources are left out of the count, as they are for the download queue.
+pub const LIBRARY_UPDATE_PER_SOURCE_WARNING: usize = 60;
+
 /// The choices of the remove-after-read setting, in the order the settings screen shows them: disabled, last read,
 /// second to last, and so on up to fifth to last.
 pub const REMOVE_AFTER_READ_OPTIONS: [i32; 6] = [-1, 0, 1, 2, 3, 4];
+
+/// Total and largest per-source count of the queued items that are not from an unmetered source. Each item is
+/// `(source id, is_unmetered)`.
+fn metered_counts(items: impl IntoIterator<Item = (i64, bool)>) -> (usize, usize) {
+    let mut per_source: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
+    for (source, unmetered) in items {
+        if !unmetered {
+            *per_source.entry(source).or_default() += 1;
+        }
+    }
+    (per_source.values().sum(), per_source.values().copied().max().unwrap_or(0))
+}
+
+/// Whether adding to the download queue shows the bulk warning: only when the queue was empty before the add and
+/// auto-start is on, and then when more than 30 metered chapters are queued or more than 15 come from one source.
+/// `queued` is the whole queue after the add.
+pub fn download_queue_warning(was_empty: bool, auto_start: bool, queued: impl IntoIterator<Item = (i64, bool)>) -> bool {
+    if !(was_empty && auto_start) {
+        return false;
+    }
+    let (total, widest) = metered_counts(queued);
+    total > DOWNLOADS_QUEUED_WARNING_THRESHOLD || widest > CHAPTERS_PER_SOURCE_QUEUE_WARNING_THRESHOLD
+}
+
+/// Whether a library update shows the queue-size warning (`showQueueSizeWarningNotificationIfNeeded`): more than 60
+/// entries from one metered source. `to_update` holds `(source id, is_unmetered)` per entry.
+pub fn library_update_warning(to_update: impl IntoIterator<Item = (i64, bool)>) -> bool {
+    metered_counts(to_update).1 > LIBRARY_UPDATE_PER_SOURCE_WARNING
+}
 
 /// The index of the item to remove, counted back from `current` by `slots`. `-1` is disabled, and so is any other
 /// negative value (E-DL-04). Returns `None` when the target is before the first item (E-DL-03).
@@ -76,5 +118,38 @@ mod tests {
         assert_eq!(speed_limit_bytes_per_second(0), 0, "unthrottled");
         assert_eq!(speed_limit_bytes_per_second(-5), 0, "E-DL-02");
         assert_eq!(speed_limit_bytes_per_second(i32::MAX), 2_147_483_647_i64 * 1024, "TC-DL-09");
+    }
+}
+
+#[cfg(test)]
+mod queue_threshold_tests {
+    use super::*;
+
+    /// T-15a-016: the constants the queue warnings and the notification use.
+    #[test]
+    fn the_queue_constants_match_the_behaviour_section() {
+        assert_eq!(DOWNLOAD_NOTIFICATION_TIMEOUT_MS, 30_000);
+        assert_eq!(LIBRARY_UPDATE_PER_SOURCE_WARNING, 60);
+        assert_eq!((DOWNLOADS_QUEUED_WARNING_THRESHOLD, CHAPTERS_PER_SOURCE_QUEUE_WARNING_THRESHOLD), (30, 15));
+    }
+
+    #[test]
+    fn the_download_warning_needs_an_empty_queue_and_auto_start_and_skips_unmetered_sources() {
+        let sixteen_from_one = || (0..16).map(|_| (1, false));
+        assert!(download_queue_warning(true, true, sixteen_from_one()), "16 from one source");
+        assert!(!download_queue_warning(true, true, (0..15).map(|_| (1, false))), "15 is not above the limit");
+        assert!(!download_queue_warning(false, true, sixteen_from_one()), "queue was not empty");
+        assert!(!download_queue_warning(true, false, sixteen_from_one()), "auto-start is off");
+        assert!(!download_queue_warning(true, true, (0..40).map(|_| (1, true))), "unmetered items are not counted");
+        let spread = (0..31).map(|i| (i % 3, false));
+        assert!(download_queue_warning(true, true, spread), "31 in total across sources");
+    }
+
+    #[test]
+    fn the_library_update_warning_counts_per_metered_source() {
+        assert!(library_update_warning((0..61).map(|_| (7, false))));
+        assert!(!library_update_warning((0..60).map(|_| (7, false))));
+        assert!(!library_update_warning((0..100).map(|_| (7, true))), "unmetered excluded");
+        assert!(!library_update_warning((0..120).map(|i| (i % 2, false))), "60 + 60 over two sources");
     }
 }

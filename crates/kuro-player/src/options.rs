@@ -5,9 +5,11 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::config::AdvancedPrefs;
 use crate::enums::{
     AudioChannels, Debanding, Decoder, SubtitleJustification, SubtitlesBorderStyle,
 };
+use crate::mpv::{MpvError, PropertySink, PropertySource};
 
 /// One startup setting. Every entry is applied before initialisation with `set_option`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,6 +104,8 @@ pub struct PlayerPrefs {
     pub audio: AudioPrefs,
     pub data_dir: PathBuf,
     pub screenshot_dir: PathBuf,
+    /// `AdvancedPlayerPreferences`: user scripts, `mpv.conf`, `input.conf`, statistics page.
+    pub advanced: AdvancedPrefs,
 }
 
 impl Default for PlayerPrefs {
@@ -119,6 +123,7 @@ impl Default for PlayerPrefs {
             audio: AudioPrefs::default(),
             data_dir: PathBuf::new(),
             screenshot_dir: PathBuf::new(),
+            advanced: AdvancedPrefs::default(),
         }
     }
 }
@@ -159,6 +164,111 @@ pub fn resolve_hwdec(decoder: Decoder, available: &[String]) -> String {
 /// Video filter names and the prefs they come from (`VideoFilters` in `PlayerEnums.kt:141-171`).
 pub const FILTER_NAMES: [&str; 5] = ["brightness", "saturation", "contrast", "gamma", "hue"];
 
+/// Clamps a video filter value to -100..=100 before it is written (T-45a-032, proposal: the Kotlin
+/// passes stored values through unclamped).
+pub fn clamp_filter(value: i64) -> i64 {
+    value.clamp(-100, 100)
+}
+
+/// The mpv write for one video filter, at startup or on a runtime change (T-45a-032). `None` for a
+/// name outside `FILTER_NAMES`.
+pub fn filter_write(name: &str, value: i64) -> Option<(&'static str, i64)> {
+    FILTER_NAMES
+        .into_iter()
+        .find(|f| *f == name)
+        .map(|f| (f, clamp_filter(value)))
+}
+
+/// The inputs of the one `vf` chain (E-26 fix): CPU debanding, the five video filters and
+/// `format=yuv420p`. The filters come from `brightness`/`contrast`/`gamma`/`saturation` of
+/// ffmpeg's `eq` filter and from `hue`, so a runtime change rewrites the whole chain.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VideoChain {
+    pub debanding: Debanding,
+    pub use_yuv420p: bool,
+    /// brightness, saturation, contrast, gamma, hue, as stored (-100..=100).
+    pub filters: [i32; 5],
+}
+
+impl Default for VideoChain {
+    fn default() -> Self {
+        Self::from(&PlayerPrefs::default())
+    }
+}
+
+impl From<&PlayerPrefs> for VideoChain {
+    fn from(p: &PlayerPrefs) -> Self {
+        Self {
+            debanding: p.debanding,
+            use_yuv420p: p.use_yuv420p,
+            filters: p.filters,
+        }
+    }
+}
+
+/// A number with at most four decimals and no trailing zeros.
+fn trimmed(v: f64) -> String {
+    let s = format!("{v:.4}");
+    s.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+impl VideoChain {
+    /// The comma-joined `vf` value, or empty when nothing is enabled. A filter at 0 adds nothing.
+    /// Ranges follow mpv's own mapping of -100..=100: brightness and contrast to ffmpeg's
+    /// -1..1 and 0..2, saturation to 0..2, gamma to 1/8..8, hue to -180..180 degrees.
+    pub fn vf(&self) -> String {
+        let [brightness, saturation, contrast, gamma, hue] = self
+            .filters
+            .map(|v| f64::from(clamp_filter(i64::from(v)) as i32));
+        let mut eq: Vec<String> = Vec::new();
+        if brightness != 0.0 {
+            eq.push(format!("brightness={}", trimmed(brightness / 100.0)));
+        }
+        if contrast != 0.0 {
+            eq.push(format!("contrast={}", trimmed(1.0 + contrast / 100.0)));
+        }
+        if saturation != 0.0 {
+            eq.push(format!("saturation={}", trimmed(1.0 + saturation / 100.0)));
+        }
+        if gamma != 0.0 {
+            eq.push(format!("gamma={}", trimmed(8f64.powf(gamma / 100.0))));
+        }
+        let mut vf: Vec<String> = Vec::new();
+        if self.debanding == Debanding::Cpu {
+            vf.push("gradfun=radius=12".to_owned());
+        }
+        if !eq.is_empty() {
+            vf.push(format!("eq={}", eq.join(":")));
+        }
+        if hue != 0.0 {
+            vf.push(format!("hue=h={}", trimmed(hue * 1.8)));
+        }
+        if self.use_yuv420p {
+            vf.push("format=yuv420p".to_owned());
+        }
+        vf.join(",")
+    }
+}
+
+/// The decoder mpv reports as active (`getDecoder`, T-45b-068): `hwdec-current`, or the `hwdec`
+/// option while nothing is decoding yet. Unknown values are `Auto` (E-07).
+pub fn get_decoder(source: &impl PropertySource) -> Decoder {
+    let active = source
+        .get_str("hwdec-current")
+        .filter(|v| !v.is_empty())
+        .or_else(|| source.get_str("hwdec"));
+    Decoder::from_active(active.as_deref().unwrap_or_default())
+}
+
+/// Writes the chosen decoder to `hwdec` (`updateDecoder`), resolved against the candidates mpv has.
+pub fn update_decoder(
+    sink: &impl PropertySink,
+    decoder: Decoder,
+    available: &[String],
+) -> Result<(), MpvError> {
+    sink.set_str("hwdec", &resolve_hwdec(decoder, available))
+}
+
 /// Builds the ordered startup table of behaviour doc 2.2 (including the subtitle and audio
 /// groups, and the two margin options from `PlayerActivity.kt:438-439`).
 pub fn startup_settings(p: &PlayerPrefs) -> Vec<MpvSetting> {
@@ -179,19 +289,14 @@ pub fn startup_settings(p: &PlayerPrefs) -> Vec<MpvSetting> {
     };
     set("hwdec", hwdec);
 
-    // Debanding and the yuv420p format share one `vf` list. Kotlin overwrote `vf` in that case
-    // (behaviour 2.2 defect); the joined list keeps both filters.
-    let mut vf: Vec<&str> = Vec::new();
-    match p.debanding {
-        Debanding::None => {}
-        Debanding::Cpu => vf.push("gradfun=radius=12"),
-        Debanding::Gpu => set("deband", "yes".to_owned()),
+    // Debanding, the video filters and the yuv420p format share one `vf` list. Kotlin overwrote
+    // `vf` in that case (behaviour 2.2 defect); the joined list keeps all of them.
+    if p.debanding == Debanding::Gpu {
+        set("deband", "yes".to_owned());
     }
-    if p.use_yuv420p {
-        vf.push("format=yuv420p");
-    }
+    let vf = VideoChain::from(p).vf();
     if !vf.is_empty() {
-        set("vf", vf.join(","));
+        set("vf", vf);
     }
 
     set(
@@ -214,9 +319,6 @@ pub fn startup_settings(p: &PlayerPrefs) -> Vec<MpvSetting> {
     set("demuxer-max-bytes", CACHE_BYTES.to_string());
     set("demuxer-max-back-bytes", CACHE_BYTES.to_string());
     set("screenshot-directory", path_text(&p.screenshot_dir));
-    for (name, value) in FILTER_NAMES.into_iter().zip(p.filters) {
-        set(name, value.to_string());
-    }
     set("speed", kotlin_f32(p.player_speed));
     // Workaround for mpv issue 14651 (`AniyomiMPVView.kt:150-152`).
     set("vd-lavc-film-grain", "cpu".to_owned());
@@ -245,6 +347,10 @@ fn push_subtitles(s: &SubtitlePrefs, set: &mut impl FnMut(&'static str, String))
     set("sub-font", s.font.clone());
     if s.override_ass {
         set("sub-ass-override", "force".to_owned());
+    }
+    // E27 decision (T-46b-041): a justification picked in the typography card applies to ASS
+    // subtitles after a restart, not only with the ASS override.
+    if s.override_ass || s.justify != SubtitleJustification::Auto {
         set("sub-ass-justify", "yes".to_owned());
     }
     set("sub-font-size", s.font_size.to_string());
@@ -328,11 +434,6 @@ mod tests {
             ("demuxer-max-bytes", "67108864"),
             ("demuxer-max-back-bytes", "67108864"),
             ("screenshot-directory", "/pics"),
-            ("brightness", "0"),
-            ("saturation", "0"),
-            ("contrast", "0"),
-            ("gamma", "0"),
-            ("hue", "0"),
             ("speed", "1.0"),
             ("vd-lavc-film-grain", "cpu"),
             ("sub-delay", "0.0"),
@@ -512,6 +613,63 @@ mod tests {
     }
 
     #[test]
+    fn justification_alone_turns_on_ass_justify_at_startup() {
+        let mut p = prefs();
+        p.sub.justify = SubtitleJustification::Center;
+        let s = startup_settings(&p);
+        assert_eq!(setting_value(&s, "sub-ass-override"), None);
+        assert_eq!(setting_value(&s, "sub-ass-justify"), Some("yes"));
+        assert_eq!(setting_value(&s, "sub-justify"), Some("center"));
+    }
+
+    #[test]
+    fn secondary_delay_pref_round_trips_into_the_startup_table() {
+        let mut p = prefs();
+        p.sub.secondary_delay_ms = -250;
+        p.sub.delay_ms = 125;
+        let s = startup_settings(&p);
+        assert_eq!(setting_value(&s, "secondary-sub-delay"), Some("-0.25"));
+        assert_eq!(setting_value(&s, "sub-delay"), Some("0.125"));
+    }
+
+    #[test]
+    fn subtitle_prefs_map_one_to_one_to_startup_properties() {
+        let mut p = prefs();
+        p.sub.speed = 2.5;
+        p.sub.font = "Noto Sans".to_owned();
+        p.sub.font_size = 70;
+        p.sub.bold = true;
+        p.sub.italic = true;
+        p.sub.text_color_argb = 0x80FF0000u32 as i32;
+        p.sub.back_color_argb = 0;
+        p.sub.border_color_argb = -16_777_216;
+        p.sub.border_size = 9;
+        p.sub.border_style = SubtitlesBorderStyle::OpaqueBox;
+        p.sub.shadow_offset = 4;
+        p.sub.pos = 80;
+        p.sub.scale = 1.25;
+        let s = startup_settings(&p);
+        let expect = [
+            ("sub-speed", "2.5"),
+            ("sub-font", "Noto Sans"),
+            ("sub-font-size", "70"),
+            ("sub-bold", "yes"),
+            ("sub-italic", "yes"),
+            ("sub-color", "#80FF0000"),
+            ("sub-back-color", "#00000000"),
+            ("sub-border-color", "#FF000000"),
+            ("sub-border-size", "9"),
+            ("sub-border-style", "opaque-box"),
+            ("sub-shadow-offset", "4"),
+            ("sub-pos", "80"),
+            ("sub-scale", "1.25"),
+        ];
+        for (name, value) in expect {
+            assert_eq!(setting_value(&s, name), Some(value), "{name}");
+        }
+    }
+
+    #[test]
     fn cache_limits_are_64_mib() {
         let s = startup_settings(&prefs());
         assert_eq!(setting_value(&s, "demuxer-max-bytes"), Some("67108864"));
@@ -522,15 +680,104 @@ mod tests {
     }
 
     #[test]
-    fn filters_default_zero_and_write_names() {
+    fn filter_writes_clamp_and_reject_unknown_names() {
+        assert_eq!(filter_write("contrast", 150), Some(("contrast", 100)));
+        assert_eq!(filter_write("gamma", -250), Some(("gamma", -100)));
+        assert_eq!(filter_write("hue", 42), Some(("hue", 42)));
+        assert_eq!(filter_write("sharpen", 1), None);
+    }
+
+    #[test]
+    fn startup_filters_are_clamped_and_join_the_one_vf_chain() {
         let p = PlayerPrefs {
-            filters: [10, -20, 0, 5, -1],
+            filters: [500, -500, 0, 0, 0],
             ..prefs()
         };
         let s = startup_settings(&p);
-        assert_eq!(setting_value(&s, "brightness"), Some("10"));
-        assert_eq!(setting_value(&s, "saturation"), Some("-20"));
-        assert_eq!(setting_value(&s, "hue"), Some("-1"));
+        assert_eq!(
+            setting_value(&s, "vf"),
+            Some("eq=brightness=1:saturation=0,format=yuv420p")
+        );
+        assert_eq!(setting_value(&s, "brightness"), None);
+    }
+
+    #[test]
+    fn one_vf_value_holds_debanding_every_filter_and_the_format() {
+        let p = PlayerPrefs {
+            debanding: Debanding::Cpu,
+            filters: [10, -20, 30, 100, -50],
+            ..prefs()
+        };
+        assert_eq!(
+            setting_value(&startup_settings(&p), "vf"),
+            Some(
+                "gradfun=radius=12,eq=brightness=0.1:contrast=1.3:saturation=0.8:gamma=8,hue=h=-90,format=yuv420p"
+            )
+        );
+        let low = VideoChain {
+            filters: [0, 0, 0, -100, 0],
+            use_yuv420p: false,
+            ..VideoChain::default()
+        };
+        assert_eq!(low.vf(), "eq=gamma=0.125");
+        assert_eq!(
+            VideoChain {
+                use_yuv420p: false,
+                ..VideoChain::default()
+            }
+            .vf(),
+            ""
+        );
+    }
+
+    #[derive(Default)]
+    struct Fake {
+        props: std::cell::RefCell<Vec<(String, String)>>,
+    }
+    impl PropertySink for Fake {
+        fn set_str(&self, name: &str, value: &str) -> Result<(), MpvError> {
+            self.props
+                .borrow_mut()
+                .push((name.to_owned(), value.to_owned()));
+            Ok(())
+        }
+    }
+    impl PropertySource for Fake {
+        fn get_str(&self, name: &str) -> Option<String> {
+            self.props
+                .borrow()
+                .iter()
+                .rev()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v.clone())
+        }
+    }
+
+    #[test]
+    fn get_decoder_reads_the_active_hwdec_and_unknown_is_auto() {
+        let fake = Fake::default();
+        assert_eq!(get_decoder(&fake), Decoder::Auto);
+        fake.set_str("hwdec", "no").unwrap();
+        assert_eq!(get_decoder(&fake), Decoder::Sw);
+        fake.set_str("hwdec-current", "vaapi-copy").unwrap();
+        assert_eq!(get_decoder(&fake), Decoder::Hw);
+        fake.set_str("hwdec-current", "weird").unwrap();
+        assert_eq!(get_decoder(&fake), Decoder::Auto);
+    }
+
+    #[test]
+    fn update_decoder_writes_the_resolved_hwdec() {
+        let fake = Fake::default();
+        let avail = vec!["nvdec-copy".to_owned()];
+        update_decoder(&fake, Decoder::Hw, &avail).unwrap();
+        update_decoder(&fake, Decoder::Sw, &avail).unwrap();
+        assert_eq!(
+            *fake.props.borrow(),
+            vec![
+                ("hwdec".to_owned(), "nvdec-copy".to_owned()),
+                ("hwdec".to_owned(), "no".to_owned())
+            ]
+        );
     }
 
     #[test]

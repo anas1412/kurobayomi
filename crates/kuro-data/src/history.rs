@@ -233,6 +233,24 @@ impl AnimeHistoryRepo {
         self.db.read(|c| anime_list(c, query))
     }
 
+    /// The history row of the episode with this url (`AnimeHistory.kt` lookup by episode url, used by the restorer).
+    /// The lowest history id wins when rows repeat. `None` when no episode has that url.
+    pub fn by_episode_url(c: &Connection, url: &str) -> DataResult<Option<AnimeHistory>> {
+        let mut st = c.prepare_cached(
+            "SELECT H._id, H.episode_id, H.last_seen FROM animehistory H \
+             JOIN episodes E ON E._id = H.episode_id WHERE E.url = :url ORDER BY H._id LIMIT 1",
+        )?;
+        let mut rows = st.query_map(named_params! {":url": url}, |r| {
+            Ok(AnimeHistory { id: r.get(0)?, episode_id: r.get(1)?, last_seen: r.get(2)? })
+        })?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// Deletes the reset anime rows (`last_seen = 0`) inside an open transaction, for the restore path.
+    pub fn remove_resetted(c: &Connection) -> DataResult<usize> {
+        Ok(anime::remove_resetted_history(c)?)
+    }
+
     /// Every history row of one anime, reset rows included.
     pub fn by_anime_id(&self, anime_id: i64) -> DataResult<Vec<AnimeHistory>> {
         self.db.read(|c| {
@@ -704,5 +722,58 @@ mod tests {
         writes.drain().await;
         assert_eq!(repo.by_manga_id(m).unwrap().len(), 2, "both writes finished before drain returned");
         writes.drain().await;
+    }
+}
+
+#[cfg(test)]
+mod maintenance_tests {
+    use super::*;
+    use crate::support::{anime_db, insert_anime, insert_chapter, insert_episode, insert_manga, manga_db};
+
+    #[test]
+    fn remove_resetted_deletes_only_reset_manga_rows_and_returns_the_count() {
+        let (_d, db) = manga_db();
+        let m = insert_manga(&db, "m", false);
+        let (a, b) = (insert_chapter(&db, m, "a"), insert_chapter(&db, m, "b"));
+        let repo = MangaHistoryRepo::new(db.clone());
+        assert!(repo.upsert(a, 100, 5));
+        assert!(repo.upsert(b, 200, 5));
+        let a_id = repo.by_manga_id(m).unwrap().into_iter().find(|h| h.chapter_id == a).unwrap().id;
+        assert!(repo.reset_by_id(a_id));
+        let removed = db.write(|tx| Ok(MangaHistoryRepo::remove_resetted(tx)?)).unwrap();
+        assert_eq!(removed, 1);
+        let left = repo.by_manga_id(m).unwrap();
+        assert_eq!(left.iter().map(|h| h.chapter_id).collect::<Vec<_>>(), [b]);
+        assert_eq!(db.write(|tx| Ok(MangaHistoryRepo::remove_resetted(tx)?)).unwrap(), 0);
+    }
+
+    #[test]
+    fn by_chapter_url_returns_the_row_of_that_url_or_none() {
+        let (_d, db) = manga_db();
+        let m = insert_manga(&db, "m", false);
+        let a = insert_chapter(&db, m, "a");
+        let repo = MangaHistoryRepo::new(db.clone());
+        assert!(repo.upsert(a, 100, 0));
+        let found = db.read(|c| Ok(MangaHistoryRepo::by_chapter_url(c, "a")?)).unwrap().expect("row for a");
+        assert_eq!((found.chapter_id, found.last_read), (a, 100));
+        assert!(db.read(|c| Ok(MangaHistoryRepo::by_chapter_url(c, "missing")?)).unwrap().is_none());
+    }
+
+    #[test]
+    fn anime_remove_resetted_deletes_only_reset_rows_and_by_episode_url_finds_the_row() {
+        let (_d, db) = anime_db();
+        let a = insert_anime(&db, "Show", false);
+        let (e1, e2) = (insert_episode(&db, a, "e1"), insert_episode(&db, a, "e2"));
+        let repo = AnimeHistoryRepo::new(db.clone());
+        assert!(repo.upsert(e1, 100));
+        assert!(repo.upsert(e2, 200));
+        let e1_id = repo.by_anime_id(a).unwrap().into_iter().find(|h| h.episode_id == e1).unwrap().id;
+        assert!(repo.reset_by_id(e1_id));
+        let found = db.read(|c| Ok(AnimeHistoryRepo::by_episode_url(c, "e1")?)).unwrap().expect("row for e1");
+        assert_eq!((found.episode_id, found.last_seen), (e1, Some(0)));
+        assert!(db.read(|c| Ok(AnimeHistoryRepo::by_episode_url(c, "nope")?)).unwrap().is_none());
+        assert_eq!(db.write(|tx| Ok(AnimeHistoryRepo::remove_resetted(tx)?)).unwrap(), 1);
+        let left = repo.by_anime_id(a).unwrap();
+        assert_eq!(left.iter().map(|h| h.episode_id).collect::<Vec<_>>(), [e2]);
     }
 }

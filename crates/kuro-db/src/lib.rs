@@ -24,6 +24,13 @@ pub mod statements_anime;
 pub mod views_anime;
 pub mod episode_sanitizer;
 pub mod conformance;
+pub mod maintenance;
+#[cfg(feature = "legacy-import")]
+pub mod legacy;
+#[cfg(feature = "legacy-import")]
+pub mod import;
+#[cfg(feature = "legacy-import")]
+pub mod anime_legacy;
 #[cfg(test)]
 mod testdb;
 #[cfg(test)]

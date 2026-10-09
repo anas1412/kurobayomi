@@ -1,4 +1,4 @@
-// Settings main menu and the settings pages that aren't plain preference lists.
+// Settings pages that are not plain preference lists (the main list and shell are in pref_model).
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -9,13 +9,13 @@ use gtk::{Align, Box as GBox, Button, Label, Orientation as O};
 use kuro_domain::kind::EntryKind;
 
 pub fn body(id: &str) -> Option<Built> {
+    // the settings shell, the language picker, the extension lists, the backup pages and Debug info (area 47b)
+    if crate::pref_model::pages::IDS.contains(&id) {
+        return crate::pref_model::pages::body(id);
+    }
     match id {
-        "settings" => main_menu(),
         "settings_search" => search(),
-        "settings_app_language" => language(),
         "settings_player_custom_buttons" => cards(id, &["Skip opening", "Toggle shader"], true),
-        "settings_anime_extension_stores" => cards(id, &["Store A", "Store B"], false),
-        "settings_manga_extension_repos" => cards(id, &["Repo A"], false),
         "settings_player_editor" => editor(),
         "settings_player_code_editor" => code_editor(),
         "settings_worker_info" => text_dump(id, "Enqueued\n-\n\nFinished\nId: 1a2b\nTags: LibraryUpdate\nState: SUCCEEDED\n\nRunning\n-"),
@@ -27,24 +27,72 @@ pub fn body(id: &str) -> Option<Built> {
     }
 }
 
-fn main_menu() -> Option<Built> {
-    let col = column();
-    let l = boxed_list();
-    for m in with_spec(|s| s.settings_main.clone()) {
-        let pre = gtk::Image::from_icon_name(&m.icon);
-        let r = row(&m.title, m.subtitle.as_deref(), Some(gtk::Image::from_icon_name("go-next-symbolic").upcast()));
-        // put the icon in front of the title column
-        let inner = r.child().and_downcast::<GBox>().unwrap();
-        inner.prepend(&pre);
-        r.set_activatable(true);
-        let id = m.id.clone();
-        r.connect_activate(move |_| open(&id));
-        l.append(&r);
+/// One searchable item: its title, the `Category > Group` breadcrumb, the screen to open and the lowercase text the
+/// query is matched against (the title plus the hidden terms).
+struct Hit {
+    title: String,
+    crumb: String,
+    id: String,
+    haystack: String,
+}
+
+/// The first three letters of each word, so "invert" and "inverted" meet.
+fn stems(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.chars().take(3).collect())
+        .collect()
+}
+
+/// Hidden search terms of an item (T-02a-037): the key, table name and Rust field name of every registry row whose
+/// key words (the table word and `pref`/`key` aside) all appear in the title. The spec items carry no key of their
+/// own, so the title is what ties an item to its registry rows.
+fn hidden_terms(title: &str) -> String {
+    use kuro_prefs::registry::REGISTRY;
+    let title_stems = stems(title);
+    let mut terms = Vec::new();
+    for meta in REGISTRY.iter().filter(|m| !m.is_family()) {
+        let words: Vec<String> = meta
+            .key
+            .split('_')
+            .filter(|w| !matches!(*w, "pref" | "key" | "v2") && *w != meta.table)
+            .flat_map(stems)
+            .collect();
+        if !words.is_empty() && words.iter().all(|w| title_stems.contains(w)) {
+            terms.extend([meta.key, meta.table, meta.field]);
+        }
     }
-    col.append(&l);
-    let s = icon_button("system-search-symbolic", "Search settings");
-    s.connect_clicked(|_| open("settings_search"));
-    built(scrolled(&col), vec![s.upcast()])
+    terms.join(" ").to_lowercase()
+}
+
+/// The settings search index: every item of every settings screen, built once.
+fn search_index() -> Vec<Hit> {
+    with_spec(|s| {
+        let mut hits = vec![];
+        for m in &s.settings_main {
+            let Some(sc) = s.screen(&m.id) else { continue };
+            for g in &sc.groups {
+                for it in &g.items {
+                    let title = item_title(it);
+                    let haystack = format!("{} {}", title.to_lowercase(), hidden_terms(&title));
+                    hits.push(Hit { title, crumb: format!("{} > {}", m.title, g.title.clone().unwrap_or_default()), id: m.id.clone(), haystack });
+                }
+            }
+        }
+        hits
+    })
+}
+
+/// Maximum number of results shown.
+const MAX_HITS: usize = 50;
+
+/// The hits for a lowercase query of at least two characters, capped at [`MAX_HITS`].
+fn find<'a>(index: &'a [Hit], query: &str) -> Vec<&'a Hit> {
+    if query.len() < 2 {
+        return vec![];
+    }
+    index.iter().filter(|h| h.haystack.contains(query)).take(MAX_HITS).collect()
 }
 
 /// Search every settings item by title/subtitle; results show "Category > Group" breadcrumbs.
@@ -58,6 +106,7 @@ fn search() -> Option<Built> {
     empty.set_visible(false);
     col.append(&empty);
     let (r2, e2) = (results.clone(), empty.clone());
+    let index = search_index();
     entry.connect_search_changed(move |e| {
         while let Some(c) = r2.first_child() {
             r2.remove(&c);
@@ -67,30 +116,44 @@ fn search() -> Option<Built> {
             e2.set_visible(false);
             return;
         }
-        let hits = with_spec(|s| {
-            let mut hits = vec![];
-            for m in &s.settings_main {
-                let Some(sc) = s.screen(&m.id) else { continue };
-                for g in &sc.groups {
-                    for it in &g.items {
-                        let t = item_title(it);
-                        if t.to_lowercase().contains(&q) {
-                            hits.push((t, format!("{} > {}", m.title, g.title.clone().unwrap_or_default()), m.id.clone()));
-                        }
-                    }
-                }
-            }
-            hits
-        });
+        let hits = find(&index, &q);
         e2.set_visible(hits.is_empty());
-        for (t, crumb, id) in hits.into_iter().take(50) {
-            let r = row(&t, Some(&crumb), None);
+        for hit in hits {
+            let r = row(&hit.title, Some(&hit.crumb), None);
             r.set_activatable(true);
+            let id = hit.id.clone();
             r.connect_activate(move |_| open(&id));
             r2.append(&r);
         }
     });
     built(scrolled(&col), vec![])
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    fn hit(title: &str) -> Hit {
+        Hit { title: title.into(), crumb: "Reader > Navigation".into(), id: "settings_reader".into(), haystack: format!("{} {}", title.to_lowercase(), hidden_terms(title)) }
+    }
+
+    #[test]
+    fn the_registry_key_table_and_field_are_hidden_terms() {
+        let index = [hit("Invert tap zones"), hit("Show page number")];
+        let found = find(&index, "tapping");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].title, "Invert tap zones");
+        assert_eq!(found[0].crumb, "Reader > Navigation", "the breadcrumb is unchanged");
+        assert_eq!(find(&index, "pager_nav_inverted").len(), 1, "the Rust field name matches");
+        assert_eq!(find(&index, "invert").len(), 1, "titles still match");
+    }
+
+    #[test]
+    fn at_most_fifty_hits_and_nothing_below_two_characters() {
+        let index: Vec<Hit> = (0..80).map(|i| hit(&format!("Option {i}"))).collect();
+        assert_eq!(find(&index, "option").len(), MAX_HITS);
+        assert!(find(&index, "o").is_empty());
+    }
 }
 
 fn item_title(it: &crate::spec::Item) -> String {
@@ -99,29 +162,6 @@ fn item_title(it: &crate::spec::Item) -> String {
         Switch { title, .. } | List { title, .. } | Multi { title, .. } | Slider { title, .. } | Text { title, .. } | Tristate { title } | Sort { title, .. } | Chips { title, .. } | Link { title, .. } | Action { title, .. } | Info { title } => title.clone(),
         Unknown => String::new(),
     }
-}
-
-fn language() -> Option<Built> {
-    let col = column();
-    let l = boxed_list();
-    for (native, local) in [("Default", ""), ("English", "English"), ("العربية", "Arabic"), ("Français", "French"), ("Deutsch", "German"), ("日本語", "Japanese"), ("Español", "Spanish")] {
-        let check = gtk::Image::from_icon_name("object-select-symbolic");
-        check.set_visible(native == "Default");
-        let r = row(native, Some(local), Some(check.clone().upcast()));
-        r.set_activatable(true);
-        l.append(&r);
-    }
-    l.connect_row_activated(|l, r| {
-        let mut c = l.first_child();
-        while let Some(w) = c {
-            if let Some(img) = w.first_child().and_then(|h| h.last_child()).and_downcast::<gtk::Image>() {
-                img.set_visible(&w == r.upcast_ref::<gtk::Widget>());
-            }
-            c = w.next_sibling();
-        }
-    });
-    col.append(&l);
-    built(scrolled(&col), vec![])
 }
 
 fn dialog_of(id: &str, dialog: &str) {
@@ -333,4 +373,33 @@ fn licenses() -> Option<Built> {
     }
     col.append(&l);
     built(scrolled(&col), vec![])
+}
+
+/// Advanced > "Clear WebView data" (T-12a-034): the toast text for the outcome of `clear_data`.
+fn clear_webview_message(result: &std::io::Result<()>) -> String {
+    use kuro_i18n::{MsgKey, tr};
+    tr(if result.is_ok() { MsgKey::webview_data_deleted } else { MsgKey::cache_delete_error })
+}
+
+/// Deletes the WebKit data and cache directories and shows the outcome. The failure is logged by `clear_data`.
+pub fn clear_webview_data() {
+    let result = kuro_platform::linux::LinuxPaths::system()
+        .map_err(|e| {
+            tracing::error!(error = %e, "Error occurred while clearing WebView data");
+            std::io::Error::other(e)
+        })
+        .and_then(|paths| kuro_platform::webview::data::clear_data(&paths));
+    crate::toast::notify(clear_webview_message(&result));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webview_clear_outcome_messages() {
+        assert_eq!(clear_webview_message(&Ok(())), "WebView data cleared");
+        let err = Err(std::io::Error::other("denied"));
+        assert_eq!(clear_webview_message(&err), "Error occurred while clearing");
+    }
 }

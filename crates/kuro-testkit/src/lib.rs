@@ -9,10 +9,12 @@ use kuro_platform::paths::Paths;
 
 mod db;
 mod settings;
+mod tracker;
 
 pub mod domain;
 pub use db::{AnimeBuilder, EpisodeBuilder, HistoryBuilder, TestDb};
 pub use settings::InMemorySettings;
+pub use tracker::FakeTracker;
 
 /// Environment variable that makes [`assert_golden`] rewrite golden files.
 pub const UPDATE_GOLDEN_ENV: &str = "KURO_UPDATE_GOLDEN";

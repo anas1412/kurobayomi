@@ -4,12 +4,16 @@
 
 pub mod download;
 pub mod place;
+pub mod queue;
 
 use std::collections::BTreeMap;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
 
+use crate::anime::loader::{PACKAGE_EXT, SIGNER_EXT};
+use crate::anime::logs;
 use crate::anime::model::{Available, InstallStep, Kind};
 use crate::anime::package::manifest::valid_pkg;
 use crate::anime::package::verify::{VerifyError, verify_download};
@@ -48,7 +52,7 @@ pub async fn install(
     store_signing_key: &str,
     placement_lock: &tokio::sync::Mutex<()>,
     cancel: &CancellationToken,
-    on_step: &mut dyn FnMut(InstallStep),
+    on_step: &mut (dyn FnMut(InstallStep) + Send),
 ) -> Result<PathBuf, InstallError> {
     on_step(InstallStep::Pending);
     let outcome = run(client, dirs, available, store_signing_key, placement_lock, cancel, on_step).await;
@@ -67,10 +71,14 @@ async fn run(
     store_signing_key: &str,
     placement_lock: &tokio::sync::Mutex<()>,
     cancel: &CancellationToken,
-    on_step: &mut dyn FnMut(InstallStep),
+    on_step: &mut (dyn FnMut(InstallStep) + Send),
 ) -> Result<PathBuf, InstallError> {
     let kuroext = match (available.kind, available.kuroext.as_ref()) {
         (Kind::Wasm, Some(kuroext)) => kuroext,
+        (Kind::Unsigned, _) => {
+            tracing::error!(pkg = %available.pkg, store = %available.store.index_url, "{}", logs::NOT_SIGNED_FOR_INSTALL);
+            return Err(InstallError::Refused("the store entry is not signed for this host".into()));
+        }
         _ => return Err(InstallError::Refused("the store entry is not signed for this host".into())),
     };
     if !valid_pkg(&available.pkg) {
@@ -93,6 +101,9 @@ async fn run(
     let verified = match checked {
         Ok(verified) => verified,
         Err(err) => {
+            if matches!(err, VerifyError::Io(_)) {
+                tracing::error!(pkg = %available.pkg, store = %available.store.index_url, "{}", logs::READ_DOWNLOADED_FAILED);
+            }
             let _ = tokio::fs::remove_file(&part).await;
             return Err(err.into());
         }
@@ -109,6 +120,23 @@ async fn run(
         .map_err(|err| PlaceError::Io(err.to_string()));
     let _ = tokio::fs::remove_file(&part).await;
     Ok(placed??)
+}
+
+/// Deletes `<pkg>.kuroext` and its `<pkg>.signer` sidecar (T-19a-036). An absent file is not an error, so a second
+/// uninstall returns `Ok`. An invalid package name is refused before the disk is touched. This touches the disk, so the
+/// caller runs it off the main thread and then updates the state.
+pub fn uninstall(package_dir: &Path, pkg: &str) -> io::Result<()> {
+    if !valid_pkg(pkg) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{pkg:?} is not a valid package name")));
+    }
+    for ext in [PACKAGE_EXT, SIGNER_EXT] {
+        match std::fs::remove_file(package_dir.join(format!("{pkg}.{ext}"))) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
 }
 
 /// A request for a package the store does not list any more is refused with the page's message.
@@ -194,6 +222,15 @@ impl InstallTracker {
 
     pub fn step(&self, pkg: &str) -> Option<InstallStep> {
         self.entries.get(pkg).map(|entry| entry.step)
+    }
+
+    /// Drops the step of a package whose install has finished (`uninstall` clears it, behavior 5.11). A running install
+    /// keeps its entry, and this returns false.
+    pub fn forget(&mut self, pkg: &str) -> bool {
+        match self.entries.get(pkg) {
+            Some(entry) if entry.step.is_completed() => self.entries.remove(pkg).is_some(),
+            _ => false,
+        }
     }
 }
 
@@ -283,6 +320,36 @@ mod tests {
         assert!(fs_empty(&work.path().join("dl")), "no part file is left");
     }
 
+    #[tokio::test]
+    async fn tst_19_091_placement_waits_for_the_one_placement_lock() {
+        let server = MockServer::start().await;
+        let fixture = signed_package(&fixture_key(), MANIFEST, b"\0asm");
+        serve(&server, fixture.bytes.clone()).await;
+        let url = format!("{}/pkg.kuroext", server.uri());
+        let listed = listing(&fixture, &url, 7, PKG);
+        let work = tempfile::tempdir().unwrap();
+        let (package_dir, download_dir) = (work.path().join("anime"), work.path().join("dl"));
+        let target = package_dir.join(format!("{PKG}.kuroext"));
+        let lock = tokio::sync::Mutex::new(());
+        let dirs = InstallDirs { package_dir: &package_dir, download_dir: &download_dir };
+        let cancel = CancellationToken::new();
+
+        // Another install holds the placement lock. This one downloads and verifies, then must wait for it.
+        let held = lock.lock().await;
+        let blocked = tokio::time::timeout(
+            std::time::Duration::from_millis(800),
+            install(&test_client(), dirs, &listed, &key(), &lock, &cancel, &mut |_| {}),
+        )
+        .await;
+        assert!(blocked.is_err(), "the placement did not wait for the lock");
+        assert!(!target.exists(), "nothing is placed while the lock is held");
+        drop(held);
+
+        let placed = install(&test_client(), dirs, &listed, &key(), &lock, &cancel, &mut |_| {}).await;
+        assert!(placed.is_ok(), "{placed:?}");
+        assert!(target.exists());
+    }
+
     fn fs_empty(dir: &Path) -> bool {
         std::fs::read_dir(dir).map(|mut entries| entries.next().is_none()).unwrap_or(true)
     }
@@ -369,6 +436,89 @@ mod tests {
         assert!(fs_empty(&work.path().join("dl")));
     }
 
+    #[tokio::test]
+    async fn tst_19_075_a_cancel_while_the_body_streams_ends_idle_and_removes_the_part_file() {
+        use crate::anime::testkit::{has_nonempty_file, stalled_server, wait_until};
+        let fixture = signed_package(&fixture_key(), MANIFEST, b"\0asm");
+        let (url, _held) = stalled_server(vec![7u8; 4096], vec![0u8; 4096]).await;
+        let listed = listing(&fixture, &url, 7, PKG);
+        let work = tempfile::tempdir().unwrap();
+        let downloads = work.path().join("dl");
+        let cancel = CancellationToken::new();
+        let (package_dir, store_key) = (work.path().join("anime"), key());
+        let ((result, steps), ()) = tokio::join!(
+            async {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    run_install(&package_dir, &downloads, &listed, &store_key, &cancel),
+                )
+                .await
+                .expect("the cancel ends the install, no hang")
+            },
+            async {
+                wait_until(|| has_nonempty_file(&downloads)).await;
+                cancel.cancel();
+            }
+        );
+        assert_eq!(result, Err(InstallError::Cancelled));
+        assert_eq!(steps.last(), Some(&InstallStep::Idle));
+        assert!(fs_empty(&downloads), "no .part file is left");
+        assert!(!work.path().join("anime").join(format!("{PKG}.kuroext")).exists());
+    }
+
+    #[tokio::test]
+    async fn tst_19_081_an_unsigned_listing_logs_the_not_signed_text_with_the_package_and_store() {
+        let fixture = signed_package(&fixture_key(), MANIFEST, b"\0asm");
+        let mut listed = listing(&fixture, "http://127.0.0.1:9/pkg.kuroext", 7, PKG);
+        listed.kind = Kind::Unsigned;
+        listed.kuroext = None;
+        let work = tempfile::tempdir().unwrap();
+        let recording = crate::anime::testkit::start_capture();
+        let _ = run_install(&work.path().join("anime"), &work.path().join("dl"), &listed, &key(), &CancellationToken::new())
+            .await;
+        let logged: Vec<_> = recording.events().into_iter().filter(|event| event.level <= tracing::Level::WARN).collect();
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert_eq!(logged[0].message, logs::NOT_SIGNED_FOR_INSTALL);
+        assert_eq!(logged[0].level, tracing::Level::ERROR);
+        assert!(logged[0].fields.iter().any(|(name, value)| name == "pkg" && value == PKG));
+        assert!(logged[0].fields.iter().any(|(name, value)| name == "store" && value == "https://example.org/index.json"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn tst_19_081_an_unreadable_download_logs_the_read_failed_text_and_removes_the_part() {
+        use crate::anime::testkit::{has_nonempty_file, stalled_server, wait_until};
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = signed_package(&fixture_key(), MANIFEST, b"\0asm");
+        let (head, tail) = fixture.bytes.split_at(fixture.bytes.len() / 2);
+        let (url, release) = stalled_server(head.to_vec(), tail.to_vec()).await;
+        let listed = listing(&fixture, &url, 7, PKG);
+        let work = tempfile::tempdir().unwrap();
+        let downloads = work.path().join("dl");
+        let cancel = CancellationToken::new();
+        let (package_dir, store_key) = (work.path().join("anime"), key());
+        let recording = crate::anime::testkit::start_capture();
+        let ((result, _), ()) = tokio::join!(
+            run_install(&package_dir, &downloads, &listed, &store_key, &cancel),
+            async {
+                // Take the read permission away while the body is still arriving, then let the download finish.
+                wait_until(|| has_nonempty_file(&downloads)).await;
+                for entry in std::fs::read_dir(&downloads).unwrap().flatten() {
+                    std::fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(0o000)).unwrap();
+                }
+                release.send(()).unwrap();
+            }
+        );
+        // A root process can read a 000 file, so this check needs a normal user.
+        assert!(matches!(result, Err(InstallError::Verify(VerifyError::Io(_)))), "{result:?}");
+        let logged = recording.events();
+        let texts: Vec<_> = logged.iter().filter(|event| event.message == logs::READ_DOWNLOADED_FAILED).collect();
+        assert_eq!(texts.len(), 1, "{logged:?}");
+        assert_eq!(texts[0].level, tracing::Level::ERROR);
+        assert!(texts[0].fields.iter().any(|(name, value)| name == "pkg" && value == PKG));
+        assert!(fs_empty(&downloads), "the part file is removed");
+    }
+
     #[test]
     fn a_second_request_for_a_running_package_gets_the_running_entry() {
         let mut tracker = InstallTracker::new();
@@ -397,6 +547,48 @@ mod tests {
         assert!(!second.cancel.is_cancelled(), "the newer install keeps running");
         tracker.set_step(&first, InstallStep::Error);
         assert_eq!(tracker.step(PKG), Some(InstallStep::Pending), "a stale step does not overwrite the newer one");
+    }
+
+    #[test]
+    fn a_cancel_after_installed_is_a_no_op_and_forget_drops_only_a_finished_step() {
+        let mut tracker = InstallTracker::new();
+        let ticket = match tracker.begin(PKG) {
+            Begin::Started(ticket) => ticket,
+            other => panic!("{other:?}"),
+        };
+        tracker.set_step(&ticket, InstallStep::Installed);
+        assert!(!tracker.cancel(PKG));
+        assert!(!ticket.cancel.is_cancelled());
+        assert_eq!(tracker.step(PKG), Some(InstallStep::Installed));
+        assert!(tracker.forget(PKG));
+        assert_eq!(tracker.step(PKG), None);
+        assert!(!tracker.forget(PKG), "nothing left to forget");
+        let running = match tracker.begin(PKG) {
+            Begin::Started(ticket) => ticket,
+            other => panic!("{other:?}"),
+        };
+        tracker.set_step(&running, InstallStep::Downloading);
+        assert!(!tracker.forget(PKG), "a running install keeps its entry");
+        assert_eq!(tracker.step(PKG), Some(InstallStep::Downloading));
+    }
+
+    #[test]
+    fn uninstall_removes_both_files_and_a_second_uninstall_is_ok() {
+        let work = tempfile::tempdir().unwrap();
+        std::fs::write(work.path().join(format!("{PKG}.kuroext")), b"x").unwrap();
+        std::fs::write(work.path().join(format!("{PKG}.signer")), b"x").unwrap();
+        uninstall(work.path(), PKG).unwrap();
+        assert!(fs_empty(work.path()));
+        uninstall(work.path(), PKG).expect("an absent package is not an error");
+    }
+
+    #[test]
+    fn uninstall_refuses_a_bad_name_before_touching_the_disk() {
+        let work = tempfile::tempdir().unwrap();
+        std::fs::write(work.path().join("keep.kuroext"), b"x").unwrap();
+        let err = uninstall(work.path(), "../keep").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(work.path().join("keep.kuroext").exists());
     }
 
     #[test]

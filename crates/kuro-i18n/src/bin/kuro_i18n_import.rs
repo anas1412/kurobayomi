@@ -1,12 +1,17 @@
 //! Regenerates `locales/en/kurobayomi.ftl` from the Aniyomi moko base XML (plan 51-i18n T-51a-001).
 //!
 //! Usage: kuro-i18n-import <aniyomi-src-dir> <output-file>
+//!        kuro-i18n-import locales <aniyomi-src-dir> <locales-dir>
+//!
+//! The second form writes `<locales-dir>/<tag>/kurobayomi.ftl` for every translated locale
+//! (T-51a-008). A locale with no accepted message (`ur`) gets no file.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use kuro_i18n::import::{Source, generate_english, parse_moko};
+use kuro_i18n::import::{Source, generate_english, generate_locale, parse_moko};
+use kuro_i18n::locale::android_dir_to_tag;
 
 fn read_base(root: &Path, module: &str, file: &str) -> Result<Vec<Source>, String> {
     let path = root
@@ -27,8 +32,75 @@ fn run(root: &Path, out: &Path) -> Result<usize, String> {
     Ok(core.len() + aniyomi.len())
 }
 
+fn read_dir_sources(dir: &Path, files: &[&str]) -> Result<Vec<Source>, String> {
+    let mut out = Vec::new();
+    for file in files {
+        let path = dir.join(file);
+        if !path.is_file() {
+            continue;
+        }
+        let xml = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        out.extend(parse_moko(&xml).map_err(|e| format!("{}: {e}", path.display()))?);
+    }
+    Ok(out)
+}
+
+fn run_locales(root: &Path, out: &Path) -> Result<usize, String> {
+    let mut core_base = read_base(root, "i18n", "strings.xml")?;
+    core_base.extend(read_base(root, "i18n", "plurals.xml")?);
+    let mut aniyomi_base = read_base(root, "i18n-aniyomi", "strings.xml")?;
+    aniyomi_base.extend(read_base(root, "i18n-aniyomi", "plurals.xml")?);
+    let res = |module: &str| root.join(module).join("src/commonMain/moko-resources");
+    let mut dirs: Vec<String> = Vec::new();
+    for module in ["i18n", "i18n-aniyomi"] {
+        let entries = fs::read_dir(res(module)).map_err(|e| format!("{module}: {e}"))?;
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name != "base" && !dirs.contains(&name) {
+                dirs.push(name);
+            }
+        }
+    }
+    dirs.sort();
+    let files = ["strings.xml", "plurals.xml"];
+    let mut written = 0;
+    for dir in dirs {
+        let core_tr = read_dir_sources(&res("i18n").join(&dir), &files)?;
+        let aniyomi_tr = read_dir_sources(&res("i18n-aniyomi").join(&dir), &files)?;
+        let build = generate_locale(&core_base, &aniyomi_base, &core_tr, &aniyomi_tr)
+            .map_err(|e| format!("{dir}: {e}"))?;
+        let tag = android_dir_to_tag(&dir);
+        println!(
+            "{tag}: {} messages, {} warnings",
+            build.accepted,
+            build.warnings.len()
+        );
+        if build.accepted == 0 {
+            continue;
+        }
+        let target = out.join(&tag);
+        fs::create_dir_all(&target).map_err(|e| format!("{}: {e}", target.display()))?;
+        let file = target.join("kurobayomi.ftl");
+        fs::write(&file, &build.ftl).map_err(|e| format!("{}: {e}", file.display()))?;
+        written += 1;
+    }
+    Ok(written)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
+    if args.len() == 4 && args[1] == "locales" {
+        return match run_locales(&PathBuf::from(&args[2]), &PathBuf::from(&args[3])) {
+            Ok(n) => {
+                println!("wrote {n} locale files to {}", args[3]);
+                ExitCode::SUCCESS
+            }
+            Err(message) => {
+                eprintln!("kuro-i18n-import: {message}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     if args.len() != 3 {
         eprintln!("usage: kuro-i18n-import <aniyomi-src-dir> <output-file>");
         return ExitCode::from(2);

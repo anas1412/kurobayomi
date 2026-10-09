@@ -4,6 +4,7 @@
 //! The one network call is a GET, behind [`HttpGet`]. The HTTP client lives in `kuro-net` (area:12), which is not
 //! in the workspace yet, so the flow is tested with a fake.
 
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use kuro_data::DataResult;
@@ -470,5 +471,183 @@ mod tests {
         http.delay = Duration::from_millis(150);
         update_all(&repos, &ExtensionRepoService::new(&http)).expect("update all");
         assert_eq!(http.peak.load(Ordering::SeqCst), 3, "three GETs in flight at once");
+    }
+}
+
+/// The legacy URL-list import (`TrustExtensionRepositoryMigration`, version 7), read from the stored preferences.
+/// Both preference keys are deleted afterwards. See [`import_legacy_repos`] for what the URLs become.
+pub fn import_legacy_prefs(
+    anime: &kuro_data::extension_store::ExtensionStoreRepo,
+    manga: &ExtensionRepoRepo,
+    prefs: &kuro_prefs::source::SourcePrefs,
+    http: &dyn crate::extension_store::fetch::StoreHttp,
+    repo_http: &dyn HttpGet,
+) -> Result<(), crate::error::DomainError> {
+    let result = import_legacy_repos(anime, manga, &prefs.anime_extension_repos.get(), &prefs.manga_extension_repos.get(), http, repo_http);
+    if let Err(e) = prefs.anime_extension_repos.delete() {
+        tracing::error!(error = %e, "could not delete the legacy anime repo preference");
+    }
+    if let Err(e) = prefs.manga_extension_repos.delete() {
+        tracing::error!(error = %e, "could not delete the legacy manga repo preference");
+    }
+    result
+}
+
+/// Turns old repo URL lists into rows (T-19a-022, T-18a-019). Anime URLs become stores: a trailing `/index.min.json`
+/// or `/index.json` is removed, then `/repo.json` is appended, and the stores get `Repo #n` names. Manga URLs become
+/// repos with the URL as base and website and the placeholder `NOFINGERPRINT-n` fingerprint, and a base URL that is
+/// already stored is skipped. A URL that fails is logged and the loop goes on. Then every anime store and every manga
+/// repo is refreshed once, so the placeholder rows get their real details before the first listing. The URLs come
+/// from a backup's `anime_extension_repos` and `extension_repos` values, in sorted order.
+pub fn import_legacy_repos(
+    anime: &kuro_data::extension_store::ExtensionStoreRepo,
+    manga: &ExtensionRepoRepo,
+    anime_urls: &BTreeSet<String>,
+    manga_urls: &BTreeSet<String>,
+    http: &dyn crate::extension_store::fetch::StoreHttp,
+    repo_http: &dyn HttpGet,
+) -> Result<(), crate::error::DomainError> {
+    for (index, url) in anime_urls.iter().enumerate() {
+        let index_url = format!("{}/repo.json", url.trim_end_matches("/index.min.json").trim_end_matches("/index.json"));
+        if let Err(e) = crate::extension_store::ops::insert_from_legacy(anime, &index_url, &format!("Repo #{}", index + 1)) {
+            tracing::error!(url = %url, error = %e, "error migrating extension repo");
+        }
+    }
+
+    for (index, url) in manga_urls.iter().enumerate() {
+        match manga.get(url) {
+            Ok(Some(_)) => continue,
+            Ok(None) => {}
+            Err(e) => {
+                tracing::error!(url = %url, error = %e, "error migrating manga extension repo");
+                continue;
+            }
+        }
+        let repo = ExtensionRepo {
+            base_url: url.clone(),
+            name: format!("Repo #{}", index + 1),
+            short_name: None,
+            website: url.clone(),
+            signing_key_fingerprint: format!("NOFINGERPRINT-{}", index + 1),
+        };
+        if let Err(e) = upsert_repo(manga, &repo) {
+            tracing::error!(url = %url, error = %e, "error migrating manga extension repo");
+        }
+    }
+
+    if !manga_urls.is_empty() {
+        if let Err(e) = update_all(manga, &ExtensionRepoService::new(repo_http)) {
+            tracing::error!(error = %e, "could not refresh the migrated manga repos");
+        }
+    }
+    crate::extension_store::ops::refresh_all(anime, http)
+}
+
+#[cfg(test)]
+mod legacy_import_tests {
+    use super::*;
+    use crate::extension_store::fetch::tests::FakeHttp;
+    use crate::testdb::{anime_db, manga_db};
+    use kuro_prefs::store::PrefStore;
+    use kuro_prefs::source::SourcePrefs;
+
+    /// Serves `repo.json` bodies by URL; any other URL is a 404.
+    #[derive(Default)]
+    struct RepoHttp(std::collections::HashMap<String, String>);
+
+    impl HttpGet for RepoHttp {
+        fn get_text(&self, url: &str) -> Result<String, String> {
+            self.0.get(url).cloned().ok_or_else(|| format!("404 {url}"))
+        }
+    }
+
+    fn prefs_with(anime: &[&str], manga: &[&str]) -> SourcePrefs {
+        let store = PrefStore::in_memory();
+        let p = SourcePrefs::new(store);
+        p.anime_extension_repos.set(anime.iter().map(|s| s.to_string()).collect()).unwrap();
+        p.manga_extension_repos.set(manga.iter().map(|s| s.to_string()).collect()).unwrap();
+        p
+    }
+
+    /// E27: two manga URLs become `Repo #1` and `Repo #2` with placeholder fingerprints.
+    #[test]
+    fn manga_urls_become_numbered_repos_with_placeholder_fingerprints() {
+        let (_m, mdb) = manga_db();
+        let (_a, adb) = anime_db();
+        let anime = kuro_data::extension_store::ExtensionStoreRepo::new(adb);
+        let manga = ExtensionRepoRepo::new(mdb);
+        let prefs = prefs_with(&[], &["https://a/", "https://b/"]);
+        import_legacy_prefs(&anime, &manga, &prefs, &FakeHttp::default(), &RepoHttp::default()).unwrap();
+        let a = manga.get("https://a/").unwrap().expect("repo a");
+        assert_eq!((a.name.as_str(), a.website.as_str(), a.signing_key_fingerprint.as_str()), ("Repo #1", "https://a/", "NOFINGERPRINT-1"));
+        let b = manga.get("https://b/").unwrap().expect("repo b");
+        assert_eq!((b.name.as_str(), b.signing_key_fingerprint.as_str()), ("Repo #2", "NOFINGERPRINT-2"));
+        assert!(prefs.manga_extension_repos.get().is_empty(), "the key is deleted afterwards");
+    }
+
+    /// E28: the anime suffixes are stripped once each, then `/repo.json` is appended.
+    #[test]
+    fn anime_urls_strip_index_suffixes_then_append_repo_json() {
+        let (_m, mdb) = manga_db();
+        let (_a, adb) = anime_db();
+        let anime = kuro_data::extension_store::ExtensionStoreRepo::new(adb);
+        let manga = ExtensionRepoRepo::new(mdb);
+        let prefs = prefs_with(&["https://h/index.min.json", "https://h/index.json", "https://h/x"], &[]);
+        import_legacy_prefs(&anime, &manga, &prefs, &FakeHttp::default(), &RepoHttp::default()).unwrap();
+        let urls: Vec<String> = anime.all().unwrap().into_iter().map(|s| s.index_url).collect();
+        assert_eq!(urls, ["https://h/repo.json", "https://h/x/repo.json"]);
+        assert!(prefs.anime_extension_repos.get().is_empty());
+    }
+
+    /// A failing refresh of an imported store keeps the row, and the other keys are still deleted.
+    #[test]
+    fn a_failed_refresh_keeps_the_imported_row() {
+        let (_m, mdb) = manga_db();
+        let (_a, adb) = anime_db();
+        let anime = kuro_data::extension_store::ExtensionStoreRepo::new(adb);
+        let manga = ExtensionRepoRepo::new(mdb);
+        let prefs = prefs_with(&["https://h/index.json"], &[]);
+        let http = FakeHttp::default().fail("https://h/repo.json");
+        import_legacy_prefs(&anime, &manga, &prefs, &http, &RepoHttp::default()).unwrap();
+        assert_eq!(anime.all().unwrap().len(), 1);
+    }
+
+    /// T-18a-019: a base URL that is already stored is skipped, so a real repo keeps its name and fingerprint.
+    #[test]
+    fn a_manga_url_that_is_already_stored_is_skipped() {
+        let (_m, mdb) = manga_db();
+        let (_a, adb) = anime_db();
+        let anime = kuro_data::extension_store::ExtensionStoreRepo::new(adb);
+        let manga = ExtensionRepoRepo::new(mdb);
+        let real = ExtensionRepo {
+            base_url: "https://a/".into(),
+            name: "Real".into(),
+            short_name: None,
+            website: "https://real.test".into(),
+            signing_key_fingerprint: "fp-real".into(),
+        };
+        manga.insert(&real).unwrap();
+        let prefs = prefs_with(&[], &["https://a/", "https://b/"]);
+        import_legacy_prefs(&anime, &manga, &prefs, &FakeHttp::default(), &RepoHttp::default()).unwrap();
+        assert_eq!(manga.get("https://a/").unwrap(), Some(real), "the stored row is not overwritten");
+        let b = manga.get("https://b/").unwrap().expect("the new url is added");
+        assert_eq!((b.name.as_str(), b.signing_key_fingerprint.as_str()), ("Repo #2", "NOFINGERPRINT-2"));
+    }
+
+    /// T-18a-019: the imported manga rows are refreshed, so a placeholder fingerprint becomes the repo's real one.
+    #[test]
+    fn imported_manga_repos_are_refreshed_once() {
+        let (_m, mdb) = manga_db();
+        let (_a, adb) = anime_db();
+        let anime = kuro_data::extension_store::ExtensionStoreRepo::new(adb);
+        let manga = ExtensionRepoRepo::new(mdb);
+        let body = r#"{"meta":{"name":"Fresh","website":"https://fresh.test","signingKeyFingerprint":"fp-fresh"}}"#;
+        let http = RepoHttp([("https://a/repo.json".to_owned(), body.to_owned())].into());
+        let urls: BTreeSet<String> = ["https://a".to_owned(), "https://down".to_owned()].into();
+        import_legacy_repos(&anime, &manga, &BTreeSet::new(), &urls, &FakeHttp::default(), &http).unwrap();
+        let a = manga.get("https://a").unwrap().expect("repo a");
+        assert_eq!((a.name.as_str(), a.signing_key_fingerprint.as_str()), ("Fresh", "fp-fresh"));
+        let down = manga.get("https://down").unwrap().expect("a failed refresh keeps the placeholder row");
+        assert_eq!(down.signing_key_fingerprint, "NOFINGERPRINT-2");
     }
 }

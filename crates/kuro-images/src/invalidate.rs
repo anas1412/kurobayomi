@@ -4,14 +4,16 @@
 //! The functions return the entry the caller should store. The write itself goes through `TimestampStore`,
 //! which the database layer implements, so this crate does not depend on the database.
 
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kuro_platform::paths::Paths;
 
-use crate::art::{ArtRef, Owner};
-use crate::cover_file::delete_from_cache;
+use crate::art::{ArtKind, ArtRef, Owner};
+use crate::cover_file::{delete_custom_cover, delete_from_cache, set_custom_from_file};
 use crate::cover_paths;
 use crate::error::ImageError;
+use crate::messages::Message;
 
 /// Epoch milliseconds now (`Instant.now().toEpochMilli()` in Kotlin).
 pub fn now_millis() -> i64 {
@@ -127,6 +129,64 @@ pub fn await_update_background_last_modified(
         Column::BackgroundLastModified,
         now_ms,
     )
+}
+
+/// Writes the timestamp column that belongs to this image: the background column for an anime background, the
+/// cover column otherwise.
+fn bump(store: &dyn TimestampStore, art: &ArtRef, now_ms: i64) -> Result<(), ImageError> {
+    match (art.owner, art.kind) {
+        (Owner::Anime, ArtKind::Background) => {
+            await_update_background_last_modified(store, art.entry_id, now_ms)
+        }
+        _ => await_update_cover_last_modified(store, art.owner, art.entry_id, now_ms),
+    }
+}
+
+fn outcome(art: &ArtRef, ok: bool) -> Message {
+    match (
+        art.kind == ArtKind::Background && art.owner == Owner::Anime,
+        ok,
+    ) {
+        (false, true) => Message::CoverUpdated,
+        (false, false) => Message::FailedToUpdateCover,
+        (true, true) => Message::BackgroundUpdated,
+        (true, false) => Message::FailedToUpdateBackground,
+    }
+}
+
+/// The Edit action: copies the picked file into the custom image, then bumps the timestamp so the keyer changes
+/// (behavior sections 19.3, 24.2). Returns the snackbar message. An anime that is not in the library is refused
+/// (edge E-IMG-14, proposal). Local entries are not handled here: their own folder is written by area:14, so they
+/// report a failure rather than writing a stray custom file.
+pub async fn edit_custom(
+    paths: &dyn Paths,
+    store: &dyn TimestampStore,
+    art: &ArtRef,
+    picked: &Path,
+    now_ms: i64,
+) -> Message {
+    let allowed = !art.is_local() && (art.owner == Owner::Manga || art.favorite);
+    let ok = allowed
+        && set_custom_from_file(paths, art.family(), art.entry_id, picked)
+            .await
+            .is_ok()
+        && bump(store, art, now_ms).is_ok();
+    outcome(art, ok)
+}
+
+/// The Delete action: removes the custom file, then always bumps the timestamp (behavior section 24.4), so a
+/// refresh follows even when the file was already gone.
+pub fn delete_custom(
+    paths: &dyn Paths,
+    store: &dyn TimestampStore,
+    art: &ArtRef,
+    now_ms: i64,
+) -> Message {
+    let ok = !art.is_local() && {
+        delete_custom_cover(paths, art.family(), art.entry_id);
+        bump(store, art, now_ms).is_ok()
+    };
+    outcome(art, ok)
 }
 
 #[cfg(test)]
@@ -354,5 +414,90 @@ mod tests {
     #[test]
     fn now_millis_is_after_2020() {
         assert!(now_millis() > 1_577_836_800_000);
+    }
+
+    #[tokio::test]
+    async fn edit_copies_the_file_and_bumps_the_cover_timestamp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        let picked = tmp.path().join("pick.png");
+        std::fs::write(&picked, b"new").unwrap();
+        let store = Recorder::default();
+        let e = entry(1);
+        let got = edit_custom(&paths, &store, &e, &picked, NOW).await;
+        assert_eq!(got, Message::CoverUpdated);
+        assert_eq!(
+            std::fs::read(cover_paths::custom_file_for(&paths, &e)).unwrap(),
+            b"new"
+        );
+        assert_eq!(
+            *store.0.lock().unwrap(),
+            vec![(Owner::Manga, 7, Column::CoverLastModified, NOW)]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_edit_writes_no_timestamp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        let store = Recorder::default();
+        let got = edit_custom(&paths, &store, &entry(1), &tmp.path().join("gone"), NOW).await;
+        assert_eq!(got, Message::FailedToUpdateCover);
+        assert!(store.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_anime_outside_the_library_or_a_local_entry_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        let picked = tmp.path().join("pick.png");
+        std::fs::write(&picked, b"new").unwrap();
+        let store = Recorder::default();
+        let anime = ArtRef {
+            owner: Owner::Anime,
+            favorite: false,
+            kind: ArtKind::Background,
+            ..entry(1)
+        };
+        assert_eq!(
+            edit_custom(&paths, &store, &anime, &picked, NOW).await,
+            Message::FailedToUpdateBackground
+        );
+        assert_eq!(
+            edit_custom(&paths, &store, &entry(LOCAL_SOURCE_ID), &picked, NOW).await,
+            Message::FailedToUpdateCover
+        );
+        assert!(store.0.lock().unwrap().is_empty());
+        assert!(!cover_paths::custom_file_for(&paths, &anime).exists());
+    }
+
+    #[test]
+    fn delete_removes_the_file_and_bumps_the_background_column() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        let e = ArtRef {
+            owner: Owner::Anime,
+            kind: ArtKind::Background,
+            ..entry(1)
+        };
+        let file = custom(&paths, &e);
+        let store = Recorder::default();
+        assert_eq!(
+            delete_custom(&paths, &store, &e, NOW),
+            Message::BackgroundUpdated
+        );
+        assert!(!file.exists());
+        // A second delete finds no file and still bumps, as Kotlin does.
+        assert_eq!(
+            delete_custom(&paths, &store, &e, NOW + 1),
+            Message::BackgroundUpdated
+        );
+        assert_eq!(
+            *store.0.lock().unwrap(),
+            vec![
+                (Owner::Anime, 7, Column::BackgroundLastModified, NOW),
+                (Owner::Anime, 7, Column::BackgroundLastModified, NOW + 1),
+            ]
+        );
     }
 }

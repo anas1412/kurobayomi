@@ -64,7 +64,7 @@ pub mod mangas {
     pub const GET_FAVORITE_BY_SOURCE_ID: &str =
         "SELECT * FROM mangas WHERE favorite = 1 AND source = :sourceId;";
     pub const GET_DUPLICATE_LIBRARY_MANGA: &str =
-        "SELECT * FROM mangas WHERE favorite = 1 AND lower_unicode(title) = :title AND _id != :id;";
+        "SELECT * FROM mangas WHERE favorite = 1 AND kuro_lower(title) = :title AND _id != :id;";
     pub const GET_UPCOMING_MANGA: &str = "SELECT * FROM mangas WHERE next_update >= :startOfDay AND favorite = 1 AND status IN (SELECT value FROM json_each(:statuses)) ORDER BY next_update ASC;";
     pub const RESET_VIEWER_FLAGS: &str = "UPDATE mangas SET viewer = 0;";
     /// Replaces only the bits of `mask` in `viewer`, in one statement, so two setters of different bit groups cannot
@@ -120,7 +120,10 @@ pub mod mangas {
     }
 
     /// `title` must already be lowercased by the caller (`str::to_lowercase`), as upstream does.
+    /// Library favourites with the same title, ignoring case for every Unicode letter (`kuro_lower`), except `id`.
+    /// `title` is lowercased here so the comparison works for any input case.
     pub fn get_duplicate_library_manga(c: &Connection, title: &str, id: i64) -> Result<Vec<MangaRow>> {
+        let title = title.to_lowercase();
         query_all(
             c,
             GET_DUPLICATE_LIBRARY_MANGA,

@@ -74,6 +74,8 @@ pub enum Body {
 pub struct Source {
     pub name: String,
     pub body: Body,
+    /// False for `translatable="false"` (the name keeps its English text in every locale).
+    pub translatable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +100,7 @@ pub fn parse_moko(xml: &str) -> Result<Vec<Source>> {
     let mut reader = Reader::from_str(xml);
     let mut out = Vec::new();
     let mut name: Option<String> = None;
+    let mut translatable = true;
     let mut items: Option<Vec<(Quantity, String)>> = None;
     let mut quantity: Option<Quantity> = None;
     let mut text = String::new();
@@ -112,6 +115,7 @@ pub fn parse_moko(xml: &str) -> Result<Vec<Source>> {
             Event::Start(e) => open(
                 &e,
                 &mut name,
+                &mut translatable,
                 &mut items,
                 &mut quantity,
                 &mut text,
@@ -121,35 +125,34 @@ pub fn parse_moko(xml: &str) -> Result<Vec<Source>> {
                 open(
                     &e,
                     &mut name,
+                    &mut translatable,
                     &mut items,
                     &mut quantity,
                     &mut text,
                     &mut in_text,
                 )?;
                 match e.name().as_ref() {
-                    b"string" => close_string(&mut out, &mut name, &mut text, &mut in_text),
-                    b"item" => close_item(&mut items, &mut quantity, &mut text, &mut in_text)?,
-                    b"plurals" => close_plurals(&mut out, &mut name, &mut items),
+                    "string" => {
+                        close_string(&mut out, &mut name, translatable, &mut text, &mut in_text)
+                    }
+                    "item" => close_item(&mut items, &mut quantity, &mut text, &mut in_text)?,
+                    "plurals" => close_plurals(&mut out, &mut name, translatable, &mut items),
                     _ => {}
                 }
             }
             Event::End(e) => match e.name().as_ref() {
-                b"string" => close_string(&mut out, &mut name, &mut text, &mut in_text),
-                b"item" => close_item(&mut items, &mut quantity, &mut text, &mut in_text)?,
-                b"plurals" => close_plurals(&mut out, &mut name, &mut items),
+                "string" => {
+                    close_string(&mut out, &mut name, translatable, &mut text, &mut in_text)
+                }
+                "item" => close_item(&mut items, &mut quantity, &mut text, &mut in_text)?,
+                "plurals" => close_plurals(&mut out, &mut name, translatable, &mut items),
                 _ => {}
             },
             Event::Text(t) if in_text => {
-                let decoded = t
-                    .xml10_content()
-                    .map_err(|e| ImportError(format!("xml text: {e}")))?;
-                text.push_str(&decoded);
+                text.push_str(&t.xml10_content());
             }
             Event::CData(c) if in_text => {
-                let decoded = c
-                    .decode()
-                    .map_err(|e| ImportError(format!("xml cdata: {e}")))?;
-                text.push_str(&decoded);
+                text.push_str(&c.xml10_content());
             }
             Event::GeneralRef(r) if in_text => text.push(resolve_ref(&r)?),
             _ => {}
@@ -161,24 +164,27 @@ pub fn parse_moko(xml: &str) -> Result<Vec<Source>> {
 fn open(
     e: &BytesStart<'_>,
     name: &mut Option<String>,
+    translatable: &mut bool,
     items: &mut Option<Vec<(Quantity, String)>>,
     quantity: &mut Option<Quantity>,
     text: &mut String,
     in_text: &mut bool,
 ) -> Result<()> {
     match e.name().as_ref() {
-        b"string" => {
+        "string" => {
             *name =
                 Some(attr(e, "name")?.ok_or_else(|| ImportError("<string> without name".into()))?);
+            *translatable = attr(e, "translatable")?.as_deref() != Some("false");
             text.clear();
             *in_text = true;
         }
-        b"plurals" => {
+        "plurals" => {
             *name =
                 Some(attr(e, "name")?.ok_or_else(|| ImportError("<plurals> without name".into()))?);
+            *translatable = attr(e, "translatable")?.as_deref() != Some("false");
             *items = Some(Vec::new());
         }
-        b"item" => {
+        "item" => {
             let raw = attr(e, "quantity")?
                 .ok_or_else(|| ImportError("<item> without quantity".into()))?;
             *quantity = Some(Quantity::parse(&raw)?);
@@ -193,6 +199,7 @@ fn open(
 fn close_string(
     out: &mut Vec<Source>,
     name: &mut Option<String>,
+    translatable: bool,
     text: &mut String,
     in_text: &mut bool,
 ) {
@@ -201,6 +208,7 @@ fn close_string(
     out.push(Source {
         name: name.take().unwrap_or_default(),
         body,
+        translatable,
     });
 }
 
@@ -223,12 +231,14 @@ fn close_item(
 fn close_plurals(
     out: &mut Vec<Source>,
     name: &mut Option<String>,
+    translatable: bool,
     items: &mut Option<Vec<(Quantity, String)>>,
 ) {
     let list = items.take().unwrap_or_default();
     out.push(Source {
         name: name.take().unwrap_or_default(),
         body: Body::Plural(list),
+        translatable,
     });
 }
 
@@ -254,9 +264,7 @@ fn resolve_ref(r: &BytesRef<'_>) -> Result<char> {
     {
         return Ok(c);
     }
-    let name = r
-        .decode()
-        .map_err(|e| ImportError(format!("xml entity: {e}")))?;
+    let name = r.xml10_content();
     match quick_xml::escape::resolve_predefined_entity(&name).and_then(|v| v.chars().next()) {
         Some(c) => Ok(c),
         None => err(format!("unknown XML entity &{name};")),
@@ -525,12 +533,12 @@ fn render_entry(source: &Source, id: &str) -> Result<String> {
     }
 }
 
-/// Builds `locales/en/kurobayomi.ftl` from the base files of both modules (T-51a-001).
-///
-/// Order: all Aniyomi messages in source order, then core messages not defined by Aniyomi.
-/// Names defined twice inside one module are an error (T-51a-002). The output is validated
-/// with `fluent_syntax` before it is returned.
-pub fn generate_english(core: &[Source], aniyomi: &[Source]) -> Result<String> {
+/// Base entries after the overlap rule: Aniyomi names first in source order, then core names that
+/// Aniyomi does not define. Names defined twice inside one module are an error (T-51a-002).
+fn base_entries<'a>(
+    core: &'a [Source],
+    aniyomi: &'a [Source],
+) -> Result<(Vec<(Module, String, &'a Source)>, BTreeSet<String>)> {
     let mut aniyomi_ids = BTreeSet::new();
     let mut entries: Vec<(Module, String, &Source)> = Vec::new();
     for source in aniyomi {
@@ -559,7 +567,16 @@ pub fn generate_english(core: &[Source], aniyomi: &[Source]) -> Result<String> {
         }
         entries.push((Module::Core, id, source));
     }
+    Ok((entries, aniyomi_ids))
+}
 
+/// Builds `locales/en/kurobayomi.ftl` from the base files of both modules (T-51a-001).
+///
+/// Order: all Aniyomi messages in source order, then core messages not defined by Aniyomi.
+/// Names defined twice inside one module are an error (T-51a-002). The output is validated
+/// with `fluent_syntax` before it is returned.
+pub fn generate_english(core: &[Source], aniyomi: &[Source]) -> Result<String> {
+    let (entries, _) = base_entries(core, aniyomi)?;
     let mut out = String::from(
         "# Generated by kuro-i18n-import from the moko base XML. Do not edit by hand.\n\n",
     );
@@ -573,6 +590,168 @@ pub fn generate_english(core: &[Source], aniyomi: &[Source]) -> Result<String> {
         return err(format!("generated catalogue does not parse: {errors:?}"));
     }
     Ok(out)
+}
+
+/// The result of importing one locale (T-51a-009). `ftl` holds only the accepted messages: a
+/// message left out falls back to English at runtime. `warnings` names each dropped entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocaleBuild {
+    pub ftl: String,
+    pub accepted: usize,
+    pub warnings: Vec<String>,
+}
+
+/// Fluent variables a pattern reads (`$name`), in order of appearance.
+fn variables(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '$' {
+            continue;
+        }
+        let mut name = String::new();
+        while let Some(&next) = chars.peek() {
+            if next.is_ascii_alphanumeric() || next == '_' {
+                name.push(next);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        if !name.is_empty() {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// Checks one translation against its base entry (T-51a-009). `Err` names the reason; the caller
+/// keeps the English message for that id only.
+///
+/// Rules: the kinds match; a plural has an `other` variant (E12); every placeholder converts
+/// (E15); the placeholder multiset matches for plain text, so a dropped or doubled argument is
+/// rejected (E13), and a reordered one is accepted (E14). For plurals the non-count arguments are
+/// compared as sets, since each variant may use a different subset.
+fn check_translation(base: &Source, tr: &Source) -> std::result::Result<(), String> {
+    let count = count_index(&base.name);
+    match (&base.body, &tr.body) {
+        (Body::Plain(base_text), Body::Plain(tr_text)) => {
+            let mut base_vars = variables(&convert_pattern(base_text, None).map_err(|e| e.0)?);
+            let mut tr_vars = variables(&convert_pattern(tr_text, None).map_err(|e| e.0)?);
+            base_vars.sort();
+            tr_vars.sort();
+            if base_vars != tr_vars {
+                return Err(format!(
+                    "placeholders {tr_vars:?} differ from English {base_vars:?}"
+                ));
+            }
+            Ok(())
+        }
+        (Body::Plural(base_items), Body::Plural(tr_items)) => {
+            if !tr_items.iter().any(|(q, _)| *q == Quantity::Other) {
+                return Err("plural has no `other` variant".into());
+            }
+            let collect =
+                |items: &[(Quantity, String)]| -> std::result::Result<BTreeSet<String>, String> {
+                    let mut set = BTreeSet::new();
+                    for (_, text) in items {
+                        let converted = convert_pattern(text, Some(count)).map_err(|e| e.0)?;
+                        set.extend(variables(&converted));
+                    }
+                    set.remove("count");
+                    Ok(set)
+                };
+            let base_set = collect(base_items)?;
+            let tr_set = collect(tr_items)?;
+            if base_set != tr_set {
+                return Err(format!(
+                    "placeholders {tr_set:?} differ from English {base_set:?}"
+                ));
+            }
+            Ok(())
+        }
+        _ => Err("translation kind (string or plurals) differs from English".into()),
+    }
+}
+
+/// Builds one locale's `kurobayomi.ftl` from its two moko module files (T-51a-008, T-51a-009).
+///
+/// Rules, each reported as a warning and never as a hard error (the English text is used):
+/// a key not in the base is dropped (E9); a translation of a `translatable="false"` name is
+/// ignored (E1); a core translation of an Aniyomi-owned name is ignored (the Aniyomi module
+/// wins); a message that fails [`check_translation`] is left out (E12, E13, E15). Messages are
+/// written in base order. The output is validated with `fluent_syntax`.
+pub fn generate_locale(
+    core_base: &[Source],
+    aniyomi_base: &[Source],
+    core_tr: &[Source],
+    aniyomi_tr: &[Source],
+) -> Result<LocaleBuild> {
+    let (entries, aniyomi_ids) = base_entries(core_base, aniyomi_base)?;
+    let base_by_id: std::collections::BTreeMap<&str, (Module, &Source)> = entries
+        .iter()
+        .map(|(module, id, source)| (id.as_str(), (*module, *source)))
+        .collect();
+
+    let mut warnings = Vec::new();
+    let mut accepted: std::collections::BTreeMap<String, &Source> = Default::default();
+    let translations = aniyomi_tr
+        .iter()
+        .map(|s| (Module::Aniyomi, s))
+        .chain(core_tr.iter().map(|s| (Module::Core, s)));
+    for (module, tr) in translations {
+        let id = match fluent_id(&tr.name) {
+            Ok(id) => id,
+            Err(e) => {
+                warnings.push(format!("{}: {}", tr.name, e.0));
+                continue;
+            }
+        };
+        let Some((_, base)) = base_by_id.get(id.as_str()) else {
+            warnings.push(format!("{id}: not in the English base, dropped"));
+            continue;
+        };
+        if module == Module::Core && aniyomi_ids.contains(&id) {
+            continue;
+        }
+        if !base.translatable {
+            warnings.push(format!(
+                "{id}: translatable=\"false\" in English, translation ignored"
+            ));
+            continue;
+        }
+        if accepted.contains_key(&id) {
+            warnings.push(format!("{id}: duplicate translation, first one kept"));
+            continue;
+        }
+        match check_translation(base, tr) {
+            Ok(()) => {
+                accepted.insert(id, tr);
+            }
+            Err(reason) => warnings.push(format!("{id}: {reason}, English used")),
+        }
+    }
+
+    let mut out = String::from(
+        "# Generated by kuro-i18n-import from the moko base XML. Do not edit by hand.\n\n",
+    );
+    let mut count = 0;
+    for (_, id, _) in &entries {
+        let Some(tr) = accepted.get(id) else {
+            continue;
+        };
+        out.push_str(&render_entry(tr, id)?);
+        out.push('\n');
+        count += 1;
+    }
+    if let Err((_, errors)) = fluent_syntax::parser::parse(out.as_str()) {
+        return err(format!("generated locale does not parse: {errors:?}"));
+    }
+    Ok(LocaleBuild {
+        ftl: out,
+        accepted: count,
+        warnings,
+    })
 }
 
 #[cfg(test)]
@@ -749,6 +928,7 @@ mod tests {
         Source {
             name: name.to_string(),
             body,
+            translatable: true,
         }
     }
 
@@ -835,7 +1015,10 @@ mod tests {
         assert_eq!(sources.len(), 4);
         assert_eq!(
             sources[0],
-            source("app_name", Body::Plain("Aniyomi".into()))
+            Source {
+                translatable: false,
+                ..source("app_name", Body::Plain("Aniyomi".into()))
+            }
         );
         assert_eq!(
             sources[1],

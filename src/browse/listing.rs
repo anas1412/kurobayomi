@@ -1,0 +1,370 @@
+//! The state of one source listing: the items loaded so far, the pager that keeps a single request in flight, and the
+//! two error slots (T-40a-003, T-40a-004). The widget in `listing_view` only draws what `plan` says and asks for pages
+//! through `ask`. No GTK here.
+
+use std::future::Future;
+use std::pin::Pin;
+
+use kuro_domain::source::browse::BrowseQuery;
+use kuro_i18n::{MsgKey, tr};
+use kuro_prefs::library::LibraryDisplayMode;
+use kuro_source::filter_list::FilterList;
+
+use super::content::{ContentInput, ContentPlan, content_plan};
+use super::grid::{PageAsk, Pager, prefetch_due};
+
+/// One cover of a listing. `id` is the library row of the entry, found or inserted by `network_to_local_manga` when the
+/// page was loaded (0 when a caller has none, as in global search).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ListItem {
+    pub id: i64,
+    pub source_id: i64,
+    /// The entry's url in its source; with `source_id` it identifies the row.
+    pub url: String,
+    pub title: String,
+    /// The entry is already in the library: its cover is dimmed and it gets the bookmark badge.
+    pub favorite: bool,
+    /// Where the cover comes from (a URL or a file path); the app's cover loader decides what to do with it.
+    pub cover: Option<String>,
+}
+
+/// One page a source returned.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListedPage {
+    pub items: Vec<ListItem>,
+    pub has_next: bool,
+}
+
+pub type LoadFuture = Pin<Box<dyn Future<Output = Result<ListedPage, String>> + Send>>;
+
+/// Loads the pages of one source. Runs on the tokio runtime; the GTK thread never awaits it.
+pub trait PageLoader: Send + Sync + 'static {
+    /// Page `page` (1-based) of `query`. `filters` is the filter list a search uses (B§4.6.1); Popular and Latest
+    /// ignore it.
+    fn load(&self, query: BrowseQuery, filters: FilterList, page: u32) -> LoadFuture;
+}
+
+/// The loaded items and the paging state of one listing.
+pub struct Listing {
+    query: BrowseQuery,
+    filters: FilterList,
+    pager: Pager,
+    items: Vec<Option<ListItem>>,
+    loading: bool,
+    refresh_error: Option<String>,
+    append_error: Option<String>,
+}
+
+impl Listing {
+    pub fn new(query: BrowseQuery) -> Self {
+        Self {
+            query,
+            filters: FilterList::default(),
+            pager: Pager::new(),
+            items: Vec::new(),
+            loading: false,
+            refresh_error: None,
+            append_error: None,
+        }
+    }
+
+    pub fn query(&self) -> &BrowseQuery {
+        &self.query
+    }
+
+    /// The filters the listing's search runs with.
+    pub fn filters(&self) -> &FilterList {
+        &self.filters
+    }
+
+    /// Starts a new listing (a search, a Popular or Latest switch, a refresh) with the filters it had. Pages still in
+    /// flight are dropped.
+    pub fn restart(&mut self, query: BrowseQuery) {
+        let filters = std::mem::take(&mut self.filters);
+        self.restart_with(query, filters);
+    }
+
+    /// Starts a new listing with its own filter list (`search(query, filters)`, B§4.6.1).
+    pub fn restart_with(&mut self, query: BrowseQuery, filters: FilterList) {
+        self.query = query;
+        self.filters = filters;
+        self.pager.reset();
+        self.items.clear();
+        self.loading = false;
+        self.refresh_error = None;
+        self.append_error = None;
+    }
+
+    /// The next page to load, or `None` while one is in flight or the listing has ended.
+    pub fn ask(&mut self) -> Option<PageAsk> {
+        let ask = self.pager.ask()?;
+        self.loading = true;
+        Some(ask)
+    }
+
+    /// A page arrived. Returns how many items it added, or `None` when it belongs to an older listing. An empty page is
+    /// a failure, as in `MangaSourcePagingSource`: with nothing loaded it is the refresh error `no_results_found`
+    /// (B-EC-03), after items it is an appended error and the same page can be asked again (B-EC-04). The failure is
+    /// reported as `Some(0)`.
+    pub fn deliver(&mut self, generation: u64, page: ListedPage) -> Option<usize> {
+        if page.items.is_empty() {
+            return self.fail(generation, tr(MsgKey::no_results_found)).then_some(0);
+        }
+        if !self.pager.deliver(generation, page.has_next) {
+            return None;
+        }
+        self.loading = false;
+        self.append_error = None;
+        self.refresh_error = None;
+        let added = page.items.len();
+        self.items.extend(page.items.into_iter().map(Some));
+        Some(added)
+    }
+
+    /// A page failed. Before any item loaded it is a refresh error, after that an append error. Stale failures are
+    /// dropped and return `false`.
+    pub fn fail(&mut self, generation: u64, message: String) -> bool {
+        if !self.pager.fail(generation) {
+            return false;
+        }
+        self.loading = false;
+        if self.items.is_empty() {
+            self.refresh_error = Some(message);
+        } else {
+            self.append_error = Some(message);
+        }
+        true
+    }
+
+    /// Sets the favourite flag of one loaded item, as the library changed it. False when the slot is not an item.
+    pub fn set_favorite(&mut self, index: usize, favorite: bool) -> bool {
+        match self.items.get_mut(index) {
+            Some(Some(item)) => {
+                item.favorite = favorite;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Retry: forget the errors so the same page can be asked again with `ask`.
+    pub fn clear_errors(&mut self) {
+        self.refresh_error = None;
+        self.append_error = None;
+    }
+
+    /// `last_visible` is the index of the last cell on screen. True when the next page should be asked for.
+    pub fn wants_more(&self, last_visible: usize) -> bool {
+        !self.pager.is_done()
+            && !self.loading
+            && self.append_error.is_none()
+            && self.refresh_error.is_none()
+            && prefetch_due(last_visible, self.items.len())
+    }
+
+    /// The slots of the grid. A `None` slot is a placeholder and draws nothing.
+    pub fn slots(&self) -> &[Option<ListItem>] {
+        &self.items
+    }
+
+    pub fn loaded(&self) -> usize {
+        self.items.iter().flatten().count()
+    }
+
+    /// What the content area shows now.
+    pub fn plan(&self, initialized: bool, stub: bool, is_local: bool, display: LibraryDisplayMode) -> ContentPlan {
+        content_plan(&ContentInput {
+            initialized,
+            stub,
+            is_local,
+            loading: self.loading,
+            items: self.loaded(),
+            refresh_error: self.refresh_error.as_deref(),
+            append_error: self.append_error.as_deref(),
+            display,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::browse::primitives::EmptyAction;
+
+    fn item(title: &str) -> ListItem {
+        ListItem { title: title.into(), ..ListItem::default() }
+    }
+
+    fn page(titles: &[&str], has_next: bool) -> ListedPage {
+        ListedPage { items: titles.iter().map(|t| item(t)).collect(), has_next }
+    }
+
+    fn plan(listing: &Listing) -> ContentPlan {
+        listing.plan(true, false, false, LibraryDisplayMode::CompactGrid)
+    }
+
+    #[test]
+    fn the_first_load_shows_the_spinner_then_the_items() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let ask = listing.ask().expect("first page");
+        assert_eq!(plan(&listing), ContentPlan::Spinner);
+        assert_eq!(listing.deliver(ask.generation, page(&["a", "b"], true)), Some(2));
+        assert!(matches!(plan(&listing), ContentPlan::Items { mode: LibraryDisplayMode::CompactGrid, toast: None }));
+    }
+
+    #[test]
+    fn only_one_request_is_in_flight_and_the_next_page_follows_a_delivery() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let first = listing.ask().expect("page 1");
+        assert!(listing.ask().is_none(), "a second ask while one is in flight is refused");
+        listing.deliver(first.generation, page(&["a"], true));
+        assert_eq!(listing.ask().map(|a| a.page), Some(2));
+    }
+
+    #[test]
+    fn a_late_page_of_an_older_listing_is_dropped() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let old = listing.ask().expect("page");
+        listing.restart(BrowseQuery::Search("x".into()));
+        assert_eq!(listing.deliver(old.generation, page(&["stale"], false)), None);
+        assert!(!listing.fail(old.generation, "late".into()));
+        assert_eq!(listing.loaded(), 0);
+        assert_eq!(listing.query(), &BrowseQuery::Search("x".into()));
+        assert_eq!(listing.ask().map(|a| a.page), Some(1));
+    }
+
+    #[test]
+    fn a_first_page_failure_is_an_error_state_with_actions() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let ask = listing.ask().expect("page");
+        assert!(listing.fail(ask.generation, "offline".into()));
+        match plan(&listing) {
+            ContentPlan::Error { message, actions } => {
+                assert_eq!(message, "offline");
+                assert!(actions.contains(&EmptyAction::Retry));
+            }
+            other => panic!("unexpected plan {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_later_page_failure_keeps_the_items_and_raises_a_retry_toast() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let first = listing.ask().expect("page 1");
+        listing.deliver(first.generation, page(&["a"], true));
+        let second = listing.ask().expect("page 2");
+        listing.fail(second.generation, "page 2 failed".into());
+        match plan(&listing) {
+            ContentPlan::Items { toast: Some(toast), .. } => assert_eq!(toast.message, "page 2 failed"),
+            other => panic!("unexpected plan {other:?}"),
+        }
+        assert!(!listing.wants_more(0), "no automatic retry while the toast is up");
+    }
+
+    #[test]
+    fn retry_asks_the_failed_page_again_and_clears_the_error() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let ask = listing.ask().expect("page");
+        listing.fail(ask.generation, "offline".into());
+        listing.clear_errors();
+        let again = listing.ask().expect("same page again");
+        assert_eq!(again.page, 1);
+        assert_eq!(plan(&listing), ContentPlan::Spinner);
+    }
+
+    #[test]
+    fn the_next_page_is_wanted_one_page_before_the_end_and_never_after_the_last() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let ask = listing.ask().expect("page");
+        let titles: Vec<String> = (0..30).map(|i| format!("t{i}")).collect();
+        let refs: Vec<&str> = titles.iter().map(String::as_str).collect();
+        listing.deliver(ask.generation, page(&refs, true));
+        assert!(!listing.wants_more(0));
+        assert!(listing.wants_more(10), "10 + 25 reaches 30 loaded items");
+        let last = listing.ask().expect("page 2");
+        assert!(!listing.wants_more(29), "a request is in flight");
+        listing.deliver(last.generation, page(&["z"], false));
+        assert!(!listing.wants_more(30), "the listing has ended");
+    }
+
+    #[test]
+    fn an_empty_first_page_is_an_error_with_no_results_found_and_a_stub_never_lists() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let ask = listing.ask().expect("page");
+        assert_eq!(listing.deliver(ask.generation, page(&[], false)), Some(0));
+        match plan(&listing) {
+            ContentPlan::Error { message, actions } => {
+                assert_eq!(message, tr(MsgKey::no_results_found));
+                assert!(actions.contains(&EmptyAction::Retry), "the error state offers retry");
+            }
+            other => panic!("unexpected plan {other:?}"),
+        }
+        assert_eq!(listing.plan(true, true, false, LibraryDisplayMode::List), ContentPlan::Stub);
+    }
+
+    #[test]
+    fn an_empty_later_page_is_an_appended_error_even_when_the_source_says_more_follow() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let first = listing.ask().expect("page 1");
+        listing.deliver(first.generation, page(&["a"], true));
+        let second = listing.ask().expect("page 2");
+        assert_eq!(listing.deliver(second.generation, page(&[], true)), Some(0));
+        assert_eq!(listing.loaded(), 1, "the items stay");
+        match plan(&listing) {
+            ContentPlan::Items { toast: Some(toast), .. } => assert_eq!(toast.message, tr(MsgKey::no_results_found)),
+            other => panic!("unexpected plan {other:?}"),
+        }
+        assert!(!listing.wants_more(0), "the pager does not keep asking");
+        listing.clear_errors();
+        assert_eq!(listing.ask().map(|a| a.page), Some(2), "retry asks the same page again");
+    }
+
+    #[test]
+    fn a_stale_empty_page_is_dropped_like_any_stale_page() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let old = listing.ask().expect("page");
+        listing.restart(BrowseQuery::Latest);
+        assert_eq!(listing.deliver(old.generation, page(&[], false)), None);
+        assert_eq!(plan(&listing), ContentPlan::Empty, "nothing was recorded for the new listing");
+    }
+
+    #[test]
+    fn a_search_carries_its_own_filters_and_restart_keeps_them() {
+        use kuro_source::filter::Filter;
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let filters = FilterList(vec![Filter::check_box("Flag")]);
+        listing.restart_with(BrowseQuery::Search("x".into()), filters.clone());
+        assert_eq!(listing.filters(), &filters);
+        listing.restart(BrowseQuery::Search("y".into()));
+        assert_eq!(listing.filters(), &filters, "a plain restart keeps the filter list");
+        listing.restart_with(BrowseQuery::Popular, FilterList::default());
+        assert!(listing.filters().is_empty());
+    }
+
+    #[test]
+    fn a_favourite_flag_changes_in_place() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let ask = listing.ask().expect("page");
+        listing.deliver(ask.generation, page(&["a"], false));
+        assert!(listing.set_favorite(0, true));
+        assert!(listing.slots()[0].as_ref().is_some_and(|i| i.favorite));
+        assert!(!listing.set_favorite(5, true));
+    }
+
+    #[test]
+    fn the_registry_not_ready_shows_the_spinner_even_with_items() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let ask = listing.ask().expect("page");
+        listing.deliver(ask.generation, page(&["a"], false));
+        assert_eq!(listing.plan(false, false, false, LibraryDisplayMode::List), ContentPlan::Spinner);
+    }
+
+    #[test]
+    fn a_placeholder_slot_is_not_counted_as_loaded() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        listing.items.push(None);
+        listing.items.push(Some(item("a")));
+        assert_eq!(listing.slots().len(), 2);
+        assert_eq!(listing.loaded(), 1);
+    }
+}

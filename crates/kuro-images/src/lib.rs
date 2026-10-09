@@ -13,10 +13,17 @@ pub mod exception;
 pub mod fetch;
 pub mod format;
 pub mod http;
+#[cfg(feature = "icc")]
+pub mod icc;
 pub mod invalidate;
 pub mod keys;
 pub mod loader;
 pub mod memory_cache;
+pub mod menu;
+pub mod messages;
+pub mod motion;
+pub mod names;
+pub mod notify;
 pub mod options;
 pub mod platform;
 pub mod resource;
@@ -24,9 +31,12 @@ pub mod sample;
 pub mod save;
 pub mod share;
 pub mod sniff;
+pub mod tasks;
 #[cfg(test)]
 mod testing;
 pub mod texture;
+pub mod time_text;
+pub mod viewer;
 
 pub use art::{ArtKind, ArtRef, Owner};
 pub use decode::{DecodeOptions, Decoded};

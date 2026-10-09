@@ -2,11 +2,14 @@
 //! T-20a-050, T-20a-002). The title is the English base of `update_check_notification_ext_updates`; translations belong
 //! to the i18n area.
 
-use kuro_platform::notifier::Notifier;
+use kuro_platform::notifier::{APP_NAME, Notifier, send};
 use kuro_prefs::pref::Pref;
 
 /// `Notifications.ID_UPDATES_TO_EXTS`.
 pub const UPDATES_NOTICE_ID: &str = "updates-to-exts";
+
+/// The generic body of a hidden extension update notice.
+pub const GENERIC_TEXT: &str = "Extension updates are available";
 
 /// The plural title: one update reads "Extension update available", more read "N extension updates available".
 pub fn update_title(count: usize) -> String {
@@ -14,10 +17,10 @@ pub fn update_title(count: usize) -> String {
 }
 
 /// `promptUpdates`: shows the notice for the names of the packages with an update, which the caller passes non-empty.
-/// The body is the names joined with ", ", and is left out when `hide_content` is set (`hide_notification_content`).
+/// The body is the names joined with ", ". With `hide_content` (`hide_notification_content`) the notice goes out
+/// through `send` as sensitive: the title is the app name and the body is [`GENERIC_TEXT`].
 pub fn prompt_updates(notifier: &dyn Notifier, names: &[String], hide_content: bool) {
-    let body = (!hide_content).then(|| names.join(", "));
-    notifier.show(UPDATES_NOTICE_ID, &update_title(names.len()), body.as_deref());
+    send(notifier, hide_content, true, UPDATES_NOTICE_ID, APP_NAME, &update_title(names.len()), &names.join(", "), GENERIC_TEXT);
 }
 
 /// `updatePendingUpdatesCount`: stores the pending count in the badge preference, and withdraws the notice when no
@@ -73,7 +76,7 @@ mod tests {
         prompt_updates(&recorder, &names(), true);
         let shown = recorder.shown.lock().unwrap();
         assert_eq!(shown[0], ("2 extension updates available".to_owned(), Some("Alpha, Beta".to_owned())));
-        assert_eq!(shown[1], ("2 extension updates available".to_owned(), None));
+        assert_eq!(shown[1], (APP_NAME.to_owned(), Some(GENERIC_TEXT.to_owned())));
     }
 
     #[test]

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use kuro_core::text::chop;
+use kuro_platform::notifier::{APP_NAME, Notifier, send};
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -48,6 +49,7 @@ pub enum Action {
     Resume,
     CancelAll,
     ShowManga,
+    ShowAnime,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,6 +62,34 @@ pub enum Effect {
 pub trait NotificationSink: Send + Sync {
     fn show(&self, notice: &Notice);
     fn withdraw(&self, id: &'static str);
+}
+
+/// The body of a download notice while `hide_notification_content` is on.
+pub const GENERIC_TEXT: &str = "Downloads in progress";
+
+/// A [`NotificationSink`] over the platform [`Notifier`]. Every download notice is sensitive (T-01a-034): with
+/// `hide_content` set, the title is the app name and the body is [`GENERIC_TEXT`]. The flag is read per notice.
+pub struct NotifierSink {
+    notifier: Arc<dyn Notifier>,
+    hide_content: Arc<AtomicBool>,
+}
+
+impl NotifierSink {
+    pub fn new(notifier: Arc<dyn Notifier>, hide_content: Arc<AtomicBool>) -> Self {
+        Self { notifier, hide_content }
+    }
+}
+
+impl NotificationSink for NotifierSink {
+    fn show(&self, notice: &Notice) {
+        let body = notice.body.as_deref().unwrap_or_default();
+        let hide = self.hide_content.load(Ordering::Relaxed);
+        send(self.notifier.as_ref(), hide, true, notice.id, APP_NAME, &notice.title, body, GENERIC_TEXT);
+    }
+
+    fn withdraw(&self, id: &'static str) {
+        self.notifier.withdraw(id);
+    }
 }
 
 /// Pure mapping from an event to the notification it needs, if any.
@@ -306,6 +336,30 @@ mod tests {
         assert_eq!(effect_for(&DownloadEvent::Started, false), None);
         assert_eq!(effect_for(&DownloadEvent::QueueChanged, false), None);
         assert_eq!(effect_for(&DownloadEvent::Finished { chapter_id: 1 }, false), None);
+    }
+
+    #[derive(Default)]
+    struct FakeNotifier(Mutex<Vec<(String, String, Option<String>)>>);
+
+    impl Notifier for FakeNotifier {
+        fn show(&self, id: &str, title: &str, body: Option<&str>) {
+            self.0.lock().unwrap().push((id.into(), title.into(), body.map(str::to_owned)));
+        }
+        fn withdraw(&self, _id: &str) {}
+    }
+
+    #[test]
+    fn the_platform_sink_marks_download_notices_sensitive() {
+        let fake = Arc::new(FakeNotifier::default());
+        let hide = Arc::new(AtomicBool::new(false));
+        let sink = NotifierSink::new(fake.clone(), hide.clone());
+        let notice = shown(&progress("Berserk", "Chapter 1", 3, 10), false);
+        sink.show(&notice);
+        hide.store(true, Ordering::Relaxed);
+        sink.show(&notice);
+        let calls = fake.0.lock().unwrap();
+        assert_eq!(calls[0], (PROGRESS_ID.into(), notice.title.clone(), notice.body.clone()));
+        assert_eq!(calls[1], (PROGRESS_ID.into(), APP_NAME.into(), Some(GENERIC_TEXT.into())));
     }
 
     #[derive(Default)]

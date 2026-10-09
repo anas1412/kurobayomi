@@ -5,16 +5,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::model::{DownloadState, QueuedDownload};
-use crate::scheduler::{MAX_ACTIVE_SOURCES, pick_active};
+use crate::scheduler::pick_active;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum QueueError {
     #[error("chapter {0} is not in the queue")]
     UnknownId(i64),
-    #[error("chapter {0} is missing from the new order")]
-    MissingId(i64),
-    #[error("chapter {0} appears twice in the new order")]
-    DuplicateId(i64),
     #[error("chapter {id} cannot go from {from:?} to {to:?}")]
     Transition { id: i64, from: DownloadState, to: DownloadState },
 }
@@ -30,6 +26,13 @@ pub struct QueueState {
 impl QueueState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A queue restored at startup: every item is QUEUE, repeats are skipped (E-Q02).
+    pub fn restored(downloads: Vec<QueuedDownload>) -> Self {
+        let mut state = Self::new();
+        state.add_all(downloads);
+        state
     }
 
     pub fn items(&self) -> &[Arc<QueuedDownload>] {
@@ -147,23 +150,22 @@ impl QueueState {
         changed
     }
 
-    /// Puts the queue in the given order. The list must hold every queued id exactly once. ERROR items keep their
-    /// status (Proposal, unlike Kotlin `updateQueue`).
-    pub fn reorder(&mut self, ordered_ids: &[i64]) -> Result<(), QueueError> {
-        let mut seen = HashSet::new();
+    /// Puts the queue in the given order. Unknown and repeated ids are ignored, queued items that are not listed follow in
+    /// their current order, and an empty list does nothing (E-15). ERROR items keep their status (Proposal, unlike
+    /// Kotlin `updateQueue`).
+    pub fn reorder(&mut self, ordered_ids: &[i64]) {
+        if ordered_ids.is_empty() {
+            return;
+        }
+        let mut rest = std::mem::take(&mut self.items);
+        let mut out = Vec::with_capacity(rest.len());
         for id in ordered_ids {
-            if !self.contains(*id) {
-                return Err(QueueError::UnknownId(*id));
-            }
-            if !seen.insert(*id) {
-                return Err(QueueError::DuplicateId(*id));
+            if let Some(pos) = rest.iter().position(|d| d.chapter.id == *id) {
+                out.push(rest.remove(pos));
             }
         }
-        if let Some(missing) = self.items.iter().find(|d| !seen.contains(&d.chapter.id)) {
-            return Err(QueueError::MissingId(missing.chapter.id));
-        }
-        self.items.sort_by_key(|d| ordered_ids.iter().position(|id| *id == d.chapter.id));
-        Ok(())
+        out.append(&mut rest);
+        self.items = out;
     }
 
     /// Checked status change. Starting a download needs QUEUE. ERROR and QUEUE can be set from any state. Removal
@@ -206,11 +208,8 @@ impl QueueState {
     }
 
     /// The chapters the scheduler runs now (see [`pick_active`]).
-    pub fn active_ids(&self) -> Vec<i64> {
-        pick_active(
-            self.items.iter().map(|d| (d.source.id(), d.chapter.id, d.status)),
-            MAX_ACTIVE_SOURCES,
-        )
+    pub fn active_ids(&self, max_sources: usize) -> Vec<i64> {
+        pick_active(self.items.iter().map(|d| (d.source.id(), d.chapter.id, d.status)), max_sources)
     }
 
     /// `true` when no item is NOT_DOWNLOADED, QUEUE or DOWNLOADING (`Dl.areAllDownloadsFinished`).
@@ -231,6 +230,7 @@ impl QueueState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scheduler::MAX_ACTIVE_SOURCES;
     use crate::testing::{download, fake_source};
     use DownloadState::*;
 
@@ -307,18 +307,18 @@ mod tests {
     }
 
     #[test]
-    fn reorder_rejects_unknown_missing_and_duplicate_ids() {
+    fn reorder_ignores_unknown_and_repeats_and_appends_unlisted_in_current_order() {
         let mut q = queue_with(&[(1, Queue), (2, Queue), (3, Queue)]);
-        assert_eq!(q.reorder(&[1, 2, 9]), Err(QueueError::UnknownId(9)));
-        assert_eq!(q.reorder(&[1, 2]), Err(QueueError::MissingId(3)));
-        assert_eq!(q.reorder(&[1, 1, 2, 3]), Err(QueueError::DuplicateId(1)));
-        assert_eq!(statuses(&q), vec![(1, Queue), (2, Queue), (3, Queue)]);
+        q.reorder(&[3, 9, 3]);
+        assert_eq!(statuses(&q), vec![(3, Queue), (1, Queue), (2, Queue)]);
+        q.reorder(&[]);
+        assert_eq!(statuses(&q), vec![(3, Queue), (1, Queue), (2, Queue)], "an empty list is a no-op");
     }
 
     #[test]
     fn reorder_keeps_error_status() {
         let mut q = queue_with(&[(1, Error), (2, Queue)]);
-        q.reorder(&[2, 1]).unwrap();
+        q.reorder(&[2, 1]);
         assert_eq!(statuses(&q), vec![(2, Queue), (1, Error)]);
     }
 
@@ -367,10 +367,10 @@ mod tests {
     #[test]
     fn active_ids_and_all_finished_follow_the_scheduler_rules() {
         let q = queue_with(&[(1, Error), (2, Queue)]);
-        assert_eq!(q.active_ids(), vec![2]);
+        assert_eq!(q.active_ids(MAX_ACTIVE_SOURCES), vec![2]);
         assert!(!q.all_finished());
         let finished = queue_with(&[(1, Error)]);
-        assert!(finished.active_ids().is_empty());
+        assert!(finished.active_ids(MAX_ACTIVE_SOURCES).is_empty());
         assert!(finished.all_finished());
     }
 

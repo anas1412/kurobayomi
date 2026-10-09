@@ -53,6 +53,186 @@ pub fn take_bytes(s: &str, n: usize) -> &str {
     &s[..end]
 }
 
+/// UTF-8 length of `s` in bytes (`String.byteSize`).
+pub fn byte_size(s: &str) -> usize {
+    s.len()
+}
+
+/// Names of U+00A0 to U+00FF in order (HTML 4 Latin-1 entities).
+const LATIN1: [&str; 96] = [
+    "nbsp", "iexcl", "cent", "pound", "curren", "yen", "brvbar", "sect", "uml", "copy", "ordf",
+    "laquo", "not", "shy", "reg", "macr", "deg", "plusmn", "sup2", "sup3", "acute", "micro", "para",
+    "middot", "cedil", "sup1", "ordm", "raquo", "frac14", "frac12", "frac34", "iquest", "Agrave",
+    "Aacute", "Acirc", "Atilde", "Auml", "Aring", "AElig", "Ccedil", "Egrave", "Eacute", "Ecirc",
+    "Euml", "Igrave", "Iacute", "Icirc", "Iuml", "ETH", "Ntilde", "Ograve", "Oacute", "Ocirc",
+    "Otilde", "Ouml", "times", "Oslash", "Ugrave", "Uacute", "Ucirc", "Uuml", "Yacute", "THORN",
+    "szlig", "agrave", "aacute", "acirc", "atilde", "auml", "aring", "aelig", "ccedil", "egrave",
+    "eacute", "ecirc", "euml", "igrave", "iacute", "icirc", "iuml", "eth", "ntilde", "ograve",
+    "oacute", "ocirc", "otilde", "ouml", "divide", "oslash", "ugrave", "uacute", "ucirc", "uuml",
+    "yacute", "thorn", "yuml",
+];
+
+/// ponytail: Latin-1 plus the common punctuation and symbol entities; the Greek and maths entities of HTML 4 are
+/// not in the table and stay as written. Add them when a tracker payload needs them.
+fn named_entity(name: &str) -> Option<char> {
+    if let Some(i) = LATIN1.iter().position(|n| *n == name) {
+        return char::from_u32(0xA0 + i as u32);
+    }
+    Some(match name {
+        "amp" => '&',
+        "lt" => '<',
+        "gt" => '>',
+        "quot" => '"',
+        "apos" => '\'',
+        "OElig" => '\u{152}',
+        "oelig" => '\u{153}',
+        "Scaron" => '\u{160}',
+        "scaron" => '\u{161}',
+        "Yuml" => '\u{178}',
+        "fnof" => '\u{192}',
+        "circ" => '\u{2C6}',
+        "tilde" => '\u{2DC}',
+        "ensp" => '\u{2002}',
+        "emsp" => '\u{2003}',
+        "thinsp" => '\u{2009}',
+        "ndash" => '\u{2013}',
+        "mdash" => '\u{2014}',
+        "lsquo" => '\u{2018}',
+        "rsquo" => '\u{2019}',
+        "sbquo" => '\u{201A}',
+        "ldquo" => '\u{201C}',
+        "rdquo" => '\u{201D}',
+        "bdquo" => '\u{201E}',
+        "dagger" => '\u{2020}',
+        "Dagger" => '\u{2021}',
+        "bull" => '\u{2022}',
+        "hellip" => '\u{2026}',
+        "permil" => '\u{2030}',
+        "prime" => '\u{2032}',
+        "Prime" => '\u{2033}',
+        "lsaquo" => '\u{2039}',
+        "rsaquo" => '\u{203A}',
+        "euro" => '\u{20AC}',
+        "trade" => '\u{2122}',
+        "larr" => '\u{2190}',
+        "uarr" => '\u{2191}',
+        "rarr" => '\u{2192}',
+        "darr" => '\u{2193}',
+        "harr" => '\u{2194}',
+        "minus" => '\u{2212}',
+        "infin" => '\u{221E}',
+        "ne" => '\u{2260}',
+        "le" => '\u{2264}',
+        "ge" => '\u{2265}',
+        "hearts" => '\u{2665}',
+        _ => return None,
+    })
+}
+
+/// Decodes one `&...;` reference at the start of `rest` (which begins with `&`) into `out` and returns the text
+/// after it. Anything unknown is written as a literal `&`.
+fn push_entity<'a>(rest: &'a str, out: &mut String) -> &'a str {
+    let decoded = rest
+        .char_indices()
+        .take(34)
+        .find(|&(_, c)| c == ';')
+        .and_then(|(semi, _)| {
+            let body = &rest[1..semi];
+            let c = match body.strip_prefix('#') {
+                Some(num) => {
+                    let code = match num.strip_prefix(['x', 'X']) {
+                        Some(hex) => u32::from_str_radix(hex, 16),
+                        None => num.parse(),
+                    };
+                    code.ok().filter(|&n| n != 0).and_then(char::from_u32)
+                }
+                None => named_entity(body),
+            };
+            c.map(|c| (c, semi + 1))
+        });
+    match decoded {
+        Some((c, end)) => {
+            out.push(c);
+            &rest[end..]
+        }
+        None => {
+            out.push('&');
+            &rest[1..]
+        }
+    }
+}
+
+/// Handles the `<` at the start of `rest`: writes any text the tag stands for into `out` and returns the text
+/// after the tag. A `<` that does not start a tag is written as itself.
+fn skip_tag<'a>(rest: &'a str, out: &mut String) -> &'a str {
+    if let Some(comment) = rest.strip_prefix("<!--") {
+        return comment.find("-->").map_or("", |i| &comment[i + 3..]);
+    }
+    let body = &rest[1..];
+    let closing = body.starts_with('/');
+    let name_part = body.strip_prefix('/').unwrap_or(body);
+    if !name_part.starts_with(|c: char| c.is_ascii_alphabetic() || c == '!' || c == '?') && !closing {
+        out.push('<');
+        return body;
+    }
+    // The end of the tag: the first `>` outside quotes.
+    let mut quote = None;
+    let end = body.char_indices().find_map(|(i, c)| match (quote, c) {
+        (None, '"' | '\'') => {
+            quote = Some(c);
+            None
+        }
+        (Some(q), c) if c == q => {
+            quote = None;
+            None
+        }
+        (None, '>') => Some(i),
+        _ => None,
+    });
+    let Some(end) = end else {
+        out.push('<');
+        return body;
+    };
+    let after = &body[end + 1..];
+    let name: String = name_part
+        .chars()
+        .take_while(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    match (closing, name.as_str()) {
+        (_, "br") | (true, "p" | "div" | "li") => out.push('\n'),
+        (false, "script" | "style") if !body[..end].ends_with('/') => {
+            let close = format!("</{name}");
+            return match after.to_ascii_lowercase().find(&close) {
+                Some(i) => after[i..].find('>').map_or("", |j| &after[i + j + 1..]),
+                None => "",
+            };
+        }
+        _ => {}
+    }
+    after
+}
+
+/// `String.htmlDecode` (`Html.fromHtml` in legacy mode) for tracker and catalogue text: entities are decoded,
+/// `<br>` and the end of `<p>`, `<div>` and `<li>` become a newline, tags are removed and their text kept, and
+/// `<script>` and `<style>` content is dropped. Tags are removed before entities are decoded, so `&lt;b&gt;`
+/// stays the text `<b>`.
+pub fn html_decode_legacy(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find(['<', '&']) {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        rest = if rest.starts_with('<') {
+            skip_tag(rest, &mut out)
+        } else {
+            push_entity(rest, &mut out)
+        };
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Keeps at most `count` UTF-16 units: a longer string becomes its prefix plus `replacement`.
 pub fn chop(s: &str, count: usize, replacement: &str) -> Result<String, TextError> {
     let repl = units(replacement);
@@ -200,6 +380,61 @@ pub fn primary_cmp(a: &str, b: &str) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn byte_size_counts_utf8_bytes() {
+        assert_eq!(byte_size("日"), 3);
+        assert_eq!(byte_size(""), 0);
+        assert_eq!(byte_size("a😀"), 5);
+    }
+
+    #[test]
+    fn html_decode_spec_vectors() {
+        assert_eq!(html_decode_legacy("Tom &amp; Jerry"), "Tom & Jerry");
+        assert_eq!(html_decode_legacy("a<br>b"), "a\nb");
+        assert_eq!(html_decode_legacy("a<BR/>b<br />c"), "a\nb\nc");
+        assert_eq!(html_decode_legacy("&#8217;"), "\u{2019}");
+        assert_eq!(html_decode_legacy("&#x2019;"), "\u{2019}");
+    }
+
+    #[test]
+    fn html_decode_removes_tags_and_keeps_their_text() {
+        assert_eq!(html_decode_legacy("<b>bold</b> and <a href=\"x>y\">link</a>"), "bold and link");
+        assert_eq!(html_decode_legacy("<p>one</p><p>two</p>"), "one\ntwo\n");
+        assert_eq!(html_decode_legacy("<!-- note -->text"), "text");
+    }
+
+    #[test]
+    fn html_decode_drops_script_and_style_text() {
+        assert_eq!(html_decode_legacy("a<script>alert('<b>x</b>')</script>b"), "ab");
+        assert_eq!(html_decode_legacy("a<STYLE>p{}</STYLE>b"), "ab");
+        assert_eq!(html_decode_legacy("a<script>never closed"), "a");
+    }
+
+    #[test]
+    fn html_decode_leaves_unknown_references_and_stray_brackets() {
+        assert_eq!(html_decode_legacy("a & b"), "a & b");
+        assert_eq!(html_decode_legacy("&bogus; &#0; &#xD800;"), "&bogus; &#0; &#xD800;");
+        assert_eq!(html_decode_legacy("1 < 2 and 3 > 2"), "1 < 2 and 3 > 2");
+        assert_eq!(html_decode_legacy("&lt;b&gt;"), "<b>");
+        assert_eq!(html_decode_legacy("a<b"), "a<b");
+    }
+
+    #[test]
+    fn html_decode_named_entities() {
+        assert_eq!(LATIN1.len(), 96);
+        assert_eq!(html_decode_legacy("caf&eacute; &nbsp;&yuml;&copy;"), "caf\u{e9} \u{a0}\u{ff}\u{a9}");
+        assert_eq!(html_decode_legacy("&ldquo;hi&rdquo; &ndash; &hellip;"), "\u{201c}hi\u{201d} \u{2013} \u{2026}");
+    }
+
+    #[test]
+    fn html_decode_anilist_sample_payload() {
+        let title = "Frieren: Beyond Journey&#8217;s End<br>Season 2 &amp; <i>OVA</i><script>track()</script>";
+        assert_eq!(
+            html_decode_legacy(title),
+            "Frieren: Beyond Journey\u{2019}s End\nSeason 2 & OVA"
+        );
+    }
 
     #[test]
     fn chop_matches_spec_example() {

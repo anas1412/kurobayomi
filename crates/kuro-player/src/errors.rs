@@ -9,6 +9,20 @@ pub enum PlayerMessage {
     NoNextEpisode,
     /// Error when the hoster list of a switched episode is empty (`no_hosters`).
     NoHosters,
+    /// Toast after a screenshot is saved (`picture_saved`).
+    PictureSaved,
+    /// Toast when the local stream server cannot start (`http_server_start_failure`).
+    HttpServerStartFailure,
+    /// Shown in the screenshot sheet when mpv wrote no file (`player_screenshot_failed`, new key).
+    ScreenshotFailed,
+    /// Pill text when auto-play is switched on (`enable_auto_play`).
+    AutoPlayOn,
+    /// Pill text when auto-play is switched off (`disable_auto_play`).
+    AutoPlayOff,
+    /// Numeric chooser error above the maximum (`numeric_chooser_value_too_big`).
+    ValueTooBig,
+    /// Numeric chooser error below the minimum (`numeric_chooser_value_too_small`).
+    ValueTooSmall,
 }
 
 impl PlayerMessage {
@@ -16,6 +30,13 @@ impl PlayerMessage {
         match self {
             Self::NoNextEpisode => "no_next_episode",
             Self::NoHosters => "no_hosters",
+            Self::PictureSaved => "picture_saved",
+            Self::HttpServerStartFailure => "http_server_start_failure",
+            Self::ScreenshotFailed => "player_screenshot_failed",
+            Self::AutoPlayOn => "enable_auto_play",
+            Self::AutoPlayOff => "disable_auto_play",
+            Self::ValueTooBig => "numeric_chooser_value_too_big",
+            Self::ValueTooSmall => "numeric_chooser_value_too_small",
         }
     }
 
@@ -23,6 +44,13 @@ impl PlayerMessage {
         match self {
             Self::NoNextEpisode => "Next Episode not found!",
             Self::NoHosters => "Hoster list is empty",
+            Self::PictureSaved => "Picture saved",
+            Self::HttpServerStartFailure => "Failed to start http server",
+            Self::ScreenshotFailed => "Screenshot failed",
+            Self::AutoPlayOn => "Auto-play is on",
+            Self::AutoPlayOff => "Auto-play is off",
+            Self::ValueTooBig => "Value too big",
+            Self::ValueTooSmall => "Value too small",
         }
     }
 }
@@ -65,6 +93,28 @@ mod tests {
         );
         assert_eq!(PlayerMessage::NoHosters.key(), "no_hosters");
         assert_eq!(PlayerMessage::NoHosters.text(), "Hoster list is empty");
+        assert_eq!(PlayerMessage::PictureSaved.key(), "picture_saved");
+        assert_eq!(PlayerMessage::PictureSaved.text(), "Picture saved");
+        assert_eq!(
+            PlayerMessage::HttpServerStartFailure.key(),
+            "http_server_start_failure"
+        );
+        assert_eq!(
+            PlayerMessage::HttpServerStartFailure.text(),
+            "Failed to start http server"
+        );
+        assert_eq!(
+            PlayerMessage::ScreenshotFailed.key(),
+            "player_screenshot_failed"
+        );
+        assert_eq!(PlayerMessage::ScreenshotFailed.text(), "Screenshot failed");
+        assert_eq!(PlayerMessage::AutoPlayOn.text(), "Auto-play is on");
+        assert_eq!(PlayerMessage::AutoPlayOff.key(), "disable_auto_play");
+        assert_eq!(PlayerMessage::ValueTooBig.text(), "Value too big");
+        assert_eq!(
+            PlayerMessage::ValueTooSmall.key(),
+            "numeric_chooser_value_too_small"
+        );
     }
 
     #[test]

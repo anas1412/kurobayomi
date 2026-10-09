@@ -75,8 +75,9 @@ impl ExtensionStoreRepo {
             .write(|tx| Ok(delete_extension_store(tx, index_url).map(drop)?))
     }
 
-    /// Stores a legacy repo URL from the preference import (`signing_key = NO_SIGNING_KEY`).
-    pub fn insert_from_preference(&self, index_url: &str, name: &str) -> DataResult<()> {
+    /// Stores a legacy repo URL from the backup import of an old `anime_extension_repos` value
+    /// (`signing_key = NO_SIGNING_KEY`, T-19a-022).
+    pub fn insert_from_legacy(&self, index_url: &str, name: &str) -> DataResult<()> {
         self.db
             .write(|tx| Ok(insert_extension_store_from_preference(tx, index_url, name).map(drop)?))
     }
@@ -302,7 +303,7 @@ mod tests {
     #[test]
     fn preference_import_row_has_no_signing_key() {
         let (_dir, repo) = repo();
-        repo.insert_from_preference("https://pref.test/index.min.json", "Pref")
+        repo.insert_from_legacy("https://pref.test/index.min.json", "Pref")
             .expect("insert");
         let row = repo
             .get("https://pref.test/index.min.json")

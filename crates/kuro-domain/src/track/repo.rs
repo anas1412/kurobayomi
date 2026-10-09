@@ -22,7 +22,7 @@ pub trait TrackRepo<T>: Send + Sync {
 
 impl TrackRepo<MangaTrack> for kuro_data::track::MangaTrackRepo {
     fn by_row_id(&self, row_id: Id) -> Result<Option<MangaTrack>, DomainError> {
-        Ok(kuro_data::track::MangaTrackRepo::by_row_id(self, row_id)?)
+        Ok(kuro_data::track::MangaTrackRepo::by_id(self, row_id)?)
     }
     fn by_entry(&self, entry_id: Id) -> Result<Vec<MangaTrack>, DomainError> {
         Ok(kuro_data::track::MangaTrackRepo::by_entry(self, entry_id)?)
@@ -43,7 +43,7 @@ impl TrackRepo<MangaTrack> for kuro_data::track::MangaTrackRepo {
 
 impl TrackRepo<AnimeTrack> for kuro_data::track::AnimeTrackRepo {
     fn by_row_id(&self, row_id: Id) -> Result<Option<AnimeTrack>, DomainError> {
-        Ok(kuro_data::track::AnimeTrackRepo::by_row_id(self, row_id)?)
+        Ok(kuro_data::track::AnimeTrackRepo::by_id(self, row_id)?)
     }
     fn by_entry(&self, entry_id: Id) -> Result<Vec<AnimeTrack>, DomainError> {
         Ok(kuro_data::track::AnimeTrackRepo::by_entry(self, entry_id)?)

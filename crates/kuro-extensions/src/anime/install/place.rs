@@ -8,6 +8,7 @@ use std::io;
 use std::path::Path;
 
 use crate::anime::loader::{SIGNER_EXT, read_signer};
+use crate::anime::logs;
 use crate::anime::model::{LoadError, SignerDigest};
 use crate::anime::package;
 use crate::anime::store::map::derive_lang;
@@ -53,11 +54,11 @@ pub fn place(
     }
     if let Some((current_signer, current_code)) = installed_identity(root, pkg)? {
         if manifest.version_code < current_code {
-            tracing::error!("Installed extension version is higher. Downgrading is not allowed.");
+            tracing::error!(pkg = %pkg, version_code = manifest.version_code, "{}", logs::DOWNGRADE);
             return Err(PlaceError::Downgrade);
         }
         if current_signer != *signer {
-            tracing::error!("Installed extension signature is not matched.");
+            tracing::error!(pkg = %pkg, version_code = manifest.version_code, "{}", logs::SIGNATURE_NOT_MATCHED);
             return Err(PlaceError::SignerChanged);
         }
     }
@@ -65,6 +66,7 @@ pub fn place(
     let part = root.join(format!("{pkg}.kuroext.part"));
     let written = write_atomically(source, &part, &target, root, pkg, signer);
     if let Err(err) = written {
+        tracing::error!(pkg = %pkg, error = %err, "{}", logs::COPY_FAILED);
         let _ = fs::remove_file(&part);
         return Err(PlaceError::Io(err.to_string()));
     }
@@ -292,6 +294,56 @@ mod tests {
         fs::write(&target, b"not a zip").unwrap();
         assert_eq!(place(&root, &source, PKG, &key(), &SignerDigest(key())), Err(PlaceError::InstalledUnreadable));
         assert_eq!(fs::read(&target).unwrap(), b"not a zip", "the unreadable file is left for the user to remove");
+    }
+
+    /// The one event `place` logged, checked against the text, level and `pkg`/`version_code` fields.
+    fn assert_logged_once(logged: &[crate::anime::testkit::Logged], text: &str, version_code: Option<&str>) {
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert_eq!(logged[0].message, text);
+        assert_eq!(logged[0].level, tracing::Level::ERROR);
+        assert!(logged[0].fields.iter().any(|(name, value)| name == "pkg" && value == PKG));
+        if let Some(code) = version_code {
+            assert!(logged[0].fields.iter().any(|(name, value)| name == "version_code" && value == code));
+        }
+    }
+
+    #[test]
+    fn tst_19_081_a_downgrade_logs_the_kotlin_text_with_the_package_and_version() {
+        let work = tempfile::tempdir().unwrap();
+        let root = work.path().join("anime");
+        install_first(work.path(), &root, &signed_package(&fixture_key(), &manifest_version("1.0.8", 8), b"\0asm"));
+        let older = signed_package(&fixture_key(), &manifest_version("1.0.6", 6), b"\0asm");
+        let source = download_of(work.path(), "older.part", &older);
+        let (result, logged) =
+            crate::anime::testkit::capture(|| place(&root, &source, PKG, &key(), &SignerDigest(key())));
+        assert_eq!(result, Err(PlaceError::Downgrade));
+        assert_logged_once(&logged, logs::DOWNGRADE, Some("6"));
+    }
+
+    #[test]
+    fn tst_19_081_a_signer_change_logs_the_kotlin_text_with_the_package_and_version() {
+        let work = tempfile::tempdir().unwrap();
+        let root = work.path().join("anime");
+        install_first(work.path(), &root, &signed_package(&fixture_key(), MANIFEST, b"\0asm"));
+        let other = signer_hex(&other_key());
+        let upgrade = signed_package(&other_key(), &manifest_version("1.0.8", 8), b"\0asm");
+        let source = download_of(work.path(), "upgrade.part", &upgrade);
+        let (result, logged) =
+            crate::anime::testkit::capture(|| place(&root, &source, PKG, &other, &SignerDigest(other.clone())));
+        assert_eq!(result, Err(PlaceError::SignerChanged));
+        assert_logged_once(&logged, logs::SIGNATURE_NOT_MATCHED, Some("8"));
+    }
+
+    #[test]
+    fn tst_19_081_a_failed_copy_logs_the_kotlin_text_with_the_package() {
+        let work = tempfile::tempdir().unwrap();
+        let blocker = work.path().join("root-is-a-file");
+        fs::write(&blocker, b"file").unwrap();
+        let source = download_of(work.path(), "a.part", &signed_package(&fixture_key(), MANIFEST, b"\0asm"));
+        let (result, logged) =
+            crate::anime::testkit::capture(|| place(&blocker, &source, PKG, &key(), &SignerDigest(key())));
+        assert!(matches!(result, Err(PlaceError::Io(_))), "{result:?}");
+        assert_logged_once(&logged, logs::COPY_FAILED, None);
     }
 
     #[test]

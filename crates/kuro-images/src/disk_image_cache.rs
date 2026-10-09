@@ -134,6 +134,30 @@ impl DiskImageCache {
         }
     }
 
+    /// Removes every finished entry and returns how many were removed (behavior section 20.6). A `.part` file is
+    /// left alone, because a write in progress may own it.
+    pub async fn clear(&self) -> io::Result<usize> {
+        let mut total = self.total.lock().await;
+        let mut removed = 0;
+        let mut dir = tokio::fs::read_dir(&self.root).await?;
+        while let Some(entry) = dir.next_entry().await? {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "part") {
+                continue;
+            }
+            let len = entry.metadata().await?.len();
+            match tokio::fs::remove_file(&path).await {
+                Ok(()) => {
+                    removed += 1;
+                    *total = total.saturating_sub(len);
+                }
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(removed)
+    }
+
     /// Bytes held by finished entries.
     pub async fn size(&self) -> u64 {
         *self.total.lock().await

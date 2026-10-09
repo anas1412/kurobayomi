@@ -3,12 +3,17 @@
 //! Pipeline: sniff the type, pick the decoder path (T-34a-025), read the header, refuse an empty or oversized
 //! image, decode to RGBA8 with straight alpha, and downscale by the in-sample size (T-34a-026).
 
+mod animation;
+mod borders;
 mod raster;
+
+pub use animation::{Frame, decode_frames};
 
 #[cfg(feature = "jxl")]
 mod jxl;
 
 use bytes::Bytes;
+use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder, ImageFormat, imageops};
 
 use crate::error::ImageError;
@@ -46,6 +51,9 @@ pub struct DecodeOptions {
     pub size: RequestSize,
     pub scale: Scale,
     pub custom_decoder: bool,
+    /// From `LoadOptions::crop_borders`: uniform-colour borders are cut off before the picture is sampled
+    /// (area:44 behavior section 9.4).
+    pub crop_borders: bool,
     pub max_pixels: u64,
 }
 
@@ -55,6 +63,7 @@ impl Default for DecodeOptions {
             size: RequestSize::Original,
             scale: Scale::Fit,
             custom_decoder: false,
+            crop_borders: false,
             max_pixels: COVER_MAX_PIXELS,
         }
     }
@@ -66,6 +75,7 @@ impl From<&LoadOptions> for DecodeOptions {
             size: opts.size,
             scale: opts.scale,
             custom_decoder: opts.custom_decoder,
+            crop_borders: opts.crop_borders,
             max_pixels: COVER_MAX_PIXELS,
         }
     }
@@ -125,6 +135,13 @@ fn open(codec: Codec, bytes: &[u8]) -> Result<Box<dyn ImageDecoder + '_>, ImageE
     })
 }
 
+/// A JPEG without its end-of-image marker is a truncated download. The decoder would fill the missing rows, so the
+/// file is refused instead (fixture F-11). Zero padding after the marker is allowed.
+fn is_truncated_jpeg(bytes: &[u8]) -> bool {
+    let end = bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+    !bytes[..end].ends_with(&[0xFF, 0xD9])
+}
+
 /// Decodes the first frame of `bytes` to RGBA8 at the size the request asks for (behavior sections 14 and 15).
 pub fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Decoded, ImageError> {
     let codec = detect(bytes).ok_or(ImageError::UnsupportedFormat)?;
@@ -134,7 +151,7 @@ pub fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Decoded, ImageError>
     {
         return Err(ImageError::UnsupportedFormat);
     }
-    let decoder = open(codec, bytes)?;
+    let mut decoder = open(codec, bytes)?;
     let (width, height) = decoder.dimensions();
     if width == 0 || height == 0 {
         return Err(ImageError::DecodeInit);
@@ -145,16 +162,25 @@ pub fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Decoded, ImageError>
     {
         return Err(ImageError::TooLarge);
     }
-    let sample = sample_for(opts.size, opts.scale, (width, height));
-    let mut image = DynamicImage::from_decoder(decoder)
-        .map_err(|e| {
-            tracing::debug!(error = %e, "image decode failed");
-            ImageError::DecodeFailed
-        })?
-        .into_rgba8();
+    // The EXIF orientation turns the picture before it is cropped and sampled.
+    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    if matches!(codec, Codec::Raster(ImageFormat::Jpeg)) && is_truncated_jpeg(bytes) {
+        return Err(ImageError::DecodeFailed);
+    }
+    let mut turned = DynamicImage::from_decoder(decoder).map_err(|e| {
+        tracing::debug!(error = %e, "image decode failed");
+        ImageError::DecodeFailed
+    })?;
+    turned.apply_orientation(orientation);
+    let mut image = turned.into_rgba8();
     if image.width() == 0 || image.height() == 0 {
         return Err(ImageError::DecodeFailed);
     }
+    if opts.crop_borders {
+        image = borders::crop(image);
+    }
+    // The target size is matched to the turned and cropped picture (design section 4.5).
+    let sample = sample_for(opts.size, opts.scale, (image.width(), image.height()));
     if sample > 1 {
         image = imageops::thumbnail(
             &image,
@@ -260,6 +286,47 @@ mod tests {
         assert_eq!((got.width, got.height), (100, 150));
         assert!(got.is_sampled);
         assert_eq!(got.rgba.len(), 100 * 150 * 4);
+    }
+
+    fn bordered_png() -> Vec<u8> {
+        let mut img = image::RgbaImage::from_pixel(100, 120, image::Rgba([255, 255, 255, 255]));
+        for y in 10..90 {
+            for x in 20..80 {
+                img.put_pixel(x, y, image::Rgba([0, 0, 0, 255]));
+            }
+        }
+        encode(&img, ImageFormat::Png)
+    }
+
+    #[test]
+    fn crop_borders_cuts_the_border_only_when_asked() {
+        let bytes = bordered_png();
+        let off = decode(&bytes, &opts()).unwrap();
+        assert_eq!((off.width, off.height), (100, 120));
+        let on = decode(
+            &bytes,
+            &DecodeOptions {
+                crop_borders: true,
+                ..opts()
+            },
+        )
+        .unwrap();
+        assert_eq!((on.width, on.height), (60, 80));
+    }
+
+    #[test]
+    fn crop_happens_before_sampling() {
+        let want = DecodeOptions {
+            crop_borders: true,
+            size: RequestSize::Pixels {
+                width: 30,
+                height: 40,
+            },
+            ..opts()
+        };
+        let got = decode(&bordered_png(), &want).unwrap();
+        assert_eq!((got.width, got.height), (30, 40));
+        assert!(got.is_sampled);
     }
 
     #[test]
@@ -395,5 +462,151 @@ mod tests {
         let got = decode(&fixture("avif_still_96.avif"), &want).unwrap();
         assert_eq!((got.width, got.height), (48, 32));
         assert!(got.is_sampled);
+    }
+}
+
+/// The fixture set of area:34 (`p1-edge-cases-and-tests.md` section 7, generated by `tests/fixtures/generate.py`).
+/// F-10 (HEIF) is not in the set: no encoder is available for it in this build.
+#[cfg(test)]
+mod fixture_tests {
+    use super::*;
+    use crate::sniff::is_image;
+    use crate::testing::fixture;
+
+    fn opts() -> DecodeOptions {
+        DecodeOptions::default()
+    }
+
+    #[test]
+    fn f01_baseline_jpeg_decodes_at_its_size() {
+        let got = decode(&fixture("jpeg_baseline_320x480.jpg"), &opts()).unwrap();
+        assert_eq!((got.width, got.height), (320, 480));
+        assert_eq!(got.rgba.len(), 320 * 480 * 4);
+    }
+
+    #[test]
+    fn f02_exif_orientation_six_turns_the_picture_clockwise() {
+        let bytes = fixture("jpeg_exif_rot90.jpg");
+        let got = decode(&bytes, &opts()).unwrap();
+        assert_eq!((got.width, got.height), (320, 480));
+        // The stored picture has red rising to the right and green rising downwards. After a quarter turn
+        // clockwise the top-left corner is the stored bottom-left corner, which is green.
+        assert!(
+            got.rgba[0] < 60 && got.rgba[1] > 195,
+            "{:?}",
+            &got.rgba[..3]
+        );
+        // The top-right corner is the stored top-left corner, which is black.
+        let top_right = (320 - 1) * 4;
+        assert!(got.rgba[top_right] < 40 && got.rgba[top_right + 1] < 40);
+    }
+
+    #[test]
+    fn f02_orientation_is_applied_before_the_sample_size() {
+        let want = DecodeOptions {
+            size: RequestSize::Pixels {
+                width: 160,
+                height: 240,
+            },
+            ..opts()
+        };
+        let got = decode(&fixture("jpeg_exif_rot90.jpg"), &want).unwrap();
+        assert_eq!((got.width, got.height), (160, 240));
+        assert!(got.is_sampled);
+    }
+
+    #[test]
+    fn f03_rgba_png_keeps_its_alpha_gradient() {
+        let got = decode(&fixture("png_rgba_100x100.png"), &opts()).unwrap();
+        assert_eq!((got.width, got.height), (100, 100));
+        assert_eq!(got.rgba[3], 0, "left edge is transparent");
+        assert_eq!(got.rgba[99 * 4 + 3], 255, "right edge is opaque");
+    }
+
+    #[test]
+    fn f04_static_gif_decodes() {
+        let got = decode(&fixture("gif_static_64.gif"), &opts()).unwrap();
+        assert_eq!((got.width, got.height), (64, 64));
+    }
+
+    #[test]
+    fn f05_animated_gif_gives_its_first_frame() {
+        let got = decode(&fixture("gif_animated_3f.gif"), &opts()).unwrap();
+        assert_eq!((got.width, got.height), (64, 64));
+        assert!(
+            got.rgba[0] > 200 && got.rgba[1] < 60 && got.rgba[2] < 60,
+            "{:?}",
+            &got.rgba[..4]
+        );
+    }
+
+    #[test]
+    fn f06_lossy_webp_decodes() {
+        let got = decode(&fixture("webp_lossy_50.webp"), &opts()).unwrap();
+        assert_eq!((got.width, got.height), (120, 90));
+    }
+
+    #[test]
+    fn f07_bmp_decodes() {
+        let got = decode(&fixture("bmp_24bit.bmp"), &opts()).unwrap();
+        assert_eq!((got.width, got.height), (96, 64));
+    }
+
+    #[test]
+    fn f11_truncated_jpeg_fails_with_one_of_the_two_decode_messages() {
+        let err = decode(&fixture("truncated_jpeg.jpg"), &opts()).unwrap_err();
+        assert!(
+            matches!(err, ImageError::DecodeInit | ImageError::DecodeFailed),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn f12_zero_byte_file_is_unsupported_and_not_an_image() {
+        let bytes = fixture("zero_bytes.bin");
+        assert!(sniff::sniff(&bytes).is_none());
+        assert!(matches!(
+            decode(&bytes, &opts()),
+            Err(ImageError::UnsupportedFormat)
+        ));
+    }
+
+    #[test]
+    fn f13_text_named_jpg_passes_the_name_test_only() {
+        let bytes = fixture("text_named.jpg");
+        // The extension alone is enough, so the bytes do not matter for the name test.
+        assert!(is_image(Some("text_named.jpg"), &[]));
+        assert!(sniff::sniff(&bytes).is_none());
+        assert!(matches!(
+            decode(&bytes, &opts()),
+            Err(ImageError::UnsupportedFormat)
+        ));
+    }
+
+    #[test]
+    fn f14_zero_width_png_is_decode_init() {
+        let err = decode(&fixture("zero_dimension.png"), &opts()).unwrap_err();
+        assert!(matches!(err, ImageError::DecodeInit), "{err}");
+    }
+
+    #[test]
+    fn f15_huge_png_header_is_too_large_before_any_pixel_is_read() {
+        let err = decode(&fixture("huge_header.png"), &opts()).unwrap_err();
+        assert!(matches!(err, ImageError::TooLarge), "{err}");
+    }
+
+    #[test]
+    fn f16_uppercase_extension_is_an_image_by_sniffing() {
+        let bytes = fixture("uppercase_ext.JPG");
+        assert!(is_image(Some("uppercase_ext.JPG"), &bytes));
+        assert_eq!(decode(&bytes, &opts()).unwrap().width, 320);
+    }
+
+    #[test]
+    fn f17_jpeg_extension_is_an_image_by_sniffing_only() {
+        let bytes = fixture("jpeg_as_jpeg_ext.jpeg");
+        assert!(is_image(Some("jpeg_as_jpeg_ext.jpeg"), &bytes));
+        assert!(!is_image(Some("jpeg_as_jpeg_ext.jpeg"), &[]));
+        assert_eq!(decode(&bytes, &opts()).unwrap().height, 480);
     }
 }

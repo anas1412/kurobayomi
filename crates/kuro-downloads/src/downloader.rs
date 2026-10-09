@@ -14,14 +14,17 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::time::MissedTickBehavior;
 use tokio::task::{AbortHandle, Id, JoinError, JoinSet};
 
+use crate::data_saver::DataSaver;
 use crate::error::{DownloadError, FailureKind};
 use crate::events::DownloadEvent;
+use crate::images::PageImageCache;
 use crate::index::DownloadIndex;
 use crate::layout::DownloadLayout;
 use crate::manager::{EnqueueOutcome, ManagerParams};
 use crate::model::{ChapterRef, DownloadState, MangaRef, QueuedDownload, SourceRef};
 use crate::pipeline::{ChapterJob, ChapterOutcome, FreeSpaceFn, PipelineCtx, PipelineMsg, Update, run_chapter};
 use crate::queue::QueueState;
+use crate::scheduler::MAX_ACTIVE_SOURCES;
 use crate::store::{QueueRow, QueueStore};
 
 /// Progress events are coalesced to this interval per chapter (RC-05).
@@ -60,17 +63,44 @@ impl ProcessHold for NoHold {
 }
 
 /// Settings read by the downloader. Changing one takes effect when the next run starts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DownloadSettings {
     /// Stop on a metered connection (`pref_download_only_over_wifi_key`, default on).
     pub only_over_wifi: bool,
+    /// Pack each finished chapter as a `.cbz` (`save_chapter_as_cbz`, default on).
+    pub save_as_cbz: bool,
+    /// Split pages taller than 3x their width (`split_tall_images`, default on).
+    pub split_tall_images: bool,
+    /// Shared speed limit in KiB/s, 0 is unlimited (`download_speed_limit`). Read by the shared limiter.
+    pub speed_limit_kib_s: u32,
+    /// Part height for the tall split: `2 * max(monitor width, height)` from GDK, set by the GUI. Not a user setting.
+    pub optimal_image_height: u32,
+    /// Data-saver proxy preferences (T-23a-017). The service is `None` by default.
+    pub data_saver: DataSaver,
 }
 
 impl Default for DownloadSettings {
     fn default() -> Self {
-        Self { only_over_wifi: true }
+        Self {
+            only_over_wifi: true,
+            save_as_cbz: true,
+            split_tall_images: true,
+            speed_limit_kib_s: 0,
+            optimal_image_height: crate::images::DEFAULT_OPTIMAL_HEIGHT,
+            data_saver: DataSaver::default(),
+        }
     }
 }
+
+/// The settings this crate consumes as `table.field` paths of the kuro-prefs registry, with the default text each one
+/// must have (`p1-data-and-config.md` section 5.1, T-23a-037). The stored keys are the Kotlin names
+/// (`pref_download_only_over_wifi_key`, `save_chapter_as_cbz`, `split_tall_images`, `download_speed_limit`).
+pub const SETTING_KEYS: [(&str, &str); 4] = [
+    ("downloads.download_only_over_wifi", "true"),
+    ("downloads.save_chapters_as_cbz", "true"),
+    ("downloads.split_tall_images", "true"),
+    ("downloads.download_speed_limit", "0"),
+];
 
 /// What a removal applies to.
 pub enum RemoveTarget {
@@ -89,6 +119,10 @@ pub enum Command {
     Start,
     Pause,
     Clear,
+    /// Puts the queue in this order. Unknown ids are ignored and unlisted chapters follow in their current order (E-15).
+    Reorder {
+        chapter_ids: Vec<i64>,
+    },
     Remove {
         target: RemoveTarget,
         reply: oneshot::Sender<Vec<i64>>,
@@ -155,6 +189,7 @@ pub struct Downloader {
     index: Arc<DownloadIndex>,
     free_space: FreeSpaceFn,
     settings: DownloadSettings,
+    page_cache: Option<Arc<dyn PageImageCache>>,
     connectivity: watch::Receiver<Connectivity>,
     connectivity_open: bool,
     msg_tx: mpsc::UnboundedSender<PipelineMsg>,
@@ -168,7 +203,7 @@ impl Downloader {
     pub fn new(params: ManagerParams, events: broadcast::Sender<DownloadEvent>, shared: Arc<Shared>) -> Self {
         let (msg_tx, msg_rx) = mpsc::unbounded_channel();
         Self {
-            queue: QueueState::new(),
+            queue: QueueState::restored(params.restored),
             running: false,
             resume_on_network: false,
             network_failed: HashSet::new(),
@@ -183,6 +218,7 @@ impl Downloader {
             index: params.index,
             free_space: params.free_space,
             settings: params.settings,
+            page_cache: params.page_cache,
             connectivity: params.connectivity,
             connectivity_open: true,
             msg_tx,
@@ -233,6 +269,7 @@ impl Downloader {
             Command::Start => self.start_run(true).await,
             Command::Pause => self.pause().await,
             Command::Clear => self.clear().await,
+            Command::Reorder { chapter_ids } => self.reorder(&chapter_ids).await,
             Command::Remove { target, reply } => {
                 let ids = self.remove(target).await;
                 let _ = reply.send(ids);
@@ -374,6 +411,16 @@ impl Downloader {
         self.stop(None).await;
     }
 
+    /// Puts the queue in the given order. Unknown ids are ignored and unlisted chapters follow (E-15).
+    async fn reorder(&mut self, chapter_ids: &[i64]) {
+        if chapter_ids.is_empty() {
+            return;
+        }
+        self.queue.reorder(chapter_ids);
+        self.persist().await;
+        self.emit(DownloadEvent::QueueChanged);
+    }
+
     /// Removes chapters or a manga from the queue. A running queue is paused first and restarted afterwards, so a
     /// chapter is never written while its folder is being deleted (RC-04, RC-11).
     async fn remove(&mut self, target: RemoveTarget) -> Vec<i64> {
@@ -424,7 +471,7 @@ impl Downloader {
         if !self.running {
             return;
         }
-        let wanted = self.queue.active_ids();
+        let wanted = self.queue.active_ids(MAX_ACTIVE_SOURCES);
         let stale: Vec<i64> = self.running_tasks.keys().copied().filter(|id| !wanted.contains(id)).collect();
         for chapter_id in stale {
             self.abort_task(chapter_id);
@@ -453,6 +500,10 @@ impl Downloader {
             chapter_id,
             generation,
             tx: self.msg_tx.clone(),
+            page_cache: self.page_cache.clone(),
+            split_tall_images: self.settings.split_tall_images,
+            optimal_height: self.settings.optimal_image_height,
+            data_saver: self.settings.data_saver.clone(),
         };
         let job = ChapterJob {
             source: item.source.clone(),
@@ -764,8 +815,10 @@ mod tests {
             store: Arc::new(QueueStore::open_in_memory().unwrap()),
             free_space: plenty,
             settings: DownloadSettings::default(),
+            page_cache: None,
             connectivity,
             hold,
+            restored: Vec::new(),
         };
         let dl = Downloader::new(params, events_tx, Arc::new(Shared::new()));
         Harness { dl, events, conn, _base: base }
@@ -871,5 +924,42 @@ mod tests {
         let manga_dir = h._base.path().join("downloads").join("Source 1 (EN)").join("Berserk");
         assert!(!manga_dir.join("Chapter 1_tmp").exists(), "RC-01: no stray tmp folder");
         assert!(manga_dir.join("Chapter 1").is_dir());
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    fn default_text(key: &str) -> String {
+        let d = DownloadSettings::default();
+        match key {
+            "downloads.download_only_over_wifi" => d.only_over_wifi.to_string(),
+            "downloads.save_chapters_as_cbz" => d.save_as_cbz.to_string(),
+            "downloads.split_tall_images" => d.split_tall_images.to_string(),
+            "downloads.download_speed_limit" => d.speed_limit_kib_s.to_string(),
+            other => panic!("unknown key {other}"),
+        }
+    }
+
+    #[test]
+    fn every_registered_key_has_the_kotlin_default() {
+        for (key, default) in SETTING_KEYS {
+            assert_eq!(default_text(key), default, "{key}");
+        }
+    }
+
+    #[test]
+    fn registered_keys_exist_in_the_prefs_registry_with_the_same_default() {
+        use kuro_prefs::registry::{Lit, find_path};
+        for (path, default) in SETTING_KEYS {
+            let meta = find_path(path).unwrap_or_else(|| panic!("{path} is not in the kuro-prefs registry"));
+            let text = match meta.default {
+                Lit::Bool(b) => b.to_string(),
+                Lit::Int(n) => n.to_string(),
+                other => panic!("{path}: unexpected default {other:?}"),
+            };
+            assert_eq!(text, default, "{path} ({})", meta.key);
+        }
     }
 }
