@@ -51,7 +51,7 @@ fn present_count(name: &str) -> (usize, usize) {
         "Yotsuba" | "Tako" | "MidnightDusk" | "TealTurquoise" | "TidalWave" | "YinYang" => (28, 28),
         "Cloudflare" | "Doom" | "Matrix" | "Sapphire" => (23, 23),
         "Nord" => (31, 32),
-        "CottonCandy" => (22, 23),
+        "CottonCandy" => (22, 22),
         "Mocha" => (22, 22),
         other => panic!("no coverage row for {other}"),
     }

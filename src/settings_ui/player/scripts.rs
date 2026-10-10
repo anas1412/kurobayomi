@@ -432,7 +432,26 @@ pub fn buttons_page() -> Option<Built> {
             view.render();
         });
     });
-    built(overlay, crate::ui::toolbar(&crate::ui::screen("settings_player_custom_buttons")))
+    built(overlay, guide_toolbar("settings_player_custom_buttons"))
+}
+
+/// The custom buttons guide, opened in the browser (T-48a-049). A launch that fails shows "Could not open link".
+const GUIDE_URL: &str = "https://aniyomi.org/docs/guides/player-settings/custom-buttons";
+
+fn guide_toolbar(id: &str) -> Vec<gtk::Widget> {
+    let widgets = crate::ui::toolbar(&crate::ui::screen(id));
+    let guide = widgets.iter().find(|w| w.tooltip_text().as_deref() == Some("Custom buttons guide"));
+    if let Some(guide) = guide.and_then(|w| w.downcast_ref::<Button>()) {
+        guide.connect_clicked(|_| {
+            gtk::UriLauncher::new(GUIDE_URL).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
+                if let Err(err) = result {
+                    tracing::warn!(%err, "could not open the custom buttons guide");
+                    crate::toast::notify(super::advanced::OPEN_FAILED);
+                }
+            });
+        });
+    }
+    widgets
 }
 
 // ---------- script editor ----------

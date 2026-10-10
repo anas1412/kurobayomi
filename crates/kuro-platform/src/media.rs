@@ -47,7 +47,9 @@ pub type CommandHandler = Box<dyn Fn(MediaCommand) + Send + 'static>;
 /// command, which only happens when the UI has stopped reading.
 pub fn command_channel() -> (CommandHandler, async_channel::Receiver<MediaCommand>) {
     let (tx, rx) = async_channel::bounded(32);
-    (Box::new(move |command| drop(tx.try_send(command))), rx)
+    (Box::new(move |command| {
+        let _ = tx.try_send(command);
+    }), rx)
 }
 
 /// Publishes now-playing state and receives transport commands.

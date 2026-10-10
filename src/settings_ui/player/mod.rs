@@ -15,6 +15,7 @@ pub mod scripts;
 pub mod seeking;
 pub mod subtitle;
 pub mod syntax;
+pub mod torrent;
 
 use std::rc::Rc;
 

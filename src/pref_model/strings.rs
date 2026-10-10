@@ -31,6 +31,14 @@ pub fn back() -> String {
     tr(MsgKey::action_webview_back)
 }
 
+/// Kurobayomi-only words (T-47ba-074). Not in the Kotlin tree, so they are plain English constants until the string
+/// table (area 51) takes them.
+pub const NOT_INCLUDED: &str = "Not included";
+pub const INCLUDED: &str = "Included";
+pub const EXCLUDED: &str = "Excluded";
+pub const LOG_OUT_OF_TRACKER: &str = "Log out of this tracker?";
+pub const COULD_NOT_SAVE: &str = "Could not save this setting";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -43,5 +51,12 @@ mod tests {
         assert_eq!(logged_in(), "Logged in");
         assert_eq!(label_backup(), "Backup and restore");
         assert_eq!(back(), "Back");
+    }
+
+    #[test]
+    fn the_kurobayomi_only_words_are_the_proposal_text() {
+        assert_eq!([NOT_INCLUDED, INCLUDED, EXCLUDED], ["Not included", "Included", "Excluded"]);
+        assert_eq!(LOG_OUT_OF_TRACKER, "Log out of this tracker?");
+        assert_eq!(COULD_NOT_SAVE, "Could not save this setting");
     }
 }

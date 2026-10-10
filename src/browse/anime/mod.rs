@@ -14,6 +14,7 @@ pub mod favorite_store;
 pub mod loader;
 pub mod migrate_dialog;
 pub mod migrate_engine;
+pub mod migrate_live;
 pub mod migrate_rules;
 pub mod migrate_seasons;
 pub mod prefs;

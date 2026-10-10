@@ -43,13 +43,7 @@ pub fn moved_title(tab: Tab) -> String {
     })
 }
 
-/// The download queue as the More tab sees it (`DownloadQueueState`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QueueState {
-    Stopped,
-    Paused { pending: i64 },
-    Downloading { pending: i64 },
-}
+pub use super::queue_state::QueueState;
 
 /// The queue row's subtitle: none when stopped, "Paused" (with the count when items wait) when paused, the count when
 /// downloading. The count is the string table's plural, one format string with the number in it.

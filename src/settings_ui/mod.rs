@@ -16,6 +16,7 @@ pub mod browse;
 pub mod cache;
 pub mod category;
 pub mod category_sets;
+pub mod changelog;
 pub mod chooser;
 pub mod clipboard;
 pub mod cookie_import;

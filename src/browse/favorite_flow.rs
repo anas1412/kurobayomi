@@ -13,7 +13,7 @@ use kuro_i18n::{MsgKey, tr};
 use super::dialogs::{ButtonStyle, DialogSlot, DialogSpec};
 use super::entries::{CategoryChoice, FavoriteStore, add_entry, add_entry_to, chooser_rows, remove_entry};
 use super::favorite::{
-    AddOutcome, DuplicateAnswer, LongClick, OptimisticFavorite, duplicate_answer, duplicate_dialog, long_click, on_remove_answer,
+    AddOutcome, DuplicateAnswer, LongClick, OptimisticFavorite, duplicate_answer, duplicate_dialog_for, long_click, on_remove_answer,
     remove_confirm,
 };
 use super::listing::ListItem;
@@ -40,6 +40,8 @@ pub struct FavoriteFlow {
     anchor: glib::WeakRef<gtk::Widget>,
     /// Counts long presses, so the answer of an older one never opens its dialog over a newer one (B-EC-27).
     presses: Cell<u64>,
+    /// An anime page: the duplicate dialog says Show anime.
+    anime: bool,
 }
 
 /// Runs `work` on a worker thread and `then` with its result on the main loop.
@@ -53,7 +55,12 @@ fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static, then: 
 
 impl FavoriteFlow {
     pub fn new(store: Arc<dyn FavoriteStore>, anchor: &impl IsA<gtk::Widget>, hooks: FavoriteHooks) -> Rc<Self> {
-        Rc::new(Self { store, dialogs: DialogSlot::new(), hooks, anchor: anchor.upcast_ref::<gtk::Widget>().downgrade(), presses: Cell::new(0) })
+        Self::new_for(store, anchor, hooks, false)
+    }
+
+    /// `anime` is true on an anime page.
+    pub fn new_for(store: Arc<dyn FavoriteStore>, anchor: &impl IsA<gtk::Widget>, hooks: FavoriteHooks, anime: bool) -> Rc<Self> {
+        Rc::new(Self { store, dialogs: DialogSlot::new(), hooks, anchor: anchor.upcast_ref::<gtk::Widget>().downgrade(), presses: Cell::new(0), anime })
     }
 
     /// The dialog on screen, if any.
@@ -108,7 +115,7 @@ impl FavoriteFlow {
     }
 
     fn ask_duplicate(self: &Rc<Self>, item: ListItem, existing: i64) {
-        let text = duplicate_dialog();
+        let text = duplicate_dialog_for(self.anime);
         let spec = DialogSpec {
             title: text.title,
             body: Some(text.body),
@@ -250,6 +257,10 @@ pub(crate) mod tests {
     }
 
     fn rig() -> Rig {
+        rig_for(false)
+    }
+
+    fn rig_for(anime: bool) -> Rig {
         let store = Arc::new(FakeStore::default());
         let anchor = gtk::Label::new(None);
         let (flags, toasts, opened): (Rc<RefCell<Vec<(i64, bool)>>>, Rc<RefCell<Vec<String>>>, Rc<RefCell<Vec<String>>>) =
@@ -263,7 +274,7 @@ pub(crate) mod tests {
             now_ms: Rc::new(|| 5_000),
             edit_categories: Rc::new(move || o3.borrow_mut().push("categories".to_owned())),
         };
-        let flow = FavoriteFlow::new(Arc::clone(&store) as Arc<dyn FavoriteStore>, &anchor, hooks);
+        let flow = FavoriteFlow::new_for(Arc::clone(&store) as Arc<dyn FavoriteStore>, &anchor, hooks, anime);
         Rig { flow, store, flags, toasts, opened, _anchor: anchor }
     }
 
@@ -326,6 +337,21 @@ pub(crate) mod tests {
         buttons_of(&rig.flow.dialog().expect("dialog"))[2].emit_clicked();
         assert!(pump(|| rig.store.calls().contains(&"favorite 7 true 5000".to_owned())), "Add anyway adds");
         assert_eq!(rig.flags.borrow().first(), Some(&(7, true)));
+    }
+
+    /// T-41b-021: the anime page's duplicate dialog offers Show anime, Migrate existing entry, Add anyway and Cancel.
+    fn the_anime_duplicate_dialog_says_show_anime_and_each_row_runs_its_action() {
+        let rig = rig_for(true);
+        *rig.store.duplicates.lock().expect("lock") = vec![42];
+        rig.flow.long_press(item(false));
+        assert!(pump(|| rig.flow.dialog().is_some()));
+        let window = rig.flow.dialog().expect("dialog");
+        let labels: Vec<String> = buttons_of(&window).iter().filter_map(|b| b.label().map(|l| l.to_string())).collect();
+        let text = duplicate_dialog_for(true);
+        assert_eq!(labels, [text.show, text.migrate, text.add_anyway, text.cancel]);
+        assert_eq!(labels[0], tr(MsgKey::action_show_anime));
+        buttons_of(&window)[0].emit_clicked();
+        assert_eq!(*rig.opened.borrow(), ["open 42"]);
     }
 
     fn a_second_long_press_replaces_the_open_dialog() {
@@ -409,6 +435,7 @@ pub(crate) mod tests {
     pub(crate) fn smoke() {
         a_favourite_asks_to_remove_and_confirm_runs_the_remove_write();
         a_new_entry_with_a_duplicate_shows_the_duplicate_dialog_and_add_anyway_adds();
+        the_anime_duplicate_dialog_says_show_anime_and_each_row_runs_its_action();
         a_second_long_press_replaces_the_open_dialog();
         a_plain_entry_is_added_and_a_failed_write_restores_the_flag_with_the_error_toast();
         an_ask_default_category_opens_the_chooser_and_writes_nothing_until_it_is_answered();

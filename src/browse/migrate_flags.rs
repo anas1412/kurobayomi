@@ -79,6 +79,10 @@ impl RunGuard {
     pub fn finish(&self) {
         self.running.set(false);
     }
+
+    pub fn is_running(&self) -> bool {
+        self.running.get()
+    }
 }
 
 #[cfg(test)]

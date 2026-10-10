@@ -102,6 +102,11 @@ pub trait ActionHost {
     fn cancel_restore(&self);
     fn open_url(&self, url: &str);
     fn reveal(&self, path: &std::path::Path);
+    /// The folders a reveal may name (design 6.1): the data folder, the downloads folder and the cache folder.
+    fn reveal_roots(&self) -> Vec<PathBuf>;
+    /// Starts the app-update download of `url` (already checked by [`update_url_ok`]).
+    fn start_app_update(&self, url: &str, version: Option<String>);
+    fn cancel_app_update(&self);
     /// An action no part of the app handles yet.
     fn unavailable(&self, what: &str);
 }
@@ -113,6 +118,23 @@ fn valid_urls(urls: &[String]) -> bool {
 fn web_url(url: &str) -> bool {
     let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
     lower.starts_with("https://") || lower.starts_with("http://")
+}
+
+/// Design 6.1: the asset url of an app update is `https`, on a GitHub release host, with no user info and the default port.
+pub fn update_url_ok(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else { return false };
+    parsed.scheme() == "https"
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.port().is_none()
+        && matches!(parsed.host_str(), Some("github.com" | "objects.githubusercontent.com"))
+}
+
+/// Design 6.1: a path to reveal is absolute, has no `..`, and lies under one of `roots`.
+pub fn reveal_path_ok(path: &std::path::Path, roots: &[PathBuf]) -> bool {
+    path.is_absolute()
+        && !path.components().any(|c| matches!(c, std::path::Component::ParentDir))
+        && roots.iter().any(|root| path.starts_with(root))
 }
 
 /// Runs `action`. A rejected payload is logged and does nothing.
@@ -181,10 +203,11 @@ pub fn route(host: &dyn ActionHost, action: AppAction) {
             host.withdraw(kuro_backup::notify::ID_RESTORE_PROGRESS);
             host.cancel_restore();
         }
-        StartAppUpdate { .. } => host.unavailable("start app update"),
-        CancelAppUpdate => host.unavailable("cancel app update"),
-        RevealFile { path } if path.is_absolute() => host.reveal(&path),
-        RevealFile { path } => tracing::warn!(?path, "a notice action named a relative path to reveal"),
+        StartAppUpdate { url, version } if update_url_ok(&url) => host.start_app_update(&url, version),
+        StartAppUpdate { url, .. } => tracing::warn!(%url, "a notice action named an update url outside the release hosts"),
+        CancelAppUpdate => host.cancel_app_update(),
+        RevealFile { path } if reveal_path_ok(&path, &host.reveal_roots()) => host.reveal(&path),
+        RevealFile { path } => tracing::warn!(?path, "a notice action named a path that may not be revealed"),
         OpenUrl { url } if web_url(&url) => host.open_url(&url),
         OpenUrl { url } => tracing::warn!(%url, "a notice action named a url that is not http or https"),
         Dismiss { notice } => host.withdraw(&notice),
@@ -255,6 +278,15 @@ mod tests {
         }
         fn unavailable(&self, what: &str) {
             self.log(format!("unavailable {what}"));
+        }
+        fn reveal_roots(&self) -> Vec<PathBuf> {
+            vec!["/data".into(), "/downloads".into()]
+        }
+        fn start_app_update(&self, url: &str, version: Option<String>) {
+            self.log(format!("start_app_update {url} {version:?}"));
+        }
+        fn cancel_app_update(&self) {
+            self.log("cancel_app_update".to_owned());
         }
     }
 
@@ -360,6 +392,38 @@ mod tests {
         assert!(run(AppAction::OpenUrl { url: "file:///etc/passwd".into() }).is_empty());
         assert_eq!(run(AppAction::OpenUrl { url: "https://a.b".into() }), ["open_url https://a.b"]);
         assert!(run(AppAction::RevealFile { path: "rel/x".into() }).is_empty());
+    }
+
+    #[test]
+    fn an_update_url_must_be_https_on_a_release_host() {
+        // T-35a-092, test U13
+        let start = |url: &str| run(AppAction::StartAppUpdate { url: url.into(), version: Some("v1".into()) });
+        let good = "https://github.com/o/r/releases/download/v1/App.AppImage";
+        assert_eq!(start(good), [format!("start_app_update {good} Some(\"v1\")")]);
+        assert_eq!(start("https://objects.githubusercontent.com/x").len(), 1);
+        for bad in [
+            "http://github.com/o/r/a.AppImage",
+            "https://evil.example/a.AppImage",
+            "https://github.com.evil.example/a",
+            "https://user@github.com/a",
+            "https://github.com:8443/a",
+            "file:///etc/passwd",
+            "not a url",
+        ] {
+            assert!(start(bad).is_empty(), "{bad}");
+        }
+        assert_eq!(run(AppAction::CancelAppUpdate), ["cancel_app_update"]);
+    }
+
+    #[test]
+    fn a_reveal_stays_inside_the_allowed_folders() {
+        // T-35a-092
+        let reveal = |p: &str| run(AppAction::RevealFile { path: p.into() });
+        assert_eq!(reveal("/downloads/App.AppImage"), ["reveal /downloads/App.AppImage"]);
+        assert_eq!(reveal("/data/x").len(), 1);
+        assert!(reveal("/etc/passwd").is_empty());
+        assert!(reveal("/downloads/../etc/passwd").is_empty());
+        assert!(reveal("/downloadsX/a").is_empty());
     }
 
     #[test]

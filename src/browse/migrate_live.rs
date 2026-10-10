@@ -319,6 +319,26 @@ mod tests {
         assert!(repo.by_id(old.id).expect("old").favorite && !repo.by_id(new.id).expect("new").favorite, "nothing was written");
     }
 
+    /// T-40b-085 `migrate_counts_query_orders_by_source`: the migrate tab's count query of `mangas.sq` on an in-memory
+    /// database, then through the repository over the real schema. Sources come back in order, favourites only.
+    #[test]
+    fn migrate_counts_query_orders_by_source() {
+        let memory = rusqlite::Connection::open_in_memory().expect("in-memory database");
+        memory.execute_batch("CREATE TABLE mangas(_id INTEGER PRIMARY KEY AUTOINCREMENT, source INTEGER NOT NULL, favorite INTEGER NOT NULL);").expect("table");
+        for (source, favorite) in [(9, 1), (3, 1), (9, 1), (5, 0), (5, 1), (7, 0)] {
+            memory.execute("INSERT INTO mangas(source, favorite) VALUES (?1, ?2)", (source, favorite)).expect("row");
+        }
+        assert!(kuro_db::sql::mangas::GET_SOURCE_ID_WITH_FAVORITE_COUNT.contains("ORDER BY source"));
+        assert_eq!(kuro_db::sql::mangas::get_source_id_with_favorite_count(&memory).expect("counts"), [(3, 1), (5, 1), (9, 2)], "ordered by source; source 7 has no favourite");
+
+        let (_dir, db) = db();
+        let repo = MangaRepo::new(db);
+        for (source, url, favorite) in [(9, "/a", true), (3, "/b", true), (9, "/c", true), (7, "/d", false)] {
+            add_manga(&repo, source, url, favorite);
+        }
+        assert_eq!(repo.favorite_counts_by_source().expect("counts"), [(3, 1), (9, 2)]);
+    }
+
     #[test]
     fn with_no_directory_the_new_source_is_missing() {
         let (_dir, db) = db();

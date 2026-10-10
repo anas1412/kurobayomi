@@ -275,6 +275,8 @@ fn tapped(index: usize, changed: &Rc<dyn Fn()>) {
 fn check_mark() -> gtk::Widget {
     let label = crate::pref_model::strings::logged_in();
     let image = gtk::Image::from_icon_name("object-select-symbolic");
+    crate::pref_model::style::install();
+    image.add_css_class("tracker-check");
     image.set_pixel_size(crate::pref_model::widgets::TRACKER_CHECK_SIZE);
     image.set_tooltip_text(Some(&label));
     image.set_accessible_role(gtk::AccessibleRole::Img);

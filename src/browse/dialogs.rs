@@ -121,6 +121,25 @@ impl DialogSlot {
         window
     }
 
+    /// Registers a window the caller built itself (a dialog that stays open while it works): any dialog this slot has
+    /// open is closed first, and the slot forgets the window when it closes. A close handler the caller connected
+    /// before this call can still refuse the close.
+    pub fn adopt(&self, window: &gtk::Window) {
+        let old = self.current.borrow_mut().take();
+        if let Some(old) = old {
+            old.close();
+        }
+        *self.current.borrow_mut() = Some(window.clone());
+        let (slot, this) = (Rc::clone(&self.current), window.clone());
+        window.connect_close_request(move |_| {
+            let mut current = slot.borrow_mut();
+            if current.as_ref() == Some(&this) {
+                current.take();
+            }
+            gtk::glib::Propagation::Proceed
+        });
+    }
+
     /// The dialog on screen, if any.
     pub fn current(&self) -> Option<gtk::Window> {
         self.current.borrow().clone()

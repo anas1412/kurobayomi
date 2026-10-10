@@ -325,6 +325,14 @@ fn more() -> Option<Built> {
     let mut groups = s.groups.clone();
     for g in &mut groups {
         g.items.retain(|it| !matches!(it, crate::spec::Item::Link { target, .. } if target == "history"));
+        // The queue row shows the derived download state, not the mockup text; no manager runs in the app yet, so Stopped.
+        for it in &mut g.items {
+            if let crate::spec::Item::Link { subtitle, target, .. } = it {
+                if target == "download_queue" {
+                    *subtitle = crate::pref_model::more::queue_subtitle(crate::pref_model::queue_state::QueueState::Stopped);
+                }
+            }
+        }
     }
     groups_into(&col, &groups);
     tag(&col, "more");

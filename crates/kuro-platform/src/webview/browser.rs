@@ -105,7 +105,7 @@ fn parse_line(line: &str, source: &str) -> Option<WebCookie> {
 
 /// A [`WebViewHost`] for a machine with no embedded view. A challenge opens in the system browser; the user exports
 /// the cookies with a `cookies.txt` extension to `cookies_file`, and the host polls that file until a clearance cookie
-/// newer than the old one shows up. [`BrowserHost::oauth_login`] covers tracker login through the loopback redirect.
+/// newer than the old one shows up. [`WebViewHost::oauth_login`] covers tracker login through the loopback redirect.
 pub struct BrowserHost {
     opener: Arc<dyn Opener>,
     cookies_file: PathBuf,
@@ -117,21 +117,6 @@ impl BrowserHost {
     pub fn new(opener: Arc<dyn Opener>, cookies_file: PathBuf) -> Self {
         Self { opener, cookies_file, poll: Duration::from_secs(1) }
     }
-
-    /// Opens `build_url(redirect_uri)` in the system browser and returns the query pairs of the redirect that comes back
-    /// within `limit`. The caller checks `state` against the value it put in the URL.
-    pub async fn oauth_login(&self, build_url: impl FnOnce(&str) -> Url, limit: Duration) -> io::Result<Vec<(String, String)>> {
-        let redirect = LoopbackRedirect::bind().await?;
-        let uri = redirect.redirect_uri("/callback")?;
-        self.opener.open_target(build_url(&uri).as_str())?;
-        redirect.receive(limit).await
-    }
-
-    /// The cookies in the import file that `url`'s host can send. A missing or unreadable file gives none.
-    pub fn imported_cookies(&self, url: &Url) -> Vec<WebCookie> {
-        let text = std::fs::read_to_string(&self.cookies_file).unwrap_or_default();
-        parse_cookies_txt(&text, url.host_str().unwrap_or_default())
-    }
 }
 
 #[async_trait]
@@ -142,6 +127,25 @@ impl WebViewHost for BrowserHost {
 
     async fn get_html(&self) -> Option<String> {
         None
+    }
+
+    /// Opens `build_url(redirect_uri)` in the system browser and returns the query pairs of the redirect that comes back
+    /// within `limit`. The caller checks `state` against the value it put in the URL.
+    async fn oauth_login(
+        &self,
+        build_url: Box<dyn for<'r> FnOnce(&'r str) -> Url + Send>,
+        limit: Duration,
+    ) -> io::Result<Vec<(String, String)>> {
+        let redirect = LoopbackRedirect::bind().await?;
+        let uri = redirect.redirect_uri("/callback")?;
+        self.opener.open_target(build_url(&uri).as_str())?;
+        redirect.receive(limit).await
+    }
+
+    /// The cookies in the import file that `url`'s host can send. A missing or unreadable file gives none.
+    fn imported_cookies(&self, url: &Url) -> Vec<WebCookie> {
+        let text = std::fs::read_to_string(&self.cookies_file).unwrap_or_default();
+        parse_cookies_txt(&text, url.host_str().unwrap_or_default())
     }
 
     async fn solve_challenge(&self, req: SolveRequest, cancel: CancellationToken) -> SolveOutcome {
@@ -323,12 +327,14 @@ broken line\n";
     async fn oauth_login_opens_the_browser_with_the_redirect_uri_and_returns_the_query() {
         let dir = tempfile::tempdir().unwrap();
         let (host, rec) = host(dir.path().join("cookies.txt"));
-        let host = Arc::new(host);
+        let host: Arc<dyn WebViewHost> = Arc::new(host);
         let task = {
             let host = host.clone();
             tokio::spawn(async move {
                 host.oauth_login(
-                    |redirect| Url::parse_with_params("https://auth.test/authorize", [("redirect_uri", redirect)]).unwrap(),
+                    Box::new(|redirect: &str| {
+                        Url::parse_with_params("https://auth.test/authorize", [("redirect_uri", redirect)]).unwrap()
+                    }),
                     Duration::from_secs(5),
                 )
                 .await

@@ -124,7 +124,7 @@ pub trait WebViewHost: Send + Sync {
     /// login URL. The default is for hosts with no login path, so the caller falls back to its own error.
     async fn oauth_login(
         &self,
-        build_url: Box<dyn FnOnce(&str) -> Url + Send>,
+        build_url: Box<dyn for<'r> FnOnce(&'r str) -> Url + Send>,
         limit: Duration,
     ) -> io::Result<Vec<(String, String)>> {
         let _ = (build_url, limit);
@@ -228,6 +228,13 @@ mod tests {
                 outdated: false
             }
         );
+    }
+
+    #[test]
+    fn no_webview_has_no_login_path_and_no_imported_cookies() {
+        let login = futures_block_on(NoWebView.oauth_login(Box::new(|_: &str| Url::parse("https://auth.test/").unwrap()), Duration::from_secs(1)));
+        assert_eq!(login.unwrap_err().kind(), io::ErrorKind::Unsupported);
+        assert!(NoWebView.imported_cookies(&Url::parse("https://site.test/").unwrap()).is_empty());
     }
 
     /// A host whose page holds quotes and newlines. Android's `getHtml` returns such text JSON-quoted and escaped.

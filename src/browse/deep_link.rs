@@ -8,10 +8,28 @@ use kuro_source::model::SManga;
 use kuro_source::{DeepLinkOutcome, ResolvableSource, resolve_deep_link};
 
 use super::listing::{LinkFuture, ListItem};
+use super::pending::SearchIntent;
+use super::route::BrowseKind;
 
 /// Whether `text` is a link a source could own: an `http` or `https` URL with a host.
 pub fn is_link(text: &str) -> bool {
     reqwest::Url::parse(text.trim()).is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+}
+
+/// The global search a `kurobayomi://animesearch?query=<text>&filter=<package name>` link asks for (T-41b-037). A missing
+/// `query` is blank, which still opens the page; a missing `filter` is no extension filter. Any other link is `None`.
+pub fn anime_search_intent(uri: &str) -> Option<SearchIntent> {
+    let url = reqwest::Url::parse(uri.trim()).ok()?;
+    if url.scheme() != "kurobayomi" || url.host_str() != Some("animesearch") {
+        return None;
+    }
+    let param = |name: &str| url.query_pairs().find(|(key, _)| key == name).map(|(_, value)| value.into_owned());
+    Some(SearchIntent { query: param("query").unwrap_or_default(), extension: param("filter"), kind: BrowseKind::Anime })
+}
+
+/// Opens global search for an `animesearch` link; `false` when `uri` is not one.
+pub fn open_anime_search_link(uri: &str) -> bool {
+    anime_search_intent(uri).map(super::pending::open_search_intent).is_some()
 }
 
 /// The lookup of `uri` over `sources`, in list order (`resolve_deep_link`). `to_item` turns the resolved manga into its
@@ -87,6 +105,26 @@ mod tests {
     fn site() -> (Arc<Site>, Arc<Mutex<Vec<&'static str>>>) {
         let log: Arc<Mutex<Vec<&'static str>>> = Arc::default();
         (Arc::new(Site { log: Arc::clone(&log), lookups: AtomicUsize::new(0) }), log)
+    }
+
+    #[test]
+    fn an_animesearch_link_carries_its_query_and_extension_filter_as_an_anime_search() {
+        let intent = |uri| anime_search_intent(uri).expect("an animesearch link");
+        assert_eq!(
+            intent("kurobayomi://animesearch?query=one%20piece&filter=eu.example.alpha"),
+            SearchIntent { query: "one piece".into(), extension: Some("eu.example.alpha".into()), kind: BrowseKind::Anime }
+        );
+        assert_eq!(intent("kurobayomi://animesearch?query=a+b").extension, None, "no filter is no extension filter");
+        assert_eq!(intent("kurobayomi://animesearch").query, "", "a blank query still opens the page");
+        assert_eq!(intent("kurobayomi://animesearch?filter=").extension.as_deref(), Some(""), "an empty filter is passed on as given");
+    }
+
+    #[test]
+    fn other_links_are_not_animesearch_links() {
+        for uri in ["kurobayomi://add-repo?url=x", "https://animesearch/?query=a", "aniyomi://animesearch?query=a", "animesearch?query=a", ""] {
+            assert!(anime_search_intent(uri).is_none(), "{uri:?}");
+            assert!(!open_anime_search_link(uri), "{uri:?}");
+        }
     }
 
     #[test]

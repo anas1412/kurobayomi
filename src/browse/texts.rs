@@ -12,6 +12,11 @@ pub const MIGRATE_SOURCES_EMPTY: &str = "No source has favorites to migrate";
 /// `migrate_tracks_always`: the dim line under the migrate options. Tracking data is copied whatever is ticked (T-40a-045).
 pub const MIGRATE_TRACKS_ALWAYS: &str = "Tracking data is always transferred.";
 
+/// `migration_failed`: the inline error of a failed anime migration (T-41a-035, a Proposal over Aniyomi's silent path).
+pub fn migration_failed(reason: &str) -> String {
+    format!("Migration failed: {reason}")
+}
+
 /// The migrate tab's help action (T-41b-040, help URLs of `p2-data-and-config.md` section 5).
 pub const SOURCE_MIGRATION_HELP_URL: &str = "https://aniyomi.org/help/guides/source-migration/";
 
@@ -25,5 +30,6 @@ mod tests {
         assert_eq!(MIGRATE_SOURCES_EMPTY, "No source has favorites to migrate");
         assert_eq!(MIGRATE_TRACKS_ALWAYS, "Tracking data is always transferred.");
         assert_eq!(SOURCE_MIGRATION_HELP_URL, "https://aniyomi.org/help/guides/source-migration/");
+        assert_eq!(migration_failed("disk full"), "Migration failed: disk full");
     }
 }

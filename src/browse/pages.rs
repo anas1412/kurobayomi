@@ -153,6 +153,8 @@ pub struct FavoritesDeps {
     pub now_ms: Rc<dyn Fn() -> i64>,
     /// The category chooser's Edit categories: the Categories page on this kind's section.
     pub edit_categories: Rc<dyn Fn()>,
+    /// An anime page: the duplicate dialog's wording.
+    pub anime: bool,
 }
 
 pub struct BrowseSourceDeps {
@@ -390,7 +392,7 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
     root.append(listing_view.widget());
 
     // the library flows: a long press asks, a flag flips at once and a failed write puts it back
-    let flow = favorites.map(|FavoritesDeps { store, toast, open_entry, migrate, now_ms, edit_categories }| {
+    let flow = favorites.map(|FavoritesDeps { store, toast, open_entry, migrate, now_ms, edit_categories, anime }| {
         let (flag_view, toast_view) = (listing_view.downgrade(), listing_view.downgrade());
         let hooks = FavoriteHooks {
             set_flag: Rc::new(move |id, flag| {
@@ -408,7 +410,7 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
             now_ms,
             edit_categories,
         };
-        FavoriteFlow::new(store, &root, hooks)
+        FavoriteFlow::new_for(store, &root, hooks, anime)
     });
     *flow_slot.borrow_mut() = flow.clone();
 

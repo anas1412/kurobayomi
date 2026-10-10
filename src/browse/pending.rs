@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use super::route::BrowseRoute;
+use super::route::{BrowseKind, BrowseRoute};
 
 /// `eu.kanade.tachiyomi.SEARCH`: the extras `query` and `filter` (an extension package). An extension filter forces All and
 /// limits the search to that package's sources.
@@ -12,6 +12,8 @@ use super::route::BrowseRoute;
 pub struct SearchIntent {
     pub query: String,
     pub extension: Option<String>,
+    /// The catalogue the search runs in: `animesearch` links are anime ones, the SEARCH intent is manga.
+    pub kind: BrowseKind,
 }
 
 thread_local! {
@@ -83,8 +85,8 @@ mod tests {
 
     #[test]
     fn a_parked_intent_is_handed_out_once() {
-        park_intent(SearchIntent { query: "one".into(), extension: Some("eu.a".into()) });
-        assert_eq!(take_intent(), Some(SearchIntent { query: "one".into(), extension: Some("eu.a".into()) }));
+        park_intent(SearchIntent { query: "one".into(), extension: Some("eu.a".into()), kind: BrowseKind::Manga });
+        assert_eq!(take_intent(), Some(SearchIntent { query: "one".into(), extension: Some("eu.a".into()), kind: BrowseKind::Manga }));
         assert_eq!(take_intent(), None);
     }
 }

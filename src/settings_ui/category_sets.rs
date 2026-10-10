@@ -11,6 +11,7 @@ use kuro_prefs::checkbox::TriState;
 use kuro_prefs::pref::Pref;
 
 use crate::pref_model::bind;
+use crate::pref_model::strings;
 use crate::pref_model::model::{ItemCommon, PreferenceItem};
 use crate::pref_model::widgets::dialog;
 use crate::settings_ui::category::{self, Category};
@@ -53,6 +54,19 @@ pub fn split(states: &BTreeMap<i32, TriState<()>>) -> (BTreeSet<String>, BTreeSe
     (include, exclude)
 }
 
+/// The accessible name of a tri-state box: the word for its state, so a screen reader says which one it is (T-47ba-051).
+pub fn state_label(state: &TriState<()>) -> &'static str {
+    match state {
+        TriState::None(()) => strings::NOT_INCLUDED,
+        TriState::Include(()) => strings::INCLUDED,
+        TriState::Exclude(()) => strings::EXCLUDED,
+    }
+}
+
+fn name_state(button: &gtk::CheckButton, state: &TriState<()>) {
+    button.update_property(&[gtk::accessible::Property::Label(state_label(state))]);
+}
+
 /// The action row that shows the include and exclude label of a rule and opens the tri-state dialog. `enabled` is the
 /// rule's enable input (the switch above it), so a row whose rule is off is hidden with it.
 pub fn categories_row(title: &str, sets: &CategorySets, categories: &[Category], message: &'static str, enabled: bool) -> PreferenceItem {
@@ -82,11 +96,18 @@ pub fn open_dialog(title: &str, message: &str, sets: &CategorySets, categories: 
         let id = category.id;
         let initial = state_of(id, &include, &exclude);
         let recorded = Rc::clone(&states);
-        let check = crate::tri_check::tri_check(initial, move |next| {
-            recorded.borrow_mut().insert(id, next);
+        let button: Rc<RefCell<Option<gtk::CheckButton>>> = Rc::new(RefCell::new(None));
+        let named = Rc::clone(&button);
+        let check = crate::tri_check::tri_check(initial.clone(), move |next| {
+            recorded.borrow_mut().insert(id, next.clone());
+            if let Some(button) = named.borrow().as_ref() {
+                name_state(button, &next);
+            }
         });
         check.widget().set_label(Some(&category.name));
+        name_state(check.widget(), &initial);
         column.append(check.widget());
+        *button.borrow_mut() = Some(check.widget().clone());
         checks.push(check);
     }
     let sets = sets.clone();
@@ -148,6 +169,12 @@ mod tests {
             seen.push(state.clone());
         }
         assert_eq!(seen, [TriState::Include(()), TriState::Exclude(()), TriState::None(()), TriState::Include(())]);
+    }
+
+    #[test]
+    fn each_tri_state_has_its_own_accessible_name() {
+        let names = [TriState::None(()), TriState::Include(()), TriState::Exclude(())].map(|s| state_label(&s));
+        assert_eq!(names, ["Not included", "Included", "Excluded"]);
     }
 
     #[test]

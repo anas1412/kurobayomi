@@ -20,6 +20,7 @@ use kuro_i18n::{tr, MsgKey};
 use crate::app_update;
 use crate::pref_model::debug_info::{app_rows, device_rows, model_text, version_text};
 use crate::pref_model::model::{Preference, PreferenceItem};
+use crate::settings_ui::changelog;
 use crate::settings_ui::clipboard::copy_to_clipboard;
 use crate::settings_ui::rows::{item, tap_item, text, TapRow};
 
@@ -134,25 +135,89 @@ fn run_check(done: impl FnOnce(Result<Outcome, ReleaseError>) + 'static) {
     });
 }
 
-/// "New version available!" with the notes, and Open on GitHub or Not now. There is no in-place install.
-fn show_update(release: &Release) {
-    let dialog = gtk::AlertDialog::builder()
-        .message(format!("{} {}", tr(MsgKey::update_check_notification_update_available), release.version))
-        .detail(&release.info)
-        .buttons([tr(MsgKey::update_check_open), tr(MsgKey::action_not_now)])
-        .cancel_button(1)
-        .default_button(0)
-        .build();
-    let link = release.release_link.clone();
-    dialog.choose(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, move |choice| {
-        if choice == Ok(0) {
-            gtk::UriLauncher::new(&link).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-                if let Err(e) = result {
-                    tracing::warn!(error = %e, "could not open the release page");
-                }
-            });
+/// Opens `url` with the desktop's handler; `failed` runs when it cannot be opened.
+fn launch(url: &str, failed: impl FnOnce() + 'static) {
+    gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, move |result| {
+        if let Err(e) = result {
+            tracing::warn!(error = %e, "could not open the link");
+            failed();
         }
     });
+}
+
+/// The update page (T-47ba-030, ui-parity 3.5): a 48 px icon, the heading, the version, the notes in a scrolling body
+/// and the pinned Download and Not now buttons. Enter is Download, Escape is Not now.
+///
+/// Decision (T-47ba-032): there is no in-place install (T-35a-056 drops it). Download opens the release's file link
+/// with the desktop's handler and closes the page; the button is disabled on the first click. Offline, the handler
+/// fails and a toast says so.
+fn show_update(release: &Release) {
+    let window = gtk::Window::builder()
+        .transient_for(&crate::ui::window())
+        .modal(true)
+        .default_width(520)
+        .default_height(560)
+        .title(tr(MsgKey::update_check_notification_update_available))
+        .build();
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    column.set_margin_top(24);
+    column.set_margin_bottom(16);
+    column.set_margin_start(24);
+    column.set_margin_end(24);
+    let icon = gtk::Image::builder().icon_name("software-update-available-symbolic").pixel_size(48).halign(gtk::Align::Center).build();
+    icon.set_accessible_role(gtk::AccessibleRole::Presentation);
+    column.append(&icon);
+    column.append(&gtk::Label::builder().label(tr(MsgKey::update_check_notification_update_available)).css_classes(["title-1"]).build());
+    column.append(&gtk::Label::builder().label(&release.version).css_classes(["dim-label"]).build());
+
+    let notes = gtk::Label::builder().use_markup(true).wrap(true).xalign(0.0).yalign(0.0).selectable(true).build();
+    notes.set_markup(&changelog::to_pango(&release.info));
+    notes.connect_activate_link(|_, url| {
+        launch(url, || {});
+        gtk::glib::Propagation::Stop
+    });
+    let scroll = gtk::ScrolledWindow::builder().child(&notes).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+    column.append(&scroll);
+
+    if changelog::link_visible(&release.release_link) {
+        let open = gtk::Button::builder().label(tr(MsgKey::update_check_open)).icon_name("web-browser-symbolic").halign(gtk::Align::Start).build();
+        open.add_css_class("flat");
+        let link = release.release_link.clone();
+        open.connect_clicked(move |_| launch(&link, || {}));
+        column.append(&open);
+    }
+
+    let download = gtk::Button::builder().label(tr(MsgKey::update_check_confirm)).css_classes(["suggested-action"]).build();
+    let not_now = gtk::Button::with_label(&tr(MsgKey::action_not_now));
+    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    buttons.set_halign(gtk::Align::End);
+    buttons.append(&download);
+    buttons.append(&not_now);
+    column.append(&buttons);
+    window.set_child(Some(&column));
+    window.set_default_widget(Some(&download));
+
+    let file = release.download_link.clone();
+    let closing = window.clone();
+    download.connect_clicked(move |button| {
+        button.set_sensitive(false);
+        launch(&file, || crate::toast::notify(tr(MsgKey::update_check_notification_download_error)));
+        closing.close();
+    });
+    let closing = window.clone();
+    not_now.connect_clicked(move |_| closing.close());
+    let keys = gtk::EventControllerKey::new();
+    let closing = window.clone();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk::gdk::Key::Escape {
+            closing.close();
+            gtk::glib::Propagation::Stop
+        } else {
+            gtk::glib::Propagation::Proceed
+        }
+    });
+    window.add_controller(keys);
+    window.present();
 }
 
 /// A tap on the row: starts a check unless one runs, shows the spinner meanwhile, then the report.

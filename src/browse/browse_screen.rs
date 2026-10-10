@@ -114,6 +114,7 @@ pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery, incognit
             migrate: Rc::clone(&env.migrate),
             now_ms: Rc::clone(&env.now_ms),
             edit_categories: Rc::clone(&env.edit_categories),
+            anime: false,
         }),
         hide_in_library: env.prefs.hide_in_library(),
         initial_query: query,

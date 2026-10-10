@@ -301,6 +301,34 @@ mod tests {
         assert!(!listing.wants_more(30), "the listing has ended");
     }
 
+    /// T-40b-085 `browse_loader_demand_driven`: a fake paged source that records the pages asked for. Page 1 is asked when
+    /// the listing opens; each later page only when the viewer scrolls near the end, and never twice at once.
+    #[test]
+    fn browse_loader_demand_driven() {
+        fn serve(listing: &mut Listing, asked: &mut Vec<u32>) {
+            let ask = listing.ask().expect("a page is due");
+            asked.push(ask.page);
+            let titles: Vec<String> = (0..30).map(|i| format!("p{}-{i}", ask.page)).collect();
+            let refs: Vec<&str> = titles.iter().map(String::as_str).collect();
+            listing.deliver(ask.generation, page(&refs, ask.page < 5));
+        }
+        let (mut listing, mut asked) = (Listing::new(BrowseQuery::Popular), Vec::new());
+        serve(&mut listing, &mut asked);
+        for top in [0, 3, 4] {
+            assert!(!listing.wants_more(top), "near the top nothing more is asked for");
+        }
+        assert_eq!(asked, [1], "no eager fetch of page 2");
+        assert!(listing.wants_more(10), "scrolling to the last 25 cells asks for page 2");
+        serve(&mut listing, &mut asked);
+        assert_eq!(asked, [1, 2]);
+        assert!(!listing.wants_more(10), "with 60 items the same position is far from the end again");
+        assert!(listing.wants_more(40));
+        let in_flight = listing.ask().expect("page 3");
+        assert_eq!(in_flight.page, 3);
+        assert!(!listing.wants_more(59), "a request in flight blocks a second one");
+        assert_eq!(asked.len(), 2, "pages 4 and 5 were never asked for");
+    }
+
     #[test]
     fn an_empty_first_page_is_an_error_with_no_results_found_and_a_stub_never_lists() {
         let mut listing = Listing::new(BrowseQuery::Popular);

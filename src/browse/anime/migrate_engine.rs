@@ -3,6 +3,9 @@
 //! episode, category and track writes and the two favourite flips run in one transaction. The download delete and the
 //! custom cover and background copies run after the commit, so a failed transaction leaves the files alone.
 //!
+//! Decision (T-41a-034): the favourite flips stay inside the transaction, ahead of the file steps. The acceptance asks for
+//! one transaction with rollback and file work only after the commit, which cannot also keep the Kotlin order of the flips.
+//!
 //! Deviations from the Kotlin order, all forced by the acceptance: the file steps (5, 7, 8) run after the commit, so they
 //! come after the favourite flips (6, 9), which sit inside the transaction. A file step that fails after the commit is a
 //! warning, as in the manga engine. `last_second_seen` and `fillermark` are copied with the matched episode (E20).
@@ -23,6 +26,17 @@ pub enum AnimeMigrateError {
     FetchEpisodes(String),
     /// A database step failed: the transaction rolled back.
     Step(String),
+}
+
+impl std::fmt::Display for AnimeMigrateError {
+    /// The reason the dialog shows after "Migration failed: ".
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AnimeMigrateError::NewSourceMissing => f.write_str("the source of the new anime is not installed"),
+            AnimeMigrateError::FetchEpisodes(reason) => write!(f, "the episodes could not be fetched ({reason})"),
+            AnimeMigrateError::Step(reason) => f.write_str(reason),
+        }
+    }
 }
 
 /// What a finished migration reports besides success.
@@ -371,6 +385,13 @@ mod tests {
         let fake = Fake { fetch_fails: Some("offline".to_owned()), ..Fake::new() };
         assert_eq!(run(&fake, true, i32::MAX), Err(AnimeMigrateError::FetchEpisodes("offline".to_owned())));
         assert_eq!(fake.lines(), ["fetch"], "nothing was written");
+    }
+
+    #[test]
+    fn each_error_has_the_reason_the_dialog_shows() {
+        assert_eq!(AnimeMigrateError::NewSourceMissing.to_string(), "the source of the new anime is not installed");
+        assert_eq!(AnimeMigrateError::FetchEpisodes("timeout".into()).to_string(), "the episodes could not be fetched (timeout)");
+        assert_eq!(AnimeMigrateError::Step("disk full".into()).to_string(), "disk full");
     }
 
     #[test]

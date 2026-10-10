@@ -103,6 +103,7 @@ pub fn source_page(env: &AnimeEnv, source_id: i64, query: BrowseQuery) -> Source
             migrate: Rc::clone(&env.migrate),
             now_ms: Rc::clone(&env.now_ms),
             edit_categories: Rc::clone(&env.edit_categories),
+            anime: true,
         }),
         on_back: Rc::clone(&env.on_back),
         open_webview: Rc::clone(&env.open_webview),

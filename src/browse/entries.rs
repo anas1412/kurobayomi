@@ -204,6 +204,46 @@ mod tests {
     use super::fake::FakeStore;
     use super::*;
 
+    /// T-40b-085 `add_favorite_sequence`: the category links first, the favourite second, the default flags and the
+    /// tracker bindings (`after_add`) last. The Kotlin order puts the flags before the favourite; here they follow it so
+    /// a failed favourite write never leaves flags behind (D-FAV-01 decision).
+    #[test]
+    fn add_favorite_sequence() {
+        let store = FakeStore::default();
+        *store.default_category.lock().expect("lock") = 0;
+        assert_eq!(add_entry(&store, 7, 1_000), AddOutcome::Added { category_error: None });
+        assert_eq!(store.calls(), ["categories 7 []", "favorite 7 true 1000"], "links, then the favourite");
+        assert_eq!(*store.added.lock().expect("lock"), [7], "the flags and trackers step ran once, after the favourite");
+    }
+
+    /// T-40b-085 `remove_favorite_clears_cover_flag`: two cover files went, so `cover_last_modified` is stamped.
+    #[test]
+    fn remove_favorite_clears_cover_flag() {
+        let store = FakeStore::default();
+        *store.covers.lock().expect("lock") = 2;
+        assert_eq!(remove_entry(&store, 7, 5_000), Ok(()));
+        assert_eq!(store.calls(), ["favorite 7 false 0", "clear_cover 7", "stamp 7 5000"]);
+        let none = FakeStore::default();
+        assert_eq!(remove_entry(&none, 7, 5_000), Ok(()));
+        assert_eq!(none.calls(), ["favorite 7 false 0", "clear_cover 7"], "no file deleted: no stamp");
+    }
+
+    /// T-40b-085 `favorite_write_failure_rolls_back`: the favourite write fails, the flag the view flipped is put back
+    /// and the toast is `internal_error` (D-FAV-02); nothing after the write runs.
+    #[test]
+    fn favorite_write_failure_rolls_back() {
+        let store = FakeStore::default();
+        store.fail.lock().expect("lock").push("write_favorite");
+        let mut view = crate::browse::favorite::OptimisticFavorite::start(false);
+        assert!(view.shown(), "the view flips at once");
+        let outcome = add_entry(&store, 7, 1_000);
+        assert_eq!(outcome, AddOutcome::Failed("write_favorite failed".to_owned()));
+        let toast = view.fail();
+        assert!(!view.shown(), "the row flag is restored");
+        assert_eq!(toast.message, kuro_i18n::tr(kuro_i18n::MsgKey::internal_error));
+        assert!(store.added.lock().expect("lock").is_empty(), "no defaults or tracker bindings for an entry that was not added");
+    }
+
     #[test]
     fn a_default_category_adds_with_the_categories_before_the_favourite() {
         let store = FakeStore::default();

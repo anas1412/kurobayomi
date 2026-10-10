@@ -29,8 +29,8 @@ pub fn rows(about: &str) -> Vec<MenuRow> {
         row("Tracking", "One-way progress sync, enhanced sync", "emblem-synchronizing-symbolic", "settings_tracking"),
         row("Browse", "Sources, extensions, global search", "compass-symbolic", "settings_browse"),
         row("Data and storage", "Manual & automatic backups, storage space", "drive-harddisk-symbolic", "settings_data_storage"),
-        row("Security and privacy", "App lock, secure screen", "security-high-symbolic", "settings_security"),
-        row("Advanced", "Dump crash logs, battery optimizations", "utilities-terminal-symbolic", "settings_advanced"),
+        row("Security and privacy", "App lock", "security-high-symbolic", "settings_security"),
+        row("Advanced", "Dump crash logs", "utilities-terminal-symbolic", "settings_advanced"),
         row("About", about, "help-about-symbolic", "settings_about"),
     ]
 }

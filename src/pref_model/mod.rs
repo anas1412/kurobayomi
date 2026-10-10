@@ -8,6 +8,7 @@
 pub mod backup_pages;
 pub mod bind;
 pub mod debug_info;
+pub mod enabled;
 pub mod highlight;
 pub mod language;
 pub mod model;
@@ -16,6 +17,7 @@ pub mod more;
 pub mod onboarding;
 pub mod page;
 pub mod pages;
+pub mod queue_state;
 pub mod render;
 pub mod router;
 pub mod shell;

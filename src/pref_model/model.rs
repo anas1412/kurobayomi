@@ -37,6 +37,8 @@ pub struct ItemCommon {
     pub subtitle: Option<String>,
     /// GTK symbolic icon name, `None` for no icon.
     pub icon: Option<&'static str>,
+    /// A live flag that overrides `enabled` after the build; flipping it slides the row in or makes it insensitive.
+    pub enabled_flag: Option<super::enabled::EnabledFlag>,
 }
 
 /// Default subtitle template for bound lists and edit fields.
@@ -45,7 +47,7 @@ pub const BOUND_SUBTITLE: &str = "%s";
 impl ItemCommon {
     /// Static row: no subtitle, no icon, enabled.
     pub fn new(title: impl Into<String>) -> Self {
-        Self { title: title.into(), enabled: true, subtitle: None, icon: None }
+        Self { title: title.into(), enabled: true, subtitle: None, icon: None, enabled_flag: None }
     }
 
     /// Bound row: subtitle template `%s` (list, multi-select and edit fields).
@@ -65,6 +67,13 @@ impl ItemCommon {
 
     pub fn disabled(mut self) -> Self {
         self.enabled = false;
+        self
+    }
+
+    /// Binds the row's enabled state to `flag` (its current value is the initial state).
+    pub fn with_enabled_flag(mut self, flag: super::enabled::EnabledFlag) -> Self {
+        self.enabled = flag.get();
+        self.enabled_flag = Some(flag);
         self
     }
 
@@ -89,7 +98,7 @@ pub enum PreferenceItem {
                validate: Rc<dyn Fn(&str) -> bool>, error_message: Option<Rc<dyn Fn(&str) -> String>>, veto: Veto<String> },
     MultiLineEdit { common: ItemCommon, pref: Pref<String>, can_be_blank: bool, veto: Veto<String> },
     MpvConf { common: ItemCommon, pref: Pref<String>, file_name: Option<String>, can_be_blank: bool, veto: Veto<String> },
-    EditTextInfo { common: ItemCommon, pref: Pref<String>, dialog_subtitle: Option<String>,
+    EditTextInfo { common: ItemCommon, pref: Pref<String>, dialog_subtitle: Option<String>, can_be_blank: bool,
                    validate: Rc<dyn Fn(&str) -> bool>, error_message: Option<Rc<dyn Fn(&str) -> String>>, veto: Veto<String> },
     Tracker { name: String, logged_in: bool, on_login: Rc<dyn Fn()>, on_logout: Rc<dyn Fn()> },
     Info { text: String, enabled: bool },
@@ -167,6 +176,23 @@ impl PreferenceItem {
             Self::Tracker { name, .. } => name,
             Self::Info { text, .. } => text,
             Self::Custom { title, .. } => title,
+        }
+    }
+
+    /// The live enabled flag, when the item has one.
+    pub fn enabled_flag(&self) -> Option<&super::enabled::EnabledFlag> {
+        match self {
+            Self::Text { common, .. }
+            | Self::Switch { common, .. }
+            | Self::Slider { common, .. }
+            | Self::List { common, .. }
+            | Self::BasicList { common, .. }
+            | Self::MultiSelect { common, .. }
+            | Self::EditText { common, .. }
+            | Self::MultiLineEdit { common, .. }
+            | Self::MpvConf { common, .. }
+            | Self::EditTextInfo { common, .. } => common.enabled_flag.as_ref(),
+            Self::Tracker { .. } | Self::Info { .. } | Self::Custom { .. } => None,
         }
     }
 

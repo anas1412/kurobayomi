@@ -1,6 +1,6 @@
 //! Internal player page rows: progress and preserve position (T-48a-015), Controls and Hosters (T-48a-013) and the
 //! Display group (T-48a-014), the Intro skip group (T-48a-016) and the External player group (T-48a-018). The PiP group
-//! (T-48a-017) is not built.
+//! (T-48a-017) is the mini player group, shown only when the display probe reports support.
 #![allow(dead_code)]
 use kuro_prefs::pref::Pref;
 use kuro_prefs::prefs::Prefs;
@@ -50,13 +50,40 @@ pub fn progress_row(pref: &Pref<f32>) -> PreferenceItem {
     }
 }
 
+/// What the display lets the mini player do (T-48a-017).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MiniPlayerSupport {
+    /// An X11 display: the small window can be forced on top (mpv `ontop`).
+    AlwaysOnTop,
+    /// A Wayland compositor: the small window is shown but cannot be forced on top (no protocol for it).
+    Windowed,
+}
+
+/// The support a display of GDK type `display_type` gives. `None` for any other (or no) display: the group is hidden.
+pub fn mini_player_support(display_type: Option<&str>) -> Option<MiniPlayerSupport> {
+    match display_type? {
+        "GdkX11Display" => Some(MiniPlayerSupport::AlwaysOnTop),
+        "GdkWaylandDisplay" => Some(MiniPlayerSupport::Windowed),
+        _ => None,
+    }
+}
+
+/// The probe on the running display. Before GTK is up there is no display, so the answer is `None`.
+pub fn probe_mini_player() -> Option<MiniPlayerSupport> {
+    if !gtk::is_initialized_main_thread() {
+        return None;
+    }
+    let display = gtk::gdk::Display::default()?;
+    mini_player_support(Some(gtk::glib::prelude::ObjectExt::type_(&display).name()))
+}
+
 /// The internal player page: the progress and controls rows, then Mini player, Intro skip and External player (T-45a-047: the Android PiP is dropped, its four settings stay under the mini player label).
 pub fn internal_rows(prefs: &Prefs) -> Vec<Preference> {
     let p = &prefs.player;
     let hide_times = hide_time_options();
     let hide_options: Vec<(i32, &str)> = hide_times.iter().map(|(code, label)| (*code, label.as_str())).collect();
     let opacity = format!("{}%", p.panel_opacity.get());
-    vec![
+    let mut rows = vec![
         item(progress_row(&p.progress_preference)),
         item(switch("Preserve watch position on seen episodes", &p.preserve_watching_position, true)),
         group(
@@ -66,16 +93,6 @@ pub fn internal_rows(prefs: &Prefs) -> Vec<Preference> {
                 switch("Show loading circle", &p.show_loading_circle, true),
                 switch_sub("Show current chapter indicator", "Only appears if the video has chapters", &p.show_current_chapter, true),
                 switch("Remember and switch to the last used brightness", &p.remember_player_brightness, true),
-                switch("Remember and switch to the last used volume", &p.remember_player_volume, true),
-            ],
-        ),
-        group(
-            "Mini player",
-            vec![
-                switch("Enable mini player", &p.enable_pip, true),
-                switch("Open mini player on exit", &p.pip_on_exit, true),
-                switch("Show mini player episode change toasts", &p.pip_episode_toasts, true),
-                switch("Switch next to previous in mini player", &p.pip_replace_with_previous, true),
             ],
         ),
         group(
@@ -98,7 +115,26 @@ pub fn internal_rows(prefs: &Prefs) -> Vec<Preference> {
         ),
         intro_skip_group(prefs),
         external::group_row(prefs),
-    ]
+    ];
+    // the stored mini player prefs stay as they are when the group is hidden
+    if probe_mini_player().is_some() {
+        rows.insert(3, mini_player_group(prefs));
+    }
+    rows
+}
+
+/// The Mini player group (the PiP prefs under their desktop label).
+pub fn mini_player_group(prefs: &Prefs) -> Preference {
+    let p = &prefs.player;
+    group(
+        "Mini player",
+        vec![
+            switch("Enable mini player", &p.enable_pip, true),
+            switch("Open mini player on exit", &p.pip_on_exit, true),
+            switch("Show mini player episode change toasts", &p.pip_episode_toasts, true),
+            switch("Switch next to previous in mini player", &p.pip_replace_with_previous, true),
+        ],
+    )
 }
 
 /// The timeouts of the intro skip button, in seconds (`pref_waiting_time_aniskip`, entries 5..10).
@@ -152,6 +188,40 @@ pub fn info_row() -> PreferenceItem {
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_mini_player_probe_follows_the_display_type() {
+        assert_eq!(mini_player_support(Some("GdkX11Display")), Some(MiniPlayerSupport::AlwaysOnTop));
+        assert_eq!(mini_player_support(Some("GdkWaylandDisplay")), Some(MiniPlayerSupport::Windowed));
+        assert_eq!(mini_player_support(Some("GdkBroadwayDisplay")), None);
+        assert_eq!(mini_player_support(None), None);
+    }
+
+    #[test]
+    fn without_a_display_the_mini_player_group_is_hidden() {
+        let prefs = Prefs::in_memory();
+        let titles: Vec<String> = internal_rows(&prefs)
+            .iter()
+            .filter_map(|entry| match entry {
+                Preference::Group(g) => Some(g.title.clone()),
+                Preference::Item(_) => None,
+            })
+            .collect();
+        if probe_mini_player().is_none() {
+            assert!(!titles.iter().any(|t| t == "Mini player"), "{titles:?}");
+        }
+        assert!(titles.iter().any(|t| t == "Hosters"));
+    }
+
+    /// The group called `title`; the mini player group comes and goes with the display, so no test counts positions.
+    fn group_titled<'a>(tree: &'a [Preference], title: &str) -> &'a crate::pref_model::model::PreferenceGroup {
+        tree.iter()
+            .find_map(|entry| match entry {
+                Preference::Group(g) if g.title == title => Some(g),
+                _ => None,
+            })
+            .expect("the group")
+    }
+
     fn common_of(row: &PreferenceItem) -> &ItemCommon {
         match row {
             PreferenceItem::Switch { common, .. }
@@ -203,15 +273,12 @@ mod tests {
             _ => panic!("group"),
         };
         assert_eq!(controls.title, "Controls");
-        assert_eq!(controls.items.len(), 5);
+        assert_eq!(controls.items.len(), 4);
         assert!(!prefs.player.allow_gestures.get());
         assert!(prefs.player.show_loading_circle.get());
         let subtitle = common_of(&controls.items[2]).subtitle.as_deref();
         assert_eq!(subtitle, Some("Only appears if the video has chapters"));
-        let hosters = match &tree[4] {
-            Preference::Group(g) => g,
-            _ => panic!("group"),
-        };
+        let hosters = group_titled(&tree, "Hosters");
         assert_eq!(hosters.items.len(), 2);
         assert!(!prefs.player.show_failed_hosters.get() && !prefs.player.show_empty_hosters.get());
     }
@@ -220,13 +287,22 @@ mod tests {
     fn display_group_has_no_cutout_or_status_bar_rows_and_shows_the_opacity() {
         let prefs = Prefs::in_memory();
         let tree = internal_rows(&prefs);
-        let Preference::Group(display) = &tree[5] else { panic!("group") };
+        let display = group_titled(&tree, "Display");
         let titles: Vec<&str> = display.items.iter().map(|i| i.title()).collect();
         assert_eq!(titles.len(), 6);
         assert!(!titles.iter().any(|t| t.contains("status bar") || t.contains("cutout")));
         let PreferenceItem::Slider { common, value, .. } = &display.items[5] else { panic!("slider") };
         assert_eq!(*value, 60);
         assert_eq!(common.subtitle.as_deref(), Some("60%"));
+    }
+
+    #[test]
+    fn the_volume_memory_switch_is_not_shown_on_desktop() {
+        let prefs = Prefs::in_memory();
+        let tree = internal_rows(&prefs);
+        let Preference::Group(controls) = &tree[2] else { panic!("group") };
+        assert!(!controls.items.iter().any(|i| i.title().contains("last used volume")));
+        assert!(controls.items.iter().any(|i| i.title().contains("last used brightness")));
     }
 
     #[test]

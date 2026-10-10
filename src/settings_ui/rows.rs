@@ -98,7 +98,7 @@ pub fn tap_item(
 
 /// A tracker logo (bundled PNG or SVG bytes) as a 24 px picture, or `None` when the bytes cannot be decoded (the row
 /// then shows no logo).
-fn logo_image(bytes: &'static [u8]) -> Option<gtk::Image> {
+pub(crate) fn logo_image(bytes: &'static [u8]) -> Option<gtk::Image> {
     use gtk::prelude::*;
     let texture = gtk::gdk::Texture::from_bytes(&gtk::glib::Bytes::from_static(bytes)).ok()?;
     let image = gtk::Image::from_paintable(Some(&texture));

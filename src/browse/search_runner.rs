@@ -416,6 +416,77 @@ mod tests {
         });
     }
 
+    /// Answers at once with a result, except the source 3, which fails.
+    struct OneFails;
+
+    impl PageLoader for OneFails {
+        fn load(&self, _query: BrowseQuery, _filters: FilterList, _page: u32) -> LoadFuture {
+            Box::pin(async { Err("source 3 is down".to_owned()) })
+        }
+    }
+
+    struct Quick;
+
+    impl PageLoader for Quick {
+        fn load(&self, _query: BrowseQuery, _filters: FilterList, _page: u32) -> LoadFuture {
+            Box::pin(async { Ok(ListedPage { items: vec![ListItem { id: 5, title: "found".into(), ..ListItem::default() }], has_next: false }) })
+        }
+    }
+
+    /// T-40b-085 `global_search_five_sources_one_fails`: the other four rows have results, the failing one is an
+    /// error row, and the progress reaches the total.
+    #[test]
+    fn global_search_five_sources_one_fails() {
+        with_loop(|context| {
+            let loaders: Loaders = Arc::new(|id| Some(if id == 3 { Arc::new(OneFails) as Arc<dyn PageLoader> } else { Arc::new(Quick) }));
+            let engine = GlobalSearch::new(candidates(5), ["en".to_owned()].into(), BTreeSet::new(), None, false);
+            let hooks = RunnerHooks { changed: Rc::new(|_| {}), open_entry: Rc::new(|_| {}) };
+            let runner = SearchRunner::new(engine, loaders, hooks);
+            runner.submit("one");
+            assert!(pump(context, || runner.snapshot().answered == 5), "an error counts as an answer");
+            let snapshot = runner.snapshot();
+            assert_eq!((snapshot.answered, snapshot.total), (5, 5), "progress = total");
+            let errors: Vec<i64> = snapshot.rows.iter().filter(|row| matches!(row.state, SearchState::Error(_))).map(|row| row.source.id).collect();
+            assert_eq!(errors, [3], "only the failing source is an error row");
+            assert_eq!(snapshot.rows.iter().filter(|row| matches!(&row.state, SearchState::Results(items) if items.len() == 1)).count(), 4);
+        });
+    }
+
+    /// T-40b-085 `global_search_semaphore_limits_to_5`: eight sources that wait, never more than five in flight, and
+    /// five really do run at once.
+    #[test]
+    fn global_search_semaphore_limits_to_5() {
+        with_loop(|context| {
+            let rig = rig(8);
+            rig.runner.submit("one");
+            assert!(pump(context, || rig.started.load(Ordering::SeqCst) == 5));
+            let _ = pump(context, || false);
+            rig.gate.add_permits(8);
+            assert!(pump(context, || rig.runner.snapshot().answered == 8));
+            assert_eq!(rig.peak.load(Ordering::SeqCst), 5, "max in-flight = 5");
+        });
+    }
+
+    /// T-40b-085 `global_search_abort_on_new_query`: a new query aborts the blocked old requests, and nothing of the old
+    /// query is shown afterwards.
+    #[test]
+    fn global_search_abort_on_new_query() {
+        with_loop(|context| {
+            let rig = rig(2);
+            rig.runner.submit("old");
+            assert!(pump(context, || rig.live.load(Ordering::SeqCst) == 2));
+            let before = rig.snapshots.borrow().len();
+            rig.runner.submit("new");
+            assert!(pump(context, || rig.live.load(Ordering::SeqCst) == 2 && rig.started.load(Ordering::SeqCst) == 4), "the old two were dropped, the new two run");
+            rig.gate.add_permits(4);
+            assert!(pump(context, || rig.runner.snapshot().answered == 2));
+            let _ = pump(context, || false);
+            let late: Vec<_> = rig.snapshots.borrow().iter().skip(before).filter(|s| s.query == "old" && s.answered > 0).cloned().collect();
+            assert!(late.is_empty(), "no result of the old query is applied after the new one was asked");
+            assert_eq!(rig.runner.snapshot().query, "new");
+        });
+    }
+
     #[test]
     fn two_search_screens_share_one_gate_of_five_fetches() {
         with_loop(|context| {

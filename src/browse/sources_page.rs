@@ -340,6 +340,28 @@ pub(crate) mod tests {
         assert!(texts.iter().any(|t| t == "English") && texts.iter().any(|t| *t == crate::browse::names::localized_display_name("ja")), "{texts:?}");
     }
 
+    /// T-40b-085 `pre_init_sources_spinner`: a registry that is not initialised keeps the list loading, however many
+    /// snapshots arrive, until it says it is ready (D-SS-01).
+    fn pre_init_sources_spinner() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let (tx, rx) = watch::channel(false);
+        let page = SourcesPage::new(nav(&log), rx);
+        for _ in 0..3 {
+            page.update(snapshot());
+            let context = gtk::glib::MainContext::default();
+            while context.iteration(false) {}
+            assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("spinner"), "still loading before initialisation");
+        }
+        assert!(page.inner.column.first_child().is_none(), "no row is drawn before the registry is ready");
+        tx.send_replace(true);
+        let context = gtk::glib::MainContext::default();
+        let start = std::time::Instant::now();
+        while page.inner.stack.visible_child_name().as_deref() != Some("list") && start.elapsed().as_secs() < 2 {
+            while context.iteration(false) {}
+        }
+        assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("list"));
+    }
+
     fn latest_shows_only_for_sources_that_support_it_and_pin_buttons_are_named() {
         let log = Rc::new(RefCell::new(Vec::new()));
         let (_tx, rx) = watch::channel(true);
@@ -443,6 +465,7 @@ pub(crate) mod tests {
 
     pub(crate) fn smoke() {
         the_page_waits_for_the_registry_then_lists_headers_and_rows();
+        pre_init_sources_spinner();
         latest_shows_only_for_sources_that_support_it_and_pin_buttons_are_named();
         long_press_opens_the_options_popover_titled_with_the_visual_name_and_a_choice_applies();
         a_stub_row_says_not_installed_in_the_error_colour();

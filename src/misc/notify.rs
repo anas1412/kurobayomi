@@ -222,10 +222,6 @@ pub fn post(post: Post) -> bool {
     send(Op::Show(post))
 }
 
-/// Sends the steps in order. `false` as soon as one step is refused, so later steps are not sent after a gap.
-pub fn send_all(ops: impl IntoIterator<Item = Op>) -> bool {
-    ops.into_iter().all(send)
-}
 
 fn show(app: &gio::Application, post: &Post) {
     let notification = gio::Notification::new(&post.title);

@@ -3,8 +3,10 @@
 use gtk::prelude::*;
 use gtk::{Image, ListBoxRow};
 
-use super::model::{mpv_subtitle, PreferenceItem};
+use super::model::PreferenceItem;
 use super::strings;
+use super::widgets::dialog;
+use crate::settings_ui::player::conf_edit;
 use super::widgets::{info, list, multi_select, edit_text, row, slider, switch, text, TRACKER_CHECK_SIZE};
 
 /// The row for one item, or `None` when the item renders nothing (a blank info block).
@@ -36,10 +38,27 @@ pub fn item_row(item: &PreferenceItem) -> Option<ListBoxRow> {
             )
             .row
         }
-        // Multi-line and MPV editors are not wired yet (task T-47ba-044). Shown read-only meanwhile.
-        PreferenceItem::MultiLineEdit { common, pref, .. } => read_only(&common.title, &pref.get()),
-        PreferenceItem::MpvConf { common, pref, .. } => read_only(&common.title, &mpv_subtitle(&pref.get())),
-        PreferenceItem::EditTextInfo { common, pref, .. } => read_only(&common.title, &pref.get()),
+        // The MPV config row is the conf editor (T-47ba-044): two lines of subtitle, a multi-line dialog, veto-gated.
+        PreferenceItem::MpvConf { common, pref, can_be_blank, .. } => {
+            let editor = conf_edit::conf_row(&common.title, pref, *can_be_blank);
+            return item_row(&editor);
+        }
+        PreferenceItem::MultiLineEdit { common, pref, can_be_blank, .. } => {
+            let editor = conf_edit::multi_line_row(&common.title, pref, *can_be_blank);
+            return item_row(&editor);
+        }
+        PreferenceItem::EditTextInfo { common, pref, dialog_subtitle, can_be_blank, validate, error_message, veto } => {
+            edit_text::row(
+                common,
+                pref.clone(),
+                dialog_subtitle.clone(),
+                *can_be_blank,
+                validate.clone(),
+                error_message.clone(),
+                veto.clone(),
+            )
+            .row
+        }
         PreferenceItem::Tracker { name, logged_in, on_login, on_logout } => {
             tracker_row(name, *logged_in, on_login.clone(), on_logout.clone())
         }
@@ -49,29 +68,60 @@ pub fn item_row(item: &PreferenceItem) -> Option<ListBoxRow> {
     Some(built)
 }
 
-fn read_only(title: &str, value: &str) -> ListBoxRow {
-    row::build(row::RowSpec { title, subtitle: Some(value), icon: None, trailing: None, on_click: None }).row
-}
-
 fn tracker_row(name: &str, logged_in: bool, on_login: std::rc::Rc<dyn Fn()>, on_logout: std::rc::Rc<dyn Fn()>) -> ListBoxRow {
     let check = logged_in.then(|| {
         let label = strings::logged_in();
         let image = Image::from_icon_name("object-select-symbolic");
         image.set_pixel_size(TRACKER_CHECK_SIZE);
         image.set_tooltip_text(Some(&label));
+        image.add_css_class("tracker-check");
         image.set_accessible_role(gtk::AccessibleRole::Img);
         image.update_property(&[gtk::accessible::Property::Label(&label)]);
         image
     });
     let trailing = check.as_ref().map(|image| image.clone().upcast::<gtk::Widget>());
+    super::style::install();
     let built = row::build(row::RowSpec {
         title: name,
         subtitle: None,
         icon: None,
         trailing: trailing.as_ref(),
-        on_click: Some(std::rc::Rc::new(move || if logged_in { on_logout() } else { on_login() })),
+        on_click: Some(std::rc::Rc::new({
+            let name = name.to_owned();
+            move || if logged_in { confirm_logout(&name, on_logout.clone()) } else { on_login() }
+        })),
     });
+    if let Some(logo) = tracker_logo(name) {
+        if let Some(content) = built.row.child().and_downcast::<gtk::Box>() {
+            content.prepend(&logo);
+        }
+    }
     built.row
+}
+
+/// The bundled logo of the login row named `name`, when one is bundled.
+fn tracker_logo(name: &str) -> Option<Image> {
+    let id = kuro_track::login_rows::LOGIN_ROWS.iter().find(|row| row.name == name)?.tracker;
+    match kuro_track::logo::logo_asset(id)? {
+        kuro_track::tracker::LogoRef::Embedded(bytes) => crate::settings_ui::rows::logo_image(bytes),
+        _ => None,
+    }
+}
+
+/// Logging out asks first (T-47ba-050, Proposal T-E42). The login stays until the user confirms.
+fn confirm_logout(name: &str, on_logout: std::rc::Rc<dyn Fn()>) {
+    let body = gtk::Label::builder().label(name).xalign(0.0).build();
+    dialog::show(
+        &crate::ui::window(),
+        strings::LOG_OUT_OF_TRACKER,
+        &body,
+        Some(&strings::ok()),
+        move |confirmed| {
+            on_logout();
+            confirmed.finish();
+        },
+        || {},
+    );
 }
 
 fn custom_row(widget: gtk::Widget) -> ListBoxRow {

@@ -40,6 +40,7 @@ rusqlite = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+sha2 = { workspace = true }
 fancy-regex = "0.19.2"
 jiff = "0.2.37"
 icu_datetime = "2.3.0"

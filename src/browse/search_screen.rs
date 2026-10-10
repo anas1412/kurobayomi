@@ -48,7 +48,7 @@ pub fn start_for(migrating: bool, migrate_manga: Option<(i64, String)>, intent: 
             MigrateStart::Ready { origin, title } => Start::Search { query: title, extension: None, origin: Some(origin) },
         };
     }
-    if let Some(SearchIntent { query, extension }) = intent {
+    if let Some(SearchIntent { query, extension, .. }) = intent {
         return Start::Search { query, extension, origin: None };
     }
     let query = match route {
@@ -246,11 +246,15 @@ fn production_env(kind: BrowseKind, migrate_from: Option<i64>) -> SearchEnv {
 /// A card of an anime migrate search: the dialog of what to include for moving `old` to the card's anime. Show anime and
 /// Show seasons open the card's page, where a seasons title lists its seasons. The options come from the old title (its
 /// custom cover and background) and start from the saved `anime_migrate_flags`, which every run stores before it starts.
-/// Copy and Migrate need the anime migration engine, which the app does not have yet, so they say that the operation
-/// failed instead of doing nothing.
+/// Copy and Migrate run the anime migration engine on the main context; a success pops the search and pushes the new
+/// entry, a failure shows its reason in the dialog.
 fn anime_migrate_dialog(repo: AnimeRepo, old: i64) -> Rc<dyn Fn(i64)> {
+    use super::anime::directory::AnimeDirectory;
     use super::anime::migrate_dialog::{Facts, MigrateHandlers, show};
+    use super::anime::migrate_engine::migrate_anime;
+    use super::anime::migrate_live::AnimeLiveSteps;
     use super::anime::prefs::AnimeBrowsePrefs;
+    use super::migrate_engine::MigratePlan;
     let slot = super::dialogs::DialogSlot::new();
     let prefs = Rc::new(AnimeBrowsePrefs::new(crate::data::app().base.store().clone()));
     Rc::new(move |new: i64| {
@@ -260,6 +264,9 @@ fn anime_migrate_dialog(repo: AnimeRepo, old: i64) -> Rc<dyn Fn(i64)> {
             return;
         };
         let (save, stored) = (Rc::clone(&prefs), Rc::clone(&prefs));
+        let app = crate::data::app();
+        let steps = Rc::new(AnimeLiveSteps::new(app.db(EntryKind::Anime), Arc::new(AnimeDirectory::current(repo.clone())), app.base.store().clone()));
+        let (old_row, new_row) = (old_anime.clone(), new_anime.clone());
         let handlers = MigrateHandlers {
             show_anime: Rc::new(move || crate::entry_core::anime::route::open(new)),
             show_seasons: Rc::new(move || crate::entry_core::anime::route::open(new)),
@@ -268,9 +275,25 @@ fn anime_migrate_dialog(repo: AnimeRepo, old: i64) -> Rc<dyn Fn(i64)> {
                     tracing::warn!(%error, "the anime migrate flags could not be stored");
                 }
             }),
-            run: Rc::new(|run| {
-                tracing::warn!(?run, "no anime migration engine is installed, nothing was migrated");
-                crate::toast::notify(tr(MsgKey::internal_error));
+            run: Rc::new(move |run, done| {
+                let (steps, old_anime, new_anime) = (Rc::clone(&steps), old_row.clone(), new_row.clone());
+                let plan = MigratePlan { replace: run.replace, flags: run.flags as i32 };
+                gtk::glib::spawn_future_local(async move {
+                    done(match migrate_anime(&*steps, &old_anime, &new_anime, plan).await {
+                        Ok(outcome) => {
+                            if !outcome.warnings.is_empty() {
+                                crate::toast::notify(tr(MsgKey::internal_error));
+                            }
+                            Ok(())
+                        }
+                        Err(error) => Err(error.to_string()),
+                    });
+                });
+            }),
+            // the migrate page is popped, which leaves the page it was opened from, and the new entry is pushed
+            finished: Rc::new(move || {
+                crate::ui::pop();
+                crate::entry_core::anime::route::open(new);
             }),
         };
         // the library stores the fetch type as the database's enum; the dialog's rules take the source API's
@@ -339,7 +362,7 @@ fn migrate_manga(entry_id: i64) -> Option<(i64, String)> {
 
 /// The body of `global_search` and `migrate_search`, as `screens::body` asks for it. `None` leaves the screen to its sample
 /// page: no app data, or nothing was parked for this screen. The catalogue is the migrate request's, the parked route's, or
-/// the entry page's that asked for a title or genre search; an intent is a manga one.
+/// the entry page's that asked for a title or genre search; an intent carries its own.
 pub fn body(migrating: bool) -> Option<Built> {
     if !crate::data::is_installed() {
         return None;
@@ -361,7 +384,7 @@ pub fn body(migrating: bool) -> Option<Built> {
             return None;
         }
         let kind = match (&intent, &route) {
-            (Some(_), _) => BrowseKind::Manga,
+            (Some(intent), _) => intent.kind,
             (None, Some(BrowseRoute::GlobalSearch { kind, .. })) => *kind,
             _ => caller.unwrap_or(BrowseKind::Manga),
         };
@@ -411,7 +434,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_intent_wins_over_a_route_and_a_route_over_the_text_an_entry_parked() {
-        let intent = SearchIntent { query: "one".into(), extension: Some("eu.a".into()) };
+        let intent = SearchIntent { query: "one".into(), extension: Some("eu.a".into()), kind: BrowseKind::Manga };
         let route = BrowseRoute::GlobalSearch { kind: BrowseKind::Manga, source_id: None, query: "two".into() };
         assert_eq!(
             start_for(false, None, Some(intent), Some(route.clone()), Some("three".into())),

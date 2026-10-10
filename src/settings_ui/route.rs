@@ -44,6 +44,7 @@ pub fn handles(id: &str) -> bool {
             | "settings_player_subtitle"
             | "settings_player_audio"
             | "settings_player_advanced"
+            | "settings_player_torrents"
             | "settings_downloads"
             | "settings_open_source_licenses"
             | "settings_worker_info"
@@ -235,6 +236,7 @@ pub fn tree_with(id: &str, prefs: &Prefs, anime: &[Category], manga: &[Category]
         "settings_player_subtitle" => loose(player::subtitle::page_rows(prefs)),
         "settings_player_audio" => loose(player::audio::page_rows(prefs)),
         "settings_player_advanced" => loose(player::advanced::page_rows(prefs)),
+        "settings_player_torrents" => loose(player::torrent::page_rows(prefs)),
         _ => spec,
     }
 }
@@ -384,6 +386,7 @@ pub fn body(id: &str) -> Option<Built> {
         "settings_player_subtitle" => loose_page(id, player::subtitle::page_rows(&prefs())),
         "settings_player_audio" => loose_page(id, player::audio::page_rows(&prefs())),
         "settings_player_advanced" => loose_page(id, player::advanced::page_rows(&prefs())),
+        "settings_player_torrents" => loose_page(id, player::torrent::page_rows(&prefs())),
         "settings_downloads" => downloads_page(),
         "settings_player_custom_buttons" => player::scripts::buttons_page(),
         "settings_player_editor" => player::scripts::editor_page(),
@@ -421,6 +424,7 @@ mod tests {
             "settings_player_subtitle",
             "settings_player_audio",
             "settings_player_advanced",
+            "settings_player_torrents",
             "settings_downloads",
             "settings_browse",
             "settings_search",
@@ -435,7 +439,7 @@ mod tests {
                 assert!(handles(id) && spec.screen(id).is_some(), "{id}");
             }
         });
-        for other in ["settings", "library", "settings_player_torrents", "settings_debug_info"] {
+        for other in ["settings", "library", "settings_debug_info"] {
             assert!(!handles(other), "{other}");
         }
     }

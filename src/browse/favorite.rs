@@ -135,10 +135,15 @@ pub struct DuplicateDialog {
 }
 
 pub fn duplicate_dialog() -> DuplicateDialog {
+    duplicate_dialog_for(false)
+}
+
+/// The dialog of an anime page: Aniyomi's `DuplicateAnimeDialog` has the manga body and its own Show anime button.
+pub fn duplicate_dialog_for(anime: bool) -> DuplicateDialog {
     DuplicateDialog {
         title: tr(MsgKey::are_you_sure),
         body: tr(MsgKey::confirm_add_duplicate_manga),
-        show: tr(MsgKey::action_show_manga),
+        show: tr(if anime { MsgKey::action_show_anime } else { MsgKey::action_show_manga }),
         migrate: tr(MsgKey::action_migrate_duplicate),
         add_anyway: tr(MsgKey::action_add_anyway),
         cancel: tr(MsgKey::action_cancel),
@@ -179,6 +184,13 @@ mod tests {
         assert_eq!(duplicate_answer(Some(2)), DuplicateAnswer::AddAnyway);
         assert_eq!(duplicate_answer(Some(3)), DuplicateAnswer::Nothing, "Cancel changes nothing");
         assert_eq!(duplicate_answer(None), DuplicateAnswer::Nothing, "so does a dismissal");
+    }
+
+    #[test]
+    fn the_anime_duplicate_dialog_says_show_anime_and_the_manga_one_says_show_manga() {
+        assert_eq!(duplicate_dialog_for(true).show, tr(MsgKey::action_show_anime));
+        assert_eq!(duplicate_dialog_for(false).show, tr(MsgKey::action_show_manga));
+        assert_eq!(duplicate_dialog_for(true).body, duplicate_dialog_for(false).body);
     }
 
     #[test]

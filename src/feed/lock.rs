@@ -18,7 +18,7 @@ pub fn is_locked(prefs: &dyn PrefsReader) -> Result<bool, FeedError> {
         .map_err(FeedError::Prefs)
 }
 
-/// `config.toml` read without the cross-process lock the running app holds: the CLI only reads.
+/// The settings file read without the cross-process lock the running app holds: the CLI only reads.
 pub struct ConfigFile(pub PathBuf);
 
 impl PrefsReader for ConfigFile {
@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn missing_file_is_open_and_garbage_fails_closed() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+        let path = kuro_prefs::toml_backend::config_file(dir.path());
         assert!(!is_locked(&ConfigFile(path.clone())).unwrap());
         std::fs::write(&path, "[security\nuse_authenticator = ").unwrap();
         assert!(matches!(is_locked(&ConfigFile(path.clone())), Err(FeedError::Prefs(_))));

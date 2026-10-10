@@ -9,6 +9,7 @@ pub const CSS: &str = "\
 .pref-flash { background-color: alpha(@accent_bg_color, 0.12); transition: background-color 200ms ease; }
 .pref-flash-off { background-color: transparent; }
 .pref-error { color: @error_color; }
+.tracker-check { color: #4CAF50; }
 .pref-slider-pill { border-radius: 999px; padding: 2px 10px; }
 .theme-card { border: 4px solid transparent; border-radius: 17px; padding: 4px; min-width: 114px; }
 .theme-card.selected { border-color: @accent_color; }
@@ -35,6 +36,12 @@ pub fn install() {
 #[cfg(test)]
 mod tests {
     use super::CSS;
+
+    #[test]
+    fn the_tracker_check_uses_the_login_green() {
+        let green = format!(".tracker-check {{ color: {}; }}", crate::pref_model::widgets::TRACKER_CHECK_COLOR);
+        assert!(CSS.contains(&green));
+    }
 
     #[test]
     fn css_defines_the_flash_and_title_classes() {
