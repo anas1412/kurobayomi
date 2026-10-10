@@ -28,24 +28,18 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # GTK 4.16 is needed for the gtk4 v4_16 feature; Ubuntu 24.04 ships 4.14.
-    container: fedora:41
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system packages
-        # libdav1d-devel: image's avif-native feature builds dav1d-sys, which needs dav1d.pc.
-        # mpv-devel (libmpv) comes from RPM Fusion; kuro-player links it.
+        # libdav1d-dev: image's avif-native feature builds dav1d-sys, which needs dav1d.pc.
+        # libmpv-dev: kuro-player links libmpv. Ubuntu 24.04 ships GTK 4.14, which is what the gtk4 v4_14 feature targets.
         run: |
-          dnf install -y gcc pkgconf-pkg-config gtk4-devel libdav1d-devel ripgrep curl
-          dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm"
-          dnf install -y mpv-devel
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libdav1d-dev libmpv-dev ripgrep
 
-      - name: Install Rust
-        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-
-      - name: Add cargo to PATH
-        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Update Rust
+        run: rustup update stable
 
       - name: Platform boundary check
         run: scripts/check-platform-boundary.sh
@@ -63,4 +57,4 @@ jobs:
 
       - name: Disk space left
         if: always()
-        run: df -h / /__w | cat
+        run: df -h / | cat

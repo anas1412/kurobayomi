@@ -54,7 +54,7 @@ The local source (files on your computer) is built in.
 
 ## Build and run
 
-Needs a recent stable Rust, GTK 4.16 or newer, and libmpv.
+Needs a recent stable Rust, GTK 4.14 or newer, and libmpv.
 
 ```bash
 cargo run                      # the mockup window
