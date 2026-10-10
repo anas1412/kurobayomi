@@ -6,7 +6,7 @@ This file is for Claude working on this repo. The speed-ups below cut a GUI wave
 
 1. **Give lanes their own build folder.** One shared `target/` has one lock, so every lane's `cargo test` queues behind the others. Seed extra folders instantly (btrfs reflink): `cp -a --reflink=auto ~/kurobayomi/target ~/kurobayomi-targets/B` (also `C`). Put `CARGO_TARGET_DIR=$HOME/kurobayomi-targets/B` in the lane prompt. Spread lanes across the shared folder, B and C.
 2. **Incremental builds on.** `.cargo/config.toml` (git-excluded) sets `incremental = true`. The 126k-line GUI crate otherwise recompiles from scratch on every test run.
-3. **Hard cap on concurrent compiles.** `.cargo/config.toml` also sets `rustc-wrapper = "/home/blackbox/kurobayomi-notes/rustc-limit.sh"`, which lets at most `N` (now 3; it was 2 for a while when stalls were high) rustc processes run machine-wide, whatever `-j` the lane passes. Lower `N` in the script when memory stalls (PSI full) stay above about 15%. The `.cargo/` folder is excluded through `.git/info/exclude`, so recreate it on a new machine.
+3. **Hard cap on concurrent compiles.** `.cargo/config.toml` also sets `rustc-wrapper = "/home/blackbox/kurobayomi-notes/rustc-limit.sh"`, which lets at most `N` (now 3) rustc processes run machine-wide, whatever `-j` the lane passes. Lower `N` in the script when memory stalls (PSI full) stay above about 15%. The `.cargo/` folder is excluded through `.git/info/exclude`, so recreate it on a new machine.
 4. **No final "verify" agent in a wave.** It cannot give a clean result while other lanes edit. Verify yourself instead: commit a snapshot, `git worktree add --detach ~/kurobayomi-verify HEAD`, run `CARGO_TARGET_DIR=$HOME/kurobayomi-verify/target cargo test --workspace --no-fail-fast -j 2` there, push that exact commit, then remove the worktree.
 5. **Disjoint ownership.** Crate lanes own crates. GUI lanes own separate `src/<module>/` folders. Shared files (`src/main.rs`, `src/ui.rs`, `src/screens.rs`, `Cargo.toml`) get small additive edits only. A lane that sees compile errors in files it does not own waits 90 seconds and retries up to 5 times.
 6. **GUI tests run on one GTK thread.** Use `crate::testing::with_display(...)`; tests that need a display skip themselves when none exists. Without this the test binary crashed with SIGSEGV about 1 run in 4.
@@ -48,6 +48,8 @@ The machine has 15 GB RAM plus a 15 GB zram swap that sits at 8 to 15 GB used, s
 - **Before every Workflow launch run `python3 ~/kurobayomi-notes/check-wave.py <script.js>`.** If it prints `CHECK-WAVE FAILED`, fix the script. The only exception is an intentional re-run of partial work: mark that group `"rerun": true` in `GROUPS`.
 - Never generate a wave script over an existing wave file (it removes its tasks from the "already handed out" set).
 - What went wrong before: the old picker skipped only tasks it could parse, so about 217 finished M00 and M01 tasks and about 18 others (ids like `T-req-platform-006` and two-letter suffixes like `T-49ba-003`) were handed out again, about 6% of the plan.
+
+- **Waiting for a long test:** agents must wait with ONE command (`timeout 590 bash -c 'until grep -q EXIT= LOG; do sleep 10; done'`) and read the log. Calling the Monitor tool repeatedly in a loop creates a new background task every few seconds (86 identical ones on 2026-10-10, from one wave 53 agent) and burns tokens.
 
 ## Wave bookkeeping
 
