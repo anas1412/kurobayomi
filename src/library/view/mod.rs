@@ -135,6 +135,8 @@ struct Inner {
     empty: gtk::Box,
     empty_label: gtk::Label,
     global_button: gtk::Button,
+    /// The getting-started guide on an empty library (T-37a-053).
+    guide_button: gtk::Button,
     bar: gtk::Revealer,
     bar_label: gtk::Label,
 }
@@ -196,6 +198,9 @@ impl LibraryView {
         empty.set_vexpand(true);
         empty.append(&empty_label);
         empty.append(&global_button);
+        let guide_button = gtk::Button::with_label(&tr(MsgKey::getting_started_guide));
+        guide_button.set_visible(false);
+        empty.append(&guide_button);
 
         let bar_label = gtk::Label::new(None);
         bar_label.set_hexpand(true);
@@ -251,6 +256,7 @@ impl LibraryView {
             empty,
             empty_label,
             global_button,
+            guide_button,
             bar,
             bar_label,
         }));
@@ -572,6 +578,15 @@ impl LibraryView {
                 open(&query);
             }
         });
+        let guide = self.inner.borrow().guide_button.clone();
+        guide.connect_clicked(|button| {
+            let window = button.root().and_then(|r| r.downcast::<gtk::Window>().ok());
+            gtk::UriLauncher::new(crate::shell::onboarding::GETTING_STARTED_URL).launch(
+                window.as_ref(),
+                gio::Cancellable::NONE,
+                |_| {},
+            );
+        });
     }
 }
 
@@ -674,13 +689,13 @@ fn render(inner: &Rc<RefCell<Inner>>) {
         let items: Vec<LibraryItem> = pages.get(index).map_or_else(Vec::new, |p| p.items.clone());
         let grid_cells = cells::cells(&items, st.query.as_deref());
         let global_label = cells::global_label(st.query.as_deref().unwrap_or_default());
-        let (empty_text, show_global) = if items.is_empty() && st.built.is_some() {
+        let (empty_text, show_global, show_guide) = if items.is_empty() && st.built.is_some() {
             let filters = st.built.as_ref().is_some_and(|b| b.has_active_filters);
             let library_empty = st.built.as_ref().is_none_or(|b| b.is_library_empty());
-            let text = empty_page(search_active, filters, library_empty).text();
-            (text, shows_global_search(search_active, true))
+            let page = empty_page(search_active, filters, library_empty);
+            (page.text(), shows_global_search(search_active, true), actions::shows_getting_started(page))
         } else {
-            ("", false)
+            ("", false, false)
         };
         let hidden = st.selection.hidden_count(&items);
         let selected = st.selection.len();
@@ -697,6 +712,7 @@ fn render(inner: &Rc<RefCell<Inner>>) {
             grid_cells,
             empty_text,
             show_global,
+            show_guide,
             global_label,
             bar_text,
             bar_open: !st.selection.is_empty(),
@@ -740,6 +756,8 @@ fn render(inner: &Rc<RefCell<Inner>>) {
     empty_label.set_label(view.empty_text);
     global.set_visible(view.show_global);
     global.set_label(&view.global_label);
+    let guide = inner.borrow().guide_button.clone();
+    guide.set_visible(view.show_guide);
     bar_label.set_label(&view.bar_text);
     bar.set_reveal_child(view.bar_open);
     header.set_visible(!view.bar_open);
@@ -810,6 +828,7 @@ struct Rendered {
     grid_cells: Vec<Cell>,
     empty_text: &'static str,
     show_global: bool,
+    show_guide: bool,
     global_label: String,
     bar_text: String,
     bar_open: bool,

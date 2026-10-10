@@ -434,7 +434,7 @@ Area evidence: [area:01](01-foundation-app-bootstrap/00-overview.md) section 2.3
 7. Build the tokio runtime.
 8. Build `AppContext`.
 9. Run the migrator (`kuro-app::migrate::run_blocking`) before the first window (area:01 D4). The migrator runs the Kurobayomi steps, plus the importer prompt when an Aniyomi file is found (area:03 D3).
-10. Create `gtk::Application` with id `io.github.blackbox.Kurobayomi` and call `app.run()`.
+10. Create `gtk::Application` with id `io.github.anas1412.Kurobayomi` and call `app.run()`.
 11. `connect_activate`: build the shell, show the window, then run warm-up.
 
 Warm-up (area:01 D5): after the first frame, one service per GLib idle callback, in this order: `manga_db`, `anime_db`, `network`, `sources`, `extensions`, `trackers`, `images`, `downloads`, `jobs`. Warm-up never blocks the main thread for more than one service.

@@ -166,7 +166,7 @@ Edge effects:
 
 ## 6. Tests to write (new)
 
-- T1 (`tests/css_parses.rs`, Xvfb): load `data/style.css` and `palette_css` for each palette; `parsing-error` never fires; the resource `/io/github/blackbox/Kurobayomi/style.css` exists.
+- T1 (`tests/css_parses.rs`, Xvfb): load `data/style.css` and `palette_css` for each palette; `parsing-error` never fires; the resource `/io/github/anas1412/Kurobayomi/style.css` exists.
 - T2 (`tests/icons_resolve.rs`, Xvfb): after `icons::register`, every `Icon` variant's `name()` has `IconTheme::has_icon == true`. Fails if an export is missing or misnamed.
 - T3 (`src/theme.rs`, unit): `AppTheme::from_pref` for all 22 Android enum names (`p1-data-and-config.md` 2.1): `DEFAULT`→Default, `COTTONCANDY`→CottonCandy, `MOCHA`→Mocha, every other name (including `MONET`, `BLUE`, `HOT_PINK`, `DARK_BLUE`, empty string, lowercase `mocha`)→Default. Unknown names must not panic.
 - T4 (`src/theme.rs`, unit): `hex6(0xFF745B00) == "745B00"`; `hex6(0x1F888888) == "888888"`.
@@ -178,7 +178,7 @@ Edge effects:
 - T10 (`src/anim.rs`, unit): `seek_alpha` at t=0, 149, 150, 299, 300, 449, 450, 600, 750, 899, 900 ms for triangle 0 equals the schedule (row 0 end at 150 ms is `1.0`; at 900 ms the cycle restarts at `0.0`). Also `cubic_bezier(0.4,0,0.2,1,0.5)` is between 0.5 and 1.0.
 - T11 (`src/splash.rs`, unit with injected clock): ready at 300 ms → hide at 500 ms; ready never → hide at 5000 ms; ready at 6000 ms → hidden at 5000 ms; `elapsed == 500` boundary keeps the splash (condition is `<=`).
 - T12 (`src/icons.rs`, unit): no two `Icon` variants share a `name()` unless intended (the table in the design doc lists the only shared name `image-x-generic-symbolic` for `Photo` and `Cover`).
-- T13 (`tests/desktop_file.rs`): `data/io.github.blackbox.Kurobayomi.desktop` passes `desktop-file-validate` (system tool) and has five unique `[Desktop Action]` names.
+- T13 (`tests/desktop_file.rs`): `data/io.github.anas1412.Kurobayomi.desktop` passes `desktop-file-validate` (system tool) and has five unique `[Desktop Action]` names.
 - T14 (manual, documented): on Tokyo Night, confirm the default theme shows no palette override (`theme_bg_color` equals the Tokyo Night value); with CottonCandy/Mocha the window background equals the palette `background`.
 
 ## 7. Acceptance checks that are manual (screenshots)

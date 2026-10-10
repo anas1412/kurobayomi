@@ -23,7 +23,7 @@ use kuro_prefs::ui::UiPrefs;
 use crate::data;
 use crate::entry_core::cover_view::CoverView;
 use crate::updates::download_host;
-use crate::updates::prefs::week_start;
+use crate::updates::prefs::{home_returns_today, week_start};
 use crate::updates::upcoming::calendar::week_start_for;
 use crate::updates::upcoming::calendar_view::{CalendarView, ensure_css};
 use crate::updates::upcoming::layout::{self, Shape};
@@ -47,6 +47,8 @@ struct Env {
     relative: bool,
     date_pattern: String,
     locale: &'static str,
+    /// The opt-in Home key (T-42b-046).
+    home_today: bool,
     open: Rc<dyn Fn(i64)>,
 }
 
@@ -62,6 +64,7 @@ impl Env {
             relative: ui.relative_time.get(),
             date_pattern: ui.date_format.get(),
             locale,
+            home_today: home_returns_today(&store).get(),
             open: Rc::new(move |id| open_entry(kind, id)),
         }
     }
@@ -98,6 +101,7 @@ impl UpcomingPage {
                     page.jump(day);
                 }
             });
+            calendar.set_home_returns_today(env.home_today);
             let content = GBox::new(O::Vertical, 0);
             let scroll = gtk::ScrolledWindow::builder().child(&content).vexpand(true).hexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
             let paned = gtk::Paned::builder()
@@ -410,6 +414,7 @@ mod tests {
             relative: true,
             date_pattern: String::new(),
             locale: "en",
+            home_today: false,
             open: Rc::new(move |id| log.borrow_mut().push(id)),
         };
         let page = UpcomingPage::new(EntryKind::Anime, env);

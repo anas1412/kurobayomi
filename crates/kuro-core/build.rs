@@ -28,5 +28,5 @@ fn main() {
     println!("cargo:rustc-env=KB_COMMIT_COUNT={count}");
     println!("cargo:rustc-env=KB_BUILD_TIME={}", utc::rfc3339(epoch));
     println!("cargo:rustc-env=KB_BUILD_TYPE={build_type}");
-    println!("cargo:rustc-env=KB_APP_ID=io.github.blackbox.Kurobayomi");
+    println!("cargo:rustc-env=KB_APP_ID=io.github.anas1412.Kurobayomi");
 }

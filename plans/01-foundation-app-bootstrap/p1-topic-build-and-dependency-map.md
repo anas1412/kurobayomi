@@ -30,7 +30,7 @@ Mapping of Gradle build types:
 
 | Gradle | Cargo | Differences carried over |
 |---|---|---|
-| `debug` (`.dev` id suffix, `-<commit count>` version suffix, pseudo-locales) | `cargo build` (profile `dev`) | `verbose_logging` default true; version name gets `-<commit count>`; the application id stays `io.github.blackbox.Kurobayomi` (no suffix: the D-Bus name must not change between builds because the `.desktop` file and notifications refer to it; dev runs already use `NON_UNIQUE` through env vars) |
+| `debug` (`.dev` id suffix, `-<commit count>` version suffix, pseudo-locales) | `cargo build` (profile `dev`) | `verbose_logging` default true; version name gets `-<commit count>`; the application id stays `io.github.anas1412.Kurobayomi` (no suffix: the D-Bus name must not change between builds because the `.desktop` file and notifications refer to it; dev runs already use `NON_UNIQUE` through env vars) |
 | `release` (minify and shrink unless `disable-code-shrink`) | `cargo build --release` | `strip` is deliberately off (section 1.1) |
 | `preview` (`.debug` suffix, release behaviour, build time = now) | `cargo build --profile preview` | `BUILD_TYPE = "preview"` in `app_info` |
 | `benchmark` (profileable, disabled unless flavor `default`=`dev`) | Drop | Rust has `perf`/`samply`; no profileable-APK concept |

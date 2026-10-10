@@ -9,6 +9,7 @@ use crate::hosts::close_top;
 use crate::mpv::{MpvError, MpvHandle};
 use crate::session_file::{FINAL_SAVE_DEADLINE_MS, SHUTDOWN_TIMEOUT_MS};
 use crate::state::PlayerState;
+use crate::volume::resume_volume;
 
 /// One step of an open request (`onNewIntent`, behaviour 1.2), listed in the order to run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,18 +94,19 @@ pub fn on_pause(state: &mut PlayerState, kind: PauseKind) -> Vec<PauseStep> {
 /// `onResume` clears `isExiting`, and only `onResume` does. A `PLAYBACK_RESTART` cannot clear it,
 /// because the event gate drops events while it is set (behaviour 6.4).
 pub fn on_resume(state: &mut PlayerState) {
-    // Coming back from a hidden window asks for the remembered volume to be restored (T-45a-083).
+    // Coming back from a hidden window asks for the resume volume rule to run once (T-45a-046).
     state.restore_volume_on_resume = state.is_exiting;
     state.is_exiting = false;
 }
 
-/// The volume to write after a resume from a hidden window (T-45a-083). It is the remembered value,
-/// and it is taken once. No brightness step runs here (T-45a-045 is dropped on desktop).
-pub fn take_volume_restore(state: &mut PlayerState, remembered: Option<i64>) -> Option<i64> {
+/// The mpv volume to write after a resume from a hidden window (T-45a-046). It is 100 when the
+/// device volume is below its maximum (`volume::resume_volume`), and it is taken once. No brightness
+/// step runs here (T-45a-045 is dropped on desktop).
+pub fn take_volume_restore(state: &mut PlayerState, device_steps: i32) -> Option<i64> {
     if !std::mem::take(&mut state.restore_volume_on_resume) {
         return None;
     }
-    remembered
+    resume_volume(device_steps)
 }
 
 /// The event gate. While the window is exiting, observer events are dropped, and `execute` drops
@@ -398,20 +400,30 @@ mod tests {
     }
 
     #[test]
-    fn resume_from_hidden_restores_the_remembered_volume_once() {
+    fn t46_resume_from_hidden_sets_volume_100_once_when_the_device_is_below_max() {
         let mut state = PlayerState {
             is_exiting: true,
             ..PlayerState::default()
         };
         on_resume(&mut state);
-        assert_eq!(take_volume_restore(&mut state, Some(70)), Some(70));
-        assert_eq!(take_volume_restore(&mut state, Some(70)), None);
+        assert_eq!(take_volume_restore(&mut state, 3), Some(100));
+        assert_eq!(take_volume_restore(&mut state, 3), None);
+    }
+
+    #[test]
+    fn t46_resume_from_hidden_at_device_max_writes_nothing() {
+        let mut state = PlayerState {
+            is_exiting: true,
+            ..PlayerState::default()
+        };
+        on_resume(&mut state);
+        assert_eq!(take_volume_restore(&mut state, crate::system_av::VOLUME_STEPS), None);
     }
 
     #[test]
     fn plain_resume_restores_nothing() {
         let mut state = PlayerState::default();
         on_resume(&mut state);
-        assert_eq!(take_volume_restore(&mut state, Some(70)), None);
+        assert_eq!(take_volume_restore(&mut state, 3), None);
     }
 }

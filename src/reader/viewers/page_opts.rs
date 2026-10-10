@@ -19,11 +19,8 @@ pub struct PageOpts {
     pub automatic_background: bool,
     pub double_tap_ms: u32,
     pub long_tap: bool,
-    /// A webtoon page: decoded no wider than the view (B§8.4).
+    /// A webtoon page: decoded no wider than the view (B§8.4). A pager page always decodes in full.
     pub webtoon: bool,
-    /// A long strip decodes in full (`pref_always_decode_long_strip_with_ssiv`); otherwise a webtoon page decodes at
-    /// the view width. A pager page always decodes in full.
-    pub full_decode: bool,
     /// Pages cut their uniform border at decode (`crop_borders` for a pager, `crop_borders_webtoon` for a webtoon).
     pub crop: bool,
     /// A wide fitted page zooms to the view height after it loads (`landscape_zoom`).
@@ -81,7 +78,6 @@ pub fn page_opts(settings: &ViewerSettings, kind: ViewerKind, system_dark: bool)
         double_tap_ms: settings.double_tap_anim_ms,
         long_tap: settings.long_tap,
         webtoon: !kind.is_pager(),
-        full_decode: settings.always_decode_long_strip,
         crop: if kind.is_pager() { settings.crop_pager } else { settings.crop_webtoon },
         landscape_zoom: settings.landscape_zoom,
         side_padding: if kind.is_pager() { 0 } else { pref_rules::side_padding(settings.side_padding) },
@@ -89,9 +85,10 @@ pub fn page_opts(settings: &ViewerSettings, kind: ViewerKind, system_dark: bool)
 }
 
 impl PageOpts {
-    /// Whether a decode is cut to the view width first: a webtoon page, unless the long strip decodes in full (T-43b-023).
+    /// Whether a decode is cut to the view width first: a webtoon page. The long strip full-decode option is dropped
+    /// (T-44a-061), so every webtoon page takes this path.
     pub fn decode_to_view(&self) -> bool {
-        self.webtoon && !self.full_decode
+        self.webtoon
     }
 }
 
@@ -173,13 +170,13 @@ mod tests {
     }
 
     #[test]
-    fn t023_a_webtoon_page_decodes_at_the_view_width_unless_the_long_strip_decodes_in_full() {
+    fn t023_a_webtoon_page_decodes_at_the_view_width_and_a_pager_page_never_does() {
         let normal = settings(|_| {});
         assert!(page_opts(&normal, ViewerKind::Webtoon, false).decode_to_view());
         assert!(!page_opts(&normal, ViewerKind::LeftToRight, false).decode_to_view(), "a pager page is never cut to the view");
-        let full = settings(|p| p.store().pref(super::super::settings::ALWAYS_DECODE_LONG_STRIP_KEY, false).set(true).unwrap());
-        assert!(!page_opts(&full, ViewerKind::Webtoon, false).decode_to_view(), "the full-decode path");
-        assert!(!page_opts(&full, ViewerKind::WebtoonGapped, false).decode_to_view());
+        // T-44a-061: the stored full-decode value is ignored
+        let stored = settings(|p| p.store().pref("pref_always_decode_long_strip_with_ssiv", false).set(true).unwrap());
+        assert!(page_opts(&stored, ViewerKind::WebtoonGapped, false).decode_to_view());
     }
 
     #[test]

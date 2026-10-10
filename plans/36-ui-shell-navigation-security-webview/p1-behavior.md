@@ -49,7 +49,7 @@ File: app/src/main/java/eu/kanade/tachiyomi/ui/main/MainActivity.kt:158-346
 (MainActivity.kt:348-355) `onProvideAssistContent` sets `outContent.webUri` to `screen.onProvideAssistUrl()` only if the top screen implements `AssistContentScreen`. Android-only; dropped (§10).
 
 ### 1.5 Proposal: Linux startup
-- Process start: create `gtk::Application` with id `io.github.blackbox.Kurobayomi` (already in mockup at `src/main.rs:13`). Use `connect_activate` for the first window and `connect_open` for URIs and files (replaces `onCreate` / `onNewIntent`).
+- Process start: create `gtk::Application` with id `io.github.anas1412.Kurobayomi` (already in mockup at `src/main.rs:13`). Use `connect_activate` for the first window and `connect_open` for URIs and files (replaces `onCreate` / `onNewIntent`).
 - Single instance is provided by GApplication D-Bus registration. A second launch with args is forwarded to the primary instance via `open` or `activate`; the second process exits. This replaces `isTaskRoot`.
 - Run migrations (area 11) on a background tokio task before the window is shown. Show the window only after the migration result and the first intent are handled (see §1.6). This replaces the splash gate.
 - Changelog dialog: show once after an upgrade when migration reported "did migrate" and the build is not a debug build (see §7).

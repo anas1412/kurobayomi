@@ -37,7 +37,7 @@ dist/plasmoid/org.kurobayomi.updates.anime/
     "Id": "org.kurobayomi.updates.manga",
     "Name": "Updates",
     "Description": "See your recently updated library entries",
-    "Icon": "io.github.blackbox.Kurobayomi",
+    "Icon": "io.github.anas1412.Kurobayomi",
     "Category": "Utilities"
   },
   "KPackageStructure": "Plasma/Applet",

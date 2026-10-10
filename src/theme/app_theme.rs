@@ -174,7 +174,8 @@ impl AppTheme {
             // The Linux default follows the desktop theme; the catalogue has no key of its own.
             AppTheme::GtkTheme => MsgKey::theme_system,
             AppTheme::Default => MsgKey::label_default,
-            AppTheme::Monet => MsgKey::theme_monet,
+            // T-48a-058: Android's wallpaper colours are not reproduced; the choice follows the desktop accent or GTK theme.
+            AppTheme::Monet => return Some("System colours".to_string()),
             AppTheme::Cloudflare => MsgKey::theme_cloudflare,
             AppTheme::CottonCandy => MsgKey::theme_cottoncandy,
             AppTheme::Doom => MsgKey::theme_doom,
@@ -297,7 +298,7 @@ mod tests {
     fn titles_come_from_the_catalogue() {
         assert_eq!(AppTheme::Default.title().as_deref(), Some("Default"));
         assert_eq!(AppTheme::Cloudflare.title().as_deref(), Some("Cloudflare"));
-        assert_eq!(AppTheme::Monet.title().as_deref(), Some("Dynamic"));
+        assert_eq!(AppTheme::Monet.title().as_deref(), Some("System colours"), "the Dynamic choice is shown as System colours");
         assert!(AppTheme::Monochrome.title().is_some());
     }
 

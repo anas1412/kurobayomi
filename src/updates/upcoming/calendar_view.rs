@@ -73,6 +73,8 @@ pub struct CalendarView {
     focus: Cell<NaiveDate>,
     cells: RefCell<HashMap<NaiveDate, gtk::Widget>>,
     on_day: Rc<dyn Fn(NaiveDate)>,
+    /// The opt-in Home key (T-42b-046): off unless the setting turns it on.
+    home_today: Cell<bool>,
 }
 
 impl CalendarView {
@@ -96,6 +98,7 @@ impl CalendarView {
             focus: Cell::new(today),
             cells: RefCell::default(),
             on_day: Rc::new(on_day),
+            home_today: Cell::new(false),
         });
         view.set_title_text("a", month);
         view.title.set_visible_child_name("a");
@@ -119,6 +122,11 @@ impl CalendarView {
     pub fn set_events(self: &Rc<Self>, events: BTreeMap<NaiveDate, u32>) {
         *self.events.borrow_mut() = events;
         self.rebuild_grid();
+    }
+
+    /// Turns the opt-in Home key on or off (T-42b-046). Off, Home is not taken by the calendar.
+    pub fn set_home_returns_today(&self, on: bool) {
+        self.home_today.set(on);
     }
 
     /// The day changed under a page that stayed open: the ring and the dimming move to the new today.
@@ -249,6 +257,8 @@ impl CalendarView {
             if let Some(step) = cal_key(key) {
                 view.move_focus(calendar::key_move(view.focus_date(), step));
                 glib::Propagation::Stop
+            } else if key == gdk::Key::Home && view.home() {
+                glib::Propagation::Stop
             } else if matches!(key, gdk::Key::Return | gdk::Key::KP_Enter | gdk::Key::space) && view.focused_cell().is_some() {
                 (view.on_day)(view.focus_date());
                 glib::Propagation::Stop
@@ -282,6 +292,15 @@ impl CalendarView {
         if let Some(widget) = self.cells.borrow().get(&to) {
             widget.grab_focus();
         }
+    }
+
+    /// Home, when the setting is on: shows the current month with today focused. Returns `false` (key not taken) when off.
+    fn home(self: &Rc<Self>) -> bool {
+        if !self.home_today.get() {
+            return false;
+        }
+        self.move_focus(self.today.get());
+        true
     }
 }
 
@@ -369,6 +388,20 @@ mod tests {
             assert_eq!(title(&view), "November 2026", "the visible child switches at once; only its entry is animated");
             view.step_month(-1);
             assert_eq!(title(&view), "October 2026");
+        });
+    }
+
+    #[test]
+    fn calendar_view_home_returns_to_the_current_month_only_when_on() {
+        crate::testing::with_display(|| {
+            let view = CalendarView::new(Weekday::Mon, d(2026, 10, 8), |_| {});
+            view.step_month(3);
+            assert!(!view.home(), "off by default: Home is not taken");
+            assert_eq!(view.month(), (2027, 1));
+            view.set_home_returns_today(true);
+            assert!(view.home());
+            assert_eq!(view.month(), (2026, 10), "back to the month of today");
+            assert_eq!(view.focus.get(), d(2026, 10, 8), "today is focused");
         });
     }
 

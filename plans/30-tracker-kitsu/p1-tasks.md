@@ -257,7 +257,7 @@ Common source prefix used below: `app/src/main/java/eu/kanade/tachiyomi/data/tra
 - Acceptance:
   - One reqwest client with connect timeout 30 s, read timeout 30 s, total timeout 120 s, rustls with system roots (KT-93, E-75).
   - Authed requests send `Cache-Control: no-cache` (flagged against E-74); response bodies of PATCH and DELETE are dropped without leaking the connection (E-73).
-  - User-Agent `Kurobayomi v<version> (io.github.blackbox.Kurobayomi)`.
+  - User-Agent `Kurobayomi v<version> (io.github.anas1412.Kurobayomi)`.
 
 ### T-30a-026 — Concurrency model and GTK bridge
 - Priority: P1

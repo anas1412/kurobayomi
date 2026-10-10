@@ -19,7 +19,7 @@ Format is the repository task format (lint: `python3 /home/blackbox/kurobayomi/p
 - Depends: T-01a-001
 - Sources: app/build.gradle.kts, app/src/main/java/eu/kanade/tachiyomi/AppInfo.kt, core/common/src/main/java/tachiyomi/core/common/util/system/ImageUtil.kt, buildSrc/src/main/kotlin/mihon/buildlogic/Commands.kt
 - Acceptance:
-  - `kuro_core::app_info::APP_INFO` exposes app id `io.github.blackbox.Kurobayomi`, version name, `VERSION_CODE` (starts at 1), commit count, short commit SHA, build time in `%Y-%m-%dT%H:%M:%SZ` UTC, build type (debug, preview, release) and `updater_enabled`
+  - `kuro_core::app_info::APP_INFO` exposes app id `io.github.anas1412.Kurobayomi`, version name, `VERSION_CODE` (starts at 1), commit count, short commit SHA, build time in `%Y-%m-%dT%H:%M:%SZ` UTC, build type (debug, preview, release) and `updater_enabled`
   - a debug build appends `-<commit count>` to the version name and a release build does not
   - building from a source tarball without `.git` succeeds with commit count `0` and SHA `unknown`
   - `supported_image_mime_types()` returns `image/avif`, `image/gif`, `image/heif`, `image/jpeg`, `image/jxl`, `image/png`, `image/webp` in that order, minus any whose decoder feature is disabled
@@ -80,7 +80,7 @@ Format is the repository task format (lint: `python3 /home/blackbox/kurobayomi/p
 - Sources: app/src/main/java/eu/kanade/presentation/crash/CrashScreen.kt, app/src/main/java/eu/kanade/tachiyomi/crash/CrashActivity.kt, presentation-core/src/main/java/tachiyomi/presentation/core/screens/InfoScreen.kt
 - Acceptance:
   - `kurobayomi --crash-report <file>` opens one window with, top to bottom: bug icon (48 px, accent colour), heading `Whoops!`, subtitle `Kurobayomi ran into an unexpected error. Share the crash logs when you report the problem.`, a rounded filled box with the selectable monospace crash text, a separator, a full-width `Share crash logs` button and a full-width `Restart the application` button
-  - the reporter registers application id `io.github.blackbox.Kurobayomi.CrashReporter` with non-unique flags and does not open the database, settings writer, runtime or global stylesheet
+  - the reporter registers application id `io.github.anas1412.Kurobayomi.CrashReporter` with non-unique flags and does not open the database, settings writer, runtime or global stylesheet
   - an unreadable or missing report file shows `No crash details available` and logs `Wasn't able to retrieve crash report` to stderr
   - Escape and the close button quit the reporter without restarting; `Restart the application` spawns the normal app detached after the crashed process has exited (polls for at most 2 s) and then quits
   - with no display available the reporter prints the report path to stderr and exits 1

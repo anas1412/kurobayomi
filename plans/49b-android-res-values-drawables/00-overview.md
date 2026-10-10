@@ -85,9 +85,9 @@ kurobayomi/
     kurobayomi.gresource.xml    (new) bundles style.css, icons/, splash resources
     style.css                   (new) all CSS rules for this area
     icons/hicolor/scalable/actions/kb-*-symbolic.svg               (new, about 30 files)
-    icons/hicolor/scalable/apps/io.github.blackbox.Kurobayomi.svg  (new)
-    icons/hicolor/symbolic/apps/io.github.blackbox.Kurobayomi-symbolic.svg (new)
-    io.github.blackbox.Kurobayomi.desktop   (new, five [Desktop Action] groups)
+    icons/hicolor/scalable/apps/io.github.anas1412.Kurobayomi.svg  (new)
+    icons/hicolor/symbolic/apps/io.github.anas1412.Kurobayomi-symbolic.svg (new)
+    io.github.anas1412.Kurobayomi.desktop   (new, five [Desktop Action] groups)
   tools/
     export_icons.py             (new) one-time VectorDrawable -> symbolic SVG export (stdlib only)
     check_palette.py            (new) XML vs Rust palette drift check

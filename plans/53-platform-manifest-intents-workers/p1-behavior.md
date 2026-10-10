@@ -106,7 +106,7 @@ Observed defects of this function (see also edge cases E-14 to E-18): the `value
 | `show-history` | History | `--action=show-history` | `Shortcut { History, None }` |
 | `show-browse` | Browse | `--action=show-browse` | `Shortcut { Catalogues, None }` |
 
-The duplicate id is removed. The labels come from the same MR keys (localised at build time through `area:51`). The icon is the app icon name, `io.github.blackbox.Kurobayomi` (Linux icon theme lookup; no per-action icon file).
+The duplicate id is removed. The labels come from the same MR keys (localised at build time through `area:51`). The icon is the app icon name, `io.github.anas1412.Kurobayomi` (Linux icon theme lookup; no per-action icon file).
 
 ### 2.5 Observed: search metadata (`app/src/main/res/xml/searchable.xml`)
 

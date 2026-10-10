@@ -79,7 +79,7 @@ These Android drawables are replaced by a freedesktop/GTK icon name. The name is
 | ic_skip_previous_24dp | media-skip-backward-symbolic | PipActions.kt |
 | ic_system_update_alt_white_24dp | software-update-available-symbolic | AppUpdateNotifier.kt |
 | ic_warning_white_24dp | dialog-warning-symbolic | AnimeDownloadNotifier.kt, MangaDownloadNotifier.kt, AnimeLibraryUpdateNotifier.kt, MangaLibraryUpdateNotifier.kt, AppUpdateNotifier.kt |
-| ic_ani (logo, see section 4) | io.github.blackbox.Kurobayomi | 8 files (section 4) |
+| ic_ani (logo, see section 4) | io.github.anas1412.Kurobayomi | 8 files (section 4) |
 | ic_animelibrary_selector_24dp | two-state: `kb-animelibrary-outline-symbolic` / `kb-animelibrary-filled-symbolic` (section 2) | app/src/main/res/menu/main_nav.xml (no Kotlin user) |
 | anim_caret_down (static states) | pan-down-symbolic / pan-up-symbolic | AnimeInfoHeader.kt, MangaInfoHeader.kt |
 | anim_history_enter (static) | document-open-recent-symbolic | HistoriesTab.kt, DownloadsTab.kt |
@@ -93,15 +93,15 @@ Note: `ic_video_chapter_20dp.xml` has no row here because it is unused in Kotlin
 
 ## 4. Logo and launcher icons
 
-- In-app logo (`ic_ani.xml`, 512 viewport, two paths, both `#FFFFFF` in Android): export as `data/icons/hicolor/symbolic/apps/io.github.blackbox.Kurobayomi-symbolic.svg` with `#bebebe` fills (the Compose LogoHeader tints it `onSurface`, so symbolic is the correct form). Name is the `Icon::LogoSymbolic` stem.
-- Full-colour app icon (`ic_launcher_foreground.xml`, 108 viewport, colours kept): export as `data/icons/hicolor/scalable/apps/io.github.blackbox.Kurobayomi.svg`. Keep `android:fillColor` values (`#000`, `#2E84BF`, `#69A3CB`, `#C92824`, `#FFFFFF`, `#FF000000`); do not set `#bebebe`. The two circle paths are `M54,54m-25,0a25,25 0,1 1,50 0a25,25 0,1 1,-50 0` and the r=20.051 circle; keep the arc commands verbatim. The adaptive background is not exported (the mipmap background is transparent).
-- Monochrome launcher (`ic_ani_monochrome_launcher.xml`, 108 viewport): not installed on Linux; its only use is the monochrome adaptive icon. Export as `symbolic/apps/io.github.blackbox.Kurobayomi-monochrome-symbolic.svg` if a tray icon is added later (Proposal; the file is kept, not required).
+- In-app logo (`ic_ani.xml`, 512 viewport, two paths, both `#FFFFFF` in Android): export as `data/icons/hicolor/symbolic/apps/io.github.anas1412.Kurobayomi-symbolic.svg` with `#bebebe` fills (the Compose LogoHeader tints it `onSurface`, so symbolic is the correct form). Name is the `Icon::LogoSymbolic` stem.
+- Full-colour app icon (`ic_launcher_foreground.xml`, 108 viewport, colours kept): export as `data/icons/hicolor/scalable/apps/io.github.anas1412.Kurobayomi.svg`. Keep `android:fillColor` values (`#000`, `#2E84BF`, `#69A3CB`, `#C92824`, `#FFFFFF`, `#FF000000`); do not set `#bebebe`. The two circle paths are `M54,54m-25,0a25,25 0,1 1,50 0a25,25 0,1 1,-50 0` and the r=20.051 circle; keep the arc commands verbatim. The adaptive background is not exported (the mipmap background is transparent).
+- Monochrome launcher (`ic_ani_monochrome_launcher.xml`, 108 viewport): not installed on Linux; its only use is the monochrome adaptive icon. Export as `symbolic/apps/io.github.anas1412.Kurobayomi-monochrome-symbolic.svg` if a tray icon is added later (Proposal; the file is kept, not required).
 - The splash logo (`ic_tachi_splash`) is `ic_ani` at 108 dp, centred: use the symbolic logo at 108 px in the splash page; no separate export.
 
 ## 5. Shipping and loading
 
-- GResource: `data/kurobayomi.gresource.xml` lists the `data/icons/hicolor/...` files under the prefix `/io/github/blackbox/Kurobayomi/icons/` (so `icons::ICON_RESOURCE_PATH` is the root of a theme directory).
-- `IconTheme::add_resource_path("/io/github/blackbox/Kurobayomi/icons")` makes the files resolvable by name; the directory must follow the theme layout `scalable/actions/`, `scalable/apps/`, `symbolic/apps/`.
+- GResource: `data/kurobayomi.gresource.xml` lists the `data/icons/hicolor/...` files under the prefix `/io/github/anas1412/Kurobayomi/icons/` (so `icons::ICON_RESOURCE_PATH` is the root of a theme directory).
+- `IconTheme::add_resource_path("/io/github/anas1412/Kurobayomi/icons")` makes the files resolvable by name; the directory must follow the theme layout `scalable/actions/`, `scalable/apps/`, `symbolic/apps/`.
 - For the `.desktop` file to show the custom action icons outside the app, also install the same SVGs under `share/icons/hicolor/scalable/actions/` (Proposal, see design section 7).
 
 ## 6. Pixel checks

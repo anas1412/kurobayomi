@@ -1,6 +1,6 @@
-//! The reader decode rows of Advanced settings (tasks T-47a-081 and T-47a-082): the custom hardware bitmap threshold and
-//! the legacy decoder switch for the long strip. The threshold choices come from the device's texture limit (the
-//! `custom_texture_limit_options` rule of `kuro-platform`); the legacy switch is the reader's own preference.
+//! The reader decode rows of Advanced settings (task T-47a-081): the custom hardware bitmap threshold. The threshold choices
+//! come from the device's texture limit (the `custom_texture_limit_options` rule of `kuro-platform`). The legacy long strip
+//! decoder switch (T-47a-082) is dropped (T-44a-061): the tiled decoder is the only path, and a stored value is ignored.
 //!
 //! Gap: the reader does not read the threshold yet (the reader's decode path is another lane's module). The device
 //! limit comes from `device::device_texture_limit`, which `startup::probe_texture_limit` feeds at start-up; the row is not
@@ -9,14 +9,12 @@ use kuro_platform::device::{custom_texture_limit_options, device_texture_limit};
 use kuro_prefs::prefs::Prefs;
 
 use crate::pref_model::model::PreferenceItem;
-use crate::settings_ui::rows::{group, int_choice, switch_sub};
+use crate::settings_ui::rows::{group, int_choice};
 
 pub const THRESHOLD_TITLE: &str = "Custom hardware bitmap threshold";
 pub const THRESHOLD_KEY: &str = "pref_hardware_bitmap_threshold";
 pub const THRESHOLD_DEFAULT: i32 = 2048;
 pub const THRESHOLD_HINT: &str = "If reader loads a blank image incrementally reduce the threshold.";
-pub const LEGACY_TITLE: &str = "Use legacy decoder for long strip reader";
-pub const LEGACY_SUBTITLE: &str = "Affects performance. Only enable if reducing bitmap threshold doesn't fix blank image issues";
 /// The device limit at or below which the threshold has one choice, so the row is disabled.
 const FLOOR: i32 = 2048;
 
@@ -48,10 +46,9 @@ pub fn threshold_row(prefs: &Prefs) -> PreferenceItem {
     row
 }
 
-/// The Reader group of the Advanced page: the threshold and the legacy decoder.
+/// The Reader group of the Advanced page: the threshold only (T-44a-061 drops the legacy decoder switch).
 pub fn reader_group(prefs: &Prefs) -> crate::pref_model::model::Preference {
-    let legacy = switch_sub(LEGACY_TITLE, LEGACY_SUBTITLE, &prefs.base.always_decode_long_strip_with_ssiv, true);
-    group("Reader", vec![threshold_row(prefs), legacy])
+    group("Reader", vec![threshold_row(prefs)])
 }
 
 #[cfg(test)]
@@ -89,8 +86,10 @@ mod tests {
     }
 
     #[test]
-    fn the_legacy_decoder_switch_defaults_to_off() {
+    fn the_reader_group_has_only_the_threshold_row() {
         let prefs = Prefs::in_memory();
-        assert!(!prefs.base.always_decode_long_strip_with_ssiv.get());
+        let crate::pref_model::model::Preference::Group(reader) = reader_group(&prefs) else { panic!("a group") };
+        assert_eq!(reader.items.len(), 1, "the legacy long strip switch is dropped (T-44a-061)");
+        assert_eq!(reader.items[0].title(), THRESHOLD_TITLE);
     }
 }

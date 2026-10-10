@@ -1,6 +1,6 @@
 # 50-android-widgets — Part 1 Rust design
 
-Target: `/home/blackbox/kurobayomi` (single crate `kurobayomi`, edition 2024, `gtk = gtk4 0.11.5` with feature `v4_16`, `serde`, `serde_json`; entry `src/main.rs:12` `fn main() -> glib::ExitCode` creating `gtk::Application` id `io.github.blackbox.Kurobayomi`).
+Target: `/home/blackbox/kurobayomi` (single crate `kurobayomi`, edition 2024, `gtk = gtk4 0.11.5` with feature `v4_16`, `serde`, `serde_json`; entry `src/main.rs:12` `fn main() -> glib::ExitCode` creating `gtk::Application` id `io.github.anas1412.Kurobayomi`).
 
 Scope recap: the Android widgets are dropped as Android hosts. What survives is the data rule (window, unread filter, dedupe, cap), the grid geometry, the lock rule, and the click routing. They are delivered as:
 
@@ -382,7 +382,7 @@ Note: `data["exit code"]` and `data["stdout"]` are the executable engine's keys;
 [Desktop Entry]
 Name=Kurobayomi
 Exec=kurobayomi %U
-Icon=io.github.blackbox.Kurobayomi
+Icon=io.github.anas1412.Kurobayomi
 Type=Application
 Categories=AudioVideo;Graphics;
 Actions=Updates;

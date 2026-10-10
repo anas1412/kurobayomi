@@ -115,7 +115,7 @@ fn main() -> glib::ExitCode {
 
     // a second launch is forwarded to the running instance by GApplication; dev variables run a window of their own
     let unique = kuro_platform::single_instance::is_unique(|v| std::env::var(v).is_ok());
-    let app = gtk::Application::builder().application_id("io.github.blackbox.Kurobayomi").flags(shell::launch::app_flags(unique)).build();
+    let app = gtk::Application::builder().application_id("io.github.anas1412.Kurobayomi").flags(shell::launch::app_flags(unique)).build();
     shell::launch::connect(&app);
     // the preferences get up to 2 s to reach the disk when the application shuts down (T-02a-038)
     app.connect_shutdown(|_| {

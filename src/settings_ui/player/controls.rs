@@ -111,6 +111,8 @@ pub fn internal_rows(prefs: &Prefs) -> Vec<Preference> {
                 switch("Reduce player animation", &p.reduce_motion, true),
                 int_choice("Hide player controls time", &p.player_time_to_disappear, &hide_options, true),
                 slider("Panel opacity", &p.panel_opacity, 0..=100, Some(opacity.as_str()), true),
+                // T-48a-019: the orientation row is dropped; the stored value is ignored
+                info(ROTATION_NOTE),
             ],
         ),
         intro_skip_group(prefs),
@@ -183,6 +185,9 @@ pub fn info_text_for_custom() -> &'static str {
 pub fn info_row() -> PreferenceItem {
     info(info_text_for_custom())
 }
+
+/// The help line that replaces the orientation row (T-48a-019).
+pub const ROTATION_NOTE: &str = "Screen rotation is not used on desktop.";
 
 #[cfg(test)]
 mod tests {
@@ -289,8 +294,9 @@ mod tests {
         let tree = internal_rows(&prefs);
         let display = group_titled(&tree, "Display");
         let titles: Vec<&str> = display.items.iter().map(|i| i.title()).collect();
-        assert_eq!(titles.len(), 6);
-        assert!(!titles.iter().any(|t| t.contains("status bar") || t.contains("cutout")));
+        assert_eq!(titles.len(), 7);
+        assert!(!titles.iter().any(|t| t.contains("status bar") || t.contains("cutout") || t.contains("orientation")));
+        assert_eq!(display.items[6].title(), ROTATION_NOTE, "the help line says rotation is dropped");
         let PreferenceItem::Slider { common, value, .. } = &display.items[5] else { panic!("slider") };
         assert_eq!(*value, 60);
         assert_eq!(common.subtitle.as_deref(), Some("60%"));

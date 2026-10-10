@@ -136,7 +136,7 @@ Defect and edge IDs are `E-nn`. "Kotlin" means the behaviour observed in the fil
 | `fixtures/uri/*.txt` | one URI per line with the expected route, used by TC-53-02, TC-53-03, TC-53-14 |
 | `fixtures/notice/*.json` | serialised `AppAction` payloads (valid and invalid), used by TC-53-04, TC-53-05 |
 | `fixtures/progress/*.csv` | `(bytes, total, millis)` sequences with the expected notices, used by TC-53-13 |
-| `fixtures/desktop/io.github.blackbox.Kurobayomi.desktop` | golden copy of the desktop entry (`p1-rust-design.md` section 2.6) |
+| `fixtures/desktop/io.github.anas1412.Kurobayomi.desktop` | golden copy of the desktop entry (`p1-rust-design.md` section 2.6) |
 | `fixtures/mime/application-x-tachibk.xml` | golden copy of the MIME XML |
 | `fixtures/resolve/anime/*.json` and `fixtures/resolve/manga/*.json` | fake source responses: `getUriType`, `getAnime`, `getEpisode`, episode lists (kind, url, id) |
 | `fixtures/network/*.json` | `NetworkState` samples: connected+wifi, connected+ethernet, metered, no NM, offline |

@@ -89,7 +89,7 @@ pub fn nav() -> (gtk::Stack, gtk::ApplicationWindow) {
     thread_local! {
         static NAV: (gtk::Application, gtk::ApplicationWindow, gtk::Stack) = {
             let app = gtk::Application::builder()
-                .application_id("io.github.blackbox.KurobayomiTest")
+                .application_id("io.github.anas1412.KurobayomiTest")
                 .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
                 .build();
             app.register(gtk::gio::Cancellable::NONE).expect("register the test application");

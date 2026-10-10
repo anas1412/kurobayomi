@@ -9,6 +9,19 @@
 //! Fixtures: the T-3 data sets live with the code that reads them, in `crates/kuro-domain` (its `testdb` and the
 //! row builders in `fixtures`), not in `tests/fixtures/library`, because every pure rule they feed is tested there
 //! and in `t2` without a JSON round trip.
+//!
+//! Decision records (Android-only parts dropped or replaced):
+//! - T-37a-036: no pull gesture. F5 and the header refresh button update the active category, and the toast shows the
+//!   outcome (`actions::update_toast`).
+//! - T-37a-050: the global update says "Updating library"; a category update says "Updating category".
+//! - T-37a-052: dropped: haptic feedback, animated vector tab icons, the splash ready flag and the pull-to-refresh physics.
+//!   Nothing functional is lost; only tactile and motion feedback.
+//! - T-37a-053: the getting-started link opens through `gtk::UriLauncher` from the empty library
+//!   (`actions::shows_getting_started`). The Android intent path is removed.
+//! - T-37a-057: the interval-custom row is not drawn on the desktop. The filter still runs when the restriction is on
+//!   (`t2::filter`, T2-FILTER-06).
+//! - T-37a-058: an entry with only logged-out tracks sorts as -1.0 (E-14). A NaN mean counts as unscored
+//!   (`kuro_domain::library::order::tracker_mean`).
 #![allow(dead_code)] // some pure helpers are tested but not called yet
 
 pub mod actions;

@@ -100,6 +100,8 @@ pub const PREF_READER_THEME: &str = "Background color";
 pub const PREF_SHOW_PAGE_NUMBER: &str = "Show page number";
 pub const PREF_FULLSCREEN: &str = "Fullscreen";
 pub const PREF_CUTOUT_SHORT: &str = "Show content in cutout area";
+/// The help line that records the dropped cutout setting on Linux (T-43b-050). The key stays in the store.
+pub const CUTOUT_DROPPED_NOTE: &str = "Show content in cutout area is not used on Linux: there is no display cutout.";
 pub const PREF_KEEP_SCREEN_ON: &str = "Keep screen on";
 pub const PREF_READ_WITH_LONG_TAP: &str = "Show actions on long tap";
 pub const PREF_ALWAYS_SHOW_CHAPTER_TRANSITION: &str = "Always show chapter transition";

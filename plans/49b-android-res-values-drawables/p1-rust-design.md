@@ -11,9 +11,9 @@ kurobayomi/
     kurobayomi.gresource.xml    (new) bundles style.css, icons/, splash resources
     style.css                   (new) all CSS rules for this area (section 5)
     icons/hicolor/scalable/actions/kb-*-symbolic.svg         (new, 30-odd files, section 4)
-    icons/hicolor/scalable/apps/io.github.blackbox.Kurobayomi.svg   (new)
-    icons/hicolor/symbolic/apps/io.github.blackbox.Kurobayomi-symbolic.svg (new)
-    io.github.blackbox.Kurobayomi.desktop   (new, desktop actions, section 7)
+    icons/hicolor/scalable/apps/io.github.anas1412.Kurobayomi.svg   (new)
+    icons/hicolor/symbolic/apps/io.github.anas1412.Kurobayomi-symbolic.svg (new)
+    io.github.anas1412.Kurobayomi.desktop   (new, desktop actions, section 7)
   src/
     main.rs        (existing) calls theme::install and icons::register in build_ui before the window is shown
     theme.rs       (new) AppTheme enum, Palette struct, palette constants, CSS string builders, install()
@@ -274,14 +274,14 @@ impl Icon {
             Self::Forward10 => "kb-forward-10-symbolic",
             Self::TextShadow => "kb-text-shadow-symbolic",
             Self::FontFamily => "kb-font-family-symbolic",
-            Self::Logo => "io.github.blackbox.Kurobayomi",
-            Self::LogoSymbolic => "io.github.blackbox.Kurobayomi-symbolic",
+            Self::Logo => "io.github.anas1412.Kurobayomi",
+            Self::LogoSymbolic => "io.github.anas1412.Kurobayomi-symbolic",
         }
     }
 }
 
-pub const APP_ID: &str = "io.github.blackbox.Kurobayomi";
-pub const ICON_RESOURCE_PATH: &str = "/io/github/blackbox/Kurobayomi/icons";
+pub const APP_ID: &str = "io.github.anas1412.Kurobayomi";
+pub const ICON_RESOURCE_PATH: &str = "/io/github/anas1412/Kurobayomi/icons";
 
 /// Adds the bundled icon directory to the default display's icon theme.
 /// Must run before the first window is shown.
@@ -304,7 +304,7 @@ Full mapping rationale (which Android drawable becomes which `Icon` variant) is 
 1. One-time offline export (a script under `tools/`, run by hand, output committed): read each `Port` drawable from `app/src/main/res/drawable/` (paths in the inventory), take `android:viewportWidth`/`Height` as the SVG `viewBox`, copy each `android:pathData` verbatim into a `<path d="...">`, and set `fill="#bebebe"` (the GTK symbolic recolour key; GTK replaces `#bebebe` with the widget foreground). Strip the Android `android:fillColor` and keep `fill-rule` only where `android:fillType="evenOdd"`.
 2. Verify each exported file renders at 16 px and 24 px with `rsvg-convert` (or Inkscape) and inspect visually against the Android render.
 3. Check: `gtk::IconTheme::has_icon(name)` is true for each `Icon` variant (test in section 8).
-4. Launcher icon: `ic_launcher_foreground.xml` is full colour, not symbolic. Export it as `scalable/apps/io.github.blackbox.Kurobayomi.svg` with its original colours (no `#bebebe` recolour). The adaptive background is dropped (behavior 4.2 and inventory).
+4. Launcher icon: `ic_launcher_foreground.xml` is full colour, not symbolic. Export it as `scalable/apps/io.github.anas1412.Kurobayomi.svg` with its original colours (no `#bebebe` recolour). The adaptive background is dropped (behavior 4.2 and inventory).
 5. Monochrome launcher `ic_ani_monochrome_launcher.xml` and logo `ic_ani.xml` export as `-symbolic.svg` with `#bebebe` fills (the `ic_ani.xml` second path and first path both fill `#FFFFFF` in Android; in the symbolic export both become `#bebebe`).
 
 Custom symbolic icons added beyond the inventory's own rows (all sourced from the named Android file's base state):
@@ -457,7 +457,7 @@ Palette override is a per-theme choice. The default (`AppTheme::Default`) instal
 /// the `kb-amoled` class to the window when `dark` is true and the AMOLED preference is on.
 pub fn install(display: &gtk::gdk::Display, theme: AppTheme, dark: bool) -> [gtk::CssProvider; 2] {
     let base = gtk::CssProvider::new();
-    base.load_from_resource("/io/github/blackbox/Kurobayomi/style.css");
+    base.load_from_resource("/io/github/anas1412/Kurobayomi/style.css");
     gtk::style_context_add_provider_for_display(display, &base, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
     let palette = gtk::CssProvider::new();
@@ -488,14 +488,14 @@ pub fn install(display: &gtk::gdk::Display, theme: AppTheme, dark: bool) -> [gtk
 
 ## 7. Desktop actions (replaces `app/shortcuts.xml`)
 
-`data/io.github.blackbox.Kurobayomi.desktop` (installed to `share/applications/`):
+`data/io.github.anas1412.Kurobayomi.desktop` (installed to `share/applications/`):
 
 ```ini
 [Desktop Entry]
 Type=Application
 Name=Kurobayomi
 Exec=kurobayomi %U
-Icon=io.github.blackbox.Kurobayomi
+Icon=io.github.anas1412.Kurobayomi
 Terminal=false
 Categories=AudioVideo;Graphics;
 Actions=library;animelib;updates;history;browse;

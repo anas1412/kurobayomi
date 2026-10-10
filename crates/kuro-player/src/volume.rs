@@ -61,6 +61,17 @@ pub fn shows_slider_on_mpv_change(previous: Option<i64>, new: i64) -> bool {
     previous != Some(new)
 }
 
+/// One volume-key press (T-45a-046): mpv's own `volume` moves by `step` and stays in `0..=volume_max`.
+pub fn key_step(volume: i64, step: i32, volume_max: i64) -> i64 {
+    (volume + i64::from(step)).clamp(0, volume_max)
+}
+
+/// The mpv volume written when the window comes back from a hidden state (`onResume`,
+/// `PlayerActivity.kt:634-648`): 100 when the device volume is below its maximum, else nothing.
+pub fn resume_volume(device_steps: i32) -> Option<i64> {
+    (device_steps < VOLUME_STEPS).then_some(100)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +131,20 @@ mod tests {
     fn device_volume_is_clamped_at_zero() {
         let out = change_volume_by(state(0, 100, 30), -5);
         assert_eq!(out.writes, vec![VolumeWrite::System(0)]);
+    }
+
+    #[test]
+    fn t46_a_key_step_moves_mpv_volume_by_one_and_stays_in_range() {
+        assert_eq!(key_step(50, 1, 130), 51);
+        assert_eq!(key_step(50, -1, 130), 49);
+        assert_eq!(key_step(130, 1, 130), 130);
+        assert_eq!(key_step(0, -1, 130), 0);
+    }
+
+    #[test]
+    fn t46_resume_sets_100_only_below_the_device_maximum() {
+        assert_eq!(resume_volume(VOLUME_STEPS - 1), Some(100));
+        assert_eq!(resume_volume(VOLUME_STEPS), None);
     }
 
     #[test]

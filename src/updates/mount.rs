@@ -105,11 +105,13 @@ pub fn updates() -> Option<Built> {
     page.connect_unmap(|_| reset_new_updates());
     let spec = crate::ui::screen("updates");
     let mut end: Vec<gtk::Widget> = Vec::new();
+    let mut refresh: Option<gtk::Button> = None;
     for item in &spec.toolbar {
         let button = crate::ui::icon_button(&item.icon, &item.label);
         if item.label == UPDATE_LIBRARY {
             let stack = stack.clone();
             button.connect_clicked(move |button| update_library(button, &stack));
+            refresh = Some(button.clone());
         } else if item.label == VIEW_UPCOMING {
             // each kind has its own Upcoming page, as in the source (the anime tab opens the anime one)
             let stack = stack.clone();
@@ -126,6 +128,20 @@ pub fn updates() -> Option<Built> {
         end.push(button.upcast());
     }
     end.reverse();
+    if let Some(refresh) = refresh {
+        // F5 starts the same pass as the Refresh button (T-42b-042, in place of pull-to-refresh)
+        let keys = gtk::EventControllerKey::new();
+        let stack = stack.clone();
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if library_trigger::is_refresh_key(key) {
+                update_library(&refresh, &stack);
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        page.add_controller(keys);
+    }
     UPDATES.with(|u| *u.borrow_mut() = vec![anime, manga]);
     Some(Built { content: page.upcast(), end })
 }

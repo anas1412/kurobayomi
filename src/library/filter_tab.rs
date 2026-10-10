@@ -36,6 +36,8 @@ pub enum Item {
     Tri { filter: Filter, label: Label },
 }
 
+/// Decision (T-37a-057): the interval-custom row is not drawn on the desktop build; upstream draws it only in debug
+/// builds. The filter still runs when the restriction is on (`t2::filter`).
 /// The rows top to bottom (B-12.1). `trackers` are the logged-in trackers as (id, name), in tracker order: none gives no
 /// tracker row, one gives a single row, more give a heading and one row each.
 pub fn items(kind: EntryKind, trackers: &[(i64, String)]) -> Vec<Item> {
@@ -203,6 +205,20 @@ mod tests {
 
     fn prefs() -> LibraryPrefs {
         LibraryPrefs::new(PrefStore::in_memory())
+    }
+
+    #[test]
+    fn t_37a_057_the_interval_row_is_not_drawn_on_the_desktop() {
+        for kind in [EntryKind::Anime, EntryKind::Manga] {
+            for trackers in [vec![], vec![(1, "AniList".to_owned())], vec![(1, "A".to_owned()), (2, "B".to_owned())]] {
+                let rows = items(kind, &trackers);
+                assert!(
+                    rows.iter().all(|row| !matches!(row, Item::Tri { label: Label::Msg(MsgKey::action_filter_interval_custom), .. })),
+                    "{kind:?} with {} trackers",
+                    trackers.len()
+                );
+            }
+        }
     }
 
     #[test]

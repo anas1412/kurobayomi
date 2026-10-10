@@ -480,6 +480,11 @@ pub fn general_tab(prefs: &ReaderPrefs) -> gtk::Box {
     root.append(&check(strings::PREF_SHOW_PAGE_NUMBER, &prefs.show_page_number));
     root.append(&check(strings::PREF_FULLSCREEN, &prefs.fullscreen));
     root.append(&check(strings::PREF_KEEP_SCREEN_ON, &prefs.keep_screen_on));
+    let cutout_note = gtk::Label::new(Some(strings::CUTOUT_DROPPED_NOTE));
+    cutout_note.set_wrap(true);
+    cutout_note.set_xalign(0.0);
+    cutout_note.add_css_class("dim-label");
+    root.append(&cutout_note);
     root.append(&check(strings::PREF_READ_WITH_LONG_TAP, &prefs.read_with_long_tap));
     root.append(&check(strings::PREF_ALWAYS_SHOW_CHAPTER_TRANSITION, &prefs.always_show_chapter_transition));
     root.append(&check(strings::PREF_PAGE_TRANSITIONS, &prefs.page_transitions));

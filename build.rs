@@ -1,11 +1,11 @@
 //! Compiles the bundled icon theme (`src/theme/icons`) into a GResource under
-//! `/io/github/blackbox/Kurobayomi/icons`; `theme::icons::register` loads it at startup.
+//! `/io/github/anas1412/Kurobayomi/icons`; `theme::icons::register` loads it at startup.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const PREFIX: &str = "/io/github/blackbox/Kurobayomi/icons";
+const PREFIX: &str = "/io/github/anas1412/Kurobayomi/icons";
 
 fn files(dir: &Path, root: &Path, out: &mut Vec<String>) {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir).expect("read icon dir").map(|e| e.expect("dir entry").path()).collect();

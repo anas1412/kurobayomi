@@ -42,6 +42,28 @@ pub enum PlayerOrientation {
     SensorLandscape,
 }
 
+/// Rotation the desktop control sets in place of the orientation lock (T-45a-035): mpv `video-rotate`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum VideoRotate {
+    #[default]
+    Deg0,
+    Deg90,
+    Deg180,
+    Deg270,
+}
+
+impl VideoRotate {
+    /// The value mpv takes for `video-rotate`.
+    pub fn degrees(self) -> i64 {
+        match self {
+            Self::Deg0 => 0,
+            Self::Deg90 => 90,
+            Self::Deg180 => 180,
+            Self::Deg270 => 270,
+        }
+    }
+}
+
 /// Single-tap action bound to a media key or gesture (`PlayerEnums.kt:61-67`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SingleActionGesture {

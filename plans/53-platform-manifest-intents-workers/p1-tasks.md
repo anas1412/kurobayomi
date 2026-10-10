@@ -10,7 +10,7 @@ Every scope file is covered: the 56 files of the scope command appear in `p1-inv
 - Depends: area:01-foundation-app-bootstrap, area:36-ui-shell-navigation-security-webview
 - Sources: app/src/main/AndroidManifest.xml, app/src/main/java/eu/kanade/tachiyomi/ui/main/MainActivity.kt, src/main.rs
 - Acceptance:
-  - the binary starts one `gtk::ApplicationWindow` with application id `io.github.blackbox.Kurobayomi`, and `KUROBAYOMI_SMOKE=1 cargo run` still prints the `smoke:` line
+  - the binary starts one `gtk::ApplicationWindow` with application id `io.github.anas1412.Kurobayomi`, and `KUROBAYOMI_SMOKE=1 cargo run` still prints the `smoke:` line
   - the window opens on the Library tab when no launch request is given
   - the Android `isTaskRoot` check has no equivalent: a second process is handled by T-53a-007 and never creates a second window
 
@@ -20,7 +20,7 @@ Every scope file is covered: the 56 files of the scope command appear in `p1-inv
 - Depends: T-53a-011, T-53a-003
 - Sources: app/src/main/AndroidManifest.xml, app/shortcuts.xml
 - Acceptance:
-  - `io.github.blackbox.Kurobayomi.desktop` contains `Exec=kurobayomi %U`, `Icon=io.github.blackbox.Kurobayomi`, `StartupWMClass=io.github.blackbox.Kurobayomi`, `DBusActivatable=true`, `StartupNotify=true`
+  - `io.github.anas1412.Kurobayomi.desktop` contains `Exec=kurobayomi %U`, `Icon=io.github.anas1412.Kurobayomi`, `StartupWMClass=io.github.anas1412.Kurobayomi`, `DBusActivatable=true`, `StartupNotify=true`
   - the file is byte-equal to the golden copy in `p1-rust-design.md` section 2.6 (test TC-53-36)
   - `desktop-file-validate` exits 0
 
@@ -389,7 +389,7 @@ Every scope file is covered: the 56 files of the scope command appear in `p1-inv
 - Depends: T-53a-002, T-53a-003
 - Sources: app/src/main/AndroidManifest.xml (icon and roundIcon), app/src/main/res/drawable/ic_ani.xml
 - Acceptance:
-  - the icon `io.github.blackbox.Kurobayomi` resolves in the hicolor theme at 48, 128 and 256 pixels
+  - the icon `io.github.anas1412.Kurobayomi` resolves in the hicolor theme at 48, 128 and 256 pixels
   - the package post-install hook runs `update-desktop-database` and `update-mime-database`
   - `xdg-mime query default x-scheme-handler/kurobayomi` returns the desktop file
 

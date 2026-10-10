@@ -68,6 +68,12 @@ mod tests {
     }
 
     #[test]
+    fn no_more_row_routes_to_the_storage_tab() {
+        // T-47ba-017: the Storage tab is reached from Updates; the More list opens the settings screens only
+        assert!(rows("x").iter().all(|r| !r.target.starts_with("storage")));
+    }
+
+    #[test]
     fn player_row_opens_the_player_root_and_about_takes_the_given_subtitle() {
         let rows = rows("Kurobayomi Stable 0.1.0");
         assert_eq!(rows[3].target, "settings_player");

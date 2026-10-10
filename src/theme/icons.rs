@@ -9,10 +9,10 @@ use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
 
 /// The application id, also the icon name of the full-colour app icon.
-pub const APP_ID: &str = "io.github.blackbox.Kurobayomi";
+pub const APP_ID: &str = "io.github.anas1412.Kurobayomi";
 
 /// The bundled icon theme root: `scalable/actions/`, `scalable/apps/` and `symbolic/apps/` below it.
-pub const ICON_RESOURCE_PATH: &str = "/io/github/blackbox/Kurobayomi/icons";
+pub const ICON_RESOURCE_PATH: &str = "/io/github/anas1412/Kurobayomi/icons";
 
 /// One icon the app shows. `name()` is the icon-theme name looked up at run time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,7 +167,7 @@ impl Icon {
             Icon::TextShadow => "kb-text-shadow-symbolic",
             Icon::FontFamily => "kb-font-family-symbolic",
             Icon::Logo => APP_ID,
-            Icon::LogoSymbolic => "io.github.blackbox.Kurobayomi-symbolic",
+            Icon::LogoSymbolic => "io.github.anas1412.Kurobayomi-symbolic",
         }
     }
 
@@ -175,8 +175,8 @@ impl Icon {
     /// name that the user's icon theme provides.
     pub const fn bundled_path(self) -> Option<&'static str> {
         Some(match self {
-            Icon::Logo => "scalable/apps/io.github.blackbox.Kurobayomi.svg",
-            Icon::LogoSymbolic => "symbolic/apps/io.github.blackbox.Kurobayomi-symbolic.svg",
+            Icon::Logo => "scalable/apps/io.github.anas1412.Kurobayomi.svg",
+            Icon::LogoSymbolic => "symbolic/apps/io.github.anas1412.Kurobayomi-symbolic.svg",
             Icon::AnimeLibraryOutline => "scalable/actions/kb-animelibrary-outline-symbolic.svg",
             Icon::AnimeLibraryFilled => "scalable/actions/kb-animelibrary-filled-symbolic.svg",
             Icon::LibraryManga => "scalable/actions/kb-library-symbolic.svg",
@@ -362,7 +362,7 @@ mod tests {
         assert_eq!(Icon::DownloadCircle.name(), "kb-download-circle-symbolic");
         assert_eq!(Icon::ReaderContinuousVertical.name(), "kb-reader-continuous-vertical-symbolic");
         assert_eq!(Icon::Logo.name(), APP_ID);
-        assert_eq!(Icon::LogoSymbolic.name(), "io.github.blackbox.Kurobayomi-symbolic");
+        assert_eq!(Icon::LogoSymbolic.name(), "io.github.anas1412.Kurobayomi-symbolic");
     }
 
     #[test]
@@ -478,15 +478,15 @@ mod tests {
         assert_eq!(themed.names()[0].as_str(), "accessories-dictionary-symbolic");
         let logo = notification_icon(Icon::Logo);
         let logo = logo.downcast_ref::<gtk::gio::ThemedIcon>().expect("themed icon");
-        assert_eq!(logo.names()[0].as_str(), "io.github.blackbox.Kurobayomi");
+        assert_eq!(logo.names()[0].as_str(), "io.github.anas1412.Kurobayomi");
     }
 
     #[test]
     fn app_icon_is_full_colour_and_symbolic_is_separate() {
-        assert_eq!(Icon::Logo.bundled_path(), Some("scalable/apps/io.github.blackbox.Kurobayomi.svg"));
+        assert_eq!(Icon::Logo.bundled_path(), Some("scalable/apps/io.github.anas1412.Kurobayomi.svg"));
         assert_eq!(
             Icon::LogoSymbolic.bundled_path(),
-            Some("symbolic/apps/io.github.blackbox.Kurobayomi-symbolic.svg")
+            Some("symbolic/apps/io.github.anas1412.Kurobayomi-symbolic.svg")
         );
     }
 
@@ -533,7 +533,7 @@ mod tests {
     /// T-49ba-017: the full-colour app icon keeps the launcher colours and has no background tile.
     #[test]
     fn app_icon_keeps_the_launcher_colours() {
-        let text = std::fs::read_to_string(icon_file("scalable/apps/io.github.blackbox.Kurobayomi.svg")).expect("svg");
+        let text = std::fs::read_to_string(icon_file("scalable/apps/io.github.anas1412.Kurobayomi.svg")).expect("svg");
         for colour in ["#000", "#2E84BF", "#69A3CB", "#C92824", "#FFFFFF"] {
             assert!(text.contains(&format!("fill=\"{colour}\"")), "missing {colour}");
         }
@@ -564,7 +564,7 @@ mod brand_tests {
     fn brand_resource_paths_point_into_the_bundle() {
         assert_eq!(
             Brand::Magnet.resource_path(),
-            "/io/github/blackbox/Kurobayomi/icons/brand/magnet.svg"
+            "/io/github/anas1412/Kurobayomi/icons/brand/magnet.svg"
         );
     }
 }

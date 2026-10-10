@@ -537,7 +537,7 @@ async fn t_30a_025_authed_calls_send_the_kurobayomi_user_agent_and_no_cache() {
         .unwrap()
         .to_owned();
     assert!(agent.starts_with(UA_PREFIX));
-    assert!(agent.ends_with("(io.github.blackbox.Kurobayomi)"));
+    assert!(agent.ends_with("(io.github.anas1412.Kurobayomi)"));
 }
 
 #[tokio::test]

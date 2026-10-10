@@ -169,13 +169,13 @@ This area reads only files that ship inside the APK. It writes nothing.
 | app/src/main/AndroidManifest.xml | manifest (theme refs at lines 50, 57, 214, 225) | Android |
 
 Linux equivalents this plan produces (not present yet):
-- `data/icons/hicolor/scalable/apps/io.github.blackbox.Kurobayomi.svg` (full-colour app icon)
-- `data/icons/hicolor/symbolic/apps/io.github.blackbox.Kurobayomi-symbolic.svg` (monochrome app icon)
+- `data/icons/hicolor/scalable/apps/io.github.anas1412.Kurobayomi.svg` (full-colour app icon)
+- `data/icons/hicolor/symbolic/apps/io.github.anas1412.Kurobayomi-symbolic.svg` (monochrome app icon)
 - `data/icons/hicolor/scalable/actions/kb-*-symbolic.svg` (custom symbolic icons; list in the icon topic)
 - `data/style.css` (GResource-bundled stylesheet; palette and token rules)
-- `data/io.github.blackbox.Kurobayomi.desktop` (desktop actions)
+- `data/io.github.anas1412.Kurobayomi.desktop` (desktop actions)
 
-The app id `io.github.blackbox.Kurobayomi` is the one already used by the mockup (`src/main.rs:13`).
+The app id `io.github.anas1412.Kurobayomi` is the one already used by the mockup (`src/main.rs:13`).
 
 ---
 

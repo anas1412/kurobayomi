@@ -89,7 +89,7 @@ thread: kuro-rt
 location: crates/kuro-core/src/foo.rs:42:9
 message: index out of bounds: the len is 3 but the index is 7
 [facts]
-app_id: io.github.blackbox.Kurobayomi
+app_id: io.github.anas1412.Kurobayomi
 app_version: 0.1.0 (a1b2c3d, 1, 2026-10-08T11:00:00Z)
 os: CachyOS Linux
 kernel: Linux 7.2.9-1-cachyos
@@ -118,7 +118,7 @@ Rules: the first line is the magic and version; lines before `[facts]` are `key:
 ## 5. Reporter mode (replaces `CrashActivity`)
 
 `crash_window::run(path)`:
-1. `gtk::init()`; create `gtk::Application` with id `io.github.blackbox.Kurobayomi.CrashReporter` and flags `NON_UNIQUE` (so it never collides with the main instance's D-Bus name; equivalent of the separate `:error_handler` process). No settings, DB, runtime, logging file, migrator, or crash hook other than `eprintln` is initialised. Theme mode is applied by reading `settings.toml` directly with a minimal parser if present (best effort; failure ignored) so the window matches the user's light/dark choice; otherwise GTK's own settings apply.
+1. `gtk::init()`; create `gtk::Application` with id `io.github.anas1412.Kurobayomi.CrashReporter` and flags `NON_UNIQUE` (so it never collides with the main instance's D-Bus name; equivalent of the separate `:error_handler` process). No settings, DB, runtime, logging file, migrator, or crash hook other than `eprintln` is initialised. Theme mode is applied by reading `settings.toml` directly with a minimal parser if present (best effort; failure ignored) so the window matches the user's light/dark choice; otherwise GTK's own settings apply.
 2. Read the file. Success: show the parsed text. Failure (missing, unreadable, empty): log `Wasn't able to retrieve crash report` (same wording as Kotlin's `Wasn't able to retrieve throwable from intent`) to stderr and show the fallback text.
 3. Present the window (`p1-ui-parity.md` section 2).
 4. Buttons: "Share crash logs" (section 6), "Restart the application" (section 7).

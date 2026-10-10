@@ -16,7 +16,7 @@ Dependency tokens: T-ids inside this file or other areas, or `area:<id>`.
 - Depends: area:01-foundation-app-bootstrap, area:11-app-migrations, area:02-preferences-system
 - Sources: app/src/main/java/eu/kanade/tachiyomi/ui/main/MainActivity.kt, app/src/main/java/mihon/core/migration/Migrator.kt, app/src/main/java/eu/kanade/tachiyomi/ui/base/activity/BaseActivity.kt, src/main.rs
 - Acceptance:
-  - `gtk::Application` id `io.github.blackbox.Kurobayomi` registers on D-Bus; a second launch forwards its arguments to the first instance and exits with status 0.
+  - `gtk::Application` id `io.github.anas1412.Kurobayomi` registers on D-Bus; a second launch forwards its arguments to the first instance and exits with status 0.
   - The first window is not presented until the migration future resolves (no `block_on` on the GTK thread).
   - The tokio runtime is created once in `main` and reachable from `shell::Shell`.
   - A debug run with `KUROBAYOMI_SMOKE` set still uses `ApplicationFlags::NON_UNIQUE` (src/main.rs:15-16).

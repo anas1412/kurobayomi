@@ -10,7 +10,7 @@ Task ids use the prefix T-49ba-. Every scope path appears in at least one task's
 - Acceptance:
   - `src/theme.rs` exposes `install(display, theme, dark)` and both `CssProvider`s are installed before the first window is presented (`src/main.rs` `build_ui`).
   - With the default `AppTheme::Default` no palette CSS is loaded: the provider content is empty and `@theme_bg_color` on the window equals the active GTK theme value (Tokyo Night check).
-  - `data/style.css` is bundled as `/io/github/blackbox/Kurobayomi/style.css` and loads with zero `parsing-error` events (test T1).
+  - `data/style.css` is bundled as `/io/github/anas1412/Kurobayomi/style.css` and loads with zero `parsing-error` events (test T1).
 
 ### T-49ba-002 — AppTheme preference model and stored-value compatibility
 - Priority: P0
@@ -86,7 +86,7 @@ Task ids use the prefix T-49ba-. Every scope path appears in at least one task's
 - Sources: app/src/main/res/drawable/ic_close_24dp.xml, app/src/main/res/drawable/ic_pause_24dp.xml, app/src/main/res/drawable/ic_play_arrow_24dp.xml, app/src/main/res/drawable/ic_skip_next_24dp.xml, app/src/main/res/drawable/ic_skip_previous_24dp.xml
 - Acceptance:
   - `src/icons.rs` defines `enum Icon` with the variants in `p1-rust-design.md` section 2.3 and `name()` returns exactly the listed names.
-  - `icons::register(display)` adds `/io/github/blackbox/Kurobayomi/icons` to the icon theme before the window is shown.
+  - `icons::register(display)` adds `/io/github/anas1412/Kurobayomi/icons` to the icon theme before the window is shown.
   - Test T2 passes: every variant resolves with `IconTheme::has_icon`.
 
 ### T-49ba-010 — Icon export pipeline (VectorDrawable to symbolic SVG)
@@ -126,7 +126,7 @@ Task ids use the prefix T-49ba-. Every scope path appears in at least one task's
 - Sources: app/src/main/res/drawable/ic_book_24dp.xml, app/src/main/res/drawable/ic_done_24dp.xml, app/src/main/res/drawable/ic_dns_24dp.xml, app/src/main/res/drawable/ic_extension_24dp.xml, app/src/main/res/drawable/ic_folder_24dp.xml, app/src/main/res/drawable/ic_info_24dp.xml, app/src/main/res/drawable/ic_photo_24dp.xml, app/src/main/res/drawable/ic_refresh_24dp.xml, app/src/main/res/drawable/ic_share_24dp.xml, app/src/main/res/drawable/ic_system_update_alt_white_24dp.xml, app/src/main/java/eu/kanade/tachiyomi/data/download/manga/MangaDownloadNotifier.kt, app/src/main/java/eu/kanade/tachiyomi/data/library/manga/MangaLibraryUpdateNotifier.kt, app/src/main/java/eu/kanade/tachiyomi/data/updater/AppUpdateNotifier.kt, app/src/main/java/eu/kanade/tachiyomi/data/backup/BackupNotifier.kt, app/src/main/java/eu/kanade/tachiyomi/ui/reader/SaveImageNotifier.kt, app/src/main/java/eu/kanade/tachiyomi/data/player/service/HttpServerService.kt, app/src/main/java/eu/kanade/tachiyomi/extension/ExtensionUpdateNotifier.kt
 - Acceptance:
   - Every notification the scope's icons appear in uses `gio::ThemedIcon` with the standard name from the inventory (for example `accessories-dictionary-symbolic` for book, `object-select-symbolic` for done).
-  - Notifications default to `io.github.blackbox.Kurobayomi` (`Icon::Logo`) where Android used `ic_ani`.
+  - Notifications default to `io.github.anas1412.Kurobayomi` (`Icon::Logo`) where Android used `ic_ani`.
   - No notification sets an accent colour (the `accent_blue` tint is dropped; see T-49ba-038 for the colour drop).
 
 ### T-49ba-014 — Entry-list calendar and drag-handle icons
@@ -163,8 +163,8 @@ Task ids use the prefix T-49ba-. Every scope path appears in at least one task's
 - Depends: T-49ba-010
 - Sources: app/src/main/res/drawable/ic_launcher_foreground.xml, app/src/main/res/mipmap/ic_launcher.xml, app/src/main/res/mipmap/ic_launcher_round.xml
 - Acceptance:
-  - `data/icons/hicolor/scalable/apps/io.github.blackbox.Kurobayomi.svg` renders with the original colours (`#000`, `#2E84BF`, `#69A3CB`, `#C92824`, `#FFFFFF`, `#FF000000`) and no background tile (the Android mipmap background is transparent).
-  - The `.desktop` file (T-49ba-037) uses `Icon=io.github.blackbox.Kurobayomi`.
+  - `data/icons/hicolor/scalable/apps/io.github.anas1412.Kurobayomi.svg` renders with the original colours (`#000`, `#2E84BF`, `#69A3CB`, `#C92824`, `#FFFFFF`, `#FF000000`) and no background tile (the Android mipmap background is transparent).
+  - The `.desktop` file (T-49ba-037) uses `Icon=io.github.anas1412.Kurobayomi`.
   - The icon appears in the KDE application menu and task switcher.
 
 ### T-49ba-018 — Logo icon (in-app symbolic) and monochrome launcher symbol
@@ -173,7 +173,7 @@ Task ids use the prefix T-49ba-. Every scope path appears in at least one task's
 - Depends: T-49ba-010
 - Sources: app/src/main/res/drawable/ic_ani.xml, app/src/main/res/drawable/ic_ani_monochrome_launcher.xml, app/src/main/java/eu/kanade/presentation/more/LogoHeader.kt
 - Acceptance:
-  - `data/icons/hicolor/symbolic/apps/io.github.blackbox.Kurobayomi-symbolic.svg` exists with `#bebebe` fills and renders the Aniyomi logo.
+  - `data/icons/hicolor/symbolic/apps/io.github.anas1412.Kurobayomi-symbolic.svg` exists with `#bebebe` fills and renders the Aniyomi logo.
   - The More-page logo header (UI in p1-ui-parity.md section 12) shows a 64 px symbolic logo with 56 px vertical padding and a separator below.
 
 ### T-49ba-019 — Entry expand/collapse caret (static states)
@@ -355,7 +355,7 @@ Task ids use the prefix T-49ba-. Every scope path appears in at least one task's
 - Depends: T-49ba-009
 - Sources: app/shortcuts.xml, core/common/src/main/java/eu/kanade/tachiyomi/core/Constants.kt, app/src/main/java/eu/kanade/tachiyomi/ui/main/MainActivity.kt, app/src/main/res/drawable/sc_collections_bookmark_48dp.xml, app/src/main/res/drawable/sc_collections_baseline_48dp.xml, app/src/main/res/drawable/sc_new_releases_48dp.xml, app/src/main/res/drawable/sc_history_48dp.xml, app/src/main/res/drawable/sc_explore_48dp.xml
 - Acceptance:
-  - `data/io.github.blackbox.Kurobayomi.desktop` has five `[Desktop Action]` groups with unique names: `library`, `animelib`, `updates`, `history`, `browse`.
+  - `data/io.github.anas1412.Kurobayomi.desktop` has five `[Desktop Action]` groups with unique names: `library`, `animelib`, `updates`, `history`, `browse`.
   - `kurobayomi --action=<name>` routes to the same screens as MainActivity (`Library`, `AnimeLib`, `Updates`, `History`, `Browse`).
   - Test T13 passes (`desktop-file-validate`).
   - The duplicate `show_recently_updated` id bug is not reproduced.

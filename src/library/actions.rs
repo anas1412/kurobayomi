@@ -17,6 +17,7 @@ use kuro_domain::error::DomainError;
 use kuro_domain::kind::EntryKind;
 use kuro_domain::library::active::continue_target;
 use kuro_domain::library::model::LibraryRow;
+use kuro_domain::library::search::EmptyPage;
 
 use crate::updates::download_actions::UnitTarget;
 use crate::updates::download_exec;
@@ -305,6 +306,12 @@ pub fn update_toast(scope: UpdateScope, already_running: bool) -> String {
         (false, UpdateScope::Library) => MsgKey::updating_library,
         (false, UpdateScope::Category) => MsgKey::updating_category,
     })
+}
+
+/// The getting-started button shows only on the empty state of a library with no entries, no search and no filter
+/// (T-37a-053; upstream's empty-library action). Opens the guide through `gtk::UriLauncher`, not an intent.
+pub fn shows_getting_started(page: EmptyPage) -> bool {
+    page == EmptyPage::LibraryEmpty
 }
 
 /// The toast when the continue button finds nothing to open (E-25).
@@ -649,6 +656,15 @@ mod tests {
     fn t2_upd_01_global_and_category_update_messages() {
         assert_eq!(update_toast(UpdateScope::Library, false), "Updating library");
         assert_eq!(update_toast(UpdateScope::Category, false), "Updating category");
+    }
+
+    #[test]
+    fn t_37a_053_getting_started_shows_only_for_an_empty_library() {
+        use kuro_domain::library::search::empty_page;
+        assert!(shows_getting_started(empty_page(false, false, true)));
+        assert!(!shows_getting_started(empty_page(true, false, true)), "a search leaves no room for it");
+        assert!(!shows_getting_started(empty_page(false, true, true)), "an active filter does not");
+        assert!(!shows_getting_started(empty_page(false, false, false)), "an empty category is not an empty library");
     }
 
     #[test]

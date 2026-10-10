@@ -199,7 +199,7 @@ Rust: `tokio::sync::watch::Receiver<usize>` per manager (rust-design §4). Area:
 
 | Android resource | Used in | Kurobayomi replacement (GTK symbolic icon name, to verify against the Adwaita/Papirus set on the user's machine) |
 |---|---|---|
-| `R.drawable.ic_ani` | LogoHeader | `applications-multimedia-symbolic` (matches mockup `src/screens.rs:339`) or the app's own `io.github.blackbox.Kurobayomi` icon (area:49b) |
+| `R.drawable.ic_ani` | LogoHeader | `applications-multimedia-symbolic` (matches mockup `src/screens.rs:339`) or the app's own `io.github.anas1412.Kurobayomi` icon (area:49b) |
 | `R.drawable.ic_glasses_24dp` | Incognito row | `dialog-password-symbolic` or a bundled SVG (area:49b). Proposal: bundle the SVG so the glasses look is kept |
 | `R.drawable.ic_updates_outline_24dp` | NavStyle MOVE_UPDATES_TO_MORE | `document-open-recent-symbolic` |
 | `R.drawable.anim_more_enter` | MoreTab animated tab icon | static `open-menu-symbolic`; animation dropped (see rust-design §8) |

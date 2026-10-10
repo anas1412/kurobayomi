@@ -162,7 +162,7 @@ pub fn parse(property: &str, value: &str) -> Option<BridgeCommand> {
         return None;
     };
     if matches!(command, BridgeCommand::SoftwareKeyboard(_)) {
-        tracing::info!("software keyboard is not supported on desktop; ignored");
+        tracing::debug!("software keyboard is not supported on desktop; ignored");
     }
     Some(command)
 }

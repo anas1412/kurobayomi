@@ -25,7 +25,7 @@ pub fn record_empty_open_fetch(anime_id: i64, now_ms: i64) {
 /// What started a refresh.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trigger {
-    /// The refresh button or the pull-to-refresh gesture.
+    /// The refresh button or F5 (T-39a-038). The desktop has no pull-to-refresh gesture.
     Manual,
     /// The first open of the page.
     Open,

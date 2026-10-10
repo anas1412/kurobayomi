@@ -17,7 +17,7 @@ use crate::chapters::{self, Segment};
 use crate::completion::Completion;
 use crate::desktop::Desktop;
 use crate::config::{apply_fonts_dir, apply_user_files, write_mpv_config};
-use crate::enums::{Decoder, GpuKind};
+use crate::enums::{Decoder, GpuKind, VideoRotate};
 use crate::errors::PlayerMessage;
 use crate::external::{self, ExternalError, FinalSave, Launch, Plan, Preset};
 use crate::ipc;
@@ -42,6 +42,7 @@ use crate::tracks::{
 };
 use crate::tracking::Tracking;
 use crate::types::{TimeStamp, Track, Video};
+use crate::volume::key_step;
 use crate::window::{CommandSink, accepts_event, execute, on_resume, take_volume_restore};
 
 /// The `FILE_LOADED` steps that the window performs itself, after the session ran the others.
@@ -481,13 +482,31 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
         self.host.set_str(name, &value.to_string())
     }
 
-    /// `onResume`: clears the exit gate and restores the remembered volume once after a hidden window.
-    pub fn resume(&mut self, remembered_volume: Option<i64>) -> Result<(), MpvError> {
+    /// `onResume`: clears the exit gate and, once after a hidden window, applies the volume rule
+    /// (T-45a-046). `device_steps` is the device volume read by the caller.
+    pub fn resume(&mut self, device_steps: i32) -> Result<(), MpvError> {
         on_resume(&mut self.state);
-        match take_volume_restore(&mut self.state, remembered_volume) {
+        match take_volume_restore(&mut self.state, device_steps) {
             Some(volume) => self.host.set_str("volume", &volume.to_string()),
             None => Ok(()),
         }
+    }
+
+    /// Sets mpv `video-rotate` from the desktop rotation control (T-45a-035).
+    pub fn set_video_rotate(&self, rotate: VideoRotate) -> Result<(), MpvError> {
+        self.host.set_str("video-rotate", &rotate.degrees().to_string())
+    }
+
+    /// A volume key press (T-45a-046): mpv's own `volume` moves one step inside `0..=volume-max`.
+    pub fn volume_key(&self, step: i32) -> Result<(), MpvError> {
+        let volume = self.read_int("volume").unwrap_or(100);
+        let max = self.read_int("volume-max").unwrap_or(130);
+        self.host
+            .set_str("volume", &key_step(volume, step, max).to_string())
+    }
+
+    fn read_int(&self, name: &str) -> Option<i64> {
+        self.host.get_str(name)?.parse::<f64>().ok().map(|v| v as i64)
     }
 
     /// The toast for a finished screenshot, if any.
@@ -940,17 +959,47 @@ mod tests {
     fn resume_restores_the_volume_once_and_screenshot_toasts() {
         let mut session = Session::new(Fake::default());
         session.state.is_exiting = true;
-        session.resume(Some(70)).unwrap();
-        session.resume(Some(70)).unwrap();
+        session.resume(3).unwrap();
+        session.resume(3).unwrap();
         assert_eq!(
             *session.host.writes.borrow(),
-            vec![("volume".to_owned(), "70".to_owned())]
+            vec![("volume".to_owned(), "100".to_owned())]
         );
         assert_eq!(
             session.screenshot_done(Ok(())),
             Some(PlayerMessage::PictureSaved)
         );
         assert_eq!(session.screenshot_done(Err("full")), None);
+    }
+
+    #[test]
+    fn t45a035_the_rotation_control_writes_video_rotate() {
+        let session = Session::new(Fake::default());
+        session.set_video_rotate(VideoRotate::Deg270).unwrap();
+        assert_eq!(
+            *session.host.writes.borrow(),
+            vec![("video-rotate".to_owned(), "270".to_owned())]
+        );
+    }
+
+    #[test]
+    fn t46_volume_key_moves_mpv_volume_one_step_within_volume_max() {
+        let session = Session::new(Fake::default());
+        session.host.props.borrow_mut().insert("volume".into(), "100".into());
+        session.host.props.borrow_mut().insert("volume-max".into(), "130".into());
+        session.volume_key(1).unwrap();
+        session.host.props.borrow_mut().insert("volume".into(), "130".into());
+        session.volume_key(1).unwrap();
+        session.host.props.borrow_mut().insert("volume".into(), "0".into());
+        session.volume_key(-1).unwrap();
+        assert_eq!(
+            *session.host.writes.borrow(),
+            vec![
+                ("volume".to_owned(), "101".to_owned()),
+                ("volume".to_owned(), "130".to_owned()),
+                ("volume".to_owned(), "0".to_owned()),
+            ]
+        );
     }
 
     #[test]

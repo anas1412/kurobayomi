@@ -296,7 +296,7 @@ pub fn on_pref_change<F: Fn() + 'static>(rx: async_channel::Receiver<()>, f: F) 
 Android WorkManager gives constraints (network type, metered, charging, battery-not-low) and survives app death. On Linux there is no equivalent in-process guarantee.
 
 Options:
-- **A (recommended, Proposal):** in-process scheduler in tokio. Next-run timestamps are stored in SQLite (area 26). Work runs while the app is open. Optional autostart: the app writes `$XDG_CONFIG_HOME/autostart/io.github.blackbox.Kurobayomi.desktop` when the user enables "Run in background" (a new row not in the Android screen, to be added with explicit sign-off).
+- **A (recommended, Proposal):** in-process scheduler in tokio. Next-run timestamps are stored in SQLite (area 26). Work runs while the app is open. Optional autostart: the app writes `$XDG_CONFIG_HOME/autostart/io.github.anas1412.Kurobayomi.desktop` when the user enables "Run in background" (a new row not in the Android screen, to be added with explicit sign-off).
 - **B:** systemd `--user` timer `kurobayomi-update.timer` (`OnUnitActiveSec=` = interval) that runs `kurobayomi --update-library`. Works without the GUI; more moving parts.
 
 Constraint mapping (Proposal for both options):

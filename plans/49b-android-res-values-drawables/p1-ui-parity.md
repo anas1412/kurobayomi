@@ -286,7 +286,7 @@ Visible elements (OBSERVED): every notifier uses a small icon from this area, an
 
 Desktop equivalent:
 - Use `gio::Notification::set_icon(&gio::ThemedIcon::new(name))` with the standard names from the inventory (`dialog-warning-symbolic`, `object-select-symbolic`, `view-refresh-symbolic`, `folder-symbolic`, `application-x-addon-symbolic`, `network-server-symbolic`, `software-update-available-symbolic`, `image-x-generic-symbolic`, `accessories-dictionary-symbolic`, `dialog-information-symbolic`, `window-close-symbolic`, `document-send-symbolic`, `media-playback-start-symbolic`, `media-playback-pause-symbolic`).
-- The app notifications use `io.github.blackbox.Kurobayomi` (`Icon::Logo`) as the default icon, matching `ic_ani` in Android.
+- The app notifications use `io.github.anas1412.Kurobayomi` (`Icon::Logo`) as the default icon, matching `ic_ani` in Android.
 - Accent colour: not applicable; the desktop environment decides.
 
 Mockup gap: the mockup does not send notifications yet.

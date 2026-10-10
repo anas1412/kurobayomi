@@ -48,7 +48,7 @@ pub mod write;
 /// names the project, since no repository URL is decided yet (see the DECISIONS of the tracker lane).
 pub fn user_agent() -> String {
     format!(
-        "Kurobayomi/{} ({}) (io.github.blackbox.Kurobayomi)",
+        "Kurobayomi/{} ({}) (io.github.anas1412.Kurobayomi)",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS
     )

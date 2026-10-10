@@ -203,7 +203,7 @@ Common headers for `authClient` requests (set by `KitsuInterceptor`, I:38-43):
 - `Accept: application/vnd.api+json`
 - `Content-Type: application/vnd.api+json`
 
-Proposal: `User-Agent: Kurobayomi v<CARGO_PKG_VERSION> (io.github.blackbox.Kurobayomi)`. Keep the other three headers.
+Proposal: `User-Agent: Kurobayomi v<CARGO_PKG_VERSION> (io.github.anas1412.Kurobayomi)`. Keep the other three headers.
 
 ### 4.1 Login (password grant)
 - Method and URL: `POST https://kitsu.app/api/oauth/token`

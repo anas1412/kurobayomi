@@ -1,6 +1,7 @@
 //! Header shortcuts of the entry screens (T-38a-046). The chapter and episode list keys are `selection::key_command`. In the
-//! header: F opens the filter sheet, R refreshes, Ctrl+M migrates and W opens the WebView when it is available. Upstream:
-//! `MangaScreen.kt` key handling. Pure: the window asks `header_key` and shows `HELP`.
+//! header: F opens the filter sheet, R or Ctrl+R refreshes (Ctrl+R replaces the dropped pull gesture, T-38a-050), Ctrl+M
+//! migrates and W opens the WebView when it is available. Upstream: `MangaScreen.kt` key handling. Pure: the window asks
+//! `header_key` and shows `HELP`.
 
 use super::selection::Mods;
 
@@ -17,7 +18,7 @@ pub enum HeaderKey {
 pub fn header_key(letter: char, mods: Mods, webview_available: bool) -> Option<HeaderKey> {
     match (letter, mods.ctrl) {
         ('f', false) => Some(HeaderKey::Filter),
-        ('r', false) => Some(HeaderKey::Refresh),
+        ('r', _) => Some(HeaderKey::Refresh),
         ('m', true) => Some(HeaderKey::Migrate),
         ('w', false) if webview_available => Some(HeaderKey::WebView),
         _ => None,
@@ -51,6 +52,7 @@ mod tests {
         let ctrl = Mods { ctrl: true, shift: false };
         assert_eq!(header_key('f', none, false), Some(HeaderKey::Filter));
         assert_eq!(header_key('r', none, false), Some(HeaderKey::Refresh));
+        assert_eq!(header_key('r', ctrl, false), Some(HeaderKey::Refresh), "Ctrl+R refreshes (T-38a-050)");
         assert_eq!(header_key('m', ctrl, false), Some(HeaderKey::Migrate));
         assert_eq!(header_key('m', none, false), None, "M alone does nothing");
         assert_eq!(header_key('x', none, true), None);

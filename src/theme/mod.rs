@@ -11,7 +11,7 @@
 //! 040, 042, 047). Each has one reason here:
 //! - Dynamic colour: the Android `m3_sys_color_dynamic_*` tokens are never read. Monet here is the
 //!   desktop accent colour from the settings portal, a Linux feature (T-49a-005).
-//! - `lightStatusBar`, `lightNavigationBar`, `elevationOverlayEnabled`, `windowLightNavigationBar`
+//! - `lightStatusBar`, `windowLightStatusBar`, `lightNavigationBar`, `elevationOverlayEnabled`, `windowLightNavigationBar`
 //!   and the API-27 navigation-bar overrides: GTK has no system bars and no forced dark mode; the
 //!   dark decision comes from the window background (`dark::`).
 //! - `forceDarkAllowed`, `statusBarColor`, `navigationBarColor`, `navigationBarDividerColor`,

@@ -8,6 +8,7 @@
 pub mod constraints;
 pub mod counters;
 pub mod download;
+pub mod downloaded;
 pub mod entry;
 pub mod error;
 pub mod error_log;

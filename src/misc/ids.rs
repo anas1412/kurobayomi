@@ -58,7 +58,7 @@ pub const ALL_IDS: &[&str] = &[
     EXTENSIONS_INSTALLING,
 ];
 
-/// The notice kinds of the registry (T-35a-080, T-35a-081, T-35a-082).
+/// The notice kinds of the registry (T-35a-080, T-35a-081, T-35a-082, T-35a-083, T-35a-084, T-35a-085, T-35a-086).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Category {
     AppUpdate,
@@ -69,6 +69,10 @@ pub enum Category {
     DownloadErrors,
     BackupProgress,
     BackupComplete,
+    Incognito,
+    ServerStatus,
+    ExtensionUpdates,
+    SaveImage,
 }
 
 /// How urgently a notice is shown.
@@ -81,7 +85,7 @@ pub enum Priority {
 
 impl Category {
     /// The category of a slot id, with or without its per-entry or per-kind `:suffix`. `None` for an id that has no
-    /// category (the save-image notice, the incognito notice and the server notices).
+    /// category (the server notices are status lines in the window, see T-35a-084).
     pub fn of(id: &str) -> Option<Self> {
         let base = id.split(':').next().unwrap_or(id);
         Some(match base {
@@ -93,6 +97,10 @@ impl Category {
             DOWNLOAD_MANGA_ERROR | DOWNLOAD_ANIME_ERROR => Self::DownloadErrors,
             BACKUP_PROGRESS | RESTORE_PROGRESS => Self::BackupProgress,
             BACKUP_COMPLETE | RESTORE_COMPLETE => Self::BackupComplete,
+            INCOGNITO => Self::Incognito,
+            SERVER_TORRENT | SERVER_HTTP => Self::ServerStatus,
+            EXTENSIONS_UPDATES | EXTENSIONS_INSTALLING => Self::ExtensionUpdates,
+            SAVE_IMAGE => Self::SaveImage,
             _ => return None,
         })
     }
@@ -159,7 +167,13 @@ mod tests {
         assert_eq!(Category::of(DOWNLOAD_ANIME_ERROR), Some(Category::DownloadErrors));
         assert_eq!(Category::of(RESTORE_COMPLETE), Some(Category::BackupComplete));
         assert_eq!(Category::of(APP_UPDATE_INSTALL), Some(Category::AppUpdate));
-        assert_eq!(Category::of(SAVE_IMAGE), None);
+        assert_eq!(Category::of(SAVE_IMAGE), Some(Category::SaveImage));
+        assert_eq!(Category::of(INCOGNITO), Some(Category::Incognito));
+        assert_eq!(Category::of(SERVER_TORRENT), Some(Category::ServerStatus));
+        assert_eq!(Category::of(SERVER_HTTP), Some(Category::ServerStatus));
+        assert_eq!(Category::of(EXTENSIONS_UPDATES), Some(Category::ExtensionUpdates));
+        assert_eq!(Category::of(EXTENSIONS_INSTALLING), Some(Category::ExtensionUpdates));
+        assert_eq!(Category::of("app-update.unknown"), None);
         assert_eq!(Category::BackupComplete.priority(), Priority::High);
         assert_eq!(Category::BackupProgress.priority(), Priority::Low);
         assert_eq!(Category::AppUpdate.priority(), Priority::Default);

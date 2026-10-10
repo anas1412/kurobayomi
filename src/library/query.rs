@@ -88,6 +88,8 @@ pub fn compute(req: &Request, snap: &Snapshot, facts: &Facts) -> Built {
         |row| (facts.downloads)(row),
         |source| (facts.source)(source).language,
     );
+    // Decision (T-37a-058, E-14): only logged-in trackers feed the mean, so an entry with only logged-out tracks has no
+    // scores and sorts as -1.0 (`tracker_mean`, which also maps a NaN mean to -1.0).
     let scores: BTreeMap<i64, Vec<f64>> = snap
         .tracks
         .iter()

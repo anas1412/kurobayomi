@@ -55,7 +55,7 @@ Mapping to the existing mockup files (`src/ui.rs`, `src/screens.rs`, `src/spec.r
 | `screens::downloads()` (`src/screens.rs:354`) | the More → Downloads view that `Shortcut { Downloads }` reaches |
 | `screens::open_entry`, `open_media` (`src/screens.rs:62` to `:69`) | entry and media pages for `OpenManga`, `OpenAnime`, `OpenChapter`, `OpenEpisode` once their data is loaded |
 | `screen:reader`, `screen:player` widget names (`src/main.rs:58`) | immersive detection; the transition table uses the same names |
-| `gtk::Application::builder().application_id("io.github.blackbox.Kurobayomi")` (`src/main.rs:13`) | GApplication identity used by D-Bus notifications, desktop file, single-instance forwarding |
+| `gtk::Application::builder().application_id("io.github.anas1412.Kurobayomi")` (`src/main.rs:13`) | GApplication identity used by D-Bus notifications, desktop file, single-instance forwarding |
 | `NON_UNIQUE` flag for `KUROBAYOMI_SMOKE`, `KUROBAYOMI_OPEN`, `KUROBAYOMI_SHOT` (`src/main.rs:14` to `:16`) | keep for development; release builds stay unique |
 | `app.connect_activate(build_ui)` (`src/main.rs:18`) | no `open` or `command-line` handler exists in the mockup; this area adds both (section 6.1) |
 
@@ -350,7 +350,7 @@ The Kotlin comparison is `currentTime - 200 > lastTick` with `lastTick = 0` at s
 
 ### 2.6 Desktop entry and MIME (kuro-platform/src/linux/desktop_entry.rs, mime.rs)
 
-Desktop entry (packaging installs it under `share/applications/io.github.blackbox.Kurobayomi.desktop`; the app verifies it at start, T-53a-011):
+Desktop entry (packaging installs it under `share/applications/io.github.anas1412.Kurobayomi.desktop`; the app verifies it at start, T-53a-011):
 
 ```ini
 [Desktop Entry]
@@ -359,12 +359,12 @@ Name=Kurobayomi
 GenericName=Manga and anime reader
 Comment=Read manga and watch anime
 Exec=kurobayomi %U
-Icon=io.github.blackbox.Kurobayomi
+Icon=io.github.anas1412.Kurobayomi
 Terminal=false
 Categories=AudioVideo;Graphics;Viewer;
 StartupNotify=true
 DBusActivatable=true
-StartupWMClass=io.github.blackbox.Kurobayomi
+StartupWMClass=io.github.anas1412.Kurobayomi
 MimeType=application/x-tachibk;x-scheme-handler/kurobayomi;x-scheme-handler/aniyomi;x-scheme-handler/tachiyomi;
 Actions=show-library;show-animelib;show-updates;show-history;show-browse;
 
@@ -416,7 +416,7 @@ Wi-Fi detection reads two NetworkManager properties on `org.freedesktop.NetworkM
 
 ### 2.8 Search provider (kuro-platform/src/linux/search_provider.rs, P2, T-53a-066)
 
-The GNOME Shell search provider interface `org.gnome.Shell.SearchProvider2` has methods `GetInitialResultSet(terms)`, `GetSubsearchResultSet(prev, terms)`, `GetResultMetas(ids)`, `ActivateResult(id, terms, timestamp)`, `LaunchSearch(terms, timestamp)`. The implementation serves one result per manga or anime title; `ActivateResult` sends `LaunchRequest::Search` to the running instance through `SingleInstance`. The `.ini` file for GNOME is written at packaging time (`share/gnome-shell/search-providers/io.github.blackbox.Kurobayomi.search-provider.ini`, with `DesktopId=io.github.blackbox.Kurobayomi.desktop` and `BusName=io.github.blackbox.Kurobayomi.SearchProvider`, `ObjectPath=/io/github/blackbox/Kurobayomi/SearchProvider`, `Version=2`).
+The GNOME Shell search provider interface `org.gnome.Shell.SearchProvider2` has methods `GetInitialResultSet(terms)`, `GetSubsearchResultSet(prev, terms)`, `GetResultMetas(ids)`, `ActivateResult(id, terms, timestamp)`, `LaunchSearch(terms, timestamp)`. The implementation serves one result per manga or anime title; `ActivateResult` sends `LaunchRequest::Search` to the running instance through `SingleInstance`. The `.ini` file for GNOME is written at packaging time (`share/gnome-shell/search-providers/io.github.anas1412.Kurobayomi.search-provider.ini`, with `DesktopId=io.github.anas1412.Kurobayomi.desktop` and `BusName=io.github.anas1412.Kurobayomi.SearchProvider`, `ObjectPath=/io/github/anas1412/Kurobayomi/SearchProvider`, `Version=2`).
 
 ## 3. Platform implementations
 

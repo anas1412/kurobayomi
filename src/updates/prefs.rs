@@ -9,10 +9,17 @@ use kuro_prefs::store::PrefStore;
 pub const WEEK_START_KEY: &str = "upcoming.week_start";
 /// The value that lets the locale decide.
 pub const WEEK_START_AUTO: &str = "auto";
+/// The key of the opt-in Home key (T-42b-046): when on, Home returns the Upcoming calendar to the current month.
+pub const HOME_RETURNS_TODAY_KEY: &str = "upcoming.home_returns_today";
 
 /// `upcoming.week_start`, default `auto`.
 pub fn week_start(store: &PrefStore) -> Pref<String> {
     store.pref(WEEK_START_KEY, WEEK_START_AUTO.to_owned())
+}
+
+/// `upcoming.home_returns_today`, default off: Aniyomi has no Today button, so the key is not taken unless set.
+pub fn home_returns_today(store: &PrefStore) -> Pref<bool> {
+    store.pref(HOME_RETURNS_TODAY_KEY, false)
 }
 
 #[cfg(test)]
@@ -58,6 +65,17 @@ mod tests {
         assert_eq!(week_start_for(&pref.get(), "en_US"), Weekday::Sun, "auto follows the locale");
         pref.set("monday".to_owned()).expect("the memory store accepts writes");
         assert_eq!(week_start_for(&pref.get(), "en_US"), Weekday::Mon, "the setting overrides the locale");
+    }
+
+    #[test]
+    fn prefs_home_key_is_off_by_default_and_follows_the_setting() {
+        use super::home_returns_today;
+        let store = PrefStore::in_memory();
+        let pref = home_returns_today(&store);
+        assert_eq!(pref.key(), "upcoming.home_returns_today");
+        assert!(!pref.get(), "off by default, so parity holds");
+        pref.set(true).expect("the memory store accepts writes");
+        assert!(home_returns_today(&store).get());
     }
 
     #[test]

@@ -341,7 +341,7 @@ impl Api {
 Every authed call: `let bearer = self.auth.bearer().await?;` then headers:
 ```rust
 .header(reqwest::header::AUTHORIZATION, format!("Bearer {bearer}"))
-.header(reqwest::header::USER_AGENT, USER_AGENT)            // "Kurobayomi v{CARGO_PKG_VERSION} (io.github.blackbox.Kurobayomi)"
+.header(reqwest::header::USER_AGENT, USER_AGENT)            // "Kurobayomi v{CARGO_PKG_VERSION} (io.github.anas1412.Kurobayomi)"
 .header(reqwest::header::ACCEPT, "application/vnd.api+json")
 .header(reqwest::header::CONTENT_TYPE, "application/vnd.api+json")
 .header("Cache-Control", "no-cache")                        // Proposal, see behaviour 5.3

@@ -13,9 +13,7 @@ use crate::reader::page_profile::{DISPLAY_PROFILE_KEY, set_display_profile};
 use crate::reader::tiles::{TILE_THRESHOLD_KEY, set_tile_threshold};
 use crate::reader::pref_rules::{self, NAVIGATION_MODE, READER_THEME, ZOOM_START, clamp_to};
 
-/// The key of `always_decode_long_strip_with_ssiv` (T-43b-023). It lives in the base preferences, so the viewer reads it
-/// from the same store by its key.
-pub const ALWAYS_DECODE_LONG_STRIP_KEY: &str = "pref_always_decode_long_strip_with_ssiv";
+// `pref_always_decode_long_strip_with_ssiv` is dropped (T-44a-061): the viewer does not read it, and a stored value is ignored.
 
 /// The settings a viewer reads, as plain values.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,8 +41,6 @@ pub struct ViewerSettings {
     pub side_padding: i32,
     pub zoom_out_disabled: bool,
     pub double_tap_zoom: bool,
-    /// A webtoon page decodes in full instead of at the view width (`pref_always_decode_long_strip_with_ssiv`).
-    pub always_decode_long_strip: bool,
     /// `pref_hardware_bitmap_threshold`: the largest tile edge of a page decoded from now on (T-44a-060).
     pub tile_threshold: i32,
     /// `pref_display_profile_key`: the ICC file pages are taken to when decoded from now on (T-43a-067).
@@ -121,7 +117,6 @@ impl ViewerSettings {
             side_padding: pref_rules::side_padding(p.webtoon_side_padding.get()),
             zoom_out_disabled: p.webtoon_disable_zoom_out.get(),
             double_tap_zoom: p.webtoon_double_tap_zoom_enabled.get(),
-            always_decode_long_strip: p.store().pref(ALWAYS_DECODE_LONG_STRIP_KEY, false).get(),
             tile_threshold: read_tile_threshold(p),
             display_profile: read_display_profile(p),
             dual_split_pager: p.dual_page_split_paged.get(),
@@ -177,7 +172,6 @@ pub fn diff(old: &ViewerSettings, new: &ViewerSettings, family: Family) -> Vec<R
                 Reaction::RefreshImages,
                 old.crop_webtoon != new.crop_webtoon
                     || old.side_padding != new.side_padding
-                    || old.always_decode_long_strip != new.always_decode_long_strip
                     || old.dual_split_webtoon != new.dual_split_webtoon
                     || old.dual_invert_webtoon != new.dual_invert_webtoon
                     || old.dual_rotate_webtoon != new.dual_rotate_webtoon
@@ -353,17 +347,15 @@ mod tests {
     }
 
     #[test]
-    fn t023_the_long_strip_decode_is_off_by_default_follows_its_key_and_refreshes_only_the_webtoon() {
+    fn t044a_061_the_dropped_long_strip_key_changes_nothing_in_the_viewer() {
         let p = prefs();
-        assert!(!ViewerSettings::from_prefs(&p).always_decode_long_strip, "default false");
         let old = ViewerSettings::from_prefs(&p);
         let mut watch = SettingsWatch::new(p.clone(), old.clone());
-        p.store().pref(ALWAYS_DECODE_LONG_STRIP_KEY, false).set(true).unwrap();
+        p.store().pref("pref_always_decode_long_strip_with_ssiv", false).set(true).unwrap();
         let new = ViewerSettings::from_prefs(&p);
-        assert!(new.always_decode_long_strip);
-        assert_eq!(diff(&old, &new, Family::Webtoon), [Reaction::RefreshImages]);
+        assert!(diff(&old, &new, Family::Webtoon).is_empty(), "a stored value is ignored");
         assert!(diff(&old, &new, Family::Pager).is_empty());
-        assert_eq!(watch.poll(), Some(new), "the live viewer sees the change");
+        assert_eq!(watch.poll(), None, "no change is delivered for the dropped key");
     }
 
     #[test]

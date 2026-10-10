@@ -5,6 +5,7 @@
 pub mod app_update;
 pub mod badge;
 pub mod download;
+pub mod export;
 pub mod ids;
 pub mod interval;
 pub mod notify;

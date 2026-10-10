@@ -67,7 +67,7 @@ No `lazy_static`/`once_cell`: `std::sync::{OnceLock, LazyLock}` and `std::cell::
 ```rust
 // kuro-core/src/app_info.rs
 pub struct AppInfo {
-    pub app_id: &'static str,                 // "io.github.blackbox.Kurobayomi"
+    pub app_id: &'static str,                 // "io.github.anas1412.Kurobayomi"
     pub version_name: &'static str,           // env!("CARGO_PKG_VERSION"), plus "-<commit count>" in debug (built in const via concat in build.rs output)
     pub version_code: u32,                    // VERSION_CODE
     pub commit_count: &'static str,

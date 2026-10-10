@@ -4,6 +4,20 @@
 //! and `cache` hold the page rules and the disk cache. `loader` holds the page loaders and the chapter state
 //! machine. `chapters` builds the reader list. `session` runs the reader state. `launch` opens the reader for the app. `screen` is the reader page: open, failure card, chapter buttons, crop. `writer` is the database writer.
 //!
+//! Android items with no Linux port (T-43b-050 to T-43b-052, T-44a-017, T-44a-061, T-44a-072, T-44a-073):
+//! - The display cutout setting is never offered (`settings_model::has_display_cutout`). Its key stays in the store, and the
+//!   general tab says it is not used on Linux.
+//! - Hardware bitmap config, `BitmapRegionDecoder` and the SDK gates: none. `pref_hardware_bitmap_threshold` is the tile
+//!   threshold (`tiles`).
+//! - "Always decode the long strip with SSIV" is dropped: a webtoon page decodes at the view width, and a stored value is ignored.
+//! - Haptic feedback on long press: none. The long press still works (`long_press`).
+//! - DirectionalViewPager is replaced by the pager of `viewers::pager`; no visible loss.
+//! - The webtoon frame's touch translation, the touch-ignoring tile view and the ViewPager exception guards: not needed, the
+//!   widgets keep the behaviour.
+//! Replacements for the Android view APIs in scope (T-43b-052): AbstractComposeView -> plain GTK widgets; Handler.postDelayed
+//! -> `glib::timeout_add_local_once` (`page_view`); ViewConfiguration -> the constants of `long_press`; MaterialButton ->
+//! `gtk::Button`; Canvas.drawRect -> `gtk::Snapshot` (`blend_box`); FLAG_KEEP_SCREEN_ON -> the platform idle inhibitor (`keep_awake`).
+//!
 //! Gap list G-01 to G-35 (`plans/43-reader-core/p1-ui-parity.md` section 12), the ones that were open at the review (T-43a-078):
 //! - G-27 navigation overlay labels with fade: done in `nav_overlay` (zones, colours, labels, 1000 ms fades, shown by the
 //!   on-start and new-user preferences and by a changed tap-zone layout). The tap zones themselves are area 44 (`viewers::nav`).

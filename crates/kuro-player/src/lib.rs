@@ -22,6 +22,8 @@ pub mod delay_card;
 pub mod dialog;
 pub mod double_tap;
 pub mod downloads;
+#[cfg(test)]
+mod dropped;
 pub mod enums;
 pub mod episode_list;
 pub mod episodes;

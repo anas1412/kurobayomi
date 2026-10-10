@@ -77,11 +77,23 @@ pub fn message(outcome: Outcome) -> &'static str {
     }
 }
 
+/// True for the key that starts a library pass on the Updates page, in place of pull-to-refresh (T-42b-042): F5.
+pub fn is_refresh_key(key: gtk::gdk::Key) -> bool {
+    key == gtk::gdk::Key::F5
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
 
     use super::*;
+
+    #[test]
+    fn f5_is_the_refresh_key_and_other_keys_are_not() {
+        assert!(is_refresh_key(gtk::gdk::Key::F5));
+        assert!(!is_refresh_key(gtk::gdk::Key::F4));
+        assert!(!is_refresh_key(gtk::gdk::Key::Escape));
+    }
 
     fn host(running: bool, accept: bool) -> (Host, Rc<Cell<u32>>) {
         let starts = Rc::new(Cell::new(0));
