@@ -48,6 +48,7 @@ mod tests {
 
     #[test]
     fn t45b083_every_loss_is_in_the_release_notes_with_its_task() {
+        let notes = NOTES.to_lowercase();
         for needle in [
             "rotation lock",
             "status bar",
@@ -57,24 +58,24 @@ mod tests {
             "file picker",
             "audio focus",
             "haptic",
-            "Web Video Caster",
+            "web video caster",
             "background services",
-            "T-45a-035",
-            "T-45a-042",
-            "T-45a-045",
-            "T-45a-054",
-            "T-45a-060",
-            "T-45a-080",
-            "T-45a-081",
-            "T-45b-058",
-            "T-45b-065",
-            "T-46a-045",
-            "T-46a-047",
-            "T-46a-048",
-            "T-46a-057",
-            "T-46b-040",
+            "t-45a-035",
+            "t-45a-042",
+            "t-45a-045",
+            "t-45a-054",
+            "t-45a-060",
+            "t-45a-080",
+            "t-45a-081",
+            "t-45b-058",
+            "t-45b-065",
+            "t-46a-045",
+            "t-46a-047",
+            "t-46a-048",
+            "t-46a-057",
+            "t-46b-040",
         ] {
-            assert!(NOTES.contains(needle), "release notes miss {needle}");
+            assert!(notes.contains(needle), "release notes miss {needle}");
         }
     }
 

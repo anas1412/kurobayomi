@@ -124,7 +124,7 @@ pub fn media_title(anime_title: &str, episode_number: f32, episode_name: &str) -
 }
 
 /// The file path of an on-device episode (T-45a-068). A local-source episode or a downloaded one
-/// plays from its path as it is. The `FileProvider` step is dropped on desktop.
+/// plays from its path as it is. The Android content-URI step is dropped on desktop.
 pub fn on_device_path(local_source: bool, downloaded: bool, video_url: &str) -> Option<&str> {
     (local_source || downloaded).then_some(video_url)
 }
