@@ -502,6 +502,15 @@ mod tests {
     async fn tst_19_081_an_unreadable_download_logs_the_read_failed_text_and_removes_the_part() {
         use crate::anime::testkit::{has_nonempty_file, stalled_server, wait_until};
         use std::os::unix::fs::PermissionsExt;
+        // A root process (the CI container) can read a 000 file, so there is nothing to test there.
+        let probe = tempfile::tempdir().unwrap();
+        let probe_file = probe.path().join("probe");
+        std::fs::write(&probe_file, b"x").unwrap();
+        std::fs::set_permissions(&probe_file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&probe_file).is_ok() {
+            eprintln!("skipped tst_19_081_an_unreadable_download: this process can read a 000 file (root)");
+            return;
+        }
         let fixture = signed_package(&fixture_key(), MANIFEST, b"\0asm");
         let (head, tail) = fixture.bytes.split_at(fixture.bytes.len() / 2);
         let (url, release) = stalled_server(head.to_vec(), tail.to_vec()).await;
