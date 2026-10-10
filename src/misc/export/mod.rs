@@ -2,6 +2,8 @@
 //! `library_csv`, the atomic write in `write`. The dialog and the file chooser are in the settings page (another lane);
 //! they call `save`, `toast` and `ExportSession`.
 
+#![allow(dead_code)] // the settings page calls these from the settings lane
+
 pub mod library_csv;
 pub mod write;
 

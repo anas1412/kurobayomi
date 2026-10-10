@@ -253,5 +253,5 @@ Each item is observable. Run before tagging a release.
 ## 9. What this document does not decide
 
 - Visual theme beyond "inherit the GTK theme" (area 02 Q-A, area 49 owns the theme).
-- Packaging format (Flatpak, AUR, `.deb`). Area 54 owns it. This document only records the constraints in ADR-10.
+- Packaging format. Decided by the user on 2026-10-10: Flatpak first (primary), an AppImage built by CI later. No `.deb`, RPM, AUR or any other OS-specific package from this project. The in-app updater only announces a new version; Flatpak updates itself and the plan already drops AppImage self-replacement. Area 54 owns the details. This document also records the constraints in ADR-10.
 - Exact `wasmtime` version pin and WIT package version. Area 20 owns the contract (`p1-topic-wasm-component-design.md`).

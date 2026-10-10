@@ -1,0 +1,132 @@
+name: Issue report
+description: Report an issue in Kurobayomi
+labels: [Bug]
+body:
+  - type: textarea
+    id: reproduce-steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide an example of the issue.
+      placeholder: |
+        Example:
+          1. First step
+          2. Second step
+          3. Issue here
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: Explain what you should expect to happen.
+      placeholder: |
+        Example:
+          "This should happen..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual behavior
+      description: Explain what actually happens.
+      placeholder: |
+        Example:
+          "This happened instead..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: log-file
+    attributes:
+      label: Log file
+      description: |
+        Logs and crash reports are in the log directory, by default `~/.local/state/kurobayomi/logs`
+        (`~/.var/app/<app id>/.local/state/kurobayomi/logs` for the Flatpak build).
+        Attach the newest file, or paste the relevant lines.
+      placeholder: |
+        You can upload the log file as an attachment, or paste the log in plain text if needed.
+
+  - type: input
+    id: kurobayomi-version
+    attributes:
+      label: Kurobayomi version
+      description: Run `kurobayomi --version`, or open the About dialog.
+      placeholder: |
+        Example: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: linux-distribution
+    attributes:
+      label: Linux distribution
+      description: The name and version, for example from `/etc/os-release`.
+      placeholder: |
+        Example: "Fedora 41"
+    validations:
+      required: true
+
+  - type: input
+    id: desktop-environment
+    attributes:
+      label: Desktop environment
+      description: Name and version.
+      placeholder: |
+        Example: "KDE Plasma 6.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: session-type
+    attributes:
+      label: Session type
+      description: Run `loginctl show-session auto -p Type` in a terminal if you are not sure.
+      options:
+        - Wayland
+        - X11
+    validations:
+      required: true
+
+  - type: input
+    id: gtk-version
+    attributes:
+      label: GTK version
+      description: Run `pkg-config --modversion gtk4`. For the Flatpak build, give the runtime version.
+      placeholder: |
+        Example: "4.16.7"
+    validations:
+      required: true
+
+  - type: input
+    id: libmpv-version
+    attributes:
+      label: libmpv version
+      description: Run `mpv --version`. Needed for player problems.
+      placeholder: |
+        Example: "0.39.0"
+
+  - type: textarea
+    id: other-details
+    attributes:
+      label: Other details
+      placeholder: |
+        Additional details and attachments.
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      description: Read this carefully, we will close and ignore your issue if you skimmed through this.
+      options:
+        - label: I have searched the existing issues and this is a new ticket, **NOT** a duplicate or related to another open or closed issue.
+          required: true
+        - label: I have written a short but informative title.
+          required: true
+        - label: If this is an issue with an extension, I should be opening an issue in the extension's repository.
+          required: true
+        - label: I have updated the app to the [latest release](https://github.com/anas1412/kurobayomi/releases/latest).
+          required: true
+        - label: I have filled out all of the requested information in this form, including specific version numbers.
+          required: true

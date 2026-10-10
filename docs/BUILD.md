@@ -26,8 +26,10 @@ end-to-end test checks this: `cargo test --release -p kuro-core --test crash_mai
 Aniyomi's Gradle build has settings that have no Cargo equivalent here and are not ported:
 
 - ABI splits (one APK per CPU architecture): a Linux binary targets one architecture per build.
-- The benchmark build type (macrobenchmark): benchmarks are `cargo test -- --ignored` tests.
+- The benchmark build type: startup is timed by `scripts/bench-startup.sh` (see `benchmarking.md`) against the `dist` binary.
 - Lint settings (Android Lint baselines and severity overrides): `cargo clippy` replaces them.
 - Kotlin compiler opt-ins (`-opt-in=...` flags): Rust has no equivalent.
-- Dependency info (the AGP `dependenciesInfo` block that embeds the dependency list in the APK): `Cargo.lock`
-  records the dependencies.
+- Dependency info (the AGP `dependenciesInfo` block that embeds the dependency list in the APK): release builds
+  use `scripts/build-auditable.sh`, which embeds the list with cargo-auditable.
+
+The full list of dropped build steps, with the user impact of each, is in `drop-decisions.md`.

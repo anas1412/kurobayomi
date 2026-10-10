@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn title_off_and_type_on_writes_only_the_kind_column() {
-        let options = ExportOptions { title: false, ..ExportOptions::ALL };
+        let options = ExportOptions { title: false, kind: true, author: false, artist: false };
         assert_eq!(render(&worked_example(), options), "anime\r\nmanga\r\nmanga");
     }
 

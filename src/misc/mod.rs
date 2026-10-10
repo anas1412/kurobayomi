@@ -6,12 +6,17 @@ pub mod app_update;
 pub mod badge;
 pub mod download;
 pub mod export;
+pub mod headless;
 pub mod ids;
+pub mod install;
 pub mod interval;
 pub mod notify;
+pub mod notify_icon;
+pub mod reveal;
 pub mod router;
 pub mod rules;
 pub mod runner;
+pub mod shortcuts;
 pub mod throttle;
 
 /// Starts the update runner and the schedule once, from the GTK main thread inside the app's runtime.

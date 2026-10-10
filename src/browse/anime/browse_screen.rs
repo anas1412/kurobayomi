@@ -25,7 +25,7 @@ use crate::browse::sources::LOCAL_SOURCE_ID;
 use crate::browse::view::file_cover_loader;
 
 /// What an anime source page needs of the app.
-pub struct AnimeEnv {
+pub struct AppServices {
     pub prefs: Rc<AnimeBrowsePrefs>,
     pub directory: Arc<AnimeDirectory>,
     pub store: Arc<dyn FavoriteStore>,
@@ -43,7 +43,7 @@ pub struct AnimeEnv {
 }
 
 /// The page of `source_id` opened on `query`.
-pub fn source_page(env: &AnimeEnv, source_id: i64, query: BrowseQuery) -> SourcePage {
+pub fn source_page(env: &AppServices, source_id: i64, query: BrowseQuery) -> SourcePage {
     let listed = env.directory.sources().into_iter().find(|entry| entry.source.id == source_id && !entry.source.is_stub);
     let instance = env.directory.instance(source_id);
     let loader = instance.as_ref().and_then(|_| env.directory.loader(source_id));
@@ -119,7 +119,7 @@ pub fn source_page(env: &AnimeEnv, source_id: i64, query: BrowseQuery) -> Source
 }
 
 /// The app side of an anime source page, over the anime library.
-fn production_env() -> AnimeEnv {
+fn production_env() -> AppServices {
     use kuro_data::anime::AnimeRepo;
     use kuro_data::category::{CategoryKind, CategoryRepo};
     use kuro_domain::kind::EntryKind;
@@ -139,7 +139,7 @@ fn production_env() -> AnimeEnv {
         Arc::new(|_| 0),
         Arc::new(|_| 0),
     );
-    AnimeEnv {
+    AppServices {
         prefs,
         directory: Arc::new(AnimeDirectory::current(anime.clone())),
         store: Arc::new(store),
@@ -224,7 +224,7 @@ pub(crate) mod tests {
     }
 
     struct Rig {
-        env: AnimeEnv,
+        env: AppServices,
         source: Arc<FakeSource>,
         log: Rc<RefCell<Vec<String>>>,
         _entered: tokio::runtime::EnterGuard<'static>,
@@ -244,7 +244,7 @@ pub(crate) mod tests {
         let directory = AnimeDirectory::new(sources_of(&buckets), Some(Arc::new(Held(Arc::clone(&source)))), Arc::new(move |_| Arc::clone(&lookup)));
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let (opened, web, back, settings) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
-        let env = AnimeEnv {
+        let env = AppServices {
             prefs,
             directory: Arc::new(directory),
             store: Arc::new(FakeStore::default()),

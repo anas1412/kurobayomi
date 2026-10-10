@@ -79,6 +79,18 @@ impl Shell {
         self.boot.borrow_mut().window_built()
     }
 
+    /// The migrations finished: the library page may leave its loading state (T-53a-069). The window is built only
+    /// after the data opens, so `main` calls this when it starts building it.
+    pub fn migration_done(&self) {
+        self.boot.borrow_mut().migration_done();
+    }
+
+    /// What the library page shows now.
+    #[allow(dead_code)]
+    pub fn library_state(&self) -> super::bootstrap::LibraryState {
+        self.boot.borrow().library_state()
+    }
+
     /// The home tab selection. It is built once, the first time this runs, so a wide or narrow switch keeps it.
     pub fn home_tabs(&self, start: StartScreen, style: NavStyle) -> Rc<RefCell<HomeTabs>> {
         self.home.borrow_mut().get_or_insert_with(|| Rc::new(RefCell::new(HomeTabs::new(start, style)))).clone()
@@ -113,6 +125,15 @@ mod tests {
         assert_eq!(shell.window_built(), vec![search]);
         let later = LaunchRequest::OpenUri("c://d".into());
         assert_eq!(shell.submit(later.clone()), Some(later));
+    }
+
+    #[test]
+    fn the_library_loads_until_the_migrations_are_done() {
+        let rt = rt();
+        let shell = shell(&rt);
+        assert_eq!(shell.library_state(), super::super::bootstrap::LibraryState::Loading);
+        shell.migration_done();
+        assert_eq!(shell.library_state(), super::super::bootstrap::LibraryState::Ready);
     }
 
     #[test]

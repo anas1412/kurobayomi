@@ -58,6 +58,9 @@ mod updates;
 mod pref_model;
 mod browse;
 mod shell;
+mod util;
+#[allow(dead_code)]
+mod dropped;
 
 use gtk::prelude::*;
 use kuro_platform::paths::Paths as _;
@@ -79,6 +82,18 @@ fn main() -> glib::ExitCode {
     // `--run-backup`: one automatic backup from the systemd timer, no window and no GTK
     if std::env::args().skip(1).any(|a| a == "--run-backup") {
         return glib::ExitCode::from(backup_run::run_backup_cli());
+    }
+    // `--library-update=auto|manual`: the timer's headless pass, or a request handed to the running app; no window
+    {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        match misc::headless::parse_mode(&args) {
+            Ok(Some(mode)) => return glib::ExitCode::from(misc::headless::run(mode)),
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("kurobayomi: {e}");
+                return glib::ExitCode::from(kuro_platform::deep_link::USAGE_EXIT_CODE as u8);
+            }
+        }
     }
     // the detached crash reporter started by the panic hook: a window over the report file, none of the app state below
     let mut args = std::env::args().skip(1);
@@ -221,6 +236,7 @@ fn build_window(app: &gtk::Application) {
     settings_ui::appearance::apply_saved_pure_black(prefs.ui.theme_dark_amoled.get(), prefs.ui.theme_mode.get());
     // one selection for every layout: the sidebar and the bottom bar show the same tab (T-36a-004)
     let host = shell::Shell::get().expect("the shell is installed in main");
+    host.migration_done();
     let home = host.home_tabs(prefs.ui.start_screen.get(), prefs.ui.nav_style.get());
     shell::tabs::bind(&tabs, &home);
     let sep = gtk::Separator::new(O::Vertical);
@@ -264,11 +280,11 @@ fn build_window(app: &gtk::Application) {
 
     // reader/player are immersive: no sidebar or tab bar while they're on screen
     let refresh = {
-        let (win, nav, tabs, home, mode) = (win.clone(), nav.clone(), tabs.clone(), home.clone(), prefs.ui.tablet_ui_mode.clone());
+        let (win, nav, tabs, home) = (win.clone(), nav.clone(), tabs.clone(), home.clone());
         move || {
             let immersive = nav.visible_child().is_some_and(|c| matches!(c.widget_name().as_str(), "screen:reader" | "screen:player" | shell::onboarding::PAGE_NAME));
-            let (width, height) = window_size::size_of(&win);
-            let chrome = shell::layout::chrome_for(mode.get(), width, height, win.is_maximized());
+            let (width, _) = window_size::size_of(&win);
+            let chrome = shell::layout::chrome_for(width, win.is_maximized());
             // the bottom bar belongs to the tab pages, and it hides on the tab that moved into More
             let on_tabs = nav.visible_child().as_ref() == Some(tabs.upcast_ref());
             let bar_allowed = on_tabs && shell::tabs::bar_visible(home.borrow().current(), home.borrow().more_tab(), true);
@@ -285,8 +301,6 @@ fn build_window(app: &gtk::Application) {
     let r = refresh.clone();
     tabs.connect_visible_child_name_notify(move |_| r());
     let r = refresh.clone();
-    pref_model::bind::follow(&prefs.ui.tablet_ui_mode, || true, move |_| r());
-    let r = refresh.clone();
     win.connect_default_width_notify(move |_| r());
     let r = refresh.clone();
     win.connect_default_height_notify(move |_| r());
@@ -300,7 +314,10 @@ fn build_window(app: &gtk::Application) {
     library::mount::on_selection_change(refresh.clone());
     refresh();
     applock_host::attach(&win, data::app().security.clone());
-    win.present();
+    // with the lock on, the main window is shown by the unlock window once it succeeds (T-53a-070)
+    if !shell::unlock::gate(app, &win, &data::app().security) {
+        win.present();
+    }
     schedule_crash_test();
     startup::publish_launcher_badge(&win, &app.application_id().unwrap_or_default());
     // background work that waits for the window: the chapter cache clear and the opt-in release check
@@ -310,6 +327,8 @@ fn build_window(app: &gtk::Application) {
     app_update::startup(&data::app().base);
     // requests that arrived before the window: --action, --search, --open and opened files
     shell::launch::window_built(app, &win);
+    // the desktop search provider serves library titles while the app runs (T-53a-066)
+    shell::library_catalogue::serve(app, data::app().manga_db.clone(), data::app().anime_db.clone());
     // the first launch starts the onboarding wizard (T-36a-024)
     shell::onboarding::show_if_needed(&win, base.store(), !kuro_platform::single_instance::is_unique(|v| std::env::var(v).is_ok()));
     // no keyboard focus ring on the first header button at startup

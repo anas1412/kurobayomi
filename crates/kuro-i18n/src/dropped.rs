@@ -14,6 +14,11 @@
 //!   - Identical plural forms stay as they are.
 //! * Build plumbing (T-51a-022). No Gradle, moko, AGP or locales-config code is ported. The build script `build.rs`
 //!   and the `xtask` replace them, and the plan in `p1-data-and-config.md` section 2 is the reference.
+//! * Notification channels (T-51a-036). Linux notifications have no channels, so the `channel_*` names are not
+//!   used as channel ids. They stay in the catalog (no name is removed, above), and no code reads them yet. The
+//!   notification settings view can use them as category labels later.
+//! * S-Pen strings (T-51a-037). There are no stylus actions on the desktop. `spen_previous_page` and
+//!   `spen_next_page` stay in the catalog unused, as the names rule above says.
 //! * Android localisation API (T-51a-023). `Context.stringResource`, `StringDesc`, the moko backslash workaround and
 //!   `AppCompatDelegate` locale calls are not ported. The replacements are [`crate::tr`], [`crate::trf`],
 //!   [`crate::tr_plural`], the `app_language` preference (see `picker`), and `glib::language_names()` passed to
@@ -55,6 +60,35 @@ mod tests {
     #[test]
     fn the_airing_time_trailing_space_is_an_explicit_placeable() {
         assert!(line_of("pref_show_next_episode_airing_time").ends_with("{\" \"}"));
+    }
+
+    #[test]
+    fn t51a036_the_channel_names_stay_in_the_catalog_and_unused() {
+        for key in [
+            "channel_common",
+            "channel_progress",
+            "channel_complete",
+            "channel_errors",
+            "channel_new_chapters",
+            "channel_app_updates",
+            "channel_ext_updates",
+            "channel_new_chapters_episodes",
+        ] {
+            line_of(key);
+            for text in sources() {
+                assert!(!text.contains(key), "{key} must stay unused");
+            }
+        }
+    }
+
+    #[test]
+    fn t51a037_the_spen_names_stay_in_the_catalog_and_unused() {
+        for key in ["spen_previous_page", "spen_next_page"] {
+            line_of(key);
+            for text in sources() {
+                assert!(!text.contains(key), "{key} must stay unused");
+            }
+        }
     }
 
     #[test]

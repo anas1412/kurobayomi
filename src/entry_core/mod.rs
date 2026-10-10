@@ -7,7 +7,7 @@
 //!
 //! Decision records (Android-only parts dropped or replaced; the user loses no function unless a line says so):
 //! - T-38a-047: haptics dropped. The 1-second label reveal of the bulk bar (`route::bulk_button`) is the feedback.
-//! - T-38a-048: the assist content URL is dropped. Share and Copy URL (T-38a-040) give the same address.
+//! - T-38a-048: the assist content URL is dropped. The Share overflow item (`toolbar::Overflow::Share`) gives the same address.
 //! - T-38a-049: Voyager, the Compose runtime, Injekt, Coil, Android Intents and ContentResolver are replaced by page
 //!   structs, `ui::push` and `ui::pop`, constructor injection and the Rust equivalents of the rust design table (section 4).
 //! - T-38a-050: the pull-to-refresh gesture is not ported. Refresh is R or Ctrl+R (`shortcuts::header_key`), the overflow
@@ -18,12 +18,12 @@
 //!   Compose `State` and `@Immutable`, Injekt field injection (constructor injection), `Serializable` on `Manga` and
 //!   `MangaTrack` (plain structs), and `Lifecycle` flows (widget map and unmap). No visible change; state survives a
 //!   restart only in the DB and preferences, as upstream.
-//! - T-39a-052: the ignorePadding layout trick is dropped. Each row has its own GTK margin of 14 px.
+//! - T-39a-052: the ignorePadding layout trick is dropped. Rows take their own GTK margins instead.
 //! - T-39a-053: haptics and the preview composables are dropped; `AnimeEpisodeListItemPreview` is not ported.
-//! - T-39a-059: Compose item keys are dropped. GTK model identity (`EpisodeRowObject`, the season anime id) replaces them.
+//! - T-39a-059: Compose item keys are dropped. The GTK list model's items (`glib::BoxedAnyObject` rows) replace them.
 //! - T-39a-064: the fast scroller is dropped. GTK overlay scrollbars are used.
 //! - T-39b-066: `AssistContentScreen` and `onProvideAssistUrl` are dropped. Loss: the Android assistant cannot read the
-//!   entry URL. Copy link (T-39b-051) replaces it.
+//!   entry URL. Share, which copies the address (T-39b-051), replaces it.
 //! - T-39b-067: the haptic pulse on library add is dropped. Loss: a tactile pulse on phones. The button state is the feedback.
 //! - T-39b-068: swipe-to-dismiss on the track sheet and the Voyager `Screen` and `Navigator` are dropped. Sheets are pages on
 //!   the GTK stack: Escape and Back pop them (`escape_controller`), and the close button works too.

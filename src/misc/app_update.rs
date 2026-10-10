@@ -38,7 +38,7 @@ pub enum Phase {
 
 /// The prompt for `version`: default tap opens the release page, "Download" starts the download and "What's new" opens
 /// the release page too.
-pub fn prompt(version: &str, release_url: &str, download_url: &str) -> Post {
+pub fn prompt(version: &str, release_url: &str, download_url: &str, sha256: Option<&str>) -> Post {
     Post {
         id: ids::APP_UPDATE_PROGRESS.to_owned(),
         title: PROMPT_TITLE.to_owned(),
@@ -49,7 +49,7 @@ pub fn prompt(version: &str, release_url: &str, download_url: &str) -> Post {
         buttons: vec![
             (
                 "Download".to_owned(),
-                Target::Action(AppAction::StartAppUpdate { url: download_url.to_owned(), version: Some(version.to_owned()) }),
+                Target::Action(AppAction::StartAppUpdate { url: download_url.to_owned(), version: Some(version.to_owned()), sha256: sha256.map(str::to_owned) }),
             ),
             ("What's new".to_owned(), Target::Action(AppAction::OpenUrl { url: release_url.to_owned() })),
         ],
@@ -86,8 +86,15 @@ pub static CHECK: SingleFlight = SingleFlight::new();
 
 /// Posts the prompt of a `NewUpdate` result, once per call. Needs the guard of the check that found the release, so a
 /// second check cannot post while the first is still running. `post` is the notifier (`notify::post` in the app).
-pub fn announce(_held: &CheckGuard<'_>, version: &str, release_url: &str, download_url: &str, post: impl FnOnce(Post) -> bool) -> bool {
-    post(prompt(version, release_url, download_url))
+pub fn announce(
+    _held: &CheckGuard<'_>,
+    version: &str,
+    release_url: &str,
+    download_url: &str,
+    sha256: Option<&str>,
+    post: impl FnOnce(Post) -> bool,
+) -> bool {
+    post(prompt(version, release_url, download_url, sha256))
 }
 
 /// The progress notice: low priority, one "Cancel" button. The caller throttles the percents (`ProgressThrottle`).
@@ -109,7 +116,7 @@ pub fn progress(version: Option<&str>, phase: Phase) -> Post {
 }
 
 /// The failure notice: "Retry" starts the same download again with its version, "Cancel" dismisses this slot only.
-pub fn failure(version: Option<&str>, url: &str, message: &str) -> Post {
+pub fn failure(version: Option<&str>, url: &str, sha256: Option<&str>, message: &str) -> Post {
     Post {
         id: ids::APP_UPDATE_ERROR.to_owned(),
         title: FAILED_TITLE.to_owned(),
@@ -120,7 +127,7 @@ pub fn failure(version: Option<&str>, url: &str, message: &str) -> Post {
         buttons: vec![
             (
                 "Retry".to_owned(),
-                Target::Action(AppAction::StartAppUpdate { url: url.to_owned(), version: version.map(str::to_owned) }),
+                Target::Action(AppAction::StartAppUpdate { url: url.to_owned(), version: version.map(str::to_owned), sha256: sha256.map(str::to_owned) }),
             ),
             ("Cancel".to_owned(), Target::Action(AppAction::Dismiss { notice: ids::APP_UPDATE_ERROR.to_owned() })),
         ],
@@ -147,8 +154,8 @@ pub fn finished(path: &Path, verified: bool) -> Post {
 }
 
 /// The steps of a failed download: the progress is withdrawn before the error is shown (T-35a-052).
-pub fn failed_steps(version: Option<&str>, url: &str, message: &str) -> Vec<Op> {
-    vec![Op::Withdraw(ids::APP_UPDATE_PROGRESS.to_owned()), Op::Show(failure(version, url, message))]
+pub fn failed_steps(version: Option<&str>, url: &str, sha256: Option<&str>, message: &str) -> Vec<Op> {
+    vec![Op::Withdraw(ids::APP_UPDATE_PROGRESS.to_owned()), Op::Show(failure(version, url, sha256, message))]
 }
 
 /// The steps of a cancelled download: the progress goes, and no error is shown (T-35a-052, test U17).
@@ -186,7 +193,7 @@ mod tests {
         let first = flight.begin().expect("the first check begins");
         assert!(flight.begin().is_none(), "a second check does not begin while the first runs");
         let mut posted = Vec::new();
-        assert!(announce(&first, "v1.2.0", RELEASE, ASSET, |post| {
+        assert!(announce(&first, "v1.2.0", RELEASE, ASSET, None, |post| {
             posted.push(post);
             true
         }));
@@ -199,7 +206,7 @@ mod tests {
     #[test]
     fn the_prompt_payload_is_exact() {
         // N-prompt (T-35a-048): id, category body, default tap and both buttons
-        let post = prompt("1.2.0", RELEASE, ASSET);
+        let post = prompt("1.2.0", RELEASE, ASSET, None);
         assert_eq!(post.id, "app-update.progress");
         assert_eq!(post.title, "New version available!");
         assert_eq!(post.body.as_deref(), Some("1.2.0"));
@@ -207,7 +214,7 @@ mod tests {
         assert_eq!(
             post.buttons,
             vec![
-                ("Download".to_owned(), Target::Action(AppAction::StartAppUpdate { url: ASSET.into(), version: Some("1.2.0".into()) })),
+                ("Download".to_owned(), Target::Action(AppAction::StartAppUpdate { url: ASSET.into(), version: Some("1.2.0".into()), sha256: None })),
                 ("What's new".to_owned(), Target::Action(AppAction::OpenUrl { url: RELEASE.into() })),
             ]
         );
@@ -236,9 +243,9 @@ mod tests {
     #[test]
     fn a_retried_download_keeps_the_version_in_the_title() {
         // N6 (E-U3): the retry carries the version, so the progress title is the version again
-        let steps = failed_steps(Some("1.2.0"), ASSET, "network error");
+        let steps = failed_steps(Some("1.2.0"), ASSET, None, "network error");
         let Op::Show(error) = &steps[1] else { panic!("the second step is the error") };
-        assert_eq!(error.buttons[0].1, Target::Action(AppAction::StartAppUpdate { url: ASSET.into(), version: Some("1.2.0".into()) }));
+        assert_eq!(error.buttons[0].1, Target::Action(AppAction::StartAppUpdate { url: ASSET.into(), version: Some("1.2.0".into()), sha256: None }));
         let retried = progress(Some("1.2.0"), Phase::Downloading(None));
         assert_eq!(retried.title, "1.2.0");
     }
@@ -246,13 +253,13 @@ mod tests {
     #[test]
     fn a_failed_download_withdraws_the_progress_before_the_error_is_shown() {
         // N5 (T-35a-052): the order is part of the contract
-        let steps = failed_steps(Some("1.2.0"), ASSET, "HTTP 404");
+        let steps = failed_steps(Some("1.2.0"), ASSET, None, "HTTP 404");
         assert_eq!(log(&steps), vec!["withdraw:app-update.progress", "show:app-update.error"]);
     }
 
     #[test]
     fn the_error_has_retry_and_cancel_and_cancel_dismisses_only_its_slot() {
-        let post = failure(Some("1.2.0"), ASSET, "HTTP 404");
+        let post = failure(Some("1.2.0"), ASSET, None, "HTTP 404");
         assert_eq!(post.id, "app-update.error");
         assert_eq!(post.buttons.len(), 2);
         assert_eq!(post.buttons[1], ("Cancel".to_owned(), Target::Action(AppAction::Dismiss { notice: "app-update.error".into() })));
@@ -296,8 +303,27 @@ mod tests {
 
     #[test]
     fn every_notice_stays_within_the_three_button_rule() {
-        for post in [prompt("1", RELEASE, ASSET), progress(None, Phase::Downloading(None)), failure(None, ASSET, "x"), finished(Path::new("/a/b"), true)] {
+        for post in [prompt("1", RELEASE, ASSET, None), progress(None, Phase::Downloading(None)), failure(None, ASSET, None, "x"), finished(Path::new("/a/b"), true)] {
             assert!(post.buttons.len() <= crate::misc::rules::MAX_BUTTONS);
         }
+    }
+
+    #[test]
+    fn the_release_digest_travels_from_the_prompt_through_the_start_action_and_the_retry() {
+        // T-35a-054: the sha256 of the release reaches the downloader; a retry keeps it
+        let digest = "ab".repeat(32);
+        let post = prompt("1.2.0", RELEASE, ASSET, Some(&digest));
+        let Target::Action(start) = &post.buttons[0].1 else { panic!("the Download button is an action") };
+        assert_eq!(
+            *start,
+            AppAction::StartAppUpdate { url: ASSET.into(), version: Some("1.2.0".into()), sha256: Some(digest.clone()) }
+        );
+        let json = start.to_target().unwrap();
+        assert_eq!(AppAction::from_target(&json).unwrap(), *start);
+        let retry = failure(Some("1.2.0"), ASSET, Some(&digest), "HTTP 404");
+        assert_eq!(retry.buttons[0].1, Target::Action(start.clone()));
+        // an action stored before the field existed still parses, with no digest
+        let old = r#"{"kind":"start_app_update","url":"https://github.com/o/r/a.AppImage","version":"v1"}"#;
+        assert!(matches!(AppAction::from_target(old), Ok(AppAction::StartAppUpdate { sha256: None, .. })));
     }
 }

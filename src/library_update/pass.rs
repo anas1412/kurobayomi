@@ -18,6 +18,7 @@ use crate::library_update::entry::{Deps, EntryContext, update_entry};
 use crate::library_update::error::UpdateError;
 use crate::library_update::fetch_interval::{Window, window_for};
 use crate::library_update::politeness;
+use crate::library_update::progress;
 use crate::library_update::queue::{FetchType, LibraryEntry, QueueInput, QueueRestrictions, build_queue};
 use crate::library_update::source::{Fetched, SourceItem, SourceRegistry};
 use crate::library_update::store::LibraryStore;
@@ -388,6 +389,7 @@ where
             events: Mutex::new(vec![PassEvent::Started { total }]),
             queued: AtomicUsize::new(0),
         });
+        progress::publish(kind, PassEvent::Started { total });
         let settings = Arc::new(settings);
         let permits = Arc::new(Semaphore::new(MAX_SOURCES_IN_PARALLEL));
         let mut tasks = JoinSet::new();
@@ -423,6 +425,7 @@ where
                         progress.completed += 1;
                         let done = progress.completed;
                         shared.events.lock().unwrap_or_else(|p| p.into_inner()).push(PassEvent::EntryFinished { entry_id: entry.id, done });
+                        progress::publish(kind, PassEvent::EntryFinished { entry_id: entry.id, done });
                     }
                     shared.publish(&deps.host, kind, settings.hide_content);
                 }
@@ -453,6 +456,7 @@ where
         let status = if cancelled { PassStatus::Cancelled } else { PassStatus::Success };
         let mut events = shared.events.lock().unwrap_or_else(|p| p.into_inner()).clone();
         events.push(PassEvent::Finished { status: status.clone() });
+        progress::publish(kind, PassEvent::Finished { status: status.clone() });
         PassOutcome { status, updates, failures, queued_downloads, events }
     }
 }

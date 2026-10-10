@@ -16,6 +16,48 @@ pub fn title(page_title: Option<&str>, initial_title: &str) -> String {
     page_title.unwrap_or(initial_title).to_string()
 }
 
+/// What the screen is opened with (Kotlin extras `url_key`, `source_key`, `title_key`, `anime_key`, T-53a-071).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenRequest {
+    pub url: String,
+    pub source_id: Option<i64>,
+    /// `title_key`: the title shown until the page has one.
+    pub title_key: Option<String>,
+    pub anime: bool,
+}
+
+impl OpenRequest {
+    /// The title the header starts with: the `title_key` value, or none.
+    pub fn initial_title(&self) -> &str {
+        self.title_key.as_deref().unwrap_or("")
+    }
+}
+
+/// What the Back action does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackStep {
+    /// Go back one page in the history.
+    History,
+    /// The history is at its start: close the screen.
+    Close,
+}
+
+/// Back goes back in history while the page can, and closes the screen otherwise.
+pub fn back_step(can_go_back: bool) -> BackStep {
+    if can_go_back { BackStep::History } else { BackStep::Close }
+}
+
+/// The label of the Back action.
+pub fn back_label() -> String {
+    tr(MsgKey::action_webview_back)
+}
+
+/// Opening the screen pushes; closing it pops (T-53a-051).
+pub fn transition(opening: bool) -> super::transitions::Spec {
+    let direction = if opening { super::transitions::Direction::Push } else { super::transitions::Direction::Pop };
+    super::transitions::spec(direction, super::transitions::animations_enabled())
+}
+
 /// The overflow actions, in the order the menu lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Overflow {
@@ -97,7 +139,8 @@ pub fn header(
     widget.pack_start(&close_button);
 
     let back_button = gtk::Button::from_icon_name("go-previous-symbolic");
-    back_button.set_tooltip_text(Some(&tr(MsgKey::action_webview_back)));
+    back_button.set_tooltip_text(Some(&back_label()));
+    back_button.update_property(&[gtk::accessible::Property::Label(&back_label())]);
     back_button.set_sensitive(false);
     back_button.connect_clicked(move |_| back());
     let forward_button = gtk::Button::from_icon_name("go-next-symbolic");
@@ -187,6 +230,31 @@ impl Header {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_initial_title_is_the_title_key_value() {
+        let request = OpenRequest { url: "https://x.test".into(), source_id: Some(3), title_key: Some("Source".into()), anime: false };
+        assert_eq!(request.initial_title(), "Source");
+        assert_eq!(title(None, request.initial_title()), "Source");
+        assert_eq!(OpenRequest { title_key: None, ..request }.initial_title(), "");
+    }
+
+    #[test]
+    fn back_goes_through_history_and_closes_at_its_start() {
+        assert_eq!(back_step(true), BackStep::History);
+        assert_eq!(back_step(false), BackStep::Close);
+        assert_eq!(back_label(), "Back");
+    }
+
+    #[test]
+    fn open_and_close_follow_the_page_transitions() {
+        use super::super::transitions::{Direction, animations_enabled, spec};
+        crate::testing::with_display(|| {
+            let on = animations_enabled();
+            assert_eq!(transition(true), spec(Direction::Push, on));
+            assert_eq!(transition(false), spec(Direction::Pop, on));
+        });
+    }
 
     #[test]
     fn the_page_title_wins_over_the_initial_title() {

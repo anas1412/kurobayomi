@@ -2,6 +2,10 @@
 //! targets, so a web link is copied to the clipboard and a file is saved through a save dialog that starts in the
 //! Downloads folder. A cancelled dialog does nothing.
 //!
+//! A file that is already on disk (a saved image, a backup) is shown in the file manager instead (T-53a-040): "Show in
+//! folder" reveals it and "Copy link" copies a web address. No share chooser is opened anywhere. The backup type
+//! `application/x-protobuf+gzip` is only the backup format's own metadata (area 21) and is never used to pick a share target.
+//!
 //! Loss recorded: no third-party share targets on desktop.
 
 use std::path::{Path, PathBuf};
@@ -20,7 +24,14 @@ pub enum Plan {
     CopyLink(String),
     /// Save the file at `source`, with the dialog suggesting `name`.
     SaveFile { source: PathBuf, name: String },
+    /// Reveal the file in the file manager ("Show in folder").
+    ShowInFolder(PathBuf),
     Nothing,
+}
+
+/// The plan for a file that is already on disk: reveal it. A relative path does nothing.
+pub fn show_in_folder(path: &Path) -> Plan {
+    if path.is_absolute() { Plan::ShowInFolder(path.to_path_buf()) } else { Plan::Nothing }
 }
 
 /// The plan for an item: a web address is copied; a `file://` link or an absolute path is saved under its own name.
@@ -69,6 +80,17 @@ pub fn run(plan: Plan, parent: &gtk::Window, downloads: &Path) {
                 }
             });
         }
+        Plan::ShowInFolder(path) => {
+            gtk::FileLauncher::new(Some(&gio::File::for_path(&path))).open_containing_folder(
+                Some(parent),
+                None::<&gio::Cancellable>,
+                move |result| {
+                    if let Err(e) = result {
+                        tracing::warn!("{} was not shown in the file manager: {e}", path.display());
+                    }
+                },
+            );
+        }
         Plan::Nothing => {}
     }
 }
@@ -105,5 +127,23 @@ mod tests {
         assert_eq!(plan("   "), Plan::Nothing);
         assert_eq!(plan("/"), Plan::Nothing);
         assert_eq!(plan("plain words"), Plan::Nothing);
+    }
+
+    #[test]
+    fn a_file_on_disk_is_revealed_not_shared() {
+        assert_eq!(show_in_folder(Path::new("/home/u/Downloads/page.png")), Plan::ShowInFolder("/home/u/Downloads/page.png".into()));
+        assert_eq!(show_in_folder(Path::new("page.png")), Plan::Nothing);
+    }
+
+    #[test]
+    fn no_share_chooser_and_no_backup_share_type_in_the_shell() {
+        // the backup MIME stays in the backup crate; the shell has no share sheet
+        for (name, text) in [("share.rs", include_str!("share.rs")), ("route.rs", include_str!("route.rs"))] {
+            let production = &text[..text.find("#[cfg(test)]").unwrap_or(text.len())];
+            let code: Vec<_> = production.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
+            for forbidden in ["x-protobuf", "ACTION_SEND", "createChooser", "toShareIntent"] {
+                assert!(!code.iter().any(|l| l.contains(forbidden)), "{name}: {forbidden}");
+            }
+        }
     }
 }

@@ -129,4 +129,11 @@ Exec=kurobayomi --action=show-browse
         assert!(POST_INSTALL.contains("update-mime-database"));
         assert!(POST_INSTALL.starts_with("#!/bin/sh"));
     }
+
+    #[test]
+    fn the_search_provider_file_is_what_the_provider_serves() {
+        // the file packaging installs under the shell's search-providers folder, next to the desktop entry
+        let shipped = include_str!("data/io.github.anas1412.Kurobayomi.search-provider.ini");
+        assert_eq!(shipped, crate::shell::search_provider::ini());
+    }
 }

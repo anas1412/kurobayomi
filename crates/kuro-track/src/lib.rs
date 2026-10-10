@@ -7,6 +7,8 @@ pub mod base;
 pub mod bind;
 pub mod connectivity;
 pub mod ctx;
+#[cfg(test)]
+mod dropped;
 pub mod detach;
 pub mod dialog;
 pub mod entry_kind;

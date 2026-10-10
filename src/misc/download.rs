@@ -5,8 +5,8 @@
 //! - `kuro-platform` has no `Paths::update_dir` and is outside this lane, so the folder is an argument; the app passes
 //!   the downloads folder (the file is meant to be found and run by the user). Because that folder holds the user's
 //!   own files, only `.kuro-update-*.part` files are swept, and only when older than [`STALE_AFTER`].
-//! - There is no network-status service on the platform side, so "Waiting for network" is not entered: an offline
-//!   start fails at the connection and shows the retry notice.
+//! - An offline start shows "Waiting for network" and sends no request until the connectivity adapter reports a
+//!   network (T-35a-057). Metered connections are allowed, as in Aniyomi (the adapter only reports availability).
 //! - The checksum is hashed while the bytes are written, so the finished file is never read again.
 //! - A notice step is a plain [`Op`] handed to a sink, so the order of notices is tested without GTK.
 
@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+use kuro_track::connectivity::Connectivity;
 use sha2::{Digest, Sha256};
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
@@ -66,12 +67,24 @@ pub struct Downloader {
     dir: PathBuf,
     sink: Sink,
     handle: Handle,
+    net: Arc<dyn Connectivity>,
     slot: Mutex<Option<Running>>,
 }
 
+/// The desktop's network state (T-35a-057). GIO reports link availability, not internet reachability.
+pub struct GioNetwork;
+
+#[async_trait::async_trait]
+impl Connectivity for GioNetwork {
+    fn is_online(&self) -> bool {
+        use gtk::gio::prelude::NetworkMonitorExt as _;
+        gtk::gio::NetworkMonitor::default().is_network_available()
+    }
+}
+
 impl Downloader {
-    pub fn new(dir: PathBuf, sink: Sink, handle: Handle) -> Arc<Self> {
-        Arc::new(Self { dir, sink, handle, slot: Mutex::new(None) })
+    pub fn new(dir: PathBuf, sink: Sink, handle: Handle, net: Arc<dyn Connectivity>) -> Arc<Self> {
+        Arc::new(Self { dir, sink, handle, net, slot: Mutex::new(None) })
     }
 
     /// Starts `request`, replacing a running download: the old one is cancelled and has ended before the new one begins.
@@ -119,10 +132,12 @@ impl Downloader {
         sweep_stale(&self.dir, SystemTime::now());
         let part = self.dir.join(format!("{PART_PREFIX}{name}{PART_SUFFIX}"));
         let version = request.version.as_deref();
-        (self.sink)(Op::Show(app_update::progress(version, Phase::Downloading(None))));
+        let online = self.net.is_online();
+        let first = if online { Phase::Downloading(None) } else { Phase::WaitingForNetwork };
+        (self.sink)(Op::Show(app_update::progress(version, first)));
         let outcome = tokio::select! {
             () = cancel.cancelled() => Outcome::Cancelled,
-            outcome = self.fetch(&request, &name, &part) => outcome,
+            outcome = self.fetch_when_online(&request, &name, &part, online) => outcome,
         };
         let steps = match outcome {
             Outcome::Done { path, verified } => app_update::finished_steps(&path, verified),
@@ -133,12 +148,21 @@ impl Downloader {
             Outcome::Failed(message) => {
                 let _ = std::fs::remove_file(&part);
                 tracing::warn!(url = %request.url, %message, "the app update download failed");
-                app_update::failed_steps(version, &request.url, FAILED_BODY)
+                app_update::failed_steps(version, &request.url, request.sha256.as_deref(), FAILED_BODY)
             }
         };
         for step in steps {
             (self.sink)(step);
         }
+    }
+
+    /// Waits for the network when the start found none, then downloads. No request is sent before that (T-35a-057).
+    async fn fetch_when_online(&self, request: &Request, name: &str, part: &Path, online: bool) -> Outcome {
+        if !online {
+            self.net.wait_online().await;
+            (self.sink)(Op::Show(app_update::progress(request.version.as_deref(), Phase::Downloading(None))));
+        }
+        self.fetch(request, name, part).await
     }
 
     async fn fetch(&self, request: &Request, name: &str, part: &Path) -> Outcome {
@@ -192,7 +216,7 @@ pub fn install(dir: PathBuf, handle: Handle) {
             let sink: Sink = Arc::new(|op| {
                 super::notify::send(op);
             });
-            *slot = Some(Downloader::new(dir, sink, handle));
+            *slot = Some(Downloader::new(dir, sink, handle, Arc::new(GioNetwork)));
         }
     });
 }
@@ -205,12 +229,12 @@ pub fn asset_name_of(url: &str) -> Option<String> {
 
 /// The `StartAppUpdate` action: downloads `url`. A url with no usable file name shows the failure notice.
 /// `false` before [`install`] ran.
-pub fn start_app_update(url: &str, version: Option<String>) -> bool {
+pub fn start_app_update(url: &str, version: Option<String>, sha256: Option<String>) -> bool {
     let Some(downloader) = INSTANCE.with(|slot| slot.borrow().clone()) else { return false };
-    let request = Request { url: url.to_owned(), asset_name: asset_name_of(url).unwrap_or_default(), version, sha256: None };
+    let request = Request { url: url.to_owned(), asset_name: asset_name_of(url).unwrap_or_default(), version, sha256 };
     if let Err(error) = downloader.start(request.clone()) {
         tracing::warn!(?error, url, "the app update download was not started");
-        for step in app_update::failed_steps(request.version.as_deref(), url, FAILED_BODY) {
+        for step in app_update::failed_steps(request.version.as_deref(), url, request.sha256.as_deref(), FAILED_BODY) {
             (downloader.sink)(step);
         }
     }
@@ -245,6 +269,7 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     const BODY: &[u8] = b"kurobayomi-appimage-bytes";
 
@@ -299,12 +324,26 @@ mod tests {
         format!("http://{addr}")
     }
 
+    /// A network that answers from a flag. Its `wait_online` is the trait's default poll.
+    struct Net(Arc<AtomicBool>);
+
+    #[async_trait::async_trait]
+    impl Connectivity for Net {
+        fn is_online(&self) -> bool {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
     fn setup() -> (tempfile::TempDir, Arc<Downloader>, Arc<Mutex<Vec<Op>>>) {
+        setup_online(Arc::new(AtomicBool::new(true)))
+    }
+
+    fn setup_online(online: Arc<AtomicBool>) -> (tempfile::TempDir, Arc<Downloader>, Arc<Mutex<Vec<Op>>>) {
         let dir = tempfile::tempdir().unwrap();
         let ops = Arc::new(Mutex::new(Vec::new()));
         let log = ops.clone();
         let sink: Sink = Arc::new(move |op| log.lock().unwrap().push(op));
-        let downloader = Downloader::new(dir_path(&dir), sink, Handle::current());
+        let downloader = Downloader::new(dir_path(&dir), sink, Handle::current(), Arc::new(Net(online)));
         (dir, downloader, ops)
     }
 
@@ -413,7 +452,22 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn offline_shows_the_retry_notice() {
+    async fn offline_waits_for_the_network_and_sends_no_request_until_it_is_back() {
+        // T-35a-057 (U19): no part file and no download while offline; the download runs once the network returns.
+        let online = Arc::new(AtomicBool::new(false));
+        let (dir, dl, ops) = setup_online(online.clone());
+        dl.start(request(format!("{}/ok", server()), None)).unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let waiting = ops.lock().unwrap().iter().any(|op| matches!(op, Op::Show(p) if p.body.as_deref() == Some("Waiting for network")));
+        assert!(waiting, "the progress notice says Waiting for network");
+        assert!(parts(&dir_path(&dir)).is_empty(), "no request was sent");
+        online.store(true, Ordering::SeqCst);
+        dl.finished().await;
+        assert_eq!(std::fs::read(dir_path(&dir).join("Kurobayomi-x86_64.AppImage")).unwrap(), BODY);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_refused_connection_while_online_shows_the_retry_notice() {
         let (dir, dl, ops) = setup();
         // a port nothing listens on
         let closed = {

@@ -1,13 +1,7 @@
 //! Base activity and theming lifecycle (Kotlin `BaseActivity`, `ThemingDelegate` and `prepareTabletUiContext`, T-36a-061).
 //!
 //! Two rules: the theme is applied before the first widget is built, and the tablet context is applied before the layout
-//! is measured. `Lifecycle` keeps the order and refuses a step that runs early. The tablet rule (behaviour section 8.1) is
-//! `override_smallest_width`.
-
-use kuro_prefs::ui::TabletUiMode;
-
-/// `TABLET_UI_REQUIRED_SCREEN_WIDTH_DP`: a smallest width from this value is a tablet.
-pub const TABLET_MIN_DP: i32 = 720;
+//! is measured. `Lifecycle` keeps the order and refuses a step that runs early.
 
 /// The step that ran too early.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,35 +46,6 @@ impl Lifecycle {
     }
 }
 
-/// Whether the screen counts as a tablet UI at this smallest width.
-pub fn is_tablet_ui(smallest_width_dp: i32) -> bool {
-    smallest_width_dp >= TABLET_MIN_DP
-}
-
-/// Whether the tablet UI is expected for the user's mode (`prepareTabletUiContext`, `expected`).
-pub fn expected_tablet_ui(mode: TabletUiMode, smallest_width_dp: i32, landscape: bool) -> bool {
-    match mode {
-        // one threshold for both orientations: a resizable window has no stable orientation, and table TC-53 says 720
-        TabletUiMode::AUTOMATIC => is_tablet_ui(smallest_width_dp),
-        TabletUiMode::ALWAYS => true,
-        TabletUiMode::LANDSCAPE => landscape,
-        TabletUiMode::NEVER => false,
-    }
-}
-
-/// The smallest width the layout measures with: unchanged when it already matches the mode, otherwise raised to 720 for
-/// a tablet or lowered to 719 for a phone.
-pub fn override_smallest_width(mode: TabletUiMode, smallest_width_dp: i32, landscape: bool) -> i32 {
-    let expected = expected_tablet_ui(mode, smallest_width_dp, landscape);
-    if is_tablet_ui(smallest_width_dp) == expected {
-        smallest_width_dp
-    } else if expected {
-        smallest_width_dp.max(TABLET_MIN_DP)
-    } else {
-        smallest_width_dp.min(TABLET_MIN_DP - 1)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,33 +65,5 @@ mod tests {
         assert_eq!(life.measure(), Err(LifecycleError::TabletContextNotApplied));
         life.apply_tablet_context();
         assert_eq!(life.measure(), Ok(()));
-    }
-
-    #[test]
-    fn automatic_uses_the_720_threshold_in_both_orientations() {
-        assert!(!expected_tablet_ui(TabletUiMode::AUTOMATIC, 719, true));
-        assert!(!expected_tablet_ui(TabletUiMode::AUTOMATIC, 719, false));
-        assert!(expected_tablet_ui(TabletUiMode::AUTOMATIC, 720, false));
-        assert!(expected_tablet_ui(TabletUiMode::AUTOMATIC, 720, true));
-    }
-
-    #[test]
-    fn fixed_modes_ignore_the_width() {
-        assert!(expected_tablet_ui(TabletUiMode::ALWAYS, 300, false));
-        assert!(!expected_tablet_ui(TabletUiMode::NEVER, 900, true));
-        assert!(expected_tablet_ui(TabletUiMode::LANDSCAPE, 300, true));
-        assert!(!expected_tablet_ui(TabletUiMode::LANDSCAPE, 900, false));
-    }
-
-    #[test]
-    fn a_phone_width_is_raised_to_the_tablet_minimum_when_the_tablet_is_expected() {
-        assert_eq!(override_smallest_width(TabletUiMode::ALWAYS, 400, false), 720);
-        assert_eq!(override_smallest_width(TabletUiMode::ALWAYS, 800, false), 800);
-    }
-
-    #[test]
-    fn a_tablet_width_is_lowered_to_719_when_the_phone_is_expected() {
-        assert_eq!(override_smallest_width(TabletUiMode::NEVER, 900, false), 719);
-        assert_eq!(override_smallest_width(TabletUiMode::NEVER, 400, false), 400);
     }
 }

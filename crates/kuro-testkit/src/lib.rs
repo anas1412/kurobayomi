@@ -12,6 +12,7 @@ mod settings;
 mod tracker;
 
 pub mod domain;
+pub mod track_samples;
 pub use db::{AnimeBuilder, EpisodeBuilder, HistoryBuilder, TestDb};
 pub use settings::InMemorySettings;
 pub use tracker::FakeTracker;

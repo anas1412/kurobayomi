@@ -102,7 +102,7 @@ pub fn connect(app: &gtk::Application) {
     });
 }
 
-fn submit_all(app: &gtk::Application, requests: Vec<LaunchRequest>) {
+pub(super) fn submit_all(app: &gtk::Application, requests: Vec<LaunchRequest>) {
     let Some(shell) = Shell::get() else { return };
     for request in requests {
         if let Some(now) = shell.submit(request) {

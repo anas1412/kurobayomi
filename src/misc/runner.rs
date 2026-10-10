@@ -194,6 +194,9 @@ fn device_facts(
 }
 
 /// Whether the device restrictions the user chose hold right now. A blocked scheduled pass retries later.
+///
+/// Deviation (T-26a-012): the battery level is never read, so the battery-not-low constraint is not enforced on this
+/// platform. Wi-Fi, metered network and power source are the constraints checked here.
 async fn device_allows(inputs: &Inputs) -> bool {
     let restrictions = inputs.library.auto_update_device_restrictions.get();
     let conditions = kuro_platform::power_network::read_conditions().await;
@@ -272,22 +275,27 @@ fn folder_renames() -> Arc<FolderRenames> {
 
 fn runner() -> Arc<Runner> {
     let app = crate::data::app();
-    let lib = LibraryPrefs::new(app.base.store().clone());
+    runner_over(app.manga_db.clone(), app.anime_db.clone(), app.base.store())
+}
+
+/// The runner over two database handles and a preference store, for the app and for the headless pass.
+fn runner_over(manga_db: Arc<Db>, anime_db: Arc<Db>, store: &PrefStore) -> Arc<Runner> {
+    let lib = LibraryPrefs::new(store.clone());
     let renames = folder_renames();
     let sync = DbItemSync::new(
-        app.manga_db.clone(),
-        app.anime_db.clone(),
+        manga_db.clone(),
+        anime_db.clone(),
         Arc::new(MangaSyncLocks::default()),
         Arc::new(MangaSyncLocks::default()),
         lib.mark_duplicate_read_chapter_as_read.get().contains(kuro_prefs::library::MARK_DUPLICATE_CHAPTER_READ_NEW),
         kuro_domain::items::episode_sync::mark_duplicate_as_seen_from_pref(&lib.mark_duplicate_seen_episode_as_seen.get()),
     )
     .with_renames(renames.clone(), renames);
-    let prefs = Prefs::with_store(app.base.store().clone(), Arc::new(kuro_prefs::memory::MemorySecrets::default()));
-    let host = PrefsHost::new(ToastHost::new(app.manga_db.clone(), app.anime_db.clone(), app.base.store()), &prefs);
+    let prefs = Prefs::with_store(store.clone(), Arc::new(kuro_prefs::memory::MemorySecrets::default()));
+    let host = PrefsHost::new(ToastHost::new(manga_db.clone(), anime_db.clone(), store), &prefs);
     Arc::new(PassRunner::new(Deps {
         registry: NothingInstalled,
-        store: SqliteLibraryStore::new(app.manga_db.clone(), app.anime_db.clone()),
+        store: SqliteLibraryStore::new(manga_db, anime_db),
         sync,
         host,
     }))
@@ -372,6 +380,7 @@ pub fn start() {
         std::rc::Rc::new(move |kind, category| start_runner.start_now(pass_settings(kind, category, &start_inputs)));
     let running: std::rc::Rc<dyn Fn(EntryKind) -> bool> =
         std::rc::Rc::new(move |kind| running_runner.locks().holder(kind).is_some());
+    register_update_action(start.clone());
     register_buttons(start, running);
 
     let mut senders = Vec::new();
@@ -391,6 +400,92 @@ pub fn start() {
     }
     let pref = LibraryPrefs::new(app.base.store().clone()).auto_update_interval;
     crate::misc::interval::pump(&pref, senders);
+}
+
+/// The application action a second process activates on the primary instance (T-26a-029).
+pub const UPDATE_ACTION: &str = "library-update";
+
+/// Starts a manual pass of every kind through `start`, which holds the single-flight lock of the runner: a kind that is
+/// already running answers `false`, so a forwarded request never adds a second lock holder (test F-11).
+pub fn start_all(start: &dyn Fn(EntryKind, Option<i64>) -> bool) -> [(EntryKind, bool); 2] {
+    [EntryKind::Manga, EntryKind::Anime].map(|kind| (kind, start(kind, None)))
+}
+
+/// `app.library-update("manual")`: what `kurobayomi --library-update=manual` asks of the running app (T-26a-029).
+fn register_update_action(start: std::rc::Rc<dyn Fn(EntryKind, Option<i64>) -> bool>) {
+    use gtk::prelude::*;
+    let Some(app) = gtk::gio::Application::default() else { return };
+    let action = gtk::gio::SimpleAction::new(UPDATE_ACTION, Some(gtk::glib::VariantTy::STRING));
+    action.connect_activate(move |_, param| {
+        if param.and_then(|p| p.get::<String>()).as_deref() == Some("manual") {
+            start_all(&*start);
+        }
+    });
+    app.add_action(&action);
+}
+
+/// The exit status of a headless run: 0 unless a pass could not read the library. A kind that is already running, a
+/// retry, a cancel and a blocked device all end with 0, because the next timer tick tries again (T-26a-020).
+fn exit_code(statuses: &[PassStatus]) -> u8 {
+    u8::from(statuses.iter().any(|status| matches!(status, PassStatus::Failed(_))))
+}
+
+/// One pass per kind over `runner`. A scheduled run checks the device restrictions first, like the in-app schedule.
+async fn headless_passes(runner: &Runner, inputs: &Inputs, trigger: Trigger) -> u8 {
+    if trigger == Trigger::Auto && !device_allows(inputs).await {
+        println!("kurobayomi: the device restrictions are not met, no update ran");
+        return 0;
+    }
+    let mut statuses = Vec::new();
+    for kind in [EntryKind::Manga, EntryKind::Anime] {
+        let status = runner.run(pass_settings(kind, None, inputs), trigger).await.status;
+        match &status {
+            PassStatus::Skipped => println!("kurobayomi: an update of this kind is already running"),
+            PassStatus::Failed(reason) => eprintln!("kurobayomi: the {kind:?} library update failed: {reason}"),
+            _ => {}
+        }
+        statuses.push(status);
+    }
+    exit_code(&statuses)
+}
+
+/// `kurobayomi --library-update=auto` (and the fallback of `=manual` with no app running): one pass per kind over the
+/// library without GTK, then the exit status. An app that is open owns the library and its own schedule, so this exits
+/// 0 with "already running" (T-26a-020). A headless run has no notifier, so its notices are dropped.
+pub fn run_headless(trigger: Trigger) -> u8 {
+    let paths = match kuro_platform::linux::LinuxPaths::system() {
+        Ok(paths) => paths,
+        Err(error) => {
+            eprintln!("kurobayomi: {error}");
+            return 1;
+        }
+    };
+    let library = match crate::backup_run::open_headless(&paths) {
+        Ok(library) => library,
+        Err(error) if error.to_lowercase().contains("lock") => {
+            println!("kurobayomi: already running, the open app owns the library");
+            return 0;
+        }
+        Err(error) => {
+            eprintln!("kurobayomi: cannot open the library: {error}");
+            return 1;
+        }
+    };
+    let runtime = match kuro_core::runtime::build() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("kurobayomi: no runtime: {error}");
+            return 1;
+        }
+    };
+    let store = library.prefs.clone();
+    let inputs = Inputs {
+        library: LibraryPrefs::new(store.clone()),
+        download: DownloadPrefs::new(store.clone()),
+        hide_content: kuro_prefs::security::SecurityPrefs::new(store.clone()).hide_notification_content.clone(),
+    };
+    let runner = runner_over(library.manga, library.anime, &store);
+    runtime.block_on(headless_passes(&runner, &inputs, trigger))
 }
 
 #[cfg(test)]
@@ -575,5 +670,32 @@ mod tests {
         let slot = registry.get_or_stub(9);
         assert!(matches!(slot, SourceSlot::Missing));
         assert_eq!(slot.fetch(EntryKind::Manga, "/m", false).await, Err(UpdateError::SourceNotInstalled));
+    }
+
+    #[test]
+    fn a_forwarded_manual_request_starts_each_kind_once_and_a_second_one_adds_no_lock_holder() {
+        // T-26a-029, test F-11: the closure stands for the runner's single-flight `start_now`
+        let holders = RefCell::new(Vec::new());
+        let start = |kind: EntryKind, category: Option<i64>| {
+            assert_eq!(category, None, "a forwarded request updates the whole library");
+            let mut holders = holders.borrow_mut();
+            let free = !holders.contains(&kind);
+            if free {
+                holders.push(kind);
+            }
+            free
+        };
+        assert_eq!(start_all(&start), [(EntryKind::Manga, true), (EntryKind::Anime, true)]);
+        assert_eq!(start_all(&start), [(EntryKind::Manga, false), (EntryKind::Anime, false)]);
+        assert_eq!(holders.borrow().len(), 2);
+    }
+
+    #[test]
+    fn a_headless_run_fails_only_when_the_library_could_not_be_read() {
+        // T-26a-020: a busy kind, a cancel and a retry all exit 0
+        assert_eq!(exit_code(&[PassStatus::Success, PassStatus::Success]), 0);
+        assert_eq!(exit_code(&[PassStatus::Skipped, PassStatus::Retry, PassStatus::Cancelled]), 0);
+        assert_eq!(exit_code(&[PassStatus::Success, PassStatus::Failed("no library".into())]), 1);
+        assert_eq!(exit_code(&[]), 0);
     }
 }

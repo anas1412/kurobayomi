@@ -1,0 +1,4 @@
+#%PAM-1.0
+# the app lock asks for the user's own password: the desktop's stack, without the nologin check
+auth      include   system-auth
+account   include   system-auth

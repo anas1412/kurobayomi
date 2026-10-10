@@ -1,0 +1,18 @@
+# cargo-about configuration (scripts/third-party.sh). The list matches the licences allowed by deny.toml.
+accepted = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "LGPL-2.1-or-later",
+    "LGPL-2.1",
+    "CC0-1.0",
+    "BSL-1.0",
+]
+# the licence page shows normal dependencies only
+ignore-dev-dependencies = true
+ignore-build-dependencies = false

@@ -58,4 +58,22 @@ pub mod warning;
 #[allow(dead_code)]
 pub mod webview;
 
+// the desktop packaging step, the provider's catalogue, the lock window and the player and reader screens call these
+// from their own lanes; their rules are tested here
+#[allow(dead_code)]
+pub mod desktop_labels;
+#[allow(dead_code)]
+pub mod language;
+#[cfg(test)]
+mod manual_checklist;
+#[allow(dead_code)]
+pub mod player_result;
+pub mod library_catalogue;
+#[allow(dead_code)]
+pub mod search_provider;
+#[allow(dead_code)]
+pub mod transitions;
+#[allow(dead_code)]
+pub mod unlock;
+
 pub use host::Shell;

@@ -14,9 +14,16 @@
 //! - T-41b-057: no row movement animation. Results reorder as they arrive. Pages change with the stack's crossfade only.
 //! - T-41b-058: navigation uses `ui::push` and `ui::pop` with no Voyager types. Escape and Back match section 4 of
 //!   `p2-topic-browse-listing.md`.
-//! - T-41b-059: collaborators are passed explicitly, not through a service locator. `anime::browse_screen::AnimeEnv` holds
-//!   the anime browse services, and the browse and global search modules read no global. The struct is `AnimeEnv`, not
-//!   `AppServices`; the name is the only difference.
+//! - T-41b-059: Injekt is replaced by explicit services. `anime::browse_screen::AppServices` holds the anime browse
+//!   collaborators and is passed to `source_page`; the manga counterpart is `browse_screen::BrowseEnv`. Named gaps:
+//!   (1) the cover and background caches are passed to the favourite store as `|_| 0` clearers, because the image layer
+//!   keeps no per-entry cover files yet; (2) getCategories, setAnimeCategories, addTracks and networkToLocalAnime have
+//!   no collaborator field of their own: the favourite store (`FavoriteStore`) owns the category and add work, and the
+//!   tracker binder is attached by `with_add_effects` where it is wired; (3) the page constructors still read two
+//!   process-wide values at the screen entry points, not inside the pure logic or the services struct: the app handle
+//!   (`crate::data::app()`) and the source directory (`directory::current()`). The entry points are `page` and
+//!   `production_env` of `browse_screen`, `anime::browse_screen` and `migrate_screen`, the `mount` shell, `search_screen`
+//!   and `source_prefs_screen`. Passing them in needs `screens::build` (not in this lane) to hand them down.
 #![allow(dead_code)] // wired as the source registry and the extension manager arrive
 
 pub mod anime;

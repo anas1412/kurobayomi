@@ -35,6 +35,7 @@ pub fn window() -> gtk::ApplicationWindow {
 pub fn push(page: &impl IsA<gtk::Widget>) {
     let stack = nav().0;
     stack.add_child(page);
+    crate::shell::transitions::apply(&stack, crate::shell::transitions::Direction::Push);
     stack.set_visible_child(page);
 }
 
@@ -42,6 +43,7 @@ pub fn pop() {
     let stack = nav().0;
     let Some(cur) = stack.visible_child() else { return };
     let Some(prev) = cur.prev_sibling() else { return };
+    crate::shell::transitions::apply(&stack, crate::shell::transitions::Direction::Pop);
     stack.set_visible_child(&prev);
     glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || stack.remove(&cur));
 }
@@ -79,6 +81,7 @@ pub fn pop_until(stop: impl Fn(&gtk::Widget) -> bool) {
 pub fn pop_to_root() {
     let stack = nav().0;
     let Some(root) = stack.first_child() else { return };
+    crate::shell::transitions::apply(&stack, crate::shell::transitions::Direction::Pop);
     stack.set_visible_child(&root);
     while let Some(w) = root.next_sibling() {
         stack.remove(&w);

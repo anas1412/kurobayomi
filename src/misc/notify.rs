@@ -395,12 +395,16 @@ impl ActionHost for GtkHost {
     fn reveal_roots(&self) -> Vec<std::path::PathBuf> {
         use kuro_platform::paths::Paths as _;
         kuro_platform::linux::LinuxPaths::system()
-            .map(|p| vec![p.data_dir(), p.default_downloads_dir(), p.cache_dir()])
+            .map(|p| {
+                let mut roots = vec![p.data_dir(), p.default_downloads_dir(), p.cache_dir()];
+                roots.extend(crate::misc::reveal::announced_folders());
+                roots
+            })
             .unwrap_or_default()
     }
 
-    fn start_app_update(&self, url: &str, version: Option<String>) {
-        if !crate::misc::download::start_app_update(url, version) {
+    fn start_app_update(&self, url: &str, version: Option<String>, sha256: Option<String>) {
+        if !crate::misc::download::start_app_update(url, version, sha256) {
             self.unavailable("start app update before the downloader exists");
         }
     }
@@ -488,14 +492,15 @@ mod tests {
 
     #[test]
     fn a_long_list_of_new_items_drops_the_download_button() {
-        // T-26a-094 limits: 15 chapters, 10 episodes
-        let many: Vec<(f64, i64)> = (0..16).map(|n| (f64::from(n), i64::from(n))).collect();
+        // T-26a-094: the limits are the notice module's constants (15 chapters, 10 episodes)
+        use crate::library_update::notice::{ANIME_DOWNLOAD_ACTION_LIMIT, MANGA_DOWNLOAD_ACTION_LIMIT};
+        let many: Vec<(f64, i64)> = (0..=MANGA_DOWNLOAD_ACTION_LIMIT).map(|n| (n as f64, n as i64)).collect();
         let post = entry_post(EntryKind::Manga, &update(&many), false).expect("shown");
-        assert_eq!(post.buttons.len(), 2, "16 chapters: no Download");
-        let post = entry_post(EntryKind::Manga, &update(&many[..15]), false).expect("shown");
-        assert_eq!(post.buttons.len(), 3, "15 chapters: Download");
-        let post = entry_post(EntryKind::Anime, &update(&many[..11]), false).expect("shown");
-        assert_eq!(post.buttons.len(), 2, "11 episodes: no Download");
+        assert_eq!(post.buttons.len(), 2, "one over the chapter limit: no Download");
+        let post = entry_post(EntryKind::Manga, &update(&many[..MANGA_DOWNLOAD_ACTION_LIMIT]), false).expect("shown");
+        assert_eq!(post.buttons.len(), 3, "at the chapter limit: Download");
+        let post = entry_post(EntryKind::Anime, &update(&many[..=ANIME_DOWNLOAD_ACTION_LIMIT]), false).expect("shown");
+        assert_eq!(post.buttons.len(), 2, "one over the episode limit: no Download");
     }
 
     #[test]

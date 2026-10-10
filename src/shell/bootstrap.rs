@@ -1,19 +1,20 @@
-//! Launch bootstrap: the first window waits for the migrations, and launch requests that arrive before the window
-//! exists are queued in arrival order (T-36a-001, T-36a-015, T-53a-006).
+//! Launch bootstrap: the first window waits for the migrations, the library page shows a loading state until they finish,
+//! and launch requests that arrive before the window exists are queued in arrival order (T-36a-001, T-36a-015, T-53a-006,
+//! T-53a-069).
 //!
-//! The splash timing (`keep_hidden`) is the Kotlin `keepOnScreen` rule from behaviour section 1.6.
+//! The Kotlin splash timers (500 ms minimum, 5000 ms maximum, 400 ms exit animation) are not ported: GTK shows the window
+//! when it is ready, and the library page shows `LibraryState::Loading` until the migrator finishes. The crash screen is
+//! owned by area 01.
 
 use std::collections::VecDeque;
-use std::time::Duration;
 
-/// The window stays hidden at least this long (behaviour 1.6).
-pub const MIN_SHOW: Duration = Duration::from_millis(500);
-/// After this long the window is shown whether or not the first route is applied.
-pub const MAX_WAIT: Duration = Duration::from_millis(5000);
-
-/// Whether the splash keeps the window hidden at `elapsed`, given whether the first route was applied.
-pub fn keep_hidden(elapsed: Duration, first_route_applied: bool) -> bool {
-    elapsed <= MIN_SHOW || (!first_route_applied && elapsed <= MAX_WAIT)
+/// What the library page shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LibraryState {
+    /// The migrator is still running: a spinner, no list.
+    Loading,
+    /// The migrator finished: the library list.
+    Ready,
 }
 
 /// Startup state on the GTK thread. The window is presented only after the migrations resolve.
@@ -45,6 +46,11 @@ impl<T> Bootstrap<T> {
         self.migrated
     }
 
+    /// The library page shows the loading state until the migrator finishes.
+    pub fn library_state(&self) -> LibraryState {
+        if self.migrated { LibraryState::Ready } else { LibraryState::Loading }
+    }
+
     /// A launch request arrived. Returns it back when the window exists, so the caller applies it now.
     /// Otherwise it is queued and returned later by `window_built`.
     pub fn request(&mut self, req: T) -> Option<T> {
@@ -67,14 +73,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn splash_timing_matches_the_kotlin_rule_at_the_listed_instants() {
-        let ms = Duration::from_millis;
-        assert!(keep_hidden(ms(0), false));
-        assert!(keep_hidden(ms(499), false));
-        assert!(keep_hidden(ms(500), true), "still hidden at the minimum when ready");
-        assert!(!keep_hidden(ms(501), true));
-        assert!(keep_hidden(ms(4999), false));
-        assert!(!keep_hidden(ms(5001), false), "forced show at the cap");
+    fn no_splash_timers_are_ported() {
+        let source = include_str!("bootstrap.rs");
+        let code = &source[..source.find("#[cfg(test)]").unwrap()];
+        for timer in ["MIN_SHOW", "MAX_WAIT", "keep_hidden", "Duration"] {
+            assert!(!code.lines().filter(|l| !l.trim_start().starts_with("//")).any(|l| l.contains(timer)), "{timer}");
+        }
+    }
+
+    #[test]
+    fn the_library_page_loads_until_the_migrator_finishes() {
+        let mut boot: Bootstrap<&str> = Bootstrap::new();
+        assert_eq!(boot.library_state(), LibraryState::Loading);
+        boot.migration_done();
+        assert_eq!(boot.library_state(), LibraryState::Ready);
     }
 
     #[test]

@@ -35,7 +35,7 @@ pub const REREADING: i64 = -1;
 pub const ACCEPTED_SOURCES: &[&str] = &["tachidesk/en"];
 
 /// Logo colour `#FFD600`: the dominant brand yellow of `ic_tracker_suwayomi`, sampled from the logo (T-33a-084, D-27).
-/// Replaces the Kotlin `rgb(255, 35, 35)` that was marked `// TODO` (`Suwayomi.kt:24`).
+/// Replaces the Kotlin `rgb(255, 35, 35)` that Kotlin marked as a placeholder (`Suwayomi.kt:24`).
 pub const LOGO_COLOR: u32 = 0xFFFF_D600;
 
 /// Logo name in the bundled assets (T-33a-100).
