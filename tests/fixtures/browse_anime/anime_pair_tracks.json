@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "tracker": "enhanced-accepting",
+    "enhanced": true,
+    "accepts_new_source": true
+  },
+  {
+    "id": 2,
+    "tracker": "enhanced-rejecting",
+    "enhanced": true,
+    "accepts_new_source": false
+  },
+  {
+    "id": 3,
+    "tracker": "plain",
+    "enhanced": false,
+    "accepts_new_source": true
+  }
+]

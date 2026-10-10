@@ -46,6 +46,17 @@ mod tests {
     }
 
     #[test]
+    fn the_intro_length_airing_episode_and_airing_time_masks_are_disjoint() {
+        // T-F1
+        let masks = [viewer_flags::INTRO_MASK, viewer_flags::AIRING_EPISODE_MASK, viewer_flags::AIRING_TIME_MASK];
+        for (i, a) in masks.iter().enumerate() {
+            for b in &masks[i + 1..] {
+                assert_eq!(a & b, 0);
+            }
+        }
+    }
+
+    #[test]
     fn a_length_round_trips_and_is_clamped_to_eight_bits() {
         for (length, stored) in [(90, 90), (300, 44), (-1, 255)] {
             let word = apply(0, skip_intro_write(length));

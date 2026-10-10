@@ -224,8 +224,11 @@ impl DbRestorer<'_> {
     }
 
     fn custom_buttons(&mut self) -> Result<Item, RestoreError> {
-        let result = in_tx(self.t.anime, |tx| restore_custom_buttons(tx, &self.backup.custom_buttons)).map_err(|e| e.to_string());
-        done(text::CUSTOM_BUTTON_SETTINGS.english.into(), result)
+        let title = text::CUSTOM_BUTTON_SETTINGS.english;
+        match in_tx(self.t.anime, |tx| restore_custom_buttons(tx, &self.backup.custom_buttons)) {
+            Ok(inserted) => done(format!("{title} ({inserted})"), Ok(())),
+            Err(e) => done(title.into(), Err(e.to_string())),
+        }
     }
 }
 

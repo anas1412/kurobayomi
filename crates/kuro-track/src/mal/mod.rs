@@ -7,6 +7,7 @@ pub mod consts;
 pub mod dates;
 pub mod dto;
 pub mod error;
+pub mod login;
 pub mod messages;
 pub mod pkce;
 pub mod redirect;

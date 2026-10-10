@@ -771,6 +771,25 @@ mod orchestration_tests {
     }
 
     #[tokio::test]
+    async fn two_concurrent_refreshes_of_one_anime_run_one_whole_cycle_after_the_other() {
+        // T-17a-047 / E-C4: each refresh holds the anime's lock for its read, source, write, sync and re-read.
+        let stored = anime(7, false);
+        let mut rig = make_rig(stored.clone());
+        rig.source.episodes = vec![s_episode("/e1")];
+        rig.sync = Arc::new(FakeListSync { new_episodes: vec![episode("/e1", 0)], ..FakeListSync::new(rig.log.clone()) });
+        let updater = updater(&rig);
+        let (first, second) = tokio::join!(
+            updater.episodes(&stored, &rig.source, FetchFlags::default()),
+            updater.episodes(&stored, &rig.source, FetchFlags::default()),
+        );
+        first.expect("first refresh");
+        second.expect("second refresh");
+        let cycle = ["read.episodes", "source.episodes", "write.anime", "sync.episodes", "read.anime"];
+        let expected: Vec<&str> = cycle.iter().chain(cycle.iter()).copied().collect();
+        assert_eq!(calls(&rig), expected, "E-C4: the second refresh starts after the first one has finished");
+    }
+
+    #[tokio::test]
     async fn episodes_reach_the_source_in_source_order() {
         let stored = anime(7, false);
         let mut rig = make_rig(stored.clone());

@@ -1,6 +1,8 @@
 //! The info header, GTK-free: the lines it shows, what a click searches, what a long press copies, and the cover size.
 //! Upstream: `MangaInfoHeader.kt:336-414` (layouts), `:424-520` (title, author, artist, source rows).
 
+use kuro_images::art::{ArtKind, ArtRef, Owner};
+
 use crate::entry_core::detail::EntryState;
 use crate::entry_core::text::{artist_row, display_author, display_title, status_icon, status_text};
 
@@ -37,6 +39,10 @@ pub struct HeaderModel {
     pub source: String,
     /// The source extension is missing: the warning icon is drawn in the error color.
     pub stub: bool,
+    /// The genre chips under the description; empty hides the row (E-70).
+    pub genres: Vec<GenreChip>,
+    /// The cover to load. A newer `last_modified` in it makes the header load the cover again.
+    pub cover: Option<ArtRef>,
     raw_title: String,
     raw_author: Option<String>,
 }
@@ -52,6 +58,8 @@ impl HeaderModel {
             &page.source.name,
             page.source.stub,
         )
+        .with_genres(Some(&m.genres))
+        .with_cover(Owner::Manga, m.id, m.source, m.thumbnail_url.as_deref(), m.favorite, m.cover_last_modified)
     }
 
     /// The header of any entry kind: the caller supplies the status icon and text, because manga and anime have
@@ -72,9 +80,23 @@ impl HeaderModel {
             status: status.1,
             source: source.to_owned(),
             stub,
+            genres: Vec::new(),
+            cover: None,
             raw_title: title.to_owned(),
             raw_author: author.map(str::to_owned),
         }
+    }
+
+    /// The same header with the cover of an entry: `(id, source, thumbnail url, favorite, cover_last_modified)`.
+    pub fn with_cover(mut self, owner: Owner, id: i64, source: i64, url: Option<&str>, favorite: bool, last_modified: i64) -> Self {
+        self.cover = Some(ArtRef { owner, entry_id: id, source_id: source, kind: ArtKind::Cover, url: url.map(str::to_owned), favorite, last_modified });
+        self
+    }
+
+    /// The same header with the chips of a genre list (`genre_chips`).
+    pub fn with_genres(mut self, genres: Option<&[String]>) -> Self {
+        self.genres = genre_chips(genres);
+        self
     }
 
     /// The raw text of a field when it is non-blank. Placeholders are never copied or searched.
@@ -134,8 +156,11 @@ mod tests {
             genres: vec![],
             status: 0,
             thumbnail_url: None,
+            cover_last_modified: 0,
             initialized: true,
             favorite: true,
+            next_update: 0,
+            fetch_interval: 0,
             local: false,
             flags: Default::default(),
         };
@@ -201,5 +226,93 @@ mod tests {
         assert!(!is_large(719, 900));
         assert!(is_large(720, 900));
         assert!(!is_large(1200, 719), "a short window is not a tablet");
+    }
+}
+
+/// One genre chip of the header (T-38a-016). A click offers Search, which runs the genre in the manga's own source
+/// (`global` false, as `performGenreSearch` does), and Copy to clipboard, which copies the genre text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenreChip {
+    pub label: String,
+    pub search: SearchRequest,
+    pub copy: String,
+}
+
+/// The chips of a genre list. Blank genres are dropped; an absent or empty list gives no chips, and the row is hidden
+/// (E-70). Chips never wrap the window width on their own: the widget lays them out in a flow box (E-71).
+pub fn genre_chips(genres: Option<&[String]>) -> Vec<GenreChip> {
+    genres
+        .unwrap_or_default()
+        .iter()
+        .map(|g| g.trim())
+        .filter(|g| !g.is_empty())
+        .map(|g| GenreChip {
+            label: g.to_owned(),
+            search: SearchRequest { query: g.to_owned(), global: false },
+            copy: g.to_owned(),
+        })
+        .collect()
+}
+
+/// How the chips are laid out: not at all when there are none, one horizontal row while the description is collapsed,
+/// and a wrapping block once it is expanded (E-70, E-71).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GenreLayout {
+    Hidden,
+    Row,
+    Wrap,
+}
+
+pub fn genre_layout(chips: usize, expanded: bool) -> GenreLayout {
+    match (chips, expanded) {
+        (0, _) => GenreLayout::Hidden,
+        (_, false) => GenreLayout::Row,
+        (_, true) => GenreLayout::Wrap,
+    }
+}
+
+#[cfg(test)]
+mod genre_tests {
+    use super::*;
+
+    #[test]
+    fn an_absent_or_empty_genre_list_gives_no_chips() {
+        assert!(genre_chips(None).is_empty());
+        assert!(genre_chips(Some(&[])).is_empty());
+        assert!(genre_chips(Some(&["  ".to_owned()])).is_empty(), "blank genres are dropped");
+    }
+
+    #[test]
+    fn the_chips_hide_when_empty_stay_in_one_row_collapsed_and_wrap_expanded() {
+        assert_eq!(genre_layout(0, true), GenreLayout::Hidden);
+        assert_eq!(genre_layout(3, false), GenreLayout::Row);
+        assert_eq!(genre_layout(3, true), GenreLayout::Wrap);
+    }
+
+    #[test]
+    fn the_header_carries_the_cover_of_its_entry_and_a_newer_stamp_makes_it_differ() {
+        let plain = HeaderModel::from_parts("t", None, None, ("x", String::new()), "S", false);
+        assert_eq!(plain.cover, None);
+        let at = |stamp| plain.clone().with_cover(Owner::Anime, 4, 9, Some("u"), true, stamp);
+        let art = at(5).cover.expect("a cover");
+        assert_eq!((art.entry_id, art.source_id, art.last_modified, art.owner), (4, 9, 5, Owner::Anime));
+        assert_ne!(at(5), at(6), "the header is rebuilt, or its cover reloaded, when the stamp changes");
+    }
+
+    #[test]
+    fn the_header_carries_the_chips_of_its_genre_list() {
+        let genres = ["Action".to_owned()];
+        let model = HeaderModel::from_parts("t", None, None, ("x", String::new()), "S", false).with_genres(Some(&genres));
+        assert_eq!(model.genres.len(), 1);
+        assert!(HeaderModel::from_parts("t", None, None, ("x", String::new()), "S", false).genres.is_empty());
+    }
+
+    #[test]
+    fn each_chip_searches_its_own_source_and_copies_its_text() {
+        let genres = ["Action".to_owned(), " Drama ".to_owned()];
+        let chips = genre_chips(Some(&genres));
+        assert_eq!(chips.iter().map(|c| c.label.as_str()).collect::<Vec<_>>(), ["Action", "Drama"]);
+        assert_eq!(chips[1].copy, "Drama");
+        assert_eq!(chips[0].search, SearchRequest { query: "Action".into(), global: false });
     }
 }

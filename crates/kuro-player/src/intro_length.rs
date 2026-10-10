@@ -96,7 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn oversized_values_are_clamped_not_truncated() {
+    fn t78_oversized_values_are_clamped_not_truncated() {
         let flags = with_length(0, 300);
         assert_eq!(stored_length(flags), 255);
         assert_eq!(with_length(0, -4), with_length(0, 0));

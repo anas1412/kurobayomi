@@ -152,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn seek_to_out_of_range_is_ignored() {
+    fn t43_seek_to_out_of_range_is_ignored() {
         let mut s = Seeker::default();
         assert_eq!(s.seek_to(-1, true, 100), None);
         assert_eq!(s.seek_to(101, true, 100), None);
@@ -169,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn back_taps_keep_adding_and_reset_past_the_duration() {
+    fn t44_back_taps_keep_adding_and_reset_past_the_duration() {
         let a = accumulate(0, -10, 60, 100);
         assert_eq!(a, -10);
         let b = accumulate(a, -10, 50, 100);
@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_tables_cover_every_action_per_side() {
+    fn t45_dispatch_tables_cover_every_action_per_side() {
         use SingleActionGesture as A;
         use TapSide::*;
         assert_eq!(tap_command(Left, A::Seek, 10), TapCommand::SeekBy(-10));

@@ -1,0 +1,186 @@
+//! Playback over one libmpv handle: loading an episode, the transport, seeking and volume. No GTK here; the
+//! window and the headless test both drive it. Times are read back from mpv and kept in milliseconds.
+
+use std::path::Path;
+
+use kuro_player::load::start_command_ms;
+use kuro_player::mpv::{MpvError, MpvHandle};
+use kuro_player::seek::{absolute_flag, relative_flag};
+
+/// Seek step of the arrow keys, and of Shift with them (the long step is the shortcut table's 60 s).
+pub const SEEK_STEP_MS: i64 = 10_000;
+pub const SEEK_LONG_STEP_MS: i64 = 60_000;
+/// Volume change of one Up or Down press, on mpv's 0 to 100 scale.
+pub const VOLUME_STEP: f64 = 5.0;
+pub const VOLUME_MAX: f64 = 100.0;
+
+pub struct Playback {
+    mpv: MpvHandle,
+}
+
+impl Playback {
+    pub fn new(mpv: MpvHandle) -> Self {
+        Self { mpv }
+    }
+
+    pub fn mpv(&self) -> &MpvHandle {
+        &self.mpv
+    }
+
+    pub fn mpv_mut(&mut self) -> &mut MpvHandle {
+        &mut self.mpv
+    }
+
+    /// Loads `path` at `start_ms` and plays it. mpv starts paused, so the load also unpauses.
+    pub fn load(&self, path: &Path, start_ms: i64) -> Result<(), String> {
+        let text = path
+            .to_str()
+            .ok_or_else(|| format!("path is not UTF-8: {}", path.display()))?;
+        let start = start_command_ms(start_ms);
+        let start: Vec<&str> = start.iter().map(String::as_str).collect();
+        self.mpv.command(&start).map_err(|e| e.to_string())?;
+        self.mpv
+            .command(&["loadfile", text, "replace", "0"])
+            .map_err(|e| e.to_string())?;
+        self.mpv
+            .set_property_flag("pause", false)
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.mpv.get_flag("pause").unwrap_or(true)
+    }
+
+    /// Toggles pause and returns the new paused state.
+    pub fn toggle_pause(&self) -> Result<bool, MpvError> {
+        let paused = !self.is_paused();
+        self.mpv.set_property_flag("pause", paused)?;
+        Ok(paused)
+    }
+
+    /// Ends playback. Used on close, so audio stops before the handle goes away.
+    pub fn stop(&self) {
+        if let Err(e) = self.mpv.command(&["stop"]) {
+            tracing::warn!(error = %e, "mpv stop failed");
+        }
+    }
+
+    /// The playhead in milliseconds, or `None` while no file has a position.
+    pub fn position_ms(&self) -> Option<i64> {
+        self.mpv.get_f64("time-pos").map(secs_to_ms)
+    }
+
+    pub fn duration_ms(&self) -> Option<i64> {
+        self.mpv.get_f64("duration").map(secs_to_ms)
+    }
+
+    pub fn eof_reached(&self) -> bool {
+        self.mpv.get_flag("eof-reached").unwrap_or(false)
+    }
+
+    pub fn seek_to_ms(&self, ms: i64) -> Result<(), MpvError> {
+        let secs = format_secs(ms);
+        self.mpv.command(&["seek", secs.as_str(), absolute_flag(true)])
+    }
+
+    pub fn seek_by_ms(&self, delta_ms: i64) -> Result<(), MpvError> {
+        let secs = format_secs(delta_ms);
+        self.mpv.command(&["seek", secs.as_str(), relative_flag(true)])
+    }
+
+    pub fn volume(&self) -> f64 {
+        self.mpv.get_f64("volume").unwrap_or(VOLUME_MAX)
+    }
+
+    pub fn set_volume(&self, volume: f64) -> Result<(), MpvError> {
+        self.mpv.set_property_f64("volume", clamp_volume(volume))
+    }
+}
+
+/// libmpv needs the C numeric locale: `mpv_create` returns null under a comma-decimal one. GTK's `gtk::init` takes
+/// the locale from the environment, so this is set before every core is created. Only LC_NUMERIC changes.
+pub fn use_c_numeric_locale() {
+    // SAFETY: a null locale only queries; the returned string is read before the next locale call. The name set is a
+    // valid NUL-terminated locale, and setlocale only changes process state, as GTK's init does. Setting is skipped
+    // when LC_NUMERIC is already "C", because setlocale with a name reads the environment, which races with other
+    // threads that change it.
+    unsafe {
+        let current = libc::setlocale(libc::LC_NUMERIC, std::ptr::null());
+        if current.is_null() || std::ffi::CStr::from_ptr(current) != c"C" {
+            libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
+        }
+    }
+}
+
+fn secs_to_ms(secs: f64) -> i64 {
+    (secs * 1000.0).round() as i64
+}
+
+/// Seconds with millisecond precision, as mpv's command arguments take them.
+fn format_secs(ms: i64) -> String {
+    format!("{:.3}", ms as f64 / 1000.0)
+}
+
+pub fn clamp_volume(volume: f64) -> f64 {
+    volume.clamp(0.0, VOLUME_MAX)
+}
+
+/// The volume after `steps` presses of Up (positive) or Down (negative), clamped to the scale.
+pub fn volume_after_steps(current: f64, steps: i32) -> f64 {
+    clamp_volume(current + f64::from(steps) * VOLUME_STEP)
+}
+
+/// The seek offset of an arrow key: forward or back, by the short or the long step.
+pub fn seek_delta_ms(forward: bool, long: bool) -> i64 {
+    let step = if long { SEEK_LONG_STEP_MS } else { SEEK_STEP_MS };
+    if forward { step } else { -step }
+}
+
+/// The position a seek-bar value asks for. `fraction` is the bar's 0 to 1 value, clamped to the duration.
+pub fn seek_target_ms(fraction: f64, duration_ms: i64) -> i64 {
+    (fraction.clamp(0.0, 1.0) * duration_ms as f64).round() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn volume_is_clamped_to_the_mpv_scale() {
+        assert_eq!(clamp_volume(-3.0), 0.0);
+        assert_eq!(clamp_volume(140.0), VOLUME_MAX);
+        assert_eq!(clamp_volume(55.5), 55.5);
+    }
+
+    #[test]
+    fn volume_steps_move_by_five_and_stop_at_the_ends() {
+        assert_eq!(volume_after_steps(50.0, 1), 55.0);
+        assert_eq!(volume_after_steps(50.0, -2), 40.0);
+        assert_eq!(volume_after_steps(98.0, 1), VOLUME_MAX);
+        assert_eq!(volume_after_steps(2.0, -1), 0.0);
+    }
+
+    #[test]
+    fn arrow_keys_seek_ten_seconds_and_shift_seeks_sixty() {
+        assert_eq!(seek_delta_ms(true, false), 10_000);
+        assert_eq!(seek_delta_ms(false, false), -10_000);
+        assert_eq!(seek_delta_ms(true, true), 60_000);
+        assert_eq!(seek_delta_ms(false, true), -60_000);
+    }
+
+    #[test]
+    fn seek_bar_fraction_maps_to_the_duration_and_is_clamped() {
+        assert_eq!(seek_target_ms(0.5, 4_000), 2_000);
+        assert_eq!(seek_target_ms(0.0, 4_000), 0);
+        assert_eq!(seek_target_ms(1.7, 4_000), 4_000);
+        assert_eq!(seek_target_ms(-0.2, 4_000), 0);
+    }
+
+    #[test]
+    fn seconds_round_to_the_nearest_millisecond() {
+        assert_eq!(secs_to_ms(2.9999), 3000);
+        assert_eq!(secs_to_ms(1.2344), 1234);
+        assert_eq!(format_secs(2500), "2.500");
+        assert_eq!(format_secs(-10_000), "-10.000");
+    }
+}

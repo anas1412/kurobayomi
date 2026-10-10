@@ -192,7 +192,10 @@ mod tests {
     #[test]
     fn t_28a_009_expiry_uses_seconds_and_strict_greater_than() {
         assert!(is_expired(100, 101), "past expiry is expired");
-        assert!(!is_expired(100, 100), "equal is still valid, as isExpired uses >");
+        assert!(
+            !is_expired(100, 100),
+            "equal is still valid, as isExpired uses >"
+        );
         assert!(!is_expired(100, 99));
     }
 

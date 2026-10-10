@@ -46,6 +46,8 @@ pub const SCALE_TYPES: [(i32, &str); 6] = [
     (5, "Original size"),
     (6, "Smart fit"),
 ];
+/// Double-tap zoom animation durations in ms (`pref_double_tap_anim_speed`); 1 turns the animation off.
+pub const DOUBLE_TAP_SPEEDS: [(i32, &str); 3] = [(1, "No animation"), (500, "Normal"), (250, "Fast")];
 pub const ZOOM_STARTS: [(i32, &str); 4] = [(1, "Automatic"), (2, "Left"), (3, "Right"), (4, "Center")];
 pub const TAPPING_INVERT: [(TappingInvertMode, &str); 4] = [
     (TappingInvertMode::NONE, "None"),
@@ -92,6 +94,7 @@ fn tree(prefs: &Prefs, hide: bool) -> Vec<Preference> {
     let s = ReaderState::from_prefs(r);
     let mut tree: Vec<Preference> = vec![
         item(int_choice("Default reading mode", &r.default_reading_mode, &READING_MODES, true)),
+        item(int_choice("Double tap animation speed", &r.double_tap_anim_speed, &DOUBLE_TAP_SPEEDS, true)),
         item(switch_sub("Show reading mode", "Briefly show current mode when reader is opened", &r.show_reading_mode, true)),
         item(switch_sub(
             "Show tap zones overlay",
@@ -186,6 +189,26 @@ fn tree(prefs: &Prefs, hide: bool) -> Vec<Preference> {
             switch("Disable zoom out", &r.webtoon_disable_zoom_out, true),
         ]),
     ));
+    let volume_keys_on = r.read_with_volume_keys.get();
+    tree.push(group(
+        "Navigation",
+        vis(vec![
+            switch("Volume keys", &r.read_with_volume_keys, true),
+            switch("Invert volume keys", &r.read_with_volume_keys_inverted, volume_keys_on),
+        ]),
+    ));
+    tree.push(group(
+        "Actions",
+        vis(vec![
+            switch("Show actions on long tap", &r.read_with_long_tap, true),
+            switch_sub(
+                "Save pages into separate folders",
+                "Creates folders according to entries' title",
+                &r.folder_per_manga,
+                true,
+            ),
+        ]),
+    ));
     tree
 }
 
@@ -215,7 +238,7 @@ mod tests {
     fn the_page_has_four_groups_in_order_after_the_top_level_rows() {
         let prefs = Prefs::in_memory();
         let tree = rows(&prefs);
-        assert_eq!(group_titles(&tree), ["Display", "Reading", "Paged", "Long strip"]);
+        assert_eq!(group_titles(&tree), ["Display", "Reading", "Paged", "Long strip", "Navigation", "Actions"]);
         let top: Vec<&str> = tree
             .iter()
             .filter_map(|e| match e {
@@ -223,7 +246,10 @@ mod tests {
                 Preference::Group(_) => None,
             })
             .collect();
-        assert_eq!(top, ["Default reading mode", "Show reading mode", "Show tap zones overlay", "Animate page transitions"]);
+        assert_eq!(
+            top,
+            ["Default reading mode", "Double tap animation speed", "Show reading mode", "Show tap zones overlay", "Animate page transitions"]
+        );
     }
 
     #[test]
@@ -277,6 +303,16 @@ mod tests {
         };
         assert_eq!(common.subtitle.as_deref(), Some("12%"));
         assert_eq!(*range.end(), 25);
+    }
+
+    #[test]
+    fn volume_inversion_is_shown_only_with_volume_keys_and_the_actions_group_has_both_rows() {
+        let prefs = Prefs::in_memory();
+        assert_eq!(titles_of(&rows(&prefs), "Navigation"), ["Volume keys"]);
+        prefs.reader.read_with_volume_keys.set(true).unwrap();
+        assert_eq!(titles_of(&rows(&prefs), "Navigation"), ["Volume keys", "Invert volume keys"]);
+        assert_eq!(titles_of(&rows(&prefs), "Actions"), ["Show actions on long tap", "Save pages into separate folders"]);
+        assert_eq!(DOUBLE_TAP_SPEEDS.map(|(code, _)| code), [1, 500, 250]);
     }
 
     fn find_item<'a>(tree: &'a [Preference], group: &str, title: &str) -> &'a PreferenceItem {

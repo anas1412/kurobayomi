@@ -3,6 +3,7 @@
 //! `favorite`, run against a `FavoriteStore`; the GTK side is `favorite_flow`.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use kuro_domain::category::target::resolve_add_target;
 use tokio::sync::watch;
@@ -25,6 +26,10 @@ pub struct CategoryChoice {
     pub name: String,
 }
 
+/// Starts the enhanced-tracker bindings of a newly added entry: the entry id, its title and its source id. It must not
+/// block: the add does not wait for the trackers (B§5.2).
+pub type TrackerBinder = Arc<dyn Fn(i64, &str, i64) + Send + Sync>;
+
 /// The library as the browse pages use it. Every call blocks, so the page runs them off the GTK thread.
 pub trait FavoriteStore: Send + Sync + 'static {
     /// `NetworkToLocalManga`: the row of `(source_id, url)`, inserted as a non-favourite when none exists.
@@ -43,11 +48,25 @@ pub trait FavoriteStore: Send + Sync + 'static {
     fn clear_cover(&self, id: i64) -> usize;
     /// Writes `cover_last_modified`.
     fn stamp_cover(&self, id: i64, now_ms: i64) -> Result<(), String>;
+    /// Deletes the entry's cached background files and returns how many went. Manga has none, so the default is 0.
+    fn clear_background(&self, _id: i64) -> usize {
+        0
+    }
+    /// Writes `background_last_modified`. Manga has none, so the default writes nothing.
+    fn stamp_background(&self, _id: i64, _now_ms: i64) -> Result<(), String> {
+        Ok(())
+    }
+    /// What an add does besides the favourite and the categories: the default episode flags and the enhanced-tracker
+    /// bindings. A store with neither has nothing to do.
+    fn after_add(&self, _id: i64) -> Result<(), String> {
+        Ok(())
+    }
     /// The urls of the source's library entries, published again after every change to them.
     fn favorite_urls(&self, source_id: i64) -> watch::Receiver<BTreeSet<String>>;
 }
 
-/// Adds the entry. A resolved target writes its categories first and the favourite second; an `Ask` target writes
+/// Adds the entry. A resolved target writes its categories first and the favourite second, then the defaults and
+/// tracker bindings of `after_add` run; an `Ask` target writes
 /// nothing and asks for the chooser. A category failure is logged and does not block the favourite (E-FAV-02).
 pub fn add_entry(store: &dyn FavoriteStore, id: i64, now_ms: i64) -> AddOutcome<String> {
     let ids: Vec<i64> = store.categories().map(|all| all.into_iter().map(|c| c.id).collect()).unwrap_or_default();
@@ -67,18 +86,26 @@ fn add_with(
     target: &kuro_domain::category::target::AddTarget,
 ) -> AddOutcome<String> {
     let outcome = add(target, now_ms, |ids| store.set_categories(id, ids), |write| store.write_favorite(id, write));
-    if let AddOutcome::Added { category_error: Some(error) } = &outcome {
-        tracing::warn!(entry = id, %error, "the categories of an added entry could not be written");
+    if let AddOutcome::Added { category_error } = &outcome {
+        if let Some(error) = category_error {
+            tracing::warn!(entry = id, %error, "the categories of an added entry could not be written");
+        }
+        if let Err(error) = store.after_add(id) {
+            tracing::warn!(entry = id, %error, "the defaults of an added entry could not be applied");
+        }
     }
     outcome
 }
 
 /// Removes the entry from the library: the favourite write, then the cover cache, then `cover_last_modified` when at
-/// least one file was deleted (B-EC-13).
+/// least one file was deleted (B-EC-13). The background cache follows the same rule (anime only).
 pub fn remove_entry(store: &dyn FavoriteStore, id: i64, now_ms: i64) -> Result<(), String> {
     store.write_favorite(id, toggle_write(true, now_ms))?;
     if let Some(stamp) = cover_stamp_after_remove(store.clear_cover(id), now_ms) {
         store.stamp_cover(id, stamp)?;
+    }
+    if let Some(stamp) = cover_stamp_after_remove(store.clear_background(id), now_ms) {
+        store.stamp_background(id, stamp)?;
     }
     Ok(())
 }
@@ -99,6 +126,8 @@ pub(crate) mod fake {
         pub duplicates: Mutex<Vec<i64>>,
         pub covers: Mutex<usize>,
         pub known: Mutex<Vec<(i64, String, bool)>>,
+        /// The ids `after_add` ran for.
+        pub added: Mutex<Vec<i64>>,
     }
 
     impl FakeStore {
@@ -143,6 +172,10 @@ pub(crate) mod fake {
         }
         fn stamp_cover(&self, id: i64, now_ms: i64) -> Result<(), String> {
             self.note("stamp_cover", format!("stamp {id} {now_ms}"))
+        }
+        fn after_add(&self, id: i64) -> Result<(), String> {
+            self.added.lock().expect("lock").push(id);
+            Ok(())
         }
         fn favorite_urls(&self, _source_id: i64) -> watch::Receiver<BTreeSet<String>> {
             watch::channel(BTreeSet::new()).1
@@ -210,5 +243,19 @@ mod tests {
         failing.fail.lock().expect("lock").push("write_favorite");
         assert!(remove_entry(&failing, 7, 1).is_err());
         assert_eq!(failing.calls(), ["favorite 7 false 0"], "the cover cache is untouched when the write fails");
+    }
+
+    #[test]
+    fn the_add_side_effects_run_only_for_an_add_that_was_written() {
+        let store = FakeStore::default();
+        *store.default_category.lock().expect("lock") = -1;
+        *store.categories.lock().expect("lock") = vec![CategoryChoice { id: 3, name: "Reading".into() }];
+        assert_eq!(add_entry(&store, 7, 1), AddOutcome::Chooser);
+        assert!(store.added.lock().expect("lock").is_empty(), "the chooser writes nothing, so nothing follows");
+        add_entry_to(&store, 7, 1, vec![3]);
+        assert_eq!(*store.added.lock().expect("lock"), [7], "the chosen add runs them once");
+        store.fail.lock().expect("lock").push("write_favorite");
+        add_entry_to(&store, 8, 1, vec![]);
+        assert_eq!(*store.added.lock().expect("lock"), [7], "a failed favourite write binds and defaults nothing");
     }
 }

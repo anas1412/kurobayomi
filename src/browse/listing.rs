@@ -360,6 +360,96 @@ mod tests {
     }
 
     #[test]
+    fn first_load_with_no_items_and_more_to_come_is_still_the_no_results_error() {
+        // p2-topic-browse-listing.md section 2, page-1 table, row "0 animes, hasNextPage any".
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let ask = listing.ask().expect("page");
+        assert_eq!(listing.deliver(ask.generation, page(&[], true)), Some(0));
+        match plan(&listing) {
+            ContentPlan::Error { message, actions } => {
+                assert_eq!(message, tr(MsgKey::no_results_found));
+                assert!(actions.contains(&EmptyAction::Retry));
+            }
+            other => panic!("unexpected plan {other:?}"),
+        }
+        assert!(!listing.wants_more(0), "the empty state does not page on by itself");
+    }
+
+    #[test]
+    fn first_load_with_items_and_no_next_page_asks_for_nothing_more() {
+        // Page-1 table row "n > 0 animes, hasNextPage = false" and E-BR-19: one page, no append request.
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let ask = listing.ask().expect("page");
+        assert_eq!(listing.deliver(ask.generation, page(&["a", "b"], false)), Some(2));
+        assert!(matches!(plan(&listing), ContentPlan::Items { toast: None, .. }));
+        assert!(listing.ask().is_none(), "the source said there is no next page");
+        assert!(!listing.wants_more(1));
+    }
+
+    #[test]
+    fn a_source_that_always_says_more_follows_is_paged_without_a_cap() {
+        // E-BR-18: hasNextPage = true forever. Kurobayomi keeps no cap (parity), so every page is asked in turn.
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let mut ask = listing.ask().expect("page 1");
+        for expected in 1..=200_u32 {
+            assert_eq!(ask.page, expected);
+            listing.deliver(ask.generation, page(&["x"], true));
+            assert!(listing.wants_more(listing.loaded() - 1), "page {expected} leaves the next one wanted");
+            ask = listing.ask().expect("the next page");
+        }
+        assert_eq!(listing.loaded(), 200);
+    }
+
+    #[test]
+    fn a_later_empty_page_without_more_is_an_appended_error_and_keeps_the_items() {
+        // Append table, row "0 animes" with hasNextPage = false.
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let first = listing.ask().expect("page 1");
+        listing.deliver(first.generation, page(&["a"], true));
+        let second = listing.ask().expect("page 2");
+        assert_eq!(listing.deliver(second.generation, page(&[], false)), Some(0));
+        assert_eq!(listing.loaded(), 1);
+        assert!(matches!(plan(&listing), ContentPlan::Items { toast: Some(_), .. }));
+    }
+
+    #[test]
+    fn a_later_page_with_items_and_no_next_page_ends_the_listing() {
+        // Append table, row "n > 0, hasNextPage = false".
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let first = listing.ask().expect("page 1");
+        listing.deliver(first.generation, page(&["a"], true));
+        let second = listing.ask().expect("page 2");
+        assert_eq!(listing.deliver(second.generation, page(&["b", "c"], false)), Some(2));
+        assert_eq!(listing.loaded(), 3);
+        assert!(listing.ask().is_none(), "the listing has ended");
+        assert!(!listing.wants_more(2));
+    }
+
+    #[test]
+    fn a_later_page_with_items_and_more_schedules_the_page_after_it() {
+        // Append table, row "n > 0, hasNextPage = true".
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let first = listing.ask().expect("page 1");
+        listing.deliver(first.generation, page(&["a"], true));
+        let second = listing.ask().expect("page 2");
+        listing.deliver(second.generation, page(&["b"], true));
+        assert_eq!(listing.ask().map(|a| a.page), Some(3));
+    }
+
+    #[test]
+    fn a_refresh_during_an_append_drops_the_old_append_and_keeps_the_new_listing_empty() {
+        // RC-2: the append of the old listing is in flight when the listing restarts.
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let first = listing.ask().expect("page 1");
+        listing.deliver(first.generation, page(&["a"], true));
+        let append = listing.ask().expect("page 2 in flight");
+        listing.restart(BrowseQuery::Latest);
+        assert_eq!(listing.deliver(append.generation, page(&["old"], false)), None);
+        assert_eq!(listing.loaded(), 0, "the old append does not reach the new listing");
+        assert_eq!(listing.ask().map(|a| a.page), Some(1));
+    }
+
+    #[test]
     fn a_placeholder_slot_is_not_counted_as_loaded() {
         let mut listing = Listing::new(BrowseQuery::Popular);
         listing.items.push(None);

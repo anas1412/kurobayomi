@@ -1,0 +1,45 @@
+[
+  {
+    "source": {
+      "id": 1,
+      "name": "Alpha",
+      "lang": "en",
+      "pinned": true
+    },
+    "state": "results",
+    "titles": []
+  },
+  {
+    "source": {
+      "id": 2,
+      "name": "Beta",
+      "lang": "en",
+      "pinned": true
+    },
+    "state": "results",
+    "titles": [
+      "One",
+      "Two",
+      "Three"
+    ]
+  },
+  {
+    "source": {
+      "id": 3,
+      "name": "Gamma",
+      "lang": "en",
+      "pinned": false
+    },
+    "state": "error",
+    "message": "offline"
+  },
+  {
+    "source": {
+      "id": 4,
+      "name": "Delta",
+      "lang": "en",
+      "pinned": false
+    },
+    "state": "loading"
+  }
+]

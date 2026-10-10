@@ -10,6 +10,7 @@ use gtk::{Align, Box as GBox, Button, Label, Orientation as O};
 use kuro_domain::flags::TriState;
 use kuro_i18n::{MsgKey, tr};
 
+use super::set_default::{self, Scope};
 use super::settings::{
     DisplayRows, FilterRow, SortRow, display_mode_write, display_rows, filter_click, filter_rows, previews_write, session_note,
     sort_rows, summaries_write,
@@ -37,7 +38,7 @@ pub struct SettingsWindow {
     on_change: Rc<dyn Fn(Change)>,
 }
 
-fn tri_icon(state: TriState) -> &'static str {
+pub(super) fn tri_icon(state: TriState) -> &'static str {
     match state {
         TriState::ENABLED_IS => "object-select-symbolic",
         TriState::ENABLED_NOT => "window-close-symbolic",
@@ -45,7 +46,7 @@ fn tri_icon(state: TriState) -> &'static str {
     }
 }
 
-fn icon_row(label: &str, icon: &str) -> (Button, gtk::Image) {
+pub(super) fn icon_row(label: &str, icon: &str) -> (Button, gtk::Image) {
     let content = GBox::new(O::Horizontal, 12);
     let image = gtk::Image::from_icon_name(if icon.is_empty() { "image-missing" } else { icon });
     image.set_opacity(if icon.is_empty() { 0.0 } else { 1.0 });
@@ -54,10 +55,11 @@ fn icon_row(label: &str, icon: &str) -> (Button, gtk::Image) {
     (Button::builder().child(&content).css_classes(["flat"]).build(), image)
 }
 
-/// The confirm dialog of "Set as default": the text, the library checkbox (off), Cancel and OK. OK reports
-/// `Change::SetDefault`.
-fn confirm_default(parent: &gtk::Window, on_change: Rc<dyn Fn(Change)>) {
-    let also = gtk::CheckButton::builder().label(tr(MsgKey::also_set_episode_settings_for_library)).build();
+/// The confirm dialog of "Set as default" for the window of `scope`: the text, the library checkbox (off), Cancel and
+/// OK, all from `set_default`. OK reports `Change::SetDefault`; the default keys are always written, and the checkbox
+/// decides whether every anime in the library takes the settings too.
+pub(super) fn confirm_default(parent: &gtk::Window, scope: Scope, on_change: Rc<dyn Fn(Change)>) {
+    let also = gtk::CheckButton::builder().label(tr(set_default::LIBRARY_CHECKBOX)).build();
     let ok = Button::builder().label(tr(MsgKey::action_ok)).css_classes(["suggested-action"]).build();
     let cancel = Button::with_label(&tr(MsgKey::action_cancel));
     let buttons = GBox::new(O::Horizontal, 8);
@@ -65,10 +67,10 @@ fn confirm_default(parent: &gtk::Window, on_change: Rc<dyn Fn(Change)>) {
     buttons.append(&cancel);
     buttons.append(&ok);
     let col = ui::column();
-    col.append(&Label::builder().label(tr(MsgKey::confirm_set_chapter_settings)).wrap(true).xalign(0.0).build());
+    col.append(&Label::builder().label(tr(set_default::BODY)).wrap(true).xalign(0.0).build());
     col.append(&also);
     col.append(&buttons);
-    let dialog = ui::modal(Label::new(Some(&tr(MsgKey::episode_settings))).upcast_ref(), &col, 360, 200);
+    let dialog = ui::modal(Label::new(Some(&tr(set_default::title(scope)))).upcast_ref(), &col, 360, 200);
     dialog.set_transient_for(Some(parent));
     cancel.connect_clicked({
         let dialog = dialog.clone();
@@ -78,13 +80,13 @@ fn confirm_default(parent: &gtk::Window, on_change: Rc<dyn Fn(Change)>) {
         let dialog = dialog.clone();
         move |_| {
             dialog.close();
-            on_change(Change::SetDefault { apply_all: also.is_active() });
+            on_change(Change::SetDefault { apply_all: set_default::confirm(also.is_active()).apply_to_library });
         }
     });
     dialog.present();
 }
 
-fn clear(page: &GBox) {
+pub(super) fn clear(page: &GBox) {
     while let Some(child) = page.first_child() {
         page.remove(&child);
     }
@@ -118,7 +120,7 @@ impl SettingsWindow {
         let window = ui::modal(switcher.upcast_ref(), &body, 360, 420);
         set_default.connect_clicked({
             let (window, on_change) = (window.clone(), Rc::clone(&on_change));
-            move |_| confirm_default(&window, Rc::clone(&on_change))
+            move |_| confirm_default(&window, Scope::Episode, Rc::clone(&on_change))
         });
         let keys = gtk::EventControllerKey::new();
         keys.connect_key_pressed({

@@ -65,6 +65,37 @@ pub fn forget_category(store: &PrefStore, lib: &LibraryPrefs, kind: CategoryKind
     Ok(())
 }
 
+/// `CategoryPreferencesCleanupMigration` (T-11a-008). `manga_ids` and `anime_ids` are the decimal ids of the categories
+/// that exist in each database, the system category `"0"` included. A default category preference that names an id
+/// in neither set is deleted, which reads back as `-1` ("always ask"). Each of the ten category-id sets loses
+/// `ids - manga_ids - anime_ids`; a set with nothing to lose is not written. An id is checked against both sets, not
+/// the set of its own kind, as in the upstream migration. Returns how many ids the sets lost.
+pub fn prune_dangling_category_ids(
+    store: &PrefStore,
+    lib: &LibraryPrefs,
+    manga_ids: &BTreeSet<String>,
+    anime_ids: &BTreeSet<String>,
+) -> Result<usize, PrefError> {
+    let known = |id: &String| manga_ids.contains(id) || anime_ids.contains(id);
+    for default in [&lib.default_manga_category, &lib.default_anime_category] {
+        let id = default.get();
+        if default.is_set() && id != -1 && !known(&id.to_string()) {
+            default.delete()?;
+        }
+    }
+    let mut removed = 0;
+    for key in category_id_set_keys() {
+        let set = store.pref::<BTreeSet<String>>(key, BTreeSet::new());
+        let ids = set.get();
+        let kept: BTreeSet<String> = ids.iter().filter(|id| known(id)).cloned().collect();
+        if kept.len() != ids.len() {
+            removed += ids.len() - kept.len();
+            set.set(kept)?;
+        }
+    }
+    Ok(removed)
+}
+
 /// The preference writes of `SetSortModeForMangaCategory`. `serialized_sort` is the stored sort string such
 /// as `RANDOM,ASCENDING`. `random` draws a new seed for the Random sort. `global` writes the sort into the
 /// global preference, which is false when a category takes the change instead.
@@ -150,6 +181,52 @@ mod tests {
 
         assert_eq!(lib.default_manga_category.get(), -1, "the default named the deleted category");
         assert_eq!(lib.default_anime_category.get(), 3, "another category is still the default");
+    }
+
+    fn id_set(items: &[&str]) -> BTreeSet<String> {
+        ids(items)
+    }
+
+    #[test]
+    fn pruning_after_deleting_category_7_clears_it_from_every_set_and_keeps_the_system_id() {
+        let store = PrefStore::in_memory();
+        let lib = LibraryPrefs::new(store.clone());
+        for key in category_id_set_keys() {
+            store.pref::<BTreeSet<String>>(key, BTreeSet::new()).set(ids(&["0", "7", "8"])).unwrap();
+        }
+        let manga = id_set(&["0", "8"]);
+        let anime = id_set(&["0"]);
+
+        let removed = prune_dangling_category_ids(&store, &lib, &manga, &anime).unwrap();
+
+        assert_eq!(removed, 10, "one dangling id in each of the ten sets");
+        for key in category_id_set_keys() {
+            assert_eq!(set_of(&store, key), ids(&["0", "8"]), "{key}");
+        }
+    }
+
+    #[test]
+    fn pruning_resets_a_dangling_default_and_keeps_a_known_one() {
+        let store = PrefStore::in_memory();
+        let lib = LibraryPrefs::new(store.clone());
+        lib.default_manga_category.set(7).unwrap();
+        lib.default_anime_category.set(3).unwrap();
+        // 3 exists in the manga database only: the check looks at both sets.
+        prune_dangling_category_ids(&store, &lib, &id_set(&["0", "3"]), &id_set(&["0"])).unwrap();
+        assert!(!lib.default_manga_category.is_set(), "7 is in neither set");
+        assert_eq!(lib.default_manga_category.get(), -1);
+        assert_eq!(lib.default_anime_category.get(), 3);
+    }
+
+    #[test]
+    fn pruning_leaves_sets_without_dangling_ids_unwritten() {
+        let store = PrefStore::in_memory();
+        let lib = LibraryPrefs::new(store.clone());
+        store.pref::<BTreeSet<String>>("library_update_categories", BTreeSet::new()).set(ids(&["1"])).unwrap();
+        let removed = prune_dangling_category_ids(&store, &lib, &id_set(&["0", "1"]), &id_set(&["0"])).unwrap();
+        assert_eq!(removed, 0);
+        assert!(store.get_raw("download_new_categories").is_none(), "an absent set is not created");
+        assert!(!lib.default_manga_category.is_set(), "the unset default stays unset");
     }
 
     #[test]

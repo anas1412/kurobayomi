@@ -1,0 +1,23 @@
+[
+  {
+    "id": 9001,
+    "name": "",
+    "lang": "",
+    "stub": true,
+    "home_url": null
+  },
+  {
+    "id": 0,
+    "name": "Local source",
+    "lang": "",
+    "stub": false,
+    "home_url": null
+  },
+  {
+    "id": 81,
+    "name": "Web source",
+    "lang": "en",
+    "stub": false,
+    "home_url": "https://web.example"
+  }
+]

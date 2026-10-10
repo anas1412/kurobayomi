@@ -5,7 +5,7 @@
 //! blocking pool and never look at the token, so a pop does not cancel them (`launchNonCancellable`). Nothing here imports GTK.
 //! Upstream: `MangaScreenModel.kt:173-256` (init), `:362-420` (fetchAllFromSource), `CoroutinesExtensions.kt`.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_channel::{Receiver, Sender};
@@ -160,7 +160,7 @@ impl Shared {
         let read = self
             .blocking(move |store, backend| {
                 let Some(manga) = store.manga(manga_id)? else {
-                    return Ok((None, Vec::new(), Default::default(), Default::default(), Default::default()));
+                    return Ok((None, Vec::new(), Default::default(), Default::default(), Default::default(), Default::default(), false));
                 };
                 if !manga.favorite {
                     store.write_defaults(manga_id, defaults)?;
@@ -170,10 +170,12 @@ impl Shared {
                 let source = manga.as_ref().map(|m| backend.source_info(m.source)).unwrap_or_default();
                 let scanlators = store.scanlators(manga_id)?;
                 let categories = store.categories(manga_id)?;
-                kuro_data::DataResult::Ok((manga, chapters, source, scanlators, categories))
+                let tracking = (store.track_count(manga_id)?, backend.has_logged_in_tracker());
+                let http = manga.as_ref().is_some_and(|m| backend.is_http_source(m.source));
+                kuro_data::DataResult::Ok((manga, chapters, source, scanlators, categories, tracking, http))
             })
             .await;
-        let (manga, chapters, source, scanlators, (all, membership)) = match read {
+        let (manga, chapters, source, scanlators, (all, membership), (tracking_count, logged_in), http_source) = match read {
             Ok(read) => read,
             Err(e) => {
                 self.fail("SQLiteException", e);
@@ -187,6 +189,9 @@ impl Shared {
             page.excluded_scanlators = scanlators.excluded;
             page.categories = all;
             page.category_membership = membership;
+            page.tracking_count = i64::try_from(tracking_count).unwrap_or(i64::MAX);
+            page.has_logged_in_trackers = logged_in;
+            page.http_source = http_source;
         }
         let ready = matches!(loaded.state, LoadState::Ready(_));
         let fetch = loaded.needs_info || loaded.needs_chapters;
@@ -236,9 +241,40 @@ impl Shared {
                 }
             }
         });
+        // the scanlator sets have their own tables: an exclusion or a new chapter source changes them, and the sheet and
+        // the filter tint follow (`watch_available`, `watch_excluded`)
+        let sets: Arc<Mutex<(Option<Vec<String>>, Option<BTreeSet<String>>)>> = Arc::default();
+        let publish_sets = {
+            let (shared, sets) = (Arc::clone(self), Arc::clone(&sets));
+            move || {
+                let guard = sets.lock().unwrap_or_else(PoisonError::into_inner);
+                if let (Some(available), Some(excluded)) = (&guard.0, &guard.1) {
+                    shared.emit(StoreEvent::Scanlators { available: available.clone(), excluded: excluded.clone() });
+                }
+            }
+        };
+        let mut available_sub = self.store.watch_available(manga_id);
+        let mut excluded_sub = self.store.watch_excluded(manga_id);
+        let available_task = tokio::spawn({
+            let (sets, publish_sets) = (Arc::clone(&sets), publish_sets.clone());
+            async move {
+                while let Some(Ok(set)) = available_sub.changed().await {
+                    sets.lock().unwrap_or_else(PoisonError::into_inner).0 = Some(set.iter().cloned().collect());
+                    publish_sets();
+                }
+            }
+        });
+        let excluded_task = tokio::spawn(async move {
+            while let Some(Ok(set)) = excluded_sub.changed().await {
+                sets.lock().unwrap_or_else(PoisonError::into_inner).1 = Some(set.as_ref().clone());
+                publish_sets();
+            }
+        });
         let mut subs = self.subscriptions.lock().unwrap_or_else(PoisonError::into_inner);
         subs.push(manga_task.abort_handle());
         subs.push(chapter_task.abort_handle());
+        subs.push(available_task.abort_handle());
+        subs.push(excluded_task.abort_handle());
     }
 
     /// `fetchAllFromSource`: details and chapters run at once. One refresh per manga: a second call while one runs
@@ -311,6 +347,12 @@ impl Shared {
                 bookmark,
             } => {
                 self.write_result(move |s, _| s.set_bookmark(manga_id, &chapter_ids, bookmark).map(drop)).await;
+            }
+            StoreCmd::SetFetchInterval { manga_id, wheel } => {
+                self.write_result(move |s, _| s.set_fetch_interval(manga_id, wheel)).await;
+            }
+            StoreCmd::SetExcludedScanlators { manga_id, excluded } => {
+                self.write_result(move |s, _| s.set_excluded_scanlators(manga_id, &excluded)).await;
             }
             StoreCmd::AddToLibrary { manga_id, category_ids } => self.add_to_library(manga_id, category_ids).await,
             StoreCmd::SetCategories { manga_id, category_ids } => {
@@ -706,6 +748,13 @@ mod tests {
             let rx = runner.events();
             runner.send(StoreCmd::FetchAll { manga_id: id, manual: true });
             until(&rx, |e| matches!(e, StoreEvent::Refreshing(true))).await;
+            // `Refreshing(true)` comes before the fetch futures exist: wait until the fetch has really started, or a
+            // dispose that wins the race would cancel it before it began
+            let started = std::time::Instant::now() + Duration::from_secs(5);
+            while backend.details.load(Ordering::SeqCst) == 0 {
+                assert!(std::time::Instant::now() < started, "the fetch never started");
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
             runner.send(StoreCmd::SetFlagBits {
                 manga_id: id,
                 flag: c::SHOW_BOOKMARKED,
@@ -898,8 +947,11 @@ mod tests {
                 genres: vec![],
                 status: 0,
                 thumbnail_url: None,
+                cover_last_modified: 0,
                 initialized: true,
                 favorite: true,
+                next_update: 0,
+                fetch_interval: 0,
                 local: false,
                 flags: Default::default(),
             })

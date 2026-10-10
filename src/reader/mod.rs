@@ -8,6 +8,8 @@
 pub mod blend_box;
 pub mod bottom_bar;
 pub mod cache;
+pub mod decode_guard;
+pub mod error_card;
 pub mod chapters;
 pub mod chrome;
 pub mod flags;
@@ -37,6 +39,7 @@ pub mod state;
 pub mod strings;
 pub mod sync;
 pub mod theme;
+pub mod tiles;
 pub mod transition;
 pub mod viewer;
 pub mod viewers;

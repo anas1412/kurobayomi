@@ -25,7 +25,13 @@ pub struct MangaRow {
     pub genres: Vec<String>,
     /// `SManga` status, 0..6 (`0` is unknown).
     pub status: i64,
+    /// The stored next update, epoch milliseconds (`0` when never computed).
+    pub next_update: i64,
+    /// The stored fetch interval: negative for a user interval, `0` automatic.
+    pub fetch_interval: i32,
     pub thumbnail_url: Option<String>,
+    /// `cover_last_modified`, epoch milliseconds: a newer value makes the cover load again.
+    pub cover_last_modified: i64,
     /// `initialized`: details were fetched from the source at least once.
     pub initialized: bool,
     pub favorite: bool,
@@ -53,6 +59,8 @@ pub struct EntryState {
     pub excluded_scanlators: BTreeSet<String>,
     pub tracking_count: i64,
     pub has_logged_in_trackers: bool,
+    /// The source is an HTTP source: the action row offers WebView and the overflow menu offers Share.
+    pub http_source: bool,
     pub has_prompted_add: bool,
     pub is_refreshing: bool,
     pub dialog: DialogSlot,
@@ -138,6 +146,7 @@ pub fn finish_load(
         excluded_scanlators: BTreeSet::new(),
         tracking_count: 0,
         has_logged_in_trackers: false,
+        http_source: false,
         has_prompted_add: false,
         is_refreshing: needs_info || needs_chapters,
         dialog: DialogSlot::default(),
@@ -168,6 +177,8 @@ pub fn apply_snapshot(state: &mut EntryState, manga: MangaRow, chapters: Vec<Cha
 pub enum StoreCmd {
     /// Reads the page, starts the live subscriptions, and starts the first fetch when info or chapters are missing.
     Load { manga_id: i64 },
+    /// `setFetchInterval`: the wheel value; the stored value is its negative (0 is automatic).
+    SetFetchInterval { manga_id: i64, wheel: i32 },
     /// `fetchAllFromSource`. One refresh per manga runs at a time.
     FetchAll { manga_id: i64, manual: bool },
     /// One masked UPDATE of `mangas.chapter_flags`.
@@ -185,6 +196,9 @@ pub enum StoreCmd {
         chapter_ids: Vec<i64>,
         bookmark: bool,
     },
+    /// The scanlator sheet's OK: the excluded set becomes exactly this, inserts and deletes in one transaction
+    /// (`SetExcludedScanlators`).
+    SetExcludedScanlators { manga_id: i64, excluded: BTreeSet<String> },
     /// `CategoryConfirm::AddToLibrary`: favorite and categories in one transaction. Categories reload after.
     AddToLibrary { manga_id: i64, category_ids: Vec<i64> },
     /// `CategoryConfirm::SetCategories`: the links in one transaction. Categories reload after.
@@ -244,6 +258,8 @@ pub enum StoreEvent {
     Removed { ask_delete_downloads: bool },
     /// A download call queued chapters. The page may offer to add the manga to the library.
     Queued,
+    /// The available scanlators or the excluded ones changed (`watch_available`, `watch_excluded`).
+    Scanlators { available: Vec<String>, excluded: BTreeSet<String> },
 }
 
 /// A single slot that keeps only the newest value. A producer `put`s, the consumer `take`s, and an older value is
@@ -293,6 +309,8 @@ mod tests {
     fn manga(initialized: bool, favorite: bool) -> MangaRow {
         MangaRow {
             id: 1,
+            next_update: 0,
+            fetch_interval: 0,
             source: 9,
             url: "/m/1".into(),
             title: "Title".into(),
@@ -302,6 +320,7 @@ mod tests {
             genres: vec![],
             status: 0,
             thumbnail_url: None,
+            cover_last_modified: 0,
             initialized,
             favorite,
             local: false,

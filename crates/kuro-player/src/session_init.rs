@@ -8,6 +8,7 @@ use kuro_data::episode::Episode;
 use crate::errors::{InitError, PlayerMessage};
 use kuro_domain::entries::anime::AnimeExt;
 
+use crate::mpv::PropertySink;
 use crate::playlist;
 use crate::types::Hoster;
 
@@ -31,12 +32,65 @@ pub enum HostersInput {
 }
 
 /// The mpv user-data the init writes for Lua scripts (behaviour 2.2, D§7.2).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UserData {
     pub anime_title: String,
     pub intro_length: i64,
     /// Category names joined with `", "`.
     pub category: String,
+    /// The episode number, sent as a double (`episode-number`).
+    pub episode_number: f64,
+}
+
+/// One value of a user-data write, typed as mpv expects it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum UserDataValue {
+    Str(String),
+    Int(i64),
+    Double(f64),
+}
+
+impl UserData {
+    /// The property writes of the load, in order (T-45b-071): `anime-title`, `intro-length`,
+    /// `category` and `episode-number`.
+    pub fn writes(&self) -> Vec<(&'static str, UserDataValue)> {
+        vec![
+            (
+                "user-data/current-anime/anime-title",
+                UserDataValue::Str(self.anime_title.clone()),
+            ),
+            (
+                "user-data/current-anime/intro-length",
+                UserDataValue::Int(self.intro_length),
+            ),
+            (
+                "user-data/current-anime/category",
+                UserDataValue::Str(self.category.clone()),
+            ),
+            (
+                "user-data/current-anime/episode-number",
+                UserDataValue::Double(self.episode_number),
+            ),
+        ]
+    }
+}
+
+impl UserData {
+    /// Sends `writes()` to mpv in order, each with its own type (T-45b-071). A failed write is
+    /// logged and the rest still go out, so a Lua script that misses one value does not stop
+    /// playback.
+    pub fn apply(&self, sink: &impl PropertySink) {
+        for (name, value) in self.writes() {
+            let result = match value {
+                UserDataValue::Str(text) => sink.set_str(name, &text),
+                UserDataValue::Int(number) => sink.set_i64(name, number),
+                UserDataValue::Double(number) => sink.set_f64(name, number),
+            };
+            if let Err(e) = result {
+                tracing::error!("failed to write {name}: {e}");
+            }
+        }
+    }
 }
 
 /// What a successful init resolved.
@@ -137,6 +191,7 @@ pub fn init(
             (list, None)
         }
     };
+    let episode_number = episode.episode_number;
     InitOutcome::Loaded(Box::new(InitPlan {
         playlist,
         episode,
@@ -148,6 +203,7 @@ pub fn init(
             anime_title: anime.title.clone(),
             intro_length: input.intro_length,
             category: input.categories.join(", "),
+            episode_number,
         },
     }))
 }
@@ -285,7 +341,39 @@ mod tests {
                 anime_title: "Show".to_owned(),
                 intro_length: 90,
                 category: "Action, Drama".to_owned(),
+                episode_number: 2.0,
             }
+        );
+    }
+
+    #[test]
+    fn user_data_writes_use_the_lua_property_names_and_types() {
+        let data = UserData {
+            anime_title: "Show".to_owned(),
+            intro_length: 90,
+            category: "Action, Drama".to_owned(),
+            episode_number: 2.5,
+        };
+        assert_eq!(
+            data.writes(),
+            vec![
+                (
+                    "user-data/current-anime/anime-title",
+                    UserDataValue::Str("Show".to_owned())
+                ),
+                (
+                    "user-data/current-anime/intro-length",
+                    UserDataValue::Int(90)
+                ),
+                (
+                    "user-data/current-anime/category",
+                    UserDataValue::Str("Action, Drama".to_owned())
+                ),
+                (
+                    "user-data/current-anime/episode-number",
+                    UserDataValue::Double(2.5)
+                ),
+            ]
         );
     }
 

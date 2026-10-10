@@ -181,11 +181,9 @@ impl BaseTracker {
                 self.secrets
                     .delete(SECRET_SERVICE, &account(self.id, Field::Password))
             });
-        let flagged = self.secrets.set(
-            SECRET_SERVICE,
-            &account(self.id, Field::Expired),
-            "true",
-        );
+        let flagged = self
+            .secrets
+            .set(SECRET_SERVICE, &account(self.id, Field::Expired), "true");
         self.publish();
         self.events.send(TrackEvent::LoginChanged {
             tracker_id: self.id,
@@ -300,8 +298,12 @@ mod tests {
         let secrets = MemSecrets::new();
         let b = base(&secrets);
         let rx = b.login_state();
-        b.save_oauth("someone", "access-1", &serde_json::json!({"access": "access-1"}))
-            .unwrap();
+        b.save_oauth(
+            "someone",
+            "access-1",
+            &serde_json::json!({"access": "access-1"}),
+        )
+        .unwrap();
         assert!(b.is_logged_in());
         assert!(rx.has_changed().unwrap(), "the login state was published");
         assert_eq!(
@@ -325,7 +327,11 @@ mod tests {
         secrets.fail_set_for(&kitsu(Field::Token));
         secrets.fail_with_unavailable();
         let err = base(&secrets)
-            .save_oauth("someone", "access-1", &serde_json::json!({"access": "access-1"}))
+            .save_oauth(
+                "someone",
+                "access-1",
+                &serde_json::json!({"access": "access-1"}),
+            )
             .unwrap_err();
         assert!(matches!(err, TrackError::SecretsUnavailable));
         assert!(secrets.all_values().is_empty());

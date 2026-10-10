@@ -4,7 +4,8 @@
 //! rewrites a key of Aniyomi's Android SharedPreferences file (renames, value codecs, features that
 //! do not exist on Linux). Kurobayomi creates `config.toml` and `state.toml` fresh on first run, so
 //! there is no old file for them to rewrite, and backup import (area 21) maps old keys itself.
-//! The three always-migrations (scheduler setup) are added when their traits exist (areas 21, 26).
+//! The three always-migrations (scheduler set-up) are not preference rewrites. They live in
+//! `kuro_core::migrate::list`, next to the framework that runs them.
 
 use super::Migration;
 

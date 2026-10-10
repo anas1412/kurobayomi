@@ -240,20 +240,30 @@ impl AniList {
         &self.base
     }
 
-    /// Stores the token, then reads the Viewer. A failure leaves the tracker logged out and is returned (E-01).
+    /// Reads the Viewer with the new token, then stores the login. A failed Viewer query restores the state held
+    /// before the attempt and writes nothing, so an earlier valid session stays (T-27b-024). A failure while storing
+    /// returns the tracker to logged out, because the attempt had begun to overwrite the stored slots (E-01).
     pub async fn login(
         &self,
         token: AccessToken,
         expires_in: Option<i64>,
     ) -> Result<LoginSuccess, AniListError> {
         let expires_at = now_s() + expires_in.unwrap_or(DEFAULT_LIFETIME_S);
+        let previous = self.api.state();
         self.api.set_state(AuthState::LoggedIn {
             token: token.clone(),
             viewer_id: 0,
             expires_at,
             score_format: ScoreFormat::Point10,
         });
-        match self.verify_and_store(&token, expires_at).await {
+        let data: ViewerData = match self.api.execute_probe(queries::VIEWER, None::<()>).await {
+            Ok(data) => data,
+            Err(e) => {
+                self.api.set_state(previous);
+                return Err(e);
+            }
+        };
+        match self.store_viewer(&token, expires_at, data) {
             Ok(success) => Ok(success),
             Err(e) => {
                 if let Err(clear) = self.logout() {
@@ -264,12 +274,12 @@ impl AniList {
         }
     }
 
-    async fn verify_and_store(
+    fn store_viewer(
         &self,
         token: &AccessToken,
         expires_at: i64,
+        data: ViewerData,
     ) -> Result<LoginSuccess, AniListError> {
-        let data: ViewerData = self.api.execute(queries::VIEWER, None::<()>).await?;
         let viewer_id = data.viewer.id;
         let format_text = data
             .viewer
@@ -285,7 +295,8 @@ impl AniList {
             score_format,
         });
         self.score_type.set(
-            AniListScoreType::from_name(score_format.to_api()).unwrap_or(AniListScoreType::POINT_10),
+            AniListScoreType::from_name(score_format.to_api())
+                .unwrap_or(AniListScoreType::POINT_10),
         )?;
         // The username slot holds the viewer id (as in Aniyomi); the event follows this commit.
         let stored = StoredToken {
@@ -348,7 +359,10 @@ impl AniList {
     }
 
     /// The user's list entry for a manga, or `None`. When AniList returns several, the first is used.
-    pub async fn find_manga_entry(&self, media_id: i64) -> Result<Option<MangaTrack>, AniListError> {
+    pub async fn find_manga_entry(
+        &self,
+        media_id: i64,
+    ) -> Result<Option<MangaTrack>, AniListError> {
         let vars = FindMangaVars {
             id: self.viewer_id()?,
             manga_id: media_id,
@@ -362,7 +376,10 @@ impl AniList {
     }
 
     /// The user's list entry for an anime, or `None`. Same rules as [`AniList::find_manga_entry`].
-    pub async fn find_anime_entry(&self, media_id: i64) -> Result<Option<AnimeTrack>, AniListError> {
+    pub async fn find_anime_entry(
+        &self,
+        media_id: i64,
+    ) -> Result<Option<AnimeTrack>, AniListError> {
         let vars = FindAnimeVars {
             id: self.viewer_id()?,
             anime_id: media_id,
@@ -505,7 +522,6 @@ fn now_s() -> i64 {
     api::now_s()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -519,7 +535,8 @@ mod tests {
 
     const VIEWER_10: &str = include_str!("../../../tests/fixtures/anilist/viewer_point10.json");
     const VIEWER_3: &str = include_str!("../../../tests/fixtures/anilist/viewer_point3.json");
-    const VIEWER_UNKNOWN: &str = include_str!("../../../tests/fixtures/anilist/viewer_unknown_format.json");
+    const VIEWER_UNKNOWN: &str =
+        include_str!("../../../tests/fixtures/anilist/viewer_unknown_format.json");
     const SEARCH_MANGA: &str = include_str!("../../../tests/fixtures/anilist/search_manga_ok.json");
     const SEARCH_ANIME: &str = include_str!("../../../tests/fixtures/anilist/search_anime_ok.json");
     const SAVE_OK: &str = include_str!("../../../tests/fixtures/anilist/save_entry_ok.json");
@@ -527,10 +544,18 @@ mod tests {
     /// A login written by an earlier run, in the `tracker/2/*` layout.
     fn seed(secrets: &MemSecrets, token: &str, viewer: i64, expires_at: i64) -> TestResult {
         let id = TrackerId::ANILIST;
-        secrets.set(SECRET_SERVICE, &account(id, Field::Username), &viewer.to_string())?;
+        secrets.set(
+            SECRET_SERVICE,
+            &account(id, Field::Username),
+            &viewer.to_string(),
+        )?;
         secrets.set(SECRET_SERVICE, &account(id, Field::Password), token)?;
         let json = serde_json::json!({ "access_token": token, "expires_at": expires_at });
-        secrets.set(SECRET_SERVICE, &account(id, Field::Token), &json.to_string())?;
+        secrets.set(
+            SECRET_SERVICE,
+            &account(id, Field::Token),
+            &json.to_string(),
+        )?;
         Ok(())
     }
 
@@ -561,13 +586,21 @@ mod tests {
         assert_eq!(success.score_format, ScoreFormat::Point10);
         assert!(api.is_logged_in());
         assert_eq!(fake.bearers(), vec![Some("token-value".to_owned())]);
-        assert_eq!(secrets.raw("tracker/2/password"), Some("token-value".to_owned()));
+        assert_eq!(
+            secrets.raw("tracker/2/password"),
+            Some("token-value".to_owned())
+        );
         assert_eq!(secrets.raw("tracker/2/account"), Some("4242".to_owned()));
-        let json: serde_json::Value = serde_json::from_str(&secrets.raw("tracker/2/oauth").unwrap_or_default())?;
+        let json: serde_json::Value =
+            serde_json::from_str(&secrets.raw("tracker/2/oauth").unwrap_or_default())?;
         assert_eq!(json["access_token"], "token-value");
         assert!(json["expires_at"].as_i64().unwrap_or(0) > now_s());
         assert_eq!(secrets.raw("tracker/2/expired"), None);
-        assert_eq!(prefs.pref("anilist.viewer_id", 0_i64).get(), 0, "no login data in preferences");
+        assert_eq!(
+            prefs.pref("anilist.viewer_id", 0_i64).get(),
+            0,
+            "no login data in preferences"
+        );
         Ok(())
     }
 
@@ -575,12 +608,41 @@ mod tests {
     async fn t_28a_011_a_failed_viewer_query_leaves_the_tracker_logged_out() -> TestResult {
         let fake = FakeTransport::new(vec![status(401, "{}")]);
         let secrets = MemSecrets::new();
-        let api = AniList::open(fake, secrets.clone(), &PrefStore::in_memory(), EventBus::default())?;
+        let api = AniList::open(
+            fake,
+            secrets.clone(),
+            &PrefStore::in_memory(),
+            EventBus::default(),
+        )?;
         let r = api.login(token(), None).await;
         assert!(r.is_err(), "E-01: the failure is returned");
         assert!(!api.is_logged_in());
         assert_eq!(api.api.state(), AuthState::LoggedOut);
-        assert!(secrets.all_values().is_empty(), "nothing stored after a failed login");
+        assert!(
+            secrets.all_values().is_empty(),
+            "nothing stored after a failed login"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn t_27b_024_a_failed_second_login_keeps_the_valid_session() -> TestResult {
+        let fake = FakeTransport::new(vec![ok(VIEWER_10), status(401, "{}")]);
+        let secrets = MemSecrets::new();
+        let prefs = PrefStore::in_memory();
+        let api = AniList::open(fake, secrets.clone(), &prefs, EventBus::default())?;
+        api.login(token(), None).await?;
+        let stored = secrets.all_values();
+        let state = api.api.state();
+
+        let r = api.login(AccessToken::new("bad-token"), None).await;
+        assert!(r.is_err());
+        assert!(api.is_logged_in(), "the first session is still held");
+        assert!(api.api.state() == state);
+        assert_eq!(secrets.raw("tracker/2/password"), Some("token-value".into()));
+        assert_eq!(secrets.raw("tracker/2/account"), Some("4242".into()));
+        assert_eq!(secrets.raw("tracker/2/expired"), None, "no expired flag");
+        assert_eq!(secrets.all_values().len(), stored.len());
         Ok(())
     }
 
@@ -600,7 +662,12 @@ mod tests {
     async fn t_28a_011_decimal_viewer_sets_point10_decimal() -> TestResult {
         let decimal = include_str!("../../../tests/fixtures/anilist/viewer_point_decimal.json");
         let fake = FakeTransport::new(vec![ok(decimal)]);
-        let api = AniList::open(fake, MemSecrets::new(), &PrefStore::in_memory(), EventBus::default())?;
+        let api = AniList::open(
+            fake,
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            EventBus::default(),
+        )?;
         let success = api.login(token(), None).await?;
         assert_eq!(success.viewer_id, 4242);
         assert_eq!(success.score_format, ScoreFormat::Point10Decimal);
@@ -610,7 +677,12 @@ mod tests {
     #[tokio::test]
     async fn t_28a_005_unknown_score_format_falls_back_to_point10() -> TestResult {
         let fake = FakeTransport::new(vec![ok(VIEWER_UNKNOWN)]);
-        let api = AniList::open(fake, MemSecrets::new(), &PrefStore::in_memory(), EventBus::default())?;
+        let api = AniList::open(
+            fake,
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            EventBus::default(),
+        )?;
         let success = api.login(token(), None).await?;
         assert_eq!(success.score_format, ScoreFormat::Point10);
         Ok(())
@@ -626,7 +698,11 @@ mod tests {
         api.logout()?;
         assert!(!api.is_logged_in());
         for slot in ["oauth", "account", "password", "expired"] {
-            assert_eq!(secrets.raw(&format!("tracker/2/{slot}")), None, "E-05: {slot} deleted, not the text null");
+            assert_eq!(
+                secrets.raw(&format!("tracker/2/{slot}")),
+                None,
+                "E-05: {slot} deleted, not the text null"
+            );
         }
         assert!(secrets.all_values().is_empty());
         Ok(())
@@ -641,16 +717,29 @@ mod tests {
         api.login(token(), None).await?;
         api.logout()?;
         let reopened = AniList::open(fake, secrets, &prefs, EventBus::default())?;
-        assert!(!reopened.is_logged_in(), "E-48 is about tracks; the login itself is gone");
+        assert!(
+            !reopened.is_logged_in(),
+            "E-48 is about tracks; the login itself is gone"
+        );
         Ok(())
     }
 
     #[tokio::test]
-    async fn t_28a_010_token_without_its_record_is_not_authenticated_and_sends_nothing() -> TestResult {
+    async fn t_28a_010_token_without_its_record_is_not_authenticated_and_sends_nothing()
+    -> TestResult {
         let fake = FakeTransport::new(vec![]);
         let secrets = MemSecrets::new();
-        secrets.set(SECRET_SERVICE, &account(TrackerId::ANILIST, Field::Password), "orphan-token")?;
-        let api = AniList::open(fake.clone(), secrets, &PrefStore::in_memory(), EventBus::default())?;
+        secrets.set(
+            SECRET_SERVICE,
+            &account(TrackerId::ANILIST, Field::Password),
+            "orphan-token",
+        )?;
+        let api = AniList::open(
+            fake.clone(),
+            secrets,
+            &PrefStore::in_memory(),
+            EventBus::default(),
+        )?;
         let r = api.search_manga("x").await;
         assert!(matches!(r, Err(AniListError::NotAuthenticated)), "E-04");
         assert_eq!(fake.calls(), 0);
@@ -664,9 +753,16 @@ mod tests {
         seed(&secrets, "stale", 77, 1)?;
         let prefs = PrefStore::in_memory();
         let api = AniList::open(fake.clone(), secrets.clone(), &prefs, EventBus::default())?;
-        assert!(matches!(api.api.state(), AuthState::Expired { viewer_id: 77 }));
+        assert!(matches!(
+            api.api.state(),
+            AuthState::Expired { viewer_id: 77 }
+        ));
         assert!(api.base().auth_expired(), "the flag is set at open");
-        assert_eq!(secrets.raw("tracker/2/oauth"), None, "the stale token is removed");
+        assert_eq!(
+            secrets.raw("tracker/2/oauth"),
+            None,
+            "the stale token is removed"
+        );
         let r = api.search_manga("x").await;
         assert!(matches!(r, Err(AniListError::AuthExpired)));
         assert_eq!(fake.calls(), 0);
@@ -679,15 +775,26 @@ mod tests {
         let far_future_ms: i64 = 4_000_000_000_000;
         seed(&secrets, "tok", 5, far_future_ms)?;
         let prefs = PrefStore::in_memory();
-        let api = AniList::open(FakeTransport::new(vec![]), secrets, &prefs, EventBus::default())?;
+        let api = AniList::open(
+            FakeTransport::new(vec![]),
+            secrets,
+            &prefs,
+            EventBus::default(),
+        )?;
         assert!(api.is_logged_in(), "4e12 ms is 4e9 s, still in the future");
         Ok(())
     }
 
     #[tokio::test]
-    async fn t_28a_016_manga_search_asks_for_the_novel_filter_and_maps_three_results() -> TestResult {
+    async fn t_28a_016_manga_search_asks_for_the_novel_filter_and_maps_three_results() -> TestResult
+    {
         let fake = FakeTransport::new(vec![ok(VIEWER_10), ok(SEARCH_MANGA)]);
-        let api = AniList::open(fake.clone(), MemSecrets::new(), &PrefStore::in_memory(), EventBus::default())?;
+        let api = AniList::open(
+            fake.clone(),
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            EventBus::default(),
+        )?;
         api.login(token(), None).await?;
         let rows = api.search_manga("bocchi").await?;
         assert_eq!(rows.len(), 3);
@@ -701,20 +808,35 @@ mod tests {
     #[tokio::test]
     async fn t_28a_017_anime_search_maps_rows() -> TestResult {
         let fake = FakeTransport::new(vec![ok(VIEWER_10), ok(SEARCH_ANIME)]);
-        let api = AniList::open(fake.clone(), MemSecrets::new(), &PrefStore::in_memory(), EventBus::default())?;
+        let api = AniList::open(
+            fake.clone(),
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            EventBus::default(),
+        )?;
         api.login(token(), None).await?;
         let rows = api.search_anime("show").await?;
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].authors.len(), 3);
         let sent = fake.bodies();
-        assert!(!sent[1]["query"].as_str().unwrap_or_default().contains("format_not_in"));
+        assert!(
+            !sent[1]["query"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("format_not_in")
+        );
         Ok(())
     }
 
     #[tokio::test]
     async fn t_28a_020_add_manga_through_the_client_returns_the_id() -> TestResult {
         let fake = FakeTransport::new(vec![ok(VIEWER_10), ok(SAVE_OK)]);
-        let api = AniList::open(fake, MemSecrets::new(), &PrefStore::in_memory(), EventBus::default())?;
+        let api = AniList::open(
+            fake,
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            EventBus::default(),
+        )?;
         api.login(token(), None).await?;
         let t = MangaTrack {
             id: None,
@@ -739,7 +861,12 @@ mod tests {
     #[tokio::test]
     async fn t_28a_021_unknown_local_status_is_an_error_before_any_request() -> TestResult {
         let fake = FakeTransport::new(vec![ok(VIEWER_10)]);
-        let api = AniList::open(fake.clone(), MemSecrets::new(), &PrefStore::in_memory(), EventBus::default())?;
+        let api = AniList::open(
+            fake.clone(),
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            EventBus::default(),
+        )?;
         api.login(token(), None).await?;
         let t = AnimeTrack {
             id: None,
@@ -763,7 +890,8 @@ mod tests {
         Ok(())
     }
     #[tokio::test]
-    async fn t_27b_040_login_and_logout_each_send_login_changed_and_publish_the_state() -> TestResult {
+    async fn t_27b_040_login_and_logout_each_send_login_changed_and_publish_the_state() -> TestResult
+    {
         let fake = FakeTransport::new(vec![ok(VIEWER_10)]);
         let bus = EventBus::default();
         let mut events = bus.subscribe();
@@ -771,12 +899,20 @@ mod tests {
         let mut state = Tracker::login_state(&api);
         assert!(!*state.borrow_and_update());
         api.login(token(), None).await?;
-        let changed = TrackEvent::LoginChanged { tracker_id: TrackerId::ANILIST };
+        let changed = TrackEvent::LoginChanged {
+            tracker_id: TrackerId::ANILIST,
+        };
         assert_eq!(events.recv().await?, changed);
-        assert!(state.has_changed()? && *state.borrow_and_update(), "settings sees the login");
+        assert!(
+            state.has_changed()? && *state.borrow_and_update(),
+            "settings sees the login"
+        );
         api.logout()?;
         assert_eq!(events.recv().await?, changed);
-        assert!(state.has_changed()? && !*state.borrow_and_update(), "settings sees the logout");
+        assert!(
+            state.has_changed()? && !*state.borrow_and_update(),
+            "settings sees the logout"
+        );
         Ok(())
     }
 
@@ -784,7 +920,12 @@ mod tests {
     async fn t_27b_028_logout_clears_the_expired_flag_and_the_memory_state() -> TestResult {
         let secrets = MemSecrets::new();
         seed(&secrets, "stale", 77, 1)?;
-        let api = AniList::open(FakeTransport::new(vec![]), secrets.clone(), &PrefStore::in_memory(), EventBus::default())?;
+        let api = AniList::open(
+            FakeTransport::new(vec![]),
+            secrets.clone(),
+            &PrefStore::in_memory(),
+            EventBus::default(),
+        )?;
         assert!(api.base().auth_expired());
         api.logout()?;
         assert!(!api.base().auth_expired());
@@ -794,19 +935,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn t_27a_044_the_tracker_trait_logs_in_with_the_token_and_reports_it_through_the_manager_views() -> TestResult {
+    async fn t_27a_044_the_tracker_trait_logs_in_with_the_token_and_reports_it_through_the_manager_views()
+    -> TestResult {
         let fake = FakeTransport::new(vec![ok(VIEWER_3), ok(SEARCH_ANIME)]);
-        let api: Arc<dyn Tracker> = Arc::new(AniList::open(fake, MemSecrets::new(), &PrefStore::in_memory(), EventBus::default())?);
+        let api: Arc<dyn Tracker> = Arc::new(AniList::open(
+            fake,
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            EventBus::default(),
+        )?);
         assert!(!api.is_logged_in());
         api.login("", "token-value").await?;
         assert!(api.is_logged_in());
         assert_eq!(api.username(), "4242");
         assert_eq!(api.password(), "token-value");
         assert_eq!(api.id(), TrackerId::ANILIST);
-        assert_eq!(api.score_list(), ["-", "😦", "😐", "😊"], "the list follows the account's score format");
+        assert_eq!(
+            api.score_list(),
+            ["-", "😦", "😐", "😊"],
+            "the list follows the account's score format"
+        );
         let anime = api.as_anime().ok_or("anime view")?;
         assert_eq!(anime.status_list().len(), 6);
-        assert_eq!(anime.status_label(anime.watching_status()), Some("watching"));
+        assert_eq!(
+            anime.status_label(anime.watching_status()),
+            Some("watching")
+        );
         assert_eq!(anime.search("show").await?.len(), 2);
         assert!(api.as_manga().is_some());
         api.logout()?;
@@ -820,12 +974,25 @@ mod tests {
         seed(&secrets, "tok", 5, 4_000_000_000)?;
         let prefs = PrefStore::in_memory();
         prefs.set_raw("anilist_score_type", PrefValue::Int(10));
-        let api = AniList::open(FakeTransport::new(vec![]), secrets.clone(), &prefs, EventBus::default())?;
+        let api = AniList::open(
+            FakeTransport::new(vec![]),
+            secrets.clone(),
+            &prefs,
+            EventBus::default(),
+        )?;
         assert!(api.relogin_required());
         assert!(!api.is_logged_in());
-        assert!(prefs.get_raw("anilist_score_type").is_none(), "the key is removed");
+        assert!(
+            prefs.get_raw("anilist_score_type").is_none(),
+            "the key is removed"
+        );
         assert_eq!(secrets.raw("tracker/2/oauth"), None);
-        let again = AniList::open(FakeTransport::new(vec![]), MemSecrets::new(), &prefs, EventBus::default())?;
+        let again = AniList::open(
+            FakeTransport::new(vec![]),
+            MemSecrets::new(),
+            &prefs,
+            EventBus::default(),
+        )?;
         assert!(!again.relogin_required(), "the logout happens once");
         Ok(())
     }
@@ -834,7 +1001,12 @@ mod tests {
     fn t_28a_013_a_string_score_does_not_trigger_the_relogin() -> TestResult {
         let prefs = PrefStore::in_memory();
         prefs.set_raw("anilist_score_type", PrefValue::Str("POINT_5".into()));
-        let api = AniList::open(FakeTransport::new(vec![]), MemSecrets::new(), &prefs, EventBus::default())?;
+        let api = AniList::open(
+            FakeTransport::new(vec![]),
+            MemSecrets::new(),
+            &prefs,
+            EventBus::default(),
+        )?;
         assert!(!api.relogin_required());
         Ok(())
     }
@@ -853,10 +1025,20 @@ mod tests {
 
     #[tokio::test]
     async fn t_28a_022_delete_entry_reports_whether_anything_was_deleted() -> TestResult {
-        let fake = FakeTransport::new(vec![ok(r#"{"data":{"DeleteMediaListEntry":{"deleted":true}}}"#)]);
-        let api = AniList::from_parts(fake.clone(), MemSecrets::new(), &PrefStore::in_memory(), logged_in());
+        let fake = FakeTransport::new(vec![ok(
+            r#"{"data":{"DeleteMediaListEntry":{"deleted":true}}}"#,
+        )]);
+        let api = AniList::from_parts(
+            fake.clone(),
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            logged_in(),
+        );
         assert!(api.delete_entry(9001).await?);
-        assert_eq!(fake.bodies()[0]["variables"]["listId"], serde_json::json!(9001));
+        assert_eq!(
+            fake.bodies()[0]["variables"]["listId"],
+            serde_json::json!(9001)
+        );
         Ok(())
     }
 

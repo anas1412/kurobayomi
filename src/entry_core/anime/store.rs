@@ -10,10 +10,15 @@ use kuro_data::anime::{Anime, AnimeRepo, AnimeUpdate, SeasonAnime};
 use kuro_data::episode::{Episode, EpisodeRepo, EpisodeUpdate};
 use kuro_db::handle::Db;
 use kuro_db::subscribe::Subscription;
+use kuro_data::anime::AnimeRelationGroup;
+use kuro_data::anime_relation::AnimeRelationRepo;
 use kuro_domain::entries::defaults::{apply_default_episode_flags, apply_default_season_flags};
+use kuro_domain::entries::fetch_interval::{get_window, set_anime_fetch_interval};
 use kuro_prefs::store::PrefStore;
 
 use super::actions::Mark;
+use super::images::{ImageKind, bumped_last_modified};
+use super::season_settings;
 use super::settings::sort_click;
 
 /// Typed access to the tables of one anime page. Cheap to clone: it shares one `Db`.
@@ -45,6 +50,22 @@ impl AnimeStore {
         Ok(self.categories.by_entry(anime_id)?.into_iter().map(|c| c.id).collect())
     }
 
+    /// How many trackers the entry is bound to, for the tracking button of the action row.
+    pub fn track_count(&self, anime_id: i64) -> DataResult<usize> {
+        Ok(kuro_data::track::AnimeTrackRepo::new(Arc::clone(&self.db)).by_entry(anime_id)?.len())
+    }
+
+    /// Every category (the default row `0` included, the dialog drops it) and the ids the entry is linked to.
+    pub fn categories(&self, anime_id: i64) -> DataResult<(Vec<(i64, String)>, Vec<i64>)> {
+        let all = self.categories.all()?.into_iter().map(|cat| (cat.id, cat.name)).collect();
+        Ok((all, self.category_ids(anime_id)?))
+    }
+
+    /// Replaces the category links of the entry in one transaction.
+    pub fn set_categories(&self, anime_id: i64, category_ids: &[i64]) -> DataResult<()> {
+        self.animes.set_categories(anime_id, category_ids)
+    }
+
     /// The entry, or `None` when the row does not exist.
     pub fn anime(&self, id: i64) -> DataResult<Option<Anime>> {
         match self.animes.by_id(id) {
@@ -71,6 +92,65 @@ impl AnimeStore {
     /// writer transaction, so two quick taps cannot both see the same word.
     pub fn sort_by(&self, anime_id: i64, mode: i64) -> DataResult<bool> {
         self.animes.update_episode_flags(anime_id, |word| sort_click(word, mode))
+    }
+
+    /// One masked UPDATE of `animes.season_flags`: the write of a click in the season settings window.
+    pub fn set_season_flag_bits(&self, anime_id: i64, flag: i64, mask: i64) -> DataResult<bool> {
+        self.animes.set_season_flags_masked(anime_id, flag, mask)
+    }
+
+    /// A click on a Sort row of the season settings: the active key flips its direction, another key starts ascending.
+    /// Read and written in one transaction, like the episode sort.
+    pub fn season_sort_by(&self, anime_id: i64, code: i64) -> DataResult<bool> {
+        self.animes.update_season_flags(anime_id, |word| season_settings::sort_click(word, code))
+    }
+
+    /// "Set as default" with the library checkbox on, for the episode settings: the episode default word goes to every
+    /// favorite, and nothing else does (`setCurrentSettingsAsDefault` calls `setAnimeDefaultEpisodeFlags` only).
+    /// Returns how many entries changed.
+    pub fn apply_episode_defaults_to_library(&self, prefs: &PrefStore) -> DataResult<usize> {
+        let mut changed = 0;
+        for anime in self.animes.favorites()? {
+            if apply_default_episode_flags(&self.animes, prefs, &anime)? {
+                changed += 1;
+            }
+        }
+        Ok(changed)
+    }
+
+    /// The same for the season settings: the season default word goes to every favorite, the episode flags stay.
+    pub fn apply_season_defaults_to_library(&self, prefs: &PrefStore) -> DataResult<usize> {
+        let mut changed = 0;
+        for anime in self.animes.favorites()? {
+            if apply_default_season_flags(&self.animes, prefs, &anime)? {
+                changed += 1;
+            }
+        }
+        Ok(changed)
+    }
+
+    /// The library entries other than this one with the same title, case folded (the duplicate check of an add).
+    pub fn duplicates(&self, anime_id: i64) -> DataResult<Vec<Anime>> {
+        let Some(anime) = self.anime(anime_id)? else { return Ok(Vec::new()) };
+        self.animes.duplicates(anime.id, &anime.title)
+    }
+
+    /// The related groups of the entry, published again after a change to the relations or the anime they link.
+    pub fn watch_related(&self, anime_id: i64) -> Subscription<Vec<AnimeRelationGroup>> {
+        AnimeRelationRepo::new(self.db()).subscribe_related(anime_id)
+    }
+
+    /// An edit or a delete of a custom image: the last-modified of that image moves forward, so every cache keyed by
+    /// it loads the picture again (T-I12). `Ok(false)` when the row is gone.
+    pub fn bump_image(&self, anime_id: i64, kind: ImageKind, now_ms: i64) -> DataResult<bool> {
+        let Some(anime) = self.anime(anime_id)? else { return Ok(false) };
+        let mut update = AnimeUpdate::new(anime_id);
+        match kind {
+            ImageKind::Cover => update.cover_last_modified = Some(bumped_last_modified(anime.cover_last_modified, now_ms)),
+            ImageKind::Background => update.background_last_modified = Some(bumped_last_modified(anime.background_last_modified, now_ms)),
+        }
+        self.animes.update(&update)?;
+        Ok(true)
     }
 
     /// One masked UPDATE of `animes.viewer_flags`, so a write never reads back and touches the other groups (E-AIR-1).
@@ -113,6 +193,14 @@ impl AnimeStore {
             })
             .collect();
         if updates.is_empty() { Ok(()) } else { self.episodes.update_all(&updates) }
+    }
+
+    /// `setFetchInterval` for an anime: stores `-wheel` (0 is automatic) and recomputes the next update (T-39a-026).
+    pub fn set_fetch_interval(&self, anime_id: i64, wheel: i32) -> DataResult<()> {
+        let anime = self.animes.by_id(anime_id)?;
+        let now = chrono::Local::now();
+        let window = get_window(&now);
+        set_anime_fetch_interval(&self.animes, &self.episodes, &anime, wheel, &now, window, now.timestamp_millis())
     }
 
     /// Marks these episodes seen or unseen in one transaction. Unseen also resets the position (`SetSeenStatus`).
@@ -247,6 +335,31 @@ mod tests {
     }
 
     #[test]
+    fn categories_list_every_row_with_the_links_of_the_entry_and_set_replaces_them() {
+        let (_dir, store, id) = with_episodes(true, true, 0, 0);
+        let repo = CategoryRepo::new(store.db(), CategoryKind::Anime);
+        let a = repo.insert(&kuro_data::category::Category { id: 0, name: "Airing".into(), order: 1, flags: 0, hidden: false }).unwrap();
+        let b = repo.insert(&kuro_data::category::Category { id: 0, name: "Later".into(), order: 2, flags: 0, hidden: false }).unwrap();
+        store.set_categories(id, &[a]).unwrap();
+        let (all, linked) = store.categories(id).unwrap();
+        assert!(all.iter().any(|(i, n)| *i == a && n == "Airing") && all.iter().any(|(i, _)| *i == b));
+        assert_eq!(linked, vec![a]);
+        store.set_categories(id, &[b, b]).unwrap();
+        assert_eq!(store.categories(id).unwrap().1, vec![b], "a repeated id is linked once");
+        store.set_categories(id, &[]).unwrap();
+        assert!(store.categories(id).unwrap().1.is_empty());
+    }
+
+    #[test]
+    fn the_track_count_is_the_number_of_bound_trackers() {
+        let (_dir, store, id) = with_episodes(true, true, 0, 0);
+        assert_eq!(store.track_count(id).unwrap(), 0);
+        let repo = kuro_data::track::AnimeTrackRepo::new(store.db());
+        repo.insert(&kuro_data::track::AnimeTrack { anime_id: id, ..kuro_data::track::AnimeTrack::new(2) }).unwrap();
+        assert_eq!(store.track_count(id).unwrap(), 1);
+    }
+
+    #[test]
     fn reads_the_entry_and_its_episodes_and_a_missing_row_is_none() {
         let (_dir, store, id) = with_episodes(true, true, 3, 1);
         assert_eq!(store.anime(id).unwrap().unwrap().title, "Frieren");
@@ -265,5 +378,71 @@ mod tests {
         assert_eq!(word & ep::UNSEEN_MASK, ep::SHOW_UNSEEN, "the filter group survives a sort");
         store.sort_by(id, ep::SORTING_NUMBER).unwrap();
         assert_eq!(store.anime(id).unwrap().unwrap().episode_flags & ep::SORT_DIR_MASK, ep::SORT_DESC);
+    }
+
+    #[test]
+    fn the_episode_defaults_reach_every_favorite_and_leave_their_season_flags_alone() {
+        use kuro_domain::entries::anime::season_flags as sf;
+        let (_dir, store, id) = with_episodes(true, true, 1, 0);
+        store.set_season_flag_bits(id, sf::SHOW_UNSEEN, sf::UNSEEN_MASK).unwrap();
+        let prefs = PrefStore::in_memory();
+        kuro_domain::entries::defaults::set_episode_settings_default(&prefs, ep::SHOW_SEEN | ep::SORT_ASC | ep::SORTING_NUMBER);
+        assert_eq!(store.apply_episode_defaults_to_library(&prefs).unwrap(), 1);
+        let row = store.anime(id).unwrap().unwrap();
+        assert_eq!(row.episode_flags & ep::UNSEEN_MASK, ep::SHOW_SEEN, "the episode default was applied");
+        assert_eq!(row.season_flags & sf::UNSEEN_MASK, sf::SHOW_UNSEEN, "the season flags are not the user's request");
+    }
+
+    #[test]
+    fn the_season_defaults_reach_every_favorite_and_leave_their_episode_flags_alone() {
+        use kuro_domain::entries::anime::season_flags as sf;
+        let (_dir, store, id) = with_episodes(true, true, 1, 0);
+        store.set_flag_bits(id, ep::SHOW_UNSEEN, ep::UNSEEN_MASK).unwrap();
+        let prefs = PrefStore::in_memory();
+        kuro_domain::entries::defaults::set_season_settings_default(&prefs, sf::SHOW_COMPLETED);
+        assert_eq!(store.apply_season_defaults_to_library(&prefs).unwrap(), 1);
+        let row = store.anime(id).unwrap().unwrap();
+        assert_eq!(row.season_flags & sf::COMPLETED_MASK, sf::SHOW_COMPLETED);
+        assert_eq!(row.episode_flags & ep::UNSEEN_MASK, ep::SHOW_UNSEEN);
+    }
+
+    #[test]
+    fn season_writes_are_masked_and_a_sort_click_flips_the_active_key() {
+        use kuro_domain::entries::anime::season_flags as sf;
+        let (_dir, store, id) = with_episodes(true, true, 0, 0);
+        store.set_season_flag_bits(id, sf::SHOW_STARTED, sf::STARTED_MASK).unwrap();
+        store.set_season_flag_bits(id, sf::SHOW_BOOKMARKED, sf::BOOKMARKED_MASK).unwrap();
+        let word = store.anime(id).unwrap().unwrap().season_flags;
+        assert_eq!((word & sf::STARTED_MASK, word & sf::BOOKMARKED_MASK), (sf::SHOW_STARTED, sf::SHOW_BOOKMARKED));
+        store.season_sort_by(id, sf::SORT_UPLOAD).unwrap();
+        let word = store.anime(id).unwrap().unwrap().season_flags;
+        assert_eq!((word & sf::SORT_MASK, word & sf::SORT_DIR_MASK), (sf::SORT_UPLOAD, sf::SORT_ASC));
+        store.season_sort_by(id, sf::SORT_UPLOAD).unwrap();
+        assert_eq!(store.anime(id).unwrap().unwrap().season_flags & sf::SORT_DIR_MASK, sf::SORT_DESC, "the second click flips it");
+    }
+
+    #[test]
+    fn a_library_entry_with_the_same_title_is_a_duplicate_and_the_entry_itself_is_not() {
+        let (_dir, store, id) = with_episodes(false, true, 0, 0);
+        assert!(store.duplicates(id).unwrap().is_empty());
+        let twin = AnimeRepo::new(store.db())
+            .insert(&Anime { source: 8, url: "/b".into(), title: "FRIEREN".into(), favorite: true, ..Anime::create() })
+            .unwrap();
+        let found = store.duplicates(id).unwrap();
+        assert_eq!(found.iter().map(|a| a.id).collect::<Vec<_>>(), vec![twin]);
+        assert!(store.duplicates(twin).unwrap().is_empty(), "the other entry is not in the library");
+    }
+
+    #[test]
+    fn an_image_bump_moves_the_stamp_of_that_image_only_and_always_forward() {
+        let (_dir, store, id) = with_episodes(true, true, 0, 0);
+        assert!(store.bump_image(id, ImageKind::Cover, 100).unwrap());
+        let row = store.anime(id).unwrap().unwrap();
+        assert_eq!((row.cover_last_modified, row.background_last_modified), (100, 0));
+        assert!(store.bump_image(id, ImageKind::Cover, 100).unwrap());
+        assert_eq!(store.anime(id).unwrap().unwrap().cover_last_modified, 101, "the same millisecond still moves it");
+        assert!(store.bump_image(id, ImageKind::Background, 50).unwrap());
+        assert_eq!(store.anime(id).unwrap().unwrap().background_last_modified, 50);
+        assert!(!store.bump_image(4242, ImageKind::Cover, 1).unwrap());
     }
 }

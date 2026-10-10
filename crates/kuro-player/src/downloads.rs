@@ -94,14 +94,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn download_ahead_is_past_the_point_only_above_thirty_five_percent() {
+    fn t61_download_ahead_is_past_the_point_only_above_thirty_five_percent() {
         assert!(!past_download_ahead(350, 1000));
         assert!(past_download_ahead(351, 1000));
         assert!(!past_download_ahead(500, 0));
     }
 
     #[test]
-    fn download_ahead_queues_the_next_episodes_once_per_episode() {
+    fn t60_download_ahead_queues_the_next_episodes_once_per_episode() {
         let mut ahead = DownloadAhead::default();
         let following = [12, 13, 14];
         assert_eq!(
@@ -125,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_after_read_follows_the_slot_rule() {
+    fn t59_remove_after_read_follows_the_slot_rule() {
         let list = ["a", "b", "c"];
         let seen = |_: &&str| true;
         assert_eq!(episode_to_delete(&list, 2, -1, 0, seen), Ok(None));

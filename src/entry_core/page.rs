@@ -41,6 +41,8 @@ pub enum UiAction {
     },
     SetUnread(TriState),
     SetBookmarked(TriState),
+    /// The interval dialog's OK or Reset: the wheel value (0 is automatic).
+    SetFetchInterval(i32),
     SetDownloaded(TriState),
     SetDisplayNumber(bool),
     SortBy(i64),
@@ -64,6 +66,8 @@ pub enum UiAction {
     ResetFlags,
     /// An entry of the Download menu: the next chapters, or every unread one.
     DownloadMenu(DownloadAction),
+    /// The scanlator sheet's OK: the exclusions become exactly this set.
+    SetExcludedScanlators(std::collections::BTreeSet<String>),
 }
 
 /// What the widget layer does after an action.
@@ -187,6 +191,12 @@ impl Page {
                     self.banners.push(tr(MsgKey::delete_downloads_for_manga), Some(action), Length::Short, now_ms);
                 }
             }
+            StoreEvent::Scanlators { available, excluded } => {
+                if let Some(page) = self.ready_mut() {
+                    page.available_scanlators = available;
+                    page.excluded_scanlators = excluded;
+                }
+            }
             StoreEvent::Queued => {
                 // the add-to-library prompt: once per open, and only for a manga that is not in the library
                 let (manga_id, default_category) = (self.manga_id, self.default_category);
@@ -228,6 +238,8 @@ impl Page {
             UiAction::Refresh => out.cmds.push(StoreCmd::FetchAll { manga_id, manual: true }),
             UiAction::SetUnread(state) => out.cmds.push(write(unread_write(state))),
             UiAction::SetBookmarked(state) => out.cmds.push(write(bookmarked_write(state))),
+            UiAction::SetFetchInterval(wheel) => out.cmds.push(StoreCmd::SetFetchInterval { manga_id, wheel }),
+            UiAction::SetExcludedScanlators(excluded) => out.cmds.push(StoreCmd::SetExcludedScanlators { manga_id, excluded }),
             UiAction::SetDownloaded(state) => out.cmds.push(write(downloaded_write(state))),
             UiAction::SetDisplayNumber(number) => out.cmds.push(write(display_write(number))),
             UiAction::SortBy(mode) => out.cmds.push(StoreCmd::SortBy { manga_id, mode }),
@@ -414,8 +426,11 @@ mod tests {
             genres: vec![],
             status: 0,
             thumbnail_url: None,
+            cover_last_modified: 0,
             initialized: true,
             favorite: true,
+            next_update: 0,
+            fetch_interval: 0,
             local: false,
             flags: ChapterFlags(flags),
         }
@@ -586,6 +601,19 @@ mod tests {
         assert!(page.banners.current().is_some());
         page.banners.tick(4100);
         assert!(page.banners.current().is_none());
+    }
+
+    #[test]
+    fn the_scanlator_sheet_ok_and_a_scanlator_event_reach_the_page() {
+        let mut page = ready(3);
+        let excluded: std::collections::BTreeSet<String> = ["B".to_owned()].into();
+        assert_eq!(
+            page.act(UiAction::SetExcludedScanlators(excluded.clone())).cmds,
+            vec![StoreCmd::SetExcludedScanlators { manga_id: 1, excluded: excluded.clone() }]
+        );
+        page.apply(StoreEvent::Scanlators { available: vec!["A".into(), "B".into()], excluded: excluded.clone() }, 0);
+        let ready = page.ready().expect("ready");
+        assert_eq!((ready.available_scanlators.clone(), ready.excluded_scanlators.clone()), (vec!["A".to_owned(), "B".to_owned()], excluded));
     }
 
     #[test]

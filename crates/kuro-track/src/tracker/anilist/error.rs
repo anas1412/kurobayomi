@@ -111,14 +111,23 @@ mod tests {
         for e in cases {
             let key = e.message();
             let text = english(&key);
-            for debug in ["AuthExpired", "NotInList", "RateLimited", "UnknownStatus", "NotAuthenticated"] {
+            for debug in [
+                "AuthExpired",
+                "NotInList",
+                "RateLimited",
+                "UnknownStatus",
+                "NotAuthenticated",
+            ] {
                 assert!(!text.contains(debug), "{text}");
             }
             let tracked: crate::error::TrackError = e.into();
             assert_eq!(tracked.to_string(), text);
             assert_eq!(tracked.toast("AniList"), key);
         }
-        assert_eq!(AniListError::AuthExpired.message(), MsgKey::AniListSessionExpired);
+        assert_eq!(
+            AniListError::AuthExpired.message(),
+            MsgKey::AniListSessionExpired
+        );
     }
 
     #[test]
@@ -128,6 +137,8 @@ mod tests {
         assert!(TrackError::from(AniListError::AuthExpired).is_retry_futile());
         assert!(!TrackError::from(AniListError::Offline).is_retry_futile());
         assert!(!TrackError::from(AniListError::Transient).is_retry_futile());
-        assert!(!TrackError::from(AniListError::RateLimited { retry_after: None }).is_retry_futile());
+        assert!(
+            !TrackError::from(AniListError::RateLimited { retry_after: None }).is_retry_futile()
+        );
     }
 }

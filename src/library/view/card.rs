@@ -73,6 +73,55 @@ pub fn build(item: &LibraryItem, mode: LibraryDisplayMode, selected: bool, show_
     Card { root: root.upcast(), continue_button }
 }
 
+/// Builds the row of `item` for List mode (T-37a-021): a square cover, the title, the badges, then the continue
+/// button. `row_height` comes from `layout::list_row_height`.
+pub fn build_list(item: &LibraryItem, selected: bool, show_continue: bool, row_height: f64) -> Card {
+    let height = row_height.round() as i32;
+    let edge = (height - 8).max(40);
+    let cover = crate::ui::cover(edge, edge);
+    cover.add_css_class("library-cover");
+    if selected {
+        cover.set_opacity(0.76);
+    }
+    let root = gtk::Box::new(O::Horizontal, 8);
+    root.set_size_request(-1, height);
+    root.set_margin_start(8);
+    root.set_margin_end(8);
+    root.add_css_class("library-card");
+    if selected {
+        root.add_css_class("selected");
+    }
+    root.append(&cover);
+
+    let title = gtk::Label::new(Some(&item.row.title));
+    title.set_hexpand(true);
+    title.set_xalign(0.0);
+    title.set_valign(Align::Center);
+    title.set_wrap(true);
+    title.set_lines(2);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    root.append(&title);
+
+    let badges = badge_group(item);
+    badges.set_valign(Align::Center);
+    root.append(&badges);
+    let language = language_badge(item);
+    language.set_valign(Align::Center);
+    root.append(&language);
+
+    let continue_button = show_continue.then(|| {
+        let size = layout::continue_size(LibraryDisplayMode::List);
+        let button = gtk::Button::from_icon_name("media-playback-start-symbolic");
+        button.set_css_classes(&["circular", "osd"]);
+        button.set_size_request(size, size);
+        button.set_tooltip_text(Some("Resume"));
+        button.set_valign(Align::Center);
+        root.append(&button);
+        button
+    });
+    Card { root: root.upcast(), continue_button }
+}
+
 fn title_label(text: &str, lines: i32, inset: i32) -> gtk::Label {
     let label = gtk::Label::new(Some(text));
     label.set_wrap(true);

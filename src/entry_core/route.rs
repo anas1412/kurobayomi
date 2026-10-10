@@ -23,19 +23,24 @@ use kuro_prefs::tristate::TriState;
 
 use crate::data;
 use crate::entry_core::backend::StubBackend;
+use crate::entry_core::action_row::{TrackingClick, interval_click_opens_dialog, next_update, tracking_click};
+use crate::entry_core::action_row_view::{ActionRow, RowState};
 use crate::entry_core::banner_view::{self, BannerView};
 use crate::entry_core::chapter::ChapterRow;
 use crate::entry_core::chapter_actions::{DownloadAction, fab_state, indicator_action};
 use crate::entry_core::description_view;
 use crate::entry_core::detail::{LatestWins, LoadContext, LoadState, StoreCmd, StoreEvent};
 use crate::entry_core::dialog::{CategoryDialog, Dialog};
+use crate::entry_core::fetch_interval_dialog;
+use crate::entry_core::handoff::{self, MigrateRequest, WebViewRequest};
 use crate::entry_core::flags::{ChapterFlags, save_as_default, scanlator_filter_active};
-use crate::entry_core::header::{HeaderModel, SearchRequest, is_large};
+use crate::entry_core::header::{GenreChip, HeaderModel, SearchRequest, is_large};
 use crate::entry_core::header_view::{self, Handlers, LibraryButton};
 use crate::entry_core::list_model::list_header;
 use crate::entry_core::list_view::{ChapterList, RowActions, Swipe, ensure_css};
 use crate::entry_core::page::{Page, UiAction};
 use crate::entry_core::runner::{self, Runner};
+use crate::entry_core::scanlator_sheet;
 use crate::entry_core::selection::{Key, Mods, key_command};
 use crate::entry_core::store::DbStore;
 use crate::entry_core::text::{Description, Expansion, description};
@@ -81,6 +86,7 @@ struct View {
     stack: gtk::Stack,
     header_slot: GBox,
     library: LibraryButton,
+    action_row: ActionRow,
     description_slot: GBox,
     header_button: Button,
     count: Label,
@@ -110,7 +116,8 @@ struct View {
     ready_once: Cell<bool>,
     duplicate_open: Cell<bool>,
     shown_header: RefCell<Option<HeaderModel>>,
-    shown_description: RefCell<Option<Description>>,
+    /// What the description slot shows: the text and the genre chips under it.
+    shown_description: RefCell<Option<(Description, Vec<GenreChip>)>>,
 }
 
 fn now_ms(clock: Instant) -> u64 {
@@ -167,13 +174,40 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     header_row.append(&missing);
     header_row.append(&gtk::Image::from_icon_name("view-filter-symbolic"));
     let header_button = Button::builder().child(&header_row).css_classes(["flat"]).build();
-    // the library button
-    let library = LibraryButton::new();
     // UI parity 1: a spinner while refreshing, and a line when there are no chapters
     let spinner = gtk::Spinner::builder().halign(Align::Center).build();
     let empty = ui::dim(&tr(MsgKey::no_chapters_error));
     empty.set_halign(Align::Center);
     let on_row_view: Rc<RefCell<Weak<View>>> = Rc::default();
+    // the action row (T-38a-017): library, interval (the dialog of T-38a-028), tracking and WebView. WebView shows
+    // only for an HTTP source (`RowState::webview`).
+    let action_row = ActionRow::new(
+        Rc::new({
+            let weak = Rc::clone(&on_row_view);
+            move || {
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.open_interval();
+                }
+            }
+        }),
+        Some(Rc::new({
+            let weak = Rc::clone(&on_row_view);
+            move || {
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.tracking_pressed();
+                }
+            }
+        })),
+        Some(Rc::new({
+            let weak = Rc::clone(&on_row_view);
+            move || {
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.webview_pressed();
+                }
+            }
+        })),
+    );
+    let library = action_row.library.clone();
     let swipe = crate::data::is_installed().then(|| Swipe {
         prefs: Rc::new((*data::app().library).clone()),
         run: {
@@ -215,7 +249,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         },
     );
     col.append(&header_slot);
-    col.append(&library.button);
+    col.append(&action_row.root);
     col.append(&description_slot);
     col.append(&header_button);
     col.append(&spinner);
@@ -305,6 +339,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         stack,
         header_slot,
         library: library.clone(),
+        action_row: action_row.clone(),
         description_slot,
         header_button: header_button.clone(),
         count,
@@ -340,7 +375,24 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     view.build_selection_bar();
     view.render();
 
-    library.button.connect_clicked(on_view(&weak, |v| v.act(UiAction::ToggleFavorite { skip_duplicate: false })));
+    library.connect(
+        {
+            let weak = weak.clone();
+            move || {
+                if let Some(view) = weak.upgrade() {
+                    view.act(UiAction::ToggleFavorite { skip_duplicate: false });
+                }
+            }
+        },
+        {
+            let weak = weak.clone();
+            move || {
+                if let Some(view) = weak.upgrade() {
+                    view.open_category_dialog();
+                }
+            }
+        },
+    );
     header_button.connect_clicked({
         let weak = weak.clone();
         move |button| {
@@ -525,6 +577,25 @@ impl View {
     }
 
     /// Runs one action, sends its commands to the runner and redraws.
+    /// The interval button (T-38a-028): the dialog of a favorite. OK and Reset store the wheel through the runner.
+    fn open_interval(self: &Rc<Self>) {
+        let (interval, expected, favorite) = {
+            let page = self.page.borrow();
+            let Some(r) = page.ready() else { return };
+            let expected = (r.manga.status != kuro_domain::entries::manga::STATUS_COMPLETED).then_some(r.manga.next_update);
+            (r.manga.fetch_interval, expected, r.manga.favorite)
+        };
+        if !interval_click_opens_dialog(favorite) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        fetch_interval_dialog::open(interval, expected, move |wheel| {
+            if let Some(view) = weak.upgrade() {
+                view.act(UiAction::SetFetchInterval(wheel));
+            }
+        });
+    }
+
     fn act(self: &Rc<Self>, action: UiAction) {
         let out = self.page.borrow_mut().act(action);
         for cmd in out.cmds {
@@ -587,10 +658,8 @@ impl View {
     fn handlers(self: &Rc<Self>) -> Handlers {
         let weak = Rc::downgrade(self);
         Handlers {
-            on_search: Rc::new(|request: SearchRequest| {
-                // ponytail: the search screens take no query argument yet, so this opens them
-                ui::open(if request.global { "global_search" } else { "browse_source" });
-            }),
+            // the query goes to the opened screen through `handoff::take_search`
+            on_search: Rc::new(|request: SearchRequest| handoff::open_search(request)),
             on_copy: Rc::new({
                 let weak = weak.clone();
                 move |text: String| {
@@ -650,8 +719,8 @@ impl View {
                 ready.manga.title.clone(),
                 ready.from_source,
                 ready.chapters.is_empty(),
-                // no source registry yet: nothing tells the page that the source is HTTP or configurable
-                bar_state(ready, false, false),
+                // nothing tells the page that a source has settings yet, so Settings never shows
+                bar_state(ready, ready.http_source, false),
                 fab_state(ready),
                 ready.manga.favorite,
             )
@@ -670,6 +739,7 @@ impl View {
             .map(|w| if w.height() > 0 { w.height() } else { w.default_height() })
             .filter(|h| *h > 0)
             .unwrap_or(FALLBACK_HEIGHT);
+        let genres = model.genres.clone();
         let large = is_large(width, height);
         self.large.set(large);
         if !self.ready_once.replace(true) {
@@ -700,11 +770,28 @@ impl View {
             self.header_slot.append(&header_view::build(&model, large, column, &self.handlers()));
             *self.shown_header.borrow_mut() = Some(model);
         }
-        self.library.set(favorite);
-        if self.shown_description.borrow().as_ref() != Some(&desc) {
+        let row = self.page.borrow().ready().map(|r| RowState {
+            favorite: r.manga.favorite,
+            next: next_update(
+                Some(r.manga.next_update),
+                chrono::Utc::now().timestamp_millis(),
+                r.manga.status == kuro_domain::entries::manga::STATUS_COMPLETED,
+            ),
+            user_interval: r.manga.fetch_interval < 0,
+            tracking_count: r.tracking_count,
+            has_tracking: true,
+            webview: r.http_source,
+        });
+        match row {
+            Some(row) => self.action_row.apply(&row),
+            None => self.library.set(favorite),
+        }
+        let desc_key = (desc, genres);
+        if self.shown_description.borrow().as_ref() != Some(&desc_key) {
             clear(&self.description_slot);
-            self.description_slot.append(&description_view::build(&desc, Rc::clone(&self.expansion)));
-            *self.shown_description.borrow_mut() = Some(desc);
+            let handlers = self.handlers();
+            self.description_slot.append(&description_view::build(&desc_key.0, Rc::clone(&self.expansion), Some((&desc_key.1, &handlers))));
+            *self.shown_description.borrow_mut() = Some(desc_key);
         }
         self.count.set_label(&count_text);
         self.missing.set_label(missing_text.as_deref().unwrap_or(""));
@@ -790,7 +877,7 @@ impl View {
         let (items, refreshing) = {
             let page = self.page.borrow();
             match page.ready() {
-                Some(ready) => (bar_state(ready, false, false).overflow, ready.is_refreshing),
+                Some(ready) => (bar_state(ready, ready.http_source, false).overflow, ready.is_refreshing),
                 None => (Vec::new(), false),
             }
         };
@@ -798,7 +885,7 @@ impl View {
             let (label, action): (String, fn(&Rc<View>)) = match item {
                 Overflow::Refresh => (tr(MsgKey::action_webview_refresh), |v| v.act(UiAction::Refresh)),
                 Overflow::EditCategories => (tr(MsgKey::action_edit_categories), View::open_category_dialog),
-                Overflow::Migrate => (tr(MsgKey::action_migrate), |_| ui::open("migrate_search")),
+                Overflow::Migrate => (tr(MsgKey::action_migrate), View::migrate),
                 Overflow::Share => (tr(MsgKey::action_share), View::share),
                 Overflow::Settings => (tr(MsgKey::action_settings), |_| ui::open("source_preferences")),
             };
@@ -809,6 +896,52 @@ impl View {
         }
         popover.set_child(Some(&col));
         popover
+    }
+
+    /// The tracking button: the tracking sheet when a tracker is logged in, the tracking settings when none is (E-25).
+    fn tracking_pressed(&self) {
+        let logged_in = self.page.borrow().ready().is_some_and(|p| p.has_logged_in_trackers);
+        match tracking_click(logged_in) {
+            TrackingClick::Sheet => ui::open("tracking_sheet"),
+            TrackingClick::Settings => ui::open("settings_tracking"),
+        }
+    }
+
+    /// The exclusion sheet of the Scanlator filter row. OK writes the set it hands back.
+    fn open_scanlator_sheet(self: &Rc<Self>) {
+        let (available, excluded) = {
+            let page = self.page.borrow();
+            let Some(r) = page.ready() else { return };
+            (r.available_scanlators.clone(), r.excluded_scanlators.clone())
+        };
+        let weak = Rc::downgrade(self);
+        scanlator_sheet::open(&available, &excluded, move |set| {
+            if let Some(view) = weak.upgrade() {
+                view.act(UiAction::SetExcludedScanlators(set));
+            }
+        });
+    }
+
+    /// The WebView button (an HTTP source only): the entry's page in the WebView.
+    fn webview_pressed(&self) {
+        let request = self.page.borrow().ready().map(|p| WebViewRequest { url: p.manga.url.clone(), title: p.manga.title.clone() });
+        if let Some(request) = request {
+            handoff::open_webview(request);
+        }
+    }
+
+    /// The overflow menu's Migrate: the migrate flow of this manga (a favorite only, `toolbar::overflow_items`).
+    fn migrate(self: &Rc<Self>) {
+        let target = self.page.borrow().ready().map(|p| (p.manga.id, p.manga.title.clone()));
+        if let Some((id, title)) = target {
+            self.migrate_entry(id, title);
+        }
+    }
+
+    /// Opens the migrate flow for the entry `id`: the request carries its id and title, so the flow can name it, link
+    /// to it and replace its page when it finishes.
+    fn migrate_entry(&self, id: i64, title: String) {
+        handoff::open_migrate(MigrateRequest { entry_id: id, anime: false, title });
     }
 
     /// Copies the link of the entry.
@@ -868,12 +1001,7 @@ impl View {
             row.set_sensitive(enabled);
             filter_tab.append(&row);
         }
-        let scanlator = plain_row(&tr(MsgKey::scanlator), &popover, |_| {
-            let screen = ui::screen("manga_entry_details");
-            if let Some(dialog) = screen.dialogs.iter().find(|d| d.id == "scanlator_filter") {
-                ui::show_dialog(dialog);
-            }
-        });
+        let scanlator = plain_row(&tr(MsgKey::scanlator), &popover, on_view(&weak, View::open_scanlator_sheet));
         if scanlator_active {
             scanlator.add_css_class("chapter-primary");
         }
@@ -1016,12 +1144,24 @@ impl View {
         let message = save_as_default(&store, flags);
         if apply_all && let Some(handle) = &self.handle {
             let repo = kuro_data::manga::MangaRepo::new(app.db(EntryKind::Manga));
+            let (done, count) = async_channel::bounded::<usize>(1);
             // detached: closing the dialog or the page does not stop the run (`withNonCancellableContext`)
             handle.spawn(async move {
-                if let Err(e) = kuro_domain::entries::defaults::chapter_defaults_to_library_detached(repo, store).await {
-                    tracing::warn!("could not apply the default chapter settings to the library: {e}");
+                match kuro_domain::entries::defaults::chapter_defaults_to_library_detached(repo, store).await {
+                    Ok(updated) => {
+                        let _ = done.send(updated).await;
+                    }
+                    Err(e) => tracing::warn!("could not apply the default chapter settings to the library: {e}"),
                 }
             });
+            // the message says how many favorites took the settings, so it waits for the run (E-DEF-3)
+            let weak = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                if let (Ok(updated), Some(view)) = (count.recv().await, weak.upgrade()) {
+                    view.toast(applied_to_library_text(&message, updated));
+                }
+            });
+            return;
         }
         self.toast(message);
     }
@@ -1032,27 +1172,44 @@ impl View {
         if !open || self.duplicate_open.replace(true) {
             return;
         }
+        let duplicate_id = match self.page.borrow().ready().and_then(|p| p.dialog.current()) {
+            Some(Dialog::DuplicateManga { duplicate_id, .. }) => *duplicate_id,
+            _ => return,
+        };
+        let show = Button::with_label(&tr(MsgKey::action_show_manga));
         let add = Button::builder().label(tr(MsgKey::action_add_anyway)).css_classes(["suggested-action"]).build();
         let migrate = Button::with_label(&tr(MsgKey::action_migrate_duplicate));
         let cancel = Button::with_label(&tr(MsgKey::action_cancel));
         let buttons = GBox::new(O::Horizontal, 8);
         buttons.set_halign(Align::End);
-        for b in [&cancel, &migrate, &add] {
+        for b in [&cancel, &show, &migrate, &add] {
             buttons.append(b);
         }
         let col = ui::column();
         col.append(&Label::builder().label(tr(MsgKey::confirm_add_duplicate_manga)).wrap(true).xalign(0.0).build());
         col.append(&buttons);
-        let window = ui::modal(Label::new(Some(&tr(MsgKey::add_to_library))).upcast_ref(), &col, 400, 220);
+        let window = ui::modal(Label::new(Some(&tr(MsgKey::are_you_sure))).upcast_ref(), &col, 400, 220);
+        // Show entry dismisses the sheet first, then pushes the duplicate page on top (E-24)
+        show.connect_clicked({
+            let window = window.clone();
+            move |_| {
+                window.close();
+                crate::entry_core::route::open(duplicate_id);
+            }
+        });
         cancel.connect_clicked({
             let window = window.clone();
             move |_| window.close()
         });
         migrate.connect_clicked({
-            let window = window.clone();
+            let (window, weak) = (window.clone(), Rc::downgrade(self));
             move |_| {
                 window.close();
-                ui::open("migrate_search");
+                if let Some(view) = weak.upgrade() {
+                    // one primary-key read names the old entry for the migrate dialog
+                    let title = kuro_data::manga::MangaRepo::new(data::app().db(EntryKind::Manga)).by_id(duplicate_id).map(|m| m.title).unwrap_or_default();
+                    view.migrate_entry(duplicate_id, title);
+                }
             }
         });
         let weak = Rc::downgrade(self);
@@ -1119,6 +1276,11 @@ impl View {
     }
 }
 
+/// The message after "Set as default" with the library checkbox: the saved text and how many favorites took it.
+fn applied_to_library_text(saved: &str, count: usize) -> String {
+    format!("{saved} ({count})")
+}
+
 /// A row of a menu with no mark: it closes the popover and runs.
 fn plain_row(label: &str, popover: &gtk::Popover, on_click: impl Fn(&Button) + 'static) -> Button {
     let button = Button::builder().css_classes(["flat"]).build();
@@ -1161,6 +1323,11 @@ fn clear(slot: &GBox) {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+
+    #[test]
+    fn applying_to_the_library_reports_the_count_after_the_saved_text() {
+        assert_eq!(super::applied_to_library_text("Updated default chapter settings", 3), "Updated default chapter settings (3)");
+    }
 
     use kuro_data::chapter::{Chapter, ChapterRepo};
     use kuro_data::manga::{Manga, MangaRepo, MangaUpdate};

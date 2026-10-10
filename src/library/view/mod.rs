@@ -33,7 +33,9 @@ use crate::library::category_dialog::CategoryDialog;
 use crate::library::display_tab;
 use crate::library::keys;
 use crate::library::layout;
+use crate::library::filter_tab;
 use crate::library::load;
+use crate::library::random;
 use crate::library::query::{Built, Facts};
 use crate::library::select::Selection;
 use crate::library::worker::{Gate, Job, Reply, Worker};
@@ -47,6 +49,8 @@ pub struct Deps {
     pub facts: Facts,
     pub downloaded_only: Rc<dyn Fn() -> bool>,
     pub logged_in: Rc<dyn Fn() -> BTreeSet<i64>>,
+    /// The logged-in trackers as (id, name), for the Filter tab's tracker rows.
+    pub tracker_names: Rc<dyn Fn() -> Vec<(i64, String)>>,
     /// `pref_always_use_external_player`, read when the continue button is clicked.
     pub always_external: Rc<dyn Fn() -> bool>,
     /// Whether the chapter or episode with this id is on disk; the entry's downloaded filter reads it.
@@ -74,6 +78,10 @@ pub struct Nav {
     pub edit_categories: Rc<dyn Fn()>,
     /// Told when selection mode starts or ends; the shell hides its sidebar while it is on (B-1.4).
     pub selecting: Rc<dyn Fn(bool)>,
+    /// Starts an update pass of one category (`Some(id)`); `false` when a pass of this kind is already running.
+    pub update: Rc<dyn Fn(Option<i64>) -> bool>,
+    /// Whether a pass of this kind is running now; the refresh button shows it.
+    pub update_running: Rc<dyn Fn() -> bool>,
 }
 
 /// The shared state of one library view. Lives in an `Rc<RefCell<_>>` that handlers reach through a `Weak`.
@@ -103,6 +111,10 @@ struct Inner {
     tabs: tabs::TabStrip,
     scroller: gtk::ScrolledWindow,
     grid: gtk::GridView,
+    /// List mode shows this over the same store instead of the grid (T-37a-021).
+    list: gtk::ListView,
+    /// Starts an update of the active category; busy while a pass of this kind runs (T-26a-102).
+    refresh_button: gtk::Button,
     empty: gtk::Box,
     empty_label: gtk::Label,
     global_button: gtk::Button,
@@ -137,6 +149,9 @@ impl LibraryView {
         header.set_margin_top(8);
         header.append(&title);
         header.append(&search);
+        let refresh_button = gtk::Button::from_icon_name("view-refresh-symbolic");
+        refresh_button.set_tooltip_text(Some(&tr(MsgKey::action_update_category)));
+        header.append(&refresh_button);
 
         let tabs = tabs::TabStrip::new();
         let grid = gtk::GridView::new(
@@ -145,6 +160,12 @@ impl LibraryView {
         );
         grid.set_vexpand(true);
         grid.set_single_click_activate(false);
+        let list = gtk::ListView::new(
+            Some(gtk::NoSelection::new(Some(store.clone()))),
+            Some(gtk::SignalListItemFactory::new()),
+        );
+        list.set_vexpand(true);
+        list.set_single_click_activate(false);
         let scroller = gtk::ScrolledWindow::builder().child(&grid).vexpand(true).build();
 
         let empty_label = gtk::Label::new(None);
@@ -205,6 +226,8 @@ impl LibraryView {
             tabs,
             scroller,
             grid,
+            list,
+            refresh_button,
             empty,
             empty_label,
             global_button,
@@ -213,13 +236,20 @@ impl LibraryView {
         }));
         let view = Self { inner: inner.clone(), root };
         // a resize across a column boundary or the 900 px breakpoint changes the count without a data change
-        let (weak, seen) = (Rc::downgrade(&inner), FlagCell::new(-1));
+        let (weak, seen) = (Rc::downgrade(&inner), FlagCell::new((-1, -1)));
         let scroller = inner.borrow().scroller.clone();
         scroller.add_tick_callback(move |scroller, _| {
-            let width = window_width(scroller);
-            if seen.replace(width) != width {
+            let size = (window_width(scroller), scroller.height());
+            let before = seen.replace(size);
+            if before != size {
                 if let Some(inner) = weak.upgrade() {
-                    apply_columns(&inner);
+                    if before.0 != size.0 {
+                        apply_columns(&inner);
+                    }
+                    // List rows divide the page height, so a new height or list size rebuilds them
+                    if is_list_mode(&inner.borrow()) {
+                        render(&inner);
+                    }
                 }
             }
             glib::ControlFlow::Continue
@@ -252,17 +282,19 @@ impl LibraryView {
         submit(&self.inner);
     }
 
-    /// "Open random entry": one uniformly chosen entry of the active page, `None` when the page is empty.
+    /// "Open random entry": one uniformly chosen entry of the active page; a toast when the page is empty.
     pub fn open_random(&self) {
         let (id, open) = {
             let st = self.inner.borrow();
             let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(&st)));
             let items = page.map_or(&[][..], |p| p.items.as_slice());
-            let pick = (!items.is_empty()).then(|| kuro_domain::library::order::new_seed().unsigned_abs() as usize % items.len());
-            (pick.map(|i| items[i].row.id), st.nav.open.clone())
+            let nonce = u64::from(kuro_domain::library::order::new_seed().unsigned_abs());
+            let id = random::pick_index(items.len(), nonce).and_then(|i| items.get(i)).map(|item| item.row.id);
+            (id, st.nav.open.clone())
         };
-        if let Some(id) = id {
-            open(id);
+        match id {
+            Some(id) => open(id),
+            None => crate::toast::notify(random::EMPTY_TOAST),
         }
     }
 
@@ -279,8 +311,13 @@ impl LibraryView {
     fn wire(&self, replies: &async_channel::Receiver<Reply>) {
         let weak = Rc::downgrade(&self.inner);
 
-        let factory = self.inner.borrow().grid.factory().and_then(|f| f.downcast::<gtk::SignalListItemFactory>().ok());
-        if let Some(factory) = factory {
+        // the grid and the list share one binder; List mode shows the list (T-37a-021)
+        let (grid_factory, list_factory) = {
+            let st = self.inner.borrow();
+            (st.grid.factory(), st.list.factory())
+        };
+        for factory in [grid_factory, list_factory].into_iter().flatten() {
+            let Ok(factory) = factory.downcast::<gtk::SignalListItemFactory>() else { continue };
             let weak_bind = weak.clone();
             factory.connect_bind(move |_, obj| {
                 if let Some(item) = obj.downcast_ref::<gtk::ListItem>() {
@@ -288,6 +325,7 @@ impl LibraryView {
                 }
             });
         }
+        self.wire_refresh(&weak);
 
         let weak_search = weak.clone();
         let search = self.inner.borrow().search.clone();
@@ -396,6 +434,32 @@ impl LibraryView {
         });
     }
 
+    /// The refresh button (T-26a-102): starts a pass of the active category, says so in a toast, and stays busy
+    /// while a pass of this kind runs.
+    fn wire_refresh(&self, weak: &Weak<RefCell<Inner>>) {
+        let button = self.inner.borrow().refresh_button.clone();
+        sync_refresh_button(&self.inner);
+        let weak_click = weak.clone();
+        button.connect_clicked(move |_| {
+            let Some(inner) = weak_click.upgrade() else { return };
+            let (update, category) = {
+                let st = inner.borrow();
+                let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(&st)));
+                (st.nav.update.clone(), page.map(|p| p.category.id))
+            };
+            let started = update(category);
+            crate::toast::notify(actions::update_toast(actions::UpdateScope::Category, !started));
+            sync_refresh_button(&inner);
+        });
+        // a pass that ends, or one started elsewhere, changes the button without a click
+        let weak_poll = weak.clone();
+        glib::timeout_add_local(Duration::from_millis(500), move || {
+            let Some(inner) = weak_poll.upgrade() else { return glib::ControlFlow::Break };
+            sync_refresh_button(&inner);
+            glib::ControlFlow::Continue
+        });
+    }
+
     /// The selection header (count, select all, invert, cancel) and the action bar (change categories, mark,
     /// download, delete).
     fn wire_bar(&self, weak: &Weak<RefCell<Inner>>) {
@@ -454,6 +518,15 @@ impl LibraryView {
             }
         });
     }
+}
+
+/// Disables the refresh button while a pass of this kind runs.
+fn sync_refresh_button(inner: &Rc<RefCell<Inner>>) {
+    let (button, running) = {
+        let st = inner.borrow();
+        (st.refresh_button.clone(), st.nav.update_running.clone())
+    };
+    button.set_sensitive(!running());
 }
 
 /// Sends the current settings to the worker as a new generation.
@@ -598,6 +671,7 @@ fn render(inner: &Rc<RefCell<Inner>>) {
     tabs.set(&view.labels, view.index, on_select);
 
     apply_columns(inner);
+    show_mode_view(inner);
     let objects: Vec<glib::BoxedAnyObject> = view.grid_cells.iter().cloned().map(glib::BoxedAnyObject::new).collect();
     store.splice(0, store.n_items(), objects.as_slice());
     let has_items = !view.items.is_empty();
@@ -620,6 +694,29 @@ fn render(inner: &Rc<RefCell<Inner>>) {
     if let Some(notify) = changed {
         notify(view.bar_open);
     }
+}
+
+/// Puts the list or the grid in the scroller for the display mode.
+fn show_mode_view(inner: &Rc<RefCell<Inner>>) {
+    let (scroller, list, grid, list_mode) = {
+        let st = inner.borrow();
+        (st.scroller.clone(), st.list.clone(), st.grid.clone(), is_list_mode(&st))
+    };
+    let wanted: gtk::Widget = if list_mode { list.upcast() } else { grid.upcast() };
+    if scroller.child().as_ref() != Some(&wanted) {
+        scroller.set_child(Some(&wanted));
+    }
+}
+
+fn is_list_mode(st: &Inner) -> bool {
+    st.deps.prefs.display_mode.get() == kuro_prefs::library::LibraryDisplayMode::List
+}
+
+/// The row height of List mode for the current page height and list size (T-37a-021).
+fn list_row_height(st: &Inner) -> f64 {
+    let (portrait, landscape) = display_tab::column_prefs(&st.deps.prefs, st.deps.kind);
+    let size = layout::list_size(window_width(&st.scroller), portrait.get(), landscape.get());
+    layout::list_row_height(f64::from(st.scroller.height()), size)
 }
 
 /// Width of the window that holds `widget`, or of the widget itself before it has a window.
@@ -790,7 +887,12 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
         )
     };
     let show_continue = actions::continue_visible(show_continue_pref, &item.row);
-    let card = card::build(&item, mode, selected, show_continue);
+    let card = if mode == kuro_prefs::library::LibraryDisplayMode::List {
+        let row_height = list_row_height(&inner.borrow());
+        card::build_list(&item, selected, show_continue, row_height)
+    } else {
+        card::build(&item, mode, selected, show_continue)
+    };
     list_item.set_child(Some(&card.root));
 
     // the action runs on release, so a long press can claim the sequence first and the release then does nothing
@@ -860,7 +962,7 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
 /// The settings sheet over the active page. The sort tab writes through `CategoryService::set_sort_mode`, which
 /// draws a new Random seed itself; the library reloads when the write is done.
 fn open_settings(inner: &Rc<RefCell<Inner>>) {
-    let (kind, prefs, categories, has_tracker, category, current_sort) = {
+    let (kind, prefs, categories, has_tracker, category, current_sort, downloaded_only, trackers) = {
         let st = inner.borrow();
         let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(&st)));
         let categorized = st.deps.prefs.categorized_display_settings.get();
@@ -869,7 +971,16 @@ fn open_settings(inner: &Rc<RefCell<Inner>>) {
             Some(p) if categorized => p.category.sort(st.deps.kind),
             _ => st.deps.categories.global_sort(),
         };
-        (st.deps.kind, st.deps.prefs.clone(), st.deps.categories.clone(), !(st.deps.logged_in)().is_empty(), category, current_sort)
+        (
+            st.deps.kind,
+            st.deps.prefs.clone(),
+            st.deps.categories.clone(),
+            !(st.deps.logged_in)().is_empty(),
+            category,
+            current_sort,
+            (st.deps.downloaded_only)(),
+            (st.deps.tracker_names)(),
+        )
     };
     let weak = Rc::downgrade(inner);
     let set_sort: Rc<dyn Fn(LibrarySort)> = Rc::new(move |sort| {
@@ -883,23 +994,16 @@ fn open_settings(inner: &Rc<RefCell<Inner>>) {
             }
         });
     });
-    let id = match kind {
-        EntryKind::Anime => "anime_library",
-        EntryKind::Manga => "manga_library",
-    };
-    let filter_tab = filter_tab(id);
+    // a filter write reloads the page; the sheet may already be gone, so the reload goes through a weak handle
+    let weak_filter = Rc::downgrade(inner);
+    let on_change: Rc<dyn Fn()> = Rc::new(move || {
+        if let Some(inner) = weak_filter.upgrade() {
+            submit(&inner);
+        }
+    });
+    let filter_tab = filter_tab::build(kind, prefs.clone(), downloaded_only, &trackers, on_change);
     let window_width = window_width(&inner.borrow().scroller);
     sheet::show(sheet::Ctx { kind, prefs, has_tracker, current_sort, set_sort, filter_tab, window_width });
-}
-
-/// The spec's Filter tab, shown as it is.
-fn filter_tab(screen_id: &str) -> gtk::Widget {
-    let col = crate::ui::column();
-    let sheets = crate::ui::screen(screen_id).sheets;
-    if let Some(tab) = sheets.first().and_then(|s| s.tabs.first()) {
-        crate::ui::groups_into(&col, &tab.groups);
-    }
-    crate::ui::scrolled(&col).upcast()
 }
 
 /// The continue button: opens the entry's next item, in the external player when the preference is on, or says
@@ -978,6 +1082,7 @@ mod tests {
             },
             downloaded_only: Rc::new(|| false),
             logged_in: Rc::new(BTreeSet::new),
+            tracker_names: Rc::new(Vec::new),
             always_external: Rc::new(|| false),
             item_downloaded: Rc::new(|_| false),
         };
@@ -993,6 +1098,8 @@ mod tests {
                 let seen = selecting_calls.clone();
                 move |on| seen.borrow_mut().push(on)
             }),
+            update: Rc::new(|_| true),
+            update_running: Rc::new(|| false),
         };
         let view = LibraryView::new(deps, nav).expect("view");
         let inner = view.inner.clone();

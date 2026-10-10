@@ -136,7 +136,11 @@ impl AnimeTracker for AniList {
         self.score_format().display(t.score)
     }
 
-    async fn update(&self, t: &AnimeTrack, did_watch_episode: bool) -> Result<AnimeTrack, TrackError> {
+    async fn update(
+        &self,
+        t: &AnimeTrack,
+        did_watch_episode: bool,
+    ) -> Result<AnimeTrack, TrackError> {
         let mut next = t.clone();
         service::update_anime(self, &mut next, did_watch_episode, now_ms()).await?;
         Ok(next)
@@ -188,7 +192,11 @@ impl MangaTracker for AniList {
         self.score_format().display(t.score)
     }
 
-    async fn update(&self, t: &MangaTrack, did_read_chapter: bool) -> Result<MangaTrack, TrackError> {
+    async fn update(
+        &self,
+        t: &MangaTrack,
+        did_read_chapter: bool,
+    ) -> Result<MangaTrack, TrackError> {
         let mut next = t.clone();
         service::update_manga(self, &mut next, did_read_chapter, now_ms()).await?;
         Ok(next)

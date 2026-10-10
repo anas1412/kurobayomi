@@ -277,12 +277,26 @@ mod tests {
         let manga: Vec<&str> = MangaStatus::ORDER.iter().map(|s| s.label_en()).collect();
         assert_eq!(
             manga,
-            ["Reading", "Plan to read", "Completed", "Rereading", "Paused", "Dropped"]
+            [
+                "Reading",
+                "Plan to read",
+                "Completed",
+                "Rereading",
+                "Paused",
+                "Dropped"
+            ]
         );
         let anime: Vec<&str> = AnimeStatus::ORDER.iter().map(|s| s.label_en()).collect();
         assert_eq!(
             anime,
-            ["Watching", "Plan to watch", "Completed", "Rewatching", "Paused", "Dropped"]
+            [
+                "Watching",
+                "Plan to watch",
+                "Completed",
+                "Rewatching",
+                "Paused",
+                "Dropped"
+            ]
         );
         assert_eq!(MangaStatus::Rereading.label_key(), "repeating");
         assert_eq!(AnimeStatus::Rewatching.label_key(), "repeating_anime");

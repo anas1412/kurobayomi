@@ -36,11 +36,29 @@ pub enum MpvError {
 /// with a recording fake. `MpvHandle` is the real sink.
 pub trait PropertySink {
     fn set_str(&self, name: &str, value: &str) -> Result<(), MpvError>;
+
+    /// An integer property (`MPVLib.setPropertyInt`). A sink with no typed write sends the text.
+    fn set_i64(&self, name: &str, value: i64) -> Result<(), MpvError> {
+        self.set_str(name, &value.to_string())
+    }
+
+    /// A double property (`MPVLib.setPropertyDouble`). A sink with no typed write sends the text.
+    fn set_f64(&self, name: &str, value: f64) -> Result<(), MpvError> {
+        self.set_str(name, &value.to_string())
+    }
 }
 
 impl PropertySink for MpvHandle {
     fn set_str(&self, name: &str, value: &str) -> Result<(), MpvError> {
         self.set_property_str(name, value)
+    }
+
+    fn set_i64(&self, name: &str, value: i64) -> Result<(), MpvError> {
+        self.set_property_i64(name, value)
+    }
+
+    fn set_f64(&self, name: &str, value: f64) -> Result<(), MpvError> {
+        self.set_property_f64(name, value)
     }
 }
 

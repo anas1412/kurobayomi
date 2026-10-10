@@ -18,11 +18,10 @@ const DESKTOP: &str = "Desktop";
 const SESSION: &str = "Session";
 const GTK: &str = "GTK";
 
-/// "Stable <version>", "Debug <sha>" in a debug build, "Preview r<count>" in a preview build.
-pub fn version_text(build_type: &str, version: &str, sha: &str, commit_count: u32) -> String {
+/// "Stable <version>", "Debug <sha>" in a debug build.
+pub fn version_text(build_type: &str, version: &str, sha: &str) -> String {
     match build_type {
         "debug" => format!("Debug {sha}"),
-        "preview" => format!("Preview r{commit_count}"),
         _ => format!("Stable {version}"),
     }
 }
@@ -47,7 +46,7 @@ fn read_file(path: &str) -> Option<String> {
 pub fn app_rows(version_title: &str, build_time_title: &str) -> Vec<(String, String)> {
     let info = &*APP_INFO;
     vec![
-        (version_title.to_owned(), version_text(info.build_type, &info.version_name, info.git_sha, info.commit_count)),
+        (version_title.to_owned(), version_text(info.build_type, &info.version_name, info.git_sha)),
         (build_time_title.to_owned(), info.build_time.to_owned()),
     ]
 }
@@ -135,9 +134,8 @@ mod tests {
 
     #[test]
     fn t_47b_040_the_version_row_names_the_build() {
-        assert_eq!(version_text("release", "0.1.0", "abc1234", 77), "Stable 0.1.0");
-        assert_eq!(version_text("debug", "0.1.0-77", "abc1234", 77), "Debug abc1234");
-        assert_eq!(version_text("preview", "0.1.0", "abc1234", 77), "Preview r77");
+        assert_eq!(version_text("release", "0.1.0", "abc1234"), "Stable 0.1.0");
+        assert_eq!(version_text("debug", "0.1.0-77", "abc1234"), "Debug abc1234");
     }
 
     #[test]

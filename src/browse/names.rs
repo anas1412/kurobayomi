@@ -16,6 +16,16 @@ pub fn localized_display_name(lang: &str) -> String {
     display_name(display_tag(lang))
 }
 
+/// `LocaleHelper.getLocalizedDisplayName` as the global search header uses it for its subtitle (E19): the language's own
+/// name, and for the `all` tag the tag itself with its first letter capitalised, which is what Java answers for it. The
+/// source lists use `localized_display_name`, where `all` is the Multi label.
+pub fn subtitle_display_name(lang: &str) -> String {
+    if lang == "all" {
+        return "All".to_owned();
+    }
+    localized_display_name(lang)
+}
+
 /// `LocaleHelper.comparator` as a total order. `all` sorts first, then languages by their localized names. Two tags
 /// with one name stay apart by tag (E-40-14), and equal tags compare equal, so `all` is reflexive (TC-40-010).
 pub fn compare_languages(a: &str, b: &str) -> Ordering {
@@ -81,5 +91,13 @@ mod tests {
         assert_eq!(case_insensitive_cmp("Alpha", "alpha"), Ordering::Equal);
         assert_eq!(case_insensitive_cmp("alpha", "Beta"), Ordering::Less);
         assert_eq!(case_insensitive_cmp("Beta", "alpha"), Ordering::Greater);
+    }
+
+    #[test]
+    fn the_global_search_subtitle_shows_all_as_all_and_not_as_multi() {
+        assert_eq!(subtitle_display_name("all"), "All");
+        assert_eq!(source_display_name("all"), "Multi", "the source lists keep their Multi label");
+        assert_eq!(subtitle_display_name("zh-CN"), localized_display_name("zh-Hans"));
+        assert_eq!(subtitle_display_name("en"), localized_display_name("en"));
     }
 }

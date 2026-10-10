@@ -1,0 +1,1 @@
+{"data":{"type":"libraryEntries","attributes":{"status":"current","progress":12,"private":false},"relationships":{"user":{"data":{"id":"42","type":"users"}},"media":{"data":{"id":5,"type":"anime"}}}}}

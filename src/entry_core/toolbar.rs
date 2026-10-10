@@ -95,6 +95,8 @@ mod tests {
     fn page(flags: i64, local: bool, favorite: bool, rows: Vec<ChapterRow>) -> Box<EntryState> {
         let manga = MangaRow {
             id: 1,
+            next_update: 0,
+            fetch_interval: 0,
             source: 1,
             url: String::new(),
             title: "t".into(),
@@ -104,6 +106,7 @@ mod tests {
             genres: vec![],
             status: 0,
             thumbnail_url: None,
+            cover_last_modified: 0,
             initialized: true,
             favorite,
             local,

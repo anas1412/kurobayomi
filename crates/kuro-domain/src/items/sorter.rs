@@ -298,6 +298,7 @@ mod tests {
         assert_eq!(collate("á", "a"), Ordering::Equal);
         assert_eq!(collate("Chapter 10", "Chapter 2"), Ordering::Less);
         assert_eq!(collate("b", "A"), Ordering::Greater);
+        assert_eq!(collate("alpha", "Beta"), Ordering::Less, "T-17a-045: alphabetical, not by code point");
     }
 
     #[test]

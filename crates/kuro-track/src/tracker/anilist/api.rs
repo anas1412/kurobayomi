@@ -113,7 +113,10 @@ impl Transport for HttpTransport {
         let mut request = self
             .client
             .post(endpoint())
-            .header(reqwest::header::CONTENT_TYPE, "application/json; charset=utf-8")
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/json; charset=utf-8",
+            )
             .body(body.to_string());
         if let Some(token) = bearer {
             request = request.bearer_auth(token);
@@ -126,7 +129,10 @@ impl Transport for HttpTransport {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.trim().parse::<u64>().ok())
             .map(Duration::from_secs);
-        let body = response.bytes().await.map_err(AniListError::from_transport)?;
+        let body = response
+            .bytes()
+            .await
+            .map_err(AniListError::from_transport)?;
         Ok(RawResponse {
             status,
             body,
@@ -161,10 +167,7 @@ impl Api {
     }
 
     pub fn set_state(&self, next: AuthState) {
-        *self
-            .state
-            .write()
-            .unwrap_or_else(PoisonError::into_inner) = next;
+        *self.state.write().unwrap_or_else(PoisonError::into_inner) = next;
     }
 
     /// The token for an authenticated call, checked at `now_s`. A token past its expiry is cleared here, so
@@ -206,6 +209,26 @@ impl Api {
         query: &str,
         variables: Option<V>,
     ) -> Result<T, AniListError> {
+        self.execute_inner(query, variables, true).await
+    }
+
+    /// Like [`Api::execute`], but a 401 only returns [`AniListError::AuthExpired`]. It does not clear the stored
+    /// login or set the flag. A login attempt checks its new token this way, so a refused token cannot wipe the
+    /// session that was stored before the attempt.
+    pub async fn execute_probe<V: Serialize, T: DeserializeOwned>(
+        &self,
+        query: &str,
+        variables: Option<V>,
+    ) -> Result<T, AniListError> {
+        self.execute_inner(query, variables, false).await
+    }
+
+    async fn execute_inner<V: Serialize, T: DeserializeOwned>(
+        &self,
+        query: &str,
+        variables: Option<V>,
+        expire_on_401: bool,
+    ) -> Result<T, AniListError> {
         let token = self.bearer(now_s())?;
         self.limiter.acquire().await;
 
@@ -216,9 +239,12 @@ impl Api {
 
         let raw = self.transport.post(&body, Some(token.expose())).await?;
         match raw.status {
+            401 if !expire_on_401 => Err(AniListError::AuthExpired),
             401 => {
                 let viewer_id = match self.state() {
-                    AuthState::LoggedIn { viewer_id, .. } | AuthState::Expired { viewer_id } => viewer_id,
+                    AuthState::LoggedIn { viewer_id, .. } | AuthState::Expired { viewer_id } => {
+                        viewer_id
+                    }
                     AuthState::LoggedOut => 0,
                 };
                 self.expire(viewer_id);
@@ -279,9 +305,17 @@ mod tests {
         for _ in 0..85 {
             limiter.acquire().await;
         }
-        assert_eq!(Instant::now() - start, Duration::ZERO, "85 calls need no wait");
+        assert_eq!(
+            Instant::now() - start,
+            Duration::ZERO,
+            "85 calls need no wait"
+        );
         limiter.acquire().await;
-        assert_eq!(Instant::now() - start, Duration::from_secs(60), "the 86th waits for the window");
+        assert_eq!(
+            Instant::now() - start,
+            Duration::from_secs(60),
+            "the 86th waits for the window"
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -292,12 +326,20 @@ mod tests {
         limiter.acquire().await;
         let before = Instant::now();
         limiter.acquire().await;
-        assert_eq!(Instant::now() - before, Duration::from_secs(30), "waits for the first entry only");
+        assert_eq!(
+            Instant::now() - before,
+            Duration::from_secs(30),
+            "waits for the first entry only"
+        );
         tokio::time::sleep(Duration::from_secs(120)).await;
         let later = Instant::now();
         limiter.acquire().await;
         limiter.acquire().await;
-        assert_eq!(Instant::now() - later, Duration::ZERO, "capacity is back after the window");
+        assert_eq!(
+            Instant::now() - later,
+            Duration::ZERO,
+            "capacity is back after the window"
+        );
     }
 
     #[tokio::test]
@@ -353,18 +395,41 @@ mod tests {
             score_format: crate::tracker::anilist::score::ScoreFormat::Point10,
         };
         let api = Api::new(fake.clone(), test_base(), state);
-        let _: Value = api.execute("query User { Viewer { id } }", None::<()>).await?;
+        let _: Value = api
+            .execute("query User { Viewer { id } }", None::<()>)
+            .await?;
         assert!(fake.bodies()[0].get("variables").is_none());
-        assert_eq!(fake.bodies()[0]["query"], json!("query User { Viewer { id } }"));
+        assert_eq!(
+            fake.bodies()[0]["query"],
+            json!("query User { Viewer { id } }")
+        );
         Ok(())
     }
 
     #[tokio::test]
     async fn t_28a_015_status_codes_map_to_typed_errors() -> TestResult {
         let cases: Vec<(RawResponse, &str)> = vec![
-            (status(401, include_str!("../../../tests/fixtures/anilist/http_401.txt")), "auth"),
-            (status(429, include_str!("../../../tests/fixtures/anilist/http_429.txt")), "rate"),
-            (status(500, include_str!("../../../tests/fixtures/anilist/http_500.txt")), "transient"),
+            (
+                status(
+                    401,
+                    include_str!("../../../tests/fixtures/anilist/http_401.txt"),
+                ),
+                "auth",
+            ),
+            (
+                status(
+                    429,
+                    include_str!("../../../tests/fixtures/anilist/http_429.txt"),
+                ),
+                "rate",
+            ),
+            (
+                status(
+                    500,
+                    include_str!("../../../tests/fixtures/anilist/http_500.txt"),
+                ),
+                "transient",
+            ),
             (status(404, "nope"), "http404"),
         ];
         for (raw, kind) in cases {
@@ -401,7 +466,8 @@ mod tests {
             secrets.clone(),
             bus,
         ));
-        base.save_oauth("9", "t", &json!({"access_token": "t"})).unwrap();
+        base.save_oauth("9", "t", &json!({"access_token": "t"}))
+            .unwrap();
         events.recv().await.unwrap();
         let state = AuthState::LoggedIn {
             token: AccessToken::new("t"),
@@ -409,7 +475,11 @@ mod tests {
             expires_at: i64::MAX,
             score_format: crate::tracker::anilist::score::ScoreFormat::Point10,
         };
-        let api = Api::new(FakeTransport::new(vec![status(401, "{}")]), base.clone(), state);
+        let api = Api::new(
+            FakeTransport::new(vec![status(401, "{}")]),
+            base.clone(),
+            state,
+        );
         let r: Result<Value, _> = api.execute("q", None::<()>).await;
         assert!(matches!(r, Err(AniListError::AuthExpired)));
         assert!(base.auth_expired());
@@ -438,7 +508,9 @@ mod tests {
     #[tokio::test]
     async fn t_28a_034_mal_id_is_read_without_a_token() -> TestResult {
         let fake = crate::tracker::anilist::testkit::FakeTransport::new(vec![
-            crate::tracker::anilist::testkit::ok(include_str!("../../../tests/fixtures/anilist/media_mal_16498.json")),
+            crate::tracker::anilist::testkit::ok(include_str!(
+                "../../../tests/fixtures/anilist/media_mal_16498.json"
+            )),
         ]);
         assert_eq!(anilist_to_mal_id(fake.as_ref(), 9253).await, Some(16498));
         assert_eq!(fake.bearers(), vec![None]);
@@ -449,7 +521,9 @@ mod tests {
     #[tokio::test]
     async fn t_28a_034_null_mal_id_and_failures_give_none() {
         let null = crate::tracker::anilist::testkit::FakeTransport::new(vec![
-            crate::tracker::anilist::testkit::ok(include_str!("../../../tests/fixtures/anilist/media_mal_null.json")),
+            crate::tracker::anilist::testkit::ok(include_str!(
+                "../../../tests/fixtures/anilist/media_mal_null.json"
+            )),
         ]);
         assert_eq!(anilist_to_mal_id(null.as_ref(), 1).await, None);
         let failing = crate::tracker::anilist::testkit::FakeTransport::new(vec![

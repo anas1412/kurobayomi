@@ -675,7 +675,7 @@ mod tests {
 
     /// T74: every key of data doc section 4 with its default.
     #[test]
-    fn all_defaults_match_source() {
+    fn t74_all_defaults_match_source() {
         use PrefDefault::*;
         let table: &[(&str, PrefDefault)] = &[
             ("mpv_scripts", Bool(false)),
@@ -786,7 +786,7 @@ mod tests {
 
     /// T75
     #[test]
-    fn speed_presets_count_12() {
+    fn t75_speed_presets_count_12() {
         let Some(PrefKey {
             default: PrefDefault::StringSet(set),
             ..
@@ -801,7 +801,7 @@ mod tests {
 
     /// T76
     #[test]
-    fn audio_channels_values() {
+    fn t76_audio_channels_values() {
         let pairs = [
             (AudioChannels::Auto, "Auto", ("audio-channels", "auto-safe")),
             (
@@ -828,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn subtitle_justification_values() {
+    fn t76_subtitle_justification_values() {
         let pairs = [
             (SubtitleJustification::Left, "Left", "left"),
             (SubtitleJustification::Center, "Center", "center"),
@@ -842,7 +842,7 @@ mod tests {
     }
 
     #[test]
-    fn border_style_values() {
+    fn t76_border_style_values() {
         let pairs = [
             (
                 SubtitlesBorderStyle::OutlineAndShadow,

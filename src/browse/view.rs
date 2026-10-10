@@ -8,7 +8,7 @@ use kuro_i18n::tr;
 use std::rc::Rc;
 
 use super::grid::{CELL_MARGIN_PX, LIST_COVER_PX, badge_visible, cell_alpha};
-use super::icons::{ICON_HEIGHT_PX, SourceIcon, load_icon, placeholder_rgba};
+use super::icons::{ICON_HEIGHT_PX, IconRef, SourceIcon, fallback_glyph, fetch_icon, http_get, icon_cache_root, icon_ref, load_icon, placeholder_rgba};
 use super::listing::ListItem;
 use super::primitives::{EmptyAction, SPINNER_PADDING_PX, SPINNER_SIZE_PX, ToastAction, ToastDuration, ToastSpec};
 
@@ -76,8 +76,15 @@ pub fn toast_timeout_ms(spec: &ToastSpec) -> Option<u32> {
 
 /// The icon of a row, 40 px square. A built-in glyph is tinted with the error colour for a stub or an untrusted
 /// extension. The file of an installed extension shows the `PLACEHOLDER_ARGB` fill while it is read and decoded on a
-/// blocking thread, then the picture; a file that cannot be read leaves the default glyph (T-41a-004).
+/// blocking thread, then the picture; a file that cannot be read leaves the default glyph (T-41a-004). The icon of an
+/// available extension is a url: the same placeholder shows while it is fetched through the image cache, and a failed
+/// fetch leaves the error glyph (T-40a-027).
 pub fn icon_image(icon: SourceIcon, file: Option<&str>) -> Image {
+    icon_image_sized(icon, file, ICON_HEIGHT_PX)
+}
+
+/// `icon_image` at `px` square: 40 in a row, 112 on the details page.
+pub fn icon_image_sized(icon: SourceIcon, file: Option<&str>, px: i32) -> Image {
     let image = match (icon.icon_name(), file) {
         (Some(name), _) => Image::from_icon_name(name),
         (None, None) => Image::from_icon_name(SourceIcon::Default.icon_name().unwrap_or("image-missing")),
@@ -85,19 +92,32 @@ pub fn icon_image(icon: SourceIcon, file: Option<&str>) -> Image {
             let image = Image::new();
             let [r, g, b, a] = placeholder_rgba();
             image.set_paintable(Some(&texture_of(1, 1, &[r, g, b, a])));
-            let (weak, path) = (image.downgrade(), std::path::PathBuf::from(file));
+            let (weak, source) = (image.downgrade(), file.to_owned());
             gtk::glib::spawn_future_local(async move {
-                let decoded = gtk::gio::spawn_blocking(move || load_icon(&path)).await.ok().flatten();
+                let url = matches!(icon_ref(&source), IconRef::Url(_));
+                let decoded = gtk::gio::spawn_blocking(move || match icon_ref(&source) {
+                    IconRef::Url(url) => fetch_icon(icon_cache_root().as_deref(), url, http_get),
+                    IconRef::File(file) => load_icon(std::path::Path::new(file)),
+                })
+                .await
+                .ok()
+                .flatten();
                 let Some(image) = weak.upgrade() else { return };
                 match decoded {
                     Some(icon) => image.set_paintable(Some(&texture_of(icon.width, icon.height, &icon.rgba))),
-                    None => image.set_icon_name(SourceIcon::Default.icon_name()),
+                    None => {
+                        let (glyph, error) = fallback_glyph(url);
+                        image.set_icon_name(Some(glyph));
+                        if error {
+                            image.add_css_class("error");
+                        }
+                    }
                 }
             });
             image
         }
     };
-    image.set_pixel_size(ICON_HEIGHT_PX);
+    image.set_pixel_size(px);
     if icon.is_error() {
         image.add_css_class("error");
     }
@@ -216,10 +236,10 @@ fn in_library_badge() -> Image {
     badge
 }
 
-fn title_label(text: &str) -> Label {
+fn title_label(text: &str, lines: i32) -> Label {
     let label = Label::new(Some(text));
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    label.set_lines(2);
+    label.set_lines(lines);
     label.set_wrap(true);
     label.set_max_width_chars(14);
     label.set_xalign(0.0);
@@ -230,6 +250,18 @@ fn title_label(text: &str) -> Label {
 /// The cell carries half the gap on every side; the container (see `listing_view`) carries the rest of the padding. The
 /// cover is `cover_width` px wide and 2:3.
 pub fn grid_cell(item: Option<&ListItem>, mode: LibraryDisplayMode, load: &CoverLoader, guard: &CoverGuard, cover_width: i32) -> GBox {
+    grid_cell_lines(item, mode, load, guard, cover_width, 2)
+}
+
+/// `grid_cell` with `title_lines` lines of title: the listing shows two, a global-search card three (T-40a-011).
+pub fn grid_cell_lines(
+    item: Option<&ListItem>,
+    mode: LibraryDisplayMode,
+    load: &CoverLoader,
+    guard: &CoverGuard,
+    cover_width: i32,
+    title_lines: i32,
+) -> GBox {
     let cell = GBox::new(O::Vertical, 4);
     for margin in [GBox::set_margin_start, GBox::set_margin_end, GBox::set_margin_top, GBox::set_margin_bottom] {
         margin(&cell, CELL_MARGIN_PX);
@@ -242,7 +274,7 @@ pub fn grid_cell(item: Option<&ListItem>, mode: LibraryDisplayMode, load: &Cover
     }
     match mode {
         LibraryDisplayMode::CompactGrid => {
-            let title = title_label(&item.title);
+            let title = title_label(&item.title, title_lines);
             title.add_css_class("osd");
             title.set_valign(Align::End);
             stage.add_overlay(&title);
@@ -250,7 +282,7 @@ pub fn grid_cell(item: Option<&ListItem>, mode: LibraryDisplayMode, load: &Cover
         }
         LibraryDisplayMode::ComfortableGrid | LibraryDisplayMode::List => {
             cell.append(&stage);
-            cell.append(&title_label(&item.title));
+            cell.append(&title_label(&item.title, title_lines));
         }
         LibraryDisplayMode::CoverOnlyGrid => cell.append(&stage),
     }
@@ -277,8 +309,8 @@ pub fn list_cell(item: Option<&ListItem>, load: &CoverLoader, guard: &CoverGuard
     row
 }
 
-/// The long press and its desktop alias, the secondary click, without a primary click. The cells of the listing
-/// activate through the view itself, so only these two gestures are added to them.
+/// The long press and its desktop aliases, the secondary click and the Menu key or Shift+F10, without a primary click.
+/// The cells of the listing activate through the view itself, so no primary click is added to them.
 pub fn attach_long_press(widget: &impl IsA<gtk::Widget>, on_long: impl Fn() + 'static) {
     let on_long: Rc<dyn Fn()> = Rc::new(on_long);
     let long = gtk::GestureLongPress::new();
@@ -291,11 +323,15 @@ pub fn attach_long_press(widget: &impl IsA<gtk::Widget>, on_long: impl Fn() + 's
     });
     widget.add_controller(long);
     let secondary = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build();
-    secondary.connect_pressed(move |gesture, _, _, _| {
-        gesture.set_state(gtk::EventSequenceState::Claimed);
-        on_long();
+    secondary.connect_pressed({
+        let on_long = Rc::clone(&on_long);
+        move |gesture, _, _, _| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            on_long();
+        }
     });
     widget.add_controller(secondary);
+    attach_menu_key(widget, on_long);
 }
 
 /// Primary click and long press are two gestures with two callbacks. A secondary click is the desktop alias of a long
@@ -327,13 +363,17 @@ pub fn attach_row_gestures(widget: &impl IsA<gtk::Widget>, on_primary: impl Fn()
     });
     widget.add_controller(secondary);
 
-    // the keyboard's way to a context menu: the Menu key, or Shift+F10
+    attach_menu_key(widget, on_long);
+}
+
+/// The keyboard's way to a context menu: the Menu key, or Shift+F10. The widget takes focus so the keys reach it.
+pub fn attach_menu_key(widget: &impl IsA<gtk::Widget>, on_menu: Rc<dyn Fn()>) {
     widget.set_focusable(true);
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed(move |_, key, _, state| {
         let menu = key == gtk::gdk::Key::Menu || (key == gtk::gdk::Key::F10 && state.contains(gtk::gdk::ModifierType::SHIFT_MASK));
         if menu {
-            on_long();
+            on_menu();
         }
         if menu { gtk::glib::Propagation::Stop } else { gtk::glib::Propagation::Proceed }
     });
@@ -426,6 +466,20 @@ pub(crate) mod tests {
         assert_eq!(longs.get(), 4, "the long press, the right click and both menu keys reach the long-press callback");
     }
 
+    fn a_listing_cell_opens_the_menu_from_the_keyboard_too() {
+        let cell = GBox::new(O::Horizontal, 0);
+        let opened = Rc::new(Cell::new(0));
+        let seen = Rc::clone(&opened);
+        attach_long_press(&cell, move || seen.set(seen.get() + 1));
+        assert!(cell.is_focusable(), "the cell takes focus so the keys reach it");
+        let list = cell.observe_controllers();
+        let keys = (0..list.n_items()).filter_map(|i| list.item(i)).find_map(|c| c.downcast::<gtk::EventControllerKey>().ok()).expect("key controller");
+        let shift = gtk::gdk::ModifierType::SHIFT_MASK;
+        assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Menu, &0_u32, &gtk::gdk::ModifierType::empty()]));
+        assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::F10, &0_u32, &shift]));
+        assert_eq!(opened.get(), 2);
+    }
+
     /// Run by `smoke::browse_widgets_smoke`: GTK binds to the first thread that starts it, so every widget check
     /// of this lane runs in that one test.
     pub(crate) fn smoke() {
@@ -435,5 +489,6 @@ pub(crate) mod tests {
         cover_only_has_no_title_and_comfortable_has_one_under_the_cover();
         the_cover_loader_is_called_with_the_item_cover();
         primary_click_and_long_press_call_different_callbacks();
+        a_listing_cell_opens_the_menu_from_the_keyboard_too();
     }
 }

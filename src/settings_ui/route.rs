@@ -16,7 +16,7 @@ use crate::screens::{built, Built};
 use crate::settings_ui::category::Category;
 use crate::settings_ui::merge::merge;
 use crate::settings_ui::reader::rules::ReaderState;
-use crate::settings_ui::{appearance, browse, library, player, reader, rows, search, storage, view};
+use crate::settings_ui::{advanced, appearance, browse, cache, library, player, reader, rows, search, storage, usage, view};
 
 /// The settings ids this module builds.
 pub fn handles(id: &str) -> bool {
@@ -33,6 +33,8 @@ pub fn handles(id: &str) -> bool {
             | "settings_browse"
             | "settings_search"
             | "settings_data_storage"
+            | "settings_tracking"
+            | "settings_advanced"
     )
 }
 
@@ -42,7 +44,8 @@ pub fn prefs() -> Prefs {
     Prefs::with_store(crate::data::app().base.store().clone(), Arc::new(kuro_prefs::memory::MemorySecrets::default()))
 }
 
-fn spec_tree(id: &str, store: &kuro_prefs::store::PrefStore) -> Vec<Preference> {
+/// The spec tree of a screen, built with the registry (no typed rows yet).
+pub fn spec_tree(id: &str, store: &kuro_prefs::store::PrefStore) -> Vec<Preference> {
     let registry = crate::ui::with_spec(Registry::new);
     let navigate: Rc<dyn Fn(&str)> = Rc::new(|target| crate::ui::open(target));
     registry.build(id, store, &navigate).unwrap_or_default()
@@ -59,26 +62,34 @@ fn named(widgets: Vec<gtk::Widget>) -> Vec<gtk::Widget> {
     widgets
 }
 
-fn toolbar(id: &str) -> Vec<gtk::Widget> {
+/// The toolbar of a spec screen, every icon-only button named by its tooltip.
+pub fn toolbar(id: &str) -> Vec<gtk::Widget> {
     named(crate::ui::toolbar(&crate::ui::screen(id)))
 }
 
 /// Where the help action of Data and storage goes (`SettingsDataScreen.HELP_URL`).
 const STORAGE_HELP_URL: &str = "https://aniyomi.org/docs/faq/storage";
+/// Where the help action of Tracking goes.
+const TRACKING_HELP_URL: &str = "https://aniyomi.org/help/guides/tracking/";
 
-/// The toolbar of Data and storage; its help action (spec label `Tracking guide`) opens the storage FAQ.
-fn data_storage_toolbar() -> Vec<gtk::Widget> {
-    let widgets = toolbar("settings_data_storage");
+/// The toolbar of a screen whose help action (the spec's `Tracking guide` button) opens `url` in the browser.
+fn help_toolbar(id: &str, url: &'static str) -> Vec<gtk::Widget> {
+    let widgets = toolbar(id);
     if let Some(help) = widgets.iter().find(|w| w.tooltip_text().as_deref() == Some("Tracking guide")).and_then(|w| w.downcast_ref::<gtk::Button>()) {
-        help.connect_clicked(|_| {
-            gtk::UriLauncher::new(STORAGE_HELP_URL).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
+        help.connect_clicked(move |_| {
+            gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
                 if let Err(err) = result {
-                    tracing::warn!(%err, "could not open the storage help page");
+                    tracing::warn!(%err, "could not open the help page");
                 }
             });
         });
     }
     widgets
+}
+
+/// The toolbar of Data and storage; its help action opens the storage FAQ.
+fn data_storage_toolbar() -> Vec<gtk::Widget> {
+    help_toolbar("settings_data_storage", STORAGE_HELP_URL)
 }
 
 /// The user categories of a kind (the Default category is not one of them), as the settings lists need them.
@@ -148,15 +159,45 @@ pub fn tree_with(id: &str, prefs: &Prefs, anime: &[Category], manga: &[Category]
         "settings_library" => merge(spec, library::page_rows(prefs, anime, manga, open)),
         "settings_reader" => merge(spec, reader::page::rows_all(prefs)),
         "settings_browse" => merge(spec, browse::page_rows(prefs)),
+        "settings_advanced" => merge(spec, advanced::page_rows(prefs, Rc::new(|| {}))),
         "settings_data_storage" => merge(spec, data_storage_rows(prefs, Rc::new(|| {}))),
         _ => spec,
     }
 }
 
-/// The typed rows of Data and storage: the storage location row and its info text, with `changed` run after a new
-/// folder is stored.
+/// The typed rows of Data and storage: the storage location row and its info text (loose), the Restore backup row and
+/// the storage usage group. `changed` runs after a new folder is stored or the cache is cleared.
 fn data_storage_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
-    storage::rows(prefs, changed).into_iter().map(rows::item).collect()
+    let mut tree: Vec<Preference> = storage::rows(prefs, Rc::clone(&changed)).into_iter().map(rows::item).collect();
+    tree.push(rows::group("Backup and restore", vec![restore_backup_row()]));
+    tree.push(rows::group("Storage usage", vec![cache::clear_row(Rc::clone(&changed)), rows::switch("Clear episode/chapter cache on app launch", &prefs.library.auto_clear_item_cache, true)]));
+    tree
+}
+
+/// The Restore backup row: a file chooser (`Select backup file`), then the Restore backup page on that file. A restore
+/// that is already running keeps the chooser shut.
+fn restore_backup_row() -> PreferenceItem {
+    let mut row = rows::text("Restore backup", None, true);
+    if let PreferenceItem::Text { on_click, .. } = &mut row {
+        *on_click = Some(Rc::new(choose_backup_file));
+    }
+    row
+}
+
+fn choose_backup_file() {
+    if crate::backup_host::restore_running() {
+        crate::toast::notify("Restore is already in progress");
+        return;
+    }
+    let dialog = gtk::FileDialog::new();
+    dialog.set_title("Select backup file");
+    dialog.open(Some(&crate::ui::window()), None::<&gtk::gio::Cancellable>, |result| match result.ok().and_then(|file| file.path()) {
+        Some(path) => {
+            crate::pref_model::backup_pages::set_restore_file(path);
+            crate::ui::open("settings_restore_backup");
+        }
+        None => crate::toast::notify("No file selected"),
+    });
 }
 
 /// Puts the spec page of Data and storage, the live storage rows, the banner for a gone base folder and the real
@@ -177,7 +218,7 @@ fn fill_data_storage(holder: &gtk::Box) {
         tree.insert(0, rows::item(banner));
     }
     let body = page::body(&tree);
-    crate::pref_model::storage_rows::replace_usage_row(&body.widget, &crate::pref_model::storage_rows::rows());
+    usage::replace_usage_row(&body.widget, &usage::live_rows());
     holder.append(&body.widget);
 }
 
@@ -186,6 +227,13 @@ fn data_storage_page() -> Option<Built> {
     holder.set_vexpand(true);
     fill_data_storage(&holder);
     built(holder, data_storage_toolbar())
+}
+
+/// Tracking settings: the spec page, its help action opening the tracking guide.
+fn tracking_page() -> Option<Built> {
+    let prefs = prefs();
+    let tree = spec_tree("settings_tracking", prefs.store());
+    built(page::body(&tree).widget, help_toolbar("settings_tracking", TRACKING_HELP_URL))
 }
 
 fn gestures_page() -> Option<Built> {
@@ -214,6 +262,8 @@ pub fn body(id: &str) -> Option<Built> {
         "settings_browse" => browse_page(),
         "settings_search" => search::page(),
         "settings_data_storage" => data_storage_page(),
+        "settings_advanced" => advanced::page(),
+        "settings_tracking" => tracking_page(),
         _ => None,
     }
 }
@@ -236,13 +286,15 @@ mod tests {
             "settings_browse",
             "settings_search",
             "settings_data_storage",
+            "settings_advanced",
+            "settings_tracking",
         ];
         crate::ui::with_spec(|spec| {
             for id in ids {
                 assert!(handles(id) && spec.screen(id).is_some(), "{id}");
             }
         });
-        for other in ["settings", "settings_player_internal", "library", "settings_about"] {
+        for other in ["settings", "settings_player_internal", "library", "settings_about", "settings_downloads"] {
             assert!(!handles(other), "{other}");
         }
     }

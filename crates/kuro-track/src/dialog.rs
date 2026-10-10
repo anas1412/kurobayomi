@@ -68,7 +68,8 @@ impl LoginForm {
     }
 }
 
-/// Logs the tracker in. On failure the tracker is logged out, which clears the stored credentials (source rule).
+/// Logs the tracker in. A failure leaves any session stored before the attempt untouched (T-30a-008). Aniyomi
+/// logs out on failure, which wipes a valid session; that defect is not ported.
 pub async fn run_login(
     tracker: &dyn Tracker,
     username: &str,
@@ -76,10 +77,7 @@ pub async fn run_login(
 ) -> Result<MsgKey, MsgKey> {
     match tracker.login(username, password).await {
         Ok(()) => Ok(MsgKey::LoginSuccess),
-        Err(e) => {
-            let _ = tracker.logout();
-            Err(failure_message(&e))
-        }
+        Err(e) => Err(failure_message(&e)),
     }
 }
 
@@ -175,7 +173,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tr_27_045_failure_marks_the_form_keeps_text_and_logs_out() {
+    async fn tr_27_045_failure_marks_the_form_keeps_text_and_the_prior_session() {
         let t = kitsu();
         t.save_credentials("u", "old").unwrap();
         *t.fail.lock().unwrap() = Some("Wrong password".into());
@@ -192,7 +190,11 @@ mod tests {
             (form.username.as_str(), form.password.as_str()),
             ("u", "bad")
         );
-        assert!(!t.is_logged_in(), "the failed login clears the credentials");
+        assert!(t.is_logged_in(), "the failed login keeps the prior session");
+        assert_eq!(
+            (t.username().as_str(), t.password().as_str()),
+            ("u", "old")
+        );
     }
 
     #[tokio::test]
@@ -227,7 +229,10 @@ mod tests {
 
     #[test]
     fn t_28a_048_login_success_toast_names_anilist_and_others_keep_the_generic_text() {
-        assert_eq!(login_success_message(TrackerId::ANILIST, "AniList"), MsgKey::AniListLoggedIn);
+        assert_eq!(
+            login_success_message(TrackerId::ANILIST, "AniList"),
+            MsgKey::AniListLoggedIn
+        );
         assert_eq!(
             login_success_message(TrackerId::KITSU, "Kitsu"),
             MsgKey::TrackerLoggedIn("Kitsu".into())

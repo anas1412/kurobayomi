@@ -1,6 +1,7 @@
 //! Updates page behaviour (T-42a-034, T-42a-038): what Escape and the cover do in selection mode, which controls stay
 //! enabled, what a finished read-state write leaves behind, and the page load state with its error row and retry.
 
+use crate::updates::copy;
 use crate::updates::list::PageState;
 use crate::updates::selection::{Selectable, Selection};
 
@@ -63,6 +64,21 @@ impl<T> UpdatesLoad<T> {
             *self = UpdatesLoad::Loading;
         }
     }
+
+    /// Applies a failed query (T-42b-003, EC-42-U-03). A feed already on screen stays and the subscription lives on; the
+    /// returned text is the toast. With nothing on screen the error row with a retry takes the page.
+    pub fn apply_failure(&mut self, error: &str) -> Option<String> {
+        if matches!(self, UpdatesLoad::Loaded(_)) {
+            return Some(copy::INTERNAL_ERROR.to_owned());
+        }
+        *self = UpdatesLoad::Failed(error.to_owned());
+        None
+    }
+}
+
+/// The footer under a feed that hit the query limit (EC-42-U-02): the older rows are not shown.
+pub fn limit_footer(rows: usize) -> Option<&'static str> {
+    (rows == kuro_domain::UPDATES_LIMIT as usize).then_some(copy::SHOWING_LATEST_500)
 }
 
 #[cfg(test)]
@@ -116,5 +132,25 @@ mod tests {
         assert_eq!(load, UpdatesLoad::Loading);
         load = UpdatesLoad::Loaded(Vec::new());
         assert_eq!(load.page(), PageState::Empty("No recent updates".to_owned()));
+    }
+
+    #[test]
+    fn updates_failure_keeps_a_feed_on_screen_and_toasts() {
+        let mut load = UpdatesLoad::Loaded(vec![1, 2]);
+        assert_eq!(load.apply_failure("db locked"), Some(copy::INTERNAL_ERROR.to_owned()));
+        assert_eq!(load, UpdatesLoad::Loaded(vec![1, 2]));
+    }
+
+    #[test]
+    fn updates_failure_before_the_first_load_shows_the_error_row() {
+        let mut load: UpdatesLoad<i64> = UpdatesLoad::Loading;
+        assert_eq!(load.apply_failure("db locked"), None);
+        assert_eq!(load.page(), PageState::Error("db locked".to_owned()));
+    }
+
+    #[test]
+    fn updates_limit_footer_only_at_five_hundred() {
+        assert_eq!(limit_footer(500), Some("Showing latest 500"));
+        assert_eq!(limit_footer(499), None);
     }
 }

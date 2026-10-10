@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# On by default so the app loads each verified component through the WASM host (T-20a-001). It links wasmtime through
+# kuro-source-wasm; build with `--no-default-features` to leave it out.
+default = ["wasm"]
+wasm = ["dep:kuro-source-wasm"]
+
 [dependencies]
 async-channel = { workspace = true }
 base64 = { workspace = true }
@@ -15,6 +21,7 @@ kuro-core = { path = "../kuro-core" }
 kuro-net = { workspace = true }
 kuro-platform = { path = "../kuro-platform" }
 kuro-prefs = { path = "../kuro-prefs" }
+kuro-source-wasm = { path = "../kuro-source-wasm", optional = true }
 prost = { version = "0.14.4", default-features = false, features = ["derive"] }
 reqwest = { workspace = true }
 serde = { workspace = true }

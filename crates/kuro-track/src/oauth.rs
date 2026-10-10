@@ -22,6 +22,36 @@ const SHIKIMORI_CLIENT_ID: &str = "aOAYRqOLwxpA8skpcQIXetNy4cw2rn2fRzScawlcQ5U";
 const BANGUMI_CLIENT_ID: &str = "bgm293165b66d7e58156";
 const SIMKL_CLIENT_ID: &str = "aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e";
 
+/// The client secrets of the trackers that exchange a code with one (T-27b-022). They come from configuration, never
+/// from the source. A missing or empty secret turns that tracker's browser login off.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClientSecrets {
+    pub shikimori: Option<String>,
+    pub bangumi: Option<String>,
+    pub simkl: Option<String>,
+}
+
+impl ClientSecrets {
+    /// The secret of `tracker`. `None` when it is missing, empty, or the tracker uses none.
+    pub fn get(&self, tracker: TrackerId) -> Option<&str> {
+        let secret = match tracker {
+            TrackerId::SHIKIMORI => &self.shikimori,
+            TrackerId::BANGUMI => &self.bangumi,
+            TrackerId::SIMKL => &self.simkl,
+            _ => return None,
+        };
+        secret.as_deref().filter(|s| !s.trim().is_empty())
+    }
+
+    /// True when `tracker` can start a browser login: it needs no secret, or its secret is set.
+    pub fn allows_login(&self, tracker: TrackerId) -> bool {
+        !matches!(
+            tracker,
+            TrackerId::SHIKIMORI | TrackerId::BANGUMI | TrackerId::SIMKL
+        ) || self.get(tracker).is_some()
+    }
+}
+
 /// `n` random bytes as URL-safe base64 without padding.
 fn random_token(n: usize) -> String {
     let mut bytes = vec![0u8; n];
@@ -146,6 +176,22 @@ impl PendingLogins {
         Some(url)
     }
 
+    /// [`PendingLogins::begin`] for a login the user starts. A tracker whose client secret is missing gets the
+    /// "<name> is not configured" toast and no authorise URL, and no attempt is opened (T-27b-022).
+    pub fn begin_configured(
+        &mut self,
+        tracker: TrackerId,
+        name: &str,
+        secrets: &ClientSecrets,
+        now_ms: i64,
+    ) -> Result<String, MsgKey> {
+        if !secrets.allows_login(tracker) {
+            return Err(MsgKey::TrackerNotConfigured(name.to_owned()));
+        }
+        self.begin(tracker, now_ms)
+            .ok_or(MsgKey::UnrecognizedLoginLink)
+    }
+
     /// The live attempt of `tracker`. An attempt past its TTL is dropped and reported as `Expired`.
     fn live(&mut self, tracker: TrackerId, now_ms: i64) -> Result<&PendingLogin, Route> {
         let expired = match self.0.get(&tracker) {
@@ -163,7 +209,8 @@ impl PendingLogins {
     pub fn route(&mut self, uri: &str, now_ms: i64) -> Route {
         match parse_callback(uri) {
             Redirect::Ignored => Route::Ignored,
-            Redirect::Unexpected => Route::Unrecognized,
+            Redirect::Unexpected | Redirect::Malformed => Route::Unrecognized,
+            Redirect::MyAnimeListLoopback => Route::Ignored,
             Redirect::Cancelled(tracker) => match self.live(tracker, now_ms) {
                 Ok(_) => {
                     self.0.remove(&tracker);
@@ -227,11 +274,12 @@ pub fn handle_redirect(
         }
     }
     let name = match &route {
-        Route::Cancelled(t) | Route::NotAllowed(t) | Route::Expired(t) | Route::StateMismatch(t) => {
-            trackers
-                .get(*t)
-                .map_or_else(|| t.0.to_string(), |tr| tr.name().to_owned())
-        }
+        Route::Cancelled(t)
+        | Route::NotAllowed(t)
+        | Route::Expired(t)
+        | Route::StateMismatch(t) => trackers
+            .get(*t)
+            .map_or_else(|| t.0.to_string(), |tr| tr.name().to_owned()),
         _ => String::new(),
     };
     if let Some(message) = route.message(&name) {
@@ -250,6 +298,11 @@ pub enum Redirect {
     Ignored,
     /// `aniyomi://<unknown>-auth`: "Unrecognized login link".
     Unexpected,
+    /// A known host with an empty `code`, so the link is malformed: "Unrecognized login link" with no network call.
+    Malformed,
+    /// `myanimelist-auth`: MyAnimeList logs in through its loopback redirect (`mal::redirect`), so this scheme is not
+    /// routed here and nothing happens.
+    MyAnimeListLoopback,
     /// The user refused, or the redirect carried no code or token: "Login cancelled". Old credentials stay.
     Cancelled(TrackerId),
     /// An authorisation code (query) or an implicit token (fragment), with the echoed `state` if any.
@@ -289,6 +342,9 @@ pub fn parse_callback(uri: &str) -> Redirect {
     if !matches!(url.scheme(), "aniyomi" | "kurobayomi") {
         return Redirect::Ignored;
     }
+    if url.host_str() == Some("myanimelist-auth") {
+        return Redirect::MyAnimeListLoopback;
+    }
     let Some(tracker) = url.host_str().and_then(tracker_of) else {
         return Redirect::Unexpected;
     };
@@ -304,23 +360,60 @@ pub fn parse_callback(uri: &str) -> Redirect {
             None => Redirect::Cancelled(tracker),
         };
     }
-    let mut value = None;
-    let mut state = None;
-    for (k, v) in url::form_urlencoded::parse(url.query().unwrap_or("").as_bytes()) {
-        if k == "code" && !v.is_empty() {
-            value = Some(v.into_owned());
-        } else if k == "state" {
-            state = Some(v.into_owned());
-        }
-    }
-    match value {
-        Some(value) => Redirect::Credential {
+    // The first `code` counts. It is percent-decoded, and `+` stays `+` (E-52, E-54).
+    let query = url.query().unwrap_or("");
+    let code = query
+        .split('&')
+        .find_map(|segment| segment.strip_prefix("code="));
+    let state = query
+        .split('&')
+        .find_map(|segment| segment.strip_prefix("state="))
+        .map(percent_decode);
+    match code {
+        None => Redirect::Cancelled(tracker),
+        Some("") => Redirect::Malformed,
+        Some(raw) => Redirect::Credential {
             tracker,
-            value,
+            value: percent_decode(raw),
             state,
             expires_in: None,
         },
-        None => Redirect::Cancelled(tracker),
+    }
+}
+
+/// Decodes `%XX` escapes and leaves every other byte alone, so `+` stays `+`. Invalid UTF-8 is replaced.
+fn percent_decode(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
+            if let Some(byte) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Routes text the user pasted into the "Finish login by pasting the link" field (T-27b-029). The text goes through
+/// the same parser and `state` guard as a routed link. Empty text, or text that is not a login link, shows the
+/// "Unrecognized login link" toast.
+pub fn handle_pasted(
+    pending: &mut PendingLogins,
+    trackers: &crate::manager::TrackerManager,
+    text: &str,
+    now_ms: i64,
+) -> Handled {
+    let text = text.trim();
+    match handle_redirect(pending, trackers, text, now_ms) {
+        Handled::Ignored => Handled::Toast(MsgKey::UnrecognizedLoginLink),
+        other => other,
     }
 }
 
@@ -359,6 +452,55 @@ mod tests {
             panic!("an accepted redirect is exchanged");
         };
         assert_eq!((c.tracker, c.value.as_str()), (TrackerId::SIMKL, "abc"));
+    }
+
+    #[test]
+    fn t_27b_022_a_missing_client_secret_gives_a_toast_and_no_url() {
+        let mut pending = PendingLogins::default();
+        let none = ClientSecrets::default();
+        for (tracker, name) in [
+            (TrackerId::SHIKIMORI, "Shikimori"),
+            (TrackerId::BANGUMI, "Bangumi"),
+            (TrackerId::SIMKL, "Simkl"),
+        ] {
+            assert_eq!(
+                pending.begin_configured(tracker, name, &none, 0),
+                Err(MsgKey::TrackerNotConfigured(name.into()))
+            );
+            assert_eq!(
+                pending.route(&format!("aniyomi://{}-auth?code=x", name.to_lowercase()), 1),
+                Route::NotAllowed(tracker),
+                "no attempt was opened"
+            );
+        }
+        let blank = ClientSecrets {
+            simkl: Some("  ".into()),
+            ..ClientSecrets::default()
+        };
+        assert!(pending.begin_configured(TrackerId::SIMKL, "Simkl", &blank, 0).is_err());
+    }
+
+    #[test]
+    fn t_27b_022_a_set_secret_or_a_tracker_without_one_starts_the_login() {
+        let mut pending = PendingLogins::default();
+        let secrets = ClientSecrets {
+            simkl: Some("s".into()),
+            ..ClientSecrets::default()
+        };
+        assert!(
+            pending
+                .begin_configured(TrackerId::SIMKL, "Simkl", &secrets, 0)
+                .unwrap()
+                .starts_with("https://simkl.com/oauth/authorize")
+        );
+        assert!(
+            pending
+                .begin_configured(TrackerId::ANILIST, "AniList", &ClientSecrets::default(), 0)
+                .is_ok(),
+            "AniList uses no client secret"
+        );
+        assert_eq!(secrets.get(TrackerId::SIMKL), Some("s"));
+        assert_eq!(secrets.get(TrackerId::BANGUMI), None);
     }
 
     fn credential(tracker: TrackerId, value: &str, state: Option<&str>) -> Redirect {
@@ -442,7 +584,7 @@ mod tests {
         );
         assert_eq!(
             parse_callback("aniyomi://myanimelist-auth"),
-            Redirect::Unexpected,
+            Redirect::MyAnimeListLoopback,
             "MyAnimeList logs in through its loopback redirect, not this scheme"
         );
     }
@@ -457,6 +599,102 @@ mod tests {
             parse_callback("aniyomi://simkl-auth?code=a%20b"),
             credential(TrackerId::SIMKL, "a b", None)
         );
+    }
+
+    #[test]
+    fn t_27b_022_the_first_code_is_percent_decoded_and_plus_stays_plus() {
+        assert_eq!(
+            parse_callback("aniyomi://bangumi-auth?code=a+b%2Bc&code=later"),
+            credential(TrackerId::BANGUMI, "a+b+c", None)
+        );
+    }
+
+    #[test]
+    fn t_27b_022_a_missing_code_is_a_denial_and_an_empty_code_is_malformed() {
+        assert_eq!(
+            parse_callback("aniyomi://simkl-auth?error=access_denied"),
+            Redirect::Cancelled(TrackerId::SIMKL)
+        );
+        assert_eq!(
+            parse_callback("aniyomi://simkl-auth?code="),
+            Redirect::Malformed
+        );
+        let mut pending = PendingLogins::default();
+        pending.begin(TrackerId::SIMKL, 0).unwrap();
+        assert_eq!(
+            pending.route("aniyomi://simkl-auth?code=", 0),
+            Route::Unrecognized
+        );
+        assert_eq!(
+            pending.route("aniyomi://simkl-auth?error=x", 0),
+            Route::Cancelled(TrackerId::SIMKL),
+            "a denial keeps the stored login and consumes the attempt"
+        );
+    }
+
+    #[test]
+    fn t_27b_022_the_percent_decoder_leaves_bad_escapes_alone() {
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%zz%41"), "%zzA");
+        assert_eq!(percent_decode("%E3%81%82"), "あ");
+    }
+
+    /// The eleven registry ids, each backed by a fake manga tracker.
+    fn fake_registry() -> crate::manager::TrackerManager {
+        use crate::fakes::{FakeManga, MemSecrets, new_log};
+        use crate::tracker::Tracker;
+        let secrets = MemSecrets::new();
+        let log = new_log();
+        let ids = [
+            TrackerId::MYANIMELIST,
+            TrackerId::ANILIST,
+            TrackerId::KITSU,
+            TrackerId::SHIKIMORI,
+            TrackerId::BANGUMI,
+            TrackerId::KOMGA,
+            TrackerId::MANGAUPDATES,
+            TrackerId::KAVITA,
+            TrackerId::SUWAYOMI,
+            TrackerId::SIMKL,
+            TrackerId::JELLYFIN,
+        ];
+        let trackers: Vec<std::sync::Arc<dyn Tracker>> = ids
+            .iter()
+            .map(|id| {
+                std::sync::Arc::new(FakeManga::new(*id, "x", secrets.clone(), log.clone()))
+                    as std::sync::Arc<dyn Tracker>
+            })
+            .collect();
+        crate::manager::TrackerManager::new(trackers).unwrap()
+    }
+
+    #[tokio::test]
+    async fn t_27b_029_pasted_links_use_the_same_guard_and_toasts() {
+        let trackers = fake_registry();
+        let mut pending = PendingLogins::default();
+        assert_eq!(
+            handle_pasted(&mut pending, &trackers, "   ", 0),
+            Handled::Toast(MsgKey::UnrecognizedLoginLink)
+        );
+        assert_eq!(
+            handle_pasted(&mut pending, &trackers, "https://example.test/x", 0),
+            Handled::Toast(MsgKey::UnrecognizedLoginLink)
+        );
+        // No attempt is pending, so a pasted code is refused like a routed one.
+        assert_eq!(
+            handle_pasted(&mut pending, &trackers, "aniyomi://bangumi-auth?code=x", 0),
+            Handled::Toast(MsgKey::LoginExpired)
+        );
+        pending.begin(TrackerId::BANGUMI, 0).unwrap();
+        assert!(matches!(
+            handle_pasted(
+                &mut pending,
+                &trackers,
+                "aniyomi://bangumi-auth?code=xyz&state=wrong",
+                0
+            ),
+            Handled::Toast(MsgKey::TrackerLoginFailed(_))
+        ));
     }
 
     #[test]
@@ -576,7 +814,7 @@ mod tests {
         let mut pending = PendingLogins::default();
         assert_eq!(
             pending.route("aniyomi://myanimelist-auth?code=abc", 0),
-            Route::Unrecognized
+            Route::Ignored
         );
     }
 
@@ -638,7 +876,12 @@ mod tests {
         let h = crate::fakes::Harness::new();
         let mut pending = PendingLogins::default();
         assert_eq!(
-            handle_redirect(&mut pending, &h.ctx.trackers, "kurobayomi://simkl-auth?code=x", 0),
+            handle_redirect(
+                &mut pending,
+                &h.ctx.trackers,
+                "kurobayomi://simkl-auth?code=x",
+                0
+            ),
             Handled::Toast(MsgKey::LoginExpired),
             "routed like aniyomi://, with no attempt pending"
         );
@@ -650,7 +893,12 @@ mod tests {
         h.login(TrackerId::SIMKL);
         let mut pending = PendingLogins::default();
         assert_eq!(
-            handle_redirect(&mut pending, &h.ctx.trackers, "aniyomi://simkl-auth?code=x", 0),
+            handle_redirect(
+                &mut pending,
+                &h.ctx.trackers,
+                "aniyomi://simkl-auth?code=x",
+                0
+            ),
             Handled::Ignored
         );
     }

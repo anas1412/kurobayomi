@@ -1,0 +1,12 @@
+{
+  "enabled": [
+    "all",
+    "en"
+  ],
+  "available": [
+    "all",
+    "en",
+    "de",
+    "ja"
+  ]
+}

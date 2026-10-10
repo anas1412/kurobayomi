@@ -12,12 +12,17 @@ mod entry_model;
 mod ext_host;
 mod library;
 mod library_update;
+mod misc;
+mod local_flow;
+mod local_flow_anime;
 mod live;
 mod gio_notifier;
 mod incognito;
 mod locale;
 mod open_link;
 mod player;
+#[allow(dead_code)]
+mod player_view;
 mod player_scripts;
 mod reader;
 mod reporter;
@@ -39,6 +44,7 @@ mod window_size;
 mod updates;
 mod pref_model;
 mod browse;
+mod shell;
 
 use gtk::prelude::*;
 use kuro_platform::paths::Paths as _;
@@ -59,14 +65,17 @@ fn main() -> glib::ExitCode {
     if args.any(|a| a == "--crash-report") {
         return reporter::run(args.next().unwrap_or_default().into());
     }
+    // the command line is checked before GTK starts, so `--help` and a bad option work without a display; a second
+    // launch hands the same arguments to the running instance through GApplication
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let link = match kuro_platform::deep_link::open_from_args(&args) {
-        Ok(link) => link,
-        Err(e) => {
-            eprintln!("kurobayomi: {e}");
-            return glib::ExitCode::from(kuro_platform::deep_link::USAGE_EXIT_CODE as u8);
-        }
-    };
+    if shell::argv::wants_help(&args) {
+        print!("{}", shell::argv::USAGE);
+        return glib::ExitCode::SUCCESS;
+    }
+    if let Err(e) = shell::argv::parse_launch(&args) {
+        eprintln!("kurobayomi: {e}");
+        return glib::ExitCode::from(kuro_platform::deep_link::USAGE_EXIT_CODE as u8);
+    }
     let paths = kuro_platform::linux::LinuxPaths::system().expect("resolve app directories");
     // the hook goes in first so a panic during the rest of startup is reported too
     kuro_core::crash::install(paths.crash_dir());
@@ -80,35 +89,27 @@ fn main() -> glib::ExitCode {
     if let Err(e) = kuro_core::crash::prune(&paths.crash_dir(), kuro_core::crash::now_ms()) {
         eprintln!("kurobayomi: could not prune crash reports: {e}");
     }
-    // a second launch hands its command to the running instance and exits; dev variables skip this
-    let unique = kuro_platform::single_instance::is_unique(|v| std::env::var(v).is_ok());
-    let mut listener = None;
-    if unique {
-        let socket = kuro_platform::single_instance::socket_path(&paths.state_dir());
-        let command = link.as_ref().map(|l| l.to_arg()).unwrap_or_default();
-        let acquired = std::fs::create_dir_all(paths.state_dir()).and_then(|()| kuro_platform::single_instance::acquire(&socket, &command));
-        match acquired {
-            Ok(kuro_platform::single_instance::Acquired::Forwarded) => return glib::ExitCode::SUCCESS,
-            Ok(kuro_platform::single_instance::Acquired::Primary(l)) => listener = Some(l),
-            Err(e) => eprintln!("kurobayomi: single instance is off: {e}"),
-        }
-    }
     let rt = kuro_core::runtime::build().expect("tokio runtime");
+    // the one runtime, reachable from the shell for the whole run
+    let _shell = shell::Shell::install(rt.handle().clone(), &paths);
 
-    let app = gtk::Application::builder().application_id("io.github.blackbox.Kurobayomi").build();
-    // dev runs must not get handed off to an already-open window
-    if !unique {
-        app.set_flags(gtk::gio::ApplicationFlags::NON_UNIQUE);
-    }
-    let commands = listener.as_ref().map(|l| l.commands.clone());
-    app.connect_activate(move |app| build_ui(app, link.clone(), commands.clone()));
+    // a second launch is forwarded to the running instance by GApplication; dev variables run a window of their own
+    let unique = kuro_platform::single_instance::is_unique(|v| std::env::var(v).is_ok());
+    let app = gtk::Application::builder().application_id("io.github.blackbox.Kurobayomi").flags(shell::launch::app_flags(unique)).build();
+    shell::launch::connect(&app);
+    app.connect_activate(|app| {
+        // a later launch only raises the window; the first one builds it
+        if let Some(win) = app.windows().first() {
+            win.present();
+            return;
+        }
+        build_ui(app);
+    });
     // live queries of the entry screens are spawned on the runtime, so the GTK thread enters it while the app runs
     let code = {
         let _entered = rt.enter();
-        // the command line was read above; GApplication must not parse `--open` itself
-        app.run_with_args(&[std::env::args().next().unwrap_or_default()])
+        app.run()
     };
-    drop(listener);
     // detached history flushes get up to 2 s to finish before the runtime goes away
     let unfinished = kuro_domain::history::repo::join_pending_flushes(std::time::Duration::from_secs(2));
     if unfinished > 0 {
@@ -133,9 +134,9 @@ thread_local! {
 }
 
 /// Opens the data off the GTK thread (a splash shows if that takes over 300 ms), then builds and presents the window.
-fn build_ui(app: &gtk::Application, link: Option<kuro_platform::deep_link::DeepLink>, commands: Option<async_channel::Receiver<String>>) {
+fn build_ui(app: &gtk::Application) {
     if data::is_installed() {
-        build_window(app, link, commands);
+        build_window(app);
         return;
     }
     if OPENING.with(|o| o.replace(true)) {
@@ -150,7 +151,7 @@ fn build_ui(app: &gtk::Application, link: Option<kuro_platform::deep_link::DeepL
         move || startup::splash_window(&shown_app),
         move |opened, splash| {
             match opened.and_then(data::install) {
-                Ok(()) => build_window(&app, link, commands),
+                Ok(()) => build_window(&app),
                 Err(e) => {
                     eprintln!("kurobayomi: cannot open the library databases: {e}");
                     app.quit();
@@ -166,7 +167,7 @@ fn build_ui(app: &gtk::Application, link: Option<kuro_platform::deep_link::DeepL
     );
 }
 
-fn build_window(app: &gtk::Application, link: Option<kuro_platform::deep_link::DeepLink>, commands: Option<async_channel::Receiver<String>>) {
+fn build_window(app: &gtk::Application) {
     theme::startup();
     let win = gtk::ApplicationWindow::builder()
         .application(app)
@@ -187,7 +188,13 @@ fn build_window(app: &gtk::Application, link: Option<kuro_platform::deep_link::D
     let tabs = tabs();
     nav.add_child(&tabs);
     let sidebar = sidebar(&tabs);
-    settings_ui::appearance::open_start_tab(&tabs, &settings_ui::route::prefs());
+    let prefs = settings_ui::route::prefs();
+    settings_ui::appearance::open_start_tab(&tabs, &prefs);
+    settings_ui::appearance::apply_theme_mode(prefs.ui.theme_mode.get());
+    // one selection for every layout: the sidebar and the bottom bar show the same tab (T-36a-004)
+    let host = shell::Shell::get().expect("the shell is installed in main");
+    let home = host.home_tabs(prefs.ui.start_screen.get(), prefs.ui.nav_style.get());
+    shell::tabs::bind(&tabs, &home);
     let sep = gtk::Separator::new(O::Vertical);
     let row = GBox::new(O::Horizontal, 0);
     row.append(&sidebar);
@@ -203,39 +210,52 @@ fn build_window(app: &gtk::Application, link: Option<kuro_platform::deep_link::D
     overlay.set_child(Some(&outer));
     let _toaster = toast::attach(&overlay);
     win.set_child(Some(&overlay));
-    // banner above everything; the stored incognito value is applied here (banner and notification)
+    // the app-state banners above everything: indexing, downloaded only, incognito (T-36a-018). The incognito module
+    // keeps the action, the notification and the More switch; its own banner is not placed.
     let base = &data::app().base;
-    outer.prepend(&incognito::attach(app, base.incognito_mode.clone(), base.downloaded_only.clone()));
+    let _ = incognito::attach(app, base.incognito_mode.clone(), base.downloaded_only.clone());
+    let banners = std::rc::Rc::new(shell::banners::Banners::new());
+    outer.prepend(&banners.widget);
+    {
+        let (index, downloaded_only, incognito) = (host.downloads().clone(), base.downloaded_only.clone(), base.incognito_mode.clone());
+        shell::banners::watch(banners, move || shell::banners::BannerState {
+            indexing: index.checking_indicator_visible(),
+            downloaded_only: downloaded_only.get(),
+            incognito: incognito.get(),
+        });
+    }
     // the extension host: package scans, icons, load problems and the first-run languages
     ext_host::start(base.store(), data::app().anime_db.clone());
+    // the library update runner behind the refresh button and the automatic schedule
+    misc::start();
     // the restore banner, the Create and Restore hosts, and the close dialog of a running restore
     outer.prepend(&backup_host::attach(app, &win));
     open_link::register(app, &win);
-    if let Some(commands) = commands {
-        let (app, win) = (app.clone(), win.clone());
-        glib::spawn_future_local(async move {
-            while let Ok(command) = commands.recv().await {
-                open_link::dispatch(&app, &win, &command);
-            }
-        });
-    }
 
     // reader/player are immersive: no sidebar or tab bar while they're on screen
     let refresh = {
-        let (win, nav) = (win.clone(), nav.clone());
+        let (win, nav, tabs, home, mode) = (win.clone(), nav.clone(), tabs.clone(), home.clone(), prefs.ui.tablet_ui_mode.clone());
         move || {
-            let immersive = nav.visible_child().is_some_and(|c| matches!(c.widget_name().as_str(), "screen:reader" | "screen:player"));
+            let immersive = nav.visible_child().is_some_and(|c| matches!(c.widget_name().as_str(), "screen:reader" | "screen:player" | shell::onboarding::PAGE_NAME));
             let (width, height) = window_size::size_of(&win);
-            let wide = window_size::is_tablet_ui(width, height);
+            let chrome = shell::layout::chrome_for(mode.get(), width, height, win.is_maximized());
+            // the bottom bar belongs to the tab pages, and it hides on the tab that moved into More
+            let on_tabs = nav.visible_child().as_ref() == Some(tabs.upcast_ref());
+            let bar_allowed = on_tabs && shell::tabs::bar_visible(home.borrow().current(), home.borrow().more_tab(), true);
+            let shown = shell::layout::visibility(chrome, immersive, bar_allowed);
             // the sidebar also hides while library entries are selected (B-1.4)
             let selecting = library::mount::selecting();
-            sidebar.set_visible(wide && !immersive && !selecting);
-            sep.set_visible(wide && !immersive && !selecting);
-            bottom.set_visible(!wide && !immersive && nav.visible_child().as_ref() == Some(tabs.upcast_ref()));
+            sidebar.set_visible(shown.sidebar && !selecting);
+            sep.set_visible(shown.sidebar && !selecting);
+            bottom.set_visible(shown.bottom_bar);
         }
     };
     let r = refresh.clone();
     nav.connect_visible_child_notify(move |_| r());
+    let r = refresh.clone();
+    tabs.connect_visible_child_name_notify(move |_| r());
+    let r = refresh.clone();
+    pref_model::bind::follow(&prefs.ui.tablet_ui_mode, || true, move |_| r());
     let r = refresh.clone();
     win.connect_default_width_notify(move |_| r());
     let r = refresh.clone();
@@ -246,6 +266,7 @@ fn build_window(app: &gtk::Application, link: Option<kuro_platform::deep_link::D
     pref_model::shell::follow_resizes();
     window_size::watch(&win);
     theme::attach_window(&win);
+    local_flow::ui::attach(&win);
     library::mount::on_selection_change(refresh.clone());
     refresh();
     applock_host::attach(&win, data::app().security.clone());
@@ -256,25 +277,37 @@ fn build_window(app: &gtk::Application, link: Option<kuro_platform::deep_link::D
         startup::clear_chapter_cache_on_launch(data::app().library.auto_clear_item_cache.get(), kuro_images::platform::chapter_cache_dir(&paths));
     }
     app_update::startup(&data::app().base);
-    if let Some(link) = &link {
-        open_link::dispatch(app, &win, &link.to_arg());
-    }
+    // requests that arrived before the window: --action, --search, --open and opened files
+    shell::launch::window_built(app, &win);
+    // the first launch starts the onboarding wizard (T-36a-024)
+    shell::onboarding::show_if_needed(&win, base.store(), !kuro_platform::single_instance::is_unique(|v| std::env::var(v).is_ok()));
     // no keyboard focus ring on the first header button at startup
     GtkWindowExt::set_focus(&win, None::<&gtk::Widget>);
 
-    // Escape / Alt+Left goes back, like Aniyomi's back gesture
+    // Escape / Alt+Left goes back, like Aniyomi's back gesture. On the root page, back returns to the start tab.
+    let go_back: std::rc::Rc<dyn Fn()> = {
+        let (tabs, home) = (tabs.clone(), home.clone());
+        std::rc::Rc::new(move || {
+            let (_, shown) = ui::page_stack();
+            if shown == 0 && shell::tabs::go_back(&tabs, &home) {
+                return;
+            }
+            pref_model::shell::go_back();
+        })
+    };
     let keys = gtk::EventControllerKey::new();
-    keys.connect_key_pressed(|_, key, _, state| {
+    let back_key = go_back.clone();
+    keys.connect_key_pressed(move |_, key, _, state| {
         let back = key == gtk::gdk::Key::Escape || (key == gtk::gdk::Key::Left && state.contains(gtk::gdk::ModifierType::ALT_MASK));
         if back {
-            pref_model::shell::go_back();
+            back_key();
         }
         if back { glib::Propagation::Stop } else { glib::Propagation::Proceed }
     });
     win.add_controller(keys);
     // the mouse back button (button 8) is the same action
     let mouse_back = gtk::GestureClick::builder().button(8).build();
-    mouse_back.connect_pressed(|_, _, _, _| pref_model::shell::go_back());
+    mouse_back.connect_pressed(move |_, _, _, _| go_back());
     win.add_controller(mouse_back);
 
     // dev hooks: KUROBAYOMI_OPEN=<screen id> starts on that screen; KUROBAYOMI_SMOKE=1 opens every
@@ -398,6 +431,11 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
                 library::mount::reselect();
             }
             updates::mount::reselect(id, tabs.visible_child_name().as_deref() == Some(id.as_str()));
+            // choosing More while it shows opens Settings (HomeScreen reselect)
+            let showing = tabs.visible_child_name().as_deref() == Some(id.as_str());
+            if showing && shell::tabs::tab_for_id(id, kuro_prefs::ui::Tab::AnimeLibrary).is_some_and(|t| shell::tabs::on_reselect(t) == shell::tabs::Reselect::OpenSettings) {
+                pref_model::shell::open(None);
+            }
             tabs.set_visible_child_name(id);
         });
     }

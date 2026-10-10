@@ -1,8 +1,9 @@
 //! The episode list widget: a `gio::ListStore` behind a `gtk::ListView`, so only the rows on screen exist (3000 rows
 //! cost the same as 30). The store holds leading slots (the info block and the item header, which scroll with the
 //! list in the single-column layout) followed by one item per episode row. `sync` diffs the new rows against the
-//! shown ones: a changed row gets one `items_changed`, a changed structure one splice. Rows report clicks, long
-//! presses and right clicks; the page decides what they mean (`gesture::Selection`).
+//! shown ones: one changed row gets one `items_changed`, several changed rows (select all, mark many) and a changed
+//! structure get one `splice` each, so a bulk update is one signal. Rows report clicks, long presses and right clicks;
+//! the page decides what they mean (`selection::Selection`).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -10,24 +11,35 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Label, Orientation as O, gio, glib, pango};
+use kuro_i18n::{MsgKey, tr_plural};
 
 use super::actions::swipe_action;
-use super::episode_row::{Diff, EpisodeRow, PADDING, RowLayout, diff, info_alpha, title_alpha, title_gap};
-use crate::entry_core::swipe::side_of_drag;
+use super::episode_row::{Diff, EpisodeRow, Line, PADDING, RowLayout, changed_span, diff_lines, info_alpha, title_alpha, title_gap};
+use super::swipe_look::{MenuItem, SwipeLook, reveal};
+use crate::entry_core::swipe::{Side, side_of_drag};
 
 /// The swipe actions of a row (T-39b-015): the stored actions, and what to run for one row on a touch drag.
 #[derive(Clone)]
 pub struct EpisodeSwipe {
     pub prefs: Rc<kuro_prefs::library::LibraryPrefs>,
     pub run: Rc<dyn Fn(i64, kuro_prefs::library::EpisodeSwipeAction)>,
+    /// The icon and undo state of an action on one episode, for the strip a drag reveals (`swipe_look::look`).
+    pub look: Rc<dyn Fn(i64, kuro_prefs::library::EpisodeSwipeAction) -> Option<SwipeLook>>,
+    /// The items of the row's context menu for one episode (`swipe_look::menu`): the actions of the swipe, by click.
+    pub menu: Rc<dyn Fn(i64) -> Vec<MenuItem>>,
 }
 
 /// A press on a row: (episode id, long press or right click, Alt held). Alt opens in the other player.
 pub type OnRow = Rc<dyn Fn(i64, bool, bool)>;
 
+/// Summary lines a collapsed summary shows (T-39a-012).
+const COLLAPSED_LINES: i32 = super::summary::COLLAPSED_LINES;
+
 /// The class of the filler label and the bookmark icon colours. They resolve the theme's `kuro_tertiary` and
 /// `kuro_primary` named colours, which GTK looks up across every provider of the display.
-const CSS: &str = ".episode-primary { color: @kuro_primary; } .episode-tertiary { color: @kuro_tertiary; }";
+const CSS: &str = ".episode-primary { color: @kuro_primary; } .episode-tertiary { color: @kuro_tertiary; } \
+    .episode-swipe { background: @kuro_primary_container; color: @kuro_on_primary_container; } \
+    .episode-swipe-idle { background: @kuro_surface_container_lowest; color: @kuro_on_surface; }";
 
 fn ensure_css() {
     thread_local! {
@@ -55,6 +67,16 @@ enum Item {
     /// The n-th leading widget.
     Slot(usize),
     Episode(EpisodeRow),
+    /// The missing-count separator with the number of episodes it stands for (T-39a-015).
+    Missing(i32),
+}
+
+/// The store item of one line of the list.
+fn item_for(line: &Line) -> Item {
+    match line {
+        Line::Episode(row) => Item::Episode(row.clone()),
+        Line::Missing { count, .. } => Item::Missing(*count),
+    }
 }
 
 fn item_of(list_item: &gtk::ListItem) -> Option<Item> {
@@ -76,6 +98,9 @@ struct RowWidgets {
     summary: Label,
     bookmark: gtk::Image,
     slot: GBox,
+    /// The strip a drag reveals on the side it heads for (T-39a-017), over the row.
+    reveal: GBox,
+    reveal_icon: gtk::Image,
 }
 
 fn row_widgets() -> RowWidgets {
@@ -115,10 +140,23 @@ fn row_widgets() -> RowWidgets {
     row.append(&text);
     row.append(&bookmark);
     let slot = GBox::new(O::Vertical, 0);
+    let reveal_icon = gtk::Image::new();
+    reveal_icon.set_pixel_size(24);
+    let reveal = GBox::new(O::Horizontal, 0);
+    reveal.set_halign(Align::Start);
+    reveal.set_can_target(false);
+    reveal.set_visible(false);
+    reveal.set_overflow(gtk::Overflow::Hidden);
+    reveal_icon.set_margin_start(16);
+    reveal_icon.set_margin_end(16);
+    reveal.append(&reveal_icon);
+    let host = gtk::Overlay::new();
+    host.set_child(Some(&row));
+    host.add_overlay(&reveal);
     let stack = gtk::Stack::new();
-    stack.add_named(&row, Some("row"));
+    stack.add_named(&host, Some("row"));
     stack.add_named(&slot, Some("slot"));
-    RowWidgets { stack, row, check, thumb, text, title, filler_icon, filler, info, info_line, summary, bookmark, slot }
+    RowWidgets { stack, row, check, thumb, text, title, filler_icon, filler, info, info_line, summary, bookmark, slot, reveal, reveal_icon }
 }
 
 impl RowWidgets {
@@ -165,6 +203,16 @@ impl RowWidgets {
         }
         self.summary.set_visible(row.summary.is_some());
         self.summary.set_label(row.summary.as_deref().unwrap_or(""));
+        self.summary.set_lines(if row.summary_expanded { -1 } else { COLLAPSED_LINES });
+    }
+
+    /// A separator row: "Missing N items", dimmed, in the slot.
+    fn show_missing(&self, count: i32) {
+        let label = Label::builder().label(tr_plural(MsgKey::missing_items, i64::from(count), &[])).xalign(0.0).css_classes(["dim-label", "caption"]).build();
+        label.set_margin_start(16);
+        label.set_margin_top(8);
+        label.set_margin_bottom(8);
+        self.show_slot(label.upcast_ref());
     }
 
     fn show_slot(&self, widget: &gtk::Widget) {
@@ -182,18 +230,96 @@ impl RowWidgets {
             self.slot.remove(&child);
         }
     }
+
+    /// Draws the strip of a drag in progress: the icon of the action of the side it heads for, on `primaryContainer`
+    /// once past the threshold and on the dimmed background before. No action (Disabled) draws nothing.
+    fn show_reveal(&self, dx: f64, dy: f64, looks: (Option<SwipeLook>, Option<SwipeLook>)) {
+        let Some(strip) = reveal(dx, dy) else { return self.hide_reveal() };
+        let look = match strip.side {
+            Side::Left => looks.0,
+            Side::Right => looks.1,
+        };
+        let Some(look) = look else { return self.hide_reveal() };
+        self.reveal_icon.set_icon_name(Some(look.icon));
+        self.reveal.set_halign(if strip.side == Side::Right { Align::Start } else { Align::End });
+        self.reveal.set_width_request(strip.width);
+        self.reveal.remove_css_class(if strip.armed { "episode-swipe-idle" } else { "episode-swipe" });
+        self.reveal.add_css_class(if strip.armed { "episode-swipe" } else { "episode-swipe-idle" });
+        self.reveal.set_visible(true);
+    }
+
+    fn hide_reveal(&self) {
+        self.reveal.set_visible(false);
+    }
+}
+
+/// The context menu of a row: the swipe actions as buttons, shown at the pointer. A press runs the action and closes it.
+fn show_menu(parent: &GBox, x: f64, y: f64, id: i64, swipe: &EpisodeSwipe) {
+    let popover = gtk::Popover::new();
+    let col = GBox::new(O::Vertical, 2);
+    for item in (swipe.menu)(id) {
+        let content = GBox::new(O::Horizontal, 8);
+        if !item.icon.is_empty() {
+            content.append(&gtk::Image::from_icon_name(item.icon));
+        }
+        content.append(&Label::new(Some(&kuro_i18n::tr(item.label))));
+        let button = gtk::Button::builder().child(&content).css_classes(["flat"]).build();
+        let (run, popover) = (Rc::clone(&swipe.run), popover.clone());
+        button.connect_clicked(move |_| {
+            popover.popdown();
+            run(id, item.action);
+        });
+        col.append(&button);
+    }
+    popover.set_child(Some(&col));
+    popover.set_parent(parent);
+    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    // a popover parented to a recycled row must be unparented when it closes
+    popover.connect_closed(|p| {
+        let p = p.clone();
+        glib::idle_add_local_once(move || p.unparent());
+    });
+    popover.popup();
+}
+
+/// Brings the episode part of `store` (everything from `offset`) from `shown` to `rows`. One changed row is updated in
+/// place with one `items_changed`, so its widget is kept. Several changed rows are replaced by one `splice` over their
+/// span, and a different set of rows by one `splice` over the whole episode part.
+fn sync_store(store: &gio::ListStore, offset: u32, shown: &[Line], rows: &[Line]) {
+    let item_of = |line: &Line| glib::BoxedAnyObject::new(item_for(line));
+    match diff_lines(shown, rows) {
+        Diff::Same => {}
+        Diff::Rows(indices) if indices.len() == 1 => {
+            let at = offset + indices[0] as u32;
+            if let Some(item) = store.item(at).and_downcast::<glib::BoxedAnyObject>() {
+                *item.borrow_mut::<Item>() = item_for(&rows[indices[0]]);
+            }
+            store.items_changed(at, 1, 1);
+        }
+        Diff::Rows(indices) => {
+            if let Some((start, len)) = changed_span(&indices) {
+                let objects: Vec<glib::BoxedAnyObject> = rows[start..start + len].iter().map(item_of).collect();
+                store.splice(offset + start as u32, len as u32, &objects);
+            }
+        }
+        Diff::Reset => {
+            let objects: Vec<glib::BoxedAnyObject> = rows.iter().map(item_of).collect();
+            store.splice(offset, store.n_items() - offset, &objects);
+        }
+    }
 }
 
 pub struct EpisodeList {
     pub widget: gtk::ListView,
     store: gio::ListStore,
     leading: RefCell<Vec<gtk::Widget>>,
-    shown: RefCell<Vec<EpisodeRow>>,
+    shown: RefCell<Vec<Line>>,
 }
 
 impl EpisodeList {
     /// `on_row` gets row presses. `on_activate` gets the id of the row that Enter or a double click activated.
-    pub fn new(on_row: OnRow, on_activate: Rc<dyn Fn(i64)>, swipe: Option<EpisodeSwipe>) -> Rc<Self> {
+    /// `on_summary` gets the id of an episode whose summary was tapped (T-39a-012).
+    pub fn new(on_row: OnRow, on_activate: Rc<dyn Fn(i64)>, on_summary: Rc<dyn Fn(i64)>, swipe: Option<EpisodeSwipe>) -> Rc<Self> {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let registry: Rc<RefCell<HashMap<usize, Rc<RowWidgets>>>> = Rc::default();
         let list: Rc<RefCell<Option<std::rc::Weak<Self>>>> = Rc::default();
@@ -219,10 +345,14 @@ impl EpisodeList {
                         }
                     }
                 });
+                // a right click opens the menu of the swipe actions; without them (no installed app) it selects the row
                 let right = gtk::GestureClick::builder().button(3).build();
                 right.connect_pressed({
-                    let (list_item, on_row) = (list_item.clone(), Rc::clone(&on_row));
-                    move |_, _, _, _| press(&list_item, &on_row, true, false)
+                    let (list_item, on_row, swipe, widgets) = (list_item.clone(), Rc::clone(&on_row), swipe.clone(), Rc::clone(&widgets));
+                    move |_, _, x, y| match (&swipe, item_of(&list_item)) {
+                        (Some(swipe), Some(Item::Episode(row))) => show_menu(&widgets.row, x, y, row.id, swipe),
+                        _ => press(&list_item, &on_row, true, false),
+                    }
                 });
                 let long = gtk::GestureLongPress::new();
                 long.connect_pressed({
@@ -235,12 +365,45 @@ impl EpisodeList {
                 for c in [left.upcast_ref::<gtk::EventController>(), right.upcast_ref(), long.upcast_ref()] {
                     widgets.row.add_controller(c.clone());
                 }
+                // a tap on the summary toggles it and claims the press, so the row does not open (T-39a-012)
+                let summary_tap = gtk::GestureClick::builder().button(1).build();
+                summary_tap.connect_released({
+                    let (list_item, on_summary) = (list_item.clone(), Rc::clone(&on_summary));
+                    move |gesture, _, _, _| {
+                        gesture.set_state(gtk::EventSequenceState::Claimed);
+                        if let Some(Item::Episode(row)) = item_of(&list_item) {
+                            on_summary(row.id);
+                        }
+                    }
+                });
+                widgets.summary.add_controller(summary_tap);
                 if let Some(swipe) = swipe.clone() {
-                    // a horizontal drag on a touch screen runs the action of the side it ends on, selected or not
+                    // a horizontal drag on a touch screen reveals the action of the side it heads for, and the release
+                    // past the threshold runs it, selected or not
                     let drag = gtk::GestureDrag::new();
                     drag.set_touch_only(true);
+                    let looks: Rc<Cell<(Option<SwipeLook>, Option<SwipeLook>)>> = Rc::default();
+                    drag.connect_drag_begin({
+                        let (list_item, swipe, looks) = (list_item.clone(), swipe.clone(), Rc::clone(&looks));
+                        move |_, _, _| {
+                            if let Some(Item::Episode(row)) = item_of(&list_item) {
+                                let of = |side| (swipe.look)(row.id, swipe_action(&swipe.prefs, side));
+                                looks.set((of(Side::Left), of(Side::Right)));
+                            }
+                        }
+                    });
+                    drag.connect_drag_update({
+                        let (widgets, looks) = (Rc::clone(&widgets), Rc::clone(&looks));
+                        move |_, dx, dy| widgets.show_reveal(dx, dy, looks.get())
+                    });
+                    drag.connect_cancel({
+                        let widgets = Rc::clone(&widgets);
+                        move |_, _| widgets.hide_reveal()
+                    });
+                    let ended = Rc::clone(&widgets);
                     let list_item = list_item.clone();
                     drag.connect_drag_end(move |_, dx, dy| {
+                        ended.hide_reveal();
                         let (Some(side), Some(Item::Episode(row))) = (side_of_drag(dx, dy), item_of(&list_item)) else { return };
                         (swipe.run)(row.id, swipe_action(&swipe.prefs, side));
                     });
@@ -261,6 +424,7 @@ impl EpisodeList {
                         let width = this.widget.root().map_or(1180, |r| r.width());
                         widgets.show_row(&row, width);
                     }
+                    Item::Missing(count) => widgets.show_missing(count),
                     Item::Slot(i) => {
                         if let Some(w) = this.leading.borrow().get(i) {
                             widgets.show_slot(w);
@@ -313,27 +477,10 @@ impl EpisodeList {
         self.store.splice(0, old, &objects);
     }
 
-    /// Shows `rows`. A changed row is updated in place with one `items_changed`; a different set of rows replaces the
-    /// episode part of the store with one splice.
-    pub fn sync(&self, rows: Vec<EpisodeRow>) {
+    /// Shows `rows`: see `sync_store`.
+    pub fn sync(&self, rows: Vec<Line>) {
         let offset = self.leading.borrow().len() as u32;
-        match diff(&self.shown.borrow(), &rows) {
-            Diff::Same => {}
-            Diff::Rows(indices) => {
-                for i in indices {
-                    let at = offset + i as u32;
-                    if let Some(item) = self.store.item(at).and_downcast::<glib::BoxedAnyObject>() {
-                        *item.borrow_mut::<Item>() = Item::Episode(rows[i].clone());
-                    }
-                    self.store.items_changed(at, 1, 1);
-                }
-            }
-            Diff::Reset => {
-                let objects: Vec<glib::BoxedAnyObject> =
-                    rows.iter().cloned().map(|r| glib::BoxedAnyObject::new(Item::Episode(r))).collect();
-                self.store.splice(offset, self.store.n_items() - offset, &objects);
-            }
-        }
+        sync_store(&self.store, offset, &self.shown.borrow(), &rows);
         *self.shown.borrow_mut() = rows;
     }
 
@@ -345,7 +492,79 @@ impl EpisodeList {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+
+    fn rows(n: i64) -> Vec<EpisodeRow> {
+        (1..=n)
+            .map(|id| EpisodeRow {
+                id,
+                title: format!("Episode {id}"),
+                info: String::new(),
+                seen: false,
+                layout: RowLayout::Simple,
+                indicators: super::super::episode_row::Indicators { bookmark: false, filler: false },
+                preview_url: None,
+                summary: None,
+                summary_expanded: false,
+                selected: false,
+            })
+            .collect()
+    }
+
+    fn lines(rows: &[EpisodeRow]) -> Vec<Line> {
+        rows.iter().cloned().map(Line::Episode).collect()
+    }
+
+    /// A store with two leading slots and `shown`, and a counter of its `items_changed` signals.
+    fn store_with(shown: &[EpisodeRow]) -> (gio::ListStore, Rc<Cell<u32>>) {
+        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let items: Vec<glib::BoxedAnyObject> = (0..2).map(|i| glib::BoxedAnyObject::new(Item::Slot(i))).collect();
+        store.splice(0, 0, &items);
+        let items: Vec<glib::BoxedAnyObject> = shown.iter().cloned().map(|r| glib::BoxedAnyObject::new(Item::Episode(r))).collect();
+        store.splice(2, 0, &items);
+        let signals = Rc::new(Cell::new(0));
+        store.connect_items_changed({
+            let signals = Rc::clone(&signals);
+            move |_, _, _, _| signals.set(signals.get() + 1)
+        });
+        (store, signals)
+    }
+
+    #[test]
+    fn one_changed_row_is_one_signal_and_an_identical_list_is_none() {
+        let shown = rows(5);
+        let (store, signals) = store_with(&shown);
+        let mut next = shown.clone();
+        next[3].seen = true;
+        sync_store(&store, 2, &lines(&shown), &lines(&next));
+        assert_eq!(signals.get(), 1);
+        sync_store(&store, 2, &lines(&next), &lines(&next));
+        assert_eq!(signals.get(), 1, "nothing changed");
+    }
+
+    #[test]
+    fn a_bulk_change_is_one_splice_that_keeps_the_list_the_same_length() {
+        let shown = rows(300);
+        let (store, signals) = store_with(&shown);
+        let all_selected: Vec<EpisodeRow> = shown.iter().cloned().map(|r| EpisodeRow { selected: true, ..r }).collect();
+        sync_store(&store, 2, &lines(&shown), &lines(&all_selected));
+        assert_eq!(signals.get(), 1, "select all is one signal, not 300");
+        assert_eq!(store.n_items(), 302);
+        let last = store.item(301).and_downcast::<glib::BoxedAnyObject>().unwrap();
+        assert!(matches!(&*last.borrow::<Item>(), Item::Episode(r) if r.selected));
+        let slot = store.item(1).and_downcast::<glib::BoxedAnyObject>().unwrap();
+        assert!(matches!(&*slot.borrow::<Item>(), Item::Slot(1)), "the leading slots are untouched");
+    }
+
+    #[test]
+    fn a_different_set_of_rows_is_one_splice_over_the_episode_part() {
+        let shown = rows(4);
+        let (store, signals) = store_with(&shown);
+        sync_store(&store, 2, &lines(&shown), &lines(&rows(2)));
+        assert_eq!((signals.get(), store.n_items()), (1, 4));
+    }
 
     #[test]
     fn thumbnails_take_40_percent_of_the_window_up_to_250_px() {

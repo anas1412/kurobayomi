@@ -4,10 +4,12 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use gtk::glib;
 use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
 
 use super::glue::{PageChannel, debounce_search, follow_pages, keep_alive};
+use super::keys::{BrowseShortcut, EscapeStep, browse_shortcut, escape_step};
 use super::route::{BrowseKind, BrowsePage, BrowseRoute, reselect_route};
 
 /// What the tab needs from the app.
@@ -22,6 +24,13 @@ pub struct ShellDeps {
     pub on_filter: Rc<dyn Fn(BrowsePage)>,
     /// The overflow's extension repos entry, for the visible kind.
     pub on_repos: Rc<dyn Fn(BrowseKind)>,
+    /// Escape with no search open: back out of the Browse page.
+    pub on_leave: Rc<dyn Fn()>,
+}
+
+/// The tab label with its badge: the update count in brackets, only when above zero (T-41a-011).
+pub fn tab_title(base: &str, updates: usize) -> String {
+    if updates > 0 { format!("{base} ({updates})") } else { base.to_owned() }
 }
 
 struct Inner {
@@ -101,6 +110,15 @@ impl BrowseShell {
                 inner.query(text);
             }
         });
+        // Ctrl+F, Escape and Ctrl+1..6 reach the shell from anywhere on the tab (T-40a-035)
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(&inner);
+        keys.connect_key_pressed(move |_, key, _, modifiers| match weak.upgrade() {
+            Some(inner) if inner.key(key, modifiers) => glib::Propagation::Stop,
+            _ => glib::Propagation::Proceed,
+        });
+        root.add_controller(keys);
         inner.ready.set(true);
         inner.page_changed();
         Self { root, end, inner }
@@ -114,6 +132,13 @@ impl BrowseShell {
     /// `show_anime_extension()`: the anime extensions tab (page 2).
     pub fn show_anime_extension(&self) {
         self.inner.channel.send(BrowsePage::extensions_of(BrowseKind::Anime));
+    }
+
+    /// The badge of a tab: its title plus the count, or the plain title at zero.
+    pub fn set_badge(&self, page: BrowsePage, updates: usize) {
+        if let Some(child) = self.inner.stack.child_by_name(&page.index().to_string()) {
+            self.inner.stack.page(&child).set_title(&tab_title(&page.title(), updates));
+        }
     }
 
     /// The tab that is showing.
@@ -134,6 +159,35 @@ impl Inner {
             .and_then(|name| name.parse::<usize>().ok())
             .and_then(|index| BrowsePage::ALL.get(index).copied())
             .unwrap_or(BrowsePage::AnimeSources)
+    }
+
+    /// One key of the tab. True when it was ours.
+    fn key(&self, key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
+        if key == gtk::gdk::Key::Escape {
+            return match escape_step(self.search_bar.reveals_child() && self.visible().is_extensions()) {
+                EscapeStep::CloseSearch => {
+                    self.search.set_text("");
+                    self.search_bar.set_reveal_child(false);
+                    true
+                }
+                EscapeStep::Leave => {
+                    (self.deps.on_leave)();
+                    true
+                }
+            };
+        }
+        match browse_shortcut(key, modifiers) {
+            Some(BrowseShortcut::FocusSearch) if self.visible().is_extensions() => {
+                self.search_bar.set_reveal_child(true);
+                self.search.grab_focus();
+                true
+            }
+            Some(BrowseShortcut::SubTab(n)) => {
+                self.select(BrowsePage::ALL[usize::from(n) - 1]);
+                true
+            }
+            _ => false,
+        }
     }
 
     fn select(&self, page: BrowsePage) {
@@ -181,7 +235,12 @@ impl Inner {
             }
         });
 
-        let entries = vec![tr(MsgKey::action_filter), tr(MsgKey::label_extension_repos)];
+        // Anime says "Extension stores" in the overflow (T-41a-011); manga keeps "Extension repos".
+        let repos_key = match self.visible().kind() {
+            BrowseKind::Anime => MsgKey::extensionStores,
+            BrowseKind::Manga => MsgKey::label_extension_repos,
+        };
+        let entries = vec![tr(MsgKey::action_filter), tr(repos_key)];
         let weak = Rc::downgrade(self);
         let overflow = crate::ui::menu_button("view-more-symbolic", &entries, move |label| {
             let Some(inner) = weak.upgrade() else { return };
@@ -192,6 +251,17 @@ impl Inner {
             }
         });
         vec![global.upcast(), filter.upcast(), overflow.upcast()]
+    }
+}
+
+#[cfg(test)]
+mod pure_tests {
+    use super::tab_title;
+
+    #[test]
+    fn the_badge_shows_only_above_zero() {
+        assert_eq!(tab_title("Extensions", 0), "Extensions");
+        assert_eq!(tab_title("Extensions", 2), "Extensions (2)");
     }
 }
 
@@ -217,11 +287,12 @@ pub(crate) mod tests {
     struct Log {
         routes: Rc<RefCell<Vec<BrowseRoute>>>,
         queries: Rc<RefCell<Vec<(BrowsePage, String)>>>,
+        left: Rc<RefCell<u32>>,
     }
 
     fn shell() -> (BrowseShell, Log) {
-        let log = Log { routes: Rc::default(), queries: Rc::default() };
-        let (routes, queries) = (Rc::clone(&log.routes), Rc::clone(&log.queries));
+        let log = Log { routes: Rc::default(), queries: Rc::default(), left: Rc::default() };
+        let (routes, queries, left) = (Rc::clone(&log.routes), Rc::clone(&log.queries), Rc::clone(&log.left));
         let pages = BrowsePage::ALL.iter().map(|p| (*p, gtk::Label::new(Some(&p.title())).upcast::<gtk::Widget>())).collect();
         let deps = ShellDeps {
             pages,
@@ -229,6 +300,7 @@ pub(crate) mod tests {
             on_query: Rc::new(move |page, text| queries.borrow_mut().push((page, text))),
             on_filter: Rc::new(|_| {}),
             on_repos: Rc::new(|_| {}),
+            on_leave: Rc::new(move || *left.borrow_mut() += 1),
         };
         (BrowseShell::new(deps), log)
     }
@@ -283,7 +355,47 @@ pub(crate) mod tests {
         assert_eq!(log.queries.borrow().last(), Some(&(BrowsePage::AnimeExtensions, "ab".to_owned())), "the new page gets the text");
     }
 
+    fn ctrl_f_escape_and_ctrl_digits_drive_the_tab() {
+        use gtk::gdk::{Key, ModifierType};
+        let (shell, log) = shell();
+        let ctrl = ModifierType::CONTROL_MASK;
+        assert!(shell.inner.key(Key::_4, ctrl));
+        assert_eq!(shell.visible(), BrowsePage::MangaExtensions, "Ctrl+4 is the fourth tab");
+        assert!(shell.inner.key(Key::_1, ctrl));
+        assert_eq!(shell.visible(), BrowsePage::AnimeSources);
+        assert!(!shell.inner.key(Key::f, ctrl), "there is no search on a sources page");
+        assert!(shell.inner.key(Key::_3, ctrl));
+        shell.inner.search_bar.set_reveal_child(false);
+        assert!(shell.inner.key(Key::f, ctrl));
+        assert!(shell.inner.search_bar.reveals_child(), "Ctrl+F opens the search");
+        assert!(shell.inner.key(Key::Escape, ModifierType::empty()));
+        assert!(!shell.inner.search_bar.reveals_child(), "the first Escape closes the search");
+        assert_eq!(*log.left.borrow(), 0);
+        assert!(shell.inner.key(Key::Escape, ModifierType::empty()));
+        assert_eq!(*log.left.borrow(), 1, "the second Escape leaves");
+        // the same keys through the controller of the root
+        let controllers = shell.root.observe_controllers();
+        let key = (0..controllers.n_items()).filter_map(|i| controllers.item(i)).find_map(|c| c.downcast::<gtk::EventControllerKey>().ok()).expect("key controller");
+        assert!(key.emit_by_name::<bool>("key-pressed", &[&Key::_2, &0_u32, &ctrl]));
+        assert_eq!(shell.visible(), BrowsePage::MangaSources);
+    }
+
+    fn the_update_count_badges_the_tab_title_only_above_zero() {
+        let (shell, _log) = shell();
+        let title = |page: BrowsePage| {
+            let child = shell.inner.stack.child_by_name(&page.index().to_string()).expect("page");
+            shell.inner.stack.page(&child).title().map(|t| t.to_string()).unwrap_or_default()
+        };
+        let base = BrowsePage::AnimeExtensions.title();
+        shell.set_badge(BrowsePage::AnimeExtensions, 3);
+        assert_eq!(title(BrowsePage::AnimeExtensions), format!("{base} (3)"));
+        shell.set_badge(BrowsePage::AnimeExtensions, 0);
+        assert_eq!(title(BrowsePage::AnimeExtensions), base);
+    }
+
     pub(crate) fn smoke() {
+        ctrl_f_escape_and_ctrl_digits_drive_the_tab();
+        the_update_count_badges_the_tab_title_only_above_zero();
         six_pages_in_order_and_the_extension_requests_select_pages_3_and_2();
         reselecting_opens_global_search_for_the_visible_kind();
         the_search_entry_follows_the_extensions_pages_and_waits_250_ms();

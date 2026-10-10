@@ -41,9 +41,12 @@ pub fn not_installed_text(label: &str) -> String {
 }
 
 /// `Listing.from_nav_arg`: the Popular and Latest sentinels of either kind select those listings, any other text is a
-/// search, and no argument is an empty search (E-BR-03, E-BR-26).
+/// search. No argument, or a blank one, opens Popular rather than an empty search (E-BR-26, PROPOSAL taken).
 pub fn listing_from_nav_arg(arg: Option<&str>) -> BrowseQuery {
-    BrowseQuery::from_legacy(arg.unwrap_or_default())
+    match arg.filter(|text| !text.trim().is_empty()) {
+        Some(text) => BrowseQuery::from_legacy(text),
+        None => BrowseQuery::Popular,
+    }
 }
 
 /// Whether a listing change restarts the pager. It restarts when the value changes, or on an explicit toolbar submit,
@@ -237,7 +240,8 @@ mod tests {
         assert_eq!(listing_from_nav_arg(Some(LEGACY_ANIME_POPULAR)), BrowseQuery::Popular);
         assert_eq!(listing_from_nav_arg(Some(LEGACY_ANIME_LATEST)), BrowseQuery::Latest);
         assert_eq!(listing_from_nav_arg(Some("one piece")), search("one piece"));
-        assert_eq!(listing_from_nav_arg(None), search(""));
+        assert_eq!(listing_from_nav_arg(None), BrowseQuery::Popular, "E-BR-26: no argument opens Popular");
+        assert_eq!(listing_from_nav_arg(Some("   ")), BrowseQuery::Popular, "E-BR-26: a blank argument opens Popular");
     }
 
     #[test]

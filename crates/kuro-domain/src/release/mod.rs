@@ -1,5 +1,9 @@
 //! Application release check (`GetApplicationRelease.kt`, `ReleaseServiceImpl.kt`, `GithubRelease.kt`): the latest
 //! GitHub release, the version rule, the three-day throttle, and the `@mention` linkifier of the release notes.
+//!
+//! Dropped from upstream: the in-app APK download and install (the installer is Android only) and the preview update
+//! channel (there is no preview build type). The user loses the one-tap in-app install; the distro package manager is
+//! the update path. The dialog offers the release page and "Not now".
 
 pub mod check;
 pub mod github;

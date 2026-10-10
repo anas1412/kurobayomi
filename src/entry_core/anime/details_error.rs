@@ -1,0 +1,142 @@
+//! Typed errors of the anime details page (T-39a-060, D-5). Each place the Kotlin used `!!` or a failing lookup now
+//! returns one of these, shows its text, and logs it with `tracing::error!`. Upstream: `p1-rust-design.md` section 10.
+
+use std::fmt;
+
+use kuro_data::DataError;
+
+use super::images::ImageError;
+
+#[derive(Debug)]
+pub enum DetailsError {
+    EpisodeNotFound(i64),
+    AnimeNotFound(i64),
+    SourceUnavailable(i64),
+    /// The quality (hoster and video) options of an episode failed; the text is the cause.
+    Quality(String),
+    Image(ImageError),
+    /// A read or write of the anime database failed.
+    Data(DataError),
+    Db(rusqlite::Error),
+    Io(std::io::Error),
+}
+
+impl DetailsError {
+    /// The text a user sees in the error state or the snackbar.
+    pub fn user_message(&self) -> String {
+        match self {
+            Self::EpisodeNotFound(_) => "This episode is no longer in the library".to_owned(),
+            Self::AnimeNotFound(_) => "This anime is no longer in the library".to_owned(),
+            Self::SourceUnavailable(_) => "The source of this anime is not available".to_owned(),
+            Self::Quality(_) => "No available videos".to_owned(),
+            Self::Image(error) => match error {
+                ImageError::NoImage => "No image is available".to_owned(),
+                ImageError::OpenFailed => "The image could not be opened".to_owned(),
+                ImageError::EmptyShare => "The image could not be shared".to_owned(),
+                ImageError::Io => "The image could not be written".to_owned(),
+            },
+            Self::Data(_) | Self::Db(_) | Self::Io(_) => "Something went wrong while reading this entry".to_owned(),
+        }
+    }
+
+    /// Logs the error with its detail and returns it, so a caller can log and show in one line.
+    pub fn record(self) -> Self {
+        tracing::error!("anime details: {self}");
+        self
+    }
+}
+
+impl fmt::Display for DetailsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EpisodeNotFound(id) => write!(f, "episode {id} not found"),
+            Self::AnimeNotFound(id) => write!(f, "anime {id} not found"),
+            Self::SourceUnavailable(id) => write!(f, "source {id} unavailable"),
+            Self::Quality(detail) => write!(f, "quality: {detail}"),
+            Self::Image(error) => write!(f, "image: {error:?}"),
+            Self::Data(error) => write!(f, "data: {error}"),
+            Self::Db(error) => write!(f, "db: {error}"),
+            Self::Io(error) => write!(f, "io: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for DetailsError {}
+
+impl From<ImageError> for DetailsError {
+    fn from(error: ImageError) -> Self {
+        Self::Image(error)
+    }
+}
+
+impl From<DataError> for DetailsError {
+    fn from(error: DataError) -> Self {
+        Self::Data(error)
+    }
+}
+
+impl From<rusqlite::Error> for DetailsError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Db(error)
+    }
+}
+
+impl From<std::io::Error> for DetailsError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+/// Replaces `!!` and `get(...)!!`: a missing value becomes the typed error, never a panic.
+pub fn required<T>(value: Option<T>, missing: impl FnOnce() -> DetailsError) -> Result<T, DetailsError> {
+    value.ok_or_else(missing)
+}
+
+/// A blocking task that did not finish (it panicked or the runtime is shutting down) is an I/O failure of the page.
+pub fn join_failed(error: &tokio::task::JoinError) -> DetailsError {
+    DetailsError::Io(std::io::Error::other(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_episode_or_anime_is_an_error_not_a_panic() {
+        // the two lookups of EpisodeOptionsDialogScreen.kt:172-173
+        assert!(matches!(required(None::<i64>, || DetailsError::EpisodeNotFound(4)), Err(DetailsError::EpisodeNotFound(4))));
+        assert!(matches!(required(Some(1), || DetailsError::AnimeNotFound(4)), Ok(1)));
+    }
+
+    #[test]
+    fn each_variant_has_a_message_and_a_detail_line() {
+        let all = [
+            DetailsError::EpisodeNotFound(1),
+            DetailsError::AnimeNotFound(2),
+            DetailsError::SourceUnavailable(3),
+            DetailsError::Quality("no hoster".into()),
+            DetailsError::Image(ImageError::NoImage),
+            DetailsError::Data(DataError::NotFound),
+            DetailsError::Db(rusqlite::Error::QueryReturnedNoRows),
+            DetailsError::Io(std::io::Error::other("disk")),
+        ];
+        for error in &all {
+            assert!(!error.user_message().is_empty());
+            assert!(!error.to_string().is_empty());
+        }
+        assert_eq!(DetailsError::EpisodeNotFound(7).to_string(), "episode 7 not found");
+    }
+
+    #[test]
+    fn the_source_errors_convert_and_keep_their_variant() {
+        assert!(matches!(DetailsError::from(ImageError::OpenFailed), DetailsError::Image(ImageError::OpenFailed)));
+        assert!(matches!(DetailsError::from(rusqlite::Error::QueryReturnedNoRows), DetailsError::Db(_)));
+        assert!(matches!(DetailsError::from(std::io::Error::other("x")), DetailsError::Io(_)));
+        assert!(matches!(DetailsError::from(DataError::NotFound), DetailsError::Data(_)));
+    }
+
+    #[test]
+    fn record_returns_the_same_error() {
+        assert!(matches!(DetailsError::SourceUnavailable(9).record(), DetailsError::SourceUnavailable(9)));
+    }
+}

@@ -8,19 +8,23 @@ pub mod cover;
 pub mod reader;
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use kuro_archive::ArchiveReader;
 use kuro_source::model::{MangasPage, Page, SChapter, SManga};
 use kuro_source::{CatalogueSource, FilterList, MangaSource, SortSelection, SourceError};
 
 use crate::LOCAL_SOURCE_ID;
 use crate::bridge;
 use crate::browse::browse;
-use crate::comicinfo::COMIC_INFO_FILE;
+use crate::archive as archive_entry;
+use crate::comicinfo::{COMIC_INFO_FILE, ComicInfo};
 use crate::error::LocalSourceError;
-use crate::format::Format;
+use crate::format::{Format, is_manga_archive};
+use crate::natsort::natural_cmp_ci;
 use crate::fs::{FsEntry, file_url, find_child, list_dir};
 use crate::images::find_image;
 use crate::json_side::{MangaDetails, apply_manga_details, details_file, read_details_json};
@@ -82,7 +86,7 @@ impl LocalMangaSource {
             if let Some(cover) = find_image(&dir, "cover").and_then(|p| file_url(&p)) {
                 updated.thumbnail_url = Some(cover);
             }
-            apply_legacy_details(&dir, &mut updated);
+            apply_details_files(&dir, &mut updated);
             Ok(updated)
         })
         .await
@@ -103,33 +107,62 @@ impl LocalMangaSource {
 }
 
 /// One browse row: the folder name is both title and URL, and the cover is `cover.*` when there is one.
-/// Kotlin `getMangaDetails`, legacy `details.json` branch (behavior 7.1, E-MANGA-6). It runs only when the folder has no
-/// top-level `ComicInfo.xml`. The fields are applied, `ComicInfo.xml` is written from the manga, and `details.json` is
-/// deleted only after that write succeeds. A decode or write failure is logged and the file is kept.
-fn apply_legacy_details(dir: &Path, manga: &mut SManga) {
+/// Marker file that says a manga folder was scanned for ComicInfo and none was found (behavior 7.1 step 6c).
+const NO_XML_FILE: &str = ".noxml";
+
+/// Kotlin `getMangaDetails`, steps 5 and 6 (behavior 7.1). The first matching branch runs:
+/// (a) a top-level `ComicInfo.xml` is applied and `.noxml` is removed; (b) a legacy `details.json` is applied, written
+/// out as `ComicInfo.xml`, and deleted only after that write; (c) with no marker, the first archive that holds a root
+/// `ComicInfo.xml` (natural name order) has it copied into the folder, or `.noxml` is created. A failure is logged and
+/// the manga keeps the fields it already has (behavior 7.6).
+fn apply_details_files(dir: &Path, manga: &mut SManga) {
     let entries = match list_dir(dir) {
         Ok(entries) => entries,
         Err(error) => {
-            tracing::error!(
-                "Error reading manga folder for details: {error} ({})",
-                dir.display()
-            );
+            tracing::error!("Error reading manga folder for details: {error} ({})", dir.display());
             return;
         }
     };
-    if entries.iter().any(|e| e.name == COMIC_INFO_FILE) {
+    let comic_info = entries.iter().find(|e| e.name == COMIC_INFO_FILE);
+    let no_xml = entries.iter().find(|e| e.name == NO_XML_FILE);
+    if let Some(info) = comic_info {
+        if let Some(marker) = no_xml {
+            if let Err(error) = fs::remove_file(&marker.path) {
+                tracing::error!("Error deleting {NO_XML_FILE}: {error} ({})", marker.path.display());
+            }
+        }
+        apply_comic_info_file(&info.path, manga);
         return;
     }
-    let Some(json) = details_file(&entries) else {
+    if let Some(json) = details_file(&entries) {
+        apply_legacy_details(dir, json, manga);
         return;
-    };
+    }
+    if no_xml.is_some() {
+        return;
+    }
+    match copy_comic_info_from_archive(dir, &entries) {
+        Some(copied) => apply_comic_info_file(&copied, manga),
+        None => create_no_xml_marker(dir),
+    }
+}
+
+/// Reads a ComicInfo file and copies its fields into the manga. A read or parse failure is logged; the file stays.
+fn apply_comic_info_file(path: &Path, manga: &mut SManga) {
+    let parsed = fs::read(path).map_err(LocalSourceError::from).and_then(|bytes| ComicInfo::from_xml(&bytes));
+    match parsed {
+        Ok(info) => bridge::apply_comic_info(manga, &info),
+        Err(error) => tracing::error!("Error reading {COMIC_INFO_FILE}: {error} ({})", path.display()),
+    }
+}
+
+/// Branch (b): decodes `details.json`, copies its fields, writes `ComicInfo.xml`, and deletes the JSON only after the
+/// write succeeds. A decode or write failure is logged and the file is kept.
+fn apply_legacy_details(dir: &Path, json: &FsEntry, manga: &mut SManga) {
     let details = match read_details_json::<MangaDetails>(&json.path) {
         Ok(details) => details,
         Err(error) => {
-            tracing::error!(
-                "Error reading details.json: {error} ({})",
-                json.path.display()
-            );
+            tracing::error!("Error reading details.json: {error} ({})", json.path.display());
             return;
         }
     };
@@ -138,16 +171,51 @@ fn apply_legacy_details(dir: &Path, manga: &mut SManga) {
     match fs::write(dir.join(COMIC_INFO_FILE), xml) {
         Ok(()) => {
             if let Err(error) = fs::remove_file(&json.path) {
-                tracing::error!(
-                    "Error deleting details.json: {error} ({})",
-                    json.path.display()
-                );
+                tracing::error!("Error deleting details.json: {error} ({})", json.path.display());
             }
         }
-        Err(error) => tracing::error!(
-            "Error writing ComicInfo.xml from details.json: {error} ({})",
-            dir.display()
-        ),
+        Err(error) => tracing::error!("Error writing ComicInfo.xml from details.json: {error} ({})", dir.display()),
+    }
+}
+
+/// Branch (c), `copyComicInfoFileFromArchive`: the first archive (natural name order) whose root holds exactly
+/// `ComicInfo.xml` is copied into `dir`. Directories are skipped, and an archive that cannot be opened is logged and
+/// passed over. `None` when no archive has one.
+fn copy_comic_info_from_archive(dir: &Path, entries: &[FsEntry]) -> Option<PathBuf> {
+    let mut archives: Vec<&FsEntry> = entries.iter().filter(|e| e.is_file && is_manga_archive(&e.name)).collect();
+    archives.sort_by(|a, b| natural_cmp_ci(&a.name, &b.name));
+    for archive in archives {
+        let reader = match ArchiveReader::open(&archive.path) {
+            Ok(reader) => reader,
+            Err(error) => {
+                tracing::error!("Error opening archive for ComicInfo: {error} ({})", archive.path.display());
+                continue;
+            }
+        };
+        match archive_entry::read_entry(&reader, COMIC_INFO_FILE) {
+            Ok(Some(bytes)) => {
+                let target = dir.join(COMIC_INFO_FILE);
+                return match fs::write(&target, bytes) {
+                    Ok(()) => Some(target),
+                    Err(error) => {
+                        tracing::error!("Error copying {COMIC_INFO_FILE}: {error} ({})", dir.display());
+                        None
+                    }
+                };
+            }
+            Ok(None) => {}
+            Err(error) => tracing::error!("Error reading archive entry: {error} ({})", archive.path.display()),
+        }
+    }
+    None
+}
+
+/// Creates the empty `.noxml` marker so later details fetches skip the archive scan. An existing marker is kept.
+fn create_no_xml_marker(dir: &Path) {
+    match fs::OpenOptions::new().write(true).create_new(true).open(dir.join(NO_XML_FILE)) {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => tracing::error!("Error creating {NO_XML_FILE}: {error} ({})", dir.display()),
     }
 }
 

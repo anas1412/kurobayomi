@@ -273,4 +273,46 @@ mod tests {
         assert_eq!(card.press(Button::B, at(start, 120)), Some(120));
         assert!(card.default_and_reset_enabled());
     }
+
+    /// D1: an audio run from 100 ms reads 220 ms after 120 ms, the same button is disabled, and the
+    /// other button stops it at 220.
+    #[test]
+    fn d1_audio_positive_run_from_100_ms() {
+        let start = Instant::now();
+        let mut m = DelayMeasure::new(DelayKind::Audio);
+        assert_eq!(m.press(Button::A, 100, start), Press::Started);
+        assert_eq!(m.live_value(at(start, 120)), Some(220));
+        assert_eq!(m.press(Button::A, 100, at(start, 120)), Press::Ignored);
+        assert_eq!(m.press(Button::B, 100, at(start, 120)), Press::Stopped(220));
+    }
+
+    /// D5: the enabled truth table for both kinds in each run state.
+    #[test]
+    fn d5_enabled_truth_table() {
+        let start = Instant::now();
+        let mut audio = DelayMeasure::new(DelayKind::Audio);
+        audio.press(Button::A, 0, start);
+        assert_eq!(
+            (audio.enabled(Button::A), audio.enabled(Button::B)),
+            (false, true)
+        );
+        let mut audio_neg = DelayMeasure::new(DelayKind::Audio);
+        audio_neg.press(Button::B, 0, start);
+        assert_eq!(
+            (audio_neg.enabled(Button::A), audio_neg.enabled(Button::B)),
+            (true, false)
+        );
+        let mut sub = DelayMeasure::new(DelayKind::Subtitle);
+        sub.press(Button::A, 0, start);
+        assert_eq!(
+            (sub.enabled(Button::A), sub.enabled(Button::B)),
+            (false, true)
+        );
+        let mut sub_pos = DelayMeasure::new(DelayKind::Subtitle);
+        sub_pos.press(Button::B, 0, start);
+        assert_eq!(
+            (sub_pos.enabled(Button::A), sub_pos.enabled(Button::B)),
+            (true, false)
+        );
+    }
 }

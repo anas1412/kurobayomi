@@ -102,7 +102,11 @@ mod tests {
         let ms = fuzzy_to_ms(Some(2025), Some(3), Some(10)) + 23 * 3_600_000 + 1_800_000;
         assert_eq!(
             create_date(ms),
-            Some(FuzzyDateInput { year: 2025, month: 3, day: 10 }),
+            Some(FuzzyDateInput {
+                year: 2025,
+                month: 3,
+                day: 10
+            }),
             "test 28, time of day dropped"
         );
     }
@@ -113,7 +117,11 @@ mod tests {
             let ms = local_day_ms(y, m, d);
             assert_eq!(
                 create_date(ms),
-                Some(FuzzyDateInput { year: y, month: m as u32, day: d as u32 })
+                Some(FuzzyDateInput {
+                    year: y,
+                    month: m as u32,
+                    day: d as u32
+                })
             );
         }
     }

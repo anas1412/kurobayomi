@@ -14,10 +14,13 @@
 pub mod actions;
 pub mod cells;
 pub mod display_tab;
+pub mod filter_tab;
 #[cfg(test)]
 mod fixtures;
 pub mod keys;
 pub mod mount;
+pub mod name_dialog;
+pub mod random;
 pub mod category_dialog;
 pub mod category_screen;
 pub mod delete_dialog;

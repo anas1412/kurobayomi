@@ -1,0 +1,32 @@
+[
+ {
+  "type": "audio",
+  "id": 1,
+  "lang": "jpn",
+  "title": "Japanese"
+ },
+ {
+  "type": "audio",
+  "id": 2,
+  "lang": "eng",
+  "title": "English"
+ },
+ {
+  "type": "sub",
+  "id": 1,
+  "lang": "eng",
+  "title": "English Signs"
+ },
+ {
+  "type": "sub",
+  "id": 2,
+  "lang": "eng",
+  "title": "English Commentary"
+ },
+ {
+  "type": "sub",
+  "id": 3,
+  "lang": "jpn",
+  "title": "Japanese"
+ }
+]

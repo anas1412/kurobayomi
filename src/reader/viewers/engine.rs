@@ -152,10 +152,12 @@ fn item_row(item: &ItemKey, lookup: &Lookup, host: &PageHost) -> Row {
 
 /// What a new page row is handed: the options of the current settings and the long-press report (T-43b-013).
 fn page_host(settings: &ViewerSettings, kind: ViewerKind, emit: &Emitter) -> PageHost {
-    let emit = emit.clone();
+    let (long_emit, zoom_emit) = (emit.clone(), emit.clone());
     PageHost {
         opts: page_opts(settings, kind, crate::reader::theme::system_prefers_dark()),
-        on_long_tap: Rc::new(move |page, _x, _y| emit.send(ViewerEvent::LongTap(page))),
+        on_long_tap: Rc::new(move |page, _x, _y| long_emit.send(ViewerEvent::LongTap(page))),
+        // Any zoom of a page hides the menu (T-44a-071, B§6.5).
+        on_zoom: Rc::new(move || zoom_emit.send(ViewerEvent::HideMenu)),
     }
 }
 

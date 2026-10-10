@@ -16,6 +16,7 @@ pub mod category;
 pub mod chapter;
 pub mod columns;
 pub mod compat;
+pub mod dropped;
 pub mod episode;
 pub mod error;
 pub mod extension_repo;
@@ -27,6 +28,7 @@ pub mod sanitize;
 pub mod source;
 pub mod time;
 pub mod track;
+pub mod updates;
 
 pub use kuro_db::open::{DbError as DataError, DbResult as DataResult};
 

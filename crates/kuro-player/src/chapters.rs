@@ -414,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn external_start_near_zero_snaps_to_zero() {
+    fn t22_external_start_near_zero_snaps_to_zero() {
         let out = merge(
             &[],
             &[stamp(0.4, 90.0, "", ChapterType::Opening)],
@@ -425,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn end_marker_added_when_next_stamp_is_not_adjacent() {
+    fn t23_end_marker_added_when_next_stamp_is_not_adjacent() {
         let out = merge(
             &[],
             &[
@@ -443,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn end_marker_skipped_when_end_is_at_duration() {
+    fn t24_end_marker_skipped_when_end_is_at_duration() {
         let out = with_timestamps(
             &[],
             &[stamp(60.0, 1000.5, "Ending", ChapterType::Ending)],
@@ -454,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn mpv_chapter_within_a_second_of_external_is_dropped() {
+    fn t25_mpv_chapter_within_a_second_of_external_is_dropped() {
         let current = vec![Segment {
             index: 0,
             name: "Chapter 2".to_owned(),
@@ -470,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn adjacent_empty_names_are_collapsed() {
+    fn t26_adjacent_empty_names_are_collapsed() {
         let stamps = [
             stamp(0.0, 30.0, "", ChapterType::Other),
             stamp(30.0, 60.0, "", ChapterType::Other),
@@ -485,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn null_duration_uses_the_sentinel_and_keeps_end_marker() {
+    fn t27_null_duration_uses_the_sentinel_and_keeps_end_marker() {
         let out = merge(
             &[],
             &[stamp(1300.0, 1400.0, "Ed", ChapterType::Ending)],
@@ -508,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn external_colour_only_for_known_type() {
+    fn t28_external_colour_only_for_known_type() {
         assert_eq!(color(&external(10.0, ChapterType::Other)), None);
         assert_eq!(
             color(&external(10.0, ChapterType::Opening)),

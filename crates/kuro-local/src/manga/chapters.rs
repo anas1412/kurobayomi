@@ -201,6 +201,18 @@ mod tests {
     }
 
     #[test]
+    fn t_14_chapters_epub_title_replaces_name_not_number() -> io::Result<()> {
+        let (root, mut manga) = manga_with(&[])?;
+        let fixture =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/metadata.epub");
+        fs::copy(fixture, root.path().join("Show").join("Vol 7.epub"))?;
+        let got = chapters(root.path(), &mut manga).map_err(io::Error::other)?;
+        assert_eq!(got[0].name, "Chapter Title", "the title replaces the file name");
+        assert_eq!(got[0].chapter_number, 7.0, "the number still comes from the file name");
+        Ok(())
+    }
+
+    #[test]
     fn an_epub_chapter_takes_its_title_and_date_from_the_package() -> io::Result<()> {
         let (root, mut manga) = manga_with(&[])?;
         let fixture =

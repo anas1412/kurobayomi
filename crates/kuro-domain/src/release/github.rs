@@ -1,6 +1,10 @@
 //! The GitHub latest-release client (`ReleaseServiceImpl.latest`, `GithubRelease.kt`). The HTTP call is behind
 //! [`ReleaseHttp`], so the app wires its own transport and tests can answer with fixed bodies.
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use regex::Regex;
 use serde::Deserialize;
 
 use super::{Release, ReleaseError, ReleaseService};
@@ -37,23 +41,25 @@ struct AssetDto {
     browser_download_url: String,
 }
 
-/// The names of a Linux build of `arch` (the host architecture as Rust names it), lower case.
-fn arch_tokens(arch: &str) -> &[&str] {
-    match arch {
-        "x86_64" => &["x86_64", "amd64"],
-        "aarch64" => &["aarch64", "arm64"],
-        _ => &[],
+/// The architecture tags an asset name can carry as `-<tag>`, as Rust names them.
+const ARCH_TAGS: [&str; 2] = ["x86_64", "aarch64"];
+
+/// The download of this host (`getDownloadLink`): each asset is keyed by the architecture tag its name carries as
+/// `-<tag>` (or no tag), a later asset replacing an earlier one with the same key, and the answer is the entry for
+/// `arch`, else the one with no tag. `None` when neither exists (TC-REL-04).
+pub fn pick_download_link<'a>(assets: &'a [(String, String)], arch: &str) -> Option<&'a str> {
+    let mut by_tag: HashMap<Option<&str>, &str> = HashMap::new();
+    for (name, url) in assets {
+        let tag = ARCH_TAGS.into_iter().find(|t| name.contains(&format!("-{t}")));
+        by_tag.insert(tag, url);
     }
+    by_tag.get(&Some(arch)).or_else(|| by_tag.get(&None)).copied()
 }
 
-/// The asset of this host: the first whose lower-case name holds `linux` and an architecture token of `arch`. `None`
-/// when no asset matches (TC-REL-04).
-pub fn choose_asset<'a>(assets: &'a [(String, String)], arch: &str) -> Option<&'a (String, String)> {
-    let tokens = arch_tokens(arch);
-    assets.iter().find(|(name, _)| {
-        let lower = name.to_ascii_lowercase();
-        lower.contains("linux") && tokens.iter().any(|t| lower.contains(t))
-    })
+/// The release notes without the checksum footer (`(?s)---.*Checksums.*`).
+fn strip_checksums(info: &str) -> String {
+    static FOOTER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)---.*Checksums.*").expect("fixed pattern"));
+    FOOTER.replace_all(info, "").into_owned()
 }
 
 /// The GitHub release source. `arch` is the host architecture (`std::env::consts::ARCH` in the app).
@@ -66,6 +72,11 @@ impl<H: ReleaseHttp> GithubReleases<H> {
     pub fn new(http: H, arch: &str) -> Self {
         Self { http, arch: arch.to_owned() }
     }
+
+    /// The client for the host this build runs on: `std::env::consts::ARCH` in place of `Build.SUPPORTED_ABIS[0]`.
+    pub fn for_this_host(http: H) -> Self {
+        Self::new(http, std::env::consts::ARCH)
+    }
 }
 
 impl<H: ReleaseHttp> ReleaseService for GithubReleases<H> {
@@ -76,11 +87,11 @@ impl<H: ReleaseHttp> ReleaseService for GithubReleases<H> {
         }
         let dto: ReleaseDto = serde_json::from_slice(&body).map_err(|e| ReleaseError::Parse(e.to_string()))?;
         let assets: Vec<(String, String)> = dto.assets.into_iter().map(|a| (a.name, a.browser_download_url)).collect();
-        Ok(choose_asset(&assets, &self.arch).map(|(_, url)| Release {
+        Ok(pick_download_link(&assets, &self.arch).map(|url| Release {
             version: dto.tag_name,
-            info: dto.body.unwrap_or_default(),
+            info: strip_checksums(&dto.body.unwrap_or_default()),
             release_link: dto.html_url,
-            download_link: url.clone(),
+            download_link: url.to_owned(),
         }))
     }
 }
@@ -157,15 +168,68 @@ mod tests {
     }
 
     #[test]
-    fn the_asset_rule_needs_linux_and_the_architecture_in_the_name() {
-        let assets = vec![
-            ("app-windows-x86_64.zip".to_owned(), "w".to_owned()),
-            ("app-linux-arm64.tar.gz".to_owned(), "a".to_owned()),
-            ("app-Linux-AMD64.tar.gz".to_owned(), "b".to_owned()),
-        ];
-        assert_eq!(choose_asset(&assets, "x86_64").map(|a| a.1.as_str()), Some("b"));
-        assert_eq!(choose_asset(&assets, "aarch64").map(|a| a.1.as_str()), Some("a"));
-        assert_eq!(choose_asset(&assets, "riscv64"), None);
-        assert_eq!(choose_asset(&assets[..1], "x86_64"), None);
+    fn for_this_host_reads_the_build_architecture() {
+        let host = GithubReleases::for_this_host(Fixed::new(Ok((200, BODY.as_bytes().to_vec()))));
+        assert_eq!(host.arch, std::env::consts::ARCH);
+        // BODY's only Linux asset is for x86_64, so only an x86_64 build finds it.
+        assert_eq!(host.latest("o/r").unwrap().is_some(), std::env::consts::ARCH == "x86_64");
+    }
+
+    fn assets(names: &[&str]) -> Vec<(String, String)> {
+        names.iter().map(|n| ((*n).to_owned(), format!("https://dl/{n}"))).collect()
+    }
+
+    fn pick(names: &[&str], arch: &str) -> Option<String> {
+        pick_download_link(&assets(names), arch).map(|u| u.trim_start_matches("https://dl/").to_owned())
+    }
+
+    #[test]
+    fn the_tagged_asset_of_this_architecture_is_picked() {
+        let both = ["k-1.0-x86_64.tar.zst", "k-1.0-aarch64.tar.zst"];
+        assert_eq!(pick(&both, "x86_64").as_deref(), Some("k-1.0-x86_64.tar.zst"));
+        assert_eq!(pick(&both, "aarch64").as_deref(), Some("k-1.0-aarch64.tar.zst"));
+    }
+
+    #[test]
+    fn an_untagged_asset_is_the_fallback_and_a_tagged_one_beats_it() {
+        assert_eq!(pick(&["k-1.0.tar.zst"], "x86_64").as_deref(), Some("k-1.0.tar.zst"));
+        assert_eq!(pick(&["k-1.0.tar.zst", "k-1.0-x86_64.tar.zst"], "x86_64").as_deref(), Some("k-1.0-x86_64.tar.zst"));
+        assert_eq!(pick(&["k-1.0-x86_64.tar.zst", "k-1.0.tar.zst"], "x86_64").as_deref(), Some("k-1.0-x86_64.tar.zst"));
+        assert_eq!(pick(&["k-1.0.tar.zst", "k-1.0-x86_64.tar.zst"], "riscv64").as_deref(), Some("k-1.0.tar.zst"));
+    }
+
+    #[test]
+    fn only_another_architecture_or_no_assets_is_none() {
+        assert_eq!(pick(&["k-1.0-aarch64.tar.zst"], "x86_64"), None);
+        assert_eq!(pick(&[], "x86_64"), None);
+    }
+
+    #[test]
+    fn the_later_asset_wins_on_a_duplicate_key() {
+        let dup = [("a-x86_64.zip", "first"), ("b-x86_64.zip", "last")].map(|(n, u)| (n.to_owned(), u.to_owned()));
+        assert_eq!(pick_download_link(&dup, "x86_64"), Some("last"));
+        let untagged = [("a.zip", "first"), ("b.zip", "last")].map(|(n, u)| (n.to_owned(), u.to_owned()));
+        assert_eq!(pick_download_link(&untagged, "x86_64"), Some("last"));
+    }
+
+    #[test]
+    fn the_android_abi_names_are_not_architecture_tags() {
+        assert_eq!(pick(&["app-arm64-v8a.apk"], "aarch64").as_deref(), Some("app-arm64-v8a.apk"), "untagged, so the fallback");
+        assert_eq!(pick(&["app-arm64-v8a.apk", "app-aarch64.apk"], "aarch64").as_deref(), Some("app-aarch64.apk"));
+    }
+
+    #[test]
+    fn the_checksum_footer_is_cut_from_the_notes() {
+        assert_eq!(strip_checksums("Fixes.\n\n---\n## Checksums\nabc  file\n"), "Fixes.\n\n");
+        assert_eq!(strip_checksums("Fixes\n---\nmore"), "Fixes\n---\nmore", "a rule with no Checksums after it stays");
+        assert_eq!(strip_checksums("No footer"), "No footer");
+    }
+
+    #[test]
+    fn the_release_notes_come_back_without_the_footer() {
+        let body = r#"{"tag_name":"v1","body":"Notes\n---\nChecksums\nabc","html_url":"u",
+            "assets":[{"name":"k-x86_64.zip","browser_download_url":"d"}]}"#;
+        let got = client(Ok((200, body.as_bytes().to_vec())), "x86_64").latest("o/r").unwrap().unwrap();
+        assert_eq!(got.info, "Notes\n");
     }
 }

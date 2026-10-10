@@ -107,7 +107,7 @@ impl MalApi {
             ])
             .send()
             .await?;
-        decode(check(response).await?).await
+        decode(check(response)?).await
     }
 
     /// `GET users/@me` (E4). Returns the user name.
@@ -204,14 +204,14 @@ impl MalApi {
         let url = self.api_url(&format!("/{kind}/{id}/my_list_status"), &[])?;
         let token = self.auth.bearer(&self.http).await?;
         let response = self.http.delete(url).bearer_auth(token).send().await?;
-        check(response).await?;
+        self.check_authed(response)?;
         Ok(())
     }
 
     async fn get<T: DeserializeOwned>(&self, url: Url) -> Result<T, MalError> {
         let token = self.auth.bearer(&self.http).await?;
         let response = self.http.get(url).bearer_auth(token).send().await?;
-        decode(check(response).await?).await
+        decode(self.check_authed(response)?).await
     }
 
     async fn send_form<T: DeserializeOwned>(
@@ -228,12 +228,22 @@ impl MalApi {
             .form(form)
             .send()
             .await?;
-        decode(check(response).await?).await
+        decode(self.check_authed(response)?).await
+    }
+
+    /// [`check`] for a call that sent a Bearer value. A 401 means MAL refused the token, so the auth-expired flag is
+    /// set and the call fails with [`MalError::LoginExpired`] (T-27a-074).
+    fn check_authed(&self, response: Response) -> Result<Response, MalError> {
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.auth.set_expired(true)?;
+            return Err(MalError::LoginExpired);
+        }
+        check(response)
     }
 }
 
 /// Non-2xx responses become `Http(code)`.
-async fn check(response: Response) -> Result<Response, MalError> {
+fn check(response: Response) -> Result<Response, MalError> {
     let status = response.status();
     if status.is_success() {
         Ok(response)

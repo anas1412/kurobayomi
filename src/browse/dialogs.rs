@@ -104,6 +104,18 @@ impl DialogSlot {
                 gtk::glib::Propagation::Proceed
             });
         }
+        // Escape cancels: it closes the dialog, which answers `None` like any dismissal
+        let escape = gtk::EventControllerKey::new();
+        let closing = window.clone();
+        escape.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                closing.close();
+                gtk::glib::Propagation::Stop
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+        window.add_controller(escape);
         *self.current.borrow_mut() = Some(window.clone());
         window.present();
         window
@@ -179,7 +191,27 @@ pub(crate) mod tests {
         second.close();
     }
 
+    fn escape_cancels_the_dialog_with_the_dismiss_answer() {
+        let slot = DialogSlot::new();
+        let anchor = gtk::Label::new(None);
+        let answers: Rc<RefCell<Vec<Option<usize>>>> = Rc::default();
+        let log = Rc::clone(&answers);
+        let window = slot.show(&anchor, spec("Ask"), move |a| log.borrow_mut().push(a));
+        let controllers = window.observe_controllers();
+        let keys = (0..controllers.n_items())
+            .filter_map(|i| controllers.item(i))
+            .find_map(|c| c.downcast::<gtk::EventControllerKey>().ok())
+            .expect("key controller");
+        let none = gtk::gdk::ModifierType::empty();
+        assert!(!keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::a, &0_u32, &none]), "other keys go on");
+        assert!(answers.borrow().is_empty());
+        assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Escape, &0_u32, &none]));
+        assert_eq!(*answers.borrow(), [None], "Escape is a dismissal");
+        assert!(slot.current().is_none());
+    }
+
     pub(crate) fn smoke() {
+        escape_cancels_the_dialog_with_the_dismiss_answer();
         a_button_answers_with_its_index_once_and_closing_without_one_answers_none();
         a_second_dialog_replaces_the_open_one();
     }

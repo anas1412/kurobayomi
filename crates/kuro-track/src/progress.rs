@@ -1,11 +1,12 @@
 //! Progress updates (`TrackEpisode.kt`, `TrackChapter.kt`): push "episode N seen" or "chapter N read" to every
-//! logged-in tracker that is behind it. Offline and failed updates go to the retry queue. Each tracker's
-//! outcome is returned, so no error is rethrown to the caller.
+//! logged-in tracker that is behind it. The trackers run concurrently and one failure never blocks another (EC-44).
+//! Offline and failed updates go to the retry queue. Every error is logged at info, and each tracker's outcome is
+//! returned as a value, so no error is rethrown to the caller.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-
+use futures::future::join_all;
 use tokio::task::JoinHandle;
 
 use crate::ctx::TrackCtx;
@@ -14,9 +15,10 @@ use crate::error::TrackError;
 use crate::error::redact;
 use crate::events::TrackEvent;
 use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::policy::auto_update_allowed;
 use crate::queue::QueueItem;
 use crate::queue::retry::{ItemOutcome, RetryRunner};
-use crate::tracker::{AnimeTracker, MangaTracker};
+use crate::tracker::{AnimeTracker, MangaTracker, Tracker};
 
 /// What a progress update did for one tracker.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,53 +61,66 @@ pub fn spawn_track_episode(
     })
 }
 
-/// `already_locked` is set when the caller holds every binding lock, so none is taken here.
+/// `already_locked` is set when the caller holds every binding lock, so none is taken here. The eligible trackers run
+/// concurrently, so one slow or failing tracker never delays another (EC-44). Results come back in registry order.
 async fn track_episode_with(
     ctx: &TrackCtx,
     entry_id: i64,
     episode: f64,
     already_locked: bool,
 ) -> Vec<(TrackerId, TrackOutcome)> {
-    let mut out = Vec::new();
-    for tracker in ctx.trackers.logged_in() {
-        let Some(api) = tracker.as_anime() else {
-            continue;
-        };
-        let id = tracker.id();
-        let lock = ctx.locks.for_binding(Kind::Anime, entry_id, id);
-        let _guard = if already_locked {
-            None
-        } else {
-            Some(lock.lock().await)
-        };
-        let binding = match ctx.anime_binding(entry_id, id).await {
-            Ok(Some(b)) => b,
-            Ok(None) => continue,
-            Err(e) => {
-                out.push((id, TrackOutcome::Failed(e.to_string())));
-                continue;
-            }
-        };
-        let outcome = if episode <= binding.last_episode_seen {
-            TrackOutcome::Skipped
-        } else if !ctx.net.is_online() {
-            queue_progress(ctx, Kind::Anime, entry_id, id, episode)
-        } else {
-            match apply_anime(ctx, &binding, api, episode).await {
-                Ok(()) => {
-                    settle(ctx, Kind::Anime, entry_id, id, episode);
-                    TrackOutcome::Updated
-                }
-                Err(e) if e.is_retry_futile() => TrackOutcome::Failed(e.to_string()),
-                Err(e) => {
-                    tracing::info!(entry = entry_id, tracker = id.0, error = %redact(&e.to_string()), "episode update queued");
-                    queue_progress(ctx, Kind::Anime, entry_id, id, episode)
-                }
-            }
-        };
-        out.push((id, outcome));
+    // T-29a-057: with the switch off nothing is sent, and nothing is queued either. Incognito reading never reaches
+    // here; the reader or player checks it with the same gate.
+    if !auto_update_allowed(&ctx.prefs, false) {
+        return Vec::new();
     }
-    out
+    let runs = ctx
+        .trackers
+        .logged_in()
+        .into_iter()
+        .map(|tracker| episode_for(ctx, tracker, entry_id, episode, already_locked));
+    join_all(runs).await.into_iter().flatten().collect()
+}
+
+/// One tracker's share of [`track_episode_with`]. `None` when the tracker is not an anime tracker or has no binding.
+async fn episode_for(
+    ctx: &TrackCtx,
+    tracker: Arc<dyn Tracker>,
+    entry_id: i64,
+    episode: f64,
+    already_locked: bool,
+) -> Option<(TrackerId, TrackOutcome)> {
+    let api = tracker.as_anime()?;
+    let id = tracker.id();
+    let lock = ctx.locks.for_binding(Kind::Anime, entry_id, id);
+    let _guard = if already_locked {
+        None
+    } else {
+        Some(lock.lock().await)
+    };
+    let binding = match ctx.anime_binding(entry_id, id).await {
+        Ok(Some(b)) => b,
+        Ok(None) => return None,
+        Err(e) => return Some((id, failed(entry_id, id, "episode", &e.to_string()))),
+    };
+    let outcome = if episode <= binding.last_episode_seen {
+        TrackOutcome::Skipped
+    } else if !ctx.net.is_online() {
+        queue_progress(ctx, Kind::Anime, entry_id, id, episode)
+    } else {
+        match apply_anime(ctx, &binding, api, episode).await {
+            Ok(()) => {
+                settle(ctx, Kind::Anime, entry_id, id, episode);
+                TrackOutcome::Updated
+            }
+            Err(e) if e.is_retry_futile() => failed(entry_id, id, "episode", &e.to_string()),
+            Err(e) => {
+                tracing::info!(entry = entry_id, tracker = id.0, error = %redact(&e.to_string()), "episode update queued");
+                queue_progress(ctx, Kind::Anime, entry_id, id, episode)
+            }
+        }
+    };
+    Some((id, outcome))
 }
 
 /// Pushes chapter `chapter` to every logged-in manga tracker with a binding for `manga_id`.
@@ -136,53 +151,71 @@ pub fn spawn_track_chapter(
     })
 }
 
-/// `already_locked` is set when the caller holds every binding lock, so none is taken here.
+/// `already_locked` is set when the caller holds every binding lock, so none is taken here. The eligible trackers run
+/// concurrently (EC-44), as in [`track_episode_with`].
 async fn track_chapter_with(
     ctx: &TrackCtx,
     manga_id: i64,
     chapter: f64,
     already_locked: bool,
 ) -> Vec<(TrackerId, TrackOutcome)> {
-    let mut out = Vec::new();
-    for tracker in ctx.trackers.logged_in() {
-        let Some(api) = tracker.as_manga() else {
-            continue;
-        };
-        let id = tracker.id();
-        let lock = ctx.locks.for_binding(Kind::Manga, manga_id, id);
-        let _guard = if already_locked {
-            None
-        } else {
-            Some(lock.lock().await)
-        };
-        let binding = match ctx.manga_binding(manga_id, id).await {
-            Ok(Some(b)) => b,
-            Ok(None) => continue,
-            Err(e) => {
-                out.push((id, TrackOutcome::Failed(e.to_string())));
-                continue;
-            }
-        };
-        let outcome = if chapter <= binding.last_chapter_read {
-            TrackOutcome::Skipped
-        } else if !ctx.net.is_online() {
-            queue_progress(ctx, Kind::Manga, manga_id, id, chapter)
-        } else {
-            match apply_manga(ctx, &binding, api, chapter).await {
-                Ok(()) => {
-                    settle(ctx, Kind::Manga, manga_id, id, chapter);
-                    TrackOutcome::Updated
-                }
-                Err(e) if e.is_retry_futile() => TrackOutcome::Failed(e.to_string()),
-                Err(e) => {
-                    tracing::info!(entry = manga_id, tracker = id.0, error = %redact(&e.to_string()), "chapter update queued");
-                    queue_progress(ctx, Kind::Manga, manga_id, id, chapter)
-                }
-            }
-        };
-        out.push((id, outcome));
+    // T-29a-057: see `track_episode_with`.
+    if !auto_update_allowed(&ctx.prefs, false) {
+        return Vec::new();
     }
-    out
+    let runs = ctx
+        .trackers
+        .logged_in()
+        .into_iter()
+        .map(|tracker| chapter_for(ctx, tracker, manga_id, chapter, already_locked));
+    join_all(runs).await.into_iter().flatten().collect()
+}
+
+/// One tracker's share of [`track_chapter_with`]. `None` when the tracker is not a manga tracker or has no binding.
+async fn chapter_for(
+    ctx: &TrackCtx,
+    tracker: Arc<dyn Tracker>,
+    manga_id: i64,
+    chapter: f64,
+    already_locked: bool,
+) -> Option<(TrackerId, TrackOutcome)> {
+    let api = tracker.as_manga()?;
+    let id = tracker.id();
+    let lock = ctx.locks.for_binding(Kind::Manga, manga_id, id);
+    let _guard = if already_locked {
+        None
+    } else {
+        Some(lock.lock().await)
+    };
+    let binding = match ctx.manga_binding(manga_id, id).await {
+        Ok(Some(b)) => b,
+        Ok(None) => return None,
+        Err(e) => return Some((id, failed(manga_id, id, "chapter", &e.to_string()))),
+    };
+    let outcome = if chapter <= binding.last_chapter_read {
+        TrackOutcome::Skipped
+    } else if !ctx.net.is_online() {
+        queue_progress(ctx, Kind::Manga, manga_id, id, chapter)
+    } else {
+        match apply_manga(ctx, &binding, api, chapter).await {
+            Ok(()) => {
+                settle(ctx, Kind::Manga, manga_id, id, chapter);
+                TrackOutcome::Updated
+            }
+            Err(e) if e.is_retry_futile() => failed(manga_id, id, "chapter", &e.to_string()),
+            Err(e) => {
+                tracing::info!(entry = manga_id, tracker = id.0, error = %redact(&e.to_string()), "chapter update queued");
+                queue_progress(ctx, Kind::Manga, manga_id, id, chapter)
+            }
+        }
+    };
+    Some((id, outcome))
+}
+
+/// A failure that was not queued: logged at info (`TrackChapter.kt` logs and swallows) and kept as an outcome.
+fn failed(entry: i64, tracker: TrackerId, what: &str, message: &str) -> TrackOutcome {
+    tracing::info!(entry, tracker = tracker.0, error = %redact(message), "{what} update failed");
+    TrackOutcome::Failed(message.to_owned())
 }
 
 /// Refresh, copy the progress in, update the remote, then store locally (`TrackEpisode.kt:31-44`). Nothing is
@@ -236,7 +269,7 @@ fn queue_progress(
 ) -> TrackOutcome {
     match ctx.enqueue(kind, entry_id, tracker, progress) {
         Ok(()) => TrackOutcome::Queued,
-        Err(e) => TrackOutcome::Failed(e.to_string()),
+        Err(e) => failed(entry_id, tracker, "queue", &e.to_string()),
     }
 }
 
@@ -457,6 +490,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ec_44_eligible_anime_trackers_run_together() {
+        let h = Harness::new();
+        h.login(TrackerId::KITSU);
+        h.login(TrackerId::SIMKL);
+        for id in [TrackerId::KITSU, TrackerId::SIMKL] {
+            h.ctx
+                .anime_tracks
+                .upsert(&anime_binding(1, id, 1.0))
+                .await
+                .unwrap();
+        }
+        // Each update waits for the other one. A sequential loop would never get past the first.
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        for id in [TrackerId::KITSU, TrackerId::SIMKL] {
+            *h.anime_tracker(id).gate.lock().unwrap() = Some(barrier.clone());
+        }
+        let out = tokio::time::timeout(Duration::from_secs(5), track_episode(&h.ctx, 1, 2.0))
+            .await
+            .expect("the trackers ran concurrently");
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|(_, o)| *o == TrackOutcome::Updated));
+    }
+
+    #[tokio::test]
+    async fn ec_44_one_failing_manga_tracker_does_not_block_the_other() {
+        let h = Harness::new();
+        h.login(TrackerId::MANGAUPDATES);
+        h.login(TrackerId::KAVITA);
+        for id in [TrackerId::MANGAUPDATES, TrackerId::KAVITA] {
+            h.ctx
+                .manga_tracks
+                .upsert(&manga_binding(9, id, 1.0))
+                .await
+                .unwrap();
+        }
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        for id in [TrackerId::MANGAUPDATES, TrackerId::KAVITA] {
+            *h.manga_tracker(id).gate.lock().unwrap() = Some(barrier.clone());
+        }
+        *h.manga_tracker(TrackerId::MANGAUPDATES).fail.lock().unwrap() = Some("HTTP 500".into());
+
+        let out = tokio::time::timeout(Duration::from_secs(5), track_chapter(&h.ctx, 9, 2.0))
+            .await
+            .expect("the trackers ran concurrently");
+        let outcome = |id| out.iter().find(|(t, _)| *t == id).map(|(_, o)| o.clone());
+        assert_eq!(outcome(TrackerId::MANGAUPDATES), Some(TrackOutcome::Queued));
+        assert_eq!(outcome(TrackerId::KAVITA), Some(TrackOutcome::Updated));
+        let rows = h.ctx.manga_tracks.list_for_entry(9).await.unwrap();
+        assert!(rows.iter().any(|r| r.tracker_id == TrackerId::KAVITA && r.last_chapter_read == 2.0));
+    }
+
+    #[tokio::test]
     async fn tr_27_112_chapter_success_and_failure_queue_rules() {
         let h = Harness::new();
         h.login(TrackerId::MANGAUPDATES);
@@ -482,6 +567,50 @@ mod tests {
             h.ctx.queue.list(Kind::Anime).unwrap().is_empty(),
             "D3: kinds stay apart"
         );
+    }
+
+    #[tokio::test]
+    async fn t_29a_057_with_the_switch_off_reading_and_watching_send_no_update() {
+        let h = Harness::new();
+        h.login(TrackerId::KITSU);
+        h.login(TrackerId::MANGAUPDATES);
+        h.ctx
+            .anime_tracks
+            .upsert(&anime_binding(5, TrackerId::KITSU, 1.0))
+            .await
+            .unwrap();
+        h.ctx
+            .manga_tracks
+            .upsert(&manga_binding(9, TrackerId::MANGAUPDATES, 1.0))
+            .await
+            .unwrap();
+        h.ctx.prefs.auto_update_track.set(false).unwrap();
+
+        assert!(track_episode(&h.ctx, 5, 2.0).await.is_empty());
+        assert!(track_chapter(&h.ctx, 9, 2.0).await.is_empty());
+        assert!(
+            spawn_track_episode(h.ctx.clone(), 5, 2.0)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            spawn_track_chapter(h.ctx.clone(), 9, 2.0)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !logs(&h).iter().any(|l| l.starts_with("update")),
+            "no PUT is sent"
+        );
+        assert!(h.ctx.queue.list(Kind::Anime).unwrap().is_empty());
+        assert!(h.ctx.queue.list(Kind::Manga).unwrap().is_empty());
+
+        h.ctx.prefs.auto_update_track.set(true).unwrap();
+        let out = track_episode(&h.ctx, 5, 2.0).await;
+        assert_eq!(out, vec![(TrackerId::KITSU, TrackOutcome::Updated)]);
+        assert!(logs(&h).iter().any(|l| l.starts_with("update")));
     }
 
     #[tokio::test]

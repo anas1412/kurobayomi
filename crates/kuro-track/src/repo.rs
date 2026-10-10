@@ -162,7 +162,8 @@ impl AnimeTrackRepo for kuro_data::track::AnimeTrackRepo {
 
     async fn list_for_entry(&self, anime_id: i64) -> Result<Vec<AnimeTrack>, TrackError> {
         let repo = self.clone();
-        let rows = blocking(move || kuro_data::track::AnimeTrackRepo::by_entry(&repo, anime_id)).await?;
+        let rows =
+            blocking(move || kuro_data::track::AnimeTrackRepo::by_entry(&repo, anime_id)).await?;
         Ok(rows.iter().map(AnimeTrack::from_db).collect())
     }
 
@@ -173,7 +174,8 @@ impl AnimeTrackRepo for kuro_data::track::AnimeTrackRepo {
 
     async fn delete(&self, anime_id: i64, tracker_id: TrackerId) -> Result<(), TrackError> {
         let repo = self.clone();
-        blocking(move || kuro_data::track::AnimeTrackRepo::delete(&repo, anime_id, tracker_id.0)).await
+        blocking(move || kuro_data::track::AnimeTrackRepo::delete(&repo, anime_id, tracker_id.0))
+            .await
     }
 }
 
@@ -208,7 +210,8 @@ impl MangaTrackRepo for kuro_data::track::MangaTrackRepo {
 
     async fn list_for_entry(&self, manga_id: i64) -> Result<Vec<MangaTrack>, TrackError> {
         let repo = self.clone();
-        let rows = blocking(move || kuro_data::track::MangaTrackRepo::by_entry(&repo, manga_id)).await?;
+        let rows =
+            blocking(move || kuro_data::track::MangaTrackRepo::by_entry(&repo, manga_id)).await?;
         Ok(rows.iter().map(MangaTrack::from_db).collect())
     }
 
@@ -219,7 +222,8 @@ impl MangaTrackRepo for kuro_data::track::MangaTrackRepo {
 
     async fn delete(&self, manga_id: i64, tracker_id: TrackerId) -> Result<(), TrackError> {
         let repo = self.clone();
-        blocking(move || kuro_data::track::MangaTrackRepo::delete(&repo, manga_id, tracker_id.0)).await
+        blocking(move || kuro_data::track::MangaTrackRepo::delete(&repo, manga_id, tracker_id.0))
+            .await
     }
 }
 
@@ -227,7 +231,8 @@ impl MangaTrackRepo for kuro_data::track::MangaTrackRepo {
 impl AnimeEpisodeRepo for kuro_data::episode::EpisodeRepo {
     async fn list(&self, anime_id: i64) -> Result<Vec<UnitRef>, TrackError> {
         let repo = self.clone();
-        let rows = blocking(move || kuro_data::episode::EpisodeRepo::by_anime_id(&repo, anime_id)).await?;
+        let rows =
+            blocking(move || kuro_data::episode::EpisodeRepo::by_anime_id(&repo, anime_id)).await?;
         Ok(rows
             .into_iter()
             .map(|e| UnitRef {
@@ -258,7 +263,9 @@ impl AnimeEpisodeRepo for kuro_data::episode::EpisodeRepo {
 impl MangaChapterRepo for kuro_data::chapter::ChapterRepo {
     async fn list(&self, manga_id: i64) -> Result<Vec<UnitRef>, TrackError> {
         let repo = self.clone();
-        let rows = blocking(move || kuro_data::chapter::ChapterRepo::by_manga_id(&repo, manga_id, false)).await?;
+        let rows =
+            blocking(move || kuro_data::chapter::ChapterRepo::by_manga_id(&repo, manga_id, false))
+                .await?;
         Ok(rows
             .into_iter()
             .map(|c| UnitRef {
@@ -289,7 +296,9 @@ impl MangaChapterRepo for kuro_data::chapter::ChapterRepo {
 impl AnimeHistoryRepo for kuro_data::history::AnimeHistoryRepo {
     async fn seen_times(&self, anime_id: i64) -> Result<Vec<Option<i64>>, TrackError> {
         let repo = self.clone();
-        let rows = blocking(move || kuro_data::history::AnimeHistoryRepo::by_anime_id(&repo, anime_id)).await?;
+        let rows =
+            blocking(move || kuro_data::history::AnimeHistoryRepo::by_anime_id(&repo, anime_id))
+                .await?;
         Ok(rows.iter().map(|h| h.last_seen).collect())
     }
 }
@@ -298,7 +307,9 @@ impl AnimeHistoryRepo for kuro_data::history::AnimeHistoryRepo {
 impl MangaHistoryRepo for kuro_data::history::MangaHistoryRepo {
     async fn read_times(&self, manga_id: i64) -> Result<Vec<Option<i64>>, TrackError> {
         let repo = self.clone();
-        let rows = blocking(move || kuro_data::history::MangaHistoryRepo::by_manga_id(&repo, manga_id)).await?;
+        let rows =
+            blocking(move || kuro_data::history::MangaHistoryRepo::by_manga_id(&repo, manga_id))
+                .await?;
         Ok(rows.iter().map(|h| Some(h.last_read)).collect())
     }
 }

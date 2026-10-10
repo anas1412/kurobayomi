@@ -37,6 +37,11 @@ pub trait Tracker: Send + Sync {
     fn supports_private_tracking(&self) -> bool {
         false
     }
+    /// True when the remove dialog deletes the local row first and then the remote one, so a failed remote delete is
+    /// shown but does not bring the local row back (Kitsu, T-30a-022). The default runs the remote delete first.
+    fn removes_local_first(&self) -> bool {
+        false
+    }
     fn completion_status(&self) -> i64;
     /// Score labels in index order. The stored score is `index_to_score(index)`.
     fn score_list(&self) -> &[String];

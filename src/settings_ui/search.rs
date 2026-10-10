@@ -198,9 +198,29 @@ fn result_row(hit: &Hit) -> gtk::ListBoxRow {
     row
 }
 
+/// The settings search over every screen.
+pub fn page() -> Option<Built> {
+    search_page(false)
+}
+
+/// The settings search over the player screens only, as the player settings' search button opens it (T-48a-011).
+pub fn player_page() -> Option<Built> {
+    search_page(true)
+}
+
+/// The index the search reads: every row, or only the player rows when `player_only`.
+fn scoped_index(player_only: bool) -> Vec<Row> {
+    let rows = index();
+    if player_only {
+        rows.into_iter().filter(|row| row.player).collect()
+    } else {
+        rows
+    }
+}
+
 /// The settings search screen. Each keystroke re-runs the search. Opening it focuses the field; Enter gives the focus
 /// back; a result opens its screen and asks that screen to highlight the row.
-pub fn page() -> Option<Built> {
+fn search_page(player_only: bool) -> Option<Built> {
     let col = gtk::Box::new(gtk::Orientation::Vertical, 8);
     col.set_margin_start(16);
     col.set_margin_end(16);
@@ -222,7 +242,7 @@ pub fn page() -> Option<Built> {
         entry.connect_search_changed(move |entry| {
             clear(&results);
             let query = entry.text();
-            let found = hits(&index(), query.as_str());
+            let found = hits(&scoped_index(player_only), query.as_str());
             empty.set_visible(!query.is_empty() && found.is_empty());
             for hit in &found {
                 results.append(&result_row(hit));

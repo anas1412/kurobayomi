@@ -1,8 +1,9 @@
-//! Page decode (T-43b-014, decode half). The decode itself is pure (the `image` crate, no GTK) and runs on the blocking
-//! pool; the page view turns the RGBA bytes into a `gdk::Texture` on the GTK thread.
+//! Page decode (T-43b-014, T-44a-050, decode half). The decode itself is pure (the `image` crate, no GTK) and runs on the
+//! blocking pool. The page view cuts the RGBA into a tile pyramid (`tiles`) and turns the visible tiles into
+//! `gdk::Texture`s on the GTK thread.
 //!
-//! `needs_tiling` is the decision the tiling work (T-43b-021, P1) will use. P0 always uploads one texture (topic
-//! section 6).
+//! `needs_tiling` is the predicate for a page too large for one texture; the pyramid itself is built for every page
+//! and has one level when the page fits.
 
 /// The hardware bitmap threshold default (`GLUtil.SAFE_TEXTURE_LIMIT`).
 pub const DEFAULT_TILE_THRESHOLD: u32 = 2048;
@@ -37,6 +38,24 @@ pub struct DecodedPage {
 /// Whether a page this large must be tiled rather than uploaded whole (E-06): the longer edge exceeds the threshold.
 pub fn needs_tiling(width: u32, height: u32, threshold: u32) -> bool {
     width.max(height) > threshold
+}
+
+/// Shrinks a page to `width` pixels wide, keeping its aspect ratio, when it is wider than that. A narrower page is never
+/// enlarged (B§8.4: webtoon pages decode at the view width). A page that cannot be rebuilt comes back empty, which the
+/// page view shows as a load error.
+pub fn fit_to_width(page: DecodedPage, width: u32) -> DecodedPage {
+    if width == 0 || page.width <= width {
+        return page;
+    }
+    let height = (u64::from(page.height) * u64::from(width) / u64::from(page.width)).max(1) as u32;
+    let DecodedPage { width: src_w, height: src_h, rgba } = page;
+    match image::RgbaImage::from_raw(src_w, src_h, rgba) {
+        Some(img) => {
+            let out = image::imageops::resize(&img, width, height, image::imageops::FilterType::Triangle);
+            DecodedPage { width: out.width(), height: out.height(), rgba: out.into_raw() }
+        }
+        None => DecodedPage { width: 0, height: 0, rgba: Vec::new() },
+    }
 }
 
 /// Decodes page bytes to RGBA8. An empty input is `Corrupt`. Bytes with no known image signature are
@@ -90,6 +109,19 @@ mod tests {
     fn e07_unknown_bytes_are_unsupported_and_empty_input_is_corrupt() {
         assert_eq!(decode_rgba(b"this is plain text, not an image"), Err(DecodeError::UnsupportedFormat));
         assert_eq!(decode_rgba(&[]), Err(DecodeError::Corrupt));
+    }
+
+    #[test]
+    fn a_wide_page_is_shrunk_to_the_view_width_and_a_narrow_one_is_kept() {
+        let wide = DecodedPage { width: 400, height: 200, rgba: vec![7; 400 * 200 * 4] };
+        let shrunk = fit_to_width(wide, 200);
+        assert_eq!((shrunk.width, shrunk.height), (200, 100));
+        assert_eq!(shrunk.rgba.len(), 200 * 100 * 4);
+        let narrow = DecodedPage { width: 100, height: 50, rgba: vec![7; 100 * 50 * 4] };
+        let kept = fit_to_width(narrow, 800);
+        assert_eq!((kept.width, kept.height), (100, 50), "never enlarged");
+        let zero_view = DecodedPage { width: 10, height: 10, rgba: vec![0; 400] };
+        assert_eq!(fit_to_width(zero_view, 0).width, 10, "no view width, no change");
     }
 
     #[test]

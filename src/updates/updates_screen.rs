@@ -9,7 +9,7 @@ use chrono::{Local, Months};
 use gtk::gdk::ModifierType;
 use gtk::glib;
 use gtk::prelude::*;
-use gtk::{Box as GBox, Button, CheckButton, GestureClick, GestureLongPress, Label, ListBox, Orientation as O};
+use gtk::{Box as GBox, Button, CheckButton, GestureClick, GestureLongPress, Image, Label, ListBox, Orientation as O};
 use kuro_domain::dates::ListRow;
 use kuro_domain::kind::EntryKind;
 use kuro_domain::updates::repo::UpdatesRepo;
@@ -17,14 +17,20 @@ use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::ui::UiPrefs;
 
 use crate::data;
+use crate::updates::bottom_bar::{self, BarAction, Selected};
 use crate::updates::bulk::{self, BulkAction};
 use crate::updates::coalesce::watch_coalesced;
+use crate::updates::download_state::DownloadState;
 use crate::updates::feed::{self, FeedRow, Gesture, Press};
-use crate::updates::history::{COALESCE_MS, NOT_FOUND_TOAST_MS};
+use crate::updates::format;
+use crate::updates::history::COALESCE_MS;
 use crate::updates::screen_toast::ScreenToast;
 use crate::updates::selection::{Selection, is_selection_mode};
 use crate::updates::state_page::PageStates;
-use crate::updates::updates_page::{BackAction, UpdatesLoad, back_action, cover_click_enabled};
+use crate::updates::updates_page::{self, BackAction, UpdatesLoad, back_action, cover_click_enabled};
+
+/// How long the screen's toasts stay (the Updates failure and the bar's errors).
+const TOAST_MS: u64 = 4_000;
 
 /// The gesture of a click: Ctrl and Shift change what a tap means.
 fn click_gesture(state: ModifierType) -> Gesture {
@@ -63,7 +69,9 @@ impl UpdatesScreen {
                     screen.start();
                 }
             });
-            let bar = build_bar(kind, weak);
+            let bar = GBox::new(O::Horizontal, 6);
+            crate::ui::margins(&bar, 6);
+            bar.set_visible(false);
             let body = GBox::new(O::Vertical, 0);
             body.append(&bar);
             body.append(pages.widget());
@@ -146,25 +154,30 @@ impl UpdatesScreen {
         let weak = Rc::downgrade(self);
         let handle = watch_coalesced(sub, COALESCE_MS, move |published| {
             let Some(screen) = weak.upgrade() else { return };
-            screen.publish(published.map(|rows| (*rows).clone()));
+            let toast = screen.publish(published.map(|rows| (*rows).clone()));
             screen.render();
+            if let Some(message) = toast {
+                screen.toast.show(&message, TOAST_MS);
+            }
         });
         *self.watch.borrow_mut() = Some(handle);
         self.render();
     }
 
-    fn publish(&self, result: Result<Vec<kuro_domain::updates::model::UpdateRow>, String>) {
+    /// Applies one query result. A failure keeps a feed on screen and returns the toast text (T-42b-003).
+    fn publish(&self, result: Result<Vec<kuro_domain::updates::model::UpdateRow>, String>) -> Option<String> {
         let mut load = self.load.borrow_mut();
-        *load = match result {
+        match result {
             Ok(rows) => {
                 let previous = match &*load {
                     UpdatesLoad::Loaded(previous) => previous.clone(),
                     _ => Vec::new(),
                 };
-                UpdatesLoad::Loaded(feed::replace_rows(rows, &previous, &mut self.selection.borrow_mut()))
+                *load = UpdatesLoad::Loaded(feed::replace_rows(rows, &previous, &mut self.selection.borrow_mut()));
+                None
             }
-            Err(message) => UpdatesLoad::Failed(message),
-        };
+            Err(message) => load.apply_failure(&message),
+        }
     }
 
     fn render(self: &Rc<Self>) {
@@ -177,7 +190,7 @@ impl UpdatesScreen {
             (load.page(), rows)
         };
         let mode = is_selection_mode(&rows);
-        self.bar.set_visible(mode);
+        self.fill_bar(&rows, mode);
         self.fill(&rows, mode);
         self.pages.show(&page);
     }
@@ -186,6 +199,7 @@ impl UpdatesScreen {
         while let Some(child) = self.col.first_child() {
             child.unparent();
         }
+        self.col.append(&last_updated_label());
         let ui = UiPrefs::new(data::app().base.store().clone());
         let items = feed::layout(
             rows,
@@ -213,6 +227,9 @@ impl UpdatesScreen {
                     list.append(&self.row(&rows[i], mode));
                 }
             }
+        }
+        if let Some(footer) = updates_page::limit_footer(rows.len()) {
+            self.col.append(&crate::ui::dim(footer));
         }
     }
 
@@ -333,51 +350,99 @@ impl UpdatesScreen {
         };
         self.render();
         if let Some(message) = message {
-            self.toast.show(&message, NOT_FOUND_TOAST_MS);
+            self.toast.show(&message, TOAST_MS);
         }
     }
 }
 
-/// The bulk bar: select all, the bookmark pair, the fillermark pair (anime), mark read and unread, and cancel.
-fn build_bar(kind: EntryKind, weak: &Weak<UpdatesScreen>) -> GBox {
-    let bar = GBox::new(O::Horizontal, 6);
-    crate::ui::margins(&bar, 6);
-    bar.set_visible(false);
-    let anime = kind == EntryKind::Anime;
-    let button = |icon: &str, tip: String, on: Rc<dyn Fn(&Rc<UpdatesScreen>)>| {
-        let b = Button::from_icon_name(icon);
-        b.set_tooltip_text(Some(&tip));
-        let weak = weak.clone();
-        b.connect_clicked(move |_| {
+impl UpdatesScreen {
+    /// Rebuilds the bulk bar from the selection (T-42a-036): the close button and the "N selected" count, then the
+    /// actions the predicates allow, then select-all. Actions with no executor yet (download, delete, play) are not
+    /// drawn; see `bottom_bar` for their predicates.
+    fn fill_bar(self: &Rc<Self>, rows: &[FeedRow], mode: bool) {
+        while let Some(child) = self.bar.first_child() {
+            self.bar.remove(&child);
+        }
+        self.bar.set_visible(mode);
+        if !mode {
+            return;
+        }
+        let anime = self.kind == EntryKind::Anime;
+        let selected: Vec<Selected> = rows
+            .iter()
+            .filter(|r| r.selected)
+            .map(|r| Selected {
+                read: r.row.done,
+                bookmark: r.row.bookmark,
+                fillermark: r.row.fillermark,
+                progress: r.row.progress,
+                // The download state is not in the feed row yet (the queue is not in the app state).
+                state: DownloadState::NotDownloaded,
+            })
+            .collect();
+        let close = Button::from_icon_name("window-close-symbolic");
+        close.set_tooltip_text(Some(&tr(MsgKey::action_cancel)));
+        let weak = Rc::downgrade(self);
+        close.connect_clicked(move |_| {
             if let Some(screen) = weak.upgrade() {
-                on(&screen);
+                screen.clear_selection();
             }
         });
-        b
-    };
-    let action = |a: BulkAction| -> Rc<dyn Fn(&Rc<UpdatesScreen>)> { Rc::new(move |s| s.bulk(a)) };
-    bar.append(&button("edit-select-all-symbolic", tr(MsgKey::action_select_all), Rc::new(|s| s.select_all())));
-    let (add_bookmark, drop_bookmark) = if anime {
-        (MsgKey::action_bookmark_episode, MsgKey::action_remove_bookmark_episode)
-    } else {
-        (MsgKey::action_bookmark, MsgKey::action_remove_bookmark)
-    };
-    bar.append(&button("starred-symbolic", tr(add_bookmark), action(BulkAction::Bookmark(true))));
-    bar.append(&button("non-starred-symbolic", tr(drop_bookmark), action(BulkAction::Bookmark(false))));
-    if anime {
-        bar.append(&button("tag-symbolic", tr(MsgKey::action_fillermark_episode), action(BulkAction::Fillermark(true))));
-        bar.append(&button("tag-outline-symbolic", tr(MsgKey::action_remove_fillermark_episode), action(BulkAction::Fillermark(false))));
+        self.bar.append(&close);
+        self.bar.append(&Label::new(Some(&bottom_bar::selected_text(selected.len()))));
+        for action in bottom_bar::visible_actions(anime, &selected, false) {
+            if let Some(bulk_action) = bulk_for(action) {
+                self.bar.append(&self.bar_button(action, anime, bulk_action));
+            }
+        }
+        let spacer = GBox::new(O::Horizontal, 0);
+        spacer.set_hexpand(true);
+        self.bar.append(&spacer);
+        let select_all = Button::from_icon_name("edit-select-all-symbolic");
+        select_all.set_tooltip_text(Some(&tr(MsgKey::action_select_all)));
+        let weak = Rc::downgrade(self);
+        select_all.connect_clicked(move |_| {
+            if let Some(screen) = weak.upgrade() {
+                screen.select_all();
+            }
+        });
+        self.bar.append(&select_all);
     }
-    let (mark_read, mark_unread) = if anime {
-        (MsgKey::action_mark_as_seen, MsgKey::action_mark_as_unseen)
-    } else {
-        (MsgKey::action_mark_as_read, MsgKey::action_mark_as_unread)
-    };
-    bar.append(&button("object-select-symbolic", tr(mark_read), action(BulkAction::MarkRead(true))));
-    bar.append(&button("window-close-symbolic", tr(mark_unread), action(BulkAction::MarkRead(false))));
-    let spacer = GBox::new(O::Horizontal, 0);
-    spacer.set_hexpand(true);
-    bar.append(&spacer);
-    bar.append(&button("edit-clear-symbolic", tr(MsgKey::action_cancel), Rc::new(|s| s.clear_selection())));
-    bar
+
+    fn bar_button(self: &Rc<Self>, action: BarAction, anime: bool, bulk_action: BulkAction) -> Button {
+        let content = GBox::new(O::Horizontal, 6);
+        content.append(&Image::from_icon_name(bottom_bar::icon(action)));
+        content.append(&Label::new(Some(&tr(bottom_bar::label(action, anime)))));
+        let button = Button::new();
+        button.set_child(Some(&content));
+        let weak = Rc::downgrade(self);
+        button.connect_clicked(move |_| {
+            if let Some(screen) = weak.upgrade() {
+                screen.bulk(bulk_action);
+            }
+        });
+        button
+    }
+}
+
+/// The bulk write of a bar action. Download, delete and play have no executor yet, so they map to nothing.
+fn bulk_for(action: BarAction) -> Option<BulkAction> {
+    match action {
+        BarAction::Bookmark => Some(BulkAction::Bookmark(true)),
+        BarAction::RemoveBookmark => Some(BulkAction::Bookmark(false)),
+        BarAction::Fillermark => Some(BulkAction::Fillermark(true)),
+        BarAction::RemoveFillermark => Some(BulkAction::Fillermark(false)),
+        BarAction::MarkRead => Some(BulkAction::MarkRead(true)),
+        BarAction::MarkUnread => Some(BulkAction::MarkRead(false)),
+        BarAction::Download | BarAction::Delete | BarAction::PlayExternally | BarAction::PlayInternally => None,
+    }
+}
+
+/// The "Library last updated: ..." row at the top of the feed (T-42b-016), in italics.
+fn last_updated_label() -> Label {
+    let last = data::app().library.last_updated_timestamp.get();
+    let text = format::last_updated_line(last, Local::now().timestamp_millis());
+    let label = Label::builder().xalign(0.0).css_classes(["dim-label"]).build();
+    label.set_markup(&format!("<i>{}</i>", gtk::glib::markup_escape_text(&text)));
+    label
 }

@@ -13,8 +13,9 @@ use kuro_source_http::local_server::LocalHandler;
 
 use crate::bridge::{self, BridgeCommand};
 use crate::chapters::{self, Segment};
+use crate::completion::Completion;
 use crate::config::{apply_fonts_dir, apply_user_files, write_mpv_config};
-use crate::enums::Decoder;
+use crate::enums::{Decoder, GpuKind};
 use crate::errors::PlayerMessage;
 use crate::external::{self, ExternalError, FinalSave, Launch, Plan, Preset};
 use crate::ipc;
@@ -26,13 +27,18 @@ use crate::options::{
     FILTER_NAMES, PlayerPrefs, VideoChain, filter_write, get_decoder, startup_settings,
     update_decoder,
 };
+use crate::progress::{self, SecondAction};
 use crate::screenshot::screenshot_result;
+use crate::seek::absolute_flag;
+use crate::session_init::UserData;
+use crate::skip::{Label, SkipConfig, SkipIntro, SkipSeek, Tap, Tick};
 use crate::state::PlayerState;
+use crate::stats_page::startup_commands;
 use crate::system_av::volume_max_write;
 use crate::tracks::{
-    AddKind, TRACK_NONE, TrackValue, add_file_args, external_track_commands, select_sub,
-    track_id_from_value,
+    AddKind, TrackValue, add_file_args, external_track_commands, select_sub, track_id_from_value,
 };
+use crate::tracking::Tracking;
 use crate::types::{TimeStamp, Track, Video};
 use crate::window::{CommandSink, accepts_event, execute, on_resume, take_volume_restore};
 
@@ -79,13 +85,33 @@ struct Loaded {
     timestamps: Vec<TimeStamp>,
 }
 
+/// What one whole-second tick leaves for the window (behaviour 7.1 and 6.8).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SecondReport {
+    /// The decisions of the tick, for the progress save and the download-ahead step. `None` while
+    /// the episode loads, without an episode, or while the duration is unknown.
+    pub action: Option<SecondAction>,
+    /// The episode went past the completion threshold on this tick, for the first time.
+    pub completed: bool,
+    /// The countdown toast of the netflix-style skip, shown once per countdown.
+    pub toast: Option<String>,
+}
+
 pub struct Session<H> {
     pub host: H,
     pub state: PlayerState,
+    /// The trackers of the playing anime and the ports a seen episode is sent through.
+    pub tracking: Tracking,
     loaded: Loaded,
+    user_data: Option<UserData>,
+    skip_config: SkipConfig,
+    skip: SkipIntro,
+    completion: Completion,
+    /// `pref_player_smooth_seek`, for the seeks the skip button makes.
+    precise_seek: bool,
     /// The inputs of the `vf` chain, so a filter change rewrites the whole chain (E-26).
     video: VideoChain,
-    hwdec_available: Vec<String>,
+    gpu: GpuKind,
     statistics_page: i32,
 }
 
@@ -94,9 +120,15 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
         Self {
             host,
             state: PlayerState::default(),
+            tracking: Tracking::default(),
             loaded: Loaded::default(),
+            user_data: None,
+            skip_config: SkipConfig::default(),
+            skip: SkipIntro::new(SkipConfig::default()),
+            completion: Completion::default(),
+            precise_seek: false,
             video: VideoChain::default(),
-            hwdec_available: Vec::new(),
+            gpu: GpuKind::default(),
             statistics_page: 0,
         }
     }
@@ -104,6 +136,33 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
     /// `pref_player_statistics_page`, the page the statistics overlay opens on.
     pub fn statistics_page(&self) -> i32 {
         self.statistics_page
+    }
+
+    /// The `user-data/current-anime/*` values the next load writes (T-45b-071). They come from the
+    /// init plan of the episode.
+    pub fn set_user_data(&mut self, user_data: UserData) {
+        self.user_data = Some(user_data);
+    }
+
+    /// Runs the commands that follow mpv creation (`postInitOptions`): the statistics overlay opens
+    /// on `pref_player_statistics_page` unless it is 0 (T-45a-053). A failed command is logged.
+    pub fn post_init(&self) {
+        for command in startup_commands(i64::from(self.statistics_page)) {
+            let args: Vec<&str> = command.iter().map(String::as_str).collect();
+            if let Err(e) = self.host.command(&args) {
+                tracing::error!("failed to run {}: {e}", args.join(" "));
+            }
+        }
+    }
+
+    /// Sets the skip-intro preferences and starts the machine again.
+    pub fn set_skip_config(&mut self, config: SkipConfig) {
+        self.skip_config = config;
+        self.skip = SkipIntro::new(config);
+    }
+
+    pub fn set_precise_seek(&mut self, precise: bool) {
+        self.precise_seek = precise;
     }
 
     /// `selectSub` (behaviour 5.6): works out the new `(sid, secondary-sid)` pair from what mpv
@@ -142,7 +201,7 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
 
     /// `updateDecoder`: writes `hwdec` for the chosen decoder.
     pub fn update_decoder(&self, decoder: Decoder) -> Result<(), MpvError> {
-        update_decoder(&self.host, decoder, &self.hwdec_available)
+        update_decoder(&self.host, decoder, self.gpu)
     }
 
     /// Loads a video: the local server is started for a placeholder URL, then `loadfile` is sent.
@@ -164,6 +223,9 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
             subtitles: video.subtitle_tracks.clone(),
             timestamps: video.timestamps.clone(),
         };
+        if let Some(user_data) = &self.user_data {
+            user_data.apply(&self.host);
+        }
         if let Some(command) = loadfile_command(Some(&spec)) {
             let args: Vec<&str> = command.iter().map(String::as_str).collect();
             execute(&self.state, &self.host, &args)?;
@@ -211,6 +273,8 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
     }
 
     fn on_file_loaded(&mut self) -> Dispatch {
+        // `waitingSkipIntro` is read again on every file: each episode starts its own countdown.
+        self.skip = SkipIntro::new(self.skip_config);
         let mut steps = LoadedSteps {
             host: &self.host,
             loaded: &self.loaded,
@@ -232,6 +296,108 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
         duration: Option<i32>,
     ) -> Option<Vec<Segment>> {
         chapters::with_timestamps(current, &self.loaded.timestamps, duration)
+    }
+
+    /// `setupChapters`: stores the chapters read from mpv with the video's timestamps merged in,
+    /// then makes the chapter at the playback position current (`setChapter`, T-45b-022).
+    pub fn set_chapters(&mut self, from_mpv: Vec<Segment>, duration: Option<i32>) {
+        self.state.chapters = self
+            .merged_chapters(&from_mpv, duration)
+            .unwrap_or(from_mpv);
+        self.sync_skip();
+    }
+
+    /// Merges AniSkip intervals into the chapters and syncs the skip button (`fileLoaded`, after
+    /// `aniskip::lookup`). An empty list changes nothing.
+    pub fn apply_aniskip(&mut self, stamps: &[TimeStamp], duration: Option<i32>) {
+        if let Some(merged) = chapters::with_timestamps(&self.state.chapters, stamps, duration) {
+            self.state.chapters = merged;
+            self.sync_skip();
+        }
+    }
+
+    /// The whole-second tick (`time-pos` as an integer): `updatePlayBackPos` then `setChapter`.
+    /// It reads the progress decisions, marks the episode seen once it completes and sends that
+    /// to the trackers, then drives the skip-intro machine (T-45a-066, T-45b-022).
+    pub fn on_time_pos(&mut self, position_s: i64) -> SecondReport {
+        let policy = self.tracking.policy;
+        let allowed = progress::progress_allowed(policy.incognito_source, self.tracking.has_trackers());
+        let action = progress::on_second(
+            self.state.is_loading_episode,
+            self.state.current_episode.as_ref().map(|e| e.id),
+            position_s,
+            self.state.duration as i64,
+            policy.threshold,
+            allowed,
+        );
+        let mut completed = false;
+        if let (Some(action), Some(episode)) = (&action, self.state.current_episode.as_mut()) {
+            episode.last_second_seen = action.position_ms;
+            episode.total_seconds = action.total_ms;
+            if action.completed && self.completion.complete(episode) {
+                completed = true;
+                self.tracking.on_seen(episode.episode_number);
+            }
+        }
+        self.state.pos = position_s as f32;
+        self.set_current_chapter();
+        let tick = self.skip.on_tick(&self.state.chapters, self.state.pos);
+        SecondReport {
+            action,
+            completed,
+            toast: self.apply_tick(tick),
+        }
+    }
+
+    /// `onSkipIntro`: the user taps the skip button.
+    pub fn on_skip_tap(&mut self) -> Tap {
+        let tap = self.skip.on_skip(&self.state.chapters, self.state.pos);
+        if let Tap::Seek(seek) = &tap {
+            self.seek_with_text(seek.clone());
+        }
+        tap
+    }
+
+    fn sync_skip(&mut self) {
+        self.set_current_chapter();
+        let tick = self.skip.sync(&self.state.chapters, self.state.pos);
+        self.apply_tick(tick);
+    }
+
+    /// `_currentChapter` follows the position. It is left alone before the first chapter.
+    fn set_current_chapter(&mut self) {
+        let state = &mut self.state;
+        if let Some(i) = chapters::current_chapter(&state.chapters, state.pos) {
+            if state.current_chapter.as_ref() != Some(&state.chapters[i]) {
+                state.current_chapter = Some(state.chapters[i].clone());
+            }
+        }
+    }
+
+    /// Applies the label and the seek of a skip tick and hands back its toast.
+    fn apply_tick(&mut self, tick: Tick) -> Option<String> {
+        if let Label::Set(text) = tick.label {
+            self.state.skip_intro_text = text;
+        }
+        if let Some(seek) = tick.seek {
+            self.seek_with_text(seek);
+        }
+        tick.toast
+    }
+
+    /// `seekToWithText`: the seek indicator state, then an absolute seek inside the duration.
+    fn seek_with_text(&mut self, seek: SkipSeek) {
+        self.state.is_seeking_forwards = seek.position > 0;
+        self.state.double_tap_seek_amount = (seek.position - self.state.pos as i64) as i32;
+        self.state.seek_text = Some(seek.text);
+        if !(0..=self.state.duration as i64).contains(&seek.position) {
+            return;
+        }
+        let position = seek.position.to_string();
+        let args = ["seek", position.as_str(), absolute_flag(self.precise_seek)];
+        if let Err(e) = execute(&self.state, &self.host, &args) {
+            tracing::error!("failed to seek to {position}: {e}");
+        }
     }
 
     /// One video filter change, clamped (T-45a-032). A name outside the five filters writes
@@ -279,8 +445,9 @@ impl Session<MpvHandle> {
         apply_fonts_dir(&host, fonts_dir)?;
         let mut session = Self::new(host);
         session.video = VideoChain::from(prefs);
-        session.hwdec_available = prefs.hwdec_available.clone();
+        session.gpu = prefs.gpu;
         session.statistics_page = prefs.advanced.statistics_page;
+        session.post_init();
         Ok(session)
     }
 }
@@ -358,6 +525,7 @@ pub fn run_external(
 mod tests {
     use super::*;
     use crate::mpv::MpvError;
+    use crate::tracks::TRACK_NONE;
     use std::cell::RefCell;
     use std::collections::HashMap;
 
@@ -374,6 +542,12 @@ mod tests {
                 .borrow_mut()
                 .push((name.to_owned(), value.to_owned()));
             Ok(())
+        }
+        fn set_i64(&self, name: &str, value: i64) -> Result<(), MpvError> {
+            self.set_str(name, &format!("i64:{value}"))
+        }
+        fn set_f64(&self, name: &str, value: f64) -> Result<(), MpvError> {
+            self.set_str(name, &format!("f64:{value}"))
         }
     }
     impl PropertySource for Fake {
@@ -632,7 +806,7 @@ mod tests {
     #[test]
     fn decoder_is_read_from_mpv_and_written_to_hwdec() {
         let mut session = Session::new(Fake::default());
-        session.hwdec_available = vec!["vaapi-copy".to_owned()];
+        session.gpu = GpuKind::Intel;
         session
             .host
             .props
@@ -749,5 +923,215 @@ mod tests {
             Duration::from_millis(20),
         );
         assert_eq!(out, Ok(None));
+    }
+
+    #[test]
+    fn load_writes_the_current_anime_user_data_with_its_types() {
+        let mut session = Session::new(Fake::default());
+        session.set_user_data(UserData {
+            anime_title: "Show".to_owned(),
+            intro_length: 90,
+            category: "Action, Drama".to_owned(),
+            episode_number: 2.5,
+        });
+        session
+            .load_video(&video("file:///a.mkv"), &mut LocalServer::default(), || None)
+            .unwrap();
+        let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
+        assert_eq!(
+            *session.host.writes.borrow(),
+            vec![
+                pair("user-data/current-anime/anime-title", "Show"),
+                pair("user-data/current-anime/intro-length", "i64:90"),
+                pair("user-data/current-anime/category", "Action, Drama"),
+                pair("user-data/current-anime/episode-number", "f64:2.5"),
+            ]
+        );
+        assert_eq!(session.host.commands.borrow().len(), 1);
+    }
+
+    #[test]
+    fn post_init_opens_the_statistics_page_unless_it_is_off() {
+        let mut session = Session::new(Fake::default());
+        session.post_init();
+        assert!(session.host.commands.borrow().is_empty());
+        session.statistics_page = 3;
+        session.post_init();
+        assert_eq!(
+            *session.host.commands.borrow(),
+            vec![
+                vec!["script-binding", "stats/display-stats-toggle"],
+                vec!["script-binding", "stats/display-page-3"],
+            ]
+        );
+    }
+
+    struct Ports(std::rc::Rc<RefCell<Vec<String>>>);
+
+    impl crate::tracking::TrackerPort for Ports {
+        fn online(&self) -> bool {
+            true
+        }
+        fn send(&self, track_id: i64, episode: f64) -> Result<(), String> {
+            self.0.borrow_mut().push(format!("send {track_id} {episode}"));
+            Ok(())
+        }
+    }
+
+    impl crate::tracking::DelayedPort for Ports {
+        fn add(&self, _: i64, _: f64) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn schedule(&self) {}
+    }
+
+    fn playing(duration: f32) -> Session<Fake> {
+        let mut session = Session::new(Fake::default());
+        session.state.duration = duration;
+        session.state.current_episode = Some(kuro_data::episode::Episode {
+            id: 4,
+            episode_number: 3.0,
+            ..kuro_data::episode::Episode::create()
+        });
+        session
+    }
+
+    #[test]
+    fn completing_an_episode_updates_the_trackers_once() {
+        let log = std::rc::Rc::new(RefCell::new(Vec::new()));
+        let mut session = playing(100.0);
+        session.tracking = crate::tracking::Tracking {
+            trackers: vec![crate::progress::TrackerEntry {
+                track_id: 9,
+                logged_in: true,
+                last_episode_seen: 2.0,
+            }],
+            ports: Some(crate::tracking::Ports {
+                tracker: Box::new(Ports(log.clone())),
+                delayed: Box::new(Ports(log.clone())),
+            }),
+            ..crate::tracking::Tracking::default()
+        };
+        let early = session.on_time_pos(50);
+        assert!(!early.completed && early.action.is_some());
+        assert!(log.borrow().is_empty());
+        let done = session.on_time_pos(86);
+        assert!(done.completed);
+        assert!(session.state.current_episode.as_ref().unwrap().seen);
+        assert!(!session.on_time_pos(87).completed);
+        assert_eq!(*log.borrow(), vec!["send 9 3"]);
+        assert_eq!(session.state.pos, 87.0);
+    }
+
+    #[test]
+    fn a_tick_while_loading_reports_no_decisions_and_sends_nothing() {
+        let mut session = playing(100.0);
+        session.state.is_loading_episode = true;
+        assert_eq!(session.on_time_pos(90).action, None);
+        assert!(!session.state.current_episode.as_ref().unwrap().seen);
+    }
+
+    fn opening() -> Vec<TimeStamp> {
+        vec![TimeStamp {
+            start: 10.0,
+            end: 100.0,
+            name: "Opening".to_owned(),
+            kind: crate::types::ChapterType::Opening,
+        }]
+    }
+
+    #[test]
+    fn aniskip_intervals_become_chapters_and_the_skip_button() {
+        let mut session = playing(200.0);
+        session.state.pos = 12.0;
+        session.apply_aniskip(&opening(), Some(200));
+        assert!(session.state.chapters.iter().any(|c| c.name == "Opening"));
+        assert_eq!(
+            session.state.current_chapter.as_ref().map(|c| c.name.as_str()),
+            Some("Opening")
+        );
+        assert_eq!(
+            session.state.skip_intro_text,
+            chapters::skip_label(crate::types::ChapterType::Opening)
+        );
+        let before = session.state.chapters.clone();
+        session.apply_aniskip(&[], Some(200));
+        assert_eq!(session.state.chapters, before);
+    }
+
+    #[test]
+    fn the_skip_button_seeks_to_the_next_chapter_with_its_text() {
+        let mut session = playing(200.0);
+        session.state.pos = 12.0;
+        session.apply_aniskip(&opening(), Some(200));
+        let tap = session.on_skip_tap();
+        assert!(matches!(tap, Tap::Seek(SkipSeek { position: 100, .. })));
+        assert_eq!(
+            *session.host.commands.borrow(),
+            vec![vec!["seek", "100", "absolute+keyframes"]]
+        );
+        assert!(session.state.is_seeking_forwards);
+        assert_eq!(session.state.double_tap_seek_amount, 88);
+        assert!(session.state.seek_text.is_some());
+    }
+
+    #[test]
+    fn auto_skip_seeks_on_the_tick_and_netflix_counts_down_from_the_file_load() {
+        let mut session = playing(200.0);
+        session.set_skip_config(SkipConfig {
+            auto_skip: true,
+            ..SkipConfig::default()
+        });
+        session.apply_aniskip(&opening(), Some(200));
+        session.state.is_loading_episode = false;
+        session.on_time_pos(12);
+        assert_eq!(
+            *session.host.commands.borrow(),
+            vec![vec!["seek", "100", "absolute+keyframes"]]
+        );
+
+        let mut session = playing(200.0);
+        session.set_skip_config(SkipConfig {
+            netflix: true,
+            default_wait: 1,
+            ..SkipConfig::default()
+        });
+        session.set_precise_seek(true);
+        session.apply_aniskip(&opening(), Some(200));
+        let first = session.on_time_pos(12);
+        assert!(first.toast.is_some());
+        assert!(session.host.commands.borrow().is_empty());
+        let second = session.on_time_pos(13);
+        assert_eq!(second.toast, None);
+        assert_eq!(
+            *session.host.commands.borrow(),
+            vec![vec!["seek", "100", "absolute"]]
+        );
+    }
+
+    #[test]
+    fn a_seek_outside_the_duration_only_sets_the_indicator() {
+        let mut session = playing(50.0);
+        session.state.pos = 12.0;
+        session.apply_aniskip(&opening(), Some(50));
+        session.on_skip_tap();
+        assert!(session.host.commands.borrow().is_empty());
+        assert!(session.state.seek_text.is_some());
+    }
+
+    #[test]
+    fn file_loaded_starts_a_fresh_countdown() {
+        let mut session = playing(200.0);
+        session.set_skip_config(SkipConfig {
+            netflix: true,
+            default_wait: 3,
+            ..SkipConfig::default()
+        });
+        session.apply_aniskip(&opening(), Some(200));
+        session.on_time_pos(12);
+        session.on_time_pos(13);
+        assert_eq!(session.skip.waiting(), 1);
+        session.on_event(MpvEvent::FileLoaded);
+        assert_eq!(session.skip.waiting(), 3);
     }
 }

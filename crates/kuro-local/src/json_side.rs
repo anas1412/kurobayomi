@@ -137,7 +137,9 @@ pub fn read_details_json<T: DeserializeOwned>(path: &Path) -> Result<T, LocalSou
 
 fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, LocalSourceError> {
     let bytes = std::fs::read(path)?;
-    Ok(serde_json::from_slice(&bytes)?)
+    // A UTF-8 byte order mark is accepted (E-JSON-6).
+    let body = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+    Ok(serde_json::from_slice(body)?)
 }
 
 #[cfg(test)]

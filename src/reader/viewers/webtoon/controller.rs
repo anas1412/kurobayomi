@@ -128,6 +128,8 @@ impl WebtoonController {
         }
     }
 
+    /// A page became current. Quirk of B§7.3, reproduced: the preload target is the chapter the list ends in, which is
+    /// the chapter of the last page when the list ends in a page, not necessarily the chapter of this page.
     fn on_page_selected(&self, page: &PageRef, allow: bool) -> Vec<Effect> {
         let mut fx = vec![Effect::PageSelected(page.clone())];
         let Some(chapter) = &self.chapter else { return fx };

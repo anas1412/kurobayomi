@@ -241,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn show_text_keeps_the_text_and_drops_quotes() {
+    fn t69_show_text_keeps_the_text_and_drops_quotes() {
         assert_eq!(
             cmd("show_text", "\"Skipped intro\""),
             Some(BridgeCommand::ShowText("Skipped intro".to_owned()))
@@ -323,7 +323,10 @@ mod tests {
         );
         assert_eq!(
             cmd("seek_to_with_text", "90|Skip"),
-            Some(BridgeCommand::Transport(Transport::SeekTo(90.0)))
+            Some(BridgeCommand::Transport(Transport::SeekToWithText(
+                90.0,
+                "Skip".to_owned()
+            )))
         );
         assert_eq!(cmd("seek_by", "soon"), None);
     }
@@ -351,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_int_picker_is_ignored() {
+    fn t72_malformed_int_picker_is_ignored() {
         assert_eq!(cmd("launch_int_picker", "Speed|%d|0|30|5"), None);
         assert_eq!(cmd("launch_int_picker", "Speed|%d|a|30|5|p"), None);
     }
@@ -374,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn every_non_empty_value_is_reset_and_empty_is_not() {
+    fn t71_every_non_empty_value_is_reset_and_empty_is_not() {
         assert!(reset_needed("\"hide\""));
         assert!(reset_needed("unused"));
         assert!(!reset_needed(""));
@@ -411,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn toggle_ui_show_toggle_and_hide_rows() {
+    fn t70_toggle_ui_show_toggle_and_hide_rows() {
         let mut s = PlayerState::default();
         s.controls_shown = false;
         run(&mut s, "toggle_ui", "show", &[]);

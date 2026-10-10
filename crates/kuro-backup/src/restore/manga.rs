@@ -374,6 +374,22 @@ mod tests {
         mangas::get_by_url_and_source(c, url, 7).unwrap().unwrap()
     }
 
+    /// T-20a-094: 2499283573021220255 is the id Tachiyomi and Aniyomi backups carry for MangaDex (English, version 1). The
+    /// id rule reproduces it from the name, language and version, and a restore keeps a backup's source integer as is.
+    #[test]
+    fn a_backup_source_id_equals_the_generated_id_and_survives_a_restore_unchanged() {
+        const MANGADEX_BACKUP_ID: i64 = 2499283573021220255;
+        assert_eq!(kuro_source::generate_id("MangaDex", "en", 1), MANGADEX_BACKUP_ID);
+        let (_d, mut c) = db();
+        let tx = c.transaction().unwrap();
+        let mut m = manga("md");
+        m.source = MANGADEX_BACKUP_ID;
+        restore_manga_entry(&tx, &clock(), &m, &HashMap::new()).unwrap();
+        tx.commit().unwrap();
+        let r = mangas::get_by_url_and_source(&c, "md", MANGADEX_BACKUP_ID).unwrap().unwrap();
+        assert_eq!(r.source, kuro_source::generate_id("MangaDex", "en", 1));
+    }
+
     #[test]
     fn new_row_stores_initialized_from_description_and_zeroed_schedule() {
         let (_d, mut c) = db();

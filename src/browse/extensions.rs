@@ -6,7 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use kuro_extensions::InstallStep;
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
+
+use super::dialogs::{ButtonStyle, DialogSpec};
 
 use super::names::{case_insensitive_cmp, compare_languages, localized_display_name};
 
@@ -281,19 +283,17 @@ pub fn status_text(step: InstallStep) -> Option<String> {
     })
 }
 
-/// The warning line of a row.
+/// The warning line of a row. NSFW is the short "18+"; the long sentence is the NSFW dialog's (`ext_nsfw_warning`).
 pub fn warning_text(warning: Warning) -> String {
     tr(match warning {
         Warning::Untrusted => MsgKey::ext_untrusted,
         Warning::Obsolete => MsgKey::ext_obsolete,
-        Warning::Nsfw => MsgKey::ext_nsfw_warning,
+        Warning::Nsfw => MsgKey::ext_nsfw_short,
     })
 }
 
 pub fn row_actions(ext: &Ext, step: InstallStep) -> Vec<RowAction> {
-    if step == InstallStep::Installed {
-        return Vec::new();
-    }
+    // A transient Installed step renders the idle buttons (E5, T16): it is completed, so it falls through to the table.
     if !step.is_completed() {
         return vec![RowAction::Cancel];
     }
@@ -307,6 +307,38 @@ pub fn row_actions(ext: &Ext, step: InstallStep) -> Vec<RowAction> {
         ExtState::Available if ext.sources.is_empty() => vec![RowAction::Install],
         ExtState::Available => vec![RowAction::WebView, RowAction::Install],
     }
+}
+
+/// What a long press on an extension row does (B§5.9, T-40a-028, T-41a-011). An available package installs at once.
+/// An installed or untrusted one is removed at once when its directory exists, and asks first otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExtLongPress {
+    Install,
+    RemoveNow,
+    ConfirmRemove,
+}
+
+pub fn ext_long_press(state: &ExtState, dir_exists: bool) -> ExtLongPress {
+    match state {
+        ExtState::Available => ExtLongPress::Install,
+        ExtState::Installed { .. } | ExtState::Untrusted if dir_exists => ExtLongPress::RemoveNow,
+        ExtState::Installed { .. } | ExtState::Untrusted => ExtLongPress::ConfirmRemove,
+    }
+}
+
+/// The private-extension remove confirm: "Remove Extension?", a body that names the extension, Remove and Cancel.
+/// Button 0 removes (B§5.9).
+pub fn remove_confirm_spec(name: &str) -> DialogSpec {
+    DialogSpec {
+        title: tr(MsgKey::ext_confirm_remove),
+        body: Some(trf(MsgKey::remove_private_extension_message, &[("arg1", Arg::Str(name))])),
+        buttons: vec![(tr(MsgKey::ext_remove), ButtonStyle::Destructive), (tr(MsgKey::action_cancel), ButtonStyle::Plain)],
+    }
+}
+
+/// The remove confirm's answer: only the first button removes.
+pub fn remove_answer(chosen: Option<usize>) -> bool {
+    chosen == Some(0)
 }
 
 /// Install steps of every package being installed. Two jobs for one package share a count, so the first one to
@@ -376,6 +408,17 @@ pub fn update_all_queue(exts: &[Ext]) -> Vec<usize> {
         .filter(|(_, e)| matches!(e.state, ExtState::Installed { has_update: true, .. }))
         .map(|(i, _)| i)
         .collect()
+}
+
+/// The rows Update all acts on: the Updates group of what is visible now (query and NSFW setting applied), in the order
+/// the list shows it. Feed it `split_available` rows (B§1.7, T14).
+pub fn update_all_visible(exts: &[Ext], query: &str, show_nsfw: bool) -> Vec<usize> {
+    group(exts, query, show_nsfw).into_iter().find(|g| g.key == GroupKey::Updates).map(|g| g.rows).unwrap_or_default()
+}
+
+/// The tab badge number: installed extensions with an update. The tab shows it only when it is above zero (T-41a-011).
+pub fn updates_count(exts: &[Ext]) -> usize {
+    update_all_queue(exts).len()
 }
 
 /// The details page leaves when its extension is no longer installed (B§7.5).
@@ -655,6 +698,27 @@ mod tests {
     }
 
     #[test]
+    fn a_long_press_installs_an_available_row_and_removes_an_installed_one_only_with_a_directory() {
+        let installed_state = ExtState::Installed { has_update: false, obsolete: false };
+        assert_eq!(ext_long_press(&ExtState::Available, false), ExtLongPress::Install);
+        assert_eq!(ext_long_press(&installed_state, true), ExtLongPress::RemoveNow);
+        assert_eq!(ext_long_press(&ExtState::Untrusted, true), ExtLongPress::RemoveNow);
+        assert_eq!(ext_long_press(&installed_state, false), ExtLongPress::ConfirmRemove);
+        assert_eq!(ext_long_press(&ExtState::Untrusted, false), ExtLongPress::ConfirmRemove);
+    }
+
+    #[test]
+    fn the_private_remove_confirm_names_the_extension_and_only_the_first_button_removes() {
+        let spec = remove_confirm_spec("Anime Pack");
+        assert_eq!(spec.title, tr(MsgKey::ext_confirm_remove));
+        assert_eq!(spec.body.as_deref(), Some(trf(MsgKey::remove_private_extension_message, &[("arg1", Arg::Str("Anime Pack"))]).as_str()));
+        assert_eq!(spec.buttons.len(), 2);
+        assert!(remove_answer(Some(0)));
+        assert!(!remove_answer(Some(1)), "Cancel keeps the extension");
+        assert!(!remove_answer(None), "a dismissal keeps the extension");
+    }
+
+    #[test]
     fn row_buttons_follow_the_action_table() {
         let idle = InstallStep::Idle;
         assert_eq!(row_actions(&installed("I", true), idle), vec![RowAction::Settings, RowAction::Update]);
@@ -665,7 +729,11 @@ mod tests {
         assert_eq!(row_actions(&no_sources, idle), vec![RowAction::Install]);
         assert_eq!(row_actions(&installed("I", true), InstallStep::Downloading), vec![RowAction::Cancel]);
         assert_eq!(row_actions(&installed("I", true), InstallStep::Error), vec![RowAction::Retry]);
-        assert!(row_actions(&available("A", "en"), InstallStep::Installed).is_empty());
+        assert_eq!(
+            row_actions(&available("A", "en"), InstallStep::Installed),
+            vec![RowAction::WebView, RowAction::Install],
+            "a transient Installed step shows the idle buttons (T16)"
+        );
     }
 
     #[test]
@@ -742,5 +810,42 @@ mod tests {
         for warning in [Warning::Untrusted, Warning::Obsolete, Warning::Nsfw] {
             assert!(!warning_text(warning).is_empty());
         }
+    }
+
+    #[test]
+    fn the_nsfw_row_warning_is_the_short_18_plus_not_the_dialog_sentence() {
+        assert_eq!(warning_text(Warning::Nsfw), tr(MsgKey::ext_nsfw_short));
+        assert_ne!(warning_text(Warning::Nsfw), tr(MsgKey::ext_nsfw_warning));
+    }
+
+    #[test]
+    fn update_all_only_visible_set() {
+        let exts = vec![installed("Xray", true), installed("One", true), installed("Plain", false)];
+        assert_eq!(update_all_visible(&exts, "", true), vec![1, 0], "everything with an update, list order");
+        // the fixture sources carry the url https://a.example, so the query must be more than a letter of it
+        assert_eq!(update_all_visible(&exts, "xray", true), vec![0], "the query restricts it");
+        assert!(update_all_visible(&exts, "plain", true).is_empty(), "a visible row without an update adds nothing");
+        let mut adult = installed("Adult", true);
+        adult.nsfw = true;
+        assert!(update_all_visible(&[adult.clone()], "", false).is_empty(), "the NSFW setting hides it");
+        assert_eq!(update_all_visible(&[adult], "", true), vec![0]);
+    }
+
+    #[test]
+    fn the_badge_counts_installed_updates_only() {
+        let mut stale = installed("Stale", false);
+        stale.state = ExtState::Installed { has_update: false, obsolete: true };
+        assert_eq!(updates_count(&[installed("A", true), installed("B", true), stale, available("C", "en")]), 2);
+        assert_eq!(updates_count(&[]), 0);
+    }
+
+    #[test]
+    fn a_long_press_follows_the_state_and_the_directory() {
+        let installed = ExtState::Installed { has_update: false, obsolete: false };
+        assert_eq!(ext_long_press(&ExtState::Available, false), ExtLongPress::Install);
+        assert_eq!(ext_long_press(&installed, true), ExtLongPress::RemoveNow);
+        assert_eq!(ext_long_press(&ExtState::Untrusted, true), ExtLongPress::RemoveNow);
+        assert_eq!(ext_long_press(&installed, false), ExtLongPress::ConfirmRemove);
+        assert!(remove_answer(Some(0)) && !remove_answer(Some(1)) && !remove_answer(None));
     }
 }

@@ -7,34 +7,82 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Label, Orientation as O};
 
+use crate::entry_core::action_row::{self, Tone, tone_alpha};
 use crate::entry_core::header::{Field, HeaderModel, SearchRequest, cover_size};
+use crate::entry_core::cover_view::CoverView;
+use crate::entry_core::list_view::ensure_css;
+
+/// Draws a button of the action row in `tone`: the primary colour at full opacity, or the foreground at 0.38 alpha.
+pub fn apply_tone(widget: &impl IsA<gtk::Widget>, tone: Tone) {
+    widget.set_opacity(tone_alpha(tone));
+    if tone == Tone::Primary {
+        widget.add_css_class("chapter-primary");
+    } else {
+        widget.remove_css_class("chapter-primary");
+    }
+}
 
 /// The library button of an entry page: a heart and "In library" for a favorite, an empty star and "Add to library"
 /// otherwise. It is a plain button with an icon and a label as its child, because a button holds either its own
-/// label or its own icon, not both.
+/// label or its own icon, not both. The primary colour marks a favorite, the foreground at 0.38 alpha the rest
+/// (`action_row::library`), and a long press opens the category editor, for a favorite only (E-13).
 #[derive(Clone)]
 pub struct LibraryButton {
     pub button: gtk::Button,
     icon: gtk::Image,
     label: Label,
+    content: GBox,
+    favorite: Rc<Cell<bool>>,
 }
 
 impl LibraryButton {
     pub fn new() -> Self {
+        ensure_css();
         let icon = gtk::Image::new();
         let label = Label::new(None);
-        let row = GBox::new(O::Horizontal, 8);
-        row.append(&icon);
-        row.append(&label);
-        let button = gtk::Button::builder().child(&row).css_classes(["flat"]).halign(Align::Start).margin_start(8).margin_end(8).focus_on_click(false).build();
-        let this = Self { button, icon, label };
+        let content = GBox::new(O::Horizontal, 8);
+        content.append(&icon);
+        content.append(&label);
+        let button = gtk::Button::builder().child(&content).css_classes(["flat"]).halign(Align::Start).margin_start(8).margin_end(8).focus_on_click(false).build();
+        let this = Self { button, icon, label, content, favorite: Rc::new(Cell::new(false)) };
         this.set(false);
         this
     }
 
     pub fn set(&self, favorite: bool) {
-        self.label.set_label(&kuro_i18n::tr(if favorite { kuro_i18n::MsgKey::in_library } else { kuro_i18n::MsgKey::add_to_library }));
-        self.icon.set_icon_name(Some(if favorite { "emblem-favorite-symbolic" } else { "non-starred-symbolic" }));
+        self.favorite.set(favorite);
+        let shown = action_row::library(favorite);
+        self.label.set_label(&kuro_i18n::tr(shown.label));
+        self.icon.set_icon_name(Some(if shown.filled { "emblem-favorite-symbolic" } else { "non-starred-symbolic" }));
+        apply_tone(&self.content, shown.tone);
+    }
+
+    /// Runs `on_click` on a click and `on_long_press` on a long press. The long press counts only while the entry is a
+    /// favorite; then the release that follows it is not a click. Otherwise the press is a plain click.
+    pub fn connect(&self, on_click: impl Fn() + 'static, on_long_press: impl Fn() + 'static) {
+        let long_fired = Rc::new(Cell::new(false));
+        let press = gtk::GestureClick::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
+        press.connect_pressed({
+            let long_fired = Rc::clone(&long_fired);
+            move |_, _, _, _| long_fired.set(false)
+        });
+        self.button.add_controller(press);
+        let long = gtk::GestureLongPress::new();
+        long.connect_pressed({
+            let (favorite, long_fired) = (Rc::clone(&self.favorite), Rc::clone(&long_fired));
+            move |_, _, _| {
+                if action_row::library_long_press_opens_categories(favorite.get()) {
+                    long_fired.set(true);
+                    on_long_press();
+                }
+            }
+        });
+        self.button.add_controller(long);
+        self.button.connect_clicked(move |_| {
+            if !long_fired.replace(false) {
+                on_click();
+            }
+        });
     }
 }
 
@@ -92,7 +140,11 @@ fn icon_row(icon: &str, content: &impl IsA<gtk::Widget>, centered: bool) -> GBox
 /// centered text. `column_width` is the width of the column that holds the header.
 pub fn build(model: &HeaderModel, large: bool, column_width: i32, h: &Handlers) -> GBox {
     let (w, ht) = cover_size(large, column_width);
-    let cover = crate::ui::cover(w, ht);
+    let cover_view = CoverView::new(w, ht);
+    if let Some(art) = &model.cover {
+        cover_view.load(art.clone());
+    }
+    let cover = cover_view.frame.clone();
     cover.set_valign(Align::Start);
     let on_cover = Rc::clone(&h.on_cover);
     let tap = gtk::GestureClick::new();
@@ -128,4 +180,57 @@ pub fn build(model: &HeaderModel, large: bool, column_width: i32, h: &Handlers) 
     root.append(&cover);
     root.append(&info);
     root
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    /// One display test: the button draws a favorite in the primary colour at full opacity and anything else at 0.38,
+    /// a long press runs only for a favorite and then swallows the click that follows, and a plain click always runs.
+    #[test]
+    #[ignore = "needs a display; run alone: cargo test -p kurobayomi library_button -- --ignored"]
+    fn library_button_tone_and_long_press() {
+        if gtk::init().is_err() {
+            eprintln!("skipped: no display for the library button test");
+            return;
+        }
+        let button = LibraryButton::new();
+        let content = button.button.child().expect("the content box");
+        assert!((content.opacity() - 0.38).abs() < 0.01, "not in the library: dimmed (GTK keeps opacity in 8 bits)");
+        assert!(!content.has_css_class("chapter-primary"));
+        let clicks = Rc::new(Cell::new(0));
+        let longs = Rc::new(Cell::new(0));
+        button.connect(
+            {
+                let clicks = Rc::clone(&clicks);
+                move || clicks.set(clicks.get() + 1)
+            },
+            {
+                let longs = Rc::clone(&longs);
+                move || longs.set(longs.get() + 1)
+            },
+        );
+        let long_press = || {
+            let controllers = button.button.observe_controllers();
+            let gesture = (0..controllers.n_items())
+                .filter_map(|i| controllers.item(i).and_downcast::<gtk::GestureLongPress>())
+                .next()
+                .expect("the long press gesture");
+            gesture.emit_by_name::<()>("pressed", &[&0.0f64, &0.0f64]);
+        };
+        long_press();
+        assert_eq!(longs.get(), 0, "no long press for an entry outside the library (E-13)");
+        button.set(true);
+        assert_eq!(content.opacity(), 1.0, "a favorite: full opacity");
+        assert!(content.has_css_class("chapter-primary"), "and the primary colour");
+        long_press();
+        assert_eq!(longs.get(), 1);
+        button.button.emit_clicked();
+        assert_eq!(clicks.get(), 0, "the release after a long press is not a click");
+        button.button.emit_clicked();
+        assert_eq!(clicks.get(), 1, "a plain click runs");
+    }
 }

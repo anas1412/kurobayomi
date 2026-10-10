@@ -1,5 +1,11 @@
 //! One tracking row as the flows see it, anime or manga. The two stored shapes stay in `model.rs`; this enum is the
 //! one type the Home list and the dialogs pass around (`TrackRecord` of `p2-rust-design.md` section 3).
+//!
+//! Decision (T-27b-001): the enum over `AnimeTrack` and `MangaTrack` replaces the flat struct of `p2-rust-design.md`
+//! section 3. The stored shapes already carry the fields with their own types, and `p1-data-and-config.md` section
+//! 4.2 gives the id as `Option<i64>`, where `None` is a row that is not saved. The `-1` sentinel of the flat struct is
+//! not used, because `None` cannot be mistaken for a real id. The accessors below are the one way the flows read a
+//! field.
 
 use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
 
@@ -108,6 +114,63 @@ impl From<MangaTrack> for TrackRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t_27b_001_stored_rows_round_trip_through_the_record_with_every_field_set() {
+        let anime = AnimeTrack {
+            id: Some(11),
+            anime_id: 7,
+            tracker_id: TrackerId::KITSU,
+            remote_id: 99,
+            library_id: Some(55),
+            title: "Show".into(),
+            last_episode_seen: 4.0,
+            total_episodes: 12,
+            status: 2,
+            score: 7.5,
+            remote_url: "https://kitsu.app/anime/show".into(),
+            start_date: 1_791_621_000_000,
+            finish_date: 1_791_707_400_000,
+            private: true,
+        };
+        let row = anime.to_db(true).unwrap();
+        // The tracking URL goes to the URL field and progress to last_episode_seen for anime.
+        assert_eq!(row.remote_url, "https://kitsu.app/anime/show");
+        assert_eq!(row.last_episode_seen, 4.0);
+        let record = TrackRecord::from(AnimeTrack::from_db(&row));
+        match &record {
+            TrackRecord::Anime(back) => assert_eq!(back.to_db(true).unwrap(), row),
+            TrackRecord::Manga(_) => panic!("an anime row became a manga record"),
+        }
+        assert_eq!(record.progress(), 4.0);
+
+        let manga = MangaTrack {
+            id: Some(12),
+            manga_id: 9,
+            tracker_id: TrackerId::ANILIST,
+            remote_id: 3,
+            library_id: Some(8),
+            title: "Book".into(),
+            last_chapter_read: 3.5,
+            total_chapters: 40,
+            status: 1,
+            score: 6.0,
+            remote_url: "https://anilist.co/manga/3".into(),
+            start_date: 1,
+            finish_date: 2,
+            private: false,
+        };
+        let row = manga.to_db(true).unwrap();
+        assert_eq!(row.remote_url, "https://anilist.co/manga/3");
+        assert_eq!(row.last_chapter_read, 3.5);
+        let record = TrackRecord::from(MangaTrack::from_db(&row));
+        match &record {
+            TrackRecord::Manga(back) => assert_eq!(back.to_db(true).unwrap(), row),
+            TrackRecord::Anime(_) => panic!("a manga row became an anime record"),
+        }
+        assert_eq!(record.progress(), 3.5);
+        assert_eq!((record.start_date(), record.finish_date()), (1, 2));
+    }
 
     #[test]
     fn tr_27b_001_accessors_read_the_fields_of_each_shape() {

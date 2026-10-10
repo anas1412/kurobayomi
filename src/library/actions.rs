@@ -157,6 +157,10 @@ pub enum UpdateScope {
     Category,
 }
 
+/// Decision (T-26a-113): the library's toasts go through the app's one toast layer (`crate::toast::notify`), which
+/// shows each message for `ToastLength::Short`, 2 s, and replaces a visible one. The 4 s length and the
+/// `toast(overlay, text)` signature of the task need a new length in `kuro_platform::toast` and a changed helper in
+/// `src/toast.rs`; neither file belongs to the library lane, so the library keeps the shared layer.
 /// The toast an update request shows: "Updating library" or "Updating category", or the already-running notice
 /// when an update is in progress (T2-UPD-01, T2-UPD-02).
 pub fn update_toast(scope: UpdateScope, already_running: bool) -> String {
@@ -213,7 +217,39 @@ pub fn continue_visible(button_on: bool, row: &LibraryRow) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuro_data::chapter::{Chapter, ChapterRepo};
     use kuro_data::manga::{Manga, MangaRepo};
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn t2_cont_03_an_excluded_scanlator_is_never_the_next_chapter() {
+        // The only unread chapter belongs to an excluded scanlator, so there is nothing to continue with.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("manga.db");
+        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let db = Arc::new(Db::new(&path, writer).expect("manga db handle"));
+        let manga_id = MangaRepo::new(db.clone())
+            .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "t".into(), ..Manga::create() })
+            .expect("insert manga");
+        ChapterRepo::new(db.clone())
+            .add_all(&[
+                Chapter { manga_id, url: "/1".into(), name: "1".into(), chapter_number: 1.0, read: true, ..Chapter::create() },
+                Chapter {
+                    manga_id,
+                    url: "/2".into(),
+                    name: "2".into(),
+                    chapter_number: 2.0,
+                    scanlator: Some("bad".into()),
+                    ..Chapter::create()
+                },
+            ])
+            .expect("add chapters");
+        MangaRepo::new(db.clone())
+            .set_excluded_scanlators(manga_id, &BTreeSet::from(["bad".to_string()]))
+            .expect("exclude scanlator");
+        let entry = LibraryRow { id: manga_id, ..row(2, 1) };
+        assert_eq!(next_item(&db, EntryKind::Manga, &entry, false, |_| false).expect("next item"), None);
+    }
 
     fn row(total: i64, done: i64) -> LibraryRow {
         LibraryRow {

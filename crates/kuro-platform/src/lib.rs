@@ -18,7 +18,7 @@
 //! | `externalCacheDir` (createFileInCacheDir) | `Paths::cache_dir()` and `Paths::temp_dir()` | kuro-platform |
 //! | `ConnectivityManager`, `NetworkCapabilities` (NetworkExtensions, NetworkStateTracker) | `gio::NetworkMonitor` plus NetworkManager over zbus (`device::read` covers the update conditions) | kuro-platform |
 //! | `WifiManager.isWifiEnabled`, `connectionInfo.bssid` | NetworkManager `PrimaryConnectionType` (`device::read`) | kuro-platform |
-//! | `ConnectivityManager.registerDefaultNetworkCallback` (networkStateFlow) | `gio::NetworkMonitor::network-changed` plus NetworkManager `StateChanged` (not implemented yet) | kuro-platform |
+//! | `ConnectivityManager.registerDefaultNetworkCallback` (networkStateFlow) | `power_network::PowerNetworkState` (a watch value bumped when the conditions change; polls NetworkManager and UPower, GIO network monitor fallback) | kuro-platform |
 //! | `NotificationManagerCompat`, builders, channels (NotificationExtensions) | `Notifier` over `gio::Notification` (T-req-platform-004); channel groups dropped | kuro-platform |
 //! | `POST_NOTIFICATIONS` runtime permission (NotificationExtensions) | none needed; the portal asks | dropped (no Linux permission) |
 //! | `NotificationCompat.Builder.setColor` | dropped | dropped (no notification colour) |
@@ -85,6 +85,7 @@ pub mod notifications;
 pub mod notifier;
 pub mod opener;
 pub mod paths;
+pub mod power_network;
 pub mod process;
 pub mod secrets;
 #[cfg(unix)]

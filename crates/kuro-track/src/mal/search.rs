@@ -136,7 +136,11 @@ impl MalApi {
             return Ok(ids
                 .into_iter()
                 .zip(details)
-                .map(|(id, d)| manga_hit(id, &d))
+                .map(|(id, d)| {
+                    let mut hit = manga_hit(id, &d);
+                    hit.from_my_list = true;
+                    hit
+                })
                 .collect());
         }
         let ids = self.search_ids("manga", truncate_query(query)).await?;
@@ -162,7 +166,11 @@ impl MalApi {
             return Ok(ids
                 .into_iter()
                 .zip(details)
-                .map(|(id, d)| anime_hit(id, &d))
+                .map(|(id, d)| {
+                    let mut hit = anime_hit(id, &d);
+                    hit.from_my_list = true;
+                    hit
+                })
                 .collect());
         }
         let ids = self.search_ids("anime", truncate_query(query)).await?;

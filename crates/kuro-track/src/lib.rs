@@ -32,6 +32,7 @@ pub mod remove;
 pub mod repo;
 pub mod search_screen;
 pub mod sheet;
+pub mod shikimori;
 pub mod sync;
 pub mod toast;
 pub mod tracker;

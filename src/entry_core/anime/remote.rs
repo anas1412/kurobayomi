@@ -9,6 +9,7 @@
 //! Known gaps: the list sync of seasons does not exist in the domain layer, so a `Seasons` entry reports an error
 //! instead of syncing, and no cover cache is wired, so a changed cover is stamped but its file is not deleted.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use kuro_data::anime::Anime;
@@ -26,8 +27,10 @@ use kuro_source::anime::{SAnime, SEpisode};
 use tokio::runtime::Handle;
 
 use super::entry_state::RefreshPlan;
+use super::download_backend::AnimeDownloads;
 use super::refresh::Trigger;
 use super::runner::{AnimeBackend, AnimeFetch, StubAnimeBackend};
+use super::store::AnimeStore;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
 
@@ -41,6 +44,10 @@ pub trait AnimeSourceLookup: Send + Sync + 'static {
     }
     /// Whether the source serves torrents (`isSourceForTorrents`).
     fn is_torrent(&self, _source_id: i64) -> bool {
+        false
+    }
+    /// Whether the source is an HTTP source (`source is AnimeHttpSource`): only then does the page offer WebView.
+    fn is_http(&self, _source_id: i64) -> bool {
         false
     }
 }
@@ -103,6 +110,8 @@ pub struct RemoteAnimeBackend {
     lookup: Arc<dyn AnimeSourceLookup>,
     store: Arc<DbRemoteStore>,
     update: Arc<UpdateFromRemote>,
+    episodes: AnimeStore,
+    downloads: Option<AnimeDownloads>,
 }
 
 impl RemoteAnimeBackend {
@@ -113,7 +122,21 @@ impl RemoteAnimeBackend {
         let list_sync = EpisodeListSync { sync, handle, mark_duplicate_as_seen };
         let store = Arc::new(DbRemoteStore::new(Arc::clone(&db)));
         let update = Arc::new(UpdateFromRemote::new(store.clone(), Arc::new(list_sync), Arc::new(NoCoverFiles)));
-        Self { stubs: StubAnimeBackend::new(db), lookup, store, update }
+        Self { stubs: StubAnimeBackend::new(Arc::clone(&db)), lookup, store, update, episodes: AnimeStore::new(db), downloads: None }
+    }
+
+    /// Gives the backend the downloads of the page: the downloads folder and the app's queue.
+    pub fn with_downloads(mut self, downloads: AnimeDownloads) -> Self {
+        self.downloads = Some(downloads);
+        self
+    }
+
+    /// The entry and the episodes with these ids (all of them when `ids` is `None`), with the source line.
+    fn entry_episodes(&self, anime_id: i64, ids: Option<&[i64]>) -> Option<(Anime, Vec<Episode>, SourceInfo)> {
+        let anime = self.episodes.anime(anime_id).ok().flatten()?;
+        let episodes: Vec<Episode> = self.episodes.episodes(anime_id).ok()?.into_iter().filter(|e| ids.is_none_or(|ids| ids.contains(&e.id))).collect();
+        let info = self.source_info(anime.source);
+        Some((anime, episodes, info))
     }
 }
 
@@ -145,6 +168,39 @@ impl AnimeBackend for RemoteAnimeBackend {
 
     fn is_torrent_source(&self, source_id: i64) -> bool {
         self.lookup.is_torrent(source_id)
+    }
+
+    fn is_http_source(&self, source_id: i64) -> bool {
+        self.lookup.is_http(source_id)
+    }
+
+    fn has_download_handler(&self) -> bool {
+        self.downloads.as_ref().is_some_and(AnimeDownloads::can_enqueue)
+    }
+
+    fn downloaded_episodes(&self, anime_id: i64) -> HashSet<i64> {
+        let (Some(downloads), Some((anime, episodes, info))) = (&self.downloads, self.entry_episodes(anime_id, None)) else { return HashSet::new() };
+        downloads.downloaded(&anime, &episodes, &info)
+    }
+
+    fn downloaded_count(&self, anime_id: i64) -> usize {
+        self.downloaded_episodes(anime_id).len()
+    }
+
+    fn enqueue_episodes(&self, anime_id: i64, episode_ids: &[i64], start_now: bool) -> bool {
+        let (Some(downloads), Some((anime, episodes, info))) = (&self.downloads, self.entry_episodes(anime_id, Some(episode_ids))) else { return false };
+        downloads.enqueue(&anime, &episodes, &info, start_now)
+    }
+
+    fn delete_episodes(&self, anime_id: i64, episode_ids: &[i64]) {
+        let (Some(downloads), Some((anime, episodes, info))) = (&self.downloads, self.entry_episodes(anime_id, Some(episode_ids))) else { return };
+        let categories = self.episodes.category_ids(anime_id).unwrap_or_default();
+        downloads.delete(&anime, &episodes, categories, &info);
+    }
+
+    fn delete_downloads(&self, anime_id: i64) {
+        let on_disk: Vec<i64> = self.downloaded_episodes(anime_id).into_iter().collect();
+        self.delete_episodes(anime_id, &on_disk);
     }
 }
 

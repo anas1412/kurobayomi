@@ -244,7 +244,9 @@ mod tests {
     #[test]
     fn t_28a_016_manga_search_text_has_the_server_side_filters() {
         assert!(SEARCH_MANGA.contains("Page (perPage: 50)"));
-        assert!(SEARCH_MANGA.contains("media(search: $query, type: MANGA, format_not_in: [NOVEL])"));
+        assert!(
+            SEARCH_MANGA.contains("media(search: $query, type: MANGA, format_not_in: [NOVEL])")
+        );
     }
 
     #[test]

@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 
-use super::{Begin, InstallTracker, Ticket};
+use super::{InstallTracker, Ticket};
 use crate::anime::model::InstallStep;
 
 #[derive(Debug, Default)]
@@ -17,14 +17,18 @@ impl InstallQueue {
         Self::default()
     }
 
-    /// Queues an install of `pkg`. A package that is already waiting or running gets its step back, and nothing is
-    /// queued a second time (E-INS-12).
-    pub fn request(&mut self, tracker: &mut InstallTracker, pkg: &str) -> Begin {
-        let begin = tracker.begin(pkg);
-        if let Begin::Started(ticket) = &begin {
-            self.waiting.push_back(ticket.clone());
+    /// Queues an install of `pkg`. One install per package is live (T-20a-030): a second request cancels the first,
+    /// waiting or running, and queues a new one, as `AnimeExtensionInstaller.downloadAndInstall` deletes the old download.
+    /// The old running task reports nothing that counts, because its ticket is stale (see `InstallTracker::replace`).
+    pub fn request(&mut self, tracker: &mut InstallTracker, pkg: &str) -> Ticket {
+        if let Some(position) = self.waiting.iter().position(|ticket| ticket.pkg == pkg) {
+            if let Some(old) = self.waiting.remove(position) {
+                old.cancel.cancel();
+            }
         }
-        begin
+        let ticket = tracker.replace(pkg);
+        self.waiting.push_back(ticket.clone());
+        ticket
     }
 
     /// The next entry to run, in FIFO order. It moves to the running list.
@@ -86,13 +90,6 @@ impl InstallQueue {
 mod tests {
     use super::*;
 
-    fn started(begin: Begin) -> Ticket {
-        match begin {
-            Begin::Started(ticket) => ticket,
-            Begin::Running(step) => panic!("expected a new install, got {step:?}"),
-        }
-    }
-
     #[test]
     fn requests_start_in_fifo_order() {
         let mut tracker = InstallTracker::new();
@@ -117,22 +114,32 @@ mod tests {
     }
 
     #[test]
-    fn tst_19_085_a_second_request_for_a_queued_or_running_package_gets_the_existing_entry() {
+    fn tst_19_085_a_second_request_for_a_queued_package_cancels_the_first_and_queues_one_entry() {
+        let mut tracker = InstallTracker::new();
+        let mut queue = InstallQueue::new();
+        let first = queue.request(&mut tracker, "eu.a");
+        let other = queue.request(&mut tracker, "eu.b");
+        let second = queue.request(&mut tracker, "eu.a");
+        assert!(first.cancel.is_cancelled(), "the old install is cancelled");
+        assert!(!second.cancel.is_cancelled() && !other.cancel.is_cancelled());
+        assert_eq!(queue.waiting(), ["eu.b", "eu.a"], "one entry per package, the new one last");
+        assert_eq!(tracker.step("eu.a"), Some(InstallStep::Pending));
+    }
+
+    #[test]
+    fn t_20a_030_a_second_request_for_a_running_package_cancels_it_and_ignores_its_late_steps() {
         let mut tracker = InstallTracker::new();
         let mut queue = InstallQueue::new();
         queue.request(&mut tracker, "eu.a");
-        assert_eq!(
-            queue.request(&mut tracker, "eu.a"),
-            Begin::Running(InstallStep::Pending)
-        );
-        assert_eq!(queue.waiting(), ["eu.a"], "one entry, so one download");
-        let ticket = started(queue.request(&mut tracker, "eu.b"));
-        assert_eq!(ticket.pkg, "eu.b");
-        queue.next();
-        assert_eq!(
-            queue.request(&mut tracker, "eu.a"),
-            Begin::Running(InstallStep::Pending)
-        );
+        let running = queue.next().expect("one entry");
+        tracker.set_step(&running, InstallStep::Downloading);
+        let second = queue.request(&mut tracker, "eu.a");
+        assert!(running.cancel.is_cancelled());
+        assert_eq!(queue.waiting(), ["eu.a"]);
+        tracker.set_step(&running, InstallStep::Installed);
+        assert_eq!(tracker.step("eu.a"), Some(InstallStep::Pending), "the old install's late step changes nothing");
+        queue.finished(&running);
+        assert_eq!(queue.next().as_ref(), Some(&second));
     }
 
     #[test]
@@ -140,7 +147,7 @@ mod tests {
         let mut tracker = InstallTracker::new();
         let mut queue = InstallQueue::new();
         queue.request(&mut tracker, "eu.a");
-        let second = started(queue.request(&mut tracker, "eu.b"));
+        let second = queue.request(&mut tracker, "eu.b");
         queue.request(&mut tracker, "eu.c");
         assert!(queue.cancel(&mut tracker, "eu.b"));
         assert_eq!(tracker.step("eu.b"), Some(InstallStep::Idle));
@@ -170,7 +177,7 @@ mod tests {
     fn tst_19_087_shutdown_sets_queued_entries_to_error_and_the_active_one_to_idle() {
         let mut tracker = InstallTracker::new();
         let mut queue = InstallQueue::new();
-        let active = started(queue.request(&mut tracker, "eu.active"));
+        let active = queue.request(&mut tracker, "eu.active");
         queue.request(&mut tracker, "eu.waiting");
         queue.next();
         tracker.set_step(&active, InstallStep::Downloading);

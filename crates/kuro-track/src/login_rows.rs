@@ -4,7 +4,7 @@
 use crate::manager::TrackerManager;
 use crate::messages::MsgKey;
 use crate::model::TrackerId;
-use crate::oauth::PendingLogins;
+use crate::oauth::{ClientSecrets, PendingLogins};
 use crate::tracker::Tracker;
 
 /// What a row does when tapped.
@@ -131,11 +131,18 @@ pub enum RowTap {
     ConfirmLogout,
     /// Start the MyAnimeList login with `mal::MalTracker::begin_login` (loopback listener plus paste field).
     StartMalLogin,
+    /// Show this toast and open nothing: the tracker's client secret is not configured (T-27b-022).
+    Toast(MsgKey),
 }
 
 /// The effect of tapping `view`. A browser row begins an attempt in `pending`. `None` when the tracker has no
-/// authorise URL, so nothing opens.
-pub fn tap_row(view: &LoginRowView, pending: &mut PendingLogins, now_ms: i64) -> Option<RowTap> {
+/// authorise URL, so nothing opens. A browser row whose client secret is missing in `secrets` shows a toast instead.
+pub fn tap_row(
+    view: &LoginRowView,
+    pending: &mut PendingLogins,
+    secrets: &ClientSecrets,
+    now_ms: i64,
+) -> Option<RowTap> {
     // An expired MyAnimeList login is shown checked, and a tap starts a new login ("Log in again").
     if view.logged_in && !view.expired {
         return Some(RowTap::ConfirmLogout);
@@ -145,9 +152,12 @@ pub fn tap_row(view: &LoginRowView, pending: &mut PendingLogins, now_ms: i64) ->
         LoginAction::Browser if view.row.tracker == TrackerId::MYANIMELIST => {
             view.configured.then_some(RowTap::StartMalLogin)
         }
-        LoginAction::Browser => pending
-            .begin(view.row.tracker, now_ms)
-            .map(RowTap::OpenBrowser),
+        LoginAction::Browser => Some(
+            match pending.begin_configured(view.row.tracker, view.row.name, secrets, now_ms) {
+                Ok(url) => RowTap::OpenBrowser(url),
+                Err(toast) => RowTap::Toast(toast),
+            },
+        ),
     }
 }
 
@@ -168,18 +178,38 @@ mod tests {
 
         let mut pending = PendingLogins::default();
         assert_eq!(
-            tap_row(&views[2], &mut pending, 0),
+            tap_row(&views[2], &mut pending, &ClientSecrets::default(), 0),
             Some(RowTap::ConfirmLogout)
         );
         assert_eq!(
-            tap_row(&views[3], &mut pending, 0),
+            tap_row(&views[3], &mut pending, &ClientSecrets::default(), 0),
             Some(RowTap::OpenCredentials)
         );
-        let Some(RowTap::OpenBrowser(url)) = tap_row(&views[1], &mut pending, 0) else {
+        let Some(RowTap::OpenBrowser(url)) = tap_row(&views[1], &mut pending, &ClientSecrets::default(), 0) else {
             panic!("AniList opens the browser");
         };
         assert!(url.starts_with("https://"), "{url}");
         assert_eq!(INFO_TEXT_ID, "tracking_info");
+    }
+
+    #[tokio::test]
+    async fn t_27b_022_a_row_without_its_client_secret_shows_a_toast() {
+        let h = Harness::new();
+        let views = login_row_views(&h.ctx.trackers);
+        let mut pending = PendingLogins::default();
+        let shikimori = &views[4];
+        assert_eq!(
+            tap_row(shikimori, &mut pending, &ClientSecrets::default(), 0),
+            Some(RowTap::Toast(MsgKey::TrackerNotConfigured("Shikimori".into())))
+        );
+        let secrets = ClientSecrets {
+            shikimori: Some("s".into()),
+            ..ClientSecrets::default()
+        };
+        assert!(matches!(
+            tap_row(shikimori, &mut pending, &secrets, 0),
+            Some(RowTap::OpenBrowser(_))
+        ));
     }
 
     #[test]
@@ -272,23 +302,23 @@ mod tests {
         let mut pending = PendingLogins::default();
         let logged_out = mal_view(false, false, true);
         assert_eq!(
-            tap_row(&logged_out, &mut pending, 0),
+            tap_row(&logged_out, &mut pending, &ClientSecrets::default(), 0),
             Some(RowTap::StartMalLogin),
             "a logged-out MAL row starts the loopback login"
         );
         let expired = mal_view(true, true, true);
         assert_eq!(
-            tap_row(&expired, &mut pending, 0),
+            tap_row(&expired, &mut pending, &ClientSecrets::default(), 0),
             Some(RowTap::StartMalLogin),
             "an expired login is started again"
         );
         let logged_in = mal_view(true, false, true);
         assert_eq!(
-            tap_row(&logged_in, &mut pending, 0),
+            tap_row(&logged_in, &mut pending, &ClientSecrets::default(), 0),
             Some(RowTap::ConfirmLogout)
         );
         assert_eq!(
-            tap_row(&mal_view(false, false, false), &mut pending, 0),
+            tap_row(&mal_view(false, false, false), &mut pending, &ClientSecrets::default(), 0),
             None,
             "no client id: the flow does not start"
         );

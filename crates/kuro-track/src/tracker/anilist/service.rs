@@ -101,7 +101,11 @@ pub async fn update_anime(
 
 /// Bind of a manga to the local entry (`p1-behavior.md` 10.3). A remote entry copies the personal fields,
 /// keeps the local `private` (E-18), and is saved. No remote entry adds it, and the new id becomes `library_id`.
-pub async fn bind_manga(api: &AniList, t: &mut MangaTrack, has_read: bool) -> Result<(), AniListError> {
+pub async fn bind_manga(
+    api: &AniList,
+    t: &mut MangaTrack,
+    has_read: bool,
+) -> Result<(), AniListError> {
     match api.find_manga_entry(t.remote_id).await? {
         Some(remote) => {
             copy_personal_from_manga(t, &remote, false);
@@ -130,7 +134,11 @@ pub async fn bind_manga(api: &AniList, t: &mut MangaTrack, has_read: bool) -> Re
 }
 
 /// Bind of an anime. Same rules as [`bind_manga`], with WATCHING, PLAN_TO_WATCH and REWATCHING.
-pub async fn bind_anime(api: &AniList, t: &mut AnimeTrack, has_seen: bool) -> Result<(), AniListError> {
+pub async fn bind_anime(
+    api: &AniList,
+    t: &mut AnimeTrack,
+    has_seen: bool,
+) -> Result<(), AniListError> {
     match api.find_anime_entry(t.remote_id).await? {
         Some(remote) => {
             copy_personal_from_anime(t, &remote, false);
@@ -234,11 +242,11 @@ mod tests {
     use super::*;
     use crate::fakes::MemSecrets;
     use crate::model::TrackerId;
-    use crate::tracker::anilist::auth::{AccessToken, AuthState};
     use crate::tracker::anilist::api::RawResponse;
+    use crate::tracker::anilist::auth::{AccessToken, AuthState};
+    use crate::tracker::anilist::date::fuzzy_to_ms;
     use crate::tracker::anilist::score::ScoreFormat;
     use crate::tracker::anilist::testkit::{FakeTransport, ok};
-    use crate::tracker::anilist::date::fuzzy_to_ms;
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -247,7 +255,8 @@ mod tests {
     const SAVE_OK: &str = include_str!("../../../tests/fixtures/anilist/save_entry_ok.json");
     const UPDATE_OK: &str = include_str!("../../../tests/fixtures/anilist/update_entry_ok.json");
     const DELETE_OK: &str = include_str!("../../../tests/fixtures/anilist/delete_entry_ok.json");
-    const DELETE_ABSENT: &str = include_str!("../../../tests/fixtures/anilist/delete_entry_absent.json");
+    const DELETE_ABSENT: &str =
+        include_str!("../../../tests/fixtures/anilist/delete_entry_absent.json");
     const FIND_ANIME: &str = include_str!("../../../tests/fixtures/anilist/find_anime_found.json");
 
     fn client(responses: Vec<RawResponse>) -> (AniList, Arc<FakeTransport>) {
@@ -258,7 +267,12 @@ mod tests {
             expires_at: i64::MAX,
             score_format: ScoreFormat::Point10,
         };
-        let api = AniList::from_parts(fake.clone(), MemSecrets::new(), &PrefStore::in_memory(), state);
+        let api = AniList::from_parts(
+            fake.clone(),
+            MemSecrets::new(),
+            &PrefStore::in_memory(),
+            state,
+        );
         (api, fake)
     }
 
@@ -411,8 +425,14 @@ mod tests {
         t.finish_date = fuzzy_to_ms(Some(2025), Some(4), Some(2));
         update_manga(&api, &mut t, false, NOW).await?;
         let vars = body(&fake, 0)["variables"].clone();
-        assert_eq!(vars["startedAt"], json!({"year": 2025, "month": 3, "day": 10}));
-        assert_eq!(vars["completedAt"], json!({"year": 2025, "month": 4, "day": 2}));
+        assert_eq!(
+            vars["startedAt"],
+            json!({"year": 2025, "month": 3, "day": 10})
+        );
+        assert_eq!(
+            vars["completedAt"],
+            json!({"year": 2025, "month": 4, "day": 2})
+        );
         Ok(())
     }
 
@@ -514,7 +534,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn t_28a_026_refresh_copies_personal_fields_and_keeps_link_and_library_id() -> TestResult {
+    async fn t_28a_026_refresh_copies_personal_fields_and_keeps_link_and_library_id() -> TestResult
+    {
         let (api, _fake) = client(vec![ok(FIND_FOUND)]);
         let mut t = manga(MangaStatus::Reading, 1.0, 3);
         t.remote_url = "old-url".into();

@@ -1,0 +1,186 @@
+{
+  "old": [
+    {
+      "number": 1,
+      "seen": true,
+      "bookmark": false,
+      "date_fetch": 1010,
+      "last_second_seen": 0
+    },
+    {
+      "number": 2,
+      "seen": true,
+      "bookmark": false,
+      "date_fetch": 1020,
+      "last_second_seen": 0
+    },
+    {
+      "number": 3,
+      "seen": true,
+      "bookmark": true,
+      "date_fetch": 1030,
+      "last_second_seen": 0
+    },
+    {
+      "number": 4,
+      "seen": true,
+      "bookmark": false,
+      "date_fetch": 1040,
+      "last_second_seen": 0
+    },
+    {
+      "number": 5,
+      "seen": true,
+      "bookmark": false,
+      "date_fetch": 1050,
+      "last_second_seen": 0
+    },
+    {
+      "number": 6,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 1060,
+      "last_second_seen": 1200
+    },
+    {
+      "number": 7,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 1070,
+      "last_second_seen": 0
+    },
+    {
+      "number": 8,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 1080,
+      "last_second_seen": 0
+    },
+    {
+      "number": 9,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 1090,
+      "last_second_seen": 0
+    },
+    {
+      "number": 10,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 1100,
+      "last_second_seen": 0
+    },
+    {
+      "number": 11,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 1110,
+      "last_second_seen": 0
+    },
+    {
+      "number": 12,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 1120,
+      "last_second_seen": 0
+    }
+  ],
+  "new": [
+    {
+      "number": 1.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2001
+    },
+    {
+      "number": 2.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2002
+    },
+    {
+      "number": 3.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2003
+    },
+    {
+      "number": 4.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2004
+    },
+    {
+      "number": 5.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2005
+    },
+    {
+      "number": 6.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2006
+    },
+    {
+      "number": 7.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2007
+    },
+    {
+      "number": 8.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2008
+    },
+    {
+      "number": 9.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2009
+    },
+    {
+      "number": 10.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2010
+    },
+    {
+      "number": 11.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2011
+    },
+    {
+      "number": 12.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2012
+    },
+    {
+      "number": 13.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2013
+    },
+    {
+      "number": 14.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2014
+    },
+    {
+      "number": -1.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2100
+    },
+    {
+      "number": -1.0,
+      "seen": false,
+      "bookmark": false,
+      "date_fetch": 2101
+    }
+  ]
+}

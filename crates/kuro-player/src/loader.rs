@@ -3,8 +3,11 @@
 //! 4.4). Pure and synchronous: the source calls go through `VideoSource`, and the caller runs this
 //! on a worker thread. Cancellation is the load gate's generation check.
 
+use std::path::PathBuf;
+
 use crate::hosters::{
-    VideoSource, get_resolved_video, load_hoster_state, load_hoster_state_forced, select_best_video,
+    VideoSource, get_hosters_on_http, get_resolved_video, load_hoster_state,
+    load_hoster_state_forced, local_videos, select_best_video,
 };
 use crate::types::{Hoster, HosterState, ReadyHoster, Video, VideoState};
 
@@ -35,6 +38,68 @@ pub fn episode_kind(
         Ok(EpisodeKind::Local)
     } else {
         Err(SourceNotSupported)
+    }
+}
+
+/// What `get_hosters` asks of the app about one episode: the download manager and the local source
+/// directory. The app implements it; tests use a fake.
+pub trait EpisodeDeps {
+    type Error;
+    /// `downloadManager.isEpisodeDownloaded(..., skipCache)`.
+    fn is_downloaded(&self, skip_cache: bool) -> bool;
+    /// `downloadManager.buildVideo(source, anime, episode)`.
+    fn build_downloaded_video(&self) -> Result<Video, Self::Error>;
+    /// The base directory of the local source, if it is set.
+    fn local_base_dir(&self) -> Option<PathBuf>;
+}
+
+/// `EpisodeLoader.isDownload` (behaviour 3.2): a disk check that skips the download cache.
+pub fn is_download<D: EpisodeDeps>(deps: &D) -> bool {
+    deps.is_downloaded(true)
+}
+
+/// Why `get_hosters` failed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum GetHostersError<E> {
+    /// `error("source not supported")`.
+    NotSupported(SourceNotSupported),
+    /// The HTTP source call failed.
+    Source(E),
+}
+
+/// `EpisodeLoader.getHosters` (behaviour 3.1, T-45b-007): downloaded, then HTTP, then local, else
+/// `SourceNotSupported`. The downloaded and local paths swallow their errors into an empty list.
+/// `episode_url` is the stored `episode.url` that the local path reads.
+pub fn get_hosters<S, D>(
+    deps: &D,
+    source: &S,
+    episode: &S::Episode,
+    episode_url: &str,
+) -> Result<Vec<Hoster>, GetHostersError<S::Error>>
+where
+    S: VideoSource,
+    D: EpisodeDeps,
+{
+    match episode_kind(is_download(deps), source.is_http(), source.is_local())
+        .map_err(GetHostersError::NotSupported)?
+    {
+        EpisodeKind::Downloaded => Ok(downloaded_hosters(deps.build_downloaded_video())),
+        EpisodeKind::Http => get_hosters_on_http(source, episode).map_err(GetHostersError::Source),
+        EpisodeKind::Local => Ok(local_hosters(deps, episode_url)),
+    }
+}
+
+/// `getHostersOnLocal` (behaviour 3.5): the file as one hoster, or an empty list when the base
+/// directory or the file is missing.
+fn local_hosters<D: EpisodeDeps>(deps: &D, episode_url: &str) -> Vec<Hoster> {
+    let videos = deps
+        .local_base_dir()
+        .map(|base| local_videos(&base, episode_url))
+        .unwrap_or_default();
+    if videos.is_empty() {
+        Vec::new()
+    } else {
+        vec![Hoster::from_videos(videos)]
     }
 }
 
@@ -371,6 +436,7 @@ mod tests {
         videos: HashMap<String, Vec<Video>>,
         resolve_fails: Vec<String>,
         http: bool,
+        local: bool,
     }
 
     impl VideoSource for Source {
@@ -379,6 +445,9 @@ mod tests {
 
         fn is_http(&self) -> bool {
             self.http
+        }
+        fn is_local(&self) -> bool {
+            self.local
         }
         fn has_hoster_list(&self) -> bool {
             false
@@ -448,6 +517,117 @@ mod tests {
         assert_eq!(episode_kind(false, false, false), Err(SourceNotSupported));
     }
 
+    /// A fake download manager that records how the disk check was called.
+    #[derive(Default)]
+    struct Deps {
+        downloaded: bool,
+        build_fails: bool,
+        base: Option<PathBuf>,
+        calls: std::cell::RefCell<Vec<bool>>,
+    }
+
+    impl EpisodeDeps for Deps {
+        type Error = ();
+
+        fn is_downloaded(&self, skip_cache: bool) -> bool {
+            self.calls.borrow_mut().push(skip_cache);
+            self.downloaded
+        }
+        fn build_downloaded_video(&self) -> Result<Video, ()> {
+            if self.build_fails {
+                Err(())
+            } else {
+                Ok(video("file:///dl.mkv"))
+            }
+        }
+        fn local_base_dir(&self) -> Option<PathBuf> {
+            self.base.clone()
+        }
+    }
+
+    #[test]
+    fn is_download_skips_the_cache() {
+        let deps = Deps::default();
+        assert!(!is_download(&deps));
+        assert_eq!(*deps.calls.borrow(), vec![true]);
+    }
+
+    #[test]
+    fn get_hosters_prefers_the_downloaded_file_over_the_source() {
+        let deps = Deps {
+            downloaded: true,
+            ..Deps::default()
+        };
+        let src = Source {
+            http: true,
+            local: true,
+            ..Source::default()
+        };
+        let hosters = get_hosters(&deps, &src, &(), "a/b.mkv").unwrap();
+        assert_eq!(hosters.len(), 1);
+        assert_eq!(
+            hosters[0].video_list.as_ref().unwrap()[0].video_url,
+            "file:///dl.mkv"
+        );
+        let broken = Deps {
+            downloaded: true,
+            build_fails: true,
+            ..Deps::default()
+        };
+        assert_eq!(get_hosters(&broken, &src, &(), "a/b.mkv"), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn get_hosters_takes_the_http_path_before_the_local_one() {
+        let src = Source {
+            http: true,
+            local: true,
+            ..Source::default()
+        };
+        // The fake has no hoster list and an empty video list: the legacy path gives one hoster.
+        let hosters = get_hosters(&Deps::default(), &src, &(), "a/b.mkv").unwrap();
+        assert_eq!(hosters.len(), 1);
+        assert_eq!(hosters[0].hoster_name, crate::types::NO_HOSTER_LIST);
+    }
+
+    #[test]
+    fn get_hosters_reads_a_local_file_and_gives_nothing_for_a_missing_one() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("show")).unwrap();
+        std::fs::write(dir.path().join("show/ep1.mkv"), b"x").unwrap();
+        let src = Source {
+            local: true,
+            ..Source::default()
+        };
+        let deps = Deps {
+            base: Some(dir.path().to_path_buf()),
+            ..Deps::default()
+        };
+        let found = get_hosters(&deps, &src, &(), "show/ep1.mkv").unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].video_list.as_ref().unwrap()[0].video_title,
+            "Local source: show/ep1.mkv"
+        );
+        assert_eq!(
+            get_hosters(&deps, &src, &(), "show/none.mkv"),
+            Ok(Vec::new())
+        );
+        assert_eq!(
+            get_hosters(&Deps::default(), &src, &(), "show/ep1.mkv"),
+            Ok(Vec::new())
+        );
+    }
+
+    #[test]
+    fn get_hosters_of_an_unknown_source_is_not_supported() {
+        let src = Source::default();
+        assert_eq!(
+            get_hosters(&Deps::default(), &src, &(), "a/b"),
+            Err(GetHostersError::NotSupported(SourceNotSupported))
+        );
+    }
+
     #[test]
     fn a_downloaded_episode_is_one_hoster_and_an_error_is_empty() {
         let hosters = downloaded_hosters::<()>(Ok(video("file")));
@@ -470,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn the_saved_selection_is_loaded_first() {
+    fn t63_the_saved_selection_is_loaded_first() {
         let src = source(&[
             ("a", vec![video("a0"), video("a1")]),
             ("b", vec![video("b0")]),
@@ -521,6 +701,50 @@ mod tests {
             session.current_video.as_ref().map(|v| v.video_url.as_str()),
             Some("good?resolved")
         );
+    }
+
+    /// T64: the saved selection fails to resolve, so the best remaining video is selected.
+    #[test]
+    fn t64_a_failed_saved_selection_falls_back_to_the_best_video() {
+        let mut src = source(&[("a", vec![video("a0")]), ("b", vec![video("b0")])]);
+        src.resolve_fails.push("b0".to_owned());
+        let mut session =
+            HosterSession::new(vec![hoster("a", None, false), hoster("b", None, false)]);
+        assert_eq!(session.load_hosters(&src, Some((1, 0))), Ok(()));
+        assert_eq!(session.states[1].video_state(0), VideoState::Error);
+        assert_eq!(session.selected, Some((0, 0)));
+        assert_eq!(
+            session.current_video.as_ref().map(|v| v.video_url.as_str()),
+            Some("a0?resolved")
+        );
+    }
+
+    /// T65: every hoster is empty, so there is nothing to play.
+    #[test]
+    fn t65_empty_hosters_give_no_available_videos() {
+        let src = source(&[("a", Vec::new()), ("b", Vec::new())]);
+        let mut session =
+            HosterSession::new(vec![hoster("a", None, false), hoster("b", None, false)]);
+        assert_eq!(
+            session.load_hosters(&src, None),
+            Err(LoadFailure::NoAvailableVideos)
+        );
+    }
+
+    /// T66: a hoster still loading defers the load: `Ok(false)`, selection reset, no error.
+    #[test]
+    fn t66_a_loading_hoster_defers_the_load_and_resets_the_selection() {
+        let mut src = source(&[]);
+        src.resolve_fails.push("bad".to_owned());
+        let mut session = HosterSession::new(vec![
+            hoster("a", Some(vec![video("bad")]), false),
+            hoster("b", None, false),
+        ]);
+        assert!(matches!(session.states[1], HosterState::Loading(_)));
+        assert_eq!(session.load_video(&src, video("bad"), 0, 0), Ok(false));
+        assert_eq!(session.selected, None);
+        assert_eq!(session.states[0].video_state(0), VideoState::Error);
+        assert_eq!(session.current_video, None);
     }
 
     #[test]
@@ -586,14 +810,14 @@ mod tests {
     }
 
     #[test]
-    fn cancel_resets_every_hoster_to_idle() {
+    fn t67_cancel_resets_every_hoster_to_idle() {
         let mut session = HosterSession::new(vec![hoster("a", Some(vec![video("x")]), false)]);
         session.cancel();
         assert_eq!(session.states, vec![HosterState::Idle("a".to_owned())]);
     }
 
     #[test]
-    fn a_stale_load_ticket_is_dropped_after_a_newer_select() {
+    fn t68_a_stale_load_ticket_is_dropped_after_a_newer_select() {
         let mut gate = LoadGate::default();
         let first = gate.begin();
         let second = gate.begin();

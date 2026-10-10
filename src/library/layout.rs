@@ -15,13 +15,21 @@ pub fn tabs_visible(category_tabs: bool, search_active: bool) -> bool {
 }
 
 /// Height of one list row when `entries` rows share `page_height` pixels: `height / n - 3 / n` in floating point,
-/// at least 48 (E-23, an intended difference from the upstream integer division).
+/// at least 48 (E-23, an intended difference from the upstream integer division). A list size of 0 (Auto) gives the
+/// fixed 76 px row (T-37a-021).
 pub fn list_row_height(page_height: f64, entries: usize) -> f64 {
     if entries == 0 {
-        return 48.0;
+        return 76.0;
     }
     let n = entries as f64;
     (page_height / n - 3.0 / n).max(48.0)
+}
+
+/// The list size of the page: the portrait or landscape slider value for a window `width` pixels wide (the same
+/// split the grids read), clamped to `0..=10`. 0 is Auto.
+pub fn list_size(width: i32, portrait: i32, landscape: i32) -> usize {
+    use kuro_domain::library::columns::{PORTRAIT_BREAKPOINT_PX, clamp_columns};
+    clamp_columns(if width < PORTRAIT_BREAKPOINT_PX { portrait } else { landscape }) as usize
 }
 
 /// The tab label: the category name, with its count after it when counts are shown.
@@ -96,6 +104,16 @@ mod tests {
         assert_eq!(list_row_height(600.0, 4), 600.0 / 4.0 - 3.0 / 4.0);
         assert_eq!(list_row_height(600.0, 2), 600.0 / 2.0 - 1.5);
         assert_eq!(list_row_height(100.0, 10), 48.0);
-        assert_eq!(list_row_height(100.0, 0), 48.0);
+        assert_eq!(list_row_height(100.0, 0), 76.0, "list size 0 is the fixed 76 px row");
+        assert_eq!(list_row_height(0.0, 0), 76.0);
+    }
+
+    #[test]
+    fn the_list_size_follows_the_orientation_key_and_stays_in_range() {
+        assert_eq!(list_size(899, 3, 7), 3);
+        assert_eq!(list_size(900, 3, 7), 7);
+        assert_eq!(list_size(500, 0, 7), 0);
+        assert_eq!(list_size(500, 99, 7), 10);
+        assert_eq!(list_size(500, -4, 7), 0);
     }
 }

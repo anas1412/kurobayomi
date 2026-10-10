@@ -39,13 +39,33 @@ pub fn system_prefers_dark() -> bool {
     gtk::Settings::default().is_some_and(|s| s.is_gtk_application_prefer_dark_theme())
 }
 
-/// Sets the background class of a reader widget. Earlier background classes are removed first.
+/// Whether the reader's text is light (`isDarkBackground`, B§1.4): themes 1 and 2 are dark, automatic is dark when
+/// the system prefers dark, and anything else (white) is light text off.
+pub fn dark_background(theme: i32, system_dark: bool) -> bool {
+    match theme {
+        1 | 2 => true,
+        3 => system_dark,
+        _ => false,
+    }
+}
+
+/// The class of the text colour that goes with a background (`reader-text-*`).
+pub fn text_class(theme: i32, system_dark: bool) -> &'static str {
+    if dark_background(theme, system_dark) { "reader-text-light" } else { "reader-text-dark" }
+}
+
+/// Sets the background and text classes of a reader widget. Earlier classes are removed first. Pages, cards and
+/// error states inside the widget take the same palette (T-44a-059).
 pub fn apply_background(widget: &impl IsA<gtk::Widget>, theme: i32) {
     let background = background_for(theme, system_prefers_dark());
     for class in [Background::White, Background::Black, Background::Gray] {
         widget.remove_css_class(class.class());
     }
     widget.add_css_class(background.class());
+    for class in ["reader-text-light", "reader-text-dark"] {
+        widget.remove_css_class(class);
+    }
+    widget.add_css_class(text_class(theme, system_prefers_dark()));
 }
 
 /// The reader stylesheet: the background colours and the page indicator.
@@ -53,6 +73,8 @@ pub fn css() -> &'static str {
     ".reader-bg-white { background-color: #ffffff; }
 .reader-bg-black { background-color: #000000; }
 .reader-bg-gray { background-color: #202125; }
+.reader-text-light { color: #ffffff; }
+.reader-text-dark { color: #000000; }
 .reader-scrim { background-color: rgba(0, 0, 0, 0.5); }
 .reader-gray { filter: grayscale(1); }
 .reader-invert { filter: invert(1); }
@@ -79,6 +101,17 @@ mod tests {
         assert_eq!(background_for(2, true), Background::Gray);
         assert_eq!(background_for(3, true), Background::Gray);
         assert_eq!(background_for(3, false), Background::White);
+    }
+
+    #[test]
+    fn the_text_is_light_on_the_dark_backgrounds_and_dark_on_white() {
+        assert!(!dark_background(0, true), "white takes dark text whatever the system says");
+        assert!(dark_background(1, false));
+        assert!(dark_background(2, false));
+        assert!(dark_background(3, true));
+        assert!(!dark_background(3, false));
+        assert_eq!(text_class(0, false), "reader-text-dark");
+        assert_eq!(text_class(1, false), "reader-text-light");
     }
 
     #[test]

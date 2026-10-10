@@ -12,6 +12,7 @@ use crate::error::{TrackError, redact};
 use crate::events::{EventBus, TrackEvent};
 use crate::manager::TrackerManager;
 use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::prefs::TrackPrefs;
 use crate::progress::TrackRunner;
 use crate::queue::RetryQueue;
 use crate::queue::retry::RetryScheduler;
@@ -60,6 +61,8 @@ pub struct TrackCtx {
     pub queue: Arc<RetryQueue>,
     pub scheduler: Arc<RetryScheduler>,
     pub net: Arc<dyn Connectivity>,
+    /// The shared tracking switches. Progress from reading or watching is sent only while they allow it.
+    pub prefs: Arc<TrackPrefs>,
     pub locks: BindingLocks,
     /// Change notifications, sent after each committed write.
     pub events: EventBus,

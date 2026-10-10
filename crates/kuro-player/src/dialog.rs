@@ -64,10 +64,15 @@ pub fn picker_values(min: i32, max: i32, step: i32) -> Option<Vec<i32>> {
     (step > 0).then(|| (min..=max).step_by(step as usize).collect())
 }
 
-/// The row the picker opens on: the default's row, or row 0 when the default is not in `values`
+/// The row the picker opens on. A default outside the range of `values` is clamped into it on open
+/// (U§6, T-45b-080). A default inside the range but off the step has no row, so it opens on row 0
 /// (E-46-028).
 pub fn picker_start_index(values: &[i32], default: i32) -> usize {
-    values.iter().position(|v| *v == default).unwrap_or(0)
+    let (Some(&lo), Some(&hi)) = (values.first(), values.last()) else {
+        return 0;
+    };
+    let value = default.clamp(lo, hi);
+    values.iter().position(|v| *v == value).unwrap_or(0)
 }
 
 /// What a dismissal commits: the value of the displayed row, never the default (E-46-027).
@@ -164,6 +169,14 @@ mod picker_tests {
         let values = [0, 3, 6, 9];
         assert_eq!(picker_start_index(&values, 6), 2);
         assert_eq!(picker_start_index(&values, 7), 0);
+    }
+
+    #[test]
+    fn an_out_of_range_default_is_clamped_on_open() {
+        let values = [0, 3, 6, 9];
+        assert_eq!(picker_start_index(&values, 50), 3);
+        assert_eq!(picker_start_index(&values, -5), 0);
+        assert_eq!(picker_start_index(&[], 4), 0);
     }
 
     #[test]

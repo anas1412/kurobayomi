@@ -38,6 +38,15 @@ pub trait Backend: Send + Sync + 'static {
     fn cancel_download(&self, _chapter_id: i64) {}
     /// Binds the enhanced trackers of the source to a manga that just joined the library (`bindEnhancedTrackers`).
     fn bind_enhanced(&self, _manga_id: i64) {}
+    /// Whether a tracker is logged in: the tracking button opens the tracking sheet then, the tracking settings
+    /// otherwise (E-25). The app has no tracker session yet, so the default is no.
+    fn has_logged_in_tracker(&self) -> bool {
+        false
+    }
+    /// Whether the source is an HTTP source: only then does the page offer WebView and Share.
+    fn is_http_source(&self, _source_id: i64) -> bool {
+        false
+    }
     /// Deletes the cover files of a manga that just left the library (`removeCovers`), after the write succeeded.
     /// `true` when a file was removed.
     fn remove_cover(&self, _manga_id: i64) -> bool {

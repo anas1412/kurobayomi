@@ -406,6 +406,44 @@ async fn a_remote_delete_failure_is_logged_and_the_local_removal_still_happens()
 }
 
 #[tokio::test]
+async fn a_failed_remote_delete_is_logged_at_error_and_a_404_at_warn() {
+    let captured = Captured::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(captured.clone())
+        .with_ansi(false)
+        .with_max_level(tracing::Level::TRACE)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = tracker_for(&server, dir.path(), MemorySecrets::default().into());
+    tracker.auth().set_token(fresh_token("a")).unwrap();
+    for (id, status) in [(5, 500), (6, 404)] {
+        Mock::given(method("DELETE"))
+            .and(path(format!("/v2/manga/{id}/my_list_status")))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+    }
+    let deletable = tracker.as_deletable_manga().expect("deletable");
+    deletable.delete(&manga_track(5, 1, 0.0, 0)).await.unwrap();
+    let logs = captured.text();
+    assert!(
+        logs.lines()
+            .any(|l| l.contains("ERROR") && l.contains("Failed to remove the MAL entry")),
+        "{logs}"
+    );
+    deletable.delete(&manga_track(6, 1, 0.0, 0)).await.unwrap();
+    let logs = captured.text();
+    assert!(
+        logs.lines()
+            .any(|l| l.contains("WARN") && l.contains("not on the list")),
+        "{logs}"
+    );
+}
+
+#[tokio::test]
 async fn a_remote_update_failure_is_logged_with_the_title_id_and_no_token() {
     let captured = Captured::default();
     let subscriber = tracing_subscriber::fmt()

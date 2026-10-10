@@ -1,10 +1,72 @@
 //! Source icon resolution (T-40a-006). The choice is cached per source id, and a missing icon never blocks a row.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Icons are 40 px high and square (`height(40) aspectRatio(1)`).
 pub const ICON_HEIGHT_PX: i32 = 40;
+
+/// The icon of the details page header is 112 px square (T-40a-021, T-40a-027).
+pub const DETAILS_ICON_PX: i32 = 112;
+
+/// Where the picture of an extension comes from: an available extension names the url of its icon, an installed one
+/// the package or image file it ships. Both travel in `Ext::icon_file`; the scheme tells them apart (T-40a-027).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IconRef<'a> {
+    Url(&'a str),
+    File(&'a str),
+}
+
+pub fn icon_ref(value: &str) -> IconRef<'_> {
+    if value.starts_with("https://") || value.starts_with("http://") { IconRef::Url(value) } else { IconRef::File(value) }
+}
+
+/// The file an icon url is cached in: the image cache's own name for a key, the md5 of the url (T-34a-068).
+pub fn icon_cache_file(root: &Path, url: &str) -> PathBuf {
+    root.join(kuro_images::keys::hash_key(url))
+}
+
+/// The image cache folder, resolved from the platform data directory. `None` when there is no home to put it in.
+pub fn icon_cache_root() -> Option<PathBuf> {
+    let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
+    Some(kuro_images::platform::image_cache_dir(&paths))
+}
+
+/// The picture of an available extension: the cached file when the url was fetched before, else what `get` downloads,
+/// which is then cached. A fetch that fails, or bytes that are not a picture, are `None` and the row shows its error
+/// glyph. Blocking: callers run it off the GTK thread.
+pub fn fetch_icon(root: Option<&Path>, url: &str, get: impl FnOnce(&str) -> Option<Vec<u8>>) -> Option<DecodedIcon> {
+    let cached = root.map(|root| icon_cache_file(root, url));
+    if let Some(bytes) = cached.as_ref().and_then(|file| std::fs::read(file).ok()) {
+        if let Some(icon) = decode_icon(&bytes) {
+            return Some(icon);
+        }
+    }
+    let bytes = get(url)?;
+    let icon = decode_icon(&bytes)?;
+    if let Some(file) = cached {
+        // written beside the entry and renamed in, so a reader never sees half a file
+        let part = file.with_extension("part");
+        let stored = std::fs::create_dir_all(file.parent().unwrap_or(Path::new("."))).and_then(|()| std::fs::write(&part, &bytes)).and_then(|()| std::fs::rename(&part, &file));
+        if let Err(error) = stored {
+            tracing::debug!(%error, "an extension icon could not be cached");
+        }
+    }
+    Some(icon)
+}
+
+/// The glyph a failed icon leaves: a url that could not be fetched shows the error glyph in the error colour (the bundled
+/// error placeholder of D7); a file that could not be read shows the default source glyph.
+pub fn fallback_glyph(from_url: bool) -> (&'static str, bool) {
+    if from_url { ("dialog-error-symbolic", true) } else { (SourceIcon::Default.icon_name().unwrap_or("image-missing"), false) }
+}
+
+/// Downloads an icon with a short timeout.
+pub fn http_get(url: &str) -> Option<Vec<u8>> {
+    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(15)).build().ok()?;
+    let response = client.get(url).send().ok()?.error_for_status().ok()?;
+    response.bytes().ok().map(|bytes| bytes.to_vec())
+}
 
 /// Which icon a source row shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,5 +255,42 @@ mod tests {
         let icon = load_icon(&file).expect("decoded");
         assert_eq!((icon.width, icon.height), (2, 3));
         assert_eq!(&icon.rgba[..4], &[1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn an_http_value_is_a_url_and_anything_else_is_a_file() {
+        assert_eq!(icon_ref("https://x.test/icon.png"), IconRef::Url("https://x.test/icon.png"));
+        assert_eq!(icon_ref("http://x.test/icon.png"), IconRef::Url("http://x.test/icon.png"));
+        assert_eq!(icon_ref("/cache/icons/pkg.png"), IconRef::File("/cache/icons/pkg.png"));
+        assert_eq!(DETAILS_ICON_PX, 112);
+    }
+
+    fn png() -> Vec<u8> {
+        let mut png = Vec::new();
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([9, 8, 7, 255]))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("encode");
+        png
+    }
+
+    #[test]
+    fn an_icon_url_is_fetched_once_and_then_read_from_the_cache() {
+        let dir = tempfile::tempdir().expect("dir");
+        let url = "https://x.test/icon.png";
+        let bytes = png();
+        let first = fetch_icon(Some(dir.path()), url, |_| Some(bytes.clone())).expect("fetched");
+        assert_eq!((first.width, first.height), (2, 2));
+        assert!(icon_cache_file(dir.path(), url).exists(), "the picture is cached under the md5 of its url");
+        let second = fetch_icon(Some(dir.path()), url, |_| panic!("a cached icon is not fetched again")).expect("cached");
+        assert_eq!(second, first);
+    }
+
+    #[test]
+    fn a_failed_fetch_or_a_bad_picture_is_none_and_caches_nothing() {
+        let dir = tempfile::tempdir().expect("dir");
+        assert_eq!(fetch_icon(Some(dir.path()), "https://x.test/a.png", |_| None), None, "the network failed");
+        assert_eq!(fetch_icon(Some(dir.path()), "https://x.test/b.png", |_| Some(b"<html>".to_vec())), None, "not a picture");
+        assert_eq!(std::fs::read_dir(dir.path()).expect("dir").count(), 0);
+        assert_eq!(fetch_icon(None, "https://x.test/c.png", |_| Some(png())).map(|i| i.width), Some(2), "with no cache folder it still shows");
     }
 }

@@ -211,6 +211,55 @@ pub fn resume_position_ms(
     })
 }
 
+/// One tracker of the anime, as far as the seen update needs it (T-45a-066).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TrackerEntry {
+    pub track_id: i64,
+    pub logged_in: bool,
+    pub last_episode_seen: f64,
+}
+
+/// What an episode seen does for one tracker (T-45a-066, T-45a-067).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TrackUpdate {
+    /// Send the episode to the tracker now.
+    Send { track_id: i64, episode: f64 },
+    /// Offline: store it in the delayed-tracking store and schedule its replay job.
+    Delay { track_id: i64, episode: f64 },
+}
+
+/// The tracker updates of a seen episode. Nothing happens unless the auto-update preference is on
+/// and the episode is seen. Then every logged-in tracker whose last seen episode is lower than
+/// `episode_number` gets one update: a send when online, a delayed entry when offline.
+pub fn seen_tracker_updates(
+    auto_update: bool,
+    seen: bool,
+    episode_number: f64,
+    online: bool,
+    trackers: &[TrackerEntry],
+) -> Vec<TrackUpdate> {
+    if !auto_update || !seen {
+        return Vec::new();
+    }
+    trackers
+        .iter()
+        .filter(|t| t.logged_in && t.last_episode_seen < episode_number)
+        .map(|t| {
+            if online {
+                TrackUpdate::Send {
+                    track_id: t.track_id,
+                    episode: episode_number,
+                }
+            } else {
+                TrackUpdate::Delay {
+                    track_id: t.track_id,
+                    episode: episode_number,
+                }
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,13 +343,13 @@ mod tests {
     }
 
     #[test]
-    fn incognito_without_trackers_writes_neither_history_nor_progress() {
+    fn t56_incognito_without_trackers_writes_neither_history_nor_progress() {
         let plan = save(true, false, 42, &blank(), &episode(false, 500, 1000));
         assert_eq!(plan, SavePlan::default());
     }
 
     #[test]
-    fn incognito_with_a_tracker_writes_progress_but_not_history() {
+    fn t57_incognito_with_a_tracker_writes_progress_but_not_history() {
         let plan = save(true, true, 42, &blank(), &episode(false, 500, 1000));
         assert_eq!(plan.history_seen_at, None);
         assert_eq!(plan.episode.unwrap().last_second_seen, Some(500));
@@ -315,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_save_upserts_history_at_now_and_writes_only_changed_fields() {
+    fn t58_normal_save_upserts_history_at_now_and_writes_only_changed_fields() {
         let stored = episode(false, 0, 1000);
         let plan = save(false, false, 42, &stored, &episode(false, 100, 1000));
         assert_eq!(plan.history_seen_at, Some(42));
@@ -344,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn unseen_becomes_seen_at_threshold() {
+    fn t55_unseen_becomes_seen_at_threshold() {
         let stored = episode(false, 0, 1000);
         let at = save(false, false, 1, &stored, &episode(false, 850, 1000));
         assert_eq!(at.episode.unwrap().seen, Some(true));
@@ -410,5 +459,48 @@ mod tests {
         // unseen: resume either way
         assert_eq!(resume_position_ms(None, false, false, 5000), 5000);
         assert_eq!(resume_position_ms(None, false, true, 5000), 5000);
+    }
+
+    fn tracker(id: i64, logged_in: bool, seen: f64) -> TrackerEntry {
+        TrackerEntry {
+            track_id: id,
+            logged_in,
+            last_episode_seen: seen,
+        }
+    }
+
+    #[test]
+    fn seen_update_goes_to_each_logged_in_tracker_behind_the_episode() {
+        let list = [
+            tracker(1, true, 4.0),
+            tracker(2, true, 6.0),
+            tracker(3, false, 0.0),
+        ];
+        assert_eq!(
+            seen_tracker_updates(true, true, 5.0, true, &list),
+            vec![TrackUpdate::Send {
+                track_id: 1,
+                episode: 5.0
+            }]
+        );
+    }
+
+    #[test]
+    fn nothing_without_the_preference_or_when_not_seen() {
+        let list = [tracker(1, true, 0.0)];
+        assert!(seen_tracker_updates(false, true, 5.0, true, &list).is_empty());
+        assert!(seen_tracker_updates(true, false, 5.0, true, &list).is_empty());
+    }
+
+    #[test]
+    fn offline_updates_are_delayed_not_sent() {
+        let list = [tracker(7, true, 1.0)];
+        assert_eq!(
+            seen_tracker_updates(true, true, 2.0, false, &list),
+            vec![TrackUpdate::Delay {
+                track_id: 7,
+                episode: 2.0
+            }]
+        );
     }
 }

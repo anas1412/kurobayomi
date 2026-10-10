@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Juliet",
+    "pkg": "eu.example.juliet",
+    "version": "1.4.9",
+    "nsfw": true,
+    "signature": "abc"
+  },
+  {
+    "name": "Zeta",
+    "pkg": "eu.example.kilo",
+    "version": "1.4.10",
+    "nsfw": false,
+    "signature": "def"
+  }
+]

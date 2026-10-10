@@ -31,28 +31,6 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
     }
 }
 
-/// The installed build: a release build knows its version, a preview build only its commit count (tags are `r<count>`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Current {
-    Release(String),
-    Preview { commit_count: u64 },
-}
-
-/// The digits of a preview tag (`r2000` is 2000). `None` when the tag has no digits or they overflow.
-pub fn preview_number(tag: &str) -> Option<u64> {
-    let digits: String = tag.chars().filter(char::is_ascii_digit).collect();
-    digits.parse().ok()
-}
-
-/// True when `candidate` is newer than the installed build: the semver rule for a release build, and for a preview
-/// build the tag's digits strictly above the commit count (`isPreview`: `newVersion.toInt() > commitCount`).
-pub fn is_update(candidate: &str, current: &Current) -> bool {
-    match current {
-        Current::Release(version) => is_newer(candidate, version),
-        Current::Preview { commit_count } => preview_number(candidate).is_some_and(|n| n > *commit_count),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,22 +72,5 @@ mod tests {
     fn an_unparseable_side_is_never_newer() {
         assert!(!is_newer("nightly", "1.0.0"));
         assert!(!is_newer("2.0.0", "nightly"));
-    }
-
-    #[test]
-    fn a_preview_tag_is_newer_only_when_its_number_is_strictly_above_the_commit_count() {
-        let preview = |commit_count| Current::Preview { commit_count };
-        assert!(is_update("r2000", &preview(1000)), "TC-REL-02: 2000 against 1000");
-        assert!(!is_update("r2000", &preview(2000)), "equal is not newer");
-        assert!(is_update("r2001", &preview(2000)));
-        assert!(!is_update("nightly", &preview(1)), "no digits is never newer");
-        assert!(!is_update("r99999999999999999999999", &preview(1)), "overflow is never newer");
-    }
-
-    #[test]
-    fn a_release_build_uses_the_semver_rule() {
-        let release = Current::Release("1.0.0".into());
-        assert!(is_update("v1.0.1", &release));
-        assert!(!is_update("v1.0.0", &release));
     }
 }

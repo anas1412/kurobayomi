@@ -37,7 +37,7 @@ pub fn grouped<T, Tz: TimeZone>(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use chrono::{FixedOffset, TimeZone, Utc};
 
     use super::*;
 
@@ -85,5 +85,35 @@ mod tests {
                 ListRow::Item("c"),
             ]
         );
+    }
+
+    #[test]
+    fn grouping_splits_at_local_midnight() {
+        // E-U17: 23:59:59.999 and 00:00:00.001 local are on different days, so they get two headers.
+        let zone = FixedOffset::east_opt(3 * 3600).unwrap();
+        let local = |day: u32, h: u32, m: u32, s: u32, ms: i64| {
+            zone.with_ymd_and_hms(2026, 10, day, h, m, s).unwrap().timestamp_millis() + ms
+        };
+        let rows = grouped([("early", local(10, 0, 0, 0, 1)), ("late", local(9, 23, 59, 59, 999))], &zone, d(10), false, "yyyy-MM-dd", "en");
+        assert_eq!(
+            rows,
+            vec![
+                ListRow::Header("2026-10-10".into()),
+                ListRow::Item("early"),
+                ListRow::Header("2026-10-09".into()),
+                ListRow::Item("late"),
+            ]
+        );
+    }
+
+    #[test]
+    fn grouping_keeps_a_long_day_under_its_local_dates() {
+        // E-U16 (shape only): a 25-hour span crosses two local dates, one header each. The DST zone itself needs a
+        // tz database, which the crate set does not carry; a fixed offset covers the grouping rule.
+        let zone = FixedOffset::east_opt(0).unwrap();
+        let at = |day: u32, hour: u32| zone.with_ymd_and_hms(2026, 10, day, hour, 0, 0).unwrap().timestamp_millis();
+        let rows = grouped([("a", at(10, 23)), ("b", at(11, 0)), ("c", at(11, 23))], &zone, d(11), false, "yyyy-MM-dd", "en");
+        let headers = rows.iter().filter(|r| matches!(r, ListRow::Header(_))).count();
+        assert_eq!(headers, 2);
     }
 }

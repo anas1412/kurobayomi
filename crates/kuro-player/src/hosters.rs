@@ -19,6 +19,10 @@ pub trait VideoSource {
 
     /// `source is AnimeHttpSource`.
     fn is_http(&self) -> bool;
+    /// `source is LocalAnimeSource`. A source that is neither HTTP nor local is not supported.
+    fn is_local(&self) -> bool {
+        false
+    }
     /// Replaces the reflection walk `checkHasHosters` (`EpisodeLoader.kt:60-78`). The app answers
     /// it from `kuro-source` `AnimeSource::provides_hosters`: the two names are one capability.
     fn has_hoster_list(&self) -> bool;

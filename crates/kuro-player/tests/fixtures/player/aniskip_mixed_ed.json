@@ -1,0 +1,1 @@
+{"found":true,"results":[{"interval":{"startTime":1300,"endTime":1390},"skipType":"mixed-ed","skipId":"synthetic-1","episodeLength":1420},{"interval":{"startTime":10,"endTime":100},"skipType":"op","skipId":"synthetic-2","episodeLength":1420}],"message":"Successfully found skip times","statusCode":200}

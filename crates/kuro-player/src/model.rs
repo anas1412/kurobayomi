@@ -39,6 +39,35 @@ pub enum Change {
     PrimaryButton,
     /// `is_exiting`.
     Exiting,
+    /// `sub_tracks`, `audio_tracks`, `selected_sub`, `selected_audio`.
+    Tracks,
+    /// `hoster_list`, `hoster_state`, `hoster_expanded`, `selected_hoster_video`.
+    Hosters,
+    /// `chapters` or `current_chapter`.
+    Chapters,
+    /// `skip_intro_text`.
+    SkipText,
+    /// `playlist`, `playlist_flags`, `has_prev`, `has_next`.
+    Playlist,
+    /// `current_episode`, `current_anime`, `current_source`, `is_episode_online`, `anime_title`,
+    /// `media_title`.
+    Episode,
+    /// `current_video` or `decoder`.
+    Video,
+    /// `seek_position`, `is_seeking`, `is_seeking_forwards`, `double_tap_seek_amount`.
+    Seek,
+    /// `seek_text`.
+    SeekText,
+    /// `volume_system`, `volume_mpv`, `volume_boost_cap`, `is_volume_slider_shown`.
+    VolumeLevel,
+    /// `brightness` or `is_brightness_slider_shown`.
+    Brightness,
+    /// `player_update`.
+    PlayerUpdate,
+    /// `remaining_sleep`.
+    Sleep,
+    /// `custom_buttons`.
+    CustomButtons,
 }
 
 /// The change groups between two states, in declaration order, each at most once.
@@ -46,9 +75,14 @@ pub fn changes(before: &PlayerState, after: &PlayerState) -> Vec<Change> {
     let checks = [
         (
             Change::Position,
-            before.pos != after.pos || before.duration != after.duration,
+            before.pos != after.pos
+                || before.duration != after.duration
+                || before.read_ahead != after.read_ahead,
         ),
-        (Change::Paused, before.paused != after.paused),
+        (
+            Change::Paused,
+            before.paused != after.paused || before.paused_state != after.paused_state,
+        ),
         (
             Change::Loading,
             before.is_loading != after.is_loading
@@ -87,6 +121,80 @@ pub fn changes(before: &PlayerState, after: &PlayerState) -> Vec<Change> {
                 || before.primary_button_title != after.primary_button_title,
         ),
         (Change::Exiting, before.is_exiting != after.is_exiting),
+        (
+            Change::Tracks,
+            before.sub_tracks != after.sub_tracks
+                || before.audio_tracks != after.audio_tracks
+                || before.selected_sub != after.selected_sub
+                || before.selected_audio != after.selected_audio,
+        ),
+        (
+            Change::Hosters,
+            before.hoster_list != after.hoster_list
+                || before.hoster_state != after.hoster_state
+                || before.hoster_expanded != after.hoster_expanded
+                || before.selected_hoster_video != after.selected_hoster_video,
+        ),
+        (
+            Change::Chapters,
+            before.chapters != after.chapters || before.current_chapter != after.current_chapter,
+        ),
+        (
+            Change::SkipText,
+            before.skip_intro_text != after.skip_intro_text,
+        ),
+        (
+            Change::Playlist,
+            before.playlist != after.playlist
+                || before.playlist_flags != after.playlist_flags
+                || before.has_prev != after.has_prev
+                || before.has_next != after.has_next,
+        ),
+        (
+            Change::Episode,
+            before.current_episode != after.current_episode
+                || before.current_anime != after.current_anime
+                || before.current_source != after.current_source
+                || before.is_episode_online != after.is_episode_online
+                || before.anime_title != after.anime_title
+                || before.media_title != after.media_title,
+        ),
+        (
+            Change::Video,
+            before.current_video != after.current_video || before.decoder != after.decoder,
+        ),
+        (
+            Change::Seek,
+            before.seek_position != after.seek_position
+                || before.is_seeking != after.is_seeking
+                || before.is_seeking_forwards != after.is_seeking_forwards
+                || before.double_tap_seek_amount != after.double_tap_seek_amount,
+        ),
+        (Change::SeekText, before.seek_text != after.seek_text),
+        (
+            Change::VolumeLevel,
+            before.volume_system != after.volume_system
+                || before.volume_mpv != after.volume_mpv
+                || before.volume_boost_cap != after.volume_boost_cap
+                || before.is_volume_slider_shown != after.is_volume_slider_shown,
+        ),
+        (
+            Change::Brightness,
+            before.brightness != after.brightness
+                || before.is_brightness_slider_shown != after.is_brightness_slider_shown,
+        ),
+        (
+            Change::PlayerUpdate,
+            before.player_update != after.player_update,
+        ),
+        (
+            Change::Sleep,
+            before.remaining_sleep != after.remaining_sleep,
+        ),
+        (
+            Change::CustomButtons,
+            before.custom_buttons != after.custom_buttons,
+        ),
     ];
     checks
         .into_iter()
@@ -210,12 +318,52 @@ mod tests {
             s.pos = 10.0;
             s.duration = 90.0;
             s.paused = Some(true);
-            s.is_loading = true;
-            s.is_loading_tracks = true;
+            s.is_loading = false;
+            s.is_loading_tracks = false;
         });
         assert_eq!(
             *seen.borrow(),
             vec![Change::Position, Change::Paused, Change::Loading]
+        );
+    }
+
+    #[test]
+    fn each_new_field_group_notifies_once() {
+        use crate::tracks::VideoTrack;
+        let mut store = Store::new(PlayerState::default());
+        let seen = recording(&mut store);
+        store.update(|s| {
+            s.selected_audio = 2;
+            s.audio_tracks.push(VideoTrack {
+                id: 2,
+                name: "A".into(),
+                language: None,
+            });
+            s.selected_hoster_video = (0, 1);
+            s.skip_intro_text = Some("Skip".into());
+            s.has_next = true;
+            s.media_title = "t".into();
+            s.decoder = crate::enums::Decoder::Sw;
+            s.seek_text = Some("+5".into());
+            s.chapters.push(crate::chapters::Segment {
+                index: 0,
+                name: "c".into(),
+                start: 0.0,
+                kind: crate::types::ChapterType::Other,
+            });
+        });
+        assert_eq!(
+            *seen.borrow(),
+            vec![
+                Change::Tracks,
+                Change::Hosters,
+                Change::Chapters,
+                Change::SkipText,
+                Change::Playlist,
+                Change::Episode,
+                Change::Video,
+                Change::SeekText
+            ]
         );
     }
 

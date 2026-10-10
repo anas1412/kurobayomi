@@ -1,0 +1,94 @@
+[
+  {
+    "name": "Echo",
+    "pkg": "eu.example.echo",
+    "version": "1.4.5",
+    "lang": "en",
+    "nsfw": false,
+    "store": "Main store",
+    "sources": [
+      {
+        "id": 41,
+        "name": "Echo EN",
+        "lang": "en",
+        "base_url": "https://echo.example"
+      },
+      {
+        "id": 42,
+        "name": "Echo All",
+        "lang": "all",
+        "base_url": "https://echo-all.example"
+      }
+    ]
+  },
+  {
+    "name": "Foxtrot",
+    "pkg": "eu.example.foxtrot",
+    "version": "1.4.6",
+    "lang": "de",
+    "nsfw": true,
+    "store": "Main store",
+    "sources": [
+      {
+        "id": 51,
+        "name": "Foxtrot",
+        "lang": "de",
+        "base_url": "https://foxtrot.example"
+      }
+    ]
+  },
+  {
+    "name": "Alpha",
+    "pkg": "eu.example.alpha",
+    "version": "1.4.2",
+    "lang": "en",
+    "nsfw": false,
+    "store": "Main store",
+    "sources": [
+      {
+        "id": 11,
+        "name": "Alpha One",
+        "lang": "en",
+        "base_url": "https://alpha.example"
+      }
+    ]
+  },
+  {
+    "name": "Hotel",
+    "pkg": "eu.example.hotel",
+    "version": "1.4.7",
+    "lang": "all",
+    "nsfw": false,
+    "store": "Main store",
+    "sources": [
+      {
+        "id": 61,
+        "name": "Hotel",
+        "lang": "en",
+        "base_url": "https://hotel-a.example"
+      },
+      {
+        "id": 62,
+        "name": "Hotel",
+        "lang": "en",
+        "base_url": "https://hotel-b.example"
+      }
+    ]
+  },
+  {
+    "name": "India",
+    "pkg": "eu.example.india",
+    "version": "1.4.8",
+    "lang": "en",
+    "nsfw": false,
+    "store": null,
+    "sources": [
+      {
+        "id": 71,
+        "name": "India",
+        "lang": "en",
+        "base_url": "https://india.example"
+      }
+    ]
+  }
+]

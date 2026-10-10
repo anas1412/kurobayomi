@@ -2,8 +2,8 @@
 //! of the rows in one transaction, then the download deletion for marked-read rows when the preference is on. The whole
 //! operation runs under [`crate::app::rx::non_cancellable`], so a closed screen does not stop it (EC-29).
 //!
-//! The download deletion is a port ([`ChapterDownloads`], [`EpisodeDownloads`]): `DeleteChapterDownload` (T-10a-015)
-//! implements it. Until that lands, the caller passes a no-op.
+//! The download deletion is a port ([`ChapterDownloads`], [`EpisodeDownloads`]): `DeleteChapterDownload` and
+//! `DeleteEpisodeDownload` (`app::delete_download`, T-10a-015) implement it.
 
 use kuro_data::anime::{Anime, AnimeRepo};
 use kuro_data::chapter::{Chapter, ChapterRepo, ChapterUpdate};
@@ -41,7 +41,7 @@ impl From<SetStatusResult> for SetSeenResult {
     }
 }
 
-/// Deletes the downloads of chapters (`DeleteChapterDownload.awaitAll`). A missing source is a silent no-op (EC-27).
+/// Deletes the downloads of chapters (`DeleteChapterDownload.awaitAll`). A missing source deletes nothing (EC-27).
 pub trait ChapterDownloads: Send + Sync {
     fn delete_chapters(&self, manga: &Manga, chapters: &[Chapter]);
 }

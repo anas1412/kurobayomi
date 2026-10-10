@@ -7,14 +7,14 @@ pub mod episodes;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use kuro_source::anime::{AnimeRelation, AnimeSource, AnimesPage, FetchType, SAnime, SEpisode};
+use kuro_source::anime::{AnimeRelation, AnimeSource, AnimesPage, FetchType, Hoster, SAnime, SEpisode, local_hosters};
 use kuro_source::{FilterList, SortSelection, SourceError};
 
 use crate::LOCAL_SOURCE_ID;
 use crate::browse::browse;
 use crate::error::LocalSourceError;
 use crate::format::is_anime_episode;
-use crate::fs::{FsEntry, file_url, find_child, list_dir};
+use crate::fs::{FsEntry, file_url, find_child, list_dir, safe_join};
 use crate::images::find_image;
 use crate::json_side::{AnimeDetails, apply_anime_details, details_file, read_details_json};
 use crate::media::FrameExtractor;
@@ -179,9 +179,48 @@ impl AnimeSource for LocalAnimeSource {
         Ok(list)
     }
 
-    /// Playback hosters for a local episode are T-14a-025, not in this step: no hosters are listed yet.
+    /// The seasons of an anime folder: its non-hidden sub-folders in name order (behavior 11.3, T-14a-024).
+    async fn season_list(&self, anime: &SAnime) -> Result<Vec<SAnime>, SourceError> {
+        let root = self.root.clone();
+        let url = anime.url.clone();
+        let seasons = crate::blocking(move || {
+            let Some(dir) = root.and_then(|root| find_child(&root, &url)) else {
+                return Ok(Vec::new());
+            };
+            let mut seasons = Vec::new();
+            for entry in list_dir(&dir)?.into_iter().filter(|e| e.is_dir && !e.name.starts_with('.')) {
+                seasons.push(SAnime {
+                    url: format!("{url}/{}", entry.name),
+                    title: entry.name.clone(),
+                    fetch_type: fetch_type_at(&entry.path),
+                    ..SAnime::default()
+                });
+            }
+            Ok(seasons)
+        })
+        .await?;
+        Ok(seasons)
+    }
+
+    /// One hoster holding the episode's file as a `file://` video (behavior 11.7, T-14a-025). An unsafe or missing
+    /// episode URL gives an empty list, with no error.
+    async fn hosters(&self, episode: &SEpisode) -> Result<Vec<Hoster>, SourceError> {
+        let root = self.root.clone();
+        let url = episode.url.clone();
+        let hosters = crate::blocking(move || {
+            let file = root
+                .and_then(|root| safe_join(&root, &url))
+                .filter(|path| path.is_file())
+                .and_then(|path| file_url(&path));
+            Ok(local_hosters(&url, file))
+        })
+        .await?;
+        Ok(hosters)
+    }
+
+    /// The local source lists hosters, one per episode file, so the hoster path is used instead of the legacy videos.
     fn provides_hosters(&self) -> bool {
-        false
+        true
     }
 
     /// Kotlin `getRelatedAnimeList` returns an empty list.

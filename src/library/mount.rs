@@ -1,7 +1,12 @@
 //! Mounts the library view in the window (T-37a-061): builds the view's dependencies from the app data, registers
 //! the views so the shell can reach them, and exposes what the shell needs. The two kinds share one sidebar
 //! destination (`library`) with an Anime and a Manga page; each kind still has its own sidebar index per nav style
-//! ([`sidebar_index`], [`registered_index`]).
+//! ([`sidebar_index`]).
+//!
+//! Decision (T-37a-045, replaces B-14.11): with `MOVE_MANGA_TO_MORE` the manga library is a page under More, at index
+//! 5. Aniyomi jumps from it to the anime tab; here Back returns to the tab it was opened from, and to More when it was
+//! entered from the More list. The sidebar index below is the part this module owns; the Back target is the shell's
+//! (`src/shell/tabs.rs`, `TabState::back`), which has to remember the origin tab when the manga page opens.
 //!
 //! - Re-selecting the Library sidebar item opens the library settings sheet ([`reselect`], B-1.2).
 //! - Other screens can fill the search box ([`search_library`] and [`inject_search`], B-1.3).
@@ -35,6 +40,8 @@ thread_local! {
     static PENDING_SEARCH: RefCell<Vec<(EntryKind, String)>> = const { RefCell::new(Vec::new()) };
     /// What the selection Download action does with its entries (the app's download manager registers here).
     static DELETE_DOWNLOADS_SINK: RefCell<Option<Rc<dyn Fn(EntryKind, Vec<i64>)>>> = const { RefCell::new(None) };
+    /// What the refresh button does (the update runner in `crate::misc` registers here).
+    static UPDATE_HOST: RefCell<Option<UpdateHost>> = const { RefCell::new(None) };
     static DOWNLOAD_SINK: RefCell<Option<Rc<dyn Fn(EntryKind, Vec<i64>, DownloadAmount)>>> = const { RefCell::new(None) };
 }
 
@@ -53,10 +60,18 @@ pub fn sidebar_index(kind: EntryKind, style: NavStyle) -> u8 {
     }
 }
 
-/// The sidebar index of a kind under the nav style stored in the app's preferences.
-pub fn registered_index(kind: EntryKind) -> u8 {
-    let ui = kuro_prefs::ui::UiPrefs::new(crate::data::app().base.store().clone());
-    sidebar_index(kind, ui.nav_style.get())
+/// What the library's refresh button asks of the app (T-26a-102).
+#[derive(Clone)]
+pub struct UpdateHost {
+    /// Starts a pass of one category of a kind; `false` when a pass of that kind is already running.
+    pub start: Rc<dyn Fn(EntryKind, Option<i64>) -> bool>,
+    /// Whether a pass of that kind is running.
+    pub running: Rc<dyn Fn(EntryKind) -> bool>,
+}
+
+/// Registers the update runner behind the refresh button. Replaces an earlier one.
+pub fn on_update(host: UpdateHost) {
+    UPDATE_HOST.with(|h| *h.borrow_mut() = Some(host));
 }
 
 /// Registers what "delete downloads" in the remove dialog does. Replaces an earlier one.
@@ -294,6 +309,14 @@ fn nav(kind: EntryKind, db: Arc<Db>) -> Nav {
         global_search: Rc::new(open_global_search),
         edit_categories: Rc::new(|| crate::ui::open("categories")),
         selecting: Rc::new(move |on| set_selecting(kind, on)),
+        update: Rc::new(move |category| match UPDATE_HOST.with(|h| h.borrow().clone()) {
+            Some(host) => (host.start)(kind, category),
+            None => {
+                tracing::debug!(?category, "no update runner is registered for the library");
+                false
+            }
+        }),
+        update_running: Rc::new(move || UPDATE_HOST.with(|h| h.borrow().clone()).is_some_and(|host| (host.running)(kind))),
     }
 }
 
@@ -320,6 +343,7 @@ fn deps(kind: EntryKind) -> Deps {
         },
         downloaded_only: Rc::new(move || downloaded_only.get()),
         logged_in: Rc::new(BTreeSet::new),
+        tracker_names: Rc::new(Vec::new),
         always_external: Rc::new(|| false),
         item_downloaded: Rc::new(|_| false),
     }

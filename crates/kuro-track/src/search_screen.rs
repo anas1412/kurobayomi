@@ -31,11 +31,16 @@ pub struct CardView {
     pub title: String,
     /// Authors and artists, distinct, joined with ", ". `None` when both lists are empty.
     pub byline: Option<String>,
-    /// Type, Started, Status and Score, in that order. Only the lines with a value are present.
+    /// Cover image URL. `None` when the tracker has none.
+    pub cover_url: Option<String>,
+    /// Type, Started, Status, Count and Score, in that order. Only the lines with a value are present. A `my:` row
+    /// has no Status line.
     pub details: Vec<DetailLine>,
     /// The summary trimmed, at most drawn as four lines by the GUI. `None` when blank.
     pub summary: Option<String>,
     pub can_open: bool,
+    /// The card offers Refresh: it is a row of the `my:` search (T-29a-049).
+    pub refreshable: bool,
 }
 
 /// Lower-cases the text and capitalises its first character ("ONGOING" becomes "Ongoing").
@@ -64,6 +69,11 @@ struct CardFields<'a> {
     score: Option<f64>,
     summary: &'a str,
     tracking_url: &'a str,
+    cover_url: &'a str,
+    /// Chapters or episodes; 0 means unknown and the line is left out.
+    count: i64,
+    count_label: (&'static str, &'static str),
+    from_my_list: bool,
 }
 
 fn card(f: CardFields<'_>) -> CardView {
@@ -91,11 +101,18 @@ fn card(f: CardFields<'_>) -> CardView {
     }
     // E-37: the API's underscores read as spaces ("ON_HOLD" is "On hold").
     let status = capitalise_lower(&f.publishing_status.replace('_', " "));
-    if !status.is_empty() {
+    if !status.is_empty() && !f.from_my_list {
         details.push(DetailLine {
             label_key: "track_status",
             label: "Status",
             value: status,
+        });
+    }
+    if f.count > 0 {
+        details.push(DetailLine {
+            label_key: f.count_label.0,
+            label: f.count_label.1,
+            value: f.count.to_string(),
         });
     }
     if let Some(score) = f.score {
@@ -111,9 +128,13 @@ fn card(f: CardFields<'_>) -> CardView {
     CardView {
         title: f.title.to_owned(),
         byline: (!names.is_empty()).then(|| names.join(", ")),
+        cover_url: Some(f.cover_url)
+            .filter(|c| !c.is_empty())
+            .map(str::to_owned),
         details,
         summary,
         can_open: !f.tracking_url.is_empty(),
+        refreshable: f.from_my_list,
     }
 }
 
@@ -138,6 +159,10 @@ impl SearchHit for AnimeTrackSearch {
             score: self.score,
             summary: &self.summary,
             tracking_url: &self.tracking_url,
+            cover_url: &self.cover_url,
+            count: self.total_episodes,
+            count_label: ("episodes", "Episodes"),
+            from_my_list: self.from_my_list,
         })
     }
     fn set_private(&mut self, private: bool) {
@@ -166,6 +191,10 @@ impl SearchHit for MangaTrackSearch {
             score: self.score,
             summary: &self.summary,
             tracking_url: &self.tracking_url,
+            cover_url: &self.cover_url,
+            count: self.total_chapters,
+            count_label: ("chapters", "Chapters"),
+            from_my_list: self.from_my_list,
         })
     }
     fn set_private(&mut self, private: bool) {
@@ -345,6 +374,8 @@ impl<R: SearchHit> SearchScreen<R> {
 pub enum CardMenuItem {
     CopyToClipboard,
     OpenInBrowser,
+    /// Only for rows of the `my:` search (T-29a-049).
+    Refresh,
 }
 
 /// What a card menu item does. The menu closes after every item (D15).
@@ -354,6 +385,8 @@ pub enum CardEffect {
     Copy { text: String, toast: MsgKey },
     /// Opens the tracker page in the browser.
     Open(String),
+    /// Looks the row up again; carries its list key.
+    Refresh((TrackerId, i64)),
 }
 
 /// Runs a menu item. `None` when the item is disabled: open with no URL (D9).
@@ -367,6 +400,10 @@ pub fn card_action(item: CardMenuItem, hit: &impl SearchHit) -> Option<CardEffec
             let url = hit.tracking_url();
             (!url.is_empty()).then(|| CardEffect::Open(url.to_owned()))
         }
+        CardMenuItem::Refresh => hit
+            .card()
+            .refreshable
+            .then(|| CardEffect::Refresh(hit.list_key())),
     }
 }
 
@@ -514,7 +551,10 @@ mod tests {
         let (mut other, _) =
             SearchScreen::<AnimeTrackSearch>::open("x", Some((TrackerId::ANILIST, 5)), true);
         other.finish(Ok(results()));
-        assert!(other.selected().is_none(), "an id absent from the results never matches");
+        assert!(
+            other.selected().is_none(),
+            "an id absent from the results never matches"
+        );
         let (mut kitsu, _) =
             SearchScreen::<AnimeTrackSearch>::open("x", Some((TrackerId::KITSU, 1)), true);
         kitsu.finish(Ok(results()));
@@ -526,7 +566,10 @@ mod tests {
         let (mut empty_url, _) =
             SearchScreen::<AnimeTrackSearch>::open("x", Some((TrackerId::ANILIST, 5)), true);
         empty_url.finish(Ok(vec![hit(TrackerId::ANILIST, 5, "")]));
-        assert!(empty_url.selected().is_some(), "selection does not depend on the URL");
+        assert!(
+            empty_url.selected().is_some(),
+            "selection does not depend on the URL"
+        );
     }
 
     #[test]
@@ -623,6 +666,47 @@ mod tests {
     }
 
     #[test]
+    fn t_29a_049_the_card_carries_cover_and_count_before_the_score() {
+        use crate::model::search::MangaTrackSearch;
+        let mut m = MangaTrackSearch::new(TrackerId::MYANIMELIST, 1, "M", "https://m.test/1");
+        m.cover_url = "https://img.test/c.jpg".into();
+        m.total_chapters = 120;
+        m.score = Some(8.4);
+        let card = m.card();
+        assert_eq!(card.cover_url.as_deref(), Some("https://img.test/c.jpg"));
+        let lines: Vec<(&str, &str)> = card
+            .details
+            .iter()
+            .map(|d| (d.label, d.value.as_str()))
+            .collect();
+        assert_eq!(lines, [("Chapters", "120"), ("Score", "8")]);
+        assert_eq!(hit(TrackerId::MYANIMELIST, 2, "").card().cover_url, None);
+
+        let mut a = hit(TrackerId::MYANIMELIST, 3, "");
+        a.total_episodes = 12;
+        assert_eq!(a.card().details[0].label, "Episodes");
+        a.total_episodes = 0;
+        assert!(a.card().details.is_empty(), "0 means unknown");
+    }
+
+    #[test]
+    fn t_29a_049_my_list_rows_show_no_status_and_offer_refresh() {
+        let mut h = hit(TrackerId::MYANIMELIST, 4, "https://m.test/4");
+        h.publishing_status = "finished".into();
+        assert!(h.card().details.iter().any(|d| d.label == "Status"));
+        assert_eq!(card_action(CardMenuItem::Refresh, &h), None);
+
+        h.from_my_list = true;
+        let card = h.card();
+        assert!(card.refreshable);
+        assert!(!card.details.iter().any(|d| d.label == "Status"));
+        assert_eq!(
+            card_action(CardMenuItem::Refresh, &h),
+            Some(CardEffect::Refresh((TrackerId::MYANIMELIST, 4)))
+        );
+    }
+
+    #[test]
     fn t_28a_057_track_buttons_are_disabled_while_a_bind_is_in_flight() {
         let (mut screen, _) = SearchScreen::<AnimeTrackSearch>::open("x", None, true);
         screen.finish(Ok(results()));
@@ -631,7 +715,10 @@ mod tests {
         assert!(screen.confirm(false).is_some());
         screen.set_in_flight(true);
         assert!(!screen.track_buttons_enabled());
-        assert!(screen.confirm(true).is_none(), "no second bind while one is written");
+        assert!(
+            screen.confirm(true).is_none(),
+            "no second bind while one is written"
+        );
         screen.set_in_flight(false);
         assert!(screen.confirm(true).is_some());
     }
@@ -642,9 +729,17 @@ mod tests {
         hit.publishing_status = "ON_HOLD".into();
         hit.score = Some(85.9);
         let card = hit.card();
-        let status = card.details.iter().find(|d| d.label == "Status").map(|d| d.value.clone());
+        let status = card
+            .details
+            .iter()
+            .find(|d| d.label == "Status")
+            .map(|d| d.value.clone());
         assert_eq!(status.as_deref(), Some("On hold"));
-        let score = card.details.iter().find(|d| d.label == "Score").map(|d| d.value.clone());
+        let score = card
+            .details
+            .iter()
+            .find(|d| d.label == "Score")
+            .map(|d| d.value.clone());
         assert_eq!(score.as_deref(), Some("85"));
     }
 }

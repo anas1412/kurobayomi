@@ -52,7 +52,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_mark_updates_the_memory_and_returns_the_write() {
+    fn t62_a_mark_updates_the_memory_and_returns_the_write() {
         let mut episode = CurrentEpisode {
             id: Some(42),
             ..CurrentEpisode::default()

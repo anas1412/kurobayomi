@@ -1,0 +1,44 @@
+{
+ "filters": [
+  {
+   "name": "unseen",
+   "episode_flags": 2
+  },
+  {
+   "name": "downloaded_not",
+   "episode_flags": 16
+  },
+  {
+   "name": "show_seen",
+   "episode_flags": 4
+  },
+  {
+   "name": "unseen_and_bookmarked",
+   "episode_flags": 34
+  }
+ ],
+ "masks": {
+  "UNSEEN_MASK": 6,
+  "DOWNLOADED_MASK": 24,
+  "BOOKMARKED_MASK": 96,
+  "FILLERMARKED_MASK": 384,
+  "SORTING_MASK": 1536,
+  "SHOW_UNSEEN": 2,
+  "SHOW_SEEN": 4,
+  "SHOW_DOWNLOADED": 8,
+  "SHOW_NOT_DOWNLOADED": 16,
+  "SHOW_BOOKMARKED": 32,
+  "SHOW_NOT_BOOKMARKED": 64,
+  "SHOW_FILLERMARKED": 128,
+  "SHOW_NOT_FILLERMARKED": 256,
+  "SORTING_SOURCE": 0,
+  "SORTING_NUMBER": 512,
+  "SORTING_UPLOAD_DATE": 1024,
+  "SORTING_ALPHABET": 1536
+ },
+ "viewer": {
+  "intro_length_85": 85,
+  "intro_length_0_disabled": 72057594037927936,
+  "clamp_300": 300
+ }
+}

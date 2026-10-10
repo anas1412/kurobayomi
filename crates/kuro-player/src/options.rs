@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::AdvancedPrefs;
 use crate::enums::{
-    AudioChannels, Debanding, Decoder, SubtitleJustification, SubtitlesBorderStyle,
+    AudioChannels, Debanding, Decoder, GpuKind, SubtitleJustification, SubtitlesBorderStyle,
 };
 use crate::mpv::{MpvError, PropertySink, PropertySource};
 
@@ -93,6 +93,8 @@ impl Default for AudioPrefs {
 pub struct PlayerPrefs {
     pub try_hwdec: bool,
     pub hwdec_available: Vec<String>,
+    /// The GPU vendor, which picks the Linux `hwdec` names of the decoder chips.
+    pub gpu: GpuKind,
     pub gpu_next: bool,
     pub debanding: Debanding,
     pub use_yuv420p: bool,
@@ -113,6 +115,7 @@ impl Default for PlayerPrefs {
         Self {
             try_hwdec: true,
             hwdec_available: Vec::new(),
+            gpu: GpuKind::default(),
             gpu_next: false,
             debanding: Debanding::None,
             use_yuv420p: true,
@@ -260,13 +263,14 @@ pub fn get_decoder(source: &impl PropertySource) -> Decoder {
     Decoder::from_active(active.as_deref().unwrap_or_default())
 }
 
-/// Writes the chosen decoder to `hwdec` (`updateDecoder`), resolved against the candidates mpv has.
+/// Writes the chosen decoder to `hwdec` (`updateDecoder`, T-46b-016). The value is the Linux name
+/// for the GPU vendor (`Decoder::linux_value`); Android names are never written.
 pub fn update_decoder(
     sink: &impl PropertySink,
     decoder: Decoder,
-    available: &[String],
+    gpu: GpuKind,
 ) -> Result<(), MpvError> {
-    sink.set_str("hwdec", &resolve_hwdec(decoder, available))
+    sink.set_str("hwdec", decoder.linux_value(gpu))
 }
 
 /// Builds the ordered startup table of behaviour doc 2.2 (including the subtitle and audio
@@ -790,14 +794,27 @@ mod tests {
     #[test]
     fn update_decoder_writes_the_resolved_hwdec() {
         let fake = Fake::default();
-        let avail = vec!["nvdec-copy".to_owned()];
-        update_decoder(&fake, Decoder::Hw, &avail).unwrap();
-        update_decoder(&fake, Decoder::Sw, &avail).unwrap();
+        update_decoder(&fake, Decoder::Hw, GpuKind::Nvidia).unwrap();
+        update_decoder(&fake, Decoder::Sw, GpuKind::Nvidia).unwrap();
         assert_eq!(
             *fake.props.borrow(),
             vec![
                 ("hwdec".to_owned(), "nvdec-copy".to_owned()),
                 ("hwdec".to_owned(), "no".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn update_decoder_writes_the_vendor_name_on_intel() {
+        let fake = Fake::default();
+        update_decoder(&fake, Decoder::Hw, GpuKind::Intel).unwrap();
+        update_decoder(&fake, Decoder::HwPlus, GpuKind::Intel).unwrap();
+        assert_eq!(
+            *fake.props.borrow(),
+            vec![
+                ("hwdec".to_owned(), "vaapi-copy".to_owned()),
+                ("hwdec".to_owned(), "vaapi".to_owned())
             ]
         );
     }

@@ -33,27 +33,30 @@ pub fn legacy_repo_urls(prefs: &[BackupPreference]) -> (BTreeSet<String>, BTreeS
 /// Adds the backup's custom buttons (T-22a-028, behaviour 4.6). A button whose name is already in the database, or
 /// that repeats an earlier name in the backup, adds nothing (E-17). New rows follow the stored order, and the backup's
 /// `sortIndex` order decides the order of the new ones. At most one button becomes favourite: the first favourite in
-/// that order, and only when the database has none (D10 fix).
-pub fn restore_custom_buttons(c: &Connection, buttons: &[BackupCustomButtons]) -> DbResult<()> {
+/// that order, and only when the database has none (D10 fix). Returns how many buttons were inserted, so the restore
+/// can tell the user.
+pub fn restore_custom_buttons(c: &Connection, buttons: &[BackupCustomButtons]) -> DbResult<usize> {
     if buttons.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     let stored = custom_buttons(c)?;
     let mut names: HashSet<String> = stored.iter().map(|b| b.name.clone()).collect();
     let mut has_favorite = stored.iter().any(|b| b.is_favorite);
     let mut ordered: Vec<&BackupCustomButtons> = buttons.iter().collect();
     ordered.sort_by_key(|b| b.sort_index);
+    let mut inserted = 0;
     for b in ordered {
         if !names.insert(b.name.clone()) {
             continue;
         }
         let id = create_custom_button(c, &b.name, &b.content, &b.long_press_content, &b.on_startup)?;
+        inserted += 1;
         if b.is_favorite && !has_favorite {
             update_custom_button(c, id, &CustomButtonUpdate { is_favorite: Some(true), ..Default::default() })?;
             has_favorite = true;
         }
     }
-    Ok(())
+    Ok(inserted)
 }
 
 /// Upserts one anime extension store on `index_url` (T-22a-026). A duplicate is an update, never an error. The badge
@@ -194,7 +197,7 @@ mod tests {
     #[test]
     fn restored_buttons_take_max_plus_one_in_backup_sort_order() {
         let (_dir, c) = buttons_db();
-        restore_custom_buttons(&c, &[button("late", 5, false), button("early", 1, false)]).unwrap();
+        assert_eq!(restore_custom_buttons(&c, &[button("late", 5, false), button("early", 1, false)]).unwrap(), 2);
         let rows = custom_buttons(&c).unwrap();
         let order: Vec<(&str, i64)> = rows.iter().map(|b| (b.name.as_str(), b.sort_index)).collect();
         assert_eq!(order, vec![("early", 0), ("late", 1)]);
@@ -204,7 +207,8 @@ mod tests {
     fn name_already_in_the_database_is_skipped() {
         let (_dir, c) = buttons_db();
         create_custom_button(&c, "Skip", "stored", "", "").unwrap();
-        restore_custom_buttons(&c, &[button("Skip", 0, false), button("New", 1, false)]).unwrap();
+        let inserted = restore_custom_buttons(&c, &[button("Skip", 0, false), button("New", 1, false)]).unwrap();
+        assert_eq!(inserted, 1, "only the new name is counted");
         let rows = custom_buttons(&c).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].content, "stored", "no update to the stored button");
@@ -213,7 +217,7 @@ mod tests {
     #[test]
     fn duplicate_names_inside_the_backup_make_one_row() {
         let (_dir, c) = buttons_db();
-        restore_custom_buttons(&c, &[button("Dup", 0, false), button("Dup", 1, false)]).unwrap();
+        assert_eq!(restore_custom_buttons(&c, &[button("Dup", 0, false), button("Dup", 1, false)]).unwrap(), 1);
         assert_eq!(custom_buttons(&c).unwrap().len(), 1);
     }
 

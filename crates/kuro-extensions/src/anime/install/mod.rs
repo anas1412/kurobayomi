@@ -1,6 +1,6 @@
 //! The install pipeline (T-19a-032, `p1-rust-design.md` section 6.1). One install goes Pending, Downloading, Installing,
-//! then Installed, Idle (cancelled) or Error. `InstallTracker` keeps one live entry per package, so a second request
-//! for a package that is already running gets the running entry back, and a stale cancel cannot touch a newer install.
+//! then Installed, Idle (cancelled) or Error. `InstallTracker` keeps one live entry per package. The queue replaces a
+//! running install with a newer request (T-20a-030), and a stale step or cancel cannot touch the newer install.
 
 pub mod download;
 pub mod place;
@@ -193,11 +193,24 @@ impl InstallTracker {
                 return Begin::Running(entry.step);
             }
         }
+        Begin::Started(self.start(pkg))
+    }
+
+    /// Starts an install for `pkg` and cancels the one already running, as Aniyomi's `downloadAndInstall` does (T-20a-030):
+    /// the old install's token fires and its later steps are ignored. The queue calls this for every request.
+    pub fn replace(&mut self, pkg: &str) -> Ticket {
+        if let Some(entry) = self.entries.get(pkg) {
+            entry.cancel.cancel();
+        }
+        self.start(pkg)
+    }
+
+    fn start(&mut self, pkg: &str) -> Ticket {
         self.next_serial += 1;
         let serial = self.next_serial;
         let cancel = CancellationToken::new();
         self.entries.insert(pkg.to_owned(), Entry { serial, step: InstallStep::Pending, cancel: cancel.clone() });
-        Begin::Started(Ticket { pkg: pkg.to_owned(), serial, cancel })
+        Ticket { pkg: pkg.to_owned(), serial, cancel }
     }
 
     /// Records a step for the install behind `ticket`. A ticket for an older install changes nothing.
@@ -528,6 +541,23 @@ mod tests {
         };
         tracker.set_step(&first, InstallStep::Downloading);
         assert_eq!(tracker.begin(PKG), Begin::Running(InstallStep::Downloading));
+    }
+
+    #[test]
+    fn a_replacing_install_cancels_the_running_one_and_ignores_its_late_steps() {
+        let mut tracker = InstallTracker::new();
+        let first = match tracker.begin(PKG) {
+            Begin::Started(ticket) => ticket,
+            other => panic!("{other:?}"),
+        };
+        tracker.set_step(&first, InstallStep::Downloading);
+        let second = tracker.replace(PKG);
+        assert!(first.cancel.is_cancelled(), "the old install is cancelled");
+        tracker.set_step(&first, InstallStep::Installed);
+        assert_eq!(tracker.step(PKG), Some(InstallStep::Pending), "the old install's late step changes nothing");
+        tracker.set_step(&second, InstallStep::Downloading);
+        assert_eq!(tracker.step(PKG), Some(InstallStep::Downloading));
+        assert!(!second.cancel.is_cancelled());
     }
 
     #[test]

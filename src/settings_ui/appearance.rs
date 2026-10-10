@@ -1,11 +1,14 @@
 //! Theme mode (task T-47a-011), the pure-black visibility rule (T-47a-014 gate) and the start screen (T-48a-005).
-// Not reachable from `route.rs` yet: the Theme mode chips and the dark-only pure-black rule wait for the theme area; only the start screen and pure-black rows are routed.
+// Some helpers (the pure-black row outside the page, the portal read used only at apply time) are kept for the search index and tests.
 #![allow(dead_code)]
+use std::rc::Rc;
+
 use chrono::{Local, NaiveDate};
 use kuro_prefs::datefmt;
 use kuro_prefs::prefs::Prefs;
-use kuro_prefs::ui::{StartScreen, ThemeMode};
+use kuro_prefs::ui::{NavStyle, StartScreen, ThemeMode};
 
+use crate::pref_model::bind;
 use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::settings_ui::rows::{enum_choice, group, switch, switch_sub, text_choice, REQUIRES_RESTART};
 
@@ -27,14 +30,78 @@ pub fn amoled_visible(mode: ThemeMode, portal_color_scheme: Option<u32>) -> bool
     effective_dark(mode, portal_color_scheme)
 }
 
-/// Theme mode list: System, Light, Dark. Stored by constant name.
+/// The colour scheme the desktop portal reports (`org.freedesktop.appearance` `color-scheme`), or `None` when the
+/// portal is absent or does not answer within a second.
+pub fn portal_color_scheme() -> Option<u32> {
+    use gtk::gio::{self, prelude::*};
+    use gtk::glib::prelude::ToVariant;
+    let proxy = gio::DBusProxy::for_bus_sync(
+        gio::BusType::Session,
+        gio::DBusProxyFlags::NONE,
+        None,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.Settings",
+        None::<&gio::Cancellable>,
+    )
+    .ok()?;
+    let reply = proxy
+        .call_sync(
+            "Read",
+            Some(&("org.freedesktop.appearance", "color-scheme").to_variant()),
+            gio::DBusCallFlags::NONE,
+            1000,
+            None::<&gio::Cancellable>,
+        )
+        .ok()?;
+    // `Read` answers `(v)`: the variant holds the `u` value
+    reply.child_value(0).child_value(0).get::<u32>()
+}
+
+/// Applies the theme mode to GTK without a restart (`gtk-application-prefer-dark-theme`). LIGHT and DARK force it;
+/// SYSTEM follows the portal, and with no portal answer the preference is off, which is GTK's default.
+pub fn apply_theme_mode(mode: ThemeMode) {
+    let Some(settings) = gtk::Settings::default() else { return };
+    settings.set_gtk_application_prefer_dark_theme(effective_dark(mode, portal_color_scheme()));
+}
+
+/// Theme mode list: System, Light, Dark. Stored by constant name. A change is applied to GTK at once.
 pub fn theme_mode_row(prefs: &Prefs) -> PreferenceItem {
-    enum_choice(
-        "Theme",
+    let mut row = enum_choice(
+        "Theme mode",
         &prefs.ui.theme_mode,
         &[(ThemeMode::SYSTEM, "System"), (ThemeMode::LIGHT, "Light"), (ThemeMode::DARK, "Dark")],
         true,
-    )
+    );
+    if let PreferenceItem::BasicList { on_change, .. } = &mut row {
+        let written = Rc::clone(on_change);
+        let stored = prefs.ui.theme_mode.clone();
+        *on_change = bind::veto(move |key: String| {
+            let result = written(key);
+            let stored = stored.clone();
+            async move {
+                let result = result.await;
+                if result == Ok(true) {
+                    apply_theme_mode(stored.get());
+                }
+                result
+            }
+        });
+    }
+    row
+}
+
+/// The navigation styles in list order: the tab each one moves into More.
+pub const NAV_STYLES: [(NavStyle, &str); 4] = [
+    (NavStyle::MOVE_MANGA_TO_MORE, "Move Manga to the More tab"),
+    (NavStyle::MOVE_UPDATES_TO_MORE, "Move Updates to the More tab"),
+    (NavStyle::MOVE_HISTORY_TO_MORE, "Move History to the More tab"),
+    (NavStyle::MOVE_BROWSE_TO_MORE, "Move Browse to the More tab"),
+];
+
+/// The navigation style list (`bottom_rail_nav_style`).
+pub fn nav_style_row(prefs: &Prefs) -> PreferenceItem {
+    enum_choice("Navigation Style", &prefs.ui.nav_style, &NAV_STYLES, true)
 }
 
 /// The five start screens in list order, with their titles.
@@ -111,10 +178,10 @@ pub fn open_start_tab(tabs: &gtk::Stack, prefs: &Prefs) {
 pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     let today = Local::now().date_naive();
     vec![
-        group("Theme", vec![switch("Pure black dark mode", &prefs.ui.theme_dark_amoled, true)]),
+        group("Theme", vec![theme_mode_row(prefs), switch("Pure black dark mode", &prefs.ui.theme_dark_amoled, true)]),
         group(
             "Display",
-            vec![start_screen_row(prefs), date_format_row(prefs, today), relative_time_row(prefs, today)],
+            vec![start_screen_row(prefs), nav_style_row(prefs), date_format_row(prefs, today), relative_time_row(prefs, today)],
         ),
     ]
 }
@@ -269,6 +336,32 @@ mod tests {
         let tree = page_rows(&prefs);
         let Preference::Group(display) = &tree[1] else { panic!("group") };
         let titles: Vec<&str> = display.items.iter().map(|i| i.title()).collect();
-        assert_eq!(titles, ["Start Screen", "Date format", "Relative timestamps"]);
+        assert_eq!(titles, ["Start Screen", "Navigation Style", "Date format", "Relative timestamps"]);
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+
+    #[test]
+    fn the_theme_mode_row_is_titled_as_the_spec_and_shows_the_stored_mode() {
+        let prefs = Prefs::in_memory();
+        let row = theme_mode_row(&prefs);
+        assert_eq!(row.title(), "Theme mode");
+        let PreferenceItem::BasicList { value, .. } = row else { panic!("list") };
+        assert_eq!(value, "SYSTEM");
+        prefs.ui.theme_mode.set(ThemeMode::DARK).unwrap();
+        let PreferenceItem::BasicList { value, .. } = theme_mode_row(&prefs) else { panic!("list") };
+        assert_eq!(value, "DARK");
+    }
+
+    #[test]
+    fn the_navigation_style_list_offers_the_four_styles_and_stores_the_pick() {
+        let prefs = Prefs::in_memory();
+        let PreferenceItem::BasicList { entries, value, .. } = nav_style_row(&prefs) else { panic!("list") };
+        assert_eq!(value, "MOVE_HISTORY_TO_MORE");
+        assert_eq!(entries[0].1, "Move Manga to the More tab");
+        assert_eq!(entries.len(), 4);
     }
 }

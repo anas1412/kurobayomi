@@ -109,7 +109,27 @@ pub struct EpisodeRow {
     pub preview_url: Option<String>,
     /// Present only when summaries are shown and the text is not blank.
     pub summary: Option<String>,
+    /// The summary is expanded (all its lines) rather than three lines (T-39a-012). Kept per episode by the model.
+    pub summary_expanded: bool,
     pub selected: bool,
+}
+
+/// One line of the episode list: an episode row, or the missing-count separator after or before episodes (T-39a-015).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Line {
+    Episode(EpisodeRow),
+    /// `key` is `missing-count-{lower|null}-{higher}`; `count` is the number of episodes missing there.
+    Missing { key: String, count: i32 },
+}
+
+impl Line {
+    /// The identity of a line for the diff: the episode id, or the separator key.
+    pub fn slot(&self) -> String {
+        match self {
+            Self::Episode(row) => row.id.to_string(),
+            Self::Missing { key, .. } => key.clone(),
+        }
+    }
 }
 
 /// The upload date as `YYYY-MM-DD`; an unknown date (zero or negative) has no text.
@@ -137,6 +157,7 @@ pub fn row(ep: &Episode, display_number: bool, show_previews: bool, show_summari
         indicators: Indicators::of(ep),
         preview_url: shown(&ep.preview_url, show_previews),
         summary: shown(&ep.summary, show_summaries),
+        summary_expanded: false,
         selected,
     }
 }
@@ -145,14 +166,31 @@ pub fn row(ep: &Episode, display_number: bool, show_previews: bool, show_summari
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Diff {
     Same,
-    /// Same rows in the same order: these indices changed, one `items_changed(i, 1, 1)` each.
+    /// Same rows in the same order: these indices changed (ascending). One row is one `items_changed(i, 1, 1)`; several
+    /// are one splice over their span (`changed_span`).
     Rows(Vec<usize>),
     /// Rows were added, removed or reordered: one splice replaces the list.
     Reset,
 }
 
+/// The span `(start, len)` that covers every index of a `Diff::Rows`, so a bulk change (select all, mark many) is one
+/// splice instead of one signal per row. `None` for no index.
+pub fn changed_span(indices: &[usize]) -> Option<(usize, usize)> {
+    let (first, last) = (indices.iter().min()?, indices.iter().max()?);
+    Some((*first, last - first + 1))
+}
+
 pub fn diff(old: &[EpisodeRow], new: &[EpisodeRow]) -> Diff {
-    if old.len() != new.len() || old.iter().zip(new).any(|(a, b)| a.id != b.id) {
+    diff_by(old, new, |row| row.id.to_string())
+}
+
+/// The diff of list lines: a line keeps its place when it has the same slot (an episode id or a separator key).
+pub fn diff_lines(old: &[Line], new: &[Line]) -> Diff {
+    diff_by(old, new, Line::slot)
+}
+
+fn diff_by<T: PartialEq>(old: &[T], new: &[T], slot: impl Fn(&T) -> String) -> Diff {
+    if old.len() != new.len() || old.iter().zip(new).any(|(a, b)| slot(a) != slot(b)) {
         return Diff::Reset;
     }
     let changed: Vec<usize> = (0..old.len()).filter(|&i| old[i] != new[i]).collect();
@@ -165,6 +203,13 @@ mod tests {
 
     fn episode() -> Episode {
         Episode::create()
+    }
+
+    #[test]
+    fn the_span_covers_the_first_to_the_last_changed_row() {
+        assert_eq!(changed_span(&[]), None);
+        assert_eq!(changed_span(&[4]), Some((4, 1)));
+        assert_eq!(changed_span(&[2, 3, 9]), Some((2, 8)));
     }
 
     #[test]
@@ -271,5 +316,11 @@ mod tests {
         assert_eq!(diff(&old, &changed), Diff::Rows(vec![1]));
         assert_eq!(diff(&old, &old[..2]), Diff::Reset);
         assert_eq!(diff(&old, &[mk(1), mk(3), mk(2)]), Diff::Reset);
+        // separators keep their slot too: a new count is a change, a new neighbour is a reset
+        let sep = |count| Line::Missing { key: "missing-count-1-5".into(), count };
+        let lines = vec![Line::Episode(mk(1)), sep(2)];
+        assert_eq!(diff_lines(&lines, &lines), Diff::Same);
+        assert_eq!(diff_lines(&lines, &[Line::Episode(mk(1)), sep(3)]), Diff::Rows(vec![1]));
+        assert_eq!(diff_lines(&lines, &[Line::Episode(mk(1))]), Diff::Reset);
     }
 }

@@ -8,6 +8,7 @@
 pub mod browse;
 pub mod browse_view;
 pub mod extensions;
+pub mod favorite_store;
 pub mod loader;
 pub mod prefs;
 pub mod sources;

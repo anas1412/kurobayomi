@@ -4,15 +4,18 @@
 //! own task, on the blocking pool, and never look at the token, so a pop does not cancel them. No GTK here.
 //! Upstream: `AnimeScreenModel.kt:204-283` (init), `fetchAllFromSource`.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_channel::{Receiver, Sender};
-use kuro_data::anime::Anime;
+use kuro_data::DataResult;
+use kuro_data::anime::{Anime, AnimeRelationGroup};
 use kuro_data::episode::Episode;
 use kuro_data::source::{AnimeStubSourceRepo, StubSource};
 use kuro_db::handle::Db;
+use kuro_db::schema_anime::FetchType;
 use kuro_domain::download::filter::{CategoryDecision, should_download_new};
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_prefs::store::PrefStore;
@@ -21,10 +24,14 @@ use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::actions::Mark;
+use super::details_error::{DetailsError, join_failed};
 use super::entry_state::RefreshPlan;
+use super::images::ImageKind;
 use super::library::{RemoveOutcome, add_to_library_flag, remove_from_library};
 use super::model::{AnimeEntryModel, AnimeLoadContext};
 use super::refresh::{Begin, RefreshGate, Trigger, auto_download_targets, last_empty_open_fetch, record_empty_open_fetch};
+use super::season_tile::SeasonExtra;
+use super::set_default::Scope;
 use super::store::AnimeStore;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
@@ -53,6 +60,31 @@ pub trait AnimeBackend: Send + Sync + 'static {
     }
     /// Deletes every download of the entry.
     fn delete_downloads(&self, _anime_id: i64) {}
+    /// Whether the app can queue and delete episode downloads (`onDownloadEpisode != null`): the Download menu and the
+    /// download rows of the selection bar show only then.
+    fn has_download_handler(&self) -> bool {
+        false
+    }
+    /// The ids of the entry's episodes that are on disk.
+    fn downloaded_episodes(&self, _anime_id: i64) -> HashSet<i64> {
+        HashSet::new()
+    }
+    /// Queues these episodes. With `start_now` the one episode goes to the front and the queue starts. `false` when
+    /// the downloads layer is not there: nothing was queued.
+    fn enqueue_episodes(&self, _anime_id: i64, _episode_ids: &[i64], _start_now: bool) -> bool {
+        false
+    }
+    /// Deletes the downloads of these episodes (the Delete row, and a mark seen with "remove after seen").
+    fn delete_episodes(&self, _anime_id: i64, _episode_ids: &[i64]) {}
+    /// Whether a tracker is logged in: the tracking button opens the tracking sheet then, the tracking settings
+    /// otherwise (E-25). The app has no tracker session yet, so the default is no.
+    fn has_logged_in_tracker(&self) -> bool {
+        false
+    }
+    /// Whether the source is an HTTP source: only then does the action row offer WebView (E-26).
+    fn is_http_source(&self, _source_id: i64) -> bool {
+        false
+    }
     /// Plays an episode in an external player. `false` when it cannot (the app resolves no video URL yet): the page
     /// then opens the internal player.
     fn play_external(&self, _anime_id: i64, _episode_id: i64) -> bool {
@@ -64,6 +96,10 @@ pub trait AnimeBackend: Send + Sync + 'static {
     }
     /// Starts the torrent server before a torrent episode plays (17.5).
     fn start_torrent_server(&self) {}
+    /// The language code of a source (`source.lang`), for the language badge of a season. Empty when it is not known.
+    fn source_language(&self, _source_id: i64) -> String {
+        String::new()
+    }
 }
 
 /// The backend of an app with no anime source registry yet: every source reads as not installed, the local source
@@ -103,6 +139,10 @@ impl AnimeBackend for StubAnimeBackend {
     fn fetch(&self, _anime_id: i64, _plan: RefreshPlan, _trigger: Trigger) -> AnimeFetch {
         Box::pin(async { Err(DetailError::SourceNotInstalled) })
     }
+
+    fn source_language(&self, source_id: i64) -> String {
+        self.stubs.get(source_id).ok().flatten().map(|stub| stub.lang).unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -112,14 +152,36 @@ pub enum AnimeCmd {
     Refresh { anime_id: i64 },
     SetFlagBits { anime_id: i64, flag: i64, mask: i64 },
     SortBy { anime_id: i64, mode: i64 },
+    /// A masked write of the season flag word (the season settings window).
+    SetSeasonFlagBits { anime_id: i64, flag: i64, mask: i64 },
+    /// A Sort click of the season settings window: flips the active key, or starts another one ascending.
+    SeasonSortBy { anime_id: i64, code: i64 },
+    /// "Set as default" with the library checkbox on: the default of this scope only goes to every favorite. Answered
+    /// by `AnimeEvent::DefaultsApplied`.
+    ApplyDefaultsToLibrary { scope: Scope },
+    /// The library button of an entry that is not in the library. With `check_duplicates` a same-named library entry
+    /// stops the add and is answered by `AnimeEvent::Duplicate`; "Add anyway" sends it with the check off.
+    AddToLibrary { anime_id: i64, check_duplicates: bool },
+    /// A custom image was edited or deleted: moves the last-modified of that image forward.
+    BumpImage { anime_id: i64, kind: ImageKind },
     /// The library button: removes a favorite, or adds an entry that is not one, with the library defaults.
     ToggleFavorite { anime_id: i64 },
     /// Sets or clears the bookmark or fillermark of exactly these episodes (`actions::bulk_mark_targets`).
     SetMark { ids: Vec<i64>, mark: Mark, on: bool },
     /// Marks these episodes seen or unseen.
     SetSeen { ids: Vec<i64>, seen: bool },
+    /// `setFetchInterval`: the wheel value; the stored value is its negative (0 is automatic).
+    SetFetchInterval { anime_id: i64, wheel: i32 },
     /// Deletes every download of the entry (the Delete button of the prompt).
     DeleteDownloads { anime_id: i64 },
+    /// Queues these episodes for download. With `start_now` the one episode goes to the front.
+    Download { anime_id: i64, ids: Vec<i64>, start_now: bool },
+    /// Deletes the downloads of these episodes.
+    DeleteEpisodeDownloads { anime_id: i64, ids: Vec<i64> },
+    /// Reads the categories and the entry's links, for the category editor: answered by `AnimeEvent::Categories`.
+    LoadCategories { anime_id: i64 },
+    /// The category editor's OK: replaces the entry's category links.
+    SetCategories { anime_id: i64, category_ids: Vec<i64> },
     Shutdown,
 }
 
@@ -135,8 +197,20 @@ pub enum AnimeEvent {
     Added,
     /// The entry left the library. A failed write sends nothing (E-LIB-9).
     Removed(RemoveOutcome),
-    /// A store read or write failed.
+    /// A store read or write failed. The text is what the user sees (`DetailsError::user_message`); the detail is logged.
     Failed(String),
+    /// The related groups changed (or were read for the first time).
+    Related(Vec<AnimeRelationGroup>),
+    /// The result of `ApplyDefaultsToLibrary`: how many entries took the defaults.
+    DefaultsApplied { scope: Scope, updated: usize },
+    /// The entry being added has the same title as these library entries.
+    Duplicate { existing: Vec<Anime> },
+    /// The download count and source language of each season, for the tiles of a `Seasons` entry.
+    SeasonFacts(Vec<SeasonExtra>),
+    /// The ids of the episodes on disk changed (a download finished or a delete ran).
+    Downloads(HashSet<i64>),
+    /// The answer of `LoadCategories`: every category and the ids the entry is linked to.
+    Categories { all: Vec<(i64, String)>, linked: Vec<i64> },
 }
 
 /// The page's handle on the runner. Dropping it stops the runner and the subscriptions.
@@ -242,10 +316,19 @@ impl Shared {
         }
     }
 
-    /// Runs blocking store work on the blocking pool. The work keeps running if the awaiting task is aborted.
-    async fn blocking<T: Send + 'static>(&self, work: impl FnOnce(AnimeStore) -> T + Send + 'static) -> T {
+    /// Tells the page a store read or write failed: the detail goes to the log, the user message to the page.
+    fn failed(&self, error: impl Into<DetailsError>) {
+        self.emit(AnimeEvent::Failed(error.into().record().user_message()));
+    }
+
+    /// Runs blocking store work on the blocking pool. The work keeps running if the awaiting task is aborted. A task
+    /// that did not finish is a typed error, not a panic.
+    async fn blocking<T: Send + 'static>(&self, work: impl FnOnce(AnimeStore) -> DataResult<T> + Send + 'static) -> Result<T, DetailsError> {
         let store = self.store.clone();
-        tokio::task::spawn_blocking(move || work(store)).await.expect("store work does not panic")
+        match tokio::task::spawn_blocking(move || work(store)).await {
+            Ok(result) => result.map_err(DetailsError::from),
+            Err(e) => Err(join_failed(&e)),
+        }
     }
 
     /// The load sequence (`AnimeEntryModel::load`), then the live subscription, then the first-open refresh.
@@ -257,8 +340,12 @@ impl Shared {
         };
         let (prefs, backend) = (self.prefs.clone(), Arc::clone(&self.backend));
         let loaded = self
-            .blocking(move |store| {
-                AnimeEntryModel::load(&store, &prefs, anime_id, ctx, |source| backend.source_info(source))
+            .blocking(move |store| -> DataResult<Option<AnimeEntryModel>> {
+                let mut model = AnimeEntryModel::load(&store, &prefs, anime_id, ctx, |source| backend.source_info(source))?;
+                if let Some(m) = &mut model {
+                    m.downloaded = backend.downloaded_episodes(anime_id);
+                }
+                Ok(model)
             })
             .await;
         match loaded {
@@ -267,15 +354,19 @@ impl Shared {
                 if plan.episodes {
                     record_empty_open_fetch(anime_id, ctx.now_ms);
                 }
+                let seasons = model.anime.fetch_type == FetchType::Seasons;
                 self.emit(AnimeEvent::Loaded(Some(Box::new(model))));
                 self.subscribe(anime_id);
+                if seasons {
+                    self.emit_season_facts(anime_id).await;
+                }
                 if plan.any() {
                     tokio::spawn(self.clone().refresh(anime_id, plan, Trigger::Open));
                 }
             }
             Ok(None) => self.emit(AnimeEvent::Loaded(None)),
             Err(e) => {
-                self.emit(AnimeEvent::Failed(e.to_string()));
+                self.failed(e);
                 self.emit(AnimeEvent::Loaded(None));
             }
         }
@@ -303,7 +394,36 @@ impl Shared {
             }
             Err(e) => Err(e),
         };
+        let refreshed = result.is_ok();
         self.emit(AnimeEvent::RefreshEnded(result));
+        // a refresh of a `Seasons` entry may have added seasons
+        if refreshed {
+            self.emit_season_facts(anime_id).await;
+        }
+    }
+
+    /// The download count and source language of each season of the entry, read off the GTK thread. Nothing is sent
+    /// for an entry with no seasons.
+    async fn emit_season_facts(&self, anime_id: i64) {
+        let backend = Arc::clone(&self.backend);
+        let facts = self
+            .blocking(move |store| {
+                Ok(store
+                    .seasons(anime_id)?
+                    .iter()
+                    .map(|season| SeasonExtra {
+                        id: season.id(),
+                        download_count: i64::try_from(backend.downloaded_count(season.id())).unwrap_or(i64::MAX),
+                        source_language: backend.source_language(season.anime.source),
+                    })
+                    .collect::<Vec<_>>())
+            })
+            .await;
+        match facts {
+            Ok(facts) if !facts.is_empty() => self.emit(AnimeEvent::SeasonFacts(facts)),
+            Ok(_) => {}
+            Err(e) => self.failed(e),
+        }
     }
 
     /// Queues the new episodes of a manual refresh when the preferences and the entry's categories allow it (T-REF-4).
@@ -314,7 +434,7 @@ impl Shared {
         }
         let prefs = self.prefs.clone();
         let targets = self
-            .blocking(move |store| -> kuro_data::DataResult<Vec<Episode>> {
+            .blocking(move |store| -> DataResult<Vec<Episode>> {
                 let downloads = DownloadPrefs::new(&prefs);
                 let favorite = store.anime(anime_id)?.is_some_and(|a| a.favorite);
                 let rule = CategoryDecision {
@@ -338,7 +458,7 @@ impl Shared {
                 let _ = tokio::task::spawn_blocking(move || backend.enqueue_new_episodes(anime_id, &targets)).await;
             }
             Ok(_) => {}
-            Err(e) => self.emit(AnimeEvent::Failed(e.to_string())),
+            Err(e) => self.failed(e),
         }
     }
 
@@ -349,7 +469,7 @@ impl Shared {
         let prefs = self.prefs.clone();
         let now = now_ms();
         let written = self
-            .blocking(move |store| -> kuro_data::DataResult<Option<bool>> {
+            .blocking(move |store| -> DataResult<Option<bool>> {
                 let Some(anime) = store.anime(anime_id)? else { return Ok(None) };
                 if anime.favorite {
                     Ok(store.set_favorite(anime_id, false, now)?.then_some(false))
@@ -362,18 +482,47 @@ impl Shared {
             Ok(Some(true)) => self.emit(AnimeEvent::Added),
             Ok(Some(false)) => {
                 let backend = Arc::clone(&self.backend);
-                let (covers_changed, downloads) = tokio::task::spawn_blocking(move || (backend.remove_cover(anime_id), backend.downloaded_count(anime_id)))
-                    .await
-                    .expect("backend work does not panic");
-                if let Some(outcome) = remove_from_library(true, covers_changed, downloads) {
-                    self.emit(AnimeEvent::Removed(outcome));
+                match tokio::task::spawn_blocking(move || (backend.remove_cover(anime_id), backend.downloaded_count(anime_id))).await {
+                    Ok((covers_changed, downloads)) => {
+                        if let Some(outcome) = remove_from_library(true, covers_changed, downloads) {
+                            self.emit(AnimeEvent::Removed(outcome));
+                        }
+                    }
+                    Err(e) => self.failed(join_failed(&e)),
                 }
             }
             Ok(None) => {}
             Err(e) => {
                 // the favorite write failed: no cover is deleted and no prompt shows
-                self.emit(AnimeEvent::Failed(e.to_string()));
+                self.failed(e);
             }
+        }
+    }
+
+    /// The library button of an entry that is not in the library. With `check_duplicates`, a library entry with the
+    /// same title stops the add and the page is asked what to do (T-39a-047); nothing is written until it answers.
+    async fn add_to_library(&self, anime_id: i64, check_duplicates: bool) {
+        let found = self
+            .blocking(move |store| {
+                let favorite = store.anime(anime_id)?.map(|a| a.favorite);
+                let existing = if check_duplicates && favorite == Some(false) { store.duplicates(anime_id)? } else { Vec::new() };
+                Ok((favorite, existing))
+            })
+            .await;
+        match found {
+            Ok((Some(false), existing)) if !existing.is_empty() => self.emit(AnimeEvent::Duplicate { existing }),
+            Ok((Some(false), _)) => self.toggle_favorite(anime_id).await,
+            // the row is gone, or the entry joined the library meanwhile: there is nothing to add
+            Ok(_) => {}
+            Err(e) => self.failed(e),
+        }
+    }
+
+    /// Reads the episodes on disk again and tells the page.
+    async fn emit_downloads(&self, anime_id: i64) {
+        let backend = Arc::clone(&self.backend);
+        if let Ok(on_disk) = tokio::task::spawn_blocking(move || backend.downloaded_episodes(anime_id)).await {
+            self.emit(AnimeEvent::Downloads(on_disk));
         }
     }
 
@@ -414,9 +563,19 @@ impl Shared {
                 }
             }
         });
+        let mut related_sub = self.store.watch_related(anime_id);
+        let shared = Arc::clone(self);
+        let related_task = tokio::spawn(async move {
+            while let Some(published) = related_sub.changed().await {
+                if let Ok(groups) = published {
+                    shared.emit(AnimeEvent::Related(groups.as_ref().clone()));
+                }
+            }
+        });
         let mut subs = self.subscriptions.lock().unwrap_or_else(PoisonError::into_inner);
         subs.push(anime_task.abort_handle());
         subs.push(episode_task.abort_handle());
+        subs.push(related_task.abort_handle());
     }
 
     /// One write command. Runs in its own task.
@@ -426,18 +585,60 @@ impl Shared {
                 self.blocking(move |s| s.set_flag_bits(anime_id, flag, mask)).await
             }
             AnimeCmd::SortBy { anime_id, mode } => self.blocking(move |s| s.sort_by(anime_id, mode)).await,
+            AnimeCmd::SetSeasonFlagBits { anime_id, flag, mask } => {
+                self.blocking(move |s| s.set_season_flag_bits(anime_id, flag, mask)).await
+            }
+            AnimeCmd::SeasonSortBy { anime_id, code } => self.blocking(move |s| s.season_sort_by(anime_id, code)).await,
+            AnimeCmd::ApplyDefaultsToLibrary { scope } => {
+                let prefs = self.prefs.clone();
+                let applied = self
+                    .blocking(move |s| match scope {
+                        Scope::Episode => s.apply_episode_defaults_to_library(&prefs),
+                        Scope::Season => s.apply_season_defaults_to_library(&prefs),
+                    })
+                    .await;
+                match applied {
+                    Ok(updated) => return self.emit(AnimeEvent::DefaultsApplied { scope, updated }),
+                    Err(e) => return self.failed(e),
+                }
+            }
+            AnimeCmd::AddToLibrary { anime_id, check_duplicates } => return self.add_to_library(anime_id, check_duplicates).await,
+            AnimeCmd::BumpImage { anime_id, kind } => {
+                let now = now_ms();
+                self.blocking(move |s| s.bump_image(anime_id, kind, now)).await
+            }
             AnimeCmd::ToggleFavorite { anime_id } => return self.toggle_favorite(anime_id).await,
             AnimeCmd::SetMark { ids, mark, on } => self.blocking(move |s| s.set_marks(&ids, mark, on).map(|()| true)).await,
             AnimeCmd::SetSeen { ids, seen } => self.blocking(move |s| s.set_seen(&ids, seen).map(|()| true)).await,
+            AnimeCmd::SetFetchInterval { anime_id, wheel } => {
+                self.blocking(move |s| s.set_fetch_interval(anime_id, wheel).map(|()| true)).await
+            }
             AnimeCmd::DeleteDownloads { anime_id } => {
                 let backend = Arc::clone(&self.backend);
                 let _ = tokio::task::spawn_blocking(move || backend.delete_downloads(anime_id)).await;
-                return;
+                return self.emit_downloads(anime_id).await;
+            }
+            AnimeCmd::Download { anime_id, ids, start_now } => {
+                let backend = Arc::clone(&self.backend);
+                let _ = tokio::task::spawn_blocking(move || backend.enqueue_episodes(anime_id, &ids, start_now)).await;
+                return self.emit_downloads(anime_id).await;
+            }
+            AnimeCmd::DeleteEpisodeDownloads { anime_id, ids } => {
+                let backend = Arc::clone(&self.backend);
+                let _ = tokio::task::spawn_blocking(move || backend.delete_episodes(anime_id, &ids)).await;
+                return self.emit_downloads(anime_id).await;
+            }
+            AnimeCmd::LoadCategories { anime_id } => match self.blocking(move |s| s.categories(anime_id)).await {
+                Ok((all, linked)) => return self.emit(AnimeEvent::Categories { all, linked }),
+                Err(e) => Err(e),
+            },
+            AnimeCmd::SetCategories { anime_id, category_ids } => {
+                self.blocking(move |s| s.set_categories(anime_id, &category_ids).map(|()| true)).await
             }
             AnimeCmd::Load { .. } | AnimeCmd::Refresh { .. } | AnimeCmd::Shutdown => return,
         };
         if let Err(e) = result {
-            self.emit(AnimeEvent::Failed(e.to_string()));
+            self.failed(e);
         }
     }
 }
@@ -514,6 +715,10 @@ mod tests {
 
         fn delete_downloads(&self, _: i64) {
             self.deleted.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn source_language(&self, _: i64) -> String {
+            "ja".to_owned()
         }
     }
 
@@ -619,6 +824,13 @@ mod tests {
             let rx = runner.events();
             runner.send(AnimeCmd::Load { anime_id: id });
             until(&rx, |e| matches!(e, AnimeEvent::Loaded(_))).await;
+            // the refresh starts after `Loaded`: wait until the fetch has really started, or a dispose that wins the
+            // race would cancel it before it began
+            let started = std::time::Instant::now() + Duration::from_secs(5);
+            while backend.started.load(Ordering::SeqCst) == 0 {
+                assert!(std::time::Instant::now() < started, "the fetch never started");
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
             runner.send(AnimeCmd::SetFlagBits { anime_id: id, flag: ep::SHOW_BOOKMARKED, mask: ep::BOOKMARKED_MASK });
             drop(runner); // the page was popped while the fetch is held open
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -756,5 +968,109 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let plan = RefreshPlan { info: true, episodes: false, seasons: false };
         assert_eq!(rt.block_on(backend.fetch(1, plan, Trigger::Manual)), Err(DetailError::SourceNotInstalled));
+    }
+
+    #[test]
+    fn set_as_default_with_the_checkbox_reports_how_many_favorites_took_that_scope_only() {
+        use kuro_domain::entries::anime::season_flags as sf;
+        let rt = rt();
+        let (_dir, store, id) = with_episodes(true, true, 1, 0);
+        store.set_season_flag_bits(id, sf::SHOW_STARTED, sf::STARTED_MASK).unwrap();
+        let prefs = PrefStore::in_memory();
+        kuro_domain::entries::defaults::set_episode_settings_default(&prefs, ep::SHOW_SEEN | ep::SORT_ASC | ep::SORTING_NUMBER);
+        rt.block_on(async {
+            let runner = spawn(rt.handle(), store.clone(), prefs, Fake::new(0), AnimeLoadContext::default());
+            runner.send(AnimeCmd::ApplyDefaultsToLibrary { scope: Scope::Episode });
+            let event = until(&runner.events(), |e| matches!(e, AnimeEvent::DefaultsApplied { .. })).await;
+            let AnimeEvent::DefaultsApplied { scope, updated } = event else { unreachable!() };
+            assert_eq!((scope, updated), (Scope::Episode, 1));
+            let row = store.anime(id).unwrap().unwrap();
+            assert_eq!(row.episode_flags & ep::UNSEEN_MASK, ep::SHOW_SEEN);
+            assert_eq!(row.season_flags & sf::STARTED_MASK, sf::SHOW_STARTED, "the episode scope leaves the season flags alone");
+        });
+    }
+
+    #[test]
+    fn an_add_with_a_same_named_library_entry_waits_for_the_answer_and_add_anyway_adds() {
+        use kuro_data::anime::AnimeRepo;
+        let rt = rt();
+        let (_dir, store, id) = with_episodes(false, true, 0, 0);
+        let twin = AnimeRepo::new(store.db()).insert(&Anime { source: 8, url: "/b".into(), title: "frieren".into(), favorite: true, ..Anime::create() }).unwrap();
+        rt.block_on(async {
+            let runner = start(&rt, store.clone(), Fake::new(0));
+            let rx = runner.events();
+            runner.send(AnimeCmd::AddToLibrary { anime_id: id, check_duplicates: true });
+            let AnimeEvent::Duplicate { existing } = until(&rx, |e| matches!(e, AnimeEvent::Duplicate { .. })).await else { unreachable!() };
+            assert_eq!(existing.iter().map(|a| a.id).collect::<Vec<_>>(), vec![twin]);
+            assert!(!store.anime(id).unwrap().unwrap().favorite, "nothing is written until the user answers");
+            runner.send(AnimeCmd::AddToLibrary { anime_id: id, check_duplicates: false });
+            until(&rx, |e| matches!(e, AnimeEvent::Added)).await;
+            assert!(store.anime(id).unwrap().unwrap().favorite);
+        });
+    }
+
+    #[test]
+    fn an_add_without_a_duplicate_adds_at_once() {
+        let rt = rt();
+        let (_dir, store, id) = with_episodes(false, true, 0, 0);
+        rt.block_on(async {
+            let runner = start(&rt, store.clone(), Fake::new(0));
+            runner.send(AnimeCmd::AddToLibrary { anime_id: id, check_duplicates: true });
+            until(&runner.events(), |e| matches!(e, AnimeEvent::Added)).await;
+            assert!(store.anime(id).unwrap().unwrap().favorite);
+        });
+    }
+
+    #[test]
+    fn an_image_bump_reaches_the_row_and_the_page_hears_of_it() {
+        let rt = rt();
+        let (_dir, store, id) = with_episodes(true, true, 0, 0);
+        rt.block_on(async {
+            let runner = start(&rt, store.clone(), Fake::new(0));
+            let rx = runner.events();
+            runner.send(AnimeCmd::Load { anime_id: id });
+            until(&rx, |e| matches!(e, AnimeEvent::Loaded(_))).await;
+            runner.send(AnimeCmd::BumpImage { anime_id: id, kind: ImageKind::Background });
+            until(&rx, |e| matches!(e, AnimeEvent::Snapshot { anime, .. } if anime.background_last_modified > 0)).await;
+        });
+    }
+
+    #[test]
+    fn related_groups_are_published_after_the_load_and_again_when_they_change() {
+        use kuro_data::anime::AnimeRepo;
+        use kuro_data::anime_relation::AnimeRelationRepo;
+        let rt = rt();
+        let (_dir, store, id) = with_episodes(true, true, 0, 0);
+        let other = AnimeRepo::new(store.db()).insert(&Anime { source: 8, url: "/b".into(), title: "Other".into(), ..Anime::create() }).unwrap();
+        rt.block_on(async {
+            let runner = start(&rt, store.clone(), Fake::new(0));
+            let rx = runner.events();
+            runner.send(AnimeCmd::Load { anime_id: id });
+            until(&rx, |e| matches!(e, AnimeEvent::Related(groups) if groups.is_empty())).await;
+            let group = AnimeRelationGroup { name: "Sequel".into(), anime: vec![Anime { id: other, ..Anime::create() }] };
+            AnimeRelationRepo::new(store.db()).replace_relations(id, &[group], 1).unwrap();
+            let AnimeEvent::Related(groups) = until(&rx, |e| matches!(e, AnimeEvent::Related(g) if !g.is_empty())).await else { unreachable!() };
+            assert_eq!((groups[0].name.as_str(), groups[0].anime[0].id), ("Sequel", other));
+        });
+    }
+
+    #[test]
+    fn a_seasons_entry_gets_the_download_count_and_language_of_each_season() {
+        use kuro_data::anime::AnimeRepo;
+        let rt = rt();
+        let (_dir, store, id) = with_episodes(true, true, 0, 0);
+        store.set_fetch_type_for_test(id, FetchType::Seasons);
+        let season = AnimeRepo::new(store.db())
+            .insert(&Anime { source: 7, url: "/s1".into(), title: "S1".into(), parent_id: Some(id), season_number: 1.0, ..Anime::create() })
+            .unwrap();
+        rt.block_on(async {
+            let mut fake = Fake::new(0);
+            Arc::get_mut(&mut fake).unwrap().downloads = 3;
+            let runner = start(&rt, store.clone(), fake);
+            let rx = runner.events();
+            runner.send(AnimeCmd::Load { anime_id: id });
+            let AnimeEvent::SeasonFacts(facts) = until(&rx, |e| matches!(e, AnimeEvent::SeasonFacts(_))).await else { unreachable!() };
+            assert_eq!(facts, vec![SeasonExtra { id: season, download_count: 3, source_language: "ja".into() }]);
+        });
     }
 }

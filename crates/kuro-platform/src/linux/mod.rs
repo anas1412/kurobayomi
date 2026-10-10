@@ -6,6 +6,7 @@ pub mod idle;
 pub mod launcher;
 pub mod media;
 pub mod paths;
+pub mod power_network;
 pub mod secrets;
 pub mod secrets_file;
 pub mod storage;

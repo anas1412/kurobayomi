@@ -72,7 +72,7 @@ mod tests {
     }
 
     #[test]
-    fn completion_marks_seen_once_per_episode() {
+    fn t54_completion_marks_seen_once_per_episode() {
         let mut completion = Completion::default();
         let mut ep = episode(1, 1.0, false);
         assert!(completion.complete(&mut ep));

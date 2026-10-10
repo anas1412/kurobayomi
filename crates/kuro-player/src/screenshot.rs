@@ -8,6 +8,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use kuro_i18n::{Arg, MsgKey, tr, trf};
+
 use crate::enums::{ArtType, SetAsArt};
 use crate::errors::PlayerMessage;
 
@@ -200,6 +202,32 @@ pub fn set_as_art(
     set_as_art_result(
         written.as_ref().map(|_| ()).map_err(String::as_str),
         local_or_favorite,
+    )
+}
+
+/// The toast for a set-as-art result (T-45a-051). Success names the slot that was written. A
+/// failure always reads "Failed to update cover", as in the Kotlin.
+pub fn set_as_art_message(art: ArtType, result: SetAsArt) -> String {
+    match result {
+        SetAsArt::Success => tr(match art {
+            ArtType::Cover => MsgKey::cover_updated,
+            ArtType::Background => MsgKey::background_updated,
+            ArtType::Thumbnail => MsgKey::thumbnail_updated,
+        }),
+        SetAsArt::AddToLibraryFirst => tr(MsgKey::notification_first_add_to_library),
+        SetAsArt::Error => tr(MsgKey::notification_cover_update_failed),
+    }
+}
+
+/// The text sent with a shared screenshot: `"<anime title>: <episode name>, <time>"` (T-45a-050).
+pub fn share_text(anime_title: &str, episode_name: &str, time: &str) -> String {
+    trf(
+        MsgKey::share_screenshot_info,
+        &[
+            ("arg1", Arg::Str(anime_title)),
+            ("arg2", Arg::Str(episode_name)),
+            ("arg3", Arg::Str(time)),
+        ],
     )
 }
 
@@ -476,5 +504,33 @@ mod sheet_tests {
         );
         let ok: io::Result<PathBuf> = Ok(dir.path().to_path_buf());
         assert_eq!(sheet_capture_message(&ok), None);
+    }
+
+    #[test]
+    fn set_as_art_messages_name_the_slot_and_the_failure() {
+        assert_eq!(
+            set_as_art_message(ArtType::Background, SetAsArt::Success),
+            "Background updated"
+        );
+        assert_eq!(
+            set_as_art_message(ArtType::Thumbnail, SetAsArt::Success),
+            "Thumbnail updated"
+        );
+        assert_eq!(
+            set_as_art_message(ArtType::Cover, SetAsArt::AddToLibraryFirst),
+            "Please add the entry to your library before doing this"
+        );
+        assert_eq!(
+            set_as_art_message(ArtType::Cover, SetAsArt::Error),
+            "Failed to update cover"
+        );
+    }
+
+    #[test]
+    fn share_text_is_title_episode_and_time() {
+        assert_eq!(
+            share_text("Show", "Episode 2", "12:34"),
+            "Show: Episode 2, 12:34"
+        );
     }
 }

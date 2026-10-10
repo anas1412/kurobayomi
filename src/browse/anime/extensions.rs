@@ -5,6 +5,8 @@
 
 use std::collections::BTreeSet;
 
+use kuro_extensions::InstallStep;
+use kuro_extensions::anime::model::InstallStep as AnimeStep;
 use kuro_prefs::base::BasePrefs;
 use kuro_prefs::source::SourcePrefs;
 
@@ -77,6 +79,19 @@ impl ExtensionsModel {
     fn recompute(&mut self) {
         let visible = split_available(&self.exts, Some(&self.enabled_langs));
         self.groups = group(&visible, &self.query, self.show_nsfw);
+    }
+}
+
+/// The anime install step in the shared lifecycle's terms. Both enums name the same six states in the same order, so the
+/// shared `Installs` map, the row texts and the row buttons apply to anime rows unchanged (T-41a-015).
+pub fn shared_step(step: AnimeStep) -> InstallStep {
+    match step {
+        AnimeStep::Idle => InstallStep::Idle,
+        AnimeStep::Pending => InstallStep::Pending,
+        AnimeStep::Downloading => InstallStep::Downloading,
+        AnimeStep::Installing => InstallStep::Installing,
+        AnimeStep::Installed => InstallStep::Installed,
+        AnimeStep::Error => InstallStep::Error,
     }
 }
 
@@ -171,5 +186,23 @@ mod tests {
         base.extension_installer.set("SHIZUKU".into()).expect("store");
         model.on_pref_change(&prefs, &base);
         assert_eq!(model.installer(), "SHIZUKU");
+    }
+
+    #[test]
+    fn every_anime_step_maps_to_the_shared_step_and_keeps_its_completion() {
+        let pairs = [
+            (AnimeStep::Idle, InstallStep::Idle),
+            (AnimeStep::Pending, InstallStep::Pending),
+            (AnimeStep::Downloading, InstallStep::Downloading),
+            (AnimeStep::Installing, InstallStep::Installing),
+            (AnimeStep::Installed, InstallStep::Installed),
+            (AnimeStep::Error, InstallStep::Error),
+        ];
+        for (anime, shared) in pairs {
+            assert_eq!(shared_step(anime), shared);
+            assert_eq!(shared_step(anime).is_completed(), anime.is_completed(), "{anime:?}");
+        }
+        let finished: Vec<AnimeStep> = pairs.iter().map(|p| p.0).filter(|s| s.is_completed()).collect();
+        assert_eq!(finished, vec![AnimeStep::Idle, AnimeStep::Installed, AnimeStep::Error], "the final states");
     }
 }

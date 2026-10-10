@@ -11,7 +11,7 @@ use kuro_prefs::pref::Pref;
 use crate::pref_model::bind;
 use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::settings_ui::category::Category;
-use crate::settings_ui::rows::{enum_choice, group, int_choice, item, switch, switch_with, text};
+use crate::settings_ui::rows::{enum_choice, group, int_choice, item, multi_choice, switch, switch_with, text};
 
 /// Stored value meaning "ask every time" for the default category.
 pub const ALWAYS_ASK: i32 = -1;
@@ -91,6 +91,12 @@ pub fn episode_swipe_options() -> [(EpisodeSwipeAction, &'static str); 5] {
     [Disabled, ToggleBookmark, ToggleFillermark, ToggleSeen, Download].map(|action| (action, episode_swipe_label(action)))
 }
 
+/// The chapter mark-duplicate options: marked as read after reading a chapter, or after fetching a new one.
+pub const DUPLICATE_READ_CHAPTER: [(&str, &str); 2] = [("existing", "After reading a chapter"), ("new", "After fetching new chapter")];
+/// The episode mark-duplicate options: marked as seen after watching an episode, or after fetching a new one.
+pub const DUPLICATE_SEEN_EPISODE: [(&str, &str); 2] =
+    [("existing_episode", "After watching an episode"), ("new_episode", "After fetching new episode")];
+
 /// The chapter swipe rows, titled as `spec/settings.json` titles them.
 pub fn chapter_swipe_group(prefs: &Prefs) -> Preference {
     let l = &prefs.library;
@@ -99,6 +105,12 @@ pub fn chapter_swipe_group(prefs: &Prefs) -> Preference {
         vec![
             enum_choice("Chapter on swipe to left", &l.swipe_left_chapter, &chapter_swipe_options(), true),
             enum_choice("Chapter on swipe to right", &l.swipe_right_chapter, &chapter_swipe_options(), true),
+            multi_choice(
+                "Mark duplicate read chapter as read",
+                &l.mark_duplicate_read_chapter_as_read,
+                &DUPLICATE_READ_CHAPTER,
+                true,
+            ),
         ],
     )
 }
@@ -111,6 +123,12 @@ pub fn episode_swipe_group(prefs: &Prefs) -> Preference {
         vec![
             enum_choice("Episode on swipe to left", &l.swipe_left_episode, &episode_swipe_options(), true),
             enum_choice("Episode on swipe to right", &l.swipe_right_episode, &episode_swipe_options(), true),
+            multi_choice(
+                "Mark duplicate seen episode as seen",
+                &l.mark_duplicate_seen_episode_as_seen,
+                &DUPLICATE_SEEN_EPISODE,
+                true,
+            ),
         ],
     )
 }
@@ -211,6 +229,38 @@ mod tests {
         prefs.library.default_manga_category.set(42).unwrap();
         let _ = default_manga_category(&prefs, &categories());
         assert_eq!(prefs.library.default_manga_category.get(), ALWAYS_ASK);
+    }
+
+    /// Runs a veto future that resolves at once (the writes here never wait).
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let mut future = std::pin::pin!(future);
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(value) => value,
+            std::task::Poll::Pending => panic!("the veto is not immediately ready"),
+        }
+    }
+
+    #[test]
+    fn the_mark_duplicate_rows_store_their_selection_under_the_two_keys() {
+        let prefs = Prefs::in_memory();
+        let rows = swipe_rows(&prefs);
+        let mut found = 0;
+        for entry in &rows {
+            let Preference::Group(g) = entry else { panic!("group") };
+            for item in &g.items {
+                let PreferenceItem::MultiSelect { entries, veto, pref, .. } = item else { continue };
+                found += 1;
+                assert_eq!(entries.len(), 2);
+                let picked: std::collections::BTreeSet<String> = ["new".to_owned()].into();
+                let picked_episode: std::collections::BTreeSet<String> = ["new_episode".to_owned()].into();
+                let value = if pref.key().contains("chapter") { picked } else { picked_episode };
+                assert_eq!(block_on(veto(value.clone())), Ok(true));
+                assert_eq!(pref.get(), value);
+            }
+        }
+        assert_eq!(found, 2);
+        assert!(prefs.library.mark_duplicate_read_chapter_as_read.get().contains("new"));
     }
 
     #[test]

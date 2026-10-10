@@ -97,6 +97,20 @@ pub fn title(anime: &str, episode: &str) -> String {
     format!("{anime} - {episode}")
 }
 
+/// The content type guessed from the URL's extension (T-45a-059), used only when the desktop opener
+/// needs one. A query string is ignored. Anything unknown is `video/any`.
+pub fn mime_type(url: &str) -> &'static str {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let ext = file.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("mp4") => "video/mp4",
+        Some("mkv") => "video/x-matroska",
+        Some("m3u8") => "application/x-mpegURL",
+        _ => "video/any",
+    }
+}
+
 /// Start position in ms (T-45a-062). A seen episode restarts at 1 ms, unless the watching position
 /// is kept and the saved position is short of the end. Otherwise the saved position is used.
 pub fn start_ms(seen: bool, preserve_position: bool, last_ms: i64, total_ms: i64) -> i64 {
@@ -532,5 +546,14 @@ mod tests {
         assert_eq!(find_on_path("notexec", path), None);
         let (_dir2, path2) = path_with("mpv");
         assert!(find_on_path("mpv", &path2).is_some());
+    }
+
+    #[test]
+    fn mime_type_follows_the_extension() {
+        assert_eq!(mime_type("https://h/a/ep.MP4?token=1"), "video/mp4");
+        assert_eq!(mime_type("/media/show.mkv"), "video/x-matroska");
+        assert_eq!(mime_type("https://h/master.m3u8"), "application/x-mpegURL");
+        assert_eq!(mime_type("https://h/stream"), "video/any");
+        assert_eq!(mime_type("https://h.example/dir.v2/stream"), "video/any");
     }
 }

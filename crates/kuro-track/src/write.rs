@@ -269,8 +269,16 @@ mod tests {
             let b = spawn_anime_edit(h.ctx.clone(), 1, TrackerId::ANILIST, AnimeEdit::Progress(9));
             let (a, b) = (a.await.unwrap().unwrap(), b.await.unwrap().unwrap());
             assert_eq!((a.last_episode_seen, b.last_episode_seen), (5.0, 9.0));
-            let stored = h.ctx.anime_binding(1, TrackerId::ANILIST).await.unwrap().unwrap();
-            assert_eq!(stored.last_episode_seen, 9.0, "B, submitted last, lands last");
+            let stored = h
+                .ctx
+                .anime_binding(1, TrackerId::ANILIST)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                stored.last_episode_seen, 9.0,
+                "B, submitted last, lands last"
+            );
         }
     }
 

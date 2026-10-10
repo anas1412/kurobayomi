@@ -1,7 +1,7 @@
 //! The release check flow (`GetApplicationRelease.kt`): the three-day throttle, the lookup, and the decision of
 //! whether `last_app_check` moves. The stored time itself is the caller's: [`Check::checked_at`] says what to write.
 
-use super::version::{is_update, Current};
+use super::version::is_newer;
 use super::{Release, ReleaseError, ReleaseService};
 
 /// Minimum time between two lookups, in milliseconds (three days).
@@ -29,11 +29,11 @@ pub fn is_throttled(now: i64, last_checked: i64) -> bool {
 /// Runs the check. `repository` empty disables it (`UPDATE_REPOSITORY`), as does a throttled call unless `force` is set;
 /// neither calls the service. A lookup that returns no release (no asset for this host) leaves the stored time alone,
 /// as does an error, which is returned. A release that comes back moves the time to `now` and is compared with
-/// `current` (a release version, or a preview build's commit count).
+/// `current`, the installed version.
 pub fn check_for_update(
     service: &dyn ReleaseService,
     repository: &str,
-    current: &Current,
+    current: &str,
     last_checked: i64,
     now: i64,
     force: bool,
@@ -45,7 +45,7 @@ pub fn check_for_update(
     let Some(release) = service.latest(repository)? else {
         return Ok(nothing);
     };
-    let outcome = if is_update(&release.version, current) { Outcome::NewUpdate(release) } else { Outcome::NoNewUpdate };
+    let outcome = if is_newer(&release.version, current) { Outcome::NewUpdate(release) } else { Outcome::NoNewUpdate };
     Ok(Check { outcome, checked_at: Some(now) })
 }
 
@@ -87,7 +87,7 @@ mod tests {
     }
 
     fn check(svc: &Counting, last: i64, force: bool) -> Result<Check, ReleaseError> {
-        check_for_update(svc, "o/r", &Current::Release("1.0.0".into()), last, NOW, force)
+        check_for_update(svc, "o/r", "1.0.0", last, NOW, force)
     }
 
     #[test]
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn an_empty_repository_disables_the_check() {
         let svc = Counting::new(Ok(Some(release("v9.0.0"))));
-        let got = check_for_update(&svc, "", &Current::Release("1.0.0".into()), 0, NOW, true).unwrap();
+        let got = check_for_update(&svc, "", "1.0.0", 0, NOW, true).unwrap();
         assert_eq!(got.checked_at, None);
         assert_eq!(svc.calls.get(), 0);
     }
@@ -148,13 +148,5 @@ mod tests {
     fn a_nightly_tag_is_never_an_update() {
         let svc = Counting::new(Ok(Some(release("nightly"))));
         assert_eq!(check(&svc, 0, false).unwrap().outcome, Outcome::NoNewUpdate);
-    }
-
-    #[test]
-    fn a_preview_build_is_offered_a_higher_numbered_tag() {
-        let svc = Counting::new(Ok(Some(release("r2000"))));
-        let current = Current::Preview { commit_count: 1000 };
-        let got = check_for_update(&svc, "o/r", &current, 0, NOW, false).unwrap();
-        assert_eq!(got, Check { outcome: Outcome::NewUpdate(release("r2000")), checked_at: Some(NOW) });
     }
 }

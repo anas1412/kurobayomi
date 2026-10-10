@@ -2,6 +2,8 @@
 //! 7.1-7.2; T-45a-036, T-45a-037). The mpv pause and the episode load are the caller's commands.
 //! This module changes the state and returns the decisions.
 
+use kuro_data::episode::Episode;
+
 use crate::enums::{Panels, Sheets};
 use crate::errors::{InitError, PlayerMessage};
 use crate::pref_write::Write;
@@ -51,6 +53,26 @@ pub fn no_next_episode_message(
     auto_play: bool,
 ) -> Option<PlayerMessage> {
     (has_anime && !switch_found && !auto_play).then_some(PlayerMessage::NoNextEpisode)
+}
+
+/// The result of a prev or next request (`getAdjacentEpisodeId`, T-45b-006).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Adjacent {
+    /// Switch to this episode id.
+    Episode(i64),
+    /// No neighbour: show this toast and keep the current episode.
+    Stay(PlayerMessage),
+}
+
+/// Decides a prev or next request from the playlist (behaviour 2.7, 18). An id of `-1` means there
+/// is no neighbour, so the episode does not change: previous shows `no_prev_episode` and next shows
+/// `no_next_episode` ("Next Episode not found!").
+pub fn adjacent_decision(playlist: &[Episode], current_id: i64, previous: bool) -> Adjacent {
+    match crate::playlist::adjacent_id(playlist, current_id, previous) {
+        -1 if previous => Adjacent::Stay(PlayerMessage::NoPrevEpisode),
+        -1 => Adjacent::Stay(PlayerMessage::NoNextEpisode),
+        id => Adjacent::Episode(id),
+    }
 }
 
 /// What to do with the hoster list of a switched episode (behaviour 7.1 step f).
@@ -139,6 +161,39 @@ mod tests {
         assert_eq!(no_next_episode_message(true, false, true), None);
         assert_eq!(no_next_episode_message(true, true, false), None);
         assert_eq!(no_next_episode_message(false, false, false), None);
+    }
+
+    fn ep(id: i64) -> Episode {
+        Episode {
+            id,
+            ..Episode::create()
+        }
+    }
+
+    #[test]
+    fn prev_at_the_start_shows_no_prev_episode_and_keeps_the_episode() {
+        let list = [ep(1), ep(2)];
+        let decision = adjacent_decision(&list, 1, true);
+        assert_eq!(decision, Adjacent::Stay(PlayerMessage::NoPrevEpisode));
+        assert_eq!(PlayerMessage::NoPrevEpisode.key(), "no_prev_episode");
+    }
+
+    #[test]
+    fn next_at_the_end_shows_next_episode_not_found_and_keeps_the_episode() {
+        let list = [ep(1), ep(2)];
+        let decision = adjacent_decision(&list, 2, false);
+        assert_eq!(decision, Adjacent::Stay(PlayerMessage::NoNextEpisode));
+        assert_eq!(
+            PlayerMessage::NoNextEpisode.text(),
+            "Next Episode not found!"
+        );
+    }
+
+    #[test]
+    fn a_neighbour_is_a_switch() {
+        let list = [ep(1), ep(2), ep(3)];
+        assert_eq!(adjacent_decision(&list, 2, true), Adjacent::Episode(1));
+        assert_eq!(adjacent_decision(&list, 2, false), Adjacent::Episode(3));
     }
 
     #[test]

@@ -4,9 +4,13 @@
 //! thin. The domain queries and writes live in `kuro-domain`; these modules decide what the screens do with them.
 #![allow(dead_code)] // wired by the screens lane; the helpers are tested here before the screens call them
 
+pub mod bottom_bar;
 pub mod bulk;
 pub mod coalesce;
+pub mod copy;
 pub mod dates;
+pub mod download_actions;
+pub mod download_state;
 pub mod format;
 pub mod feed;
 pub mod history;
@@ -23,5 +27,12 @@ pub mod selection;
 pub mod shell;
 pub mod signals;
 pub mod state_page;
+pub mod stats;
+pub mod stats_screen;
+pub mod store;
+pub mod storage;
+pub mod storage_row;
+pub mod storage_screen;
+pub mod updates_dialog;
 pub mod updates_page;
 pub mod updates_screen;

@@ -353,10 +353,16 @@ mod tests {
             .unwrap()
             .timestamp_millis();
         let day = NaiveDate::from_ymd_opt(2026, 10, 8).unwrap();
-        let short = kuro_i18n::date::DateFormat::LocaleShort
-            .format(day, kuro_i18n::current_locale().tag);
-        assert_eq!(row_date_text(ms, "", &zone).as_deref(), Some(short.as_str()));
-        assert_eq!(row_date_text(ms, "  ", &zone).as_deref(), Some(short.as_str()));
+        let short =
+            kuro_i18n::date::DateFormat::LocaleShort.format(day, kuro_i18n::current_locale().tag);
+        assert_eq!(
+            row_date_text(ms, "", &zone).as_deref(),
+            Some(short.as_str())
+        );
+        assert_eq!(
+            row_date_text(ms, "  ", &zone).as_deref(),
+            Some(short.as_str())
+        );
         assert_eq!(
             row_date_text(ms, "dd MMM yyyy", &zone).as_deref(),
             Some("08 Oct 2026"),

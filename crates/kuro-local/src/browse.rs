@@ -107,6 +107,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn t_14_browse_entry_removed_mid_scan_skipped() -> io::Result<()> {
+        // A child that vanishes between the listing and its metadata read has no metadata: a link whose target was
+        // removed is the same state on disk.
+        let dir = make_folders(&["Stays", "Target"])?;
+        std::os::unix::fs::symlink(dir.path().join("Target"), dir.path().join("Gone"))?;
+        fs::remove_dir(dir.path().join("Target"))?;
+        let got = browse(Some(dir.path().to_path_buf()), String::new(), false, None, name_of).await;
+        assert_eq!(got.map_err(io::Error::other)?, ["Stays"]);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn a_blank_query_keeps_everything_and_a_query_filters_ignoring_case() -> io::Result<()> {
         let dir = make_folders(&["Naruto", "Bleach", "naruto x"])?;
         let root = Some(dir.path().to_path_buf());

@@ -223,8 +223,11 @@ mod tests {
             genres: vec![],
             status: 0,
             thumbnail_url: None,
+            cover_last_modified: 0,
             initialized: true,
             favorite: true,
+            next_update: 0,
+            fetch_interval: 0,
             local: false,
             flags: ChapterFlags(flags),
         };

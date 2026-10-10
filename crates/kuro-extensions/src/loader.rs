@@ -1,5 +1,5 @@
-//! Finds the extension packages under `<data>/extensions` and checks each one (T-20a-001). Instantiating the component
-//! needs the WASM host (`kuro-source-wasm`, P2), so a verified package is returned unloaded.
+//! Finds the extension packages under `<data>/extensions` and checks each one (T-20a-001). [`scan_into`] only checks;
+//! with the `wasm` feature, `instantiate::scan_and_instantiate` also loads each verified component through the WASM host.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -74,8 +74,14 @@ pub fn scan_into(
     icons: &Path,
 ) -> Vec<LoadResult> {
     let results = discover(extensions_dir, signed);
+    publish(registry, extensions_dir, &results, icons);
+    results
+}
+
+/// Publishes checked `results` to `registry` (the second half of [`scan_into`]).
+pub(crate) fn publish(registry: &ExtensionRegistry, extensions_dir: &Path, results: &[LoadResult], icons: &Path) {
     let (mut installed, mut untrusted, mut seen) = (Vec::new(), Vec::new(), Vec::new());
-    for result in &results {
+    for result in results {
         match result {
             LoadResult::Verified { manifest, component } | LoadResult::Untrusted { manifest, component } => {
                 let dir = component.parent().unwrap_or(extensions_dir);
@@ -106,14 +112,13 @@ pub fn scan_into(
     }
     registry.set_installed(installed);
     registry.set_untrusted(untrusted);
-    results
 }
 
 fn folder_name(dir: &Path) -> String {
     dir.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-fn is_hidden(path: &Path) -> bool {
+pub(crate) fn is_hidden(path: &Path) -> bool {
     path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with('.'))
 }
 

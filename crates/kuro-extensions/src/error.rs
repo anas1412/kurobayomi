@@ -9,6 +9,8 @@ pub enum LoadError {
     UnsupportedApi(String),
     #[error("component.wasm is missing")]
     MissingComponent,
+    #[error("the component does not instantiate: {0}")]
+    Instantiate(String),
     #[error("could not read {0}")]
     Io(String),
 }

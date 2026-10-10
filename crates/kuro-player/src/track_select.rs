@@ -96,6 +96,46 @@ pub fn preferred_track(
         .map(|t| t.id)
 }
 
+/// The preference strings `TrackSelect` reads. The subtitle list uses the whitelist and the
+/// blacklist; the audio list never does (behaviour 5.3).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TrackPrefs {
+    pub subtitle_langs: String,
+    pub subtitle_whitelist: String,
+    pub subtitle_blacklist: String,
+    pub audio_langs: String,
+    /// The system locale tag, used when a language list is empty.
+    pub system_lang: String,
+}
+
+/// The `prefer` seam of `tracks::default_tracks`: the index in `tracks` of the preferred track.
+/// Audio is chosen with an empty whitelist and blacklist (T21).
+pub fn prefer_index(
+    tracks: &[crate::tracks::VideoTrack],
+    subtitle: bool,
+    prefs: &TrackPrefs,
+) -> Option<usize> {
+    let candidates: Vec<TrackCandidate> = tracks
+        .iter()
+        .map(|t| TrackCandidate {
+            id: t.id,
+            name: t.name.clone(),
+            lang: t.language.clone().filter(|l| !l.is_empty()),
+        })
+        .collect();
+    let (langs, whitelist, blacklist) = if subtitle {
+        (
+            &prefs.subtitle_langs,
+            &prefs.subtitle_whitelist,
+            &prefs.subtitle_blacklist,
+        )
+    } else {
+        (&prefs.audio_langs, &String::new(), &String::new())
+    };
+    let id = preferred_track(&candidates, langs, whitelist, blacklist, &prefs.system_lang)?;
+    tracks.iter().position(|t| t.id == id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn first_preferred_language_with_a_track_wins() {
+    fn t14_first_preferred_language_with_a_track_wins() {
         let tracks = [
             track(1, "Japanese", Some("ja")),
             track(2, "English", Some("en")),
@@ -130,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_preference_uses_the_system_language() {
+    fn t17_empty_preference_uses_the_system_language() {
         let tracks = [
             track(1, "Japanese", Some("ja")),
             track(2, "English", Some("en")),
@@ -139,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn language_matches_whole_tags_only() {
+    fn t19_language_matches_whole_tags_only() {
         // "xen" must not match the tag "en" (E-22).
         let tracks = [track(1, "Xenon commentary", Some("xen"))];
         assert_eq!(preferred_track(&tracks, "en", "", "", "en"), None);
@@ -172,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn no_match_gives_none() {
+    fn t20_no_match_gives_none() {
         let tracks = [track(1, "Japanese", Some("ja"))];
         assert_eq!(preferred_track(&tracks, "de", "", "", "en"), None);
     }

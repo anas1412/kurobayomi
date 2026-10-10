@@ -129,7 +129,8 @@ impl<A: Clone> Banners<A> {
     }
 
     fn show(&mut self, banner: Banner<A>, now_ms: u64) {
-        let until_ms = banner.length.millis().map(|ms| now_ms + ms);
+        // a banner with an action waits for the user; only a plain message times out (T-38a-034)
+        let until_ms = if banner.action.is_some() { None } else { banner.length.millis().map(|ms| now_ms + ms) };
         self.current = Some(Shown { banner, until_ms });
     }
 }
@@ -202,6 +203,17 @@ mod tests {
         assert!(host.current().is_some());
         host.tick(8000);
         assert!(host.current().is_none());
+    }
+
+    #[test]
+    fn a_plain_message_times_out_but_one_with_an_action_waits_for_the_user() {
+        let mut host = Host::default();
+        host.push("saved", None, Length::Short, 0);
+        host.tick(SHORT_MS);
+        assert!(host.current().is_none(), "4 s with no action");
+        host.push("add?", Some(("Add".into(), "add")), Length::Short, 0);
+        host.tick(SHORT_MS * 10);
+        assert!(host.current().is_some(), "an action keeps the banner");
     }
 
     #[test]

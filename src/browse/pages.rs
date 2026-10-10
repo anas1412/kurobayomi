@@ -26,7 +26,7 @@ use super::icons::resolve;
 use super::listing::ListItem;
 use super::nav::{BackAction, action_url, back_action, last_used_write};
 use super::listing_view::{ListingDeps, ListingView};
-use super::names::localized_display_name;
+use super::names::{localized_display_name, subtitle_display_name};
 use super::primitives::{ToastSpec, stub_source_label};
 use super::route::search_listing;
 use super::sources::LOCAL_SOURCE_ID;
@@ -387,15 +387,61 @@ pub enum SearchState {
 pub struct SearchRow {
     pub source: Source,
     pub state: SearchState,
+    /// The source the search started from (a migrate search): its header carries a "\u{25B6} " prefix.
+    pub origin: bool,
 }
 
-/// Global search: the query, a progress fraction, and one row per source in the order the model chose.
+/// Global search: the query, how many sources have answered of how many, and one row per source in the order the model
+/// chose.
 #[derive(Clone, Debug)]
 pub struct GlobalSearchSnapshot {
     pub query: String,
-    /// 0.0 to 1.0, the share of sources that answered.
-    pub progress: f64,
+    /// The sources that have answered, with an error counting as an answer.
+    pub answered: usize,
+    /// The sources asked.
+    pub total: usize,
     pub rows: Vec<SearchRow>,
+}
+
+/// Which sources the rows are limited to: the pinned ones (the default) or all.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SourceFilter {
+    #[default]
+    PinnedOnly,
+    All,
+}
+
+/// The chip row of the search toolbar: one of the two source filters, and the Has results toggle.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SearchChips {
+    pub filter: SourceFilter,
+    pub only_has_results: bool,
+}
+
+/// A card of a result row is 96 px wide (T-40a-011).
+pub const SEARCH_CARD_WIDTH_PX: i32 = 96;
+
+/// The progress bar shows while at least one source has answered and not all of them have (E-40-57..59).
+pub fn progress_visible(answered: usize, total: usize) -> bool {
+    answered >= 1 && answered < total
+}
+
+/// The rows the chips leave: pinned-only keeps pinned sources and the origin source; Has results keeps rows whose
+/// search found something. A chip change filters what is already here and never runs the search again (D-UI-10).
+pub fn visible_rows(rows: &[SearchRow], chips: SearchChips) -> Vec<&SearchRow> {
+    use kuro_domain::source::pin::Pin;
+    rows.iter()
+        .filter(|row| match chips.filter {
+            SourceFilter::All => true,
+            SourceFilter::PinnedOnly => row.origin || row.source.pin.contains(Pin::Pinned),
+        })
+        .filter(|row| !chips.only_has_results || matches!(&row.state, SearchState::Results(items) if !items.is_empty()))
+        .collect()
+}
+
+/// The title of a source header: the name, with a prefix on the origin source.
+pub fn row_title(row: &SearchRow) -> String {
+    if row.origin { format!("\u{25B6} {}", row.source.name) } else { row.source.name.clone() }
 }
 
 pub struct GlobalSearchNav {
@@ -403,9 +449,24 @@ pub struct GlobalSearchNav {
     pub search: Rc<dyn Fn(&str)>,
     /// The arrow of a source's header: its browse listing with the query.
     pub open_source: Rc<dyn Fn(i64)>,
-    /// A cover.
+    /// A card.
     pub open_entry: Rc<dyn Fn(i64, &ListItem)>,
+    /// A long press on a card: the entry's preview.
+    pub preview: Rc<dyn Fn(i64, &ListItem)>,
     pub load_cover: CoverLoader,
+    /// The chips as the page starts with them (the stored filter and toggle).
+    pub chips: SearchChips,
+    /// A chip changed: the page already filters its rows; this is for storing the choice. It runs no search.
+    pub on_chips: Rc<dyn Fn(SearchChips)>,
+}
+
+/// What the page redraws from.
+struct SearchView {
+    column: gtk::Box,
+    progress: gtk::ProgressBar,
+    nav: GlobalSearchNav,
+    chips: Cell<SearchChips>,
+    last: RefCell<Option<GlobalSearchSnapshot>>,
 }
 
 /// The global search page. It shows a spinner until the source registry is initialised, then the rows of the snapshot;
@@ -413,32 +474,87 @@ pub struct GlobalSearchNav {
 pub struct GlobalSearchPage {
     root: gtk::Widget,
     entry: gtk::SearchEntry,
-    progress: gtk::ProgressBar,
-    column: gtk::Box,
-    nav: Rc<GlobalSearchNav>,
+    view: Rc<SearchView>,
 }
 
 pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> GlobalSearchPage {
-    let nav = Rc::new(nav);
     let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let entry = gtk::SearchEntry::new();
     entry.set_placeholder_text(Some(&tr(MsgKey::action_global_search_hint)));
     entry.set_margin_start(12);
     entry.set_margin_end(12);
     entry.set_margin_top(6);
-    let search = Rc::clone(&nav);
-    entry.connect_activate(move |entry| (search.search)(entry.text().as_str()));
     body.append(&entry);
     let progress = gtk::ProgressBar::new();
     progress.set_visible(false);
-    body.append(&progress);
     let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
     column.set_margin_start(12);
     column.set_margin_end(12);
-    body.append(&gtk::ScrolledWindow::builder().child(&column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
+    let view = Rc::new(SearchView { column, progress, chips: Cell::new(nav.chips), nav, last: RefCell::new(None) });
+    let search = Rc::clone(&view);
+    entry.connect_activate(move |entry| (search.nav.search)(entry.text().as_str()));
+    body.append(&search_chips(&view));
+    body.append(&view.progress);
+    body.append(&gtk::ScrolledWindow::builder().child(&view.column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
     // the registry's readiness gates the whole page: the existing source gate shows the spinner, then crossfades in
     let root = crate::source_gate::when_sources_ready(&kuro_core::sources::SourceGate::new(ready), &body);
-    GlobalSearchPage { root, entry, progress, column, nav }
+    GlobalSearchPage { root, entry, view }
+}
+
+/// The chips: Pinned and All pick the source filter, a separator, then the Has results toggle (B§10.1).
+fn search_chips(view: &Rc<SearchView>) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    row.set_margin_start(12);
+    row.set_margin_end(12);
+    let chips = view.chips.get();
+    let chip = |label: MsgKey, active: bool| {
+        let button = gtk::ToggleButton::with_label(&tr(label));
+        button.add_css_class("chip");
+        button.set_active(active);
+        button
+    };
+    let pinned = chip(MsgKey::pinned_sources, chips.filter == SourceFilter::PinnedOnly);
+    let all = chip(MsgKey::all, chips.filter == SourceFilter::All);
+    all.set_group(Some(&pinned));
+    let has_results = chip(MsgKey::has_results, chips.only_has_results);
+    for (button, filter) in [(&pinned, SourceFilter::PinnedOnly), (&all, SourceFilter::All)] {
+        let view = Rc::clone(view);
+        button.connect_toggled(move |button| {
+            if button.is_active() {
+                view.set_chips(SearchChips { filter, ..view.chips.get() });
+            }
+        });
+    }
+    let toggled = Rc::clone(view);
+    has_results.connect_toggled(move |button| toggled.set_chips(SearchChips { only_has_results: button.is_active(), ..toggled.chips.get() }));
+    row.append(&pinned);
+    row.append(&all);
+    row.append(&gtk::Separator::new(gtk::Orientation::Vertical));
+    row.append(&has_results);
+    row
+}
+
+impl SearchView {
+    fn set_chips(&self, chips: SearchChips) {
+        if self.chips.replace(chips) == chips {
+            return;
+        }
+        (self.nav.on_chips)(chips);
+        self.redraw();
+    }
+
+    fn redraw(&self) {
+        while let Some(child) = self.column.first_child() {
+            self.column.remove(&child);
+        }
+        let last = self.last.borrow();
+        let Some(snapshot) = last.as_ref() else { return };
+        self.progress.set_fraction(if snapshot.total == 0 { 0.0 } else { (snapshot.answered as f64 / snapshot.total as f64).clamp(0.0, 1.0) });
+        self.progress.set_visible(progress_visible(snapshot.answered, snapshot.total));
+        for row in visible_rows(&snapshot.rows, self.chips.get()) {
+            self.column.append(&search_row(row, &self.nav));
+        }
+    }
 }
 
 impl GlobalSearchPage {
@@ -446,18 +562,17 @@ impl GlobalSearchPage {
         &self.root
     }
 
+    /// The progress bar's fraction while it shows, `None` while it is hidden.
+    pub fn progress(&self) -> Option<f64> {
+        self.view.progress.is_visible().then(|| self.view.progress.fraction())
+    }
+
     pub fn update(&self, snapshot: &GlobalSearchSnapshot) {
         if self.entry.text().as_str() != snapshot.query && !self.entry.has_focus() {
             self.entry.set_text(&snapshot.query);
         }
-        self.progress.set_fraction(snapshot.progress.clamp(0.0, 1.0));
-        self.progress.set_visible(snapshot.progress < 1.0 && !snapshot.rows.is_empty());
-        while let Some(child) = self.column.first_child() {
-            self.column.remove(&child);
-        }
-        for row in &snapshot.rows {
-            self.column.append(&search_row(row, &self.nav));
-        }
+        *self.view.last.borrow_mut() = Some(snapshot.clone());
+        self.view.redraw();
     }
 }
 
@@ -466,9 +581,9 @@ fn search_row(row: &SearchRow, nav: &GlobalSearchNav) -> gtk::Box {
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let titles = gtk::Box::new(gtk::Orientation::Vertical, 0);
     titles.set_hexpand(true);
-    titles.append(&gtk::Label::builder().label(&row.source.name).xalign(0.0).css_classes(["heading"]).build());
+    titles.append(&gtk::Label::builder().label(row_title(row)).xalign(0.0).css_classes(["heading"]).build());
     if !row.source.lang.is_empty() {
-        titles.append(&gtk::Label::builder().label(localized_display_name(&row.source.lang)).xalign(0.0).css_classes(["dim-label"]).build());
+        titles.append(&gtk::Label::builder().label(subtitle_display_name(&row.source.lang)).xalign(0.0).css_classes(["dim-label"]).build());
     }
     header.append(&titles);
     let go = gtk::Button::from_icon_name("go-next-symbolic");
@@ -491,16 +606,19 @@ fn search_row(row: &SearchRow, nav: &GlobalSearchNav) -> gtk::Box {
         SearchState::Results(items) => {
             let covers = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             for item in items {
-                let cell = super::view::grid_cell(
+                let cell = super::view::grid_cell_lines(
                     Some(item),
                     kuro_prefs::library::LibraryDisplayMode::ComfortableGrid,
                     &nav.load_cover,
                     &super::view::always(),
-                    super::grid::COVER_WIDTH_PX,
+                    SEARCH_CARD_WIDTH_PX,
+                    3,
                 );
                 let button = gtk::Button::builder().child(&cell).css_classes(["flat"]).build();
-                let (open, item, id) = (Rc::clone(&nav.open_entry), item.clone(), row.source.id);
-                button.connect_clicked(move |_| open(id, &item));
+                let (open, entry, id) = (Rc::clone(&nav.open_entry), item.clone(), row.source.id);
+                button.connect_clicked(move |_| open(id, &entry));
+                let (preview, entry) = (Rc::clone(&nav.preview), item.clone());
+                super::view::attach_long_press(&button, move || preview(id, &entry));
                 covers.append(&button);
             }
             section.append(&gtk::ScrolledWindow::builder().child(&covers).vscrollbar_policy(gtk::PolicyType::Never).build());
@@ -602,15 +720,10 @@ pub(crate) mod tests {
 
         let (_tx, ready) = watch::channel(true);
         let search = global_search(
-            GlobalSearchNav {
-                search: Rc::new(|_| {}),
-                open_source: Rc::new(|_| {}),
-                open_entry: Rc::new(|_, _| {}),
-                load_cover: Rc::new(|_, _| {}),
-            },
+            search_nav(SearchChips::default()).0,
             ready,
         );
-        search.update(&GlobalSearchSnapshot { query: String::new(), progress: 1.0, rows: vec![] });
+        search.update(&GlobalSearchSnapshot { query: String::new(), answered: 0, total: 0, rows: vec![] });
         assert!(!all_labels(search.widget()).iter().any(|t| t.starts_with("Source")), "no invented sources");
 
         let entries = migrate_entries(
@@ -651,15 +764,7 @@ pub(crate) mod tests {
         let source = |id, name: &str| Source::new(id, name, "en");
         let item = ListItem { title: "Berserk".into(), ..ListItem::default() };
         let (ready_tx, ready) = watch::channel(false);
-        let page = global_search(
-            GlobalSearchNav {
-                search: Rc::new(|_| {}),
-                open_source: Rc::new(|_| {}),
-                open_entry: Rc::new(|_, _| {}),
-                load_cover: Rc::new(|_, _| {}),
-            },
-            ready,
-        );
+        let page = global_search(search_nav(SearchChips { filter: SourceFilter::All, only_has_results: false }).0, ready);
         assert_eq!(
             page.widget().downcast_ref::<gtk::Stack>().and_then(|s| s.visible_child_name()).as_deref(),
             Some("spinner"),
@@ -675,18 +780,114 @@ pub(crate) mod tests {
         }
         page.update(&GlobalSearchSnapshot {
             query: "ber".into(),
-            progress: 0.5,
+            answered: 2,
+            total: 4,
             rows: vec![
-                SearchRow { source: source(1, "Alpha"), state: SearchState::Results(vec![item]) },
-                SearchRow { source: source(2, "Beta"), state: SearchState::Results(vec![]) },
-                SearchRow { source: source(3, "Gamma"), state: SearchState::Error("offline".into()) },
-                SearchRow { source: source(4, "Delta"), state: SearchState::Loading },
+                SearchRow { source: source(1, "Alpha"), state: SearchState::Results(vec![item]), origin: false },
+                SearchRow { source: source(2, "Beta"), state: SearchState::Results(vec![]), origin: false },
+                SearchRow { source: source(3, "Gamma"), state: SearchState::Error("offline".into()), origin: false },
+                SearchRow { source: source(4, "Delta"), state: SearchState::Loading, origin: false },
             ],
         });
         let text = all_labels(page.widget());
         for expected in ["Alpha", "Berserk", "Beta", "Gamma", "offline", "Delta", &tr(MsgKey::no_results_found)] {
             assert!(text.iter().any(|t| t == expected), "{expected} in {text:?}");
         }
+    }
+
+    /// Everything the search page called back, as text.
+    type SearchLog = Rc<RefCell<Vec<String>>>;
+
+    fn search_nav(chips: SearchChips) -> (GlobalSearchNav, SearchLog) {
+        let log: SearchLog = Rc::default();
+        let (searched, opened, previewed, chipped) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
+        let nav = GlobalSearchNav {
+            search: Rc::new(move |q| searched.borrow_mut().push(format!("search {q}"))),
+            open_source: Rc::new(|_| {}),
+            open_entry: Rc::new(move |id, item| opened.borrow_mut().push(format!("open {id} {}", item.title))),
+            preview: Rc::new(move |id, item| previewed.borrow_mut().push(format!("preview {id} {}", item.title))),
+            load_cover: Rc::new(|_, _| {}),
+            chips,
+            on_chips: Rc::new(move |c| chipped.borrow_mut().push(format!("chips {c:?}"))),
+        };
+        (nav, log)
+    }
+
+    fn descendants<T: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Vec<T> {
+        fn walk<T: IsA<gtk::Widget>>(widget: &gtk::Widget, out: &mut Vec<T>) {
+            if let Some(found) = widget.downcast_ref::<T>() {
+                out.push(found.clone());
+            }
+            let mut child = widget.first_child();
+            while let Some(w) = child {
+                walk(&w, out);
+                child = w.next_sibling();
+            }
+        }
+        let mut out = Vec::new();
+        walk(widget.upcast_ref(), &mut out);
+        out
+    }
+
+    fn global_search_has_chips_a_progress_bar_that_hides_at_the_ends_and_96_px_cards() {
+        let (nav, log) = search_nav(SearchChips::default());
+        let page = global_search(nav, watch::channel(true).1);
+        let pinned = {
+            let mut source = Source::new(1, "Alpha", "en");
+            source.pin = kuro_domain::source::pin::Pins::PINNED;
+            source
+        };
+        let item = ListItem { title: "Berserk".into(), ..ListItem::default() };
+        let rows = vec![
+            SearchRow { source: pinned, state: SearchState::Results(vec![item]), origin: false },
+            SearchRow { source: Source::new(2, "Beta", "en"), state: SearchState::Results(vec![]), origin: false },
+            SearchRow { source: Source::new(3, "Gamma", "en"), state: SearchState::Loading, origin: true },
+        ];
+        let snapshot = |answered| GlobalSearchSnapshot { query: "ber".into(), answered, total: 3, rows: rows.clone() };
+
+        let context = gtk::glib::MainContext::default();
+        let start = std::time::Instant::now();
+        while page.widget().downcast_ref::<gtk::Stack>().and_then(|s| s.visible_child_name()).as_deref() != Some("content")
+            && start.elapsed().as_secs() < 2
+        {
+            while context.iteration(false) {}
+        }
+        page.update(&snapshot(0));
+        assert!(!page.view.progress.is_visible(), "no source has answered yet");
+        page.update(&snapshot(1));
+        assert!(page.view.progress.is_visible(), "one of three");
+        page.update(&snapshot(3));
+        assert!(!page.view.progress.is_visible(), "all answered");
+
+        let text = all_labels(page.widget());
+        for expected in ["Alpha", &format!("\u{25B6} Gamma")] {
+            assert!(text.iter().any(|t| t == expected), "{expected} in {text:?}: pinned-only keeps the pinned and the origin source");
+        }
+        assert!(!text.iter().any(|t| t == "Beta"), "an unpinned source is out under Pinned");
+
+        // the chips: Pinned, All, a separator, Has results
+        let chips: Vec<gtk::ToggleButton> = descendants(page.widget());
+        let names: Vec<String> = chips.iter().map(|c| c.label().map(|l| l.to_string()).unwrap_or_default()).collect();
+        assert_eq!(names, [tr(MsgKey::pinned_sources), tr(MsgKey::all), tr(MsgKey::has_results)]);
+        assert!(chips[0].is_active() && !chips[1].is_active() && !chips[2].is_active());
+        chips[1].set_active(true);
+        assert!(!chips[0].is_active(), "Pinned and All are one choice");
+        assert!(all_labels(page.widget()).iter().any(|t| t == "Beta"), "All shows every source again, from the rows already here");
+        chips[2].set_active(true);
+        let text = all_labels(page.widget());
+        assert!(text.iter().any(|t| t == "Alpha") && !text.iter().any(|t| t == "Beta" || t == "\u{25B6} Gamma"), "Has results keeps only rows with results: {text:?}");
+        assert!(log.borrow().iter().all(|entry| entry.starts_with("chips ")), "a chip change never runs the search: {:?}", log.borrow());
+        assert_eq!(log.borrow().len(), 2);
+
+        // cards are 96 px wide and a long press previews
+        let card = descendants::<gtk::Button>(page.widget()).into_iter().find(|b| b.has_css_class("flat") && b.child().is_some_and(|c| c.is::<gtk::Box>())).expect("card");
+        assert!(descendants::<gtk::Widget>(&card).iter().any(|w| w.width_request() == SEARCH_CARD_WIDTH_PX), "the cover is 96 px wide");
+        let controllers = card.observe_controllers();
+        let long = (0..controllers.n_items()).filter_map(|i| controllers.item(i)).find_map(|c| c.downcast::<gtk::GestureLongPress>().ok()).expect("long press");
+        long.emit_by_name::<()>("pressed", &[&0.0_f64, &0.0_f64]);
+        assert_eq!(log.borrow().last().map(String::as_str), Some("preview 1 Berserk"));
+        card.emit_clicked();
+        assert_eq!(log.borrow().last().map(String::as_str), Some("open 1 Berserk"));
     }
 
     fn migrate_entries_sorts_by_title_without_case_and_shows_a_load_error() {
@@ -942,6 +1143,63 @@ pub(crate) mod tests {
         no_sample_rows_in_an_empty_snapshot();
         migrate_sources_lists_the_snapshot_with_counts_and_marks_stubs();
         global_search_shows_each_state_of_a_source();
+        global_search_has_chips_a_progress_bar_that_hides_at_the_ends_and_96_px_cards();
         migrate_entries_sorts_by_title_without_case_and_shows_a_load_error();
+    }
+}
+
+#[cfg(test)]
+mod pure_tests {
+    use kuro_domain::source::pin::Pins;
+
+    use super::*;
+
+    fn row(id: i64, pinned: bool, origin: bool, state: SearchState) -> SearchRow {
+        let mut source = Source::new(id, &format!("S{id}"), "en");
+        if pinned {
+            source.pin = Pins::PINNED;
+        }
+        SearchRow { source, state, origin }
+    }
+
+    fn found() -> SearchState {
+        SearchState::Results(vec![ListItem::default()])
+    }
+
+    fn ids(rows: &[&SearchRow]) -> Vec<i64> {
+        rows.iter().map(|r| r.source.id).collect()
+    }
+
+    #[test]
+    fn the_progress_bar_shows_only_from_one_answer_until_all_have_answered() {
+        assert!(!progress_visible(0, 5), "nobody has answered");
+        assert!(progress_visible(1, 5));
+        assert!(progress_visible(4, 5));
+        assert!(!progress_visible(5, 5), "everybody has");
+        assert!(!progress_visible(0, 0));
+    }
+
+    #[test]
+    fn the_chips_filter_the_rows_they_are_given_and_the_origin_is_never_pinned_out() {
+        let rows = vec![
+            row(1, true, false, found()),
+            row(2, false, false, found()),
+            row(3, false, true, SearchState::Results(vec![])),
+            row(4, true, false, SearchState::Loading),
+        ];
+        let pinned = SearchChips { filter: SourceFilter::PinnedOnly, only_has_results: false };
+        assert_eq!(ids(&visible_rows(&rows, pinned)), [1, 3, 4]);
+        let all = SearchChips { filter: SourceFilter::All, only_has_results: false };
+        assert_eq!(ids(&visible_rows(&rows, all)), [1, 2, 3, 4]);
+        let results = SearchChips { filter: SourceFilter::All, only_has_results: true };
+        assert_eq!(ids(&visible_rows(&rows, results)), [1, 2], "an empty result or a loading row has none");
+        assert_eq!(SearchChips::default().filter, SourceFilter::PinnedOnly, "Pinned is the default chip");
+    }
+
+    #[test]
+    fn the_origin_source_carries_the_arrow_prefix_and_a_card_is_96_px() {
+        assert_eq!(row_title(&row(1, false, true, found())), "\u{25B6} S1");
+        assert_eq!(row_title(&row(2, false, false, found())), "S2");
+        assert_eq!(SEARCH_CARD_WIDTH_PX, 96);
     }
 }

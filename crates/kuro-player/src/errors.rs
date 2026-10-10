@@ -94,15 +94,16 @@ pub fn aniskip_skip_text(chapter: &str) -> String {
     trf(MsgKey::player_aniskip_skip, &[("arg1", Arg::Str(chapter))])
 }
 
-/// Toast during the Netflix-style countdown (`player_aniskip_dontskip_toast`).
-///
-/// DECISION: the Kotlin prefixes this with a hard-coded "Skip Intro: ". The FTL has no key for
-/// that prefix and this crate does not own the FTL, so the prefix is left out until a localised
-/// `player_aniskip_toast_prefix` key exists.
+/// Toast during the Netflix-style countdown: the prefix key, then `player_aniskip_dontskip_toast`
+/// (E-46-067, T-46a-050). The prefix is `strings::TABLE` text until the FTL catalogue has the key.
 pub fn aniskip_countdown_toast(chapter: &str, seconds: i64) -> String {
-    trf(
-        MsgKey::player_aniskip_dontskip_toast,
-        &[("arg1", Arg::Str(chapter)), ("arg2", Arg::Int(seconds))],
+    let prefix = crate::strings::english("player_aniskip_toast_prefix").unwrap_or("");
+    format!(
+        "{prefix}{}",
+        trf(
+            MsgKey::player_aniskip_dontskip_toast,
+            &[("arg1", Arg::Str(chapter)), ("arg2", Arg::Int(seconds))],
+        )
     )
 }
 
@@ -226,8 +227,38 @@ mod tests {
         assert_eq!(aniskip_skip_text("Ending"), "Ending skipped");
         assert_eq!(
             aniskip_countdown_toast("Opening", 5),
-            "Skipping Opening in 5 seconds"
+            "Skip Intro: Skipping Opening in 5 seconds"
         );
+    }
+
+    /// Every key a `PlayerMessage` uses, and the countdown prefix, is in the string table.
+    #[test]
+    fn every_message_key_is_in_the_string_table() {
+        let all = [
+            PlayerMessage::NoNextEpisode,
+            PlayerMessage::NoPrevEpisode,
+            PlayerMessage::NoHosters,
+            PlayerMessage::NoEpisodeLoaded,
+            PlayerMessage::NoAvailableVideos,
+            PlayerMessage::SelectHosterFromEmptyList,
+            PlayerMessage::PictureSaved,
+            PlayerMessage::HttpServerStartFailure,
+            PlayerMessage::ScreenshotFailed,
+            PlayerMessage::AutoPlayOn,
+            PlayerMessage::AutoPlayOff,
+            PlayerMessage::ValueTooBig,
+            PlayerMessage::ValueTooSmall,
+            PlayerMessage::SleepTimerEnded,
+            PlayerMessage::AniskipDontSkip,
+        ];
+        for message in all {
+            assert!(
+                crate::strings::english(message.key()).is_some(),
+                "{} missing from the string table",
+                message.key()
+            );
+        }
+        assert!(crate::strings::english("player_aniskip_toast_prefix").is_some());
     }
 
     #[test]

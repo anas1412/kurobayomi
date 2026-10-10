@@ -3,3 +3,4 @@
 pub mod controller;
 pub mod items;
 pub mod layout;
+pub mod zoom;

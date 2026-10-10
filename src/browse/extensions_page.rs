@@ -21,8 +21,8 @@ use tokio::task::AbortHandle;
 use super::dialogs::{ButtonStyle, DialogSlot, DialogSpec};
 use super::extensions::{
     Ext, ExtEmpty, ExtState, GroupKey, Refresh, RefreshGuard, RowAction, fetch_failed_banner, language_header, language_line,
-    real_pkg, refresh_remaining_ms, row_actions, split_available, status_text, update_all_queue, version_line, warning,
-    warning_text,
+    ExtLongPress, ext_long_press, real_pkg, refresh_remaining_ms, remove_answer, remove_confirm_spec, row_actions,
+    split_available, status_text, update_all_visible, updates_count, version_line, warning, warning_text,
 };
 use super::glue::{consume_events, keep_alive, own_tasks};
 use super::installs::{Effect, Event, Input, Installs};
@@ -55,8 +55,9 @@ pub struct ExtNav {
     pub trust: Rc<dyn Fn(&str)>,
     /// The web view button of an available extension.
     pub web_view: Rc<dyn Fn(&str)>,
-    /// The repos button.
+    /// The repos button and the empty-state action. Manga says "Extension repos", anime "Extension stores" (T-41a-010).
     pub open_repos: Rc<dyn Fn()>,
+    pub repos_label: MsgKey,
     /// The NSFW setting, read on every rebuild.
     pub show_nsfw: Rc<dyn Fn() -> bool>,
 }
@@ -132,6 +133,11 @@ struct Inner {
     column: gtk::Box,
     stack: gtk::Stack,
     empty_label: gtk::Label,
+    /// Whether the package's own directory exists, which decides a long press on an installed row (T-41a-011). A
+    /// package of the managed store always has one, so the default says yes.
+    dir_exists: RefCell<Rc<dyn Fn(&str) -> bool>>,
+    /// Told the update count of every model change, for the tab badge (T-41a-011).
+    on_updates: RefCell<Rc<dyn Fn(usize)>>,
 }
 
 /// The tab. Cloning shares it; the widget keeps it alive, and destroying the widget aborts every job.
@@ -147,7 +153,7 @@ impl ExtensionsPage {
         let refresh_button = gtk::Button::from_icon_name("view-refresh-symbolic");
         refresh_button.set_tooltip_text(Some(&tr(MsgKey::action_webview_refresh)));
         let repos = gtk::Button::from_icon_name("folder-download-symbolic");
-        repos.set_tooltip_text(Some(&tr(MsgKey::label_extension_repos)));
+        repos.set_tooltip_text(Some(&tr(nav.repos_label)));
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         toolbar.set_margin_start(16);
         toolbar.set_margin_end(16);
@@ -173,7 +179,7 @@ impl ExtensionsPage {
         let empty = gtk::Box::new(gtk::Orientation::Vertical, 12);
         empty.set_valign(gtk::Align::Center);
         empty.append(&empty_label);
-        let repos_in_empty = gtk::Button::with_label(&tr(MsgKey::label_extension_repos));
+        let repos_in_empty = gtk::Button::with_label(&tr(nav.repos_label));
         repos_in_empty.set_halign(gtk::Align::Center);
         empty.append(&repos_in_empty);
         let stack = gtk::Stack::new();
@@ -211,6 +217,8 @@ impl ExtensionsPage {
             column,
             stack,
             empty_label,
+            dir_exists: RefCell::new(Rc::new(|_| true)),
+            on_updates: RefCell::new(Rc::new(|_| {})),
         });
         // the root widget owns the state; the state never owns the root, or neither would be freed
         keep_alive(&root, &inner);
@@ -271,6 +279,22 @@ impl ExtensionsPage {
     pub fn set_exts(&self, exts: Vec<Ext>) {
         *self.inner.exts.borrow_mut() = exts;
         self.inner.rebuild();
+    }
+
+    /// How a long press finds out whether an installed package's directory exists.
+    pub fn set_dir_exists(&self, exists: Rc<dyn Fn(&str) -> bool>) {
+        *self.inner.dir_exists.borrow_mut() = exists;
+    }
+
+    /// The tab badge: called with the number of installed extensions that have an update, on every model change.
+    pub fn set_on_updates(&self, on_updates: Rc<dyn Fn(usize)>) {
+        *self.inner.on_updates.borrow_mut() = on_updates;
+        self.inner.report_updates();
+    }
+
+    /// A long press or right-click on a row (U7.3).
+    pub fn long_press(&self, pkg: &str) {
+        self.inner.long_press(pkg);
     }
 
     /// The load problems to list under the extensions, as `(folder, message)`.
@@ -425,11 +449,38 @@ impl Inner {
         }
     }
 
+    /// Update all acts on the rows that are visible now: the query and the NSFW setting restrict it (B§1.7).
     fn update_all(self: &Rc<Self>) {
-        let exts = self.exts.borrow();
-        let pkgs = update_all_queue(&exts).into_iter().map(|i| exts[i].pkg.clone()).collect();
-        drop(exts);
+        let shown = self.shown.borrow();
+        let query = self.query.borrow();
+        let pkgs = update_all_visible(&shown, &query, (self.nav.show_nsfw)()).into_iter().map(|i| shown[i].pkg.clone()).collect();
+        drop((shown, query));
         self.input(Input::UpdateAll(pkgs));
+    }
+
+    fn report_updates(self: &Rc<Self>) {
+        let count = updates_count(&self.exts.borrow());
+        let report = Rc::clone(&self.on_updates.borrow());
+        report(count);
+    }
+
+    /// Long press and right-click: an available package installs, an installed or untrusted one is removed at once when
+    /// its directory exists and after a confirm when it does not (B§5.9).
+    fn long_press(self: &Rc<Self>, pkg: &str) {
+        let Some(ext) = self.shown.borrow().iter().find(|e| e.pkg == pkg).cloned() else { return };
+        let exists = Rc::clone(&self.dir_exists.borrow());
+        match ext_long_press(&ext.state, exists(&ext.pkg)) {
+            ExtLongPress::Install => self.press(pkg, RowAction::Install),
+            ExtLongPress::RemoveNow => self.input(Input::Row { pkg: pkg.to_owned(), event: Event::Uninstall }),
+            ExtLongPress::ConfirmRemove => {
+                let (weak, pkg) = (Rc::downgrade(self), pkg.to_owned());
+                self.dialogs.show(&self.column, remove_confirm_spec(&ext.name), move |chosen| {
+                    if let (true, Some(inner)) = (remove_answer(chosen), weak.upgrade()) {
+                        inner.input(Input::Row { pkg: pkg.clone(), event: Event::Uninstall });
+                    }
+                });
+            }
+        }
     }
 
     /// Applies one input to the state machine, runs its effects, and redraws the rows whose step changed.
@@ -519,6 +570,7 @@ impl Inner {
 
     /// Rebuilds the whole list from the models, the query and the current steps.
     fn rebuild(self: &Rc<Self>) {
+        self.report_updates();
         while let Some(child) = self.column.first_child() {
             self.column.remove(&child);
         }
@@ -648,6 +700,21 @@ impl Inner {
             }
         });
         row.add_controller(click);
+        let (long, secondary) = (gtk::GestureLongPress::new(), gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build());
+        let on_long = |weak: std::rc::Weak<Inner>, pkg: String| move || {
+            if let Some(inner) = weak.upgrade() {
+                inner.long_press(&pkg);
+            }
+        };
+        let run = on_long(Rc::downgrade(self), ext.pkg.clone());
+        long.connect_pressed(move |_, _, _| run());
+        let run = on_long(Rc::downgrade(self), ext.pkg.clone());
+        secondary.connect_pressed(move |gesture, _, _, _| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            run();
+        });
+        row.add_controller(long);
+        row.add_controller(secondary);
         row
     }
 }
@@ -728,7 +795,7 @@ pub(crate) mod tests {
     }
 
     fn nav() -> ExtNav {
-        ExtNav { open_details: Rc::new(|_| {}), trust: Rc::new(|_| {}), web_view: Rc::new(|_| {}), open_repos: Rc::new(|| {}), show_nsfw: Rc::new(|| true) }
+        ExtNav { open_details: Rc::new(|_| {}), trust: Rc::new(|_| {}), web_view: Rc::new(|_| {}), open_repos: Rc::new(|| {}), repos_label: MsgKey::label_extension_repos, show_nsfw: Rc::new(|| true) }
     }
 
     fn pump(context: &glib::MainContext, mut done: impl FnMut() -> bool) -> bool {
@@ -958,7 +1025,60 @@ pub(crate) mod tests {
         assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("empty"), "no enabled language leaves nothing");
     }
 
+    fn update_all_acts_on_the_visible_rows_only() {
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_time().build().expect("runtime");
+        let _entered = rt.enter();
+        let context = glib::MainContext::default();
+        let fake = Arc::new(Fake::default());
+        let page = ExtensionsPage::new(Arc::new(Arc::clone(&fake)), nav());
+        page.set_exts(vec![
+            ext("Xray", ExtState::Installed { has_update: true, obsolete: false }, "en"),
+            ext("One", ExtState::Installed { has_update: true, obsolete: false }, "en"),
+        ]);
+        page.set_query("xray");
+        page.update_all();
+        assert!(pump(&context, || !fake.installs.lock().expect("lock").is_empty()));
+        assert!(pump(&context, || !page.inner.installs.borrow().updating_all()));
+        assert_eq!(*fake.installs.lock().expect("lock"), ["eu.example.xray"], "the query keeps One out of update-all");
+    }
+
+    fn a_long_press_installs_removes_at_once_or_confirms_and_the_badge_follows_the_updates() {
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_time().build().expect("runtime");
+        let _entered = rt.enter();
+        let context = glib::MainContext::default();
+        let fake = Arc::new(Fake::default());
+        let page = ExtensionsPage::new(Arc::new(Arc::clone(&fake)), nav());
+        let badge: Rc<Cell<usize>> = Rc::default();
+        let seen = Rc::clone(&badge);
+        page.set_on_updates(Rc::new(move |n| seen.set(n)));
+        page.set_exts(vec![
+            ext("Delta", ExtState::Available, "en"),
+            ext("Kept", ExtState::Installed { has_update: true, obsolete: false }, "en"),
+            ext("Private", ExtState::Untrusted, "en"),
+        ]);
+        assert_eq!(badge.get(), 1, "one installed extension has an update");
+        page.long_press("eu.example.delta-1");
+        assert!(pump(&context, || *fake.installs.lock().expect("lock") == ["eu.example.delta"]), "available installs");
+        page.long_press("eu.example.kept");
+        assert!(pump(&context, || *fake.uninstalls.lock().expect("lock") == ["eu.example.kept"]), "an existing directory removes at once");
+        assert!(page.inner.dialogs.current().is_none());
+
+        page.set_dir_exists(Rc::new(|_| false));
+        page.long_press("eu.example.private");
+        let window = page.inner.dialogs.current().expect("the remove confirm is open");
+        let spec = remove_confirm_spec("Private");
+        assert_eq!(window.title().map(|t| t.to_string()), Some(spec.title));
+        assert_eq!(fake.uninstalls.lock().expect("lock").len(), 1, "nothing before the answer");
+        crate::browse::dialogs::buttons_of(&window)[1].emit_clicked();
+        assert_eq!(fake.uninstalls.lock().expect("lock").len(), 1, "Cancel removes nothing");
+        page.long_press("eu.example.private");
+        crate::browse::dialogs::buttons_of(&page.inner.dialogs.current().expect("dialog"))[0].emit_clicked();
+        assert!(pump(&context, || fake.uninstalls.lock().expect("lock").len() == 2), "Remove removes");
+    }
+
     pub(crate) fn smoke() {
+        update_all_acts_on_the_visible_rows_only();
+        a_long_press_installs_removes_at_once_or_confirms_and_the_badge_follows_the_updates();
         pressing_trust_asks_first_and_each_answer_does_what_it_says();
         f5_and_the_first_open_start_one_fetch_each_and_a_failure_shows_the_banner_with_retry();
         an_available_row_installs_the_real_package_of_its_synthetic_key();

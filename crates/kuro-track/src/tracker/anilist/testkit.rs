@@ -63,8 +63,6 @@ impl FakeTransport {
 impl Transport for FakeTransport {
     async fn post(&self, body: &Value, bearer: Option<&str>) -> Result<RawResponse, AniListError> {
         lock(&self.seen).push((body.clone(), bearer.map(str::to_owned)));
-        lock(&self.queue)
-            .pop_front()
-            .ok_or(AniListError::Transient)
+        lock(&self.queue).pop_front().ok_or(AniListError::Transient)
     }
 }

@@ -222,15 +222,19 @@ mod tests {
     }
 
     #[test]
-    fn t_28a_015_errors_on_http_200_are_a_graphql_error() -> Result<(), Box<dyn std::error::Error>> {
-        let env = envelope(include_str!("../../../tests/fixtures/anilist/errors_http200.json"))?;
+    fn t_28a_015_errors_on_http_200_are_a_graphql_error() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let env = envelope(include_str!(
+            "../../../tests/fixtures/anilist/errors_http200.json"
+        ))?;
         let r: Result<SaveEntryData, _> = env.into_data();
         assert!(matches!(r, Err(AniListError::GraphQl(s)) if s == "Invalid id"));
         Ok(())
     }
 
     #[test]
-    fn t_28a_015_partial_data_with_errors_is_still_an_error() -> Result<(), Box<dyn std::error::Error>> {
+    fn t_28a_015_partial_data_with_errors_is_still_an_error()
+    -> Result<(), Box<dyn std::error::Error>> {
         let env = envelope(include_str!(
             "../../../tests/fixtures/anilist/errors_http200_partial.json"
         ))?;
@@ -241,7 +245,9 @@ mod tests {
 
     #[test]
     fn t_28a_018_null_staff_and_studios_parse_as_none() -> Result<(), Box<dyn std::error::Error>> {
-        let env = envelope(include_str!("../../../tests/fixtures/anilist/search_manga_no_staff.json"))?;
+        let env = envelope(include_str!(
+            "../../../tests/fixtures/anilist/search_manga_no_staff.json"
+        ))?;
         let data: SearchData = env.into_data()?;
         assert!(data.page.media.iter().all(|m| m.staff.is_none()));
         let env = envelope(include_str!(

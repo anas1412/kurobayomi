@@ -22,6 +22,7 @@ pub fn body(id: &str) -> Option<Built> {
         "updates" => crate::updates::mount::updates().or_else(updates),
         "history" => crate::updates::mount::history().or_else(history),
         "more" => more(),
+        "browse" => crate::browse::mount::browse().or_else(|| crate::entry::body(id)),
         "download_queue" => downloads(),
         "categories" => categories(),
         "stats" => stats(),
@@ -59,11 +60,21 @@ pub fn title_n(i: usize) -> String {
 }
 
 pub fn open_entry(title: &str, anime: bool) {
+    if let Some(id) = anime.then(|| crate::local_flow_anime::anime_id_for_title(title)).flatten() {
+        crate::entry_core::anime::route::open(id);
+        return;
+    }
+    if !anime && crate::local_flow::open::entry_for_title(title) {
+        return;
+    }
     push(&crate::entry::entry(title, anime));
 }
 
 pub fn open_media(anime: bool, title: &str, unit: &str) {
-    push(&if anime { crate::player::player(title, unit) } else { crate::reader::launch::page_for(title, unit) });
+    if anime && crate::local_flow_anime::open_episode(title, unit) {
+        return;
+    }
+    push(&if anime { crate::player::player(title, unit) } else { crate::local_flow::reader::page_for(title, unit) });
 }
 
 /// Top "Anime | Manga" switcher with one page per kind (Updates, History, Downloads, …).
@@ -155,7 +166,12 @@ fn libraries() -> Option<Built> {
 
 fn library(id: &str, anime: bool) -> Built {
     // the live library view; the prototype below stays as the fallback when its worker cannot start
-    if let Some(b) = crate::library::mount::build(anime) {
+    if let Some(mut b) = crate::library::mount::build(anime) {
+        if anime {
+            b.end.insert(0, crate::local_flow_anime::add_button().upcast());
+        } else {
+            b.end.insert(0, crate::local_flow::ui::header_actions().upcast());
+        }
         return b;
     }
     let s = screen(id);

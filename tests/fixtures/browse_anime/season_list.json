@@ -1,0 +1,37 @@
+[
+  {
+    "id": 1,
+    "name": "Season 1",
+    "favorite": false
+  },
+  {
+    "id": 2,
+    "name": "Season 2",
+    "favorite": true
+  },
+  {
+    "id": 3,
+    "name": "Season 3",
+    "favorite": false
+  },
+  {
+    "id": 4,
+    "name": "Season 4",
+    "favorite": false
+  },
+  {
+    "id": 5,
+    "name": "Season 5",
+    "favorite": true
+  },
+  {
+    "id": 6,
+    "name": "Season 6",
+    "favorite": false
+  },
+  {
+    "id": 7,
+    "name": "Season 7",
+    "favorite": false
+  }
+]

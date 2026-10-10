@@ -63,6 +63,17 @@ pub fn custom_file(paths: &dyn Paths, family: Family, entry_id: i64) -> PathBuf 
     custom_dir(paths, family).join(hash_key(&entry_id.to_string()))
 }
 
+/// `<data>/animebackgrounds/<md5(url)>`, the background file for `url` (T-34a-007, behavior section 18.5). Always a
+/// path, even when the file is absent.
+pub fn background_file(paths: &dyn Paths, url: &str) -> PathBuf {
+    dir(paths, Family::AnimeBackground).join(hash_key(url))
+}
+
+/// `<data>/animebackgrounds/custom/<md5(anime id)>`, the custom background of an anime (T-34a-007, behavior section 18.5).
+pub fn custom_background_file(paths: &dyn Paths, anime_id: i64) -> PathBuf {
+    custom_file(paths, Family::AnimeBackground, anime_id)
+}
+
 /// The thumbnail or background file for the image's current URL.
 pub fn cover_file_for(paths: &dyn Paths, art: &ArtRef) -> Option<PathBuf> {
     cover_file(paths, art.family(), art.url.as_deref())
@@ -207,6 +218,20 @@ mod tests {
         std::fs::write(&marker, b"kept").unwrap();
         assert!(!create_nomedia(&folder).unwrap());
         assert_eq!(std::fs::read(&marker).unwrap(), b"kept");
+    }
+
+    #[test]
+    fn background_and_custom_background_paths_are_md5_names_in_the_background_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        assert_eq!(
+            background_file(&paths, "https://example.org/bg.jpg"),
+            tmp.path().join("data/animebackgrounds").join(hash_key("https://example.org/bg.jpg"))
+        );
+        assert_eq!(
+            custom_background_file(&paths, 7),
+            tmp.path().join("data/animebackgrounds/custom").join(hash_key("7"))
+        );
     }
 
     #[test]

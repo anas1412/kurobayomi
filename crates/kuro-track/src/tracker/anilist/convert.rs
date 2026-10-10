@@ -62,7 +62,11 @@ fn staff_name(node: &StaffNode) -> Option<String> {
 fn manga_people(m: &Media) -> (Vec<String>, Vec<String>) {
     let mut authors = Vec::new();
     let mut artists = Vec::new();
-    let edges = m.staff.as_ref().and_then(|s| s.edges.as_deref()).unwrap_or(&[]);
+    let edges = m
+        .staff
+        .as_ref()
+        .and_then(|s| s.edges.as_deref())
+        .unwrap_or(&[]);
     for edge in edges {
         let Some(name) = edge.node.as_ref().and_then(staff_name) else {
             continue;
@@ -84,7 +88,11 @@ fn studio_name(edge: &StudioEdge) -> Option<String> {
 
 /// The main studios, or every studio when none is main, capped at three.
 fn anime_authors(m: &Media) -> Vec<String> {
-    let edges = m.studios.as_ref().and_then(|s| s.edges.as_deref()).unwrap_or(&[]);
+    let edges = m
+        .studios
+        .as_ref()
+        .and_then(|s| s.edges.as_deref())
+        .unwrap_or(&[]);
     let mains: Vec<String> = edges
         .iter()
         .filter(|e| e.is_main == Some(true))
@@ -110,7 +118,11 @@ pub fn manga_search(m: &Media) -> MangaTrackSearch {
     out.authors = authors;
     out.artists = artists;
     out.cover_url = cover_of(m);
-    out.summary = m.description.as_deref().map(html::plain_text).unwrap_or_default();
+    out.summary = m
+        .description
+        .as_deref()
+        .map(html::plain_text)
+        .unwrap_or_default();
     out.publishing_type = publishing_type_of(m);
     out.publishing_status = m.status.clone().unwrap_or_default();
     out
@@ -126,7 +138,11 @@ pub fn anime_search(m: &Media) -> AnimeTrackSearch {
     out.start_date = format_ymd(start_date_millis);
     out.authors = anime_authors(m);
     out.cover_url = cover_of(m);
-    out.summary = m.description.as_deref().map(html::plain_text).unwrap_or_default();
+    out.summary = m
+        .description
+        .as_deref()
+        .map(html::plain_text)
+        .unwrap_or_default();
     out.publishing_type = publishing_type_of(m);
     out.publishing_status = m.status.clone().unwrap_or_default();
     out
@@ -209,13 +225,21 @@ mod tests {
         assert_eq!(first.start_date, "", "year-only date is blank (E-28)");
         assert_eq!(first.score, None, "null averageScore is no score");
         assert_eq!(first.authors, vec!["Ann Author", "Bo Writer"]);
-        assert_eq!(first.artists, vec!["Ann Author"], "Story & Art feeds artists");
+        assert_eq!(
+            first.artists,
+            vec!["Ann Author"],
+            "Story & Art feeds artists"
+        );
         assert_eq!(first.summary, "A line\nwith & and 'quotes' here");
         assert_eq!(first.cover_url, "https://img.test/a.jpg");
         let second = manga_search(&media[1]);
         assert_eq!(second.score, Some(72.0));
         assert_eq!(second.total_chapters, 0);
-        assert_eq!(second.artists, vec!["Cy Artist"], "name falls back to native, null names skipped");
+        assert_eq!(
+            second.artists,
+            vec!["Cy Artist"],
+            "name falls back to native, null names skipped"
+        );
         assert_eq!(second.start_date, "2010-05-07");
         let third = manga_search(&media[2]);
         assert!(third.authors.is_empty(), "null staff does not panic (E-07)");
@@ -230,9 +254,20 @@ mod tests {
         ))?;
         let data: SearchData = env.into_data()?;
         let rows: Vec<AnimeTrackSearch> = data.page.media.iter().map(anime_search).collect();
-        assert_eq!(rows[0].authors, vec!["Main A", "Main B", "Main C"], "E-08 cap of three");
-        assert_eq!(rows[1].authors, vec!["Side Studio"], "no main studio falls back to all");
-        assert!(rows[0].artists.is_empty(), "anime never carries artists (E-66)");
+        assert_eq!(
+            rows[0].authors,
+            vec!["Main A", "Main B", "Main C"],
+            "E-08 cap of three"
+        );
+        assert_eq!(
+            rows[1].authors,
+            vec!["Side Studio"],
+            "no main studio falls back to all"
+        );
+        assert!(
+            rows[0].artists.is_empty(),
+            "anime never carries artists (E-66)"
+        );
         assert_eq!(rows[0].total_episodes, 0);
         assert_eq!(rows[1].total_episodes, 2);
         Ok(())
@@ -255,10 +290,16 @@ mod tests {
         let env: GraphQlEnvelope = serde_json::from_str(include_str!(
             "../../../tests/fixtures/anilist/find_manga_found.json"
         ))?;
-        let page: MediaListPage = env.into_data::<crate::tracker::anilist::dto::FindData>()?.page;
+        let page: MediaListPage = env
+            .into_data::<crate::tracker::anilist::dto::FindData>()?
+            .page;
         let entry = page.media_list.first().ok_or("no entry")?;
         let track = manga_from_entry(entry)?;
-        assert_eq!(track.status, MangaStatus::Rereading.to_db(), "REPEATING maps to REREADING");
+        assert_eq!(
+            track.status,
+            MangaStatus::Rereading.to_db(),
+            "REPEATING maps to REREADING"
+        );
         assert_eq!(track.score, 85.0);
         assert_eq!(track.last_chapter_read, 12.0);
         assert_eq!(track.library_id, Some(9100));
@@ -290,7 +331,10 @@ mod tests {
         assert_eq!(track.status, AnimeStatus::OnHold.to_db());
         assert_eq!(track.score, 0.0);
         assert_eq!(track.last_episode_seen, 4.0);
-        assert_eq!(track.start_date, 0, "entry startedAt is null; the media startDate is not used");
+        assert_eq!(
+            track.start_date, 0,
+            "entry startedAt is null; the media startDate is not used"
+        );
         Ok(())
     }
 }

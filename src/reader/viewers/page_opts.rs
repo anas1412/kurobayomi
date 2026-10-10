@@ -15,6 +15,8 @@ pub struct PageOpts {
     pub background: Background,
     pub double_tap_ms: u32,
     pub long_tap: bool,
+    /// A webtoon page: decoded no wider than the view (B§8.4).
+    pub webtoon: bool,
 }
 
 /// The reading mode a viewer is built for, which the automatic zoom start follows.
@@ -38,6 +40,7 @@ pub fn page_opts(settings: &ViewerSettings, kind: ViewerKind, system_dark: bool)
         background: theme::background_for(settings.reader_theme, system_dark),
         double_tap_ms: settings.double_tap_anim_ms,
         long_tap: settings.long_tap,
+        webtoon: !kind.is_pager(),
     }
 }
 

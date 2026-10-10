@@ -125,6 +125,25 @@ pub fn startup_cleanup(store: &PrefStore, lib: &LibraryPrefs, known_manga: &BTre
     }
 }
 
+/// After a restore (T-11a-008): runs `kuro_prefs::category::prune_dangling_category_ids` over the category ids of both
+/// databases, so the restored sets and defaults name only categories that exist. The system category `0` always
+/// counts as known. Returns how many ids the sets lost.
+pub fn prune_after_restore(
+    store: &PrefStore,
+    lib: &LibraryPrefs,
+    known_manga: &BTreeSet<i64>,
+    known_anime: &BTreeSet<i64>,
+) -> usize {
+    let strings = |ids: &BTreeSet<i64>| -> BTreeSet<String> {
+        ids.iter().copied().chain([SYSTEM_CATEGORY_ID]).map(|id| id.to_string()).collect()
+    };
+    kuro_prefs::category::prune_dangling_category_ids(store, lib, &strings(known_manga), &strings(known_anime))
+        .unwrap_or_else(|e| {
+            tracing::error!(error = %e, "pruning the category preferences failed");
+            0
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +233,22 @@ mod tests {
         let manga: BTreeSet<i64> = [1, 2].into_iter().collect();
         let anime: BTreeSet<i64> = [3].into_iter().collect();
         assert_eq!(stale_ids(&[0, 1, 3, 9], &manga, &anime), vec![9]);
+    }
+
+    #[test]
+    fn prune_after_restore_drops_restored_ids_that_name_no_category_and_keeps_the_system_one() {
+        let store = PrefStore::in_memory();
+        let lib = LibraryPrefs::new(store.clone());
+        let set = |items: &[&str]| items.iter().map(|s| (*s).to_owned()).collect::<BTreeSet<String>>();
+        store.pref::<BTreeSet<String>>("library_update_categories", BTreeSet::new()).set(set(&["0", "2", "7"])).unwrap();
+        store.pref::<BTreeSet<String>>("animelib_update_categories", BTreeSet::new()).set(set(&["7", "9"])).unwrap();
+        lib.default_manga_category.set(7).unwrap();
+
+        let removed = prune_after_restore(&store, &lib, &BTreeSet::from([2]), &BTreeSet::from([9]));
+
+        assert_eq!(removed, 2, "7 left both sets");
+        assert_eq!(store.pref::<BTreeSet<String>>("library_update_categories", BTreeSet::new()).get(), set(&["0", "2"]));
+        assert_eq!(store.pref::<BTreeSet<String>>("animelib_update_categories", BTreeSet::new()).get(), set(&["9"]));
+        assert!(!lib.default_manga_category.is_set(), "the default named a category that is gone");
     }
 }

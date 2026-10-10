@@ -92,6 +92,22 @@ pub enum RelativeTime {
     Ago(String),
 }
 
+impl RelativeTime {
+    /// English text of the result: "Never", "Just now" or the elapsed text.
+    pub fn text(&self) -> String {
+        match self {
+            RelativeTime::Never => "Never".to_owned(),
+            RelativeTime::JustNow => "Just now".to_owned(),
+            RelativeTime::Ago(text) => text.clone(),
+        }
+    }
+}
+
+/// The "Library last updated: ..." line of the Updates feed (T-42b-016, E-U41, E-U42).
+pub fn last_updated_line(last_updated_ms: i64, now_ms: i64) -> String {
+    format!("{}{}", crate::updates::copy::LAST_UPDATED_PREFIX, relative_time_span(last_updated_ms, now_ms).text())
+}
+
 /// `relative_time_span`: `Never` for an unset timestamp, `JustNow` under a minute, else minutes, hours or days.
 pub fn relative_time_span(epoch_ms: i64, now_ms: i64) -> RelativeTime {
     if epoch_ms <= 0 {
@@ -190,5 +206,14 @@ mod tests {
         assert_eq!(format_size(999_999), "1000.00 KB");
         assert_eq!(format_size(1_000_000), "1.00 MB");
         assert_eq!(format_size(1_500_000_000), "1.50 GB");
+    }
+
+    #[test]
+    fn updates_last_updated_line_values() {
+        let now = 1_700_000_000_000;
+        assert_eq!(last_updated_line(0, now), "Library last updated: Never");
+        assert_eq!(last_updated_line(now - 30_000, now), "Library last updated: Just now");
+        assert_eq!(last_updated_line(now - 5 * 60_000, now), "Library last updated: 5 minutes ago");
+        assert_eq!(last_updated_line(now - 3 * 3_600_000, now), "Library last updated: 3 hours ago");
     }
 }

@@ -182,6 +182,12 @@ pub fn session_note(favorite: bool) -> Option<&'static str> {
     (!favorite).then_some("Settings are kept for this session")
 }
 
+/// The message after "set as default" with the library checkbox: the saved text and how many entries took the settings
+/// (E-DEF-3).
+pub fn applied_to_library_message(count: usize) -> UserMessage {
+    UserMessage::Plain(format!("{} ({count})", kuro_i18n::tr(kuro_i18n::MsgKey::episode_settings_updated)))
+}
+
 /// The snackbar after "set as default" for episodes (T-39b-010): once per successful save. A failed save shows
 /// nothing, and the list itself is never changed by the save (no optimistic write).
 pub fn default_saved_message(saved: bool) -> Option<UserMessage> {
@@ -196,6 +202,13 @@ mod tests {
     fn only_an_entry_outside_the_library_keeps_its_settings_for_the_session() {
         assert_eq!(session_note(false), Some("Settings are kept for this session"));
         assert_eq!(session_note(true), None);
+    }
+
+    #[test]
+    fn applying_to_the_library_reports_how_many_entries_changed() {
+        let UserMessage::Plain(text) = applied_to_library_message(12) else { panic!("a plain message") };
+        assert!(text.ends_with("(12)"), "{text}");
+        assert!(text.starts_with(&kuro_i18n::tr(kuro_i18n::MsgKey::episode_settings_updated)));
     }
 
     #[test]

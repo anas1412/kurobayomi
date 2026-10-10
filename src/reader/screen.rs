@@ -459,6 +459,8 @@ const PAGE_VIEWER: &str = "viewer";
 /// and shows the failure card with Retry and Close when that fails. The root widget is named `screen:reader`.
 pub fn open(deps: ReaderDeps, gate: &SourceGate, toaster: Toaster, on_close: impl Fn() + 'static) -> ReaderScreen {
     theme::install_css();
+    // Decodes started by an earlier reader are stale from now on (T-43b-059).
+    crate::reader::decode_guard::new_session();
     let theme_value = deps.prefs.reader_theme.get();
     let prefs_store = deps.prefs_store.clone();
     let core = Rc::new(ReaderCore::new(deps));

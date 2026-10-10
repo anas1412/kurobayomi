@@ -2,6 +2,7 @@
 //! offer shows the preference default (the stored value is kept).
 // Not reachable from `route.rs` yet: text rows are used by pages that are not routed yet.
 #![allow(dead_code)]
+use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
@@ -166,6 +167,18 @@ where
         entries,
         on_change,
     }
+}
+
+/// A multi-choice list whose selected keys are stored as a set of strings. `options` are `(key, label)` pairs; the
+/// subtitle lists the selected labels.
+pub fn multi_choice(title: &str, pref: &Pref<BTreeSet<String>>, options: &[(&str, &str)], enabled: bool) -> PreferenceItem {
+    let entries = options.iter().map(|(key, label)| ((*key).to_owned(), (*label).to_owned())).collect();
+    let writer = pref.clone();
+    let veto = bind::veto(move |selected: BTreeSet<String>| {
+        let result = writer.set(selected).map(|()| true).map_err(|err| err.to_string());
+        async move { result }
+    });
+    PreferenceItem::MultiSelect { common: common(title, Some("%s"), enabled), pref: pref.clone(), entries, veto }
 }
 
 /// An integer slider. `subtitle` is shown as the value text.

@@ -19,7 +19,7 @@ use crate::remote::{
 };
 use crate::repo::{AnimeTrackRepo, MangaTrackRepo, UnitRef};
 use crate::sync::{sync_anime_progress, sync_manga_progress};
-use crate::tracker::{AnimeTracker, MangaTracker};
+use crate::tracker::{AnimeTracker, MangaTracker, Tracker};
 
 /// Sets the entry id on `result`, binds it with the tracker, then stores the binding. A bind failure is
 /// returned as is, with its raw message, and nothing is stored.
@@ -55,9 +55,17 @@ pub fn spawn_register_anime(
             .trackers
             .get(tracker)
             .ok_or(TrackError::UnknownTracker(tracker.0))?;
-        let api = api.as_anime().ok_or(TrackError::UnknownTracker(tracker.0))?;
-        let stored =
-            register_anime(entry_id, &mut result, api, has_seen, ctx.anime_tracks.as_ref()).await?;
+        let api = api
+            .as_anime()
+            .ok_or(TrackError::UnknownTracker(tracker.0))?;
+        let stored = register_anime(
+            entry_id,
+            &mut result,
+            api,
+            has_seen,
+            ctx.anime_tracks.as_ref(),
+        )
+        .await?;
         ctx.events.send(TrackEvent::TrackChanged { entry_id });
         Ok(stored)
     })
@@ -96,9 +104,17 @@ pub fn spawn_register_manga(
             .trackers
             .get(tracker)
             .ok_or(TrackError::UnknownTracker(tracker.0))?;
-        let api = api.as_manga().ok_or(TrackError::UnknownTracker(tracker.0))?;
-        let stored =
-            register_manga(entry_id, &mut result, api, has_read, ctx.manga_tracks.as_ref()).await?;
+        let api = api
+            .as_manga()
+            .ok_or(TrackError::UnknownTracker(tracker.0))?;
+        let stored = register_manga(
+            entry_id,
+            &mut result,
+            api,
+            has_read,
+            ctx.manga_tracks.as_ref(),
+        )
+        .await?;
         ctx.events.send(TrackEvent::TrackChanged { entry_id });
         Ok(stored)
     })
@@ -301,6 +317,28 @@ async fn bind_enhanced_one_manga(
     Ok(())
 }
 
+/// What "Add tracking" does on an unbound row (T-27a-075).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddTrackingAction {
+    /// An enhanced tracker matches the entry and registers the match, with no search page.
+    MatchAndRegister,
+    /// Any other tracker opens its search screen.
+    OpenSearch,
+}
+
+/// The "Add tracking" action of `tracker` for an entry of `kind`.
+pub fn add_tracking_action(tracker: &dyn Tracker, kind: Kind) -> AddTrackingAction {
+    let enhanced = match kind {
+        Kind::Anime => tracker.as_enhanced_anime().is_some(),
+        Kind::Manga => tracker.as_enhanced_manga().is_some(),
+    };
+    if enhanced {
+        AddTrackingAction::MatchAndRegister
+    } else {
+        AddTrackingAction::OpenSearch
+    }
+}
+
 /// "Add tracking" on an enhanced anime tracker (B§3.9): match the entry, then register the match, with no search
 /// page. `entry` is `(entry id, title)`, or `None` when the entry is no longer in the library: nothing is shown then
 /// (E-09). No match gives "No match found" (E-07). A failure gives the tracker's toast (E-08).
@@ -369,6 +407,29 @@ mod tests {
         FakeAnime, Harness, MemAnimeRepo, MemSecrets, anime_binding, manga_binding, new_log,
     };
     use crate::model::TrackerId;
+
+    #[test]
+    fn t_27a_075_enhanced_trackers_match_and_others_open_the_search_screen() {
+        let secrets = MemSecrets::new();
+        let log = new_log();
+        let mut enhanced = FakeAnime::new(
+            TrackerId::JELLYFIN,
+            "Jellyfin",
+            secrets.clone(),
+            log.clone(),
+        );
+        enhanced.enhanced = true;
+        let mut plain = FakeAnime::new(TrackerId::KITSU, "Kitsu", secrets, log);
+        plain.enhanced = false;
+        assert_eq!(
+            add_tracking_action(&enhanced, Kind::Anime),
+            AddTrackingAction::MatchAndRegister
+        );
+        assert_eq!(
+            add_tracking_action(&plain, Kind::Anime),
+            AddTrackingAction::OpenSearch
+        );
+    }
 
     #[tokio::test]
     async fn tr_27b_013_add_tracking_on_an_enhanced_tracker_binds_the_match_without_a_search() {
@@ -447,7 +508,13 @@ mod tests {
         let ctx = Arc::clone(&h.ctx);
         let caller = tokio::spawn(async move {
             let result = AnimeTrackSearch::new(TrackerId::ANILIST, 3, "Show", "https://x");
-            drop(spawn_register_anime(ctx, 42, result, TrackerId::ANILIST, false));
+            drop(spawn_register_anime(
+                ctx,
+                42,
+                result,
+                TrackerId::ANILIST,
+                false,
+            ));
             std::future::pending::<()>().await;
         });
         tokio::task::yield_now().await;
@@ -473,7 +540,11 @@ mod tests {
         let (a, b) = (a.await.unwrap().unwrap(), b.await.unwrap().unwrap());
         assert_eq!(a.id, b.id, "both binds resolve to the same row");
         let rows = h.anime_repo.list_for_entry(42).await.unwrap();
-        assert_eq!(rows.len(), 1, "R-3: one row for the same media and local id");
+        assert_eq!(
+            rows.len(),
+            1,
+            "R-3: one row for the same media and local id"
+        );
         assert_eq!(rows[0].remote_id, 3);
 
         h.login(TrackerId::KAVITA);

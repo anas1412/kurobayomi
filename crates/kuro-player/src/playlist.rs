@@ -132,14 +132,14 @@ mod tests {
     }
 
     #[test]
-    fn build_sorts_by_number_ascending_whatever_the_anime_direction() {
+    fn t12_build_sorts_by_number_ascending_whatever_the_anime_direction() {
         let eps = vec![episode(1, 3.0), episode(2, 1.0), episode(3, 2.0)];
         let out = build(&eps, flags::SORTING_NUMBER, false, none).unwrap();
         assert_eq!(out.iter().map(|e| e.id).collect::<Vec<_>>(), vec![2, 3, 1]);
     }
 
     #[test]
-    fn build_inverts_source_order_with_sort_descending_false() {
+    fn t11_build_inverts_source_order_with_sort_descending_false() {
         let mut a = episode(1, 1.0);
         a.source_order = 0;
         let mut b = episode(2, 2.0);
@@ -149,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn build_keeps_only_downloaded_when_asked() {
+    fn t13_build_keeps_only_downloaded_when_asked() {
         let eps = vec![episode(1, 1.0), episode(2, 2.0)];
         let out = build(&eps, flags::SORTING_NUMBER, true, |e| e.id == 2).unwrap();
         assert_eq!(out.iter().map(|e| e.id).collect::<Vec<_>>(), vec![2]);

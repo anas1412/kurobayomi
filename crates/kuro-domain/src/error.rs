@@ -44,6 +44,9 @@ pub enum DomainError {
     Store(&'static str),
     #[error("source not installed: {0}")]
     SourceNotInstalled(String),
+    /// A non-local source returned no seasons for a season parent (`NoSeasonsException`; message key `no_seasons_error`).
+    #[error("no seasons found")]
+    NoSeasons,
     #[error("storage base directory unavailable")]
     StorageUnavailable,
     /// An HTTP request failed (no response, or a non-success status). The text is the client's message.

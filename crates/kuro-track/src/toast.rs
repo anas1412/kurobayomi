@@ -88,7 +88,10 @@ mod tests {
 
     #[test]
     fn tr_27b_039_long_toasts_last_as_long_as_the_surface() {
-        assert_eq!(ToastLength::Long.duration().as_millis() as i64, TOAST_HIDE_MS);
+        assert_eq!(
+            ToastLength::Long.duration().as_millis() as i64,
+            TOAST_HIDE_MS
+        );
     }
 
     #[tokio::test]

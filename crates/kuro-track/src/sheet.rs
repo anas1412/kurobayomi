@@ -445,7 +445,10 @@ mod tests {
             )),
             Ok(true)
         );
-        assert!(opener.0.lock().unwrap().is_empty(), "a long press opens nothing");
+        assert!(
+            opener.0.lock().unwrap().is_empty(),
+            "a long press opens nothing"
+        );
         assert_eq!(
             logo_gesture(LogoGesture::Click, "https://x.test/1", &opener),
             Ok(LogoEffect::Opened)

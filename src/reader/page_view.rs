@@ -1,22 +1,51 @@
-//! The page view (T-43b-013, T-43b-014, T-43b-016, T-43b-024). One page: the bytes decode on the blocking pool, the RGBA
-//! becomes a `gdk::Texture` on the GTK thread, and `snapshot` draws the texture at the zoom and centre that the pure
-//! model in `page_zoom` gives. Loading shows the indicator and hides the page; a failed load emits `image-load-error`.
+//! The page view (T-43b-013, T-43b-014, T-43b-016, T-43b-024, T-44a-044, T-44a-049, T-44a-059). One page: the bytes decode
+//! on the blocking pool into a pyramid of tiles, the tiles that the view shows become `gdk::Texture`s on the GTK thread,
+//! and `snapshot` draws them at the zoom and centre that the pure model in `page_zoom` gives. Loading shows the indicator
+//! and hides the page; a failed load emits `image-load-error`.
 //!
 //! Signals: `image-loaded`, `image-load-error`, `scale-changed` (f64), `view-clicked`, `long-tap` (f64, f64).
 //! The long press is the tracker in `long_press`, armed by the GTK click gesture. It is reported only while
 //! [`PageView::set_long_tap_enabled`] is on (`reader_long_tap`).
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib, graphene};
 
+use crate::reader::decode_guard::{self, Ticket};
 use crate::reader::long_press::{DEFAULT_DOUBLE_CLICK_MS, DEFAULT_LONG_PRESS_MS, LongPressAction, LongPressTracker, SLOP_PX};
-use crate::reader::page_decode::{self, DecodeError, DecodedPage, LoadState};
-use crate::reader::page_zoom::{self as zoom, PageConfig, Size};
+use crate::reader::page_decode::{self, DecodeError, LoadState};
+use crate::reader::page_zoom::{self as zoom, PageConfig, Size, ZoomState};
 use crate::reader::progress::LoadingIndicator;
+use crate::reader::tiles::{MAX_TILE_EDGE, Pyramid, Tile};
+
+/// The result of a decode: the pyramid of the page, or why it failed.
+type Decoded = std::thread::Result<Result<Pyramid, DecodeError>>;
+
+/// Decodes `bytes` and builds its pyramid. A webtoon page is cut to `width` first (never enlarged).
+fn decode_pyramid(bytes: &[u8], width: Option<u32>) -> Result<Pyramid, DecodeError> {
+    let page = page_decode::decode_rgba(bytes)?;
+    let page = match width {
+        Some(width) => page_decode::fit_to_width(page, width),
+        None => page,
+    };
+    Ok(Pyramid::new(page, MAX_TILE_EDGE))
+}
+
+/// Uploads one tile as a texture. `None` for a tile outside its level.
+fn upload(pyramid: &Pyramid, tile: Tile) -> Option<gdk::Texture> {
+    let bytes = pyramid.tile_bytes(tile);
+    if bytes.is_empty() {
+        return None;
+    }
+    let stride = tile.w as usize * 4;
+    let bytes = glib::Bytes::from_owned(bytes);
+    let texture = gdk::MemoryTexture::new(tile.w as i32, tile.h as i32, gdk::MemoryFormat::R8g8b8a8, &bytes, stride);
+    Some(texture.upcast::<gdk::Texture>())
+}
 
 mod imp {
     use super::*;
@@ -24,7 +53,10 @@ mod imp {
 
     #[derive(Default)]
     pub struct PageView {
-        pub texture: RefCell<Option<gdk::Texture>>,
+        /// The decoded page as a pyramid of tiles (level 0 is the full page). Only the visible tiles are uploaded.
+        pub pyramid: RefCell<Option<Pyramid>>,
+        /// Uploaded tiles. A tile that leaves the view is dropped on the next frame (T-44a-049).
+        pub tiles: RefCell<HashMap<Tile, gdk::Texture>>,
         pub src: Cell<Size>,
         pub state: Cell<LoadState>,
         /// Bumped by every load, recycle and cancelled timer, so a late result or timer is dropped.
@@ -32,9 +64,10 @@ mod imp {
         pub config: Cell<PageConfig>,
         /// The view size the zoom was last fitted to. `None` means the zoom resets to the fit and the anchor.
         pub fitted: Cell<Option<(i32, i32)>>,
-        pub min: Cell<f64>,
-        pub scale: Cell<f64>,
-        pub center: Cell<(f64, f64)>,
+        /// The zoom of the page: scale, centre, fitted minimum, maximum and double-tap level (T-44a-044).
+        pub zoom: Cell<ZoomState>,
+        /// Whether a decode is cut to the view width first (webtoon pages, B§8.4).
+        pub decode_to_view: Cell<bool>,
         pub background: RefCell<Option<gdk::RGBA>>,
         pub long: RefCell<Option<LongPressTracker>>,
         pub long_gen: Cell<u64>,
@@ -102,9 +135,7 @@ mod imp {
                 self.fit_to(Size { w, h });
             }
             if self.state.get() == LoadState::Ready {
-                if let Some(texture) = self.texture.borrow().clone() {
-                    self.draw_page(&texture, snapshot, w, h);
-                }
+                self.draw_page(snapshot, w, h);
             }
             if let Some(child) = obj.first_child() {
                 obj.snapshot_child(&child, snapshot);
@@ -118,17 +149,29 @@ mod imp {
             Size { w: f64::from(obj.width()), h: f64::from(obj.height()) }
         }
 
-        fn draw_page(&self, texture: &gdk::Texture, snapshot: &gtk::Snapshot, w: f64, h: f64) {
-            let (scale, (cx, cy), src) = (self.scale.get(), self.center.get(), self.src.get());
+        /// Draws the visible tiles at the zoom. Tiles that are not visible are released first (T-44a-049).
+        fn draw_page(&self, snapshot: &gtk::Snapshot, w: f64, h: f64) {
+            let pyramid = self.pyramid.borrow();
+            let Some(pyramid) = pyramid.as_ref() else { return };
+            let z = self.zoom.get();
             let bounds = graphene::Rect::new(0.0, 0.0, w as f32, h as f32);
             snapshot.push_clip(&bounds);
             if let Some(background) = *self.background.borrow() {
                 snapshot.append_color(&background, &bounds);
             }
-            let x = w / 2.0 - cx * scale;
-            let y = h / 2.0 - cy * scale;
-            let page = graphene::Rect::new(x as f32, y as f32, (src.w * scale) as f32, (src.h * scale) as f32);
-            snapshot.append_texture(texture, &page);
+            let (_, visible) = pyramid.visible_tiles(z.scale, z.center, (w, h));
+            let mut uploaded = self.tiles.borrow_mut();
+            uploaded.retain(|tile, _| visible.contains(tile));
+            for tile in visible {
+                if !uploaded.contains_key(&tile) {
+                    if let Some(texture) = upload(pyramid, tile) {
+                        uploaded.insert(tile, texture);
+                    }
+                }
+                let Some(texture) = uploaded.get(&tile) else { continue };
+                let (x, y, tw, th) = Pyramid::screen_rect(tile, z.scale, z.center, (w, h));
+                snapshot.append_texture(texture, &graphene::Rect::new(x as f32, y as f32, tw as f32, th as f32));
+            }
             snapshot.pop();
         }
 
@@ -142,29 +185,26 @@ mod imp {
             let src = self.src.get();
             let config = self.config.get();
             let min = zoom::min_scale(config.scale, view, src);
-            let before = self.scale.get();
-            match self.fitted.get() {
+            let before = self.zoom.get();
+            let mut z = match self.fitted.get() {
                 Some(previous) if previous == key => return,
                 Some(_) => {
-                    let scale =
-                        if (self.scale.get() - self.min.get()).abs() < 1e-9 { min } else { zoom::clamp_scale(self.scale.get(), min) };
-                    self.scale.set(scale);
+                    let scale = if before.is_fitted() { min } else { before.scale };
+                    let kept = ZoomState { scale, center: before.center, min, max: min * zoom::MAX_ZOOM_FACTOR, double_tap: zoom::double_tap_level(min) };
+                    ZoomState { scale: kept.clamp(kept.scale), ..kept }
                 }
-                None => {
-                    self.scale.set(min);
-                    self.center.set(zoom::anchor_center(config.zoom_start, src));
-                }
-            }
-            self.min.set(min);
-            self.center.set(zoom::clamp_center(self.center.get(), view, src, self.scale.get()));
+                None => ZoomState::fitted(min, zoom::anchor_center(config.zoom_start, src)),
+            };
+            z.center = zoom::clamp_center(z.center, view, src, z.scale);
+            self.zoom.set(z);
             self.fitted.set(Some(key));
-            if (self.scale.get() - before).abs() > 1e-9 {
+            if (z.scale - before.scale).abs() > 1e-9 {
                 // Every scale change reports, the first fit included (behaviour section 9.1). Deferred, because this
                 // runs inside a snapshot.
                 let weak = self.obj().downgrade();
                 glib::idle_add_local_once(move || {
                     on_page(&weak, |p| {
-                        let scale = p.scale.get();
+                        let scale = p.zoom.get().scale;
                         p.obj().emit_by_name::<()>("scale-changed", &[&scale]);
                     });
                 });
@@ -183,32 +223,35 @@ mod imp {
             self.obj().queue_draw();
         }
 
-        /// Finishes a decode started by `set_image`. A result from an older generation is dropped (E-40).
-        pub(super) fn finish_load(&self, generation: u64, decoded: std::thread::Result<Result<DecodedPage, DecodeError>>) {
-            if self.generation.get() != generation {
+        /// Drops the pyramid and every uploaded tile.
+        pub(super) fn drop_pages(&self) {
+            self.pyramid.replace(None);
+            self.tiles.borrow_mut().clear();
+        }
+
+        /// Finishes a decode started by `set_image`. A result whose ticket is no longer current (another session, or
+        /// the page was loaded again) is dropped without touching anything (E-40, T-43b-059).
+        pub(super) fn finish_load(&self, ticket: Ticket, decoded: Decoded) {
+            if !decode_guard::accepts(ticket, decode_guard::current_session(), self.generation.get()) {
                 return;
             }
-            let texture = match decoded {
-                Ok(Ok(page)) if page.width > 0 && page.height > 0 => {
-                    let src = Size { w: f64::from(page.width), h: f64::from(page.height) };
-                    let bytes = glib::Bytes::from_owned(page.rgba);
-                    let stride = page.width as usize * 4;
-                    let texture =
-                        gdk::MemoryTexture::new(page.width as i32, page.height as i32, gdk::MemoryFormat::R8g8b8a8, &bytes, stride);
-                    self.src.set(src);
-                    Some(texture.upcast::<gdk::Texture>())
-                }
+            let pyramid = match decoded {
+                Ok(Ok(pyramid)) if pyramid.size().0 > 0 && pyramid.size().1 > 0 => Some(pyramid),
                 _ => None,
             };
             let obj = self.obj();
-            match texture {
-                Some(texture) => {
-                    self.texture.replace(Some(texture));
+            match pyramid {
+                Some(pyramid) => {
+                    let (w, h) = pyramid.size();
+                    self.src.set(Size { w: f64::from(w), h: f64::from(h) });
+                    self.pyramid.replace(Some(pyramid));
+                    self.tiles.borrow_mut().clear();
                     self.fitted.set(None);
                     self.set_state(LoadState::Ready);
                     obj.emit_by_name::<()>("image-loaded", &[]);
                 }
                 None => {
+                    self.drop_pages();
                     self.set_state(LoadState::Error);
                     obj.emit_by_name::<()>("image-load-error", &[]);
                 }
@@ -338,7 +381,8 @@ mod imp {
             if self.state.get() != LoadState::Ready {
                 return;
             }
-            let target = zoom::double_tap_target(self.scale.get(), self.min.get());
+            let z = self.zoom.get();
+            let target = zoom::double_tap_target(z.scale, z.min);
             let enabled = gtk::Settings::default().is_none_or(|s| s.is_gtk_enable_animations());
             self.animate_zoom(target, (x, y), zoom::animation_ms(self.double_tap_ms.get(), enabled));
         }
@@ -351,13 +395,14 @@ mod imp {
                 let view = self.view();
                 (view.w / 2.0, view.h / 2.0)
             });
-            let target = zoom::wheel_zoom(self.scale.get(), self.min.get(), up);
+            let z = self.zoom.get();
+            let target = zoom::wheel_zoom(z.scale, z.min, up);
             self.set_zoom(target, focus);
         }
 
         fn pinch_begin(&self) {
             self.stop_animation();
-            self.pinch_start.set(self.scale.get());
+            self.pinch_start.set(self.zoom.get().scale);
             self.cancel();
         }
 
@@ -371,17 +416,18 @@ mod imp {
 
         fn drag_begin(&self) {
             self.stop_animation();
-            self.drag_start.set(self.center.get());
+            self.drag_start.set(self.zoom.get().center);
         }
 
         fn drag_update(&self, dx: f64, dy: f64) {
-            let scale = self.scale.get();
-            if self.state.get() != LoadState::Ready || scale <= 0.0 {
+            let mut z = self.zoom.get();
+            if self.state.get() != LoadState::Ready || z.scale <= 0.0 {
                 return;
             }
             let (sx, sy) = self.drag_start.get();
             let view = self.view();
-            self.center.set(zoom::clamp_center((sx - dx / scale, sy - dy / scale), view, self.src.get(), scale));
+            z.center = zoom::clamp_center((sx - dx / z.scale, sy - dy / z.scale), view, self.src.get(), z.scale);
+            self.zoom.set(z);
             self.obj().queue_draw();
         }
 
@@ -399,8 +445,9 @@ mod imp {
             self.stop_animation();
             let generation = self.anim_gen.get();
             let (view, src) = (self.view(), self.src.get());
-            let (from, start) = (self.scale.get(), self.center.get());
-            let to = zoom::clamp_scale(target, self.min.get());
+            let start = self.zoom.get();
+            let (from, begin) = (start.scale, start.center);
+            let to = start.clamp(target);
             let began = std::time::Instant::now();
             let weak = self.obj().downgrade();
             glib::timeout_add_local(Duration::from_millis(16), move || {
@@ -412,9 +459,8 @@ mod imp {
                 let elapsed = began.elapsed().as_secs_f64() * 1000.0;
                 let done = elapsed >= f64::from(duration_ms);
                 let scale = zoom::zoom_step(from, to, elapsed, duration_ms);
-                let center = zoom::clamp_center(zoom::zoom_about(start, view, from, scale, focus), view, src, scale);
-                p.center.set(center);
-                p.scale.set(scale);
+                let center = zoom::clamp_center(zoom::zoom_about(begin, view, from, scale, focus), view, src, scale);
+                p.zoom.set(ZoomState { scale, center, ..p.zoom.get() });
                 page.queue_draw();
                 page.emit_by_name::<()>("scale-changed", &[&scale]);
                 if done { glib::ControlFlow::Break } else { glib::ControlFlow::Continue }
@@ -426,11 +472,10 @@ mod imp {
             self.stop_animation();
             let view = self.view();
             let src = self.src.get();
-            let old = self.scale.get();
-            let new = zoom::clamp_scale(target, self.min.get());
-            let center = zoom::zoom_about(self.center.get(), view, old, new, focus);
-            self.center.set(zoom::clamp_center(center, view, src, new));
-            self.scale.set(new);
+            let z = self.zoom.get();
+            let new = z.clamp(target);
+            let center = zoom::zoom_about(z.center, view, z.scale, new, focus);
+            self.zoom.set(ZoomState { scale: new, center: zoom::clamp_center(center, view, src, new), ..z });
             let obj = self.obj();
             obj.queue_draw();
             obj.emit_by_name::<()>("scale-changed", &[&new]);
@@ -468,29 +513,32 @@ impl PageView {
         glib::Object::new()
     }
 
-    /// Starts decoding `bytes` for this page. A page still loading is replaced, and its result is dropped.
+    /// Starts decoding `bytes` for this page. A page still loading is replaced, and its result is dropped. The decode
+    /// belongs to the current reader session; a result from any other session is dropped (T-43b-059).
     pub fn set_image(&self, bytes: Vec<u8>, config: PageConfig) {
         let imp = self.imp();
         imp.stop_animation();
         imp.config.set(config);
         imp.fitted.set(None);
-        imp.texture.replace(None);
+        imp.drop_pages();
         let generation = imp.generation.get() + 1;
         imp.generation.set(generation);
         imp.set_state(LoadState::Loading);
+        let ticket = Ticket::now(generation);
+        let width = imp.decode_to_view.get().then(|| self.width().max(0) as u32).filter(|w| *w > 0);
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
-            let decoded = gio::spawn_blocking(move || page_decode::decode_rgba(&bytes)).await;
-            imp::on_page(&weak, |p| p.finish_load(generation, decoded));
+            let decoded = gio::spawn_blocking(move || decode_pyramid(&bytes, width)).await;
+            imp::on_page(&weak, |p| p.finish_load(ticket, decoded));
         });
     }
 
-    /// Drops the texture and any pending decode, and shows nothing until the next `set_image`.
+    /// Drops the pyramid and any pending decode, and shows nothing until the next `set_image`.
     pub fn recycle(&self) {
         let imp = self.imp();
         imp.stop_animation();
         imp.generation.set(imp.generation.get() + 1);
-        imp.texture.replace(None);
+        imp.drop_pages();
         imp.fitted.set(None);
         imp.set_state(LoadState::Empty);
     }
@@ -509,6 +557,11 @@ impl PageView {
         self.imp().double_tap_ms.set(ms);
     }
 
+    /// Cuts decodes to the view width first, as a webtoon page does (B§8.4).
+    pub fn set_decode_to_view(&self, enabled: bool) {
+        self.imp().decode_to_view.set(enabled);
+    }
+
     /// Whether `long-tap` reports (`reader_long_tap`).
     pub fn long_tap_enabled(&self) -> bool {
         self.imp().long_tap_enabled.get()
@@ -519,7 +572,7 @@ impl PageView {
     }
 
     pub fn scale(&self) -> f64 {
-        self.imp().scale.get()
+        self.imp().zoom.get().scale
     }
 
     /// The page background, drawn only once a page has loaded.
@@ -709,5 +762,14 @@ mod tests {
         pump(&ctx);
         assert!((page.scale() - 0.4).abs() < 0.01, "fit width of 2000 in 800: {}", page.scale());
         window.destroy();
+    }
+
+    #[test]
+    fn a_result_from_an_old_generation_or_session_is_not_applied() {
+        // The guard that finish_load uses: a ticket applies only to the session and generation it was started for.
+        let ticket = Ticket { session: 1, generation: 2 };
+        assert!(decode_guard::accepts(ticket, 1, 2));
+        assert!(!decode_guard::accepts(ticket, 1, 3));
+        assert!(!decode_guard::accepts(ticket, 2, 2));
     }
 }

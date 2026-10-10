@@ -66,6 +66,16 @@ mod tests {
     }
 
     #[test]
+    fn the_start_side_reads_the_start_key_and_the_end_side_the_end_key() {
+        // guards the cross-wired getter names: the right-hand drag is the start action (T-38a-027)
+        let prefs = LibraryPrefs::new(PrefStore::in_memory());
+        assert_eq!(prefs.swipe_right_chapter.key(), "pref_chapter_swipe_start_action");
+        assert_eq!(prefs.swipe_left_chapter.key(), "pref_chapter_swipe_end_action");
+        assert_eq!(action_for(&prefs, Side::Right), ChapterSwipeAction::ToggleBookmark, "start default");
+        assert_eq!(action_for(&prefs, Side::Left), ChapterSwipeAction::ToggleRead, "end default");
+    }
+
+    #[test]
     fn the_menu_lists_the_runnable_actions_once_with_the_domain_labels() {
         let prefs = LibraryPrefs::new(PrefStore::in_memory());
         let labels: Vec<_> = menu(&prefs).into_iter().map(|(_, l)| l).collect();

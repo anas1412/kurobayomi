@@ -10,9 +10,45 @@ pub fn stats_actions(current: i64, page: i64) -> (bool, Option<i64>) {
     ((page == 0) ^ (current == 0), (page != 0).then_some(page))
 }
 
+/// The commands run after init when `pref_player_statistics_page` is not 0 (T-45a-053): the
+/// `stats/display-stats-toggle` binding, then `stats/display-page-<n>`. Empty for 0 (off).
+pub fn startup_commands(page_pref: i64) -> Vec<Vec<String>> {
+    if page_pref == 0 {
+        return Vec::new();
+    }
+    vec![
+        vec![
+            "script-binding".to_owned(),
+            "stats/display-stats-toggle".to_owned(),
+        ],
+        vec![
+            "script-binding".to_owned(),
+            format!("stats/display-page-{page_pref}"),
+        ],
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_runs_the_toggle_and_the_page_unless_off() {
+        assert!(startup_commands(0).is_empty());
+        assert_eq!(
+            startup_commands(2),
+            vec![
+                vec![
+                    "script-binding".to_owned(),
+                    "stats/display-stats-toggle".to_owned()
+                ],
+                vec![
+                    "script-binding".to_owned(),
+                    "stats/display-page-2".to_owned()
+                ],
+            ]
+        );
+    }
 
     #[test]
     fn off_to_off_does_nothing() {

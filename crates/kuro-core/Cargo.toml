@@ -27,6 +27,8 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 unicode-normalization = { workspace = true }
 kuro-platform = { version = "0.1.0", path = "../kuro-platform" }
+kuro-prefs = { path = "../kuro-prefs" }
+async-trait = { workspace = true }
 icu_collator = "2"
 icu_locale = "2"
 jxl-oxide = { version = "0.11", features = ["image"] }
@@ -37,6 +39,7 @@ reqwest = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 proptest = { workspace = true }
 wiremock = { workspace = true }
 

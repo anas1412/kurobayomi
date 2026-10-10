@@ -7,6 +7,7 @@ use gtk::prelude::*;
 use super::{layout_for, root_rows, Layout};
 use crate::pref_model::page;
 use crate::screens::{built, Built};
+use crate::settings_ui::search;
 
 /// The sub-screen `id` for the right-hand pane: its title and header actions on a bar, then its content.
 fn pane(id: &str) -> gtk::Widget {
@@ -32,9 +33,21 @@ fn pane(id: &str) -> gtk::Widget {
     pane.upcast()
 }
 
+/// The header search button of the player settings: the settings search over the player screens (T-48a-011).
+fn search_button() -> gtk::Widget {
+    let button = crate::ui::icon_button("system-search-symbolic", "Search");
+    button.update_property(&[gtk::accessible::Property::Label("Search")]);
+    button.connect_clicked(|_| {
+        if let Some(page) = search::player_page() {
+            crate::ui::push(&crate::ui::page("Search settings", &page.content, page.end, true));
+        }
+    });
+    button.upcast()
+}
+
 /// The root for a window `width` pixels wide.
 pub fn body(width: i32) -> Option<Built> {
-    let end = crate::ui::toolbar(&crate::ui::screen("settings_player"));
+    let end = vec![search_button()];
     match layout_for(width) {
         Layout::Narrow => built(page::body(&root_rows(Rc::new(crate::ui::open))).widget, end),
         Layout::Sidebar => {

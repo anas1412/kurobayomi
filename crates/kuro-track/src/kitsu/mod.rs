@@ -1,6 +1,23 @@
-//! Kitsu tracker identity, capability flags and status tables (T-30a-001, T-30a-002). The login, the API and the
-//! `Tracker` trait object come with the later Kitsu tasks. This module holds the values they are built on
-//! (`plans/30-tracker-kitsu/p1-tasks.md`).
+//! Kitsu tracker: identity, capability flags, status tables (T-30a-001, T-30a-002), the REST client, the Algolia
+//! search and the tracker traits in [`tracker::KitsuTracker`] (`plans/30-tracker-kitsu/p1-tasks.md`).
+
+pub mod api;
+pub mod auth;
+pub mod dates;
+pub mod dialog;
+pub mod dto;
+pub mod error;
+pub mod rules;
+pub mod score;
+pub mod search;
+pub mod status;
+pub mod tracker;
+#[cfg(test)]
+mod fixture_tests;
+#[cfg(test)]
+mod wire_tests;
+
+pub use tracker::KitsuTracker;
 
 use crate::model::{Kind, TrackerId};
 

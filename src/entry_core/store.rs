@@ -11,6 +11,7 @@ use kuro_data::category::{CategoryKind, CategoryRepo};
 use kuro_data::chapter::{Chapter, ChapterRepo, ChapterUpdate};
 use kuro_data::manga::{Manga, MangaRepo};
 use kuro_db::flags::chapter as c;
+use kuro_domain::entries::fetch_interval::{get_window, set_manga_fetch_interval};
 use kuro_db::handle::Db;
 use kuro_db::models::MangaPatch;
 use kuro_db::statements_manga as sm;
@@ -50,8 +51,11 @@ pub fn manga_row(m: &Manga) -> MangaRow {
         genres: m.genre.clone().unwrap_or_default(),
         status: m.status,
         thumbnail_url: m.thumbnail_url.clone(),
+        cover_last_modified: m.cover_last_modified,
         initialized: m.initialized,
         favorite: m.favorite,
+        next_update: m.next_update,
+        fetch_interval: m.fetch_interval,
         local: m.source == LOCAL_SOURCE_ID,
         flags: ChapterFlags(m.chapter_flags),
     }
@@ -129,6 +133,11 @@ impl DbStore {
         Ok((Some(manga), self.chapter_list(manga_id, downloads)?))
     }
 
+    /// How many trackers the manga is bound to, for the tracking button of the action row.
+    pub fn track_count(&self, manga_id: i64) -> DataResult<usize> {
+        Ok(kuro_data::track::MangaTrackRepo::new(Arc::clone(&self.db)).by_entry(manga_id)?.len())
+    }
+
     pub fn scanlators(&self, manga_id: i64) -> DataResult<Scanlators> {
         Ok(Scanlators {
             available: self.mangas.available_scanlators(manga_id)?.into_iter().collect(),
@@ -146,6 +155,14 @@ impl DbStore {
     /// Library defaults for a manga that is not in the library (`SetMangaDefaultChapterFlags`): one masked write.
     pub fn write_defaults(&self, manga_id: i64, defaults: ChapterFlags) -> DataResult<bool> {
         self.set_flag_bits(manga_id, defaults.0, ALL_CHAPTER_FLAG_BITS)
+    }
+
+    /// `setFetchInterval`: stores `-wheel` (0 is automatic) and recomputes the next update through the domain (T-38b-022).
+    pub fn set_fetch_interval(&self, manga_id: i64, wheel: i32) -> DataResult<()> {
+        let manga = self.mangas.by_id(manga_id)?;
+        let now = chrono::Local::now();
+        let window = get_window(&now);
+        set_manga_fetch_interval(&self.mangas, &self.chapters, &manga, wheel, &now, window, now.timestamp_millis())
     }
 
     /// One masked UPDATE of `mangas.chapter_flags`: `(old & !mask) | (flag & mask)`. The schema trigger bumps
@@ -257,6 +274,21 @@ impl DbStore {
         self.mangas.set_categories(manga_id, category_ids)
     }
 
+    /// `SetExcludedScanlators`: the excluded set becomes exactly `wanted`, in one transaction.
+    pub fn set_excluded_scanlators(&self, manga_id: i64, wanted: &BTreeSet<String>) -> DataResult<()> {
+        self.mangas.set_excluded_scanlators(manga_id, wanted)
+    }
+
+    /// The distinct scanlators of the chapters, published again after each change of the chapters.
+    pub fn watch_available(&self, manga_id: i64) -> Subscription<BTreeSet<String>> {
+        self.mangas.subscribe_available_scanlators(manga_id)
+    }
+
+    /// The excluded set, published again after each change of the exclusions.
+    pub fn watch_excluded(&self, manga_id: i64) -> Subscription<BTreeSet<String>> {
+        self.mangas.subscribe_excluded_scanlators(manga_id)
+    }
+
     pub fn watch_manga(&self, manga_id: i64) -> Subscription<Option<Manga>> {
         self.mangas.subscribe_by_id(manga_id)
     }
@@ -349,6 +381,40 @@ mod tests {
         assert_eq!(manga.unwrap().title, "Title");
         assert_eq!(chapters.len(), 3);
         assert_eq!(store.read_page(999, &HashMap::new()).unwrap(), (None, vec![]));
+    }
+
+    /// The store with chapters 1, 2 and 3 by scanlators `A`, `B` and none.
+    fn store_with_scanlators() -> (tempfile::TempDir, DbStore, i64) {
+        let (dir, store, id) = store(true, 3);
+        let rows = store.chapters.by_manga_id(id, false).unwrap();
+        let by = ["A", "B"];
+        for (i, chapter) in rows.iter().enumerate() {
+            let scanlator = by.get(i).map(|s| (*s).to_owned());
+            store.chapters.update_all(&[ChapterUpdate { scanlator, ..ChapterUpdate::new(chapter.id) }]).unwrap();
+        }
+        (dir, store, id)
+    }
+
+    #[test]
+    fn excluded_null_scanlator_not_removed() {
+        let (_dir, store, id) = store_with_scanlators();
+        store.set_excluded_scanlators(id, &["A".to_owned(), "B".to_owned()].into()).unwrap();
+        let shown = store.chapter_list(id, &HashMap::new()).unwrap();
+        assert_eq!(shown.len(), 1, "both named scanlators are excluded");
+        assert_eq!(shown[0].scanlator, None, "a chapter with no scanlator is never excluded (E-SCAN-1)");
+    }
+
+    #[test]
+    fn excluded_diff_transaction() {
+        let (_dir, store, id) = store_with_scanlators();
+        store.set_excluded_scanlators(id, &["A".to_owned(), "B".to_owned()].into()).unwrap();
+        store.set_excluded_scanlators(id, &["B".to_owned(), "C".to_owned()].into()).unwrap();
+        let sets = store.scanlators(id).unwrap();
+        assert_eq!(sets.excluded, ["B".to_owned(), "C".to_owned()].into(), "A left, C joined, B stayed");
+        assert_eq!(sets.available, vec!["A".to_owned(), "B".to_owned()], "the available list reads the chapters");
+        store.set_excluded_scanlators(id, &BTreeSet::new()).unwrap();
+        assert!(store.scanlators(id).unwrap().excluded.is_empty());
+        assert_eq!(store.chapter_list(id, &HashMap::new()).unwrap().len(), 3);
     }
 
     #[test]

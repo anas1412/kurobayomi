@@ -219,11 +219,12 @@ impl Decoder {
 }
 
 /// The GPU vendor that picks the Linux `hwdec` names (design table §8.1).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum GpuKind {
     Intel,
     Amd,
     Nvidia,
+    #[default]
     Other,
 }
 

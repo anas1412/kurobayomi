@@ -186,10 +186,7 @@ mod tests {
         assert_eq!(ScoreFormat::Point5.options().len(), 6);
         assert_eq!(ScoreFormat::Point3.options().len(), 4);
         assert_eq!(ScoreFormat::Point10Decimal.options().len(), 101);
-        assert_eq!(
-            ScoreFormat::Point3.options(),
-            vec!["-", "😦", "😐", "😊"]
-        );
+        assert_eq!(ScoreFormat::Point3.options(), vec!["-", "😦", "😐", "😊"]);
         let five = ScoreFormat::Point5.options();
         assert_eq!(five.first().map(String::as_str), Some("0 ★"));
         assert_eq!(five.last().map(String::as_str), Some("5 ★"));
@@ -253,7 +250,9 @@ mod tests {
 
     #[test]
     fn t_28a_006_round_trip_keeps_the_shown_text() {
-        let values = [0.0, 10.0, 30.0, 35.0, 36.0, 50.0, 60.0, 61.0, 70.0, 90.0, 100.0];
+        let values = [
+            0.0, 10.0, 30.0, 35.0, 36.0, 50.0, 60.0, 61.0, 70.0, 90.0, 100.0,
+        ];
         for f in ALL {
             for v in values {
                 let idx = f.score_to_index(v);

@@ -176,10 +176,11 @@ mod tests {
         );
     }
 
-    fn migrate_bad_threshold(s: &PrefStore) {
+    fn migrate_bad_threshold(s: &PrefStore) -> Result<bool, PrefError> {
         assert_eq!(s.get_raw("reader_hide_threshold"), Some(PrefValue::Str("HIGH".into())));
         s.remove("reader_hide_threshold");
         s.set_raw("reader_hide_threshold", PrefValue::Str("LOWEST".into()));
+        Ok(true)
     }
 
     #[test]

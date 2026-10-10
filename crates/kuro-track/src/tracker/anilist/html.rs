@@ -8,7 +8,9 @@ pub fn plain_text(description: &str) -> String {
         .replace("<br/>", "\n")
         .replace("<br />", "\n");
     let stripped = ammonia::Builder::empty().clean(&with_breaks).to_string();
-    html_escape::decode_html_entities(&stripped).trim().to_owned()
+    html_escape::decode_html_entities(&stripped)
+        .trim()
+        .to_owned()
 }
 
 #[cfg(test)]

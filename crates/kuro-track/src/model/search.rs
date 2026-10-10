@@ -27,6 +27,9 @@ pub struct AnimeTrackSearch {
     pub publishing_status: String,
     pub publishing_type: String,
     pub start_date: String,
+    /// True for a row of the `my:` search: it comes from the user's own list, so the card shows no status and
+    /// offers Refresh (T-29a-049).
+    pub from_my_list: bool,
 }
 
 impl AnimeTrackSearch {
@@ -58,6 +61,7 @@ impl AnimeTrackSearch {
             publishing_status: String::new(),
             publishing_type: String::new(),
             start_date: String::new(),
+            from_my_list: false,
         }
     }
 
@@ -143,6 +147,9 @@ pub struct MangaTrackSearch {
     pub publishing_status: String,
     pub publishing_type: String,
     pub start_date: String,
+    /// True for a row of the `my:` search: it comes from the user's own list, so the card shows no status and
+    /// offers Refresh (T-29a-049).
+    pub from_my_list: bool,
 }
 
 impl MangaTrackSearch {
@@ -174,6 +181,7 @@ impl MangaTrackSearch {
             publishing_status: String::new(),
             publishing_type: String::new(),
             start_date: String::new(),
+            from_my_list: false,
         }
     }
 

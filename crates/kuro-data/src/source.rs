@@ -19,6 +19,13 @@ pub struct StubSource {
     pub name: String,
 }
 
+/// `StubSource.toString()`: the id, whatever the name and language are.
+impl std::fmt::Display for StubSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.id)
+    }
+}
+
 impl StubSource {
     /// `name.isBlank() || lang.isBlank()`.
     pub fn is_invalid(&self) -> bool {
@@ -124,6 +131,13 @@ mod tests {
 
     use super::*;
     use crate::tests::{anime_db, manga_db};
+
+    #[test]
+    fn a_blank_stub_is_representable_and_prints_its_id() {
+        let blank = StubSource { id: 42, lang: String::new(), name: String::new() };
+        assert!(blank.is_invalid());
+        assert_eq!(blank.to_string(), "42");
+    }
 
     #[test]
     fn display_name_uses_the_upper_case_language_or_the_id_when_blank() {

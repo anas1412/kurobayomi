@@ -1,0 +1,73 @@
+[
+  {
+    "name": "Alpha",
+    "pkg": "eu.example.alpha",
+    "version": "1.4.1",
+    "lang": "en",
+    "nsfw": false,
+    "has_update": true,
+    "obsolete": false,
+    "torrent": false,
+    "sources": [
+      {
+        "id": 11,
+        "name": "Alpha One",
+        "lang": "en",
+        "base_url": "https://alpha.example"
+      },
+      {
+        "id": 12,
+        "name": "Alpha Two",
+        "lang": "en",
+        "base_url": "https://alpha2.example"
+      }
+    ]
+  },
+  {
+    "name": "Bravo",
+    "pkg": "eu.example.bravo",
+    "version": "1.4.2",
+    "lang": "en",
+    "nsfw": true,
+    "has_update": false,
+    "obsolete": true,
+    "torrent": false,
+    "sources": [
+      {
+        "id": 21,
+        "name": "Bravo",
+        "lang": "en",
+        "base_url": "https://bravo.example"
+      }
+    ]
+  },
+  {
+    "name": "Zeta",
+    "pkg": "eu.example.charlie",
+    "version": "1.4.3",
+    "lang": "ja",
+    "nsfw": false,
+    "has_update": false,
+    "obsolete": false,
+    "torrent": false,
+    "sources": [
+      {
+        "id": 31,
+        "name": "Charlie",
+        "lang": "ja",
+        "base_url": "https://charlie.example"
+      }
+    ]
+  },
+  {
+    "name": "Delta",
+    "pkg": "eu.example.delta",
+    "version": "1.4.4",
+    "lang": "en",
+    "nsfw": false,
+    "has_update": false,
+    "obsolete": false,
+    "torrent": true,
+    "sources": []
+  }
+]

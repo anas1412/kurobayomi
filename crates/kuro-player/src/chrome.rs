@@ -101,9 +101,45 @@ pub fn primary_slot(skip_text: Option<&str>, custom_title: Option<&str>) -> Prim
     }
 }
 
-/// The picture-in-picture button shows only when the mini-player exists on this platform.
-pub fn pip_button_visible(mini_player_available: bool) -> bool {
-    mini_player_available
+/// The picture-in-picture button: shown only when `pref_enable_pip` is on, and disabled while a
+/// new episode is loading (PC:508).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PipButton {
+    pub visible: bool,
+    pub enabled: bool,
+}
+
+pub fn pip_button(pref_enable_pip: bool, loading: bool) -> PipButton {
+    PipButton {
+        visible: pref_enable_pip,
+        enabled: !loading,
+    }
+}
+
+/// The chapter text `"<mm:ss> • <name>"` of the chapter pill and the chapter button (T-46a-052,
+/// T-45b-076). The time is the chapter start in whole seconds.
+pub fn chapter_text(start_secs: f64, name: &str) -> String {
+    format!(
+        "{} • {name}",
+        crate::numfmt::format_elapsed(start_secs as i64)
+    )
+}
+
+/// Direction of the pill text animation when the chapter changes: forward slides up, backward
+/// slides down, and no change (or the first chapter shown) does not animate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChapterSlide {
+    Up,
+    Down,
+    None,
+}
+
+pub fn chapter_slide(previous: Option<usize>, current: usize) -> ChapterSlide {
+    match previous {
+        Some(prev) if current > prev => ChapterSlide::Up,
+        Some(prev) if current < prev => ChapterSlide::Down,
+        _ => ChapterSlide::None,
+    }
 }
 
 /// Next aspect for the aspect button: Fit, then Stretch, then Crop, then Fit.
@@ -195,6 +231,32 @@ mod tests {
         assert_eq!(next_aspect(VideoAspect::Fit), VideoAspect::Stretch);
         assert_eq!(next_aspect(VideoAspect::Stretch), VideoAspect::Crop);
         assert_eq!(next_aspect(VideoAspect::Crop), VideoAspect::Fit);
-        assert!(pip_button_visible(true) && !pip_button_visible(false));
+    }
+
+    #[test]
+    fn pip_button_follows_the_preference_and_loading() {
+        assert_eq!(
+            pip_button(true, false),
+            PipButton {
+                visible: true,
+                enabled: true
+            }
+        );
+        assert!(!pip_button(true, true).enabled);
+        assert!(!pip_button(false, false).visible);
+    }
+
+    #[test]
+    fn chapter_text_is_time_bullet_name() {
+        assert_eq!(chapter_text(85.0, "Intro"), "01:25 • Intro");
+        assert_eq!(chapter_text(3725.0, "Credits"), "1:02:05 • Credits");
+    }
+
+    #[test]
+    fn chapter_change_slides_by_direction() {
+        assert_eq!(chapter_slide(Some(1), 2), ChapterSlide::Up);
+        assert_eq!(chapter_slide(Some(2), 1), ChapterSlide::Down);
+        assert_eq!(chapter_slide(Some(2), 2), ChapterSlide::None);
+        assert_eq!(chapter_slide(None, 0), ChapterSlide::None);
     }
 }

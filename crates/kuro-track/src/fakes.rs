@@ -125,8 +125,12 @@ pub struct FakeAnime {
     pub log: Log,
     pub enhanced: bool,
     pub deletable: bool,
+    /// The remove dialog deletes the local row before the remote one.
+    pub local_first: bool,
     pub accepted: &'static [&'static str],
     pub fail: Mutex<Option<String>>,
+    /// When set, `refresh` (the first call of a progress update) waits on it first. Two trackers sharing a barrier of 2 finish only when they run together.
+    pub gate: Mutex<Option<Arc<tokio::sync::Barrier>>>,
     /// Overrides of the capability defaults, for the row gating tests.
     pub private_support: bool,
     pub reading_dates: bool,
@@ -140,8 +144,10 @@ impl FakeAnime {
             log,
             enhanced: false,
             deletable: false,
+            local_first: false,
             accepted: &[],
             fail: Mutex::new(None),
+            gate: Mutex::new(None),
             private_support: false,
             reading_dates: false,
             scores: SCORES.iter().map(|s| s.to_string()).collect(),
@@ -152,6 +158,13 @@ impl FakeAnime {
         match self.fail.lock().unwrap().clone() {
             Some(m) => Err(TrackError::Message(m)),
             None => Ok(()),
+        }
+    }
+
+    async fn wait_gate(&self) {
+        let gate = self.gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            gate.wait().await;
         }
     }
 }
@@ -166,6 +179,9 @@ impl Tracker for FakeAnime {
     }
     fn supports_private_tracking(&self) -> bool {
         self.private_support
+    }
+    fn removes_local_first(&self) -> bool {
+        self.local_first
     }
     fn supports_reading_dates(&self) -> bool {
         self.reading_dates
@@ -265,6 +281,7 @@ impl AnimeTracker for FakeAnime {
         )])
     }
     async fn refresh(&self, t: &AnimeTrack) -> Result<AnimeTrack, TrackError> {
+        self.wait_gate().await;
         self.check_fail()?;
         Ok(t.clone())
     }
@@ -310,6 +327,8 @@ pub struct FakeManga {
     pub deletable: bool,
     pub accepted: &'static [&'static str],
     pub fail: Mutex<Option<String>>,
+    /// See [`FakeAnime::gate`].
+    pub gate: Mutex<Option<Arc<tokio::sync::Barrier>>>,
     scores: Vec<String>,
 }
 
@@ -322,6 +341,7 @@ impl FakeManga {
             deletable: false,
             accepted: &[],
             fail: Mutex::new(None),
+            gate: Mutex::new(None),
             scores: SCORES.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -330,6 +350,13 @@ impl FakeManga {
         match self.fail.lock().unwrap().clone() {
             Some(m) => Err(TrackError::Message(m)),
             None => Ok(()),
+        }
+    }
+
+    async fn wait_gate(&self) {
+        let gate = self.gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            gate.wait().await;
         }
     }
 }
@@ -437,6 +464,7 @@ impl MangaTracker for FakeManga {
         )])
     }
     async fn refresh(&self, t: &MangaTrack) -> Result<MangaTrack, TrackError> {
+        self.wait_gate().await;
         self.check_fail()?;
         Ok(t.clone())
     }
@@ -925,6 +953,7 @@ impl Harness {
             queue,
             scheduler,
             net: net.clone(),
+            prefs: prefs(),
             locks: BindingLocks::default(),
             events: EventBus::default(),
         });

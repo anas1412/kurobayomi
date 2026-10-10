@@ -309,6 +309,27 @@ async fn refresh_401_sets_flag_and_stops_network() {
 }
 
 #[tokio::test]
+async fn api_401_sets_the_expired_flag_and_returns_login_expired() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = tracker_for(&server, dir.path(), Arc::new(MemorySecrets::default()));
+    tracker.auth().set_token(fresh_token("a")).unwrap();
+    Mock::given(method("GET"))
+        .and(path("/v2/users/@me"))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    assert!(!tracker.auth().expired());
+    assert!(matches!(
+        tracker.api().current_user().await,
+        Err(MalError::LoginExpired)
+    ));
+    assert!(tracker.auth().expired(), "T-27a-074");
+}
+
+#[tokio::test]
 async fn refresh_400_keeps_flag_clear_and_retries() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
@@ -514,6 +535,10 @@ async fn my_manga_search_pages_offsets_zero_then_250() {
     assert_eq!(hits.len(), 251);
     assert_eq!(hits[0].remote_id, 1);
     assert_eq!(hits[250].remote_id, 251);
+    assert!(
+        hits.iter().all(|h| h.from_my_list),
+        "my: rows offer Refresh"
+    );
 }
 
 #[tokio::test]
@@ -547,6 +572,7 @@ async fn my_anime_search_reads_animelist() {
     let hits = tracker.api().search_anime("my:show").await.unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].total_episodes, 12);
+    assert!(hits[0].from_my_list);
 }
 
 #[tokio::test]

@@ -1,6 +1,8 @@
 //! Local entries in the library and the downloads (area:14 behavior 17, T-14a-044). The update and sync rules (T-14a-045,
 //! T-14a-046) are in `kuro-domain` (`app::update`, `items::chapter_sync`, `items::episode_sync`), which the app calls.
 
+use std::path::Path;
+
 use crate::format::{is_anime_episode, is_manga_archive};
 use crate::fs::FsEntry;
 use crate::ids::is_local_source;
@@ -44,11 +46,45 @@ pub fn local_anime_download_count(children: &[FsEntry]) -> usize {
         .count()
 }
 
+/// The size of a local folder in bytes: the sum of every file below it (E-SYNC-5). A missing folder is 0, and a
+/// link is not followed, so a loop cannot run forever.
+pub fn local_folder_size(dir: &Path) -> u64 {
+    let Ok(items) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    items
+        .flatten()
+        .filter_map(|item| Some((item.path(), item.metadata().ok()?)))
+        .map(|(path, meta)| {
+            if meta.is_dir() {
+                local_folder_size(&path)
+            } else if meta.is_file() {
+                meta.len()
+            } else {
+                0
+            }
+        })
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ids::LOCAL_SOURCE_ID;
     use std::path::PathBuf;
+
+    #[test]
+    fn t_14_download_size_local_recursive() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let sub = dir.path().join("Ch 1").join("pages");
+        std::fs::create_dir_all(&sub)?;
+        std::fs::write(dir.path().join("a.cbz"), [0u8; 10])?;
+        std::fs::write(dir.path().join("Ch 1").join("b.jpg"), [0u8; 5])?;
+        std::fs::write(sub.join("c.jpg"), [0u8; 7])?;
+        assert_eq!(local_folder_size(dir.path()), 22);
+        assert_eq!(local_folder_size(&dir.path().join("gone")), 0, "a missing folder is 0");
+        Ok(())
+    }
 
     fn entry(name: &str, is_dir: bool) -> FsEntry {
         FsEntry {

@@ -278,4 +278,35 @@ mod tests {
         assert_eq!(colors::of(Action::Right), 0xCCA6CFD5);
         assert_eq!(label(Action::Prev), ("nav_zone_prev", "Prev"));
     }
+
+    /// T-44a-078: every layout (six, including the default for each viewer) times every inversion. An inverted table
+    /// answers a point as the plain table answers its mirror image (E-18). The grid avoids the exact edges (0.33, 0.66),
+    /// where the half-open rule of E-17 decides, and the disabled layout answers the menu everywhere (E-19).
+    #[test]
+    fn every_layout_and_inversion_answers_as_the_mirror_of_the_plain_table() {
+        let modes = [NavMode::Default, NavMode::LShaped, NavMode::KindleIsh, NavMode::Edge, NavMode::RightAndLeft, NavMode::Disabled];
+        let viewers = [ViewerKind::LeftToRight, ViewerKind::Vertical];
+        let inversions = [TappingInvertMode::NONE, TappingInvertMode::HORIZONTAL, TappingInvertMode::VERTICAL, TappingInvertMode::BOTH];
+        for viewer in viewers {
+            for mode in modes {
+                let regions = layout(mode, viewer);
+                for inv in inversions {
+                    for i in 0..50 {
+                        for j in 0..50 {
+                            let (x, y) = (0.005 + 0.02 * f64::from(i), 0.005 + 0.02 * f64::from(j));
+                            let mx = if inv.should_invert_horizontal() { 1.0 - x } else { x };
+                            let my = if inv.should_invert_vertical() { 1.0 - y } else { y };
+                            let got = hit_test(regions, inv, x, y);
+                            let want = hit_test(regions, TappingInvertMode::NONE, mx, my);
+                            assert_eq!(got, want, "{mode:?} {viewer:?} at ({x}, {y})");
+                        }
+                    }
+                }
+            }
+        }
+        for i in 0..50 {
+            let x = 0.005 + 0.02 * f64::from(i);
+            assert_eq!(hit_test(layout(NavMode::Disabled, ViewerKind::LeftToRight), TappingInvertMode::BOTH, x, x), Action::Menu);
+        }
+    }
 }

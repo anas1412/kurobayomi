@@ -1,8 +1,15 @@
 //! Player UI state model (area 45 p1-rust-design section 3.4). Plain data, no GTK. The GTK
 //! window owns one `PlayerState` and applies mpv events to it on the main loop.
 
-use crate::custom_buttons::CustomButton;
-use crate::enums::{Dialogs, Panels, Sheets};
+use kuro_data::anime::Anime;
+use kuro_data::episode::Episode;
+
+use crate::chapters::Segment;
+use crate::custom_buttons::{CustomButton, FetchState};
+use crate::enums::{Decoder, Dialogs, Panels, Sheets};
+use crate::pill::PlayerUpdate;
+use crate::tracks::VideoTrack;
+use crate::types::{Hoster, HosterState, Video};
 
 /// The reason text given to the idle inhibitor while a video plays (T-45a-041).
 pub const INHIBIT_REASON: &str = "Playing video";
@@ -52,6 +59,66 @@ pub struct PlayerState {
     pub primary_button: Option<CustomButton>,
     /// `_primaryButtonTitle`: set by `set_button_title` or from the favourite button's name.
     pub primary_button_title: String,
+
+    // playlist and episode (PlayerViewModel.kt:180-206)
+    /// `_currentPlaylist`: the episodes after the filter.
+    pub playlist: Vec<Episode>,
+    pub current_episode: Option<Episode>,
+    pub current_anime: Option<Anime>,
+    /// `_currentSource`, as the source id (the source object lives with the session).
+    pub current_source: Option<i64>,
+    pub has_prev: bool,
+    pub has_next: bool,
+    pub is_episode_online: bool,
+    /// `anime.episode_flags` snapshot the playlist was filtered with.
+    pub playlist_flags: i64,
+    pub anime_title: String,
+    pub media_title: String,
+    /// `_currentDecoder`.
+    pub decoder: Decoder,
+
+    // tracks (PlayerViewModel.kt:208-222)
+    pub sub_tracks: Vec<VideoTrack>,
+    /// `(primary, secondary)`; `-1` is none.
+    pub selected_sub: (i64, i64),
+    pub audio_tracks: Vec<VideoTrack>,
+    pub selected_audio: i64,
+
+    // hosters and videos (PlayerViewModel.kt:224-236)
+    pub hoster_list: Vec<Hoster>,
+    pub hoster_state: Vec<HosterState>,
+    pub hoster_expanded: Vec<bool>,
+    /// `(hoster, video)`; `(-1, -1)` is none.
+    pub selected_hoster_video: (i32, i32),
+    pub current_video: Option<Video>,
+
+    // chapters and skip intro (PlayerViewModel.kt:238-243)
+    pub chapters: Vec<Segment>,
+    pub current_chapter: Option<Segment>,
+    pub skip_intro_text: Option<String>,
+
+    // position (PlayerViewModel.kt:245-286)
+    pub read_ahead: f32,
+    pub seek_position: f32,
+    pub is_seeking: bool,
+    /// `_pausedState`: the pause to apply once the file loads. `Some(false)`: do not start paused.
+    pub paused_state: Option<bool>,
+    pub seek_text: Option<String>,
+    pub double_tap_seek_amount: i32,
+    pub is_seeking_forwards: bool,
+
+    // volume, brightness and one-shots (PlayerViewModel.kt:288-312)
+    pub volume_system: i32,
+    pub volume_mpv: i32,
+    /// `volume-max - 100`.
+    pub volume_boost_cap: i32,
+    pub brightness: f32,
+    pub is_brightness_slider_shown: bool,
+    pub is_volume_slider_shown: bool,
+    pub player_update: PlayerUpdate,
+    /// `_remainingTime` of the sleep timer, in seconds.
+    pub remaining_sleep: i32,
+    pub custom_buttons: FetchState,
 }
 
 impl Default for PlayerState {
@@ -59,10 +126,10 @@ impl Default for PlayerState {
         Self {
             is_exiting: false,
             paused: None,
-            is_loading: false,
+            is_loading: true,
             is_loading_episode: false,
-            is_loading_hosters: false,
-            is_loading_tracks: false,
+            is_loading_hosters: true,
+            is_loading_tracks: true,
             duration: 0.0,
             pos: 0.0,
             playback_speed: 1.0,
@@ -78,6 +145,45 @@ impl Default for PlayerState {
             dismiss_sheet: false,
             primary_button: None,
             primary_button_title: String::new(),
+            playlist: Vec::new(),
+            current_episode: None,
+            current_anime: None,
+            current_source: None,
+            has_prev: false,
+            has_next: false,
+            is_episode_online: false,
+            playlist_flags: 0,
+            anime_title: String::new(),
+            media_title: String::new(),
+            decoder: Decoder::Auto,
+            sub_tracks: Vec::new(),
+            selected_sub: (-1, -1),
+            audio_tracks: Vec::new(),
+            selected_audio: -1,
+            hoster_list: Vec::new(),
+            hoster_state: Vec::new(),
+            hoster_expanded: Vec::new(),
+            selected_hoster_video: (-1, -1),
+            current_video: None,
+            chapters: Vec::new(),
+            current_chapter: None,
+            skip_intro_text: None,
+            read_ahead: 0.0,
+            seek_position: 0.0,
+            is_seeking: false,
+            paused_state: Some(false),
+            seek_text: None,
+            double_tap_seek_amount: 0,
+            is_seeking_forwards: false,
+            volume_system: 0,
+            volume_mpv: 100,
+            volume_boost_cap: 30,
+            brightness: 0.0,
+            is_brightness_slider_shown: false,
+            is_volume_slider_shown: false,
+            player_update: PlayerUpdate::None,
+            remaining_sleep: 0,
+            custom_buttons: FetchState::Loading,
         }
     }
 }
@@ -186,6 +292,26 @@ impl PlayerState {
         }
     }
 
+    /// Applies `idle_inhibit()` (T-45a-041): holds the idle inhibition while playing and releases it
+    /// on pause or close. `inhibit` is `gtk::Application::inhibit` with the idle flag and the given
+    /// reason, and returns the cookie; `uninhibit` is `gtk::Application::uninhibit`. The cookie is
+    /// kept in `keep_awake`. Call it after every change to `paused` or `is_exiting`.
+    pub fn sync_idle_inhibit(
+        &mut self,
+        inhibit: impl FnOnce(&str) -> u32,
+        uninhibit: impl FnOnce(u32),
+    ) {
+        match self.idle_inhibit() {
+            IdleInhibit::Inhibit => self.keep_awake = Some(inhibit(INHIBIT_REASON)),
+            IdleInhibit::Release => {
+                if let Some(cookie) = self.keep_awake.take() {
+                    uninhibit(cookie);
+                }
+            }
+            IdleInhibit::Keep => {}
+        }
+    }
+
     /// `lock_controls`: the controls stay hidden except the unlock affordance (behaviour 1.5).
     pub fn lock_controls(&mut self) {
         self.controls_locked = true;
@@ -266,6 +392,94 @@ mod tests {
         s.paused = Some(false);
         s.is_exiting = true;
         assert_eq!(s.idle_inhibit(), IdleInhibit::Release);
+    }
+
+    #[test]
+    fn sync_idle_inhibit_holds_one_cookie_while_playing_and_releases_it() {
+        let mut s = PlayerState::default();
+        let log = std::cell::RefCell::new(Vec::<String>::new());
+        let sync = |s: &mut PlayerState| {
+            s.sync_idle_inhibit(
+                |reason| {
+                    log.borrow_mut().push(format!("inhibit {reason}"));
+                    42
+                },
+                |cookie| log.borrow_mut().push(format!("uninhibit {cookie}")),
+            );
+        };
+        sync(&mut s);
+        assert_eq!(
+            s.keep_awake, None,
+            "nothing is held before mpv reports a value"
+        );
+        s.paused = Some(false);
+        sync(&mut s);
+        sync(&mut s);
+        assert_eq!(s.keep_awake, Some(42));
+        s.paused = Some(true);
+        sync(&mut s);
+        assert_eq!(s.keep_awake, None);
+        s.paused = Some(false);
+        sync(&mut s);
+        s.is_exiting = true;
+        sync(&mut s);
+        assert_eq!(s.keep_awake, None);
+        assert_eq!(
+            *log.borrow(),
+            vec![
+                "inhibit Playing video".to_owned(),
+                "uninhibit 42".to_owned(),
+                "inhibit Playing video".to_owned(),
+                "uninhibit 42".to_owned(),
+            ]
+        );
+    }
+
+    /// Every initial value of `PlayerViewModel.kt:180-326` (T-45b-002). `paused` stays `None`
+    /// until mpv reports the first `pause` value, so the idle inhibitor does not hold before then.
+    #[test]
+    fn initial_values_match_the_view_model() {
+        let s = PlayerState::default();
+        assert!(s.playlist.is_empty());
+        assert!(s.current_episode.is_none() && s.current_anime.is_none());
+        assert_eq!(s.current_source, None);
+        assert!(!s.has_prev && !s.has_next && !s.is_episode_online);
+        assert_eq!(s.decoder, Decoder::Auto);
+        assert!(s.media_title.is_empty() && s.anime_title.is_empty());
+        assert!(s.is_loading && s.is_loading_tracks && s.is_loading_hosters);
+        assert!(!s.is_loading_episode);
+        assert_eq!(s.playback_speed, 1.0);
+        assert!(s.sub_tracks.is_empty() && s.audio_tracks.is_empty());
+        assert_eq!(s.selected_sub, (-1, -1));
+        assert_eq!(s.selected_audio, -1);
+        assert!(s.hoster_list.is_empty() && s.hoster_state.is_empty());
+        assert!(s.hoster_expanded.is_empty());
+        assert_eq!(s.selected_hoster_video, (-1, -1));
+        assert!(s.current_video.is_none());
+        assert!(s.chapters.is_empty() && s.current_chapter.is_none());
+        assert_eq!(s.skip_intro_text, None);
+        assert_eq!((s.pos, s.duration, s.read_ahead), (0.0, 0.0, 0.0));
+        assert_eq!(s.seek_position, 0.0);
+        assert!(!s.is_seeking);
+        assert_eq!(s.paused_state, Some(false));
+        assert_eq!(s.paused, None);
+        assert!(s.controls_shown && s.seek_bar_shown && !s.controls_locked);
+        assert_eq!(s.player_update, PlayerUpdate::None);
+        assert!(!s.is_brightness_slider_shown && !s.is_volume_slider_shown);
+        assert_eq!(s.brightness, 0.0);
+        assert_eq!(
+            (s.volume_system, s.volume_mpv, s.volume_boost_cap),
+            (0, 100, 30)
+        );
+        assert_eq!(s.seek_text, None);
+        assert_eq!(s.double_tap_seek_amount, 0);
+        assert!(!s.is_seeking_forwards);
+        assert_eq!(s.remaining_sleep, 0);
+        assert_eq!(s.custom_buttons, FetchState::Loading);
+        assert!(s.primary_button.is_none() && s.primary_button_title.is_empty());
+        assert_eq!(s.playlist_flags, 0);
+        assert!(!s.dismiss_sheet);
+        assert_eq!(s.sheet, Sheets::None);
     }
 
     #[test]

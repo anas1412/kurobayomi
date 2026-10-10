@@ -15,6 +15,17 @@ use crate::{DataResult, ENTRY_DEBOUNCE};
 /// Tables a button list reads.
 const BUTTON_TABLES: &[&str] = &["custom_buttons"];
 
+/// A whole button as a backup stores it, for [`CustomButtonRepo::insert_raw`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RawCustomButton {
+    pub name: String,
+    pub is_favorite: bool,
+    pub sort_index: i64,
+    pub content: String,
+    pub long_press_content: String,
+    pub on_startup: String,
+}
+
 /// A partial update of one button. `None` keeps the stored column.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CustomButtonUpdate {
@@ -90,6 +101,26 @@ impl CustomButtonRepo {
         self.db.write(|tx| Ok(sa::create_custom_button(tx, name, content, long_press_content, on_startup)?))
     }
 
+    /// Restore path (`insert_raw`): inserts a button with its stored favourite flag and sort index, and returns its
+    /// id. Unlike [`CustomButtonRepo::create`], the caller decides the index and the favourite state.
+    pub fn insert_raw(&self, raw: &RawCustomButton) -> DataResult<i64> {
+        self.db.write(|tx| {
+            tx.execute(
+                "INSERT INTO custom_buttons(name, isFavorite, sortIndex, content, longPressContent, onStartup) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    raw.name,
+                    raw.is_favorite,
+                    raw.sort_index,
+                    raw.content,
+                    raw.long_press_content,
+                    raw.on_startup
+                ],
+            )?;
+            Ok(tx.last_insert_rowid())
+        })
+    }
+
     /// Coalesce update of one button. Returns the rows changed: `0` for an unknown id.
     pub fn update(&self, u: &CustomButtonUpdate) -> DataResult<usize> {
         self.db.write(|tx| Ok(sa::update_custom_button(tx, u.id, &u.to_row())?))
@@ -153,6 +184,33 @@ mod tests {
         assert_eq!((seed.id, seed.name.as_str(), seed.is_favorite, seed.sort_index), (1, "+85 s", true, 0));
         assert!(seed.on_startup.contains("\n\t"), "tab characters are kept byte for byte");
         assert!(!seed.content.is_empty() && !seed.long_press_content.is_empty());
+    }
+
+    #[test]
+    fn insert_raw_keeps_the_favourite_flag_and_index_given() {
+        let (_d, repo) = repo();
+        let raw = RawCustomButton {
+            name: "Restored".into(),
+            is_favorite: true,
+            sort_index: 7,
+            content: "c".into(),
+            long_press_content: "l".into(),
+            on_startup: "s".into(),
+        };
+        let id = repo.insert_raw(&raw).unwrap();
+        let row = repo.get_all().unwrap().into_iter().find(|b| b.id == id).expect("inserted");
+        assert_eq!((row.name.as_str(), row.is_favorite, row.sort_index), ("Restored", true, 7));
+    }
+
+    #[test]
+    fn the_seed_is_not_inserted_again_when_the_file_is_reopened() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tachiyomi.animedb");
+        drop(kuro_db::schema_anime::open(&path).unwrap());
+        drop(kuro_db::schema_anime::open(&path).unwrap());
+        let writer = kuro_db::schema_anime::open(&path).unwrap();
+        let db = Arc::new(Db::new(&path, writer).unwrap());
+        assert_eq!(CustomButtonRepo::new(db).get_all().unwrap().len(), 1);
     }
 
     #[test]

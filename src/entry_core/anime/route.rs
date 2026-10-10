@@ -15,17 +15,36 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib};
-use kuro_data::anime::AnimeRepo;
+use kuro_data::anime::AnimeRelationGroup;
 use kuro_db::handle::Db;
-use kuro_domain::entries::defaults::{anime_defaults_to_library_detached, set_episode_settings_default};
+use kuro_domain::download::prefs::DownloadPrefs;
+use kuro_db::schema_anime::FetchType;
+use kuro_domain::entries::anime::AnimeExt;
+use kuro_domain::entries::defaults::{set_episode_settings_default, set_season_settings_default};
+use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_domain::kind::EntryKind;
-use kuro_i18n::{MsgKey, tr};
+use kuro_downloads::anime::layout::AnimeLayout;
+use kuro_i18n::{MsgKey, tr, tr_plural};
+use kuro_prefs::library::EpisodeSwipeAction;
+use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
 
-use super::actions::{OpenPlan, SwipeEffect, bulk_mark_targets, continue_plan, swipe_effect, tap_plan};
+use super::actions::{OpenPlan, continue_plan, tap_plan};
 use super::airing::{Airing, format_airing, visible as airing_visible};
-use super::bottom::{BottomAction, Effect, MenuContext, Selected, bottom_actions};
-use super::gesture::Click;
+use super::bottom::{BottomAction, MenuContext, Selected, bottom_actions};
+use super::download_backend::{AnimeDownloads, installed_queue};
+use super::dispatch::{bottom_cmds, swipe_cmds};
+use super::details_error::{DetailsError, required};
+use super::downloads::{DownloadMenu, NEXT_COUNTS, menu_visible};
+use super::duplicate::Choice;
+use super::images::ImageKind;
+use super::images_view;
+use super::season_grid::{Layout, SeasonGrid};
+use super::season_settings_view::SeasonSettingsWindow;
+use super::season_tile::{Overlays, SeasonItem, continue_episode, season_facts, season_item};
+use super::set_default::{self, Scope};
+use super::swipe_look::{self, DownloadState, EpisodeState};
+use super::selection::Click;
 use super::info::header_model;
 use super::layout::{bottom_bar_width, fab_expanded, two_pane};
 use super::model::{AnimeEntryModel, AnimeLoadContext};
@@ -33,15 +52,19 @@ use super::refresh::refresh_snack;
 use super::remote::{NoSources, RemoteAnimeBackend};
 use super::row_view::{EpisodeList, EpisodeSwipe};
 use super::runner::{self, AnimeBackend, AnimeCmd, AnimeEvent, AnimeRunner};
-use super::settings::default_saved_message;
 use super::settings_view::{Change, SettingsWindow};
 use super::store::AnimeStore;
-use super::info_view;
+use super::{duplicate_view, info_view, related_view};
 use crate::data;
 use crate::entry_core::banner_view::{self, BannerView};
-use crate::entry_core::chapter_actions::previous_ids;
+use crate::entry_core::category_dialog_view;
 use crate::entry_core::description_view;
+use crate::entry_core::dialog::CategoryDialog;
+use crate::entry_core::handoff::{self, MigrateRequest, WebViewRequest};
 use crate::entry_core::header::{HeaderModel, SearchRequest};
+use crate::entry_core::action_row::{TrackingClick, interval_click_opens_dialog, next_update, tracking_click};
+use crate::entry_core::action_row_view::{ActionRow, RowState};
+use crate::entry_core::fetch_interval_dialog;
 use crate::entry_core::header_view::{Handlers, LibraryButton};
 use crate::entry_core::message::{Notices, UserMessage, present};
 use crate::entry_core::text::{Description, Expansion, description};
@@ -67,14 +90,14 @@ pub fn open(anime_id: i64) {
     ui::push(&page_for(anime_id));
 }
 
-/// The page for the `anime_entry_details` screen id. Without a target it is the mockup page, so a caller that has no
-/// row to name yet keeps working.
+/// The page for the `anime_entry_details` screen id. Without a target there is no row to show, so it is the page of a
+/// row that does not exist: the "not found" state with a Back button.
 pub fn build() -> GBox {
-    match TARGET.with(Cell::take) {
-        Some(id) => page_for(id),
-        None => crate::entry::entry("Title 1", true),
-    }
+    page_for(TARGET.with(Cell::take).unwrap_or(NO_ENTRY))
 }
+
+/// An id no row has (ids start at 1): `open(NO_ENTRY)` shows the "not found" page, for a caller that has no row to name.
+pub const NO_ENTRY: i64 = 0;
 
 fn page_for(anime_id: i64) -> GBox {
     let app = data::app();
@@ -88,7 +111,10 @@ fn page_for(anime_id: i64) -> GBox {
     };
     let handle = tokio::runtime::Handle::current();
     // no registry of live anime sources yet: every fetch reports that the source is not installed
-    let backend: Arc<dyn AnimeBackend> = Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(NoSources), handle.clone()));
+    let root = crate::shell::host::Shell::get().map(|shell| shell.downloads().root().to_path_buf());
+    let downloads = AnimeDownloads::new(AnimeLayout::new(root), installed_queue());
+    let backend: Arc<dyn AnimeBackend> =
+        Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(NoSources), handle.clone()).with_downloads(downloads));
     let runner = Rc::new(runner::spawn(&handle, AnimeStore::new(Arc::clone(&db)), prefs.clone(), Arc::clone(&backend), ctx));
     runner.send(AnimeCmd::Load { anime_id });
     assemble(runner, show_airing, Env { prefs, backend, db, handle: Some(handle) })
@@ -117,7 +143,9 @@ struct View {
     notices: RefCell<Notices<AnimeCmd>>,
     snack: BannerView,
     library: LibraryButton,
+    action_row: ActionRow,
     refresh_button: Button,
+    download_menu: gtk::MenuButton,
     bottom: gtk::Revealer,
     bottom_row: GBox,
     stack: gtk::Stack,
@@ -146,10 +174,18 @@ struct View {
     bar: gtk::Revealer,
     bar_count: Label,
     settings: RefCell<Option<Rc<SettingsWindow>>>,
+    season_settings: RefCell<Option<Rc<SeasonSettingsWindow>>>,
+    seasons: SeasonGrid,
+    /// What the season grid shows: its cells, columns, whether the size is fixed, and the width bucket.
+    seasons_shown: RefCell<Option<(Vec<SeasonItem>, Layout)>>,
     two_pane: Cell<Option<bool>>,
     width: Cell<i32>,
     built: RefCell<Option<(HeaderModel, Description, bool)>>,
     expansion: Rc<Cell<Expansion>>,
+    /// The related groups the runner published, the box they are drawn in (under the description) and what it shows.
+    related: RefCell<Vec<AnimeRelationGroup>>,
+    related_host: GBox,
+    related_shown: RefCell<Option<(Vec<AnimeRelationGroup>, kuro_prefs::library::LibraryDisplayMode)>>,
 }
 
 fn icon_button(icon: &str, tip: &str) -> Button {
@@ -214,12 +250,55 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     let empty = ui::dim(&tr(MsgKey::no_episodes_error));
     empty.set_halign(Align::Center);
     empty.set_wrap(true);
+    let weak_view: Rc<RefCell<Weak<View>>> = Rc::default();
+    // a `Seasons` entry lists its seasons in a grid under the head; the grid is hidden for an episode list. A tile's
+    // continue button plays the next unseen episode of that season.
+    let seasons = SeasonGrid::new(
+        Rc::new(open),
+        Some(Rc::new({
+            let weak = Rc::clone(&weak_view);
+            move |season_id: i64| {
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.continue_season(season_id);
+                }
+            }
+        })),
+    );
     let list_head = GBox::new(O::Vertical, 4);
     list_head.append(&header_button);
     list_head.append(&spinner);
     list_head.append(&empty);
+    list_head.append(&seasons.widget);
 
-    let weak_view: Rc<RefCell<Weak<View>>> = Rc::default();
+    // the action row (T-39a-026): library, interval (the dialog of T-38a-028), tracking and WebView. WebView shows
+    // only for an HTTP source (`RowState::webview`).
+    let action_row = ActionRow::new(
+        Rc::new({
+            let weak = Rc::clone(&weak_view);
+            move || {
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.open_interval();
+                }
+            }
+        }),
+        Some(Rc::new({
+            let weak = Rc::clone(&weak_view);
+            move || {
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.tracking_pressed();
+                }
+            }
+        })),
+        Some(Rc::new({
+            let weak = Rc::clone(&weak_view);
+            move || {
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.webview_pressed();
+                }
+            }
+        })),
+    );
+    let library = action_row.library.clone();
     let list = EpisodeList::new(
         {
             let weak = Rc::clone(&weak_view);
@@ -237,6 +316,14 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
                 }
             })
         },
+        {
+            let weak = Rc::clone(&weak_view);
+            Rc::new(move |id: i64| {
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.summary_pressed(id);
+                }
+            })
+        },
         crate::data::is_installed().then(|| EpisodeSwipe {
             prefs: Rc::new((*data::app().library).clone()),
             run: {
@@ -245,6 +332,20 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
                     if let Some(view) = weak.borrow().upgrade() {
                         view.swipe_pressed(id, action);
                     }
+                })
+            },
+            look: {
+                let weak = Rc::clone(&weak_view);
+                Rc::new(move |id: i64, action: EpisodeSwipeAction| {
+                    let state = weak.borrow().upgrade().and_then(|view| view.episode_state(id));
+                    state.and_then(|state| swipe_look::look(action, state))
+                })
+            },
+            menu: {
+                let weak = Rc::clone(&weak_view);
+                Rc::new(move |id: i64| {
+                    let view = weak.borrow().upgrade();
+                    view.and_then(|view| view.episode_state(id).map(|state| swipe_look::menu(state, view.env.backend.has_download_handler()))).unwrap_or_default()
                 })
             },
         }),
@@ -355,8 +456,9 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     let filter = icon_button("view-filter-symbolic", &tr(MsgKey::action_filter));
     filter.set_sensitive(false);
     let refresh_button = icon_button("view-refresh-symbolic", &tr(MsgKey::action_webview_refresh));
-    let library = LibraryButton::new();
-    let toolbar: Vec<gtk::Widget> = vec![refresh_button.clone().upcast(), filter.clone().upcast()];
+    // the Download menu: shown for an entry that is not local, when the app can queue downloads
+    let download_menu = gtk::MenuButton::builder().icon_name("folder-download-symbolic").tooltip_text(tr(MsgKey::action_download)).visible(false).build();
+    let toolbar: Vec<gtk::Widget> = vec![download_menu.clone().upcast(), refresh_button.clone().upcast(), filter.clone().upcast()];
     let page = ui::page("", &stack, toolbar.clone(), false);
     ui::tag(&page, "anime_entry_details");
     let header = page.first_child().and_downcast::<gtk::HeaderBar>();
@@ -378,7 +480,9 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         notices: RefCell::new(Notices::default()),
         snack,
         library: library.clone(),
+        action_row: action_row.clone(),
         refresh_button: refresh_button.clone(),
+        download_menu: download_menu.clone(),
         bottom,
         bottom_row,
         stack,
@@ -405,10 +509,16 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         bar,
         bar_count,
         settings: RefCell::new(None),
+        season_settings: RefCell::new(None),
+        seasons,
+        seasons_shown: RefCell::new(None),
         two_pane: Cell::new(None),
         width: Cell::new(FALLBACK_WIDTH),
         built: RefCell::new(None),
         expansion: Rc::new(Cell::new(Expansion::new(false, false))),
+        related: RefCell::new(Vec::new()),
+        related_host: GBox::new(O::Vertical, 0),
+        related_shown: RefCell::new(None),
     });
     let weak = Rc::downgrade(&view);
     *weak_view.borrow_mut() = weak.clone();
@@ -425,11 +535,36 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     };
     filter.connect_clicked(on_view(View::open_settings));
     refresh_button.connect_clicked(on_view(View::refresh));
-    library.button.connect_clicked(on_view(View::toggle_library));
+    library.connect(
+        {
+            let weak = weak.clone();
+            move || {
+                if let Some(view) = weak.upgrade() {
+                    view.toggle_library();
+                }
+            }
+        },
+        {
+            let weak = weak.clone();
+            move || {
+                if let Some(view) = weak.upgrade() {
+                    view.open_categories();
+                }
+            }
+        },
+    );
+    download_menu.set_create_popup_func({
+        let weak = weak.clone();
+        move |button| {
+            if let Some(view) = weak.upgrade() {
+                button.set_popover(Some(&view.download_popover()));
+            }
+        }
+    });
     header_button.connect_clicked(on_view(View::open_settings));
-    cancel.connect_clicked(on_view(|v| v.edit_selection(|m, _| m.selection.clear())));
-    select_all.connect_clicked(on_view(|v| v.edit_selection(|m, ids| m.selection.select_all(ids))));
-    invert.connect_clicked(on_view(|v| v.edit_selection(|m, ids| m.selection.invert(ids))));
+    cancel.connect_clicked(on_view(|v| v.edit_selection(|m, _, _| m.selection.clear())));
+    select_all.connect_clicked(on_view(|v| v.edit_selection(|m, _, full| m.selection.select_all(full))));
+    invert.connect_clicked(on_view(|v| v.edit_selection(|m, _, full| m.selection.invert(full))));
     fab.connect_clicked(on_view(View::open_next));
     back.connect_clicked(on_view(|v| {
         if !v.back_pressed() {
@@ -513,12 +648,17 @@ fn key_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
                 }
                 glib::Propagation::Stop
             }
+            // F5 refreshes like the header button (T-39a-038); a selection disables it
+            gtk::gdk::Key::F5 if !selecting => {
+                view.refresh();
+                glib::Propagation::Stop
+            }
             gtk::gdk::Key::a | gtk::gdk::Key::A if ctrl && selecting => {
-                view.edit_selection(|m, ids| m.selection.select_all(ids));
+                view.edit_selection(|m, _, full| m.selection.select_all(full));
                 glib::Propagation::Stop
             }
             gtk::gdk::Key::i | gtk::gdk::Key::I if ctrl && selecting => {
-                view.edit_selection(|m, ids| m.selection.invert(ids));
+                view.edit_selection(|m, _, full| m.selection.invert(full));
                 glib::Propagation::Stop
             }
             _ => glib::Propagation::Proceed,
@@ -544,6 +684,9 @@ impl View {
                     if let Some(settings) = self.settings.borrow().as_ref() {
                         settings.update(m.anime.episode_flags, m.downloaded_only);
                     }
+                    if let Some(settings) = self.season_settings.borrow().as_ref() {
+                        settings.update(m.anime.season_flags, m.downloaded_only);
+                    }
                 }
             }
             AnimeEvent::RefreshEnded(result) => {
@@ -555,6 +698,12 @@ impl View {
                     m.finish_refresh(result);
                 }
             }
+            AnimeEvent::Downloads(on_disk) => {
+                if let Some(m) = self.model.borrow_mut().as_mut() {
+                    m.downloaded = on_disk;
+                }
+            }
+            AnimeEvent::Categories { all, linked } => self.show_category_dialog(&all, &linked),
             AnimeEvent::Added => {}
             AnimeEvent::Removed(outcome) => {
                 // downloads exist: ask whether they go too. Dismissing the prompt keeps them.
@@ -563,15 +712,27 @@ impl View {
                     self.present(UserMessage::DeleteDownloadsForAnime, Some(AnimeCmd::DeleteDownloads { anime_id }));
                 }
             }
-            AnimeEvent::Failed(message) => tracing::warn!("anime entry: {message}"),
+            AnimeEvent::Failed(message) => self.present(UserMessage::Plain(message), None),
+            AnimeEvent::Related(groups) => *self.related.borrow_mut() = groups,
+            AnimeEvent::SeasonFacts(extras) => {
+                if let Some(m) = self.model.borrow_mut().as_mut() {
+                    m.set_season_extras(extras);
+                }
+            }
+            AnimeEvent::DefaultsApplied { scope, updated } => self.present(set_default::applied_message(scope, updated), None),
+            AnimeEvent::Duplicate { existing } => self.show_duplicate(&existing),
         }
     }
 
     /// Switches between the two layouts. It moves the info block between the left pane and the first row of the list.
     fn apply_width(self: &Rc<Self>, width: i32) {
-        self.width.set(width);
+        let resized = self.width.replace(width) != width;
         let two = two_pane(width);
         if self.two_pane.get() == Some(two) {
+            // the layout is the same, but the automatic columns of the season grid follow the width (T-39a-034)
+            if resized && let Some(m) = self.model.borrow().as_ref() {
+                self.show_seasons(m, m.anime.fetch_type == FetchType::Seasons);
+            }
             return;
         }
         self.two_pane.set(Some(two));
@@ -604,9 +765,11 @@ impl View {
         if let Some(title) = &self.title {
             title.set_label(&m.anime.title);
         }
-        let rows = m.rows();
-        let none_shown = rows.is_empty();
-        self.list.sync(rows);
+        let lines = m.lines();
+        let seasons_entry = m.anime.fetch_type == FetchType::Seasons;
+        let none_shown = if seasons_entry { m.seasons.is_empty() } else { lines.is_empty() };
+        self.list.sync(lines);
+        self.show_seasons(m, seasons_entry);
         let header = m.item_header();
         self.count.set_label(&header.count);
         self.missing.set_label(header.missing.as_deref().unwrap_or(""));
@@ -615,10 +778,23 @@ impl View {
         self.spinner.set_spinning(m.flow.refreshing);
         self.spinner.set_visible(m.flow.refreshing);
         // one refresh runs at a time
-        self.refresh_button.set_sensitive(!m.flow.refreshing);
+        self.refresh_button.set_sensitive(!m.flow.refreshing && !m.selection.is_active());
         self.empty.set_visible(none_shown && !m.flow.refreshing);
-        self.empty.set_label(&tr(MsgKey::no_episodes_error));
-        self.library.set(m.anime.favorite);
+        self.empty.set_label(&tr(if seasons_entry { MsgKey::no_seasons_error } else { MsgKey::no_episodes_error }));
+        // the anime and manga statuses share the SAnime/SManga completed code (2)
+        self.action_row.apply(&RowState {
+            favorite: m.anime.favorite,
+            next: next_update(
+                Some(m.anime.next_update),
+                chrono::Utc::now().timestamp_millis(),
+                m.anime.status == kuro_domain::entries::manga::STATUS_COMPLETED,
+            ),
+            user_interval: m.anime.fetch_interval < 0,
+            tracking_count: m.tracking_count as i64,
+            has_tracking: true,
+            webview: self.env.backend.is_http_source(m.anime.source),
+        });
+        self.download_menu.set_visible(menu_visible(m.is_local(), self.env.backend.has_download_handler()));
         // the button stays while nothing is selected, and is disabled when no episode is unseen (T-EPS-NEXT-1)
         let fab = m.fab();
         self.fab.set_visible(!m.selection.is_active());
@@ -629,6 +805,7 @@ impl View {
         let selected = m.selection.count_in(&m.processed_ids());
         self.bar_count.set_label(&format!("{selected} {}", tr(MsgKey::selected).to_lowercase()));
         self.rebuild_top(m);
+        self.render_related();
         self.render_bottom(m);
         drop(model);
         self.render_snack();
@@ -642,10 +819,10 @@ impl View {
             .episodes
             .iter()
             .filter(|e| m.selection.contains(e.id))
-            .map(|e| Selected { bookmark: e.bookmark, fillermark: e.fillermark, seen: e.seen, last_second_seen: e.last_second_seen, downloaded: false })
+            .map(|e| Selected { bookmark: e.bookmark, fillermark: e.fillermark, seen: e.seen, last_second_seen: e.last_second_seen, downloaded: m.downloaded.contains(&e.id) })
             .collect();
-        // no anime download queue is wired, so the bar has no download handler and offers no Download or Delete
-        let ctx = MenuContext { has_download_handler: false, always_external: always_external(&self.env.prefs) };
+        // Download and Delete show only when the app can queue downloads (`onDownloadEpisode != null`)
+        let ctx = MenuContext { has_download_handler: self.env.backend.has_download_handler(), always_external: always_external(&self.env.prefs) };
         let rows = bottom_actions(&selected, ctx);
         while let Some(child) = self.bottom_row.first_child() {
             self.bottom_row.remove(&child);
@@ -681,59 +858,37 @@ impl View {
     /// A press on a row of the bottom bar: the writes use the selected episodes that differ, and the selection is
     /// cleared after the call (behaviour 11.2).
     fn bottom_pressed(self: &Rc<Self>, action: BottomAction) {
-        let anime_id;
-        let (cmds, open) = {
+        let remove = self.remove_after_seen();
+        let dispatch = {
             let mut model = self.model.borrow_mut();
             let Some(m) = model.as_mut().filter(|m| m.accepts_dispatch()) else { return };
-            anime_id = m.anime.id;
-            let selected: Vec<_> = m.episodes.iter().filter(|e| m.selection.contains(e.id)).cloned().collect();
-            let mut open = None;
-            let cmds = match action.effect() {
-                Effect::Mark(mark, on) => vec![AnimeCmd::SetMark { ids: bulk_mark_targets(&selected, mark, on), mark, on }],
-                Effect::Seen(seen) => {
-                    let ids = selected.iter().filter(|e| e.seen != seen || (!seen && e.last_second_seen > 0)).map(|e| e.id).collect();
-                    vec![AnimeCmd::SetSeen { ids, seen: seen }]
-                }
-                Effect::PreviousSeen => {
-                    let pointer = selected.first().map(|e| e.id);
-                    let ids = pointer
-                        .map(|p| previous_ids(&m.processed_ids(), p, m.filters().is_some_and(|f| f.descending)))
-                        .unwrap_or_default();
-                    // only the unseen ones change
-                    let ids = ids.into_iter().filter(|id| m.episodes.iter().any(|e| e.id == *id && !e.seen)).collect();
-                    vec![AnimeCmd::SetSeen { ids, seen: true }]
-                }
-                Effect::Open { external } => {
-                    open = selected.first().map(|e| (e.id, external));
-                    Vec::new()
-                }
-                // no download queue: the bar does not offer them
-                Effect::Download | Effect::Delete => Vec::new(),
-            };
+            let dispatch = bottom_cmds(m, action.effect(), remove);
             m.selection.clear();
-            (cmds, open)
+            dispatch
         };
-        let _ = anime_id;
-        for cmd in cmds {
+        for cmd in dispatch.cmds {
             self.runner.send(cmd);
         }
-        if let Some((id, external)) = open {
+        if let Some((id, external)) = dispatch.open {
             self.open_episode(id, OpenPlan { external, torrent_server: self.torrent_server_needed() });
         }
         self.render();
     }
 
+    /// `pref_remove_after_marked_as_read`: a mark seen deletes the downloads of the episodes it changed (T-39b-013).
+    fn remove_after_seen(&self) -> bool {
+        DownloadPrefs::new(&self.env.prefs).remove_after_marked_as_read.get()
+    }
+
     /// A swipe on a row: the action of the side, written for that one episode. It works while selecting too (E-5).
     fn swipe_pressed(self: &Rc<Self>, id: i64, action: kuro_prefs::library::EpisodeSwipeAction) {
-        let effect = {
+        let cmds = {
             let model = self.model.borrow();
             let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
-            m.episodes.iter().find(|e| e.id == id).and_then(|e| swipe_effect(action, e))
+            swipe_cmds(m, id, action, self.env.backend.has_download_handler(), self.remove_after_seen())
         };
-        match effect {
-            Some(SwipeEffect::Seen { id, seen }) => self.runner.send(AnimeCmd::SetSeen { ids: vec![id], seen }),
-            Some(SwipeEffect::Mark { ids, mark, on }) => self.runner.send(AnimeCmd::SetMark { ids, mark, on }),
-            None => {}
+        for cmd in cmds {
+            self.runner.send(cmd);
         }
     }
 
@@ -781,11 +936,159 @@ impl View {
         self.render();
     }
 
+    /// The interval button (T-39a-026): the dialog of a favorite. OK and Reset store the wheel through the runner.
+    fn open_interval(self: &Rc<Self>) {
+        let (anime_id, interval, expected, favorite) = {
+            let model = self.model.borrow();
+            let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
+            let expected = (m.anime.status != kuro_domain::entries::manga::STATUS_COMPLETED).then_some(m.anime.next_update);
+            (m.anime.id, m.anime.fetch_interval, expected, m.anime.favorite)
+        };
+        if !interval_click_opens_dialog(favorite) {
+            return;
+        }
+        let runner = self.runner.clone();
+        fetch_interval_dialog::open(interval, expected, move |wheel| {
+            runner.send(AnimeCmd::SetFetchInterval { anime_id, wheel });
+        });
+    }
+
     /// The library button: adds the entry, or removes it from the library.
     fn toggle_library(self: &Rc<Self>) {
+        let target = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| (m.anime.id, m.anime.favorite));
+        match target {
+            // a favorite leaves the library
+            Some((anime_id, true)) => self.runner.send(AnimeCmd::ToggleFavorite { anime_id }),
+            // an add checks for a same-named library entry first (T-39a-047)
+            Some((anime_id, false)) => self.runner.send(AnimeCmd::AddToLibrary { anime_id, check_duplicates: true }),
+            None => {}
+        }
+    }
+
+    /// The duplicate window of an add that found a same-named library entry. A row closes it first and then acts: Show
+    /// opens the entry that is there, Migrate starts the migrate flow from it, Add anyway adds without the check.
+    fn show_duplicate(&self, existing: &[kuro_data::anime::Anime]) {
+        let (Some(duplicate), Some(anime_id)) = (existing.first().cloned(), self.model.borrow().as_ref().map(|m| m.anime.id)) else { return };
+        let runner = Rc::clone(&self.runner);
+        duplicate_view::open(move |choice| match choice {
+            Choice::ShowAnime => open(duplicate.id),
+            Choice::Migrate => handoff::open_migrate(MigrateRequest { entry_id: duplicate.id, anime: true, title: duplicate.title.clone() }),
+            Choice::AddAnyway => runner.send(AnimeCmd::AddToLibrary { anime_id, check_duplicates: false }),
+        });
+    }
+
+    /// The tracking button: the tracking sheet when a tracker is logged in, the tracking settings when none is (E-25).
+    fn tracking_pressed(&self) {
+        match tracking_click(self.env.backend.has_logged_in_tracker()) {
+            TrackingClick::Sheet => ui::open("tracking_sheet"),
+            TrackingClick::Settings => ui::open("settings_tracking"),
+        }
+    }
+
+    /// The WebView button (an HTTP source only): the entry's page in the WebView.
+    fn webview_pressed(&self) {
+        let request = self.model.borrow().as_ref().map(|m| WebViewRequest { url: m.anime.url.clone(), title: m.anime.title.clone() });
+        if let Some(request) = request {
+            handoff::open_webview(request);
+        }
+    }
+
+    /// A long press on the library button of a favorite: reads the categories, and the answer opens the editor.
+    fn open_categories(&self) {
         let anime_id = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.id);
         if let Some(anime_id) = anime_id {
-            self.runner.send(AnimeCmd::ToggleFavorite { anime_id });
+            self.runner.send(AnimeCmd::LoadCategories { anime_id });
+        }
+    }
+
+    /// The category editor over the answer of `LoadCategories`. OK writes the checked ids; any other way out writes
+    /// nothing.
+    fn show_category_dialog(&self, all: &[(i64, String)], linked: &[i64]) {
+        let Some(anime_id) = self.model.borrow().as_ref().map(|m| m.anime.id) else { return };
+        let runner = Rc::clone(&self.runner);
+        category_dialog_view::open(
+            CategoryDialog::new(anime_id, false, all, linked),
+            move |category_ids| runner.send(AnimeCmd::SetCategories { anime_id, category_ids }),
+            || {},
+        );
+    }
+
+    /// The width the season grid has: the page, or the right pane of the two-pane layout.
+    fn grid_width(&self) -> i32 {
+        let width = self.width.get();
+        if self.two_pane.get() == Some(true) { (width - LEFT_WIDTH - 1).max(0) } else { width }
+    }
+
+    /// The season grid of a `Seasons` entry. Its minimum column count is the entry's size setting (`Layout::columns_for`); it
+    /// is redrawn only when the cells, the columns or the width changed.
+    fn show_seasons(&self, m: &AnimeEntryModel, seasons_entry: bool) {
+        if !seasons_entry {
+            self.seasons.widget.set_visible(false);
+            *self.seasons_shown.borrow_mut() = None;
+            return;
+        }
+        let size = m.anime.season_display_grid_size();
+        let mode = m.anime.season_display_grid_mode();
+        let width = self.grid_width();
+        // the overlays are the parent entry's stored bits; the facts of a season are what the runner read for it
+        let overlays = Overlays::of(&m.anime);
+        let items: Vec<SeasonItem> = m
+            .seasons
+            .iter()
+            .map(|s| {
+                let local = s.anime.source == kuro_source::local::LOCAL_SOURCE_ID;
+                season_item(s, overlays, &season_facts(s, m.season_extras.get(&s.id()), local))
+            })
+            .collect();
+        let layout = Layout {
+            mode,
+            number_mode: m.anime.season_display_mode() == kuro_domain::entries::anime::season_flags::DISPLAY_MODE_NUMBER,
+            // the page can continue watching: a tile shows the button when its season has an unseen episode
+            has_continue: true,
+            columns: Layout::columns_for(width, i64::from(size), mode),
+            fixed: size > 0 || mode == SeasonDisplayMode::List,
+            width,
+        };
+        let key = (items, layout);
+        if self.seasons_shown.borrow().as_ref() == Some(&key) {
+            return;
+        }
+        self.seasons.set(&key.0, &key.1);
+        *self.seasons_shown.borrow_mut() = Some(key);
+    }
+
+    /// The Download menu: the next 1, 5, 10 or 25 unseen episodes, or every unseen one.
+    fn download_popover(self: &Rc<Self>) -> gtk::Popover {
+        let popover = gtk::Popover::new();
+        let col = GBox::new(O::Vertical, 2);
+        ui::margins(&col, 6);
+        let mut entries: Vec<(String, DownloadMenu)> =
+            NEXT_COUNTS.iter().map(|&n| (tr_plural(MsgKey::download_amount_anime, n as i64, &[]), DownloadMenu::Next(n))).collect();
+        entries.push((tr(MsgKey::download_unseen), DownloadMenu::Unseen));
+        for (label, menu) in entries {
+            let button = Button::builder().css_classes(["flat"]).build();
+            button.set_child(Some(&Label::builder().label(&label).xalign(0.0).build()));
+            let (weak, popover) = (Rc::downgrade(self), popover.clone());
+            button.connect_clicked(move |_| {
+                popover.popdown();
+                if let Some(view) = weak.upgrade() {
+                    view.run_download(menu);
+                }
+            });
+            col.append(&button);
+        }
+        popover.set_child(Some(&col));
+        popover
+    }
+
+    fn run_download(&self, menu: DownloadMenu) {
+        let (anime_id, ids) = {
+            let model = self.model.borrow();
+            let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
+            (m.anime.id, m.download_targets(menu))
+        };
+        if !ids.is_empty() {
+            self.runner.send(AnimeCmd::Download { anime_id, ids, start_now: false });
         }
     }
 
@@ -800,31 +1103,34 @@ impl View {
             self.top.remove(&child);
         }
         let column = if two { LEFT_WIDTH } else { self.width.get() };
-        self.top.append(&info_view::build(&key.0, two, column, &self.handlers()));
-        let text = description_view::build(&key.1, Rc::clone(&self.expansion));
+        let handlers = self.handlers();
+        self.top.append(&info_view::build(&key.0, two, column, &handlers));
+        let text = description_view::build(&key.1, Rc::clone(&self.expansion), Some((&key.0.genres, &handlers)));
         text.set_margin_start(16);
         text.set_margin_end(16);
         self.top.append(&text);
-        detach(&self.library.button);
-        self.top.append(&self.library.button);
+        // the related rows come with the description (`ExpandableAnimeDescription`)
+        detach(&self.related_host);
+        self.top.append(&self.related_host);
+        detach(&self.action_row.root);
+        self.top.append(&self.action_row.root);
         *self.built.borrow_mut() = Some(key);
     }
 
     fn handlers(self: &Rc<Self>) -> Handlers {
+        let weak = Rc::downgrade(self);
         Handlers {
-            on_search: Rc::new(|request: SearchRequest| {
-                // ponytail: the search screens take no query argument yet, so this opens them
-                ui::open(if request.global { "global_search" } else { "browse_source" });
-            }),
+            // the query goes to the opened screen through `handoff::take_search`
+            on_search: Rc::new(|request: SearchRequest| handoff::open_search(request)),
             on_copy: Rc::new(|text: String| {
                 if let Some(display) = gtk::gdk::Display::default() {
                     display.clipboard().set_text(&text);
                 }
             }),
-            on_cover: Rc::new(|| {
-                let screen = ui::screen("anime_entry_details");
-                if let Some(dialog) = screen.dialogs.iter().find(|d| d.id == "full_cover") {
-                    ui::show_dialog(dialog);
+            // a click on the cover opens the images window on the cover page
+            on_cover: Rc::new(move || {
+                if let Some(view) = weak.upgrade() {
+                    view.open_images();
                 }
             }),
         }
@@ -859,11 +1165,12 @@ impl View {
         let open = {
             let mut model = self.model.borrow_mut();
             let Some(m) = model.as_mut().filter(|m| m.accepts_dispatch()) else { return };
+            let view = m.processed_ids();
             if long {
-                m.selection.long_press(id);
+                m.selection.long_press(&view, id);
                 None
             } else {
-                match m.selection.click(id) {
+                match m.selection.click(&view, id) {
                     Click::Open(id) => Some(id),
                     Click::Toggled { .. } => None,
                 }
@@ -877,27 +1184,113 @@ impl View {
         self.render();
     }
 
+    /// A tap on a summary toggles it, unless an episode is selected (T-39a-012). The row is drawn again with its new limit.
+    fn summary_pressed(self: &Rc<Self>, id: i64) {
+        let changed = {
+            let mut model = self.model.borrow_mut();
+            let Some(m) = model.as_mut() else { return };
+            let selecting = m.selection.is_active();
+            m.summaries.click(id, selecting)
+        };
+        if changed {
+            self.render();
+        }
+    }
+
     fn is_torrent_source(&self) -> bool {
         let source = self.model.borrow().as_ref().map(|m| m.anime.source);
         source.is_some_and(|s| self.env.backend.is_torrent_source(s))
     }
 
-    /// Opens an episode as the plan says. The torrent server starts before the player, and only for a torrent source.
-    /// An external player the app cannot start falls back to the internal one.
+    /// Opens an episode as the plan says. A missing episode is a typed error shown in the snackbar, not a panic.
     fn open_episode(&self, id: i64, plan: OpenPlan) {
+        let found = {
+            let model = self.model.borrow();
+            required(model.as_ref().and_then(|m| m.episodes.iter().find(|e| e.id == id).map(|e| (m.anime.id, m.anime.title.clone(), e.name.clone()))), || {
+                DetailsError::EpisodeNotFound(id)
+            })
+        };
+        match found {
+            Ok((anime_id, title, name)) => self.play(anime_id, id, &title, &name, plan),
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    /// Starts the torrent server when the plan says so, then plays in the external player, or in the internal one when
+    /// the external one cannot start.
+    fn play(&self, anime_id: i64, episode_id: i64, title: &str, name: &str, plan: OpenPlan) {
         if plan.torrent_server {
             self.env.backend.start_torrent_server();
         }
-        let (anime_id, title, name) = {
-            let model = self.model.borrow();
-            let Some(m) = model.as_ref() else { return };
-            let name = m.episodes.iter().find(|e| e.id == id).map(|e| e.name.clone()).unwrap_or_default();
-            (m.anime.id, m.anime.title.clone(), name)
-        };
-        if plan.external && self.env.backend.play_external(anime_id, id) {
+        if plan.external && self.env.backend.play_external(anime_id, episode_id) {
             return;
         }
-        crate::screens::open_media(true, &title, &name);
+        crate::screens::open_media(true, title, name);
+    }
+
+    /// Logs a typed error and shows its text in the snackbar.
+    fn show_error(&self, error: DetailsError) {
+        self.present(UserMessage::Plain(error.record().user_message()), None);
+        self.render_snack();
+    }
+
+    /// The continue button of a season tile: plays that season's next unseen episode, as the FAB does for an entry.
+    fn continue_season(&self, season_id: i64) {
+        let store = AnimeStore::new(Arc::clone(&self.env.db));
+        let played = (|| -> Result<(), DetailsError> {
+            let season = required(store.anime(season_id)?, || DetailsError::AnimeNotFound(season_id))?;
+            let episodes = store.episodes(season_id)?;
+            let episode = required(continue_episode(&episodes), || DetailsError::EpisodeNotFound(season_id))?;
+            let torrent = self.env.backend.is_torrent_source(season.source);
+            let plan = continue_plan(always_external(&self.env.prefs), torrent_enabled(&self.env.prefs), torrent);
+            self.play(season_id, episode.id, &season.title, &episode.name, plan);
+            Ok(())
+        })();
+        if let Err(error) = played {
+            self.show_error(error);
+        }
+    }
+
+    /// The state of one episode the swipe strip and the row menu read.
+    fn episode_state(&self, id: i64) -> Option<EpisodeState> {
+        let model = self.model.borrow();
+        let m = model.as_ref()?;
+        let e = m.episodes.iter().find(|e| e.id == id)?;
+        let download = if m.downloaded.contains(&id) { DownloadState::Downloaded } else { DownloadState::NotDownloaded };
+        Some(EpisodeState { seen: e.seen, bookmark: e.bookmark, fillermark: e.fillermark, download })
+    }
+
+    /// The images window, on the cover page. An edit or a delete there moves the image's last-modified through the runner.
+    fn open_images(&self) {
+        let found = {
+            let model = self.model.borrow();
+            required(model.as_ref().map(|m| m.anime.clone()), || DetailsError::AnimeNotFound(0))
+        };
+        match (found, self.env.handle.clone()) {
+            (Ok(anime), Some(handle)) => {
+                let (runner, anime_id) = (Rc::clone(&self.runner), anime.id);
+                let bump = Rc::new(move |kind: ImageKind| runner.send(AnimeCmd::BumpImage { anime_id, kind }));
+                images_view::open(anime, ImageKind::Cover, images_view::Env { handle, bump });
+            }
+            (Err(error), _) => self.show_error(error),
+            (Ok(_), None) => {}
+        }
+    }
+
+    /// Draws the related groups under the description when they or the display mode changed.
+    fn render_related(&self) {
+        let mode = SourcePrefs::new(self.env.prefs.clone()).source_display_mode.get();
+        let key = (self.related.borrow().clone(), mode);
+        if self.related_shown.borrow().as_ref() == Some(&key) {
+            return;
+        }
+        while let Some(child) = self.related_host.first_child() {
+            self.related_host.remove(&child);
+        }
+        if let Some(section) = related_view::section(&key.0, mode, Rc::new(open)) {
+            self.related_host.append(&section);
+        }
+        *self.related_shown.borrow_mut() = Some(key);
     }
 
     /// The FAB: opens the first unseen episode, with the setting as it is and no inversion (17.2).
@@ -909,13 +1302,15 @@ impl View {
         }
     }
 
-    /// Edits the selection over the ids of the processed list, then redraws.
-    fn edit_selection(self: &Rc<Self>, edit: impl FnOnce(&mut AnimeEntryModel, &[i64])) {
+    /// Edits the selection, then redraws. The closure gets the processed ids (the view, for toggles) and every
+    /// episode id (for select all and invert, which act on the full list).
+    fn edit_selection(self: &Rc<Self>, edit: impl FnOnce(&mut AnimeEntryModel, &[i64], &[i64])) {
         {
             let mut model = self.model.borrow_mut();
             let Some(m) = model.as_mut().filter(|m| m.accepts_dispatch()) else { return };
-            let ids = m.processed_ids();
-            edit(m, &ids);
+            let view = m.processed_ids();
+            let full: Vec<i64> = m.episodes.iter().map(|e| e.id).collect();
+            edit(m, &view, &full);
         }
         self.render();
     }
@@ -934,6 +1329,9 @@ impl View {
         if let Some(open) = self.settings.borrow().as_ref() {
             open.present();
             return;
+        }
+        if self.model.borrow().as_ref().is_some_and(|m| m.anime.fetch_type == FetchType::Seasons) {
+            return self.open_season_settings();
         }
         let Some((word, downloaded_only, favorite)) = self
             .model
@@ -968,31 +1366,96 @@ impl View {
     }
 
     /// A click in the settings window becomes a store command; the window redraws when the snapshot arrives.
-    fn apply_change(&self, change: Change) {
+    fn apply_change(self: &Rc<Self>, change: Change) {
         let Some((anime_id, word)) = self.model.borrow().as_ref().map(|m| (m.anime.id, m.anime.episode_flags)) else { return };
+        // an entry outside the library keeps its flags for the session: the model takes the change as well as the row
+        if let Some(m) = self.model.borrow_mut().as_mut() {
+            match change {
+                Change::Flag((flag, mask)) => m.note_flag_write(flag, mask),
+                Change::Sort(mode) => m.note_sort(mode),
+                Change::SetDefault { .. } => {}
+            }
+        }
         self.runner.send(match change {
             Change::Flag((flag, mask)) => AnimeCmd::SetFlagBits { anime_id, flag, mask },
             Change::Sort(mode) => AnimeCmd::SortBy { anime_id, mode },
-            Change::SetDefault { apply_all } => return self.save_default(word, apply_all),
+            Change::SetDefault { apply_all } => return self.save_default(Scope::Episode, word, apply_all),
         });
+        self.render();
     }
 
-    /// "Set as default": stores the flags of this entry as the library default, and with the checkbox writes them to
-    /// every favorite on a detached task. The message shows once per save (T-39b-010).
-    fn save_default(&self, word: i64, apply_all: bool) {
-        set_episode_settings_default(&self.env.prefs, word);
-        if apply_all && let Some(handle) = &self.env.handle {
-            let (repo, prefs) = (AnimeRepo::new(Arc::clone(&self.env.db)), self.env.prefs.clone());
-            handle.spawn(async move {
-                if let Err(e) = anime_defaults_to_library_detached(repo, prefs).await {
-                    tracing::warn!("could not apply the default episode settings to the library: {e}");
+    /// Opens the season settings window of a `Seasons` entry, from the header or the filter button.
+    fn open_season_settings(self: &Rc<Self>) {
+        if let Some(open) = self.season_settings.borrow().as_ref() {
+            open.present();
+            return;
+        }
+        let Some((word, downloaded_only, favorite)) = self
+            .model
+            .borrow()
+            .as_ref()
+            .filter(|m| m.accepts_dispatch())
+            .map(|m| (m.anime.season_flags, m.downloaded_only, m.anime.favorite))
+        else {
+            return;
+        };
+        let weak = Rc::downgrade(self);
+        let window = SeasonSettingsWindow::new(
+            word,
+            downloaded_only,
+            favorite,
+            Rc::new({
+                let weak = weak.clone();
+                move |change| {
+                    if let Some(view) = weak.upgrade() {
+                        view.apply_season_change(change);
+                    }
                 }
-            });
+            }),
+        );
+        window.on_close(move || {
+            if let Some(view) = weak.upgrade() {
+                view.season_settings.borrow_mut().take();
+            }
+        });
+        window.present();
+        *self.season_settings.borrow_mut() = Some(window);
+    }
+
+    /// A click in the season settings window: a masked write of the season flag word, or the sort. Both go through the
+    /// runner (the masked-write path); "Set as default" stores the word of this entry as the season default.
+    fn apply_season_change(self: &Rc<Self>, change: Change) {
+        let Some((anime_id, word)) = self.model.borrow().as_ref().map(|m| (m.anime.id, m.anime.season_flags)) else { return };
+        if let Some(m) = self.model.borrow_mut().as_mut() {
+            match change {
+                Change::Flag((flag, mask)) => m.note_season_write(flag, mask),
+                Change::Sort(code) => m.note_season_sort(code),
+                Change::SetDefault { .. } => {}
+            }
         }
-        if let Some(message) = default_saved_message(true) {
-            self.present(message, None);
-            self.render_snack();
+        self.runner.send(match change {
+            Change::Flag((flag, mask)) => AnimeCmd::SetSeasonFlagBits { anime_id, flag, mask },
+            Change::Sort(code) => AnimeCmd::SeasonSortBy { anime_id, code },
+            Change::SetDefault { apply_all } => return self.save_default(Scope::Season, word, apply_all),
+        });
+        self.render();
+    }
+
+    /// "Set as default": stores the flag word of this entry as the default of `scope`, and with the checkbox applies
+    /// that default to every favorite through the runner. Only that scope is written: an episode save never touches the
+    /// season flags of the library, and the reverse. With the checkbox the message waits for the run, to say how many
+    /// entries took the settings (E-DEF-3); without it the message shows once per save (T-39b-010).
+    fn save_default(self: &Rc<Self>, scope: Scope, word: i64, apply_all: bool) {
+        match scope {
+            Scope::Episode => set_episode_settings_default(&self.env.prefs, word),
+            Scope::Season => set_season_settings_default(&self.env.prefs, word),
+        };
+        if apply_all {
+            self.runner.send(AnimeCmd::ApplyDefaultsToLibrary { scope });
+            return;
         }
+        self.present(set_default::saved_message(scope), None);
+        self.render_snack();
     }
 }
 
@@ -1075,6 +1538,11 @@ mod tests {
         let buttons: Vec<Button> = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Button>().ok()).collect();
         let labels: Vec<String> = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).map(|l| l.label().to_string()).collect();
         assert!(labels.iter().any(|t| t == "In library"), "the library button of a favorite");
+        assert!(labels.iter().any(|t| t == "Tracking"), "the tracking button has its callback");
+        let webview = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.label() == "WebView").and_then(|l| l.ancestor(Button::static_type()));
+        assert!(webview.is_some_and(|b| !b.is_visible()), "WebView shows for an HTTP source only");
+        let download = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::MenuButton>().ok()).find(|b| b.tooltip_text().as_deref() == Some("Download")).expect("the Download menu exists");
+        assert!(!download.is_visible(), "no download handler, no Download menu");
         assert!(buttons.iter().any(|b| b.tooltip_text().as_deref() == Some("Refresh") && b.is_sensitive()), "the refresh button");
         let fab = buttons.iter().find(|b| b.has_css_class("pill")).expect("the FAB");
         assert!(fab.is_visible() && fab.is_sensitive(), "an unseen episode exists");

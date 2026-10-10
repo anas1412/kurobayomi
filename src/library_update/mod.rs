@@ -11,11 +11,13 @@ pub mod entry;
 pub mod error;
 pub mod fetch_interval;
 pub mod pass;
+pub mod progress;
 pub mod queue;
 pub mod reading;
 pub mod schedule;
 pub mod source;
 pub mod store;
+pub mod sync;
 pub mod text;
 
 #[cfg(test)]

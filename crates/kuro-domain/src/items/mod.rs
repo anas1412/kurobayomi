@@ -6,6 +6,7 @@ pub mod facades;
 pub mod missing;
 pub mod model;
 pub mod recognition;
+pub mod season_sync;
 pub mod sync_plan;
 pub mod should_update;
 pub mod source_sync;

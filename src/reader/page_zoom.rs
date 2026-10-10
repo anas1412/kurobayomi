@@ -89,9 +89,10 @@ pub struct PageConfig {
     pub zoom_start: ZoomStart,
 }
 
-/// The fitted (minimum) scale for a view and source size, per `minScale()` (fork section 3 table).
+/// The fitted (minimum) scale for a view and source size, per `minScale()` (fork section 3 table). Before the view has
+/// a size, and for an empty source, it is 1 (E-60), so no later step divides by zero.
 pub fn min_scale(kind: ImageScaleType, view: Size, src: Size) -> f64 {
-    if src.w <= 0.0 || src.h <= 0.0 {
+    if src.w <= 0.0 || src.h <= 0.0 || view.w <= 0.0 || view.h <= 0.0 {
         return 1.0;
     }
     let fit_w = view.w / src.w;
@@ -117,10 +118,44 @@ pub fn clamp_scale(scale: f64, min: f64) -> f64 {
     scale.max(min).min(min * MAX_ZOOM_FACTOR)
 }
 
-/// The double-tap target of a non-animated page (E-14): at the fitted scale, zoom to twice it; when zoomed, go
-/// back to the fitted scale.
+/// The double-tap level of a page fitted at `min`: twice the fit, never above the maximum zoom (E-65).
+pub fn double_tap_level(min: f64) -> f64 {
+    (min * DOUBLE_TAP_FACTOR).min(min * MAX_ZOOM_FACTOR)
+}
+
+/// The double-tap target of a non-animated page (E-14, E-64): zoom in to the double-tap level when the scale is at the
+/// fit or at most 0.9 of that level; otherwise go back to the fitted scale.
 pub fn double_tap_target(scale: f64, min: f64) -> f64 {
-    if scale <= min + EPS { min * DOUBLE_TAP_FACTOR } else { min }
+    let level = double_tap_level(min);
+    if scale <= min + EPS || scale <= 0.9 * level { level } else { min }
+}
+
+/// The zoom of one page (T-44a-044, TZ §1-§3): the scale, the centre in source pixels, the fitted minimum, the maximum
+/// (5 times the fit) and the double-tap level. A `Copy` value, so the page view holds it in a `Cell`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ZoomState {
+    pub scale: f64,
+    pub center: (f64, f64),
+    pub min: f64,
+    pub max: f64,
+    pub double_tap: f64,
+}
+
+impl ZoomState {
+    /// A page shown at its fit, centred on `center`.
+    pub fn fitted(min: f64, center: (f64, f64)) -> Self {
+        Self { scale: min, center, min, max: min * MAX_ZOOM_FACTOR, double_tap: double_tap_level(min) }
+    }
+
+    /// Keeps a scale within `[min, max]`.
+    pub fn clamp(&self, scale: f64) -> f64 {
+        scale.max(self.min).min(self.max)
+    }
+
+    /// Whether the page is at its fitted scale.
+    pub fn is_fitted(&self) -> bool {
+        (self.scale - self.min).abs() < EPS
+    }
 }
 
 /// The double-tap target of an animated page (E-41): absolute levels, 1 toggles to 2, anything above 1 goes to 1.
@@ -193,6 +228,51 @@ mod tests {
     use super::*;
 
     const VIEW: Size = Size { w: 800.0, h: 600.0 };
+
+    #[test]
+    fn e61_e62_stretch_and_smart_fit_on_the_spec_vectors() {
+        let view = Size { w: 200.0, h: 200.0 };
+        let wide = Size { w: 400.0, h: 200.0 };
+        assert!(close(min_scale(ImageScaleType::Stretch, view, wide), 1.0), "crop to fill takes the larger fit");
+        assert!(close(min_scale(ImageScaleType::FitScreen, view, wide), 0.5));
+        let square = Size { w: 600.0, h: 600.0 };
+        assert!(close(min_scale(ImageScaleType::SmartFit, square, Size { w: 300.0, h: 900.0 }), 2.0), "tall fits the width");
+        assert!(close(min_scale(ImageScaleType::SmartFit, square, Size { w: 900.0, h: 300.0 }), 2.0), "wide fits the height");
+    }
+
+    #[test]
+    fn e60_before_the_view_has_a_size_the_minimum_is_one() {
+        let zero = Size { w: 0.0, h: 0.0 };
+        assert_eq!(min_scale(ImageScaleType::FitScreen, zero, TALL), 1.0);
+        assert_eq!(min_scale(ImageScaleType::Stretch, Size { w: 800.0, h: 0.0 }, TALL), 1.0);
+        assert_eq!(min_scale(ImageScaleType::FitScreen, VIEW, Size { w: 0.0, h: 0.0 }), 1.0);
+    }
+
+    #[test]
+    fn e65_the_double_tap_level_is_twice_the_fit_within_the_maximum() {
+        assert!(close(double_tap_level(1.0), 2.0));
+        assert!(close(double_tap_level(0.3), 0.6));
+        assert!(double_tap_level(0.3) <= 0.3 * MAX_ZOOM_FACTOR);
+    }
+
+    #[test]
+    fn e64_double_tap_zooms_in_up_to_the_boundary_of_nine_tenths_of_the_level() {
+        let min = 0.3;
+        let level = 0.6;
+        assert!(close(double_tap_target(min, min), level), "at the fit");
+        assert!(close(double_tap_target(0.9 * level, min), level), "exactly at 0.9 of the level zooms in");
+        assert!(close(double_tap_target(0.9 * level + 0.001, min), min), "just above goes back to the fit");
+        assert!(close(double_tap_target(0.5, min), level), "between the fit and the boundary zooms in");
+    }
+
+    #[test]
+    fn t044_a_fitted_zoom_state_has_the_maximum_and_the_double_tap_level() {
+        let state = ZoomState::fitted(0.3, (5.0, 6.0));
+        assert!(state.is_fitted());
+        assert!(close(state.max, 1.5) && close(state.double_tap, 0.6));
+        assert!(close(state.clamp(9.0), 1.5) && close(state.clamp(0.1), 0.3));
+        assert_eq!(state.center, (5.0, 6.0));
+    }
     const TALL: Size = Size { w: 1000.0, h: 2000.0 };
     const WIDE: Size = Size { w: 2000.0, h: 1000.0 };
 

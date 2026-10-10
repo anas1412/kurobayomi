@@ -8,7 +8,6 @@ use std::time::Duration;
 use gtk::glib;
 use kuro_domain::release::check::{Outcome, check_for_update};
 use kuro_domain::release::github::{GithubReleases, ReleaseHttp};
-use kuro_domain::release::version::Current;
 use kuro_domain::release::{Release, ReleaseError, ReleaseService};
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::base::BasePrefs;
@@ -39,16 +38,6 @@ pub fn hides_row(title: &str) -> bool {
     title == CHECK_ROW_TITLE && !available()
 }
 
-/// The running build as the version rule wants it: a preview build by its commit count, any other by its version.
-pub fn current() -> Current {
-    let info = &*kuro_core::app_info::APP_INFO;
-    if info.build_type == "preview" {
-        Current::Preview { commit_count: u64::from(info.commit_count) }
-    } else {
-        Current::Release(env!("CARGO_PKG_VERSION").to_owned())
-    }
-}
-
 /// The GET behind [`GithubReleases`], over a blocking reqwest client. Built on the worker thread that runs the check.
 struct Http(reqwest::blocking::Client);
 
@@ -72,7 +61,7 @@ impl ReleaseHttp for Http {
 pub fn check(
     service: &dyn ReleaseService,
     repository: &str,
-    current: &Current,
+    current: &str,
     base: &BasePrefs,
     now: i64,
     force: bool,
@@ -92,7 +81,7 @@ fn spawn_check(base: BasePrefs, force: bool, deliver: impl FnOnce(Result<Outcome
     std::thread::spawn(move || {
         let result = Http::new().map_err(ReleaseError::Transport).and_then(|http| {
             let service = GithubReleases::new(http, std::env::consts::ARCH);
-            check(&service, UPDATE_REPOSITORY, &current(), &base, chrono::Utc::now().timestamp_millis(), force)
+            check(&service, UPDATE_REPOSITORY, env!("CARGO_PKG_VERSION"), &base, chrono::Utc::now().timestamp_millis(), force)
         });
         let _ = tx.send_blocking(result);
     });
@@ -218,13 +207,13 @@ mod tests {
     #[test]
     fn a_returned_release_stores_the_check_time_and_a_second_call_inside_three_days_is_skipped() {
         let (base, service, now) = (base(), fixed(Ok(Some(release("v2.0.0")))), 100 * DAY);
-        let current = Current::Release("1.0.0".into());
-        let first = check(&service, "o/r", &current, &base, now, false).unwrap();
+        let current = "1.0.0";
+        let first = check(&service, "o/r", current, &base, now, false).unwrap();
         assert_eq!(first, Outcome::NewUpdate(release("v2.0.0")));
         assert_eq!(base.last_app_check.get(), now);
-        check(&service, "o/r", &current, &base, now + DAY, false).unwrap();
+        check(&service, "o/r", current, &base, now + DAY, false).unwrap();
         assert_eq!(service.calls.get(), 1, "the throttle read the stored time");
-        check(&service, "o/r", &current, &base, now + DAY, true).unwrap();
+        check(&service, "o/r", current, &base, now + DAY, true).unwrap();
         assert_eq!(service.calls.get(), 2, "force bypasses it");
         assert_eq!(base.last_app_check.get(), now + DAY);
     }
@@ -232,18 +221,18 @@ mod tests {
     #[test]
     fn an_error_or_a_missing_asset_leaves_the_stored_time_alone() {
         let base = base();
-        let current = Current::Release("1.0.0".into());
+        let current = "1.0.0";
         let failing = fixed(Err(ReleaseError::Http(403)));
-        assert_eq!(check(&failing, "o/r", &current, &base, 50 * DAY, true), Err(ReleaseError::Http(403)));
+        assert_eq!(check(&failing, "o/r", current, &base, 50 * DAY, true), Err(ReleaseError::Http(403)));
         let no_asset = fixed(Ok(None));
-        assert_eq!(check(&no_asset, "o/r", &current, &base, 50 * DAY, true), Ok(Outcome::NoNewUpdate));
+        assert_eq!(check(&no_asset, "o/r", current, &base, 50 * DAY, true), Ok(Outcome::NoNewUpdate));
         assert_eq!(base.last_app_check.get(), 0);
     }
 
     #[test]
     fn an_empty_repository_makes_no_call() {
         let (base, service) = (base(), fixed(Ok(Some(release("v2.0.0")))));
-        let got = check(&service, "", &Current::Release("1.0.0".into()), &base, 100 * DAY, true);
+        let got = check(&service, "", "1.0.0", &base, 100 * DAY, true);
         assert_eq!(got, Ok(Outcome::NoNewUpdate));
         assert_eq!(service.calls.get(), 0);
     }

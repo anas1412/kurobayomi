@@ -68,6 +68,14 @@ impl LoadingIndicator {
         self.root.is_visible()
     }
 
+    /// Back to the spinner (a queued or loading page after a download was shown).
+    pub fn show_spinner(&self) {
+        self.progress.set(None);
+        self.ring.set_visible(false);
+        self.spinner.set_visible(true);
+        self.show();
+    }
+
     /// Switches to the determinate ring at `value` (clamped to 0..=100).
     pub fn set_progress(&self, value: i32) {
         self.progress.set(Some(clamp_progress(value)));
