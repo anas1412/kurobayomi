@@ -33,4 +33,13 @@ jobs:
         run: scripts/check-path-literals.sh
 
       - name: Tests
+        # The default debug build of this workspace fills the runner disk, so build without debug symbols or incremental data.
+        env:
+          CARGO_INCREMENTAL: "0"
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_TEST_DEBUG: "0"
         run: cargo test --workspace
+
+      - name: Disk space left
+        if: always()
+        run: df -h / /__w | cat
