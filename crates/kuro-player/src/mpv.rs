@@ -17,6 +17,9 @@ use crate::tracks::TrackValue;
 /// reach the GL render context instead of an mpv-owned window.
 pub const RENDER_VO: &str = "libmpv";
 
+/// `MPV_ERROR_OPTION_NOT_FOUND` from `mpv/client.h`.
+const MPV_ERROR_OPTION_NOT_FOUND: i32 = -5;
+
 /// Resolves a GL function name. Passed as a plain function pointer so no state is captured.
 pub type GetProcAddress = fn(&str) -> *mut c_void;
 
@@ -96,7 +99,14 @@ impl MpvHandle {
     pub fn create(settings: &[MpvSetting]) -> Result<Self, MpvError> {
         let inner = libmpv2::Mpv::with_initializer(|init| {
             for setting in settings {
-                init.set_option(setting.name, setting.value.as_str())?;
+                // An older libmpv (Ubuntu 24.04 ships 0.37) does not know every option; skip those
+                // instead of failing to start the player.
+                match init.set_option(setting.name, setting.value.as_str()) {
+                    Err(libmpv2::Error::Raw(MPV_ERROR_OPTION_NOT_FOUND)) => {
+                        tracing::warn!(option = setting.name, "this libmpv does not know the option; skipped");
+                    }
+                    other => other?,
+                }
             }
             // Set last so it wins over the preference table (see `RENDER_VO`).
             init.set_option("vo", RENDER_VO)?;
@@ -287,6 +297,20 @@ mod tests {
     fn headless() -> MpvHandle {
         let dir = tempfile::tempdir().expect("temp data dir");
         headless_in(dir.path())
+    }
+
+    #[test]
+    fn an_option_this_libmpv_does_not_know_is_skipped() {
+        let mut settings = startup_settings(&PlayerPrefs::default());
+        settings.push(MpvSetting {
+            name: "ao",
+            value: "null".to_owned(),
+        });
+        settings.push(MpvSetting {
+            name: "option-from-a-future-mpv",
+            value: "yes".to_owned(),
+        });
+        assert!(MpvHandle::create(&settings).is_ok());
     }
 
     #[test]
