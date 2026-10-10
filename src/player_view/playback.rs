@@ -40,7 +40,8 @@ impl Playback {
         let start: Vec<&str> = start.iter().map(String::as_str).collect();
         self.mpv.command(&start).map_err(|e| e.to_string())?;
         self.mpv
-            .command(&["loadfile", text, "replace", "0"])
+            // No index argument: mpv before 0.38 reads the third argument as the options.
+            .command(&["loadfile", text, "replace"])
             .map_err(|e| e.to_string())?;
         self.mpv
             .set_property_flag("pause", false)

@@ -253,5 +253,6 @@ Each item is observable. Run before tagging a release.
 ## 9. What this document does not decide
 
 - Visual theme beyond "inherit the GTK theme" (area 02 Q-A, area 49 owns the theme).
+- First sources to make work (user, 2026-10-10): implement the two easiest sources for manga and for anime to prove the whole path. Manga: Gone with the Blastwave (`src/en/gwtb`) and Existential Comics (`src/en/existentialcomics`) from keiyoushi/extensions-source. Anime: BeatZ Anime (`src/es/beatzanime`) and KimoiTV (`src/en/kimoitv`) from yuzono/anime-extensions. The user has no Jellyfin server, so Jellyfin is not a test target. Reference clones are in `~/ext-refs/`; the analysis is in `docs/source-porting/`. Blocked first by the foundation work: anime ops in the WASM contract, the guest template, and the TOML recipe engine.
 - Packaging format. Decided by the user on 2026-10-10: Flatpak first (primary), an AppImage built by CI later. No `.deb`, RPM, AUR or any other OS-specific package from this project. The in-app updater only announces a new version; Flatpak updates itself and the plan already drops AppImage self-replacement. Area 54 owns the details. This document also records the constraints in ADR-10.
 - Exact `wasmtime` version pin and WIT package version. Area 20 owns the contract (`p1-topic-wasm-component-design.md`).
