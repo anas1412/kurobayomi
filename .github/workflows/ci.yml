@@ -14,7 +14,11 @@ jobs:
 
       - name: Install system packages
         # libdav1d-devel: image's avif-native feature builds dav1d-sys, which needs dav1d.pc.
-        run: dnf install -y gcc pkgconf-pkg-config gtk4-devel libdav1d-devel ripgrep curl
+        # mpv-devel (libmpv) comes from RPM Fusion; kuro-player links it.
+        run: |
+          dnf install -y gcc pkgconf-pkg-config gtk4-devel libdav1d-devel ripgrep curl
+          dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm"
+          dnf install -y mpv-devel
 
       - name: Install Rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal

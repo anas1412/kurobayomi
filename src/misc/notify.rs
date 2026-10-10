@@ -391,6 +391,23 @@ impl ActionHost for GtkHost {
     fn unavailable(&self, what: &str) {
         tracing::warn!(action = what, "a notice action has no handler in this build");
     }
+
+    fn reveal_roots(&self) -> Vec<std::path::PathBuf> {
+        use kuro_platform::paths::Paths as _;
+        kuro_platform::linux::LinuxPaths::system()
+            .map(|p| vec![p.data_dir(), p.default_downloads_dir(), p.cache_dir()])
+            .unwrap_or_default()
+    }
+
+    fn start_app_update(&self, url: &str, version: Option<String>) {
+        if !crate::misc::download::start_app_update(url, version) {
+            self.unavailable("start app update before the downloader exists");
+        }
+    }
+
+    fn cancel_app_update(&self) {
+        crate::misc::download::cancel_app_update();
+    }
 }
 
 /// Registers `app.notice` and starts showing posted notices. Call once from the GTK main thread, with the application

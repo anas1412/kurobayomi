@@ -482,11 +482,17 @@ pub fn build(anime: bool) -> Option<Built> {
             tinted.remove_css_class("accent");
         }
     });
-    let entries = crate::ui::screen(spec_id(kind)).menu;
+    let mut entries = crate::ui::screen(spec_id(kind)).menu;
+    let update_label = tr(MsgKey::action_update_library);
+    if !entries.contains(&update_label) {
+        entries.insert(0, update_label.clone());
+    }
     let v = view.clone();
     let menu = crate::ui::menu_button("view-more-symbolic", &entries, move |label| {
         if label == "Open random entry" {
             v.open_random();
+        } else if label == update_label {
+            v.update_library();
         }
     });
     Some(Built { content: view.widget(), end: vec![filter.upcast(), menu.upcast()] })

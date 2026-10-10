@@ -56,6 +56,40 @@ pub fn prompt(version: &str, release_url: &str, download_url: &str) -> Post {
     }
 }
 
+/// One check at a time (E-U10, test U10): [`SingleFlight::begin`] hands out a guard to one caller at a time.
+#[derive(Default)]
+pub struct SingleFlight(std::sync::atomic::AtomicBool);
+
+/// Held for the length of a check; dropping it lets the next check begin.
+pub struct CheckGuard<'a>(&'a SingleFlight);
+
+impl SingleFlight {
+    pub const fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// `None` while another check holds the guard.
+    pub fn begin(&self) -> Option<CheckGuard<'_>> {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.0.compare_exchange(false, true, SeqCst, SeqCst).is_ok().then_some(CheckGuard(self))
+    }
+}
+
+impl Drop for CheckGuard<'_> {
+    fn drop(&mut self) {
+        self.0.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// The app's one check slot: every check of the app (the About row, the startup check) begins here.
+pub static CHECK: SingleFlight = SingleFlight::new();
+
+/// Posts the prompt of a `NewUpdate` result, once per call. Needs the guard of the check that found the release, so a
+/// second check cannot post while the first is still running. `post` is the notifier (`notify::post` in the app).
+pub fn announce(_held: &CheckGuard<'_>, version: &str, release_url: &str, download_url: &str, post: impl FnOnce(Post) -> bool) -> bool {
+    post(prompt(version, release_url, download_url))
+}
+
 /// The progress notice: low priority, one "Cancel" button. The caller throttles the percents (`ProgressThrottle`).
 pub fn progress(version: Option<&str>, phase: Phase) -> Post {
     let body = match phase {
@@ -143,6 +177,23 @@ mod tests {
                 Op::Show(post) => format!("show:{}", post.id),
             })
             .collect()
+    }
+
+    #[test]
+    fn a_second_check_waits_for_the_first_and_the_prompt_posts_once() {
+        // T-35a-047, test U10
+        let flight = SingleFlight::new();
+        let first = flight.begin().expect("the first check begins");
+        assert!(flight.begin().is_none(), "a second check does not begin while the first runs");
+        let mut posted = Vec::new();
+        assert!(announce(&first, "v1.2.0", RELEASE, ASSET, |post| {
+            posted.push(post);
+            true
+        }));
+        assert_eq!(posted.len(), 1);
+        assert_eq!(posted[0].id, ids::APP_UPDATE_PROGRESS);
+        drop(first);
+        assert!(flight.begin().is_some(), "the guard is released when the check ends");
     }
 
     #[test]

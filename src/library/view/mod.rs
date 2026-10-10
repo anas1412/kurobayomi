@@ -303,6 +303,15 @@ impl LibraryView {
         submit(&self.inner);
     }
 
+    /// The header menu's "Update library": a pass over the whole library (no category), with the toast of its scope
+    /// (T-37a-035).
+    pub fn update_library(&self) {
+        let update = self.inner.borrow().nav.update.clone();
+        let started = update(None);
+        crate::library::toast::notify(actions::update_toast(actions::UpdateScope::Library, !started));
+        sync_refresh_button(&self.inner);
+    }
+
     /// "Open random entry": one uniformly chosen entry of the active page; a toast when the page is empty.
     pub fn open_random(&self) {
         let (id, open) = {

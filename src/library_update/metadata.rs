@@ -33,6 +33,7 @@ use crate::library_update::politeness;
 use crate::library_update::queue::LibraryEntry;
 use crate::library_update::source::{RemoteFlags, Source, SourceDetails, SourceRegistry};
 use crate::library_update::store::LibraryStore;
+use crate::library_update::text;
 
 /// The lock name of the manga metadata pass (`MetadataUpdate-manga`).
 pub const MANGA_LOCK: &str = "MetadataUpdate-manga";
@@ -181,6 +182,16 @@ pub struct MetadataDeps<R, S, M> {
     pub registry: R,
     pub store: S,
     pub writer: M,
+    /// The progress notice of a pass (T-26a-054); `None` shows none.
+    pub progress: Option<Arc<dyn MetadataProgress>>,
+}
+
+/// Where a metadata pass reports its progress: the same title as an update pass (`text::progress_title`).
+pub trait MetadataProgress: Send + Sync {
+    /// The pass of `kind` has finished `title`'s share of its entries.
+    fn show(&self, kind: EntryKind, title: &str);
+    /// The pass ended (completed, cancelled or failed): the notice goes.
+    fn done(&self, kind: EntryKind);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,6 +227,8 @@ struct Counts {
     updated: AtomicUsize,
     skipped: AtomicUsize,
     failed: AtomicUsize,
+    /// Entries finished, whatever the result: the progress counter.
+    finished: AtomicUsize,
 }
 
 /// The metadata passes of the app: one lock per kind, manual starts only.
@@ -274,6 +287,12 @@ where
         let queue = distinct_by_id(library);
         let queued = queue.len();
         let counts = Arc::new(Counts::default());
+        let report = |finished: usize| {
+            if let Some(progress) = &deps.progress {
+                progress.show(kind, &text::progress_title(finished as u64, queued as u64));
+            }
+        };
+        report(0);
         let permits = Arc::new(Semaphore::new(MAX_SOURCES_IN_PARALLEL));
         let mut tasks = JoinSet::new();
         for group in group_by_source(queue) {
@@ -286,6 +305,10 @@ where
                         break;
                     }
                     refresh_entry(&deps, &counts, &entry, now_ms).await;
+                    let finished = counts.finished.fetch_add(1, Ordering::SeqCst) + 1;
+                    if let Some(progress) = &deps.progress {
+                        progress.show(kind, &text::progress_title(finished as u64, queued as u64));
+                    }
                 }
             });
         }
@@ -295,6 +318,9 @@ where
             }
         }
         let status = if guard.cancel.load(Ordering::SeqCst) { MetadataStatus::Cancelled } else { MetadataStatus::Completed };
+        if let Some(progress) = &deps.progress {
+            progress.done(kind);
+        }
         MetadataOutcome {
             status,
             queued,
@@ -359,7 +385,7 @@ mod tests {
     type TestRunner = MetadataRunner<FakeRegistry, FakeStore, FakeWriter>;
 
     fn runner(store: FakeStore, registry: FakeRegistry) -> Arc<TestRunner> {
-        Arc::new(MetadataRunner::new(MetadataDeps { registry, store, writer: FakeWriter::default() }))
+        Arc::new(MetadataRunner::new(MetadataDeps { registry, store, writer: FakeWriter::default(), progress: None }))
     }
 
     fn anime(id: i64, source: i64, title: &str) -> LibraryEntry {
@@ -467,6 +493,42 @@ mod tests {
         assert_eq!(runner.run(EntryKind::Anime, 1).await.status, MetadataStatus::Completed);
         drop(held);
         assert!(!runner.is_running(EntryKind::Manga));
+    }
+
+    #[derive(Default)]
+    struct Log(Mutex<Vec<String>>);
+
+    impl MetadataProgress for Log {
+        fn show(&self, kind: EntryKind, title: &str) {
+            self.0.lock().unwrap().push(format!("show {kind:?} {title}"));
+        }
+        fn done(&self, kind: EntryKind) {
+            self.0.lock().unwrap().push(format!("done {kind:?}"));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pass_reports_the_update_progress_title_and_withdraws_it_at_the_end() {
+        // T-26a-054
+        let mut registry = FakeRegistry::default();
+        registry.sources.insert(1, FakeSource::ok(vec![]).with_details(details()));
+        let log = Arc::new(Log::default());
+        let runner = MetadataRunner::new(MetadataDeps {
+            registry,
+            store: FakeStore::with(vec![entry(1, 1, "A"), entry(2, 1, "B")]),
+            writer: FakeWriter::default(),
+            progress: Some(log.clone()),
+        });
+        runner.run(EntryKind::Manga, 1).await;
+        assert_eq!(
+            *log.0.lock().unwrap(),
+            [
+                format!("show Manga {}", text::progress_title(0, 2)),
+                format!("show Manga {}", text::progress_title(1, 2)),
+                format!("show Manga {}", text::progress_title(2, 2)),
+                "done Manga".to_owned(),
+            ]
+        );
     }
 
     #[tokio::test]

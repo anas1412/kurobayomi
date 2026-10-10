@@ -42,6 +42,13 @@ The machine has 15 GB RAM plus a 15 GB zram swap that sits at 8 to 15 GB used, s
 - **Run both scripts before reporting a lane done:** `bash scripts/check-path-literals.sh && bash scripts/check-platform-boundary.sh .` They take about a second. A failure here turns the GitHub CI red even when every test passes.
 - **GUI tests** that create GTK objects must run through `crate::testing::with_display(...)` (one GTK thread), otherwise the test binary crashes at random.
 
+## Never hand out the same task twice (user, 2026-10-10: "pls no repeated work")
+
+- Every new wave script must pick its tasks with `~/kurobayomi-notes/pick.py` (`from pick import pick`), which skips everything in `~/kurobayomi-notes/ledger.py`: every task of every earlier wave script, the M02 chunks, and all of milestones M00 and M01 (done before the waves). Do not write ad-hoc picking code.
+- **Before every Workflow launch run `python3 ~/kurobayomi-notes/check-wave.py <script.js>`.** If it prints `CHECK-WAVE FAILED`, fix the script. The only exception is an intentional re-run of partial work: mark that group `"rerun": true` in `GROUPS`.
+- Never generate a wave script over an existing wave file (it removes its tasks from the "already handed out" set).
+- What went wrong before: the old picker skipped only tasks it could parse, so about 217 finished M00 and M01 tasks and about 18 others (ids like `T-req-platform-006` and two-letter suffixes like `T-49ba-003`) were handed out again, about 6% of the plan.
+
 ## Wave bookkeeping
 
 - Task source: `plans/TASKS.csv`. Pick by plan area, skip ids already present in any wave script's `GROUPS`. Never regenerate over a wave script that has already run: its ids would drop out of the "taken" set and be handed out twice.

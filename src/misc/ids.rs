@@ -20,10 +20,12 @@ pub const DOWNLOAD_ANIME_PROGRESS: &str = "download.anime.progress";
 pub const DOWNLOAD_ANIME_ERROR: &str = "download.anime.error";
 pub const NEW_CHAPTERS: &str = "new.chapters";
 pub const NEW_EPISODES: &str = "new.episodes";
-pub const BACKUP_PROGRESS: &str = "backup.progress";
-pub const BACKUP_COMPLETE: &str = "backup.complete";
-pub const RESTORE_PROGRESS: &str = "restore.progress";
-pub const RESTORE_COMPLETE: &str = "restore.complete";
+// One id source for backup and restore (T-35a-082): the slots the backup crate posts to are the registry's ids, so the
+// router's withdraw of a restore and the restore's own notice name the same slot.
+pub const BACKUP_PROGRESS: &str = kuro_backup::notify::ID_BACKUP_PROGRESS;
+pub const BACKUP_COMPLETE: &str = kuro_backup::notify::ID_BACKUP_RESULT;
+pub const RESTORE_PROGRESS: &str = kuro_backup::notify::ID_RESTORE_PROGRESS;
+pub const RESTORE_COMPLETE: &str = kuro_backup::notify::ID_RESTORE_RESULT;
 pub const INCOGNITO: &str = "incognito";
 pub const SERVER_TORRENT: &str = "server.torrent";
 pub const SERVER_HTTP: &str = "server.http";
@@ -55,6 +57,54 @@ pub const ALL_IDS: &[&str] = &[
     EXTENSIONS_UPDATES,
     EXTENSIONS_INSTALLING,
 ];
+
+/// The notice kinds of the registry (T-35a-080, T-35a-081, T-35a-082).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Category {
+    AppUpdate,
+    LibraryProgress,
+    LibraryErrors,
+    NewChapters,
+    DownloadProgress,
+    DownloadErrors,
+    BackupProgress,
+    BackupComplete,
+}
+
+/// How urgently a notice is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Priority {
+    Low,
+    Default,
+    High,
+}
+
+impl Category {
+    /// The category of a slot id, with or without its per-entry or per-kind `:suffix`. `None` for an id that has no
+    /// category (the save-image notice, the incognito notice and the server notices).
+    pub fn of(id: &str) -> Option<Self> {
+        let base = id.split(':').next().unwrap_or(id);
+        Some(match base {
+            APP_UPDATE_PROGRESS | APP_UPDATE_INSTALL | APP_UPDATE_ERROR => Self::AppUpdate,
+            LIBRARY_PROGRESS => Self::LibraryProgress,
+            LIBRARY_ERROR | LIBRARY_SIZE_WARNING => Self::LibraryErrors,
+            NEW_CHAPTERS | NEW_EPISODES => Self::NewChapters,
+            DOWNLOAD_MANGA_PROGRESS | DOWNLOAD_ANIME_PROGRESS => Self::DownloadProgress,
+            DOWNLOAD_MANGA_ERROR | DOWNLOAD_ANIME_ERROR => Self::DownloadErrors,
+            BACKUP_PROGRESS | RESTORE_PROGRESS => Self::BackupProgress,
+            BACKUP_COMPLETE | RESTORE_COMPLETE => Self::BackupComplete,
+            _ => return None,
+        })
+    }
+
+    pub fn priority(self) -> Priority {
+        match self {
+            Self::LibraryProgress | Self::DownloadProgress | Self::BackupProgress => Priority::Low,
+            Self::BackupComplete => Priority::High,
+            _ => Priority::Default,
+        }
+    }
+}
 
 fn kind_tag(kind: EntryKind) -> &'static str {
     match kind {
@@ -98,6 +148,27 @@ mod tests {
         let unique: BTreeSet<&str> = ALL_IDS.iter().copied().collect();
         assert_eq!(unique.len(), ALL_IDS.len(), "no duplicate id");
         assert_eq!(ALL_IDS.len(), 22);
+    }
+
+    #[test]
+    fn every_category_id_has_a_category_and_backup_complete_is_high() {
+        // T-35a-080, T-35a-081, T-35a-082
+        assert_eq!(Category::of(&library_progress(EntryKind::Manga)), Some(Category::LibraryProgress));
+        assert_eq!(Category::of(&library_error(EntryKind::Anime)), Some(Category::LibraryErrors));
+        assert_eq!(Category::of(&new_items(EntryKind::Anime, 3)), Some(Category::NewChapters));
+        assert_eq!(Category::of(DOWNLOAD_ANIME_ERROR), Some(Category::DownloadErrors));
+        assert_eq!(Category::of(RESTORE_COMPLETE), Some(Category::BackupComplete));
+        assert_eq!(Category::of(APP_UPDATE_INSTALL), Some(Category::AppUpdate));
+        assert_eq!(Category::of(SAVE_IMAGE), None);
+        assert_eq!(Category::BackupComplete.priority(), Priority::High);
+        assert_eq!(Category::BackupProgress.priority(), Priority::Low);
+        assert_eq!(Category::AppUpdate.priority(), Priority::Default);
+    }
+
+    #[test]
+    fn backup_and_restore_share_the_backup_crates_slots() {
+        assert_eq!(RESTORE_PROGRESS, kuro_backup::notify::ID_RESTORE_PROGRESS);
+        assert_eq!(BACKUP_PROGRESS, kuro_backup::notify::ID_BACKUP_PROGRESS);
     }
 
     #[test]

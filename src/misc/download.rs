@@ -21,7 +21,6 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::app_update::{self, Phase};
-use super::ids;
 use super::notify::Op;
 use super::throttle::ProgressThrottle;
 
@@ -181,6 +180,50 @@ impl Downloader {
     }
 }
 
+thread_local! {
+    static INSTANCE: std::cell::RefCell<Option<Arc<Downloader>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Creates the app's downloader once: notices go to the GTK notifier and files to `dir`. Call from the GTK main thread.
+pub fn install(dir: PathBuf, handle: Handle) {
+    INSTANCE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            let sink: Sink = Arc::new(|op| {
+                super::notify::send(op);
+            });
+            *slot = Some(Downloader::new(dir, sink, handle));
+        }
+    });
+}
+
+/// The file name an asset url ends in, or `None` when the url has no path segment to name it.
+pub fn asset_name_of(url: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    parsed.path_segments()?.next_back().filter(|n| !n.is_empty()).map(str::to_owned)
+}
+
+/// The `StartAppUpdate` action: downloads `url`. A url with no usable file name shows the failure notice.
+/// `false` before [`install`] ran.
+pub fn start_app_update(url: &str, version: Option<String>) -> bool {
+    let Some(downloader) = INSTANCE.with(|slot| slot.borrow().clone()) else { return false };
+    let request = Request { url: url.to_owned(), asset_name: asset_name_of(url).unwrap_or_default(), version, sha256: None };
+    if let Err(error) = downloader.start(request.clone()) {
+        tracing::warn!(?error, url, "the app update download was not started");
+        for step in app_update::failed_steps(request.version.as_deref(), url, FAILED_BODY) {
+            (downloader.sink)(step);
+        }
+    }
+    true
+}
+
+/// The `CancelAppUpdate` action.
+pub fn cancel_app_update() {
+    if let Some(downloader) = INSTANCE.with(|slot| slot.borrow().clone()) {
+        downloader.stop();
+    }
+}
+
 /// Deletes the `.kuro-update-*.part` files of `dir` last written more than [`STALE_AFTER`] before `now`.
 pub fn sweep_stale(dir: &Path, now: SystemTime) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -195,11 +238,6 @@ pub fn sweep_stale(dir: &Path, now: SystemTime) {
             let _ = std::fs::remove_file(entry.path());
         }
     }
-}
-
-/// The Op step that clears the prompt and progress slot, for a caller that ends the flow without a download.
-pub fn withdraw_progress() -> Op {
-    Op::Withdraw(ids::APP_UPDATE_PROGRESS.to_owned())
 }
 
 #[cfg(test)]
@@ -266,7 +304,8 @@ mod tests {
         let ops = Arc::new(Mutex::new(Vec::new()));
         let log = ops.clone();
         let sink: Sink = Arc::new(move |op| log.lock().unwrap().push(op));
-        (dir, Downloader::new(dir_path(&dir), sink, Handle::current()), ops)
+        let downloader = Downloader::new(dir_path(&dir), sink, Handle::current());
+        (dir, downloader, ops)
     }
 
     fn dir_path(dir: &tempfile::TempDir) -> PathBuf {
@@ -340,7 +379,7 @@ mod tests {
         dl.finished().await;
         assert!(parts(&dir_path(&dir)).is_empty());
         assert_eq!(tail(&ops, 1), ["withdraw:app-update.progress"]);
-        assert!(!ops.lock().unwrap().iter().any(|op| matches!(op, Op::Show(p) if p.id == ids::APP_UPDATE_ERROR)));
+        assert!(!ops.lock().unwrap().iter().any(|op| matches!(op, Op::Show(p) if p.id == crate::misc::ids::APP_UPDATE_ERROR)));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -370,7 +409,7 @@ mod tests {
         assert_eq!(std::fs::read(&file).unwrap(), b"the newer download");
         assert!(parts(&dir_path(&dir)).is_empty());
         assert_eq!(tail(&ops, 1), ["show:app-update.install"]);
-        assert!(!ops.lock().unwrap().iter().any(|op| matches!(op, Op::Show(p) if p.id == ids::APP_UPDATE_ERROR)));
+        assert!(!ops.lock().unwrap().iter().any(|op| matches!(op, Op::Show(p) if p.id == crate::misc::ids::APP_UPDATE_ERROR)));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -395,6 +434,13 @@ mod tests {
         request.asset_name = "../evil".to_owned();
         assert!(dl.start(request).is_err());
         assert!(ops.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_asset_name_is_the_last_path_segment() {
+        assert_eq!(asset_name_of("https://github.com/o/r/releases/download/v1/App.AppImage").as_deref(), Some("App.AppImage"));
+        assert_eq!(asset_name_of("https://github.com/o/r/"), None);
+        assert_eq!(asset_name_of("nope"), None);
     }
 
     #[test]

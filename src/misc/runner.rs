@@ -34,7 +34,7 @@ use crate::library_update::download::DownloadPolicy;
 use crate::library_update::entry::Deps;
 use crate::library_update::error::UpdateError;
 use crate::library_update::error_log;
-use crate::library_update::metadata::{DbMetadataStore, MetadataDeps, MetadataRunner};
+use crate::library_update::metadata::{DbMetadataStore, MetadataDeps, MetadataProgress, MetadataRunner};
 use crate::library_update::pass::{EntryUpdate, Failure, Host, PassRunner, PassSettings, PassStatus, Trigger};
 use crate::library_update::queue::QueueRestrictions;
 use crate::library_update::renames::FolderRenames;
@@ -311,7 +311,22 @@ thread_local! {
 /// Cancels the running update pass of `kind` (the cancel button of a progress notice, T-35a-021). `false` when no pass
 /// runs or the runner has not started. Call from the GTK main thread.
 pub fn stop(kind: EntryKind) -> bool {
-    RUNNING.with(|r| r.borrow().as_ref().and_then(|runner| runner.stop(kind))).is_some()
+    let updates = RUNNING.with(|r| r.borrow().as_ref().and_then(|runner| runner.stop(kind))).is_some();
+    let metadata = METADATA.with(|m| m.borrow().as_ref().is_some_and(|runner| runner.stop(kind)));
+    updates || metadata
+}
+
+/// The progress notice of a metadata pass: the slot and Cancel button of an update pass of the same kind (T-26a-054).
+struct MetadataNotices;
+
+impl MetadataProgress for MetadataNotices {
+    fn show(&self, kind: EntryKind, title: &str) {
+        notify::post(notify::progress_post(kind, title, None));
+    }
+
+    fn done(&self, kind: EntryKind) {
+        notify::send(notify::Op::Withdraw(crate::misc::ids::library_progress(kind)));
+    }
 }
 
 fn metadata_passes() -> Arc<MetadataPasses> {
@@ -320,6 +335,7 @@ fn metadata_passes() -> Arc<MetadataPasses> {
         registry: NothingInstalled,
         store: SqliteLibraryStore::new(app.manga_db.clone(), app.anime_db.clone()),
         writer: DbMetadataStore::new(app.manga_db.clone(), app.anime_db.clone()),
+        progress: Some(Arc::new(MetadataNotices)),
     }))
 }
 
