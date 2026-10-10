@@ -74,10 +74,13 @@ fn store(scanned: &ScannedManga) {
     let db = crate::data::app().db(EntryKind::Manga);
     let now = chrono::Utc::now().timestamp_millis();
     match sync(&db, scanned, now) {
-        Ok(done) => crate::toast::notify(format!(
-            "{}: {} new, {} renamed chapters",
-            scanned.title, done.new_chapters, done.renamed_chapters
-        )),
+        Ok(done) => {
+            crate::toast::notify(format!(
+                "{}: {} new, {} renamed chapters",
+                scanned.title, done.new_chapters, done.renamed_chapters
+            ));
+            crate::library::mount::refresh(EntryKind::Manga);
+        }
         Err(error) => crate::toast::notify(format!("Could not save {}: {error}", scanned.title)),
     }
 }

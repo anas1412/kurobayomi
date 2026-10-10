@@ -46,6 +46,7 @@ fn scan_in_background(scan: impl FnOnce(&std::sync::Arc<kuro_db::handle::Db>) ->
     glib::spawn_future_local(async move {
         if let Ok(result) = rx.recv().await {
             crate::toast::notify(message(&result));
+            crate::library::mount::refresh(kuro_domain::kind::EntryKind::Anime);
         }
     });
 }

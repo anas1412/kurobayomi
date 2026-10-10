@@ -135,6 +135,13 @@ pub fn reselect() {
     }
 }
 
+/// Reloads the library of `kind`, for changes made outside it such as a local folder scan.
+pub fn refresh(kind: EntryKind) {
+    if let Some(view) = visible(Some(kind)) {
+        view.refresh();
+    }
+}
+
 /// Puts `query` in the search box of one kind's library (B-1.3). A view that is not built yet gets it on mount.
 pub fn inject_search(kind: EntryKind, query: &str) {
     match visible(Some(kind)) {

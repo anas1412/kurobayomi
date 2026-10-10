@@ -99,7 +99,8 @@ mod tests {
 
     #[test]
     fn date_roundtrip_identity_1970_to_2099() {
-        let mut day = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        // 1970-01-01 is skipped: in UTC its local midnight is epoch 0, which means "unset".
+        let mut day = NaiveDate::from_ymd_opt(1970, 1, 2).unwrap();
         let end = NaiveDate::from_ymd_opt(2099, 12, 31).unwrap();
         while day <= end {
             let text = day.format("%Y-%m-%d").to_string();

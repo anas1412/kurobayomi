@@ -184,11 +184,12 @@ mod tests {
         let tasks = NonCancellable::new(rt.handle().clone());
         let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = done.clone();
+        // The clock starts before the spawn: the task's sleep begins at the spawn, not at the shutdown call.
+        let start = Instant::now();
         tasks.spawn(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
             flag.store(true, std::sync::atomic::Ordering::SeqCst);
         });
-        let start = Instant::now();
         shutdown_draining(rt, &tasks);
         assert!(done.load(std::sync::atomic::Ordering::SeqCst));
         assert!(start.elapsed() >= Duration::from_millis(190));
