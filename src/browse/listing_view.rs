@@ -96,6 +96,11 @@ impl WeakListingView {
 
 impl ListingView {
     pub fn new(deps: ListingDeps, query: BrowseQuery) -> Self {
+        Self::with_filters(deps, query, FilterList::default())
+    }
+
+    /// A listing that starts with `query` and the filters its search runs with (a browse page opened on a search).
+    pub fn with_filters(deps: ListingDeps, query: BrowseQuery, filters: FilterList) -> Self {
         let store = gtk::gio::ListStore::new::<glib::BoxedAnyObject>();
         let selection = gtk::NoSelection::new(Some(store.clone()));
         let grid = gtk::GridView::new(Some(selection.clone()), None::<gtk::ListItemFactory>);
@@ -138,7 +143,11 @@ impl ListingView {
         let inner = Rc::new(Inner {
             ready: Cell::new(ready),
             display: Cell::new(display),
-            listing: RefCell::new(Listing::new(query)),
+            listing: RefCell::new({
+                let mut listing = Listing::new(query.clone());
+                listing.restart_with(query, filters);
+                listing
+            }),
             tasks: Rc::new(RefCell::new(PageTasks::new())),
             toast_dismissed: Cell::new(false),
             cover_px: Cell::new(COVER_WIDTH_PX),
@@ -175,6 +184,17 @@ impl ListingView {
     /// `search(query, filters)` (B§4.6.1): a new listing that searches with its own copy of `filters`.
     pub fn restart_with(&self, query: BrowseQuery, filters: FilterList) {
         self.inner.restart(query, filters);
+    }
+
+    /// `browse_hide_in_library_items`, read by the page when it was made (B§1.1, T-40b-034): favourites of the pages that
+    /// arrive after this call are not kept.
+    pub fn set_hide_in_library(&self, hide: bool) {
+        self.inner.listing.borrow_mut().set_hide_in_library(hide);
+    }
+
+    /// How many covers the listing holds.
+    pub fn loaded_count(&self) -> u32 {
+        self.inner.store.n_items()
     }
 
     /// The display-mode button was used.

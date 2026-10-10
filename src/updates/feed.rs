@@ -2,18 +2,67 @@
 //! carries its own selected flag, as [`Selection`] expects; a press is routed here by what it was (tap, long press,
 //! Ctrl or Shift click) and whether the selection mode is already on.
 
+use std::collections::HashMap;
+
 use chrono::{NaiveDate, TimeZone};
 use kuro_domain::dates::ListRow;
 use kuro_domain::updates::model::UpdateRow;
 
 use crate::updates::bulk::UnitFlags;
 use crate::updates::dates::grouped;
+use crate::updates::download_actions::UnitTarget;
+use crate::updates::download_state::{self, Change, DiskCache, DiskKey, DownloadState, QueueEntry, RowDownload};
 use crate::updates::selection::{Selectable, Selection, is_selection_mode};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FeedRow {
     pub row: UpdateRow,
     pub selected: bool,
+    /// What the download indicator shows (T-42a-029): the queue status, else the disk check, else not downloaded.
+    pub download: RowDownload,
+}
+
+/// The state of a row with no queue entry and no files.
+pub const NOT_DOWNLOADED: RowDownload = RowDownload { state: DownloadState::NotDownloaded, progress: 0 };
+
+/// The disk-check key of a row: its source, entry title, unit name and scanlator.
+pub fn disk_key(row: &UpdateRow) -> DiskKey {
+    DiskKey { source_id: row.source_id, entry_title: row.entry_title.clone(), unit_name: row.item_name.clone(), scanlator: row.scanlator.clone() }
+}
+
+/// Derives the download state of every row from the queue snapshot and the (cached) disk check. Call it on a new
+/// list and after each download-cache or queue signal, with `cache` invalidated first on the signal.
+pub fn rederive(rows: &mut [FeedRow], queue: impl Fn(i64) -> Option<QueueEntry>, cache: &mut DiskCache, on_disk: impl Fn(&DiskKey) -> bool) {
+    for row in rows {
+        let key = disk_key(&row.row);
+        let downloaded = cache.is_downloaded(key.clone(), || on_disk(&key));
+        row.download = download_state::derive(queue(row.row.item_id), downloaded);
+    }
+}
+
+/// Row positions by unit id. Rebuilt whenever the list is replaced, so a download event finds its row without a scan
+/// (T-42b-040).
+pub fn index_rows(rows: &[FeedRow]) -> HashMap<i64, usize> {
+    rows.iter().enumerate().map(|(i, r)| (r.row.item_id, i)).collect()
+}
+
+/// Patches the one row an event names. Returns whether a row was found. A missing or stale index entry is a no-op.
+pub fn apply_download(rows: &mut [FeedRow], index: &HashMap<i64, usize>, unit_id: i64, change: Change) -> bool {
+    match index.get(&unit_id).and_then(|&i| rows.get_mut(i)).filter(|r| r.row.item_id == unit_id) {
+        Some(row) => {
+            download_state::apply_to(&mut row.download, change);
+            true
+        }
+        None => false,
+    }
+}
+
+/// The selected rows as download targets (entry, unit, state), for the bulk download actions.
+pub fn selected_targets(rows: &[FeedRow]) -> Vec<UnitTarget> {
+    rows.iter()
+        .filter(|r| r.selected)
+        .map(|r| UnitTarget { entry_id: r.row.entry_id, unit_id: r.row.item_id, state: r.download.state })
+        .collect()
 }
 
 impl Selectable for FeedRow {
@@ -28,13 +77,12 @@ impl Selectable for FeedRow {
     }
 }
 
-/// A new list from the query. Rows that were selected stay selected by unit id (EC-42-U-05), and the bounds are
-/// recomputed from the flags.
-pub fn replace_rows(rows: Vec<UpdateRow>, previous: &[FeedRow], selection: &mut Selection) -> Vec<FeedRow> {
+/// A new list from the query. Rows that were selected stay selected by unit id. The bounds are left alone, as in the
+/// source (B 5.4, E-U46): `selection` may point past the new list, and `Selection::toggle` clamps what it reads. The
+/// 42a rule that recomputes them on a refresh (EC-42-U-05) lost to the exact port of T-42b-006.
+pub fn replace_rows(rows: Vec<UpdateRow>, previous: &[FeedRow], _selection: &mut Selection) -> Vec<FeedRow> {
     let was_selected = |id: i64| previous.iter().any(|p| p.selected && p.row.item_id == id);
-    let next: Vec<FeedRow> = rows.into_iter().map(|row| FeedRow { selected: was_selected(row.item_id), row }).collect();
-    selection.sync(&next);
-    next
+    rows.into_iter().map(|row| FeedRow { selected: was_selected(row.item_id), row, download: NOT_DOWNLOADED }).collect()
 }
 
 /// The list under date headers by fetch day; each item is an index into `rows`.
@@ -134,7 +182,7 @@ mod tests {
     }
 
     fn rows(n: i64) -> Vec<FeedRow> {
-        (0..n).map(|id| FeedRow { row: update(id), selected: false }).collect()
+        (0..n).map(|id| FeedRow { row: update(id), selected: false, download: NOT_DOWNLOADED }).collect()
     }
 
     fn flags(rows: &[FeedRow]) -> Vec<bool> {
@@ -188,13 +236,29 @@ mod tests {
     }
 
     #[test]
-    fn feed_new_list_keeps_selected_ids_and_recomputes_bounds() {
+    fn feed_new_list_keeps_selected_ids_and_leaves_the_bounds() {
         let (mut items, mut sel) = (rows(5), Selection::default());
         press(Gesture::LongPress, &mut sel, &mut items, 2);
         press(Gesture::LongPress, &mut sel, &mut items, 3);
         let fresh = replace_rows(vec![update(9), update(3), update(2), update(8)], &items, &mut sel);
         assert_eq!(flags(&fresh), [false, true, true, false]);
-        assert_eq!(sel.bounds(), [1, 2]);
+        assert_eq!(sel.bounds(), [2, 3], "the anchors are not recomputed on a refresh");
+    }
+
+    #[test]
+    fn stale_anchor_after_refresh_is_preserved() {
+        let (mut items, mut sel) = (rows(8), Selection::default());
+        press(Gesture::LongPress, &mut sel, &mut items, 6);
+        press(Gesture::LongPress, &mut sel, &mut items, 7);
+        assert_eq!(sel.bounds(), [6, 7]);
+        // the refreshed list is shorter than the anchors; the selected row 6 is now at index 0
+        let mut fresh = replace_rows(vec![update(6), update(30), update(31)], &items, &mut sel);
+        assert_eq!(sel.bounds(), [6, 7]);
+        assert_eq!(flags(&fresh), [true, false, false]);
+        // a long press below the stale lower anchor fills up to it, clamped to the list: no panic
+        assert_eq!(press(Gesture::LongPress, &mut sel, &mut fresh, 31), Press::Changed);
+        assert_eq!(flags(&fresh), [true, false, true]);
+        assert_eq!(sel.bounds(), [2, 7]);
     }
 
     #[test]
@@ -206,5 +270,46 @@ mod tests {
         let picked = selected_flags(&items);
         assert_eq!(picked.len(), 1);
         assert_eq!((picked[0].id, picked[0].bookmark, picked[0].progress), (1, true, 7));
+    }
+
+    #[test]
+    fn feed_download_state_comes_from_the_queue_then_the_cached_disk_check() {
+        let mut items = rows(3);
+        let mut cache = DiskCache::default();
+        let checks = std::cell::Cell::new(0);
+        let queue = |id: i64| (id == 0).then_some(QueueEntry { status: DownloadState::Downloading, progress: 30 });
+        let disk = |key: &DiskKey| {
+            checks.set(checks.get() + 1);
+            key.unit_name == "c1"
+        };
+        rederive(&mut items, queue, &mut cache, disk);
+        let states: Vec<DownloadState> = items.iter().map(|r| r.download.state).collect();
+        assert_eq!(states, [DownloadState::Downloading, DownloadState::Downloaded, DownloadState::NotDownloaded]);
+        assert_eq!(items[0].download.progress, 30);
+        let first = checks.get();
+        rederive(&mut items, queue, &mut cache, disk);
+        assert_eq!(checks.get(), first, "the second pass is served from the cache");
+        cache.invalidate();
+        rederive(&mut items, queue, &mut cache, disk);
+        assert_eq!(checks.get(), first * 2, "the cache signal drops the checks");
+    }
+
+    #[test]
+    fn feed_download_events_patch_only_the_matching_row() {
+        let mut items = rows(3);
+        let index = index_rows(&items);
+        assert!(apply_download(&mut items, &index, 2, Change::Status(DownloadState::Queue)));
+        assert!(apply_download(&mut items, &index, 2, Change::Progress(10)));
+        assert!(!apply_download(&mut items, &index, 99, Change::Progress(10)));
+        assert_eq!(items[2].download, RowDownload { state: DownloadState::Queue, progress: 10 });
+        assert_eq!(items[0].download, NOT_DOWNLOADED);
+    }
+
+    #[test]
+    fn feed_selected_targets_carry_the_download_state() {
+        let mut items = rows(3);
+        items[1].selected = true;
+        items[1].download = RowDownload { state: DownloadState::Downloaded, progress: 0 };
+        assert_eq!(selected_targets(&items), vec![UnitTarget { entry_id: 1, unit_id: 1, state: DownloadState::Downloaded }]);
     }
 }

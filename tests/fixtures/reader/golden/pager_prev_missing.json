@@ -1,0 +1,15 @@
+{
+  "about": "no previous chapter: the Prev transition points at nothing",
+  "viewer": "LeftToRight",
+  "force": true,
+  "items": [
+    "P(2,-)",
+    "p2:0",
+    "p2:1",
+    "p2:2",
+    "N(2,3)",
+    "p3:0",
+    "p3:1"
+  ],
+  "jump": null
+}

@@ -79,7 +79,10 @@ mod tests {
             "Not authenticated with Kitsu"
         );
         assert_eq!(KitsuError::Http(503).to_string(), "HTTP error 503");
-        assert_eq!(KitsuError::UnknownStatus("x".into()).to_string(), "Unknown status");
+        assert_eq!(
+            KitsuError::UnknownStatus("x".into()).to_string(),
+            "Unknown status"
+        );
         assert_eq!(
             KitsuError::MissingMediaData("Anime").to_string(),
             "Missing Anime data from Kitsu"
@@ -88,8 +91,14 @@ mod tests {
             KitsuError::MissingMediaData("Manga").to_string(),
             "Missing Manga data from Kitsu"
         );
-        assert_eq!(KitsuError::NotFound("anime").to_string(), "Could not find anime");
-        assert_eq!(KitsuError::NoUser.to_string(), "Missing User data from Kitsu");
+        assert_eq!(
+            KitsuError::NotFound("anime").to_string(),
+            "Could not find anime"
+        );
+        assert_eq!(
+            KitsuError::NoUser.to_string(),
+            "Missing User data from Kitsu"
+        );
     }
 
     #[test]

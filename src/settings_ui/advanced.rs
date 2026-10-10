@@ -1,6 +1,6 @@
 //! The rows of Advanced settings this module binds (tasks T-47a-076, T-47a-077, T-47a-078 and T-47a-080): the
-//! networking group (clear WebView data, DNS over HTTPS, the user agent and its reset) and the reader reset under
-//! Library. The rest of the page stays as the spec builds it. "Clear cookies" is not bound here (see the report).
+//! networking group (clear cookies, clear WebView data, DNS over HTTPS, the user agent and its reset) and the reader
+//! reset under Library. The rest of the page stays as the spec builds it.
 use std::rc::Rc;
 
 use gtk::prelude::*;
@@ -76,6 +76,32 @@ pub fn doh_row(prefs: &Prefs) -> PreferenceItem {
     int_choice("DNS over HTTPS (DoH)", &prefs.network.doh_provider, &DOH_PROVIDERS, true)
 }
 
+/// The jar file the HTTP client persists its cookies in, under the platform data directory.
+pub const COOKIE_FILE: &str = "cookies.json";
+
+/// Empties the cookie jar stored at `file` (memory and file) and returns the toast text on success.
+pub fn clear_cookies_at(file: std::path::PathBuf) -> std::io::Result<&'static str> {
+    kuro_net::cookies::CookieJar::load(file).remove_all()?;
+    Ok("Cookies cleared")
+}
+
+fn clear_cookies() {
+    let file = kuro_platform::linux::LinuxPaths::system().map(|p| kuro_platform::paths::Paths::data_dir(&p).join(COOKIE_FILE));
+    match file.map_err(std::io::Error::other).and_then(clear_cookies_at) {
+        Ok(text) => crate::toast::notify(text),
+        Err(err) => tracing::warn!(%err, "the cookies could not be cleared"),
+    }
+}
+
+/// The "Clear cookies" row: empties the HTTP cookie jar and says "Cookies cleared".
+pub fn clear_cookies_row() -> PreferenceItem {
+    let mut row = text("Clear cookies", None, true);
+    if let PreferenceItem::Text { on_click, .. } = &mut row {
+        *on_click = Some(Rc::new(clear_cookies));
+    }
+    row
+}
+
 /// The WebView data clear (the cache, cookies and local storage of the WebKit view).
 pub fn clear_webview_row() -> PreferenceItem {
     let mut row = text("Clear WebView data", None, true);
@@ -106,13 +132,29 @@ pub fn reset_reader_row() -> PreferenceItem {
 
 /// The typed rows of Advanced settings, in their groups. `changed` redraws the page after a reset.
 pub fn page_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
+    let revoke = revoke_trust_row(prefs, Rc::clone(&changed));
     vec![
         group(
             "Networking",
-            vec![clear_webview_row(), doh_row(prefs), user_agent_row(prefs), reset_user_agent_row(prefs, changed)],
+            vec![clear_cookies_row(), clear_webview_row(), doh_row(prefs), user_agent_row(prefs), reset_user_agent_row(prefs, changed)],
         ),
         group("Library", vec![reset_reader_row()]),
+        group("Extensions", vec![revoke]),
     ]
+}
+
+/// Revoke trusted unknown extensions (task T-47a-084): the trusted set of manga and anime extensions is cleared and the
+/// page is redrawn. The extension lists read the set when they are shown, so nothing waits for a restart.
+pub fn revoke_trust_row(prefs: &Prefs, changed: Rc<dyn Fn()>) -> PreferenceItem {
+    let trusted = prefs.sources.trusted_extensions.clone();
+    let mut row = text("Revoke trusted unknown extensions", None, true);
+    if let PreferenceItem::Text { on_click, .. } = &mut row {
+        *on_click = Some(Rc::new(move || match trusted.set(std::collections::BTreeSet::new()) {
+            Ok(()) => changed(),
+            Err(err) => tracing::warn!(%err, "the trusted extensions were not cleared"),
+        }));
+    }
+    row
 }
 
 /// Advanced settings: the spec page with the rows of [`page_rows`] in place of their spec twins.
@@ -152,6 +194,24 @@ mod tests {
     }
 
     #[test]
+    fn clear_cookies_empties_the_stored_jar_and_reports_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(COOKIE_FILE);
+        let jar = kuro_net::cookies::CookieJar::load(file.clone());
+        let url = reqwest::Url::parse("https://example.org/").unwrap();
+        let (n, v) = ("k", "v");
+        reqwest::cookie::CookieStore::set_cookies(
+            &*jar.provider(),
+            &mut std::iter::once(&reqwest::header::HeaderValue::from_str(&format!("{n}={v}; Max-Age=3600")).unwrap()),
+            &url,
+        );
+        jar.flush().unwrap();
+        assert_eq!(jar.get(&url).len(), 1);
+        assert_eq!(clear_cookies_at(file.clone()).unwrap(), "Cookies cleared");
+        assert!(kuro_net::cookies::CookieJar::load(file).get(&url).is_empty());
+    }
+
+    #[test]
     fn a_stored_provider_is_the_list_value_and_an_unknown_one_shows_disabled() {
         let prefs = Prefs::in_memory();
         assert_eq!(value_of(&doh_row(&prefs)), "-1");
@@ -185,6 +245,21 @@ mod tests {
         assert!(common.enabled);
         on_click.expect("tapping resets")();
         assert_eq!(prefs.network.default_user_agent.get(), prefs.network.default_user_agent.default_value());
+    }
+
+    #[test]
+    fn revoke_clears_the_trusted_set_and_redraws_the_page() {
+        use std::cell::Cell;
+        let prefs = Prefs::in_memory();
+        prefs.sources.trusted_extensions.set(std::collections::BTreeSet::from(["pkg.a".to_owned()])).unwrap();
+        let redrawn = Rc::new(Cell::new(0));
+        let counter = Rc::clone(&redrawn);
+        let row = revoke_trust_row(&prefs, Rc::new(move || counter.set(counter.get() + 1)));
+        let PreferenceItem::Text { on_click, common } = &row else { panic!("an action row") };
+        assert_eq!(common.title, "Revoke trusted unknown extensions");
+        (on_click.as_ref().expect("a tap action"))();
+        assert!(prefs.sources.trusted_extensions.get().is_empty());
+        assert_eq!(redrawn.get(), 1);
     }
 
     #[test]

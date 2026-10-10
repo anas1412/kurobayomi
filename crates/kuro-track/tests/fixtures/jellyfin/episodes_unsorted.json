@@ -1,0 +1,29 @@
+{
+ "Items": [
+  {
+   "Name": "Ep 3",
+   "Id": "e3",
+   "IndexNumber": 3,
+   "UserData": {
+    "Played": false
+   }
+  },
+  {
+   "Name": "Ep 1",
+   "Id": "e1",
+   "IndexNumber": 1,
+   "UserData": {
+    "Played": true
+   }
+  },
+  {
+   "Name": "Ep 2",
+   "Id": "e2",
+   "IndexNumber": 2,
+   "UserData": {
+    "Played": true
+   }
+  }
+ ],
+ "TotalRecordCount": 3
+}

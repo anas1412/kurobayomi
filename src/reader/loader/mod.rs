@@ -85,6 +85,32 @@ impl PageLoader for Loader {
         Loader::is_local(self)
     }
 
+    fn load_page(&self, index: usize) -> Option<Box<dyn std::any::Any>> {
+        match self {
+            Loader::Http(l) => Some(Box::new(l.load_page(index))),
+            _ => None,
+        }
+    }
+
+    fn retry_page(&self, index: usize) {
+        if let Loader::Http(l) = self {
+            l.retry_page(index);
+        }
+    }
+
+    fn image_file(&self, index: usize) -> Option<PathBuf> {
+        match self {
+            Loader::Http(l) => l.image_file(index),
+            _ => None,
+        }
+    }
+
+    fn sync_page(&self, page: &ReaderPage) {
+        if let Loader::Http(l) = self {
+            l.sync_page(page);
+        }
+    }
+
     fn recycle(&self) {
         match self {
             Loader::Directory(l) => l.recycle(),

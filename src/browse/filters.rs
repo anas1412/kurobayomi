@@ -4,8 +4,10 @@
 
 use std::cell::RefCell;
 
+use kuro_source::browse::BrowseState;
 use kuro_source::filter_list::FilterList;
 use kuro_source::filter_sheet::FilterSheet;
+use kuro_source::listing::Listing;
 
 use super::nav::{FilterSeed, filter_seed};
 
@@ -46,6 +48,12 @@ impl SourceFilters {
         self.sheet.borrow().items()
     }
 
+    /// The sheet takes `list` as its working copy (a genre search sets a filter): the sheet then shows it. It does not
+    /// search.
+    pub fn load(&self, list: FilterList) {
+        self.sheet.borrow_mut().reset(list);
+    }
+
     /// Reset: the sheet takes a fresh clone of the defaults. It does not search.
     pub fn reset(&self) {
         let fresh = self.fresh();
@@ -62,6 +70,18 @@ impl SourceFilters {
             }
             FilterSeed::Keep => self.current(),
         }
+    }
+}
+
+/// `searchGenre(genre)` of a browse page (T-40b-037, B§4.7): a group or select that holds the genre is set on a fresh copy of
+/// the defaults, and the search runs with no text. Otherwise the genre name is searched as text with the defaults. Returns
+/// the text (`None` for a genre filter) and the filters the search runs with.
+pub fn genre_search(defaults: &FilterList, genre: &str) -> (Option<String>, FilterList) {
+    let mut state = BrowseState::new(defaults.clone());
+    state.search_genre(genre, defaults.clone());
+    match state.listing() {
+        Listing::Search { query, filters } => (query.clone(), filters.clone()),
+        _ => (Some(genre.to_owned()), defaults.clone()),
     }
 }
 
@@ -105,11 +125,52 @@ mod tests {
     }
 
     #[test]
+    fn a_loaded_list_becomes_the_sheets_working_copy_and_the_defaults_stay() {
+        let filters = SourceFilters::new(defaults());
+        let mut chosen = defaults();
+        chosen.0[0] = Filter::check_box("Flag");
+        chosen.0.push(Filter::check_box("Extra"));
+        filters.load(chosen.clone());
+        assert_eq!(filters.current(), chosen, "the sheet shows what a genre search set");
+        assert_eq!(filters.fresh(), defaults(), "the defaults are never edited");
+    }
+
+    #[test]
     fn reset_replaces_every_filter_with_a_fresh_one() {
         let filters = SourceFilters::new(defaults());
         filters.edit(|sheet| sheet.toggle_check(&[0]).expect("check"));
         filters.reset();
         assert_eq!(filters.current(), defaults());
         assert_eq!(filters.items().len(), 2);
+    }
+
+    #[test]
+    fn a_genre_in_a_group_checks_the_box_and_searches_with_no_text() {
+        use kuro_source::filter::Filter;
+        let defaults = FilterList(vec![Filter::group("Genres", vec![Filter::check_box("Action"), Filter::check_box("Drama")])]);
+        let (query, filters) = genre_search(&defaults, "drama");
+        assert_eq!(query, None, "B§4.7: a genre filter is searched with no text");
+        let Filter::Group { state, .. } = &filters.0[0] else { panic!("the group stays") };
+        assert!(matches!(state[1], Filter::CheckBox { state: true, .. }), "the matching checkbox is checked");
+        assert!(matches!(state[0], Filter::CheckBox { state: false, .. }), "the other one is not");
+        assert!(matches!(defaults.0[0], Filter::Group { ref state, .. } if matches!(state[1], Filter::CheckBox { state: false, .. })), "the defaults are never edited");
+    }
+
+    #[test]
+    fn a_genre_in_a_select_sets_the_index_of_the_full_values_list() {
+        use kuro_source::filter::Filter;
+        let defaults = FilterList(vec![Filter::select("Genre", vec!["Any".into(), "Action".into(), "Drama".into()])]);
+        let (query, filters) = genre_search(&defaults, "Drama");
+        assert_eq!(query, None);
+        assert_eq!(filters.0[0].select_value(), Some("Drama"), "B-EC-22: the index refers to the full values list");
+    }
+
+    #[test]
+    fn a_genre_nobody_holds_is_searched_as_text_with_the_defaults() {
+        use kuro_source::filter::Filter;
+        let defaults = FilterList(vec![Filter::check_box("Flag")]);
+        let (query, filters) = genre_search(&defaults, "Slice of Life");
+        assert_eq!(query.as_deref(), Some("Slice of Life"), "B-EC-11: the genre name is the text");
+        assert_eq!(filters, defaults);
     }
 }

@@ -163,7 +163,7 @@ Verification: unit-test `ALFuzzyDate`, status maps, score conversions (table-dri
 
 Role: tracker "Bangumi" (id 5, manga and anime, no deletion support, supports private tracking). Files: `app/src/main/java/eu/kanade/tachiyomi/data/track/bangumi/{Bangumi.kt, BangumiApi.kt, BangumiInterceptor.kt, BangumiUtils.kt, dto/*.kt}`.
 
-Constants (`BangumiApi.kt:268-277`): `CLIENT_ID = "bgm293165b66d7e58156"`, `API_URL = "https://api.bgm.tv"`, `OAUTH_URL = "https://bgm.tv/oauth/access_token"`, `LOGIN_URL = "https://bgm.tv/oauth/authorize"`, `REDIRECT_URL = "aniyomi://bangumi-auth"`, `APP_JSON = "application/json"`. The `CLIENT_SECRET` is sent in token requests (not reproduced here).
+Constants (`BangumiApi.kt:268-277`): `CLIENT_ID = <Bangumi client id, not reproduced>`, `API_URL = "https://api.bgm.tv"`, `OAUTH_URL = "https://bgm.tv/oauth/access_token"`, `LOGIN_URL = "https://bgm.tv/oauth/authorize"`, `REDIRECT_URL = "aniyomi://bangumi-auth"`, `APP_JSON = "application/json"`. The `CLIENT_SECRET` is sent in token requests (not reproduced here).
 
 Hosts: `bgm.tv` serves the OAuth authorize and token endpoints (and the README link `README.md:33`); `api.bgm.tv` serves the REST API; `bangumi.tv` is only used to build the user-facing subject link `https://bangumi.tv/subject/<id>` (`app/src/main/java/eu/kanade/tachiyomi/data/track/bangumi/dto/BGMSearch.kt:41` and `:56`).
 

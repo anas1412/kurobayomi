@@ -23,6 +23,11 @@ use kuro_data::manga::{MangaRepo, MangaUpdate};
 use kuro_db::handle::Db;
 use kuro_domain::kind::EntryKind;
 use kuro_i18n::{MsgKey, tr};
+use kuro_images::art::{ArtKind, ArtRef, Owner};
+use kuro_images::invalidate::remove_covers;
+use kuro_local::LOCAL_SOURCE_ID;
+use kuro_platform::linux::LinuxPaths;
+use kuro_platform::paths::Paths;
 use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::ui::NavStyle;
 
@@ -228,20 +233,68 @@ pub fn source_info(db: &Arc<Db>, kind: EntryKind, id: i64) -> SourceInfo {
     }
 }
 
-/// Takes the selected entries out of the library: favorite off, cover timestamp now. Downloads stay (T2-DEL-01,
-/// T2-DEL-03).
-pub fn remove_from_library(db: &Arc<Db>, kind: EntryKind, ids: &[i64]) -> usize {
-    // the cover cache key changes with the removal (E-27)
+/// Takes the selected entries out of the library: favorite off, and the cached covers (an anime's background too)
+/// deleted. A cover timestamp moves only when a file was deleted, as Kotlin's `removeCovers` does, and it is written
+/// with the removal (E-27). Downloads stay (T2-DEL-01, T2-DEL-03). Local entries keep their files.
+pub fn remove_from_library(paths: &dyn Paths, db: &Arc<Db>, kind: EntryKind, ids: &[i64]) -> usize {
     let now = kuro_data::time::now_millis();
     ids.iter()
         .filter(|id| {
             let done = match kind {
-                EntryKind::Manga => MangaRepo::new(db.clone()).update(&MangaUpdate { favorite: Some(false), cover_last_modified: Some(now), ..MangaUpdate::new(**id) }),
-                EntryKind::Anime => AnimeRepo::new(db.clone()).update(&AnimeUpdate { favorite: Some(false), cover_last_modified: Some(now), ..AnimeUpdate::new(**id) }),
+                EntryKind::Manga => remove_manga(paths, db, **id, now).map_err(|e| e.to_string()),
+                EntryKind::Anime => remove_anime(paths, db, **id, now).map_err(|e| e.to_string()),
             };
             done.inspect_err(|e| tracing::error!(error = %e, entry = id, "removing from the library failed")).is_ok()
         })
         .count()
+}
+
+fn remove_manga(paths: &dyn Paths, db: &Arc<Db>, id: i64, now: i64) -> kuro_data::DataResult<()> {
+    let repo = MangaRepo::new(db.clone());
+    let manga = repo.by_id(id)?;
+    let cover = ArtRef {
+        owner: Owner::Manga,
+        entry_id: id,
+        source_id: manga.source,
+        kind: ArtKind::Cover,
+        url: manga.thumbnail_url.clone(),
+        favorite: manga.favorite,
+        last_modified: manga.cover_last_modified,
+    };
+    let removed = remove_covers(paths, &cover, now);
+    repo.update(&MangaUpdate {
+        favorite: Some(false),
+        cover_last_modified: (removed != cover).then_some(now),
+        ..MangaUpdate::new(id)
+    })
+}
+
+fn remove_anime(paths: &dyn Paths, db: &Arc<Db>, id: i64, now: i64) -> kuro_data::DataResult<()> {
+    let repo = AnimeRepo::new(db.clone());
+    let anime = repo.by_id(id)?;
+    let cover = ArtRef {
+        owner: Owner::Anime,
+        entry_id: id,
+        source_id: anime.source,
+        kind: ArtKind::Cover,
+        url: anime.thumbnail_url.clone(),
+        favorite: anime.favorite,
+        last_modified: anime.cover_last_modified,
+    };
+    let background = ArtRef {
+        kind: ArtKind::Background,
+        url: anime.background_url.clone(),
+        last_modified: anime.background_last_modified,
+        ..cover.clone()
+    };
+    let cover_after = remove_covers(paths, &cover, now);
+    let background_after = remove_covers(paths, &background, now);
+    repo.update(&AnimeUpdate {
+        favorite: Some(false),
+        cover_last_modified: (cover_after != cover).then_some(now),
+        background_last_modified: (background_after != background).then_some(now),
+        ..AnimeUpdate::new(id)
+    })
 }
 
 fn spec_id(kind: EntryKind) -> &'static str {
@@ -251,12 +304,26 @@ fn spec_id(kind: EntryKind) -> &'static str {
     }
 }
 
+/// Whether the entry is a local one (source 0). Local entries open by id, so two folders with one title stay apart.
+fn is_local_entry(db: &Arc<Db>, kind: EntryKind, id: i64) -> bool {
+    let source = match kind {
+        EntryKind::Manga => MangaRepo::new(db.clone()).by_id(id).map(|m| m.source),
+        EntryKind::Anime => AnimeRepo::new(db.clone()).by_id(id).map(|a| a.source),
+    };
+    source.is_ok_and(|s| s == LOCAL_SOURCE_ID)
+}
+
 fn nav(kind: EntryKind, db: Arc<Db>) -> Nav {
     let anime = kind == EntryKind::Anime;
     let open = {
         let db = db.clone();
         Rc::new(move |id| {
-            if let Some(title) = entry_title(&db, kind, id) {
+            if is_local_entry(&db, kind, id) {
+                match kind {
+                    EntryKind::Manga => crate::local_flow::open::entry(id),
+                    EntryKind::Anime => crate::entry_core::anime::route::open(id),
+                }
+            } else if let Some(title) = entry_title(&db, kind, id) {
                 crate::screens::open_entry(&title, anime);
             }
         })
@@ -264,7 +331,15 @@ fn nav(kind: EntryKind, db: Arc<Db>) -> Nav {
     let resume = {
         let db = db.clone();
         Rc::new(move |r: crate::library::view::Resume| {
-            if let Some(title) = entry_title(&db, kind, r.entry) {
+            if is_local_entry(&db, kind, r.entry) {
+                // the item is a chapter or episode id, so the local reader or player finds it without its name
+                match kind {
+                    EntryKind::Manga => crate::ui::push(&crate::local_flow::reader::open_local_chapter(r.entry, r.item)),
+                    EntryKind::Anime => {
+                        crate::local_flow_anime::open_local_episode(r.item);
+                    }
+                }
+            } else if let Some(title) = entry_title(&db, kind, r.entry) {
                 crate::screens::open_media(anime, &title, &r.item.to_string());
             }
         })
@@ -277,7 +352,11 @@ fn nav(kind: EntryKind, db: Arc<Db>) -> Nav {
             let offered = !flags.iter().any(|(_, local)| *local);
             crate::library::delete_dialog::show(kind, offered, move |choice| {
                 let plan = delete_plan(&flags, choice);
-                let done = remove_from_library(&db, kind, &plan.unfavorite);
+                let Ok(paths) = LinuxPaths::system() else {
+                    tracing::error!("no data paths; the selected entries stay in the library");
+                    return;
+                };
+                let done = remove_from_library(&paths, &db, kind, &plan.unfavorite);
                 if let Some(text) = crate::library::actions::partial_failure_toast(done, plan.unfavorite.len()) {
                     crate::toast::notify(text);
                 }
@@ -297,11 +376,11 @@ fn nav(kind: EntryKind, db: Arc<Db>) -> Nav {
     Nav {
         open,
         resume,
-        // the selection bar's Download queues every unseen item (`UNVIEWED_ITEMS`); the registered manager does it
-        download: Rc::new(move |ids| {
+        // the selection bar's Download menu picks the amount; the registered manager queues the items
+        download: Rc::new(move |ids, amount| {
             let sink = DOWNLOAD_SINK.with(|s| s.borrow().clone());
             match sink {
-                Some(sink) => sink(kind, ids, DownloadAmount::Unviewed),
+                Some(sink) => sink(kind, ids, amount),
                 None => tracing::debug!(?ids, "no download manager is registered for the library"),
             }
         }),
@@ -387,6 +466,7 @@ pub fn build(anime: bool) -> Option<Built> {
 #[cfg(test)]
 mod tests {
     use kuro_data::manga::Manga;
+    use kuro_testkit::TempPaths;
 
     use super::*;
 
@@ -419,18 +499,45 @@ mod tests {
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() }).expect("insert");
         assert_eq!(entry_title(&db, EntryKind::Manga, id).as_deref(), Some("Berserk"));
-        assert_eq!(remove_from_library(&db, EntryKind::Manga, &[id]), 1);
+        let paths = TempPaths::new().expect("temp paths");
+        assert_eq!(remove_from_library(&paths, &db, EntryKind::Manga, &[id]), 1);
         assert!(!repo.by_id(id).expect("still stored").favorite);
     }
 
     #[test]
-    fn t2_del_03_removal_stamps_the_cover_timestamp() {
+    fn t2_del_03_removal_deletes_the_cover_and_stamps_its_timestamp() {
         let (_dir, db) = manga_db();
+        let paths = TempPaths::new().expect("temp paths");
+        let repo = MangaRepo::new(db.clone());
+        let id = repo
+            .insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), thumbnail_url: Some("https://img.test/c.jpg".into()), ..Manga::create() })
+            .expect("insert");
+        let art = ArtRef {
+            owner: Owner::Manga,
+            entry_id: id,
+            source_id: 7,
+            kind: ArtKind::Cover,
+            url: Some("https://img.test/c.jpg".into()),
+            favorite: true,
+            last_modified: 0,
+        };
+        let file = kuro_images::cover_paths::cover_file_for(&paths, &art).expect("a cover path");
+        std::fs::create_dir_all(file.parent().expect("a directory")).expect("cover dir");
+        std::fs::write(&file, b"png").expect("cover file");
+        remove_from_library(&paths, &db, EntryKind::Manga, &[id]);
+        assert!(!file.exists(), "the cached cover is deleted");
+        assert!(repo.by_id(id).expect("stored").cover_last_modified > 0);
+    }
+
+    #[test]
+    fn a_removal_with_no_cached_cover_leaves_the_cover_timestamp_alone() {
+        // Kotlin's removeCovers moves the timestamp only when it deleted a file.
+        let (_dir, db) = manga_db();
+        let paths = TempPaths::new().expect("temp paths");
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() }).expect("insert");
+        remove_from_library(&paths, &db, EntryKind::Manga, &[id]);
         assert_eq!(repo.by_id(id).expect("stored").cover_last_modified, 0);
-        remove_from_library(&db, EntryKind::Manga, &[id]);
-        assert!(repo.by_id(id).expect("stored").cover_last_modified > 0);
     }
 
     #[test]

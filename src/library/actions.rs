@@ -110,6 +110,21 @@ pub fn plan_download(unseen: &[i64], amount: DownloadAmount, skip: impl Fn(i64) 
     }
 }
 
+/// The Download menu of the selection bar for `kind`: next 1, 5, 10 or 25 items, then every unviewed one (T-37a-028).
+pub fn download_menu(kind: EntryKind) -> Vec<(DownloadAmount, String)> {
+    let (one, many, unviewed) = match kind {
+        EntryKind::Manga => ("chapter", "chapters", "Unread"),
+        EntryKind::Anime => ("episode", "episodes", "Unwatched"),
+    };
+    vec![
+        (DownloadAmount::Next(1), format!("Next {one}")),
+        (DownloadAmount::Next(5), format!("Next 5 {many}")),
+        (DownloadAmount::Next(10), format!("Next 10 {many}")),
+        (DownloadAmount::Next(25), format!("Next 25 {many}")),
+        (DownloadAmount::Unviewed, unviewed.to_owned()),
+    ]
+}
+
 /// The two checkboxes of the remove dialog: take the entries out of the library, delete their downloads.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DeleteChoice {

@@ -24,10 +24,12 @@ use kuro_extensions::anime::languages::enable_first_run_languages;
 use kuro_extensions::anime::loader::PackageDir;
 use kuro_extensions::anime::manager::ExtensionState;
 use kuro_extensions::anime::model::{Buckets, StoreRow};
+use kuro_extensions::anime::sources::icon_for_source;
 use kuro_extensions::anime::service::{AnimeExtensions, pump};
 use kuro_extensions::anime::trust::TrustStore;
 use kuro_extensions::anime::update::LAST_CHECK_KEY;
 use kuro_extensions::registry::{ExtensionRegistry, Snapshot};
+use kuro_domain::source::model::Source;
 use kuro_platform::paths::Paths;
 use kuro_prefs::source::{SourcePrefs, system_locale};
 use kuro_prefs::store::PrefStore;
@@ -61,6 +63,8 @@ struct Latest {
     manga: Vec<Ext>,
     problems: Vec<(String, String)>,
     anime: Buckets,
+    anime_sources: Vec<Source>,
+    anime_icons: BTreeMap<i64, String>,
 }
 
 thread_local! {
@@ -85,6 +89,22 @@ pub fn anime_lists() -> Buckets {
     LATEST.with(|l| l.borrow().anime.clone())
 }
 
+/// The sources of the installed anime packages as the Sources list shows them, and the package icon file of each source
+/// that has one (T-17a-025). A source without an icon file is left out of the map, and its row draws the generic icon.
+pub fn anime_source_rows(state: &ExtensionState) -> (Vec<Source>, BTreeMap<i64, String>) {
+    let refs: Vec<_> = state.installed().values().flat_map(|ext| &ext.sources).collect();
+    let icons = refs.iter().filter_map(|s| Some((s.id, icon_for_source(state, Some(s))?.to_string_lossy().into_owned()))).collect();
+    (refs.iter().map(|s| Source::new(s.id, &s.name, &s.lang)).collect(), icons)
+}
+
+/// The anime sources and their icon files as the last state change left them.
+pub fn anime_sources() -> (Vec<Source>, BTreeMap<i64, String>) {
+    LATEST.with(|l| {
+        let latest = l.borrow();
+        (latest.anime_sources.clone(), latest.anime_icons.clone())
+    })
+}
+
 /// What a state change publishes: the first-run languages (a no-op once `source_languages` is saved), the Browse lists
 /// built with the current preferences, and from them the badges and the per-store counts the pages read.
 fn publish(state: &ExtensionState, prefs: &SourcePrefs) {
@@ -94,7 +114,13 @@ fn publish(state: &ExtensionState, prefs: &SourcePrefs) {
     let lists = anime_buckets(state, prefs);
     ext_badges::publish(badges_of(&lists));
     ext_badges::publish_store_counts(not_runnable_by_store(state, prefs.show_not_runnable.get()));
-    LATEST.with(|l| l.borrow_mut().anime = lists);
+    let (sources, icons) = anime_source_rows(state);
+    LATEST.with(|l| {
+        let mut latest = l.borrow_mut();
+        latest.anime = lists;
+        latest.anime_sources = sources;
+        latest.anime_icons = icons;
+    });
 }
 
 /// The rows of the shared extension list for the manga packages in `snapshot`. Each row's icon is the cached `icon.png`
@@ -127,6 +153,24 @@ pub fn manga_exts(snapshot: &Snapshot, icons: &Path) -> Vec<Ext> {
 /// The load problems of the manga packages as `(folder, message)` lines, in folder order.
 pub fn problem_lines(snapshot: &Snapshot) -> Vec<(String, String)> {
     snapshot.problems.iter().map(|(file, message)| (file.clone(), message.clone())).collect()
+}
+
+/// The download folder names of every installed source (T-17a-048): `Name (LANG)` for the anime sources, and the
+/// extension names for the manga packages, whose sources the manga registry does not list.
+fn download_folder_names(state: &ExtensionState, manga: &Snapshot) -> Vec<String> {
+    let anime = state.installed().values().flat_map(|ext| &ext.sources).map(|s| kuro_downloads::anime::naming::source_dir_name(&s.name, &s.lang));
+    let manga = manga.installed.values().map(|ext| kuro_downloads::layout::DownloadLayout::source_dir_name(&ext.name));
+    anime.chain(manga).collect()
+}
+
+/// Logs the download folders that match no installed source, once the first anime scan is in. Nothing is deleted.
+fn log_orphans(root: std::path::PathBuf, names: Vec<String>, handle: &tokio::runtime::Handle) {
+    handle.spawn_blocking(move || {
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        if let Err(e) = kuro_source::orphans::log_orphaned_download_folders(&root, &names) {
+            tracing::warn!("the download folders could not be checked for orphans: {e}");
+        }
+    });
 }
 
 /// The running host.
@@ -222,10 +266,16 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
     );
     let apply_state = state.clone();
     let apply_prefs = SourcePrefs::new(store.clone());
+    let (apply_registry, apply_handle, downloads) = (registry.clone(), tokio::runtime::Handle::current(), paths.default_downloads_dir());
+    let mut orphans_logged = false;
     glib::spawn_future_local(pump(inbox, move |event| {
         let mut state = apply_state.borrow_mut();
         state.apply(event);
         publish(&state, &apply_prefs);
+        if state.initialized() && !orphans_logged {
+            orphans_logged = true;
+            log_orphans(downloads.clone(), download_folder_names(&state, &apply_registry.snapshot()), &apply_handle);
+        }
     }));
 
     // the daily check, and a refresh whenever the stores change
@@ -272,6 +322,60 @@ mod tests {
             kuroext: None,
             store: StoreRef { index_url: "https://s/i.json".into(), name: "S".into() },
         }
+    }
+
+    #[test]
+    fn a_source_row_carries_its_package_icon_when_the_package_has_one() {
+        let source = |id: i64| AnimeSourceRef { id, name: format!("S{id}"), lang: "en".into(), base_url: String::new() };
+        let package = |pkg: &str, icon: Option<&str>, id: i64| {
+            kuro_extensions::anime::model::LoadResult::Success(kuro_extensions::anime::model::Installed {
+                name: pkg.into(),
+                pkg: pkg.into(),
+                version_name: "1".into(),
+                version_code: 1,
+                abi: AbiVersion { major: 1, minor: 0 },
+                lang: "en".into(),
+                nsfw: false,
+                torrent: false,
+                sources: vec![source(id)],
+                icon: icon.map(Into::into),
+                signer: kuro_extensions::anime::model::SignerDigest("ab".repeat(32)),
+                has_update: false,
+                is_obsolete: false,
+                store: None,
+            })
+        };
+        let mut state = ExtensionState::new();
+        state.apply_loaded(vec![package("eu.a", Some("/icons/a.png"), 1), package("eu.b", None, 2)]);
+        let (rows, icons) = anime_source_rows(&state);
+        assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(icons, BTreeMap::from([(1, "/icons/a.png".to_owned())]), "no entry for the package without an icon: the generic icon");
+    }
+
+    #[test]
+    fn download_folder_names_cover_the_anime_sources_and_the_manga_packages() {
+        let source = |name: &str| AnimeSourceRef { id: 1, name: name.into(), lang: "en".into(), base_url: String::new() };
+        let mut state = ExtensionState::new();
+        state.apply_loaded(vec![kuro_extensions::anime::model::LoadResult::Success(kuro_extensions::anime::model::Installed {
+            name: "T".into(),
+            pkg: "eu.t".into(),
+            version_name: "1".into(),
+            version_code: 1,
+            abi: AbiVersion { major: 1, minor: 0 },
+            lang: "en".into(),
+            nsfw: false,
+            torrent: false,
+            sources: vec![source("Tube/One")],
+            icon: None,
+            signer: kuro_extensions::anime::model::SignerDigest("ab".repeat(32)),
+            has_update: false,
+            is_obsolete: false,
+            store: None,
+        })]);
+        let registry = ExtensionRegistry::new();
+        registry.set_installed(vec![Installed { pkg: "eu.m".into(), name: "Manga".into(), version_code: 1, lib_version: 1.0, has_update: false, is_obsolete: false }]);
+        let names = download_folder_names(&state, &registry.snapshot());
+        assert_eq!(names, vec!["Tube_One (EN)".to_owned(), "Manga".to_owned()]);
     }
 
     fn state() -> ExtensionState {

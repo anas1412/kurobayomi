@@ -1,0 +1,45 @@
+{
+ "Items": [
+  {
+   "Name": "Ep 1",
+   "Id": "e1",
+   "IndexNumber": 1,
+   "UserData": {
+    "Played": true
+   }
+  },
+  {
+   "Name": "Ep 2",
+   "Id": "e2",
+   "IndexNumber": 2,
+   "UserData": {
+    "Played": true
+   }
+  },
+  {
+   "Name": "Ep 3",
+   "Id": "e3",
+   "IndexNumber": 3,
+   "UserData": {
+    "Played": false
+   }
+  },
+  {
+   "Name": "Ep 4",
+   "Id": "e4",
+   "IndexNumber": 4,
+   "UserData": {
+    "Played": false
+   }
+  },
+  {
+   "Name": "Ep 5",
+   "Id": "e5",
+   "IndexNumber": 5,
+   "UserData": {
+    "Played": false
+   }
+  }
+ ],
+ "TotalRecordCount": 5
+}

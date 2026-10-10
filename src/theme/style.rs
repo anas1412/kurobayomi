@@ -20,7 +20,15 @@ pub mod class {
     pub const ACTIVE: &str = "kb-active";
     pub const PILL: &str = "kb-pill";
     pub const COVER_PLACEHOLDER: &str = "kb-cover-placeholder";
-    pub const STATE_LAYER: &str = "kb-state-layer";
+    pub const PLAYER_RIPPLE: &str = "kb-player-ripple";
+    pub const TAB_PILL: &str = "kb-tab-pill";
+    pub const HIT_TARGET: &str = "kb-hit-target";
+    pub const NOINDICATION: &str = "kb-noindication";
+    pub const INFO_BAR: &str = "kb-info-bar";
+    pub const COLLAPSIBLE: &str = "kb-collapsible";
+    pub const ICON_TOGGLE: &str = "kb-icon-toggle";
+    pub const WHEEL: &str = "kb-wheel";
+    pub const WHEEL_SELECTED: &str = "kb-wheel-selected";
     pub const DRAGGED: &str = "kb-dragged";
     pub const FAST_THUMB: &str = "kb-fast-thumb";
     pub const FAST_SHOWN: &str = "kb-fast-shown";
@@ -34,7 +42,13 @@ pub mod class {
     pub const SHEET_TABLET: &str = "kb-sheet-tablet";
     pub const SHEET_SHOWN: &str = "kb-sheet-shown";
     pub const LINK_ICON: &str = "kb-link-icon";
+    /// A glyph in the primary colour (the info screen icon).
+    pub const PRIMARY_ICON: &str = "kb-primary-icon";
 }
+
+/// Alpha of the onSurface state layer under a hovered clickable surface; a press uses
+/// `RIPPLE_ALPHA` (the Compose ripple defaults, T-49b-021).
+pub const HOVER_ALPHA: f32 = 0.08;
 
 /// Alpha of the selected-row tint: 0.16 in dark, 0.22 in light (`selectedBackground`, M1).
 pub fn selected_alpha(dark: bool) -> f32 {
@@ -71,12 +85,19 @@ pub fn top_small_padding() -> Edges {
 /// pill takes a GTK-theme stand-in for `surface_container_high` (T-49a-034).
 pub fn system_rules(dark: bool) -> String {
     let active = Tokens::active_for(dark).to_css();
+    // the tab pill follows the generic pill, so its alpha background wins at equal specificity
     format!(
-        ".{} {{ background-color: alpha(@theme_selected_bg_color, {}); }}\n.{} {{ color: {active}; }}\n.{} {{ background-color: mix(@theme_bg_color, @theme_fg_color, 0.1); }}\n",
+        ".{} {{ background-color: alpha(@theme_selected_bg_color, {}); }}\n.{} {{ color: {active}; }}\n.{} {{ background-color: mix(@theme_bg_color, @theme_fg_color, 0.1); }}\n.{} {{ background-color: alpha(@theme_fg_color, {}); }}\n.{} {{ color: @accent_color; }}\n.{}:hover {{ background-color: alpha(@theme_fg_color, {HOVER_ALPHA}); }}\n.{}:active {{ background-color: alpha(@theme_fg_color, {}); }}\n",
         class::SELECTED,
         selected_alpha(dark),
         class::ACTIVE,
-        class::PILL
+        class::PILL,
+        class::TAB_PILL,
+        crate::widgets::tabs::pill_alpha(dark),
+        class::PRIMARY_ICON,
+        class::SURFACE,
+        class::SURFACE,
+        crate::theme::tokens::RIPPLE_ALPHA,
     )
 }
 
@@ -124,6 +145,12 @@ pub fn widget_static_rules() -> String {
 .{sheet_tablet}.{sheet_shown} {{ opacity: 1; }}
 .{link} {{ color: @accent_color; }}
 .{pill} {{ padding: 1px 6px; border-radius: 999px; }}
+.{hit} {{ min-width: 48px; min-height: 48px; }}
+.{noind}:hover, .{noind}:active {{ background-image: none; background-color: transparent; }}
+.{info_bar} {{ border-top: 1px solid alpha(@window_fg_color, 0.12); padding: 8px 0 16px 0; }}
+.{collapsible} > title {{ padding: 12px 24px; }}
+.{icon_toggle} {{ min-height: 48px; }}
+.{wheel} {{ border-radius: 16px; }}
 ",
         filled = class::BUTTON_FILLED,
         text = class::BUTTON_TEXT,
@@ -144,6 +171,12 @@ pub fn widget_static_rules() -> String {
         sheet_ms = tk::SHEET_ANIM_MS,
         link = class::LINK_ICON,
         pill = class::PILL,
+        hit = class::HIT_TARGET,
+        noind = class::NOINDICATION,
+        info_bar = class::INFO_BAR,
+        collapsible = class::COLLAPSIBLE,
+        icon_toggle = class::ICON_TOGGLE,
+        wheel = class::WHEEL,
     )
 }
 
@@ -153,7 +186,7 @@ pub fn ripple_rules(system_dark: bool) -> String {
     let rgb = if system_dark { "255, 255, 255" } else { "0, 0, 0" };
     format!(
         ".{layer}:hover, .{layer}:focus-visible, .{layer}:active, .{layer}.{dragged} {{ background-color: rgba({rgb}, {alpha}); }}\n",
-        layer = class::STATE_LAYER,
+        layer = class::PLAYER_RIPPLE,
         dragged = class::DRAGGED,
         alpha = crate::theme::tokens::RIPPLE_ALPHA,
     )
@@ -173,17 +206,34 @@ pub fn palette_rules(tokens: &Tokens) -> String {
         class::SURFACE
     );
     let _ = writeln!(out, ".{}:hover {{ transition-duration: 120ms; }}", class::SURFACE);
+    // the state layer: onSurface over a hovered or pressed clickable surface
+    let on_surface = tokens.get(Role::OnSurface);
+    let _ = writeln!(out, ".{}:hover {{ background-color: {}; }}", class::SURFACE, on_surface.to_css_with_alpha(HOVER_ALPHA));
+    let _ = writeln!(
+        out,
+        ".{}:active {{ background-color: {}; }}",
+        class::SURFACE,
+        on_surface.to_css_with_alpha(crate::theme::tokens::RIPPLE_ALPHA)
+    );
     let _ = writeln!(
         out,
         ".{} {{ background-color: {}; }}",
         class::SELECTED,
         tokens.get(Role::Secondary).to_css_with_alpha(selected_alpha(tokens.dark))
     );
+    // body medium: 14 px, semibold, on_surface_variant (T-49b-011)
     let _ = writeln!(
         out,
-        ".{} {{ font-weight: 600; color: {}; }}",
+        ".{} {{ font-weight: 600; font-size: 14px; color: {}; }}",
         class::HEADER,
         tokens.get(Role::OnSurfaceVariant).to_css()
+    );
+    let _ = writeln!(
+        out,
+        ".{} {{ background-color: {}; border: 1px solid {}; border-radius: 16px; }}",
+        class::WHEEL_SELECTED,
+        tokens.get(Role::Primary).to_css_with_alpha(0.2),
+        tokens.get(Role::Primary).to_css()
     );
     let _ = writeln!(out, ".{} {{ color: {}; }}", class::ACTIVE, tokens.active().to_css());
     let _ = writeln!(
@@ -193,6 +243,14 @@ pub fn palette_rules(tokens: &Tokens) -> String {
         tokens.get(Role::SurfaceContainerHigh).to_css(),
         tokens.get(Role::OnSurface).to_css()
     );
+    // after the generic pill: equal specificity, so the later rule wins (T-49b-022)
+    let _ = writeln!(
+        out,
+        ".{} {{ background-color: {}; }}",
+        class::TAB_PILL,
+        tokens.get(Role::OnBackground).to_css_with_alpha(crate::widgets::tabs::pill_alpha(tokens.dark))
+    );
+    let _ = writeln!(out, ".{} {{ color: {}; }}", class::PRIMARY_ICON, tokens.get(Role::Primary).to_css());
     out
 }
 
@@ -236,6 +294,43 @@ mod tests {
             let want = format!(".kb-pill {{ background-color: {};", t.get(Role::SurfaceContainerHigh).to_css());
             assert!(palette_rules(&t).contains(&want), "dark={dark}");
         }
+    }
+
+    // T-49b-021: an indicated surface has a hover and a press background; .kb-noindication has none.
+    #[test]
+    fn clickable_surface_has_hover_and_press_backgrounds() {
+        let t = tokens_for(scheme_for(AppTheme::CLOUDFLARE), false, false);
+        let rules = palette_rules(&t);
+        let on_surface = t.get(Role::OnSurface);
+        assert!(rules.contains(&format!(".kb-surface:hover {{ background-color: {}; }}", on_surface.to_css_with_alpha(HOVER_ALPHA))));
+        assert!(rules.contains(&format!(".kb-surface:active {{ background-color: {}; }}", on_surface.to_css_with_alpha(0.1))));
+        assert!(system_rules(false).contains(".kb-surface:hover { background-color: alpha(@theme_fg_color, 0.08); }"));
+        assert!(system_rules(false).contains(".kb-surface:active { background-color: alpha(@theme_fg_color, 0.1); }"));
+        assert!(widget_static_rules().contains(".kb-noindication:hover, .kb-noindication:active { background-image: none; background-color: transparent; }"));
+    }
+
+    // T-49b-022: the tab pill rule comes after the generic pill rule, so its alpha background wins.
+    #[test]
+    fn tab_pill_rule_follows_the_pill_rule() {
+        for dark in [false, true] {
+            let t = tokens_for(scheme_for(AppTheme::CLOUDFLARE), dark, false);
+            let rules = palette_rules(&t);
+            let pill = rules.find(".kb-pill {").expect("pill rule");
+            let tab = rules.find(".kb-tab-pill {").expect("tab pill rule");
+            assert!(tab > pill, "dark={dark}");
+            let want = t.get(Role::OnBackground).to_css_with_alpha(if dark { 0.12 } else { 0.08 });
+            assert!(rules.contains(&format!(".kb-tab-pill {{ background-color: {want}; }}")), "dark={dark}");
+            let system = system_rules(dark);
+            assert!(system.find(".kb-tab-pill {").unwrap() > system.find(".kb-pill {").unwrap(), "dark={dark}");
+        }
+    }
+
+    // T-49b-026: the info icon is primary, not the amber filter tint.
+    #[test]
+    fn primary_icon_class_uses_the_primary_role() {
+        let t = tokens_for(scheme_for(AppTheme::CLOUDFLARE), false, false);
+        assert!(palette_rules(&t).contains(&format!(".kb-primary-icon {{ color: {}; }}", t.get(Role::Primary).to_css())));
+        assert!(system_rules(true).contains(".kb-primary-icon { color: @accent_color; }"));
     }
 
     // T-49a-052 / TEST-49-21: the FAB rules carry the source timings.
@@ -342,25 +437,32 @@ mod ripple_tests {
             assert!(css.contains(state), "{state}");
         }
     }
+
+    // T-49b-013: `.kb-player-ripple`, alpha .1 for every state.
+    #[test]
+    fn player_ripple_class_and_alpha() {
+        assert_eq!(super::class::PLAYER_RIPPLE, "kb-player-ripple");
+        assert_eq!(crate::theme::tokens::RIPPLE_ALPHA, 0.1);
+        let css = ripple_rules(false);
+        assert!(css.contains(".kb-player-ripple:hover"));
+        assert!(css.contains(".kb-player-ripple.kb-dragged"));
+    }
 }
 
 
 #[cfg(test)]
 mod parse_tests {
-    /// The widget and system rules parse under `gtk::CssProvider`. Needs a display; run alone:
-    /// `cargo test -p kurobayomi widget_rules_parse -- --ignored`.
+    /// The widget and system rules parse under `gtk::CssProvider`. Needs a display, and skips
+    /// itself without one.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi widget_rules_parse -- --ignored"]
     fn widget_rules_parse_under_css_provider() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping");
-            return;
-        }
-        for dark in [false, true] {
-            let css = format!("{}{}", super::system_rules(dark), super::widget_rules(dark));
-            if let Err(message) = crate::theme::apply::build_provider(&css) {
-                panic!("CSS did not parse: {message}");
+        crate::testing::with_display(|| {
+            for dark in [false, true] {
+                let css = format!("{}{}", super::system_rules(dark), super::widget_rules(dark));
+                if let Err(message) = crate::theme::apply::build_provider(&css) {
+                    panic!("CSS did not parse: {message}");
+                }
             }
-        }
+        });
     }
 }

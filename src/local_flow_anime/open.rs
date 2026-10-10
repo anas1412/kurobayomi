@@ -32,6 +32,37 @@ pub fn opening_of(db: &Arc<Db>, title: &str, episode_name: &str) -> Result<Optio
     Ok(episodes.into_iter().find(|e| e.name == episode_name).map(|e| Opening { path: e.url, episode_id: e.id, start_ms: e.last_second_seen * 1000 }))
 }
 
+/// The opening of episode row `episode_id`, when its entry is local. `None` for a missing row or a remote entry.
+pub fn opening_by_id(db: &Arc<Db>, episode_id: i64) -> Result<Option<Opening>, String> {
+    let Some(episode) = EpisodeRepo::new(Arc::clone(db)).by_id(episode_id).map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let anime = AnimeRepo::new(Arc::clone(db)).by_id(episode.anime_id).map_err(|e| e.to_string())?;
+    if anime.source != LOCAL_SOURCE_ID {
+        return Ok(None);
+    }
+    Ok(Some(Opening { path: episode.url, episode_id: episode.id, start_ms: episode.last_second_seen * 1000 }))
+}
+
+/// Plays a local episode by its row id in the player. `false` when the row is not a local episode, so the caller keeps
+/// its own player.
+pub fn open_local_episode(episode_id: i64) -> bool {
+    if !crate::data::is_installed() {
+        return false;
+    }
+    match opening_by_id(&crate::data::app().anime_db, episode_id) {
+        Ok(Some(found)) => {
+            crate::player_view::open_episode(std::path::Path::new(&found.path), found.episode_id, found.start_ms);
+            true
+        }
+        Ok(None) => false,
+        Err(e) => {
+            tracing::error!(error = %e, "the local episode lookup failed");
+            false
+        }
+    }
+}
+
 /// The local entry id for a title on the GTK thread. `None` before the data opens, and for any other title.
 pub fn anime_id_for_title(title: &str) -> Option<i64> {
     if !crate::data::is_installed() {
@@ -88,6 +119,29 @@ mod tests {
         assert_eq!(opening, Opening { path: dir.join("Show - 1.mkv").to_string_lossy().into_owned(), episode_id: first.id, start_ms: 90_000 });
         assert_eq!(opening_of(&db, "Show", "Show - 9").expect("lookup"), None, "an unknown episode name");
         assert_eq!(opening_of(&db, "Berserk", "Show - 1").expect("lookup"), None, "a title with no local entry");
+    }
+
+    #[test]
+    fn an_episode_id_opens_only_a_local_episode() {
+        let (_db_dir, db) = anime_db();
+        let root = tempfile::tempdir().expect("root");
+        let dir = root.path().join("Show");
+        std::fs::create_dir(&dir).expect("series folder");
+        std::fs::write(dir.join("Show - 1.mkv"), b"video").expect("episode 1");
+        scan_root(&db, root.path()).expect("scan");
+        let anime_id = anime_id_with_title(&db, "Show").expect("lookup").expect("local Show");
+        let episode = EpisodeRepo::new(Arc::clone(&db)).by_anime_id(anime_id).expect("rows").remove(0);
+        let opening = opening_by_id(&db, episode.id).expect("lookup").expect("local episode");
+        assert_eq!(opening.path, episode.url);
+
+        let remote = AnimeRepo::new(Arc::clone(&db))
+            .insert(&kuro_data::anime::Anime { source: 42, url: "remote/1".into(), title: "Remote".into(), favorite: true, ..kuro_data::anime::Anime::create() })
+            .expect("remote row");
+        let remote_episode = kuro_data::episode::Episode { anime_id: remote, url: "remote/1/ep1".into(), name: "1".into(), ..kuro_data::episode::Episode::create() };
+        EpisodeRepo::new(Arc::clone(&db)).add_all(&[remote_episode]).expect("remote episode");
+        let remote_id = EpisodeRepo::new(Arc::clone(&db)).by_anime_id(remote).expect("rows").remove(0).id;
+        assert_eq!(opening_by_id(&db, remote_id).expect("lookup"), None, "a remote episode keeps its own player");
+        assert_eq!(opening_by_id(&db, 9_999).expect("lookup"), None, "a missing episode");
     }
 
     #[test]

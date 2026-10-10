@@ -1,0 +1,15 @@
+{
+  "note": "Generic fixture for T-40a-039: two installed (one shared with the repo, one with no icon) and one untrusted.",
+  "installed": [
+    {"name": "Alpha Reader", "pkg": "eu.example.alpha", "version": "1.4.0", "lang": "en", "nsfw": false, "obsolete": false,
+     "icon": "icon.png", "shared": true,
+     "sources": [{"id": 1001, "name": "Alpha Source", "lang": "en", "base_url": "https://alpha.example"}]},
+    {"name": "Gamma Reader", "pkg": "eu.example.gamma", "version": "0.9.0", "lang": "en", "nsfw": false, "obsolete": false,
+     "icon": null, "shared": false,
+     "sources": [{"id": 3001, "name": "Gamma Source", "lang": "en", "base_url": "https://gamma.example"}]}
+  ],
+  "untrusted": [
+    {"name": "Unknown Reader", "pkg": "eu.example.unknown", "version": "0.0.1", "lang": null, "nsfw": false,
+     "sources": [{"id": 6001, "name": "Unknown Source", "lang": "en", "base_url": "https://unknown.example"}]}
+  ]
+}

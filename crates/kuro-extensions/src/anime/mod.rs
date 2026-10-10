@@ -18,6 +18,7 @@ pub mod backup;
 pub mod package;
 pub mod sources;
 pub mod store;
+pub mod stores_page;
 pub mod trust;
 pub mod update;
 

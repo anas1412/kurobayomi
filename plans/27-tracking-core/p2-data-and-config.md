@@ -128,8 +128,8 @@ All values are repo-relative to the cited files. Client ids are public values in
 |---|---|---|---|
 | AniList | `app/src/main/java/eu/kanade/tachiyomi/data/track/anilist/AnilistApi.kt:584-587` | `https://anilist.co/api/v2/oauth/authorize?client_id=5338&response_type=token` | implicit: token in URL fragment |
 | MyAnimeList | `myanimelist/MyAnimeListApi.kt:392-396` | `https://myanimelist.net/v1/oauth2/authorize?client_id=686b980ff4240fccce7f6a654cea07ce&code_challenge=<verifier>&response_type=code` | code, PKCE, method implicit `plain` (no `code_challenge_method` sent) |
-| Bangumi | `bangumi/BangumiApi.kt:279-285` | `https://bgm.tv/oauth/authorize?client_id=bgm293165b66d7e58156&response_type=code&redirect_uri=aniyomi%3A%2F%2Fbangumi-auth` | code |
-| Shikimori | `shikimori/ShikimoriApi.kt:261-266` | `https://shikimori.one/oauth/authorize?client_id=aOAYRqOLwxpA8skpcQIXetNy4cw2rn2fRzScawlcQ5U&redirect_uri=aniyomi%3A%2F%2Fshikimori-auth&response_type=code` | code |
+| Bangumi | `bangumi/BangumiApi.kt:279-285` | `https://bgm.tv/oauth/authorize?client_id=<Bangumi client id>&response_type=code&redirect_uri=aniyomi%3A%2F%2Fbangumi-auth` | code |
+| Shikimori | `shikimori/ShikimoriApi.kt:261-266` | `https://shikimori.one/oauth/authorize?client_id=<Shikimori client id>&redirect_uri=aniyomi%3A%2F%2Fshikimori-auth&response_type=code` | code |
 | Simkl | `simkl/SimklApi.kt:248-253` | `https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=aniyomi%3A%2F%2Fsimkl-auth` | code |
 
 Redirect URIs in use: `aniyomi://bangumi-auth` (`BangumiApi.kt:275`), `aniyomi://shikimori-auth` (`ShikimoriApi.kt:256`), `aniyomi://simkl-auth` (`SimklApi.kt:246`). AniList and MAL authorize URLs do not send `redirect_uri`, so the redirect registered with the provider applies. The manifest intent filter (`AndroidManifest.xml:250-258`) handles all five hosts with scheme `aniyomi`.

@@ -291,6 +291,7 @@ fn clear_db(id: &str) -> Option<Built> {
             tracing::warn!(error = %e, "cannot list the non-library entries to clear");
             Vec::new()
         });
+    let sources = sorted_by_name(sources);
     let b = GBox::new(O::Vertical, 0);
     if sources.is_empty() {
         let text = screen(id).empty.unwrap_or_else(|| "Nothing to clear".to_owned());
@@ -313,6 +314,13 @@ fn clear_db(id: &str) -> Option<Built> {
             })
             .collect(),
     );
+    // tapping anywhere on a row flips its check
+    let tapped = Rc::clone(&entries);
+    l.connect_row_activated(move |_, row| {
+        if let Some((_, check, _)) = tapped.iter().find(|(_, _, r)| r == row) {
+            check.set_active(!check.is_active());
+        }
+    });
     col.append(&l);
     b.append(&scrolled(&col));
     let del = Button::builder().label("Delete").css_classes(["destructive-action"]).sensitive(false).build();
@@ -366,6 +374,12 @@ fn clear_db(id: &str) -> Option<Built> {
     all.connect_clicked(move |_| e1.iter().for_each(|(_, c, _)| c.set_active(true)));
     inv.connect_clicked(move |_| e2.iter().for_each(|(_, c, _)| c.set_active(!c.is_active())));
     built(b, vec![inv.upcast(), all.upcast()])
+}
+
+/// The clear-database rows in source-name order, ignoring case.
+fn sorted_by_name(mut sources: Vec<(i64, String, i64)>) -> Vec<(i64, String, i64)> {
+    sources.sort_by_cached_key(|(_, name, _)| name.to_lowercase());
+    sources
 }
 
 /// Housekeeping after "Clear database" committed (T-03a-028): above 1000 removed chapters or episodes the WAL is
@@ -437,6 +451,13 @@ pub fn clear_webview_data() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clear_database_rows_sort_by_source_name_ignoring_case() {
+        let rows = vec![(1, "zeta".to_owned(), 3), (2, "Alpha".to_owned(), 1), (3, "beta".to_owned(), 2)];
+        let names: Vec<String> = sorted_by_name(rows).into_iter().map(|(_, n, _)| n).collect();
+        assert_eq!(names, ["Alpha", "beta", "zeta"]);
+    }
 
     #[test]
     fn webview_clear_outcome_messages() {

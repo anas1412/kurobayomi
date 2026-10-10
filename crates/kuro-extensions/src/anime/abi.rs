@@ -28,6 +28,17 @@ impl AbiVersion {
     }
 }
 
+/// The loader's rule for an Aniyomi lib (`AnimeExtensionLoader`): the integer metadata wins, else the `versionName`
+/// prefix before its last dot, parsed as a number. Used by the tests only (TST-19-060). The store path reads
+/// `extensionLib` instead.
+#[cfg(test)]
+pub(crate) fn aniyomi_lib_from_metadata(metadata_lib: Option<i64>, version_name: &str) -> Option<f64> {
+    match metadata_lib {
+        Some(lib) => Some(lib as f64),
+        None => version_name.rsplit_once('.').map_or(version_name, |(head, _)| head).parse::<f64>().ok(),
+    }
+}
+
 fn digits(part: &str) -> Option<u32> {
     if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
         return None;
@@ -70,5 +81,18 @@ mod tests {
     #[test]
     fn display_is_major_dot_minor() {
         assert_eq!(AbiVersion::parse("1.4").unwrap().to_string(), "1.4");
+    }
+
+    #[test]
+    fn tst_19_060_the_metadata_integer_wins_over_the_version_name() {
+        assert_eq!(aniyomi_lib_from_metadata(Some(16), "15.2"), Some(16.0));
+    }
+
+    #[test]
+    fn tst_19_060_without_metadata_the_version_prefix_before_the_last_dot_is_the_lib() {
+        assert_eq!(aniyomi_lib_from_metadata(None, "16.3"), Some(16.0));
+        assert_eq!(aniyomi_lib_from_metadata(None, "16"), Some(16.0));
+        assert_eq!(aniyomi_lib_from_metadata(None, "16.3.1"), Some(16.3));
+        assert_eq!(aniyomi_lib_from_metadata(None, "abc.1"), None);
     }
 }

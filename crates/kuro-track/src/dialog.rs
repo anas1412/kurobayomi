@@ -191,10 +191,7 @@ mod tests {
             ("u", "bad")
         );
         assert!(t.is_logged_in(), "the failed login keeps the prior session");
-        assert_eq!(
-            (t.username().as_str(), t.password().as_str()),
-            ("u", "old")
-        );
+        assert_eq!((t.username().as_str(), t.password().as_str()), ("u", "old"));
     }
 
     #[tokio::test]

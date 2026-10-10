@@ -7,8 +7,9 @@ use serde_json::json;
 use wiremock::matchers::{body_string, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::api::{Endpoints, OAuthClient, USER_AGENT_VALUE};
-use super::dto::SmOAuth;
+use super::api::{Endpoints, OAuthClient};
+use super::dto::{SmEntry, SmOAuth};
+use super::search;
 use super::*;
 use crate::fakes::MemSecrets;
 use crate::model::{AnimeTrack, MangaTrack};
@@ -35,9 +36,7 @@ fn token(access: &str, created: i64, refresh: Option<&str>) -> SmOAuth {
 
 async fn tracker_for(server: &MockServer, secrets: Arc<dyn SecretStore>) -> ShikimoriTracker {
     ShikimoriTracker::new(
-        Endpoints {
-            base: server.uri(),
-        },
+        Endpoints { base: server.uri() },
         Some(OAuthClient {
             client_id: "cid".into(),
             client_secret: "sec".into(),
@@ -203,7 +202,15 @@ async fn t_31a_006_login_stores_the_user_id_and_the_token_after_whoami() {
     assert!(t.is_logged_in());
     assert_eq!(t.username(), "1234");
     assert_eq!(t.password(), "new");
-    assert_eq!(t.api().base().load_token::<SmOAuth>().unwrap().unwrap().access_token, "new");
+    assert_eq!(
+        t.api()
+            .base()
+            .load_token::<SmOAuth>()
+            .unwrap()
+            .unwrap()
+            .access_token,
+        "new"
+    );
 }
 
 #[tokio::test]
@@ -241,7 +248,10 @@ async fn t_31a_006_a_failed_whoami_keeps_an_existing_login() {
 
     assert!(t.login("", "abc").await.is_err());
 
-    assert!(t.is_logged_in(), "RC-06: a failed second login does not log out");
+    assert!(
+        t.is_logged_in(),
+        "RC-06: a failed second login does not log out"
+    );
     assert_eq!(t.username(), "1234");
     assert_eq!(t.password(), "tok");
 }
@@ -281,7 +291,16 @@ async fn t_31a_005_ten_concurrent_callers_cause_one_refresh() {
     let results = futures::future::join_all(calls).await;
 
     assert!(results.iter().all(|r| r.as_deref() == Ok("fresh")));
-    assert_eq!(t.api().base().load_token::<SmOAuth>().unwrap().unwrap().refresh_token.as_deref(), Some("r2"));
+    assert_eq!(
+        t.api()
+            .base()
+            .load_token::<SmOAuth>()
+            .unwrap()
+            .unwrap()
+            .refresh_token
+            .as_deref(),
+        Some("r2")
+    );
 }
 
 #[tokio::test]
@@ -338,23 +357,36 @@ async fn t_31a_005_expired_without_refresh_token_is_auth_expired_with_no_request
 }
 
 #[tokio::test]
-async fn t_31a_008_logged_out_calls_send_nothing() {
+async fn t_31a_045_logged_out_search_sends_no_authorization_header() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(0)
+        .and(path("/api/mangas"))
+        .and(header("User-Agent", crate::user_agent()))
+        .and(header("Cache-Control", "no-cache"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([catalogue(json!(20))])))
+        .expect(1)
         .mount(&server)
         .await;
     let secrets: Arc<dyn SecretStore> = MemSecrets::new();
     let t = tracker_for(&server, secrets).await;
 
-    let result = t.as_manga().unwrap().search("naruto").await;
+    let found = t.as_manga().unwrap().search("naruto").await.unwrap();
 
-    assert!(matches!(result, Err(TrackError::Key(_))));
-    assert_eq!(
-        ShikimoriError::NotAuthenticated.to_string(),
-        "Not authenticated with Shikimori"
-    );
+    assert_eq!(found.len(), 1);
+    let requests = server.received_requests().await.unwrap();
+    assert!(requests[0].headers.get("authorization").is_none());
+}
+
+#[tokio::test]
+async fn t_31a_045_a_logged_out_collection_call_still_sends_nothing() {
+    let server = MockServer::start().await;
+    let secrets: Arc<dyn SecretStore> = MemSecrets::new();
+    let t = tracker_for(&server, secrets).await;
+
+    let result = t.api().find_library(Kind::Manga, 5, "1").await;
+
+    assert!(matches!(result, Err(ShikimoriError::NotAuthenticated)));
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -363,7 +395,7 @@ async fn t_31a_008_authed_calls_send_bearer_user_agent_and_no_cache() {
     Mock::given(method("GET"))
         .and(path("/api/mangas"))
         .and(header("Authorization", "Bearer tok"))
-        .and(header("User-Agent", USER_AGENT_VALUE))
+        .and(header("User-Agent", crate::user_agent()))
         .and(header("Cache-Control", "no-cache"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
         .expect(1)
@@ -381,7 +413,10 @@ async fn t_31a_009_search_query_order_and_mapping() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/mangas"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([catalogue(json!(null))])))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([catalogue(json!(null)), catalogue(json!(20))])),
+        )
         .mount(&server)
         .await;
     let (t, _) = logged_in(&server).await;
@@ -389,10 +424,17 @@ async fn t_31a_009_search_query_order_and_mapping() {
     let found = t.as_manga().unwrap().search("naruto").await.unwrap();
 
     let requests = server.received_requests().await.unwrap();
-    assert_eq!(requests[0].url.query(), Some("order=popularity&search=naruto&limit=20"));
-    assert_eq!(found.len(), 1);
+    assert_eq!(
+        requests[0].url.query(),
+        Some("order=popularity&search=naruto&limit=20")
+    );
+    assert_eq!(
+        found.len(),
+        1,
+        "the record without a chapter count is skipped (OQ-1)"
+    );
     assert_eq!(found[0].remote_id, 5);
-    assert_eq!(found[0].total_chapters, 0);
+    assert_eq!(found[0].total_chapters, 20);
     assert_eq!(found[0].tracking_url, format!("{}/mangas/5", server.uri()));
     assert_eq!(found[0].cover_url, format!("{}/images/p.jpg", server.uri()));
     assert_eq!(found[0].start_date, "2020-01-02");
@@ -454,7 +496,12 @@ async fn t_31a_010_refresh_sets_library_id_and_keeps_the_catalogue_id() {
         .await;
     let (t, _) = logged_in(&server).await;
 
-    let got = t.as_manga().unwrap().refresh(&manga(1, 0.0, 0)).await.unwrap();
+    let got = t
+        .as_manga()
+        .unwrap()
+        .refresh(&manga(1, 0.0, 0))
+        .await
+        .unwrap();
 
     assert_eq!(got.library_id, Some(9));
     assert_eq!(got.remote_id, 5);
@@ -479,9 +526,14 @@ async fn t_31a_010_refresh_without_a_row_is_could_not_find_manga() {
         .await;
     let (t, _) = logged_in(&server).await;
 
-    let err = t.as_manga().unwrap().refresh(&manga(1, 0.0, 0)).await.unwrap_err();
+    let err = t
+        .as_manga()
+        .unwrap()
+        .refresh(&manga(1, 0.0, 0))
+        .await
+        .unwrap_err();
 
-    assert_eq!(err.to_string(), "Could not find manga");
+    assert_eq!(err.to_string(), "Shikimori error: Could not find manga");
 }
 
 // ---- T-31a-011: the upsert body ----
@@ -541,7 +593,13 @@ async fn t_31a_011_an_unknown_internal_status_is_an_error_and_sends_nothing() {
         .await;
     let (t, _) = logged_in(&server).await;
 
-    assert!(t.as_manga().unwrap().update(&manga(9, 0.0, 0), false).await.is_err());
+    assert!(
+        t.as_manga()
+            .unwrap()
+            .update(&manga(9, 0.0, 0), false)
+            .await
+            .is_err()
+    );
 }
 
 // ---- T-31a-012, T-31a-013: update on read, bind ----
@@ -559,7 +617,12 @@ async fn t_31a_012_completing_the_last_chapter_sends_completed() {
         .await;
     let (t, _) = logged_in(&server).await;
 
-    let got = t.as_manga().unwrap().update(&manga(1, 12.0, 12), true).await.unwrap();
+    let got = t
+        .as_manga()
+        .unwrap()
+        .update(&manga(1, 12.0, 12), true)
+        .await
+        .unwrap();
 
     assert_eq!(got.status, 2);
 }
@@ -627,7 +690,10 @@ async fn t_31a_013_bind_found_keeps_local_dates_and_private_and_forces_reading()
 
     assert_eq!((m.status, m.score, m.last_chapter_read), (1, 6.0, 4.0));
     assert_eq!(m.library_id, Some(9));
-    assert_eq!((m.start_date, m.finish_date), (1_700_000_000_000, 1_700_000_100_000));
+    assert_eq!(
+        (m.start_date, m.finish_date),
+        (1_700_000_000_000, 1_700_000_100_000)
+    );
     assert!(m.private);
 }
 
@@ -675,7 +741,11 @@ async fn t_31a_013_a_found_entry_without_a_count_is_a_decode_error() {
         .await;
     let (t, _) = logged_in(&server).await;
 
-    let err = t.api().find_library(Kind::Manga, 5, "1234").await.unwrap_err();
+    let err = t
+        .api()
+        .find_library(Kind::Manga, 5, "1234")
+        .await
+        .unwrap_err();
 
     assert!(matches!(err, ShikimoriError::Decode(_)));
 }
@@ -724,4 +794,200 @@ async fn t_31a_009_unknown_status_on_a_user_rate_is_an_error() {
         t.api().find_library(Kind::Manga, 5, "1234").await,
         Err(ShikimoriError::UnknownStatus("later".into()))
     );
+}
+
+// ---- T-31a-015, T-31a-016, T-31a-017, T-31a-037, TS-S-15, TS-S-18: delete, logout, mapping, setup ----
+
+#[tokio::test]
+async fn t_31a_015_a_404_on_delete_means_already_removed_and_is_success() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v2/user_rates/9"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let (t, _) = logged_in(&server).await;
+    let mut with_id = manga(1, 0.0, 0);
+    with_id.library_id = Some(9);
+
+    t.as_deletable_manga()
+        .unwrap()
+        .delete(&with_id)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn t_31a_016_after_logout_a_restart_restores_no_token() {
+    let server = MockServer::start().await;
+    let (t, secrets) = logged_in(&server).await;
+    t.logout().unwrap();
+
+    let again = tracker_for(&server, secrets).await;
+
+    assert!(!again.is_logged_in());
+    assert!(!again.api().tokens().has_token());
+}
+
+#[tokio::test]
+async fn ts_s_15_a_refresh_that_finishes_after_logout_stores_nothing() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/token"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"access_token": "late", "token_type": "Bearer", "created_at": now(), "expires_in": 86400, "refresh_token": "r2"}))
+                .set_delay(std::time::Duration::from_millis(300)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let (t, secrets) = logged_in(&server).await;
+    t.api().tokens().login(token("old", 0, Some("r")));
+
+    let refresh = t.api().bearer();
+    let logout = async {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        t.logout().unwrap();
+    };
+    let (result, ()) = tokio::join!(refresh, logout);
+
+    assert_eq!(result, Err(ShikimoriError::NotAuthenticated));
+    assert!(!t.is_logged_in());
+    assert!(t.api().base().load_token::<SmOAuth>().unwrap().is_none());
+    assert!(!t.api().tokens().has_token());
+    let _ = secrets;
+}
+
+#[tokio::test]
+async fn ts_s_18_two_parallel_upserts_both_post_and_return_the_row_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/user_rates"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": 77})))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let (t, _) = logged_in(&server).await;
+    let rating = Rating {
+        kind: Kind::Manga,
+        user_id: "1234".into(),
+        target_id: 5,
+        progress: 3.0,
+        score: 7.0,
+        status: ShikiStatus::Reading,
+    };
+
+    let (a, b) = tokio::join!(t.api().upsert(&rating), t.api().upsert(&rating));
+
+    assert_eq!((a, b), (Ok(77), Ok(77)));
+}
+
+#[test]
+fn t_31a_017_a_manga_without_chapters_is_skipped_and_an_anime_without_episodes_counts_zero() {
+    let base = "https://shikimori.one";
+    let manga: SmEntry = serde_json::from_value(catalogue(json!(null))).unwrap();
+    assert!(search::to_manga_search(base, &manga).is_none());
+    let mut anime_json = catalogue(json!(20));
+    anime_json["episodes"] = json!(null);
+    let anime: SmEntry = serde_json::from_value(anime_json).unwrap();
+    assert_eq!(search::to_anime_search(base, &anime).total_episodes, 0);
+}
+
+#[test]
+fn t_31a_037_the_setup_message_says_why_login_is_off_without_a_client() {
+    let secrets: Arc<dyn SecretStore> = MemSecrets::new();
+    let off =
+        ShikimoriTracker::new(Endpoints::production(), None, REDIRECT, secrets.clone()).unwrap();
+    assert!(matches!(
+        off.setup_message(),
+        Some(crate::messages::MsgKey::TrackerNotConfigured(name)) if name == "Shikimori"
+    ));
+    let on = ShikimoriTracker::new(
+        Endpoints::production(),
+        Some(OAuthClient {
+            client_id: "cid".into(),
+            client_secret: "sec".into(),
+        }),
+        REDIRECT,
+        secrets,
+    )
+    .unwrap();
+    assert!(on.setup_message().is_none());
+}
+
+// ---- T-31a-042, T-31a-047, T-31a-048: remove option, logo, backup ids ----
+
+#[test]
+fn t_31a_042_shikimori_offers_the_remote_removal_for_both_kinds() {
+    let t = ShikimoriTracker::new(
+        Endpoints {
+            base: "http://127.0.0.1:1".into(),
+        },
+        None,
+        REDIRECT,
+        MemSecrets::new(),
+    )
+    .unwrap();
+    assert!(t.as_deletable_manga().is_some());
+    assert!(t.as_deletable_anime().is_some());
+}
+
+#[test]
+fn t_31a_047_the_logo_is_the_embedded_48_px_png() {
+    let t = ShikimoriTracker::new(
+        Endpoints {
+            base: "http://127.0.0.1:1".into(),
+        },
+        None,
+        REDIRECT,
+        MemSecrets::new(),
+    )
+    .unwrap();
+    match t.logo() {
+        LogoRef::Embedded(bytes) => {
+            assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+            // IHDR width and height, big-endian, at bytes 16..24.
+            assert_eq!(&bytes[16..20], &48u32.to_be_bytes());
+            assert_eq!(&bytes[20..24], &48u32.to_be_bytes());
+        }
+        other => panic!("expected the embedded logo, got {other:?}"),
+    }
+}
+
+#[test]
+fn t_31a_048_shikimori_id_and_status_numbers_are_the_backup_values() {
+    assert_eq!(
+        TrackerId::SHIKIMORI,
+        TrackerId(4),
+        "syncId 4 in Aniyomi backups"
+    );
+    for n in 1..=6 {
+        let s = ShikiStatus::from_internal(n).expect("1..6 restore unchanged");
+        assert_eq!(s as i64, n);
+    }
+    assert!(ShikiStatus::from_internal(7).is_none());
+}
+
+#[tokio::test]
+async fn t_31a_040_the_shared_client_is_the_area_12_builder_with_its_cookie_store() {
+    // reqwest's own default client keeps no cookies, so this fails if the client is not built from `kuro_net`.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/set"))
+        .respond_with(ResponseTemplate::new(200).insert_header("set-cookie", "a=b; Path=/"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/check"))
+        .and(header("cookie", "a=b"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = super::api::http_client().unwrap();
+    client.get(format!("{}/set", server.uri())).send().await.unwrap();
+    let got = client.get(format!("{}/check", server.uri())).send().await.unwrap();
+    assert_eq!(got.status(), 200);
 }

@@ -20,7 +20,7 @@ use kuro_db::handle::Db;
 use kuro_db::statements_anime::{CustomButton, ExtensionStore};
 use kuro_prefs::values::PrefValue as AppValue;
 
-use super::{AnimeEntry, ExtensionArtifacts, LibraryReader, MangaEntry, PrefStore, SourcePrefStore};
+use super::{AnimeEntry, Built, ExtensionArtifacts, LibraryReader, MangaEntry, PrefStore, SourcePrefStore};
 use crate::error::BackupError;
 use crate::schema::PrefValue;
 
@@ -64,6 +64,27 @@ impl DbLibrary {
 }
 
 impl LibraryReader for DbLibrary {
+    /// E-05. The repositories read on pooled WAL readers, which see only committed rows, and every commit goes
+    /// through the single writer. Holding both writers for the pass therefore pins the state every read sees.
+    // ponytail: the app's own writes wait for the pass; a pinned reader connection in kuro-db would let them
+    // proceed, add it if backups on large libraries stall the UI.
+    fn snapshot(&self, f: &mut dyn FnMut() -> Built) -> Built {
+        let mut built = None;
+        let mut pass = || -> Result<(), kuro_db::error::DbError> {
+            built = Some(f());
+            Ok(())
+        };
+        let held = if Arc::ptr_eq(&self.manga, &self.anime) {
+            self.manga.write(|_| pass())
+        } else {
+            self.manga.write(|_| self.anime.write(|_| pass()))
+        };
+        match built {
+            Some(result) => result,
+            None => Err(BackupError::Read(held.err().map(|e| e.to_string()).unwrap_or_default())),
+        }
+    }
+
     fn manga_favorites(&self) -> Result<Vec<MangaEntry>, BackupError> {
         let favorites = MangaRepo::new(self.manga.clone()).favorites().map_err(read)?;
         favorites.into_iter().map(|m| self.manga_entry(m)).collect()
@@ -186,6 +207,7 @@ fn is_hidden(path: &std::path::Path) -> bool {
 mod tests {
     use super::*;
     use crate::creator::CreateInputs;
+    use crate::schema::Backup;
     use crate::creator::extensions::collect;
     use kuro_db::{schema_anime, schema_manga};
     use kuro_prefs::store::PrefStore as AppStore;
@@ -211,6 +233,36 @@ mod tests {
         assert!(lib.manga_extension_repos().unwrap().is_empty());
         assert!(lib.anime_extension_stores().unwrap().is_empty());
         assert!(lib.custom_buttons().unwrap().iter().all(|b| !b.name.is_empty()));
+    }
+
+    /// E-05: a write that starts during the pass commits only after it, so the pass reads one state.
+    #[test]
+    fn a_write_during_the_build_pass_waits_for_it() {
+        let (_dir, manga, anime) = dbs();
+        let lib = DbLibrary::new(manga.clone(), anime);
+        let writer_db = manga.clone();
+        let mut during = 0;
+        let mut writer = None;
+        let built = lib.snapshot(&mut || {
+            writer = Some(std::thread::spawn({
+                let db = writer_db.clone();
+                move || {
+                    let mut m = Manga::create();
+                    m.source = 7;
+                    m.url = "/m/late".into();
+                    m.title = "Late".into();
+                    m.favorite = true;
+                    MangaRepo::new(db).insert(&m).unwrap();
+                }
+            }));
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            during = lib.manga_favorites().unwrap().len();
+            Ok((Backup::default(), Vec::new()))
+        });
+        assert!(built.is_ok());
+        assert_eq!(during, 0, "the late write was not visible inside the pass");
+        writer.unwrap().join().unwrap();
+        assert_eq!(lib.manga_favorites().unwrap().len(), 1, "the write lands once the pass ends");
     }
 
     #[test]

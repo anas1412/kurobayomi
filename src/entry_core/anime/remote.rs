@@ -50,6 +50,11 @@ pub trait AnimeSourceLookup: Send + Sync + 'static {
     fn is_http(&self, _source_id: i64) -> bool {
         false
     }
+    /// Whether the source is configurable (`source is ConfigurableAnimeSource`): only then does the overflow menu offer
+    /// Settings (T-39a-057).
+    fn is_configurable(&self, _source_id: i64) -> bool {
+        false
+    }
 }
 
 /// The lookup of an app with no source registry: every source reads as not installed.
@@ -172,6 +177,10 @@ impl AnimeBackend for RemoteAnimeBackend {
 
     fn is_http_source(&self, source_id: i64) -> bool {
         self.lookup.is_http(source_id)
+    }
+
+    fn is_configurable_source(&self, source_id: i64) -> bool {
+        self.lookup.is_configurable(source_id)
     }
 
     fn has_download_handler(&self) -> bool {

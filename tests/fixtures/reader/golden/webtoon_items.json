@@ -1,0 +1,52 @@
+{
+  "loaded_neighbours_forced": {
+    "about": "both neighbours loaded, transitions forced",
+    "force": true,
+    "items": [
+      "p1:1",
+      "p1:2",
+      "P(2,1)",
+      "p2:0",
+      "p2:1",
+      "N(2,3)",
+      "p3:0",
+      "p3:1"
+    ],
+    "next_to": 3
+  },
+  "loaded_neighbours_plain": {
+    "about": "both neighbours loaded, no gap, always-show off",
+    "force": false,
+    "items": [
+      "p1:1",
+      "p1:2",
+      "p2:0",
+      "p2:1",
+      "p3:0",
+      "p3:1"
+    ],
+    "next_to": 3
+  },
+  "next_still_loading": {
+    "about": "the next chapter is loading: its gate stays",
+    "force": false,
+    "items": [
+      "p1:1",
+      "p1:2",
+      "p2:0",
+      "p2:1",
+      "N(2,3)"
+    ],
+    "next_to": 3
+  },
+  "end_of_book": {
+    "about": "one chapter",
+    "force": false,
+    "items": [
+      "P(2,-)",
+      "p2:0",
+      "N(2,-)"
+    ],
+    "next_to": null
+  }
+}

@@ -435,7 +435,7 @@ fn i4_global_search_progress_is_a_half() {
     use super::pages::{GlobalSearchNav, GlobalSearchSnapshot, SearchChips, SearchRow, SearchState, SourceFilter, global_search};
     let nav = GlobalSearchNav {
         search: Rc::new(|_| {}),
-        open_source: Rc::new(|_| {}),
+        open_source: Rc::new(|_, _| {}),
         open_entry: Rc::new(|_, _| {}),
         preview: Rc::new(|_, _| {}),
         load_cover: Rc::new(|_, _| {}),

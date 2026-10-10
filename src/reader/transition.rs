@@ -2,14 +2,19 @@
 //!
 //! [`content`] is the pure model: which header and chapter go in each block, the fallback text for a missing
 //! side, and the gap warning. [`build`] turns it into GTK widgets. Names are cut to 5 lines and scanlators to 2
-//! by the labels; the card is 460 px wide.
+//! by the labels; the card is at most 460 px wide and keeps its natural width below that.
 
+use std::rc::Rc;
+use std::sync::Arc;
+
+use gtk::glib;
+use gtk::pango;
+use gtk::prelude::*;
+use gtk::subclass::prelude::*;
 use kuro_data::chapter::Chapter;
 use kuro_domain::items::missing::item_gap;
-use gtk::prelude::*;
-use gtk::pango;
 
-use super::model::ChapterTransition;
+use super::model::{ChapterState, ChapterTransition};
 use super::strings;
 
 /// One chapter in a block: its header, name, scanlator and download state.
@@ -81,17 +86,77 @@ pub fn content(transition: &ChapterTransition, from_downloaded: bool, to_downloa
     }
 }
 
-/// The GTK card. The width is fixed at 460 px, the largest it is laid out at.
+/// The widest the card is laid out (460 dp in the Kotlin card).
+pub const CARD_MAX_WIDTH: i32 = 460;
+
+/// The width the card takes in `available`: its natural width, never more than [`CARD_MAX_WIDTH`], and never more than
+/// there is room for. Returns the width and the offset that centres it.
+pub fn card_extent(available: i32) -> (i32, i32) {
+    let width = available.min(CARD_MAX_WIDTH);
+    (width, (available - width) / 2)
+}
+
+mod max_width {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct MaxWidth;
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for MaxWidth {
+        const NAME: &'static str = "KuroMaxWidthLayout";
+        type Type = super::MaxWidthLayout;
+        type ParentType = gtk::LayoutManager;
+    }
+
+    impl ObjectImpl for MaxWidth {}
+
+    impl LayoutManagerImpl for MaxWidth {
+        fn measure(&self, widget: &gtk::Widget, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            let Some(child) = widget.first_child() else { return (0, 0, -1, -1) };
+            if orientation == gtk::Orientation::Horizontal {
+                let (min, natural, _, _) = child.measure(orientation, for_size);
+                return (min.min(CARD_MAX_WIDTH), natural.min(CARD_MAX_WIDTH), -1, -1);
+            }
+            // the height the child needs at the width it will get
+            let width = if for_size < 0 { child.measure(gtk::Orientation::Horizontal, -1).1 } else { for_size };
+            let (min, natural, _, _) = child.measure(orientation, width.min(CARD_MAX_WIDTH));
+            (min, natural, -1, -1)
+        }
+
+        fn allocate(&self, widget: &gtk::Widget, width: i32, height: i32, baseline: i32) {
+            if let Some(child) = widget.first_child() {
+                let (card, x) = card_extent(width);
+                child.allocate(card, height, baseline, Some(gtk::gsk::Transform::new().translate(&gtk::graphene::Point::new(x as f32, 0.0))));
+            }
+        }
+    }
+}
+
+glib::wrapper! {
+    /// Gives its only child its natural width up to [`CARD_MAX_WIDTH`], centred (GTK has no max-width).
+    pub struct MaxWidthLayout(ObjectSubclass<max_width::MaxWidth>) @extends gtk::LayoutManager;
+}
+
+impl MaxWidthLayout {
+    pub fn new() -> Self {
+        glib::Object::new()
+    }
+}
+
+/// The GTK card: at most 460 px wide, and as wide as its text asks below that.
 pub fn build(content: &Content) -> gtk::Box {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 24);
-    column.set_halign(gtk::Align::Center);
-    column.set_size_request(460, -1);
     column.append(&slot_widget(&content.top));
     if let Some(warning) = content.gap_warning() {
         column.append(&notice(&warning, "dialog-warning-symbolic", "error"));
     }
     column.append(&slot_widget(&content.bottom));
-    column
+    let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    card.set_halign(gtk::Align::Center);
+    card.set_layout_manager(Some(MaxWidthLayout::new()));
+    card.append(&column);
+    card
 }
 
 fn slot_widget(slot: &Slot) -> gtk::Widget {
@@ -151,6 +216,84 @@ fn notice(text: &str, icon: &str, css: &str) -> gtk::Box {
     label.set_max_width_chars(40);
     row.append(&label);
     row
+}
+
+/// The spacing of a transition card in a viewer (B§11.4). GTK margins and padding are logical pixels, so the
+/// toolkit scales them with the display's scale factor and no conversion is needed here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Metrics {
+    pub side: i32,
+    pub top: i32,
+    pub bottom: i32,
+    /// The margin above and below the pages status line (webtoon only).
+    pub status_margin: i32,
+}
+
+/// Pager: 64 px on each side, centred vertically.
+pub const PAGER_METRICS: Metrics = Metrics { side: 64, top: 0, bottom: 0, status_margin: 0 };
+/// Webtoon: 128 px above and below, 32 px on each side, 16 px around the status line.
+pub const WEBTOON_METRICS: Metrics = Metrics { side: 32, top: 128, bottom: 128, status_margin: 16 };
+
+/// The destination's downloaded flag (B§11.2). A local manga is always downloaded and needs no lookup. Otherwise
+/// the lookup decides for the destination chapter, and a missing destination is not downloaded.
+pub fn going_to_downloaded(manga_is_local: bool, to: Option<&Chapter>, lookup: impl FnOnce(&Chapter) -> bool) -> bool {
+    manga_is_local || to.is_some_and(lookup)
+}
+
+/// The status line under a destination card (B§11.3): nothing while waiting or once loaded, the spinner text while
+/// loading, and the error text otherwise.
+pub fn status_text(state: &ChapterState) -> Option<String> {
+    match state {
+        ChapterState::Wait | ChapterState::Loaded(_) => None,
+        ChapterState::Loading => Some(strings::TRANSITION_PAGES_LOADING.to_owned()),
+        ChapterState::Error(e) => Some(strings::failed_to_load_pages(&e.message)),
+    }
+}
+
+/// Runs the download lookup for the destination off the GTK thread, then calls `done` on the main loop with the
+/// flag. Only the chapter and the lookup cross the thread; the GTK side keeps its own state.
+pub fn going_to_downloaded_off_thread(
+    manga_is_local: bool,
+    to: Option<Chapter>,
+    lookup: Arc<dyn Fn(&Chapter) -> bool + Send + Sync>,
+    done: impl FnOnce(bool) + 'static,
+) {
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let found = going_to_downloaded(manga_is_local, to.as_ref(), |c| lookup(c));
+        let _ = tx.send_blocking(found);
+    });
+    glib::spawn_future_local(async move {
+        if let Ok(found) = rx.recv().await {
+            done(found);
+        }
+    });
+}
+
+/// The line under a destination card for its state: a spinner with the loading text, or the error with a Retry
+/// button that asks for the chapter again. Nothing for a waiting or loaded chapter.
+pub fn status_box(state: &ChapterState, on_retry: Rc<dyn Fn()>) -> Option<gtk::Box> {
+    let text = status_text(state)?;
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    column.set_halign(gtk::Align::Center);
+    column.set_margin_top(8);
+    column.set_margin_bottom(8);
+    if matches!(state, ChapterState::Loading) {
+        let spinner = gtk::Spinner::new();
+        spinner.start();
+        column.append(&spinner);
+    }
+    let label = gtk::Label::new(Some(&text));
+    label.set_wrap(true);
+    label.set_justify(gtk::Justification::Center);
+    column.append(&label);
+    if matches!(state, ChapterState::Error(_)) {
+        let retry = gtk::Button::with_label(strings::RETRY);
+        retry.set_halign(gtk::Align::Center);
+        retry.connect_clicked(move |_| on_retry());
+        column.append(&retry);
+    }
+    Some(column)
 }
 
 #[cfg(test)]
@@ -216,5 +359,29 @@ mod tests {
         let unknown = chapter(4, -1.0, "?", None);
         let unknown_next = ChapterTransition::Next { from: unknown, to: Some(to) };
         assert_eq!(content(&unknown_next, false, false).gap, 0, "unknown numbers never warn");
+    }
+
+    #[test]
+    fn the_card_takes_its_available_width_up_to_460_and_is_centred_beyond_it() {
+        assert_eq!(card_extent(300), (300, 0), "a narrow window gives the card all of it");
+        assert_eq!(card_extent(460), (460, 0));
+        assert_eq!(card_extent(1000), (460, 270));
+    }
+
+    fn natural_width(card: &gtk::Box) -> i32 {
+        card.measure(gtk::Orientation::Horizontal, -1).1
+    }
+
+    #[test]
+    fn a_long_name_is_capped_at_460_and_a_short_one_keeps_its_natural_width() {
+        crate::testing::with_display(|| {
+            let transition = |name: &str| ChapterTransition::Next { from: chapter(1, 1.0, name, None), to: None };
+            let long = build(&content(&transition(&"a very long chapter name ".repeat(30)), false, false));
+            assert_eq!(natural_width(&long), CARD_MAX_WIDTH);
+            let short = build(&content(&transition("One"), false, false));
+            let width = natural_width(&short);
+            assert!(width < CARD_MAX_WIDTH, "a short card is not stretched to 460 (got {width})");
+            assert!(width > 0);
+        });
     }
 }

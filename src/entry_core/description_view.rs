@@ -174,47 +174,44 @@ mod tests {
     /// One display test: the chips are one scrolling row while the description is collapsed and a wrapping block once
     /// it is expanded, a chip's Search runs the genre in the entry's own source, Copy copies it, and no chips draw no row.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi genre_chip_row -- --ignored"]
     fn genre_chip_row() {
-        if gtk::init().is_err() {
-            eprintln!("skipped: no display for the genre chip test");
-            return;
-        }
-        let searched: Rc<RefCell<Vec<SearchRequest>>> = Rc::default();
-        let copied: Rc<RefCell<Vec<String>>> = Rc::default();
-        let handlers = Handlers {
-            on_search: Rc::new({
-                let searched = Rc::clone(&searched);
-                move |r| searched.borrow_mut().push(r)
-            }),
-            on_copy: Rc::new({
-                let copied = Rc::clone(&copied);
-                move |t| copied.borrow_mut().push(t)
-            }),
-            on_cover: Rc::new(|| {}),
-        };
-        let text = description(Some("A long story."));
-        let chips = genre_chips(Some(&["Action".to_owned(), "Drama".to_owned()]));
-        let expansion = Rc::new(Cell::new(Expansion::new(false, false)));
-        let root = build(&text, Rc::clone(&expansion), Some((&chips, &handlers)));
-        let all = descendants(root.upcast_ref());
-        let row = all.iter().find_map(|w| w.clone().downcast::<gtk::ScrolledWindow>().ok()).expect("the collapsed row");
-        let wrap = all.iter().find_map(|w| w.clone().downcast::<gtk::FlowBox>().ok()).expect("the wrapping block");
-        assert!(row.is_visible() && !wrap.is_visible(), "collapsed: one row");
-        let caret = all.iter().find_map(|w| w.clone().downcast::<gtk::Button>().ok().filter(|b| b.icon_name().is_some())).expect("the caret");
-        caret.emit_clicked();
-        assert!(!row.is_visible() && wrap.is_visible(), "expanded: wrapping");
-        // the first chip of the row: its popover has Search and Copy to clipboard
-        let chip = descendants(row.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::MenuButton>().ok()).expect("a chip");
-        assert_eq!(chip.label().as_deref(), Some("Action"));
-        let menu = chip.popover().expect("the chip menu");
-        let buttons: Vec<gtk::Button> = descendants(menu.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Button>().ok()).collect();
-        let labelled = |text: &str| buttons.iter().find(|b| b.label().as_deref() == Some(text)).cloned();
-        labelled("Search").expect("Search").emit_clicked();
-        labelled("Copy to clipboard").expect("Copy to clipboard").emit_clicked();
-        assert_eq!(*searched.borrow(), vec![SearchRequest { query: "Action".into(), global: false }]);
-        assert_eq!(*copied.borrow(), vec!["Action".to_owned()]);
-        let plain = build(&text, expansion, None);
-        assert!(descendants(plain.upcast_ref()).iter().all(|w| w.downcast_ref::<gtk::FlowBox>().is_none()), "no chips, no row");
+        crate::testing::with_display(|| {
+            let searched: Rc<RefCell<Vec<SearchRequest>>> = Rc::default();
+            let copied: Rc<RefCell<Vec<String>>> = Rc::default();
+            let handlers = Handlers {
+                on_search: Rc::new({
+                    let searched = Rc::clone(&searched);
+                    move |r| searched.borrow_mut().push(r)
+                }),
+                on_copy: Rc::new({
+                    let copied = Rc::clone(&copied);
+                    move |t| copied.borrow_mut().push(t)
+                }),
+                on_cover: Rc::new(|| {}),
+            };
+            let text = description(Some("A long story."));
+            let chips = genre_chips(Some(&["Action".to_owned(), "Drama".to_owned()]));
+            let expansion = Rc::new(Cell::new(Expansion::new(false, false)));
+            let root = build(&text, Rc::clone(&expansion), Some((&chips, &handlers)));
+            let all = descendants(root.upcast_ref());
+            let row = all.iter().find_map(|w| w.clone().downcast::<gtk::ScrolledWindow>().ok()).expect("the collapsed row");
+            let wrap = all.iter().find_map(|w| w.clone().downcast::<gtk::FlowBox>().ok()).expect("the wrapping block");
+            assert!(row.is_visible() && !wrap.is_visible(), "collapsed: one row");
+            let caret = all.iter().find_map(|w| w.clone().downcast::<gtk::Button>().ok().filter(|b| b.icon_name().is_some())).expect("the caret");
+            caret.emit_clicked();
+            assert!(!row.is_visible() && wrap.is_visible(), "expanded: wrapping");
+            // the first chip of the row: its popover has Search and Copy to clipboard
+            let chip = descendants(row.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::MenuButton>().ok()).expect("a chip");
+            assert_eq!(chip.label().as_deref(), Some("Action"));
+            let menu = chip.popover().expect("the chip menu");
+            let buttons: Vec<gtk::Button> = descendants(menu.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Button>().ok()).collect();
+            let labelled = |text: &str| buttons.iter().find(|b| b.label().as_deref() == Some(text)).cloned();
+            labelled("Search").expect("Search").emit_clicked();
+            labelled("Copy to clipboard").expect("Copy to clipboard").emit_clicked();
+            assert_eq!(*searched.borrow(), vec![SearchRequest { query: "Action".into(), global: false }]);
+            assert_eq!(*copied.borrow(), vec!["Action".to_owned()]);
+            let plain = build(&text, expansion, None);
+            assert!(descendants(plain.upcast_ref()).iter().all(|w| w.downcast_ref::<gtk::FlowBox>().is_none()), "no chips, no row");
+        });
     }
 }

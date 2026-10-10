@@ -180,11 +180,62 @@ pub enum MsgKey {
     MalLogInAgain,
     /// "Login was not completed": consent refused or no code (D-04, T-29a-051).
     MalLoginNotCompleted,
+    /// An enhanced-tracker failure shown through its `track.enhanced.*` key (T-33a-022). `arg` fills `%s`, empty
+    /// when the text has none. Use [`MsgKey::enhanced`].
+    Enhanced { key: &'static str, arg: String },
+    /// "HTTP %d, check website in WebView" (`exception_http`), a server answer other than success (T-31a-041).
+    HttpStatus(u16),
+    /// `track_error` with a fixed detail key instead of free text (T-31a-041, design section 10).
+    TrackerDetail {
+        tracker: String,
+        detail: TrackDetail,
+    },
     /// Raw text of a failure, shown as is.
     Raw(String),
 }
 
+/// The fixed detail of a [`MsgKey::TrackerDetail`] toast. Each variant is a message of its own, so no English
+/// text from an error type reaches the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackDetail {
+    NotAuthenticated,
+    TooManyEntries,
+    NotFoundManga,
+    NotFoundAnime,
+    UnknownStatus,
+    NoLibraryId,
+    /// The answer of the server could not be read.
+    InvalidResponse,
+    /// The request did not reach the server.
+    Network,
+    SecretStorage,
+}
+
+impl TrackDetail {
+    /// English text of the detail, used by the tests and as the fallback.
+    pub fn english(self) -> &'static str {
+        match self {
+            TrackDetail::NotAuthenticated => "Not authenticated",
+            TrackDetail::TooManyEntries => "Too many entries in response",
+            TrackDetail::NotFoundManga => "Could not find manga",
+            TrackDetail::NotFoundAnime => "Could not find anime",
+            TrackDetail::UnknownStatus => "Unknown status",
+            TrackDetail::NoLibraryId => "Missing library id",
+            TrackDetail::InvalidResponse => "Invalid response",
+            TrackDetail::Network => "Network error",
+            TrackDetail::SecretStorage => "Secret storage is unavailable",
+        }
+    }
+}
+
 impl MsgKey {
+    pub fn enhanced(key: &'static str, arg: &str) -> Self {
+        MsgKey::Enhanced {
+            key,
+            arg: arg.to_owned(),
+        }
+    }
+
     /// The copy toast for `content`, truncated to 50 characters (`truncateCenter(50)`).
     pub fn copied(content: &str) -> Self {
         MsgKey::CopiedToClipboard(truncate_center(content, 50))
@@ -221,6 +272,7 @@ impl MsgKey {
             MsgKey::Score => "score",
             MsgKey::Chapters => "chapters",
             MsgKey::Episodes => "episodes",
+            MsgKey::HttpStatus(_) => "exception_http",
             MsgKey::LoginFailed
             | MsgKey::LocalRemovalFailed
             | MsgKey::NoTrackingLink
@@ -247,6 +299,8 @@ impl MsgKey {
             | MsgKey::MalWaitingForLogin
             | MsgKey::MalLogInAgain
             | MsgKey::MalLoginNotCompleted
+            | MsgKey::TrackerDetail { .. }
+            | MsgKey::Enhanced { .. }
             | MsgKey::Raw(_) => return None,
         })
     }
@@ -324,7 +378,25 @@ pub fn english(key: &MsgKey) -> String {
         MsgKey::MalNoClientId => mal_text::NO_CLIENT_ID.into(),
         MsgKey::MalLogInAgain => mal_text::LOG_IN_AGAIN.into(),
         MsgKey::MalLoginNotCompleted => mal_text::LOGIN_NOT_COMPLETED.into(),
+        MsgKey::Enhanced { key, arg } => enhanced_text(key, arg),
+        MsgKey::HttpStatus(code) => format!("HTTP {code}, check website in WebView"),
+        MsgKey::TrackerDetail { tracker, detail } => {
+            format!("{tracker} error: {}", detail.english())
+        }
         MsgKey::Raw(text) => text.clone(),
+    }
+}
+
+/// English text of a `track.enhanced.*` key (`p1-rust-design.md` section 7.2).
+fn enhanced_text(key: &str, arg: &str) -> String {
+    match key {
+        "track.enhanced.unauthorized" => "Unauthorized / api key not valid".into(),
+        "track.enhanced.server_error" => "Error fetching JWT token".into(),
+        "track.enhanced.login_required" => "Please log in through the extension".into(),
+        "track.enhanced.search_unsupported" => "Search is not available for this tracker".into(),
+        "track.enhanced.missing_fragment" => "Tracking link is incomplete".into(),
+        "track.enhanced.chapter_missing" => format!("Chapter {arg} is not on the server"),
+        other => other.into(),
     }
 }
 
@@ -470,6 +542,26 @@ mod tests {
             );
         }
         assert_eq!(MsgKey::Raw("x".into()).resource_id(), None);
+    }
+
+    #[test]
+    fn t_31a_041_http_status_and_detail_keys_read_their_texts() {
+        assert_eq!(
+            english(&MsgKey::HttpStatus(503)),
+            "HTTP 503, check website in WebView"
+        );
+        assert_eq!(
+            MsgKey::HttpStatus(503).resource_id(),
+            Some("exception_http")
+        );
+        assert!(EN_CATALOGUE.contains("\nexception_http ="));
+        assert_eq!(
+            english(&MsgKey::TrackerDetail {
+                tracker: "Bangumi".into(),
+                detail: TrackDetail::NotFoundAnime
+            }),
+            "Bangumi error: Could not find anime"
+        );
     }
 
     #[test]

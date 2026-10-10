@@ -13,6 +13,11 @@ pub trait SearchHit: Clone {
     fn title(&self) -> &str;
     /// Empty when the tracker did not set one (D9). The open action is then disabled.
     fn tracking_url(&self) -> &str;
+    /// The URL "open in browser" opens. The tracking URL unless the result also carries an absolute `source_url`
+    /// (Simkl, whose tracking URL is a relative `/anime/<id>`).
+    fn open_url(&self) -> &str {
+        self.tracking_url()
+    }
     fn card(&self) -> CardView;
     fn set_private(&mut self, private: bool);
 }
@@ -68,7 +73,7 @@ struct CardFields<'a> {
     publishing_status: &'a str,
     score: Option<f64>,
     summary: &'a str,
-    tracking_url: &'a str,
+    open_url: &'a str,
     cover_url: &'a str,
     /// Chapters or episodes; 0 means unknown and the line is left out.
     count: i64,
@@ -133,7 +138,7 @@ fn card(f: CardFields<'_>) -> CardView {
             .map(str::to_owned),
         details,
         summary,
-        can_open: !f.tracking_url.is_empty(),
+        can_open: !f.open_url.is_empty(),
         refreshable: f.from_my_list,
     }
 }
@@ -148,6 +153,9 @@ impl SearchHit for AnimeTrackSearch {
     fn tracking_url(&self) -> &str {
         &self.tracking_url
     }
+    fn open_url(&self) -> &str {
+        AnimeTrackSearch::open_url(self)
+    }
     fn card(&self) -> CardView {
         card(CardFields {
             title: &self.title,
@@ -158,7 +166,7 @@ impl SearchHit for AnimeTrackSearch {
             publishing_status: &self.publishing_status,
             score: self.score,
             summary: &self.summary,
-            tracking_url: &self.tracking_url,
+            open_url: AnimeTrackSearch::open_url(self),
             cover_url: &self.cover_url,
             count: self.total_episodes,
             count_label: ("episodes", "Episodes"),
@@ -190,7 +198,7 @@ impl SearchHit for MangaTrackSearch {
             publishing_status: &self.publishing_status,
             score: self.score,
             summary: &self.summary,
-            tracking_url: &self.tracking_url,
+            open_url: &self.tracking_url,
             cover_url: &self.cover_url,
             count: self.total_chapters,
             count_label: ("chapters", "Chapters"),
@@ -397,7 +405,7 @@ pub fn card_action(item: CardMenuItem, hit: &impl SearchHit) -> Option<CardEffec
             toast: crate::sheet::copy_toast(hit.title()),
         }),
         CardMenuItem::OpenInBrowser => {
-            let url = hit.tracking_url();
+            let url = hit.open_url();
             (!url.is_empty()).then(|| CardEffect::Open(url.to_owned()))
         }
         CardMenuItem::Refresh => hit
@@ -662,6 +670,22 @@ mod tests {
         assert_eq!(
             card_action(CardMenuItem::OpenInBrowser, &h),
             Some(CardEffect::Open("https://a.test/3".into()))
+        );
+    }
+
+    #[test]
+    fn t_32a_071_open_in_browser_uses_source_url_for_simkl_and_tracking_url_otherwise() {
+        let mut simkl = hit(TrackerId::SIMKL, 5, "/anime/5");
+        simkl.source_url = "https://simkl.com/anime/5/slug".into();
+        assert!(simkl.card().can_open);
+        assert_eq!(
+            card_action(CardMenuItem::OpenInBrowser, &simkl),
+            Some(CardEffect::Open("https://simkl.com/anime/5/slug".into()))
+        );
+        let mu = MangaTrackSearch::new(TrackerId::MANGAUPDATES, 5, "M", "https://mu.test/5");
+        assert_eq!(
+            card_action(CardMenuItem::OpenInBrowser, &mu),
+            Some(CardEffect::Open("https://mu.test/5".into()))
         );
     }
 

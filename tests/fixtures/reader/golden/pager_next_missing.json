@@ -1,0 +1,15 @@
+{
+  "about": "no next chapter",
+  "viewer": "LeftToRight",
+  "force": true,
+  "items": [
+    "p1:3",
+    "p1:4",
+    "P(2,1)",
+    "p2:0",
+    "p2:1",
+    "p2:2",
+    "N(2,-)"
+  ],
+  "jump": null
+}

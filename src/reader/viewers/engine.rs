@@ -5,7 +5,10 @@
 //! A page that can be read from disk shows its image in a `PageView`, fitted by the stored scale type and zoom start
 //! and following later changes in place (`holder`, `page_opts`). A page that cannot be read here keeps a label that
 //! follows the page's status. The page view reports long presses (when `reader_long_tap` is on) as
-//! `ViewerEvent::LongTap`; webtoon zoom (T-44a-039) is not wired yet.
+//! `ViewerEvent::LongTap`.
+//!
+//! The webtoon sits in a `ZoomFrame`: a pinch (the GTK zoom gesture), a drag and a double tap drive `WebtoonZoom`, and
+//! the frame scales and moves the strip (T-44a-038, T-44a-039). The pager zooms inside each page view.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -16,6 +19,7 @@ use std::time::Duration;
 use gtk::glib::{self, ControlFlow, Propagation};
 use gtk::prelude::*;
 
+use super::downloads::DownloadCheck;
 use super::effect::Effect;
 use super::gesture::{self, DragTracker, Gesture, TapRecognizer};
 use super::holder::{self, PageHost, Row, Tasks};
@@ -26,9 +30,12 @@ use super::page_opts::page_opts;
 use super::pager::controller::{PagerController, PagerOptions};
 use super::settings::{self, Family, Reaction, SettingsWatch, ViewerSettings};
 use super::webtoon::controller::{WebtoonController, WebtoonOptions};
+use super::webtoon::frame::ZoomFrame;
 use super::webtoon::layout::{StripLayout, refresh_range};
+use super::webtoon::zoom::{Anim, WebtoonZoom};
 use super::{Emitter, ViewerContext, ViewerEngine, ViewerKind};
-use crate::reader::model::{ReaderChapter, ReaderPage, ViewerChapters};
+use crate::reader::error_card;
+use crate::reader::model::{ChapterTransition, PageStatus, ReaderChapter, ReaderPage, ViewerChapters};
 use crate::reader::viewer::ViewerEvent;
 
 /// Height of a transition card in the webtoon strip, until its content is measured.
@@ -94,7 +101,7 @@ fn recognizer(on_release: bool) -> TapRecognizer {
     if on_release { r.acting_on_release() } else { r }
 }
 
-fn input_key(key: &gtk::gdk::Key) -> InputKey {
+pub(super) fn input_key(key: &gtk::gdk::Key) -> InputKey {
     match key.name().as_deref() {
         Some("Left") => InputKey::Left,
         Some("Right") => InputKey::Right,
@@ -125,7 +132,8 @@ fn scrolled(horizontal: bool) -> gtk::ScrolledWindow {
 }
 
 /// The row for an item: a label until page content exists, following the page's status or the destination
-/// chapter's state (T-44a-006). An insert page follows its parent, whose bytes it shares.
+/// chapter's state (T-44a-006). An insert page is made on demand and reads through its parent, whose bytes it shares;
+/// it decodes the other half of the parent (T-44a-050).
 fn item_row(item: &ItemKey, lookup: &Lookup, host: &PageHost) -> Row {
     match item {
         ItemKey::Page(p) => {
@@ -134,30 +142,51 @@ fn item_row(item: &ItemKey, lookup: &Lookup, host: &PageHost) -> Row {
             } else {
                 format!("Chapter {} page {}", p.chapter.id, p.number())
             };
-            let parent = PageRef { kind: PageKind::Normal, ..p.clone() };
-            // A split insert would show the whole page twice until decode-time splitting exists, so it keeps its label.
-            holder::page_row(text, lookup.pages.get(&parent).cloned(), (!p.is_insert()).then_some(host))
+            holder::page_row(text, lookup.page(p), Some(host))
         }
         ItemKey::Transition(t) => {
-            let text = match (&t.to, t.dir) {
-                (Some(to), super::model::Dir::Next) => format!("Next chapter {}", to.id),
-                (Some(to), super::model::Dir::Prev) => format!("Previous chapter {}", to.id),
-                (None, super::model::Dir::Next) => "There's no next chapter".to_string(),
-                (None, super::model::Dir::Prev) => "There's no previous chapter".to_string(),
+            let to = match &t.to {
+                Some(key) => match lookup.chapter(key) {
+                    Some(chapter) => Some(chapter),
+                    None => return holder::plain_row("Chapter unavailable"),
+                },
+                None => None,
             };
-            holder::transition_row(text, t.to.as_ref().and_then(|to| lookup.chapter(to)))
+            match lookup.chapter(&t.from) {
+                Some(from) => {
+                    let transition = match t.dir {
+                        super::model::Dir::Next => ChapterTransition::Next { from, to },
+                        super::model::Dir::Prev => ChapterTransition::Prev { from, to },
+                    };
+                    holder::transition_row(transition, host)
+                }
+                None => holder::plain_row("Chapter unavailable"),
+            }
         }
     }
 }
 
-/// What a new page row is handed: the options of the current settings and the long-press report (T-43b-013).
-fn page_host(settings: &ViewerSettings, kind: ViewerKind, emit: &Emitter) -> PageHost {
-    let (long_emit, zoom_emit) = (emit.clone(), emit.clone());
+/// What a new page row is handed: the options of the current settings, the long-press report (T-43b-013), what a
+/// split page asks of the viewer and what a row's error state asks of the layout.
+fn page_host(
+    settings: &ViewerSettings,
+    kind: ViewerKind,
+    emit: &Emitter,
+    on_split: Rc<dyn Fn(Rc<ReaderPage>)>,
+    on_layout: Rc<dyn Fn()>,
+    downloads: &DownloadCheck,
+) -> PageHost {
+    let (long_emit, zoom_emit, retry_emit) = (emit.clone(), emit.clone(), emit.clone());
     PageHost {
         opts: page_opts(settings, kind, crate::reader::theme::system_prefers_dark()),
         on_long_tap: Rc::new(move |page, _x, _y| long_emit.send(ViewerEvent::LongTap(page))),
         // Any zoom of a page hides the menu (T-44a-071, B§6.5).
         on_zoom: Rc::new(move || zoom_emit.send(ViewerEvent::HideMenu)),
+        on_split,
+        on_layout,
+        is_webtoon: !kind.is_pager(),
+        on_retry: Rc::new(move |chapter| retry_emit.send(ViewerEvent::RequestPreload(chapter))),
+        downloads: downloads.clone(),
     }
 }
 
@@ -294,6 +323,16 @@ fn normalised(x: f64, y: f64, width: f64, height: f64) -> (f64, f64) {
     ((x / width.max(1.0)).clamp(0.0, 1.0), (y / height.max(1.0)).clamp(0.0, 1.0))
 }
 
+/// The drag threshold from the desktop settings, which is the touch slop of a pan.
+fn recognizer_slop() -> f64 {
+    gtk::Settings::default().map_or(8.0, |s| f64::from(s.property::<i32>("gtk-dnd-drag-threshold").max(0)))
+}
+
+/// `delta` with the first `slop` pixels taken off: nothing inside the slop, then the distance past it.
+fn dead_zone(delta: f64, slop: f64) -> f64 {
+    if delta.abs() > slop { delta - delta.signum() * slop } else { 0.0 }
+}
+
 pub struct PagerEngine(Rc<PagerInner>);
 
 impl PagerEngine {
@@ -348,6 +387,8 @@ struct PagerInner {
     lookup: RefCell<Lookup>,
     settings: RefCell<ViewerSettings>,
     emit: Emitter,
+    /// The download index, for the transition cards' downloaded flags.
+    downloads: DownloadCheck,
     /// The realised rows by index, each with the item it was made for, so a changed item list replaces them.
     slots: RefCell<BTreeMap<usize, (ItemKey, Row)>>,
     recognizer: RefCell<TapRecognizer>,
@@ -383,6 +424,7 @@ impl PagerInner {
             lookup: RefCell::default(),
             settings: RefCell::new(settings.clone()),
             emit: ctx.emit,
+            downloads: ctx.downloads,
             slots: RefCell::default(),
             recognizer: RefCell::new(recognizer(true)),
             watch: RefCell::new(ctx.prefs.map(|p| SettingsWatch::new(p, settings))),
@@ -407,6 +449,32 @@ impl PagerInner {
 
     fn horizontal(&self) -> bool {
         self.kind != ViewerKind::Vertical
+    }
+
+    /// What a new row is handed. A split page asks for its insert page on the next idle, because the report can come
+    /// while the rows are being built.
+    fn host(&self) -> PageHost {
+        let weak = self.me.clone();
+        let on_split: Rc<dyn Fn(Rc<ReaderPage>)> = Rc::new(move |page| {
+            let weak = weak.clone();
+            glib::idle_add_local_once(move || {
+                if let Some(this) = weak.upgrade() {
+                    this.on_page_split(&page);
+                }
+            });
+        });
+        page_host(&self.settings.borrow(), self.kind, &self.emit, on_split, Rc::new(|| {}), &self.downloads)
+    }
+
+    /// A transform split `page` in two: its insert page goes next to it (B§5.6, T-44a-050).
+    fn on_page_split(&self, page: &Rc<ReaderPage>) {
+        if !self.emit.is_open() {
+            return;
+        }
+        let Some(parent) = PageRef::from_reader(page) else { return };
+        let insert = PageRef::insert_of(&parent);
+        let fx = self.ctl.borrow_mut().on_page_split(&parent, insert);
+        self.run(fx);
     }
 
     fn extent(&self) -> i32 {
@@ -492,7 +560,7 @@ impl PagerInner {
             let widget = slots
                 .entry(i)
                 .or_insert_with(|| {
-                    let row = item_row(&items[i], &self.lookup.borrow(), &page_host(&self.settings.borrow(), self.kind, &self.emit));
+                    let row = item_row(&items[i], &self.lookup.borrow(), &self.host());
                     self.fixed.put(&row.widget, 0.0, 0.0);
                     (items[i].clone(), row)
                 })
@@ -750,7 +818,7 @@ impl ViewerEngine for WebtoonEngine {
     }
 
     fn widget(&self) -> &gtk::Widget {
-        self.0.root.upcast_ref()
+        self.0.frame.upcast_ref()
     }
 
     fn set_chapters(&self, chapters: ViewerChapters) {
@@ -786,6 +854,8 @@ struct WebtoonInner {
     lookup: RefCell<Lookup>,
     settings: RefCell<ViewerSettings>,
     emit: Emitter,
+    /// The download index, for the transition cards' downloaded flags.
+    downloads: DownloadCheck,
     /// Realised rows, keyed by item so a rebuild reuses the rows that survive it (the keyed diff of T-44a-031).
     realised: RefCell<HashMap<ItemKey, Row>>,
     layout: RefCell<StripLayout>,
@@ -808,6 +878,15 @@ struct WebtoonInner {
     anim: Rc<Cell<u64>>,
     /// False until the store's first emission, so page transitions start off (E-22).
     transitions_live: Cell<bool>,
+    /// What the engine shows: the frame scales and moves the strip (T-44a-038).
+    frame: ZoomFrame,
+    zoom: RefCell<WebtoonZoom>,
+    /// Bumped to stop a running zoom animation.
+    zoom_anim: Cell<u64>,
+    /// A zoom animation is running: a double tap is ignored (E-33).
+    animating: Cell<bool>,
+    /// A layout asked for by a row is waiting for the next idle.
+    layout_pending: Cell<bool>,
 }
 
 fn webtoon_options(s: &ViewerSettings) -> WebtoonOptions {
@@ -820,6 +899,7 @@ impl WebtoonInner {
         let fixed = gtk::Fixed::new();
         root.set_child(Some(&fixed));
         root.set_visible(false);
+        let frame = ZoomFrame::new(&root);
         let kind = if gapped { ViewerKind::WebtoonGapped } else { ViewerKind::Webtoon };
         let settings = ctx.settings;
         let inner = Rc::new_cyclic(|me| WebtoonInner {
@@ -827,10 +907,16 @@ impl WebtoonInner {
             kind,
             root,
             fixed,
+            frame,
+            zoom: RefCell::new(WebtoonZoom::new(settings.zoom_out_disabled)),
+            zoom_anim: Cell::new(0),
+            animating: Cell::new(false),
+            layout_pending: Cell::new(false),
             ctl: RefCell::new(WebtoonController::new(webtoon_options(&settings.clone().before_first_emission()))),
             lookup: RefCell::default(),
             settings: RefCell::new(settings.clone()),
             emit: ctx.emit,
+            downloads: ctx.downloads,
             realised: RefCell::default(),
             layout: RefCell::default(),
             watch: RefCell::new(ctx.prefs.map(|p| SettingsWatch::new(p, settings))),
@@ -861,7 +947,33 @@ impl WebtoonInner {
             }
         });
         inner.wire_resize();
+        inner.wire_zoom();
         inner
+    }
+
+    /// What a new row is handed. A row asks for a layout when it starts or stops showing its error card.
+    fn host(&self) -> PageHost {
+        let weak = self.me.clone();
+        let on_layout: Rc<dyn Fn()> = Rc::new(move || {
+            if let Some(this) = weak.upgrade() {
+                this.request_layout();
+            }
+        });
+        page_host(&self.settings.borrow(), self.kind, &self.emit, Rc::new(|_| {}), on_layout, &self.downloads)
+    }
+
+    /// Lays the strip out again on the next idle: the report can come while the rows are being built.
+    fn request_layout(&self) {
+        if self.layout_pending.replace(true) {
+            return;
+        }
+        let weak = self.me.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(this) = weak.upgrade() {
+                this.layout_pending.set(false);
+                this.sync();
+            }
+        });
     }
 
     /// The strip is laid out once it has a size, and again when the size changes. Checked once per frame, like the
@@ -915,12 +1027,23 @@ impl WebtoonInner {
         h
     }
 
-    /// The strip geometry for the current items: pages fill the viewport until decoded, cards have a fixed height.
+    /// The strip geometry for the current items: pages fill the viewport until decoded, a page that failed is the error
+    /// card, 0.8 of the viewport (B§8.5), and transition cards have a fixed height. The viewport is the strip's own
+    /// height, which the frame makes `original / scale` below a scale of 1 (E-31).
     fn current_layout(&self) -> (Vec<ItemKey>, StripLayout) {
         let items = self.ctl.borrow().items().to_vec();
         let vh = self.viewport();
-        let heights = items.iter().map(|i| if i.page().is_some() { vh } else { CARD_HEIGHT }).collect();
+        let heights = items.iter().map(|i| self.item_height(i, vh)).collect();
         (items, StripLayout::new(heights))
+    }
+
+    fn item_height(&self, item: &ItemKey, viewport: i32) -> i32 {
+        let Some(page) = item.page() else { return CARD_HEIGHT };
+        let errored = match self.realised.borrow().get(item) {
+            Some(row) => row.errored(),
+            None => self.lookup.borrow().pages.get(page).is_some_and(|p| p.status.get() == PageStatus::Error),
+        };
+        if errored { error_card::webtoon_card_height(viewport) } else { viewport }
     }
 
     /// Takes the chapters and follows their load state: each change hands them to the controller again (B§11.3).
@@ -1030,7 +1153,7 @@ impl WebtoonInner {
             let widget = realised
                 .entry(key.clone())
                 .or_insert_with(|| {
-                    let row = item_row(key, &self.lookup.borrow(), &page_host(&self.settings.borrow(), self.kind, &self.emit));
+                    let row = item_row(key, &self.lookup.borrow(), &self.host());
                     self.fixed.put(&row.widget, 0.0, 0.0);
                     row
                 })
@@ -1042,6 +1165,159 @@ impl WebtoonInner {
         drop(realised);
         self.fixed.set_size_request(width, layout.total_height() as i32);
         *self.layout.borrow_mut() = layout.clone();
+    }
+
+    /// The geometry the zoom math is done in: half the frame's width and original height (B§10.7).
+    fn zoom_geometry(&self) -> ((f64, f64), f64) {
+        let (w, h) = (f64::from(self.frame.width()), f64::from(self.frame.height()));
+        ((w / 2.0, h / 2.0), h)
+    }
+
+    /// Shows the zoom state: the frame scales the strip and moves it, and the strip takes the height that goes with it.
+    fn apply_zoom(&self) {
+        let zoom = self.zoom.borrow();
+        self.frame.set_view(zoom.scale(), zoom.pan());
+    }
+
+    fn stop_zoom_anim(&self) {
+        self.zoom_anim.set(self.zoom_anim.get() + 1);
+        self.animating.set(false);
+    }
+
+    /// Pinch and quick scale (`onScale`): `factor` multiplies the scale. Any zoom hides the menu (B§6.5).
+    fn pinch(&self, factor: f64) {
+        let (half, original) = self.zoom_geometry();
+        self.zoom.borrow_mut().pinch(factor, half, original);
+        self.apply_zoom();
+        self.emit.send(ViewerEvent::HideMenu);
+    }
+
+    /// The end of a pinch: a scale under the minimum animates back to it (`onScaleEnd`).
+    fn pinch_end(&self) {
+        let anim = self.zoom.borrow_mut().settle();
+        if let Some(anim) = anim {
+            self.run_zoom_anim(anim);
+        }
+    }
+
+    /// Whether the strip is at its first or last item, which is when a drag pans y as well as x (B§10.7).
+    fn at_edge(&self) -> bool {
+        let layout = self.layout.borrow();
+        let scroll = self.root.vadjustment().value().round() as i64;
+        let vh = i64::from(self.root.height());
+        layout.first_visible(scroll) == Some(0) || (!layout.is_empty() && layout.offset(layout.len() - 1) < scroll + vh)
+    }
+
+    /// A drag while zoomed pans x always and y at the edges. `dx` and `dy` are the change since the last update.
+    fn zoom_drag(&self, dx: f64, dy: f64) {
+        let (half, original) = self.zoom_geometry();
+        let edge = self.at_edge();
+        self.zoom.borrow_mut().drag(dx, dy, edge, half, original);
+        self.apply_zoom();
+    }
+
+    /// `onDoubleTapConfirmed` (E-33): zoom to 2 about the touch, or back to 1. Gated by the live setting.
+    fn double_tap(&self, x: f64, y: f64) {
+        let enabled = self.settings.borrow().double_tap_zoom;
+        let (half, _) = self.zoom_geometry();
+        let anim = self.zoom.borrow_mut().double_tap(enabled, self.animating.get(), (x, y), half);
+        if let Some(anim) = anim {
+            self.emit.send(ViewerEvent::HideMenu);
+            self.run_zoom_anim(anim);
+        }
+    }
+
+    /// Runs `anim` on the frame clock, 200 ms with the decelerate curve, clamped on every frame (E-34). A frame that is
+    /// not on screen, or desktop animations being off, goes to the end state at once.
+    fn run_zoom_anim(&self, anim: Anim) {
+        self.stop_zoom_anim();
+        let token = self.zoom_anim.get();
+        let (half, original) = self.zoom_geometry();
+        let animations = gtk::Settings::default().is_none_or(|s| s.is_gtk_enable_animations());
+        if !animations || !self.frame.is_mapped() {
+            self.zoom.borrow_mut().apply(anim.end(), half, original);
+            self.apply_zoom();
+            return;
+        }
+        self.animating.set(true);
+        let started: Cell<Option<i64>> = Cell::new(None);
+        let weak = self.me.clone();
+        self.frame.add_tick_callback(move |_, clock| {
+            let Some(this) = weak.upgrade() else { return ControlFlow::Break };
+            if this.zoom_anim.get() != token {
+                return ControlFlow::Break;
+            }
+            let now = clock.frame_time();
+            let t0 = started.get().unwrap_or_else(|| {
+                started.set(Some(now));
+                now
+            });
+            let elapsed = ((now - t0) / 1000).clamp(0, i64::from(u32::MAX)) as u32;
+            let (half, original) = this.zoom_geometry();
+            let done = this.zoom.borrow_mut().step(&anim, elapsed, half, original);
+            this.apply_zoom();
+            if done {
+                this.animating.set(false);
+                ControlFlow::Break
+            } else {
+                ControlFlow::Continue
+            }
+        });
+    }
+
+    /// The pinch and drag gestures of the strip. They run on the frame in the capture phase, so they see the touch
+    /// before the pages do (a page of the strip does not zoom on its own), and they claim nothing: taps, long presses
+    /// and the scrolled window's own scrolling carry on.
+    fn wire_zoom(&self) {
+        let pinch = gtk::GestureZoom::new();
+        pinch.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let last = Rc::new(Cell::new(1.0));
+        let (weak, seen) = (self.me.clone(), Rc::clone(&last));
+        pinch.connect_begin(move |_, _| {
+            seen.set(1.0);
+            if let Some(this) = weak.upgrade() {
+                this.stop_zoom_anim();
+            }
+        });
+        let weak = self.me.clone();
+        pinch.connect_scale_changed(move |_, factor| {
+            // the gesture reports the scale since it began; `onScale` takes the change since the last event
+            let step = factor / last.replace(factor).max(f64::EPSILON);
+            if let Some(this) = weak.upgrade() {
+                this.pinch(step);
+            }
+        });
+        let weak = self.me.clone();
+        pinch.connect_end(move |_, _| {
+            if let Some(this) = weak.upgrade() {
+                this.pinch_end();
+            }
+        });
+        self.frame.add_controller(pinch);
+
+        let drag = gtk::GestureDrag::new();
+        drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let slop = recognizer_slop();
+        let applied = Rc::new(Cell::new((0.0, 0.0)));
+        let (weak, seen) = (self.me.clone(), Rc::clone(&applied));
+        drag.connect_drag_begin(move |_, _, _| {
+            seen.set((0.0, 0.0));
+            if let Some(this) = weak.upgrade() {
+                this.stop_zoom_anim();
+            }
+        });
+        let weak = self.me.clone();
+        drag.connect_drag_update(move |_, dx, dy| {
+            let Some(this) = weak.upgrade() else { return };
+            if this.zoom.borrow().scale() <= 1.0 {
+                return;
+            }
+            // the first `slop` pixels of a drag are a tap that wobbled, not a pan (touch slop)
+            let (ex, ey) = (dead_zone(dx, slop), dead_zone(dy, slop));
+            let (px, py) = applied.replace((ex, ey));
+            this.zoom_drag(ex - px, ey - py);
+        });
+        self.frame.add_controller(drag);
     }
 
     /// Scrolls by `delta` pixels, animated when page transitions are on (B§7.4).
@@ -1082,10 +1358,15 @@ impl WebtoonInner {
                 Reaction::RefreshImages => self.refresh_images(),
                 // The webtoon does not restart for a theme change as upstream does; its background changes in place.
                 Reaction::Restyle => crate::reader::theme::apply_background(&self.root, new.reader_theme),
-                // The taps read the table on each release. Zoom-out and double-tap zoom are read from the live
-                // settings by the zoom frame (T-44a-039, T-44a-042, T-44a-043), which does not exist yet, so
-                // there is nothing to refresh until it does.
-                Reaction::Navigation | Reaction::RemoveSplits | Reaction::ZoomOutDisabled | Reaction::DoubleTapZoom => {}
+                // Turning zoom-out off while the strip is below 1 animates it back to 1 (E-32).
+                Reaction::ZoomOutDisabled => {
+                    let anim = self.zoom.borrow_mut().set_zoom_out_disabled(new.zoom_out_disabled);
+                    if let Some(anim) = anim {
+                        self.run_zoom_anim(anim);
+                    }
+                }
+                // The taps read the table on each release, and a double tap reads `double_tap_zoom` live.
+                Reaction::Navigation | Reaction::RemoveSplits | Reaction::DoubleTapZoom => {}
             }
         }
     }
@@ -1093,6 +1374,7 @@ impl WebtoonInner {
     fn destroy(&self) {
         self.emit.close();
         self.anim.set(self.anim.get() + 1);
+        self.stop_zoom_anim();
         *self.chapter_tasks.borrow_mut() = Tasks::default();
         let mut child = self.fixed.first_child();
         while let Some(widget) = child {
@@ -1139,8 +1421,12 @@ impl Surface for WebtoonInner {
     }
 
     fn tap(&self, gesture: Gesture) {
-        // Double tap zoom (T-44a-039) is not wired in this slice. Long presses reach the page view.
-        let Gesture::Tap { x, y } = gesture else { return };
+        // Long presses reach the page view. A double tap zooms the strip (T-44a-039).
+        let (x, y) = match gesture {
+            Gesture::Tap { x, y } => (x, y),
+            Gesture::DoubleTap { x, y } => return self.double_tap(x, y),
+            Gesture::LongPress { .. } => return,
+        };
         let original = f64::from(self.original_height.get());
         let (nx, ny) = normalised(x, y, f64::from(self.root.width()), original);
         let outcome = {
@@ -1162,5 +1448,199 @@ impl Surface for WebtoonInner {
 
     fn wheel(&self, _dy: f64) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reader::model::PageSource;
+    use crate::reader::viewers::ViewerContext;
+    use kuro_data::chapter::Chapter;
+    use kuro_prefs::reader::ReaderPrefs;
+    use kuro_prefs::store::PrefStore;
+    use std::path::PathBuf;
+
+    fn prefs() -> ReaderPrefs {
+        ReaderPrefs::new(PrefStore::in_memory())
+    }
+
+    fn context(settings: ViewerSettings) -> ViewerContext {
+        ViewerContext { emit: Emitter::new(Rc::new(|_| {})), settings, prefs: None, downloads: DownloadCheck::default() }
+    }
+
+    fn image(name: &str, width: u32, height: u32) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("kuro-engine-{}-{name}.png", std::process::id()));
+        image::RgbaImage::from_pixel(width, height, image::Rgba([40, 80, 120, 255])).save(&path).expect("write the test image");
+        path
+    }
+
+    /// A loaded chapter whose pages are ready files (a path that does not exist is a page that fails).
+    fn chapter(id: i64, files: &[PathBuf]) -> Rc<ReaderChapter> {
+        let mut data = Chapter::create();
+        data.id = id;
+        data.url = format!("/c/{id}");
+        let chapter = ReaderChapter::new(data);
+        let pages = files
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let page = ReaderPage::new(i as u32, format!("p{i}"), None, PageSource::File(path.clone()));
+                page.status.set(PageStatus::Ready);
+                page
+            })
+            .collect();
+        chapter.finish_loading(pages).unwrap();
+        chapter
+    }
+
+    fn handed(chapter: &Rc<ReaderChapter>) -> ViewerChapters {
+        ViewerChapters { curr: Rc::clone(chapter), prev: None, next: None }
+    }
+
+    fn show(widget: &gtk::Widget) -> gtk::Window {
+        let window = gtk::Window::new();
+        window.set_default_size(400, 500);
+        window.set_child(Some(widget));
+        window.present();
+        window
+    }
+
+    fn pump_until(done: impl Fn() -> bool) -> bool {
+        let ctx = glib::MainContext::default();
+        for _ in 0..800 {
+            while ctx.iteration(false) {}
+            if done() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        false
+    }
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
+    #[test]
+    fn a_failed_webtoon_page_is_an_error_card_of_four_fifths_of_the_viewport() {
+        crate::testing::with_display(|| {
+            let missing = std::env::temp_dir().join("kuro-engine-missing.png");
+            let chapter = chapter(1, &[missing, image("webtoon-ok", 40, 60)]);
+            let engine = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&prefs())));
+            let window = show(engine.widget());
+            engine.set_chapters(handed(&chapter));
+            let inner = Rc::clone(&engine.0);
+            let height_of = |index: usize| {
+                let item = inner.ctl.borrow().items().iter().find(|i| i.page().is_some_and(|p| p.index == index as u32)).cloned();
+                item.and_then(|item| inner.realised.borrow().get(&item).map(|row| (row.errored(), row.widget.height_request())))
+            };
+            assert!(pump_until(|| height_of(0).is_some_and(|(errored, _)| errored)), "the unreadable page shows its error card");
+            let viewport = inner.root.height();
+            assert!(viewport > 0);
+            assert!(pump_until(|| height_of(0).is_some_and(|(_, h)| h == error_card::webtoon_card_height(viewport))), "0.8 of the viewport");
+            assert_eq!(height_of(1).map(|(errored, h)| (errored, h)), Some((false, viewport)), "a good page keeps the viewport height");
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn a_pinch_scales_the_strip_and_below_one_the_strip_is_taller() {
+        crate::testing::with_display(|| {
+            let chapter = chapter(1, &[image("zoom-a", 40, 60), image("zoom-b", 40, 60)]);
+            let engine = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&prefs())));
+            let window = show(engine.widget());
+            engine.set_chapters(handed(&chapter));
+            let inner = Rc::clone(&engine.0);
+            assert!(pump_until(|| inner.root.height() > 0 && inner.frame.height() > 0));
+            let original = inner.frame.height();
+            inner.pinch(0.5);
+            assert!(close(inner.frame.view().0, 0.5));
+            assert!(pump_until(|| inner.root.height() == original * 2), "the strip is twice as tall at 0.5 (E-31)");
+            inner.pinch(0.1);
+            assert!(close(inner.frame.view().0, 0.5), "the scale stops at the minimum");
+            inner.pinch(2.0);
+            inner.pinch(10.0);
+            assert!(close(inner.frame.view().0, 3.0), "and at the maximum");
+            assert!(pump_until(|| inner.root.height() == original));
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn a_drag_while_zoomed_pans_x_and_a_double_tap_zooms_to_two_and_back() {
+        crate::testing::with_display(|| {
+            let chapter = chapter(1, &[image("tap-a", 40, 60)]);
+            let engine = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&prefs())));
+            let window = show(engine.widget());
+            engine.set_chapters(handed(&chapter));
+            let inner = Rc::clone(&engine.0);
+            assert!(pump_until(|| inner.frame.height() > 0 && inner.frame.is_mapped()));
+            // the recogniser's double tap reaches the zoom (T-44a-039)
+            Surface::tap(&*inner, Gesture::DoubleTap { x: 100.0, y: 100.0 });
+            assert!(inner.animating.get(), "the zoom animation runs on the frame clock");
+            inner.double_tap(300.0, 300.0);
+            assert!(pump_until(|| !inner.animating.get() && close(inner.frame.view().0, 2.0)), "200 ms later the strip is at 2");
+            let (_, (x0, y0)) = inner.frame.view();
+            assert!(close(x0, 100.0) && close(y0, 150.0), "centred on the first touch: {x0}, {y0}");
+            inner.zoom_drag(-50.0, 40.0);
+            let (_, (x, y)) = inner.frame.view();
+            assert!(close(x, x0 - 50.0), "x always pans");
+            assert!(close(y, y0), "the page sits between two cards, not at an edge of the strip: y does not pan");
+            inner.root.vadjustment().set_value(0.0);
+            assert!(pump_until(|| inner.at_edge()), "scrolled to the first item");
+            inner.zoom_drag(0.0, 40.0);
+            assert!(close(inner.frame.view().1.1, y0 + 40.0), "at an edge y pans too");
+            inner.double_tap(10.0, 10.0);
+            assert!(pump_until(|| !inner.animating.get() && close(inner.frame.view().0, 1.0)), "a second double tap goes back to 1");
+            assert_eq!(inner.frame.view().1, (0.0, 0.0));
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn double_tap_zoom_follows_its_setting_and_zoom_out_off_pulls_the_strip_back_to_one() {
+        crate::testing::with_display(|| {
+            let chapter = chapter(1, &[image("setting-a", 40, 60)]);
+            let mut settings = ViewerSettings::from_prefs(&prefs());
+            settings.double_tap_zoom = false;
+            let engine = WebtoonEngine::new(false, context(settings.clone()));
+            let window = show(engine.widget());
+            engine.set_chapters(handed(&chapter));
+            let inner = Rc::clone(&engine.0);
+            assert!(pump_until(|| inner.frame.height() > 0 && inner.frame.is_mapped()));
+            inner.double_tap(100.0, 100.0);
+            assert!(!inner.animating.get() && close(inner.frame.view().0, 1.0), "the setting is off");
+            inner.pinch(0.5);
+            engine.apply_settings(ViewerSettings { zoom_out_disabled: true, ..settings });
+            assert!(inner.animating.get(), "turning zoom-out off below 1 animates back (E-32)");
+            assert!(pump_until(|| !inner.animating.get() && close(inner.frame.view().0, 1.0)));
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn a_wide_pager_page_asks_for_its_insert_page_when_splitting_is_on() {
+        crate::testing::with_display(|| {
+            for (split, expect_insert) in [(true, true), (false, false)] {
+                let name = format!("pager-wide-{split}");
+                let chapter = chapter(1, &[image(&format!("{name}-a"), 40, 20), image(&format!("{name}-b"), 40, 20)]);
+                let p = prefs();
+                p.dual_page_split_paged.set(split).unwrap();
+                let engine = PagerEngine::new(ViewerKind::LeftToRight, context(ViewerSettings::from_prefs(&p)));
+                let window = show(engine.widget());
+                engine.set_chapters(handed(&chapter));
+                let inner = Rc::clone(&engine.0);
+                let has_insert = || inner.ctl.borrow().items().iter().any(|i| i.page().is_some_and(PageRef::is_insert));
+                if expect_insert {
+                    assert!(pump_until(has_insert), "the split of a wide page places its insert page");
+                } else {
+                    pump_until(|| false);
+                    assert!(!has_insert(), "no split, no insert");
+                }
+                engine.destroy();
+                window.destroy();
+            }
+        });
     }
 }

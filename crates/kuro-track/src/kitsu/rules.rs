@@ -71,7 +71,13 @@ pub fn bind_new_status(has_progress: bool, current: i64, planned: i64) -> i64 {
 /// A positive total reached by the truncated progress completes the entry. Any other event moves the entry to
 /// `current`, which also turns dropped or on-hold entries back into reading or watching. Progress of exactly 1.0
 /// starts the entry now. A total of 0 never completes it.
-pub fn apply_progress_event(p: &mut Personal, total: i64, did_progress: bool, current: i64, now_ms: i64) {
+pub fn apply_progress_event(
+    p: &mut Personal,
+    total: i64,
+    did_progress: bool,
+    current: i64,
+    now_ms: i64,
+) {
     if !did_progress || p.status == COMPLETED {
         return;
     }

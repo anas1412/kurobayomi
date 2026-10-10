@@ -480,8 +480,8 @@ pub(crate) mod tests {
         assert_eq!(opened.get(), 2);
     }
 
-    /// Run by `smoke::browse_widgets_smoke`: GTK binds to the first thread that starts it, so every widget check
-    /// of this lane runs in that one test.
+    /// Run by `smoke::browse_widgets_smoke`: every widget check of this lane runs in that one test, on the shared
+    /// GTK thread of `crate::testing`.
     pub(crate) fn smoke() {
         a_placeholder_slot_renders_nothing();
         a_favourite_dims_only_its_cover_and_not_the_cell_or_the_title();

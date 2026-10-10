@@ -12,5 +12,5 @@ pub mod plan;
 pub mod scan;
 pub mod sync;
 
-pub use button::add_button;
-pub use open::{anime_id_for_title, open_episode};
+pub use button::header_actions;
+pub use open::{anime_id_for_title, open_episode, open_local_episode};

@@ -52,6 +52,7 @@ pub async fn refresh_once(
     index_urls: &[String],
     cancel: &CancellationToken,
     events: &Sender<Event>,
+    is_latest: &(dyn Fn() -> bool + Sync),
 ) -> bool {
     let aggregate: Aggregate = match fetch_all(client, index_urls, cancel).await {
         Ok(aggregate) => aggregate,
@@ -63,6 +64,10 @@ pub async fn refresh_once(
     };
     if aggregate.stores.is_empty() && !aggregate.failures.is_empty() {
         tracing::error!("no store could be read, so the previous extension list stays");
+        return false;
+    }
+    if !is_latest() {
+        tracing::debug!("a newer extension refresh started, so this result is dropped");
         return false;
     }
     events.send(Event::Refreshed(aggregate)).await.is_ok()
@@ -95,7 +100,7 @@ pub async fn run_checks(
         if events.is_closed() {
             return;
         }
-        if refresh_once(client, &index_urls(), cancel, events).await {
+        if refresh_once(client, &index_urls(), cancel, events, &|| true).await {
             failed = false;
             if let Err(err) = last_check.set(now()) {
                 tracing::warn!("could not save {LAST_CHECK_KEY}: {err}");
@@ -222,9 +227,18 @@ mod tests {
         let server = MockServer::start().await;
         serve_one_store(&server, 200).await;
         let (events, inbox) = async_channel::unbounded();
-        assert!(refresh_once(&test_client(), &urls_of(&server), &CancellationToken::new(), &events).await);
+        assert!(refresh_once(&test_client(), &urls_of(&server), &CancellationToken::new(), &events, &|| true).await);
         assert!(matches!(inbox.try_recv(), Ok(Event::Refreshed(agg)) if agg.available.len() == 1));
         assert_eq!(server.received_requests().await.unwrap().len(), 1, "one request per store");
+    }
+
+    #[tokio::test]
+    async fn a_superseded_refresh_sends_nothing_so_the_newer_result_is_not_overwritten() {
+        let server = MockServer::start().await;
+        serve_one_store(&server, 200).await;
+        let (events, inbox) = async_channel::unbounded();
+        assert!(!refresh_once(&test_client(), &urls_of(&server), &CancellationToken::new(), &events, &|| false).await);
+        assert!(inbox.try_recv().is_err(), "a dropped result sends no event");
     }
 
     #[tokio::test]
@@ -232,7 +246,7 @@ mod tests {
         let server = MockServer::start().await;
         serve_one_store(&server, 500).await;
         let (events, inbox) = async_channel::unbounded();
-        assert!(!refresh_once(&test_client(), &urls_of(&server), &CancellationToken::new(), &events).await);
+        assert!(!refresh_once(&test_client(), &urls_of(&server), &CancellationToken::new(), &events, &|| true).await);
         assert!(inbox.try_recv().is_err());
     }
 
@@ -242,7 +256,7 @@ mod tests {
         serve_one_store(&server, 500).await;
         let (events, _inbox) = async_channel::unbounded();
         let recording = crate::anime::testkit::start_capture();
-        refresh_once(&test_client(), &urls_of(&server), &CancellationToken::new(), &events).await;
+        refresh_once(&test_client(), &urls_of(&server), &CancellationToken::new(), &events, &|| true).await;
         let logged = recording.events();
         let store_failures = logged.iter().filter(|event| event.message.starts_with("Failed to ")).count();
         assert_eq!(store_failures, 1, "{logged:?}");

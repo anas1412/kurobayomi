@@ -28,6 +28,12 @@ pub fn next_airing_write(episode: i32, airing_at: i64) -> (i64, i64) {
     (scratch.viewer_flags & AIRING_WRITE_MASK, AIRING_WRITE_MASK)
 }
 
+/// The length the skip-intro dialog starts at (`AnimeScreen.kt`, `ChangeAnimeSkipIntro`): the stored length, or the
+/// library default when the skip is on and no length is stored.
+pub fn dialog_start(stored: i32, disabled: bool, default: i32) -> i32 {
+    if !disabled && stored == 0 { default } else { stored }
+}
+
 /// The word after a masked write: `(old & !mask) | (value & mask)`. Mirrors what the store's UPDATE does.
 pub fn apply(word: i64, (value, mask): (i64, i64)) -> i64 {
     (word & !mask) | (value & mask)
@@ -36,6 +42,13 @@ pub fn apply(word: i64, (value, mask): (i64, i64)) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_dialog_starts_at_the_default_only_for_an_unset_enabled_skip() {
+        assert_eq!(dialog_start(0, false, 85), 85);
+        assert_eq!(dialog_start(0, true, 85), 0, "a disabled skip starts at its stored length");
+        assert_eq!(dialog_start(30, false, 85), 30);
+    }
 
     #[test]
     fn the_masks_are_the_kotlin_values() {

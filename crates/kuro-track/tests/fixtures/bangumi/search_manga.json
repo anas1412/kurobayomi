@@ -1,0 +1,5 @@
+{"total":3,"limit":20,"offset":0,"data":[
+  {"id":101,"name":"Bleach","name_cn":"死神","summary":"  hi  ","date":"2001-08-07","platform":"漫画","eps":0,"rating":{"score":8.5},"images":{"common":"https://lain.bgm.tv/pic/cover/c/101.jpg"}},
+  {"id":102,"name":"Bleach","name_cn":"","summary":null,"date":"2001-08-07","platform":"漫画","eps":0,"rating":{"score":7.0},"images":{"common":"https://lain.bgm.tv/pic/cover/c/102.jpg"}},
+  {"id":103,"name":"Bleach Novel","name_cn":"","summary":"novel","date":"2005-01-01","platform":"小说","eps":0,"rating":{"score":6.0},"images":{"common":"https://lain.bgm.tv/pic/cover/c/103.jpg"}}
+]}

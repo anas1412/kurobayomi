@@ -65,14 +65,14 @@ pub enum StatsState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tile {
     pub value: String,
-    pub caption: &'static str,
+    pub caption: String,
     pub icon: Option<&'static str>,
 }
 
 /// One section card: its heading and a row of equal tiles.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Card {
-    pub title: &'static str,
+    pub title: String,
     pub tiles: Vec<Tile>,
 }
 
@@ -96,54 +96,54 @@ pub fn tracker_stats(entries: &[Vec<f64>], logged_in_trackers: i64) -> TrackerSt
 pub fn mean_score_text(mean: Option<f64>) -> String {
     match mean {
         Some(value) => format!("{value:.2} ★"),
-        None => copy::NOT_AVAILABLE.to_owned(),
+        None => copy::not_available(),
     }
 }
 
-fn tile(value: String, caption: &'static str, icon: Option<&'static str>) -> Tile {
+fn tile(value: String, caption: String, icon: Option<&'static str>) -> Tile {
     Tile { value, caption, icon }
 }
 
-fn overview_card(overview: Overview, duration_caption: &'static str) -> Card {
+fn overview_card(overview: Overview, duration_caption: String) -> Card {
     Card {
-        title: copy::STATS_OVERVIEW,
+        title: copy::stats_overview(),
         tiles: vec![
-            tile(overview.library_count.to_string(), copy::STATS_IN_LIBRARY, Some("user-bookmarks-symbolic")),
-            tile(duration_string(overview.total_duration_ms, copy::NONE), duration_caption, Some("document-open-recent-symbolic")),
-            tile(overview.completed_count.to_string(), copy::STATS_COMPLETED, Some("emblem-ok-symbolic")),
+            tile(overview.library_count.to_string(), copy::stats_in_library(), Some("user-bookmarks-symbolic")),
+            tile(duration_string(overview.total_duration_ms, &copy::none()), duration_caption, Some("document-open-recent-symbolic")),
+            tile(overview.completed_count.to_string(), copy::stats_completed(), Some("emblem-ok-symbolic")),
         ],
     }
 }
 
 fn titles_card(titles: Titles) -> Card {
     Card {
-        title: copy::STATS_ENTRIES,
+        title: copy::stats_entries(),
         tiles: vec![
-            tile(titles.global_update_count.to_string(), copy::STATS_IN_GLOBAL_UPDATE, None),
-            tile(titles.started_count.to_string(), copy::STATS_STARTED, None),
-            tile(titles.local_count.to_string(), copy::STATS_LOCAL, None),
+            tile(titles.global_update_count.to_string(), copy::stats_in_global_update(), None),
+            tile(titles.started_count.to_string(), copy::stats_started(), None),
+            tile(titles.local_count.to_string(), copy::stats_local(), None),
         ],
     }
 }
 
-fn counts_card(title: &'static str, counts: Counts, read_caption: &'static str) -> Card {
+fn counts_card(title: String, counts: Counts, read_caption: String) -> Card {
     Card {
         title,
         tiles: vec![
-            tile(counts.total.to_string(), copy::STATS_TOTAL, None),
+            tile(counts.total.to_string(), copy::stats_total(), None),
             tile(counts.read.to_string(), read_caption, None),
-            tile(counts.downloaded.to_string(), copy::STATS_DOWNLOADED, None),
+            tile(counts.downloaded.to_string(), copy::stats_downloaded(), None),
         ],
     }
 }
 
 fn trackers_card(trackers: TrackerStats) -> Card {
     Card {
-        title: copy::STATS_TRACKERS,
+        title: copy::stats_trackers(),
         tiles: vec![
-            tile(trackers.tracked_count.to_string(), copy::STATS_TRACKED, None),
-            tile(mean_score_text(trackers.mean_score), copy::STATS_MEAN_SCORE, None),
-            tile(trackers.tracker_count.to_string(), copy::STATS_USED, None),
+            tile(trackers.tracked_count.to_string(), copy::stats_tracked(), None),
+            tile(mean_score_text(trackers.mean_score), copy::stats_mean_score(), None),
+            tile(trackers.tracker_count.to_string(), copy::stats_used(), None),
         ],
     }
 }
@@ -153,18 +153,41 @@ pub fn cards(state: &StatsState) -> Vec<Card> {
     match state {
         StatsState::Loading => Vec::new(),
         StatsState::Manga(s) => vec![
-            overview_card(s.overview, copy::STATS_READ_DURATION),
+            overview_card(s.overview, copy::stats_read_duration()),
             titles_card(s.titles),
-            counts_card(copy::STATS_CHAPTERS, s.chapters, copy::STATS_READ),
+            counts_card(copy::stats_chapters(), s.chapters, copy::stats_read()),
             trackers_card(s.trackers),
         ],
         StatsState::Anime(s) => vec![
-            overview_card(s.overview, copy::STATS_WATCHED_DURATION),
+            overview_card(s.overview, copy::stats_watched_duration()),
             titles_card(s.titles),
-            counts_card(copy::STATS_EPISODES, s.episodes, copy::STATS_WATCHED),
+            counts_card(copy::stats_episodes(), s.episodes, copy::stats_watched()),
             trackers_card(s.trackers),
         ],
     }
+}
+
+/// The sections whose query failed (EC-42-S-06): each shows "N/A" in every tile, the others show their values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Failed {
+    pub overview: bool,
+    pub titles: bool,
+    pub counts: bool,
+    pub trackers: bool,
+}
+
+/// [`cards`] with the failed sections blanked to "N/A" (T-42a-043: per-section "N/A" on error).
+pub fn cards_with(state: &StatsState, failed: Failed) -> Vec<Card> {
+    let flags = [failed.overview, failed.titles, failed.counts, failed.trackers];
+    let mut out = cards(state);
+    for (card, failed) in out.iter_mut().zip(flags) {
+        if failed {
+            for tile in &mut card.tiles {
+                tile.value = copy::not_available();
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -189,18 +212,19 @@ mod tests {
 
     #[test]
     fn stats_cards_are_in_page_order_with_per_kind_titles() {
-        let manga_titles: Vec<&str> = cards(&StatsState::Manga(manga())).iter().map(|c| c.title).collect();
+        let manga_cards = cards(&StatsState::Manga(manga()));
+        let manga_titles: Vec<&str> = manga_cards.iter().map(|c| c.title.as_str()).collect();
         assert_eq!(manga_titles, ["Overview", "Entries", "Chapters", "Trackers"]);
-        let anime_titles: Vec<&str> = cards(&StatsState::Anime(AnimeStats::default())).iter().map(|c| c.title).collect();
+        let anime_titles: Vec<String> = cards(&StatsState::Anime(AnimeStats::default())).iter().map(|c| c.title.clone()).collect();
         assert_eq!(anime_titles[2], "Episodes");
     }
 
     #[test]
     fn stats_manga_values_and_captions_match_the_table() {
         let cards = cards(&StatsState::Manga(manga()));
-        let overview: Vec<(&str, &str)> = cards[0].tiles.iter().map(|t| (t.value.as_str(), t.caption)).collect();
+        let overview: Vec<(&str, &str)> = cards[0].tiles.iter().map(|t| (t.value.as_str(), t.caption.as_str())).collect();
         assert_eq!(overview, [("3", "In library"), ("None", "Read duration"), ("1", "Completed entries")]);
-        let chapters: Vec<(&str, &str)> = cards[2].tiles.iter().map(|t| (t.value.as_str(), t.caption)).collect();
+        let chapters: Vec<(&str, &str)> = cards[2].tiles.iter().map(|t| (t.value.as_str(), t.caption.as_str())).collect();
         assert_eq!(chapters, [("40", "Total"), ("12", "Read"), ("5", "Downloaded")]);
         assert_eq!(cards[3].tiles[1].value, "7.50 ★");
     }
@@ -245,5 +269,20 @@ mod tests {
     #[test]
     fn stats_zero_duration_shows_none_in_the_overview() {
         assert_eq!(cards(&StatsState::Manga(manga()))[0].tiles[1].value, "None");
+    }
+
+    #[test]
+    fn stats_a_failed_section_shows_na_and_the_rest_keep_their_values() {
+        let failed = Failed { trackers: true, ..Failed::default() };
+        let cards = cards_with(&StatsState::Manga(manga()), failed);
+        assert!(cards[3].tiles.iter().all(|t| t.value == "N/A"));
+        assert_eq!(cards[3].tiles[0].caption, "Tracked entries", "captions stay");
+        assert_eq!(cards[0].tiles[0].value, "3");
+        assert_eq!(cards_with(&StatsState::Manga(manga()), Failed::default()), cards_of(&StatsState::Manga(manga())));
+        assert!(cards_with(&StatsState::Loading, failed).is_empty());
+    }
+
+    fn cards_of(state: &StatsState) -> Vec<Card> {
+        cards(state)
     }
 }

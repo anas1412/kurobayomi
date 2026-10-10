@@ -104,22 +104,47 @@ pub fn set_manga_finish_date(t: &mut MangaTrack, millis: i64) {
     t.finish_date = millis;
 }
 
-/// Behaviour 3.6, the one write path of every setter. The remote `update` runs first and its response is
-/// dropped. Only then is `t` upserted locally. A remote failure writes nothing and returns the error.
+/// `t` with the status, progress and total of the track `update` returned, so the stored binding keeps the
+/// server's verdict (E-92) and the local personal fields.
+pub(crate) fn with_server_anime(t: &AnimeTrack, server: &AnimeTrack) -> AnimeTrack {
+    AnimeTrack {
+        status: server.status,
+        last_episode_seen: server.last_episode_seen,
+        total_episodes: server.total_episodes,
+        ..t.clone()
+    }
+}
+
+/// Manga form of [`with_server_anime`].
+pub(crate) fn with_server_manga(t: &MangaTrack, server: &MangaTrack) -> MangaTrack {
+    MangaTrack {
+        status: server.status,
+        last_chapter_read: server.last_chapter_read,
+        total_chapters: server.total_chapters,
+        ..t.clone()
+    }
+}
+
+/// Behaviour 3.6, the one write path of every setter. The remote `update` runs first. Only then is `t` upserted locally,
+/// with the status, progress and total the server returned. A remote failure writes nothing and returns the error.
 /// Returns the stored binding with its row id.
 pub async fn update_remote_anime(
     t: &AnimeTrack,
     tr: &dyn AnimeTracker,
     repo: &dyn AnimeTrackRepo,
 ) -> Result<AnimeTrack, TrackError> {
-    if let Err(e) = tr.update(t, false).await {
-        tracing::error!(tracker = t.tracker_id.0, error = %redact(&e.to_string()), "remote update failed");
-        return Err(e);
-    }
-    let id = repo.upsert(t).await?;
+    let server = match tr.update(t, false).await {
+        Ok(server) => server,
+        Err(e) => {
+            tracing::error!(tracker = t.tracker_id.0, error = %redact(&e.to_string()), "remote update failed");
+            return Err(e);
+        }
+    };
+    let stored = with_server_anime(t, &server);
+    let id = repo.upsert(&stored).await?;
     Ok(AnimeTrack {
         id: Some(id),
-        ..t.clone()
+        ..stored
     })
 }
 
@@ -129,14 +154,18 @@ pub async fn update_remote_manga(
     tr: &dyn MangaTracker,
     repo: &dyn MangaTrackRepo,
 ) -> Result<MangaTrack, TrackError> {
-    if let Err(e) = tr.update(t, false).await {
-        tracing::error!(tracker = t.tracker_id.0, error = %redact(&e.to_string()), "remote update failed");
-        return Err(e);
-    }
-    let id = repo.upsert(t).await?;
+    let server = match tr.update(t, false).await {
+        Ok(server) => server,
+        Err(e) => {
+            tracing::error!(tracker = t.tracker_id.0, error = %redact(&e.to_string()), "remote update failed");
+            return Err(e);
+        }
+    };
+    let stored = with_server_manga(t, &server);
+    let id = repo.upsert(&stored).await?;
     Ok(MangaTrack {
         id: Some(id),
-        ..t.clone()
+        ..stored
     })
 }
 
@@ -287,6 +316,35 @@ mod tests {
         assert_eq!(t.score, 0.0);
         set_anime_score(&mut t, &tr, "c").unwrap();
         assert_eq!(t.score, 2.0);
+    }
+
+    #[test]
+    fn t_33a_042_the_server_status_and_progress_replace_the_local_ones() {
+        let mut local = manga(5.0, 0, STATUS_WATCHING);
+        local.score = 8.0;
+        let server = manga(12.0, 12, STATUS_COMPLETED);
+        let stored = with_server_manga(&local, &server);
+        assert_eq!(
+            (
+                stored.status,
+                stored.last_chapter_read,
+                stored.total_chapters
+            ),
+            (STATUS_COMPLETED, 12.0, 12)
+        );
+        assert_eq!(stored.score, 8.0, "personal fields stay");
+        let mut local = anime(5.0, 0, STATUS_WATCHING);
+        local.score = 8.0;
+        let stored = with_server_anime(&local, &anime(12.0, 12, STATUS_COMPLETED));
+        assert_eq!(
+            (
+                stored.status,
+                stored.last_episode_seen,
+                stored.total_episodes,
+                stored.score
+            ),
+            (STATUS_COMPLETED, 12.0, 12, 8.0)
+        );
     }
 
     #[test]

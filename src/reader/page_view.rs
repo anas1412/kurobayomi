@@ -9,6 +9,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gtk::prelude::*;
@@ -16,23 +17,64 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib, graphene};
 
 use crate::reader::decode_guard::{self, Ticket};
+use crate::reader::decoded_lru::{ByteLru, DEFAULT_BUDGET_BYTES};
 use crate::reader::long_press::{DEFAULT_DOUBLE_CLICK_MS, DEFAULT_LONG_PRESS_MS, LongPressAction, LongPressTracker, SLOP_PX};
 use crate::reader::page_decode::{self, DecodeError, LoadState};
+use crate::reader::page_transform::{self, DecodeIntent};
 use crate::reader::page_zoom::{self as zoom, PageConfig, Size, ZoomState};
 use crate::reader::progress::LoadingIndicator;
 use crate::reader::tiles::{MAX_TILE_EDGE, Pyramid, Tile};
+use crate::reader::viewers::page_bytes::ByteSource;
 
-/// The result of a decode: the pyramid of the page, or why it failed.
-type Decoded = std::thread::Result<Result<Pyramid, DecodeError>>;
+/// The result of a decode: the pyramid of the page and whether a transform changed it, or why it failed.
+type Decoded = std::thread::Result<Result<(Pyramid, bool), DecodeError>>;
 
-/// Decodes `bytes` and builds its pyramid. A webtoon page is cut to `width` first (never enlarged).
-fn decode_pyramid(bytes: &[u8], width: Option<u32>) -> Result<Pyramid, DecodeError> {
+/// Decodes `bytes`, applies the transform of `intent`, and builds the pyramid. A webtoon page is cut to `width` after
+/// the transform (never enlarged). All of it runs on the worker; the texture is made later on the GTK thread.
+fn decode_pyramid(bytes: &[u8], width: Option<u32>, intent: DecodeIntent) -> Result<(Pyramid, bool), DecodeError> {
     let page = page_decode::decode_rgba(bytes)?;
+    let (page, changed) = page_transform::apply(page, intent);
     let page = match width {
         Some(width) => page_decode::fit_to_width(page, width),
         None => page,
     };
-    Ok(Pyramid::new(page, MAX_TILE_EDGE))
+    Ok((Pyramid::new(page, MAX_TILE_EDGE), changed))
+}
+
+/// What identifies a decode in the cache: where the bytes come from, what was done to them, and the width they were cut
+/// to (T-44a-069).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct DecodeKey {
+    source: ByteSource,
+    intent: DecodeIntent,
+    width: Option<u32>,
+}
+
+/// A cached decode. A page that shows it holds its own share of the pyramid, which is how the cache knows the entry is
+/// in use.
+#[derive(Clone)]
+struct Cached {
+    pyramid: Rc<Pyramid>,
+    split: bool,
+}
+
+thread_local! {
+    /// The decoded pages kept by byte budget. A page that leaves the realised window drops its widget but not its pixels.
+    static DECODED: RefCell<ByteLru<DecodeKey, Cached>> = RefCell::new(ByteLru::new(DEFAULT_BUDGET_BYTES));
+}
+
+fn cache_get(key: &DecodeKey) -> Option<Cached> {
+    DECODED.with(|c| c.borrow_mut().get(key))
+}
+
+fn cache_put(key: DecodeKey, cached: &Cached) {
+    let bytes = cached.pyramid.byte_size();
+    DECODED.with(|c| c.borrow_mut().insert(key, cached.clone(), bytes, |e| Rc::strong_count(&e.pyramid) > 1));
+}
+
+/// Forgets every decoded page. A new reader session starts with none.
+pub fn clear_decoded_cache() {
+    DECODED.with(|c| c.borrow_mut().clear());
 }
 
 /// Uploads one tile as a texture. `None` for a tile outside its level.
@@ -54,7 +96,7 @@ mod imp {
     #[derive(Default)]
     pub struct PageView {
         /// The decoded page as a pyramid of tiles (level 0 is the full page). Only the visible tiles are uploaded.
-        pub pyramid: RefCell<Option<Pyramid>>,
+        pub pyramid: RefCell<Option<Rc<Pyramid>>>,
         /// Uploaded tiles. A tile that leaves the view is dropped on the next frame (T-44a-049).
         pub tiles: RefCell<HashMap<Tile, gdk::Texture>>,
         pub src: Cell<Size>,
@@ -68,6 +110,8 @@ mod imp {
         pub zoom: Cell<ZoomState>,
         /// Whether a decode is cut to the view width first (webtoon pages, B§8.4).
         pub decode_to_view: Cell<bool>,
+        /// Set for a webtoon page: it does not zoom on its own, the strip does (T-44a-039).
+        pub zoom_locked: Cell<bool>,
         pub background: RefCell<Option<gdk::RGBA>>,
         pub long: RefCell<Option<LongPressTracker>>,
         pub long_gen: Cell<u64>,
@@ -119,6 +163,7 @@ mod imp {
                 vec![
                     glib::subclass::Signal::builder("image-loaded").build(),
                     glib::subclass::Signal::builder("image-load-error").build(),
+                    glib::subclass::Signal::builder("page-split").build(),
                     glib::subclass::Signal::builder("scale-changed").param_types([glib::Type::F64]).build(),
                     glib::subclass::Signal::builder("view-clicked").build(),
                     glib::subclass::Signal::builder("long-tap").param_types([glib::Type::F64, glib::Type::F64]).build(),
@@ -230,31 +275,41 @@ mod imp {
         }
 
         /// Finishes a decode started by `set_image`. A result whose ticket is no longer current (another session, or
-        /// the page was loaded again) is dropped without touching anything (E-40, T-43b-059).
-        pub(super) fn finish_load(&self, ticket: Ticket, decoded: Decoded) {
+        /// the page was loaded again) is dropped without touching anything (E-40, T-43b-059). A good result goes to the
+        /// decoded cache under `key` before the page shows it.
+        pub(super) fn finish_load(&self, ticket: Ticket, decoded: Decoded, key: Option<DecodeKey>) {
             if !decode_guard::accepts(ticket, decode_guard::current_session(), self.generation.get()) {
                 return;
             }
-            let pyramid = match decoded {
-                Ok(Ok(pyramid)) if pyramid.size().0 > 0 && pyramid.size().1 > 0 => Some(pyramid),
-                _ => None,
-            };
-            let obj = self.obj();
-            match pyramid {
-                Some(pyramid) => {
-                    let (w, h) = pyramid.size();
-                    self.src.set(Size { w: f64::from(w), h: f64::from(h) });
-                    self.pyramid.replace(Some(pyramid));
-                    self.tiles.borrow_mut().clear();
-                    self.fitted.set(None);
-                    self.set_state(LoadState::Ready);
-                    obj.emit_by_name::<()>("image-loaded", &[]);
+            match decoded {
+                Ok(Ok((pyramid, split))) if pyramid.size().0 > 0 && pyramid.size().1 > 0 => {
+                    let cached = Cached { pyramid: Rc::new(pyramid), split };
+                    if let Some(key) = key {
+                        cache_put(key, &cached);
+                    }
+                    self.show_pyramid(cached);
                 }
-                None => {
+                _ => {
                     self.drop_pages();
                     self.set_state(LoadState::Error);
-                    obj.emit_by_name::<()>("image-load-error", &[]);
+                    self.obj().emit_by_name::<()>("image-load-error", &[]);
                 }
+            }
+        }
+
+        /// Shows a decoded page: sizes the zoom to it and reports `image-loaded`, and `page-split` when a transform
+        /// split it.
+        pub(super) fn show_pyramid(&self, cached: Cached) {
+            let (w, h) = cached.pyramid.size();
+            self.src.set(Size { w: f64::from(w), h: f64::from(h) });
+            self.pyramid.replace(Some(cached.pyramid));
+            self.tiles.borrow_mut().clear();
+            self.fitted.set(None);
+            self.set_state(LoadState::Ready);
+            let obj = self.obj();
+            obj.emit_by_name::<()>("image-loaded", &[]);
+            if cached.split {
+                obj.emit_by_name::<()>("page-split", &[]);
             }
         }
 
@@ -275,6 +330,15 @@ mod imp {
             let weak = obj.downgrade();
             click.connect_cancel(move |_, _| on_page(&weak, |p| p.cancel()));
             obj.add_controller(click);
+
+            // a right-click opens the page actions like a long press does (T-43a-045); it is deliberate, so it does
+            // not wait for the long-press setting
+            let secondary = gtk::GestureClick::builder().button(gdk::BUTTON_SECONDARY).build();
+            let weak = obj.downgrade();
+            secondary.connect_pressed(move |_, _, x, y| {
+                on_page(&weak, |p| p.obj().emit_by_name::<()>("long-tap", &[&x, &y]));
+            });
+            obj.add_controller(secondary);
 
             let motion = gtk::EventControllerMotion::new();
             let weak = obj.downgrade();
@@ -307,14 +371,16 @@ mod imp {
             obj.add_controller(scroll);
         }
 
-        fn press(&self, n: i32, x: f64, y: f64, t: u32) {
+        pub(super) fn press(&self, n: i32, x: f64, y: f64, t: u32) {
             self.press_at.set((x, y));
             self.pointer.set(Some((x, y)));
             if n >= 2 {
                 // The second tap of a double tap: no long press, and the pending timer (if any) is dropped.
                 self.long_action(|tr| tr.on_cancel());
                 self.bump_long();
-                self.double_tap(x, y);
+                if !self.zoom_locked.get() {
+                    self.double_tap(x, y);
+                }
                 return;
             }
             self.long_fired.set(false);
@@ -388,7 +454,7 @@ mod imp {
         }
 
         fn wheel(&self, up: bool) {
-            if self.state.get() != LoadState::Ready {
+            if self.state.get() != LoadState::Ready || self.zoom_locked.get() {
                 return;
             }
             let focus = self.pointer.get().unwrap_or_else(|| {
@@ -400,28 +466,34 @@ mod imp {
             self.set_zoom(target, focus);
         }
 
-        fn pinch_begin(&self) {
+        pub(super) fn pinch_begin(&self) {
+            if self.zoom_locked.get() {
+                return;
+            }
             self.stop_animation();
             self.pinch_start.set(self.zoom.get().scale);
             self.cancel();
         }
 
-        fn pinch(&self, factor: f64) {
-            if self.state.get() != LoadState::Ready {
+        pub(super) fn pinch(&self, factor: f64) {
+            if self.state.get() != LoadState::Ready || self.zoom_locked.get() {
                 return;
             }
             let view = self.view();
-            self.set_zoom(self.pinch_start.get() * factor, (view.w / 2.0, view.h / 2.0));
+            self.set_zoom(zoom::pinch_scale(self.pinch_start.get(), factor, &self.zoom.get()), (view.w / 2.0, view.h / 2.0));
         }
 
         fn drag_begin(&self) {
+            if self.zoom_locked.get() {
+                return;
+            }
             self.stop_animation();
             self.drag_start.set(self.zoom.get().center);
         }
 
         fn drag_update(&self, dx: f64, dy: f64) {
             let mut z = self.zoom.get();
-            if self.state.get() != LoadState::Ready || z.scale <= 0.0 {
+            if self.state.get() != LoadState::Ready || z.scale <= 0.0 || self.zoom_locked.get() {
                 return;
             }
             let (sx, sy) = self.drag_start.get();
@@ -516,6 +588,40 @@ impl PageView {
     /// Starts decoding `bytes` for this page. A page still loading is replaced, and its result is dropped. The decode
     /// belongs to the current reader session; a result from any other session is dropped (T-43b-059).
     pub fn set_image(&self, bytes: Vec<u8>, config: PageConfig) {
+        self.load(bytes, config, DecodeIntent::NONE, None);
+    }
+
+    /// Like [`set_image`], with the transform to apply on the worker. The decoded page is kept in the byte-budget cache
+    /// under `source` and `intent`, so [`show_cached`] finds it again (T-44a-069).
+    pub fn set_image_from(&self, source: ByteSource, bytes: Vec<u8>, config: PageConfig, intent: DecodeIntent) {
+        let key = self.cache_key(source, intent);
+        self.load(bytes, config, intent, Some(key));
+    }
+
+    /// Whether the cache key of this page is settled: a webtoon page is keyed by the view width, which is 0 until the
+    /// page has been allocated.
+    pub fn cache_key_ready(&self) -> bool {
+        !self.imp().decode_to_view.get() || self.width() > 0
+    }
+
+    /// Shows the page from the decoded cache when it is there, with no decode. `false` when it is not.
+    pub fn show_cached(&self, source: ByteSource, config: PageConfig, intent: DecodeIntent) -> bool {
+        let Some(cached) = cache_get(&self.cache_key(source, intent)) else { return false };
+        let imp = self.imp();
+        imp.stop_animation();
+        imp.config.set(config);
+        // a decode still running for this page is stale now
+        imp.generation.set(imp.generation.get() + 1);
+        imp.show_pyramid(cached);
+        true
+    }
+
+    fn cache_key(&self, source: ByteSource, intent: DecodeIntent) -> DecodeKey {
+        let width = self.imp().decode_to_view.get().then(|| self.width().max(0) as u32).filter(|w| *w > 0);
+        DecodeKey { source, intent, width }
+    }
+
+    fn load(&self, bytes: Vec<u8>, config: PageConfig, intent: DecodeIntent, key: Option<DecodeKey>) {
         let imp = self.imp();
         imp.stop_animation();
         imp.config.set(config);
@@ -525,11 +631,11 @@ impl PageView {
         imp.generation.set(generation);
         imp.set_state(LoadState::Loading);
         let ticket = Ticket::now(generation);
-        let width = imp.decode_to_view.get().then(|| self.width().max(0) as u32).filter(|w| *w > 0);
+        let width = key.as_ref().map_or_else(|| imp.decode_to_view.get().then(|| self.width().max(0) as u32).filter(|w| *w > 0), |k| k.width);
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
-            let decoded = gio::spawn_blocking(move || decode_pyramid(&bytes, width)).await;
-            imp::on_page(&weak, |p| p.finish_load(ticket, decoded));
+            let decoded = gio::spawn_blocking(move || decode_pyramid(&bytes, width, intent)).await;
+            imp::on_page(&weak, |p| p.finish_load(ticket, decoded, key));
         });
     }
 
@@ -555,6 +661,11 @@ impl PageView {
     /// The double-tap zoom duration in ms (`pref_double_tap_anim_speed`), before the GTK animation setting scales it.
     pub fn set_double_tap_anim_ms(&self, ms: u32) {
         self.imp().double_tap_ms.set(ms);
+    }
+
+    /// Whether the page zooms on its own. A webtoon page does not: the strip does (T-44a-039).
+    pub fn set_zoomable(&self, zoomable: bool) {
+        self.imp().zoom_locked.set(!zoomable);
     }
 
     /// Cuts decodes to the view width first, as a webtoon page does (B§8.4).
@@ -603,6 +714,14 @@ impl PageView {
     pub fn connect_scale_changed<F: Fn(f64) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_local("scale-changed", false, move |values| {
             f(values[1].get::<f64>().unwrap_or_default());
+            None
+        })
+    }
+
+    /// Reports that a transform split the page in two, so the viewer places its insert page.
+    pub fn connect_page_split<F: Fn() + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_local("page-split", false, move |_| {
+            f();
             None
         })
     }
@@ -656,112 +775,97 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi page_view:: -- --ignored"]
     fn a_page_loads_and_recycle_drops_it_then_a_new_one_loads() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping the page view");
-            return;
-        }
-        let page = PageView::new();
-        assert_eq!(page.state(), LoadState::Empty);
-        page.set_image(png(3, 2), PageConfig::default());
-        assert_eq!(page.state(), LoadState::Loading);
-        settle(&page);
-        assert_eq!(page.state(), LoadState::Ready);
-        page.recycle();
-        assert_eq!(page.state(), LoadState::Empty);
-        page.set_image(png(4, 4), PageConfig::default());
-        settle(&page);
-        assert_eq!(page.state(), LoadState::Ready);
+        crate::testing::with_display(|| {
+            let page = PageView::new();
+            assert_eq!(page.state(), LoadState::Empty);
+            page.set_image(png(3, 2), PageConfig::default());
+            assert_eq!(page.state(), LoadState::Loading);
+            settle(&page);
+            assert_eq!(page.state(), LoadState::Ready);
+            page.recycle();
+            assert_eq!(page.state(), LoadState::Empty);
+            page.set_image(png(4, 4), PageConfig::default());
+            settle(&page);
+            assert_eq!(page.state(), LoadState::Ready);
+        });
     }
 
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi page_view:: -- --ignored"]
     fn a_corrupt_page_enters_the_error_state_and_emits_the_signal() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping the page view");
-            return;
-        }
-        let page = PageView::new();
-        let failed = std::rc::Rc::new(Cell::new(false));
-        let seen = std::rc::Rc::clone(&failed);
-        page.connect_image_load_error(move || seen.set(true));
-        page.set_image(b"not an image".to_vec(), PageConfig::default());
-        settle(&page);
-        assert_eq!(page.state(), LoadState::Error);
-        assert!(failed.get());
+        crate::testing::with_display(|| {
+            let page = PageView::new();
+            let failed = std::rc::Rc::new(Cell::new(false));
+            let seen = std::rc::Rc::clone(&failed);
+            page.connect_image_load_error(move || seen.set(true));
+            page.set_image(b"not an image".to_vec(), PageConfig::default());
+            settle(&page);
+            assert_eq!(page.state(), LoadState::Error);
+            assert!(failed.get());
+        });
     }
 
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi page_view:: -- --ignored"]
     fn e01_a_tall_page_is_fitted_to_the_view_when_shown() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping the page view");
-            return;
-        }
-        let page = PageView::new();
-        let window = gtk::Window::new();
-        window.set_default_size(800, 600);
-        window.set_child(Some(&page));
-        window.present();
-        page.set_image(png(1000, 2000), PageConfig::default());
-        settle(&page);
-        let ctx = glib::MainContext::default();
-        pump(&ctx);
-        // FitScreen on a 1000x2000 page in an 800x600 view: min(0.8, 0.3) = 0.3.
-        assert!((page.scale() - 0.3).abs() < 0.01, "scale {}", page.scale());
-        window.destroy();
+        crate::testing::with_display(|| {
+            let page = PageView::new();
+            let window = gtk::Window::new();
+            window.set_default_size(800, 600);
+            window.set_child(Some(&page));
+            window.present();
+            page.set_image(png(1000, 2000), PageConfig::default());
+            settle(&page);
+            let ctx = glib::MainContext::default();
+            pump(&ctx);
+            // FitScreen on a 1000x2000 page in an 800x600 view: min(0.8, 0.3) = 0.3.
+            assert!((page.scale() - 0.3).abs() < 0.01, "scale {}", page.scale());
+            window.destroy();
+        });
     }
 
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi page_view:: -- --ignored"]
     fn e01_a_wide_page_is_fitted_to_the_view_when_shown() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping the page view");
-            return;
-        }
-        let page = PageView::new();
-        let window = gtk::Window::new();
-        window.set_default_size(800, 600);
-        window.set_child(Some(&page));
-        let reported = std::rc::Rc::new(Cell::new(0.0));
-        let seen = std::rc::Rc::clone(&reported);
-        page.connect_scale_changed(move |s| seen.set(s));
-        window.present();
-        page.set_image(png(2000, 1000), PageConfig::default());
-        settle(&page);
-        let ctx = glib::MainContext::default();
-        pump(&ctx);
-        // FitScreen on a 2000x1000 page in an 800x600 view: min(0.4, 0.6) = 0.4, reported by the initial fit.
-        assert!((page.scale() - 0.4).abs() < 0.01, "scale {}", page.scale());
-        assert!((reported.get() - 0.4).abs() < 0.01, "scale-changed reported {}", reported.get());
-        window.destroy();
+        crate::testing::with_display(|| {
+            let page = PageView::new();
+            let window = gtk::Window::new();
+            window.set_default_size(800, 600);
+            window.set_child(Some(&page));
+            let reported = std::rc::Rc::new(Cell::new(0.0));
+            let seen = std::rc::Rc::clone(&reported);
+            page.connect_scale_changed(move |s| seen.set(s));
+            window.present();
+            page.set_image(png(2000, 1000), PageConfig::default());
+            settle(&page);
+            let ctx = glib::MainContext::default();
+            pump(&ctx);
+            // FitScreen on a 2000x1000 page in an 800x600 view: min(0.4, 0.6) = 0.4, reported by the initial fit.
+            assert!((page.scale() - 0.4).abs() < 0.01, "scale {}", page.scale());
+            assert!((reported.get() - 0.4).abs() < 0.01, "scale-changed reported {}", reported.get());
+            window.destroy();
+        });
     }
 
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi page_view:: -- --ignored"]
     fn changing_the_config_refits_without_reloading_the_texture() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping the page view");
-            return;
-        }
-        let page = PageView::new();
-        let window = gtk::Window::new();
-        window.set_default_size(800, 600);
-        window.set_child(Some(&page));
-        window.present();
-        page.set_image(png(2000, 1000), PageConfig::default());
-        settle(&page);
-        let ctx = glib::MainContext::default();
-        pump(&ctx);
-        page.set_config(PageConfig { scale: zoom::ImageScaleType::Stretch, ..PageConfig::default() });
-        pump(&ctx);
-        assert_eq!(page.state(), LoadState::Ready, "no reload");
-        assert!((page.scale() - 0.6).abs() < 0.01, "stretch fills the larger fit: {}", page.scale());
-        page.set_config(PageConfig { scale: zoom::ImageScaleType::FitWidth, ..PageConfig::default() });
-        pump(&ctx);
-        assert!((page.scale() - 0.4).abs() < 0.01, "fit width of 2000 in 800: {}", page.scale());
-        window.destroy();
+        crate::testing::with_display(|| {
+            let page = PageView::new();
+            let window = gtk::Window::new();
+            window.set_default_size(800, 600);
+            window.set_child(Some(&page));
+            window.present();
+            page.set_image(png(2000, 1000), PageConfig::default());
+            settle(&page);
+            let ctx = glib::MainContext::default();
+            pump(&ctx);
+            page.set_config(PageConfig { scale: zoom::ImageScaleType::Stretch, ..PageConfig::default() });
+            pump(&ctx);
+            assert_eq!(page.state(), LoadState::Ready, "no reload");
+            assert!((page.scale() - 0.6).abs() < 0.01, "stretch fills the larger fit: {}", page.scale());
+            page.set_config(PageConfig { scale: zoom::ImageScaleType::FitWidth, ..PageConfig::default() });
+            pump(&ctx);
+            assert!((page.scale() - 0.4).abs() < 0.01, "fit width of 2000 in 800: {}", page.scale());
+            window.destroy();
+        });
     }
 
     #[test]
@@ -771,5 +875,113 @@ mod tests {
         assert!(decode_guard::accepts(ticket, 1, 2));
         assert!(!decode_guard::accepts(ticket, 1, 3));
         assert!(!decode_guard::accepts(ticket, 2, 2));
+    }
+
+    fn wide_png() -> Vec<u8> {
+        png(400, 200)
+    }
+
+    fn settle_all() {
+        pump(&glib::MainContext::default());
+    }
+
+    fn file(name: &str) -> ByteSource {
+        ByteSource::File(std::path::PathBuf::from(format!("/page-view-tests/{name}")))
+    }
+
+    #[test]
+    fn a_decoded_page_is_kept_in_the_cache_and_a_second_view_shows_it_without_decoding() {
+        crate::testing::with_display(|| {
+            let (source, config) = (file("cached.png"), PageConfig::default());
+            let first = PageView::new();
+            assert!(!first.show_cached(source.clone(), config, DecodeIntent::NONE), "nothing is cached yet");
+            first.set_image_from(source.clone(), png(30, 20), config, DecodeIntent::NONE);
+            settle(&first);
+            assert_eq!(first.state(), LoadState::Ready);
+            let second = PageView::new();
+            assert!(second.show_cached(source.clone(), config, DecodeIntent::NONE));
+            assert_eq!(second.state(), LoadState::Ready, "shown at once, with no decode");
+            assert_eq!(second.imp().src.get(), Size { w: 30.0, h: 20.0 });
+            let rotated = DecodeIntent { transform: page_transform::PageTransform::RotateWide { invert: false }, only_if_wide: false };
+            assert!(!PageView::new().show_cached(source, config, rotated), "another transform is another entry");
+        });
+    }
+
+    #[test]
+    fn a_view_holds_a_share_of_its_cached_pyramid_which_is_what_pins_it_against_eviction() {
+        crate::testing::with_display(|| {
+            let view = PageView::new();
+            view.set_image_from(file("pinned.png"), png(8, 8), PageConfig::default(), DecodeIntent::NONE);
+            settle(&view);
+            let key = DecodeKey { source: file("pinned.png"), intent: DecodeIntent::NONE, width: None };
+            let cached = cache_get(&key).expect("cached");
+            assert_eq!(Rc::strong_count(&cached.pyramid), 3, "the cache, the view and this handle");
+            view.recycle();
+            assert_eq!(Rc::strong_count(&cached.pyramid), 2, "the view let go; the pixels stay cached for the way back");
+        });
+    }
+
+    #[test]
+    fn the_transform_is_applied_on_the_worker_and_a_split_is_reported() {
+        crate::testing::with_display(|| {
+            let page = PageView::new();
+            let splits = Rc::new(Cell::new(0));
+            let seen = Rc::clone(&splits);
+            page.connect_page_split(move || seen.set(seen.get() + 1));
+            let split = DecodeIntent { transform: page_transform::PageTransform::SplitLeft, only_if_wide: true };
+            page.set_image_from(file("wide.png"), wide_png(), PageConfig::default(), split);
+            settle(&page);
+            assert_eq!(page.imp().src.get(), Size { w: 200.0, h: 200.0 }, "the left half of a 400 by 200 page");
+            assert_eq!(splits.get(), 1);
+            // a tall page is not wide: it is kept whole and nothing is reported
+            page.set_image_from(file("tall.png"), png(100, 300), PageConfig::default(), split);
+            settle(&page);
+            assert_eq!(page.imp().src.get(), Size { w: 100.0, h: 300.0 });
+            assert_eq!(splits.get(), 1);
+            // the cached page reports its split again for a row that is built later
+            let again = PageView::new();
+            let seen = Rc::clone(&splits);
+            again.connect_page_split(move || seen.set(seen.get() + 1));
+            assert!(again.show_cached(file("wide.png"), PageConfig::default(), split));
+            assert_eq!(splits.get(), 2);
+        });
+    }
+
+    #[test]
+    fn a_rotated_page_swaps_its_edges() {
+        crate::testing::with_display(|| {
+            let page = PageView::new();
+            let rotate = DecodeIntent { transform: page_transform::PageTransform::RotateWide { invert: true }, only_if_wide: false };
+            page.set_image_from(file("rotate.png"), wide_png(), PageConfig::default(), rotate);
+            settle(&page);
+            assert_eq!(page.imp().src.get(), Size { w: 200.0, h: 400.0 });
+        });
+    }
+
+    #[test]
+    fn a_webtoon_page_does_not_zoom_on_its_own() {
+        crate::testing::with_display(|| {
+            let page = PageView::new();
+            let window = gtk::Window::new();
+            window.set_default_size(800, 600);
+            window.set_child(Some(&page));
+            window.present();
+            page.set_image(png(1000, 2000), PageConfig::default());
+            settle(&page);
+            settle_all();
+            let fit = page.scale();
+            page.set_zoomable(false);
+            page.imp().pinch_begin();
+            page.imp().pinch(3.0);
+            assert!((page.scale() - fit).abs() < 1e-9, "locked: the pinch changes nothing");
+            page.imp().press(2, 400.0, 300.0, 0);
+            settle_all();
+            assert!((page.scale() - fit).abs() < 1e-9, "locked: a double tap does not zoom");
+            page.set_zoomable(true);
+            page.imp().pinch_begin();
+            page.imp().pinch(2.0);
+            assert!((page.scale() - fit * 2.0).abs() < 1e-9, "unlocked: the pinch scales from the fit");
+            window.destroy();
+        });
     }
 }

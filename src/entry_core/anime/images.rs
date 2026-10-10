@@ -301,6 +301,18 @@ mod tests {
     }
 
     #[test]
+    fn an_android_custom_cover_is_found_without_renaming() {
+        // T-39a-065: the file the Android app wrote under the md5 of the id is the one the page reads
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("animecovers/custom").join(md5_hex(b"42"));
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]).unwrap();
+        assert!(has_custom(dir.path(), ImageKind::Cover, 42));
+        assert!(!has_custom(dir.path(), ImageKind::Background, 42));
+        assert!(!has_custom(dir.path(), ImageKind::Cover, 43));
+    }
+
+    #[test]
     fn the_pager_labels_are_reversed_on_the_background_page() {
         // T-I10
         let cover = Pager::new(ImageKind::Cover);

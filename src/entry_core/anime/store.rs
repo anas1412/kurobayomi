@@ -88,6 +88,11 @@ impl AnimeStore {
         self.animes.set_episode_flags_masked(anime_id, flag, mask)
     }
 
+    /// The skip-intro length of the entry: the length bits and the disable bit, in one masked write.
+    pub fn set_skip_intro_length(&self, anime_id: i64, length: i32) -> DataResult<bool> {
+        kuro_domain::app::entries::set_anime_skip_intro_length(&self.animes, anime_id, i64::from(length))
+    }
+
     /// Sort by `mode`, or flip the direction when `mode` is the stored key. The word is read and written inside one
     /// writer transaction, so two quick taps cannot both see the same word.
     pub fn sort_by(&self, anime_id: i64, mode: i64) -> DataResult<bool> {

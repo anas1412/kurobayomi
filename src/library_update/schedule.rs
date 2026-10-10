@@ -42,6 +42,8 @@ where
     Fut: Future<Output = PassStatus>,
 {
     let mut attempt: u32 = 0;
+    // Set while the schedule is off: the first pass after turning it on runs at once (T-26a-010, WorkManager parity).
+    let mut run_now = false;
     loop {
         let hours = *interval_hours.borrow_and_update();
         if hours == 0 {
@@ -49,9 +51,17 @@ where
                 return;
             }
             attempt = 0;
+            run_now = true;
             continue;
         }
-        let wait = if attempt == 0 { next_delay_ms(hours, jitter_ms()) } else { backoff_ms(attempt) };
+        let wait = if run_now {
+            0
+        } else if attempt == 0 {
+            next_delay_ms(hours, jitter_ms())
+        } else {
+            backoff_ms(attempt)
+        };
+        run_now = false;
         tokio::select! {
             () = tokio::time::sleep(Duration::from_millis(wait)) => {
                 attempt = match run().await {
@@ -92,6 +102,25 @@ mod tests {
         assert_eq!(backoff_ms(3), 30 * 60_000);
         assert_eq!(backoff_ms(30), BACKOFF_CAP_MS);
         assert_eq!(backoff_ms(31), BACKOFF_CAP_MS);
+    }
+
+    #[tokio::test]
+    async fn turning_the_schedule_on_runs_the_first_pass_at_once() {
+        // T-26a-010: enabling runs the first pass without waiting a period.
+        let (tx, rx) = watch::channel(0u32);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&runs);
+        let handle = tokio::spawn(run_schedule(rx, move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async { PassStatus::Success }
+        }));
+        // let the loop reach its wait for the change first: a value already there at start is a startup value
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        tx.send(12).expect("the loop is listening");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "the first pass runs at once");
+        drop(tx);
+        tokio::time::timeout(Duration::from_secs(5), handle).await.expect("the loop ends").expect("no panic");
     }
 
     #[tokio::test]

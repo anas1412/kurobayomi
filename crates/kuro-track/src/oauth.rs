@@ -18,16 +18,14 @@ pub const PENDING_TTL_MS: i64 = 5 * 60 * 1000;
 const STATE_BYTES: usize = 32;
 
 const ANILIST_CLIENT_ID: &str = "5338";
-const SHIKIMORI_CLIENT_ID: &str = "aOAYRqOLwxpA8skpcQIXetNy4cw2rn2fRzScawlcQ5U";
-const BANGUMI_CLIENT_ID: &str = "bgm293165b66d7e58156";
 const SIMKL_CLIENT_ID: &str = "aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e";
 
 /// The client secrets of the trackers that exchange a code with one (T-27b-022). They come from configuration, never
-/// from the source. A missing or empty secret turns that tracker's browser login off.
+/// from the source. A missing or empty secret turns that tracker's browser login off. Shikimori and Bangumi are not
+/// here: their client (id and secret) is the tracker's own `OAuthClient`, and their login gate is
+/// `Tracker::setup_message` (T-31a-039).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClientSecrets {
-    pub shikimori: Option<String>,
-    pub bangumi: Option<String>,
     pub simkl: Option<String>,
 }
 
@@ -35,8 +33,6 @@ impl ClientSecrets {
     /// The secret of `tracker`. `None` when it is missing, empty, or the tracker uses none.
     pub fn get(&self, tracker: TrackerId) -> Option<&str> {
         let secret = match tracker {
-            TrackerId::SHIKIMORI => &self.shikimori,
-            TrackerId::BANGUMI => &self.bangumi,
             TrackerId::SIMKL => &self.simkl,
             _ => return None,
         };
@@ -45,10 +41,7 @@ impl ClientSecrets {
 
     /// True when `tracker` can start a browser login: it needs no secret, or its secret is set.
     pub fn allows_login(&self, tracker: TrackerId) -> bool {
-        !matches!(
-            tracker,
-            TrackerId::SHIKIMORI | TrackerId::BANGUMI | TrackerId::SIMKL
-        ) || self.get(tracker).is_some()
+        tracker != TrackerId::SIMKL || self.get(tracker).is_some()
     }
 }
 
@@ -61,28 +54,14 @@ fn random_token(n: usize) -> String {
 
 /// The authorise URL of a browser login, with the source's query order and `state` last. `None` for trackers
 /// without a browser login here (Kitsu, MangaUpdates, enhanced trackers). MyAnimeList is not listed: its URL needs the
-/// user's client id and a PKCE verifier, and comes from `mal::MalTracker::begin_login` (T-29a-040).
+/// user's client id and a PKCE verifier, and comes from `mal::MalTracker::begin_login` (T-29a-040). Shikimori and
+/// Bangumi are not listed either: their URL needs the user's client and the redirect URI area 27 chose, and comes from
+/// `Tracker::browser_auth_url` through [`PendingLogins::begin_configured`] (T-31a-038, T-31a-039).
 pub fn authorize_url(tracker: TrackerId, state: &str) -> Option<String> {
     let (base, params): (&str, Vec<(&str, &str)>) = match tracker {
         TrackerId::ANILIST => (
             "https://anilist.co/api/v2/oauth/authorize",
             vec![("client_id", ANILIST_CLIENT_ID), ("response_type", "token")],
-        ),
-        TrackerId::SHIKIMORI => (
-            "https://shikimori.one/oauth/authorize",
-            vec![
-                ("client_id", SHIKIMORI_CLIENT_ID),
-                ("redirect_uri", "aniyomi://shikimori-auth"),
-                ("response_type", "code"),
-            ],
-        ),
-        TrackerId::BANGUMI => (
-            "https://bgm.tv/oauth/authorize",
-            vec![
-                ("client_id", BANGUMI_CLIENT_ID),
-                ("response_type", "code"),
-                ("redirect_uri", "aniyomi://bangumi-auth"),
-            ],
         ),
         TrackerId::SIMKL => (
             "https://simkl.com/oauth/authorize",
@@ -164,6 +143,21 @@ impl PendingLogins {
     pub fn begin(&mut self, tracker: TrackerId, now_ms: i64) -> Option<String> {
         let state = random_token(STATE_BYTES);
         let url = authorize_url(tracker, &state)?;
+        self.open(tracker, state, now_ms);
+        Some(url)
+    }
+
+    /// Opens an attempt for `tracker` on an authorise URL the tracker built from its own client and redirect URI, and
+    /// returns that URL with `state` added last. `None` when `url` is not a URL.
+    pub fn begin_with_url(&mut self, tracker: TrackerId, url: &str, now_ms: i64) -> Option<String> {
+        let mut url = Url::parse(url).ok()?;
+        let state = random_token(STATE_BYTES);
+        url.query_pairs_mut().append_pair("state", &state);
+        self.open(tracker, state, now_ms);
+        Some(url.into())
+    }
+
+    fn open(&mut self, tracker: TrackerId, state: String, now_ms: i64) {
         self.0.insert(
             tracker,
             PendingLogin {
@@ -173,18 +167,31 @@ impl PendingLogins {
                 started_at_ms: now_ms,
             },
         );
-        Some(url)
     }
 
-    /// [`PendingLogins::begin`] for a login the user starts. A tracker whose client secret is missing gets the
-    /// "<name> is not configured" toast and no authorise URL, and no attempt is opened (T-27b-022).
+    /// [`PendingLogins::begin`] for a login the user starts. A tracker that is not configured gets the
+    /// "<name> is not configured" toast and no authorise URL, and no attempt is opened (T-27b-022, T-31a-037).
+    /// Shikimori and Bangumi are gated by their registered tracker (`Tracker::setup_message`, the same check that
+    /// disables the row) and use its `browser_auth_url`; the others by `secrets`.
     pub fn begin_configured(
         &mut self,
         tracker: TrackerId,
         name: &str,
         secrets: &ClientSecrets,
+        trackers: &crate::manager::TrackerManager,
         now_ms: i64,
     ) -> Result<String, MsgKey> {
+        if matches!(tracker, TrackerId::SHIKIMORI | TrackerId::BANGUMI) {
+            let not_configured = || MsgKey::TrackerNotConfigured(name.to_owned());
+            let registered = trackers.get(tracker).ok_or_else(not_configured)?;
+            if let Some(hint) = registered.setup_message() {
+                return Err(hint);
+            }
+            let url = registered.browser_auth_url().ok_or_else(not_configured)?;
+            return self
+                .begin_with_url(tracker, &url, now_ms)
+                .ok_or(MsgKey::UnrecognizedLoginLink);
+        }
         if !secrets.allows_login(tracker) {
             return Err(MsgKey::TrackerNotConfigured(name.to_owned()));
         }
@@ -256,6 +263,10 @@ pub enum Handled {
     /// Exchange the credential for a token (or store it, for an implicit grant), then save it with
     /// [`crate::base::BaseTracker::save_oauth`].
     Exchange(Credential),
+    /// The Simkl redirect `aniyomi://simkl-auth...`. Simkl's login carries no `state` and no pending attempt, so it is
+    /// not checked here: pass the URI to `simkl::SimklTracker::handle_launch_uri` (or the open dialog's
+    /// `simkl::login::SimklLogin::on_launch_uri`), which exchanges the code or logs out when there is none (T-32a-031).
+    SimklRedirect(String),
 }
 
 /// Routes an `aniyomi://<tracker>-auth` URI received by the application's open handler: the GUI passes every opened
@@ -266,6 +277,17 @@ pub fn handle_redirect(
     uri: &str,
     now_ms: i64,
 ) -> Handled {
+    if crate::simkl::oauth::is_simkl_redirect(uri) {
+        // A repeated redirect after the login already worked is ignored, as for the other trackers (R-5).
+        let live = trackers
+            .get(TrackerId::SIMKL)
+            .is_some_and(|t| t.is_logged_in() && !t.auth_expired());
+        return if live {
+            Handled::Ignored
+        } else {
+            Handled::SimklRedirect(uri.to_owned())
+        };
+    }
     let route = pending.route(uri, now_ms);
     // A repeated redirect after the login already succeeded is ignored (R-5), not reported as expired.
     if let Route::NotAllowed(t) = &route {
@@ -421,6 +443,9 @@ pub fn handle_pasted(
 mod tests {
     use super::*;
 
+    /// An authorise URL as a tracker builds it from its own client.
+    const BGM_URL: &str = "https://bgm.tv/oauth/authorize?client_id=cid&response_type=code";
+
     #[tokio::test]
     async fn tr_27a_022_the_open_handler_gives_a_toast_or_a_credential() {
         let h = crate::fakes::Harness::new();
@@ -435,11 +460,11 @@ mod tests {
             Handled::Toast(MsgKey::UnrecognizedLoginLink)
         );
         assert_eq!(
-            handle_redirect(&mut pending, trackers, "aniyomi://simkl-auth?code=x", 0),
+            handle_redirect(&mut pending, trackers, "aniyomi://shikimori-auth?code=x", 0),
             Handled::Toast(MsgKey::LoginExpired),
             "no attempt is pending"
         );
-        let url = pending.begin(TrackerId::SIMKL, 0).unwrap();
+        let url = pending.begin(TrackerId::ANILIST, 0).unwrap();
         let state = Url::parse(&url)
             .unwrap()
             .query_pairs()
@@ -447,24 +472,74 @@ mod tests {
             .unwrap()
             .1
             .into_owned();
-        let uri = format!("aniyomi://simkl-auth?code=abc&state={state}");
+        let uri = format!("aniyomi://anilist-auth#access_token=abc&state={state}");
         let Handled::Exchange(c) = handle_redirect(&mut pending, trackers, &uri, 1) else {
             panic!("an accepted redirect is exchanged");
         };
-        assert_eq!((c.tracker, c.value.as_str()), (TrackerId::SIMKL, "abc"));
+        assert_eq!((c.tracker, c.value.as_str()), (TrackerId::ANILIST, "abc"));
     }
 
-    #[test]
-    fn t_27b_022_a_missing_client_secret_gives_a_toast_and_no_url() {
+    #[tokio::test]
+    async fn t_32a_031_the_simkl_redirect_is_handed_over_without_a_pending_attempt() {
+        let h = crate::fakes::Harness::new();
+        let mut pending = PendingLogins::default();
+        assert_eq!(
+            handle_redirect(
+                &mut pending,
+                &h.ctx.trackers,
+                "aniyomi://simkl-auth?code=x",
+                0
+            ),
+            Handled::SimklRedirect("aniyomi://simkl-auth?code=x".into()),
+            "Simkl carries no state: the redirect goes to the Simkl login, not to the LoginExpired toast"
+        );
+        assert_eq!(
+            handle_redirect(&mut pending, &h.ctx.trackers, "aniyomi://simkl-auth", 0),
+            Handled::SimklRedirect("aniyomi://simkl-auth".into()),
+            "a redirect without a code is handled there too (logout, TST-57)"
+        );
+    }
+
+    #[tokio::test]
+    async fn t_27b_022_a_missing_client_secret_gives_a_toast_and_no_url() {
+        let trackers = fake_registry();
         let mut pending = PendingLogins::default();
         let none = ClientSecrets::default();
+        assert_eq!(
+            pending.begin_configured(TrackerId::SIMKL, "Simkl", &none, &trackers, 0),
+            Err(MsgKey::TrackerNotConfigured("Simkl".into()))
+        );
+        assert_eq!(
+            pending.route("aniyomi://simkl-auth?code=x", 1),
+            Route::NotAllowed(TrackerId::SIMKL),
+            "no attempt was opened"
+        );
+        let blank = ClientSecrets {
+            simkl: Some("  ".into()),
+        };
+        assert!(
+            pending
+                .begin_configured(TrackerId::SIMKL, "Simkl", &blank, &trackers, 0)
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn t_31a_039_shikimori_and_bangumi_have_no_url_without_their_tracker_client() {
+        // The fake registry has no client for either, so neither builds an authorise URL.
+        let trackers = fake_registry();
+        let mut pending = PendingLogins::default();
         for (tracker, name) in [
             (TrackerId::SHIKIMORI, "Shikimori"),
             (TrackerId::BANGUMI, "Bangumi"),
-            (TrackerId::SIMKL, "Simkl"),
         ] {
+            assert!(
+                authorize_url(tracker, "S").is_none(),
+                "no literal client id"
+            );
+            assert!(pending.begin(tracker, 0).is_none());
             assert_eq!(
-                pending.begin_configured(tracker, name, &none, 0),
+                pending.begin_configured(tracker, name, &ClientSecrets::default(), &trackers, 0),
                 Err(MsgKey::TrackerNotConfigured(name.into()))
             );
             assert_eq!(
@@ -473,34 +548,59 @@ mod tests {
                 "no attempt was opened"
             );
         }
-        let blank = ClientSecrets {
-            simkl: Some("  ".into()),
-            ..ClientSecrets::default()
-        };
-        assert!(pending.begin_configured(TrackerId::SIMKL, "Simkl", &blank, 0).is_err());
     }
 
-    #[test]
-    fn t_27b_022_a_set_secret_or_a_tracker_without_one_starts_the_login() {
+    #[tokio::test]
+    async fn t_27b_022_a_set_secret_or_a_tracker_without_one_starts_the_login() {
+        let trackers = fake_registry();
         let mut pending = PendingLogins::default();
         let secrets = ClientSecrets {
             simkl: Some("s".into()),
-            ..ClientSecrets::default()
         };
         assert!(
             pending
-                .begin_configured(TrackerId::SIMKL, "Simkl", &secrets, 0)
+                .begin_configured(TrackerId::SIMKL, "Simkl", &secrets, &trackers, 0)
                 .unwrap()
                 .starts_with("https://simkl.com/oauth/authorize")
         );
         assert!(
             pending
-                .begin_configured(TrackerId::ANILIST, "AniList", &ClientSecrets::default(), 0)
+                .begin_configured(
+                    TrackerId::ANILIST,
+                    "AniList",
+                    &ClientSecrets::default(),
+                    &trackers,
+                    0
+                )
                 .is_ok(),
             "AniList uses no client secret"
         );
         assert_eq!(secrets.get(TrackerId::SIMKL), Some("s"));
         assert_eq!(secrets.get(TrackerId::BANGUMI), None);
+    }
+
+    #[test]
+    fn t_31a_038_begin_with_url_keeps_the_tracker_url_and_adds_state_last() {
+        let mut pending = PendingLogins::default();
+        let url = pending
+            .begin_with_url(
+                TrackerId::SHIKIMORI,
+                "https://shikimori.one/oauth/authorize?client_id=c&redirect_uri=kurobayomi%3A%2F%2Fshikimori-auth&response_type=code",
+                0,
+            )
+            .unwrap();
+        let state = pending.0[&TrackerId::SHIKIMORI].state.clone();
+        assert_eq!(
+            url,
+            format!(
+                "https://shikimori.one/oauth/authorize?client_id=c&redirect_uri=kurobayomi%3A%2F%2Fshikimori-auth&response_type=code&state={state}"
+            )
+        );
+        assert!(
+            pending
+                .begin_with_url(TrackerId::SHIKIMORI, "not a url", 0)
+                .is_none()
+        );
     }
 
     fn credential(tracker: TrackerId, value: &str, state: Option<&str>) -> Redirect {
@@ -685,7 +785,9 @@ mod tests {
             handle_pasted(&mut pending, &trackers, "aniyomi://bangumi-auth?code=x", 0),
             Handled::Toast(MsgKey::LoginExpired)
         );
-        pending.begin(TrackerId::BANGUMI, 0).unwrap();
+        pending
+            .begin_with_url(TrackerId::BANGUMI, BGM_URL, 0)
+            .unwrap();
         assert!(matches!(
             handle_pasted(
                 &mut pending,
@@ -722,10 +824,6 @@ mod tests {
         assert_eq!(
             authorize_url(TrackerId::ANILIST, "S").unwrap(),
             "https://anilist.co/api/v2/oauth/authorize?client_id=5338&response_type=token&state=S"
-        );
-        assert_eq!(
-            authorize_url(TrackerId::BANGUMI, "S").unwrap(),
-            "https://bgm.tv/oauth/authorize?client_id=bgm293165b66d7e58156&response_type=code&redirect_uri=aniyomi%3A%2F%2Fbangumi-auth&state=S"
         );
         assert_eq!(
             authorize_url(TrackerId::SIMKL, "S").unwrap(),
@@ -795,9 +893,13 @@ mod tests {
     #[test]
     fn tr_27b_026_last_attempt_wins_and_a_mismatched_state_keeps_it_pending() {
         let mut pending = PendingLogins::default();
-        pending.begin(TrackerId::BANGUMI, 0).unwrap();
+        pending
+            .begin_with_url(TrackerId::BANGUMI, BGM_URL, 0)
+            .unwrap();
         let old = pending.0[&TrackerId::BANGUMI].state.clone();
-        pending.begin(TrackerId::BANGUMI, 0).unwrap();
+        pending
+            .begin_with_url(TrackerId::BANGUMI, BGM_URL, 0)
+            .unwrap();
         let new = pending.0[&TrackerId::BANGUMI].state.clone();
         assert_eq!(
             pending.route(&format!("aniyomi://bangumi-auth?code=x&state={old}"), 0),
@@ -836,7 +938,9 @@ mod tests {
     #[test]
     fn tr_27b_024_a_cancelled_redirect_consumes_the_attempt_and_names_the_tracker() {
         let mut pending = PendingLogins::default();
-        pending.begin(TrackerId::SHIKIMORI, 0).unwrap();
+        pending
+            .begin_with_url(TrackerId::SHIKIMORI, BGM_URL, 0)
+            .unwrap();
         let route = pending.route("aniyomi://shikimori-auth?error=access_denied", 0);
         assert_eq!(route, Route::Cancelled(TrackerId::SHIKIMORI));
         assert_eq!(

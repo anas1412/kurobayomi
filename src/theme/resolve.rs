@@ -257,4 +257,56 @@ mod tests {
         unique.dedup();
         assert_eq!(unique.len(), 18);
     }
+
+    /// WCAG relative luminance of an opaque colour.
+    fn luminance(c: Rgba) -> f64 {
+        let lin = |v: u8| {
+            let v = f64::from(v) / 255.0;
+            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+    }
+
+    fn contrast(fg: Rgba, bg: Rgba) -> f64 {
+        // translucent text is composited over its background before measuring
+        let (a, b) = (luminance(fg.over(bg)), luminance(bg));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// 4.3: the contrast report. Pairs below WCAG AA (4.5:1) are printed as warnings for the owner and
+    /// never fail the test; the test only checks that every pair of every scheme was measured.
+    #[test]
+    fn contrast_report_lists_pairs_below_aa_without_failing() {
+        const PAIRS: [(Role, Role); 6] = [
+            (Role::OnPrimary, Role::Primary),
+            (Role::OnSurface, Role::Surface),
+            (Role::OnSurfaceVariant, Role::Surface),
+            (Role::OnSecondaryContainer, Role::SecondaryContainer),
+            (Role::OnTertiary, Role::Tertiary),
+            (Role::OnBackground, Role::Background),
+        ];
+        let (mut measured, mut warnings) = (0, Vec::new());
+        for scheme in SCHEMES.iter() {
+            for dark in [false, true] {
+                let tokens = tokens_for(scheme, dark, false);
+                for (fg, bg) in PAIRS {
+                    let ratio = contrast(tokens.get(fg), tokens.get(bg));
+                    measured += 1;
+                    assert!(ratio.is_finite() && ratio >= 1.0, "{} {fg:?}/{bg:?}", scheme.name);
+                    if ratio < 4.5 {
+                        warnings.push(format!(
+                            "{} {} {fg:?} on {bg:?}: {ratio:.2}:1",
+                            scheme.name,
+                            if dark { "dark" } else { "light" }
+                        ));
+                    }
+                }
+            }
+        }
+        assert_eq!(measured, 18 * 2 * PAIRS.len());
+        for warning in &warnings {
+            eprintln!("contrast warning (below 4.5:1): {warning}");
+        }
+        eprintln!("contrast report: {} of {measured} pairs below AA", warnings.len());
+    }
 }

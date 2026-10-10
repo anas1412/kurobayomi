@@ -3,7 +3,7 @@
 //! toggle; the sources page also writes the hidden source ids, as strings (D§5). Ports `MangaSourcesFilterScreen` and
 //! `MangaExtensionFilterScreen` with their screen models; the rules are pure and the widgets are thin.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -41,7 +41,8 @@ pub struct LangGroup {
 /// sorted by `(language off, language order)`. The page shows the sources of an enabled language only.
 pub fn sources_filter_groups(sources: &[Source], enabled: &BTreeSet<String>, disabled: &BTreeSet<String>) -> Vec<LangGroup> {
     let hidden = |s: &Source| disabled.contains(&s.id.to_string());
-    let mut sorted: Vec<&Source> = sources.iter().collect();
+    // Only online sources are listed (E-SF-04): a stub and the local source are not HTTP sources.
+    let mut sorted: Vec<&Source> = sources.iter().filter(|s| !s.is_stub && s.id != super::sources::LOCAL_SOURCE_ID).collect();
     sorted.sort_by(|a, b| hidden(a).cmp(&hidden(b)).then_with(|| case_insensitive_cmp(&a.name, &b.name)));
     let mut groups: Vec<LangGroup> = Vec::new();
     for source in sorted {
@@ -58,6 +59,29 @@ pub fn sources_filter_groups(sources: &[Source], enabled: &BTreeSet<String>, dis
     }
     groups.sort_by(|a, b| (!a.enabled).cmp(&(!b.enabled)).then_with(|| compare_languages(&a.lang, &b.lang)));
     groups
+}
+
+/// The states of the Sources filter page (B§3.1): loading until the registry is ready, an error when the list failed, and
+/// the groups otherwise (an empty success shows `source_filter_empty_screen`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FilterScreen {
+    Loading,
+    Error,
+    Success(Vec<LangGroup>),
+}
+
+/// The state the page is in (E-SF-05 for the error). `ready` is the registry's readiness; `failed` is a failed load.
+pub fn filter_screen(ready: bool, failed: bool, sources: &[Source], enabled: &BTreeSet<String>, disabled: &BTreeSet<String>) -> FilterScreen {
+    match (ready, failed) {
+        (false, _) => FilterScreen::Loading,
+        (true, true) => FilterScreen::Error,
+        (true, false) => FilterScreen::Success(sources_filter_groups(sources, enabled, disabled)),
+    }
+}
+
+/// What an error does: the page shows `internal_error` as a toast and pops itself (E-SF-05).
+pub fn error_pops_the_page(screen: &FilterScreen) -> bool {
+    *screen == FilterScreen::Error
 }
 
 /// One switch of the extension language page.
@@ -143,6 +167,12 @@ struct SourcesInner {
     stack: gtk::Stack,
     column: gtk::Box,
     sources: RefCell<Vec<Source>>,
+    /// The registry's readiness and whether the list failed (B§3.1): the page is Loading until it is ready.
+    ready: Cell<bool>,
+    failed: Cell<bool>,
+    /// What the Error state does: the `internal_error` toast and a pop of the page (E-SF-05). Runs once.
+    on_error: RefCell<Option<Rc<dyn Fn()>>>,
+    errored: Cell<bool>,
 }
 
 /// The Show/hide sources page. It reads `source_languages` and the hidden ids when it draws and writes them when a
@@ -157,7 +187,17 @@ impl SourcesFilterPage {
     /// `languages` is `source_languages`; `hidden` is `hidden_catalogues` or `hidden_anime_catalogues`.
     pub fn new(languages: Pref<BTreeSet<String>>, hidden: Pref<BTreeSet<String>>) -> Self {
         let (stack, column) = page_stack(&tr(MsgKey::source_filter_empty_screen));
-        let inner = Rc::new(SourcesInner { languages, hidden, stack, column, sources: RefCell::new(Vec::new()) });
+        let inner = Rc::new(SourcesInner {
+            languages,
+            hidden,
+            stack,
+            column,
+            sources: RefCell::new(Vec::new()),
+            ready: Cell::new(false),
+            failed: Cell::new(false),
+            on_error: RefCell::new(None),
+            errored: Cell::new(false),
+        });
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.append(&inner.stack);
         keep_alive(&root, &inner);
@@ -168,17 +208,47 @@ impl SourcesFilterPage {
         &self.root
     }
 
-    /// The installed online sources, replacing the list.
+    /// The installed online sources, replacing the list: the registry is ready and the load succeeded.
     pub fn set_sources(&self, sources: Vec<Source>) {
+        self.set_state(true, false, sources);
+    }
+
+    /// The page's state as B§3.1 has it: Loading until `ready`, Error when the load `failed` (the error hook runs),
+    /// Success with the groups of `sources` otherwise.
+    pub fn set_state(&self, ready: bool, failed: bool, sources: Vec<Source>) {
         *self.inner.sources.borrow_mut() = sources;
+        self.inner.ready.set(ready);
+        self.inner.failed.set(failed);
         self.inner.render();
+    }
+
+    /// What the Error state does (E-SF-05): show the `internal_error` toast and pop the page.
+    pub fn set_on_error(&self, on_error: Rc<dyn Fn()>) {
+        *self.inner.on_error.borrow_mut() = Some(on_error);
     }
 }
 
 impl SourcesInner {
     fn render(self: &Rc<Self>) {
         clear(&self.column);
-        let groups = sources_filter_groups(&self.sources.borrow(), &self.languages.get(), &self.hidden.get());
+        let screen = filter_screen(self.ready.get(), self.failed.get(), &self.sources.borrow(), &self.languages.get(), &self.hidden.get());
+        if error_pops_the_page(&screen) {
+            self.stack.set_visible_child_name("empty");
+            // the hook runs after the borrow of the slot ends: it pops the page, which may drop this one
+            let hook = self.on_error.borrow().clone();
+            if let Some(hook) = hook.filter(|_| !self.errored.replace(true)) {
+                hook();
+            }
+            return;
+        }
+        let groups = match screen {
+            FilterScreen::Loading => {
+                self.stack.set_visible_child_name("loading");
+                return;
+            }
+            FilterScreen::Error => return,
+            FilterScreen::Success(groups) => groups,
+        };
         if groups.is_empty() {
             self.stack.set_visible_child_name("empty");
             return;
@@ -440,6 +510,22 @@ pub(crate) mod tests {
         assert_eq!(label.label().as_str(), tr(MsgKey::source_filter_empty_screen));
     }
 
+    fn the_filter_page_shows_loading_then_the_groups_and_an_error_toasts_and_pops_once() {
+        let (languages, hidden) = prefs();
+        let page = SourcesFilterPage::new(languages, hidden);
+        let popped: Rc<RefCell<Vec<String>>> = Rc::default();
+        let log = Rc::clone(&popped);
+        page.set_on_error(Rc::new(move || log.borrow_mut().push(tr(MsgKey::internal_error))));
+        page.set_state(false, false, vec![Source::new(1, "Alpha", "en")]);
+        assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("loading"), "not ready: Loading");
+        page.set_state(true, false, vec![Source::new(1, "Alpha", "en")]);
+        assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("list"), "ready: the groups");
+        page.set_state(true, true, Vec::new());
+        assert_eq!(*popped.borrow(), [tr(MsgKey::internal_error)], "an error shows the toast and pops the page");
+        page.set_state(true, true, Vec::new());
+        assert_eq!(popped.borrow().len(), 1, "once");
+    }
+
     fn ext(lang: &str) -> Ext {
         Ext {
             name: "E".into(),
@@ -479,6 +565,23 @@ pub(crate) mod tests {
         the_language_switch_and_the_source_checkbox_write_their_sets_as_strings();
         language_toggle_keeps_checkboxes();
         no_sources_shows_the_source_filter_empty_screen();
+        the_filter_page_shows_loading_then_the_groups_and_an_error_toasts_and_pops_once();
         the_extension_language_switches_write_the_set_and_a_failed_fetch_toasts_internal_error();
+    }
+
+    #[test]
+    fn the_filter_page_states_follow_readiness_then_failure_then_the_groups() {
+        let sources = [Source::new(1, "Zed", "en")];
+        let (enabled, disabled) = (BTreeSet::from(["en".to_owned()]), BTreeSet::new());
+        assert_eq!(filter_screen(false, false, &sources, &enabled, &disabled), FilterScreen::Loading);
+        assert_eq!(filter_screen(false, true, &sources, &enabled, &disabled), FilterScreen::Loading, "loading until the registry is ready");
+        assert_eq!(filter_screen(true, true, &sources, &enabled, &disabled), FilterScreen::Error);
+        assert!(error_pops_the_page(&FilterScreen::Error), "E-SF-05: an error shows the toast and pops the page");
+        assert!(!error_pops_the_page(&FilterScreen::Loading));
+        match filter_screen(true, false, &sources, &enabled, &disabled) {
+            FilterScreen::Success(groups) => assert_eq!(groups.len(), 1),
+            other => panic!("a success has groups: {other:?}"),
+        }
+        assert_eq!(filter_screen(true, false, &[], &enabled, &disabled), FilterScreen::Success(vec![]), "an empty success is the empty screen");
     }
 }

@@ -314,26 +314,22 @@ mod tests {
         assert!(all.contains(&css));
     }
 
-    /// TEST-49-06: the generated CSS parses under `gtk::CssProvider`. Needs a display, and GTK binds
-    /// to the first thread that initialises it, so it must not share a run with the other GTK tests:
-    /// `cargo test -p kurobayomi theme::css -- --ignored` (skips itself when there is no display).
+    /// TEST-49-06: the generated CSS parses under `gtk::CssProvider`. Needs a display, and skips
+    /// itself without one.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi generated_css_parses -- --ignored"]
     fn generated_css_parses_under_css_provider() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping CssProvider parse");
-            return;
-        }
-        for (app, dark, system) in [
-            (AppTheme::DEFAULT, false, true),
-            (AppTheme::DOOM, true, false),
-            (AppTheme::CLOUDFLARE, false, false),
-        ] {
-            let css = render(&tokens_for(scheme_for(app), dark, false), system);
-            if let Err(message) = super::super::apply::build_provider(&css) {
-                panic!("CSS did not parse: {message}");
+        crate::testing::with_display(|| {
+            for (app, dark, system) in [
+                (AppTheme::DEFAULT, false, true),
+                (AppTheme::DOOM, true, false),
+                (AppTheme::CLOUDFLARE, false, false),
+            ] {
+                let css = render(&tokens_for(scheme_for(app), dark, false), system);
+                if let Err(message) = super::super::apply::build_provider(&css) {
+                    panic!("CSS did not parse: {message}");
+                }
             }
-        }
+        });
     }
 
     #[test]

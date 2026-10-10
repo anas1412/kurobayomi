@@ -41,6 +41,27 @@ pub fn scan_root(db: &Arc<Db>, root: &Path) -> Result<ScanReport, String> {
     Ok(report)
 }
 
+/// Rescans the series already in the library, each under the folder it came from (the parent of its series folder).
+/// A series the user took out of the library is not added back, unlike a folder chosen again with `scan_root`.
+pub fn rescan_library(db: &Arc<Db>, now: i64) -> Result<ScanReport, String> {
+    let mut report = ScanReport::default();
+    for row in AnimeRepo::new(Arc::clone(db)).favorites_by_source(LOCAL_SOURCE_ID).map_err(text)? {
+        let dir = std::path::PathBuf::from(&row.url);
+        let (Some(root), Some(name)) = (dir.parent(), dir.file_name()) else { continue };
+        let series = Series { name: name.to_string_lossy().into_owned(), dir: dir.clone() };
+        match sync_series(db, root, &series, now) {
+            Ok(Some(done)) => {
+                report.series += 1;
+                report.episodes_added += done.added;
+                report.episodes_removed += done.removed;
+            }
+            Ok(None) => {}
+            Err(e) => tracing::error!(error = %e, series = %series.name, "a local anime folder could not be rescanned"),
+        }
+    }
+    Ok(report)
+}
+
 /// The episode changes of one series.
 #[derive(Debug, PartialEq, Eq)]
 struct Synced {
@@ -184,6 +205,27 @@ pub(crate) mod tests {
         assert_eq!(report.episodes_removed, 1);
         let anime_id = AnimeRepo::new(Arc::clone(&db)).by_url_and_source(&root.path().join("Show").to_string_lossy(), LOCAL_SOURCE_ID).expect("query").expect("row").id;
         assert!(EpisodeRepo::new(db).by_anime_id(anime_id).expect("rows").is_empty());
+    }
+
+    #[test]
+    fn a_library_rescan_follows_its_series_and_leaves_removed_ones_out() {
+        let (_db_dir, db) = anime_db();
+        let root = tempfile::tempdir().expect("root");
+        video(root.path(), "Show", "Show - 1.mkv");
+        video(root.path(), "Gone", "Gone - 1.mkv");
+        scan_root(&db, root.path()).expect("first scan");
+        let repo = AnimeRepo::new(Arc::clone(&db));
+        let gone = repo.by_url_and_source(&root.path().join("Gone").to_string_lossy(), LOCAL_SOURCE_ID).expect("query").expect("row").id;
+        repo.update(&AnimeUpdate { favorite: Some(false), ..AnimeUpdate::new(gone) }).expect("unfavourite");
+        video(root.path(), "Show", "Show - 2.mkv");
+        video(root.path(), "New", "New - 1.mkv");
+
+        let report = rescan_library(&db, 5).expect("rescan");
+        assert_eq!(report, ScanReport { series: 1, episodes_added: 1, episodes_removed: 0 });
+        assert!(!repo.by_id(gone).expect("row").favorite, "a removed series stays out of the library");
+        assert!(library_rows(&db).iter().all(|a| a.title != "New"), "a folder that was never added is not picked up");
+        let show = repo.by_url_and_source(&root.path().join("Show").to_string_lossy(), LOCAL_SOURCE_ID).expect("query").expect("row").id;
+        assert_eq!(EpisodeRepo::new(db).by_anime_id(show).expect("rows").len(), 2);
     }
 
     #[test]

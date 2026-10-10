@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_channel::{Receiver, Sender};
 use kuro_prefs::pref::Pref;
@@ -30,6 +31,8 @@ pub struct AnimeExtensions {
     events: Sender<Event>,
     /// One install at a time writes the package folder (section 6.2).
     placement: Arc<tokio::sync::Mutex<()>>,
+    /// Counts the manual refreshes. A refresh whose number is no longer the latest drops its result (race R-03).
+    refresh_generation: Arc<AtomicU64>,
 }
 
 impl AnimeExtensions {
@@ -43,7 +46,12 @@ impl AnimeExtensions {
     }
 
     pub fn new(runtime: Handle, events: Sender<Event>) -> Self {
-        Self { runtime, events, placement: Arc::new(tokio::sync::Mutex::new(())) }
+        Self {
+            runtime,
+            events,
+            placement: Arc::new(tokio::sync::Mutex::new(())),
+            refresh_generation: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     /// The startup scan of the package folder, on the blocking pool (T-19a-024). The trust set is read by the worker.
@@ -90,7 +98,12 @@ impl AnimeExtensions {
         cancel: CancellationToken,
     ) -> JoinHandle<bool> {
         let events = self.events.clone();
-        self.runtime.spawn(async move { refresh_once(&client, &index_urls, &cancel, &events).await })
+        let generation = self.refresh_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let latest = Arc::clone(&self.refresh_generation);
+        self.runtime.spawn(async move {
+            let is_latest = move || latest.load(Ordering::SeqCst) == generation;
+            refresh_once(&client, &index_urls, &cancel, &events, &is_latest).await
+        })
     }
 
     /// The scheduled daily check (T-19a-052). `index_urls` is read at each check. It ends when `cancel` fires or the

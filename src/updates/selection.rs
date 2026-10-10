@@ -1,6 +1,6 @@
 //! Selection engine of the Updates lists (behaviour 2.5, T-42a-006). The selected flags live on the rows; this keeps
-//! only the two bounds (`positions[0..1]`), so a stale id set cannot exist (EC-42-U-04). Bounds are recomputed from
-//! the flags whenever the list is replaced (EC-42-U-05). Indices are positions in the row list; headers are not rows.
+//! only the two bounds (`positions[0..1]`), so a stale id set cannot exist (EC-42-U-04). The bounds are NOT recomputed
+//! when the list is replaced (B 5.4, T-42b-006); [`Selection::sync`] is for a caller that wants that. Indices are positions in the row list; headers are not rows.
 
 use std::ops::Range;
 
@@ -57,7 +57,7 @@ impl Selection {
                 self.bounds = [at, at];
                 Range { start: index, end: index }
             } else if at < self.bounds[0] {
-                let range = Range { start: index + 1, end: self.bounds[0] as usize };
+                let range = Range { start: index + 1, end: (self.bounds[0] as usize).min(items.len()) };
                 self.bounds[0] = at;
                 range
             } else if at > self.bounds[1] {
@@ -255,5 +255,46 @@ mod tests {
         let changed = sel.toggle(&mut items, 4, true, true, true);
         assert_eq!(changed, vec![4, 3]);
         assert!(flags(&items).iter().all(|f| *f));
+    }
+
+    #[test]
+    fn vector_3_1_long_press_and_tap_sequence() {
+        // p2-edge-cases-and-tests.md 3.1: rows with ids 1..8 at index id - 1; here ids are the indices 0..7
+        let mut items = rows(8);
+        let mut sel = Selection::default();
+        sel.toggle(&mut items, 2, true, true, true);
+        assert_eq!((flags(&items), sel.bounds()), (vec![false, false, true, false, false, false, false, false], [2, 2]));
+        sel.toggle(&mut items, 5, true, true, true);
+        assert_eq!((flags(&items), sel.bounds()), (vec![false, false, true, true, true, true, false, false], [2, 5]));
+        sel.toggle(&mut items, 0, true, true, true);
+        assert_eq!((flags(&items), sel.bounds()), (vec![true, true, true, true, true, true, false, false], [0, 5]));
+        sel.toggle(&mut items, 0, false, true, false);
+        assert_eq!((flags(&items), sel.bounds()), (vec![false, true, true, true, true, true, false, false], [1, 5]));
+        sel.toggle(&mut items, 7, true, true, false);
+        assert_eq!((flags(&items), sel.bounds()), (vec![false, true, true, true, true, true, false, true], [1, 7]));
+        sel.toggle(&mut items, 7, false, true, false);
+        assert_eq!((flags(&items), sel.bounds()), (vec![false, true, true, true, true, true, false, false], [1, 5]));
+    }
+
+    #[test]
+    fn vector_3_2_quirk_tap_then_long_press_keeps_lower_anchor_unset() {
+        let mut items = rows(8);
+        let mut sel = Selection::default();
+        sel.toggle(&mut items, 4, true, true, false);
+        assert_eq!(sel.bounds(), [-1, 4]);
+        sel.toggle(&mut items, 6, true, true, true);
+        assert_eq!(flags(&items), [false, false, false, false, true, true, true, false]);
+        assert_eq!(sel.bounds(), [-1, 6]);
+    }
+
+    #[test]
+    fn quirk_long_press_with_stale_anchors() {
+        let mut items = rows(8);
+        let mut sel = Selection::default();
+        sel.toggle(&mut items, 2, true, false, false);
+        assert_eq!(sel.bounds(), [-1, -1], "a programmatic select leaves the anchors alone");
+        sel.toggle(&mut items, 5, true, true, true);
+        assert_eq!(flags(&items), [true, true, true, true, true, true, false, false]);
+        assert_eq!(sel.bounds(), [-1, 5]);
     }
 }

@@ -77,8 +77,8 @@ pub enum MangaUriType {
 #[async_trait]
 pub trait ResolvableSource: MangaSource {
     fn uri_type(&self, uri: &str) -> MangaUriType;
-    async fn manga_for_uri(&self, uri: &str) -> Result<Option<SManga>, SourceError>;
-    async fn chapter_for_uri(&self, uri: &str) -> Result<Option<SChapter>, SourceError>;
+    async fn manga_from_uri(&self, uri: &str) -> Result<Option<SManga>, SourceError>;
+    async fn chapter_from_uri(&self, uri: &str) -> Result<Option<SChapter>, SourceError>;
 }
 
 /// The answer to a manga deep link.
@@ -93,10 +93,44 @@ pub enum ResolvedManga {
 /// Runs the one lookup that matches the URI type, so a source is asked only for the kind it recognises.
 pub async fn resolve_manga_uri(source: &dyn ResolvableSource, uri: &str) -> Result<ResolvedManga, SourceError> {
     match source.uri_type(uri) {
-        MangaUriType::Manga => Ok(ResolvedManga::Manga(source.manga_for_uri(uri).await?)),
-        MangaUriType::Chapter => Ok(ResolvedManga::Chapter(source.chapter_for_uri(uri).await?)),
+        MangaUriType::Manga => Ok(ResolvedManga::Manga(source.manga_from_uri(uri).await?)),
+        MangaUriType::Chapter => Ok(ResolvedManga::Chapter(source.chapter_from_uri(uri).await?)),
         MangaUriType::Unknown => Ok(ResolvedManga::Unknown),
     }
+}
+
+/// What a deep link resolved to (behaviour section 16). The `Loading` state belongs to the caller, which shows it while
+/// this runs.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeepLinkOutcome {
+    NoResults,
+    Result { manga: SManga, chapter: Option<SChapter> },
+}
+
+/// The deep-link flow (T-15a-043). The first source in list order that recognises `uri` resolves it (EC-DL-04). A lookup
+/// error is logged and gives `NoResults` (EC-DL-03, a deliberate change). A chapter is looked up only for a chapter link
+/// whose manga resolved (EC-DL-02).
+pub async fn resolve_deep_link(sources: &[&dyn ResolvableSource], uri: &str) -> DeepLinkOutcome {
+    let Some(source) = sources.iter().find(|s| s.uri_type(uri) != MangaUriType::Unknown) else {
+        return DeepLinkOutcome::NoResults;
+    };
+    let manga = match source.manga_from_uri(uri).await {
+        Ok(Some(manga)) => manga,
+        Ok(None) => return DeepLinkOutcome::NoResults,
+        Err(err) => {
+            tracing::error!(?err, "deep link manga lookup failed");
+            return DeepLinkOutcome::NoResults;
+        }
+    };
+    let chapter = if source.uri_type(uri) == MangaUriType::Chapter {
+        source.chapter_from_uri(uri).await.unwrap_or_else(|err| {
+            tracing::error!(?err, "deep link chapter lookup failed");
+            None
+        })
+    } else {
+        None
+    };
+    DeepLinkOutcome::Result { manga, chapter }
 }
 
 /// Runs one source call behind a panic boundary. A panic inside the call becomes `Parse("source panicked")`, so a
@@ -273,6 +307,7 @@ mod tests {
     struct Links {
         manga_lookups: Mutex<usize>,
         chapter_lookups: Mutex<usize>,
+        fail_manga: bool,
     }
 
     #[async_trait]
@@ -305,11 +340,14 @@ mod tests {
                 MangaUriType::Unknown
             }
         }
-        async fn manga_for_uri(&self, _uri: &str) -> Result<Option<SManga>, SourceError> {
+        async fn manga_from_uri(&self, _uri: &str) -> Result<Option<SManga>, SourceError> {
             *self.manga_lookups.lock().unwrap() += 1;
+            if self.fail_manga {
+                return Err(SourceError::Parse("boom".into()));
+            }
             Ok(Some(SManga::new("/m/1", "One")))
         }
-        async fn chapter_for_uri(&self, _uri: &str) -> Result<Option<SChapter>, SourceError> {
+        async fn chapter_from_uri(&self, _uri: &str) -> Result<Option<SChapter>, SourceError> {
             *self.chapter_lookups.lock().unwrap() += 1;
             Ok(None)
         }
@@ -329,5 +367,76 @@ mod tests {
         assert_eq!(resolve_manga_uri(&source, "https://x.test/c/1").await.unwrap(), ResolvedManga::Chapter(None));
         assert_eq!(resolve_manga_uri(&source, "https://other.test/x").await.unwrap(), ResolvedManga::Unknown);
         assert_eq!((*source.manga_lookups.lock().unwrap(), *source.chapter_lookups.lock().unwrap()), (0, 1));
+    }
+
+    /// A deep-link source with a fixed title, so two of them can be told apart in list order.
+    struct Titled(&'static str);
+
+    #[async_trait]
+    impl MangaSource for Titled {
+        fn id(&self) -> i64 {
+            10
+        }
+        fn name(&self) -> &str {
+            self.0
+        }
+        async fn get_manga_details(&self, manga: &SManga) -> Result<SManga, SourceError> {
+            Ok(manga.clone())
+        }
+        async fn get_chapter_list(&self, _manga: &SManga) -> Result<Vec<SChapter>, SourceError> {
+            Ok(Vec::new())
+        }
+        async fn get_page_list(&self, _chapter: &SChapter) -> Result<Vec<Page>, SourceError> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[async_trait]
+    impl ResolvableSource for Titled {
+        fn uri_type(&self, _uri: &str) -> MangaUriType {
+            MangaUriType::Manga
+        }
+        async fn manga_from_uri(&self, _uri: &str) -> Result<Option<SManga>, SourceError> {
+            Ok(Some(SManga::new("/t", self.0)))
+        }
+        async fn chapter_from_uri(&self, _uri: &str) -> Result<Option<SChapter>, SourceError> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn ec_dl_01_no_source_recognises_the_uri_so_there_are_no_results() {
+        let source = Links::default();
+        assert_eq!(resolve_deep_link(&[&source], "https://other.test/x").await, DeepLinkOutcome::NoResults);
+        assert_eq!(*source.manga_lookups.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn ec_dl_02_a_chapter_link_with_no_chapter_keeps_the_manga() {
+        let source = Links::default();
+        let outcome = resolve_deep_link(&[&source], "https://x.test/c/1").await;
+        assert_eq!(outcome, DeepLinkOutcome::Result { manga: SManga::new("/m/1", "One"), chapter: None });
+        assert_eq!((*source.manga_lookups.lock().unwrap(), *source.chapter_lookups.lock().unwrap()), (1, 1));
+    }
+
+    #[tokio::test]
+    async fn ec_dl_02_a_manga_link_never_looks_up_a_chapter() {
+        let source = Links::default();
+        resolve_deep_link(&[&source], "https://x.test/m/1").await;
+        assert_eq!(*source.chapter_lookups.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn ec_dl_03_a_failing_manga_lookup_is_no_results() {
+        let source = Links { fail_manga: true, ..Default::default() };
+        assert_eq!(resolve_deep_link(&[&source], "https://x.test/m/1").await, DeepLinkOutcome::NoResults);
+    }
+
+    #[tokio::test]
+    async fn ec_dl_04_the_first_source_in_list_order_wins() {
+        let first = Titled("First");
+        let second = Titled("Second");
+        let outcome = resolve_deep_link(&[&first, &second], "https://x.test/m/1").await;
+        assert_eq!(outcome, DeepLinkOutcome::Result { manga: SManga::new("/t", "First"), chapter: None });
     }
 }

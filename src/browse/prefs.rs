@@ -48,6 +48,12 @@ impl BrowsePrefs {
         self.sources.source_display_mode.set(mode)
     }
 
+    /// `browse_hide_in_library_items`: a manga browse page leaves the library's entries out of its listing. Read once,
+    /// when the page is made.
+    pub fn hide_in_library(&self) -> bool {
+        self.sources.hide_in_manga_library_items.get()
+    }
+
     /// A column count from the settings, never negative.
     pub fn columns(stored: i32) -> i32 {
         stored.max(0)

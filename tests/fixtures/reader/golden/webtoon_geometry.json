@@ -1,0 +1,95 @@
+{
+  "about": "heights are a card, a page, a failed page at 0.8 of the viewport, a page and a card; viewport 800",
+  "viewport": 800,
+  "heights": [
+    200,
+    800,
+    640,
+    800,
+    200
+  ],
+  "offsets": [
+    0,
+    200,
+    1000,
+    1640,
+    2440,
+    2640
+  ],
+  "total": 2640,
+  "scroll_distance": 600,
+  "steps": [
+    {
+      "scroll": 0,
+      "realised": [
+        0,
+        3
+      ],
+      "first_visible": 0,
+      "current": 0
+    },
+    {
+      "scroll": 100,
+      "realised": [
+        0,
+        3
+      ],
+      "first_visible": 0,
+      "current": 0
+    },
+    {
+      "scroll": 400,
+      "realised": [
+        0,
+        4
+      ],
+      "first_visible": 1,
+      "current": 1
+    },
+    {
+      "scroll": 800,
+      "realised": [
+        1,
+        4
+      ],
+      "first_visible": 1,
+      "current": 1
+    },
+    {
+      "scroll": 1200,
+      "realised": [
+        1,
+        5
+      ],
+      "first_visible": 2,
+      "current": 2
+    },
+    {
+      "scroll": 1640,
+      "realised": [
+        2,
+        5
+      ],
+      "first_visible": 3,
+      "current": 3
+    },
+    {
+      "scroll": 2000,
+      "realised": [
+        2,
+        5
+      ],
+      "first_visible": 3,
+      "current": 4
+    },
+    {
+      "scroll": 2440,
+      "realised": [
+        3,
+        5
+      ],
+      "first_visible": 4,
+      "current": 4
+    }
+  ]
+}

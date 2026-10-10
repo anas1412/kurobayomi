@@ -1,0 +1,111 @@
+//! The dialog state of the anime page (T-39b-030). Upstream: `AnimeScreenModel.kt` (`Dialog`, 1547-1562; `dismissDialog`,
+//! `showSettingsDialog`, the category-then-track flag) and `AnimeScreen.kt:232-238` (dismiss). Pure: one slot, the last
+//! request wins, and the track sheet re-opens after a dismiss only when the add flow set the flag and auto-open is on.
+
+/// Every dialog the anime page can show, with the ids it needs. The widgets read the entry for the rest.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AnimeDialog {
+    ChangeCategory { anime_id: i64 },
+    DeleteEpisodes(Vec<i64>),
+    DuplicateAnime { anime_id: i64, duplicate_id: i64 },
+    Migrate { new_id: i64, old_id: i64 },
+    SetAnimeFetchInterval { anime_id: i64 },
+    ShowQualities { anime_id: i64, episode_id: i64 },
+    ChangeAnimeSkipIntro,
+    EpisodeSettingsSheet,
+    SeasonSettingsSheet,
+    TrackSheet,
+    FullImages,
+}
+
+/// The one open dialog, and the one-shot "track sheet after the category dialog" flag.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DialogSlot {
+    current: Option<AnimeDialog>,
+    from_change_category: bool,
+}
+
+impl DialogSlot {
+    /// Opens a dialog. It replaces the one on screen (the last request wins).
+    pub fn open(&mut self, dialog: AnimeDialog) {
+        self.current = Some(dialog);
+    }
+
+    pub fn current(&self) -> Option<&AnimeDialog> {
+        self.current.as_ref()
+    }
+
+    /// The settings sheet of the entry's kind: seasons get the season sheet, episodes the episode sheet.
+    pub fn open_settings(&mut self, seasons: bool) {
+        self.open(if seasons { AnimeDialog::SeasonSettingsSheet } else { AnimeDialog::EpisodeSettingsSheet });
+    }
+
+    /// The choose-category branch of an add: the category dialog opens and the track sheet may follow its dismiss.
+    pub fn open_change_category_from_add(&mut self, anime_id: i64) {
+        self.from_change_category = true;
+        self.open(AnimeDialog::ChangeCategory { anime_id });
+    }
+
+    /// Dismisses the dialog on screen. When the add flow set the flag and auto-open is on, the flag is cleared and the
+    /// track sheet opens; the return value says so.
+    pub fn dismiss(&mut self, auto_open_track: bool) -> bool {
+        self.current = None;
+        if auto_open_track && self.from_change_category {
+            self.from_change_category = false;
+            self.open(AnimeDialog::TrackSheet);
+            return true;
+        }
+        false
+    }
+
+    /// Confirming the category dialog does not go through the dismiss, so the flag is left as it is (5.3).
+    pub fn confirm_category(&mut self) {
+        self.current = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_last_request_wins_and_dismiss_clears_the_slot() {
+        let mut slot = DialogSlot::default();
+        slot.open(AnimeDialog::FullImages);
+        slot.open(AnimeDialog::ChangeAnimeSkipIntro);
+        assert_eq!(slot.current(), Some(&AnimeDialog::ChangeAnimeSkipIntro));
+        assert!(!slot.dismiss(false));
+        assert_eq!(slot.current(), None);
+    }
+
+    #[test]
+    fn settings_opens_the_sheet_of_the_entry_kind() {
+        let mut slot = DialogSlot::default();
+        slot.open_settings(true);
+        assert_eq!(slot.current(), Some(&AnimeDialog::SeasonSettingsSheet));
+        slot.open_settings(false);
+        assert_eq!(slot.current(), Some(&AnimeDialog::EpisodeSettingsSheet));
+    }
+
+    #[test]
+    fn the_track_sheet_follows_a_dismissed_category_dialog_only_when_both_are_set() {
+        let mut slot = DialogSlot::default();
+        slot.open_change_category_from_add(3);
+        assert!(!slot.dismiss(false), "auto-open is off");
+        slot.open_change_category_from_add(3);
+        assert!(slot.dismiss(true), "the add flow and auto-open are both on");
+        assert_eq!(slot.current(), Some(&AnimeDialog::TrackSheet));
+        slot.dismiss(true);
+        assert!(!slot.dismiss(true), "the flag is one-shot");
+    }
+
+    #[test]
+    fn a_confirmed_category_dialog_keeps_the_flag_for_a_later_dismiss() {
+        let mut slot = DialogSlot::default();
+        slot.open_change_category_from_add(3);
+        slot.confirm_category();
+        assert_eq!(slot.current(), None);
+        slot.open(AnimeDialog::FullImages);
+        assert!(slot.dismiss(true), "the flag is not cleared by the confirm");
+    }
+}

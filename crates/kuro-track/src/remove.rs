@@ -85,7 +85,9 @@ pub async fn remove_anime(
     also_remote: bool,
     repo: &dyn AnimeTrackRepo,
 ) -> Result<(), MsgKey> {
-    remove_anime_inner(track, tracker, also_remote, repo).await.1
+    remove_anime_inner(track, tracker, also_remote, repo)
+        .await
+        .1
 }
 
 /// The remove with the flag the callers need: whether the local row is gone, even when the result is an error.
@@ -105,7 +107,10 @@ async fn remove_anime_inner(
             return (false, Err(local_failure(&e)));
         }
         let remote = match deletable {
-            Some(d) => d.delete(track).await.map_err(|e| remote_failure(tracker, &e)),
+            Some(d) => d
+                .delete(track)
+                .await
+                .map_err(|e| remote_failure(tracker, &e)),
             None => Ok(()),
         };
         return (true, remote);
@@ -128,7 +133,9 @@ pub async fn remove_manga(
     also_remote: bool,
     repo: &dyn MangaTrackRepo,
 ) -> Result<(), MsgKey> {
-    remove_manga_inner(track, tracker, also_remote, repo).await.1
+    remove_manga_inner(track, tracker, also_remote, repo)
+        .await
+        .1
 }
 
 /// The remove with the flag the callers need: whether the local row is gone, even when the result is an error.
@@ -148,7 +155,10 @@ async fn remove_manga_inner(
             return (false, Err(local_failure(&e)));
         }
         let remote = match deletable {
-            Some(d) => d.delete(track).await.map_err(|e| remote_failure(tracker, &e)),
+            Some(d) => d
+                .delete(track)
+                .await
+                .map_err(|e| remote_failure(tracker, &e)),
             None => Ok(()),
         };
         return (true, remote);
@@ -380,7 +390,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn t_30a_022_a_local_first_tracker_loses_the_local_row_even_when_the_remote_delete_fails() {
+    async fn t_30a_022_a_local_first_tracker_loses_the_local_row_even_when_the_remote_delete_fails()
+    {
         let log = new_log();
         let mut tracker = deletable(log.clone());
         tracker.local_first = true;

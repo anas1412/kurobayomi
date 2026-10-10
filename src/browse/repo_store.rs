@@ -72,6 +72,10 @@ impl FavoriteStore for RepoStore {
         self.manga.set_categories(id, ids).map_err(text)
     }
 
+    fn entry_categories(&self, id: i64) -> Result<Vec<i64>, String> {
+        Ok(self.categories.by_entry(id).map_err(text)?.into_iter().filter(|c| c.id != 0).map(|c| c.id).collect())
+    }
+
     fn clear_cover(&self, id: i64) -> usize {
         (self.clear_cover)(id)
     }
@@ -151,6 +155,18 @@ mod tests {
         assert_eq!(removed.date_added, 0);
         assert_eq!(removed.cover_last_modified, 9_000, "a deleted cover file stamps the row");
         assert_eq!(removed.chapter_flags & 0b1111, 0b1010);
+    }
+
+    #[test]
+    fn the_entry_categories_are_the_user_category_links_of_the_row() {
+        let (_dir, store, _manga) = store(Arc::default());
+        let entry = store.local_entry(5, "/series/1", "One", None).expect("entry");
+        let reading = store.categories.insert(&kuro_data::category::Category { id: 0, name: "Reading".into(), order: 1, flags: 0, hidden: false }).expect("category");
+        assert_eq!(store.entry_categories(entry.id), Ok(Vec::new()), "a new entry has no links");
+        store.set_categories(entry.id, &[reading]).expect("links");
+        assert_eq!(store.entry_categories(entry.id), Ok(vec![reading]));
+        let rows = crate::browse::entries::chooser_rows(&store.categories().expect("list"), &store.entry_categories(entry.id).expect("links"));
+        assert_eq!(rows.iter().map(|(c, on)| (c.id, *on)).collect::<Vec<_>>(), [(reading, true)]);
     }
 
     #[test]

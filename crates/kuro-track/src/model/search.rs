@@ -20,6 +20,9 @@ pub struct AnimeTrackSearch {
     pub finish_date_millis: i64,
     pub private: bool,
     pub tracking_url: String,
+    /// The absolute page URL of the result when `tracking_url` is a relative form (Simkl stores `/anime/<id>`). Empty
+    /// otherwise. "Open in browser" uses it before `tracking_url` (R-5.2, R-5.7).
+    pub source_url: String,
     pub authors: Vec<String>,
     pub artists: Vec<String>,
     pub cover_url: String,
@@ -54,6 +57,7 @@ impl AnimeTrackSearch {
             finish_date_millis: 0,
             private: false,
             tracking_url: tracking_url.into(),
+            source_url: String::new(),
             authors: Vec::new(),
             artists: Vec::new(),
             cover_url: String::new(),
@@ -68,6 +72,15 @@ impl AnimeTrackSearch {
     /// The list key used by the search screen: `(tracker_id, remote_id)`.
     pub fn list_key(&self) -> (TrackerId, i64) {
         (self.tracker_id, self.remote_id)
+    }
+
+    /// The URL "open in browser" opens: `source_url` when the tracker set one, else `tracking_url`.
+    pub fn open_url(&self) -> &str {
+        if self.source_url.is_empty() {
+            &self.tracking_url
+        } else {
+            &self.source_url
+        }
     }
 
     /// The binding this result would create. A missing score becomes 0 (no score).

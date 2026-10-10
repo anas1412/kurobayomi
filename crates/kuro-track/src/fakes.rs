@@ -30,6 +30,7 @@ use crate::tracker::{
     AnimeTracker, DeletableAnimeTracker, DeletableMangaTracker, EnhancedAnimeTracker,
     EnhancedMangaTracker, LogoRef, MangaTracker, Tracker,
 };
+use crate::trackers::enhanced::EntryRef;
 use kuro_testkit::{TempDir, TestDb};
 
 /// Calls in the order they happened, shared between a tracker and its repository.
@@ -292,21 +293,28 @@ impl EnhancedAnimeTracker for FakeAnime {
     fn accepted_sources(&self) -> &[&'static str] {
         self.accepted
     }
-    async fn match_entry(
-        &self,
-        title: &str,
-        entry_id: i64,
-    ) -> Result<Option<AnimeTrackSearch>, TrackError> {
-        Ok((!title.is_empty()).then(|| {
-            let mut r = AnimeTrackSearch::new(self.id(), 9, title, "https://example.test/9");
-            r.anime_id = entry_id;
+    /// Matches by `entry.url` when it is set (as the real trackers do), else a fixed URL.
+    async fn match_entry(&self, entry: &EntryRef) -> Result<Option<AnimeTrackSearch>, TrackError> {
+        let url = if entry.url.is_empty() {
+            "https://example.test/9"
+        } else {
+            entry.url.as_str()
+        };
+        Ok((!entry.title.is_empty()).then(|| {
+            let mut r = AnimeTrackSearch::new(self.id(), 9, &entry.title, url);
+            r.anime_id = entry.id;
             r
         }))
     }
-    fn is_track_from(&self, t: &AnimeTrack, _source_id: Option<&str>) -> bool {
+    fn is_track_from(&self, t: &AnimeTrack, _entry: &EntryRef, _source_id: Option<&str>) -> bool {
         t.tracker_id == self.id()
     }
-    fn migrate_track(&self, t: &AnimeTrack, _new_source_id: &str) -> Option<AnimeTrack> {
+    fn migrate_track(
+        &self,
+        t: &AnimeTrack,
+        _new_source_id: &str,
+        _new_entry: &EntryRef,
+    ) -> Option<AnimeTrack> {
         Some(t.clone())
     }
 }
@@ -475,21 +483,28 @@ impl EnhancedMangaTracker for FakeManga {
     fn accepted_sources(&self) -> &[&'static str] {
         self.accepted
     }
-    async fn match_entry(
-        &self,
-        title: &str,
-        entry_id: i64,
-    ) -> Result<Option<MangaTrackSearch>, TrackError> {
-        Ok((!title.is_empty()).then(|| {
-            let mut r = MangaTrackSearch::new(self.id(), 9, title, "https://example.test/9");
-            r.manga_id = entry_id;
+    /// Matches by `entry.url` when it is set (as the real trackers do), else a fixed URL.
+    async fn match_entry(&self, entry: &EntryRef) -> Result<Option<MangaTrackSearch>, TrackError> {
+        let url = if entry.url.is_empty() {
+            "https://example.test/9"
+        } else {
+            entry.url.as_str()
+        };
+        Ok((!entry.title.is_empty()).then(|| {
+            let mut r = MangaTrackSearch::new(self.id(), 9, &entry.title, url);
+            r.manga_id = entry.id;
             r
         }))
     }
-    fn is_track_from(&self, t: &MangaTrack, _source_id: Option<&str>) -> bool {
+    fn is_track_from(&self, t: &MangaTrack, _entry: &EntryRef, _source_id: Option<&str>) -> bool {
         t.tracker_id == self.id()
     }
-    fn migrate_track(&self, t: &MangaTrack, _new_source_id: &str) -> Option<MangaTrack> {
+    fn migrate_track(
+        &self,
+        t: &MangaTrack,
+        _new_source_id: &str,
+        _new_entry: &EntryRef,
+    ) -> Option<MangaTrack> {
         Some(t.clone())
     }
 }
@@ -900,6 +915,11 @@ pub struct Harness {
 impl Harness {
     /// Must run inside a tokio runtime (the registry starts watcher tasks).
     pub fn new() -> Self {
+        Self::with_tracker(None)
+    }
+
+    /// Like [`Harness::new`], with `replace` standing in for the fake that has the same tracker id.
+    pub fn with_tracker(replace: Option<Arc<dyn Tracker>>) -> Self {
         let dir = TempDir::new().unwrap();
         let secrets = MemSecrets::new();
         let log = new_log();
@@ -927,6 +947,10 @@ impl Harness {
                 manga.insert(id, Arc::clone(&f));
                 trackers.push(f);
             }
+        }
+        if let Some(r) = replace {
+            trackers.retain(|t| t.id() != r.id());
+            trackers.push(r);
         }
         let anime_repo = Arc::new(MemAnimeRepo {
             log: Some(log.clone()),

@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib};
-use kuro_data::anime::AnimeRelationGroup;
+use kuro_data::anime::{AnimeRelationGroup, SeasonAnime};
 use kuro_db::handle::Db;
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_db::schema_anime::FetchType;
@@ -24,9 +24,10 @@ use kuro_domain::entries::defaults::{set_episode_settings_default, set_season_se
 use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_domain::kind::EntryKind;
 use kuro_downloads::anime::layout::AnimeLayout;
-use kuro_i18n::{MsgKey, tr, tr_plural};
+use kuro_i18n::{Arg, MsgKey, tr, tr_plural, trf};
 use kuro_prefs::library::EpisodeSwipeAction;
 use kuro_prefs::source::SourcePrefs;
+use kuro_prefs::player::GesturePrefs;
 use kuro_prefs::store::PrefStore;
 
 use super::actions::{OpenPlan, continue_plan, tap_plan};
@@ -36,12 +37,16 @@ use super::download_backend::{AnimeDownloads, installed_queue};
 use super::dispatch::{bottom_cmds, swipe_cmds};
 use super::details_error::{DetailsError, required};
 use super::downloads::{DownloadMenu, NEXT_COUNTS, menu_visible};
+use super::intro_dialog;
+use super::overflow::{self, Entry as OverflowEntry, Item as OverflowItem};
+use super::viewer;
 use super::duplicate::Choice;
 use super::images::ImageKind;
 use super::images_view;
 use super::season_grid::{Layout, SeasonGrid};
 use super::season_settings_view::SeasonSettingsWindow;
-use super::season_tile::{Overlays, SeasonItem, continue_episode, season_facts, season_item};
+use super::season_pipeline::process_seasons;
+use super::season_tile::{SeasonFacts, SeasonItem, continue_episode, season_facts};
 use super::set_default::{self, Scope};
 use super::swipe_look::{self, DownloadState, EpisodeState};
 use super::selection::Click;
@@ -454,11 +459,13 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     stack.add_named(&ready, Some("ready"));
 
     let filter = icon_button("view-filter-symbolic", &tr(MsgKey::action_filter));
-    filter.set_sensitive(false);
     let refresh_button = icon_button("view-refresh-symbolic", &tr(MsgKey::action_webview_refresh));
     // the Download menu: shown for an entry that is not local, when the app can queue downloads
     let download_menu = gtk::MenuButton::builder().icon_name("folder-download-symbolic").tooltip_text(tr(MsgKey::action_download)).visible(false).build();
-    let toolbar: Vec<gtk::Widget> = vec![download_menu.clone().upcast(), refresh_button.clone().upcast(), filter.clone().upcast()];
+    // the overflow menu: the items `overflow::items` gives for this entry and its source (T-39a-075)
+    let overflow_menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text(tr(MsgKey::action_menu_overflow_description)).build();
+    let toolbar: Vec<gtk::Widget> =
+        vec![download_menu.clone().upcast(), refresh_button.clone().upcast(), filter.clone().upcast(), overflow_menu.clone().upcast()];
     let page = ui::page("", &stack, toolbar.clone(), false);
     ui::tag(&page, "anime_entry_details");
     let header = page.first_child().and_downcast::<gtk::HeaderBar>();
@@ -561,7 +568,17 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
             }
         }
     });
+    overflow_menu.set_create_popup_func({
+        let weak = weak.clone();
+        move |button| {
+            if let Some(view) = weak.upgrade() {
+                button.set_popover(Some(&view.overflow_popover()));
+            }
+        }
+    });
     header_button.connect_clicked(on_view(View::open_settings));
+    // the toolbar Filter button opens the same settings sheet as the count row (T-39b-054)
+    filter.connect_clicked(on_view(View::open_settings));
     cancel.connect_clicked(on_view(|v| v.edit_selection(|m, _, _| m.selection.clear())));
     select_all.connect_clicked(on_view(|v| v.edit_selection(|m, _, full| m.selection.select_all(full))));
     invert.connect_clicked(on_view(|v| v.edit_selection(|m, _, full| m.selection.invert(full))));
@@ -794,7 +811,9 @@ impl View {
             has_tracking: true,
             webview: self.env.backend.is_http_source(m.anime.source),
         });
-        self.download_menu.set_visible(menu_visible(m.is_local(), self.env.backend.has_download_handler()));
+        // a local or stub source has no downloads to queue (`isLocalOrStub`, T-39b-059)
+        let local_or_stub = m.is_local() || self.env.backend.source_info(m.anime.source).stub;
+        self.download_menu.set_visible(menu_visible(local_or_stub, self.env.backend.has_download_handler()));
         // the button stays while nothing is selected, and is disabled when no episode is unseen (T-EPS-NEXT-1)
         let fab = m.fab();
         self.fab.set_visible(!m.selection.is_active());
@@ -1030,16 +1049,16 @@ impl View {
         let size = m.anime.season_display_grid_size();
         let mode = m.anime.season_display_grid_mode();
         let width = self.grid_width();
-        // the overlays are the parent entry's stored bits; the facts of a season are what the runner read for it
-        let overlays = Overlays::of(&m.anime);
-        let items: Vec<SeasonItem> = m
+        // the facts of a season are what the runner read for it; the filters, the sort and the overlays are the pipeline's
+        let seasons: Vec<(SeasonAnime, SeasonFacts)> = m
             .seasons
             .iter()
             .map(|s| {
                 let local = s.anime.source == kuro_source::local::LOCAL_SOURCE_ID;
-                season_item(s, overlays, &season_facts(s, m.season_extras.get(&s.id()), local))
+                (s.clone(), season_facts(s, m.season_extras.get(&s.id()), local))
             })
             .collect();
+        let items: Vec<SeasonItem> = process_seasons(&m.anime, &seasons, m.downloaded_only);
         let layout = Layout {
             mode,
             number_mode: m.anime.season_display_mode() == kuro_domain::entries::anime::season_flags::DISPLAY_MODE_NUMBER,
@@ -1055,6 +1074,89 @@ impl View {
         }
         self.seasons.set(&key.0, &key.1);
         *self.seasons_shown.borrow_mut() = Some(key);
+    }
+
+    /// The overflow menu (T-39a-075, T-39a-057). Built each time it opens, so the items follow the entry.
+    fn overflow_popover(self: &Rc<Self>) -> gtk::Popover {
+        let popover = gtk::Popover::new();
+        let col = GBox::new(O::Vertical, 2);
+        ui::margins(&col, 6);
+        let entry = {
+            let model = self.model.borrow();
+            model.as_ref().filter(|m| m.accepts_dispatch()).map(|m| {
+                let source = m.anime.source;
+                (
+                    OverflowEntry {
+                        favorite: m.anime.favorite,
+                        episodes: m.anime.fetch_type == FetchType::Episodes,
+                        http_source: self.env.backend.is_http_source(source),
+                        configurable_source: self.env.backend.is_configurable_source(source),
+                    },
+                    m.flow.refreshing,
+                )
+            })
+        };
+        let Some((entry, refreshing)) = entry else { return popover };
+        for item in overflow::items(entry) {
+            let (label, action): (String, fn(&Rc<View>)) = match item {
+                OverflowItem::ChangeIntro => (tr(MsgKey::action_change_intro_length), |v: &Rc<View>| v.open_intro_length()),
+                OverflowItem::Refresh => (tr(MsgKey::action_webview_refresh), |v: &Rc<View>| v.refresh()),
+                OverflowItem::EditCategories => (tr(MsgKey::action_edit_categories), |v: &Rc<View>| v.open_categories()),
+                OverflowItem::Migrate => (tr(MsgKey::action_migrate), |v: &Rc<View>| v.migrate()),
+                OverflowItem::Share => (tr(MsgKey::action_share), |v: &Rc<View>| v.share()),
+                OverflowItem::Settings => (tr(MsgKey::action_settings), |_: &Rc<View>| ui::open("source_preferences")),
+            };
+            let button = Button::builder().css_classes(["flat"]).build();
+            button.set_child(Some(&Label::builder().label(&label).xalign(0.0).build()));
+            // one refresh runs at a time
+            button.set_sensitive(item != OverflowItem::Refresh || !refreshing);
+            let (weak, popover) = (Rc::downgrade(self), popover.clone());
+            button.connect_clicked(move |_| {
+                popover.popdown();
+                if let Some(view) = weak.upgrade() {
+                    action(&view);
+                }
+            });
+            col.append(&button);
+        }
+        popover.set_child(Some(&col));
+        popover
+    }
+
+    /// Change intro length (T-39a-075): the wheel of the entry's skip-intro length. OK stores it through the runner.
+    fn open_intro_length(self: &Rc<Self>) {
+        let (anime_id, stored, disabled) = {
+            let model = self.model.borrow();
+            let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
+            (m.anime.id, m.anime.skip_intro_length(), m.anime.skip_intro_disable())
+        };
+        let default = GesturePrefs::new(self.env.prefs.clone()).default_intro_length.get();
+        let runner = self.runner.clone();
+        intro_dialog::open(viewer::dialog_start(stored, disabled, default), move |length| {
+            runner.send(AnimeCmd::SetSkipIntroLength { anime_id, length });
+        });
+    }
+
+    /// Migrate (T-39a-075): starts the migrate flow from this entry, as the duplicate choice does.
+    fn migrate(self: &Rc<Self>) {
+        let request = self
+            .model
+            .borrow()
+            .as_ref()
+            .filter(|m| m.accepts_dispatch())
+            .map(|m| MigrateRequest { entry_id: m.anime.id, anime: true, title: m.anime.title.clone() });
+        if let Some(request) = request {
+            handoff::open_migrate(request);
+        }
+    }
+
+    /// Share (T-39a-075): copies the entry's address to the clipboard and says so, as the manga page does.
+    fn share(self: &Rc<Self>) {
+        let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.url.clone());
+        if let (Some(url), Some(display)) = (url, gtk::gdk::Display::default()) {
+            display.clipboard().set_text(&url);
+            self.present(UserMessage::Plain(trf(MsgKey::copied_to_clipboard, &[("arg1", Arg::Str(&url))])), None);
+        }
     }
 
     /// The Download menu: the next 1, 5, 10 or 25 unseen episodes, or every unseen one.
@@ -1219,6 +1321,10 @@ impl View {
     /// Starts the torrent server when the plan says so, then plays in the external player, or in the internal one when
     /// the external one cannot start.
     fn play(&self, anime_id: i64, episode_id: i64, title: &str, name: &str, plan: OpenPlan) {
+        // a local episode plays in the internal player at its saved position, whatever the plan says
+        if crate::local_flow_anime::open_local_episode(episode_id) {
+            return;
+        }
         if plan.torrent_server {
             self.env.backend.start_torrent_server();
         }
@@ -1503,89 +1609,86 @@ mod tests {
     /// stub warning, the single column at 360 px with no horizontal minimum above 360, the two panes from 900 px with
     /// the info block moved to the left, and Missing with a Back button.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi anime_route_smoke -- --ignored"]
     fn anime_route_smoke() {
-        if gtk::init().is_err() {
-            eprintln!("skipped: no display for the anime route smoke test");
-            return;
-        }
-        let ctx = glib::MainContext::default();
-        let _owner = ctx.acquire().expect("main context");
-        let rt = kuro_core::runtime::build().expect("runtime");
-        let (_dir, store, id) = super::super::store::fixture::with_episodes(true, true, 3, 1);
-        let spawn = |anime_id| {
-            let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), kuro_prefs::store::PrefStore::in_memory(), Arc::new(Stub), AnimeLoadContext::default()));
-            let page = assemble(Rc::clone(&runner), true, env_of(&store));
-            runner.send(AnimeCmd::Load { anime_id });
-            (page, runner)
-        };
-        let stack_of = |page: &GBox| descendants(page.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::Stack>().ok()).expect("the page has a stack");
+        crate::testing::with_display(|| {
+            let ctx = glib::MainContext::default();
+            let _owner = ctx.acquire().expect("main context");
+            let rt = kuro_core::runtime::build().expect("runtime");
+            let (_dir, store, id) = super::super::store::fixture::with_episodes(true, true, 3, 1);
+            let spawn = |anime_id| {
+                let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), kuro_prefs::store::PrefStore::in_memory(), Arc::new(Stub), AnimeLoadContext::default()));
+                let page = assemble(Rc::clone(&runner), true, env_of(&store));
+                runner.send(AnimeCmd::Load { anime_id });
+                (page, runner)
+            };
+            let stack_of = |page: &GBox| descendants(page.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::Stack>().ok()).expect("the page has a stack");
 
-        let (page, _runner) = spawn(id);
-        let stack = stack_of(&page);
-        assert_eq!(stack.visible_child_name().as_deref(), Some("loading"));
-        assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
-        let all = descendants(page.upcast_ref());
-        let list = all.iter().find_map(|w| w.clone().downcast::<gtk::ListView>().ok()).expect("the list view");
-        // at 360 px the page is one column: the info block and the list head are the first two rows of the list
-        let window = gtk::Window::builder().default_width(360).default_height(700).child(&page).build();
-        window.present();
-        assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 5)), "two leading rows and three episodes");
-        for _ in 0..20 {
-            while ctx.iteration(false) {}
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        let buttons: Vec<Button> = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Button>().ok()).collect();
-        let labels: Vec<String> = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).map(|l| l.label().to_string()).collect();
-        assert!(labels.iter().any(|t| t == "In library"), "the library button of a favorite");
-        assert!(labels.iter().any(|t| t == "Tracking"), "the tracking button has its callback");
-        let webview = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.label() == "WebView").and_then(|l| l.ancestor(Button::static_type()));
-        assert!(webview.is_some_and(|b| !b.is_visible()), "WebView shows for an HTTP source only");
-        let download = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::MenuButton>().ok()).find(|b| b.tooltip_text().as_deref() == Some("Download")).expect("the Download menu exists");
-        assert!(!download.is_visible(), "no download handler, no Download menu");
-        assert!(buttons.iter().any(|b| b.tooltip_text().as_deref() == Some("Refresh") && b.is_sensitive()), "the refresh button");
-        let fab = buttons.iter().find(|b| b.has_css_class("pill")).expect("the FAB");
-        assert!(fab.is_visible() && fab.is_sensitive(), "an unseen episode exists");
-        let (min, _, _, _) = page.measure(gtk::Orientation::Horizontal, -1);
-        assert!(min <= 360, "no horizontal minimum above 360 px, got {min}");
-        let left = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::ScrolledWindow>().ok()).find(|w| w.width_request() == LEFT_WIDTH).expect("the left pane");
-        assert!(!left.is_visible(), "no left pane in one column");
-        // from 900 px the info block moves to the left pane and the list keeps only its head
-        window.set_default_size(1000, 700);
-        assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 4)), "one leading row and three episodes");
-        assert!(left.is_visible() && left.first_child().is_some(), "the left pane shows the info block");
-        window.set_child(None::<&gtk::Widget>);
-        window.close();
+            let (page, _runner) = spawn(id);
+            let stack = stack_of(&page);
+            assert_eq!(stack.visible_child_name().as_deref(), Some("loading"));
+            assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
+            let all = descendants(page.upcast_ref());
+            let list = all.iter().find_map(|w| w.clone().downcast::<gtk::ListView>().ok()).expect("the list view");
+            // at 360 px the page is one column: the info block and the list head are the first two rows of the list
+            let window = gtk::Window::builder().default_width(360).default_height(700).child(&page).build();
+            window.present();
+            assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 5)), "two leading rows and three episodes");
+            for _ in 0..20 {
+                while ctx.iteration(false) {}
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let buttons: Vec<Button> = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Button>().ok()).collect();
+            let labels: Vec<String> = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).map(|l| l.label().to_string()).collect();
+            assert!(labels.iter().any(|t| t == "In library"), "the library button of a favorite");
+            assert!(labels.iter().any(|t| t == "Tracking"), "the tracking button has its callback");
+            let webview = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.label() == "WebView").and_then(|l| l.ancestor(Button::static_type()));
+            assert!(webview.is_some_and(|b| !b.is_visible()), "WebView shows for an HTTP source only");
+            let download = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::MenuButton>().ok()).find(|b| b.tooltip_text().as_deref() == Some("Download")).expect("the Download menu exists");
+            assert!(!download.is_visible(), "no download handler, no Download menu");
+            assert!(buttons.iter().any(|b| b.tooltip_text().as_deref() == Some("Refresh") && b.is_sensitive()), "the refresh button");
+            let fab = buttons.iter().find(|b| b.has_css_class("pill")).expect("the FAB");
+            assert!(fab.is_visible() && fab.is_sensitive(), "an unseen episode exists");
+            let (min, _, _, _) = page.measure(gtk::Orientation::Horizontal, -1);
+            assert!(min <= 360, "no horizontal minimum above 360 px, got {min}");
+            let left = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::ScrolledWindow>().ok()).find(|w| w.width_request() == LEFT_WIDTH).expect("the left pane");
+            assert!(!left.is_visible(), "no left pane in one column");
+            // from 900 px the info block moves to the left pane and the list keeps only its head
+            window.set_default_size(1000, 700);
+            assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 4)), "one leading row and three episodes");
+            assert!(left.is_visible() && left.first_child().is_some(), "the left pane shows the info block");
+            window.set_child(None::<&gtk::Widget>);
+            window.close();
 
-        // 3000 episodes: the list view builds only the rows on screen, so the page opens without a stall
-        let (_big_dir, big_store, big_id) = super::super::store::fixture::with_episodes(true, true, 3000, 10);
-        let big_runner = Rc::new(runner::spawn(rt.handle(), big_store.clone(), kuro_prefs::store::PrefStore::in_memory(), Arc::new(Stub), AnimeLoadContext::default()));
-        let big = assemble(Rc::clone(&big_runner), true, env_of(&big_store));
-        let big_window = gtk::Window::builder().default_width(1000).default_height(700).child(&big).build();
-        big_window.present();
-        big_runner.send(AnimeCmd::Load { anime_id: big_id });
-        let started = std::time::Instant::now();
-        let big_list = descendants(big.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::ListView>().ok()).expect("the list view");
-        assert!(pump(&ctx, || big_list.model().is_some_and(|m| m.n_items() == 3001)), "3000 rows and the list head");
-        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
-        for _ in 0..50 {
-            while ctx.iteration(false) {}
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        // GTK prepares a few off-screen rows ahead; what matters is that 3000 rows do not make 3000 widgets
-        let built = descendants(big_list.upcast_ref()).into_iter().filter(|w| w.type_().name() == "GtkListItemWidget").collect::<Vec<_>>();
-        assert!(built.len() < 400, "only a window of rows is built, got {}", built.len());
-        assert!(built.iter().filter(|w| w.is_mapped()).count() < 40, "only the visible rows are on screen");
-        let newest = descendants(big_list.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).any(|l| l.label() == "Episode 3000" && l.is_mapped());
-        assert!(newest, "the first row shows the newest episode");
-        big_window.set_child(None::<&gtk::Widget>);
-        big_window.close();
+            // 3000 episodes: the list view builds only the rows on screen, so the page opens without a stall
+            let (_big_dir, big_store, big_id) = super::super::store::fixture::with_episodes(true, true, 3000, 10);
+            let big_runner = Rc::new(runner::spawn(rt.handle(), big_store.clone(), kuro_prefs::store::PrefStore::in_memory(), Arc::new(Stub), AnimeLoadContext::default()));
+            let big = assemble(Rc::clone(&big_runner), true, env_of(&big_store));
+            let big_window = gtk::Window::builder().default_width(1000).default_height(700).child(&big).build();
+            big_window.present();
+            big_runner.send(AnimeCmd::Load { anime_id: big_id });
+            let started = std::time::Instant::now();
+            let big_list = descendants(big.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::ListView>().ok()).expect("the list view");
+            assert!(pump(&ctx, || big_list.model().is_some_and(|m| m.n_items() == 3001)), "3000 rows and the list head");
+            assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+            for _ in 0..50 {
+                while ctx.iteration(false) {}
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            // GTK prepares a few off-screen rows ahead; what matters is that 3000 rows do not make 3000 widgets
+            let built = descendants(big_list.upcast_ref()).into_iter().filter(|w| w.type_().name() == "GtkListItemWidget").collect::<Vec<_>>();
+            assert!(built.len() < 400, "only a window of rows is built, got {}", built.len());
+            assert!(built.iter().filter(|w| w.is_mapped()).count() < 40, "only the visible rows are on screen");
+            let newest = descendants(big_list.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).any(|l| l.label() == "Episode 3000" && l.is_mapped());
+            assert!(newest, "the first row shows the newest episode");
+            big_window.set_child(None::<&gtk::Widget>);
+            big_window.close();
 
-        let missing_id = 4242;
-        let (missing, _r) = spawn(missing_id);
-        let stack = stack_of(&missing);
-        assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("missing")), "a missing row ends in the missing state");
-        let has_back = descendants(missing.upcast_ref()).iter().filter_map(|w| w.clone().downcast::<Button>().ok()).any(|b| b.label().as_deref() == Some("Back"));
-        assert!(has_back, "the missing state offers Back");
+            let missing_id = 4242;
+            let (missing, _r) = spawn(missing_id);
+            let stack = stack_of(&missing);
+            assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("missing")), "a missing row ends in the missing state");
+            let has_back = descendants(missing.upcast_ref()).iter().filter_map(|w| w.clone().downcast::<Button>().ok()).any(|b| b.label().as_deref() == Some("Back"));
+            assert!(has_back, "the missing state offers Back");
+        });
     }
 }

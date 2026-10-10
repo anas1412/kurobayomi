@@ -22,6 +22,8 @@ pub const TRANSITION_FINISHED: &str = "Finished:";
 pub const TRANSITION_CURRENT: &str = "Current:";
 pub const TRANSITION_NO_PREVIOUS: &str = "There's no previous chapter";
 pub const TRANSITION_NO_NEXT: &str = "There's no next chapter";
+/// `transition_pages_loading`: the status line while the adjacent chapter loads (B§11.3).
+pub const TRANSITION_PAGES_LOADING: &str = "Loading pages…";
 pub const LABEL_DOWNLOADED: &str = "Downloaded";
 
 pub const PICTURE_SAVED: &str = "Picture saved";
@@ -57,6 +59,8 @@ pub const ROTATION_LANDSCAPE: &str = "Landscape";
 pub const ROTATION_FORCE_PORTRAIT: &str = "Locked portrait";
 pub const ROTATION_FORCE_LANDSCAPE: &str = "Locked landscape";
 pub const ROTATION_REVERSE_PORTRAIT: &str = "Reverse portrait";
+/// The note under the rotation choices: the value is stored but no rotation follows (E-ORI-1).
+pub const ROTATION_NO_EFFECT: &str = "Rotation has no effect on this platform";
 
 pub const PREF_CATEGORY_READING_MODE: &str = "Reading mode";
 pub const PREF_CATEGORY_GENERAL: &str = "General";
@@ -131,12 +135,11 @@ pub const ZOOM_START_LEFT: &str = "Left";
 pub const ZOOM_START_RIGHT: &str = "Right";
 pub const ZOOM_START_CENTER: &str = "Center";
 
-// The three right-to-left, vertical and continuous-vertical names were not re-read from strings.xml; verify
-// before release (T-43a-061).
+// The four paged names match the base `strings.xml` of the upstream app (G-34 closed).
 pub const LEFT_TO_RIGHT_VIEWER: &str = "Paged (left to right)";
 pub const RIGHT_TO_LEFT_VIEWER: &str = "Paged (right to left)";
 pub const VERTICAL_VIEWER: &str = "Paged (vertical)";
-pub const VERTICAL_PLUS_VIEWER: &str = "Continuous vertical";
+pub const VERTICAL_PLUS_VIEWER: &str = "Long strip with gaps";
 
 /// `Source not installed: %1$s` (`source_not_installed`).
 pub fn source_not_installed(source: &str) -> String {
@@ -185,6 +188,12 @@ pub fn on_off(value: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_reading_mode_names_match_the_base_strings() {
+        assert_eq!(VERTICAL_PLUS_VIEWER, "Long strip with gaps");
+        assert_eq!(WEBTOON_VIEWER, "Long strip");
+    }
 
     #[test]
     fn transition_and_error_strings_match_the_upstream_text() {

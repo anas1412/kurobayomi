@@ -1,0 +1,15 @@
+{
+  "about": "preprocessed inserts, the last page split",
+  "viewer": "LeftToRight",
+  "force": false,
+  "items": [
+    "P(2,-)",
+    "p2:0",
+    "i2:0",
+    "p2:1",
+    "p2:2",
+    "i2:2",
+    "p3:0"
+  ],
+  "jump": "i2:2"
+}

@@ -37,6 +37,22 @@ impl Rgba {
         }
     }
 
+    /// The same colour with alpha `alpha` (0..1), rounded to the nearest 8-bit step (`0.22` gives 56).
+    pub fn with_alpha(self, alpha: f32) -> Self {
+        Rgba { a: (alpha.clamp(0.0, 1.0) * 255.0).round() as u8, ..self }
+    }
+
+    /// `self` composited over `dst` (source-over). Alpha 0 returns `dst`; alpha 255 returns `self`.
+    pub fn over(self, dst: Rgba) -> Rgba {
+        let (sa, da) = (f64::from(self.a) / 255.0, f64::from(dst.a) / 255.0);
+        let out_a = sa + da * (1.0 - sa);
+        if out_a == 0.0 {
+            return Rgba { r: 0, g: 0, b: 0, a: 0 };
+        }
+        let mix = |s: u8, d: u8| ((f64::from(s) * sa + f64::from(d) * da * (1.0 - sa)) / out_a).round() as u8;
+        Rgba { r: mix(self.r, dst.r), g: mix(self.g, dst.g), b: mix(self.b, dst.b), a: (out_a * 255.0).round() as u8 }
+    }
+
     /// CSS `rgba(...)` text with the given alpha (0..1) rather than the stored one.
     pub fn to_css_with_alpha(self, alpha: f32) -> String {
         format!("rgba({}, {}, {}, {})", self.r, self.g, self.b, trim_unit(alpha))
@@ -312,6 +328,27 @@ pub const EASE_LINEAR: (f32, f32, f32, f32) = (0.0, 0.0, 1.0, 1.0);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 4.2: `over` at the two alpha extremes, and `with_alpha` rounding
+    #[test]
+    fn over_with_alpha_zero_and_full_returns_one_side_exactly() {
+        let src = Rgba::argb(0xFF00_58CA);
+        let dst = Rgba::argb(0xFFFE_FBFF);
+        assert_eq!(src.with_alpha(0.0).over(dst), dst);
+        assert_eq!(src.over(dst), src);
+        assert_eq!(Rgba { a: 255, ..src }.over(dst), src);
+        let translucent = Rgba::argb(0x80FE_FBFF);
+        assert_eq!(src.with_alpha(0.0).over(translucent), translucent);
+    }
+
+    #[test]
+    fn with_alpha_rounds_to_the_nearest_byte() {
+        let c = Rgba::argb(0xFF00_58CA);
+        assert_eq!(c.with_alpha(0.22).a, 56);
+        assert_eq!((c.with_alpha(0.22).r, c.with_alpha(0.22).g, c.with_alpha(0.22).b), (0x00, 0x58, 0xCA));
+        assert_eq!(c.with_alpha(2.0).a, 255);
+        assert_eq!(c.with_alpha(-1.0).a, 0);
+    }
 
     #[test]
     fn argb_splits_channels() {

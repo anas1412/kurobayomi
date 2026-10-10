@@ -20,6 +20,7 @@ use crate::remote::{
 use crate::repo::{AnimeTrackRepo, MangaTrackRepo, UnitRef};
 use crate::sync::{sync_anime_progress, sync_manga_progress};
 use crate::tracker::{AnimeTracker, MangaTracker, Tracker};
+use crate::trackers::enhanced::EntryRef;
 
 /// Sets the entry id on `result`, binds it with the tracker, then stores the binding. A bind failure is
 /// returned as is, with its raw message, and nothing is stored.
@@ -225,26 +226,43 @@ pub async fn bind_manga(
     Ok(item)
 }
 
-/// Binds the entry to every logged-in enhanced anime tracker that accepts `source_id`, in registry order
-/// (`bindEnhancedTrackers`, behaviour 6.2). A tracker that already has a binding is skipped. A failure is logged
-/// with the entry title and tracker, and the next tracker still runs. The failures are returned for the caller.
+/// [`bind_enhanced_anime_entry`] for a caller that only has the id, the title and the source id. The `EntryRef` it
+/// builds has no `url`, so a tracker that matches by URL fails for it; callers that know the entry URL use
+/// [`bind_enhanced_anime_entry`].
 pub async fn bind_enhanced_anime(
     ctx: &TrackCtx,
     entry_id: i64,
     entry_title: &str,
     source_id: &str,
 ) -> Vec<(TrackerId, TrackError)> {
+    let entry = EntryRef {
+        id: entry_id,
+        source_id: source_id.parse().unwrap_or_default(),
+        url: String::new(),
+        title: entry_title.to_owned(),
+    };
+    bind_enhanced_anime_entry(ctx, &entry, source_id).await
+}
+
+/// Binds the entry to every logged-in enhanced anime tracker that accepts `source_identity`, in registry order
+/// (`bindEnhancedTrackers`, behaviour 6.2). A tracker that already has a binding is skipped. A failure is logged
+/// with the entry title and tracker, and the next tracker still runs. The failures are returned for the caller.
+pub async fn bind_enhanced_anime_entry(
+    ctx: &TrackCtx,
+    entry: &EntryRef,
+    source_identity: &str,
+) -> Vec<(TrackerId, TrackError)> {
     let mut failures = Vec::new();
     for tracker in ctx.trackers.logged_in() {
         let (Some(api), Some(enhanced)) = (tracker.as_anime(), tracker.as_enhanced_anime()) else {
             continue;
         };
-        if !enhanced.accepts(source_id) {
+        if !enhanced.accepts(source_identity) {
             continue;
         }
         let id = tracker.id();
-        if let Err(e) = bind_enhanced_one_anime(ctx, entry_id, api, enhanced, entry_title).await {
-            tracing::warn!(entry = entry_title, tracker = id.0, error = %redact(&e.to_string()), "could not match anime with tracker");
+        if let Err(e) = bind_enhanced_one_anime(ctx, entry, api, enhanced).await {
+            tracing::warn!(entry = entry.title, tracker = id.0, error = %redact(&e.to_string()), "could not match anime with tracker");
             failures.push((id, e));
         }
     }
@@ -253,15 +271,15 @@ pub async fn bind_enhanced_anime(
 
 async fn bind_enhanced_one_anime(
     ctx: &TrackCtx,
-    entry_id: i64,
+    entry: &EntryRef,
     api: &dyn AnimeTracker,
     enhanced: &dyn crate::tracker::EnhancedAnimeTracker,
-    entry_title: &str,
 ) -> Result<(), TrackError> {
+    let entry_id = entry.id;
     if ctx.anime_binding(entry_id, api.id()).await?.is_some() {
         return Ok(());
     }
-    let Some(mut search) = enhanced.match_entry(entry_title, entry_id).await? else {
+    let Some(mut search) = enhanced.match_entry(entry).await? else {
         return Ok(());
     };
     search.anime_id = entry_id;
@@ -279,17 +297,32 @@ pub async fn bind_enhanced_manga(
     manga_title: &str,
     source_id: &str,
 ) -> Vec<(TrackerId, TrackError)> {
+    let entry = EntryRef {
+        id: manga_id,
+        source_id: source_id.parse().unwrap_or_default(),
+        url: String::new(),
+        title: manga_title.to_owned(),
+    };
+    bind_enhanced_manga_entry(ctx, &entry, source_id).await
+}
+
+/// Manga form of [`bind_enhanced_anime_entry`].
+pub async fn bind_enhanced_manga_entry(
+    ctx: &TrackCtx,
+    entry: &EntryRef,
+    source_identity: &str,
+) -> Vec<(TrackerId, TrackError)> {
     let mut failures = Vec::new();
     for tracker in ctx.trackers.logged_in() {
         let (Some(api), Some(enhanced)) = (tracker.as_manga(), tracker.as_enhanced_manga()) else {
             continue;
         };
-        if !enhanced.accepts(source_id) {
+        if !enhanced.accepts(source_identity) {
             continue;
         }
         let id = tracker.id();
-        if let Err(e) = bind_enhanced_one_manga(ctx, manga_id, api, enhanced, manga_title).await {
-            tracing::warn!(entry = manga_title, tracker = id.0, error = %redact(&e.to_string()), "could not match manga with tracker");
+        if let Err(e) = bind_enhanced_one_manga(ctx, entry, api, enhanced).await {
+            tracing::warn!(entry = entry.title, tracker = id.0, error = %redact(&e.to_string()), "could not match manga with tracker");
             failures.push((id, e));
         }
     }
@@ -298,15 +331,15 @@ pub async fn bind_enhanced_manga(
 
 async fn bind_enhanced_one_manga(
     ctx: &TrackCtx,
-    manga_id: i64,
+    entry: &EntryRef,
     api: &dyn MangaTracker,
     enhanced: &dyn crate::tracker::EnhancedMangaTracker,
-    manga_title: &str,
 ) -> Result<(), TrackError> {
+    let manga_id = entry.id;
     if ctx.manga_binding(manga_id, api.id()).await?.is_some() {
         return Ok(());
     }
-    let Some(mut search) = enhanced.match_entry(manga_title, manga_id).await? else {
+    let Some(mut search) = enhanced.match_entry(entry).await? else {
         return Ok(());
     };
     search.manga_id = manga_id;
@@ -340,16 +373,16 @@ pub fn add_tracking_action(tracker: &dyn Tracker, kind: Kind) -> AddTrackingActi
 }
 
 /// "Add tracking" on an enhanced anime tracker (B§3.9): match the entry, then register the match, with no search
-/// page. `entry` is `(entry id, title)`, or `None` when the entry is no longer in the library: nothing is shown then
-/// (E-09). No match gives "No match found" (E-07). A failure gives the tracker's toast (E-08).
+/// page. `entry` is `None` when the entry is no longer in the library: nothing is shown then (E-09). No match gives "No match found" (E-07). A failure gives the tracker's toast (E-08).
 pub async fn add_enhanced_anime(
     ctx: &TrackCtx,
     tracker: TrackerId,
-    entry: Option<(i64, &str)>,
+    entry: Option<&EntryRef>,
 ) -> Result<Option<AnimeTrack>, MsgKey> {
-    let Some((entry_id, title)) = entry else {
+    let Some(entry) = entry else {
         return Ok(None);
     };
+    let entry_id = entry.id;
     let tr = ctx
         .trackers
         .get(tracker)
@@ -359,7 +392,7 @@ pub async fn add_enhanced_anime(
         return Err(TrackError::UnknownTracker(tracker.0).toast(&name));
     };
     let mut found = enhanced
-        .match_entry(title, entry_id)
+        .match_entry(entry)
         .await
         .map_err(|e| e.toast(&name))?
         .ok_or(MsgKey::NoMatchFound)?;
@@ -374,11 +407,12 @@ pub async fn add_enhanced_anime(
 pub async fn add_enhanced_manga(
     ctx: &TrackCtx,
     tracker: TrackerId,
-    entry: Option<(i64, &str)>,
+    entry: Option<&EntryRef>,
 ) -> Result<Option<MangaTrack>, MsgKey> {
-    let Some((manga_id, title)) = entry else {
+    let Some(entry) = entry else {
         return Ok(None);
     };
+    let manga_id = entry.id;
     let tr = ctx
         .trackers
         .get(tracker)
@@ -388,7 +422,7 @@ pub async fn add_enhanced_manga(
         return Err(TrackError::UnknownTracker(tracker.0).toast(&name));
     };
     let mut found = enhanced
-        .match_entry(title, manga_id)
+        .match_entry(entry)
         .await
         .map_err(|e| e.toast(&name))?
         .ok_or(MsgKey::NoMatchFound)?;
@@ -407,6 +441,15 @@ mod tests {
         FakeAnime, Harness, MemAnimeRepo, MemSecrets, anime_binding, manga_binding, new_log,
     };
     use crate::model::TrackerId;
+
+    fn entry(id: i64, title: &str) -> EntryRef {
+        EntryRef {
+            id,
+            source_id: 7,
+            url: format!("/series/{id}"),
+            title: title.into(),
+        }
+    }
 
     #[test]
     fn t_27a_075_enhanced_trackers_match_and_others_open_the_search_screen() {
@@ -435,7 +478,7 @@ mod tests {
     async fn tr_27b_013_add_tracking_on_an_enhanced_tracker_binds_the_match_without_a_search() {
         let h = Harness::new();
         h.login(TrackerId::JELLYFIN);
-        let got = add_enhanced_anime(&h.ctx, TrackerId::JELLYFIN, Some((4, "Show")))
+        let got = add_enhanced_anime(&h.ctx, TrackerId::JELLYFIN, Some(&entry(4, "Show")))
             .await
             .unwrap()
             .unwrap();
@@ -447,7 +490,7 @@ mod tests {
     async fn tr_27b_013_no_match_gives_the_no_match_toast_and_stores_nothing() {
         let h = Harness::new();
         h.login(TrackerId::JELLYFIN);
-        let err = add_enhanced_anime(&h.ctx, TrackerId::JELLYFIN, Some((4, "")))
+        let err = add_enhanced_anime(&h.ctx, TrackerId::JELLYFIN, Some(&entry(4, "")))
             .await
             .unwrap_err();
         assert_eq!(err, MsgKey::NoMatchFound);
@@ -469,7 +512,7 @@ mod tests {
         let h = Harness::new();
         h.login(TrackerId::JELLYFIN);
         *h.anime_tracker(TrackerId::JELLYFIN).fail.lock().unwrap() = Some("server said no".into());
-        let err = add_enhanced_anime(&h.ctx, TrackerId::JELLYFIN, Some((4, "Show")))
+        let err = add_enhanced_anime(&h.ctx, TrackerId::JELLYFIN, Some(&entry(4, "Show")))
             .await
             .unwrap_err();
         assert_eq!(
@@ -794,5 +837,25 @@ mod tests {
         assert!(failures.is_empty());
         let rows = h.ctx.manga_tracks.list_for_entry(24).await.unwrap();
         assert_eq!((rows.len(), rows[0].tracker_id), (1, TrackerId::KAVITA));
+    }
+
+    #[tokio::test]
+    async fn t_33a_006_the_bind_path_passes_the_entry_ref_to_match_and_stores_its_url() {
+        let h = Harness::new();
+        h.login(TrackerId::JELLYFIN);
+        let failures = bind_enhanced_anime_entry(&h.ctx, &entry(30, "Show"), "src.jf").await;
+        assert!(failures.is_empty());
+        let rows = h.ctx.anime_tracks.list_for_entry(30).await.unwrap();
+        assert_eq!(rows[0].remote_url, "/series/30", "match used entry.url");
+    }
+
+    #[tokio::test]
+    async fn t_33a_006_the_manga_bind_path_passes_the_entry_ref_to_match() {
+        let h = Harness::new();
+        h.login(TrackerId::KAVITA);
+        let failures = bind_enhanced_manga_entry(&h.ctx, &entry(31, "Manga"), "src.kv").await;
+        assert!(failures.is_empty());
+        let rows = h.ctx.manga_tracks.list_for_entry(31).await.unwrap();
+        assert_eq!(rows[0].remote_url, "/series/31");
     }
 }

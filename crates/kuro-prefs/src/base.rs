@@ -1,16 +1,15 @@
 //! `[base]` preferences (Aniyomi `BasePreferences`), plus the two release-check keys Linux adds.
 //!
 //! `downloaded_only`, `incognito_mode` and `shown_onboarding_flow` are app state and live in
-//! `state.toml`. The extension installer is kept as the stored string: the Android installer
-//! choice is dropped on Linux, and the string survives backups unchanged.
+//! `state.toml`. The Android `extension_installer` choice is dropped on Linux (T-19a-037): it has no field, and a
+//! backed-up value is skipped on restore.
 
 use crate::PrefError;
 use crate::registry::define_prefs;
 
 define_prefs! {
-    /// `[base]` section: the seven keys of Aniyomi `BasePreferences` that Linux keeps, then the two release-check keys.
+    /// `[base]` section: the six keys of Aniyomi `BasePreferences` that Linux keeps, then the two release-check keys.
     pub struct BasePrefs in "base" {
-        extension_installer: String = "extension_installer" => String::from("PACKAGEINSTALLER");
         downloaded_only: bool = "__APP_STATE_pref_downloaded_only" => false;
         incognito_mode: bool = "__APP_STATE_incognito_mode" => false;
         shown_onboarding_flow: bool = "__APP_STATE_onboarding_complete" => false;
@@ -85,7 +84,6 @@ mod tests {
         assert_eq!(
             BasePrefs::FIELDS,
             &[
-                ("extension_installer", "extension_installer"),
                 ("downloaded_only", "__APP_STATE_pref_downloaded_only"),
                 ("incognito_mode", "__APP_STATE_incognito_mode"),
                 ("shown_onboarding_flow", "__APP_STATE_onboarding_complete"),
@@ -114,7 +112,6 @@ mod tests {
     #[test]
     fn defaults_are_the_plan_defaults() {
         let base = BasePrefs::new(PrefStore::in_memory());
-        assert_eq!(base.extension_installer.get(), "PACKAGEINSTALLER");
         assert!(!base.downloaded_only.get());
         assert!(!base.incognito_mode.get());
         assert!(!base.shown_onboarding_flow.get());
@@ -133,7 +130,6 @@ mod tests {
             let base = BasePrefs::new(store.clone());
             base.display_profile.set("/icc/paper.icc".into()).unwrap();
             base.hardware_bitmap_threshold.set(4096).unwrap();
-            base.extension_installer.set("LEGACY".into()).unwrap();
             base.downloaded_only.set(true).unwrap();
             base.incognito_mode.set(true).unwrap();
             base.shown_onboarding_flow.set(true).unwrap();
@@ -143,7 +139,6 @@ mod tests {
         let base = BasePrefs::new(store.clone());
         assert_eq!(base.display_profile.get(), "/icc/paper.icc");
         assert_eq!(base.hardware_bitmap_threshold.get(), 4096);
-        assert_eq!(base.extension_installer.get(), "LEGACY");
         assert!(base.downloaded_only.get());
         assert!(base.incognito_mode.get());
         assert!(base.shown_onboarding_flow.get());

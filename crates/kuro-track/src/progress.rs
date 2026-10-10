@@ -18,6 +18,7 @@ use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
 use crate::policy::auto_update_allowed;
 use crate::queue::QueueItem;
 use crate::queue::retry::{ItemOutcome, RetryRunner};
+use crate::remote::{with_server_anime, with_server_manga};
 use crate::tracker::{AnimeTracker, MangaTracker, Tracker};
 
 /// What a progress update did for one tracker.
@@ -234,8 +235,9 @@ pub(crate) async fn apply_anime(
         last_episode_seen: episode,
         ..fresh
     };
-    api.update(&updated, true).await?;
-    ctx.save_anime(&updated).await?;
+    let server = api.update(&updated, true).await?;
+    ctx.save_anime(&with_server_anime(&updated, &server))
+        .await?;
     Ok(())
 }
 
@@ -254,8 +256,9 @@ pub(crate) async fn apply_manga(
         last_chapter_read: chapter,
         ..fresh
     };
-    api.update(&updated, true).await?;
-    ctx.save_manga(&updated).await?;
+    let server = api.update(&updated, true).await?;
+    ctx.save_manga(&with_server_manga(&updated, &server))
+        .await?;
     Ok(())
 }
 
@@ -529,7 +532,10 @@ mod tests {
         for id in [TrackerId::MANGAUPDATES, TrackerId::KAVITA] {
             *h.manga_tracker(id).gate.lock().unwrap() = Some(barrier.clone());
         }
-        *h.manga_tracker(TrackerId::MANGAUPDATES).fail.lock().unwrap() = Some("HTTP 500".into());
+        *h.manga_tracker(TrackerId::MANGAUPDATES)
+            .fail
+            .lock()
+            .unwrap() = Some("HTTP 500".into());
 
         let out = tokio::time::timeout(Duration::from_secs(5), track_chapter(&h.ctx, 9, 2.0))
             .await
@@ -538,7 +544,10 @@ mod tests {
         assert_eq!(outcome(TrackerId::MANGAUPDATES), Some(TrackOutcome::Queued));
         assert_eq!(outcome(TrackerId::KAVITA), Some(TrackOutcome::Updated));
         let rows = h.ctx.manga_tracks.list_for_entry(9).await.unwrap();
-        assert!(rows.iter().any(|r| r.tracker_id == TrackerId::KAVITA && r.last_chapter_read == 2.0));
+        assert!(
+            rows.iter()
+                .any(|r| r.tracker_id == TrackerId::KAVITA && r.last_chapter_read == 2.0)
+        );
     }
 
     #[tokio::test]

@@ -98,7 +98,11 @@ fn anime(status: i64, seen: f64, total: i64) -> AnimeTrack {
 
 /// `GET library-entries` answer with one entry (library id 77) and its media (chapter or episode count `count`).
 fn one_entry(kind: &str, status: &str, progress: i64, private: bool, count: Value) -> Value {
-    let count_key = if kind == "manga" { "chapterCount" } else { "episodeCount" };
+    let count_key = if kind == "manga" {
+        "chapterCount"
+    } else {
+        "episodeCount"
+    };
     json!({
         "data": [{"id": "77", "attributes": {"status": status, "progress": progress,
             "ratingTwenty": 16, "startedAt": "2024-05-01T00:00:00.000Z", "finishedAt": null,
@@ -121,13 +125,21 @@ async fn mount_json(server: &MockServer, verb: &'static str, at: &str, body: Val
 #[tokio::test]
 async fn t_30a_017_search_key_then_algolia_with_the_exact_headers_and_body() {
     let server = MockServer::start().await;
-    mount_json(&server, "GET", "/api/edge/algolia-keys/media/", json!({"media": {"key": "k1"}})).await;
+    mount_json(
+        &server,
+        "GET",
+        "/api/edge/algolia-keys/media/",
+        json!({"media": {"key": "k1"}}),
+    )
+    .await;
     Mock::given(method("POST"))
         .and(path("/1/indexes/production_media/query/"))
         .and(header("X-Algolia-Application-Id", "AWQO5J657S"))
         .and(header("X-Algolia-API-Key", "k1"))
         .and(header("Content-Type", "application/json; charset=utf-8"))
-        .and(body_json(json!({"params": format!("query=one+piece{FILTER_MANGA}")})))
+        .and(body_json(
+            json!({"params": format!("query=one+piece{FILTER_MANGA}")}),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"hits": [
             {"id": "1", "canonicalTitle": "One Piece", "chapterCount": null, "subtype": "manga",
              "averageRating": 90.0, "startDate": 1_000_000_000, "endDate": null}
@@ -148,7 +160,10 @@ async fn t_30a_017_search_key_then_algolia_with_the_exact_headers_and_body() {
         .into_iter()
         .find(|r| r.url.path().starts_with("/1/"))
         .unwrap();
-    assert!(algolia.headers.get("authorization").is_none(), "KT-92: no bearer to Algolia");
+    assert!(
+        algolia.headers.get("authorization").is_none(),
+        "KT-92: no bearer to Algolia"
+    );
 }
 
 #[tokio::test]
@@ -190,7 +205,13 @@ async fn t_30a_028_the_key_is_kept_and_a_403_fetches_it_once_more_then_fails() {
 #[tokio::test]
 async fn t_30a_018_novel_hits_are_dropped_and_a_bad_hit_is_skipped() {
     let server = MockServer::start().await;
-    mount_json(&server, "GET", "/api/edge/algolia-keys/media/", json!({"media": {"key": "k"}})).await;
+    mount_json(
+        &server,
+        "GET",
+        "/api/edge/algolia-keys/media/",
+        json!({"media": {"key": "k"}}),
+    )
+    .await;
     Mock::given(method("POST"))
         .and(path("/1/indexes/production_media/query/"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"hits": [
@@ -218,7 +239,13 @@ async fn t_30a_018_novel_hits_are_dropped_and_a_bad_hit_is_skipped() {
 #[tokio::test]
 async fn t_30a_019_bind_without_an_entry_posts_planned_and_takes_the_new_id() {
     let server = MockServer::start().await;
-    mount_json(&server, "GET", "/api/edge/library-entries", json!({"data": []})).await;
+    mount_json(
+        &server,
+        "GET",
+        "/api/edge/library-entries",
+        json!({"data": []}),
+    )
+    .await;
     Mock::given(method("POST"))
         .and(path("/api/edge/library-entries"))
         .and(body_json(json!({"data": {
@@ -240,7 +267,10 @@ async fn t_30a_019_bind_without_an_entry_posts_planned_and_takes_the_new_id() {
 
     assert_eq!(m.remote_id, 555);
     assert_eq!(m.score, 0.0);
-    assert_eq!(m.remote_url, "https://kitsu.app/manga/5", "KT-66: the tracking URL is unchanged");
+    assert_eq!(
+        m.remote_url, "https://kitsu.app/manga/5",
+        "KT-66: the tracking URL is unchanged"
+    );
 }
 
 #[tokio::test]
@@ -272,7 +302,10 @@ async fn t_30a_019_bind_with_an_entry_copies_progress_and_keeps_the_local_privat
     t.as_manga().unwrap().bind(&mut m, true).await.unwrap();
 
     // KT-44: dropped with progress becomes reading. KT-42: personal fields copied, private stays local.
-    assert_eq!((m.status, m.last_chapter_read, m.score), (READING, 7.0, 8.0));
+    assert_eq!(
+        (m.status, m.last_chapter_read, m.score),
+        (READING, 7.0, 8.0)
+    );
     assert_eq!(m.remote_id, 77);
     assert!(!m.private);
     assert_eq!(m.start_date, 1_714_521_600_000);
@@ -369,7 +402,10 @@ async fn t_30a_021_refresh_copies_personal_fields_and_the_remote_total() {
 
     let out = t.as_manga().unwrap().refresh(&m).await.unwrap();
 
-    assert_eq!((out.last_chapter_read, out.score, out.status), (9.0, 8.0, READING));
+    assert_eq!(
+        (out.last_chapter_read, out.score, out.status),
+        (9.0, 8.0, READING)
+    );
     assert!(out.private, "KT-59: refresh copies private");
     assert_eq!(out.total_chapters, 0, "a null count is 0");
     assert_eq!((out.title.as_str(), out.remote_id), ("Kept", 77));
@@ -378,7 +414,13 @@ async fn t_30a_021_refresh_copies_personal_fields_and_the_remote_total() {
 #[tokio::test]
 async fn t_30a_021_refresh_without_the_entry_is_not_found_with_the_kind_name() {
     let server = MockServer::start().await;
-    mount_json(&server, "GET", "/api/edge/library-entries", json!({"data": []})).await;
+    mount_json(
+        &server,
+        "GET",
+        "/api/edge/library-entries",
+        json!({"data": []}),
+    )
+    .await;
     let (t, _) = logged_in(&server);
     let mut a = anime(WATCHING, 0.0, 0);
     a.remote_id = 77;
@@ -457,7 +499,12 @@ async fn t_30a_022_an_unbound_track_is_refused_before_any_request() {
     let mut m = manga(READING, 0.0, 0);
     m.remote_id = 0;
 
-    let err = t.as_deletable_manga().unwrap().delete(&m).await.unwrap_err();
+    let err = t
+        .as_deletable_manga()
+        .unwrap()
+        .delete(&m)
+        .await
+        .unwrap_err();
 
     assert_eq!(err.to_string(), "Could not find manga");
     assert!(server.received_requests().await.unwrap().is_empty());
@@ -482,7 +529,13 @@ async fn t_30a_025_authed_calls_send_the_kurobayomi_user_agent_and_no_cache() {
     t.api().find_entry(Kind::Manga, 5).await.unwrap();
 
     let request = server.received_requests().await.unwrap().remove(0);
-    let agent = request.headers.get("user-agent").unwrap().to_str().unwrap().to_owned();
+    let agent = request
+        .headers
+        .get("user-agent")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
     assert!(agent.starts_with(UA_PREFIX));
     assert!(agent.ends_with("(io.github.blackbox.Kurobayomi)"));
 }
@@ -546,9 +599,15 @@ async fn t_30a_027_a_logout_during_a_refresh_discards_the_refreshed_token() {
     let (result, ()) = tokio::join!(call, logout);
 
     assert_eq!(result, Err(KitsuError::NotAuthenticated));
-    assert_eq!(auth::load(&secrets), None, "KT-97: no token is stored after logout");
     assert_eq!(
-        secrets.get(SECRET_SERVICE, &account(TrackerId::KITSU, Field::Username)).unwrap(),
+        auth::load(&secrets),
+        None,
+        "KT-97: no token is stored after logout"
+    );
+    assert_eq!(
+        secrets
+            .get(SECRET_SERVICE, &account(TrackerId::KITSU, Field::Username))
+            .unwrap(),
         None
     );
 }
@@ -560,10 +619,22 @@ async fn t_30a_026_operations_on_one_entry_wait_for_each_other() {
     let wait = Duration::from_millis(50);
 
     let first = t.lock_entry(Kind::Manga, 77).await;
-    assert!(tokio::time::timeout(wait, t.lock_entry(Kind::Manga, 77)).await.is_err());
-    assert!(tokio::time::timeout(wait, t.lock_entry(Kind::Anime, 77)).await.is_ok());
+    assert!(
+        tokio::time::timeout(wait, t.lock_entry(Kind::Manga, 77))
+            .await
+            .is_err()
+    );
+    assert!(
+        tokio::time::timeout(wait, t.lock_entry(Kind::Anime, 77))
+            .await
+            .is_ok()
+    );
     drop(first);
-    assert!(tokio::time::timeout(wait, t.lock_entry(Kind::Manga, 77)).await.is_ok());
+    assert!(
+        tokio::time::timeout(wait, t.lock_entry(Kind::Manga, 77))
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test]

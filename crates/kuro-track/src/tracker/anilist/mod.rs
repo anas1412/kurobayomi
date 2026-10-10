@@ -639,7 +639,10 @@ mod tests {
         assert!(r.is_err());
         assert!(api.is_logged_in(), "the first session is still held");
         assert!(api.api.state() == state);
-        assert_eq!(secrets.raw("tracker/2/password"), Some("token-value".into()));
+        assert_eq!(
+            secrets.raw("tracker/2/password"),
+            Some("token-value".into())
+        );
         assert_eq!(secrets.raw("tracker/2/account"), Some("4242".into()));
         assert_eq!(secrets.raw("tracker/2/expired"), None, "no expired flag");
         assert_eq!(secrets.all_values().len(), stored.len());

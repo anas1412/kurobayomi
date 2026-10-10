@@ -10,7 +10,9 @@ use crate::wire::{Message, Reader, WireError, Writer, required};
 
 /// Serial names of the `PreferenceValue` subclasses. kotlinx polymorphic encoding writes the fully qualified class
 /// name as field 1 and the subclass message (its `value` is field 1) as field 2. Confirmed on a real Aniyomi
-/// `.tachibk` (xyz.jmir.tachiyomi.mi_2026-05-26, 34 app preferences, 7 source preference groups; T-21a-034).
+/// `.tachibk` (xyz.jmir.tachiyomi.mi_2026-05-26, 34 app preferences, 7 source preference groups; T-21a-034). The
+/// records and the dump are in `fixtures/restore/prefs_wire.md` and `tests/prefs_wire.rs`, so these constants are
+/// verified, not guessed.
 pub mod pref_tag {
     pub const INT: &str = "eu.kanade.tachiyomi.data.backup.models.IntPreferenceValue";
     pub const LONG: &str = "eu.kanade.tachiyomi.data.backup.models.LongPreferenceValue";
@@ -37,6 +39,7 @@ fn update_strategy_of(v: u64) -> Result<UpdateStrategy, WireError> {
     }
 }
 
+/// `Seasons` 0, `Episodes` 1: Kotlin declaration order; the real dump has no field 507 to confirm it (`fixtures/MANIFEST.md`).
 fn fetch_type_of(v: u64) -> Result<FetchType, WireError> {
     match v {
         0 => Ok(FetchType::Seasons),

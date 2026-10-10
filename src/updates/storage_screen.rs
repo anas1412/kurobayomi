@@ -200,9 +200,9 @@ impl StorageScreen {
 
     /// The per-row confirm (T-42a-051): OK runs the delete hook, Cancel changes nothing.
     fn confirm_delete(self: &Rc<Self>, row: &StorageRow) {
-        let title = if self.anime { copy::DELETE_TITLE_EPISODES } else { copy::DELETE_TITLE_CHAPTERS };
+        let title = if self.anime { copy::delete_title_episodes() } else { copy::delete_title_chapters() };
         let copy_text = ConfirmCopy {
-            title: title.to_owned(),
+            title,
             text: storage::delete_text(&row.title),
             checkbox: None,
             confirm: tr(MsgKey::action_ok),

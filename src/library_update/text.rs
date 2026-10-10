@@ -8,6 +8,23 @@ pub const SUMMARY_TITLE_CHOP: usize = 45;
 /// Chapter or episode numbers listed in a description before "and N more".
 pub const MAX_LISTED_NUMBERS: usize = 5;
 
+/// A source with more queued entries than this in one pass gets the large-queue warning (unless it is unmetered).
+pub const QUEUE_WARNING_THRESHOLD: usize = 60;
+/// How long the large-queue warning stays on screen.
+pub const QUEUE_WARNING_TIMEOUT_MS: u64 = 30_000;
+pub const QUEUE_WARNING_TITLE: &str = "Warning";
+pub const QUEUE_WARNING_TEXT: &str =
+    "Large updates harm sources and may lead to slower updates and also increased battery usage. Tap to learn more.";
+/// The help page the warning opens (the Kotlin FAQ anchor, kept until the Kurobayomi site has its own).
+pub const QUEUE_WARNING_URL: &str =
+    "https://aniyomi.org/docs/faq/library#why-am-i-warned-about-large-bulk-updates-and-downloads";
+
+/// Whether the large-queue warning shows: `per_source` holds (queued entries, unmetered) for each source of the pass.
+/// Only a source that is not unmetered and has more than [`QUEUE_WARNING_THRESHOLD`] entries counts.
+pub fn queue_needs_warning(per_source: &[(usize, bool)]) -> bool {
+    per_source.iter().any(|(count, unmetered)| !unmetered && *count > QUEUE_WARNING_THRESHOLD)
+}
+
 /// `chop` of the Kotlin helper: text longer than `count` characters is cut to `count - 1` characters plus "…".
 pub fn chop(text: &str, count: usize) -> String {
     if text.chars().count() > count {
@@ -117,6 +134,16 @@ mod tests {
 
     const M: EntryKind = EntryKind::Manga;
     const A: EntryKind = EntryKind::Anime;
+
+    #[test]
+    fn large_queue_warning_needs_more_than_sixty_entries_from_a_metered_source() {
+        // Q-18: 60 is fine, 61 warns, an unmetered source is exempt, and any one source is enough.
+        assert!(!queue_needs_warning(&[(60, false)]));
+        assert!(queue_needs_warning(&[(61, false)]));
+        assert!(!queue_needs_warning(&[(500, true)]));
+        assert!(queue_needs_warning(&[(3, false), (1, true), (70, false)]));
+        assert!(!queue_needs_warning(&[]));
+    }
 
     #[test]
     fn progress_percent_rounds_down_and_guards_zero() {

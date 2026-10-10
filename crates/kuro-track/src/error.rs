@@ -7,6 +7,12 @@ use kuro_platform::secrets::SecretError;
 pub enum TrackError {
     #[error("{0}")]
     Message(String),
+    /// The server refused the login or key. The toast shows the `track.enhanced.unauthorized` key (T-33a-005).
+    #[error("unauthorised")]
+    Unauthorised,
+    /// A transport failure. The text is already redacted (T-33a-005).
+    #[error("{0}")]
+    Http(String),
     #[error("score not in list: '{0}'")]
     UnknownScore(String),
     #[error("track has no row id")]
@@ -53,8 +59,12 @@ impl TrackError {
     }
 
     pub fn toast(&self, tracker: &str) -> crate::messages::MsgKey {
-        if let TrackError::Key(key) = self {
-            return key.clone();
+        match self {
+            TrackError::Key(key) => return key.clone(),
+            TrackError::Unauthorised => {
+                return crate::messages::MsgKey::enhanced("track.enhanced.unauthorized", "");
+            }
+            _ => {}
         }
         crate::messages::MsgKey::TrackerError {
             tracker: tracker.to_owned(),

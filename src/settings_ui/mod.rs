@@ -14,6 +14,7 @@ pub mod browse;
 pub mod cache;
 pub mod category;
 pub mod clipboard;
+pub mod downloads;
 pub mod lang;
 pub mod library;
 pub mod menu;

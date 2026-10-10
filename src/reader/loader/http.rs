@@ -305,6 +305,17 @@ impl HttpLoader {
         }
     }
 
+    /// Copies the worker's status and image url of one page into its cells. Runs on the GTK thread.
+    pub fn sync_page(&self, page: &ReaderPage) {
+        let state = self.shared.lock();
+        if let Some(slot) = state.slots.get(page.index as usize) {
+            page.status.set(slot.status);
+            if slot.image_url.is_some() {
+                *page.image_url.borrow_mut() = slot.image_url.clone();
+            }
+        }
+    }
+
     /// Stops the worker after its current page and drops the queue. Idempotent.
     pub fn recycle(&self) {
         if self.recycled.replace(true) {

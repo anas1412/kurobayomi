@@ -1,0 +1,17 @@
+{
+  "note": "Generic fixture for T-40b-043: 12 titles, mixed case, one empty, one with accents.",
+  "favorites": [
+    {"id": 1, "title": "Manga A"},
+    {"id": 2, "title": "manga a"},
+    {"id": 3, "title": "MANGA B"},
+    {"id": 4, "title": "Manga c"},
+    {"id": 5, "title": "Zeta Tale"},
+    {"id": 6, "title": "alpha quest"},
+    {"id": 7, "title": "Beta Story"},
+    {"id": 8, "title": "Gamma Run"},
+    {"id": 9, "title": ""},
+    {"id": 10, "title": "Delta Night"},
+    {"id": 11, "title": "ÉCLAIR"},
+    {"id": 12, "title": "éclair"}
+  ]
+}

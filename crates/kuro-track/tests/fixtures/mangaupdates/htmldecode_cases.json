@@ -1,0 +1,17 @@
+{
+  "_about": "TST-14 / T-32a-023. `kotlin` is the output of htmlDecode (androidx parseAsHtml, legacy mode) read from the Android HTML converter rules; there is no JVM here to run it. A case with `port` is a known difference: the Rust port returns `port`, not `kotlin`.",
+  "cases": [
+    { "name": "entity and tag", "input": "Tom &amp; Jerry <i>x</i>", "kotlin": "Tom & Jerry x" },
+    { "name": "nested tags", "input": "<b>bold <i>italic</i></b> text", "kotlin": "bold italic text" },
+    { "name": "unclosed tag", "input": "<b>unclosed", "kotlin": "unclosed" },
+    { "name": "empty", "input": "", "kotlin": "" },
+    { "name": "unicode with entity", "input": "日本語 &lt;3", "kotlin": "日本語 <3" },
+    { "name": "numeric entities", "input": "It&#39;s &#x41;", "kotlin": "It's A" },
+    { "name": "named entities", "input": "&quot;q&quot; &copy; &hellip;", "kotlin": "\"q\" © …" },
+    { "name": "bare ampersand and less-than", "input": "AT&T a < b", "kotlin": "AT&T a < b" },
+    { "name": "double encoded", "input": "&amp;lt;b&amp;gt;", "kotlin": "&lt;b&gt;" },
+    { "name": "unknown entity stays", "input": "x &zzzunknown; y", "kotlin": "x &zzzunknown; y" },
+    { "name": "line break tag", "input": "a<br>b", "kotlin": "a\nb", "port": "ab" },
+    { "name": "script content", "input": "x<script>alert(1)</script>y", "kotlin": "xalert(1)y", "port": "xy" }
+  ]
+}

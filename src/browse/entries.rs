@@ -26,6 +26,12 @@ pub struct CategoryChoice {
     pub name: String,
 }
 
+/// The chooser's rows: the user's categories only (the system category, id 0, is never offered), each checked when the
+/// entry is linked to it now (B§4.8.3).
+pub fn chooser_rows(categories: &[CategoryChoice], linked: &[i64]) -> Vec<(CategoryChoice, bool)> {
+    categories.iter().filter(|c| c.id != 0).map(|c| (c.clone(), linked.contains(&c.id))).collect()
+}
+
 /// Starts the enhanced-tracker bindings of a newly added entry: the entry id, its title and its source id. It must not
 /// block: the add does not wait for the trackers (B§5.2).
 pub type TrackerBinder = Arc<dyn Fn(i64, &str, i64) + Send + Sync>;
@@ -44,6 +50,11 @@ pub trait FavoriteStore: Send + Sync + 'static {
     fn write_favorite(&self, id: i64, write: FavoriteWrite) -> Result<(), String>;
     /// Replaces the entry's category links; an empty list is the Default category.
     fn set_categories(&self, id: i64, ids: &[i64]) -> Result<(), String>;
+    /// The category ids the entry is linked to now: the chooser opens with these checked (B§4.8.3). A store without
+    /// links has none.
+    fn entry_categories(&self, _id: i64) -> Result<Vec<i64>, String> {
+        Ok(Vec::new())
+    }
     /// Deletes the entry's cached cover files and returns how many files went.
     fn clear_cover(&self, id: i64) -> usize;
     /// Writes `cover_last_modified`.
@@ -126,6 +137,8 @@ pub(crate) mod fake {
         pub duplicates: Mutex<Vec<i64>>,
         pub covers: Mutex<usize>,
         pub known: Mutex<Vec<(i64, String, bool)>>,
+        /// The category ids the entry is linked to now.
+        pub links: Mutex<Vec<i64>>,
         /// The ids `after_add` ran for.
         pub added: Mutex<Vec<i64>>,
     }
@@ -166,6 +179,9 @@ pub(crate) mod fake {
         fn set_categories(&self, id: i64, ids: &[i64]) -> Result<(), String> {
             self.note("set_categories", format!("categories {id} {ids:?}"))
         }
+        fn entry_categories(&self, _id: i64) -> Result<Vec<i64>, String> {
+            Ok(self.links.lock().expect("lock").clone())
+        }
         fn clear_cover(&self, id: i64) -> usize {
             self.log.lock().expect("lock").push(format!("clear_cover {id}"));
             *self.covers.lock().expect("lock")
@@ -205,6 +221,21 @@ mod tests {
         assert!(store.calls().is_empty());
         assert_eq!(add_entry_to(&store, 7, 1_000, vec![3]), AddOutcome::Added { category_error: None });
         assert_eq!(store.calls(), ["categories 7 [3]", "favorite 7 true 1000"]);
+    }
+
+    #[test]
+    fn the_chooser_lists_user_categories_only_with_the_linked_ones_checked() {
+        let all = vec![
+            CategoryChoice { id: 0, name: "Default".into() },
+            CategoryChoice { id: 3, name: "Reading".into() },
+            CategoryChoice { id: 4, name: "Later".into() },
+        ];
+        let rows = chooser_rows(&all, &[4, 0]);
+        let shown: Vec<(i64, bool)> = rows.iter().map(|(c, on)| (c.id, *on)).collect();
+        assert_eq!(shown, [(3, false), (4, true)], "id 0 is never offered, the link to 4 is checked");
+        let store = FakeStore::default();
+        *store.links.lock().expect("lock") = vec![3];
+        assert_eq!(store.entry_categories(7), Ok(vec![3]));
     }
 
     #[test]

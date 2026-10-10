@@ -157,7 +157,7 @@ pub fn test_client() -> reqwest::Client {
 pub fn trust_with_entries(entries: &[String]) -> crate::anime::trust::TrustStore {
     let pref = kuro_prefs::store::PrefStore::in_memory()
         .pref("__APP_STATE_trusted_extensions", std::collections::BTreeSet::new());
-    pref.extend(entries.iter().cloned());
+    pref.extend(entries.iter().cloned()).expect("the in-memory store accepts the trust entries");
     crate::anime::trust::TrustStore::new(pref)
 }
 

@@ -81,6 +81,10 @@ impl<H: Host> Host for PrefsHost<H> {
     fn show_error(&self, kind: EntryKind, failed: usize) {
         self.inner.show_error(kind, failed);
     }
+
+    fn show_queue_warning(&self, kind: EntryKind) {
+        self.inner.show_queue_warning(kind);
+    }
 }
 
 #[cfg(test)]

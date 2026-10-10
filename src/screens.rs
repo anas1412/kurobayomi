@@ -23,6 +23,7 @@ pub fn body(id: &str) -> Option<Built> {
         "history" => crate::updates::mount::history().or_else(history),
         "more" => more(),
         "browse" => crate::browse::mount::browse().or_else(|| crate::entry::body(id)),
+        "global_search" | "migrate_search" => crate::browse::search_screen::body(id == "migrate_search").or_else(|| crate::entry::body(id)),
         "download_queue" => downloads(),
         "categories" => categories(),
         "stats" => stats(),
@@ -40,6 +41,11 @@ pub fn build(id: &str) -> GBox {
         "player" => return crate::player::player("Title 1", "Episode 1"),
         "anime_entry_details" => return crate::entry_core::anime::route::build(),
         "manga_entry_details" => return crate::entry_core::route::build(),
+        "browse_source" | "migrate_source_search" => {
+            if let Some(page) = crate::browse::browse_screen::page(id) {
+                return page;
+            }
+        }
         _ => {}
     }
     let s = screen(id);
@@ -168,7 +174,7 @@ fn library(id: &str, anime: bool) -> Built {
     // the live library view; the prototype below stays as the fallback when its worker cannot start
     if let Some(mut b) = crate::library::mount::build(anime) {
         if anime {
-            b.end.insert(0, crate::local_flow_anime::add_button().upcast());
+            b.end.insert(0, crate::local_flow_anime::header_actions().upcast());
         } else {
             b.end.insert(0, crate::local_flow::ui::header_actions().upcast());
         }
@@ -365,70 +371,12 @@ fn categories() -> Option<Built> {
     built(content, vec![])
 }
 
-fn stat_card(title: &str, items: &[(String, String)], big: bool) -> gtk::Frame {
-    let v = GBox::new(O::Vertical, 8);
-    margins(&v, 16);
-    v.append(&Label::builder().label(title).xalign(0.0).css_classes(["heading"]).build());
-    let row = GBox::new(O::Horizontal, 0);
-    row.set_homogeneous(true);
-    for (value, caption) in items {
-        let c = GBox::new(O::Vertical, 2);
-        c.append(&Label::builder().label(value).css_classes([if big { "title-1" } else { "title-3" }]).build());
-        c.append(&dim(caption));
-        c.last_child().unwrap().set_halign(Align::Center);
-        row.append(&c);
-    }
-    v.append(&row);
-    gtk::Frame::builder().child(&v).build()
-}
-
 fn stats() -> Option<Built> {
-    let s = screen("stats");
-    let content = kind_tabs(move |anime| {
-        let col = column();
-        let values = [["42", "2d 4h 10m", "7"], ["30", "12", "1"], ["980", "640", "52"], ["18", "7.40 ★", "2"]];
-        for (gi, g) in s.groups.iter().enumerate() {
-            let items: Vec<(String, String)> = g
-                .items
-                .iter()
-                .enumerate()
-                .map(|(i, it)| {
-                    let cap = match it { crate::spec::Item::Info { title } => title.clone(), _ => String::new() };
-                    let cap = if anime { cap } else { cap.replace("Watched", "Read").replace("watched", "read") };
-                    (values.get(gi).map(|v| v[i.min(2)]).unwrap_or("0").to_string(), cap)
-                })
-                .collect();
-            let t = g.title.clone().unwrap_or_default();
-            let t = if anime { t } else { t.replace("Episodes", "Chapters") };
-            col.append(&stat_card(&t, &items, gi == 0));
-        }
-        scrolled(&col).upcast()
-    });
-    built(content, vec![])
+    crate::updates::mount::stats()
 }
 
 fn storage() -> Option<Built> {
-    let content = kind_tabs(|anime| {
-        let col = column();
-        let cat = gtk::DropDown::from_strings(&["All", "Default", "Reading"]);
-        cat.set_halign(Align::Center);
-        col.append(&cat);
-        col.append(&Label::builder().label("3.2 GB").css_classes(["title-1"]).margin_top(12).build());
-        let gauge = gtk::LevelBar::for_interval(0.0, 1.0);
-        gauge.set_value(0.64);
-        col.append(&gauge);
-        let l = boxed_list();
-        for i in 1..=5 {
-            let n = if anime { format!("{} episodes", 24 - i) } else { format!("{} chapters", 80 - i) };
-            let del = icon_button("user-trash-symbolic", "Delete");
-            let d = if anime { "storage_delete_anime" } else { "storage_delete_manga" };
-            del.connect_clicked(move |_| dialog_of("storage", d));
-            l.append(&list_row(Some(thumb(48, 48).upcast()), &title_n(i), &format!("● {} MB · {n}", 900 / i), vec![del.upcast()]));
-        }
-        col.append(&l);
-        scrolled(&col).upcast()
-    });
-    built(content, vec![])
+    crate::updates::mount::storage()
 }
 
 // Onboarding / New update / Crash share Aniyomi's InfoScreen layout.

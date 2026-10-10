@@ -80,10 +80,10 @@ pub struct CategoryOption {
 /// The dropdown options: "All" first, then the categories in the given order. Id 0 is shown as "Default" whatever its
 /// stored name is (EC-42-T-04).
 pub fn category_options(categories: &[(i64, String)]) -> Vec<CategoryOption> {
-    std::iter::once(CategoryOption { id: ALL_ID, label: copy::STORAGE_ALL.to_owned() })
+    std::iter::once(CategoryOption { id: ALL_ID, label: copy::storage_all() })
         .chain(categories.iter().map(|(id, name)| CategoryOption {
             id: *id,
-            label: if *id == 0 { copy::STORAGE_DEFAULT.to_owned() } else { name.clone() },
+            label: if *id == 0 { copy::storage_default() } else { name.clone() },
         }))
         .collect()
 }

@@ -85,6 +85,10 @@ pub trait AnimeBackend: Send + Sync + 'static {
     fn is_http_source(&self, _source_id: i64) -> bool {
         false
     }
+    /// Whether the source is configurable: only then does the overflow menu offer Settings (T-39a-057).
+    fn is_configurable_source(&self, _source_id: i64) -> bool {
+        false
+    }
     /// Plays an episode in an external player. `false` when it cannot (the app resolves no video URL yet): the page
     /// then opens the internal player.
     fn play_external(&self, _anime_id: i64, _episode_id: i64) -> bool {
@@ -151,6 +155,8 @@ pub enum AnimeCmd {
     /// A manual refresh: every part of the entry is fetched again, and the new episodes may auto-download.
     Refresh { anime_id: i64 },
     SetFlagBits { anime_id: i64, flag: i64, mask: i64 },
+    /// The skip-intro length in seconds; 0 turns the skip off (`setSkipIntroLength`).
+    SetSkipIntroLength { anime_id: i64, length: i32 },
     SortBy { anime_id: i64, mode: i64 },
     /// A masked write of the season flag word (the season settings window).
     SetSeasonFlagBits { anime_id: i64, flag: i64, mask: i64 },
@@ -583,6 +589,9 @@ impl Shared {
         let result = match cmd {
             AnimeCmd::SetFlagBits { anime_id, flag, mask } => {
                 self.blocking(move |s| s.set_flag_bits(anime_id, flag, mask)).await
+            }
+            AnimeCmd::SetSkipIntroLength { anime_id, length } => {
+                self.blocking(move |s| s.set_skip_intro_length(anime_id, length)).await
             }
             AnimeCmd::SortBy { anime_id, mode } => self.blocking(move |s| s.sort_by(anime_id, mode)).await,
             AnimeCmd::SetSeasonFlagBits { anime_id, flag, mask } => {

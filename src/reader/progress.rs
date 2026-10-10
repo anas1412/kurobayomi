@@ -103,22 +103,19 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi progress:: -- --ignored"]
     fn show_and_hide_toggle_and_the_ring_appears_only_after_set_progress() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping the loading indicator");
-            return;
-        }
-        let indicator = LoadingIndicator::new();
-        assert!(!indicator.is_shown());
-        assert_eq!(indicator.progress(), None);
-        indicator.show();
-        assert!(indicator.is_shown());
-        indicator.set_progress(150);
-        assert_eq!(indicator.progress(), Some(100));
-        indicator.set_progress(-1);
-        assert_eq!(indicator.progress(), Some(0));
-        indicator.hide();
-        assert!(!indicator.is_shown());
+        crate::testing::with_display(|| {
+            let indicator = LoadingIndicator::new();
+            assert!(!indicator.is_shown());
+            assert_eq!(indicator.progress(), None);
+            indicator.show();
+            assert!(indicator.is_shown());
+            indicator.set_progress(150);
+            assert_eq!(indicator.progress(), Some(100));
+            indicator.set_progress(-1);
+            assert_eq!(indicator.progress(), Some(0));
+            indicator.hide();
+            assert!(!indicator.is_shown());
+        });
     }
 }

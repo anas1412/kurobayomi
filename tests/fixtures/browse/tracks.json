@@ -1,0 +1,7 @@
+{
+  "note": "Generic fixture for the migrate engine: two tracks, one matched by a fake tracker, one not.",
+  "tracks": [
+    {"tracker_id": 900, "remote_id": 11, "matched_by_fake_tracker": true},
+    {"tracker_id": 901, "remote_id": 12, "matched_by_fake_tracker": false}
+  ]
+}

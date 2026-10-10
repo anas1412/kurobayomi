@@ -4,6 +4,11 @@
 use std::collections::{BTreeMap, HashMap};
 
 use kuro_prefs::import::{ANIME_CATEGORY_KEYS, CategoryMaps, ImportReport, MANGA_CATEGORY_KEYS, import_preferences};
+use kuro_prefs::keys::restored_key;
+use kuro_prefs::legacy::{
+    EXTENSION_REPO_SETS, LEGACY_SECURE_SCREEN, LEGACY_UPDATE_ONLY_NON_COMPLETED, SECURE_SCREEN_V2, UPDATE_INTERVAL,
+    UPDATE_RESTRICTIONS,
+};
 use kuro_prefs::registry::{self, Kind};
 use kuro_prefs::store::PrefStore;
 use kuro_prefs::values::PrefValue as Value;
@@ -60,6 +65,39 @@ fn convert(v: &PrefValue) -> Value {
     }
 }
 
+/// The prefix of app-state keys. They are never restored from a backup (T-22a-052).
+const APP_STATE_PREFIX: &str = "__APP_STATE_";
+
+/// Legacy names that `legacy::convert` rewrites before the write. They are not in the registry, but a restore must
+/// keep them (T-22a-052).
+const RESTORABLE_LEGACY_KEYS: [&str; 7] = [
+    LEGACY_SECURE_SCREEN,
+    SECURE_SCREEN_V2,
+    LEGACY_UPDATE_ONLY_NON_COMPLETED,
+    UPDATE_INTERVAL,
+    UPDATE_RESTRICTIONS,
+    EXTENSION_REPO_SETS[0],
+    EXTENSION_REPO_SETS[1],
+];
+
+/// Keys of retired features. Their value is read from a backup and ignored (T-19a-037): the installer choice went with
+/// the Android installers, and the single kuroext install path has no setting for it.
+const RETIRED_KEYS: [&str; 1] = ["extension_installer"];
+
+/// The allowlist of an app-preference restore (T-22a-052). A key is written only when the Kurobayomi schema names it or
+/// it is a legacy key above. App-state keys and retired keys are never written. Everything else, such as a key the app
+/// does not know, is skipped and counted.
+fn is_restorable(key: &str) -> bool {
+    if key.starts_with(APP_STATE_PREFIX) {
+        return false;
+    }
+    let current = restored_key(key);
+    if RETIRED_KEYS.contains(&current.as_str()) {
+        return false;
+    }
+    registry::lookup(&current).is_some() || RESTORABLE_LEGACY_KEYS.contains(&current.as_str())
+}
+
 /// The two default-category keys hold one id, remapped (T-22a-009).
 fn is_default_category(key: &str) -> bool {
     key == "default_category" || key == "default_anime_category"
@@ -111,16 +149,25 @@ fn map_for<'a>(key: &str, maps: &'a CategoryMaps) -> &'a BTreeMap<i64, i64> {
     if MANGA_CATEGORY_KEYS.contains(&key) { &maps.manga } else { &maps.anime }
 }
 
+/// What an app-preference restore did: the import report, and how many backup keys the allowlist skipped (T-22a-052).
+#[derive(Debug, Default)]
+pub struct AppPrefsRestore {
+    pub report: ImportReport,
+    pub skipped: usize,
+}
+
 /// Restores the app preferences (T-22a-009), writes `categorized_display` when the categories section computed it,
-/// then re-arms both schedulers once each (T-22a-010, X-57).
+/// then re-arms both schedulers once each (T-22a-010, X-57). Keys the allowlist refuses are skipped and counted.
 pub fn restore_app_prefs(
     store: &PrefStore,
     prefs: &[BackupPreference],
     maps: &CategoryMaps,
     categorized_display: Option<bool>,
     scheduler: &dyn Scheduler,
-) -> ImportReport {
-    let entries = prepare(store, prefs, maps);
+) -> AppPrefsRestore {
+    let allowed: Vec<BackupPreference> = prefs.iter().filter(|p| is_restorable(&p.key)).cloned().collect();
+    let skipped = prefs.len() - allowed.len();
+    let entries = prepare(store, &allowed, maps);
     // No credentials are passed, so `import_preferences` has no error path. Private keys are counted as skipped.
     let report = import_preferences(store, entries, maps, None, false).unwrap_or_default();
     if let Some(flag) = categorized_display {
@@ -128,7 +175,7 @@ pub fn restore_app_prefs(
     }
     scheduler.rearm_library_updates();
     scheduler.rearm_auto_backup();
-    report
+    AppPrefsRestore { report, skipped }
 }
 
 /// Restores each source's preferences into the store `source_<sourceId>` (T-22a-009, E-52). `open` returns the store
@@ -220,16 +267,61 @@ mod tests {
     }
 
     #[test]
-    fn unregistered_key_with_a_different_stored_type_is_skipped() {
+    fn unregistered_keys_are_skipped_and_counted_by_the_allowlist() {
         let store = PrefStore::in_memory();
         store.set_raw("not_in_registry", Value::Bool(true));
         let prefs = vec![
             pref("not_in_registry", PrefValue::String("x".into())),
             pref("other_unknown", PrefValue::String("y".into())),
         ];
-        restore_app_prefs(&store, &prefs, &CategoryMaps::default(), None, &Count::default());
+        let outcome = restore_app_prefs(&store, &prefs, &CategoryMaps::default(), None, &Count::default());
         assert_eq!(store.get_raw("not_in_registry"), Some(Value::Bool(true)));
-        assert_eq!(store.get_raw("other_unknown"), Some(Value::Str("y".into())), "absent key is written");
+        assert_eq!(store.get_raw("other_unknown"), None, "an unknown key is never written");
+        assert_eq!(outcome.skipped, 2);
+    }
+
+    #[test]
+    fn keys_outside_the_schema_and_app_state_keys_are_skipped_and_counted() {
+        let store = PrefStore::in_memory();
+        let prefs = vec![
+            pref("other_unknown", PrefValue::String("y".into())),
+            pref("__APP_STATE_last_auto_backup_timestamp", PrefValue::Long(5)),
+            pref("extension_installer", PrefValue::String("SHIZUKU".into())),
+            pref("show_nsfw_source", PrefValue::Boolean(true)),
+        ];
+        let outcome = restore_app_prefs(&store, &prefs, &CategoryMaps::default(), None, &Count::default());
+        assert_eq!(outcome.skipped, 3);
+        assert_eq!(outcome.report.unknown_kept, 0, "nothing unknown reaches the write");
+        assert_eq!(store.get_raw("extension_installer"), None, "the removed installer preference is ignored, with no error");
+        assert_eq!(store.get_raw("show_nsfw_source"), Some(Value::Bool(true)));
+    }
+
+    #[test]
+    fn a_backup_with_only_known_keys_skips_nothing() {
+        let store = PrefStore::in_memory();
+        let outcome = restore_app_prefs(
+            &store,
+            &[pref("show_nsfw_source", PrefValue::Boolean(true))],
+            &CategoryMaps::default(),
+            None,
+            &Count::default(),
+        );
+        assert_eq!(outcome.skipped, 0);
+        assert_eq!(store.get_raw("show_nsfw_source"), Some(Value::Bool(true)));
+    }
+
+    #[test]
+    fn a_legacy_key_passes_the_allowlist_so_its_conversion_still_runs() {
+        let store = PrefStore::in_memory();
+        let outcome = restore_app_prefs(
+            &store,
+            &[pref("secure_screen", PrefValue::Boolean(true))],
+            &CategoryMaps::default(),
+            None,
+            &Count::default(),
+        );
+        assert_eq!(outcome.skipped, 0);
+        assert!(!outcome.report.conversions.is_empty(), "secure_screen is converted, not dropped");
     }
 
     #[test]

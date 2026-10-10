@@ -2,8 +2,8 @@
 //! service and preferences. GTK widgets are in `view`; `mount` puts the view in the window.
 //!
 //! Tests: the package is a binary, so there is no `--lib` target. Run them without a display with
-//! `cargo test -p kurobayomi --bin kurobayomi library::`. The widget checks in `view::sheet` need a display and are
-//! ignored by default (`... library::view::sheet -- --ignored`). `t2` holds the T2-* tests of
+//! `cargo test -p kurobayomi --bin kurobayomi library::`. The widget checks in `view::sheet` need a display and skip
+//! themselves without one (they run on the shared GTK thread of `crate::testing`). `t2` holds the T2-* tests of
 //! `p1-edge-cases-and-tests.md` section T-2.
 //!
 //! Fixtures: the T-3 data sets live with the code that reads them, in `crates/kuro-domain` (its `testdb` and the

@@ -12,6 +12,7 @@ kuro-i18n = { path = "../kuro-i18n" }
 kuro-net = { path = "../kuro-net" }
 kuro-platform = { path = "../kuro-platform" }
 kuro-prefs = { path = "../kuro-prefs" }
+md-5 = { workspace = true }
 async-trait = { workspace = true }
 ammonia = "4.2.1"
 bytes = { workspace = true }

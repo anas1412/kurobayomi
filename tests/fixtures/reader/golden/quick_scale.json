@@ -1,0 +1,56 @@
+{
+  "about": "threshold 20, y_start 100; the scale is clamped to 1..4; the sixth move crosses, so the seventh keeps the scale",
+  "threshold": 20.0,
+  "steps": [
+    {
+      "y": 100.0,
+      "multiplier": 1.0,
+      "scale": 1.0
+    },
+    {
+      "y": 100.0,
+      "multiplier": 1.0,
+      "scale": 1.0
+    },
+    {
+      "y": 110.0,
+      "multiplier": 1.5,
+      "scale": 1.5
+    },
+    {
+      "y": 120.0,
+      "multiplier": 1.25,
+      "scale": 1.875
+    },
+    {
+      "y": 115.0,
+      "multiplier": 0.9166666666666667,
+      "scale": 1.7187500000000002
+    },
+    {
+      "y": 115.0,
+      "multiplier": 1.0,
+      "scale": 1.7187500000000002
+    },
+    {
+      "y": 140.0,
+      "multiplier": 1.0,
+      "scale": 1.7187500000000002
+    },
+    {
+      "y": 150.0,
+      "multiplier": 1.1,
+      "scale": 1.8906250000000004
+    },
+    {
+      "y": 130.0,
+      "multiplier": 0.8333333333333333,
+      "scale": 1.5755208333333335
+    },
+    {
+      "y": 130.0,
+      "multiplier": 1.0,
+      "scale": 1.5755208333333335
+    }
+  ]
+}

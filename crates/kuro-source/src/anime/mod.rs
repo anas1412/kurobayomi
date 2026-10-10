@@ -2,10 +2,14 @@
 //! API, as `ARCHITECTURE.md` and `CRATE-MAP.md` place it. No GTK and no HTTP here: the HTTP adapter lands in
 //! `kuro-source-http`, the same as for manga.
 
+pub mod codec;
 pub mod hoster;
 pub mod loader;
 pub mod model;
+pub mod registry;
 pub mod thumbnail;
+pub mod torrent;
+pub mod torrent_lookup;
 pub mod traits;
 pub mod url;
 pub mod video;

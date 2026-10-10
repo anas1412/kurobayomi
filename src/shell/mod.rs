@@ -29,4 +29,20 @@ pub mod reader_root;
 pub mod search;
 pub mod tabs;
 
+// the screens that use these build them in their own lanes; the rules are tested here
+#[allow(dead_code)]
+pub mod date_text;
+#[allow(dead_code)]
+pub mod empty;
+#[allow(dead_code)]
+pub mod entry_route;
+#[allow(dead_code)]
+pub mod lifecycle;
+#[allow(dead_code)]
+pub mod tabbed;
+#[allow(dead_code)]
+pub mod warning;
+#[allow(dead_code)]
+pub mod webview;
+
 pub use host::Shell;

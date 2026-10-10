@@ -22,10 +22,12 @@ use kuro_prefs::pref::Pref;
 use tokio::runtime::Handle;
 use tokio::sync::watch;
 
+use crate::library_update::constraints::{self, DeviceFacts};
 use crate::library_update::counters::PrefsHost;
 use crate::library_update::entry::Deps;
 use crate::library_update::error::UpdateError;
-use crate::library_update::pass::{EntryUpdate, Host, PassRunner, PassSettings, Trigger};
+use crate::library_update::notice;
+use crate::library_update::pass::{EntryUpdate, Host, PassRunner, PassSettings, PassStatus, Trigger};
 use crate::library_update::queue::QueueRestrictions;
 use crate::library_update::schedule::run_schedule;
 use crate::library_update::source::{Fetched, Source, SourceRegistry};
@@ -90,8 +92,28 @@ impl Host for ToastHost {
     fn start_downloads(&self, _kind: EntryKind) {}
 
     fn show_error(&self, _kind: EntryKind, failed: usize) {
-        crate::toast::notify(format!("Library update failed for {failed} {}", if failed == 1 { "entry" } else { "entries" }));
+        // No error log file is written yet, so the notice has no tap action.
+        if let Some(notice) = notice::error_notice(failed, false) {
+            crate::toast::notify(format!("{}: {}", notice.title, notice.text));
+        }
     }
+
+    // Toasts are short; the 30 s warning and its help link need a notification surface (not wired yet).
+    fn show_queue_warning(&self, _kind: EntryKind) {
+        crate::toast::notify(format!("{}: {}", text::QUEUE_WARNING_TITLE, text::QUEUE_WARNING_TEXT));
+    }
+}
+
+/// Whether the device restrictions the user chose hold right now. Only the facts the platform reports count: the
+/// connection is not checked here yet (the platform reports "not connected" when it cannot read NetworkManager), and
+/// Wi-Fi is unknown until the platform reports the primary connection type. A blocked scheduled pass retries later.
+async fn device_allows(inputs: &Inputs) -> bool {
+    let restrictions = inputs.library.auto_update_device_restrictions.get();
+    let now = kuro_platform::power_network::read_conditions().await;
+    constraints::satisfied(
+        &restrictions,
+        DeviceFacts { connected: None, wifi: None, metered: Some(now.metered), on_ac: Some(now.on_ac) },
+    )
 }
 
 type Runner = PassRunner<NothingInstalled, SqliteLibraryStore, DbItemSync, PrefsHost<ToastHost>>;
@@ -179,7 +201,12 @@ pub fn start() {
         let (runner, inputs) = (runner.clone(), inputs.clone());
         handle.spawn(run_schedule(rx, move || {
             let (runner, inputs) = (runner.clone(), inputs.clone());
-            async move { runner.run(pass_settings(kind, None, &inputs), Trigger::Auto).await.status }
+            async move {
+                if !device_allows(&inputs).await {
+                    return PassStatus::Retry;
+                }
+                runner.run(pass_settings(kind, None, &inputs), Trigger::Auto).await.status
+            }
         }));
     }
     let pref = LibraryPrefs::new(app.base.store().clone()).auto_update_interval;

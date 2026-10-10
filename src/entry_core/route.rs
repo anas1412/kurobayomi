@@ -26,8 +26,9 @@ use crate::entry_core::backend::StubBackend;
 use crate::entry_core::action_row::{TrackingClick, interval_click_opens_dialog, next_update, tracking_click};
 use crate::entry_core::action_row_view::{ActionRow, RowState};
 use crate::entry_core::banner_view::{self, BannerView};
+use crate::entry_core::bulk_bar::{BulkAction, bulk_actions};
 use crate::entry_core::chapter::ChapterRow;
-use crate::entry_core::chapter_actions::{DownloadAction, fab_state, indicator_action};
+use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, fab_state, indicator_action};
 use crate::entry_core::description_view;
 use crate::entry_core::detail::{LatestWins, LoadContext, LoadState, StoreCmd, StoreEvent};
 use crate::entry_core::dialog::{CategoryDialog, Dialog};
@@ -96,6 +97,8 @@ struct View {
     list: Rc<ChapterList>,
     scroller: gtk::ScrolledWindow,
     selection_bar: gtk::Revealer,
+    /// The buttons the selection bar shows, so it is rebuilt only when they change (T-38a-024).
+    bulk_shown: RefCell<Vec<BulkAction>>,
     banner: BannerView,
     fab: gtk::Revealer,
     fab_label: Label,
@@ -349,6 +352,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         list: Rc::clone(&list),
         scroller: scroller.clone(),
         selection_bar,
+        bulk_shown: RefCell::new(Vec::new()),
         banner,
         fab,
         fab_label,
@@ -372,7 +376,6 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     let weak = Rc::downgrade(&view);
     *on_row_view.borrow_mut() = weak.clone();
     *banner_weak.borrow_mut() = weak.clone();
-    view.build_selection_bar();
     view.render();
 
     library.connect(
@@ -617,6 +620,11 @@ impl View {
     fn open_chapter(&self, id: i64) {
         let page = self.page.borrow();
         let Some(ready) = page.ready() else { return };
+        if ready.manga.source == kuro_local::LOCAL_SOURCE_ID {
+            // a local chapter is opened by ids, so two folders with one title keep apart
+            ui::push(&crate::local_flow::reader::open_local_chapter(ready.manga.id, id));
+            return;
+        }
         let name = ready.chapters.iter().find(|c| c.id == id).map(|c: &ChapterRow| c.name.clone()).unwrap_or_default();
         crate::screens::open_media(false, &ready.manga.title, &name);
     }
@@ -801,7 +809,18 @@ impl View {
         self.spinner.set_visible(refreshing);
         self.empty.set_visible(no_chapters && !refreshing);
         self.list.sync(rows);
-        self.selection_bar.set_reveal_child(bar.selected_total > 0);
+        let bulk = {
+            let page = self.page.borrow();
+            page.ready()
+                .map(|r| {
+                    let selected: Vec<&ChapterRow> = r.chapters.iter().filter(|c| r.selection.contains(c.id)).collect();
+                    bulk_actions(&selected, r.manga.local)
+                })
+                .unwrap_or_default()
+        };
+        self.sync_selection_bar(&bulk);
+        // the bar shows while a selected chapter is in the list (behaviour 7.7: selected_visible > 0)
+        self.selection_bar.set_reveal_child(bar.menu == ActionMenu::Selection);
         self.fab_label.set_label(&tr(fab.label()));
         self.fab.set_reveal_child(fab.visible);
         self.update_scroll();
@@ -833,24 +852,126 @@ impl View {
         }
     }
 
-    /// The bar of actions on the selected chapters.
-    fn build_selection_bar(self: &Rc<Self>) {
+    /// The bar of actions on the selected chapters (T-38a-024). The buttons are `bulk_actions` of the selection, so they
+    /// follow it; the bar is rebuilt only when that list changes.
+    fn sync_selection_bar(self: &Rc<Self>, actions: &[BulkAction]) {
+        if self.bulk_shown.borrow().as_slice() == actions {
+            return;
+        }
+        *self.bulk_shown.borrow_mut() = actions.to_vec();
         let bar = GBox::new(O::Horizontal, 6);
         bar.add_css_class("toolbar");
         bar.set_halign(Align::Center);
-        let weak = Rc::downgrade(self);
-        let items: [(&str, MsgKey, UiAction); 4] = [
-            ("object-select-symbolic", MsgKey::action_mark_as_read, UiAction::MarkRead(true)),
-            ("edit-undo-symbolic", MsgKey::action_mark_as_unread, UiAction::MarkRead(false)),
-            ("starred-symbolic", MsgKey::action_bookmark, UiAction::Bookmark(true)),
-            ("non-starred-symbolic", MsgKey::action_remove_bookmark, UiAction::Bookmark(false)),
-        ];
-        for (icon, label, action) in items {
-            let button = ui::icon_button(icon, &tr(label));
-            button.connect_clicked(on_view(&weak, move |v| v.act(action.clone())));
-            bar.append(&button);
+        for action in actions {
+            bar.append(&self.bulk_button(*action));
         }
         self.selection_bar.set_child(Some(&bar));
+    }
+
+    /// One button of the bar: a tap runs the action at once; a long press shows its label for a second and its release
+    /// runs nothing. A new long press restarts the timer.
+    fn bulk_button(self: &Rc<Self>, action: BulkAction) -> Button {
+        let label = tr(action.label());
+        let text = Label::builder().label(&label).visible(false).css_classes(["caption"]).build();
+        let content = GBox::new(O::Vertical, 2);
+        content.append(&gtk::Image::from_icon_name(action.icon()));
+        content.append(&text);
+        let button = Button::builder().child(&content).tooltip_text(&label).css_classes(["flat"]).build();
+        button.update_property(&[gtk::accessible::Property::Label(&label)]);
+        let long_pressed = Rc::new(Cell::new(false));
+        let press = gtk::GestureClick::new();
+        press.connect_pressed({
+            let long_pressed = long_pressed.clone();
+            move |_, _, _, _| long_pressed.set(false)
+        });
+        button.add_controller(press);
+        let long = gtk::GestureLongPress::new();
+        let shown = Rc::new(Cell::new(0u32));
+        long.connect_pressed({
+            let (long_pressed, shown, text) = (long_pressed.clone(), shown.clone(), text.downgrade());
+            move |_, _, _| {
+                long_pressed.set(true);
+                let Some(text) = text.upgrade() else { return };
+                text.set_visible(true);
+                let id = shown.get().wrapping_add(1);
+                shown.set(id);
+                let (shown, text) = (shown.clone(), text.downgrade());
+                glib::timeout_add_local_once(Duration::from_millis(1000), move || {
+                    if let Some(text) = text.upgrade()
+                        && shown.get() == id
+                    {
+                        text.set_visible(false);
+                    }
+                });
+            }
+        });
+        button.add_controller(long);
+        let weak = Rc::downgrade(self);
+        button.connect_clicked(move |_| {
+            if long_pressed.replace(false) {
+                return;
+            }
+            if let Some(view) = weak.upgrade() {
+                view.bulk_click(action);
+            }
+        });
+        button
+    }
+
+    /// A tap on a bulk button: the selected chapters get the action. Delete asks first.
+    fn bulk_click(self: &Rc<Self>, action: BulkAction) {
+        let ids: Vec<i64> = match self.page.borrow().ready() {
+            Some(ready) => ready.selection.ids().collect(),
+            None => return,
+        };
+        match action {
+            BulkAction::Bookmark => self.act(UiAction::Bookmark(true)),
+            BulkAction::Unbookmark => self.act(UiAction::Bookmark(false)),
+            BulkAction::MarkRead => self.act(UiAction::MarkRead(true)),
+            BulkAction::MarkUnread => self.act(UiAction::MarkRead(false)),
+            BulkAction::MarkPrevious => {
+                if let Some(&pointer) = ids.first() {
+                    self.act(UiAction::MarkPrevious(pointer));
+                }
+            }
+            BulkAction::Download => self.act(UiAction::Download { ids, action: IndicatorAction::StartNow }),
+            BulkAction::Delete => {
+                self.act(UiAction::OpenDialog(Dialog::DeleteChapters(ids.clone())));
+                self.show_delete_dialog(ids);
+            }
+        }
+    }
+
+    /// The delete confirmation (T-38a-030): OK clears the selection and deletes the chapters the dialog holds.
+    fn show_delete_dialog(self: &Rc<Self>, ids: Vec<i64>) {
+        let cancel = Button::with_label(&tr(MsgKey::action_cancel));
+        let ok = Button::builder().label(tr(MsgKey::action_ok)).css_classes(["suggested-action"]).build();
+        let buttons = GBox::new(O::Horizontal, 8);
+        buttons.set_halign(Align::End);
+        buttons.append(&cancel);
+        buttons.append(&ok);
+        let col = ui::column();
+        col.append(&Label::builder().label(tr(MsgKey::confirm_delete_chapters)).wrap(true).xalign(0.0).build());
+        col.append(&buttons);
+        let window = ui::modal(Label::new(Some(&tr(MsgKey::are_you_sure))).upcast_ref(), &col, 400, 200);
+        cancel.connect_clicked({
+            let (window, weak) = (window.clone(), Rc::downgrade(self));
+            move |_| {
+                window.close();
+                if let Some(view) = weak.upgrade() {
+                    view.act(UiAction::DismissDialog);
+                }
+            }
+        });
+        ok.connect_clicked({
+            let (window, weak) = (window.clone(), Rc::downgrade(self));
+            move |_| {
+                window.close();
+                if let Some(view) = weak.upgrade() {
+                    view.act(UiAction::ConfirmDeleteChapters(ids.clone()));
+                }
+            }
+        });
     }
 
     /// The Download menu: the next 1, 5, 10 or 25 unread chapters, or every unread one.
@@ -1361,114 +1482,111 @@ mod tests {
     /// One display test (GTK is bound to the thread that starts it): Loading, then Ready with rows, a stub warning in
     /// the header, a non-focusable banner, and Missing with a Back button.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi entry_route_smoke -- --ignored"]
     fn entry_route_smoke() {
-        if gtk::init().is_err() {
-            eprintln!("skipped: no display for the entry route smoke test");
-            return;
-        }
-        let ctx = glib::MainContext::default();
-        let _owner = ctx.acquire().expect("main context");
-        let rt = kuro_core::runtime::build().expect("runtime");
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
-        let db = Arc::new(Db::new(&path, writer).expect("manga handle"));
-        let mangas = MangaRepo::new(Arc::clone(&db));
-        let id = mangas.insert(&Manga { source: 7, url: "/m".into(), title: "Berserk".into(), favorite: true, ..Manga::create() }).unwrap();
-        mangas.update(&MangaUpdate { initialized: Some(true), ..MangaUpdate::new(id) }).unwrap();
-        let chapters: Vec<Chapter> = (1..=3)
-            .map(|n| Chapter { manga_id: id, url: format!("/c{n}"), name: format!("Chapter {n}"), chapter_number: f64::from(n), source_order: i64::from(3 - n), ..Chapter::create() })
-            .collect();
-        ChapterRepo::new(Arc::clone(&db)).add_all(&chapters).unwrap();
+        crate::testing::with_display(|| {
+            let ctx = glib::MainContext::default();
+            let _owner = ctx.acquire().expect("main context");
+            let rt = kuro_core::runtime::build().expect("runtime");
+            let dir = tempfile::tempdir().expect("temp dir");
+            let path = dir.path().join("manga.db");
+            let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
+            let db = Arc::new(Db::new(&path, writer).expect("manga handle"));
+            let mangas = MangaRepo::new(Arc::clone(&db));
+            let id = mangas.insert(&Manga { source: 7, url: "/m".into(), title: "Berserk".into(), favorite: true, ..Manga::create() }).unwrap();
+            mangas.update(&MangaUpdate { initialized: Some(true), ..MangaUpdate::new(id) }).unwrap();
+            let chapters: Vec<Chapter> = (1..=3)
+                .map(|n| Chapter { manga_id: id, url: format!("/c{n}"), name: format!("Chapter {n}"), chapter_number: f64::from(n), source_order: i64::from(3 - n), ..Chapter::create() })
+                .collect();
+            ChapterRepo::new(Arc::clone(&db)).add_all(&chapters).unwrap();
 
-        let spawn = |manga_id| {
-            let runner = Rc::new(runner::spawn(rt.handle(), DbStore::new(Arc::clone(&db)), Arc::new(StubBackend::new(Arc::clone(&db))), LoadContext::default()));
-            let page = assemble(Page::new(manga_id, false), Rc::clone(&runner));
-            runner.send(StoreCmd::Load { manga_id });
-            page
-        };
-        let stack_of = |page: &GBox| descendants(page.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::Stack>().ok()).expect("the page has a stack");
-        let enabled = |page: &GBox| {
-            let header = page.first_child().and_downcast::<gtk::HeaderBar>().expect("header bar");
-            descendants(header.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Button>().ok()).filter(|b| b.is_sensitive()).count()
-        };
+            let spawn = |manga_id| {
+                let runner = Rc::new(runner::spawn(rt.handle(), DbStore::new(Arc::clone(&db)), Arc::new(StubBackend::new(Arc::clone(&db))), LoadContext::default()));
+                let page = assemble(Page::new(manga_id, false), Rc::clone(&runner));
+                runner.send(StoreCmd::Load { manga_id });
+                page
+            };
+            let stack_of = |page: &GBox| descendants(page.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::Stack>().ok()).expect("the page has a stack");
+            let enabled = |page: &GBox| {
+                let header = page.first_child().and_downcast::<gtk::HeaderBar>().expect("header bar");
+                descendants(header.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Button>().ok()).filter(|b| b.is_sensitive()).count()
+            };
 
-        let page = spawn(id);
-        let stack = stack_of(&page);
-        assert_eq!(stack.visible_child_name().as_deref(), Some("loading"), "loading until the first read");
-        let loading_buttons = enabled(&page);
-        assert_eq!(loading_buttons, 1, "only Back works while Loading");
-        assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
-        assert!(enabled(&page) > loading_buttons, "toolbar actions work once Ready");
-        let all = descendants(page.upcast_ref());
-        let list = all.iter().find_map(|w| w.clone().downcast::<gtk::ListView>().ok()).expect("the list view");
-        assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 3)), "three rows in the model");
-        let stub = all.iter().filter_map(|w| w.clone().downcast::<gtk::Image>().ok()).any(|i| i.icon_name().as_deref() == Some("dialog-warning-symbolic") && i.has_css_class("error"));
-        assert!(stub, "a stub source shows the warning icon in the error color");
-        // the count row, the Resume button and the filter sheet
-        let texts = |root: &gtk::Widget| -> Vec<String> { descendants(root).into_iter().filter_map(|w| w.downcast::<Label>().ok()).map(|l| l.label().to_string()).collect() };
-        assert!(texts(page.upcast_ref()).iter().any(|t| t == "3 chapters"), "the count row reads the processed list");
-        assert!(texts(page.upcast_ref()).iter().any(|t| t == "In library"), "the library button of a favorite");
-        let fab = all.iter().filter_map(|w| w.clone().downcast::<gtk::Revealer>().ok()).find(|r| r.transition_duration() == FAB_FADE_MS).expect("the Resume button");
-        assert!(fab.reveals_child(), "unread chapters and nothing selected: the button shows");
-        assert!(texts(fab.upcast_ref()).iter().any(|t| t == "Start"), "no chapter is read, so Start");
-        let window = gtk::Window::builder().default_width(900).default_height(700).child(&page).build();
-        window.present();
-        let filter = all.iter().filter_map(|w| w.clone().downcast::<gtk::MenuButton>().ok()).find(|b| b.tooltip_text().as_deref() == Some("Filter")).expect("the Filter button");
-        filter.popup();
-        let sheet = filter.popover().expect("the filter sheet");
-        let labels = texts(sheet.upcast_ref());
-        for want in ["Filter", "Sort", "Display", "Downloaded", "Unread", "Bookmarked", "Scanlator", "By source", "Source title", "Chapter number"] {
-            assert!(labels.iter().any(|t| t == want), "the sheet has {want}: {labels:?}");
-        }
-        filter.popdown();
-        window.set_child(None::<&gtk::Widget>);
-        window.close();
-        let banner = banner_view::build(|| {}, || {});
-        assert!(!banner.widget.is_focusable() && !banner.widget.can_focus());
+            let page = spawn(id);
+            let stack = stack_of(&page);
+            assert_eq!(stack.visible_child_name().as_deref(), Some("loading"), "loading until the first read");
+            let loading_buttons = enabled(&page);
+            assert_eq!(loading_buttons, 1, "only Back works while Loading");
+            assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
+            assert!(enabled(&page) > loading_buttons, "toolbar actions work once Ready");
+            let all = descendants(page.upcast_ref());
+            let list = all.iter().find_map(|w| w.clone().downcast::<gtk::ListView>().ok()).expect("the list view");
+            assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 3)), "three rows in the model");
+            let stub = all.iter().filter_map(|w| w.clone().downcast::<gtk::Image>().ok()).any(|i| i.icon_name().as_deref() == Some("dialog-warning-symbolic") && i.has_css_class("error"));
+            assert!(stub, "a stub source shows the warning icon in the error color");
+            // the count row, the Resume button and the filter sheet
+            let texts = |root: &gtk::Widget| -> Vec<String> { descendants(root).into_iter().filter_map(|w| w.downcast::<Label>().ok()).map(|l| l.label().to_string()).collect() };
+            assert!(texts(page.upcast_ref()).iter().any(|t| t == "3 chapters"), "the count row reads the processed list");
+            assert!(texts(page.upcast_ref()).iter().any(|t| t == "In library"), "the library button of a favorite");
+            let fab = all.iter().filter_map(|w| w.clone().downcast::<gtk::Revealer>().ok()).find(|r| r.transition_duration() == FAB_FADE_MS).expect("the Resume button");
+            assert!(fab.reveals_child(), "unread chapters and nothing selected: the button shows");
+            assert!(texts(fab.upcast_ref()).iter().any(|t| t == "Start"), "no chapter is read, so Start");
+            let window = gtk::Window::builder().default_width(900).default_height(700).child(&page).build();
+            window.present();
+            let filter = all.iter().filter_map(|w| w.clone().downcast::<gtk::MenuButton>().ok()).find(|b| b.tooltip_text().as_deref() == Some("Filter")).expect("the Filter button");
+            filter.popup();
+            let sheet = filter.popover().expect("the filter sheet");
+            let labels = texts(sheet.upcast_ref());
+            for want in ["Filter", "Sort", "Display", "Downloaded", "Unread", "Bookmarked", "Scanlator", "By source", "Source title", "Chapter number"] {
+                assert!(labels.iter().any(|t| t == want), "the sheet has {want}: {labels:?}");
+            }
+            filter.popdown();
+            window.set_child(None::<&gtk::Widget>);
+            window.close();
+            let banner = banner_view::build(|| {}, || {});
+            assert!(!banner.widget.is_focusable() && !banner.widget.can_focus());
 
-        // the list model: one items_changed for a reset, one per changed row
-        let rows: Vec<crate::entry_core::list_model::RowItem> = (1..=3)
-            .map(|id| crate::entry_core::list_model::RowItem {
-                id,
-                title: format!("c{id}"),
-                subtitle: String::new(),
-                read: false,
-                bookmark: false,
-                selected: false,
-                download: kuro_downloads::DownloadState::NotDownloaded,
-                progress: 0,
-                indicator: true,
-                missing: None,
-            })
-            .collect();
-        let model_list = ChapterList::new(
-            Rc::new(|_: i64, _: Mods, _: bool| {}),
-            None,
-            RowActions { on_indicator: Rc::new(|_, _| {}), on_previous: Rc::new(|_| {}) },
-        );
-        let signals = Rc::new(Cell::new(0));
-        model_list.widget.model().expect("model").connect_items_changed({
-            let signals = Rc::clone(&signals);
-            move |_, _, _, _| signals.set(signals.get() + 1)
+            // the list model: one items_changed for a reset, one per changed row
+            let rows: Vec<crate::entry_core::list_model::RowItem> = (1..=3)
+                .map(|id| crate::entry_core::list_model::RowItem {
+                    id,
+                    title: format!("c{id}"),
+                    subtitle: String::new(),
+                    read: false,
+                    bookmark: false,
+                    selected: false,
+                    download: kuro_downloads::DownloadState::NotDownloaded,
+                    progress: 0,
+                    indicator: true,
+                    missing: None,
+                })
+                .collect();
+            let model_list = ChapterList::new(
+                Rc::new(|_: i64, _: Mods, _: bool| {}),
+                None,
+                RowActions { on_indicator: Rc::new(|_, _| {}), on_previous: Rc::new(|_| {}) },
+            );
+            let signals = Rc::new(Cell::new(0));
+            model_list.widget.model().expect("model").connect_items_changed({
+                let signals = Rc::clone(&signals);
+                move |_, _, _, _| signals.set(signals.get() + 1)
+            });
+            model_list.sync(rows.clone());
+            assert_eq!(signals.get(), 1, "a new list is one items_changed");
+            let mut changed = rows.clone();
+            changed[0].selected = true;
+            changed[2].progress = 40;
+            model_list.sync(changed.clone());
+            assert_eq!(signals.get(), 3, "one items_changed per changed row");
+            model_list.sync(changed.clone());
+            assert_eq!(signals.get(), 3, "an identical list changes nothing");
+            model_list.sync(changed[..2].to_vec());
+            assert_eq!(signals.get(), 4, "a removed row is one more");
+
+            let missing = spawn(4242);
+            let stack = stack_of(&missing);
+            assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("missing")), "a missing row ends in the missing state");
+            let has_back = descendants(missing.upcast_ref()).iter().filter_map(|w| w.clone().downcast::<Button>().ok()).any(|b| b.label().as_deref() == Some("Back"));
+            assert!(has_back, "the missing state offers Back");
         });
-        model_list.sync(rows.clone());
-        assert_eq!(signals.get(), 1, "a new list is one items_changed");
-        let mut changed = rows.clone();
-        changed[0].selected = true;
-        changed[2].progress = 40;
-        model_list.sync(changed.clone());
-        assert_eq!(signals.get(), 3, "one items_changed per changed row");
-        model_list.sync(changed.clone());
-        assert_eq!(signals.get(), 3, "an identical list changes nothing");
-        model_list.sync(changed[..2].to_vec());
-        assert_eq!(signals.get(), 4, "a removed row is one more");
-
-        let missing = spawn(4242);
-        let stack = stack_of(&missing);
-        assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("missing")), "a missing row ends in the missing state");
-        let has_back = descendants(missing.upcast_ref()).iter().filter_map(|w| w.clone().downcast::<Button>().ok()).any(|b| b.label().as_deref() == Some("Back"));
-        assert!(has_back, "the missing state offers Back");
     }
 }

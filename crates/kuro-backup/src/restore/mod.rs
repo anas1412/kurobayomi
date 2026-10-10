@@ -31,6 +31,7 @@ pub mod merge;
 pub mod options;
 pub mod prefs;
 pub mod progress;
+pub mod runner;
 pub mod screen;
 pub mod sections;
 

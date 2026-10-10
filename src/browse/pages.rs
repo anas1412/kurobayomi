@@ -12,6 +12,7 @@ use kuro_domain::source::browse::BrowseQuery;
 use kuro_domain::source::model::Source;
 use kuro_i18n::{Arg, MsgKey, tr, trf};
 use kuro_prefs::source::{MigrationDirection, MigrationSortingMode};
+use kuro_source::filter_list::FilterList;
 use tokio::sync::watch;
 
 use super::entries::FavoriteStore;
@@ -122,6 +123,8 @@ pub struct FavoritesDeps {
     /// The duplicate dialog's Migrate existing entry.
     pub migrate: Rc<dyn Fn(i64)>,
     pub now_ms: Rc<dyn Fn() -> i64>,
+    /// The category chooser's Edit categories: the Categories page on this kind's section.
+    pub edit_categories: Rc<dyn Fn()>,
 }
 
 pub struct BrowseSourceDeps {
@@ -136,6 +139,11 @@ pub struct BrowseSourceDeps {
     /// `source_defaults`, and the sheet that edits a working copy of them.
     pub filters: Rc<SourceFilters>,
     pub favorites: Option<FavoritesDeps>,
+    /// The hide-in-library preference of the source's kind, read when the page is made (`BrowsePrefs::hide_in_library`
+    /// for manga): favourites are then left out of the listing (T-40b-034).
+    pub hide_in_library: bool,
+    /// What the page opens on: Popular, or a search (a browse page opened with a query, B§4.6).
+    pub initial_query: BrowseQuery,
     pub on_back: Rc<dyn Fn()>,
     pub on_overflow: Rc<dyn Fn(OverflowItem)>,
     /// Opens a url in the browser (the local source's help guide).
@@ -186,7 +194,7 @@ fn stub_page(listing: &ListingDeps, on_back: Rc<dyn Fn()>) -> gtk::Box {
 }
 
 pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
-    let BrowseSourceDeps { supports_latest, configurable, incognito, prefs, mut listing, filters, favorites, on_back, on_overflow, open_url } = deps;
+    let BrowseSourceDeps { supports_latest, configurable, incognito, prefs, mut listing, filters, favorites, hide_in_library, initial_query, on_back, on_overflow, open_url } = deps;
     if listing.stub {
         return SourcePage::Stub(stub_page(&listing, on_back));
     }
@@ -215,7 +223,10 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
         }
     });
     listing.favorite_urls = favorites.as_ref().map(|f| f.store.favorite_urls(source_id));
-    let listing_view = ListingView::new(listing, BrowseQuery::Popular);
+    // a page opened on a search starts from the source's defaults, like a search made from Popular
+    let start_filters = if matches!(initial_query, BrowseQuery::Search(_)) { filters.for_search(false) } else { FilterList::default() };
+    let listing_view = ListingView::with_filters(listing, initial_query.clone(), start_filters);
+    listing_view.set_hide_in_library(hide_in_library);
 
     let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some(&tr(MsgKey::action_search_hint)));
@@ -267,6 +278,11 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
         },
     });
 
+    if let BrowseQuery::Search(text) = &initial_query {
+        search.set_text(text);
+        header.search.set_active(true);
+    }
+
     // a search is always a new listing, and a blank one is sent as the empty string (B-EC-08, B-EC-09). It starts from
     // the source's defaults when Popular or Latest was showing, and keeps the sheet's values when a search was running.
     let view = listing_view.clone();
@@ -282,12 +298,13 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
     chips.set_margin_top(8);
     chips.set_margin_bottom(8);
     let popular = gtk::ToggleButton::with_label(&tr(MsgKey::popular));
-    popular.set_active(true);
+    popular.set_active(matches!(initial_query, BrowseQuery::Popular));
     chips.append(&popular);
     let mut latest_chip = None;
     if supports_latest {
         let latest = gtk::ToggleButton::with_label(&tr(MsgKey::latest));
         latest.set_group(Some(&popular));
+        latest.set_active(matches!(initial_query, BrowseQuery::Latest));
         chips.append(&latest);
         let (view, seed) = (listing_view.clone(), Rc::clone(&filters));
         latest.connect_toggled(move |button| {
@@ -336,7 +353,7 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
     root.append(listing_view.widget());
 
     // the library flows: a long press asks, a flag flips at once and a failed write puts it back
-    let flow = favorites.map(|FavoritesDeps { store, toast, open_entry, migrate, now_ms }| {
+    let flow = favorites.map(|FavoritesDeps { store, toast, open_entry, migrate, now_ms, edit_categories }| {
         let (flag_view, toast_view) = (listing_view.downgrade(), listing_view.downgrade());
         let hooks = FavoriteHooks {
             set_flag: Rc::new(move |id, flag| {
@@ -352,6 +369,7 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
             open_entry,
             migrate,
             now_ms,
+            edit_categories,
         };
         FavoriteFlow::new(store, &root, hooks)
     });
@@ -447,8 +465,9 @@ pub fn row_title(row: &SearchRow) -> String {
 pub struct GlobalSearchNav {
     /// Enter in the search entry.
     pub search: Rc<dyn Fn(&str)>,
-    /// The arrow of a source's header: its browse listing with the query.
-    pub open_source: Rc<dyn Fn(i64)>,
+    /// The arrow of a source's header, with the text in the search box now (submitted or not): its browse listing with
+    /// that text (GS-EC-15).
+    pub open_source: Rc<dyn Fn(i64, &str)>,
     /// A card.
     pub open_entry: Rc<dyn Fn(i64, &ListItem)>,
     /// A long press on a card: the entry's preview.
@@ -467,6 +486,8 @@ struct SearchView {
     nav: GlobalSearchNav,
     chips: Cell<SearchChips>,
     last: RefCell<Option<GlobalSearchSnapshot>>,
+    /// The text in the search box, as typed.
+    typed: Rc<RefCell<String>>,
 }
 
 /// The global search page. It shows a spinner until the source registry is initialised, then the rows of the snapshot;
@@ -490,9 +511,11 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
     column.set_margin_start(12);
     column.set_margin_end(12);
-    let view = Rc::new(SearchView { column, progress, chips: Cell::new(nav.chips), nav, last: RefCell::new(None) });
+    let view = Rc::new(SearchView { column, progress, chips: Cell::new(nav.chips), nav, last: RefCell::new(None), typed: Rc::default() });
     let search = Rc::clone(&view);
     entry.connect_activate(move |entry| (search.nav.search)(entry.text().as_str()));
+    let typing = Rc::clone(&view);
+    entry.connect_changed(move |entry| *typing.typed.borrow_mut() = entry.text().to_string());
     body.append(&search_chips(&view));
     body.append(&view.progress);
     body.append(&gtk::ScrolledWindow::builder().child(&view.column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
@@ -552,7 +575,7 @@ impl SearchView {
         self.progress.set_fraction(if snapshot.total == 0 { 0.0 } else { (snapshot.answered as f64 / snapshot.total as f64).clamp(0.0, 1.0) });
         self.progress.set_visible(progress_visible(snapshot.answered, snapshot.total));
         for row in visible_rows(&snapshot.rows, self.chips.get()) {
-            self.column.append(&search_row(row, &self.nav));
+            self.column.append(&search_row(row, &self.nav, Rc::clone(&self.typed)));
         }
     }
 }
@@ -568,15 +591,31 @@ impl GlobalSearchPage {
     }
 
     pub fn update(&self, snapshot: &GlobalSearchSnapshot) {
-        if self.entry.text().as_str() != snapshot.query && !self.entry.has_focus() {
-            self.entry.set_text(&snapshot.query);
-        }
-        *self.view.last.borrow_mut() = Some(snapshot.clone());
-        self.view.redraw();
+        draw(&self.entry, &self.view, snapshot);
+    }
+
+    /// The text in the search box, as typed: a source row opens its browse page with it (GS-EC-15).
+    pub fn typed(&self) -> String {
+        self.view.typed.borrow().clone()
+    }
+
+    /// `update` as a closure that holds the page's contents but not the page widget itself, so a model that owns it does not
+    /// keep the page alive.
+    pub fn updater(&self) -> impl Fn(&GlobalSearchSnapshot) + 'static {
+        let (entry, view) = (self.entry.clone(), Rc::clone(&self.view));
+        move |snapshot| draw(&entry, &view, snapshot)
     }
 }
 
-fn search_row(row: &SearchRow, nav: &GlobalSearchNav) -> gtk::Box {
+fn draw(entry: &gtk::SearchEntry, view: &SearchView, snapshot: &GlobalSearchSnapshot) {
+    if entry.text().as_str() != snapshot.query && !entry.has_focus() {
+        entry.set_text(&snapshot.query);
+    }
+    *view.last.borrow_mut() = Some(snapshot.clone());
+    view.redraw();
+}
+
+fn search_row(row: &SearchRow, nav: &GlobalSearchNav, typed: Rc<RefCell<String>>) -> gtk::Box {
     let section = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let titles = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -589,7 +628,8 @@ fn search_row(row: &SearchRow, nav: &GlobalSearchNav) -> gtk::Box {
     let go = gtk::Button::from_icon_name("go-next-symbolic");
     go.set_tooltip_text(Some(&row.source.name));
     let (open, id) = (Rc::clone(&nav.open_source), row.source.id);
-    go.connect_clicked(move |_| open(id));
+    // the text is read when the arrow is pressed, not when the row was drawn
+    go.connect_clicked(move |_| open(id, &typed.borrow().clone()));
     header.append(&go);
     section.append(&header);
     match &row.state {
@@ -803,7 +843,7 @@ pub(crate) mod tests {
         let (searched, opened, previewed, chipped) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
         let nav = GlobalSearchNav {
             search: Rc::new(move |q| searched.borrow_mut().push(format!("search {q}"))),
-            open_source: Rc::new(|_| {}),
+            open_source: Rc::new(|_, _| {}),
             open_entry: Rc::new(move |id, item| opened.borrow_mut().push(format!("open {id} {}", item.title))),
             preview: Rc::new(move |id, item| previewed.borrow_mut().push(format!("preview {id} {}", item.title))),
             load_cover: Rc::new(|_, _| {}),
@@ -946,6 +986,10 @@ pub(crate) mod tests {
     }
 
     fn source_rig(stub: bool, incognito: bool, filters: FilterList, results: Vec<Result<ListedPage, String>>) -> Rig {
+        source_rig_hiding(stub, incognito, filters, results, false)
+    }
+
+    fn source_rig_hiding(stub: bool, incognito: bool, filters: FilterList, results: Vec<Result<ListedPage, String>>, hide: bool) -> Rig {
         let rt: &'static tokio::runtime::Runtime =
             Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_time().build().expect("runtime")));
         let entered = rt.enter();
@@ -977,6 +1021,8 @@ pub(crate) mod tests {
             },
             filters: Rc::new(SourceFilters::new(filters)),
             favorites: None,
+            hide_in_library: hide,
+            initial_query: BrowseQuery::Popular,
             on_back: Rc::new(move || back.borrow_mut().push("back".into())),
             on_overflow: Rc::new(move |i| overflow.borrow_mut().push(format!("overflow {i:?}"))),
             open_url: Rc::new(move |u| url.borrow_mut().push(format!("url {u}"))),
@@ -1133,7 +1179,24 @@ pub(crate) mod tests {
         assert_eq!(rig.log.borrow().last().map(String::as_str), Some("action OpenInWebView"));
     }
 
+    fn hide_in_library_keeps_favourites_out_of_a_page_made_with_the_flag_on() {
+        let page = |favorite: bool, title: &str| ListItem { title: title.into(), url: format!("/{title}"), favorite, ..ListItem::default() };
+        let listed = || Ok(ListedPage { items: vec![page(true, "mine"), page(false, "new")], has_next: false });
+        let prefs = super::super::prefs::BrowsePrefs::new(PrefStore::in_memory());
+        assert!(!prefs.hide_in_library(), "off by default");
+        prefs.sources.hide_in_manga_library_items.set(true).expect("set");
+        assert!(prefs.hide_in_library(), "the page reads the stored preference");
+
+        let on = source_rig_hiding(false, false, FilterList::default(), vec![listed()], true);
+        let SourcePage::Browse(shown) = &on.page else { panic!("browse page") };
+        assert!(pump_until(|| shown.listing.loaded_count() == 1), "only the entry that is not in the library is kept");
+        let off = source_rig_hiding(false, false, FilterList::default(), vec![listed()], false);
+        let SourcePage::Browse(shown) = &off.page else { panic!("browse page") };
+        assert!(pump_until(|| shown.listing.loaded_count() == 2), "the flag off keeps both");
+    }
+
     pub(crate) fn smoke() {
+        hide_in_library_keeps_favourites_out_of_a_page_made_with_the_flag_on();
         a_stub_source_shows_only_its_title_back_and_the_missing_message();
         opening_a_source_stores_it_as_the_last_used_unless_incognito_applies();
         back_clears_the_search_text_first_and_then_leaves();

@@ -7,13 +7,13 @@ pub mod dates;
 pub mod dialog;
 pub mod dto;
 pub mod error;
+#[cfg(test)]
+mod fixture_tests;
 pub mod rules;
 pub mod score;
 pub mod search;
 pub mod status;
 pub mod tracker;
-#[cfg(test)]
-mod fixture_tests;
 #[cfg(test)]
 mod wire_tests;
 

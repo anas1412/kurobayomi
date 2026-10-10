@@ -10,4 +10,6 @@ pub mod sync;
 pub mod ui;
 
 #[cfg(test)]
+mod integration;
+#[cfg(test)]
 mod tests;

@@ -1,6 +1,7 @@
 //! The confirm dialog of the History screen (T-42a-018, T-42a-024): a text, an optional checkbox whose state reaches
 //! the confirm callback, Cancel and a confirm button. `show_dialog_then` of the shell passes no value to its callback,
-//! so the remove dialog with its "Reset all" checkbox is built here.
+//! so the remove dialog with its "Reset all" checkbox is built here. Cancel is the default button and Escape closes
+//! the dialog. A modal window has no scrim, so a click outside it cannot cancel; the parent window is blocked instead.
 
 use std::rc::Rc;
 
@@ -40,6 +41,20 @@ pub fn show(copy: ConfirmCopy, destructive: bool, on_ok: impl Fn(bool) + 'static
     let w = win.clone();
     cancel.connect_clicked(move |_| w.close());
     buttons.append(&cancel);
+    // Cancel is the default button, so Enter never confirms a destructive action; Escape closes the dialog
+    win.set_default_widget(Some(&cancel));
+    GtkWindowExt::set_focus(&win, Some(&cancel));
+    let keys = gtk::EventControllerKey::new();
+    let w = win.clone();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk::gdk::Key::Escape {
+            w.close();
+            gtk::glib::Propagation::Stop
+        } else {
+            gtk::glib::Propagation::Proceed
+        }
+    });
+    win.add_controller(keys);
 
     let confirm = Button::with_label(&copy.confirm);
     confirm.add_css_class(if destructive { "destructive-action" } else { "suggested-action" });

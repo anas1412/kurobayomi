@@ -7,6 +7,7 @@ use crate::ctx::TrackCtx;
 use crate::error::TrackError;
 use crate::error::redact;
 use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::remote::{with_server_anime, with_server_manga};
 use crate::repo::UnitRef;
 use crate::tracker::{AnimeTracker, MangaTracker, Tracker};
 
@@ -59,9 +60,10 @@ async fn sync_anime_inner(
         ..remote.clone()
     };
 
-    api.update(&updated, false).await?;
+    let server = api.update(&updated, false).await?;
     ctx.anime_episodes.mark_seen(&newly_seen).await?;
-    ctx.save_anime(&updated).await?;
+    ctx.save_anime(&with_server_anime(&updated, &server))
+        .await?;
     Ok(())
 }
 
@@ -103,9 +105,10 @@ async fn sync_manga_inner(
         ..remote.clone()
     };
 
-    api.update(&updated, false).await?;
+    let server = api.update(&updated, false).await?;
     ctx.manga_chapters.mark_read(&newly_read).await?;
-    ctx.save_manga(&updated).await?;
+    ctx.save_manga(&with_server_manga(&updated, &server))
+        .await?;
     Ok(())
 }
 

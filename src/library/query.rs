@@ -68,6 +68,8 @@ pub struct Built {
     pub has_active_filters: bool,
     /// Distinct entries across the pages after filter and search (E-11).
     pub distinct_count: usize,
+    /// Every library row, filtered or not: the selection refreshes its snapshots from these (T-37a-059).
+    pub library: Vec<LibraryRow>,
 }
 
 impl Built {
@@ -136,7 +138,12 @@ pub fn compute(req: &Request, snap: &Snapshot, facts: &Facts) -> Built {
         .collect();
 
     let distinct_count = distinct_entry_count(&pages);
-    Built { pages, has_active_filters: req.filters.has_active() || req.filters.downloaded_only, distinct_count }
+    Built {
+        pages,
+        has_active_filters: req.filters.has_active() || req.filters.downloaded_only,
+        distinct_count,
+        library: snap.rows.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -330,6 +337,45 @@ mod tests {
         let mut req = request();
         req.logged_in = BTreeSet::from([10]);
         assert_eq!(ids(&compute(&req, &snap, &facts())), vec![vec![2, 1, 3]]);
+    }
+
+    #[test]
+    fn no_visible_category_with_an_active_search_is_an_empty_library_not_a_panic() {
+        // T-37a-047 (T2-PIPE-12): nothing visible, search on.
+        let snap = snapshot(vec![], vec![row(1, "x", 5, 1, 0)]);
+        let mut req = request();
+        req.query = Some("x".into());
+        let built = compute(&req, &snap, &facts());
+        assert!(built.pages.is_empty());
+        assert!(built.is_library_empty());
+    }
+
+    #[test]
+    fn a_visible_empty_category_keeps_its_page_under_an_active_search() {
+        // T-37a-047: an empty visible category is still a page, with no items.
+        let snap = snapshot(vec![cat(5, "A", ASC_ALPHA)], vec![row(1, "x", 6, 1, 0)]);
+        let mut req = request();
+        req.query = Some("x".into());
+        let built = compute(&req, &snap, &facts());
+        assert_eq!(ids(&built), vec![Vec::<i64>::new()]);
+        assert!(built.is_library_empty());
+    }
+
+    #[test]
+    fn ten_thousand_rows_go_through_the_pipeline_in_one_pass() {
+        // T-37a-054: one pass over the rows, no per-row rebuild. The 50 ms target is measured in the release
+        // build; this guard only catches a quadratic blow-up in the debug test build.
+        let rows: Vec<LibraryRow> = (1..=10_000).map(|i| row(i, &format!("title {i:05}"), 5, 3, i % 3)).collect();
+        let mut snap = snapshot(vec![cat(5, "A", ASC_ALPHA)], rows);
+        snap.tracks.insert(7, vec![(10, 8.0)]);
+        let mut req = request();
+        req.logged_in = BTreeSet::from([10]);
+        req.query = Some("title".into());
+        let started = std::time::Instant::now();
+        let built = compute(&req, &snap, &facts());
+        let elapsed = started.elapsed();
+        assert_eq!(built.distinct_count, 10_000);
+        assert!(elapsed < std::time::Duration::from_secs(5), "took {elapsed:?}");
     }
 
     #[test]

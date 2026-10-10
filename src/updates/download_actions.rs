@@ -2,6 +2,8 @@
 //! work to do; the download queue and the disk are the caller's. The grouped work runs detached, so once a plan is
 //! handed over it is not cancelled by the screen.
 
+use kuro_i18n::MsgKey;
+
 use crate::updates::download_state::DownloadState;
 
 /// The actions of a download indicator or of the bulk bar (`ChapterDownloadAction` / `EpisodeDownloadAction`).
@@ -11,6 +13,8 @@ pub enum DownloadAction {
     StartNow,
     Cancel,
     Delete,
+    /// Opens the episode options sheet of one anime unit. It is a dialog, not a queue step, so it has no [`Plan`].
+    ShowQualities,
 }
 
 /// One selected unit: its entry, its id and its current download state.
@@ -96,6 +100,59 @@ pub fn plan(action: DownloadAction, rows: &[UnitTarget], facts: impl Fn(i64) -> 
             .filter(|(entry, _)| facts(*entry).is_some_and(|f| f.source_installed))
             .map(|(entry_id, unit_ids)| Plan::Delete { entry_id, unit_ids })
             .collect(),
+        DownloadAction::ShowQualities => Vec::new(),
+    }
+}
+
+/// The entries a Delete over `rows` skips because their source is not installed, in order of first appearance
+/// (T-42b-010): the caller logs a warning and shows the toast once for them.
+pub fn delete_skipped(rows: &[UnitTarget], facts: impl Fn(i64) -> Option<EntryFacts>) -> Vec<i64> {
+    by_entry(rows).into_iter().map(|(entry, _)| entry).filter(|entry| !facts(*entry).is_some_and(|f| f.source_installed)).collect()
+}
+
+/// The actions the download indicator of a row offers for its state (the menu of the indicator): a unit that is not
+/// downloaded starts, a queued one starts now or is cancelled, a running one is cancelled, a failed one retries or is
+/// cancelled, and a downloaded one is deleted. Delete here does not ask (parity, EC-42-U-08).
+pub fn row_actions(state: DownloadState) -> Vec<DownloadAction> {
+    match state {
+        DownloadState::NotDownloaded => vec![DownloadAction::Start],
+        DownloadState::Queue => vec![DownloadAction::StartNow, DownloadAction::Cancel],
+        DownloadState::Downloading => vec![DownloadAction::Cancel],
+        DownloadState::Error => vec![DownloadAction::Start, DownloadAction::Cancel],
+        DownloadState::Downloaded => vec![DownloadAction::Delete],
+    }
+}
+
+/// The symbolic icon of the download indicator for a state.
+pub fn indicator_icon(state: DownloadState) -> &'static str {
+    match state {
+        DownloadState::NotDownloaded => "folder-download-symbolic",
+        DownloadState::Queue => "view-list-symbolic",
+        DownloadState::Downloading => "emblem-synchronizing-symbolic",
+        DownloadState::Downloaded => "emblem-ok-symbolic",
+        DownloadState::Error => "dialog-error-symbolic",
+    }
+}
+
+/// The actions of a row's indicator menu: [`row_actions`], plus SHOW_QUALITIES for an anime unit that is not downloaded
+/// (the long press of the source's indicator) when an options sheet can open (`sheet`).
+pub fn indicator_actions(anime: bool, state: DownloadState, sheet: bool) -> Vec<DownloadAction> {
+    let mut actions = row_actions(state);
+    if anime && sheet && state == DownloadState::NotDownloaded {
+        actions.push(DownloadAction::ShowQualities);
+    }
+    actions
+}
+
+/// The label key of an indicator action in the state it is offered for.
+pub fn row_action_label(action: DownloadAction, state: DownloadState) -> MsgKey {
+    match (action, state) {
+        (DownloadAction::Start, DownloadState::Error) => MsgKey::action_retry,
+        (DownloadAction::Start, _) => MsgKey::action_download,
+        (DownloadAction::StartNow, _) => MsgKey::action_start_downloading_now,
+        (DownloadAction::Cancel, _) => MsgKey::action_cancel,
+        (DownloadAction::Delete, _) => MsgKey::action_delete,
+        (DownloadAction::ShowQualities, _) => MsgKey::player_sheets_qualities_title,
     }
 }
 
@@ -104,6 +161,15 @@ pub fn plan(action: DownloadAction, rows: &[UnitTarget], facts: impl Fn(i64) -> 
 pub fn remove_after_read(newly_read: &[UnitTarget]) -> Vec<(i64, Vec<i64>)> {
     let downloaded: Vec<UnitTarget> = newly_read.iter().copied().filter(|r| r.state == DownloadState::Downloaded).collect();
     by_entry(&downloaded)
+}
+
+/// SHOW_QUALITIES (T-42b-009, T-42b-019): the episode options sheet opens only for exactly one row. Returns that row;
+/// a multi-select gives nothing and leaves the selection as it is (E-U49).
+pub fn quality_target(rows: &[UnitTarget]) -> Option<UnitTarget> {
+    match rows {
+        [only] => Some(*only),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -177,5 +243,49 @@ mod tests {
         // Only the rows the read write changes are passed in (already-read rows are filtered out by the caller).
         let newly_read = vec![unit(1, 10, DownloadState::Downloaded), unit(1, 11, DownloadState::NotDownloaded), unit(2, 20, DownloadState::Downloaded)];
         assert_eq!(remove_after_read(&newly_read), vec![(1, vec![10]), (2, vec![20])]);
+    }
+
+    #[test]
+    fn download_row_actions_follow_the_state() {
+        assert_eq!(row_actions(DownloadState::NotDownloaded), vec![DownloadAction::Start]);
+        assert_eq!(row_actions(DownloadState::Queue), vec![DownloadAction::StartNow, DownloadAction::Cancel]);
+        assert_eq!(row_actions(DownloadState::Downloading), vec![DownloadAction::Cancel]);
+        assert_eq!(row_actions(DownloadState::Error), vec![DownloadAction::Start, DownloadAction::Cancel]);
+        assert_eq!(row_actions(DownloadState::Downloaded), vec![DownloadAction::Delete]);
+        assert_eq!(indicator_icon(DownloadState::Downloaded), "emblem-ok-symbolic");
+        assert_eq!(row_action_label(DownloadAction::Start, DownloadState::Error), MsgKey::action_retry);
+        assert_eq!(row_action_label(DownloadAction::Start, DownloadState::NotDownloaded), MsgKey::action_download);
+    }
+
+    #[test]
+    fn download_delete_names_the_entries_it_skips() {
+        let rows = [unit(1, 10, DownloadState::Downloaded), unit(2, 20, DownloadState::Downloaded), unit(2, 21, DownloadState::Downloaded), unit(3, 30, DownloadState::Downloaded)];
+        let facts = |entry: i64| match entry {
+            1 => Some(EntryFacts { in_library: true, source_installed: true }),
+            2 => Some(EntryFacts { in_library: true, source_installed: false }),
+            _ => None,
+        };
+        assert_eq!(delete_skipped(&rows, facts), vec![2, 3]);
+        assert!(delete_skipped(&rows, all_good).is_empty());
+    }
+
+    #[test]
+    fn show_qualities_is_a_dialog_not_a_plan_and_only_offered_for_anime_not_downloaded() {
+        assert!(plan(DownloadAction::ShowQualities, &[unit(1, 10, DownloadState::NotDownloaded)], all_good).is_empty());
+        assert_eq!(
+            indicator_actions(true, DownloadState::NotDownloaded, true),
+            vec![DownloadAction::Start, DownloadAction::ShowQualities]
+        );
+        assert_eq!(indicator_actions(true, DownloadState::NotDownloaded, false), vec![DownloadAction::Start]);
+        assert_eq!(indicator_actions(false, DownloadState::NotDownloaded, true), vec![DownloadAction::Start]);
+        assert_eq!(indicator_actions(true, DownloadState::Downloaded, true), vec![DownloadAction::Delete]);
+    }
+
+    #[test]
+    fn quality_target_needs_exactly_one_row() {
+        let one = unit(1, 10, DownloadState::NotDownloaded);
+        assert_eq!(quality_target(&[one]), Some(one));
+        assert_eq!(quality_target(&[one, unit(2, 11, DownloadState::Queue)]), None);
+        assert_eq!(quality_target(&[]), None);
     }
 }

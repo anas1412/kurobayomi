@@ -53,6 +53,9 @@ pub const TOP_ROWS: [PrefRow; 4] = [
     },
 ];
 
+/// The key of [`TrackPrefs::bangumi_episode_progress`].
+pub const BANGUMI_EPISODE_PROGRESS_KEY: &str = "bangumi_episode_progress";
+
 /// Typed handles over the tracking keys.
 pub struct TrackPrefs {
     /// `pref_auto_update_manga_sync_key`, shared by anime and manga.
@@ -61,6 +64,9 @@ pub struct TrackPrefs {
     pub show_next_episode_airing_time: Pref<bool>,
     pub auto_update_on_mark_read: Pref<AutoTrackState>,
     pub anilist_score_type: Pref<AniListScoreType>,
+    /// Bangumi anime progress through the episode endpoints (T-31a-044, D7). Default off. Not an Aniyomi key, so it
+    /// is stored under `[extra]` and exported with the `kuro_` prefix.
+    pub bangumi_episode_progress: Pref<bool>,
 }
 
 impl TrackPrefs {
@@ -87,6 +93,7 @@ impl TrackPrefs {
                 "anilist_score_type",
                 AniListScoreType::POINT_10,
             ),
+            bangumi_episode_progress: Pref::new(store, BANGUMI_EPISODE_PROGRESS_KEY, false),
         }
     }
 }
@@ -106,6 +113,10 @@ mod tests {
         assert!(p.show_next_episode_airing_time.get());
         assert_eq!(p.auto_update_on_mark_read.get(), AutoTrackState::ALWAYS);
         assert_eq!(p.anilist_score_type.get(), AniListScoreType::POINT_10);
+        assert!(
+            !p.bangumi_episode_progress.get(),
+            "T-31a-044: off by default"
+        );
     }
 
     #[test]

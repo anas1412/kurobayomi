@@ -200,6 +200,11 @@ pub fn sync_gtk_preference(mode: ThemeMode, system_dark: bool) {
 }
 
 /// Stores the settings, then applies them with the last known system value.
+/// The system dark flag as last read; light until the portal answers.
+pub fn system_is_dark() -> bool {
+    SYSTEM_DARK.with(Cell::get).unwrap_or(false)
+}
+
 pub fn set_settings(display: &gdk::Display, settings: ThemeSettings) -> bool {
     CURRENT.with(|c| *c.borrow_mut() = Some((display.clone(), settings)));
     apply_current()
@@ -334,31 +339,28 @@ mod tests {
     }
 
     /// T-49b-008 and F-49-01: one palette provider for the life of the process, replaced text on
-    /// each apply, and a broken sheet keeps the previous text. Needs a display; run alone:
-    /// `cargo test -p kurobayomi gtk_palette_provider -- --ignored`.
+    /// each apply, and a broken sheet keeps the previous text. Needs a display, and
+    /// skips itself without one.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi gtk_palette_provider -- --ignored"]
     fn gtk_palette_provider_keeps_one_provider_and_the_last_good_text() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping");
-            return;
-        }
-        let display = gdk::Display::default().expect("a display");
-        assert!(build_provider(BASE_CSS).is_ok());
-        let doom = palette_text(&resolve(&ThemeSettings { scheme: SchemeSel::from(AppTheme::Doom), ..ThemeSettings::default() }, false));
-        let cloudflare = palette_text(&resolve(&ThemeSettings { scheme: SchemeSel::from(AppTheme::Cloudflare), ..ThemeSettings::default() }, false));
+        crate::testing::with_display(|| {
+            let display = gdk::Display::default().expect("a display");
+            assert!(build_provider(BASE_CSS).is_ok());
+            let doom = palette_text(&resolve(&ThemeSettings { scheme: SchemeSel::from(AppTheme::Doom), ..ThemeSettings::default() }, false));
+            let cloudflare = palette_text(&resolve(&ThemeSettings { scheme: SchemeSel::from(AppTheme::Cloudflare), ..ThemeSettings::default() }, false));
 
-        assert!(reapply(&display, &doom));
-        let first = PALETTE.with(|slot| slot.borrow().as_ref().map(|(_, p)| p.clone())).expect("palette provider");
-        assert!(reapply(&display, &cloudflare));
-        let second = PALETTE.with(|slot| slot.borrow().as_ref().map(|(_, p)| p.clone())).expect("palette provider");
-        assert_eq!(first, second, "the palette provider is added once and reused");
-        // GTK stores the parsed sheet, so compare with a reference provider loaded from the same text.
-        let reference = CssProvider::new();
-        reference.load_from_string(&cloudflare);
-        assert_eq!(second.to_str(), reference.to_str(), "the text is replaced");
+            assert!(reapply(&display, &doom));
+            let first = PALETTE.with(|slot| slot.borrow().as_ref().map(|(_, p)| p.clone())).expect("palette provider");
+            assert!(reapply(&display, &cloudflare));
+            let second = PALETTE.with(|slot| slot.borrow().as_ref().map(|(_, p)| p.clone())).expect("palette provider");
+            assert_eq!(first, second, "the palette provider is added once and reused");
+            // GTK stores the parsed sheet, so compare with a reference provider loaded from the same text.
+            let reference = CssProvider::new();
+            reference.load_from_string(&cloudflare);
+            assert_eq!(second.to_str(), reference.to_str(), "the text is replaced");
 
-        assert!(!reapply(&display, "}}}} not css"), "a broken sheet is refused");
-        assert_eq!(second.to_str(), reference.to_str(), "the previous text is kept");
+            assert!(!reapply(&display, "}}}} not css"), "a broken sheet is refused");
+            assert_eq!(second.to_str(), reference.to_str(), "the previous text is kept");
+        });
     }
 }

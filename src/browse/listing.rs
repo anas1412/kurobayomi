@@ -53,6 +53,8 @@ pub struct Listing {
     loading: bool,
     refresh_error: Option<String>,
     append_error: Option<String>,
+    /// `browse_hide_in_library_items`, read when the page was made (B§1.1, T-40b-034): favourites are not kept.
+    hide_in_library: bool,
 }
 
 impl Listing {
@@ -65,7 +67,14 @@ impl Listing {
             loading: false,
             refresh_error: None,
             append_error: None,
+            hide_in_library: false,
         }
+    }
+
+    /// Sets the hide-in-library flag. It applies to the pages delivered after the call; a favourite already on screen stays
+    /// until the listing changes (B-EC-15).
+    pub fn set_hide_in_library(&mut self, hide: bool) {
+        self.hide_in_library = hide;
     }
 
     pub fn query(&self) -> &BrowseQuery {
@@ -105,7 +114,7 @@ impl Listing {
     /// A page arrived. Returns how many items it added, or `None` when it belongs to an older listing. An empty page is
     /// a failure, as in `MangaSourcePagingSource`: with nothing loaded it is the refresh error `no_results_found`
     /// (B-EC-03), after items it is an appended error and the same page can be asked again (B-EC-04). The failure is
-    /// reported as `Some(0)`.
+    /// reported as `Some(0)`. With the hide-in-library flag on, favourites are not kept, so a page of only favourites adds 0.
     pub fn deliver(&mut self, generation: u64, page: ListedPage) -> Option<usize> {
         if page.items.is_empty() {
             return self.fail(generation, tr(MsgKey::no_results_found)).then_some(0);
@@ -116,8 +125,10 @@ impl Listing {
         self.loading = false;
         self.append_error = None;
         self.refresh_error = None;
-        let added = page.items.len();
-        self.items.extend(page.items.into_iter().map(Some));
+        let hide = self.hide_in_library;
+        let kept: Vec<ListItem> = page.items.into_iter().filter(|item| !(hide && item.favorite)).collect();
+        let added = kept.len();
+        self.items.extend(kept.into_iter().map(Some));
         Some(added)
     }
 
@@ -456,5 +467,20 @@ mod tests {
         listing.items.push(Some(item("a")));
         assert_eq!(listing.slots().len(), 2);
         assert_eq!(listing.loaded(), 1);
+    }
+
+    #[test]
+    fn hide_in_library_keeps_only_the_non_favourites_of_a_page_and_a_flag_off_keeps_all() {
+        let favourite = |id: i64| ListItem { id, title: format!("F{id}"), favorite: true, ..ListItem::default() };
+        let plain = |id: i64| ListItem { id, title: format!("P{id}"), ..ListItem::default() };
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        listing.set_hide_in_library(true);
+        let ask = listing.ask().expect("a first page is asked");
+        assert_eq!(listing.deliver(ask.generation, ListedPage { items: vec![favourite(1), plain(2), favourite(3)], has_next: true }), Some(1));
+        assert_eq!(listing.loaded(), 1, "T-40b-034: a favourite is not shown");
+        let mut all = Listing::new(BrowseQuery::Popular);
+        let ask = all.ask().expect("a first page is asked");
+        assert_eq!(all.deliver(ask.generation, ListedPage { items: vec![favourite(1), plain(2)], has_next: false }), Some(2));
+        assert_eq!(all.loaded(), 2, "the flag off keeps every row");
     }
 }

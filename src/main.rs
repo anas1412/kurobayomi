@@ -41,6 +41,8 @@ mod widgets;
 mod ui;
 mod watch;
 mod window_size;
+#[cfg(test)]
+mod testing;
 mod updates;
 mod pref_model;
 mod browse;
@@ -168,7 +170,8 @@ fn build_ui(app: &gtk::Application) {
 }
 
 fn build_window(app: &gtk::Application) {
-    theme::startup();
+    // the theme is applied before the first widget is built (T-36a-061)
+    shell::Shell::build(theme::startup).build_widget().expect("the theme was applied by Shell::build");
     let win = gtk::ApplicationWindow::builder()
         .application(app)
         .title("Kurobayomi")
@@ -389,6 +392,8 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
     let list = gtk::ListBox::new();
     list.add_css_class("navigation-sidebar");
     list.set_valign(gtk::Align::Center);
+    list.set_margin_top(widgets::rail::PAD_V);
+    list.set_margin_bottom(widgets::rail::PAD_V);
     let ids: Vec<String> = ui::with_spec(|s| s.nav.iter().map(|n| n.id.clone()).collect());
     // widgets that hide in icon-only mode, and the dots that replace badges there
     let (mut expanded, mut dots, mut rows): (Vec<gtk::Widget>, Vec<gtk::Widget>, Vec<GBox>) = (vec![], vec![], vec![]);
@@ -417,6 +422,8 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
         }
         let tip = if badge.is_empty() { n.title.clone() } else { format!("{} ({badge})", n.title) };
         let row = gtk::ListBoxRow::builder().child(&h).tooltip_text(tip).build();
+        row.set_margin_top(widgets::rail::ITEM_SPACING / 2);
+        row.set_margin_bottom(widgets::rail::ITEM_SPACING / 2);
         list.append(&row);
         squares.push((img, row));
         rows.push(h);
@@ -449,13 +456,16 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
     });
     list.select_row(list.row_at_index(0).as_ref());
 
-    let b = GBox::new(O::Vertical, 0);
+    let b = GBox::new(O::Vertical, widgets::rail::HEADER_GAP);
+    b.set_size_request(widgets::rail::MIN_WIDTH, -1);
     b.append(&header);
     b.append(&gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_width(true).vexpand(true).build());
 
     // icon-only rail: hide labels/badges/title, show badge dots, drop the app-icon decoration
+    let narrow = std::rc::Rc::new(std::cell::Cell::new(false));
+    let narrow_now = narrow.clone();
     toggle.connect_toggled(move |t| {
-        let rail = t.is_active();
+        let rail = t.is_active() || narrow_now.get();
         expanded.iter().for_each(|w| w.set_visible(!rail));
         dots.iter().for_each(|w| w.set_visible(rail));
         rows.iter().for_each(|h| h.set_halign(if rail { gtk::Align::Center } else { gtk::Align::Fill }));
@@ -466,7 +476,13 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
         }
         title.set_visible(!rail);
         header.set_decoration_layout(Some(if rail { ":".to_string() } else { ui::decoration(true) }.as_str()));
-        t.set_tooltip_text(Some(if rail { "Expand sidebar" } else { "Collapse sidebar" }));
+        t.set_tooltip_text(Some(if t.is_active() { "Expand sidebar" } else { "Collapse sidebar" }));
+    });
+    // below 600 px the labels hide and the icons remain, whatever the toggle says
+    let follower = toggle.clone();
+    widgets::rail::follow_width(&b, move |now| {
+        narrow.set(now);
+        follower.emit_by_name::<()>("toggled", &[]);
     });
     if std::env::var("KUROBAYOMI_RAIL").is_ok() {
         toggle.set_active(true);

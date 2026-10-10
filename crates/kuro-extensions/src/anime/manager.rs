@@ -3,7 +3,9 @@
 //! startup scan reads the package folder on a worker thread, so the main thread never waits for the disk.
 
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use async_channel::Sender;
 use tokio::runtime::Handle;
@@ -64,6 +66,8 @@ pub fn spawn_uninstall(runtime: &Handle, package_dir: PathBuf, pkg: String, even
     })
 }
 
+/// The extension state. Only the GTK main thread owns and mutates it (T-19a-023): the `Rc` marker makes it `!Send`, so a
+/// worker can only send [`Event`]s, never reach the state.
 #[derive(Debug, Default)]
 pub struct ExtensionState {
     installed: BTreeMap<String, Installed>,
@@ -72,6 +76,7 @@ pub struct ExtensionState {
     initialized: bool,
     installs: InstallTracker,
     banners: Vec<String>,
+    _main_thread_only: PhantomData<Rc<()>>,
 }
 
 /// What a source id resolves to: an installed package's source, or a listed source that is not installed.
@@ -320,6 +325,19 @@ fn first_listing(list: &[Available]) -> BTreeMap<&str, &Available> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Compile-time check that [`ExtensionState`] is not `Send` (T-19a-023). If it became `Send`, the probe below would be
+    /// ambiguous between the two impls and this module would not compile.
+    trait AmbiguousIfSend<A> {
+        fn probe() {}
+    }
+    impl<T: ?Sized> AmbiguousIfSend<()> for T {}
+    impl<T: ?Sized + Send> AmbiguousIfSend<u8> for T {}
+
+    #[test]
+    fn the_extension_state_is_not_send() {
+        <ExtensionState as AmbiguousIfSend<_>>::probe();
+    }
     use crate::anime::icons::IconCache;
     use crate::anime::loader::PackageDir;
     use crate::anime::model::StoreRow;

@@ -2,13 +2,16 @@
 //! navigation and the crop toggle. T-43a-023, T-43a-024, T-43a-026, T-43a-037 (wiring), part of T-43a-077.
 //!
 //! [`ReaderCore`] holds the behaviour and has no widgets, so it is tested without a display. [`open`] builds the
-//! widgets over it. The page viewers (area 44) fill the `viewer` slot of the returned [`ReaderScreen`].
+//! widgets over it. Once the chapter has loaded, the screen builds the viewer of the manga's reading mode
+//! (`viewers::make_viewer` behind `viewers::adapter::EngineViewer`) and attaches it to the `viewer` slot of the returned
+//! [`ReaderScreen`]. A mode change destroys it and attaches the next one.
 //!
 //! ponytail: a chapter load runs on the GTK thread (a `ReaderChapter` is `Rc`, so it cannot move to a worker). The
 //! spinner is shown and one frame is let through before the load starts, so the screen is never modal, but it does
 //! not animate while an HTTP page list is fetched. Move the page-list fetch to the runtime when the viewers land.
 
 use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
@@ -16,25 +19,35 @@ use std::sync::mpsc::{self, Receiver};
 use gtk::glib;
 use gtk::prelude::*;
 use kuro_core::sources::SourceGate;
+use kuro_domain::download::prefs::DownloadPrefs;
+use kuro_prefs::library::LibraryPrefs;
 use kuro_data::chapter::Chapter;
 use kuro_db::Db;
 use kuro_platform::toast::{ToastLength, Toaster};
+use kuro_platform::notifier::Notifier;
+use kuro_data::manga::{MangaRepo, MangaUpdate};
 use kuro_prefs::reader::{ReaderOrientation, ReaderPrefs, ReadingMode};
 use tokio::sync::watch;
 
 use super::bottom_bar::BottomBar;
 use super::chapters::ListOptions;
+use super::delete_queue::{Pending, QueueFile};
 use super::chrome::{self, TopBar, TopBarActions, build_error_card, build_top_bar};
 use super::flags::{self, CropPref};
+use super::history_rules;
+use super::page_actions;
+use super::page_save;
+use super::restore;
 use super::indicator::PageIndicator;
 use super::keep_awake::{self, KeepAwake};
 use super::loader::{LoadFailure, Loader, load_chapter};
 use super::mode_sheet::{self, Outcome};
-use super::model::{LoadError, ReaderChapter, ReaderPage, ViewerChapters};
+use super::model::{LoadError, PageStatus, ReaderChapter, ReaderPage, ViewerChapters};
 use super::nav::{self, Step};
 use super::navigator::{Navigator, NavigatorState};
 use super::overlay::Tint;
 use super::session::{AdjacentOutcome, ReaderEvent, ReaderSession, ReaderStore, open_list};
+use super::rotation_sheet;
 use super::settings_window::{self, MangaChoices};
 use super::sheet::{self, Sheet};
 use super::sync::{self, Effect};
@@ -42,6 +55,10 @@ use super::state::{self, Dialog, EscapeAction, UiState};
 use super::strings;
 use super::theme;
 use super::viewer::{self, Viewer, ViewerEvent, ViewerSlot};
+use super::viewers::adapter::{self, EngineViewer};
+use super::viewers::downloads::DownloadCheck;
+use super::viewers::settings::ViewerSettings;
+use super::viewers::{Emitter, ViewerContext, ViewerKind, make_viewer};
 
 /// Picks the loader of a chapter (see `loader::choose_loader`).
 pub type BuildLoader = Rc<dyn Fn(&Rc<ReaderChapter>) -> Result<Loader, LoadError>>;
@@ -59,6 +76,27 @@ pub struct ReaderDeps {
     pub incognito: bool,
     /// The store behind `prefs`. Its change feed applies live settings to the open reader.
     pub prefs_store: kuro_prefs::store::PrefStore,
+}
+
+/// Deletes the downloads of the chapters a closing reader hands it (T-43a-032). It is called once, on the GTK thread, and
+/// does its work elsewhere.
+pub type DeleteSink = Rc<dyn Fn(Vec<Pending>)>;
+
+/// What a reader opened by the app has beyond [`ReaderDeps`]: where it keeps its crash-restore record and its delete
+/// queue, how it deletes downloads, and the download index for its transition cards. The default has none of them, so
+/// a reader that does not need them (a local manga) is opened with [`open`] and writes nothing.
+pub struct ReaderExtras {
+    /// The platform data directory. Without it no restore record and no delete queue are kept.
+    pub data_dir: Option<PathBuf>,
+    /// Deletes the downloads of the chapters queued by delete-after-read. Without it the rule is off.
+    pub delete_sink: Option<DeleteSink>,
+    pub downloads: DownloadCheck,
+}
+
+impl Default for ReaderExtras {
+    fn default() -> Self {
+        Self { data_dir: None, delete_sink: None, downloads: DownloadCheck::default() }
+    }
 }
 
 /// The crop button after a toggle: the new value, the icon that reflects it and the toast text.
@@ -95,14 +133,59 @@ pub async fn wait_ready(mut ready: watch::Receiver<bool>) -> bool {
 /// The reader's behaviour without widgets.
 pub struct ReaderCore {
     deps: ReaderDeps,
+    extras: ReaderExtras,
     session: RefCell<Option<ReaderSession>>,
     events: RefCell<Option<Receiver<ReaderEvent>>>,
     manga_title: RefCell<String>,
+    /// The delete queue was handed to the sink; a later close does not hand it over again.
+    deletes_flushed: Cell<bool>,
 }
 
 impl ReaderCore {
     pub fn new(deps: ReaderDeps) -> Self {
-        Self { deps, session: RefCell::new(None), events: RefCell::new(None), manga_title: RefCell::new(String::new()) }
+        Self::with_extras(deps, ReaderExtras::default())
+    }
+
+    pub fn with_extras(deps: ReaderDeps, extras: ReaderExtras) -> Self {
+        Self {
+            deps,
+            extras,
+            session: RefCell::new(None),
+            events: RefCell::new(None),
+            manga_title: RefCell::new(String::new()),
+            deletes_flushed: Cell::new(false),
+        }
+    }
+
+    /// The download index for the viewers' transition cards.
+    pub fn downloads(&self) -> DownloadCheck {
+        self.extras.downloads.clone()
+    }
+
+    /// Where the reader starts (T-43a-039): the explicit chapter, or the chapter and page of a fresh crash-restore record
+    /// when none was asked for and `restore_after_crash` is on.
+    pub fn start(&self) -> restore::Start {
+        let saved = self.extras.data_dir.as_deref().and_then(|dir| restore::load(&restore::path_in(dir)));
+        let enabled = self.deps.prefs_store.pref(restore::PREF_KEY, true).get();
+        restore::resolve(self.deps.manga_id, self.deps.chapter_id, saved, history_rules::now_ms(), enabled)
+    }
+
+    /// Hands the chapters queued by delete-after-read to the sink, once, when the reader closes (T-43a-032). The queue is
+    /// kept in its file until the sink reports them dealt with, so chapters of a reader that never closed are deleted by
+    /// the next one that does.
+    pub fn flush_deletes(&self) {
+        let (Some(sink), Some(dir)) = (&self.extras.delete_sink, self.extras.data_dir.as_deref()) else { return };
+        if self.deletes_flushed.replace(true) {
+            return;
+        }
+        let pending = match self.session.borrow_mut().as_mut() {
+            Some(session) => session.pending_deletes(),
+            // the reader never loaded: what an earlier one left is still due
+            None => QueueFile::in_dir(dir).list(),
+        };
+        if !pending.is_empty() {
+            sink(pending);
+        }
     }
 
     /// The reader's event feed for the viewers, once the initial load has made it. Taken once.
@@ -110,15 +193,26 @@ impl ReaderCore {
         self.events.borrow_mut().take()
     }
 
+    /// The settings a new viewer starts from, read from the preference store (T-44a-004).
+    pub fn viewer_settings(&self) -> ViewerSettings {
+        ViewerSettings::from_prefs(&self.deps.prefs)
+    }
+
+    /// The preference store handle a viewer follows for live changes (T-44a-005).
+    pub fn reader_prefs(&self) -> ReaderPrefs {
+        self.deps.prefs.clone()
+    }
+
     /// Loads the manga, builds the reader list and loads the requested chapter (T-43a-023). A failure leaves no
     /// session behind, so a retry repeats the whole load (T-43a-024).
     pub fn initial_load(&self) -> Result<(), LoadError> {
         *self.session.borrow_mut() = None;
         let prefs = &self.deps.prefs;
+        let start = self.start();
         let opened = open_list(
             Arc::clone(&self.deps.db),
             self.deps.manga_id,
-            self.deps.chapter_id,
+            start.chapter_id,
             |manga| ListOptions {
                 skip_read: prefs.skip_read.get(),
                 skip_filtered: prefs.skip_filtered.get(),
@@ -135,9 +229,13 @@ impl ReaderCore {
             LoadFailure::Failed(error) => error,
             LoadFailure::Cancelled => LoadError::new(strings::UNKNOWN_ERROR),
         })?;
+        if let (Some(page), Some(pages)) = (start.page_index, chapter.pages()) {
+            // a restored page is where the viewer opens, kept inside the chapter
+            chapter.requested_page.set(page.clamp(0, pages.len().saturating_sub(1) as i64));
+        }
         *self.manga_title.borrow_mut() = opened.manga.title.clone();
         let (tx, rx) = mpsc::channel();
-        let session = ReaderSession::new(
+        let mut session = ReaderSession::new(
             self.deps.manga_id,
             opened.manga.viewer_flags,
             opened.chapters,
@@ -147,6 +245,14 @@ impl ReaderCore {
             Rc::clone(&self.deps.store),
             tx,
         );
+        let mark_duplicates = LibraryPrefs::new(self.deps.prefs_store.clone()).mark_duplicate_read_chapter_as_read.get();
+        session.set_mark_duplicates_read(mark_duplicates.contains("existing"));
+        if let (Some(_), Some(dir)) = (&self.extras.delete_sink, self.extras.data_dir.as_deref()) {
+            // the slot count is read once, when the reader opens
+            let slots = DownloadPrefs::new(&self.deps.prefs_store).remove_after_read_slots.get();
+            session.set_delete_after_read(i64::from(slots), Some(QueueFile::in_dir(dir)));
+        }
+        session.start_history(history_rules::now_ms());
         *self.session.borrow_mut() = Some(session);
         *self.events.borrow_mut() = Some(rx);
         Ok(())
@@ -192,8 +298,56 @@ impl ReaderCore {
     }
 
     /// Flips the bookmark of the current chapter and writes it. Returns the new state.
-    pub fn toggle_bookmark(&self) -> Option<bool> {
+    pub fn toggle_bookmark(&self) -> Option<Result<bool, String>> {
         self.session.borrow().as_ref()?.toggle_bookmark()
+    }
+
+    /// The page on screen: the current chapter's page at the visible position.
+    pub fn visible_page(&self) -> Option<Rc<ReaderPage>> {
+        let session = self.session.borrow();
+        let session = session.as_ref()?;
+        let pages = session.current_chapter()?.pages()?;
+        let index = session.current_page().checked_sub(1)? as usize;
+        pages.get(index).cloned()
+    }
+
+    /// The toast after a cover write (T-43a-058). The cover is written first, then the library check (E-COVER-1).
+    pub fn cover_result(&self, written: Result<(), String>) -> &'static str {
+        if written.is_err() {
+            return strings::NOTIFICATION_COVER_UPDATE_FAILED;
+        }
+        let manga = match MangaRepo::new(Arc::clone(&self.deps.db)).by_id(self.deps.manga_id) {
+            Ok(manga) => manga,
+            Err(_) => return strings::NOTIFICATION_COVER_UPDATE_FAILED,
+        };
+        if !manga.favorite {
+            return strings::NOTIFICATION_FIRST_ADD_TO_LIBRARY;
+        }
+        let update = MangaUpdate { id: self.deps.manga_id, cover_last_modified: Some(history_rules::now_ms()), ..Default::default() };
+        match MangaRepo::new(Arc::clone(&self.deps.db)).update(&update) {
+            Ok(()) => strings::COVER_UPDATED,
+            Err(_) => strings::NOTIFICATION_COVER_UPDATE_FAILED,
+        }
+    }
+
+    /// The manga title and the chapter name of a page, for the saved file's name (T-43a-054).
+    pub fn page_names(&self, page: &ReaderPage) -> (String, String) {
+        let chapter = page.chapter().map(|c| c.chapter.name.clone()).unwrap_or_default();
+        (self.manga_title.borrow().clone(), chapter)
+    }
+
+    /// Writes the read time of the open chapter when the reader leaves the screen (T-43a-033).
+    pub fn pause_history(&self) {
+        if let Some(session) = self.session.borrow_mut().as_mut() {
+            session.flush_history(history_rules::now_ms());
+        }
+    }
+
+    /// Starts the read timer again when the reader is shown after a pause (T-43a-033).
+    pub fn resume_history(&self) {
+        if let Some(session) = self.session.borrow_mut().as_mut() {
+            session.resume_history(history_rules::now_ms());
+        }
     }
 
     /// The current chapter and its neighbours, for a viewer that is attached.
@@ -368,12 +522,16 @@ impl ReaderChrome {
                         tint.on_page_changed(prefs);
                     }
                 };
-                let _ = screen.core.page_selected(&page, &mut |_| {}, &mut flash);
+                let switched = screen.core.page_selected(&page, &mut |_| {}, &mut flash);
+                if switched.is_some() {
+                    // the page belongs to another chapter, which is now the current one: the viewer gets its neighbours
+                    reload_chapters(&screen);
+                }
                 sync_top_bar(&screen);
                 refresh(&screen);
             }
             ViewerEvent::RequestPreload(chapter) => screen.core.request_preload(&chapter),
-            ViewerEvent::LongTap(_) => {}
+            ViewerEvent::LongTap(page) => open_page_actions(&screen, page),
         }
     }
 
@@ -434,6 +592,10 @@ struct Screen {
     viewer_box: gtk::Box,
     /// The viewer attached by area 44. The slider moves it; with none attached the slider has nothing to move.
     viewer_slot: RefCell<ViewerSlot>,
+    /// The reading mode the attached viewer was built for, so a reload knows whether the mode changed.
+    viewer_kind: Cell<Option<ViewerKind>>,
+    /// The core's event feed, taken once the initial load has made it (T-043a-086).
+    events: RefCell<Option<std::sync::mpsc::Receiver<ReaderEvent>>>,
     tint: Tint,
     /// Holds the top bar, which is rebuilt when the chapter or its bookmark changes.
     top_slot: gtk::Box,
@@ -458,12 +620,33 @@ const PAGE_VIEWER: &str = "viewer";
 /// `reader::open`: the reader page. It waits for the source manager, loads the manga and the requested chapter,
 /// and shows the failure card with Retry and Close when that fails. The root widget is named `screen:reader`.
 pub fn open(deps: ReaderDeps, gate: &SourceGate, toaster: Toaster, on_close: impl Fn() + 'static) -> ReaderScreen {
+    open_with(deps, ReaderExtras::default(), gate, toaster, on_close)
+}
+
+/// [`open`] with the crash-restore, delete-after-read and download-index extras of an app-opened reader.
+pub fn open_with(
+    deps: ReaderDeps,
+    extras: ReaderExtras,
+    gate: &SourceGate,
+    toaster: Toaster,
+    on_close: impl Fn() + 'static,
+) -> ReaderScreen {
     theme::install_css();
     // Decodes started by an earlier reader are stale from now on (T-43b-059).
     crate::reader::decode_guard::new_session();
+    // and so are the pages the last reader kept decoded
+    crate::reader::page_view::clear_decoded_cache();
     let theme_value = deps.prefs.reader_theme.get();
     let prefs_store = deps.prefs_store.clone();
-    let core = Rc::new(ReaderCore::new(deps));
+    let core = Rc::new(ReaderCore::with_extras(deps, extras));
+    // closing the reader first hands the delete-after-read queue over (T-43a-032)
+    let on_close = {
+        let core = Rc::clone(&core);
+        move || {
+            core.flush_deletes();
+            on_close();
+        }
+    };
 
     let viewer = gtk::Box::new(gtk::Orientation::Vertical, 0);
     viewer.set_vexpand(true);
@@ -520,6 +703,8 @@ pub fn open(deps: ReaderDeps, gate: &SourceGate, toaster: Toaster, on_close: imp
         stack,
         viewer_box: viewer.clone(),
         viewer_slot: RefCell::new(None),
+        viewer_kind: Cell::new(None),
+        events: RefCell::new(None),
         tint,
         top_slot,
         shown_chapter: Cell::new(-1),
@@ -559,15 +744,18 @@ pub fn open(deps: ReaderDeps, gate: &SourceGate, toaster: Toaster, on_close: imp
             None => false,
         }
     });
-    let (mode_weak, crop_weak, settings_weak) = (weak.clone(), weak.clone(), weak.clone());
+    let (mode_weak, rotation_weak, crop_weak, settings_weak) = (weak.clone(), weak.clone(), weak.clone(), weak.clone());
     bottom_bar.connect(
         move || {
             if let Some(s) = mode_weak.upgrade() {
                 open_mode_sheet(&s);
             }
         },
-        // The rotation sheet is T-043a-044, which is not part of this change.
-        || {},
+        move || {
+            if let Some(s) = rotation_weak.upgrade() {
+                open_rotation_sheet(&s);
+            }
+        },
         move || {
             if let Some(s) = crop_weak.upgrade() {
                 toggle_crop(&s);
@@ -593,19 +781,30 @@ pub fn open(deps: ReaderDeps, gate: &SourceGate, toaster: Toaster, on_close: imp
     let keys = gtk::EventControllerKey::new();
     {
         let screen = Rc::clone(&screen);
-        keys.connect_key_pressed(move |_, key, _, _| handle_key(&screen, key));
+        keys.connect_key_pressed(move |_, key, _, state| handle_key(&screen, key, state));
     }
     root.add_controller(keys);
     {
         let screen = Rc::clone(&screen);
         root.connect_map(move |root| {
             root.grab_focus();
+            // shown again after a pause (for example back from the manga details): time reading again (T-43a-033)
+            screen.core.resume_history();
             sync_keep_awake(&screen, true);
         });
     }
     {
+        // a reader taken out of the window without its close button still hands its queue over
+        let core = Rc::clone(&core);
+        root.connect_destroy(move |_| core.flush_deletes());
+    }
+    {
         let screen = Rc::clone(&screen);
-        root.connect_unmap(move |_| sync_keep_awake(&screen, false));
+        root.connect_unmap(move |_| {
+            // leaving the reader (or hiding it) ends the read session, so its time is written (T-43a-033)
+            screen.core.pause_history();
+            sync_keep_awake(&screen, false);
+        });
     }
 
     screen.tint.apply(&screen.core.deps.prefs, &screen.stack);
@@ -649,6 +848,13 @@ fn apply_effect(screen: &Screen, effect: Effect) {
                 screen.tint.reset_flash();
             }
         }
+        Effect::Incognito => {
+            // turning the global flag off closes the reader (E-INC-2)
+            let on = kuro_prefs::base::BasePrefs::new(screen.core.deps.prefs_store.clone()).incognito_mode.get();
+            if sync::closes_on_incognito(on) {
+                (screen.on_close)();
+            }
+        }
         Effect::Brightness | Effect::ColorFilter => screen.tint.apply(&screen.core.deps.prefs, &screen.stack),
     }
 }
@@ -687,7 +893,7 @@ fn set_menu(screen: &Screen, visible: bool) {
     refresh(screen);
 }
 
-fn handle_key(screen: &Rc<Screen>, key: gtk::gdk::Key) -> glib::Propagation {
+fn handle_key(screen: &Rc<Screen>, key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> glib::Propagation {
     if key == gtk::gdk::Key::F11 {
         if let Some(window) = window_of(screen) {
             if state::toggle_fullscreen(window.is_fullscreen()) { window.fullscreen() } else { window.unfullscreen() }
@@ -710,6 +916,15 @@ fn handle_key(screen: &Rc<Screen>, key: gtk::gdk::Key) -> glib::Propagation {
     // the keys of the sheet that is open stay with it
     if screen.sheet.is_open() {
         return glib::Propagation::Proceed;
+    }
+    if !text_has_focus(screen) {
+        if let Some(propagation) = shortcut(screen, key, modifiers) {
+            return propagation;
+        }
+    }
+    // the reader's focus is on the root, so the keys the viewer owns (arrows, page keys) come through here
+    if screen.viewer_slot.borrow().as_ref().is_some_and(|v| v.handle_key(key, modifiers)) {
+        return glib::Propagation::Stop;
     }
     match key.to_unicode().and_then(nav::key_step) {
         Some(step) => {
@@ -734,12 +949,176 @@ fn open_mode_sheet(screen: &Rc<Screen>) {
             Outcome::Revert => ReadingMode::Default,
         };
         s.core.apply_mode(mode);
+        drain_events(&s);
         s.sheet.dismiss();
         refresh(&s);
     });
     let content = mode_sheet::build(screen.core.manga_mode(), screen.core.show_reading_mode(), done);
     screen.ui.borrow_mut().open(Dialog::ReadingModeSelect);
     screen.sheet.show(&content);
+}
+
+/// The rotation sheet (T-043a-044). Apply stores the manga's orientation, toasts its label and closes the sheet.
+fn open_rotation_sheet(screen: &Rc<Screen>) {
+    let weak = Rc::downgrade(screen);
+    let done: Rc<dyn Fn(ReaderOrientation, &'static str)> = Rc::new(move |orientation, toast| {
+        let Some(s) = weak.upgrade() else { return };
+        s.core.apply_orientation(orientation);
+        s.toaster.show(toast, ToastLength::Short);
+        drain_events(&s);
+        s.sheet.dismiss();
+        refresh(&s);
+    });
+    let content = rotation_sheet::build(screen.core.manga_orientation(), done);
+    screen.ui.borrow_mut().open(Dialog::OrientationSelect);
+    screen.sheet.show(&content);
+}
+
+/// The page actions sheet (T-43a-045). A long press, a right-click and Shift+F10 open it for the page.
+fn open_page_actions(screen: &Rc<Screen>, page: Rc<ReaderPage>) {
+    let weak = Rc::downgrade(screen);
+    let on_action: Rc<dyn Fn(page_actions::Action)> = Rc::new(move |action| {
+        let Some(s) = weak.upgrade() else { return };
+        if page_actions::closes_sheet(action) {
+            s.sheet.dismiss();
+        }
+        run_page_action(&s, &page, action);
+    });
+    let content = page_actions::build(on_action);
+    screen.ui.borrow_mut().open(Dialog::PageActions);
+    screen.sheet.show(&content);
+}
+
+fn run_page_action(screen: &Rc<Screen>, page: &Rc<ReaderPage>, action: page_actions::Action) {
+    match action {
+        page_actions::Action::Copy => copy_page(screen, page),
+        page_actions::Action::Save => save_page(screen, page),
+        page_actions::Action::Share => share_page(screen, page),
+        page_actions::Action::SetCover => set_cover(screen, page),
+    }
+}
+
+fn warn_unknown(screen: &Screen) {
+    screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+}
+
+/// Where a page's bytes are, for an action that runs now. A page that is not `Ready` gives `None` and nothing is
+/// shown: the actions do nothing for it (T-43a-045). A ready page whose bytes cannot be found shows the error toast.
+fn ready_source(screen: &Screen, page: &Rc<ReaderPage>) -> Option<crate::reader::viewers::page_bytes::ByteSource> {
+    if !page_actions::runs_for(page.status.get()) {
+        return None;
+    }
+    let source = page_save::page_source(page);
+    if source.is_none() {
+        warn_unknown(screen);
+    }
+    source
+}
+
+/// Copies a ready page to the clipboard as an image (T-43a-057). Nothing is shown on success.
+fn copy_page(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
+    let Some(source) = ready_source(screen, page) else { return };
+    let toaster = screen.toaster.clone();
+    page_save::in_background(move || page_save::read_bytes(&source), move |result| {
+        let texture = result.ok().and_then(|bytes| gtk::gdk::Texture::from_bytes(&gtk::glib::Bytes::from_owned(bytes)).ok());
+        match (texture, gtk::gdk::Display::default()) {
+            (Some(texture), Some(display)) => display.clipboard().set_texture(&texture),
+            _ => {
+                toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+            }
+        }
+    });
+}
+
+/// Saves a page into the pictures folder and shows the saved or error notice (T-43a-054, T-43a-055).
+fn save_page(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
+    let Some(source) = ready_source(screen, page) else { return };
+    let (title, chapter) = screen.core.page_names(page);
+    let base = page_save::page_file_base(&title, &chapter, page.number() as usize);
+    let folder = screen.core.deps.prefs.folder_per_manga.get();
+    let Some(notifier) = app_notifier() else { return warn_unknown(screen) };
+    page_save::save_in_background(source, &title, &base, folder, notifier);
+}
+
+/// Stages a copy of the page and opens it with the desktop (T-43a-056).
+fn share_page(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
+    let Some(source) = ready_source(screen, page) else { return };
+    let (title, chapter) = screen.core.page_names(page);
+    let base = page_save::page_file_base(&title, &chapter, page.number() as usize);
+    let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return warn_unknown(screen) };
+    let staging = kuro_images::share::staging_dir(&paths);
+    let toaster = screen.toaster.clone();
+    page_save::in_background(move || page_save::stage_for_share(&source, &base, &staging), move |result| {
+        let opened = result.and_then(|path| kuro_images::share::reveal(&path).map_err(|e| e.to_string()));
+        if opened.is_err() {
+            toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+        }
+    });
+}
+
+/// Sets the page as the manga's cover after a confirm (T-43a-058). The result toast follows the write.
+fn set_cover(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
+    if !page_actions::runs_for(page.status.get()) {
+        return;
+    }
+    let Some(window) = window_of(screen) else { return };
+    let (weak, page) = (Rc::downgrade(screen), Rc::clone(page));
+    sheet::confirm(&window, strings::CONFIRM_SET_IMAGE_AS_COVER, move || {
+        let Some(s) = weak.upgrade() else { return };
+        // checked again now that the confirm has been answered
+        let Some(source) = ready_source(&s, &page) else { return };
+        let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return warn_unknown(&s) };
+        let cover = kuro_images::cover_paths::custom_file(&paths, kuro_images::cover_paths::Family::MangaCover, s.core.deps.manga_id);
+        let weak = Rc::downgrade(&s);
+        page_save::in_background(move || page_save::write_cover_file(&source, &cover), move |written| {
+            let Some(s) = weak.upgrade() else { return };
+            let message = s.core.cover_result(written);
+            s.toaster.show(message, ToastLength::Short);
+        });
+    });
+}
+
+/// The notifier of the app's notices, for the save notice. `None` before the application exists.
+fn app_notifier() -> Option<Arc<dyn Notifier>> {
+    let app = gtk::gio::Application::default()?.downcast::<gtk::Application>().ok()?;
+    Some(Arc::new(crate::gio_notifier::GioNotifier::new(&app, Vec::new())))
+}
+
+/// Whether a text field of the reader has the focus, when the reader's shortcuts stay off (T-43a-053).
+fn text_has_focus(screen: &Screen) -> bool {
+    let Some(window) = window_of(screen) else { return false };
+    let Some(focus) = gtk::prelude::GtkWindowExt::focus(&window) else { return false };
+    focus.is::<gtk::Entry>() || focus.is::<gtk::Text>() || focus.is::<gtk::TextView>() || focus.is::<gtk::SearchEntry>()
+}
+
+/// The desktop shortcuts (T-43a-053): Ctrl+D bookmark, Ctrl+C copy page, Ctrl+S save page, Shift+F10 page actions.
+/// `None` when the key is not one of them.
+fn shortcut(screen: &Rc<Screen>, key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> Option<glib::Propagation> {
+    if key == gtk::gdk::Key::F10 && modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK) {
+        let page = screen.core.visible_page()?;
+        open_page_actions(screen, page);
+        return Some(glib::Propagation::Stop);
+    }
+    if !modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+        return None;
+    }
+    match key.to_unicode()?.to_ascii_lowercase() {
+        'd' => {
+            if let Some(Err(_)) = screen.core.toggle_bookmark() {
+                warn_unknown(screen);
+            }
+            let weak = Rc::downgrade(screen);
+            glib::idle_add_local_once(move || {
+                if let Some(s) = weak.upgrade() {
+                    rebuild_top_bar(&s);
+                }
+            });
+        }
+        'c' => copy_page(screen, &screen.core.visible_page()?),
+        's' => save_page(screen, &screen.core.visible_page()?),
+        _ => return None,
+    }
+    Some(glib::Propagation::Stop)
 }
 
 fn toggle_crop(screen: &Screen) {
@@ -756,12 +1135,14 @@ fn open_settings(screen: &Rc<Screen>) {
         on_mode: Rc::new(move |mode| {
             if let Some(s) = mode_weak.upgrade() {
                 s.core.apply_mode(mode);
+                drain_events(&s);
                 refresh(&s);
             }
         }),
         on_orientation: Rc::new(move |orientation| {
             if let Some(s) = orientation_weak.upgrade() {
                 s.core.apply_orientation(orientation);
+                drain_events(&s);
                 refresh(&s);
             }
         }),
@@ -799,11 +1180,84 @@ fn start(screen: &Rc<Screen>) {
         match result {
             Ok(()) => {
                 screen.stack.set_visible_child_name(PAGE_VIEWER);
+                *screen.events.borrow_mut() = screen.core.take_events();
+                install_viewer(&screen);
+                watch_events(&screen);
                 sync_top_bar(&screen);
                 refresh(&screen);
             }
             Err(error) => show_card(&screen, &error),
         }
+    });
+}
+
+/// Builds the viewer for the manga's reading mode and attaches it (T-44a-070). `attach_viewer` destroys the previous
+/// viewer first, so a mode switch never has two viewers alive. The viewer opens on the chapter's requested page by
+/// itself, and from then on reports back through the chrome.
+fn install_viewer(screen: &Rc<Screen>) {
+    let kind = adapter::kind_of(screen.core.reading_mode());
+    let chrome = ReaderChrome { screen: Rc::downgrade(screen) };
+    let ctx = ViewerContext {
+        emit: Emitter::new(Rc::new({
+            let chrome = chrome.clone();
+            move |event| chrome.route(event)
+        })),
+        settings: screen.core.viewer_settings(),
+        prefs: Some(screen.core.reader_prefs()),
+        downloads: screen.core.downloads(),
+    };
+    screen.viewer_kind.set(Some(kind));
+    chrome.attach_viewer(Box::new(EngineViewer::new(make_viewer(kind, ctx), screen.viewer_box.clone())));
+}
+
+/// Hands the current chapters to the attached viewer again, after a chapter changed or finished loading.
+fn reload_chapters(screen: &Screen) {
+    let Some(chapters) = screen.core.viewer_chapters() else { return };
+    // a viewer that is being attached holds the slot; its first chapters are the ones it is given
+    if let Ok(slot) = screen.viewer_slot.try_borrow() {
+        if let Some(viewer) = slot.as_ref() {
+            viewer.set_chapters(&chapters);
+        }
+    }
+}
+
+/// `ReloadViewerChapters`: a new viewer when the reading mode changed (the old one is destroyed first), otherwise the
+/// same viewer with the new chapters.
+fn reload_viewer(screen: &Rc<Screen>) {
+    if screen.viewer_kind.get() == Some(adapter::kind_of(screen.core.reading_mode())) {
+        reload_chapters(screen);
+    } else {
+        install_viewer(screen);
+    }
+}
+
+/// Carries out what the core's session has sent since the last call. Events arrive in order and none is dropped.
+fn drain_events(screen: &Rc<Screen>) {
+    let events: Vec<ReaderEvent> = screen.events.borrow().as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
+    for event in events {
+        match event {
+            ReaderEvent::ReloadViewerChapters => reload_viewer(screen),
+            // the window keeps its shape on the desktop, and the image actions belong to the page sheet (T-043a-045)
+            ReaderEvent::SetOrientation(_)
+            | ReaderEvent::PageChanged
+            | ReaderEvent::SetCoverResult(_)
+            | ReaderEvent::SavedImage(_)
+            | ReaderEvent::ShareImage(_)
+            | ReaderEvent::CopyImage(_) => {}
+        }
+    }
+}
+
+/// Follows the core's events while the reader is open: a preload that finished, or a mode change that came from
+/// somewhere other than the reader's own buttons.
+fn watch_events(screen: &Rc<Screen>) {
+    let weak = Rc::downgrade(screen);
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || match weak.upgrade() {
+        Some(screen) => {
+            drain_events(&screen);
+            glib::ControlFlow::Continue
+        }
+        None => glib::ControlFlow::Break,
     });
 }
 
@@ -814,8 +1268,8 @@ fn show_card(screen: &Rc<Screen>, error: &LoadError) {
     screen.stack.set_visible_child_name(PAGE_CARD);
 }
 
-/// The slider's page index goes to the attached viewer's `move_to_page`. Until area 44 attaches a viewer with
-/// `ReaderChrome::attach_viewer` there is nothing to move, and the slider does nothing (blocked on area 44).
+/// The slider's page index goes to the attached viewer's `move_to_page`. With no viewer attached (the load has not
+/// finished) there is nothing to move.
 fn move_viewer(screen: &Screen, index: usize) {
     if let Some(viewer) = screen.viewer_slot.borrow().as_ref() {
         screen.core.move_viewer_to(viewer.as_ref(), index);
@@ -830,21 +1284,25 @@ fn sync_top_bar(screen: &Rc<Screen>) {
 }
 
 /// Builds the top bar for the current chapter (T-043a-040): back, the manga and chapter title, the bookmark toggle
-/// and the overflow menu. Back and the title return to the page below, which is the manga's page.
+/// and the overflow menu. Back returns to the page below; the title opens the manga's details.
 fn rebuild_top_bar(screen: &Rc<Screen>) {
     let Some(info) = screen.core.top_bar() else { return };
     screen.shown_chapter.set(screen.core.current_chapter_id().unwrap_or(-1));
     while let Some(child) = screen.top_slot.first_child() {
         screen.top_slot.remove(&child);
     }
-    let (back, open_manga) = (Rc::clone(&screen.on_close), Rc::clone(&screen.on_close));
+    let back = Rc::clone(&screen.on_close);
+    let manga_id = screen.core.deps.manga_id;
     let (bookmark, overflow) = (Rc::downgrade(screen), Rc::downgrade(screen));
     let actions = TopBarActions {
         on_back: Box::new(move || back()),
-        on_open_manga: Box::new(move || open_manga()),
+        // the title pushes the manga's details page above the reader, so returning pops back to the same page
+        on_open_manga: Box::new(move || crate::entry_core::route::open(manga_id)),
         on_bookmark: Box::new(move || {
             let Some(screen) = bookmark.upgrade() else { return };
-            screen.core.toggle_bookmark();
+            if let Some(Err(_)) = screen.core.toggle_bookmark() {
+                screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+            }
             // the bar is rebuilt after the click has finished, so its icon and label follow the new state
             glib::idle_add_local_once(move || rebuild_top_bar(&screen));
         }),
@@ -887,6 +1345,12 @@ fn press(screen: &Rc<Screen>, step: Step) {
     glib::idle_add_local_once(move || {
         let outcome = screen.core.step(step);
         screen.stepping.set(false);
+        if matches!(outcome, AdjacentOutcome::Moved(_)) {
+            // the viewer shows the new chapter from its first page
+            reload_chapters(&screen);
+            move_viewer(&screen, 0);
+        }
+        drain_events(&screen);
         sync_top_bar(&screen);
         refresh(&screen);
         if let AdjacentOutcome::Failed(message) = outcome {
@@ -925,7 +1389,11 @@ mod tests {
 
     impl ReaderStore for NoStore {
         fn save_progress(&self, _: i64, _: i64, _: bool) {}
-        fn set_bookmark(&self, _: i64, _: bool) {}
+        fn set_bookmark(&self, _: i64, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn mark_read(&self, _: i64) {}
+        fn upsert_history(&self, _: i64, _: i64, _: i64) {}
         fn set_viewer_flags(&self, _: i64, _: i64, _: i64) {}
         fn flush(&self) {}
     }
@@ -1140,10 +1608,104 @@ mod tests {
         let bar = core.top_bar().unwrap();
         assert_eq!((bar.manga_title.as_str(), bar.bookmarked, bar.is_http_source), ("My Manga", false, true));
         assert_eq!(core.current_chapter_id(), Some(f.chapter_ids[1]));
-        assert_eq!(core.toggle_bookmark(), Some(true));
+        assert_eq!(core.toggle_bookmark(), Some(Ok(true)));
         assert!(core.top_bar().unwrap().bookmarked);
         assert_eq!(core.step(Step::Previous), AdjacentOutcome::Moved(0));
         assert_eq!(core.current_chapter_id(), Some(f.chapter_ids[0]), "the bar follows the chapter");
         assert!(!core.top_bar().unwrap().bookmarked, "the bookmark belongs to the chapter, not the reader");
+    }
+
+    /// Network pages with real image bytes, so the viewer can show them.
+    struct PngPages;
+
+    impl HttpPageSource for PngPages {
+        fn page_list(&self, _chapter_url: &str) -> Result<Vec<PageEntry>, String> {
+            Ok(vec![PageEntry { url: "p0".into(), image_url: None }, PageEntry { url: "p1".into(), image_url: None }])
+        }
+        fn image_url(&self, page_url: &str) -> Result<String, String> {
+            Ok(format!("https://img/{page_url}.png"))
+        }
+        fn image(&self, _image_url: &str) -> Result<Vec<u8>, String> {
+            let mut out = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(20, 30, image::Rgba([50, 60, 70, 255])))
+                .write_to(&mut out, image::ImageFormat::Png)
+                .map_err(|e| e.to_string())?;
+            Ok(out.into_inner())
+        }
+    }
+
+    fn page_views(widget: &gtk::Widget, out: &mut Vec<crate::reader::page_view::PageView>) {
+        if let Some(view) = widget.downcast_ref::<crate::reader::page_view::PageView>() {
+            out.push(view.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(c) = child {
+            page_views(&c, out);
+            child = c.next_sibling();
+        }
+    }
+
+    fn pump_until(done: impl Fn() -> bool) -> bool {
+        let ctx = glib::MainContext::default();
+        for _ in 0..1000 {
+            while ctx.iteration(false) {}
+            if done() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        false
+    }
+
+    /// T-44a-070 end to end: the reader attaches the viewer of the manga's mode once the chapter has loaded, the network
+    /// pages reach it through the loader, and a mode switch destroys the old viewer before the new one is attached.
+    #[test]
+    fn the_reader_attaches_its_viewer_shows_network_pages_and_swaps_the_viewer_on_a_mode_switch() {
+        crate::testing::with_display(|| {
+            let f = fixture(2);
+            let build: BuildLoader = Rc::new(|chapter| {
+                let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/reader-screen-tests/viewer");
+                let _ = std::fs::remove_dir_all(&root);
+                let cache = Arc::new(DiskCache::open(root, CACHE_LIMIT_BYTES).unwrap());
+                Ok(Loader::Http(HttpLoader::new(Arc::new(PngPages), 1, chapter.chapter.url.clone(), cache)))
+            });
+            let deps = ReaderDeps {
+                db: Arc::clone(&f.db),
+                manga_id: f.manga_id,
+                chapter_id: f.chapter_ids[0],
+                prefs: ReaderPrefs::new(PrefStore::in_memory()),
+                store: Rc::new(NoStore),
+                build,
+                is_downloaded: Rc::new(|_| false),
+                downloaded_only: false,
+                incognito: false,
+                prefs_store: PrefStore::in_memory(),
+            };
+            let (toaster, _feed) = kuro_platform::toast::toast_channel();
+            let screen = open(deps, &crate::reader::launch::open_gate(), toaster, || {});
+            let window = gtk::Window::new();
+            window.set_default_size(500, 600);
+            window.set_child(Some(&screen.root));
+            window.present();
+
+            assert!(pump_until(|| screen.viewer.first_child().is_some()), "the viewer is attached once the chapter has loaded");
+            assert!(screen.viewer.first_child().unwrap().is::<gtk::ScrolledWindow>(), "the default mode reads as a pager");
+            assert!(
+                pump_until(|| {
+                    let mut views = Vec::new();
+                    page_views(screen.viewer.upcast_ref(), &mut views);
+                    views.iter().any(|v| v.state() == crate::reader::page_decode::LoadState::Ready)
+                }),
+                "a network page is fetched by the loader and shown by the viewer"
+            );
+
+            screen.core.apply_mode(ReadingMode::Webtoon);
+            assert!(pump_until(|| screen.viewer.first_child().is_some_and(|w| w.is::<crate::reader::viewers::webtoon::frame::ZoomFrame>())));
+            assert_eq!(screen.viewer.observe_children().n_items(), 1, "the old viewer is gone, not stacked under the new one");
+            screen.core.apply_mode(ReadingMode::LeftToRight);
+            assert!(pump_until(|| screen.viewer.first_child().is_some_and(|w| w.is::<gtk::ScrolledWindow>())));
+            assert_eq!(screen.viewer.observe_children().n_items(), 1);
+            window.destroy();
+        });
     }
 }

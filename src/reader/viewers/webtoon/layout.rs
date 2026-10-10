@@ -205,4 +205,38 @@ mod tests {
         assert_eq!(refresh_range(None, 50), Some(0..=3));
         assert_eq!(refresh_range(Some(0), 0), None);
     }
+
+    /// T-44a-079: the strip geometry and the current-item sequence of a scroll through a strip with cards, a page that
+    /// failed (0.8 of the viewport) and a taller page, compared with the golden file.
+    #[test]
+    fn the_golden_webtoon_geometry_matches() {
+        let viewport = 800;
+        let heights = vec![200, 800, 640, 800, 200];
+        let layout = StripLayout::new(heights.clone());
+        let offsets: Vec<i64> = (0..=heights.len()).map(|i| layout.offset(i)).collect();
+        assert_eq!(offsets, [0, 200, 1000, 1640, 2440, 2640], "prefix sums, worked out by hand");
+        let scrolls = [0, 100, 400, 800, 1200, 1640, 2000, 2440];
+        let steps: Vec<serde_json::Value> = scrolls
+            .iter()
+            .map(|&scroll| {
+                let realised = layout.realised(scroll, viewport);
+                serde_json::json!({
+                    "scroll": scroll,
+                    "realised": [realised.start, realised.end],
+                    "first_visible": layout.first_visible(scroll),
+                    "current": layout.last_end_visible(scroll, viewport, realised),
+                })
+            })
+            .collect();
+        let golden = serde_json::json!({
+            "about": "heights are a card, a page, a failed page at 0.8 of the viewport, a page and a card; viewport 800",
+            "viewport": viewport,
+            "heights": heights,
+            "offsets": offsets,
+            "total": layout.total_height(),
+            "scroll_distance": StripLayout::scroll_distance(viewport),
+            "steps": steps,
+        });
+        crate::reader::golden::check("webtoon_geometry.json", &golden);
+    }
 }

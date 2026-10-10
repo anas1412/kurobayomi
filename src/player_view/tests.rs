@@ -129,20 +129,21 @@ fn a_clip_plays_seeks_pauses_and_its_progress_survives_a_reopen() {
 /// Opens a real player window on the desktop and pumps the main loop while the clip plays. Needs a display, so it
 /// runs only with `--ignored`. It writes the app's mpv config files, as opening any episode does.
 #[test]
-#[ignore = "needs a display"]
+#[ignore = "opens a real player window and writes the app's mpv config files; run on purpose: cargo test -p kurobayomi window_plays -- --ignored"]
 fn window_plays_the_clip_on_screen() {
-    gtk::init().expect("GTK needs a display");
-    for name in ["glGetIntegerv", "glGetString", "glBindFramebuffer"] {
-        assert!(!super::gl::get_proc_address(name).is_null(), "{name} did not resolve once GTK had loaded GL");
-    }
-    let dir = TempDir::new().unwrap();
-    let Some(clip) = make_clip(dir.path()) else {
-        return;
-    };
-    super::open_episode(&clip, 0, 0);
-    let end = Instant::now() + Duration::from_secs(8);
-    while Instant::now() < end {
-        gtk::glib::MainContext::default().iteration(false);
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    crate::testing::with_display(|| {
+        for name in ["glGetIntegerv", "glGetString", "glBindFramebuffer"] {
+            assert!(!super::gl::get_proc_address(name).is_null(), "{name} did not resolve once GTK had loaded GL");
+        }
+        let dir = TempDir::new().unwrap();
+        let Some(clip) = make_clip(dir.path()) else {
+            return;
+        };
+        super::open_episode(&clip, 0, 0);
+        let end = Instant::now() + Duration::from_secs(8);
+        while Instant::now() < end {
+            gtk::glib::MainContext::default().iteration(false);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
 }

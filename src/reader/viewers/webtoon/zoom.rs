@@ -151,6 +151,15 @@ impl WebtoonZoom {
         self.scale = self.clamp_scale(end.0);
         self.pan = self.clamp_pan(end.1, half, original_h);
     }
+
+    /// Moves to the state `elapsed_ms` into `anim`. The pan is clamped on every frame (E-34). `true` when the animation
+    /// has run its course.
+    pub fn step(&mut self, anim: &Anim, elapsed_ms: u32, half: (f64, f64), original_h: f64) -> bool {
+        let (scale, pan) = anim.sample(elapsed_ms, |scale, pan| clamp_pan(scale, pan, half, original_h));
+        self.scale = self.clamp_scale(scale);
+        self.pan = if self.scale == 1.0 { (0.0, 0.0) } else { pan };
+        elapsed_ms >= anim.duration_ms()
+    }
 }
 
 /// The clamp of a pan at `scale`. Below 1 the strip is centred vertically (`originalHeight / 2 - halfHeight`) and x is
@@ -291,5 +300,41 @@ mod tests {
             assert!(close(*g, w), "{got:?}");
         }
         assert!(z.settle().is_none(), "the pinch stays at the minimum");
+    }
+
+    /// T-44a-080: the pager pinch sequence (a page fitted at 0.3, range 0.3 to 1.5) and the webtoon pinch sequence,
+    /// compared with the golden file. The expected numbers are also written out here, worked by hand.
+    #[test]
+    fn the_golden_pinch_sequences_match() {
+        use crate::reader::page_zoom::{ZoomState, pinch_scale};
+        let page = ZoomState::fitted(0.3, (500.0, 1000.0));
+        // each gesture starts at the scale the page has, and reports the factor since it began
+        let gestures: [(f64, &[f64]); 2] = [(0.3, &[1.2, 2.0, 3.0, 8.0, 0.5]), (1.5, &[0.5, 0.1])];
+        let pager: Vec<serde_json::Value> = gestures
+            .iter()
+            .map(|(start, factors)| {
+                let scales: Vec<f64> = factors.iter().map(|f| pinch_scale(*start, *f, &page)).collect();
+                serde_json::json!({ "start": start, "factors": factors, "scales": scales })
+            })
+            .collect();
+        let first: Vec<f64> = pager[0]["scales"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        for (got, want) in first.iter().zip([0.36, 0.6, 0.9, 1.5, 0.3]) {
+            assert!(close(*got, want), "{first:?}");
+        }
+        let second: Vec<f64> = pager[1]["scales"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        assert!(close(second[0], 0.75) && close(second[1], 0.3), "{second:?}");
+
+        let mut z = WebtoonZoom::new(false);
+        let steps = [1.2, 1.2, 0.5, 0.5, 1.5, 4.0, 4.0];
+        let scales: Vec<f64> = steps.iter().map(|f| z.pinch(*f, HALF, ORIGINAL)).collect();
+        for (got, want) in scales.iter().zip([1.2, 1.44, 0.72, 0.5, 0.75, 3.0, 3.0]) {
+            assert!(close(*got, want), "{scales:?}");
+        }
+        let golden = serde_json::json!({
+            "about": "pager: page fitted at 0.3, range 0.3 to 1.5, one entry per gesture; webtoon: factors per event, range 0.5 to 3",
+            "pager": { "min": 0.3, "max": 1.5, "gestures": pager },
+            "webtoon": { "min": 0.5, "max": 3.0, "factors": steps, "scales": scales },
+        });
+        crate::reader::golden::check("zoom_pinch.json", &golden);
     }
 }

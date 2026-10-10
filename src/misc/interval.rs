@@ -5,7 +5,10 @@ use kuro_prefs::pref::Pref;
 use tokio::sync::watch;
 
 use crate::pref_model::model::Preference;
-use crate::settings_ui::rows::{group, int_choice};
+use crate::settings_ui::rows::{group, info, int_choice};
+
+/// Shown under the interval choice: when the first automatic run happens (T-26a-010).
+pub const FIRST_RUN_NOTE: &str = "The first automatic update runs as soon as the conditions are met after you turn this on.";
 
 /// Stored hours and label of each choice. 0 is Off, the default.
 pub const CHOICES: [(i32, &str); 6] = [
@@ -29,7 +32,7 @@ pub fn hours(stored: i32) -> u32 {
 /// The settings row. The library settings page merges it over the spec row of the same group and title, so the
 /// choice reads and writes the real preference.
 pub fn rows(pref: &Pref<i32>) -> Vec<Preference> {
-    vec![group("Global update", vec![int_choice("Automatic updates", pref, &CHOICES, true)])]
+    vec![group("Global update", vec![int_choice("Automatic updates", pref, &CHOICES, true), info(FIRST_RUN_NOTE)])]
 }
 
 /// Sends `stored` as hours to every schedule loop. Each loop restarts its wait on the change (`run_schedule`).

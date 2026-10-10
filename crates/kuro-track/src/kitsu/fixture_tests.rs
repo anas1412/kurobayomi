@@ -132,13 +132,17 @@ async fn t_30a_033_login_search_after_login_and_no_bearer_on_the_login_post() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/oauth/token"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(fresh(fixture!("token_ok.json"))),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(fresh(fixture!("token_ok.json"))))
         .mount(&server)
         .await;
     mount(&server, "GET", "/api/edge/users", fixture!("users_ok.json")).await;
-    mount(&server, "GET", "/api/edge/algolia-keys/media/", fixture!("key_ok.json")).await;
+    mount(
+        &server,
+        "GET",
+        "/api/edge/algolia-keys/media/",
+        fixture!("key_ok.json"),
+    )
+    .await;
     Mock::given(method("POST"))
         .and(path("/1/indexes/production_media/query/"))
         .and(header("X-Algolia-API-Key", "k1"))
@@ -183,12 +187,16 @@ async fn t_30a_033_an_empty_users_answer_is_no_user_and_stores_nothing() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/oauth/token"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(fresh(fixture!("token_ok.json"))),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(fresh(fixture!("token_ok.json"))))
         .mount(&server)
         .await;
-    mount(&server, "GET", "/api/edge/users", fixture!("users_empty.json")).await;
+    mount(
+        &server,
+        "GET",
+        "/api/edge/users",
+        fixture!("users_empty.json"),
+    )
+    .await;
     let secrets: Arc<dyn SecretStore> = MemSecrets::new();
     let t = KitsuTracker::new(endpoints(&server), secrets.clone()).unwrap();
 
@@ -261,14 +269,26 @@ async fn t_30a_033_a_refresh_that_cannot_connect_sends_the_request_with_the_stal
 
 #[test]
 fn t_30a_033_the_filter_constants_equal_the_fixture_files() {
-    assert_eq!(FILTER_MANGA, fixture!("algolia_filter_manga.txt").trim_end());
-    assert_eq!(FILTER_ANIME, fixture!("algolia_filter_anime.txt").trim_end());
+    assert_eq!(
+        FILTER_MANGA,
+        fixture!("algolia_filter_manga.txt").trim_end()
+    );
+    assert_eq!(
+        FILTER_ANIME,
+        fixture!("algolia_filter_anime.txt").trim_end()
+    );
 }
 
 #[tokio::test]
 async fn t_30a_033_an_anime_hit_uses_the_episode_count_and_the_anime_url() {
     let server = MockServer::start().await;
-    mount(&server, "GET", "/api/edge/algolia-keys/media/", fixture!("key_ok.json")).await;
+    mount(
+        &server,
+        "GET",
+        "/api/edge/algolia-keys/media/",
+        fixture!("key_ok.json"),
+    )
+    .await;
     mount(
         &server,
         "POST",
@@ -297,7 +317,8 @@ async fn t_30a_033_a_rotated_key_is_fetched_again_and_the_search_is_retried_once
     Mock::given(method("POST"))
         .and(path("/1/indexes/production_media/query/"))
         .respond_with(
-            ResponseTemplate::new(403).set_body_raw(fixture!("key_rotated_403.json"), "application/json"),
+            ResponseTemplate::new(403)
+                .set_body_raw(fixture!("key_rotated_403.json"), "application/json"),
         )
         .up_to_n_times(1)
         .mount(&server)
@@ -321,7 +342,13 @@ async fn t_30a_033_a_rotated_key_is_fetched_again_and_the_search_is_retried_once
 #[tokio::test]
 async fn t_30a_033_bind_to_a_found_manga_entry_copies_it_and_keeps_the_tracking_url() {
     let server = MockServer::start().await;
-    mount(&server, "GET", "/api/edge/library-entries", fixture!("list_manga_found.json")).await;
+    mount(
+        &server,
+        "GET",
+        "/api/edge/library-entries",
+        fixture!("list_manga_found.json"),
+    )
+    .await;
     Mock::given(method("PATCH"))
         .and(path("/api/edge/library-entries/9001"))
         .respond_with(ResponseTemplate::new(200))
@@ -333,8 +360,14 @@ async fn t_30a_033_bind_to_a_found_manga_entry_copies_it_and_keeps_the_tracking_
 
     t.as_manga().unwrap().bind(&mut m, true).await.unwrap();
 
-    assert_eq!(m.remote_id, 9001, "the library entry id replaces the media id");
-    assert_eq!((m.status, m.last_chapter_read, m.score), (READING, 7.0, 8.0));
+    assert_eq!(
+        m.remote_id, 9001,
+        "the library entry id replaces the media id"
+    );
+    assert_eq!(
+        (m.status, m.last_chapter_read, m.score),
+        (READING, 7.0, 8.0)
+    );
     assert_eq!(m.total_chapters, 0, "KT-87: a null chapter count is 0");
     assert_eq!(m.start_date, 1_714_521_600_000);
     assert_eq!(m.finish_date, 0, "KT-87: a null finish date is 0");
@@ -344,7 +377,13 @@ async fn t_30a_033_bind_to_a_found_manga_entry_copies_it_and_keeps_the_tracking_
 #[tokio::test]
 async fn t_30a_033_an_empty_list_is_no_entry_for_find_and_not_found_for_get() {
     let server = MockServer::start().await;
-    mount(&server, "GET", "/api/edge/library-entries", fixture!("list_manga_empty.json")).await;
+    mount(
+        &server,
+        "GET",
+        "/api/edge/library-entries",
+        fixture!("list_manga_empty.json"),
+    )
+    .await;
     let (t, _) = logged_in(&server);
 
     assert_eq!(t.api().find_entry(Kind::Manga, 77).await.unwrap(), None);
@@ -357,21 +396,42 @@ async fn t_30a_033_an_empty_list_is_no_entry_for_find_and_not_found_for_get() {
 #[tokio::test]
 async fn t_30a_033_refresh_of_an_anime_entry_reads_status_score_and_the_episode_total() {
     let server = MockServer::start().await;
-    mount(&server, "GET", "/api/edge/library-entries", fixture!("list_anime_found.json")).await;
+    mount(
+        &server,
+        "GET",
+        "/api/edge/library-entries",
+        fixture!("list_anime_found.json"),
+    )
+    .await;
     let (t, _) = logged_in(&server);
 
     let out = t.as_anime().unwrap().refresh(&anime()).await.unwrap();
 
     assert_eq!(out.status, COMPLETED);
-    assert_eq!((out.last_episode_seen, out.score, out.total_episodes), (12.0, 10.0, 12));
+    assert_eq!(
+        (out.last_episode_seen, out.score, out.total_episodes),
+        (12.0, 10.0, 12)
+    );
     assert_eq!(out.finish_date, 1_717_200_000_000);
 }
 
 #[tokio::test]
 async fn t_30a_033_the_add_response_gives_the_new_library_id() {
     let server = MockServer::start().await;
-    mount(&server, "POST", "/api/edge/library-entries", fixture!("add_response.json")).await;
-    mount(&server, "GET", "/api/edge/library-entries", fixture!("list_manga_empty.json")).await;
+    mount(
+        &server,
+        "POST",
+        "/api/edge/library-entries",
+        fixture!("add_response.json"),
+    )
+    .await;
+    mount(
+        &server,
+        "GET",
+        "/api/edge/library-entries",
+        fixture!("list_manga_empty.json"),
+    )
+    .await;
     let (t, _) = logged_in(&server);
     let mut m = manga();
 
@@ -393,7 +453,9 @@ fn t_30a_033_the_timeouts_are_thirty_thirty_and_one_hundred_twenty_seconds() {
 async fn t_30a_033_a_slow_server_fails_with_the_read_timeout_and_the_call_timeout() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .respond_with(json_body(fixture!("list_manga_empty.json")).set_delay(Duration::from_millis(400)))
+        .respond_with(
+            json_body(fixture!("list_manga_empty.json")).set_delay(Duration::from_millis(400)),
+        )
         .mount(&server)
         .await;
     let slow = Duration::from_millis(50);

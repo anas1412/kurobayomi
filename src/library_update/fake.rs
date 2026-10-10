@@ -132,6 +132,7 @@ pub struct FakeHost {
     pub enqueued: Mutex<Vec<(i64, usize)>>,
     pub starts: AtomicUsize,
     pub errors: Mutex<Vec<usize>>,
+    pub queue_warnings: AtomicUsize,
 }
 
 impl Host for FakeHost {
@@ -167,5 +168,9 @@ impl Host for FakeHost {
 
     fn show_error(&self, _kind: EntryKind, failed: usize) {
         self.errors.lock().unwrap().push(failed);
+    }
+
+    fn show_queue_warning(&self, _kind: EntryKind) {
+        self.queue_warnings.fetch_add(1, Ordering::SeqCst);
     }
 }

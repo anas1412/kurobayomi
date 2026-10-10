@@ -11,7 +11,7 @@ use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
 
 use super::dialogs::{ButtonStyle, DialogSlot, DialogSpec};
-use super::entries::{CategoryChoice, FavoriteStore, add_entry, add_entry_to, remove_entry};
+use super::entries::{CategoryChoice, FavoriteStore, add_entry, add_entry_to, chooser_rows, remove_entry};
 use super::favorite::{
     AddOutcome, DuplicateAnswer, LongClick, OptimisticFavorite, duplicate_answer, duplicate_dialog, long_click, on_remove_answer,
     remove_confirm,
@@ -29,6 +29,8 @@ pub struct FavoriteHooks {
     /// The duplicate dialog's Migrate existing entry.
     pub migrate: Rc<dyn Fn(i64)>,
     pub now_ms: Rc<dyn Fn() -> i64>,
+    /// The chooser's Edit categories: opens the Categories page on its manga section.
+    pub edit_categories: Rc<dyn Fn()>,
 }
 
 pub struct FavoriteFlow {
@@ -161,10 +163,14 @@ impl FavoriteFlow {
         blocking(
             move || {
                 let outcome = add_entry(store.as_ref(), id, now);
-                let categories = if outcome == AddOutcome::Chooser { store.categories().unwrap_or_default() } else { Vec::new() };
-                (outcome, categories)
+                let (categories, linked) = if outcome == AddOutcome::Chooser {
+                    (store.categories().unwrap_or_default(), store.entry_categories(id).unwrap_or_default())
+                } else {
+                    (Vec::new(), Vec::new())
+                };
+                (outcome, categories, linked)
             },
-            move |(outcome, categories)| match outcome {
+            move |(outcome, categories, linked)| match outcome {
                 AddOutcome::Added { .. } => {}
                 AddOutcome::Failed(error) => {
                     tracing::warn!(%error, "adding to the library failed");
@@ -172,18 +178,21 @@ impl FavoriteFlow {
                 }
                 AddOutcome::Chooser => {
                     (this.hooks.set_flag)(id, false);
-                    this.choose_categories(item, categories);
+                    this.choose_categories(item, categories, linked);
                 }
             },
         );
     }
 
-    fn choose_categories(self: &Rc<Self>, item: ListItem, categories: Vec<CategoryChoice>) {
+    /// The category chooser: the user's categories with the entry's current links checked, OK, Cancel and Edit
+    /// categories (which closes the chooser and opens the Categories page; nothing is written).
+    fn choose_categories(self: &Rc<Self>, item: ListItem, categories: Vec<CategoryChoice>, linked: Vec<i64>) {
         let column = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        let checks: Vec<(i64, gtk::CheckButton)> = categories
-            .iter()
-            .map(|category| {
+        let checks: Vec<(i64, gtk::CheckButton)> = chooser_rows(&categories, &linked)
+            .into_iter()
+            .map(|(category, on)| {
                 let check = gtk::CheckButton::with_label(&category.name);
+                check.set_active(on);
                 column.append(&check);
                 (category.id, check)
             })
@@ -191,14 +200,20 @@ impl FavoriteFlow {
         let spec = DialogSpec {
             title: tr(MsgKey::action_move_category),
             body: None,
-            buttons: vec![(tr(MsgKey::action_ok), ButtonStyle::Suggested), (tr(MsgKey::action_cancel), ButtonStyle::Plain)],
+            buttons: vec![
+                (tr(MsgKey::action_ok), ButtonStyle::Suggested),
+                (tr(MsgKey::action_cancel), ButtonStyle::Plain),
+                (tr(MsgKey::action_edit_categories), ButtonStyle::Plain),
+            ],
         };
         let this = Rc::clone(self);
-        self.show(spec, Some(column.upcast()), move |chosen| {
-            if chosen == Some(0) {
+        self.show(spec, Some(column.upcast()), move |chosen| match chosen {
+            Some(0) => {
                 let picked = checks.iter().filter(|(_, check)| check.is_active()).map(|(id, _)| *id).collect();
                 this.add_to(item.clone(), picked);
             }
+            Some(2) => (this.hooks.edit_categories)(),
+            _ => {}
         });
     }
 
@@ -239,13 +254,14 @@ pub(crate) mod tests {
         let anchor = gtk::Label::new(None);
         let (flags, toasts, opened): (Rc<RefCell<Vec<(i64, bool)>>>, Rc<RefCell<Vec<String>>>, Rc<RefCell<Vec<String>>>) =
             Default::default();
-        let (f, t, o1, o2) = (Rc::clone(&flags), Rc::clone(&toasts), Rc::clone(&opened), Rc::clone(&opened));
+        let (f, t, o1, o2, o3) = (Rc::clone(&flags), Rc::clone(&toasts), Rc::clone(&opened), Rc::clone(&opened), Rc::clone(&opened));
         let hooks = FavoriteHooks {
             set_flag: Rc::new(move |id, flag| f.borrow_mut().push((id, flag))),
             toast: Rc::new(move |spec| t.borrow_mut().push(spec.message)),
             open_entry: Rc::new(move |id| o1.borrow_mut().push(format!("open {id}"))),
             migrate: Rc::new(move |id| o2.borrow_mut().push(format!("migrate {id}"))),
             now_ms: Rc::new(|| 5_000),
+            edit_categories: Rc::new(move || o3.borrow_mut().push("categories".to_owned())),
         };
         let flow = FavoriteFlow::new(Arc::clone(&store) as Arc<dyn FavoriteStore>, &anchor, hooks);
         Rig { flow, store, flags, toasts, opened, _anchor: anchor }
@@ -340,6 +356,7 @@ pub(crate) mod tests {
         *rig.store.default_category.lock().expect("lock") = -1;
         *rig.store.categories.lock().expect("lock") =
             vec![CategoryChoice { id: 3, name: "Reading".into() }, CategoryChoice { id: 4, name: "Later".into() }];
+        *rig.store.links.lock().expect("lock") = vec![3];
         rig.flow.long_press(item(false));
         assert!(pump(|| rig.flow.dialog().is_some()), "the chooser opens");
         assert!(rig.store.calls().iter().all(|c| !c.starts_with("favorite")), "nothing is written yet");
@@ -361,6 +378,9 @@ pub(crate) mod tests {
             out
         };
         assert_eq!(checks.len(), 2);
+        assert_eq!(checks.iter().map(|c| c.is_active()).collect::<Vec<_>>(), [true, false], "the linked category 3 is preselected");
+        assert_eq!(buttons_of(&window).len(), 3, "OK, Cancel and Edit categories");
+        checks[0].set_active(false);
         checks[1].set_active(true);
         buttons_of(&window)[0].emit_clicked();
         assert!(pump(|| rig.store.calls().contains(&"favorite 7 true 5000".to_owned())));
@@ -370,11 +390,23 @@ pub(crate) mod tests {
         assert!(categories < favorite, "the category links are written before the favourite");
     }
 
+    fn edit_categories_opens_the_categories_page_and_writes_nothing() {
+        let rig = rig();
+        *rig.store.default_category.lock().expect("lock") = -1;
+        *rig.store.categories.lock().expect("lock") = vec![CategoryChoice { id: 3, name: "Reading".into() }];
+        rig.flow.long_press(item(false));
+        assert!(pump(|| rig.flow.dialog().is_some()), "the chooser opens");
+        buttons_of(&rig.flow.dialog().expect("dialog"))[2].emit_clicked();
+        assert_eq!(*rig.opened.borrow(), ["categories"], "the categories page was asked for");
+        assert!(rig.store.calls().iter().all(|c| !c.starts_with("favorite")), "nothing is added");
+    }
+
     pub(crate) fn smoke() {
         a_favourite_asks_to_remove_and_confirm_runs_the_remove_write();
         a_new_entry_with_a_duplicate_shows_the_duplicate_dialog_and_add_anyway_adds();
         a_second_long_press_replaces_the_open_dialog();
         a_plain_entry_is_added_and_a_failed_write_restores_the_flag_with_the_error_toast();
         an_ask_default_category_opens_the_chooser_and_writes_nothing_until_it_is_answered();
+        edit_categories_opens_the_categories_page_and_writes_nothing();
     }
 }

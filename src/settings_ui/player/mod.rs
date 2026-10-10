@@ -1,11 +1,20 @@
 //! Player settings: the root with its nine rows (T-48a-010), and the pages of the rows built so far.
+pub mod advanced;
+pub mod audio;
+pub mod conf_edit;
 pub mod controls;
+pub mod decoder;
+pub mod external;
+pub mod highlight;
 pub mod files;
 pub mod gestures;
 pub mod intro;
+pub mod language;
 pub mod root;
 pub mod scripts;
 pub mod seeking;
+pub mod subtitle;
+pub mod syntax;
 
 use std::rc::Rc;
 

@@ -1565,6 +1565,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fancy-regex"
+version = "0.19.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d301f5bf187b3c295fce6468d3875037a0bccc5f6b151c63cac2f85babf21912"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "fastrand"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3449,6 +3460,7 @@ dependencies = [
  "kuro-net",
  "kuro-platform",
  "kuro-prefs",
+ "kuro-source",
  "kuro-source-wasm",
  "prost",
  "reqwest",
@@ -3623,13 +3635,17 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "kuro-core",
  "md-5",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "url",
+ "wiremock",
 ]
 
 [[package]]
@@ -3716,6 +3732,7 @@ dependencies = [
  "kuro-platform",
  "kuro-prefs",
  "kuro-testkit",
+ "md-5",
  "rand 0.10.3",
  "reqwest",
  "serde",
@@ -3738,6 +3755,7 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "chrono",
+ "fancy-regex",
  "gtk4",
  "image",
  "kuro-archive",
@@ -3751,6 +3769,7 @@ dependencies = [
  "kuro-i18n",
  "kuro-images",
  "kuro-local",
+ "kuro-net",
  "kuro-platform",
  "kuro-player",
  "kuro-prefs",
@@ -5229,7 +5248,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

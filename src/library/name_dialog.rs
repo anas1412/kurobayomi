@@ -81,22 +81,20 @@ mod tests {
 
     #[test]
     fn t2_catscr_01_the_ok_button_and_helper_follow_the_name_check() {
-        if gtk::init().is_err() {
-            eprintln!("skipped: no display for the name dialog test");
-            return;
-        }
-        let ok = gtk::Button::new();
-        let helper = gtk::Label::new(None);
-        show_check(&check_name("", &["Action"]), &ok, &helper);
-        assert!(!ok.is_sensitive(), "an empty name is refused");
-        assert_eq!(helper.text().as_str(), "*required");
-        assert!(!helper.has_css_class("error"));
-        show_check(&check_name("Action", &["Action"]), &ok, &helper);
-        assert!(!ok.is_sensitive(), "a name another category uses is refused");
-        assert!(helper.has_css_class("error"));
-        assert_eq!(helper.text().as_str(), "A category with this name already exists!");
-        show_check(&check_name("action", &["Action"]), &ok, &helper);
-        assert!(ok.is_sensitive(), "the match is exact: action is not Action");
-        assert!(!helper.has_css_class("error"));
+        crate::testing::with_display(|| {
+            let ok = gtk::Button::new();
+            let helper = gtk::Label::new(None);
+            show_check(&check_name("", &["Action"]), &ok, &helper);
+            assert!(!ok.is_sensitive(), "an empty name is refused");
+            assert_eq!(helper.text().as_str(), "*required");
+            assert!(!helper.has_css_class("error"));
+            show_check(&check_name("Action", &["Action"]), &ok, &helper);
+            assert!(!ok.is_sensitive(), "a name another category uses is refused");
+            assert!(helper.has_css_class("error"));
+            assert_eq!(helper.text().as_str(), "A category with this name already exists!");
+            show_check(&check_name("action", &["Action"]), &ok, &helper);
+            assert!(ok.is_sensitive(), "the match is exact: action is not Action");
+            assert!(!helper.has_css_class("error"));
+        });
     }
 }

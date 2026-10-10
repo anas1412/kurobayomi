@@ -14,17 +14,27 @@ use kuro_db::Db;
 use kuro_prefs::reader::{ORIENTATION_MASK, READING_MODE_MASK, ReaderOrientation, ReadingMode};
 
 use super::chapters::{ListError, ListOptions, build_reader_list};
+use super::delete_queue::{self, DeleteQueue, Pending, QueueFile};
 use super::flags;
+use super::history_rules::{self, now_ms};
 use super::loader::{LoadFailure, Loader, load_chapter};
 use super::model::{ChapterState, LoadError, PageStatus, ReaderChapter, ReaderPage, ViewerChapters};
 use super::nav::{self, Step};
+use super::restore::SavedSession;
 use super::strings;
 
 /// The writes a session makes. The production implementation is the writer thread (`writer::WriterHandle`).
 pub trait ReaderStore {
     fn save_progress(&self, chapter_id: i64, last_page_read: i64, read: bool);
-    fn set_bookmark(&self, chapter_id: i64, bookmark: bool);
+    /// Writes the bookmark and reports whether it was stored. `Err` makes the session revert the flag (T-43a-035).
+    fn set_bookmark(&self, chapter_id: i64, bookmark: bool) -> Result<(), String>;
+    /// Marks a chapter read without moving its last page (the duplicate rule, T-43a-031).
+    fn mark_read(&self, chapter_id: i64);
+    /// Adds `duration` ms of read time and sets the last read time (T-43a-033).
+    fn upsert_history(&self, chapter_id: i64, read_at: i64, duration: i64);
     fn set_viewer_flags(&self, manga_id: i64, value: i64, mask: i64);
+    /// Keeps where the reader is, for the crash restore (T-43a-039). A store with nowhere to keep it ignores it.
+    fn save_restore(&self, _session: SavedSession) {}
     /// Blocks until every write sent so far has run. A chapter switch calls it before the new chapter loads.
     fn flush(&self);
 }
@@ -104,6 +114,20 @@ pub struct ReaderSession {
     adjacent_busy: bool,
     /// The visible page, 1-based, for the page indicator (`currentPage`).
     current_page: u32,
+    /// `mark_duplicate_read_chapter_read` contains `existing` (T-43a-031). Off unless the caller turns it on.
+    mark_duplicates_read: bool,
+    /// When the current read session started, in ms. Owned by the UI thread (E-HIST-2).
+    history_started: Option<i64>,
+    /// The delete-after-read rule, when the app can delete downloads (T-43a-032).
+    delete_after_read: Option<DeleteAfterRead>,
+}
+
+/// The delete-after-read state of a session: the slot count read when the reader opened, the chapters queued so far
+/// and the file that keeps them across a restart.
+struct DeleteAfterRead {
+    slots: i64,
+    queue: DeleteQueue,
+    file: Option<QueueFile>,
 }
 
 impl ReaderSession {
@@ -129,7 +153,57 @@ impl ReaderSession {
             events,
             adjacent_busy: false,
             current_page: 1,
+            mark_duplicates_read: false,
+            history_started: None,
+            delete_after_read: None,
         }
+    }
+
+    /// Turns on delete-after-read for the completions this session sees (T-43a-032). `slots` is the preference value:
+    /// a negative one turns it off. The queue is also written to `file`, so it survives a restart (E-DEL-4).
+    pub fn set_delete_after_read(&mut self, slots: i64, file: Option<QueueFile>) {
+        self.delete_after_read = (slots >= 0).then(|| DeleteAfterRead { slots, queue: DeleteQueue::default(), file });
+    }
+
+    /// The chapters to delete now that the reader is closing: those queued by this session and, when the queue is kept in
+    /// a file, those left by an earlier one. The file keeps them until the caller reports them dealt with.
+    pub fn pending_deletes(&mut self) -> Vec<Pending> {
+        let Some(rule) = self.delete_after_read.as_mut() else { return Vec::new() };
+        let queued = rule.queue.take();
+        match &rule.file {
+            Some(file) => file.list(),
+            None => queued,
+        }
+    }
+
+    /// Turns on the duplicate rule for the completions this session sees (T-43a-031).
+    pub fn set_mark_duplicates_read(&mut self, on: bool) {
+        self.mark_duplicates_read = on;
+    }
+
+    /// Starts the read timer for the current chapter (T-43a-033). Incognito never writes history.
+    pub fn start_history(&mut self, now: i64) {
+        self.history_started = Some(now);
+    }
+
+    /// Starts the timer again when the reader is shown after a pause, unless one is already running (E-HIST-1).
+    pub fn resume_history(&mut self, now: i64) {
+        if self.history_started.is_none() {
+            self.history_started = Some(now);
+        }
+    }
+
+    /// Writes the read time since the timer started for the current chapter and stops the timer (E-HIST-1). A flush
+    /// with no running timer writes nothing new. Incognito writes nothing and keeps the timer.
+    pub fn flush_history(&mut self, now: i64) {
+        if self.incognito {
+            return;
+        }
+        if let Some(chapter) = self.current_chapter() {
+            let duration = history_rules::history_duration(self.history_started, now);
+            self.store.upsert_history(chapter.chapter.id, now, duration);
+        }
+        self.history_started = None;
     }
 
     pub fn chapters(&self) -> &[Rc<ReaderChapter>] {
@@ -161,13 +235,20 @@ impl ReaderSession {
     }
 
     /// Flips the bookmark of the current chapter and writes it. Incognito does not gate it (`bookmarkCurrentChapter`).
-    /// Returns the new value.
-    pub fn toggle_bookmark(&self) -> Option<bool> {
+    /// The flag changes at once. A failed write puts the previous flag back and returns the error (E-BMK-1). `None`
+    /// when no chapter is current.
+    pub fn toggle_bookmark(&self) -> Option<Result<bool, String>> {
         let chapter = self.current_chapter()?;
-        let value = !chapter.bookmark.get();
+        let previous = chapter.bookmark.get();
+        let value = !previous;
         chapter.bookmark.set(value);
-        self.store.set_bookmark(chapter.chapter.id, value);
-        Some(value)
+        match self.store.set_bookmark(chapter.chapter.id, value) {
+            Ok(()) => Some(Ok(value)),
+            Err(error) => {
+                chapter.bookmark.set(previous);
+                Some(Err(error))
+            }
+        }
     }
 
     pub fn viewer_flags(&self) -> i64 {
@@ -194,9 +275,20 @@ impl ReaderSession {
             chapter.last_page_read.set(index);
             if index == pages_len - 1 {
                 // landing on the last page completes the chapter; repeating it is harmless (E-PROG-2)
-                chapter.read.set(true);
+                let newly_read = !chapter.read.replace(true);
+                // the hook order is: delete-after-read, then duplicate marking (T-43a-030, T-43a-031, T-43a-032)
+                self.queue_delete_after(chapter_index);
+                if newly_read && self.mark_duplicates_read {
+                    self.mark_duplicates_read_of(chapter_index);
+                }
             }
             self.store.save_progress(chapter.chapter.id, index, chapter.read.get());
+            self.store.save_restore(SavedSession {
+                manga_id: self.manga_id,
+                chapter_id: chapter.chapter.id,
+                page_index: index,
+                saved_at: now_ms(),
+            });
         }
         if self.current == Some(chapter_index) {
             return None;
@@ -213,8 +305,12 @@ impl ReaderSession {
     ) -> Result<(), LoadFailure> {
         // the previous chapter's progress is durable before the new chapter is loaded (T-43a-025)
         self.store.flush();
+        let now = now_ms();
+        self.flush_history(now);
         let chapter = Rc::clone(&self.chapters[index]);
         let result = load_chapter(&chapter, || build(&chapter), self.preserve_position);
+        // the timer runs on the chapter the reader now shows, which is the old one when the load failed
+        self.start_history(now);
         match &result {
             Ok(()) => self.current = Some(index),
             Err(LoadFailure::Failed(error)) => tracing::warn!(error = %error, "chapter switch failed"),
@@ -325,6 +421,32 @@ impl ReaderSession {
         }
     }
 
+    /// `deleteChapterIfNeeded`: queues the chapter `slots` before the completed one, when it has been read. The queue is
+    /// flushed when the reader closes, and it is written to its file at once so a crash does not lose it.
+    fn queue_delete_after(&mut self, completed: usize) {
+        let Some(rule) = self.delete_after_read.as_mut() else { return };
+        let Some(target) = delete_queue::delete_target(&self.chapters, completed, rule.slots) else { return };
+        let chapter = &self.chapters[target];
+        if !chapter.read.get() {
+            return;
+        }
+        let entry = Pending { manga_id: self.manga_id, chapter_id: chapter.chapter.id };
+        rule.queue.push(entry);
+        if let Some(Err(error)) = rule.file.as_ref().map(|file| file.add(entry)) {
+            tracing::warn!(error = %error, "the delete queue could not be saved");
+        }
+    }
+
+    /// Marks the unread chapters that share the completed chapter's number as read (T-43a-031). The list is the
+    /// reader's list, so only those chapters are touched (E-DUP-1).
+    fn mark_duplicates_read_of(&mut self, completed: usize) {
+        for index in history_rules::duplicate_indices(&self.chapters, completed) {
+            let duplicate = &self.chapters[index];
+            duplicate.read.set(true);
+            self.store.mark_read(duplicate.chapter.id);
+        }
+    }
+
     fn index_of(&self, chapter: &Rc<ReaderChapter>) -> Option<usize> {
         self.chapters.iter().position(|c| Rc::ptr_eq(c, chapter))
     }
@@ -356,14 +478,34 @@ mod tests {
         order: RefCell<Vec<&'static str>>,
         flags: RefCell<Vec<(i64, i64, i64)>>,
         bookmarks: RefCell<Vec<(i64, bool)>>,
+        read_marks: RefCell<Vec<i64>>,
+        history: RefCell<Vec<(i64, i64, i64)>>,
+        restores: RefCell<Vec<SavedSession>>,
+        fail_bookmarks: std::cell::Cell<bool>,
     }
 
     impl ReaderStore for Recorder {
         fn save_progress(&self, chapter_id: i64, last_page_read: i64, read: bool) {
             self.progress.borrow_mut().push((chapter_id, last_page_read, read));
         }
-        fn set_bookmark(&self, chapter_id: i64, bookmark: bool) {
+        fn mark_read(&self, chapter_id: i64) {
+            self.read_marks.borrow_mut().push(chapter_id);
+        }
+
+        fn upsert_history(&self, chapter_id: i64, read_at: i64, duration: i64) {
+            self.history.borrow_mut().push((chapter_id, read_at, duration));
+        }
+
+        fn save_restore(&self, session: SavedSession) {
+            self.restores.borrow_mut().push(session);
+        }
+
+        fn set_bookmark(&self, chapter_id: i64, bookmark: bool) -> Result<(), String> {
+            if self.fail_bookmarks.get() {
+                return Err("Unknown error".to_owned());
+            }
             self.bookmarks.borrow_mut().push((chapter_id, bookmark));
+            Ok(())
         }
         fn set_viewer_flags(&self, manga_id: i64, value: i64, mask: i64) {
             self.flags.borrow_mut().push((manga_id, value, mask));
@@ -407,10 +549,72 @@ mod tests {
         let rec = Rc::new(Recorder::default());
         let ch = chapter(4, false);
         let (s, _rx) = session(Rc::clone(&rec), vec![Rc::clone(&ch)], 0, true);
-        assert_eq!(s.toggle_bookmark(), Some(true));
+        assert_eq!(s.toggle_bookmark(), Some(Ok(true)));
         assert!(ch.bookmark.get());
-        assert_eq!(s.toggle_bookmark(), Some(false));
+        assert_eq!(s.toggle_bookmark(), Some(Ok(false)));
         assert_eq!(rec.bookmarks.borrow().as_slice(), [(4, true), (4, false)]);
+    }
+
+    #[test]
+    fn a_failed_bookmark_write_reverts_the_flag_and_reports_the_error() {
+        let rec = Rc::new(Recorder::default());
+        rec.fail_bookmarks.set(true);
+        let ch = chapter(4, false);
+        let (s, _rx) = session(Rc::clone(&rec), vec![Rc::clone(&ch)], 0, false);
+        assert_eq!(s.toggle_bookmark(), Some(Err("Unknown error".to_owned())));
+        assert!(!ch.bookmark.get(), "the icon and the stored flag stay where they were");
+    }
+
+    #[test]
+    fn a_flush_writes_the_time_since_the_timer_started_and_a_second_flush_keeps_the_duration() {
+        let rec = Rc::new(Recorder::default());
+        let (mut s, _rx) = session(Rc::clone(&rec), vec![chapter(4, false)], 0, false);
+        s.start_history(1_000);
+        s.flush_history(4_000);
+        s.flush_history(9_000);
+        assert_eq!(rec.history.borrow().as_slice(), [(4, 4_000, 3_000), (4, 9_000, 0)]);
+    }
+
+    #[test]
+    fn resuming_after_a_pause_times_the_next_stretch_and_never_resets_a_running_timer() {
+        let rec = Rc::new(Recorder::default());
+        let (mut s, _rx) = session(Rc::clone(&rec), vec![chapter(4, false)], 0, false);
+        s.start_history(1_000);
+        s.resume_history(2_000);
+        s.flush_history(4_000);
+        s.resume_history(10_000);
+        s.flush_history(15_000);
+        assert_eq!(rec.history.borrow().as_slice(), [(4, 4_000, 3_000), (4, 15_000, 5_000)]);
+    }
+
+    #[test]
+    fn incognito_writes_no_history_and_keeps_the_timer() {
+        let rec = Rc::new(Recorder::default());
+        let (mut s, _rx) = session(Rc::clone(&rec), vec![chapter(4, false)], 0, true);
+        s.start_history(1_000);
+        s.flush_history(4_000);
+        assert!(rec.history.borrow().is_empty());
+    }
+
+    #[test]
+    fn completing_a_chapter_marks_its_unread_duplicates_read_when_the_rule_is_on() {
+        let rec = Rc::new(Recorder::default());
+        let numbered = |id: i64, number: f64| {
+            let mut c = Chapter::create();
+            c.id = id;
+            c.url = format!("/c/{id}");
+            c.chapter_number = number;
+            let ch = ReaderChapter::new(c);
+            let pages = (0..3).map(|i| ReaderPage::new(i, format!("p{i}"), None, PageSource::Http)).collect::<Vec<_>>();
+            ch.finish_loading(pages).unwrap();
+            ch
+        };
+        let completed = numbered(1, 5.0);
+        let chapters = vec![Rc::clone(&completed), numbered(2, 5.0), numbered(3, 6.0)];
+        let (mut s, _rx) = session(Rc::clone(&rec), chapters, 0, false);
+        s.set_mark_duplicates_read(true);
+        s.record_page(0, &page(&completed, 2));
+        assert_eq!(rec.read_marks.borrow().as_slice(), [2]);
     }
 
     #[test]
@@ -425,6 +629,71 @@ mod tests {
         assert!(ch.read.get());
         s.record_page(0, &page(&ch, 2));
         assert_eq!(rec.progress.borrow().as_slice(), [(1, 1, false), (1, 2, true), (1, 2, true)]);
+    }
+
+    #[test]
+    fn each_page_change_saves_the_restore_record_and_incognito_saves_none() {
+        let rec = Rc::new(Recorder::default());
+        let ch = chapter(5, false);
+        let (mut s, _rx) = session(Rc::clone(&rec), vec![Rc::clone(&ch)], 0, false);
+        s.record_page(0, &page(&ch, 1));
+        s.record_page(0, &page(&ch, 2));
+        let saved: Vec<(i64, i64, i64)> = rec.restores.borrow().iter().map(|r| (r.manga_id, r.chapter_id, r.page_index)).collect();
+        assert_eq!(saved, [(7, 5, 1), (7, 5, 2)]);
+
+        let private = Rc::new(Recorder::default());
+        let (mut p, _rx2) = session(Rc::clone(&private), vec![Rc::clone(&ch)], 0, true);
+        p.record_page(0, &page(&ch, 1));
+        assert!(private.restores.borrow().is_empty(), "the in-memory restore keys are kept but not saved (E-INC-1)");
+    }
+
+    /// Four chapters, the first `read` of them already read; the session is on the last page of chapter 3.
+    fn delete_session(read: usize, slots: i64, incognito: bool) -> (ReaderSession, Vec<Rc<ReaderChapter>>) {
+        let chapters: Vec<_> = (1..=4).map(|id| chapter(id, (id as usize) <= read)).collect();
+        let (mut s, _rx) = session(Rc::new(Recorder::default()), chapters.clone(), 2, incognito);
+        s.set_delete_after_read(slots, None);
+        s.record_page(2, &page(&chapters[2], 2));
+        (s, chapters)
+    }
+
+    fn queued_ids(s: &mut ReaderSession) -> Vec<i64> {
+        s.pending_deletes().iter().map(|p| p.chapter_id).collect()
+    }
+
+    #[test]
+    fn completing_a_chapter_queues_the_one_slots_before_it_and_only_when_that_one_is_read() {
+        let (mut one_back, _c) = delete_session(2, 1, false);
+        assert_eq!(queued_ids(&mut one_back), [2], "slot 1 targets the chapter before the completed one");
+        let (mut itself, _c) = delete_session(2, 0, false);
+        assert_eq!(queued_ids(&mut itself), [3], "slot 0 targets the completed chapter, which is read now");
+        let (mut unread_target, _c) = delete_session(0, 1, false);
+        assert!(queued_ids(&mut unread_target).is_empty(), "an unread chapter is never queued");
+    }
+
+    #[test]
+    fn a_negative_slot_count_an_early_position_and_incognito_queue_nothing() {
+        let (mut off, _c) = delete_session(4, -1, false);
+        assert!(queued_ids(&mut off).is_empty());
+        let (mut also_off, _c) = delete_session(4, -2, false);
+        assert!(queued_ids(&mut also_off).is_empty(), "-2 does not reach a chapter ahead");
+        let (mut too_far, _c) = delete_session(4, 5, false);
+        assert!(queued_ids(&mut too_far).is_empty());
+        let (mut private, _c) = delete_session(4, 1, true);
+        assert!(queued_ids(&mut private).is_empty(), "incognito writes nothing (E-INC-1)");
+    }
+
+    #[test]
+    fn the_queue_file_survives_the_session_and_the_next_reader_flushes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let chapters: Vec<_> = (1..=3).map(|id| chapter(id, true)).collect();
+        let (mut first, _rx) = session(Rc::new(Recorder::default()), chapters.clone(), 2, false);
+        first.set_delete_after_read(1, Some(QueueFile::in_dir(dir.path())));
+        first.record_page(2, &page(&chapters[2], 2));
+        drop(first); // the reader never closed cleanly
+
+        let (mut next, _rx) = session(Rc::new(Recorder::default()), chapters, 0, false);
+        next.set_delete_after_read(1, Some(QueueFile::in_dir(dir.path())));
+        assert_eq!(next.pending_deletes(), vec![Pending { manga_id: 7, chapter_id: 2 }]);
     }
 
     #[test]

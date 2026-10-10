@@ -3,8 +3,10 @@
 
 pub mod api;
 pub mod auth;
+pub mod config;
 pub mod dto;
 pub mod error;
+pub mod registry;
 pub mod search;
 pub mod status;
 #[cfg(test)]
@@ -20,6 +22,7 @@ use self::api::{Endpoints, LibEntry, OAuthClient, Rating, ShikimoriApi};
 use self::error::ShikimoriError;
 use self::status::ShikiStatus;
 use crate::error::TrackError;
+use crate::messages::MsgKey;
 use crate::model::search::{AnimeTrackSearch, MangaTrackSearch};
 use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
 use crate::tracker::{
@@ -29,6 +32,8 @@ use crate::tracker::{
 pub const NAME: &str = "Shikimori";
 /// `Color.rgb(40, 40, 40)` (`Shikimori.kt`), `0xAARRGGBB`.
 pub const LOGO_COLOR: u32 = 0xFF28_2828;
+/// The 48 px logo (T-31a-047). The provider's mark: shipping it is the user's licence decision (OQ-3).
+const LOGO_PNG: &[u8] = include_bytes!("../../../../assets/tracker/shikimori.png");
 const COMPLETED: i64 = 2;
 const READING: i64 = 1;
 const REREADING: i64 = 6;
@@ -165,11 +170,21 @@ impl Tracker for ShikimoriTracker {
     }
 
     fn logo(&self) -> LogoRef {
-        LogoRef::IconName("shikimori")
+        LogoRef::Embedded(LOGO_PNG)
     }
 
     fn logo_color(&self) -> u32 {
         LOGO_COLOR
+    }
+
+    /// The authorise URL for the configured client. `None` while the client is not configured (T-31a-037).
+    fn browser_auth_url(&self) -> Option<String> {
+        self.auth_url().ok()
+    }
+
+    /// The Settings row shows this while the OAuth client is not configured (T-31a-037).
+    fn setup_message(&self) -> Option<MsgKey> {
+        (!self.api.has_client()).then(|| MsgKey::TrackerNotConfigured(NAME.to_owned()))
     }
 
     fn completion_status(&self) -> i64 {
@@ -260,11 +275,26 @@ impl MangaTracker for ShikimoriTracker {
         (t.score as i64).to_string()
     }
 
-    async fn update(&self, t: &MangaTrack, did_read_chapter: bool) -> Result<MangaTrack, TrackError> {
+    async fn update(
+        &self,
+        t: &MangaTrack,
+        did_read_chapter: bool,
+    ) -> Result<MangaTrack, TrackError> {
         let current = status_of(t.status)?;
-        let status = next_status_after_read(current, did_read_chapter, t.last_chapter_read, t.total_chapters);
+        let status = next_status_after_read(
+            current,
+            did_read_chapter,
+            t.last_chapter_read,
+            t.total_chapters,
+        );
         let library = self
-            .write(Kind::Manga, t.remote_id, t.last_chapter_read, t.score, status)
+            .write(
+                Kind::Manga,
+                t.remote_id,
+                t.last_chapter_read,
+                t.score,
+                status,
+            )
             .await?;
         let mut out = t.clone();
         out.status = status as i64;
@@ -303,7 +333,7 @@ impl MangaTracker for ShikimoriTracker {
         let base = self.api.base_url();
         Ok(entries
             .iter()
-            .map(|e| search::to_manga_search(base, e))
+            .filter_map(|e| search::to_manga_search(base, e))
             .collect())
     }
 
@@ -345,11 +375,26 @@ impl AnimeTracker for ShikimoriTracker {
         (t.score as i64).to_string()
     }
 
-    async fn update(&self, t: &AnimeTrack, did_watch_episode: bool) -> Result<AnimeTrack, TrackError> {
+    async fn update(
+        &self,
+        t: &AnimeTrack,
+        did_watch_episode: bool,
+    ) -> Result<AnimeTrack, TrackError> {
         let current = status_of(t.status)?;
-        let status = next_status_after_read(current, did_watch_episode, t.last_episode_seen, t.total_episodes);
+        let status = next_status_after_read(
+            current,
+            did_watch_episode,
+            t.last_episode_seen,
+            t.total_episodes,
+        );
         let library = self
-            .write(Kind::Anime, t.remote_id, t.last_episode_seen, t.score, status)
+            .write(
+                Kind::Anime,
+                t.remote_id,
+                t.last_episode_seen,
+                t.score,
+                status,
+            )
             .await?;
         let mut out = t.clone();
         out.status = status as i64;

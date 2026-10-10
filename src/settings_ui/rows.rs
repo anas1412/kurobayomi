@@ -76,7 +76,7 @@ fn accept_any(_: &str) -> Result<(), String> {
 }
 
 /// The write of a text row: a blank text that is not allowed is not applied (`Ok(false)`), an invalid one is an error.
-fn text_veto(pref: &Pref<String>, can_be_blank: bool, validate: fn(&str) -> Result<(), String>) -> Veto<String> {
+pub(crate) fn text_veto(pref: &Pref<String>, can_be_blank: bool, validate: fn(&str) -> Result<(), String>) -> Veto<String> {
     let pref = pref.clone();
     bind::veto(move |text: String| {
         let result = if !can_be_blank && text.trim().is_empty() {

@@ -16,6 +16,7 @@ use crate::library_update::download::DownloadPolicy;
 use crate::library_update::entry::{Deps, EntryContext, update_entry};
 use crate::library_update::error::UpdateError;
 use crate::library_update::fetch_interval::{Window, window_for};
+use crate::library_update::politeness;
 use crate::library_update::queue::{FetchType, LibraryEntry, QueueInput, QueueRestrictions, build_queue};
 use crate::library_update::source::{Fetched, SourceItem, SourceRegistry};
 use crate::library_update::store::LibraryStore;
@@ -50,6 +51,8 @@ pub trait Host: Send + Sync {
     fn enqueue_downloads(&self, kind: EntryKind, entry_id: i64, items: &[SourceItem]);
     fn start_downloads(&self, kind: EntryKind);
     fn show_error(&self, kind: EntryKind, failed: usize);
+    /// The large-queue warning: a source of this pass has more queued entries than the threshold (not unmetered).
+    fn show_queue_warning(&self, kind: EntryKind);
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -349,6 +352,18 @@ where
             tracing::debug!(entry_id, reason = reason.message(), "library update skipped entry");
         }
 
+        let mut queued_per_source: HashMap<i64, usize> = HashMap::new();
+        for entry in &queue.entries {
+            *queued_per_source.entry(entry.source).or_default() += 1;
+        }
+        let per_source: Vec<(usize, bool)> = queued_per_source
+            .into_iter()
+            .map(|(source, count)| (count, deps.registry.get_or_stub(source).is_unmetered()))
+            .collect();
+        if text::queue_needs_warning(&per_source) {
+            deps.host.show_queue_warning(kind);
+        }
+
         let total = queue.entries.len();
         let shared = Arc::new(Shared {
             total,
@@ -381,7 +396,11 @@ where
                     shared.publish(&deps.host, kind, settings.hide_content);
 
                     let cx = EntryContext { settings: &settings, window, now_ms, cancel: &cancel };
-                    let result = update_entry(&*deps, &cx, &entry).await;
+                    // The source's process-wide permit: no second request to it from the other kind's pass (T-26a-022).
+                    let result = {
+                        let _source = politeness::acquire(entry.source).await;
+                        update_entry(&*deps, &cx, &entry).await
+                    };
                     record_entry(&deps.host, kind, &shared, &entry, result);
                     {
                         let mut progress = shared.progress.lock().unwrap_or_else(|p| p.into_inner());
@@ -494,6 +513,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_automatic_anime_pass_yields_to_a_running_manual_anime_pass() {
+        // T-26a-015: anime follows the manga rule (the deliberate fix of P-5).
+        let runner = runner(FakeStore::default(), FakeRegistry::default());
+        let _held = PassLocks::acquire(runner.locks(), EntryKind::Anime, Trigger::Manual).expect("anime lock");
+        let scheduled = runner.run(PassSettings::new(EntryKind::Anime), Trigger::Auto).await;
+        assert_eq!(scheduled.status, PassStatus::Retry);
+    }
+
+    #[tokio::test]
     async fn an_automatic_pass_of_the_other_kind_is_not_blocked() {
         // Kinds lock independently (SC-12).
         let runner = runner(FakeStore::default(), FakeRegistry::default());
@@ -601,6 +629,19 @@ mod tests {
         let global = max_active.load(Ordering::SeqCst);
         assert!(global <= MAX_SOURCES_IN_PARALLEL, "at most five sources at once, saw {global}");
         assert!(global > 1, "sources do overlap, saw {global}");
+    }
+
+    #[tokio::test]
+    async fn a_queue_of_more_than_sixty_entries_from_one_source_warns_once() {
+        // Q-18, T-26a-031: 60 is quiet, 61 warns once.
+        for (count, warnings) in [(60_i64, 0), (61, 1)] {
+            let mut registry = FakeRegistry::default();
+            registry.sources.insert(1, FakeSource::ok(Vec::new()));
+            let library: Vec<LibraryEntry> = (1..=count).map(|id| entry(id, 1, &format!("T{id}"))).collect();
+            let runner = runner(FakeStore::with(library), registry);
+            runner.run(settings(), Trigger::Manual).await;
+            assert_eq!(runner.deps.host.queue_warnings.load(Ordering::SeqCst), warnings, "{count} queued");
+        }
     }
 
     #[tokio::test]

@@ -186,7 +186,11 @@ impl KitsuApi {
 
     /// Searches media of `kind`. The query is not trimmed and an empty query is sent as `query=` (KT-74). The first
     /// page only. An Algolia 403 drops the cached key, fetches it again and retries once; a second 403 is an error.
-    pub async fn search_media(&self, kind: Kind, query: &str) -> Result<Vec<AlgoliaHit>, KitsuError> {
+    pub async fn search_media(
+        &self,
+        kind: Kind,
+        query: &str,
+    ) -> Result<Vec<AlgoliaHit>, KitsuError> {
         let params = format!("query={}{}", encode_query(query), filter(kind));
         let body = json!({ "params": params });
         let key = self.search_key().await?;

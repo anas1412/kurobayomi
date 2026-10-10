@@ -8,10 +8,23 @@ pub enum AfterMigrate {
     PopToLastThenPush,
     /// `navigator.replace(new entry)`.
     Replace,
+    /// `popUntilRoot`, open the Browse tab, then push the new entry: the way out of a per-source migrate search (B§13.2).
+    RootBrowseThenPush,
 }
 
 pub fn after_migrate(top_is_entry_page: bool) -> AfterMigrate {
     if top_is_entry_page { AfterMigrate::PopToLastThenPush } else { AfterMigrate::Replace }
+}
+
+/// The way out of a per-source migrate search: whatever is on top, the root, the Browse tab and the new entry.
+pub fn after_source_search_migrate() -> AfterMigrate {
+    AfterMigrate::RootBrowseThenPush
+}
+
+/// Runs the way out of a per-source migrate search: opening the Browse tab pops every pushed page first.
+pub fn finish_source_search_migrate(push_new: impl FnOnce()) {
+    crate::ui::open("browse");
+    push_new();
 }
 
 /// Runs the way out: `top` is the page now on top of the stack, `push_new` opens the migrated entry.
@@ -22,6 +35,7 @@ pub fn finish_migrate(top: &gtk::Widget, top_is_entry_page: bool, push_new: impl
             crate::ui::pop_until(move |page| *page == last);
         }
         AfterMigrate::Replace => crate::ui::pop(),
+        AfterMigrate::RootBrowseThenPush => crate::ui::open("browse"),
     }
     push_new();
 }
@@ -54,12 +68,7 @@ pub(crate) mod tests {
 
     /// Needs the navigation stack, so it runs inside the one GTK check of the lane (`smoke::browse_widgets_smoke`).
     pub(crate) fn smoke() {
-        let app = gtk::Application::builder().application_id("org.kurobayomi.browse.test").build();
-        let _ = app.register(gtk::gio::Cancellable::NONE);
-        let window = gtk::ApplicationWindow::new(&app);
-        let stack = gtk::Stack::new();
-        window.set_child(Some(&stack));
-        crate::ui::nav_init(&stack, &window);
+        let (stack, _window) = crate::testing::nav();
         let (root, details, search) = (page("root"), page("details"), page("search"));
         for p in [&root, &details, &search] {
             crate::ui::push(p);
@@ -96,7 +105,6 @@ pub(crate) mod tests {
         crate::ui::pop();
         assert_eq!(top(), "entry", "the migrate page is gone");
         settle();
-        window.close();
     }
 
     #[test]

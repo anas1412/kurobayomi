@@ -10,8 +10,7 @@ pub fn is_local_thumbnail(url: &str) -> bool {
     url.starts_with("file://")
 }
 
-/// A cropped picture of the thumbnail, sized `width` by `height`. The card lane calls it in place of its placeholder.
-#[allow(dead_code)] // no card calls it yet: the library card still draws its placeholder
+/// A cropped picture of the thumbnail, sized `width` by `height`. The library card calls it for a local entry.
 pub fn cover_widget(thumbnail_url: Option<&str>, width: i32, height: i32) -> gtk::Picture {
     let picture = gtk::Picture::new();
     picture.set_content_fit(gtk::ContentFit::Cover);

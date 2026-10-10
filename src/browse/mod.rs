@@ -6,8 +6,10 @@
 
 pub mod anime;
 pub mod banner;
+pub mod browse_screen;
 pub mod content;
 pub mod dialogs;
+pub mod directory;
 pub mod entries;
 pub mod ext_badges;
 pub mod ext_problems;
@@ -20,6 +22,7 @@ pub mod favorite_flow;
 pub mod filter_sheet;
 pub mod filters;
 pub mod grid;
+pub mod global_search;
 pub mod glue;
 pub mod header;
 pub mod header_bar;
@@ -30,15 +33,19 @@ pub mod lang_pages;
 pub mod listing;
 pub mod listing_view;
 pub mod loader;
+pub mod migrate_list;
 pub mod migrate_nav;
 pub mod mount;
 pub mod nav;
 pub mod names;
 pub mod pages;
+pub mod pending;
 pub mod prefs;
 pub mod primitives;
 pub mod repo_store;
 pub mod route;
+pub mod search_runner;
+pub mod search_screen;
 pub mod shell;
 pub mod source_prefs_page;
 pub mod sources;
@@ -50,5 +57,7 @@ pub mod view;
 
 #[cfg(test)]
 mod smoke;
+#[cfg(test)]
+mod fixtures_tests;
 #[cfg(test)]
 mod spec_tests;

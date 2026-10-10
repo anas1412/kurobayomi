@@ -1,0 +1,13 @@
+{
+  "note": "Generic fixture for T-40b-020 and T-40b-070/071: 8 sources over en, ja, all and other, one stub, the local source (id 0), one without latest, and one with a blank name.",
+  "sources": [
+    {"id": 0, "name": "Local source", "lang": "other", "supports_latest": false, "is_stub": false, "pinned": false, "count": 2},
+    {"id": 1001, "name": "Alpha Source", "lang": "en", "supports_latest": true, "is_stub": false, "pinned": true, "count": 3},
+    {"id": 1002, "name": "Alpha Mirror", "lang": "en", "supports_latest": false, "is_stub": false, "pinned": false, "count": 0},
+    {"id": 2001, "name": "Beta Source", "lang": "ja", "supports_latest": true, "is_stub": false, "pinned": false, "count": 12},
+    {"id": 2002, "name": "Beta Retired", "lang": "ja", "supports_latest": true, "is_stub": true, "pinned": false, "count": 5},
+    {"id": 3001, "name": "All Sites", "lang": "all", "supports_latest": true, "is_stub": false, "pinned": false, "count": 1},
+    {"id": 4001, "name": "", "lang": "en", "supports_latest": true, "is_stub": false, "pinned": false, "count": 0},
+    {"id": 5001, "name": "Zeta Source", "lang": "de", "supports_latest": false, "is_stub": false, "pinned": false, "count": 7}
+  ]
+}

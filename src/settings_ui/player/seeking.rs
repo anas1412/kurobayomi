@@ -28,6 +28,9 @@ pub fn intro_row(prefs: &Prefs) -> PreferenceItem {
     row
 }
 
+/// The desktop change to the brightness gesture (T-48a-021): the video filter replaces the screen backlight.
+pub const BRIGHTNESS_INFO: &str = "Brightness is changed with a video filter inside the player, so the screen backlight stays as it is.";
+
 /// The Sliders group: the volume and brightness gestures.
 pub fn sliders_group(prefs: &Prefs) -> Preference {
     let g = &prefs.gestures;
@@ -36,6 +39,7 @@ pub fn sliders_group(prefs: &Prefs) -> Preference {
         vec![
             switch("Enable Volume and Brightness Gestures", &g.gesture_volume_brightness, true),
             switch("Swap volume and brightness slider", &g.swap_volume_brightness, true),
+            info(BRIGHTNESS_INFO),
         ],
     )
 }
@@ -138,7 +142,8 @@ mod tests {
             let screen = spec.screen("settings_player_gestures").expect("screen");
             for (group, (_, rows)) in screen.groups.iter().zip(&shape) {
                 let spec_titles: Vec<String> = group.items.iter().map(crate::pref_model::spec_convert::item_title).collect();
-                assert_eq!(spec_titles.len(), rows.len(), "{:?}", group.title);
+                let extra = usize::from(group.title.as_deref() == Some("Sliders")); // the brightness note is a desktop addition
+                assert_eq!(spec_titles.len() + extra, rows.len(), "{:?}", group.title);
                 for (spec_title, row) in spec_titles.iter().zip(rows).filter(|(t, _)| t.len() < 60) {
                     assert_eq!(spec_title, row);
                 }

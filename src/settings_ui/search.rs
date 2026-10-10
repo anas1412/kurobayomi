@@ -45,18 +45,21 @@ pub const MAIN_SCREENS: [&str; 9] = [
 ];
 
 /// The player index (Android `playerSettingScreens`), appended after the main index.
-pub const PLAYER_SCREENS: [&str; 7] = [
+pub const PLAYER_SCREENS: [&str; 10] = [
     "settings_player",
+    "settings_player_internal",
     "settings_player_gestures",
     "settings_player_decoder",
     "settings_player_subtitle",
     "settings_player_audio",
+    "settings_player_custom_buttons",
+    "settings_player_editor",
     "settings_player_torrents",
     "settings_player_advanced",
 ];
 
 /// The first breadcrumb node of a hit from the player index during a non-player search.
-pub const PLAYER_PREFIX: &str = "Player settings";
+pub const PLAYER_PREFIX: &str = "Player";
 
 /// At most this many results are shown, in index order.
 pub const MAX_RESULTS: usize = 10;
@@ -304,7 +307,7 @@ mod tests {
         let expected: Vec<&str> = MAIN_SCREENS.iter().chain(PLAYER_SCREENS.iter()).copied().collect();
         assert_eq!(screens, expected);
         assert!(!screens.contains(&"settings_about"));
-        assert_eq!(rows.iter().filter(|r| r.player).count(), 7);
+        assert_eq!(rows.iter().filter(|r| r.player).count(), 10);
         assert_eq!(rows[0].screen_title, "Appearance", "titles come from the spec");
     }
 
@@ -340,7 +343,7 @@ mod tests {
     fn a_player_hit_gets_the_player_prefix_first() {
         let mut row = row_of("Seeking", None, "settings_player_gestures", Some("Seeking"), true);
         row.screen_title = "Gestures".into();
-        assert_eq!(crumb(&row), "Player settings > Gestures > Seeking");
+        assert_eq!(crumb(&row), "Player > Gestures > Seeking");
         row.player = false;
         assert_eq!(crumb(&row), "Gestures > Seeking", "the prefix is only for the player index");
     }

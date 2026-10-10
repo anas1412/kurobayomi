@@ -1,0 +1,18 @@
+{
+  "note": "Generic fixture for T-40a-039. No real titles, packages or covers.",
+  "extensions": [
+    {"name": "Alpha Reader", "pkg": "eu.example.alpha", "version": "1.5.0", "lang": "en", "nsfw": false, "obsolete": false,
+     "sources": [{"id": 1001, "name": "Alpha Source", "lang": "en", "base_url": "https://alpha.example"}]},
+    {"name": "Beta Reader", "pkg": "eu.example.beta", "version": "1.0.0", "lang": "ja", "nsfw": true, "obsolete": false,
+     "sources": [{"id": 2001, "name": "Beta Source", "lang": "ja", "base_url": "https://beta.example"}]},
+    {"name": "Gamma Reader", "pkg": "eu.example.gamma", "version": "0.9.0", "lang": "en", "nsfw": false, "obsolete": true,
+     "sources": [{"id": 3001, "name": "Gamma Source", "lang": "en", "base_url": "https://gamma.example"}]},
+    {"name": "Delta Reader", "pkg": "eu.example.delta", "version": "2.0.0", "lang": "en", "nsfw": false, "obsolete": false,
+     "sources": []},
+    {"name": "Epsilon Reader", "pkg": "eu.example.epsilon", "version": "0.1.0", "lang": "", "nsfw": false, "obsolete": false,
+     "sources": [{"id": 4001, "name": "Epsilon Source", "lang": "", "base_url": null}]},
+    {"name": "Zeta Reader", "pkg": "eu.example.zeta", "version": "1.1.0", "lang": "de", "nsfw": false, "obsolete": false,
+     "sources": [{"id": 5001, "name": "Zeta One", "lang": "de", "base_url": "https://zeta.example"},
+                 {"id": 5002, "name": "Zeta Two", "lang": "de", "base_url": null}]}
+  ]
+}

@@ -61,6 +61,7 @@ pub fn restore_backup(
     let mut restorer = DbRestorer {
         backup,
         t: targets,
+        skipped_settings: 0,
         clock: RunClock::new(now),
         cancel,
         manga_by_order: HashMap::new(),
@@ -76,6 +77,8 @@ pub fn restore_backup(
 struct DbRestorer<'a> {
     backup: Backup,
     t: Targets<'a>,
+    /// Keys the app-preference allowlist skipped (T-22a-052).
+    skipped_settings: usize,
     clock: RunClock,
     /// Checked again just before an entry commits (F-01).
     cancel: &'a dyn Fn() -> bool,
@@ -159,7 +162,8 @@ impl DbRestorer<'_> {
                 .map(|a| CategoryMaps { manga: m.manga, anime: a.anime })
         });
         let result = maps.map_err(|e| e.to_string()).map(|maps| {
-            restore_app_prefs(self.t.app_prefs, &self.backup.preferences, &maps, self.display, self.t.scheduler);
+            let outcome = restore_app_prefs(self.t.app_prefs, &self.backup.preferences, &maps, self.display, self.t.scheduler);
+            self.skipped_settings = outcome.skipped;
         });
         done(text::APP_SETTINGS.english.into(), result)
     }
@@ -233,6 +237,10 @@ impl DbRestorer<'_> {
 }
 
 impl Restorer for DbRestorer<'_> {
+    fn skipped_settings(&self) -> usize {
+        self.skipped_settings
+    }
+
     fn item(&mut self, section: Section, index: u32) -> Result<Item, RestoreError> {
         let i = index as usize;
         match section {

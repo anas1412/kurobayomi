@@ -3,9 +3,11 @@
 //! call, so a toggle shows on the next rebuild.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use kuro_prefs::PrefError;
 use kuro_prefs::source::SourcePrefs;
+use kuro_source::local::LOCAL_SOURCE_ID;
 
 use crate::anime::manager::ExtensionState;
 use crate::anime::model::{AnimeSourceRef, Installed};
@@ -36,6 +38,26 @@ pub fn source_items<'a>(extension: &'a Installed, hidden: &BTreeSet<String>) -> 
         .iter()
         .map(|source| SourceItem { source, enabled: is_enabled(source.id, hidden), label_as_name })
         .collect()
+}
+
+/// The installed package that owns `source`. There is none for no source, for the local source, and for a stub (a
+/// source whose package is not installed).
+fn owner<'a>(state: &'a ExtensionState, source: Option<&AnimeSourceRef>) -> Option<&'a Installed> {
+    let source = source.filter(|source| source.id != LOCAL_SOURCE_ID)?;
+    state.installed().values().find(|installed| installed.sources.iter().any(|owned| owned.id == source.id))
+}
+
+/// `isSourceForTorrents` (T-17a-033): the owning extension's `is_torrent` flag. False for no source, the local source,
+/// and a missing owner.
+pub fn is_source_for_torrents(state: &ExtensionState, source: Option<&AnimeSourceRef>) -> bool {
+    owner(state, source).is_some_and(|installed| installed.torrent)
+}
+
+/// The icon of the owning package (T-17a-025). The icon was read when the package loaded, so the package keeps one
+/// entry, which is the per-package cache. `None` for no source, the local source, a stub, or a package without an icon
+/// file; the UI then draws the generic icon.
+pub fn icon_for_source(state: &ExtensionState, source: Option<&AnimeSourceRef>) -> Option<PathBuf> {
+    owner(state, source)?.icon.clone()
 }
 
 /// Flips one source and returns whether it is enabled now. The caller then calls [`browse_sources`] again.
@@ -116,6 +138,44 @@ mod tests {
         let items = source_items(&ext, &hidden);
         assert_eq!(items.iter().map(|item| item.enabled).collect::<Vec<_>>(), [true, false]);
         assert!(items.iter().all(|item| item.label_as_name));
+    }
+
+    fn torrent_package(pkg: &str, sources: Vec<AnimeSourceRef>, torrent: bool) -> Installed {
+        Installed { torrent, ..installed(pkg, sources) }
+    }
+
+    #[test]
+    fn a_torrent_source_takes_the_flag_of_its_owning_package() {
+        let mut state = ExtensionState::new();
+        state.apply_loaded(vec![
+            LoadResult::Success(torrent_package("p.torrent", vec![source(10, "T")], true)),
+            LoadResult::Success(torrent_package("p.plain", vec![source(11, "P")], false)),
+        ]);
+        assert!(is_source_for_torrents(&state, Some(&source(10, "T"))));
+        assert!(!is_source_for_torrents(&state, Some(&source(11, "P"))));
+    }
+
+    #[test]
+    fn no_source_local_source_and_a_stub_are_never_torrent_sources() {
+        let mut state = ExtensionState::new();
+        state.apply_loaded(vec![LoadResult::Success(torrent_package("p.torrent", vec![source(10, "T")], true))]);
+        assert!(!is_source_for_torrents(&state, None));
+        assert!(!is_source_for_torrents(&state, Some(&source(LOCAL_SOURCE_ID, "Local"))));
+        assert!(!is_source_for_torrents(&state, Some(&source(99, "Stub, package not installed"))), "a missing owner is false");
+    }
+
+    #[test]
+    fn the_icon_is_the_owning_packages_icon_and_none_for_stubs_and_local() {
+        let icon = PathBuf::from("/cache/ext-icons/p.torrent.png");
+        let mut with_icon = torrent_package("p.torrent", vec![source(10, "T")], true);
+        with_icon.icon = Some(icon.clone());
+        let mut state = ExtensionState::new();
+        state.apply_loaded(vec![LoadResult::Success(with_icon), LoadResult::Success(installed("p.none", vec![source(12, "N")]))]);
+        assert_eq!(icon_for_source(&state, Some(&source(10, "T"))), Some(icon));
+        assert_eq!(icon_for_source(&state, Some(&source(12, "N"))), None, "no icon file: the generic icon");
+        assert_eq!(icon_for_source(&state, Some(&source(99, "Stub"))), None);
+        assert_eq!(icon_for_source(&state, Some(&source(LOCAL_SOURCE_ID, "Local"))), None);
+        assert_eq!(icon_for_source(&state, None), None);
     }
 
     #[test]

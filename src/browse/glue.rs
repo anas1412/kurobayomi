@@ -14,6 +14,28 @@ use tokio::sync::watch;
 use super::route::{BrowsePage, SEARCH_DEBOUNCE_MS, search_due, search_wait_ms};
 use super::tasks::PageTasks;
 
+/// Follows preferences while a page is open (T-40b-015): twice a second, on the GTK main loop, each `check` is asked whether its
+/// preference changed (`Watch::try_changed`). When any did, `on_change` runs once. The timer stops once `alive` says the page
+/// is gone. Every check runs on every tick, so one change never hides another.
+pub fn poll_pref_changes(checks: Vec<Box<dyn Fn() -> bool>>, alive: impl Fn() -> bool + 'static, on_change: impl Fn() + 'static) {
+    glib::timeout_add_local(Duration::from_millis(500), move || {
+        if !alive() {
+            return glib::ControlFlow::Break;
+        }
+        if checks.iter().map(|check| check()).fold(false, |any, changed| any | changed) {
+            on_change();
+        }
+        glib::ControlFlow::Continue
+    });
+}
+
+/// Opens the Categories page on its manga section (the category chooser's Edit categories, T-40b-045).
+pub fn open_manga_categories() {
+    let page = crate::screens::build("categories");
+    crate::settings_ui::view::show_kind(&page, crate::settings_ui::library::categories_tab(kuro_domain::kind::EntryKind::Manga));
+    crate::ui::push(&page);
+}
+
 /// The tab-switch channel: capacity one, drop-oldest (E-40 R-40-08). A new request replaces one nobody has read.
 #[derive(Clone)]
 pub struct PageChannel {

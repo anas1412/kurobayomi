@@ -309,4 +309,70 @@ mod tests {
             assert_eq!(hit_test(layout(NavMode::Disabled, ViewerKind::LeftToRight), TappingInvertMode::BOTH, x, x), Action::Menu);
         }
     }
+
+    const GRID: [f64; 12] = [0.0, 0.1, 0.2, 0.33, 0.4, 0.5, 0.6, 0.66, 0.7, 0.8, 0.9, 1.0];
+
+    fn letter(action: Action) -> char {
+        match action {
+            Action::Menu => 'M',
+            Action::Prev => 'P',
+            Action::Next => 'N',
+            Action::Left => 'L',
+            Action::Right => 'R',
+        }
+    }
+
+    /// One layout as a golden value: for each of the four inversions, a row of letters per `y` and a column per `x`.
+    fn golden_of(mode: NavMode, viewer: ViewerKind) -> serde_json::Value {
+        let inversions = [
+            ("none", TappingInvertMode::NONE),
+            ("horizontal", TappingInvertMode::HORIZONTAL),
+            ("vertical", TappingInvertMode::VERTICAL),
+            ("both", TappingInvertMode::BOTH),
+        ];
+        let regions = layout(mode, viewer);
+        let mut by_inversion = serde_json::Map::new();
+        for (name, inv) in inversions {
+            let rows: Vec<String> = GRID.iter().map(|y| GRID.iter().map(|x| letter(hit_test(regions, inv, *x, *y))).collect()).collect();
+            by_inversion.insert(name.into(), serde_json::json!(rows));
+        }
+        serde_json::json!({
+            "about": "hit_test outcome per normalised point: M menu, P prev, N next, L left, R right; rows are y, columns are x",
+            "xs": GRID,
+            "ys": GRID,
+            "inversions": by_inversion,
+        })
+    }
+
+    /// T-44a-078: the six layouts times the four inversions, from the golden files. The default layout is one file per
+    /// viewer family, since it resolves differently for each (B§2.3).
+    #[test]
+    fn the_golden_navigation_cases_hold_for_six_layouts_and_four_inversions() {
+        use crate::reader::golden::check;
+        check("nav_default_pager.json", &golden_of(NavMode::Default, ViewerKind::LeftToRight));
+        check("nav_default_webtoon.json", &golden_of(NavMode::Default, ViewerKind::Webtoon));
+        check("nav_l_shaped.json", &golden_of(NavMode::LShaped, ViewerKind::LeftToRight));
+        check("nav_kindle_ish.json", &golden_of(NavMode::KindleIsh, ViewerKind::LeftToRight));
+        check("nav_edge.json", &golden_of(NavMode::Edge, ViewerKind::LeftToRight));
+        check("nav_right_and_left.json", &golden_of(NavMode::RightAndLeft, ViewerKind::LeftToRight));
+        check("nav_disabled.json", &golden_of(NavMode::Disabled, ViewerKind::LeftToRight));
+    }
+
+    /// Independent of the files: a few cells of the L-shaped table, read off B§2.3 by hand (E-15 to E-19).
+    #[test]
+    fn a_few_cells_of_the_l_shaped_golden_are_what_the_spec_says() {
+        let golden = golden_of(NavMode::LShaped, ViewerKind::Webtoon);
+        let cell = |inv: &str, y: usize, x: usize| golden["inversions"][inv][y].as_str().unwrap().chars().nth(x).unwrap();
+        // x = GRID[1] = 0.1, y = GRID[1] = 0.1 is the top band: Prev; mirrored on both axes it is the bottom band: Next
+        assert_eq!(cell("none", 1, 1), 'P');
+        assert_eq!(cell("both", 1, 1), 'N');
+        // the centre block is the menu in every inversion
+        for inv in ["none", "horizontal", "vertical", "both"] {
+            assert_eq!(cell(inv, 5, 5), 'M', "{inv}");
+        }
+        // the middle row, left third is Prev and right third is Next, swapped by a horizontal inversion
+        assert_eq!(cell("none", 5, 1), 'P');
+        assert_eq!(cell("none", 5, 10), 'N');
+        assert_eq!(cell("horizontal", 5, 1), 'N');
+    }
 }

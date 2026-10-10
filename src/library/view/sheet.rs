@@ -193,17 +193,13 @@ mod tests {
         out
     }
 
-    /// GTK binds to the first thread that starts it, so both widget checks run in this one test, like the other
-    /// display tests of the app. Run alone: `cargo test -p kurobayomi library::view::sheet -- --ignored`.
+    /// Both widget checks run in this one test, on the shared GTK thread of `crate::testing`.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi library::view::sheet -- --ignored"]
     fn sheet_widgets_smoke() {
-        if gtk::init().is_err() {
-            eprintln!("skipped: no display for the library sheet checks");
-            return;
-        }
-        a_sort_tap_flips_the_same_row_and_writes_at_once();
-        the_display_tab_writes_every_control_immediately();
+        crate::testing::with_display(|| {
+            a_sort_tap_flips_the_same_row_and_writes_at_once();
+            the_display_tab_writes_every_control_immediately();
+        });
     }
 
     fn a_sort_tap_flips_the_same_row_and_writes_at_once() {
@@ -233,7 +229,7 @@ mod tests {
         assert_eq!(prefs.download_badge.get(), !before);
         let slider = find::<gtk::Scale>(&tab).expect("columns slider");
         slider.set_value(4.0);
-        assert_eq!(prefs.anime_portrait_columns.get(), 4);
+        assert_eq!(prefs.anime_landscape_columns.get(), 4);
         let chips: Vec<gtk::ToggleButton> = all::<gtk::ToggleButton>(&tab);
         assert_eq!(chips.len(), 4, "four mode chips");
         chips[3].set_active(true);

@@ -8,14 +8,17 @@
 //! the store's own flusher thread saves it, so the GTK thread never waits on a file (see `settings_window`).
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use kuro_data::chapter::{ChapterRepo, ChapterUpdate};
+use kuro_data::history::MangaHistoryRepo;
 use kuro_data::manga::MangaRepo;
 use kuro_db::Db;
 
+use super::restore::{self, SavedSession};
 use super::session::ReaderStore;
 
 /// One write the reader asks for.
@@ -24,6 +27,12 @@ pub enum Command {
     Progress { chapter_id: i64, last_page_read: i64, read: bool },
     Bookmark { chapter_id: i64, bookmark: bool },
     ViewerBits { manga_id: i64, value: i64, mask: i64 },
+    /// Marks a chapter read without touching its last page (the duplicate rule, T-43a-031).
+    MarkRead { chapter_id: i64 },
+    /// Adds `duration` ms to the chapter's read time and sets its last read time (T-43a-033).
+    History { chapter_id: i64, read_at: i64, duration: i64 },
+    /// The crash-restore record, replaced in its file (T-43a-039).
+    Restore { file: PathBuf, session: SavedSession },
 }
 
 /// How long [`ReaderStore::flush`] waits for the writer before it gives up and goes on.
@@ -33,15 +42,18 @@ const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 /// before it has run.
 enum Msg {
     Write(Command),
+    /// A write whose outcome the caller waits for (a bookmark, which reverts when it fails).
+    Checked(Command, Sender<Result<(), String>>),
     Flush(Sender<()>),
 }
 
-/// Coalesces one batch: per chapter only the last progress and the last bookmark are written, and viewer-bit
-/// writes are kept in order, since each one merges into the previous value.
+/// Coalesces one batch: per chapter only the last progress and the last bookmark are written. Viewer-bit writes,
+/// read marks and history adds are kept in order, since each one merges into or adds to the previous value.
 pub fn coalesce(batch: Vec<Command>) -> Vec<Command> {
     let mut progress: BTreeMap<i64, Command> = BTreeMap::new();
     let mut bookmark: BTreeMap<i64, Command> = BTreeMap::new();
     let mut bits = Vec::new();
+    let mut restore: Option<Command> = None;
     for command in batch {
         match &command {
             Command::Progress { chapter_id, .. } => {
@@ -50,16 +62,20 @@ pub fn coalesce(batch: Vec<Command>) -> Vec<Command> {
             Command::Bookmark { chapter_id, .. } => {
                 bookmark.insert(*chapter_id, command);
             }
-            Command::ViewerBits { .. } => bits.push(command),
+            Command::ViewerBits { .. } | Command::MarkRead { .. } | Command::History { .. } => bits.push(command),
+            // only the last record of a batch matters
+            Command::Restore { .. } => restore = Some(command),
         }
     }
-    bits.into_iter().chain(progress.into_values()).chain(bookmark.into_values()).collect()
+    bits.into_iter().chain(progress.into_values()).chain(bookmark.into_values()).chain(restore).collect()
 }
 
 /// The writer's sending half, held by the reader session.
 #[derive(Clone)]
 pub struct WriterHandle {
     tx: Sender<Msg>,
+    /// Where the crash-restore record goes. Without it `save_restore` does nothing.
+    restore_file: Option<PathBuf>,
 }
 
 impl WriterHandle {
@@ -70,7 +86,13 @@ impl WriterHandle {
             .name("kuro-reader-writer".into())
             .spawn(move || run(db, rx))
             .expect("the reader writer thread starts");
-        Self { tx }
+        Self { tx, restore_file: None }
+    }
+
+    /// Keeps the crash-restore record in the platform data directory `data_dir` (T-43a-039).
+    pub fn with_restore_in(mut self, data_dir: &std::path::Path) -> Self {
+        self.restore_file = Some(restore::path_in(data_dir));
+        self
     }
 }
 
@@ -79,12 +101,32 @@ impl ReaderStore for WriterHandle {
         self.send(Command::Progress { chapter_id, last_page_read, read });
     }
 
-    fn set_bookmark(&self, chapter_id: i64, bookmark: bool) {
-        self.send(Command::Bookmark { chapter_id, bookmark });
+    /// Waits for the writer's answer, so a failed bookmark write can revert the flag (T-43a-035). A writer that does
+    /// not answer within the flush timeout counts as a failure.
+    fn set_bookmark(&self, chapter_id: i64, bookmark: bool) -> Result<(), String> {
+        let (reply, answer) = mpsc::channel();
+        if self.tx.send(Msg::Checked(Command::Bookmark { chapter_id, bookmark }, reply)).is_err() {
+            return Err("Unknown error".to_owned());
+        }
+        answer.recv_timeout(FLUSH_TIMEOUT).unwrap_or_else(|_| Err("Unknown error".to_owned()))
+    }
+
+    fn mark_read(&self, chapter_id: i64) {
+        self.send(Command::MarkRead { chapter_id });
+    }
+
+    fn upsert_history(&self, chapter_id: i64, read_at: i64, duration: i64) {
+        self.send(Command::History { chapter_id, read_at, duration });
     }
 
     fn set_viewer_flags(&self, manga_id: i64, value: i64, mask: i64) {
         self.send(Command::ViewerBits { manga_id, value, mask });
+    }
+
+    fn save_restore(&self, session: SavedSession) {
+        if let Some(file) = &self.restore_file {
+            self.send(Command::Restore { file: file.clone(), session });
+        }
     }
 
     /// Waits until the writer has run everything sent before this call (T-43a-025). Any later write that goes
@@ -105,47 +147,69 @@ impl WriterHandle {
     }
 }
 
-/// Splits one batch of messages into its writes and its flush acknowledgements.
-fn split(batch: Vec<Msg>) -> (Vec<Command>, Vec<Sender<()>>) {
-    let (mut writes, mut acks) = (Vec::new(), Vec::new());
+/// Splits one batch of messages into its writes, its checked writes and its flush acknowledgements.
+type Split = (Vec<Command>, Vec<(Command, Sender<Result<(), String>>)>, Vec<Sender<()>>);
+
+fn split(batch: Vec<Msg>) -> Split {
+    let (mut writes, mut checked, mut acks) = (Vec::new(), Vec::new(), Vec::new());
     for msg in batch {
         match msg {
             Msg::Write(command) => writes.push(command),
+            Msg::Checked(command, reply) => checked.push((command, reply)),
             Msg::Flush(ack) => acks.push(ack),
         }
     }
-    (writes, acks)
+    (writes, checked, acks)
+}
+
+/// Runs one write through its repository.
+fn execute(chapters: &ChapterRepo, histories: &MangaHistoryRepo, mangas: &MangaRepo, command: &Command) -> Result<(), String> {
+    let result = match command {
+        Command::Progress { chapter_id, last_page_read, read } => {
+            let mut update = ChapterUpdate::new(*chapter_id);
+            update.read = Some(*read);
+            update.last_page_read = Some(*last_page_read);
+            chapters.update(&update).map(|_| ()).map_err(|e| e.to_string())
+        }
+        Command::Bookmark { chapter_id, bookmark } => {
+            let mut update = ChapterUpdate::new(*chapter_id);
+            update.bookmark = Some(*bookmark);
+            chapters.update(&update).map(|_| ()).map_err(|e| e.to_string())
+        }
+        Command::MarkRead { chapter_id } => {
+            let mut update = ChapterUpdate::new(*chapter_id);
+            update.read = Some(true);
+            chapters.update(&update).map(|_| ()).map_err(|e| e.to_string())
+        }
+        Command::History { chapter_id, read_at, duration } => {
+            histories.try_upsert(*chapter_id, *read_at, *duration).map_err(|e| e.to_string())
+        }
+        Command::ViewerBits { manga_id, value, mask } => {
+            mangas.set_viewer_bits(*manga_id, *value, *mask).map(|_| ()).map_err(|e| e.to_string())
+        }
+        Command::Restore { file, session } => restore::save(file, session).map_err(|e| e.to_string()),
+    };
+    if let Err(error) = &result {
+        tracing::warn!(error = %error, ?command, "reader write failed");
+    }
+    result
 }
 
 fn run(db: Arc<Db>, rx: Receiver<Msg>) {
     let chapters = ChapterRepo::new(Arc::clone(&db));
+    let histories = MangaHistoryRepo::new(Arc::clone(&db));
     let mangas = MangaRepo::new(db);
     while let Ok(first) = rx.recv() {
         let mut batch = vec![first];
         while let Ok(next) = rx.try_recv() {
             batch.push(next);
         }
-        let (writes, acks) = split(batch);
+        let (writes, checked, acks) = split(batch);
         for command in coalesce(writes) {
-            let result = match &command {
-                Command::Progress { chapter_id, last_page_read, read } => {
-                    let mut update = ChapterUpdate::new(*chapter_id);
-                    update.read = Some(*read);
-                    update.last_page_read = Some(*last_page_read);
-                    chapters.update(&update).map(|_| ())
-                }
-                Command::Bookmark { chapter_id, bookmark } => {
-                    let mut update = ChapterUpdate::new(*chapter_id);
-                    update.bookmark = Some(*bookmark);
-                    chapters.update(&update).map(|_| ())
-                }
-                Command::ViewerBits { manga_id, value, mask } => {
-                    mangas.set_viewer_bits(*manga_id, *value, *mask).map(|_| ())
-                }
-            };
-            if let Err(e) = result {
-                tracing::warn!(error = %e, ?command, "reader write failed");
-            }
+            let _ = execute(&chapters, &histories, &mangas, &command);
+        }
+        for (command, reply) in checked {
+            let _ = reply.send(execute(&chapters, &histories, &mangas, &command));
         }
         for ack in acks {
             let _ = ack.send(());
@@ -176,13 +240,28 @@ mod tests {
     #[test]
     fn a_batch_splits_into_its_writes_and_its_flush_acknowledgements() {
         let (ack, _done) = mpsc::channel();
-        let (writes, acks) = split(vec![
+        let (reply, _answer) = mpsc::channel();
+        let (writes, checked, acks) = split(vec![
             Msg::Write(Command::Bookmark { chapter_id: 1, bookmark: true }),
             Msg::Flush(ack),
+            Msg::Checked(Command::Bookmark { chapter_id: 3, bookmark: false }, reply),
             Msg::Write(Command::Bookmark { chapter_id: 2, bookmark: true }),
         ]);
         assert_eq!(writes.len(), 2);
+        assert_eq!(checked.len(), 1);
         assert_eq!(acks.len(), 1);
+    }
+
+    #[test]
+    fn history_adds_and_read_marks_are_never_coalesced() {
+        let out = coalesce(vec![
+            Command::History { chapter_id: 1, read_at: 10, duration: 5 },
+            Command::MarkRead { chapter_id: 2 },
+            Command::History { chapter_id: 1, read_at: 20, duration: 7 },
+        ]);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0], Command::History { chapter_id: 1, read_at: 10, duration: 5 });
+        assert_eq!(out[2], Command::History { chapter_id: 1, read_at: 20, duration: 7 });
     }
 
     #[test]
@@ -202,6 +281,38 @@ mod tests {
         handle.flush();
         let stored = ChapterRepo::new(db).by_id(chapter_id).unwrap().unwrap();
         assert_eq!((stored.last_page_read, stored.read), (4, true));
+    }
+
+    #[test]
+    fn only_the_last_restore_record_of_a_batch_is_written() {
+        let file = PathBuf::from("/data/reader_session.json");
+        let at = |page_index| SavedSession { manga_id: 1, chapter_id: 2, page_index, saved_at: 5 };
+        let out = coalesce(vec![
+            Command::Restore { file: file.clone(), session: at(1) },
+            Command::Progress { chapter_id: 2, last_page_read: 1, read: false },
+            Command::Restore { file: file.clone(), session: at(4) },
+        ]);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[1], Command::Restore { file, session: at(4) });
+    }
+
+    #[test]
+    fn the_handle_writes_the_restore_record_to_its_file_and_a_plain_handle_writes_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = kuro_db::schema_manga::db_path(dir.path());
+        let writer = kuro_db::schema_manga::open(&path).unwrap();
+        let db = Arc::new(Db::new(&path, writer).unwrap());
+        let record = SavedSession { manga_id: 1, chapter_id: 2, page_index: 3, saved_at: 4 };
+
+        let plain = WriterHandle::spawn(Arc::clone(&db));
+        plain.save_restore(record);
+        plain.flush();
+        assert_eq!(restore::load(&restore::path_in(dir.path())), None);
+
+        let keeping = WriterHandle::spawn(db).with_restore_in(dir.path());
+        keeping.save_restore(record);
+        keeping.flush();
+        assert_eq!(restore::load(&restore::path_in(dir.path())), Some(record));
     }
 
     #[test]

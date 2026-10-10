@@ -1,0 +1,16 @@
+{
+  "about": "a chapter gap forces the transition",
+  "viewer": "LeftToRight",
+  "force": false,
+  "items": [
+    "p1:0",
+    "p1:1",
+    "P(2,1)",
+    "p2:0",
+    "p2:1",
+    "N(2,3)",
+    "p3:0",
+    "p3:1"
+  ],
+  "jump": null
+}

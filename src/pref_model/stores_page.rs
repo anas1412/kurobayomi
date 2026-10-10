@@ -712,76 +712,69 @@ mod tests {
         }
     }
 
-    /// GTK binds to the first thread that starts it, so the widget checks run in this one test. Run alone:
-    /// `cargo test -p kurobayomi pref_model::stores_page -- --ignored`.
+    /// The widget checks run in this one test, on the shared GTK thread of `crate::testing`.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi pref_model::stores_page -- --ignored"]
     fn page_widgets_smoke() {
-        if gtk::init().is_err() {
-            eprintln!("skipped: no display for the stores page checks");
-            return;
-        }
-        let app = gtk::Application::builder().application_id("io.github.blackbox.KurobayomiTest").flags(gio::ApplicationFlags::NON_UNIQUE).build();
-        app.register(None::<&gio::Cancellable>).expect("register");
-        let window = gtk::ApplicationWindow::new(&app);
-        crate::ui::nav_init(&gtk::Stack::new(), &window);
+        crate::testing::with_display(|| {
+            let _nav = crate::testing::nav();
 
-        let ops = Arc::new(Fake { fail_with: Some("HTTP 500".into()), added: Default::default() });
-        let feed: Rc<RefCell<Option<Box<dyn Fn(Vec<Item>)>>>> = Rc::new(RefCell::new(None));
-        let sink = feed.clone();
-        let (built, page) = build(ops.clone(), Texts::stores(), move |push| *sink.borrow_mut() = Some(push));
-        let push = |items: Vec<Item>| (feed.borrow().as_ref().expect("subscribed"))(items);
-        let inner = page.inner.clone();
-        let shown = || inner.stack.visible_child_name().map(|n| n.to_string()).unwrap_or_default();
+            let ops = Arc::new(Fake { fail_with: Some("HTTP 500".into()), added: Default::default() });
+            let feed: Rc<RefCell<Option<Box<dyn Fn(Vec<Item>)>>>> = Rc::new(RefCell::new(None));
+            let sink = feed.clone();
+            let (built, page) = build(ops.clone(), Texts::stores(), move |push| *sink.borrow_mut() = Some(push));
+            let push = |items: Vec<Item>| (feed.borrow().as_ref().expect("subscribed"))(items);
+            let inner = page.inner.clone();
+            let shown = || inner.stack.visible_child_name().map(|n| n.to_string()).unwrap_or_default();
 
-        assert_eq!(shown(), "loading", "a spinner until the first emission");
-        assert!(!inner.fab.is_visible());
-        push(vec![]);
-        assert_eq!(shown(), "empty", "zero stores show the empty text");
-        assert!(inner.fab.is_visible(), "with the FAB still there");
-        push(vec![Item("https://a/index.json".into())]);
-        assert_eq!(shown(), "list");
-        assert!(inner.list.row_at_index(0).is_some() && inner.list.row_at_index(1).is_none());
+            assert_eq!(shown(), "loading", "a spinner until the first emission");
+            assert!(!inner.fab.is_visible());
+            push(vec![]);
+            assert_eq!(shown(), "empty", "zero stores show the empty text");
+            assert!(inner.fab.is_visible(), "with the FAB still there");
+            push(vec![Item("https://a/index.json".into())]);
+            assert_eq!(shown(), "list");
+            assert!(inner.list.row_at_index(0).is_some() && inner.list.row_at_index(1).is_none());
 
-        // the add dialog: Add is off while empty, on for a new URL, off again for a stored one
-        inner.dispatch(Event::Open(Dialog::Add(Entry::default())));
-        assert!(inner.dialog.borrow().is_some());
-        {
-            let open = inner.dialog.borrow();
-            let open = open.as_ref().expect("open");
-            assert!(!open.dialog.confirm.as_ref().expect("Add").is_sensitive());
-            assert_eq!(open.helper.as_ref().expect("helper").text(), "*required");
-        }
-        inner.dispatch(Event::Type("https://a/index.json".into()));
-        {
-            let open = inner.dialog.borrow();
-            let open = open.as_ref().expect("open");
-            assert_eq!(open.helper.as_ref().expect("helper").text(), "This extension store already exists");
-            assert!(!open.dialog.confirm.as_ref().expect("Add").is_sensitive());
-        }
-        inner.dispatch(Event::Type("https://b/index.json".into()));
-        assert!(inner.dialog.borrow().as_ref().expect("open").dialog.confirm.as_ref().expect("Add").is_sensitive());
+            // the add dialog: Add is off while empty, on for a new URL, off again for a stored one
+            inner.dispatch(Event::Open(Dialog::Add(Entry::default())));
+            assert!(inner.dialog.borrow().is_some());
+            {
+                let open = inner.dialog.borrow();
+                let open = open.as_ref().expect("open");
+                assert!(!open.dialog.confirm.as_ref().expect("Add").is_sensitive());
+                assert_eq!(open.helper.as_ref().expect("helper").text(), "*required");
+            }
+            inner.dispatch(Event::Type("https://a/index.json".into()));
+            {
+                let open = inner.dialog.borrow();
+                let open = open.as_ref().expect("open");
+                assert_eq!(open.helper.as_ref().expect("helper").text(), "This extension store already exists");
+                assert!(!open.dialog.confirm.as_ref().expect("Add").is_sensitive());
+            }
+            inner.dispatch(Event::Type("https://b/index.json".into()));
+            assert!(inner.dialog.borrow().as_ref().expect("open").dialog.confirm.as_ref().expect("Add").is_sensitive());
 
-        // a failing add keeps the dialog, shows the error and enables Add again
-        inner.dispatch(Event::Submit);
-        assert_eq!(inner.dialog.borrow().as_ref().expect("open").dialog.confirm.as_ref().expect("Add").label().as_deref(), Some("Processing…"));
-        pump_until(|| inner.dialog.borrow().as_ref().is_some_and(|d| d.helper.as_ref().is_some_and(|h| h.text() == "HTTP 500")));
-        assert_eq!(ops.added.lock().unwrap().as_slice(), ["https://b/index.json"]);
-        assert!(inner.dialog.borrow().as_ref().expect("still open").dialog.confirm.as_ref().expect("Add").is_sensitive());
+            // a failing add keeps the dialog, shows the error and enables Add again
+            inner.dispatch(Event::Submit);
+            assert_eq!(inner.dialog.borrow().as_ref().expect("open").dialog.confirm.as_ref().expect("Add").label().as_deref(), Some("Processing…"));
+            pump_until(|| inner.dialog.borrow().as_ref().is_some_and(|d| d.helper.as_ref().is_some_and(|h| h.text() == "HTTP 500")));
+            assert_eq!(ops.added.lock().unwrap().as_slice(), ["https://b/index.json"]);
+            assert!(inner.dialog.borrow().as_ref().expect("still open").dialog.confirm.as_ref().expect("Add").is_sensitive());
 
-        // Escape or Cancel closes it; the remove dialog opens from the state and closes on confirm
-        inner.dispatch(Event::Dismiss);
-        assert!(inner.dialog.borrow().is_none());
-        inner.dispatch(Event::Open(Dialog::Remove { key: "https://a/index.json".into(), name: "A".into(), url: "https://a/index.json".into() }));
-        assert!(inner.dialog.borrow().is_some());
-        inner.dispatch(Event::ConfirmRemove);
-        assert!(inner.dialog.borrow().is_none(), "the dialog closes at once");
+            // Escape or Cancel closes it; the remove dialog opens from the state and closes on confirm
+            inner.dispatch(Event::Dismiss);
+            assert!(inner.dialog.borrow().is_none());
+            inner.dispatch(Event::Open(Dialog::Remove { key: "https://a/index.json".into(), name: "A".into(), url: "https://a/index.json".into() }));
+            assert!(inner.dialog.borrow().is_some());
+            inner.dispatch(Event::ConfirmRemove);
+            assert!(inner.dialog.borrow().is_none(), "the dialog closes at once");
 
-        // a refresh shows the header spinner until it is done
-        inner.dispatch(Event::Refresh);
-        assert!(inner.spinner.is_visible());
-        pump_until(|| !inner.spinner.is_visible());
-        assert!(!inner.spinner.is_visible());
-        assert_eq!(built.end.len(), 2, "spinner and Refresh in the header");
+            // a refresh shows the header spinner until it is done
+            inner.dispatch(Event::Refresh);
+            assert!(inner.spinner.is_visible());
+            pump_until(|| !inner.spinner.is_visible());
+            assert!(!inner.spinner.is_visible());
+            assert_eq!(built.end.len(), 2, "spinner and Refresh in the header");
+        });
     }
 }

@@ -191,46 +191,43 @@ mod tests {
     /// One display test: the button draws a favorite in the primary colour at full opacity and anything else at 0.38,
     /// a long press runs only for a favorite and then swallows the click that follows, and a plain click always runs.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi library_button -- --ignored"]
     fn library_button_tone_and_long_press() {
-        if gtk::init().is_err() {
-            eprintln!("skipped: no display for the library button test");
-            return;
-        }
-        let button = LibraryButton::new();
-        let content = button.button.child().expect("the content box");
-        assert!((content.opacity() - 0.38).abs() < 0.01, "not in the library: dimmed (GTK keeps opacity in 8 bits)");
-        assert!(!content.has_css_class("chapter-primary"));
-        let clicks = Rc::new(Cell::new(0));
-        let longs = Rc::new(Cell::new(0));
-        button.connect(
-            {
-                let clicks = Rc::clone(&clicks);
-                move || clicks.set(clicks.get() + 1)
-            },
-            {
-                let longs = Rc::clone(&longs);
-                move || longs.set(longs.get() + 1)
-            },
-        );
-        let long_press = || {
-            let controllers = button.button.observe_controllers();
-            let gesture = (0..controllers.n_items())
-                .filter_map(|i| controllers.item(i).and_downcast::<gtk::GestureLongPress>())
-                .next()
-                .expect("the long press gesture");
-            gesture.emit_by_name::<()>("pressed", &[&0.0f64, &0.0f64]);
-        };
-        long_press();
-        assert_eq!(longs.get(), 0, "no long press for an entry outside the library (E-13)");
-        button.set(true);
-        assert_eq!(content.opacity(), 1.0, "a favorite: full opacity");
-        assert!(content.has_css_class("chapter-primary"), "and the primary colour");
-        long_press();
-        assert_eq!(longs.get(), 1);
-        button.button.emit_clicked();
-        assert_eq!(clicks.get(), 0, "the release after a long press is not a click");
-        button.button.emit_clicked();
-        assert_eq!(clicks.get(), 1, "a plain click runs");
+        crate::testing::with_display(|| {
+            let button = LibraryButton::new();
+            let content = button.button.child().expect("the content box");
+            assert!((content.opacity() - 0.38).abs() < 0.01, "not in the library: dimmed (GTK keeps opacity in 8 bits)");
+            assert!(!content.has_css_class("chapter-primary"));
+            let clicks = Rc::new(Cell::new(0));
+            let longs = Rc::new(Cell::new(0));
+            button.connect(
+                {
+                    let clicks = Rc::clone(&clicks);
+                    move || clicks.set(clicks.get() + 1)
+                },
+                {
+                    let longs = Rc::clone(&longs);
+                    move || longs.set(longs.get() + 1)
+                },
+            );
+            let long_press = || {
+                let controllers = button.button.observe_controllers();
+                let gesture = (0..controllers.n_items())
+                    .filter_map(|i| controllers.item(i).and_downcast::<gtk::GestureLongPress>())
+                    .next()
+                    .expect("the long press gesture");
+                gesture.emit_by_name::<()>("pressed", &[&0.0f64, &0.0f64]);
+            };
+            long_press();
+            assert_eq!(longs.get(), 0, "no long press for an entry outside the library (E-13)");
+            button.set(true);
+            assert_eq!(content.opacity(), 1.0, "a favorite: full opacity");
+            assert!(content.has_css_class("chapter-primary"), "and the primary colour");
+            long_press();
+            assert_eq!(longs.get(), 1);
+            button.button.emit_clicked();
+            assert_eq!(clicks.get(), 0, "the release after a long press is not a click");
+            button.button.emit_clicked();
+            assert_eq!(clicks.get(), 1, "a plain click runs");
+        });
     }
 }

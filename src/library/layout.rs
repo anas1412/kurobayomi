@@ -58,6 +58,11 @@ pub fn count_badge(count: i64) -> Option<String> {
     (count > 0).then(|| count.to_string())
 }
 
+/// The tooltip of the unread badge: a season parent counts seasons, not episodes (T-37a-048). None keeps the default.
+pub fn unread_badge_tooltip(season_parent: bool) -> Option<&'static str> {
+    season_parent.then_some("unseen seasons")
+}
+
 /// The language badge: the source language in upper case, or None when empty.
 pub fn language_badge(language: &str) -> Option<String> {
     (!language.is_empty()).then(|| language.to_uppercase())
@@ -66,6 +71,13 @@ pub fn language_badge(language: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_season_parent_unread_badge_says_unseen_seasons() {
+        // T-37a-048: the tooltip names seasons for season parents only.
+        assert_eq!(unread_badge_tooltip(true), Some("unseen seasons"));
+        assert_eq!(unread_badge_tooltip(false), None);
+    }
 
     #[test]
     fn covers_keep_the_book_ratio_and_tabs_show_counts_on_request() {

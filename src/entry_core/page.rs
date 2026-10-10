@@ -68,6 +68,8 @@ pub enum UiAction {
     DownloadMenu(DownloadAction),
     /// The scanlator sheet's OK: the exclusions become exactly this set.
     SetExcludedScanlators(std::collections::BTreeSet<String>),
+    /// The delete confirmation's OK: the selection is cleared, then the downloads of these chapters are deleted.
+    ConfirmDeleteChapters(Vec<i64>),
 }
 
 /// What the widget layer does after an action.
@@ -314,6 +316,11 @@ impl Page {
             UiAction::ConfirmCategory(confirm) => {
                 page.dialog.dismiss();
                 out.cmds.push(confirm.into());
+            }
+            UiAction::ConfirmDeleteChapters(chapter_ids) => {
+                page.dialog.dismiss();
+                page.selection.clear();
+                out.cmds.push(StoreCmd::DeleteDownloads { manga_id, chapter_ids });
             }
             UiAction::Row {
                 id,

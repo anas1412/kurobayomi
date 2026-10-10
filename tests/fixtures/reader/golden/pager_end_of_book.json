@@ -1,0 +1,12 @@
+{
+  "about": "one chapter, both ends of the book",
+  "viewer": "LeftToRight",
+  "force": false,
+  "items": [
+    "P(2,-)",
+    "p2:0",
+    "p2:1",
+    "N(2,-)"
+  ],
+  "jump": null
+}

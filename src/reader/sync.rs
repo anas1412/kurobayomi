@@ -18,6 +18,16 @@ pub enum Effect {
     Flash,
     Brightness,
     ColorFilter,
+    /// The global incognito flag changed; the reader closes when it is off (E-INC-2).
+    Incognito,
+}
+
+/// The preference key of the global incognito flag (`BasePrefs::incognito_mode`).
+pub const INCOGNITO_KEY: &str = "__APP_STATE_incognito_mode";
+
+/// Whether the reader closes for a new value of the global incognito flag (E-INC-2).
+pub fn closes_on_incognito(now_on: bool) -> bool {
+    !now_on
 }
 
 /// The effects of a changed preference key. Keys that touch no open reader part give nothing.
@@ -34,6 +44,7 @@ pub fn effects_for(key: &str) -> Vec<Effect> {
         "pref_color_filter_key" | "color_filter_value" | "color_filter_mode" | "pref_grayscale" | "pref_inverted_colors" => {
             vec![Effect::ColorFilter]
         }
+        INCOGNITO_KEY => vec![Effect::Incognito],
         _ => Vec::new(),
     }
 }
@@ -66,6 +77,13 @@ mod tests {
         assert_eq!(effects_for("pref_reader_flash_duration"), [Effect::Flash]);
         assert_eq!(effects_for("custom_brightness_value"), [Effect::Brightness]);
         assert_eq!(effects_for("pref_grayscale"), [Effect::ColorFilter]);
+    }
+
+    #[test]
+    fn the_incognito_flag_maps_to_its_effect_and_only_turning_it_off_closes_the_reader() {
+        assert_eq!(effects_for(INCOGNITO_KEY), [Effect::Incognito]);
+        assert!(closes_on_incognito(false));
+        assert!(!closes_on_incognito(true));
     }
 
     #[test]

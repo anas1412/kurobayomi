@@ -1,0 +1,17 @@
+{
+  "about": "right to left reverses the whole list",
+  "viewer": "RightToLeft",
+  "force": true,
+  "items": [
+    "p3:1",
+    "p3:0",
+    "N(2,3)",
+    "p2:2",
+    "p2:1",
+    "p2:0",
+    "P(2,1)",
+    "p1:4",
+    "p1:3"
+  ],
+  "jump": null
+}

@@ -80,14 +80,19 @@ pub enum Change {
     Progress(i64),
 }
 
+/// Applies one event to the state a row shows.
+pub fn apply_to(download: &mut RowDownload, change: Change) {
+    match change {
+        Change::Status(state) => download.state = state,
+        Change::Progress(progress) => download.progress = progress,
+    }
+}
+
 /// Applies `change` to the row with `unit_id` only. Returns whether a row was found; unknown ids are ignored.
 pub fn apply(rows: &mut [UnitDownload], unit_id: i64, change: Change) -> bool {
     match rows.iter_mut().find(|r| r.unit_id == unit_id) {
         Some(row) => {
-            match change {
-                Change::Status(state) => row.download.state = state,
-                Change::Progress(progress) => row.download.progress = progress,
-            }
+            apply_to(&mut row.download, change);
             true
         }
         None => false,

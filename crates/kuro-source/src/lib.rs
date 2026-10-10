@@ -17,6 +17,7 @@ pub mod listing;
 pub mod local;
 pub mod messages;
 pub mod model;
+pub mod orphans;
 pub mod pager;
 pub mod prefs;
 pub mod source;
@@ -31,6 +32,6 @@ pub use messages::{SourceFailure, error_message, failure_message};
 pub use pager::{Page, PagerError, RemotePager};
 pub use prefs::{PrefDescriptorError, SourcePref, check_descriptors, preference_key};
 pub use source::{
-    CatalogueSource, ConfigurableSource, MangaSource, MangaUriType, ResolvableSource, ResolvedManga, isolate,
-    resolve_manga_uri,
+    CatalogueSource, ConfigurableSource, DeepLinkOutcome, MangaSource, MangaUriType, ResolvableSource, ResolvedManga,
+    isolate, resolve_deep_link, resolve_manga_uri,
 };

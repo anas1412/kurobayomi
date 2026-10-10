@@ -5,6 +5,8 @@
 //!
 //! `make_viewer` builds the engine for a reading mode (B§0). `ViewerKind::from_flag` rejects the unresolved mode 0.
 
+pub mod adapter;
+pub mod downloads;
 pub mod effect;
 pub mod engine;
 pub mod gap;
@@ -128,6 +130,8 @@ pub struct ViewerContext {
     /// The store the settings came from. With it the viewer follows later changes (T-44a-005); without it the
     /// settings stay as given.
     pub prefs: Option<ReaderPrefs>,
+    /// The download index, for the transition cards' downloaded flags (T-43b-032).
+    pub downloads: downloads::DownloadCheck,
 }
 
 /// The engine for a reading mode (B§0): the pager for the three paged modes, the webtoon for the two strips.
@@ -192,17 +196,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi viewers::tests::a_test_viewer -- --ignored"]
     fn a_test_viewer_receives_a_key_and_reports_it_handled() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping the viewer contract probe");
-            return;
-        }
-        let viewer: Box<dyn ViewerEngine> = Box::new(Probe { root: gtk::Box::new(gtk::Orientation::Vertical, 0), keys: Cell::new(0) });
-        assert!(viewer.handle_key(KeyEvent { key: keys::InputKey::Right, ctrl: false, released: false }));
-        assert!(!viewer.handle_key(KeyEvent { key: keys::InputKey::Left, ctrl: false, released: false }));
-        viewer.destroy();
-        assert_eq!(viewer.kind(), ViewerKind::LeftToRight);
+        crate::testing::with_display(|| {
+            let viewer: Box<dyn ViewerEngine> = Box::new(Probe { root: gtk::Box::new(gtk::Orientation::Vertical, 0), keys: Cell::new(0) });
+            assert!(viewer.handle_key(KeyEvent { key: keys::InputKey::Right, ctrl: false, released: false }));
+            assert!(!viewer.handle_key(KeyEvent { key: keys::InputKey::Left, ctrl: false, released: false }));
+            viewer.destroy();
+            assert_eq!(viewer.kind(), ViewerKind::LeftToRight);
+        });
     }
 
     #[test]

@@ -15,7 +15,10 @@ use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
 use gtk::{Orientation as O, gdk, gio, glib};
+use kuro_data::anime::AnimeRepo;
+use kuro_data::manga::MangaRepo;
 use kuro_db::handle::Db;
+use kuro_db::schema_anime::FetchType;
 use kuro_domain::category::service::CategoryService;
 use kuro_domain::kind::EntryKind;
 use kuro_domain::library::active::clamp_page;
@@ -70,8 +73,8 @@ pub struct Resume {
 pub struct Nav {
     pub open: Rc<dyn Fn(i64)>,
     pub resume: Rc<dyn Fn(Resume)>,
-    /// Queues the downloads of the selected entries.
-    pub download: Rc<dyn Fn(Vec<i64>)>,
+    /// Queues the downloads of the selected entries: how many, from the Download menu.
+    pub download: Rc<dyn Fn(Vec<i64>, actions::DownloadAmount)>,
     /// Starts removing the selected entries from the library.
     pub delete: Rc<dyn Fn(Vec<i64>)>,
     pub global_search: Rc<dyn Fn(&str)>,
@@ -106,7 +109,7 @@ struct Inner {
     /// The toolbar; the selection header replaces it while entries are selected (U-1.1).
     header: gtk::Box,
     sel_header: gtk::Box,
-    download_button: gtk::Button,
+    download_button: gtk::MenuButton,
     search: gtk::SearchEntry,
     tabs: tabs::TabStrip,
     scroller: gtk::ScrolledWindow,
@@ -188,7 +191,7 @@ impl LibraryView {
         sel_header.set_margin_top(8);
         sel_header.set_visible(false);
         sel_header.append(&bar_label);
-        let download_button = gtk::Button::with_label(&tr(MsgKey::action_download));
+        let download_button = gtk::MenuButton::builder().label(tr(MsgKey::action_download)).build();
         let action_bar = gtk::ActionBar::new();
         let bar = gtk::Revealer::new();
         bar.set_transition_type(gtk::RevealerTransitionType::SlideUp);
@@ -504,7 +507,21 @@ impl LibraryView {
                 connect(&button, action);
                 bar_box.pack_start(&button);
             }
-            connect(&download_button, Box::new(|inner| selected_action(inner, |nav| nav.download.clone())));
+            // the Download menu: the next 1, 5, 10 or 25 items, or every unviewed one (T-37a-028)
+            let menu = gtk::Box::new(O::Vertical, 2);
+            let popover = gtk::Popover::builder().child(&menu).build();
+            for (amount, label) in actions::download_menu(kind) {
+                let item = gtk::Button::with_label(&label);
+                let (weak_item, popover_item) = (weak.clone(), popover.clone());
+                item.connect_clicked(move |_| {
+                    popover_item.popdown();
+                    if let Some(inner) = weak_item.upgrade() {
+                        selected_download(&inner, amount);
+                    }
+                });
+                menu.append(&item);
+            }
+            download_button.set_popover(Some(&popover));
             bar_box.pack_start(&download_button);
         }
         let weak_global = weak.clone();
@@ -549,7 +566,11 @@ fn apply_reply(inner: &Rc<RefCell<Inner>>, reply: Reply) {
             return;
         }
         match reply.result {
-            Ok(built) => st.built = Some(built),
+            Ok(built) => {
+                // ids that left the library drop out of the selection; the counts follow the new rows (T-37a-059)
+                st.selection.refresh(&built.library);
+                st.built = Some(built);
+            }
             Err(e) => {
                 tracing::error!(error = %e, "loading the library failed");
                 return;
@@ -786,7 +807,18 @@ fn select_with(inner: &Rc<RefCell<Inner>>, change: impl FnOnce(&mut Selection, &
     render(inner);
 }
 
-/// Hands the selected entry ids to a navigation hook (download, delete), then clears the selection.
+/// Queues the downloads of the selected entries with one amount of the Download menu, then clears the selection.
+fn selected_download(inner: &Rc<RefCell<Inner>>, amount: actions::DownloadAmount) {
+    let (ids, run) = {
+        let st = inner.borrow();
+        (st.selection.ids().to_vec(), st.nav.download.clone())
+    };
+    run(ids, amount);
+    inner.borrow_mut().selection.clear();
+    render(inner);
+}
+
+/// Hands the selected entry ids to a navigation hook (delete), then clears the selection.
 fn selected_action(inner: &Rc<RefCell<Inner>>, hook: impl Fn(&Nav) -> Rc<dyn Fn(Vec<i64>)>) {
     let (ids, run) = {
         let st = inner.borrow();
@@ -887,11 +919,13 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
         )
     };
     let show_continue = actions::continue_visible(show_continue_pref, &item.row);
+    let thumbnail = local_thumbnail(&inner.borrow(), &item);
+    let season_parent = is_season_parent(&inner.borrow(), &item);
     let card = if mode == kuro_prefs::library::LibraryDisplayMode::List {
         let row_height = list_row_height(&inner.borrow());
-        card::build_list(&item, selected, show_continue, row_height)
+        card::build_list(&item, selected, show_continue, row_height, thumbnail.as_deref(), season_parent)
     } else {
-        card::build(&item, mode, selected, show_continue)
+        card::build(&item, mode, selected, show_continue, thumbnail.as_deref(), season_parent)
     };
     list_item.set_child(Some(&card.root));
 
@@ -956,6 +990,24 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
                 resume_entry(&inner, &resume_row);
             }
         });
+    }
+}
+
+/// Whether the item is an anime season parent: its unread badge counts seasons (T-37a-048).
+fn is_season_parent(st: &Inner, item: &LibraryItem) -> bool {
+    st.deps.kind == EntryKind::Anime
+        && AnimeRepo::new(st.deps.db.clone()).by_id(item.row.id).is_ok_and(|a| a.fetch_type == FetchType::Seasons)
+}
+
+/// The stored cover of a local entry, which its card draws in place of the placeholder. Other entries have none here.
+fn local_thumbnail(st: &Inner, item: &LibraryItem) -> Option<String> {
+    if !item.row.is_local() {
+        return None;
+    }
+    let db = st.deps.db.clone();
+    match st.deps.kind {
+        EntryKind::Manga => MangaRepo::new(db).by_id(item.row.id).ok()?.thumbnail_url,
+        EntryKind::Anime => AnimeRepo::new(db).by_id(item.row.id).ok()?.thumbnail_url,
     }
 }
 
@@ -1054,82 +1106,80 @@ mod tests {
 
     #[test]
     fn the_view_loads_the_worker_reply_and_renders_selection_and_search() {
-        if gtk::init().is_err() {
-            eprintln!("skipped: no display for the library view smoke test");
-            return;
-        }
-        let ctx = glib::MainContext::default();
-        let _owner = ctx.acquire().expect("main context");
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
-        let db = Arc::new(Db::new(&path, writer).expect("manga db handle"));
-        let store = PrefStore::in_memory();
-        let prefs = Rc::new(LibraryPrefs::new(store.clone()));
-        MangaRepo::new(db.clone())
-            .insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() })
-            .expect("insert");
-        let categories =
-            Rc::new(CategoryService::new(db.clone(), EntryKind::Manga, Arc::new(LibraryPrefs::new(store))));
-        let deps = Deps {
-            kind: EntryKind::Manga,
-            db,
-            prefs,
-            categories,
-            facts: Facts {
-                downloads: Arc::new(|_| 0),
-                source: Arc::new(|_| SourceInfo { name: "Local".into(), language: "en".into() }),
-            },
-            downloaded_only: Rc::new(|| false),
-            logged_in: Rc::new(BTreeSet::new),
-            tracker_names: Rc::new(Vec::new),
-            always_external: Rc::new(|| false),
-            item_downloaded: Rc::new(|_| false),
-        };
-        let selecting_calls: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
-        let nav = Nav {
-            open: Rc::new(|_| {}),
-            resume: Rc::new(|_| {}),
-            download: Rc::new(|_| {}),
-            delete: Rc::new(|_| {}),
-            global_search: Rc::new(|_| {}),
-            edit_categories: Rc::new(|| {}),
-            selecting: Rc::new({
-                let seen = selecting_calls.clone();
-                move |on| seen.borrow_mut().push(on)
-            }),
-            update: Rc::new(|_| true),
-            update_running: Rc::new(|| false),
-        };
-        let view = LibraryView::new(deps, nav).expect("view");
-        let inner = view.inner.clone();
-        assert!(pump_until(|| inner.borrow().built.is_some()), "the worker reply arrives");
-        assert_eq!(inner.borrow().store.n_items(), 1, "one cover for the one entry");
-        assert_eq!(inner.borrow().title.label().as_str(), "Manga", "B-7.3: tabs on shows the default title, even with one page");
+        crate::testing::with_display(|| {
+            let ctx = glib::MainContext::default();
+            let _owner = ctx.acquire().expect("main context");
+            let dir = tempfile::tempdir().expect("temp dir");
+            let path = dir.path().join("manga.db");
+            let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+            let db = Arc::new(Db::new(&path, writer).expect("manga db handle"));
+            let store = PrefStore::in_memory();
+            let prefs = Rc::new(LibraryPrefs::new(store.clone()));
+            MangaRepo::new(db.clone())
+                .insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() })
+                .expect("insert");
+            let categories =
+                Rc::new(CategoryService::new(db.clone(), EntryKind::Manga, Arc::new(LibraryPrefs::new(store))));
+            let deps = Deps {
+                kind: EntryKind::Manga,
+                db,
+                prefs,
+                categories,
+                facts: Facts {
+                    downloads: Arc::new(|_| 0),
+                    source: Arc::new(|_| SourceInfo { name: "Local".into(), language: "en".into() }),
+                },
+                downloaded_only: Rc::new(|| false),
+                logged_in: Rc::new(BTreeSet::new),
+                tracker_names: Rc::new(Vec::new),
+                always_external: Rc::new(|| false),
+                item_downloaded: Rc::new(|_| false),
+            };
+            let selecting_calls: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+            let nav = Nav {
+                open: Rc::new(|_| {}),
+                resume: Rc::new(|_| {}),
+                download: Rc::new(|_, _| {}),
+                delete: Rc::new(|_| {}),
+                global_search: Rc::new(|_| {}),
+                edit_categories: Rc::new(|| {}),
+                selecting: Rc::new({
+                    let seen = selecting_calls.clone();
+                    move |on| seen.borrow_mut().push(on)
+                }),
+                update: Rc::new(|_| true),
+                update_running: Rc::new(|| false),
+            };
+            let view = LibraryView::new(deps, nav).expect("view");
+            let inner = view.inner.clone();
+            assert!(pump_until(|| inner.borrow().built.is_some()), "the worker reply arrives");
+            assert_eq!(inner.borrow().store.n_items(), 1, "one cover for the one entry");
+            assert_eq!(inner.borrow().title.label().as_str(), "Manga", "B-7.3: tabs on shows the default title, even with one page");
 
-        let row = inner.borrow().built.as_ref().expect("built").pages[0].items[0].row.clone();
-        select_with(&inner, |sel, _| sel.toggle(&row));
-        assert!(inner.borrow().bar.reveals_child(), "the selection bar opens");
-        assert_eq!(inner.borrow().bar_label.label().as_str(), "1 selected");
-        assert!(inner.borrow().sel_header.is_visible() && !inner.borrow().header.is_visible(), "the selection header replaces the toolbar");
-        assert!(inner.borrow().download_button.is_visible(), "no local entry is selected");
-        select_with(&inner, |sel, _| sel.clear());
-        assert!(!inner.borrow().bar.reveals_child());
-        assert!(inner.borrow().header.is_visible() && !inner.borrow().sel_header.is_visible());
+            let row = inner.borrow().built.as_ref().expect("built").pages[0].items[0].row.clone();
+            select_with(&inner, |sel, _| sel.toggle(&row));
+            assert!(inner.borrow().bar.reveals_child(), "the selection bar opens");
+            assert_eq!(inner.borrow().bar_label.label().as_str(), "1 selected");
+            assert!(inner.borrow().sel_header.is_visible() && !inner.borrow().header.is_visible(), "the selection header replaces the toolbar");
+            assert!(inner.borrow().download_button.is_visible(), "no local entry is selected");
+            select_with(&inner, |sel, _| sel.clear());
+            assert!(!inner.borrow().bar.reveals_child());
+            assert!(inner.borrow().header.is_visible() && !inner.borrow().sel_header.is_visible());
 
-        assert_eq!(*selecting_calls.borrow(), vec![true, false], "the shell hears selection start and end once each (B-1.4)");
+            assert_eq!(*selecting_calls.borrow(), vec![true, false], "the shell hears selection start and end once each (B-1.4)");
 
-        // B-1.3: a query from outside fills the box, and B-6.4: the global row is the first cell while it matches
-        view.set_query("Berserk");
-        assert_eq!(inner.borrow().search.text().as_str(), "Berserk");
-        assert!(pump_until(|| inner.borrow().store.n_items() == 2), "the global row plus the match");
-        let first = inner.borrow().store.item(0).and_downcast::<glib::BoxedAnyObject>().expect("first cell");
-        assert!(matches!(&*first.borrow::<Cell>(), Cell::Global(q) if q == "Berserk"));
+            // B-1.3: a query from outside fills the box, and B-6.4: the global row is the first cell while it matches
+            view.set_query("Berserk");
+            assert_eq!(inner.borrow().search.text().as_str(), "Berserk");
+            assert!(pump_until(|| inner.borrow().store.n_items() == 2), "the global row plus the match");
+            let first = inner.borrow().store.item(0).and_downcast::<glib::BoxedAnyObject>().expect("first cell");
+            assert!(matches!(&*first.borrow::<Cell>(), Cell::Global(q) if q == "Berserk"));
 
-        view.set_query("zzz");
-        let search_done = pump_until(|| inner.borrow().built.as_ref().is_some_and(|b| b.distinct_count == 0));
-        assert!(search_done, "a search with no match empties the page");
-        assert_eq!(inner.borrow().store.n_items(), 0);
-        assert_eq!(inner.borrow().empty_label.label().as_str(), "No results found");
+            view.set_query("zzz");
+            let search_done = pump_until(|| inner.borrow().built.as_ref().is_some_and(|b| b.distinct_count == 0));
+            assert!(search_done, "a search with no match empties the page");
+            assert_eq!(inner.borrow().store.n_items(), 0);
+            assert_eq!(inner.borrow().empty_label.label().as_str(), "No results found");
+        });
     }
 }

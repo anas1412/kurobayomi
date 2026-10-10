@@ -416,7 +416,7 @@ Coverage: every file in p1-inventory.md maps to at least one task (see the file-
 - Sources: app/src/main/java/eu/kanade/tachiyomi/data/track/shikimori/ShikimoriApi.kt, app/src/main/java/eu/kanade/tachiyomi/data/track/bangumi/BangumiApi.kt
 - Acceptance:
   - `TrackClientConfig { shikimori, bangumi }` loads from the user config (`[track.clients]`); absent entries disable login with `NotConfigured` (FM-05; TS-X-01 context).
-  - The Aniyomi client id and secret values are not present in any Kurobayomi source file (grep for `aOAYRqOLwxpA8` and `bgm293165b66d7e58156` returns nothing).
+  - The Aniyomi client id and secret values are not present in any Kurobayomi source file (a literal grep for the Aniyomi client id and secret values returns nothing).
   - The decision in p1-behavior.md D-OPEN-1 is recorded by the user before release (open question).
 
 ### T-31a-040 — Shared HTTP client usage, headers and cache policy

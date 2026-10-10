@@ -8,6 +8,7 @@ use kuro_domain::library::page::LibraryItem;
 use kuro_prefs::library::LibraryDisplayMode;
 
 use crate::library::layout;
+use crate::local_flow::cover::cover_widget;
 
 /// The widgets of one card. `continue_button` is present when the card shows one.
 pub struct Card {
@@ -15,10 +16,27 @@ pub struct Card {
     pub continue_button: Option<gtk::Button>,
 }
 
-/// Builds the card of `item`. `selected` styles it as selected; `show_continue` adds the continue button.
-pub fn build(item: &LibraryItem, mode: LibraryDisplayMode, selected: bool, show_continue: bool) -> Card {
+/// The cover of a card: a local entry with a stored thumbnail shows that image cropped, anything else the placeholder.
+/// The row decides it, not `item.is_local`, which also depends on the local badge switch.
+fn cover_of(item: &LibraryItem, thumbnail: Option<&str>, width: i32, height: i32) -> gtk::Widget {
+    match thumbnail.filter(|_| item.row.is_local()) {
+        Some(url) => cover_widget(Some(url), width, height).upcast(),
+        None => crate::ui::cover(width, height).upcast(),
+    }
+}
+
+/// Builds the card of `item`. `selected` styles it as selected; `show_continue` adds the continue button; `thumbnail`
+/// is the stored cover of a local entry; `season_parent` words the unread badge as seasons (T-37a-048).
+pub fn build(
+    item: &LibraryItem,
+    mode: LibraryDisplayMode,
+    selected: bool,
+    show_continue: bool,
+    thumbnail: Option<&str>,
+    season_parent: bool,
+) -> Card {
     let width = COLUMN_WIDTH_PX;
-    let cover = crate::ui::cover(width, layout::cover_height(width));
+    let cover = cover_of(item, thumbnail, width, layout::cover_height(width));
     cover.add_css_class("library-cover");
     if selected {
         cover.set_opacity(0.76);
@@ -26,7 +44,7 @@ pub fn build(item: &LibraryItem, mode: LibraryDisplayMode, selected: bool, show_
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&cover));
 
-    let badges = badge_group(item);
+    let badges = badge_group(item, season_parent);
     badges.set_halign(Align::Start);
     badges.set_valign(Align::Start);
     overlay.add_overlay(&badges);
@@ -75,10 +93,17 @@ pub fn build(item: &LibraryItem, mode: LibraryDisplayMode, selected: bool, show_
 
 /// Builds the row of `item` for List mode (T-37a-021): a square cover, the title, the badges, then the continue
 /// button. `row_height` comes from `layout::list_row_height`.
-pub fn build_list(item: &LibraryItem, selected: bool, show_continue: bool, row_height: f64) -> Card {
+pub fn build_list(
+    item: &LibraryItem,
+    selected: bool,
+    show_continue: bool,
+    row_height: f64,
+    thumbnail: Option<&str>,
+    season_parent: bool,
+) -> Card {
     let height = row_height.round() as i32;
     let edge = (height - 8).max(40);
-    let cover = crate::ui::cover(edge, edge);
+    let cover = cover_of(item, thumbnail, edge, edge);
     cover.add_css_class("library-cover");
     if selected {
         cover.set_opacity(0.76);
@@ -102,7 +127,7 @@ pub fn build_list(item: &LibraryItem, selected: bool, show_continue: bool, row_h
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     root.append(&title);
 
-    let badges = badge_group(item);
+    let badges = badge_group(item, season_parent);
     badges.set_valign(Align::Center);
     root.append(&badges);
     let language = language_badge(item);
@@ -136,7 +161,7 @@ fn title_label(text: &str, lines: i32, inset: i32) -> gtk::Label {
 }
 
 /// Download count and unread count, top start. Hidden when both are zero or not computed.
-fn badge_group(item: &LibraryItem) -> gtk::Box {
+fn badge_group(item: &LibraryItem, season_parent: bool) -> gtk::Box {
     let group = gtk::Box::new(O::Horizontal, 2);
     group.set_margin_start(4);
     group.set_margin_top(4);
@@ -144,7 +169,11 @@ fn badge_group(item: &LibraryItem) -> gtk::Box {
         group.append(&badge(&text, "badge-download"));
     }
     if let Some(text) = layout::count_badge(item.unread_count) {
-        group.append(&badge(&text, "badge-unread"));
+        let unread = badge(&text, "badge-unread");
+        if let Some(tip) = layout::unread_badge_tooltip(season_parent) {
+            unread.set_tooltip_text(Some(tip));
+        }
+        group.append(&unread);
     }
     group
 }

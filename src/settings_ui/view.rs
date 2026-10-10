@@ -96,33 +96,30 @@ mod tests {
         }
     }
 
-    /// Needs a display; run alone: `cargo test -p kurobayomi settings_ui::view -- --ignored`.
+    /// Needs a display, and skips itself without one.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi settings_ui::view -- --ignored"]
     fn a_changed_rule_input_rebuilds_the_page_and_an_unchanged_one_does_not() {
-        if gtk::init().is_err() {
-            eprintln!("skipped: no display for the live page check");
-            return;
-        }
-        let prefs = Rc::new(Prefs::in_memory());
-        let builds = Rc::new(Cell::new(0));
-        let (for_state, for_tree, counted) = (Rc::clone(&prefs), Rc::clone(&prefs), Rc::clone(&builds));
-        let built = live_page(
-            prefs.store(),
-            move || for_state.reader.dual_page_split_paged.get(),
-            move || {
-                counted.set(counted.get() + 1);
-                vec![item(switch("Split", &for_tree.reader.dual_page_split_paged, true))]
-            },
-            vec![],
-        );
-        assert_eq!(builds.get(), 1, "built once on open");
-        prefs.reader.crop_borders.set(true).unwrap();
-        spin(400);
-        assert_eq!(builds.get(), 1, "a change that leaves the rule input alone does not rebuild");
-        prefs.reader.dual_page_split_paged.set(true).unwrap();
-        spin(400);
-        assert_eq!(builds.get(), 2, "a changed rule input rebuilds once");
-        drop(built);
+        crate::testing::with_display(|| {
+            let prefs = Rc::new(Prefs::in_memory());
+            let builds = Rc::new(Cell::new(0));
+            let (for_state, for_tree, counted) = (Rc::clone(&prefs), Rc::clone(&prefs), Rc::clone(&builds));
+            let built = live_page(
+                prefs.store(),
+                move || for_state.reader.dual_page_split_paged.get(),
+                move || {
+                    counted.set(counted.get() + 1);
+                    vec![item(switch("Split", &for_tree.reader.dual_page_split_paged, true))]
+                },
+                vec![],
+            );
+            assert_eq!(builds.get(), 1, "built once on open");
+            prefs.reader.crop_borders.set(true).unwrap();
+            spin(400);
+            assert_eq!(builds.get(), 1, "a change that leaves the rule input alone does not rebuild");
+            prefs.reader.dual_page_split_paged.set(true).unwrap();
+            spin(400);
+            assert_eq!(builds.get(), 2, "a changed rule input rebuilds once");
+            drop(built);
+        });
     }
 }

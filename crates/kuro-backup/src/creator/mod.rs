@@ -1,6 +1,6 @@
 //! Backup build (area 21, T-21a-012): gathers the library through `LibraryReader`, maps it with the creators and
-//! assembles the `Backup` container. Reads go through the reader only, so the database adapter owns the read
-//! transaction (E-05) and the gating of the non-favourite queries lives here (E-09).
+//! assembles the `Backup` container. Reads go through the reader only, so the database adapter owns the consistent
+//! view of the whole pass (`LibraryReader::snapshot`, E-05) and the gating of the non-favourite queries lives here (E-09).
 
 pub mod db;
 pub mod entries;
@@ -42,8 +42,17 @@ pub struct AnimeEntry {
     pub history: Vec<AnimeHistory>,
 }
 
-/// Read side of the library. The implementation runs every call inside one read transaction (E-05).
+/// What one build pass returns: the container and the extension packages skipped for a missing artifact.
+pub type Built = Result<(Backup, Vec<String>), BackupError>;
+
+/// Read side of the library. `build_backup_report` runs all of its reads inside one [`LibraryReader::snapshot`] (E-05).
 pub trait LibraryReader {
+    /// Runs `f`, the whole build pass, so that every read it makes sees one state of the library. The default
+    /// adds no isolation, for readers over data that cannot change underneath the build.
+    fn snapshot(&self, f: &mut dyn FnMut() -> Built) -> Built {
+        f()
+    }
+
     fn manga_favorites(&self) -> Result<Vec<MangaEntry>, BackupError>;
     /// Read manga that are not in the library (B-08a). Called only when `read_entries` and `library_entries` are on.
     fn manga_read_not_in_library(&self) -> Result<Vec<MangaEntry>, BackupError>;
@@ -95,7 +104,11 @@ pub fn build_backup(inputs: &CreateInputs<'_>, opts: &BackupOptions) -> Result<B
 
 /// Like `build_backup`, also returning the packages whose extension artifact was missing and skipped (E-16), for the
 /// completion notification.
-pub fn build_backup_report(inputs: &CreateInputs<'_>, opts: &BackupOptions) -> Result<(Backup, Vec<String>), BackupError> {
+pub fn build_backup_report(inputs: &CreateInputs<'_>, opts: &BackupOptions) -> Built {
+    inputs.library.snapshot(&mut || build_pass(inputs, opts))
+}
+
+fn build_pass(inputs: &CreateInputs<'_>, opts: &BackupOptions) -> Built {
     let lib = inputs.library;
 
     // E-09: the non-favourite queries run only when their result can reach the output.

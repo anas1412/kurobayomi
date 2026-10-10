@@ -4,6 +4,7 @@
 //! Everything here lives on the GTK main thread, so shared ownership is `Rc` and mutation is `Cell` or `RefCell`.
 //! Background loaders report through events and never touch these types (plan 43, section 2).
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -61,6 +62,19 @@ pub trait PageLoader {
     fn recycle(&self);
     /// `isLocal`: false for the HTTP loader, whose chapters a downloaded copy can replace.
     fn is_local(&self) -> bool;
+    /// `loadPage`: asks for page `index` (and the pages after it) to be fetched. The guard returned cancels what it
+    /// queued when dropped. Local loaders have nothing to fetch.
+    fn load_page(&self, _index: usize) -> Option<Box<dyn Any>> {
+        None
+    }
+    /// The Retry of a failed page: queues it again at the highest priority.
+    fn retry_page(&self, _index: usize) {}
+    /// The cached image file of a fetched page that is ready. A file that has gone queues the page again.
+    fn image_file(&self, _index: usize) -> Option<PathBuf> {
+        None
+    }
+    /// Copies the loader's status of `page` into the page's cells (the worker never touches them).
+    fn sync_page(&self, _page: &ReaderPage) {}
 }
 
 /// Identity of a chapter: its row id and url, the fields `ChapterImpl.equals` compares.
@@ -174,6 +188,31 @@ impl ReaderChapter {
 
     pub fn has_loader(&self) -> bool {
         self.loader.borrow().is_some()
+    }
+
+    /// Asks the loader to fetch page `index` (see [`PageLoader::load_page`]). `None` without a loader, or when there is
+    /// nothing to fetch.
+    pub fn request_page(&self, index: usize) -> Option<Box<dyn Any>> {
+        self.loader.borrow().as_ref().and_then(|l| l.load_page(index))
+    }
+
+    /// Queues a failed page again (the Retry of its card).
+    pub fn retry_page(&self, index: usize) {
+        if let Some(loader) = self.loader.borrow().as_ref() {
+            loader.retry_page(index);
+        }
+    }
+
+    /// The cached image file of a ready fetched page.
+    pub fn page_file(&self, index: usize) -> Option<PathBuf> {
+        self.loader.borrow().as_ref().and_then(|l| l.image_file(index))
+    }
+
+    /// Copies the loader's status of `page` into its cells.
+    pub fn sync_page(&self, page: &ReaderPage) {
+        if let Some(loader) = self.loader.borrow().as_ref() {
+            loader.sync_page(page);
+        }
     }
 
     /// `ref()`.

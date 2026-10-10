@@ -10,6 +10,7 @@ use crate::error::TrackError;
 use crate::messages::MsgKey;
 use crate::model::search::{AnimeTrackSearch, MangaTrackSearch};
 use crate::model::{AnimeTrack, MangaTrack, TrackerId};
+use crate::trackers::enhanced::EntryRef;
 
 /// Where a tracker's logo comes from. Replaces the Android drawable id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,12 @@ pub trait Tracker: Send + Sync {
     /// The message the Settings row shows instead of its login state while the tracker cannot log in yet, for
     /// example MyAnimeList without a client id (T-29a-040). `None` when the tracker is ready.
     fn setup_message(&self) -> Option<MsgKey> {
+        None
+    }
+    /// The authorise URL of a browser login the tracker builds from its own configured client and redirect URI
+    /// (Shikimori, Bangumi, T-31a-038). `None` for trackers whose URL comes from elsewhere. `PendingLogins` adds
+    /// `state` and opens the attempt.
+    fn browser_auth_url(&self) -> Option<String> {
         None
     }
     fn supports_reading_dates(&self) -> bool {
@@ -143,13 +150,16 @@ pub trait EnhancedAnimeTracker: AnimeTracker {
         self.accepted_sources().contains(&source_id)
     }
     /// `Ok(None)` when nothing matches. Never a partly filled result.
-    async fn match_entry(
+    async fn match_entry(&self, entry: &EntryRef) -> Result<Option<AnimeTrackSearch>, TrackError>;
+    /// True when `t` points at `entry` (same URL) and the entry's source is accepted.
+    fn is_track_from(&self, t: &AnimeTrack, entry: &EntryRef, source_id: Option<&str>) -> bool;
+    /// `t` moved to `new_entry` when its source is accepted, else `None`.
+    fn migrate_track(
         &self,
-        title: &str,
-        entry_id: i64,
-    ) -> Result<Option<AnimeTrackSearch>, TrackError>;
-    fn is_track_from(&self, t: &AnimeTrack, source_id: Option<&str>) -> bool;
-    fn migrate_track(&self, t: &AnimeTrack, new_source_id: &str) -> Option<AnimeTrack>;
+        t: &AnimeTrack,
+        new_source_id: &str,
+        new_entry: &EntryRef,
+    ) -> Option<AnimeTrack>;
 }
 
 /// Manga trackers that match entries from installed sources (`EnhancedMangaTracker.kt`).
@@ -161,13 +171,16 @@ pub trait EnhancedMangaTracker: MangaTracker {
         self.accepted_sources().contains(&source_id)
     }
     /// `Ok(None)` when nothing matches. Never a partly filled result.
-    async fn match_entry(
+    async fn match_entry(&self, entry: &EntryRef) -> Result<Option<MangaTrackSearch>, TrackError>;
+    /// True when `t` points at `entry` (same URL) and the entry's source is accepted.
+    fn is_track_from(&self, t: &MangaTrack, entry: &EntryRef, source_id: Option<&str>) -> bool;
+    /// `t` moved to `new_entry` when its source is accepted, else `None`.
+    fn migrate_track(
         &self,
-        title: &str,
-        entry_id: i64,
-    ) -> Result<Option<MangaTrackSearch>, TrackError>;
-    fn is_track_from(&self, t: &MangaTrack, source_id: Option<&str>) -> bool;
-    fn migrate_track(&self, t: &MangaTrack, new_source_id: &str) -> Option<MangaTrack>;
+        t: &MangaTrack,
+        new_source_id: &str,
+        new_entry: &EntryRef,
+    ) -> Option<MangaTrack>;
 }
 
 /// Anime trackers whose remote record can be deleted (`DeletableAnimeTracker.kt`).

@@ -131,16 +131,21 @@ pub enum RowTap {
     ConfirmLogout,
     /// Start the MyAnimeList login with `mal::MalTracker::begin_login` (loopback listener plus paste field).
     StartMalLogin,
+    /// Open this URL in the default browser and show the Simkl login dialog (`simkl::login::SimklLogin`). The URL is the
+    /// constant authorise URL of the source: no `state`, and no client secret to configure (T-32a-048).
+    StartSimklLogin(String),
     /// Show this toast and open nothing: the tracker's client secret is not configured (T-27b-022).
     Toast(MsgKey),
 }
 
 /// The effect of tapping `view`. A browser row begins an attempt in `pending`. `None` when the tracker has no
-/// authorise URL, so nothing opens. A browser row whose client secret is missing in `secrets` shows a toast instead.
+/// authorise URL, so nothing opens. A browser row that is not configured shows a toast instead: a missing client
+/// secret in `secrets` (Simkl), or the registered tracker's `setup_message` (Shikimori, Bangumi).
 pub fn tap_row(
     view: &LoginRowView,
     pending: &mut PendingLogins,
     secrets: &ClientSecrets,
+    trackers: &TrackerManager,
     now_ms: i64,
 ) -> Option<RowTap> {
     // An expired MyAnimeList login is shown checked, and a tap starts a new login ("Log in again").
@@ -152,8 +157,17 @@ pub fn tap_row(
         LoginAction::Browser if view.row.tracker == TrackerId::MYANIMELIST => {
             view.configured.then_some(RowTap::StartMalLogin)
         }
+        LoginAction::Browser if view.row.tracker == TrackerId::SIMKL => {
+            Some(RowTap::StartSimklLogin(crate::simkl::oauth::authorize_url()))
+        }
         LoginAction::Browser => Some(
-            match pending.begin_configured(view.row.tracker, view.row.name, secrets, now_ms) {
+            match pending.begin_configured(
+                view.row.tracker,
+                view.row.name,
+                secrets,
+                trackers,
+                now_ms,
+            ) {
                 Ok(url) => RowTap::OpenBrowser(url),
                 Err(toast) => RowTap::Toast(toast),
             },
@@ -178,38 +192,146 @@ mod tests {
 
         let mut pending = PendingLogins::default();
         assert_eq!(
-            tap_row(&views[2], &mut pending, &ClientSecrets::default(), 0),
+            tap_row(
+                &views[2],
+                &mut pending,
+                &ClientSecrets::default(),
+                &h.ctx.trackers,
+                0
+            ),
             Some(RowTap::ConfirmLogout)
         );
         assert_eq!(
-            tap_row(&views[3], &mut pending, &ClientSecrets::default(), 0),
+            tap_row(
+                &views[3],
+                &mut pending,
+                &ClientSecrets::default(),
+                &h.ctx.trackers,
+                0
+            ),
             Some(RowTap::OpenCredentials)
         );
-        let Some(RowTap::OpenBrowser(url)) = tap_row(&views[1], &mut pending, &ClientSecrets::default(), 0) else {
+        let Some(RowTap::OpenBrowser(url)) = tap_row(
+            &views[1],
+            &mut pending,
+            &ClientSecrets::default(),
+            &h.ctx.trackers,
+            0,
+        ) else {
             panic!("AniList opens the browser");
         };
         assert!(url.starts_with("https://"), "{url}");
         assert_eq!(INFO_TEXT_ID, "tracking_info");
     }
 
+    /// The harness registry with a real Shikimori tracker (and Bangumi) in place of the fakes.
+    fn registry_with_clients(
+        h: &Harness,
+        client: Option<crate::shikimori::api::OAuthClient>,
+    ) -> TrackerManager {
+        let secrets: std::sync::Arc<dyn kuro_platform::secrets::SecretStore> =
+            crate::fakes::MemSecrets::new();
+        let mut list: Vec<std::sync::Arc<dyn Tracker>> = h
+            .ctx
+            .trackers
+            .all()
+            .iter()
+            .filter(|t| t.id() != TrackerId::SHIKIMORI && t.id() != TrackerId::BANGUMI)
+            .cloned()
+            .collect();
+        list.push(std::sync::Arc::new(
+            crate::shikimori::ShikimoriTracker::production(
+                client.clone(),
+                "kurobayomi://shikimori-auth",
+                secrets.clone(),
+            )
+            .unwrap(),
+        ));
+        list.push(std::sync::Arc::new(
+            crate::bangumi::BangumiTracker::production(
+                client,
+                "kurobayomi://bangumi-auth",
+                secrets,
+            )
+            .unwrap(),
+        ));
+        TrackerManager::new(list).unwrap()
+    }
+
     #[tokio::test]
-    async fn t_27b_022_a_row_without_its_client_secret_shows_a_toast() {
+    async fn t_31a_037_the_login_of_shikimori_and_bangumi_follows_the_tracker_client() {
+        let h = Harness::new();
+        let mut pending = PendingLogins::default();
+        let off = registry_with_clients(&h, None);
+        for (view, name) in login_row_views(&off)
+            .iter()
+            .filter(|v| matches!(v.row.tracker, TrackerId::SHIKIMORI | TrackerId::BANGUMI))
+            .zip(["Shikimori", "Bangumi"])
+        {
+            assert!(!view.configured, "{name}: the row says it is off");
+            assert_eq!(
+                tap_row(view, &mut pending, &ClientSecrets::default(), &off, 0),
+                Some(RowTap::Toast(MsgKey::TrackerNotConfigured(name.into()))),
+                "the gate and the row use one source"
+            );
+        }
+        let on = registry_with_clients(
+            &h,
+            Some(crate::shikimori::api::OAuthClient {
+                client_id: "my-id".into(),
+                client_secret: "my-secret".into(),
+            }),
+        );
+        for view in login_row_views(&on)
+            .iter()
+            .filter(|v| matches!(v.row.tracker, TrackerId::SHIKIMORI | TrackerId::BANGUMI))
+        {
+            assert!(view.configured);
+            let Some(RowTap::OpenBrowser(url)) =
+                tap_row(view, &mut pending, &ClientSecrets::default(), &on, 0)
+            else {
+                panic!("a configured row opens the browser");
+            };
+            let url = url::Url::parse(&url).unwrap();
+            let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+            assert_eq!(
+                query["client_id"], "my-id",
+                "the user's client, not a literal"
+            );
+            assert_eq!(
+                query["redirect_uri"],
+                format!("kurobayomi://{}-auth", view.row.name.to_lowercase())
+            );
+            assert_eq!(query["state"].len(), 43);
+            assert_eq!(url.query_pairs().last().unwrap().0, "state", "state last");
+        }
+    }
+
+    #[tokio::test]
+    async fn t_32a_048_the_simkl_row_opens_the_constant_url_with_no_secret_and_no_attempt() {
         let h = Harness::new();
         let views = login_row_views(&h.ctx.trackers);
+        let simkl = views.iter().find(|v| v.row.name == "Simkl").unwrap();
         let mut pending = PendingLogins::default();
-        let shikimori = &views[4];
         assert_eq!(
-            tap_row(shikimori, &mut pending, &ClientSecrets::default(), 0),
-            Some(RowTap::Toast(MsgKey::TrackerNotConfigured("Shikimori".into())))
+            tap_row(
+                simkl,
+                &mut pending,
+                &ClientSecrets::default(),
+                &h.ctx.trackers,
+                0
+            ),
+            Some(RowTap::StartSimklLogin(
+                "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=aniyomi%3A%2F%2Fsimkl-auth"
+                    .into()
+            )),
+            "byte-equal, no state, no ClientSecrets"
         );
-        let secrets = ClientSecrets {
-            shikimori: Some("s".into()),
-            ..ClientSecrets::default()
-        };
-        assert!(matches!(
-            tap_row(shikimori, &mut pending, &secrets, 0),
-            Some(RowTap::OpenBrowser(_))
-        ));
+        assert_eq!(
+            pending.route("aniyomi://simkl-auth?code=x", 1),
+            crate::oauth::Route::NotAllowed(TrackerId::SIMKL),
+            "no pending attempt: the redirect is not state-checked"
+        );
     }
 
     #[test]
@@ -280,8 +402,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn t_29a_047_the_mal_row_states_follow_the_login_and_expiry() {
+    #[tokio::test]
+    async fn t_29a_047_the_mal_row_states_follow_the_login_and_expiry() {
+        let h = Harness::new();
         let dir = tempfile::tempdir().expect("tempdir");
         let secrets = crate::fakes::MemSecrets::new();
         let tokens: std::sync::Arc<dyn crate::mal::store::TokenStore> =
@@ -302,23 +425,47 @@ mod tests {
         let mut pending = PendingLogins::default();
         let logged_out = mal_view(false, false, true);
         assert_eq!(
-            tap_row(&logged_out, &mut pending, &ClientSecrets::default(), 0),
+            tap_row(
+                &logged_out,
+                &mut pending,
+                &ClientSecrets::default(),
+                &h.ctx.trackers,
+                0
+            ),
             Some(RowTap::StartMalLogin),
             "a logged-out MAL row starts the loopback login"
         );
         let expired = mal_view(true, true, true);
         assert_eq!(
-            tap_row(&expired, &mut pending, &ClientSecrets::default(), 0),
+            tap_row(
+                &expired,
+                &mut pending,
+                &ClientSecrets::default(),
+                &h.ctx.trackers,
+                0
+            ),
             Some(RowTap::StartMalLogin),
             "an expired login is started again"
         );
         let logged_in = mal_view(true, false, true);
         assert_eq!(
-            tap_row(&logged_in, &mut pending, &ClientSecrets::default(), 0),
+            tap_row(
+                &logged_in,
+                &mut pending,
+                &ClientSecrets::default(),
+                &h.ctx.trackers,
+                0
+            ),
             Some(RowTap::ConfirmLogout)
         );
         assert_eq!(
-            tap_row(&mal_view(false, false, false), &mut pending, &ClientSecrets::default(), 0),
+            tap_row(
+                &mal_view(false, false, false),
+                &mut pending,
+                &ClientSecrets::default(),
+                &h.ctx.trackers,
+                0
+            ),
             None,
             "no client id: the flow does not start"
         );

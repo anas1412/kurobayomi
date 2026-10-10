@@ -4,6 +4,8 @@
 
 use kuro_i18n::MsgKey;
 
+use crate::updates::bulk::BulkAction;
+use crate::updates::download_actions::DownloadAction;
 use crate::updates::download_state::DownloadState;
 
 /// The actions the bar can show, in the order the Kotlin bars list them.
@@ -73,6 +75,35 @@ pub fn visible_actions(anime: bool, selected: &[Selected], always_external: bool
     out
 }
 
+/// What a bar action does when pressed: a batch write, a download action over the selection, or opening the single
+/// selected unit in a player. Both play actions open with `alt` (the player that is not the preferred one).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarCommand {
+    Bulk(BulkAction),
+    Download(DownloadAction),
+    Play { alt: bool },
+}
+
+/// The command of a bar action. Delete maps to the download action; the screen asks to confirm first (T-42a-032).
+pub fn command(action: BarAction) -> BarCommand {
+    match action {
+        BarAction::Bookmark => BarCommand::Bulk(BulkAction::Bookmark(true)),
+        BarAction::RemoveBookmark => BarCommand::Bulk(BulkAction::Bookmark(false)),
+        BarAction::Fillermark => BarCommand::Bulk(BulkAction::Fillermark(true)),
+        BarAction::RemoveFillermark => BarCommand::Bulk(BulkAction::Fillermark(false)),
+        BarAction::MarkRead => BarCommand::Bulk(BulkAction::MarkRead(true)),
+        BarAction::MarkUnread => BarCommand::Bulk(BulkAction::MarkRead(false)),
+        BarAction::Download => BarCommand::Download(DownloadAction::Start),
+        BarAction::Delete => BarCommand::Download(DownloadAction::Delete),
+        BarAction::PlayExternally | BarAction::PlayInternally => BarCommand::Play { alt: true },
+    }
+}
+
+/// Whether the play action opens the external player: the player preference inverted by `alt` (E-U35, behaviour 12.5).
+pub fn play_opens_external(always_external: bool, alt: bool) -> bool {
+    always_external ^ alt
+}
+
 /// The label key of an action for the kind (manga "chapter" words, anime "episode" and "watched" words).
 pub fn label(action: BarAction, anime: bool) -> MsgKey {
     match (action, anime) {
@@ -132,12 +163,12 @@ mod tests {
         let mixed = [unit(true, false, 0, DownloadState::Downloaded), unit(false, true, 0, DownloadState::NotDownloaded)];
         assert_eq!(
             visible_actions(false, &mixed, false),
-            vec![BarAction::Bookmark, BarAction::MarkRead, BarAction::Download, BarAction::Delete]
+            vec![BarAction::Bookmark, BarAction::MarkRead, BarAction::MarkUnread, BarAction::Download, BarAction::Delete]
         );
         let all_read_bookmarked = [unit(true, true, 0, DownloadState::Downloaded)];
         assert_eq!(
             visible_actions(false, &all_read_bookmarked, false),
-            vec![BarAction::RemoveBookmark, BarAction::Delete]
+            vec![BarAction::RemoveBookmark, BarAction::MarkUnread, BarAction::Delete]
         );
     }
 
@@ -168,5 +199,26 @@ mod tests {
         assert_eq!(label(BarAction::MarkRead, true), MsgKey::action_mark_as_seen);
         assert_eq!(selected_text(3), "3 selected");
         assert!(!icon(BarAction::Delete).is_empty());
+    }
+
+    #[test]
+    fn bottom_bar_every_action_has_a_command() {
+        use BarAction::*;
+        for action in [Bookmark, RemoveBookmark, Fillermark, RemoveFillermark, MarkRead, MarkUnread, Download, Delete, PlayExternally, PlayInternally] {
+            let _ = command(action);
+        }
+        assert_eq!(command(Download), BarCommand::Download(DownloadAction::Start));
+        assert_eq!(command(Delete), BarCommand::Download(DownloadAction::Delete));
+        assert_eq!(command(PlayExternally), BarCommand::Play { alt: true });
+        assert_eq!(command(PlayInternally), BarCommand::Play { alt: true });
+        assert_eq!(command(MarkUnread), BarCommand::Bulk(BulkAction::MarkRead(false)));
+    }
+
+    #[test]
+    fn bottom_bar_player_route_truth_table() {
+        assert!(!play_opens_external(false, false));
+        assert!(play_opens_external(false, true));
+        assert!(play_opens_external(true, false));
+        assert!(!play_opens_external(true, true));
     }
 }

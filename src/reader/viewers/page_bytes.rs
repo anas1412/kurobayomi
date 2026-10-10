@@ -1,13 +1,15 @@
-//! Where a page's bytes are read from (T-43b-014). A page on disk or in an archive can be read straight away; a page
-//! that comes over the network is not a file the viewer knows, so it has no source here and keeps its status label.
+//! Where a page's bytes are read from (T-43b-014, T-44a-062). A page on disk or in an archive can be read straight
+//! away. A page that comes over the network is fetched by its chapter's loader into the disk cache, and is read from
+//! there once the loader says it is ready: [`Located::Fetched`].
 
 use std::io::{self, Read};
 use std::path::PathBuf;
+use std::rc::Rc;
 
-use crate::reader::model::PageSource;
+use crate::reader::model::{PageSource, ReaderPage};
 
 /// A place the bytes of one page can be read from.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ByteSource {
     File(PathBuf),
     Entry { archive: PathBuf, entry: String },
@@ -20,6 +22,48 @@ pub fn byte_source(source: &PageSource) -> Option<ByteSource> {
         PageSource::File(path) => Some(ByteSource::File(path.clone())),
         PageSource::ArchiveEntry { archive, entry } => Some(ByteSource::Entry { archive: archive.clone(), entry: entry.clone() }),
         PageSource::Shared(parent) => byte_source(&parent.source),
+    }
+}
+
+/// The page whose own source is read: an insert page reads through its parent.
+pub fn root_page(page: &Rc<ReaderPage>) -> Rc<ReaderPage> {
+    match &page.source {
+        PageSource::Shared(parent) => root_page(parent),
+        _ => Rc::clone(page),
+    }
+}
+
+/// How a page's bytes are found.
+#[derive(Clone)]
+pub enum Located {
+    /// A file or an archive entry: always there.
+    Fixed(ByteSource),
+    /// A page the chapter's loader fetches: the file exists once the loader has it ready. Holds the root page.
+    Fetched(Rc<ReaderPage>),
+}
+
+impl Located {
+    /// The place to read from now. `None` for a fetched page the loader has not got (or has lost: the loader then
+    /// queues it again).
+    pub fn resolve(&self) -> Option<ByteSource> {
+        match self {
+            Self::Fixed(source) => Some(source.clone()),
+            Self::Fetched(page) => page.chapter()?.page_file(page.index as usize).map(ByteSource::File),
+        }
+    }
+
+    pub fn is_fetched(&self) -> bool {
+        matches!(self, Self::Fetched(_))
+    }
+}
+
+/// Where `page`'s bytes come from. `None` for a page that has no way to get them: a fetched page whose chapter has no
+/// loader stays blank (E-40).
+pub fn locate(page: &Rc<ReaderPage>) -> Option<Located> {
+    let root = root_page(page);
+    match byte_source(&root.source) {
+        Some(source) => Some(Located::Fixed(source)),
+        None => root.chapter().filter(|c| c.has_loader()).map(|_| Located::Fetched(root)),
     }
 }
 
@@ -59,6 +103,54 @@ mod tests {
         let parent = ReaderPage::new(0, "p0", None, PageSource::File(PathBuf::from("/tmp/p0.png")));
         let insert = ReaderPage::insert_page(&parent);
         assert_eq!(byte_source(&insert.source), Some(ByteSource::File(PathBuf::from("/tmp/p0.png"))));
+    }
+
+    struct Fake(std::cell::Cell<Option<PathBuf>>);
+
+    impl crate::reader::model::PageLoader for Fake {
+        fn recycle(&self) {}
+        fn is_local(&self) -> bool {
+            false
+        }
+        fn image_file(&self, _index: usize) -> Option<PathBuf> {
+            let file = self.0.take();
+            self.0.set(file.clone());
+            file
+        }
+    }
+
+    fn fetched_page(file: Option<PathBuf>) -> (Rc<crate::reader::model::ReaderChapter>, Rc<ReaderPage>) {
+        let chapter = crate::reader::model::ReaderChapter::new(kuro_data::chapter::Chapter::create());
+        chapter.set_loader(Box::new(Fake(std::cell::Cell::new(file))));
+        let page = ReaderPage::new(0, "p0", None, PageSource::Http);
+        chapter.finish_loading(vec![Rc::clone(&page)]).unwrap();
+        (chapter, page)
+    }
+
+    #[test]
+    fn a_fetched_page_is_located_through_its_loader_and_resolves_once_the_file_exists() {
+        let (_chapter, waiting) = fetched_page(None);
+        let located = locate(&waiting).expect("the chapter has a loader");
+        assert!(located.is_fetched());
+        assert_eq!(located.resolve(), None, "the loader has not got the file yet");
+        let (_chapter, ready) = fetched_page(Some(PathBuf::from("/cache/p0.0")));
+        assert_eq!(locate(&ready).unwrap().resolve(), Some(ByteSource::File(PathBuf::from("/cache/p0.0"))));
+    }
+
+    #[test]
+    fn a_fetched_page_without_a_loader_stays_blank_and_a_file_page_is_fixed() {
+        let orphan = ReaderPage::new(0, "p0", None, PageSource::Http);
+        assert!(locate(&orphan).is_none(), "no chapter, so nothing can fetch it (E-40)");
+        let file = ReaderPage::new(0, "p0", None, PageSource::File(PathBuf::from("/tmp/a.png")));
+        assert!(matches!(locate(&file), Some(Located::Fixed(_))));
+    }
+
+    #[test]
+    fn an_insert_of_a_fetched_page_is_located_through_the_parent() {
+        let (_chapter, parent) = fetched_page(Some(PathBuf::from("/cache/p0.0")));
+        let insert = ReaderPage::insert_page(&parent);
+        assert!(Rc::ptr_eq(&root_page(&insert), &parent));
+        assert_eq!(locate(&insert).unwrap().resolve(), Some(ByteSource::File(PathBuf::from("/cache/p0.0"))));
     }
 
     #[test]

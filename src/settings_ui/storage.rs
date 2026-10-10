@@ -57,7 +57,8 @@ pub fn accept_choice(path: &Path) -> Result<(), &'static str> {
     tempfile::tempfile_in(path).map(drop).map_err(|_| REFUSED)
 }
 
-fn manager(store: &PrefStore) -> Option<StorageManager> {
+/// The storage manager over the stored base folder (the mpv-config tree and the downloads resolve through it).
+pub fn manager(store: &PrefStore) -> Option<StorageManager> {
     let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
     Some(StorageManager::open(store, paths.data_dir()))
 }

@@ -161,4 +161,40 @@ mod tests {
         assert!(!place_insert(&mut at_end, 0, ViewerKind::LeftToRight, insert));
         assert_eq!(at_end.len(), 1);
     }
+
+    /// One golden scenario: the labels of the list a set builds, and the item to jump to when the last page was split.
+    fn scenario(about: &str, kind: ViewerKind, force: bool, set: &ChapterSet, pre: &[PageRef]) -> serde_json::Value {
+        let mut preprocessed: BTreeMap<u32, PageRef> = pre.iter().map(|p| (p.index, p.clone())).collect();
+        let list = build_pager_items(set, force, &mut preprocessed, kind);
+        let jump = list.jump.as_ref().map(|j| label(std::slice::from_ref(j)).remove(0));
+        serde_json::json!({ "about": about, "viewer": format!("{kind:?}"), "force": force, "items": label(&list.items), "jump": jump })
+    }
+
+    /// T-44a-079: the item lists of the pager scenarios (the pager topic, section 8), compared with the golden files.
+    #[test]
+    fn the_golden_pager_item_lists_match() {
+        use crate::reader::golden::check;
+        let ltr = ViewerKind::LeftToRight;
+        let both = set(loaded(2, 2.0, 3), Some(loaded(1, 1.0, 5)), Some(loaded(3, 3.0, 4)));
+        check("pager_prev_next_present.json", &scenario("previous and next loaded, transitions forced", ltr, true, &both, &[]));
+        let no_prev = set(loaded(2, 2.0, 3), None, Some(loaded(3, 3.0, 4)));
+        check("pager_prev_missing.json", &scenario("no previous chapter: the Prev transition points at nothing", ltr, true, &no_prev, &[]));
+        let no_next = set(loaded(2, 2.0, 3), Some(loaded(1, 1.0, 5)), None);
+        check("pager_next_missing.json", &scenario("no next chapter", ltr, true, &no_next, &[]));
+        let alone = set(loaded(2, 2.0, 2), None, None);
+        check("pager_end_of_book.json", &scenario("one chapter, both ends of the book", ltr, false, &alone, &[]));
+        let adjacent = set(loaded(2, 2.0, 2), Some(loaded(1, 1.0, 2)), Some(loaded(3, 3.0, 2)));
+        check(
+            "pager_no_forced_transitions.json",
+            &scenario("loaded neighbours with no gap and always-show off: no transitions", ltr, false, &adjacent, &[]),
+        );
+        let gap = set(loaded(2, 5.0, 2), Some(loaded(1, 2.0, 2)), Some(loaded(3, 9.0, 2)));
+        check("pager_gap_forces_transitions.json", &scenario("a chapter gap forces the transition", ltr, false, &gap, &[]));
+        check("pager_r2l.json", &scenario("right to left reverses the whole list", ViewerKind::RightToLeft, true, &both, &[]));
+        let curr = loaded(2, 2.0, 3);
+        let split = set(curr.clone(), None, Some(loaded(3, 3.0, 1)));
+        let inserts = [PageRef::insert_of(&curr.page(0)), PageRef::insert_of(&curr.page(2))];
+        check("pager_insert_placement.json", &scenario("preprocessed inserts, the last page split", ltr, false, &split, &inserts));
+        check("pager_insert_placement_r2l.json", &scenario("the same inserts, right to left", ViewerKind::RightToLeft, false, &split, &inserts));
+    }
 }

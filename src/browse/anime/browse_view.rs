@@ -71,6 +71,7 @@ pub fn anime_browse_source(deps: AnimeBrowseDeps) -> SourcePage {
     if let Err(error) = prefs.record_last_used(listing.source_id, package.as_deref()) {
         tracing::warn!(%error, "could not store the last used anime source");
     }
+    let hide_in_library = prefs.hide_in_library();
     let browse_prefs = prefs.browse_prefs();
     listing.prefs = Rc::clone(&browse_prefs);
     let source_name = listing.source_name.clone();
@@ -91,6 +92,8 @@ pub fn anime_browse_source(deps: AnimeBrowseDeps) -> SourcePage {
         listing,
         filters,
         favorites,
+        hide_in_library,
+        initial_query: kuro_domain::source::browse::BrowseQuery::Popular,
         on_back,
         on_overflow,
         open_url: Rc::new(move |url| open_external(url, parent.as_ref())),

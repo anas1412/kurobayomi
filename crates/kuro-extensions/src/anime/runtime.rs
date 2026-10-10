@@ -31,7 +31,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
-    use crate::anime::manager::{Event, ExtensionState};
+    use crate::anime::manager::Event;
     use crate::anime::store::refresh::{Aggregate, fetch_all};
     use crate::anime::testkit::{store_bytes, store_document, test_client};
 
@@ -47,7 +47,6 @@ mod tests {
     fn what_crosses_threads_is_send_and_static() {
         assert_send::<Event>();
         assert_send::<Aggregate>();
-        assert_send::<ExtensionState>();
         assert_send::<async_channel::Sender<Event>>();
         assert_send::<async_channel::Receiver<Event>>();
     }

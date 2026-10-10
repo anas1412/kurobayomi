@@ -40,6 +40,11 @@ impl Pyramid {
         Self { levels }
     }
 
+    /// The bytes of decoded pixels the pyramid holds, all levels.
+    pub fn byte_size(&self) -> usize {
+        self.levels.iter().map(|l| l.rgba.len()).sum()
+    }
+
     /// The full page's size (level 0).
     pub fn size(&self) -> (u32, u32) {
         self.levels.first().map_or((0, 0), |p| (p.width, p.height))
@@ -165,6 +170,15 @@ mod tests {
 
     fn page(width: u32, height: u32, value: u8) -> DecodedPage {
         DecodedPage { width, height, rgba: vec![value; width as usize * height as usize * 4] }
+    }
+
+    #[test]
+    fn the_byte_size_counts_every_level_for_the_cache_budget() {
+        let one = Pyramid::new(page(10, 10, 1), MAX_TILE_EDGE);
+        assert_eq!(one.byte_size(), 10 * 10 * 4);
+        let two = Pyramid::new(page(8, 8, 1), 4);
+        assert!(two.level_count() > 1);
+        assert!(two.byte_size() > 8 * 8 * 4, "the smaller levels count too");
     }
 
     #[test]

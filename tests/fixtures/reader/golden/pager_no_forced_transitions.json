@@ -1,0 +1,14 @@
+{
+  "about": "loaded neighbours with no gap and always-show off: no transitions",
+  "viewer": "LeftToRight",
+  "force": false,
+  "items": [
+    "p1:0",
+    "p1:1",
+    "p2:0",
+    "p2:1",
+    "p3:0",
+    "p3:1"
+  ],
+  "jump": null
+}

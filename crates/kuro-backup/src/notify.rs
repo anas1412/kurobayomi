@@ -14,8 +14,10 @@ pub const GENERIC_RESTORE_TEXT: &str = "Restore in progress";
 pub const ID_BACKUP_PROGRESS: &str = "kurobayomi-backup-progress";
 pub const ID_BACKUP_RESULT: &str = "kurobayomi-backup-result";
 pub const ID_AUTO_WARNING: &str = "kurobayomi-auto-backup-warning";
-pub const ID_RESTORE_PROGRESS: &str = "kurobayomi-restore-progress";
-pub const ID_RESTORE_RESULT: &str = "kurobayomi-restore-result";
+/// Restore ids follow design section 8: progress and every final notice (complete, canceled, failed) share one id,
+/// so the final notice replaces the progress one.
+pub const ID_RESTORE_PROGRESS: &str = "restore-progress";
+pub const ID_RESTORE_RESULT: &str = "restore-complete";
 /// Consecutive failed automatic runs before the one warning (E-10, ui-parity section 3).
 pub const FAILURE_STREAK_WARNING: u32 = 3;
 
@@ -23,6 +25,8 @@ pub const FAILURE_STREAK_WARNING: u32 = 3;
 pub enum Urgency {
     Low,
     Normal,
+    /// Restore completed with errors, restore failed (design section 8).
+    High,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,7 +146,7 @@ pub fn restore_progress(content: &str, done: u32, total: u32, sync: bool, hide_c
 }
 
 pub fn restore_failed(reason: &str) -> Notice {
-    Notice::new(ID_RESTORE_RESULT, "Restoring backup failed", Some(reason.to_owned()), Urgency::Normal)
+    Notice::new(ID_RESTORE_RESULT, "Restoring backup failed", Some(reason.to_owned()), Urgency::High)
 }
 
 /// Canceled restore: the failure title with "Canceled restore" (behaviour section 8.3). No summary is shown.
@@ -153,16 +157,23 @@ pub fn restore_canceled() -> Notice {
 /// The completion notice for a finished run: the summary when it completed, the canceled notice otherwise.
 pub fn restore_end(end: &RestoreEnd) -> Notice {
     match end {
-        RestoreEnd::Completed(s) => restore_done(s.elapsed_ms, u32::try_from(s.errors).unwrap_or(u32::MAX), s.error_log.as_deref(), false),
+        RestoreEnd::Completed(s) => restore_done(
+            s.elapsed_ms,
+            u32::try_from(s.errors).unwrap_or(u32::MAX),
+            u32::try_from(s.skipped_settings).unwrap_or(u32::MAX),
+            s.error_log.as_deref(),
+            false,
+        ),
         RestoreEnd::Canceled { .. } => restore_canceled(),
     }
 }
 
 /// Restore finished: "Restore completed" or "Library sync complete", with the summary line. "Tap to see details"
 /// appears only when there are errors and a log exists (T-21a-029).
-pub fn restore_done(elapsed_ms: i64, errors: u32, log: Option<&Path>, sync: bool) -> Notice {
+pub fn restore_done(elapsed_ms: i64, errors: u32, skipped: u32, log: Option<&Path>, sync: bool) -> Notice {
     let title = if sync { "Library sync complete" } else { "Restore completed" };
-    let mut n = Notice::new(ID_RESTORE_RESULT, title, Some(done_text(elapsed_ms, errors)), Urgency::Normal);
+    let urgency = if errors > 0 { Urgency::High } else { Urgency::Normal };
+    let mut n = Notice::new(ID_RESTORE_RESULT, title, Some(done_text(elapsed_ms, errors, skipped)), urgency);
     if let (true, Some(log)) = (errors > 0, log) {
         n.action = Some(Action::OpenErrorLog(log.to_path_buf()));
     }
@@ -176,10 +187,16 @@ pub fn restore_duration(elapsed_ms: i64) -> String {
 }
 
 /// "Done in %1$s with %2$s error" for one error, "errors" for any other count (English plural rule).
-pub fn done_text(elapsed_ms: i64, errors: u32) -> String {
+/// The completion text. The skip count is named only when it is not zero (T-22a-052, PROPOSAL wording).
+pub fn done_text(elapsed_ms: i64, errors: u32, skipped: u32) -> String {
     let time = restore_duration(elapsed_ms);
     let noun = if errors == 1 { "error" } else { "errors" };
-    format!("Done in {time} with {errors} {noun}")
+    let base = format!("Done in {time} with {errors} {noun}");
+    match skipped {
+        0 => base,
+        1 => format!("{base}, 1 setting skipped"),
+        n => format!("{base}, {n} settings skipped"),
+    }
 }
 
 /// Notifier that records its calls, shared by the tests of the job and the loop.
@@ -245,9 +262,20 @@ mod tests {
 
     #[test]
     fn plural_errors() {
-        assert_eq!(done_text(65_000, 1), "Done in 01 min, 05 sec with 1 error");
-        assert_eq!(done_text(65_000, 2), "Done in 01 min, 05 sec with 2 errors");
-        assert_eq!(done_text(0, 0), "Done in 00 min, 00 sec with 0 errors");
+        assert_eq!(done_text(65_000, 1, 0), "Done in 01 min, 05 sec with 1 error");
+        assert_eq!(done_text(65_000, 2, 0), "Done in 01 min, 05 sec with 2 errors");
+        assert_eq!(done_text(0, 0, 0), "Done in 00 min, 00 sec with 0 errors");
+        assert_eq!(done_text(0, 0, 1), "Done in 00 min, 00 sec with 0 errors, 1 setting skipped");
+        assert_eq!(done_text(0, 0, 3), "Done in 00 min, 00 sec with 0 errors, 3 settings skipped");
+    }
+
+    #[test]
+    fn the_hide_preference_defaults_off_and_hides_the_restore_title_when_on() {
+        let prefs = kuro_prefs::security::SecurityPrefs::new(kuro_prefs::store::PrefStore::in_memory());
+        assert!(!prefs.hide_notification_content.get(), "default off");
+        assert!(restore_progress("One Piece", 1, 2, false, prefs.hide_notification_content.get()).body.is_some());
+        prefs.hide_notification_content.set(true).unwrap();
+        assert_eq!(restore_progress("One Piece", 1, 2, false, prefs.hide_notification_content.get()).body, None);
     }
 
     #[test]
@@ -281,9 +309,19 @@ mod tests {
     #[test]
     fn details_action_only_with_errors_and_log() {
         let log = Path::new("/home/u/log.txt");
-        assert_eq!(restore_done(1, 2, Some(log), false).action, Some(Action::OpenErrorLog(log.into())));
-        assert_eq!(restore_done(1, 0, Some(log), false).action, None);
-        assert_eq!(restore_done(1, 2, None, false).action, None);
+        assert_eq!(restore_done(1, 2, 0, Some(log), false).action, Some(Action::OpenErrorLog(log.into())));
+        assert_eq!(restore_done(1, 0, 0, Some(log), false).action, None);
+        assert_eq!(restore_done(1, 2, 0, None, false).action, None);
+    }
+
+    #[test]
+    fn restore_ids_and_urgency_follow_design_section_8() {
+        assert_eq!((ID_RESTORE_PROGRESS, ID_RESTORE_RESULT), ("restore-progress", "restore-complete"));
+        assert_eq!(restore_progress("x", 1, 2, false, false).urgency, Urgency::Low);
+        assert_eq!(restore_done(1, 0, 0, None, false).urgency, Urgency::Normal);
+        assert_eq!(restore_done(1, 2, 0, None, false).urgency, Urgency::High);
+        assert_eq!(restore_canceled().urgency, Urgency::Normal);
+        assert_eq!(restore_failed("x").urgency, Urgency::High);
     }
 
     #[test]
@@ -304,7 +342,7 @@ mod tests {
     #[test]
     fn end_notice_follows_the_run_outcome() {
         let log = PathBuf::from("/home/u/aniyomi_restore_error.txt");
-        let done = restore_end(&RestoreEnd::Completed(crate::restore::job::Summary { elapsed_ms: 65_000, errors: 1, error_log: Some(log.clone()) }));
+        let done = restore_end(&RestoreEnd::Completed(crate::restore::job::Summary { elapsed_ms: 65_000, errors: 1, error_log: Some(log.clone()), skipped_settings: 0 }));
         assert_eq!(done.title, "Restore completed");
         assert_eq!(done.body.as_deref(), Some("Done in 01 min, 05 sec with 1 error"));
         assert_eq!(done.action, Some(Action::OpenErrorLog(log)));

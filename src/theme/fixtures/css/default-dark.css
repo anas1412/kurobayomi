@@ -76,7 +76,12 @@ window { background-color: @kuro_background; color: @kuro_on_background; }
 .kb-surface { transition: background-color 120ms cubic-bezier(0.4, 0, 0.2, 1); }
 .kb-surface:active { transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
 .kb-surface:hover { transition-duration: 120ms; }
+.kb-surface:hover { background-color: rgba(227, 226, 230, 0.08); }
+.kb-surface:active { background-color: rgba(227, 226, 230, 0.1); }
 .kb-selected { background-color: rgba(176, 198, 255, 0.16); }
-.kb-header { font-weight: 600; color: rgba(197, 198, 208, 1); }
+.kb-header { font-weight: 600; font-size: 14px; color: rgba(197, 198, 208, 1); }
+.kb-wheel-selected { background-color: rgba(176, 198, 255, 0.2); border: 1px solid rgba(176, 198, 255, 1); border-radius: 16px; }
 .kb-active { color: rgba(255, 235, 59, 1); }
 .kb-pill { background-color: rgba(41, 39, 48, 1); color: rgba(227, 226, 230, 1); }
+.kb-tab-pill { background-color: rgba(227, 226, 230, 0.12); }
+.kb-primary-icon { color: rgba(176, 198, 255, 1); }

@@ -216,7 +216,6 @@ pub const TORRSERVER_TRACKERS: &str = concat!(
 
 #[rustfmt::skip]
 define_prefs! {
-    "extension_installer", Normal, Str, "PACKAGEINSTALLER", "base", "extension_installer";
     "__APP_STATE_pref_downloaded_only", AppState, Bool, false, "base", "downloaded_only";
     "__APP_STATE_incognito_mode", AppState, Bool, false, "base", "incognito_mode";
     "__APP_STATE_onboarding_complete", AppState, Bool, false, "base", "shown_onboarding_flow";
@@ -251,10 +250,6 @@ define_prefs! {
     "ext_updates_count", Normal, Int, 0, "sources", "manga_extension_updates_count";
     "browse_hide_in_anime_library_items", Normal, Bool, false, "sources", "hide_in_anime_library_items";
     "browse_hide_in_library_items", Normal, Bool, false, "sources", "hide_in_manga_library_items";
-    "eh_enable_source_blacklist", Normal, Bool, true, "sources", "enable_source_blacklist";
-    "sources_tab_categories", Normal, Set, &[], "sources", "sources_tab_categories";
-    "sources_tab_categories_filter", Normal, Bool, false, "sources", "sources_tab_categories_filter";
-    "sources_tab_source_categories", Normal, Set, &[], "sources", "sources_tab_sources_in_categories";
     "data_saver", Normal, Str, "NONE", "sources", "data_saver";
     "ignore_jpeg", Normal, Bool, false, "sources", "data_saver_ignore_jpeg";
     "ignore_gif", Normal, Bool, true, "sources", "data_saver_ignore_gif";
@@ -562,6 +557,16 @@ mod tests {
         "default_chapter_sort_by_ascending_or_descending",
     ];
 
+    /// Plan rows that are not ported: the Android installer choice (T-19a-037) and the four commented-out SY keys
+    /// (T-17a-039). The registry must not hold them.
+    const DROPPED_KEYS: [&str; 5] = [
+        "extension_installer",
+        "eh_enable_source_blacklist",
+        "sources_tab_categories",
+        "sources_tab_categories_filter",
+        "sources_tab_source_categories",
+    ];
+
     /// Rows of the plan's registry tables as (key, store, kind, default).
     fn plan_rows() -> Vec<(String, String, String, String)> {
         MARKDOWN
@@ -576,7 +581,7 @@ mod tests {
                     .replace("${tracker.id}", "{id}")
                     .replace("${id}", "{id}");
                 // T-19a-064: the anime update badge count is derived in memory, never registered
-                (key != "animeext_updates_count").then(|| (
+                (key != "animeext_updates_count" && !DROPPED_KEYS.contains(&key.as_str())).then(|| (
                     key,
                     cells[4].to_owned(),
                     cells[5].to_owned(),
@@ -647,9 +652,9 @@ mod tests {
     ];
 
     #[test]
-    fn registry_has_the_327_plan_rows_in_order() {
+    fn registry_has_the_322_plan_rows_in_order() {
         let rows = plan_rows();
-        assert_eq!(rows.len(), 327, "the plan's 328 rows minus the derived animeext_updates_count");
+        assert_eq!(rows.len(), 322, "the plan's 328 rows minus the derived animeext_updates_count and the five dropped keys");
         // four Kurobayomi rows after the plan's rows: `show_not_runnable` (T-19a-066), `anime_ext_last_check` (T-19a-064),
         // `check_app_updates` and `last_app_check` (T-07a-036)
         assert_eq!(REGISTRY.len(), rows.len() + 4);
@@ -682,6 +687,13 @@ mod tests {
             }
         }
         assert_eq!(pinned, PROSE_DEFAULTS.len());
+    }
+
+    #[test]
+    fn dropped_keys_are_not_registered() {
+        for key in DROPPED_KEYS {
+            assert!(REGISTRY.iter().all(|meta| meta.key != key), "{key} is dropped");
+        }
     }
 
     #[test]

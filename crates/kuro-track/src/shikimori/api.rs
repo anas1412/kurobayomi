@@ -2,8 +2,8 @@
 //! adds the bearer token, the User-Agent and `Cache-Control: no-cache`, and refreshes an expired token first. The
 //! refresh and the code exchange are sent without the bearer. Persistence goes through [`BaseTracker`].
 
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use kuro_platform::secrets::SecretStore;
 use reqwest::header::{CACHE_CONTROL, CONTENT_TYPE, USER_AGENT};
@@ -13,23 +13,30 @@ use serde::de::DeserializeOwned;
 use url::Url;
 
 use super::auth::{TokenSlot, is_expired};
-use super::dto::{SmAddEntryResponse, SmEntry, SmOAuth, SmUser, SmUserListEntry};
+use super::dto::{SmAddEntryResponse, SmEntry, SmOAuth, SmUser, SmUserListEntry, ensure_finite};
 use super::error::ShikimoriError;
 use super::status::ShikiStatus;
 use crate::base::BaseTracker;
 use crate::events::EventBus;
 use crate::model::{Kind, TrackerId};
 
-/// The User-Agent of every Shikimori call (`Kurobayomi v<version> (<app id>)`).
-pub const USER_AGENT_VALUE: &str = concat!(
-    "Kurobayomi v",
-    env!("CARGO_PKG_VERSION"),
-    " (io.github.blackbox.Kurobayomi)"
-);
 const JSON_MIME: &str = "application/json; charset=utf-8";
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-const READ_TIMEOUT: Duration = Duration::from_secs(30);
-const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The one HTTP client of the Shikimori and Bangumi calls (T-31a-040). It is built once from area 12's
+/// `kuro_net::transport::client_builder` with the Aniyomi transport limits (timeouts, redirect policy, pool, rustls) and
+/// an in-memory cookie store, and every tracker call clones it. Neither tracker builds a client of its own.
+pub(crate) fn http_client() -> Result<reqwest::Client, reqwest::Error> {
+    static SHARED: OnceLock<reqwest::Client> = OnceLock::new();
+    if let Some(client) = SHARED.get() {
+        return Ok(client.clone());
+    }
+    let client = kuro_net::transport::client_builder(
+        &kuro_net::transport::TransportLimits::default(),
+        Arc::new(reqwest::cookie::Jar::default()),
+    )
+    .build()?;
+    Ok(SHARED.get_or_init(|| client).clone())
+}
 
 /// Where the calls go. Tests point this at a local server.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,10 +54,20 @@ impl Endpoints {
 }
 
 /// The OAuth client of the user's configuration (`[track.clients]`, D-OPEN-1). The values are not in the source.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct OAuthClient {
     pub client_id: String,
     pub client_secret: String,
+}
+
+/// The secret never reaches a log through `Debug` (TS-X-12).
+impl std::fmt::Debug for OAuthClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAuthClient")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"[redacted]")
+            .finish()
+    }
 }
 
 /// One library row for a catalogue record (`ShikiLibEntry`, section 3.4 of the design). `library_id` is the user-rate
@@ -157,13 +174,8 @@ impl ShikimoriApi {
             EventBus::default(),
         );
         let stored = base.load_token::<SmOAuth>().ok().flatten();
-        let http = reqwest::Client::builder()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .read_timeout(READ_TIMEOUT)
-            .timeout(CALL_TIMEOUT)
-            .build()?;
         Ok(Self {
-            http,
+            http: http_client()?,
             endpoints,
             client,
             redirect_uri: redirect_uri.to_owned(),
@@ -183,6 +195,11 @@ impl ShikimoriApi {
 
     pub fn tokens(&self) -> &TokenSlot {
         &self.tokens
+    }
+
+    /// True when the user has configured the OAuth client. Without it no login can start (D-OPEN-1).
+    pub fn has_client(&self) -> bool {
+        self.client.is_some()
     }
 
     fn client_config(&self) -> Result<&OAuthClient, ShikimoriError> {
@@ -250,7 +267,7 @@ impl ShikimoriApi {
             .http
             .get(self.api_url("users/whoami"))
             .bearer_auth(access_token)
-            .header(USER_AGENT, USER_AGENT_VALUE)
+            .header(USER_AGENT, crate::user_agent())
             .header(CACHE_CONTROL, "no-cache")
             .send()
             .await?;
@@ -261,12 +278,18 @@ impl ShikimoriApi {
     /// server refuses (400 or 401) flags the login as expired. A missing refresh token on an expired token does the
     /// same, without a request. Any other refresh failure keeps the token for the next call.
     pub async fn bearer(&self) -> Result<String, ShikimoriError> {
-        let (token, _) = self.tokens.snapshot().ok_or(ShikimoriError::NotAuthenticated)?;
+        let (token, _) = self
+            .tokens
+            .snapshot()
+            .ok_or(ShikimoriError::NotAuthenticated)?;
         if !is_expired(&token, now_secs()) {
             return Ok(token.access_token);
         }
         let _single_flight = self.tokens.refresh_lock.lock().await;
-        let (current, generation) = self.tokens.snapshot().ok_or(ShikimoriError::NotAuthenticated)?;
+        let (current, generation) = self
+            .tokens
+            .snapshot()
+            .ok_or(ShikimoriError::NotAuthenticated)?;
         if !is_expired(&current, now_secs()) {
             return Ok(current.access_token);
         }
@@ -310,7 +333,7 @@ impl ShikimoriApi {
             .http
             .request(method, url)
             .bearer_auth(bearer)
-            .header(USER_AGENT, USER_AGENT_VALUE)
+            .header(USER_AGENT, crate::user_agent())
             .header(CACHE_CONTROL, "no-cache");
         if let Some(body) = body {
             request = request.header(CONTENT_TYPE, JSON_MIME).body(body);
@@ -329,10 +352,24 @@ impl ShikimoriApi {
 
     /// `GET mangas/{id}` or `animes/{id}`. A 404 is `Http(404)`.
     pub async fn catalogue_entry(&self, kind: Kind, id: i64) -> Result<SmEntry, ShikimoriError> {
-        self.get(self.api_url(&format!("{}/{id}", media_path(kind)))).await
+        self.get(self.api_url(&format!("{}/{id}", media_path(kind))))
+            .await
     }
 
-    /// Catalogue search, first 20 by popularity (T-31a-009). Needs a login (D9).
+    /// A GET with no bearer, for the public catalogue (T-31a-045, D9). Still sends the User-Agent and no-cache.
+    async fn get_anonymous(&self, url: String) -> Result<String, ShikimoriError> {
+        let response = self
+            .http
+            .get(url)
+            .header(USER_AGENT, crate::user_agent())
+            .header(CACHE_CONTROL, "no-cache")
+            .send()
+            .await?;
+        read_success(response).await
+    }
+
+    /// Catalogue search, first 20 by popularity (T-31a-009). With a login the bearer is sent, so account filters keep
+    /// working. Logged out, the request has no `Authorization` header (T-31a-045).
     pub async fn search(&self, kind: Kind, query: &str) -> Result<Vec<SmEntry>, ShikimoriError> {
         let mut url = Url::parse(&self.api_url(media_path(kind)))
             .map_err(|e| ShikimoriError::Transport(e.to_string()))?;
@@ -340,7 +377,12 @@ impl ShikimoriApi {
             .append_pair("order", "popularity")
             .append_pair("search", query)
             .append_pair("limit", "20");
-        self.get(url.to_string()).await
+        let text = if self.tokens.snapshot().is_some() {
+            self.send(Method::GET, url.to_string(), None).await?
+        } else {
+            self.get_anonymous(url.to_string()).await?
+        };
+        Ok(serde_json::from_str(&text)?)
     }
 
     /// The two-step lookup (T-31a-010): the catalogue record, then the user's rows for it. `Ok(None)` when the user
@@ -365,6 +407,8 @@ impl ShikimoriApi {
         let Some(row) = rows.into_iter().next() else {
             return Ok(None);
         };
+        ensure_finite(&[row.chapters, row.episodes, catalogue.score])
+            .map_err(ShikimoriError::Decode)?;
         let total = match kind {
             Kind::Manga => catalogue.chapters,
             Kind::Anime => catalogue.episodes,
@@ -417,14 +461,23 @@ impl ShikimoriApi {
         Ok(serde_json::from_str::<SmAddEntryResponse>(&text)?.id)
     }
 
-    /// `DELETE v2/user_rates/<library id>` (T-31a-013 path, D18 guarded by the caller).
+    /// `DELETE v2/user_rates/<library id>` (T-31a-015). A 404 means the row is already gone remotely, which is what
+    /// delete is for, so it is success (EC-S-26, OQ-2).
     pub async fn delete(&self, library_id: i64) -> Result<(), ShikimoriError> {
-        self.send(
-            Method::DELETE,
-            self.api_url(&format!("v2/user_rates/{library_id}")),
-            None,
-        )
-        .await?;
-        Ok(())
+        match self
+            .send(
+                Method::DELETE,
+                self.api_url(&format!("v2/user_rates/{library_id}")),
+                None,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(ShikimoriError::Http(404)) => {
+                tracing::info!("Shikimori entry {library_id} was already removed");
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 }

@@ -435,7 +435,10 @@ impl KitsuApi {
             session.user_id = None;
             session.generation += 1;
         }
-        *self.algolia_key.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *self
+            .algolia_key
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = None;
         auth::clear(self.secrets.as_ref())?;
         self.secrets
             .delete(SECRET_SERVICE, &account(TrackerId::KITSU, Field::Expired))?;

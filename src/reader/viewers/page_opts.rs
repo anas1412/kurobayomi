@@ -5,6 +5,7 @@ use kuro_prefs::reader::ReadingMode;
 
 use super::settings::ViewerSettings;
 use super::ViewerKind;
+use crate::reader::page_transform::SplitSettings;
 use crate::reader::page_zoom::{self, ImageScaleType, PageConfig};
 use crate::reader::theme::{self, Background};
 
@@ -17,6 +18,8 @@ pub struct PageOpts {
     pub long_tap: bool,
     /// A webtoon page: decoded no wider than the view (B§8.4).
     pub webtoon: bool,
+    /// The dual-page settings the decode transform follows (T-44a-050).
+    pub transform: SplitSettings,
 }
 
 /// The reading mode a viewer is built for, which the automatic zoom start follows.
@@ -30,9 +33,33 @@ pub fn reading_mode(kind: ViewerKind) -> ReadingMode {
     }
 }
 
+/// The dual-page settings of a viewer family, and for the pager the reading direction that picks the split side.
+pub fn split_settings(settings: &ViewerSettings, kind: ViewerKind) -> SplitSettings {
+    if kind.is_pager() {
+        SplitSettings {
+            split: settings.dual_split_pager,
+            invert: settings.dual_invert_pager,
+            rotate: settings.dual_rotate_pager,
+            rotate_invert: settings.dual_rotate_invert_pager,
+            l2r: kind == ViewerKind::LeftToRight,
+            webtoon: false,
+        }
+    } else {
+        SplitSettings {
+            split: settings.dual_split_webtoon,
+            invert: settings.dual_invert_webtoon,
+            rotate: settings.dual_rotate_webtoon,
+            rotate_invert: settings.dual_rotate_invert_webtoon,
+            l2r: false,
+            webtoon: true,
+        }
+    }
+}
+
 /// The page options for `settings` in a viewer of `kind`. A webtoon page always fits the width.
 pub fn page_opts(settings: &ViewerSettings, kind: ViewerKind, system_dark: bool) -> PageOpts {
     PageOpts {
+        transform: split_settings(settings, kind),
         config: PageConfig {
             scale: ImageScaleType::effective(settings.image_scale_type, !kind.is_pager()),
             zoom_start: page_zoom::zoom_start(settings.zoom_start, reading_mode(kind)),
@@ -110,5 +137,19 @@ mod tests {
     fn each_background_has_the_stylesheet_colour() {
         assert_eq!(background_rgb(Background::Black), (0.0, 0.0, 0.0));
         assert_eq!(background_rgb(Background::White), (1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn the_dual_page_settings_of_the_family_reach_the_decode_transform() {
+        let s = settings(|p| {
+            p.dual_page_split_paged.set(true).unwrap();
+            p.dual_page_invert_paged.set(true).unwrap();
+            p.dual_page_split_webtoon.set(false).unwrap();
+        });
+        let pager = page_opts(&s, ViewerKind::LeftToRight, false).transform;
+        assert!(pager.split && pager.invert && pager.l2r && !pager.webtoon);
+        assert!(!page_opts(&s, ViewerKind::RightToLeft, false).transform.l2r, "only left to right reads the left half first");
+        let web = page_opts(&s, ViewerKind::Webtoon, false).transform;
+        assert!(!web.split && web.webtoon, "the webtoon follows its own settings");
     }
 }

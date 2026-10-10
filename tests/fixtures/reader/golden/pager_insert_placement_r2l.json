@@ -1,0 +1,15 @@
+{
+  "about": "the same inserts, right to left",
+  "viewer": "RightToLeft",
+  "force": false,
+  "items": [
+    "p3:0",
+    "i2:2",
+    "p2:2",
+    "p2:1",
+    "i2:0",
+    "p2:0",
+    "P(2,-)"
+  ],
+  "jump": "i2:2"
+}

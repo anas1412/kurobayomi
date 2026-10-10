@@ -298,7 +298,13 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
         Item::Slider { title, min, max, step, default, unit } => {
             let (min, max) = (min.unwrap_or(0.0), max.unwrap_or(100.0));
             let step = step.unwrap_or(1.0).max(f64::EPSILON);
-            let sc = gtk::Scale::with_range(O::Horizontal, min, max, step);
+            // whole-number ranges use the integer slider (T-49b-020)
+            let whole = step == 1.0 && min.fract() == 0.0 && max.fract() == 0.0;
+            let sc = if whole {
+                crate::widgets::int_slider::IntSlider::new(min as i64, max as i64, default.as_f64().unwrap_or(min) as i64).scale
+            } else {
+                gtk::Scale::with_range(O::Horizontal, min, max, step)
+            };
             sc.set_value(default.as_f64().unwrap_or(min));
             sc.set_width_request(220);
             sc.set_draw_value(true);

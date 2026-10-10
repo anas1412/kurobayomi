@@ -11,6 +11,7 @@ use kuro_prefs::ui::{NavStyle, StartScreen};
 
 use super::argv::LaunchRequest;
 use super::bootstrap::Bootstrap;
+use super::lifecycle::Lifecycle;
 use super::tabs::HomeTabs;
 
 pub struct Shell {
@@ -40,6 +41,15 @@ impl Shell {
             })
             .clone()
         })
+    }
+
+    /// The window's first step (Kotlin `BaseActivity.onCreate`): runs `apply_theme`, then records it, so the first
+    /// widget is built under the theme. The returned [`Lifecycle`] refuses `build_widget` if the theme did not run.
+    pub fn build(apply_theme: impl FnOnce()) -> Lifecycle {
+        let mut life = Lifecycle::new();
+        apply_theme();
+        life.apply_theme();
+        life
     }
 
     /// The installed shell, or `None` before [`Shell::install`] (unit tests).
@@ -115,6 +125,14 @@ mod tests {
         let again = shell.home_tabs(StartScreen::MANGA, NavStyle::MOVE_BROWSE_TO_MORE);
         assert!(Rc::ptr_eq(&first, &again));
         assert_eq!(again.borrow().current(), Tab::Browse);
+    }
+
+    #[test]
+    fn build_applies_the_theme_before_a_widget_may_be_built() {
+        let ran = std::cell::Cell::new(false);
+        let life = Shell::build(|| ran.set(true));
+        assert!(ran.get());
+        assert_eq!(life.build_widget(), Ok(()));
     }
 
     #[test]

@@ -67,7 +67,9 @@ struct State {
     pages_stack: gtk::Stack,
     switch_label: Label,
     edit_slot: GBox,
-    notice: Label,
+    /// The snackbar: its text and the dismiss button beside it (T-39a-069).
+    notice: GBox,
+    notice_text: Label,
     /// Counts the notices, so the timeout of an older one does not hide a newer one.
     notice_id: Cell<u32>,
     zoom: Cell<f64>,
@@ -106,7 +108,24 @@ impl State {
         for (kind, page) in KINDS.iter().zip(&pages) {
             pages_stack.add_named(&page.stack, Some(kind.stem()));
         }
-        let notice = Label::builder().css_classes(["osd", "caption"]).halign(Align::Center).valign(Align::End).margin_bottom(16).visible(false).build();
+        let notice_text = Label::builder().css_classes(["caption"]).build();
+        let dismiss = Button::from_icon_name("window-close-symbolic");
+        dismiss.add_css_class("flat");
+        dismiss.set_tooltip_text(Some(&tr(MsgKey::action_close)));
+        let notice = GBox::new(O::Horizontal, 6);
+        notice.add_css_class("osd");
+        notice.set_halign(Align::Center);
+        notice.set_valign(Align::End);
+        notice.set_margin_bottom(16);
+        notice.set_visible(false);
+        notice.append(&notice_text);
+        notice.append(&dismiss);
+        let hide = notice.downgrade();
+        dismiss.connect_clicked(move |_| {
+            if let Some(notice) = hide.upgrade() {
+                notice.set_visible(false);
+            }
+        });
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&pages_stack));
         overlay.add_overlay(&notice);
@@ -136,6 +155,7 @@ impl State {
             switch_label,
             edit_slot,
             notice,
+            notice_text,
             notice_id: Cell::new(0),
             zoom: Cell::new(ZOOM_MIN),
             env,
@@ -312,7 +332,7 @@ impl State {
     fn notify(self: &Rc<Self>, text: &str) {
         let id = self.notice_id.get().wrapping_add(1);
         self.notice_id.set(id);
-        self.notice.set_label(text);
+        self.notice_text.set_label(text);
         self.notice.set_visible(true);
         let weak = Rc::downgrade(self);
         glib::timeout_add_local_once(Duration::from_secs(4), move || {

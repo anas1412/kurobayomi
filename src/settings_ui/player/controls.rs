@@ -1,12 +1,13 @@
 //! Internal player page rows: progress and preserve position (T-48a-015), Controls and Hosters (T-48a-013) and the
-//! Display group (T-48a-014). Intro skip, PiP and external player rows belong to tasks 016 to 018.
-// Not reachable from `route.rs` yet: the Internal player page is still the spec page.
+//! Display group (T-48a-014), the Intro skip group (T-48a-016) and the External player group (T-48a-018). The PiP group
+//! (T-48a-017) is not built.
 #![allow(dead_code)]
 use kuro_prefs::pref::Pref;
 use kuro_prefs::prefs::Prefs;
 
 use crate::pref_model::bind;
 use crate::pref_model::model::{ItemCommon, Preference, PreferenceItem};
+use crate::settings_ui::player::external;
 use crate::settings_ui::rows::{group, info, int_choice, item, slider, switch, switch_sub};
 use crate::settings_ui::search::SearchableSettings;
 
@@ -49,7 +50,7 @@ pub fn progress_row(pref: &Pref<f32>) -> PreferenceItem {
     }
 }
 
-/// The internal player page, without the rows of tasks 016 to 018.
+/// The internal player page: the progress and controls rows, then Intro skip and External player (PiP is not built).
 pub fn internal_rows(prefs: &Prefs) -> Vec<Preference> {
     let p = &prefs.player;
     let hide_times = hide_time_options();
@@ -85,7 +86,34 @@ pub fn internal_rows(prefs: &Prefs) -> Vec<Preference> {
                 slider("Panel opacity", &p.panel_opacity, 0..=100, Some(opacity.as_str()), true),
             ],
         ),
+        intro_skip_group(prefs),
+        external::group_row(prefs),
     ]
+}
+
+/// The timeouts of the intro skip button, in seconds (`pref_waiting_time_aniskip`, entries 5..10).
+pub const BUTTON_TIMEOUTS: [(i32, &str); 6] = [(5, "5 seconds"), (6, "6 seconds"), (7, "7 seconds"), (8, "8 seconds"), (9, "9 seconds"), (10, "10 seconds")];
+
+pub const ANISKIP_INFO: &str = "AniSkip requires the anime to be tracked with MAL or Anilist to work";
+
+/// The Intro skip group (task T-48a-016). The children are greyed while intro skip is off, and "disable AniSkip on
+/// chapters" also needs AniSkip on.
+pub fn intro_skip_group(prefs: &Prefs) -> Preference {
+    let p = &prefs.player;
+    let intro_on = p.enable_skip_intro.get();
+    let aniskip_on = p.ani_skip_enabled.get();
+    group(
+        "Intro skip",
+        vec![
+            switch("Enable intro skip", &p.enable_skip_intro, true),
+            switch("Enable auto skip", &p.auto_skip_intro, intro_on),
+            switch("Enable Netflix style", &p.enable_netflix_style_intro_skip, intro_on),
+            int_choice("Button timeout", &p.waiting_time_intro_skip, &BUTTON_TIMEOUTS, intro_on),
+            switch("Enable AniSkip", &p.ani_skip_enabled, intro_on),
+            switch("Disable AniSkip if video already contains chapters", &p.disable_ani_skip_on_chapters, intro_on && aniskip_on),
+            info(ANISKIP_INFO),
+        ],
+    )
 }
 
 /// Screen-search contract for the internal player page.
@@ -195,5 +223,44 @@ mod tests {
     fn info_text_names_the_three_double_tap_key_names() {
         assert!(info_text_for_custom().contains("kurobayomi-double-tap-left"));
         assert!(info_text_for_custom().contains("kurobayomi-double-tap-right"));
+    }
+
+    fn intro_item(tree: &[Preference], title: &str) -> bool {
+        let group = tree
+            .iter()
+            .find_map(|entry| match entry {
+                Preference::Group(g) if g.title == "Intro skip" => Some(g),
+                _ => None,
+            })
+            .expect("the Intro skip group");
+        group.items.iter().find(|i| i.title() == title).expect("the row").enabled()
+    }
+
+    #[test]
+    fn the_intro_children_grey_out_while_intro_skip_is_off_and_the_chapter_rule_needs_aniskip() {
+        let prefs = Prefs::in_memory();
+        let tree = internal_rows(&prefs);
+        assert!(intro_item(&tree, "Enable intro skip"));
+        assert!(intro_item(&tree, "Enable AniSkip"), "on with intro skip on");
+        assert!(!intro_item(&tree, "Disable AniSkip if video already contains chapters"), "needs AniSkip on");
+        prefs.player.ani_skip_enabled.set(true).unwrap();
+        assert!(intro_item(&tree_after(&prefs), "Disable AniSkip if video already contains chapters"));
+        prefs.player.enable_skip_intro.set(false).unwrap();
+        assert!(!intro_item(&tree_after(&prefs), "Enable auto skip"), "greyed while intro skip is off");
+        assert!(!intro_item(&tree_after(&prefs), "Button timeout"));
+    }
+
+    fn tree_after(prefs: &Prefs) -> Vec<Preference> {
+        internal_rows(prefs)
+    }
+
+    #[test]
+    fn the_button_timeouts_run_from_5_to_10_seconds_with_5_stored_by_default() {
+        let prefs = Prefs::in_memory();
+        assert_eq!(prefs.player.waiting_time_intro_skip.get(), 5);
+        let labels: Vec<&str> = BUTTON_TIMEOUTS.iter().map(|(_, label)| *label).collect();
+        assert_eq!(labels.first(), Some(&"5 seconds"));
+        assert_eq!(labels.last(), Some(&"10 seconds"));
+        assert_eq!(BUTTON_TIMEOUTS.len(), 6);
     }
 }

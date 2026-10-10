@@ -69,8 +69,8 @@ Bangumi has no rereading status: `getRereadingStatus()` and `getRewatchingStatus
 - `OAUTH_URL = "$BASE_URL/oauth/token"` (line 253).
 - `LOGIN_URL = "$BASE_URL/oauth/authorize"` (line 254).
 - `REDIRECT_URL = "aniyomi://shikimori-auth"` (line 256).
-- `CLIENT_ID = "aOAYRqOLwxpA8skpcQIXetNy4cw2rn2fRzScawlcQ5U"` (line 258).
-- `CLIENT_SECRET = "jqjmORn6bh2046ulkm4lHEwJ3OA1RmO3FD2sR9f6Clw"` (line 259).
+- `CLIENT_ID = <Shikimori client id, not reproduced>` (line 258).
+- `CLIENT_SECRET = <Shikimori client secret, not reproduced>` (line 259).
 
 Proposal on the credentials: see section 8, D-OPEN-1 (ownership of the OAuth client). The Kurobayomi value comes from configuration, never from a copy of these constants.
 
@@ -281,7 +281,7 @@ Reading and rewatching ids: `getReadingStatus()` = `READING`; `getWatchingStatus
 
 ### 3.1 Endpoints and constants (`BangumiApi.kt:267-296`)
 
-- `CLIENT_ID = "bgm293165b66d7e58156"` (line 268), `CLIENT_SECRET = "21d5f5c19ac24b4bc9c855ffa2387030"` (line 269).
+- `CLIENT_ID = <Bangumi client id, not reproduced>` (line 268), `CLIENT_SECRET = <Bangumi client secret, not reproduced>` (line 269).
 - `API_URL = "https://api.bgm.tv"` (line 271). `OAUTH_URL = "https://bgm.tv/oauth/access_token"` (line 272). `LOGIN_URL = "https://bgm.tv/oauth/authorize"` (line 273).
 - `REDIRECT_URL = "aniyomi://bangumi-auth"` (line 275). `APP_JSON = "application/json"` (line 277).
 
@@ -313,7 +313,7 @@ Server **[verified]**: `SubjectCollectionType` enum `1` 想看 (wish), `2` 看�
 
 ### 3.4 Login by OAuth code
 
-1. Authorise URL (`BangumiApi.authUrl()`, lines 279-284): `https://bgm.tv/oauth/authorize?client_id=bgm293165b66d7e58156&response_type=code&redirect_uri=aniyomi%3A%2F%2Fbangumi-auth`. Parameter order: `client_id`, `response_type`, `redirect_uri`. No `scope`, no `state`. Opened via `openInBrowser(..., forceDefaultBrowser = true)` (`SettingsTrackingScreen.kt:213-218`).
+1. Authorise URL (`BangumiApi.authUrl()`, lines 279-284): `https://bgm.tv/oauth/authorize?client_id=<Bangumi client id>&response_type=code&redirect_uri=aniyomi%3A%2F%2Fbangumi-auth`. Parameter order: `client_id`, `response_type`, `redirect_uri`. No `scope`, no `state`. Opened via `openInBrowser(..., forceDefaultBrowser = true)` (`SettingsTrackingScreen.kt:213-218`).
 2. Redirect `aniyomi://bangumi-auth?code=<code>` (the Bangumi authorisation code is valid for 60 seconds **[verified]**, `docs-raw/How-to-Auth.md` step 2). `TrackLoginActivity.handleBangumi` (lines 33-44) calls `login(code)` or `logout()` if the code is missing.
 3. `login(code)` (`Bangumi.kt:190-202`):
    a. `oauth = api.accessToken(code)`.

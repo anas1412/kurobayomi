@@ -328,20 +328,17 @@ mod tests {
     }
 
     /// T-49ba-009 (T2): every icon resolves after `register`. Needs a display and the GResource
-    /// bundle: `cargo test -p kurobayomi every_icon_resolves -- --ignored`.
+    /// bundle; it skips itself when there is no display.
     #[test]
-    #[ignore = "needs a display and the icon bundle; run alone: cargo test -p kurobayomi every_icon_resolves -- --ignored"]
     fn every_icon_resolves_after_register() {
-        if gtk::init().is_err() {
-            eprintln!("no display: skipping");
-            return;
-        }
-        let display = gtk::gdk::Display::default().expect("a display");
-        register(&display);
-        let theme = gtk::IconTheme::for_display(&display);
-        for icon in Icon::ALL {
-            assert!(theme.has_icon(icon.name()), "{icon:?} ({}) does not resolve", icon.name());
-        }
+        crate::testing::with_display(|| {
+            let display = gtk::gdk::Display::default().expect("a display");
+            register(&display);
+            let theme = gtk::IconTheme::for_display(&display);
+            for icon in Icon::ALL {
+                assert!(theme.has_icon(icon.name()), "{icon:?} ({}) does not resolve", icon.name());
+            }
+        });
     }
 
     #[test]
@@ -413,6 +410,21 @@ mod tests {
             assert!(!text.contains("#FFF\""), "{} has a #FFF fill", path.display());
             assert!(!text.contains("#FFFFFF"), "{} has a #FFFFFF fill", path.display());
             assert!(text.contains("viewBox=\"0 0 "), "{} has no viewBox", path.display());
+        }
+    }
+
+    /// 4.7: every action icon parses as one balanced `<svg>` element and has `viewBox="0 0 24 24"`.
+    /// The two launcher icons are not 24 px glyphs and are checked above.
+    #[test]
+    fn action_icons_parse_and_use_the_24_px_viewbox() {
+        for path in svg_files("scalable/actions") {
+            let text = std::fs::read_to_string(&path).expect("svg");
+            let name = path.display();
+            let body = text.trim();
+            assert!(body.starts_with("<svg") && body.ends_with("</svg>"), "{name} is not one svg element");
+            assert_eq!(body.matches('<').count(), body.matches('>').count(), "{name} has unbalanced tags");
+            assert_eq!(body.matches("<svg").count(), 1, "{name} nests an svg");
+            assert!(body.contains("viewBox=\"0 0 24 24\""), "{name} has no 24 px viewBox");
         }
     }
 

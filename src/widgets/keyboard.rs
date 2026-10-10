@@ -63,9 +63,38 @@ pub fn close_on_escape<F: Fn() + 'static>(widget: &impl IsA<gtk::Widget>, on_clo
     widget.as_ref().add_controller(keys);
 }
 
+/// True for the two Enter key names: Return and the keypad Enter.
+pub fn is_enter_name(name: &str) -> bool {
+    matches!(name, "Return" | "KP_Enter")
+}
+
+/// Runs `action` when Enter is pressed in a single-line entry (T-49b-030). The capture-phase
+/// controller takes the key before the entry's own activate, and other keys pass through.
+pub fn enter_activates<F: Fn() + 'static>(entry: &gtk::Entry, action: F) {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    keys.connect_key_pressed(move |_, keyval, _, _| {
+        if keyval.name().is_some_and(|n| is_enter_name(&n)) {
+            action();
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    entry.add_controller(keys);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enter_keys_are_return_and_keypad_enter_only() {
+        assert!(is_enter_name("Return"));
+        assert!(is_enter_name("KP_Enter"));
+        assert!(!is_enter_name("KP_Return"));
+        assert!(!is_enter_name("a"));
+    }
 
     #[test]
     fn tab_family_keys_pick_a_direction() {

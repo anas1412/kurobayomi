@@ -1,10 +1,10 @@
-//! Shikimori errors (`plans/31-tracker-shikimori-bangumi/p1-rust-design.md` section 10). The display texts are the
-//! texts the user sees, and they convert to `TrackError` unchanged.
+//! Shikimori errors (`plans/31-tracker-shikimori-bangumi/p1-rust-design.md` section 10). The display texts are for
+//! logs; the user sees the message keys they convert to (T-31a-041).
 
 use kuro_platform::secrets::SecretError;
 
 use crate::error::TrackError;
-use crate::messages::MsgKey;
+use crate::messages::{MsgKey, TrackDetail};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ShikimoriError {
@@ -58,8 +58,31 @@ impl From<SecretError> for ShikimoriError {
 }
 
 impl From<ShikimoriError> for TrackError {
+    /// The toast of a failure (T-31a-041). The expired login (D1), the unset client and a server status have their
+    /// own keys. Every other failure is `track_error` with a fixed detail key, never raw text.
     fn from(e: ShikimoriError) -> Self {
-        TrackError::Key(MsgKey::Raw(e.to_string()))
+        let detail = match e {
+            ShikimoriError::AuthExpired | ShikimoriError::Http(401) => {
+                return TrackError::Key(MsgKey::LoginExpired);
+            }
+            ShikimoriError::NotConfigured => {
+                return TrackError::Key(MsgKey::TrackerNotConfigured(super::NAME.to_owned()));
+            }
+            ShikimoriError::Http(code) => return TrackError::Key(MsgKey::HttpStatus(code)),
+            ShikimoriError::NotAuthenticated => TrackDetail::NotAuthenticated,
+            ShikimoriError::NotFound("anime") => TrackDetail::NotFoundAnime,
+            ShikimoriError::NotFound(_) => TrackDetail::NotFoundManga,
+            ShikimoriError::UnknownStatus(_) => TrackDetail::UnknownStatus,
+            ShikimoriError::Decode(_) => TrackDetail::InvalidResponse,
+            ShikimoriError::Transport(_) => TrackDetail::Network,
+            ShikimoriError::SecretStorage => TrackDetail::SecretStorage,
+            ShikimoriError::TooManyEntries => TrackDetail::TooManyEntries,
+            ShikimoriError::NoLibraryId => TrackDetail::NoLibraryId,
+        };
+        TrackError::Key(MsgKey::TrackerDetail {
+            tracker: super::NAME.to_owned(),
+            detail,
+        })
     }
 }
 
@@ -78,6 +101,51 @@ mod tests {
             ShikimoriError::TooManyEntries.to_string(),
             "Too many entries in response"
         );
-        assert_eq!(ShikimoriError::NotFound("anime").to_string(), "Could not find anime");
+        assert_eq!(
+            ShikimoriError::NotFound("anime").to_string(),
+            "Could not find anime"
+        );
+    }
+
+    #[test]
+    fn t_31a_041_each_failure_maps_to_a_key_and_never_to_raw_text() {
+        let key = |e: ShikimoriError| match TrackError::from(e) {
+            TrackError::Key(k) => k,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(key(ShikimoriError::AuthExpired), MsgKey::LoginExpired);
+        assert_eq!(key(ShikimoriError::Http(401)), MsgKey::LoginExpired);
+        assert_eq!(
+            key(ShikimoriError::NotConfigured),
+            MsgKey::TrackerNotConfigured("Shikimori".into())
+        );
+        assert_eq!(key(ShikimoriError::Http(404)), MsgKey::HttpStatus(404));
+        assert_eq!(
+            key(ShikimoriError::TooManyEntries),
+            MsgKey::TrackerDetail {
+                tracker: "Shikimori".into(),
+                detail: TrackDetail::TooManyEntries
+            }
+        );
+        assert_eq!(
+            key(ShikimoriError::NotFound("anime")),
+            MsgKey::TrackerDetail {
+                tracker: "Shikimori".into(),
+                detail: TrackDetail::NotFoundAnime
+            }
+        );
+        // The text of the inner error never reaches the key.
+        let decode = key(ShikimoriError::Decode("secret body text".into()));
+        assert!(!crate::messages::english(&decode).contains("secret body text"));
+        let all = [
+            ShikimoriError::NotAuthenticated,
+            ShikimoriError::Transport("x".into()),
+            ShikimoriError::UnknownStatus("9".into()),
+            ShikimoriError::NoLibraryId,
+            ShikimoriError::SecretStorage,
+        ];
+        for e in all {
+            assert!(matches!(key(e), MsgKey::TrackerDetail { .. }));
+        }
     }
 }

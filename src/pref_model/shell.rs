@@ -274,41 +274,34 @@ mod tests {
         });
     }
 
-    /// Needs a display; run alone: `cargo test -p kurobayomi pref_model::shell -- --ignored`.
+    /// Needs a display, and skips itself without one.
     #[test]
-    #[ignore = "needs a display; run alone: cargo test -p kurobayomi pref_model::shell -- --ignored"]
     fn t_47b_003_back_walks_the_real_window_stack() {
-        if gtk::init().is_err() {
-            eprintln!("skipped: no display for the shell check");
-            return;
-        }
-        let app = gtk::Application::builder().application_id("io.github.blackbox.KurobayomiShellTest").flags(gtk::gio::ApplicationFlags::NON_UNIQUE).build();
-        app.register(None::<&gtk::gio::Cancellable>).expect("register");
-        let window = gtk::ApplicationWindow::new(&app);
-        let stack = gtk::Stack::new();
-        let tabs = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        tabs.set_widget_name("screen:tabs");
-        stack.add_child(&tabs);
-        crate::ui::nav_init(&stack, &window);
+        crate::testing::with_display(|| {
+            let (stack, _window) = crate::testing::nav();
+            let tabs = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            tabs.set_widget_name("screen:tabs");
+            stack.add_child(&tabs);
 
-        assert!(!back(), "no shell yet: the caller pops as usual");
-        let page = |name: &str| {
-            let w = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            w.set_widget_name(&format!("screen:{name}"));
-            crate::ui::push(&w);
-            w
-        };
-        SHELL.with(|s| s.borrow_mut().open(None, false));
-        ROOT.with(|r| *r.borrow_mut() = Some("screen:settings".to_owned()));
-        let settings = page("settings");
-        let inner = page("settings_advanced");
-        assert!(back(), "an inner page is popped first");
-        assert_eq!(stack.visible_child().as_ref(), Some(settings.upcast_ref()));
-        assert!(SHELL.with(|s| s.borrow().is_open()), "the shell stays open under it");
-        assert!(back(), "then the shell closes");
-        assert_eq!(stack.visible_child().as_ref(), Some(tabs.upcast_ref()));
-        assert!(!SHELL.with(|s| s.borrow().is_open()));
-        assert!(!back(), "and the next back is the caller's");
-        drop(inner);
+            assert!(!back(), "no shell yet: the caller pops as usual");
+            let page = |name: &str| {
+                let w = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                w.set_widget_name(&format!("screen:{name}"));
+                crate::ui::push(&w);
+                w
+            };
+            SHELL.with(|s| s.borrow_mut().open(None, false));
+            ROOT.with(|r| *r.borrow_mut() = Some("screen:settings".to_owned()));
+            let settings = page("settings");
+            let inner = page("settings_advanced");
+            assert!(back(), "an inner page is popped first");
+            assert_eq!(stack.visible_child().as_ref(), Some(settings.upcast_ref()));
+            assert!(SHELL.with(|s| s.borrow().is_open()), "the shell stays open under it");
+            assert!(back(), "then the shell closes");
+            assert_eq!(stack.visible_child().as_ref(), Some(tabs.upcast_ref()));
+            assert!(!SHELL.with(|s| s.borrow().is_open()));
+            assert!(!back(), "and the next back is the caller's");
+            drop(inner);
+        });
     }
 }

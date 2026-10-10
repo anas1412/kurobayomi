@@ -217,6 +217,12 @@ pub fn zoom_about(center: (f64, f64), view: Size, old: f64, new: f64, focus: (f6
     (under.0 - dx / new, under.1 - dy / new)
 }
 
+/// The scale during a pinch: the scale the pinch began at times the gesture's factor, kept within the page's range
+/// (`scale = min(max, dist / distStart * scaleStart)`, never under the fit; TZ §4.1).
+pub fn pinch_scale(start: f64, factor: f64, zoom: &ZoomState) -> f64 {
+    zoom.clamp(start * factor)
+}
+
 /// The scale after one ctrl+wheel notch: up zooms in, down zooms out, both bounded by [`clamp_scale`].
 pub fn wheel_zoom(scale: f64, min: f64, up: bool) -> f64 {
     let factor = if up { WHEEL_ZOOM_STEP } else { 1.0 / WHEEL_ZOOM_STEP };

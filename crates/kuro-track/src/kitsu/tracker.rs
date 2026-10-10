@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use kuro_platform::secrets::SecretStore;
-use tokio::sync::{OwnedMutexGuard, Mutex as AsyncMutex, watch};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, watch};
 
 use super::api::{Endpoints, KitsuApi};
 use super::error::KitsuError;
@@ -140,7 +140,9 @@ impl KitsuTracker {
                 let mut p = local;
                 rules::bind_found(&mut p, remote, has_progress, current);
                 let entry = found.entry.id;
-                self.api.update_entry(kind, entry, &p.entry_fields()).await?;
+                self.api
+                    .update_entry(kind, entry, &p.entry_fields())
+                    .await?;
                 Ok((entry, p))
             }
             None => {
@@ -292,7 +294,13 @@ impl AnimeTracker for KitsuTracker {
     ) -> Result<AnimeTrack, TrackError> {
         let _entry = self.lock_entry(Kind::Anime, t.remote_id).await;
         let mut p = anime_personal(t);
-        rules::apply_progress_event(&mut p, t.total_episodes, did_watch_episode, WATCHING, now_ms());
+        rules::apply_progress_event(
+            &mut p,
+            t.total_episodes,
+            did_watch_episode,
+            WATCHING,
+            now_ms(),
+        );
         self.api
             .update_entry(Kind::Anime, t.remote_id, &p.entry_fields())
             .await?;
@@ -369,7 +377,13 @@ impl MangaTracker for KitsuTracker {
     ) -> Result<MangaTrack, TrackError> {
         let _entry = self.lock_entry(Kind::Manga, t.remote_id).await;
         let mut p = manga_personal(t);
-        rules::apply_progress_event(&mut p, t.total_chapters, did_read_chapter, READING, now_ms());
+        rules::apply_progress_event(
+            &mut p,
+            t.total_chapters,
+            did_read_chapter,
+            READING,
+            now_ms(),
+        );
         self.api
             .update_entry(Kind::Manga, t.remote_id, &p.entry_fields())
             .await?;
