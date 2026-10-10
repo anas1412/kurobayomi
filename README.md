@@ -21,30 +21,30 @@ What exists today (library crates with tests, not yet wired to the screens):
 
 What does not work yet: reading and playing from a real source, tracking, backups, downloads in the app.
 
-### Progress (estimate, 2026-10-09 evening)
+### Progress (estimate, 2026-10-10)
 
 Rough estimates from code size and task queues, not verified task by task. "Done" is the share of the plan's tasks finished for that feature. "Works in the app" means you can use it from the window.
-Overall: about 33% of the plan's 3,800 tasks are done (41% handed out) and about 15-18% works end to end. More than half of the tasks are GUI screens and wiring, which are only about 16% started.
+Overall: about 55% of the plan's 3,800 tasks are done (68% handed out) and about 35% works end to end. The local manga and local anime paths are wired but not yet checked by hand in a real window.
 
 | Feature | What it means for you | Done | Works in the app |
 |---|---|---|---|
-| App start, folders, logs, crash report | Opens cleanly, keeps files in the right places, tells you if it crashes | 65% | 60% |
-| Settings storage | Your choices are saved and survive restarts | 72% | 35% |
-| Databases (manga and anime) | Library, chapters, episodes and history are stored on disk | 70% | 40% |
-| Library logic | Categories, sorting, filters, read/unread, history | 70% | 40% |
-| Network | Talking to websites and APIs | 58% | 10% |
-| Sources: add a repo link and browse | Paste a source repository link, then browse and search titles | 62% | 20% |
-| Local files | Read your own CBZ files, image folders and video files | 65% | 15% |
-| Covers and images | Cover art, image decoding and caching | 70% | 20% |
-| Manga reader | Open a chapter and page through it | 45% | 20% |
-| Video player (mpv) | Play episodes, remember your position | 37% | 5% |
-| Downloads | Save chapters and episodes for offline use | 51% | 0% |
-| AniList tracking | Sync your progress to AniList | 10% | 0% |
-| Other trackers (MAL, Kitsu and so on) | The same for the other services | 0% | 0% |
-| Backup and restore | Export and import your library, including Aniyomi backups | 65% | 0% |
-| Auto-update library | Check for new chapters and episodes by itself | 5% | 0% |
-| Screens (what you see) | Real screens driven by real data | 13% | 13% |
-| Translations, CI, docs | Languages, automated checks, README | 48% | 30% |
+| App start, folders, logs, crash report | Opens cleanly, keeps files in the right places, tells you if it crashes | 70% | 60% |
+| Settings storage | Your choices are saved and survive restarts | 80% | 50% |
+| Databases (manga and anime) | Library, chapters, episodes and history are stored on disk | 80% | 55% |
+| Library logic | Categories, sorting, filters, read/unread, history | 80% | 55% |
+| Network | Talking to websites and APIs | 70% | 20% |
+| Sources: add a repo link and browse | Paste a source repository link, then browse and search titles | 70% | 25% |
+| Local files | Read your own CBZ files, image folders and video files | 85% | 55% |
+| Covers and images | Cover art, image decoding and caching | 80% | 45% |
+| Manga reader | Open a chapter and page through it | 70% | 50% |
+| Video player (mpv) | Play episodes, remember your position | 60% | 40% |
+| Downloads | Save chapters and episodes for offline use | 60% | 10% |
+| AniList tracking | Sync your progress to AniList | 55% | 0% |
+| Other trackers (MAL, Kitsu and so on) | The same for the other services | 45% | 0% |
+| Backup and restore | Export and import your library, including Aniyomi backups | 70% | 5% |
+| Auto-update library | Check for new chapters and episodes by itself | 40% | 10% |
+| Screens (what you see) | Real screens driven by real data | 50% | 40% |
+| Translations, CI, docs | Languages, automated checks, README | 55% | 35% |
 | Windows port | Later | 0% | 0% |
 
 ## Sources
