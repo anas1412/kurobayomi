@@ -32,7 +32,7 @@ impl Shell {
     pub fn install(runtime: tokio::runtime::Handle, paths: &dyn Paths) -> Rc<Shell> {
         SHELL.with(|cell| {
             cell.get_or_init(|| {
-                let cache = paths.cache_dir().join("downloads");
+                let cache = paths.download_index_cache_dir();
                 if let Err(e) = std::fs::create_dir_all(&cache) {
                     tracing::warn!("the download index snapshot folder was not created: {e}");
                 }

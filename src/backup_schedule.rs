@@ -67,7 +67,7 @@ pub fn start(app: &gtk::Application) {
     let store = state.base.store().clone();
     let (backup, storage) = (BackupPrefs::new(store.clone()), StoragePrefs::new(store.clone()));
     let base = crate::settings_ui::storage::decode(&storage.base_storage_directory.get());
-    let library = Library { prefs: store, manga: state.manga_db.clone(), anime: state.anime_db.clone(), extensions_dir: paths.data_dir().join("extensions") };
+    let library = Library { prefs: store, manga: state.manga_db.clone(), anime: state.anime_db.clone(), extensions_dir: paths.extensions_dir() };
     let host = CliHost {
         library,
         auto_dir: automatic_dir_for(base.as_deref(), &paths),

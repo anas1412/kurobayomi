@@ -69,6 +69,22 @@ pub trait Paths {
     fn auto_backups_dir(&self) -> PathBuf {
         self.data_dir().join("autobackup")
     }
+    /// Snapshot of the download index, kept in the cache beside the downloads folder.
+    fn download_index_cache_dir(&self) -> PathBuf {
+        self.cache_dir().join("downloads")
+    }
+    /// The text log of the last library update pass.
+    fn library_update_log_file(&self) -> PathBuf {
+        self.cache_dir().join("update_errors.txt")
+    }
+    /// The cookie jar of the HTTP client.
+    fn cookie_jar_file(&self) -> PathBuf {
+        self.data_dir().join("cookies.json")
+    }
+    /// A cover or background folder under the data directory (`covers`, `animecovers`, ...).
+    fn cover_family_dir(&self, folder: &str) -> PathBuf {
+        self.data_dir().join(folder)
+    }
     /// Scratch folder for page bytes written for another reader. It lives under the system temporary directory and
     /// carries the process id, so two running copies do not share it.
     fn page_bytes_dir(&self) -> PathBuf {
@@ -205,6 +221,10 @@ mod role_tests {
         assert_eq!(p.anime_extension_icons_dir(), PathBuf::from("/k/ext-icons"));
         assert_eq!(p.extension_download_dir(), PathBuf::from("/k/ext-download"));
         assert_eq!(p.auto_backups_dir(), PathBuf::from("/d/autobackup"));
+        assert_eq!(p.download_index_cache_dir(), PathBuf::from("/k/downloads"));
+        assert_eq!(p.library_update_log_file(), PathBuf::from("/k/update_errors.txt"));
+        assert_eq!(p.cookie_jar_file(), PathBuf::from("/d/cookies.json"));
+        assert_eq!(p.cover_family_dir("animecovers"), PathBuf::from("/d/animecovers"));
         assert_eq!(p.cookies_import_file(), PathBuf::from("/c/cookies.txt"));
     }
 

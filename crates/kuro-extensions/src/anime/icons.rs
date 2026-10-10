@@ -38,7 +38,7 @@ impl IconCache {
     }
 
     pub fn from_paths(paths: &dyn Paths) -> Self {
-        Self::new(paths.cache_dir().join("ext-icons"))
+        Self::new(paths.anime_extension_icons_dir())
     }
 
     /// The cache file of `pkg`, or `None` for a name that is not a valid package name.

@@ -10,12 +10,12 @@ use kuro_platform::paths::Paths;
 
 /// `<cache>/image_cache`, the disk cache of non-library images (behavior section 9).
 pub fn image_cache_dir(paths: &dyn Paths) -> PathBuf {
-    paths.cache_dir().join("image_cache")
+    paths.image_cache_dir()
 }
 
 /// `<cache>/chapter_disk_cache`, the page-list and page-image cache (behavior section 20.1).
 pub fn chapter_cache_dir(paths: &dyn Paths) -> PathBuf {
-    paths.cache_dir().join(crate::chapter_cache::FOLDER)
+    paths.chapter_cache_dir()
 }
 
 #[cfg(test)]

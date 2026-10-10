@@ -38,12 +38,12 @@ impl PackageDir {
 
     /// `<data>/extensions/anime`, resolved through the platform `Paths`.
     pub fn from_paths(paths: &dyn Paths) -> Self {
-        Self::new(paths.data_dir().join("extensions").join("anime"))
+        Self::new(paths.anime_extensions_dir())
     }
 
     /// `<cache>/ext-download`, where downloads are written before they are placed.
     pub fn download_dir(paths: &dyn Paths) -> PathBuf {
-        paths.cache_dir().join("ext-download")
+        paths.extension_download_dir()
     }
 
     /// Startup cleanup: deletes `*.kuroext.part` leftovers from a crashed download or placement, in the package

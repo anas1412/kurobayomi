@@ -13,7 +13,7 @@ pub const STAGING_FOLDER: &str = "shared_image";
 
 /// `<cache>/shared_image`.
 pub fn staging_dir(paths: &dyn Paths) -> PathBuf {
-    paths.cache_dir().join(STAGING_FOLDER)
+    paths.share_staging_dir()
 }
 
 /// Runs `share` on the staged file. When it fails, `reveal` runs on the same file instead, and the share error is

@@ -271,7 +271,7 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
     // manga packages: one scan, icons into the cache, problems kept by folder
     let registry = Arc::new(ExtensionRegistry::new());
     {
-        let (registry, dir, icons) = (registry.clone(), paths.data_dir().join("extensions"), kuro_extensions::icon::icon_cache_dir(&paths));
+        let (registry, dir, icons) = (registry.clone(), paths.extensions_dir(), kuro_extensions::icon::icon_cache_dir(&paths));
         let (tx, rx) = async_channel::bounded(1);
         handle.spawn_blocking(move || {
             kuro_extensions::loader::scan_into(&registry, &dir, &BTreeMap::new(), &icons);

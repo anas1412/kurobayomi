@@ -10,7 +10,7 @@ use kuro_platform::paths::Paths;
 
 /// `<cache>/extensions/icons`, one `<pkg>.png` per package.
 pub fn icon_cache_dir(paths: &dyn Paths) -> PathBuf {
-    paths.cache_dir().join("extensions").join("icons")
+    paths.extension_icons_dir()
 }
 
 /// The cache file of `pkg`, or `None` for a name that is not a valid package name.

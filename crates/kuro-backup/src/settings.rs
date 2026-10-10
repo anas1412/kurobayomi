@@ -63,7 +63,7 @@ pub fn automatic_dir(base: Option<&Path>, data_home: &Path) -> PathBuf {
 pub fn automatic_dir_for(base: Option<&Path>, paths: &dyn kuro_platform::paths::Paths) -> PathBuf {
     match base {
         Some(base) => base.join(AUTO_DIR_NAME),
-        None => paths.data_dir().join(AUTO_DIR_NAME),
+        None => paths.auto_backups_dir(),
     }
 }
 

@@ -131,7 +131,7 @@ struct Ctx {
 fn library() -> Library {
     let app = crate::data::app();
     let paths = kuro_platform::linux::LinuxPaths::system().expect("the app directories resolve");
-    Library { prefs: app.base.store().clone(), manga: app.manga_db.clone(), anime: app.anime_db.clone(), extensions_dir: paths.data_dir().join("extensions") }
+    Library { prefs: app.base.store().clone(), manga: app.manga_db.clone(), anime: app.anime_db.clone(), extensions_dir: paths.extensions_dir() }
 }
 
 fn hide_content() -> bool {

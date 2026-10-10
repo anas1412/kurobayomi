@@ -30,7 +30,7 @@ pub fn help_url(kind: EntryKind) -> &'static str {
 
 /// Where the log of a pass is written: `FILE_NAME` in the cache directory of the app.
 pub fn path(paths: &dyn Paths) -> PathBuf {
-    paths.cache_dir().join(FILE_NAME)
+    paths.library_update_log_file()
 }
 
 /// The text of the log. `source_name` gives the display name of a source id (an uninstalled source shows its id).

@@ -35,7 +35,7 @@ impl Family {
 /// `<data>/<family>`, created on first access (behavior section 18.1). A failed creation is logged and the
 /// path is still returned, so the caller's own I/O reports the error, as Kotlin's `File` does.
 pub fn dir(paths: &dyn Paths, family: Family) -> PathBuf {
-    let dir = paths.data_dir().join(family.folder());
+    let dir = paths.cover_family_dir(family.folder());
     ensure_dir(&dir);
     dir
 }

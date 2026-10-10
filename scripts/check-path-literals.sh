@@ -5,7 +5,10 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-pattern='_dir\(\)\s*\.join\('
+# Only calls of the Paths accessors count (`paths.cache_dir().join(..)`), not helpers that happen to end in _dir
+# such as a test's `fixture_dir()` or glib's `home_dir()`. The accessor list is read from kuro-platform.
+accessors=$(rg --no-filename --only-matching --replace '$1' 'fn ([a-z_]+_dir)\(&self' crates/kuro-platform/src | sort -u | paste -sd'|')
+pattern="\\.(${accessors})\\(\\)\\s*\\.join\\("
 status=0
 matches=$(rg --line-number --no-heading --color never --hidden \
     --glob '!.git/**' \
