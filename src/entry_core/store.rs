@@ -22,6 +22,9 @@ use crate::entry_core::chapter::ChapterRow;
 use crate::entry_core::detail::MangaRow;
 use crate::entry_core::flags::ChapterFlags;
 use crate::entry_core::readstate::{ReadPlan, plan_mark_read};
+use crate::entry_core::tracking::facts::Summary;
+use crate::entry_core::tracking::session;
+use kuro_track::model::Kind;
 
 /// `LocalSource.ID`: rows of the local source are always downloaded.
 const LOCAL_SOURCE_ID: i64 = kuro_source::local::LOCAL_SOURCE_ID;
@@ -136,6 +139,12 @@ impl DbStore {
     /// How many trackers the manga is bound to, for the tracking button of the action row.
     pub fn track_count(&self, manga_id: i64) -> DataResult<usize> {
         Ok(kuro_data::track::MangaTrackRepo::new(Arc::clone(&self.db)).by_entry(manga_id)?.len())
+    }
+
+    /// The tracking count and the logged-in flag of the manga, through the same filter as the sheet (T-TRK-12, D-10).
+    pub fn track_summary(&self, manga_id: i64, source_id: i64) -> DataResult<Summary> {
+        let bound: Vec<i64> = kuro_data::track::MangaTrackRepo::new(Arc::clone(&self.db)).by_entry(manga_id)?.iter().map(|t| t.tracker_id).collect();
+        Ok(session::summary(Kind::Manga, source_id, &bound))
     }
 
     pub fn scanlators(&self, manga_id: i64) -> DataResult<Scanlators> {

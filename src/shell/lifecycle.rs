@@ -8,10 +8,6 @@ use kuro_prefs::ui::TabletUiMode;
 
 /// `TABLET_UI_REQUIRED_SCREEN_WIDTH_DP`: a smallest width from this value is a tablet.
 pub const TABLET_MIN_DP: i32 = 720;
-/// `TABLET_UI_MIN_SCREEN_WIDTH_PORTRAIT_DP`, the Automatic mode threshold in portrait.
-pub const AUTOMATIC_PORTRAIT_DP: i32 = 700;
-/// `TABLET_UI_MIN_SCREEN_WIDTH_LANDSCAPE_DP`, the Automatic mode threshold in landscape.
-pub const AUTOMATIC_LANDSCAPE_DP: i32 = 600;
 
 /// The step that ran too early.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,10 +60,8 @@ pub fn is_tablet_ui(smallest_width_dp: i32) -> bool {
 /// Whether the tablet UI is expected for the user's mode (`prepareTabletUiContext`, `expected`).
 pub fn expected_tablet_ui(mode: TabletUiMode, smallest_width_dp: i32, landscape: bool) -> bool {
     match mode {
-        TabletUiMode::AUTOMATIC => {
-            let threshold = if landscape { AUTOMATIC_LANDSCAPE_DP } else { AUTOMATIC_PORTRAIT_DP };
-            smallest_width_dp >= threshold
-        }
+        // one threshold for both orientations: a resizable window has no stable orientation, and table TC-53 says 720
+        TabletUiMode::AUTOMATIC => is_tablet_ui(smallest_width_dp),
         TabletUiMode::ALWAYS => true,
         TabletUiMode::LANDSCAPE => landscape,
         TabletUiMode::NEVER => false,
@@ -109,10 +103,11 @@ mod tests {
     }
 
     #[test]
-    fn automatic_uses_the_portrait_and_landscape_thresholds() {
-        assert!(expected_tablet_ui(TabletUiMode::AUTOMATIC, 650, true));
-        assert!(!expected_tablet_ui(TabletUiMode::AUTOMATIC, 650, false));
-        assert!(expected_tablet_ui(TabletUiMode::AUTOMATIC, 700, false));
+    fn automatic_uses_the_720_threshold_in_both_orientations() {
+        assert!(!expected_tablet_ui(TabletUiMode::AUTOMATIC, 719, true));
+        assert!(!expected_tablet_ui(TabletUiMode::AUTOMATIC, 719, false));
+        assert!(expected_tablet_ui(TabletUiMode::AUTOMATIC, 720, false));
+        assert!(expected_tablet_ui(TabletUiMode::AUTOMATIC, 720, true));
     }
 
     #[test]

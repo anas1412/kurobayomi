@@ -15,6 +15,13 @@ pub const MIN_RATE_NO_ZOOM_OUT: f64 = 1.0;
 pub const DOUBLE_TAP_RATE: f64 = 2.0;
 /// Duration of a double tap, a zoom-out animation and the minimum change (`ANIMATOR_DURATION_TIME`).
 pub const ANIMATION_MS: u32 = 200;
+/// Duration of a fling while zoomed (B§10.8).
+pub const FLING_MS: u32 = 400;
+
+/// The pan a fling adds on one axis: `0.4 * v / 2` for a release velocity `v` in pixels per second (B§10.8).
+pub fn fling_pan(v: f64) -> f64 {
+    0.4 * v / 2.0
+}
 
 /// The zoom and pan of the webtoon strip.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -130,6 +137,17 @@ impl WebtoonZoom {
         }
         let pan = ((half.0 - touch.0) * (DOUBLE_TAP_RATE - 1.0), (half.1 - touch.1) * (DOUBLE_TAP_RATE - 1.0));
         Some(Anim { from: (self.scale, self.pan), to: (DOUBLE_TAP_RATE, pan), duration_ms: ANIMATION_MS })
+    }
+
+    /// A fling (B§10.8): x moves by [`fling_pan`] of its velocity, y only at the strip's edges, over [`FLING_MS`] with the
+    /// decelerate curve, clamped at the end. Nothing happens at scale 1, where the list scrolls by itself.
+    pub fn fling(&self, velocity: (f64, f64), at_edge: bool, half: (f64, f64), original_h: f64) -> Option<Anim> {
+        if self.scale <= 1.0 {
+            return None;
+        }
+        let dy = if at_edge { fling_pan(velocity.1) } else { 0.0 };
+        let target = clamp_pan(self.scale, (self.pan.0 + fling_pan(velocity.0), self.pan.1 + dy), half, original_h);
+        Some(Anim { from: (self.scale, self.pan), to: (self.scale, target), duration_ms: FLING_MS })
     }
 
     /// The pan clamp for the current scale (B§10.7): `x` is `[-half_w * (s - 1), half_w * (s - 1)]` and `y` likewise
@@ -336,5 +354,24 @@ mod tests {
             "webtoon": { "min": 0.5, "max": 3.0, "factors": steps, "scales": scales },
         });
         crate::reader::golden::check("zoom_pinch.json", &golden);
+    }
+
+    #[test]
+    fn t041_a_fling_while_zoomed_moves_x_by_0_2_v_and_y_only_at_the_edges() {
+        let mut z = WebtoonZoom::new(false);
+        z.apply((2.0, (0.0, 0.0)), (100.0, 100.0), 1000.0);
+        let anim = z.fling((50.0, 300.0), false, (100.0, 100.0), 1000.0).expect("zoomed in, a fling runs");
+        assert_eq!(anim.duration_ms(), 400);
+        assert_eq!(anim.end(), (2.0, (10.0, 0.0)), "x moves by 0.4 * 50 / 2 and y stays off the edges");
+        let at_edge = z.fling((50.0, 300.0), true, (100.0, 100.0), 1000.0).expect("zoomed in");
+        assert_eq!(at_edge.end(), (2.0, (10.0, 60.0)), "at the edge y moves by 0.4 * 300 / 2");
+        let far = z.fling((5000.0, 0.0), false, (100.0, 100.0), 1000.0).expect("zoomed in");
+        assert_eq!(far.end().1 .0, 100.0, "the pan is clamped to the strip");
+    }
+
+    #[test]
+    fn t041_a_fling_at_scale_one_does_nothing() {
+        let z = WebtoonZoom::new(false);
+        assert!(z.fling((500.0, 500.0), true, (100.0, 100.0), 1000.0).is_none());
     }
 }

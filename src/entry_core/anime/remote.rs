@@ -210,6 +210,9 @@ impl RemoteAnimeBackend {
 }
 
 impl AnimeBackend for RemoteAnimeBackend {
+    fn has_logged_in_tracker(&self) -> bool {
+        crate::entry_core::tracking::session::has_logged_in()
+    }
     fn source_info(&self, source_id: i64) -> SourceInfo {
         self.lookup.info(source_id).unwrap_or_else(|| self.stubs.source_info(source_id))
     }

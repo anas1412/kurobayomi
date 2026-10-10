@@ -126,6 +126,56 @@ mod tests {
         }
     }
 
+    /// Picking a date and reading it back keeps the calendar day under each zone (T-28a-050). The parent spawns one
+    /// child process per zone, because `TZ` is read once per process. The days include the New York DST changes.
+    #[test]
+    fn t_28a_050_round_trip_holds_under_new_york_and_tokyo() {
+        const CHILD: &str = "KUROBAYOMI_DATE_ZONE_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            for (y, m, d) in [
+                (2025, 3, 9),
+                (2025, 3, 10),
+                (2025, 11, 2),
+                (2025, 11, 3),
+                (2025, 1, 1),
+                (2024, 2, 29),
+                (1999, 12, 31),
+            ] {
+                let ms = local_day_ms(y, m, d);
+                assert_eq!(
+                    create_date(ms),
+                    Some(FuzzyDateInput {
+                        year: y,
+                        month: m,
+                        day: d
+                    }),
+                    "{y}-{m}-{d} in {}",
+                    std::env::var("TZ").unwrap_or_default()
+                );
+                assert_eq!(format_ymd(ms), format!("{y:04}-{m:02}-{d:02}"));
+            }
+            return;
+        }
+        let exe = std::env::current_exe().expect("test binary path");
+        for zone in ["America/New_York", "Asia/Tokyo"] {
+            let out = std::process::Command::new(&exe)
+                .args([
+                    "--exact",
+                    "tracker::anilist::date::tests::t_28a_050_round_trip_holds_under_new_york_and_tokyo",
+                    "--nocapture",
+                ])
+                .env("TZ", zone)
+                .env(CHILD, zone)
+                .output()
+                .expect("child test runs");
+            assert!(
+                out.status.success(),
+                "{zone}: {}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+        }
+    }
+
     #[test]
     fn t_28a_023_format_ymd_of_zero_is_empty() {
         assert_eq!(format_ymd(0), "");

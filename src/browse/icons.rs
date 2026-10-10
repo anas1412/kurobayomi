@@ -68,14 +68,15 @@ pub fn http_get(url: &str) -> Option<Vec<u8>> {
     response.bytes().ok().map(|bytes| bytes.to_vec())
 }
 
-/// Which icon a source row shows.
+/// Which icon a source row shows. T-10a-034 decision: the provider is this enum plus the loader in `view::icon_image_sized`
+/// (a custom icon is decoded off the GTK thread and set as a texture there); the built-in kinds are named theme icons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceIcon {
     /// A stub with no icon: the warning glyph in the error colour.
     Warning,
     /// The icon the extension ships with, loaded from its file.
     Custom,
-    /// The local source's folder icon.
+    /// The local source shows the application icon (`ic_local_source` in Aniyomi).
     Local,
     /// The generic source icon.
     Default,
@@ -94,7 +95,7 @@ impl SourceIcon {
         match self {
             SourceIcon::Warning => Some("dialog-warning-symbolic"),
             SourceIcon::Custom => None,
-            SourceIcon::Local => Some("folder-symbolic"),
+            SourceIcon::Local => Some(crate::theme::icons::APP_ID),
             SourceIcon::Default => Some("application-x-addon-symbolic"),
             SourceIcon::Untrusted => Some("security-low-symbolic"),
         }
@@ -209,7 +210,7 @@ mod tests {
     fn built_in_icons_have_names_and_custom_icons_do_not() {
         assert_eq!(SourceIcon::Custom.icon_name(), None);
         assert!(SourceIcon::Warning.icon_name().is_some());
-        assert!(SourceIcon::Local.icon_name().is_some());
+        assert_eq!(SourceIcon::Local.icon_name(), Some(crate::theme::icons::APP_ID), "the local source shows the app icon");
         assert!(SourceIcon::Default.icon_name().is_some());
         assert_eq!(ICON_HEIGHT_PX, 40);
     }

@@ -11,6 +11,7 @@
 pub mod about;
 pub mod advanced;
 pub mod appearance;
+pub mod auth;
 pub mod browse;
 pub mod cache;
 pub mod category;

@@ -5,6 +5,7 @@ pub mod device;
 pub mod idle;
 pub mod launcher;
 pub mod media;
+pub mod notifier;
 pub mod paths;
 pub mod power_network;
 pub mod secrets;
@@ -13,6 +14,7 @@ pub mod storage;
 
 pub use idle::ScreenSaver;
 pub use media::Mpris;
+pub use notifier::QueuedNotifier;
 pub use paths::LinuxPaths;
 pub use secrets::SecretService;
 pub use secrets_file::EncryptedFileStore;

@@ -154,6 +154,8 @@ pub enum MsgKey {
     AniListNotAuthenticated,
     /// "Session expired, log in again". Also the subtitle of the AniList login row (T-28a-048).
     AniListSessionExpired,
+    /// "Kitsu session expired. Log in again." The subtitle of an expired Kitsu login row (T-30a-031, Proposal text).
+    KitsuSessionExpired,
     /// "This entry is not on your AniList list".
     AniListNotInList,
     /// "AniList rate limit reached, try again in a minute".
@@ -288,6 +290,7 @@ impl MsgKey {
             | MsgKey::NoTrackingData
             | MsgKey::AniListNotAuthenticated
             | MsgKey::AniListSessionExpired
+            | MsgKey::KitsuSessionExpired
             | MsgKey::AniListNotInList
             | MsgKey::AniListRateLimited
             | MsgKey::AniListOffline
@@ -368,6 +371,7 @@ pub fn english(key: &MsgKey) -> String {
         MsgKey::Episodes => "Episodes".into(),
         MsgKey::AniListNotAuthenticated => "You are not logged in to AniList".into(),
         MsgKey::AniListSessionExpired => "Session expired, log in again".into(),
+        MsgKey::KitsuSessionExpired => "Kitsu session expired. Log in again.".into(),
         MsgKey::AniListNotInList => "This entry is not on your AniList list".into(),
         MsgKey::AniListRateLimited => "AniList rate limit reached, try again in a minute".into(),
         MsgKey::AniListOffline => "No network connection to AniList".into(),
@@ -524,6 +528,7 @@ mod tests {
                         | MsgKey::NoTrackingData
                         | MsgKey::AniListNotAuthenticated
                         | MsgKey::AniListSessionExpired
+                        | MsgKey::KitsuSessionExpired
                         | MsgKey::AniListNotInList
                         | MsgKey::AniListRateLimited
                         | MsgKey::AniListOffline
@@ -577,6 +582,10 @@ mod tests {
             "Waiting for MyAnimeList..."
         );
         assert_eq!(english(&MsgKey::MalLogInAgain), "Log in again");
+        assert_eq!(
+            english(&MsgKey::KitsuSessionExpired),
+            "Kitsu session expired. Log in again."
+        );
         assert_eq!(
             english(&MsgKey::MalNoClientId),
             "Set a MyAnimeList client id to log in"

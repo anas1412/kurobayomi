@@ -22,6 +22,8 @@ pub enum Effect {
     Navigation,
     /// The global incognito flag changed; the reader closes when it is off (E-INC-2).
     Incognito,
+    /// A chapter skip rule changed (`skip_read`, `skip_filtered`, `skip_dupe`): the chapter list is built again (E-LIST-1).
+    ChapterList,
 }
 
 /// The preference key of the global incognito flag (`BasePrefs::incognito_mode`).
@@ -50,6 +52,7 @@ pub fn effects_for(key: &str) -> Vec<Effect> {
             vec![Effect::Navigation]
         }
         INCOGNITO_KEY => vec![Effect::Incognito],
+        "skip_read" | "skip_filtered" | "skip_dupe" => vec![Effect::ChapterList],
         _ => Vec::new(),
     }
 }

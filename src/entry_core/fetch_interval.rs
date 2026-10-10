@@ -26,9 +26,10 @@ pub fn body(interval: i32, expected_next_update_ms: Option<i64>, now_ms: i64) ->
     }
 }
 
-/// The wheel shows only in debug builds and only when the entry allows interval changes (E-46, E-47).
-pub fn wheel_visible(debug_build: bool, interval_changes_allowed: bool) -> bool {
-    debug_build && interval_changes_allowed
+/// The wheel shows whenever the entry allows interval changes, in every build (fix 23.8). The gate is the
+/// `isUpdateIntervalEnabled` setting, which defaults on (E-46, E-47).
+pub fn wheel_visible(interval_changes_allowed: bool) -> bool {
+    interval_changes_allowed
 }
 
 /// The starting wheel index: `|interval|` for a user interval (`< 0`), else 0 (E-45). Clamped to the wheel's range.
@@ -54,10 +55,9 @@ mod tests {
     }
 
     #[test]
-    fn the_wheel_needs_a_debug_build_and_an_allowed_change() {
-        assert!(wheel_visible(true, true));
-        assert!(!wheel_visible(false, true));
-        assert!(!wheel_visible(true, false));
+    fn the_wheel_follows_the_allowed_setting_in_every_build() {
+        assert!(wheel_visible(true));
+        assert!(!wheel_visible(false));
     }
 
     #[test]

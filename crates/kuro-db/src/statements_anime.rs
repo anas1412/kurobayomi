@@ -175,7 +175,7 @@ seenAt
 FROM animehistoryView
 WHERE animehistoryView.seenAt > 0
 AND maxSeenAtEpisodeId = animehistoryView.episodeId
-AND lower(animehistoryView.title) LIKE ('%' || :query || '%') ESCAPE '\'
+AND kuro_lower(animehistoryView.title) LIKE ('%' || kuro_lower(:query) || '%') ESCAPE '\'
 ORDER BY seenAt DESC"#;
 
 /// One `animes` row, all 32 columns.
@@ -1593,7 +1593,7 @@ pub fn delete_extension_store(c: &Connection, index_url: &str) -> rusqlite::Resu
 
 const ANIME_CHILDREN: &str = "SELECT * FROM animes WHERE parent_id = :parentId";
 
-const ANIME_DUPLICATE_CANDIDATES: &str = "SELECT * FROM animes WHERE favorite = 1 AND _id != :id";
+const ANIME_DUPLICATE_LIBRARY: &str = "SELECT * FROM animes WHERE favorite = 1 AND kuro_lower(title) = :titleLowercased AND _id != :id";
 
 const ANIME_SOURCE_FAVORITE_COUNTS: &str = "SELECT source, count(*) FROM animes WHERE favorite = 1 GROUP BY source ORDER BY source";
 
@@ -1692,13 +1692,12 @@ pub fn clear_non_library_anime(c: &Connection, ids: &[i64], orphaned: &[i64]) ->
     tx.commit()
 }
 
-/// The first library anime other than `id` whose title, lowercased with `str::to_lowercase`,
-/// equals `title_lower`. The caller passes the lowercased title it searches for. The comparison
-/// runs in Rust, not in SQL, so it does not need the `kuro_lower` SQL function.
+/// The first library anime other than `id` whose title, lowercased with `kuro_lower` (Rust's
+/// `str::to_lowercase`), equals `title_lower`. The caller passes the lowercased title it searches for.
 pub fn get_duplicate_library_anime(c: &Connection, id: i64, title_lower: &str) -> rusqlite::Result<Option<AnimeRow>> {
-    Ok(anime_rows(c, ANIME_DUPLICATE_CANDIDATES, named_params! {":id": id})?
+    Ok(anime_rows(c, ANIME_DUPLICATE_LIBRARY, named_params! {":id": id, ":titleLowercased": title_lower})?
         .into_iter()
-        .find(|a| a.title.to_lowercase() == title_lower))
+        .next())
 }
 
 /// `(source, count)` of the library anime, one row per source, ordered by source.
@@ -2067,6 +2066,18 @@ mod tests {
         assert_eq!(titles("%"), vec!["100% Pure"]);
         assert!(titles("zzz").is_empty());
         assert!(titles("_").is_empty());
+    }
+
+    #[test]
+    fn history_search_folds_non_ascii_case_like_kuro_lower() {
+        let c = open_in_memory().unwrap();
+        let eclair = insert_anime(&c, &AnimeRow { title: "Éclair".into(), ..sample_anime("/e", true) }).unwrap();
+        insert_episode(&c, &sample_episode(eclair, "e1")).unwrap();
+        upsert_history(&c, 1, Millis(5000)).unwrap();
+        let titles = |q: &str| -> Vec<String> { history(&c, q).unwrap().into_iter().map(|h| h.title).collect() };
+        assert_eq!(titles("éclair"), vec!["Éclair"]);
+        assert_eq!(titles("ÉCLAIR"), vec!["Éclair"]);
+        assert!(titles("eclair").is_empty(), "the ASCII fold alone must not match a non-ASCII letter");
     }
 
     #[test]

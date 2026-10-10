@@ -20,6 +20,7 @@ use super::score::{SCORE_LIST, score_from_label, wire_score};
 use super::search::remote_date;
 use super::status::{anime_wire, from_wire, manga_wire};
 use super::store::{CLIENT_ID_ENV, MalSettings, TokenStore, resolve_client_id};
+use crate::keyed_lock::KeyedLocks;
 use crate::messages::MsgKey;
 use crate::model::{AnimeTrack, MangaTrack};
 
@@ -46,6 +47,10 @@ pub struct MalTracker {
     notices: Mutex<Vec<MsgKey>>,
     /// The score picker labels, in index order.
     scores: Vec<String>,
+    /// One lock per anime title, held across each PUT, so two writes to one title never overlap (T-29a-055).
+    anime_puts: KeyedLocks,
+    /// One lock per manga title, held across each PUT (T-29a-055).
+    manga_puts: KeyedLocks,
 }
 
 impl MalTracker {
@@ -89,15 +94,18 @@ impl MalTracker {
             api_base,
         )?;
         let logged_in = !settings.username().is_empty() && auth.has_token();
+        let pending = settings.pending_verifier();
         Ok(Self {
             api,
             auth,
             settings,
             client_id,
-            pending: Mutex::new(None),
+            pending: Mutex::new(pending),
             login_tx: watch::channel(logged_in).0,
             notices: Mutex::new(Vec::new()),
             scores: SCORE_LIST.iter().map(|s| (*s).to_owned()).collect(),
+            anime_puts: KeyedLocks::default(),
+            manga_puts: KeyedLocks::default(),
         })
     }
 
@@ -147,6 +155,7 @@ impl MalTracker {
         let client_id = self.client_id()?;
         let verifier = new_verifier();
         let url = authorize_url(client_id, &verifier);
+        self.settings.set_pending_verifier(Some(&verifier))?;
         *self.pending_slot() = Some(verifier);
         Ok(url)
     }
@@ -159,6 +168,9 @@ impl MalTracker {
     /// Drops the verifier of the login in progress. The Cancel button of the login dialog calls this.
     pub fn cancel_login(&self) {
         *self.pending_slot() = None;
+        if let Err(e) = self.settings.set_pending_verifier(None) {
+            tracing::warn!(error = %e, "MAL pending login could not be cleared from the settings file");
+        }
     }
 
     /// Ends the login attempt with what the redirect or the paste carried. A code completes the login. A denial
@@ -180,6 +192,9 @@ impl MalTracker {
     /// Exchanges `code` with the verifier of the login in progress.
     pub async fn complete_login(&self, code: &str) -> Result<(), MalError> {
         let verifier = self.pending_slot().take().ok_or(MalError::NoPendingLogin)?;
+        if let Err(e) = self.settings.set_pending_verifier(None) {
+            tracing::warn!(error = %e, "MAL pending login could not be cleared from the settings file");
+        }
         self.login_with_code(code, &verifier).await
     }
 
@@ -311,6 +326,7 @@ impl MalTracker {
 
     /// `updateItem` for manga: PUT the local state and apply the reply (E12, `MyAnimeListApi.kt:181-206`).
     pub async fn put_manga(&self, track: &mut MangaTrack) -> Result<(), MalError> {
+        let _held = self.manga_puts.hold(track.remote_id).await;
         let form = manga_put_form(track)?;
         let reply = self.api.put_manga(track.remote_id, &form).await?;
         apply_manga_status(&reply, track);
@@ -319,6 +335,7 @@ impl MalTracker {
 
     /// `updateItem` for anime (E13, `MyAnimeListApi.kt:208-233`).
     pub async fn put_anime(&self, track: &mut AnimeTrack) -> Result<(), MalError> {
+        let _held = self.anime_puts.hold(track.remote_id).await;
         let form = anime_put_form(track)?;
         let reply = self.api.put_anime(track.remote_id, &form).await?;
         apply_anime_status(&reply, track);

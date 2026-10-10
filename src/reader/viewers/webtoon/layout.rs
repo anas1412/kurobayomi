@@ -3,6 +3,14 @@
 
 use std::ops::Range;
 
+/// The space under each page in gapped mode, in logical pixels (15 dp, E-38). Continuous mode adds none.
+pub const GAP_PX: i32 = 15;
+
+/// The gap under each page for the strip's mode: [`GAP_PX`] when gapped, 0 otherwise (E-38).
+pub fn gap_px(gapped: bool) -> i32 {
+    if gapped { GAP_PX } else { 0 }
+}
+
 /// The heights of every item in the strip and their prefix sums.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StripLayout {
@@ -238,5 +246,15 @@ mod tests {
             "steps": steps,
         });
         crate::reader::golden::check("webtoon_geometry.json", &golden);
+    }
+
+    #[test]
+    fn t033_gapped_mode_adds_15_px_under_each_page_and_continuous_adds_none() {
+        assert_eq!(gap_px(true), 15);
+        assert_eq!(gap_px(false), 0);
+        let gap = gap_px(true);
+        let layout = StripLayout::new(vec![100 + gap, 200 + gap]);
+        assert_eq!(layout.offset(1), 115, "the second page starts after the first page and its gap");
+        assert_eq!(layout.height(0) - gap, 100, "the row is the page without its gap");
     }
 }

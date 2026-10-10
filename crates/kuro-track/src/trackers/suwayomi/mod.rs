@@ -34,8 +34,9 @@ pub const REREADING: i64 = -1;
 /// Accepted source identity: `tachidesk/en` (`Suwayomi.kt:89`, the Tachidesk extension).
 pub const ACCEPTED_SOURCES: &[&str] = &["tachidesk/en"];
 
-/// Logo colour `#FF2323` (`Suwayomi.kt:24`). Kept until the colour is sampled from the logo (T-33a-084).
-pub const LOGO_COLOR: u32 = 0xFFFF_2323;
+/// Logo colour `#FFD600`: the dominant brand yellow of `ic_tracker_suwayomi`, sampled from the logo (T-33a-084, D-27).
+/// Replaces the Kotlin `rgb(255, 35, 35)` that was marked `// TODO` (`Suwayomi.kt:24`).
+pub const LOGO_COLOR: u32 = 0xFFFF_D600;
 
 /// Logo name in the bundled assets (T-33a-100).
 pub const LOGO_NAME: &str = "ic_tracker_suwayomi";
@@ -263,7 +264,7 @@ mod tests {
         assert_eq!(manga.status_label(3), Some("completed"));
         assert_eq!(manga.status_label(9), None);
         assert_eq!(manga.display_score(&track("x")), "");
-        assert_eq!(t.logo_color(), 0xFFFF_2323);
+        assert_eq!(t.logo_color(), 0xFFFF_D600);
         assert!(matches!(t.logo(), LogoRef::IconName(LOGO_NAME)));
     }
 

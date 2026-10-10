@@ -23,6 +23,9 @@ pub const JELLYFIN_MARK_CONCURRENCY: usize = 4;
 /// The auth header. The key stays out of URLs and logs (P-8).
 const TOKEN_HEADER: &str = "X-Emby-Token";
 
+/// Episodes per request (`Limit`, T-33a-106, E-88).
+pub const EPISODE_PAGE: usize = 200;
+
 pub struct JellyfinApi {
     http: reqwest::Client,
     auth: JellyfinAuth,
@@ -110,23 +113,33 @@ impl JellyfinApi {
         resp.json::<JFItem>().await.map_err(decode_error)
     }
 
-    /// The episodes of a season, sorted by the server (D-14). The season's `seasonId` is the item id.
+    /// The episodes of a season, sorted by the server (D-14). The season's `seasonId` is the item id. Pages of
+    /// [`EPISODE_PAGE`] items with `StartIndex` until a short page (E-88).
     async fn episodes(
         &self,
         tracking: &TrackingUrl,
         series_id: &str,
         key: &str,
     ) -> Result<Vec<JFItem>, EnhancedError> {
-        let mut url = tracking.child(&["Shows", series_id, "Episodes"])?;
-        url.query_pairs_mut()
-            .append_pair("seasonId", &tracking.item_id)
-            .append_pair("userId", &tracking.user_id)
-            .append_pair("Fields", "Overview,MediaSources")
-            .append_pair("SortBy", "IndexNumber")
-            .append_pair("SortOrder", "Ascending");
-        let resp = self.send(self.authed(self.http.get(url), key)).await?;
-        let list: JFItemList = resp.json().await.map_err(decode_error)?;
-        Ok(list.items)
+        let mut all = Vec::new();
+        loop {
+            let mut url = tracking.child(&["Shows", series_id, "Episodes"])?;
+            url.query_pairs_mut()
+                .append_pair("seasonId", &tracking.item_id)
+                .append_pair("userId", &tracking.user_id)
+                .append_pair("Fields", "Overview,MediaSources")
+                .append_pair("SortBy", "IndexNumber")
+                .append_pair("SortOrder", "Ascending")
+                .append_pair("StartIndex", &all.len().to_string())
+                .append_pair("Limit", &EPISODE_PAGE.to_string());
+            let resp = self.send(self.authed(self.http.get(url), key)).await?;
+            let list: JFItemList = resp.json().await.map_err(decode_error)?;
+            let got = list.items.len();
+            all.extend(list.items);
+            if got < EPISODE_PAGE {
+                return Ok(all);
+            }
+        }
     }
 
     /// `POST {server}/Users/{u}/PlayedItems/{id}?DatePlayed=…` with the key in the header.

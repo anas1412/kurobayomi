@@ -16,6 +16,8 @@ pub mod entry_state;
 pub mod episode_item;
 pub mod episode_row;
 pub mod format;
+pub mod next_update;
+pub mod playlist_filter;
 pub mod selection;
 pub mod header;
 pub mod info;

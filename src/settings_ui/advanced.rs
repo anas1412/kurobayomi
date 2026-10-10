@@ -161,6 +161,7 @@ pub fn page_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     vec![
         item(share_crash_logs_row()),
         item(verbose_row(prefs)),
+        item(onboarding_guide_row(prefs)),
         group("Data", vec![reindex_downloads_row()]),
         group(
             "Networking",
@@ -173,6 +174,26 @@ pub fn page_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
         group("Library", vec![refresh_covers_row(), reset_reader_row()]),
         group("Extensions", vec![revoke]),
     ]
+}
+
+/// Onboarding guide (task T-47a-071): pushes the onboarding flow. The flow writes its completion flag only when its last
+/// step finishes, and a user who reaches this row has normally finished it, so the flag keeps its value.
+pub fn onboarding_guide_row(prefs: &Prefs) -> PreferenceItem {
+    let store = prefs.store().clone();
+    let mut row = text("Onboarding guide", None, true);
+    if let PreferenceItem::Text { on_click, .. } = &mut row {
+        *on_click = Some(Rc::new(move || open_onboarding(&store)));
+    }
+    row
+}
+
+fn open_onboarding(store: &kuro_prefs::store::PrefStore) {
+    let flow = crate::shell::onboarding::page(
+        store,
+        crate::ui::pop,
+        || crate::ui::open(crate::pref_model::onboarding::DATA_AND_STORAGE),
+    );
+    crate::ui::push(&flow);
 }
 
 /// The Verbose logging subtitle (task T-47a-070).
@@ -405,6 +426,20 @@ fn fill(holder: &gtk::Box) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn onboarding_guide_is_a_top_level_row_right_after_verbose_logging() {
+        let rows = page_rows(&Prefs::in_memory(), Rc::new(|| {}));
+        let titles: Vec<&str> = rows
+            .iter()
+            .filter_map(|entry| match entry {
+                Preference::Item(item) => Some(item.title()),
+                Preference::Group(_) => None,
+            })
+            .collect();
+        let at = titles.iter().position(|t| *t == "Onboarding guide").expect("the row is there");
+        assert_eq!(titles[at - 1], "Verbose logging");
+    }
 
     #[test]
     fn the_doh_list_has_disabled_and_the_thirteen_providers_in_order() {

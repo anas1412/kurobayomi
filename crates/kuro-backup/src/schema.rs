@@ -1256,31 +1256,33 @@ impl Message for PrefValue {
         let mut flag = None;
         let mut set = std::collections::BTreeSet::new();
         let tag = required(tag, "type")?;
+        // The class name is matched by its simple name, so `...backup.models.` and `...backup.full.models.` both decode.
+        let kind = tag.rsplit('.').next().unwrap_or_default();
         while let Some((f, wt)) = r.next_tag()? {
             if f != 1 {
                 r.skip(wt)?;
                 continue;
             }
-            match tag.as_str() {
-                pref_tag::INT => int = Some(r.int32(f, wt)?),
-                pref_tag::LONG => long = Some(r.int64(f, wt)?),
-                pref_tag::FLOAT => float = Some(r.float32(f, wt)?),
-                pref_tag::STRING => text = Some(r.string(f, wt)?),
-                pref_tag::BOOLEAN => flag = Some(r.boolean(f, wt)?),
-                pref_tag::STRING_SET => {
+            match kind {
+                "IntPreferenceValue" => int = Some(r.int32(f, wt)?),
+                "LongPreferenceValue" => long = Some(r.int64(f, wt)?),
+                "FloatPreferenceValue" => float = Some(r.float32(f, wt)?),
+                "StringPreferenceValue" => text = Some(r.string(f, wt)?),
+                "BooleanPreferenceValue" => flag = Some(r.boolean(f, wt)?),
+                "StringSetPreferenceValue" => {
                     set.insert(r.string(f, wt)?);
                 }
                 _ => return Err(WireError::Unsupported(PREF_VALUE_UNKNOWN)),
             }
         }
         // An absent `value` is the Kotlin default of the subclass.
-        match tag.as_str() {
-            pref_tag::INT => Ok(Self::Int(int.unwrap_or(0))),
-            pref_tag::LONG => Ok(Self::Long(long.unwrap_or(0))),
-            pref_tag::FLOAT => Ok(Self::Float(float.unwrap_or(0.0))),
-            pref_tag::STRING => Ok(Self::String(text.unwrap_or_default())),
-            pref_tag::BOOLEAN => Ok(Self::Boolean(flag.unwrap_or(false))),
-            pref_tag::STRING_SET => Ok(Self::StringSet(set)),
+        match kind {
+            "IntPreferenceValue" => Ok(Self::Int(int.unwrap_or(0))),
+            "LongPreferenceValue" => Ok(Self::Long(long.unwrap_or(0))),
+            "FloatPreferenceValue" => Ok(Self::Float(float.unwrap_or(0.0))),
+            "StringPreferenceValue" => Ok(Self::String(text.unwrap_or_default())),
+            "BooleanPreferenceValue" => Ok(Self::Boolean(flag.unwrap_or(false))),
+            "StringSetPreferenceValue" => Ok(Self::StringSet(set)),
             _ => Err(WireError::Unsupported(PREF_VALUE_UNKNOWN)),
         }
     }
@@ -1708,6 +1710,28 @@ mod tests {
         let p = BackupPreference::from_bytes(&real).unwrap();
         assert_eq!(p, BackupPreference { key: "library_unseen_updates_count".into(), value: PrefValue::Int(4) });
         assert_eq!(p.to_bytes().unwrap(), real);
+    }
+
+    #[test]
+    fn the_full_models_serial_names_decode_like_the_plain_ones() {
+        for (suffix, value) in [("Int", PrefValue::Int(4)), ("Long", PrefValue::Long(5)), ("Float", PrefValue::Float(1.5)),
+            ("String", PrefValue::String("s".into())), ("Boolean", PrefValue::Boolean(true)),
+            ("StringSet", PrefValue::StringSet(["a".to_string()].into_iter().collect()))]
+        {
+            let plain = value.to_bytes().unwrap();
+            // The plain bytes with field 1 (the serial name) swapped for the full-models one.
+            let mut full = Writer::new();
+            full.string(1, &format!("eu.kanade.tachiyomi.data.backup.full.models.{suffix}PreferenceValue"));
+            let mut r = Reader::new(&plain);
+            while let Some((f, wt)) = r.next_tag().unwrap() {
+                if f == 2 {
+                    full.bytes(2, r.len_delimited().unwrap());
+                } else {
+                    r.skip(wt).unwrap();
+                }
+            }
+            assert_eq!(PrefValue::from_bytes(&full.finish()).unwrap(), value, "{suffix}");
+        }
     }
 
     #[test]

@@ -316,6 +316,28 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
         }
     }
 
+    /// The AniSkip step of `fileLoaded`: when `aniskip::lookup_wanted` allows it, looks up the intervals of the
+    /// playing episode with `aniskip::lookup` and merges them into the chapters. The host passes the tracker refs of
+    /// the anime in track order and the four preference values; an unwanted or failed lookup changes nothing.
+    pub async fn run_aniskip(
+        &mut self,
+        api: &impl crate::aniskip::SkipApi,
+        tracks: &[crate::aniskip::TrackerRef],
+        wanted: bool,
+    ) {
+        let Some(episode) = self.state.current_episode.as_ref().map(|e| e.episode_number) else {
+            return;
+        };
+        if !wanted {
+            return;
+        }
+        let duration = self.state.duration;
+        let stamps = crate::aniskip::lookup(api, tracks, episode, Some(f64::from(duration))).await;
+        if let Some(stamps) = stamps {
+            self.apply_aniskip(&stamps, Some(duration as i32));
+        }
+    }
+
     /// The whole-second tick (`time-pos` as an integer): `updatePlayBackPos` then `setChapter`.
     /// It reads the progress decisions, marks the episode seen once it completes and sends that
     /// to the trackers, then drives the skip-intro machine (T-45a-066, T-45b-022).
@@ -1057,6 +1079,40 @@ mod tests {
         let before = session.state.chapters.clone();
         session.apply_aniskip(&[], Some(200));
         assert_eq!(session.state.chapters, before);
+    }
+
+    struct SkipFake;
+
+    impl crate::aniskip::SkipApi for SkipFake {
+        fn mal_id_of(&self, _: i64) -> impl std::future::Future<Output = Option<i64>> + Send {
+            std::future::ready(Some(21))
+        }
+
+        fn skip_times(
+            &self,
+            _: i64,
+            _: i32,
+            _: i64,
+        ) -> impl std::future::Future<Output = Option<Vec<TimeStamp>>> + Send {
+            std::future::ready(Some(vec![TimeStamp {
+                start: 10.0,
+                end: 100.0,
+                name: "Opening".to_owned(),
+                kind: crate::types::ChapterType::Opening,
+            }]))
+        }
+    }
+
+    #[tokio::test]
+    async fn run_aniskip_merges_the_intervals_only_when_wanted() {
+        use crate::aniskip::TrackerRef;
+        let mut session = playing(200.0);
+        session.run_aniskip(&SkipFake, &[TrackerRef::AniList(9)], false).await;
+        assert!(session.state.chapters.is_empty());
+        session.run_aniskip(&SkipFake, &[TrackerRef::Other], true).await;
+        assert!(session.state.chapters.is_empty());
+        session.run_aniskip(&SkipFake, &[TrackerRef::AniList(9)], true).await;
+        assert!(session.state.chapters.iter().any(|c| c.name == "Opening"));
     }
 
     #[test]

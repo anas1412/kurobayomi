@@ -170,7 +170,10 @@ impl Shared {
                 let source = manga.as_ref().map(|m| backend.source_info(m.source)).unwrap_or_default();
                 let scanlators = store.scanlators(manga_id)?;
                 let categories = store.categories(manga_id)?;
-                let tracking = (store.track_count(manga_id)?, backend.has_logged_in_tracker());
+                let tracking = {
+                    let summary = store.track_summary(manga_id, manga.as_ref().map_or(0, |m| m.source))?;
+                    (summary.count, summary.has_logged_in)
+                };
                 let http = manga.as_ref().is_some_and(|m| backend.is_http_source(m.source));
                 kuro_data::DataResult::Ok((manga, chapters, source, scanlators, categories, tracking, http))
             })
@@ -189,7 +192,7 @@ impl Shared {
             page.excluded_scanlators = scanlators.excluded;
             page.categories = all;
             page.category_membership = membership;
-            page.tracking_count = i64::try_from(tracking_count).unwrap_or(i64::MAX);
+            page.tracking_count = tracking_count;
             page.has_logged_in_trackers = logged_in;
             page.http_source = http_source;
         }

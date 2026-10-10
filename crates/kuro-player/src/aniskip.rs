@@ -79,21 +79,20 @@ pub enum TrackerRef {
     Other,
 }
 
-/// The MAL id for AniSkip (E-03 fix). The first track whose tracker gives a non-zero MAL id wins:
-/// a MAL track gives its remote id, an AniList track asks `anilist_lookup`, and other trackers are
-/// passed over. `None` when no track resolves, so AniSkip is not called.
+/// The MAL id for AniSkip. Only the first track counts: the Kotlin `return` sits inside `map`
+/// (`PlayerViewModel.kt:2044`), so the first track's answer is the whole answer. A MAL track gives its remote id, an
+/// AniList track asks `anilist_lookup`. A non-MAL first track, or a zero id, gives `None`, so AniSkip is not called.
+/// This is kept on purpose as a quirk of the source (T-29a-033).
 pub fn resolve_mal_id(
     tracks: &[TrackerRef],
     mut anilist_lookup: impl FnMut(i64) -> Option<i64>,
 ) -> Option<i64> {
-    tracks.iter().find_map(|track| {
-        let id = match *track {
-            TrackerRef::MyAnimeList(id) => Some(id),
-            TrackerRef::AniList(id) => anilist_lookup(id),
-            TrackerRef::Other => None,
-        };
-        id.filter(|id| *id != 0)
-    })
+    let id = match *tracks.first()? {
+        TrackerRef::MyAnimeList(id) => Some(id),
+        TrackerRef::AniList(id) => anilist_lookup(id),
+        TrackerRef::Other => None,
+    };
+    id.filter(|id| *id != 0)
 }
 
 /// The `episodeLength` of the skip query: the player duration in whole seconds. A missing, zero or
@@ -168,10 +167,11 @@ pub fn lookup_wanted(
     intro_skip && aniskip && !(disable_on_chapters && has_chapters)
 }
 
-/// The AniSkip lookup of one episode (T-45b-021): the skip intervals for the first track that
-/// gives a non-zero MAL id, from one skip-times request. Nothing is requested when the duration is
-/// missing, and no AniSkip request follows a failed AniList lookup. The caller merges the result
-/// into the chapters (`Session::apply_aniskip`).
+/// The AniSkip lookup of one episode (T-45b-021): the skip intervals for the first track only, from one skip-times
+/// request. Like the Kotlin (`PlayerViewModel.kt:2044`, `return` inside `map`), the first track's answer is the whole
+/// answer, so a non-MAL first track makes no AniSkip call even when a MAL track follows (T-29a-033). Nothing is
+/// requested when the duration is missing, and no AniSkip request follows a failed AniList lookup. The caller merges
+/// the result into the chapters (`Session::apply_aniskip`).
 pub async fn lookup(
     api: &impl SkipApi,
     tracks: &[TrackerRef],
@@ -179,19 +179,13 @@ pub async fn lookup(
     duration: Option<f64>,
 ) -> Option<Vec<TimeStamp>> {
     let length = episode_length(duration)?;
-    let mut mal_id = None;
-    for track in tracks {
-        let id = match *track {
-            TrackerRef::MyAnimeList(id) => Some(id),
-            TrackerRef::AniList(id) => api.mal_id_of(id).await,
-            TrackerRef::Other => None,
-        };
-        if let Some(id) = id.filter(|id| *id != 0) {
-            mal_id = Some(id);
-            break;
-        }
-    }
-    api.skip_times(mal_id?, episode_number as i32, length).await
+    let id = match *tracks.first()? {
+        TrackerRef::MyAnimeList(id) => Some(id),
+        TrackerRef::AniList(id) => api.mal_id_of(id).await,
+        TrackerRef::Other => None,
+    };
+    let mal_id = id.filter(|id| *id != 0)?;
+    api.skip_times(mal_id, episode_number as i32, length).await
 }
 
 #[cfg(test)]
@@ -250,23 +244,26 @@ mod tests {
     }
 
     #[test]
-    fn the_first_track_that_resolves_gives_the_mal_id() {
+    fn the_first_track_gives_the_mal_id() {
         use TrackerRef::*;
         let never = |_| panic!("no lookup needed");
-        assert_eq!(resolve_mal_id(&[Other, MyAnimeList(21)], never), Some(21));
         assert_eq!(
             resolve_mal_id(&[MyAnimeList(21), AniList(9)], never),
             Some(21)
         );
-        assert_eq!(resolve_mal_id(&[Other], never), None);
         assert_eq!(resolve_mal_id(&[], never), None);
-        // A zero MAL id or a lookup without an id passes on to the next track.
-        assert_eq!(
-            resolve_mal_id(&[MyAnimeList(0), AniList(5), MyAnimeList(7)], |_| None),
-            Some(7)
-        );
         assert_eq!(resolve_mal_id(&[AniList(5)], |id| Some(id * 2)), Some(10));
         assert_eq!(resolve_mal_id(&[AniList(5)], |_| Some(0)), None);
+    }
+
+    /// The quirk of T-29a-033: a non-MAL first track returns nothing, even when a MAL track follows.
+    #[test]
+    fn a_non_mal_first_track_returns_nothing() {
+        use TrackerRef::*;
+        let never = |_| panic!("no lookup needed");
+        assert_eq!(resolve_mal_id(&[Other, MyAnimeList(21)], never), None);
+        assert_eq!(resolve_mal_id(&[Other], never), None);
+        assert_eq!(resolve_mal_id(&[MyAnimeList(0), MyAnimeList(7)], never), None);
     }
 
     #[test]
@@ -315,15 +312,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lookup_queries_aniskip_once_for_the_first_resolved_track() {
+    async fn lookup_queries_aniskip_once_for_the_first_track() {
         let api = Fake {
             mal_of: Some(21),
             ..Fake::default()
         };
-        let tracks = [TrackerRef::Other, TrackerRef::AniList(9), TrackerRef::MyAnimeList(5)];
+        let tracks = [TrackerRef::AniList(9), TrackerRef::MyAnimeList(5)];
         let stamps = lookup(&api, &tracks, 3.0, Some(1500.9)).await.unwrap();
         assert_eq!(stamps.len(), 2);
         assert_eq!(*api.calls.lock().unwrap(), vec!["anilist 9", "skip 21 3 1500"]);
+    }
+
+    /// T-29a-033: the production lookup keeps the Kotlin quirk. A non-MAL first track makes no call at all.
+    #[tokio::test]
+    async fn a_non_mal_first_track_makes_no_aniskip_call() {
+        let api = Fake {
+            mal_of: Some(21),
+            ..Fake::default()
+        };
+        let tracks = [TrackerRef::Other, TrackerRef::MyAnimeList(21)];
+        assert_eq!(lookup(&api, &tracks, 3.0, Some(1500.0)).await, None);
+        let tracks = [TrackerRef::Other, TrackerRef::AniList(9)];
+        assert_eq!(lookup(&api, &tracks, 3.0, Some(1500.0)).await, None);
+        assert!(api.calls.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

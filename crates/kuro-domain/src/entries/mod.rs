@@ -12,6 +12,7 @@ pub mod manga;
 pub mod network_to_local;
 pub mod queries;
 pub mod related_anime;
+pub mod related_sync;
 pub mod season_display;
 pub mod source_convert;
 pub mod viewer_flags;

@@ -1,0 +1,34 @@
+[Desktop Entry]
+Type=Application
+Name=Kurobayomi
+GenericName=Manga and anime reader
+Comment=Read manga and watch anime
+Exec=kurobayomi %U
+Icon=io.github.blackbox.Kurobayomi
+Terminal=false
+Categories=AudioVideo;Graphics;Viewer;
+StartupNotify=true
+DBusActivatable=true
+StartupWMClass=io.github.blackbox.Kurobayomi
+MimeType=application/x-tachibk;x-scheme-handler/kurobayomi;x-scheme-handler/aniyomi;x-scheme-handler/tachiyomi;
+Actions=show-library;show-animelib;show-updates;show-history;show-browse;
+
+[Desktop Action show-library]
+Name=Manga library
+Exec=kurobayomi --action=show-library
+
+[Desktop Action show-animelib]
+Name=Anime library
+Exec=kurobayomi --action=show-animelib
+
+[Desktop Action show-updates]
+Name=Updates
+Exec=kurobayomi --action=show-updates
+
+[Desktop Action show-history]
+Name=History
+Exec=kurobayomi --action=show-history
+
+[Desktop Action show-browse]
+Name=Browse
+Exec=kurobayomi --action=show-browse

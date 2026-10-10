@@ -74,6 +74,7 @@
 
 pub mod deep_link;
 pub mod device;
+pub mod dropped;
 pub mod external_player;
 pub mod filename;
 pub mod idle;

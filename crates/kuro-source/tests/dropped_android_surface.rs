@@ -8,6 +8,9 @@ use std::path::{Path, PathBuf};
 
 const CRATES: [&str; 4] = ["kuro-source", "kuro-local", "kuro-extensions", "kuro-prefs"];
 
+/// The crates whose areas own the install, backup and image drops of areas 13, 18 to 22 and 34.
+const OWNED_CRATES: [&str; 6] = ["kuro-source", "kuro-local", "kuro-extensions", "kuro-backup", "kuro-images", "kuro-source-wasm"];
+
 const FORBIDDEN: &[&str] = &[
     "VideoUrl",
     "awaitSingle",
@@ -50,13 +53,13 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Production code of every crate in `CRATES`, with `//` comments removed, as `file:line: token` hits.
-fn hits_for(tokens: &[&str]) -> Vec<String> {
-    let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+/// Production code of every crate in `crates`, with `//` comments removed, as `file:line: token` hits.
+fn hits_in(crates: &[&str], tokens: &[&str]) -> Vec<String> {
+    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut hits = Vec::new();
-    for krate in CRATES {
+    for krate in crates {
         let mut files = Vec::new();
-        rust_files(&crates.join(krate).join("src"), &mut files);
+        rust_files(&crates_dir.join(krate).join("src"), &mut files);
         for file in files {
             let text = fs::read_to_string(&file).unwrap();
             // production code only: a test may name a dropped key to assert that it is gone
@@ -76,7 +79,7 @@ fn hits_for(tokens: &[&str]) -> Vec<String> {
 
 #[test]
 fn no_dropped_android_identifier_appears_in_code() {
-    let hits = hits_for(FORBIDDEN);
+    let hits = hits_in(&CRATES, FORBIDDEN);
     assert!(hits.is_empty(), "dropped identifiers in code:\n{}", hits.join("\n"));
 }
 
@@ -101,7 +104,7 @@ const FORBIDDEN_DEVICE_AND_STORAGE: &[&str] = &[
 
 #[test]
 fn no_dropped_device_or_storage_identifier_appears_in_code() {
-    let hits = hits_for(FORBIDDEN_DEVICE_AND_STORAGE);
+    let hits = hits_in(&CRATES, FORBIDDEN_DEVICE_AND_STORAGE);
     assert!(hits.is_empty(), "dropped device or storage identifiers in code:\n{}", hits.join("\n"));
 }
 
@@ -124,4 +127,70 @@ fn no_android_build_or_manifest_file_is_kept() {
             assert!(!path.exists(), "{} is an Android build file and is dropped", path.display());
         }
     }
+}
+
+/// Installer, broadcast, notification, class-loading, metadata, backup-sync and hardware-bitmap identifiers of the
+/// Android extension and backup surface (T-18a-038 to T-18a-042, T-19a-041 to T-19a-075, T-20a-093, T-21a-033,
+/// T-22a-029, T-22a-039, T-22a-045, T-22a-053, T-34a-034, T-13a-056). Each drop is "no code, no symbol", so none of
+/// these may appear in the production code of the crates that own those areas.
+const FORBIDDEN_INSTALL_AND_BACKUP: &[&str] = &[
+    "PackageInstallerInstallerManga",
+    "ShizukuInstallerManga",
+    "MangaExtensionInstallActivity",
+    "MangaExtensionInstallService",
+    "AnimeExtensionInstallActivity",
+    "AnimeExtensionInstallService",
+    "AnimeExtensionInstallReceiver",
+    "ExtensionInstallerPreference",
+    "ext_install_service_notif",
+    "ext_apk_update_channel",
+    "ChildFirstPathClassLoader",
+    "PathClassLoader",
+    "Class.forName",
+    "getInstalledPackages",
+    "getPackageArchiveInfo",
+    "PackageInfoCompat",
+    "fixBasePaths",
+    "hasMiuiPackageInstaller",
+    "isShizukuInstalled",
+    "isPackageInstalled",
+    "getUriCompat",
+    "DownloadManager",
+    "ACTION_UNINSTALL_PACKAGE",
+    "ACTION_PACKAGE_ADDED",
+    "ACTION_EXTENSION_ADDED",
+    "EXTRA_REPLACING",
+    "BroadcastReceiver",
+    "NotificationCompat",
+    "NotificationChannel",
+    "hasReadme",
+    "hasChangelog",
+    "pkgFactory",
+    "isShared",
+    "MIUI",
+    "miui",
+    "ic_ani",
+    "isSync",
+    "SYNCING_LIBRARY",
+    "LIBRARY_SYNC_COMPLETE",
+    "syncing_library",
+    "library_sync_complete",
+    "Library sync complete",
+    "BackupExtensionPreferences",
+    "backup_flags",
+    "BrokenBackupSource",
+    "BrokenBackupAnimeSource",
+    "pref_hardware_bitmap_threshold",
+    "HardwareBitmap",
+    "hardware_bitmap",
+    "GLUtil",
+    "StorageVolume",
+    "getExternalFilesDirs",
+    "/sdcard",
+];
+
+#[test]
+fn no_dropped_install_backup_or_storage_identifier_appears_in_code() {
+    let hits = hits_in(&OWNED_CRATES, FORBIDDEN_INSTALL_AND_BACKUP);
+    assert!(hits.is_empty(), "dropped install, backup or storage identifiers in code:\n{}", hits.join("\n"));
 }

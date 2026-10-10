@@ -1,11 +1,11 @@
 //! Reader settings rows: the top-level rows and the Display, Reading, Paged and Long strip groups (T-47a-031..038).
 //! Rows that the rule table disables are left out of the tree (hidden, as on Android).
 use kuro_prefs::prefs::Prefs;
-use kuro_prefs::reader::{ReaderHideThreshold, TappingInvertMode};
+use kuro_prefs::reader::{FlashColor, ReaderHideThreshold, TappingInvertMode};
 
 use super::rules::{row_enabled, ReaderState, Row};
 use crate::settings_ui::search::SearchableSettings;
-use crate::settings_ui::rows::{enum_choice, exclusive_switch, group, int_choice, item, slider, switch, switch_sub, visible};
+use crate::settings_ui::rows::{enum_choice, exclusive_switch, group, int_choice, item, scaled_slider, slider, switch, switch_sub, visible};
 use crate::pref_model::model::{Preference, PreferenceItem};
 
 /// `ReadingMode` codes (`pref_default_reading_mode_key`); 0 (Default) is not offered.
@@ -114,6 +114,7 @@ fn tree(prefs: &Prefs, hide: bool) -> Vec<Preference> {
             switch("Show page number", &r.show_page_number, true),
         ]),
     ));
+    tree.push(group("E-Ink", vis(eink_rows(r, &s))));
     tree.push(group(
         "Reading",
         vis(vec![
@@ -212,6 +213,26 @@ fn tree(prefs: &Prefs, hide: bool) -> Vec<Preference> {
     tree
 }
 
+/// The E-Ink group (task T-47a-035): the page-change flash switch, then its duration, interval and colour, which need
+/// the switch on. The duration is stored in milliseconds and offered in 100 ms steps.
+fn eink_rows(r: &kuro_prefs::reader::ReaderPrefs, s: &ReaderState) -> Vec<PreferenceItem> {
+    let millis = r.flash_duration_millis.get();
+    let duration = format!("{millis} ms");
+    let interval = r.flash_page_interval.get();
+    let pages = if interval == 1 { "1 page".to_owned() } else { format!("{interval} pages") };
+    vec![
+        switch_sub("Flash on page change", "Reduces ghosting on e-ink displays", &r.flash_on_page_change, true),
+        scaled_slider("Flash duration", &r.flash_duration_millis, 1..=15, 100, Some(duration.as_str()), row_enabled(Row::FlashDuration, s)),
+        slider("Flash every", &r.flash_page_interval, 1..=10, Some(pages.as_str()), row_enabled(Row::FlashInterval, s)),
+        enum_choice(
+            "Flash with",
+            &r.flash_color,
+            &[(FlashColor::BLACK, "Black"), (FlashColor::WHITE, "White"), (FlashColor::WHITE_BLACK, "White and Black")],
+            row_enabled(Row::FlashColor, s),
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,10 +256,10 @@ mod tests {
     }
 
     #[test]
-    fn the_page_has_four_groups_in_order_after_the_top_level_rows() {
+    fn the_page_has_its_groups_in_order_after_the_top_level_rows() {
         let prefs = Prefs::in_memory();
         let tree = rows(&prefs);
-        assert_eq!(group_titles(&tree), ["Display", "Reading", "Paged", "Long strip", "Navigation", "Actions"]);
+        assert_eq!(group_titles(&tree), ["Display", "E-Ink", "Reading", "Paged", "Long strip", "Navigation", "Actions"]);
         let top: Vec<&str> = tree
             .iter()
             .filter_map(|e| match e {
@@ -259,6 +280,28 @@ mod tests {
             titles_of(&tree, "Display"),
             ["Default rotation", "Background color", "Fullscreen", "Keep screen on", "Show page number"]
         );
+    }
+
+    #[test]
+    fn eink_shows_only_the_flash_switch_until_it_is_on_then_the_three_rows() {
+        let prefs = Prefs::in_memory();
+        assert_eq!(titles_of(&rows(&prefs), "E-Ink"), ["Flash on page change"]);
+        prefs.reader.flash_on_page_change.set(true).unwrap();
+        assert_eq!(titles_of(&rows(&prefs), "E-Ink"), ["Flash on page change", "Flash duration", "Flash every", "Flash with"]);
+    }
+
+    #[test]
+    fn eink_duration_slider_is_in_100_ms_steps_stored_in_milliseconds() {
+        let prefs = Prefs::in_memory();
+        prefs.reader.flash_on_page_change.set(true).unwrap();
+        let tree = rows(&prefs);
+        let PreferenceItem::Slider { value, range, on_change, common, .. } = find_item(&tree, "E-Ink", "Flash duration") else {
+            panic!("a slider")
+        };
+        assert_eq!((*value, *range.start(), *range.end()), (1, 1, 15));
+        assert_eq!(common.subtitle.as_deref(), Some("100 ms"));
+        assert!(block_on(on_change(3)).unwrap());
+        assert_eq!(prefs.reader.flash_duration_millis.get(), 300);
     }
 
     #[test]

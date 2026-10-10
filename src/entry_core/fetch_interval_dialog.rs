@@ -25,7 +25,7 @@ pub fn open(interval: i32, expected_next_update_ms: Option<i64>, on_ok: impl Fn(
 
     let wheel = SpinButton::with_range(0.0, f64::from(MAX_INTERVAL), 1.0);
     wheel.set_value(f64::from(initial_wheel(interval)));
-    wheel.set_visible(wheel_visible(cfg!(debug_assertions), true));
+    wheel.set_visible(wheel_visible(true));
 
     let reset = Button::with_label(&tr(MsgKey::action_reset));
     let cancel = Button::with_label(&tr(MsgKey::action_cancel));

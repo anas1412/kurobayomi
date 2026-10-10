@@ -3,7 +3,7 @@
 
 use futures::future::join_all;
 
-use crate::ctx::{REFRESH_PARALLELISM, TrackCtx};
+use crate::ctx::TrackCtx;
 use crate::error::TrackError;
 use crate::error::redact;
 use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
@@ -232,6 +232,7 @@ async fn refresh_one_manga(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ctx::REFRESH_PARALLELISM;
     use crate::fakes::{Harness, anime_binding, manga_binding};
 
     #[test]

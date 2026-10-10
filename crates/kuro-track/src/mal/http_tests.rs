@@ -320,6 +320,13 @@ async fn api_401_sets_the_expired_flag_and_returns_login_expired() {
         .expect(1)
         .mount(&server)
         .await;
+    // The 401 triggers one refresh (T-29a-053); MAL refuses that refresh too, so the login has expired.
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(1)
+        .mount(&server)
+        .await;
 
     assert!(!tracker.auth().expired());
     assert!(matches!(
@@ -330,15 +337,102 @@ async fn api_401_sets_the_expired_flag_and_returns_login_expired() {
 }
 
 #[tokio::test]
-async fn refresh_400_keeps_flag_clear_and_retries() {
+async fn t_29a_053_api_401_refreshes_once_and_retries_once() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = tracker_for(&server, dir.path(), Arc::new(MemorySecrets::default()));
+    tracker.auth().set_token(fresh_token("old-access")).unwrap();
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(token_body("new-access")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/users/@me"))
+        .and(header("authorization", "Bearer old-access"))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/users/@me"))
+        .and(header("authorization", "Bearer new-access"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"name":"u"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    assert_eq!(tracker.api().current_user().await.unwrap(), "u");
+    assert!(!tracker.auth().expired());
+}
+
+#[tokio::test]
+async fn t_29a_053_second_401_after_the_retry_is_http_401_without_a_loop() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = tracker_for(&server, dir.path(), Arc::new(MemorySecrets::default()));
+    tracker.auth().set_token(fresh_token("old-access")).unwrap();
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(token_body("new-access")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/users/@me"))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    assert!(matches!(
+        tracker.api().current_user().await,
+        Err(MalError::Http(401))
+    ));
+}
+
+#[tokio::test]
+async fn t_29a_054_a_failed_refresh_is_not_retried_for_thirty_seconds() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = tracker_for(&server, dir.path(), Arc::new(MemorySecrets::default()));
+    tracker.auth().set_token(expired_token("old")).unwrap();
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let http = reqwest::Client::new();
+    let t0 = 1_700_000_000;
+    assert!(matches!(
+        tracker.auth().bearer_at(&http, t0).await,
+        Err(MalError::RefreshFailed)
+    ));
+    // Within 30 s: no request, RefreshFailed at once.
+    assert!(matches!(
+        tracker.auth().bearer_at(&http, t0 + 10).await,
+        Err(MalError::RefreshFailed)
+    ));
+    // After 30 s the refresh runs again (the second POST).
+    assert!(matches!(
+        tracker.auth().bearer_at(&http, t0 + 31).await,
+        Err(MalError::RefreshFailed)
+    ));
+}
+
+#[tokio::test]
+async fn refresh_400_keeps_flag_clear_and_backs_off() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
     let tracker = tracker_for(&server, dir.path(), Arc::new(MemorySecrets::default()));
     tracker.auth().set_token(expired_token("a")).unwrap();
+    // One refusal; the second call within 30 s sends no refresh (T-29a-054).
     Mock::given(method("POST"))
         .and(path(TOKEN_PATH))
         .respond_with(ResponseTemplate::new(400))
-        .expect(2)
+        .expect(1)
         .mount(&server)
         .await;
 

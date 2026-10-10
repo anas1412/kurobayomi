@@ -31,11 +31,12 @@ use super::pager::controller::{PagerController, PagerOptions};
 use super::settings::{self, Family, Reaction, SettingsWatch, ViewerSettings};
 use super::webtoon::controller::{WebtoonController, WebtoonOptions};
 use super::webtoon::frame::ZoomFrame;
-use super::webtoon::layout::{StripLayout, refresh_range};
+use super::webtoon::layout::{StripLayout, gap_px, refresh_range};
 use super::webtoon::zoom::{Anim, WebtoonZoom};
 use super::{Emitter, ViewerContext, ViewerEngine, ViewerKind};
 use crate::reader::error_card;
 use crate::reader::page_zoom::{self, ZoomKey};
+use crate::reader::quick_scale::{QuickScale, THRESHOLD_DP};
 use crate::reader::model::{ChapterTransition, PageStatus, ReaderChapter, ReaderPage, ViewerChapters};
 use crate::reader::viewer::ViewerEvent;
 
@@ -184,6 +185,7 @@ fn page_host(
     on_split: Rc<dyn Fn(Rc<ReaderPage>)>,
     on_layout: Rc<dyn Fn()>,
     downloads: &DownloadCheck,
+    menu_open: &Rc<Cell<bool>>,
 ) -> PageHost {
     let (long_emit, zoom_emit, retry_emit) = (emit.clone(), emit.clone(), emit.clone());
     PageHost {
@@ -196,6 +198,7 @@ fn page_host(
         is_webtoon: !kind.is_pager(),
         on_retry: Rc::new(move |chapter| retry_emit.send(ViewerEvent::RequestPreload(chapter))),
         downloads: downloads.clone(),
+        menu_open: Rc::clone(menu_open),
     }
 }
 
@@ -398,6 +401,8 @@ struct PagerInner {
     emit: Emitter,
     /// The download index, for the transition cards' downloaded flags.
     downloads: DownloadCheck,
+    /// Whether the reader menu is shown (the screen's flag, shared with every row).
+    menu_open: Rc<Cell<bool>>,
     /// The realised rows by index, each with the item it was made for, so a changed item list replaces them.
     slots: RefCell<BTreeMap<usize, (ItemKey, Row)>>,
     recognizer: RefCell<TapRecognizer>,
@@ -434,6 +439,7 @@ impl PagerInner {
             settings: RefCell::new(settings.clone()),
             emit: ctx.emit,
             downloads: ctx.downloads,
+            menu_open: ctx.menu_open,
             slots: RefCell::default(),
             recognizer: RefCell::new(recognizer(true)),
             watch: RefCell::new(ctx.prefs.map(|p| SettingsWatch::new(p, settings))),
@@ -472,7 +478,7 @@ impl PagerInner {
                 }
             });
         });
-        page_host(&self.settings.borrow(), self.kind, &self.emit, on_split, Rc::new(|| {}), &self.downloads)
+        page_host(&self.settings.borrow(), self.kind, &self.emit, on_split, Rc::new(|| {}), &self.downloads, &self.menu_open)
     }
 
     /// A transform split `page` in two: its insert page goes next to it (B§5.6, T-44a-050).
@@ -760,7 +766,7 @@ impl PagerInner {
     }
 
     fn key(&self, ev: KeyEvent) -> bool {
-        let ctx = key_context(&self.settings.borrow());
+        let ctx = key_context(&self.settings.borrow(), self.menu_open.get());
         let out = keys::pager_key(ev, ctx);
         match out.action {
             Some(KeyAction::Page(cmd)) => self.command(cmd),
@@ -778,8 +784,8 @@ impl PagerInner {
     }
 }
 
-fn key_context(s: &ViewerSettings) -> KeyContext {
-    KeyContext { volume_enabled: s.volume_keys, volume_inverted: s.volume_keys_inverted, menu_visible: false }
+fn key_context(s: &ViewerSettings, menu_visible: bool) -> KeyContext {
+    KeyContext { volume_enabled: s.volume_keys, volume_inverted: s.volume_keys_inverted, menu_visible }
 }
 
 impl Surface for PagerInner {
@@ -885,6 +891,8 @@ struct WebtoonInner {
     emit: Emitter,
     /// The download index, for the transition cards' downloaded flags.
     downloads: DownloadCheck,
+    /// Whether the reader menu is shown (the screen's flag, shared with every row).
+    menu_open: Rc<Cell<bool>>,
     /// Realised rows, keyed by item so a rebuild reuses the rows that survive it (the keyed diff of T-44a-031).
     realised: RefCell<HashMap<ItemKey, Row>>,
     layout: RefCell<StripLayout>,
@@ -916,6 +924,8 @@ struct WebtoonInner {
     animating: Cell<bool>,
     /// A layout asked for by a row is waiting for the next idle.
     layout_pending: Cell<bool>,
+    /// A quick scale in progress: a drag that began on a double tap (T-44a-040).
+    quick: RefCell<Option<QuickScale>>,
 }
 
 fn webtoon_options(s: &ViewerSettings) -> WebtoonOptions {
@@ -941,11 +951,13 @@ impl WebtoonInner {
             zoom_anim: Cell::new(0),
             animating: Cell::new(false),
             layout_pending: Cell::new(false),
+            quick: RefCell::new(None),
             ctl: RefCell::new(WebtoonController::new(webtoon_options(&settings.clone().before_first_emission()))),
             lookup: RefCell::default(),
             settings: RefCell::new(settings.clone()),
             emit: ctx.emit,
             downloads: ctx.downloads,
+            menu_open: ctx.menu_open,
             realised: RefCell::default(),
             layout: RefCell::default(),
             watch: RefCell::new(ctx.prefs.map(|p| SettingsWatch::new(p, settings))),
@@ -988,7 +1000,7 @@ impl WebtoonInner {
                 this.request_layout();
             }
         });
-        page_host(&self.settings.borrow(), self.kind, &self.emit, Rc::new(|_| {}), on_layout, &self.downloads)
+        page_host(&self.settings.borrow(), self.kind, &self.emit, Rc::new(|_| {}), on_layout, &self.downloads, &self.menu_open)
     }
 
     /// Lays the strip out again on the next idle: the report can come while the rows are being built.
@@ -1062,7 +1074,9 @@ impl WebtoonInner {
     fn current_layout(&self) -> (Vec<ItemKey>, StripLayout) {
         let items = self.ctl.borrow().items().to_vec();
         let vh = self.viewport();
-        let heights = items.iter().map(|i| self.item_height(i, vh)).collect();
+        // gapped mode leaves room under every item; the row itself is the item height without the gap
+        let gap = gap_px(self.kind == ViewerKind::WebtoonGapped);
+        let heights = items.iter().map(|i| self.item_height(i, vh) + gap).collect();
         (items, StripLayout::new(heights))
     }
 
@@ -1190,8 +1204,11 @@ impl WebtoonInner {
                 })
                 .widget
                 .clone();
-            // every row is inset by the side padding on both sides (T-43b-047)
-            widget.set_size_request((width - 2 * pad).max(0), layout.height(i));
+            // every row is inset by the side padding on both sides (T-43b-047). A row's margins add to its width, so
+            // the request leaves them out: otherwise the strip's minimum grows by them on every pass (BUG-READER-2).
+            let gap = gap_px(self.kind == ViewerKind::WebtoonGapped);
+            let margins = widget.margin_start() + widget.margin_end();
+            widget.set_size_request((width - 2 * pad - margins).max(0), (layout.height(i) - gap).max(0));
             self.fixed.move_(&widget, f64::from(pad), layout.offset(i) as f64);
         }
         drop(realised);
@@ -1335,12 +1352,16 @@ impl WebtoonInner {
         drag.connect_drag_begin(move |_, _, _| {
             seen.set((0.0, 0.0));
             if let Some(this) = weak.upgrade() {
+                this.quick.borrow_mut().take();
                 this.stop_zoom_anim();
             }
         });
         let weak = self.me.clone();
         drag.connect_drag_update(move |_, dx, dy| {
             let Some(this) = weak.upgrade() else { return };
+            if this.quick_scale_move(dy) {
+                return;
+            }
             if this.zoom.borrow().scale() <= 1.0 {
                 return;
             }
@@ -1349,7 +1370,57 @@ impl WebtoonInner {
             let (px, py) = applied.replace((ex, ey));
             this.zoom_drag(ex - px, ey - py);
         });
+        let weak = self.me.clone();
+        drag.connect_drag_end(move |_, _, _| {
+            let Some(this) = weak.upgrade() else { return };
+            if this.quick.borrow_mut().take().is_some() {
+                this.pinch_end();
+            }
+        });
         self.frame.add_controller(drag);
+
+        // a fling glides the zoomed strip on from the release (T-44a-041)
+        let swipe = gtk::GestureSwipe::new();
+        swipe.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = self.me.clone();
+        swipe.connect_swipe(move |_, vx, vy| {
+            if let Some(this) = weak.upgrade() {
+                this.fling((vx, vy));
+            }
+        });
+        self.frame.add_controller(swipe);
+    }
+
+    /// One vertical move of a quick scale (T-44a-040, TZ §4.2). A drag that began on the second press of a double tap
+    /// scales the strip by the move's factor; the first move arms it. Returns whether the move was taken.
+    fn quick_scale_move(&self, dy: f64) -> bool {
+        let armed = self.settings.borrow().double_tap_zoom && self.recognizer.borrow().in_double_press();
+        let mut slot = self.quick.borrow_mut();
+        if slot.is_none() {
+            if !armed {
+                return false;
+            }
+            *slot = Some(QuickScale::new(THRESHOLD_DP, 0.0));
+        }
+        let Some(quick) = slot.as_mut() else { return false };
+        // a crossing of the view height (scale 1) resets the distance, as the source does on an axis crossing
+        let before = self.zoom.borrow().scale();
+        let factor = quick.on_move(dy, |m| before < 1.0 && before * m >= 1.0);
+        drop(slot);
+        if factor != 1.0 {
+            self.pinch(factor);
+        }
+        true
+    }
+
+    /// A fling while zoomed (B§10.8): the strip glides on from the release velocity.
+    fn fling(&self, velocity: (f64, f64)) {
+        let (half, original) = self.zoom_geometry();
+        let edge = self.at_edge();
+        let anim = self.zoom.borrow().fling(velocity, edge, half, original);
+        if let Some(anim) = anim {
+            self.run_zoom_anim(anim);
+        }
     }
 
     /// Scrolls by `delta` pixels, animated when page transitions are on (B§7.4).
@@ -1417,7 +1488,7 @@ impl WebtoonInner {
     }
 
     fn key(&self, ev: KeyEvent) -> bool {
-        let ctx = key_context(&self.settings.borrow());
+        let ctx = key_context(&self.settings.borrow(), self.menu_open.get());
         let out = keys::webtoon_key(ev, ctx);
         match out.action {
             Some(KeyAction::Scroll { down }) => {
@@ -1511,7 +1582,7 @@ mod tests {
     }
 
     fn context(settings: ViewerSettings) -> ViewerContext {
-        ViewerContext { emit: Emitter::new(Rc::new(|_| {})), settings, prefs: None, downloads: DownloadCheck::default() }
+        ViewerContext { emit: Emitter::new(Rc::new(|_| {})), settings, prefs: None, downloads: DownloadCheck::default(), menu_open: Rc::default() }
     }
 
     fn image(name: &str, width: u32, height: u32) -> PathBuf {
@@ -1713,6 +1784,30 @@ mod tests {
     }
 
     #[test]
+    fn t040_a_drag_that_began_on_a_double_tap_quick_scales_and_any_other_drag_does_not() {
+        crate::testing::with_display(|| {
+            let chapter = chapter(1, &[image("quick-a", 40, 60)]);
+            let engine = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&prefs())));
+            let window = show(engine.widget());
+            engine.set_chapters(handed(&chapter));
+            let inner = Rc::clone(&engine.0);
+            assert!(pump_until(|| inner.frame.height() > 0 && inner.frame.is_mapped()));
+            assert!(!inner.quick_scale_move(10.0), "a plain drag is not a quick scale");
+            assert!(close(inner.zoom.borrow().scale(), 1.0));
+            {
+                let mut recognizer = inner.recognizer.borrow_mut();
+                recognizer.press(0, 10.0, 10.0);
+                recognizer.release(50, 10.0, 10.0);
+                recognizer.press(100, 10.0, 10.0);
+            }
+            assert!(inner.quick_scale_move(0.0), "the first move arms the quick scale");
+            assert!(inner.quick_scale_move(10.0), "a move down from the double tap is taken");
+            assert!(close(inner.zoom.borrow().scale(), 1.5), "dragging down zooms in by the span: {}", inner.zoom.borrow().scale());
+            window.destroy();
+        });
+    }
+
+    #[test]
     fn t047_the_webtoon_rows_are_inset_by_the_side_padding_on_both_sides() {
         crate::testing::with_display(|| {
             let chapter = chapter(1, &[image("padding-a", 40, 60)]);
@@ -1722,31 +1817,22 @@ mod tests {
             let window = show(engine.widget());
             engine.set_chapters(handed(&chapter));
             let inner = Rc::clone(&engine.0);
-            // one sample of the geometry per check: the window may still be growing while the strip lays out
+            // The geometry of one layout: the strip's width request is the view width that layout used, so the rows are
+            // compared with it and not with the live width (a window can still be changing size).
             let inset = |percent: i32| {
-                let width = inner.root.width();
                 let item = inner.ctl.borrow().items().iter().find(|i| i.page().is_some()).cloned()?;
                 let realised = inner.realised.borrow();
                 let row = realised.get(&item)?;
+                let width = inner.fixed.width_request();
                 let pad = width * percent / 100;
                 let (request, x) = (row.widget.width_request(), inner.fixed.child_position(&row.widget).0);
                 Some(width > 0 && request == width - 2 * pad && x == f64::from(pad))
             };
             assert!(pump_until(|| inset(10) == Some(true)), "padded by 10 percent of the view width on both sides");
-            for _ in 0..6 {
-                pump_ms(100);
-                eprintln!("DEBUG root {} window {} fixed {}", inner.root.width(), window.width(), inner.fixed.width());
-            }
             // a change of the setting refreshes the rows at the new inset
             let held = inner.settings.borrow().clone();
             engine.apply_settings(ViewerSettings { side_padding: 0, ..held });
-            let ok = pump_until(|| inset(0) == Some(true));
-            let sample = {
-                let item = inner.ctl.borrow().items().iter().find(|i| i.page().is_some()).cloned();
-                let realised = inner.realised.borrow();
-                item.and_then(|i| realised.get(&i).map(|r| (r.widget.width_request(), inner.fixed.child_position(&r.widget).0)))
-            };
-            assert!(ok, "no padding, full width: root {} sample {:?} settings {}", inner.root.width(), sample, inner.settings.borrow().side_padding);
+            assert!(pump_until(|| inset(0) == Some(true)), "no padding, full width");
             window.destroy();
         });
     }
@@ -1832,6 +1918,58 @@ mod tests {
                 engine.destroy();
                 window.destroy();
             }
+        });
+    }
+
+    #[test]
+    fn t016_the_wheel_pages_the_pager_down_for_a_down_step_and_back_otherwise_and_the_webtoon_keeps_it() {
+        crate::testing::with_display(|| {
+            let (engine, window) = wide_pager("wheel-a", &prefs());
+            let inner = Rc::clone(&engine.0);
+            let first = inner.ctl.borrow().view_index();
+            assert!(engine.handle_scroll(3.0));
+            assert_eq!(inner.ctl.borrow().view_index(), first + 1, "a down step is the next page");
+            assert!(engine.handle_scroll(0.0));
+            assert_eq!(inner.ctl.borrow().view_index(), first, "no movement is the previous page (E-24)");
+            window.destroy();
+            let webtoon = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&prefs())));
+            assert!(!webtoon.handle_scroll(1.0), "the webtoon scrolls natively and does not claim the wheel");
+        });
+    }
+
+    #[test]
+    fn bug_reader_1_a_page_key_press_turns_the_page_and_its_release_does_not_turn_it_again() {
+        crate::testing::with_display(|| {
+            let (engine, window) = wide_pager("key-turn", &prefs());
+            let inner = Rc::clone(&engine.0);
+            let first = inner.ctl.borrow().view_index();
+            assert!(engine.handle_key(KeyEvent { key: InputKey::Down, ctrl: false, released: false }));
+            assert_eq!(inner.ctl.borrow().view_index(), first + 1, "the press turns the page");
+            assert!(engine.handle_key(KeyEvent { key: InputKey::Down, ctrl: false, released: true }));
+            assert_eq!(inner.ctl.borrow().view_index(), first + 1, "the release is claimed and turns nothing");
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn bug_reader_2_the_strip_width_does_not_grow_across_layout_passes_at_no_side_padding() {
+        crate::testing::with_display(|| {
+            let chapter = chapter(1, &[image("width-a", 40, 60), image("width-b", 40, 60), image("width-c", 40, 60)]);
+            let p = prefs();
+            p.webtoon_side_padding.set(0).unwrap();
+            let engine = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&p)));
+            let window = show(engine.widget());
+            engine.set_chapters(handed(&chapter));
+            let inner = Rc::clone(&engine.0);
+            assert!(pump_until(|| inner.viewport() > 0 && inner.fixed.size_request().0 > 0));
+            let (start_fixed, start_window) = (inner.fixed.size_request().0, window.width());
+            for _ in 0..20 {
+                inner.lay_out();
+                pump_ms(10);
+            }
+            assert_eq!(inner.fixed.size_request().0, start_fixed, "the strip's width request does not grow per pass");
+            assert!(window.width() <= start_window, "the window does not grow with the strip: {} > {start_window}", window.width());
+            window.destroy();
         });
     }
 }

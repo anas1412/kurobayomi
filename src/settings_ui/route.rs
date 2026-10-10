@@ -245,8 +245,28 @@ pub fn tree_with(id: &str, prefs: &Prefs, anime: &[Category], manga: &[Category]
 fn data_storage_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     let mut tree: Vec<Preference> = storage::rows(prefs, Rc::clone(&changed)).into_iter().map(rows::item).collect();
     let interval = rows::ranged_choice("Automatic backup frequency", &prefs.backup.backup_interval, |h| kuro_backup::settings::interval_label(h as u32).unwrap_or("").to_owned(), true);
-    tree.push(rows::group("Backup and restore", vec![interval, restore_backup_row()]));
+    tree.push(rows::group("Backup and restore", vec![interval, restore_backup_row(), rows::info(&backup_info(prefs))]));
     tree.push(rows::group("Storage usage", vec![cache::clear_row(Rc::clone(&changed)), rows::switch("Clear episode/chapter cache on app launch", &prefs.library.auto_clear_item_cache, true)]));
+    tree
+}
+
+/// The static backup info line of the spec page. The typed line below replaces it: it carries the last automatic backup.
+pub const KEEP_COPIES: &str = "You should keep copies of backups in other places as well. Backups may contain sensitive data including any stored passwords; be careful if sharing.";
+
+/// The backup info line: the advice to keep copies, then when the last automatic backup ran (`backup_interval` page).
+fn backup_info(prefs: &Prefs) -> String {
+    let now = i64::try_from(kuro_core::crash::now_ms()).unwrap_or(i64::MAX);
+    let last = prefs.backup.last_auto_backup_timestamp.get();
+    format!("{KEEP_COPIES}\n\n{}", kuro_backup::settings::last_auto_info(last, now))
+}
+
+/// The spec rows without the static backup info line, which the typed one replaces.
+fn without_backup_info(mut tree: Vec<Preference>) -> Vec<Preference> {
+    for entry in &mut tree {
+        if let Preference::Group(group) = entry {
+            group.items.retain(|item| !matches!(item, PreferenceItem::Info { text, .. } if text.starts_with(KEEP_COPIES)));
+        }
+    }
     tree
 }
 
@@ -289,7 +309,7 @@ fn fill_data_storage(holder: &gtk::Box) {
             fill_data_storage(&holder);
         }
     });
-    let mut tree = merge(spec_tree("settings_data_storage", prefs.store()), data_storage_rows(&prefs, changed));
+    let mut tree = merge(without_backup_info(spec_tree("settings_data_storage", prefs.store())), data_storage_rows(&prefs, changed));
     if let Some(banner) = storage::banner_row(&prefs) {
         tree.insert(0, rows::item(banner));
     }
@@ -428,8 +448,8 @@ mod tests {
         assert_eq!(before.len(), 11 - 2);
         assert_eq!(after.len(), 11 - 3, "invert tap zones, pan and flip rotated are hidden; invert split is back");
         let tree = rows(&prefs);
-        let spec_only = titles(&tree, "E-Ink");
-        assert_eq!(spec_only.len(), 4, "groups the typed rows do not cover stay as the spec builds them");
+        let eink = titles(&tree, "E-Ink");
+        assert_eq!(eink, ["Flash on page change"], "the E-Ink group is typed too: with the flash off only its switch shows");
     }
 
     fn group_titles(tree: &[Preference], group: &str) -> Vec<String> {

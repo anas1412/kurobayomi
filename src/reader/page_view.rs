@@ -25,7 +25,7 @@ use crate::reader::decode_guard::{self, Ticket};
 use kuro_core::image::background::Background;
 use crate::reader::decoded_lru::{ByteLru, DEFAULT_BUDGET_BYTES};
 use crate::reader::long_press::{DEFAULT_DOUBLE_CLICK_MS, DEFAULT_LONG_PRESS_MS, LongPressAction, LongPressTracker, SLOP_PX};
-use crate::reader::page_decode::{self, DecodeError, LoadState};
+use crate::reader::page_decode::{self, DecodeError, LoadState, MIN_DELAY_MS};
 use crate::reader::page_transform::{self, DecodeIntent};
 use crate::reader::page_zoom::{self as zoom, PageConfig, Size, ZoomKey, ZoomState};
 use crate::reader::progress::LoadingIndicator;
@@ -35,22 +35,39 @@ use crate::reader::viewers::pager::nav::Phys;
 use crate::reader::viewers::visible;
 
 /// The result of a decode: the pyramid of the page and whether a transform changed it, or why it failed.
-type Decoded = std::thread::Result<Result<(Pyramid, bool), DecodeError>>;
+/// The pyramids of a page's frames, each with its delay in milliseconds, and whether a transform changed the page.
+type Frames = Vec<(Pyramid, u32)>;
 
-/// Decodes `bytes`, applies the transform of `intent`, cuts the uniform border when `crop` is on (T-43b-020), and builds
-/// the pyramid. A webtoon page is cut to `width` after that (never enlarged). A page with an edge past the D-9 limit of
-/// 16384 px is shrunk to it before the pyramid is built. All of it runs on the worker; the texture is made later on the
-/// GTK thread.
+type Decoded = std::thread::Result<Result<(Frames, bool, Option<u32>), DecodeError>>;
+
+/// Decodes every frame of `bytes`, applies the transform of `intent`, cuts the uniform border when `crop` is on (T-43b-020),
+/// and builds a pyramid per frame. A webtoon page is cut to `width` after that (never enlarged). A page with an edge past
+/// the D-9 limit of 16384 px is shrunk to it before the pyramid is built. All of it runs on the worker; the textures are
+/// made later on the GTK thread.
+fn decode_animation(bytes: &[u8], width: Option<u32>, intent: DecodeIntent, crop: bool) -> Result<(Frames, bool, Option<u32>), DecodeError> {
+    let mut changed = false;
+    let mut frames = Vec::new();
+    for (index, frame) in page_decode::decode_frames(bytes)?.into_iter().enumerate() {
+        let (page, split) = page_transform::apply(frame.page, intent);
+        if index == 0 {
+            changed = split;
+        }
+        let page = if crop { crop_borders::crop_borders(page) } else { page };
+        let page = match width {
+            Some(width) => page_decode::fit_to_width(page, width),
+            None => page,
+        };
+        let page = page_decode::limit_edge(page, page_decode::MAX_TEXTURE_EDGE);
+        frames.push((Pyramid::new(page, MAX_TILE_EDGE), frame.delay_ms));
+    }
+    Ok((frames, changed, page_decode::loop_passes(bytes)))
+}
+
+/// The first frame of [`decode_animation`] as a still page.
+#[cfg(test)]
 fn decode_pyramid(bytes: &[u8], width: Option<u32>, intent: DecodeIntent, crop: bool) -> Result<(Pyramid, bool), DecodeError> {
-    let page = page_decode::decode_rgba(bytes)?;
-    let (page, changed) = page_transform::apply(page, intent);
-    let page = if crop { crop_borders::crop_borders(page) } else { page };
-    let page = match width {
-        Some(width) => page_decode::fit_to_width(page, width),
-        None => page,
-    };
-    let page = page_decode::limit_edge(page, page_decode::MAX_TEXTURE_EDGE);
-    Ok((Pyramid::new(page, MAX_TILE_EDGE), changed))
+    let (mut frames, changed, _) = decode_animation(bytes, width, intent, crop)?;
+    Ok((frames.swap_remove(0).0, changed))
 }
 
 /// What identifies a decode in the cache: where the bytes come from, what was done to them, whether the border was cut,
@@ -67,7 +84,12 @@ struct DecodeKey {
 /// in use.
 #[derive(Clone)]
 struct Cached {
+    /// The first frame, which the page shows until the frames start to turn.
     pyramid: Rc<Pyramid>,
+    /// Every frame with its delay (one entry for a still page).
+    frames: Vec<(Rc<Pyramid>, u32)>,
+    /// How many times the frames play through; `None` loops forever.
+    passes: Option<u32>,
     split: bool,
 }
 
@@ -81,7 +103,7 @@ fn cache_get(key: &DecodeKey) -> Option<Cached> {
 }
 
 fn cache_put(key: DecodeKey, cached: &Cached) {
-    let bytes = cached.pyramid.byte_size();
+    let bytes = cached.frames.iter().map(|(pyramid, _)| pyramid.byte_size()).sum();
     DECODED.with(|c| c.borrow_mut().insert(key, cached.clone(), bytes, |e| Rc::strong_count(&e.pyramid) > 1));
 }
 
@@ -124,6 +146,15 @@ mod imp {
         pub pyramid: RefCell<Option<Rc<Pyramid>>>,
         /// Uploaded tiles. A tile that leaves the view is dropped on the next frame (T-44a-049).
         pub tiles: RefCell<HashMap<Tile, gdk::Texture>>,
+        /// Every frame of an animated page with its delay in ms; a still page holds one (T-44a-051).
+        pub frames: RefCell<Vec<(Rc<Pyramid>, u32)>>,
+        /// The index of the frame on screen.
+        pub frame_index: Cell<usize>,
+        /// Bumped when the frames change or the page is dropped, so a frame timer left from before does nothing.
+        pub frame_token: Cell<u64>,
+        /// How many times the frames play through (`None` is forever), and how many passes have finished.
+        pub passes: Cell<Option<u32>>,
+        pub passes_done: Cell<u32>,
         pub src: Cell<Size>,
         pub state: Cell<LoadState>,
         /// Bumped by every load, recycle and cancelled timer, so a late result or timer is dropped.
@@ -150,6 +181,8 @@ mod imp {
         pub long_gen: Cell<u64>,
         pub long_fired: Cell<bool>,
         pub long_tap_enabled: Cell<bool>,
+        /// The reader menu's flag; a long press reports while it is shown, whatever `long_tap_enabled` says (E-21).
+        pub menu_open: RefCell<Rc<Cell<bool>>>,
         pub press_at: Cell<(f64, f64)>,
         pub pointer: Cell<Option<(f64, f64)>>,
         pub pinch_start: Cell<f64>,
@@ -307,6 +340,48 @@ mod imp {
         pub(super) fn drop_pages(&self) {
             self.pyramid.replace(None);
             self.tiles.borrow_mut().clear();
+            self.frames.borrow_mut().clear();
+            self.frame_token.set(self.frame_token.get() + 1);
+        }
+
+        /// Schedules the frame after the one on screen, after the current frame's delay. A still page schedules nothing.
+        fn schedule_frame(&self) {
+            let delay = {
+                let frames = self.frames.borrow();
+                if frames.len() < 2 {
+                    return;
+                }
+                frames[self.frame_index.get() % frames.len()].1.max(MIN_DELAY_MS)
+            };
+            let (weak, token) = (self.obj().downgrade(), self.frame_token.get());
+            glib::timeout_add_local_once(Duration::from_millis(u64::from(delay)), move || {
+                if let Some(page) = weak.upgrade() {
+                    page.imp().advance_frame(token);
+                }
+            });
+        }
+
+        /// Shows the frame after the one on screen, looping back to the first, and schedules the next (T-44a-051).
+        fn advance_frame(&self, token: u64) {
+            if token != self.frame_token.get() {
+                return;
+            }
+            let next = match self.frames.borrow().len() {
+                n if n > 1 => (self.frame_index.get() + 1) % n,
+                _ => return,
+            };
+            if next == 0 {
+                self.passes_done.set(self.passes_done.get() + 1);
+                if self.passes.get().is_some_and(|passes| self.passes_done.get() >= passes) {
+                    return;
+                }
+            }
+            let pyramid = Rc::clone(&self.frames.borrow()[next].0);
+            self.frame_index.set(next);
+            self.pyramid.replace(Some(pyramid));
+            self.tiles.borrow_mut().clear();
+            self.obj().queue_draw();
+            self.schedule_frame();
         }
 
         /// Finishes a decode started by `set_image`. A result whose ticket is no longer current (another session, or
@@ -317,8 +392,9 @@ mod imp {
                 return;
             }
             match decoded {
-                Ok(Ok((pyramid, split))) if pyramid.size().0 > 0 && pyramid.size().1 > 0 => {
-                    let cached = Cached { pyramid: Rc::new(pyramid), split };
+                Ok(Ok((frames, split, passes))) if frames.first().is_some_and(|(p, _)| p.size().0 > 0 && p.size().1 > 0) => {
+                    let frames: Vec<(Rc<Pyramid>, u32)> = frames.into_iter().map(|(p, delay)| (Rc::new(p), delay)).collect();
+                    let cached = Cached { pyramid: Rc::clone(&frames[0].0), frames, passes, split };
                     if let Some(key) = key {
                         cache_put(key, &cached);
                     }
@@ -335,7 +411,8 @@ mod imp {
         /// Picks the page's own background when the theme is Automatic, from the decoded page (level 0) and the
         /// viewport orientation; otherwise clears it so the theme colour shows.
         pub(super) fn refresh_page_fill(&self) {
-            let fill = if self.auto_background.get() {
+            // the automatic background reads a static page only (B§9.3), so an animated page keeps the theme colour
+            let fill = if self.auto_background.get() && self.frames.borrow().len() < 2 {
                 self.pyramid.borrow().as_ref().map(|pyramid| {
                     let obj = self.obj();
                     pyramid.choose_background(obj.width() > obj.height())
@@ -352,6 +429,12 @@ mod imp {
             let (w, h) = cached.pyramid.size();
             self.src.set(Size { w: f64::from(w), h: f64::from(h) });
             self.pyramid.replace(Some(cached.pyramid));
+            self.frames.replace(cached.frames);
+            self.frame_index.set(0);
+            self.passes.set(cached.passes);
+            self.passes_done.set(0);
+            self.frame_token.set(self.frame_token.get() + 1);
+            self.schedule_frame();
             self.refresh_page_fill();
             self.tiles.borrow_mut().clear();
             self.fitted.set(None);
@@ -573,7 +656,7 @@ mod imp {
                 return;
             }
             self.long_fired.set(true);
-            if self.long_tap_enabled.get() {
+            if self.long_tap_enabled.get() || self.menu_open.borrow().get() {
                 let (x, y) = self.press_at.get();
                 self.obj().emit_by_name::<()>("long-tap", &[&x, &y]);
             }
@@ -584,7 +667,12 @@ mod imp {
                 return;
             }
             let z = self.zoom.get();
-            let target = zoom::double_tap_target(z.scale, z.min);
+            // an animated page toggles between the fit and twice the fit (PhotoView levels 1, 2, 5, B§10.6)
+            let target = if self.frames.borrow().len() > 1 {
+                zoom::animated_double_tap_target(z.scale / z.min) * z.min
+            } else {
+                zoom::double_tap_target(z.scale, z.min)
+            };
             let enabled = gtk::Settings::default().is_none_or(|s| s.is_gtk_enable_animations());
             self.animate_zoom(target, (x, y), zoom::animation_ms(self.double_tap_ms.get(), enabled));
         }
@@ -771,7 +859,7 @@ impl PageView {
         let crop = imp.crop_borders.get();
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
-            let decoded = gio::spawn_blocking(move || decode_pyramid(&bytes, width, intent, crop)).await;
+            let decoded = gio::spawn_blocking(move || decode_animation(&bytes, width, intent, crop)).await;
             imp::on_page(&weak, |p| p.finish_load(ticket, decoded, key));
         });
     }
@@ -886,6 +974,11 @@ impl PageView {
     /// Whether a confirmed long press reports `long-tap` (`reader_long_tap`).
     pub fn set_long_tap_enabled(&self, enabled: bool) {
         self.imp().long_tap_enabled.set(enabled);
+    }
+
+    /// The reader menu's flag, read on each long press (E-21).
+    pub fn set_menu_open(&self, open: Rc<Cell<bool>>) {
+        self.imp().menu_open.replace(open);
     }
 
     pub fn connect_image_loaded<F: Fn() + 'static>(&self, f: F) -> glib::SignalHandlerId {
@@ -1106,9 +1199,10 @@ mod tests {
             settle(&view);
             let key = DecodeKey { source: file("pinned.png"), intent: DecodeIntent::NONE, crop: false, width: None };
             let cached = cache_get(&key).expect("cached");
-            assert_eq!(Rc::strong_count(&cached.pyramid), 3, "the cache, the view and this handle");
+            // each holder keeps the page twice: as the first-frame pyramid and as frame 0
+            assert_eq!(Rc::strong_count(&cached.pyramid), 6, "the cache, the view and this handle");
             view.recycle();
-            assert_eq!(Rc::strong_count(&cached.pyramid), 2, "the view let go; the pixels stay cached for the way back");
+            assert_eq!(Rc::strong_count(&cached.pyramid), 4, "the view let go; the pixels stay cached for the way back");
         });
     }
 
@@ -1167,7 +1261,9 @@ mod tests {
         assert_eq!(uncropped.size(), (120, 100));
         let (cropped, _) = decode_pyramid(&bytes, None, DecodeIntent::NONE, true).expect("decode");
         assert_eq!(cropped.size(), (80, 60));
-        let (plain, _) = decode_pyramid(&png(120, 100), None, DecodeIntent::NONE, true).expect("decode");
+        // a solid red page is both dark and light to the border detector, so only an all-white page has no border (a margin as wide as half the page leaves no ink)
+        let white = bordered_png(120, 100, 60);
+        let (plain, _) = decode_pyramid(&white, None, DecodeIntent::NONE, true).expect("decode");
         assert_eq!(plain.size(), (120, 100), "a page with no uniform border is unchanged");
         let (webtoon, _) = decode_pyramid(&bytes, Some(40), DecodeIntent::NONE, true).expect("decode");
         assert_eq!(webtoon.size(), (40, 30), "the border is cut first, then the page is cut to the view width");
@@ -1288,6 +1384,25 @@ mod tests {
             run_for(400);
             assert!((page.imp().zoom.get().center.0 - held).abs() < 1e-9, "a stopped pan stays where it was stopped");
             window.destroy();
+        });
+    }
+
+    #[test]
+    fn t025_the_automatic_theme_paints_a_colour_computed_from_the_loaded_page_and_other_themes_do_not() {
+        crate::testing::with_display(|| {
+            let auto = PageView::new();
+            auto.set_auto_background(true);
+            assert!(auto.imp().page_fill.borrow().is_none(), "nothing is computed before a page has loaded");
+            auto.set_image(png(60, 40), PageConfig::default());
+            settle(&auto);
+            assert!(auto.imp().page_fill.borrow().is_some(), "after load the page's own colour is picked");
+            let themed = PageView::new();
+            themed.set_auto_background(false);
+            themed.set_image(png(60, 40), PageConfig::default());
+            settle(&themed);
+            assert!(themed.imp().page_fill.borrow().is_none(), "the theme colour shows");
+            auto.set_auto_background(false);
+            assert!(auto.imp().page_fill.borrow().is_none(), "leaving Automatic clears the computed colour");
         });
     }
 

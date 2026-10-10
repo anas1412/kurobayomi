@@ -134,7 +134,8 @@ pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> gtk::Revealer {
             entries.append(&item);
         }
         popover.set_child(Some(&entries));
-        let menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).build();
+        let menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).tooltip_text(strings::OVERFLOW_MENU).build();
+        menu.update_property(&[gtk::accessible::Property::Label(strings::OVERFLOW_MENU)]);
         row.append(&menu);
     }
 

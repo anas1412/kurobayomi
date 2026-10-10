@@ -77,6 +77,21 @@ fn t_32a_030_the_score_list_is_zero_to_ten() {
     assert_eq!(t.score_list()[10], "10");
 }
 
+#[test]
+fn t_32a_047_display_score_is_the_truncated_integer_and_the_status_picker_order_is_fixed() {
+    let t = offline();
+    let anime = t.as_anime().unwrap();
+    assert_eq!(anime.display_score(&show(1, 1, 0.0, 0, 7.9)), "7");
+    assert_eq!(anime.display_score(&show(1, 1, 0.0, 0, 0.0)), "0");
+    assert_eq!(
+        anime.status_list(),
+        vec![1, 2, 3, 4, 5],
+        "watching, completed, on hold, not interesting, plan to watch"
+    );
+    assert_eq!(anime.status_label(3), Some("on_hold"));
+    assert_eq!(anime.status_label(4), Some("not_interesting"));
+}
+
 // ---- T-32a-031: authorise URL and redirect ----
 
 #[tokio::test]

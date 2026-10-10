@@ -10,6 +10,7 @@ use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use super::error::MalError;
 use super::redirect::CodeOutcome;
+use super::store::MalSettings;
 use super::testkit::{MemorySecrets, expired_token, fresh_token, tracker_for};
 use super::tracker::MalTracker;
 use super::tracker_impl::login_toast;
@@ -527,4 +528,37 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
 fn _tracker_type_is_send_sync() {
     fn assert_bounds<T: Send + Sync>() {}
     assert_bounds::<MalTracker>();
+}
+
+#[tokio::test]
+async fn t_29a_038_a_restart_between_the_two_steps_still_completes_the_login() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let secrets: Arc<MemorySecrets> = MemorySecrets::default().into();
+    let challenge = {
+        let tracker = tracker_for(&server, dir.path(), secrets.clone());
+        let url = tracker.begin_login().expect("client id is set");
+        url.query_pairs()
+            .find(|(k, _)| k == "code_challenge")
+            .map(|(_, v)| v.into_owned())
+            .expect("challenge")
+    };
+    // The verifier is written to the config file while the login waits.
+    let stored = MalSettings::open(dir.path()).unwrap().pending_verifier();
+    assert!(stored.is_some(), "pending_verifier is persisted");
+
+    // A fresh tracker (the restart) reads it back and completes the login.
+    let tracker = tracker_for(&server, dir.path(), secrets.clone());
+    assert!(tracker.login_in_progress());
+    mount_exchange(&server, &challenge).await;
+    tracker
+        .finish_login(CodeOutcome::Code("CODE".into()))
+        .await
+        .expect("the login completes after the restart");
+    assert!(tracker.is_logged_in());
+    assert_eq!(
+        MalSettings::open(dir.path()).unwrap().pending_verifier(),
+        None,
+        "removed once the code is consumed"
+    );
 }

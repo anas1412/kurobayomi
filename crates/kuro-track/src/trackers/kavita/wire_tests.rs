@@ -301,3 +301,38 @@ async fn t_33a_057_no_slot_means_no_request_at_all() {
     assert!(api.get_track_search(&series_url(&server)).await.is_err());
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn t_33a_107_a_thumbnail_in_the_series_does_not_fill_the_cover() {
+    let server = login_server().await;
+    let series = r#"{"id":12,"name":"B","pages":10,"pagesRead":4,"format":3,"libraryId":1,"thumbnail_url":"https://x/y.jpg"}"#;
+    mount_reads(&server, series, VOLUMES_OK, (204, "")).await;
+    let found = api_for(dir_for(&server, KEY))
+        .get_track_search(&series_url(&server))
+        .await
+        .unwrap();
+    assert_eq!(
+        found.cover_url, "",
+        "D-01: the cover waits for the live check (T-33a-107)"
+    );
+}
+
+#[tokio::test]
+async fn t_33a_108_e113_a_volume_encoded_latest_chapter_is_passed_through_raw() {
+    let server = login_server().await;
+    mount_reads(
+        &server,
+        SERIES_OK,
+        VOLUMES_OK,
+        (200, r#"{"number":"10000"}"#),
+    )
+    .await;
+    let found = api_for(dir_for(&server, KEY))
+        .get_track_search(&series_url(&server))
+        .await
+        .unwrap();
+    assert_eq!(
+        found.last_chapter_read, 10000.0,
+        "E-113 default: keep the raw value (parity)"
+    );
+}

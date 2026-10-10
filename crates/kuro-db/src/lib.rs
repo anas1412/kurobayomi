@@ -11,6 +11,7 @@ pub mod open;
 pub mod schema;
 pub mod migrate;
 pub mod codec;
+mod dropped;
 pub mod flags;
 pub mod models;
 pub mod notify;
@@ -25,6 +26,7 @@ pub mod views_anime;
 pub mod episode_sanitizer;
 pub mod conformance;
 pub mod maintenance;
+pub mod restore;
 #[cfg(feature = "legacy-import")]
 pub mod legacy;
 #[cfg(feature = "legacy-import")]

@@ -78,7 +78,7 @@ pub trait AnimeBackend: Send + Sync + 'static {
     /// Deletes the downloads of these episodes (the Delete row, and a mark seen with "remove after seen").
     fn delete_episodes(&self, _anime_id: i64, _episode_ids: &[i64]) {}
     /// Whether a tracker is logged in: the tracking button opens the tracking sheet then, the tracking settings
-    /// otherwise (E-25). The app has no tracker session yet, so the default is no.
+    /// otherwise (E-25). The default is no; the app's backends read the published tracker session.
     fn has_logged_in_tracker(&self) -> bool {
         false
     }
@@ -122,6 +122,9 @@ impl StubAnimeBackend {
 }
 
 impl AnimeBackend for StubAnimeBackend {
+    fn has_logged_in_tracker(&self) -> bool {
+        crate::entry_core::tracking::session::has_logged_in()
+    }
     fn source_info(&self, source_id: i64) -> SourceInfo {
         if source_id == kuro_source::local::LOCAL_SOURCE_ID {
             return SourceInfo {

@@ -336,14 +336,17 @@ fn t39_an_anilist_entry_without_a_mal_id_makes_no_aniskip_request() {
 }
 
 #[test]
-fn t40_the_first_resolving_tracker_gives_the_mal_id() {
-    // [Kitsu, MAL]: the Kitsu track is passed over and the MAL id is used.
+fn t40_only_the_first_track_gives_the_mal_id() {
+    // [Kitsu, MAL]: the first track is not MAL, so nothing is returned (T-29a-033, PlayerViewModel.kt:2044).
     let id = resolve_mal_id(&[TrackerRef::Other, TrackerRef::MyAnimeList(21)], |_| None);
-    assert_eq!(id, Some(21));
-    // [Kitsu, AniList]: the AniList entry resolves through the lookup fixture.
+    assert_eq!(id, None);
+    // [Kitsu, AniList]: the same quirk applies to the AniList lookup.
     let id = resolve_mal_id(&[TrackerRef::Other, TrackerRef::AniList(5)], |_| {
         parse_mal_id(&fixture("anilist_mal.json"))
     });
+    assert_eq!(id, None);
+    // [MAL, Kitsu]: the MAL track is first and gives its remote id.
+    let id = resolve_mal_id(&[TrackerRef::MyAnimeList(21), TrackerRef::Other], |_| None);
     assert_eq!(id, Some(21));
 }
 

@@ -30,6 +30,7 @@ use crate::entry_core::bulk_bar::{BulkAction, bulk_actions};
 use crate::entry_core::chapter::ChapterRow;
 use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, fab_state};
 use crate::entry_core::description_view;
+use crate::entry_core::tracking;
 use crate::entry_core::detail::{LatestWins, LoadContext, LoadState, StoreCmd, StoreEvent};
 use crate::entry_core::dialog::{CategoryDialog, Dialog};
 use crate::entry_core::fetch_interval_dialog;
@@ -138,6 +139,7 @@ fn now_ms(clock: Instant) -> u64 {
 }
 
 fn page_for(manga_id: i64) -> GBox {
+    tracking::session::refresh_from_host();
     let app = data::app();
     let db = app.db(EntryKind::Manga);
     let store = app.base.store().clone();
@@ -641,6 +643,9 @@ impl View {
             ui::pop();
             return;
         }
+        if out.open_tracking {
+            ui::open("tracking_sheet");
+        }
         self.render();
         if let Some(id) = out.focus {
             self.list.focus_row(id);
@@ -1089,10 +1094,16 @@ impl View {
         }
     }
 
+    /// `autoOpenTrack`: a tracker is logged in and "open the track menu on adding" is on. Both are read when asked.
+    fn auto_open_tracking(&self) -> bool {
+        tracking::session::refresh_from_host();
+        tracking::session::has_logged_in() && data::app().base.store().pref::<bool>("track_on_adding_to_library", true).get()
+    }
+
     /// The tracking button: the tracking sheet when a tracker is logged in, the tracking settings when none is (E-25).
     fn tracking_pressed(&self) {
-        let logged_in = self.page.borrow().ready().is_some_and(|p| p.has_logged_in_trackers);
-        match tracking_click(logged_in) {
+        tracking::session::refresh_from_host();
+        match tracking_click(tracking::session::has_logged_in()) {
             TrackingClick::Sheet => ui::open("tracking_sheet"),
             TrackingClick::Settings => ui::open("settings_tracking"),
         }
@@ -1456,10 +1467,12 @@ impl View {
                 window.close();
             }
         });
-        // any other way out (Escape, the close button) leaves without writing
+        // any other way out (Escape, the close button) leaves without writing; in the add flow the tracking sheet follows
+        // when a tracker is logged in and "open the track menu on adding" is on, both read now (E-TRK-5)
         window.connect_close_request(move |_| {
             if let Some(view) = weak.upgrade() {
-                view.act(UiAction::DismissDialog);
+                let auto_open = view.auto_open_tracking();
+                view.act(UiAction::DismissCategory { auto_open });
             }
             glib::Propagation::Proceed
         });

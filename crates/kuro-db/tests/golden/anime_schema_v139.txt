@@ -2,6 +2,8 @@ index anime_relations_anime_id_index on anime_relations
 index anime_relations_related_anime_id_index on anime_relations
 index animehistory_history_episode_id_index on animehistory
 index animelib_favorite_index on animes
+index animes_categories_anime_id_index on animes_categories
+index animes_categories_category_id_index on animes_categories
 index animes_fetch_type on animes
 index animes_parent_id on animes
 index animes_url_index on animes

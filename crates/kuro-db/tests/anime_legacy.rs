@@ -200,12 +200,20 @@ fn version_gates_refuse_too_old_and_too_new_and_leave_139_alone() {
     set(112);
     assert!(matches!(upgrade_legacy(&path), Err(DbError::TooOldForImport { found: 112 })));
     assert!(!dir.path().join("anime.db.bak-v112").exists(), "refused before any copy");
+    set(141);
+    assert!(matches!(upgrade_legacy(&path), Err(DbError::TooNew { found: 141, supported: 140 })));
     set(140);
-    assert!(matches!(upgrade_legacy(&path), Err(DbError::TooNew { found: 140, supported: 139 })));
-    set(139);
     let before = std::fs::read(&path).unwrap();
     assert_eq!(upgrade_legacy(&path).unwrap(), None);
-    assert_eq!(std::fs::read(&path).unwrap(), before, "a 139 file is untouched");
+    assert_eq!(std::fs::read(&path).unwrap(), before, "a 140 file is untouched");
+    legacy_file(&path, 139);
+    assert!(upgrade_legacy(&path).unwrap().is_some(), "139 runs the native step to 140");
+    let c = Connection::open(&path).unwrap();
+    assert_eq!(one(&c, "PRAGMA user_version"), 140);
+    let indexes: i64 = c
+        .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name LIKE 'animes_categories_%_index'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(indexes, 2);
 }
 
 #[test]

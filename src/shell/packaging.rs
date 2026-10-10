@@ -1,0 +1,134 @@
+//! The files packaging installs (T-53a-002, T-53a-003, T-53a-011, T-53a-041): the desktop entry, the shared-mime-info
+//! file, the hicolor icons and the post-install hook. They live in `data/` next to this module; the tests hold them to
+//! the golden text of `p1-rust-design.md` section 2.6 and to the launch code that serves them.
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::process::Command;
+
+    use crate::shell::argv;
+
+    const DESKTOP: &str = include_str!("data/io.github.blackbox.Kurobayomi.desktop");
+    const MIME: &str = include_str!("data/io.github.blackbox.Kurobayomi.xml");
+    const POST_INSTALL: &str = include_str!("data/post-install.sh");
+
+    /// The golden copy of section 2.6, TC-53-36.
+    const DESKTOP_GOLDEN: &str = "[Desktop Entry]
+Type=Application
+Name=Kurobayomi
+GenericName=Manga and anime reader
+Comment=Read manga and watch anime
+Exec=kurobayomi %U
+Icon=io.github.blackbox.Kurobayomi
+Terminal=false
+Categories=AudioVideo;Graphics;Viewer;
+StartupNotify=true
+DBusActivatable=true
+StartupWMClass=io.github.blackbox.Kurobayomi
+MimeType=application/x-tachibk;x-scheme-handler/kurobayomi;x-scheme-handler/aniyomi;x-scheme-handler/tachiyomi;
+Actions=show-library;show-animelib;show-updates;show-history;show-browse;
+
+[Desktop Action show-library]
+Name=Manga library
+Exec=kurobayomi --action=show-library
+
+[Desktop Action show-animelib]
+Name=Anime library
+Exec=kurobayomi --action=show-animelib
+
+[Desktop Action show-updates]
+Name=Updates
+Exec=kurobayomi --action=show-updates
+
+[Desktop Action show-history]
+Name=History
+Exec=kurobayomi --action=show-history
+
+[Desktop Action show-browse]
+Name=Browse
+Exec=kurobayomi --action=show-browse
+";
+
+    const MIME_GOLDEN: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<mime-info xmlns=\"http://www.freedesktop.org/standards/shared-mime-info\">
+  <mime-type type=\"application/x-tachibk\">
+    <comment>Kurobayomi backup</comment>
+    <sub-class-of type=\"application/gzip\"/>
+    <glob pattern=\"*.tachibk\"/>
+  </mime-type>
+</mime-info>
+";
+
+    fn data(name: &str) -> String {
+        format!("{}/src/shell/data/{name}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    /// Runs a checker when it is installed; `None` when it is not, so the test does not fail on a bare machine.
+    fn run(tool: &str, args: &[&str]) -> Option<bool> {
+        Command::new(tool).args(args).output().ok().map(|o| o.status.success())
+    }
+
+    #[test]
+    fn tc_53_36_the_desktop_entry_is_the_golden_copy_and_has_the_launch_keys() {
+        assert_eq!(DESKTOP, DESKTOP_GOLDEN);
+        for key in ["Exec=kurobayomi %U", "Icon=io.github.blackbox.Kurobayomi", "StartupWMClass=io.github.blackbox.Kurobayomi", "DBusActivatable=true", "StartupNotify=true"] {
+            assert!(DESKTOP.lines().any(|l| l == key), "{key}");
+        }
+    }
+
+    #[test]
+    fn desktop_file_validate_exits_zero() {
+        if let Some(ok) = run("desktop-file-validate", &[&data("io.github.blackbox.Kurobayomi.desktop")]) {
+            assert!(ok);
+        }
+    }
+
+    #[test]
+    fn the_desktop_actions_are_five_distinct_groups_that_the_launcher_understands() {
+        let groups: Vec<&str> = DESKTOP.lines().filter_map(|l| l.strip_prefix("[Desktop Action ")?.strip_suffix(']')).collect();
+        assert_eq!(groups, ["show-library", "show-animelib", "show-updates", "show-history", "show-browse"]);
+        let listed = DESKTOP.lines().find_map(|l| l.strip_prefix("Actions=")).unwrap_or_default();
+        assert_eq!(listed.trim_end_matches(';').split(';').collect::<Vec<_>>(), groups);
+        for name in &groups {
+            let exec = format!("Exec=kurobayomi --action={name}");
+            assert!(DESKTOP.lines().any(|l| l == exec), "{name} has its Exec");
+            assert!(argv::ACTIONS.contains(name), "{name} is a launch action");
+            let args = [format!("--action={name}")];
+            let parsed = argv::parse_argv(&args).unwrap();
+            assert!(matches!(&parsed[..], [argv::LaunchRequest::Action { .. }]), "{name} parses");
+        }
+    }
+
+    #[test]
+    fn tc_53_37_the_mime_file_declares_the_backup_type_and_the_entry_lists_it() {
+        assert_eq!(MIME, MIME_GOLDEN);
+        if let Some(ok) = run("xmllint", &["--noout", &data("io.github.blackbox.Kurobayomi.xml")]) {
+            assert!(ok);
+        }
+        let mime_types = DESKTOP.lines().find_map(|l| l.strip_prefix("MimeType=")).unwrap_or_default();
+        for t in ["application/x-tachibk", "x-scheme-handler/kurobayomi", "x-scheme-handler/aniyomi", "x-scheme-handler/tachiyomi"] {
+            assert!(mime_types.split(';').any(|m| m == t), "{t}");
+        }
+    }
+
+    #[test]
+    fn the_icon_resolves_in_hicolor_at_48_128_and_256_pixels() {
+        for size in [48u32, 128, 256] {
+            let path = data(&format!("icons/hicolor/{size}x{size}/apps/io.github.blackbox.Kurobayomi.png"));
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+            assert_eq!(&bytes[1..4], b"PNG");
+            // the PNG header stores the width and height at bytes 16 to 24
+            assert_eq!(u32::from_be_bytes(bytes[16..20].try_into().unwrap()), size);
+            assert_eq!(u32::from_be_bytes(bytes[20..24].try_into().unwrap()), size);
+        }
+        assert!(Path::new(&data("icons/hicolor/scalable/apps/io.github.blackbox.Kurobayomi.svg")).exists());
+    }
+
+    #[test]
+    fn the_post_install_hook_refreshes_the_desktop_and_mime_databases() {
+        assert!(POST_INSTALL.contains("update-desktop-database"));
+        assert!(POST_INSTALL.contains("update-mime-database"));
+        assert!(POST_INSTALL.starts_with("#!/bin/sh"));
+    }
+}

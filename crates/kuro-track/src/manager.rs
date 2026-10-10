@@ -28,6 +28,9 @@ pub const REGISTRY_ORDER: [TrackerId; 11] = [
 pub struct TrackerManager {
     trackers: Vec<Arc<dyn Tracker>>,
     logged_in: watch::Sender<Vec<TrackerId>>,
+    /// Source identities `"{name}/{lang}"` installed now. The app publishes them with
+    /// [`TrackerManager::set_installed_sources`] (T-27a-077).
+    installed: watch::Sender<Vec<String>>,
 }
 
 /// One enhanced tracker and whether an installed source serves it.
@@ -79,6 +82,7 @@ impl TrackerManager {
         Ok(Self {
             trackers,
             logged_in,
+            installed: watch::channel(Vec::new()).0,
         })
     }
 
@@ -104,6 +108,33 @@ impl TrackerManager {
     /// The ids of the logged-in trackers. Emits a new list after each login or logout.
     pub fn logged_in_stream(&self) -> watch::Receiver<Vec<TrackerId>> {
         self.logged_in.subscribe()
+    }
+
+    /// Publishes the installed source identities. Subscribers of [`TrackerManager::installed_stream`] are told only when
+    /// the list changes, so installing a source that an enhanced tracker accepts adds its row without a restart (T-27a-077).
+    pub fn set_installed_sources(&self, ids: &[&str]) {
+        self.installed.send_if_modified(|list| {
+            let next: Vec<String> = ids.iter().map(|s| (*s).to_owned()).collect();
+            if *list == next {
+                false
+            } else {
+                *list = next;
+                true
+            }
+        });
+    }
+
+    /// The installed source identities. Emits a new list after each change.
+    pub fn installed_stream(&self) -> watch::Receiver<Vec<String>> {
+        self.installed.subscribe()
+    }
+
+    /// [`TrackerManager::discover_enhanced`] over the sources last published with
+    /// [`TrackerManager::set_installed_sources`].
+    pub fn discover_installed(&self) -> EnhancedDiscovery {
+        let ids = self.installed.borrow().clone();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        self.discover_enhanced(&refs)
     }
 
     /// Enhanced anime and manga trackers, matched against the qualified ids of installed sources.
@@ -261,6 +292,28 @@ mod tests {
             not_installed_text("Base", &["A".into(), "B".into()]),
             "Base\n\nA, B"
         );
+    }
+
+    #[tokio::test]
+    async fn t_27a_077_installing_an_accepted_source_adds_its_row_without_a_restart() {
+        let secrets = MemSecrets::new();
+        let log = new_log();
+        let mut list = registry(&secrets);
+        let mut jelly = FakeAnime::new(TrackerId::JELLYFIN, "Jellyfin", secrets.clone(), log.clone());
+        jelly.enhanced = true;
+        jelly.accepted = &["jf.source"];
+        list.retain(|t| t.id() != TrackerId::JELLYFIN);
+        list.push(Arc::new(jelly));
+        let m = TrackerManager::new(list).unwrap();
+        let mut stream = m.installed_stream();
+
+        assert!(m.discover_installed().available.is_empty());
+        m.set_installed_sources(&["jf.source"]);
+        stream.changed().await.unwrap();
+        assert_eq!(m.discover_installed().available, vec![TrackerId::JELLYFIN]);
+        // The same list again is not a change.
+        m.set_installed_sources(&["jf.source"]);
+        assert!(!stream.has_changed().unwrap());
     }
 }
 

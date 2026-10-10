@@ -57,6 +57,31 @@ impl IntPicker {
     pub fn write(&self, value: i32) -> (String, i64) {
         (self.property.clone(), i64::from(value))
     }
+
+    /// The values the wheel shows: `start`, `start + step`, and so on up to `stop` (`(min..max step step)`, E-46-028).
+    /// A `stop` that the step does not reach is left out. Empty when `start` is past `stop`.
+    pub fn values(&self) -> Vec<i32> {
+        if self.step <= 0 {
+            return Vec::new();
+        }
+        (self.start..=self.stop)
+            .step_by(self.step as usize)
+            .collect()
+    }
+
+    /// The wheel's starting index: the index of the default value, or 0 when the default is not in the list (E-46-028).
+    pub fn start_index(&self, default_value: i32) -> usize {
+        self.values()
+            .iter()
+            .position(|value| *value == default_value)
+            .unwrap_or(0)
+    }
+
+    /// The value committed when the dialog is dismissed: the value under the wheel (E-46-027). `None` when the wheel
+    /// is empty.
+    pub fn commit_value(&self, selection: usize) -> Option<i32> {
+        self.values().get(selection).copied()
+    }
 }
 
 /// One action requested by a protocol property.
@@ -106,12 +131,18 @@ fn int_picker(data: &str) -> Option<IntPicker> {
     let [title, name_format, start, stop, step, property, ..] = parts.as_slice() else {
         return None;
     };
+    let step: i32 = step.parse().ok()?;
+    if step <= 0 {
+        // E-46-097: a step of zero or less would make the wheel's range throw. The picker is not opened.
+        tracing::warn!("launch_int_picker with step {step} is rejected");
+        return None;
+    }
     Some(IntPicker {
         title: (*title).to_owned(),
         name_format: (*name_format).to_owned(),
         start: start.parse().ok()?,
         stop: stop.parse().ok()?,
-        step: step.parse().ok()?,
+        step,
         property: (*property).to_owned(),
     })
 }
@@ -357,6 +388,57 @@ mod tests {
     fn t72_malformed_int_picker_is_ignored() {
         assert_eq!(cmd("launch_int_picker", "Speed|%d|0|30|5"), None);
         assert_eq!(cmd("launch_int_picker", "Speed|%d|a|30|5|p"), None);
+    }
+
+    fn picker(start: i32, stop: i32, step: i32) -> IntPicker {
+        IntPicker {
+            title: "t".into(),
+            name_format: "%d".into(),
+            start,
+            stop,
+            step,
+            property: "p".into(),
+        }
+    }
+
+    #[test]
+    fn t_46a_026_values_step_from_start_and_leave_out_an_unreached_stop() {
+        let p = picker(0, 10, 3);
+        assert_eq!(p.values(), vec![0, 3, 6, 9]);
+        assert_eq!(
+            picker(0, 9, 3).values(),
+            vec![0, 3, 6, 9],
+            "a stop that is reached is kept"
+        );
+        assert!(
+            picker(5, 1, 1).values().is_empty(),
+            "start past stop is empty"
+        );
+    }
+
+    #[test]
+    fn t_46a_026_the_wheel_starts_on_the_default_or_index_zero_and_commits_the_selection() {
+        let p = picker(0, 10, 3);
+        assert_eq!(p.start_index(6), 2);
+        assert_eq!(
+            p.start_index(7),
+            0,
+            "a default outside the list starts at index 0 (E-46-028)"
+        );
+        assert_eq!(p.commit_value(1), Some(3));
+        assert_eq!(p.commit_value(9), None);
+    }
+
+    #[test]
+    fn t_46a_026_a_zero_or_negative_step_is_rejected_at_parse() {
+        assert_eq!(
+            cmd("launch_int_picker", "Speed|%d s|0|30|0|user-data/x"),
+            None
+        );
+        assert_eq!(
+            cmd("launch_int_picker", "Speed|%d s|0|30|-5|user-data/x"),
+            None
+        );
     }
 
     #[test]

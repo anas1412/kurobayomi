@@ -252,11 +252,24 @@ pub fn multi_choice_with(common: ItemCommon, pref: &Pref<BTreeSet<String>>, opti
 
 /// An integer slider. `subtitle` is shown as the value text.
 pub fn slider(title: &str, pref: &Pref<i32>, range: RangeInclusive<i32>, subtitle: Option<&str>, enabled: bool) -> PreferenceItem {
+    scaled_slider(title, pref, range, 1, subtitle, enabled)
+}
+
+/// A slider over `pref / scale` whose moves store `value * scale`: the E-Ink flash duration is stored in milliseconds
+/// and offered in 100 ms steps (`scale` 100).
+pub fn scaled_slider(
+    title: &str,
+    pref: &Pref<i32>,
+    range: RangeInclusive<i32>,
+    scale: i32,
+    subtitle: Option<&str>,
+    enabled: bool,
+) -> PreferenceItem {
     let steps = slider_steps(*range.start(), *range.end());
-    let stored = pref.get();
+    let stored = pref.get() / scale;
     let pref = pref.clone();
     let on_change = bind::veto(move |value: i32| {
-        let result = pref.set(value).map_err(|err| err.to_string());
+        let result = pref.set(value * scale).map_err(|err| err.to_string());
         async move { result.map(|()| true) }
     });
     PreferenceItem::Slider { common: common(title, subtitle, enabled), value: stored, range, steps, on_change }

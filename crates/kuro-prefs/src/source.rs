@@ -38,7 +38,7 @@ define_prefs! {
     /// `[sources]` section: the keys of Aniyomi `SourcePreferences`, minus the derived `animeext_updates_count` (T-19a-064).
     pub struct SourcePrefs in "sources" {
         source_display_mode: LibraryDisplayMode = "pref_display_mode_catalogue" => LibraryDisplayMode::DEFAULT;
-        enabled_languages: BTreeSet<String> = "source_languages" => default_enabled_languages(&system_locale());
+        enabled_languages: BTreeSet<String> = "source_languages" => kuro_i18n::source_names::default_enabled_languages(&system_locale());
         show_nsfw_source: bool = "show_nsfw_source" => true;
         /// Kurobayomi only (T-19a-066): shows the store entries that cannot run on Linux, with badges and no install.
         show_not_runnable: bool = "show_not_runnable" => false;
@@ -71,27 +71,12 @@ define_prefs! {
     }
 }
 
-/// The locale the process runs in: `LC_MESSAGES`, then `LANG` (T-18a-023). Empty when neither is set.
+/// The device language: the language part of the resolved UI locale of `kuro-i18n`, not an environment read (T-51a-035).
 pub fn system_locale() -> String {
-    locale_from(|name| std::env::var(name).ok())
+    kuro_i18n::source_names::device_language()
 }
 
-/// [`system_locale`] over any variable lookup.
-fn locale_from(var: impl Fn(&str) -> Option<String>) -> String {
-    ["LC_MESSAGES", "LANG"].iter().find_map(|name| var(name).filter(|v| !v.is_empty())).unwrap_or_default()
-}
-
-/// `LocaleHelper.getDefaultEnabledLanguages()`: `all`, `en` and the language subtag of `locale` in lower case. A locale
-/// with no usable language gives `all` and `en` only.
-pub fn default_enabled_languages(locale: &str) -> BTreeSet<String> {
-    let mut languages = BTreeSet::from(["all".to_owned(), "en".to_owned()]);
-    let subtag = locale.split(['.', '@', '_', '-']).next().unwrap_or_default().to_ascii_lowercase();
-    let usable = (2..=3).contains(&subtag.len()) && subtag.chars().all(|c| c.is_ascii_lowercase());
-    if usable && subtag != "c" && subtag != "posix" {
-        languages.insert(subtag);
-    }
-    languages
-}
+pub use kuro_i18n::source_names::default_enabled_languages;
 
 #[cfg(test)]
 mod tests {
@@ -108,16 +93,6 @@ mod tests {
             let row = REGISTRY.iter().find(|m| m.key == *key).unwrap_or_else(|| panic!("{field}: {key} not registered"));
             assert_eq!(row.table, "sources", "{key}");
         }
-    }
-
-    #[test]
-    fn the_locale_reads_lc_messages_before_lang_and_skips_empty_values() {
-        let env = |pairs: &'static [(&'static str, &'static str)]| {
-            move |name: &str| pairs.iter().find(|(k, _)| *k == name).map(|(_, v)| (*v).to_owned())
-        };
-        assert_eq!(locale_from(env(&[("LANG", "de_DE.UTF-8"), ("LC_MESSAGES", "fr_FR.UTF-8")])), "fr_FR.UTF-8");
-        assert_eq!(locale_from(env(&[("LANG", "de_DE.UTF-8"), ("LC_MESSAGES", "")])), "de_DE.UTF-8");
-        assert_eq!(locale_from(env(&[("LC_ALL", "ja_JP.UTF-8")])), "", "LC_ALL is not read");
     }
 
     #[test]

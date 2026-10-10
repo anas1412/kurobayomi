@@ -14,6 +14,7 @@ pub mod options;
 pub mod reveal;
 pub mod restore;
 pub mod schema;
+pub mod schema_text;
 pub mod screen;
 pub mod settings;
 pub mod storage_info;

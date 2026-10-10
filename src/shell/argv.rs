@@ -23,6 +23,9 @@ Options:
   --run-backup    run one automatic backup and exit
   --help          print this text and exit
 
+Quit policy: closing the last window quits the application, unless the torrent server or the HTTP server is running;
+then it keeps running without a window until you stop the server from its notice.
+
 Test hooks (ignored in release builds unless KUROBAYOMI_ALLOW_TEST_HOOKS=1):
   KUROBAYOMI_CRASH_TEST=1       panic 500 ms after the main window is shown
   KUROBAYOMI_CRASH_TEST=worker  panic inside a tokio task
@@ -81,16 +84,43 @@ pub enum LaunchRequest {
     OpenUri(String),
     /// A `--open <link>` deep link.
     Open(DeepLink),
+    /// A request the route table refuses (EC-07): the window shows its message and stays on the default tab.
+    Invalid(RouteError),
+}
+
+/// A launch request the window cannot route. Each one becomes a visible message (defect E-16).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RouteError {
+    /// `--type` names no kind (E-14).
+    UnknownKind(String),
+    /// An entry action without `--id` (E-18).
+    MissingId(String),
+    /// An action name that is not in the desktop action list.
+    UnknownAction(String),
+    /// A link the route table refuses (EC-17, EC-18).
+    Uri(super::uri::UriError),
+    /// A file or argument that is not a backup, a link or an option (EC-10).
+    Unrecognised(String),
+}
+
+impl std::fmt::Display for RouteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownKind(k) => write!(f, "Unknown search type {k}, use anime or manga"),
+            Self::MissingId(a) => write!(f, "{a} needs an entry id"),
+            Self::UnknownAction(a) => write!(f, "Unknown action {a}"),
+            Self::Uri(e) => e.fmt(f),
+            Self::Unrecognised(a) => write!(f, "{a} is not a backup file or a link"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArgError {
     MissingValue(String),
     UnknownAction(String),
-    UnknownType(String),
     BadId(String),
     UnknownOption(String),
-    UnexpectedArgument(String),
     BadLink(String),
 }
 
@@ -99,10 +129,8 @@ impl std::fmt::Display for ArgError {
         match self {
             Self::MissingValue(o) => write!(f, "{o} needs a value"),
             Self::UnknownAction(a) => write!(f, "unknown action {a}"),
-            Self::UnknownType(t) => write!(f, "unknown type {t}, use anime or manga"),
             Self::BadId(v) => write!(f, "--id must be a number, got {v}"),
             Self::UnknownOption(o) => write!(f, "unknown option {o}"),
-            Self::UnexpectedArgument(a) => write!(f, "unexpected argument {a}"),
             Self::BadLink(m) => f.write_str(m),
         }
     }
@@ -114,6 +142,27 @@ impl std::error::Error for ArgError {}
 const SKIPPED_WITH_VALUE: [&str; 2] = ["--open", "--crash-report"];
 /// Options without a value that belong to other handlers.
 const SKIPPED_FLAGS: [&str; 2] = ["--version", "--run-backup"];
+
+/// True for an `http://` or `https://` address (any case).
+pub fn is_web_address(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://")
+}
+
+/// The backup file an argument names, or `None`. A plain path is kept exactly as given (EC-24). A `file://` link is
+/// decoded and its path is used. The check is the extension of that path, never a suffix test on the whole text
+/// (E-11), so a link of another scheme whose query ends in `.tachibk` is not a backup.
+pub fn backup_path(arg: &str) -> Option<PathBuf> {
+    let path = match arg.split_once("://") {
+        None => PathBuf::from(arg),
+        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("file") => {
+            let path = &rest[rest.find('/')?..];
+            PathBuf::from(super::uri::percent_decode(path.split(['?', '#']).next().unwrap_or(""), false))
+        }
+        Some(_) => return None,
+    };
+    path.extension().is_some_and(|e| e == "tachibk").then_some(path)
+}
 
 /// Parses the arguments after the program name. Requests come out in order: action, search, then files and URIs.
 /// An empty `--search=` value produces no request.
@@ -153,9 +202,11 @@ pub fn parse_argv(args: &[String]) -> Result<Vec<LaunchRequest>, ArgError> {
             }
             n if SKIPPED_FLAGS.contains(&n) => {}
             n if n.starts_with("--") => return Err(ArgError::UnknownOption(arg.to_string())),
-            _ if arg.ends_with(".tachibk") => positional.push(LaunchRequest::OpenFile(PathBuf::from(arg))),
+            _ if backup_path(arg).is_some() => positional.extend(backup_path(arg).map(LaunchRequest::OpenFile)),
+            // a web address given as text is searched for, with the address in the search box (EC-11)
+            _ if is_web_address(arg) => positional.push(LaunchRequest::Search { query: arg.to_string(), kind: Kind::Anime }),
             _ if arg.contains("://") => positional.push(LaunchRequest::OpenUri(arg.to_string())),
-            _ => return Err(ArgError::UnexpectedArgument(arg.to_string())),
+            _ => positional.push(LaunchRequest::Invalid(RouteError::Unrecognised(arg.to_string()))),
         }
         i += 1;
     }
@@ -168,12 +219,11 @@ pub fn parse_argv(args: &[String]) -> Result<Vec<LaunchRequest>, ArgError> {
         out.push(LaunchRequest::Action { name: name.clone(), id: if needs_id(&name) { id } else { None } });
     }
     if let Some(query) = query.filter(|q| !q.is_empty()) {
-        let kind = match kind.as_deref().map(str::to_ascii_lowercase).as_deref() {
-            None | Some("anime") => Kind::Anime,
-            Some("manga") => Kind::Manga,
-            Some(other) => return Err(ArgError::UnknownType(other.to_string())),
-        };
-        out.push(LaunchRequest::Search { query, kind });
+        match kind.as_deref().map(str::to_ascii_lowercase).as_deref() {
+            None | Some("anime") => out.push(LaunchRequest::Search { query, kind: Kind::Anime }),
+            Some("manga") => out.push(LaunchRequest::Search { query, kind: Kind::Manga }),
+            Some(other) => out.push(LaunchRequest::Invalid(RouteError::UnknownKind(other.to_string()))),
+        }
     }
     out.extend(positional);
     Ok(out)
@@ -220,9 +270,62 @@ mod tests {
     }
 
     #[test]
-    fn empty_search_is_a_no_op_and_unknown_type_is_an_error() {
+    fn empty_search_is_a_no_op_and_unknown_type_is_a_route_error() {
+        // EC-05 and EC-07: no request for an empty query; an unknown kind is a request the window reports
         assert_eq!(parse_argv(&argv(&["--search="])), Ok(vec![]));
-        assert_eq!(parse_argv(&argv(&["--search=x", "--type=video"])), Err(ArgError::UnknownType("video".into())));
+        assert_eq!(parse_argv(&argv(&["--search=naruto", "--type=comic"])), Ok(vec![LaunchRequest::Invalid(RouteError::UnknownKind("comic".into()))]));
+    }
+
+    #[test]
+    fn a_web_address_given_as_text_is_searched_for() {
+        // EC-11
+        assert_eq!(
+            parse_argv(&argv(&["https://example.test/anime/1"])),
+            Ok(vec![LaunchRequest::Search { query: "https://example.test/anime/1".into(), kind: Kind::Anime }])
+        );
+        assert!(is_web_address("HTTP://x.test"));
+        assert!(!is_web_address("ftp://x.test"));
+    }
+
+    #[test]
+    fn backup_detection_looks_at_the_decoded_path_extension() {
+        // EC-09, EC-10, EC-24 and E-11 (TC-53-14)
+        let p = |a: &str| backup_path(a);
+        assert_eq!(p("/home/u/Downloads/backup.tachibk"), Some(PathBuf::from("/home/u/Downloads/backup.tachibk")));
+        assert_eq!(p("/home/u/Downloads/backup.tachibk.part"), None);
+        assert_eq!(p("/home/u/Descargas/Copia de seguridad.tachibk"), Some(PathBuf::from("/home/u/Descargas/Copia de seguridad.tachibk")));
+        assert_eq!(p("/home/u/100%25.tachibk"), Some(PathBuf::from("/home/u/100%25.tachibk")), "a plain path is never decoded");
+        assert_eq!(p("file:///x/a%20b.tachibk"), Some(PathBuf::from("/x/a b.tachibk")));
+        assert_eq!(p("file:///x/a.tachibk?x=1"), Some(PathBuf::from("/x/a.tachibk")));
+        assert_eq!(p("file:///x/a.tachibk.part"), None);
+        assert_eq!(p("kurobayomi://restore?file=/a/b.tachibk"), None, "a query that ends in the suffix is not a backup");
+        assert_eq!(p("file://"), None);
+    }
+
+    #[test]
+    fn a_backup_link_is_a_file_and_a_part_file_is_unrecognised_not_an_error() {
+        assert_eq!(parse_argv(&argv(&["file:///x/a%20b.tachibk"])), Ok(vec![LaunchRequest::OpenFile(PathBuf::from("/x/a b.tachibk"))]));
+        assert_eq!(
+            parse_argv(&argv(&["backup.tachibk.part"])),
+            Ok(vec![LaunchRequest::Invalid(RouteError::Unrecognised("backup.tachibk.part".into()))])
+        );
+        assert_eq!(
+            parse_argv(&argv(&["kurobayomi://restore?file=/a/b.tachibk"])),
+            Ok(vec![LaunchRequest::OpenUri("kurobayomi://restore?file=/a/b.tachibk".into())])
+        );
+    }
+
+    #[test]
+    fn the_quit_policy_is_in_the_help_text() {
+        assert!(USAGE.contains("Quit policy") && USAGE.contains("torrent server"));
+    }
+
+    #[test]
+    fn route_errors_have_visible_messages() {
+        assert_eq!(RouteError::UnknownKind("comic".into()).to_string(), "Unknown search type comic, use anime or manga");
+        assert_eq!(RouteError::MissingId("show-manga".into()).to_string(), "show-manga needs an entry id");
+        assert!(!RouteError::UnknownAction("x".into()).to_string().is_empty());
+        assert_eq!(RouteError::Unrecognised("a.part".into()).to_string(), "a.part is not a backup file or a link");
     }
 
     #[test]
@@ -241,7 +344,7 @@ mod tests {
     #[test]
     fn stray_arguments_are_rejected() {
         assert_eq!(parse_argv(&argv(&["--bogus"])), Err(ArgError::UnknownOption("--bogus".into())));
-        assert_eq!(parse_argv(&argv(&["notes.txt"])), Err(ArgError::UnexpectedArgument("notes.txt".into())));
+        assert_eq!(parse_argv(&argv(&["notes.txt"])), Ok(vec![LaunchRequest::Invalid(RouteError::Unrecognised("notes.txt".into()))]));
         assert_eq!(parse_argv(&argv(&["--search"])), Err(ArgError::MissingValue("--search".into())));
     }
 

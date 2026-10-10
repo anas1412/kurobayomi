@@ -77,7 +77,7 @@ pub fn page_opts(settings: &ViewerSettings, kind: ViewerKind, system_dark: bool)
             zoom_start: page_zoom::zoom_start(settings.zoom_start, reading_mode(kind)),
         },
         background: theme::background_for(settings.reader_theme, system_dark),
-        automatic_background: settings.reader_theme == 3,
+        automatic_background: settings.reader_theme == 3 && kind.is_pager(),
         double_tap_ms: settings.double_tap_anim_ms,
         long_tap: settings.long_tap,
         webtoon: !kind.is_pager(),
@@ -162,6 +162,14 @@ mod tests {
         let auto = settings(|p| p.reader_theme.set(3).unwrap());
         assert_eq!(page_opts(&auto, ViewerKind::Webtoon, true).background, Background::Gray);
         assert_eq!(page_opts(&auto, ViewerKind::Webtoon, false).background, Background::White);
+    }
+
+    #[test]
+    fn t054_the_automatic_background_is_for_the_pager_only() {
+        let auto = settings(|p| p.reader_theme.set(3).unwrap());
+        assert!(page_opts(&auto, ViewerKind::LeftToRight, false).automatic_background);
+        assert!(!page_opts(&auto, ViewerKind::Webtoon, false).automatic_background, "the webtoon keeps the theme colour");
+        assert!(!page_opts(&settings(|_| {}), ViewerKind::LeftToRight, false).automatic_background);
     }
 
     #[test]

@@ -49,6 +49,9 @@ pub enum UiAction {
     OpenDialog(Dialog),
     ConfirmCategory(CategoryConfirm),
     DismissDialog,
+    /// The change-category dialog closed without OK. In the add flow with `auto_open` the tracking sheet follows
+    /// (`autoOpenTrack`, E-74); the caller reads `auto_open` at this moment.
+    DismissCategory { auto_open: bool },
     /// The Back button or Escape: a selection is cleared first, and the page pops only when nothing is selected.
     Back,
     /// A download action on rows: the indicator of one row, or the Download swipe (`runChapterDownloadActions`).
@@ -82,6 +85,8 @@ pub struct Outcome {
     pub focus: Option<i64>,
     /// Back or Escape found nothing selected: pop the page.
     pub pop: bool,
+    /// Open the tracking sheet: the add flow's category dialog was dismissed with auto-open on (E-74).
+    pub open_tracking: bool,
 }
 
 #[derive(Debug)]
@@ -313,6 +318,11 @@ impl Page {
             }
             UiAction::OpenDialog(dialog) => page.dialog.open(dialog),
             UiAction::DismissDialog => page.dialog.dismiss(),
+            UiAction::DismissCategory { auto_open } => {
+                let add_flow = matches!(page.dialog.current(), Some(Dialog::ChangeCategory(d)) if d.add_flow);
+                page.dialog.dismiss_category(add_flow, auto_open);
+                out.open_tracking = page.dialog.take_tracking_intent();
+            }
             UiAction::ConfirmCategory(confirm) => {
                 page.dialog.dismiss();
                 out.cmds.push(confirm.into());
@@ -585,6 +595,20 @@ mod tests {
         assert!(page.ready().unwrap().dialog.current().is_none());
         page.apply(StoreEvent::Categories { all: vec![(4, "A".into())], membership: vec![4] }, 0);
         assert_eq!(page.ready().unwrap().category_membership, vec![4]);
+    }
+
+    #[test]
+    fn dismissing_the_add_flow_category_dialog_opens_tracking_only_with_auto_open() {
+        let dialog = |add_flow| Dialog::ChangeCategory(crate::entry_core::dialog::CategoryDialog::new(1, add_flow, &[(2, "A".into())], &[]));
+        let mut page = ready(1);
+        page.act(UiAction::OpenDialog(dialog(true)));
+        assert!(!page.act(UiAction::DismissCategory { auto_open: false }).open_tracking, "auto-open off");
+        page.act(UiAction::OpenDialog(dialog(true)));
+        let out = page.act(UiAction::DismissCategory { auto_open: true });
+        assert!(out.open_tracking && page.ready().unwrap().dialog.current().is_none(), "add flow with auto-open (E-74)");
+        page.act(UiAction::OpenDialog(dialog(false)));
+        assert!(!page.act(UiAction::DismissCategory { auto_open: true }).open_tracking, "not the add flow");
+        assert!(!page.act(UiAction::DismissCategory { auto_open: true }).open_tracking, "after OK nothing is open, no intent");
     }
 
     #[test]

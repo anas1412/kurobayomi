@@ -2,10 +2,15 @@
 //!
 //! Mode table: behaviour section 8.2. `TabletUiMode` comes from `kuro_prefs::ui`.
 
+use gtk::prelude::*;
 use kuro_prefs::ui::TabletUiMode;
 
-/// Width from which the window is wide (the mockup's existing threshold, `src/main.rs`).
-pub const WIDE_MIN_WIDTH_PX: i32 = 760;
+/// Width from which the window is wide in Automatic mode (`TABLET_UI_REQUIRED_SCREEN_WIDTH_DP`, table TC-53: 719 is
+/// compact, 720 is wide).
+pub const WIDE_MIN_WIDTH_PX: i32 = 720;
+
+/// The smallest window the app can be shrunk to (table TC-53, the phone size of the layout rules).
+pub const MIN_WINDOW_SIZE: (i32, i32) = (360, 480);
 
 /// Which tab chrome the window shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +29,11 @@ pub fn chrome_for(mode: TabletUiMode, width: i32, height: i32, maximized: bool) 
         TabletUiMode::NEVER => false,
     };
     if sidebar { Chrome::Sidebar } else { Chrome::BottomBar }
+}
+
+/// Sets the smallest size the window can be shrunk to (T-52a-044: 360 x 480).
+pub fn apply_minimum_size(win: &impl IsA<gtk::Widget>) {
+    win.set_size_request(MIN_WINDOW_SIZE.0, MIN_WINDOW_SIZE.1);
 }
 
 /// Which chrome elements are on screen.
@@ -56,11 +66,28 @@ mod tests {
     }
 
     #[test]
-    fn automatic_uses_the_760_px_breakpoint() {
+    fn automatic_uses_the_720_px_breakpoint() {
+        // TC-53: AUTO 719 px is compact, 720 px is wide
         assert_eq!(chrome(TabletUiMode::AUTOMATIC, 500, 800), Chrome::BottomBar);
-        assert_eq!(chrome(TabletUiMode::AUTOMATIC, 759, 800), Chrome::BottomBar);
-        assert_eq!(chrome(TabletUiMode::AUTOMATIC, 760, 800), Chrome::Sidebar);
+        assert_eq!(chrome(TabletUiMode::AUTOMATIC, 719, 800), Chrome::BottomBar);
+        assert_eq!(chrome(TabletUiMode::AUTOMATIC, 720, 800), Chrome::Sidebar);
         assert_eq!(chrome(TabletUiMode::AUTOMATIC, 900, 600), Chrome::Sidebar);
+    }
+
+    #[test]
+    fn table_tc_53_rows() {
+        // the rows of TC-53 in plans/52-util-app/p1-edge-cases-and-tests.md section 5.13
+        assert_eq!(chrome(TabletUiMode::AUTOMATIC, 719, 800), Chrome::BottomBar);
+        assert_eq!(chrome(TabletUiMode::AUTOMATIC, 720, 800), Chrome::Sidebar);
+        assert_eq!(chrome(TabletUiMode::LANDSCAPE, 1000, 800), Chrome::Sidebar);
+        assert_eq!(chrome(TabletUiMode::LANDSCAPE, 800, 800), Chrome::BottomBar, "a square window is not landscape");
+        assert_eq!(chrome(TabletUiMode::ALWAYS, 300, 300), Chrome::Sidebar);
+        assert_eq!(chrome(TabletUiMode::NEVER, 2000, 1000), Chrome::BottomBar);
+    }
+
+    #[test]
+    fn the_minimum_window_is_360_by_480() {
+        assert_eq!(MIN_WINDOW_SIZE, (360, 480));
     }
 
     #[test]
@@ -70,7 +97,7 @@ mod tests {
 
     #[test]
     fn always_is_sidebar_at_every_width_and_orientation() {
-        for (w, h) in [(500, 800), (500, 300), (760, 800), (900, 600), (900, 1200)] {
+        for (w, h) in [(500, 800), (500, 300), (720, 800), (900, 600), (900, 1200)] {
             assert_eq!(chrome(TabletUiMode::ALWAYS, w, h), Chrome::Sidebar, "{w}x{h}");
         }
     }
@@ -85,22 +112,22 @@ mod tests {
 
     #[test]
     fn never_is_bottom_bar_at_every_width_and_orientation() {
-        for (w, h) in [(500, 800), (500, 300), (760, 800), (900, 600), (900, 1200)] {
+        for (w, h) in [(500, 800), (500, 300), (720, 800), (900, 600), (900, 1200)] {
             assert_eq!(chrome(TabletUiMode::NEVER, w, h), Chrome::BottomBar, "{w}x{h}");
         }
     }
 
     #[test]
     fn every_mode_is_checked_at_the_three_breakpoint_widths() {
-        // widths 500, 760 and 900, portrait and landscape: the table has one answer per cell
+        // widths 500, 720 and 900, portrait and landscape: the table has one answer per cell
         let expect = |mode: TabletUiMode, w: i32, landscape: bool| match mode {
-            TabletUiMode::AUTOMATIC => if w >= 760 { Chrome::Sidebar } else { Chrome::BottomBar },
+            TabletUiMode::AUTOMATIC => if w >= WIDE_MIN_WIDTH_PX { Chrome::Sidebar } else { Chrome::BottomBar },
             TabletUiMode::ALWAYS => Chrome::Sidebar,
             TabletUiMode::LANDSCAPE => if landscape { Chrome::Sidebar } else { Chrome::BottomBar },
             TabletUiMode::NEVER => Chrome::BottomBar,
         };
         for mode in MODES {
-            for w in [500, 760, 900] {
+            for w in [500, 720, 900] {
                 for landscape in [false, true] {
                     let h = if landscape { w - 100 } else { w + 300 };
                     assert_eq!(chrome(mode, w, h), expect(mode, w, landscape), "{mode:?} {w}x{h}");

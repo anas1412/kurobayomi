@@ -117,6 +117,7 @@ impl AnimeEntryModel {
         if plan.any() {
             flow.begin_refresh();
         }
+        let tracking_count = store.track_summary(anime_id, anime.source)?.count as usize;
         Ok(Some(Self {
             flow,
             anime,
@@ -131,7 +132,7 @@ impl AnimeEntryModel {
             refresh_error: None,
             session_flags,
             downloaded: HashSet::new(),
-            tracking_count: store.track_count(anime_id)?,
+            tracking_count,
             season_extras: HashMap::new(),
         }))
     }
@@ -546,11 +547,11 @@ mod tests {
     }
 
     #[test]
-    fn the_tracker_count_is_read_at_load() {
+    fn the_tracker_count_counts_only_logged_in_trackers() {
         let (_dir, store, id) = with_episodes(true, true, 1, 0);
         assert_eq!(load(&store, id).tracking_count, 0);
         kuro_data::track::AnimeTrackRepo::new(store.db()).insert(&kuro_data::track::AnimeTrack { anime_id: id, ..kuro_data::track::AnimeTrack::new(2) }).unwrap();
-        assert_eq!(load(&store, id).tracking_count, 1);
+        assert_eq!(load(&store, id).tracking_count, 0, "a binding of a tracker that is not logged in does not count (T-TRK-12)");
     }
 
     #[test]

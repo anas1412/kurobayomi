@@ -377,6 +377,66 @@ impl<R: SearchHit> SearchScreen<R> {
     }
 }
 
+/// The keys the tracker search answers (T-28a-052). The field and the result list have their own Enter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchKey {
+    /// Enter while the search field has focus: runs the search.
+    EnterInField,
+    /// Enter while a result row has focus: tracks the selected row.
+    EnterOnRow,
+    Up,
+    Down,
+    Escape,
+}
+
+/// What a key asks the screen to do. The GUI runs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchKeyEffect {
+    /// Run the search with the field text.
+    Search,
+    /// Track the selected row.
+    Track,
+    /// Close the search.
+    Close,
+    /// The selection moved.
+    Moved,
+    /// Nothing to do.
+    Nothing,
+}
+
+impl<R: SearchHit> SearchScreen<R> {
+    /// Keyboard navigation (T-28a-052). Up and Down move the selection through the results, starting at the first
+    /// or the last row when none is selected. Enter on a row tracks it. Escape closes.
+    pub fn key(&mut self, key: SearchKey) -> SearchKeyEffect {
+        match key {
+            SearchKey::EnterInField => SearchKeyEffect::Search,
+            SearchKey::EnterOnRow if self.selected().is_some() => SearchKeyEffect::Track,
+            SearchKey::EnterOnRow => SearchKeyEffect::Nothing,
+            SearchKey::Escape => SearchKeyEffect::Close,
+            SearchKey::Up => self.step(-1),
+            SearchKey::Down => self.step(1),
+        }
+    }
+
+    fn step(&mut self, delta: isize) -> SearchKeyEffect {
+        let SearchState::Results(hits) = &self.state else {
+            return SearchKeyEffect::Nothing;
+        };
+        let keys: Vec<(TrackerId, i64)> = hits.iter().map(|h| h.list_key()).collect();
+        if keys.is_empty() {
+            return SearchKeyEffect::Nothing;
+        }
+        let current = self.selected.and_then(|k| keys.iter().position(|x| *x == k));
+        let next = match current {
+            None if delta > 0 => 0,
+            None => keys.len() - 1,
+            Some(i) => i.saturating_add_signed(delta).min(keys.len() - 1),
+        };
+        self.selected = Some(keys[next]);
+        SearchKeyEffect::Moved
+    }
+}
+
 /// Items of the long-press menu of a card, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CardMenuItem {
@@ -430,6 +490,34 @@ mod tests {
             hit(TrackerId::ANILIST, 2, "https://a.test/2"),
             hit(TrackerId::KITSU, 1, "https://k.test/1"),
         ]
+    }
+
+    #[test]
+    fn t_28a_052_up_and_down_move_the_selection_and_enter_tracks_it() {
+        let (mut screen, _) = SearchScreen::<AnimeTrackSearch>::open("x", None, true);
+        screen.finish(Ok(results()));
+        assert_eq!(screen.key(SearchKey::Down), SearchKeyEffect::Moved);
+        assert_eq!(screen.selected().map(|h| h.list_key()), Some((TrackerId::ANILIST, 1)));
+        assert_eq!(screen.key(SearchKey::Down), SearchKeyEffect::Moved);
+        assert_eq!(screen.selected().map(|h| h.list_key()), Some((TrackerId::ANILIST, 2)));
+        screen.key(SearchKey::Down);
+        screen.key(SearchKey::Down);
+        assert_eq!(screen.selected().map(|h| h.list_key()), Some((TrackerId::KITSU, 1)), "the last row stays");
+        screen.key(SearchKey::Up);
+        assert_eq!(screen.selected().map(|h| h.list_key()), Some((TrackerId::ANILIST, 2)));
+        assert_eq!(screen.key(SearchKey::EnterOnRow), SearchKeyEffect::Track);
+        assert_eq!(screen.key(SearchKey::Escape), SearchKeyEffect::Close);
+    }
+
+    #[test]
+    fn t_28a_052_enter_in_the_field_searches_and_up_selects_the_last_row() {
+        let (mut screen, _) = SearchScreen::<AnimeTrackSearch>::open("x", None, true);
+        assert_eq!(screen.key(SearchKey::Up), SearchKeyEffect::Nothing, "no results yet");
+        assert_eq!(screen.key(SearchKey::EnterInField), SearchKeyEffect::Search);
+        screen.finish(Ok(results()));
+        assert_eq!(screen.key(SearchKey::EnterOnRow), SearchKeyEffect::Nothing, "no row selected");
+        assert_eq!(screen.key(SearchKey::Up), SearchKeyEffect::Moved);
+        assert_eq!(screen.selected().map(|h| h.list_key()), Some((TrackerId::KITSU, 1)));
     }
 
     #[test]

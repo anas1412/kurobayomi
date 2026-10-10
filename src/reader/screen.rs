@@ -24,7 +24,7 @@ use kuro_prefs::library::LibraryPrefs;
 use kuro_data::chapter::Chapter;
 use kuro_db::Db;
 use kuro_platform::toast::{ToastLength, Toaster};
-use kuro_data::manga::{MangaRepo, MangaUpdate};
+use kuro_data::manga::{Manga, MangaRepo, MangaUpdate};
 use kuro_prefs::reader::{ReaderOrientation, ReaderPrefs, ReadingMode};
 use tokio::sync::watch;
 
@@ -199,6 +199,33 @@ impl ReaderCore {
         ViewerSettings::from_prefs(&self.deps.prefs)
     }
 
+    /// The chapter list rules, from the skip preferences of the reader.
+    fn list_options(&self, manga: &Manga) -> ListOptions {
+        let prefs = &self.deps.prefs;
+        ListOptions {
+            skip_read: prefs.skip_read.get(),
+            skip_filtered: prefs.skip_filtered.get(),
+            skip_dupe: prefs.skip_dupe.get(),
+            downloaded_only: self.deps.downloaded_only,
+            chapter_flags: manga.chapter_flags,
+        }
+    }
+
+    /// Builds the chapter list again after a skip rule changed (E-LIST-1). The chapter being read stays open with its
+    /// loaded pages.
+    pub fn rebuild_list(&self) -> Result<(), String> {
+        let Some(current) = self.session.borrow().as_ref().and_then(|s| s.current_chapter().map(|c| c.key().id)) else {
+            return Ok(());
+        };
+        let opened = open_list(Arc::clone(&self.deps.db), self.deps.manga_id, current, |manga| self.list_options(manga), |chapter| {
+            (self.deps.is_downloaded)(chapter)
+        })?;
+        if let Some(session) = self.session.borrow_mut().as_mut() {
+            session.replace_list(opened.chapters);
+        }
+        Ok(())
+    }
+
     /// The preference store handle a viewer follows for live changes (T-44a-005).
     pub fn reader_prefs(&self) -> ReaderPrefs {
         self.deps.prefs.clone()
@@ -210,19 +237,9 @@ impl ReaderCore {
         *self.session.borrow_mut() = None;
         let prefs = &self.deps.prefs;
         let start = self.start();
-        let opened = open_list(
-            Arc::clone(&self.deps.db),
-            self.deps.manga_id,
-            start.chapter_id,
-            |manga| ListOptions {
-                skip_read: prefs.skip_read.get(),
-                skip_filtered: prefs.skip_filtered.get(),
-                skip_dupe: prefs.skip_dupe.get(),
-                downloaded_only: self.deps.downloaded_only,
-                chapter_flags: manga.chapter_flags,
-            },
-            |chapter| (self.deps.is_downloaded)(chapter),
-        )
+        let opened = open_list(Arc::clone(&self.deps.db), self.deps.manga_id, start.chapter_id, |manga| self.list_options(manga), |chapter| {
+            (self.deps.is_downloaded)(chapter)
+        })
         .map_err(LoadError::new)?;
         let preserve = prefs.preserve_reading_position.get();
         let chapter = Rc::clone(&opened.chapters[opened.index]);
@@ -593,6 +610,8 @@ struct Screen {
     viewer_box: gtk::Box,
     /// The viewer attached by area 44. The slider moves it; with none attached the slider has nothing to move.
     viewer_slot: RefCell<ViewerSlot>,
+    /// The reader menu's flag, read by the viewers (long tap, volume keys); `set_menu` keeps it current.
+    menu_open: Rc<Cell<bool>>,
     /// The reading mode the attached viewer was built for, so a reload knows whether the mode changed.
     viewer_kind: Cell<Option<ViewerKind>>,
     /// The core's event feed, taken once the initial load has made it (T-043a-086).
@@ -708,6 +727,7 @@ pub fn open_with(
         viewer_box: viewer.clone(),
         viewer_slot: RefCell::new(None),
         viewer_kind: Cell::new(None),
+        menu_open: Rc::new(Cell::new(state::UiState::default().menu_visible)),
         events: RefCell::new(None),
         tint,
         nav_overlay,
@@ -868,6 +888,13 @@ fn apply_effect(screen: &Screen, effect: Effect) {
             }
         }
         Effect::Brightness | Effect::ColorFilter => screen.tint.apply(&screen.core.deps.prefs),
+        Effect::ChapterList => match screen.core.rebuild_list() {
+            Ok(()) => {
+                reload_chapters(screen);
+                refresh(screen);
+            }
+            Err(error) => tracing::warn!(%error, "the chapter list could not be rebuilt after a skip rule changed"),
+        },
     }
 }
 
@@ -900,6 +927,7 @@ fn apply_fullscreen(screen: &Screen, menu_visible: bool) {
 
 fn set_menu(screen: &Screen, visible: bool) {
     screen.ui.borrow_mut().set_menu_visible(visible);
+    screen.menu_open.set(visible);
     screen.top.set_reveal_child(visible);
     screen.bottom.set_reveal_child(visible);
     refresh(screen);
@@ -1218,6 +1246,7 @@ fn install_viewer(screen: &Rc<Screen>) {
         settings: screen.core.viewer_settings(),
         prefs: Some(screen.core.reader_prefs()),
         downloads: screen.core.downloads(),
+        menu_open: Rc::clone(&screen.menu_open),
     };
     // the new-user flag shows the overlay once; the preference is cleared as soon as it is read (`ViewerConfig`)
     let prefs = screen.core.reader_prefs();

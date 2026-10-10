@@ -95,6 +95,14 @@ pub mod keys {
     pub const PREF_PIP_EPISODE_TOASTS: &str = "pref_pip_episode_toasts";
     pub const PREF_PIP_ON_EXIT: &str = "pref_pip_on_exit";
     pub const PIP_REPLACE_WITH_PREVIOUS: &str = "pip_replace_with_previous";
+    pub const PREF_REMEMBER_DECODER: &str = "pref_remember_decoder";
+    pub const PLAYER_DECODER: &str = "player_decoder";
+    pub const PREF_TORRSERVER_ENABLE: &str = "pref_torrserver_enable";
+    pub const PREF_TORRSERVER_SHOWNOTICE: &str = "pref_torrserver_shownotice";
+    pub const PREF_TORRSERVER_PORT: &str = "pref_torrserver_port";
+    pub const PREF_TORRSERVER_PROXYMODE: &str = "pref_torrserver_proxymode";
+    pub const PREF_TORRSERVER_PROXYURL: &str = "pref_torrserver_proxyurl";
+    pub const PREF_TORRSERVER_TACKERS: &str = "pref_torrserver_tackers";
     pub const PREF_ALWAYS_USE_EXTERNAL_PLAYER: &str = "pref_always_use_external_player";
     pub const EXTERNAL_PLAYER_PREFERENCE: &str = "external_player_preference";
     pub const PREF_PLAYER_SPEED: &str = "pref_player_speed";
@@ -135,7 +143,7 @@ pub mod keys {
 
 /// Every key, in the order of the data doc (section 4.1 to 4.6, then the keys read from other
 /// files).
-pub const CATALOGUE: [PrefKey; 96] = [
+pub const CATALOGUE: [PrefKey; 104] = [
     PrefKey {
         key: keys::MPV_SCRIPTS,
         default: PrefDefault::Bool(false),
@@ -375,6 +383,38 @@ pub const CATALOGUE: [PrefKey; 96] = [
     PrefKey {
         key: keys::PIP_REPLACE_WITH_PREVIOUS,
         default: PrefDefault::Bool(false),
+    },
+    PrefKey {
+        key: keys::PREF_REMEMBER_DECODER,
+        default: PrefDefault::Bool(false),
+    },
+    PrefKey {
+        key: keys::PLAYER_DECODER,
+        default: PrefDefault::Str(""),
+    },
+    PrefKey {
+        key: keys::PREF_TORRSERVER_ENABLE,
+        default: PrefDefault::Bool(false),
+    },
+    PrefKey {
+        key: keys::PREF_TORRSERVER_SHOWNOTICE,
+        default: PrefDefault::Bool(false),
+    },
+    PrefKey {
+        key: keys::PREF_TORRSERVER_PORT,
+        default: PrefDefault::Str("8090"),
+    },
+    PrefKey {
+        key: keys::PREF_TORRSERVER_PROXYMODE,
+        default: PrefDefault::Enum("None"),
+    },
+    PrefKey {
+        key: keys::PREF_TORRSERVER_PROXYURL,
+        default: PrefDefault::Str(""),
+    },
+    PrefKey {
+        key: keys::PREF_TORRSERVER_TACKERS,
+        default: PrefDefault::Str(crate::torrent::trackers::DEFAULT_TRACKER_PREF),
     },
     PrefKey {
         key: keys::PREF_ALWAYS_USE_EXTERNAL_PLAYER,
@@ -644,15 +684,70 @@ pub fn enum_text<E: NamedEnum>(value: E) -> &'static str {
     value.name()
 }
 
+/// The brightness or volume to restore when a session starts (T-45b-053). It is restored only when remembering is on
+/// and a level was saved (a stored value below zero means none was).
+pub fn remembered_level(remember: bool, stored: f64) -> Option<f64> {
+    (remember && stored >= 0.0).then_some(stored)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn t_45b_053_a_level_is_restored_only_when_remembered_and_saved() {
+        assert_eq!(remembered_level(true, 0.4), Some(0.4));
+        assert_eq!(
+            remembered_level(true, 0.0),
+            Some(0.0),
+            "zero is a saved level"
+        );
+        assert_eq!(
+            remembered_level(true, -1.0),
+            None,
+            "-1 means none was saved"
+        );
+        assert_eq!(remembered_level(false, 0.4), None, "off by default");
+    }
+
+    #[test]
+    fn t_45b_054_display_preferences_have_the_source_defaults() {
+        let default_of = |key: &str| find(key).map(|entry| entry.default);
+        assert_eq!(
+            default_of(keys::PREF_PANEL_OPACITY),
+            Some(PrefDefault::Int(60))
+        );
+        assert_eq!(
+            default_of(keys::PREF_REDUCE_MOTION),
+            Some(PrefDefault::Bool(false))
+        );
+        assert_eq!(
+            default_of(keys::PREF_DISPLAY_VOL_AS_PER),
+            Some(PrefDefault::Bool(true))
+        );
+        assert_eq!(
+            default_of(keys::PREF_PLAYER_TIME_TO_DISAPPEAR),
+            Some(PrefDefault::Int(4000))
+        );
+        assert_eq!(
+            default_of(keys::PREF_SHOW_SYSTEM_STATUS_BAR),
+            Some(PrefDefault::Bool(false))
+        );
+    }
+
+    #[test]
+    fn t_46b_043_the_remembered_decoder_is_off_by_default() {
+        assert_eq!(
+            find(keys::PREF_REMEMBER_DECODER).map(|e| e.default),
+            Some(PrefDefault::Bool(false))
+        );
+    }
+
+    #[test]
     fn keys_are_unique_and_every_source_key_is_present() {
         let mut seen = std::collections::HashSet::new();
         assert!(CATALOGUE.iter().all(|e| seen.insert(e.key)));
-        assert_eq!(CATALOGUE.len(), 96);
+        assert_eq!(CATALOGUE.len(), 104);
         for key in [
             "pref_audio_lang",
             "pref_subtitle_lang",
@@ -776,6 +871,14 @@ mod tests {
             ("auto_download_while_watching", Int(0)),
             ("remove_after_read_slots", Int(-1)),
             ("mark_duplicate_seen_episode_seen", StringSet(&[])),
+            ("pref_remember_decoder", Bool(false)),
+            ("player_decoder", Str("")),
+            ("pref_torrserver_enable", Bool(false)),
+            ("pref_torrserver_shownotice", Bool(false)),
+            ("pref_torrserver_port", Str("8090")),
+            ("pref_torrserver_proxymode", Enum("None")),
+            ("pref_torrserver_proxyurl", Str("")),
+            ("pref_torrserver_tackers", Str(crate::torrent::trackers::DEFAULT_TRACKER_PREF)),
         ];
         for (key, want) in table {
             assert_eq!(find(key).map(|e| e.default), Some(*want), "{key}");

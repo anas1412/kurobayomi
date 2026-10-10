@@ -10,7 +10,7 @@ use kuro_prefs::ui::{NavStyle, StartScreen, ThemeMode};
 
 use crate::pref_model::bind;
 use crate::pref_model::model::{Preference, PreferenceItem};
-use crate::settings_ui::rows::{enum_choice, group, switch, switch_sub, text_choice, REQUIRES_RESTART};
+use crate::settings_ui::rows::{enum_choice, group, switch_sub, switch_with, text_choice, REQUIRES_RESTART};
 
 /// XDG portal `color-scheme` value for "prefer dark" (0 = no preference, 2 = light).
 pub const PORTAL_PREFER_DARK: u32 = 1;
@@ -76,13 +76,15 @@ pub fn theme_mode_row(prefs: &Prefs) -> PreferenceItem {
     if let PreferenceItem::BasicList { on_change, .. } = &mut row {
         let written = Rc::clone(on_change);
         let stored = prefs.ui.theme_mode.clone();
+        let amoled = prefs.ui.theme_dark_amoled.clone();
         *on_change = bind::veto(move |key: String| {
             let result = written(key);
-            let stored = stored.clone();
+            let (stored, amoled) = (stored.clone(), amoled.clone());
             async move {
                 let result = result.await;
                 if result == Ok(true) {
                     apply_theme_mode(stored.get());
+                    apply_saved_pure_black(amoled.get(), stored.get());
                 }
                 result
             }
@@ -178,7 +180,7 @@ pub fn open_start_tab(tabs: &gtk::Stack, prefs: &Prefs) {
 pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     let today = Local::now().date_naive();
     vec![
-        group("Theme", vec![theme_mode_row(prefs), switch("Pure black dark mode", &prefs.ui.theme_dark_amoled, true)]),
+        group("Theme", std::iter::once(theme_mode_row(prefs)).chain(amoled_row(prefs, prefs.ui.theme_mode.get(), portal_color_scheme())).collect()),
         group(
             "Display",
             vec![start_screen_row(prefs), nav_style_row(prefs), date_format_row(prefs, today), relative_time_row(prefs, today)],
@@ -188,7 +190,47 @@ pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
 
 /// The pure-black switch, offered only while the dark theme is in effect (none otherwise).
 pub fn amoled_row(prefs: &Prefs, mode: ThemeMode, portal_color_scheme: Option<u32>) -> Option<PreferenceItem> {
-    amoled_visible(mode, portal_color_scheme).then(|| switch("Pure black dark mode", &prefs.ui.theme_dark_amoled, true))
+    let dark = effective_dark(mode, portal_color_scheme);
+    amoled_visible(mode, portal_color_scheme).then(|| {
+        let veto = bind::veto(move |on: bool| {
+            apply_pure_black(on, dark);
+            async { Ok(true) }
+        });
+        switch_with("Pure black dark mode", None, &prefs.ui.theme_dark_amoled, true, veto)
+    })
+}
+
+/// The CSS of pure black dark mode (T-47a-014): window and background surfaces at #000000.
+const PURE_BLACK_CSS: &str = "window, .background { background-color: #000000; }";
+
+/// The override CSS for the switch and the dark state: the black surfaces only while both hold.
+pub fn pure_black_css(on: bool, dark: bool) -> &'static str {
+    if on && dark { PURE_BLACK_CSS } else { "" }
+}
+
+thread_local! {
+    /// The pure-black provider, added to the display once and swapped in place.
+    static PURE_BLACK: std::cell::RefCell<Option<gtk::CssProvider>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Applies pure black live (T-47a-014): a CSS provider swap, no restart.
+pub fn apply_pure_black(on: bool, dark: bool) {
+    let Some(display) = gtk::gdk::Display::default() else { return };
+    let provider = PURE_BLACK.with(|slot| {
+        slot.borrow_mut()
+            .get_or_insert_with(|| {
+                let provider = gtk::CssProvider::new();
+                gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_USER);
+                provider
+            })
+            .clone()
+    });
+    provider.load_from_string(pure_black_css(on, dark));
+}
+
+/// Applies the stored pure-black choice for the stored theme mode, at start and after a mode change.
+pub fn apply_saved_pure_black(on: bool, mode: ThemeMode) {
+    apply_pure_black(on, effective_dark(mode, portal_color_scheme()));
 }
 
 #[cfg(test)]
@@ -208,6 +250,13 @@ mod tests {
         assert!(!effective_dark(ThemeMode::SYSTEM, Some(2)));
         assert!(!effective_dark(ThemeMode::SYSTEM, Some(0)));
         assert!(!effective_dark(ThemeMode::SYSTEM, None));
+    }
+
+    #[test]
+    fn pure_black_css_is_set_only_while_the_switch_is_on_and_dark_is_in_effect() {
+        assert!(pure_black_css(true, true).contains("#000000"));
+        assert_eq!(pure_black_css(true, false), "");
+        assert_eq!(pure_black_css(false, true), "");
     }
 
     #[test]

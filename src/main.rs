@@ -204,6 +204,7 @@ fn build_window(app: &gtk::Application) {
     let prefs = settings_ui::route::prefs();
     settings_ui::appearance::open_start_tab(&tabs, &prefs);
     settings_ui::appearance::apply_theme_mode(prefs.ui.theme_mode.get());
+    settings_ui::appearance::apply_saved_pure_black(prefs.ui.theme_dark_amoled.get(), prefs.ui.theme_mode.get());
     // one selection for every layout: the sidebar and the bottom bar show the same tab (T-36a-004)
     let host = shell::Shell::get().expect("the shell is installed in main");
     let home = host.home_tabs(prefs.ui.start_screen.get(), prefs.ui.nav_style.get());
@@ -326,6 +327,7 @@ fn build_window(app: &gtk::Application) {
     mouse_back.connect_pressed(move |_, _, _, _| go_back());
     win.add_controller(mouse_back);
 
+    shell::layout::apply_minimum_size(&win);
     // dev hooks: KUROBAYOMI_OPEN=<screen id> starts on that screen; KUROBAYOMI_SMOKE=1 opens every
     // screen, sheet and dialog once and quits (a panic or GTK critical shows up in the output)
     if let Some((w, h)) = std::env::var("KUROBAYOMI_SIZE").ok().and_then(|v| v.split_once('x').map(|(w, h)| (w.parse().unwrap_or(1180), h.parse().unwrap_or(780)))) {

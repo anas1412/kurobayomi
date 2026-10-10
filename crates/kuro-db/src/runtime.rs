@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use kuro_platform::paths::Paths;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
@@ -22,6 +23,21 @@ pub const READERS: usize = 4;
 
 /// Messages a subscription may fall behind by. Past this it re-queries without knowing what changed.
 const CHANGE_QUEUE: usize = 256;
+
+/// Committed write transactions between two `PRAGMA wal_checkpoint(PASSIVE)` runs (T-04a-032).
+pub const CHECKPOINT_EVERY: u64 = 1000;
+
+/// Uptime between two `PRAGMA optimize` runs while the handle is open (T-04a-032).
+pub const OPTIMIZE_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Housekeeping counters of the writer. Runs after a commit, never inside a write transaction.
+#[derive(Debug)]
+struct Upkeep {
+    commits: u64,
+    checkpoints: u64,
+    optimizes: u64,
+    optimized_at: Instant,
+}
 
 /// Which database file a handle opens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +83,7 @@ pub struct Db {
     pending: Arc<Pending>,
     /// One message per committed write that touched a table.
     pub(crate) changes: broadcast::Sender<Changed>,
+    upkeep: Mutex<Upkeep>,
 }
 
 impl Db {
@@ -93,6 +110,7 @@ impl Db {
             .collect::<DbResult<Vec<_>>>()?;
         let pending = notify::install(&writer)?;
         let (changes, _) = broadcast::channel(CHANGE_QUEUE);
+        let upkeep = Upkeep { commits: 0, checkpoints: 0, optimizes: 0, optimized_at: Instant::now() };
         Ok(Self {
             path: path.to_path_buf(),
             writer: Mutex::new(writer),
@@ -100,6 +118,7 @@ impl Db {
             next_reader: AtomicUsize::new(0),
             pending,
             changes,
+            upkeep: Mutex::new(upkeep),
         })
     }
 
@@ -126,7 +145,35 @@ impl Db {
             // A send with no subscriber is the normal case, so its error is ignored.
             let _ = self.changes.send(changed);
         }
+        self.after_commit(&conn);
         Ok(value)
+    }
+
+    /// Periodic upkeep after a committed write: a passive checkpoint every [`CHECKPOINT_EVERY`] commits and
+    /// `PRAGMA optimize` once per [`OPTIMIZE_EVERY`] of uptime. The write already committed, so a failure here
+    /// is logged, never returned.
+    fn after_commit(&self, conn: &Connection) {
+        let mut up = lock(&self.upkeep);
+        up.commits += 1;
+        if up.commits % CHECKPOINT_EVERY == 0 {
+            match conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(())) {
+                Ok(()) => up.checkpoints += 1,
+                Err(err) => tracing::warn!(error = %err, "passive WAL checkpoint failed"),
+            }
+        }
+        if up.optimized_at.elapsed() >= OPTIMIZE_EVERY {
+            match conn.execute_batch("PRAGMA optimize") {
+                Ok(()) => up.optimizes += 1,
+                Err(err) => tracing::warn!(error = %err, "PRAGMA optimize failed"),
+            }
+            up.optimized_at = Instant::now();
+        }
+    }
+
+    /// `(checkpoints, optimizes)` run by the upkeep so far, for tests and diagnostics.
+    pub fn upkeep_counts(&self) -> (u64, u64) {
+        let up = lock(&self.upkeep);
+        (up.checkpoints, up.optimizes)
     }
 
     /// Shutdown housekeeping on the writer: lets SQLite refresh its statistics and folds the WAL into the
@@ -447,7 +494,7 @@ mod publication_tests {
             .unwrap();
         }
         assert_eq!(DbKind::Anime.file_name(), "anime.db");
-        assert_eq!(DbKind::Anime.schema_version(), 139);
+        assert_eq!(DbKind::Anime.schema_version(), 140);
         assert_eq!(DbKind::Manga.file_name(), "manga.db");
         assert_eq!(DbKind::Manga.schema_version(), 34);
     }
@@ -503,5 +550,35 @@ mod publication_tests {
         anime.write(|tx| Ok(tx.execute("INSERT INTO categories(_id, name, sort, flags) VALUES (1, 'a', 0, 0)", [])?)).unwrap();
         assert_eq!(drain(&mut anime_rx), 1, "the anime write publishes on the anime handle");
         assert_eq!(drain(&mut manga_rx), 0, "the anime write never publishes on the manga handle");
+    }
+}
+
+#[cfg(test)]
+mod upkeep_tests {
+    use super::*;
+    use crate::schema_manga;
+
+    #[test]
+    fn a_passive_checkpoint_runs_after_every_thousand_commits_and_not_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("manga.db");
+        let db = Db::new(&path, schema_manga::open(&path).unwrap()).unwrap();
+        for _ in 0..(CHECKPOINT_EVERY - 1) {
+            db.write(|_tx| Ok(())).unwrap();
+        }
+        assert_eq!(db.upkeep_counts(), (0, 0), "no checkpoint before the 1000th commit");
+        db.write(|_tx| Ok(())).unwrap();
+        assert_eq!(db.upkeep_counts().0, 1, "the 1000th commit checkpoints once");
+    }
+
+    #[test]
+    fn a_failed_write_is_not_counted_as_a_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("manga.db");
+        let db = Db::new(&path, schema_manga::open(&path).unwrap()).unwrap();
+        for _ in 0..CHECKPOINT_EVERY {
+            let _ = db.write::<()>(|_tx| Err(DbError::Task("boom".into())));
+        }
+        assert_eq!(db.upkeep_counts(), (0, 0));
     }
 }

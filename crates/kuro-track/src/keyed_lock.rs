@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use tokio::task::JoinError;
 
 // ponytail: the table keeps one entry per key the session has written and never shrinks. Prune it if it ever shows up
@@ -16,6 +16,20 @@ use tokio::task::JoinError;
 pub struct KeyedLocks(Mutex<HashMap<i64, Arc<AsyncMutex<()>>>>);
 
 impl KeyedLocks {
+    fn lock_for(&self, key: i64) -> Arc<AsyncMutex<()>> {
+        let mut map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        Arc::clone(
+            map.entry(key)
+                .or_insert_with(|| Arc::new(AsyncMutex::new(()))),
+        )
+    }
+
+    /// Waits for the lock of `key` and holds it until the guard is dropped. For work that borrows its data, which cannot
+    /// run on a spawned task. Callers that hold the guard must not drop it while a second write is still pending.
+    pub async fn hold(&self, key: i64) -> OwnedMutexGuard<()> {
+        self.lock_for(key).lock_owned().await
+    }
+
     /// Runs `work` while holding the lock of `key`, on a spawned task. The task finishes even if the caller is dropped.
     /// A panic inside `work` comes back as the `JoinError`.
     pub async fn run<T, F>(self: &Arc<Self>, key: i64, work: F) -> Result<T, JoinError>
@@ -23,13 +37,7 @@ impl KeyedLocks {
         T: Send + 'static,
         F: Future<Output = T> + Send + 'static,
     {
-        let lock = {
-            let mut map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            Arc::clone(
-                map.entry(key)
-                    .or_insert_with(|| Arc::new(AsyncMutex::new(()))),
-            )
-        };
+        let lock = self.lock_for(key);
         tokio::spawn(async move {
             let _held = lock.lock().await;
             work.await
@@ -98,5 +106,25 @@ mod tests {
         // The first write never ends, so only its own task is stuck. Key 2 still finishes.
         let (_, got) = tokio::join!(tokio::time::timeout(Duration::from_millis(50), held), other);
         assert!(got.is_ok_and(|r| r.is_ok()));
+    }
+}
+
+#[cfg(test)]
+mod hold_tests {
+    use std::time::Duration;
+
+    use super::KeyedLocks;
+
+    #[tokio::test]
+    async fn t_29a_055_a_second_hold_for_one_key_waits_and_another_key_does_not() {
+        let locks = KeyedLocks::default();
+        let first = locks.hold(16498).await;
+        let same = tokio::time::timeout(Duration::from_millis(30), locks.hold(16498)).await;
+        assert!(same.is_err(), "the second write for one title waits");
+        let other = tokio::time::timeout(Duration::from_millis(30), locks.hold(1)).await;
+        assert!(other.is_ok(), "a different title is not held back");
+        drop(first);
+        let after = tokio::time::timeout(Duration::from_millis(200), locks.hold(16498)).await;
+        assert!(after.is_ok(), "the waiting write runs once the first ends");
     }
 }

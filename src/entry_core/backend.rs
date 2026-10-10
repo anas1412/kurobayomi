@@ -39,7 +39,7 @@ pub trait Backend: Send + Sync + 'static {
     /// Binds the enhanced trackers of the source to a manga that just joined the library (`bindEnhancedTrackers`).
     fn bind_enhanced(&self, _manga_id: i64) {}
     /// Whether a tracker is logged in: the tracking button opens the tracking sheet then, the tracking settings
-    /// otherwise (E-25). The app has no tracker session yet, so the default is no.
+    /// otherwise (E-25). The default is no; the app's backends read the published tracker session.
     fn has_logged_in_tracker(&self) -> bool {
         false
     }
@@ -71,6 +71,9 @@ impl StubBackend {
 const LOCAL_SOURCE_ID: i64 = kuro_source::local::LOCAL_SOURCE_ID;
 
 impl Backend for StubBackend {
+    fn has_logged_in_tracker(&self) -> bool {
+        crate::entry_core::tracking::session::has_logged_in()
+    }
     fn source_info(&self, source_id: i64) -> SourceInfo {
         if source_id == LOCAL_SOURCE_ID {
             return SourceInfo {

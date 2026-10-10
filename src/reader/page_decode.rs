@@ -82,6 +82,85 @@ pub fn limit_edge(page: DecodedPage, max_edge: u32) -> DecodedPage {
     }
 }
 
+/// One frame of a page: its pixels and how long it stays on screen, in milliseconds (0 for a still image).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Frame {
+    pub page: DecodedPage,
+    pub delay_ms: u32,
+}
+
+/// The frames a player keeps of one animation. A longer animation plays its first frames only (a bound on memory).
+pub const MAX_FRAMES: usize = 300;
+/// The shortest frame delay a player shows, in milliseconds (E-46).
+pub const MIN_DELAY_MS: u32 = 10;
+
+/// The frames of a page (T-44a-051). An animated GIF or WebP gives every frame with its delay, clamped to
+/// [`MIN_DELAY_MS`]. Anything else, and a still GIF or WebP, is one frame with no delay. An animation that fails part
+/// way keeps the frames before the failure. Animated AVIF, HEIF and JXL are a still first frame (T-44a-052).
+pub fn decode_frames(bytes: &[u8]) -> Result<Vec<Frame>, DecodeError> {
+    use image::AnimationDecoder;
+    let animated = match image::guess_format(bytes) {
+        Ok(image::ImageFormat::Gif) => image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes))
+            .ok()
+            .map(|d| animation_frames(d.into_frames())),
+        Ok(image::ImageFormat::WebP) => image::codecs::webp::WebPDecoder::new(std::io::Cursor::new(bytes))
+            .ok()
+            .map(|d| animation_frames(d.into_frames())),
+        _ => None,
+    };
+    match animated {
+        Some(frames) if frames.len() > 1 => Ok(frames),
+        _ => decode_rgba(bytes).map(|page| vec![Frame { page, delay_ms: 0 }]),
+    }
+}
+
+/// How many times an animation plays through, read from the file itself because the image crate does not expose it
+/// (T-44a-051). `None` loops forever. A GIF carries the NETSCAPE2.0 repeat count (N repeats after the first play, 0 is
+/// forever, no extension is one play). A WebP carries the ANIM loop count (N plays, 0 is forever).
+pub fn loop_passes(bytes: &[u8]) -> Option<u32> {
+    match image::guess_format(bytes) {
+        Ok(image::ImageFormat::Gif) => {
+            const TAG: &[u8] = b"NETSCAPE2.0";
+            let Some(at) = bytes.windows(TAG.len()).position(|w| w == TAG) else { return Some(1) };
+            match bytes.get(at + TAG.len()..at + TAG.len() + 4) {
+                Some([3, 1, lo, hi]) => match u16::from_le_bytes([*lo, *hi]) {
+                    0 => None,
+                    n => Some(u32::from(n) + 1),
+                },
+                _ => Some(1),
+            }
+        }
+        Ok(image::ImageFormat::WebP) => {
+            let mut at = 12;
+            while let Some(head) = bytes.get(at..at + 8) {
+                let size = u32::from_le_bytes([head[4], head[5], head[6], head[7]]) as usize;
+                if &head[..4] == b"ANIM" {
+                    let loops = bytes.get(at + 12..at + 14).map_or(0, |b| u16::from_le_bytes([b[0], b[1]]));
+                    return if loops == 0 { None } else { Some(u32::from(loops)) };
+                }
+                at += 8 + size + (size & 1);
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// The frames of an animation decoder, up to [`MAX_FRAMES`], stopping at the first frame that fails to decode.
+fn animation_frames(frames: image::Frames<'_>) -> Vec<Frame> {
+    frames
+        .take(MAX_FRAMES)
+        .map_while(Result::ok)
+        .map(|frame| {
+            let (numer, denom) = frame.delay().numer_denom_ms();
+            let delay_ms = if denom == 0 { 0 } else { (numer / denom).max(MIN_DELAY_MS) };
+            let buffer = frame.into_buffer();
+            let (width, height) = buffer.dimensions();
+            Frame { page: DecodedPage { width, height, rgba: buffer.into_raw() }, delay_ms }
+        })
+        .collect()
+}
+
 /// Decodes page bytes to RGBA8. An empty input is `Corrupt`. Bytes with no known image signature are
 /// `UnsupportedFormat`. Bytes with a known signature that fail to decode, including a truncated file, are `Corrupt`.
 pub fn decode_rgba(bytes: &[u8]) -> Result<DecodedPage, DecodeError> {
@@ -167,6 +246,71 @@ mod tests {
     fn the_texture_limit_is_the_d9_value_above_the_tile_threshold() {
         assert_eq!(MAX_TEXTURE_EDGE, 16384);
         assert!(needs_tiling(MAX_TEXTURE_EDGE, 10, DEFAULT_TILE_THRESHOLD), "a page at the limit is tiled, not downscaled");
+    }
+
+    #[test]
+    fn t051_an_animated_gif_gives_every_frame_with_its_delay_and_a_delay_under_ten_ms_is_ten() {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+            let red = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255]));
+            let blue = image::RgbaImage::from_pixel(4, 4, image::Rgba([0, 0, 255, 255]));
+            encoder
+                .encode_frames(vec![
+                    image::Frame::from_parts(red, 0, 0, image::Delay::from_numer_denom_ms(50, 1)),
+                    image::Frame::from_parts(blue, 0, 0, image::Delay::from_numer_denom_ms(1, 1)),
+                ])
+                .expect("encode");
+        }
+        let frames = decode_frames(&bytes).expect("gif");
+        assert_eq!(frames.iter().map(|f| f.delay_ms).collect::<Vec<_>>(), vec![50, MIN_DELAY_MS]);
+        assert_eq!((frames[0].page.width, frames[0].page.height), (4, 4));
+        assert!(frames[0].page.rgba[0] > 200 && frames[0].page.rgba[1] < 50, "the first frame is the red one");
+    }
+
+    fn gif_with_loop(extension: Option<u16>) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut enc = image::codecs::gif::GifEncoder::new(&mut bytes);
+            let _ = enc.set_repeat(match extension {
+                Some(0) => image::codecs::gif::Repeat::Infinite,
+                Some(n) => image::codecs::gif::Repeat::Finite(n),
+                None => image::codecs::gif::Repeat::Finite(0),
+            });
+            let frame = image::Frame::new(image::RgbaImage::from_pixel(2, 2, image::Rgba([1, 2, 3, 255])));
+            enc.encode_frames(vec![frame.clone(), frame]).expect("gif");
+        }
+        bytes
+    }
+
+    #[test]
+    fn t051_a_gif_loop_count_is_read_from_the_netscape_extension() {
+        assert_eq!(loop_passes(&gif_with_loop(Some(0))), None, "0 is forever");
+        assert_eq!(loop_passes(&gif_with_loop(Some(2))), Some(3), "two repeats after the first play");
+        let mut no_extension = gif_with_loop(Some(0));
+        let at = no_extension.windows(11).position(|w| w == b"NETSCAPE2.0").expect("extension");
+        no_extension[at] = b'X';
+        assert_eq!(loop_passes(&no_extension), Some(1), "no extension plays once");
+    }
+
+    #[test]
+    fn t051_a_webp_loop_count_is_read_from_the_anim_chunk() {
+        let mut webp = b"RIFF\0\0\0\0WEBPVP8X".to_vec();
+        webp.extend_from_slice(&[10, 0, 0, 0]);
+        webp.extend_from_slice(&[0; 10]);
+        webp.extend_from_slice(b"ANIM");
+        webp.extend_from_slice(&[6, 0, 0, 0, 0, 0, 0, 0, 4, 0]);
+        assert_eq!(loop_passes(&webp), Some(4));
+        let n = webp.len();
+        webp[n - 2] = 0;
+        assert_eq!(loop_passes(&webp), None);
+    }
+
+    #[test]
+    fn t052_a_still_png_is_one_frame_without_a_delay() {
+        let frames = decode_frames(&encoded(image::ImageFormat::Png, 3, 2)).expect("png");
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].delay_ms, 0);
     }
 
     #[test]

@@ -604,10 +604,10 @@ fn opening_a_file_from_a_newer_app_through_the_handle_is_refused_and_untouched()
     let paths = TempPaths::new().unwrap();
     let file = DbKind::Anime.path(&kuro_platform::paths::Paths::data_dir(&paths));
     drop(AnimeDb::open(&paths).unwrap());
-    Connection::open(&file).unwrap().pragma_update(None, "user_version", 140).unwrap();
+    Connection::open(&file).unwrap().pragma_update(None, "user_version", 141).unwrap();
     let before = std::fs::read(&file).unwrap();
     let err = Db::open(DbKind::Anime, &paths).err().expect("refused");
-    assert!(matches!(err, DbError::TooNew { found: 140, supported: 139 }), "{err:?}");
+    assert!(matches!(err, DbError::TooNew { found: 141, supported: 140 }), "{err:?}");
     assert_eq!(std::fs::read(&file).unwrap(), before);
 }
 

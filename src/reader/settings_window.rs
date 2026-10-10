@@ -497,6 +497,12 @@ pub fn general_tab(prefs: &ReaderPrefs) -> gtk::Box {
     inverted.set_margin_start(24);
     deps.add(Row::InvertVolumeKeys, &inverted);
     root.append(&inverted);
+    let caveat = gtk::Label::new(Some(strings::VOLUME_KEYS_MEDIA_CAVEAT));
+    caveat.set_wrap(true);
+    caveat.set_xalign(0.0);
+    caveat.set_margin_start(24);
+    caveat.add_css_class("dim-label");
+    root.append(&caveat);
     root.append(&restore_row(prefs));
     root.append(&flash_rows(prefs));
     root
@@ -573,19 +579,34 @@ pub fn filter_tab(prefs: &ReaderPrefs) -> gtk::Box {
     root.set_margin_end(16);
 
     let brightness_check = check(strings::PREF_CUSTOM_BRIGHTNESS, &prefs.custom_brightness);
+    // a positive value would need the display backlight, which the reader cannot reach (E-BRIGHT-2)
+    let unavailable = gtk::Label::new(Some(strings::CUSTOM_BRIGHTNESS_UNAVAILABLE));
+    unavailable.set_wrap(true);
+    unavailable.set_xalign(0.0);
+    unavailable.add_css_class("dim-label");
+    unavailable.set_visible(prefs.custom_brightness.get() && prefs.custom_brightness_value.get() > 0);
     let brightness_value = prefs.custom_brightness_value.clone();
+    let (note_on_slide, check_on_slide) = (unavailable.clone(), brightness_check.clone());
     let brightness = slider(
         strings::PREF_CUSTOM_BRIGHTNESS,
         BRIGHTNESS_RANGE,
         prefs.custom_brightness_value.get(),
         number_text,
-        move |v| save(&brightness_value, v),
+        move |v| {
+            save(&brightness_value, v);
+            note_on_slide.set_visible(check_on_slide.is_active() && v > 0);
+        },
     );
     brightness.set_visible(prefs.custom_brightness.get());
     let shown = brightness.clone();
-    brightness_check.connect_toggled(move |b| shown.set_visible(b.is_active()));
+    let (note_on_toggle, value_on_toggle) = (unavailable.clone(), prefs.custom_brightness_value.clone());
+    brightness_check.connect_toggled(move |b| {
+        shown.set_visible(b.is_active());
+        note_on_toggle.set_visible(b.is_active() && value_on_toggle.get() > 0);
+    });
     root.append(&brightness_check);
     root.append(&brightness);
+    root.append(&unavailable);
 
     let filter_check = check(strings::PREF_CUSTOM_COLOR_FILTER, &prefs.color_filter);
     let colours = gtk::Box::new(gtk::Orientation::Vertical, 4);

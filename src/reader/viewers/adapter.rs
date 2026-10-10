@@ -113,7 +113,7 @@ mod tests {
                 _ => "other",
             });
         });
-        ViewerContext { emit: Emitter::new(sink), settings: ViewerSettings::from_prefs(&ReaderPrefs::new(PrefStore::in_memory())), prefs: None, downloads: Default::default() }
+        ViewerContext { emit: Emitter::new(sink), settings: ViewerSettings::from_prefs(&ReaderPrefs::new(PrefStore::in_memory())), prefs: None, downloads: Default::default(), menu_open: Default::default() }
     }
 
     fn chapters() -> ViewerChapters {
@@ -157,6 +157,7 @@ mod tests {
             viewer.set_chapters(&chapters());
             assert!(viewer.handle_key(gdk::Key::Right, gdk::ModifierType::empty()), "an arrow key is the viewer's");
             assert!(!viewer.handle_key(gdk::Key::a, gdk::ModifierType::empty()));
+            events.borrow_mut().clear();
             viewer.destroy();
             assert!(!viewer.handle_key(gdk::Key::Right, gdk::ModifierType::empty()));
             assert!(!viewer.handle_motion(0.0, 1.0));

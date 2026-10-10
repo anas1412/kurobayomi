@@ -114,6 +114,10 @@ pub fn row_subtitle(tracker: &dyn Tracker, in_progress: bool) -> Option<MsgKey> 
     if in_progress && tracker.id() == TrackerId::ANILIST {
         return Some(MsgKey::AniListLoggingIn);
     }
+    if tracker.id() == TrackerId::KITSU {
+        let expired = tracker.auth_expired() && !tracker.is_logged_in();
+        return expired.then_some(MsgKey::KitsuSessionExpired);
+    }
     if tracker.auth_expired() && !tracker.is_logged_in() {
         return Some(MsgKey::AniListSessionExpired);
     }

@@ -19,7 +19,7 @@ pub fn body(id: &str) -> Option<Built> {
         "settings_player_editor" => editor(),
         "settings_player_code_editor" => code_editor(),
         "settings_worker_info" => text_dump(id, "Enqueued\n-\n\nFinished\nId: 1a2b\nTags: LibraryUpdate\nState: SUCCEEDED\n\nRunning\n-"),
-        "settings_backup_schema" => text_dump(id, "message Backup {\n  repeated BackupManga backupManga = 1;\n  repeated BackupCategory backupCategories = 2;\n  repeated BackupAnime backupAnime = 3;\n}"),
+        "settings_backup_schema" => backup_schema(id),
         "settings_clear_manga_database" | "settings_clear_anime_database" => clear_db(id),
         "settings_open_source_licenses" => licenses(),
         "settings_open_source_library_license" => text_dump(id, "Apache License\nVersion 2.0, January 2004\nhttp://www.apache.org/licenses/"),
@@ -262,6 +262,22 @@ fn text_dump(id: &str, text: &str) -> Option<Built> {
     let l = Label::builder().label(text).xalign(0.0).yalign(0.0).selectable(true).css_classes(["monospace"]).build();
     margins(&l, 16);
     built(scrolled(&l), toolbar(&screen(id)))
+}
+
+/// The debug screen of the backup schema: the 13 `Backup` fields, and the Copy button puts the text on the clipboard (T-21a-035).
+fn backup_schema(id: &str) -> Option<Built> {
+    let text = kuro_backup::schema_text::TEXT;
+    let l = Label::builder().label(text).xalign(0.0).yalign(0.0).selectable(true).css_classes(["monospace"]).build();
+    margins(&l, 16);
+    let tools = toolbar(&screen(id));
+    for copy in tools.iter().filter_map(|w| w.downcast_ref::<Button>()) {
+        copy.connect_clicked(|_| {
+            if let Some(display) = gtk::gdk::Display::default() {
+                display.clipboard().set_text(text);
+            }
+        });
+    }
+    built(scrolled(&l), tools)
 }
 
 /// The clear-database screens: one row per source that has non-library entries in the database, a

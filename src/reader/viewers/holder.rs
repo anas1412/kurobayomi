@@ -42,6 +42,8 @@ const POLL_MS: u64 = 100;
 pub struct PageHost {
     pub opts: PageOpts,
     pub on_long_tap: Rc<dyn Fn(Rc<ReaderPage>, f64, f64)>,
+    /// The reader menu's flag: a long press also reports while the menu is shown (E-21).
+    pub menu_open: Rc<Cell<bool>>,
     pub on_zoom: Rc<dyn Fn()>,
     /// A transform split a normal page in two: the pager places the insert page for it (T-44a-050).
     pub on_split: Rc<dyn Fn(Rc<ReaderPage>)>,
@@ -220,6 +222,7 @@ impl Image {
         view.set_auto_background(host.opts.automatic_background);
         view.set_double_tap_anim_ms(host.opts.double_tap_ms);
         view.set_long_tap_enabled(host.opts.long_tap);
+        view.set_menu_open(Rc::clone(&host.menu_open));
         view.set_decode_to_view(host.opts.decode_to_view());
         view.set_crop_borders(host.opts.crop);
         view.set_landscape_zoom(host.opts.landscape_zoom);
@@ -722,6 +725,7 @@ mod tests {
         PageHost {
             opts: page_opts(&settings, ViewerKind::LeftToRight, false),
             on_long_tap: Rc::new(|_, _, _| {}),
+            menu_open: Rc::default(),
             on_zoom: Rc::new(|| {}),
             on_split: Rc::new(|_| {}),
             on_layout: Rc::new(move || layouts.set(layouts.get() + 1)),

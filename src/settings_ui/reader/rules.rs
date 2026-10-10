@@ -8,7 +8,7 @@ pub const TAP_ZONES_DISABLED: i32 = 5;
 pub const SCALE_FIT_SCREEN: i32 = 1;
 
 /// Every row whose enabled state depends on another setting.
-#[allow(dead_code)] // the E-Ink and volume key rows are still spec rows
+#[allow(dead_code)] // the invert volume keys row is still a spec row
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Row {
     PagerInvertTapZones,

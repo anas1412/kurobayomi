@@ -9,6 +9,9 @@
 pub mod appbar;
 pub mod argv;
 pub mod banners;
+// the holds wait for the torrent and HTTP servers (T-53a-035), which start them from their own lanes
+#[allow(dead_code)]
+pub mod background;
 // the splash timing and the migration gate wait for the startup lane; the downloaded filter waits for the reader's call
 #[allow(dead_code)]
 pub mod bootstrap;
@@ -21,6 +24,9 @@ pub mod layout;
 #[allow(dead_code)]
 pub mod nav;
 pub mod onboarding;
+// the installed desktop, MIME and icon files in `data/`; the module holds their tests
+#[cfg(test)]
+mod packaging;
 #[allow(dead_code)]
 pub mod player_root;
 #[allow(dead_code)]
@@ -28,10 +34,14 @@ pub mod reader_root;
 #[allow(dead_code)]
 pub mod search;
 pub mod tabs;
+pub mod uri;
 
 // the screens that use these build them in their own lanes; the rules are tested here
 #[allow(dead_code)]
 pub mod date_text;
+// the resolvers (T-53a-048, T-53a-050) are installed with `deep_link_page::install_resolver` by the source lanes
+#[allow(dead_code)]
+pub mod deep_link_page;
 #[allow(dead_code)]
 pub mod empty;
 #[allow(dead_code)]

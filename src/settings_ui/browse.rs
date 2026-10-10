@@ -8,10 +8,12 @@ use kuro_prefs::prefs::Prefs;
 
 use crate::pref_model::bind::{self, Veto};
 use crate::pref_model::model::{Preference, PreferenceItem};
+use crate::settings_ui::auth;
 use crate::settings_ui::rows::{group, info, switch, switch_with, text};
 
 pub const NSFW_SUBTITLE: &str = "Requires app restart to take effect";
 pub const NSFW_INFO: &str = "This does not prevent unofficial or potentially incorrectly flagged extensions from surfacing NSFW (18+) content within the app.";
+pub const NSFW_GATE_TITLE: &str = "NSFW (18+) sources";
 pub const NSFW_REFUSED: &str = "Authentication is required to change this setting";
 pub const ANIME_REPOS_TITLE: &str = "Anime extension repos";
 pub const MANGA_REPOS_TITLE: &str = "Manga extension repos";
@@ -61,12 +63,14 @@ fn repo_row(title: &str, count: i64, screen: &'static str) -> PreferenceItem {
     row
 }
 
-/// The NSFW switch: a change needs device authentication. None is available in this build, so a change is refused
-/// with a message and the value stays as it is.
+/// The NSFW switch: a change passes the unlock confirm (T-47a-068); a refused or cancelled unlock keeps the value.
 fn nsfw_switch(title: &str, pref: &Pref<bool>) -> PreferenceItem {
     let veto: Veto<bool> = bind::veto(move |_on: bool| async move {
-        crate::toast::notify(NSFW_REFUSED);
-        Ok(false)
+        let confirmed = auth::confirm(NSFW_GATE_TITLE, auth::CONFIRM_LOCK_CHANGE).await;
+        if !confirmed {
+            crate::toast::notify(NSFW_REFUSED);
+        }
+        Ok(confirmed)
     });
     switch_with(title, Some(NSFW_SUBTITLE), pref, true, veto)
 }
@@ -122,14 +126,13 @@ mod tests {
     }
 
     #[test]
-    fn a_nsfw_change_is_refused_and_the_value_stays_without_device_authentication() {
+    fn a_nsfw_change_passes_the_unlock_confirm_and_needs_no_dialog_while_no_passphrase_is_set() {
         let prefs = Prefs::in_memory();
         let tree = page_rows(&prefs, RepoCounts::default());
         let nsfw = group_of(&tree, "NSFW (18+) sources");
         let PreferenceItem::Switch { veto, .. } = &nsfw.items[0] else { panic!("a switch") };
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         let mut future = std::pin::pin!(veto(false));
-        assert!(matches!(future.as_mut().poll(&mut context), std::task::Poll::Ready(Ok(false))));
-        assert!(prefs.sources.show_nsfw_source.get());
+        assert!(matches!(future.as_mut().poll(&mut context), std::task::Poll::Ready(Ok(true))));
     }
 }

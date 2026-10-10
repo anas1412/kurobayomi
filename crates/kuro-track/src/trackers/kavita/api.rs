@@ -50,7 +50,9 @@ impl KavitaApi {
             self.latest_chapter_read(&api, id),
         )?;
         let mut found = MangaTrackSearch::new(TrackerId::KAVITA, 0, series.name.clone(), url);
-        found.cover_url = series.thumbnail_url.unwrap_or_default();
+        // D-01 and T-33a-107: upstream never sends a thumbnail, so the cover stays empty until the cover endpoint is
+        // confirmed on a live server. The series thumbnail is not read.
+        found.cover_url = String::new();
         found.total_chapters = total;
         found.last_chapter_read = latest;
         found.status = kavita_status(series.pages, series.pages_read);

@@ -15,6 +15,7 @@ pub mod error;
 pub mod extension;
 pub mod extension_repo;
 pub mod download;
+mod dropped;
 pub mod extension_store;
 pub mod flags;
 pub mod history;

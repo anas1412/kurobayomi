@@ -63,6 +63,8 @@ pub const ROTATION_REVERSE_PORTRAIT: &str = "Reverse portrait";
 pub const ROTATION_NO_EFFECT: &str = "Rotation has no effect on this platform";
 /// PROPOSAL (E-BRIGHT-2): shown when a positive custom brightness is asked for, since there is no backlight control.
 pub const CUSTOM_BRIGHTNESS_UNAVAILABLE: &str = "Custom brightness is not available on this display";
+/// The accessible name and tooltip of the top bar overflow button (the Kotlin content description, in English).
+pub const OVERFLOW_MENU: &str = "More";
 /// PROPOSAL (E-SAVE-2): the suffix a saved page gets when its file name is taken, as in ` (2)`, ` (3)`.
 pub fn name_collision_suffix(n: u32) -> String {
     format!(" ({n})")
@@ -101,6 +103,9 @@ pub const PREF_SKIP_DUPE_CHAPTERS: &str = "Skip duplicate chapters";
 pub const PREF_PRESERVE_READING_POSITION: &str = "Preserve reading position on read chapters";
 pub const PREF_READ_WITH_VOLUME_KEYS: &str = "Volume keys";
 pub const PREF_READ_WITH_VOLUME_KEYS_INVERTED: &str = "Invert volume keys";
+/// Under the volume key rows: the desktop can take the media keys before the reader sees them (E-25 caveat, the
+/// catalogue's drop note). PageUp, PageDown and Space always page, so nothing is lost by it.
+pub const VOLUME_KEYS_MEDIA_CAVEAT: &str = "The desktop can take the volume keys before the reader gets them. Page Up, Page Down and Space always turn pages.";
 pub const PREF_DOUBLE_TAP_ANIM_SPEED: &str = "Double tap animation speed";
 pub const DOUBLE_TAP_ANIM_SPEED_0: &str = "No animation";
 pub const DOUBLE_TAP_ANIM_SPEED_NORMAL: &str = "Normal";

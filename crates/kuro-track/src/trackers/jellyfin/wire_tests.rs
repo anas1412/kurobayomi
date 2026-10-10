@@ -386,3 +386,44 @@ async fn t_33a_037_e88_a_season_of_150_episodes_is_not_truncated() {
     assert_eq!(found.last_episode_seen, 100.0);
     assert_eq!(found.status, WATCHING);
 }
+
+#[tokio::test]
+async fn t_33a_106_a_season_of_150_episodes_is_read_in_one_short_page() {
+    let server = MockServer::start().await;
+    mount_item(&server, "/Users/U1/Items/S1", item("Season 1", "S1", false)).await;
+    let items: Vec<String> = (1..=150)
+        .map(|i| episode(&format!("e{i}"), i, true))
+        .collect();
+    mount_episodes(&server, episodes(&items)).await;
+    let url = format!("{}/Users/U1/Items/S1#seriesId,R9", server.uri());
+    let found = api_for("U1", KEY).get_track_search(&url).await.unwrap();
+    assert_eq!(found.total_episodes, 150);
+}
+
+#[tokio::test]
+async fn t_33a_106_a_full_page_is_followed_by_the_next_start_index() {
+    let server = MockServer::start().await;
+    mount_item(&server, "/Users/U1/Items/S1", item("Season 1", "S1", false)).await;
+    let first: Vec<String> = (1..=200)
+        .map(|i| episode(&format!("e{i}"), i, true))
+        .collect();
+    let second: Vec<String> = (201..=250)
+        .map(|i| episode(&format!("e{i}"), i, false))
+        .collect();
+    for (start, body) in [("0", episodes(&first)), ("200", episodes(&second))] {
+        Mock::given(method("GET"))
+            .and(path("/Shows/R9/Episodes"))
+            .and(query_param("StartIndex", start))
+            .and(query_param("Limit", "200"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+    }
+    let url = format!("{}/Users/U1/Items/S1#seriesId,R9", server.uri());
+    let found = api_for("U1", KEY).get_track_search(&url).await.unwrap();
+    assert_eq!(found.total_episodes, 250, "both pages are read");
+    assert_eq!(
+        found.last_episode_seen, 200.0,
+        "the watched run ends at episode 200"
+    );
+}

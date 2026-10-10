@@ -227,6 +227,14 @@ pub(crate) async fn apply_anime(
     api: &dyn AnimeTracker,
     episode: f64,
 ) -> Result<(), TrackError> {
+    // Race 4 (T-29a-056): the local row may have been deleted while this update waited. Nothing is sent for it.
+    if ctx
+        .anime_binding(binding.anime_id, binding.tracker_id)
+        .await?
+        .is_none()
+    {
+        return Ok(());
+    }
     let fresh = api.refresh(binding).await?;
     let updated = AnimeTrack {
         id: binding.id,
@@ -248,6 +256,14 @@ pub(crate) async fn apply_manga(
     api: &dyn MangaTracker,
     chapter: f64,
 ) -> Result<(), TrackError> {
+    // Race 4 (T-29a-056): the local row may have been deleted while this update waited. Nothing is sent for it.
+    if ctx
+        .manga_binding(binding.manga_id, binding.tracker_id)
+        .await?
+        .is_none()
+    {
+        return Ok(());
+    }
     let fresh = api.refresh(binding).await?;
     let updated = MangaTrack {
         id: binding.id,
@@ -620,6 +636,26 @@ mod tests {
         let out = track_episode(&h.ctx, 5, 2.0).await;
         assert_eq!(out, vec![(TrackerId::KITSU, TrackOutcome::Updated)]);
         assert!(logs(&h).iter().any(|l| l.starts_with("update")));
+    }
+
+    #[tokio::test]
+    async fn t_29a_056_a_deleted_row_sends_no_remote_update() {
+        let h = Harness::new();
+        h.login(TrackerId::KITSU);
+        let binding = anime_binding(12, TrackerId::KITSU, 3.0);
+        h.ctx.anime_tracks.upsert(&binding).await.unwrap();
+        h.ctx
+            .anime_tracks
+            .delete(12, TrackerId::KITSU)
+            .await
+            .unwrap();
+        let api = h.anime_tracker(TrackerId::KITSU);
+        apply_anime(&h.ctx, &binding, &*api, 5.0).await.unwrap();
+        assert!(
+            !logs(&h).iter().any(|l| l.starts_with("update") || l.starts_with("refresh")),
+            "no refresh and no update for a deleted row: {:?}",
+            logs(&h)
+        );
     }
 
     #[tokio::test]

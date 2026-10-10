@@ -7,6 +7,7 @@ pub mod dates;
 pub mod dialog;
 pub mod dto;
 pub mod error;
+pub mod import;
 #[cfg(test)]
 mod fixture_tests;
 pub mod rules;

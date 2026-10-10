@@ -72,6 +72,11 @@ impl TapRecognizer {
         out
     }
 
+    /// Whether the press in progress is the second half of a double tap. A drag from it is a quick scale (T-44a-040).
+    pub fn in_double_press(&self) -> bool {
+        self.press.is_some_and(|p| p.double)
+    }
+
     /// Pointer motion. Movement past the slop cancels an armed long press.
     pub fn motion(&mut self, x: f64, y: f64) {
         if let Some(press) = self.press.as_mut() {

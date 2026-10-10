@@ -132,6 +132,9 @@ pub struct ViewerContext {
     pub prefs: Option<ReaderPrefs>,
     /// The download index, for the transition cards' downloaded flags (T-43b-032).
     pub downloads: downloads::DownloadCheck,
+    /// Whether the reader menu is shown. The screen owns it and sets it on each toggle; the long tap and the volume
+    /// keys read it (E-21, E-25).
+    pub menu_open: Rc<Cell<bool>>,
 }
 
 /// The engine for a reading mode (B§0): the pager for the three paged modes, the webtoon for the two strips.

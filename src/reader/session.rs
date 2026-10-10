@@ -223,6 +223,19 @@ impl ReaderSession {
         self.current.and_then(|i| self.chapters.get(i))
     }
 
+    /// Replaces the chapter list (E-LIST-1). The chapter being read keeps its own object, with its loaded pages, and
+    /// stays the current one; the list the caller built must contain it.
+    pub fn replace_list(&mut self, mut list: Vec<Rc<ReaderChapter>>) {
+        if let Some(current) = self.current_chapter().cloned() {
+            let key = current.key();
+            if let Some(slot) = list.iter_mut().find(|c| c.key() == key) {
+                *slot = current;
+            }
+            self.current = list.iter().position(|c| c.key() == key);
+        }
+        self.chapters = list;
+    }
+
     /// The current chapter and its neighbours, for the viewer.
     pub fn viewer_chapters(&self) -> Option<ViewerChapters> {
         let current = Rc::clone(self.current_chapter()?);
@@ -875,5 +888,17 @@ mod tests {
             "Requested chapter of id 3 not found in chapter list"
         );
         assert!(list_error_message(&ListError::CurrentChapterMissing).starts_with("The chapter is not downloaded"));
+    }
+
+    #[test]
+    fn e_list_1_a_rebuilt_list_keeps_the_open_chapter_object_and_its_place() {
+        let rec = Rc::new(Recorder::default());
+        let (one, two, three) = (chapter(1, false), chapter(2, false), chapter(3, false));
+        let (mut s, _rx) = session(Rc::clone(&rec), vec![one, Rc::clone(&two), three], 1, false);
+        // the skip rule drops chapter 3 and the rebuilt list holds a new object for chapter 2
+        s.replace_list(vec![chapter(2, false), chapter(1, false)]);
+        assert_eq!(s.current_index(), Some(0), "the open chapter keeps the current place in the new list");
+        assert!(Rc::ptr_eq(s.current_chapter().expect("a current chapter"), &two), "its loaded object is kept");
+        assert_eq!(s.chapters()[1].key().id, 1, "the other chapters are the rebuilt ones");
     }
 }

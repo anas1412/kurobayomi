@@ -22,6 +22,9 @@ use crate::entry_core::favorite::{AddRoute, route_add};
 use super::images::{ImageKind, bumped_last_modified};
 use super::season_settings;
 use super::settings::sort_click;
+use crate::entry_core::tracking::facts::Summary;
+use crate::entry_core::tracking::session;
+use kuro_track::model::Kind;
 
 /// Typed access to the tables of one anime page. Cheap to clone: it shares one `Db`.
 #[derive(Clone)]
@@ -55,6 +58,12 @@ impl AnimeStore {
     /// How many trackers the entry is bound to, for the tracking button of the action row.
     pub fn track_count(&self, anime_id: i64) -> DataResult<usize> {
         Ok(kuro_data::track::AnimeTrackRepo::new(Arc::clone(&self.db)).by_entry(anime_id)?.len())
+    }
+
+    /// The tracking count and the logged-in flag of the entry, through the same filter as the sheet (T-TRK-12, D-10).
+    pub fn track_summary(&self, anime_id: i64, source_id: i64) -> DataResult<Summary> {
+        let bound: Vec<i64> = kuro_data::track::AnimeTrackRepo::new(Arc::clone(&self.db)).by_entry(anime_id)?.iter().map(|t| t.tracker_id).collect();
+        Ok(session::summary(Kind::Anime, source_id, &bound))
     }
 
     /// Every category (the default row `0` included, the dialog drops it) and the ids the entry is linked to.

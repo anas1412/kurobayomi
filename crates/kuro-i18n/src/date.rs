@@ -66,10 +66,12 @@ impl DateFormat {
     }
 }
 
-/// The locale for a tag, or English when the tag does not parse.
+/// The locale for a tag, or English when the tag does not parse. The numbering system is forced to
+/// Latin digits (`-u-nu-latn`), so ICU's native digits (Arabic-Indic and the like) never appear
+/// (T-51a-033: ASCII digits in every locale).
 fn locale_or_english(tag: &str) -> Locale {
-    Locale::try_from_str(tag)
-        .or_else(|_| Locale::try_from_str("en"))
+    Locale::try_from_str(&format!("{tag}-u-nu-latn"))
+        .or_else(|_| Locale::try_from_str("en-u-nu-latn"))
         .expect("en is a valid locale")
 }
 
@@ -96,6 +98,39 @@ fn month_abbr(date: NaiveDate, locale: &str) -> String {
         Ok(formatter) => formatter.format(&input).to_string(),
         Err(_) => fallback(),
     }
+}
+
+/// One row of the Appearance date-format list with today's date in it (T-51a-041).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DatePreview {
+    /// The stored `app_date_format` value of this choice.
+    pub pref: &'static str,
+    /// `Default (<date>)` for the locale short date, otherwise `<pattern> (<date>)`.
+    pub label: String,
+}
+
+/// The six choices in list order, each with `today` formatted in it. The Settings screen calls this
+/// once when it opens, not on every frame.
+pub fn previews(today: NaiveDate, locale: &str) -> Vec<DatePreview> {
+    const CHOICES: [DateFormat; 6] = [
+        DateFormat::LocaleShort,
+        DateFormat::MonthDayYear,
+        DateFormat::DayMonthYear,
+        DateFormat::IsoDate,
+        DateFormat::DayMonthNameYear,
+        DateFormat::MonthNameDayYear,
+    ];
+    CHOICES
+        .into_iter()
+        .map(|format| {
+            let shown = format.format(today, locale);
+            let name = match format {
+                DateFormat::LocaleShort => crate::tr(crate::MsgKey::label_default),
+                other => other.pref().to_owned(),
+            };
+            DatePreview { pref: format.pref(), label: format!("{name} ({shown})") }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -144,5 +179,28 @@ mod tests {
             assert_eq!(DateFormat::from_pref(format.pref()), format);
         }
         assert_eq!(DateFormat::from_pref("bogus"), DateFormat::LocaleShort);
+    }
+
+    #[test]
+    fn previews_show_each_choice_with_todays_date_in_order() {
+        let rows = previews(day(), "en");
+        let labels: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
+        assert_eq!(labels[0], "Default (10/9/26)");
+        assert_eq!(labels[1], "MM/dd/yy (10/09/26)");
+        assert_eq!(labels[2], "dd/MM/yy (09/10/26)");
+        assert_eq!(labels[3], "yyyy-MM-dd (2026-10-09)");
+        assert_eq!(labels[4], "dd MMM yyyy (09 Oct 2026)");
+        assert_eq!(labels[5], "MMM dd, yyyy (Oct 09, 2026)");
+        assert_eq!(rows[0].pref, "");
+    }
+
+    #[test]
+    fn short_dates_use_ascii_digits_in_every_offered_locale() {
+        for tag in ["ar", "fa", "bn", "ne", "mr", "my", "km", "am", "sd", "hi", "th"] {
+            let text = DateFormat::LocaleShort.format(day(), tag);
+            assert!(!text.chars().any(|c| c.is_numeric() && !c.is_ascii_digit()), "{tag}: {text}");
+            let month = DateFormat::DayMonthNameYear.format(day(), tag);
+            assert!(!month.chars().any(|c| c.is_numeric() && !c.is_ascii_digit()), "{tag}: {month}");
+        }
     }
 }

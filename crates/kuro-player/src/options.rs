@@ -108,6 +108,11 @@ pub struct PlayerPrefs {
     pub screenshot_dir: PathBuf,
     /// `AdvancedPlayerPreferences`: user scripts, `mpv.conf`, `input.conf`, statistics page.
     pub advanced: AdvancedPrefs,
+    /// `pref_remember_decoder` (T-46b-043, opt-in, default off). When on, `remembered_decoder` is applied at startup
+    /// instead of `try_hwdec`.
+    pub remember_decoder: bool,
+    /// The decoder chosen last time, stored by `decoder_stored_name`.
+    pub remembered_decoder: Option<Decoder>,
 }
 
 impl Default for PlayerPrefs {
@@ -127,6 +132,8 @@ impl Default for PlayerPrefs {
             data_dir: PathBuf::new(),
             screenshot_dir: PathBuf::new(),
             advanced: AdvancedPrefs::default(),
+            remember_decoder: false,
+            remembered_decoder: None,
         }
     }
 }
@@ -166,6 +173,42 @@ pub fn resolve_hwdec(decoder: Decoder, available: &[String]) -> String {
 
 /// Video filter names and the prefs they come from (`VideoFilters` in `PlayerEnums.kt:141-171`).
 pub const FILTER_NAMES: [&str; 5] = ["brightness", "saturation", "contrast", "gamma", "hue"];
+
+/// Whether the filters panel warns that some filters may not work: the video output is not `gpu-next` (T-46b-036).
+pub fn filters_warning_needed(vo: &str) -> bool {
+    vo != "gpu-next"
+}
+
+/// The writes that reset all five filters to 0 (T-46b-036). The caller also deletes the stored values.
+pub fn filter_reset_writes() -> Vec<(&'static str, i64)> {
+    FILTER_NAMES
+        .iter()
+        .filter_map(|name| filter_write(name, 0))
+        .collect()
+}
+
+/// The stored name of a decoder for `pref`-style storage (T-46b-043). The name is the variant name.
+pub fn decoder_stored_name(decoder: Decoder) -> &'static str {
+    match decoder {
+        Decoder::AutoCopy => "AutoCopy",
+        Decoder::Auto => "Auto",
+        Decoder::Sw => "Sw",
+        Decoder::Hw => "Hw",
+        Decoder::HwPlus => "HwPlus",
+    }
+}
+
+/// The decoder of a stored name, or `None` for a name this build does not know.
+pub fn decoder_from_stored(name: &str) -> Option<Decoder> {
+    Some(match name {
+        "AutoCopy" => Decoder::AutoCopy,
+        "Auto" => Decoder::Auto,
+        "Sw" => Decoder::Sw,
+        "Hw" => Decoder::Hw,
+        "HwPlus" => Decoder::HwPlus,
+        _ => return None,
+    })
+}
 
 /// Clamps a video filter value to -100..=100 before it is written (T-45a-032, proposal: the Kotlin
 /// passes stored values through unclamped).
@@ -286,10 +329,10 @@ pub fn startup_settings(p: &PlayerPrefs) -> Vec<MpvSetting> {
     set("vo", if p.gpu_next { "gpu-next" } else { "gpu" }.to_owned());
     set("pause", "yes".to_owned());
     set("profile", "fast".to_owned());
-    let hwdec = if p.try_hwdec {
-        resolve_hwdec(Decoder::Auto, &p.hwdec_available)
-    } else {
-        "no".to_owned()
+    let hwdec = match (p.remember_decoder, p.remembered_decoder) {
+        (true, Some(decoder)) => resolve_hwdec(decoder, &p.hwdec_available),
+        _ if p.try_hwdec => resolve_hwdec(Decoder::Auto, &p.hwdec_available),
+        _ => "no".to_owned(),
     };
     set("hwdec", hwdec);
 
@@ -896,6 +939,78 @@ mod tests {
         assert_eq!(
             setting_value(&startup_settings(&p), "msg-level"),
             Some("all=v")
+        );
+    }
+
+    #[test]
+    fn t_46b_043_a_remembered_decoder_replaces_try_hwdec_only_when_opted_in() {
+        let available = vec!["vaapi-copy".to_owned()];
+        let remembered = PlayerPrefs {
+            remember_decoder: true,
+            remembered_decoder: Some(Decoder::Hw),
+            hwdec_available: available.clone(),
+            try_hwdec: false,
+            ..prefs()
+        };
+        assert_eq!(
+            setting_value(&startup_settings(&remembered), "hwdec"),
+            Some("vaapi-copy"),
+            "the stored decoder is applied instead of try_hwdec"
+        );
+        let off = PlayerPrefs {
+            remember_decoder: false,
+            ..remembered.clone()
+        };
+        assert_eq!(
+            setting_value(&startup_settings(&off), "hwdec"),
+            Some("no"),
+            "the default is session-only: try_hwdec decides"
+        );
+        let no_stored = PlayerPrefs {
+            remember_decoder: true,
+            remembered_decoder: None,
+            ..remembered
+        };
+        assert_eq!(
+            setting_value(&startup_settings(&no_stored), "hwdec"),
+            Some("no")
+        );
+    }
+
+    #[test]
+    fn t_46b_043_stored_decoder_names_round_trip() {
+        for decoder in [
+            Decoder::AutoCopy,
+            Decoder::Auto,
+            Decoder::Sw,
+            Decoder::Hw,
+            Decoder::HwPlus,
+        ] {
+            assert_eq!(
+                decoder_from_stored(decoder_stored_name(decoder)),
+                Some(decoder)
+            );
+        }
+        assert_eq!(decoder_from_stored("bogus"), None);
+    }
+
+    #[test]
+    fn t_46b_036_the_warning_shows_unless_the_output_is_gpu_next() {
+        assert!(filters_warning_needed("gpu"));
+        assert!(!filters_warning_needed("gpu-next"));
+    }
+
+    #[test]
+    fn t_46b_036_reset_writes_zero_to_all_five_filters_in_order() {
+        let writes = filter_reset_writes();
+        assert_eq!(writes.len(), 5);
+        assert!(writes.iter().all(|(_, value)| *value == 0));
+        assert_eq!(
+            writes.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            vec!["brightness", "saturation", "contrast", "gamma", "hue"]
+                .into_iter()
+                .map(|n| filter_write(n, 0).unwrap().0)
+                .collect::<Vec<_>>()
         );
     }
 }

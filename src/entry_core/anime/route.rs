@@ -106,6 +106,7 @@ pub fn build() -> GBox {
 pub const NO_ENTRY: i64 = 0;
 
 fn page_for(anime_id: i64) -> GBox {
+    crate::entry_core::tracking::session::refresh_from_host();
     let app = data::app();
     let db = app.db(EntryKind::Anime);
     let prefs = app.base.store().clone();
@@ -995,6 +996,7 @@ impl View {
 
     /// `autoOpenTrack`: a tracker is logged in and "open the track menu on adding" is on.
     fn auto_open_track(&self) -> bool {
+        crate::entry_core::tracking::session::refresh_from_host();
         self.env.backend.has_logged_in_tracker() && self.env.prefs.pref::<bool>("track_on_adding_to_library", true).get()
     }
 
@@ -1058,6 +1060,7 @@ impl View {
 
     /// The tracking button: the tracking sheet when a tracker is logged in, the tracking settings when none is (E-25).
     fn tracking_pressed(&self) {
+        crate::entry_core::tracking::session::refresh_from_host();
         match tracking_click(self.env.backend.has_logged_in_tracker()) {
             TrackingClick::Sheet => {
                 self.claim_slot(AnimeDialog::TrackSheet);

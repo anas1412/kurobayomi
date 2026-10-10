@@ -30,8 +30,8 @@ use crate::tracker::{
     AnimeTracker, DeletableAnimeTracker, DeletableMangaTracker, LogoRef, MangaTracker, Tracker,
 };
 
-/// Kitsu brand colour `#F75239`, `0xAARRGGBB`.
-pub const LOGO_COLOR: u32 = 0xFFF7_5239;
+/// Kitsu brand colour `rgb(51, 37, 50)` = `#332532`, `0xAARRGGBB` (`Kitsu.kt:59`, T-30a-030).
+pub const LOGO_COLOR: u32 = 0xFF33_2532;
 
 impl From<KitsuError> for TrackError {
     /// The error text is the toast, unchanged (T-30a-024). The stable key is kept for the localisation pass.

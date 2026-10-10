@@ -80,6 +80,9 @@ struct SettingsFile {
     client_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     redirect_port: Option<u16>,
+    /// The PKCE verifier of a login that started and has not finished (T-29a-038).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_verifier: Option<String>,
 }
 
 /// The client id: the environment value when set and not blank, else the config file value. Blank values count
@@ -142,6 +145,16 @@ impl MalSettings {
 
     pub fn auth_expired(&self) -> bool {
         self.lock().auth_expired
+    }
+
+    /// The verifier of the login in progress. It is kept in the file, so a restart between the browser step and the
+    /// code exchange still completes the login (T-29a-038).
+    pub fn pending_verifier(&self) -> Option<String> {
+        self.lock().pending_verifier.clone()
+    }
+
+    pub fn set_pending_verifier(&self, verifier: Option<&str>) -> Result<(), MalError> {
+        self.update(|f| f.pending_verifier = verifier.map(str::to_owned))
     }
 
     pub fn set_auth_expired(&self, value: bool) -> Result<(), MalError> {

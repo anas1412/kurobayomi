@@ -57,6 +57,9 @@ pub enum DomainError {
     Io(#[from] std::io::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    /// A source call failed (for example a related-anime fetch). The text is the source error's message.
+    #[error("source error: {0}")]
+    Source(#[from] kuro_source::SourceError),
 }
 
 /// Failure of an extension repository or store write (`SaveExtensionRepoException` upstream). `Save` is the only

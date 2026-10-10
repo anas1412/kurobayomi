@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 use crate::error::{DbError, DbResult};
-use crate::schema_anime::{ANIME_APPLICATION_ID, ANIME_SCHEMA_VERSION};
+use crate::schema_anime::{ANIME_APPLICATION_ID, ANIME_SCHEMA_VERSION, NATIVE_139_TO_140};
 
 /// The first and last step of the chain.
 pub const FIRST_STEP: i64 = 113;
@@ -126,7 +126,9 @@ pub fn upgrade_legacy(path: &Path) -> DbResult<Option<LegacyUpgrade>> {
         drop_all_views(&c)?;
         c.execute_batch("DROP TABLE IF EXISTS animehistory_temp")?;
         c.execute_batch(KUROBAYOMI_ADDITIONS)?;
+        c.execute_batch(NATIVE_139_TO_140)?;
         c.execute_batch(VIEWS_SQL)?;
+        c.pragma_update(None, "user_version", ANIME_SCHEMA_VERSION)?;
         c.pragma_update(None, "application_id", ANIME_APPLICATION_ID)
     })();
     match finished {

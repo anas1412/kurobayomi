@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use kuro_prefs::PrefError;
-use kuro_prefs::source::{SourcePrefs, default_enabled_languages};
+use kuro_prefs::source::SourcePrefs;
 
 use crate::anime::model::Available;
 
@@ -21,13 +21,6 @@ pub fn language_list(available: &[Available], enabled: &BTreeSet<String>) -> Vec
     languages
 }
 
-/// The language part of `locale` (`zh_TW.UTF-8` gives `zh`), as `Locale.getDefault().language`. The `C` and `POSIX`
-/// locales count as English (F6).
-fn device_language(locale: &str) -> String {
-    let language = locale.split(['.', '@', '_', '-']).next().unwrap_or_default().to_ascii_lowercase();
-    if language == "c" || language == "posix" { "en".to_owned() } else { language }
-}
-
 /// First-run enablement (behavior 5.6). It does nothing when the enabled languages were saved before, or when the
 /// listing is empty. Otherwise it saves the default set plus every listed source language that starts with the device
 /// language, such as `zh-Hans` for `zh`. Saving the set is the "done" marker, so a second call changes nothing. Returns
@@ -40,16 +33,8 @@ pub fn enable_first_run_languages(
     if prefs.enabled_languages.is_set() || available.is_empty() {
         return Ok(false);
     }
-    let device = device_language(locale);
-    let mut enabled = default_enabled_languages(locale);
-    if !device.is_empty() {
-        let extra = available
-            .iter()
-            .flat_map(|listed| listed.sources.iter())
-            .map(|source| source.lang.as_str())
-            .filter(|lang| *lang != device && lang.starts_with(device.as_str()));
-        enabled.extend(extra.map(str::to_owned));
-    }
+    let tags: Vec<&str> = available.iter().flat_map(|listed| listed.sources.iter()).map(|source| source.lang.as_str()).collect();
+    let enabled = kuro_i18n::source_names::first_run_enabled(locale, &tags);
     prefs.enabled_languages.set(enabled)?;
     Ok(true)
 }

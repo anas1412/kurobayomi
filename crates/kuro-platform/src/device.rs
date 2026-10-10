@@ -104,6 +104,12 @@ pub fn custom_texture_limit_options(device: i32) -> Vec<i32> {
     out
 }
 
+/// Picture-in-picture is not offered on the desktop (T-01a-046): GTK has no PiP window, and the always-on-top mini
+/// player replaces it. Constant, so no code path depends on PiP.
+pub const fn device_has_pip() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod limits_tests {
     use super::*;

@@ -1,7 +1,8 @@
 //! Keyboard tables for the pager and the webtoon (T-44a-013, T-44a-014, T-44a-015, B§4.2, B§4.4, E-15, E-25, E-26).
 //!
-//! Each key is claimed on press and on release (the release is swallowed, E-26). The action runs on release, as
-//! upstream does. Volume keys are claimed only when the feature is on and the menu is hidden (E-25).
+//! Each key is claimed on press and on release (the release is swallowed, E-26). The action runs on the press edge, so
+//! the reader root (which the adapter feeds press events only) and a focused viewer behave the same. Volume keys are
+//! claimed only when the feature is on and the menu is hidden (E-25).
 
 use super::pager::nav::PageCmd;
 use crate::reader::page_zoom::ZoomKey;
@@ -30,7 +31,7 @@ pub enum InputKey {
     Other,
 }
 
-/// One key event. `released` is true for the release edge.
+/// One key event. `released` is true for the release edge. Actions run on the press edge only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyEvent {
     pub key: InputKey,
@@ -58,14 +59,14 @@ pub enum KeyAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyOutcome {
     pub claimed: bool,
-    /// Runs on the release edge only.
+    /// Runs on the press edge only; the release edge is claimed and does nothing.
     pub action: Option<KeyAction>,
 }
 
 const UNCLAIMED: KeyOutcome = KeyOutcome { claimed: false, action: None };
 
 fn claimed(action: Option<KeyAction>, ev: KeyEvent) -> KeyOutcome {
-    KeyOutcome { claimed: true, action: if ev.released { action } else { None } }
+    KeyOutcome { claimed: true, action: if ev.released { None } else { action } }
 }
 
 /// A zoom key acts on the press, so a held key keeps zooming, and its release is claimed and ignored.
@@ -166,27 +167,44 @@ mod tests {
     }
 
     #[test]
-    fn pager_keys_are_claimed_on_both_edges_and_act_on_release() {
+    fn pager_keys_are_claimed_on_both_edges_and_act_on_the_press_edge() {
         let down = pager_key(press(InputKey::Right), OFF);
-        assert!(down.claimed && down.action.is_none());
+        assert_eq!(down, KeyOutcome { claimed: true, action: Some(KeyAction::Page(PageCmd::Right)) });
         let up = pager_key(release(InputKey::Right), OFF);
-        assert_eq!(up, KeyOutcome { claimed: true, action: Some(KeyAction::Page(PageCmd::Right)) });
+        assert_eq!(up, KeyOutcome { claimed: true, action: None }, "the release is claimed and does nothing");
+    }
+
+    #[test]
+    fn page_keys_turn_pages_on_press_for_every_key_the_pager_owns() {
+        for (key, cmd) in [
+            (InputKey::Left, PageCmd::Left),
+            (InputKey::Right, PageCmd::Right),
+            (InputKey::Up, PageCmd::Prev),
+            (InputKey::Down, PageCmd::Next),
+            (InputKey::PageUp, PageCmd::Prev),
+            (InputKey::PageDown, PageCmd::Next),
+            (InputKey::Space, PageCmd::Next),
+            (InputKey::ShiftSpace, PageCmd::Prev),
+            (InputKey::Home, PageCmd::First),
+            (InputKey::End, PageCmd::Last),
+        ] {
+            assert_eq!(pager_key(press(key), OFF).action, Some(KeyAction::Page(cmd)), "{key:?}");
+        }
     }
 
     #[test]
     fn ctrl_arrows_use_the_reading_order_and_plain_arrows_are_physical() {
-        let ctrl_right = KeyEvent { key: InputKey::Right, ctrl: true, released: true };
+        let ctrl_right = KeyEvent { key: InputKey::Right, ctrl: true, released: false };
         assert_eq!(pager_key(ctrl_right, OFF).action, Some(KeyAction::Page(PageCmd::Next)));
-        let ctrl_left = KeyEvent { key: InputKey::Left, ctrl: true, released: true };
+        let ctrl_left = KeyEvent { key: InputKey::Left, ctrl: true, released: false };
         assert_eq!(pager_key(ctrl_left, OFF).action, Some(KeyAction::Page(PageCmd::Prev)));
-        assert_eq!(pager_key(release(InputKey::Left), OFF).action, Some(KeyAction::Page(PageCmd::Left)));
+        assert_eq!(pager_key(press(InputKey::Left), OFF).action, Some(KeyAction::Page(PageCmd::Left)));
     }
 
     #[test]
-    fn vertical_and_page_keys_step_through_the_reading_order() {
-        assert_eq!(pager_key(release(InputKey::PageDown), OFF).action, Some(KeyAction::Page(PageCmd::Next)));
-        assert_eq!(pager_key(release(InputKey::Up), OFF).action, Some(KeyAction::Page(PageCmd::Prev)));
-        assert_eq!(pager_key(release(InputKey::Menu), OFF).action, Some(KeyAction::ToggleMenu));
+    fn menu_key_toggles_the_menu_on_press() {
+        assert_eq!(pager_key(press(InputKey::Menu), OFF).action, Some(KeyAction::ToggleMenu));
+        assert_eq!(webtoon_key(press(InputKey::Menu), OFF).action, Some(KeyAction::ToggleMenu));
     }
 
     #[test]
@@ -199,22 +217,22 @@ mod tests {
 
     #[test]
     fn volume_keys_page_and_invert_when_enabled() {
-        assert_eq!(pager_key(release(InputKey::VolumeDown), ON).action, Some(KeyAction::Page(PageCmd::Next)));
-        assert_eq!(pager_key(release(InputKey::VolumeUp), ON).action, Some(KeyAction::Page(PageCmd::Prev)));
+        assert_eq!(pager_key(press(InputKey::VolumeDown), ON).action, Some(KeyAction::Page(PageCmd::Next)));
+        assert_eq!(pager_key(press(InputKey::VolumeUp), ON).action, Some(KeyAction::Page(PageCmd::Prev)));
         let inverted = KeyContext { volume_inverted: true, ..ON };
-        assert_eq!(pager_key(release(InputKey::VolumeDown), inverted).action, Some(KeyAction::Page(PageCmd::Prev)));
-        assert_eq!(webtoon_key(release(InputKey::VolumeDown), inverted).action, Some(KeyAction::Scroll { down: false }));
-        assert_eq!(webtoon_key(release(InputKey::VolumeUp), inverted).action, Some(KeyAction::Scroll { down: true }));
+        assert_eq!(pager_key(press(InputKey::VolumeDown), inverted).action, Some(KeyAction::Page(PageCmd::Prev)));
+        assert_eq!(webtoon_key(press(InputKey::VolumeDown), inverted).action, Some(KeyAction::Scroll { down: false }));
+        assert_eq!(webtoon_key(press(InputKey::VolumeUp), inverted).action, Some(KeyAction::Scroll { down: true }));
     }
 
     #[test]
-    fn webtoon_scroll_keys_are_consumed_on_both_edges() {
+    fn webtoon_scroll_keys_are_consumed_on_both_edges_and_scroll_on_press() {
         for key in [InputKey::Left, InputKey::Up, InputKey::PageUp] {
-            assert_eq!(webtoon_key(release(key), OFF).action, Some(KeyAction::Scroll { down: false }));
-            assert!(webtoon_key(press(key), OFF).claimed);
+            assert_eq!(webtoon_key(press(key), OFF).action, Some(KeyAction::Scroll { down: false }));
+            assert!(webtoon_key(release(key), OFF).claimed);
         }
         for key in [InputKey::Right, InputKey::Down, InputKey::PageDown] {
-            assert_eq!(webtoon_key(release(key), OFF).action, Some(KeyAction::Scroll { down: true }));
+            assert_eq!(webtoon_key(press(key), OFF).action, Some(KeyAction::Scroll { down: true }));
         }
     }
 
@@ -226,16 +244,16 @@ mod tests {
 
     #[test]
     fn space_and_home_end_turn_pages_in_the_pager() {
-        assert_eq!(pager_key(release(InputKey::Space), OFF).action, Some(KeyAction::Page(PageCmd::Next)));
-        assert_eq!(pager_key(release(InputKey::ShiftSpace), OFF).action, Some(KeyAction::Page(PageCmd::Prev)));
-        assert_eq!(pager_key(release(InputKey::Home), OFF).action, Some(KeyAction::Page(PageCmd::First)));
-        assert_eq!(pager_key(release(InputKey::End), OFF).action, Some(KeyAction::Page(PageCmd::Last)));
+        assert_eq!(pager_key(press(InputKey::Space), OFF).action, Some(KeyAction::Page(PageCmd::Next)));
+        assert_eq!(pager_key(press(InputKey::ShiftSpace), OFF).action, Some(KeyAction::Page(PageCmd::Prev)));
+        assert_eq!(pager_key(press(InputKey::Home), OFF).action, Some(KeyAction::Page(PageCmd::First)));
+        assert_eq!(pager_key(press(InputKey::End), OFF).action, Some(KeyAction::Page(PageCmd::Last)));
     }
 
     #[test]
     fn space_scrolls_the_webtoon_and_home_end_are_not_claimed_there() {
-        assert_eq!(webtoon_key(release(InputKey::Space), OFF).action, Some(KeyAction::Scroll { down: true }));
-        assert_eq!(webtoon_key(release(InputKey::ShiftSpace), OFF).action, Some(KeyAction::Scroll { down: false }));
+        assert_eq!(webtoon_key(press(InputKey::Space), OFF).action, Some(KeyAction::Scroll { down: true }));
+        assert_eq!(webtoon_key(press(InputKey::ShiftSpace), OFF).action, Some(KeyAction::Scroll { down: false }));
         assert_eq!(webtoon_key(press(InputKey::Home), OFF), UNCLAIMED);
     }
 }

@@ -11,6 +11,7 @@ use tracing::{debug, warn};
 
 pub mod catalog;
 pub mod date;
+mod dropped;
 pub mod import;
 pub mod locale;
 pub mod names;

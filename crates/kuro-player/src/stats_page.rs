@@ -1,5 +1,21 @@
-//! Statistics page chips (area 46 `MoreSheet.kt`, T-46b-009). Pure: the sheet sends the returned
+//! Statistics page chips (area 46 `MoreSheet.kt`, T-46b-009, T-46b-019). Pure: the sheet sends the returned
 //! toggle and page commands to mpv, then stores the page.
+//!
+//! Source of truth (T-46b-042, E72): the stored `pref_player_statistics_page` decides which chip is selected. Toggling
+//! the overlay from the keyboard does not update the stored page, so the chip can show the stored page while the
+//! overlay shows another one. This is documented, and mpv is not queried when the sheet opens.
+
+/// The six chips of the statistics page, in order: off, then pages 1 to 5 (T-46b-019).
+pub const CHIP_PAGES: [i64; 6] = [0, 1, 2, 3, 4, 5];
+
+/// The label of the chip for `page`: `Off` for 0 and `Page N` for 1 to 5. `None` for any other page.
+pub fn chip_label(page: i64) -> Option<String> {
+    match page {
+        0 => Some("Off".to_owned()),
+        1..=5 => Some(format!("Page {page}")),
+        _ => None,
+    }
+}
 
 /// What clicking the chip for `page` does, given the page that is currently shown. Both are 0 for
 /// off and 1 to 5 for the pages. Returns `(toggle, page_command)`:
@@ -48,6 +64,17 @@ mod tests {
                 ],
             ]
         );
+    }
+
+    #[test]
+    fn t_46b_019_the_six_chips_are_off_then_pages_one_to_five() {
+        let labels: Vec<String> = CHIP_PAGES.iter().map(|p| chip_label(*p).unwrap()).collect();
+        assert_eq!(
+            labels,
+            ["Off", "Page 1", "Page 2", "Page 3", "Page 4", "Page 5"]
+        );
+        assert_eq!(chip_label(6), None);
+        assert_eq!(chip_label(-1), None);
     }
 
     #[test]

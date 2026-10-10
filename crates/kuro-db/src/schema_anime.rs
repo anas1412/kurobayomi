@@ -23,7 +23,14 @@ use crate::open::{create_baseline, open_and_migrate, DbResult, SchemaBundle};
 pub use crate::anime::consts::FILE_NAME as ANIME_DB_FILE;
 
 /// `PRAGMA user_version` of the fresh anime schema (`anime::consts`).
-pub use crate::anime::consts::SCHEMA_VERSION as ANIME_SCHEMA_VERSION;
+pub use crate::anime::consts::{BASELINE_VERSION as ANIME_BASELINE_VERSION, SCHEMA_VERSION as ANIME_SCHEMA_VERSION};
+
+/// The native steps above the Aniyomi baseline (T-04a-036): 139 to 140 adds the category-link indexes.
+pub const NATIVE_139_TO_140: &str = include_str!("../sql/anime/native/139.sql");
+
+/// Migrations of the anime file, applied to files below the latest version and to every fresh file
+/// (after the baseline SQL, which already holds the same objects).
+pub const ANIME_MIGRATIONS: &[(i64, &str)] = &[(140, NATIVE_139_TO_140)];
 
 /// `PRAGMA application_id` of anime files: ASCII "KUR1". Aniyomi files keep 0, and an Aniyomi file
 /// at version 139 must not pass as ours.
@@ -55,14 +62,15 @@ fn refuse_foreign(found: i64) -> DbError {
     }
 }
 
-/// The anime file: the fresh schema and views at version 139. No migrations yet.
+/// The anime file: the fresh schema and views (latest version 140), with the baseline at 139 so that
+/// Aniyomi files at 139 run the native steps.
 pub const ANIME_SCHEMA: SchemaBundle = SchemaBundle {
     baseline_sql: concat!(
         include_str!("../sql/anime/schema.sql"),
         include_str!("../sql/anime/views.sql"),
     ),
-    baseline_version: ANIME_SCHEMA_VERSION,
-    migrations: &[],
+    baseline_version: ANIME_BASELINE_VERSION,
+    migrations: ANIME_MIGRATIONS,
     application_id: ANIME_APPLICATION_ID,
     tables: ANIME_TABLES,
     refuse_foreign,
@@ -82,7 +90,20 @@ pub fn open_in_data_dir(paths: &dyn Paths) -> DbResult<Connection> {
 /// empty file. A file this app must not touch (newer, or an Aniyomi file) is refused before any
 /// write, so it stays byte-identical.
 pub fn open(path: &Path) -> DbResult<Connection> {
-    open_and_migrate(path, &ANIME_SCHEMA)
+    let c = open_and_migrate(path, &ANIME_SCHEMA)?;
+    heal_stuck_sync_flags(&c)?;
+    Ok(c)
+}
+
+/// Clears `is_syncing` left set by a sync that never finished (a crash or a killed process). Runs on
+/// every open after migration (T-04a-024). The statements touch only the flag, which no version trigger
+/// reads, so `version` stays as it was.
+pub fn heal_stuck_sync_flags(c: &Connection) -> DbResult<()> {
+    c.execute_batch(
+        "UPDATE animes SET is_syncing = 0 WHERE is_syncing = 1;
+         UPDATE episodes SET is_syncing = 0 WHERE is_syncing = 1;",
+    )?;
+    Ok(())
 }
 
 /// The fresh schema in a new in-memory database (tests and the test kit). WAL does not apply to
@@ -437,7 +458,7 @@ mod tests {
     #[test]
     fn file_name_and_versions_are_the_contract() {
         assert_eq!(ANIME_DB_FILE, "anime.db");
-        assert_eq!(ANIME_SCHEMA_VERSION, 139);
+        assert_eq!(ANIME_SCHEMA_VERSION, 140);
         assert_eq!(db_path(Path::new("/data")), Path::new("/data/anime.db"));
     }
 
@@ -457,7 +478,7 @@ mod tests {
         assert_eq!(pragma_i64(&c, "busy_timeout"), 5000);
         assert_eq!(pragma_i64(&c, "recursive_triggers"), 0);
         assert_eq!(pragma_i64(&c, "application_id"), ANIME_APPLICATION_ID);
-        assert_eq!(pragma_i64(&c, "user_version"), 139);
+        assert_eq!(pragma_i64(&c, "user_version"), 140);
         let mode: String = c.pragma_query_value(None, "journal_mode", |r| r.get(0)).unwrap();
         assert_eq!(mode, "wal");
     }
@@ -466,9 +487,40 @@ mod tests {
     fn fresh_schema_has_ten_tables_nine_indexes_seven_triggers_and_eight_views() {
         let c = open_in_memory().unwrap();
         assert_eq!(count(&c, "table"), 10);
-        assert_eq!(count(&c, "index"), 9);
+        assert_eq!(count(&c, "index"), 11);
         assert_eq!(count(&c, "trigger"), 7);
         assert_eq!(count(&c, "view"), 8);
+    }
+
+    #[test]
+    fn opening_clears_stuck_sync_flags_and_leaves_version_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = db_path(dir.path());
+        {
+            let c = open(&path).unwrap();
+            c.execute_batch(
+                "INSERT INTO animes(_id, source, url, title, status, favorite, initialized, viewer,
+                    episode_flags, cover_last_modified, date_added, season_flags, season_number,
+                    season_source_order, background_last_modified)
+                 VALUES (1, 1, 'u1', 'Alpha', 1, 0, 1, 0, 0, 0, 0, 0, -1.0, 0, 0);
+                 INSERT INTO episodes(_id, anime_id, url, name, seen, bookmark, last_second_seen,
+                    total_seconds, episode_number, source_order, date_fetch, date_upload, fillermark)
+                 VALUES (1, 1, 'e1', 'Ep 1', 0, 0, 0, 0, 1.0, 0, 0, 0, 0);
+                 UPDATE animes SET is_syncing = 1 WHERE _id = 1;
+                 UPDATE episodes SET is_syncing = 1 WHERE _id = 1;",
+            )
+            .unwrap();
+        }
+        let before = {
+            let c = Connection::open(&path).unwrap();
+            (anime_version(&c), episode_version(&c))
+        };
+        let c = open(&path).unwrap();
+        let flag = |table: &str| -> i64 {
+            c.query_row(&format!("SELECT is_syncing FROM {table} WHERE _id = 1"), [], |r| r.get(0)).unwrap()
+        };
+        assert_eq!((flag("animes"), flag("episodes")), (0, 0));
+        assert_eq!((anime_version(&c), episode_version(&c)), before);
     }
 
     #[test]
@@ -491,7 +543,7 @@ mod tests {
             .unwrap();
         let before = std::fs::read(&path).unwrap();
         let err = open(&path).unwrap_err();
-        assert!(matches!(err, DbError::TooNew { found: 9999, supported: 139 }), "{err:?}");
+        assert!(matches!(err, DbError::TooNew { found: 9999, supported: 140 }), "{err:?}");
         assert_eq!(std::fs::read(&path).unwrap(), before);
     }
 
@@ -910,5 +962,85 @@ mod tests {
             concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/anime_schema_v139.txt"),
             dump,
         );
+    }
+}
+
+#[cfg(test)]
+mod heal_and_native_step_tests {
+    use super::*;
+
+    fn index_names(c: &Connection) -> Vec<String> {
+        let mut st = c
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'animes_categories' ORDER BY name")
+            .unwrap();
+        st.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    }
+
+    #[test]
+    fn a_fresh_file_has_both_category_link_indexes_at_140() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = open(&db_path(dir.path())).unwrap();
+        assert_eq!(index_names(&c), vec!["animes_categories_anime_id_index", "animes_categories_category_id_index"]);
+        let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 140);
+    }
+
+    #[test]
+    fn a_139_file_gets_the_native_indexes_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = db_path(dir.path());
+        {
+            let c = open(&path).unwrap();
+            c.execute_batch(
+                "DROP INDEX animes_categories_anime_id_index; DROP INDEX animes_categories_category_id_index;
+                 PRAGMA user_version = 139;",
+            )
+            .unwrap();
+        }
+        let c = open(&path).unwrap();
+        assert_eq!(index_names(&c).len(), 2);
+        let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 140);
+    }
+
+    #[test]
+    fn the_library_view_searches_the_category_links_through_the_new_index() {
+        let c = open_in_memory().unwrap();
+        let mut st = c.prepare("EXPLAIN QUERY PLAN SELECT * FROM animelibView").unwrap();
+        let details: Vec<String> = st.query_map([], |r| r.get::<_, String>(3)).unwrap().map(Result::unwrap).collect();
+        assert!(
+            details.iter().all(|d| !(d.starts_with("SEARCH MC ") && d.contains("AUTOMATIC"))),
+            "the MC alias still builds a temporary index: {details:?}"
+        );
+        assert!(
+            details.iter().any(|d| d == "SEARCH MC USING INDEX animes_categories_anime_id_index (anime_id=?) LEFT-JOIN"),
+            "the MC alias uses the new index: {details:?}"
+        );
+    }
+
+    #[test]
+    fn reopening_clears_is_syncing_flags_and_keeps_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = db_path(dir.path());
+        {
+            let c = open(&path).unwrap();
+            c.execute_batch(
+                "INSERT INTO animes(_id, source, url, title, status, favorite, initialized, viewer,
+                    episode_flags, cover_last_modified, date_added, season_flags, season_number,
+                    season_source_order, background_last_modified, is_syncing, version)
+                 VALUES (1, 1, 'u1', 'Alpha', 1, 0, 1, 0, 0, 0, 0, 0, -1.0, 0, 0, 1, 7);
+                 INSERT INTO episodes(_id, anime_id, url, name, seen, bookmark, last_second_seen,
+                    total_seconds, episode_number, source_order, date_fetch, date_upload, fillermark, is_syncing, version)
+                 VALUES (1, 1, 'e1', 'Ep 1', 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1, 3);",
+            )
+            .unwrap();
+        }
+        let c = open(&path).unwrap();
+        let (anime_sync, anime_version): (i64, i64) =
+            c.query_row("SELECT is_syncing, version FROM animes WHERE _id = 1", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        let (ep_sync, ep_version): (i64, i64) =
+            c.query_row("SELECT is_syncing, version FROM episodes WHERE _id = 1", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((anime_sync, anime_version), (0, 7));
+        assert_eq!((ep_sync, ep_version), (0, 3));
     }
 }

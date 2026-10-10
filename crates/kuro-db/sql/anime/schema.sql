@@ -1,4 +1,4 @@
--- Kurobayomi anime database: fresh schema at user_version 139.
+-- Kurobayomi anime database: fresh schema at user_version 140 (the Aniyomi schema 139 plus native step 139 to 140).
 -- Source: Aniyomi data/src/main/sqldelightanime/dataanime/*.sq. SQLDelight annotations
 -- are removed and double-quoted strings are written as single-quoted literals.
 -- Views are in views.sql.
@@ -146,6 +146,10 @@ CREATE TABLE animes_categories(
     FOREIGN KEY(anime_id) REFERENCES animes (_id)
     ON DELETE CASCADE
 );
+
+CREATE INDEX animes_categories_anime_id_index ON animes_categories(anime_id);
+
+CREATE INDEX animes_categories_category_id_index ON animes_categories(category_id);
 
 CREATE TRIGGER insert_anime_category_update_version AFTER INSERT ON animes_categories
 BEGIN

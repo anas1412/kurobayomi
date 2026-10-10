@@ -18,6 +18,7 @@ ed25519-dalek = "3.0.0"
 flate2 = { workspace = true }
 futures = { workspace = true }
 kuro-core = { path = "../kuro-core" }
+kuro-i18n = { path = "../kuro-i18n" }
 kuro-net = { workspace = true }
 kuro-platform = { path = "../kuro-platform" }
 kuro-prefs = { path = "../kuro-prefs" }
