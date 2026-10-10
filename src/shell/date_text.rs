@@ -49,6 +49,34 @@ fn style<'a>(prefs: Prefs<'_>, locale: &'a str) -> DateStyle<'a> {
     DateStyle { relative: prefs.relative, format: format_for(prefs.date_format), locale }
 }
 
+/// Kotlin `convertEpochMillisZone(from, to)`: the wall clock of the instant in zone `from`, read again as a wall clock
+/// in zone `to`. Zones are IANA names (`UTC`, `Asia/Tokyo`); `None` for an unknown name or an out-of-range value.
+pub fn convert_epoch_millis_zone(epoch_millis: i64, from: &str, to: &str) -> Option<i64> {
+    let wall = jiff::Timestamp::from_millisecond(epoch_millis).ok()?.to_zoned(jiff::tz::TimeZone::get(from).ok()?).datetime();
+    let zoned = wall.to_zoned(jiff::tz::TimeZone::get(to).ok()?).ok()?;
+    Some(zoned.timestamp().as_millisecond())
+}
+
+fn icu_locale(locale: &str) -> icu_locale::Locale {
+    locale.parse().unwrap_or_else(|_| icu_locale::Locale::try_from_str("en").expect("en is a valid locale"))
+}
+
+/// The locale short time, 12 or 24 hour by the locale (ICU short length). Falls back to `HH:mm`.
+pub fn short_time(time: chrono::NaiveTime, locale: &str) -> String {
+    use chrono::Timelike;
+    let fallback = || time.format("%H:%M").to_string();
+    let Ok(input) = icu_datetime::input::Time::try_new(time.hour() as u8, time.minute() as u8, 0, 0) else { return fallback() };
+    match icu_datetime::NoCalendarFormatter::try_new(icu_locale(locale).into(), icu_datetime::fieldsets::T::short().with_time_precision(icu_datetime::options::TimePrecision::Minute)) {
+        Ok(formatter) => formatter.format(&input).to_string(),
+        Err(_) => fallback(),
+    }
+}
+
+/// The locale short date and short time, `"{date} {time}"` (`toTimestampString`).
+pub fn short_datetime(when: NaiveDateTime, locale: &str) -> String {
+    format!("{} {}", DateFormat::LocaleShort.format(when.date(), locale), short_time(when.time(), locale))
+}
+
 /// The system-zone wall clock for epoch milliseconds.
 fn local_naive(epoch_millis: i64) -> NaiveDateTime {
     DateTime::from_timestamp_millis(epoch_millis).map(|utc| utc.with_timezone(&Local).naive_local()).unwrap_or_default()
@@ -69,6 +97,32 @@ mod tests {
     }
 
     const ABSOLUTE: Prefs<'static> = Prefs { relative: false, date_format: "" };
+
+    #[test]
+    fn tc_27_d_zone_conversion_reads_the_wall_clock_in_the_other_zone() {
+        assert_eq!(convert_epoch_millis_zone(0, "UTC", "Asia/Tokyo"), Some(-32_400_000));
+        assert_eq!(convert_epoch_millis_zone(0, "Asia/Tokyo", "UTC"), Some(32_400_000));
+        assert_eq!(convert_epoch_millis_zone(5, "UTC", "UTC"), Some(5));
+        assert_eq!(convert_epoch_millis_zone(0, "UTC", "Not/AZone"), None);
+    }
+
+    #[test]
+    fn tc_27_a_and_b_short_datetime_is_the_short_date_then_the_short_time() {
+        let when = NaiveDate::from_ymd_opt(2024, 3, 9).unwrap().and_hms_opt(15, 5, 0).unwrap();
+        let date = DateFormat::LocaleShort.format(when.date(), "en");
+        let text = short_datetime(when, "en");
+        assert!(text.starts_with(&format!("{date} ")), "{text}");
+        assert_eq!(text, format!("{date} {}", short_time(when.time(), "en")));
+    }
+
+    #[test]
+    fn tc_27_c_the_short_time_follows_the_locale_clock() {
+        let t = chrono::NaiveTime::from_hms_opt(15, 5, 0).unwrap();
+        let en = short_time(t, "en-US");
+        assert!(en.starts_with("3:05") && en.ends_with("PM"), "{en}");
+        assert_eq!(short_time(t, "de-DE"), "15:05");
+        assert_eq!(short_time(t, "not a locale!"), short_time(t, "en"));
+    }
 
     #[test]
     fn zero_and_negative_timestamps_render_not_applicable() {

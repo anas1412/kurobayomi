@@ -8,6 +8,7 @@ use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Label, Orientation as O};
 
 use crate::entry_core::action_row::{self, Tone, tone_alpha};
+use crate::entry_core::backdrop_view;
 use crate::entry_core::header::{Field, HeaderModel, SearchRequest, cover_size};
 use crate::entry_core::cover_view::CoverView;
 use crate::entry_core::list_view::ensure_css;
@@ -179,7 +180,15 @@ pub fn build(model: &HeaderModel, large: bool, column_width: i32, h: &Handlers) 
     }
     root.append(&cover);
     root.append(&info);
-    root
+    // the cover blurred behind the header (T-38a-014): the backdrop is the main child and fills what the header measures
+    let backdrop = backdrop_view::build(model.cover.as_ref());
+    let layered = gtk::Overlay::new();
+    layered.set_child(Some(&backdrop));
+    layered.add_overlay(&root);
+    layered.set_measure_overlay(&root, true);
+    let outer = GBox::new(O::Vertical, 0);
+    outer.append(&layered);
+    outer
 }
 
 #[cfg(test)]

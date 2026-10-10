@@ -16,7 +16,7 @@ use crate::screens::{built, Built};
 use crate::settings_ui::category::Category;
 use crate::settings_ui::merge::merge;
 use crate::settings_ui::reader::rules::ReaderState;
-use crate::settings_ui::{about, advanced, appearance, browse, cache, downloads, library, player, reader, rows, search, security, storage, tracking, usage, view};
+use crate::settings_ui::{about, advanced, appearance, browse, cache, chooser, downloads, library, library_export, player, reader, rows, search, security, storage, tracking, usage, view};
 use kuro_data::extension_repo::ExtensionRepoRepo;
 use kuro_data::extension_store::ExtensionStoreRepo;
 
@@ -45,6 +45,8 @@ pub fn handles(id: &str) -> bool {
             | "settings_player_audio"
             | "settings_player_advanced"
             | "settings_downloads"
+            | "settings_open_source_licenses"
+            | "settings_worker_info"
     )
 }
 
@@ -79,9 +81,6 @@ pub fn toolbar(id: &str) -> Vec<gtk::Widget> {
 
 /// Where the help action of Data and storage goes (`SettingsDataScreen.HELP_URL`).
 const STORAGE_HELP_URL: &str = "https://aniyomi.org/docs/faq/storage";
-/// Where the help action of Tracking goes.
-const TRACKING_HELP_URL: &str = "https://aniyomi.org/help/guides/tracking/";
-
 /// The toolbar of a screen whose help action (the spec's `Tracking guide` button) opens `url` in the browser.
 fn help_toolbar(id: &str, url: &'static str) -> Vec<gtk::Widget> {
     let widgets = toolbar(id);
@@ -247,6 +246,14 @@ fn data_storage_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     let interval = rows::ranged_choice("Automatic backup frequency", &prefs.backup.backup_interval, |h| kuro_backup::settings::interval_label(h as u32).unwrap_or("").to_owned(), true);
     tree.push(rows::group("Backup and restore", vec![interval, restore_backup_row(), rows::info(&backup_info(prefs))]));
     tree.push(rows::group("Storage usage", vec![cache::clear_row(Rc::clone(&changed)), rows::switch("Clear episode/chapter cache on app launch", &prefs.library.auto_clear_item_cache, true)]));
+    tree.push(library_export::group_row());
+    tree
+}
+
+/// The spec group of the Library List dialog's switches (`export_columns`): the dialog is `library_export`, so the spec
+/// group is left out of the page.
+fn without_export_dialog(mut tree: Vec<Preference>) -> Vec<Preference> {
+    tree.retain(|entry| !matches!(entry, Preference::Group(group) if group.title == library_export::DIALOG_TITLE));
     tree
 }
 
@@ -287,12 +294,18 @@ fn choose_backup_file() {
     }
     let dialog = gtk::FileDialog::new();
     dialog.set_title("Select backup file");
-    dialog.open(Some(&crate::ui::window()), None::<&gtk::gio::Cancellable>, |result| match result.ok().and_then(|file| file.path()) {
-        Some(path) => {
-            crate::pref_model::backup_pages::set_restore_file(path);
-            crate::ui::open("settings_restore_backup");
+    dialog.open(Some(&crate::ui::window()), None::<&gtk::gio::Cancellable>, |result| {
+        let path = match result {
+            Ok(file) => file.path(),
+            Err(err) => return crate::toast::notify(chooser::failure_toast(&err).unwrap_or("No file selected")),
+        };
+        match path {
+            Some(path) => {
+                crate::pref_model::backup_pages::set_restore_file(path);
+                crate::ui::open("settings_restore_backup");
+            }
+            None => crate::toast::notify("No file selected"),
         }
-        None => crate::toast::notify("No file selected"),
     });
 }
 
@@ -309,7 +322,7 @@ fn fill_data_storage(holder: &gtk::Box) {
             fill_data_storage(&holder);
         }
     });
-    let mut tree = merge(without_backup_info(spec_tree("settings_data_storage", prefs.store())), data_storage_rows(&prefs, changed));
+    let mut tree = merge(without_export_dialog(without_backup_info(spec_tree("settings_data_storage", prefs.store()))), data_storage_rows(&prefs, changed));
     if let Some(banner) = storage::banner_row(&prefs) {
         tree.insert(0, rows::item(banner));
     }
@@ -339,9 +352,11 @@ fn about_page() -> Option<Built> {
     built(page::body(&tree).widget, toolbar("settings_about"))
 }
 
-/// Tracking settings: the spec page, its help action opening the tracking guide.
+/// Tracking settings: the spec page without the help button (T-27a-047, the dropped link is in the release notes).
 fn tracking_page() -> Option<Built> {
-    tracking::page(help_toolbar("settings_tracking", TRACKING_HELP_URL))
+    let mut bar = toolbar("settings_tracking");
+    bar.retain(|w| w.tooltip_text().as_deref() != Some("Tracking guide"));
+    tracking::page(bar)
 }
 
 fn gestures_page() -> Option<Built> {
@@ -380,6 +395,8 @@ pub fn body(id: &str) -> Option<Built> {
         "settings_tracking" => tracking_page(),
         "settings_security" => security_page(),
         "settings_about" => about_page(),
+        "settings_open_source_licenses" => super::licenses::list_page(),
+        "settings_worker_info" => super::worker_info::page(),
         _ => None,
     }
 }

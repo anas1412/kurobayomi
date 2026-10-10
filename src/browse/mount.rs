@@ -296,6 +296,13 @@ fn migrate_page(
                 crate::toast::notify(tr(MsgKey::copied_to_clipboard_plain));
             }
         }),
+        open_url: Rc::new(|url| {
+            gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
+                if let Err(error) = result {
+                    tracing::warn!(%error, "the help link could not be opened");
+                }
+            });
+        }),
     })
     .upcast()
 }
@@ -535,7 +542,15 @@ pub fn browse() -> Option<Built> {
                     tracing::warn!(%error, "a trusted extension could not be stored");
                 }
             }),
-            web_view: Rc::new(|_| crate::ui::open("webview")),
+            web_view: {
+                let rows = Rc::clone(&rows_of);
+                Rc::new(move |pkg| {
+                    let target = rows(page_kind).into_iter().find(|e| e.pkg == pkg).and_then(|ext| super::extensions::webview_target(&ext));
+                    if let Some((url, title)) = target {
+                        crate::entry_core::handoff::open_webview(crate::entry_core::handoff::WebViewRequest { url, title });
+                    }
+                })
+            },
             open_repos: Rc::new(move || crate::ui::open(store_page)),
             repos_label,
             show_nsfw: Rc::new(move || nsfw_prefs.show_nsfw_source.get()),
@@ -581,6 +596,22 @@ pub fn browse() -> Option<Built> {
                 BrowseKind::Manga => "settings_manga_extension_repos",
             })
         }),
+        on_refresh: {
+            let (anime, manga) = (anime_extensions.clone(), manga_extensions.clone());
+            Rc::new(move |page| match page {
+                BrowsePage::AnimeExtensions => anime.refresh(),
+                BrowsePage::MangaExtensions => manga.refresh(),
+                _ => {}
+            })
+        },
+        on_update_all: {
+            let (anime, manga) = (anime_extensions.clone(), manga_extensions.clone());
+            Rc::new(move |page| match page {
+                BrowsePage::AnimeExtensions => anime.update_all(),
+                BrowsePage::MangaExtensions => manga.update_all(),
+                _ => {}
+            })
+        },
         on_leave: Rc::new(crate::ui::pop),
     };
     let shell = Rc::new(BrowseShell::new(deps));

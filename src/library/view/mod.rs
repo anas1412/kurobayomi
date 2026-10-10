@@ -87,6 +87,18 @@ pub struct Nav {
     pub update_running: Rc<dyn Fn() -> bool>,
 }
 
+/// Starts an update of the active category and says what happened: the refresh button and F5 (T-37a-035).
+fn refresh_active(inner: &Rc<RefCell<Inner>>) {
+    let (update, category) = {
+        let st = inner.borrow();
+        let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(&st)));
+        (st.nav.update.clone(), page.map(|p| p.category.id))
+    };
+    let started = update(category);
+    crate::library::toast::notify(actions::update_toast(actions::UpdateScope::Category, !started));
+    sync_refresh_button(inner);
+}
+
 /// The shared state of one library view. Lives in an `Rc<RefCell<_>>` that handlers reach through a `Weak`.
 struct Inner {
     deps: Deps,
@@ -392,6 +404,7 @@ impl LibraryView {
                 keys::Shortcut::SelectAll => select_with(&inner, |sel, page| sel.select_all(page)),
                 keys::Shortcut::Invert => select_with(&inner, |sel, page| sel.invert(page)),
                 keys::Shortcut::DeleteSelection => selected_action(&inner, |nav| nav.delete.clone()),
+                keys::Shortcut::RefreshCategory => refresh_active(&inner),
                 keys::Shortcut::Tab(step) => {
                     let target = {
                         let st = inner.borrow();
@@ -468,14 +481,7 @@ impl LibraryView {
         let weak_click = weak.clone();
         button.connect_clicked(move |_| {
             let Some(inner) = weak_click.upgrade() else { return };
-            let (update, category) = {
-                let st = inner.borrow();
-                let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(&st)));
-                (st.nav.update.clone(), page.map(|p| p.category.id))
-            };
-            let started = update(category);
-            crate::library::toast::notify(actions::update_toast(actions::UpdateScope::Category, !started));
-            sync_refresh_button(&inner);
+            refresh_active(&inner);
         });
         // a pass that ends, or one started elsewhere, changes the button without a click
         let weak_poll = weak.clone();

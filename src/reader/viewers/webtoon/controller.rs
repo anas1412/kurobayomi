@@ -132,8 +132,11 @@ impl WebtoonController {
     /// the chapter of the last page when the list ends in a page, not necessarily the chapter of this page.
     fn on_page_selected(&self, page: &PageRef, allow: bool) -> Vec<Effect> {
         let mut fx = vec![Effect::PageSelected(page.clone())];
+        // `logcat` in WebtoonViewer.onPageSelected (T-44a-083)
+        tracing::debug!(page = page.number(), "webtoon onPageSelected");
         let Some(chapter) = &self.chapter else { return fx };
         if i64::from(chapter.page_count) - i64::from(page.number()) < 5 && allow && chapter.key == page.chapter {
+            tracing::debug!(page = page.number(), total = chapter.page_count, "webtoon requests preload of the next chapter");
             if let Some(to) = self.last_chapter() {
                 fx.push(Effect::Preload(to));
             }

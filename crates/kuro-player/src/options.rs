@@ -198,6 +198,20 @@ pub fn decoder_stored_name(decoder: Decoder) -> &'static str {
     }
 }
 
+/// The decoder of a stored name (`decoder_stored_name`'s inverse). An empty or unknown name is `None`, so nothing is
+/// remembered.
+pub fn decoder_from_stored_name(name: &str) -> Option<Decoder> {
+    [Decoder::AutoCopy, Decoder::Auto, Decoder::Sw, Decoder::Hw, Decoder::HwPlus]
+        .into_iter()
+        .find(|d| decoder_stored_name(*d) == name)
+}
+
+/// What a decoder choice writes to `player_decoder` (T-46b-043): the stored name when the opt-in
+/// `pref_remember_decoder` is on, otherwise `None`, so the choice stays session-only.
+pub fn remembered_decoder_write(remember: bool, chosen: Decoder) -> Option<&'static str> {
+    remember.then(|| decoder_stored_name(chosen))
+}
+
 /// The decoder of a stored name, or `None` for a name this build does not know.
 pub fn decoder_from_stored(name: &str) -> Option<Decoder> {
     Some(match name {
@@ -472,6 +486,15 @@ pub fn setting_value<'a>(settings: &'a [MpvSetting], name: &str) -> Option<&'a s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t_46b_043_a_choice_is_stored_only_with_the_opt_in_and_reads_back() {
+        assert_eq!(remembered_decoder_write(false, Decoder::Hw), None);
+        let name = remembered_decoder_write(true, Decoder::HwPlus).unwrap();
+        assert_eq!(decoder_from_stored_name(name), Some(Decoder::HwPlus));
+        assert_eq!(decoder_from_stored_name(""), None);
+        assert_eq!(decoder_from_stored_name("Nope"), None);
+    }
 
     fn prefs() -> PlayerPrefs {
         PlayerPrefs {

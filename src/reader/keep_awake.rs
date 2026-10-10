@@ -1,59 +1,74 @@
 //! Keep the screen on while the reader is open (T-043a-051). The inhibit is taken with the application and released
 //! when the reader closes or the preference goes off.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 
-use gtk::prelude::*;
+use kuro_platform::idle::{IdleGuard, IdleInhibitor};
 
 /// The inhibit is wanted while the preference is on and the reader is open.
 pub fn should_inhibit(pref_on: bool, reader_open: bool) -> bool {
     pref_on && reader_open
 }
 
-/// Holds the inhibit cookie. [`KeepAwake::sync`] takes or releases it to match the wanted state.
+/// Holds the platform idle guard (the same `IdleInhibitor` the player uses). [`KeepAwake::sync`] takes or releases it
+/// to match the wanted state; dropping `KeepAwake` releases it too.
 #[derive(Default)]
 pub struct KeepAwake {
-    cookie: Cell<Option<u32>>,
-    app: RefCell<Option<gtk::Application>>,
+    guard: RefCell<Option<IdleGuard>>,
 }
 
 impl KeepAwake {
-    pub fn sync(&self, window: &gtk::Window, want: bool) {
-        let app = window.application();
-        match (want, self.cookie.get()) {
-            (true, None) => {
-                if let Some(app) = app {
-                    let cookie = app.inhibit(Some(window), gtk::ApplicationInhibitFlags::IDLE, Some("Reading manga"));
-                    self.cookie.set(Some(cookie));
-                    *self.app.borrow_mut() = Some(app);
-                }
-            }
-            (false, Some(cookie)) => {
-                self.release(cookie);
-            }
+    pub fn sync(&self, _window: &gtk::Window, want: bool) {
+        self.sync_with(&kuro_platform::linux::ScreenSaver, want);
+    }
+
+    fn sync_with(&self, idle: &dyn IdleInhibitor, want: bool) {
+        let mut guard = self.guard.borrow_mut();
+        match (want, guard.is_some()) {
+            (true, false) => match idle.inhibit("Reading manga") {
+                Ok(taken) => *guard = Some(taken),
+                Err(error) => tracing::warn!(%error, "the screen may blank while reading"),
+            },
+            (false, true) => *guard = None,
             _ => {}
-        }
-    }
-
-    fn release(&self, cookie: u32) {
-        if let Some(app) = self.app.borrow_mut().take() {
-            app.uninhibit(cookie);
-        }
-        self.cookie.set(None);
-    }
-}
-
-impl Drop for KeepAwake {
-    fn drop(&mut self) {
-        if let Some(cookie) = self.cookie.get() {
-            self.release(cookie);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+
+    struct Counting(Arc<AtomicUsize>);
+
+    impl IdleInhibitor for Counting {
+        fn inhibit(&self, _reason: &str) -> io::Result<IdleGuard> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let live = Arc::clone(&self.0);
+            Ok(IdleGuard::new(move || {
+                live.fetch_sub(1, Ordering::SeqCst);
+            }))
+        }
+    }
+
+    #[test]
+    fn the_guard_is_taken_once_and_released_with_the_reader() {
+        let live = Arc::new(AtomicUsize::new(0));
+        let idle = Counting(Arc::clone(&live));
+        let awake = KeepAwake::default();
+        awake.sync_with(&idle, true);
+        awake.sync_with(&idle, true);
+        assert_eq!(live.load(Ordering::SeqCst), 1);
+        awake.sync_with(&idle, false);
+        assert_eq!(live.load(Ordering::SeqCst), 0);
+        awake.sync_with(&idle, true);
+        drop(awake);
+        assert_eq!(live.load(Ordering::SeqCst), 0, "dropping releases it");
+    }
 
     #[test]
     fn the_inhibit_follows_the_preference_and_the_reader_being_open() {

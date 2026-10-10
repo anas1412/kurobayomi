@@ -9,6 +9,12 @@ pub const GLOBAL_SEARCH_EMPTY_HINT: &str = "Search a source by title";
 /// (a text bug; T-41a-036, ui-parity S9).
 pub const MIGRATE_SOURCES_EMPTY: &str = "No source has favorites to migrate";
 
+/// `migrate_tracks_always`: the dim line under the migrate options. Tracking data is copied whatever is ticked (T-40a-045).
+pub const MIGRATE_TRACKS_ALWAYS: &str = "Tracking data is always transferred.";
+
+/// The migrate tab's help action (T-41b-040, help URLs of `p2-data-and-config.md` section 5).
+pub const SOURCE_MIGRATION_HELP_URL: &str = "https://aniyomi.org/help/guides/source-migration/";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -17,5 +23,7 @@ mod tests {
     fn the_texts_are_the_ones_the_plan_words() {
         assert_eq!(GLOBAL_SEARCH_EMPTY_HINT, "Search a source by title");
         assert_eq!(MIGRATE_SOURCES_EMPTY, "No source has favorites to migrate");
+        assert_eq!(MIGRATE_TRACKS_ALWAYS, "Tracking data is always transferred.");
+        assert_eq!(SOURCE_MIGRATION_HELP_URL, "https://aniyomi.org/help/guides/source-migration/");
     }
 }

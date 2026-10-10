@@ -11,6 +11,17 @@ const EMPHASIZED: &str = "cubic-bezier(0.2, 0, 0, 1)";
 /// The base stylesheet: GTK named colours and static rules, loaded before the palette.
 pub const BASE_CSS: &str = include_str!("style.css");
 
+/// Shows or hides the modal scrim on a window overlay while a modal dialog or sheet is open
+/// (T-49ba-049). The scrim is `.kb-scrim` in `style.css`, alpha 0.32.
+pub fn set_scrim(overlay: &impl gtk::prelude::IsA<gtk::Widget>, on: bool) {
+    use gtk::prelude::WidgetExt as _;
+    if on {
+        overlay.add_css_class(class::SCRIM);
+    } else {
+        overlay.remove_css_class(class::SCRIM);
+    }
+}
+
 /// CSS class names for the Kurobayomi component classes.
 pub mod class {
     pub const SURFACE: &str = "kb-surface";
@@ -44,6 +55,7 @@ pub mod class {
     pub const LINK_ICON: &str = "kb-link-icon";
     /// A glyph in the primary colour (the info screen icon).
     pub const PRIMARY_ICON: &str = "kb-primary-icon";
+    pub const SCRIM: &str = "kb-scrim";
 }
 
 /// Alpha of the onSurface state layer under a hovered clickable surface; a press uses
@@ -476,5 +488,78 @@ mod parse_tests {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod base_css_tests {
+    use super::BASE_CSS;
+
+    fn has(rule: &str) -> bool {
+        BASE_CSS.contains(rule)
+    }
+
+    /// T-49ba-045: only the GTK default named colours are referenced, so no rule is dropped.
+    #[test]
+    fn base_sheet_references_only_gtk_named_colours() {
+        const ALLOWED: [&str; 5] = [
+            "theme_bg_color",
+            "theme_fg_color",
+            "theme_base_color",
+            "theme_selected_bg_color",
+            "theme_selected_fg_color",
+        ];
+        let mut rest = BASE_CSS;
+        while let Some(at) = rest.find('@') {
+            let name: String = rest[at + 1..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            assert!(ALLOWED.contains(&name.as_str()), "undefined colour @{name} in the base sheet");
+            rest = &rest[at + 1..];
+        }
+    }
+
+    /// T-49ba-027: a dragged or selected download card gets alpha 0.08 of the selection colour.
+    #[test]
+    fn draggable_cards_tint_with_the_selection_colour() {
+        assert!(has(".kb-draggable.kb-dragged,"));
+        assert!(has("alpha(@theme_selected_bg_color, 0.08)"));
+    }
+
+    /// T-49ba-049: the modal scrim is black at 0.32.
+    #[test]
+    fn scrim_is_black_at_032() {
+        assert!(has(".kb-scrim {\n  background-color: rgba(0, 0, 0, 0.32);"));
+    }
+
+    /// T-49ba-020: the splash colours are the Android splash colours.
+    #[test]
+    fn splash_colours_match_the_android_resources() {
+        assert!(has(".kb-splash {\n  background-color: #54759E;"));
+        assert!(has(".kb-splash.kb-dark {\n  background-color: #202125;"));
+    }
+
+    /// T-49ba-003: the AMOLED surfaces match `values-night/themes.xml`, dark mode only.
+    #[test]
+    fn amoled_surfaces_match_values_night() {
+        assert!(has(".kb-dark.kb-amoled window,"));
+        assert!(has("background-color: #000000;"));
+        assert!(has(".kb-dark.kb-amoled .card,"));
+        assert!(has("background-color: #0C0C0C;"));
+        assert!(has("background-color: #131313;"));
+        assert!(has("background-color: #1B1B1B;"));
+    }
+
+    /// T-49ba-032: dividers are one pixel of the foreground at 0.12.
+    #[test]
+    fn dividers_are_one_pixel_at_012() {
+        assert!(has(".kb-divider, separator.kb-divider {\n  min-height: 1px;\n  background-color: alpha(@theme_fg_color, 0.12);"));
+    }
+
+    /// T-49ba-022: the tab-enter rotation classes that `anim::rotate_icon` sets.
+    #[test]
+    fn rotation_classes_are_defined() {
+        for class in ["kb-rot-0 {", "kb-rot-180 {", "kb-rot-360 {", "kb-icon-rot.kb-rot-0-slow {"] {
+            assert!(has(class), "{class}");
+        }
+        assert!(has("transition: -gtk-icon-transform 300ms cubic-bezier(0.4, 0, 0.2, 1);"));
     }
 }

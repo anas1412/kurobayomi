@@ -64,9 +64,9 @@ Exec=kurobayomi --action=show-browse
         format!("{}/src/shell/data/{name}", env!("CARGO_MANIFEST_DIR"))
     }
 
-    /// Runs a checker when it is installed; `None` when it is not, so the test does not fail on a bare machine.
-    fn run(tool: &str, args: &[&str]) -> Option<bool> {
-        Command::new(tool).args(args).output().ok().map(|o| o.status.success())
+    /// Runs a checker. A missing tool is a failure: CI installs desktop-file-utils and libxml2-utils (EF-01, EF-05).
+    fn run(tool: &str, args: &[&str]) -> bool {
+        Command::new(tool).args(args).output().unwrap_or_else(|e| panic!("{tool} is required for this test: {e}")).status.success()
     }
 
     #[test]
@@ -79,15 +79,15 @@ Exec=kurobayomi --action=show-browse
 
     #[test]
     fn desktop_file_validate_exits_zero() {
-        if let Some(ok) = run("desktop-file-validate", &[&data("io.github.blackbox.Kurobayomi.desktop")]) {
-            assert!(ok);
-        }
+        assert!(run("desktop-file-validate", &[&data("io.github.blackbox.Kurobayomi.desktop")]));
     }
 
     #[test]
     fn the_desktop_actions_are_five_distinct_groups_that_the_launcher_understands() {
         let groups: Vec<&str> = DESKTOP.lines().filter_map(|l| l.strip_prefix("[Desktop Action ")?.strip_suffix(']')).collect();
         assert_eq!(groups, ["show-library", "show-animelib", "show-updates", "show-history", "show-browse"]);
+        // TC-53-19: the five action ids are distinct
+        assert_eq!(groups.iter().collect::<std::collections::HashSet<_>>().len(), 5);
         let listed = DESKTOP.lines().find_map(|l| l.strip_prefix("Actions=")).unwrap_or_default();
         assert_eq!(listed.trim_end_matches(';').split(';').collect::<Vec<_>>(), groups);
         for name in &groups {
@@ -103,9 +103,7 @@ Exec=kurobayomi --action=show-browse
     #[test]
     fn tc_53_37_the_mime_file_declares_the_backup_type_and_the_entry_lists_it() {
         assert_eq!(MIME, MIME_GOLDEN);
-        if let Some(ok) = run("xmllint", &["--noout", &data("io.github.blackbox.Kurobayomi.xml")]) {
-            assert!(ok);
-        }
+        assert!(run("xmllint", &["--noout", &data("io.github.blackbox.Kurobayomi.xml")]));
         let mime_types = DESKTOP.lines().find_map(|l| l.strip_prefix("MimeType=")).unwrap_or_default();
         for t in ["application/x-tachibk", "x-scheme-handler/kurobayomi", "x-scheme-handler/aniyomi", "x-scheme-handler/tachiyomi"] {
             assert!(mime_types.split(';').any(|m| m == t), "{t}");

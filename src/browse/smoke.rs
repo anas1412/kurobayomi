@@ -26,6 +26,7 @@ fn browse_widgets_smoke() {
         super::anime::browse_view::tests::smoke();
         super::anime::browse_screen::tests::smoke();
         super::anime::migrate_dialog::tests::smoke();
+        super::manga_migrate_dialog::tests::smoke();
         super::migrate_screen::tests::smoke();
         super::source_prefs_screen::tests::smoke();
     });

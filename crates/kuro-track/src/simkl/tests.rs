@@ -1086,3 +1086,14 @@ async fn t_32a_061_no_write_body_carries_a_date_or_time() {
         assert!(!body.contains("date") && !body.contains("time"), "{body}");
     }
 }
+
+#[test]
+fn t_32a_051_the_tracker_logo_is_the_embedded_black_svg() {
+    use crate::tracker::{LogoRef, Tracker};
+    let t = offline();
+    let LogoRef::Embedded(bytes) = t.logo() else {
+        panic!("Simkl returns its embedded logo");
+    };
+    assert!(bytes.starts_with(b"<svg"));
+    assert_eq!(t.logo_color(), 0xFF00_0000);
+}

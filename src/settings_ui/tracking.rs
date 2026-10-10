@@ -306,7 +306,11 @@ fn tracker_item(index: usize, view: LoginRowView, host: Option<&Host>, changed: 
     let trailing: Option<Rc<dyn Fn() -> gtk::Widget>> = view.logged_in.then(|| Rc::new(check_mark) as Rc<dyn Fn() -> gtk::Widget>);
     let changed = Rc::clone(changed);
     let on_tap: Rc<dyn Fn(&TapRow)> = Rc::new(move |_| tapped(index, &changed));
-    tap_item(view.row.name, subtitle(host, view.row).as_deref(), true, trailing, on_tap)
+    let logo = match kuro_track::logo::logo_asset(view.row.tracker) {
+        Some(kuro_track::tracker::LogoRef::Embedded(bytes)) => Some(bytes),
+        _ => None,
+    };
+    tap_item(view.row.name, subtitle(host, view.row).as_deref(), true, trailing, logo, on_tap)
 }
 
 /// The enhanced trackers group: a row for each tracker whose source is installed (a tap is a no-op login), a disabled

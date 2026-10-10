@@ -24,6 +24,10 @@ pub struct ShellDeps {
     pub on_filter: Rc<dyn Fn(BrowsePage)>,
     /// The overflow's extension repos entry, for the visible kind.
     pub on_repos: Rc<dyn Fn(BrowseKind)>,
+    /// F5 and Ctrl+R on an extensions page: look for extensions again.
+    pub on_refresh: Rc<dyn Fn(BrowsePage)>,
+    /// Ctrl+U on an extensions page: update every extension that has an update.
+    pub on_update_all: Rc<dyn Fn(BrowsePage)>,
     /// Escape with no search open: back out of the Browse page.
     pub on_leave: Rc<dyn Fn()>,
 }
@@ -182,6 +186,14 @@ impl Inner {
                 self.search.grab_focus();
                 true
             }
+            Some(BrowseShortcut::RefreshExtensions) if self.visible().is_extensions() => {
+                (self.deps.on_refresh)(self.visible());
+                true
+            }
+            Some(BrowseShortcut::UpdateAll) if self.visible().is_extensions() => {
+                (self.deps.on_update_all)(self.visible());
+                true
+            }
             Some(BrowseShortcut::SubTab(n)) => {
                 self.select(BrowsePage::ALL[usize::from(n) - 1]);
                 true
@@ -288,11 +300,13 @@ pub(crate) mod tests {
         routes: Rc<RefCell<Vec<BrowseRoute>>>,
         queries: Rc<RefCell<Vec<(BrowsePage, String)>>>,
         left: Rc<RefCell<u32>>,
+        keyed: Rc<RefCell<Vec<String>>>,
     }
 
     fn shell() -> (BrowseShell, Log) {
-        let log = Log { routes: Rc::default(), queries: Rc::default(), left: Rc::default() };
+        let log = Log { routes: Rc::default(), queries: Rc::default(), left: Rc::default(), keyed: Rc::default() };
         let (routes, queries, left) = (Rc::clone(&log.routes), Rc::clone(&log.queries), Rc::clone(&log.left));
+        let (refreshed, updated) = (Rc::clone(&log.keyed), Rc::clone(&log.keyed));
         let pages = BrowsePage::ALL.iter().map(|p| (*p, gtk::Label::new(Some(&p.title())).upcast::<gtk::Widget>())).collect();
         let deps = ShellDeps {
             pages,
@@ -300,6 +314,8 @@ pub(crate) mod tests {
             on_query: Rc::new(move |page, text| queries.borrow_mut().push((page, text))),
             on_filter: Rc::new(|_| {}),
             on_repos: Rc::new(|_| {}),
+            on_refresh: Rc::new(move |page| refreshed.borrow_mut().push(format!("refresh {page:?}"))),
+            on_update_all: Rc::new(move |page| updated.borrow_mut().push(format!("update {page:?}"))),
             on_leave: Rc::new(move || *left.borrow_mut() += 1),
         };
         (BrowseShell::new(deps), log)
@@ -380,6 +396,20 @@ pub(crate) mod tests {
         assert_eq!(shell.visible(), BrowsePage::MangaSources);
     }
 
+    fn f5_ctrl_r_and_ctrl_u_act_on_the_extensions_pages_only() {
+        use gtk::gdk::{Key, ModifierType};
+        let (shell, log) = shell();
+        let (ctrl, none) = (ModifierType::CONTROL_MASK, ModifierType::empty());
+        assert!(!shell.inner.key(Key::u, ctrl), "Ctrl+U is not ours on a sources page");
+        assert!(!shell.inner.key(Key::F5, none));
+        assert!(log.keyed.borrow().is_empty());
+        shell.inner.select(BrowsePage::MangaExtensions);
+        assert!(shell.inner.key(Key::u, ctrl));
+        assert!(shell.inner.key(Key::F5, none));
+        assert!(shell.inner.key(Key::r, ctrl));
+        assert_eq!(*log.keyed.borrow(), ["update MangaExtensions", "refresh MangaExtensions", "refresh MangaExtensions"]);
+    }
+
     fn the_update_count_badges_the_tab_title_only_above_zero() {
         let (shell, _log) = shell();
         let title = |page: BrowsePage| {
@@ -395,6 +425,7 @@ pub(crate) mod tests {
 
     pub(crate) fn smoke() {
         ctrl_f_escape_and_ctrl_digits_drive_the_tab();
+        f5_ctrl_r_and_ctrl_u_act_on_the_extensions_pages_only();
         the_update_count_badges_the_tab_title_only_above_zero();
         six_pages_in_order_and_the_extension_requests_select_pages_3_and_2();
         reselecting_opens_global_search_for_the_visible_kind();

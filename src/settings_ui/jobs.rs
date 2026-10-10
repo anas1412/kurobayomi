@@ -5,7 +5,7 @@
 //!
 //! Decisions: ids are a counter, not UUIDs (the workspace has no uuid crate). The registry records state only; the owner
 //! spawns the job future on the runtime and reports its start and outcome here.
-#![allow(dead_code)] // the worker info page (T-47b-043) and the job owners are not in this lane yet
+#![allow(dead_code)] // the job owners are not in this lane yet; the worker info page reads the registry
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 /// The states a job moves through. `Blocked` is kept for the dump format; nothing here sets it yet.

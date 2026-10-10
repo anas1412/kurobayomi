@@ -11,10 +11,58 @@
 //! [`texture_budget_bytes`] is the peak the uploaded textures can reach, even if every page of the window were drawn at
 //! once. It is separate from the 512 MiB of decoded pixels that `decoded_lru` keeps.
 
-use crate::reader::page_decode::{DEFAULT_TILE_THRESHOLD, DecodedPage, needs_tiling};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use crate::reader::page_decode::{DEFAULT_TILE_THRESHOLD, DecodedPage, MAX_TEXTURE_EDGE, needs_tiling};
 
 /// The largest tile edge in pixels of a level (`hardwareBitmapThreshold`, B§10.1).
 pub const MAX_TILE_EDGE: u32 = DEFAULT_TILE_THRESHOLD;
+
+/// The preference key of the largest tile edge (T-44a-060). `kuro-prefs` lists it as dropped and has no typed entry for
+/// it, so the reader reads it from the store by key (see `ViewerSettings::from_prefs`); a stored value still counts.
+pub const TILE_THRESHOLD_KEY: &str = "pref_hardware_bitmap_threshold";
+
+/// The largest tile edge for a `pref_hardware_bitmap_threshold` value. A value below 256 is rejected for the default
+/// (T-44a-060), and one above the texture limit is held to it.
+pub fn max_tile_edge(pref: i32) -> u32 {
+    if pref < 256 { DEFAULT_TILE_THRESHOLD } else { (pref as u32).min(MAX_TEXTURE_EDGE) }
+}
+
+static TILE_EDGE: AtomicU32 = AtomicU32::new(MAX_TILE_EDGE);
+
+/// Takes a new `pref_hardware_bitmap_threshold`. Pages decoded after this call are cut to it; pages already decoded keep
+/// their tiles.
+pub fn set_tile_threshold(pref: i32) {
+    TILE_EDGE.store(max_tile_edge(pref), Ordering::Relaxed);
+}
+
+/// The tile edge a page decoded now is cut to.
+pub fn current_tile_edge() -> u32 {
+    TILE_EDGE.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+mod max_tile_edge_tests {
+    use super::*;
+
+    #[test]
+    fn a_threshold_below_256_falls_back_to_the_default_edge() {
+        assert_eq!(max_tile_edge(0), DEFAULT_TILE_THRESHOLD);
+        assert_eq!(max_tile_edge(255), DEFAULT_TILE_THRESHOLD);
+        assert_eq!(max_tile_edge(256), 256);
+        assert_eq!(max_tile_edge(4096), 4096);
+        assert_eq!(max_tile_edge(100_000), MAX_TEXTURE_EDGE, "above the texture limit is held to it");
+    }
+
+    #[test]
+    fn a_rejected_threshold_leaves_the_default_edge_for_the_next_decode() {
+        // only default-valued writes here: the edge is process-wide and the page tests decode with it
+        set_tile_threshold(10);
+        assert_eq!(current_tile_edge(), DEFAULT_TILE_THRESHOLD);
+        set_tile_threshold(DEFAULT_TILE_THRESHOLD as i32);
+        assert_eq!(current_tile_edge(), DEFAULT_TILE_THRESHOLD);
+    }
+}
 
 /// The pages whose textures can be alive together: the current page and two on each side (T-43b-021).
 pub const WINDOW_PAGES: u64 = 5;

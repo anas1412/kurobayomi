@@ -38,7 +38,8 @@ use super::dispatch::{bottom_cmds, swipe_cmds};
 use super::details_error::{DetailsError, required};
 use super::downloads::{DownloadMenu, NEXT_COUNTS, menu_visible};
 use super::intro_dialog;
-use super::overflow::{self, Entry as OverflowEntry, Item as OverflowItem};
+use super::torrent_server;
+use super::overflow::{self, Entry as OverflowEntry, Item as OverflowItem, LINK_COPIED, can_launch};
 use super::viewer;
 use super::dialog_state::{AnimeDialog, DialogSlot};
 use super::duplicate::Choice;
@@ -52,7 +53,7 @@ use super::set_default::{self, Scope};
 use super::swipe_look::{self, DownloadState, EpisodeState};
 use super::selection::Click;
 use super::info::header_model;
-use super::layout::{bottom_bar_width, fab_expanded, two_pane};
+use super::layout::{bottom_bar_width, fab_expanded, header_fade, two_pane};
 use super::model::{AnimeEntryModel, AnimeLoadContext};
 use super::refresh::refresh_snack;
 use super::remote::{LiveSources, RemoteAnimeBackend};
@@ -157,6 +158,7 @@ struct View {
     bottom_row: GBox,
     stack: gtk::Stack,
     title: Option<Label>,
+    header_bar: Option<gtk::HeaderBar>,
     toolbar: Vec<gtk::Widget>,
     list: Rc<EpisodeList>,
     scroller: gtk::ScrolledWindow,
@@ -314,9 +316,9 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     let list = EpisodeList::new(
         {
             let weak = Rc::clone(&weak_view);
-            Rc::new(move |id: i64, long: bool, alt: bool| {
+            Rc::new(move |id: i64, long: bool, alt: bool, mods: crate::entry_core::selection::Mods| {
                 if let Some(view) = weak.borrow().upgrade() {
-                    view.row_pressed(id, long, alt);
+                    view.row_pressed(id, long, alt, mods);
                 }
             })
         },
@@ -324,7 +326,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
             let weak = Rc::clone(&weak_view);
             Rc::new(move |id: i64| {
                 if let Some(view) = weak.borrow().upgrade() {
-                    view.row_pressed(id, false, false);
+                    view.row_pressed(id, false, false, crate::entry_core::selection::Mods::default());
                 }
             })
         },
@@ -501,6 +503,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         bottom_row,
         stack,
         title,
+        header_bar: header.clone(),
         toolbar,
         list: Rc::clone(&list),
         scroller: scroller.clone(),
@@ -688,6 +691,11 @@ fn key_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
                 view.edit_selection(|m, _, full| m.selection.invert(full));
                 glib::Propagation::Stop
             }
+            _ if super::super::shortcut_help_view::is_help_key(key) => {
+                super::super::shortcut_help_view::open();
+                glib::Propagation::Stop
+            }
+            _ if view.header_key_pressed(key, state) => glib::Propagation::Stop,
             _ => glib::Propagation::Proceed,
         }
     });
@@ -695,6 +703,32 @@ fn key_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
 }
 
 impl View {
+    /// F (episode settings), R (refresh), Ctrl+M (migrate, a favorite only) and W (WebView, an HTTP source only), the
+    /// header keys of `shortcuts::header_key` (T-38a-046). `true` when the key was one of them and ran.
+    fn header_key_pressed(self: &Rc<Self>, key: gtk::gdk::Key, state: gtk::gdk::ModifierType) -> bool {
+        use crate::entry_core::selection::Mods;
+        use crate::entry_core::shortcuts::{HeaderKey, header_key};
+        if state.intersects(gtk::gdk::ModifierType::ALT_MASK | gtk::gdk::ModifierType::SUPER_MASK) {
+            return false;
+        }
+        let Some(letter) = key.to_lower().to_unicode() else { return false };
+        let (favorite, http_source, selecting) = {
+            let model = self.model.borrow();
+            let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return false };
+            (m.anime.favorite, self.env.backend.is_http_source(m.anime.source), m.selection.is_active())
+        };
+        let mods = Mods { shift: state.contains(gtk::gdk::ModifierType::SHIFT_MASK), ctrl: state.contains(gtk::gdk::ModifierType::CONTROL_MASK) };
+        match header_key(letter, mods, http_source) {
+            Some(HeaderKey::Filter) => self.open_settings(),
+            // a selection disables Refresh, as it does the header button
+            Some(HeaderKey::Refresh) if !selecting => self.refresh(),
+            Some(HeaderKey::Migrate) if favorite => self.migrate(),
+            Some(HeaderKey::WebView) => self.webview_pressed(),
+            _ => return false,
+        }
+        true
+    }
+
     fn on_event(self: &Rc<Self>, event: AnimeEvent) {
         match event {
             AnimeEvent::Loaded(loaded) => {
@@ -775,6 +809,7 @@ impl View {
         }
         // the cover size depends on the layout
         *self.built.borrow_mut() = None;
+        self.update_fade();
         self.render();
     }
 
@@ -997,7 +1032,8 @@ impl View {
     /// `autoOpenTrack`: a tracker is logged in and "open the track menu on adding" is on.
     fn auto_open_track(&self) -> bool {
         crate::entry_core::tracking::session::refresh_from_host();
-        self.env.backend.has_logged_in_tracker() && self.env.prefs.pref::<bool>("track_on_adding_to_library", true).get()
+        let pref_on = self.env.prefs.pref::<bool>("track_on_adding_to_library", true).get();
+        crate::entry_core::tracking::summary::open_track_sheet_on_add(pref_on, self.env.backend.has_logged_in_tracker())
     }
 
     /// The dismiss of request `id` (`onDismissRequest`). When the add flow chose a category and auto-open is on, the
@@ -1177,8 +1213,10 @@ impl View {
             // the page can continue watching: a tile shows the button when its season has an unseen episode
             has_continue: true,
             columns: Layout::columns_for(width, i64::from(size), mode),
+            size: i64::from(size),
             fixed: size > 0 || mode == SeasonDisplayMode::List,
             width,
+            height: self.scroller.height(),
         };
         let key = (items, layout);
         if self.seasons_shown.borrow().as_ref() == Some(&key) {
@@ -1216,6 +1254,7 @@ impl View {
                 OverflowItem::EditCategories => (tr(MsgKey::action_edit_categories), |v: &Rc<View>| v.open_categories()),
                 OverflowItem::Migrate => (tr(MsgKey::action_migrate), |v: &Rc<View>| v.migrate()),
                 OverflowItem::Share => (tr(MsgKey::action_share), |v: &Rc<View>| v.share()),
+                OverflowItem::OpenInBrowser => (tr(MsgKey::action_open_in_browser), |v: &Rc<View>| v.open_in_browser()),
                 OverflowItem::Settings => (tr(MsgKey::action_settings), |v: &Rc<View>| v.open_source_preferences()),
             };
             let button = Button::builder().css_classes(["flat"]).build();
@@ -1277,8 +1316,21 @@ impl View {
         let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.url.clone());
         if let (Some(url), Some(display)) = (url, gtk::gdk::Display::default()) {
             display.clipboard().set_text(&url);
-            self.present(UserMessage::Plain(trf(MsgKey::copied_to_clipboard, &[("arg1", Arg::Str(&url))])), None);
+            self.present(UserMessage::Plain(LINK_COPIED.to_owned()), None);
         }
+    }
+
+    /// Open in browser (T-39b-051): the entry's address in the desktop's browser through `gtk::UriLauncher`. A launch
+    /// that fails is a toast, never a panic. Offered for an HTTP source only (`overflow::items`).
+    fn open_in_browser(self: &Rc<Self>) {
+        let url = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.url.clone());
+        let Some(url) = url.filter(|u| can_launch(u)) else { return };
+        let weak = Rc::downgrade(self);
+        gtk::UriLauncher::new(&url).launch(Some(&ui::window()), None::<&gtk::gio::Cancellable>, move |result| {
+            if let (Err(error), Some(view)) = (result, weak.upgrade()) {
+                view.present(UserMessage::Plain(error.to_string()), None);
+            }
+        });
     }
 
     /// The Download menu: the next 1, 5, 10 or 25 unseen episodes, or every unseen one.
@@ -1378,6 +1430,25 @@ impl View {
         self.scroll.set((value, backward));
         let can_forward = value + adj.page_size() < adj.upper() - 1.0;
         self.fab_label.set_visible(fab_expanded(usize::from(value > 0.0), value as i32, backward, can_forward));
+        self.update_fade();
+    }
+
+    /// The scroll position fades the title and the header bar background in the narrow layout (T-39a-036).
+    fn update_fade(&self) {
+        let narrow = !self.two_pane.get().unwrap_or(false);
+        let value = self.scroller.vadjustment().value();
+        let first_visible = value < f64::from(self.top.height());
+        let fade = header_fade(narrow, first_visible, value > 0.0);
+        if let Some(title) = &self.title {
+            title.set_opacity(fade.title);
+        }
+        if let Some(bar) = &self.header_bar {
+            if fade.background >= 1.0 {
+                bar.remove_css_class("flat");
+            } else {
+                bar.add_css_class("flat");
+            }
+        }
     }
 
     /// One tick of the airing row: the remaining time comes from the absolute target.
@@ -1394,7 +1465,7 @@ impl View {
         }
     }
 
-    fn row_pressed(self: &Rc<Self>, id: i64, long: bool, alt: bool) {
+    fn row_pressed(self: &Rc<Self>, id: i64, long: bool, alt: bool, mods: crate::entry_core::selection::Mods) {
         let open = {
             let mut model = self.model.borrow_mut();
             let Some(m) = model.as_mut().filter(|m| m.accepts_dispatch()) else { return };
@@ -1403,7 +1474,7 @@ impl View {
                 m.selection.long_press(&view, id);
                 None
             } else {
-                match m.selection.click(&view, id) {
+                match m.selection.click_with(&view, id, mods.shift, mods.ctrl) {
                     Click::Open(id) => Some(id),
                     Click::Toggled { .. } => None,
                 }
@@ -1457,9 +1528,28 @@ impl View {
             return;
         }
         if plan.torrent_server {
+            // the server start waits up to eleven seconds, so it runs off the GTK thread; the episode opens when it
+            // answers, times out or fails (the failure is a toast and playback goes on), T-39b-052
             self.env.backend.start_torrent_server();
+            let (tx, rx) = async_channel::bounded(1);
+            std::thread::spawn(move || {
+                let _ = tx.send_blocking(torrent_server::start_blocking(true, true));
+            });
+            let (backend, title, name) = (Arc::clone(&self.env.backend), title.to_owned(), name.to_owned());
+            glib::spawn_future_local(async move {
+                if let Ok(torrent_server::Outcome::Toast(text)) = rx.recv().await {
+                    crate::toast::notify(text);
+                }
+                Self::open_player(&backend, plan, anime_id, episode_id, &title, &name);
+            });
+            return;
         }
-        if plan.external && self.env.backend.play_external(anime_id, episode_id) {
+        Self::open_player(&self.env.backend, plan, anime_id, episode_id, title, name);
+    }
+
+    /// Hands the episode to the external player the plan names, or to the internal one.
+    fn open_player(backend: &Arc<dyn AnimeBackend>, plan: OpenPlan, anime_id: i64, episode_id: i64, title: &str, name: &str) {
+        if plan.external && backend.play_external(anime_id, episode_id) {
             return;
         }
         crate::screens::open_media(true, title, name);

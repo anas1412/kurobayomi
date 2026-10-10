@@ -14,7 +14,7 @@ use kuro_domain::source::model::Source;
 use kuro_i18n::{Arg, MsgKey, trf};
 use kuro_source::filter_list::FilterList;
 
-use super::global_search::{AutoOpen, GlobalSearch, SearchPlan, auto_open, take_starts};
+use super::global_search::{AutoOpen, GlobalSearch, SearchPlan, auto_open, shared_gate, take_starts};
 use super::glue::{consume_events, keep_alive, own_tasks};
 use super::deep_link::is_link;
 use super::listing::{LinkFuture, ListItem, PageLoader};
@@ -26,6 +26,9 @@ use tokio_util::sync::CancellationToken;
 
 /// The loader of a source's listings by id, `None` when the source is not installed.
 pub type Loaders = Arc<dyn Fn(i64) -> Option<Arc<dyn PageLoader>> + Send + Sync>;
+
+/// A source's fresh default filter list by id (`SourceDirectory::filters`); an unknown source searches with none.
+pub type DefaultFilters = Arc<dyn Fn(i64) -> Option<FilterList> + Send + Sync>;
 
 /// Resolves a pasted link to the entry it names, or `None` when nothing can resolve it (`SourceDirectory::resolve_link`).
 pub type LinkResolver = Arc<dyn Fn(&str) -> Option<LinkFuture>>;
@@ -48,6 +51,8 @@ struct Fetched {
 pub struct SearchRunner {
     engine: RefCell<GlobalSearch>,
     loaders: Loaders,
+    /// Where each fan-out fetch gets its filters (`source.getFilterList()`); empty lists when unset.
+    filters: RefCell<Option<DefaultFilters>>,
     hooks: RunnerHooks,
     tasks: Rc<RefCell<PageTasks<Fetched>>>,
     queue: RefCell<VecDeque<Source>>,
@@ -61,6 +66,8 @@ pub struct SearchRunner {
     links: RefCell<Option<LinkResolver>>,
     /// Ends a link lookup that a newer search or the page has outlived.
     link_lookup: RefCell<CancellationToken>,
+    /// The fetch permits: shared by every search screen in the app (E-GS-08).
+    gate: Arc<tokio::sync::Semaphore>,
 }
 
 impl Drop for SearchRunner {
@@ -71,9 +78,15 @@ impl Drop for SearchRunner {
 
 impl SearchRunner {
     pub fn new(engine: GlobalSearch, loaders: Loaders, hooks: RunnerHooks) -> Rc<Self> {
+        Self::with_gate(engine, loaders, hooks, shared_gate())
+    }
+
+    /// A runner whose fetches take their permits from `gate`. `new` passes the app's shared gate.
+    pub fn with_gate(engine: GlobalSearch, loaders: Loaders, hooks: RunnerHooks, gate: Arc<tokio::sync::Semaphore>) -> Rc<Self> {
         let runner = Rc::new(Self {
             engine: RefCell::new(engine),
             loaders,
+            filters: RefCell::new(None),
             hooks,
             tasks: Rc::new(RefCell::new(PageTasks::new())),
             queue: RefCell::new(VecDeque::new()),
@@ -84,6 +97,7 @@ impl SearchRunner {
             opened: Cell::new(false),
             links: RefCell::new(None),
             link_lookup: RefCell::new(CancellationToken::new()),
+            gate,
         });
         let weak = Rc::downgrade(&runner);
         consume_events(&runner.tasks, move |fetched| {
@@ -98,6 +112,11 @@ impl SearchRunner {
     pub fn attach(self: &Rc<Self>, widget: &impl IsA<gtk::Widget>) {
         own_tasks(widget, &self.tasks);
         keep_alive(widget, self);
+    }
+
+    /// Makes each source's fetch start from its own default filters instead of an empty list.
+    pub fn set_default_filters(&self, filters: DefaultFilters) {
+        *self.filters.borrow_mut() = Some(filters);
     }
 
     /// Makes a pasted link resolve through `resolver` before it is searched as text.
@@ -215,11 +234,16 @@ impl SearchRunner {
             let (plan, id) = (self.plan.get(), source.id);
             let query = self.query.borrow().clone();
             let loader = (self.loaders)(id);
+            let filters = self.filters.borrow().as_ref().and_then(|defaults| defaults(id)).unwrap_or_default();
             let missing = trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(&stub_source_label(&source.name, &source.lang, id)))]);
+            let gate = Arc::clone(&self.gate);
             self.tasks.borrow_mut().spawn(async move {
-                let result = match loader {
-                    Some(loader) => loader.load(BrowseQuery::Search(query), FilterList::default(), 1).await.map(|page| page.items),
-                    None => Err(missing),
+                let result = {
+                    let _permit = gate.acquire_owned().await;
+                    match loader {
+                        Some(loader) => loader.load(BrowseQuery::Search(query), filters, 1).await.map(|page| page.items),
+                        None => Err(missing),
+                    }
                 };
                 let _ = tx.send(Tagged { generation, event: Fetched { plan, source_id: id, result } }).await;
             });
@@ -262,6 +286,7 @@ mod tests {
     use kuro_domain::source::pin::Pins;
 
     use super::*;
+    use crate::browse::global_search::MAX_IN_FLIGHT;
     use crate::browse::listing::{ListedPage, LoadFuture};
     use crate::browse::pages::SearchState;
 
@@ -322,6 +347,11 @@ mod tests {
     }
 
     fn rig(count: i64) -> Rig {
+        rig_on(count, Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT)))
+    }
+
+    /// A rig whose fetches take their permits from `runner_gate`, so two rigs can share one.
+    fn rig_on(count: i64, runner_gate: Arc<tokio::sync::Semaphore>) -> Rig {
         let gate = Arc::new(tokio::sync::Semaphore::new(0));
         let (live, peak, started, queries) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)), Arc::default());
         let loader = Arc::new(Gated {
@@ -342,7 +372,7 @@ mod tests {
             }),
             open_entry: Rc::new(move |id| open_log.borrow_mut().push(id)),
         };
-        Rig { live, peak, started, gate, queries, runner: SearchRunner::new(engine, loaders, hooks), snapshots, opened, threads }
+        Rig { live, peak, started, gate, queries, runner: SearchRunner::with_gate(engine, loaders, hooks, runner_gate), snapshots, opened, threads }
     }
 
     fn pump(context: &glib::MainContext, mut done: impl FnMut() -> bool) -> bool {
@@ -387,6 +417,23 @@ mod tests {
     }
 
     #[test]
+    fn two_search_screens_share_one_gate_of_five_fetches() {
+        with_loop(|context| {
+            let shared = Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT));
+            let (first, second) = (rig_on(4, Arc::clone(&shared)), rig_on(4, Arc::clone(&shared)));
+            first.runner.submit("one");
+            second.runner.submit("two");
+            let total = || first.started.load(Ordering::SeqCst) + second.started.load(Ordering::SeqCst);
+            assert!(pump(context, || total() == 5), "five fetches run across both screens (E-GS-08)");
+            let _ = pump(context, || false);
+            assert_eq!(total(), 5, "the sixth waits for a permit");
+            first.gate.add_permits(4);
+            assert!(pump(context, || first.runner.snapshot().answered == 4), "the first screen finishes");
+            assert!(pump(context, || second.started.load(Ordering::SeqCst) == 4), "the freed permits go to the second screen");
+        });
+    }
+
+    #[test]
     fn a_new_search_aborts_the_old_fetches_and_drops_their_late_results() {
         with_loop(|context| {
             let rig = rig(2);
@@ -401,6 +448,33 @@ mod tests {
             let snapshot = rig.runner.snapshot();
             assert_eq!(snapshot.query, "new");
             assert!(snapshot.rows.iter().all(|row| matches!(row.state, SearchState::Results(_))));
+        });
+    }
+
+    /// Records the filter list each fetch was given.
+    struct Recording(Arc<std::sync::Mutex<Vec<usize>>>);
+    impl PageLoader for Recording {
+        fn load(&self, _query: BrowseQuery, filters: FilterList, _page: u32) -> LoadFuture {
+            self.0.lock().expect("lock").push(filters.len());
+            Box::pin(async { Ok(ListedPage { items: Vec::new(), has_next: false }) })
+        }
+    }
+
+    #[test]
+    fn each_fetch_starts_from_the_sources_default_filters() {
+        with_loop(|context| {
+            let seen: Arc<std::sync::Mutex<Vec<usize>>> = Arc::default();
+            let loader = Arc::new(Recording(Arc::clone(&seen)));
+            let loaders: Loaders = Arc::new(move |_| Some(Arc::clone(&loader) as Arc<dyn PageLoader>));
+            let engine = GlobalSearch::new(candidates(2), ["en".to_owned()].into(), BTreeSet::new(), None, false);
+            let hooks = RunnerHooks { changed: Rc::new(|_| {}), open_entry: Rc::new(|_| {}) };
+            let runner = SearchRunner::new(engine, loaders, hooks);
+            runner.set_default_filters(Arc::new(|id| Some(FilterList((0..id).map(|n| kuro_source::filter::Filter::check_box(&format!("f{n}"))).collect()))));
+            runner.submit("x");
+            assert!(pump(context, || runner.snapshot().answered == 2));
+            let mut lengths = seen.lock().expect("lock").clone();
+            lengths.sort();
+            assert_eq!(lengths, [1, 2], "each source got its own default list, not an empty one");
         });
     }
 

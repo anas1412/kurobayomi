@@ -272,7 +272,7 @@ pub fn plan(preset: &Preset, launch: &Launch, path_var: &OsStr) -> Result<Plan, 
 pub fn run(plan: &Plan) -> Result<Option<Child>, ExternalError> {
     match plan {
         Plan::Open(uri) => {
-            kuro_platform::opener::open(Path::new(uri))
+            kuro_platform::opener::Opener::open_target(&kuro_platform::opener::XdgOpener, uri)
                 .map_err(|e| ExternalError::Spawn(e.to_string()))?;
             Ok(None)
         }

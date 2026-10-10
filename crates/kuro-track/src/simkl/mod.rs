@@ -147,7 +147,7 @@ impl Tracker for SimklTracker {
     }
 
     fn logo(&self) -> LogoRef {
-        LogoRef::IconName("simkl")
+        crate::logo::logo_asset(TRACKER_ID).unwrap_or(LogoRef::IconName("simkl"))
     }
 
     fn logo_color(&self) -> u32 {

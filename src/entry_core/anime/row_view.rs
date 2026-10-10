@@ -16,6 +16,7 @@ use kuro_i18n::{MsgKey, tr_plural};
 use super::actions::swipe_action;
 use super::episode_row::{Diff, EpisodeRow, Line, PADDING, RowLayout, changed_span, diff_lines, info_alpha, title_alpha, title_gap};
 use super::swipe_look::{MenuItem, SwipeLook, reveal};
+use crate::entry_core::selection::Mods;
 use crate::entry_core::swipe::{Side, side_of_drag};
 
 /// The swipe actions of a row (T-39b-015): the stored actions, and what to run for one row on a touch drag.
@@ -29,8 +30,9 @@ pub struct EpisodeSwipe {
     pub menu: Rc<dyn Fn(i64) -> Vec<MenuItem>>,
 }
 
-/// A press on a row: (episode id, long press or right click, Alt held). Alt opens in the other player.
-pub type OnRow = Rc<dyn Fn(i64, bool, bool)>;
+/// A press on a row: (episode id, long press or right click, Alt held, Shift and Ctrl held). Alt opens in the other player;
+/// Shift selects a range and Ctrl toggles one row (T-39a-055).
+pub type OnRow = Rc<dyn Fn(i64, bool, bool, Mods)>;
 
 /// Summary lines a collapsed summary shows (T-39a-012).
 const COLLAPSED_LINES: i32 = super::summary::COLLAPSED_LINES;
@@ -331,9 +333,10 @@ impl EpisodeList {
                 let Some(list_item) = object.downcast_ref::<gtk::ListItem>() else { return };
                 let widgets = Rc::new(row_widgets());
                 let long_fired = Rc::new(Cell::new(false));
-                let press = |list_item: &gtk::ListItem, on_row: &OnRow, long: bool, alt: bool| {
+                let press = |list_item: &gtk::ListItem, on_row: &OnRow, long: bool, state: gtk::gdk::ModifierType| {
                     if let Some(Item::Episode(row)) = item_of(list_item) {
-                        on_row(row.id, long, alt);
+                        let mods = Mods { shift: state.contains(gtk::gdk::ModifierType::SHIFT_MASK), ctrl: state.contains(gtk::gdk::ModifierType::CONTROL_MASK) };
+                        on_row(row.id, long, state.contains(gtk::gdk::ModifierType::ALT_MASK), mods);
                     }
                 };
                 let left = gtk::GestureClick::builder().button(1).build();
@@ -341,7 +344,7 @@ impl EpisodeList {
                     let (list_item, on_row, long_fired) = (list_item.clone(), Rc::clone(&on_row), Rc::clone(&long_fired));
                     move |g, _, _, _| {
                         if !long_fired.replace(false) {
-                            press(&list_item, &on_row, false, g.current_event_state().contains(gtk::gdk::ModifierType::ALT_MASK));
+                            press(&list_item, &on_row, false, g.current_event_state());
                         }
                     }
                 });
@@ -351,7 +354,7 @@ impl EpisodeList {
                     let (list_item, on_row, swipe, widgets) = (list_item.clone(), Rc::clone(&on_row), swipe.clone(), Rc::clone(&widgets));
                     move |_, _, x, y| match (&swipe, item_of(&list_item)) {
                         (Some(swipe), Some(Item::Episode(row))) => show_menu(&widgets.row, x, y, row.id, swipe),
-                        _ => press(&list_item, &on_row, true, false),
+                        _ => press(&list_item, &on_row, true, gtk::gdk::ModifierType::empty()),
                     }
                 });
                 let long = gtk::GestureLongPress::new();
@@ -359,7 +362,7 @@ impl EpisodeList {
                     let (list_item, on_row, long_fired) = (list_item.clone(), Rc::clone(&on_row), Rc::clone(&long_fired));
                     move |_, _, _| {
                         long_fired.set(true);
-                        press(&list_item, &on_row, true, false);
+                        press(&list_item, &on_row, true, gtk::gdk::ModifierType::empty());
                     }
                 });
                 for c in [left.upcast_ref::<gtk::EventController>(), right.upcast_ref(), long.upcast_ref()] {

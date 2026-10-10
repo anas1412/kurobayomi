@@ -13,6 +13,8 @@ pub enum Shortcut {
     /// The Delete key opens the delete action for the selection (section 7 proposal). It never fires with an empty
     /// selection or while the search entry is typing, where it edits text.
     DeleteSelection,
+    /// F5 starts an update of the current category, as the refresh button does (T-37a-035).
+    RefreshCategory,
 }
 
 pub fn shortcut(key: Key, ctrl: bool, has_selection: bool, typing: bool) -> Option<Shortcut> {
@@ -22,6 +24,7 @@ pub fn shortcut(key: Key, ctrl: bool, has_selection: bool, typing: bool) -> Opti
         Key::Page_Down if ctrl => Some(Shortcut::Tab(1)),
         Key::Page_Up if ctrl => Some(Shortcut::Tab(-1)),
         Key::Delete if has_selection && !typing => Some(Shortcut::DeleteSelection),
+        Key::F5 => Some(Shortcut::RefreshCategory),
         _ => None,
     }
 }
@@ -78,6 +81,8 @@ mod tests {
         assert_eq!(shortcut(Key::Page_Up, true, false, false), Some(Shortcut::Tab(-1)));
         assert_eq!(shortcut(Key::i, false, false, false), None, "a bare I types into the search entry");
         assert_eq!(shortcut(Key::Page_Down, false, false, false), None);
+        assert_eq!(shortcut(Key::F5, false, false, false), Some(Shortcut::RefreshCategory));
+        assert_eq!(shortcut(Key::F5, false, true, true), Some(Shortcut::RefreshCategory), "F5 is not text input");
     }
 
     #[test]

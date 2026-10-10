@@ -151,6 +151,21 @@ impl Selection {
         }
     }
 
+    /// A click with desktop modifiers (T-39a-055, desktop additions; upstream has touch only). Shift+click selects the range
+    /// from the anchor, as a long press does; Ctrl+click toggles that one row, also when nothing is selected yet. With
+    /// neither it is a plain `click`.
+    pub fn click_with(&mut self, view: &[i64], id: i64, shift: bool, ctrl: bool) -> Click {
+        let selected = !self.contains(id);
+        if shift {
+            self.long_press(view, id);
+            Click::Toggled { id, selected }
+        } else if ctrl {
+            if self.toggle_one(view, id, selected, true, false) { Click::Toggled { id, selected } } else { Click::Open(id) }
+        } else {
+            self.click(view, id)
+        }
+    }
+
     /// Back or Escape. Selection is cleared first and the key is consumed (`true`). With nothing selected it returns
     /// `false` and the caller navigates up.
     pub fn back(&mut self) -> bool {
@@ -343,5 +358,28 @@ mod tests {
         assert!(s.back());
         assert!(!s.is_active());
         assert!(!s.back());
+    }
+
+    #[test]
+    fn shift_click_selects_the_range_from_the_anchor() {
+        let mut s = span(&[20]);
+        assert_eq!(s.click_with(&VIEW, 50, true, false), Click::Toggled { id: 50, selected: true });
+        assert_eq!(selected_in_view(&s), vec![20, 30, 40, 50]);
+    }
+
+    #[test]
+    fn ctrl_click_toggles_one_row_even_with_nothing_selected() {
+        let mut s = Selection::default();
+        assert_eq!(s.click_with(&VIEW, 30, false, true), Click::Toggled { id: 30, selected: true });
+        assert_eq!(s.click_with(&VIEW, 50, false, true), Click::Toggled { id: 50, selected: true });
+        assert_eq!(selected_in_view(&s), vec![30, 50], "no range between them");
+        assert_eq!(s.click_with(&VIEW, 30, false, true), Click::Toggled { id: 30, selected: false });
+        assert_eq!(selected_in_view(&s), vec![50]);
+    }
+
+    #[test]
+    fn a_click_without_modifiers_still_opens_when_nothing_is_selected() {
+        let mut s = Selection::default();
+        assert_eq!(s.click_with(&VIEW, 30, false, false), Click::Open(30));
     }
 }

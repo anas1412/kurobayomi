@@ -34,6 +34,9 @@ use crate::entry_core::tracking;
 use crate::entry_core::detail::{LatestWins, LoadContext, LoadState, StoreCmd, StoreEvent};
 use crate::entry_core::dialog::{CategoryDialog, Dialog};
 use crate::entry_core::fetch_interval_dialog;
+use crate::entry_core::full_cover_view;
+use crate::entry_core::shortcut_help_view;
+use crate::entry_core::shortcuts::{HeaderKey, header_key};
 use crate::entry_core::handoff::{self, MigrateRequest, WebViewRequest};
 use crate::entry_core::flags::{ChapterFlags, save_as_default, scanlator_filter_active};
 use crate::entry_core::header::{GenreChip, HeaderModel, SearchRequest, is_large};
@@ -474,6 +477,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     });
     list.widget.add_controller(key_controller(&weak));
     page_widget.add_controller(escape_controller(&weak));
+    page_widget.add_controller(header_key_controller(&weak));
     // a resize across the tablet threshold rebuilds the header for the other layout
     crate::window_size::on_tablet_change({
         let weak = weak.clone();
@@ -573,6 +577,44 @@ fn key_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
             return glib::Propagation::Proceed;
         }
         view.act(UiAction::Key { key: mapped, mods, focused });
+        glib::Propagation::Stop
+    });
+    keys
+}
+
+/// F (filter), R (refresh), Ctrl+M (migrate), W (WebView, an HTTP source only) and F1 or `?` (the shortcut help), on the
+/// whole page (T-38a-046). A key held with Alt or Super, or typed in a text field, goes on to GTK.
+fn header_key_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Bubble);
+    let weak = weak.clone();
+    keys.connect_key_pressed(move |_, key, _, state| {
+        let Some(view) = weak.upgrade() else { return glib::Propagation::Proceed };
+        if state.intersects(gtk::gdk::ModifierType::ALT_MASK | gtk::gdk::ModifierType::SUPER_MASK) {
+            return glib::Propagation::Proceed;
+        }
+        if shortcut_help_view::is_help_key(key) {
+            shortcut_help_view::open();
+            return glib::Propagation::Stop;
+        }
+        let Some(letter) = key.to_lower().to_unicode() else { return glib::Propagation::Proceed };
+        let webview = view.page.borrow().ready().is_some_and(|ready| ready.http_source);
+        let Some(command) = header_key(letter, mods_of(state), webview) else { return glib::Propagation::Proceed };
+        let ready = view.page.borrow().actions_enabled();
+        if !ready {
+            return glib::Propagation::Proceed;
+        }
+        match command {
+            HeaderKey::Filter => view.open_settings_at(&view.filter),
+            HeaderKey::Refresh => view.act(UiAction::Refresh),
+            // Migrate is in the overflow menu of a favorite only
+            HeaderKey::Migrate => {
+                if view.page.borrow().ready().is_some_and(|ready| ready.manga.favorite) {
+                    view.migrate();
+                }
+            }
+            HeaderKey::WebView => view.webview_pressed(),
+        }
         glib::Propagation::Stop
     });
     keys
@@ -720,10 +762,15 @@ impl View {
                     }
                 }
             }),
-            on_cover: Rc::new(|| {
-                let screen = ui::screen("manga_entry_details");
-                if let Some(dialog) = screen.dialogs.iter().find(|d| d.id == "full_cover") {
-                    ui::show_dialog(dialog);
+            on_cover: Rc::new({
+                let weak = weak.clone();
+                move || {
+                    let Some(view) = weak.upgrade() else { return };
+                    let manga = view.page.borrow().ready().map(|ready| ready.manga.clone());
+                    let (Some(manga), Some(handle)) = (manga, view.handle.clone()) else { return };
+                    let (runner, manga_id) = (Rc::clone(&view.runner), manga.id);
+                    let bump = Rc::new(move || runner.send(StoreCmd::BumpCover { manga_id }));
+                    full_cover_view::open(manga, full_cover_view::Env { handle, bump });
                 }
             }),
         }
@@ -1097,7 +1144,8 @@ impl View {
     /// `autoOpenTrack`: a tracker is logged in and "open the track menu on adding" is on. Both are read when asked.
     fn auto_open_tracking(&self) -> bool {
         tracking::session::refresh_from_host();
-        tracking::session::has_logged_in() && data::app().base.store().pref::<bool>("track_on_adding_to_library", true).get()
+        let pref_on = data::app().base.store().pref::<bool>("track_on_adding_to_library", true).get();
+        tracking::summary::open_track_sheet_on_add(pref_on, tracking::session::has_logged_in())
     }
 
     /// The tracking button: the tracking sheet when a tracker is logged in, the tracking settings when none is (E-25).

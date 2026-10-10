@@ -15,6 +15,9 @@ pub enum UriRoute {
     TrackerAuth { host: String, uri: String },
 }
 
+/// The hosts of the tracker sign-in callbacks the tracker lane handles.
+pub const TRACKER_AUTH_HOSTS: [&str; 5] = ["anilist-auth", "myanimelist-auth", "bangumi-auth", "shikimori-auth", "simkl-auth"];
+
 /// A link the route table refuses. Each one becomes a toast.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UriError {
@@ -160,6 +163,26 @@ mod tests {
     fn the_host_is_matched_in_any_case_and_a_fragment_does_not_hide_the_address() {
         assert_eq!(parse_uri("KuroBayomi://ADD-REPO?url=a%20b#frag"), Ok(UriRoute::MangaRepos { url: "a b".into() }));
         assert_eq!(parse_uri("aniyomi://add-repo/?x=1&url=u"), Ok(UriRoute::AnimeStores { url: "u".into() }));
+    }
+
+    #[test]
+    fn t53a_009_tracker_callbacks_route_to_the_tracker_lane_with_the_whole_link() {
+        // EC-19 to EC-23: the token is in the fragment (last or not), the code in the query, or no code at all; the
+        // shell only picks the route, the tracker lane reads the parameters
+        let links = [
+            "kurobayomi://anilist-auth#access_token=abc&token_type=Bearer",
+            "kurobayomi://anilist-auth#access_token=abc",
+            "kurobayomi://bangumi-auth?code=xyz",
+            "kurobayomi://simkl-auth",
+            "kurobayomi://myanimelist-auth?code=%20x",
+            "kurobayomi://shikimori-auth?code=xyz",
+        ];
+        for link in links {
+            let host = link.split("://").nth(1).and_then(|r| r.split(['/', '?', '#']).next()).unwrap();
+            assert_eq!(parse_uri(link), Ok(UriRoute::TrackerAuth { host: host.into(), uri: link.into() }), "{link}");
+        }
+        // an unknown `*-auth` host is still a tracker route; the tracker lane answers it with the toast
+        assert!(matches!(parse_uri("kurobayomi://nosuch-auth#access_token=a"), Ok(UriRoute::TrackerAuth { .. })));
     }
 
     #[test]

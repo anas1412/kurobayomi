@@ -15,6 +15,7 @@ use kuro_prefs::reader::{ORIENTATION_MASK, READING_MODE_MASK, ReaderOrientation,
 
 use super::chapters::{ListError, ListOptions, build_reader_list};
 use super::delete_queue::{self, DeleteQueue, Pending, QueueFile};
+use super::download_ahead;
 use super::flags;
 use super::history_rules::{self, now_ms};
 use super::loader::{LoadFailure, Loader, load_chapter};
@@ -120,6 +121,19 @@ pub struct ReaderSession {
     history_started: Option<i64>,
     /// The delete-after-read rule, when the app can delete downloads (T-43a-032).
     delete_after_read: Option<DeleteAfterRead>,
+    /// Sends the completed chapter's number to the trackers (T-43a-030). Off unless the caller sets it.
+    track_update: Option<TrackUpdate>,
+    /// The download-ahead rule, with its amount read when the reader opened (T-43a-034).
+    ahead: Option<AheadRule>,
+}
+
+/// Called with the manga id and the number of a chapter the reader completed. The caller applies the tracking switch.
+pub type TrackUpdate = Rc<dyn Fn(i64, f64)>;
+
+/// The download-ahead amount of a session and the lookup that says which chapters are downloaded.
+struct AheadRule {
+    amount: i32,
+    is_downloaded: Rc<dyn Fn(&Chapter) -> bool>,
 }
 
 /// The delete-after-read state of a session: the slot count read when the reader opened, the chapters queued so far
@@ -156,7 +170,29 @@ impl ReaderSession {
             mark_duplicates_read: false,
             history_started: None,
             delete_after_read: None,
+            track_update: None,
+            ahead: None,
         }
+    }
+
+    /// Turns on the tracker update for the completions this session sees (T-43a-030). Incognito sessions never call it.
+    pub fn set_track_update(&mut self, update: TrackUpdate) {
+        self.track_update = Some(update);
+    }
+
+    /// Turns on download-ahead (T-43a-034). `amount` is the preference value read when the reader opened; zero or less
+    /// leaves it off.
+    pub fn set_download_ahead(&mut self, amount: i32, is_downloaded: Rc<dyn Fn(&Chapter) -> bool>) {
+        self.ahead = (amount > 0).then_some(AheadRule { amount, is_downloaded });
+    }
+
+    /// The chapter ids to queue for the page being read now (empty when download-ahead is off or its rules say wait).
+    fn ahead_chapters(&self) -> Vec<i64> {
+        let (Some(rule), Some(current)) = (&self.ahead, self.current) else { return Vec::new() };
+        let Some(pages) = self.chapters.get(current).and_then(|c| c.pages()) else { return Vec::new() };
+        let ids: Vec<i64> = self.chapters.iter().map(|c| c.chapter.id).collect();
+        let downloaded = |i: usize| (rule.is_downloaded)(&self.chapters[i].chapter);
+        download_ahead::chapters_to_queue(rule.amount, &ids, downloaded, current, self.current_page as usize, pages.len())
     }
 
     /// Turns on delete-after-read for the completions this session sees (T-43a-032). `slots` is the preference value:
@@ -289,7 +325,11 @@ impl ReaderSession {
             if index == pages_len - 1 {
                 // landing on the last page completes the chapter; repeating it is harmless (E-PROG-2)
                 let newly_read = !chapter.read.replace(true);
-                // the hook order is: delete-after-read, then duplicate marking (T-43a-030, T-43a-031, T-43a-032)
+                // the hook order is: track update, delete-after-read, then duplicate marking (T-43a-030, T-43a-031,
+                // T-43a-032). The chapter number goes as a double; the tracker skips one it is already at or past.
+                if newly_read && let Some(update) = &self.track_update {
+                    update(self.manga_id, chapter.chapter.chapter_number);
+                }
                 self.queue_delete_after(chapter_index);
                 if newly_read && self.mark_duplicates_read {
                     self.mark_duplicates_read_of(chapter_index);
@@ -398,12 +438,13 @@ impl ReaderSession {
 
     /// `onPageSelected` (T-043a-093). An insert page is ignored. Otherwise the progress is saved, a chapter switch
     /// runs when the page belongs to another chapter, then download-ahead and the flash run, in that order.
+    /// `download_ahead` gets the chapter ids to queue, and is not called when there are none.
     /// Returns the chapter index the session switched to.
     pub fn on_page_selected(
         &mut self,
         page: &Rc<ReaderPage>,
         build: impl FnOnce(&Rc<ReaderChapter>) -> Result<Loader, LoadError>,
-        download_ahead: &mut dyn FnMut(usize),
+        download_ahead: &mut dyn FnMut(&[i64]),
         flash: &mut dyn FnMut(),
     ) -> Option<usize> {
         if page.is_insert_page() {
@@ -415,8 +456,9 @@ impl ReaderSession {
         if let Some(target) = switch {
             let _ = self.switch_chapter(target, build);
         }
-        if let Some(current) = self.current {
-            download_ahead(current);
+        let queue = self.ahead_chapters();
+        if !queue.is_empty() {
+            download_ahead(&queue);
         }
         flash();
         switch
@@ -823,6 +865,7 @@ mod tests {
         let a = chapter(1, false);
         let b = chapter(2, false);
         let (mut s, _rx) = session(Rc::clone(&rec), vec![Rc::clone(&a), Rc::clone(&b)], 0, false);
+        s.set_download_ahead(1, Rc::new(|_| true));
         let log = RefCell::new(Vec::new());
         let switched = s.on_page_selected(
             &page(&b, 1),
@@ -830,12 +873,62 @@ mod tests {
                 log.borrow_mut().push("build");
                 Err(LoadError::new("offline"))
             },
-            &mut |i| log.borrow_mut().push(if i == 0 { "ahead 0" } else { "ahead other" }),
+            &mut |ids| log.borrow_mut().push(if ids == [2] { "ahead [2]" } else { "ahead other" }),
             &mut || log.borrow_mut().push("flash"),
         );
         assert_eq!(switched, Some(1));
-        assert_eq!(log.borrow().as_slice(), ["build", "ahead 0", "flash"], "a failed switch keeps chapter 0 current");
+        assert_eq!(log.borrow().as_slice(), ["build", "ahead [2]", "flash"], "a failed switch keeps chapter 0 current");
         assert_eq!(rec.progress.borrow().as_slice(), [(2, 1, false)]);
+    }
+
+    #[test]
+    fn download_ahead_is_silent_when_off_or_when_the_amount_is_not_positive() {
+        let rec = Rc::new(Recorder::default());
+        let (a, b) = (chapter(1, false), chapter(2, false));
+        let (mut s, _rx) = session(rec, vec![Rc::clone(&a), Rc::clone(&b)], 0, false);
+        let calls = std::cell::Cell::new(0);
+        s.on_page_selected(&page(&a, 2), never_built, &mut |_: &[i64]| calls.set(calls.get() + 1), &mut || {});
+        s.set_download_ahead(0, Rc::new(|_| true));
+        s.on_page_selected(&page(&a, 2), never_built, &mut |_: &[i64]| calls.set(calls.get() + 1), &mut || {});
+        assert_eq!(calls.get(), 0);
+    }
+
+    fn chapter_numbered(id: i64, number: f64) -> Rc<ReaderChapter> {
+        let mut c = Chapter::create();
+        c.id = id;
+        c.url = format!("/c/{id}");
+        c.chapter_number = number;
+        let ch = ReaderChapter::new(c);
+        let pages = (0..3).map(|i| ReaderPage::new(i, format!("p{i}"), None, PageSource::Http)).collect::<Vec<_>>();
+        ch.finish_loading(pages).unwrap();
+        ch
+    }
+
+    #[test]
+    fn completing_a_chapter_sends_its_number_once_and_never_in_incognito() {
+        for (incognito, expected) in [(false, vec![(7, 12.5)]), (true, vec![])] {
+            let rec = Rc::new(Recorder::default());
+            let a = chapter_numbered(1, 12.5);
+            let (mut s, _rx) = session(rec, vec![Rc::clone(&a)], 0, incognito);
+            let sent = Rc::new(RefCell::new(Vec::new()));
+            let sink = Rc::clone(&sent);
+            s.set_track_update(Rc::new(move |manga, number| sink.borrow_mut().push((manga, number))));
+            s.record_page(0, &page(&a, 2));
+            s.record_page(0, &page(&a, 2));
+            assert_eq!(*sent.borrow(), expected);
+        }
+    }
+
+    #[test]
+    fn a_page_before_the_last_sends_nothing_to_the_trackers() {
+        let rec = Rc::new(Recorder::default());
+        let a = chapter_numbered(1, 3.0);
+        let (mut s, _rx) = session(rec, vec![Rc::clone(&a)], 0, false);
+        let sent = Rc::new(std::cell::Cell::new(0));
+        let sink = Rc::clone(&sent);
+        s.set_track_update(Rc::new(move |_, _| sink.set(sink.get() + 1)));
+        s.record_page(0, &page(&a, 1));
+        assert_eq!(sent.get(), 0);
     }
 
     #[test]
@@ -846,9 +939,9 @@ mod tests {
         let calls = std::cell::Cell::new(0);
         let parent = page(&a, 0);
         let insert = ReaderPage::insert_page(&parent);
-        s.on_page_selected(&insert, never_built, &mut |_| calls.set(calls.get() + 1), &mut || calls.set(calls.get() + 1));
+        s.on_page_selected(&insert, never_built, &mut |_: &[i64]| calls.set(calls.get() + 1), &mut || calls.set(calls.get() + 1));
         let stray = chapter(9, false);
-        s.on_page_selected(&page(&stray, 0), never_built, &mut |_| calls.set(calls.get() + 1), &mut || calls.set(calls.get() + 1));
+        s.on_page_selected(&page(&stray, 0), never_built, &mut |_: &[i64]| calls.set(calls.get() + 1), &mut || calls.set(calls.get() + 1));
         assert_eq!(calls.get(), 0);
         assert!(rec.progress.borrow().is_empty());
     }

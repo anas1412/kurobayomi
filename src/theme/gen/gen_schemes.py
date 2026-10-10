@@ -42,6 +42,14 @@ SCHEMES = [
 KOTLIN_OVERRIDES = {
     ("Monochrome", "light", "surfaceDim"): "FFFFFFFF",
     ("Mocha", "light", "inverseOnSurface"): "FFFBEAEB",
+    # T-49ba-005: the night XML has no onTertiary for CottonCandy; the Compose value fills it.
+    ("CottonCandy", "dark", "onTertiary"): "FF5F112B",
+}
+
+# T-49ba-043: the CottonCandy elevation overlay token is dropped (GTK has no elevation overlay).
+DROPPED = {
+    ("CottonCandy", "light", "elevationOverlay"),
+    ("CottonCandy", "dark", "elevationOverlay"),
 }
 
 # Role order must match src/theme/tokens.rs `Role` (index = discriminant).
@@ -122,6 +130,9 @@ def main():
         for (scheme, mode, role), value in KOTLIN_OVERRIDES.items():
             if scheme == name:
                 (day if mode == "light" else night)[role] = value
+        for scheme, mode, role in DROPPED:
+            if scheme == name:
+                (day if mode == "light" else night)[role] = None
         lines.append("    SchemeDef {")
         lines.append('        name: "%s",' % name)
         for mode, table in (("light", day), ("dark", night)):

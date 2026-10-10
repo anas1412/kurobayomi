@@ -268,6 +268,18 @@ impl DbStore {
         self.db.write(|tx| Ok(sm::mangas::update(tx, &patch)? > 0))
     }
 
+    /// An edit or a delete of the custom cover: `cover_last_modified` moves forward, so every cache keyed by it loads the
+    /// picture again (T-38a-038). `Ok(false)` when the row is gone.
+    pub fn bump_cover(&self, manga_id: i64, now_ms: i64) -> DataResult<bool> {
+        let Some(row) = self.manga(manga_id)? else { return Ok(false) };
+        let patch = MangaPatch {
+            id: manga_id,
+            cover_last_modified: Some(crate::entry_core::cover_model::bumped_last_modified(row.cover_last_modified, now_ms)),
+            ..MangaPatch::default()
+        };
+        self.db.write(|tx| Ok(sm::mangas::update(tx, &patch)? > 0))
+    }
+
     /// `(id, title)` of every favorite, for the duplicate check.
     pub fn favorite_titles(&self) -> DataResult<Vec<(i64, String)>> {
         Ok(self.mangas.favorites()?.into_iter().map(|m| (m.id, m.title)).collect())
@@ -540,6 +552,16 @@ mod tests {
         assert_eq!(row.date_added, 0, "E-FAV-7");
         assert!(version(&store, id) > before);
         assert!(!store.remove_from_library(999).unwrap(), "a missing row changes nothing");
+    }
+
+    #[test]
+    fn bumping_the_cover_moves_cover_last_modified_forward_only() {
+        let (_dir, store, id) = store(true, 0);
+        assert!(store.bump_cover(id, 5_000).unwrap());
+        assert_eq!(store.manga(id).unwrap().unwrap().cover_last_modified, 5_000);
+        assert!(store.bump_cover(id, 100).unwrap());
+        assert_eq!(store.manga(id).unwrap().unwrap().cover_last_modified, 5_001, "never backwards");
+        assert!(!store.bump_cover(999, 1).unwrap());
     }
 
     #[test]

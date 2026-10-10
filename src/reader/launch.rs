@@ -148,6 +148,9 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
         },
         data_dir,
         downloads: DownloadCheck::new(manga_is_local, lookup),
+        // the app starts no tracker layer and no download manager yet, so these have nothing to call
+        track_update: None,
+        download_ahead: None,
     };
     open_with(deps, extras, &open_gate(), toaster(), crate::ui::pop).root
 }

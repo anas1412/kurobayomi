@@ -9,6 +9,7 @@ pub mod solve_state;
 pub mod view;
 pub mod visible;
 
+use std::io;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -118,6 +119,22 @@ pub trait WebViewHost: Send + Sync {
     /// The page's `document.documentElement.outerHTML` as plain text, or `None` when the view has no page. The host
     /// reads the JavaScript string value, so the text is not JSON-quoted (Android's `getHtml` returns it quoted).
     async fn get_html(&self) -> Option<String>;
+
+    /// Runs an OAuth login and returns the query pairs of the redirect. `build_url` gets the redirect URI to put in the
+    /// login URL. The default is for hosts with no login path, so the caller falls back to its own error.
+    async fn oauth_login(
+        &self,
+        build_url: Box<dyn FnOnce(&str) -> Url + Send>,
+        limit: Duration,
+    ) -> io::Result<Vec<(String, String)>> {
+        let _ = (build_url, limit);
+        Err(io::Error::new(io::ErrorKind::Unsupported, "this host has no login path"))
+    }
+
+    /// The cookies the user imported for `url`'s host. The default has none.
+    fn imported_cookies(&self, _url: &Url) -> Vec<WebCookie> {
+        Vec::new()
+    }
 }
 
 /// The host used when WebKitGTK is not compiled in or cannot start.

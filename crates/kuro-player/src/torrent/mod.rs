@@ -7,4 +7,5 @@ pub mod links;
 pub mod proxy;
 pub mod route;
 pub mod server;
+pub mod service;
 pub mod trackers;

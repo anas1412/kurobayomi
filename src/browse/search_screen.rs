@@ -186,11 +186,14 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
         page.set_hint(super::texts::GLOBAL_SEARCH_EMPTY_HINT);
     }
     let hooks = RunnerHooks { changed: Rc::new(page.updater()), open_entry: Rc::clone(&env.replace_with_entry) };
-    let loaders: Loaders = match directory {
+    let loaders: Loaders = match directory.clone() {
         Some(directory) => Arc::new(move |id| directory.loader(id)),
         None => Arc::new(|_| None),
     };
     let runner = SearchRunner::new(engine, loaders, hooks);
+    if let Some(directory) = directory {
+        runner.set_default_filters(Arc::new(move |id| directory.filters(id)));
+    }
     // a pasted link resolves through the sources' `uri_type` before any catalogue search (T-20a-031)
     if let Some(links) = env.directory.clone() {
         runner.set_link_resolver(Arc::new(move |uri| links.resolve_link(uri)));
@@ -205,8 +208,8 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
     page.widget().clone()
 }
 
-/// The app side of a search page of `kind`. `migrate_from` is the anime entry a migrate search started from: a card of it
-/// opens the migrate dialog (T-41a-041) instead of the entry.
+/// The app side of a search page of `kind`. `migrate_from` is the entry a migrate search started from: a card of it opens
+/// the migrate dialog (T-41a-041, T-40a-015) instead of the entry.
 fn production_env(kind: BrowseKind, migrate_from: Option<i64>) -> SearchEnv {
     let prefs = Rc::new(BrowsePrefs::new(crate::data::app().base.store().clone()));
     match kind {
@@ -215,7 +218,7 @@ fn production_env(kind: BrowseKind, migrate_from: Option<i64>) -> SearchEnv {
             prefs,
             directory: super::directory::current(),
             open_entry: Rc::new(crate::entry_core::route::open),
-            pick_entry: None,
+            pick_entry: migrate_from.map(manga_migrate_dialog),
             replace_with_entry: Rc::new(|id| {
                 crate::ui::pop();
                 crate::entry_core::route::open(id);
@@ -241,20 +244,30 @@ fn production_env(kind: BrowseKind, migrate_from: Option<i64>) -> SearchEnv {
 }
 
 /// A card of an anime migrate search: the dialog of what to include for moving `old` to the card's anime. Show anime and
-/// Show seasons open the card's page, where a seasons title lists its seasons. Copy and Migrate need the migration
-/// engine, which the app does not have yet, so they say that the operation failed instead of doing nothing.
+/// Show seasons open the card's page, where a seasons title lists its seasons. The options come from the old title (its
+/// custom cover and background) and start from the saved `anime_migrate_flags`, which every run stores before it starts.
+/// Copy and Migrate need the anime migration engine, which the app does not have yet, so they say that the operation
+/// failed instead of doing nothing.
 fn anime_migrate_dialog(repo: AnimeRepo, old: i64) -> Rc<dyn Fn(i64)> {
-    use super::anime::migrate_dialog::{MigrateHandlers, show};
+    use super::anime::migrate_dialog::{Facts, MigrateHandlers, show};
+    use super::anime::prefs::AnimeBrowsePrefs;
     let slot = super::dialogs::DialogSlot::new();
+    let prefs = Rc::new(AnimeBrowsePrefs::new(crate::data::app().base.store().clone()));
     Rc::new(move |new: i64| {
         let (Ok(old_anime), Ok(new_anime)) = (repo.by_id(old), repo.by_id(new)) else {
             tracing::error!(old, new, "an anime of the migrate dialog could not be read");
             crate::toast::notify(tr(MsgKey::internal_error));
             return;
         };
+        let (save, stored) = (Rc::clone(&prefs), Rc::clone(&prefs));
         let handlers = MigrateHandlers {
             show_anime: Rc::new(move || crate::entry_core::anime::route::open(new)),
             show_seasons: Rc::new(move || crate::entry_core::anime::route::open(new)),
+            save_flags: Rc::new(move |bitmap| {
+                if let Err(error) = save.save_migrate_flags(bitmap) {
+                    tracing::warn!(%error, "the anime migrate flags could not be stored");
+                }
+            }),
             run: Rc::new(|run| {
                 tracing::warn!(?run, "no anime migration engine is installed, nothing was migrated");
                 crate::toast::notify(tr(MsgKey::internal_error));
@@ -262,7 +275,54 @@ fn anime_migrate_dialog(repo: AnimeRepo, old: i64) -> Rc<dyn Fn(i64)> {
         };
         // the library stores the fetch type as the database's enum; the dialog's rules take the source API's
         let fetch = |stored: kuro_db::schema_anime::FetchType| kuro_source::anime::model::FetchType::from(stored as i64);
-        show(&slot, &crate::ui::window(), fetch(old_anime.fetch_type), fetch(new_anime.fetch_type), handlers);
+        // no anime download index is published yet, so Delete downloaded is not offered
+        let has = |family| {
+            kuro_platform::linux::LinuxPaths::system().is_ok_and(|paths| kuro_images::cover_paths::custom_file(&paths, family, old).is_file())
+        };
+        let facts = Facts {
+            custom_cover: has(kuro_images::cover_paths::Family::AnimeCover),
+            custom_background: has(kuro_images::cover_paths::Family::AnimeBackground),
+            downloads: false,
+        };
+        show(&slot, &crate::ui::window(), fetch(old_anime.fetch_type), fetch(new_anime.fetch_type), facts, stored.migrate_flags(), handlers);
+    })
+}
+
+/// A card of a manga migrate search: the dialog of what to include for moving `old` to the card's manga. Show manga opens
+/// the card's page; Copy and Migrate run the migration engine on the main context and pop the search when it succeeds.
+pub(super) fn manga_migrate_dialog(old: i64) -> Rc<dyn Fn(i64)> {
+    use kuro_data::manga::MangaRepo;
+    use super::manga_migrate_dialog::{Handlers, show};
+    use super::migrate_engine::migrate_manga;
+    use super::migrate_live::LiveSteps;
+    Rc::new(move |new: i64| {
+        let app = crate::data::app();
+        let repo = MangaRepo::new(app.db(EntryKind::Manga));
+        let (Ok(old_manga), Ok(new_manga)) = (repo.by_id(old), repo.by_id(new)) else {
+            tracing::error!(old, new, "a manga of the migrate dialog could not be read");
+            crate::toast::notify(tr(MsgKey::internal_error));
+            return;
+        };
+        let downloads = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
+        let steps = Rc::new(LiveSteps::new(app.db(EntryKind::Manga), super::directory::current(), downloads));
+        let prefs = Rc::new(BrowsePrefs::new(app.base.store().clone()));
+        let (save, ran) = (Rc::clone(&prefs), Rc::clone(&steps));
+        let (old_row, new_row) = (old_manga.clone(), new_manga.clone());
+        let handlers = Handlers {
+            show_manga: Rc::new(move || crate::entry_core::route::open(new)),
+            save_flags: Rc::new(move |bitmap| {
+                if let Err(error) = save.migrate_flags.set(bitmap) {
+                    tracing::warn!(%error, "the migrate flags could not be stored");
+                }
+            }),
+            run: Rc::new(move |plan, done| {
+                let (steps, old_manga, new_manga) = (Rc::clone(&ran), old_row.clone(), new_row.clone());
+                gtk::glib::spawn_future_local(async move { done(migrate_manga(&*steps, &old_manga, &new_manga, plan).await) });
+            }),
+            finished: Rc::new(crate::ui::pop),
+            toast: Rc::new(|text| crate::toast::notify(text)),
+        };
+        show(&crate::ui::window(), LiveSteps::has_custom_cover(&old_manga), steps.has_downloads(&old_manga), prefs.migrate_flags.get(), handlers);
     })
 }
 
@@ -288,7 +348,7 @@ pub fn body(migrating: bool) -> Option<Built> {
     let (kind, migrate_from, start) = if migrating {
         let request = crate::entry_core::handoff::take_migrate()?;
         let (kind, found) = if request.anime { (BrowseKind::Anime, migrate_anime(request.entry_id)) } else { (BrowseKind::Manga, migrate_manga(request.entry_id)) };
-        (kind, request.anime.then_some(request.entry_id), start_for(true, found, None, None, None))
+        (kind, Some(request.entry_id), start_for(true, found, None, None, None))
     } else {
         let intent = pending::take_intent();
         let route = pending::take_for(screen);

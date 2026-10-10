@@ -3,11 +3,15 @@
 //! registry's adapter calls [`install`] once it exists. With none installed every page still builds: global search has no
 //! sources to ask, and the migration picker lists each library source as a stub.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+use kuro_data::manga::Manga;
 use kuro_domain::source::model::Source;
 use kuro_source::SourcePref;
 use kuro_source::filter_list::FilterList;
+use kuro_source::model::SChapter;
 
 use super::listing::{LinkFuture, PageLoader};
 
@@ -20,6 +24,9 @@ pub struct DirectorySource {
     pub home_url: Option<String>,
 }
 
+/// The chapter list of a manga as its source reports it (`getChapterList`), or the reason it could not be read.
+pub type ChaptersFuture = Pin<Box<dyn Future<Output = Result<Vec<SChapter>, String>> + Send>>;
+
 /// What the browse pages need of the installed sources.
 pub trait SourceDirectory: Send + Sync + 'static {
     /// The installed catalogue sources.
@@ -31,6 +38,11 @@ pub trait SourceDirectory: Send + Sync + 'static {
     /// The settings rows a configurable source declares (`ConfigurableSource::preferences`). `None` when the source is not
     /// installed or has no settings screen: the details page then shows no settings button for it.
     fn preferences(&self, _source_id: i64) -> Option<Vec<SourcePref>> {
+        None
+    }
+    /// The chapter list of `manga` from its source, for the migration engine. `None` when this directory cannot list
+    /// chapters: a migration then stops before it writes anything.
+    fn fetch_chapters(&self, _source_id: i64, _manga: &Manga) -> Option<ChaptersFuture> {
         None
     }
     /// Resolves a pasted link to the library row of the entry it names, asking each source's `uri_type` first (see

@@ -141,6 +141,12 @@ fn fade(area: &gtk::DrawingArea, state: &Rc<RefCell<State>>, shown: &Rc<Cell<boo
     if show {
         area.set_visible(true);
     }
+    // Reduced motion (T-44a-074): when the desktop turns animations off, the fade lasts one frame.
+    if !gtk::Settings::default().is_none_or(|s| s.is_gtk_enable_animations()) {
+        area.set_opacity(to);
+        area.set_visible(show);
+        return;
+    }
     let (area, state) = (area.clone(), Rc::clone(state));
     let started = Instant::now();
     glib::timeout_add_local(Duration::from_millis(16), move || {

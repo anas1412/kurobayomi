@@ -48,6 +48,7 @@
 @define-color accent_color @kuro_primary;
 @define-color accent_bg_color @kuro_primary;
 @define-color accent_fg_color @kuro_on_primary;
+@define-color theme_selected_bg_color @kuro_primary;
 @define-color destructive_color @kuro_error;
 @define-color destructive_bg_color @kuro_error;
 @define-color destructive_fg_color @kuro_on_error;

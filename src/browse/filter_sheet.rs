@@ -239,6 +239,7 @@ impl FilterSheetView {
         let window = gtk::Window::builder().title(tr(MsgKey::action_filter)).modal(true).default_width(420).default_height(560).build();
         window.set_transient_for(parent.as_ref());
         window.set_child(Some(&self.root));
+        super::keys::close_on_escape(&window);
         // the rows reach the sheet through weak links: the window owns it until it is destroyed
         super::glue::keep_alive(&window, self);
         window.present();
@@ -377,7 +378,33 @@ pub(crate) mod tests {
         assert!(icons.contains(&"view-sort-ascending-symbolic".to_owned()), "{icons:?}");
     }
 
+    fn escape_closes_the_sheet_window_and_keeps_the_edits() {
+        let rig = rig();
+        rig.filters.edit(|sheet| sheet.toggle_check(&[2]).expect("check"));
+        let anchor = gtk::Label::new(None);
+        let window = rig.view.present_over(&anchor);
+        let closes = Rc::new(Cell::new(0));
+        let count = Rc::clone(&closes);
+        window.connect_close_request(move |_| {
+            count.set(count.get() + 1);
+            gtk::glib::Propagation::Proceed
+        });
+        let controllers = window.observe_controllers();
+        let keys = (0..controllers.n_items())
+            .filter_map(|i| controllers.item(i))
+            .find_map(|c| c.downcast::<gtk::EventControllerKey>().ok())
+            .expect("key controller");
+        let none = gtk::gdk::ModifierType::empty();
+        assert!(!keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::a, &0_u32, &none]), "other keys go on");
+        assert_eq!(closes.get(), 0);
+        assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Escape, &0_u32, &none]));
+        assert_eq!(closes.get(), 1, "Escape closes the window");
+        assert!(matches!(&rig.filters.current().0[2], Filter::CheckBox { state: true, .. }), "and reverts nothing");
+        assert!(rig.searched.borrow().is_empty(), "and searches nothing");
+    }
+
     pub(crate) fn smoke() {
+        escape_closes_the_sheet_window_and_keeps_the_edits();
         headers_and_separators_render_as_a_heading_and_a_divider_and_groups_expand_recursively();
         a_check_box_a_tri_state_and_a_text_write_into_the_sheet();
         a_select_shows_its_indexed_value_and_the_first_one_when_the_index_is_out_of_range();

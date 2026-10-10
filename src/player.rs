@@ -104,9 +104,14 @@ pub fn player(title: &str, episode: &str) -> GBox {
     mid.add_css_class("toolbar");
     mid.set_halign(Align::Center);
     mid.set_valign(Align::Center);
-    let big = |icon: &str, tip: &str| Button::builder().child(&gtk::Image::builder().icon_name(icon).pixel_size(32).build()).tooltip_text(tip).build();
+    let big = |icon: &str, tip: &str| {
+        let b = Button::builder().child(&gtk::Image::builder().icon_name(icon).pixel_size(32).build()).tooltip_text(tip).build();
+        b.update_property(&[gtk::accessible::Property::Label(tip)]);
+        b
+    };
     let prev = big("media-skip-backward-symbolic", "Previous episode");
     let play = Button::builder().child(&gtk::Image::builder().icon_name("media-playback-pause-symbolic").pixel_size(48).build()).css_classes(["circular", "osd"]).build();
+    play.update_property(&[gtk::accessible::Property::Label("Play or pause")]);
     play.connect_clicked(|b| {
         let img = b.child().and_downcast::<gtk::Image>().unwrap();
         let paused = img.icon_name().as_deref() == Some("media-playback-start-symbolic");
@@ -140,7 +145,6 @@ pub fn player(title: &str, episode: &str) -> GBox {
     sp.set_hexpand(true);
     buttons.append(&sp);
     let skip = Button::builder().label("Skip Opening").css_classes(["suggested-action", "pill"]).build();
-    let pip = icon_button("view-restore-symbolic", "Picture-in-picture");
     let aspect = icon_button("zoom-fit-best-symbolic", "Aspect ratio");
     let o = overlay.clone();
     let modes = ["Fit to screen", "Stretched to screen", "Cropped to screen"];
@@ -149,7 +153,7 @@ pub fn player(title: &str, episode: &str) -> GBox {
         idx.set((idx.get() + 1) % 3);
         pill(&o, modes[idx.get()]);
     });
-    for w in [skip.upcast_ref::<gtk::Widget>(), pip.upcast_ref(), aspect.upcast_ref()] {
+    for w in [skip.upcast_ref::<gtk::Widget>(), aspect.upcast_ref()] {
         buttons.append(w);
     }
     bottom.append(&buttons);
@@ -159,6 +163,7 @@ pub fn player(title: &str, episode: &str) -> GBox {
     pos.set_width_chars(6);
     let bar = gtk::Scale::with_range(O::Horizontal, 0.0, duration, 1.0);
     bar.set_hexpand(true);
+    bar.update_property(&[gtk::accessible::Property::Label("Seek")]);
     bar.add_mark(85.0, gtk::PositionType::Bottom, None);
     bar.add_mark(1330.0, gtk::PositionType::Bottom, None);
     let dur = Button::builder().label(fmt_time(duration)).css_classes(["flat"]).build();
@@ -240,4 +245,28 @@ pub fn player(title: &str, episode: &str) -> GBox {
     b.append(&overlay);
     tag(&b, id);
     b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// T-46a-054: keyboard focus follows the child order of the overlay, so the control bars must be added top, centre,
+    /// bottom. The bars are told apart by their vertical alignment.
+    #[test]
+    fn the_control_bars_are_in_focus_order_top_centre_bottom() {
+        crate::testing::with_display(|| {
+            let root = player("Show", "Episode 1");
+            let overlay = root.first_child().and_downcast::<gtk::Overlay>().expect("the overlay");
+            let mut aligns = Vec::new();
+            let mut child = overlay.first_child();
+            while let Some(widget) = child {
+                if widget.has_css_class("toolbar") && widget.valign() != Align::Fill {
+                    aligns.push(widget.valign());
+                }
+                child = widget.next_sibling();
+            }
+            assert_eq!(aligns, [Align::Start, Align::Center, Align::End]);
+        });
+    }
 }

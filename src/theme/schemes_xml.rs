@@ -51,7 +51,7 @@ fn present_count(name: &str) -> (usize, usize) {
         "Yotsuba" | "Tako" | "MidnightDusk" | "TealTurquoise" | "TidalWave" | "YinYang" => (28, 28),
         "Cloudflare" | "Doom" | "Matrix" | "Sapphire" => (23, 23),
         "Nord" => (31, 32),
-        "CottonCandy" => (23, 22),
+        "CottonCandy" => (22, 23),
         "Mocha" => (22, 22),
         other => panic!("no coverage row for {other}"),
     }
@@ -102,9 +102,14 @@ fn fixtures_cover_all_eighteen_schemes_in_order() {
 
 /// The known XML-versus-Kotlin mismatches (T-49b-039). The table holds the Kotlin (Compose) value,
 /// so these entries compare against `gen_schemes.py`'s `KOTLIN_OVERRIDES` instead of the XML.
-const KOTLIN_WINS: [(&str, bool, &str); 2] = [
+/// The T-49ba-005 and T-49ba-043 decisions are here too: the CottonCandy night `onTertiary` comes from
+/// Compose, and the CottonCandy elevation token is dropped.
+const KOTLIN_WINS: [(&str, bool, &str); 5] = [
     ("Monochrome", false, "surfaceDim"),
     ("Mocha", false, "inverseOnSurface"),
+    ("CottonCandy", true, "onTertiary"),
+    ("CottonCandy", false, "elevationOverlay"),
+    ("CottonCandy", true, "elevationOverlay"),
 ];
 
 #[test]
@@ -188,6 +193,16 @@ fn listed_schemes_do_carry_the_eight_digit_value() {
             assert_eq!(table[Role::OnSurfaceVariant as usize], Some(Rgba::argb(want)), "{name}");
         }
     }
+}
+
+/// T-49ba-005 and T-49ba-043: the CottonCandy night onTertiary is the Compose value, and the
+/// elevation overlay token is absent from both modes.
+#[test]
+fn cotton_candy_decisions_are_in_the_table() {
+    let scheme = SCHEMES.iter().find(|s| s.name == "CottonCandy").unwrap();
+    assert_eq!(scheme.dark[Role::OnTertiary as usize], Some(Rgba::argb(0xFF5F_112B)));
+    assert_eq!(scheme.light[Role::ElevationOverlay as usize], None);
+    assert_eq!(scheme.dark[Role::ElevationOverlay as usize], None);
 }
 
 /// T-49b-039: the two known mismatches carry the Kotlin value, and the XML still says otherwise.

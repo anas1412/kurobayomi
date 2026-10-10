@@ -90,6 +90,10 @@ pub trait Paths {
     fn page_bytes_dir(&self) -> PathBuf {
         std::env::temp_dir().join(format!("kuro-page-bytes-{}", std::process::id()))
     }
+    /// Rounded cover thumbnails the desktop widgets read (written by the app, read-only for `--updates-json`).
+    fn widget_covers_dir(&self) -> PathBuf {
+        self.cache_dir().join("widget-covers")
+    }
     /// The `cookies.txt` export the user drops in for a source that needs a browser challenge solved by hand.
     fn cookies_import_file(&self) -> PathBuf {
         self.config_dir().join("cookies.txt")

@@ -1381,7 +1381,7 @@ pub const SCHEMES: [SchemeDef; 18] = [
             None, // surfaceContainerLow
             None, // surfaceContainerLowest
             Some(Rgba::argb(0xFFFFB1C1)), // primaryInverse
-            Some(Rgba::argb(0xFF9A4058)), // elevationOverlay
+            None, // elevationOverlay
         ],
         dark: [
             Some(Rgba::argb(0xFFFFB1C1)), // primary
@@ -1394,7 +1394,7 @@ pub const SCHEMES: [SchemeDef; 18] = [
             Some(Rgba::argb(0xFF004D63)), // secondaryContainer
             Some(Rgba::argb(0xFFBCE9FF)), // onSecondaryContainer
             Some(Rgba::argb(0xFFFFB1C1)), // tertiary
-            None, // onTertiary
+            Some(Rgba::argb(0xFF5F112B)), // onTertiary
             Some(Rgba::argb(0xFF7C2941)), // tertiaryContainer
             Some(Rgba::argb(0xFFFFD9DF)), // onTertiaryContainer
             Some(Rgba::argb(0xFF201A1B)), // background
@@ -1421,7 +1421,7 @@ pub const SCHEMES: [SchemeDef; 18] = [
             None, // surfaceContainerLow
             None, // surfaceContainerLowest
             Some(Rgba::argb(0xFF9A4058)), // primaryInverse
-            Some(Rgba::argb(0xFFFFB1C1)), // elevationOverlay
+            None, // elevationOverlay
         ],
     },
     SchemeDef {

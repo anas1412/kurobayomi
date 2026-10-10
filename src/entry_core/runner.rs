@@ -383,6 +383,10 @@ impl Shared {
                 let defaults = self.ctx.library_defaults;
                 self.write_result(move |s, _| s.write_defaults(manga_id, defaults).map(drop)).await;
             }
+            StoreCmd::BumpCover { manga_id } => {
+                let now = chrono::Utc::now().timestamp_millis();
+                self.write_result(move |s, _| s.bump_cover(manga_id, now).map(drop)).await;
+            }
             StoreCmd::Load { .. } | StoreCmd::FetchAll { .. } | StoreCmd::Shutdown => {}
         }
     }

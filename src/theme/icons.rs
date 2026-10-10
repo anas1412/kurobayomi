@@ -271,6 +271,41 @@ pub fn reading_mode_image(mode: &str) -> gtk::Image {
     image
 }
 
+/// The crop-borders toggle icon: on when crop borders is on (T-49ba-011, `BottomReaderBar.kt:59`).
+pub fn crop_icon(crop_borders: bool) -> Icon {
+    if crop_borders { Icon::CropOn } else { Icon::CropOff }
+}
+
+/// The crop-borders toggle tooltip. The reader's label catalogue has no key for it yet, so it is
+/// the English text.
+pub const CROP_TOOLTIP: &str = "Crop borders";
+
+/// The centre player button: pause while playing, play while paused (T-49ba-024).
+pub fn play_pause_icon(playing: bool) -> Icon {
+    if playing { Icon::Pause } else { Icon::Play }
+}
+
+/// The icon name of each desktop shortcut, by action name (T-49ba-038). The names are the standard
+/// icon names, or the bundled `kb-*` names where Android had a Kurobayomi drawable.
+pub const SHORTCUT_ICONS: [(&str, &str); 5] = [
+    ("library", Icon::LibraryManga.name()),
+    ("animelib", Icon::AnimeLibraryFilled.name()),
+    ("updates", Icon::UpdatesTab.name()),
+    ("history", Icon::HistoryTab.name()),
+    ("browse", "system-search-symbolic"),
+];
+
+/// The icon name of a desktop shortcut action, or `None` for an unknown action.
+pub fn shortcut_icon_name(action: &str) -> Option<&'static str> {
+    SHORTCUT_ICONS.iter().find(|(name, _)| *name == action).map(|(_, icon)| *icon)
+}
+
+/// The icon of a notification (T-49ba-013). Standard names come from the user's icon theme; the
+/// logo uses the application id, and no notification sets an accent colour.
+pub fn notification_icon(icon: Icon) -> gtk::gio::Icon {
+    gtk::gio::ThemedIcon::new(icon.name()).upcast()
+}
+
 /// Exposes the selected state of a toggle widget to assistive technology.
 pub fn set_toggle_state(widget: &impl IsA<gtk::Accessible>, selected: bool) {
     let tristate = if selected { gtk::AccessibleTristate::True } else { gtk::AccessibleTristate::False };
@@ -407,6 +442,43 @@ mod tests {
     fn download_indicator_only_for_downloaded_rows() {
         assert_eq!(download_indicator_icon(true), Some(Icon::DownloadCircle));
         assert_eq!(download_indicator_icon(false), None);
+    }
+
+    /// T-49ba-011: the crop toggle shows the on icon while crop borders is on.
+    #[test]
+    fn crop_toggle_follows_the_setting() {
+        assert_eq!(crop_icon(true), Icon::CropOn);
+        assert_eq!(crop_icon(false), Icon::CropOff);
+        assert_eq!(CROP_TOOLTIP, "Crop borders");
+    }
+
+    /// T-49ba-024: the centre button shows pause while playing and play while paused.
+    #[test]
+    fn play_button_shows_the_action_it_takes() {
+        assert_eq!(play_pause_icon(true), Icon::Pause);
+        assert_eq!(play_pause_icon(false), Icon::Play);
+    }
+
+    /// T-49ba-038: the five shortcut icon names, and nothing for an unknown action.
+    #[test]
+    fn shortcut_icons_use_the_planned_names() {
+        assert_eq!(shortcut_icon_name("library"), Some("kb-library-symbolic"));
+        assert_eq!(shortcut_icon_name("animelib"), Some("kb-animelibrary-filled-symbolic"));
+        assert_eq!(shortcut_icon_name("updates"), Some("kb-updates-outline-symbolic"));
+        assert_eq!(shortcut_icon_name("history"), Some("document-open-recent-symbolic"));
+        assert_eq!(shortcut_icon_name("browse"), Some("system-search-symbolic"));
+        assert_eq!(shortcut_icon_name("show_recently_updated"), None);
+    }
+
+    /// T-49ba-013: notification icons are themed icons with the standard names.
+    #[test]
+    fn notification_icons_are_themed_with_standard_names() {
+        let book = notification_icon(Icon::Book);
+        let themed = book.downcast_ref::<gtk::gio::ThemedIcon>().expect("themed icon");
+        assert_eq!(themed.names()[0].as_str(), "accessories-dictionary-symbolic");
+        let logo = notification_icon(Icon::Logo);
+        let logo = logo.downcast_ref::<gtk::gio::ThemedIcon>().expect("themed icon");
+        assert_eq!(logo.names()[0].as_str(), "io.github.blackbox.Kurobayomi");
     }
 
     #[test]

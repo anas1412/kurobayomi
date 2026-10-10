@@ -5,3 +5,85 @@
 .kb-secondary-item { opacity: 0.78; }
 .kb-cover-placeholder { background-color: rgba(136, 136, 136, 0.1216); }
 /* The selection and active tints are dark-aware: style::system_rules or style::palette_rules emit them. */
+
+/* Divider (T-49ba-032): values/themes.xml android:divider, a 1 px line in the foreground colour. */
+.kb-divider, separator.kb-divider {
+  min-height: 1px;
+  background-color: alpha(@theme_fg_color, 0.12);
+}
+
+/* Text appearance classes (T-49ba-031). */
+.kb-section-header {
+  font-size: 14px;
+  font-weight: 500;
+  color: alpha(@theme_fg_color, 0.7);
+}
+.kb-preference-secondary {
+  font-size: 12px;
+  color: alpha(@theme_fg_color, 0.7);
+}
+.kb-button-text {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Dialogs and popovers (T-49ba-030): the GTK surfaces keep their own radius and follow the palette. */
+window.dialog,
+popover.menu > contents {
+  background-color: @theme_base_color;
+}
+
+/* Dragged or selected download card (T-49ba-027): draggable_card_foreground, alpha 0.08. */
+.kb-draggable.kb-dragged,
+.kb-draggable:selected {
+  background-image: linear-gradient(alpha(@theme_selected_bg_color, 0.08), alpha(@theme_selected_bg_color, 0.08));
+}
+
+/* Ripple and highlight (T-49ba-048, PROPOSAL): colorControlHighlight has no GTK equivalent, so the
+ * hover state is the foreground at 0.1, the same alpha as the player ripple. */
+.kb-highlight:hover {
+  background-color: alpha(@theme_fg_color, 0.1);
+}
+
+/* Modal scrim (T-49ba-049): values/themes.xml android:backgroundDimAmount 0.32. */
+.kb-scrim {
+  background-color: rgba(0, 0, 0, 0.32);
+}
+
+/* Splash page (T-49ba-020): windowSplashScreenBackground, #54759E light and #202125 dark. */
+.kb-splash {
+  background-color: #54759E;
+}
+.kb-splash.kb-dark {
+  background-color: #202125;
+}
+
+/* AMOLED overlay (T-49ba-003): values-night/themes.xml. The window carries kb-amoled only with kb-dark. */
+.kb-dark.kb-amoled window,
+.kb-dark.kb-amoled .background {
+  background-color: #000000;
+  color: #FFFFFF;
+}
+.kb-dark.kb-amoled .card,
+.kb-dark.kb-amoled list.boxed-list {
+  background-color: #0C0C0C;
+}
+.kb-dark.kb-amoled .kb-surface-high {
+  background-color: #131313;
+}
+.kb-dark.kb-amoled .kb-surface-highest {
+  background-color: #1B1B1B;
+}
+
+/* Tab-enter icon rotation (T-49ba-022): -gtk-icon-transform, the same curve as anim.rs. Reduced
+ * motion needs no rule here: GTK turns CSS transitions off when gtk-enable-animations is false. */
+.kb-icon-rot {
+  transition: -gtk-icon-transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.kb-rot-0 { -gtk-icon-transform: rotate(0deg); }
+.kb-rot-180 { -gtk-icon-transform: rotate(180deg); }
+.kb-rot-360 { -gtk-icon-transform: rotate(360deg); }
+.kb-icon-rot.kb-rot-0-slow {
+  transition-duration: 500ms;
+  -gtk-icon-transform: rotate(0deg);
+}

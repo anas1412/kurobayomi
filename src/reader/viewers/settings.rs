@@ -8,6 +8,9 @@ use kuro_prefs::reader::{ReaderHideThreshold, ReaderPrefs, TappingInvertMode};
 use kuro_prefs::store::Changed;
 
 use super::nav::NavMode;
+use crate::reader::page_decode::DEFAULT_TILE_THRESHOLD;
+use crate::reader::page_profile::{DISPLAY_PROFILE_KEY, set_display_profile};
+use crate::reader::tiles::{TILE_THRESHOLD_KEY, set_tile_threshold};
 use crate::reader::pref_rules::{self, NAVIGATION_MODE, READER_THEME, ZOOM_START, clamp_to};
 
 /// The key of `always_decode_long_strip_with_ssiv` (T-43b-023). It lives in the base preferences, so the viewer reads it
@@ -42,6 +45,10 @@ pub struct ViewerSettings {
     pub double_tap_zoom: bool,
     /// A webtoon page decodes in full instead of at the view width (`pref_always_decode_long_strip_with_ssiv`).
     pub always_decode_long_strip: bool,
+    /// `pref_hardware_bitmap_threshold`: the largest tile edge of a page decoded from now on (T-44a-060).
+    pub tile_threshold: i32,
+    /// `pref_display_profile_key`: the ICC file pages are taken to when decoded from now on (T-43a-067).
+    pub display_profile: String,
     pub dual_split_pager: bool,
     pub dual_invert_pager: bool,
     pub dual_rotate_pager: bool,
@@ -74,6 +81,20 @@ pub enum Reaction {
     DoubleTapZoom,
 }
 
+/// Reads `pref_hardware_bitmap_threshold` and hands it to the tile cutter, which uses it for pages decoded after this.
+fn read_tile_threshold(p: &ReaderPrefs) -> i32 {
+    let value = p.store().pref(TILE_THRESHOLD_KEY, DEFAULT_TILE_THRESHOLD as i32).get();
+    set_tile_threshold(value);
+    value
+}
+
+/// Reads `pref_display_profile_key` and hands it to the page colour step, which loads the file when it changed.
+fn read_display_profile(p: &ReaderPrefs) -> String {
+    let value = p.store().pref(DISPLAY_PROFILE_KEY, String::new()).get();
+    set_display_profile(&value);
+    value
+}
+
 impl ViewerSettings {
     /// Reads every value from the store. Unknown stored values fall back to their defaults (B§1.3).
     pub fn from_prefs(p: &ReaderPrefs) -> Self {
@@ -101,6 +122,8 @@ impl ViewerSettings {
             zoom_out_disabled: p.webtoon_disable_zoom_out.get(),
             double_tap_zoom: p.webtoon_double_tap_zoom_enabled.get(),
             always_decode_long_strip: p.store().pref(ALWAYS_DECODE_LONG_STRIP_KEY, false).get(),
+            tile_threshold: read_tile_threshold(p),
+            display_profile: read_display_profile(p),
             dual_split_pager: p.dual_page_split_paged.get(),
             dual_invert_pager: p.dual_page_invert_paged.get(),
             dual_rotate_pager: p.dual_page_rotate_to_fit.get(),

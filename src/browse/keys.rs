@@ -1,5 +1,5 @@
 //! The keyboard map of the browse pages (T-40a-035, U§9). Pure: the views apply the answer. Ctrl+F focuses the search,
-//! Escape closes the search and then leaves the page, F5 refreshes the extension list, and Ctrl+1 to Ctrl+6 pick a
+//! Escape closes the search and then leaves the page, F5 and Ctrl+R refresh the extension list, and Ctrl+1 to Ctrl+6 pick a
 //! Browse sub-tab. In the migrate dialog Ctrl+Enter migrates and Ctrl+Shift+Enter copies.
 
 use gtk::gdk::{Key, ModifierType};
@@ -11,6 +11,8 @@ use kuro_i18n::{MsgKey, tr};
 pub enum BrowseShortcut {
     FocusSearch,
     RefreshExtensions,
+    /// Ctrl+U starts the update of every installed extension that has one (T-41a-014).
+    UpdateAll,
     /// Ctrl+1 is 1, and so on to Ctrl+6. The number is the position of the sub-tab, counted from one.
     SubTab(u8),
 }
@@ -27,6 +29,8 @@ pub fn browse_shortcut(key: Key, modifiers: ModifierType) -> Option<BrowseShortc
     }
     match key.to_unicode()? {
         'f' | 'F' => Some(BrowseShortcut::FocusSearch),
+        'u' | 'U' => Some(BrowseShortcut::UpdateAll),
+        'r' | 'R' => Some(BrowseShortcut::RefreshExtensions),
         digit @ '1'..='6' => Some(BrowseShortcut::SubTab(digit as u8 - b'0')),
         _ => None,
     }
@@ -69,6 +73,8 @@ pub fn help_entries() -> Vec<(String, String)> {
         line("Ctrl+F", MsgKey::action_search),
         line("Escape", MsgKey::action_cancel),
         line("F5", MsgKey::action_webview_refresh),
+        line("Ctrl+R", MsgKey::action_webview_refresh),
+        line("Ctrl+U", MsgKey::ext_update_all),
         line("Ctrl+1 \u{2026} Ctrl+6", MsgKey::label_sources),
         line("Ctrl+Enter", MsgKey::migrate),
         line("Ctrl+Shift+Enter", MsgKey::copy),
@@ -93,6 +99,36 @@ pub fn attach_migrate_keys(dialog: &impl IsA<gtk::Widget>, on_migrate: impl Fn()
     dialog.add_controller(keys);
 }
 
+/// Escape on a page with a search box: while `search_open` says the search is open, Escape runs `close_search` and the
+/// key stops there; otherwise it goes on, and the window's own handler leaves the page (`escape_step`).
+pub fn attach_escape_step(page: &impl IsA<gtk::Widget>, search_open: impl Fn() -> bool + 'static, close_search: impl Fn() + 'static) {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    keys.connect_key_pressed(move |_, key, _, _| match (key == Key::Escape).then(|| escape_step(search_open())) {
+        Some(EscapeStep::CloseSearch) => {
+            close_search();
+            gtk::glib::Propagation::Stop
+        }
+        _ => gtk::glib::Propagation::Proceed,
+    });
+    page.add_controller(keys);
+}
+
+/// Escape closes `window` (the filter sheet). Nothing is reverted: the edits already live in the caller's state.
+pub fn close_on_escape(window: &gtk::Window) {
+    let keys = gtk::EventControllerKey::new();
+    let closing = window.clone();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key == Key::Escape {
+            closing.close();
+            gtk::glib::Propagation::Stop
+        } else {
+            gtk::glib::Propagation::Proceed
+        }
+    });
+    window.add_controller(keys);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +143,20 @@ mod tests {
         assert_eq!(browse_shortcut(Key::F, ctrl()), Some(BrowseShortcut::FocusSearch));
         assert_eq!(browse_shortcut(Key::F5, ModifierType::empty()), Some(BrowseShortcut::RefreshExtensions));
         assert_eq!(browse_shortcut(Key::F, ModifierType::empty()), None, "a plain F types into a field");
+    }
+
+    #[test]
+    fn ctrl_r_refreshes_the_extensions_like_f5() {
+        assert_eq!(browse_shortcut(Key::r, ctrl()), Some(BrowseShortcut::RefreshExtensions));
+        assert_eq!(browse_shortcut(Key::R, ctrl()), Some(BrowseShortcut::RefreshExtensions));
+        assert_eq!(browse_shortcut(Key::r, ModifierType::empty()), None, "a plain R types into a field");
+    }
+
+    #[test]
+    fn ctrl_u_starts_update_all_and_a_plain_u_types() {
+        assert_eq!(browse_shortcut(Key::u, ctrl()), Some(BrowseShortcut::UpdateAll));
+        assert_eq!(browse_shortcut(Key::U, ctrl()), Some(BrowseShortcut::UpdateAll));
+        assert_eq!(browse_shortcut(Key::u, ModifierType::empty()), None);
     }
 
     #[test]
@@ -135,7 +185,7 @@ mod tests {
     #[test]
     fn the_help_lists_every_shortcut_with_a_text() {
         let help = help_entries();
-        for keys in ["Ctrl+F", "Escape", "F5", "Ctrl+Enter", "Ctrl+Shift+Enter"] {
+        for keys in ["Ctrl+F", "Escape", "F5", "Ctrl+R", "Ctrl+U", "Ctrl+Enter", "Ctrl+Shift+Enter"] {
             assert!(help.iter().any(|(k, what)| k == keys && !what.is_empty()), "{keys}");
         }
         assert!(help.iter().any(|(k, _)| k.starts_with("Ctrl+1")), "the sub-tab keys");

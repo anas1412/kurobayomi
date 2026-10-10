@@ -9,11 +9,13 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use kuro_platform::media::MediaCommand;
 use kuro_source_http::local_server::LocalHandler;
 
 use crate::bridge::{self, BridgeCommand};
 use crate::chapters::{self, Segment};
 use crate::completion::Completion;
+use crate::desktop::Desktop;
 use crate::config::{apply_fonts_dir, apply_user_files, write_mpv_config};
 use crate::enums::{Decoder, GpuKind};
 use crate::errors::PlayerMessage;
@@ -113,6 +115,8 @@ pub struct Session<H> {
     video: VideoChain,
     gpu: GpuKind,
     statistics_page: i32,
+    /// Media keys, now-playing and the idle inhibit; they follow the pause state of every event.
+    pub desktop: Desktop,
 }
 
 impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
@@ -130,6 +134,7 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
             video: VideoChain::default(),
             gpu: GpuKind::default(),
             statistics_page: 0,
+            desktop: Desktop::default(),
         }
     }
 
@@ -249,6 +254,8 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
                 Dispatch::Handled
             }
             MpvEvent::PropertyFlag(name, value) if self.state.on_flag(name, *value) => {
+                let state = &self.state;
+                self.desktop.sync(state.paused, state.is_exiting, state.pos);
                 Dispatch::Handled
             }
             MpvEvent::PropertyDouble(name, value) if self.state.on_double(name, *value) => {
@@ -283,10 +290,43 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
         };
         let state = &self.state;
         run_file_loaded(&mut steps, || state.is_exiting);
+        self.publish_now_playing(None);
         Dispatch::FileLoaded {
             pending: steps.pending,
             finish_tracks_now: steps.finish_tracks_now,
         }
+    }
+
+    /// Publishes the playing episode to the desktop media widget: the anime and media title and, when the window knows
+    /// one, the artwork URL. Called on `FILE_LOADED`, and again by the window once the title or duration is known.
+    pub fn publish_now_playing(&self, artwork: Option<&str>) {
+        let state = &self.state;
+        let title = match (state.anime_title.is_empty(), state.media_title.is_empty()) {
+            (false, false) => format!("{} - {}", state.anime_title, state.media_title),
+            (false, true) => state.anime_title.clone(),
+            _ => state.media_title.clone(),
+        };
+        self.desktop.now_playing(&title, artwork, state.duration);
+    }
+
+    /// Runs a media key or media widget command on the player. Next and Previous switch episodes, which the window
+    /// owns, so they come back as `Some`.
+    pub fn apply_media_command(&self, command: MediaCommand) -> Option<MediaCommand> {
+        let secs = |d: Duration| d.as_secs_f64().to_string();
+        let result = match command {
+            MediaCommand::Play => self.host.set_str("pause", "no"),
+            MediaCommand::Pause => self.host.set_str("pause", "yes"),
+            MediaCommand::Toggle => execute(&self.state, &self.host, &["cycle", "pause"]),
+            MediaCommand::Stop => execute(&self.state, &self.host, &["stop"]),
+            MediaCommand::SeekForward(d) => execute(&self.state, &self.host, &["seek", &secs(d), "relative"]),
+            MediaCommand::SeekBackward(d) => execute(&self.state, &self.host, &["seek", &format!("-{}", secs(d)), "relative"]),
+            MediaCommand::SeekTo(d) => execute(&self.state, &self.host, &["seek", &secs(d), "absolute"]),
+            MediaCommand::Next | MediaCommand::Previous => return Some(command),
+        };
+        if let Err(e) = result {
+            tracing::warn!("media command {command:?} failed: {e}");
+        }
+        None
     }
 
     /// The chapter list with the video's timestamps merged in, or `None` to leave it as it is.
@@ -469,6 +509,7 @@ impl Session<MpvHandle> {
         session.video = VideoChain::from(prefs);
         session.gpu = prefs.gpu;
         session.statistics_page = prefs.advanced.statistics_page;
+        session.desktop = Desktop::connect();
         session.post_init();
         Ok(session)
     }
@@ -595,6 +636,26 @@ mod tests {
 
     fn bridge_event(name: &str, value: &str) -> MpvEvent {
         MpvEvent::PropertyStr(format!("{}{name}", bridge::PREFIX), value.to_owned())
+    }
+
+    #[test]
+    fn media_keys_drive_the_player_and_episode_switches_go_to_the_window() {
+        let session = Session::new(Fake::default());
+        assert_eq!(session.apply_media_command(MediaCommand::Pause), None);
+        assert_eq!(session.apply_media_command(MediaCommand::SeekBackward(Duration::from_secs(10))), None);
+        assert_eq!(session.apply_media_command(MediaCommand::SeekTo(Duration::from_secs(5))), None);
+        assert_eq!(session.apply_media_command(MediaCommand::Next), Some(MediaCommand::Next));
+        assert_eq!(session.host.writes.borrow().as_slice(), [("pause".to_owned(), "yes".to_owned())]);
+        let commands = session.host.commands.borrow();
+        assert_eq!(commands[0], ["seek", "-10", "relative"]);
+        assert_eq!(commands[1], ["seek", "5", "absolute"]);
+    }
+
+    #[test]
+    fn a_pause_event_reaches_the_desktop_ports() {
+        let mut session = Session::new(Fake::default());
+        session.on_event(MpvEvent::PropertyFlag("pause".into(), false));
+        assert!(!session.desktop.holds_awake(), "the default desktop has no inhibitor");
     }
 
     #[test]

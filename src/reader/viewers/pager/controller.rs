@@ -174,6 +174,7 @@ impl PagerController {
 
     fn on_page_selected(&self, page: &PageRef, allow: bool, forward: bool) -> Vec<Effect> {
         let mut fx = vec![Effect::PageSelected(page.clone()), Effect::ZoomStart { page: page.clone(), forward }];
+        tracing::debug!(page = page.number(), "pager onPageSelected");
         if page.is_insert() {
             return fx;
         }
@@ -181,6 +182,7 @@ impl PagerController {
         // The last five pages of the current chapter (`size - number < 5`).
         let in_range = i64::from(chapter.page_count) - i64::from(page.number()) < 5;
         if in_range && allow && chapter.key == page.chapter {
+            tracing::debug!(page = page.number(), total = chapter.page_count, "pager requests preload of the next chapter");
             if let Some(to) = self.next_to() {
                 fx.push(Effect::Preload(to.clone()));
             }

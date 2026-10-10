@@ -66,6 +66,9 @@ pub struct Opened {
 pub fn open_blocking() -> Result<Opened, String> {
     let paths = LinuxPaths::system().map_err(|e| e.to_string())?;
     let prefs_store = kuro_prefs::settings_load::open(&paths).map_err(|e| e.to_string())?;
+    // the catalogue language is fixed here, before the first `tr`: the app_language preference, then the system list
+    let system: Vec<String> = gtk::glib::language_names().iter().map(|n| n.to_string()).collect();
+    kuro_i18n::init(&crate::pref_model::language::pref(&prefs_store).get(), &system);
     // raw-key migrations run before any typed section is built over the store
     kuro_prefs::migrate::migrate(&prefs_store, kuro_core::app_info::APP_INFO.version_code as i32).map_err(|e| e.to_string())?;
     let data_dir = paths.data_dir();

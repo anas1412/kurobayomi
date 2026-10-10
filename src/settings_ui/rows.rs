@@ -53,6 +53,7 @@ pub fn tap_item(
     subtitle: Option<&str>,
     enabled: bool,
     trailing: Option<Rc<dyn Fn() -> gtk::Widget>>,
+    logo: Option<&'static [u8]>,
     on_tap: Rc<dyn Fn(&TapRow)>,
 ) -> PreferenceItem {
     use crate::pref_model::widgets::row::{self, RowSpec};
@@ -65,6 +66,9 @@ pub fn tap_item(
             let built = row::build(RowSpec { title: &label, subtitle: sub.as_deref(), icon: None, trailing: end.as_ref(), on_click: None });
             let content = built.row.child().and_downcast::<gtk::Box>().expect("the row content");
             built.row.set_child(None::<&gtk::Widget>);
+            if let Some(image) = logo.and_then(logo_image) {
+                content.prepend(&image);
+            }
             content.set_focusable(enabled);
             content.set_sensitive(enabled);
             content.set_cursor_from_name(enabled.then_some("pointer"));
@@ -90,6 +94,18 @@ pub fn tap_item(
             content.upcast()
         }),
     }
+}
+
+/// A tracker logo (bundled PNG or SVG bytes) as a 24 px picture, or `None` when the bytes cannot be decoded (the row
+/// then shows no logo).
+fn logo_image(bytes: &'static [u8]) -> Option<gtk::Image> {
+    use gtk::prelude::*;
+    let texture = gtk::gdk::Texture::from_bytes(&gtk::glib::Bytes::from_static(bytes)).ok()?;
+    let image = gtk::Image::from_paintable(Some(&texture));
+    image.set_pixel_size(24);
+    image.set_margin_end(16);
+    image.set_accessible_role(gtk::AccessibleRole::Presentation);
+    Some(image)
 }
 
 pub fn info(text: &str) -> PreferenceItem {

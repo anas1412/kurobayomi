@@ -7,17 +7,26 @@
 //!
 //! Decisions:
 //! - A notification has no timeout of its own, so a [`Post`] with one is withdrawn by a timer on the main context.
-//! - The tap of an entry notice opens the entry's page (the `open-manga` / `open-anime` application actions); the
-//!   reader or player at the newest new item is not wired because the shell has no route that takes an item url.
+//! - Every tap and button is an `AppAction` (see `router`) sent to the one `app.notice` action. The notice is withdrawn
+//!   before the work starts, so a slow download or a failed mark never leaves a stale notice behind.
+//! - The tap of an entry notice opens the entry's page by its id; the reader or player at the newest new item is not
+//!   wired because the shell has no route that takes an item url.
 //! - The "Download" button queues the named items with autostart on through the downloads backend
 //!   (`library::actions::download_notified`); "Mark as read" also removes the downloads of the changed items when
-//!   "remove after marked as read" is on. Both run off the GTK thread and withdraw the notice when they end.
-//! - The failure notice taps through to the error log (`update_errors.txt`) in the default `text/plain` application. It
-//!   has no body and no tap while no log was written, so it never promises a tap that does nothing.
+//!   "remove after marked as read" is on. Both run off the GTK thread.
+//! - The failure notice taps through to the error log (`update_errors.txt`), revealed in the file manager. It has no
+//!   body and no tap while no log was written, so it never promises a tap that does nothing.
+//! - A notice passes `rules::prepare` (3 buttons at most, escaped text, 200 character body) before the service is called.
+//! - The queue pause and clear actions have no manager to call yet: the downloads backend only starts a queue.
+//! - Opening a chapter pushes the reader by ids; an episode opens its anime's page, as the deep link page does.
 
 use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
+
+use kuro_data::chapter::ChapterRepo;
+use kuro_data::episode::EpisodeRepo;
+use kuro_data::manga::MangaRepo;
 
 use gtk::gio;
 use gtk::glib;
@@ -25,29 +34,26 @@ use gtk::prelude::*;
 use kuro_domain::kind::EntryKind;
 use kuro_downloads::download_prefs::DownloadPrefs;
 
-use crate::library_update::notice::{self, EntryAction, ERROR_CHANNEL, WARNING_CHANNEL};
+use crate::library_update::notice::{self, EntryAction};
 use crate::library_update::pass::EntryUpdate;
 use crate::library_update::text;
+use crate::misc::ids;
+use crate::misc::router::{self, ActionHost, AppAction, QueueOp};
+use crate::misc::rules;
 use crate::updates::download_host;
-
-/// Application action that opens the url it is given.
-const OPEN_URL_ACTION: &str = "library-update-open-url";
-/// Application action that marks the items of one update notice read; takes `(kind, entry id, urls, notice id)`.
-const MARK_READ_ACTION: &str = "library-update-mark-read";
-/// Application action that queues the items of one update notice for download; takes the same tuple.
-const DOWNLOAD_ACTION: &str = "library-update-download";
-/// Application action that opens the update error log in the default text application; takes the file path.
-const OPEN_LOG_ACTION: &str = "library-update-open-log";
 
 /// What a notification button or tap does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Entry { kind: EntryKind, id: i64 },
+    /// The entry's page; withdraws `notice` first when it is set.
+    Entry { kind: EntryKind, id: i64, notice: Option<String> },
     Url(String),
     MarkRead { kind: EntryKind, entry_id: i64, urls: Vec<String>, notice_id: String },
     Download { kind: EntryKind, entry_id: i64, urls: Vec<String>, notice_id: String },
     /// The error log file.
     OpenLog(String),
+    /// Any application action, for a button or tap whose target is not an entry (the app update notices).
+    Action(AppAction),
 }
 
 fn kind_name(kind: EntryKind) -> &'static str {
@@ -57,30 +63,34 @@ fn kind_name(kind: EntryKind) -> &'static str {
     }
 }
 
-fn kind_of(name: &str) -> Option<EntryKind> {
-    match name {
-        "manga" => Some(EntryKind::Manga),
-        "anime" => Some(EntryKind::Anime),
-        _ => None,
-    }
-}
-
 impl Target {
-    /// The detailed application action name and its parameter.
-    fn action(&self) -> (String, glib::Variant) {
+    /// The application action this target runs.
+    pub fn app_action(&self) -> AppAction {
         match self {
-            Self::Entry { kind, id } => (format!("app.open-{}", kind_name(*kind)), id.to_variant()),
-            Self::Url(url) => (format!("app.{OPEN_URL_ACTION}"), url.to_variant()),
-            Self::MarkRead { kind, entry_id, urls, notice_id } => (
-                format!("app.{MARK_READ_ACTION}"),
-                (kind_name(*kind).to_owned(), *entry_id, urls.clone(), notice_id.clone()).to_variant(),
-            ),
-            Self::Download { kind, entry_id, urls, notice_id } => (
-                format!("app.{DOWNLOAD_ACTION}"),
-                (kind_name(*kind).to_owned(), *entry_id, urls.clone(), notice_id.clone()).to_variant(),
-            ),
-            Self::OpenLog(path) => (format!("app.{OPEN_LOG_ACTION}"), path.to_variant()),
+            Self::Entry { kind: EntryKind::Manga, id, notice } => AppAction::OpenManga { manga_id: *id, notice: notice.clone() },
+            Self::Entry { kind: EntryKind::Anime, id, notice } => AppAction::OpenAnime { anime_id: *id, notice: notice.clone() },
+            Self::Url(url) => AppAction::OpenUrl { url: url.clone() },
+            Self::MarkRead { kind: EntryKind::Manga, entry_id, urls, notice_id } => {
+                AppAction::MarkChaptersRead { manga_id: *entry_id, urls: urls.clone(), notice: Some(notice_id.clone()) }
+            }
+            Self::MarkRead { kind: EntryKind::Anime, entry_id, urls, notice_id } => {
+                AppAction::MarkEpisodesSeen { anime_id: *entry_id, urls: urls.clone(), notice: Some(notice_id.clone()) }
+            }
+            Self::Download { kind: EntryKind::Manga, entry_id, urls, notice_id } => {
+                AppAction::DownloadChapters { manga_id: *entry_id, urls: urls.clone(), notice: Some(notice_id.clone()) }
+            }
+            Self::Download { kind: EntryKind::Anime, entry_id, urls, notice_id } => {
+                AppAction::DownloadEpisodes { anime_id: *entry_id, urls: urls.clone(), notice: Some(notice_id.clone()) }
+            }
+            Self::OpenLog(path) => AppAction::RevealFile { path: path.into() },
+            Self::Action(action) => action.clone(),
         }
+    }
+
+    /// The detailed application action name (always `app.notice`) and its JSON parameter.
+    fn action(&self) -> Option<(String, glib::Variant)> {
+        let json = self.app_action().to_target().ok()?;
+        Some((format!("app.{}", router::NOTICE_ACTION_NAME), json.to_variant()))
     }
 }
 
@@ -97,14 +107,10 @@ pub struct Post {
     pub buttons: Vec<(String, Target)>,
 }
 
-fn notice_id(channel: &str, id: u32) -> String {
-    format!("library-update-{channel}-{id}")
-}
-
 /// The per-entry notice of an update, or `None` when the content is hidden or nothing is new (T-26a-034).
 pub fn entry_post(kind: EntryKind, update: &EntryUpdate, hide_content: bool) -> Option<Post> {
     let entry = notice::entry_notice(kind, update, hide_content)?;
-    let id = notice_id(kind_name(kind), entry.id);
+    let id = ids::new_items(kind, update.entry_id);
     let buttons = entry
         .actions
         .iter()
@@ -116,7 +122,7 @@ pub fn entry_post(kind: EntryKind, update: &EntryUpdate, hide_content: bool) -> 
                     urls: update.items.iter().map(|i| i.url.clone()).collect(),
                     notice_id: id.clone(),
                 },
-                EntryAction::ViewItems => Target::Entry { kind, id: update.entry_id },
+                EntryAction::ViewItems => Target::Entry { kind, id: update.entry_id, notice: Some(id.clone()) },
                 EntryAction::Download => Target::Download {
                     kind,
                     entry_id: update.entry_id,
@@ -127,13 +133,14 @@ pub fn entry_post(kind: EntryKind, update: &EntryUpdate, hide_content: bool) -> 
             Some((action.label(kind).to_owned(), target))
         })
         .collect();
+    let tap = Some(Target::Entry { kind, id: update.entry_id, notice: Some(id.clone()) });
     Some(Post {
         id,
         title: entry.title,
         body: Some(entry.text),
         low_priority: false,
         timeout: None,
-        tap: Some(Target::Entry { kind, id: update.entry_id }),
+        tap,
         buttons,
     })
 }
@@ -143,7 +150,7 @@ pub fn entry_post(kind: EntryKind, update: &EntryUpdate, hide_content: bool) -> 
 pub fn error_post(kind: EntryKind, failed: usize, log: Option<&Path>) -> Option<Post> {
     let error = notice::error_notice(failed, log.is_some())?;
     Some(Post {
-        id: notice_id(ERROR_CHANNEL, notice::pass_id(ERROR_CHANNEL, kind)),
+        id: ids::library_error(kind),
         title: error.title,
         body: error.opens_log.then(|| error.text.to_owned()),
         low_priority: true,
@@ -153,10 +160,29 @@ pub fn error_post(kind: EntryKind, failed: usize, log: Option<&Path>) -> Option<
     })
 }
 
+/// The progress notice of an update pass: low priority, and one Cancel button that stops that pass and withdraws it
+/// (T-35a-021, T-26a-054).
+pub fn progress_post(kind: EntryKind, title: &str, body: Option<&str>) -> Post {
+    let id = ids::library_progress(kind);
+    let cancel = match kind {
+        EntryKind::Manga => AppAction::CancelLibraryUpdate { notice: Some(id.clone()) },
+        EntryKind::Anime => AppAction::CancelAnimeLibraryUpdate { notice: Some(id.clone()) },
+    };
+    Post {
+        id,
+        title: title.to_owned(),
+        body: body.map(str::to_owned),
+        low_priority: true,
+        timeout: None,
+        tap: None,
+        buttons: vec![("Cancel".to_owned(), Target::Action(cancel))],
+    }
+}
+
 /// The large-queue warning: stays 30 s and its tap opens the FAQ page. Hidden content does not suppress it (T-26a-031).
 pub fn warning_post(kind: EntryKind) -> Post {
     Post {
-        id: notice_id(WARNING_CHANNEL, notice::pass_id(WARNING_CHANNEL, kind)),
+        id: ids::library_size_warning(kind),
         title: text::QUEUE_WARNING_TITLE.to_owned(),
         body: Some(text::QUEUE_WARNING_TEXT.to_owned()),
         low_priority: false,
@@ -166,11 +192,39 @@ pub fn warning_post(kind: EntryKind) -> Post {
     }
 }
 
-static SENDER: OnceLock<async_channel::Sender<Post>> = OnceLock::new();
+/// One step for the main thread, applied in the order it was sent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Op {
+    Show(Post),
+    Withdraw(String),
+}
 
-/// Sends `post` to the main thread. `false` when [`attach`] has not run, so the caller can fall back to a toast.
+static SENDER: OnceLock<async_channel::Sender<Op>> = OnceLock::new();
+
+/// Sends one step to the main thread. A show goes through the content rules first. `false` when [`attach`] has not run
+/// or the notice breaks a rule, so the caller can fall back to a toast.
+pub fn send(op: Op) -> bool {
+    let op = match op {
+        Op::Show(post) => match rules::prepare(post) {
+            Ok(post) => Op::Show(post),
+            Err(error) => {
+                tracing::warn!(%error, "a notice was not sent");
+                return false;
+            }
+        },
+        withdraw => withdraw,
+    };
+    SENDER.get().is_some_and(|tx| tx.try_send(op).is_ok())
+}
+
+/// Sends `post` to the main thread after the content rules (see [`send`]).
 pub fn post(post: Post) -> bool {
-    SENDER.get().is_some_and(|tx| tx.try_send(post).is_ok())
+    send(Op::Show(post))
+}
+
+/// Sends the steps in order. `false` as soon as one step is refused, so later steps are not sent after a gap.
+pub fn send_all(ops: impl IntoIterator<Item = Op>) -> bool {
+    ops.into_iter().all(send)
 }
 
 fn show(app: &gio::Application, post: &Post) {
@@ -179,13 +233,13 @@ fn show(app: &gio::Application, post: &Post) {
     if post.low_priority {
         notification.set_priority(gio::NotificationPriority::Low);
     }
-    if let Some(tap) = &post.tap {
-        let (action, target) = tap.action();
+    if let Some((action, target)) = post.tap.as_ref().and_then(Target::action) {
         notification.set_default_action_and_target_value(&action, Some(&target));
     }
     for (label, target) in &post.buttons {
-        let (action, value) = target.action();
-        notification.add_button_with_target_value(label, &action, Some(&value));
+        if let Some((action, value)) = target.action() {
+            notification.add_button_with_target_value(label, &action, Some(&value));
+        }
     }
     app.send_notification(Some(&post.id), &notification);
     if let Some(timeout) = post.timeout {
@@ -202,108 +256,171 @@ fn open_url(url: &str) {
     });
 }
 
-/// The `(kind, entry id, urls, notice id)` of a notice button.
-fn notice_params(params: &glib::Variant) -> Option<(EntryKind, i64, Vec<String>, String)> {
-    let (kind, entry_id, urls, notice_id) = params.get::<(String, i64, Vec<String>, String)>()?;
-    Some((kind_of(&kind)?, entry_id, urls, notice_id))
+/// Shows the folder of `path` in the file manager.
+fn reveal(path: &Path) {
+    gtk::FileLauncher::new(Some(&gio::File::for_path(path))).open_containing_folder(
+        None::<&gtk::Window>,
+        None::<&gio::Cancellable>,
+        |result| {
+            if let Err(error) = result {
+                tracing::warn!(%error, "the update error log could not be shown");
+            }
+        },
+    );
 }
 
-fn mark_read(app: &gio::Application, params: &glib::Variant) {
-    let Some((kind, entry_id, urls, notice_id)) = notice_params(params) else { return };
-    let data = crate::data::app();
-    let db = data.db(kind);
-    let remove = DownloadPrefs::new(data.base.store().clone()).remove_after_marked_as_read().get();
-    let backend = download_host::current();
-    let app = app.clone();
-    glib::spawn_future_local(async move {
-        let done = download_host::blocking(move || {
-            crate::library::actions::mark_notified_read(&db, &*backend, kind, entry_id, &urls, remove)
-        })
-        .await;
-        match done {
-            Some(Ok(_)) => app.withdraw_notification(&notice_id),
-            Some(Err(error)) => tracing::error!(%error, entry_id, "marking the notified items read failed"),
-            None => tracing::error!(entry_id, "marking the notified items read did not finish"),
+/// Both rows of an open-item action exist, and the item belongs to the entry.
+fn item_rows_exist(kind: EntryKind, entry_id: i64, item_id: i64) -> bool {
+    let db = crate::data::app().db(kind);
+    match kind {
+        EntryKind::Manga => {
+            MangaRepo::new(db.clone()).by_id(entry_id).is_ok()
+                && ChapterRepo::new(db).by_id(item_id).ok().flatten().is_some_and(|c| c.manga_id == entry_id)
         }
-    });
-}
-
-fn download(app: &gio::Application, params: &glib::Variant) {
-    let Some((kind, entry_id, urls, notice_id)) = notice_params(params) else { return };
-    let data = crate::data::app();
-    let db = data.db(kind);
-    let external = kind == EntryKind::Anime && DownloadPrefs::new(data.base.store().clone()).use_external_downloader().get();
-    let backend = download_host::current();
-    let app = app.clone();
-    glib::spawn_future_local(async move {
-        let queued = download_host::blocking(move || {
-            crate::library::actions::download_notified(&db, &*backend, kind, entry_id, &urls, external)
-        })
-        .await;
-        if queued.is_some() {
-            app.withdraw_notification(&notice_id);
+        EntryKind::Anime => {
+            kuro_data::anime::AnimeRepo::new(db.clone()).by_id(entry_id).is_ok()
+                && EpisodeRepo::new(db).by_id(item_id).ok().flatten().is_some_and(|e| e.anime_id == entry_id)
         }
-    });
-}
-
-/// Opens the error log with the default `text/plain` application.
-fn open_log(path: &str) {
-    let Some(viewer) = gio::AppInfo::default_for_type("text/plain", false) else {
-        tracing::warn!("no default text application is set, so the update error log was not opened");
-        return;
-    };
-    if let Err(error) = viewer.launch(&[gio::File::for_path(path)], None::<&gio::AppLaunchContext>) {
-        tracing::warn!(%error, "the update error log could not be opened");
     }
 }
 
-/// Registers the notification actions and starts showing posted notices. Call once from the GTK main thread, with the
-/// application running. Without an application (a test run) nothing is attached and [`post`] returns `false`.
+/// Raises the window and opens the entry page by its id.
+fn show_entry(kind: EntryKind, id: i64) {
+    crate::ui::window().present();
+    crate::ui::pop_to_root();
+    match kind {
+        EntryKind::Manga => crate::entry_core::route::open(id),
+        EntryKind::Anime => crate::entry_core::anime::route::open(id),
+    }
+}
+
+/// The GTK and runtime half of the router.
+struct GtkHost {
+    app: gio::Application,
+}
+
+impl ActionHost for GtkHost {
+    fn withdraw(&self, notice: &str) {
+        self.app.withdraw_notification(notice);
+    }
+
+    fn open_entry(&self, kind: EntryKind, id: i64) {
+        show_entry(kind, id);
+    }
+
+    fn open_downloads(&self, kind: EntryKind) {
+        let name = match kind {
+            EntryKind::Manga => "open-downloads",
+            EntryKind::Anime => "open-anime-downloads",
+        };
+        self.app.activate_action(name, None);
+    }
+
+    fn open_item(&self, kind: EntryKind, entry_id: i64, item_id: i64) {
+        glib::spawn_future_local(async move {
+            let found = download_host::blocking(move || item_rows_exist(kind, entry_id, item_id)).await.unwrap_or(false);
+            router::open_or_toast(
+                found,
+                || match kind {
+                    EntryKind::Manga => {
+                        crate::ui::window().present();
+                        crate::ui::push(&crate::reader::launch::open_chapter(entry_id, item_id));
+                    }
+                    EntryKind::Anime => show_entry(kind, entry_id),
+                },
+                |text| crate::toast::notify(text),
+            );
+        });
+    }
+
+    fn mark_read(&self, kind: EntryKind, entry_id: i64, urls: Vec<String>) {
+        let data = crate::data::app();
+        let db = data.db(kind);
+        let remove = DownloadPrefs::new(data.base.store().clone()).remove_after_marked_as_read().get();
+        let backend = download_host::current();
+        glib::spawn_future_local(async move {
+            let done = download_host::blocking(move || {
+                crate::library::actions::mark_notified_read(&db, &*backend, kind, entry_id, &urls, remove)
+            })
+            .await;
+            match done {
+                Some(Ok(_)) => {}
+                Some(Err(error)) => tracing::error!(%error, entry_id, "marking the notified items read failed"),
+                None => tracing::error!(entry_id, "marking the notified items read did not finish"),
+            }
+        });
+    }
+
+    fn download(&self, kind: EntryKind, entry_id: i64, urls: Vec<String>) {
+        let data = crate::data::app();
+        let db = data.db(kind);
+        let external = kind == EntryKind::Anime && DownloadPrefs::new(data.base.store().clone()).use_external_downloader().get();
+        let backend = download_host::current();
+        glib::spawn_future_local(async move {
+            let queued = download_host::blocking(move || {
+                crate::library::actions::download_notified(&db, &*backend, kind, entry_id, &urls, external)
+            })
+            .await;
+            if queued.is_none() {
+                tracing::error!(entry_id, "queueing the notified items did not finish");
+            }
+        });
+    }
+
+    fn queue(&self, kind: EntryKind, op: QueueOp) {
+        match op {
+            QueueOp::Resume => download_host::current().start_queue(kind),
+            QueueOp::Pause | QueueOp::Clear => self.unavailable(&format!("{op:?} {} downloads", kind_name(kind))),
+        }
+    }
+
+    fn cancel_update(&self, kind: EntryKind) {
+        if !crate::misc::runner::stop(kind) {
+            tracing::debug!(kind = kind_name(kind), "no update pass was running to cancel");
+        }
+    }
+
+    fn cancel_restore(&self) {
+        crate::backup_host::request_stop();
+    }
+
+    fn open_url(&self, url: &str) {
+        open_url(url);
+    }
+
+    fn reveal(&self, path: &Path) {
+        reveal(path);
+    }
+
+    fn unavailable(&self, what: &str) {
+        tracing::warn!(action = what, "a notice action has no handler in this build");
+    }
+}
+
+/// Registers `app.notice` and starts showing posted notices. Call once from the GTK main thread, with the application
+/// running. Without an application (a test run) nothing is attached and [`post`] returns `false`.
 pub fn attach() {
     let Some(app) = gio::Application::default() else { return };
     let (tx, rx) = async_channel::unbounded();
     if SENDER.set(tx).is_err() {
         return;
     }
-    let open = gio::SimpleAction::new(OPEN_URL_ACTION, Some(glib::VariantTy::STRING));
-    open.connect_activate(|_, param| {
-        if let Some(url) = param.and_then(|p| p.get::<String>()) {
-            open_url(&url);
+    let action = gio::SimpleAction::new(router::NOTICE_ACTION_NAME, Some(glib::VariantTy::STRING));
+    let host = GtkHost { app: app.clone() };
+    action.connect_activate(move |_, param| {
+        let text = param.and_then(|p| p.get::<String>()).unwrap_or_default();
+        match AppAction::from_target(&text) {
+            Ok(action) => router::route(&host, action),
+            Err(error) => tracing::warn!(%error, "a notice action was rejected"),
         }
     });
-    app.add_action(&open);
-    let mark = gio::SimpleAction::new(
-        MARK_READ_ACTION,
-        Some(glib::VariantTy::new("(sxass)").expect("a valid variant type")),
-    );
-    let mark_app = app.clone();
-    mark.connect_activate(move |_, param| {
-        if let Some(param) = param {
-            mark_read(&mark_app, param);
-        }
-    });
-    app.add_action(&mark);
-    let download_action = gio::SimpleAction::new(
-        DOWNLOAD_ACTION,
-        Some(glib::VariantTy::new("(sxass)").expect("a valid variant type")),
-    );
-    let download_app = app.clone();
-    download_action.connect_activate(move |_, param| {
-        if let Some(param) = param {
-            download(&download_app, param);
-        }
-    });
-    app.add_action(&download_action);
-    let log_action = gio::SimpleAction::new(OPEN_LOG_ACTION, Some(glib::VariantTy::STRING));
-    log_action.connect_activate(|_, param| {
-        if let Some(path) = param.and_then(|p| p.get::<String>()) {
-            open_log(&path);
-        }
-    });
-    app.add_action(&log_action);
+    app.add_action(&action);
     glib::spawn_future_local(async move {
-        while let Ok(post) = rx.recv().await {
-            show(&app, &post);
+        while let Ok(op) = rx.recv().await {
+            match op {
+                Op::Show(post) => show(&app, &post),
+                Op::Withdraw(id) => app.withdraw_notification(&id),
+            }
         }
     });
 }
@@ -345,7 +462,7 @@ mod tests {
         let post = entry_post(EntryKind::Manga, &update(&[(1.0, 1), (2.0, 0)]), false).expect("shown");
         let labels: Vec<&str> = post.buttons.iter().map(|(l, _)| l.as_str()).collect();
         assert_eq!(labels, ["Mark as read", "View chapters", "Download"]);
-        assert_eq!(post.tap, Some(Target::Entry { kind: EntryKind::Manga, id: 12 }));
+        assert_eq!(post.tap, Some(Target::Entry { kind: EntryKind::Manga, id: 12, notice: Some(post.id.clone()) }));
         let Target::MarkRead { urls, notice_id, .. } = &post.buttons[0].1 else { panic!("mark read first") };
         assert_eq!(urls, &["/c1".to_owned(), "/c2".to_owned()]);
         assert_eq!(notice_id, &post.id);
@@ -393,25 +510,56 @@ mod tests {
         let post = error_post(EntryKind::Anime, 2, Some(log)).expect("shown");
         assert_eq!(post.body.as_deref(), Some("Tap to see details"));
         assert_eq!(post.tap, Some(Target::OpenLog("/cache/update_errors.txt".to_owned())));
-        let (action, value) = post.tap.expect("tap").action();
-        assert_eq!(action, "app.library-update-open-log");
-        assert_eq!(value.get::<String>().as_deref(), Some("/cache/update_errors.txt"));
+        let (action, value) = post.tap.expect("tap").action().expect("encodes");
+        assert_eq!(action, "app.notice");
+        let action = AppAction::from_target(&value.get::<String>().expect("a string")).expect("decodes");
+        assert_eq!(action, AppAction::RevealFile { path: "/cache/update_errors.txt".into() });
     }
 
     #[test]
     fn a_target_names_its_application_action() {
-        let (action, value) = Target::Entry { kind: EntryKind::Anime, id: 5 }.action();
-        assert_eq!(action, "app.open-anime");
-        assert_eq!(value.get::<i64>(), Some(5));
-        let (action, value) = Target::Url("https://x".into()).action();
-        assert_eq!(action, "app.library-update-open-url");
-        assert_eq!(value.get::<String>().as_deref(), Some("https://x"));
-        let download = Target::Download { kind: EntryKind::Manga, entry_id: 2, urls: vec!["/a".into()], notice_id: "n".into() };
-        assert_eq!(download.action().0, "app.library-update-download");
-        let mark = Target::MarkRead { kind: EntryKind::Manga, entry_id: 2, urls: vec!["/a".into()], notice_id: "n".into() };
-        let (action, value) = mark.action();
-        assert_eq!(action, "app.library-update-mark-read");
-        assert_eq!(value.get::<(String, i64, Vec<String>, String)>(), Some(("manga".into(), 2, vec!["/a".into()], "n".into())));
+        let entry = Target::Entry { kind: EntryKind::Anime, id: 5, notice: Some("n".into()) };
+        assert_eq!(entry.app_action(), AppAction::OpenAnime { anime_id: 5, notice: Some("n".into()) });
+        assert_eq!(Target::Url("https://x".into()).app_action(), AppAction::OpenUrl { url: "https://x".into() });
+        let urls = vec!["/a".to_owned()];
+        let download = Target::Download { kind: EntryKind::Manga, entry_id: 2, urls: urls.clone(), notice_id: "n".into() };
+        assert_eq!(
+            download.app_action(),
+            AppAction::DownloadChapters { manga_id: 2, urls: urls.clone(), notice: Some("n".into()) }
+        );
+        let mark = Target::MarkRead { kind: EntryKind::Anime, entry_id: 2, urls: urls.clone(), notice_id: "n".into() };
+        assert_eq!(mark.app_action(), AppAction::MarkEpisodesSeen { anime_id: 2, urls, notice: Some("n".into()) });
+        let (name, value) = mark.action().expect("encodes");
+        assert_eq!(name, "app.notice", "every button goes through the one action");
+        assert!(value.get::<String>().is_some_and(|json| json.contains("mark_episodes_seen")));
+    }
+
+    #[test]
+    fn the_entry_notice_slot_comes_from_the_registry_and_every_post_passes_the_rules() {
+        let post = entry_post(EntryKind::Manga, &update(&[(1.0, 1)]), false).expect("shown");
+        assert_eq!(post.id, ids::new_items(EntryKind::Manga, 12));
+        assert_eq!(warning_post(EntryKind::Anime).id, ids::library_size_warning(EntryKind::Anime));
+        assert_eq!(error_post(EntryKind::Manga, 1, None).expect("shown").id, ids::library_error(EntryKind::Manga));
+        for post in [post, warning_post(EntryKind::Manga)] {
+            assert!(rules::prepare(post).is_ok());
+        }
+    }
+
+    #[test]
+    fn the_progress_notice_has_its_own_slot_per_kind_and_a_cancel_that_stops_that_kind() {
+        // T-26a-054 / T-35a-021: the cancel names the pass of the notice's own kind
+        let manga = progress_post(EntryKind::Manga, "Updating library", Some("Checking 1/3"));
+        assert_eq!(manga.id, ids::library_progress(EntryKind::Manga));
+        assert_eq!(manga.body.as_deref(), Some("Checking 1/3"));
+        assert!(manga.low_priority);
+        assert_eq!(
+            manga.buttons,
+            vec![("Cancel".to_owned(), Target::Action(AppAction::CancelLibraryUpdate { notice: Some(manga.id.clone()) }))]
+        );
+        let anime = progress_post(EntryKind::Anime, "Updating library", None);
+        assert_ne!(anime.id, manga.id);
+        assert_eq!(anime.buttons[0].1, Target::Action(AppAction::CancelAnimeLibraryUpdate { notice: Some(anime.id.clone()) }));
+        assert!(rules::prepare(anime).is_ok());
     }
 
     #[test]

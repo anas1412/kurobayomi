@@ -56,6 +56,9 @@ pub struct MigrateSourcesSnapshot {
     /// What the page says when no source has a favourite: the manga picker says `information_empty_library`, the anime
     /// picker `texts::MIGRATE_SOURCES_EMPTY` (T-41a-036).
     pub empty_text: String,
+    /// Set when the favourite counts could not be read: the page shows an error row with Retry instead of the list
+    /// (E-MS-02).
+    pub error: Option<String>,
 }
 
 pub struct MigrateSourcesNav {
@@ -65,6 +68,10 @@ pub struct MigrateSourcesNav {
     pub copy_id: Rc<dyn Fn(i64)>,
     pub toggle_mode: Rc<dyn Fn()>,
     pub toggle_direction: Rc<dyn Fn()>,
+    /// The header's help action: the source migration guide.
+    pub open_help: Rc<dyn Fn()>,
+    /// The error row's Retry: reads the counts again.
+    pub retry: Rc<dyn Fn()>,
 }
 
 pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav) -> gtk::Box {
@@ -92,8 +99,26 @@ pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav
     direction.connect_clicked(move |_| toggle_direction());
     sort.append(&mode);
     sort.append(&direction);
+    let help = gtk::Button::from_icon_name("help-browser-symbolic");
+    help.set_tooltip_text(Some(&tr(MsgKey::label_help)));
+    let open_help = Rc::clone(&nav.open_help);
+    help.connect_clicked(move |_| open_help());
+    sort.append(&help);
     root.append(&sort);
 
+    if let Some(message) = &snapshot.error {
+        let error = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        error.set_vexpand(true);
+        error.set_valign(gtk::Align::Center);
+        error.append(&gtk::Label::new(Some(message)));
+        let retry = gtk::Button::with_label(&tr(MsgKey::action_retry));
+        retry.set_halign(gtk::Align::Center);
+        let on_retry = Rc::clone(&nav.retry);
+        retry.connect_clicked(move |_| on_retry());
+        error.append(&retry);
+        root.append(&error);
+        return root;
+    }
     if snapshot.sources.is_empty() {
         let empty = gtk::Label::new(Some(&snapshot.empty_text));
         empty.set_vexpand(true);
@@ -123,8 +148,8 @@ pub struct FavoritesDeps {
     pub toast: Rc<dyn Fn(ToastSpec)>,
     /// The duplicate dialog's Show manga.
     pub open_entry: Rc<dyn Fn(i64)>,
-    /// The duplicate dialog's Migrate existing entry.
-    pub migrate: Rc<dyn Fn(i64)>,
+    /// The duplicate dialog's Migrate existing entry: the duplicate (old) and the browsed entry (new).
+    pub migrate: Rc<dyn Fn(i64, i64)>,
     pub now_ms: Rc<dyn Fn() -> i64>,
     /// The category chooser's Edit categories: the Categories page on this kind's section.
     pub edit_categories: Rc<dyn Fn()>,
@@ -350,6 +375,15 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.append(&header.bar);
     root.append(&search_bar);
+    // Escape closes the open search first (the same step as Back, B-EC-10) and then the window's handler leaves
+    {
+        let (text, active, clear) = (search.clone(), Rc::clone(&search_active), search.clone());
+        super::keys::attach_escape_step(
+            &root,
+            move || back_action(active.get(), text.text().as_str()) == BackAction::ClearQuery,
+            move || clear.set_text(""),
+        );
+    }
     root.append(&chips);
     root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     listing_view.widget().set_vexpand(true);
@@ -509,6 +543,11 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     entry.set_margin_end(12);
     entry.set_margin_top(6);
     body.append(&entry);
+    // Escape clears the typed query first; with none, it goes on and leaves the page
+    {
+        let (text, clear) = (entry.clone(), entry.clone());
+        super::keys::attach_escape_step(&body, move || !text.text().is_empty(), move || clear.set_text(""));
+    }
     let progress = gtk::ProgressBar::new();
     progress.set_visible(false);
     let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
@@ -754,12 +793,14 @@ pub(crate) mod tests {
         let log = nav_log();
         let (a, b, c, d) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
         let migrate = migrate_sources(
-            &MigrateSourcesSnapshot { sources: vec![], mode: MigrationSortingMode::ALPHABETICAL, direction: MigrationDirection::ASCENDING, empty_text: tr(MsgKey::information_empty_library) },
+            &MigrateSourcesSnapshot { sources: vec![], mode: MigrationSortingMode::ALPHABETICAL, direction: MigrationDirection::ASCENDING, empty_text: tr(MsgKey::information_empty_library), error: None },
             MigrateSourcesNav {
                 open: Rc::new(move |id| a.borrow_mut().push(format!("open {id}"))),
                 copy_id: Rc::new(move |id| b.borrow_mut().push(format!("copy {id}"))),
                 toggle_mode: Rc::new(move || c.borrow_mut().push("mode".into())),
                 toggle_direction: Rc::new(move || d.borrow_mut().push("direction".into())),
+                open_help: Rc::new(|| {}),
+                retry: Rc::new(|| {}),
             },
         );
         let text = all_labels(&migrate);
@@ -792,6 +833,7 @@ pub(crate) mod tests {
             mode: MigrationSortingMode::TOTAL,
             direction: MigrationDirection::DESCENDING,
             empty_text: String::new(),
+            error: None,
         };
         let page = migrate_sources(
             &snapshot,
@@ -800,6 +842,8 @@ pub(crate) mod tests {
                 copy_id: Rc::new(move |id| b.borrow_mut().push(format!("copy {id}"))),
                 toggle_mode: Rc::new(|| {}),
                 toggle_direction: Rc::new(|| {}),
+                open_help: Rc::new(|| {}),
+                retry: Rc::new(|| {}),
             },
         );
         let text = all_labels(&page);
@@ -1204,7 +1248,27 @@ pub(crate) mod tests {
         assert!(pump_until(|| shown.listing.loaded_count() == 2), "the flag off keeps both");
     }
 
+    fn escape_closes_an_open_search_first_and_otherwise_goes_on() {
+        let (_tx, ready) = watch::channel(true);
+        let page = global_search(search_nav(SearchChips::default()).0, ready);
+        let entry = descendants::<gtk::SearchEntry>(page.widget()).into_iter().next().expect("entry");
+        entry.set_text("one piece");
+        let controller = |widget: &gtk::Widget| {
+            let all = widget.observe_controllers();
+            (0..all.n_items()).filter_map(|i| all.item(i)).filter_map(|c| c.downcast::<gtk::EventControllerKey>().ok()).count()
+        };
+        let body = entry.parent().expect("body");
+        assert_eq!(controller(&body), 1, "the page carries the Escape step");
+        let all = body.observe_controllers();
+        let keys = (0..all.n_items()).filter_map(|i| all.item(i)).find_map(|c| c.downcast::<gtk::EventControllerKey>().ok()).expect("controller");
+        let none = gtk::gdk::ModifierType::empty();
+        assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Escape, &0_u32, &none]), "the first Escape closes the search");
+        assert_eq!(entry.text().as_str(), "", "the typed text is gone");
+        assert!(!keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Escape, &0_u32, &none]), "the second one goes on, to leave the page");
+    }
+
     pub(crate) fn smoke() {
+        escape_closes_an_open_search_first_and_otherwise_goes_on();
         hide_in_library_keeps_favourites_out_of_a_page_made_with_the_flag_on();
         a_stub_source_shows_only_its_title_back_and_the_missing_message();
         opening_a_source_stores_it_as_the_last_used_unless_incognito_applies();

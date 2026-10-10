@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use kuro_platform::toast::Toaster;
+use kuro_platform::webview::browser::BrowserHost;
 use kuro_platform::webview::WebViewHost;
 use kuro_prefs::network::NetworkPrefs;
 
@@ -91,6 +92,22 @@ impl NetworkClient {
             user_agent,
         }
         .build())
+    }
+
+    /// The client of this desktop. `embedded` is the WebKit view when this build has one; without it (or when it
+    /// reports itself unavailable) a Cloudflare challenge goes to [`BrowserHost`]: the system browser opens through
+    /// `opener` and the cookies the user exports to the platform's `cookies.txt` clear it.
+    pub fn for_desktop(
+        prefs: &NetworkPrefs,
+        paths: &dyn kuro_platform::paths::Paths,
+        embedded: Option<Arc<dyn WebViewHost>>,
+        opener: Arc<dyn kuro_platform::opener::Opener>,
+        toaster: Toaster,
+    ) -> Result<Self, NetError> {
+        let webview = embedded
+            .filter(|view| view.available())
+            .unwrap_or_else(|| Arc::new(BrowserHost::new(opener, paths.cookies_import_file())));
+        Self::new(prefs, paths.cookie_jar_file(), webview, toaster)
     }
 
     /// A copy of this client's chain, to add interceptors to. The original client is not changed.
@@ -553,5 +570,59 @@ mod preference_and_extension_tests {
                 .expect("other hosts are not limited")
                 .unwrap();
         }
+    }
+
+    struct Root(std::path::PathBuf);
+
+    impl kuro_platform::paths::Paths for Root {
+        fn data_dir(&self) -> std::path::PathBuf { self.0.join("data") }
+        fn config_dir(&self) -> std::path::PathBuf { self.0.join("config") }
+        fn state_dir(&self) -> std::path::PathBuf { self.0.join("state") }
+        fn cache_dir(&self) -> std::path::PathBuf { self.0.join("cache") }
+        fn log_dir(&self) -> std::path::PathBuf { self.0.join("log") }
+        fn temp_dir(&self) -> std::path::PathBuf { self.0.join("temp") }
+        fn crash_dir(&self) -> std::path::PathBuf { self.0.join("crash") }
+        fn default_downloads_dir(&self) -> std::path::PathBuf { self.0.join("downloads") }
+        fn default_backups_dir(&self) -> std::path::PathBuf { self.0.join("backups") }
+        fn covers_dir(&self) -> std::path::PathBuf { self.0.join("covers") }
+        fn plugin_dir(&self) -> std::path::PathBuf { self.0.join("plugins") }
+    }
+
+    #[derive(Default)]
+    struct Opened(std::sync::Mutex<Vec<String>>);
+
+    struct Shared(Arc<Opened>);
+
+    impl kuro_platform::opener::Opener for Shared {
+        fn open_target(&self, target: &str) -> std::io::Result<()> {
+            self.0.0.lock().unwrap().push(target.to_owned());
+            Ok(())
+        }
+    }
+
+    /// Without an embedded view the desktop client sends a Cloudflare challenge to `BrowserHost::solve_challenge`: the
+    /// page opens in the system browser, and the exported clearance cookie lets the request through.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn without_a_web_view_a_challenge_reaches_the_browser_host() {
+        use kuro_platform::paths::Paths;
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::any())
+            .respond_with(wiremock::ResponseTemplate::new(503).insert_header("server", "cloudflare"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::any()).respond_with(wiremock::ResponseTemplate::new(200)).mount(&server).await;
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Root(dir.path().to_path_buf());
+        std::fs::create_dir_all(paths.config_dir()).unwrap();
+        std::fs::create_dir_all(paths.data_dir()).unwrap();
+        std::fs::write(paths.cookies_import_file(), "127.0.0.1\tFALSE\t/\tFALSE\t0\tcf_clearance\texported\n").unwrap();
+        let opened = Arc::new(Opened::default());
+        let (toaster, _feed) = toast_channel();
+        let client = NetworkClient::for_desktop(&prefs(), &paths, None, Arc::new(Shared(Arc::clone(&opened))), toaster).unwrap();
+        let url = format!("{}/", server.uri());
+        let resp = client.get(&url).await.unwrap();
+        assert_eq!(resp.status, http::StatusCode::OK);
+        assert_eq!(*opened.0.lock().unwrap(), vec![url], "the browser host opened the challenged page");
     }
 }

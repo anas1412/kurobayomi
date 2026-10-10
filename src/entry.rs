@@ -771,7 +771,7 @@ fn tracker_search() -> Option<Built> {
     for i in 1..=4 {
         let h = GBox::new(O::Horizontal, 12);
         margins(&h, 12);
-        h.append(&cover(67, 96));
+        h.append(&crate::entry_core::cover_view::tracker_search_cover(67, 96, None).frame);
         let v = GBox::new(O::Vertical, 2);
         v.append(&Label::builder().label(title_n(i)).xalign(0.0).css_classes(["heading"]).build());
         v.append(&dim("Author name"));

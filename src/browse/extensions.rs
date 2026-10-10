@@ -46,6 +46,13 @@ pub struct Ext {
     pub icon_file: Option<String>,
 }
 
+/// What the globe button of an extension row opens: the first source's base URL and name. `None` when the package has no
+/// source with a URL. The request has no field for the source id (`entry_core::handoff::WebViewRequest`).
+pub fn webview_target(ext: &Ext) -> Option<(String, String)> {
+    let first = ext.sources.first()?;
+    Some((first.base_url.clone()?, first.name.clone()))
+}
+
 /// The query: comma-separated terms, matched with OR. Each term is trimmed and matched case-insensitively against
 /// names, base URLs of HTTP sources and source ids. An untrusted extension matches on its name only (E-40-09).
 pub fn matches_query(query: &str, ext: &Ext) -> bool {
@@ -503,6 +510,15 @@ mod tests {
 
     fn installed(name: &str, has_update: bool) -> Ext {
         ext(name, ExtState::Installed { has_update, obsolete: false }, Some("en"), vec![src(1, "Alpha", Some("https://a.example"))])
+    }
+
+    #[test]
+    fn the_globe_opens_the_first_source_with_its_base_url_and_name() {
+        let two = ext("Two", ExtState::Available, Some("en"), vec![src(7, "First", Some("https://first.example")), src(8, "Second", Some("https://second.example"))]);
+        assert_eq!(webview_target(&two), Some(("https://first.example".to_owned(), "First".to_owned())));
+        let no_url = ext("None", ExtState::Available, Some("en"), vec![src(9, "Local", None)]);
+        assert_eq!(webview_target(&no_url), None, "a source with no site has nothing to open");
+        assert_eq!(webview_target(&ext("Empty", ExtState::Available, None, Vec::new())), None);
     }
 
     fn available(name: &str, lang: &str) -> Ext {

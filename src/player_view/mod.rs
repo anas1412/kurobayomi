@@ -42,10 +42,16 @@ pub fn open_episode(path: &Path, episode_id: i64, start_ms: i64) {
         Ok(paths) => paths,
         Err(e) => return tracing::error!(error = %e, "player: no app directories; not opened"),
     };
-    let prefs = PlayerPrefs {
+    let mut prefs = PlayerPrefs {
         data_dir: paths.data_dir(),
         ..PlayerPrefs::default()
     };
+    if crate::data::is_installed() {
+        // T-46b-043: the opt-in decoder comes from the preferences; without it the startup is the plain one
+        let decoder = kuro_prefs::player::DecoderPrefs::new(crate::data::app().base.store().clone());
+        prefs.remember_decoder = decoder.remember_decoder.get();
+        prefs.remembered_decoder = kuro_player::options::decoder_from_stored_name(&decoder.remembered_decoder.get());
+    }
     prepare_mpv_dir(&prefs);
     playback::use_c_numeric_locale();
     let mpv = match MpvHandle::create(&startup_settings(&prefs)) {
@@ -139,6 +145,7 @@ fn apply_action(shared: &Shared, window: &gtk::Window, action: Action) -> bool {
             if let Err(e) = player.playback.set_volume(volume) {
                 tracing::warn!(error = %e, "player: volume change failed");
             }
+            remember_volume(&player.playback);
         }
         Action::ToggleFullscreen => toggle_fullscreen(window),
         Action::Escape if window.is_fullscreen() => window.unfullscreen(),
@@ -212,9 +219,11 @@ fn build_window(path: &Path, shared: &Shared, start: i64) -> gtk::Window {
     {
         let shared = Rc::clone(shared);
         volume.connect_change_value(move |_, _, value| {
-            if let Err(e) = shared.borrow().playback.set_volume(value) {
+            let player = shared.borrow();
+            if let Err(e) = player.playback.set_volume(value) {
                 tracing::warn!(error = %e, "player: volume change failed");
             }
+            remember_volume(&player.playback);
             glib::Propagation::Proceed
         });
     }
@@ -316,8 +325,35 @@ fn realize(area: &gtk::GLArea, shared: &Shared, path: &Path, start: i64, loaded:
         tracing::error!(error = %e, "player: render updates are not wired");
     }
     if !loaded.replace(true) {
+        restore_volume(&player.playback);
         if let Err(e) = player.playback.load(path, start) {
             tracing::error!(error = %e, "player: could not load the file");
+        }
+    }
+}
+
+/// The preference sections of the player, or `None` before the app data is installed.
+fn player_prefs() -> Option<kuro_prefs::player::PlayerPrefs> {
+    crate::data::is_installed().then(|| kuro_prefs::player::PlayerPrefs::new(crate::data::app().base.store().clone()))
+}
+
+/// Session start (T-45b-053): the remembered volume is written to mpv when `pref_remember_volume` is on and the stored
+/// value is not negative. Brightness has no control on the desktop (T-45a-045), so its stored value is kept as it is.
+fn restore_volume(playback: &Playback) {
+    let Some(prefs) = player_prefs() else { return };
+    if let Some(volume) = kuro_player::remember::value_to_restore(prefs.remember_player_volume.get(), prefs.player_volume_value.get())
+        && let Err(e) = playback.set_volume(f64::from(volume))
+    {
+        tracing::warn!(error = %e, "player: the remembered volume was not applied");
+    }
+}
+
+/// A volume change: stored under `player_volume_value` when `pref_remember_volume` is on.
+fn remember_volume(playback: &Playback) {
+    let Some(prefs) = player_prefs() else { return };
+    if let Some(value) = kuro_player::remember::value_to_store(prefs.remember_player_volume.get(), playback.volume() as f32) {
+        if let Err(e) = prefs.player_volume_value.set(value) {
+            tracing::warn!(error = %e, "player: the volume was not stored");
         }
     }
 }

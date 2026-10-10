@@ -158,10 +158,13 @@ pub fn reset_reader_row() -> PreferenceItem {
 /// The typed rows of Advanced settings, in their groups. `changed` redraws the page after a reset.
 pub fn page_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     let revoke = revoke_trust_row(prefs, Rc::clone(&changed));
+    let saver = super::data_saver::page_rows(prefs, Rc::clone(&changed));
     vec![
         item(share_crash_logs_row()),
         item(verbose_row(prefs)),
         item(onboarding_guide_row(prefs)),
+        item(super::notifications::row()),
+        item(super::notifications::mute_row(&prefs.base)),
         group("Data", vec![reindex_downloads_row()]),
         group(
             "Networking",
@@ -172,7 +175,9 @@ pub fn page_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
                 .collect(),
         ),
         group("Library", vec![refresh_covers_row(), reset_reader_row()]),
+        super::decode::reader_group(prefs),
         group("Extensions", vec![revoke]),
+        saver,
     ]
 }
 

@@ -41,6 +41,16 @@ ACTION_ICONS = [
     ("kb-text-shadow-symbolic", "sharp_shadow_24.xml"),
 ]
 
+# T-49ba-041: drawables the port drops (no reference in the app). The export refuses to read them.
+DROPPED_DRAWABLES = [
+    "ic_arrow_back_24dp.xml", "ic_baseline_collections_24.xml", "ic_baseline_input_24.xml",
+    "ic_baseline_open_in_new_24.xml", "ic_brightness_negative_20dp.xml", "ic_chrome_player_mode_24dp.xml",
+    "ic_circle_200dp.xml", "ic_circle_right_200dp.xml", "ic_collections_baseline_state.xml",
+    "ic_launcher_background.xml", "ic_pause_circle_filled_24.xml", "ic_play_circle_filled_24.xml",
+    "ic_video_chapter_20dp.xml", "ic_volume_off_24dp.xml",
+]
+
+
 def hex_rgba_to_svg(color):
     """Android #AARRGGBB, #RRGGBB or #RGB to an (SVG colour, opacity) pair."""
     value = color.lstrip("#")
@@ -135,6 +145,9 @@ def write(path, text):
 
 
 def main(source_dir, out_dir):
+    clash = sorted({source for _, source in ACTION_ICONS} & set(DROPPED_DRAWABLES))
+    if clash:
+        sys.exit("dropped drawables must not be exported: " + ", ".join(clash))
     actions = os.path.join(out_dir, "scalable", "actions")
     for name, source in ACTION_ICONS:
         vector = vector_root(os.path.join(source_dir, source))

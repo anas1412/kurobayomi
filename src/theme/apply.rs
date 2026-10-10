@@ -9,6 +9,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use gtk::glib::prelude::Cast as _;
+use gtk::gio::prelude::ListModelExt as _;
+use gtk::prelude::WidgetExt as _;
 use gtk::{gdk, CssProvider};
 
 use kuro_prefs::ui::ThemeMode;
@@ -29,6 +32,8 @@ thread_local! {
     static CURRENT: RefCell<Option<(gdk::Display, ThemeSettings)>> = const { RefCell::new(None) };
     /// The last known system dark flag (portal, else GTK fallback). `None` until a read arrives.
     static SYSTEM_DARK: Cell<Option<bool>> = const { Cell::new(None) };
+    /// The `(dark, amoled)` pair last marked on the windows (T-49ba-003), for windows created later.
+    static WINDOW_MARKS: Cell<(bool, bool)> = const { Cell::new((false, false)) };
 }
 
 /// The re-entrancy guard: one apply at a time, and at most one queued behind it.
@@ -222,7 +227,46 @@ fn apply_current() -> bool {
     };
     let system_dark = SYSTEM_DARK.with(Cell::get).unwrap_or(false);
     sync_gtk_preference(settings.mode, system_dark);
+    let dark = resolve(&settings, system_dark).tokens.dark;
+    WINDOW_MARKS.with(|m| m.set((dark, settings.amoled)));
+    mark_windows();
     apply(&display, &settings, system_dark)
+}
+
+/// The classes a window carries for the palette (T-49ba-003): `kb-dark` for the dark flag, and
+/// `kb-amoled` only together with it, since the AMOLED overlay has no effect in light mode.
+pub fn window_classes(dark: bool, amoled: bool) -> [(&'static str, bool); 2] {
+    [("kb-dark", dark), ("kb-amoled", dark && amoled)]
+}
+
+/// Sets the palette classes on one window.
+fn mark_window(window: &gtk::Window) {
+    let (dark, amoled) = WINDOW_MARKS.with(Cell::get);
+    for (class, on) in window_classes(dark, amoled) {
+        if on {
+            window.add_css_class(class);
+        } else {
+            window.remove_css_class(class);
+        }
+    }
+}
+
+/// Sets the palette classes on every toplevel, so a change applies without a restart.
+fn mark_windows() {
+    if !gtk::is_initialized() {
+        return;
+    }
+    let windows = gtk::Window::toplevels();
+    for i in 0..windows.n_items() {
+        if let Some(window) = windows.item(i).and_then(|o| o.downcast::<gtk::Window>().ok()) {
+            mark_window(&window);
+        }
+    }
+}
+
+/// Marks a window created after the last apply (called from `mod::attach_window`).
+pub fn mark_new_window(window: &gtk::Window) {
+    mark_window(window);
 }
 
 fn set_system(read: dark::PortalRead) {
@@ -362,5 +406,19 @@ mod tests {
             assert!(!reapply(&display, "}}}} not css"), "a broken sheet is refused");
             assert_eq!(second.to_str(), reference.to_str(), "the previous text is kept");
         });
+    }
+}
+
+#[cfg(test)]
+mod window_class_tests {
+    use super::*;
+
+    /// T-49ba-003: `kb-dark` follows the dark flag, and AMOLED only applies in dark mode.
+    #[test]
+    fn amoled_class_needs_dark_mode() {
+        assert_eq!(window_classes(true, true), [("kb-dark", true), ("kb-amoled", true)]);
+        assert_eq!(window_classes(true, false), [("kb-dark", true), ("kb-amoled", false)]);
+        assert_eq!(window_classes(false, true), [("kb-dark", false), ("kb-amoled", false)]);
+        assert_eq!(window_classes(false, false), [("kb-dark", false), ("kb-amoled", false)]);
     }
 }

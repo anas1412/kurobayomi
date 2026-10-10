@@ -1,9 +1,8 @@
-//! Colours that are not Material roles: the cover placeholder, the dividers, the blue accent and
-//! the AMOLED surfaces (T-49b-040). Android sources: presentation-core `values/colors.xml` and
-//! `values-night/colors.xml`.
+//! Colours that are not Material roles: the cover placeholder, the dividers and the AMOLED surfaces
+//! (T-49b-040). Android sources: presentation-core `values/colors.xml` and `values-night/colors.xml`.
 //!
-//! `splash` (`accent_blue` in light, `#202125` in dark) is dropped: it themes the Android splash
-//! screen only, and the desktop has no equivalent.
+//! The splash colours are the `.kb-splash` rules in `style.css` (T-49ba-020). The `accent_blue`
+//! accent is dropped (T-49ba-038): no notification or shortcut sets an accent colour.
 
 use super::tokens::Rgba;
 
@@ -13,8 +12,6 @@ pub const COVER_PLACEHOLDER: Rgba = Rgba::argb(0x1F88_8888);
 pub const DIVIDER_LIGHT: Rgba = Rgba::argb(0x1F00_0000);
 /// Divider in dark mode (`md_white_1000_12`).
 pub const DIVIDER_DARK: Rgba = Rgba::argb(0x1FFF_FFFF);
-/// Blue accent (`accent_blue`). Notifications take this colour (area 35).
-pub const ACCENT_BLUE: Rgba = Rgba::argb(0xFF54_759E);
 
 pub const AMOLED_BACKGROUND: Rgba = Rgba::argb(0xFF00_0000);
 pub const AMOLED_ON_BACKGROUND: Rgba = Rgba::argb(0xFFFF_FFFF);
@@ -39,7 +36,6 @@ mod tests {
         assert_eq!(COVER_PLACEHOLDER, Rgba::parse_hex("#1F888888").unwrap());
         assert_eq!(DIVIDER_LIGHT, Rgba::parse_hex("#1F000000").unwrap());
         assert_eq!(DIVIDER_DARK, Rgba::parse_hex("#1FFFFFFF").unwrap());
-        assert_eq!(ACCENT_BLUE, Rgba::parse_hex("#54759E").unwrap());
         assert_eq!(AMOLED_SURFACE_CONTAINER, Rgba::parse_hex("#0C0C0C").unwrap());
         assert_eq!(AMOLED_SURFACE_CONTAINER_HIGH, Rgba::parse_hex("#131313").unwrap());
         assert_eq!(AMOLED_SURFACE_CONTAINER_HIGHEST, Rgba::parse_hex("#1B1B1B").unwrap());

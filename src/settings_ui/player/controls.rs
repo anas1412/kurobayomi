@@ -50,7 +50,7 @@ pub fn progress_row(pref: &Pref<f32>) -> PreferenceItem {
     }
 }
 
-/// The internal player page: the progress and controls rows, then Intro skip and External player (PiP is not built).
+/// The internal player page: the progress and controls rows, then Mini player, Intro skip and External player (T-45a-047: the Android PiP is dropped, its four settings stay under the mini player label).
 pub fn internal_rows(prefs: &Prefs) -> Vec<Preference> {
     let p = &prefs.player;
     let hide_times = hide_time_options();
@@ -66,6 +66,16 @@ pub fn internal_rows(prefs: &Prefs) -> Vec<Preference> {
                 switch("Show loading circle", &p.show_loading_circle, true),
                 switch_sub("Show current chapter indicator", "Only appears if the video has chapters", &p.show_current_chapter, true),
                 switch("Remember and switch to the last used brightness", &p.remember_player_brightness, true),
+                switch("Remember and switch to the last used volume", &p.remember_player_volume, true),
+            ],
+        ),
+        group(
+            "Mini player",
+            vec![
+                switch("Enable mini player", &p.enable_pip, true),
+                switch("Open mini player on exit", &p.pip_on_exit, true),
+                switch("Show mini player episode change toasts", &p.pip_episode_toasts, true),
+                switch("Switch next to previous in mini player", &p.pip_replace_with_previous, true),
             ],
         ),
         group(
@@ -193,12 +203,12 @@ mod tests {
             _ => panic!("group"),
         };
         assert_eq!(controls.title, "Controls");
-        assert_eq!(controls.items.len(), 4);
+        assert_eq!(controls.items.len(), 5);
         assert!(!prefs.player.allow_gestures.get());
         assert!(prefs.player.show_loading_circle.get());
         let subtitle = common_of(&controls.items[2]).subtitle.as_deref();
         assert_eq!(subtitle, Some("Only appears if the video has chapters"));
-        let hosters = match &tree[3] {
+        let hosters = match &tree[4] {
             Preference::Group(g) => g,
             _ => panic!("group"),
         };
@@ -210,7 +220,7 @@ mod tests {
     fn display_group_has_no_cutout_or_status_bar_rows_and_shows_the_opacity() {
         let prefs = Prefs::in_memory();
         let tree = internal_rows(&prefs);
-        let Preference::Group(display) = &tree[4] else { panic!("group") };
+        let Preference::Group(display) = &tree[5] else { panic!("group") };
         let titles: Vec<&str> = display.items.iter().map(|i| i.title()).collect();
         assert_eq!(titles.len(), 6);
         assert!(!titles.iter().any(|t| t.contains("status bar") || t.contains("cutout")));

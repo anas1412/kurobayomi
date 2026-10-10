@@ -4,8 +4,9 @@
 //! The values and the mapping are pure functions, tested without a display. [`Tint`] holds the three
 //! `DrawingArea` layers and the CSS classes that apply them.
 //!
-//! The brightness layer is the black overlay of negative values. A positive value would drive the backlight; the
-//! reader has no backlight access, so a positive value leaves the page unchanged (E-BRIGHT-2, recorded decision).
+//! The brightness layer is the black overlay of negative values. A positive value drives the display backlight through
+//! [`super::backlight`] when a writable backlight exists (T-43a-065); without one the page is left unchanged and the
+//! notice is shown once per session (E-BRIGHT-2).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -159,7 +160,13 @@ impl Tint {
     /// Applies the brightness, colour filter, grayscale and invert preferences. Grayscale and invert are colour-matrix
     /// nodes over the page area only.
     pub fn apply(&self, prefs: &ReaderPrefs) {
-        let alpha = brightness_alpha(prefs.custom_brightness.get(), prefs.custom_brightness_value.get());
+        let (enabled, value) = (prefs.custom_brightness.get(), prefs.custom_brightness_value.get());
+        if let super::backlight::Outcome::Unavailable { notify: true } =
+            super::backlight::apply(std::path::Path::new(super::backlight::SYSFS_ROOT), enabled, value)
+        {
+            crate::toast::notify(super::strings::CUSTOM_BRIGHTNESS_UNAVAILABLE);
+        }
+        let alpha = brightness_alpha(enabled, value);
         self.brightness_colour.set((0.0, 0.0, 0.0, alpha));
         self.brightness.set_visible(alpha > 0.0);
         self.brightness.queue_draw();

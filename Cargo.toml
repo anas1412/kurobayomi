@@ -41,8 +41,12 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 fancy-regex = "0.19.2"
+jiff = "0.2.37"
+icu_datetime = "2.3.0"
+icu_locale = { workspace = true }
 argon2 = "0.6.0"
 tracing = { workspace = true }
+toml_edit = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }

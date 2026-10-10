@@ -197,6 +197,18 @@ mod tests {
     }
 
     #[test]
+    fn a_2000_by_1000_page_splits_into_two_squares_and_rotates_to_a_tall_page() {
+        let page = grid(2000, 1000);
+        assert!(is_wide(page.width, page.height));
+        let left = split_in_half(&page, false);
+        let right = split_in_half(&page, true);
+        assert_eq!((left.width, left.height), (1000, 1000));
+        assert_eq!((right.width, right.height), (1000, 1000));
+        let rotated = rotate(&page, false);
+        assert_eq!((rotated.width, rotated.height), (1000, 2000));
+    }
+
+    #[test]
     fn rotating_a_wide_page_turns_it_a_quarter_either_way() {
         let page = grid(3, 2);
         let cw = rotate(&page, false);

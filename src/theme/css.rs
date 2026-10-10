@@ -13,7 +13,7 @@ use super::tokens::{
 };
 
 /// The GTK named colours that the scheme overrides, and the role each one takes.
-const GTK_NAMED: [(&str, Role); 17] = [
+const GTK_NAMED: [(&str, Role); 18] = [
     ("window_bg_color", Role::Background),
     ("window_fg_color", Role::OnBackground),
     ("view_bg_color", Role::Surface),
@@ -26,6 +26,7 @@ const GTK_NAMED: [(&str, Role); 17] = [
     ("accent_color", Role::Primary),
     ("accent_bg_color", Role::Primary),
     ("accent_fg_color", Role::OnPrimary),
+    ("theme_selected_bg_color", Role::Primary),
     ("destructive_color", Role::Error),
     ("destructive_bg_color", Role::Error),
     ("destructive_fg_color", Role::OnError),
@@ -272,6 +273,7 @@ mod tests {
         let t = tokens_for(scheme_for(AppTheme::CLOUDFLARE), false, false);
         let css = render(&t, false);
         assert!(css.contains("@define-color accent_color @kuro_primary;"));
+        assert!(css.contains("@define-color theme_selected_bg_color @kuro_primary;"));
         assert!(css.contains("window {"));
     }
 

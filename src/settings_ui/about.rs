@@ -187,12 +187,103 @@ pub fn check_row() -> PreferenceItem {
         return text(app_update::CHECK_ROW_TITLE, None, false);
     }
     let spinner: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| gtk::Spinner::builder().visible(false).build().upcast());
-    tap_item(app_update::CHECK_ROW_TITLE, None, true, Some(spinner), Rc::new(check_tapped))
+    tap_item(app_update::CHECK_ROW_TITLE, None, true, Some(spinner), None, Rc::new(check_tapped))
 }
 
-/// The typed rows of the About page, merged over the spec rows of the same titles.
+pub const HELP_TRANSLATE_URL: &str = "https://aniyomi.org/docs/contribute#translation";
+pub const PRIVACY_URL: &str = "https://aniyomi.org/privacy/";
+pub const WEBSITE_URL: &str = "https://aniyomi.org";
+pub const DISCORD_URL: &str = "https://discord.gg/F32UjdJZrR";
+pub const GITHUB_URL: &str = "https://github.com/aniyomiorg/aniyomi";
+
+/// The release tag of a build: `v<version>` for a release, `r<commit count>` for a preview.
+pub fn release_tag(build_type: &str, version_name: &str, commit_count: u32) -> String {
+    if build_type == "preview" { format!("r{commit_count}") } else { format!("v{version_name}") }
+}
+
+/// The GitHub release page of a tag.
+pub fn release_page_url(repo: &str, tag: &str) -> String {
+    format!("https://github.com/{repo}/releases/tag/{tag}")
+}
+
+/// Opens a link in the desktop's browser; a failure is logged only.
+fn open_url(url: &str) {
+    gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
+        if let Err(err) = result {
+            tracing::warn!(%err, "the link did not open");
+        }
+    });
+}
+
+/// A row that opens `url` when tapped.
+fn link_row(title: &str, url: &str, enabled: bool) -> PreferenceItem {
+    let mut row = text(title, None, enabled);
+    if let PreferenceItem::Text { on_click, .. } = &mut row {
+        let url = url.to_owned();
+        *on_click = Some(Rc::new(move || open_url(&url)));
+    }
+    row
+}
+
+/// What's new: the release page of this build. Hidden in debug builds and when no release repository is set.
+fn whats_new_row() -> PreferenceItem {
+    let info = &*APP_INFO;
+    let repo = crate::app_update::UPDATE_REPOSITORY;
+    let tag = release_tag(info.build_type, &info.version_name, info.commit_count);
+    link_row("What's new", &release_page_url(repo, &tag), info.build_type != "debug" && !repo.is_empty())
+}
+
+/// The bottom row of three links: Website, Discord and GitHub.
+fn links_row() -> PreferenceItem {
+    let build: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| {
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        bar.set_halign(gtk::Align::Center);
+        for (label, url) in [("Website", WEBSITE_URL), ("Discord", DISCORD_URL), ("GitHub", GITHUB_URL)] {
+            let button = gtk::Button::with_label(label);
+            button.add_css_class("flat");
+            button.connect_clicked(move |_| open_url(url));
+            bar.append(&button);
+        }
+        bar.upcast()
+    });
+    PreferenceItem::Custom { title: "Links".to_owned(), build }
+}
+
+/// The typed rows of the About page, merged over the spec rows of the same titles. The links row has no spec twin and
+/// is kept at the end.
 pub fn page_rows() -> Vec<Preference> {
-    vec![item(version_row()), item(check_row())]
+    vec![
+        item(version_row()),
+        item(check_row()),
+        item(whats_new_row()),
+        item(link_row("Help translate", HELP_TRANSLATE_URL, true)),
+        item(link_row("Privacy policy", PRIVACY_URL, true)),
+        item(links_row()),
+    ]
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    #[test]
+    fn a_preview_build_tags_its_commit_count_and_a_release_its_version() {
+        assert_eq!(release_tag("preview", "0.1.0", 42), "r42");
+        assert_eq!(release_tag("release", "0.1.0", 42), "v0.1.0");
+    }
+
+    #[test]
+    fn the_release_page_url_joins_repo_and_tag() {
+        assert_eq!(release_page_url("owner/name", "v1.2.3"), "https://github.com/owner/name/releases/tag/v1.2.3");
+    }
+
+    #[test]
+    fn the_fixed_link_targets_are_the_acceptance_urls() {
+        assert_eq!(HELP_TRANSLATE_URL, "https://aniyomi.org/docs/contribute#translation");
+        assert_eq!(PRIVACY_URL, "https://aniyomi.org/privacy/");
+        assert_eq!(DISCORD_URL, "https://discord.gg/F32UjdJZrR");
+        assert_eq!(GITHUB_URL, "https://github.com/aniyomiorg/aniyomi");
+    }
 }
 
 #[cfg(test)]

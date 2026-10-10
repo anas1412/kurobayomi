@@ -5,6 +5,10 @@ mod backup_run;
 mod backup_schedule;
 mod bind;
 mod clamp;
+mod cli;
+// the thumbnail renderer is called by the cover loader, which does not exist yet
+#[allow(dead_code)]
+mod feed;
 // No WebView host shows the window yet (T-12a-017 needs WebKitGTK).
 #[allow(dead_code)]
 mod cloudflare_window;
@@ -17,6 +21,9 @@ mod ext_host;
 mod library;
 mod library_update;
 mod misc;
+// no screen calls the client yet; the extension host and the trackers take it from here
+#[allow(dead_code)]
+mod net_client;
 mod local_flow;
 mod local_flow_anime;
 mod live;
@@ -61,6 +68,13 @@ fn main() -> glib::ExitCode {
     if std::env::args().skip(1).any(|a| a == "--version") {
         println!("{}", kuro_core::app_info::version_line());
         return glib::ExitCode::SUCCESS;
+    }
+    // `--updates-json`: the desktop applets read the updates feed here, before any GTK call (works without a display)
+    {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        if cli::wants_updates_json(&args) {
+            return glib::ExitCode::from(cli::run(&args));
+        }
     }
     // `--run-backup`: one automatic backup from the systemd timer, no window and no GTK
     if std::env::args().skip(1).any(|a| a == "--run-backup") {
@@ -437,7 +451,8 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
         h.set_margin_end(6);
         h.set_margin_top(6);
         h.set_margin_bottom(6);
-        let badge = match n.id.as_str() { "updates" => "0", "browse" => "1", _ => "" };
+        // both badges start empty and are bound to the shared counts below; no count is written here
+        let badge = if matches!(n.id.as_str(), "updates" | "browse") { " " } else { "" };
         let icon = gtk::Overlay::new();
         let img = gtk::Image::from_icon_name(&n.icon);
         icon.set_child(Some(&img));
@@ -448,16 +463,21 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
         if !badge.is_empty() {
             let b = gtk::Label::builder().label(badge).css_classes(["accent", "caption-heading"]).width_chars(3).xalign(1.0).build();
             h.append(&b);
+            b.set_label("");
             let updates_label = (n.id == "updates").then(|| b.clone());
+            let browse_label = (n.id == "browse").then(|| b.clone());
             expanded.push(b.upcast());
             let dot = gtk::Label::builder().use_markup(true).label("<span size=\"5pt\">●</span>").css_classes(["accent"]).halign(gtk::Align::End).valign(gtk::Align::Start).visible(false).build();
             icon.add_overlay(&dot);
             if let Some(label) = updates_label.as_ref().filter(|_| data::is_installed()) {
                 misc::badge::bind(label, &dot, &kuro_prefs::library::LibraryPrefs::new(data::app().base.store().clone()));
             }
+            if let Some(label) = browse_label.as_ref().filter(|_| data::is_installed()) {
+                misc::badge::bind_extension_updates(label, &dot, &kuro_prefs::source::SourcePrefs::new(data::app().base.store().clone()));
+            }
             dots.push(dot.upcast());
         }
-        let tip = if badge.is_empty() || n.id == "updates" { n.title.clone() } else { format!("{} ({badge})", n.title) };
+        let tip = n.title.clone();
         let row = gtk::ListBoxRow::builder().child(&h).tooltip_text(tip).build();
         row.set_margin_top(widgets::rail::ITEM_SPACING / 2);
         row.set_margin_bottom(widgets::rail::ITEM_SPACING / 2);

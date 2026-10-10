@@ -6,8 +6,26 @@
 //!
 //! `startup` is the single call `main.rs` makes before the first window is presented (T-49a-058).
 //! The other helpers are used by the screens as their lanes adopt them.
+//!
+//! Android theme items that Kurobayomi does not port (area 49b, T-49ba-007, 008, 023, 033, 039,
+//! 040, 042, 047). Each has one reason here:
+//! - Dynamic colour: the Android `m3_sys_color_dynamic_*` tokens are never read. Monet here is the
+//!   desktop accent colour from the settings portal, a Linux feature (T-49a-005).
+//! - `lightStatusBar`, `lightNavigationBar`, `elevationOverlayEnabled`, `windowLightNavigationBar`
+//!   and the API-27 navigation-bar overrides: GTK has no system bars and no forced dark mode; the
+//!   dark decision comes from the window background (`dark::`).
+//! - `forceDarkAllowed`, `statusBarColor`, `navigationBarColor`, `navigationBarDividerColor`,
+//!   `enforceNavigationBarContrast`, `enforceStatusBarContrast`, `windowActionModeOverlay`,
+//!   `elevationOverlayColor`: the same reason, no system bars and no elevation tint.
+//! - The More-tab three-dot morph: decorative, and the Android `time_group` target has no children.
+//! - `PreferenceThemeOverlay.Tachiyomi` items and `Switch` elevation: GTK has no preference overlay,
+//!   and `gtk::Switch` has no elevation tint.
+//! - `MinMaxNumberPicker` and `MaterialSpinnerView`: numeric settings use `gtk::SpinButton`.
+//! - Widget corner radii (`appwidget_*`): there is no home-screen widget on Linux.
+//! - `ActionButton.Overflow` and the unused AppCompat full-screen style: no reference in the app.
 #![allow(dead_code)]
 
+pub mod anim;
 pub mod app_theme;
 pub mod apply;
 pub mod baseline;
@@ -19,6 +37,7 @@ pub mod elevation;
 pub mod empty_state;
 pub mod icons;
 pub mod loading;
+pub mod margins;
 pub mod monet;
 pub mod motion;
 pub mod picker;
@@ -26,6 +45,7 @@ pub mod prefs;
 pub mod resolve;
 pub mod shared;
 pub mod size_class;
+pub mod splash;
 mod schemes;
 #[cfg(test)]
 mod schemes_xml;
@@ -110,6 +130,7 @@ pub fn startup() {
 
 /// Tracks the window's size class and records each change (T-49a-058). Call once the window exists.
 pub fn attach_window(window: &impl gtk::prelude::IsA<gtk::Window>) {
+    apply::mark_new_window(window.as_ref());
     size_class::attach(window, |class| {
         WINDOW_CLASS.with(|c| c.set(class));
         tracing::debug!(?class, "window size class changed");

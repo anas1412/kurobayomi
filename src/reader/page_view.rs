@@ -29,7 +29,8 @@ use crate::reader::page_decode::{self, DecodeError, LoadState, MIN_DELAY_MS};
 use crate::reader::page_transform::{self, DecodeIntent};
 use crate::reader::page_zoom::{self as zoom, PageConfig, Size, ZoomKey, ZoomState};
 use crate::reader::progress::LoadingIndicator;
-use crate::reader::tiles::{MAX_TILE_EDGE, Pyramid, Tile};
+use crate::reader::page_profile;
+use crate::reader::tiles::{Pyramid, Tile, current_tile_edge};
 use crate::reader::viewers::page_bytes::ByteSource;
 use crate::reader::viewers::pager::nav::Phys;
 use crate::reader::viewers::visible;
@@ -47,8 +48,10 @@ type Decoded = std::thread::Result<Result<(Frames, bool, Option<u32>), DecodeErr
 fn decode_animation(bytes: &[u8], width: Option<u32>, intent: DecodeIntent, crop: bool) -> Result<(Frames, bool, Option<u32>), DecodeError> {
     let mut changed = false;
     let mut frames = Vec::new();
+    // read once per page: a change of the threshold applies to pages decoded after it (T-44a-060)
+    let tile_edge = current_tile_edge();
     for (index, frame) in page_decode::decode_frames(bytes)?.into_iter().enumerate() {
-        let (page, split) = page_transform::apply(frame.page, intent);
+        let (page, split) = page_transform::apply(page_profile::apply(frame.page), intent);
         if index == 0 {
             changed = split;
         }
@@ -58,7 +61,7 @@ fn decode_animation(bytes: &[u8], width: Option<u32>, intent: DecodeIntent, crop
             None => page,
         };
         let page = page_decode::limit_edge(page, page_decode::MAX_TEXTURE_EDGE);
-        frames.push((Pyramid::new(page, MAX_TILE_EDGE), frame.delay_ms));
+        frames.push((Pyramid::new(page, tile_edge), frame.delay_ms));
     }
     Ok((frames, changed, page_decode::loop_passes(bytes)))
 }

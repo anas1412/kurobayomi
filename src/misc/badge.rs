@@ -48,6 +48,12 @@ pub fn bind(label: &gtk::Label, dot: &impl IsA<gtk::Widget>, library: &LibraryPr
     });
 }
 
+/// Shows the stored extension update count in `label` and the dot, hidden at zero (the Browse entry's badge).
+pub fn bind_extension_updates(label: &gtk::Label, dot: &impl IsA<gtk::Widget>, source: &kuro_prefs::source::SourcePrefs) {
+    let dot: gtk::Widget = dot.clone().upcast();
+    bind::bind(label, &source.manga_extension_updates_count, move |l, count| paint(l, &dot, (count, 0, true)));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +77,6 @@ mod tests {
         // T-26a-101: no hard-coded count remains in the sidebar's badge table.
         let main = include_str!("../main.rs");
         assert!(!main.contains("\"updates\" => \"8\""));
+        assert!(!main.contains("\"updates\" => \"0\"") && !main.contains("\"browse\" => \"1\""));
     }
 }

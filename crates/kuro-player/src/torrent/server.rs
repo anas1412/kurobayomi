@@ -14,8 +14,8 @@ use super::proxy::{ProxyMode, start_arguments, valid_proxy_url};
 
 /// The port when the preference is missing or unusable (`pref_torrserver_port`, default `8090`).
 pub const DEFAULT_PORT: u16 = 8090;
-/// Readiness probes after the start, one per second (area 13 section 4.2, `wait(10)`).
-const READY_PROBES: u32 = 11;
+/// Readiness probes after the start, one per second (area 13 section 4.2, `wait(10)`): ten probes with a one second pause after each, so at most 10 s.
+const READY_PROBES: u32 = 10;
 /// SIGTERM waits this long before the child is killed (area 13 section 4.3).
 const STOP_GRACE: Duration = Duration::from_secs(5);
 /// The program looked up on `PATH` when no binary path is configured.
@@ -31,7 +31,7 @@ pub enum ServerError {
     Spawn(String),
     #[error("TorrServer exited with code {0}")]
     Exited(String),
-    #[error("did not respond within 11 s")]
+    #[error("did not respond within 10 s")]
     NotReady,
     #[error(transparent)]
     Client(#[from] TorrentError),

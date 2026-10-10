@@ -5,6 +5,7 @@
 //! its subclasses (`p2-topic-global-search-engine.md`).
 
 use std::collections::{BTreeSet, VecDeque};
+use std::sync::{Arc, OnceLock};
 
 use kuro_domain::source::browse::BrowseQuery;
 use kuro_domain::source::model::Source;
@@ -16,6 +17,13 @@ use super::route::{BrowseKind, BrowseRoute};
 
 /// Source fetches that run at once (R§5: a 5-permit semaphore, held only for the source call).
 pub const MAX_IN_FLIGHT: usize = 5;
+
+/// The gate every global search screen shares (E-GS-08): at most `MAX_IN_FLIGHT` source fetches run at once across all of
+/// them, not per screen.
+pub fn shared_gate() -> Arc<tokio::sync::Semaphore> {
+    static GATE: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    Arc::clone(GATE.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT))))
+}
 
 /// A catalogue source offered to a search, with the extension package it came from (`""` when it has none).
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -541,6 +541,9 @@ define_prefs! {
     "anime_ext_last_check", Normal, Long, 0, "sources", "anime_ext_last_check";
     "check_app_updates", Normal, Bool, false, "base", "check_app_updates";
     "__APP_STATE_last_app_check", AppState, Long, 0, "base", "last_app_check";
+    "muted_notification_channels", Normal, Set, &[], "base", "muted_notification_channels";
+    "pref_remember_decoder", Normal, Bool, false, "player.decoder", "remember_decoder";
+    "player_decoder", Normal, Str, "", "player.decoder", "remembered_decoder";
 }
 
 #[cfg(test)]
@@ -655,13 +658,17 @@ mod tests {
     fn registry_has_the_321_plan_rows_in_order() {
         let rows = plan_rows();
         assert_eq!(rows.len(), 321, "the plan's 328 rows minus the derived animeext_updates_count and the six dropped keys");
-        // four Kurobayomi rows after the plan's rows: `show_not_runnable` (T-19a-066), `anime_ext_last_check` (T-19a-064),
-        // `check_app_updates` and `last_app_check` (T-07a-036)
-        assert_eq!(REGISTRY.len(), rows.len() + 4);
+        // five Kurobayomi rows after the plan's rows: `show_not_runnable` (T-19a-066), `anime_ext_last_check` (T-19a-064),
+        // `check_app_updates` and `last_app_check` (T-07a-036), and `muted_notification_channels` (T-req-platform-004)
+        assert_eq!(REGISTRY.len(), rows.len() + 7);
         assert_eq!(REGISTRY[rows.len()].key, "show_not_runnable");
         assert_eq!(REGISTRY[rows.len() + 1].key, "anime_ext_last_check");
         assert_eq!(REGISTRY[rows.len() + 2].key, "check_app_updates");
         assert_eq!(REGISTRY[rows.len() + 3].key, "__APP_STATE_last_app_check");
+        assert_eq!(REGISTRY[rows.len() + 4].key, "muted_notification_channels");
+        // T-46b-043: the opt-in and the remembered decoder
+        assert_eq!(REGISTRY[rows.len() + 5].key, "pref_remember_decoder");
+        assert_eq!(REGISTRY[rows.len() + 6].key, "player_decoder");
         let mut pinned = 0;
         for (meta, (key, store, kind, default)) in REGISTRY.iter().zip(&rows) {
             assert_eq!(meta.key, key);

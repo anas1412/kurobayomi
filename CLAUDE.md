@@ -33,7 +33,7 @@ The machine has 15 GB RAM plus a 15 GB zram swap that sits at 8 to 15 GB used, s
 - **Lane budget:** at most about 11 lanes at once, at most 2 compiles at once (cap `N`), cargo `jobs = 2`.
 - **Usage limit:** agents can fail with "You've hit your weekly limit ... resets <date>". It has been transient (agents worked again minutes later). Resume the same wave with `resumeFromRunId`, then check that agent transcripts are being written. Do not stop other work, and do not assume everything is blocked until the reset date.
 - **Never stop a running workflow without being asked.** A user saying "pause" does not mean TaskStop.
-- **Disk:** keep `~/kurobayomi/target`, `~/kurobayomi-targets/*` and `/home` free space in view (each build folder is about 30 GB). Delete a build folder only when no lane uses it.
+- **Disk:** every build folder (`~/kurobayomi/target`, `~/kurobayomi-targets/*`) grows to 30 to 100 GB, mostly from incremental builds, and agents create their own folders there. On 2026-10-10 `/home` fell from 126 GB to 39 GB free in a few hours. `~/kurobayomi-notes/prune-disk.py` (run by the watcher every 10 minutes) deletes idle folders (no cargo or rustc using them, untouched for 45 minutes; for 2 hours when space is fine) and, under 60 GB free, deletes idle folders' incremental data and then the least recently used idle folders. Never delete a folder a running build uses. Tell lanes to reuse `B` or `C` instead of copying a new target folder.
 
 ## CI checks that agents keep breaking (read before editing paths or platform code)
 

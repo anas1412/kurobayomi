@@ -15,6 +15,11 @@ use kuro_images::notify::PICTURE_NOTICE_ID;
 
 use super::strings;
 
+/// The notice after a share: one fixed id, so a share again replaces it.
+pub const SHARE_NOTICE_ID: &str = "reader-shared-picture";
+/// The application action of the share notice's button; its parameter is the shared file's path.
+pub const REVEAL_ACTION: &str = "reader-reveal-shared-picture";
+
 /// The thumbnail's bounds (`SaveImageNotifier`): at most 720 wide and 1280 tall.
 pub const THUMBNAIL_MAX: (u32, u32) = (720, 1280);
 
@@ -60,8 +65,13 @@ fn install_actions(app: &gtk::Application) {
         app.add_action(&action);
     };
     register(OPEN_ACTION, |path| {
-        if let Err(error) = kuro_platform::opener::open(path) {
+        if let Err(error) = kuro_platform::opener::Opener::open_target(&kuro_platform::opener::XdgOpener, &path.to_string_lossy()) {
             tracing::warn!(error = %error, "the saved picture could not be opened");
+        }
+    });
+    register(REVEAL_ACTION, |path| {
+        if let Err(error) = kuro_images::share::reveal(path) {
+            tracing::warn!(error = %error, "the shared picture could not be shown in the file manager");
         }
     });
     register(SHARE_ACTION, |path| {
@@ -99,6 +109,25 @@ pub fn show_saved(app: &gtk::Application, path: &Path, thumbnail: Option<Vec<u8>
     app.send_notification(Some(PICTURE_NOTICE_ID), &saved_notification(path, thumbnail));
 }
 
+/// Builds the share notice: the share message as its title and a "Show in file manager" button for the staged file.
+pub fn shared_notification(text: &str, path: &Path) -> gio::Notification {
+    let notification = gio::Notification::new(text);
+    let target = path.to_string_lossy().into_owned().to_variant();
+    notification.add_button_with_target_value(strings::ACTION_SHOW_IN_FILE_MANAGER, &format!("app.{REVEAL_ACTION}"), Some(&target));
+    notification
+}
+
+/// Shows the share notice for `path`, replacing the notice of an earlier share.
+pub fn show_shared(app: &gtk::Application, text: &str, path: &Path) {
+    install_actions(app);
+    app.send_notification(Some(SHARE_NOTICE_ID), &shared_notification(text, path));
+}
+
+/// Opens a staged file with the desktop's default handler (T-43a-056).
+pub fn open_with_default(path: &Path) -> std::io::Result<()> {
+    kuro_platform::opener::Opener::open_target(&kuro_platform::opener::XdgOpener, &path.to_string_lossy())
+}
+
 /// Shows "Error" with the message, or "Unknown error" when there is none.
 pub fn show_failed(app: &gtk::Application, message: Option<&str>) {
     let notification = gio::Notification::new(strings::DOWNLOAD_NOTIFIER_TITLE_ERROR);
@@ -109,6 +138,15 @@ pub fn show_failed(app: &gtk::Application, message: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_share_notice_carries_the_message_and_a_show_in_file_manager_button() {
+        let notification = shared_notification("Title: Ch 1, page 3", Path::new("/cache/shared_image/a.png"));
+        // GNotification has no getters; building it without a display must not panic, and the label text is a constant
+        drop(notification);
+        assert_eq!(strings::ACTION_SHOW_IN_FILE_MANAGER, "Show in file manager");
+        assert_ne!(REVEAL_ACTION, SHARE_ACTION);
+    }
 
     #[test]
     fn a_thumbnail_fits_720_by_1280_keeps_its_proportions_and_never_enlarges() {

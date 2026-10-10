@@ -20,6 +20,12 @@ pub fn slider_steps(first: i32, last: i32, steps: Option<i32>) -> i32 {
     steps.unwrap_or(last - first - 1).max(0)
 }
 
+/// The step count of a player Int slider: `max - min` (T-46a-035). It is not the settings default
+/// `(max - min) - 1` above, so the player sliders get their own builder.
+pub fn int_slider_steps(min: i32, max: i32) -> i32 {
+    (max - min).max(0)
+}
+
 /// Whether a slider change should call `on_change` (E-49-25: not when the value is unchanged).
 pub fn slider_changed(previous: i32, next: i32) -> bool {
     previous != next
@@ -220,6 +226,37 @@ pub fn slider_row(
     row
 }
 
+/// The player SwitchRow (T-46a-035): the label and a switch, and a click anywhere on the row flips the switch and
+/// calls `on_toggle` with the new state. The switch itself is not focusable, so the row is the one focus stop.
+pub fn player_switch_row(label: &str, active: bool, on_toggle: impl Fn(bool) + 'static) -> gtk::ListBoxRow {
+    let switch = gtk::Switch::new();
+    switch.set_active(active);
+    switch.set_valign(gtk::Align::Center);
+    switch.set_focusable(false);
+    switch.set_can_target(false);
+    switch.update_property(&[gtk::accessible::Property::Label(label)]);
+    let row = row(label, Some(switch.upcast_ref()), true);
+    row.connect_activate(move |_| {
+        let next = !switch.is_active();
+        switch.set_active(next);
+        on_toggle(next);
+    });
+    row
+}
+
+/// The player Int SliderRow (T-46a-035): label, value pill and a slider with `max - min` discrete steps that calls
+/// `on_change` only when the integer value changes.
+pub fn player_int_slider_row(
+    label: &str,
+    min: i32,
+    max: i32,
+    value: i32,
+    value_text: impl Fn(i32) -> String + 'static,
+    on_change: impl Fn(i32) + 'static,
+) -> gtk::ListBoxRow {
+    slider_row(label, min, max, value, Some(int_slider_steps(min, max)), value_text, on_change)
+}
+
 /// A drop-down row. An out-of-range `selected` shows an empty value and logs a warning (E-49-22).
 /// `on_select` runs once per change, with the new index.
 pub fn select_row(
@@ -258,6 +295,29 @@ mod tests {
         assert_eq!(slider_steps(0, 0, None), 0);
         assert_eq!(slider_steps(5, 5, None), 0);
         assert_eq!(slider_steps(0, 3, Some(4)), 4);
+    }
+
+    #[test]
+    fn t_46a_035_the_player_int_slider_has_max_minus_min_steps() {
+        assert_eq!(int_slider_steps(0, 10), 10);
+        assert_eq!(int_slider_steps(-100, 100), 200);
+        assert_eq!(int_slider_steps(5, 5), 0);
+        assert_ne!(int_slider_steps(0, 10), slider_steps(0, 10, None));
+    }
+
+    #[test]
+    fn t_46a_035_a_row_click_flips_the_player_switch_and_reports_it() {
+        crate::testing::with_display(|| {
+            let seen = Rc::new(Cell::new(None));
+            let row = {
+                let seen = Rc::clone(&seen);
+                player_switch_row("Auto-play", false, move |on| seen.set(Some(on)))
+            };
+            row.emit_by_name::<()>("activate", &[]);
+            assert_eq!(seen.get(), Some(true));
+            row.emit_by_name::<()>("activate", &[]);
+            assert_eq!(seen.get(), Some(false));
+        });
     }
 
     #[test]

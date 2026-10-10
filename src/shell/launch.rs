@@ -37,6 +37,8 @@ pub enum Target {
     Repo(UriRoute),
     /// Raise the window; the request has no screen of its own yet.
     Present,
+    /// Return to Settings and show `toast` (an unknown `*-auth` host, E-23).
+    SettingsToast(String),
 }
 
 /// The window's target for a request. A request that cannot be routed is an error, and the caller shows its message.
@@ -53,6 +55,9 @@ pub fn target_of(request: &LaunchRequest) -> Result<Target, RouteError> {
         LaunchRequest::Invalid(error) => return Err(error.clone()),
         LaunchRequest::OpenFile(path) => Target::Restore(path.clone()),
         LaunchRequest::OpenUri(link) => match uri::parse_uri(link).map_err(RouteError::Uri)? {
+            UriRoute::TrackerAuth { host, .. } if !uri::TRACKER_AUTH_HOSTS.contains(&host.as_str()) => {
+                Target::SettingsToast(uri::UriError::UnknownHost(host).to_string())
+            }
             UriRoute::TrackerAuth { .. } => Target::Present,
             route => Target::Repo(route),
         },
@@ -159,6 +164,12 @@ pub fn apply(app: &gtk::Application, win: &gtk::ApplicationWindow, request: &Lau
             crate::ui::open(RESTORE_SCREEN);
         }
         Ok(Target::Present) => win.present(),
+        Ok(Target::SettingsToast(message)) => {
+            win.present();
+            crate::ui::pop_to_root();
+            crate::ui::open("settings");
+            crate::toast::notify(message);
+        }
         Err(error) => {
             tracing::warn!("a launch request was refused: {error}");
             win.present();
@@ -260,6 +271,15 @@ mod tests {
         );
         assert_eq!(target_of(&LaunchRequest::OpenFile("/tmp/a.tachibk".into())), Ok(Target::Restore("/tmp/a.tachibk".into())));
         assert_eq!(target_of(&LaunchRequest::OpenUri("kurobayomi://anilist-auth#access_token=a".into())), Ok(Target::Present));
+    }
+
+    #[test]
+    fn tc_53_03_an_unknown_auth_host_returns_to_settings_with_a_toast_and_the_five_known_hosts_do_not() {
+        let unknown = target_of(&LaunchRequest::OpenUri("kurobayomi://nosuch-auth#access_token=a".into()));
+        assert_eq!(unknown, Ok(Target::SettingsToast("Unknown link nosuch-auth".into())));
+        for host in uri::TRACKER_AUTH_HOSTS {
+            assert_eq!(target_of(&LaunchRequest::OpenUri(format!("kurobayomi://{host}?code=x"))), Ok(Target::Present), "{host}");
+        }
     }
 
     #[test]

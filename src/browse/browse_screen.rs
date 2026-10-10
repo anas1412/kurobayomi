@@ -38,7 +38,7 @@ pub struct BrowseEnv {
     pub store: Arc<dyn FavoriteStore>,
     pub open_entry: Rc<dyn Fn(i64)>,
     /// The duplicate dialog's Migrate existing entry.
-    pub migrate: Rc<dyn Fn(i64)>,
+    pub migrate: Rc<dyn Fn(i64, i64)>,
     pub edit_categories: Rc<dyn Fn()>,
     pub on_back: Rc<dyn Fn()>,
     pub open_url: Rc<dyn Fn(&str)>,
@@ -215,10 +215,8 @@ fn production_env(directory: Arc<dyn SourceDirectory>) -> BrowseEnv {
         directory,
         store: Arc::new(store),
         open_entry: Rc::new(crate::entry_core::route::open),
-        migrate: Rc::new(move |id| {
-            let title = manga.by_id(id).map(|row| row.title).unwrap_or_default();
-            crate::entry_core::handoff::open_migrate(crate::entry_core::handoff::MigrateRequest { entry_id: id, anime: false, title });
-        }),
+        // the migrate dialog opens at once with old = the duplicate and new = the browsed manga (T-40b-046)
+        migrate: Rc::new(|old, new| (super::search_screen::manga_migrate_dialog(old))(new)),
         edit_categories: Rc::new(super::glue::open_manga_categories),
         on_back: Rc::new(crate::ui::pop),
         open_url: Rc::new(|url| super::anime::browse::open_external(url, None)),
@@ -345,7 +343,7 @@ pub(crate) mod tests {
             directory,
             store: Arc::new(FakeStore::default()),
             open_entry: Rc::new(move |id| opened.borrow_mut().push(format!("entry {id}"))),
-            migrate: Rc::new(|_| {}),
+            migrate: Rc::new(|_, _| {}),
             edit_categories: Rc::new(|| {}),
             on_back: Rc::new(move || back.borrow_mut().push("back".into())),
             open_url: Rc::new(|_| {}),

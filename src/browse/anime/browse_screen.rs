@@ -31,7 +31,7 @@ pub struct AnimeEnv {
     pub store: Arc<dyn FavoriteStore>,
     pub open_entry: Rc<dyn Fn(i64)>,
     /// The duplicate dialog's Migrate existing entry.
-    pub migrate: Rc<dyn Fn(i64)>,
+    pub migrate: Rc<dyn Fn(i64, i64)>,
     pub edit_categories: Rc<dyn Fn()>,
     pub on_back: Rc<dyn Fn()>,
     /// Open in WebView: the url and the source's name.
@@ -143,7 +143,7 @@ fn production_env() -> AnimeEnv {
         directory: Arc::new(AnimeDirectory::current(anime.clone())),
         store: Arc::new(store),
         open_entry: Rc::new(crate::entry_core::anime::route::open),
-        migrate: Rc::new(move |id| {
+        migrate: Rc::new(move |id, _browsed| {
             let title = anime.by_id(id).map(|row| row.title).unwrap_or_default();
             handoff::open_migrate(MigrateRequest { entry_id: id, anime: true, title });
         }),
@@ -248,7 +248,7 @@ pub(crate) mod tests {
             directory: Arc::new(directory),
             store: Arc::new(FakeStore::default()),
             open_entry: Rc::new(move |id| opened.borrow_mut().push(format!("entry {id}"))),
-            migrate: Rc::new(|_| {}),
+            migrate: Rc::new(|_, _| {}),
             edit_categories: Rc::new(|| {}),
             on_back: Rc::new(move || back.borrow_mut().push("back".into())),
             open_webview: Rc::new(move |url, name| web.borrow_mut().push(format!("webview {name} {url}"))),

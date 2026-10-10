@@ -21,9 +21,19 @@ pub struct Layout {
     /// The page has a continue callback, so a tile may show the continue button.
     pub has_continue: bool,
     pub columns: u32,
+    /// The grid size setting: in list mode the number of visible rows (0 is automatic).
+    pub size: i64,
     /// A set size is also the maximum per line; an automatic one is only a minimum.
     pub fixed: bool,
     pub width: i32,
+    /// The height of the area the grid fills, for the list-mode row height (T-39a-068).
+    pub height: i32,
+}
+
+/// The height of one list-mode row: the shared library rule (`library::layout::list_row_height`). Size 0 is the fixed 76 px
+/// row, and a size of n shows n rows in the area, never below 48 px, so the size slider changes the visible rows.
+pub fn list_row_px(container_height: i32, size: i64) -> i32 {
+    crate::library::layout::list_row_height(f64::from(container_height.max(0)), size.clamp(0, season_tile::MAX_GRID_SIZE) as usize).round() as i32
 }
 
 impl Layout {
@@ -64,10 +74,11 @@ impl SeasonGrid {
         let max = if layout.fixed { layout.columns } else { (2 * season_tile::MAX_GRID_SIZE as u32).max(layout.columns) };
         self.widget.set_max_children_per_line(max);
         let list = layout.mode == SeasonDisplayMode::List;
+        let row_px = list_row_px(layout.height, layout.size);
         let cover_width = if list { 96 } else { ((layout.width - 32 - 8 * (layout.columns as i32 - 1)) / layout.columns.max(1) as i32).clamp(48, 220) };
         for item in items {
             let tile = season_tile::tile(item, layout.mode, layout.number_mode, layout.has_continue);
-            let content = if list { self.list_row(&tile, cover_width) } else { self.grid_tile(&tile, cover_width) };
+            let content = if list { self.list_row(&tile, row_px) } else { self.grid_tile(&tile, cover_width) };
             let button = gtk::Button::builder().child(&content).css_classes(["flat"]).build();
             let (on_open, id) = (Rc::clone(&self.on_open), item.id);
             button.connect_clicked(move |_| on_open(id));
@@ -113,9 +124,11 @@ impl SeasonGrid {
         content
     }
 
-    fn list_row(&self, tile: &Tile, cover_width: i32) -> GBox {
+    fn list_row(&self, tile: &Tile, row_px: i32) -> GBox {
         let row = GBox::new(O::Horizontal, 12);
-        row.append(&ui::cover(cover_width, cover_width * 3 / 2));
+        row.set_height_request(row_px);
+        let cover_height = (row_px - 2 * crate::entry_core::list_row::PAD_VERTICAL).max(1);
+        row.append(&ui::cover(cover_height * 2 / 3, cover_height));
         let text = GBox::new(O::Vertical, 4);
         text.set_hexpand(true);
         if let Some(title) = &tile.title {
@@ -127,5 +140,20 @@ impl SeasonGrid {
         }
         row.append(&text);
         row
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_rows_are_76_at_size_zero_and_split_the_area_otherwise() {
+        assert_eq!(list_row_px(600, 0), 76);
+        assert_eq!(list_row_px(600, 4), 149, "600 / 4 - 3 / 4, rounded");
+        assert_eq!(list_row_px(600, 10), 60);
+        assert_eq!(list_row_px(300, 10), 48, "never below 48");
+        assert!(list_row_px(600, 2) > list_row_px(600, 5), "a bigger size shows more, thinner rows");
     }
 }

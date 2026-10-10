@@ -21,6 +21,8 @@ use gtk::prelude::*;
 use kuro_core::sources::SourceGate;
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_prefs::library::LibraryPrefs;
+use kuro_track::policy::auto_update_allowed;
+use kuro_track::prefs::TrackPrefs;
 use kuro_data::chapter::Chapter;
 use kuro_db::Db;
 use kuro_platform::toast::{ToastLength, Toaster};
@@ -47,7 +49,7 @@ use super::nav::{self, Step};
 use super::nav_overlay::{self, NavOverlay};
 use super::navigator::{Navigator, NavigatorState};
 use super::overlay::Tint;
-use super::session::{AdjacentOutcome, ReaderEvent, ReaderSession, ReaderStore, open_list};
+use super::session::{AdjacentOutcome, ReaderEvent, ReaderSession, ReaderStore, TrackUpdate, open_list};
 use super::rotation_sheet;
 use super::settings_window::{self, MangaChoices};
 use super::sheet::{self, Sheet};
@@ -92,11 +94,19 @@ pub struct ReaderExtras {
     /// Deletes the downloads of the chapters queued by delete-after-read. Without it the rule is off.
     pub delete_sink: Option<DeleteSink>,
     pub downloads: DownloadCheck,
+    /// Sends a completed chapter's number to the trackers (T-43a-030). The reader calls it only while
+    /// `pref_auto_update_manga_sync_key` is on and the session is not incognito. Without it nothing is sent.
+    pub track_update: Option<TrackUpdate>,
+    /// Queues the chapters download-ahead picked: the manga id and the chapter ids (T-43a-034). Without it the rule is off.
+    pub download_ahead: Option<DownloadAheadSink>,
 }
+
+/// Queues the given chapters of a manga for download.
+pub type DownloadAheadSink = Rc<dyn Fn(i64, &[i64])>;
 
 impl Default for ReaderExtras {
     fn default() -> Self {
-        Self { data_dir: None, delete_sink: None, downloads: DownloadCheck::default() }
+        Self { data_dir: None, delete_sink: None, downloads: DownloadCheck::default(), track_update: None, download_ahead: None }
     }
 }
 
@@ -269,6 +279,20 @@ impl ReaderCore {
             // the slot count is read once, when the reader opens
             let slots = DownloadPrefs::new(&self.deps.prefs_store).remove_after_read_slots.get();
             session.set_delete_after_read(i64::from(slots), Some(QueueFile::in_dir(dir)));
+        }
+        if let Some(sink) = &self.extras.track_update {
+            let (sink, prefs, incognito) = (Rc::clone(sink), TrackPrefs::new(self.deps.prefs_store.clone()), self.deps.incognito);
+            session.set_track_update(Rc::new(move |manga_id, number| {
+                if auto_update_allowed(&prefs, incognito) {
+                    sink(manga_id, number);
+                }
+            }));
+        }
+        if self.extras.download_ahead.is_some() {
+            // the amount is read once, when the reader opens
+            let amount = DownloadPrefs::new(&self.deps.prefs_store).auto_download_while_reading.get();
+            let downloaded = Rc::clone(&self.deps.is_downloaded);
+            session.set_download_ahead(amount, Rc::new(move |chapter| downloaded(chapter)));
         }
         session.start_history(history_rules::now_ms());
         *self.session.borrow_mut() = Some(session);
@@ -467,15 +491,22 @@ impl ReaderCore {
     }
 
     /// `on_page_selected` for a page a viewer shows (T-043a-093). Download-ahead and the flash are the hooks the
-    /// caller passes in.
+    /// caller passes in. Download-ahead gets the chapter ids to queue.
     pub fn page_selected(
         &self,
         page: &Rc<ReaderPage>,
-        download_ahead: &mut dyn FnMut(usize),
+        download_ahead: &mut dyn FnMut(&[i64]),
         flash: &mut dyn FnMut(),
     ) -> Option<usize> {
         let build = Rc::clone(&self.deps.build);
         self.session.borrow_mut().as_mut().and_then(|s| s.on_page_selected(page, |c| build(c), download_ahead, flash))
+    }
+
+    /// Hands the chapters download-ahead picked to the sink, when the app gave one (T-43a-034).
+    pub fn queue_ahead(&self, chapter_ids: &[i64]) {
+        if let Some(sink) = &self.extras.download_ahead {
+            sink(self.deps.manga_id, chapter_ids);
+        }
     }
 
     /// A viewer asked for a chapter to be loaded in the background (T-043a-093).
@@ -540,7 +571,7 @@ impl ReaderChrome {
                         tint.on_page_changed(prefs);
                     }
                 };
-                let switched = screen.core.page_selected(&page, &mut |_| {}, &mut flash);
+                let switched = screen.core.page_selected(&page, &mut |ids| screen.core.queue_ahead(ids), &mut flash);
                 if switched.is_some() {
                     // the page belongs to another chapter, which is now the current one: the viewer gets its neighbours
                     reload_chapters(&screen);
@@ -1087,18 +1118,28 @@ fn save_page(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
     });
 }
 
-/// Stages a copy of the page and opens it with the desktop (T-43a-056).
+/// Stages a copy of the page, opens it with the default handler and shows the share message with a "Show in file
+/// manager" button (T-43a-056). The system share list does not exist here; that loss is the replacement the task names.
 fn share_page(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
     let Some(source) = ready_source(screen, page) else { return };
     let (title, chapter) = screen.core.page_names(page);
     let base = page_save::page_file_base(&title, &chapter, page.number() as usize);
+    let message = strings::share_page_info(&title, &chapter, page.number() as i32);
     let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return warn_unknown(screen) };
     let staging = kuro_images::share::staging_dir(&paths);
     let toaster = screen.toaster.clone();
     page_save::in_background(move || page_save::stage_for_share(&source, &base, &staging), move |result| {
-        let opened = result.and_then(|path| kuro_images::share::reveal(&path).map_err(|e| e.to_string()));
-        if opened.is_err() {
-            toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+        // the file opens with the default handler; the notice carries the share message and offers the file manager
+        let opened = result.and_then(|path| {
+            saved_notice::open_with_default(&path).map_err(|e| e.to_string())?;
+            Ok(path)
+        });
+        match (opened, saved_notice::application()) {
+            (Ok(path), Some(app)) => saved_notice::show_shared(&app, &message, &path),
+            (Ok(_), None) => {}
+            (Err(_), _) => {
+                toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+            }
         }
     });
 }
@@ -1520,7 +1561,7 @@ mod tests {
     }
 
     fn data_extras(dir: &std::path::Path, sink: Option<DeleteSink>) -> ReaderExtras {
-        ReaderExtras { data_dir: Some(dir.to_path_buf()), delete_sink: sink, downloads: DownloadCheck::default() }
+        ReaderExtras { data_dir: Some(dir.to_path_buf()), delete_sink: sink, ..ReaderExtras::default() }
     }
 
     fn record(f: &Fixture, chapter: usize, page_index: i64, age_ms: i64) -> restore::SavedSession {

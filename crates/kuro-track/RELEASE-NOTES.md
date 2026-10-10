@@ -31,3 +31,9 @@ original app, and some are limits of this first release.
 
 - Refreshing an entry keeps your own score, dates and private setting. Only the status, the chapters read and the
   totals come from the server.
+
+## Tracking settings
+
+- The Tracking settings page has no help button any more. The original app opened its online tracking guide
+  (aniyomi.org/help/guides/tracking/) from that button. This app does not open an outside web page from the
+  settings, so the link is lost. Decision recorded for T-27a-047.

@@ -26,8 +26,8 @@ pub struct FavoriteHooks {
     pub toast: Rc<dyn Fn(ToastSpec)>,
     /// The duplicate dialog's Show manga: opens the existing entry.
     pub open_entry: Rc<dyn Fn(i64)>,
-    /// The duplicate dialog's Migrate existing entry.
-    pub migrate: Rc<dyn Fn(i64)>,
+    /// The duplicate dialog's Migrate existing entry: the duplicate's id (the old entry) and the browsed entry's id (the new one).
+    pub migrate: Rc<dyn Fn(i64, i64)>,
     pub now_ms: Rc<dyn Fn() -> i64>,
     /// The chooser's Edit categories: opens the Categories page on its manga section.
     pub edit_categories: Rc<dyn Fn()>,
@@ -122,7 +122,7 @@ impl FavoriteFlow {
         let this = Rc::clone(self);
         self.show(spec, None, move |chosen| match duplicate_answer(chosen) {
             DuplicateAnswer::ShowExisting => (this.hooks.open_entry)(existing),
-            DuplicateAnswer::MigrateExisting => (this.hooks.migrate)(existing),
+            DuplicateAnswer::MigrateExisting => (this.hooks.migrate)(existing, item.id),
             DuplicateAnswer::AddAnyway => this.add(item.clone()),
             DuplicateAnswer::Nothing => {}
         });
@@ -259,7 +259,7 @@ pub(crate) mod tests {
             set_flag: Rc::new(move |id, flag| f.borrow_mut().push((id, flag))),
             toast: Rc::new(move |spec| t.borrow_mut().push(spec.message)),
             open_entry: Rc::new(move |id| o1.borrow_mut().push(format!("open {id}"))),
-            migrate: Rc::new(move |id| o2.borrow_mut().push(format!("migrate {id}"))),
+            migrate: Rc::new(move |old, new| o2.borrow_mut().push(format!("migrate {old} to {new}"))),
             now_ms: Rc::new(|| 5_000),
             edit_categories: Rc::new(move || o3.borrow_mut().push("categories".to_owned())),
         };
@@ -315,6 +315,11 @@ pub(crate) mod tests {
         assert_eq!(buttons_of(&window).len(), 4);
         buttons_of(&window)[0].emit_clicked();
         assert_eq!(*rig.opened.borrow(), ["open 42"]);
+
+        rig.flow.long_press(item(false));
+        assert!(pump(|| rig.flow.dialog().is_some()));
+        buttons_of(&rig.flow.dialog().expect("dialog"))[1].emit_clicked();
+        assert_eq!(*rig.opened.borrow(), ["open 42", "migrate 42 to 7"], "T-40b-046: old = the duplicate, new = the browsed entry");
 
         rig.flow.long_press(item(false));
         assert!(pump(|| rig.flow.dialog().is_some()));

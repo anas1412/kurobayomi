@@ -45,6 +45,19 @@ pub mod text;
 pub mod toolbar;
 pub mod view;
 
+/// Shared constant enums and separator labels (T-38a-045, T-38a-043), the base list row (T-38a-044, T-39a-061), cover
+/// frames (T-38a-039), the header backdrop (T-38a-014) and the header shortcuts (T-38a-046).
+pub mod backdrop;
+pub mod backdrop_view;
+pub mod cover_model;
+pub mod full_cover_view;
+pub mod shortcut_help_view;
+pub mod constants;
+pub mod cover_frame;
+pub mod list_row;
+pub mod list_row_view;
+pub mod shortcuts;
+
 /// Anime entry details (plan areas 39a and 39b): pure rules for the anime screen.
 pub mod anime;
 

@@ -75,9 +75,20 @@ pub fn apply_choice(store: &PrefStore, path: &Path) -> Result<(), &'static str> 
 
 /// Opens the folder chooser; a folder that passes [`apply_choice`] is stored and `changed` runs, any other one is
 /// refused with a toast. A cancelled chooser changes nothing.
+/// A folder chooser that failed (not dismissed) shows the unavailable toast (task T-47b-055).
+fn chooser_failed(err: &gtk::glib::Error) {
+    if let Some(message) = super::chooser::failure_toast(err) {
+        crate::toast::notify(message);
+    }
+}
+
 fn choose_folder(store: PrefStore, changed: Rc<dyn Fn()>) {
     gtk::FileDialog::new().select_folder(Some(&crate::ui::window()), None::<&gtk::gio::Cancellable>, move |result| {
-        let Some(path) = result.ok().and_then(|file| file.path()) else { return };
+        let path = match result {
+            Ok(file) => file.path(),
+            Err(err) => return chooser_failed(&err),
+        };
+        let Some(path) = path else { return };
         match apply_choice(&store, &path) {
             Ok(()) => changed(),
             Err(message) => crate::toast::notify(message),

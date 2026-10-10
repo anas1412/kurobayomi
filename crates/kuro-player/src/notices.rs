@@ -14,6 +14,13 @@ pub const TORRENT_SERVER_NOTICE_ID: &str = "torrent_server_running";
 pub const ACTION_HTTP_SERVER_CLOSE: &str = "http_server.close";
 pub const ACTION_TORRENT_SERVER_STOP: &str = "torrent_server.stop";
 
+/// What the app does with a server notice: show it, or withdraw the notice with this id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NoticeOp {
+    Show(Notice),
+    Withdraw(&'static str),
+}
+
 const HTTP_SERVER_CHANNEL: &str = "http_server_channel";
 const TORRENT_SERVER_CHANNEL: &str = "torrent_server_channel";
 

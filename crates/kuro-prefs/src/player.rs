@@ -150,7 +150,8 @@ define_prefs! {
 }
 
 define_prefs! {
-    /// `[player.decoder]` section: the 9 keys of Aniyomi `DecoderPreferences`.
+    /// `[player.decoder]` section: the 9 keys of Aniyomi `DecoderPreferences`, and the two Kurobayomi keys that
+    /// remember the chosen decoder (T-46b-043, opt-in, off by default).
     pub struct DecoderPrefs in "player.decoder" {
         try_hw_decoding: bool = "pref_try_hwdec" => true;
         gpu_next: bool = "pref_gpu_next" => false;
@@ -161,6 +162,8 @@ define_prefs! {
         contrast_filter: i32 = "pref_player_filter_contrast" => 0;
         gamma_filter: i32 = "pref_player_filter_gamma" => 0;
         hue_filter: i32 = "pref_player_filter_hue" => 0;
+        remember_decoder: bool = "pref_remember_decoder" => false;
+        remembered_decoder: String = "player_decoder" => String::new();
     }
 }
 
@@ -182,7 +185,7 @@ mod tests {
         assert_eq!(GesturePrefs::FIELDS.len(), 13);
         assert_section_registered(GesturePrefs::TABLE, GesturePrefs::FIELDS, &gestures.defaults());
         let decoder = DecoderPrefs::new(store);
-        assert_eq!(DecoderPrefs::FIELDS.len(), 9);
+        assert_eq!(DecoderPrefs::FIELDS.len(), 11);
         assert_section_registered(DecoderPrefs::TABLE, DecoderPrefs::FIELDS, &decoder.defaults());
     }
 

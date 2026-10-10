@@ -37,6 +37,8 @@ pub const ACTION_OK: &str = "OK";
 pub const ACTION_CANCEL: &str = "Cancel";
 pub const ACTION_SAVE: &str = "Save";
 pub const ACTION_SHARE: &str = "Share";
+/// The button of the share notice: shows the shared picture in the file manager (T-43a-056).
+pub const ACTION_SHOW_IN_FILE_MANAGER: &str = "Show in file manager";
 pub const ACTION_COPY_TO_CLIPBOARD: &str = "Copy to clipboard";
 pub const ACTION_APPLY: &str = "Apply";
 pub const ACTION_REVERT_TO_DEFAULT: &str = "Revert to default";
@@ -66,6 +68,11 @@ pub const CUSTOM_BRIGHTNESS_UNAVAILABLE: &str = "Custom brightness is not availa
 /// The accessible name and tooltip of the top bar overflow button (the Kotlin content description, in English).
 pub const OVERFLOW_MENU: &str = "More";
 /// PROPOSAL (E-SAVE-2): the suffix a saved page gets when its file name is taken, as in ` (2)`, ` (3)`.
+/// The accessible label of a page image (T-44a-084): "Page {n} of {total}".
+pub fn page_label(n: usize, total: usize) -> String {
+    format!("Page {n} of {total}")
+}
+
 pub fn name_collision_suffix(n: u32) -> String {
     format!(" ({n})")
 }

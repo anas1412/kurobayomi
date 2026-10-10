@@ -109,9 +109,13 @@ impl Host for ToastHost {
 
     fn add_new_updates(&self, _kind: EntryKind, _count: usize) {}
 
-    fn show_progress(&self, _kind: EntryKind, _title: &str, _body: Option<&str>) {}
+    fn show_progress(&self, kind: EntryKind, title: &str, body: Option<&str>) {
+        notify::post(notify::progress_post(kind, title, body));
+    }
 
-    fn cancel_progress(&self, _kind: EntryKind) {}
+    fn cancel_progress(&self, kind: EntryKind) {
+        notify::send(notify::Op::Withdraw(crate::misc::ids::library_progress(kind)));
+    }
 
     fn show_summary(&self, kind: EntryKind, updates: &[EntryUpdate], hide_content: bool) {
         if updates.is_empty() {
@@ -246,6 +250,7 @@ pub fn pass_settings(kind: EntryKind, category: Option<i64>, inputs: &Inputs) ->
         exclude_categories: ids(exclude),
         restrictions: QueueRestrictions::from_pref(Some(&tokens)),
         auto_update_metadata: lib.auto_update_metadata.get(),
+        include_season_children: lib.update_season_on_library_update.get(),
         hide_content: inputs.hide_content.get(),
         ..PassSettings::new(kind)
     }
@@ -300,6 +305,13 @@ type MetadataPasses = MetadataRunner<NothingInstalled, SqliteLibraryStore, DbMet
 thread_local! {
     static STARTED: OnceCell<()> = const { OnceCell::new() };
     static METADATA: RefCell<Option<Arc<MetadataPasses>>> = const { RefCell::new(None) };
+    static RUNNING: RefCell<Option<Arc<Runner>>> = const { RefCell::new(None) };
+}
+
+/// Cancels the running update pass of `kind` (the cancel button of a progress notice, T-35a-021). `false` when no pass
+/// runs or the runner has not started. Call from the GTK main thread.
+pub fn stop(kind: EntryKind) -> bool {
+    RUNNING.with(|r| r.borrow().as_ref().and_then(|runner| runner.stop(kind))).is_some()
 }
 
 fn metadata_passes() -> Arc<MetadataPasses> {
@@ -311,13 +323,14 @@ fn metadata_passes() -> Arc<MetadataPasses> {
     }))
 }
 
-/// The manual "Refresh library covers" action (T-26a-050): starts the manga and the anime metadata pass. The passes have
-/// no schedule, and each is refused only by a metadata pass of its own kind (T-26a-051). Returns, per kind, whether its
-/// pass started. Call from the GTK main thread inside the app's runtime, after [`start`]; before that nothing starts.
+/// The manual "Refresh library covers" action (T-26a-050): starts the anime and the manga metadata pass, in that order
+/// (T-26a-109). The passes have no schedule, and each is refused only by a metadata pass of its own kind (T-26a-051).
+/// Returns, per kind, whether its pass started. Call from the GTK main thread inside the app's runtime, after [`start`];
+/// before that nothing starts.
 pub fn refresh_library_covers() -> [(EntryKind, bool); 2] {
     let runner = METADATA.with(|m| m.borrow().clone());
     let now_ms = chrono::Local::now().timestamp_millis();
-    [EntryKind::Manga, EntryKind::Anime].map(|kind| (kind, runner.as_ref().is_some_and(|r| r.start_now(kind, now_ms))))
+    [EntryKind::Anime, EntryKind::Manga].map(|kind| (kind, runner.as_ref().is_some_and(|r| r.start_now(kind, now_ms))))
 }
 
 /// Builds the runner, hands it to the library's refresh button and starts one schedule loop per kind on the
@@ -328,6 +341,7 @@ pub fn start() {
     }
     let handle = Handle::current();
     let runner = runner();
+    RUNNING.with(|r| *r.borrow_mut() = Some(runner.clone()));
     let app = crate::data::app();
     let inputs = Arc::new(Inputs {
         library: LibraryPrefs::new(app.base.store().clone()),
@@ -396,6 +410,22 @@ mod tests {
         assert_eq!(settings.category, Some(5));
         assert!(settings.auto_update_metadata && settings.hide_content);
         assert_eq!(settings.kind, EntryKind::Manga);
+    }
+
+    #[test]
+    fn stopping_before_the_runner_starts_cancels_nothing() {
+        assert!(!stop(EntryKind::Manga));
+    }
+
+    #[test]
+    fn the_season_toggle_changes_the_next_pass() {
+        // T-26a-108
+        let (_store, inputs) = inputs();
+        assert!(!pass_settings(EntryKind::Anime, None, &inputs).include_season_children, "off by default");
+        inputs.library.update_season_on_library_update.set(true).unwrap();
+        assert!(pass_settings(EntryKind::Anime, None, &inputs).include_season_children);
+        inputs.library.update_season_on_library_update.set(false).unwrap();
+        assert!(!pass_settings(EntryKind::Anime, None, &inputs).include_season_children);
     }
 
     #[test]
@@ -481,6 +511,12 @@ mod tests {
     fn the_metadata_passes_do_not_start_before_the_runner_exists() {
         // T-26a-050: the only way to start one is the manual call, and it needs the runner.
         assert!(refresh_library_covers().iter().all(|(_, started)| !started));
+    }
+
+    #[test]
+    fn t_26a_109_the_cover_refresh_starts_the_anime_metadata_pass_before_the_manga_one() {
+        let kinds: Vec<EntryKind> = refresh_library_covers().iter().map(|(kind, _)| *kind).collect();
+        assert_eq!(kinds, vec![EntryKind::Anime, EntryKind::Manga]);
     }
 
     fn conditions(connected: bool) -> kuro_platform::power_network::Conditions {

@@ -183,6 +183,7 @@ pub fn boxed_list() -> ListBox {
 pub fn icon_button(icon: &str, tip: &str) -> Button {
     let b = Button::from_icon_name(if icon.is_empty() { "applications-system-symbolic" } else { icon });
     b.set_tooltip_text(Some(tip));
+    b.update_property(&[gtk::accessible::Property::Label(tip)]);
     b
 }
 

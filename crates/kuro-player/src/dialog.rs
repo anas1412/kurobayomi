@@ -58,6 +58,28 @@ pub fn handle(state: &mut PlayerState, input: DialogInput, confirm: impl FnOnce(
     }
 }
 
+/// The same inputs for the integer picker (T-46a-026, E-46-027, D-11): the displayed value is committed on every
+/// dismissal (`onDismissRequest` calls `onChange`), so Cancel, a click outside, Escape and Ok all run `commit`. An
+/// Escape that only closes a sheet above the dialog dismisses nothing and commits nothing. Returns whether the dialog
+/// was dismissed.
+pub fn handle_picker(state: &mut PlayerState, input: DialogInput, commit: impl FnOnce()) -> bool {
+    match input {
+        DialogInput::Escape => {
+            close_top(state);
+            let dismissed = state.dialog == Dialogs::None;
+            if dismissed {
+                commit();
+            }
+            dismissed
+        }
+        DialogInput::OutsideClick | DialogInput::Cancel | DialogInput::Ok => {
+            commit();
+            open_dialog(state, Dialogs::None);
+            true
+        }
+    }
+}
+
 /// The values of an integer picker: `min`, `min + step`, and so on up to `max` (`min..=max step`).
 /// `None` when `step` is not positive, which Kotlin rejects (E-46-028b).
 pub fn picker_values(min: i32, max: i32, step: i32) -> Option<Vec<i32>> {
@@ -85,6 +107,28 @@ mod tests {
     use super::*;
     use crate::enums::Sheets;
     use std::cell::Cell;
+
+    fn picker() -> Dialogs {
+        Dialogs::IntegerPicker {
+            default_value: 2,
+            min_value: 0,
+            max_value: 9,
+            step: 1,
+            name_format: "%d".into(),
+            title: "t".into(),
+        }
+    }
+
+    #[test]
+    fn t_46a_026_every_dismissal_of_the_picker_commits_the_displayed_value() {
+        for input in [DialogInput::Cancel, DialogInput::OutsideClick, DialogInput::Ok, DialogInput::Escape] {
+            let mut state = PlayerState { dialog: picker(), ..PlayerState::default() };
+            let commits = Cell::new(0);
+            assert!(handle_picker(&mut state, input, || commits.set(commits.get() + 1)), "{input:?}");
+            assert_eq!(commits.get(), 1, "{input:?}");
+            assert_eq!(state.dialog, Dialogs::None);
+        }
+    }
 
     fn open() -> PlayerState {
         PlayerState {

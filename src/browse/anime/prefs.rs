@@ -10,10 +10,11 @@ use kuro_prefs::base::BasePrefs;
 use kuro_prefs::library::{LibraryDisplayMode, LibraryPrefs};
 use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
+use kuro_prefs::values::PrefValue;
 
 use crate::browse::grid::{GridColumns, grid_columns};
 use crate::browse::nav::last_used_write;
-use crate::browse::prefs::BrowsePrefs;
+use crate::browse::prefs::{BrowsePrefs, MIGRATE_FLAGS_DEFAULT};
 
 /// The anime browse keys, each typed. Built once per store; the reads happen when a method is called.
 pub struct AnimeBrowsePrefs {
@@ -88,7 +89,27 @@ impl AnimeBrowsePrefs {
     pub fn hide_in_library(&self) -> bool {
         self.sources.hide_in_anime_library_items.get()
     }
+
+    /// `anime_migrate_flags`, default every option. The manga key `migrate_flags` is copied into it on the first read when
+    /// the anime key is not stored yet; the copy is marked, so the old key is never read again (T-41a-033).
+    pub fn migrate_flags(&self) -> i32 {
+        if self.store.get_raw(ANIME_MIGRATE_IMPORTED).is_none() {
+            self.store.set_raw(ANIME_MIGRATE_IMPORTED, PrefValue::Bool(true));
+            if let (None, Some(PrefValue::Int(old))) = (self.store.get_raw(ANIME_MIGRATE_FLAGS), self.store.get_raw("migrate_flags")) {
+                self.store.set_raw(ANIME_MIGRATE_FLAGS, PrefValue::Int(old));
+            }
+        }
+        self.store.pref(ANIME_MIGRATE_FLAGS, MIGRATE_FLAGS_DEFAULT).get()
+    }
+
+    /// Stores the migrate bitmap. A migration writes it before any work starts (behavior 11.3 step 1).
+    pub fn save_migrate_flags(&self, bitmap: i32) -> Result<(), PrefError> {
+        self.store.pref(ANIME_MIGRATE_FLAGS, MIGRATE_FLAGS_DEFAULT).set(bitmap)
+    }
 }
+
+const ANIME_MIGRATE_FLAGS: &str = "anime_migrate_flags";
+const ANIME_MIGRATE_IMPORTED: &str = "__APP_STATE_anime_migrate_flags_imported";
 
 #[cfg(test)]
 mod tests {
@@ -178,6 +199,21 @@ mod tests {
         assert_eq!(browse.library_columns_portrait.get(), 4);
         assert_eq!(browse.default_manga_category.get(), 7);
         assert_eq!(browse.display_mode(), LibraryDisplayMode::List);
+    }
+
+    #[test]
+    fn the_anime_migrate_flags_import_the_old_manga_key_once_and_default_to_every_option() {
+        let store = PrefStore::in_memory();
+        assert_eq!(AnimeBrowsePrefs::new(store.clone()).migrate_flags(), i32::MAX, "no old key: every option");
+        let store = PrefStore::in_memory();
+        store.set_raw("migrate_flags", PrefValue::Int(3));
+        let p = AnimeBrowsePrefs::new(store.clone());
+        assert_eq!(p.migrate_flags(), 3, "the old value is imported on the first read");
+        p.save_migrate_flags(0x10).expect("save");
+        assert_eq!(p.migrate_flags(), 0x10, "the saved bitmap is read back");
+        store.set_raw("migrate_flags", PrefValue::Int(7));
+        assert_eq!(p.migrate_flags(), 0x10, "the old key is never read again");
+        assert_eq!(store.get_raw("migrate_flags"), Some(PrefValue::Int(7)), "the manga key is untouched");
     }
 
     #[test]

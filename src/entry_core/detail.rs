@@ -215,6 +215,8 @@ pub enum StoreCmd {
     DeleteDownloads { manga_id: i64, chapter_ids: Vec<i64> },
     /// Writes the library's default chapter flags to this manga (the Reset item of the settings sheet).
     ResetFlags { manga_id: i64 },
+    /// The custom cover was edited or deleted: `cover_last_modified` moves forward (T-38a-038).
+    BumpCover { manga_id: i64 },
     /// Drops the subscriptions and stops the runner. Detached writes keep running.
     Shutdown,
 }

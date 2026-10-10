@@ -5,6 +5,8 @@
 //! backed-up value is skipped on restore. `pref_hardware_bitmap_threshold` is dropped too (T-13a-030): nothing reads
 //! it, GTK manages textures, and a backed-up value is skipped on restore.
 
+use std::collections::BTreeSet;
+
 use crate::registry::define_prefs;
 
 define_prefs! {
@@ -18,6 +20,8 @@ define_prefs! {
         // Linux additions (T-07a-036): the startup release check is opt-in, and its last successful lookup is app state
         check_app_updates: bool = "check_app_updates" => false;
         last_app_check: i64 = "__APP_STATE_last_app_check" => 0;
+        // Linux addition: the notification channel ids (`notifications::CATEGORIES`) the user muted
+        muted_notification_channels: BTreeSet<String> = "muted_notification_channels" => BTreeSet::new();
     }
 }
 
@@ -50,6 +54,7 @@ mod tests {
                 ),
                 ("check_app_updates", "check_app_updates"),
                 ("last_app_check", "__APP_STATE_last_app_check"),
+                ("muted_notification_channels", "muted_notification_channels"),
             ]
         );
         assert_eq!(BasePrefs::TABLE, "base");
@@ -71,6 +76,7 @@ mod tests {
         assert!(!base.always_decode_long_strip_with_ssiv.get());
         assert!(!base.check_app_updates.get(), "the release check is opt-in");
         assert_eq!(base.last_app_check.get(), 0);
+        assert!(base.muted_notification_channels.get().is_empty(), "no channel is muted by default");
     }
 
     #[test]
