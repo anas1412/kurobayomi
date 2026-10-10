@@ -13,9 +13,11 @@ use kuro_domain::source::toggles::{flip_disabled, toggle_language};
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::pref::Pref;
 
+use super::banner::{BannerSpec, InfoBanner};
 use super::extensions::Ext;
 use super::glue::keep_alive;
 use super::names::{case_insensitive_cmp, compare_languages, localized_display_name};
+use super::primitives::ToastDuration;
 use super::view::spinner_row;
 
 /// One source checkbox.
@@ -306,13 +308,13 @@ impl SourcesInner {
 
 struct ExtLangInner {
     languages: Pref<BTreeSet<String>>,
-    toast: Rc<dyn Fn(String)>,
+    banner: InfoBanner,
     stack: gtk::Stack,
     column: gtk::Box,
 }
 
-/// The extension language page: one switch per language of the extension lists. A failed language fetch toasts
-/// `internal_error`. Cloning shares the page.
+/// The extension language page: one switch per language of the extension lists. A failed language fetch shows the
+/// `internal_error` banner over the empty message (T-41a-018). Cloning shares the page.
 #[derive(Clone)]
 pub struct ExtensionLanguagesPage {
     inner: Rc<ExtLangInner>,
@@ -320,10 +322,12 @@ pub struct ExtensionLanguagesPage {
 }
 
 impl ExtensionLanguagesPage {
-    pub fn new(languages: Pref<BTreeSet<String>>, toast: Rc<dyn Fn(String)>) -> Self {
+    pub fn new(languages: Pref<BTreeSet<String>>) -> Self {
         let (stack, column) = page_stack(&tr(MsgKey::empty_screen));
-        let inner = Rc::new(ExtLangInner { languages, toast, stack, column });
+        let banner = InfoBanner::new();
+        let inner = Rc::new(ExtLangInner { languages, banner, stack, column });
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.append(inner.banner.widget());
         root.append(&inner.stack);
         keep_alive(&root, &inner);
         Self { inner, root }
@@ -357,10 +361,17 @@ impl ExtensionLanguagesPage {
         inner.stack.set_visible_child_name("list");
     }
 
-    /// The language fetch failed: the toast says `internal_error` and the page shows its empty message.
+    /// The language fetch failed: the banner says `internal_error`, until the page is left, and the page shows its empty
+    /// message under it.
     pub fn fetch_failed(&self) {
-        (self.inner.toast)(tr(MsgKey::internal_error));
+        self.inner.banner.show(&BannerSpec { message: tr(MsgKey::internal_error), action: None, duration: ToastDuration::Indefinite }, None);
         self.inner.stack.set_visible_child_name("empty");
+    }
+
+    /// Whether the failure banner shows, for the widget checks.
+    #[cfg(test)]
+    fn banner_shown(&self) -> bool {
+        self.inner.banner.widget().reveals_child()
     }
 }
 
@@ -456,6 +467,20 @@ pub(crate) mod tests {
         None
     }
 
+    fn find_label_text(widget: &gtk::Widget, text: &str) -> bool {
+        if widget.downcast_ref::<gtk::Label>().is_some_and(|label| label.label().as_str() == text) {
+            return true;
+        }
+        let mut child = widget.first_child();
+        while let Some(next) = child {
+            if find_label_text(&next, text) {
+                return true;
+            }
+            child = next.next_sibling();
+        }
+        false
+    }
+
     fn the_language_switch_and_the_source_checkbox_write_their_sets_as_strings() {
         let (languages, hidden) = prefs();
         let page = SourcesFilterPage::new(languages.clone(), hidden.clone());
@@ -539,11 +564,9 @@ pub(crate) mod tests {
         }
     }
 
-    fn the_extension_language_switches_write_the_set_and_a_failed_fetch_toasts_internal_error() {
+    fn the_extension_language_switches_write_the_set_and_a_failed_fetch_shows_the_internal_error_banner() {
         let (languages, _) = prefs();
-        let toasts: Rc<RefCell<Vec<String>>> = Rc::default();
-        let log = Rc::clone(&toasts);
-        let page = ExtensionLanguagesPage::new(languages.clone(), Rc::new(move |text| log.borrow_mut().push(text)));
+        let page = ExtensionLanguagesPage::new(languages.clone());
         page.set_exts(&[ext("en"), ext("ja")]);
         let list = rows(&page.inner.column);
         assert_eq!(list.len(), 2);
@@ -556,9 +579,11 @@ pub(crate) mod tests {
 
         page.set_exts(&[]);
         assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("empty"), "no languages: the empty screen");
-        assert!(toasts.borrow().is_empty());
+        assert!(!page.banner_shown(), "no failure, no banner");
         page.fetch_failed();
-        assert_eq!(*toasts.borrow(), [tr(MsgKey::internal_error)]);
+        assert!(page.banner_shown(), "T-41a-018: the failure is a banner, not a toast");
+        assert!(find_label_text(page.widget().upcast_ref(), &tr(MsgKey::internal_error)), "the banner says InternalError: Check crash logs for further information");
+        assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("empty"));
     }
 
     pub(crate) fn smoke() {
@@ -566,7 +591,7 @@ pub(crate) mod tests {
         language_toggle_keeps_checkboxes();
         no_sources_shows_the_source_filter_empty_screen();
         the_filter_page_shows_loading_then_the_groups_and_an_error_toasts_and_pops_once();
-        the_extension_language_switches_write_the_set_and_a_failed_fetch_toasts_internal_error();
+        the_extension_language_switches_write_the_set_and_a_failed_fetch_shows_the_internal_error_banner();
     }
 
     #[test]

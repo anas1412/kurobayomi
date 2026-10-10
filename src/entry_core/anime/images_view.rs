@@ -77,8 +77,8 @@ struct State {
 }
 
 /// Opens the images window of `anime` on the page of `start`.
-pub fn open(anime: Anime, start: ImageKind, env: Env) {
-    State::open(anime, start, env);
+pub fn open(anime: Anime, start: ImageKind, env: Env) -> gtk::Window {
+    State::open(anime, start, env)
 }
 
 /// Runs `work` to the end on a blocking-pool thread and returns its result on a channel. The image service's futures are
@@ -102,7 +102,7 @@ fn pictures_dir() -> PathBuf {
 }
 
 impl State {
-    fn open(anime: Anime, start: ImageKind, env: Env) {
+    fn open(anime: Anime, start: ImageKind, env: Env) -> gtk::Window {
         let pages = [page(), page()];
         let pages_stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::SlideLeftRight).hexpand(true).vexpand(true).build();
         for (kind, page) in KINDS.iter().zip(&pages) {
@@ -166,6 +166,7 @@ impl State {
             this.load(kind);
         }
         this.window.present();
+        this.window.clone()
     }
 
     fn connect(self: &Rc<Self>, switch: &Button, save: &Button, share: &Button) {

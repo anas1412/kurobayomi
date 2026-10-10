@@ -103,6 +103,8 @@ struct Inner {
     selection: Selection,
     /// The last value sent to `Nav::selecting`.
     selecting_shown: bool,
+    /// Told on every render whether a filter (or the forced downloaded-only view) is active (T-37a-056).
+    on_filters: Option<Rc<dyn Fn(bool)>>,
     last_resume: HashMap<i64, Instant>,
     store: gio::ListStore,
     title: gtk::Label,
@@ -131,6 +133,8 @@ struct Inner {
 pub struct LibraryView {
     inner: Rc<RefCell<Inner>>,
     root: gtk::Box,
+    /// The overlay around `root` that carries the library toast (T-37a-062).
+    shell: gtk::Overlay,
 }
 
 impl LibraryView {
@@ -219,6 +223,7 @@ impl LibraryView {
             search_turn: 0,
             selection: Selection::default(),
             selecting_shown: false,
+            on_filters: None,
             last_resume: HashMap::new(),
             store,
             title,
@@ -237,7 +242,8 @@ impl LibraryView {
             bar,
             bar_label,
         }));
-        let view = Self { inner: inner.clone(), root };
+        let shell = crate::library::toast::attach(&root);
+        let view = Self { inner: inner.clone(), root, shell };
         // a resize across a column boundary or the 900 px breakpoint changes the count without a data change
         let (weak, seen) = (Rc::downgrade(&inner), FlagCell::new((-1, -1)));
         let scroller = inner.borrow().scroller.clone();
@@ -264,7 +270,7 @@ impl LibraryView {
 
     /// The widget to place in the page.
     pub fn widget(&self) -> gtk::Widget {
-        self.root.clone().upcast()
+        self.shell.clone().upcast()
     }
 
     /// Reruns the pipeline with the current preferences and query.
@@ -297,13 +303,30 @@ impl LibraryView {
         };
         match id {
             Some(id) => open(id),
-            None => crate::toast::notify(random::EMPTY_TOAST),
+            None => crate::library::toast::notify(random::EMPTY_TOAST),
         }
     }
 
     /// Whether entries are selected (selection mode).
     pub fn selection_active(&self) -> bool {
         !self.inner.borrow().selection.is_empty()
+    }
+
+    /// Registers what runs on every render with whether a filter is active, and runs it once with the current value.
+    pub fn on_filters_active(&self, listener: impl Fn(bool) + 'static) {
+        let active = {
+            let mut st = self.inner.borrow_mut();
+            st.on_filters = Some(Rc::new(listener));
+            st.built.as_ref().is_some_and(|b| b.has_active_filters)
+        };
+        self.notify_filters(active);
+    }
+
+    fn notify_filters(&self, active: bool) {
+        let listener = self.inner.borrow().on_filters.clone();
+        if let Some(listener) = listener {
+            listener(active);
+        }
     }
 
     /// Opens the library settings sheet: Filter, Sort and Display (B-1.2, T-37a-038, T-37a-039).
@@ -451,7 +474,7 @@ impl LibraryView {
                 (st.nav.update.clone(), page.map(|p| p.category.id))
             };
             let started = update(category);
-            crate::toast::notify(actions::update_toast(actions::UpdateScope::Category, !started));
+            crate::library::toast::notify(actions::update_toast(actions::UpdateScope::Category, !started));
             sync_refresh_button(&inner);
         });
         // a pass that ends, or one started elsewhere, changes the button without a click
@@ -663,6 +686,7 @@ fn render(inner: &Rc<RefCell<Inner>>) {
             bar_text,
             bar_open: !st.selection.is_empty(),
             download_visible: actions::download_visible(st.selection.rows()),
+            filters_active: st.built.as_ref().is_some_and(|b| b.has_active_filters),
         }
     };
 
@@ -706,6 +730,10 @@ fn render(inner: &Rc<RefCell<Inner>>) {
     header.set_visible(!view.bar_open);
     sel_header.set_visible(view.bar_open);
     download.set_visible(view.download_visible);
+    let on_filters = inner.borrow().on_filters.clone();
+    if let Some(listener) = on_filters {
+        listener(view.filters_active);
+    }
     let changed = {
         let mut st = inner.borrow_mut();
         let changed = st.selecting_shown != view.bar_open;
@@ -771,6 +799,7 @@ struct Rendered {
     bar_text: String,
     bar_open: bool,
     download_visible: bool,
+    filters_active: bool,
 }
 
 /// Makes `index` the active tab and remembers its category.
@@ -838,7 +867,7 @@ fn mark(inner: &Rc<RefCell<Inner>>, read: bool) {
     let ok = actions::mark_many(&db, kind, &ids, read);
     inner.borrow_mut().selection.clear();
     if let Some(text) = actions::partial_failure_toast(ok, ids.len()) {
-        crate::toast::notify(text);
+        crate::library::toast::notify(text);
     }
     render(inner);
     submit(inner);
@@ -1074,10 +1103,10 @@ fn resume_entry(inner: &Rc<RefCell<Inner>>, row: &LibraryRow) {
     };
     match actions::next_item(&db, kind, row, downloaded_only, |item| item_downloaded(item)) {
         Ok(Some(item)) => resume(Resume { entry: row.id, item, external: always_external() }),
-        Ok(None) => crate::toast::notify(actions::NO_NEXT_ITEM),
+        Ok(None) => crate::library::toast::notify(actions::NO_NEXT_ITEM),
         Err(e) => {
             tracing::error!(error = %e, entry = row.id, "finding the next item failed");
-            crate::toast::notify(actions::NO_NEXT_ITEM);
+            crate::library::toast::notify(actions::NO_NEXT_ITEM);
         }
     }
 }

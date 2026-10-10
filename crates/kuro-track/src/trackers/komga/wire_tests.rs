@@ -11,12 +11,12 @@ use super::auth::KomgaAuth;
 use crate::model::{MangaTrack, TrackerId};
 use crate::trackers::http::tracker_client;
 
-const SERIES: &str = r#"{"metadata":{"status":"ENDED","title":"Title","summary":"Sum"}}"#;
+const SERIES: &str = include_str!("../../../tests/fixtures/komga/series_full.json");
 /// booksCount 10, unread 4, read 6, last continuous 3, max 12.9.
-const PROGRESS_V2: &str = r#"{"booksCount":10,"booksReadCount":6,"booksUnreadCount":4,"booksInProgressCount":0,"lastReadContinuousNumberSort":3.0,"maxNumberSort":12.9}"#;
-const READLIST: &str = r#"{"name":"Reading list"}"#;
+const PROGRESS_V2: &str = include_str!("../../../tests/fixtures/komga/series_v2_progress.json");
+const READLIST: &str = include_str!("../../../tests/fixtures/komga/readlist.json");
 /// booksCount 5, all read.
-const PROGRESS_V1: &str = r#"{"booksCount":5,"booksReadCount":5,"booksUnreadCount":0,"booksInProgressCount":0,"lastReadContinuousIndex":5}"#;
+const PROGRESS_V1: &str = include_str!("../../../tests/fixtures/komga/series_v1_progress.json");
 
 fn api() -> KomgaApi {
     KomgaApi::new(tracker_client().unwrap())
@@ -196,4 +196,21 @@ async fn t_33a_063_e91_refresh_keeps_the_local_score() {
     let refreshed = tracker.refresh(&local).await.unwrap();
     assert_eq!(refreshed.score, 4.0);
     assert_eq!(refreshed.last_chapter_read, 3.0);
+}
+
+#[tokio::test]
+async fn t_33a_071_e50_a_readlist_progress_404_is_an_error_not_a_zero_track() {
+    let server = MockServer::start().await;
+    get(&server, "/api/v1/readlists/5", READLIST).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/readlists/5/read-progress/tachiyomi"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let url = format!("{}/api/v1/readlists/5", server.uri());
+    let err = api().get_track_search(&creds(), &url).await.unwrap_err();
+    assert!(matches!(
+        err,
+        crate::trackers::enhanced::EnhancedError::Http(_)
+    ));
 }

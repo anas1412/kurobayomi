@@ -4471,3 +4471,39 @@ ext_store_not_runnable_hidden =
 
 # source: kurobayomi
 ext_load_problems = Load problems
+
+# source: kurobayomi
+settings_save_failed = Could not save settings. Your changes are kept and saved again on the next change.
+
+# source: kurobayomi
+pref_download_only_over_wifi = Unmetered connection only
+
+# source: kurobayomi
+db_error_too_new = This library was created by a newer version of Kurobayomi (database version { NUMBER($arg1, useGrouping: "false") }, this version supports up to { NUMBER($arg2, useGrouping: "false") }). Update Kurobayomi to open it.
+
+# source: kurobayomi
+db_error_legacy_file = This is an Aniyomi library database. Import it to keep your library.
+
+# source: kurobayomi
+db_error_corrupt = The library database is damaged. Restore it from the newest backup, or start with an empty library.
+
+# source: kurobayomi
+db_restore_from_backup = Restore from backup
+
+# source: kurobayomi
+db_import_report = Imported { NUMBER($arg1, useGrouping: "false") } entries. { NUMBER($arg2, useGrouping: "false") } could not be imported.
+
+# source: kurobayomi
+db_pre_migration_backup = A backup of your library was saved before the upgrade at { $arg1 }.
+
+# source: kurobayomi
+cloudflare_check_title = Cloudflare check
+
+# source: kurobayomi
+cloudflare_check_hint = Complete the check in this window; it closes by itself when it succeeds.
+
+# source: kurobayomi
+cookie_import_title = Import Cloudflare cookie
+
+# source: kurobayomi
+cookie_import_hint = Paste the value of the cf_clearance cookie from your browser and the browser's user agent.

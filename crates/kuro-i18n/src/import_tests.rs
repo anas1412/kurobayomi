@@ -87,7 +87,7 @@ fn english_generation_counts_1444_messages() {
         .lines()
         .filter(|l| l.contains(" =") && !l.starts_with('#') && !l.starts_with(' '))
         .count();
-    assert_eq!(ids, 1444, "1434 from the Aniyomi base plus the 10 in kurobayomi-extra.ftl");
+    assert_eq!(ids, 1456, "1434 from the Aniyomi base plus the 22 in kurobayomi-extra.ftl");
     assert_eq!(
         text, ENGLISH_FTL,
         "the committed English file is the generator output"

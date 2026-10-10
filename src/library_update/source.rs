@@ -25,6 +25,21 @@ pub struct SourceItem {
 pub struct SourceDetails {
     pub title: Option<String>,
     pub status: i64,
+    /// The cover url; blank or missing never clears a stored cover (behaviour 5.3).
+    pub thumbnail_url: Option<String>,
+}
+
+/// What a details refresh asks of a source: the details, the item list, or both (`UpdateAnimeFromRemote`'s
+/// `fetch_details` and `fetch_episodes`). A metadata pass asks for details only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RemoteFlags {
+    pub fetch_details: bool,
+    pub fetch_items: bool,
+}
+
+impl RemoteFlags {
+    /// The metadata passes: `getMangaDetails`, and for anime `fetch_details = true, fetch_episodes = false`.
+    pub const DETAILS_ONLY: Self = Self { fetch_details: true, fetch_items: false };
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -45,6 +60,14 @@ pub trait Source: Send + Sync {
         url: &str,
         with_details: bool,
     ) -> impl Future<Output = Result<Fetched, UpdateError>> + Send;
+    /// The metadata call of the manual metadata passes: only the parts `flags` asks for are fetched, so with
+    /// `DETAILS_ONLY` the chapter or episode list endpoint is never called. `None` when the source returned no details.
+    fn refresh(
+        &self,
+        kind: EntryKind,
+        url: &str,
+        flags: RemoteFlags,
+    ) -> impl Future<Output = Result<Option<SourceDetails>, UpdateError>> + Send;
 }
 
 pub trait SourceRegistry: Send + Sync {
@@ -106,6 +129,10 @@ pub(crate) mod fake {
         pub calls: Arc<AtomicUsize>,
         pub active: Arc<AtomicUsize>,
         pub max_active: Arc<AtomicUsize>,
+        /// The flags of every `refresh` call, in order.
+        pub refreshes: Arc<std::sync::Mutex<Vec<RemoteFlags>>>,
+        /// What `refresh` answers.
+        pub details: Result<Option<SourceDetails>, UpdateError>,
     }
 
     impl FakeSource {
@@ -124,7 +151,19 @@ pub(crate) mod fake {
                 calls: Arc::default(),
                 active: Arc::default(),
                 max_active: Arc::default(),
+                refreshes: Arc::default(),
+                details: Ok(None),
             }
+        }
+
+        pub fn with_details(mut self, details: SourceDetails) -> Self {
+            self.details = Ok(Some(details));
+            self
+        }
+
+        pub fn failing_refresh(mut self, error: UpdateError) -> Self {
+            self.details = Err(error);
+            self
         }
     }
 
@@ -147,6 +186,11 @@ pub(crate) mod fake {
             }
             self.active.fetch_sub(1, Ordering::SeqCst);
             self.reply.clone()
+        }
+
+        async fn refresh(&self, _kind: EntryKind, _url: &str, flags: RemoteFlags) -> Result<Option<SourceDetails>, UpdateError> {
+            self.refreshes.lock().unwrap().push(flags);
+            self.details.clone()
         }
     }
 

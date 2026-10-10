@@ -7,6 +7,7 @@ use kuro_downloads::DownloadState;
 use kuro_i18n::{Arg, MsgKey, tr_plural, trf};
 
 use crate::entry_core::chapter::ChapterRow;
+use crate::entry_core::chapter_actions::indicator_enabled;
 use crate::entry_core::detail::EntryState;
 use crate::entry_core::numfmt::format_chapter_number;
 use crate::entry_core::view::view;
@@ -36,6 +37,8 @@ pub struct RowItem {
     pub progress: u8,
     /// The row has a download indicator. A local manga's chapters are always on disk and have none.
     pub indicator: bool,
+    /// The indicator answers presses: not while any row is selected (E-27).
+    pub indicator_enabled: bool,
     /// `Some(count)` on a missing-chapters marker row: no chapter stands behind it, and its `id` is negative.
     pub missing: Option<i32>,
 }
@@ -105,6 +108,7 @@ pub fn row_items(page: &EntryState) -> Vec<RowItem> {
                 download: row.display_download(local),
                 progress: row.download_progress,
                 indicator: !local,
+                indicator_enabled: indicator_enabled(local, page.selection.len()),
                 missing: None,
             },
             ListRow::MissingCount { id, count } => RowItem {
@@ -118,6 +122,7 @@ pub fn row_items(page: &EntryState) -> Vec<RowItem> {
                 download: DownloadState::NotDownloaded,
                 progress: 0,
                 indicator: false,
+                indicator_enabled: false,
                 missing: Some(count),
             },
         })
@@ -207,6 +212,7 @@ mod tests {
             download: DownloadState::NotDownloaded,
             progress: 0,
             indicator: true,
+            indicator_enabled: true,
             missing: None,
         }
     }
@@ -248,6 +254,9 @@ mod tests {
         assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(rows[0].download, DownloadState::Downloaded);
         assert!(!rows[0].selected && rows[1].selected);
+        assert!(rows.iter().all(|r| r.indicator && !r.indicator_enabled), "the indicators are off while a row is selected");
+        page.selection.clear();
+        assert!(row_items(&page).iter().all(|r| r.indicator && r.indicator_enabled));
     }
 
     #[test]

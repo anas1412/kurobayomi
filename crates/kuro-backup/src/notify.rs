@@ -162,16 +162,15 @@ pub fn restore_end(end: &RestoreEnd) -> Notice {
             u32::try_from(s.errors).unwrap_or(u32::MAX),
             u32::try_from(s.skipped_settings).unwrap_or(u32::MAX),
             s.error_log.as_deref(),
-            false,
         ),
         RestoreEnd::Canceled { .. } => restore_canceled(),
     }
 }
 
-/// Restore finished: "Restore completed" or "Library sync complete", with the summary line. "Tap to see details"
-/// appears only when there are errors and a log exists (T-21a-029).
-pub fn restore_done(elapsed_ms: i64, errors: u32, skipped: u32, log: Option<&Path>, sync: bool) -> Notice {
-    let title = if sync { "Library sync complete" } else { "Restore completed" };
+/// Restore finished: "Restore completed", with the summary line. "Tap to see details" appears only when there are
+/// errors and a log exists (T-21a-029). The sync variant is dead (no caller sets sync, D21), so it has no parameter.
+pub fn restore_done(elapsed_ms: i64, errors: u32, skipped: u32, log: Option<&Path>) -> Notice {
+    let title = "Restore completed";
     let urgency = if errors > 0 { Urgency::High } else { Urgency::Normal };
     let mut n = Notice::new(ID_RESTORE_RESULT, title, Some(done_text(elapsed_ms, errors, skipped)), urgency);
     if let (true, Some(log)) = (errors > 0, log) {
@@ -309,17 +308,17 @@ mod tests {
     #[test]
     fn details_action_only_with_errors_and_log() {
         let log = Path::new("/home/u/log.txt");
-        assert_eq!(restore_done(1, 2, 0, Some(log), false).action, Some(Action::OpenErrorLog(log.into())));
-        assert_eq!(restore_done(1, 0, 0, Some(log), false).action, None);
-        assert_eq!(restore_done(1, 2, 0, None, false).action, None);
+        assert_eq!(restore_done(1, 2, 0, Some(log)).action, Some(Action::OpenErrorLog(log.into())));
+        assert_eq!(restore_done(1, 0, 0, Some(log)).action, None);
+        assert_eq!(restore_done(1, 2, 0, None).action, None);
     }
 
     #[test]
     fn restore_ids_and_urgency_follow_design_section_8() {
         assert_eq!((ID_RESTORE_PROGRESS, ID_RESTORE_RESULT), ("restore-progress", "restore-complete"));
         assert_eq!(restore_progress("x", 1, 2, false, false).urgency, Urgency::Low);
-        assert_eq!(restore_done(1, 0, 0, None, false).urgency, Urgency::Normal);
-        assert_eq!(restore_done(1, 2, 0, None, false).urgency, Urgency::High);
+        assert_eq!(restore_done(1, 0, 0, None).urgency, Urgency::Normal);
+        assert_eq!(restore_done(1, 2, 0, None).urgency, Urgency::High);
         assert_eq!(restore_canceled().urgency, Urgency::Normal);
         assert_eq!(restore_failed("x").urgency, Urgency::High);
     }
@@ -342,7 +341,7 @@ mod tests {
     #[test]
     fn end_notice_follows_the_run_outcome() {
         let log = PathBuf::from("/home/u/aniyomi_restore_error.txt");
-        let done = restore_end(&RestoreEnd::Completed(crate::restore::job::Summary { elapsed_ms: 65_000, errors: 1, error_log: Some(log.clone()), skipped_settings: 0 }));
+        let done = restore_end(&RestoreEnd::Completed(crate::restore::job::Summary { elapsed_ms: 65_000, errors: 1, error_log: Some(log.clone()), skipped_settings: 0, skipped_extensions: 0 }));
         assert_eq!(done.title, "Restore completed");
         assert_eq!(done.body.as_deref(), Some("Done in 01 min, 05 sec with 1 error"));
         assert_eq!(done.action, Some(Action::OpenErrorLog(log)));

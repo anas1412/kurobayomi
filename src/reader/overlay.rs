@@ -21,7 +21,7 @@ use super::pref_rules;
 use super::rules;
 
 /// The custom brightness slider range (`ColorFilterPage.kt:41`).
-pub const BRIGHTNESS_RANGE: (i32, i32) = (-75, 100);
+pub const BRIGHTNESS_RANGE: (i32, i32) = kuro_prefs::ranges::CUSTOM_BRIGHTNESS.bounds().expect("a range");
 
 /// One byte of the packed ARGB colour filter value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,17 +72,32 @@ pub fn filter_rgba(enabled: bool, packed: i32) -> Option<(f64, f64, f64, f64)> {
     })
 }
 
-/// The CSS class for grayscale and invert. Grayscale applies first, then invert (T-043a-066).
-pub fn filter_class(grayscale: bool, inverted: bool) -> Option<&'static str> {
-    match (grayscale, inverted) {
-        (false, false) => None,
-        (true, false) => Some("reader-gray"),
-        (false, true) => Some("reader-invert"),
-        (true, true) => Some("reader-gray-invert"),
-    }
-}
+/// A colour matrix for a `GskColorMatrixNode`: sixteen floats, four rows of `[r, g, b, a]` in the row-vector layout that
+/// graphene uses, and the four-float offset that is added after the matrix.
+pub type ColourMatrix = ([f32; 16], [f32; 4]);
 
-const FILTER_CLASSES: [&str; 3] = ["reader-gray", "reader-invert", "reader-gray-invert"];
+/// The luminance weights of grayscale (`ColorMatrix.setSaturation(0)`: red, green, blue).
+const LUMA: [f32; 3] = [0.213, 0.715, 0.072];
+
+/// The matrix of the page filter (T-043a-066, T-43b-049): grayscale first, then invert, so both together are `1 - luma`.
+/// `None` when both are off. Alpha is never touched.
+pub fn page_colour_matrix(grayscale: bool, inverted: bool) -> Option<ColourMatrix> {
+    if !grayscale && !inverted {
+        return None;
+    }
+    let sign = if inverted { -1.0 } else { 1.0 };
+    let mut m = [0.0_f32; 16];
+    for (row, weight) in LUMA.iter().enumerate() {
+        for col in 0..3 {
+            // grayscale: every output channel is the luma; invert only: each channel maps to itself, negated
+            let own = if grayscale { *weight } else if row == col { 1.0 } else { 0.0 };
+            m[row * 4 + col] = sign * own;
+        }
+    }
+    m[15] = 1.0;
+    let offset = if inverted { 1.0 } else { 0.0 };
+    Some((m, [offset, offset, offset, 0.0]))
+}
 
 type Rgba = (f64, f64, f64, f64);
 
@@ -141,8 +156,9 @@ impl Tint {
         }
     }
 
-    /// Applies the brightness, colour filter, grayscale and invert preferences. `page` is the page area widget.
-    pub fn apply(&self, prefs: &ReaderPrefs, page: &impl IsA<gtk::Widget>) {
+    /// Applies the brightness, colour filter, grayscale and invert preferences. Grayscale and invert are colour-matrix
+    /// nodes over the page area only.
+    pub fn apply(&self, prefs: &ReaderPrefs) {
         let alpha = brightness_alpha(prefs.custom_brightness.get(), prefs.custom_brightness_value.get());
         self.brightness_colour.set((0.0, 0.0, 0.0, alpha));
         self.brightness.set_visible(alpha > 0.0);
@@ -150,12 +166,7 @@ impl Tint {
 
         self.blend.set_filter(filter_rgba(prefs.color_filter.get(), prefs.color_filter_value.get()), prefs.color_filter_mode.get());
 
-        for class in FILTER_CLASSES {
-            page.remove_css_class(class);
-        }
-        if let Some(class) = filter_class(prefs.grayscale.get(), prefs.inverted_colors.get()) {
-            page.add_css_class(class);
-        }
+        self.blend.set_page_filter(page_colour_matrix(prefs.grayscale.get(), prefs.inverted_colors.get()));
     }
 
     /// A page changed. Counts it toward the flash interval and starts a flash when it is due. Called only while the
@@ -236,11 +247,36 @@ mod tests {
         assert!((a - 128.0 / 255.0).abs() < 1e-9);
     }
 
+    /// What a colour comes out as: the row vector `[r, g, b, a]` times the matrix, plus the offset.
+    fn through(filter: ColourMatrix, rgba: [f32; 4]) -> [f32; 4] {
+        let (m, offset) = filter;
+        std::array::from_fn(|col| (0..4).map(|row| rgba[row] * m[row * 4 + col]).sum::<f32>() + offset[col])
+    }
+
+    fn near(a: [f32; 4], b: [f32; 4]) -> bool {
+        a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5)
+    }
+
     #[test]
-    fn grayscale_and_invert_are_off_by_default_and_combine_in_order() {
-        assert_eq!(filter_class(false, false), None);
-        assert_eq!(filter_class(true, false), Some("reader-gray"));
-        assert_eq!(filter_class(false, true), Some("reader-invert"));
-        assert_eq!(filter_class(true, true), Some("reader-gray-invert"));
+    fn grayscale_and_invert_are_off_by_default_and_each_is_its_own_matrix() {
+        assert_eq!(page_colour_matrix(false, false), None);
+        let gray = page_colour_matrix(true, false).unwrap();
+        assert!(near(through(gray, [1.0, 0.0, 0.0, 1.0]), [0.213, 0.213, 0.213, 1.0]), "red goes to its luma");
+        assert!(near(through(gray, [0.0, 1.0, 0.0, 1.0]), [0.715, 0.715, 0.715, 1.0]));
+        assert!(near(through(gray, [1.0, 1.0, 1.0, 1.0]), [1.0, 1.0, 1.0, 1.0]), "white stays white");
+        let invert = page_colour_matrix(false, true).unwrap();
+        assert!(near(through(invert, [0.0, 0.25, 1.0, 0.5]), [1.0, 0.75, 0.0, 0.5]), "colours flip and alpha stays");
+    }
+
+    #[test]
+    fn grayscale_applies_before_invert() {
+        let both = page_colour_matrix(true, true).unwrap();
+        let gray = page_colour_matrix(true, false).unwrap();
+        let invert = page_colour_matrix(false, true).unwrap();
+        for colour in [[1.0, 0.0, 0.0, 1.0], [0.2, 0.6, 0.9, 1.0], [0.0, 0.0, 0.0, 1.0]] {
+            let in_order = through(invert, through(gray, colour));
+            assert!(near(through(both, colour), in_order), "{colour:?}");
+        }
+        assert!(near(through(both, [1.0, 0.0, 0.0, 1.0]), [0.787, 0.787, 0.787, 1.0]));
     }
 }

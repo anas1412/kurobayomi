@@ -1,7 +1,10 @@
 //! The source preference page: rows built from the list a configurable source declares (switch, list, multi choice,
 //! text, and categories that nest rows), a spinner until the source registry has loaded, and every value written to the
-//! source's own preference store, `source_<id>.<key>` (T-40a-023). Ports `MangaSourcePreferencesScreen`; the rules of
-//! what a row shows are pure.
+//! source's own preference store, `source_<id>.<key>` (T-40a-023). A source that declares no rows is not configurable and
+//! the page says `empty_screen`. Ports `MangaSourcePreferencesScreen`; the rules of what a row shows are pure.
+//!
+//! The descriptor (`kuro_source::SourcePref`) has no info-text or action-row variant yet, so those two rows of the
+//! plan's list cannot be drawn until it has; a row's `summary` is its only explanatory text.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -44,10 +47,11 @@ pub fn dialog_title(title: &str) -> String {
     title.to_owned()
 }
 
-/// What the text field of an edit-text row asks of the input method: no spell check and no emoji. GTK keeps no
-/// history for an entry, so the incognito input of the Android screen needs nothing more (U§8.3).
+/// What the text field of an edit-text row asks of the input method: no spell check and a private input, exactly
+/// `NO_SPELLCHECK | PRIVATE` (T-41a-023, D6). GTK keeps no history for an entry, so the incognito input of the Android
+/// screen needs nothing more (U§8.3).
 pub fn edit_text_hints() -> gtk::InputHints {
-    gtk::InputHints::NO_SPELLCHECK | gtk::InputHints::NO_EMOJI | gtk::InputHints::PRIVATE
+    gtk::InputHints::NO_SPELLCHECK | gtk::InputHints::PRIVATE
 }
 
 /// The second line of a row: the declared summary, else what the row currently holds.
@@ -95,6 +99,10 @@ impl SourcePrefsPage {
         let stack = gtk::Stack::new();
         stack.add_named(&spinner_row(), Some("loading"));
         stack.add_named(&scroller, Some("list"));
+        let empty = gtk::Label::new(Some(&tr(MsgKey::empty_screen)));
+        empty.set_valign(gtk::Align::Center);
+        empty.set_vexpand(true);
+        stack.add_named(&empty, Some("empty"));
         stack.set_vexpand(true);
         stack.set_visible_child_name("loading");
         let inner = Rc::new(Inner {
@@ -140,6 +148,10 @@ impl Inner {
             self.column.remove(&child);
         }
         let rows = self.rows.borrow().clone();
+        if rows.is_empty() {
+            self.stack.set_visible_child_name("empty");
+            return;
+        }
         for row in &rows {
             self.add_row(&self.column, row);
         }
@@ -324,10 +336,9 @@ mod pure_tests {
     }
 
     #[test]
-    fn a_dialog_takes_the_title_of_its_row_and_text_asks_for_no_spellcheck_or_emoji() {
+    fn a_dialog_takes_the_title_of_its_row_and_text_asks_for_no_spellcheck_and_a_private_input() {
         assert_eq!(dialog_title("Quality"), "Quality");
-        let hints = edit_text_hints();
-        assert!(hints.contains(gtk::InputHints::NO_SPELLCHECK | gtk::InputHints::NO_EMOJI | gtk::InputHints::PRIVATE));
+        assert_eq!(edit_text_hints(), gtk::InputHints::NO_SPELLCHECK | gtk::InputHints::PRIVATE, "T-41a-023 lists exactly these two");
     }
 
     #[test]
@@ -490,7 +501,7 @@ pub(crate) mod tests {
         let window = page.inner.dialogs.current().expect("the text dialog");
         let entry = all::<gtk::Entry>(&window.child().expect("child")).remove(0);
         assert_eq!(entry.text().as_str(), "example.org");
-        assert!(entry.input_hints().contains(gtk::InputHints::NO_SPELLCHECK | gtk::InputHints::NO_EMOJI));
+        assert_eq!(entry.input_hints(), gtk::InputHints::NO_SPELLCHECK | gtk::InputHints::PRIVATE);
         entry.set_text("mirror.test");
         crate::browse::dialogs::buttons_of(&window)[1].emit_clicked();
         assert_eq!(prefs.get_string("host"), None, "Cancel stores nothing");
@@ -503,7 +514,18 @@ pub(crate) mod tests {
         assert_eq!(*changed.borrow(), ["hd", "size", "langs", "host"], "the source hears each written key once");
     }
 
+    fn a_source_with_no_rows_is_not_configurable_and_the_page_says_so() {
+        let page = SourcePrefsPage::new(SourcePrefs::new(PrefStore::in_memory(), 7), Rc::new(|_| {}), watch::channel(true).1);
+        page.set_rows(Vec::new());
+        assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("empty"));
+        let label = all::<gtk::Label>(page.inner.stack.visible_child().as_ref().expect("child")).remove(0);
+        assert_eq!(label.label().as_str(), tr(MsgKey::empty_screen), "Well, this is awkward");
+        page.set_rows(declared());
+        assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("list"), "rows replace the empty state");
+    }
+
     pub(crate) fn smoke() {
+        a_source_with_no_rows_is_not_configurable_and_the_page_says_so();
         a_spinner_shows_until_the_registry_loads_then_the_rows_appear();
         every_row_type_writes_into_the_sources_own_store_and_tells_the_source();
     }

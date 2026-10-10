@@ -285,6 +285,19 @@ mod manga_repo {
     }
 
     #[test]
+    fn clear_non_library_removes_only_non_library_rows_and_an_empty_list_is_a_no_op() {
+        let (_d, db) = manga_db();
+        let repo = MangaRepo::new(db);
+        let fav = repo.insert(&new_manga("f", "F", true)).unwrap();
+        let non = repo.insert(&new_manga("n", "N", false)).unwrap();
+        assert_eq!(repo.clear_non_library_by_sources(&[]).unwrap(), 0);
+        assert!(repo.by_id(non).is_ok(), "an empty list deletes nothing");
+        repo.clear_non_library_by_sources(&[1]).unwrap();
+        assert!(repo.by_id(fav).is_ok(), "library entries are untouched");
+        assert!(matches!(repo.by_id(non), Err(DataError::NotFound)));
+    }
+
+    #[test]
     fn source_counts_split_library_and_non_library_rows() {
         let (_d, db) = manga_db();
         let repo = MangaRepo::new(db);

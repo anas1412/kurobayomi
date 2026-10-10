@@ -31,6 +31,12 @@ pub struct StorageInput {
 pub struct StorageScreen {
     anime: bool,
     root: GBox,
+    /// The two columns (dropdown and donut on the left, rows on the right); one column when narrow (T-42a-053).
+    split: GBox,
+    left: GBox,
+    right: GBox,
+    chart: Overlay,
+    width: Cell<i32>,
     overlay_total: Label,
     donut: DrawingArea,
     dropdown: DropDown,
@@ -89,18 +95,36 @@ impl StorageScreen {
             let helper = crate::ui::dim(copy::STORAGE_EMPTY_CATEGORY);
             helper.set_visible(false);
 
-            root.append(&category);
-            root.append(&dropdown);
-            root.append(&chart);
-            root.append(&scanning);
-            root.append(&helper);
-            root.append(&list);
+            let split = GBox::new(O::Vertical, 12);
+            let left = GBox::new(O::Vertical, 12);
+            let right = GBox::new(O::Vertical, 12);
+            left.append(&category);
+            left.append(&dropdown);
+            left.append(&chart);
+            right.append(&scanning);
+            right.append(&helper);
+            right.append(&list);
+            split.append(&left);
+            split.append(&right);
+            root.append(&split);
             let toast = ScreenToast::new();
             root.append(toast.widget());
+            let weak_tick = weak.clone();
+            split.add_tick_callback(move |widget, _| {
+                if let Some(screen) = weak_tick.upgrade() {
+                    screen.reflow(widget.width());
+                }
+                gtk::glib::ControlFlow::Continue
+            });
 
             Self {
                 anime,
                 root,
+                split,
+                left,
+                right,
+                chart,
+                width: Cell::new(0),
                 overlay_total,
                 donut,
                 dropdown,
@@ -120,6 +144,31 @@ impl StorageScreen {
     /// The page widget: the column, with the toast at its foot.
     pub fn widget(&self) -> &GBox {
         &self.root
+    }
+
+    /// Lays the page out for a content width: two columns at 2 to 3 from 720 px (the chart stays under the dropdown),
+    /// else one column with the chart first. Runs on each frame and only acts when the width changed.
+    fn reflow(&self, width: i32) {
+        if width == self.width.get() {
+            return;
+        }
+        self.width.set(width);
+        if storage::two_column(width) {
+            let (left, _) = storage::column_widths(width);
+            self.split.set_orientation(O::Horizontal);
+            self.left.set_size_request(left, -1);
+            self.left.set_margin_end(storage::LEFT_COLUMN_GAP);
+            self.left.set_hexpand(false);
+            self.right.set_hexpand(true);
+            self.left.reorder_child_after(&self.chart, Some(&self.dropdown));
+        } else {
+            self.split.set_orientation(O::Vertical);
+            self.left.set_size_request(-1, -1);
+            self.left.set_margin_end(0);
+            self.left.set_hexpand(true);
+            self.right.set_hexpand(true);
+            self.left.reorder_child_after(&self.chart, Option::<&gtk::Widget>::None);
+        }
     }
 
     /// Sets the delete hook (see the field's comment).

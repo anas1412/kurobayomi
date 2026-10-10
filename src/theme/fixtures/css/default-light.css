@@ -73,8 +73,8 @@ window { background-color: @kuro_background; color: @kuro_on_background; }
 .kuro-settings-heading { font-weight: 600; padding: 10px 24px; color: @kuro_on_surface_variant; }
 .kuro-settings-icon { color: @kuro_primary; }
 .kuro-check:disabled { opacity: 0.38; }
-.kb-surface { transition: background-color 120ms cubic-bezier(0.4, 0, 0.2, 1); }
-.kb-surface:active { transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
+.kb-surface { transition: background-color 120ms cubic-bezier(0.4, 0.0, 0.2, 1.0); }
+.kb-surface:active { transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0.0, 0.6, 1.0); }
 .kb-surface:hover { transition-duration: 120ms; }
 .kb-surface:hover { background-color: rgba(27, 27, 31, 0.08); }
 .kb-surface:active { background-color: rgba(27, 27, 31, 0.1); }

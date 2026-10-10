@@ -29,6 +29,15 @@ pub fn sort_rows(rows: &mut [SourceRow]) {
     rows.sort_by_cached_key(|row| (!row.enabled, row.sort_label()));
 }
 
+/// `labelAsName` of an extension's sources (behavior 4.1): a source is labelled by its own name when the extension has more
+/// than one source and those sources do not all share one name (`multiSource && !multiLangSingleSource`). `names` are the
+/// source names of one extension.
+pub fn label_as_name(names: &[&str]) -> bool {
+    let multi_source = names.len() > 1;
+    let multi_lang_single_source = multi_source && names.iter().collect::<BTreeSet<_>>().len() == 1;
+    multi_source && !multi_lang_single_source
+}
+
 /// Enables (removes from the disabled set) or disables every source id of the extension (E-40-38). Ids are stored as
 /// strings to match upstream backups (D§5).
 pub fn set_all_enabled(disabled: &BTreeSet<String>, ids: &[i64], enable: bool) -> BTreeSet<String> {
@@ -139,10 +148,11 @@ pub fn repo_link(repo_url: Option<&str>) -> Option<String> {
 }
 
 /// The text a click on the header copies (B§7.2). The block after the blank line is for installed extensions, which is
-/// all this page shows.
+/// all this page shows. `appendLine` ends the Shared line with a newline, and the Repository line is added only when the
+/// extension has a store (`AnimeExtensionDetailsScreen.kt:256-260`).
 pub fn debug_text(d: &ExtDetails) -> String {
-    format!(
-        "Extension name: {} (lang: {}; package: {})\nExtension version: {} (lib: {}; version code: {})\nNSFW: {}\n\nUpdate available: {}\nOrphaned: {}\nShared: {}\nRepository: {}",
+    let mut text = format!(
+        "Extension name: {} (lang: {}; package: {})\nExtension version: {} (lib: {}; version code: {})\nNSFW: {}\n\nUpdate available: {}\nOrphaned: {}\nShared: {}\n",
         d.name,
         d.lang,
         d.pkg,
@@ -153,8 +163,12 @@ pub fn debug_text(d: &ExtDetails) -> String {
         d.has_update,
         d.obsolete,
         d.shared,
-        d.repo_url.as_deref().unwrap_or("null"),
-    )
+    );
+    if let Some(url) = &d.repo_url {
+        text.push_str("Repository: ");
+        text.push_str(url);
+    }
+    text
 }
 
 /// The package name under the title: what follows the extension namespace, else the whole name.
@@ -180,9 +194,36 @@ pub fn cleared_log(count: usize, urls: &[String]) -> String {
     format!("Cleared {count} cookies for: {}", urls.join(", "))
 }
 
+/// The banner after a cookie clear: the count the user sees (T-41a-021, a proposal over the silent log).
+pub fn cleared_banner(count: usize) -> String {
+    format!("Cleared {count} cookies")
+}
+
+#[cfg(test)]
+mod banner_tests {
+    use super::*;
+
+    #[test]
+    fn the_cookie_banner_shows_the_count_and_a_failed_url_counts_zero() {
+        assert_eq!(cleared_banner(0), "Cleared 0 cookies");
+        assert_eq!(cleared_banner(4), "Cleared 4 cookies");
+        let (urls, cleared) = clear_cookies(&[DetailSource { id: 1, name: "A".into(), lang: "en".into(), label_as_name: false, configurable: false, base_url: Some("https://a.test/".into()) }], |_| 0);
+        assert_eq!(cleared, 0, "a failed URL is counted as 0 (T25)");
+        assert!(!urls.is_empty(), "the base URL is still asked");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn label_as_name_is_multi_source_and_not_one_name_repeated_per_language() {
+        assert!(!label_as_name(&["Only"]), "one source is labelled by its language");
+        assert!(!label_as_name(&["Same", "Same"]), "several languages of one source name are multi-lang single-source");
+        assert!(label_as_name(&["Alpha", "Beta"]), "several different sources are labelled by name");
+        assert!(label_as_name(&["Same", "Same", "Other"]), "any second name makes them distinct");
+    }
 
     fn row(id: i64, name: &str, display: &str, label_as_name: bool, enabled: bool) -> SourceRow {
         SourceRow { id, name: name.into(), display_name: display.into(), label_as_name, enabled }
@@ -265,7 +306,8 @@ mod tests {
         let mut none = details();
         none.repo_url = None;
         none.lib_version = Some(1.0);
-        assert!(debug_text(&none).ends_with("Repository: null"));
+        assert!(debug_text(&none).ends_with("Shared: false\n"), "no store: no Repository line, and the newline after Shared stays");
+        assert!(!debug_text(&none).contains("Repository"));
         assert!(debug_text(&none).contains("lib: 1.0;"), "a whole lib version keeps its .0 like Kotlin's Double");
         none.lib_version = None;
         assert!(debug_text(&none).contains("lib: n/a;"), "an anime package has no library version");

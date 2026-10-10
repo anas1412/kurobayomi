@@ -2,12 +2,12 @@
 //! `UpdateFromRemote`: it asks the source, writes the metadata with the cover and background rules (T-REF-5), syncs the
 //! episode list and returns the episodes the sync added, which a manual refresh may queue for download (T-REF-4).
 //!
-//! Where a source comes from is `AnimeSourceLookup`. The app has no registry of live anime sources yet, so the page
-//! passes `NoSources` and every fetch reports that the source is not installed, as the stub did; a lookup that hands
-//! out sources is the only thing missing for a real fetch.
+//! Where a source comes from is `AnimeSourceLookup`. `LiveSources` answers for the sources this build ships
+//! (`builtin_anime_sources`, none yet); an id it does not know reports that the source is not installed. A `Seasons`
+//! entry syncs its season list through the domain's `SyncSeasons`, and with "update seasons on refresh" on, the episodes
+//! of its seasons are fetched after it (`season_fetch`).
 //!
-//! Known gaps: the list sync of seasons does not exist in the domain layer, so a `Seasons` entry reports an error
-//! instead of syncing, and no cover cache is wired, so a changed cover is stamped but its file is not deleted.
+//! Known gap: no cover cache is wired, so a changed cover is stamped but its file is not deleted.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -17,19 +17,23 @@ use kuro_data::episode::Episode;
 use kuro_db::handle::Db;
 use kuro_db::schema_anime::FetchType;
 use kuro_domain::error::DomainError;
+use async_trait::async_trait;
 use kuro_domain::items::episode_sync::{EpisodeSyncOptions, NoEpisodeRenames, SyncEpisodes, mark_duplicate_as_seen_from_pref};
+use kuro_domain::items::season_sync::SyncSeasons;
 use kuro_domain::items::source_sync::MangaSyncLocks;
 use kuro_domain::source::remote_update::{AnimeRemote, CacheFiles, DbRemoteStore, FetchFlags, ListSync, RemoteError, RemoteStore, UpdateFromRemote};
 use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
 use kuro_source::SourceError;
-use kuro_source::anime::{SAnime, SEpisode};
+use kuro_source::anime::registry::builtin_anime_sources;
+use kuro_source::anime::{AnimeSource, SAnime, SAnimeEpisodeUpdate, SAnimeSeasonUpdate, SEpisode};
 use tokio::runtime::Handle;
 
 use super::entry_state::RefreshPlan;
 use super::download_backend::AnimeDownloads;
 use super::refresh::Trigger;
 use super::runner::{AnimeBackend, AnimeFetch, StubAnimeBackend};
+use super::season_fetch::fetch_episodes_of;
 use super::store::AnimeStore;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
@@ -55,6 +59,10 @@ pub trait AnimeSourceLookup: Send + Sync + 'static {
     fn is_configurable(&self, _source_id: i64) -> bool {
         false
     }
+    /// Whether the source is an `UnmeteredSource`: a season refresh fetches its seasons in parallel.
+    fn is_unmetered(&self, _source_id: i64) -> bool {
+        false
+    }
 }
 
 /// The lookup of an app with no source registry: every source reads as not installed.
@@ -63,6 +71,59 @@ pub struct NoSources;
 impl AnimeSourceLookup for NoSources {
     fn remote(&self, _source_id: i64) -> Option<Arc<dyn AnimeRemote>> {
         None
+    }
+}
+
+/// The lookup over live sources. The flags come from the source itself (`is_configurable`, `is_unmetered`); the trait has
+/// no HTTP or torrent marker, so those two read false and the page offers neither WebView nor the torrent start.
+pub struct LiveSources {
+    sources: Vec<Arc<dyn AnimeSource>>,
+}
+
+impl LiveSources {
+    pub fn new(sources: Vec<Arc<dyn AnimeSource>>) -> Self {
+        Self { sources }
+    }
+
+    /// The sources this build ships.
+    pub fn builtin() -> Self {
+        Self::new(builtin_anime_sources())
+    }
+
+    fn find(&self, source_id: i64) -> Option<&Arc<dyn AnimeSource>> {
+        self.sources.iter().find(|s| s.id() == source_id)
+    }
+}
+
+/// A live source as the domain's remote update asks it: its own combined updates.
+struct SourceRemote(Arc<dyn AnimeSource>);
+
+#[async_trait]
+impl AnimeRemote for SourceRemote {
+    async fn episode_update(&self, anime: SAnime, episodes: Vec<SEpisode>, fetch_details: bool, fetch_episodes: bool) -> Result<SAnimeEpisodeUpdate, SourceError> {
+        self.0.anime_episode_update(anime, episodes, fetch_details, fetch_episodes).await
+    }
+
+    async fn season_update(&self, anime: SAnime, seasons: Vec<SAnime>, fetch_details: bool, fetch_seasons: bool) -> Result<SAnimeSeasonUpdate, SourceError> {
+        self.0.anime_season_update(anime, seasons, fetch_details, fetch_seasons).await
+    }
+}
+
+impl AnimeSourceLookup for LiveSources {
+    fn remote(&self, source_id: i64) -> Option<Arc<dyn AnimeRemote>> {
+        self.find(source_id).map(|source| Arc::new(SourceRemote(Arc::clone(source))) as Arc<dyn AnimeRemote>)
+    }
+
+    fn info(&self, source_id: i64) -> Option<SourceInfo> {
+        self.find(source_id).map(|source| SourceInfo { name: source.display_name(), stub: false })
+    }
+
+    fn is_configurable(&self, source_id: i64) -> bool {
+        self.find(source_id).is_some_and(|source| source.is_configurable())
+    }
+
+    fn is_unmetered(&self, source_id: i64) -> bool {
+        self.find(source_id).is_some_and(|source| source.is_unmetered())
     }
 }
 
@@ -80,10 +141,11 @@ impl CacheFiles for NoCoverFiles {
     fn delete_background(&self, _anime: &Anime) {}
 }
 
-/// The list sync of `UpdateFromRemote` over the domain's async episode sync. It runs on a tokio worker, so the wait
-/// for the sync is `block_in_place`.
+/// The list sync of `UpdateFromRemote` over the domain's async episode sync and its season sync. It runs on a tokio
+/// worker, so the wait for the episode sync is `block_in_place`.
 struct EpisodeListSync {
     sync: SyncEpisodes,
+    seasons: SyncSeasons,
     handle: Handle,
     mark_duplicate_as_seen: bool,
 }
@@ -104,8 +166,8 @@ impl ListSync for EpisodeListSync {
         })
     }
 
-    fn sync_seasons(&self, _raw: &[SAnime], _anime: &Anime, _manual: bool, _window: (i64, i64)) -> Result<Vec<Anime>, DomainError> {
-        Err(DomainError::Invalid("the season list sync is not available yet"))
+    fn sync_seasons(&self, raw: &[SAnime], anime: &Anime, manual: bool, window: (i64, i64)) -> Result<Vec<Anime>, DomainError> {
+        self.seasons.run(raw, anime, manual, window, chrono::Utc::now().timestamp_millis())
     }
 }
 
@@ -117,17 +179,19 @@ pub struct RemoteAnimeBackend {
     update: Arc<UpdateFromRemote>,
     episodes: AnimeStore,
     downloads: Option<AnimeDownloads>,
+    library: LibraryPrefs,
 }
 
 impl RemoteAnimeBackend {
     /// `handle` is the runtime the fetches run on, which must be a multi-threaded one.
     pub fn new(db: Arc<Db>, prefs: &PrefStore, lookup: Arc<dyn AnimeSourceLookup>, handle: Handle) -> Self {
-        let mark_duplicate_as_seen = mark_duplicate_as_seen_from_pref(&LibraryPrefs::new(prefs.clone()).mark_duplicate_seen_episode_as_seen.get());
+        let library = LibraryPrefs::new(prefs.clone());
+        let mark_duplicate_as_seen = mark_duplicate_as_seen_from_pref(&library.mark_duplicate_seen_episode_as_seen.get());
         let sync = SyncEpisodes::new(Arc::clone(&db), Arc::new(MangaSyncLocks::default()), Arc::new(NoEpisodeRenames));
-        let list_sync = EpisodeListSync { sync, handle, mark_duplicate_as_seen };
+        let list_sync = EpisodeListSync { sync, seasons: SyncSeasons::new(Arc::clone(&db)), handle, mark_duplicate_as_seen };
         let store = Arc::new(DbRemoteStore::new(Arc::clone(&db)));
         let update = Arc::new(UpdateFromRemote::new(store.clone(), Arc::new(list_sync), Arc::new(NoCoverFiles)));
-        Self { stubs: StubAnimeBackend::new(Arc::clone(&db)), lookup, store, update, episodes: AnimeStore::new(db), downloads: None }
+        Self { stubs: StubAnimeBackend::new(Arc::clone(&db)), lookup, store, update, episodes: AnimeStore::new(db), downloads: None, library }
     }
 
     /// Gives the backend the downloads of the page: the downloads folder and the app's queue.
@@ -152,6 +216,7 @@ impl AnimeBackend for RemoteAnimeBackend {
 
     fn fetch(&self, anime_id: i64, plan: RefreshPlan, trigger: Trigger) -> AnimeFetch {
         let (store, update, lookup) = (Arc::clone(&self.store), Arc::clone(&self.update), Arc::clone(&self.lookup));
+        let season_episodes = self.library.update_season_on_refresh.get();
         Box::pin(async move {
             let anime = store.anime(anime_id).map_err(domain_error)?;
             let Some(remote) = lookup.remote(anime.source) else {
@@ -166,7 +231,25 @@ impl AnimeBackend for RemoteAnimeBackend {
             };
             match anime.fetch_type {
                 FetchType::Episodes => update.episodes(&anime, &*remote, flags).await.map(|r| r.new_episodes).map_err(detail_error),
-                FetchType::Seasons => update.seasons(&anime, &*remote, flags).await.map(|_| Vec::new()).map_err(detail_error),
+                FetchType::Seasons => {
+                    let seasons = update.seasons(&anime, &*remote, flags).await.map_err(detail_error)?.new_seasons;
+                    // behaviour 6.4.1: with "update seasons on refresh" on, the episodes of the unfinished seasons follow
+                    if season_episodes {
+                        let episode_flags = FetchFlags { fetch_details: false, fetch_episodes: true, fetch_seasons: false, ..flags };
+                        fetch_episodes_of(seasons, lookup.is_unmetered(anime.source), |season| {
+                            let (update, remote) = (Arc::clone(&update), Arc::clone(&remote));
+                            async move {
+                                // one failing season is logged and does not stop the others; new episodes are not downloaded
+                                match update.episodes(&season, &*remote, episode_flags).await {
+                                    Ok(_) | Err(RemoteError::Cancelled | RemoteError::Source(SourceError::Cancelled)) => {}
+                                    Err(error) => tracing::error!(season = season.id, %error, "the episodes of a season were not fetched"),
+                                }
+                            }
+                        })
+                        .await;
+                    }
+                    Ok(Vec::new())
+                }
             }
         })
     }
@@ -247,13 +330,14 @@ mod tests {
     struct FakeSource {
         anime: SAnime,
         episodes: Vec<SEpisode>,
+        seasons: Vec<SAnime>,
         http_failure: Option<u16>,
         asked: Mutex<Vec<(bool, bool)>>,
     }
 
     impl FakeSource {
         fn new(episodes: Vec<SEpisode>) -> Arc<Self> {
-            Arc::new(Self { anime: SAnime { title: "Frieren".into(), ..SAnime::default() }, episodes, http_failure: None, asked: Mutex::default() })
+            Arc::new(Self { anime: SAnime { title: "Frieren".into(), ..SAnime::default() }, episodes, seasons: Vec::new(), http_failure: None, asked: Mutex::default() })
         }
     }
 
@@ -268,7 +352,10 @@ mod tests {
         }
 
         async fn season_update(&self, _: SAnime, _: Vec<SAnime>, _: bool, _: bool) -> Result<SAnimeSeasonUpdate, SourceError> {
-            Err(SourceError::Unsupported("seasons"))
+            if self.seasons.is_empty() {
+                return Err(SourceError::Unsupported("seasons"));
+            }
+            Ok(SAnimeSeasonUpdate { anime: self.anime.clone(), seasons: self.seasons.clone() })
         }
     }
 
@@ -328,6 +415,57 @@ mod tests {
         let plan = RefreshPlan { info: false, episodes: true, seasons: false };
         rt.block_on(backend.fetch(id, plan, Trigger::Open)).unwrap();
         assert_eq!(*source.asked.lock().unwrap(), vec![(false, true)], "details are not asked for");
+    }
+
+    fn seasons_source() -> Arc<FakeSource> {
+        let seasons = vec![
+            SAnime { url: "/s1".into(), title: "Frieren Season 1".into(), ..SAnime::default() },
+            SAnime { url: "/s2".into(), title: "Frieren Season 2".into(), ..SAnime::default() },
+        ];
+        Arc::new(FakeSource { seasons, ..Arc::into_inner(FakeSource::new(vec![s_episode("/e1", 1.0)])).unwrap() })
+    }
+
+    /// Refreshes a parent that lists seasons from `source`: the temp dir to keep alive, the ids of the stored seasons and the store.
+    fn season_refresh(rt: &tokio::runtime::Runtime, update_seasons: bool, source: &Arc<FakeSource>) -> (tempfile::TempDir, Vec<i64>, AnimeStore) {
+        let (dir, store, id) = with_episodes(true, true, 0, 0);
+        store.set_fetch_type_for_test(id, FetchType::Seasons);
+        let prefs = PrefStore::in_memory();
+        LibraryPrefs::new(prefs.clone()).update_season_on_refresh.set(update_seasons).unwrap();
+        let backend = RemoteAnimeBackend::new(store.db(), &prefs, Arc::new(One(source.clone())), rt.handle().clone());
+        let plan = RefreshPlan { info: true, episodes: false, seasons: true };
+        rt.block_on(backend.fetch(id, plan, Trigger::Manual)).expect("the refresh works");
+        let ids = kuro_data::anime::AnimeRepo::new(store.db()).seasons_by_parent(id).unwrap().into_iter().map(|s| s.anime.id).collect();
+        (dir, ids, store)
+    }
+
+    #[test]
+    fn a_seasons_refresh_stores_every_season_and_fetches_the_episodes_of_each_when_the_pref_is_on() {
+        let rt = rt();
+        let source = seasons_source();
+        let (_dir, ids, store) = season_refresh(&rt, true, &source);
+        assert_eq!(ids.len(), 2, "both source seasons are stored as children");
+        for id in ids {
+            assert_eq!(store.episodes(id).unwrap().len(), 1, "the episodes of the season were stored");
+        }
+        assert_eq!(*source.asked.lock().unwrap(), vec![(false, true), (false, true)], "one episode call per season, with no details");
+    }
+
+    #[test]
+    fn a_seasons_refresh_leaves_the_episodes_alone_when_the_pref_is_off() {
+        let rt = rt();
+        let source = seasons_source();
+        let (_dir, ids, store) = season_refresh(&rt, false, &source);
+        assert_eq!(ids.len(), 2);
+        assert!(ids.iter().all(|id| store.episodes(*id).unwrap().is_empty()));
+        assert!(source.asked.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_live_sources_know_only_their_own_ids() {
+        let lookup = LiveSources::new(Vec::new());
+        assert!(lookup.remote(7).is_none());
+        assert!(!lookup.is_configurable(7) && !lookup.is_unmetered(7));
+        assert!(LiveSources::builtin().info(7).is_none(), "no builtin source has this id");
     }
 
     #[test]

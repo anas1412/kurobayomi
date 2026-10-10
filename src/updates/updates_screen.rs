@@ -134,6 +134,8 @@ impl UpdatesScreen {
             } else if ctrl && key.to_lower() == gtk::gdk::Key::i {
                 screen.select_inverse();
                 glib::Propagation::Stop
+            } else if matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter) && screen.enter() {
+                glib::Propagation::Stop
             } else {
                 glib::Propagation::Proceed
             }
@@ -187,6 +189,15 @@ impl UpdatesScreen {
             }
             BackAction::Navigate => false,
         }
+    }
+
+    /// Enter on the focused row does what a tap on it does: opens the unit, or toggles it while selecting (T-42b-038).
+    /// `false` when the focus is not on a row itself (a button inside it keeps its own Enter), so the key goes on.
+    fn enter(self: &Rc<Self>) -> bool {
+        let focus = self.root.root().and_then(|root| gtk::prelude::RootExt::focus(&root));
+        let Some(id) = focus.and_then(|w| feed::unit_of_row_name(&w.widget_name())) else { return false };
+        self.press_later(Gesture::Tap, id);
+        true
     }
 
     fn clear_selection(self: &Rc<Self>) {
@@ -376,7 +387,7 @@ impl UpdatesScreen {
         line.append(&texts);
         line.append(&self.download_indicator(feed_row));
 
-        let list_row = gtk::ListBoxRow::builder().child(&line).activatable(false).build();
+        let list_row = gtk::ListBoxRow::builder().child(&line).activatable(false).name(feed::row_name(row.item_id)).build();
         self.attach_gestures(&list_row, row.item_id);
         list_row
     }
@@ -670,6 +681,19 @@ impl UpdatesScreen {
         }
         popover.set_child(Some(&menu));
         button.set_popover(Some(&popover));
+        // the long press of a not-downloaded anime indicator shows the qualities instead of the menu, and the row's own
+        // long press (selection) does not see it
+        if let Some(action) = download_actions::indicator_long_press(self.kind == EntryKind::Anime, state, qualities::available()) {
+            let long = GestureLongPress::new();
+            let (weak, id) = (Rc::downgrade(self), feed_row.row.item_id);
+            long.connect_pressed(move |gesture, _, _| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                if let Some(screen) = weak.upgrade() {
+                    screen.row_download(action, id);
+                }
+            });
+            button.add_controller(long);
+        }
         button
     }
 }

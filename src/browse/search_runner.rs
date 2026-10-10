@@ -16,13 +16,19 @@ use kuro_source::filter_list::FilterList;
 
 use super::global_search::{AutoOpen, GlobalSearch, SearchPlan, auto_open, take_starts};
 use super::glue::{consume_events, keep_alive, own_tasks};
-use super::listing::{ListItem, PageLoader};
+use super::deep_link::is_link;
+use super::listing::{LinkFuture, ListItem, PageLoader};
 use super::pages::{GlobalSearchSnapshot, SourceFilter};
 use super::primitives::stub_source_label;
 use super::tasks::{PageTasks, Tagged};
+use crate::source_bridge::call_cancellable;
+use tokio_util::sync::CancellationToken;
 
 /// The loader of a source's listings by id, `None` when the source is not installed.
 pub type Loaders = Arc<dyn Fn(i64) -> Option<Arc<dyn PageLoader>> + Send + Sync>;
+
+/// Resolves a pasted link to the entry it names, or `None` when nothing can resolve it (`SourceDirectory::resolve_link`).
+pub type LinkResolver = Arc<dyn Fn(&str) -> Option<LinkFuture>>;
 
 /// What the runner reports to the page.
 pub struct RunnerHooks {
@@ -51,6 +57,16 @@ pub struct SearchRunner {
     /// The extension package of a search started by an intent; only such a search can auto-open (GS-EC-13).
     extension: RefCell<Option<String>>,
     opened: Cell<bool>,
+    /// Resolves a pasted link before any catalogue search (T-20a-031).
+    links: RefCell<Option<LinkResolver>>,
+    /// Ends a link lookup that a newer search or the page has outlived.
+    link_lookup: RefCell<CancellationToken>,
+}
+
+impl Drop for SearchRunner {
+    fn drop(&mut self) {
+        self.link_lookup.borrow().cancel();
+    }
 }
 
 impl SearchRunner {
@@ -66,6 +82,8 @@ impl SearchRunner {
             query: RefCell::new(String::new()),
             extension: RefCell::new(None),
             opened: Cell::new(false),
+            links: RefCell::new(None),
+            link_lookup: RefCell::new(CancellationToken::new()),
         });
         let weak = Rc::downgrade(&runner);
         consume_events(&runner.tasks, move |fetched| {
@@ -82,8 +100,45 @@ impl SearchRunner {
         keep_alive(widget, self);
     }
 
-    /// Enter in the search box: a new query searches, a blank or unchanged one does nothing.
+    /// Makes a pasted link resolve through `resolver` before it is searched as text.
+    pub fn set_link_resolver(&self, resolver: LinkResolver) {
+        *self.links.borrow_mut() = Some(resolver);
+    }
+
+    /// Offers `text` to the link resolver when it is a link and a resolver has a source for it. The entry then opens and
+    /// no catalogue is searched; a link that resolves to nothing is searched as text, like any query. `true` while the
+    /// lookup runs, so the caller does not search yet.
+    fn resolve_first(self: &Rc<Self>, text: &str, then: impl FnOnce(&Rc<Self>) + 'static) -> bool {
+        self.link_lookup.borrow().cancel();
+        let lookup = if is_link(text) { self.links.borrow().as_ref().and_then(|resolve| resolve(text)) } else { None };
+        let Some(lookup) = lookup else { return false };
+        let token = CancellationToken::new();
+        *self.link_lookup.borrow_mut() = token.clone();
+        let weak = Rc::downgrade(self);
+        call_cancellable(token, lookup, move |item| {
+            let Some(runner) = weak.upgrade() else { return };
+            match item {
+                Some(item) => {
+                    if !runner.opened.replace(true) {
+                        (runner.hooks.open_entry)(item.id);
+                    }
+                }
+                None => then(&runner),
+            }
+        });
+        true
+    }
+
+    /// Enter in the search box: a link opens its entry when a source resolves it, any other query searches, a blank or
+    /// unchanged one does nothing.
     pub fn submit(self: &Rc<Self>, text: &str) {
+        let owned = text.to_owned();
+        if !self.resolve_first(text, move |runner| runner.search(&owned)) {
+            self.search(text);
+        }
+    }
+
+    fn search(self: &Rc<Self>, text: &str) {
         *self.query.borrow_mut() = text.to_owned();
         let plan = {
             let mut engine = self.engine.borrow_mut();
@@ -107,6 +162,13 @@ impl SearchRunner {
 
     /// A search with an extension filter (the SEARCH intent): forces All, and the single-result auto-open applies.
     pub fn request(self: &Rc<Self>, query: &str, extension: Option<&str>) {
+        let (owned, extension_owned) = (query.to_owned(), extension.map(str::to_owned));
+        if !self.resolve_first(query, move |runner| runner.search_extension(&owned, extension_owned.as_deref())) {
+            self.search_extension(query, extension);
+        }
+    }
+
+    fn search_extension(self: &Rc<Self>, query: &str, extension: Option<&str>) {
         *self.query.borrow_mut() = query.to_owned();
         *self.extension.borrow_mut() = extension.map(str::to_owned);
         let plan = self.engine.borrow_mut().request(query, extension);
@@ -408,6 +470,57 @@ mod tests {
             let Rig { runner, live, .. } = rig;
             drop(runner);
             assert!(pump(context, || live.load(Ordering::SeqCst) == 0), "the tasks go with the page");
+        });
+    }
+
+    /// A resolver that logs each text it is asked about and answers with `entry` (`None`: nothing resolves it).
+    fn resolver(entry: Option<i64>, asked: &Arc<std::sync::Mutex<Vec<String>>>) -> LinkResolver {
+        let asked = Arc::clone(asked);
+        Arc::new(move |uri| {
+            asked.lock().expect("lock").push(uri.to_owned());
+            Some(Box::pin(async move { entry.map(|id| ListItem { id, ..ListItem::default() }) }) as LinkFuture)
+        })
+    }
+
+    #[test]
+    fn a_pasted_link_opens_the_entry_a_source_resolves_and_searches_no_catalogue() {
+        with_loop(|context| {
+            let rig = rig(2);
+            let asked = Arc::default();
+            rig.runner.set_link_resolver(resolver(Some(77), &asked));
+            rig.runner.submit("https://site.test/m/1");
+            assert!(pump(context, || !rig.opened.borrow().is_empty()), "the resolved entry opens");
+            assert_eq!(*rig.opened.borrow(), [77]);
+            assert_eq!(*asked.lock().expect("lock"), ["https://site.test/m/1"]);
+            let _ = pump(context, || false);
+            assert_eq!(rig.started.load(Ordering::SeqCst), 0, "no catalogue was searched before or after");
+        });
+    }
+
+    #[test]
+    fn a_link_nothing_resolves_is_searched_as_text() {
+        with_loop(|context| {
+            let rig = rig(2);
+            let asked = Arc::default();
+            rig.runner.set_link_resolver(resolver(None, &asked));
+            rig.runner.submit("https://site.test/m/1");
+            assert!(pump(context, || rig.started.load(Ordering::SeqCst) == 2), "both catalogues are searched after the lookup");
+            assert_eq!(*rig.queries.lock().expect("lock"), ["https://site.test/m/1", "https://site.test/m/1"]);
+            assert!(rig.opened.borrow().is_empty());
+        });
+    }
+
+    #[test]
+    fn a_link_with_no_source_to_resolve_it_is_searched_at_once_and_plain_text_never_asks() {
+        with_loop(|context| {
+            let rig = rig(1);
+            rig.runner.set_link_resolver(Arc::new(|_| None));
+            rig.runner.submit("https://site.test/m/1");
+            assert!(pump(context, || rig.started.load(Ordering::SeqCst) == 1), "no lookup runs: the catalogue is searched");
+            let asked = Arc::default();
+            rig.runner.set_link_resolver(resolver(Some(1), &asked));
+            rig.runner.submit("one piece");
+            assert!(asked.lock().expect("lock").is_empty(), "text that is not a link is not offered to the resolver");
         });
     }
 }

@@ -9,14 +9,19 @@ license.workspace = true
 kuro-platform = { workspace = true }
 kuro-prefs = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true }
 bytes = { workspace = true }
+chrono = { workspace = true }
 cookie = { workspace = true }
 cookie_store = { workspace = true }
 futures = { workspace = true }
+hickory-resolver = { version = "0.26.3", default-features = false }
 http = { workspace = true }
 psl = { workspace = true }
 reqwest = { workspace = true }
+rquickjs = { version = "0.14.0", optional = true }
 reqwest_cookie_store = { workspace = true }
+sha2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -24,6 +29,10 @@ tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "fs", "i
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
+
+[features]
+# Source JavaScript (`JavaScriptEngine`, area 12 T-12a-028). Off by default; the QuickJS build needs a C compiler.
+js-sources = ["dep:rquickjs"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

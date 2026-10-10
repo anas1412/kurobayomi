@@ -144,6 +144,11 @@ impl SettingsWindow {
         self.window.present();
     }
 
+    /// The window, for the page's one dialog slot.
+    pub fn window(&self) -> &gtk::Window {
+        &self.window
+    }
+
     /// Runs `f` when the window closes (Escape, the close button or the page).
     pub fn on_close(&self, f: impl Fn() + 'static) {
         self.window.connect_close_request(move |_| {

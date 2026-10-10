@@ -1,0 +1,41 @@
+{
+  "id": "9",
+  "libraryId": "1",
+  "name": "Title",
+  "created": "2026-01-02T03:04:05Z",
+  "lastModified": "2026-02-02T03:04:05Z",
+  "fileLastModified": "2026-02-01T00:00:00Z",
+  "booksCount": 10,
+  "booksReadCount": 6,
+  "booksUnreadCount": 4,
+  "booksInProgressCount": 0,
+  "metadata": {
+    "status": "ENDED",
+    "created": "2026-01-02T03:04:05Z",
+    "lastModified": "2026-02-02T03:04:05Z",
+    "title": "Title",
+    "titleSort": "Title",
+    "summary": "Sum",
+    "summaryLock": false,
+    "readingDirection": "RIGHT_TO_LEFT",
+    "readingDirectionLock": false,
+    "publisher": "Pub",
+    "publisherLock": false,
+    "ageRating": null,
+    "ageRatingLock": false,
+    "language": "en",
+    "languageLock": false,
+    "genres": ["Action"],
+    "genresLock": false,
+    "tags": [],
+    "tagsLock": false
+  },
+  "booksMetadata": {
+    "authors": [{"name": "A", "role": "writer"}],
+    "releaseDate": null,
+    "summary": "Sum",
+    "summaryNumber": "",
+    "created": "2026-01-02T03:04:05Z",
+    "lastModified": "2026-02-02T03:04:05Z"
+  }
+}

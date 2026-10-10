@@ -8,15 +8,20 @@
 //! collapse is not drawn: the page is rebuilt (`view.rs`) when a rule input changes.
 //! `route.rs` is what `screens::body` calls, so the screens here are the ones the app shows.
 
+pub mod about;
 pub mod advanced;
 pub mod appearance;
 pub mod browse;
 pub mod cache;
 pub mod category;
+pub mod category_sets;
 pub mod clipboard;
+pub mod cookie_import;
 pub mod downloads;
+pub mod jobs;
 pub mod lang;
 pub mod library;
+pub mod library_update;
 pub mod menu;
 pub mod merge;
 pub mod player;
@@ -24,7 +29,10 @@ pub mod reader;
 pub mod route;
 pub mod rows;
 pub mod search;
+pub mod security;
 pub mod storage;
+pub mod tracker_host;
+pub mod tracking;
 pub mod usage;
 pub mod view;
 

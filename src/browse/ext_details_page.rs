@@ -12,12 +12,17 @@ use kuro_domain::source::toggles::flip_disabled;
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::pref::Pref;
 
+use super::banner::{BannerSpec, InfoBanner};
 use super::dialogs::{ButtonStyle, DialogSlot, DialogSpec};
-use super::ext_details::{ExtDetails, cleared_log, clear_cookies, debug_text, detail_rows, repo_link, set_all_enabled, stripped_pkg};
+use super::ext_details::{ExtDetails, cleared_banner, cleared_log, clear_cookies, debug_text, detail_rows, repo_link, set_all_enabled, stripped_pkg};
 use super::glue::keep_alive;
 use super::icons::{DETAILS_ICON_PX, resolve};
 use super::names::localized_display_name;
+use super::primitives::ToastDuration;
 use super::view::icon_image_sized;
+
+/// The widest the details content gets, in pixels; it is centred in a wider window (T-41a-050).
+pub const DETAILS_MAX_WIDTH_PX: i32 = 640;
 
 /// What the page needs from the app.
 pub struct DetailsDeps {
@@ -31,7 +36,7 @@ pub struct DetailsDeps {
     pub open_source_prefs: Rc<dyn Fn(i64)>,
     /// The open-repo action.
     pub open_url: Rc<dyn Fn(&str)>,
-    /// Removes the cookies of one base url and returns how many it dropped.
+    /// Removes the cookies of one base url and returns how many it dropped; a url it cannot clear returns 0.
     pub clear_cookies: Rc<dyn Fn(&str) -> usize>,
     /// A short message at the bottom of the window.
     pub toast: Rc<dyn Fn(String)>,
@@ -42,6 +47,8 @@ struct Inner {
     stack: gtk::Stack,
     column: gtk::Box,
     toolbar: gtk::Box,
+    /// "Cleared n cookies" (T-41a-021), a 4 s banner under the toolbar.
+    banner: InfoBanner,
     dialogs: DialogSlot,
     details: RefCell<Option<ExtDetails>>,
     /// The switch of each source row, by source id, for enable all and disable all.
@@ -70,6 +77,10 @@ impl ExtDetailsPage {
 
         let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let scroller = gtk::ScrolledWindow::builder().child(&column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+        // the content is centred and never wider than the details page maximum (T-41a-050)
+        scroller.set_propagate_natural_width(true);
+        scroller.set_max_content_width(DETAILS_MAX_WIDTH_PX);
+        column.set_halign(gtk::Align::Center);
         let empty = gtk::Label::new(Some(&tr(MsgKey::empty_screen)));
         empty.set_valign(gtk::Align::Center);
         empty.set_vexpand(true);
@@ -79,14 +90,17 @@ impl ExtDetailsPage {
         stack.set_vexpand(true);
         stack.set_visible_child_name("empty");
 
+        let banner = InfoBanner::new();
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.append(&toolbar);
+        root.append(banner.widget());
         root.append(&stack);
         let inner = Rc::new(Inner {
             deps,
             stack,
             column,
             toolbar,
+            banner,
             dialogs: DialogSlot::new(),
             details: RefCell::new(None),
             switches: RefCell::new(Vec::new()),
@@ -164,6 +178,7 @@ impl Inner {
         let Some(sources) = self.details.borrow().as_ref().map(|d| d.sources.clone()) else { return };
         let (urls, cleared) = clear_cookies(&sources, |url| (self.deps.clear_cookies)(url));
         tracing::info!("{}", cleared_log(cleared, &urls));
+        self.banner.show(&BannerSpec { message: cleared_banner(cleared), action: None, duration: ToastDuration::Seconds(4) }, None);
     }
 
     fn render(self: &Rc<Self>) {
@@ -547,7 +562,8 @@ pub(crate) mod tests {
         rig.page.set_details(Some(details(false, false)));
         rig.page.clear_cookies();
         assert_eq!(*rig.cookie_calls.borrow(), ["https://a.test", "https://g.test"]);
-        assert!(rig.toasts.borrow().is_empty(), "there is no feedback beyond the log");
+        assert!(rig.toasts.borrow().is_empty(), "T-41a-021: it is a banner, not a toast");
+        assert!(labels(&rig.page.root).contains(&cleared_banner(4)), "the banner shows the count (two URLs, two cookies each)");
     }
 
     fn the_uninstall_button_calls_back_and_a_vanished_extension_shows_the_empty_screen() {

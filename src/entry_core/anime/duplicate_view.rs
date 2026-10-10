@@ -11,7 +11,7 @@ use super::duplicate::{BODY, Choice, ROWS, Step, TITLE, steps};
 use crate::ui;
 
 /// Opens the window. `act` runs the choice, after the window is closed.
-pub fn open(act: impl Fn(Choice) + 'static) {
+pub fn open(act: impl Fn(Choice) + 'static) -> gtk::Window {
     let act: Rc<dyn Fn(Choice)> = Rc::new(act);
     let col = ui::column();
     col.append(&Label::builder().label(tr(BODY)).wrap(true).xalign(0.0).build());
@@ -43,4 +43,5 @@ pub fn open(act: impl Fn(Choice) + 'static) {
     cancel.connect_clicked(move |_| run());
     col.append(&cancel);
     dialog.present();
+    dialog
 }

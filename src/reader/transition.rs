@@ -178,6 +178,7 @@ fn chapter_text(line: &ChapterLine) -> gtk::Box {
     if line.downloaded {
         let check = gtk::Image::from_icon_name("emblem-ok-symbolic");
         check.set_tooltip_text(Some(strings::LABEL_DOWNLOADED));
+        check.update_property(&[gtk::accessible::Property::Label(strings::LABEL_DOWNLOADED)]);
         name_row.append(&check);
     }
     let name = gtk::Label::new(Some(&line.name));

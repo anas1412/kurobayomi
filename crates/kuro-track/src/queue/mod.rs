@@ -4,7 +4,7 @@
 pub mod retry;
 pub mod store;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use kuro_db::handle::Db;
 
@@ -25,6 +25,8 @@ pub struct QueueItem {
 /// The queue. Each call is one statement in one transaction, so there is no read-modify-write race.
 pub struct RetryQueue {
     db: Arc<Db>,
+    /// The parked count last shown by [`RetryQueue::take_parked_notice`]. Session only (T-27a-071).
+    announced: Mutex<usize>,
 }
 
 impl RetryQueue {
@@ -34,7 +36,10 @@ impl RetryQueue {
             tx.execute_batch(store::CREATE)?;
             Ok(())
         })?;
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            announced: Mutex::new(0),
+        })
     }
 
     /// Queues `progress` for the binding, keeping the highest value already queued.
@@ -142,6 +147,44 @@ impl RetryQueue {
         Ok(rows)
     }
 
+    /// Pending updates of one entry (the sheet's badge, T-27a-071).
+    pub fn pending_for_entry(&self, kind: Kind, entry_id: i64) -> Result<usize, TrackError> {
+        Ok(self
+            .list(kind)?
+            .iter()
+            .filter(|i| i.entry_id == entry_id)
+            .count())
+    }
+
+    /// Items the scheduler has parked, meaning their attempts are used up (`retry::MAX_ATTEMPTS`).
+    pub fn parked_count(&self) -> Result<usize, TrackError> {
+        let mut parked = 0;
+        for kind in [Kind::Anime, Kind::Manga] {
+            parked += self
+                .list(kind)?
+                .iter()
+                .filter(|i| i.attempts >= retry::MAX_ATTEMPTS)
+                .count();
+        }
+        Ok(parked)
+    }
+
+    /// The count for the one parked toast of an entry open (T-27a-071). `Some(n)` when more items are parked than the
+    /// last toast showed; `None` otherwise. Nothing is parked means the next parking shows again.
+    pub fn take_parked_notice(&self) -> Result<Option<usize>, TrackError> {
+        let parked = self.parked_count()?;
+        let mut announced = self.announced.lock().unwrap_or_else(|e| e.into_inner());
+        if parked == 0 {
+            *announced = 0;
+            return Ok(None);
+        }
+        if parked > *announced {
+            *announced = parked;
+            return Ok(Some(parked));
+        }
+        Ok(None)
+    }
+
     /// True when nothing is queued for either kind.
     pub fn is_empty(&self) -> Result<bool, TrackError> {
         let count: i64 = self
@@ -185,6 +228,33 @@ mod tests {
         assert_eq!(anime.len(), 1);
         assert_eq!(anime[0].progress, 3.0);
         assert_eq!(q.list(Kind::Manga).unwrap()[0].progress, 9.0);
+    }
+
+    #[test]
+    fn t_27a_071_the_pending_count_is_per_entry() {
+        let (_dir, q) = queue();
+        q.add(Kind::Manga, 1, TrackerId::KITSU, 5.0, 10).unwrap();
+        q.add(Kind::Manga, 2, TrackerId::KITSU, 5.0, 10).unwrap();
+        assert_eq!(q.pending_for_entry(Kind::Manga, 1).unwrap(), 1);
+        assert_eq!(q.pending_for_entry(Kind::Manga, 3).unwrap(), 0);
+    }
+
+    #[test]
+    fn t_27a_071_a_parked_item_is_one_notice_until_the_count_changes() {
+        let (_dir, q) = queue();
+        q.add(Kind::Manga, 1, TrackerId::KITSU, 5.0, 10).unwrap();
+        assert_eq!(q.take_parked_notice().unwrap(), None, "not parked yet");
+        for _ in 0..retry::MAX_ATTEMPTS {
+            q.bump_attempts(Kind::Manga, 1, TrackerId::KITSU).unwrap();
+        }
+        assert_eq!(q.parked_count().unwrap(), 1);
+        assert_eq!(q.take_parked_notice().unwrap(), Some(1));
+        assert_eq!(q.take_parked_notice().unwrap(), None, "shown once");
+        q.add(Kind::Manga, 2, TrackerId::KITSU, 5.0, 10).unwrap();
+        for _ in 0..retry::MAX_ATTEMPTS {
+            q.bump_attempts(Kind::Manga, 2, TrackerId::KITSU).unwrap();
+        }
+        assert_eq!(q.take_parked_notice().unwrap(), Some(2));
     }
 
     #[test]

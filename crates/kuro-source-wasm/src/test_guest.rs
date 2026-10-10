@@ -103,7 +103,7 @@ fn template(payload: &str, body: &str) -> String {
 
 /// The environment every test guest gets: an in-memory preference store, and a client that makes no request on its own.
 /// The directory holds the cookie file, so the caller keeps it alive for the test.
-pub fn env() -> (crate::source::HostEnv, tempfile::TempDir) {
+pub fn env() -> (kuro_source_wasm::source::HostEnv, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("temp dir");
     let prefs = kuro_prefs::network::NetworkPrefs::new(kuro_prefs::store::PrefStore::in_memory());
     let (toaster, _feed) = kuro_platform::toast::toast_channel();
@@ -114,7 +114,7 @@ pub fn env() -> (crate::source::HostEnv, tempfile::TempDir) {
         toaster,
     )
     .expect("client");
-    let host_env = crate::source::HostEnv {
+    let host_env = kuro_source_wasm::source::HostEnv {
         client,
         prefs: kuro_prefs::store::PrefStore::in_memory(),
     };

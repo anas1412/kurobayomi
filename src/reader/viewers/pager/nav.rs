@@ -12,6 +12,10 @@ pub enum PageCmd {
     Prev,
     Left,
     Right,
+    /// The first page of the list (Home). Not a step: `decide` jumps straight to it.
+    First,
+    /// The last page of the list (End). Not a step: `decide` jumps straight to it.
+    Last,
 }
 
 /// A physical direction on screen.
@@ -42,6 +46,9 @@ pub fn physical(kind: ViewerKind, cmd: PageCmd) -> Phys {
         PageCmd::Next => Phys::Right,
         PageCmd::Prev if rtl => Phys::Right,
         PageCmd::Prev => Phys::Left,
+        // The absolute jumps have no step; `decide` handles them before this is asked.
+        PageCmd::First => Phys::Left,
+        PageCmd::Last => Phys::Right,
     }
 }
 
@@ -57,6 +64,13 @@ pub fn step(dir: Phys, index: usize, len: usize) -> Option<usize> {
 /// Decides a command (B§6.3). `can_pan` is the current page's pan capability in that direction; the page must
 /// have more than one pixel left to pan (E-13), which the caller decides.
 pub fn decide(kind: ViewerKind, cmd: PageCmd, index: usize, len: usize, navigate_pan: bool, can_pan: bool, smooth: bool) -> MoveDecision {
+    let last = len.saturating_sub(1);
+    match cmd {
+        PageCmd::First if index > 0 => return MoveDecision::Turn { index: 0, smooth },
+        PageCmd::Last if index < last => return MoveDecision::Turn { index: last, smooth },
+        PageCmd::First | PageCmd::Last => return MoveDecision::Nothing,
+        _ => {}
+    }
     let dir = physical(kind, cmd);
     match step(dir, index, len) {
         None => MoveDecision::Nothing,
@@ -98,6 +112,15 @@ mod tests {
     fn right_to_left_next_steps_to_a_lower_index() {
         assert_eq!(decide(RightToLeft, PageCmd::Next, 3, 5, false, false, false), MoveDecision::Turn { index: 2, smooth: false });
         assert_eq!(decide(RightToLeft, PageCmd::Prev, 3, 5, false, false, true), MoveDecision::Turn { index: 4, smooth: true });
+    }
+
+    #[test]
+    fn home_and_end_jump_to_the_first_and_last_page_and_do_nothing_when_already_there() {
+        assert_eq!(decide(LeftToRight, PageCmd::First, 3, 5, true, true, true), MoveDecision::Turn { index: 0, smooth: true });
+        assert_eq!(decide(RightToLeft, PageCmd::Last, 1, 5, false, false, false), MoveDecision::Turn { index: 4, smooth: false });
+        assert_eq!(decide(LeftToRight, PageCmd::First, 0, 5, true, true, true), MoveDecision::Nothing);
+        assert_eq!(decide(LeftToRight, PageCmd::Last, 4, 5, true, true, true), MoveDecision::Nothing);
+        assert_eq!(decide(LeftToRight, PageCmd::Last, 0, 0, true, true, true), MoveDecision::Nothing, "an empty list has no last page");
     }
 
     #[test]

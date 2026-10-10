@@ -216,28 +216,27 @@ mod tests {
         assert_eq!(next, (latest + Duration::days(42)).and_utc().timestamp_millis());
     }
 
-    /// A zone with one spring-forward change (CET, +01:00, until 2026-03-29 02:00 local; CEST, +02:00, after). It
-    /// stands in for Europe/Paris, which the crate does not link.
+    /// A zone with one clock change: `BEFORE` seconds east of UTC until the instant `AT` (unix seconds), `AFTER` from
+    /// then on. Spring-forward and fall-back changes are both this shape, so the four zones below need no zone
+    /// database. A local time the change skips has no instant; one it repeats has two.
     #[derive(Clone, Copy, Debug)]
-    struct SpringZone;
+    struct Change<const BEFORE: i32, const AFTER: i32, const AT: i64>;
 
-    fn cet() -> FixedOffset {
-        FixedOffset::east_opt(3_600).unwrap()
+    impl<const BEFORE: i32, const AFTER: i32, const AT: i64> Change<BEFORE, AFTER, AT> {
+        fn offset(secs: i32) -> FixedOffset {
+            FixedOffset::east_opt(secs).unwrap()
+        }
+
+        fn at() -> NaiveDateTime {
+            DateTime::from_timestamp(AT, 0).unwrap().naive_utc()
+        }
     }
 
-    fn cest() -> FixedOffset {
-        FixedOffset::east_opt(7_200).unwrap()
-    }
-
-    fn transition_utc() -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(2026, 3, 29).unwrap().and_hms_opt(1, 0, 0).unwrap()
-    }
-
-    impl TimeZone for SpringZone {
+    impl<const BEFORE: i32, const AFTER: i32, const AT: i64> TimeZone for Change<BEFORE, AFTER, AT> {
         type Offset = FixedOffset;
 
         fn from_offset(_: &FixedOffset) -> Self {
-            SpringZone
+            Self
         }
 
         fn offset_from_local_date(&self, local: &NaiveDate) -> LocalResult<FixedOffset> {
@@ -245,14 +244,13 @@ mod tests {
         }
 
         fn offset_from_local_datetime(&self, local: &NaiveDateTime) -> LocalResult<FixedOffset> {
-            let gap_start = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap().and_hms_opt(2, 0, 0).unwrap();
-            let gap_end = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap().and_hms_opt(3, 0, 0).unwrap();
-            if *local < gap_start {
-                LocalResult::Single(cet())
-            } else if *local < gap_end {
-                LocalResult::None
-            } else {
-                LocalResult::Single(cest())
+            let before_holds = *local - Duration::seconds(i64::from(BEFORE)) < Self::at();
+            let after_holds = *local - Duration::seconds(i64::from(AFTER)) >= Self::at();
+            match (before_holds, after_holds) {
+                (true, true) => LocalResult::Ambiguous(Self::offset(BEFORE), Self::offset(AFTER)),
+                (true, false) => LocalResult::Single(Self::offset(BEFORE)),
+                (false, true) => LocalResult::Single(Self::offset(AFTER)),
+                (false, false) => LocalResult::None,
             }
         }
 
@@ -261,18 +259,101 @@ mod tests {
         }
 
         fn offset_from_utc_datetime(&self, utc: &NaiveDateTime) -> FixedOffset {
-            if *utc < transition_utc() { cet() } else { cest() }
+            Self::offset(if *utc < Self::at() { BEFORE } else { AFTER })
         }
+    }
+
+    /// Europe/Paris 2026-03-29: 02:00 CET (+01:00) becomes 03:00 CEST (+02:00). The day has 23 hours.
+    type ParisSpring = Change<3_600, 7_200, 1_774_746_000>;
+    /// Europe/Paris 2026-10-25: 03:00 CEST becomes 02:00 CET. The day has 25 hours.
+    type ParisAutumn = Change<7_200, 3_600, 1_792_890_000>;
+    /// America/New_York 2026-03-08: 02:00 EST (-05:00) becomes 03:00 EDT (-04:00). The day has 23 hours.
+    type NewYorkSpring = Change<{ -18_000 }, { -14_400 }, 1_772_953_200>;
+    /// America/New_York 2026-11-01: 02:00 EDT becomes 01:00 EST. The day has 25 hours.
+    type NewYorkAutumn = Change<{ -14_400 }, { -18_000 }, 1_793_512_800>;
+
+    const PARIS_SPRING: ParisSpring = Change;
+    const PARIS_AUTUMN: ParisAutumn = Change;
+    const NEW_YORK_SPRING: NewYorkSpring = Change;
+    const NEW_YORK_AUTUMN: NewYorkAutumn = Change;
+
+    /// Local wall-clock instant in `zone`, in epoch milliseconds (never a skipped or repeated time).
+    fn local<Tz: TimeZone>(zone: &Tz, y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Tz> {
+        zone.with_ymd_and_hms(y, m, d, h, min, 0).single().expect("an unambiguous local time")
+    }
+
+    fn utc_ms(y: i32, m: u32, d: u32, h: u32) -> i64 {
+        at(y, m, d, h)
     }
 
     #[test]
     fn fi22_day_counts_are_calendar_days_across_a_dst_change() {
         // Last change 2026-03-27 00:00 CET; now 2026-03-29 12:00 CEST. The count is calendar days: 2.
-        let now = SpringZone.with_ymd_and_hms(2026, 3, 29, 12, 0, 0).single().unwrap();
-        let last = SpringZone.with_ymd_and_hms(2026, 3, 27, 0, 0, 0).single().unwrap().timestamp_millis();
+        let now = local(&PARIS_SPRING, 2026, 3, 29, 12, 0);
+        let last = local(&PARIS_SPRING, 2026, 3, 27, 0, 0).timestamp_millis();
         let next = next_ms(stored(7, 0, last), 7, &now);
         // cycle = 2 div 7 = 0, next = 2026-03-27 + 7 days = 2026-04-03 00:00 at the offset of now (CEST) = 22:00 UTC.
         assert_eq!(next, Utc.with_ymd_and_hms(2026, 4, 2, 22, 0, 0).unwrap().timestamp_millis());
+    }
+
+    #[test]
+    fn fi22_europe_paris_window_uses_local_midnights_on_a_23_and_a_25_hour_day() {
+        // Spring: yesterday 00:00 CET to tomorrow 00:00 CEST is 47 hours, not 48.
+        let now = local(&PARIS_SPRING, 2026, 3, 29, 12, 0);
+        let window = window_for(&now);
+        assert_eq!(window.lower_ms, utc_ms(2026, 3, 27, 23));
+        assert_eq!(window.upper_ms, utc_ms(2026, 3, 29, 22) - 1);
+        // Autumn: yesterday 00:00 CEST to tomorrow 00:00 CET is 49 hours.
+        let now = local(&PARIS_AUTUMN, 2026, 10, 25, 12, 0);
+        let window = window_for(&now);
+        assert_eq!(window.lower_ms, utc_ms(2026, 10, 23, 22));
+        assert_eq!(window.upper_ms, utc_ms(2026, 10, 25, 23) - 1);
+    }
+
+    #[test]
+    fn fi22_europe_paris_next_update_counts_calendar_days_not_hours() {
+        // Spring: 2026-03-28 00:00 to 2026-03-30 00:30 is 2 calendar days but 47.5 hours.
+        let now = local(&PARIS_SPRING, 2026, 3, 30, 0, 30);
+        let last = local(&PARIS_SPRING, 2026, 3, 28, 0, 0).timestamp_millis();
+        // 2 days since the last change at a 1-day interval: cycle 2, next = last + 3 days = 03-31 00:00 CEST.
+        assert_eq!(next_ms(stored(1, 0, last), 1, &now), utc_ms(2026, 3, 30, 22));
+        // Autumn: 2026-10-24 00:00 to 2026-10-25 23:30 is 1 calendar day but 48.5 hours.
+        let now = local(&PARIS_AUTUMN, 2026, 10, 25, 23, 30);
+        let last = local(&PARIS_AUTUMN, 2026, 10, 24, 0, 0).timestamp_millis();
+        // 1 day since the last change: cycle 1, next = last + 2 days = 10-26 00:00 CET.
+        assert_eq!(next_ms(stored(1, 0, last), 1, &now), utc_ms(2026, 10, 25, 23));
+    }
+
+    #[test]
+    fn fi22_america_new_york_window_uses_local_midnights_on_a_23_and_a_25_hour_day() {
+        let now = local(&NEW_YORK_SPRING, 2026, 3, 8, 12, 0);
+        let window = window_for(&now);
+        assert_eq!(window.lower_ms, utc_ms(2026, 3, 7, 5), "03-07 00:00 EST");
+        assert_eq!(window.upper_ms, utc_ms(2026, 3, 9, 4) - 1, "03-09 00:00 EDT, 47 hours later");
+        let now = local(&NEW_YORK_AUTUMN, 2026, 11, 1, 12, 0);
+        let window = window_for(&now);
+        assert_eq!(window.lower_ms, utc_ms(2026, 10, 31, 4), "10-31 00:00 EDT");
+        assert_eq!(window.upper_ms, utc_ms(2026, 11, 2, 5) - 1, "11-02 00:00 EST, 49 hours later");
+    }
+
+    #[test]
+    fn fi22_america_new_york_next_update_counts_calendar_days_not_hours() {
+        // Spring: 2026-03-07 00:00 to 2026-03-09 00:30 is 2 calendar days but 47.5 hours.
+        let now = local(&NEW_YORK_SPRING, 2026, 3, 9, 0, 30);
+        let last = local(&NEW_YORK_SPRING, 2026, 3, 7, 0, 0).timestamp_millis();
+        assert_eq!(next_ms(stored(1, 0, last), 1, &now), utc_ms(2026, 3, 10, 4), "03-10 00:00 EDT");
+        // Autumn: 2026-10-31 00:00 to 2026-11-01 23:30 is 1 calendar day but 48.5 hours.
+        let now = local(&NEW_YORK_AUTUMN, 2026, 11, 1, 23, 30);
+        let last = local(&NEW_YORK_AUTUMN, 2026, 10, 31, 0, 0).timestamp_millis();
+        assert_eq!(next_ms(stored(1, 0, last), 1, &now), utc_ms(2026, 11, 2, 5), "11-02 00:00 EST");
+    }
+
+    #[test]
+    fn the_change_zones_skip_and_repeat_the_local_hours_a_clock_change_does() {
+        let spring = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap();
+        assert!(matches!(PARIS_SPRING.offset_from_local_datetime(&spring.and_hms_opt(2, 30, 0).unwrap()), LocalResult::None));
+        let autumn = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        assert!(matches!(PARIS_AUTUMN.offset_from_local_datetime(&autumn.and_hms_opt(2, 30, 0).unwrap()), LocalResult::Ambiguous(..)));
     }
 
     #[test]

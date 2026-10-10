@@ -26,7 +26,7 @@ use super::holder::{self, PageHost, Row, Tasks};
 use super::keys::{self, InputKey, KeyAction, KeyContext, KeyEvent};
 use super::model::{ChapterKey, ChapterSet, ItemKey, PageKind, PageRef};
 use super::nav::{self, TapOutcome};
-use super::page_opts::page_opts;
+use super::page_opts::{page_opts, side_padding_px};
 use super::pager::controller::{PagerController, PagerOptions};
 use super::settings::{self, Family, Reaction, SettingsWatch, ViewerSettings};
 use super::webtoon::controller::{WebtoonController, WebtoonOptions};
@@ -35,6 +35,7 @@ use super::webtoon::layout::{StripLayout, refresh_range};
 use super::webtoon::zoom::{Anim, WebtoonZoom};
 use super::{Emitter, ViewerContext, ViewerEngine, ViewerKind};
 use crate::reader::error_card;
+use crate::reader::page_zoom::{self, ZoomKey};
 use crate::reader::model::{ChapterTransition, PageStatus, ReaderChapter, ReaderPage, ViewerChapters};
 use crate::reader::viewer::ViewerEvent;
 
@@ -101,7 +102,7 @@ fn recognizer(on_release: bool) -> TapRecognizer {
     if on_release { r.acting_on_release() } else { r }
 }
 
-pub(super) fn input_key(key: &gtk::gdk::Key) -> InputKey {
+pub(super) fn input_key(key: &gtk::gdk::Key, shift: bool) -> InputKey {
     match key.name().as_deref() {
         Some("Left") => InputKey::Left,
         Some("Right") => InputKey::Right,
@@ -109,9 +110,17 @@ pub(super) fn input_key(key: &gtk::gdk::Key) -> InputKey {
         Some("Down") => InputKey::Down,
         Some("Page_Up") => InputKey::PageUp,
         Some("Page_Down") => InputKey::PageDown,
+        Some("space") if shift => InputKey::ShiftSpace,
+        Some("space") => InputKey::Space,
+        Some("Home") => InputKey::Home,
+        Some("End") => InputKey::End,
         Some("Menu") => InputKey::Menu,
         Some("XF86AudioRaiseVolume") => InputKey::VolumeUp,
         Some("XF86AudioLowerVolume") => InputKey::VolumeDown,
+        // plus, minus and 0 zoom; Ctrl+0 is the same reset (T-43b-058)
+        Some("plus" | "equal" | "KP_Add") => InputKey::ZoomIn,
+        Some("minus" | "KP_Subtract") => InputKey::ZoomOut,
+        Some("0" | "KP_0") => InputKey::ZoomReset,
         _ => InputKey::Other,
     }
 }
@@ -277,7 +286,7 @@ fn wire_surface<T: Surface>(this: &Rc<T>) {
     let keys = gtk::EventControllerKey::new();
     let weak = Rc::downgrade(this);
     keys.connect_key_pressed(move |_, key, _, state| {
-        let ev = KeyEvent { key: input_key(&key), ctrl: state.contains(gtk::gdk::ModifierType::CONTROL_MASK), released: false };
+        let ev = KeyEvent { key: input_key(&key, state.contains(gtk::gdk::ModifierType::SHIFT_MASK)), ctrl: state.contains(gtk::gdk::ModifierType::CONTROL_MASK), released: false };
         match weak.upgrade() {
             Some(s) if s.key(ev) => Propagation::Stop,
             _ => Propagation::Proceed,
@@ -285,7 +294,7 @@ fn wire_surface<T: Surface>(this: &Rc<T>) {
     });
     let weak = Rc::downgrade(this);
     keys.connect_key_released(move |_, key, _, state| {
-        let ev = KeyEvent { key: input_key(&key), ctrl: state.contains(gtk::gdk::ModifierType::CONTROL_MASK), released: true };
+        let ev = KeyEvent { key: input_key(&key, state.contains(gtk::gdk::ModifierType::SHIFT_MASK)), ctrl: state.contains(gtk::gdk::ModifierType::CONTROL_MASK), released: true };
         if let Some(s) = weak.upgrade() {
             s.key(ev);
         }
@@ -514,8 +523,14 @@ impl PagerInner {
                     self.rebuild();
                 }
                 Effect::ScrollTo { index, smooth } => self.scroll_to(index, smooth),
-                // Panning a wide page (T-44a-029) and the zoom-start hook (T-44a-03x) are not wired yet.
-                Effect::Pan(_) | Effect::ZoomStart { .. } => {}
+                Effect::Pan(dir) => self.on_current_row(|row| row.pan(dir)),
+                // the page's zoom-start hook runs the landscape zoom (T-43b-018)
+                Effect::ZoomStart { page, forward } => {
+                    let key = ItemKey::Page(page);
+                    if let Some((_, row)) = self.slots.borrow().values().find(|(item, _)| *item == key) {
+                        row.page_selected(forward);
+                    }
+                }
                 Effect::PageSelected(r) => {
                     let page = self.lookup.borrow().page(&r);
                     if let Some(page) = page {
@@ -690,8 +705,21 @@ impl PagerInner {
         });
     }
 
+    /// Runs `f` on the row of the page that is shown, when it has one.
+    fn on_current_row(&self, f: impl FnOnce(&Row)) {
+        let index = self.ctl.borrow().view_index();
+        if let Some((_, row)) = self.slots.borrow().get(&index) {
+            f(row);
+        }
+    }
+
+    /// A move command. The shown page's pan room in the direction of the command decides whether it pans first
+    /// (`navigate_to_pan`, B§6.3), for keys, wheel and side-zone taps alike.
     fn command(&self, cmd: super::pager::nav::PageCmd) {
-        let fx = self.ctl.borrow_mut().command(cmd, false);
+        let dir = super::pager::nav::physical(self.kind, cmd);
+        let mut can_pan = false;
+        self.on_current_row(|row| can_pan = row.can_pan(dir));
+        let fx = self.ctl.borrow_mut().command(cmd, can_pan);
         self.run(fx);
     }
 
@@ -737,6 +765,7 @@ impl PagerInner {
         match out.action {
             Some(KeyAction::Page(cmd)) => self.command(cmd),
             Some(KeyAction::ToggleMenu) => self.emit.send(ViewerEvent::ToggleMenu),
+            Some(KeyAction::Zoom(zoom_key)) => self.on_current_row(|row| row.zoom_key(zoom_key)),
             Some(KeyAction::Scroll { .. }) | None => {}
         }
         out.claimed
@@ -1083,6 +1112,7 @@ impl WebtoonInner {
                         self.lay_out();
                     }
                 }
+                // the webtoon neither pans a page nor zooms one to the view height
                 Effect::Pan(_) | Effect::ZoomStart { .. } => {}
                 Effect::PageSelected(r) => {
                     let page = self.lookup.borrow().page(&r);
@@ -1140,6 +1170,7 @@ impl WebtoonInner {
 
     fn reconcile(&self, items: &[ItemKey], layout: &StripLayout, range: Range<usize>) {
         let width = self.root.width().max(0);
+        let pad = side_padding_px(width, self.settings.borrow().side_padding);
         let mut realised = self.realised.borrow_mut();
         let wanted: HashSet<&ItemKey> = range.clone().map(|i| &items[i]).collect();
         let stale: Vec<ItemKey> = realised.keys().filter(|k| !wanted.contains(k)).cloned().collect();
@@ -1159,8 +1190,9 @@ impl WebtoonInner {
                 })
                 .widget
                 .clone();
-            widget.set_size_request(width, layout.height(i));
-            self.fixed.move_(&widget, 0.0, layout.offset(i) as f64);
+            // every row is inset by the side padding on both sides (T-43b-047)
+            widget.set_size_request((width - 2 * pad).max(0), layout.height(i));
+            self.fixed.move_(&widget, f64::from(pad), layout.offset(i) as f64);
         }
         drop(realised);
         self.fixed.set_size_request(width, layout.total_height() as i32);
@@ -1393,9 +1425,22 @@ impl WebtoonInner {
                 self.scroll_by(if down { step } else { -step });
             }
             Some(KeyAction::ToggleMenu) => self.emit.send(ViewerEvent::ToggleMenu),
+            Some(KeyAction::Zoom(zoom_key)) => self.key_zoom(zoom_key),
             Some(KeyAction::Page(_)) | None => {}
         }
         out.claimed
+    }
+
+    /// A zoom key scales the strip as a pinch does (T-43b-058): one step in or out, or back to 1.
+    fn key_zoom(&self, key: ZoomKey) {
+        self.stop_zoom_anim();
+        let factor = match key {
+            ZoomKey::In => page_zoom::KEY_ZOOM_STEP,
+            ZoomKey::Out => 1.0 / page_zoom::KEY_ZOOM_STEP,
+            ZoomKey::Reset => 1.0 / self.zoom.borrow().scale().max(f64::EPSILON),
+        };
+        self.pinch(factor);
+        self.pinch_end();
     }
 }
 
@@ -1518,6 +1563,16 @@ mod tests {
         false
     }
 
+    /// Runs the main context for `ms` milliseconds.
+    fn pump_ms(ms: u64) {
+        let ctx = glib::MainContext::default();
+        let end = std::time::Instant::now() + Duration::from_millis(ms);
+        while std::time::Instant::now() < end {
+            while ctx.iteration(false) {}
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-6
     }
@@ -1616,6 +1671,142 @@ mod tests {
             assert!(inner.animating.get(), "turning zoom-out off below 1 animates back (E-32)");
             assert!(pump_until(|| !inner.animating.get() && close(inner.frame.view().0, 1.0)));
             window.destroy();
+        });
+    }
+
+    #[test]
+    fn t058_the_plus_minus_and_zero_keys_map_to_the_zoom_keys() {
+        crate::testing::with_display(|| {
+            use gtk::gdk::Key;
+            assert_eq!(input_key(&Key::plus, false), InputKey::ZoomIn);
+            assert_eq!(input_key(&Key::equal, false), InputKey::ZoomIn);
+            assert_eq!(input_key(&Key::KP_Add, false), InputKey::ZoomIn);
+            assert_eq!(input_key(&Key::minus, false), InputKey::ZoomOut);
+            assert_eq!(input_key(&Key::KP_Subtract, false), InputKey::ZoomOut);
+            assert_eq!(input_key(&Key::_0, false), InputKey::ZoomReset);
+            assert_eq!(input_key(&Key::KP_0, false), InputKey::ZoomReset);
+            assert_eq!(input_key(&Key::a, false), InputKey::Other);
+        });
+    }
+
+    #[test]
+    fn t058_a_zoom_key_scales_the_webtoon_strip_and_reset_returns_to_one() {
+        crate::testing::with_display(|| {
+            let chapter = chapter(1, &[image("keyzoom-a", 40, 60)]);
+            let engine = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&prefs())));
+            let window = show(engine.widget());
+            engine.set_chapters(handed(&chapter));
+            let inner = Rc::clone(&engine.0);
+            assert!(pump_until(|| inner.frame.height() > 0 && inner.frame.is_mapped()));
+            let press = |key| engine.handle_key(KeyEvent { key, ctrl: false, released: false });
+            assert!(press(InputKey::ZoomIn));
+            assert!(close(inner.frame.view().0, page_zoom::KEY_ZOOM_STEP), "{}", inner.frame.view().0);
+            assert!(press(InputKey::ZoomOut));
+            assert!(press(InputKey::ZoomOut));
+            assert!(close(inner.frame.view().0, 1.0 / page_zoom::KEY_ZOOM_STEP));
+            assert!(press(InputKey::ZoomIn));
+            assert!(press(InputKey::ZoomIn));
+            assert!(press(InputKey::ZoomReset));
+            assert!(close(inner.frame.view().0, 1.0), "reset: {}", inner.frame.view().0);
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn t047_the_webtoon_rows_are_inset_by_the_side_padding_on_both_sides() {
+        crate::testing::with_display(|| {
+            let chapter = chapter(1, &[image("padding-a", 40, 60)]);
+            let p = prefs();
+            p.webtoon_side_padding.set(10).unwrap();
+            let engine = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&p)));
+            let window = show(engine.widget());
+            engine.set_chapters(handed(&chapter));
+            let inner = Rc::clone(&engine.0);
+            // one sample of the geometry per check: the window may still be growing while the strip lays out
+            let inset = |percent: i32| {
+                let width = inner.root.width();
+                let item = inner.ctl.borrow().items().iter().find(|i| i.page().is_some()).cloned()?;
+                let realised = inner.realised.borrow();
+                let row = realised.get(&item)?;
+                let pad = width * percent / 100;
+                let (request, x) = (row.widget.width_request(), inner.fixed.child_position(&row.widget).0);
+                Some(width > 0 && request == width - 2 * pad && x == f64::from(pad))
+            };
+            assert!(pump_until(|| inset(10) == Some(true)), "padded by 10 percent of the view width on both sides");
+            for _ in 0..6 {
+                pump_ms(100);
+                eprintln!("DEBUG root {} window {} fixed {}", inner.root.width(), window.width(), inner.fixed.width());
+            }
+            // a change of the setting refreshes the rows at the new inset
+            let held = inner.settings.borrow().clone();
+            engine.apply_settings(ViewerSettings { side_padding: 0, ..held });
+            let ok = pump_until(|| inset(0) == Some(true));
+            let sample = {
+                let item = inner.ctl.borrow().items().iter().find(|i| i.page().is_some()).cloned();
+                let realised = inner.realised.borrow();
+                item.and_then(|i| realised.get(&i).map(|r| (r.widget.width_request(), inner.fixed.child_position(&r.widget).0)))
+            };
+            assert!(ok, "no padding, full width: root {} sample {:?} settings {}", inner.root.width(), sample, inner.settings.borrow().side_padding);
+            window.destroy();
+        });
+    }
+
+    /// A pager on two wide pages, shown and decoded, with the shown page's row.
+    fn wide_pager(name: &str, prefs: &ReaderPrefs) -> (PagerEngine, gtk::Window) {
+        let chapter = chapter(1, &[image(&format!("{name}-a"), 2000, 1000), image(&format!("{name}-b"), 2000, 1000)]);
+        let engine = PagerEngine::new(ViewerKind::LeftToRight, context(ViewerSettings::from_prefs(prefs)));
+        let window = show(engine.widget());
+        engine.set_chapters(handed(&chapter));
+        let inner = Rc::clone(&engine.0);
+        let ready = || {
+            let index = inner.ctl.borrow().view_index();
+            inner.slots.borrow().get(&index).is_some_and(|(_, row)| row.page_ready())
+        };
+        assert!(pump_until(ready), "the shown page is decoded");
+        pump_ms(300);
+        (engine, window)
+    }
+
+    #[test]
+    fn t019_a_next_command_turns_a_fitted_page_because_it_has_nothing_to_pan() {
+        crate::testing::with_display(|| {
+            use super::super::pager::nav::PageCmd;
+            let (engine, window) = wide_pager("pan-fit", &prefs());
+            let inner = Rc::clone(&engine.0);
+            let first = inner.ctl.borrow().view_index();
+            inner.command(PageCmd::Next);
+            assert_eq!(inner.ctl.borrow().view_index(), first + 1);
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn t019_a_next_command_pans_a_zoomed_page_before_it_turns_and_navigate_to_pan_off_turns_at_once() {
+        crate::testing::with_display(|| {
+            use super::super::pager::nav::{PageCmd, Phys};
+            for navigate_pan in [true, false] {
+                let p = prefs();
+                p.navigate_to_pan.set(navigate_pan).unwrap();
+                let (engine, window) = wide_pager(&format!("pan-zoom-{navigate_pan}"), &p);
+                let inner = Rc::clone(&engine.0);
+                inner.on_current_row(|row| (0..4).for_each(|_| row.zoom_key(ZoomKey::In)));
+                let mut room = false;
+                inner.on_current_row(|row| room = row.can_pan(Phys::Right));
+                assert!(room, "zoomed in, the page has room to the right");
+                let first = inner.ctl.borrow().view_index();
+                let mut pans = 0;
+                for _ in 0..6 {
+                    inner.command(PageCmd::Next);
+                    if inner.ctl.borrow().view_index() != first {
+                        break;
+                    }
+                    pans += 1;
+                    pump_ms(400);
+                }
+                assert_eq!(inner.ctl.borrow().view_index(), first + 1, "it turns once the page is at its right edge");
+                assert_eq!(pans, usize::from(navigate_pan), "one pan across the zoomed page, none with the preference off");
+                window.destroy();
+            }
         });
     }
 

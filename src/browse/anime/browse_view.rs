@@ -6,6 +6,8 @@
 
 use std::rc::Rc;
 
+use kuro_domain::source::browse::BrowseQuery;
+
 use crate::browse::anime::browse::{Link, open_external, help_link, webview_link};
 use crate::browse::anime::prefs::AnimeBrowsePrefs;
 use crate::browse::filters::SourceFilters;
@@ -35,6 +37,8 @@ pub struct AnimeBrowseDeps {
     pub on_settings: Rc<dyn Fn()>,
     /// The window an external link launches from, when there is one.
     pub parent: Option<gtk::Window>,
+    /// What the page opens on: the route's listing, Popular or Latest from a row, or a search from global search.
+    pub initial_query: BrowseQuery,
 }
 
 /// What an overflow item does.
@@ -67,7 +71,7 @@ pub fn open_link(link: &Link, open_webview: &dyn Fn(&str, &str), parent: Option<
 /// Builds the anime browse page. Opening it stores the source as the last-used anime source once, for an installed or a
 /// stub source, unless incognito applies (the global switch, or the source's extension in `incognito_anime_extensions`).
 pub fn anime_browse_source(deps: AnimeBrowseDeps) -> SourcePage {
-    let AnimeBrowseDeps { supports_latest, configurable, prefs, package, home_url, mut listing, filters, favorites, on_back, open_webview, on_settings, parent } = deps;
+    let AnimeBrowseDeps { supports_latest, configurable, prefs, package, home_url, mut listing, filters, favorites, on_back, open_webview, on_settings, parent, initial_query } = deps;
     if let Err(error) = prefs.record_last_used(listing.source_id, package.as_deref()) {
         tracing::warn!(%error, "could not store the last used anime source");
     }
@@ -93,7 +97,7 @@ pub fn anime_browse_source(deps: AnimeBrowseDeps) -> SourcePage {
         filters,
         favorites,
         hide_in_library,
-        initial_query: kuro_domain::source::browse::BrowseQuery::Popular,
+        initial_query,
         on_back,
         on_overflow,
         open_url: Rc::new(move |url| open_external(url, parent.as_ref())),
@@ -187,6 +191,7 @@ pub(crate) mod tests {
             open_webview: Rc::new(move |url, name| webview.borrow_mut().push(format!("webview {name} {url}"))),
             on_settings: Rc::new(move || settings.borrow_mut().push("settings".into())),
             parent: None,
+            initial_query: BrowseQuery::Popular,
         });
         Rig { page, prefs, log, source, _runtime: entered }
     }

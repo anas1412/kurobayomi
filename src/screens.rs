@@ -38,11 +38,26 @@ pub fn body(id: &str) -> Option<Built> {
 pub fn build(id: &str) -> GBox {
     match id {
         "reader" => return crate::reader::launch::page_for("Title 1", "Chapter 1"),
+        "upcoming" => {
+            if let Some(page) = crate::updates::mount::upcoming() {
+                return page;
+            }
+        }
         "player" => return crate::player::player("Title 1", "Episode 1"),
         "anime_entry_details" => return crate::entry_core::anime::route::build(),
         "manga_entry_details" => return crate::entry_core::route::build(),
         "browse_source" | "migrate_source_search" => {
             if let Some(page) = crate::browse::browse_screen::page(id) {
+                return page;
+            }
+        }
+        "migrate_entries" => {
+            if let Some(page) = crate::browse::migrate_screen::page() {
+                return page;
+            }
+        }
+        "source_preferences" => {
+            if let Some(page) = crate::browse::source_prefs_screen::page() {
                 return page;
             }
         }

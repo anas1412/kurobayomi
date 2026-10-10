@@ -4,6 +4,9 @@
 //! [`instantiate`] compiles it, asks it for its sources, and returns each one as a `CatalogueSource`. Every guest call
 //! runs on a blocking thread, behind a per-source mutex, under an epoch deadline and a memory limit (see [`limits`]).
 
+// the shared WAT guests are also compiled into tests/sandbox.rs, where they name this crate by its own name
+extern crate self as kuro_source_wasm;
+
 pub mod bridge;
 pub mod error;
 pub mod install;

@@ -24,7 +24,6 @@ use kuro_prefs::library::LibraryPrefs;
 use kuro_data::chapter::Chapter;
 use kuro_db::Db;
 use kuro_platform::toast::{ToastLength, Toaster};
-use kuro_platform::notifier::Notifier;
 use kuro_data::manga::{MangaRepo, MangaUpdate};
 use kuro_prefs::reader::{ReaderOrientation, ReaderPrefs, ReadingMode};
 use tokio::sync::watch;
@@ -37,6 +36,7 @@ use super::flags::{self, CropPref};
 use super::history_rules;
 use super::page_actions;
 use super::page_save;
+use super::saved_notice;
 use super::restore;
 use super::indicator::PageIndicator;
 use super::keep_awake::{self, KeepAwake};
@@ -44,6 +44,7 @@ use super::loader::{LoadFailure, Loader, load_chapter};
 use super::mode_sheet::{self, Outcome};
 use super::model::{LoadError, PageStatus, ReaderChapter, ReaderPage, ViewerChapters};
 use super::nav::{self, Step};
+use super::nav_overlay::{self, NavOverlay};
 use super::navigator::{Navigator, NavigatorState};
 use super::overlay::Tint;
 use super::session::{AdjacentOutcome, ReaderEvent, ReaderSession, ReaderStore, open_list};
@@ -597,6 +598,8 @@ struct Screen {
     /// The core's event feed, taken once the initial load has made it (T-043a-086).
     events: RefCell<Option<std::sync::mpsc::Receiver<ReaderEvent>>>,
     tint: Tint,
+    /// The tap zones drawn over the pages (G-27).
+    nav_overlay: NavOverlay,
     /// Holds the top bar, which is rebuilt when the chapter or its bookmark changes.
     top_slot: gtk::Box,
     /// The id of the chapter the top bar shows, `-1` before the first build.
@@ -659,6 +662,7 @@ pub fn open_with(
     // the overlays sit over the pages only, below the chrome and the sheets
     let page_layer = gtk::Overlay::new();
     let tint = Tint::new(&page_layer, &stack);
+    let nav_overlay = NavOverlay::new(&page_layer);
 
     let navigator = Navigator::new();
     let top_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -706,6 +710,7 @@ pub fn open_with(
         viewer_kind: Cell::new(None),
         events: RefCell::new(None),
         tint,
+        nav_overlay,
         top_slot,
         shown_chapter: Cell::new(-1),
         top,
@@ -807,7 +812,7 @@ pub fn open_with(
         });
     }
 
-    screen.tint.apply(&screen.core.deps.prefs, &screen.stack);
+    screen.tint.apply(&screen.core.deps.prefs);
     sync::follow(&prefs_store, weak.clone(), apply_effect);
     start(&screen);
     ReaderScreen { root, viewer, core, chrome: ReaderChrome { screen: weak } }
@@ -855,7 +860,14 @@ fn apply_effect(screen: &Screen, effect: Effect) {
                 (screen.on_close)();
             }
         }
-        Effect::Brightness | Effect::ColorFilter => screen.tint.apply(&screen.core.deps.prefs, &screen.stack),
+        Effect::Navigation => {
+            // a changed tap-zone layout shows the new zones (`navigationModeChangedListener`)
+            if let Some(kind) = screen.viewer_kind.get() {
+                let zones = nav_overlay::zones_for(kind, &screen.core.viewer_settings());
+                screen.nav_overlay.set_navigation(zones, false);
+            }
+        }
+        Effect::Brightness | Effect::ColorFilter => screen.tint.apply(&screen.core.deps.prefs),
     }
 }
 
@@ -917,10 +929,12 @@ fn handle_key(screen: &Rc<Screen>, key: gtk::gdk::Key, modifiers: gtk::gdk::Modi
     if screen.sheet.is_open() {
         return glib::Propagation::Proceed;
     }
-    if !text_has_focus(screen) {
-        if let Some(propagation) = shortcut(screen, key, modifiers) {
-            return propagation;
-        }
+    // a text entry keeps every key it is typed (the zoom keys plus, minus and 0 included, T-43b-058)
+    if text_has_focus(screen) {
+        return glib::Propagation::Proceed;
+    }
+    if let Some(propagation) = shortcut(screen, key, modifiers) {
+        return propagation;
     }
     // the reader's focus is on the root, so the keys the viewer owns (arrows, page keys) come through here
     if screen.viewer_slot.borrow().as_ref().is_some_and(|v| v.handle_key(key, modifiers)) {
@@ -1036,8 +1050,13 @@ fn save_page(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
     let (title, chapter) = screen.core.page_names(page);
     let base = page_save::page_file_base(&title, &chapter, page.number() as usize);
     let folder = screen.core.deps.prefs.folder_per_manga.get();
-    let Some(notifier) = app_notifier() else { return warn_unknown(screen) };
-    page_save::save_in_background(source, &title, &base, folder, notifier);
+    let Some(app) = saved_notice::application() else { return warn_unknown(screen) };
+    // the notice of an earlier save goes first; the new one replaces it (fixed id)
+    saved_notice::clear(&app);
+    page_save::save_in_background(source, &title, &base, folder, move |saved, thumbnail| match saved {
+        Ok(path) => saved_notice::show_saved(&app, &path, thumbnail),
+        Err(error) => saved_notice::show_failed(&app, Some(&error)),
+    });
 }
 
 /// Stages a copy of the page and opens it with the desktop (T-43a-056).
@@ -1076,12 +1095,6 @@ fn set_cover(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
             s.toaster.show(message, ToastLength::Short);
         });
     });
-}
-
-/// The notifier of the app's notices, for the save notice. `None` before the application exists.
-fn app_notifier() -> Option<Arc<dyn Notifier>> {
-    let app = gtk::gio::Application::default()?.downcast::<gtk::Application>().ok()?;
-    Some(Arc::new(crate::gio_notifier::GioNotifier::new(&app, Vec::new())))
 }
 
 /// Whether a text field of the reader has the focus, when the reader's shortcuts stay off (T-43a-053).
@@ -1206,6 +1219,16 @@ fn install_viewer(screen: &Rc<Screen>) {
         prefs: Some(screen.core.reader_prefs()),
         downloads: screen.core.downloads(),
     };
+    // the new-user flag shows the overlay once; the preference is cleared as soon as it is read (`ViewerConfig`)
+    let prefs = screen.core.reader_prefs();
+    let new_user = prefs.show_navigation_overlay_new_user.get();
+    if new_user {
+        if let Err(e) = prefs.show_navigation_overlay_new_user.set(false) {
+            tracing::warn!(error = %e, "the new-user overlay flag could not be saved");
+        }
+    }
+    let wanted = ctx.settings.overlay_on_start || new_user;
+    screen.nav_overlay.set_navigation(nav_overlay::zones_for(kind, &ctx.settings), wanted);
     screen.viewer_kind.set(Some(kind));
     chrome.attach_viewer(Box::new(EngineViewer::new(make_viewer(kind, ctx), screen.viewer_box.clone())));
 }
@@ -1369,6 +1392,7 @@ mod tests {
     use kuro_data::manga::{Manga, MangaRepo};
     use kuro_prefs::store::PrefStore;
     use kuro_prefs::reader::ReadingMode;
+    use crate::reader::delete_queue::Pending;
 
     struct Pages;
 
@@ -1446,6 +1470,112 @@ mod tests {
             incognito: false,
             prefs_store: PrefStore::in_memory(),
         })
+    }
+
+    fn core_with(f: &Fixture, chapter_id: i64, prefs_store: PrefStore, extras: ReaderExtras, build: BuildLoader) -> ReaderCore {
+        ReaderCore::with_extras(
+            ReaderDeps {
+                db: Arc::clone(&f.db),
+                manga_id: f.manga_id,
+                chapter_id,
+                prefs: ReaderPrefs::new(prefs_store.clone()),
+                store: Rc::new(NoStore),
+                build,
+                is_downloaded: Rc::new(|_| false),
+                downloaded_only: false,
+                incognito: false,
+                prefs_store,
+            },
+            extras,
+        )
+    }
+
+    fn data_extras(dir: &std::path::Path, sink: Option<DeleteSink>) -> ReaderExtras {
+        ReaderExtras { data_dir: Some(dir.to_path_buf()), delete_sink: sink, downloads: DownloadCheck::default() }
+    }
+
+    fn record(f: &Fixture, chapter: usize, page_index: i64, age_ms: i64) -> restore::SavedSession {
+        restore::SavedSession {
+            manga_id: f.manga_id,
+            chapter_id: f.chapter_ids[chapter],
+            page_index,
+            saved_at: history_rules::now_ms() - age_ms,
+        }
+    }
+
+    fn current_requested_page(core: &ReaderCore) -> i64 {
+        core.session.borrow().as_ref().unwrap().current_chapter().unwrap().requested_page.get()
+    }
+
+    #[test]
+    fn a_reader_opened_without_a_chapter_restores_the_saved_chapter_and_page() {
+        let f = fixture(3);
+        let dir = tempfile::tempdir().unwrap();
+        restore::save(&restore::path_in(dir.path()), &record(&f, 1, 1, 60_000)).unwrap();
+        let core = core_with(&f, 0, PrefStore::in_memory(), data_extras(dir.path(), None), http_build("restore"));
+        core.initial_load().unwrap();
+        assert_eq!(core.current_index(), Some(1));
+        assert_eq!(current_requested_page(&core), 1);
+    }
+
+    #[test]
+    fn an_explicit_chapter_wins_and_the_setting_off_or_an_old_record_restores_nothing() {
+        let f = fixture(3);
+        let dir = tempfile::tempdir().unwrap();
+        restore::save(&restore::path_in(dir.path()), &record(&f, 1, 1, 60_000)).unwrap();
+        let explicit = core_with(&f, f.chapter_ids[2], PrefStore::in_memory(), data_extras(dir.path(), None), http_build("restore-explicit"));
+        explicit.initial_load().unwrap();
+        assert_eq!(explicit.current_index(), Some(2), "the chapter the library asked for wins");
+
+        let off = PrefStore::in_memory();
+        off.pref(restore::PREF_KEY, true).set(false).unwrap();
+        let disabled = core_with(&f, 0, off, data_extras(dir.path(), None), http_build("restore-off"));
+        assert_eq!(disabled.initial_load().unwrap_err().message, "Requested chapter of id 0 not found in chapter list");
+
+        restore::save(&restore::path_in(dir.path()), &record(&f, 1, 1, restore::WINDOW_MS + 1_000)).unwrap();
+        let stale = core_with(&f, 0, PrefStore::in_memory(), data_extras(dir.path(), None), http_build("restore-old"));
+        assert!(stale.initial_load().is_err(), "a record older than 24 hours is not used");
+    }
+
+    #[test]
+    fn a_restored_page_beyond_the_chapter_is_kept_inside_it() {
+        let f = fixture(1);
+        let dir = tempfile::tempdir().unwrap();
+        restore::save(&restore::path_in(dir.path()), &record(&f, 0, 40, 1_000)).unwrap();
+        let core = core_with(&f, 0, PrefStore::in_memory(), data_extras(dir.path(), None), http_build("restore-clamp"));
+        core.initial_load().unwrap();
+        assert_eq!(current_requested_page(&core), 1, "the chapter has two pages");
+    }
+
+    #[test]
+    fn closing_hands_the_delete_queue_to_the_sink_once_and_without_a_sink_the_rule_is_off() {
+        let f = fixture(3);
+        let dir = tempfile::tempdir().unwrap();
+        let store = PrefStore::in_memory();
+        DownloadPrefs::new(&store).remove_after_read_slots.set(0).unwrap();
+        let handed: Rc<RefCell<Vec<Vec<Pending>>>> = Rc::default();
+        let sink: DeleteSink = {
+            let handed = Rc::clone(&handed);
+            Rc::new(move |pending| handed.borrow_mut().push(pending))
+        };
+        let core = core_with(&f, f.chapter_ids[0], store.clone(), data_extras(dir.path(), Some(sink)), http_build("delete"));
+        core.initial_load().unwrap();
+        let finish = |core: &ReaderCore| {
+            let chapter = Rc::clone(core.session.borrow().as_ref().unwrap().current_chapter().unwrap());
+            let last = Rc::clone(chapter.pages().unwrap().last().unwrap());
+            last.set_chapter(&chapter);
+            core.page_selected(&last, &mut |_| {}, &mut || {});
+        };
+        finish(&core);
+        core.flush_deletes();
+        core.flush_deletes();
+        assert_eq!(*handed.borrow(), vec![vec![Pending { manga_id: f.manga_id, chapter_id: f.chapter_ids[0] }]]);
+
+        let quiet = core_with(&f, f.chapter_ids[0], store, data_extras(dir.path(), None), http_build("delete-off"));
+        quiet.initial_load().unwrap();
+        finish(&quiet);
+        quiet.flush_deletes();
+        assert_eq!(handed.borrow().len(), 1, "without a sink nothing is handed over");
     }
 
     fn runtime() -> tokio::runtime::Runtime {

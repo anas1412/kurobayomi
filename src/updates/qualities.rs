@@ -58,6 +58,34 @@ pub fn open(request: QualityRequest) -> bool {
     }
 }
 
+/// The spec screen and dialog of the episode options.
+const OPTIONS_SCREEN: &str = "anime_entry_details";
+const OPTIONS_DIALOG: &str = "episode_options";
+
+/// The episode options dialog for `request`: the spec dialog under the episode's title (the dialog's own title is the
+/// episode title, `EpisodeOptionsDialogScreen`).
+pub fn episode_dialog(spec: &crate::spec::Dialog, request: &QualityRequest) -> crate::spec::Dialog {
+    crate::spec::Dialog { title: request.episode_title.clone(), ..spec.clone() }
+}
+
+/// Registers the episode options dialog of the anime entry screen as the sheet (T-42a-037, T-42b-019). Called when the
+/// Updates page is built, so the row menu offers Show qualities from the first row.
+pub fn install_episode_options() {
+    install(|request| {
+        tracing::debug!(
+            episode = request.unit_id,
+            anime = request.entry_id,
+            source = request.source_id,
+            external = request.external_downloader,
+            "opening the episode options"
+        );
+        match crate::ui::screen(OPTIONS_SCREEN).dialogs.iter().find(|d| d.id == OPTIONS_DIALOG) {
+            Some(spec) => crate::ui::show_dialog(&episode_dialog(spec, &request)),
+            None => tracing::warn!("the episode options dialog is not in the spec"),
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
@@ -118,5 +146,13 @@ mod tests {
         assert!(available());
         assert!(open(QualityRequest { episode_title: String::new(), unit_id: 5, entry_id: 1, source_id: 1, external_downloader: false }));
         assert_eq!(seen.get(), 5);
+    }
+
+    #[test]
+    fn the_episode_dialog_carries_the_episode_title() {
+        let spec = crate::spec::Dialog { id: "episode_options".into(), title: "Episode 1".into(), text: Some("Choose video quality:".into()), ..Default::default() };
+        let request = QualityRequest { episode_title: "Episode 9".into(), unit_id: 9, entry_id: 1, source_id: 2, external_downloader: false };
+        let dialog = episode_dialog(&spec, &request);
+        assert_eq!((dialog.title.as_str(), dialog.text.as_deref()), ("Episode 9", Some("Choose video quality:")));
     }
 }

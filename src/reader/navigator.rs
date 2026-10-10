@@ -176,6 +176,7 @@ impl Navigator {
             step.set(action.step);
             button.set_icon_name(action.icon);
             button.set_tooltip_text(Some(action.description));
+            button.update_property(&[gtk::accessible::Property::Label(action.description)]);
             button.set_sensitive(action.enabled && !state.loading);
         }
         self.pill.set_direction(if state.rtl { gtk::TextDirection::Rtl } else { gtk::TextDirection::Ltr });

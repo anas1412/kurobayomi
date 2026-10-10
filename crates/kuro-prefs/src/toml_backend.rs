@@ -345,7 +345,7 @@ fn tag_of_value(v: &PrefValue) -> &'static str {
 }
 
 /// Decodes a TOML value as the kind named by `tag`. `None` when the TOML type does not match.
-fn decode_as(v: &Value, tag: &str) -> Option<PrefValue> {
+pub(crate) fn decode_as(v: &Value, tag: &str) -> Option<PrefValue> {
     match tag {
         "bool" => v.as_bool().map(PrefValue::Bool),
         "int" => v
@@ -377,7 +377,7 @@ fn to_value(v: &PrefValue) -> Value {
     }
 }
 
-fn tagged(v: &PrefValue) -> InlineTable {
+pub(crate) fn tagged(v: &PrefValue) -> InlineTable {
     let mut t = InlineTable::new();
     t.insert("t", Value::from(tag_of_value(v)));
     t.insert("v", to_value(v));
@@ -441,7 +441,7 @@ fn quarantine(path: &Path) {
 }
 
 /// Writes `text` to `<path>.tmp` beside `path`, syncs it, then renames it over `path`.
-fn write_atomic(path: &Path, text: &str) -> Result<(), PrefError> {
+pub(crate) fn write_atomic(path: &Path, text: &str) -> Result<(), PrefError> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);

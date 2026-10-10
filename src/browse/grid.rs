@@ -67,10 +67,13 @@ pub enum GridColumns {
     Fixed(i32),
 }
 
-/// The landscape key is read when the window is at least as wide as it is high, else the portrait key (B§4.5). `0`
+/// The narrowest window that reads the landscape key (T-41a-050, D14).
+pub const LANDSCAPE_MIN_WIDTH_PX: i32 = 720;
+
+/// The landscape key is read when the window is at least `LANDSCAPE_MIN_WIDTH_PX` wide, else the portrait key. `0`
 /// (or any value below 1) gives adaptive cells; `n > 0` gives exactly `n` columns (B-EC-18).
-pub fn grid_columns(width: i32, height: i32, portrait: i32, landscape: i32) -> GridColumns {
-    let stored = if width >= height { landscape } else { portrait };
+pub fn grid_columns(width: i32, portrait: i32, landscape: i32) -> GridColumns {
+    let stored = if width >= LANDSCAPE_MIN_WIDTH_PX { landscape } else { portrait };
     if stored > 0 { GridColumns::Fixed(stored) } else { GridColumns::Adaptive { cell_px: ADAPTIVE_CELL_PX } }
 }
 
@@ -267,16 +270,17 @@ mod tests {
     }
 
     #[test]
-    fn the_landscape_key_is_read_when_the_window_is_at_least_as_wide_as_tall() {
-        assert_eq!(grid_columns(800, 600, 3, 5), GridColumns::Fixed(5));
-        assert_eq!(grid_columns(600, 800, 3, 5), GridColumns::Fixed(3));
-        assert_eq!(grid_columns(600, 600, 3, 5), GridColumns::Fixed(5), "a square window is landscape");
+    fn the_landscape_key_is_read_from_720_px_wide() {
+        assert_eq!(grid_columns(800, 3, 5), GridColumns::Fixed(5));
+        assert_eq!(grid_columns(720, 3, 5), GridColumns::Fixed(5), "720 is the first landscape width");
+        assert_eq!(grid_columns(719, 3, 5), GridColumns::Fixed(3), "one pixel narrower is portrait");
+        assert_eq!(grid_columns(600, 3, 5), GridColumns::Fixed(3), "a square window below 720 is portrait");
     }
 
     #[test]
     fn zero_or_negative_columns_are_adaptive_cells_of_128_px() {
-        assert_eq!(grid_columns(800, 600, 0, 0), GridColumns::Adaptive { cell_px: 128 });
-        assert_eq!(grid_columns(600, 800, -2, 0), GridColumns::Adaptive { cell_px: 128 });
+        assert_eq!(grid_columns(800, 0, 0), GridColumns::Adaptive { cell_px: 128 });
+        assert_eq!(grid_columns(600, -2, 0), GridColumns::Adaptive { cell_px: 128 });
     }
 
     #[test]

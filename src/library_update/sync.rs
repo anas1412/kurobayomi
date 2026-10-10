@@ -10,8 +10,8 @@ use kuro_data::chapter::Chapter;
 use kuro_data::episode::Episode;
 use kuro_data::manga::{Manga, MangaRepo};
 use kuro_db::handle::Db;
-use kuro_domain::items::chapter_sync::{ChapterSyncError, ChapterSyncOptions, NoRenames, SyncChapters};
-use kuro_domain::items::episode_sync::{EpisodeSyncError, EpisodeSyncOptions, NoEpisodeRenames, SyncEpisodes};
+use kuro_domain::items::chapter_sync::{ChapterRenames, ChapterSyncError, ChapterSyncOptions, NoRenames, SyncChapters};
+use kuro_domain::items::episode_sync::{EpisodeRenames, EpisodeSyncError, EpisodeSyncOptions, NoEpisodeRenames, SyncEpisodes};
 use kuro_domain::items::source_sync::MangaSyncLocks;
 use kuro_domain::kind::EntryKind;
 use kuro_source::anime::SEpisode;
@@ -30,6 +30,8 @@ use crate::library_update::source::{Fetched, SourceItem};
 pub struct DbItemSync {
     manga_db: Arc<Db>,
     anime_db: Arc<Db>,
+    chapter_locks: Arc<MangaSyncLocks>,
+    episode_locks: Arc<MangaSyncLocks>,
     chapters: SyncChapters,
     episodes: SyncEpisodes,
     mark_duplicate_read: bool,
@@ -45,9 +47,16 @@ impl DbItemSync {
         mark_duplicate_read: bool,
         mark_duplicate_seen: bool,
     ) -> Self {
-        let chapters = SyncChapters::new(manga_db.clone(), chapter_locks, Arc::new(NoRenames));
-        let episodes = SyncEpisodes::new(anime_db.clone(), episode_locks, Arc::new(NoEpisodeRenames));
-        Self { manga_db, anime_db, chapters, episodes, mark_duplicate_read, mark_duplicate_seen }
+        let chapters = SyncChapters::new(manga_db.clone(), chapter_locks.clone(), Arc::new(NoRenames));
+        let episodes = SyncEpisodes::new(anime_db.clone(), episode_locks.clone(), Arc::new(NoEpisodeRenames));
+        Self { manga_db, anime_db, chapter_locks, episode_locks, chapters, episodes, mark_duplicate_read, mark_duplicate_seen }
+    }
+
+    /// Takes the folder renames of downloaded chapters and episodes instead of the no-op ones (T-26a-086).
+    pub fn with_renames(mut self, chapter_renames: Arc<dyn ChapterRenames>, episode_renames: Arc<dyn EpisodeRenames>) -> Self {
+        self.chapters = SyncChapters::new(self.manga_db.clone(), self.chapter_locks.clone(), chapter_renames);
+        self.episodes = SyncEpisodes::new(self.anime_db.clone(), self.episode_locks.clone(), episode_renames);
+        self
     }
 }
 
@@ -271,6 +280,58 @@ mod tests {
         assert_eq!(first.len(), 2, "both chapters are new on the first sync");
         let second = sync.sync(&entry(id), &list, window(), 2_000).await.expect("second sync");
         assert!(second.is_empty(), "nothing is new the second time");
+    }
+
+    #[tokio::test]
+    async fn perf_02_a_500_item_sync_is_fast() {
+        // The plan's bound is 100 ms in a release build; a debug build is held to a loose bound.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let manga = manga_db(dir.path());
+        let anime_path = dir.path().join("anime.db");
+        let anime_writer = kuro_db::schema_anime::open(&anime_path).expect("open anime db");
+        let anime = Arc::new(Db::new(&anime_path, anime_writer).expect("anime db handle"));
+        let id = MangaRepo::new(manga.clone())
+            .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Manga::create() })
+            .expect("insert manga");
+        let sync = sync_for(manga, anime);
+        let items: Vec<SourceItem> = (0..500).map(|n| SourceItem { source_order: n, ..item(&format!("/c/{n}"), f64::from(n as i32)) }).collect();
+        let list = fetched(items);
+        let limit = if cfg!(debug_assertions) { std::time::Duration::from_secs(5) } else { std::time::Duration::from_millis(100) };
+        let started = std::time::Instant::now();
+        let first = sync.sync(&entry(id), &list, window(), 1_000).await.expect("500 new chapters");
+        assert_eq!(first.len(), 500);
+        let again = sync.sync(&entry(id), &list, window(), 2_000).await.expect("unchanged list");
+        assert!(again.is_empty());
+        assert!(started.elapsed() < limit, "two 500-item syncs took {:?}", started.elapsed());
+    }
+
+    #[derive(Default)]
+    struct RecordingRenames(std::sync::Mutex<Vec<(String, String)>>);
+
+    impl ChapterRenames for RecordingRenames {
+        fn rename(&self, _manga: &Manga, stored: &Chapter, prepared: &Chapter) {
+            self.0.lock().unwrap().push((stored.name.clone(), prepared.name.clone()));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pass_sync_hands_a_renamed_chapter_to_the_rename_port_it_was_given() {
+        // T-26a-086: the pass takes the real port in place of `NoRenames`.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let manga = manga_db(dir.path());
+        let anime_path = dir.path().join("anime.db");
+        let anime_writer = kuro_db::schema_anime::open(&anime_path).expect("open anime db");
+        let anime = Arc::new(Db::new(&anime_path, anime_writer).expect("anime db handle"));
+        let id = MangaRepo::new(manga.clone())
+            .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Manga::create() })
+            .expect("insert manga");
+        let renames = Arc::new(RecordingRenames::default());
+        let sync = sync_for(manga, anime).with_renames(renames.clone(), Arc::new(NoEpisodeRenames));
+        sync.sync(&entry(id), &fetched(vec![item("/c/1", 1.0)]), window(), 1_000).await.expect("first sync");
+        assert!(renames.0.lock().unwrap().is_empty(), "a new chapter has nothing to rename");
+        let renamed = SourceItem { name: "Chapter 1 v2".into(), ..item("/c/1", 1.0) };
+        sync.sync(&entry(id), &fetched(vec![renamed]), window(), 2_000).await.expect("second sync");
+        assert_eq!(renames.0.lock().unwrap().as_slice(), &[("Chapter 1".to_owned(), "Chapter 1 v2".to_owned())]);
     }
 
     #[tokio::test]

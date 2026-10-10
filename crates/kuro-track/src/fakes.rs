@@ -979,6 +979,7 @@ impl Harness {
             net: net.clone(),
             prefs: prefs(),
             locks: BindingLocks::default(),
+            refresh_limit: Default::default(),
             events: EventBus::default(),
         });
         Self {

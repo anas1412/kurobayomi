@@ -32,9 +32,9 @@ use kuro_platform::paths::Paths;
 use kuro_prefs::store::PrefStore;
 
 /// `backup_interval` (hours, default 12) and the two app-state stamps of the automatic backup.
-const INTERVAL_KEY: &str = "backup_interval";
+pub(crate) const INTERVAL_KEY: &str = "backup_interval";
 const LAST_AUTO_KEY: &str = "__APP_STATE_last_auto_backup_timestamp";
-const ENABLED_AT_KEY: &str = "__APP_STATE_backup_enabled_at";
+pub(crate) const ENABLED_AT_KEY: &str = "__APP_STATE_backup_enabled_at";
 const STORAGE_DIR_KEY: &str = "__APP_STATE_storage_dir";
 
 /// No source is installed and no tracker is signed in until the extension and tracker areas register theirs, so a check

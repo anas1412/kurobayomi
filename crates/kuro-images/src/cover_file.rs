@@ -254,6 +254,33 @@ mod tests {
     }
 
     #[test]
+    fn background_deletion_counts_each_file_it_removes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = TestPaths::new(tmp.path());
+        let art = ArtRef::anime_entry(
+            true,
+            4,
+            1,
+            true,
+            (None, 0),
+            (Some("https://example.org/bg.jpg".to_owned()), 0),
+        );
+        let bg = cover_paths::cover_file_for(&paths, &art).unwrap();
+        let custom = cover_paths::custom_file_for(&paths, &art);
+        for file in [&bg, &custom] {
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, b"bg").unwrap();
+        }
+        // Without the custom flag only the background goes, and the custom file stays.
+        assert_eq!(delete_from_cache(&paths, &art, false), 1);
+        assert!(custom.is_file());
+        std::fs::write(&bg, b"bg").unwrap();
+        assert_eq!(delete_from_cache(&paths, &art, true), 2);
+        assert!(!bg.exists() && !custom.exists());
+        assert_eq!(delete_from_cache(&paths, &art, true), 0);
+    }
+
+    #[test]
     fn delete_custom_reports_whether_a_file_was_removed() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = TestPaths::new(tmp.path());

@@ -129,7 +129,7 @@ pub const SCHEMES: [SchemeDef; 18] = [
             Some(Rgba::argb(0xFF000000)), // outlineVariant
             Some(Rgba::argb(0xFF000000)), // scrim
             Some(Rgba::argb(0xFFFFFFFF)), // surfaceBright
-            Some(Rgba::argb(0xFF000000)), // surfaceDim
+            Some(Rgba::argb(0xFFFFFFFF)), // surfaceDim
             Some(Rgba::argb(0xFFFFFFFF)), // surfaceContainer
             Some(Rgba::argb(0xFFFFFFFF)), // surfaceContainerHigh
             Some(Rgba::argb(0xFFFFFFFF)), // surfaceContainerHighest
@@ -1448,7 +1448,7 @@ pub const SCHEMES: [SchemeDef; 18] = [
             Some(Rgba::argb(0xFF4C4639)), // onSurfaceVariant
             None, // surfaceTint
             Some(Rgba::argb(0xFF362F2D)), // inverseSurface
-            Some(Rgba::argb(0xFFFBEEEB)), // inverseOnSurface
+            Some(Rgba::argb(0xFFFBEAEB)), // inverseOnSurface
             None, // error
             None, // onError
             None, // errorContainer

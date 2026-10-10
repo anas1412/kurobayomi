@@ -16,6 +16,7 @@ pub mod home;
 pub mod item;
 pub mod keyed_lock;
 pub mod kitsu;
+pub mod logo;
 pub mod login_rows;
 pub mod mal;
 pub mod manager;

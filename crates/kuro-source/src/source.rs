@@ -104,7 +104,8 @@ pub async fn resolve_manga_uri(source: &dyn ResolvableSource, uri: &str) -> Resu
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeepLinkOutcome {
     NoResults,
-    Result { manga: SManga, chapter: Option<SChapter> },
+    /// `source_id` is the source that recognised the link and resolved it.
+    Result { source_id: i64, manga: SManga, chapter: Option<SChapter> },
 }
 
 /// The deep-link flow (T-15a-043). The first source in list order that recognises `uri` resolves it (EC-DL-04). A lookup
@@ -130,7 +131,7 @@ pub async fn resolve_deep_link(sources: &[&dyn ResolvableSource], uri: &str) -> 
     } else {
         None
     };
-    DeepLinkOutcome::Result { manga, chapter }
+    DeepLinkOutcome::Result { source_id: source.id(), manga, chapter }
 }
 
 /// Runs one source call behind a panic boundary. A panic inside the call becomes `Parse("source panicked")`, so a
@@ -415,7 +416,7 @@ mod tests {
     async fn ec_dl_02_a_chapter_link_with_no_chapter_keeps_the_manga() {
         let source = Links::default();
         let outcome = resolve_deep_link(&[&source], "https://x.test/c/1").await;
-        assert_eq!(outcome, DeepLinkOutcome::Result { manga: SManga::new("/m/1", "One"), chapter: None });
+        assert_eq!(outcome, DeepLinkOutcome::Result { source_id: 9, manga: SManga::new("/m/1", "One"), chapter: None });
         assert_eq!((*source.manga_lookups.lock().unwrap(), *source.chapter_lookups.lock().unwrap()), (1, 1));
     }
 
@@ -437,6 +438,6 @@ mod tests {
         let first = Titled("First");
         let second = Titled("Second");
         let outcome = resolve_deep_link(&[&first, &second], "https://x.test/m/1").await;
-        assert_eq!(outcome, DeepLinkOutcome::Result { manga: SManga::new("/t", "First"), chapter: None });
+        assert_eq!(outcome, DeepLinkOutcome::Result { source_id: 10, manga: SManga::new("/t", "First"), chapter: None });
     }
 }

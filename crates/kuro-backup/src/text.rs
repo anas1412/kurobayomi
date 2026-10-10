@@ -13,8 +13,6 @@ pub const RESTORING_BACKUP: Text = Text { key: "restoring_backup", english: "Res
 pub const RESTORING_BACKUP_ERROR: Text = Text { key: "restoring_backup_error", english: "Restoring backup failed" };
 pub const RESTORING_BACKUP_CANCELED: Text = Text { key: "restoring_backup_canceled", english: "Canceled restore" };
 pub const RESTORE_COMPLETED: Text = Text { key: "restore_completed", english: "Restore completed" };
-pub const SYNCING_LIBRARY: Text = Text { key: "syncing_library", english: "Syncing library" };
-pub const LIBRARY_SYNC_COMPLETE: Text = Text { key: "library_sync_complete", english: "Library sync complete" };
 pub const MISSING_SOURCES: Text = Text { key: "backup_restore_missing_sources", english: "Missing sources:" };
 pub const TRACKERS_NOT_LOGGED_IN: Text = Text { key: "backup_restore_missing_trackers", english: "Trackers not logged into:" };
 pub const SELECT_BACKUP_FILE: Text = Text { key: "file_select_backup", english: "Select backup file" };
@@ -70,8 +68,6 @@ mod tests {
             RESTORING_BACKUP_ERROR,
             RESTORING_BACKUP_CANCELED,
             RESTORE_COMPLETED,
-            SYNCING_LIBRARY,
-            LIBRARY_SYNC_COMPLETE,
             MISSING_SOURCES,
             TRACKERS_NOT_LOGGED_IN,
             SELECT_BACKUP_FILE,

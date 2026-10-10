@@ -93,7 +93,8 @@ fn backup(c: &Connection, path: &Path, from: i64) -> DbResult<()> {
     prune(dir, file)
 }
 
-fn prune(dir: &Path, file: &str) -> DbResult<()> {
+/// The pre-migration backups of the database file `file` in `dir`, oldest first, with their stamps.
+pub(crate) fn backups_of(dir: &Path, file: &str) -> DbResult<Vec<(String, PathBuf)>> {
     let prefix = format!("{file}.pre-v");
     let mut backups: Vec<(String, PathBuf)> = std::fs::read_dir(dir)?
         .map(|e| e.map(|e| e.path()))
@@ -110,6 +111,11 @@ fn prune(dir: &Path, file: &str) -> DbResult<()> {
         })
         .collect();
     backups.sort();
+    Ok(backups)
+}
+
+fn prune(dir: &Path, file: &str) -> DbResult<()> {
+    let mut backups = backups_of(dir, file)?;
     let excess = backups.len().saturating_sub(KEEP_BACKUPS);
     for (_, p) in backups.drain(..excess) {
         std::fs::remove_file(p)?;

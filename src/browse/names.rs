@@ -101,3 +101,42 @@ mod tests {
         assert_eq!(subtitle_display_name("en"), localized_display_name("en"));
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use kuro_core::text::primary_cmp;
+    use proptest::prelude::*;
+
+    fn text() -> impl Strategy<Value = String> {
+        proptest::collection::vec(any::<char>(), 0..6).prop_map(|chars| chars.into_iter().collect())
+    }
+
+    fn tag() -> impl Strategy<Value = &'static str> {
+        proptest::sample::select(vec!["en", "fr", "all", "ja", "pt-BR", "zh-CN", "zh-TW", "de", ""])
+    }
+
+    /// Antisymmetric and transitive: together with reflexivity this is a total preorder, which a sort needs.
+    fn is_total_preorder<T: Copy>(cmp: impl Fn(T, T) -> Ordering, a: T, b: T, c: T) -> bool {
+        let antisymmetric = cmp(a, b) == cmp(b, a).reverse();
+        let transitive = !(cmp(a, b) != Ordering::Greater && cmp(b, c) != Ordering::Greater) || cmp(a, c) != Ordering::Greater;
+        antisymmetric && transitive && cmp(a, a) == Ordering::Equal
+    }
+
+    proptest! {
+        #[test]
+        fn primary_cmp_is_a_total_preorder(a in text(), b in text(), c in text()) {
+            prop_assert!(is_total_preorder(|x: &str, y: &str| primary_cmp(x, y), a.as_str(), b.as_str(), c.as_str()));
+        }
+
+        #[test]
+        fn case_insensitive_cmp_is_a_total_preorder(a in text(), b in text(), c in text()) {
+            prop_assert!(is_total_preorder(case_insensitive_cmp, a.as_str(), b.as_str(), c.as_str()));
+        }
+
+        #[test]
+        fn compare_languages_is_a_total_order_over_the_language_tags(a in tag(), b in tag(), c in tag()) {
+            prop_assert!(is_total_preorder(compare_languages, a, b, c));
+        }
+    }
+}

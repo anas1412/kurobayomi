@@ -213,6 +213,39 @@ pub struct MalMediaData {
     pub media: Option<MalMedia>,
 }
 
+/// `Media` of the next-airing lookup. `nextAiringEpisode` is null when no episode is scheduled.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextAiringMedia {
+    pub next_airing_episode: Option<NextAiringEpisode>,
+}
+
+/// The scheduled episode: its number and its airing time in epoch seconds.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextAiringEpisode {
+    pub episode: i64,
+    pub airing_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NextAiringData {
+    #[serde(rename = "Media")]
+    pub media: Option<NextAiringMedia>,
+}
+
+/// `Media { id }` of the MAL-to-AniList lookup. Null when AniList has no media with that MAL id.
+#[derive(Debug, Deserialize)]
+pub struct AniListIdMedia {
+    pub id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AniListIdData {
+    #[serde(rename = "Media")]
+    pub media: Option<AniListIdMedia>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

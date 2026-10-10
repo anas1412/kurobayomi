@@ -12,8 +12,8 @@ use crate::entry_core::dialog::CategoryDialog;
 use crate::ui;
 
 /// Opens the dialog over `model`. `on_ok` runs with the checked ids before the window closes; `on_dismiss` runs on
-/// every close that was not OK.
-pub fn open(model: CategoryDialog, on_ok: impl Fn(Vec<i64>) + 'static, on_dismiss: impl Fn() + 'static) {
+/// every close that was not OK. The window is returned, so a page can keep it in its one dialog slot.
+pub fn open(model: CategoryDialog, on_ok: impl Fn(Vec<i64>) + 'static, on_dismiss: impl Fn() + 'static) -> gtk::Window {
     let model = Rc::new(RefCell::new(model));
     let list = ui::boxed_list();
     for (i, item) in model.borrow().items.iter().enumerate() {
@@ -44,4 +44,5 @@ pub fn open(model: CategoryDialog, on_ok: impl Fn(Vec<i64>) + 'static, on_dismis
         gtk::glib::Propagation::Proceed
     });
     window.present();
+    window
 }

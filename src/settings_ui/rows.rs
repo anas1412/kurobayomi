@@ -37,6 +37,61 @@ pub fn text(title: &str, subtitle: Option<&str>, enabled: bool) -> PreferenceIte
     PreferenceItem::Text { common: common(title, subtitle, enabled), on_click: None }
 }
 
+/// The live parts of a row built by [`tap_item`], handed to its tap handler.
+#[derive(Clone)]
+pub struct TapRow {
+    /// The row's subtitle label.
+    pub subtitle: gtk::Label,
+    /// The widget [`tap_item`]'s `trailing` builder made, if there was one.
+    pub trailing: Option<gtk::Widget>,
+}
+
+/// A custom row that can be tapped (mouse, Enter or Space) and shows what a plain text row cannot: a trailing widget
+/// (a check mark, a spinner) and a subtitle the handler may change. A disabled row ignores taps.
+pub fn tap_item(
+    title: &str,
+    subtitle: Option<&str>,
+    enabled: bool,
+    trailing: Option<Rc<dyn Fn() -> gtk::Widget>>,
+    on_tap: Rc<dyn Fn(&TapRow)>,
+) -> PreferenceItem {
+    use crate::pref_model::widgets::row::{self, RowSpec};
+    use gtk::prelude::*;
+    let (label, sub) = (title.to_owned(), subtitle.map(str::to_owned));
+    PreferenceItem::Custom {
+        title: title.to_owned(),
+        build: Rc::new(move || {
+            let end = trailing.as_ref().map(|make| make());
+            let built = row::build(RowSpec { title: &label, subtitle: sub.as_deref(), icon: None, trailing: end.as_ref(), on_click: None });
+            let content = built.row.child().and_downcast::<gtk::Box>().expect("the row content");
+            built.row.set_child(None::<&gtk::Widget>);
+            content.set_focusable(enabled);
+            content.set_sensitive(enabled);
+            content.set_cursor_from_name(enabled.then_some("pointer"));
+            let parts = TapRow { subtitle: built.subtitle.clone(), trailing: end };
+            let tap = {
+                let on_tap = Rc::clone(&on_tap);
+                Rc::new(move || on_tap(&parts))
+            };
+            let click = gtk::GestureClick::new();
+            let on_click = Rc::clone(&tap);
+            click.connect_released(move |_, _, _, _| on_click());
+            content.add_controller(click);
+            let keys = gtk::EventControllerKey::new();
+            keys.connect_key_pressed(move |_, key, _, _| {
+                if crate::pref_model::widgets::dialog::is_enter(key) || key == gtk::gdk::Key::space {
+                    tap();
+                    gtk::glib::Propagation::Stop
+                } else {
+                    gtk::glib::Propagation::Proceed
+                }
+            });
+            content.add_controller(keys);
+            content.upcast()
+        }),
+    }
+}
+
 pub fn info(text: &str) -> PreferenceItem {
     PreferenceItem::Info { text: text.to_owned(), enabled: true }
 }
@@ -126,6 +181,15 @@ pub fn int_choice(title: &str, pref: &Pref<i32>, options: &[(i32, &str)], enable
     PreferenceItem::BasicList { common: common(title, Some("%s"), enabled), value: current.to_string(), entries, on_change }
 }
 
+/// [`int_choice`] whose options are the values `kuro_prefs::ranges` allows for the preference's key, so the widget and
+/// the stored-value rules cannot disagree (T-02a-036). `label` names each value.
+pub fn ranged_choice(title: &str, pref: &Pref<i32>, label: impl Fn(i32) -> String, enabled: bool) -> PreferenceItem {
+    let constraint = kuro_prefs::ranges::constraint(pref.key()).unwrap_or_else(|| panic!("{} has no entry in kuro_prefs::ranges", pref.key()));
+    let options: Vec<(i32, String)> = constraint.values().into_iter().map(|v| (v as i32, label(v as i32))).collect();
+    let borrowed: Vec<(i32, &str)> = options.iter().map(|(code, text)| (*code, text.as_str())).collect();
+    int_choice(title, pref, &borrowed, enabled)
+}
+
 /// The subtitle of a row whose change applies at the next launch (task T-47a-010).
 pub const REQUIRES_RESTART: &str = "Requires app restart to take effect";
 
@@ -172,13 +236,18 @@ where
 /// A multi-choice list whose selected keys are stored as a set of strings. `options` are `(key, label)` pairs; the
 /// subtitle lists the selected labels.
 pub fn multi_choice(title: &str, pref: &Pref<BTreeSet<String>>, options: &[(&str, &str)], enabled: bool) -> PreferenceItem {
+    multi_choice_with(common(title, Some("%s"), enabled), pref, options)
+}
+
+/// [`multi_choice`] with its own subtitle template (`Restrictions: %s`), for a row whose subtitle names its labels.
+pub fn multi_choice_with(common: ItemCommon, pref: &Pref<BTreeSet<String>>, options: &[(&str, &str)]) -> PreferenceItem {
     let entries = options.iter().map(|(key, label)| ((*key).to_owned(), (*label).to_owned())).collect();
     let writer = pref.clone();
     let veto = bind::veto(move |selected: BTreeSet<String>| {
         let result = writer.set(selected).map(|()| true).map_err(|err| err.to_string());
         async move { result }
     });
-    PreferenceItem::MultiSelect { common: common(title, Some("%s"), enabled), pref: pref.clone(), entries, veto }
+    PreferenceItem::MultiSelect { common, pref: pref.clone(), entries, veto }
 }
 
 /// An integer slider. `subtitle` is shown as the value text.
@@ -209,6 +278,17 @@ mod tests {
         let kept = visible(rows);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].title(), "On");
+    }
+
+    #[test]
+    fn ranged_choice_offers_exactly_the_values_the_ranges_allow() {
+        let prefs = Prefs::in_memory();
+        let PreferenceItem::BasicList { entries, .. } = ranged_choice("Max", &prefs.library.auto_update_interval, |h| format!("{h}h"), true) else {
+            panic!("expected a list");
+        };
+        let codes: Vec<&str> = entries.iter().map(|(code, _)| code.as_str()).collect();
+        assert_eq!(codes, ["0", "12", "24", "48", "72", "168"]);
+        assert_eq!(entries[1].1, "12h");
     }
 
     #[test]

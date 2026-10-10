@@ -6,9 +6,10 @@
 use std::sync::{Arc, Mutex};
 
 use kuro_domain::source::model::Source;
+use kuro_source::SourcePref;
 use kuro_source::filter_list::FilterList;
 
-use super::listing::PageLoader;
+use super::listing::{LinkFuture, PageLoader};
 
 /// One installed catalogue source and the package it came from (`""` when it has none, as the local source).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +28,17 @@ pub trait SourceDirectory: Send + Sync + 'static {
     fn loader(&self, source_id: i64) -> Option<Arc<dyn PageLoader>>;
     /// The filter list a source's search sheet starts from. `None` when it is not installed.
     fn filters(&self, source_id: i64) -> Option<FilterList>;
+    /// The settings rows a configurable source declares (`ConfigurableSource::preferences`). `None` when the source is not
+    /// installed or has no settings screen: the details page then shows no settings button for it.
+    fn preferences(&self, _source_id: i64) -> Option<Vec<SourcePref>> {
+        None
+    }
+    /// Resolves a pasted link to the library row of the entry it names, asking each source's `uri_type` first (see
+    /// `deep_link::resolve`). `None` when this directory has no source that can resolve links: global search then
+    /// searches the catalogues with the text (T-20a-031).
+    fn resolve_link(&self, _uri: &str) -> Option<LinkFuture> {
+        None
+    }
 }
 
 static CURRENT: Mutex<Option<Arc<dyn SourceDirectory>>> = Mutex::new(None);

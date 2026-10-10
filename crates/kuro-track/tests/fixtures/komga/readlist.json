@@ -1,0 +1,8 @@
+{
+  "id": "5",
+  "name": "Reading list",
+  "bookIds": ["1", "2"],
+  "createdDate": "2026-01-02T03:04:05Z",
+  "lastModifiedDate": "2026-02-02T03:04:05Z",
+  "filtered": false
+}

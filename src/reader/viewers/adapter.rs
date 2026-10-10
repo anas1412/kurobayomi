@@ -76,7 +76,11 @@ impl Viewer for EngineViewer {
 
     fn handle_key(&self, key: gdk::Key, modifiers: gdk::ModifierType) -> bool {
         !self.destroyed.get()
-            && self.engine.handle_key(KeyEvent { key: input_key(&key), ctrl: modifiers.contains(gdk::ModifierType::CONTROL_MASK), released: false })
+            && self.engine.handle_key(KeyEvent {
+                key: input_key(&key, modifiers.contains(gdk::ModifierType::SHIFT_MASK)),
+                ctrl: modifiers.contains(gdk::ModifierType::CONTROL_MASK),
+                released: false,
+            })
     }
 
     fn handle_motion(&self, _dx: f64, dy: f64) -> bool {

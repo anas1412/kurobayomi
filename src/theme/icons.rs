@@ -277,6 +277,36 @@ pub fn set_toggle_state(widget: &impl IsA<gtk::Accessible>, selected: bool) {
     widget.update_state(&[gtk::accessible::State::Checked(tristate)]);
 }
 
+/// The brand and extension marks (T-49b-024). They are SVG files in the bundle under `brand/`, with
+/// `fill="currentColor"` so the CSS colour tints them. Only their links use them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Brand {
+    Discord,
+    Github,
+    Magnet,
+}
+
+impl Brand {
+    /// The file name inside the bundle's `brand/` directory.
+    pub const fn file_name(self) -> &'static str {
+        match self {
+            Brand::Discord => "discord.svg",
+            Brand::Github => "github.svg",
+            Brand::Magnet => "magnet.svg",
+        }
+    }
+
+    /// The GResource path the image loads from.
+    pub fn resource_path(self) -> String {
+        format!("{ICON_RESOURCE_PATH}/brand/{}", self.file_name())
+    }
+
+    /// The mark as an image, read from the bundle.
+    pub fn image(self) -> gtk::Image {
+        gtk::Image::from_resource(&self.resource_path())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,5 +466,33 @@ mod tests {
             assert!(text.contains(&format!("fill=\"{colour}\"")), "missing {colour}");
         }
         assert!(!text.contains("#bebebe"));
+    }
+}
+
+#[cfg(test)]
+mod brand_tests {
+    use super::Brand;
+
+    // T-49b-024: each mark is a 24-unit viewBox with one fill, and the bundle path matches the file.
+    #[test]
+    fn brand_svgs_are_tintable_single_fill_glyphs() {
+        let files = [
+            (Brand::Discord, include_str!("icons/brand/discord.svg")),
+            (Brand::Github, include_str!("icons/brand/github.svg")),
+            (Brand::Magnet, include_str!("icons/brand/magnet.svg")),
+        ];
+        for (brand, svg) in files {
+            assert!(svg.contains(r#"viewBox="0 0 24 24""#), "{brand:?}");
+            assert_eq!(svg.matches(" fill=").count(), 1, "{brand:?} has one fill");
+            assert!(svg.contains(r#"fill="currentColor""#), "{brand:?} takes the CSS colour");
+        }
+    }
+
+    #[test]
+    fn brand_resource_paths_point_into_the_bundle() {
+        assert_eq!(
+            Brand::Magnet.resource_path(),
+            "/io/github/blackbox/Kurobayomi/icons/brand/magnet.svg"
+        );
     }
 }

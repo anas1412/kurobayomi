@@ -35,6 +35,7 @@ use super::set_default::Scope;
 use super::store::AnimeStore;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
+use crate::entry_core::favorite::AddRoute;
 
 /// What a fetch hands back: the episodes the sync added, which a manual refresh queues for download (T-REF-4).
 pub type AnimeFetch = Pin<Box<dyn Future<Output = Result<Vec<Episode>, DetailError>> + Send>>;
@@ -188,6 +189,8 @@ pub enum AnimeCmd {
     LoadCategories { anime_id: i64 },
     /// The category editor's OK: replaces the entry's category links.
     SetCategories { anime_id: i64, category_ids: Vec<i64> },
+    /// The answer of the add dialog: the entry joins the library in these categories.
+    AddWithCategories { anime_id: i64, category_ids: Vec<i64> },
     Shutdown,
 }
 
@@ -217,6 +220,8 @@ pub enum AnimeEvent {
     Downloads(HashSet<i64>),
     /// The answer of `LoadCategories`: every category and the ids the entry is linked to.
     Categories { all: Vec<(i64, String)>, linked: Vec<i64> },
+    /// The library button of an add with no default category: the category dialog asks which ones (T-39b-026).
+    AddCategories { all: Vec<(i64, String)>, linked: Vec<i64> },
 }
 
 /// The page's handle on the runner. Dropping it stops the runner and the subscriptions.
@@ -480,7 +485,7 @@ impl Shared {
                 if anime.favorite {
                     Ok(store.set_favorite(anime_id, false, now)?.then_some(false))
                 } else {
-                    Ok(store.add_to_library(anime_id, &prefs, now)?.then_some(add_to_library_flag()))
+                    Ok(store.add_to_library(anime_id, &[], &prefs, now)?.then_some(add_to_library_flag()))
                 }
             })
             .await;
@@ -517,9 +522,37 @@ impl Shared {
             .await;
         match found {
             Ok((Some(false), existing)) if !existing.is_empty() => self.emit(AnimeEvent::Duplicate { existing }),
-            Ok((Some(false), _)) => self.toggle_favorite(anime_id).await,
+            Ok((Some(false), _)) => self.add_flow(anime_id).await,
             // the row is gone, or the entry joined the library meanwhile: there is nothing to add
             Ok(_) => {}
+            Err(e) => self.failed(e),
+        }
+    }
+
+    /// The add branch of the library button (T-39b-026, behaviour 4.3): the default category adds at once, no default or
+    /// no user category adds without one, and an unset or deleted default asks which categories first. Favorite is not
+    /// written until the answer.
+    async fn add_flow(&self, anime_id: i64) {
+        let prefs = self.prefs.clone();
+        match self.blocking(move |s| s.add_route(&prefs)).await {
+            Ok(AddRoute::AddDefaultCategory(category)) => {
+                self.add_with_categories(anime_id, category.into_iter().collect()).await;
+            }
+            Ok(AddRoute::ChooseCategory) => match self.blocking(move |s| s.categories(anime_id)).await {
+                Ok((all, linked)) => self.emit(AnimeEvent::AddCategories { all, linked }),
+                Err(e) => self.failed(e),
+            },
+            Err(e) => self.failed(e),
+        }
+    }
+
+    /// Adds the entry in these categories: the links and the favorite in order (`moveAnimeToCategoriesAndAddToLibrary`).
+    async fn add_with_categories(&self, anime_id: i64, category_ids: Vec<i64>) {
+        let prefs = self.prefs.clone();
+        let now = now_ms();
+        match self.blocking(move |s| s.add_to_library(anime_id, &category_ids, &prefs, now)).await {
+            Ok(true) => self.emit(AnimeEvent::Added),
+            Ok(false) => {}
             Err(e) => self.failed(e),
         }
     }
@@ -612,6 +645,7 @@ impl Shared {
                 }
             }
             AnimeCmd::AddToLibrary { anime_id, check_duplicates } => return self.add_to_library(anime_id, check_duplicates).await,
+            AnimeCmd::AddWithCategories { anime_id, category_ids } => return self.add_with_categories(anime_id, category_ids).await,
             AnimeCmd::BumpImage { anime_id, kind } => {
                 let now = now_ms();
                 self.blocking(move |s| s.bump_image(anime_id, kind, now)).await

@@ -2,13 +2,14 @@
 //! updates to `library_unseen_updates_count`, and the pass start stores `library_update_last_timestamp`.
 //! `PrefsHost` wraps the notification host and does these writes before it forwards each call.
 
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use kuro_domain::kind::EntryKind;
 use kuro_prefs::Prefs;
 use kuro_prefs::pref::Pref;
 
-use crate::library_update::pass::{EntryUpdate, Host};
+use crate::library_update::pass::{EntryUpdate, Failure, Host};
 use crate::library_update::source::SourceItem;
 
 pub struct PrefsHost<H> {
@@ -78,8 +79,12 @@ impl<H: Host> Host for PrefsHost<H> {
         self.inner.start_downloads(kind);
     }
 
-    fn show_error(&self, kind: EntryKind, failed: usize) {
-        self.inner.show_error(kind, failed);
+    fn write_error_log(&self, kind: EntryKind, failures: &[Failure]) -> Option<PathBuf> {
+        self.inner.write_error_log(kind, failures)
+    }
+
+    fn show_error(&self, kind: EntryKind, failed: usize, log: Option<&Path>) {
+        self.inner.show_error(kind, failed, log);
     }
 
     fn show_queue_warning(&self, kind: EntryKind) {

@@ -37,6 +37,7 @@ url = { workspace = true }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+kuro-db = { path = "../kuro-db" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 tracing-subscriber = { workspace = true }

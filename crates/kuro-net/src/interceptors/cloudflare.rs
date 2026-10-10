@@ -81,8 +81,16 @@ impl SolveJob {
             old_clearance,
             timeout: CF_SOLVE_TIMEOUT,
             cookie_names: CF_COOKIE_NAMES,
+            visible: false,
         };
-        self.webview.solve_challenge(req, cancel).await
+        let hidden = self.webview.solve_challenge(req.clone(), cancel.clone()).await;
+        // A hidden solve that ran out of time is tried again where the person can finish it (T-12a-032), when the
+        // host can show a window. The deadline there is 120 s.
+        let timed_out = matches!(hidden, SolveOutcome::Failed { reason: SolveFailure::Timeout, .. });
+        if timed_out && self.webview.supports_visible() {
+            return self.webview.solve_challenge(req.into_visible(), cancel).await;
+        }
+        hidden
     }
 }
 
@@ -695,5 +703,64 @@ mod tests {
         }
         assert_eq!(gauge.solves.load(Ordering::SeqCst), 3);
         assert_eq!(gauge.max.load(Ordering::SeqCst), CF_MAX_PARALLEL_SOLVES);
+    }
+
+    /// A host that times out the hidden solve and clears the visible one. It records every request it is given.
+    struct TwoStage {
+        visible_supported: bool,
+        seen: std::sync::Mutex<Vec<(bool, Duration)>>,
+    }
+
+    #[async_trait]
+    impl WebViewHost for TwoStage {
+        fn available(&self) -> bool {
+            true
+        }
+
+        fn supports_visible(&self) -> bool {
+            self.visible_supported
+        }
+
+        async fn get_html(&self) -> Option<String> {
+            None
+        }
+
+        async fn solve_challenge(&self, req: SolveRequest, _cancel: CancellationToken) -> SolveOutcome {
+            self.seen.lock().unwrap().push((req.visible, req.timeout));
+            if req.visible {
+                cleared()
+            } else {
+                SolveOutcome::Failed { reason: SolveFailure::Timeout, outdated: false }
+            }
+        }
+    }
+
+    async fn run_job(host: Arc<TwoStage>) -> SolveOutcome {
+        let dir = tempfile::tempdir().unwrap();
+        let job = SolveJob {
+            webview: host,
+            jar: CookieJar::load(dir.path().join("cookies.json")),
+            url: Url::parse("https://site.test/").unwrap(),
+            headers: Vec::new(),
+            user_agent: String::new(),
+        };
+        job.run(CancellationToken::new()).await
+    }
+
+    #[tokio::test]
+    async fn a_hidden_timeout_is_tried_again_in_the_visible_window_with_a_120_second_deadline() {
+        let host = Arc::new(TwoStage { visible_supported: true, seen: Default::default() });
+        assert!(matches!(run_job(host.clone()).await, SolveOutcome::Cleared { .. }));
+        assert_eq!(*host.seen.lock().unwrap(), [(false, CF_SOLVE_TIMEOUT), (true, Duration::from_secs(120))]);
+    }
+
+    #[tokio::test]
+    async fn a_host_without_a_visible_window_keeps_the_hidden_timeout() {
+        let host = Arc::new(TwoStage { visible_supported: false, seen: Default::default() });
+        assert_eq!(
+            run_job(host.clone()).await,
+            SolveOutcome::Failed { reason: SolveFailure::Timeout, outdated: false }
+        );
+        assert_eq!(*host.seen.lock().unwrap(), [(false, CF_SOLVE_TIMEOUT)], "no second solve");
     }
 }

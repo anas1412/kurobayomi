@@ -292,9 +292,9 @@ mod tests {
 
     #[test]
     fn a_zero_column_preference_is_adaptive_and_a_positive_one_is_that_many_columns() {
-        assert_eq!(grid_columns(800, 600, 0, 0), GridColumns::Adaptive { cell_px: 128 });
-        assert_eq!(grid_columns(800, 600, 0, 3), GridColumns::Fixed(3), "a landscape window reads the landscape key");
-        assert!(matches!(grid_columns(800, 600, -1, 0), GridColumns::Adaptive { .. }), "values below 1 are adaptive");
+        assert_eq!(grid_columns(800, 0, 0), GridColumns::Adaptive { cell_px: 128 });
+        assert_eq!(grid_columns(800, 0, 3), GridColumns::Fixed(3), "a landscape window reads the landscape key");
+        assert!(matches!(grid_columns(800, -1, 0), GridColumns::Adaptive { .. }), "values below 1 are adaptive");
     }
 
     #[test]

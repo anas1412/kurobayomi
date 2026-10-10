@@ -62,6 +62,7 @@ pub fn restore_backup(
         backup,
         t: targets,
         skipped_settings: 0,
+        skipped_extensions: 0,
         clock: RunClock::new(now),
         cancel,
         manga_by_order: HashMap::new(),
@@ -79,6 +80,8 @@ struct DbRestorer<'a> {
     t: Targets<'a>,
     /// Keys the app-preference allowlist skipped (T-22a-052).
     skipped_settings: usize,
+    /// APK extension payloads, counted and not installed (T-22a-029).
+    skipped_extensions: usize,
     clock: RunClock,
     /// Checked again just before an entry commits (F-01).
     cancel: &'a dyn Fn() -> bool,
@@ -241,6 +244,10 @@ impl Restorer for DbRestorer<'_> {
         self.skipped_settings
     }
 
+    fn skipped_extensions(&self) -> usize {
+        self.skipped_extensions
+    }
+
     fn item(&mut self, section: Section, index: u32) -> Result<Item, RestoreError> {
         let i = index as usize;
         match section {
@@ -259,8 +266,11 @@ impl Restorer for DbRestorer<'_> {
                 Ok(Item { title: r.name.clone(), error: restore_manga_repo(self.t.manga, r).err() })
             }
             Section::CustomButtons => self.custom_buttons(),
-            // No installer exists yet: the step counts and writes nothing.
-            Section::Extensions => done(text::LABEL_EXTENSIONS.english.into(), Ok(())),
+            // Every payload is an APK, which does not run on Linux: each one is counted as skipped, and none is an error.
+            Section::Extensions => {
+                self.skipped_extensions = self.backup.extensions.len();
+                done(text::LABEL_EXTENSIONS.english.into(), Ok(()))
+            }
         }
     }
 }
@@ -522,5 +532,24 @@ mod tests {
     fn counts_include_seasons_and_every_list() {
         let c = counts(&fixture());
         assert_eq!((c.anime_entries, c.manga_entries, c.anime_stores, c.manga_repos), (2, 2, 1, 1));
+    }
+
+    /// APK payloads are counted as skipped, one per entry, and never reported as errors (T-22a-029).
+    #[test]
+    fn apk_extension_payloads_are_counted_as_skipped_not_errors() {
+        let mut e = env();
+        let payload = |name: &str| crate::schema::BackupExtension { pkg_name: name.into(), apk: vec![1, 2, 3] };
+        let backup = Backup { extensions: vec![payload("eu.a"), payload("eu.b")], ..Backup::default() };
+        let only_extensions = RestoreOptions {
+            library_entries: false,
+            categories: false,
+            app_settings: false,
+            extension_stores: false,
+            custom_buttons: false,
+            source_settings: false,
+            extensions: true,
+        };
+        let (run, _) = run(&mut e, backup, only_extensions, &|| false);
+        assert_eq!((run.skipped_extensions, run.errors.len(), run.stop), (2, 0, None));
     }
 }

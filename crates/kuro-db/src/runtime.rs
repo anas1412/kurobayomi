@@ -13,7 +13,7 @@ use tokio::sync::broadcast;
 
 use crate::error::{DbError, DbResult};
 use crate::notify::{self, Changed, Pending};
-use crate::open::open_connection;
+use crate::open::{mark_clean_shutdown, open_connection};
 use crate::schema_anime;
 use crate::schema_manga;
 
@@ -58,6 +58,8 @@ impl DbKind {
 
 /// One writer and [`READERS`] readers on one file. Share it behind an `Arc`.
 pub struct Db {
+    /// The database file, so `close` can take up its dirty marker.
+    path: PathBuf,
     writer: Mutex<Connection>,
     readers: Vec<Mutex<Connection>>,
     next_reader: AtomicUsize,
@@ -92,6 +94,7 @@ impl Db {
         let pending = notify::install(&writer)?;
         let (changes, _) = broadcast::channel(CHANGE_QUEUE);
         Ok(Self {
+            path: path.to_path_buf(),
             writer: Mutex::new(writer),
             readers,
             next_reader: AtomicUsize::new(0),
@@ -127,13 +130,14 @@ impl Db {
     }
 
     /// Shutdown housekeeping on the writer: lets SQLite refresh its statistics and folds the WAL into the
-    /// main file (`PRAGMA optimize`, `PRAGMA wal_checkpoint(TRUNCATE)`). The handle stays usable.
+    /// main file (`PRAGMA optimize`, `PRAGMA wal_checkpoint(TRUNCATE)`), then removes the `.dirty` marker so the
+    /// next launch runs the quick check only. The handle stays usable.
     pub fn close(&self) -> DbResult<()> {
         let conn = lock(&self.writer);
         // Optimize first: it may write statistics, and the checkpoint should fold those in too.
         conn.execute_batch("PRAGMA optimize")?;
         conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
-        Ok(())
+        mark_clean_shutdown(&self.path)
     }
 
     /// [`Db::read`] on tokio's blocking pool, for callers on an async task.
@@ -236,6 +240,16 @@ mod tests {
 
     fn id_of(c: &Connection, name: &str) -> rusqlite::Result<i64> {
         c.query_row("SELECT _id FROM categories WHERE name = ?1", [name], |r| r.get(0))
+    }
+
+    #[test]
+    fn the_dirty_marker_is_down_after_open_and_up_after_close() {
+        let paths = kuro_testkit::TempPaths::new().unwrap();
+        let db = Db::open(DbKind::Manga, &paths).unwrap();
+        let marker = crate::open::dirty_marker(&DbKind::Manga.path(&paths.data_dir()));
+        assert!(marker.is_file(), "created on open");
+        db.close().unwrap();
+        assert!(!marker.exists(), "removed on clean shutdown");
     }
 
     #[test]

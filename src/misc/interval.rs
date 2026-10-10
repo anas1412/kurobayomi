@@ -5,34 +5,33 @@ use kuro_prefs::pref::Pref;
 use tokio::sync::watch;
 
 use crate::pref_model::model::Preference;
-use crate::settings_ui::rows::{group, info, int_choice};
+use crate::settings_ui::rows::{group, info, ranged_choice};
 
 /// Shown under the interval choice: when the first automatic run happens (T-26a-010).
 pub const FIRST_RUN_NOTE: &str = "The first automatic update runs as soon as the conditions are met after you turn this on.";
 
-/// Stored hours and label of each choice. 0 is Off, the default.
-pub const CHOICES: [(i32, &str); 6] = [
-    (0, "Off"),
-    (12, "Every 12 hours"),
-    (24, "Daily"),
-    (48, "Every 2 days"),
-    (72, "Every 3 days"),
-    (168, "Weekly"),
-];
-
-/// The hours the schedule runs on for a stored value. A value that is not one of the six choices (an old or edited
-/// file) means Off.
-pub fn hours(stored: i32) -> u32 {
-    if CHOICES.iter().any(|(h, _)| *h == stored) { stored as u32 } else { 0 }
+/// The label of one of the interval choices `kuro_prefs::ranges::LIBRARY_UPDATE_INTERVAL` allows. 0 is Off, the default.
+pub fn label(hours: i32) -> String {
+    match hours {
+        0 => "Off".to_owned(),
+        24 => "Daily".to_owned(),
+        48 => "Every 2 days".to_owned(),
+        168 => "Weekly".to_owned(),
+        h if h % 24 == 0 => format!("Every {} days", h / 24),
+        h => format!("Every {h} hours"),
+    }
 }
 
-// Not called yet: `settings_ui::library::page_rows` (another lane) adds `misc::interval::rows(&l.auto_update_interval)`
-// to its typed rows. The schedule below already follows the preference whoever writes it.
-#[allow(dead_code)]
+/// The hours the schedule runs on for a stored value. A value that is not one of the allowed choices (an old or edited
+/// file) means Off.
+pub fn hours(stored: i32) -> u32 {
+    if kuro_prefs::ranges::LIBRARY_UPDATE_INTERVAL.contains(i64::from(stored)) { stored as u32 } else { 0 }
+}
+
 /// The settings row. The library settings page merges it over the spec row of the same group and title, so the
 /// choice reads and writes the real preference.
 pub fn rows(pref: &Pref<i32>) -> Vec<Preference> {
-    vec![group("Global update", vec![int_choice("Automatic updates", pref, &CHOICES, true), info(FIRST_RUN_NOTE)])]
+    vec![group("Global update", vec![ranged_choice("Automatic updates", pref, label, true), info(FIRST_RUN_NOTE)])]
 }
 
 /// Sends `stored` as hours to every schedule loop. Each loop restarts its wait on the change (`run_schedule`).
@@ -63,9 +62,9 @@ mod tests {
 
     #[test]
     fn the_six_choices_store_0_12_24_48_72_168_and_default_to_off() {
-        let stored: Vec<i32> = CHOICES.iter().map(|(h, _)| *h).collect();
+        let stored = kuro_prefs::ranges::LIBRARY_UPDATE_INTERVAL.values();
         assert_eq!(stored, [0, 12, 24, 48, 72, 168]);
-        let labels: Vec<&str> = CHOICES.iter().map(|(_, l)| *l).collect();
+        let labels: Vec<String> = stored.iter().map(|h| label(*h as i32)).collect();
         assert_eq!(labels, ["Off", "Every 12 hours", "Daily", "Every 2 days", "Every 3 days", "Weekly"]);
         let pref = Pref::new(PrefStore::in_memory(), "pref_library_update_interval_key", 0_i32);
         assert_eq!(hours(pref.get()), 0);

@@ -82,8 +82,13 @@ fn map_server_error(err: CoreError) -> TorrentError {
     }
 }
 
+/// `addTorrent` for a magnet link. Only a timeout is a dead torrent; every other failure means the server is not
+/// usable, as the Kotlin `catch (_: Exception) { DisabledTorrServerException }` does (T-20a-070).
 async fn add_magnet(server: &TorrServerClient, url: &str, title: &str) -> Result<TorrentDto, TorrentError> {
-    server.add(url, title, false).await.map_err(map_server_error)
+    server.add(url, title, false).await.map_err(|err| match err {
+        CoreError::ServerTimeout => TorrentError::Dead,
+        _ => TorrentError::ServerNotRunning,
+    })
 }
 
 async fn download_torrent(http: &reqwest::Client, url: &str) -> Result<TorrentDto, TorrentError> {
@@ -226,12 +231,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_server_error_status_keeps_its_own_message() {
+    async fn a_server_error_status_for_a_magnet_is_a_disabled_server() {
         let server = MockServer::start().await;
         Mock::given(method("POST")).and(path("/torrents")).respond_with(ResponseTemplate::new(500)).mount(&server).await;
         let result = resolve_torrent_info(&client(server.address().port()), true, &reqwest::Client::new(), "magnet:?xt=urn:btih:abc", "t").await;
-        assert_eq!(result, Err(TorrentError::Http(500)));
-        assert_eq!(TorrentError::Http(500).to_string(), "HTTP error 500");
+        assert_eq!(result, Err(TorrentError::ServerNotRunning));
     }
 
     #[tokio::test]

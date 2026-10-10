@@ -85,7 +85,25 @@ fn run(secrets: &dyn SecretStore) -> Result<usize, Stop> {
         }
         secrets.delete(old_service, old)?;
     }
+    clear_null_text(secrets)?;
     Ok(moved)
+}
+
+/// Deletes the text `null` that an older build left in the tracker layout (T-28a-044). Logout now deletes the rows,
+/// so this runs once per start and only removes the stale text. Other values are kept.
+fn clear_null_text(secrets: &dyn SecretStore) -> Result<(), Stop> {
+    for tracker in crate::manager::REGISTRY_ORDER {
+        for field in [Field::Username, Field::Password, Field::Token] {
+            let key = account(tracker, field);
+            if secrets
+                .get(SECRET_SERVICE, &key)?
+                .is_some_and(|v| v.trim() == "null")
+            {
+                secrets.delete(SECRET_SERVICE, &key)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -148,6 +166,29 @@ mod tests {
         assert_eq!(migrate_legacy_tracker_secrets(s.as_ref()), Migration::Moved(4));
         assert_eq!(s.raw("tracker/7/password").as_deref(), Some("KEPT"));
         assert_eq!(s.get(OLD, "pref_mangasync_password_7").unwrap(), None);
+    }
+
+    #[test]
+    fn t_28a_044_a_null_text_in_the_anilist_token_slot_is_cleared_on_start() {
+        let s = seeded();
+        s.set(SECRET_SERVICE, &account(TrackerId::ANILIST, Field::Token), "null")
+            .unwrap();
+        s.set(SECRET_SERVICE, &account(TrackerId::ANILIST, Field::Password), "real-token")
+            .unwrap();
+        migrate_legacy_tracker_secrets(s.as_ref());
+        assert_eq!(
+            s.get(SECRET_SERVICE, &account(TrackerId::ANILIST, Field::Token))
+                .unwrap(),
+            None,
+            "the literal null is removed"
+        );
+        assert_eq!(
+            s.get(SECRET_SERVICE, &account(TrackerId::ANILIST, Field::Password))
+                .unwrap()
+                .as_deref(),
+            Some("real-token"),
+            "other values are kept"
+        );
     }
 
     #[test]

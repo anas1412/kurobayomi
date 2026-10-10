@@ -18,6 +18,11 @@ use kuro_domain::kind::EntryKind;
 use kuro_domain::library::active::continue_target;
 use kuro_domain::library::model::LibraryRow;
 
+use crate::updates::download_actions::UnitTarget;
+use crate::updates::download_exec;
+use crate::updates::download_host::DownloadBackend;
+use crate::updates::download_state::{self, DiskKey};
+
 /// The category ids an entry keeps after a change. `all_links` must hold every link, hidden ones included, so
 /// a hidden category the user cannot see in the dialog is not dropped (E-07).
 pub fn next_membership(all_links: &[i64], include: &[i64], exclude: &[i64]) -> Vec<i64> {
@@ -63,6 +68,121 @@ pub fn mark_anime(db: &Arc<Db>, anime_id: i64, seen: bool) -> Result<usize, Doma
         episodes_to_change(seen, &episodes).iter().map(|e| episode_status_update(seen, e)).collect();
     repo.update_all(&updates)?;
     Ok(updates.len())
+}
+
+/// A chapter or episode a mark-read changed: what the download check and the download removal need.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChangedItem {
+    pub id: i64,
+    pub name: String,
+    pub scanlator: Option<String>,
+}
+
+/// Marks the chapters or episodes of one entry whose `url` is in `urls` read or unread, the ones an update notice names
+/// (T-26a-034), and returns the ones that changed; urls the entry does not hold are ignored.
+pub fn mark_items_by_url_changed(
+    db: &Arc<Db>,
+    kind: EntryKind,
+    entry_id: i64,
+    urls: &[String],
+    read: bool,
+) -> Result<Vec<ChangedItem>, DomainError> {
+    match kind {
+        EntryKind::Manga => {
+            let repo = ChapterRepo::new(db.clone());
+            let named: Vec<_> = repo.by_manga_id(entry_id, false)?.into_iter().filter(|c| urls.contains(&c.url)).collect();
+            let changed = chapters_to_change(read, &named);
+            let items = changed.iter().map(|c| ChangedItem { id: c.id, name: c.name.clone(), scanlator: c.scanlator.clone() }).collect();
+            let updates: Vec<ChapterUpdate> = changed.iter().map(|c| chapter_status_update(read, c)).collect();
+            repo.update_all(&updates)?;
+            Ok(items)
+        }
+        EntryKind::Anime => {
+            let repo = EpisodeRepo::new(db.clone());
+            let named: Vec<_> = repo.by_anime_id(entry_id)?.into_iter().filter(|e| urls.contains(&e.url)).collect();
+            let changed = episodes_to_change(read, &named);
+            let items = changed.iter().map(|e| ChangedItem { id: e.id, name: e.name.clone(), scanlator: e.scanlator.clone() }).collect();
+            let updates: Vec<EpisodeUpdate> = changed.iter().map(|e| episode_status_update(read, e)).collect();
+            repo.update_all(&updates)?;
+            Ok(items)
+        }
+    }
+}
+
+/// As [`mark_items_by_url_changed`], returning only how many changed.
+pub fn mark_items_by_url(db: &Arc<Db>, kind: EntryKind, entry_id: i64, urls: &[String], read: bool) -> Result<usize, DomainError> {
+    Ok(mark_items_by_url_changed(db, kind, entry_id, urls, read)?.len())
+}
+
+/// The title and source id of an entry, for the download disk check. `None` when the entry is gone.
+fn entry_facts(db: &Arc<Db>, kind: EntryKind, entry_id: i64) -> Option<(String, i64)> {
+    match kind {
+        EntryKind::Manga => MangaRepo::new(db.clone()).by_id(entry_id).ok().map(|m| (m.title, m.source)),
+        EntryKind::Anime => AnimeRepo::new(db.clone()).by_id(entry_id).ok().map(|a| (a.title, a.source)),
+    }
+}
+
+/// The notice's "Mark as read" (T-26a-093): marks the named items read and, when "remove after marked as read" is on,
+/// deletes the downloads of the items that changed. Returns how many items changed.
+pub fn mark_notified_read(
+    db: &Arc<Db>,
+    backend: &dyn DownloadBackend,
+    kind: EntryKind,
+    entry_id: i64,
+    urls: &[String],
+    remove_downloads: bool,
+) -> Result<usize, DomainError> {
+    let changed = mark_items_by_url_changed(db, kind, entry_id, urls, true)?;
+    if remove_downloads && !changed.is_empty() {
+        if let Some((title, source_id)) = entry_facts(db, kind, entry_id) {
+            let targets: Vec<UnitTarget> = changed
+                .iter()
+                .map(|item| {
+                    let key = DiskKey {
+                        source_id,
+                        entry_title: title.clone(),
+                        unit_name: item.name.clone(),
+                        scanlator: item.scanlator.clone(),
+                    };
+                    UnitTarget { entry_id, unit_id: item.id, state: download_state::derive(None, backend.on_disk(kind, &key)).state }
+                })
+                .collect();
+            download_exec::remove_read_downloads(backend, kind, true, &targets);
+        }
+    }
+    Ok(changed.len())
+}
+
+/// The ids of the chapters or episodes of an entry whose url is in `urls`. Empty when the entry is gone.
+pub fn item_ids_by_url(db: &Arc<Db>, kind: EntryKind, entry_id: i64, urls: &[String]) -> Vec<i64> {
+    match kind {
+        EntryKind::Manga => ChapterRepo::new(db.clone())
+            .by_manga_id(entry_id, false)
+            .map(|rows| rows.into_iter().filter(|c| urls.contains(&c.url)).map(|c| c.id).collect()),
+        EntryKind::Anime => EpisodeRepo::new(db.clone())
+            .by_anime_id(entry_id)
+            .map(|rows| rows.into_iter().filter(|e| urls.contains(&e.url)).map(|e| e.id).collect()),
+    }
+    .unwrap_or_default()
+}
+
+/// The notice's "Download" (T-26a-093): queues the named items with autostart on, so the queue starts at once. An entry
+/// that is gone, or items that match nothing, queue nothing and say nothing. Returns how many items were named.
+pub fn download_notified(
+    db: &Arc<Db>,
+    backend: &dyn DownloadBackend,
+    kind: EntryKind,
+    entry_id: i64,
+    urls: &[String],
+    external: bool,
+) -> usize {
+    let ids = item_ids_by_url(db, kind, entry_id, urls);
+    if ids.is_empty() {
+        return 0;
+    }
+    backend.enqueue(kind, entry_id, &ids, external);
+    backend.start_queue(kind);
+    ids.len()
 }
 
 /// Marks every selected entry and returns how many entries were written. A failed entry is logged and the rest
@@ -172,10 +292,10 @@ pub enum UpdateScope {
     Category,
 }
 
-/// Decision (T-26a-113): the library's toasts go through the app's one toast layer (`crate::toast::notify`), which
-/// shows each message for `ToastLength::Short`, 2 s, and replaces a visible one. The 4 s length and the
-/// `toast(overlay, text)` signature of the task need a new length in `kuro_platform::toast` and a changed helper in
-/// `src/toast.rs`; neither file belongs to the library lane, so the library keeps the shared layer.
+// Decision (T-37a-062, supersedes T-26a-113): the library's toasts go through `crate::library::toast`, which shows each
+// message for 4 s (U-1.8) on the library page. The shared layer (`crate::toast`) keeps 2 s and 3.5 s and shows the
+// message only when no library page is on screen.
+
 /// The toast an update request shows: "Updating library" or "Updating category", or the already-running notice
 /// when an update is in progress (T2-UPD-01, T2-UPD-02).
 pub fn update_toast(scope: UpdateScope, already_running: bool) -> String {
@@ -427,6 +547,93 @@ mod tests {
         assert_eq!(mark_manga(&db, id, true).expect("mark read"), 2);
         assert_eq!(mark_manga(&db, id, true).expect("mark read again"), 0);
         assert_eq!(mark_manga(&db, id, false).expect("mark unread"), 3);
+    }
+
+    #[test]
+    fn mark_items_by_url_changes_only_the_named_chapters() {
+        let (_dir, db) = db();
+        let id = MangaRepo::new(db.clone())
+            .insert(&Manga { favorite: true, source: 7, url: "m".into(), title: "m".into(), ..Manga::create() })
+            .expect("insert");
+        db.write(|tx| {
+            for n in 1..=3 {
+                tx.execute(
+                    "INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload) \
+                     VALUES (?1, ?2, 'c', NULL, 0, 0, 0, ?3, ?3, 0, 0)",
+                    (id, format!("c{n}"), n as f64),
+                )?;
+            }
+            Ok(())
+        })
+        .expect("chapters");
+        let named = ["c2".to_owned(), "c3".to_owned(), "missing".to_owned()];
+        assert_eq!(mark_items_by_url(&db, EntryKind::Manga, id, &named, true).expect("mark"), 2);
+        assert_eq!(mark_items_by_url(&db, EntryKind::Manga, id, &named, true).expect("again"), 0);
+        let unread = ChapterRepo::new(db.clone()).by_manga_id(id, false).expect("read").into_iter().filter(|c| !c.read).count();
+        assert_eq!(unread, 1, "c1 stays unread");
+    }
+
+    fn notified_manga(db: &Arc<Db>) -> (i64, Vec<(String, i64)>) {
+        let id = MangaRepo::new(db.clone())
+            .insert(&Manga { favorite: true, source: 7, url: "m".into(), title: "m".into(), ..Manga::create() })
+            .expect("insert");
+        db.write(|tx| {
+            for n in 1..=3 {
+                tx.execute(
+                    "INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload) \
+                     VALUES (?1, ?2, ?3, NULL, 0, 0, 0, ?4, ?4, 0, 0)",
+                    (id, format!("u{n}"), format!("c{n}"), n as f64),
+                )?;
+            }
+            Ok(())
+        })
+        .expect("chapters");
+        let ids = ChapterRepo::new(db.clone()).by_manga_id(id, false).expect("rows").into_iter().map(|c| (c.url, c.id)).collect();
+        (id, ids)
+    }
+
+    fn id_of(ids: &[(String, i64)], url: &str) -> i64 {
+        ids.iter().find(|(u, _)| u == url).map(|(_, id)| *id).expect("chapter id")
+    }
+
+    #[test]
+    fn t_26a_093_mark_read_from_a_notice_removes_the_downloads_of_the_changed_items_when_the_option_is_on() {
+        use crate::updates::download_host::fake::{Call, Fake};
+        let (_dir, db) = db();
+        let (id, ids) = notified_manga(&db);
+        let backend = Fake::installed();
+        backend.disk.lock().unwrap().extend([1, 2]);
+        let urls = ["u1".to_owned(), "u2".to_owned(), "u3".to_owned()];
+        // option off: the items are marked, nothing is deleted
+        assert_eq!(mark_notified_read(&db, &backend, EntryKind::Manga, id, &urls[..1], false).expect("mark"), 1);
+        assert!(backend.calls().is_empty(), "remove-after-read is off");
+        // option on: only the changed, downloaded item goes (c1 was already read, c3 is not on disk)
+        assert_eq!(mark_notified_read(&db, &backend, EntryKind::Manga, id, &urls, true).expect("mark"), 2);
+        assert_eq!(backend.calls(), vec![Call::Delete { entry_id: id, unit_ids: vec![id_of(&ids, "u2")] }]);
+        // nothing changes the second time, so nothing is deleted again
+        assert_eq!(mark_notified_read(&db, &backend, EntryKind::Manga, id, &urls, true).expect("mark"), 0);
+        assert_eq!(backend.calls().len(), 1);
+    }
+
+    #[test]
+    fn t_26a_093_the_download_button_queues_the_named_items_with_autostart_and_a_missing_entry_is_a_no_op() {
+        use crate::updates::download_host::fake::{Call, Fake};
+        let (_dir, db) = db();
+        let (id, ids) = notified_manga(&db);
+        let backend = Fake::installed();
+        let urls = ["u2".to_owned(), "u3".to_owned(), "gone".to_owned()];
+        assert_eq!(download_notified(&db, &backend, EntryKind::Manga, id, &urls, false), 2);
+        assert_eq!(
+            backend.calls(),
+            vec![
+                Call::Enqueue { entry_id: id, unit_ids: vec![id_of(&ids, "u2"), id_of(&ids, "u3")], external: false },
+                Call::StartQueue,
+            ],
+            "autostart: the queue starts right after the enqueue"
+        );
+        let other = Fake::installed();
+        assert_eq!(download_notified(&db, &other, EntryKind::Manga, 9_999, &urls, false), 0);
+        assert!(other.calls().is_empty(), "a missing entry is a silent no-op");
     }
 
     #[test]

@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use kuro_data::DataResult;
-use kuro_data::category::{CategoryKind, CategoryRepo};
+use kuro_data::category::{Category, CategoryKind, CategoryRepo};
 use kuro_data::anime::{Anime, AnimeRepo, AnimeUpdate, SeasonAnime};
 use kuro_data::episode::{Episode, EpisodeRepo, EpisodeUpdate};
 use kuro_db::handle::Db;
@@ -14,9 +14,11 @@ use kuro_data::anime::AnimeRelationGroup;
 use kuro_data::anime_relation::AnimeRelationRepo;
 use kuro_domain::entries::defaults::{apply_default_episode_flags, apply_default_season_flags};
 use kuro_domain::entries::fetch_interval::{get_window, set_anime_fetch_interval};
+use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
 
 use super::actions::Mark;
+use crate::entry_core::favorite::{AddRoute, route_add};
 use super::images::{ImageKind, bumped_last_modified};
 use super::season_settings;
 use super::settings::sort_click;
@@ -59,6 +61,13 @@ impl AnimeStore {
     pub fn categories(&self, anime_id: i64) -> DataResult<(Vec<(i64, String)>, Vec<i64>)> {
         let all = self.categories.all()?.into_iter().map(|cat| (cat.id, cat.name)).collect();
         Ok((all, self.category_ids(anime_id)?))
+    }
+
+    /// The add branch of the library button for an anime (`favorite::route_add`), with the library's default category.
+    pub fn add_route(&self, prefs: &PrefStore) -> DataResult<AddRoute> {
+        let default = LibraryPrefs::new(prefs.clone()).default_anime_category.get();
+        let user: Vec<Category> = self.categories.all()?.into_iter().filter(|c| c.id != 0).collect();
+        Ok(route_add(i64::from(default), &user))
     }
 
     /// Replaces the category links of the entry in one transaction.
@@ -179,8 +188,13 @@ impl AnimeStore {
 
     /// Adds the entry to the library: the favorite write, then the library defaults for its episode and season flags
     /// (T-39b-012: defaults are written when it joins the library, not when it is opened). `Ok(false)` when the row is gone.
-    pub fn add_to_library(&self, anime_id: i64, prefs: &PrefStore, now_ms: i64) -> DataResult<bool> {
+    /// Adds the entry to the library in the given categories (none for "no category"). The links are written before the
+    /// favorite, so a failed link leaves the entry out (T-39b-026, E-LIB-6).
+    pub fn add_to_library(&self, anime_id: i64, category_ids: &[i64], prefs: &PrefStore, now_ms: i64) -> DataResult<bool> {
         let Some(anime) = self.anime(anime_id)? else { return Ok(false) };
+        if !category_ids.is_empty() {
+            self.set_categories(anime_id, category_ids)?;
+        }
         self.set_favorite(anime_id, true, now_ms)?;
         apply_default_episode_flags(&self.animes, prefs, &anime)?;
         apply_default_season_flags(&self.animes, prefs, &anime)?;
@@ -302,11 +316,32 @@ mod tests {
         let prefs = PrefStore::in_memory();
         kuro_domain::entries::defaults::set_episode_settings_default(&prefs, ep::SHOW_UNSEEN | ep::SORT_ASC | ep::SORTING_NUMBER);
         assert_eq!(store.anime(id).unwrap().unwrap().episode_flags, 0, "the stored word is untouched until the add");
-        assert!(store.add_to_library(id, &prefs, 9).unwrap());
+        assert!(store.add_to_library(id, &[], &prefs, 9).unwrap());
         let row = store.anime(id).unwrap().unwrap();
         assert!(row.favorite);
         assert_eq!(row.episode_flags & ep::UNSEEN_MASK, ep::SHOW_UNSEEN, "the library default reached the row");
-        assert!(!store.add_to_library(4242, &prefs, 9).unwrap());
+        assert!(!store.add_to_library(4242, &[], &prefs, 9).unwrap());
+    }
+
+    #[test]
+    fn the_add_route_takes_the_default_category_and_asks_when_it_is_unset_or_deleted() {
+        // T-39b-026: default category exists, default is Uncategorized, default unset or deleted
+        let (_dir, store, id) = with_episodes(false, true, 0, 0);
+        let repo = CategoryRepo::new(store.db(), CategoryKind::Anime);
+        let cat = repo.insert(&kuro_data::category::Category { id: 0, name: "Airing".into(), order: 1, flags: 0, hidden: false }).unwrap();
+        let prefs = PrefStore::in_memory();
+        kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(cat as i32).unwrap();
+        assert_eq!(store.add_route(&prefs).unwrap(), AddRoute::AddDefaultCategory(Some(cat)));
+        kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(0).unwrap();
+        assert_eq!(store.add_route(&prefs).unwrap(), AddRoute::AddDefaultCategory(None));
+        kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(-1).unwrap();
+        assert_eq!(store.add_route(&prefs).unwrap(), AddRoute::ChooseCategory);
+        kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(9_999).unwrap();
+        assert_eq!(store.add_route(&prefs).unwrap(), AddRoute::ChooseCategory, "a deleted default asks");
+        // the answer writes the links and the favorite together
+        assert!(store.add_to_library(id, &[cat], &prefs, 9).unwrap());
+        assert_eq!(store.categories(id).unwrap().1, vec![cat]);
+        assert!(store.anime(id).unwrap().unwrap().favorite);
     }
 
     #[test]

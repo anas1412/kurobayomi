@@ -14,6 +14,7 @@
 pub mod actions;
 pub mod cells;
 pub mod display_tab;
+pub mod download_facts;
 pub mod filter_tab;
 #[cfg(test)]
 mod fixtures;
@@ -28,6 +29,8 @@ pub mod layout;
 pub mod load;
 pub mod query;
 pub mod sort_tab;
+pub mod toast;
+pub mod trackers;
 #[cfg(test)]
 mod t2;
 pub mod select;

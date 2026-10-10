@@ -22,13 +22,24 @@ pub enum WindowClass {
 
 /// The class of a width in dp. Strict greater-than at 600 and 840.
 pub fn classify(width_dp: f32) -> WindowClass {
-    if width_dp > EXPANDED_WIDTH_WINDOW_SIZE {
+    if is_expanded_width(width_dp) {
         WindowClass::Expanded
-    } else if width_dp > MEDIUM_WIDTH_WINDOW_SIZE {
+    } else if is_medium_width(width_dp) {
         WindowClass::Medium
     } else {
         WindowClass::Compact
     }
+}
+
+/// `w > 600` dp (`WindowSize.kt`, strict as in Compose). Used by the sidebar label rule (T-49b-017)
+/// and the two-pane layouts (T-49b-042).
+pub fn is_medium_width(width_dp: f32) -> bool {
+    width_dp > MEDIUM_WIDTH_WINDOW_SIZE
+}
+
+/// `w > 840` dp (strict as in Compose). The expanded layouts start here.
+pub fn is_expanded_width(width_dp: f32) -> bool {
+    width_dp > EXPANDED_WIDTH_WINDOW_SIZE
 }
 
 /// Width in dp from device pixels and the scale. `None` for a zero or negative width.
@@ -78,6 +89,25 @@ mod tests {
         assert_eq!(classify(840.0), WindowClass::Medium);
         assert_eq!(classify(841.0), WindowClass::Expanded);
         assert_eq!(classify(2000.0), WindowClass::Expanded);
+    }
+
+    // T-49b-042: the breakpoint helpers are strict, and they agree with `classify`.
+    #[test]
+    fn breakpoint_helpers_are_strict() {
+        assert!(!is_medium_width(600.0));
+        assert!(is_medium_width(600.5));
+        assert!(!is_expanded_width(840.0));
+        assert!(is_expanded_width(840.5));
+        for w in [0.0, 600.0, 600.5, 840.0, 840.5, 2000.0] {
+            let expected = if is_expanded_width(w) {
+                WindowClass::Expanded
+            } else if is_medium_width(w) {
+                WindowClass::Medium
+            } else {
+                WindowClass::Compact
+            };
+            assert_eq!(classify(w), expected, "{w}");
+        }
     }
 
     #[test]

@@ -48,10 +48,10 @@ impl AnimeBrowsePrefs {
         self.sources.source_display_mode.set(mode)
     }
 
-    /// The grid columns for a window of `width` by `height`: the landscape key when the window is wider than it is tall,
-    /// otherwise the portrait key. Zero or less is adaptive (E-BR-23).
-    pub fn columns(&self, width: i32, height: i32) -> GridColumns {
-        grid_columns(width, height, self.library.anime_portrait_columns.get(), self.library.anime_landscape_columns.get())
+    /// The grid columns for a window `width` wide: the landscape key from 720 px, otherwise the portrait key (T-41a-050).
+    /// Zero or less is adaptive (E-BR-23).
+    pub fn columns(&self, width: i32) -> GridColumns {
+        grid_columns(width, self.library.anime_portrait_columns.get(), self.library.anime_landscape_columns.get())
     }
 
     /// `default_anime_category`, default -1 (ask every time). The system category 0 is never offered.
@@ -103,7 +103,7 @@ mod tests {
     fn the_defaults_match_the_listed_ones() {
         let p = prefs();
         assert_eq!(p.display_mode(), LibraryDisplayMode::CompactGrid);
-        assert_eq!(p.columns(800, 600), GridColumns::Adaptive { cell_px: 128 }, "0 is adaptive");
+        assert_eq!(p.columns(800), GridColumns::Adaptive { cell_px: 128 }, "0 is adaptive");
         assert_eq!(p.default_category(), -1);
         assert!(!p.incognito());
         assert!(!p.hide_in_library());
@@ -127,8 +127,8 @@ mod tests {
         let p = AnimeBrowsePrefs::new(store.clone());
         p.library.anime_landscape_columns.set(3).expect("set");
         p.library.manga_portrait_columns.set(9).expect("set");
-        assert_eq!(p.columns(800, 600), GridColumns::Fixed(3), "a wide window reads the landscape key");
-        assert_eq!(p.columns(600, 800), GridColumns::Adaptive { cell_px: 128 }, "the portrait key is still 0");
+        assert_eq!(p.columns(800), GridColumns::Fixed(3), "a wide window reads the landscape key");
+        assert_eq!(p.columns(600), GridColumns::Adaptive { cell_px: 128 }, "the portrait key is still 0");
         assert_eq!(store.get_raw("pref_animelib_columns_landscape_key"), Some(PrefValue::Int(3)));
     }
 
@@ -136,7 +136,7 @@ mod tests {
     fn a_negative_column_value_is_adaptive() {
         let p = prefs();
         p.library.anime_portrait_columns.set(-2).expect("set");
-        assert!(matches!(p.columns(400, 800), GridColumns::Adaptive { .. }));
+        assert!(matches!(p.columns(400), GridColumns::Adaptive { .. }));
     }
 
     #[test]

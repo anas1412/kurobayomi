@@ -276,6 +276,7 @@ broken line\n";
             old_clearance: old.map(str::to_owned),
             timeout,
             cookie_names: &["cf_clearance"],
+            visible: false,
         }
     }
 

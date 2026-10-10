@@ -16,7 +16,7 @@ use crate::screens::{built, Built};
 use crate::settings_ui::category::Category;
 use crate::settings_ui::merge::merge;
 use crate::settings_ui::reader::rules::ReaderState;
-use crate::settings_ui::{advanced, appearance, browse, cache, downloads, library, player, reader, rows, search, storage, usage, view};
+use crate::settings_ui::{about, advanced, appearance, browse, cache, downloads, library, player, reader, rows, search, security, storage, tracking, usage, view};
 use kuro_data::extension_repo::ExtensionRepoRepo;
 use kuro_data::extension_store::ExtensionStoreRepo;
 
@@ -36,6 +36,8 @@ pub fn handles(id: &str) -> bool {
             | "settings_search"
             | "settings_data_storage"
             | "settings_tracking"
+            | "settings_security"
+            | "settings_about"
             | "settings_advanced"
             | "settings_player_internal"
             | "settings_player_decoder"
@@ -131,12 +133,21 @@ fn reader_page() -> Option<Built> {
     ))
 }
 
+/// The Library page. The interval, the category sets and the rows they turn on or off are rebuilt when they change.
 fn library_page() -> Option<Built> {
-    let prefs = prefs();
+    let prefs = Rc::new(prefs());
+    let store = prefs.store().clone();
+    let (for_state, for_tree) = (Rc::clone(&prefs), Rc::clone(&prefs));
     let open: Rc<dyn Fn(EntryKind)> = Rc::new(open_categories);
-    let typed = library::page_rows(&prefs, &categories_of(EntryKind::Anime), &categories_of(EntryKind::Manga), open);
-    let tree = merge(spec_tree("settings_library", prefs.store()), typed);
-    built(page::body(&tree).widget, toolbar("settings_library"))
+    Some(view::live_page(
+        &store,
+        move || crate::settings_ui::library_update::rule_state(&for_state),
+        move || {
+            let typed = library::page_rows(&for_tree, &categories_of(EntryKind::Anime), &categories_of(EntryKind::Manga), Rc::clone(&open));
+            merge(spec_tree("settings_library", for_tree.store()), typed)
+        },
+        toolbar("settings_library"),
+    ))
 }
 
 fn appearance_page() -> Option<Built> {
@@ -164,11 +175,20 @@ fn internal_page() -> Option<Built> {
     ))
 }
 
-/// The Downloads page: the spec rows with the Only on Wi-Fi switch in its place.
+/// The Downloads page: the spec rows with the typed rows in their place. The rows follow the rules of their switches.
 fn downloads_page() -> Option<Built> {
-    let prefs = prefs();
-    let tree = merge(spec_tree("settings_downloads", prefs.store()), downloads::page_rows(&prefs));
-    built(page::body(&tree).widget, toolbar("settings_downloads"))
+    let prefs = Rc::new(prefs());
+    let store = prefs.store().clone();
+    let (for_state, for_tree) = (Rc::clone(&prefs), Rc::clone(&prefs));
+    Some(view::live_page(
+        &store,
+        move || downloads::rule_state(&for_state),
+        move || {
+            let typed = downloads::page_rows(&for_tree, &categories_of(EntryKind::Anime), &categories_of(EntryKind::Manga));
+            merge(spec_tree("settings_downloads", for_tree.store()), typed)
+        },
+        toolbar("settings_downloads"),
+    ))
 }
 
 /// A player page of loose typed rows, with the page toolbar.
@@ -207,7 +227,10 @@ pub fn tree_with(id: &str, prefs: &Prefs, anime: &[Category], manga: &[Category]
         "settings_browse" => merge(spec, browse::page_rows(prefs, counts)),
         "settings_advanced" => merge(spec, advanced::page_rows(prefs, Rc::new(|| {}))),
         "settings_data_storage" => merge(spec, data_storage_rows(prefs, Rc::new(|| {}))),
-        "settings_downloads" => merge(spec, downloads::page_rows(prefs)),
+        "settings_downloads" => merge(spec, downloads::page_rows(prefs, anime, manga)),
+        "settings_tracking" => merge(spec, tracking::page_rows(prefs, Rc::new(|| {}))),
+        "settings_security" => merge(spec, security::page_rows(prefs)),
+        "settings_about" => merge(spec, about::page_rows()),
         "settings_player_internal" => player::controls::internal_rows(prefs),
         "settings_player_decoder" => loose(player::decoder::page_rows(prefs)),
         "settings_player_subtitle" => loose(player::subtitle::page_rows(prefs)),
@@ -221,7 +244,8 @@ pub fn tree_with(id: &str, prefs: &Prefs, anime: &[Category], manga: &[Category]
 /// the storage usage group. `changed` runs after a new folder is stored or the cache is cleared.
 fn data_storage_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     let mut tree: Vec<Preference> = storage::rows(prefs, Rc::clone(&changed)).into_iter().map(rows::item).collect();
-    tree.push(rows::group("Backup and restore", vec![restore_backup_row()]));
+    let interval = rows::ranged_choice("Automatic backup frequency", &prefs.backup.backup_interval, |h| kuro_backup::settings::interval_label(h as u32).unwrap_or("").to_owned(), true);
+    tree.push(rows::group("Backup and restore", vec![interval, restore_backup_row()]));
     tree.push(rows::group("Storage usage", vec![cache::clear_row(Rc::clone(&changed)), rows::switch("Clear episode/chapter cache on app launch", &prefs.library.auto_clear_item_cache, true)]));
     tree
 }
@@ -281,11 +305,23 @@ fn data_storage_page() -> Option<Built> {
     built(holder, data_storage_toolbar())
 }
 
+/// Security and privacy: the spec page with the notification switch in its place.
+fn security_page() -> Option<Built> {
+    let prefs = prefs();
+    let tree = merge(spec_tree("settings_security", prefs.store()), security::page_rows(&prefs));
+    built(page::body(&tree).widget, toolbar("settings_security"))
+}
+
+/// About: the spec page with the Version and Check for updates rows in their place.
+fn about_page() -> Option<Built> {
+    let prefs = prefs();
+    let tree = merge(spec_tree("settings_about", prefs.store()), about::page_rows());
+    built(page::body(&tree).widget, toolbar("settings_about"))
+}
+
 /// Tracking settings: the spec page, its help action opening the tracking guide.
 fn tracking_page() -> Option<Built> {
-    let prefs = prefs();
-    let tree = spec_tree("settings_tracking", prefs.store());
-    built(page::body(&tree).widget, help_toolbar("settings_tracking", TRACKING_HELP_URL))
+    tracking::page(help_toolbar("settings_tracking", TRACKING_HELP_URL))
 }
 
 fn gestures_page() -> Option<Built> {
@@ -322,6 +358,8 @@ pub fn body(id: &str) -> Option<Built> {
         "settings_data_storage" => data_storage_page(),
         "settings_advanced" => advanced::page(),
         "settings_tracking" => tracking_page(),
+        "settings_security" => security_page(),
+        "settings_about" => about_page(),
         _ => None,
     }
 }
@@ -352,13 +390,15 @@ mod tests {
             "settings_data_storage",
             "settings_advanced",
             "settings_tracking",
+            "settings_security",
+            "settings_about",
         ];
         crate::ui::with_spec(|spec| {
             for id in ids {
                 assert!(handles(id) && spec.screen(id).is_some(), "{id}");
             }
         });
-        for other in ["settings", "library", "settings_about", "settings_player_torrents"] {
+        for other in ["settings", "library", "settings_player_torrents", "settings_debug_info"] {
             assert!(!handles(other), "{other}");
         }
     }

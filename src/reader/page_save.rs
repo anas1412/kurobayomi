@@ -3,14 +3,11 @@
 //! and so on (E-SAVE-2). Failures show as the error notice; nothing here panics.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use kuro_images::cover_file::write_atomic;
 use kuro_images::names::{build_valid_filename, reader_file_name};
-use kuro_images::notify;
 use kuro_images::save::PICTURES_FOLDER;
 use kuro_images::sniff::sniff;
-use kuro_platform::notifier::Notifier;
 
 use super::viewers::page_bytes::{ByteSource, read};
 
@@ -43,18 +40,25 @@ pub fn page_source(page: &std::rc::Rc<crate::reader::model::ReaderPage>) -> Opti
     super::viewers::page_bytes::locate(page)?.resolve()
 }
 
-/// Saves the page's bytes into the pictures folder on a worker thread and sends the saved or error notice.
-/// `file_base` is the reader name without an extension, from [`reader_file_name`].
-pub fn save_in_background(source: ByteSource, title: &str, file_base: &str, folder_per_manga: bool, notifier: Arc<dyn Notifier>) {
+/// Saves the page's bytes into the pictures folder on a worker thread and calls `done` on the GTK thread with the
+/// written path, or the error, and the thumbnail of the picture for the notice (T-43a-054, T-43a-055). `file_base` is
+/// the reader name without an extension, from [`reader_file_name`].
+pub fn save_in_background(
+    source: ByteSource,
+    title: &str,
+    file_base: &str,
+    folder_per_manga: bool,
+    done: impl FnOnce(Result<PathBuf, String>, Option<Vec<u8>>) + 'static,
+) {
     let (title, file_base) = (title.to_owned(), file_base.to_owned());
-    std::thread::spawn(move || {
-        notify::clear(&*notifier);
-        let outcome = save_now(&source, &title, &file_base, folder_per_manga, &pictures_dir());
-        match outcome {
-            Ok(_) => notify::saved(&*notifier),
-            Err(error) => notify::failed(&*notifier, Some(error.as_str())),
-        }
-    });
+    in_background(
+        move || {
+            let saved = save_now(&source, &title, &file_base, folder_per_manga, &pictures_dir());
+            let thumbnail = saved.as_ref().ok().and_then(|path| super::saved_notice::thumbnail_png(path));
+            (saved, thumbnail)
+        },
+        move |(saved, thumbnail)| done(saved, thumbnail),
+    );
 }
 
 /// The blocking part of a save: read, sniff, pick a free name, write. Returns the written path.

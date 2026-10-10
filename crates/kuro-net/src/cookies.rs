@@ -5,7 +5,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, MutexGuard, PoisonError};
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cookie::SameSite as RawSameSite;
@@ -18,6 +19,8 @@ use url::Url;
 
 /// Writes happen this long after the last change.
 pub const SAVE_DEBOUNCE: Duration = Duration::from_secs(2);
+/// How long a pasted `cf_clearance` stays in the jar (what Cloudflare sets).
+const CLEARANCE_MAX_AGE_SECS: i64 = 365 * 24 * 60 * 60;
 /// How often the writer checks for changes.
 const POLL: Duration = Duration::from_millis(500);
 
@@ -27,11 +30,18 @@ struct Inner {
     /// Counts changes. `saved` is the version of the last successful write, so `version != saved` means unsaved.
     version: AtomicU64,
     saved: AtomicU64,
+    /// The browser user agent the user entered with a pasted clearance, by registrable domain (T-12a-033). It is
+    /// the default `User-Agent` for that domain, because a clearance only works with the agent that earned it.
+    agents: Mutex<BTreeMap<String, String>>,
 }
 
 impl Inner {
     fn lock(&self) -> MutexGuard<'_, CookieStore> {
         self.store.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn agents(&self) -> MutexGuard<'_, BTreeMap<String, String>> {
+        self.agents.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn changed(&self) {
@@ -92,11 +102,13 @@ impl CookieJar {
                 CookieStore::new()
             }
         };
+        let agents_path = agents_path(&path);
         let inner = Arc::new(Inner {
             store: CookieStoreMutex::new(store),
             path,
             version: AtomicU64::new(0),
             saved: AtomicU64::new(0),
+            agents: Mutex::new(read_agents(&agents_path)),
         });
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(writer(Arc::downgrade(&inner)));
@@ -144,7 +156,12 @@ impl CookieJar {
     pub fn remove_all(&self) -> io::Result<()> {
         self.inner.lock().clear();
         self.inner.changed();
-        self.inner.write_now()
+        self.inner.write_now()?;
+        self.inner.agents().clear();
+        match fs::remove_file(agents_path(&self.inner.path)) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
     }
 
     /// Saves now when there are unsaved changes.
@@ -170,6 +187,54 @@ impl CookieJar {
         }
     }
 
+    /// Stores a `cf_clearance` value that the user pasted for `url`, and the browser user agent that earned it as
+    /// the default `User-Agent` for the domain (T-12a-033). The value must be non-empty and hold no `;` and no
+    /// whitespace, so it cannot break the cookie header it is sent in; the user agent must be a usable header
+    /// value. Nothing is stored when either is refused.
+    pub fn import_clearance(&self, url: &Url, value: &str, user_agent: &str) -> Result<(), ClearanceImportError> {
+        if value.is_empty() {
+            return Err(ClearanceImportError::Empty);
+        }
+        if value.contains(';') || value.chars().any(char::is_whitespace) {
+            return Err(ClearanceImportError::Malformed);
+        }
+        let user_agent = user_agent.trim();
+        if user_agent.is_empty() || http::HeaderValue::from_str(user_agent).is_err() {
+            return Err(ClearanceImportError::InvalidUserAgent);
+        }
+        // Cloudflare scopes the cookie to the registrable domain (`.site.test`), so `www.site.test` and `site.test`
+        // both send it. An address or a name with no dot (`localhost`) stays host-only.
+        let key = crate::interceptors::cloudflare::solve_key(url);
+        let domain = match url.host() {
+            Some(url::Host::Domain(_)) if key.contains('.') => format!(".{key}"),
+            _ => url.host_str().unwrap_or_default().to_owned(),
+        };
+        let cookie = WebCookie {
+            name: "cf_clearance".into(),
+            value: value.into(),
+            domain,
+            path: "/".into(),
+            secure: url.scheme() == "https",
+            http_only: false,
+            // Cloudflare sets `cf_clearance` for a year. A pasted value has no expiry of its own, and a session
+            // cookie would not reach the jar file, so it gets the same year.
+            expires: Some(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64) + CLEARANCE_MAX_AGE_SECS),
+            same_site: None,
+        };
+        self.import(url, &[cookie]);
+        let mut agents = self.inner.agents();
+        agents.insert(crate::interceptors::cloudflare::solve_key(url), user_agent.to_owned());
+        if let Err(e) = write_agents(&agents, &agents_path(&self.inner.path)) {
+            tracing::warn!("cannot save the domain user agents: {e}");
+        }
+        Ok(())
+    }
+
+    /// The default `User-Agent` the user entered for `url`'s registrable domain with a pasted clearance.
+    pub fn domain_user_agent(&self, url: &Url) -> Option<String> {
+        self.inner.agents().get(&crate::interceptors::cloudflare::solve_key(url)).cloned()
+    }
+
     /// The cookies to hand to the WebView before a load of `url`.
     pub fn export_for(&self, url: &Url) -> Vec<WebCookie> {
         self.get(url).iter().map(to_web).collect()
@@ -180,6 +245,15 @@ const COOKIES_CLEARED_TEXT: &str = "Cookies cleared";
 
 /// Settings > Networking > Clear cookies (T-12a-035): empties the jar, writes the empty file, then shows the toast.
 /// When the file cannot be written the error is returned and no toast is shown.
+/// Why a pasted `cf_clearance` value was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClearanceImportError {
+    Empty,
+    Malformed,
+    /// The browser user agent is blank or cannot be sent as a header.
+    InvalidUserAgent,
+}
+
 pub fn clear_cookies(jar: &CookieJar, toaster: &Toaster) -> io::Result<()> {
     jar.remove_all()?;
     toaster.show(COOKIES_CLEARED_TEXT, ToastLength::Short);
@@ -223,6 +297,32 @@ async fn writer(inner: std::sync::Weak<Inner>) {
             }
         }
     }
+}
+
+/// The file that holds the domain user agents, next to the jar.
+fn agents_path(jar_path: &Path) -> PathBuf {
+    let mut path = jar_path.as_os_str().to_owned();
+    path.push(".user_agents.json");
+    PathBuf::from(path)
+}
+
+/// A missing or unreadable file gives no agents.
+fn read_agents(path: &Path) -> BTreeMap<String, String> {
+    File::open(path)
+        .ok()
+        .and_then(|file| serde_json::from_reader(BufReader::new(file)).ok())
+        .unwrap_or_default()
+}
+
+fn write_agents(agents: &BTreeMap<String, String>, path: &Path) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    fs::write(&tmp, serde_json::to_vec(agents).map_err(io::Error::other)?)?;
+    fs::rename(&tmp, path)
 }
 
 fn open_store(path: &Path) -> io::Result<CookieStore> {
@@ -323,8 +423,65 @@ mod tests {
     use http::HeaderValue;
     use reqwest::cookie::CookieStore as _;
 
+    const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) Firefox/136.0";
+
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()
+    }
+
+    #[test]
+    fn a_pasted_clearance_is_stored_for_the_domain() {
+        let dir = tempfile::tempdir().unwrap();
+        let jar = CookieJar::load(dir.path().join("cookies.json"));
+        let site = url("https://site.test/manga");
+        jar.import_clearance(&site, "abc123", UA).unwrap();
+        let cookies = jar.get(&site);
+        assert!(cookies.iter().any(|c| c.name() == "cf_clearance" && c.value() == "abc123"));
+        // it is scoped to the registrable domain, so a sibling host sends it too, and another domain does not
+        assert!(!jar.get(&url("https://www.site.test/")).is_empty());
+        assert!(jar.get(&url("https://other.test/")).is_empty());
+        // it is persistent, so it is in the file a reload reads
+        jar.flush().unwrap();
+        assert!(!CookieJar::load(dir.path().join("cookies.json")).get(&site).is_empty());
+    }
+
+    #[test]
+    fn an_empty_or_malformed_clearance_is_refused_and_nothing_is_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let jar = CookieJar::load(dir.path().join("cookies.json"));
+        let site = url("https://site.test/");
+        assert_eq!(jar.import_clearance(&site, "", UA), Err(ClearanceImportError::Empty));
+        assert_eq!(jar.import_clearance(&site, "a;b", UA), Err(ClearanceImportError::Malformed));
+        assert_eq!(jar.import_clearance(&site, "a b", UA), Err(ClearanceImportError::Malformed));
+        assert_eq!(jar.import_clearance(&site, "ok", "  "), Err(ClearanceImportError::InvalidUserAgent));
+        assert_eq!(jar.import_clearance(&site, "ok", "bad\nagent"), Err(ClearanceImportError::InvalidUserAgent));
+        assert!(jar.get(&site).is_empty());
+        assert_eq!(jar.domain_user_agent(&site), None);
+    }
+
+    #[test]
+    fn the_entered_user_agent_becomes_the_domain_default_and_survives_a_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("cookies.json");
+        let jar = CookieJar::load(file.clone());
+        jar.import_clearance(&url("https://www.site.test/a"), "abc", "  Mozilla/5.0 (X11) Firefox/136.0 ").unwrap();
+        // the registrable domain keys it, so a sibling host shares it and another domain does not
+        let agent = Some("Mozilla/5.0 (X11) Firefox/136.0".to_owned());
+        assert_eq!(jar.domain_user_agent(&url("https://api.site.test/")), agent);
+        assert_eq!(jar.domain_user_agent(&url("https://other.test/")), None);
+        assert_eq!(CookieJar::load(file).domain_user_agent(&url("https://site.test/")), agent);
+    }
+
+    #[test]
+    fn clearing_the_cookies_forgets_the_domain_user_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("cookies.json");
+        let jar = CookieJar::load(file.clone());
+        let site = url("https://site.test/");
+        jar.import_clearance(&site, "abc", UA).unwrap();
+        jar.remove_all().unwrap();
+        assert_eq!(jar.domain_user_agent(&site), None);
+        assert_eq!(CookieJar::load(file).domain_user_agent(&site), None);
     }
 
     fn web(name: &str, value: &str, domain: &str, path: &str, expires: Option<i64>) -> WebCookie {

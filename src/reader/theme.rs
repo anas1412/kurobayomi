@@ -76,9 +76,6 @@ pub fn css() -> &'static str {
 .reader-text-light { color: #ffffff; }
 .reader-text-dark { color: #000000; }
 .reader-scrim { background-color: rgba(0, 0, 0, 0.5); }
-.reader-gray { filter: grayscale(1); }
-.reader-invert { filter: invert(1); }
-.reader-gray-invert { filter: grayscale(1) invert(1); }
 .reader-page-indicator { font-weight: bold; color: #ebebeb; text-shadow: 2px 2px 2px #2d2d2d; }"
 }
 
@@ -122,5 +119,10 @@ mod tests {
     #[test]
     fn the_gray_is_the_spec_colour() {
         assert!(css().contains("#202125"));
+    }
+
+    #[test]
+    fn grayscale_and_invert_are_not_css_filters() {
+        assert!(!css().contains("filter"), "they are colour-matrix nodes on the page area (T-43b-049)");
     }
 }

@@ -12,6 +12,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gtk::prelude::*;
+use kuro_domain::source::model::Source;
 use kuro_domain::source::toggles::{flip_disabled, toggle_pin};
 use kuro_extensions::InstallStep;
 use kuro_extensions::anime::model::Buckets;
@@ -22,7 +23,8 @@ use tokio::sync::watch;
 
 use super::anime::sources::{ListPrefs, TabRoute};
 use super::anime::sources_view::{AnimeSourcesNav, AnimeSourcesPage};
-use super::ext_details::{DetailSource, ExtDetails};
+use super::directory::SourceDirectory;
+use super::ext_details::{DetailSource, ExtDetails, label_as_name};
 use super::ext_details_page::{DetailsDeps, ExtDetailsPage};
 use super::extensions::{Ext, ExtSource, ExtState};
 use super::extensions_page::{ExtNav, ExtensionBackend, JobFuture, RefreshFuture, Reporter};
@@ -100,10 +102,21 @@ pub fn anime_exts(buckets: &Buckets) -> Vec<Ext> {
     installed.chain(untrusted).chain(available).collect()
 }
 
-/// The details of an installed extension from the rows the page shows. `lib_version` and `repo_url` are not part of the
-/// shared row, so the debug text says `n/a` and `null` for them rather than invent a value.
-pub fn details_of(ext: &Ext) -> Option<ExtDetails> {
+/// What the details page shows about an installed package that the shared row does not carry: the store it came from, for
+/// the repository link and the debug text, and which of its sources have a settings screen of their own.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DetailFacts {
+    pub repo_url: Option<String>,
+    pub configurable: BTreeSet<i64>,
+}
+
+/// The details of an installed extension from the rows the page shows. `lib_version` is not part of the shared row, so the
+/// debug text says `n/a` for it rather than invent a value. A source is labelled by its name when its extension has
+/// several sources that do not all share one name (`multiSource && !multiLangSingleSource`, T-41a-019).
+pub fn details_of(ext: &Ext, facts: &DetailFacts) -> Option<ExtDetails> {
     let ExtState::Installed { has_update, obsolete } = ext.state else { return None };
+    let names: Vec<&str> = ext.sources.iter().map(|s| s.name.as_str()).collect();
+    let label_as_name = label_as_name(&names);
     Some(ExtDetails {
         name: ext.name.clone(),
         pkg: ext.pkg.clone(),
@@ -115,7 +128,7 @@ pub fn details_of(ext: &Ext) -> Option<ExtDetails> {
         has_update,
         obsolete,
         shared: false,
-        repo_url: None,
+        repo_url: facts.repo_url.clone(),
         icon_file: ext.icon_file.clone(),
         sources: ext
             .sources
@@ -124,12 +137,59 @@ pub fn details_of(ext: &Ext) -> Option<ExtDetails> {
                 id: s.id,
                 name: s.name.clone(),
                 lang: s.lang.clone(),
-                label_as_name: s.lang.is_empty(),
-                configurable: false,
+                label_as_name,
+                configurable: facts.configurable.contains(&s.id),
                 base_url: s.base_url.clone(),
             })
             .collect(),
     })
+}
+
+/// The index url of the store an installed anime package came from (`extension.store.indexUrl`), `None` for a package that
+/// has no store or is not installed. A manga package keeps no store, so its details have no repository link.
+pub fn anime_repo_url(buckets: &Buckets, pkg: &str) -> Option<String> {
+    buckets.updates.iter().chain(&buckets.installed).find(|e| e.pkg == pkg).and_then(|e| e.store.as_ref()).map(|store| store.index_url.clone())
+}
+
+/// The ids among `ids` whose source declares settings rows of its own.
+pub fn configurable_ids(directory: Option<&dyn SourceDirectory>, ids: impl IntoIterator<Item = i64>) -> BTreeSet<i64> {
+    ids.into_iter().filter(|id| directory.is_some_and(|directory| directory.preferences(*id).is_some())).collect()
+}
+
+/// The directory of a kind, as the pages read it: the manga directory the app installed, or the anime sources the
+/// extension host published.
+fn directory_of(kind: BrowseKind) -> Option<Arc<dyn SourceDirectory>> {
+    use kuro_data::anime::AnimeRepo;
+    use kuro_domain::kind::EntryKind;
+
+    match kind {
+        BrowseKind::Manga => super::directory::current(),
+        BrowseKind::Anime => Some(Arc::new(super::anime::directory::AnimeDirectory::current(AnimeRepo::new(crate::data::app().db(EntryKind::Anime))))),
+    }
+}
+
+/// The installed sources of a kind, as the Sources filter and the Sources page list them: `anime` is what the host
+/// published for the anime kind.
+pub fn installed_sources(kind: BrowseKind, directory: Option<&dyn SourceDirectory>, anime: Vec<Source>) -> Vec<Source> {
+    match kind {
+        BrowseKind::Anime => anime,
+        BrowseKind::Manga => directory.map(|directory| directory.sources().into_iter().map(|entry| entry.source).collect()).unwrap_or_default(),
+    }
+}
+
+/// The facts of one installed row.
+fn facts_of(kind: BrowseKind, ext: &Ext) -> DetailFacts {
+    let repo_url = match kind {
+        BrowseKind::Anime => anime_repo_url(&crate::ext_host::anime_lists(), &ext.pkg),
+        BrowseKind::Manga => None,
+    };
+    let directory = directory_of(kind);
+    DetailFacts { repo_url, configurable: configurable_ids(directory.as_deref(), ext.sources.iter().map(|s| s.id)) }
+}
+
+/// Whether the package is no longer an installed row: the details page of it then has nothing to show and pops (E18, R7).
+pub fn is_gone(rows: &[Ext], pkg: &str) -> bool {
+    !rows.iter().any(|ext| ext.pkg == pkg && matches!(ext.state, ExtState::Installed { .. }))
 }
 
 /// What the app can do with an extension from this tab today: nothing downloads here yet, so an install ends in its
@@ -171,10 +231,10 @@ pub fn startup_badge(stored: i32, published: Option<&[Ext]>) -> (usize, Option<i
 }
 
 /// Pushes a page of the tab with a title and a Back button.
-/// What the manga Sources page shows of its preferences (T-40b-015). Its rows wait for the source registry.
+/// What the manga Sources page shows of its preferences (T-40b-015) and the sources the directory lists.
 fn manga_sources_snapshot(prefs: &SourcePrefs) -> SourcesSnapshot {
     SourcesSnapshot {
-        sources: Vec::new(),
+        sources: installed_sources(BrowseKind::Manga, super::directory::current().as_deref(), Vec::new()),
         enabled_languages: prefs.enabled_languages.get(),
         disabled: prefs.disabled_manga_sources.get(),
         pinned: prefs.pinned_manga_sources.get(),
@@ -204,32 +264,32 @@ fn open_route(route: &BrowseRoute) {
     super::pending::open(route.clone());
 }
 
-/// The manga Migrate tab: the library's favourite counts per source, over the installed sources (T-40b-070).
-fn manga_migrate(prefs: &Rc<SourcePrefs>) -> gtk::Widget {
-    use kuro_data::manga::MangaRepo;
-    use kuro_domain::kind::EntryKind;
-
+/// A Migrate tab of one kind: the library's favourite counts per source, over the installed sources (T-40b-070,
+/// T-41a-036). `read` is the kind's count read, which runs off the GTK thread.
+fn migrate_page(
+    kind: BrowseKind,
+    prefs: &Rc<SourcePrefs>,
+    read: impl Fn() -> Result<Vec<(i64, i64)>, String> + Clone + Send + 'static,
+    directory: Rc<dyn Fn() -> Option<Arc<dyn SourceDirectory>>>,
+) -> gtk::Widget {
     use super::migrate_list::{MigrateDeps, migrate_tab};
 
-    let repo = MangaRepo::new(crate::data::app().db(EntryKind::Manga));
     migrate_tab(MigrateDeps {
+        kind,
         prefs: Rc::clone(prefs),
         counts: Rc::new(move |deliver| {
-            let repo = repo.clone();
+            let read = read.clone();
             gtk::glib::spawn_future_local(async move {
-                let read = gtk::gio::spawn_blocking(move || repo.favorite_counts_by_source()).await;
-                match read {
-                    Ok(Ok(counts)) => deliver(counts),
-                    Ok(Err(error)) => {
-                        tracing::warn!(%error, "the favourite counts could not be read");
-                        deliver(Vec::new());
-                    }
-                    Err(_) => deliver(Vec::new()),
+                match gtk::gio::spawn_blocking(read).await {
+                    Ok(Ok(counts)) => deliver(Ok(counts)),
+                    Ok(Err(error)) => deliver(Err(error)),
+                    Err(_) => deliver(Err("the favourite count read was cancelled".to_owned())),
                 }
             });
         }),
-        directory: Rc::new(super::directory::current),
-        open: Rc::new(|source_id| super::pending::open(BrowseRoute::MigrateEntries { source_id })),
+        toast: Rc::new(|text: String| crate::toast::notify(text)),
+        directory,
+        open: Rc::new(move |source_id| super::pending::open(BrowseRoute::MigrateEntries { kind, source_id })),
         copy_id: Rc::new(|id| {
             if let Some(display) = gtk::gdk::Display::default() {
                 display.clipboard().set_text(&id.to_string());
@@ -240,21 +300,63 @@ fn manga_migrate(prefs: &Rc<SourcePrefs>) -> gtk::Widget {
     .upcast()
 }
 
+/// The manga Migrate tab.
+fn manga_migrate(prefs: &Rc<SourcePrefs>) -> gtk::Widget {
+    use kuro_data::manga::MangaRepo;
+    use kuro_domain::kind::EntryKind;
+
+    let repo = MangaRepo::new(crate::data::app().db(EntryKind::Manga));
+    migrate_page(
+        BrowseKind::Manga,
+        prefs,
+        move || repo.favorite_counts_by_source().map_err(|error| error.to_string()),
+        Rc::new(super::directory::current),
+    )
+}
+
+/// The anime Migrate tab: the anime library's favourite counts over the anime sources the host published.
+fn anime_migrate(prefs: &Rc<SourcePrefs>) -> gtk::Widget {
+    use kuro_data::anime::AnimeRepo;
+    use kuro_domain::kind::EntryKind;
+
+    let repo = AnimeRepo::new(crate::data::app().db(EntryKind::Anime));
+    let for_sources = repo.clone();
+    migrate_page(
+        BrowseKind::Anime,
+        prefs,
+        move || repo.favorite_counts_by_source().map_err(|error| error.to_string()),
+        Rc::new(move || Some(Arc::new(super::anime::directory::AnimeDirectory::current(for_sources.clone())) as Arc<dyn SourceDirectory>)),
+    )
+}
+
+/// The language rows a language page can offer: the extension host's rows, or the failure when there is no host to ask.
+/// Without a started extension host the available languages cannot be fetched (T-41a-018).
+pub fn language_rows(host_running: bool, rows: Vec<Ext>) -> Result<Vec<Ext>, String> {
+    if host_running { Ok(rows) } else { Err("the extension host is not running".to_owned()) }
+}
+
 /// The language filter of the visible page: Show/hide sources for a sources page, the language switches for an
 /// extensions page (B§4, B§8).
 fn open_filter(page: BrowsePage, prefs: &Rc<SourcePrefs>, rows: &dyn Fn(BrowsePage) -> Vec<Ext>) {
     if page.is_extensions() {
-        let languages = ExtensionLanguagesPage::new(prefs.enabled_languages.clone(), Rc::new(|text: String| crate::toast::notify(text)));
-        languages.set_exts(&rows(page));
+        let languages = ExtensionLanguagesPage::new(prefs.enabled_languages.clone());
+        match language_rows(crate::ext_host::registry().is_some(), rows(page)) {
+            Ok(rows) => languages.set_exts(&rows),
+            Err(error) => {
+                tracing::error!(%error, "the extension languages could not be fetched");
+                languages.fetch_failed();
+            }
+        }
         push_page(&tr(MsgKey::label_extensions), languages.widget());
     } else {
-        let hidden = match page.kind() {
+        let kind = page.kind();
+        let hidden = match kind {
             BrowseKind::Anime => prefs.disabled_anime_sources.clone(),
             BrowseKind::Manga => prefs.disabled_manga_sources.clone(),
         };
         let filter = SourcesFilterPage::new(prefs.enabled_languages.clone(), hidden.clone());
-        // no source registry yet: the page says that no installed source was found
-        filter.set_sources(Vec::new());
+        let sources_now = move || installed_sources(kind, super::directory::current().as_deref(), crate::ext_host::anime_sources().0);
+        filter.set_sources(sources_now());
         // an error shows the `internal_error` toast and pops the page (E-SF-05)
         filter.set_on_error(Rc::new(|| {
             crate::toast::notify(tr(MsgKey::internal_error));
@@ -267,22 +369,35 @@ fn open_filter(page: BrowsePage, prefs: &Rc<SourcePrefs>, rows: &dyn Fn(BrowsePa
             move || widget.upgrade().is_some()
         };
         let shown = filter.clone();
-        glue::poll_pref_changes(checks, alive, move || shown.set_sources(Vec::new()));
+        glue::poll_pref_changes(checks, alive, move || shown.set_sources(sources_now()));
         push_page(&tr(MsgKey::label_sources), filter.widget());
     }
 }
 
-/// The details page of an installed extension, over the preferences of its kind.
-fn open_details(kind: BrowseKind, prefs: &Rc<SourcePrefs>, ext: Option<Ext>) {
+/// The details page of an installed extension, over the preferences of its kind. `rows` reads the kind's extension rows
+/// again: the page pops once the package is no longer installed (E18, R7).
+fn open_details(kind: BrowseKind, prefs: &Rc<SourcePrefs>, ext: Option<Ext>, rows: Rc<dyn Fn() -> Vec<Ext>>) {
     let (incognito, disabled) = match kind {
         BrowseKind::Anime => (prefs.incognito_anime_extensions.clone(), prefs.disabled_anime_sources.clone()),
         BrowseKind::Manga => (prefs.incognito_manga_extensions.clone(), prefs.disabled_manga_sources.clone()),
     };
+    let pkg = ext.as_ref().map(|e| e.pkg.clone());
+    let remove_cookies = super::cookies::remover();
     let deps = DetailsDeps {
         incognito,
         disabled,
-        uninstall: Rc::new(|| {}),
-        open_source_prefs: Rc::new(|_| {}),
+        // the host's uninstall; the page leaves when the package drops out of the installed rows
+        uninstall: {
+            let pkg = pkg.clone();
+            Rc::new(move || {
+                if let Some(pkg) = &pkg {
+                    gtk::glib::spawn_future_local(HostBackend.uninstall(pkg.clone()));
+                }
+            })
+        },
+        open_source_prefs: Rc::new(move |source_id| {
+            crate::entry_core::handoff::open_source_preferences(crate::entry_core::handoff::SourcePrefsRequest { source_id, anime: kind == BrowseKind::Anime });
+        }),
         open_url: Rc::new(|url| {
             gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
                 if let Err(error) = result {
@@ -290,13 +405,29 @@ fn open_details(kind: BrowseKind, prefs: &Rc<SourcePrefs>, ext: Option<Ext>) {
                 }
             });
         }),
-        // no HTTP client with a cookie jar is wired into the app yet, so there is nothing to clear
-        clear_cookies: Rc::new(|_| 0),
+        clear_cookies: Rc::new(remove_cookies),
         toast: Rc::new(|text: String| crate::toast::notify(text)),
     };
     let page = ExtDetailsPage::new(deps);
-    page.set_details(ext.as_ref().and_then(details_of));
+    page.set_details(ext.as_ref().and_then(|ext| details_of(ext, &facts_of(kind, ext))));
+    if let Some(pkg) = pkg {
+        pop_when_gone(page.widget(), pkg, rows);
+    }
     push_page(&tr(MsgKey::label_extension_info), page.widget());
+}
+
+/// Pops the details page once its package is gone from the installed rows, checked each second while the page is the one on
+/// show: a page under another one waits until it is shown again, so a pop never takes the wrong page.
+fn pop_when_gone(page: &gtk::Box, pkg: String, rows: Rc<dyn Fn() -> Vec<Ext>>) {
+    let weak = page.downgrade();
+    gtk::glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
+        let Some(page) = weak.upgrade() else { return gtk::glib::ControlFlow::Break };
+        if page.is_mapped() && is_gone(&rows(), &pkg) {
+            crate::ui::pop();
+            return gtk::glib::ControlFlow::Break;
+        }
+        gtk::glib::ControlFlow::Continue
+    });
 }
 
 /// Builds the tab. `None` before the app data is open.
@@ -348,7 +479,7 @@ pub fn browse() -> Option<Built> {
             route: Rc::new(move |route| match route {
                 TabRoute::GlobalSearch => open_route(&BrowseRoute::GlobalSearch { kind: BrowseKind::Anime, source_id: None, query: String::new() }),
                 TabRoute::Visibility => open_filter(BrowsePage::AnimeSources, &filter_prefs, &*filter_rows),
-                TabRoute::Browse { .. } => crate::ui::open("browse_source"),
+                TabRoute::Browse { source_id, query } => open_route(&BrowseRoute::AnimeBrowseSource { source_id, query }),
             }),
             toggle_pin: Rc::new(move |id| flip(&pin, id, toggle_pin)),
             toggle_disabled: Rc::new(move |id| flip(&hide, id, flip_disabled)),
@@ -394,7 +525,8 @@ pub fn browse() -> Option<Built> {
         let nav = ExtNav {
             open_details: Rc::new(move |pkg| {
                 let ext = details_rows(page_kind).into_iter().find(|e| e.pkg == pkg);
-                open_details(kind, &details_prefs, ext);
+                let again = Rc::clone(&details_rows);
+                open_details(kind, &details_prefs, ext, Rc::new(move || again(page_kind)));
             }),
             trust: Rc::new(move |pkg| {
                 let mut trusted = trust_prefs.trusted_extensions.get();
@@ -426,8 +558,7 @@ pub fn browse() -> Option<Built> {
         (BrowsePage::MangaSources, manga_sources.widget().clone().upcast()),
         (BrowsePage::AnimeExtensions, anime_extensions.widget().clone().upcast()),
         (BrowsePage::MangaExtensions, manga_extensions.widget().clone().upcast()),
-        // the anime migration list waits for the anime library's counts
-        (BrowsePage::AnimeMigrate, empty_page(&tr(MsgKey::information_empty_library))),
+        (BrowsePage::AnimeMigrate, anime_migrate(&prefs)),
         (BrowsePage::MangaMigrate, manga_migrate(&prefs)),
     ];
     let filter_prefs = Rc::clone(&prefs);
@@ -489,14 +620,6 @@ pub fn browse() -> Option<Built> {
     let built = Built { content: shell.root.clone().upcast(), end: shell.end.clone() };
     SHELL.with(|s| *s.borrow_mut() = Some(shell));
     Some(built)
-}
-
-/// A page that says there is nothing to list.
-fn empty_page(text: &str) -> gtk::Widget {
-    let label = gtk::Label::new(Some(text));
-    label.set_valign(gtk::Align::Center);
-    label.set_vexpand(true);
-    label.upcast()
 }
 
 #[cfg(test)]
@@ -611,11 +734,88 @@ mod tests {
     #[test]
     fn only_an_installed_row_has_details_and_they_carry_no_invented_fields() {
         let mut ext = anime_exts(&Buckets { installed: vec![installed("eu.in", false)], ..Buckets::default() }).remove(0);
-        let details = details_of(&ext).expect("installed");
+        let details = details_of(&ext, &DetailFacts::default()).expect("installed");
         assert_eq!((details.lib_version, details.repo_url.as_deref(), details.shared), (None, None, false));
         assert_eq!(details.sources.len(), 1);
         assert_eq!(details.sources[0].base_url.as_deref(), Some("https://src.example"));
         ext.state = ExtState::Available;
-        assert_eq!(details_of(&ext), None);
+        assert_eq!(details_of(&ext, &DetailFacts::default()), None);
+    }
+
+    fn row_with(sources: &[(i64, &str, &str)]) -> Ext {
+        Ext {
+            sources: sources.iter().map(|(id, name, lang)| ExtSource { id: *id, name: (*name).into(), lang: (*lang).into(), base_url: None }).collect(),
+            ..ext_row("eu.multi", false)
+        }
+    }
+
+    #[test]
+    fn a_source_is_labelled_by_name_only_with_several_sources_that_do_not_all_share_one_name() {
+        let label = |ext: &Ext| details_of(ext, &DetailFacts::default()).expect("installed").sources.iter().map(|s| s.label_as_name).collect::<Vec<_>>();
+        assert_eq!(label(&row_with(&[(1, "Only", "en")])), [false], "one source: the language is its label");
+        assert_eq!(label(&row_with(&[(1, "Same", "en"), (2, "Same", "fr")])), [false, false], "one name in several languages: multi-lang single source");
+        assert_eq!(label(&row_with(&[(1, "Alpha", "en"), (2, "Beta", "en")])), [true, true], "T-41a-019: different sources are labelled by name");
+        assert_eq!(label(&row_with(&[])), Vec::<bool>::new());
+    }
+
+    #[test]
+    fn the_facts_set_the_repository_and_the_settings_button_of_each_source() {
+        let ext = row_with(&[(1, "Alpha", "en"), (2, "Beta", "en")]);
+        let facts = DetailFacts { repo_url: Some("https://raw.githubusercontent.com/u/r/main/index.min.json".into()), configurable: BTreeSet::from([2]) };
+        let details = details_of(&ext, &facts).expect("installed");
+        assert_eq!(details.repo_url.as_deref(), Some("https://raw.githubusercontent.com/u/r/main/index.min.json"));
+        assert_eq!(details.sources.iter().map(|s| s.configurable).collect::<Vec<_>>(), [false, true], "only the source with settings rows has the button");
+    }
+
+    #[test]
+    fn an_anime_package_has_the_index_url_of_its_store_and_other_packages_have_none() {
+        let mut with_store = installed("eu.in", false);
+        with_store.store = Some(kuro_extensions::anime::model::StoreRef { index_url: "https://s/i.json".into(), name: "S".into() });
+        let buckets = Buckets { updates: vec![installed("eu.up", true)], installed: vec![with_store], ..Buckets::default() };
+        assert_eq!(anime_repo_url(&buckets, "eu.in").as_deref(), Some("https://s/i.json"));
+        assert_eq!(anime_repo_url(&buckets, "eu.up"), None, "an installed package with no store");
+        assert_eq!(anime_repo_url(&buckets, "eu.missing"), None);
+    }
+
+    struct Declaring(i64);
+
+    impl SourceDirectory for Declaring {
+        fn sources(&self) -> Vec<super::super::directory::DirectorySource> {
+            vec![super::super::directory::DirectorySource { source: Source::new(self.0, "Alpha", "en"), package: String::new(), home_url: None }]
+        }
+        fn loader(&self, _id: i64) -> Option<Arc<dyn super::super::listing::PageLoader>> {
+            None
+        }
+        fn filters(&self, _id: i64) -> Option<kuro_source::filter_list::FilterList> {
+            None
+        }
+        fn preferences(&self, id: i64) -> Option<Vec<kuro_source::SourcePref>> {
+            (id == self.0).then(|| vec![kuro_source::SourcePref::Switch { key: "k".into(), title: "T".into(), summary: None, default: false }])
+        }
+    }
+
+    #[test]
+    fn a_source_is_configurable_when_the_directory_declares_rows_for_it() {
+        assert_eq!(configurable_ids(Some(&Declaring(2)), [1, 2, 3]), BTreeSet::from([2]));
+        assert!(configurable_ids(None, [1, 2]).is_empty(), "no directory: no settings buttons");
+        assert_eq!(installed_sources(BrowseKind::Manga, Some(&Declaring(2)), vec![Source::new(9, "A", "en")]).iter().map(|s| s.id).collect::<Vec<_>>(), [2], "manga reads the directory");
+        assert_eq!(installed_sources(BrowseKind::Anime, Some(&Declaring(2)), vec![Source::new(9, "A", "en")]).iter().map(|s| s.id).collect::<Vec<_>>(), [9], "anime reads the host's sources");
+        assert!(installed_sources(BrowseKind::Manga, None, Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn a_package_that_drops_out_of_the_installed_rows_is_gone() {
+        let rows = [ext_row("a", false), Ext { state: ExtState::Available, ..ext_row("b", false) }];
+        assert!(!is_gone(&rows, "a"), "E18: still installed");
+        assert!(is_gone(&rows, "b"), "listed but not installed counts as gone");
+        assert!(is_gone(&rows, "c"));
+        assert!(is_gone(&[], "a"), "the list emptied: the page pops");
+    }
+
+    #[test]
+    fn the_languages_fail_to_fetch_only_when_there_is_no_extension_host() {
+        assert_eq!(language_rows(true, vec![ext_row("a", false)]).map(|rows| rows.len()), Ok(1));
+        assert!(language_rows(true, Vec::new()).is_ok_and(|rows| rows.is_empty()), "an empty list is the empty screen, not a failure");
+        assert!(language_rows(false, vec![ext_row("a", false)]).is_err(), "T-41a-018: no host, no languages: the banner");
     }
 }

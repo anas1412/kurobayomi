@@ -3,26 +3,80 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The series metadata the tracker reads (`SeriesDto.metadata`).
+/// A series (`SeriesDto`, `KomgaModels.kt:6-20`). Keys without `?` are required (serde rejects a missing one); a `?`
+/// key may be absent or null. Wire names are camelCase.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SeriesDto {
+    pub id: String,
+    pub library_id: String,
+    pub name: String,
+    pub created: Option<String>,
+    pub last_modified: Option<String>,
+    pub file_last_modified: String,
+    pub books_count: i32,
+    pub books_read_count: i32,
+    pub books_unread_count: i32,
+    pub books_in_progress_count: i32,
     pub metadata: SeriesMetadataDto,
+    pub books_metadata: BookMetadataAggregationDto,
 }
 
+/// Series metadata (`SeriesMetadataDto`, `KomgaModels.kt:22-43`). The tracker reads `status`, `title` and `summary`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SeriesMetadataDto {
     pub status: String,
+    pub created: Option<String>,
+    pub last_modified: Option<String>,
     pub title: String,
+    pub title_sort: String,
     pub summary: String,
+    pub summary_lock: bool,
+    pub reading_direction: String,
+    pub reading_direction_lock: bool,
+    pub publisher: String,
+    pub publisher_lock: bool,
+    pub age_rating: Option<i32>,
+    pub age_rating_lock: bool,
+    pub language: String,
+    pub language_lock: bool,
+    pub genres: Vec<String>,
+    pub genres_lock: bool,
+    pub tags: Vec<String>,
+    pub tags_lock: bool,
 }
 
-/// A readlist. Only its name is read (`ReadListDto.toTrack`).
+/// Book metadata of a series (`BookMetadataAggregationDto`, `KomgaModels.kt:45-54`). `authors` may be absent.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookMetadataAggregationDto {
+    #[serde(default)]
+    pub authors: Vec<AuthorDto>,
+    pub release_date: Option<String>,
+    pub summary: String,
+    pub summary_number: String,
+    pub created: String,
+    pub last_modified: String,
+}
+
+/// An author of a book (`AuthorDto`, `KomgaModels.kt:56-60`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct AuthorDto {
+    pub name: String,
+    pub role: String,
+}
+
+/// A readlist (`ReadListDto`, `KomgaModels.kt:72-80`). The tracker reads only `name` (`ReadListDto.toTrack`).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadListDto {
+    pub id: String,
     pub name: String,
+    pub book_ids: Vec<String>,
+    pub created_date: String,
+    pub last_modified_date: String,
+    pub filtered: bool,
 }
 
 /// Progress of a readlist (v1 shape). Converted to the v2 shape with [`ReadProgressDto::to_v2`].
@@ -80,14 +134,31 @@ pub struct ReadProgressUpdateV2Dto {
 mod tests {
     use super::*;
 
+    const SERIES_FULL: &str = include_str!("../../../tests/fixtures/komga/series_full.json");
+    const READLIST_FULL: &str = include_str!("../../../tests/fixtures/komga/readlist.json");
+
     #[test]
-    fn t_33a_070_series_metadata_is_read_and_other_fields_are_ignored() {
-        let s: SeriesDto = serde_json::from_str(
-            r#"{"id":"9","booksCount":3,"metadata":{"status":"ENDED","title":"T","summary":"S","genres":[]}}"#,
-        )
-        .unwrap();
-        assert_eq!(s.metadata.title, "T");
+    fn t_33a_070_series_fixture_parses_with_the_metadata_the_tracker_reads() {
+        let s: SeriesDto = serde_json::from_str(SERIES_FULL).unwrap();
+        assert_eq!(s.metadata.title, "Title");
         assert_eq!(s.metadata.status, "ENDED");
+        assert_eq!(s.metadata.summary, "Sum");
+        assert_eq!(s.metadata.age_rating, None);
+        assert_eq!(s.books_metadata.authors[0].role, "writer");
+    }
+
+    #[test]
+    fn t_33a_070_e51_a_series_without_a_required_key_fails() {
+        let mut v: serde_json::Value = serde_json::from_str(SERIES_FULL).unwrap();
+        v.as_object_mut().unwrap().remove("fileLastModified");
+        assert!(serde_json::from_value::<SeriesDto>(v).is_err());
+    }
+
+    #[test]
+    fn t_33a_070_a_readlist_fixture_parses_and_gives_its_name() {
+        let r: ReadListDto = serde_json::from_str(READLIST_FULL).unwrap();
+        assert_eq!(r.name, "Reading list");
+        assert_eq!(r.book_ids.len(), 2);
     }
 
     #[test]

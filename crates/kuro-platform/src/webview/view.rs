@@ -1,24 +1,14 @@
-//! WebView helpers that need no WebKit (`WebViewUtil.kt`, T-13a-052, T-12a-041): the user agent transform, the
-//! Chrome major version parse, and the settings every app view gets. The WebKitGTK host applies the settings to a
-//! view (T-12a-017); the functions here are the part that can be tested without a display.
+//! WebView helpers that need no WebKit (`WebViewUtil.kt`, T-13a-052, T-12a-041): the Chrome major version parse and
+//! the settings every app view gets. `getInferredUserAgent` is dropped: it had no callers (T-12a-037). The WebKitGTK
+//! host applies the settings to a view (T-12a-017); the functions here are the part that can be tested without a
+//! display.
 
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-/// `; Android .*?\)`: the Android platform part of a user agent, up to its first `)`.
-static ANDROID_PLATFORM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"; Android .*?\)").unwrap());
-/// `Version/.* Chrome/`: the Android WebView `Version/x` token, up to `Chrome/`.
-static VERSION_TOKEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Version/.* Chrome/").unwrap());
 /// `.*Chrome/(\d+)\..*`: the Chrome major version, from the last `Chrome/N.` in the user agent.
 static CHROME_MAJOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r".*Chrome/(\d+)\..*").unwrap());
-
-/// The user agent the Android app shows sites: the platform part becomes `Android 10; K)` and the `Version/x` token
-/// is removed. This is `WebViewUtil.getInferredUserAgent`, kept for parity (OQ-13a-4, see DECISIONS).
-pub fn infer_user_agent(default_ua: &str) -> String {
-    let platform = ANDROID_PLATFORM.replace_all(default_ua, "; Android 10; K)");
-    VERSION_TOKEN.replace_all(&platform, "Chrome/").into_owned()
-}
 
 /// The Chrome major version in a user agent, or 0 when it has none. A 0 counts as outdated.
 pub fn parse_chrome_major(ua: &str) -> u32 {
@@ -53,20 +43,6 @@ mod tests {
 
     const SAMPLE: &str = "Mozilla/5.0 (Linux; Android 13; Pixel 7 Build/TQ3A.230805.001) AppleWebKit/537.36 \
         (KHTML, like Gecko) Version/4.0 Chrome/116.0.0.0 Mobile Safari/537.36";
-
-    #[test]
-    fn the_android_platform_and_the_version_token_are_rewritten() {
-        assert_eq!(
-            infer_user_agent(SAMPLE),
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
-        );
-    }
-
-    #[test]
-    fn a_user_agent_without_the_android_parts_is_unchanged() {
-        let desktop = "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/136.0";
-        assert_eq!(infer_user_agent(desktop), desktop);
-    }
 
     #[test]
     fn the_chrome_major_is_read_from_chrome_and_is_zero_when_absent() {

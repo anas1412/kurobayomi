@@ -56,7 +56,10 @@ pub fn extended_fab(label: &str, icon_name: &str, expanded: bool) -> ExtendedFab
     text.set_margin_end(end);
     let revealer = gtk::Revealer::new();
     revealer.set_transition_type(gtk::RevealerTransitionType::SlideRight);
-    revealer.set_transition_duration(crate::theme::tokens::FAB_WIDTH_MS);
+    revealer.set_transition_duration(crate::theme::motion::duration_ms(
+        crate::theme::tokens::FAB_WIDTH_MS,
+        crate::theme::motion::enabled(),
+    ));
     revealer.set_child(Some(&text));
     row.append(&revealer);
 

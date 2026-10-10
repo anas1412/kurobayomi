@@ -73,6 +73,10 @@ pub trait Restorer {
     fn skipped_settings(&self) -> usize {
         0
     }
+    /// Backup extension payloads that were not installed, because APK payloads do not run on Linux (T-22a-029).
+    fn skipped_extensions(&self) -> usize {
+        0
+    }
 }
 
 /// One collected error: when it happened and the message of its log line (behaviour section 7.2).
@@ -89,6 +93,8 @@ pub struct Run {
     pub stop: Option<RestoreError>,
     /// Keys the app-preference allowlist skipped (T-22a-052).
     pub skipped_settings: usize,
+    /// APK extension payloads that were skipped, not installed (T-22a-029).
+    pub skipped_extensions: usize,
 }
 
 /// Runs `plan` in order. Each finished item advances `progress` once and emits one event.
@@ -102,11 +108,11 @@ pub fn run_sections(
     let mut errors = Vec::new();
     for &(section, items) in plan {
         if cancel() {
-            return Run { errors, stop: Some(RestoreError::Cancelled), skipped_settings: restorer.skipped_settings() };
+            return Run { errors, stop: Some(RestoreError::Cancelled), skipped_settings: restorer.skipped_settings(), skipped_extensions: restorer.skipped_extensions() };
         }
         for index in 0..items {
             if cancel() {
-                return Run { errors, stop: Some(RestoreError::Cancelled), skipped_settings: restorer.skipped_settings() };
+                return Run { errors, stop: Some(RestoreError::Cancelled), skipped_settings: restorer.skipped_settings(), skipped_extensions: restorer.skipped_extensions() };
             }
             match restorer.item(section, index) {
                 Ok(item) => {
@@ -115,11 +121,11 @@ pub fn run_sections(
                     }
                     emit(progress.advance(&item.title));
                 }
-                Err(stop) => return Run { errors, stop: Some(stop), skipped_settings: restorer.skipped_settings() },
+                Err(stop) => return Run { errors, stop: Some(stop), skipped_settings: restorer.skipped_settings(), skipped_extensions: restorer.skipped_extensions() },
             }
         }
     }
-    Run { errors, stop: None, skipped_settings: restorer.skipped_settings() }
+    Run { errors, stop: None, skipped_settings: restorer.skipped_settings(), skipped_extensions: restorer.skipped_extensions() }
 }
 
 #[cfg(test)]
@@ -258,7 +264,7 @@ mod tests {
         let opts = RestoreOptions { library_entries: false, categories: false, app_settings: false, extension_stores: false, custom_buttons: false, source_settings: false, extensions: false };
         let mut log = Log::default();
         let (run, events) = run_plain(opts, Counts::default(), &mut log);
-        assert_eq!(run, Run { errors: vec![], stop: None, skipped_settings: 0 });
+        assert_eq!(run, Run { errors: vec![], stop: None, skipped_settings: 0, skipped_extensions: 0 });
         assert!(events.is_empty());
     }
 }

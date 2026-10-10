@@ -220,7 +220,6 @@ define_prefs! {
     "__APP_STATE_incognito_mode", AppState, Bool, false, "base", "incognito_mode";
     "__APP_STATE_onboarding_complete", AppState, Bool, false, "base", "shown_onboarding_flow";
     "pref_display_profile_key", Normal, Str, "", "base", "display_profile";
-    "pref_hardware_bitmap_threshold", Normal, Int, 2048, "base", "hardware_bitmap_threshold";
     "pref_always_decode_long_strip_with_ssiv", Normal, Bool, false, "base", "always_decode_long_strip_with_ssiv";
     "pref_theme_mode_key", Normal, Str, "SYSTEM", "ui", "theme_mode";
     "pref_app_theme", Normal, Str, "DEFAULT", "ui", "app_theme";
@@ -557,10 +556,11 @@ mod tests {
         "default_chapter_sort_by_ascending_or_descending",
     ];
 
-    /// Plan rows that are not ported: the Android installer choice (T-19a-037) and the four commented-out SY keys
-    /// (T-17a-039). The registry must not hold them.
-    const DROPPED_KEYS: [&str; 5] = [
+    /// Plan rows that are not ported: the Android installer choice (T-19a-037), the four commented-out SY keys
+    /// (T-17a-039) and the hardware bitmap threshold (T-13a-030). The registry must not hold them.
+    const DROPPED_KEYS: [&str; 6] = [
         "extension_installer",
+        "pref_hardware_bitmap_threshold",
         "eh_enable_source_blacklist",
         "sources_tab_categories",
         "sources_tab_categories_filter",
@@ -652,9 +652,9 @@ mod tests {
     ];
 
     #[test]
-    fn registry_has_the_322_plan_rows_in_order() {
+    fn registry_has_the_321_plan_rows_in_order() {
         let rows = plan_rows();
-        assert_eq!(rows.len(), 322, "the plan's 328 rows minus the derived animeext_updates_count and the five dropped keys");
+        assert_eq!(rows.len(), 321, "the plan's 328 rows minus the derived animeext_updates_count and the six dropped keys");
         // four Kurobayomi rows after the plan's rows: `show_not_runnable` (T-19a-066), `anime_ext_last_check` (T-19a-064),
         // `check_app_updates` and `last_app_check` (T-07a-036)
         assert_eq!(REGISTRY.len(), rows.len() + 4);

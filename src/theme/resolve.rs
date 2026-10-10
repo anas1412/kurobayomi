@@ -79,19 +79,18 @@ pub fn tokens_for(scheme: &SchemeDef, dark: bool, amoled: bool) -> Tokens {
 
 /// The 10 AMOLED overrides of `BaseColorScheme.getColorScheme`. Nothing else changes.
 pub fn apply_amoled(colors: &mut [Rgba; ROLE_COUNT]) {
-    let black = Rgba::argb(0xFF00_0000);
-    let white = Rgba::argb(0xFFFF_FFFF);
-    let container = Rgba::argb(0xFF0C_0C0C);
-    colors[Role::Background as usize] = black;
-    colors[Role::OnBackground as usize] = white;
-    colors[Role::Surface as usize] = black;
-    colors[Role::OnSurface as usize] = white;
+    use super::shared::*;
+    let container = AMOLED_SURFACE_CONTAINER;
+    colors[Role::Background as usize] = AMOLED_BACKGROUND;
+    colors[Role::OnBackground as usize] = AMOLED_ON_BACKGROUND;
+    colors[Role::Surface as usize] = AMOLED_SURFACE;
+    colors[Role::OnSurface as usize] = AMOLED_ON_SURFACE;
     colors[Role::SurfaceVariant as usize] = container;
     colors[Role::SurfaceContainerLowest as usize] = container;
     colors[Role::SurfaceContainerLow as usize] = container;
     colors[Role::SurfaceContainer as usize] = container;
-    colors[Role::SurfaceContainerHigh as usize] = Rgba::argb(0xFF13_1313);
-    colors[Role::SurfaceContainerHighest as usize] = Rgba::argb(0xFF1B_1B1B);
+    colors[Role::SurfaceContainerHigh as usize] = AMOLED_SURFACE_CONTAINER_HIGH;
+    colors[Role::SurfaceContainerHighest as usize] = AMOLED_SURFACE_CONTAINER_HIGHEST;
 }
 
 #[cfg(test)]

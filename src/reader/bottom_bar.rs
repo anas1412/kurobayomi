@@ -93,9 +93,13 @@ impl BottomBar {
         for (button, spec) in self.buttons.iter().zip(bar_buttons(mode, orientation, crop_on)) {
             button.set_icon_name(spec.icon);
             button.set_tooltip_text(Some(spec.description));
+            button.update_property(&[gtk::accessible::Property::Label(spec.description)]);
         }
         let classes: &[&str] = if crop_on { &["flat", "toggled"] } else { &["flat"] };
         self.buttons[2].set_css_classes(classes);
+        // The crop button is a toggle: its pressed state is exposed as well as the icon change (T-43a-089).
+        let pressed = if crop_on { gtk::AccessibleTristate::True } else { gtk::AccessibleTristate::False };
+        self.buttons[2].update_state(&[gtk::accessible::State::Pressed(pressed)]);
     }
 }
 

@@ -23,6 +23,8 @@ pub const FLUSH_DELAY: Duration = Duration::from_millis(250);
 const FLUSH_POLL: Duration = Duration::from_millis(50);
 /// Consecutive failed saves that send one notice to [`PrefStore::save_failures`].
 pub const FAILURES_BEFORE_NOTICE: u32 = 3;
+/// How long shutdown waits for [`PrefStore::flush_within`] before it gives up on the save.
+pub const SHUTDOWN_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Persistence behind a store. `load` runs once when the store opens; `save` gets every value.
 pub trait Backend: Send + Sync {
@@ -166,6 +168,17 @@ impl PrefStore {
     /// Saves now, even when the debounce window has not closed.
     pub fn flush(&self) -> Result<(), PrefError> {
         self.0.save()
+    }
+
+    /// [`flush`](Self::flush) for shutdown: waits at most `timeout`. `None` means the save is still
+    /// running on its own thread and the values are not all on disk yet.
+    pub fn flush_within(&self, timeout: Duration) -> Option<Result<(), PrefError>> {
+        let (tx, rx) = mpsc::channel();
+        let store = self.clone();
+        thread::spawn(move || {
+            let _ = tx.send(store.flush());
+        });
+        rx.recv_timeout(timeout).ok()
     }
 
     /// A typed handle for `key` with the value `default` when the key is not stored.

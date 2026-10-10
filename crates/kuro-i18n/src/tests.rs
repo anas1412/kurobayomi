@@ -129,7 +129,7 @@ fn every_key_renders_with_its_declared_arguments() {
 #[test]
 fn key_table_matches_english_file() {
     assert_eq!(MsgKey::ALL.len(), MSG_COUNT);
-    assert_eq!(MSG_COUNT, 1444, "1434 from the Aniyomi base plus the 10 in kurobayomi-extra.ftl");
+    assert_eq!(MSG_COUNT, 1456, "1434 from the Aniyomi base plus the 22 in kurobayomi-extra.ftl");
     let ids: HashSet<&str> = MsgKey::ALL.iter().map(|k| k.id()).collect();
     assert_eq!(ids.len(), MSG_COUNT, "ids are unique");
     assert_eq!(MsgKey::r#type.id(), "type");
@@ -307,4 +307,46 @@ fn offered_locales_lists_english_and_has_no_empty_tag() {
     let offered = crate::offered_locales();
     assert!(offered.contains(&"en"));
     assert!(offered.iter().all(|tag| !tag.is_empty()));
+}
+
+#[test]
+fn database_failure_and_save_messages_format_their_arguments() {
+    assert_eq!(
+        tr(MsgKey::settings_save_failed),
+        "Could not save settings. Your changes are kept and saved again on the next change."
+    );
+    assert_eq!(tr(MsgKey::pref_download_only_over_wifi), "Unmetered connection only");
+    assert_eq!(
+        trf(MsgKey::db_error_too_new, &[("arg1", Arg::Int(9999)), ("arg2", Arg::Int(34))]),
+        "This library was created by a newer version of Kurobayomi (database version 9999, this version supports up to 34). Update Kurobayomi to open it."
+    );
+    assert_eq!(
+        trf(MsgKey::db_import_report, &[("arg1", Arg::Int(1200)), ("arg2", Arg::Int(3))]),
+        "Imported 1200 entries. 3 could not be imported."
+    );
+    assert_eq!(
+        trf(MsgKey::db_pre_migration_backup, &[("arg1", Arg::Str("manga.db.pre-v33-20261010T100000Z.bak"))]),
+        "A backup of your library was saved before the upgrade at manga.db.pre-v33-20261010T100000Z.bak."
+    );
+}
+
+#[test]
+fn existing_keys_reused_for_database_messages_are_in_the_catalogue() {
+    for key in [
+        MsgKey::action_replace_repo_title,
+        MsgKey::action_replace_repo_message,
+        MsgKey::invalid_repo_name,
+        MsgKey::confirm_add_duplicate_manga,
+        MsgKey::pref_reset_viewer_flags_success,
+        MsgKey::pref_reset_viewer_flags_error,
+        MsgKey::database_clean,
+        MsgKey::error_repo_exists,
+        MsgKey::error_category_exists,
+        MsgKey::clear_database_source_item_count,
+        MsgKey::clear_database_completed,
+        MsgKey::clear_database_confirmation,
+        MsgKey::pref_clear_manga_database,
+    ] {
+        assert!(!tr(key).is_empty(), "{key:?} has no English text");
+    }
 }

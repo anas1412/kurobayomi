@@ -87,7 +87,7 @@ mod tests {
     }
 
     fn finished() -> Result<RestoreEnd, BackupError> {
-        Ok(RestoreEnd::Completed(Summary { elapsed_ms: 1, errors: 0, error_log: None, skipped_settings: 0 }))
+        Ok(RestoreEnd::Completed(Summary { elapsed_ms: 1, errors: 0, error_log: None, skipped_settings: 0, skipped_extensions: 0 }))
     }
 
     /// Reads events until the last one of a run arrives.

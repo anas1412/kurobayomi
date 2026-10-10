@@ -561,8 +561,8 @@ pub mod views {
     pub const LIBRARY: &str = "SELECT * FROM libraryView;";
     pub const HISTORY: &str = "SELECT id, mangaId, chapterId, title, thumbnailUrl, source, favorite, cover_last_modified, chapterNumber, readAt, readDuration FROM historyView WHERE historyView.readAt > 0 AND maxReadAtChapterId = historyView.chapterId AND lower(historyView.title) LIKE ('%' || :query || '%') ESCAPE '\\' ORDER BY readAt DESC;";
     pub const GET_LATEST_HISTORY: &str = "SELECT id, mangaId, chapterId, title, thumbnailUrl, source, favorite, cover_last_modified, chapterNumber, readAt, readDuration FROM historyView WHERE historyView.readAt > 0 ORDER BY readAt DESC LIMIT 1;";
-    pub const GET_RECENT_UPDATES: &str = "SELECT * FROM updatesView WHERE dateUpload > :after LIMIT :limit;";
-    pub const GET_UPDATES_BY_READ_STATUS: &str = "SELECT * FROM updatesView WHERE read = :read AND dateUpload > :after LIMIT :limit;";
+    pub const GET_RECENT_UPDATES: &str = "SELECT * FROM updatesView WHERE dateUpload > :after ORDER BY datefetch DESC LIMIT :limit;";
+    pub const GET_UPDATES_BY_READ_STATUS: &str = "SELECT * FROM updatesView WHERE read = :read AND dateUpload > :after ORDER BY datefetch DESC LIMIT :limit;";
 
     /// Row limit the Updates screen passes to both update queries (`GetMangaUpdates`).
     pub const UPDATES_PAGE_LIMIT: i64 = 500;

@@ -10,6 +10,10 @@ use kuro_prefs::store::Changed;
 use super::nav::NavMode;
 use crate::reader::pref_rules::{self, NAVIGATION_MODE, READER_THEME, ZOOM_START, clamp_to};
 
+/// The key of `always_decode_long_strip_with_ssiv` (T-43b-023). It lives in the base preferences, so the viewer reads it
+/// from the same store by its key.
+pub const ALWAYS_DECODE_LONG_STRIP_KEY: &str = "pref_always_decode_long_strip_with_ssiv";
+
 /// The settings a viewer reads, as plain values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ViewerSettings {
@@ -36,6 +40,8 @@ pub struct ViewerSettings {
     pub side_padding: i32,
     pub zoom_out_disabled: bool,
     pub double_tap_zoom: bool,
+    /// A webtoon page decodes in full instead of at the view width (`pref_always_decode_long_strip_with_ssiv`).
+    pub always_decode_long_strip: bool,
     pub dual_split_pager: bool,
     pub dual_invert_pager: bool,
     pub dual_rotate_pager: bool,
@@ -94,6 +100,7 @@ impl ViewerSettings {
             side_padding: pref_rules::side_padding(p.webtoon_side_padding.get()),
             zoom_out_disabled: p.webtoon_disable_zoom_out.get(),
             double_tap_zoom: p.webtoon_double_tap_zoom_enabled.get(),
+            always_decode_long_strip: p.store().pref(ALWAYS_DECODE_LONG_STRIP_KEY, false).get(),
             dual_split_pager: p.dual_page_split_paged.get(),
             dual_invert_pager: p.dual_page_invert_paged.get(),
             dual_rotate_pager: p.dual_page_rotate_to_fit.get(),
@@ -147,6 +154,7 @@ pub fn diff(old: &ViewerSettings, new: &ViewerSettings, family: Family) -> Vec<R
                 Reaction::RefreshImages,
                 old.crop_webtoon != new.crop_webtoon
                     || old.side_padding != new.side_padding
+                    || old.always_decode_long_strip != new.always_decode_long_strip
                     || old.dual_split_webtoon != new.dual_split_webtoon
                     || old.dual_invert_webtoon != new.dual_invert_webtoon
                     || old.dual_rotate_webtoon != new.dual_rotate_webtoon
@@ -319,6 +327,20 @@ mod tests {
         new.reader_theme = 2;
         assert_eq!(diff(&old, &new, Family::Webtoon), [Reaction::Restyle]);
         assert_eq!(diff(&old, &new, Family::Pager), [Reaction::RefreshImages]);
+    }
+
+    #[test]
+    fn t023_the_long_strip_decode_is_off_by_default_follows_its_key_and_refreshes_only_the_webtoon() {
+        let p = prefs();
+        assert!(!ViewerSettings::from_prefs(&p).always_decode_long_strip, "default false");
+        let old = ViewerSettings::from_prefs(&p);
+        let mut watch = SettingsWatch::new(p.clone(), old.clone());
+        p.store().pref(ALWAYS_DECODE_LONG_STRIP_KEY, false).set(true).unwrap();
+        let new = ViewerSettings::from_prefs(&p);
+        assert!(new.always_decode_long_strip);
+        assert_eq!(diff(&old, &new, Family::Webtoon), [Reaction::RefreshImages]);
+        assert!(diff(&old, &new, Family::Pager).is_empty());
+        assert_eq!(watch.poll(), Some(new), "the live viewer sees the change");
     }
 
     #[test]

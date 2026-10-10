@@ -15,6 +15,8 @@ pub const KEY_AMOLED: &str = "pref_theme_dark_amoled_key";
 
 /// The stored name for the Linux-only `System` choice.
 pub const SYSTEM_NAME: &str = "SYSTEM";
+/// The stored name for the bundled Tokyo Night scheme (T-49a-063).
+pub const TOKYO_NIGHT_NAME: &str = "TOKYO_NIGHT";
 
 /// The deprecated Android names. They are rewritten to the Linux default once, on read.
 const DEPRECATED: [&str; 3] = ["DARK_BLUE", "HOT_PINK", "BLUE"];
@@ -23,6 +25,9 @@ const DEPRECATED: [&str; 3] = ["DARK_BLUE", "HOT_PINK", "BLUE"];
 fn decode_scheme(raw: &str) -> Option<SchemeSel> {
     if raw == SYSTEM_NAME {
         return Some(SchemeSel::System);
+    }
+    if raw == TOKYO_NIGHT_NAME {
+        return Some(SchemeSel::TokyoNight);
     }
     if DEPRECATED.contains(&raw) {
         return Some(SchemeSel::System);
@@ -81,6 +86,7 @@ pub fn read_settings(store: &PrefStore) -> ThemeSettings {
 pub fn write_scheme(store: &PrefStore, scheme: SchemeSel) {
     let name = match scheme {
         SchemeSel::System => SYSTEM_NAME,
+        SchemeSel::TokyoNight => TOKYO_NIGHT_NAME,
         SchemeSel::Scheme(app) => app.name(),
     };
     store.set_raw(KEY_APP_THEME, PrefValue::Str(name.to_string()));
@@ -114,6 +120,14 @@ mod tests {
         assert_eq!(s.scheme, SchemeSel::System);
         assert_eq!(s.mode, ThemeMode::SYSTEM);
         assert!(!s.amoled);
+    }
+
+    #[test]
+    fn tokyo_night_round_trips_through_the_store() {
+        let store = store_with(Some("TOKYO_NIGHT"));
+        assert_eq!(read_settings(&store).scheme, SchemeSel::TokyoNight);
+        write_scheme(&store, SchemeSel::TokyoNight);
+        assert_eq!(store.get_raw(KEY_APP_THEME), Some(PrefValue::Str("TOKYO_NIGHT".into())));
     }
 
     #[test]

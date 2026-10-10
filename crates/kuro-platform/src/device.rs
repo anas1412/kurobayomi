@@ -88,6 +88,10 @@ pub fn device_texture_limit() -> i32 {
 
 /// The custom texture limit choices for a device limit, largest first: the device limit, then every multiple of
 /// 1024 below it down to 2048 (`GLUtil.CUSTOM_TEXTURE_LIMIT_OPTIONS`).
+///
+/// Kept for T-12a-039 (it requires the generator and its vectors), which conflicts with T-13a-030 (do not port it
+/// unless a maximum-decode-size setting is added). T-12a-039 wins for the generator only: there is no setting, no
+/// texture-limit row and no stored `pref_hardware_bitmap_threshold`, so T-13a-030's other rules hold.
 pub fn custom_texture_limit_options(device: i32) -> Vec<i32> {
     let mut out = vec![device];
     let steps = device / TEXTURE_STEP;
@@ -98,20 +102,6 @@ pub fn custom_texture_limit_options(device: i32) -> Vec<i32> {
         }
     }
     out
-}
-
-/// The `pref_hardware_bitmap_threshold` value the image pipeline reads without locking. Set from the stored
-/// preference at startup and whenever the preference changes.
-static HARDWARE_BITMAP_THRESHOLD: AtomicI32 = AtomicI32::new(SAFE_TEXTURE_LIMIT);
-
-/// The current hardware bitmap threshold.
-pub fn hardware_bitmap_threshold() -> i32 {
-    HARDWARE_BITMAP_THRESHOLD.load(Ordering::Relaxed)
-}
-
-/// Publishes a new hardware bitmap threshold. Readers see it on their next read; no restart is needed.
-pub fn set_hardware_bitmap_threshold(value: i32) {
-    HARDWARE_BITMAP_THRESHOLD.store(value, Ordering::Relaxed);
 }
 
 #[cfg(test)]
@@ -144,14 +134,6 @@ mod limits_tests {
         assert_eq!(texture_limit_from(None, 1024), SAFE_TEXTURE_LIMIT);
         assert_eq!(texture_limit_from(None, 8192), 8192);
         assert_eq!(texture_limit_from(None, 0), FALLBACK_TEXTURE_LIMIT);
-    }
-
-    #[test]
-    fn hardware_threshold_is_an_atomic_that_changes_without_restart() {
-        set_hardware_bitmap_threshold(4096);
-        assert_eq!(hardware_bitmap_threshold(), 4096);
-        set_hardware_bitmap_threshold(SAFE_TEXTURE_LIMIT);
-        assert_eq!(hardware_bitmap_threshold(), SAFE_TEXTURE_LIMIT);
     }
 
     #[test]

@@ -32,6 +32,7 @@ libc = "0.2.189"
 material-colors = "0.5.0"
 reqwest = { workspace = true, features = ["blocking"] }
 async-channel = { workspace = true }
+async-trait = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 image = { workspace = true }
@@ -45,6 +46,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 async-trait = { workspace = true }
 kuro-testkit = { path = "crates/kuro-testkit" }
+proptest = "1.11.0"
 
 [workspace]
 members =["crates/kuro-core", "crates/kuro-i18n", "crates/kuro-platform", "crates/kuro-testkit", "crates/kuro-prefs", "crates/kuro-db", "crates/kuro-data", "crates/kuro-domain", "crates/kuro-source", "crates/kuro-source-http", "crates/kuro-net", "crates/kuro-extensions", "crates/kuro-player", "crates/kuro-source-wasm", "crates/kuro-downloads", "crates/kuro-images", "crates/kuro-local", "crates/kuro-archive", "crates/kuro-track", "crates/kuro-backup"]

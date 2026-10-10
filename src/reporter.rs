@@ -14,6 +14,12 @@ const SUBTITLE: &str = "Kurobayomi ran into an unexpected error. Share the crash
 
 /// Shows the report at `path` and returns the exit code.
 pub fn run(path: PathBuf) -> glib::ExitCode {
+    // `KUROBAYOMI_REPORTER_DRY=1`: print the report path and exit, no window (T-01a-048)
+    let env = |name: &str| std::env::var(name).ok();
+    if kuro_core::crash::reporter_dry_run(env(kuro_core::crash::REPORTER_DRY_ENV).as_deref(), env(kuro_core::crash::ALLOW_TEST_HOOKS_ENV).as_deref(), kuro_core::crash::RELEASE_BUILD) {
+        println!("{}", path.display());
+        return glib::ExitCode::SUCCESS;
+    }
     if gtk::init().is_err() {
         eprintln!("kurobayomi: no display for the crash reporter; crash report: {}", path.display());
         return glib::ExitCode::FAILURE;

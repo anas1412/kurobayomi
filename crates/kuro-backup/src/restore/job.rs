@@ -22,6 +22,8 @@ pub struct Summary {
     pub error_log: Option<PathBuf>,
     /// Backup preference keys the allowlist skipped (T-22a-052).
     pub skipped_settings: usize,
+    /// APK extension payloads that were skipped, not installed (T-22a-029). They are not errors.
+    pub skipped_extensions: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +63,7 @@ pub fn conclude(run: &Run, elapsed: Duration, log_dir: &Path) -> RestoreEnd {
             errors: run.errors.len(),
             error_log,
             skipped_settings: run.skipped_settings,
+            skipped_extensions: run.skipped_extensions,
         }),
     }
 }
@@ -79,7 +82,7 @@ mod tests {
     #[test]
     fn cancel_writes_the_errors_so_far_and_reports_canceled() {
         let dir = tempfile::tempdir().unwrap();
-        let run = Run { errors: vec![line("Berserk [Mock]: boom")], stop: Some(RestoreError::Cancelled), skipped_settings: 0 };
+        let run = Run { errors: vec![line("Berserk [Mock]: boom")], stop: Some(RestoreError::Cancelled), skipped_settings: 0, skipped_extensions: 0 };
         let end = conclude(&run, Duration::from_secs(3), dir.path());
         let RestoreEnd::Canceled { error_log: Some(path) } = end else { panic!("expected Canceled with a log") };
         assert!(std::fs::read_to_string(path).unwrap().contains("Berserk [Mock]: boom"));
@@ -88,14 +91,14 @@ mod tests {
     #[test]
     fn cancel_without_errors_has_no_log() {
         let dir = tempfile::tempdir().unwrap();
-        let run = Run { errors: vec![], stop: Some(RestoreError::Cancelled), skipped_settings: 0 };
+        let run = Run { errors: vec![], stop: Some(RestoreError::Cancelled), skipped_settings: 0, skipped_extensions: 0 };
         assert_eq!(conclude(&run, Duration::ZERO, dir.path()), RestoreEnd::Canceled { error_log: None });
     }
 
     #[test]
     fn completed_run_reports_elapsed_count_and_log() {
         let dir = tempfile::tempdir().unwrap();
-        let run = Run { errors: vec![line("a"), line("b")], stop: None, skipped_settings: 0 };
+        let run = Run { errors: vec![line("a"), line("b")], stop: None, skipped_settings: 0, skipped_extensions: 0 };
         let RestoreEnd::Completed(s) = conclude(&run, Duration::from_millis(65_000), dir.path()) else { panic!("expected Completed") };
         assert_eq!((s.elapsed_ms, s.errors), (65_000, 2));
         assert_eq!(s.error_log, Some(dir.path().join(crate::restore::error_log::LOG_FILE)));
@@ -106,7 +109,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let blocker = dir.path().join("file");
         std::fs::write(&blocker, b"x").unwrap();
-        let run = Run { errors: vec![line("a")], stop: None, skipped_settings: 0 };
+        let run = Run { errors: vec![line("a")], stop: None, skipped_settings: 0, skipped_extensions: 0 };
         let RestoreEnd::Completed(s) = conclude(&run, Duration::ZERO, &blocker.join("sub")) else { panic!("expected Completed") };
         assert_eq!((s.errors, s.error_log), (1, None));
     }

@@ -200,6 +200,45 @@ mod tests {
         assert_eq!(build_loader(&chapter).err().unwrap().message, "Source not found");
     }
 
+    fn plain(name: &str) -> Chapter {
+        let mut c = Chapter::create();
+        c.name = name.into();
+        c.url = format!("/{name}");
+        c
+    }
+
+    fn named(name: &str) -> Rc<ReaderChapter> {
+        ReaderChapter::new(plain(name))
+    }
+
+    #[test]
+    fn a_chapter_on_disk_opens_from_its_download_and_any_other_reports_source_not_found() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("Source (EN)/Manga Title/Chapter 1");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("001.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+        let loaded = loader_for(&named("Chapter 1"), Some((root.path(), "Manga Title"))).ok().expect("the download opens");
+        assert!(matches!(loaded, Loader::Download(_)));
+        assert_eq!(loader_for(&named("Chapter 2"), Some((root.path(), "Manga Title"))).err().unwrap().message, "Source not found");
+    }
+
+    #[test]
+    fn the_lookup_asks_the_index_and_a_local_manga_has_every_chapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = DownloadIndex::open(dir.path(), dir.path());
+        index.add_chapter(7, "Source (EN)", "Title 1", "Chapter 1");
+        let mut manga = Manga::create();
+        manga.title = "Title 1".into();
+        manga.source = 7;
+        let lookup = downloaded_lookup(Some(index.clone()), &manga);
+        assert!(lookup(&plain("Chapter 1")));
+        assert!(!lookup(&plain("Chapter 2")));
+        assert!(!downloaded_lookup(None, &manga)(&plain("Chapter 1")), "no index, nothing downloaded");
+        manga.source = kuro_local::LOCAL_SOURCE_ID;
+        assert!(downloaded_lookup(Some(index), &manga)(&plain("Chapter 9")));
+        assert!(downloaded_lookup(None, &manga)(&plain("Chapter 9")));
+    }
+
     #[test]
     fn the_gate_is_open_even_after_its_sender_is_gone() {
         assert!(*open_gate().ready_watch().borrow());

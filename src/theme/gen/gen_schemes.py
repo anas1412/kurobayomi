@@ -37,6 +37,13 @@ SCHEMES = [
     ("Mocha", "values/colors_mocha.xml", APP),
 ]
 
+# The Compose (Kotlin) value wins where the XML differs (T-49b-041). Checked by hand against
+# app/.../colorscheme/MonochromeColorScheme.kt (lightScheme) and MochaColorScheme.kt (lightScheme).
+KOTLIN_OVERRIDES = {
+    ("Monochrome", "light", "surfaceDim"): "FFFFFFFF",
+    ("Mocha", "light", "inverseOnSurface"): "FFFBEAEB",
+}
+
 # Role order must match src/theme/tokens.rs `Role` (index = discriminant).
 ROLES = [
     "primary", "onPrimary", "primaryContainer", "onPrimaryContainer", "inversePrimary",
@@ -112,6 +119,9 @@ def main():
     lines.append("pub const SCHEMES: [SchemeDef; %d] = [" % len(SCHEMES))
     for name, rel_file, rel_root in SCHEMES:
         day, night = build_table(rel_root, rel_file)
+        for (scheme, mode, role), value in KOTLIN_OVERRIDES.items():
+            if scheme == name:
+                (day if mode == "light" else night)[role] = value
         lines.append("    SchemeDef {")
         lines.append('        name: "%s",' % name)
         for mode, table in (("light", day), ("dark", night)):

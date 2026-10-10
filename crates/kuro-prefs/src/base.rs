@@ -2,66 +2,22 @@
 //!
 //! `downloaded_only`, `incognito_mode` and `shown_onboarding_flow` are app state and live in
 //! `state.toml`. The Android `extension_installer` choice is dropped on Linux (T-19a-037): it has no field, and a
-//! backed-up value is skipped on restore.
+//! backed-up value is skipped on restore. `pref_hardware_bitmap_threshold` is dropped too (T-13a-030): nothing reads
+//! it, GTK manages textures, and a backed-up value is skipped on restore.
 
-use crate::PrefError;
 use crate::registry::define_prefs;
 
 define_prefs! {
-    /// `[base]` section: the six keys of Aniyomi `BasePreferences` that Linux keeps, then the two release-check keys.
+    /// `[base]` section: the keys of Aniyomi `BasePreferences` that Linux keeps, then the two release-check keys.
     pub struct BasePrefs in "base" {
         downloaded_only: bool = "__APP_STATE_pref_downloaded_only" => false;
         incognito_mode: bool = "__APP_STATE_incognito_mode" => false;
         shown_onboarding_flow: bool = "__APP_STATE_onboarding_complete" => false;
         display_profile: String = "pref_display_profile_key" => String::new();
-        hardware_bitmap_threshold: i32 = "pref_hardware_bitmap_threshold" => 2048;
         always_decode_long_strip_with_ssiv: bool = "pref_always_decode_long_strip_with_ssiv" => false;
         // Linux additions (T-07a-036): the startup release check is opt-in, and its last successful lookup is app state
         check_app_updates: bool = "check_app_updates" => false;
         last_app_check: i64 = "__APP_STATE_last_app_check" => 0;
-    }
-}
-
-impl BasePrefs {
-    /// First launch: when `pref_hardware_bitmap_threshold` is unset it is stored as `device_limit`. Later launches
-    /// keep the stored value. The value is then published to the atomic that the image pipeline reads.
-    pub fn seed_hardware_bitmap_threshold(&self, device_limit: i32) -> Result<(), PrefError> {
-        if !self.hardware_bitmap_threshold.is_set() {
-            self.hardware_bitmap_threshold.set(device_limit)?;
-        }
-        kuro_platform::device::set_hardware_bitmap_threshold(self.hardware_bitmap_threshold.get());
-        Ok(())
-    }
-
-    /// Stores a new threshold and publishes it. Readers of the atomic see it at once, with no restart.
-    pub fn set_hardware_bitmap_threshold(&self, value: i32) -> Result<(), PrefError> {
-        self.hardware_bitmap_threshold.set(value)?;
-        kuro_platform::device::set_hardware_bitmap_threshold(value);
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod threshold_tests {
-    use super::*;
-    use crate::store::PrefStore;
-    use crate::values::PrefValue;
-
-    #[test]
-    fn first_launch_stores_the_device_limit_and_later_launches_keep_it() {
-        let store = PrefStore::in_memory();
-        BasePrefs::new(store.clone()).seed_hardware_bitmap_threshold(8192).unwrap();
-        assert_eq!(store.get_raw("pref_hardware_bitmap_threshold"), Some(PrefValue::Int(8192)));
-        BasePrefs::new(store.clone()).seed_hardware_bitmap_threshold(16384).unwrap();
-        assert_eq!(store.get_raw("pref_hardware_bitmap_threshold"), Some(PrefValue::Int(8192)));
-    }
-
-    #[test]
-    fn a_changed_threshold_is_published_without_a_restart() {
-        let base = BasePrefs::new(PrefStore::in_memory());
-        base.set_hardware_bitmap_threshold(4096).unwrap();
-        assert_eq!(kuro_platform::device::hardware_bitmap_threshold(), 4096);
-        assert_eq!(base.hardware_bitmap_threshold.get(), 4096);
     }
 }
 
@@ -89,10 +45,6 @@ mod tests {
                 ("shown_onboarding_flow", "__APP_STATE_onboarding_complete"),
                 ("display_profile", "pref_display_profile_key"),
                 (
-                    "hardware_bitmap_threshold",
-                    "pref_hardware_bitmap_threshold"
-                ),
-                (
                     "always_decode_long_strip_with_ssiv",
                     "pref_always_decode_long_strip_with_ssiv",
                 ),
@@ -116,7 +68,6 @@ mod tests {
         assert!(!base.incognito_mode.get());
         assert!(!base.shown_onboarding_flow.get());
         assert_eq!(base.display_profile.get(), "");
-        assert_eq!(base.hardware_bitmap_threshold.get(), 2048);
         assert!(!base.always_decode_long_strip_with_ssiv.get());
         assert!(!base.check_app_updates.get(), "the release check is opt-in");
         assert_eq!(base.last_app_check.get(), 0);
@@ -129,7 +80,6 @@ mod tests {
             let store = open(&paths).unwrap();
             let base = BasePrefs::new(store.clone());
             base.display_profile.set("/icc/paper.icc".into()).unwrap();
-            base.hardware_bitmap_threshold.set(4096).unwrap();
             base.downloaded_only.set(true).unwrap();
             base.incognito_mode.set(true).unwrap();
             base.shown_onboarding_flow.set(true).unwrap();
@@ -138,7 +88,6 @@ mod tests {
         let store = open(&paths).unwrap();
         let base = BasePrefs::new(store.clone());
         assert_eq!(base.display_profile.get(), "/icc/paper.icc");
-        assert_eq!(base.hardware_bitmap_threshold.get(), 4096);
         assert!(base.downloaded_only.get());
         assert!(base.incognito_mode.get());
         assert!(base.shown_onboarding_flow.get());
@@ -151,10 +100,6 @@ mod tests {
         assert_eq!(
             config["base"]["display_profile"].as_str(),
             Some("/icc/paper.icc")
-        );
-        assert_eq!(
-            config["base"]["hardware_bitmap_threshold"].as_integer(),
-            Some(4096)
         );
         assert!(config["base"].get("downloaded_only").is_none());
 
@@ -182,7 +127,6 @@ mod tests {
         let security = SecurityPrefs::new(store.clone());
         let network = NetworkPrefs::new(store.clone());
         assert!(!base.downloaded_only.get());
-        assert_eq!(base.hardware_bitmap_threshold.get(), 2048);
         assert!(!security.use_authenticator.get());
         assert_eq!(security.lock_app_after.get(), 0);
         assert_eq!(network.doh_provider.get(), -1);

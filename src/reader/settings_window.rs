@@ -8,25 +8,38 @@
 //! database writer actor (`writer`) carries the reader's database writes only. This is the recorded decision for
 //! the criterion that routes preference writes through the writer actor.
 //!
+//! Dependent rows follow the rules of `settings_ui::reader::rules` (one `row_enabled` for the settings screen and this
+//! sheet): they stay in place and go insensitive while their parent setting does not allow them, and they are re-checked
+//! after every write. Turning "Split wide pages" on turns "Rotate wide pages to fit" off, and the other way round.
+//!
+//! Decision on the spec's `pref` key (T-43b-031): this sheet is built straight over `ReaderPrefs` in this file, as the
+//! sheet of the reader has always been, so `src/spec.rs` (`Item`) and `src/ui.rs` (`item_row`) carry no `pref` key for it;
+//! the acceptance bullet is amended to "every control binds its `ReaderPrefs` key in `settings_window`".
+//!
 //! Every control writes only its own key. The "Split wide pages" control writes `pref_dual_page_split` and its
 //! invert control writes `pref_dual_page_invert` (E-UI-3: the mockup had them swapped).
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
 use kuro_prefs::pref::Pref;
-use kuro_prefs::reader::{FlashColor, ReaderOrientation, ReaderPrefs, ReadingMode, TappingInvertMode};
+use kuro_prefs::reader::{FlashColor, ReaderHideThreshold, ReaderOrientation, ReaderPrefs, ReadingMode, TappingInvertMode};
 use kuro_prefs::values::PrefType;
 
 use super::overlay::{self, BRIGHTNESS_RANGE, Channel};
+use super::restore;
 use super::strings;
+use crate::settings_ui::reader::rules::{ReaderState, Row, row_enabled};
 
 /// The tap zone chip index that disables taps, which hides the inversion row.
 pub const TAP_ZONE_DISABLED: i32 = 5;
 /// Flash duration as the slider sees it: units of 100 ms, `1..=15`.
 pub const FLASH_SLIDER_RANGE: (i32, i32) = (1, 15);
 pub const FLASH_INTERVAL_RANGE: (i32, i32) = (1, 10);
-pub const SIDE_PADDING_RANGE: (i32, i32) = (0, 25);
+pub const SIDE_PADDING_RANGE: (i32, i32) = kuro_prefs::ranges::WEBTOON_SIDE_PADDING.bounds().expect("a range");
+/// One channel of the colour filter value.
+const CHANNEL_RANGE: (i32, i32) = kuro_prefs::ranges::COLOR_FILTER_CHANNEL.bounds().expect("a range");
 
 /// Background chips in display order, with the stored `pref_reader_theme_key` value of each.
 pub const THEME_CHIPS: [(&str, i32); 4] = [
@@ -77,6 +90,21 @@ pub const FLASH_CHIPS: [(&str, FlashColor); 3] = [
     (strings::PREF_FLASH_STYLE_BLACK, FlashColor::BLACK),
     (strings::PREF_FLASH_STYLE_WHITE, FlashColor::WHITE),
     (strings::PREF_FLASH_STYLE_WHITE_BLACK, FlashColor::WHITE_BLACK),
+];
+
+/// Double tap animation chips: the stored duration in ms and the label. 1 ms turns the animation off.
+pub const DOUBLE_TAP_SPEED_CHIPS: [(&str, i32); 3] = [
+    (strings::DOUBLE_TAP_ANIM_SPEED_0, 1),
+    (strings::DOUBLE_TAP_ANIM_SPEED_NORMAL, 500),
+    (strings::DOUBLE_TAP_ANIM_SPEED_FAST, 250),
+];
+
+/// Hide-menu threshold chips of the webtoon strip, in `ReaderHideThreshold` order (5, 13, 31 and 47 px).
+pub const HIDE_THRESHOLD_CHIPS: [(&str, ReaderHideThreshold); 4] = [
+    (strings::PREF_HIGHEST, ReaderHideThreshold::HIGHEST),
+    (strings::PREF_HIGH, ReaderHideThreshold::HIGH),
+    (strings::PREF_LOW, ReaderHideThreshold::LOW),
+    (strings::PREF_LOWEST, ReaderHideThreshold::LOWEST),
 ];
 
 /// The four dual-page keys of one viewer family: paged or webtoon.
@@ -149,11 +177,46 @@ fn heading(text: &str) -> gtk::Label {
     label
 }
 
+/// The rows of one sheet that depend on another setting. Each is enabled by `row_enabled` and checked again by
+/// [`Dependents::refresh`], which every controlling write calls.
+#[derive(Clone)]
+struct Dependents {
+    prefs: ReaderPrefs,
+    rows: Rc<RefCell<Vec<(Row, gtk::Widget)>>>,
+}
+
+impl Dependents {
+    fn new(prefs: &ReaderPrefs) -> Self {
+        Self { prefs: prefs.clone(), rows: Rc::default() }
+    }
+
+    /// Registers a row under its rule and applies the rule now.
+    fn add(&self, row: Row, widget: &impl IsA<gtk::Widget>) {
+        widget.set_sensitive(row_enabled(row, &ReaderState::from_prefs(&self.prefs)));
+        self.rows.borrow_mut().push((row, widget.clone().upcast()));
+    }
+
+    fn refresh(&self) {
+        let state = ReaderState::from_prefs(&self.prefs);
+        for (row, widget) in self.rows.borrow().iter() {
+            widget.set_sensitive(row_enabled(*row, &state));
+        }
+    }
+}
+
 fn check(label: &str, pref: &Pref<bool>) -> gtk::CheckButton {
+    check_then(label, pref, || {})
+}
+
+/// A check that writes its key and then calls `after`.
+fn check_then(label: &str, pref: &Pref<bool>, after: impl Fn() + 'static) -> gtk::CheckButton {
     let button = gtk::CheckButton::with_label(label);
     button.set_active(pref.get());
     let pref = pref.clone();
-    button.connect_toggled(move |b| save(&pref, b.is_active()));
+    button.connect_toggled(move |b| {
+        save(&pref, b.is_active());
+        after();
+    });
     button
 }
 
@@ -220,8 +283,9 @@ pub fn reading_tab(prefs: &ReaderPrefs, mode: ReadingMode, orientation: ReaderOr
     root.append(&heading(strings::PREF_CATEGORY_FOR_THIS_SERIES));
 
     // both viewer blocks are built; the one that fits the chosen mode is shown, and a chip swaps them at once
-    let pager = pager_block(prefs);
-    let webtoon = webtoon_block(prefs);
+    let deps = Dependents::new(prefs);
+    let pager = pager_block(prefs, &deps);
+    let webtoon = webtoon_block(prefs, &deps);
     let default_mode = prefs.default_reading_mode.clone();
     let show_block = {
         let (pager, webtoon) = (pager.clone(), webtoon.clone());
@@ -280,57 +344,89 @@ fn orientation_name(orientation: ReaderOrientation) -> &'static str {
     }
 }
 
-/// The dual-page checks of one family. The invert and flip rows show only while their parent is on.
-fn dual_page_rows(root: &gtk::Box, prefs: &ReaderPrefs, webtoon: bool) {
+/// Which dependent rows a viewer family's controls feed.
+struct FamilyRows {
+    invert_split: Row,
+    flip_rotated: Row,
+    invert_tap_zones: Row,
+}
+
+const PAGER_ROWS: FamilyRows = FamilyRows { invert_split: Row::PagerInvertSplit, flip_rotated: Row::PagerFlipRotated, invert_tap_zones: Row::PagerInvertTapZones };
+const WEBTOON_ROWS: FamilyRows =
+    FamilyRows { invert_split: Row::WebtoonInvertSplit, flip_rotated: Row::WebtoonFlipRotated, invert_tap_zones: Row::WebtoonInvertTapZones };
+
+/// The dual-page checks of one family. The invert and flip rows are enabled only while their parent is on, and split and
+/// rotate are exclusive: turning one on turns the other off (`SettingsReaderScreen`'s `onValueChanged`).
+fn dual_page_rows(root: &gtk::Box, prefs: &ReaderPrefs, webtoon: bool, deps: &Dependents) {
     let keys = dual_page_prefs(prefs, webtoon);
-    let split = check(strings::PREF_DUAL_PAGE_SPLIT, keys.split);
+    let rows = if webtoon { WEBTOON_ROWS } else { PAGER_ROWS };
+    let (split, rotate) = (keys.split.clone(), keys.rotate.clone());
+
+    let refresh = deps.clone();
+    let split_check = check_then(strings::PREF_DUAL_PAGE_SPLIT, keys.split, move || refresh.refresh());
+    let refresh = deps.clone();
+    let rotate_check = check_then(strings::PREF_PAGE_ROTATE, keys.rotate, move || refresh.refresh());
+    {
+        let (rotate_check, rotate) = (rotate_check.clone(), rotate.clone());
+        split_check.connect_toggled(move |b| {
+            if b.is_active() && rotate.get() {
+                rotate_check.set_active(false);
+            }
+        });
+    }
+    {
+        let (split_check, split) = (split_check.clone(), split.clone());
+        rotate_check.connect_toggled(move |b| {
+            if b.is_active() && split.get() {
+                split_check.set_active(false);
+            }
+        });
+    }
+
     let invert = check(strings::PREF_DUAL_PAGE_INVERT, keys.invert);
     invert.set_margin_start(24);
-    invert.set_visible(keys.split.get());
-    let invert_row = invert.clone();
-    split.connect_toggled(move |b| invert_row.set_visible(b.is_active()));
-    root.append(&split);
+    deps.add(rows.invert_split, &invert);
+    root.append(&split_check);
     root.append(&invert);
 
-    let rotate = check(strings::PREF_PAGE_ROTATE, keys.rotate);
     let rotate_invert = check(strings::PREF_PAGE_ROTATE_INVERT, keys.rotate_invert);
     rotate_invert.set_margin_start(24);
-    rotate_invert.set_visible(keys.rotate.get());
-    let rotate_invert_row = rotate_invert.clone();
-    rotate.connect_toggled(move |b| rotate_invert_row.set_visible(b.is_active()));
-    root.append(&rotate);
+    deps.add(rows.flip_rotated, &rotate_invert);
+    root.append(&rotate_check);
     root.append(&rotate_invert);
 }
 
-/// The tap zone chips and, unless taps are disabled, the inversion chips.
-fn tap_zone_rows(root: &gtk::Box, zone: &Pref<i32>, invert: &Pref<TappingInvertMode>) {
+/// The tap zone chips and the inversion chips, which are insensitive while taps are disabled.
+fn tap_zone_rows(root: &gtk::Box, zone: &Pref<i32>, invert: &Pref<TappingInvertMode>, invert_row: Row, deps: &Dependents) {
     let inversion = gtk::Box::new(gtk::Orientation::Vertical, 4);
     inversion.append(&gtk::Label::new(Some(strings::PREF_READ_WITH_TAPPING_INVERTED)));
     let invert_options: Vec<(&str, i32)> = INVERT_CHIPS.iter().enumerate().map(|(i, (l, _))| (*l, i as i32)).collect();
     let current = INVERT_CHIPS.iter().position(|(_, m)| *m == invert.get()).unwrap_or(0) as i32;
     let invert_pref = invert.clone();
     inversion.append(&chips(&invert_options, current, move |v| save(&invert_pref, INVERT_CHIPS[v as usize].1)));
+    deps.add(invert_row, &inversion);
     let zone_options: Vec<(&str, i32)> = TAP_ZONE_CHIPS.iter().enumerate().map(|(i, l)| (*l, i as i32)).collect();
-    inversion.set_visible(zone.get() != TAP_ZONE_DISABLED);
-    let shown = inversion.clone();
-    let zone_pref = zone.clone();
+    let (zone_pref, refresh) = (zone.clone(), deps.clone());
     root.append(&gtk::Label::new(Some(strings::PREF_VIEWER_NAV)));
     root.append(&chips(&zone_options, zone.get(), move |v| {
         save(&zone_pref, v);
-        shown.set_visible(v != TAP_ZONE_DISABLED);
+        refresh.refresh();
     }));
     root.append(&inversion);
 }
 
-fn pager_block(prefs: &ReaderPrefs) -> gtk::Box {
+fn pager_block(prefs: &ReaderPrefs, deps: &Dependents) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
     root.append(&heading(strings::PAGER_VIEWER));
-    tap_zone_rows(&root, &prefs.navigation_mode_pager, &prefs.pager_nav_inverted);
+    tap_zone_rows(&root, &prefs.navigation_mode_pager, &prefs.pager_nav_inverted, PAGER_ROWS.invert_tap_zones, deps);
 
     let scale: Vec<(&str, i32)> = SCALE_TYPE_CHIPS.iter().enumerate().map(|(i, l)| (*l, i as i32 + 1)).collect();
     root.append(&gtk::Label::new(Some(strings::PREF_IMAGE_SCALE_TYPE)));
-    let scale_pref = prefs.image_scale_type.clone();
-    root.append(&chips(&scale, prefs.image_scale_type.get(), move |v| save(&scale_pref, v)));
+    let (scale_pref, refresh) = (prefs.image_scale_type.clone(), deps.clone());
+    root.append(&chips(&scale, prefs.image_scale_type.get(), move |v| {
+        save(&scale_pref, v);
+        refresh.refresh();
+    }));
 
     let zoom: Vec<(&str, i32)> = ZOOM_START_CHIPS.iter().enumerate().map(|(i, l)| (*l, i as i32 + 1)).collect();
     root.append(&gtk::Label::new(Some(strings::PREF_ZOOM_START)));
@@ -338,16 +434,20 @@ fn pager_block(prefs: &ReaderPrefs) -> gtk::Box {
     root.append(&chips(&zoom, prefs.zoom_start.get(), move |v| save(&zoom_pref, v)));
 
     root.append(&check(strings::PREF_CROP_BORDERS, &prefs.crop_borders));
-    root.append(&check(strings::PREF_LANDSCAPE_ZOOM, &prefs.landscape_zoom));
-    root.append(&check(strings::PREF_NAVIGATE_PAN, &prefs.navigate_to_pan));
-    dual_page_rows(&root, prefs, false);
+    let landscape = check(strings::PREF_LANDSCAPE_ZOOM, &prefs.landscape_zoom);
+    deps.add(Row::PagerLandscapeZoom, &landscape);
+    root.append(&landscape);
+    let pan = check(strings::PREF_NAVIGATE_PAN, &prefs.navigate_to_pan);
+    deps.add(Row::PagerPanWide, &pan);
+    root.append(&pan);
+    dual_page_rows(&root, prefs, false, deps);
     root
 }
 
-fn webtoon_block(prefs: &ReaderPrefs) -> gtk::Box {
+fn webtoon_block(prefs: &ReaderPrefs, deps: &Dependents) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
     root.append(&heading(strings::WEBTOON_VIEWER));
-    tap_zone_rows(&root, &prefs.navigation_mode_webtoon, &prefs.webtoon_nav_inverted);
+    tap_zone_rows(&root, &prefs.navigation_mode_webtoon, &prefs.webtoon_nav_inverted, WEBTOON_ROWS.invert_tap_zones, deps);
     let padding = prefs.webtoon_side_padding.clone();
     root.append(&slider(
         strings::PREF_WEBTOON_SIDE_PADDING,
@@ -357,9 +457,14 @@ fn webtoon_block(prefs: &ReaderPrefs) -> gtk::Box {
         move |v| save(&padding, v),
     ));
     root.append(&check(strings::PREF_CROP_BORDERS, &prefs.crop_borders_webtoon));
-    dual_page_rows(&root, prefs, true);
+    dual_page_rows(&root, prefs, true, deps);
     root.append(&check(strings::PREF_DOUBLE_TAP_ZOOM, &prefs.webtoon_double_tap_zoom_enabled));
     root.append(&check(strings::PREF_WEBTOON_DISABLE_ZOOM_OUT, &prefs.webtoon_disable_zoom_out));
+    root.append(&gtk::Label::new(Some(strings::PREF_HIDE_THRESHOLD)));
+    let options: Vec<(&str, i32)> = HIDE_THRESHOLD_CHIPS.iter().enumerate().map(|(i, (l, _))| (*l, i as i32)).collect();
+    let current = HIDE_THRESHOLD_CHIPS.iter().position(|(_, t)| *t == prefs.reader_hide_threshold.get()).unwrap_or(0) as i32;
+    let threshold = prefs.reader_hide_threshold.clone();
+    root.append(&chips(&options, current, move |v| save(&threshold, HIDE_THRESHOLD_CHIPS[v as usize].1)));
     root
 }
 
@@ -378,16 +483,39 @@ pub fn general_tab(prefs: &ReaderPrefs) -> gtk::Box {
     root.append(&check(strings::PREF_READ_WITH_LONG_TAP, &prefs.read_with_long_tap));
     root.append(&check(strings::PREF_ALWAYS_SHOW_CHAPTER_TRANSITION, &prefs.always_show_chapter_transition));
     root.append(&check(strings::PREF_PAGE_TRANSITIONS, &prefs.page_transitions));
+    root.append(&gtk::Label::new(Some(strings::PREF_DOUBLE_TAP_ANIM_SPEED)));
+    let speed = prefs.double_tap_anim_speed.clone();
+    root.append(&chips(&DOUBLE_TAP_SPEED_CHIPS, prefs.double_tap_anim_speed.get(), move |v| save(&speed, v)));
+    root.append(&check(strings::PREF_SKIP_READ_CHAPTERS, &prefs.skip_read));
+    root.append(&check(strings::PREF_SKIP_FILTERED_CHAPTERS, &prefs.skip_filtered));
+    root.append(&check(strings::PREF_SKIP_DUPE_CHAPTERS, &prefs.skip_dupe));
+    root.append(&check(strings::PREF_PRESERVE_READING_POSITION, &prefs.preserve_reading_position));
+    let deps = Dependents::new(prefs);
+    let refresh = deps.clone();
+    root.append(&check_then(strings::PREF_READ_WITH_VOLUME_KEYS, &prefs.read_with_volume_keys, move || refresh.refresh()));
+    let inverted = check(strings::PREF_READ_WITH_VOLUME_KEYS_INVERTED, &prefs.read_with_volume_keys_inverted);
+    inverted.set_margin_start(24);
+    deps.add(Row::InvertVolumeKeys, &inverted);
+    root.append(&inverted);
+    root.append(&restore_row(prefs));
     root.append(&flash_rows(prefs));
     root
 }
 
+/// The switch of the crash restore (T-43a-039). It is on by default and lives under its own key in the store.
+fn restore_row(prefs: &ReaderPrefs) -> gtk::CheckButton {
+    check(strings::PREF_RESTORE_AFTER_CRASH, &prefs.store().pref(restore::PREF_KEY, true))
+}
+
 fn flash_rows(prefs: &ReaderPrefs) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    let flash = check(strings::PREF_FLASH_PAGE, &prefs.flash_on_page_change);
+    let deps = Dependents::new(prefs);
+    let refresh = deps.clone();
+    let flash = check_then(strings::PREF_FLASH_PAGE, &prefs.flash_on_page_change, move || refresh.refresh());
     let details = gtk::Box::new(gtk::Orientation::Vertical, 4);
     details.set_margin_start(24);
-    details.set_visible(prefs.flash_on_page_change.get());
+    // every control of the group is disabled, not hidden, while the switch is off
+    deps.add(Row::FlashDuration, &details);
 
     let duration = prefs.flash_duration_millis.clone();
     details.append(&slider(
@@ -411,8 +539,6 @@ fn flash_rows(prefs: &ReaderPrefs) -> gtk::Box {
     let colour = prefs.flash_color.clone();
     details.append(&chips(&colour_options, current, move |v| save(&colour, FLASH_CHIPS[v as usize].1)));
 
-    let shown = details.clone();
-    flash.connect_toggled(move |b| shown.set_visible(b.is_active()));
     root.append(&flash);
     root.append(&details);
     root
@@ -467,7 +593,7 @@ pub fn filter_tab(prefs: &ReaderPrefs) -> gtk::Box {
         let value = prefs.color_filter_value.clone();
         colours.append(&slider(
             label,
-            (0, 255),
+            CHANNEL_RANGE,
             overlay::channel_get(prefs.color_filter_value.get(), channel),
             number_text,
             // each write replaces one byte and keeps the other three of the stored value

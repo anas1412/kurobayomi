@@ -20,6 +20,61 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const MAGIC: &str = "kurobayomi-crash-report 1";
 /// Newest reports kept in the crash directory.
 pub const KEPT_CRASH_REPORTS: usize = 20;
+
+/// Set to `1` (main window, 500 ms after it is shown) or `worker` (inside a tokio task) to crash on
+/// purpose. Ignored in release builds unless [`ALLOW_TEST_HOOKS_ENV`] is `1`.
+pub const CRASH_TEST_ENV: &str = "KUROBAYOMI_CRASH_TEST";
+/// Set to `1` so the reporter prints the report path and exits 0 without a window. Same release gate.
+pub const REPORTER_DRY_ENV: &str = "KUROBAYOMI_REPORTER_DRY";
+/// Set to `1` to let the test hooks work in a release build.
+pub const ALLOW_TEST_HOOKS_ENV: &str = "KUROBAYOMI_ALLOW_TEST_HOOKS";
+/// Panic message of the crash test hooks.
+pub const CRASH_TEST_MESSAGE: &str = "crash test";
+/// Delay between the main window being shown and the `1` crash test panicking.
+pub const CRASH_TEST_DELAY_MS: u64 = 500;
+/// True in release builds, where the test hooks need [`ALLOW_TEST_HOOKS_ENV`].
+pub const RELEASE_BUILD: bool = !cfg!(debug_assertions);
+
+/// Where a crash test panics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CrashTest {
+    /// On the main thread, [`CRASH_TEST_DELAY_MS`] after the main window is presented.
+    MainWindow,
+    /// Inside a tokio task, see [`crash_test_worker`].
+    Worker,
+}
+
+/// The crash test selected by the `KUROBAYOMI_CRASH_TEST` value. In a release build (`release`) it
+/// is ignored unless the `KUROBAYOMI_ALLOW_TEST_HOOKS` value is `1`. Other values select nothing.
+pub fn crash_test_hook(crash_test: Option<&str>, allow: Option<&str>, release: bool) -> Option<CrashTest> {
+    if release && allow != Some("1") {
+        return None;
+    }
+    match crash_test? {
+        "1" => Some(CrashTest::MainWindow),
+        "worker" => Some(CrashTest::Worker),
+        _ => None,
+    }
+}
+
+/// Whether the reporter runs in dry-run mode for the `KUROBAYOMI_REPORTER_DRY` value, under the same
+/// release gate as [`crash_test_hook`].
+pub fn reporter_dry_run(reporter_dry: Option<&str>, allow: Option<&str>, release: bool) -> bool {
+    if release && allow != Some("1") {
+        return false;
+    }
+    reporter_dry == Some("1")
+}
+
+/// Panics with [`CRASH_TEST_MESSAGE`] on the calling thread. The `1` hook calls it on the main thread.
+pub fn crash_test_now() -> ! {
+    panic!("{CRASH_TEST_MESSAGE}")
+}
+
+/// The `worker` hook: panics with [`CRASH_TEST_MESSAGE`] when polled. Spawn it on a tokio runtime.
+pub async fn crash_test_worker() {
+    panic!("{CRASH_TEST_MESSAGE}")
+}
 /// Reports older than this are deleted at startup.
 const MAX_REPORT_AGE_MS: u128 = 14 * 24 * 60 * 60 * 1000;
 static CRASHING: AtomicBool = AtomicBool::new(false);
@@ -325,6 +380,25 @@ mod tests {
         let sections = BTreeMap::from([("manga_extensions", body.to_owned())]);
         let text = render(&sample("boom"), &BTreeMap::new(), &sections);
         assert!(text.contains(&format!("[manga_extensions]\n{body}\n[anime_extensions]\n[backtrace]\n")), "{text}");
+    }
+
+    #[test]
+    fn test_hooks_are_selected_by_value_and_ignored_in_release_without_the_allow_switch() {
+        assert_eq!(crash_test_hook(Some("1"), None, false), Some(CrashTest::MainWindow));
+        assert_eq!(crash_test_hook(Some("worker"), None, false), Some(CrashTest::Worker));
+        assert_eq!(crash_test_hook(Some("yes"), None, false), None);
+        assert_eq!(crash_test_hook(None, None, false), None);
+        assert_eq!(crash_test_hook(Some("1"), None, true), None, "release ignores the hook");
+        assert_eq!(crash_test_hook(Some("1"), Some("0"), true), None);
+        assert_eq!(crash_test_hook(Some("1"), Some("1"), true), Some(CrashTest::MainWindow));
+    }
+
+    #[test]
+    fn reporter_dry_run_follows_the_same_release_gate() {
+        assert!(reporter_dry_run(Some("1"), None, false));
+        assert!(!reporter_dry_run(Some("0"), None, false));
+        assert!(!reporter_dry_run(Some("1"), None, true));
+        assert!(reporter_dry_run(Some("1"), Some("1"), true));
     }
 
     #[test]

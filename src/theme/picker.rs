@@ -77,6 +77,41 @@ pub fn cards_css(entries: &[(AppTheme, Tokens)], selected: AppTheme) -> String {
         .collect()
 }
 
+/// The CSS class of a card's focusable slot. Its focus ring is `CARD_FOCUS_CSS`.
+pub const CARD_SLOT_CLASS: &str = "kb-card-slot";
+
+/// The focus ring of a card, shown for keyboard focus only (T-49a-065).
+pub const CARD_FOCUS_CSS: &str = ".kb-card-slot:focus-visible { outline: 2px solid @accent_color; outline-offset: 2px; }\n";
+
+/// The card index that an arrow key moves to. The ends stop; the focus does not wrap.
+pub fn next_card(current: usize, len: usize, step: isize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    (current as isize + step).clamp(0, len as isize - 1) as usize
+}
+
+/// Keys on a card: Left and Right move focus to the neighbour, Enter and Space select the card.
+fn card_keys(index: usize, slots: Rc<RefCell<Vec<gtk::Box>>>, select: Rc<dyn Fn()>) -> gtk::EventControllerKey {
+    use gtk::gdk::Key;
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        let step = match key {
+            Key::Left | Key::KP_Left => -1,
+            Key::Right | Key::KP_Right => 1,
+            Key::Return | Key::KP_Enter | Key::space => {
+                select();
+                return gtk::glib::Propagation::Stop;
+            }
+            _ => return gtk::glib::Propagation::Proceed,
+        };
+        let slots = slots.borrow();
+        slots[next_card(index, slots.len(), step)].grab_focus();
+        gtk::glib::Propagation::Stop
+    });
+    keys
+}
+
 /// The pure-black switch is insensitive in Light mode. Its stored value is kept there.
 pub fn amoled_sensitive(mode: ThemeMode) -> bool {
     mode != ThemeMode::LIGHT
@@ -184,6 +219,7 @@ pub fn theme_cards(stored: AppTheme, mode: ThemeMode, amoled: bool) -> gtk::Scro
     }
 
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    let slots: Rc<RefCell<Vec<gtk::Box>>> = Rc::new(RefCell::new(Vec::new()));
     for (app, _) in entries.iter() {
         let app = *app;
         let card = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -211,14 +247,25 @@ pub fn theme_cards(stored: AppTheme, mode: ThemeMode, amoled: bool) -> gtk::Scro
         card.append(&label);
 
         let (entries, provider, checks) = (entries.clone(), provider.clone(), checks.clone());
-        let on_select = move || {
+        let on_select: Rc<dyn Fn()> = Rc::new(move || {
             change_settings(|s| s.scheme = SchemeSel::from(app));
             provider.load_from_string(&cards_css(&entries, app));
             for (card_app, check) in checks.borrow().iter() {
                 check.set_visible(*card_app == app);
             }
-        };
-        row.append(&surface::clickable(&card, true, on_select, None));
+        });
+        let index = slots.borrow().len();
+        let slot = surface::clickable(&card, true, { let on_select = on_select.clone(); move || on_select() }, None);
+        slot.add_css_class(CARD_SLOT_CLASS);
+        slot.set_focusable(true);
+        slots.borrow_mut().push(slot.clone());
+        slot.add_controller(card_keys(index, slots.clone(), on_select));
+        row.append(&slot);
+    }
+    if let Some(display) = gtk::gdk::Display::default() {
+        let focus = gtk::CssProvider::new();
+        focus.load_from_string(CARD_FOCUS_CSS);
+        gtk::style_context_add_provider_for_display(&display, &focus, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
 
     gtk::ScrolledWindow::builder()
@@ -320,6 +367,22 @@ mod tests {
             }
             assert!(switch.is_sensitive());
         });
+    }
+
+    // T-49a-065: arrows stop at the ends of the row.
+    #[test]
+    fn arrow_keys_move_one_card_and_stop_at_the_ends() {
+        assert_eq!(next_card(0, 3, 1), 1);
+        assert_eq!(next_card(2, 3, 1), 2);
+        assert_eq!(next_card(0, 3, -1), 0);
+        assert_eq!(next_card(1, 3, -1), 0);
+        assert_eq!(next_card(0, 0, 1), 0);
+    }
+
+    #[test]
+    fn cards_show_a_focus_ring_for_keyboard_focus() {
+        assert!(CARD_FOCUS_CSS.contains(".kb-card-slot:focus-visible"));
+        assert!(CARD_FOCUS_CSS.contains("outline"));
     }
 
     #[test]

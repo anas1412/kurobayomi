@@ -53,6 +53,9 @@ pub struct MigrateSourcesSnapshot {
     pub sources: Vec<(Source, i64)>,
     pub mode: MigrationSortingMode,
     pub direction: MigrationDirection,
+    /// What the page says when no source has a favourite: the manga picker says `information_empty_library`, the anime
+    /// picker `texts::MIGRATE_SOURCES_EMPTY` (T-41a-036).
+    pub empty_text: String,
 }
 
 pub struct MigrateSourcesNav {
@@ -92,7 +95,7 @@ pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav
     root.append(&sort);
 
     if snapshot.sources.is_empty() {
-        let empty = gtk::Label::new(Some(&tr(MsgKey::information_empty_library)));
+        let empty = gtk::Label::new(Some(&snapshot.empty_text));
         empty.set_vexpand(true);
         root.append(&empty);
         return root;
@@ -594,6 +597,11 @@ impl GlobalSearchPage {
         draw(&self.entry, &self.view, snapshot);
     }
 
+    /// The hint of the empty search box. The anime page says "Search a source by title" (T-41a-027).
+    pub fn set_hint(&self, hint: &str) {
+        self.entry.set_placeholder_text(Some(hint));
+    }
+
     /// The text in the search box, as typed: a source row opens its browse page with it (GS-EC-15).
     pub fn typed(&self) -> String {
         self.view.typed.borrow().clone()
@@ -746,7 +754,7 @@ pub(crate) mod tests {
         let log = nav_log();
         let (a, b, c, d) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
         let migrate = migrate_sources(
-            &MigrateSourcesSnapshot { sources: vec![], mode: MigrationSortingMode::ALPHABETICAL, direction: MigrationDirection::ASCENDING },
+            &MigrateSourcesSnapshot { sources: vec![], mode: MigrationSortingMode::ALPHABETICAL, direction: MigrationDirection::ASCENDING, empty_text: tr(MsgKey::information_empty_library) },
             MigrateSourcesNav {
                 open: Rc::new(move |id| a.borrow_mut().push(format!("open {id}"))),
                 copy_id: Rc::new(move |id| b.borrow_mut().push(format!("copy {id}"))),
@@ -783,6 +791,7 @@ pub(crate) mod tests {
             sources: vec![(Source::new(1, "Alpha", "en"), 12), (stub, 3), (Source::new(3, "Nolang", ""), 1)],
             mode: MigrationSortingMode::TOTAL,
             direction: MigrationDirection::DESCENDING,
+            empty_text: String::new(),
         };
         let page = migrate_sources(
             &snapshot,

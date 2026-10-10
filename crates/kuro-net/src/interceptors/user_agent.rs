@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use http::header::{HeaderValue, USER_AGENT};
 
 use super::{Chain, Interceptor};
+use crate::cookies::CookieJar;
 use crate::error::NetError;
 use crate::request::Request;
 use crate::response::Response;
@@ -15,6 +16,8 @@ type Provider = Box<dyn Fn() -> String + Send + Sync>;
 
 pub struct UserAgentInterceptor {
     provider: Provider,
+    /// The jar that holds the user agent a user entered for a domain with a pasted clearance (T-12a-033).
+    domains: Option<CookieJar>,
 }
 
 impl UserAgentInterceptor {
@@ -22,7 +25,14 @@ impl UserAgentInterceptor {
     pub fn new(provider: impl Fn() -> String + Send + Sync + 'static) -> Self {
         Self {
             provider: Box::new(provider),
+            domains: None,
         }
+    }
+
+    /// A request for a domain the user pasted a clearance for gets that domain's user agent in place of the default.
+    pub fn with_domain_defaults(mut self, jar: CookieJar) -> Self {
+        self.domains = Some(jar);
+        self
     }
 }
 
@@ -45,7 +55,8 @@ impl Interceptor for UserAgentInterceptor {
             return chain.proceed(req).await;
         }
         req.headers.remove(USER_AGENT);
-        let ua = (self.provider)();
+        let domain_default = self.domains.as_ref().and_then(|jar| jar.domain_user_agent(&req.url));
+        let ua = domain_default.unwrap_or_else(|| (self.provider)());
         let ua = ua.trim();
         if ua.is_empty() {
             warn_once("the setting is blank");
@@ -131,5 +142,29 @@ mod tests {
     async fn a_default_with_a_non_ascii_character_is_skipped_not_fatal() {
         let ua = seen_user_agent("Mozillaé", HeaderMap::new()).await;
         assert_eq!(ua, None);
+    }
+
+    #[tokio::test]
+    async fn a_domain_with_a_pasted_clearance_gets_its_own_user_agent_instead_of_the_default() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::any())
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let jar = CookieJar::load(dir.path().join("cookies.json"));
+        let url = url::Url::parse(&server.uri()).unwrap();
+        jar.import_clearance(&url, "abc", "Firefox/136.0").unwrap();
+        let client = NetworkClient::for_tests(vec![Arc::new(
+            UserAgentInterceptor::new(|| "kuro/1.0".to_owned()).with_domain_defaults(jar),
+        )]);
+        client.execute(request::get(&format!("{}/", server.uri())).unwrap()).await.unwrap();
+        // a request that carries its own user agent keeps it
+        let mut own = HeaderMap::new();
+        own.append(USER_AGENT, HeaderValue::from_static("mine"));
+        client.execute(request::get(&format!("{}/", server.uri())).unwrap().headers(own)).await.unwrap();
+        let received = server.received_requests().await.unwrap();
+        let agents: Vec<_> = received.iter().map(|r| r.headers.get("user-agent").unwrap().to_str().unwrap().to_owned()).collect();
+        assert_eq!(agents, ["Firefox/136.0", "mine"]);
     }
 }

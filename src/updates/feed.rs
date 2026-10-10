@@ -111,6 +111,16 @@ pub fn selected_flags(rows: &[FeedRow]) -> Vec<UnitFlags> {
         .collect()
 }
 
+/// The widget name of the list row of unit `id`, so a key press can find the focused row's unit.
+pub fn row_name(id: i64) -> String {
+    format!("unit:{id}")
+}
+
+/// The unit of a row widget name made by [`row_name`].
+pub fn unit_of_row_name(name: &str) -> Option<i64> {
+    name.strip_prefix("unit:")?.parse().ok()
+}
+
 /// How a row was pressed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Gesture {
@@ -311,5 +321,12 @@ mod tests {
         items[1].selected = true;
         items[1].download = RowDownload { state: DownloadState::Downloaded, progress: 0 };
         assert_eq!(selected_targets(&items), vec![UnitTarget { entry_id: 1, unit_id: 1, state: DownloadState::Downloaded }]);
+    }
+
+    #[test]
+    fn feed_row_names_round_trip_and_other_names_are_not_units() {
+        assert_eq!(unit_of_row_name(&row_name(42)), Some(42));
+        assert_eq!(unit_of_row_name("screen:updates"), None);
+        assert_eq!(unit_of_row_name("unit:x"), None);
     }
 }

@@ -18,6 +18,8 @@ pub enum Effect {
     Flash,
     Brightness,
     ColorFilter,
+    /// The tap zones or their inversion changed: the navigation overlay shows the new layout (G-27).
+    Navigation,
     /// The global incognito flag changed; the reader closes when it is off (E-INC-2).
     Incognito,
 }
@@ -43,6 +45,9 @@ pub fn effects_for(key: &str) -> Vec<Effect> {
         "pref_custom_brightness_key" | "custom_brightness_value" => vec![Effect::Brightness],
         "pref_color_filter_key" | "color_filter_value" | "color_filter_mode" | "pref_grayscale" | "pref_inverted_colors" => {
             vec![Effect::ColorFilter]
+        }
+        "reader_navigation_mode_pager" | "reader_navigation_mode_webtoon" | "reader_tapping_inverted" | "reader_tapping_inverted_webtoon" => {
+            vec![Effect::Navigation]
         }
         INCOGNITO_KEY => vec![Effect::Incognito],
         _ => Vec::new(),
@@ -77,6 +82,8 @@ mod tests {
         assert_eq!(effects_for("pref_reader_flash_duration"), [Effect::Flash]);
         assert_eq!(effects_for("custom_brightness_value"), [Effect::Brightness]);
         assert_eq!(effects_for("pref_grayscale"), [Effect::ColorFilter]);
+        assert_eq!(effects_for("reader_navigation_mode_pager"), [Effect::Navigation]);
+        assert_eq!(effects_for("reader_tapping_inverted_webtoon"), [Effect::Navigation]);
     }
 
     #[test]

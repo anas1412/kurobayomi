@@ -7,6 +7,7 @@ use super::settings::ViewerSettings;
 use super::ViewerKind;
 use crate::reader::page_transform::SplitSettings;
 use crate::reader::page_zoom::{self, ImageScaleType, PageConfig};
+use crate::reader::pref_rules;
 use crate::reader::theme::{self, Background};
 
 /// The values a page view takes from the viewer's settings.
@@ -14,10 +15,21 @@ use crate::reader::theme::{self, Background};
 pub struct PageOpts {
     pub config: PageConfig,
     pub background: Background,
+    /// The reader theme is Automatic: each page paints the background `chooseBackground` picks for it (T-13a-029).
+    pub automatic_background: bool,
     pub double_tap_ms: u32,
     pub long_tap: bool,
     /// A webtoon page: decoded no wider than the view (B§8.4).
     pub webtoon: bool,
+    /// A long strip decodes in full (`pref_always_decode_long_strip_with_ssiv`); otherwise a webtoon page decodes at
+    /// the view width. A pager page always decodes in full.
+    pub full_decode: bool,
+    /// Pages cut their uniform border at decode (`crop_borders` for a pager, `crop_borders_webtoon` for a webtoon).
+    pub crop: bool,
+    /// A wide fitted page zooms to the view height after it loads (`landscape_zoom`).
+    pub landscape_zoom: bool,
+    /// The webtoon side padding in percent of the view width, 0..=25, on each side (zero for a pager).
+    pub side_padding: i32,
     /// The dual-page settings the decode transform follows (T-44a-050).
     pub transform: SplitSettings,
 }
@@ -65,10 +77,29 @@ pub fn page_opts(settings: &ViewerSettings, kind: ViewerKind, system_dark: bool)
             zoom_start: page_zoom::zoom_start(settings.zoom_start, reading_mode(kind)),
         },
         background: theme::background_for(settings.reader_theme, system_dark),
+        automatic_background: settings.reader_theme == 3,
         double_tap_ms: settings.double_tap_anim_ms,
         long_tap: settings.long_tap,
         webtoon: !kind.is_pager(),
+        full_decode: settings.always_decode_long_strip,
+        crop: if kind.is_pager() { settings.crop_pager } else { settings.crop_webtoon },
+        landscape_zoom: settings.landscape_zoom,
+        side_padding: if kind.is_pager() { 0 } else { pref_rules::side_padding(settings.side_padding) },
     }
+}
+
+impl PageOpts {
+    /// Whether a decode is cut to the view width first: a webtoon page, unless the long strip decodes in full (T-43b-023).
+    pub fn decode_to_view(&self) -> bool {
+        self.webtoon && !self.full_decode
+    }
+}
+
+/// The width of one side margin of the webtoon strip: `percent` of the view width (`webtoon_side_padding / 100`),
+/// clamped to 0..=25 percent (T-43b-047).
+pub fn side_padding_px(view_width: i32, percent: i32) -> i32 {
+    let percent = pref_rules::side_padding(percent);
+    (i64::from(view_width.max(0)) * i64::from(percent) / 100) as i32
 }
 
 /// The colour a background paints, as the stylesheet does (`reader-bg-*`), in 0..=1 RGB.
@@ -131,6 +162,39 @@ mod tests {
         let auto = settings(|p| p.reader_theme.set(3).unwrap());
         assert_eq!(page_opts(&auto, ViewerKind::Webtoon, true).background, Background::Gray);
         assert_eq!(page_opts(&auto, ViewerKind::Webtoon, false).background, Background::White);
+    }
+
+    #[test]
+    fn t023_a_webtoon_page_decodes_at_the_view_width_unless_the_long_strip_decodes_in_full() {
+        let normal = settings(|_| {});
+        assert!(page_opts(&normal, ViewerKind::Webtoon, false).decode_to_view());
+        assert!(!page_opts(&normal, ViewerKind::LeftToRight, false).decode_to_view(), "a pager page is never cut to the view");
+        let full = settings(|p| p.store().pref(super::super::settings::ALWAYS_DECODE_LONG_STRIP_KEY, false).set(true).unwrap());
+        assert!(!page_opts(&full, ViewerKind::Webtoon, false).decode_to_view(), "the full-decode path");
+        assert!(!page_opts(&full, ViewerKind::WebtoonGapped, false).decode_to_view());
+    }
+
+    #[test]
+    fn t020_crop_follows_the_pager_or_the_webtoon_preference() {
+        let s = settings(|p| p.crop_borders.set(true).unwrap());
+        assert!(page_opts(&s, ViewerKind::RightToLeft, false).crop);
+        assert!(!page_opts(&s, ViewerKind::Webtoon, false).crop);
+        let w = settings(|p| p.crop_borders_webtoon.set(true).unwrap());
+        assert!(page_opts(&w, ViewerKind::WebtoonGapped, false).crop);
+        assert!(!page_opts(&w, ViewerKind::LeftToRight, false).crop);
+    }
+
+    #[test]
+    fn t047_the_side_padding_is_a_percent_of_the_view_width_on_the_webtoon_only() {
+        let s = settings(|p| p.webtoon_side_padding.set(10).unwrap());
+        assert_eq!(page_opts(&s, ViewerKind::Webtoon, false).side_padding, 10);
+        assert_eq!(page_opts(&s, ViewerKind::LeftToRight, false).side_padding, 0);
+        assert_eq!(side_padding_px(800, 10), 80);
+        assert_eq!(side_padding_px(800, 0), 0);
+        assert_eq!(side_padding_px(800, 25), 200);
+        assert_eq!(side_padding_px(800, 40), 200, "out of range values are clamped");
+        assert_eq!(side_padding_px(800, -5), 0);
+        assert_eq!(side_padding_px(-5, 10), 0);
     }
 
     #[test]

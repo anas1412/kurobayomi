@@ -65,26 +65,22 @@ pub fn register_functions(c: &Connection) -> DbResult<()> {
 /// Opens (creating the file and its parent directory when needed) and brings the database to the
 /// bundle's latest version. The gate runs before any write: a `user_version` above the bundle, or a
 /// file with another application id (an Aniyomi file), is refused and left untouched.
+///
+/// A file that fails its check, or is not a database at all, is renamed to `<file>.corrupt-<UTC>` (with its
+/// `-wal` and `-shm` siblings) and the call returns [`DbError::Corrupt`] naming where it went. The path is then
+/// free: the caller restores [`restore_newest_backup`] or opens again for an empty database. Files above
+/// [`QUICK_CHECK_MAX_BYTES`] are not checked.
 pub fn open_and_migrate(path: &Path, bundle: &SchemaBundle) -> DbResult<Connection> {
-    Ok(open_and_migrate_report(path, bundle)?.conn)
-}
-
-/// The result of [`open_and_migrate_report`].
-pub struct Opened {
-    pub conn: Connection,
-    /// Where a corrupt file was moved. The connection is then on a new, empty database, and the caller shows
-    /// the restore-from-backup dialog.
-    pub quarantined: Option<PathBuf>,
-}
-
-/// [`open_and_migrate`] with the corruption report. A file whose `quick_check` fails is renamed to
-/// `<file>.corrupt-<unix seconds>` (with its `-wal` and `-shm` siblings) and a new database is created in its
-/// place. Files above [`QUICK_CHECK_MAX_BYTES`] are not checked.
-pub fn open_and_migrate_report(path: &Path, bundle: &SchemaBundle) -> DbResult<Opened> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
-    let quarantined = if is_corrupt(path)? { Some(quarantine(path)?) } else { None };
+    let was_dirty = dirty_marker(path).exists();
+    if is_corrupt(path, was_dirty)? {
+        let moved = quarantine(path)?;
+        // the marker belonged to the file that was moved; the next open starts a new one
+        mark_clean_shutdown(path)?;
+        return Err(DbError::Corrupt(format!("failed its integrity check, moved to {}", moved.display())));
+    }
     let mut c = Connection::open(path)?;
     let tables: i64 = c.query_row(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table'",
@@ -108,18 +104,40 @@ pub fn open_and_migrate_report(path: &Path, bundle: &SchemaBundle) -> DbResult<O
             )));
         }
     }
+    // The marker goes down before the first write. A crash leaves it behind, and the next open then
+    // runs the full integrity check.
+    std::fs::write(dirty_marker(path), b"")?;
     configure(&c)?;
     if tables == 0 {
         create_baseline(&mut c, bundle)?;
     } else {
         migrate::run(&mut c, path, user_version, bundle.migrations)?;
     }
-    Ok(Opened { conn: c, quarantined })
+    Ok(c)
 }
 
-/// True when `PRAGMA quick_check` reports anything but `ok`, or the file is not a database at all. A missing,
-/// empty or oversized file is not checked (false).
-fn is_corrupt(path: &Path) -> DbResult<bool> {
+/// Suffix of the marker file that says a database is open or was not closed cleanly.
+pub const DIRTY_SUFFIX: &str = ".dirty";
+
+/// The dirty marker of the database at `path`: `<file>.dirty` beside it.
+pub fn dirty_marker(path: &Path) -> PathBuf {
+    let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    path.with_file_name(format!("{file}{DIRTY_SUFFIX}"))
+}
+
+/// Removes the dirty marker. Call on clean shutdown, after the connection is closed. A missing marker is fine.
+pub fn mark_clean_shutdown(path: &Path) -> DbResult<()> {
+    match std::fs::remove_file(dirty_marker(path)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// True when the file fails a check, or is not a database at all. A dirty file (`was_dirty`) gets
+/// `PRAGMA integrity_check`, any other gets `quick_check`. A missing, empty or oversized file is not
+/// checked (false).
+fn is_corrupt(path: &Path, was_dirty: bool) -> DbResult<bool> {
     let Ok(meta) = std::fs::metadata(path) else {
         return Ok(false);
     };
@@ -131,7 +149,8 @@ fn is_corrupt(path: &Path) -> DbResult<bool> {
         return Ok(false);
     }
     let c = Connection::open(path)?;
-    match c.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0)) {
+    let pragma = if was_dirty { "PRAGMA integrity_check" } else { "PRAGMA quick_check" };
+    match c.query_row(pragma, [], |r| r.get::<_, String>(0)) {
         Ok(first) => Ok(first != "ok"),
         Err(rusqlite::Error::SqliteFailure(e, _))
             if matches!(e.code, ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) =>
@@ -142,23 +161,51 @@ fn is_corrupt(path: &Path) -> DbResult<bool> {
     }
 }
 
-/// Moves a corrupt database and its WAL and shared-memory files aside. Nothing is deleted.
+/// Moves a corrupt database and its WAL and shared-memory files aside, to `<file>.corrupt-<UTC>` (a counter is
+/// added when that name is taken). Nothing is deleted and nothing is overwritten.
 fn quarantine(path: &Path) -> DbResult<PathBuf> {
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let stamp = migrate::utc_stamp(
+        SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0)),
+    );
     let file = path
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| std::io::Error::other("database file name is not UTF-8"))?;
-    let dest = path.with_file_name(format!("{file}.corrupt-{stamp}"));
+    let taken = |name: &str| ["", "-wal", "-shm"].iter().any(|side| path.with_file_name(format!("{name}{side}")).exists());
+    let mut name = format!("{file}.corrupt-{stamp}");
+    let mut n = 1;
+    while taken(&name) {
+        name = format!("{file}.corrupt-{stamp}-{n}");
+        n += 1;
+    }
+    let dest = path.with_file_name(&name);
     std::fs::rename(path, &dest)?;
     for side in ["-wal", "-shm"] {
         let from = path.with_file_name(format!("{file}{side}"));
         if from.exists() {
-            std::fs::rename(&from, dest.with_file_name(format!("{file}.corrupt-{stamp}{side}")))?;
+            std::fs::rename(&from, path.with_file_name(format!("{name}{side}")))?;
         }
     }
-    tracing::error!(from = %path.display(), to = %dest.display(), "database failed quick_check; moved aside");
+    tracing::error!(from = %path.display(), to = %dest.display(), "database failed its integrity check; moved aside");
     Ok(dest)
+}
+
+/// Puts the newest pre-migration backup back at `path`. The current file, if any, is moved aside
+/// first, so nothing is deleted. Returns the backup that was restored, or `NotFound` when there is none.
+pub fn restore_newest_backup(path: &Path) -> DbResult<PathBuf> {
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let file = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| std::io::Error::other("database file name is not UTF-8"))?;
+    let (_, backup) = migrate::backups_of(dir, file)?.pop().ok_or(DbError::NotFound)?;
+    if path.exists() {
+        quarantine(path)?;
+    }
+    let tmp = path.with_file_name(format!("{file}.restore-tmp"));
+    std::fs::copy(&backup, &tmp)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(backup)
 }
 
 /// Runs the baseline and stamps the application id and version in one transaction, so a failing
@@ -256,24 +303,59 @@ mod tests {
         assert_eq!(seed, (0, String::new(), -1, 0, 0), "TC-O01: the baseline seed row");
     }
 
+    fn corrupt_siblings(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("manga.db.corrupt-"))
+            .collect();
+        names.sort();
+        names
+    }
+
     #[test]
     fn a_healthy_file_is_not_quarantined() {
         let dir = tempfile::tempdir().unwrap();
         let p = kur_file(dir.path());
-        let opened = open_and_migrate_report(&p, &MANGA_SCHEMA).unwrap();
-        assert!(opened.quarantined.is_none());
+        drop(open_and_migrate(&p, &MANGA_SCHEMA).unwrap());
+        assert!(corrupt_siblings(dir.path()).is_empty());
     }
 
     #[test]
-    fn a_corrupt_file_is_moved_aside_and_a_fresh_database_takes_its_place() {
+    fn a_corrupt_file_is_moved_aside_and_the_open_returns_corrupt() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("manga.db");
         std::fs::write(&p, b"this is not a sqlite database, just bytes ".repeat(200)).unwrap();
-        let opened = open_and_migrate_report(&p, &MANGA_SCHEMA).unwrap();
-        let moved = opened.quarantined.expect("corrupt file is quarantined");
-        assert!(moved.file_name().unwrap().to_string_lossy().starts_with("manga.db.corrupt-"));
-        assert!(std::fs::read(&moved).unwrap().starts_with(b"this is not"), "bytes are kept, not deleted");
-        assert_eq!(pragma_i64(&opened.conn, "user_version"), 34);
+        let err = open_and_migrate(&p, &MANGA_SCHEMA).unwrap_err();
+        let DbError::Corrupt(msg) = err else { panic!("expected Corrupt, got {err}") };
+        let kept = corrupt_siblings(dir.path());
+        assert_eq!(kept.len(), 1);
+        assert!(msg.contains(&kept[0]), "the error names the quarantine path: {msg}");
+        let stamp = kept[0].strip_prefix("manga.db.corrupt-").unwrap();
+        assert_eq!(stamp.len(), 16, "UTC stamp like the backup names: {stamp}");
+        assert!(stamp.ends_with('Z') && stamp.as_bytes()[8] == b'T');
+        assert!(std::fs::read(dir.path().join(&kept[0])).unwrap().starts_with(b"this is not"), "bytes are kept");
+        assert!(!p.exists() && !dirty_marker(&p).exists(), "the path is free for a new database");
+        let c = open_and_migrate(&p, &MANGA_SCHEMA).unwrap();
+        assert_eq!(pragma_i64(&c, "user_version"), 34, "the next open creates an empty database");
+    }
+
+    #[test]
+    fn quarantine_never_overwrites_an_earlier_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("manga.db");
+        let junk = b"not a database ".repeat(300);
+        for round in 0..3u8 {
+            let mut bytes = junk.clone();
+            bytes.push(round);
+            std::fs::write(&p, &bytes).unwrap();
+            assert!(matches!(open_and_migrate(&p, &MANGA_SCHEMA), Err(DbError::Corrupt(_))));
+        }
+        let kept = corrupt_siblings(dir.path());
+        assert_eq!(kept.len(), 3, "{kept:?}");
+        let mut last_bytes: Vec<u8> = kept.iter().map(|n| *std::fs::read(dir.path().join(n)).unwrap().last().unwrap()).collect();
+        last_bytes.sort();
+        assert_eq!(last_bytes, [0, 1, 2]);
     }
 
     #[test]
@@ -281,7 +363,59 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("manga.db");
         std::fs::write(&p, b"").unwrap();
-        assert!(open_and_migrate_report(&p, &MANGA_SCHEMA).unwrap().quarantined.is_none());
+        drop(open_and_migrate(&p, &MANGA_SCHEMA).unwrap());
+        assert!(corrupt_siblings(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn open_puts_the_dirty_marker_down_and_a_clean_shutdown_takes_it_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("manga.db");
+        let c = open_and_migrate(&p, &MANGA_SCHEMA).unwrap();
+        assert!(dirty_marker(&p).is_file(), "marker exists while the database is open");
+        assert_eq!(dirty_marker(&p).file_name().unwrap(), "manga.db.dirty");
+        drop(c);
+        mark_clean_shutdown(&p).unwrap();
+        assert!(!dirty_marker(&p).exists());
+        mark_clean_shutdown(&p).unwrap();
+    }
+
+    #[test]
+    fn a_truncated_file_left_dirty_is_moved_aside_by_the_integrity_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = kur_file(dir.path());
+        std::fs::write(dirty_marker(&p), b"").unwrap();
+        let bytes = std::fs::read(&p).unwrap();
+        std::fs::write(&p, &bytes[..bytes.len().min(100)]).unwrap();
+        assert!(matches!(open_and_migrate(&p, &MANGA_SCHEMA), Err(DbError::Corrupt(_))), "a truncated dirty file is quarantined");
+        assert_eq!(corrupt_siblings(dir.path()).len(), 1);
+    }
+
+    #[test]
+    fn restore_newest_backup_brings_back_the_pre_migration_copy_of_a_truncated_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = kur_file(dir.path());
+        drop(open_and_migrate(&p, &WITH_34).unwrap());
+        assert_eq!(backup_files(dir.path()).len(), 1, "migrating 33 to 34 kept one pre-migration backup");
+        let bytes = std::fs::read(&p).unwrap();
+        std::fs::write(&p, &bytes[..100]).unwrap();
+
+        let restored = restore_newest_backup(&p).unwrap();
+        assert!(restored.file_name().unwrap().to_string_lossy().contains(".pre-v33-"));
+        let quarantined = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .any(|n| n.starts_with("manga.db.corrupt-"));
+        assert!(quarantined, "the truncated file is kept aside, not deleted");
+        let c = open_and_migrate(&p, &BASELINE_ONLY).unwrap();
+        assert_eq!(pragma_i64(&c, "user_version"), 33, "the restored copy is the version it was taken at");
+    }
+
+    #[test]
+    fn restore_without_a_backup_is_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = kur_file(dir.path());
+        assert!(matches!(restore_newest_backup(&p), Err(DbError::NotFound)));
     }
 
     #[test]

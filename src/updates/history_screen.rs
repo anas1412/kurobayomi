@@ -5,11 +5,14 @@
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 
 use chrono::Local;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GBox, ListBox, Orientation as O};
+use crate::browse::entries::FavoriteStore;
+use crate::browse::favorite::{DuplicateAnswer, duplicate_answer, duplicate_dialog};
 use kuro_domain::dates::ListRow;
 use kuro_domain::history::model::HistoryWithRelations;
 use kuro_domain::history::repo::HistoryRepo;
@@ -25,6 +28,7 @@ use crate::updates::history::{
     COALESCE_MS, CLEAR_DONE_TOAST_MS, HistoryDialog, HistoryState, NOT_FOUND_TOAST_MS, Resume, clear_outcome, empty_message,
     history_lines, remove_dialog,
 };
+use crate::updates::history_add::{self, Step};
 use crate::updates::history_data::{self, Unit};
 use crate::updates::history_dialog::{self, ConfirmCopy};
 use crate::updates::history_row::{RowActions, history_row};
@@ -194,10 +198,69 @@ impl HistoryScreen {
         }
     }
 
+    /// The favourite button: duplicate check, then the default category, as the Browse add does (T-42a-019).
     fn add_to_library(self: &Rc<Self>, line: &HistoryLine) {
-        if history_data::add_to_library(&self.db(), self.kind, line.entry_id).is_err() {
-            self.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS);
+        let store = history_add::store(self.kind);
+        let title = history_data::entry_title(&self.db(), self.kind, line.entry_id).unwrap_or_default();
+        let now = kuro_data::time::now_millis();
+        match history_add::start(store.as_ref(), line.entry_id, &title, now) {
+            Ok(Step::Added) => {}
+            Ok(Step::Chooser) => self.choose_categories(store, line.entry_id, now),
+            Ok(Step::Duplicate(existing)) => self.duplicate_dialog(store, line.entry_id, existing[0], now),
+            Err(_) => self.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
         }
+    }
+
+    /// The category chooser: the entry's current links are checked; OK writes them, then the favourite.
+    fn choose_categories(self: &Rc<Self>, store: Arc<dyn FavoriteStore>, entry_id: i64, now: i64) {
+        let rows = match history_add::chooser_options(store.as_ref(), entry_id) {
+            Ok(rows) => rows.into_iter().map(|(c, on)| (c.id, c.name, on)).collect(),
+            Err(_) => return self.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
+        };
+        let labels = [tr(MsgKey::action_ok), tr(MsgKey::action_cancel), tr(MsgKey::action_edit_categories)];
+        let (weak, on_store) = (Rc::downgrade(self), Arc::clone(&store));
+        history_dialog::choose_categories(
+            tr(MsgKey::action_move_category),
+            rows,
+            labels,
+            move |picked| {
+                if let Some(screen) = weak.upgrade() {
+                    if history_add::confirm_chooser(on_store.as_ref(), entry_id, now, picked).is_err() {
+                        screen.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS);
+                    }
+                }
+            },
+            move || crate::ui::open("categories"),
+        );
+    }
+
+    /// The duplicate dialog: show the existing entry, migrate it, add anyway, or cancel (nothing is written).
+    fn duplicate_dialog(self: &Rc<Self>, store: Arc<dyn FavoriteStore>, entry_id: i64, existing: i64, now: i64) {
+        let copy = duplicate_dialog();
+        let labels = vec![copy.show, copy.migrate, copy.add_anyway, copy.cancel];
+        let (weak, anime) = (Rc::downgrade(self), self.kind == EntryKind::Anime);
+        let db = self.db();
+        let kind = self.kind;
+        history_dialog::pick(copy.title, copy.body, labels, move |index| {
+            let Some(screen) = weak.upgrade() else { return };
+            match duplicate_answer(Some(index)) {
+                DuplicateAnswer::ShowExisting => {
+                    if let Some(title) = history_data::entry_title(&db, kind, existing) {
+                        crate::screens::open_entry(&title, anime);
+                    }
+                }
+                DuplicateAnswer::MigrateExisting => {
+                    let title = history_data::entry_title(&db, kind, existing).unwrap_or_default();
+                    crate::entry_core::handoff::open_migrate(crate::entry_core::handoff::MigrateRequest { entry_id: existing, anime, title });
+                }
+                DuplicateAnswer::AddAnyway => match history_add::add_anyway(store.as_ref(), entry_id, now) {
+                    Ok(Step::Chooser) => screen.choose_categories(Arc::clone(&store), entry_id, now),
+                    Ok(_) => {}
+                    Err(_) => screen.toast.show(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
+                },
+                DuplicateAnswer::Nothing => {}
+            }
+        });
     }
 
     /// A click on a row: the first next unit of its entry opens, or the not-found toast shows.

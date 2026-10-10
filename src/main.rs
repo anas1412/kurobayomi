@@ -2,8 +2,12 @@ mod applock_host;
 mod app_update;
 mod backup_host;
 mod backup_run;
+mod backup_schedule;
 mod bind;
 mod clamp;
+// No WebView host shows the window yet (T-12a-017 needs WebKitGTK).
+#[allow(dead_code)]
+mod cloudflare_window;
 mod data;
 mod entry;
 #[allow(dead_code)]
@@ -82,7 +86,7 @@ fn main() -> glib::ExitCode {
     // the hook goes in first so a panic during the rest of startup is reported too
     kuro_core::crash::install(paths.crash_dir());
     let _log = match kuro_core::logging::init(cfg!(debug_assertions), &paths.log_dir()) {
-        Ok(log) => Some(log),
+        Ok(log) => Some(settings_ui::advanced::share_logging(log)),
         Err(e) => {
             eprintln!("kurobayomi: file logging is off: {e}");
             None
@@ -99,6 +103,12 @@ fn main() -> glib::ExitCode {
     let unique = kuro_platform::single_instance::is_unique(|v| std::env::var(v).is_ok());
     let app = gtk::Application::builder().application_id("io.github.blackbox.Kurobayomi").flags(shell::launch::app_flags(unique)).build();
     shell::launch::connect(&app);
+    // the preferences get up to 2 s to reach the disk when the application shuts down (T-02a-038)
+    app.connect_shutdown(|_| {
+        if data::is_installed() {
+            data::flush_on_shutdown(data::app().base.store());
+        }
+    });
     app.connect_activate(|app| {
         // a later launch only raises the window; the first one builds it
         if let Some(win) = app.windows().first() {
@@ -233,6 +243,8 @@ fn build_window(app: &gtk::Application) {
     misc::start();
     // the restore banner, the Create and Restore hosts, and the close dialog of a running restore
     outer.prepend(&backup_host::attach(app, &win));
+    // the automatic backup schedule follows the interval setting (T-02a-024)
+    backup_schedule::start(app);
     open_link::register(app, &win);
 
     // reader/player are immersive: no sidebar or tab bar while they're on screen
@@ -274,6 +286,7 @@ fn build_window(app: &gtk::Application) {
     refresh();
     applock_host::attach(&win, data::app().security.clone());
     win.present();
+    schedule_crash_test();
     startup::publish_launcher_badge(&win, &app.application_id().unwrap_or_default());
     // background work that waits for the window: the chapter cache clear and the opt-in release check
     if let Ok(paths) = kuro_platform::linux::LinuxPaths::system() {
@@ -366,6 +379,24 @@ fn build_window(app: &gtk::Application) {
     }
 }
 
+/// The crash-reporter test hooks (T-01a-048): `KUROBAYOMI_CRASH_TEST=1` panics on the main thread 500 ms after the
+/// window is presented, `=worker` panics inside a tokio task. Release builds ignore both unless
+/// `KUROBAYOMI_ALLOW_TEST_HOOKS=1`.
+fn schedule_crash_test() {
+    use kuro_core::crash::{self, CrashTest};
+    let env = |name: &str| std::env::var(name).ok();
+    match crash::crash_test_hook(env(crash::CRASH_TEST_ENV).as_deref(), env(crash::ALLOW_TEST_HOOKS_ENV).as_deref(), crash::RELEASE_BUILD) {
+        Some(CrashTest::MainWindow) => {
+            glib::timeout_add_local_once(std::time::Duration::from_millis(crash::CRASH_TEST_DELAY_MS), || crash::crash_test_now());
+        }
+        // the GTK thread is inside the runtime while the app runs, see `main`
+        Some(CrashTest::Worker) => {
+            tokio::spawn(crash::crash_test_worker());
+        }
+        None => {}
+    }
+}
+
 /// One page per Aniyomi nav destination, each with its own header (title + that tab's actions).
 fn tabs() -> gtk::Stack {
     let tabs = gtk::Stack::new();
@@ -404,7 +435,7 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
         h.set_margin_end(6);
         h.set_margin_top(6);
         h.set_margin_bottom(6);
-        let badge = match n.id.as_str() { "updates" => "8", "browse" => "1", _ => "" };
+        let badge = match n.id.as_str() { "updates" => "0", "browse" => "1", _ => "" };
         let icon = gtk::Overlay::new();
         let img = gtk::Image::from_icon_name(&n.icon);
         icon.set_child(Some(&img));
@@ -415,12 +446,16 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
         if !badge.is_empty() {
             let b = gtk::Label::builder().label(badge).css_classes(["accent", "caption-heading"]).width_chars(3).xalign(1.0).build();
             h.append(&b);
+            let updates_label = (n.id == "updates").then(|| b.clone());
             expanded.push(b.upcast());
             let dot = gtk::Label::builder().use_markup(true).label("<span size=\"5pt\">●</span>").css_classes(["accent"]).halign(gtk::Align::End).valign(gtk::Align::Start).visible(false).build();
             icon.add_overlay(&dot);
+            if let Some(label) = updates_label.as_ref().filter(|_| data::is_installed()) {
+                misc::badge::bind(label, &dot, &kuro_prefs::library::LibraryPrefs::new(data::app().base.store().clone()));
+            }
             dots.push(dot.upcast());
         }
-        let tip = if badge.is_empty() { n.title.clone() } else { format!("{} ({badge})", n.title) };
+        let tip = if badge.is_empty() || n.id == "updates" { n.title.clone() } else { format!("{} ({badge})", n.title) };
         let row = gtk::ListBoxRow::builder().child(&h).tooltip_text(tip).build();
         row.set_margin_top(widgets::rail::ITEM_SPACING / 2);
         row.set_margin_bottom(widgets::rail::ITEM_SPACING / 2);

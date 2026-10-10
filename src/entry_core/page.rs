@@ -389,6 +389,7 @@ fn download_cmd(page: &mut EntryState, manga_id: i64, ids: Vec<i64>, action: Ind
         return;
     }
     match action {
+        IndicatorAction::Start => out.cmds.push(StoreCmd::Download { manga_id, chapter_ids: ids, start_now: false }),
         IndicatorAction::StartNow => out.cmds.push(StoreCmd::Download { manga_id, chapter_ids: ids, start_now: true }),
         IndicatorAction::Cancel => {
             let chapter_id = ids[0];
@@ -680,6 +681,7 @@ mod tests {
         let mut page = ready(3);
         let dl = |ids: Vec<i64>, action| UiAction::Download { ids, action };
         assert_eq!(page.act(dl(vec![1], IndicatorAction::StartNow)).cmds, vec![StoreCmd::Download { manga_id: 1, chapter_ids: vec![1], start_now: true }]);
+        assert_eq!(page.act(dl(vec![1, 2], IndicatorAction::Start)).cmds, vec![StoreCmd::Download { manga_id: 1, chapter_ids: vec![1, 2], start_now: false }]);
         assert!(page.act(dl(vec![1, 2], IndicatorAction::StartNow)).cmds.is_empty(), "E-DL-2");
         assert!(page.act(dl(vec![1, 2], IndicatorAction::Cancel)).cmds.is_empty(), "E-DL-1");
         assert_eq!(page.act(dl(vec![1, 2], IndicatorAction::Delete)).cmds, vec![StoreCmd::DeleteDownloads { manga_id: 1, chapter_ids: vec![1, 2] }]);

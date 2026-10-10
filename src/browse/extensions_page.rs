@@ -31,6 +31,9 @@ use super::trust::{TrustAnswer, TrustEffect, answer as trust_answer, trust_dialo
 use super::icons::resolve_for;
 use super::view::{icon_image, spinner_row};
 
+/// The widest the extension list gets, in pixels; it is centred in a wider window (T-41a-050).
+pub const EXT_LIST_MAX_WIDTH_PX: i32 = 960;
+
 pub type JobFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// A refresh that can fail: the error text is not shown, the page shows its fetch-failed banner (T-41a-013).
 pub type RefreshFuture = Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
@@ -175,6 +178,10 @@ impl ExtensionsPage {
 
         let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let scroller = gtk::ScrolledWindow::builder().child(&column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+        // the list is centred and never wider than the extension list maximum (T-41a-050)
+        scroller.set_propagate_natural_width(true);
+        scroller.set_max_content_width(EXT_LIST_MAX_WIDTH_PX);
+        column.set_halign(gtk::Align::Center);
         let empty_label = gtk::Label::new(None);
         let empty = gtk::Box::new(gtk::Orientation::Vertical, 12);
         empty.set_valign(gtk::Align::Center);

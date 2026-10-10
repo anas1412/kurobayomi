@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 
 use crate::connectivity::Connectivity;
@@ -44,6 +44,29 @@ impl BindingLocks {
     }
 }
 
+/// Refresh requests one tracker serves at once (T-27a-081). The rest wait for a permit.
+pub const REFRESH_PARALLELISM: usize = 4;
+
+/// One semaphore per tracker, so a refresh of many titles never sends more than [`REFRESH_PARALLELISM`] requests to
+/// one service at once. Other trackers are not held back.
+#[derive(Default)]
+pub struct RefreshLimit(Mutex<HashMap<i64, Arc<Semaphore>>>);
+
+impl RefreshLimit {
+    /// Takes one permit for a refresh request to `tracker`. The permit is released when it is dropped.
+    pub async fn acquire(&self, tracker: TrackerId) -> Option<OwnedSemaphorePermit> {
+        let sem = {
+            let mut map = self.0.lock().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(
+                map.entry(tracker.0)
+                    .or_insert_with(|| Arc::new(Semaphore::new(REFRESH_PARALLELISM))),
+            )
+        };
+        // The semaphore is never closed, so this only fails if it was closed; then the request runs unlimited.
+        sem.acquire_owned().await.ok()
+    }
+}
+
 /// Epoch milliseconds now.
 pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -64,6 +87,8 @@ pub struct TrackCtx {
     /// The shared tracking switches. Progress from reading or watching is sent only while they allow it.
     pub prefs: Arc<TrackPrefs>,
     pub locks: BindingLocks,
+    /// Caps the refresh requests sent to one tracker at once.
+    pub refresh_limit: RefreshLimit,
     /// Change notifications, sent after each committed write.
     pub events: EventBus,
 }

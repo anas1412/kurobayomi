@@ -3,6 +3,10 @@
 //! and `snapshot` draws them at the zoom and centre that the pure model in `page_zoom` gives. Loading shows the indicator
 //! and hides the page; a failed load emits `image-load-error`.
 //!
+//! Landscape auto-zoom (T-43b-018): once a wide page is fitted, 500 ms after it loads on screen or is selected, it eases to
+//! the view height over 500 ms. Pan (T-43b-019): `pan_left` and `pan_right` move one view width over 250 ms. Both are
+//! animations of the one zoom state, so a pinch, drag, wheel, key zoom or double tap stops them.
+//!
 //! Signals: `image-loaded`, `image-load-error`, `scale-changed` (f64), `view-clicked`, `long-tap` (f64, f64).
 //! The long press is the tracker in `long_press`, armed by the GTK click gesture. It is reported only while
 //! [`PageView::set_long_tap_enabled`] is on (`reader_long_tap`).
@@ -16,37 +20,46 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib, graphene};
 
+use crate::reader::crop_borders;
 use crate::reader::decode_guard::{self, Ticket};
+use kuro_core::image::background::Background;
 use crate::reader::decoded_lru::{ByteLru, DEFAULT_BUDGET_BYTES};
 use crate::reader::long_press::{DEFAULT_DOUBLE_CLICK_MS, DEFAULT_LONG_PRESS_MS, LongPressAction, LongPressTracker, SLOP_PX};
 use crate::reader::page_decode::{self, DecodeError, LoadState};
 use crate::reader::page_transform::{self, DecodeIntent};
-use crate::reader::page_zoom::{self as zoom, PageConfig, Size, ZoomState};
+use crate::reader::page_zoom::{self as zoom, PageConfig, Size, ZoomKey, ZoomState};
 use crate::reader::progress::LoadingIndicator;
 use crate::reader::tiles::{MAX_TILE_EDGE, Pyramid, Tile};
 use crate::reader::viewers::page_bytes::ByteSource;
+use crate::reader::viewers::pager::nav::Phys;
+use crate::reader::viewers::visible;
 
 /// The result of a decode: the pyramid of the page and whether a transform changed it, or why it failed.
 type Decoded = std::thread::Result<Result<(Pyramid, bool), DecodeError>>;
 
-/// Decodes `bytes`, applies the transform of `intent`, and builds the pyramid. A webtoon page is cut to `width` after
-/// the transform (never enlarged). All of it runs on the worker; the texture is made later on the GTK thread.
-fn decode_pyramid(bytes: &[u8], width: Option<u32>, intent: DecodeIntent) -> Result<(Pyramid, bool), DecodeError> {
+/// Decodes `bytes`, applies the transform of `intent`, cuts the uniform border when `crop` is on (T-43b-020), and builds
+/// the pyramid. A webtoon page is cut to `width` after that (never enlarged). A page with an edge past the D-9 limit of
+/// 16384 px is shrunk to it before the pyramid is built. All of it runs on the worker; the texture is made later on the
+/// GTK thread.
+fn decode_pyramid(bytes: &[u8], width: Option<u32>, intent: DecodeIntent, crop: bool) -> Result<(Pyramid, bool), DecodeError> {
     let page = page_decode::decode_rgba(bytes)?;
     let (page, changed) = page_transform::apply(page, intent);
+    let page = if crop { crop_borders::crop_borders(page) } else { page };
     let page = match width {
         Some(width) => page_decode::fit_to_width(page, width),
         None => page,
     };
+    let page = page_decode::limit_edge(page, page_decode::MAX_TEXTURE_EDGE);
     Ok((Pyramid::new(page, MAX_TILE_EDGE), changed))
 }
 
-/// What identifies a decode in the cache: where the bytes come from, what was done to them, and the width they were cut
-/// to (T-44a-069).
+/// What identifies a decode in the cache: where the bytes come from, what was done to them, whether the border was cut,
+/// and the width they were cut to (T-44a-069).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct DecodeKey {
     source: ByteSource,
     intent: DecodeIntent,
+    crop: bool,
     width: Option<u32>,
 }
 
@@ -75,6 +88,18 @@ fn cache_put(key: DecodeKey, cached: &Cached) {
 /// Forgets every decoded page. A new reader session starts with none.
 pub fn clear_decoded_cache() {
     DECODED.with(|c| c.borrow_mut().clear());
+}
+
+/// Paints a background pick: `Solid` as one colour, `VerticalBands` as a four-stop gradient at 0, 1/3, 2/3 and 1.
+fn paint_fill(snapshot: &gtk::Snapshot, fill: &Background, bounds: &graphene::Rect) {
+    let rgba = |c: kuro_core::image::background::Rgba| gdk::RGBA::new(f32::from(c.0) / 255.0, f32::from(c.1) / 255.0, f32::from(c.2) / 255.0, f32::from(c.3) / 255.0);
+    match fill {
+        Background::Solid(c) => snapshot.append_color(&rgba(*c), bounds),
+        Background::VerticalBands { .. } => {
+            let stops = fill.stops().map(|(offset, c)| gtk::gsk::ColorStop::new(offset, rgba(c)));
+            snapshot.append_linear_gradient(bounds, &graphene::Point::new(bounds.x(), bounds.y()), &graphene::Point::new(bounds.x(), bounds.y() + bounds.height()), &stops);
+        }
+    }
 }
 
 /// Uploads one tile as a texture. `None` for a tile outside its level.
@@ -110,9 +135,17 @@ mod imp {
         pub zoom: Cell<ZoomState>,
         /// Whether a decode is cut to the view width first (webtoon pages, B§8.4).
         pub decode_to_view: Cell<bool>,
+        /// Whether a decode cuts the uniform border off the page (`crop_borders`, `crop_borders_webtoon`).
+        pub crop_borders: Cell<bool>,
+        /// Whether a wide page zooms to the view height after it loads (`landscape_zoom`).
+        pub landscape_zoom: Cell<bool>,
         /// Set for a webtoon page: it does not zoom on its own, the strip does (T-44a-039).
         pub zoom_locked: Cell<bool>,
         pub background: RefCell<Option<gdk::RGBA>>,
+        /// The theme is Automatic: a loaded page paints what `choose_background` picks for it (T-13a-029).
+        pub auto_background: Cell<bool>,
+        /// The pick for the page on show, when `auto_background` is on.
+        pub page_fill: RefCell<Option<Background>>,
         pub long: RefCell<Option<LongPressTracker>>,
         pub long_gen: Cell<u64>,
         pub long_fired: Cell<bool>,
@@ -189,7 +222,7 @@ mod imp {
     }
 
     impl PageView {
-        fn view(&self) -> Size {
+        pub(super) fn view(&self) -> Size {
             let obj = self.obj();
             Size { w: f64::from(obj.width()), h: f64::from(obj.height()) }
         }
@@ -201,8 +234,10 @@ mod imp {
             let z = self.zoom.get();
             let bounds = graphene::Rect::new(0.0, 0.0, w as f32, h as f32);
             snapshot.push_clip(&bounds);
-            if let Some(background) = *self.background.borrow() {
-                snapshot.append_color(&background, &bounds);
+            match (self.page_fill.borrow().as_ref(), *self.background.borrow()) {
+                (Some(fill), _) => paint_fill(snapshot, fill, &bounds),
+                (None, Some(background)) => snapshot.append_color(&background, &bounds),
+                (None, None) => {}
             }
             let (_, visible) = pyramid.visible_tiles(z.scale, z.center, (w, h));
             let mut uploaded = self.tiles.borrow_mut();
@@ -297,12 +332,27 @@ mod imp {
             }
         }
 
+        /// Picks the page's own background when the theme is Automatic, from the decoded page (level 0) and the
+        /// viewport orientation; otherwise clears it so the theme colour shows.
+        pub(super) fn refresh_page_fill(&self) {
+            let fill = if self.auto_background.get() {
+                self.pyramid.borrow().as_ref().map(|pyramid| {
+                    let obj = self.obj();
+                    pyramid.choose_background(obj.width() > obj.height())
+                })
+            } else {
+                None
+            };
+            self.page_fill.replace(fill);
+        }
+
         /// Shows a decoded page: sizes the zoom to it and reports `image-loaded`, and `page-split` when a transform
         /// split it.
         pub(super) fn show_pyramid(&self, cached: Cached) {
             let (w, h) = cached.pyramid.size();
             self.src.set(Size { w: f64::from(w), h: f64::from(h) });
             self.pyramid.replace(Some(cached.pyramid));
+            self.refresh_page_fill();
             self.tiles.borrow_mut().clear();
             self.fitted.set(None);
             self.set_state(LoadState::Ready);
@@ -311,6 +361,92 @@ mod imp {
             if cached.split {
                 obj.emit_by_name::<()>("page-split", &[]);
             }
+            // a page that loads on screen is read forward (`onImageLoaded`)
+            self.schedule_landscape_zoom(true, true);
+        }
+
+        /// Schedules the landscape auto-zoom 500 ms from now (`landscapeZoom`, T-43b-018). Nothing is scheduled when the
+        /// preference is off. A user zoom or pan in the meantime bumps `anim_gen` and cancels it. `on_screen` asks for the
+        /// page to be visible then, as a page that loads off screen is not zoomed.
+        pub(super) fn schedule_landscape_zoom(&self, forward: bool, on_screen: bool) {
+            if !self.landscape_zoom.get() {
+                return;
+            }
+            self.stop_animation();
+            let generation = self.anim_gen.get();
+            let weak = self.obj().downgrade();
+            glib::timeout_add_local_once(Duration::from_millis(u64::from(zoom::LANDSCAPE_ZOOM_DELAY_MS)), move || {
+                on_page(&weak, |p| p.landscape_zoom(generation, forward, on_screen));
+            });
+        }
+
+        /// The zoom itself: when all five preconditions hold now, eases to the view height over 500 ms.
+        fn landscape_zoom(&self, generation: u64, forward: bool, on_screen: bool) {
+            if self.anim_gen.get() != generation {
+                return;
+            }
+            let (view, src, z) = (self.view(), self.src.get(), self.zoom.get());
+            let ready = self.state.get() == LoadState::Ready && self.fitted.get().is_some() && view.h > 0.0;
+            let config = self.config.get();
+            if !zoom::landscape_zoom_applies(self.landscape_zoom.get(), config.scale, src, z.scale, z.min, ready) {
+                return;
+            }
+            if on_screen && !visible::landscape_zoom_on_load(&*self.obj(), true, (src.w as i32, src.h as i32)) {
+                return;
+            }
+            let centre = zoom::landscape_zoom_centre(config.zoom_start, forward, src, z.center);
+            self.animate_view(zoom::landscape_zoom_scale(view, src), centre, zoom::LANDSCAPE_ZOOM_MS, zoom::ease_in_out);
+        }
+
+        /// How far the page can pan in each direction, in screen px, `(left, right)`.
+        pub(super) fn pan_room(&self) -> (f64, f64) {
+            if self.state.get() != LoadState::Ready || self.fitted.get().is_none() {
+                return (0.0, 0.0);
+            }
+            let z = self.zoom.get();
+            zoom::pan_remaining(z.center, self.view(), self.src.get(), z.scale)
+        }
+
+        /// Moves the page one view width toward `dir` over 250 ms, easing out (T-43b-019). Does nothing before the page is
+        /// ready. Any zoom or drag that follows stops it.
+        pub(super) fn pan(&self, dir: Phys) {
+            if self.state.get() != LoadState::Ready || self.fitted.get().is_none() {
+                return;
+            }
+            let z = self.zoom.get();
+            let sign = if dir == Phys::Right { 1.0 } else { -1.0 };
+            let centre = zoom::pan_step_centre(z.center, self.view(), z.scale, sign);
+            self.animate_view(z.scale, centre, zoom::PAN_MS, zoom::ease_out_quad);
+        }
+
+        /// Eases the zoom to `scale` and the centre to `centre` over `duration_ms` with `ease`. The centre is held inside
+        /// the page on every frame, so a pan stops at the edge. `scale-changed` is reported while the scale moves.
+        pub(super) fn animate_view(&self, scale: f64, centre: (f64, f64), duration_ms: u32, ease: fn(f64) -> f64) {
+            self.stop_animation();
+            let generation = self.anim_gen.get();
+            let (view, src) = (self.view(), self.src.get());
+            let start = self.zoom.get();
+            let to = start.clamp(scale);
+            let began = std::time::Instant::now();
+            let weak = self.obj().downgrade();
+            glib::timeout_add_local(Duration::from_millis(16), move || {
+                let Some(page) = weak.upgrade() else { return glib::ControlFlow::Break };
+                let p = page.imp();
+                if p.anim_gen.get() != generation {
+                    return glib::ControlFlow::Break;
+                }
+                let t = began.elapsed().as_secs_f64() * 1000.0 / f64::from(duration_ms.max(1));
+                let eased = ease(t);
+                let now = start.scale + (to - start.scale) * eased;
+                let at = (start.center.0 + (centre.0 - start.center.0) * eased, start.center.1 + (centre.1 - start.center.1) * eased);
+                let before = p.zoom.get().scale;
+                p.zoom.set(ZoomState { scale: now, center: zoom::clamp_center(at, view, src, now), ..p.zoom.get() });
+                page.queue_draw();
+                if (now - before).abs() > 1e-9 {
+                    page.emit_by_name::<()>("scale-changed", &[&now]);
+                }
+                if t >= 1.0 { glib::ControlFlow::Break } else { glib::ControlFlow::Continue }
+            });
         }
 
         fn install_controllers(&self) {
@@ -540,7 +676,7 @@ mod imp {
         }
 
         /// Sets the zoom to `target` (clamped to the page's range) while the source point under `focus` stays put.
-        fn set_zoom(&self, target: f64, focus: (f64, f64)) {
+        pub(super) fn set_zoom(&self, target: f64, focus: (f64, f64)) {
             self.stop_animation();
             let view = self.view();
             let src = self.src.get();
@@ -618,7 +754,7 @@ impl PageView {
 
     fn cache_key(&self, source: ByteSource, intent: DecodeIntent) -> DecodeKey {
         let width = self.imp().decode_to_view.get().then(|| self.width().max(0) as u32).filter(|w| *w > 0);
-        DecodeKey { source, intent, width }
+        DecodeKey { source, intent, crop: self.imp().crop_borders.get(), width }
     }
 
     fn load(&self, bytes: Vec<u8>, config: PageConfig, intent: DecodeIntent, key: Option<DecodeKey>) {
@@ -632,9 +768,10 @@ impl PageView {
         imp.set_state(LoadState::Loading);
         let ticket = Ticket::now(generation);
         let width = key.as_ref().map_or_else(|| imp.decode_to_view.get().then(|| self.width().max(0) as u32).filter(|w| *w > 0), |k| k.width);
+        let crop = imp.crop_borders.get();
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
-            let decoded = gio::spawn_blocking(move || decode_pyramid(&bytes, width, intent)).await;
+            let decoded = gio::spawn_blocking(move || decode_pyramid(&bytes, width, intent, crop)).await;
             imp::on_page(&weak, |p| p.finish_load(ticket, decoded, key));
         });
     }
@@ -673,6 +810,53 @@ impl PageView {
         self.imp().decode_to_view.set(enabled);
     }
 
+    /// Cuts the uniform border off pages decoded from now on (`crop_borders`, `crop_borders_webtoon`). A shown page is
+    /// decoded again by the caller.
+    pub fn set_crop_borders(&self, on: bool) {
+        self.imp().crop_borders.set(on);
+    }
+
+    /// Whether a wide fitted page zooms to the view height after it loads (`landscape_zoom`).
+    pub fn set_landscape_zoom(&self, on: bool) {
+        self.imp().landscape_zoom.set(on);
+    }
+
+    /// The page became the selected one: the landscape zoom runs 500 ms later (`onPageSelected`). `forward` is the
+    /// direction of the selection, which decides the end of the page the zoom starts at.
+    pub fn on_page_selected(&self, forward: bool) {
+        self.imp().schedule_landscape_zoom(forward, false);
+    }
+
+    /// Whether the page has more than 1 px left to pan to the left (`canPanLeft`).
+    pub fn can_pan_left(&self) -> bool {
+        zoom::can_pan(self.imp().pan_room().0)
+    }
+
+    /// Whether the page has more than 1 px left to pan to the right (`canPanRight`).
+    pub fn can_pan_right(&self) -> bool {
+        zoom::can_pan(self.imp().pan_room().1)
+    }
+
+    /// Pans one view width to the left over 250 ms. Does nothing before the page is ready.
+    pub fn pan_left(&self) {
+        self.imp().pan(Phys::Left);
+    }
+
+    /// Pans one view width to the right over 250 ms. Does nothing before the page is ready.
+    pub fn pan_right(&self) {
+        self.imp().pan(Phys::Right);
+    }
+
+    /// Zooms for a zoom key (T-43b-058), about the view centre. A webtoon page does not zoom: the strip does.
+    pub fn zoom_by_key(&self, key: ZoomKey) {
+        let imp = self.imp();
+        if imp.state.get() != LoadState::Ready || imp.fitted.get().is_none() || imp.zoom_locked.get() {
+            return;
+        }
+        let (z, view) = (imp.zoom.get(), imp.view());
+        imp.set_zoom(zoom::key_zoom_target(z.scale, z.min, key), (view.w / 2.0, view.h / 2.0));
+    }
+
     /// Whether `long-tap` reports (`reader_long_tap`).
     pub fn long_tap_enabled(&self) -> bool {
         self.imp().long_tap_enabled.get()
@@ -689,6 +873,13 @@ impl PageView {
     /// The page background, drawn only once a page has loaded.
     pub fn set_page_background(&self, colour: Option<gdk::RGBA>) {
         self.imp().background.replace(colour);
+        self.queue_draw();
+    }
+
+    /// Whether the page paints the background picked from its own pixels (reader theme Automatic).
+    pub fn set_auto_background(&self, on: bool) {
+        self.imp().auto_background.set(on);
+        self.imp().refresh_page_fill();
         self.queue_draw();
     }
 
@@ -913,7 +1104,7 @@ mod tests {
             let view = PageView::new();
             view.set_image_from(file("pinned.png"), png(8, 8), PageConfig::default(), DecodeIntent::NONE);
             settle(&view);
-            let key = DecodeKey { source: file("pinned.png"), intent: DecodeIntent::NONE, width: None };
+            let key = DecodeKey { source: file("pinned.png"), intent: DecodeIntent::NONE, crop: false, width: None };
             let cached = cache_get(&key).expect("cached");
             assert_eq!(Rc::strong_count(&cached.pyramid), 3, "the cache, the view and this handle");
             view.recycle();
@@ -955,6 +1146,169 @@ mod tests {
             page.set_image_from(file("rotate.png"), wide_png(), PageConfig::default(), rotate);
             settle(&page);
             assert_eq!(page.imp().src.get(), Size { w: 200.0, h: 400.0 });
+        });
+    }
+
+    /// A PNG of `width` by `height` with a white border of `margin` px around red ink.
+    fn bordered_png(width: u32, height: u32, margin: u32) -> Vec<u8> {
+        let img = image::RgbaImage::from_fn(width, height, |x, y| {
+            let inside = x >= margin && x < width - margin && y >= margin && y < height - margin;
+            if inside { image::Rgba([200, 30, 30, 255]) } else { image::Rgba([255, 255, 255, 255]) }
+        });
+        let mut out = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(img).write_to(&mut out, image::ImageFormat::Png).expect("encode");
+        out.into_inner()
+    }
+
+    #[test]
+    fn t020_the_decode_cuts_a_twenty_pixel_white_border_only_when_crop_is_on() {
+        let bytes = bordered_png(120, 100, 20);
+        let (uncropped, _) = decode_pyramid(&bytes, None, DecodeIntent::NONE, false).expect("decode");
+        assert_eq!(uncropped.size(), (120, 100));
+        let (cropped, _) = decode_pyramid(&bytes, None, DecodeIntent::NONE, true).expect("decode");
+        assert_eq!(cropped.size(), (80, 60));
+        let (plain, _) = decode_pyramid(&png(120, 100), None, DecodeIntent::NONE, true).expect("decode");
+        assert_eq!(plain.size(), (120, 100), "a page with no uniform border is unchanged");
+        let (webtoon, _) = decode_pyramid(&bytes, Some(40), DecodeIntent::NONE, true).expect("decode");
+        assert_eq!(webtoon.size(), (40, 30), "the border is cut first, then the page is cut to the view width");
+    }
+
+    #[test]
+    fn t020_a_page_cropped_and_one_not_are_separate_cache_entries() {
+        crate::testing::with_display(|| {
+            let (source, config) = (file("crop.png"), PageConfig::default());
+            let page = PageView::new();
+            page.set_crop_borders(true);
+            page.set_image_from(source.clone(), bordered_png(120, 100, 20), config, DecodeIntent::NONE);
+            settle(&page);
+            assert_eq!(page.imp().src.get(), Size { w: 80.0, h: 60.0 });
+            let other = PageView::new();
+            assert!(!other.show_cached(source.clone(), config, DecodeIntent::NONE), "crop is off here, so the cropped decode is not used");
+            other.set_crop_borders(true);
+            assert!(other.show_cached(source, config, DecodeIntent::NONE));
+        });
+    }
+
+    /// Runs the main context for `ms` milliseconds.
+    fn run_for(ms: u64) {
+        let ctx = glib::MainContext::default();
+        let end = std::time::Instant::now() + Duration::from_millis(ms);
+        while std::time::Instant::now() < end {
+            while ctx.iteration(false) {}
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// A shown 800 by 600 window with a 2000 by 1000 page loaded in it, fitted (scale 0.4).
+    fn wide_page_in_window(landscape: bool) -> (PageView, gtk::Window) {
+        let page = PageView::new();
+        page.set_landscape_zoom(landscape);
+        let window = gtk::Window::new();
+        window.set_default_size(800, 600);
+        window.set_child(Some(&page));
+        window.present();
+        run_for(300);
+        page.set_image(png(2000, 1000), PageConfig::default());
+        settle(&page);
+        (page, window)
+    }
+
+    #[test]
+    fn t018_a_wide_fitted_page_zooms_to_the_view_height_after_the_delay() {
+        crate::testing::with_display(|| {
+            let (page, window) = wide_page_in_window(true);
+            run_for(200);
+            assert!((page.scale() - 0.4).abs() < 0.01, "still at the fit before the 500 ms delay: {}", page.scale());
+            run_for(1400);
+            assert!((page.scale() - 0.6).abs() < 0.01, "the 600 px view height over the 1000 px page: {}", page.scale());
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn t018_the_zoom_does_not_run_with_the_preference_off_or_after_a_user_zoom() {
+        crate::testing::with_display(|| {
+            let (off, window) = wide_page_in_window(false);
+            run_for(1600);
+            assert!((off.scale() - 0.4).abs() < 0.01, "preference off: {}", off.scale());
+            window.destroy();
+            let (user, window) = wide_page_in_window(true);
+            run_for(200);
+            user.zoom_by_key(ZoomKey::In);
+            let zoomed = user.scale();
+            run_for(1600);
+            assert!((user.scale() - zoomed).abs() < 1e-9, "a user zoom cancels the pending landscape zoom: {}", user.scale());
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn t019_a_zoomed_page_pans_one_view_width_and_stops_at_the_edge() {
+        crate::testing::with_display(|| {
+            let (page, window) = wide_page_in_window(false);
+            run_for(300);
+            assert!(!page.can_pan_left() && !page.can_pan_right(), "a fitted page has nothing to pan");
+            for _ in 0..3 {
+                page.zoom_by_key(ZoomKey::In);
+            }
+            assert!(page.can_pan_left() && page.can_pan_right(), "zoomed in on its centre, both sides have room");
+            let before = page.imp().zoom.get();
+            page.pan_right();
+            run_for(150);
+            let mid = page.imp().zoom.get().center.0;
+            assert!(mid > before.center.0 && mid < 1900.0, "moving: {mid}");
+            run_for(400);
+            // one view width is 800 / 0.78125 = 1024 source px, which is past the right edge: the pan stops there
+            let edge = 2000.0 - 800.0 / before.scale / 2.0;
+            assert!((page.imp().zoom.get().center.0 - edge).abs() < 1.0, "at the right edge: {}", page.imp().zoom.get().center.0);
+            assert!(!page.can_pan_right() && page.can_pan_left());
+            page.pan_left();
+            run_for(500);
+            assert!((page.imp().zoom.get().center.0 - (edge - 1024.0).max(800.0 / before.scale / 2.0)).abs() < 1.0);
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn t019_a_pan_is_interruptible_and_does_nothing_before_the_page_is_ready() {
+        crate::testing::with_display(|| {
+            let idle = PageView::new();
+            idle.pan_left();
+            idle.pan_right();
+            assert!(!idle.can_pan_left() && !idle.can_pan_right());
+            let (page, window) = wide_page_in_window(false);
+            run_for(300);
+            for _ in 0..3 {
+                page.zoom_by_key(ZoomKey::In);
+            }
+            page.pan_right();
+            run_for(80);
+            page.imp().stop_animation();
+            let held = page.imp().zoom.get().center.0;
+            run_for(400);
+            assert!((page.imp().zoom.get().center.0 - held).abs() < 1e-9, "a stopped pan stays where it was stopped");
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn t058_zoom_keys_step_the_scale_and_reset_returns_to_the_fit() {
+        crate::testing::with_display(|| {
+            let (page, window) = wide_page_in_window(false);
+            run_for(300);
+            let fit = page.scale();
+            page.zoom_by_key(ZoomKey::In);
+            assert!((page.scale() - fit * zoom::KEY_ZOOM_STEP).abs() < 1e-9);
+            page.zoom_by_key(ZoomKey::Out);
+            page.zoom_by_key(ZoomKey::Out);
+            assert!((page.scale() - fit).abs() < 1e-9, "never under the fit");
+            page.zoom_by_key(ZoomKey::In);
+            page.zoom_by_key(ZoomKey::Reset);
+            assert!((page.scale() - fit).abs() < 1e-9);
+            page.set_zoomable(false);
+            page.zoom_by_key(ZoomKey::In);
+            assert!((page.scale() - fit).abs() < 1e-9, "a webtoon page leaves zoom to the strip");
+            window.destroy();
         });
     }
 

@@ -144,6 +144,13 @@ pub fn indicator_actions(anime: bool, state: DownloadState, sheet: bool) -> Vec<
     actions
 }
 
+/// What a long press on the download indicator does (`EpisodeDownloadIndicator`: the long click of a unit that is not
+/// downloaded shows the qualities). Only an anime unit with an options sheet registered reacts; a long press elsewhere on
+/// the row still selects it.
+pub fn indicator_long_press(anime: bool, state: DownloadState, sheet: bool) -> Option<DownloadAction> {
+    (anime && sheet && state == DownloadState::NotDownloaded).then_some(DownloadAction::ShowQualities)
+}
+
 /// The label key of an indicator action in the state it is offered for.
 pub fn row_action_label(action: DownloadAction, state: DownloadState) -> MsgKey {
     match (action, state) {
@@ -287,5 +294,14 @@ mod tests {
         assert_eq!(quality_target(&[one]), Some(one));
         assert_eq!(quality_target(&[one, unit(2, 11, DownloadState::Queue)]), None);
         assert_eq!(quality_target(&[]), None);
+    }
+
+    #[test]
+    fn a_long_press_on_a_not_downloaded_anime_indicator_shows_the_qualities() {
+        assert_eq!(indicator_long_press(true, DownloadState::NotDownloaded, true), Some(DownloadAction::ShowQualities));
+        assert_eq!(indicator_long_press(true, DownloadState::NotDownloaded, false), None, "no sheet registered");
+        assert_eq!(indicator_long_press(false, DownloadState::NotDownloaded, true), None, "manga has no qualities");
+        assert_eq!(indicator_long_press(true, DownloadState::Downloaded, true), None);
+        assert_eq!(indicator_long_press(true, DownloadState::Queue, true), None);
     }
 }

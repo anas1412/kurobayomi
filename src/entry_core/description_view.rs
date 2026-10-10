@@ -208,7 +208,7 @@ mod tests {
             let labelled = |text: &str| buttons.iter().find(|b| b.label().as_deref() == Some(text)).cloned();
             labelled("Search").expect("Search").emit_clicked();
             labelled("Copy to clipboard").expect("Copy to clipboard").emit_clicked();
-            assert_eq!(*searched.borrow(), vec![SearchRequest { query: "Action".into(), global: false }]);
+            assert_eq!(*searched.borrow(), vec![SearchRequest { query: "Action".into(), global: false, genre: true }]);
             assert_eq!(*copied.borrow(), vec!["Action".to_owned()]);
             let plain = build(&text, expansion, None);
             assert!(descendants(plain.upcast_ref()).iter().all(|w| w.downcast_ref::<gtk::FlowBox>().is_none()), "no chips, no row");

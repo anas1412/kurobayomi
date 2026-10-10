@@ -237,6 +237,22 @@ pub const MAL_ID: &str = "query ($id: Int) {
   }
 }";
 
+/// The next airing episode of an AniList media. Sent without a token (AniChart lookup, E-45).
+pub const NEXT_AIRING: &str = "query ($id: Int) {
+  Media(id: $id) {
+    nextAiringEpisode {
+      episode
+      airingAt
+    }
+  }
+}";
+
+/// The AniList id of a MyAnimeList id (AniChart lookup for a MAL track, T-29a-032). The MAL id is an `i64`, so it is
+/// written into the text directly.
+pub fn anilist_id_from_mal(mal_id: i64) -> String {
+    format!("query {{ Media(idMal:{mal_id},type: ANIME) {{ id }} }}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +300,21 @@ mod tests {
     fn t_28a_034_mal_lookup_asks_for_id_mal_only() {
         assert!(MAL_ID.contains("Media(id: $id)"));
         assert!(MAL_ID.contains("idMal"));
+    }
+
+    #[test]
+    fn t_28a_035_next_airing_asks_for_episode_and_airing_time() {
+        assert!(NEXT_AIRING.contains("Media(id: $id)"));
+        assert!(NEXT_AIRING.contains("nextAiringEpisode {"));
+        assert!(NEXT_AIRING.contains("episode"));
+        assert!(NEXT_AIRING.contains("airingAt"));
+    }
+
+    #[test]
+    fn t_29a_032_anilist_id_query_names_the_mal_id_and_type() {
+        assert_eq!(
+            anilist_id_from_mal(16498),
+            "query { Media(idMal:16498,type: ANIME) { id } }"
+        );
     }
 }

@@ -1,59 +1,15 @@
 //! File names for saved images: the Android-compatible sanitiser, byte-limited titles and the reader and player
 //! name rules (area:34 behavior section 22, design section 8.2).
 //!
-//! The base sanitiser is the same port `kuro-downloads` uses for its folder names. `kuro-images` cannot depend on
-//! that crate (it depends on this one), so the rule is kept here as well.
+//! The base sanitiser is the shared `kuro_core::text::build_valid_filename`.
 
 /// The title budget in UTF-8 bytes for a saved page or frame name (behavior section 22.3).
 pub const MAX_TITLE_BYTES: usize = 250;
-/// Kotlin's `take(240)` counts UTF-16 units (behavior section 22.1).
-const MAX_UTF16_UNITS: usize = 240;
 
-/// Device names that Windows refuses as file names (design section 8.2, addendum rule 5).
-const RESERVED: [&str; 22] = [
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-];
-
-/// `DiskUtil.buildValidFilename` (behavior section 22.1), then the reserved-name rule. Trims leading and trailing
-/// dots and spaces, maps forbidden and control characters to `_`, returns `(invalid)` for an empty result, and
-/// keeps at most 240 UTF-16 units.
+/// `DiskUtil.buildValidFilename` (behavior section 22.1) with the NTFS rules of the addendum: the shared
+/// implementation in `kuro-core`.
 pub fn build_valid_filename(orig: &str) -> String {
-    let trimmed = orig.trim_matches(|c| c == '.' || c == ' ');
-    if trimmed.is_empty() {
-        return "(invalid)".to_owned();
-    }
-    let mapped: String = trimmed
-        .chars()
-        .map(|c| if is_forbidden(c) { '_' } else { c })
-        .collect();
-    reserve_device_name(take_utf16(&mapped, MAX_UTF16_UNITS).to_owned())
-}
-
-fn is_forbidden(c: char) -> bool {
-    c <= '\u{1f}' || c == '\u{7f}' || "\"*/:<>?\\|".contains(c)
-}
-
-fn take_utf16(s: &str, units: usize) -> &str {
-    let mut used = 0;
-    for (i, c) in s.char_indices() {
-        used += c.len_utf16();
-        if used > units {
-            return &s[..i];
-        }
-    }
-    s
-}
-
-/// `CON.txt` becomes `CON_.txt`. The stem is compared without its extension and without trailing spaces.
-fn reserve_device_name(name: String) -> String {
-    let stem_end = name.find('.').unwrap_or(name.len());
-    let stem = name[..stem_end].trim_end_matches(' ');
-    if RESERVED.iter().any(|r| stem.eq_ignore_ascii_case(r)) {
-        format!("{stem}_{}", &name[stem_end..])
-    } else {
-        name
-    }
+    kuro_core::text::build_valid_filename(orig, true)
 }
 
 /// The first `n` UTF-8 bytes of `s`, cut on a character boundary (behavior section 22.2). A character cut in the
@@ -119,6 +75,14 @@ mod tests {
         let out = build_valid_filename(&emoji);
         assert_eq!(out.encode_utf16().count(), 240);
         assert_eq!(out, "\u{1F600}".repeat(120));
+    }
+
+    #[test]
+    fn a_cut_that_ends_on_a_dot_or_space_is_trimmed_again() {
+        let name = format!("{} b", "a".repeat(239));
+        assert_eq!(build_valid_filename(&name), "a".repeat(239));
+        let dots = format!("{}.x", "a".repeat(239));
+        assert_eq!(build_valid_filename(&dots), "a".repeat(239));
     }
 
     #[test]

@@ -17,6 +17,8 @@ use kuro_i18n::{MsgKey, tr};
 use tokio::sync::watch;
 
 use super::directory::SourceDirectory;
+use kuro_data::anime::AnimeRepo;
+use kuro_domain::kind::EntryKind;
 use super::global_search::{Candidate, GlobalSearch, MigrateStart, deep_link_fallback, migrate_start, row_text_route};
 use super::pages::{GlobalSearchNav, SearchChips, SourceFilter, global_search as search_page_widget};
 use super::pending::{self, SearchIntent};
@@ -90,6 +92,14 @@ pub fn source_route(source_id: i64, typed: &str, migrating: bool) -> BrowseRoute
     }
 }
 
+/// The arrow of a source row of either catalogue: an anime row opens the anime browse page on the same listing.
+pub fn source_route_for(kind: BrowseKind, source_id: i64, typed: &str, migrating: bool) -> BrowseRoute {
+    match (kind, source_route(source_id, typed, migrating)) {
+        (BrowseKind::Anime, BrowseRoute::BrowseSource { source_id, query, .. }) => BrowseRoute::AnimeBrowseSource { source_id, query },
+        (_, route) => route,
+    }
+}
+
 /// A deep link that found nothing replaces its page with global search for the query (GS-EC-16).
 pub fn replace_with_global_search(query: &str) {
     crate::ui::pop();
@@ -98,10 +108,15 @@ pub fn replace_with_global_search(query: &str) {
 
 /// What a search page needs of the app.
 pub struct SearchEnv {
+    /// Which catalogue the page searches: it reads that kind's pinned and hidden sources and routes its rows.
+    pub kind: BrowseKind,
     pub prefs: Rc<BrowsePrefs>,
     pub directory: Option<Arc<dyn SourceDirectory>>,
     /// A card: the manga's page (library id).
     pub open_entry: Rc<dyn Fn(i64)>,
+    /// A card of a migrate search: the anime page asks what to migrate (the dialog). `None` opens the entry, as a long
+    /// press does.
+    pub pick_entry: Option<Rc<dyn Fn(i64)>>,
     /// The single-result auto-open: the manga's page replaces the search.
     pub replace_with_entry: Rc<dyn Fn(i64)>,
     pub open_route: Rc<dyn Fn(BrowseRoute)>,
@@ -122,13 +137,11 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
     let sources = &env.prefs.sources;
     let only_has_results = sources.global_search_filter_state.get();
     let directory = env.directory.clone();
-    let engine = GlobalSearch::new(
-        candidates(directory.as_deref(), &sources.pinned_manga_sources.get()),
-        sources.enabled_languages.get(),
-        hidden_ids(&sources.disabled_manga_sources.get()),
-        *origin,
-        only_has_results,
-    );
+    let (pinned, hidden) = match env.kind {
+        BrowseKind::Manga => (sources.pinned_manga_sources.get(), sources.disabled_manga_sources.get()),
+        BrowseKind::Anime => (sources.pinned_anime_sources.get(), sources.disabled_anime_sources.get()),
+    };
+    let engine = GlobalSearch::new(candidates(directory.as_deref(), &pinned), sources.enabled_languages.get(), hidden_ids(&hidden), *origin, only_has_results);
     // the page and the runner reach each other: the page calls the runner through a weak slot
     let slot: Rc<RefCell<Weak<SearchRunner>>> = Rc::default();
     let with_runner = |action: fn(&Rc<SearchRunner>, &str)| {
@@ -142,10 +155,11 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
     };
     let submit = with_runner(|runner, text| runner.submit(text));
     let (typed_slot, open_route, prefs) = (Rc::clone(&slot), Rc::clone(&env.open_route), Rc::clone(&env.prefs));
-    let (open_entry, preview) = (Rc::clone(&env.open_entry), Rc::clone(&env.open_entry));
+    let (open_entry, preview) = (env.pick_entry.clone().unwrap_or_else(|| Rc::clone(&env.open_entry)), Rc::clone(&env.open_entry));
+    let kind = env.kind;
     let nav = GlobalSearchNav {
         search: Rc::new(submit),
-        open_source: Rc::new(move |id, typed| open_route(source_route(id, typed, migrating))),
+        open_source: Rc::new(move |id, typed| open_route(source_route_for(kind, id, typed, migrating))),
         open_entry: Rc::new(move |_, item| open_entry(item.id)),
         // there is no entry preview in the app: a long press opens the entry, as a tap does
         preview: Rc::new(move |_, item| preview(item.id)),
@@ -168,12 +182,19 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
     };
     let (_never_sent, ready) = watch::channel(true);
     let page = search_page_widget(nav, ready);
+    if env.kind == BrowseKind::Anime {
+        page.set_hint(super::texts::GLOBAL_SEARCH_EMPTY_HINT);
+    }
     let hooks = RunnerHooks { changed: Rc::new(page.updater()), open_entry: Rc::clone(&env.replace_with_entry) };
     let loaders: Loaders = match directory {
         Some(directory) => Arc::new(move |id| directory.loader(id)),
         None => Arc::new(|_| None),
     };
     let runner = SearchRunner::new(engine, loaders, hooks);
+    // a pasted link resolves through the sources' `uri_type` before any catalogue search (T-20a-031)
+    if let Some(links) = env.directory.clone() {
+        runner.set_link_resolver(Arc::new(move |uri| links.resolve_link(uri)));
+    }
     *slot.borrow_mut() = Rc::downgrade(&runner);
     runner.attach(page.widget());
     if query.trim().is_empty() {
@@ -184,59 +205,109 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
     page.widget().clone()
 }
 
-/// The app side of a search page.
-fn production_env() -> SearchEnv {
+/// The app side of a search page of `kind`. `migrate_from` is the anime entry a migrate search started from: a card of it
+/// opens the migrate dialog (T-41a-041) instead of the entry.
+fn production_env(kind: BrowseKind, migrate_from: Option<i64>) -> SearchEnv {
     let prefs = Rc::new(BrowsePrefs::new(crate::data::app().base.store().clone()));
-    SearchEnv {
-        prefs,
-        directory: super::directory::current(),
-        open_entry: Rc::new(crate::entry_core::route::open),
-        replace_with_entry: Rc::new(|id| {
-            crate::ui::pop();
-            crate::entry_core::route::open(id);
-        }),
-        open_route: Rc::new(pending::open),
+    match kind {
+        BrowseKind::Manga => SearchEnv {
+            kind,
+            prefs,
+            directory: super::directory::current(),
+            open_entry: Rc::new(crate::entry_core::route::open),
+            pick_entry: None,
+            replace_with_entry: Rc::new(|id| {
+                crate::ui::pop();
+                crate::entry_core::route::open(id);
+            }),
+            open_route: Rc::new(pending::open),
+        },
+        BrowseKind::Anime => {
+            let repo = AnimeRepo::new(crate::data::app().db(EntryKind::Anime));
+            SearchEnv {
+                kind,
+                prefs,
+                directory: Some(Arc::new(super::anime::directory::AnimeDirectory::current(repo.clone()))),
+                open_entry: Rc::new(crate::entry_core::anime::route::open),
+                pick_entry: migrate_from.map(|old| anime_migrate_dialog(repo, old)),
+                replace_with_entry: Rc::new(|id| {
+                    crate::ui::pop();
+                    crate::entry_core::anime::route::open(id);
+                }),
+                open_route: Rc::new(pending::open),
+            }
+        }
     }
 }
 
-/// Whether the visible page is the manga page of an entry, which is where a parked title or genre search comes from.
-fn caller_is_manga_entry() -> bool {
-    super::browse_screen::visible_page() == "screen:manga_entry_details"
+/// A card of an anime migrate search: the dialog of what to include for moving `old` to the card's anime. Show anime and
+/// Show seasons open the card's page, where a seasons title lists its seasons. Copy and Migrate need the migration
+/// engine, which the app does not have yet, so they say that the operation failed instead of doing nothing.
+fn anime_migrate_dialog(repo: AnimeRepo, old: i64) -> Rc<dyn Fn(i64)> {
+    use super::anime::migrate_dialog::{MigrateHandlers, show};
+    let slot = super::dialogs::DialogSlot::new();
+    Rc::new(move |new: i64| {
+        let (Ok(old_anime), Ok(new_anime)) = (repo.by_id(old), repo.by_id(new)) else {
+            tracing::error!(old, new, "an anime of the migrate dialog could not be read");
+            crate::toast::notify(tr(MsgKey::internal_error));
+            return;
+        };
+        let handlers = MigrateHandlers {
+            show_anime: Rc::new(move || crate::entry_core::anime::route::open(new)),
+            show_seasons: Rc::new(move || crate::entry_core::anime::route::open(new)),
+            run: Rc::new(|run| {
+                tracing::warn!(?run, "no anime migration engine is installed, nothing was migrated");
+                crate::toast::notify(tr(MsgKey::internal_error));
+            }),
+        };
+        // the library stores the fetch type as the database's enum; the dialog's rules take the source API's
+        let fetch = |stored: kuro_db::schema_anime::FetchType| kuro_source::anime::model::FetchType::from(stored as i64);
+        show(&slot, &crate::ui::window(), fetch(old_anime.fetch_type), fetch(new_anime.fetch_type), handlers);
+    })
+}
+
+/// The anime entry a migrate request names: its source and title. An anime that is not in the library is `None`.
+fn migrate_anime(entry_id: i64) -> Option<(i64, String)> {
+    AnimeRepo::new(crate::data::app().db(EntryKind::Anime)).by_id(entry_id).ok().map(|anime| (anime.source, anime.title))
 }
 
 /// The manga a migrate request names: its source and title. A manga that is not in the library is `None`.
 fn migrate_manga(entry_id: i64) -> Option<(i64, String)> {
     use kuro_data::manga::MangaRepo;
-    use kuro_domain::kind::EntryKind;
     MangaRepo::new(crate::data::app().db(EntryKind::Manga)).by_id(entry_id).ok().map(|manga| (manga.source, manga.title))
 }
 
 /// The body of `global_search` and `migrate_search`, as `screens::body` asks for it. `None` leaves the screen to its sample
-/// page: no app data, another kind of search, or nothing was parked for this screen.
+/// page: no app data, or nothing was parked for this screen. The catalogue is the migrate request's, the parked route's, or
+/// the entry page's that asked for a title or genre search; an intent is a manga one.
 pub fn body(migrating: bool) -> Option<Built> {
     if !crate::data::is_installed() {
         return None;
     }
     let screen = if migrating { "migrate_search" } else { "global_search" };
-    let start = if migrating {
-        let request = crate::entry_core::handoff::take_migrate().filter(|request| !request.anime)?;
-        start_for(true, migrate_manga(request.entry_id), None, None, None)
+    let (kind, migrate_from, start) = if migrating {
+        let request = crate::entry_core::handoff::take_migrate()?;
+        let (kind, found) = if request.anime { (BrowseKind::Anime, migrate_anime(request.entry_id)) } else { (BrowseKind::Manga, migrate_manga(request.entry_id)) };
+        (kind, request.anime.then_some(request.entry_id), start_for(true, found, None, None, None))
     } else {
         let intent = pending::take_intent();
         let route = pending::take_for(screen);
-        if matches!(route, Some(BrowseRoute::GlobalSearch { kind: BrowseKind::Anime, .. })) {
-            return None;
-        }
-        let entry_text = (intent.is_none() && route.is_none() && caller_is_manga_entry())
+        let caller = super::browse_screen::search_caller();
+        let entry_text = (intent.is_none() && route.is_none() && caller.is_some())
             .then(crate::entry_core::handoff::take_search)
             .flatten()
             .map(|request| request.query);
         if intent.is_none() && route.is_none() && entry_text.is_none() {
             return None;
         }
-        start_for(false, None, intent, route, entry_text)
+        let kind = match (&intent, &route) {
+            (Some(_), _) => BrowseKind::Manga,
+            (None, Some(BrowseRoute::GlobalSearch { kind, .. })) => *kind,
+            _ => caller.unwrap_or(BrowseKind::Manga),
+        };
+        (kind, None, start_for(false, None, intent, route, entry_text))
     };
-    Some(Built { content: search_widget(&production_env(), &start, migrating), end: Vec::new() })
+    Some(Built { content: search_widget(&production_env(kind, migrate_from), &start, migrating), end: Vec::new() })
 }
 
 #[cfg(test)]
@@ -338,8 +409,10 @@ pub(crate) mod tests {
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let (entry_log, replace_log, route_log) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
         let env = SearchEnv {
+            kind: BrowseKind::Manga,
             prefs,
             directory: Some(directory),
+            pick_entry: None,
             open_entry: Rc::new(move |id| entry_log.borrow_mut().push(format!("entry {id}"))),
             replace_with_entry: Rc::new(move |id| replace_log.borrow_mut().push(format!("replace {id}"))),
             open_route: Rc::new(move |route| route_log.borrow_mut().push(format!("route {route:?}"))),
@@ -467,7 +540,47 @@ pub(crate) mod tests {
         assert!(rig.asked.lock().expect("lock").is_empty());
     }
 
+    fn an_anime_page_reads_the_anime_pins_hints_what_to_search_and_sends_its_rows_to_the_anime_page() {
+        let mut rig = rig();
+        rig.env.kind = BrowseKind::Anime;
+        // the manga pins of the rig do not count for anime: only source 2 is pinned there
+        rig.env.prefs.sources.pinned_anime_sources.set(BTreeSet::from(["2".to_owned()])).expect("pins");
+        let page = search_widget(&rig.env, &Start::Search { query: "one".into(), extension: None, origin: None }, false);
+        assert!(pump_until(|| labels(&page).iter().any(|t| t == "Found 2")), "the pinned anime source answers: {:?}", labels(&page));
+        assert_eq!(rig.asked.lock().expect("lock").len(), 1, "only the anime-pinned source is asked, not the manga-pinned ones");
+        let search = {
+            fn find(widget: &gtk::Widget) -> Option<gtk::SearchEntry> {
+                if let Some(entry) = widget.downcast_ref::<gtk::SearchEntry>() {
+                    return Some(entry.clone());
+                }
+                let mut child = widget.first_child();
+                while let Some(next) = child {
+                    if let Some(found) = find(&next) {
+                        return Some(found);
+                    }
+                    child = next.next_sibling();
+                }
+                None
+            }
+            find(&page).expect("search entry")
+        };
+        assert_eq!(search.placeholder_text().as_deref(), Some(crate::browse::texts::GLOBAL_SEARCH_EMPTY_HINT), "T-41a-027: the anime hint");
+        assert_eq!(
+            source_route_for(BrowseKind::Anime, 2, "typed", false),
+            BrowseRoute::AnimeBrowseSource { source_id: 2, query: BrowseQuery::Search("typed".into()) },
+            "an anime row opens the anime page on the typed text"
+        );
+    }
+
+    #[test]
+    fn the_row_route_of_each_catalogue_is_its_own_browse_page() {
+        assert_eq!(source_route_for(BrowseKind::Anime, 3, " ", false), BrowseRoute::AnimeBrowseSource { source_id: 3, query: BrowseQuery::Popular });
+        assert_eq!(source_route_for(BrowseKind::Manga, 3, " ", false), BrowseRoute::BrowseSource { source_id: 3, query: BrowseQuery::Popular, migrating: false });
+        assert!(matches!(source_route_for(BrowseKind::Manga, 3, "x", true), BrowseRoute::BrowseSource { migrating: true, .. }));
+    }
+
     pub(crate) fn smoke() {
+        an_anime_page_reads_the_anime_pins_hints_what_to_search_and_sends_its_rows_to_the_anime_page();
         a_page_with_a_query_searches_the_pinned_sources_and_draws_their_rows();
         the_has_results_toggle_is_stored_and_read_again_by_the_next_page();
         a_source_arrow_opens_its_listing_with_the_typed_text();

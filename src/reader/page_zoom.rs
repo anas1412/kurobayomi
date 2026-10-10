@@ -192,6 +192,85 @@ pub fn anchor_center(start: ZoomStart, src: Size) -> (f64, f64) {
     }
 }
 
+/// Landscape auto-zoom starts this long after the page is selected (`postDelayed(500)`).
+pub const LANDSCAPE_ZOOM_DELAY_MS: u32 = 500;
+/// Length of the landscape auto-zoom and of the landscape zoom's easing (`withDuration(500)`, EASE_IN_OUT_QUAD).
+pub const LANDSCAPE_ZOOM_MS: u32 = 500;
+/// Length of one pan step (`withDuration(250)`, EASE_OUT_QUAD). Not scaled by the system animation factor.
+pub const PAN_MS: u32 = 250;
+
+/// Whether the landscape auto-zoom runs (`ReaderPageImageView.landscapeZoom`, T-43b-018): the preference is on, the page
+/// is ready and fitted to the screen, it is wider than tall, and it sits at its minimum zoom (E-04).
+pub fn landscape_zoom_applies(enabled: bool, kind: ImageScaleType, src: Size, scale: f64, min: f64, ready: bool) -> bool {
+    enabled && ready && kind == ImageScaleType::FitScreen && src.w > src.h && (scale - min).abs() < EPS
+}
+
+/// The zoom the landscape auto-zoom animates to: the page height fits the view height (`height / sHeight`).
+pub fn landscape_zoom_scale(view: Size, src: Size) -> f64 {
+    view.h / src.h
+}
+
+/// Whether the image can pan in one direction: more than 1 px is left to pan (`canPan`, E-13). `remaining` is in screen px.
+pub fn can_pan(remaining: f64) -> bool {
+    remaining > 1.0
+}
+
+/// The centre after one pan step: one view width in source px (`view.width / scale`), left for `dir` -1 and right for +1.
+/// A scale of zero or less leaves the centre where it is.
+pub fn pan_step_centre(center: (f64, f64), view: Size, scale: f64, dir: f64) -> (f64, f64) {
+    if scale <= 0.0 {
+        return center;
+    }
+    (center.0 + dir.signum() * view.w / scale, center.1)
+}
+
+/// Ease out over `t` in 0..=1 (`EASE_OUT_QUAD`, the easing of a pan step).
+pub fn ease_out_quad(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    t * (2.0 - t)
+}
+
+/// How far the image can still pan, in screen px: `(left, right)`. Zero on an axis where the view is as wide as the
+/// image or wider, and never negative.
+pub fn pan_remaining(center: (f64, f64), view: Size, src: Size, scale: f64) -> (f64, f64) {
+    if scale <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let half = view.w / scale / 2.0;
+    (((center.0 - half) * scale).max(0.0), ((src.w - (center.0 + half)) * scale).max(0.0))
+}
+
+/// The centre a landscape auto-zoom animates to (`landscapeZoom`): the zoom start decides the corner, and a backward
+/// selection reads the page from its other end. Centred pages keep their centre.
+pub fn landscape_zoom_centre(start: ZoomStart, forward: bool, src: Size, current: (f64, f64)) -> (f64, f64) {
+    let (near, far) = ((0.0, 0.0), (src.w, 0.0));
+    match (start, forward) {
+        (ZoomStart::Left, true) | (ZoomStart::Right, false) => near,
+        (ZoomStart::Right, true) | (ZoomStart::Left, false) => far,
+        (ZoomStart::Center, _) => current,
+    }
+}
+
+/// A zoom key of the viewer (T-43b-058, additive): plus zooms in, minus zooms out, 0 and Ctrl+0 go back to the fit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomKey {
+    In,
+    Out,
+    Reset,
+}
+
+/// One key press of zoom, as a factor of the scale.
+pub const KEY_ZOOM_STEP: f64 = 1.25;
+
+/// The scale after a zoom key: [`KEY_ZOOM_STEP`] up or down within `[min, 5 x min]`, or the fit for `Reset`.
+pub fn key_zoom_target(scale: f64, min: f64, key: ZoomKey) -> f64 {
+    match key {
+        ZoomKey::In => clamp_scale(scale * KEY_ZOOM_STEP, min),
+        ZoomKey::Out => clamp_scale(scale / KEY_ZOOM_STEP, min),
+        ZoomKey::Reset => min,
+    }
+}
+
 /// Keeps the view inside the image (`PAN_LIMIT_INSIDE`, E-12). An axis where the image is smaller than the view is
 /// centred on the image.
 pub fn clamp_center(center: (f64, f64), view: Size, src: Size, scale: f64) -> (f64, f64) {
@@ -414,5 +493,80 @@ mod tests {
         assert!(close(wheel_zoom(1.0, 0.3, false), 1.0 / 1.1));
         assert!(close(wheel_zoom(0.3, 0.3, false), 0.3));
         assert!(close(wheel_zoom(1.5, 0.3, true), 1.5));
+    }
+
+    #[test]
+    fn landscape_zoom_needs_every_precondition() {
+        let wide = Size { w: 2000.0, h: 1000.0 };
+        let tall = Size { w: 1000.0, h: 2000.0 };
+        assert!(landscape_zoom_applies(true, ImageScaleType::FitScreen, wide, 0.5, 0.5, true));
+        assert!(!landscape_zoom_applies(false, ImageScaleType::FitScreen, wide, 0.5, 0.5, true), "the preference is off");
+        assert!(!landscape_zoom_applies(true, ImageScaleType::FitWidth, wide, 0.5, 0.5, true), "not fitted to the screen");
+        assert!(!landscape_zoom_applies(true, ImageScaleType::FitScreen, tall, 0.5, 0.5, true), "not a wide page");
+        assert!(!landscape_zoom_applies(true, ImageScaleType::FitScreen, wide, 0.6, 0.5, true), "already zoomed past the minimum");
+        assert!(!landscape_zoom_applies(true, ImageScaleType::FitScreen, wide, 0.5, 0.5, false), "the page is not ready");
+    }
+
+    #[test]
+    fn landscape_zoom_fits_the_height_in_five_hundred_ms() {
+        assert_eq!((LANDSCAPE_ZOOM_DELAY_MS, LANDSCAPE_ZOOM_MS), (500, 500));
+        assert!(close(landscape_zoom_scale(Size { w: 800.0, h: 600.0 }, Size { w: 2000.0, h: 1200.0 }), 0.5));
+    }
+
+    #[test]
+    fn a_pan_is_possible_only_past_one_pixel() {
+        assert!(can_pan(40.0));
+        assert!(!can_pan(1.0), "exactly 1 px is not enough (E-13)");
+        assert!(!can_pan(0.0));
+    }
+
+    #[test]
+    fn the_pan_remaining_is_what_is_left_to_each_side_in_screen_pixels() {
+        let (view, src) = (Size { w: 800.0, h: 600.0 }, Size { w: 2000.0, h: 600.0 });
+        // at scale 1 the view covers 800 source px; centred at 1000 it has 600 left on each side
+        assert_eq!(pan_remaining((1000.0, 300.0), view, src, 1.0), (600.0, 600.0));
+        assert_eq!(pan_remaining((400.0, 300.0), view, src, 1.0), (0.0, 1200.0), "at the left edge");
+        assert_eq!(pan_remaining((1600.0, 300.0), view, src, 1.0), (1200.0, 0.0), "at the right edge");
+        // a page narrower than the view has nothing to pan
+        assert_eq!(pan_remaining((500.0, 300.0), view, Size { w: 1000.0, h: 600.0 }, 0.5), (0.0, 0.0));
+        assert_eq!(pan_remaining((1.0, 1.0), view, src, 0.0), (0.0, 0.0));
+        assert!(can_pan(pan_remaining((1000.0, 300.0), view, src, 1.0).0));
+        assert!(!can_pan(pan_remaining((400.5, 300.0), view, src, 1.0).0), "half a pixel left is not a pan");
+    }
+
+    #[test]
+    fn the_pan_easing_starts_fast_and_ends_at_one() {
+        assert!(close(ease_out_quad(0.0), 0.0) && close(ease_out_quad(1.0), 1.0) && close(ease_out_quad(2.0), 1.0));
+        assert!(close(ease_out_quad(0.5), 0.75), "faster than linear at the start");
+    }
+
+    #[test]
+    fn the_landscape_zoom_goes_to_the_corner_the_zoom_start_names() {
+        let src = Size { w: 2000.0, h: 1000.0 };
+        let here = (700.0, 500.0);
+        assert_eq!(landscape_zoom_centre(ZoomStart::Left, true, src, here), (0.0, 0.0));
+        assert_eq!(landscape_zoom_centre(ZoomStart::Left, false, src, here), (2000.0, 0.0));
+        assert_eq!(landscape_zoom_centre(ZoomStart::Right, true, src, here), (2000.0, 0.0));
+        assert_eq!(landscape_zoom_centre(ZoomStart::Right, false, src, here), (0.0, 0.0));
+        assert_eq!(landscape_zoom_centre(ZoomStart::Center, true, src, here), here);
+    }
+
+    #[test]
+    fn the_zoom_keys_step_within_the_range_and_reset_goes_to_the_fit() {
+        let min = 0.4;
+        assert!(close(key_zoom_target(min, min, ZoomKey::In), min * KEY_ZOOM_STEP));
+        assert!(close(key_zoom_target(min, min, ZoomKey::Out), min), "never under the fit");
+        assert!(close(key_zoom_target(min * 5.0, min, ZoomKey::In), min * 5.0), "never over five times the fit");
+        assert!(close(key_zoom_target(1.0, min, ZoomKey::Out), 1.0 / KEY_ZOOM_STEP));
+        assert!(close(key_zoom_target(1.3, min, ZoomKey::Reset), min));
+    }
+
+    #[test]
+    fn a_pan_step_moves_one_view_width_in_source_pixels() {
+        let view = Size { w: 800.0, h: 600.0 };
+        assert!(close(pan_step_centre((1000.0, 500.0), view, 0.5, 1.0).0, 2600.0), "right by 800 px at half zoom");
+        assert!(close(pan_step_centre((1000.0, 500.0), view, 0.5, -1.0).0, -600.0), "left by 800 px at half zoom");
+        assert_eq!(pan_step_centre((1000.0, 500.0), view, 0.5, 1.0).1, 500.0, "the pan is horizontal only");
+        assert_eq!(pan_step_centre((1000.0, 500.0), view, 0.0, 1.0), (1000.0, 500.0), "no scale, no move");
     }
 }

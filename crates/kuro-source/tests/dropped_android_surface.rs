@@ -50,8 +50,8 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-#[test]
-fn no_dropped_android_identifier_appears_in_code() {
+/// Production code of every crate in `CRATES`, with `//` comments removed, as `file:line: token` hits.
+fn hits_for(tokens: &[&str]) -> Vec<String> {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut hits = Vec::new();
     for krate in CRATES {
@@ -63,7 +63,7 @@ fn no_dropped_android_identifier_appears_in_code() {
             let code_part = text.split("#[cfg(test)]").next().unwrap_or_default();
             for (number, line) in code_part.lines().enumerate() {
                 let code = line.split("//").next().unwrap_or_default();
-                for token in FORBIDDEN.iter() {
+                for token in tokens {
                     if code.contains(token) {
                         hits.push(format!("{}:{}: {token}", file.display(), number + 1));
                     }
@@ -71,7 +71,38 @@ fn no_dropped_android_identifier_appears_in_code() {
             }
         }
     }
+    hits
+}
+
+#[test]
+fn no_dropped_android_identifier_appears_in_code() {
+    let hits = hits_for(FORBIDDEN);
     assert!(hits.is_empty(), "dropped identifiers in code:\n{}", hits.join("\n"));
+}
+
+/// Vendor ROM, browser-list, Rx, SAF and FFmpeg-string identifiers (T-13a-035, T-13a-045 to T-13a-047, T-13a-054,
+/// T-12a-037, T-12a-038). The hardware bitmap preference (T-13a-030) is not guarded here: its key still lives in kuro-prefs. Each is dropped on Linux, so none may appear in the crates that own those areas.
+const FORBIDDEN_DEVICE_AND_STORAGE: &[&str] = &[
+    "isMiui",
+    "miuiMajorVersion",
+    "isMiuiOptimizationDisabled",
+    "isSamsung",
+    "oneUiVersion",
+    "invalidDefaultBrowsers",
+    "getInferredUserAgent",
+    "spoofedPackageName",
+    "X-Requested-With",
+    "dpToPx",
+    "Observable<",
+    "RxCoroutineBridge",
+    "content://",
+    "FFmpegUtils",
+];
+
+#[test]
+fn no_dropped_device_or_storage_identifier_appears_in_code() {
+    let hits = hits_for(FORBIDDEN_DEVICE_AND_STORAGE);
+    assert!(hits.is_empty(), "dropped device or storage identifiers in code:\n{}", hits.join("\n"));
 }
 
 #[test]

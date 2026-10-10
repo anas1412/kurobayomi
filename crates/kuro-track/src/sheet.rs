@@ -197,6 +197,20 @@ pub fn date_shown(tracker: &dyn Tracker, stored_ms: i64) -> bool {
     tracker.supports_reading_dates() && stored_ms != 0
 }
 
+/// The start or finish date text of the sheet (T-27a-073). The Home rows' `app_date_format` applies, and the day is the
+/// local day of the system zone, as `toLocalDate` gives it. `None` when the date is not shown (B§11).
+pub fn date_text(tracker: &dyn Tracker, stored_ms: i64, app_date_format: &str) -> Option<String> {
+    if !date_shown(tracker, stored_ms) {
+        return None;
+    }
+    crate::home::row_date_text(stored_ms, app_date_format, &chrono::Local)
+}
+
+/// The pending badge of the sheet: the queued updates of the entry, when there are any (T-27a-071).
+pub fn pending_badge(count: usize) -> Option<MsgKey> {
+    (count > 0).then_some(MsgKey::PendingUpdates(count))
+}
+
 /// What a Home row shows. An unbound row ("Add tracking") has nothing else (B§11, U§2.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RowActions {
@@ -391,6 +405,29 @@ mod tests {
         let set = row_actions(&bound(t, 0.0, 1_000));
         assert!(set.start_date);
         assert!(set.private_toggle);
+    }
+
+    #[test]
+    fn t_27a_073_the_sheet_date_is_hidden_when_unset_or_unsupported() {
+        let plain: Arc<dyn Tracker> = Arc::new(FakeAnime::new(
+            TrackerId::KITSU,
+            "Kitsu",
+            MemSecrets::new(),
+            new_log(),
+        ));
+        assert_eq!(date_text(plain.as_ref(), 1_000, ""), None);
+        let mut fake = FakeAnime::new(TrackerId::ANILIST, "AniList", MemSecrets::new(), new_log());
+        fake.reading_dates = true;
+        let dated: Arc<dyn Tracker> = Arc::new(fake);
+        assert_eq!(date_text(dated.as_ref(), 0, ""), None, "a stored 0 is not shown");
+        let text = date_text(dated.as_ref(), 1_700_000_000_000, "yyyy-MM-dd");
+        assert!(text.is_some_and(|t| !t.is_empty()));
+    }
+
+    #[test]
+    fn t_27a_071_the_pending_badge_shows_only_when_items_are_queued() {
+        assert_eq!(pending_badge(0), None);
+        assert_eq!(pending_badge(3), Some(MsgKey::PendingUpdates(3)));
     }
 
     struct RecordingOpener(Mutex<Vec<String>>);

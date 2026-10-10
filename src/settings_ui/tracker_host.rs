@@ -1,0 +1,285 @@
+//! The tracker services behind the Tracking screen (tasks T-47a-055 to T-47a-059): the eleven trackers in one
+//! `TrackerManager` over the app's secret store, the pending browser logins, and the arrival of a login redirect.
+//!
+//! The secret store is opened off the GTK thread (its first open probes the keyring and can take seconds), then the
+//! trackers are built on the GTK thread inside the app's runtime, which the manager's watcher tasks need.
+//!
+//! Decisions:
+//! - Shikimori and Bangumi read their OAuth client from `config.toml`; without one their rows say they are not
+//!   configured. MyAnimeList reads its client id from the config file or `KUROBAYOMI_MAL_CLIENT_ID`.
+//! - The enhanced trackers see no installed-source directory yet (they are built over an empty one), so they cannot
+//!   start a sync; this screen only needs their names and accepted source identities.
+//! - The shell does not hand `aniyomi://` or `kurobayomi://` links to this module yet; [`on_redirect`] is what it
+//!   calls once it does. Until then a browser login stays pending until its five minutes run out.
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use kuro_platform::paths::Paths;
+use kuro_platform::secrets::{SecretStore, SecretsMode};
+use kuro_track::bangumi::BangumiTracker;
+use kuro_track::events::EventBus;
+use kuro_track::kitsu::KitsuTracker;
+use kuro_track::mal::store::{SecretTokenStore, TokenStore};
+use kuro_track::mal::tracker::MalTracker;
+use kuro_track::manager::TrackerManager;
+use kuro_track::mangaupdates::MangaUpdatesTracker;
+use kuro_track::messages::{english, MsgKey};
+use kuro_track::model::TrackerId;
+use kuro_track::oauth::{handle_redirect, Handled, PendingLogins, PENDING_TTL_MS};
+use kuro_track::shikimori::config::TrackClientConfig;
+use kuro_track::shikimori::registry::{BANGUMI_REDIRECT, SHIKIMORI_REDIRECT};
+use kuro_track::shikimori::ShikimoriTracker;
+use kuro_track::simkl::SimklTracker;
+use kuro_track::tracker::Tracker;
+use kuro_track::trackers::enhanced::FlagStore;
+use kuro_track::trackers::jellyfin::JellyfinTracker;
+use kuro_track::trackers::kavita::KavitaTracker;
+use kuro_track::trackers::komga::KomgaTracker;
+use kuro_track::trackers::secret_migration::UNENCRYPTED_WARNING;
+use kuro_track::trackers::sources::{SourceDirectory, SourcePrefs};
+use kuro_track::trackers::suwayomi::SuwayomiTracker;
+
+/// The services of the Tracking screen.
+// the redirect fields are read by `on_redirect`, which has no caller until the shell passes login links on
+#[allow(dead_code)]
+pub struct Host {
+    pub manager: TrackerManager,
+    pub pending: RefCell<PendingLogins>,
+    /// Browser logins whose redirect has not arrived, with the time (ms) each one began.
+    waiting: RefCell<HashMap<TrackerId, i64>>,
+    /// True when no keyring is reachable and the secrets live in the fallback file.
+    pub fallback: bool,
+    pub mal: Arc<MalTracker>,
+    pub simkl: Arc<SimklTracker>,
+    pub shikimori: Arc<ShikimoriTracker>,
+    pub bangumi: Arc<BangumiTracker>,
+}
+
+impl Host {
+    /// Marks `tracker` as waiting for its browser redirect since `now_ms`.
+    pub fn begin_waiting(&self, tracker: TrackerId, now_ms: i64) {
+        self.waiting.borrow_mut().insert(tracker, now_ms);
+    }
+
+    /// Whether `tracker` waits for a redirect at `now_ms`: it began less than the attempt's lifetime ago.
+    pub fn is_waiting(&self, tracker: TrackerId, now_ms: i64) -> bool {
+        self.waiting.borrow().get(&tracker).is_some_and(|started| now_ms - started <= PENDING_TTL_MS)
+    }
+
+    pub fn stop_waiting(&self, tracker: TrackerId) {
+        self.waiting.borrow_mut().remove(&tracker);
+    }
+}
+
+enum State {
+    Idle,
+    Loading,
+    Ready(Rc<Host>),
+    Failed,
+}
+
+thread_local! {
+    static STATE: RefCell<State> = const { RefCell::new(State::Idle) };
+    static REFRESH: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
+}
+
+/// The services, once they are built.
+pub fn host() -> Option<Rc<Host>> {
+    STATE.with(|state| match &*state.borrow() {
+        State::Ready(host) => Some(Rc::clone(host)),
+        _ => None,
+    })
+}
+
+/// The page that redraws itself when a login finishes. The last page to register wins.
+pub fn set_refresh(redraw: Rc<dyn Fn()>) {
+    REFRESH.with(|slot| *slot.borrow_mut() = Some(redraw));
+}
+
+fn refresh() {
+    if let Some(redraw) = REFRESH.with(|slot| slot.borrow().clone()) {
+        redraw();
+    }
+}
+
+/// The text of the warning row: shown while the secrets are in the fallback file instead of the keyring.
+pub fn keyring_warning(mode: SecretsMode) -> Option<&'static str> {
+    (mode == SecretsMode::EncryptedFile).then_some(UNENCRYPTED_WARNING)
+}
+
+/// Starts building the services once. The page that registered itself with [`set_refresh`] redraws when they are there
+/// (or when building failed).
+pub fn ensure() {
+    let start = STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        matches!(*state, State::Idle).then(|| *state = State::Loading).is_some()
+    });
+    if !start {
+        return;
+    }
+    gtk::glib::spawn_future_local(async move {
+        let opened = gtk::gio::spawn_blocking(open_store).await;
+        let built = match opened {
+            Ok(Ok((secrets, config_dir))) => build(secrets, &config_dir),
+            Ok(Err(err)) => Err(err),
+            Err(_) => Err("the secret store task panicked".to_owned()),
+        };
+        STATE.with(|state| {
+            *state.borrow_mut() = match built {
+                Ok(host) => State::Ready(Rc::new(host)),
+                Err(err) => {
+                    tracing::warn!(%err, "the tracker services did not start");
+                    State::Failed
+                }
+            }
+        });
+        refresh();
+    });
+}
+
+fn open_store() -> Result<(Arc<kuro_platform::secrets::FallbackSecrets>, std::path::PathBuf), String> {
+    let paths = kuro_platform::linux::LinuxPaths::system().map_err(|err| err.to_string())?;
+    Ok((Arc::new(kuro_platform::linux::secrets::open(&paths)), paths.config_dir()))
+}
+
+/// No installed-source directory: the enhanced trackers are built over an empty one.
+struct NoSources;
+
+impl SourceDirectory for NoSources {
+    fn source_prefs(&self, _source_id: i64) -> Option<Arc<dyn SourcePrefs>> {
+        None
+    }
+}
+
+fn build(secrets: Arc<kuro_platform::secrets::FallbackSecrets>, config_dir: &std::path::Path) -> Result<Host, String> {
+    let handle = crate::shell::host::Shell::get().map(|shell| shell.runtime().clone()).ok_or("no runtime")?;
+    let _entered = handle.enter();
+    let fallback = secrets.mode() == SecretsMode::EncryptedFile;
+    let store: Arc<dyn SecretStore> = secrets;
+    let events = EventBus::default();
+    let prefs = crate::data::app().base.store().clone();
+    let flags: Arc<dyn FlagStore> = Arc::new(prefs.clone());
+    let dir: Arc<dyn SourceDirectory> = Arc::new(NoSources);
+    let clients = TrackClientConfig::load(config_dir);
+    let text = |err: &dyn std::fmt::Display| err.to_string();
+
+    let tokens: Arc<dyn TokenStore> = Arc::new(SecretTokenStore::new(Arc::clone(&store)));
+    let mal = Arc::new(MalTracker::from_config(config_dir, tokens).map_err(|e| text(&e))?);
+    let anilist = kuro_track::tracker::anilist::AniList::with_http(Arc::clone(&store), &prefs, events.clone()).map_err(|e| text(&e))?;
+    let kitsu = KitsuTracker::new(kuro_track::kitsu::api::Endpoints::production(), Arc::clone(&store)).map_err(|e| text(&e))?;
+    let shikimori = Arc::new(ShikimoriTracker::production(clients.shikimori.clone(), SHIKIMORI_REDIRECT, Arc::clone(&store)).map_err(|e| text(&e))?);
+    let bangumi = Arc::new(BangumiTracker::production(clients.bangumi.clone(), BANGUMI_REDIRECT, Arc::clone(&store)).map_err(|e| text(&e))?);
+    let mangaupdates = MangaUpdatesTracker::new(Arc::clone(&store), events.clone()).map_err(|e| text(&e))?;
+    let simkl = Arc::new(SimklTracker::new(Arc::clone(&store), events.clone()).map_err(|e| text(&e))?);
+    let komga = KomgaTracker::new(Arc::clone(&store), events).map_err(|e| text(&e))?;
+    let kavita = KavitaTracker::new(Arc::clone(&dir), Arc::clone(&flags)).map_err(|e| text(&e))?;
+    let suwayomi = SuwayomiTracker::new(Arc::clone(&dir), Arc::clone(&flags)).map_err(|e| text(&e))?;
+    let jellyfin = JellyfinTracker::new(dir, flags).map_err(|e| text(&e))?;
+
+    let all: Vec<Arc<dyn Tracker>> = vec![
+        mal.clone(),
+        Arc::new(anilist),
+        Arc::new(kitsu),
+        shikimori.clone(),
+        bangumi.clone(),
+        Arc::new(komga),
+        Arc::new(mangaupdates),
+        Arc::new(kavita),
+        Arc::new(suwayomi),
+        simkl.clone(),
+        Arc::new(jellyfin),
+    ];
+    let manager = TrackerManager::new(all).map_err(|e| text(&e))?;
+    Ok(Host { manager, pending: RefCell::default(), waiting: RefCell::default(), fallback, mal, simkl, shikimori, bangumi })
+}
+
+/// The time `PendingLogins` measures attempts by.
+pub fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+/// What finishing a login shows: the toast text.
+#[allow(dead_code)] // used by `on_redirect`
+fn finished(name: &str, result: Result<(), kuro_track::error::TrackError>) -> String {
+    match result {
+        Ok(()) => english(&MsgKey::TrackerLoggedIn(name.to_owned())),
+        Err(err) => english(&kuro_track::dialog::failure_message(&err)),
+    }
+}
+
+/// A login link arrived (`aniyomi://anilist-auth#access_token=...` and the like). Routes it to the pending attempt and
+/// finishes the login on the runtime; the toast and the redraw follow on the main context. False when the services are
+/// not built, so the caller can treat the link as not its own.
+#[allow(dead_code)] // no call site until the shell hands login links to this module
+pub fn on_redirect(uri: &str) -> bool {
+    let Some(host) = host() else { return false };
+    let handled = handle_redirect(&mut host.pending.borrow_mut(), &host.manager, uri, now_ms());
+    match handled {
+        Handled::Ignored => {}
+        Handled::Toast(key) => {
+            for row in kuro_track::login_rows::LOGIN_ROWS {
+                host.stop_waiting(row.tracker);
+            }
+            crate::toast::notify(english(&key));
+            refresh();
+        }
+        Handled::Exchange(credential) => {
+            let id = credential.tracker;
+            let name = host.manager.get(id).map_or_else(|| id.0.to_string(), |t| t.name().to_owned());
+            let host_for_task = Rc::clone(&host);
+            let (shikimori, bangumi, anilist) = (host.shikimori.clone(), host.bangumi.clone(), host.manager.get(TrackerId::ANILIST));
+            crate::source_bridge::call_on_main(
+                async move {
+                    match id {
+                        TrackerId::SHIKIMORI => shikimori.login_with_code(&credential.value).await,
+                        TrackerId::BANGUMI => bangumi.login_with_code(&credential.value).await,
+                        _ => match anilist {
+                            Some(anilist) => anilist.login("", &credential.value).await,
+                            None => Ok(()),
+                        },
+                    }
+                },
+                move |result| {
+                    host_for_task.stop_waiting(id);
+                    crate::toast::notify(finished(&name, result));
+                    refresh();
+                },
+            );
+        }
+        Handled::SimklRedirect(uri) => {
+            let simkl = host.simkl.clone();
+            let host_for_task = Rc::clone(&host);
+            crate::source_bridge::call_on_main(async move { simkl.handle_redirect(&uri).await }, move |result| {
+                host_for_task.stop_waiting(TrackerId::SIMKL);
+                crate::toast::notify(finished("Simkl", result));
+                refresh();
+            });
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_warning_row_shows_only_when_the_secrets_are_in_the_fallback_file() {
+        assert_eq!(keyring_warning(SecretsMode::Primary), None);
+        assert_eq!(keyring_warning(SecretsMode::EncryptedFile), Some(UNENCRYPTED_WARNING));
+    }
+
+    #[test]
+    fn a_finished_login_toasts_the_tracker_or_the_failure() {
+        assert_eq!(finished("Shikimori", Ok(())), "Shikimori logged in");
+        let failed = finished("Shikimori", Err(kuro_track::error::TrackError::Message("bad code".into())));
+        assert!(failed.contains("bad code"), "{failed}");
+    }
+
+    #[test]
+    fn without_services_a_link_is_not_ours() {
+        assert!(!on_redirect("aniyomi://anilist-auth#access_token=t"));
+    }
+}

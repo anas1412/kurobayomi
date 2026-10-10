@@ -251,7 +251,13 @@ pub fn auto_open(query: &str, extension: &str, total_sources: usize, rows: &[Sea
 /// A deep link whose search found nothing (or could not run) replaces the page with global search for the query
 /// (GS-EC-16).
 pub fn deep_link_fallback(query: &str) -> BrowseRoute {
-    BrowseRoute::GlobalSearch { kind: BrowseKind::Manga, source_id: None, query: query.to_owned() }
+    deep_link_fallback_for(BrowseKind::Manga, query)
+}
+
+/// The same fallback for either catalogue: an anime entry page's search that no browse page can take opens the anime
+/// global search.
+pub fn deep_link_fallback_for(kind: BrowseKind, query: &str) -> BrowseRoute {
+    BrowseRoute::GlobalSearch { kind, source_id: None, query: query.to_owned() }
 }
 
 /// A source row tapped while the search box holds text that was never submitted: the source's browse page opens with that
@@ -588,5 +594,63 @@ mod tests {
         search.set_query(Some("two"));
         assert_eq!(search.search().map(|p| p.generation), Some(2));
         assert!(search.rows().iter().all(|r| !r.origin), "no origin outside a migrate search");
+    }
+}
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use kuro_domain::source::pin::Pins;
+    use proptest::prelude::*;
+
+    fn item(id: i64) -> ListItem {
+        ListItem { id, title: format!("M{id}"), ..ListItem::default() }
+    }
+
+    proptest! {
+        /// `sort_items` of the plan: the row order is a function of the rows, so sorting again changes nothing, and neither
+        /// `apply` (which sorts) nor a stale or repeated result ever adds or drops a row or an item (T-40b-084).
+        #[test]
+        fn the_row_sort_is_idempotent_and_apply_never_changes_the_row_or_item_count(
+            specs in proptest::collection::vec((0usize..4, any::<bool>()), 1..8),
+            ops in proptest::collection::vec((0i64..9, 0u64..3, 0u8..3, 0usize..4), 0..14),
+        ) {
+            let names = ["Alpha", "Beta", "alpha", "Same"];
+            let candidates: Vec<Candidate> = specs
+                .iter()
+                .enumerate()
+                .map(|(at, (name, pinned))| {
+                    let mut source = Source::new(at as i64 + 1, names[*name], "en");
+                    if *pinned {
+                        source.pin = Pins::PINNED;
+                    }
+                    Candidate { source, package: String::new() }
+                })
+                .collect();
+            let mut search = GlobalSearch::new(candidates, ["en".to_owned()].into(), BTreeSet::new(), None, false);
+            search.set_query(Some("q"));
+            let plan = search.set_filter(SourceFilter::All).expect("a search");
+            let total = search.rows().len();
+            prop_assert_eq!(total, specs.len(), "every enabled source has a row, equal names included");
+            for (source_id, offset, kind, count) in ops {
+                let generation = plan.generation + offset - 1;
+                let sent: Result<Vec<ListItem>, String> = match kind {
+                    0 => Ok((0..count as i64).map(item).collect()),
+                    1 => Ok(vec![item(1)]),
+                    _ => Err("offline".to_owned()),
+                };
+                let sent_items = sent.as_ref().ok().map(Vec::len);
+                let applied = search.apply(generation, source_id, sent);
+                prop_assert_eq!(search.rows().len(), total, "apply never changes the number of rows");
+                if let (true, Some(sent_items)) = (applied, sent_items) {
+                    let row = search.rows().iter().find(|row| row.source.id == source_id).expect("the row that was answered");
+                    prop_assert!(matches!(&row.state, SearchState::Results(items) if items.len() == sent_items), "the items arrive as they were sent");
+                }
+            }
+            let before: Vec<i64> = search.rows().iter().map(|row| row.source.id).collect();
+            search.sort_rows();
+            let after: Vec<i64> = search.rows().iter().map(|row| row.source.id).collect();
+            prop_assert_eq!(before, after, "sorting a sorted list changes nothing");
+        }
     }
 }

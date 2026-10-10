@@ -88,6 +88,7 @@ pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> gtk::Revealer {
 
     let back = gtk::Button::from_icon_name("go-previous-symbolic");
     back.set_tooltip_text(Some("Back"));
+    back.update_property(&[gtk::accessible::Property::Label("Back")]);
     back.connect_clicked(move |_| (actions.on_back)());
     row.append(&back);
 
@@ -113,6 +114,7 @@ pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> gtk::Revealer {
         .tooltip_text(bookmark_label(bar.bookmarked))
         .build();
     bookmark.connect_clicked(move |_| (actions.on_bookmark)());
+    bookmark.update_property(&[gtk::accessible::Property::Label(bookmark_label(bar.bookmarked))]);
     row.append(&bookmark);
 
     let items = overflow_items(bar.is_http_source);

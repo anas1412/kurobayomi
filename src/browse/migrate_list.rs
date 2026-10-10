@@ -12,6 +12,7 @@ use kuro_prefs::source::{MigrationDirection, MigrationSortingMode, SourcePrefs};
 
 use super::directory::{SourceDirectory, source_or_stub};
 use super::pages::{MigrateSourcesNav, MigrateSourcesSnapshot, migrate_sources};
+use super::route::BrowseKind;
 
 /// The display order of the migration list: every library source with its count, in `mode` and `direction`. A source the
 /// directory does not know is a stub and, with no name, shows its id.
@@ -26,10 +27,24 @@ pub fn migrate_list(counts: Vec<(i64, i64)>, directory: Option<&dyn SourceDirect
     sorted
 }
 
+/// The empty state of the picker: upstream's "Your library is empty" for manga, and for anime the plan's own text, since
+/// that one is a text bug there (T-41a-036).
+pub fn empty_text(kind: BrowseKind) -> String {
+    match kind {
+        BrowseKind::Manga => kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library),
+        BrowseKind::Anime => super::texts::MIGRATE_SOURCES_EMPTY.to_owned(),
+    }
+}
+
 pub struct MigrateDeps {
+    /// Which catalogue the tab lists: it words the empty state.
+    pub kind: BrowseKind,
     pub prefs: Rc<SourcePrefs>,
-    /// `(source id, favourite count)` for every source with a favourite, handed to the callback on the GTK thread.
-    pub counts: Rc<dyn Fn(Box<dyn FnOnce(Vec<(i64, i64)>)>)>,
+    /// `(source id, favourite count)` for every source with a favourite, handed to the callback on the GTK thread. A read
+    /// that fails is an error, not an empty library (E-MS-06).
+    pub counts: Rc<dyn Fn(Box<dyn FnOnce(Result<Vec<(i64, i64)>, String>)>)>,
+    /// Shows a toast, used for a failed count read.
+    pub toast: Rc<dyn Fn(String)>,
     pub directory: Rc<dyn Fn() -> Option<Arc<dyn SourceDirectory>>>,
     /// A row: the favourites of that source.
     pub open: Rc<dyn Fn(i64)>,
@@ -81,11 +96,16 @@ fn flip_direction(prefs: &SourcePrefs) {
 /// Reads the counts and replaces the tab's content with the list in the stored sort.
 fn draw(deps: Rc<MigrateDeps>, holder: gtk::glib::WeakRef<gtk::Box>) {
     let counts = Rc::clone(&deps.counts);
-    counts(Box::new(move |list| {
+    counts(Box::new(move |read| {
         let Some(holder) = holder.upgrade() else { return };
+        let list = read.unwrap_or_else(|error| {
+            tracing::error!(%error, "the migration favourite counts could not be read");
+            (deps.toast)(kuro_i18n::tr(kuro_i18n::MsgKey::internal_error));
+            Vec::new()
+        });
         let (mode, direction) = (deps.prefs.migration_sorting_mode.get(), deps.prefs.migration_sorting_direction.get());
         let directory = (deps.directory)();
-        let snapshot = MigrateSourcesSnapshot { sources: migrate_list(list, directory.as_deref(), mode, direction), mode, direction };
+        let snapshot = MigrateSourcesSnapshot { sources: migrate_list(list, directory.as_deref(), mode, direction), mode, direction, empty_text: empty_text(deps.kind) };
         let nav = MigrateSourcesNav {
             open: Rc::clone(&deps.open),
             copy_id: Rc::clone(&deps.copy_id),
@@ -161,12 +181,28 @@ pub(crate) mod tests {
 
     fn deps(counts: Vec<(i64, i64)>, prefs: Rc<SourcePrefs>, opened: Rc<RefCell<Vec<i64>>>) -> MigrateDeps {
         MigrateDeps {
+            kind: BrowseKind::Manga,
             prefs,
-            counts: Rc::new(move |deliver| deliver(counts.clone())),
+            counts: Rc::new(move |deliver| deliver(Ok(counts.clone()))),
+            toast: Rc::new(|_| {}),
             directory: Rc::new(|| Some(directory())),
             open: Rc::new(move |id| opened.borrow_mut().push(id)),
             copy_id: Rc::new(|_| {}),
         }
+    }
+
+    fn a_failed_count_read_shows_the_internal_error_toast_and_an_empty_list() {
+        let prefs = Rc::new(SourcePrefs::new(PrefStore::in_memory()));
+        let toasts = Rc::new(RefCell::new(Vec::<String>::new()));
+        let sink = Rc::clone(&toasts);
+        let deps = MigrateDeps {
+            counts: Rc::new(|deliver| deliver(Err("db closed".to_owned()))),
+            toast: Rc::new(move |text| sink.borrow_mut().push(text)),
+            ..deps(Vec::new(), prefs, Rc::default())
+        };
+        let tab = migrate_tab(deps);
+        assert_eq!(*toasts.borrow(), [kuro_i18n::tr(kuro_i18n::MsgKey::internal_error)], "E-MS-06: the failure is not silent");
+        assert!(labels(tab.upcast_ref()).contains(&kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library)), "no list is shown");
     }
 
     fn the_tab_lists_the_library_sources_and_an_empty_library_shows_the_empty_state() {
@@ -179,6 +215,20 @@ pub(crate) mod tests {
 
         let empty = migrate_tab(deps(Vec::new(), prefs, Rc::default()));
         assert!(labels(empty.upcast_ref()).contains(&kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library)), "E-MS-01");
+    }
+
+    #[test]
+    fn the_stored_sort_uses_the_upstream_words_and_fast_taps_apply_in_order() {
+        let store = PrefStore::in_memory();
+        let prefs = SourcePrefs::new(store.clone());
+        // three taps before any redraw: each one reads the stored value, so they land in order
+        flip_mode(&prefs);
+        flip_direction(&prefs);
+        flip_mode(&prefs);
+        assert_eq!(store.get_raw("pref_migration_sorting"), Some(kuro_prefs::values::PrefValue::Str("ALPHABETICAL".into())), "E-MS-05: the last tap wins");
+        assert_eq!(store.get_raw("pref_migration_direction"), Some(kuro_prefs::values::PrefValue::Str("DESCENDING".into())));
+        flip_mode(&prefs);
+        assert_eq!(store.get_raw("pref_migration_sorting"), Some(kuro_prefs::values::PrefValue::Str("TOTAL".into())));
     }
 
     fn a_sort_toggle_is_stored_and_redraws_the_list() {
@@ -208,8 +258,51 @@ pub(crate) mod tests {
         assert_eq!(prefs.migration_sorting_direction.get(), MigrationDirection::DESCENDING);
     }
 
+    fn the_anime_picker_says_no_source_has_favorites_and_the_manga_picker_keeps_the_library_text() {
+        let prefs = Rc::new(SourcePrefs::new(PrefStore::in_memory()));
+        let tab = migrate_tab(MigrateDeps { kind: BrowseKind::Anime, ..deps(Vec::new(), prefs, Rc::default()) });
+        let text = labels(tab.upcast_ref());
+        assert!(text.contains(&crate::browse::texts::MIGRATE_SOURCES_EMPTY.to_owned()), "T-41a-036: {text:?}");
+        assert!(!text.contains(&kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library)), "not the library text bug");
+        assert_eq!(empty_text(BrowseKind::Manga), kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library));
+    }
+
     pub(crate) fn smoke() {
+        a_failed_count_read_shows_the_internal_error_toast_and_an_empty_list();
+        the_anime_picker_says_no_source_has_favorites_and_the_manga_picker_keeps_the_library_text();
         the_tab_lists_the_library_sources_and_an_empty_library_shows_the_empty_state();
         a_sort_toggle_is_stored_and_redraws_the_list();
+    }
+}
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use crate::browse::directory::tests::{FakeDirectory, entry};
+    use proptest::prelude::*;
+
+    fn ids(list: &[(Source, i64)]) -> Vec<i64> {
+        list.iter().map(|(source, _)| source.id).collect()
+    }
+
+    proptest! {
+        #[test]
+        fn the_migration_sort_keeps_every_non_local_source_and_sorting_again_changes_nothing(
+            counts in proptest::collection::vec((0i64..6, 0i64..9), 0..12),
+            by_count in any::<bool>(),
+            descending in any::<bool>(),
+        ) {
+            let mode = if by_count { MigrationSortingMode::TOTAL } else { MigrationSortingMode::ALPHABETICAL };
+            let direction = if descending { MigrationDirection::DESCENDING } else { MigrationDirection::ASCENDING };
+            let directory: Arc<dyn SourceDirectory> = Arc::new(FakeDirectory {
+                entries: vec![entry(1, "Zulu", "en", "ext.z"), entry(2, "Alpha", "en", "ext.a")],
+                answers: Arc::new(|_, _| Ok(Vec::new())),
+            });
+            let raw: Vec<(Source, i64)> = counts.iter().map(|(id, count)| (source_or_stub(Some(&*directory), *id), *count)).collect();
+            let once = sort_migration_sources(raw, mode, direction);
+            let twice = sort_migration_sources(once.clone(), mode, direction);
+            prop_assert_eq!(once.len(), counts.iter().filter(|(id, _)| *id != 0).count(), "E-MS-02: the local source is the only one left out");
+            prop_assert_eq!(ids(&once), ids(&twice), "sorting a sorted list changes nothing");
+        }
     }
 }

@@ -8,6 +8,7 @@ pub mod archive;
 pub mod dir;
 pub mod download;
 pub mod http;
+pub mod saver;
 
 use std::path::PathBuf;
 use std::rc::Rc;

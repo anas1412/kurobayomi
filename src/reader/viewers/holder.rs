@@ -19,6 +19,7 @@ use tokio::sync::watch;
 use super::downloads::DownloadCheck;
 use super::page_bytes::{self, Located};
 use super::page_opts::{PageOpts, background_rgb};
+use super::pager::nav::Phys;
 use super::status::{PageView, StatusBranch};
 use crate::reader::error_card;
 use crate::reader::transition::{self, Metrics};
@@ -28,6 +29,7 @@ use crate::reader::model::{ChapterState, PageStatus, ReaderChapter, ReaderPage, 
 use crate::reader::page_decode::LoadState;
 use crate::reader::page_transform;
 use crate::reader::page_view::PageView as PageWidget;
+use crate::reader::page_zoom::ZoomKey;
 use crate::reader::progress::LoadingIndicator;
 use crate::reader::strings;
 
@@ -98,10 +100,56 @@ impl Row {
         if old.background != new.background {
             image.view.set_page_background(Some(rgba(*new)));
         }
+        if old.automatic_background != new.automatic_background {
+            image.view.set_auto_background(new.automatic_background);
+        }
         image.view.set_double_tap_anim_ms(new.double_tap_ms);
         image.view.set_long_tap_enabled(new.long_tap);
-        if old.transform != new.transform && image.view.state() != LoadState::Empty {
+        image.view.set_landscape_zoom(new.landscape_zoom);
+        // the crop and the decode width are part of the decode, so a change decodes the page again
+        image.view.set_crop_borders(new.crop);
+        image.view.set_decode_to_view(new.decode_to_view());
+        let redecode = old.transform != new.transform || old.crop != new.crop || old.decode_to_view() != new.decode_to_view();
+        if redecode && image.view.state() != LoadState::Empty {
             image.load();
+        }
+    }
+
+    /// Whether the row's page has been decoded and is shown.
+    #[cfg(test)]
+    pub fn page_ready(&self) -> bool {
+        self.image.as_ref().is_some_and(|i| i.view.state() == LoadState::Ready)
+    }
+
+    /// Whether the shown page can pan toward `dir` (`canPanLeft`, `canPanRight`). A row with no page cannot.
+    pub fn can_pan(&self, dir: Phys) -> bool {
+        self.image.as_ref().is_some_and(|i| match dir {
+            Phys::Left => i.view.can_pan_left(),
+            Phys::Right => i.view.can_pan_right(),
+        })
+    }
+
+    /// Pans the shown page one view width toward `dir`.
+    pub fn pan(&self, dir: Phys) {
+        if let Some(image) = &self.image {
+            match dir {
+                Phys::Left => image.view.pan_left(),
+                Phys::Right => image.view.pan_right(),
+            }
+        }
+    }
+
+    /// The row's page became the selected one; `forward` is the direction of the selection (`onPageSelected`).
+    pub fn page_selected(&self, forward: bool) {
+        if let Some(image) = &self.image {
+            image.view.on_page_selected(forward);
+        }
+    }
+
+    /// Applies a zoom key to the shown page.
+    pub fn zoom_key(&self, key: ZoomKey) {
+        if let Some(image) = &self.image {
+            image.view.zoom_by_key(key);
         }
     }
 
@@ -169,9 +217,12 @@ impl Image {
 
         let view = PageWidget::new();
         view.set_page_background(Some(rgba(host.opts)));
+        view.set_auto_background(host.opts.automatic_background);
         view.set_double_tap_anim_ms(host.opts.double_tap_ms);
         view.set_long_tap_enabled(host.opts.long_tap);
-        view.set_decode_to_view(host.opts.webtoon);
+        view.set_decode_to_view(host.opts.decode_to_view());
+        view.set_crop_borders(host.opts.crop);
+        view.set_landscape_zoom(host.opts.landscape_zoom);
         // a webtoon page does not zoom on its own: the strip does (T-44a-039)
         view.set_zoomable(!host.opts.webtoon);
         stack.add_named(&view, Some("page"));

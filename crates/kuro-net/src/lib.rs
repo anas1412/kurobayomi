@@ -2,10 +2,14 @@
 //! has them, so extensions can add one. No GTK and no OS code in this crate: window work goes through
 //! `kuro_platform::webview::WebViewHost` and `kuro_platform::toast::Toaster`.
 
+pub mod cache;
 pub mod client;
 pub mod cookies;
+pub mod doh;
 pub mod error;
 pub mod interceptors;
+#[cfg(feature = "js-sources")]
+pub mod js;
 mod logging;
 pub mod progress;
 pub mod request;

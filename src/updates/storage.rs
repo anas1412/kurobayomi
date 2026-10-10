@@ -150,6 +150,22 @@ pub struct Arc {
     pub color: Rgba,
 }
 
+/// From this content width the page sits in two columns (T-42a-053); narrower it is one column with the chart first.
+pub const TWO_COLUMN_MIN_WIDTH: i32 = 720;
+/// Extra padding after the left column (dropdown and donut), in pixels.
+pub const LEFT_COLUMN_GAP: i32 = 24;
+
+pub fn two_column(width: i32) -> bool {
+    width >= TWO_COLUMN_MIN_WIDTH
+}
+
+/// The widths of the two columns of a content width: the left column (dropdown and donut) takes 2 of 5 and the right
+/// one (rows) takes 3 of 5.
+pub fn column_widths(width: i32) -> (i32, i32) {
+    let left = width * 2 / 5;
+    (left, width - left)
+}
+
 /// The half-donut arcs of a snapshot, largest first. Zero-size entries get no arc (EC-42-T-08); a zero total has none.
 pub fn donut_arcs(snapshot: &StorageSnapshot) -> Vec<Arc> {
     if snapshot.total_bytes <= 0 {
@@ -283,5 +299,13 @@ mod tests {
         assert_eq!(delete_outcome(true), DeleteOutcome::Deleted);
         assert_eq!(delete_outcome(false), DeleteOutcome::SourceMissing);
         assert_eq!(delete_text("Berserk"), "Are you sure you wish to delete \"Berserk\"?");
+    }
+
+    #[test]
+    fn storage_two_columns_from_720_px_at_two_to_three() {
+        assert!(!two_column(719) && two_column(720));
+        assert_eq!(column_widths(800), (320, 480));
+        let (left, right) = column_widths(1001);
+        assert_eq!(left + right, 1001, "the columns fill the width");
     }
 }

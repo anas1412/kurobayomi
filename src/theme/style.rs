@@ -195,14 +195,16 @@ pub fn ripple_rules(system_dark: bool) -> String {
 /// The palette-dependent `kb-*` rules, appended to the generated palette stylesheet.
 pub fn palette_rules(tokens: &Tokens) -> String {
     let mut out = String::new();
+    // Interaction timings (T-49b-012, Elevation.kt): incoming 120 ms, outgoing (press) 150 ms, hover
+    // exit 120 ms. Plain CSS transitions; the Kotlin animation API is not ported.
     let _ = writeln!(
         out,
-        ".{} {{ transition: background-color 120ms cubic-bezier(0.4, 0, 0.2, 1); }}",
+        ".{} {{ transition: background-color 120ms cubic-bezier(0.4, 0.0, 0.2, 1.0); }}",
         class::SURFACE
     );
     let _ = writeln!(
         out,
-        ".{}:active {{ transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }}",
+        ".{}:active {{ transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0.0, 0.6, 1.0); }}",
         class::SURFACE
     );
     let _ = writeln!(out, ".{}:hover {{ transition-duration: 120ms; }}", class::SURFACE);
@@ -260,6 +262,16 @@ mod tests {
     use crate::theme::resolve::{scheme_for, tokens_for};
     use crate::theme::tokens::Rgba;
     use kuro_prefs::ui::AppTheme;
+
+    // T-49b-012: the interaction timings and curves of Elevation.kt, as generated CSS.
+    #[test]
+    fn surface_transitions_use_the_interaction_timings() {
+        let t = tokens_for(scheme_for(AppTheme::CLOUDFLARE), false, false);
+        let rules = palette_rules(&t);
+        assert!(rules.contains("transition: background-color 120ms cubic-bezier(0.4, 0.0, 0.2, 1.0);"));
+        assert!(rules.contains("transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0.0, 0.6, 1.0);"));
+        assert!(rules.contains(".kb-surface:hover { transition-duration: 120ms; }"));
+    }
 
     #[test]
     fn selected_tint_alpha_follows_the_dark_flag() {

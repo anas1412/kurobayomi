@@ -1,5 +1,5 @@
-//! Enhanced trackers: the shared framework (`enhanced.rs`, `http.rs`, `sources.rs`) and the Jellyfin tracker. Kavita,
-//! Komga and Suwayomi are separate modules (area 33 tasks T-33a-040 onward).
+//! Enhanced trackers: the shared framework (`enhanced.rs`, `http.rs`, `sources.rs`) and the Jellyfin, Kavita, Komga and
+//! Suwayomi trackers (area 33 tasks T-33a-040 onward).
 
 pub mod enhanced;
 pub mod http;
@@ -9,6 +9,7 @@ pub mod komga;
 pub mod registry;
 pub mod secret_migration;
 pub mod sources;
+pub mod suwayomi;
 
 // MangaUpdates and Simkl live at the crate root (`crate::mangaupdates`, `crate::simkl`) like the other services;
 // these re-exports give them the `trackers::` paths of the area 32 layout without moving the modules.

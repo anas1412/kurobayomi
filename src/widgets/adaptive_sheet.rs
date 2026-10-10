@@ -19,6 +19,12 @@ use gtk::prelude::*;
 use super::keyboard::{close_on_escape, trap_tab_focus};
 use crate::theme::size_class::WindowClass;
 use crate::theme::style::class::{SHEET, SHEET_SHOWN, SHEET_TABLET};
+
+/// The sheet slide time: instant under reduced motion (T-49a-057).
+fn sheet_anim_ms() -> u32 {
+    crate::theme::motion::duration_ms(SHEET_ANIM_MS, crate::theme::motion::enabled())
+}
+
 use crate::theme::tokens::{SHEET_ANIM_MS, SHEET_MAX_WIDTH_LANDSCAPE, SHEET_MAX_WIDTH_PORTRAIT, SHEET_POSITIONAL_THRESHOLD, SHEET_VELOCITY_THRESHOLD};
 
 /// Which sheet to build.
@@ -111,7 +117,7 @@ pub fn adaptive_sheet(
             panel.set_width_request(max_width(false));
             let revealer = gtk::Revealer::new();
             revealer.set_transition_type(gtk::RevealerTransitionType::SlideUp);
-            revealer.set_transition_duration(SHEET_ANIM_MS);
+            revealer.set_transition_duration(sheet_anim_ms());
             revealer.set_valign(gtk::Align::End);
             revealer.set_halign(gtk::Align::Center);
             revealer.set_child(Some(&panel));
@@ -213,7 +219,7 @@ impl AdaptiveSheet {
             None => inner.panel.remove_css_class(SHEET_SHOWN),
         }
         let this = self.clone();
-        glib::timeout_add_local_once(Duration::from_millis(u64::from(SHEET_ANIM_MS)), move || this.finish());
+        glib::timeout_add_local_once(Duration::from_millis(u64::from(sheet_anim_ms())), move || this.finish());
     }
 
     fn finish(&self) {

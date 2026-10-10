@@ -485,6 +485,20 @@ impl MangaRepo {
         self.db.write(|tx| Ok(sm::mangas::delete_not_in_library_by_source_ids(tx, source_ids).map(drop)?))
     }
 
+    /// Clear database: deletes the non-library manga of `source_ids`, then the history rows left
+    /// reset, in one transaction (Q17). Removing the manga also removes its chapters, tracks, category
+    /// links and excluded scanlators through the foreign keys. Library entries are untouched. An empty
+    /// list changes nothing and returns 0. Returns the number of history rows removed.
+    pub fn clear_non_library_by_sources(&self, source_ids: &[i64]) -> DataResult<usize> {
+        if source_ids.is_empty() {
+            return Ok(0);
+        }
+        self.db.write(|tx| {
+            sm::mangas::delete_not_in_library_by_source_ids(tx, source_ids)?;
+            Ok(sm::history::remove_resetted(tx)?)
+        })
+    }
+
     /// `(source, favourite count)` for every source with at least one favourite.
     pub fn favorite_counts_by_source(&self) -> DataResult<Vec<(i64, i64)>> {
         self.db.read(|c| Ok(sm::mangas::get_source_id_with_favorite_count(c)?))

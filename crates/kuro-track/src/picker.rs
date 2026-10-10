@@ -191,16 +191,13 @@ pub struct ScorePicker {
 }
 
 impl ScorePicker {
-    /// `None` when the tracker has no score list. Starts at the index of `current`, including index 0 (defect D8).
-    /// A value not in the list starts at the middle entry, as the source does.
+    /// `None` when the tracker has no score list. Starts at the index of `current`, including index 0 (defects
+    /// D-9, E-20, T-14). A value not in the list starts at the first item (U§5).
     pub fn new(items: &[String], current: &str) -> Option<Self> {
         if items.is_empty() {
             return None;
         }
-        let selected = items
-            .iter()
-            .position(|s| s == current)
-            .unwrap_or(items.len() / 2);
+        let selected = items.iter().position(|s| s == current).unwrap_or(0);
         Some(Self {
             items: items.to_vec(),
             selected,
@@ -620,8 +617,11 @@ mod tests {
         let p = ScorePicker::new(&items, "0").unwrap();
         assert_eq!(p.selected(), 0, "index 0 is a real start position");
         assert_eq!(p.confirm(), "0");
-        let middle = ScorePicker::new(&items, "missing").unwrap();
-        assert_eq!(middle.selected(), 1);
+        let missing = ScorePicker::new(&items, "missing").unwrap();
+        assert_eq!(missing.selected(), 0, "a value not in the list starts at the first item");
+        let three: Vec<String> = ["0", "1", "2"].iter().map(|s| s.to_string()).collect();
+        let found = ScorePicker::new(&three, "2").unwrap();
+        assert_eq!(found.selected(), 2, "the current score is found at its own index");
     }
 
     #[test]

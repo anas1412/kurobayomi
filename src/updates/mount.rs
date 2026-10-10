@@ -19,6 +19,7 @@ use crate::updates::download_host;
 use crate::updates::library_trigger::{self, Outcome};
 use crate::updates::history_screen::HistoryScreen;
 use crate::updates::nav::{Reselect, reselect_action};
+use crate::updates::qualities;
 use crate::updates::stats_data;
 use crate::updates::stats_screen::StatsScreen;
 use crate::updates::storage::{self, StorageRow};
@@ -76,6 +77,19 @@ pub fn history() -> Option<Built> {
 
 /// The spec label of the toolbar button that starts a library update.
 const UPDATE_LIBRARY: &str = "Update library";
+/// The spec label of the toolbar button that opens the Upcoming page.
+const VIEW_UPCOMING: &str = "View Upcoming Updates";
+
+thread_local! {
+    /// The kind whose Upcoming page the toolbar button last asked for; `screens::build("upcoming")` reads it.
+    static UPCOMING_KIND: std::cell::Cell<EntryKind> = const { std::cell::Cell::new(EntryKind::Anime) };
+}
+
+/// The Upcoming page of the kind the Updates toolbar asked for (anime until it asks). `None` before the app data is open.
+/// The page is built by `ui::open("upcoming")` through `screens::build`.
+pub fn upcoming() -> Option<GBox> {
+    crate::updates::upcoming::page::build(UPCOMING_KIND.with(|k| k.get()))
+}
 
 /// The Updates page: both kinds under the spec toolbar. There is no search field. `None` before the app data is open.
 /// The new-updates counters reset when the page is shown and when it is left (T-42b-020).
@@ -83,6 +97,8 @@ pub fn updates() -> Option<Built> {
     if !crate::data::is_installed() {
         return None;
     }
+    // before the screens: their rows offer Show qualities only while a sheet is registered
+    qualities::install_episode_options();
     let (anime, manga) = (UpdatesScreen::new(EntryKind::Anime), UpdatesScreen::new(EntryKind::Manga));
     let (page, stack) = kind_pages(anime.widget().upcast_ref(), manga.widget().upcast_ref());
     page.connect_map(|_| reset_new_updates());
@@ -94,6 +110,13 @@ pub fn updates() -> Option<Built> {
         if item.label == UPDATE_LIBRARY {
             let stack = stack.clone();
             button.connect_clicked(move |button| update_library(button, &stack));
+        } else if item.label == VIEW_UPCOMING {
+            // each kind has its own Upcoming page, as in the source (the anime tab opens the anime one)
+            let stack = stack.clone();
+            button.connect_clicked(move |_| {
+                UPCOMING_KIND.with(|k| k.set(kind_of(stack.visible_child_name().as_deref())));
+                crate::ui::open("upcoming");
+            });
         } else {
             let label = item.label.clone();
             button.connect_clicked(move |_| {
@@ -163,14 +186,22 @@ pub fn stats() -> Option<Built> {
 /// Aggregates the statistics of one kind off the GTK thread.
 async fn stats_of(kind: EntryKind) -> Option<stats_data::Loaded> {
     let db = crate::data::app().db(kind);
-    // the anime download cache is not in the shell, so its count stays 0 until the downloads layer reports it
     let index = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
+    let rules = stats_data::GlobalUpdateRules::from_library_prefs(
+        &kuro_prefs::library::LibraryPrefs::new(crate::data::app().base.store().clone()),
+        kind,
+    );
     download_host::blocking(move || {
         let downloaded = match kind {
             EntryKind::Manga => index.map_or(0, |i| i.chapter_count_total() as i64),
-            EntryKind::Anime => 0,
+            EntryKind::Anime => download_host::anime_index().map_or(0, |i| i.episode_count_total() as i64),
         };
-        stats_data::load(&db, kind, downloaded)
+        // a store that cannot be opened reads as nobody logged in (the tracker section then shows N/A)
+        let logged_in = match kuro_platform::linux::paths::LinuxPaths::system() {
+            Ok(paths) => crate::library::trackers::logged_in(&kuro_platform::linux::secrets::open(&paths), kind),
+            Err(_) => Default::default(),
+        };
+        stats_data::load(&db, kind, downloaded, &logged_in, &rules)
     })
     .await
 }

@@ -7,7 +7,7 @@
 use reqwest::RequestBuilder;
 use reqwest::header::USER_AGENT;
 
-use crate::trackers::http::USER_AGENT as APP_USER_AGENT;
+use crate::trackers::http::current_user_agent;
 
 pub struct KomgaAuth {
     username: String,
@@ -24,9 +24,9 @@ impl KomgaAuth {
         !self.username.is_empty() && !self.password.is_empty()
     }
 
-    /// The request with the app User-Agent (`KomgaApi.kt:29-31`) and the Basic credential when it is set.
+    /// The request with the user's default User-Agent (`KomgaApi.kt:29-31`, T-33a-091) and the Basic credential when it is set.
     pub fn apply(&self, req: RequestBuilder) -> RequestBuilder {
-        let req = req.header(USER_AGENT, APP_USER_AGENT);
+        let req = req.header(USER_AGENT, current_user_agent());
         if self.is_set() {
             req.basic_auth(&self.username, Some(&self.password))
         } else {
@@ -40,7 +40,9 @@ mod tests {
     use reqwest::header::AUTHORIZATION;
 
     use super::*;
-    use crate::trackers::http::tracker_client;
+    use crate::trackers::http::{
+        USER_AGENT as APP_USER_AGENT, USER_AGENT_TEST_LOCK, set_user_agent_source, tracker_client,
+    };
 
     fn built(auth: &KomgaAuth) -> reqwest::Request {
         auth.apply(tracker_client().unwrap().get("http://127.0.0.1:1/x"))
@@ -63,7 +65,17 @@ mod tests {
 
     #[test]
     fn t_33a_061_every_request_carries_the_app_user_agent() {
+        let _guard = USER_AGENT_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let req = built(&KomgaAuth::new(String::new(), String::new()));
         assert_eq!(req.headers()[USER_AGENT], APP_USER_AGENT);
+    }
+
+    #[test]
+    fn t_33a_091_a_request_carries_the_default_user_agent_preference() {
+        let _guard = USER_AGENT_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        set_user_agent_source(std::sync::Arc::new(|| "Mine/1.0".to_owned()));
+        let req = built(&KomgaAuth::new(String::new(), String::new()));
+        crate::trackers::http::clear_user_agent_source();
+        assert_eq!(req.headers()[USER_AGENT], "Mine/1.0");
     }
 }

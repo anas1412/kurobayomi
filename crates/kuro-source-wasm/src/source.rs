@@ -45,7 +45,9 @@ pub async fn instantiate(
     instantiate_with_deadline(bytes, hosts, factory, env, CALL_DEADLINE_TICKS).await
 }
 
-async fn instantiate_with_deadline(
+/// [`instantiate`] with the call deadline in epoch ticks, so a test can stop a spinning guest quickly.
+#[doc(hidden)]
+pub async fn instantiate_with_deadline(
     bytes: Vec<u8>,
     hosts: Vec<String>,
     factory: bool,
@@ -281,13 +283,11 @@ impl CatalogueSource for WasmSource {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
-
     use kuro_source::error::SourceError;
     use serde_json::json;
 
     use super::*;
-    use crate::test_guest::{Behaviour, env, guest, without_invoke};
+    use crate::test_guest::{Behaviour, env, guest};
 
     /// One source of a single-guest package, built without the loader, so each test can pick the guest's answer.
     fn direct(bytes: Vec<u8>, id: i64, deadline_ticks: u64) -> WasmSource {
@@ -418,39 +418,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_spinning_guest_is_stopped_by_the_epoch_deadline() {
-        let started = Instant::now();
-        let (host_env, _dir) = env();
-        let outcome = instantiate_with_deadline(guest(Behaviour::Spins), Vec::new(), false, host_env, 5)
-            .await
-            .map(|sources| sources.len());
-        match outcome {
-            Err(WasmError::Instantiate(text)) => {
-                assert!(text.contains("interrupt"), "the epoch deadline stops it: {text}")
-            }
-            other => panic!("expected the deadline to stop the guest, got {other:?}"),
-        }
-        assert!(
-            started.elapsed() < Duration::from_secs(20),
-            "stopped by the deadline, not by the test"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_guest_that_grows_past_its_memory_limit_traps() {
-        let (host_env, _dir) = env();
-        let outcome = instantiate(guest(Behaviour::Grows), Vec::new(), false, host_env)
-            .await
-            .map(|sources| sources.len());
-        match outcome {
-            Err(WasmError::Instantiate(text)) => {
-                assert!(text.contains("unreachable"), "the grow refusal traps: {text}")
-            }
-            other => panic!("expected a trap, got {other:?}"),
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn a_guest_error_text_is_the_source_error_text() {
         let source = direct(
             guest(Behaviour::Fails("unknown op: popular".into())),
@@ -487,18 +454,6 @@ mod tests {
             .await
             .expect("loads");
         assert!(sources.is_empty());
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_package_without_invoke_fails_with_the_missing_export_text() {
-        let (host_env, _dir) = env();
-        let outcome = instantiate(without_invoke(), Vec::new(), false, host_env)
-            .await
-            .map(|sources| sources.len());
-        assert_eq!(
-            outcome.err(),
-            Some(WasmError::Instantiate("missing export invoke".into()))
-        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

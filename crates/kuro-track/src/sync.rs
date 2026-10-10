@@ -3,7 +3,7 @@
 
 use futures::future::join_all;
 
-use crate::ctx::TrackCtx;
+use crate::ctx::{REFRESH_PARALLELISM, TrackCtx};
 use crate::error::TrackError;
 use crate::error::redact;
 use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
@@ -112,6 +112,16 @@ async fn sync_manga_inner(
     Ok(())
 }
 
+/// The log line of a failed refresh (T-27b-034, D-5). It names the entry as `animeId=` or `mangaId=`, then the tracker
+/// id and name. It never carries the error text, a token or a URL.
+pub fn refresh_failure_log(kind: Kind, entry_id: i64, tracker: TrackerId, name: &str) -> String {
+    let key = match kind {
+        Kind::Anime => "animeId",
+        Kind::Manga => "mangaId",
+    };
+    format!("Failed to refresh track data {key}={entry_id} for service {} ({name})", tracker.0)
+}
+
 /// Refreshes every logged-in anime binding of the entry, concurrently. Returns the `(tracker, error)` failures.
 /// A failure does not stop the others. Logged-out bindings are skipped without a failure.
 pub async fn refresh_anime(
@@ -128,7 +138,10 @@ pub async fn refresh_anime(
         refresh_one_anime(ctx, entry_id, *id, &**t)
             .await
             .err()
-            .map(|e| (*id, e))
+            .map(|e| {
+                tracing::error!("{}", refresh_failure_log(Kind::Anime, entry_id, *id, t.name()));
+                (*id, e)
+            })
     }))
     .await;
     Ok(results.into_iter().flatten().collect())
@@ -148,7 +161,10 @@ async fn refresh_one_anime(
     let Some(binding) = ctx.anime_binding(entry_id, id).await? else {
         return Ok(());
     };
-    let fresh = api.refresh(&binding).await?;
+    let fresh = {
+        let _permit = ctx.refresh_limit.acquire(id).await;
+        api.refresh(&binding).await?
+    };
     let updated = AnimeTrack {
         id: binding.id,
         anime_id: binding.anime_id,
@@ -175,7 +191,10 @@ pub async fn refresh_manga(
         refresh_one_manga(ctx, manga_id, *id, &**t)
             .await
             .err()
-            .map(|e| (*id, e))
+            .map(|e| {
+                tracing::error!("{}", refresh_failure_log(Kind::Manga, manga_id, *id, t.name()));
+                (*id, e)
+            })
     }))
     .await;
     Ok(results.into_iter().flatten().collect())
@@ -195,7 +214,10 @@ async fn refresh_one_manga(
     let Some(binding) = ctx.manga_binding(manga_id, id).await? else {
         return Ok(());
     };
-    let fresh = api.refresh(&binding).await?;
+    let fresh = {
+        let _permit = ctx.refresh_limit.acquire(id).await;
+        api.refresh(&binding).await?
+    };
     let updated = MangaTrack {
         id: binding.id,
         manga_id: binding.manga_id,
@@ -338,6 +360,46 @@ mod tests {
         assert_eq!(failures[0].1.to_string(), "kitsu down");
         // AniList still refreshed and stored its row.
         assert_eq!(h.ctx.anime_tracks.list_for_entry(4).await.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn t_27b_034_anime_and_manga_log_lines_use_their_own_key_and_no_secret() {
+        assert_eq!(
+            refresh_failure_log(Kind::Anime, 7, TrackerId::KITSU, "Kitsu"),
+            "Failed to refresh track data animeId=7 for service 3 (Kitsu)"
+        );
+        assert_eq!(
+            refresh_failure_log(Kind::Manga, 9, TrackerId::KAVITA, "Kavita"),
+            "Failed to refresh track data mangaId=9 for service 8 (Kavita)"
+        );
+    }
+
+    #[tokio::test]
+    async fn t_27a_081_one_tracker_serves_at_most_four_refresh_requests_at_once() {
+        let h = Harness::new();
+        let mut held = Vec::new();
+        for _ in 0..REFRESH_PARALLELISM {
+            held.push(h.ctx.refresh_limit.acquire(TrackerId::ANILIST).await.unwrap());
+        }
+        let fifth = tokio::time::timeout(
+            std::time::Duration::from_millis(30),
+            h.ctx.refresh_limit.acquire(TrackerId::ANILIST),
+        )
+        .await;
+        assert!(fifth.is_err(), "the fifth request waits for a permit");
+        let other = tokio::time::timeout(
+            std::time::Duration::from_millis(30),
+            h.ctx.refresh_limit.acquire(TrackerId::KITSU),
+        )
+        .await;
+        assert!(other.is_ok(), "another tracker is not held back");
+        held.pop();
+        let again = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            h.ctx.refresh_limit.acquire(TrackerId::ANILIST),
+        )
+        .await;
+        assert!(again.is_ok(), "a released permit lets the next request run");
     }
 
     #[tokio::test]

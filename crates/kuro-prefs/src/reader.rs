@@ -8,14 +8,12 @@
 use crate::pref_enum;
 use crate::registry::define_prefs;
 
-pub const WEBTOON_PADDING_MIN: i32 = 0;
-pub const WEBTOON_PADDING_MAX: i32 = 25;
 /// Flash duration is stored in units of 100 ms (`pref_reader_flash_duration`).
 pub const MILLI_CONVERSION: i32 = 100;
 
-/// The webtoon side padding clamped to its UI range (`WEBTOON_PADDING_MIN..=WEBTOON_PADDING_MAX`).
+/// The webtoon side padding clamped to its UI range ([`crate::ranges::WEBTOON_SIDE_PADDING`]).
 pub fn clamp_webtoon_side_padding(value: i32) -> i32 {
-    value.clamp(WEBTOON_PADDING_MIN, WEBTOON_PADDING_MAX)
+    crate::ranges::WEBTOON_SIDE_PADDING.clamped(i64::from(value)) as i32
 }
 
 pref_enum! {
@@ -393,7 +391,7 @@ mod tests {
         assert_eq!(clamp_webtoon_side_padding(-4), 0);
         assert_eq!(clamp_webtoon_side_padding(30), 25);
         assert_eq!(clamp_webtoon_side_padding(12), 12);
-        assert_eq!((WEBTOON_PADDING_MIN, WEBTOON_PADDING_MAX, MILLI_CONVERSION), (0, 25, 100));
+        assert_eq!(MILLI_CONVERSION, 100);
     }
 
     #[test]

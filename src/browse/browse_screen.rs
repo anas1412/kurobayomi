@@ -49,7 +49,7 @@ pub struct BrowseEnv {
 }
 
 /// The loader of a source that is not installed. The stub page never asks it.
-struct NoLoader;
+pub(crate) struct NoLoader;
 
 impl PageLoader for NoLoader {
     fn load(&self, _query: BrowseQuery, _filters: FilterList, _page: u32) -> LoadFuture {
@@ -126,12 +126,7 @@ pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery, incognit
         open_url: Rc::clone(&env.open_url),
     });
     if let SourcePage::Browse(shown) = &page {
-        register(OpenBrowse {
-            listing: shown.listing.downgrade(),
-            filters,
-            search: shown.search.downgrade(),
-            chips: [Some(shown.popular.downgrade()), shown.latest.as_ref().map(|chip| chip.downgrade())],
-        });
+        register_page(shown, filters);
     }
     page
 }
@@ -151,6 +146,17 @@ thread_local! {
 
 fn register(page: OpenBrowse) {
     OPEN.with(|slot| *slot.borrow_mut() = Some(page));
+}
+
+/// Makes `shown` the page a genre search from an entry page reaches. The anime browse page registers itself the same way,
+/// so an anime entry's genre or author search runs on the anime listing below it (T-41b-024).
+pub fn register_page(shown: &super::pages::BrowseSourcePage, filters: Rc<SourceFilters>) {
+    register(OpenBrowse {
+        listing: shown.listing.downgrade(),
+        filters,
+        search: shown.search.downgrade(),
+        chips: [Some(shown.popular.downgrade()), shown.latest.as_ref().map(|chip| chip.downgrade())],
+    });
 }
 
 /// A genre search on the open browse page (`searchGenre` of the page the entry page was opened from, T-40b-038): a genre
@@ -230,8 +236,13 @@ pub fn page(screen: &str) -> Option<gtk::Box> {
     if !crate::data::is_installed() {
         return None;
     }
-    let directory = super::directory::current()?;
-    if let Some(BrowseRoute::BrowseSource { source_id, query, .. }) = pending::take_for(screen) {
+    let route = pending::take_for(screen);
+    // an anime source row, a global search row or an anime entry page parked the anime route for the same screen
+    if let Some(BrowseRoute::AnimeBrowseSource { source_id, query }) = route {
+        return super::anime::browse_screen::page(source_id, query);
+    }
+    if let Some(BrowseRoute::BrowseSource { source_id, query, .. }) = route {
+        let directory = super::directory::current()?;
         let env = production_env(directory);
         let package = env.directory.sources().into_iter().find(|entry| entry.source.id == source_id).map(|entry| entry.package);
         let incognito = crate::data::app().base.incognito_mode.get()
@@ -243,11 +254,18 @@ pub fn page(screen: &str) -> Option<gtk::Box> {
     entry_search(screen)
 }
 
-/// A genre or source-line search of the manga page on show.
-fn entry_search(screen: &str) -> Option<gtk::Box> {
-    if visible_page() != "screen:manga_entry_details" {
-        return None;
+/// The entry page on show that a parked genre or title search comes from, and the kind of its catalogue.
+pub(super) fn search_caller() -> Option<super::route::BrowseKind> {
+    match visible_page().as_str() {
+        "screen:manga_entry_details" => Some(super::route::BrowseKind::Manga),
+        "screen:anime_entry_details" => Some(super::route::BrowseKind::Anime),
+        _ => None,
     }
+}
+
+/// A genre or source-line search of the manga or anime page on show.
+fn entry_search(screen: &str) -> Option<gtk::Box> {
+    let kind = search_caller()?;
     let request = crate::entry_core::handoff::take_search()?;
     let (names, shown) = crate::ui::page_stack();
     if previous_is_browse(&names, shown) && search_open(&request.query) {
@@ -260,7 +278,7 @@ fn entry_search(screen: &str) -> Option<gtk::Box> {
         crate::ui::tag(&placeholder, screen);
         return Some(placeholder);
     }
-    pending::park(super::global_search::deep_link_fallback(&request.query));
+    pending::park(super::global_search::deep_link_fallback_for(kind, &request.query));
     Some(crate::screens::build("global_search"))
 }
 

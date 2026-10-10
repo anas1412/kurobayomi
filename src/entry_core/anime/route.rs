@@ -40,6 +40,7 @@ use super::downloads::{DownloadMenu, NEXT_COUNTS, menu_visible};
 use super::intro_dialog;
 use super::overflow::{self, Entry as OverflowEntry, Item as OverflowItem};
 use super::viewer;
+use super::dialog_state::{AnimeDialog, DialogSlot};
 use super::duplicate::Choice;
 use super::images::ImageKind;
 use super::images_view;
@@ -54,7 +55,7 @@ use super::info::header_model;
 use super::layout::{bottom_bar_width, fab_expanded, two_pane};
 use super::model::{AnimeEntryModel, AnimeLoadContext};
 use super::refresh::refresh_snack;
-use super::remote::{NoSources, RemoteAnimeBackend};
+use super::remote::{LiveSources, RemoteAnimeBackend};
 use super::row_view::{EpisodeList, EpisodeSwipe};
 use super::runner::{self, AnimeBackend, AnimeCmd, AnimeEvent, AnimeRunner};
 use super::settings_view::{Change, SettingsWindow};
@@ -115,11 +116,11 @@ fn page_for(anime_id: i64) -> GBox {
         ..Default::default()
     };
     let handle = tokio::runtime::Handle::current();
-    // no registry of live anime sources yet: every fetch reports that the source is not installed
+    // the live sources of this build; an id it does not know reports that the source is not installed
     let root = crate::shell::host::Shell::get().map(|shell| shell.downloads().root().to_path_buf());
     let downloads = AnimeDownloads::new(AnimeLayout::new(root), installed_queue());
     let backend: Arc<dyn AnimeBackend> =
-        Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(NoSources), handle.clone()).with_downloads(downloads));
+        Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::builtin()), handle.clone()).with_downloads(downloads));
     let runner = Rc::new(runner::spawn(&handle, AnimeStore::new(Arc::clone(&db)), prefs.clone(), Arc::clone(&backend), ctx));
     runner.send(AnimeCmd::Load { anime_id });
     assemble(runner, show_airing, Env { prefs, backend, db, handle: Some(handle) })
@@ -180,6 +181,11 @@ struct View {
     bar_count: Label,
     settings: RefCell<Option<Rc<SettingsWindow>>>,
     season_settings: RefCell<Option<Rc<SeasonSettingsWindow>>>,
+    /// The one dialog slot (T-39b-030) and the window that shows it. `dialog_gen` names the request on screen, so the
+    /// close of a window that a newer request replaced is ignored.
+    dialogs: RefCell<DialogSlot>,
+    dialog_window: RefCell<Option<gtk::Window>>,
+    dialog_gen: Cell<u64>,
     seasons: SeasonGrid,
     /// What the season grid shows: its cells, columns, whether the size is fixed, and the width bucket.
     seasons_shown: RefCell<Option<(Vec<SeasonItem>, Layout)>>,
@@ -517,6 +523,9 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         bar_count,
         settings: RefCell::new(None),
         season_settings: RefCell::new(None),
+        dialogs: RefCell::default(),
+        dialog_window: RefCell::new(None),
+        dialog_gen: Cell::new(0),
         seasons,
         seasons_shown: RefCell::new(None),
         two_pane: Cell::new(None),
@@ -685,7 +694,7 @@ fn key_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
 }
 
 impl View {
-    fn on_event(&self, event: AnimeEvent) {
+    fn on_event(self: &Rc<Self>, event: AnimeEvent) {
         match event {
             AnimeEvent::Loaded(loaded) => {
                 self.loaded.set(true);
@@ -721,6 +730,7 @@ impl View {
                 }
             }
             AnimeEvent::Categories { all, linked } => self.show_category_dialog(&all, &linked),
+            AnimeEvent::AddCategories { all, linked } => self.show_add_category_dialog(&all, &linked),
             AnimeEvent::Added => {}
             AnimeEvent::Removed(outcome) => {
                 // downloads exist: ask whether they go too. Dismissing the prompt keeps them.
@@ -955,6 +965,52 @@ impl View {
         self.render();
     }
 
+    /// Puts `dialog` in the slot: the one on screen closes first, so the last request wins. Returns the name of the
+    /// request, for `adopt`.
+    fn claim_slot(&self, dialog: AnimeDialog) -> u64 {
+        let id = self.dialog_gen.get() + 1;
+        self.dialog_gen.set(id);
+        self.dialogs.borrow_mut().open(dialog);
+        let old = self.dialog_window.borrow_mut().take();
+        if let Some(old) = old {
+            old.close();
+        }
+        id
+    }
+
+    /// Keeps the window of request `id`. Its close, however it happens, dismisses the slot unless the window said
+    /// otherwise (`dismiss_on_close` false: the category dialog reports its own OK and dismiss).
+    fn adopt(self: &Rc<Self>, id: u64, window: &gtk::Window, dismiss_on_close: bool) {
+        *self.dialog_window.borrow_mut() = Some(window.clone());
+        if dismiss_on_close {
+            let weak = Rc::downgrade(self);
+            window.connect_close_request(move |_| {
+                if let Some(view) = weak.upgrade() {
+                    view.dismiss_dialog(id);
+                }
+                glib::Propagation::Proceed
+            });
+        }
+    }
+
+    /// `autoOpenTrack`: a tracker is logged in and "open the track menu on adding" is on.
+    fn auto_open_track(&self) -> bool {
+        self.env.backend.has_logged_in_tracker() && self.env.prefs.pref::<bool>("track_on_adding_to_library", true).get()
+    }
+
+    /// The dismiss of request `id` (`onDismissRequest`). When the add flow chose a category and auto-open is on, the
+    /// track sheet opens now.
+    fn dismiss_dialog(&self, id: u64) {
+        if self.dialog_gen.get() != id {
+            return;
+        }
+        self.dialog_window.borrow_mut().take();
+        let auto = self.auto_open_track();
+        if self.dialogs.borrow_mut().dismiss(auto) {
+            ui::open("tracking_sheet");
+        }
+    }
+
     /// The interval button (T-39a-026): the dialog of a favorite. OK and Reset store the wheel through the runner.
     fn open_interval(self: &Rc<Self>) {
         let (anime_id, interval, expected, favorite) = {
@@ -967,9 +1023,11 @@ impl View {
             return;
         }
         let runner = self.runner.clone();
-        fetch_interval_dialog::open(interval, expected, move |wheel| {
+        let id = self.claim_slot(AnimeDialog::SetAnimeFetchInterval { anime_id });
+        let window = fetch_interval_dialog::open(interval, expected, move |wheel| {
             runner.send(AnimeCmd::SetFetchInterval { anime_id, wheel });
         });
+        self.adopt(id, &window, true);
     }
 
     /// The library button: adds the entry, or removes it from the library.
@@ -986,20 +1044,25 @@ impl View {
 
     /// The duplicate window of an add that found a same-named library entry. A row closes it first and then acts: Show
     /// opens the entry that is there, Migrate starts the migrate flow from it, Add anyway adds without the check.
-    fn show_duplicate(&self, existing: &[kuro_data::anime::Anime]) {
+    fn show_duplicate(self: &Rc<Self>, existing: &[kuro_data::anime::Anime]) {
         let (Some(duplicate), Some(anime_id)) = (existing.first().cloned(), self.model.borrow().as_ref().map(|m| m.anime.id)) else { return };
         let runner = Rc::clone(&self.runner);
-        duplicate_view::open(move |choice| match choice {
+        let id = self.claim_slot(AnimeDialog::DuplicateAnime { anime_id, duplicate_id: duplicate.id });
+        let window = duplicate_view::open(move |choice| match choice {
             Choice::ShowAnime => open(duplicate.id),
             Choice::Migrate => handoff::open_migrate(MigrateRequest { entry_id: duplicate.id, anime: true, title: duplicate.title.clone() }),
             Choice::AddAnyway => runner.send(AnimeCmd::AddToLibrary { anime_id, check_duplicates: false }),
         });
+        self.adopt(id, &window, true);
     }
 
     /// The tracking button: the tracking sheet when a tracker is logged in, the tracking settings when none is (E-25).
     fn tracking_pressed(&self) {
         match tracking_click(self.env.backend.has_logged_in_tracker()) {
-            TrackingClick::Sheet => ui::open("tracking_sheet"),
+            TrackingClick::Sheet => {
+                self.claim_slot(AnimeDialog::TrackSheet);
+                ui::open("tracking_sheet");
+            }
             TrackingClick::Settings => ui::open("settings_tracking"),
         }
     }
@@ -1022,14 +1085,60 @@ impl View {
 
     /// The category editor over the answer of `LoadCategories`. OK writes the checked ids; any other way out writes
     /// nothing.
-    fn show_category_dialog(&self, all: &[(i64, String)], linked: &[i64]) {
+    fn show_category_dialog(self: &Rc<Self>, all: &[(i64, String)], linked: &[i64]) {
         let Some(anime_id) = self.model.borrow().as_ref().map(|m| m.anime.id) else { return };
         let runner = Rc::clone(&self.runner);
-        category_dialog_view::open(
+        let id = self.claim_slot(AnimeDialog::ChangeCategory { anime_id });
+        let (ok, dismissed) = (Rc::downgrade(self), Rc::downgrade(self));
+        let window = category_dialog_view::open(
             CategoryDialog::new(anime_id, false, all, linked),
-            move |category_ids| runner.send(AnimeCmd::SetCategories { anime_id, category_ids }),
-            || {},
+            move |category_ids| {
+                runner.send(AnimeCmd::SetCategories { anime_id, category_ids });
+                if let Some(view) = ok.upgrade() {
+                    view.confirm_category(id);
+                }
+            },
+            move || {
+                if let Some(view) = dismissed.upgrade() {
+                    view.dismiss_dialog(id);
+                }
+            },
         );
+        self.adopt(id, &window, false);
+    }
+
+    /// OK in the category dialog: the slot empties without the dismiss, so the track sheet does not follow (5.3).
+    fn confirm_category(&self, id: u64) {
+        if self.dialog_gen.get() == id {
+            self.dialog_window.borrow_mut().take();
+            self.dialogs.borrow_mut().confirm_category();
+        }
+    }
+
+    /// The category dialog of an add with no default category (T-39b-026). OK adds the entry in the ticked categories;
+    /// a dismiss adds nothing, since favorite is written only with the answer.
+    fn show_add_category_dialog(self: &Rc<Self>, all: &[(i64, String)], linked: &[i64]) {
+        let Some(anime_id) = self.model.borrow().as_ref().map(|m| m.anime.id) else { return };
+        let runner = Rc::clone(&self.runner);
+        // the choose branch sets the pending flag: a dismiss may open the track sheet after it
+        let id = self.claim_slot(AnimeDialog::ChangeCategory { anime_id });
+        self.dialogs.borrow_mut().open_change_category_from_add(anime_id);
+        let (ok, dismissed) = (Rc::downgrade(self), Rc::downgrade(self));
+        let window = category_dialog_view::open(
+            CategoryDialog::new(anime_id, true, all, linked),
+            move |category_ids| {
+                runner.send(AnimeCmd::AddWithCategories { anime_id, category_ids });
+                if let Some(view) = ok.upgrade() {
+                    view.confirm_category(id);
+                }
+            },
+            move || {
+                if let Some(view) = dismissed.upgrade() {
+                    view.dismiss_dialog(id);
+                }
+            },
+        );
+        self.adopt(id, &window, false);
     }
 
     /// The width the season grid has: the page, or the right pane of the two-pane layout.
@@ -1104,7 +1213,7 @@ impl View {
                 OverflowItem::EditCategories => (tr(MsgKey::action_edit_categories), |v: &Rc<View>| v.open_categories()),
                 OverflowItem::Migrate => (tr(MsgKey::action_migrate), |v: &Rc<View>| v.migrate()),
                 OverflowItem::Share => (tr(MsgKey::action_share), |v: &Rc<View>| v.share()),
-                OverflowItem::Settings => (tr(MsgKey::action_settings), |_: &Rc<View>| ui::open("source_preferences")),
+                OverflowItem::Settings => (tr(MsgKey::action_settings), |v: &Rc<View>| v.open_source_preferences()),
             };
             let button = Button::builder().css_classes(["flat"]).build();
             button.set_child(Some(&Label::builder().label(&label).xalign(0.0).build()));
@@ -1132,9 +1241,19 @@ impl View {
         };
         let default = GesturePrefs::new(self.env.prefs.clone()).default_intro_length.get();
         let runner = self.runner.clone();
-        intro_dialog::open(viewer::dialog_start(stored, disabled, default), move |length| {
+        let id = self.claim_slot(AnimeDialog::ChangeAnimeSkipIntro);
+        let window = intro_dialog::open(viewer::dialog_start(stored, disabled, default), move |length| {
             runner.send(AnimeCmd::SetSkipIntroLength { anime_id, length });
         });
+        self.adopt(id, &window, true);
+    }
+
+    /// Settings (T-39a-057): the preferences screen of this entry's source, which the request names.
+    fn open_source_preferences(self: &Rc<Self>) {
+        let source_id = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.source);
+        if let Some(source_id) = source_id {
+            handoff::open_source_preferences(handoff::SourcePrefsRequest { source_id, anime: true });
+        }
     }
 
     /// Migrate (T-39a-075): starts the migrate flow from this entry, as the duplicate choice does.
@@ -1223,7 +1342,16 @@ impl View {
         let weak = Rc::downgrade(self);
         Handlers {
             // the query goes to the opened screen through `handoff::take_search`
-            on_search: Rc::new(|request: SearchRequest| handoff::open_search(request)),
+            on_search: Rc::new({
+                let weak = weak.clone();
+                move |request: SearchRequest| {
+                    let http_source = weak.upgrade().is_some_and(|view| {
+                        let source = view.model.borrow().as_ref().map(|m| m.anime.source);
+                        source.is_some_and(|source| view.env.backend.is_http_source(source))
+                    });
+                    handoff::open_search(request, true, http_source);
+                }
+            }),
             on_copy: Rc::new(|text: String| {
                 if let Some(display) = gtk::gdk::Display::default() {
                     display.clipboard().set_text(&text);
@@ -1367,7 +1495,7 @@ impl View {
     }
 
     /// The images window, on the cover page. An edit or a delete there moves the image's last-modified through the runner.
-    fn open_images(&self) {
+    fn open_images(self: &Rc<Self>) {
         let found = {
             let model = self.model.borrow();
             required(model.as_ref().map(|m| m.anime.clone()), || DetailsError::AnimeNotFound(0))
@@ -1376,7 +1504,9 @@ impl View {
             (Ok(anime), Some(handle)) => {
                 let (runner, anime_id) = (Rc::clone(&self.runner), anime.id);
                 let bump = Rc::new(move |kind: ImageKind| runner.send(AnimeCmd::BumpImage { anime_id, kind }));
-                images_view::open(anime, ImageKind::Cover, images_view::Env { handle, bump });
+                let id = self.claim_slot(AnimeDialog::FullImages);
+                let window = images_view::open(anime, ImageKind::Cover, images_view::Env { handle, bump });
+                self.adopt(id, &window, true);
             }
             (Err(error), _) => self.show_error(error),
             (Ok(_), None) => {}
@@ -1449,6 +1579,7 @@ impl View {
             return;
         };
         let weak = Rc::downgrade(self);
+        let id = self.claim_slot(AnimeDialog::EpisodeSettingsSheet);
         let window = SettingsWindow::new(
             word,
             downloaded_only,
@@ -1465,9 +1596,11 @@ impl View {
         window.on_close(move || {
             if let Some(view) = weak.upgrade() {
                 view.settings.borrow_mut().take();
+                view.dismiss_dialog(id);
             }
         });
         window.present();
+        self.adopt(id, window.window(), false);
         *self.settings.borrow_mut() = Some(window);
     }
 
@@ -1506,6 +1639,7 @@ impl View {
             return;
         };
         let weak = Rc::downgrade(self);
+        let id = self.claim_slot(AnimeDialog::SeasonSettingsSheet);
         let window = SeasonSettingsWindow::new(
             word,
             downloaded_only,
@@ -1522,9 +1656,11 @@ impl View {
         window.on_close(move || {
             if let Some(view) = weak.upgrade() {
                 view.season_settings.borrow_mut().take();
+                view.dismiss_dialog(id);
             }
         });
         window.present();
+        self.adopt(id, window.window(), false);
         *self.season_settings.borrow_mut() = Some(window);
     }
 

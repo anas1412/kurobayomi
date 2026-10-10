@@ -1,5 +1,19 @@
 //! Preference bindings of area 42 (T-42a-010). The keys and defaults live in the `kuro-prefs` and `kuro-downloads`
-//! structs; this test pins them to the area table, read from an empty store.
+//! structs; this test pins them to the area table, read from an empty store. The one key of this area that no shared
+//! struct owns, the Upcoming week start (T-42b-045), is bound here.
+
+use kuro_prefs::pref::Pref;
+use kuro_prefs::store::PrefStore;
+
+/// The key of the Upcoming week start: `auto` (the locale decides), `monday` or `sunday`.
+pub const WEEK_START_KEY: &str = "upcoming.week_start";
+/// The value that lets the locale decide.
+pub const WEEK_START_AUTO: &str = "auto";
+
+/// `upcoming.week_start`, default `auto`.
+pub fn week_start(store: &PrefStore) -> Pref<String> {
+    store.pref(WEEK_START_KEY, WEEK_START_AUTO.to_owned())
+}
 
 #[cfg(test)]
 mod tests {
@@ -30,6 +44,20 @@ mod tests {
 
         assert!(!PlayerPrefs::new(store.clone()).always_use_external_player.get());
         assert!(!DownloadPrefs::new(store).use_external_downloader().get());
+    }
+
+    #[test]
+    fn prefs_week_start_defaults_to_auto_and_feeds_the_calendar() {
+        use chrono::Weekday;
+        use super::week_start;
+        use crate::updates::upcoming::calendar::week_start_for;
+        let store = PrefStore::in_memory();
+        let pref = week_start(&store);
+        assert_eq!(pref.key(), "upcoming.week_start");
+        assert_eq!(pref.get(), "auto");
+        assert_eq!(week_start_for(&pref.get(), "en_US"), Weekday::Sun, "auto follows the locale");
+        pref.set("monday".to_owned()).expect("the memory store accepts writes");
+        assert_eq!(week_start_for(&pref.get(), "en_US"), Weekday::Mon, "the setting overrides the locale");
     }
 
     #[test]

@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn a_parked_route_is_handed_out_once_and_a_new_one_replaces_it() {
         assert_eq!(take(), None);
-        park(BrowseRoute::MigrateEntries { source_id: 1 });
+        park(BrowseRoute::MigrateEntries { kind: BrowseKind::Manga, source_id: 1 });
         park(BrowseRoute::GlobalSearch { kind: BrowseKind::Manga, source_id: None, query: "q".into() });
         assert_eq!(take(), Some(BrowseRoute::GlobalSearch { kind: BrowseKind::Manga, source_id: None, query: "q".into() }));
         assert_eq!(take(), None);

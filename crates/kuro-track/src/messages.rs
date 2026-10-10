@@ -104,6 +104,8 @@ pub enum MsgKey {
     LocalRemovalFailed,
     /// "No link stored for this entry". The tracker page cannot be opened or copied (E-43).
     NoTrackingLink,
+    /// "N tracking updates pending": the parked-queue toast and the sheet's pending badge (T-27a-071).
+    PendingUpdates(usize),
     /// "<name> logged in" (proposal key, part 2).
     TrackerLoggedIn(String),
     /// "<name> login failed".
@@ -276,6 +278,7 @@ impl MsgKey {
             MsgKey::LoginFailed
             | MsgKey::LocalRemovalFailed
             | MsgKey::NoTrackingLink
+            | MsgKey::PendingUpdates(_)
             | MsgKey::TrackerLoggedIn(_)
             | MsgKey::TrackerLoginFailed(_)
             | MsgKey::TrackerLoginCancelled(_)
@@ -335,6 +338,7 @@ pub fn english(key: &MsgKey) -> String {
         MsgKey::UnknownError => "Unknown error".into(),
         MsgKey::CopiedToClipboard(text) => format!("Copied to clipboard:\n{text}"),
         MsgKey::LocalRemovalFailed => "Could not remove the local tracking".into(),
+        MsgKey::PendingUpdates(n) => format!("{n} tracking updates pending"),
         MsgKey::NoTrackingLink => "No link stored for this entry".into(),
         MsgKey::TrackerLoggedIn(name) => format!("{name} logged in"),
         MsgKey::TrackerLoginFailed(name) => format!("{name} login failed"),
@@ -486,6 +490,7 @@ mod tests {
             MsgKey::copied("x"),
             MsgKey::LocalRemovalFailed,
             MsgKey::NoTrackingLink,
+            MsgKey::PendingUpdates(2),
             MsgKey::ActionCancel,
             MsgKey::ActionRemove,
             MsgKey::ActionOk,
@@ -509,6 +514,7 @@ mod tests {
                     MsgKey::LoginFailed
                         | MsgKey::LocalRemovalFailed
                         | MsgKey::NoTrackingLink
+                        | MsgKey::PendingUpdates(_)
                         | MsgKey::TrackerLoggedIn(_)
                         | MsgKey::TrackerLoginFailed(_)
                         | MsgKey::TrackerLoginCancelled(_)

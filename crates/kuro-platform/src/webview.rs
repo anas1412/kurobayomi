@@ -7,6 +7,7 @@ pub mod browser;
 pub mod data;
 pub mod solve_state;
 pub mod view;
+pub mod visible;
 
 use std::time::Duration;
 
@@ -81,6 +82,8 @@ pub struct SolveRequest {
     pub old_clearance: Option<String>,
     pub timeout: Duration,
     pub cookie_names: &'static [&'static str],
+    /// Solve in the visible challenge window (T-12a-032, see [`visible`]); the hidden solve is `false`.
+    pub visible: bool,
 }
 
 /// The WebView capability the network stack needs. Implementations run WebKit on the GTK main thread.
@@ -92,6 +95,12 @@ pub trait WebViewHost: Send + Sync {
     /// The WebKitGTK version, or `None` when it cannot be read.
     fn version(&self) -> Option<(u32, u32, u32)> {
         None
+    }
+
+    /// Whether the host can show the visible challenge window. The Cloudflare step asks for it after a hidden solve
+    /// times out (T-12a-032).
+    fn supports_visible(&self) -> bool {
+        false
     }
 
     fn version_string(&self) -> String {
@@ -192,6 +201,7 @@ mod tests {
             old_clearance: None,
             timeout: Duration::from_secs(30),
             cookie_names: &["cf_clearance"],
+            visible: false,
         };
         let outcome = futures_block_on(host.solve_challenge(req, CancellationToken::new()));
         assert_eq!(

@@ -28,7 +28,7 @@ use crate::entry_core::action_row_view::{ActionRow, RowState};
 use crate::entry_core::banner_view::{self, BannerView};
 use crate::entry_core::bulk_bar::{BulkAction, bulk_actions};
 use crate::entry_core::chapter::ChapterRow;
-use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, fab_state, indicator_action};
+use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, fab_state};
 use crate::entry_core::description_view;
 use crate::entry_core::detail::{LatestWins, LoadContext, LoadState, StoreCmd, StoreEvent};
 use crate::entry_core::dialog::{CategoryDialog, Dialog};
@@ -112,6 +112,16 @@ struct View {
     header_bar: Option<gtk::HeaderBar>,
     title: Option<Label>,
     large: Cell<bool>,
+    /// The two layouts (T-38a-036). The info block (header, actions, description) is the first thing of `col` in the small
+    /// layout, and the content of the left pane in the large one; the list head and the list are always in `col`, which
+    /// `scroller` scrolls.
+    col: GBox,
+    info: GBox,
+    left_host: GBox,
+    left_scroll: gtk::ScrolledWindow,
+    separator: gtk::Separator,
+    /// Which layout the widgets are in; `None` before the first render.
+    layout_large: Cell<Option<bool>>,
     /// The scroll value and whether the last scroll went backward, for the expanded label of the button.
     scroll: Cell<(f64, bool)>,
     handle: Option<tokio::runtime::Handle>,
@@ -235,9 +245,9 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         RowActions {
             on_indicator: {
                 let weak = Rc::clone(&on_row_view);
-                Rc::new(move |id, state| {
+                Rc::new(move |id, action| {
                     if let Some(view) = weak.borrow().upgrade() {
-                        view.act(UiAction::Download { ids: vec![id], action: indicator_action(state) });
+                        view.act(UiAction::Download { ids: vec![id], action });
                     }
                 })
             },
@@ -251,9 +261,11 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
             },
         },
     );
-    col.append(&header_slot);
-    col.append(&action_row.root);
-    col.append(&description_slot);
+    let info = GBox::new(O::Vertical, 12);
+    info.append(&header_slot);
+    info.append(&action_row.root);
+    info.append(&description_slot);
+    col.append(&info);
     col.append(&header_button);
     col.append(&spinner);
     col.append(&empty);
@@ -300,7 +312,19 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     let body = GBox::new(O::Vertical, 0);
     let overlay = gtk::Overlay::new();
     let scroller = ui::scrolled(&col);
-    stack.add_named(&scroller, Some("ready"));
+    // large layout: the info block in a pane of its own on the left, the list on the right
+    let left_host = GBox::new(O::Vertical, 0);
+    let left_scroll = ui::scrolled(&left_host);
+    left_scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+    left_scroll.set_visible(false);
+    let separator = gtk::Separator::new(O::Vertical);
+    separator.set_visible(false);
+    let ready_row = GBox::new(O::Horizontal, 0);
+    ready_row.append(&left_scroll);
+    ready_row.append(&separator);
+    ready_row.append(&scroller);
+    scroller.set_hexpand(true);
+    stack.add_named(&ready_row, Some("ready"));
     overlay.set_child(Some(&stack));
     overlay.add_overlay(&banner.widget);
     overlay.add_overlay(&fab);
@@ -365,6 +389,12 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         header_bar,
         title,
         large: Cell::new(false),
+        col,
+        info,
+        left_host,
+        left_scroll,
+        separator,
+        layout_large: Cell::new(None),
         scroll: Cell::new((0.0, false)),
         handle: tokio::runtime::Handle::try_current().ok(),
         expansion: Rc::new(Cell::new(Expansion::new(false, false))),
@@ -667,7 +697,13 @@ impl View {
         let weak = Rc::downgrade(self);
         Handlers {
             // the query goes to the opened screen through `handoff::take_search`
-            on_search: Rc::new(|request: SearchRequest| handoff::open_search(request)),
+            on_search: Rc::new({
+                let weak = weak.clone();
+                move |request: SearchRequest| {
+                    let http_source = weak.upgrade().is_some_and(|view| view.page.borrow().ready().is_some_and(|ready| ready.http_source));
+                    handoff::open_search(request, false, http_source);
+                }
+            }),
             on_copy: Rc::new({
                 let weak = weak.clone();
                 move |text: String| {
@@ -750,6 +786,7 @@ impl View {
         let genres = model.genres.clone();
         let large = is_large(width, height);
         self.large.set(large);
+        self.apply_layout(large, width);
         if !self.ready_once.replace(true) {
             self.expansion.set(Expansion::new(large, from_source));
         }
@@ -824,6 +861,31 @@ impl View {
         self.fab_label.set_label(&tr(fab.label()));
         self.fab.set_reveal_child(fab.visible);
         self.update_scroll();
+    }
+
+    /// Puts the info block where the layout wants it: in the left pane (half the width) when large, above the list when
+    /// small. A switch keeps the place in the list: the scroll value is moved by the height of the info block, which is
+    /// above the list in the small layout and beside it in the large one (E-59). The selection lives in the page state.
+    fn apply_layout(&self, large: bool, width: i32) {
+        if large {
+            self.left_scroll.set_width_request(width / 2);
+        }
+        if self.layout_large.replace(Some(large)) == Some(large) {
+            return;
+        }
+        let adjustment = self.scroller.vadjustment();
+        let (offset, info_height) = (adjustment.value(), f64::from(self.info.height()));
+        detach(&self.info);
+        if large {
+            self.left_host.append(&self.info);
+        } else {
+            self.col.prepend(&self.info);
+        }
+        self.left_scroll.set_visible(large);
+        self.separator.set_visible(large);
+        let target = layout_scroll(offset, info_height, large);
+        // the new layout is measured after this call, so the value is set once it has
+        glib::idle_add_local_once(move || adjustment.set_value(target));
     }
 
     /// The scroll position drives the label of the button (`shouldExpandFAB`) and the fade of the title and the
@@ -934,7 +996,7 @@ impl View {
                     self.act(UiAction::MarkPrevious(pointer));
                 }
             }
-            BulkAction::Download => self.act(UiAction::Download { ids, action: IndicatorAction::StartNow }),
+            BulkAction::Download => self.act(UiAction::Download { ids, action: IndicatorAction::Start }),
             BulkAction::Delete => {
                 self.act(UiAction::OpenDialog(Dialog::DeleteChapters(ids.clone())));
                 self.show_delete_dialog(ids);
@@ -1008,7 +1070,7 @@ impl View {
                 Overflow::EditCategories => (tr(MsgKey::action_edit_categories), View::open_category_dialog),
                 Overflow::Migrate => (tr(MsgKey::action_migrate), View::migrate),
                 Overflow::Share => (tr(MsgKey::action_share), View::share),
-                Overflow::Settings => (tr(MsgKey::action_settings), |_| ui::open("source_preferences")),
+                Overflow::Settings => (tr(MsgKey::action_settings), View::open_source_preferences),
             };
             let row = plain_row(&label, &popover, on_view(&weak, action));
             // one refresh runs at a time
@@ -1017,6 +1079,14 @@ impl View {
         }
         popover.set_child(Some(&col));
         popover
+    }
+
+    /// Settings: the preferences screen of this manga's source, which the request names.
+    fn open_source_preferences(self: &Rc<Self>) {
+        let source_id = self.page.borrow().ready().map(|ready| ready.manga.source);
+        if let Some(source_id) = source_id {
+            handoff::open_source_preferences(handoff::SourcePrefsRequest { source_id, anime: false });
+        }
     }
 
     /// The tracking button: the tracking sheet when a tracker is logged in, the tracking settings when none is (E-25).
@@ -1435,6 +1505,23 @@ fn menu_row(label: &str, icon: &str, popover: &gtk::Popover, on_click: impl Fn(&
     button
 }
 
+/// Takes a widget out of the box that holds it, so it can be added to another.
+fn detach(widget: &impl IsA<gtk::Widget>) {
+    if let Some(parent) = widget.parent().and_downcast::<GBox>() {
+        parent.remove(widget);
+    }
+}
+
+/// The scroll value of the list after a layout switch. Small to large drops the info block that sat above the list; large
+/// to small adds it back, except at the top of the list, where the page shows the info block first.
+fn layout_scroll(offset: f64, info_height: f64, to_large: bool) -> f64 {
+    match (to_large, offset > 0.0) {
+        (true, _) => (offset - info_height).max(0.0),
+        (false, true) => offset + info_height,
+        (false, false) => 0.0,
+    }
+}
+
 fn clear(slot: &GBox) {
     while let Some(child) = slot.first_child() {
         slot.remove(&child);
@@ -1444,6 +1531,16 @@ fn clear(slot: &GBox) {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+
+    #[test]
+    fn a_layout_switch_moves_the_scroll_by_the_height_of_the_info_block() {
+        // small to large: the info block that sat above the list is gone
+        assert_eq!(super::layout_scroll(500.0, 300.0, true), 200.0);
+        assert_eq!(super::layout_scroll(100.0, 300.0, true), 0.0, "still inside the info block: the list starts at the top");
+        // large to small: it is above the list again, unless the list is at its top
+        assert_eq!(super::layout_scroll(200.0, 300.0, false), 500.0);
+        assert_eq!(super::layout_scroll(0.0, 300.0, false), 0.0);
+    }
 
     #[test]
     fn applying_to_the_library_reports_the_count_after_the_saved_text() {
@@ -1557,6 +1654,7 @@ mod tests {
                     download: kuro_downloads::DownloadState::NotDownloaded,
                     progress: 0,
                     indicator: true,
+                    indicator_enabled: true,
                     missing: None,
                 })
                 .collect();

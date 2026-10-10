@@ -3,11 +3,37 @@
 //! decode worker with a 2x2 box filter: level 0 is the full page and each next level halves it, until the whole level
 //! fits in one tile. A frame draws the level whose texels are not finer than the screen pixels, and only the tiles that
 //! overlap the view. Pure: no GTK types. The page view uploads the tiles it is told to draw and drops the rest.
+//!
+//! Texture budget (T-43b-021). Uploaded textures are only the tiles that overlap the view of a page that is on screen;
+//! `PageView::draw_page` drops every other tile on the next frame. The frame draws a level whose texels are more than
+//! half a screen pixel, so the window it covers is under twice the view in level pixels, and [`max_tiles_for_view`]
+//! bounds the tiles of one page by that. The reader keeps the current page and two on each side ([`WINDOW_PAGES`]), so
+//! [`texture_budget_bytes`] is the peak the uploaded textures can reach, even if every page of the window were drawn at
+//! once. It is separate from the 512 MiB of decoded pixels that `decoded_lru` keeps.
 
-use crate::reader::page_decode::{DEFAULT_TILE_THRESHOLD, DecodedPage};
+use crate::reader::page_decode::{DEFAULT_TILE_THRESHOLD, DecodedPage, needs_tiling};
 
 /// The largest tile edge in pixels of a level (`hardwareBitmapThreshold`, B§10.1).
 pub const MAX_TILE_EDGE: u32 = DEFAULT_TILE_THRESHOLD;
+
+/// The pages whose textures can be alive together: the current page and two on each side (T-43b-021).
+pub const WINDOW_PAGES: u64 = 5;
+
+/// The bytes of one full tile texture, RGBA8.
+pub const TILE_TEXTURE_BYTES: u64 = MAX_TILE_EDGE as u64 * MAX_TILE_EDGE as u64 * 4;
+
+/// The most tiles one page draws for a view of `view` screen pixels. A window of `length` level pixels overlaps at most
+/// `ceil(length / edge) + 1` tiles along an axis, and the window is under twice the view (see the module notes).
+pub fn max_tiles_for_view(view: (f64, f64)) -> u64 {
+    let edge = f64::from(MAX_TILE_EDGE);
+    let along = |extent: f64| (2.0 * extent.max(0.0) / edge).ceil() as u64 + 1;
+    along(view.0) * along(view.1)
+}
+
+/// The peak bytes of uploaded tile textures for the pages of the window, for a view of `view` screen pixels.
+pub fn texture_budget_bytes(view: (f64, f64)) -> u64 {
+    WINDOW_PAGES * max_tiles_for_view(view) * TILE_TEXTURE_BYTES
+}
 
 /// A rectangle of one pyramid level, in that level's pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -31,7 +57,7 @@ impl Pyramid {
         let max_edge = max_edge.max(1);
         let mut levels = vec![page];
         while let Some(last) = levels.last() {
-            if last.width.max(last.height) <= max_edge {
+            if !needs_tiling(last.width, last.height, max_edge) {
                 break;
             }
             let next = halve(last);
@@ -43,6 +69,16 @@ impl Pyramid {
     /// The bytes of decoded pixels the pyramid holds, all levels.
     pub fn byte_size(&self) -> usize {
         self.levels.iter().map(|l| l.rgba.len()).sum()
+    }
+
+    /// The background `chooseBackground` picks for the full page (level 0), read in place.
+    pub fn choose_background(&self, landscape: bool) -> kuro_core::image::background::Background {
+        use kuro_core::image::background::{Rgba, choose_by};
+        let page = &self.levels[0];
+        choose_by(page.width, page.height, landscape, |x, y| {
+            let i = (y as usize * page.width as usize + x as usize) * 4;
+            Rgba(page.rgba[i], page.rgba[i + 1], page.rgba[i + 2], page.rgba[i + 3])
+        })
     }
 
     /// The full page's size (level 0).
@@ -179,6 +215,32 @@ mod tests {
         let two = Pyramid::new(page(8, 8, 1), 4);
         assert!(two.level_count() > 1);
         assert!(two.byte_size() > 8 * 8 * 4, "the smaller levels count too");
+    }
+
+    #[test]
+    fn the_uploaded_tiles_of_a_page_stay_within_the_documented_bound_at_every_zoom() {
+        // pages that need two and three levels, in a full HD view, over the whole range of zoom and centres; the bound does
+        // not depend on the page, so a page at the 16384 px limit holds it the same way
+        let view = (1920.0, 1080.0);
+        let bound = max_tiles_for_view(view) as usize;
+        assert_eq!(bound, 9);
+        for (w, h) in [(4100, 4100), (2100, 6000), (6000, 2100)] {
+            let pyramid = Pyramid::new(page(w, h, 7), MAX_TILE_EDGE);
+            for step in 0..60 {
+                let scale = 0.02 * 1.12f64.powi(step);
+                for (cx, cy) in [(0.0, 0.0), (f64::from(w) / 2.0, f64::from(h) / 2.0), (f64::from(w) * 0.37, f64::from(h) * 0.81)] {
+                    let (_, tiles) = pyramid.visible_tiles(scale, (cx, cy), view);
+                    assert!(tiles.len() <= bound, "{} tiles at scale {scale} on {w}x{h}", tiles.len());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_texture_budget_is_five_pages_of_the_bounded_tiles() {
+        assert_eq!(TILE_TEXTURE_BYTES, 16 * 1024 * 1024);
+        assert_eq!(texture_budget_bytes((1920.0, 1080.0)), 5 * 9 * 16 * 1024 * 1024);
+        assert!(texture_budget_bytes((800.0, 600.0)) < texture_budget_bytes((3840.0, 2160.0)), "a bigger view may draw more tiles");
     }
 
     #[test]

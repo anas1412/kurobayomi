@@ -8,6 +8,10 @@
 /// The hardware bitmap threshold default (`GLUtil.SAFE_TEXTURE_LIMIT`).
 pub const DEFAULT_TILE_THRESHOLD: u32 = 2048;
 
+/// The largest page edge that is kept as decoded (D-9, T-43b-021). Pages up to this size upload without a downscale
+/// (as tiles of at most [`DEFAULT_TILE_THRESHOLD`]); a longer edge is shrunk to this by [`limit_edge`].
+pub const MAX_TEXTURE_EDGE: u32 = 16384;
+
 /// Why a page could not be decoded (E-07).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -48,6 +52,26 @@ pub fn fit_to_width(page: DecodedPage, width: u32) -> DecodedPage {
         return page;
     }
     let height = (u64::from(page.height) * u64::from(width) / u64::from(page.width)).max(1) as u32;
+    let DecodedPage { width: src_w, height: src_h, rgba } = page;
+    match image::RgbaImage::from_raw(src_w, src_h, rgba) {
+        Some(img) => {
+            let out = image::imageops::resize(&img, width, height, image::imageops::FilterType::Triangle);
+            DecodedPage { width: out.width(), height: out.height(), rgba: out.into_raw() }
+        }
+        None => DecodedPage { width: 0, height: 0, rgba: Vec::new() },
+    }
+}
+
+/// Shrinks a page whose longer edge is above `max_edge` so that edge is `max_edge`, keeping the aspect ratio (D-9). A page
+/// within the limit is returned as it is. A page that cannot be rebuilt comes back empty, which the page view shows as a
+/// load error.
+pub fn limit_edge(page: DecodedPage, max_edge: u32) -> DecodedPage {
+    let longest = page.width.max(page.height);
+    if max_edge == 0 || longest <= max_edge {
+        return page;
+    }
+    let shrink = |edge: u32| (u64::from(edge) * u64::from(max_edge) / u64::from(longest)).max(1) as u32;
+    let (width, height) = (shrink(page.width), shrink(page.height));
     let DecodedPage { width: src_w, height: src_h, rgba } = page;
     match image::RgbaImage::from_raw(src_w, src_h, rgba) {
         Some(img) => {
@@ -122,6 +146,27 @@ mod tests {
         assert_eq!((kept.width, kept.height), (100, 50), "never enlarged");
         let zero_view = DecodedPage { width: 10, height: 10, rgba: vec![0; 400] };
         assert_eq!(fit_to_width(zero_view, 0).width, 10, "no view width, no change");
+    }
+
+    #[test]
+    fn a_page_up_to_the_texture_limit_is_kept_and_a_longer_one_is_shrunk_to_it() {
+        let at_limit = DecodedPage { width: MAX_TEXTURE_EDGE, height: 2, rgba: vec![9; MAX_TEXTURE_EDGE as usize * 2 * 4] };
+        let kept = limit_edge(at_limit, MAX_TEXTURE_EDGE);
+        assert_eq!((kept.width, kept.height), (MAX_TEXTURE_EDGE, 2), "16384 px uploads as it is");
+        let over = DecodedPage { width: 4, height: 40, rgba: vec![9; 4 * 40 * 4] };
+        let shrunk = limit_edge(over, 20);
+        assert_eq!((shrunk.width, shrunk.height), (2, 20), "the long edge is the limit and the ratio stays");
+        assert_eq!(shrunk.rgba.len(), 2 * 20 * 4);
+        let thin = DecodedPage { width: 1, height: 100, rgba: vec![9; 400] };
+        assert_eq!(limit_edge(thin, 10).width, 1, "a side never shrinks to nothing");
+        let wide = DecodedPage { width: 40, height: 4, rgba: vec![9; 40 * 4 * 4] };
+        assert_eq!(limit_edge(wide, 0).width, 40, "no limit, no change");
+    }
+
+    #[test]
+    fn the_texture_limit_is_the_d9_value_above_the_tile_threshold() {
+        assert_eq!(MAX_TEXTURE_EDGE, 16384);
+        assert!(needs_tiling(MAX_TEXTURE_EDGE, 10, DEFAULT_TILE_THRESHOLD), "a page at the limit is tiled, not downscaled");
     }
 
     #[test]

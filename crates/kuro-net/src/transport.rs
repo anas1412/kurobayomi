@@ -10,6 +10,7 @@ use futures::StreamExt;
 use reqwest::redirect::Policy;
 use tokio::sync::Semaphore;
 
+use crate::doh::DohResolver;
 use crate::error::NetError;
 use crate::logging;
 use crate::progress;
@@ -79,7 +80,20 @@ impl Transport {
         limits: TransportLimits,
         cookies: Arc<C>,
     ) -> Result<Self, NetError> {
-        let client = client_builder(&limits, cookies)
+        Self::with_doh(limits, cookies, None)
+    }
+
+    /// Like [`Transport::new`], with DNS over HTTPS answering every host name when `doh` is set (T-12a-025).
+    pub fn with_doh<C: reqwest::cookie::CookieStore + 'static>(
+        limits: TransportLimits,
+        cookies: Arc<C>,
+        doh: Option<DohResolver>,
+    ) -> Result<Self, NetError> {
+        let mut builder = client_builder(&limits, cookies);
+        if let Some(resolver) = doh {
+            builder = builder.dns_resolver(resolver);
+        }
+        let client = builder
             .build()
             .map_err(|e| NetError::Other(format!("cannot build HTTP client: {e}")))?;
         Ok(Self {

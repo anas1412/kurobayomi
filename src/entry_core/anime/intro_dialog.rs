@@ -7,7 +7,7 @@ use kuro_i18n::{MsgKey, tr};
 
 use crate::ui;
 
-pub fn open(start: i32, on_ok: impl Fn(i32) + 'static) {
+pub fn open(start: i32, on_ok: impl Fn(i32) + 'static) -> gtk::Window {
     let wheel = SpinButton::with_range(0.0, 255.0, 1.0);
     wheel.set_value(f64::from(start));
     let cancel = Button::with_label(&tr(MsgKey::action_cancel));
@@ -24,8 +24,13 @@ pub fn open(start: i32, on_ok: impl Fn(i32) + 'static) {
         let window = window.clone();
         move |_| window.close()
     });
-    ok.connect_clicked(move |_| {
-        on_ok(wheel.value_as_int());
-        window.close();
+    ok.connect_clicked({
+        let window = window.clone();
+        move |_| {
+            on_ok(wheel.value_as_int());
+            window.close();
+        }
     });
+    window.present();
+    window
 }

@@ -20,11 +20,13 @@ pub enum Field {
     Source,
 }
 
-/// "Search for `query`". `global` searches every source, otherwise only the source of the manga.
+/// "Search for `query`". `global` searches every source, otherwise only the source of the manga. `genre` marks a genre
+/// chip (`performGenreSearch`), which a Browse page with an HTTP source runs as a genre filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchRequest {
     pub query: String,
     pub global: bool,
+    pub genre: bool,
 }
 
 /// The header lines, with placeholders for blank values.
@@ -115,6 +117,7 @@ impl HeaderModel {
         Some(SearchRequest {
             query: self.raw(field)?.to_owned(),
             global: field != Field::Source,
+            genre: false,
         })
     }
 
@@ -248,7 +251,7 @@ pub fn genre_chips(genres: Option<&[String]>) -> Vec<GenreChip> {
         .filter(|g| !g.is_empty())
         .map(|g| GenreChip {
             label: g.to_owned(),
-            search: SearchRequest { query: g.to_owned(), global: false },
+            search: SearchRequest { query: g.to_owned(), global: false, genre: true },
             copy: g.to_owned(),
         })
         .collect()
@@ -313,6 +316,6 @@ mod genre_tests {
         let chips = genre_chips(Some(&genres));
         assert_eq!(chips.iter().map(|c| c.label.as_str()).collect::<Vec<_>>(), ["Action", "Drama"]);
         assert_eq!(chips[1].copy, "Drama");
-        assert_eq!(chips[0].search, SearchRequest { query: "Action".into(), global: false });
+        assert_eq!(chips[0].search, SearchRequest { query: "Action".into(), global: false, genre: true });
     }
 }

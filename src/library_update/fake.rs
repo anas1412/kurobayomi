@@ -2,6 +2,7 @@
 //! and a host that records what it was asked to show or queue.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
@@ -9,7 +10,7 @@ use kuro_domain::kind::EntryKind;
 
 use crate::library_update::error::UpdateError;
 use crate::library_update::fetch_interval::Window;
-use crate::library_update::pass::{EntryUpdate, Host, ItemSync};
+use crate::library_update::pass::{EntryUpdate, Failure, Host, ItemSync};
 use crate::library_update::queue::{FetchType, LibraryEntry, UpdateStrategy};
 use crate::library_update::source::{Fetched, SourceItem};
 use crate::library_update::store::LibraryStore;
@@ -132,6 +133,10 @@ pub struct FakeHost {
     pub enqueued: Mutex<Vec<(i64, usize)>>,
     pub starts: AtomicUsize,
     pub errors: Mutex<Vec<usize>>,
+    /// The failures of each error log the pass asked to write; the fake answers with a fixed log path.
+    pub logged: Mutex<Vec<Vec<Failure>>>,
+    /// The log path each failure notice was shown with.
+    pub error_logs: Mutex<Vec<Option<PathBuf>>>,
     pub queue_warnings: AtomicUsize,
 }
 
@@ -166,8 +171,14 @@ impl Host for FakeHost {
         self.starts.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn show_error(&self, _kind: EntryKind, failed: usize) {
+    fn write_error_log(&self, _kind: EntryKind, failures: &[Failure]) -> Option<PathBuf> {
+        self.logged.lock().unwrap().push(failures.to_vec());
+        Some(PathBuf::from("update_errors.txt"))
+    }
+
+    fn show_error(&self, _kind: EntryKind, failed: usize, log: Option<&Path>) {
         self.errors.lock().unwrap().push(failed);
+        self.error_logs.lock().unwrap().push(log.map(Path::to_path_buf));
     }
 
     fn show_queue_warning(&self, _kind: EntryKind) {

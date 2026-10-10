@@ -575,6 +575,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn t_27b_038_expiry_is_now_plus_expires_in_or_the_default_lifetime() -> TestResult {
+        for (given, lifetime) in [(Some(3600), 3600), (None, DEFAULT_LIFETIME_S)] {
+            let fake = FakeTransport::new(vec![ok(VIEWER_10)]);
+            let secrets = MemSecrets::new();
+            let prefs = PrefStore::in_memory();
+            let api = AniList::open(fake.clone(), secrets.clone(), &prefs, EventBus::default())?;
+            let before = now_s();
+            api.login(token(), given).await?;
+            let json: serde_json::Value =
+                serde_json::from_str(&secrets.raw("tracker/2/oauth").unwrap_or_default())?;
+            let expires_at = json["expires_at"].as_i64().unwrap_or(0);
+            assert!(
+                (before + lifetime..=now_s() + lifetime).contains(&expires_at),
+                "expires_at {expires_at} for expires_in {given:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn t_28a_011_login_reads_the_viewer_and_persists_the_login() -> TestResult {
         let fake = FakeTransport::new(vec![ok(VIEWER_10)]);
         let secrets = MemSecrets::new();

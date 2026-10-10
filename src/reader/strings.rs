@@ -61,6 +61,12 @@ pub const ROTATION_FORCE_LANDSCAPE: &str = "Locked landscape";
 pub const ROTATION_REVERSE_PORTRAIT: &str = "Reverse portrait";
 /// The note under the rotation choices: the value is stored but no rotation follows (E-ORI-1).
 pub const ROTATION_NO_EFFECT: &str = "Rotation has no effect on this platform";
+/// PROPOSAL (E-BRIGHT-2): shown when a positive custom brightness is asked for, since there is no backlight control.
+pub const CUSTOM_BRIGHTNESS_UNAVAILABLE: &str = "Custom brightness is not available on this display";
+/// PROPOSAL (E-SAVE-2): the suffix a saved page gets when its file name is taken, as in ` (2)`, ` (3)`.
+pub fn name_collision_suffix(n: u32) -> String {
+    format!(" ({n})")
+}
 
 pub const PREF_CATEGORY_READING_MODE: &str = "Reading mode";
 pub const PREF_CATEGORY_GENERAL: &str = "General";
@@ -89,6 +95,23 @@ pub const PREF_KEEP_SCREEN_ON: &str = "Keep screen on";
 pub const PREF_READ_WITH_LONG_TAP: &str = "Show actions on long tap";
 pub const PREF_ALWAYS_SHOW_CHAPTER_TRANSITION: &str = "Always show chapter transition";
 pub const PREF_PAGE_TRANSITIONS: &str = "Animate page transitions";
+pub const PREF_SKIP_READ_CHAPTERS: &str = "Skip chapters marked read";
+pub const PREF_SKIP_FILTERED_CHAPTERS: &str = "Skip filtered chapters";
+pub const PREF_SKIP_DUPE_CHAPTERS: &str = "Skip duplicate chapters";
+pub const PREF_PRESERVE_READING_POSITION: &str = "Preserve reading position on read chapters";
+pub const PREF_READ_WITH_VOLUME_KEYS: &str = "Volume keys";
+pub const PREF_READ_WITH_VOLUME_KEYS_INVERTED: &str = "Invert volume keys";
+pub const PREF_DOUBLE_TAP_ANIM_SPEED: &str = "Double tap animation speed";
+pub const DOUBLE_TAP_ANIM_SPEED_0: &str = "No animation";
+pub const DOUBLE_TAP_ANIM_SPEED_NORMAL: &str = "Normal";
+pub const DOUBLE_TAP_ANIM_SPEED_FAST: &str = "Fast";
+pub const PREF_HIDE_THRESHOLD: &str = "Sensitivity for hiding menu on scroll";
+pub const PREF_HIGHEST: &str = "Highest";
+pub const PREF_HIGH: &str = "High";
+pub const PREF_LOW: &str = "Low";
+pub const PREF_LOWEST: &str = "Lowest";
+/// Kurobayomi only (T-43a-039): the switch of the crash restore.
+pub const PREF_RESTORE_AFTER_CRASH: &str = "Restore the chapter and page after a crash";
 pub const PREF_FLASH_PAGE: &str = "Flash on page change";
 pub const PREF_FLASH_DURATION: &str = "Flash duration";
 pub const PREF_FLASH_PAGE_INTERVAL: &str = "Flash every";
@@ -193,6 +216,16 @@ mod tests {
     fn the_reading_mode_names_match_the_base_strings() {
         assert_eq!(VERTICAL_PLUS_VIEWER, "Long strip with gaps");
         assert_eq!(WEBTOON_VIEWER, "Long strip");
+    }
+
+    #[test]
+    fn proposal_messages_match_the_spec_text() {
+        assert_eq!(CHAPTER_NOT_DOWNLOADED, "The chapter is not downloaded. Turn off downloaded-only mode or download it first.");
+        assert_eq!(UNKNOWN_ERROR, "Unknown error");
+        assert_eq!(ROTATION_NO_EFFECT, "Rotation has no effect on this platform");
+        assert_eq!(CUSTOM_BRIGHTNESS_UNAVAILABLE, "Custom brightness is not available on this display");
+        assert_eq!(name_collision_suffix(2), " (2)");
+        assert_eq!(name_collision_suffix(10), " (10)");
     }
 
     #[test]

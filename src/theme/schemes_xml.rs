@@ -100,6 +100,13 @@ fn fixtures_cover_all_eighteen_schemes_in_order() {
     }
 }
 
+/// The known XML-versus-Kotlin mismatches (T-49b-039). The table holds the Kotlin (Compose) value,
+/// so these entries compare against `gen_schemes.py`'s `KOTLIN_OVERRIDES` instead of the XML.
+const KOTLIN_WINS: [(&str, bool, &str); 2] = [
+    ("Monochrome", false, "surfaceDim"),
+    ("Mocha", false, "inverseOnSurface"),
+];
+
 #[test]
 fn every_declared_xml_value_equals_the_scheme_value() {
     for scheme in SCHEMES.iter() {
@@ -107,6 +114,9 @@ fn every_declared_xml_value_equals_the_scheme_value() {
             let xml = fixture(scheme.name, dark);
             let table = if dark { &scheme.dark } else { &scheme.light };
             for (i, key) in KEYS.iter().enumerate() {
+                if KOTLIN_WINS.contains(&(scheme.name, dark, *key)) {
+                    continue;
+                }
                 match xml.get(*key) {
                     Some(literal) => {
                         let want = Rgba::parse_hex(literal)
@@ -177,5 +187,21 @@ fn listed_schemes_do_carry_the_eight_digit_value() {
             let table = if dark { &scheme.dark } else { &scheme.light };
             assert_eq!(table[Role::OnSurfaceVariant as usize], Some(Rgba::argb(want)), "{name}");
         }
+    }
+}
+
+/// T-49b-039: the two known mismatches carry the Kotlin value, and the XML still says otherwise.
+#[test]
+fn known_xml_mismatches_carry_the_kotlin_value() {
+    let want = [
+        ("Monochrome", Role::SurfaceDim, "FFFFFFFF", "000000"),
+        ("Mocha", Role::InverseOnSurface, "FFFBEAEB", "FBEEEB"),
+    ];
+    for (name, role, kotlin, xml_value) in want {
+        let scheme = SCHEMES.iter().find(|s| s.name == name).unwrap();
+        assert_eq!(scheme.light[role as usize], Some(Rgba::parse_hex(&format!("#{kotlin}")).unwrap()), "{name}");
+        let xml = fixture(name, false);
+        let key = KEYS[role as usize];
+        assert_eq!(xml[key], format!("#{xml_value}"), "{name} {key}");
     }
 }

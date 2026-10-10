@@ -36,6 +36,13 @@ pub fn open_manga_categories() {
     crate::ui::push(&page);
 }
 
+/// Opens the Categories page on its anime section (the anime browse page's Edit categories).
+pub fn open_anime_categories() {
+    let page = crate::screens::build("categories");
+    crate::settings_ui::view::show_kind(&page, crate::settings_ui::library::categories_tab(kuro_domain::kind::EntryKind::Anime));
+    crate::ui::push(&page);
+}
+
 /// The tab-switch channel: capacity one, drop-oldest (E-40 R-40-08). A new request replaces one nobody has read.
 #[derive(Clone)]
 pub struct PageChannel {

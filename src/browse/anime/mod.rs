@@ -6,10 +6,14 @@
 #![allow(dead_code)] // wired by the screen registration, which this lane does not own
 
 pub mod browse;
+pub mod browse_screen;
 pub mod browse_view;
+pub mod directory;
 pub mod extensions;
 pub mod favorite_store;
 pub mod loader;
+pub mod migrate_dialog;
+pub mod migrate_rules;
 pub mod prefs;
 pub mod sources;
 pub mod sources_view;

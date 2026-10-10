@@ -7,10 +7,12 @@
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub mod applock;
+pub mod backup;
 pub mod base;
 pub mod category;
 pub mod checkbox;
 pub mod datefmt;
+pub mod download;
 pub mod helpers;
 pub mod import;
 pub mod flags;
@@ -22,6 +24,7 @@ pub mod memory;
 pub mod migrate;
 pub mod network;
 pub mod pref;
+pub mod ranges;
 pub mod player;
 pub mod player_advanced;
 pub mod prefs;
@@ -31,6 +34,7 @@ pub mod security;
 pub mod settings_load;
 pub mod sort;
 pub mod source;
+pub mod source_file;
 pub mod store;
 #[cfg(test)]
 mod testutil;

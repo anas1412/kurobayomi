@@ -22,6 +22,11 @@ Options:
   --version       print the version and exit
   --run-backup    run one automatic backup and exit
   --help          print this text and exit
+
+Test hooks (ignored in release builds unless KUROBAYOMI_ALLOW_TEST_HOOKS=1):
+  KUROBAYOMI_CRASH_TEST=1       panic 500 ms after the main window is shown
+  KUROBAYOMI_CRASH_TEST=worker  panic inside a tokio task
+  KUROBAYOMI_REPORTER_DRY=1     the crash reporter prints the report path and exits 0
 ";
 
 /// True when the arguments ask for the usage text.
@@ -276,5 +281,6 @@ mod tests {
         assert!(wants_help(&argv(&["--action=show-library", "-h"])));
         assert!(!wants_help(&argv(&["--search=help"])));
         assert!(USAGE.contains("--action") && USAGE.contains("--search") && USAGE.contains("--type"));
+        assert!(["KUROBAYOMI_CRASH_TEST", "KUROBAYOMI_REPORTER_DRY", "KUROBAYOMI_ALLOW_TEST_HOOKS"].iter().all(|v| USAGE.contains(v)));
     }
 }

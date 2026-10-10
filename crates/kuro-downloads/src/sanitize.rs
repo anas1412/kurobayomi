@@ -1,48 +1,11 @@
 //! Name sanitiser: port of `DiskUtil.buildValidFilename` (behaviour 8.3) and the Windows reserved-name rule (addendum
 //! rule 5, decision D-DL-01).
 
-use kuro_core::text::take_utf16;
-
-/// Kotlin `take(240)` counts UTF-16 units.
-const MAX_UTF16_UNITS: usize = 240;
-
-#[cfg(feature = "ntfs-names")]
-const RESERVED: [&str; 22] = [
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2",
-    "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-];
-
-/// Makes one path component: trims leading and trailing dots and spaces, maps control and forbidden characters to
-/// `_`, keeps at most 240 UTF-16 units, and returns `(invalid)` for an empty result. The output equals the Kotlin
-/// output for every name without a reserved device name. With the `ntfs-names` feature (default) a reserved device
-/// name gets `_` appended before its extension, so `CON` becomes `CON_`.
+/// Makes one path component with the shared sanitiser, `kuro_core::text::build_valid_filename`. With the
+/// `ntfs-names` feature (default) the NTFS rules apply (trailing dot or space after the cut, reserved device names);
+/// without it the output equals the Kotlin output.
 pub fn build_valid_filename(orig: &str) -> String {
-    let trimmed = orig.trim_matches(|c| c == '.' || c == ' ');
-    if trimmed.is_empty() {
-        return "(invalid)".to_owned();
-    }
-    let mapped: String = trimmed.chars().map(|c| if is_forbidden(c) { '_' } else { c }).collect();
-    reserve_device_name(take_utf16(&mapped, MAX_UTF16_UNITS).to_owned())
-}
-
-fn is_forbidden(c: char) -> bool {
-    c <= '\u{1f}' || c == '\u{7f}' || "\"*/:<>?\\|".contains(c)
-}
-
-#[cfg(feature = "ntfs-names")]
-fn reserve_device_name(name: String) -> String {
-    let stem_end = name.find('.').unwrap_or(name.len());
-    let stem = name[..stem_end].trim_end_matches(' ');
-    if RESERVED.iter().any(|r| stem.eq_ignore_ascii_case(r)) {
-        format!("{stem}_{}", &name[stem_end..])
-    } else {
-        name
-    }
-}
-
-#[cfg(not(feature = "ntfs-names"))]
-fn reserve_device_name(name: String) -> String {
-    name
+    kuro_core::text::build_valid_filename(orig, cfg!(feature = "ntfs-names"))
 }
 
 #[cfg(test)]

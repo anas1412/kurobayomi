@@ -37,6 +37,9 @@ pub struct ListedPage {
 
 pub type LoadFuture = Pin<Box<dyn Future<Output = Result<ListedPage, String>> + Send>>;
 
+/// A pasted link being resolved to the library row of the entry it names; `None` when no source resolves it (T-20a-031).
+pub type LinkFuture = Pin<Box<dyn Future<Output = Option<ListItem>> + Send>>;
+
 /// Loads the pages of one source. Runs on the tokio runtime; the GTK thread never awaits it.
 pub trait PageLoader: Send + Sync + 'static {
     /// Page `page` (1-based) of `query`. `filters` is the filter list a search uses (B§4.6.1); Popular and Latest

@@ -8,7 +8,27 @@ use gtk::prelude::*;
 
 use super::layout::column_count;
 use crate::theme::components::settings_row::row;
+use crate::theme::size_class::WindowClass;
 use crate::theme::tokens::DISABLED_ALPHA;
+
+/// Settings columns keep this inset from the window edge in every window class (T-49a-066).
+pub const SETTINGS_INSET: i32 = 24;
+/// The longest settings line in the compact layout, in px (T-49a-066).
+pub const SETTINGS_COMPACT_MAX: i32 = 560;
+
+/// The widest a settings column may be in a window class: 560 px when compact, unbounded otherwise.
+pub fn settings_max_width(class: WindowClass) -> Option<i32> {
+    (class == WindowClass::Compact).then_some(SETTINGS_COMPACT_MAX)
+}
+
+/// Wraps a settings column for the window class: capped at 560 px and centred when compact. A
+/// class change takes effect when the page is next built.
+pub fn settings_column(child: &impl IsA<gtk::Widget>, class: WindowClass) -> gtk::Widget {
+    match settings_max_width(class) {
+        Some(max) => crate::clamp::clamp(child, max).upcast(),
+        None => child.as_ref().clone(),
+    }
+}
 
 pub const GRID_MIN_CELL: i32 = 128;
 pub const GRID_COLUMN_GAP: i32 = 8;
@@ -173,6 +193,15 @@ mod tests {
         assert_eq!(TriState::Disabled.icon(), "checkbox-symbolic");
         assert_eq!(TriState::EnabledIs.icon(), "checkbox-checked-symbolic");
         assert_eq!(TriState::EnabledNot.icon(), "action-unavailable-symbolic");
+    }
+
+    // T-49a-066: the 24 px inset matches the row shell, and only the compact layout is capped.
+    #[test]
+    fn settings_columns_keep_the_inset_and_cap_only_when_compact() {
+        assert_eq!(SETTINGS_INSET, crate::theme::tokens::SETTINGS_PAD_H as i32);
+        assert_eq!(settings_max_width(WindowClass::Compact), Some(560));
+        assert_eq!(settings_max_width(WindowClass::Medium), None);
+        assert_eq!(settings_max_width(WindowClass::Expanded), None);
     }
 
     #[test]

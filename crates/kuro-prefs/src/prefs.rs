@@ -10,6 +10,7 @@ use kuro_platform::paths::Paths;
 use kuro_platform::secrets::SecretStore;
 
 use crate::PrefError;
+use crate::backup::{BackupPrefs, StoragePrefs};
 use crate::base::BasePrefs;
 use crate::library::LibraryPrefs;
 use crate::migrate::{self, Migration};
@@ -37,6 +38,10 @@ pub struct Prefs {
     pub decoder: DecoderPrefs,
     /// `[torrent]`: the embedded torrent server settings (T-02a-021).
     pub torrent: TorrentPrefs,
+    /// `[backup]`: the automatic backup interval and its app state (T-02a-024).
+    pub backup: BackupPrefs,
+    /// `[storage]`: the chosen base storage folder (T-02a-024).
+    pub storage: StoragePrefs,
     /// Credential storage for tracker secrets (area 02, part 2 reads through it).
     pub secrets: Arc<dyn SecretStore>,
     store: PrefStore,
@@ -78,6 +83,8 @@ impl Prefs {
             gestures: GesturePrefs::new(store.clone()),
             decoder: DecoderPrefs::new(store.clone()),
             torrent: TorrentPrefs::new(store.clone()),
+            backup: BackupPrefs::new(store.clone()),
+            storage: StoragePrefs::new(store.clone()),
             secrets,
             store,
         }
@@ -106,7 +113,9 @@ impl Prefs {
         self.player.repair()?;
         self.gestures.repair()?;
         self.decoder.repair()?;
-        self.torrent.repair()
+        self.torrent.repair()?;
+        self.backup.repair()?;
+        self.storage.repair()
     }
 }
 

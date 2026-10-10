@@ -9,6 +9,15 @@ use std::collections::BTreeSet;
 
 use kuro_prefs::values::{Decoded, PrefType, PrefValue};
 
+/// Stored tags of the backup flags, for import tolerance and the id-remapping code.
+pub const FLAG_CATEGORIES: &str = "1";
+pub const FLAG_CHAPTERS: &str = "2";
+pub const FLAG_HISTORY: &str = "4";
+pub const FLAG_TRACK: &str = "8";
+pub const FLAG_SETTINGS: &str = "10";
+pub const FLAG_EXT_SETTINGS: &str = "20";
+pub const FLAG_EXTENSIONS: &str = "40";
+
 /// One backup flag. `tag()` is the stored string.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BackupFlag {
@@ -35,13 +44,13 @@ impl BackupFlag {
     /// The stored string of this flag.
     pub fn tag(self) -> &'static str {
         match self {
-            BackupFlag::Categories => "1",
-            BackupFlag::Chapters => "2",
-            BackupFlag::History => "4",
-            BackupFlag::Track => "8",
-            BackupFlag::Settings => "10",
-            BackupFlag::ExtSettings => "20",
-            BackupFlag::Extensions => "40",
+            BackupFlag::Categories => FLAG_CATEGORIES,
+            BackupFlag::Chapters => FLAG_CHAPTERS,
+            BackupFlag::History => FLAG_HISTORY,
+            BackupFlag::Track => FLAG_TRACK,
+            BackupFlag::Settings => FLAG_SETTINGS,
+            BackupFlag::ExtSettings => FLAG_EXT_SETTINGS,
+            BackupFlag::Extensions => FLAG_EXTENSIONS,
         }
     }
 

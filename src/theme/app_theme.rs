@@ -33,6 +33,8 @@ pub enum AppTheme {
     YinYang,
     Yotsuba,
     Monochrome,
+    /// Kurobayomi's addition (T-49a-063). Not in `AppTheme.kt`; it has no Android name.
+    TokyoNight,
     DarkBlue,
     HotPink,
     Blue,
@@ -40,7 +42,7 @@ pub enum AppTheme {
 
 impl AppTheme {
     /// Every variant, including the deprecated ones kept for parsing.
-    pub const ALL: [AppTheme; 23] = [
+    pub const ALL: [AppTheme; 24] = [
         AppTheme::GtkTheme,
         AppTheme::Default,
         AppTheme::Monet,
@@ -61,13 +63,14 @@ impl AppTheme {
         AppTheme::YinYang,
         AppTheme::Yotsuba,
         AppTheme::Monochrome,
+        AppTheme::TokyoNight,
         AppTheme::DarkBlue,
         AppTheme::HotPink,
         AppTheme::Blue,
     ];
 
-    /// The picker order: `GtkTheme`, then the 19 selectable Android themes.
-    pub const PICKER: [AppTheme; 20] = [
+    /// The picker order: `GtkTheme`, then the 19 selectable Android themes, then Tokyo Night.
+    pub const PICKER: [AppTheme; 21] = [
         AppTheme::GtkTheme,
         AppTheme::Default,
         AppTheme::Monet,
@@ -88,6 +91,7 @@ impl AppTheme {
         AppTheme::YinYang,
         AppTheme::Yotsuba,
         AppTheme::Monochrome,
+        AppTheme::TokyoNight,
     ];
 
     /// The stored name: `GTK_THEME` for `GtkTheme`, otherwise the Android constant name.
@@ -113,6 +117,7 @@ impl AppTheme {
             AppTheme::YinYang => "YINYANG",
             AppTheme::Yotsuba => "YOTSUBA",
             AppTheme::Monochrome => "MONOCHROME",
+            AppTheme::TokyoNight => "TOKYO_NIGHT",
             AppTheme::DarkBlue => "DARK_BLUE",
             AppTheme::HotPink => "HOT_PINK",
             AppTheme::Blue => "BLUE",
@@ -187,6 +192,8 @@ impl AppTheme {
             AppTheme::YinYang => MsgKey::theme_yinyang,
             AppTheme::Yotsuba => MsgKey::theme_yotsuba,
             AppTheme::Monochrome => MsgKey::theme_monochrome,
+            // A proper name, so it has no catalogue key.
+            AppTheme::TokyoNight => return Some("Tokyo Night".to_string()),
             AppTheme::DarkBlue | AppTheme::HotPink | AppTheme::Blue => return None,
         };
         Some(tr(key))
@@ -196,7 +203,9 @@ impl AppTheme {
     /// the seed (`monet`). `None` means no palette: `GtkTheme` and the deprecated names.
     pub fn scheme(self) -> Option<Scheme> {
         Some(match self {
-            AppTheme::GtkTheme | AppTheme::DarkBlue | AppTheme::HotPink | AppTheme::Blue => return None,
+            AppTheme::GtkTheme | AppTheme::TokyoNight | AppTheme::DarkBlue | AppTheme::HotPink | AppTheme::Blue => {
+                return None;
+            }
             AppTheme::Default => Scheme::DEFAULT,
             AppTheme::Monet => Scheme::MONET,
             AppTheme::Cloudflare => Scheme::CLOUDFLARE,
@@ -223,19 +232,30 @@ impl AppTheme {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::SchemeSel;
 
     #[test]
-    fn picker_lists_gtk_theme_first_and_nineteen_schemes_after() {
-        assert_eq!(AppTheme::PICKER.len(), 20);
+    fn picker_lists_gtk_theme_first_then_nineteen_schemes_then_tokyo_night() {
+        assert_eq!(AppTheme::PICKER.len(), 21);
         assert_eq!(AppTheme::PICKER[0], AppTheme::GtkTheme);
         assert_eq!(AppTheme::PICKER[1], AppTheme::Default);
         assert_eq!(AppTheme::PICKER[19], AppTheme::Monochrome);
+        assert_eq!(AppTheme::PICKER[20], AppTheme::TokyoNight);
+    }
+
+    // T-49a-063: an addition, stored as TOKYO_NIGHT, with no Aniyomi scheme of its own.
+    #[test]
+    fn tokyo_night_is_stored_and_titled_without_an_aniyomi_scheme() {
+        assert_eq!(AppTheme::from_stored("TOKYO_NIGHT"), AppTheme::TokyoNight);
+        assert_eq!(AppTheme::TokyoNight.title().as_deref(), Some("Tokyo Night"));
+        assert_eq!(AppTheme::TokyoNight.scheme(), None);
+        assert_eq!(SchemeSel::from(AppTheme::TokyoNight), SchemeSel::TokyoNight);
     }
 
     #[test]
     fn every_selectable_theme_has_a_scheme_or_is_gtk_theme() {
         for theme in AppTheme::PICKER {
-            if theme != AppTheme::GtkTheme {
+            if theme != AppTheme::GtkTheme && theme != AppTheme::TokyoNight {
                 assert!(theme.scheme().is_some(), "{theme:?}");
             }
         }

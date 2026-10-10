@@ -20,15 +20,18 @@ pub mod empty_state;
 pub mod icons;
 pub mod loading;
 pub mod monet;
+pub mod motion;
 pub mod picker;
 pub mod prefs;
 pub mod resolve;
+pub mod shared;
 pub mod size_class;
 mod schemes;
 #[cfg(test)]
 mod schemes_xml;
 pub mod style;
 pub mod tokens;
+pub mod tokyo_night;
 pub mod widget_names;
 
 use kuro_prefs::ui::{AppTheme as Scheme, ThemeMode};
@@ -43,11 +46,16 @@ pub enum SchemeSel {
     System,
     /// One of the Aniyomi schemes. `Scheme(MONET)` is the dynamic choice (see `monet`).
     Scheme(Scheme),
+    /// The bundled Kurobayomi Tokyo Night scheme (T-49a-063), stored as `TOKYO_NIGHT`.
+    TokyoNight,
 }
 
 impl From<AppTheme> for SchemeSel {
     /// `GtkTheme` and the deprecated names have no scheme, so they select `System`.
     fn from(theme: AppTheme) -> Self {
+        if theme == AppTheme::TokyoNight {
+            return SchemeSel::TokyoNight;
+        }
         match theme.scheme() {
             Some(scheme) => SchemeSel::Scheme(scheme),
             None => SchemeSel::System,
@@ -140,6 +148,12 @@ pub fn resolve_with_seed(
     contrast: f64,
 ) -> Resolved {
     let dark = is_dark(settings.mode, system_dark);
+    if settings.scheme == SchemeSel::TokyoNight {
+        return Resolved {
+            tokens: resolve::tokens_for(&tokyo_night::TOKYO_NIGHT, dark, settings.amoled),
+            system_scheme: false,
+        };
+    }
     let monet_choice = settings.scheme == SchemeSel::Scheme(Scheme::MONET);
     if let (true, Some(seed)) = (monet_choice, seed) {
         let mut tokens = monet::generate(seed, dark, contrast);

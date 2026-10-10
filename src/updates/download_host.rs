@@ -149,6 +149,24 @@ impl DownloadBackend for IndexBackend {
     }
 }
 
+/// The anime download index (T-42a-045): the same downloads folder as the shell's manga index, with its own snapshot
+/// file (a different name) in the platform cache folder. Opened on first use and shared; `None` when the platform
+/// folders cannot be resolved.
+pub fn anime_index() -> Option<kuro_downloads::anime::cache::AnimeIndex> {
+    static INDEX: OnceLock<Option<kuro_downloads::anime::cache::AnimeIndex>> = OnceLock::new();
+    INDEX
+        .get_or_init(|| {
+            use kuro_platform::paths::Paths as _;
+            let paths = kuro_platform::linux::paths::LinuxPaths::system().ok()?;
+            let cache = paths.cache_dir();
+            if let Err(e) = std::fs::create_dir_all(&cache) {
+                tracing::warn!("the anime download index snapshot folder was not created: {e}");
+            }
+            Some(kuro_downloads::anime::cache::AnimeIndex::open(paths.default_downloads_dir(), &cache))
+        })
+        .clone()
+}
+
 /// Runs `work` detached from the screen: on the shell's runtime when it exists, else on a thread. The work is not
 /// cancelled when the screen goes away. It announces a cache change when it ends, so the rows re-derive.
 pub fn spawn_detached(work: impl FnOnce() + Send + 'static) {

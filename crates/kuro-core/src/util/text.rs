@@ -32,6 +32,41 @@ pub fn take_utf16(s: &str, n: usize) -> &str {
     s
 }
 
+/// Device names that Windows refuses as file names (addendum rule 5).
+const RESERVED_DEVICE_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2",
+    "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// The one file-name sanitiser: `DiskUtil.buildValidFilename` (trim leading and trailing dots and spaces, map control
+/// and FAT-forbidden characters to `_`, `(invalid)` for an empty result, keep at most 240 UTF-16 units).
+///
+/// With `ntfs` the NTFS rules of the cross-platform addendum (rule 5) apply afterwards: a trailing dot or space left
+/// by the 240-unit cut is trimmed again, and a reserved device name gets `_` before its extension (`CON` becomes
+/// `CON_`). Without it the output equals the Kotlin output exactly.
+pub fn build_valid_filename(orig: &str, ntfs: bool) -> String {
+    let trimmed = orig.trim_matches(|c| c == '.' || c == ' ');
+    if trimmed.is_empty() {
+        return "(invalid)".to_owned();
+    }
+    let mapped: String = trimmed
+        .chars()
+        .map(|c| if c <= '\u{1f}' || c == '\u{7f}' || "\"*/:<>?\\|".contains(c) { '_' } else { c })
+        .collect();
+    let cut = take_utf16(&mapped, 240);
+    if !ntfs {
+        return cut.to_owned();
+    }
+    let cut = cut.trim_end_matches(['.', ' ']);
+    let stem_end = cut.find('.').unwrap_or(cut.len());
+    let stem = cut[..stem_end].trim_end_matches(' ');
+    if RESERVED_DEVICE_NAMES.iter().any(|r| stem.eq_ignore_ascii_case(r)) {
+        format!("{stem}_{}", &cut[stem_end..])
+    } else {
+        cut.to_owned()
+    }
+}
+
 /// Longest suffix of `s` with at most `n` UTF-16 units.
 fn take_last_utf16(s: &str, n: usize) -> &str {
     let mut used = 0;
@@ -380,6 +415,26 @@ pub fn primary_cmp(a: &str, b: &str) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn valid_filename_trims_a_trailing_dot_or_space_left_by_the_cut_when_ntfs() {
+        let spaced = format!("{} b", "a".repeat(239));
+        assert_eq!(build_valid_filename(&spaced, true), "a".repeat(239));
+        assert_eq!(build_valid_filename(&spaced, false), format!("{} ", "a".repeat(239)));
+        let dotted = format!("{}.x", "a".repeat(239));
+        assert_eq!(build_valid_filename(&dotted, true), "a".repeat(239));
+    }
+
+    #[test]
+    fn valid_filename_reserves_device_names_only_when_ntfs() {
+        assert_eq!(build_valid_filename("LPT1.txt", true), "LPT1_.txt");
+        assert_eq!(build_valid_filename("nul", true), "nul_");
+        assert_eq!(build_valid_filename("CONSOLE", true), "CONSOLE");
+        assert_eq!(build_valid_filename("CON", false), "CON");
+        assert_eq!(build_valid_filename("  ..Title.. ", true), "Title");
+        assert_eq!(build_valid_filename("a/b:c", true), "a_b_c");
+        assert_eq!(build_valid_filename("   ", true), "(invalid)");
+    }
 
     #[test]
     fn byte_size_counts_utf8_bytes() {

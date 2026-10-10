@@ -168,6 +168,7 @@ pub fn page_rows(prefs: &Prefs, anime: &[Category], manga: &[Category], open: Rc
             switch("Hide hidden categories from categories and storage screen", &l.hide_hidden_categories_settings, true),
         ],
     )];
+    tree.push(crate::settings_ui::library_update::global_update_group(prefs, anime, manga));
     tree.push(season_group(prefs));
     tree.extend(swipe_rows(prefs));
     tree
@@ -322,7 +323,7 @@ mod tests {
         assert_eq!(*opened.borrow(), ["manga", "anime"]);
         let PreferenceItem::Text { common, .. } = &g.items[0] else { panic!("text row") };
         assert_eq!(common.subtitle.as_deref(), Some("2 categories"));
-        assert_eq!(tree.len(), 4, "Categories, Season, Chapter behavior, Episode behavior");
+        assert_eq!(tree.len(), 5, "Categories, Global update, Season, Chapter behavior, Episode behavior");
     }
 
     #[test]

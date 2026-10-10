@@ -8,6 +8,8 @@ pub mod anime;
 pub mod banner;
 pub mod browse_screen;
 pub mod content;
+pub mod cookies;
+pub mod deep_link;
 pub mod dialogs;
 pub mod directory;
 pub mod entries;
@@ -35,6 +37,7 @@ pub mod listing_view;
 pub mod loader;
 pub mod migrate_list;
 pub mod migrate_nav;
+pub mod migrate_screen;
 pub mod mount;
 pub mod nav;
 pub mod names;
@@ -48,13 +51,17 @@ pub mod search_runner;
 pub mod search_screen;
 pub mod shell;
 pub mod source_prefs_page;
+pub mod source_prefs_screen;
 pub mod sources;
 pub mod sheet;
 pub mod sources_page;
 pub mod tasks;
+pub mod texts;
 pub mod trust;
 pub mod view;
 
+#[cfg(test)]
+mod model_tests;
 #[cfg(test)]
 mod smoke;
 #[cfg(test)]

@@ -13,7 +13,7 @@ use crate::ui;
 
 /// Opens the dialog for an entry with `interval` (its stored fetch interval) and `expected_next_update_ms`. OK calls
 /// `on_ok` with the wheel value and Reset with 0; the page stores `-wheel` (0 is automatic).
-pub fn open(interval: i32, expected_next_update_ms: Option<i64>, on_ok: impl Fn(i32) + 'static) {
+pub fn open(interval: i32, expected_next_update_ms: Option<i64>, on_ok: impl Fn(i32) + 'static) -> gtk::Window {
     let now = chrono::Utc::now().timestamp_millis();
     let text = match body(interval, expected_next_update_ms, now) {
         Body::Expected(days) => trf(
@@ -54,8 +54,13 @@ pub fn open(interval: i32, expected_next_update_ms: Option<i64>, on_ok: impl Fn(
             window.close();
         }
     });
-    ok.connect_clicked(move |_| {
-        on_ok(wheel.value_as_int());
-        window.close();
+    ok.connect_clicked({
+        let window = window.clone();
+        move |_| {
+            on_ok(wheel.value_as_int());
+            window.close();
+        }
     });
+    window.present();
+    window
 }

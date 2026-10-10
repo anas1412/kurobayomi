@@ -17,6 +17,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gtk::glib;
+use kuro_core::crash_dump::ExtensionStatus;
 use kuro_data::extension_store::ExtensionStoreRepo;
 use kuro_extensions::anime::browse::{RowBadges, buckets, not_runnable_by_store};
 use kuro_extensions::anime::icons::IconCache;
@@ -193,6 +194,42 @@ pub fn registry() -> Option<Arc<ExtensionRegistry>> {
     HOST.with(|h| h.borrow().as_ref().map(|host| host.registry.clone()))
 }
 
+/// The installed packages as the crash log lists them: the manga ones, then the anime ones. A manga listing carries only
+/// version codes, so those stand in for the version names.
+pub fn crash_log_extensions() -> (Vec<ExtensionStatus>, Vec<ExtensionStatus>) {
+    let manga = registry().map(|r| manga_statuses(&r.snapshot())).unwrap_or_default();
+    let anime = HOST.with(|h| h.borrow().as_ref().map(|host| anime_statuses(&host.state.borrow()))).unwrap_or_default();
+    (manga, anime)
+}
+
+fn manga_statuses(snapshot: &Snapshot) -> Vec<ExtensionStatus> {
+    snapshot
+        .installed
+        .values()
+        .map(|ext| ExtensionStatus {
+            name: ext.name.clone(),
+            installed_name: ext.version_code.to_string(),
+            installed_code: ext.version_code,
+            available: snapshot.available.get(&ext.pkg).map(|a| (a.version_code.to_string(), a.version_code)),
+            obsolete: ext.is_obsolete,
+        })
+        .collect()
+}
+
+fn anime_statuses(state: &ExtensionState) -> Vec<ExtensionStatus> {
+    state
+        .installed()
+        .values()
+        .map(|ext| ExtensionStatus {
+            name: ext.name.clone(),
+            installed_name: ext.version_name.clone(),
+            installed_code: ext.version_code,
+            available: state.available().iter().find(|a| a.pkg == ext.pkg).map(|a| (a.version_name.clone(), a.version_code)),
+            obsolete: ext.is_obsolete,
+        })
+        .collect()
+}
+
 /// The number of anime packages with an update, derived from the state and never stored.
 pub fn anime_update_count() -> usize {
     HOST.with(|h| h.borrow().as_ref().map_or(0, |host| host.state.borrow().update_count()))
@@ -302,6 +339,20 @@ mod tests {
     use kuro_extensions::registry::{Installed, Untrusted};
 
     use super::*;
+
+    #[test]
+    fn manga_statuses_pair_each_installed_package_with_its_listing() {
+        let installed = |pkg: &str, code: i64, obsolete: bool| Installed { pkg: pkg.into(), name: pkg.to_uppercase(), version_code: code, lib_version: 1.0, has_update: false, is_obsolete: obsolete };
+        let mut snapshot = Snapshot::default();
+        snapshot.installed.insert("a".into(), installed("a", 1, false));
+        snapshot.installed.insert("b".into(), installed("b", 5, true));
+        snapshot.available.insert("a".into(), kuro_extensions::registry::Available { pkg: "a".into(), version_code: 3, lib_version: 1.0 });
+        let got = manga_statuses(&snapshot);
+        assert_eq!(got[0].available, Some(("3".to_owned(), 3)));
+        assert!(!got[0].obsolete);
+        assert_eq!(got[1].available, None);
+        assert!(got[1].obsolete);
+    }
 
     fn listed(pkg: &str, kind: Kind, lang: &str) -> Available {
         Available {

@@ -13,10 +13,10 @@
 //! - The sidebar hides while entries are selected ([`selecting`] and [`on_selection_change`], B-1.4).
 
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use gtk::glib;
 use gtk::prelude::*;
 use kuro_data::anime::{AnimeRepo, AnimeUpdate};
 use kuro_data::manga::{MangaRepo, MangaUpdate};
@@ -32,6 +32,8 @@ use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::ui::NavStyle;
 
 use crate::library::actions::delete_plan;
+use crate::library::trackers::{self, Logins};
+use crate::library::download_facts;
 use crate::library::query::{Facts, SourceInfo};
 use crate::library::view::{Deps, LibraryView, Nav};
 use crate::screens::Built;
@@ -358,7 +360,7 @@ fn nav(kind: EntryKind, db: Arc<Db>) -> Nav {
                 };
                 let done = remove_from_library(&paths, &db, kind, &plan.unfavorite);
                 if let Some(text) = crate::library::actions::partial_failure_toast(done, plan.unfavorite.len()) {
-                    crate::toast::notify(text);
+                    crate::library::toast::notify(text);
                 }
                 if !plan.delete_downloads.is_empty() {
                     let sink = DELETE_DOWNLOADS_SINK.with(|s| s.borrow().clone());
@@ -399,6 +401,14 @@ fn nav(kind: EntryKind, db: Arc<Db>) -> Nav {
     }
 }
 
+/// The app's secret store, opened on the worker thread of [`Logins`]. Without data paths nobody is logged in.
+fn open_secrets() -> Arc<dyn kuro_platform::secrets::SecretStore> {
+    match LinuxPaths::system() {
+        Ok(paths) => Arc::new(kuro_platform::linux::secrets::open(&paths)),
+        Err(_) => Arc::new(kuro_prefs::memory::MemorySecrets::default()),
+    }
+}
+
 fn deps(kind: EntryKind) -> Deps {
     let app = crate::data::app();
     let db = app.db(kind);
@@ -411,18 +421,28 @@ fn deps(kind: EntryKind) -> Deps {
     ));
     let source_db = db.clone();
     let downloaded_only = app.base.downloaded_only.clone();
+    // the per-row download count comes from the download index; the tracker logins from the secret store
+    let index = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
+    let logins = Rc::new(Logins::new(kind, open_secrets, move || {
+        glib::MainContext::default().invoke(move || {
+            if let Some(view) = visible(Some(kind)) {
+                view.refresh();
+            }
+        });
+    }));
+    let (names_logins, ids_logins) = (logins.clone(), logins);
     Deps {
         kind,
         db,
         prefs,
         categories,
         facts: Facts {
-            downloads: Arc::new(|_| 0),
+            downloads: download_facts::lookup(kind, index),
             source: Arc::new(move |id| source_info(&source_db, kind, id)),
         },
         downloaded_only: Rc::new(move || downloaded_only.get()),
-        logged_in: Rc::new(BTreeSet::new),
-        tracker_names: Rc::new(Vec::new),
+        logged_in: Rc::new(move || ids_logins.get()),
+        tracker_names: Rc::new(move || trackers::names(kind, &names_logins.get())),
         always_external: Rc::new(|| false),
         item_downloaded: Rc::new(|_| false),
     }
@@ -453,6 +473,15 @@ pub fn build(anime: bool) -> Option<Built> {
     let filter = crate::ui::icon_button("view-filter-symbolic", &tr(MsgKey::action_filter));
     let v = view.clone();
     filter.connect_clicked(move |_| v.open_settings());
+    // tinted while a filter is on, the forced downloaded-only view included (T-37a-056)
+    let tinted = filter.clone();
+    view.on_filters_active(move |active| {
+        if active {
+            tinted.add_css_class("accent");
+        } else {
+            tinted.remove_css_class("accent");
+        }
+    });
     let entries = crate::ui::screen(spec_id(kind)).menu;
     let v = view.clone();
     let menu = crate::ui::menu_button("view-more-symbolic", &entries, move |label| {

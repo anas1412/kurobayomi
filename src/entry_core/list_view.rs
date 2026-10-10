@@ -13,6 +13,7 @@ use kuro_downloads::DownloadState;
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::library::{ChapterSwipeAction, LibraryPrefs};
 
+use crate::entry_core::chapter_actions::{IndicatorAction, Outcome, Press, menu_label, outcome, ring};
 use crate::entry_core::list_model::{DOT_SIZE, Diff, ROW_PADDING, RowItem, diff, row_alpha};
 use crate::entry_core::selection::Mods;
 use crate::entry_core::swipe::{action_for, menu, side_of_drag};
@@ -20,8 +21,8 @@ use crate::entry_core::swipe::{action_for, menu, side_of_drag};
 /// A click or long press on a row: (chapter id, modifiers, long press or right click).
 pub type OnRow = Rc<dyn Fn(i64, Mods, bool)>;
 
-/// What a row reports by chapter id and its download state: a click on the download indicator.
-pub type OnIndicator = Rc<dyn Fn(i64, DownloadState)>;
+/// What a row reports by chapter id and action: the download action a press or a menu item of the indicator chose.
+pub type OnIndicator = Rc<dyn Fn(i64, IndicatorAction)>;
 
 /// What a row reports by chapter id alone: "Mark previous as read" from the context menu.
 pub type OnChapter = Rc<dyn Fn(i64)>;
@@ -57,14 +58,76 @@ fn mods_of(state: ModifierType) -> Mods {
     }
 }
 
+/// The icon of the three states that draw one. A queued or downloading row draws a ring instead (`chapter_actions::ring`).
 fn download_icon(state: DownloadState) -> Option<&'static str> {
     match state {
         DownloadState::NotDownloaded => Some("document-save-symbolic"),
-        DownloadState::Queue => Some("content-loading-symbolic"),
-        DownloadState::Downloading => Some("folder-download-symbolic"),
+        DownloadState::Queue | DownloadState::Downloading => None,
         DownloadState::Downloaded => Some("emblem-ok-symbolic"),
         DownloadState::Error => Some("dialog-error-symbolic"),
     }
+}
+
+/// The side of the indicator in px, the size of the ring and its arrow.
+const INDICATOR_SIZE: i32 = 24;
+
+/// The determinate ring: the filled wedge of `fraction` of a turn over a faint track, and the arrow on top. The arrow takes
+/// the background colour once the fill is half way round (`arrow_on_fill`), so it stays visible on it.
+fn draw_ring(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, w: i32, h: i32, fraction: f64, arrow_on_fill: bool) {
+    let fg = area.color();
+    #[allow(deprecated)]
+    let bg = area.style_context().lookup_color("theme_bg_color").unwrap_or_else(|| gtk::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0));
+    let (cx, cy) = (f64::from(w) / 2.0, f64::from(h) / 2.0);
+    let radius = f64::from(w.min(h)) / 2.0;
+    let rgba = |c: &gtk::gdk::RGBA, alpha: f64| (f64::from(c.red()), f64::from(c.green()), f64::from(c.blue()), alpha);
+    // the track
+    let (r, g, b, a) = rgba(&fg, 0.25);
+    cr.set_source_rgba(r, g, b, a);
+    cr.arc(cx, cy, radius, 0.0, std::f64::consts::TAU);
+    let _ = cr.fill();
+    // the fill: a stroke as wide as the radius, so it is a wedge
+    let (r, g, b, a) = rgba(&fg, 1.0);
+    cr.set_source_rgba(r, g, b, a);
+    cr.set_line_width(radius);
+    cr.new_path();
+    cr.arc(cx, cy, radius / 2.0, -std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2 + fraction * std::f64::consts::TAU);
+    let _ = cr.stroke();
+    // the arrow
+    let (r, g, b, a) = if arrow_on_fill { rgba(&bg, 1.0) } else { rgba(&fg, 1.0) };
+    cr.set_source_rgba(r, g, b, a);
+    cr.set_line_width(2.0);
+    cr.set_line_cap(gtk::cairo::LineCap::Round);
+    cr.set_line_join(gtk::cairo::LineJoin::Round);
+    let reach = radius * 0.4;
+    cr.move_to(cx, cy - reach);
+    cr.line_to(cx, cy + reach);
+    cr.move_to(cx - reach * 0.7, cy + reach * 0.3);
+    cr.line_to(cx, cy + reach);
+    cr.line_to(cx + reach * 0.7, cy + reach * 0.3);
+    let _ = cr.stroke();
+}
+
+/// The menu a press on the indicator opens: one flat button per item, each reporting its action.
+fn indicator_menu(button: &gtk::Button, id: i64, items: &[IndicatorAction], on_indicator: &OnIndicator) {
+    let popover = gtk::Popover::new();
+    popover.set_parent(button);
+    let column = GBox::new(O::Vertical, 0);
+    for &action in items {
+        let entry = gtk::Button::builder().label(tr(menu_label(action))).css_classes(["flat"]).build();
+        let (popover, on_indicator) = (popover.clone(), Rc::clone(on_indicator));
+        entry.connect_clicked(move |_| {
+            popover.popdown();
+            on_indicator(id, action);
+        });
+        column.append(&entry);
+    }
+    popover.set_child(Some(&column));
+    // the popover is parented to the button, so it is removed once closed
+    popover.connect_closed(|p| {
+        let p = p.clone();
+        glib::idle_add_local_once(move || p.unparent());
+    });
+    popover.popup();
 }
 
 /// The unread dot and the bookmark icon take the theme's primary colour (`kuro_primary`, looked up across every
@@ -95,7 +158,11 @@ struct RowWidgets {
     title: Label,
     subtitle: Label,
     download_button: gtk::Button,
+    /// The indicator's pages: "icon" (`download`), "busy" (a spinner under an arrow) and "ring" (`ring`).
+    indicator: gtk::Stack,
     download: gtk::Image,
+    ring: gtk::DrawingArea,
+    spinner: gtk::Spinner,
     bookmark: gtk::Image,
     marker: Label,
 }
@@ -112,13 +179,18 @@ impl RowWidgets {
         let download_button = text.next_sibling()?;
         let bookmark = download_button.next_sibling()?;
         let marker = bookmark.next_sibling()?;
+        let indicator = download_button.clone().downcast::<gtk::Button>().ok()?.child()?.downcast::<gtk::Stack>().ok()?;
+        let busy = indicator.child_by_name("busy")?.downcast::<gtk::Overlay>().ok()?;
         Some(Self {
             dot: dot.downcast().ok()?,
             check: check.downcast().ok()?,
             text: text.downcast().ok()?,
             title: title.downcast().ok()?,
             subtitle: subtitle.downcast().ok()?,
-            download: download_button.clone().downcast::<gtk::Button>().ok()?.child()?.downcast().ok()?,
+            download: indicator.child_by_name("icon")?.downcast().ok()?,
+            ring: indicator.child_by_name("ring")?.downcast().ok()?,
+            spinner: busy.child()?.downcast().ok()?,
+            indicator,
             download_button: download_button.downcast().ok()?,
             bookmark: bookmark.downcast().ok()?,
             marker: marker.downcast().ok()?,
@@ -185,7 +257,20 @@ fn row_widgets() -> RowWidgets {
     text.append(&title);
     text.append(&subtitle);
     let download = gtk::Image::new();
-    let download_button = gtk::Button::builder().child(&download).css_classes(["flat", "circular"]).focus_on_click(false).valign(Align::Center).build();
+    let ring = gtk::DrawingArea::builder().content_width(INDICATOR_SIZE).content_height(INDICATOR_SIZE).build();
+    let spinner = gtk::Spinner::builder().width_request(INDICATOR_SIZE).height_request(INDICATOR_SIZE).build();
+    let arrow = gtk::Image::from_icon_name("go-down-symbolic");
+    arrow.set_pixel_size(INDICATOR_SIZE / 2);
+    arrow.set_halign(Align::Center);
+    arrow.set_valign(Align::Center);
+    let busy = gtk::Overlay::new();
+    busy.set_child(Some(&spinner));
+    busy.add_overlay(&arrow);
+    let indicator = gtk::Stack::new();
+    indicator.add_named(&download, Some("icon"));
+    indicator.add_named(&busy, Some("busy"));
+    indicator.add_named(&ring, Some("ring"));
+    let download_button = gtk::Button::builder().child(&indicator).css_classes(["flat", "circular"]).focus_on_click(false).valign(Align::Center).build();
     let bookmark = gtk::Image::from_icon_name("starred-symbolic");
     bookmark.add_css_class("chapter-primary");
     let marker = Label::builder().xalign(0.0).hexpand(true).visible(false).css_classes(["dim-label"]).build();
@@ -198,7 +283,7 @@ fn row_widgets() -> RowWidgets {
     root.append(&download_button);
     root.append(&bookmark);
     root.append(&marker);
-    RowWidgets { root, dot, check, text, title, subtitle, download_button, download, bookmark, marker }
+    RowWidgets { root, dot, check, text, title, subtitle, download_button, indicator, download, ring, spinner, bookmark, marker }
 }
 
 fn bind(w: &RowWidgets, row: &RowItem) {
@@ -224,14 +309,28 @@ fn bind(w: &RowWidgets, row: &RowItem) {
     w.check.set_opacity(if row.selected { 1.0 } else { 0.0 });
     w.bookmark.set_visible(row.bookmark);
     w.root.set_opacity(row_alpha(row.read));
-    match download_icon(row.download).filter(|_| row.indicator) {
-        Some(icon) => {
-            w.download.set_icon_name(Some(icon));
-            w.download_button.set_visible(true);
-            w.download_button.set_tooltip_text((row.progress > 0).then(|| format!("{}%", row.progress)).as_deref());
+    w.download_button.set_visible(row.indicator);
+    // the indicator answers presses only while nothing is selected
+    w.download_button.set_sensitive(row.indicator_enabled);
+    w.spinner.set_spinning(false);
+    match (ring(row.download, row.progress), download_icon(row.download)) {
+        (Some(ring), _) if ring.indeterminate => {
+            w.spinner.set_spinning(true);
+            w.indicator.set_visible_child_name("busy");
         }
-        None => w.download_button.set_visible(false),
+        (Some(ring), _) => {
+            let area = w.ring.clone();
+            w.ring.set_draw_func(move |_, cr, width, height| draw_ring(&area, cr, width, height, ring.fraction, ring.arrow_on_fill));
+            w.ring.queue_draw();
+            w.indicator.set_visible_child_name("ring");
+        }
+        (None, Some(icon)) => {
+            w.download.set_icon_name(Some(icon));
+            w.indicator.set_visible_child_name("icon");
+        }
+        (None, None) => {}
     }
+    w.download_button.set_tooltip_text((row.progress > 0 && row.indicator).then(|| format!("{}%", row.progress)).as_deref());
 }
 
 impl ChapterList {
@@ -294,16 +393,42 @@ impl ChapterList {
                 });
                 widgets.root.add_controller(drag);
             }
-            // a click on the indicator starts, cancels or deletes by the state of its row
-            widgets.download_button.connect_clicked({
-                let (list_item, on_indicator) = (list_item.clone(), Rc::clone(&actions.on_indicator));
-                move |_| {
-                    if let Some(item) = item_of(&list_item) {
+            // a press on the indicator follows `chapter_actions::outcome` by the state of its row: an action at once, or a menu
+            let press_indicator = {
+                let (list_item, on_indicator, button) = (list_item.clone(), Rc::clone(&actions.on_indicator), widgets.download_button.clone());
+                Rc::new(move |press: Press| {
+                    let Some(item) = item_of(&list_item) else { return };
+                    let (id, state) = {
                         let row = item.borrow::<RowItem>();
-                        on_indicator(row.id, row.download);
+                        (row.id, row.download)
+                    };
+                    match outcome(state, press) {
+                        Outcome::Run(action) => on_indicator(id, action),
+                        Outcome::Menu(items) => indicator_menu(&button, id, items, &on_indicator),
+                    }
+                })
+            };
+            let indicator_long_fired = Rc::new(Cell::new(false));
+            widgets.download_button.connect_clicked({
+                let (press_indicator, long_fired) = (Rc::clone(&press_indicator), Rc::clone(&indicator_long_fired));
+                move |_| {
+                    // the release that ends a long press is not a click
+                    if !long_fired.replace(false) {
+                        press_indicator(Press::Click);
                     }
                 }
             });
+            let indicator_long = gtk::GestureLongPress::new();
+            indicator_long.connect_pressed({
+                let (press_indicator, long_fired) = (Rc::clone(&press_indicator), Rc::clone(&indicator_long_fired));
+                move |g, _, _| {
+                    // a long press on the indicator is its own, not the row's selection toggle
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    long_fired.set(true);
+                    press_indicator(Press::LongPress);
+                }
+            });
+            widgets.download_button.add_controller(indicator_long);
             list_item.set_child(Some(&widgets.root));
         });
         factory.connect_bind(|_, object| {

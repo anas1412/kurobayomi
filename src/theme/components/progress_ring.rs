@@ -11,6 +11,7 @@ use std::rc::Rc;
 use gtk::prelude::*;
 
 use super::classes;
+use crate::theme::motion;
 use crate::theme::tokens::PROGRESS_ROTATION_MS;
 
 /// Crossfade between the two modes, in ms.
@@ -19,6 +20,8 @@ const CROSSFADE_MS: u32 = 200;
 const RING_SIZE: i32 = 24;
 /// Arc stroke width in px.
 const STROKE: f64 = 4.0;
+/// The static arc of the indeterminate ring when reduced motion is on: a quarter turn.
+const STATIC_SWEEP: f64 = std::f64::consts::FRAC_PI_2;
 
 /// What the ring shows for a progress value.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -48,12 +51,16 @@ pub struct ProgressRing {
     progress: Rc<Cell<f32>>,
     spinner: gtk::Spinner,
     area: gtk::DrawingArea,
+    /// True when reduced motion is on: no spinner, no rotation, a static arc (T-49a-057).
+    still: bool,
 }
 
 impl ProgressRing {
     /// Creates the ring at `progress` (see `ring_state` for the rules).
     pub fn new(initial: f32) -> Self {
         let progress = Rc::new(Cell::new(0.0_f32));
+        let still = !motion::ring_spins(motion::enabled());
+        let still_flag = Rc::new(Cell::new(still));
         let spinner = gtk::Spinner::new();
         spinner.set_size_request(RING_SIZE, RING_SIZE);
         let area = gtk::DrawingArea::new();
@@ -63,7 +70,7 @@ impl ProgressRing {
 
         let widget = gtk::Stack::new();
         widget.set_transition_type(gtk::StackTransitionType::Crossfade);
-        widget.set_transition_duration(CROSSFADE_MS);
+        widget.set_transition_duration(motion::duration_ms(CROSSFADE_MS, !still));
         widget.add_named(&spinner, Some("indeterminate"));
         widget.add_named(&area, Some("determinate"));
 
@@ -72,12 +79,14 @@ impl ProgressRing {
         {
             let progress = progress.clone();
             let rotation = rotation.clone();
+            let still_flag = still_flag.clone();
             area.set_draw_func(move |area, cr, w, h| {
                 let color = area.color();
                 let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
                 let radius = (w.min(h) as f64) / 2.0 - STROKE;
                 let sweep = match ring_state(progress.get()) {
                     RingState::Determinate(p) => p as f64 * std::f64::consts::TAU,
+                    RingState::Indeterminate if still_flag.get() => STATIC_SWEEP,
                     RingState::Indeterminate => 0.0,
                 };
                 cr.translate(cx, cy);
@@ -102,8 +111,9 @@ impl ProgressRing {
             let tick = tick.clone();
             let rotation = rotation.clone();
             let start = start.clone();
+            let still_flag = still_flag.clone();
             area.connect_map(move |area| {
-                if tick.borrow().is_some() {
+                if tick.borrow().is_some() || still_flag.get() {
                     return;
                 }
                 let rotation = rotation.clone();
@@ -139,6 +149,7 @@ impl ProgressRing {
             progress,
             spinner,
             area,
+            still,
         };
         ring.set_progress(initial);
         ring
@@ -148,9 +159,14 @@ impl ProgressRing {
     pub fn set_progress(&self, value: f32) {
         self.progress.set(value);
         match ring_state(value) {
-            RingState::Indeterminate => {
+            RingState::Indeterminate if !self.still => {
                 self.spinner.start();
                 self.widget.set_visible_child_name("indeterminate");
+            }
+            RingState::Indeterminate => {
+                self.spinner.stop();
+                self.widget.set_visible_child_name("determinate");
+                self.area.queue_draw();
             }
             RingState::Determinate(_) => {
                 self.spinner.stop();

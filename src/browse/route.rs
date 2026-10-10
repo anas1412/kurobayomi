@@ -79,7 +79,11 @@ pub enum BrowseRoute {
     BrowseSource { source_id: i64, query: BrowseQuery, migrating: bool },
     /// Global search. `source_id` limits the search to one source (migrate), `query` is empty for a blank search.
     GlobalSearch { kind: BrowseKind, source_id: Option<i64>, query: String },
-    MigrateEntries { source_id: i64 },
+    /// The favourites of one source of `kind` that a migration can start from.
+    MigrateEntries { kind: BrowseKind, source_id: i64 },
+    /// One anime source's listing. It is opened on the same screen as the manga listing; the screen tells them apart by
+    /// the route that was parked.
+    AnimeBrowseSource { source_id: i64, query: BrowseQuery },
 }
 
 impl BrowseRoute {
@@ -93,6 +97,7 @@ impl BrowseRoute {
             BrowseRoute::BrowseSource { migrating: true, .. } => "migrate_source_search",
             BrowseRoute::GlobalSearch { .. } => "global_search",
             BrowseRoute::MigrateEntries { .. } => "migrate_entries",
+            BrowseRoute::AnimeBrowseSource { .. } => "browse_source",
         }
     }
 }
@@ -220,7 +225,8 @@ mod tests {
         let migrate = BrowseRoute::BrowseSource { source_id: 7, query: BrowseQuery::Popular, migrating: true };
         assert_eq!(browse.screen_id(), "browse_source");
         assert_eq!(migrate.screen_id(), "migrate_source_search");
-        assert_eq!(BrowseRoute::MigrateEntries { source_id: 1 }.screen_id(), "migrate_entries");
+        assert_eq!(BrowseRoute::MigrateEntries { kind: BrowseKind::Manga, source_id: 1 }.screen_id(), "migrate_entries");
+        assert_eq!(BrowseRoute::AnimeBrowseSource { source_id: 1, query: BrowseQuery::Popular }.screen_id(), "browse_source", "the anime listing shares the screen");
         assert_eq!(BrowseRoute::Sources.screen_id(), "sources");
     }
 }

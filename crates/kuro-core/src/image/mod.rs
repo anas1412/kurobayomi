@@ -16,6 +16,8 @@
 //! - libarchive binding (OQ-13a-6): the planned default stands, `libarchive3-sys` behind one safe
 //!   wrapper under the `archive` feature; the spike T-13a-031 has not run, so no binding exists yet.
 
+pub mod background;
+
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 

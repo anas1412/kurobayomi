@@ -1,0 +1,15 @@
+For help on how to fix library update errors, see https://aniyomi.org/help/guides/troubleshooting
+
+
+! No chapters found
+  # Alpha
+    - A1
+    - A2
+  # Beta
+    - B1
+
+! timeout
+  # Gamma
+    - G1
+  # Alpha
+    - A3

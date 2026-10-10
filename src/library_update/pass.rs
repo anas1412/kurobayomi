@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -50,7 +51,13 @@ pub trait Host: Send + Sync {
     /// Queues the items with autostart off.
     fn enqueue_downloads(&self, kind: EntryKind, entry_id: i64, items: &[SourceItem]);
     fn start_downloads(&self, kind: EntryKind);
-    fn show_error(&self, kind: EntryKind, failed: usize);
+    /// Writes the error log of a pass that had failures (T-26a-095) and returns the file, or `None` when none was written.
+    /// Called only when there are failures and the pass was not cancelled.
+    fn write_error_log(&self, _kind: EntryKind, _failures: &[Failure]) -> Option<PathBuf> {
+        None
+    }
+    /// The failure notice; `log` is the file its tap opens (T-26a-096).
+    fn show_error(&self, kind: EntryKind, failed: usize, log: Option<&Path>);
     /// The large-queue warning: a source of this pass has more queued entries than the threshold (not unmetered).
     fn show_queue_warning(&self, kind: EntryKind);
 }
@@ -60,6 +67,14 @@ pub struct EntryUpdate {
     pub entry_id: i64,
     pub title: String,
     pub items: Vec<SourceItem>,
+}
+
+/// One failed entry of a pass: what the error log lists (behaviour 7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    pub source_id: i64,
+    pub title: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,7 +241,7 @@ fn busy_status(trigger: Trigger, held_by: Trigger) -> PassStatus {
 }
 
 /// Entries grouped by source, in order of first appearance.
-fn group_by_source(entries: Vec<LibraryEntry>) -> Vec<Vec<LibraryEntry>> {
+pub(crate) fn group_by_source(entries: Vec<LibraryEntry>) -> Vec<Vec<LibraryEntry>> {
     let mut groups: Vec<(i64, Vec<LibraryEntry>)> = Vec::new();
     for entry in entries {
         match groups.iter_mut().find(|(source, _)| *source == entry.source) {
@@ -242,7 +257,7 @@ struct Shared {
     total: usize,
     progress: Mutex<Progress>,
     updates: Mutex<Vec<EntryUpdate>>,
-    failures: Mutex<Vec<(String, String)>>,
+    failures: Mutex<Vec<Failure>>,
     events: Mutex<Vec<PassEvent>>,
     queued: AtomicUsize,
 }
@@ -421,7 +436,8 @@ where
 
         let cancelled = cancel.load(Ordering::SeqCst);
         let updates = shared.updates.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        let failures = shared.failures.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let failed = shared.failures.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let failures: Vec<(String, String)> = failed.iter().map(|f| (f.title.clone(), f.message.clone())).collect();
         let queued_downloads = shared.queued.load(Ordering::SeqCst);
         deps.host.cancel_progress(kind);
         if !updates.is_empty() {
@@ -431,7 +447,8 @@ where
             deps.host.start_downloads(kind);
         }
         if !failures.is_empty() && !cancelled {
-            deps.host.show_error(kind, failures.len());
+            let log = deps.host.write_error_log(kind, &failed);
+            deps.host.show_error(kind, failures.len(), log.as_deref());
         }
         let status = if cancelled { PassStatus::Cancelled } else { PassStatus::Success };
         let mut events = shared.events.lock().unwrap_or_else(|p| p.into_inner()).clone();
@@ -461,7 +478,11 @@ fn record_entry<H: Host>(
         }
         Err(UpdateError::Cancelled) => {}
         Err(error) => {
-            shared.failures.lock().unwrap_or_else(|p| p.into_inner()).push((entry.title.clone(), error.user_message()));
+            shared.failures.lock().unwrap_or_else(|p| p.into_inner()).push(Failure {
+                source_id: entry.source,
+                title: entry.title.clone(),
+                message: error.user_message(),
+            });
         }
     }
 }
@@ -605,6 +626,33 @@ mod tests {
         assert_eq!(outcome.failures, vec![("Broken".to_owned(), "timeout".to_owned())]);
         assert_eq!(outcome.updates.len(), 1);
         assert_eq!(runner.deps.host.errors.lock().unwrap().as_slice(), &[1]);
+    }
+
+    #[tokio::test]
+    async fn the_error_log_is_written_with_the_failures_and_its_path_goes_to_the_notice() {
+        // T-26a-095, T-26a-096
+        let mut registry = FakeRegistry::default();
+        registry.sources.insert(1, FakeSource::err(UpdateError::Other("timeout".into())));
+        let runner = runner(FakeStore::with(vec![entry(1, 1, "Broken")]), registry);
+        runner.run(settings(), Trigger::Manual).await;
+        let logged = runner.deps.host.logged.lock().unwrap();
+        assert_eq!(logged.as_slice(), &[vec![Failure { source_id: 1, title: "Broken".into(), message: "timeout".into() }]]);
+        assert_eq!(
+            runner.deps.host.error_logs.lock().unwrap().as_slice(),
+            &[Some(PathBuf::from("update_errors.txt"))],
+            "the failure notice carries the log file its tap opens"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pass_without_failures_writes_no_error_log() {
+        // P-16
+        let mut registry = FakeRegistry::default();
+        registry.sources.insert(1, FakeSource::ok(vec![item(1.0, 0)]));
+        let runner = runner(FakeStore::with(vec![entry(1, 1, "Fine")]), registry);
+        runner.run(settings(), Trigger::Manual).await;
+        assert!(runner.deps.host.logged.lock().unwrap().is_empty());
+        assert!(runner.deps.host.errors.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

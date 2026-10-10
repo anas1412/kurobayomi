@@ -9,7 +9,9 @@ use kuro_platform::toast::Toaster;
 use kuro_platform::webview::WebViewHost;
 use kuro_prefs::network::NetworkPrefs;
 
+use crate::cache::HttpCache;
 use crate::cookies::CookieJar;
+use crate::doh::{DohProvider, DohResolver};
 use crate::error::NetError;
 use crate::interceptors::{
     Chain, CloudflareInterceptor, Interceptor, RateLimit, UncaughtExceptionInterceptor, UserAgentInterceptor,
@@ -66,8 +68,11 @@ impl NetworkClient {
     ) -> Result<Self, NetError> {
         let settings = NetworkSettings::from_prefs(prefs);
         let cookies = CookieJar::load(cookie_file);
+        let doh = DohProvider::from_pref(settings.doh_provider)
+            .map(|provider| DohResolver::new(provider, &settings.default_user_agent))
+            .transpose()?;
         let transport = Arc::new(
-            Transport::new(TransportLimits::default(), cookies.provider())?
+            Transport::with_doh(TransportLimits::default(), cookies.provider(), doh)?
                 .with_verbose_logging(settings.verbose_logging),
         );
         let ua_pref = prefs.default_user_agent.clone();
@@ -75,7 +80,7 @@ impl NetworkClient {
         let ua = user_agent.clone();
         let chain: Vec<Arc<dyn Interceptor>> = vec![
             Arc::new(UncaughtExceptionInterceptor),
-            Arc::new(UserAgentInterceptor::new(move || ua())),
+            Arc::new(UserAgentInterceptor::new(move || ua()).with_domain_defaults(cookies.clone())),
             Arc::new(CloudflareInterceptor::new(webview, toaster, cookies.clone())),
         ];
         Ok(ClientBuilder {
@@ -118,6 +123,13 @@ impl NetworkClient {
             _ = cancel.cancelled() => Err(NetError::Canceled),
             resp = chain.proceed(req) => resp,
         }
+    }
+
+    /// A copy of this client with the HTTP response cache in `dir` (T-12a-027). The cache sits before the
+    /// Cloudflare step. The app passes `<cache>/network_cache`.
+    pub fn with_disk_cache(&self, dir: PathBuf) -> Result<NetworkClient, NetError> {
+        let cache = HttpCache::open(dir)?;
+        Ok(self.new_builder().add_interceptor(Arc::new(cache)).build())
     }
 
     /// `GET` with `awaitSuccess`: a non-2xx status is `NetError::Http`.

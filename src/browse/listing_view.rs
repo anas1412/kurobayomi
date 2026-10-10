@@ -1,6 +1,14 @@
 //! The content area of one source listing: the widget that draws `ContentPlan` and pages the grid or list through a
 //! `gio::ListStore` (T-40a-003, T-40a-004, T-40b-003, T-40b-004). The rules are in `listing` and `content`; this file
 //! only maps their output to widgets and runs the loaders on the runtime.
+//!
+//! Documented deviation from E-BR-09 (a row subscribes to its library row only while it is bound, and unbinding cancels the
+//! subscription): there are no per-row subscriptions. One watcher follows the urls of the source's library entries
+//! (`favorite_urls`) and `apply_favorite_urls` pushes the flag into every loaded item of the store, which rebinds the rows
+//! that show them. The effect the edge case asks for is the same: a bound row always shows the library's flag, a row that
+//! is off screen holds nothing that outlives it (it is a `ListStore` item, not a live subscription), and the watcher is
+//! one per page and ends with it. Appending a page extends the store in place (`extend_from_slice`), so the rows already
+//! on screen are not rebuilt. The 2,000-item scroll check is manual (`p2-edge-cases-and-tests.md` section 7.3).
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
@@ -386,22 +394,21 @@ impl Inner {
         self.pump_if_near_end();
     }
 
-    /// The columns of the grid for the size of the window (B§4.5): the landscape key when the window is at least as
-    /// wide as it is high, the portrait key otherwise; 0 means adaptive cells and `n` means exactly `n` columns.
+    /// The columns of the grid for the width of the window (T-41a-050): the landscape key from 720 px wide, the portrait key
+    /// otherwise; 0 means adaptive cells and `n` means exactly `n` columns.
     fn columns(&self) -> Option<(GridColumns, i32)> {
         let viewport = self.scroller.hadjustment().page_size() as i32;
         if viewport <= 0 {
             return None;
         }
-        let (width, height) = self
+        let width = self
             .scroller
             .root()
             .map(|root| root.upcast::<gtk::Widget>())
-            .map_or((viewport, self.scroller.vadjustment().page_size() as i32), |window| (window.width(), window.height()));
+            .map_or(viewport, |window| window.width());
         let prefs = &self.deps.prefs;
         let columns = grid_columns(
             width,
-            height,
             BrowsePrefs::columns(prefs.library_columns_portrait.get()),
             BrowsePrefs::columns(prefs.library_columns_landscape.get()),
         );

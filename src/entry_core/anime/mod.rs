@@ -52,6 +52,7 @@ pub mod season_settings;
 pub mod season_settings_view;
 pub mod set_default;
 pub mod season_grid;
+pub mod season_fetch;
 pub mod season_pipeline;
 pub mod season_tile;
 pub mod seen;
