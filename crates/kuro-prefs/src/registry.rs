@@ -219,35 +219,17 @@ define_prefs! {
     "__APP_STATE_pref_downloaded_only", AppState, Bool, false, "base", "downloaded_only";
     "__APP_STATE_incognito_mode", AppState, Bool, false, "base", "incognito_mode";
     "__APP_STATE_onboarding_complete", AppState, Bool, false, "base", "shown_onboarding_flow";
-    "pref_display_profile_key", Normal, Str, "", "base", "display_profile";
-    "pref_always_decode_long_strip_with_ssiv", Normal, Bool, false, "base", "always_decode_long_strip_with_ssiv";
     "pref_theme_mode_key", Normal, Str, "SYSTEM", "ui", "theme_mode";
-    "pref_app_theme", Normal, Str, "DEFAULT", "ui", "app_theme";
-    "pref_theme_dark_amoled_key", Normal, Bool, false, "ui", "theme_dark_amoled";
-    "relative_time_v2", Normal, Bool, true, "ui", "relative_time";
-    "app_date_format", Normal, Str, "", "ui", "date_format";
     "start_screen", Normal, Str, "ANIME", "ui", "start_screen";
-    "bottom_rail_nav_style", Normal, Str, "MOVE_HISTORY_TO_MORE", "ui", "nav_style";
-    "pref_display_mode_catalogue", Normal, Str, "COMPACT_GRID", "sources", "source_display_mode";
     "source_languages", Normal, Set, &["all", "en"], "sources", "enabled_languages";
     "show_nsfw_source", Normal, Bool, true, "sources", "show_nsfw_source";
-    "pref_migration_sorting", Normal, Str, "ALPHABETICAL", "sources", "migration_sorting_mode";
-    "pref_migration_direction", Normal, Str, "ASCENDING", "sources", "migration_sorting_direction";
     "anime_extension_repos", Normal, Set, &[], "sources", "anime_extension_repos";
     "extension_repos", Normal, Set, &[], "sources", "manga_extension_repos";
     "__APP_STATE_trusted_extensions", AppState, Set, &[], "sources", "trusted_extensions";
-    "__APP_STATE_has_filters_toggle_state", AppState, Bool, false, "sources", "global_search_filter_state";
     "hidden_anime_catalogues", Normal, Set, &[], "sources", "disabled_anime_sources";
     "hidden_catalogues", Normal, Set, &[], "sources", "disabled_manga_sources";
-    "incognito_anime_extensions", Normal, Set, &[], "sources", "incognito_anime_extensions";
-    "incognito_manga_extensions", Normal, Set, &[], "sources", "incognito_manga_extensions";
     "pinned_anime_catalogues", Normal, Set, &[], "sources", "pinned_anime_sources";
     "pinned_catalogues", Normal, Set, &[], "sources", "pinned_manga_sources";
-    "__APP_STATE_last_anime_catalogue_source", AppState, Long, -1, "sources", "last_used_anime_source";
-    "__APP_STATE_last_catalogue_source", AppState, Long, -1, "sources", "last_used_manga_source";
-    "ext_updates_count", Normal, Int, 0, "sources", "manga_extension_updates_count";
-    "browse_hide_in_anime_library_items", Normal, Bool, false, "sources", "hide_in_anime_library_items";
-    "browse_hide_in_library_items", Normal, Bool, false, "sources", "hide_in_manga_library_items";
     "data_saver", Normal, Str, "NONE", "sources", "data_saver";
     "ignore_jpeg", Normal, Bool, false, "sources", "data_saver_ignore_jpeg";
     "ignore_gif", Normal, Bool, true, "sources", "data_saver_ignore_gif";
@@ -263,43 +245,19 @@ define_prefs! {
     "__PRIVATE_track_token_{id}", Private, Str, "", "secrets", "track_token";
     "anilist_score_type", Normal, Str, "POINT_10", "tracking", "anilist_score_type";
     "pref_auto_update_manga_sync_key", Normal, Bool, true, "tracking", "auto_update_track";
-    "track_on_adding_to_library", Normal, Bool, true, "tracking", "track_on_adding_to_library";
-    "show_next_episode_airing_time", Normal, Bool, true, "tracking", "show_next_episode_airing_time";
-    "pref_auto_update_manga_on_mark_read", Normal, Str, "ALWAYS", "tracking", "auto_update_track_on_mark_read";
     "pref_display_mode_library", Normal, Str, "COMPACT_GRID", "library", "display_mode";
     "library_sorting_mode", Normal, Str, "ALPHABETICAL,ASCENDING", "library", "manga_sorting_mode";
     "animelib_sorting_mode", Normal, Str, "ALPHABETICAL,ASCENDING", "library", "anime_sorting_mode";
     "__APP_STATE_library_update_last_timestamp", AppState, Long, 0, "library", "last_updated_timestamp";
     "pref_library_update_interval_key", Normal, Int, 0, "library", "auto_update_interval";
-    "library_update_restriction", Normal, Set, &[], "library", "auto_update_device_restrictions";
-    "library_update_manga_restriction", Normal, Set, &["manga_fully_read", "manga_ongoing", "manga_started", "manga_outside_release_period"], "library", "auto_update_item_restrictions";
-    "auto_update_metadata", Normal, Bool, false, "library", "auto_update_metadata";
-    "display_continue_reading_button", Normal, Bool, false, "library", "show_continue_viewing_button";
-    "display_category_tabs", Normal, Bool, true, "library", "category_tabs";
-    "display_number_of_items", Normal, Bool, false, "library", "category_number_of_items";
-    "categorized_display", Normal, Bool, false, "library", "categorized_display_settings";
-    "hidden_categories", Normal, Bool, false, "library", "hide_hidden_categories_settings";
-    "pref_filter_library_interval_custom", Normal, Str, "DISABLED", "library", "filter_interval_custom";
     "display_download_badge", Normal, Bool, false, "library", "download_badge";
     "display_unread_badge", Normal, Bool, true, "library", "unread_badge";
-    "display_local_badge", Normal, Bool, true, "library", "local_badge";
-    "display_language_badge", Normal, Bool, false, "library", "language_badge";
-    "library_show_updates_count", Normal, Bool, true, "library", "new_show_updates_count";
-    "auto_clear_chapter_cache", Normal, Bool, false, "library", "auto_clear_item_cache";
-    "library_random_anime_sort_seed", Normal, Int, 0, "library", "random_anime_sort_seed";
-    "library_random_manga_sort_seed", Normal, Int, 0, "library", "random_manga_sort_seed";
-    "pref_animelib_columns_portrait_key", Normal, Int, 0, "library", "anime_portrait_columns";
-    "pref_library_columns_portrait_key", Normal, Int, 0, "library", "manga_portrait_columns";
     "pref_animelib_columns_landscape_key", Normal, Int, 0, "library", "anime_landscape_columns";
     "pref_library_columns_landscape_key", Normal, Int, 0, "library", "manga_landscape_columns";
     "pref_filter_animelib_downloaded_v2", Normal, Str, "DISABLED", "library", "filter_downloaded_anime";
     "pref_filter_library_downloaded_v2", Normal, Str, "DISABLED", "library", "filter_downloaded_manga";
     "pref_filter_animelib_unread_v2", Normal, Str, "DISABLED", "library", "filter_unseen";
     "pref_filter_library_unread_v2", Normal, Str, "DISABLED", "library", "filter_unread";
-    "pref_filter_animelib_started_v2", Normal, Str, "DISABLED", "library", "filter_started_anime";
-    "pref_filter_library_started_v2", Normal, Str, "DISABLED", "library", "filter_started_manga";
-    "pref_filter_animelib_bookmarked_v2", Normal, Str, "DISABLED", "library", "filter_bookmarked_anime";
-    "pref_filter_library_bookmarked_v2", Normal, Str, "DISABLED", "library", "filter_bookmarked_manga";
     "pref_filter_animelib_completed_v2", Normal, Str, "DISABLED", "library", "filter_completed_anime";
     "pref_filter_library_completed_v2", Normal, Str, "DISABLED", "library", "filter_completed_manga";
     "pref_filter_animelib_tracked_{id}_v2", Normal, Str, "DISABLED", "library.filter_tracked_anime", "";
@@ -310,242 +268,39 @@ define_prefs! {
     "default_category", Normal, Int, -1, "library", "default_manga_category";
     "__APP_STATE_last_used_anime_category", AppState, Int, 0, "library", "last_used_anime_category";
     "__APP_STATE_last_used_category", AppState, Int, 0, "library", "last_used_manga_category";
-    "animelib_update_categories", Normal, Set, &[], "library", "anime_update_categories";
-    "library_update_categories", Normal, Set, &[], "library", "manga_update_categories";
-    "animelib_update_categories_exclude", Normal, Set, &[], "library", "anime_update_categories_exclude";
-    "library_update_categories_exclude", Normal, Set, &[], "library", "manga_update_categories_exclude";
-    "default_episode_filter_by_seen", Normal, Long, 0, "library", "filter_episode_by_seen";
-    "default_chapter_filter_by_read", Normal, Long, 0, "library", "filter_chapter_by_read";
-    "default_episode_filter_by_downloaded", Normal, Long, 0, "library", "filter_episode_by_downloaded";
-    "default_chapter_filter_by_downloaded", Normal, Long, 0, "library", "filter_chapter_by_downloaded";
-    "default_episode_filter_by_bookmarked", Normal, Long, 0, "library", "filter_episode_by_bookmarked";
-    "default_chapter_filter_by_bookmarked", Normal, Long, 0, "library", "filter_chapter_by_bookmarked";
-    "default_episode_filter_by_fillermarked", Normal, Long, 0, "library", "filter_episode_by_fillermarked";
-    "default_episode_sort_by_source_or_number", Normal, Long, 0, "library", "sort_episode_by_source_or_number";
-    "default_chapter_sort_by_source_or_number", Normal, Long, 0, "library", "sort_chapter_by_source_or_number";
-    "default_chapter_display_by_name_or_number", Normal, Long, 0, "library", "display_episode_by_name_or_number";
-    "default_chapter_display_by_name_or_number", Normal, Long, 0, "library", "display_chapter_by_name_or_number";
-    "default_chapter_sort_by_ascending_or_descending", Normal, Long, 0, "library", "sort_episode_by_ascending_or_descending";
-    "default_chapter_sort_by_ascending_or_descending", Normal, Long, 0, "library", "sort_chapter_by_ascending_or_descending";
-    "default_episode_show_thumbnail_previews", Normal, Long, 0, "library", "show_episode_thumbnail_previews";
-    "default_episode_show_summaries", Normal, Long, 0, "library", "show_episode_summaries";
-    "default_season_filter_by_downloaded", Normal, Long, 0, "library", "filter_season_by_download";
-    "default_season_filter_by_unseen", Normal, Long, 0, "library", "filter_season_by_unseen";
-    "default_season_filter_by_started", Normal, Long, 0, "library", "filter_season_by_started";
-    "default_season_filter_by_completed", Normal, Long, 0, "library", "filter_season_by_completed";
-    "default_season_filter_by_bookmarked", Normal, Long, 0, "library", "filter_season_by_bookmarked";
-    "default_season_filter_by_fillermarked", Normal, Long, 0, "library", "filter_season_by_fillermarked";
-    "default_season_sort_by_source_or_number", Normal, Long, 0, "library", "sort_season_by_source_or_number";
-    "default_season_sort_by_ascending_or_descending", Normal, Long, 0, "library", "sort_season_by_ascending_or_descending";
-    "default_season_grid_display_mode", Normal, Long, 0, "library", "season_display_grid_mode";
-    "default_season_grid_display_size", Normal, Int, 0, "library", "season_display_grid_size";
-    "default_season_download_overlay", Normal, Bool, false, "library", "season_download_overlay";
-    "default_season_unseen_overlay", Normal, Bool, true, "library", "season_unseen_overlay";
-    "default_season_local_overlay", Normal, Bool, true, "library", "season_local_overlay";
-    "default_season_lang_overlay", Normal, Bool, false, "library", "season_lang_overlay";
-    "default_season_continue_overlay", Normal, Bool, true, "library", "season_continue_overlay";
-    "default_season_display_mode", Normal, Long, 0, "library", "season_display_mode";
-    "pref_update_season_on_refresh", Normal, Bool, false, "library", "update_season_on_refresh";
-    "pref_update_season_on_library_update", Normal, Bool, false, "library", "update_season_on_library_update";
-    "mark_duplicate_read_chapter_read", Normal, Set, &[], "library", "mark_duplicate_read_chapter_as_read";
-    "mark_duplicate_seen_episode_seen", Normal, Set, &[], "library", "mark_duplicate_seen_episode_as_seen";
-    "pref_download_only_over_wifi_key", Normal, Bool, false, "downloads", "download_only_over_wifi";
-    "use_external_downloader", Normal, Bool, false, "downloads", "use_external_downloader";
-    "external_downloader_selection", Normal, Str, "", "downloads", "external_downloader_selection";
-    "save_chapter_as_cbz", Normal, Bool, true, "downloads", "save_chapters_as_cbz";
-    "split_tall_images", Normal, Bool, true, "downloads", "split_tall_images";
-    "auto_download_while_reading", Normal, Int, 0, "downloads", "auto_download_while_reading";
-    "auto_download_while_watching", Normal, Int, 0, "downloads", "auto_download_while_watching";
     "remove_after_read_slots", Normal, Int, -1, "downloads", "remove_after_read_slots";
-    "pref_remove_after_marked_as_read_key", Normal, Bool, false, "downloads", "remove_after_marked_as_read";
-    "pref_remove_bookmarked", Normal, Bool, false, "downloads", "remove_bookmarked_chapters";
-    "pref_download_fillermarked", Normal, Bool, false, "downloads", "download_fillermarked_items";
-    "remove_exclude_categories", Normal, Set, &[], "downloads", "remove_exclude_categories";
-    "remove_exclude_anime_categories", Normal, Set, &[], "downloads", "remove_exclude_anime_categories";
     "download_new", Normal, Bool, false, "downloads", "download_new_chapters";
     "download_new_episode", Normal, Bool, false, "downloads", "download_new_episodes";
-    "download_new_categories", Normal, Set, &[], "downloads", "download_new_chapter_categories";
-    "download_new_anime_categories", Normal, Set, &[], "downloads", "download_new_episode_categories";
-    "download_new_categories_exclude", Normal, Set, &[], "downloads", "download_new_chapter_categories_exclude";
-    "download_new_anime_categories_exclude", Normal, Set, &[], "downloads", "download_new_episode_categories_exclude";
     "download_slots", Normal, Int, 1, "downloads", "number_of_downloads";
-    "download_speed_limit", Normal, Int, 0, "downloads", "download_speed_limit";
-    "download_new_unread_chapters_only", Normal, Bool, false, "downloads", "download_new_unread_chapters_only";
-    "download_new_unread_episodes_only", Normal, Bool, false, "downloads", "download_new_unseen_episodes_only";
     "backup_interval", Normal, Int, 12, "backup", "backup_interval";
     "__APP_STATE_last_auto_backup_timestamp", AppState, Long, 0, "backup", "last_auto_backup_timestamp";
-    "backup_flags", Normal, Set, &["1", "2", "4", "8"], "backup", "backup_flags";
     "__APP_STATE_storage_dir", AppState, Str, "", "storage", "base_storage_directory";
-    "use_biometric_lock", Normal, Bool, false, "security", "use_authenticator";
-    "lock_app_after", Normal, Int, 0, "security", "lock_app_after";
-    "hide_notification_content", Normal, Bool, false, "security", "hide_notification_content";
-    "__APP_STATE_last_app_closed", AppState, Long, 0, "security", "last_app_closed";
-    "verbose_logging", Normal, Bool, false, "network", "verbose_logging";
-    "doh_provider", Normal, Int, -1, "network", "doh_provider";
-    "default_user_agent", Normal, Str, "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0", "network", "default_user_agent";
     "pref_torrserver_enable", Normal, Bool, false, "torrent", "torr_server_enable";
     "pref_torrserver_shownotice", Normal, Bool, false, "torrent", "torr_server_shown_notice";
     "pref_torrserver_port", Normal, Str, "8090", "torrent", "torr_server_port";
     "pref_torrserver_tackers", Normal, Str, TORRSERVER_TRACKERS, "torrent", "torr_server_trackers";
     "pref_torrserver_proxymode", Normal, Str, "None", "torrent", "torr_server_proxy_mode";
     "pref_torrserver_proxyurl", Normal, Str, "", "torrent", "torr_server_proxy_url";
-    "pref_enable_transitions_key", Normal, Bool, true, "reader", "page_transitions";
-    "pref_reader_flash", Normal, Bool, false, "reader", "flash_on_page_change";
-    "pref_reader_flash_duration", Normal, Int, 100, "reader", "flash_duration_millis";
-    "pref_reader_flash_interval", Normal, Int, 1, "reader", "flash_page_interval";
-    "pref_reader_flash_mode", Normal, Str, "BLACK", "reader", "flash_color";
-    "pref_double_tap_anim_speed", Normal, Int, 500, "reader", "double_tap_anim_speed";
-    "pref_show_page_number_key", Normal, Bool, true, "reader", "show_page_number";
-    "pref_show_reading_mode", Normal, Bool, true, "reader", "show_reading_mode";
-    "fullscreen", Normal, Bool, false, "reader", "fullscreen";
-    "pref_keep_screen_on_key", Normal, Bool, true, "reader", "keep_screen_on";
     "pref_default_reading_mode_key", Normal, Int, 1, "reader", "default_reading_mode";
-    "pref_enable_double_tap_zoom_webtoon", Normal, Bool, true, "reader", "webtoon_double_tap_zoom_enabled";
     "pref_image_scale_type_key", Normal, Int, 1, "reader", "image_scale_type";
     "pref_zoom_start_key", Normal, Int, 1, "reader", "zoom_start";
     "pref_reader_theme_key", Normal, Int, 1, "reader", "reader_theme";
-    "always_show_chapter_transition", Normal, Bool, true, "reader", "always_show_chapter_transition";
-    "pref_preserve_reading_position", Normal, Bool, false, "reader", "preserve_reading_position";
     "crop_borders", Normal, Bool, false, "reader", "crop_borders";
-    "navigate_pan", Normal, Bool, true, "reader", "navigate_to_pan";
-    "landscape_zoom", Normal, Bool, true, "reader", "landscape_zoom";
-    "crop_borders_webtoon", Normal, Bool, false, "reader", "crop_borders_webtoon";
-    "webtoon_side_padding", Normal, Int, 0, "reader", "webtoon_side_padding";
-    "reader_hide_threshold", Normal, Str, "LOW", "reader", "reader_hide_threshold";
-    "create_folder_per_manga", Normal, Bool, false, "reader", "folder_per_manga";
-    "skip_read", Normal, Bool, false, "reader", "skip_read";
-    "skip_filtered", Normal, Bool, true, "reader", "skip_filtered";
-    "skip_dupe", Normal, Bool, false, "reader", "skip_dupe";
-    "webtoon_disable_zoom_out", Normal, Bool, false, "reader", "webtoon_disable_zoom_out";
     "pref_dual_page_split", Normal, Bool, false, "reader", "dual_page_split_paged";
-    "pref_dual_page_invert", Normal, Bool, false, "reader", "dual_page_invert_paged";
-    "pref_dual_page_split_webtoon", Normal, Bool, false, "reader", "dual_page_split_webtoon";
-    "pref_dual_page_invert_webtoon", Normal, Bool, false, "reader", "dual_page_invert_webtoon";
-    "pref_dual_page_rotate", Normal, Bool, false, "reader", "dual_page_rotate_to_fit";
-    "pref_dual_page_rotate_invert", Normal, Bool, false, "reader", "dual_page_rotate_to_fit_invert";
-    "pref_dual_page_rotate_webtoon", Normal, Bool, false, "reader", "dual_page_rotate_to_fit_webtoon";
-    "pref_dual_page_rotate_invert_webtoon", Normal, Bool, false, "reader", "dual_page_rotate_to_fit_invert_webtoon";
-    "pref_custom_brightness_key", Normal, Bool, false, "reader", "custom_brightness";
-    "custom_brightness_value", Normal, Int, 0, "reader", "custom_brightness_value";
-    "pref_color_filter_key", Normal, Bool, false, "reader", "color_filter";
-    "color_filter_value", Normal, Int, 0, "reader", "color_filter_value";
-    "color_filter_mode", Normal, Int, 0, "reader", "color_filter_mode";
-    "pref_grayscale", Normal, Bool, false, "reader", "grayscale";
-    "pref_inverted_colors", Normal, Bool, false, "reader", "inverted_colors";
-    "reader_long_tap", Normal, Bool, true, "reader", "read_with_long_tap";
-    "reader_volume_keys", Normal, Bool, false, "reader", "read_with_volume_keys";
-    "reader_volume_keys_inverted", Normal, Bool, false, "reader", "read_with_volume_keys_inverted";
-    "reader_navigation_mode_pager", Normal, Int, 0, "reader", "navigation_mode_pager";
-    "reader_navigation_mode_webtoon", Normal, Int, 0, "reader", "navigation_mode_webtoon";
-    "reader_tapping_inverted", Normal, Str, "NONE", "reader", "pager_nav_inverted";
-    "reader_tapping_inverted_webtoon", Normal, Str, "NONE", "reader", "webtoon_nav_inverted";
-    "reader_navigation_overlay_new_user", Normal, Bool, true, "reader", "show_navigation_overlay_new_user";
-    "reader_navigation_overlay_on_start", Normal, Bool, false, "reader", "show_navigation_overlay_on_start";
-    "pref_preserve_watching_position", Normal, Bool, false, "player", "preserve_watching_position";
-    "pref_progress_preference", Normal, Float, 0.85f32, "player", "progress_preference";
-    "pref_allow_gestures_in_panels", Normal, Bool, false, "player", "allow_gestures";
-    "pref_show_loading", Normal, Bool, true, "player", "show_loading_circle";
-    "pref_show_current_chapter", Normal, Bool, true, "player", "show_current_chapter";
-    "pref_remember_volume", Normal, Bool, false, "player", "remember_player_volume";
     "player_volume_value", Normal, Float, -1.0f32, "player", "player_volume_value";
-    "pref_show_failed_hosters", Normal, Bool, false, "player", "show_failed_hosters";
-    "pref_show_empty_hosters", Normal, Bool, false, "player", "show_empty_hosters";
-    "player_fullscreen", Normal, Bool, false, "player", "player_fullscreen";
-    "player_hide_controls", Normal, Bool, false, "player", "hide_controls";
-    "pref_display_vol_as_per", Normal, Bool, true, "player", "display_vol_per";
-    "pref_show_system_status_bar", Normal, Bool, false, "player", "show_system_status_bar";
-    "pref_reduce_motion", Normal, Bool, false, "player", "reduce_motion";
-    "pref_player_time_to_disappear", Normal, Int, 4000, "player", "player_time_to_disappear";
-    "pref_panel_opacity", Normal, Int, 60, "player", "panel_opacity";
-    "pref_enable_skip_intro", Normal, Bool, true, "player", "enable_skip_intro";
-    "pref_enable_auto_skip_ani_skip", Normal, Bool, false, "player", "auto_skip_intro";
-    "pref_enable_netflixStyle_aniskip", Normal, Bool, false, "player", "enable_netflix_style_intro_skip";
-    "pref_waiting_time_aniskip", Normal, Int, 5, "player", "waiting_time_intro_skip";
-    "pref_enable_ani_skip", Normal, Bool, false, "player", "ani_skip_enabled";
-    "pref_disabled_ani_skip_chapters", Normal, Bool, true, "player", "disable_ani_skip_on_chapters";
-    "pref_enable_pip", Normal, Bool, true, "player", "enable_pip";
-    "pref_pip_episode_toasts", Normal, Bool, true, "player", "pip_episode_toasts";
-    "pref_pip_on_exit", Normal, Bool, false, "player", "pip_on_exit";
-    "pip_replace_with_previous", Normal, Bool, false, "player", "pip_replace_with_previous";
-    "pref_always_use_external_player", Normal, Bool, false, "player", "always_use_external_player";
-    "external_player_preference", Normal, Str, "", "player", "external_player_preference";
-    "pref_player_speed", Normal, Float, 1.0f32, "player", "player_speed";
-    "default_speed_presets", Normal, Set, &["0.25", "0.5", "0.75", "1.0", "1.25", "1.5", "1.75", "2.0", "2.5", "3.0", "3.5", "4.0"], "player", "speed_presets";
-    "invert_duration", Normal, Bool, false, "player", "invert_duration";
-    "pref_player_aspect_state", Normal, Str, "Fit", "player", "aspect_state";
     "pref_auto_play_enabled", Normal, Bool, false, "player", "autoplay_enabled";
-    "pref_gesture_horizontal_seek", Normal, Bool, true, "player.gestures", "gesture_horizontal_seek";
-    "pref_show_seekbar", Normal, Bool, false, "player.gestures", "show_seek_bar";
-    "pref_default_intro_length", Normal, Int, 85, "player.gestures", "default_intro_length";
-    "pref_skip_length_preference", Normal, Int, 10, "player.gestures", "skip_length_preference";
-    "pref_player_smooth_seek", Normal, Bool, false, "player.gestures", "player_smooth_seek";
-    "pref_left_double_tap", Normal, Str, "Seek", "player.gestures", "left_double_tap_gesture";
-    "pref_center_double_tap", Normal, Str, "PlayPause", "player.gestures", "center_double_tap_gesture";
-    "pref_right_double_tap", Normal, Str, "Seek", "player.gestures", "right_double_tap_gesture";
-    "pref_media_previous", Normal, Str, "Switch", "player.gestures", "media_previous_gesture";
-    "pref_media_playpause", Normal, Str, "PlayPause", "player.gestures", "media_play_pause_gesture";
-    "pref_media_next", Normal, Str, "Switch", "player.gestures", "media_next_gesture";
-    "pref_try_hwdec", Normal, Bool, true, "player.decoder", "try_hw_decoding";
-    "pref_gpu_next", Normal, Bool, false, "player.decoder", "gpu_next";
-    "pref_video_debanding", Normal, Str, "None", "player.decoder", "video_debanding";
-    "use_yuv420p", Normal, Bool, true, "player.decoder", "use_yuv420p";
-    "pref_player_filter_brightness", Normal, Int, 0, "player.decoder", "brightness_filter";
-    "pref_player_filter_saturation", Normal, Int, 0, "player.decoder", "saturation_filter";
-    "pref_player_filter_contrast", Normal, Int, 0, "player.decoder", "contrast_filter";
-    "pref_player_filter_gamma", Normal, Int, 0, "player.decoder", "gamma_filter";
-    "pref_player_filter_hue", Normal, Int, 0, "player.decoder", "hue_filter";
     "pref_audio_lang", Normal, Str, "", "player.audio", "preferred_audio_languages";
-    "pref_audio_pitch_correction", Normal, Bool, true, "player.audio", "enable_pitch_correction";
-    "pref_audio_config", Normal, Str, "AutoSafe", "player.audio", "audio_channels";
-    "pref_audio_volume_boost_cap", Normal, Int, 30, "player.audio", "volume_boost_cap";
-    "pref_audio_delay", Normal, Int, 0, "player.audio", "audio_delay";
     "pref_subtitle_lang", Normal, Str, "", "player.subtitles", "preferred_sub_languages";
-    "pref_subtitle_whitelist", Normal, Str, "", "player.subtitles", "subtitle_whitelist";
-    "pref_subtitle_blacklist", Normal, Str, "", "player.subtitles", "subtitle_blacklist";
-    "pref_screenshot_subtitles", Normal, Bool, false, "player.subtitles", "screenshot_subtitles";
-    "pref_subtitle_font", Normal, Str, "Sans Serif", "player.subtitles", "subtitle_font";
-    "pref_subtitles_font_size", Normal, Int, 55, "player.subtitles", "subtitle_font_size";
-    "pref_sub_scale", Normal, Float, 1.0f32, "player.subtitles", "subtitle_font_scale";
-    "pref_sub_border_size", Normal, Int, 3, "player.subtitles", "subtitle_border_size";
-    "pref_bold_subtitles", Normal, Bool, false, "player.subtitles", "bold_subtitles";
-    "pref_italic_subtitles", Normal, Bool, false, "player.subtitles", "italic_subtitles";
-    "pref_text_color_subtitles", Normal, Int, -1, "player.subtitles", "text_color_subtitles";
-    "pref_border_color_subtitles", Normal, Int, -16777216, "player.subtitles", "border_color_subtitles";
-    "pref_border_style_subtitles", Normal, Str, "OutlineAndShadow", "player.subtitles", "border_style_subtitles";
-    "sub_shadow_offset", Normal, Int, 0, "player.subtitles", "shadow_offset_subtitles";
-    "pref_background_color_subtitles", Normal, Int, 0, "player.subtitles", "background_color_subtitles";
-    "pref_sub_justify", Normal, Str, "Auto", "player.subtitles", "subtitle_justification";
-    "pref_sub_pos", Normal, Int, 100, "player.subtitles", "subtitle_pos";
-    "pref_override_subtitles_ass", Normal, Bool, false, "player.subtitles", "override_subs_ass";
-    "pref_subtitles_delay", Normal, Int, 0, "player.subtitles", "subtitles_delay";
-    "pref_subtitles_speed", Normal, Float, 1.0f32, "player.subtitles", "subtitles_speed";
-    "pref_subtitles_secondary_delay", Normal, Int, 0, "player.subtitles", "subtitles_secondary_delay";
-    "mpv_scripts", Normal, Bool, false, "player.advanced", "mpv_user_files";
-    "pref_mpv_conf", Normal, Str, "", "player.advanced", "mpv_conf";
-    "pref_mpv_input", Normal, Str, "", "player.advanced", "mpv_input";
-    "pref_player_statistics_page", Normal, Int, 0, "player.advanced", "player_statistics_page";
-    "show_not_runnable", Normal, Bool, false, "sources", "show_not_runnable";
     "anime_ext_last_check", Normal, Long, 0, "sources", "anime_ext_last_check";
-    "check_app_updates", Normal, Bool, false, "base", "check_app_updates";
-    "__APP_STATE_last_app_check", AppState, Long, 0, "base", "last_app_check";
     "muted_notification_channels", Normal, Set, &[], "base", "muted_notification_channels";
-    "pref_remember_decoder", Normal, Bool, false, "player.decoder", "remember_decoder";
-    "player_decoder", Normal, Str, "", "player.decoder", "remembered_decoder";
     "player_open_detached", Normal, Bool, false, "player.window", "open_detached";
 }
 
-/// Keys of features this desktop app does not have. The registry holds no row for them, a restore skips them
-/// ([`is_dropped`]) and nothing reads them, so an old `config.toml` or an Aniyomi backup that still carries one loads
-/// and restores without it. Each key and its reason is recorded in `docs/drop-decisions.md`.
-///
-/// * the Android installer choice (T-19a-037), the four commented-out SY keys (T-17a-039) and the hardware bitmap
-///   threshold (T-13a-030);
-/// * `tablet_ui_mode`, the screen orientation of the reader and of the player, `secure_screen_v2` and its older
-///   spelling `secure_screen`: phone window features;
-/// * the four swipe actions of the chapter and episode rows: touch gestures;
-/// * the brightness and volume gestures of the player, and the remembered brightness that only they changed;
-/// * the display cutout (`cutout_short`): the desktop has no cutout.
-pub const DROPPED_KEYS: [&str; 20] = [
+/// Keys of features this desktop app does not have, and of settings the settings diet cut (docs/design/settings-diet.md).
+/// The registry holds no row for them, a restore skips them ([`is_dropped`]) and nothing reads them, so an old
+/// `config.toml` or an Aniyomi backup that still carries one loads and restores without it. Each key and its reason
+/// is recorded in `docs/drop-decisions.md`.
+pub const DROPPED_KEYS: [&str; 262] = [
     "extension_installer",
     "pref_hardware_bitmap_threshold",
     "eh_enable_source_blacklist",
@@ -566,6 +321,248 @@ pub const DROPPED_KEYS: [&str; 20] = [
     "pref_remember_brightness",
     "player_brightness_value",
     "cutout_short",
+    "pref_app_theme",
+    "pref_theme_dark_amoled_key",
+    "relative_time_v2",
+    "app_date_format",
+    "bottom_rail_nav_style",
+    "library_update_restriction",
+    "library_update_manga_restriction",
+    "auto_update_metadata",
+    "display_continue_reading_button",
+    "display_category_tabs",
+    "display_number_of_items",
+    "categorized_display",
+    "hidden_categories",
+    "pref_filter_library_interval_custom",
+    "display_local_badge",
+    "display_language_badge",
+    "library_show_updates_count",
+    "library_random_anime_sort_seed",
+    "library_random_manga_sort_seed",
+    "pref_animelib_columns_portrait_key",
+    "pref_library_columns_portrait_key",
+    "pref_filter_animelib_started_v2",
+    "pref_filter_library_started_v2",
+    "pref_filter_animelib_bookmarked_v2",
+    "pref_filter_library_bookmarked_v2",
+    "animelib_update_categories",
+    "library_update_categories",
+    "animelib_update_categories_exclude",
+    "library_update_categories_exclude",
+    "pref_update_season_on_refresh",
+    "pref_update_season_on_library_update",
+    "mark_duplicate_read_chapter_read",
+    "mark_duplicate_seen_episode_seen",
+    "default_episode_filter_by_seen",
+    "default_chapter_filter_by_read",
+    "default_episode_filter_by_downloaded",
+    "default_chapter_filter_by_downloaded",
+    "default_episode_filter_by_bookmarked",
+    "default_chapter_filter_by_bookmarked",
+    "default_episode_filter_by_fillermarked",
+    "default_episode_sort_by_source_or_number",
+    "default_chapter_sort_by_source_or_number",
+    "default_chapter_display_by_name_or_number",
+    "default_chapter_sort_by_ascending_or_descending",
+    "default_episode_show_thumbnail_previews",
+    "default_episode_show_summaries",
+    "default_season_filter_by_downloaded",
+    "default_season_filter_by_unseen",
+    "default_season_filter_by_started",
+    "default_season_filter_by_completed",
+    "default_season_filter_by_bookmarked",
+    "default_season_filter_by_fillermarked",
+    "default_season_sort_by_source_or_number",
+    "default_season_sort_by_ascending_or_descending",
+    "default_season_grid_display_mode",
+    "default_season_grid_display_size",
+    "default_season_download_overlay",
+    "default_season_unseen_overlay",
+    "default_season_local_overlay",
+    "default_season_lang_overlay",
+    "default_season_continue_overlay",
+    "default_season_display_mode",
+    "pref_enable_transitions_key",
+    "pref_reader_flash",
+    "pref_reader_flash_duration",
+    "pref_reader_flash_interval",
+    "pref_reader_flash_mode",
+    "pref_double_tap_anim_speed",
+    "pref_show_page_number_key",
+    "pref_show_reading_mode",
+    "fullscreen",
+    "pref_keep_screen_on_key",
+    "pref_enable_double_tap_zoom_webtoon",
+    "always_show_chapter_transition",
+    "pref_preserve_reading_position",
+    "navigate_pan",
+    "landscape_zoom",
+    "crop_borders_webtoon",
+    "webtoon_side_padding",
+    "reader_hide_threshold",
+    "create_folder_per_manga",
+    "skip_read",
+    "skip_filtered",
+    "skip_dupe",
+    "webtoon_disable_zoom_out",
+    "pref_dual_page_invert",
+    "pref_dual_page_split_webtoon",
+    "pref_dual_page_invert_webtoon",
+    "pref_dual_page_rotate",
+    "pref_dual_page_rotate_invert",
+    "pref_dual_page_rotate_webtoon",
+    "pref_dual_page_rotate_invert_webtoon",
+    "pref_custom_brightness_key",
+    "custom_brightness_value",
+    "pref_color_filter_key",
+    "color_filter_value",
+    "color_filter_mode",
+    "pref_grayscale",
+    "pref_inverted_colors",
+    "reader_long_tap",
+    "reader_volume_keys",
+    "reader_volume_keys_inverted",
+    "reader_navigation_mode_pager",
+    "reader_navigation_mode_webtoon",
+    "reader_tapping_inverted",
+    "reader_tapping_inverted_webtoon",
+    "reader_navigation_overlay_new_user",
+    "reader_navigation_overlay_on_start",
+    "pref_preserve_watching_position",
+    "pref_progress_preference",
+    "pref_allow_gestures_in_panels",
+    "pref_show_loading",
+    "pref_show_current_chapter",
+    "pref_remember_volume",
+    "pref_show_failed_hosters",
+    "pref_show_empty_hosters",
+    "player_fullscreen",
+    "player_hide_controls",
+    "pref_display_vol_as_per",
+    "pref_show_system_status_bar",
+    "pref_reduce_motion",
+    "pref_player_time_to_disappear",
+    "pref_panel_opacity",
+    "pref_enable_skip_intro",
+    "pref_enable_auto_skip_ani_skip",
+    "pref_enable_netflixStyle_aniskip",
+    "pref_waiting_time_aniskip",
+    "pref_enable_ani_skip",
+    "pref_disabled_ani_skip_chapters",
+    "pref_enable_pip",
+    "pref_pip_episode_toasts",
+    "pref_pip_on_exit",
+    "pip_replace_with_previous",
+    "pref_always_use_external_player",
+    "external_player_preference",
+    "pref_player_speed",
+    "default_speed_presets",
+    "invert_duration",
+    "pref_player_aspect_state",
+    "pref_gesture_horizontal_seek",
+    "pref_show_seekbar",
+    "pref_default_intro_length",
+    "pref_skip_length_preference",
+    "pref_player_smooth_seek",
+    "pref_left_double_tap",
+    "pref_center_double_tap",
+    "pref_right_double_tap",
+    "pref_media_previous",
+    "pref_media_playpause",
+    "pref_media_next",
+    "pref_try_hwdec",
+    "pref_gpu_next",
+    "pref_video_debanding",
+    "use_yuv420p",
+    "pref_player_filter_brightness",
+    "pref_player_filter_saturation",
+    "pref_player_filter_contrast",
+    "pref_player_filter_gamma",
+    "pref_player_filter_hue",
+    "pref_audio_pitch_correction",
+    "pref_audio_config",
+    "pref_audio_volume_boost_cap",
+    "pref_audio_delay",
+    "pref_subtitle_whitelist",
+    "pref_subtitle_blacklist",
+    "pref_screenshot_subtitles",
+    "pref_subtitle_font",
+    "pref_subtitles_font_size",
+    "pref_sub_scale",
+    "pref_sub_border_size",
+    "pref_bold_subtitles",
+    "pref_italic_subtitles",
+    "pref_text_color_subtitles",
+    "pref_border_color_subtitles",
+    "pref_border_style_subtitles",
+    "sub_shadow_offset",
+    "pref_background_color_subtitles",
+    "pref_sub_justify",
+    "pref_sub_pos",
+    "pref_override_subtitles_ass",
+    "pref_subtitles_delay",
+    "pref_subtitles_speed",
+    "pref_subtitles_secondary_delay",
+    "mpv_scripts",
+    "pref_mpv_conf",
+    "pref_mpv_input",
+    "pref_player_statistics_page",
+    "pref_remember_decoder",
+    "player_decoder",
+    "pref_download_only_over_wifi_key",
+    "use_external_downloader",
+    "external_downloader_selection",
+    "save_chapter_as_cbz",
+    "split_tall_images",
+    "auto_download_while_reading",
+    "auto_download_while_watching",
+    "pref_remove_after_marked_as_read_key",
+    "pref_remove_bookmarked",
+    "pref_download_fillermarked",
+    "remove_exclude_categories",
+    "remove_exclude_anime_categories",
+    "download_new_categories",
+    "download_new_anime_categories",
+    "download_new_categories_exclude",
+    "download_new_anime_categories_exclude",
+    "download_speed_limit",
+    "download_new_unread_chapters_only",
+    "download_new_unread_episodes_only",
+    "pref_display_mode_catalogue",
+    "pref_migration_sorting",
+    "pref_migration_direction",
+    "__APP_STATE_has_filters_toggle_state",
+    "incognito_anime_extensions",
+    "incognito_manga_extensions",
+    "__APP_STATE_last_anime_catalogue_source",
+    "__APP_STATE_last_catalogue_source",
+    "ext_updates_count",
+    "show_not_runnable",
+    "browse_hide_in_anime_library_items",
+    "browse_hide_in_library_items",
+    "track_on_adding_to_library",
+    "show_next_episode_airing_time",
+    "pref_auto_update_manga_on_mark_read",
+    "backup_flags",
+    "auto_clear_chapter_cache",
+    "use_biometric_lock",
+    "lock_app_after",
+    "hide_notification_content",
+    "__APP_STATE_last_app_closed",
+    "verbose_logging",
+    "doh_provider",
+    "default_user_agent",
+    "pref_display_profile_key",
+    "pref_always_decode_long_strip_with_ssiv",
+    "check_app_updates",
+    "__APP_STATE_last_app_check",
+    "restore_after_crash",
+    "migrate_flags",
+    "anime_migrate_flags",
+    "incognito_extensions",
+    "upcoming.week_start",
+    "upcoming.home_returns_today",
 ];
 
 /// Whether `key` (as stored, without the backup prefix) belongs to a dropped feature.
@@ -579,12 +576,6 @@ mod tests {
 
     const MARKDOWN: &str =
         include_str!("../../../plans/02-preferences-system/p1-topic-key-registry.md");
-
-    /// Keys that two Kotlin functions share on purpose (behaviour section 4). Both rows are kept.
-    const SHARED_KEYS: [&str; 2] = [
-        "default_chapter_display_by_name_or_number",
-        "default_chapter_sort_by_ascending_or_descending",
-    ];
 
     /// Rows of the plan's registry tables as (key, store, kind, default).
     fn plan_rows() -> Vec<(String, String, String, String)> {
@@ -600,11 +591,13 @@ mod tests {
                     .replace("${tracker.id}", "{id}")
                     .replace("${id}", "{id}");
                 // T-19a-064: the anime update badge count is derived in memory, never registered
+                // the default reading mode is left to right (1) by the user's decision of 2026-10-11, not the plan's 2
+                let default = if key == "pref_default_reading_mode_key" { "1" } else { cells[6] };
                 (key != "animeext_updates_count" && !DROPPED_KEYS.contains(&key.as_str())).then(|| (
                     key,
                     cells[4].to_owned(),
                     cells[5].to_owned(),
-                    cells[6].to_owned(),
+                    default.to_owned(),
                 ))
             })
             .collect()
@@ -662,34 +655,22 @@ mod tests {
     }
 
     /// Defaults the plan gives as prose, pinned to the value the registry must hold on Linux.
-    const PROSE_DEFAULTS: [(&str, Lit); 5] = [
-        ("pref_app_theme", Lit::Str("DEFAULT")),
+    const PROSE_DEFAULTS: [(&str, Lit); 3] = [
         ("source_languages", Lit::Set(&["all", "en"])),
-        ("library_update_restriction", Lit::Set(&[])),
         ("__APP_STATE_storage_dir", Lit::Str("")),
         ("pref_torrserver_tackers", Lit::Str(TORRSERVER_TRACKERS)),
     ];
 
-    /// Desktop decision (2026-10-11): a wired PC must not wait for Wi-Fi, so downloads are not held back by default.
-    const DESKTOP_DEFAULTS: [&str; 3] = ["fullscreen", "player_fullscreen", "pref_download_only_over_wifi_key"];
-
     #[test]
-    fn registry_has_the_308_plan_rows_in_order() {
+    fn registry_has_the_75_plan_rows_in_order() {
         let rows = plan_rows();
-        assert_eq!(rows.len(), 308, "the plan's 328 rows minus the derived animeext_updates_count and the 19 dropped plan rows");
-        // five Kurobayomi rows after the plan's rows: `show_not_runnable` (T-19a-066), `anime_ext_last_check` (T-19a-064),
-        // `check_app_updates` and `last_app_check` (T-07a-036), and `muted_notification_channels` (T-req-platform-004)
-        assert_eq!(REGISTRY.len(), rows.len() + 8);
-        assert_eq!(REGISTRY[rows.len()].key, "show_not_runnable");
-        assert_eq!(REGISTRY[rows.len() + 1].key, "anime_ext_last_check");
-        assert_eq!(REGISTRY[rows.len() + 2].key, "check_app_updates");
-        assert_eq!(REGISTRY[rows.len() + 3].key, "__APP_STATE_last_app_check");
-        assert_eq!(REGISTRY[rows.len() + 4].key, "muted_notification_channels");
-        // T-46b-043: the opt-in and the remembered decoder
-        assert_eq!(REGISTRY[rows.len() + 5].key, "pref_remember_decoder");
-        assert_eq!(REGISTRY[rows.len() + 6].key, "player_decoder");
-        // the player opens in its own window or in the main window, as it was left last time
-        assert_eq!(REGISTRY[rows.len() + 7].key, "player_open_detached");
+        assert_eq!(rows.len(), 75, "the plan's rows minus the derived animeext_updates_count and the dropped (cut) plan rows");
+        // three Kurobayomi rows after the plan's rows: `anime_ext_last_check` (T-19a-064), `muted_notification_channels`
+        // (T-req-platform-004) and `player_open_detached` (the player opens in its own window or in the main window)
+        assert_eq!(REGISTRY.len(), rows.len() + 3);
+        assert_eq!(REGISTRY[rows.len()].key, "anime_ext_last_check");
+        assert_eq!(REGISTRY[rows.len() + 1].key, "muted_notification_channels");
+        assert_eq!(REGISTRY[rows.len() + 2].key, "player_open_detached");
         let mut pinned = 0;
         for (meta, (key, store, kind, default)) in REGISTRY.iter().zip(&rows) {
             assert_eq!(meta.key, key);
@@ -703,9 +684,6 @@ mod tests {
             assert_eq!(Namespace::of(meta.key), ns, "{key}");
             assert!(kind_matches(meta.kind, kind), "{key}: kind {kind}");
             match default_matches(meta.default, default) {
-                // Desktop decision (2026-10-11): the reader and the player do not take the whole screen by themselves, so
-                // these two defaults differ from the plan's Android rows (fullscreen is one click or F11 away).
-                Some(false) if DESKTOP_DEFAULTS.contains(&meta.key) => assert!(matches!(meta.default, Lit::Bool(false)), "{key}"),
                 Some(matches) => assert!(matches, "{key}: default {default} vs {:?}", meta.default),
                 None => {
                     let (_, want) = PROSE_DEFAULTS
@@ -729,7 +707,8 @@ mod tests {
 
     #[test]
     fn search_terms_name_the_table_and_the_field_of_a_key() {
-        assert_eq!(search_terms("reader_tapping_inverted"), Some(["reader", "pager_nav_inverted"]));
+        assert_eq!(search_terms("pref_default_reading_mode_key"), Some(["reader", "default_reading_mode"]));
+        assert_eq!(search_terms("reader_tapping_inverted"), None, "the tapping inversion was cut");
         assert_eq!(search_terms("no_such_key"), None);
     }
 
@@ -743,14 +722,13 @@ mod tests {
     }
 
     #[test]
-    fn keys_are_unique_except_the_shared_pairs() {
+    fn keys_are_unique() {
         let mut seen = std::collections::HashMap::new();
         for meta in REGISTRY {
             *seen.entry(meta.key).or_insert(0) += 1;
         }
         for (key, count) in seen {
-            let expected = if SHARED_KEYS.contains(&key) { 2 } else { 1 };
-            assert_eq!(count, expected, "{key}");
+            assert_eq!(count, 1, "{key}");
         }
     }
 
@@ -813,9 +791,10 @@ mod path_tests {
             Some("pref_display_mode_library")
         );
         assert_eq!(
-            find_path("player.gestures.gesture_horizontal_seek").map(|m| m.key),
-            Some("pref_gesture_horizontal_seek")
+            find_path("reader.default_reading_mode").map(|m| m.key),
+            Some("pref_default_reading_mode_key")
         );
+        assert!(find_path("player.gestures.gesture_horizontal_seek").is_none(), "the gesture was cut");
         assert!(find_path("library.no_such_field").is_none());
         assert!(find_path("no_dot").is_none());
     }

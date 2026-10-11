@@ -1781,7 +1781,7 @@ mod tests {
             let (nav, _window) = crate::testing::nav();
             let db = crate::data::app().db(EntryKind::Manga);
             let mangas = MangaRepo::new(Arc::clone(&db));
-            let id = mangas.insert(&Manga { source: 2131019126180322627, url: "/series/1".into(), title: "Browsed".into(), ..Manga::create() }).unwrap();
+            let id = mangas.insert(&Manga { source: kuro_source::generate_id("Fixture", "en", 1), url: "/series/1".into(), title: "Browsed".into(), ..Manga::create() }).unwrap();
             mangas.update(&MangaUpdate { initialized: Some(true), ..MangaUpdate::new(id) }).unwrap();
             let chapter = Chapter { manga_id: id, url: "/chapters/1".into(), name: "Chapter 1".into(), chapter_number: 1.0, ..Chapter::create() };
             ChapterRepo::new(Arc::clone(&db)).add_all(&[chapter]).unwrap();

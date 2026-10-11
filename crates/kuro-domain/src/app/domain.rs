@@ -6,8 +6,8 @@
 //!
 //! Deferred, with the exact gap:
 //! - None of the 47 owner-`area:10` rows of `p1-topic-domainmodule-registry.md` has its accessor on `Domain` yet. Some
-//!   of their behaviour is built under other names and is not wired here: `IncognitoState` (`source/incognito.rs`) and
-//!   `TrustExtension` (`extension/trust.rs`). Most of the remaining rows have no type in the workspace yet.
+//!   of their behaviour is built under other names and is not wired here: `TrustExtension` (`extension/trust.rs`).
+//!   Per-extension incognito is cut (settings diet); only the global incognito flag exists. Most of the remaining rows have no type in the workspace yet.
 //! - `Domain::start(replay)` is built (T-10a-029): it schedules the delayed tracking worker when the stored queue is
 //!   non-empty. The store is one file with a `manga` and an `anime` map, so it is one handle, not two singletons.
 //! - `TrackPreferences` is area 27's, and its task is T-10a-026 (milestone M08).

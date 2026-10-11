@@ -53,6 +53,11 @@ pub trait Paths {
     fn scrapers_dir(&self) -> PathBuf {
         self.data_dir().join("scrapers")
     }
+    /// Source files fetched from repository links (recipes and plug-ins), one checked copy per source. They are fetched
+    /// again when missing or changed, so the folder is a cache.
+    fn repo_sources_dir(&self) -> PathBuf {
+        self.cache_dir().join("repo-sources")
+    }
     /// Installed anime extensions.
     fn anime_extensions_dir(&self) -> PathBuf {
         self.extensions_dir().join("anime")
@@ -226,6 +231,7 @@ mod role_tests {
         assert_eq!(p.extensions_dir(), PathBuf::from("/d/extensions"));
         assert_eq!(p.anime_extensions_dir(), PathBuf::from("/d/extensions/anime"));
         assert_eq!(p.scrapers_dir(), PathBuf::from("/d/scrapers"));
+        assert_eq!(p.repo_sources_dir(), PathBuf::from("/k/repo-sources"));
         assert_eq!(p.extension_icons_dir(), PathBuf::from("/k/extensions/icons"));
         assert_eq!(p.anime_extension_icons_dir(), PathBuf::from("/k/ext-icons"));
         assert_eq!(p.extension_download_dir(), PathBuf::from("/k/ext-download"));

@@ -230,6 +230,10 @@ pub struct AnimeQueueParams {
     pub restored: Vec<QueueEntry>,
     /// The downloaded-episode index, kept in step with deletes and finished downloads.
     pub index: AnimeIndex,
+    /// Downloads that run at once, one per source (the Downloads page's Maximum downloads, 1 to 5). It is read each time
+    /// the scheduler picks the active items, so a change applies without a restart. Tests pass
+    /// [`ANIME_MAX_ACTIVE_SOURCES`].
+    pub max_active: Arc<dyn Fn() -> usize + Send + Sync>,
 }
 
 /// The caller's handle to the actor. Cheap to clone.
@@ -379,6 +383,7 @@ pub fn spawn(params: AnimeQueueParams) -> AnimeQueue {
         state_tx,
         index: params.index,
         network: NetworkGate::default(),
+        max_active: params.max_active,
     };
     tokio::spawn(actor.run(commands, done_rx));
     let ffmpeg_notice = startup_notice(&std::env::var_os("PATH").unwrap_or_default());
@@ -405,6 +410,8 @@ struct Actor {
     running: HashMap<i64, Running>,
     /// `AnimeDownloadJob` is running.
     runner_on: bool,
+    /// The most sources that download at once (`AnimeQueueParams::max_active`).
+    max_active: Arc<dyn Fn() -> usize + Send + Sync>,
     layout: AnimeLayout,
     store: Arc<AnimeQueueStore>,
     pending: Arc<AnimePendingStore>,
@@ -842,7 +849,7 @@ impl Actor {
             return;
         }
         let wanted =
-            pick_active(self.queue.iter().map(|d| (d.source.id, d.episode.id, d.status())), ANIME_MAX_ACTIVE_SOURCES);
+            pick_active(self.queue.iter().map(|d| (d.source.id, d.episode.id, d.status())), (self.max_active)().max(1));
         let stale: Vec<i64> = self.running.keys().copied().filter(|id| !wanted.contains(id)).collect();
         for id in stale {
             if let Some(running) = self.running.remove(&id) {
@@ -1083,6 +1090,7 @@ mod tests {
             settings,
             restored,
             index: index.clone(),
+            max_active: Arc::new(|| ANIME_MAX_ACTIVE_SOURCES),
         });
         Env { queue, store, pending, runner, index, root }
     }

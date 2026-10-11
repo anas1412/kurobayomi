@@ -81,10 +81,10 @@ proptest! {
         let prefs = LibraryPrefs::new(PrefStore::in_memory());
         prefs.auto_update_interval.set(int32);
         prop_assert_eq!(prefs.auto_update_interval.get(), int32);
-        prefs.filter_chapter_by_read.set(int64);
-        prop_assert_eq!(prefs.filter_chapter_by_read.get(), int64);
-        prefs.category_tabs.set(flag);
-        prop_assert_eq!(prefs.category_tabs.get(), flag);
+        prefs.last_updated_timestamp.set(int64);
+        prop_assert_eq!(prefs.last_updated_timestamp.get(), int64);
+        prefs.download_badge.set(flag);
+        prop_assert_eq!(prefs.download_badge.get(), flag);
     }
 
     #[test]

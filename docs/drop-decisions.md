@@ -290,3 +290,254 @@ These have no field-name reader outside the lane, but the key string or a functi
 
 `anime_migrate_flags`, `auto_download_while_reading`, `auto_download_while_watching`, `default_chapter_display_by_name_or_number`, `default_chapter_filter_by_bookmarked`, `default_chapter_filter_by_downloaded`, `default_chapter_filter_by_read`, `default_chapter_sort_by_ascending_or_descending`, `default_chapter_sort_by_source_or_number`, `default_episode_filter_by_bookmarked`, `default_episode_filter_by_downloaded`, `default_episode_filter_by_fillermarked`, `default_episode_filter_by_seen`, `default_episode_show_thumbnail_previews`, `default_episode_sort_by_source_or_number`, `default_season_download_overlay`, `default_season_filter_by_bookmarked`, `default_season_filter_by_completed`, `default_season_filter_by_downloaded`, `default_season_filter_by_fillermarked`, `default_season_filter_by_started`, `default_season_filter_by_unseen`, `default_season_sort_by_ascending_or_descending`, `default_season_sort_by_source_or_number`, `default_speed_presets`, `download_new_anime_categories`, `download_new_anime_categories_exclude`, `download_new_categories`, `download_new_categories_exclude`, `download_new_unread_chapters_only`, `download_new_unread_episodes_only`, `download_speed_limit`, `external_downloader_selection`, `incognito_extensions`, `migrate_flags`, `pref_always_decode_long_strip_with_ssiv`, `pref_audio_config`, `pref_audio_delay`, `pref_audio_pitch_correction`, `pref_audio_volume_boost_cap`, `pref_background_color_subtitles`, `pref_bold_subtitles`, `pref_border_color_subtitles`, `pref_border_style_subtitles`, `pref_download_fillermarked`, `pref_hardware_bitmap_threshold`, `pref_italic_subtitles`, `pref_override_subtitles_ass`, `pref_player_aspect_state`, `pref_player_filter_brightness`, `pref_player_filter_contrast`, `pref_player_filter_gamma`, `pref_player_filter_hue`, `pref_player_filter_saturation`, `pref_player_statistics_page`, `pref_remove_after_marked_as_read_key`, `pref_remove_bookmarked`, `pref_screenshot_subtitles`, `pref_show_system_status_bar`, `pref_sub_border_size`, `pref_sub_justify`, `pref_sub_pos`, `pref_sub_scale`, `pref_subtitle_blacklist`, `pref_subtitle_font`, `pref_subtitles_delay`, `pref_subtitles_font_size`, `pref_subtitles_secondary_delay`, `pref_subtitles_speed`, `pref_subtitle_whitelist`, `pref_text_color_subtitles`, `remove_exclude_anime_categories`, `remove_exclude_categories`, `restore_after_crash`, `save_chapter_as_cbz`, `split_tall_images`, `sub_shadow_offset`, `upcoming.home_returns_today`, `upcoming.week_start`, `use_external_downloader`
 
+
+## Settings diet cut (diet-finish lane, 2026-10-11)
+
+Source: `docs/design/settings-diet.md`, section 6 tables ("If CUT: hard-code"). Every key below is in `DROPPED_KEYS` in `crates/kuro-prefs/src/registry.rs`, so an Aniyomi backup or an old `config.toml` that carries it still loads, and a restore skips it silently. The user kept Data Saver (undecided) and the Detach feature, so their keys are not in this list. Feature cuts decided by the user: app lock, external player, mini player, random sort, custom buttons, script editor, code editor and the Lua and mpv script bridge (no UI; the user's own `mpv.conf` and `input.conf` files are still honoured).
+
+| Key | Hard-coded value (diet) | Diet page |
+|---|---|---|
+| `pref_app_theme` | DEFAULT | Appearance (settings_appearance, App language) |
+| `pref_theme_dark_amoled_key` | false | Appearance (settings_appearance, App language) |
+| `relative_time_v2` | true | Appearance (settings_appearance, App language) |
+| `app_date_format` | "" (locale short date) | Appearance (settings_appearance, App language) |
+| `bottom_rail_nav_style` | MOVE_HISTORY_TO_MORE | Appearance (settings_appearance, App language) |
+| `library_update_restriction` | {} (no restriction) | Library page (settings_library) and the library window sheets |
+| `library_update_manga_restriction` | the four default skip rules | Library page (settings_library) and the library window sheets |
+| `auto_update_metadata` | false | Library page (settings_library) and the library window sheets |
+| `display_continue_reading_button` | false | Library page (settings_library) and the library window sheets |
+| `display_category_tabs` | true | Library page (settings_library) and the library window sheets |
+| `display_number_of_items` | false | Library page (settings_library) and the library window sheets |
+| `categorized_display` | false | Library page (settings_library) and the library window sheets |
+| `hidden_categories` | false | Library page (settings_library) and the library window sheets |
+| `pref_filter_library_interval_custom` | DISABLED | Library page (settings_library) and the library window sheets |
+| `display_local_badge` | true | Library page (settings_library) and the library window sheets |
+| `display_language_badge` | false | Library page (settings_library) and the library window sheets |
+| `library_show_updates_count` | true | Library page (settings_library) and the library window sheets |
+| `library_random_anime_sort_seed` | 0 | Library page (settings_library) and the library window sheets |
+| `library_random_manga_sort_seed` | 0 | Library page (settings_library) and the library window sheets |
+| `pref_animelib_columns_portrait_key` | 0 (auto) | Library page (settings_library) and the library window sheets |
+| `pref_library_columns_portrait_key` | 0 (auto) | Library page (settings_library) and the library window sheets |
+| `pref_filter_animelib_started_v2` | DISABLED | Library page (settings_library) and the library window sheets |
+| `pref_filter_library_started_v2` | DISABLED | Library page (settings_library) and the library window sheets |
+| `pref_filter_animelib_bookmarked_v2` | DISABLED | Library page (settings_library) and the library window sheets |
+| `pref_filter_library_bookmarked_v2` | DISABLED | Library page (settings_library) and the library window sheets |
+| `animelib_update_categories` | {} (all categories) | Library page (settings_library) and the library window sheets |
+| `library_update_categories` | {} (all categories) | Library page (settings_library) and the library window sheets |
+| `animelib_update_categories_exclude` | {} | Library page (settings_library) and the library window sheets |
+| `library_update_categories_exclude` | {} | Library page (settings_library) and the library window sheets |
+| `pref_update_season_on_refresh` | false | Library page (settings_library) and the library window sheets |
+| `pref_update_season_on_library_update` | false | Library page (settings_library) and the library window sheets |
+| `mark_duplicate_read_chapter_read` | {} (off) | Library page (settings_library) and the library window sheets |
+| `mark_duplicate_seen_episode_seen` | {} (off) | Library page (settings_library) and the library window sheets |
+| `default_episode_filter_by_seen` | 0 | Library page (settings_library) and the library window sheets |
+| `default_chapter_filter_by_read` | 0 | Library page (settings_library) and the library window sheets |
+| `default_episode_filter_by_downloaded` | 0 | Library page (settings_library) and the library window sheets |
+| `default_chapter_filter_by_downloaded` | 0 | Library page (settings_library) and the library window sheets |
+| `default_episode_filter_by_bookmarked` | 0 | Library page (settings_library) and the library window sheets |
+| `default_chapter_filter_by_bookmarked` | 0 | Library page (settings_library) and the library window sheets |
+| `default_episode_filter_by_fillermarked` | 0 | Library page (settings_library) and the library window sheets |
+| `default_episode_sort_by_source_or_number` | 0 (by source) | Library page (settings_library) and the library window sheets |
+| `default_chapter_sort_by_source_or_number` | 0 (by source) | Library page (settings_library) and the library window sheets |
+| `default_chapter_display_by_name_or_number` | 0 | Library page (settings_library) and the library window sheets |
+| `default_chapter_sort_by_ascending_or_descending` | 0 (descending as the app draws it today) | Library page (settings_library) and the library window sheets |
+| `default_episode_show_thumbnail_previews` | 0 | Library page (settings_library) and the library window sheets |
+| `default_episode_show_summaries` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_filter_by_downloaded` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_filter_by_unseen` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_filter_by_started` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_filter_by_completed` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_filter_by_bookmarked` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_filter_by_fillermarked` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_sort_by_source_or_number` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_sort_by_ascending_or_descending` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_grid_display_mode` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_grid_display_size` | 0 | Library page (settings_library) and the library window sheets |
+| `default_season_download_overlay` | false | Library page (settings_library) and the library window sheets |
+| `default_season_unseen_overlay` | true | Library page (settings_library) and the library window sheets |
+| `default_season_local_overlay` | true | Library page (settings_library) and the library window sheets |
+| `default_season_lang_overlay` | false | Library page (settings_library) and the library window sheets |
+| `default_season_continue_overlay` | true | Library page (settings_library) and the library window sheets |
+| `default_season_display_mode` | 0 | Library page (settings_library) and the library window sheets |
+| `pref_enable_transitions_key` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_reader_flash` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_reader_flash_duration` | 100 | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_reader_flash_interval` | 1 | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_reader_flash_mode` | BLACK | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_double_tap_anim_speed` | 500 | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_show_page_number_key` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_show_reading_mode` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `fullscreen` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `cutout_short` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_keep_screen_on_key` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_enable_double_tap_zoom_webtoon` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `always_show_chapter_transition` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_preserve_reading_position` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `navigate_pan` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `landscape_zoom` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `crop_borders_webtoon` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `webtoon_side_padding` | 0 | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `reader_hide_threshold` | LOW | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `create_folder_per_manga` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `skip_read` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `skip_filtered` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `skip_dupe` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `webtoon_disable_zoom_out` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_dual_page_invert` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_dual_page_split_webtoon` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_dual_page_invert_webtoon` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_dual_page_rotate` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_dual_page_rotate_invert` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_dual_page_rotate_webtoon` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_dual_page_rotate_invert_webtoon` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_custom_brightness_key` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `custom_brightness_value` | 0 | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_color_filter_key` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `color_filter_value` | 0 | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `color_filter_mode` | 0 | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_grayscale` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_inverted_colors` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `reader_long_tap` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `reader_volume_keys` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `reader_volume_keys_inverted` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `reader_navigation_mode_pager` | 0 (default layout) | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `reader_navigation_mode_webtoon` | 0 (default layout) | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `reader_tapping_inverted` | NONE | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `reader_tapping_inverted_webtoon` | NONE | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `reader_navigation_overlay_new_user` | true | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `reader_navigation_overlay_on_start` | false | Reader (settings_reader; the reader window has its own Settings sheet over the same keys) |
+| `pref_preserve_watching_position` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_progress_preference` | 0.85 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_allow_gestures_in_panels` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_show_loading` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_show_current_chapter` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_remember_volume` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_show_failed_hosters` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_show_empty_hosters` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `player_fullscreen` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `player_hide_controls` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_display_vol_as_per` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_show_system_status_bar` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_reduce_motion` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_player_time_to_disappear` | 4000 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_panel_opacity` | 60 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_enable_skip_intro` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_enable_auto_skip_ani_skip` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_enable_netflixStyle_aniskip` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_waiting_time_aniskip` | 5 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_enable_ani_skip` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_disabled_ani_skip_chapters` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_enable_pip` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_pip_episode_toasts` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_pip_on_exit` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pip_replace_with_previous` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_always_use_external_player` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `external_player_preference` | "" | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_player_speed` | 1.0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `default_speed_presets` | the 12 default presets | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `invert_duration` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_player_aspect_state` | Fit | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_gesture_horizontal_seek` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_show_seekbar` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_default_intro_length` | 85 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_skip_length_preference` | 10 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_player_smooth_seek` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_left_double_tap` | Seek | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_center_double_tap` | PlayPause | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_right_double_tap` | Seek | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_media_previous` | Switch | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_media_playpause` | PlayPause | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_media_next` | Switch | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_try_hwdec` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_gpu_next` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_video_debanding` | None | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `use_yuv420p` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_player_filter_brightness` | 0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_player_filter_saturation` | 0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_player_filter_contrast` | 0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_player_filter_gamma` | 0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_player_filter_hue` | 0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_audio_pitch_correction` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_audio_config` | AutoSafe | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_audio_volume_boost_cap` | 30 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_audio_delay` | 0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_subtitle_whitelist` | "" | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_subtitle_blacklist` | "" | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_screenshot_subtitles` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_subtitle_font` | Sans Serif | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_subtitles_font_size` | 55 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_sub_scale` | 1.0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_sub_border_size` | 3 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_bold_subtitles` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_italic_subtitles` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_text_color_subtitles` | -1 (white) | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_border_color_subtitles` | -16777216 (black) | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_border_style_subtitles` | OutlineAndShadow | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `sub_shadow_offset` | 0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_background_color_subtitles` | 0 (none) | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_sub_justify` | Auto | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_sub_pos` | 100 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_override_subtitles_ass` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_subtitles_delay` | 0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_subtitles_speed` | 1.0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_subtitles_secondary_delay` | 0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `mpv_scripts` | true | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_mpv_conf` | "" (use the real mpv.conf file) | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_mpv_input` | "" (use the real input.conf file) | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_player_statistics_page` | 0 | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_remember_decoder` | false | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `player_decoder` | "" | Player (settings_player and its nine rows). The live player reads almost none of these (see the top section) |
+| `pref_download_only_over_wifi_key` | false | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `use_external_downloader` | false | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `external_downloader_selection` | "" | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `save_chapter_as_cbz` | true | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `split_tall_images` | true | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `auto_download_while_reading` | 0 (off) | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `auto_download_while_watching` | 0 (off) | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `pref_remove_after_marked_as_read_key` | false | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `pref_remove_bookmarked` | false | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `pref_download_fillermarked` | false | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `remove_exclude_categories` | {} | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `remove_exclude_anime_categories` | {} | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `download_new_categories` | {} (all) | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `download_new_anime_categories` | {} (all) | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `download_new_categories_exclude` | {} | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `download_new_anime_categories_exclude` | {} | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `download_speed_limit` | 0 (no limit) | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `download_new_unread_chapters_only` | false | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `download_new_unread_episodes_only` | false | Downloads (settings_downloads). The app has no live download manager yet, so only the library-update download rule reads these |
+| `pref_display_mode_catalogue` | COMPACT_GRID | Browse (settings_browse and the Sources tab) |
+| `pref_migration_sorting` | ALPHABETICAL | Browse (settings_browse and the Sources tab) |
+| `pref_migration_direction` | ASCENDING | Browse (settings_browse and the Sources tab) |
+| `__APP_STATE_has_filters_toggle_state` | false | Browse (settings_browse and the Sources tab) |
+| `incognito_anime_extensions` | {} | Browse (settings_browse and the Sources tab) |
+| `incognito_manga_extensions` | {} | Browse (settings_browse and the Sources tab) |
+| `__APP_STATE_last_anime_catalogue_source` | -1 | Browse (settings_browse and the Sources tab) |
+| `__APP_STATE_last_catalogue_source` | -1 | Browse (settings_browse and the Sources tab) |
+| `ext_updates_count` | 0 | Browse (settings_browse and the Sources tab) |
+| `show_not_runnable` | false | Browse (settings_browse and the Sources tab) |
+| `browse_hide_in_anime_library_items` | false | Browse (settings_browse and the Sources tab) |
+| `browse_hide_in_library_items` | false | Browse (settings_browse and the Sources tab) |
+| `track_on_adding_to_library` | true | Tracking (settings_tracking) |
+| `show_next_episode_airing_time` | true | Tracking (settings_tracking) |
+| `pref_auto_update_manga_on_mark_read` | ALWAYS | Tracking (settings_tracking) |
+| `backup_flags` | all four flags (everything) | Data and storage (settings_data_storage, settings_create_backup) |
+| `auto_clear_chapter_cache` | false | Data and storage (settings_data_storage, settings_create_backup) |
+| `use_biometric_lock` | false | Security and privacy (settings_security) |
+| `lock_app_after` | 0 | Security and privacy (settings_security) |
+| `hide_notification_content` | false | Security and privacy (settings_security) |
+| `__APP_STATE_last_app_closed` | 0 | Security and privacy (settings_security) |
+| `verbose_logging` | false (release) / true in debug builds | Advanced (settings_advanced) and network |
+| `doh_provider` | -1 (off) | Advanced (settings_advanced) and network |
+| `default_user_agent` | the Firefox 136 string | Advanced (settings_advanced) and network |
+| `pref_display_profile_key` | "" | Advanced (settings_advanced) and network |
+| `pref_always_decode_long_strip_with_ssiv` | false | Advanced (settings_advanced) and network |
+| `check_app_updates` | false | Base state and notifications (no settings page) |
+| `__APP_STATE_last_app_check` | 0 | Base state and notifications (no settings page) |
+| `restore_after_crash` | true | Base state and notifications (no settings page) |
+| `pref_hardware_bitmap_threshold` | 4096 | Base state and notifications (no settings page) |
+| `migrate_flags` | everything (i32::MAX) | Base state and notifications (no settings page) |
+| `anime_migrate_flags` | everything (i32::MAX) | Base state and notifications (no settings page) |
+| `incognito_extensions` | {} | Base state and notifications (no settings page) |
+| `upcoming.week_start` | auto (locale) | Base state and notifications (no settings page) |
+| `upcoming.home_returns_today` | false | Base state and notifications (no settings page) |

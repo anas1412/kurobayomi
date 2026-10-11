@@ -152,10 +152,10 @@ pub fn request(
     logged_in: &BTreeSet<i64>,
     query: Option<String>,
 ) -> Request {
-    let random_seed = match kind {
-        EntryKind::Anime => prefs.random_anime_sort_seed.get(),
-        EntryKind::Manga => prefs.random_manga_sort_seed.get(),
-    };
+    let random_seed = kuro_prefs::category::random_sort_seed(match kind {
+        EntryKind::Anime => kuro_prefs::category::CategoryKind::Anime,
+        EntryKind::Manga => kuro_prefs::category::CategoryKind::Manga,
+    });
     Request {
         kind,
         filters: filters(prefs, kind, downloaded_only, logged_in),

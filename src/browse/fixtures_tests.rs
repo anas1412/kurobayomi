@@ -263,18 +263,16 @@ fn tc_40_117_a_chip_change_without_a_query_leaves_the_results_unchanged() {
 }
 
 #[test]
-fn a_chip_change_with_the_query_searches_only_the_sources_it_adds() {
+fn a_chip_change_with_the_query_searches_nothing_new() {
     let candidates: Vec<Candidate> = sources_fixture()
         .into_iter()
         .map(|source| Candidate { source, package: String::new() })
         .collect();
     let mut search = GlobalSearch::new(candidates, set(&["en", "ja", "all", "other", "de"]), BTreeSet::new(), None, false);
     let first = search.request("title", None).expect("the first search runs the pinned source");
-    assert_eq!(first.sources.iter().map(|s| s.id).collect::<Vec<_>>(), [1001]);
+    assert!(first.sources.iter().any(|s| s.id == 1001) && first.sources.iter().any(|s| s.id == 5001), "the Pinned chip is cut: every source is searched");
     search.apply(first.generation, 1001, Ok(Vec::new()));
-    let added = search.set_filter(SourceFilter::All).expect("the same query searches the new sources");
-    assert!(added.sources.iter().all(|s| s.id != 1001), "the answered pinned Alpha Source is not searched again");
-    assert!(added.sources.iter().any(|s| s.id == 5001), "an unpinned source is added");
+    assert_eq!(search.set_filter(SourceFilter::All), None, "a chip change adds no source: nothing is searched again");
 }
 
 #[test]

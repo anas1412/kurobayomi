@@ -16,17 +16,15 @@
 //! - T-47ba-075 `ActivityCompat.recreate` (the theme swaps live), Compose previews, the animated More icon, and the
 //!   Android storage-manager gate (the platform data directory replaces it).
 //! - T-48a-020 the system status bar row: not offered; the header bar stays in fullscreen unless the user hides it (area 36).
-//! - T-48a-053 the external player package list: built from the installed `video/*` handlers (`player::external`).
+//! - T-48a-053 the external player package list: cut with the external player settings (settings diet).
 //! - T-48a-054 the PiP and fullscreen SDK gates: the mini player group follows the display probe; Fullscreen is always offered.
 
 pub mod about;
-pub mod app_lock;
 pub mod appearance;
 pub mod auth;
 pub mod browse;
 pub mod cache;
 pub mod category;
-pub mod category_sets;
 pub mod changelog;
 pub mod chooser;
 pub mod clipboard;

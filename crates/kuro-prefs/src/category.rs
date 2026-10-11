@@ -1,10 +1,9 @@
 //! Preference side of the category rules (T-05a-025). Deleting a category clears its id from the category
-//! sets and resets the default category. A sort-mode change writes the sort string and, for Random, a new
-//! seed. The category rows are in `kuro-data::category`, and the sort codec is `kuro_db::flags::library_sort`.
+//! sets and resets the default category. A sort-mode change writes the sort string. The Random sort seed is
+//! app memory (the settings diet cut its keys), one per kind. The category rows are in `kuro-data::category`, and the sort codec is `kuro_db::flags::library_sort`.
 
 use std::collections::BTreeSet;
-use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hasher};
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use crate::PrefError;
 use crate::library::{LibraryPrefs, SortSetting};
@@ -15,6 +14,25 @@ use crate::store::PrefStore;
 pub enum CategoryKind {
     Manga,
     Anime,
+}
+
+static RANDOM_SEEDS: [AtomicI32; 2] = [AtomicI32::new(0), AtomicI32::new(0)];
+
+fn seed_slot(kind: CategoryKind) -> &'static AtomicI32 {
+    match kind {
+        CategoryKind::Manga => &RANDOM_SEEDS[0],
+        CategoryKind::Anime => &RANDOM_SEEDS[1],
+    }
+}
+
+/// The seed of the Random sort of `kind`, `0` until a Random sort is picked. It lives in memory only.
+pub fn random_sort_seed(kind: CategoryKind) -> i32 {
+    seed_slot(kind).load(Ordering::Relaxed)
+}
+
+/// Remembers `seed` as the Random sort seed of `kind` until the app closes.
+pub fn set_random_sort_seed(kind: CategoryKind, seed: i32) {
+    seed_slot(kind).store(seed, Ordering::Relaxed);
 }
 
 /// The five category-id sets of a kind: library update include and exclude, the remove-exclude set, and the
@@ -97,15 +115,9 @@ pub fn prune_dangling_category_ids(
 }
 
 /// The preference writes of `SetSortModeForMangaCategory`. `serialized_sort` is the stored sort string such
-/// as `RANDOM,ASCENDING`. `random` draws a new seed for the Random sort. `global` writes the sort into the
-/// global preference, which is false when a category takes the change instead.
-pub fn write_sort_prefs(lib: &LibraryPrefs, kind: CategoryKind, serialized_sort: &str, random: bool, global: bool) -> Result<(), PrefError> {
-    if random {
-        match kind {
-            CategoryKind::Manga => lib.random_manga_sort_seed.set(new_random_seed())?,
-            CategoryKind::Anime => lib.random_anime_sort_seed.set(new_random_seed())?,
-        }
-    }
+/// as `RANDOM,ASCENDING`. `global` writes the sort into the global preference, which is false when a category
+/// takes the change instead.
+pub fn write_sort_prefs(lib: &LibraryPrefs, kind: CategoryKind, serialized_sort: &str, global: bool) -> Result<(), PrefError> {
     if global {
         match kind {
             CategoryKind::Manga => lib.manga_sorting_mode.set(SortSetting(serialized_sort.to_owned()))?,
@@ -113,12 +125,6 @@ pub fn write_sort_prefs(lib: &LibraryPrefs, kind: CategoryKind, serialized_sort:
         }
     }
     Ok(())
-}
-
-/// A new seed for the Random sort, the `Random.nextInt()` of Aniyomi. Each call takes fresh keys from the
-/// std hasher, so consecutive seeds differ.
-pub fn new_random_seed() -> i32 {
-    RandomState::new().build_hasher().finish() as i32
 }
 
 #[cfg(test)]
@@ -230,21 +236,23 @@ mod tests {
     }
 
     #[test]
-    fn a_sort_write_sets_the_global_sort_and_a_new_seed_only_for_random() {
+    fn a_sort_write_sets_the_global_sort_only_when_global() {
         let store = PrefStore::in_memory();
         let lib = LibraryPrefs::new(store.clone());
 
-        write_sort_prefs(&lib, CategoryKind::Manga, "LAST_MANGA_UPDATE,DESCENDING", false, true).unwrap();
+        write_sort_prefs(&lib, CategoryKind::Manga, "LAST_MANGA_UPDATE,DESCENDING", true).unwrap();
         assert_eq!(lib.manga_sorting_mode.get().0, "LAST_MANGA_UPDATE,DESCENDING");
-        assert_eq!(lib.random_manga_sort_seed.get(), 0);
 
-        write_sort_prefs(&lib, CategoryKind::Manga, "RANDOM,ASCENDING", true, false).unwrap();
+        write_sort_prefs(&lib, CategoryKind::Manga, "RANDOM,ASCENDING", false).unwrap();
         assert_eq!(lib.manga_sorting_mode.get().0, "LAST_MANGA_UPDATE,DESCENDING", "a category took the change");
-        assert_ne!(lib.random_manga_sort_seed.get(), 0);
     }
 
     #[test]
-    fn consecutive_random_seeds_differ() {
-        assert_ne!(new_random_seed(), new_random_seed());
+    fn the_random_seed_is_kept_in_memory_per_kind() {
+        set_random_sort_seed(CategoryKind::Anime, 4242);
+        assert_eq!(random_sort_seed(CategoryKind::Anime), 4242);
+        set_random_sort_seed(CategoryKind::Manga, -7);
+        assert_eq!(random_sort_seed(CategoryKind::Manga), -7);
+        assert_eq!(random_sort_seed(CategoryKind::Anime), 4242, "the other kind keeps its own seed");
     }
 }

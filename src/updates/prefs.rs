@@ -5,13 +5,12 @@
 #[cfg(test)]
 mod tests {
     use kuro_prefs::library::LibraryPrefs;
-    use kuro_prefs::player::PlayerPrefs;
     use kuro_prefs::store::PrefStore;
 
     #[test]
     fn prefs_defaults_match_the_area_table() {
         let store = PrefStore::in_memory();
-        let library = LibraryPrefs::new(store.clone());
+        let library = LibraryPrefs::new(store);
         assert_eq!(library.last_updated_timestamp.get(), 0);
         assert_eq!(library.new_manga_updates_count.get(), 0);
         assert_eq!(library.new_anime_updates_count.get(), 0);
@@ -20,7 +19,6 @@ mod tests {
         assert_eq!(library.new_manga_updates_count.key(), "library_unread_updates_count");
         assert_eq!(library.new_anime_updates_count.key(), "library_unseen_updates_count");
         assert_eq!(library.default_manga_category.key(), "default_category");
-        assert!(!PlayerPrefs::new(store).always_use_external_player.get());
     }
 
     #[test]

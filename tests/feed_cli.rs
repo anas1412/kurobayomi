@@ -20,12 +20,6 @@ impl Env {
         self.home.path().join(name)
     }
 
-    fn config(&self, text: &str) {
-        let dir = self.home.path().join(".config/kurobayomi");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("config.toml"), text).unwrap();
-    }
-
     fn manga_db(&self) -> PathBuf {
         let path = self.path("manga.db");
         kuro_db::schema_manga::open(&path).unwrap().execute_batch(&fixture("manga.sql")).unwrap();
@@ -129,31 +123,6 @@ fn empty_envelope_matches_the_golden_file() {
 }
 
 #[test]
-fn locked_envelope_matches_the_golden_file_and_never_opens_the_database() {
-    let env = Env::new();
-    env.config("[security]\nuse_authenticator = true\nlock_app_after = 0\n");
-    // no database at all: a locked feed answers without looking for one
-    let missing = env.path("absent.db");
-    let out = env.run(&["--updates-json", "--kind", "manga", "--now-ms", NOW, "--db", missing.to_str().unwrap()]);
-    assert_eq!(out.status.code(), Some(0));
-    assert!(!missing.exists());
-    let text = env.stdout(&out);
-    assert_golden("manga_locked.json", &text);
-    for key in ["title", "cover_path", "unread_update_id"] {
-        assert!(!text.contains(key));
-    }
-}
-
-#[test]
-fn the_flag_off_in_the_config_is_not_locked() {
-    let env = Env::new();
-    env.config("[security]\nuse_authenticator = false\n");
-    let db = env.manga_db();
-    let out = env.run(&["--updates-json", "--kind", "manga", "--now-ms", NOW, "--db", db.to_str().unwrap()]);
-    assert_eq!(json(&String::from_utf8(out.stdout).unwrap())["locked"], false);
-}
-
-#[test]
 fn exit_2_usage_matches_the_golden_file() {
     let env = Env::new();
     let out = env.run(&["--updates-json", "--kind", "manga", "--rows", "11"]);
@@ -182,19 +151,6 @@ fn exit_3_for_a_file_that_is_not_a_database() {
     assert_eq!(out.status.code(), Some(3));
     assert_eq!(stderr_lines(&out), 1);
     assert_eq!(json(&String::from_utf8(out.stdout).unwrap())["code"], "db_error");
-}
-
-#[test]
-fn exit_4_for_unreadable_preferences_prints_no_items() {
-    let env = Env::new();
-    env.config("[security\nbroken");
-    let db = env.manga_db();
-    let out = env.run(&["--updates-json", "--kind", "manga", "--db", db.to_str().unwrap()]);
-    assert_eq!(out.status.code(), Some(4));
-    assert_eq!(stderr_lines(&out), 1);
-    let v = json(&String::from_utf8(out.stdout).unwrap());
-    assert_eq!((v["schema"].as_i64(), v["code"].as_str()), (Some(1), Some("prefs_error")));
-    assert!(v.get("items").is_none());
 }
 
 #[test]

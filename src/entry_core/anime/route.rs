@@ -90,12 +90,10 @@ pub fn target(anime_id: i64) {
     TARGET.with(|t| t.set(Some(anime_id)));
 }
 
-/// The anime sources this build runs: the builtin ones, the recipe sources (`docs/source-recipes.md`) and the shipped
-/// source crates.
-fn live_anime_sources() -> Vec<Arc<dyn kuro_source::anime::AnimeSource>> {
+/// The anime sources this build runs: the builtin ones (none) and the recipe sources (`docs/source-recipes.md`).
+pub(crate) fn live_anime_sources() -> Vec<Arc<dyn kuro_source::anime::AnimeSource>> {
     let mut sources = kuro_source::anime::registry::builtin_anime_sources();
     sources.extend(crate::recipe_sources::anime_sources());
-    sources.extend(crate::browse::builtin::anime_sources());
     sources
 }
 

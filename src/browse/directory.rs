@@ -58,35 +58,6 @@ pub trait SourceDirectory: Send + Sync + 'static {
     }
 }
 
-/// Two directories read as one: the sources of both, and each question answered by the first that knows the id.
-struct Both(Arc<dyn SourceDirectory>, Arc<dyn SourceDirectory>);
-
-impl SourceDirectory for Both {
-    fn sources(&self) -> Vec<DirectorySource> {
-        let mut all = self.0.sources();
-        all.extend(self.1.sources());
-        all
-    }
-    fn loader(&self, source_id: i64) -> Option<Arc<dyn PageLoader>> {
-        self.0.loader(source_id).or_else(|| self.1.loader(source_id))
-    }
-    fn filters(&self, source_id: i64) -> Option<FilterList> {
-        self.0.filters(source_id).or_else(|| self.1.filters(source_id))
-    }
-    fn preferences(&self, source_id: i64) -> Option<Vec<SourcePref>> {
-        self.0.preferences(source_id).or_else(|| self.1.preferences(source_id))
-    }
-    fn fetch_chapters(&self, source_id: i64, manga: &Manga) -> Option<ChaptersFuture> {
-        self.0.fetch_chapters(source_id, manga).or_else(|| self.1.fetch_chapters(source_id, manga))
-    }
-    fn resolve_link(&self, uri: &str) -> Option<LinkFuture> {
-        self.0.resolve_link(uri).or_else(|| self.1.resolve_link(uri))
-    }
-    fn manga_source(&self, source_id: i64) -> Option<Arc<dyn MangaSource>> {
-        self.0.manga_source(source_id).or_else(|| self.1.manga_source(source_id))
-    }
-}
-
 static CURRENT: Mutex<Option<Arc<dyn SourceDirectory>>> = Mutex::new(None);
 
 /// Installs the directory the pages read. A second call replaces the first.
@@ -94,15 +65,9 @@ pub fn install(directory: Arc<dyn SourceDirectory>) {
     *CURRENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(directory);
 }
 
-/// The directory the pages read: the built-in sources (`builtin`) in front of the installed directory, either alone
-/// when the other is missing, and `None` when the app has neither.
+/// The directory the pages read, or `None` before one is installed.
 pub fn current() -> Option<Arc<dyn SourceDirectory>> {
-    let installed = CURRENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
-    let builtin = super::builtin::current().map(|b| b as Arc<dyn SourceDirectory>);
-    match (builtin, installed) {
-        (Some(builtin), Some(installed)) => Some(Arc::new(Both(builtin, installed))),
-        (builtin, installed) => builtin.or(installed),
-    }
+    CURRENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
 }
 
 /// A source as the migration picker shows it: the installed one, or a stub with no name or language when the directory
@@ -167,17 +132,6 @@ pub(crate) mod tests {
         assert!(unknown.is_stub, "an id the directory does not know is a stub (T-40b-070)");
         assert_eq!(unknown.id, 9);
         assert!(source_or_stub(None, 1).is_stub, "with no directory every source is a stub");
-    }
-
-    /// The built-in sources sit in front of the installed directory: both lists, each id answered by the one that has it.
-    #[test]
-    fn two_directories_read_as_one() {
-        let builtin = Arc::new(FakeDirectory { entries: vec![entry(1, "Built", "en", "builtin.a")], answers: Arc::new(|_, _| Ok(Vec::new())) });
-        let recipes = Arc::new(FakeDirectory { entries: vec![entry(2, "Recipe", "en", "scraper.b")], answers: Arc::new(|_, _| Ok(Vec::new())) });
-        let both = Both(builtin, recipes);
-        assert_eq!(both.sources().iter().map(|e| e.source.id).collect::<Vec<_>>(), [1, 2]);
-        assert!(both.loader(1).is_some() && both.loader(2).is_some() && both.loader(3).is_none());
-        assert!(both.filters(2).is_some() && both.manga_source(1).is_none());
     }
 
     #[test]

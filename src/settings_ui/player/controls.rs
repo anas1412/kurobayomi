@@ -32,19 +32,6 @@ pub fn probe_mini_player() -> Option<MiniPlayerSupport> {
     mini_player_support(Some(gtk::glib::prelude::ObjectExt::type_(&display).name()))
 }
 
-/// The Mini player group (the PiP prefs under their desktop label).
-pub fn mini_player_group(prefs: &Prefs) -> Preference {
-    let p = &prefs.player;
-    group(
-        "Mini player",
-        vec![
-            switch("Enable mini player", &p.enable_pip, true),
-            switch("Open mini player on exit", &p.pip_on_exit, true),
-            switch("Show mini player episode change toasts", &p.pip_episode_toasts, true),
-            switch("Switch next to previous in mini player", &p.pip_replace_with_previous, true),
-        ],
-    )
-}
 
 #[cfg(test)]
 mod tests {
@@ -56,13 +43,5 @@ mod tests {
         assert_eq!(mini_player_support(Some("GdkWaylandDisplay")), Some(MiniPlayerSupport::Windowed));
         assert_eq!(mini_player_support(Some("GdkBroadwayDisplay")), None);
         assert_eq!(mini_player_support(None), None);
-    }
-
-    #[test]
-    fn the_mini_player_group_has_its_four_switches() {
-        let prefs = Prefs::in_memory();
-        let Preference::Group(g) = mini_player_group(&prefs) else { panic!("a group") };
-        assert_eq!(g.title, "Mini player");
-        assert_eq!(g.items.len(), 4);
     }
 }

@@ -39,16 +39,16 @@ pub fn split_source_name(shown: &str) -> (String, String) {
     (shown.to_owned(), String::new())
 }
 
-fn source_of(anime: &Anime, info: &SourceInfo) -> AnimeSource {
+pub(crate) fn source_of(anime: &Anime, info: &SourceInfo) -> AnimeSource {
     let (name, lang) = split_source_name(&info.name);
     AnimeSource { id: anime.source, name, lang, is_http: !info.stub, unmetered: false }
 }
 
-fn anime_ref(anime: &Anime) -> AnimeRef {
+pub(crate) fn anime_ref(anime: &Anime) -> AnimeRef {
     AnimeRef { id: anime.id, source_id: anime.source, url: anime.url.clone(), title: anime.title.clone() }
 }
 
-fn episode_ref(e: &Episode) -> EpisodeRef {
+pub(crate) fn episode_ref(e: &Episode) -> EpisodeRef {
     EpisodeRef {
         id: e.id,
         anime_id: e.anime_id,

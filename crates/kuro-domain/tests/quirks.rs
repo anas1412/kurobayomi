@@ -18,7 +18,6 @@ use kuro_domain::items::recognition::{parse_episode_number, parse_season_number}
 use kuro_domain::items::should_update::{should_update_db_chapter, should_update_db_episode, should_update_db_season};
 use kuro_domain::items::sorter::sort_seasons;
 use kuro_domain::release::version::is_newer;
-use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
 
 /// Policy of each row: `PRESERVE`, `FIX`, `DROP`, `RENAME`, `CHANGE` or `NOTE`. Only `FIX` and `CHANGE` are deviations.
@@ -81,10 +80,6 @@ fn anime_with(viewer: i64) -> Anime {
     Anime { viewer_flags: viewer, ..Anime::create() }
 }
 
-fn lib_prefs() -> LibraryPrefs {
-    LibraryPrefs::new(PrefStore::in_memory())
-}
-
 /// Q1: a source that reports `dateUpload = 0` does not make a stored row look stale on every refresh.
 #[test]
 fn q01_zero_source_upload_date_does_not_force_a_rewrite() {
@@ -101,19 +96,25 @@ fn q01_zero_source_upload_date_does_not_force_a_rewrite() {
 /// Q2: "set as default" writes the downloaded filter from the downloaded bits, not the unseen bits.
 #[test]
 fn q02_season_defaults_write_the_downloaded_filter_from_its_own_bits() {
-    let prefs = lib_prefs();
-    prefs.set_season_settings_default(0x8).expect("unseen bit only");
-    assert_eq!(prefs.filter_season_by_download.get(), 0, "unseen bits do not leak into downloaded");
-    prefs.set_season_settings_default(0x2).expect("downloaded bit");
-    assert_eq!(prefs.filter_season_by_download.get(), 0x2);
+    use kuro_domain::entries::defaults::set_season_settings_default;
+    let store = PrefStore::in_memory();
+    let downloaded = store.pref::<i64>("default_season_filter_by_downloaded", 0);
+    set_season_settings_default(&store, 0x8);
+    assert_eq!(downloaded.get(), 0, "unseen bits do not leak into downloaded");
+    set_season_settings_default(&store, 0x2);
+    assert_eq!(downloaded.get(), 0x2);
 }
 
 /// Q3: the anime and manga defaults share their keys on purpose (backup interop).
 #[test]
 fn q03_chapter_and_episode_defaults_share_their_keys() {
-    let prefs = lib_prefs();
-    assert_eq!(prefs.display_episode_by_name_or_number.key(), prefs.display_chapter_by_name_or_number.key());
-    assert_eq!(prefs.sort_episode_by_ascending_or_descending.key(), "default_chapter_sort_by_ascending_or_descending");
+    use kuro_domain::entries::defaults::{set_chapter_settings_default, set_episode_settings_default};
+    let store = PrefStore::in_memory();
+    let direction = store.pref::<i64>("default_chapter_sort_by_ascending_or_descending", 0);
+    set_chapter_settings_default(&store, 0);
+    assert_eq!(direction.get(), 0);
+    set_episode_settings_default(&store, kuro_domain::entries::anime::episode_flags::SORT_DIR_MASK);
+    assert_eq!(direction.get(), kuro_domain::entries::anime::episode_flags::SORT_DIR_MASK, "the episode default writes the chapter key");
 }
 
 /// Q4: the dead source-manager dependency is gone, and a non-favourite keeps its in-memory title overlay only.

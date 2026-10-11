@@ -20,7 +20,6 @@ use kuro_domain::history::repo::HistoryRepo;
 use kuro_domain::history::view::{HistoryLine, remove_action};
 use kuro_domain::kind::EntryKind;
 use kuro_i18n::{MsgKey, tr};
-use kuro_prefs::player::PlayerPrefs;
 
 use crate::data;
 use crate::misc::diet_defaults as diet;
@@ -361,11 +360,11 @@ impl HistoryScreen {
     }
 }
 
-/// Opens a unit in the reader or the player. The external player is chosen by `pref_always_use_external_player` and
-/// opened through `open_route`, the one launcher hook; without a launcher the internal player is the fallback.
+/// Opens a unit in the reader or the player. The always-external choice is the hard-coded default (the setting is cut)
+/// and the external player opens through `open_route`, the one launcher hook; without a launcher the internal player
+/// is the fallback.
 fn open_unit(kind: EntryKind, entry_id: i64, unit: &Unit) {
-    let always = PlayerPrefs::new(data::app().base.store().clone()).always_use_external_player.get();
-    let route = if uses_external(always, kind) { Route::External } else { Route::Internal };
+    let route = if uses_external(crate::misc::diet_defaults::PLAYER_ALWAYS_EXTERNAL, kind) { Route::External } else { Route::Internal };
     open_route::open(kind == EntryKind::Anime, entry_id, unit.id, route);
 }
 

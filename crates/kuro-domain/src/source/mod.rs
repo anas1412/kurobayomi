@@ -7,7 +7,6 @@ pub mod db_repo;
 #[cfg(test)]
 pub mod fakes;
 pub mod identity;
-pub mod incognito;
 pub mod languages;
 pub mod migration;
 pub mod model;

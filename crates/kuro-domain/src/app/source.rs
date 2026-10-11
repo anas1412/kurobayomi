@@ -32,8 +32,6 @@ pub struct KindPrefs {
     pub pinned: Pref<BTreeSet<String>>,
     /// Decimal ids of the hidden sources.
     pub disabled: Pref<BTreeSet<String>>,
-    /// The id of the source used last, or `-1`.
-    pub last_used: Pref<i64>,
 }
 
 impl KindPrefs {
@@ -42,12 +40,10 @@ impl KindPrefs {
             Kind::Manga => Self {
                 pinned: prefs.pinned_manga_sources.clone(),
                 disabled: prefs.disabled_manga_sources.clone(),
-                last_used: prefs.last_used_manga_source.clone(),
             },
             Kind::Anime => Self {
                 pinned: prefs.pinned_anime_sources.clone(),
                 disabled: prefs.disabled_anime_sources.clone(),
-                last_used: prefs.last_used_anime_source.clone(),
             },
         }
     }
@@ -89,7 +85,7 @@ pub fn compute_enabled_sources(
 }
 
 /// The enabled list as a stream: the current list first, then a new list after each change of the languages, the
-/// hidden or pinned ids, the last-used id or the source list. A list equal to the last one is not published
+/// hidden or pinned ids or the source list. A list equal to the last one is not published
 /// (`distinctUntilChanged`).
 pub fn subscribe_enabled(
     prefs: &SourcePrefs,
@@ -104,8 +100,7 @@ pub fn subscribe_enabled(
             pref_stream(&prefs.enabled_languages),
             pref_stream(&kind_prefs.disabled),
         ),
-        combine3(
-            pref_stream(&kind_prefs.last_used),
+        combine2(
             pref_stream(&prefs.data_saver_excluded_sources),
             sources,
         ),
@@ -131,14 +126,22 @@ pub fn subscribe_enabled(
     rx
 }
 
-/// The enabled list from the combined inputs of [`subscribe_enabled`]: the pinned, language and hidden sets, then the
-/// last-used id, the data-saver exclusion set and the source list. Only a manga list reads the exclusion set, so no anime
-/// row carries the flag.
-type EnabledInputs = ((BTreeSet<String>, BTreeSet<String>, BTreeSet<String>), (i64, BTreeSet<String>, Vec<Source>));
+/// The id passed as "the source used last" when the list is built: the settings diet cut the stored last-used source, so
+/// no row is ever listed a second time.
+const NO_LAST_USED: Id = -1;
 
-fn enabled_from(kind: Kind, ((pinned, languages, disabled), (last_used, excluded, sources)): &EnabledInputs) -> Vec<Source> {
+/// The enabled list from the combined inputs of [`subscribe_enabled`]: the pinned, language and hidden sets, then the
+/// data-saver exclusion set and the source list. Only a manga list reads the exclusion set, so no anime row carries the
+/// flag.
+type EnabledInputs = ((BTreeSet<String>, BTreeSet<String>, BTreeSet<String>), (BTreeSet<String>, Vec<Source>));
+
+fn enabled_from(kind: Kind, inputs: &EnabledInputs) -> Vec<Source> {
+    enabled_with(kind, inputs, NO_LAST_USED)
+}
+
+fn enabled_with(kind: Kind, ((pinned, languages, disabled), (excluded, sources)): &EnabledInputs, last_used: Id) -> Vec<Source> {
     let excluded = (kind == Kind::Manga).then_some(excluded);
-    compute_enabled_sources(sources, languages, disabled, pinned, *last_used, excluded)
+    compute_enabled_sources(sources, languages, disabled, pinned, last_used, excluded)
 }
 
 /// The Java `String.CASE_INSENSITIVE_ORDER` (JDK 16 and later, which compare code points): each character is compared
@@ -409,8 +412,8 @@ mod tests {
     fn section_two_vectors_hold_for_manga_and_anime() {
         let (rows, languages, disabled, pinned) = section2();
         let run = |kind: Kind, languages: &BTreeSet<String>, hidden: &BTreeSet<String>, last_used: i64| {
-            let inputs = ((pinned.clone(), languages.clone(), hidden.clone()), (last_used, set(&[]), rows.clone()));
-            keys(&enabled_from(kind, &inputs))
+            let inputs = ((pinned.clone(), languages.clone(), hidden.clone()), (set(&[]), rows.clone()));
+            keys(&enabled_with(kind, &inputs, last_used))
         };
         for kind in [Kind::Manga, Kind::Anime] {
             let main = run(kind, &languages, &disabled, 2);

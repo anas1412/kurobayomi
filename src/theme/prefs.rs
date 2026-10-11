@@ -190,7 +190,7 @@ mod tests {
         assert!(!s.amoled);
     }
 
-    // T-49b-006: the Linux default is the GTK theme, stored as SYSTEM; both spec files say the same, so the first
+    // T-49b-006: the Linux default is the GTK theme, stored as SYSTEM; the spec says the same, so the first
     // value written and the value the spec shows agree.
     #[test]
     fn the_spec_defaults_of_the_app_theme_match_the_first_value_written() {
@@ -213,7 +213,7 @@ mod tests {
                     assert_eq!(options.first().map(String::as_str), Some("System"), "{id}: the GTK theme is the first choice");
                 }
             }
-            assert_eq!(seen, 2, "one App theme item on each screen");
+            assert_eq!(seen, 1, "one App theme item, on onboarding only: the Appearance one is cut");
         });
     }
 }

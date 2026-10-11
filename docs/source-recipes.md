@@ -36,7 +36,7 @@ so until it is, copy a recipe into the folder by hand.
 | `kind` | `"manga"` or `"anime"` |
 | `version` | optional, default 1; raise it to make a new source id |
 | `base_urls` | the allowed hosts, see above |
-| `headers` | optional table sent with every request (a `User-Agent` here replaces the app's) and handed to the player for videos. `Host` is not allowed. Covers and page images are loaded by the app without them, so a site that refuses hotlinked images (a Referer check) will show none |
+| `headers` | optional table sent with every request (a `User-Agent` here replaces the app's) and handed to the player for videos. `Host` is not allowed. Covers and page images are loaded with them too (except the `User-Agent`), so a `Referer` check on the image host passes |
 | `rate_limit_ms` | optional, at most 60000 |
 | `[urls]` | `popular` (required), `latest`, `search`: a path starting with `/`, or a full address on a listed host. `{page}` (starts at 1) and `{query}` (search text, percent-encoded) are the only placeholders |
 | `[tests]` | optional, for the checker: a fixture file per operation, `query` (the text a live search uses, default `a`) and `item_url` (a regex the first chapter or episode address must match, else the check fails) |

@@ -6,7 +6,7 @@ use gtk::prelude::*;
 use kuro_prefs::pref::Pref;
 use kuro_prefs::prefs::Prefs;
 
-use super::{controls, external, language, link_rows};
+use super::{controls, language, link_rows};
 use crate::pref_model::bind;
 use crate::pref_model::model::{ItemCommon, Preference, PreferenceItem};
 use crate::pref_model::page;
@@ -56,7 +56,7 @@ pub fn volume_row(pref: &Pref<f32>) -> PreferenceItem {
     }
 }
 
-/// The root page rows: the kept settings, the external player, the mini player when the display allows it, and the links.
+/// The root page rows: the kept settings, the mini player when the display allows it, and the links.
 pub fn page_rows(prefs: &Prefs, open: Rc<dyn Fn(&'static str)>) -> Vec<Preference> {
     let p = &prefs.player;
     let store = prefs.store();
@@ -71,10 +71,6 @@ pub fn page_rows(prefs: &Prefs, open: Rc<dyn Fn(&'static str)>) -> Vec<Preferenc
             switch("Autoplay next episode", &p.autoplay_enabled, true),
         ],
     )];
-    tree.push(external::group_row(prefs));
-    if controls::probe_mini_player().is_some() {
-        tree.push(controls::mini_player_group(prefs));
-    }
     tree.extend(link_rows(open));
     tree
 }

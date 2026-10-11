@@ -22,7 +22,7 @@ pub fn rows(about: &str) -> Vec<MenuRow> {
     let row = |title, subtitle: &str, icon, target| MenuRow { title, subtitle: subtitle.to_owned(), icon, target };
     vec![
         row("Appearance", "Theme, start screen, app lock", "preferences-desktop-appearance-symbolic", "settings_appearance"),
-        row("Library", "Categories, global update, chapter/episode behavior", "view-grid-symbolic", "settings_library"),
+        row("Library", "Categories, global update", "view-grid-symbolic", "settings_library"),
         row("Reader", "Reading mode, display, navigation", "x-office-document-symbolic", "settings_reader"),
         row("Player", "Languages, default volume, autoplay, buttons", "video-display-symbolic", "settings_player"),
         row("Downloads and storage", "Maximum downloads, auto-download, cleanup", "folder-download-symbolic", "settings_downloads"),

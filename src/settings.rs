@@ -133,13 +133,13 @@ mod search_tests {
 
     #[test]
     fn the_registry_key_table_and_field_are_hidden_terms() {
-        let index = [hit("Invert tap zones"), hit("Show page number")];
-        let found = find(&index, "tapping");
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].title, "Invert tap zones");
+        let index = [hit("Dual page split"), hit("Show page number")];
+        let found = find(&index, "dual_page_split_paged");
+        assert_eq!(found.len(), 1, "the Rust field name matches");
+        assert_eq!(found[0].title, "Dual page split");
         assert_eq!(found[0].crumb, "Reader > Navigation", "the breadcrumb is unchanged");
-        assert_eq!(find(&index, "pager_nav_inverted").len(), 1, "the Rust field name matches");
-        assert_eq!(find(&index, "invert").len(), 1, "titles still match");
+        assert_eq!(find(&index, "pref_dual_page_split").len(), 1, "the registry key matches");
+        assert_eq!(find(&index, "split").len(), 1, "titles still match");
     }
 
     #[test]

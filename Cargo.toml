@@ -29,6 +29,7 @@ kuro-images = { path = "crates/kuro-images" }
 kuro-player = { path = "crates/kuro-player" }
 kuro-track = { path = "crates/kuro-track" }
 kuro-net = { workspace = true }
+http = { workspace = true }
 libc = "0.2.189"
 reqwest = { workspace = true, features = ["blocking"] }
 async-channel = { workspace = true }

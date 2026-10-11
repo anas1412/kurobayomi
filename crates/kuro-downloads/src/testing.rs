@@ -217,6 +217,7 @@ pub fn anime_queue(root: &std::path::Path) -> crate::anime::manager::AnimeQueue 
         settings: crate::anime::manager::AnimeSettings::default(),
         restored: Vec::new(),
         index: crate::anime::cache::AnimeIndex::open(root, &root.join("cache")),
+        max_active: Arc::new(|| crate::anime::manager::ANIME_MAX_ACTIVE_SOURCES),
     })
 }
 
@@ -240,7 +241,6 @@ pub fn manga_manager(base: &std::path::Path) -> Arc<crate::manager::DownloadMana
         hold: Arc::new(crate::downloader::NoHold),
         restored: Vec::new(),
         kept_rows: Vec::new(),
-        speed_limit_kib_s: None,
         pending: Arc::new(crate::pending::MangaPendingStore::open_in_memory().unwrap()),
     }))
 }

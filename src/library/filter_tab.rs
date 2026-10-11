@@ -235,14 +235,14 @@ mod tests {
     #[test]
     fn one_tracker_is_one_row_and_many_are_a_heading_then_one_row_each() {
         let one = items(EntryKind::Anime, &[(7, "MyAnimeList".into())]);
-        assert_eq!(one.len(), 6);
-        assert_eq!(one[5], Item::Tri { filter: Filter::Tracked(7), label: Label::Msg(MsgKey::action_filter_tracked) });
+        assert_eq!(one.len(), 4);
+        assert_eq!(one[3], Item::Tri { filter: Filter::Tracked(7), label: Label::Msg(MsgKey::action_filter_tracked) });
 
         let many = items(EntryKind::Manga, &[(1, "AniList".into()), (2, "Kitsu".into())]);
-        assert_eq!(many.len(), 5 + 1 + 2);
-        assert_eq!(many[5], Item::Heading(MsgKey::action_filter_tracked));
-        assert_eq!(many[6], Item::Tri { filter: Filter::Tracked(1), label: Label::Tracker("AniList".into()) });
-        assert_eq!(many[7], Item::Tri { filter: Filter::Tracked(2), label: Label::Tracker("Kitsu".into()) });
+        assert_eq!(many.len(), 3 + 1 + 2);
+        assert_eq!(many[3], Item::Heading(MsgKey::action_filter_tracked));
+        assert_eq!(many[4], Item::Tri { filter: Filter::Tracked(1), label: Label::Tracker("AniList".into()) });
+        assert_eq!(many[5], Item::Tri { filter: Filter::Tracked(2), label: Label::Tracker("Kitsu".into()) });
     }
 
     #[test]

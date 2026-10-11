@@ -25,7 +25,7 @@ use crate::transport::{Transport, TransportLimits};
 /// The period of a `rate_limit` when the caller has no reason to pick one: one second (`rateLimit` default).
 pub const DEFAULT_RATE_PERIOD: Duration = Duration::from_secs(1);
 
-/// Reads the default `User-Agent` on each call, so a change to the preference applies to the next request.
+/// Gives the default `User-Agent` on each call.
 pub type UserAgentSource = Arc<dyn Fn() -> String + Send + Sync>;
 
 /// The HTTP client. Every request goes through the interceptor chain, then the transport.
@@ -59,8 +59,8 @@ pub struct ClientBuilder {
 impl NetworkClient {
     /// The app client, built from the `[network]` preferences (T-12a-030). The order is: cookie jar, transport
     /// (dispatcher limits and verbose logging), the application chain (uncaught, user agent, Cloudflare).
-    /// `verbose_logging` and `doh_provider` are read here, once, so a later change needs a restart. The default
-    /// `User-Agent` is read per request, so a change applies to the next request.
+    /// `verbose_logging`, `doh_provider` and the default `User-Agent` are the hard-coded `NetworkSettings` defaults
+    /// (the settings diet cut their preferences).
     pub fn new(
         prefs: &NetworkPrefs,
         cookie_file: PathBuf,
@@ -86,8 +86,8 @@ impl NetworkClient {
             Transport::with_doh(TransportLimits::default(), cookies.provider(), doh)?
                 .with_verbose_logging(settings.verbose_logging),
         );
-        let ua_pref = prefs.default_user_agent.clone();
-        let user_agent: UserAgentSource = Arc::new(move || ua_pref.get());
+        let default_user_agent = settings.default_user_agent.clone();
+        let user_agent: UserAgentSource = Arc::new(move || default_user_agent.clone());
         let ua = user_agent.clone();
         let chain: Vec<Arc<dyn Interceptor>> = vec![
             Arc::new(UncaughtExceptionInterceptor),
@@ -481,7 +481,6 @@ mod preference_and_extension_tests {
     use kuro_prefs::store::PrefStore;
 
     use super::*;
-    use crate::logging::capture::{Capture, capturing};
 
     fn prefs() -> NetworkPrefs {
         NetworkPrefs::new(PrefStore::in_memory())
@@ -520,19 +519,15 @@ mod preference_and_extension_tests {
     }
 
     #[tokio::test]
-    async fn default_user_agent_changes_apply_to_the_next_request_without_a_restart() {
+    async fn the_app_client_sends_the_hard_coded_default_user_agent() {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::any())
             .respond_with(wiremock::ResponseTemplate::new(200))
             .mount(&server)
             .await;
         let dir = tempfile::tempdir().unwrap();
-        let prefs = prefs();
-        prefs.default_user_agent.set("  first/1.0  ".into());
-        let client = app_client(&prefs, dir.path());
-        assert_eq!(client.default_user_agent(), "first/1.0");
-        client.get(&format!("{}/", server.uri())).await.unwrap();
-        prefs.default_user_agent.set("second/2.0".into());
+        let client = app_client(&prefs(), dir.path());
+        assert_eq!(client.default_user_agent(), crate::settings::DEFAULT_USER_AGENT);
         client.get(&format!("{}/", server.uri())).await.unwrap();
         let sent: Vec<String> = server
             .received_requests()
@@ -541,26 +536,7 @@ mod preference_and_extension_tests {
             .iter()
             .map(|r| r.headers.get("user-agent").unwrap().to_str().unwrap().to_owned())
             .collect();
-        assert_eq!(sent, vec!["first/1.0", "second/2.0"]);
-        assert_eq!(client.default_user_agent(), "second/2.0");
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn verbose_logging_is_read_once_at_build_and_a_later_change_does_not_apply() {
-        let server = wiremock::MockServer::start().await;
-        wiremock::Mock::given(wiremock::matchers::any())
-            .respond_with(wiremock::ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
-        let dir = tempfile::tempdir().unwrap();
-        let prefs = prefs();
-        prefs.verbose_logging.set(false);
-        let client = app_client(&prefs, dir.path());
-        prefs.verbose_logging.set(true);
-        let capture = Capture::default();
-        let _guard = capturing(&capture);
-        client.get(&format!("{}/", server.uri())).await.unwrap();
-        assert_eq!(capture.text(), "");
+        assert_eq!(sent, vec![crate::settings::DEFAULT_USER_AGENT]);
     }
 
     #[test]

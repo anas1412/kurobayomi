@@ -127,11 +127,10 @@ pub fn open_media(anime: bool, title: &str, unit: &str) {
     }
 }
 
-/// The anime sources this build runs: the builtin ones, the recipe sources and the shipped source crates.
+/// The anime sources this build runs: the builtin ones (none) and the recipe sources.
 pub fn anime_sources() -> Vec<std::sync::Arc<dyn kuro_source::anime::AnimeSource>> {
     let mut sources = kuro_source::anime::registry::builtin_anime_sources();
     sources.extend(crate::recipe_sources::anime_sources());
-    sources.extend(crate::browse::builtin::anime_sources());
     sources
 }
 
@@ -335,7 +334,7 @@ fn moved_row() -> Option<gtk::ListBoxRow> {
     if !crate::data::is_installed() {
         return None;
     }
-    let style = crate::settings_ui::route::prefs().ui.nav_style.get();
+    let style = kuro_prefs::ui::NavStyle::MOVE_HISTORY_TO_MORE;
     with_spec(|s| moved_row_for(style, &s.nav.iter().map(|n| n.id.as_str()).collect::<Vec<_>>()))
 }
 
@@ -367,9 +366,11 @@ fn open_help() {
     });
 }
 
-/// Download queue. No download manager runs in the app yet, so the queue is always empty: the Library's empty state
-/// with one way forward. The Anime | Manga switch, sort, Cancel all and the pause button come back with the manager.
+/// Download queue: the managers' queue page once they run, else the Library's empty state with one way forward.
 fn downloads() -> Option<Built> {
+    if let Some(page) = crate::downloads::queue_page::page() {
+        return built(page, vec![]);
+    }
     let library = Button::with_label("Library");
     library.connect_clicked(|_| open("library"));
     let (page, _) = crate::browse::look::empty_state("folder-download-symbolic", &screen("download_queue").empty.unwrap_or_default(), Some(&library));

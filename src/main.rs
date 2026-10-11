@@ -1,4 +1,3 @@
-mod applock_host;
 mod app_update;
 mod backup_host;
 mod backup_run;
@@ -13,6 +12,7 @@ mod feed;
 #[allow(dead_code)]
 mod cloudflare_window;
 mod data;
+mod downloads;
 mod entry;
 #[allow(dead_code)]
 mod entry_core;
@@ -233,6 +233,7 @@ fn build_window(app: &gtk::Application) {
     // one selection for every layout: the sidebar and the bottom bar show the same tab (T-36a-004)
     let host = shell::Shell::get().expect("the shell is installed in main");
     host.migration_done();
+    host.start_downloads(std::sync::Arc::new(gio_notifier::GioNotifier::new(app, Vec::new())));
     // the navigation style is cut from the settings: the History tab stays in the More tab
     let home = host.home_tabs(prefs.ui.start_screen.get(), kuro_prefs::ui::NavStyle::MOVE_HISTORY_TO_MORE);
     shell::tabs::bind(&tabs, &home);
@@ -310,18 +311,14 @@ fn build_window(app: &gtk::Application) {
     local_flow::ui::attach(&win);
     library::mount::on_selection_change(refresh.clone());
     refresh();
-    applock_host::attach(&win, data::app().security.clone());
-    // with the lock on, the main window is shown by the unlock window once it succeeds (T-53a-070)
-    if !shell::unlock::gate(app, &win, &data::app().security) {
-        win.present();
-    }
+    win.present();
     schedule_crash_test();
-    startup::publish_launcher_badge(&win, &app.application_id().unwrap_or_default());
+    startup::publish_launcher_badge(&app.application_id().unwrap_or_default());
     // background work that waits for the window: the chapter cache clear and the opt-in release check
     if let Ok(paths) = kuro_platform::linux::LinuxPaths::system() {
         startup::clear_chapter_cache_on_launch(crate::misc::diet_defaults::LIBRARY_AUTO_CLEAR_CHAPTER_CACHE, kuro_images::platform::chapter_cache_dir(&paths));
     }
-    app_update::startup(&data::app().base);
+    app_update::startup();
     // requests that arrived before the window: --action, --search, --open and opened files
     shell::launch::window_built(app, &win);
     // the desktop search provider serves library titles while the app runs (T-53a-066)

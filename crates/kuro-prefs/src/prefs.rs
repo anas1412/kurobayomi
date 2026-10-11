@@ -15,9 +15,8 @@ use crate::base::BasePrefs;
 use crate::library::LibraryPrefs;
 use crate::migrate::{self, Migration};
 use crate::network::NetworkPrefs;
-use crate::player::{DecoderPrefs, GesturePrefs, PlayerPrefs};
+use crate::player::PlayerPrefs;
 use crate::reader::ReaderPrefs;
-use crate::security::SecurityPrefs;
 use crate::settings_load;
 use crate::source::SourcePrefs;
 use crate::store::PrefStore;
@@ -31,11 +30,8 @@ pub struct Prefs {
     pub sources: SourcePrefs,
     pub library: LibraryPrefs,
     pub network: NetworkPrefs,
-    pub security: SecurityPrefs,
     pub reader: ReaderPrefs,
     pub player: PlayerPrefs,
-    pub gestures: GesturePrefs,
-    pub decoder: DecoderPrefs,
     /// `[torrent]`: the embedded torrent server settings (T-02a-021).
     pub torrent: TorrentPrefs,
     /// `[backup]`: the automatic backup interval and its app state (T-02a-024).
@@ -77,11 +73,8 @@ impl Prefs {
             sources: SourcePrefs::new(store.clone()),
             library: LibraryPrefs::new(store.clone()),
             network: NetworkPrefs::new(store.clone()),
-            security: SecurityPrefs::new(store.clone()),
             reader: ReaderPrefs::new(store.clone()),
             player: PlayerPrefs::new(store.clone()),
-            gestures: GesturePrefs::new(store.clone()),
-            decoder: DecoderPrefs::new(store.clone()),
             torrent: TorrentPrefs::new(store.clone()),
             backup: BackupPrefs::new(store.clone()),
             storage: StoragePrefs::new(store.clone()),
@@ -108,11 +101,8 @@ impl Prefs {
         self.sources.repair()?;
         self.library.repair()?;
         self.network.repair()?;
-        self.security.repair()?;
         self.reader.repair()?;
         self.player.repair()?;
-        self.gestures.repair()?;
-        self.decoder.repair()?;
         self.torrent.repair()?;
         self.backup.repair()?;
         self.storage.repair()
@@ -124,7 +114,6 @@ mod tests {
     use kuro_platform::paths::Paths;
 
     use super::*;
-    use crate::reader::ReaderHideThreshold;
     use crate::sort::MangaLibrarySort;
     use crate::testutil::{MemorySecrets, TestDir, TestPaths};
     use crate::toml_backend::config_file;
@@ -161,57 +150,10 @@ mod tests {
     fn open_builds_defaults_on_first_run() {
         let paths = TestPaths(TestDir::new("prefs-first-run"));
         let prefs = Prefs::open(&paths, secrets(), 1).unwrap();
-        assert_eq!(prefs.reader.reader_hide_threshold.get(), ReaderHideThreshold::LOW);
         assert_eq!(prefs.library.manga_sorting_mode.get().sort(), MangaLibrarySort::default_sort());
     }
 
-    #[test]
-    fn startup_repair_rewrites_invalid_enum_and_sort_values() {
-        let paths = TestPaths(TestDir::new("prefs-repair"));
-        std::fs::create_dir_all(paths.config_dir()).unwrap();
-        std::fs::write(
-            config_file(&paths.config_dir()),
-            "[reader]\nreader_hide_threshold = \"NOPE\"\n\n[library]\nmanga_sorting_mode = \"ALPHABETICAL\"\n",
-        )
-        .unwrap();
-        let prefs = Prefs::open(&paths, secrets(), 1).unwrap();
-        assert_eq!(
-            prefs.store().get_raw("reader_hide_threshold"),
-            Some(PrefValue::Str("LOW".into()))
-        );
-        assert_eq!(
-            prefs.store().get_raw("library_sorting_mode"),
-            Some(PrefValue::Str("ALPHABETICAL,ASCENDING".into()))
-        );
-    }
 
-    fn migrate_bad_threshold(s: &PrefStore) -> Result<bool, PrefError> {
-        assert_eq!(s.get_raw("reader_hide_threshold"), Some(PrefValue::Str("HIGH".into())));
-        s.remove("reader_hide_threshold");
-        s.set_raw("reader_hide_threshold", PrefValue::Str("LOWEST".into()));
-        Ok(true)
-    }
 
-    #[test]
-    fn a_migration_edit_of_a_raw_key_is_seen_by_the_typed_section() {
-        let paths = TestPaths(TestDir::new("prefs-migrate"));
-        std::fs::create_dir_all(paths.config_dir()).unwrap();
-        std::fs::write(config_file(&paths.config_dir()), "[reader]\nreader_hide_threshold = \"HIGH\"\n").unwrap();
-        let steps = [Migration { version: 1, run: migrate_bad_threshold }];
-        let prefs = Prefs::open_with(&paths, secrets(), 1, &steps).unwrap();
-        assert_eq!(prefs.reader.reader_hide_threshold.get(), ReaderHideThreshold::LOWEST);
-    }
 
-    #[test]
-    fn a_valid_value_is_not_repaired() {
-        let paths = TestPaths(TestDir::new("prefs-valid"));
-        std::fs::create_dir_all(paths.config_dir()).unwrap();
-        std::fs::write(
-            config_file(&paths.config_dir()),
-            "[reader]\nreader_hide_threshold = \"HIGH\"\n",
-        )
-        .unwrap();
-        let prefs = Prefs::open(&paths, secrets(), 1).unwrap();
-        assert_eq!(prefs.reader.reader_hide_threshold.get(), ReaderHideThreshold::HIGH);
-    }
 }

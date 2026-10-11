@@ -1,7 +1,7 @@
 //! The app's one source registry for the library passes and the backup preflight. A source is found by its kind and its id
-//! among the built-in sources, the recipe sources and the local source. The local source (`LOCAL_SOURCE_ID`) answers
+//! among the recipe sources, the installed packages and the local source (no built-in sources are installed). The local source (`LOCAL_SOURCE_ID`) answers
 //! with no remote calls and no items, as a local source does. An id nothing knows gives `None`, so a pass uses the stub
-//! slot and the entry fails with "Source not found".
+//! slot and the entry fails with "Source not installed".
 //!
 //! The lists are read at each call, so a source that starts later is found without a restart. The registry is
 //! stateless: it holds nothing that could go stale.
@@ -14,7 +14,7 @@ use kuro_source::anime::{AnimeSource, SAnime, SEpisode};
 use kuro_source::model::{SChapter, SManga};
 use kuro_source::{MangaSource, SourceError};
 
-use crate::browse::directory::{self, SourceDirectory};
+use crate::browse::directory;
 use crate::library_update::error::UpdateError;
 use crate::library_update::source::{Fetched, RemoteFlags, Source, SourceDetails, SourceItem, SourceRegistry};
 
@@ -30,11 +30,10 @@ pub enum LiveSource {
     Anime(Arc<dyn AnimeSource>),
 }
 
-/// The anime sources of the built-in set, of the recipes and of the installed instances hook, by id.
+/// The anime sources of the recipes and of the installed instances hook, by id.
 fn anime_source(source_id: i64) -> Option<Arc<dyn AnimeSource>> {
-    crate::browse::builtin::anime_sources()
+    crate::recipe_sources::anime_sources()
         .into_iter()
-        .chain(crate::recipe_sources::anime_sources())
         .find(|source| source.id() == source_id)
         .or_else(|| crate::browse::anime::directory::instances()?.source(source_id))
 }
@@ -58,6 +57,11 @@ impl LiveRegistry {
     fn find(&self, source_id: i64) -> Option<LiveSource> {
         self.get(EntryKind::Manga, source_id).or_else(|| self.get(EntryKind::Anime, source_id))
     }
+
+    /// The name of the source with this id under either kind, when the app holds it. The folder renames read it.
+    pub fn name_of_known(&self, source_id: i64) -> Option<String> {
+        self.find(source_id).map(|source| source.name())
+    }
 }
 
 impl LiveSource {
@@ -75,6 +79,11 @@ impl LiveSource {
             Self::Manga(source) => source.lang().to_owned(),
             Self::Anime(source) => source.lang().to_owned(),
         }
+    }
+
+    /// `Name (LANG)`, the label the logs and the notices show for a source the app holds.
+    pub fn label(&self) -> String {
+        kuro_source::display_name(&self.name(), &self.lang())
     }
 }
 

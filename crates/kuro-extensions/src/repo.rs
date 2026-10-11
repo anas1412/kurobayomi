@@ -2,9 +2,11 @@
 //! that lists its sources. Adding the link makes the sources available at once; each source's file is fetched on first
 //! use and checked against the sha256 in the index. The daily check re-reads the index (see [`refresh_due`]).
 //!
+//! A source's file is a recipe (`.toml`, `docs/source-recipes.md`) or a plug-in component (`.wasm`, `wit/kuro-source.wit`).
 //! The index is read here; the GTK side stores the links and the index text, and decides where a fetched file goes.
 
 use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -56,7 +58,7 @@ pub enum RepoError {
     BadId(String),
     #[error("the source {0:?} has a sha256 that is not 64 hex digits")]
     BadChecksum(String),
-    #[error("the source {0:?} has a file link that is not an https .toml file")]
+    #[error("the source {0:?} has a file link that is not an https .toml or .wasm file")]
     BadLink(String),
     #[error("the repository link must be https")]
     BadRepoLink,
@@ -68,6 +70,8 @@ pub enum RepoError {
     Status(u16),
     #[error("the file does not match the checksum in the index")]
     Mismatch,
+    #[error("the file could not be saved: {0}")]
+    Write(String),
 }
 
 /// Reads an index and checks it: each kind has at most [`MAX_SOURCES_PER_KIND`] sources, ids are unique and plain, the
@@ -88,7 +92,7 @@ fn check(index: &Index) -> Result<(), RepoError> {
         if !is_sha256_hex(&entry.sha256) {
             return Err(RepoError::BadChecksum(entry.id.clone()));
         }
-        if !(entry.file.starts_with("https://") && entry.file.ends_with(".toml")) {
+        if !(entry.file.starts_with("https://") && (entry.file.ends_with(".toml") || entry.file.ends_with(".wasm"))) {
             return Err(RepoError::BadLink(entry.id.clone()));
         }
         *per_kind.entry(entry.kind).or_default() += 1;
@@ -166,6 +170,41 @@ pub async fn fetch_source(client: &reqwest::Client, entry: &Entry) -> Result<Vec
     Ok(bytes)
 }
 
+/// Where the copy of a source's file lives under `root`: `<id>.toml` or `<id>.wasm`, the extension the link has. The id
+/// is checked by [`parse_index`], so it cannot leave the folder.
+pub fn cached_path(root: &Path, entry: &Entry) -> PathBuf {
+    let extension = if entry.file.ends_with(".wasm") { "wasm" } else { "toml" };
+    root.join(format!("{}.{extension}", entry.id))
+}
+
+/// The path of the source's file under `root`, fetched first when there is no copy or the copy's bytes do not match the
+/// index. A matching copy is used as it is, so a source is downloaded on its first use and then read from disk.
+pub async fn ensure_cached(client: &reqwest::Client, root: &Path, entry: &Entry) -> Result<PathBuf, RepoError> {
+    let path = cached_path(root, entry);
+    let cached = std::fs::read(&path).ok();
+    if cached.is_some_and(|bytes| sha256_hex(&bytes) == entry.sha256.to_ascii_lowercase()) {
+        return Ok(path);
+    }
+    let bytes = fetch_source(client, entry).await?;
+    write_atomic(&path, &bytes).map_err(|e| RepoError::Write(e.to_string()))?;
+    Ok(path)
+}
+
+/// Writes `bytes` to `path` through a `.part` file, so a crash never leaves a half-written copy under the final name.
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    // a name of its own per write, so two fetches of one entry never rename each other's file
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let part = path.with_extension(format!("{}.{n}.part", std::process::id()));
+    std::fs::write(&part, bytes)?;
+    std::fs::rename(&part, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&part);
+    })
+}
+
 async fn get(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, RepoError> {
     let mut response = client.get(url).send().await.map_err(|e| RepoError::Network(e.to_string()))?;
     let status = response.status();
@@ -240,8 +279,17 @@ mod tests {
         assert_eq!(parse_index(&short), Err(RepoError::BadChecksum("x".into())));
         let plain = index_of(&[entry("x", "manga", "en").replace("https://", "http://")]);
         assert_eq!(parse_index(&plain), Err(RepoError::BadLink("x".into())));
-        let not_toml = index_of(&[entry("x", "manga", "en").replace(".toml", ".wasm")]);
-        assert_eq!(parse_index(&not_toml), Err(RepoError::BadLink("x".into())));
+        let not_source = index_of(&[entry("x", "manga", "en").replace(".toml", ".exe")]);
+        assert_eq!(parse_index(&not_source), Err(RepoError::BadLink("x".into())));
+    }
+
+    #[test]
+    fn a_plug_in_link_is_accepted_and_its_copy_is_named_by_the_id_and_the_extension() {
+        let text = index_of(&[entry("x", "anime", "en").replace(".toml", ".wasm")]);
+        let index = parse_index(&text).expect("a .wasm link is a source too");
+        assert_eq!(cached_path(Path::new("/c"), &index.sources[0]), PathBuf::from("/c/x.wasm"));
+        let recipe = parse_index(&index_of(&[entry("y", "manga", "en")])).expect("valid");
+        assert_eq!(cached_path(Path::new("/c"), &recipe.sources[0]), PathBuf::from("/c/y.toml"));
     }
 
     #[test]
@@ -288,5 +336,32 @@ mod tests {
     async fn an_index_over_plain_http_is_refused_before_any_request() {
         let client = reqwest::Client::new();
         assert_eq!(fetch_index(&client, "http://host/index.min.json").await, Err(RepoError::BadRepoLink));
+    }
+
+    #[tokio::test]
+    async fn a_source_is_fetched_when_it_has_no_copy_and_read_from_disk_after_that() {
+        use wiremock::matchers::path;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        // two fetches: the first use, and the one after the copy is changed on disk
+        Mock::given(path("/ok.toml"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"abc".to_vec()))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let client = reqwest::Client::new();
+        let mut source = parse_index(&index_of(&[entry("ok", "manga", "en")])).expect("valid").sources.remove(0);
+        source.file = format!("{}/ok.toml", server.uri());
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("sources");
+
+        let first = ensure_cached(&client, &root, &source).await.expect("fetched");
+        let second = ensure_cached(&client, &root, &source).await.expect("read from the copy");
+        assert_eq!(first, second);
+        assert_eq!(std::fs::read(&first).expect("the copy"), b"abc");
+
+        std::fs::write(&first, b"changed").expect("overwrite the copy");
+        ensure_cached(&client, &root, &source).await.expect("fetched again");
+        assert_eq!(std::fs::read(&first).expect("the copy"), b"abc");
     }
 }

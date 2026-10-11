@@ -611,13 +611,13 @@ mod tests {
             };
             let (_ready_tx, ready) = watch::channel(true);
             let page = manga_sources_page(&prefs, ready, read);
-            arrived.borrow_mut().push(Source::new(2131019126180322627, "Weeb Central", "en"));
+            arrived.borrow_mut().push(Source::new(kuro_source::generate_id("Fixture", "en", 1), "Fixture", "en"));
             let window = gtk::Window::builder().default_width(600).default_height(600).child(page.widget()).build();
             window.present();
             let lists_it = || {
                 let mut stack = vec![page.widget().clone().upcast::<gtk::Widget>()];
                 while let Some(widget) = stack.pop() {
-                    if widget.downcast_ref::<gtk::Label>().is_some_and(|l| l.label() == "Weeb Central") {
+                    if widget.downcast_ref::<gtk::Label>().is_some_and(|l| l.label() == "Fixture") {
                         return true;
                     }
                     let mut child = widget.first_child();

@@ -308,8 +308,8 @@ mod tests {
             pref("show_nsfw_source", PrefValue::Boolean(true)),
         ];
         let outcome = restore_app_prefs(&store, &prefs, &CategoryMaps::default(), None, &Count::default());
-        assert_eq!(outcome.skipped, 9, "the nine dropped keys");
-        assert_eq!(store.all().len(), 2, "only the theme (an enum name that now reads as the default) and the flag are written");
+        assert_eq!(outcome.skipped, 10, "the ten dropped keys, the old app theme among them");
+        assert_eq!(store.all().len(), 1, "only the flag is written");
         assert_eq!(store.get_raw("show_nsfw_source"), Some(Value::Bool(true)));
     }
 
@@ -381,32 +381,18 @@ mod tests {
     }
 
     #[test]
-    fn category_set_is_replaced_not_united_and_untouched_when_nothing_maps() {
+    fn category_set_keys_are_cut_so_a_restore_skips_them_and_leaves_the_device_set() {
         let store = PrefStore::in_memory();
         store.set_raw("library_update_categories", Value::Set(BTreeSet::from(["1".to_string()])));
-        restore_app_prefs(
+        let outcome = restore_app_prefs(
             &store,
             &[pref("library_update_categories", set(&["5", "6"]))],
             &maps(),
             None,
             &Count::default(),
         );
-        assert_eq!(
-            store.get_raw("library_update_categories"),
-            Some(Value::Set(BTreeSet::from(["10".to_string(), "9".to_string()])))
-        );
-
-        restore_app_prefs(
-            &store,
-            &[pref("library_update_categories", set(&["99"]))],
-            &maps(),
-            None,
-            &Count::default(),
-        );
-        assert_eq!(
-            store.get_raw("library_update_categories"),
-            Some(Value::Set(BTreeSet::from(["9".to_string(), "10".to_string()])))
-        );
+        assert_eq!(outcome.skipped, 1);
+        assert_eq!(store.get_raw("library_update_categories"), Some(Value::Set(BTreeSet::from(["1".to_string()]))));
     }
 
     #[test]

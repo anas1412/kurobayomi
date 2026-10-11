@@ -28,6 +28,12 @@ pub async fn read() -> DeviceState {
     }
 }
 
+/// Whether the machine shows any sign of NetworkManager (its runtime directory). [`read`] cannot tell "wired" from
+/// "NetworkManager unreadable", so callers use this to know whether a `false` Wi-Fi reading means anything.
+pub fn network_manager_present() -> bool {
+    cfg!(target_os = "linux") && std::path::Path::new("/run/NetworkManager").exists()
+}
+
 /// `MemTotal` below this many bytes counts as low RAM: 3 GiB (`ActivityManager.isLowRamDevice` in Android).
 pub const LOW_RAM_BYTES: u64 = 3_221_225_472;
 

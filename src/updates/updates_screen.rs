@@ -520,7 +520,7 @@ impl UpdatesScreen {
         };
         let anime = self.kind == EntryKind::Anime;
         if let Some(entry_id) = target {
-            let always_external = anime && kuro_prefs::player::PlayerPrefs::new(data::app().base.store().clone()).always_use_external_player.get();
+            let always_external = anime && crate::misc::diet_defaults::PLAYER_ALWAYS_EXTERNAL;
             open_route::open(anime, entry_id, id, open_route::route(anime, always_external, alt));
         }
     }
@@ -792,7 +792,7 @@ impl UpdatesScreen {
             })
             .collect();
         self.sel_label.set_label(&bottom_bar::selected_text(selected.len()));
-        let always_external = kuro_prefs::player::PlayerPrefs::new(data::app().base.store().clone()).always_use_external_player.get();
+        let always_external = crate::misc::diet_defaults::PLAYER_ALWAYS_EXTERNAL;
         for action in bottom_bar::visible_actions(anime, &selected, always_external) {
             self.bar.append(&self.bar_button(action, anime));
         }

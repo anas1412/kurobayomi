@@ -220,7 +220,7 @@ mod tests {
         let slot = registry.get_or_stub(EntryKind::Manga, 9999);
         let result = slot.fetch(EntryKind::Manga, "/x", false).await;
         assert_eq!(result, Err(UpdateError::SourceNotInstalled));
-        assert_eq!(UpdateError::SourceNotInstalled.user_message(), "Source not found");
+        assert_eq!(UpdateError::SourceNotInstalled.user_message(), "Source not installed");
     }
 
     #[test]

@@ -28,13 +28,14 @@
 pub mod anime;
 pub mod banner;
 pub mod browse_screen;
-pub mod builtin;
 pub mod content;
 pub mod cookies;
 pub mod deep_link;
 pub mod dialogs;
 pub mod directory;
 pub mod entries;
+#[cfg(test)]
+pub(crate) mod fake_catalogue;
 pub mod ext_badges;
 pub mod ext_problems;
 pub mod extensions;

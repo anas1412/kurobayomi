@@ -135,12 +135,7 @@ define_prefs! {
     /// `[ui]` section: the seven keys of Aniyomi `UiPreferences` that a desktop has.
     pub struct UiPrefs in "ui" {
         theme_mode: ThemeMode = "pref_theme_mode_key" => ThemeMode::SYSTEM;
-        app_theme: AppTheme = "pref_app_theme" => AppTheme::DEFAULT;
-        theme_dark_amoled: bool = "pref_theme_dark_amoled_key" => false;
-        relative_time: bool = "relative_time_v2" => true;
-        date_format: String = "app_date_format" => String::new();
         start_screen: StartScreen = "start_screen" => StartScreen::ANIME;
-        nav_style: NavStyle = "bottom_rail_nav_style" => NavStyle::MOVE_HISTORY_TO_MORE;
     }
 }
 
@@ -161,12 +156,7 @@ mod tests {
             UiPrefs::FIELDS,
             &[
                 ("theme_mode", "pref_theme_mode_key"),
-                ("app_theme", "pref_app_theme"),
-                ("theme_dark_amoled", "pref_theme_dark_amoled_key"),
-                ("relative_time", "relative_time_v2"),
-                ("date_format", "app_date_format"),
                 ("start_screen", "start_screen"),
-                ("nav_style", "bottom_rail_nav_style"),
             ]
         );
         assert_eq!(UiPrefs::TABLE, "ui");
@@ -182,12 +172,7 @@ mod tests {
     fn defaults_are_the_plan_defaults() {
         let ui = UiPrefs::new(PrefStore::in_memory());
         assert_eq!(ui.theme_mode.get(), ThemeMode::SYSTEM);
-        assert_eq!(ui.app_theme.get(), AppTheme::DEFAULT);
-        assert!(!ui.theme_dark_amoled.get());
-        assert!(ui.relative_time.get());
-        assert_eq!(ui.date_format.get(), "");
         assert_eq!(ui.start_screen.get(), StartScreen::ANIME);
-        assert_eq!(ui.nav_style.get(), NavStyle::MOVE_HISTORY_TO_MORE);
     }
 
     #[test]
@@ -195,14 +180,14 @@ mod tests {
         let store = PrefStore::in_memory();
         let ui = UiPrefs::new(store.clone());
         ui.theme_mode.set(ThemeMode::DARK).unwrap();
-        ui.nav_style.set(NavStyle::MOVE_BROWSE_TO_MORE).unwrap();
+        ui.start_screen.set(StartScreen::BROWSE).unwrap();
         assert_eq!(
             store.get_raw("pref_theme_mode_key"),
             Some(PrefValue::Str("DARK".into()))
         );
         assert_eq!(
-            store.get_raw("bottom_rail_nav_style"),
-            Some(PrefValue::Str("MOVE_BROWSE_TO_MORE".into()))
+            store.get_raw("start_screen"),
+            Some(PrefValue::Str("BROWSE".into()))
         );
     }
 
@@ -229,14 +214,13 @@ mod tests {
     }
 
     #[test]
-    fn a_stored_monet_theme_and_an_old_tablet_key_do_not_break_loading() {
+    fn a_stored_theme_name_and_an_old_tablet_key_do_not_break_loading() {
         let store = PrefStore::in_memory();
         store.set_raw("pref_app_theme", PrefValue::Str("MONET".into()));
         store.set_raw("tablet_ui_mode", PrefValue::Str("ALWAYS".into()));
         let ui = UiPrefs::new(store);
-        assert_eq!(ui.app_theme.get(), AppTheme::DEFAULT, "MONET reads as the default theme");
-        assert!(ui.app_theme.is_set(), "the stored text is kept");
         assert_eq!(ui.theme_mode.get(), ThemeMode::SYSTEM);
+        assert_eq!(ui.start_screen.get(), StartScreen::ANIME);
     }
 
     #[test]
@@ -287,18 +271,15 @@ mod tests {
             let store = open(&paths).unwrap();
             let ui = UiPrefs::new(store.clone());
             ui.theme_mode.set(ThemeMode::LIGHT).unwrap();
-            ui.date_format.set("yyyy-MM-dd".into()).unwrap();
-            ui.relative_time.set(false).unwrap();
+            ui.start_screen.set(StartScreen::UPDATES).unwrap();
             store.flush().unwrap();
         }
         let store = open(&paths).unwrap();
         let ui = UiPrefs::new(store);
         assert_eq!(ui.theme_mode.get(), ThemeMode::LIGHT);
-        assert_eq!(ui.date_format.get(), "yyyy-MM-dd");
-        assert!(!ui.relative_time.get());
+        assert_eq!(ui.start_screen.get(), StartScreen::UPDATES);
         let doc = read_toml(&config_file(&paths.config_dir()));
         assert_eq!(doc["ui"]["theme_mode"].as_str(), Some("LIGHT"));
-        assert_eq!(doc["ui"]["date_format"].as_str(), Some("yyyy-MM-dd"));
-        assert_eq!(doc["ui"]["relative_time"].as_bool(), Some(false));
+        assert_eq!(doc["ui"]["start_screen"].as_str(), Some("UPDATES"));
     }
 }

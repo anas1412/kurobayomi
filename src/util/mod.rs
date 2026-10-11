@@ -5,7 +5,6 @@
 
 // the player, the downloads and the lock window call these from their own lanes
 #[allow(dead_code)]
-pub mod app_lock_auth;
 #[allow(dead_code)]
 pub mod dropped;
 #[allow(dead_code)]

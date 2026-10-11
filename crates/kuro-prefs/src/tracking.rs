@@ -27,9 +27,6 @@ define_prefs! {
     pub struct TrackPrefs in "tracking" {
         anilist_score_type: String = "anilist_score_type" => String::from("POINT_10");
         auto_update_track: bool = "pref_auto_update_manga_sync_key" => true;
-        track_on_adding_to_library: bool = "track_on_adding_to_library" => true;
-        show_next_episode_airing_time: bool = "show_next_episode_airing_time" => true;
-        auto_update_track_on_mark_read: AutoTrackState = "pref_auto_update_manga_on_mark_read" => AutoTrackState::ALWAYS;
     }
 }
 
@@ -193,11 +190,7 @@ mod tests {
     fn switches_have_the_plan_defaults_and_registered_keys() {
         let prefs = TrackPrefs::new(PrefStore::in_memory());
         assert!(prefs.auto_update_track.get());
-        assert!(prefs.track_on_adding_to_library.get());
-        assert!(prefs.show_next_episode_airing_time.get());
         assert_eq!(prefs.anilist_score_type.get(), "POINT_10");
-        assert_eq!(prefs.auto_update_track_on_mark_read.get(), AutoTrackState::ALWAYS);
-        assert_eq!(prefs.auto_update_track_on_mark_read.key(), "pref_auto_update_manga_on_mark_read");
         assert_eq!(TrackPrefs::TABLE, "tracking");
         crate::testutil::assert_section_registered(TrackPrefs::TABLE, TrackPrefs::FIELDS, &prefs.defaults());
     }

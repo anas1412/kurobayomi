@@ -23,6 +23,7 @@ use crate::library_update::queue::{FetchType, LibraryEntry, QueueInput, QueueRes
 use crate::library_update::source::{Fetched, SourceItem, SourceRegistry};
 use crate::library_update::store::LibraryStore;
 use crate::library_update::text;
+use crate::settings_ui::jobs::{JobOutcome, UniquePolicy};
 
 /// Sources processed at the same time (`Semaphore(5)` in the Kotlin job).
 pub const MAX_SOURCES_IN_PARALLEL: usize = 5;
@@ -332,8 +333,25 @@ where
         self.locks.stop(kind)
     }
 
-    /// The pass body, with the lock already held. `window` and `now_ms` are fixed for the whole pass.
+    /// The pass with the lock already held, recorded as one job of its kind in the job registry (T-52a-056), so the
+    /// worker page and the busy checks see it. `window` and `now_ms` are fixed for the whole pass.
     pub async fn run_with(&self, guard: PassGuard, settings: PassSettings, window: Window, now_ms: i64) -> PassOutcome {
+        let (name, jobs) = (job_name(settings.kind), crate::settings_ui::jobs::global());
+        // The lock is held here, so an active job of this name can only be one that never ended: it is replaced.
+        let job = jobs.enqueue_unique(name, &["library-update"], UniquePolicy::Replace, None).id;
+        jobs.start(job);
+        let outcome = self.run_pass(guard, settings, window, now_ms).await;
+        match &outcome.status {
+            PassStatus::Success => jobs.finish(job, JobOutcome::Success),
+            PassStatus::Retry => jobs.finish(job, JobOutcome::Retry),
+            PassStatus::Cancelled => jobs.cancel_unique(name),
+            PassStatus::Skipped | PassStatus::Failed(_) => jobs.finish(job, JobOutcome::Failure),
+        }
+        outcome
+    }
+
+    /// The pass body, with the lock already held.
+    async fn run_pass(&self, guard: PassGuard, settings: PassSettings, window: Window, now_ms: i64) -> PassOutcome {
         let deps = Arc::clone(&self.deps);
         let kind = settings.kind;
         let cancel = guard.cancel_token();
@@ -491,6 +509,14 @@ fn record_entry<H: Host>(
     }
 }
 
+/// The name of the job a library pass of `kind` records under in the job registry.
+pub fn job_name(kind: EntryKind) -> &'static str {
+    match kind {
+        EntryKind::Manga => "library-update-manga",
+        EntryKind::Anime => "library-update-anime",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,6 +613,11 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(outcome.failures.is_empty());
         assert!(runner.deps.host.errors.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn each_kind_records_its_own_job() {
+        assert_ne!(job_name(EntryKind::Manga), job_name(EntryKind::Anime));
     }
 
     #[tokio::test]

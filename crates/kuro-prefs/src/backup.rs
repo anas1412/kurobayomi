@@ -1,9 +1,7 @@
 //! `[backup]` and `[storage]` preferences (Aniyomi `BackupPreferences`, `StoragePreferences`, T-02a-024).
 //!
-//! `backup_flags` is accepted on import and re-exported unchanged; no app code reads it. The flag strings exist so an
-//! import can tell which parts an Aniyomi backup preference named.
-
-use std::collections::BTreeSet;
+//! `backup_flags` is cut (settings diet; it is in `DROPPED_KEYS`). The flag strings exist so an import can tell which
+//! parts an Aniyomi backup preference named.
 
 use crate::pref::Watch;
 use crate::registry::define_prefs;
@@ -21,12 +19,6 @@ define_prefs! {
     pub struct BackupPrefs in "backup" {
         backup_interval: i32 = "backup_interval" => 12;
         last_auto_backup_timestamp: i64 = "__APP_STATE_last_auto_backup_timestamp" => 0;
-        backup_flags: BTreeSet<String> = "backup_flags" => BTreeSet::from([
-            FLAG_CATEGORIES.to_owned(),
-            FLAG_CHAPTERS.to_owned(),
-            FLAG_HISTORY.to_owned(),
-            FLAG_TRACK.to_owned(),
-        ]);
     }
 }
 
@@ -56,7 +48,6 @@ mod tests {
         let backup = BackupPrefs::new(PrefStore::in_memory());
         assert_eq!(backup.backup_interval.get(), 12);
         assert_eq!(backup.last_auto_backup_timestamp.get(), 0);
-        assert_eq!(backup.backup_flags.get().into_iter().collect::<Vec<_>>(), ["1", "2", "4", "8"]);
         assert!(StoragePrefs::new(PrefStore::in_memory()).base_storage_directory.get().is_empty());
     }
 

@@ -5,11 +5,11 @@
 //! - The runtime's `Handle` is taken at startup and the schedule loops are spawned on it. The runtime is built by
 //!   `kuro_core::runtime::build` (2 to 8 workers by core count); the 4 workers of T-26a-131 and the "keep running in the
 //!   background" check at shutdown belong to that builder and `main`, which this lane does not own.
-//! - Entries find their sources through [`LiveRegistry`], the one registry over the built-in, recipe and local sources.
-//!   An id it does not know ends the entry as "source not found" (the stub slot of `SourceRegistry`).
+//! - Entries find their sources through [`LiveRegistry`], the one registry over the recipe and local sources.
+//!   An id it does not know ends the entry as "Source not installed" (the stub slot of `SourceRegistry`).
 //! - The "only on Wi-Fi" restriction reads `kuro_platform::device::read()`. That reader cannot tell "wired" from
 //!   "NetworkManager unreadable", so [`device_facts`] treats a machine with no sign of NetworkManager as unknown
-//!   (SC-07). A `network_manager_present` flag on the platform's `DeviceState` would remove the guess.
+//!   (SC-07), through `kuro_platform::device::network_manager_present`.
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::BTreeSet;
@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use kuro_db::handle::Db;
 use kuro_domain::items::source_sync::MangaSyncLocks;
+use kuro_data::source::{AnimeStubSourceRepo, MangaStubSourceRepo};
 use kuro_domain::kind::EntryKind;
 use kuro_downloads::download_prefs::DownloadPrefs;
 use kuro_prefs::Prefs;
@@ -35,6 +36,7 @@ use crate::library_update::live::LiveRegistry;
 use crate::library_update::metadata::{DbMetadataStore, MetadataDeps, MetadataProgress, MetadataRunner};
 use crate::library_update::pass::{EntryUpdate, Failure, Host, PassRunner, PassSettings, PassStatus, Trigger};
 use crate::library_update::queue::QueueRestrictions;
+use crate::library_update::source::SourceRegistry;
 use crate::library_update::renames::FolderRenames;
 use crate::library_update::schedule::run_schedule;
 use crate::library_update::store::SqliteLibraryStore;
@@ -44,8 +46,8 @@ use crate::misc::diet_defaults as diet;
 use crate::misc::notify;
 use crate::updates::download_host;
 
-/// The notifications and downloads of a pass: a toast for the summary, and desktop notices (`notify`) for each entry,
-/// for failures and for the large-queue warning, which fall back to a toast when no notifier is attached. New items go
+/// The notifications and downloads of a pass: a desktop notice for the summary, and desktop notices (`notify`) for each
+/// entry, for failures and for the large-queue warning, which fall back to a toast when no notifier is attached. New items go
 /// to the downloads backend (`download_host::current`) paused, and one start at the end of the pass. Progress and
 /// counters have no surface here: the counters are written by `PrefsHost`.
 ///
@@ -65,6 +67,25 @@ impl ToastHost {
         match kind {
             EntryKind::Manga => &self.manga_db,
             EntryKind::Anime => &self.anime_db,
+        }
+    }
+
+    /// What the error log calls a source: `Name (LANG)` for a source the app holds, else the name its stub row keeps
+    /// (a backup restore writes it for a source that is not installed), else the number.
+    fn label(&self, kind: EntryKind, id: i64) -> String {
+        if let Some(source) = LiveRegistry.get(kind, id) {
+            return source.label();
+        }
+        let db = Arc::clone(self.db(kind));
+        let stored = match kind {
+            EntryKind::Manga => MangaStubSourceRepo::new(db).get(id),
+            EntryKind::Anime => AnimeStubSourceRepo::new(db).get(id),
+        };
+        match stored.ok().flatten() {
+            Some(stub) if stub.name.trim().is_empty() => id.to_string(),
+            Some(stub) if stub.lang.trim().is_empty() => stub.name,
+            Some(stub) => kuro_source::display_name(&stub.name, &stub.lang),
+            None => id.to_string(),
         }
     }
 }
@@ -88,7 +109,9 @@ impl Host for ToastHost {
         }
         let titles: Vec<String> = updates.iter().map(|u| u.title.clone()).collect();
         let summary = text::summary(kind, &titles, hide_content);
-        crate::toast::notify(format!("{}: {}", summary.title, summary.text));
+        if !notify::post(notify::summary_post(kind, &summary)) {
+            crate::toast::notify(format!("{}: {}", summary.title, summary.text));
+        }
         for update in updates {
             if let Some(post) = notify::entry_post(kind, update, hide_content) {
                 notify::post(post);
@@ -113,8 +136,7 @@ impl Host for ToastHost {
 
     fn write_error_log(&self, kind: EntryKind, failures: &[Failure]) -> Option<PathBuf> {
         let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
-        // No installed-source bridge yet, so a source shows as its id, as an uninstalled source does in Kotlin.
-        match error_log::write(&error_log::path(&paths), kind, failures, &|id| id.to_string()) {
+        match error_log::write(&error_log::path(&paths), kind, failures, &|id| self.label(kind, id)) {
             Ok(file) => file,
             Err(error) => {
                 tracing::warn!(%error, "the update error log was not written");
@@ -166,7 +188,7 @@ async fn device_allows(_inputs: &Inputs) -> bool {
     let restrictions = BTreeSet::<String>::new();
     let conditions = kuro_platform::power_network::read_conditions().await;
     let device = kuro_platform::device::read().await;
-    let seen = std::path::Path::new("/run/NetworkManager").exists();
+    let seen = kuro_platform::device::network_manager_present();
     constraints::satisfied(&restrictions, device_facts(conditions, device, seen))
 }
 
@@ -215,8 +237,8 @@ pub fn pass_settings(kind: EntryKind, category: Option<i64>, inputs: &Inputs) ->
     }
 }
 
-/// The folder renames of the item sync: the shell's downloads folder and cache, and no source names while the app has
-/// no installed-source bridge (a source the lookup does not know keeps its folders).
+/// The folder renames of the item sync: the shell's downloads folder and cache, and the source names of the one
+/// registry (a source the registry does not know keeps its folders).
 fn folder_renames() -> Arc<FolderRenames> {
     let shell = crate::shell::host::Shell::get();
     let root = shell
@@ -226,7 +248,7 @@ fn folder_renames() -> Arc<FolderRenames> {
             kuro_platform::linux::LinuxPaths::system().ok().map(|p| kuro_platform::paths::Paths::default_downloads_dir(&p))
         })
         .unwrap_or_default();
-    Arc::new(FolderRenames::new(root, Arc::new(|_| None), shell.map(|s| s.downloads().clone())))
+    Arc::new(FolderRenames::new(root, Arc::new(|id: i64| LiveRegistry.name_of_known(id)), shell.map(|s| s.downloads().clone())))
 }
 
 fn runner() -> Arc<Runner> {
@@ -556,7 +578,7 @@ mod tests {
     #[tokio::test]
     async fn an_unknown_source_gives_the_stub_slot_and_a_missing_source_error() {
         use crate::library_update::error::UpdateError;
-        use crate::library_update::source::{SourceRegistry, SourceSlot};
+        use crate::library_update::source::SourceSlot;
         let slot = LiveRegistry.get_or_stub(EntryKind::Manga, 9);
         assert!(matches!(slot, SourceSlot::Missing));
         assert_eq!(slot.fetch(EntryKind::Manga, "/m", false).await, Err(UpdateError::SourceNotInstalled));

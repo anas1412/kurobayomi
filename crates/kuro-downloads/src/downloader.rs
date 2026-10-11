@@ -40,9 +40,6 @@ pub const NO_NETWORK_TEXT: &str = "No network connection available";
 pub const NO_WIFI_TEXT: &str = "No Wi-Fi connection available";
 pub const COMMAND_CAPACITY: usize = 64;
 
-/// Returns the current `download_speed_limit` in KiB/s. The downloader calls it at each chapter start (T-23a-015).
-pub type SpeedLimitFn = Arc<dyn Fn() -> i32 + Send + Sync>;
-
 /// Network state as the GUI reports it from `gio::NetworkMonitor`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Connectivity {
@@ -68,14 +65,12 @@ impl ProcessHold for NoHold {
 /// Settings read by the downloader. Changing one takes effect when the next run starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DownloadSettings {
-    /// Stop on a metered connection (`pref_download_only_over_wifi_key`, default on).
+    /// Stop on a metered connection. Off: the settings diet cut the switch (hard-coded default).
     pub only_over_wifi: bool,
-    /// Pack each finished chapter as a `.cbz` (`save_chapter_as_cbz`, default on).
+    /// Pack each finished chapter as a `.cbz`. On: the settings diet cut the switch (hard-coded default).
     pub save_as_cbz: bool,
-    /// Split pages taller than 3x their width (`split_tall_images`, default on).
+    /// Split pages taller than 3x their width. On: the settings diet cut the switch (hard-coded default).
     pub split_tall_images: bool,
-    /// Shared speed limit in KiB/s, 0 is unlimited (`download_speed_limit`). Read by the shared limiter.
-    pub speed_limit_kib_s: u32,
     /// Part height for the tall split: `2 * max(monitor width, height)` from GDK, set by the GUI. Not a user setting.
     pub optimal_image_height: u32,
     /// Data-saver proxy preferences (T-23a-017). The service is `None` by default.
@@ -85,25 +80,14 @@ pub struct DownloadSettings {
 impl Default for DownloadSettings {
     fn default() -> Self {
         Self {
-            only_over_wifi: true,
+            only_over_wifi: false,
             save_as_cbz: true,
             split_tall_images: true,
-            speed_limit_kib_s: 0,
             optimal_image_height: crate::images::DEFAULT_OPTIMAL_HEIGHT,
             data_saver: DataSaver::default(),
         }
     }
 }
-
-/// The settings this crate consumes as `table.field` paths of the kuro-prefs registry, with the default text each one
-/// must have (`p1-data-and-config.md` section 5.1, T-23a-037). The stored keys are the Kotlin names
-/// (`pref_download_only_over_wifi_key`, `save_chapter_as_cbz`, `split_tall_images`, `download_speed_limit`).
-pub const SETTING_KEYS: [(&str, &str); 4] = [
-    ("downloads.download_only_over_wifi", "true"),
-    ("downloads.save_chapters_as_cbz", "true"),
-    ("downloads.split_tall_images", "true"),
-    ("downloads.download_speed_limit", "0"),
-];
 
 /// What a removal applies to.
 pub enum RemoveTarget {
@@ -203,8 +187,6 @@ pub struct Downloader {
     index: Arc<DownloadIndex>,
     free_space: FreeSpaceFn,
     settings: DownloadSettings,
-    /// Where the speed limit is read at each chapter start. `None` keeps `settings.speed_limit_kib_s`.
-    speed_limit: Option<SpeedLimitFn>,
     page_cache: Option<Arc<dyn PageImageCache>>,
     connectivity: watch::Receiver<Connectivity>,
     connectivity_open: bool,
@@ -213,7 +195,7 @@ pub struct Downloader {
     events: broadcast::Sender<DownloadEvent>,
     dirty_progress: HashSet<i64>,
     shared: Arc<Shared>,
-    /// The shared speed limit, set from `download_speed_limit` at each chapter start (T-23a-015).
+    /// The shared speed limit. The settings diet cut `download_speed_limit`, so it stays unlimited.
     speed: Arc<crate::throttle::SpeedLimiter>,
 }
 
@@ -237,7 +219,6 @@ impl Downloader {
             index: params.index,
             free_space: params.free_space,
             settings: params.settings,
-            speed_limit: params.speed_limit_kib_s,
             page_cache: params.page_cache,
             connectivity: params.connectivity,
             connectivity_open: true,
@@ -538,12 +519,6 @@ impl Downloader {
         let Some(item) = self.queue.get(chapter_id).cloned() else { return };
         self.next_gen += 1;
         let generation = self.next_gen;
-        // Read at each chapter start (T-23a-015). Zero is unlimited.
-        let limit_kib_s = match &self.speed_limit {
-            Some(read) => i64::from(read()),
-            None => i64::from(self.settings.speed_limit_kib_s),
-        };
-        self.speed.set_rate(crate::settings::speed_limit_bytes_per_sec(limit_kib_s));
         let ctx = PipelineCtx {
             layout: self.layout.clone(),
             index: self.index.clone(),
@@ -821,7 +796,7 @@ mod tests {
 
     #[test]
     fn default_settings_wait_for_an_unmetered_link() {
-        assert!(DownloadSettings::default().only_over_wifi);
+        assert!(!DownloadSettings::default().only_over_wifi, "the settings diet cut the switch; the default is off");
     }
 
     fn plenty(_: &Path) -> Option<u64> {
@@ -876,7 +851,6 @@ mod tests {
             hold,
             restored: Vec::new(),
         kept_rows: Vec::new(),
-        speed_limit_kib_s: None,
         pending: Arc::new(crate::pending::MangaPendingStore::open_in_memory().unwrap()),
         };
         let dl = Downloader::new(params, events_tx, Arc::new(Shared::new()));
@@ -894,22 +868,6 @@ mod tests {
         std::iter::from_fn(|| events.try_recv().ok()).collect()
     }
 
-    #[tokio::test]
-    async fn the_speed_limit_is_read_again_at_each_chapter_start() {
-        let mut h = harness(Arc::new(NoHold));
-        let limit = Arc::new(std::sync::atomic::AtomicI32::new(0));
-        let read = limit.clone();
-        h.dl.speed_limit = Some(Arc::new(move || read.load(Ordering::SeqCst)));
-        enqueue_chapters(&mut h.dl, &[1]).await;
-        let paid = |dl: &Downloader| dl.speed.book(1024, tokio::time::Instant::now().into_std()).map(|t| t.elapsed());
-        h.dl.spawn_chapter(1);
-        h.dl.abort_running_tasks();
-        assert!(paid(&h.dl).is_none(), "T-23a-015: zero is unlimited");
-        limit.store(1, Ordering::SeqCst);
-        h.dl.spawn_chapter(1);
-        h.dl.abort_running_tasks();
-        assert!(paid(&h.dl).is_some(), "T-23a-015: the new value applies at the next chapter start, without a restart");
-    }
 
     #[tokio::test]
     async fn the_process_hold_is_taken_on_start_and_released_on_stop_or_pause() {
@@ -1012,42 +970,5 @@ mod tests {
         let manga_dir = h._base.path().join("downloads").join("Source 1 (EN)").join("Berserk");
         assert!(!manga_dir.join("Chapter 1_tmp").exists(), "RC-01: no stray tmp folder");
         assert!(manga_dir.join("Chapter 1").is_dir());
-    }
-}
-
-#[cfg(test)]
-mod settings_tests {
-    use super::*;
-
-    fn default_text(key: &str) -> String {
-        let d = DownloadSettings::default();
-        match key {
-            "downloads.download_only_over_wifi" => d.only_over_wifi.to_string(),
-            "downloads.save_chapters_as_cbz" => d.save_as_cbz.to_string(),
-            "downloads.split_tall_images" => d.split_tall_images.to_string(),
-            "downloads.download_speed_limit" => d.speed_limit_kib_s.to_string(),
-            other => panic!("unknown key {other}"),
-        }
-    }
-
-    #[test]
-    fn every_registered_key_has_the_kotlin_default() {
-        for (key, default) in SETTING_KEYS {
-            assert_eq!(default_text(key), default, "{key}");
-        }
-    }
-
-    #[test]
-    fn registered_keys_exist_in_the_prefs_registry_with_the_same_default() {
-        use kuro_prefs::registry::{Lit, find_path};
-        for (path, default) in SETTING_KEYS {
-            let meta = find_path(path).unwrap_or_else(|| panic!("{path} is not in the kuro-prefs registry"));
-            let text = match meta.default {
-                Lit::Bool(b) => b.to_string(),
-                Lit::Int(n) => n.to_string(),
-                other => panic!("{path}: unexpected default {other:?}"),
-            };
-            assert_eq!(text, default, "{path} ({})", meta.key);
-        }
     }
 }

@@ -1,7 +1,7 @@
 //! `kurobayomi --updates-json` (T-50a-015 to T-50a-017, T-50a-034): prints the updates feed as one JSON document and
 //! exits. It runs before GTK starts, opens the database read-only, and never writes.
 //!
-//! Exit codes: 0 ok (locked and empty feeds included), 2 usage, 3 database, 4 preferences. On failure stdout is
+//! Exit codes: 0 ok (empty feeds included), 2 usage, 3 database, 4 preferences. On failure stdout is
 //! `{"schema":1,"error":...,"code":...}` and stderr has one human line.
 
 use std::io::Write;
@@ -89,7 +89,6 @@ fn run_feed(args: &[String], paths: Result<&dyn Paths, String>, now: i64) -> Res
     let req = Request { kind: p.kind, rows: p.rows, cols: p.cols, now_ms: p.now_ms.unwrap_or(now) };
     let env = feed::build_envelope(
         &req,
-        || feed::lock::is_locked(&feed::lock::ConfigFile(dirs.config_file.clone())),
         |after, limit| {
             let conn = feed::query::open_read_only(&dirs.db)?;
             feed::query::unread_updates(&conn, p.kind, after, limit)
@@ -175,17 +174,6 @@ mod tests {
         assert_eq!(code, 3);
         assert!(out.contains("\"code\":\"db_missing\""));
         assert!(!db.exists());
-    }
-
-    #[test]
-    fn unreadable_preferences_are_exit_4_with_no_items() {
-        let paths = kuro_testkit::TempPaths::new().unwrap();
-        let cfg = kuro_prefs::toml_backend::config_file(&paths.config_dir());
-        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
-        std::fs::write(&cfg, "[security\n").unwrap();
-        let (code, out, _) = go("--updates-json --kind anime", &paths);
-        assert_eq!(code, 4);
-        assert!(out.contains("\"code\":\"prefs_error\"") && !out.contains("items"));
     }
 
     #[test]

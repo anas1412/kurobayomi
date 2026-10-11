@@ -1,25 +1,19 @@
-//! `[base]` preferences (Aniyomi `BasePreferences`), plus the two release-check keys Linux adds.
+//! `[base]` preferences (Aniyomi `BasePreferences`) that the desktop keeps.
 //!
-//! `downloaded_only`, `incognito_mode` and `shown_onboarding_flow` are app state and live in
-//! `state.toml`. The Android `extension_installer` choice is dropped on Linux (T-19a-037): it has no field, and a
-//! backed-up value is skipped on restore. `pref_hardware_bitmap_threshold` is dropped too (T-13a-030): nothing reads
-//! it, GTK manages textures, and a backed-up value is skipped on restore.
+//! `downloaded_only`, `incognito_mode` and `shown_onboarding_flow` are app state and live in `state.toml`. The keys the
+//! settings diet cut (display profile, long-strip decoding, the release check and its last lookup) are dropped: a
+//! backed-up value is skipped on restore.
 
 use std::collections::BTreeSet;
 
 use crate::registry::define_prefs;
 
 define_prefs! {
-    /// `[base]` section: the keys of Aniyomi `BasePreferences` that Linux keeps, then the two release-check keys.
+    /// `[base]` section: the keys that the desktop keeps of Aniyomi `BasePreferences`, plus the muted channels.
     pub struct BasePrefs in "base" {
         downloaded_only: bool = "__APP_STATE_pref_downloaded_only" => false;
         incognito_mode: bool = "__APP_STATE_incognito_mode" => false;
         shown_onboarding_flow: bool = "__APP_STATE_onboarding_complete" => false;
-        display_profile: String = "pref_display_profile_key" => String::new();
-        always_decode_long_strip_with_ssiv: bool = "pref_always_decode_long_strip_with_ssiv" => false;
-        // Linux additions (T-07a-036): the startup release check is opt-in, and its last successful lookup is app state
-        check_app_updates: bool = "check_app_updates" => false;
-        last_app_check: i64 = "__APP_STATE_last_app_check" => 0;
         // Linux addition: the notification channel ids (`notifications::CATEGORIES`) the user muted
         muted_notification_channels: BTreeSet<String> = "muted_notification_channels" => BTreeSet::new();
     }
@@ -31,8 +25,6 @@ mod tests {
 
     use super::*;
     use crate::toml_backend::{config_file, state_file};
-    use crate::network::NetworkPrefs;
-    use crate::security::SecurityPrefs;
     use crate::settings_load::open;
     use crate::store::PrefStore;
     use crate::testutil::{TestDir, TestPaths, assert_section_registered, read_toml};
@@ -47,13 +39,6 @@ mod tests {
                 ("downloaded_only", "__APP_STATE_pref_downloaded_only"),
                 ("incognito_mode", "__APP_STATE_incognito_mode"),
                 ("shown_onboarding_flow", "__APP_STATE_onboarding_complete"),
-                ("display_profile", "pref_display_profile_key"),
-                (
-                    "always_decode_long_strip_with_ssiv",
-                    "pref_always_decode_long_strip_with_ssiv",
-                ),
-                ("check_app_updates", "check_app_updates"),
-                ("last_app_check", "__APP_STATE_last_app_check"),
                 ("muted_notification_channels", "muted_notification_channels"),
             ]
         );
@@ -72,10 +57,6 @@ mod tests {
         assert!(!base.downloaded_only.get());
         assert!(!base.incognito_mode.get());
         assert!(!base.shown_onboarding_flow.get());
-        assert_eq!(base.display_profile.get(), "");
-        assert!(!base.always_decode_long_strip_with_ssiv.get());
-        assert!(!base.check_app_updates.get(), "the release check is opt-in");
-        assert_eq!(base.last_app_check.get(), 0);
         assert!(base.muted_notification_channels.get().is_empty(), "no channel is muted by default");
     }
 
@@ -85,7 +66,6 @@ mod tests {
         {
             let store = open(&paths).unwrap();
             let base = BasePrefs::new(store.clone());
-            base.display_profile.set("/icc/paper.icc".into()).unwrap();
             base.downloaded_only.set(true).unwrap();
             base.incognito_mode.set(true).unwrap();
             base.shown_onboarding_flow.set(true).unwrap();
@@ -93,7 +73,6 @@ mod tests {
         }
         let store = open(&paths).unwrap();
         let base = BasePrefs::new(store.clone());
-        assert_eq!(base.display_profile.get(), "/icc/paper.icc");
         assert!(base.downloaded_only.get());
         assert!(base.incognito_mode.get());
         assert!(base.shown_onboarding_flow.get());
@@ -103,17 +82,12 @@ mod tests {
         );
 
         let config = read_toml(&config_file(&paths.config_dir()));
-        assert_eq!(
-            config["base"]["display_profile"].as_str(),
-            Some("/icc/paper.icc")
-        );
-        assert!(config["base"].get("downloaded_only").is_none());
+        assert!(config.get("base").is_none_or(|t| t.get("downloaded_only").is_none()), "app state is not in config.toml");
 
         let state = read_toml(&state_file(&paths.state_dir()));
         assert_eq!(state["base"]["downloaded_only"].as_bool(), Some(true));
         assert_eq!(state["base"]["incognito_mode"].as_bool(), Some(true));
         assert_eq!(state["base"]["shown_onboarding_flow"].as_bool(), Some(true));
-        assert!(state["base"].get("display_profile").is_none());
     }
 
     #[test]
@@ -130,15 +104,9 @@ mod tests {
 
         let store = open(&paths).unwrap();
         let base = BasePrefs::new(store.clone());
-        let security = SecurityPrefs::new(store.clone());
-        let network = NetworkPrefs::new(store.clone());
         assert!(!base.downloaded_only.get());
-        assert!(!security.use_authenticator.get());
-        assert_eq!(security.lock_app_after.get(), 0);
-        assert_eq!(network.doh_provider.get(), -1);
-        assert_eq!(network.verbose_logging.get(), cfg!(debug_assertions));
 
-        network.doh_provider.set(2).unwrap();
+        base.incognito_mode.set(true).unwrap();
         store.flush().unwrap();
         let config = fs::read_to_string(config_file(&paths.config_dir())).unwrap();
         assert!(config.contains("# from a newer build"));

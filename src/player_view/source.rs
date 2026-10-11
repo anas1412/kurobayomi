@@ -1,4 +1,4 @@
-//! Episodes of an online anime source (KickAssAnime and the recipe sources). The source's best video is resolved off
+//! Episodes of an online anime source (the recipe sources and the installed packages). The source's best video is resolved off
 //! the GTK thread through the `kuro-source` loader (the source's own hoster and video order, then the first preferred
 //! or playable video), and the window plays its URL with the request headers, subtitles and audio tracks it returned.
 //! Progress is saved by episode row, as for a local episode. A failure is a toast.
@@ -168,7 +168,7 @@ mod tests {
     use super::*;
 
     /// A source over fixed hosters. `fail` makes `hosters` fail; `sort_videos` puts the highest resolution first, as
-    /// KickAssAnime's quality order does.
+    /// a quality order does.
     struct Fake {
         hosters: Vec<Hoster>,
         fail: bool,

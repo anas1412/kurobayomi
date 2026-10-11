@@ -27,14 +27,13 @@ pub const CATEGORY_SET_KEYS: [&str; 6] = [
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::{Kind, lookup};
+    use crate::registry::{is_dropped, lookup};
 
     #[test]
-    fn each_category_key_is_a_registry_set_with_an_empty_default() {
+    fn each_category_key_is_a_dropped_key_and_not_in_the_registry() {
         for key in CATEGORY_SET_KEYS {
-            let (meta, _) = lookup(key).unwrap_or_else(|| panic!("{key} missing from the registry"));
-            assert_eq!(meta.kind, Kind::Set, "{key}");
-            assert!(meta.default.value() == crate::values::PrefValue::Set(Default::default()), "{key}");
+            assert!(is_dropped(key), "{key} is a cut setting");
+            assert!(lookup(key).is_none(), "{key} is not registered");
         }
     }
 }

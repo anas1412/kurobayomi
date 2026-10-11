@@ -6,9 +6,9 @@
 //! an unknown pair gives ids the reader reports on its failure card.
 //!
 //! Dependencies on other areas, recorded here so the reader's behaviour is not mistaken for a gap in it:
-//! - An online chapter reads its pages from the manga's source when the source directory knows it (the built-in Weeb
-//!   Central and Comix, and the installed sources): `source_pages` gives the HTTP loader the page list, the images
-//!   with the source's headers and the Comix descrambler, and the chapter cache keeps both. Page lists are fetched on
+//! - An online chapter reads its pages from the manga's source when the source directory knows it (the recipe
+//!   sources and the installed packages): `source_pages` gives the HTTP loader the page list and the images, and the
+//!   chapter cache keeps both. Page lists are fetched on
 //!   threads (`source_pages::Prefetch`): the gate waits for the opened chapter's list, Retry waits for a new fetch, and
 //!   each chapter that loads starts its neighbours' lists. A chapter whose list is not cached yet does not ask the
 //!   source on the GTK thread: it reports "still loading" (a wait the reader shows as a spinner, see
@@ -30,14 +30,12 @@ use kuro_core::sources::SourceGate;
 use kuro_data::chapter::{Chapter, ChapterRepo};
 use kuro_data::manga::{Manga, MangaRepo};
 use kuro_db::Db;
-use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_domain::kind::EntryKind;
 use kuro_downloads::index::DownloadIndex;
 use kuro_local::is_local_source;
 use kuro_platform::paths::Paths;
 use kuro_platform::toast::{Toaster, toast_channel};
 use kuro_prefs::reader::ReaderPrefs;
-use kuro_prefs::store::PrefStore;
 use tokio::sync::watch;
 
 use super::delete_disk::{DiskDeleter, Settings as DeleteSettings};
@@ -122,13 +120,10 @@ pub fn downloaded_lookup(index: Option<DownloadIndex>, manga: &Manga) -> Arc<dyn
 }
 
 /// What closing the reader does with the chapters delete-after-read queued: a worker deletes their downloads.
-fn delete_sink(db: Arc<Db>, index: DownloadIndex, data_dir: PathBuf, store: PrefStore) -> DeleteSink {
+fn delete_sink(db: Arc<Db>, index: DownloadIndex, data_dir: PathBuf) -> DeleteSink {
     Rc::new(move |pending| {
-        let prefs = DownloadPrefs::new(&store);
-        let settings = DeleteSettings {
-            remove_bookmarked: prefs.remove_bookmarked.get(),
-            exclude_categories: prefs.remove_exclude_manga_categories.get().0.into_iter().collect(),
-        };
+        // The settings diet cut the bookmark and category exclusions of delete-after-read: nothing is kept back.
+        let settings = DeleteSettings::default();
         let deleter = DiskDeleter { db: Arc::clone(&db), index: index.clone(), queue: QueueFile::in_dir(&data_dir), settings };
         std::thread::spawn(move || {
             deleter.run(&pending);
@@ -189,7 +184,7 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     };
     let extras = ReaderExtras {
         delete_sink: match (&data_dir, &index) {
-            (Some(dir), Some(index)) => Some(delete_sink(db, index.clone(), dir.clone(), store)),
+            (Some(dir), Some(index)) => Some(delete_sink(db, index.clone(), dir.clone())),
             _ => None,
         },
         data_dir,

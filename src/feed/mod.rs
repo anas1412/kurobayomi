@@ -1,10 +1,9 @@
 //! The updates feed shared by the `--updates-json` command line and the desktop applets (T-50a-001 to T-50a-017).
 //! Pure data and rules; nothing here touches GTK. Port of the Aniyomi widget feed: recent window, unread filter,
-//! one cell per entry, a cap of rows x cols, and the app-lock rule.
+//! one cell per entry, and a cap of rows x cols.
 
 pub mod cover;
 pub mod grid;
-pub mod lock;
 pub mod query;
 pub mod window;
 
@@ -102,7 +101,6 @@ pub struct Envelope {
     pub schema: u32,
     pub generated_at_ms: i64,
     pub kind: Kind,
-    pub locked: bool,
     pub grid: GridOut,
     pub window_after_ms: i64,
     pub items: Vec<Item>,
@@ -136,36 +134,28 @@ pub struct Request {
     pub now_ms: i64,
 }
 
-/// Builds the payload. The lock is checked first; when locked, `query` is never called and no title or cover leaves
-/// the process (T-50a-009).
+/// Builds the payload. Titles and covers are only looked up for the rows that go out.
 pub fn build_envelope(
     req: &Request,
-    is_locked: impl FnOnce() -> Result<bool, FeedError>,
     query: impl FnOnce(i64, usize) -> Result<Vec<UpdateRow>, FeedError>,
     cover_path: impl Fn(&UpdateRow) -> Option<String>,
 ) -> Result<Envelope, FeedError> {
     let cap = req.rows * req.cols;
     let after = window::window_start_ms(req.now_ms);
-    let locked = is_locked()?;
-    let items = if locked {
-        Vec::new()
-    } else {
-        dedupe_and_cap(query(after, grid::DB_LIMIT)?, cap as usize)
-            .into_iter()
-            .map(|r| Item {
-                entry_id: r.entry_id,
-                kind: req.kind,
-                cover_path: cover_path(&r),
-                unread_update_id: r.update_id,
-                title: r.title,
-            })
-            .collect()
-    };
+    let items = dedupe_and_cap(query(after, grid::DB_LIMIT)?, cap as usize)
+        .into_iter()
+        .map(|r| Item {
+            entry_id: r.entry_id,
+            kind: req.kind,
+            cover_path: cover_path(&r),
+            unread_update_id: r.update_id,
+            title: r.title,
+        })
+        .collect();
     Ok(Envelope {
         schema: 1,
         generated_at_ms: req.now_ms,
         kind: req.kind,
-        locked,
         grid: GridOut { rows: req.rows, cols: req.cols, cap },
         window_after_ms: after,
         items,
@@ -194,28 +184,10 @@ mod tests {
     }
 
     #[test]
-    fn a_locked_feed_never_queries() {
-        let req = Request { kind: Kind::Manga, rows: 2, cols: 4, now_ms: 0 };
-        let env = build_envelope(&req, || Ok(true), |_, _| panic!("queried while locked"), |_| panic!("cover looked up")).unwrap();
-        assert!(env.locked && env.items.is_empty());
-        let json = serde_json::to_string(&env).unwrap();
-        for key in ["title", "cover_path", "unread_update_id"] {
-            assert!(!json.contains(key), "{key} leaked");
-        }
-    }
-
-    #[test]
-    fn a_lock_read_error_fails_closed() {
-        let req = Request { kind: Kind::Anime, rows: 1, cols: 1, now_ms: 0 };
-        let err = build_envelope(&req, || Err(FeedError::Prefs("x".into())), |_, _| panic!("queried"), |_| None).unwrap_err();
-        assert_eq!(err.exit_code(), 4);
-    }
-
-    #[test]
     fn hostile_titles_round_trip_through_json() {
         let title = "a \"quoted\"\nline \u{202e}rtl \\ tab\t";
         let req = Request { kind: Kind::Manga, rows: 1, cols: 1, now_ms: 0 };
-        let env = build_envelope(&req, || Ok(false), |_, _| Ok(vec![row(1, title)]), |_| None).unwrap();
+        let env = build_envelope(&req, |_, _| Ok(vec![row(1, title)]), |_| None).unwrap();
         let back: serde_json::Value = serde_json::from_str(&serde_json::to_string(&env).unwrap()).unwrap();
         assert_eq!(back["items"][0]["title"], title);
         assert_eq!(back["items"][0]["cover_path"], serde_json::Value::Null);
@@ -267,9 +239,6 @@ mod tests {
         assert!(qml.contains("interval: 60000") && qml.contains("triggeredOnStart: true"));
         assert!(qml.contains("interval: 300") && qml.contains("interval: 6000"));
         assert!(qml.contains("console.warn"));
-        // the clear model on lock, and the locked text key
-        assert!(qml.contains("payload.locked ? [] : payload.items"));
-        assert!(qml.contains("Widget not available when app lock is enabled"));
         // the empty text is the manga one on both kinds
         assert!(qml.contains("No recent updates") && !qml.contains("Nothing watched recently"));
         let tile = std::fs::read_to_string(dist("plasmoid/org.kurobayomi.updates.manga/contents/ui/CoverTile.qml")).unwrap();

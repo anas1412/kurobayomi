@@ -18,8 +18,8 @@ pub struct Badge {
 
 /// The badge for `unread` updates in the 3-month window. The badge is hidden when the count is 0 (cleared) and
 /// while the app lock is on, as the locked widget state does.
-pub fn badge(unread: i64, app_locked: bool) -> Badge {
-    Badge { count: unread.max(0), visible: unread > 0 && !app_locked }
+pub fn badge(unread: i64) -> Badge {
+    Badge { count: unread.max(0), visible: unread > 0 }
 }
 
 /// The `application://` URI of a desktop file name (`kurobayomi.desktop`).
@@ -53,10 +53,9 @@ mod tests {
 
     #[test]
     fn the_badge_is_cleared_at_zero_and_hidden_while_locked() {
-        assert_eq!(badge(0, false), Badge { count: 0, visible: false });
-        assert_eq!(badge(4, true), Badge { count: 4, visible: false });
-        assert_eq!(badge(4, false), Badge { count: 4, visible: true });
-        assert_eq!(badge(-2, false), Badge { count: 0, visible: false });
+        assert_eq!(badge(0), Badge { count: 0, visible: false });
+        assert_eq!(badge(4), Badge { count: 4, visible: true });
+        assert_eq!(badge(-2), Badge { count: 0, visible: false });
     }
 
     #[test]

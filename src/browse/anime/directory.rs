@@ -1,8 +1,8 @@
 //! The anime side of the source directory (T-41a-027, T-41a-031, T-41a-036, T-41b-014). The shared pages ask a
 //! `SourceDirectory` for the installed sources and their loaders; this one answers for the anime packages. The list of
-//! sources is real: it is what the extension host published. A source's runnable instance is not: the app has no anime
-//! source registry yet, so the instances come through [`AnimeInstances`], which the registry installs once it exists.
-//! Until then every anime source is listed and none can be asked, and the pages say so the way they do for a stub.
+//! sources is real: it is what the extension host published. A source's runnable instance comes through [`AnimeInstances`],
+//! which the recipe sources install; a listed source with no instance cannot be asked, and the pages say so the way
+//! they do for a stub.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -77,8 +77,7 @@ impl AnimeDirectory {
     pub fn current(repo: AnimeRepo) -> Self {
         let mut sources = sources_of(&crate::ext_host::anime_lists());
         sources.extend(crate::recipe_sources::anime_rows());
-        sources.extend(crate::browse::builtin::anime_rows());
-        Self::new(sources, crate::browse::builtin::with_anime(instances()), Arc::new(move |id| repo_lookup(repo.clone(), id)))
+        Self::new(sources, instances(), Arc::new(move |id| repo_lookup(repo.clone(), id)))
     }
 
     /// The runnable source of an id, for a page that needs more of it than its loader (its latest flag).

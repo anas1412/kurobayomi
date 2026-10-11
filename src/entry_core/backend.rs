@@ -136,7 +136,7 @@ impl SourceBackend {
         Self { stub: StubBackend::new(Arc::clone(&db)), db, lookup, chapters, mark_duplicate_read }
     }
 
-    /// The app's backend: the sources the Browse directory hands out (the built-in ones).
+    /// The app's backend: the sources the Browse directory hands out (the recipe sources and the installed packages).
     pub fn live(db: Arc<Db>, _prefs: &kuro_prefs::store::PrefStore) -> Self {
         Self::new(db, Arc::new(|id| crate::browse::directory::current()?.manga_source(id)), crate::misc::diet_defaults::LIBRARY_MARK_DUPLICATE_CHAPTER_READ)
     }
@@ -220,9 +220,8 @@ mod tests {
         use kuro_domain::source::browse::BrowseQuery;
         use kuro_source::filter_list::FilterList;
 
-        use crate::browse::builtin::CatalogueLoader;
-        use crate::browse::builtin::tests::FakeCatalogue;
         use crate::browse::entries::FavoriteStore;
+        use crate::browse::fake_catalogue::FakeCatalogue;
         use crate::browse::favorite::FavoriteWrite;
         use crate::browse::listing::PageLoader;
 
@@ -239,7 +238,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
 
         // browse: two cards, each a library row of source 41
-        let loader = CatalogueLoader { source: fake.clone(), store: store.clone() };
+        let loader = crate::recipe_sources::MangaLoader { source: fake.clone(), store: store.clone() };
         let page = rt.block_on(loader.load(BrowseQuery::Popular, FilterList::default(), 1)).expect("a page");
         assert_eq!(page.items.len(), 2);
         let id = page.items[0].id;

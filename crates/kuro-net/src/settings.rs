@@ -37,14 +37,20 @@ pub struct NetworkSettings {
 }
 
 impl NetworkSettings {
-    pub fn from_prefs(prefs: &NetworkPrefs) -> Self {
+    /// The network settings. The settings diet cut every `[network]` key (verbose logging, DNS over HTTPS and the user
+    /// agent), so the hard-coded defaults are used and `_prefs` is not read. The parameter stays so the client
+    /// constructors keep their signature until they are changed (docs/drop-decisions.md).
+    pub fn from_prefs(_prefs: &NetworkPrefs) -> Self {
         Self {
-            verbose_logging: prefs.verbose_logging.get(),
-            doh_provider: prefs.doh_provider.get(),
-            default_user_agent: prefs.default_user_agent.get().trim().to_owned(),
+            verbose_logging: cfg!(debug_assertions),
+            doh_provider: -1,
+            default_user_agent: DEFAULT_USER_AGENT.to_owned(),
         }
     }
 }
+
+/// The default `User-Agent` (the settings diet cut the setting; this is its hard-coded default).
+pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0";
 
 #[cfg(test)]
 mod tests {
@@ -90,9 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn the_user_agent_is_trimmed_on_read() {
-        let prefs = NetworkPrefs::new(PrefStore::in_memory());
-        prefs.default_user_agent.set("  kuro/1.0\t ".into());
-        assert_eq!(NetworkSettings::from_prefs(&prefs).default_user_agent, "kuro/1.0");
+    fn the_user_agent_is_the_hard_coded_default() {
+        assert_eq!(NetworkSettings::from_prefs(&NetworkPrefs::new(PrefStore::in_memory())).default_user_agent, DEFAULT_USER_AGENT);
     }
 }

@@ -106,7 +106,7 @@ mod tests {
         let spec_store = prefs.store().clone();
         let junk = |title: &str| switch(title, &kuro_prefs::pref::Pref::new(spec_store.clone(), format!("spec/{title}"), false), true);
         let spec = vec![item(junk("Top")), group("Paged", vec![junk("A"), junk("B"), junk("C")])];
-        let typed = vec![item(switch("Top", &prefs.reader.fullscreen, true)), group("Paged", vec![switch("B", &prefs.reader.crop_borders, true)])];
+        let typed = vec![item(switch("Top", &prefs.reader.dual_page_split_paged, true)), group("Paged", vec![switch("B", &prefs.reader.crop_borders, true)])];
         let merged = merge(spec, typed);
         assert_eq!(titles(&merged), ["Top", "Paged/A", "Paged/B", "Paged/C"]);
         let Preference::Group(g) = &merged[1] else { panic!("group") };
@@ -119,19 +119,19 @@ mod tests {
     #[test]
     fn a_disabled_twin_hides_the_spec_row_and_the_same_title_in_another_group_is_untouched() {
         let prefs = Prefs::in_memory();
-        let junk = |title: &str| switch(title, &prefs.reader.fullscreen, true);
+        let junk = |title: &str| switch(title, &prefs.reader.dual_page_split_paged, true);
         let spec = vec![group("Paged", vec![junk("Pan"), junk("Tap")]), group("Long strip", vec![junk("Pan")])];
-        let typed = vec![group("Paged", vec![switch("Pan", &prefs.reader.navigate_to_pan, false)])];
+        let typed = vec![group("Paged", vec![switch("Pan", &prefs.reader.dual_page_split_paged, false)])];
         assert_eq!(titles(&merge(spec, typed)), ["Paged/Tap", "Long strip/Pan"]);
     }
 
     #[test]
     fn an_enabled_typed_row_without_a_twin_is_placed_before_the_next_typed_row_that_has_one() {
         let prefs = Prefs::in_memory();
-        let spec = vec![group("Theme", vec![switch("Pure black", &prefs.reader.fullscreen, true)])];
+        let spec = vec![group("Theme", vec![switch("Pure black", &prefs.reader.dual_page_split_paged, true)])];
         let typed = vec![group(
             "Theme",
-            vec![switch("Theme mode", &prefs.reader.crop_borders, true), switch("Pure black", &prefs.reader.navigate_to_pan, true)],
+            vec![switch("Theme mode", &prefs.reader.crop_borders, true), switch("Pure black", &prefs.reader.dual_page_split_paged, true)],
         )];
         assert_eq!(titles(&merge(spec, typed)), ["Theme/Theme mode", "Theme/Pure black"]);
     }
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn a_disabled_typed_row_without_a_twin_is_dropped_and_a_typed_group_without_a_spec_group_is_kept_when_it_has_an_enabled_row() {
         let prefs = Prefs::in_memory();
-        let spec = vec![group("Paged", vec![switch("Pan", &prefs.reader.fullscreen, true)])];
+        let spec = vec![group("Paged", vec![switch("Pan", &prefs.reader.dual_page_split_paged, true)])];
         let typed = vec![
             group("Paged", vec![switch("Hidden", &prefs.reader.crop_borders, false)]),
             group("Unknown", vec![switch("Kept", &prefs.reader.crop_borders, true)]),

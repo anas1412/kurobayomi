@@ -15,7 +15,6 @@ use kuro_platform::linux::LinuxPaths;
 use kuro_platform::paths::Paths as _;
 use kuro_prefs::base::BasePrefs;
 use kuro_prefs::library::LibraryPrefs;
-use kuro_prefs::security::SecurityPrefs;
 use kuro_prefs::store::PrefStore;
 
 /// The shared state of the library screens.
@@ -26,8 +25,6 @@ pub struct App {
     pub anime_categories: CategoryService,
     /// App-state switches (incognito, downloaded only) over the shared store.
     pub base: BasePrefs,
-    /// Lock and notification privacy switches.
-    pub security: SecurityPrefs,
     /// The `[library]` preferences, for the startup work that reads them (cache clear).
     pub library: Arc<LibraryPrefs>,
 }
@@ -152,7 +149,6 @@ pub fn install(opened: Opened) -> Result<(), String> {
         manga_db,
         anime_db,
         base,
-        security: SecurityPrefs::new(prefs_store),
         library: prefs,
     };
     APP.with(|cell| cell.set(Rc::new(app))).map_err(|_| "the app data is already open".to_owned())

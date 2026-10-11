@@ -97,7 +97,7 @@ pub fn page(prefs: &Prefs, queue_subtitle: Option<&str>, on_target: Rc<dyn Fn(Ta
     column.append(&group_one);
     column.append(&divider());
 
-    let nav = prefs.ui.nav_style.get();
+    let nav = NavStyle::MOVE_HISTORY_TO_MORE;
     let tab = nav.more_tab();
     let group_two = GBox::new(Orientation::Vertical, 0);
     group_two.append(&nav_row(&moved_title(tab), moved_icon(nav), Target::Moved(tab), &on_target));

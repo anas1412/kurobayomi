@@ -9,7 +9,7 @@ use kuro_db::handle::Db;
 use kuro_db::open::DbResult;
 use kuro_db::statements_anime as anime;
 use kuro_db::statements_manga::{CategoryPatch, CategoryRow, categories as manga};
-use kuro_prefs::category::{CategoryKind, forget_category, write_sort_prefs};
+use kuro_prefs::category::{CategoryKind, forget_category, set_random_sort_seed, write_sort_prefs};
 use kuro_prefs::library::LibraryPrefs;
 
 use super::model::{Category, CategoryUpdate};
@@ -307,9 +307,10 @@ impl CategoryService {
         .inspect_err(|e| tracing::error!(error = ?e, entry_id, "set entry categories failed"))
     }
 
-    /// `SetSortModeForXCategory`. With `categorized_display` on and a category, only that category takes the
-    /// new flags. Otherwise the global sort is written and every category takes the same flags.
-    /// `draw_seed` is called once, and only for the Random sort; its value becomes the new random seed.
+    /// `SetSortModeForXCategory`. The global sort is written and every category takes the same flags (the settings
+    /// diet cut the per-category sort, `categorized_display`). `category` only supplies the flag bits the new sort is
+    /// applied to. `draw_seed` is called once, and only for the Random sort; its value becomes the new random seed,
+    /// kept in memory (`kuro_prefs::category::random_sort_seed`).
     pub async fn set_sort_mode(
         &self,
         category: Option<i64>,
@@ -323,32 +324,12 @@ impl CategoryService {
         };
         let flags = sort.apply_to(category.as_ref().map_or(0, |c| c.flags));
         if sort.ty == crate::library::sort::SortType::Random {
-            let seed = draw_seed();
-            let stored = match kind {
-                EntryKind::Manga => self.prefs.random_manga_sort_seed.set(seed),
-                EntryKind::Anime => self.prefs.random_anime_sort_seed.set(seed),
-            };
-            if let Err(e) = stored {
-                tracing::warn!("could not store the random sort seed: {e}");
-            }
+            set_random_sort_seed(self.category_kind(), draw_seed());
         }
         let serialized = sort.serialize(kind);
-        let categorized = self.prefs.categorized_display_settings.get();
-        match category {
-            Some(cat) if categorized => {
-                let db = self.repo.db().clone();
-                tokio::task::spawn_blocking(move || write_flags(&db, kind, cat.id, flags))
-                    .await
-                    .map_err(DomainError::Join)??;
-            }
-            _ => {
-                write_sort_prefs(&self.prefs, self.category_kind(), &serialized, false, true);
-                let db = self.repo.db().clone();
-                tokio::task::spawn_blocking(move || write_all_flags(&db, kind, flags))
-                    .await
-                    .map_err(DomainError::Join)??;
-            }
-        }
+        write_sort_prefs(&self.prefs, self.category_kind(), &serialized, true);
+        let db = self.repo.db().clone();
+        tokio::task::spawn_blocking(move || write_all_flags(&db, kind, flags)).await.map_err(DomainError::Join)??;
         Ok(())
     }
 
@@ -364,20 +345,6 @@ impl CategoryService {
 /// `SetXDisplayMode`: one global key for both kinds.
 pub fn set_display_mode(prefs: &LibraryPrefs, mode: LibraryDisplayMode) {
     prefs.display_mode.set(mode);
-}
-
-/// The categorized-display switch. Turning it off resets the flags of both kinds (regression test for Q9), so
-/// no per-category sort survives the switch.
-pub async fn categorized_display_changed(
-    manga: &CategoryService,
-    anime: &CategoryService,
-    enabled: bool,
-) -> Result<(), DomainError> {
-    if enabled {
-        return Ok(());
-    }
-    manga.reset_category_flags().await?;
-    anime.reset_category_flags().await
 }
 
 /// Applies one update inside a write transaction. A `None` field keeps the stored value.
@@ -429,20 +396,6 @@ fn set_order(tx: &kuro_db::Transaction<'_>, kind: EntryKind, id: i64, order: i64
     Ok(())
 }
 
-fn write_flags(db: &Db, kind: EntryKind, id: i64, flags: i64) -> Result<(), DomainError> {
-    db.write(|tx| {
-        match kind {
-            EntryKind::Manga => {
-                manga::update(tx, &CategoryPatch { id, flags: Some(flags), ..Default::default() })?;
-            }
-            EntryKind::Anime => {
-                anime::update_category(tx, id, None, None, Some(flags), None)?;
-            }
-        }
-        Ok(())
-    })
-    .map_err(DomainError::from)
-}
 
 fn write_all_flags(db: &Db, kind: EntryKind, flags: i64) -> Result<(), DomainError> {
     db.write(|tx| {

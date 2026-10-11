@@ -49,32 +49,19 @@ impl Constraint {
 }
 
 pub const DOWNLOAD_SLOTS: Constraint = Constraint::Range { min: 1, max: 5 };
-pub const AUTO_DOWNLOAD_AHEAD: Constraint = Constraint::Choices(&[0, 2, 3, 5, 10]);
 pub const REMOVE_AFTER_READ_SLOTS: Constraint = Constraint::Choices(&[-1, 0, 1, 2, 3, 4]);
 pub const LIBRARY_UPDATE_INTERVAL: Constraint = Constraint::Choices(&[0, 12, 24, 48, 72, 168]);
 pub const BACKUP_INTERVAL: Constraint = Constraint::Choices(&[0, 6, 12, 24, 48, 168]);
-pub const LOCK_APP_AFTER: Constraint = Constraint::Choices(&[0, 1, 2, 5, 10, -1]);
 pub const LIBRARY_COLUMNS: Constraint = Constraint::Range { min: 0, max: 10 };
-pub const CUSTOM_BRIGHTNESS: Constraint = Constraint::Range { min: -75, max: 100 };
-pub const COLOR_FILTER_CHANNEL: Constraint = Constraint::Range { min: 0, max: 255 };
-pub const WEBTOON_SIDE_PADDING: Constraint = Constraint::Range { min: 0, max: 25 };
 
 /// Registry key of every integer setting with a constraint.
 const CONSTRAINED: &[(&str, Constraint)] = &[
     ("download_slots", DOWNLOAD_SLOTS),
-    ("auto_download_while_reading", AUTO_DOWNLOAD_AHEAD),
-    ("auto_download_while_watching", AUTO_DOWNLOAD_AHEAD),
     ("remove_after_read_slots", REMOVE_AFTER_READ_SLOTS),
     ("pref_library_update_interval_key", LIBRARY_UPDATE_INTERVAL),
     ("backup_interval", BACKUP_INTERVAL),
-    ("lock_app_after", LOCK_APP_AFTER),
-    ("pref_library_columns_portrait_key", LIBRARY_COLUMNS),
     ("pref_library_columns_landscape_key", LIBRARY_COLUMNS),
-    ("pref_animelib_columns_portrait_key", LIBRARY_COLUMNS),
     ("pref_animelib_columns_landscape_key", LIBRARY_COLUMNS),
-    ("custom_brightness_value", CUSTOM_BRIGHTNESS),
-    ("color_filter_value", COLOR_FILTER_CHANNEL),
-    ("webtoon_side_padding", WEBTOON_SIDE_PADDING),
 ];
 
 /// The constraint of `key`, or `None` when the key has none.
@@ -99,16 +86,12 @@ mod tests {
         assert!(!DOWNLOAD_SLOTS.contains(0) && !DOWNLOAD_SLOTS.contains(6));
         assert_eq!(DOWNLOAD_SLOTS.clamped(0), 1);
         assert_eq!(DOWNLOAD_SLOTS.clamped(9), 5);
-        assert_eq!(CUSTOM_BRIGHTNESS.clamped(-200), -75);
     }
 
     #[test]
     fn choices_clamp_to_the_nearest_value_and_ties_go_low() {
         assert_eq!(REMOVE_AFTER_READ_SLOTS.clamped(-7), -1);
-        assert_eq!(AUTO_DOWNLOAD_AHEAD.clamped(4), 3, "distance 1 to 3 and 5: lower wins");
-        assert_eq!(AUTO_DOWNLOAD_AHEAD.clamped(7), 5);
         assert_eq!(BACKUP_INTERVAL.clamped(168), 168);
-        assert!(!LOCK_APP_AFTER.contains(3));
     }
 
     #[test]
@@ -125,9 +108,6 @@ mod tests {
 
     #[test]
     fn bounds_give_the_slider_ends_of_a_range_only() {
-        assert_eq!(CUSTOM_BRIGHTNESS.bounds(), Some((-75, 100)));
-        assert_eq!(WEBTOON_SIDE_PADDING.bounds(), Some((0, 25)));
-        assert_eq!(COLOR_FILTER_CHANNEL.bounds(), Some((0, 255)));
         assert_eq!(BACKUP_INTERVAL.bounds(), None);
     }
 
@@ -135,7 +115,6 @@ mod tests {
     fn values_list_a_range_in_full_and_the_choices_in_order() {
         assert_eq!(DOWNLOAD_SLOTS.values(), [1, 2, 3, 4, 5]);
         assert_eq!(BACKUP_INTERVAL.values(), [0, 6, 12, 24, 48, 168]);
-        assert_eq!(WEBTOON_SIDE_PADDING.values().len(), 26);
     }
 
     #[test]

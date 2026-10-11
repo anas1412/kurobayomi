@@ -19,7 +19,7 @@ impl UpdateError {
         match self {
             Self::NoChapters => "No chapters found".into(),
             Self::NoEpisodes => "No episodes found".into(),
-            Self::SourceNotInstalled => "Source not found".into(),
+            Self::SourceNotInstalled => "Source not installed".into(),
             Self::Cancelled => "Cancelled".into(),
             Self::Other(message) if message.trim().is_empty() => format!("{self:?}"),
             Self::Other(message) => message.clone(),
@@ -41,7 +41,7 @@ mod tests {
     fn known_errors_have_the_kotlin_texts() {
         assert_eq!(UpdateError::NoChapters.user_message(), "No chapters found");
         assert_eq!(UpdateError::NoEpisodes.user_message(), "No episodes found");
-        assert_eq!(UpdateError::SourceNotInstalled.user_message(), "Source not found");
+        assert_eq!(UpdateError::SourceNotInstalled.user_message(), "Source not installed");
     }
 
     #[test]

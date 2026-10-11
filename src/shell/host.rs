@@ -4,9 +4,10 @@
 
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
-use kuro_downloads::download_prefs::DownloadPrefs;
 use kuro_downloads::index::DownloadIndex;
+use kuro_platform::notifier::Notifier;
 use kuro_platform::paths::Paths;
 use kuro_prefs::ui::{NavStyle, StartScreen};
 
@@ -21,7 +22,7 @@ pub struct Shell {
     boot: RefCell<Bootstrap<LaunchRequest>>,
     home: RefCell<Option<Rc<RefCell<HomeTabs>>>>,
     downloads: DownloadIndex,
-    /// The running manga download manager, once [`Shell::start_downloads`] has started it.
+    /// The running download managers, once [`Shell::start_downloads`] has started them.
     downloads_started: RefCell<Option<crate::downloads::Started>>,
 }
 
@@ -100,17 +101,36 @@ impl Shell {
         self.boot.borrow().library_state()
     }
 
-    /// Starts the manga download manager on the data the app has opened (call once, after the migrations). A failure is
-    /// logged and the app runs without downloads. The first call wins.
-    pub fn start_downloads(&self, paths: &dyn Paths, prefs: DownloadPrefs) {
+    /// Starts the download managers on the data the app has opened (call once, after the migrations): the manga manager
+    /// and the anime queue, whose notices go to `notifier`. A failure is logged and the app runs without downloads. The
+    /// first call wins.
+    pub fn start_downloads(&self, notifier: Arc<dyn Notifier>) {
         if self.downloads_started.borrow().is_some() {
             return;
         }
         let _entered = self.runtime.enter();
-        match crate::downloads::start_manga(paths, self.downloads.clone(), prefs) {
-            Ok(started) => *self.downloads_started.borrow_mut() = Some(started),
-            Err(e) => tracing::error!("the manga download manager did not start: {e}"),
+        let paths = match kuro_platform::linux::LinuxPaths::system() {
+            Ok(paths) => paths,
+            Err(e) => {
+                tracing::error!("the download managers did not start: {e}");
+                return;
+            }
+        };
+        let app = crate::data::app();
+        match crate::downloads::start(&paths, self.downloads.clone(), Arc::clone(&app.anime_db), app.base.store().clone(), notifier) {
+            Ok(started) => {
+                if let Some(queue) = &started.queues.anime {
+                    crate::entry_core::anime::download_backend::install_queue(queue.clone());
+                }
+                *self.downloads_started.borrow_mut() = Some(started);
+            }
+            Err(e) => tracing::error!("the download managers did not start: {e}"),
         }
+    }
+
+    /// The running download managers, or `None` before [`Shell::start_downloads`] has started them.
+    pub fn download_queues(&self) -> Option<crate::downloads::Queues> {
+        self.downloads_started.borrow().as_ref().map(|started| started.queues.clone())
     }
 
     /// The home tab selection. It is built once, the first time this runs, so a wide or narrow switch keeps it.

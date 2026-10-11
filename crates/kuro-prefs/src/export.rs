@@ -82,27 +82,27 @@ mod tests {
     #[test]
     fn app_export_skips_app_state_and_private_unless_asked() {
         let store = store_with(&[
-            ("pref_display_profile_key", PrefValue::Str("dark".into())),
+            ("pref_default_reading_mode_key", PrefValue::Str("dark".into())),
             ("__APP_STATE_last_app_check", PrefValue::Long(5)),
             ("__PRIVATE_track_token_2", PrefValue::Str("secret".into())),
             ("kuro_only_setting", PrefValue::Int(3)),
         ]);
-        assert_eq!(keys(&export_app(&store, false)), vec!["kuro_kuro_only_setting", "pref_display_profile_key"]);
+        assert_eq!(keys(&export_app(&store, false)), vec!["kuro_kuro_only_setting", "pref_default_reading_mode_key"]);
         assert_eq!(
             keys(&export_app(&store, true)),
-            vec!["__PRIVATE_track_token_2", "kuro_kuro_only_setting", "pref_display_profile_key"]
+            vec!["__PRIVATE_track_token_2", "kuro_kuro_only_setting", "pref_default_reading_mode_key"]
         );
     }
 
     #[test]
     fn app_export_keeps_every_kind_and_is_sorted() {
         let store = store_with(&[
-            ("check_app_updates", PrefValue::Bool(true)),
-            ("pref_always_decode_long_strip_with_ssiv", PrefValue::Float(1.5)),
+            ("show_nsfw_source", PrefValue::Bool(true)),
+            ("start_screen", PrefValue::Float(1.5)),
             ("__APP_STATE_incognito_mode", PrefValue::Bool(true)),
         ]);
         let out = export_app(&store, false);
-        assert_eq!(keys(&out), vec!["check_app_updates", "pref_always_decode_long_strip_with_ssiv"]);
+        assert_eq!(keys(&out), vec!["show_nsfw_source", "start_screen"]);
         assert_eq!(out[0].1, PrefValue::Bool(true));
         assert_eq!(out[1].1, PrefValue::Float(1.5));
     }
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn source_export_lists_only_files_with_keys_in_ascending_id_order() {
         let dir = tempfile::TempDir::new().unwrap();
-        for (id, key) in [(9_i64, "check_app_updates"), (2, "pref_display_profile_key"), (5, "custom_x")] {
+        for (id, key) in [(9_i64, "show_nsfw_source"), (2, "pref_default_reading_mode_key"), (5, "custom_x")] {
             let file = SourceFilePrefs::open(dir.path(), id).unwrap();
             file.set_raw(key, PrefValue::Int(id as i32));
             file.flush().unwrap();
@@ -121,7 +121,7 @@ mod tests {
         let out = export_sources(dir.path(), false);
         let ids: Vec<i64> = out.iter().map(|(id, _)| *id).collect();
         assert_eq!(ids, vec![2, 5, 9], "file 7 holds only app state and is left out");
-        assert_eq!(out[0].1, vec![("pref_display_profile_key".to_string(), PrefValue::Int(2))]);
+        assert_eq!(out[0].1, vec![("pref_default_reading_mode_key".to_string(), PrefValue::Int(2))]);
         assert_eq!(out[1].1, vec![("kuro_custom_x".to_string(), PrefValue::Int(5))], "a key outside the registry gets the kuro prefix");
     }
 

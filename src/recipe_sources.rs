@@ -3,10 +3,14 @@
 //! and the anime instances. Nothing is installed when the folder holds no recipe, so an app without recipes behaves as
 //! before. A recipe that is not valid is logged and skipped.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+use http::header::{HeaderMap, HeaderName, HeaderValue};
 
 use kuro_domain::source::browse::BrowseQuery;
 use kuro_domain::source::model::Source;
+use kuro_images::fetch::{ImageService, SourceClient, SourceHttp};
 use kuro_net::NetworkClient;
 use kuro_platform::paths::Paths;
 use kuro_prefs::network::NetworkPrefs;
@@ -111,9 +115,9 @@ fn library_store() -> Option<Arc<dyn FavoriteStore>> {
 
 /// A manga source's popular, latest or search listing, each entry mapped to its library row (the manga twin of
 /// `browse::anime::loader::AnimeLoader`).
-struct MangaLoader {
-    source: Arc<dyn CatalogueSource>,
-    store: Arc<dyn FavoriteStore>,
+pub(crate) struct MangaLoader {
+    pub(crate) source: Arc<dyn CatalogueSource>,
+    pub(crate) store: Arc<dyn FavoriteStore>,
 }
 
 impl PageLoader for MangaLoader {
@@ -176,7 +180,11 @@ fn build(recipes: Vec<Recipe>, client: &NetworkClient) -> (Option<MangaDirectory
 
 /// Hands the sources to the Browse pages.
 fn register(recipes: Vec<Recipe>, client: &NetworkClient) {
+    let by_package: HashMap<String, HeaderMap> = recipes.iter().map(|recipe| (package_of(recipe), header_map(recipe))).collect();
     let (manga, anime) = build(recipes, client);
+    let rows = manga.iter().flat_map(|directory| directory.sources()).chain(anime.iter().flat_map(|loaded| loaded.anime.iter().map(|(_, row)| row.clone())));
+    let headers: HashMap<i64, HeaderMap> = rows.filter_map(|row| Some((row.source.id, by_package.get(&row.package)?.clone()))).collect();
+    *IMAGE_HEADERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(headers);
     if let Some(directory) = manga {
         install(Arc::new(directory));
     }
@@ -187,18 +195,71 @@ fn register(recipes: Vec<Recipe>, client: &NetworkClient) {
     }
 }
 
-/// Reads the recipes of the scrapers folder and registers their sources. Call once at start.
-pub fn start(store: &PrefStore, paths: &dyn Paths) {
+/// The network client the sources and the reader's pages share, built once at start.
+static CLIENT: Mutex<Option<NetworkClient>> = Mutex::new(None);
+
+/// The shared client, `None` before [`start`] has built it.
+pub fn client() -> Option<NetworkClient> {
+    CLIENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+}
+
+/// The headers each recipe source sends with its images (its `headers` without the user agent), by source id.
+static IMAGE_HEADERS: Mutex<Option<HashMap<i64, HeaderMap>>> = Mutex::new(None);
+
+fn header_map(recipe: &Recipe) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    for (name, value) in recipe.headers.iter().filter(|(name, _)| !name.eq_ignore_ascii_case("user-agent")) {
+        if let (Ok(name), Ok(value)) = (HeaderName::from_bytes(name.as_bytes()), HeaderValue::from_str(value)) {
+            map.insert(name, value);
+        }
+    }
+    map
+}
+
+/// The image headers of a recipe source; empty for a source that is not a recipe.
+pub fn image_headers(source_id: i64) -> HeaderMap {
+    IMAGE_HEADERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().and_then(|all| all.get(&source_id).cloned()).unwrap_or_default()
+}
+
+/// Covers and images of the recipe sources go over the shared client with the recipe's headers (a `Referer` an image
+/// host asks for).
+struct RecipeImageHeaders;
+
+impl SourceHttp for RecipeImageHeaders {
+    fn http_source(&self, source_id: i64) -> Option<SourceClient> {
+        let headers = image_headers(source_id);
+        if headers.is_empty() {
+            return None;
+        }
+        Some(SourceClient { client: client()?, headers })
+    }
+}
+
+/// Builds the shared client, installs the image service the covers draw through, and registers the recipes of the
+/// scrapers folder. Call once at start, inside the app's runtime.
+pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
+    let client = match crate::net_client::build(&NetworkPrefs::new(store.clone()), paths.as_ref()) {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!("the sources do not start: {error}");
+            return;
+        }
+    };
+    *CLIENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(client.clone());
+    let images = Arc::clone(paths);
+    let image_client = client.clone();
+    tokio::spawn(async move {
+        match ImageService::new(image_client, Arc::new(RecipeImageHeaders), images).await {
+            Ok(service) => crate::entry_core::cover_view::install_images(Arc::new(service)),
+            Err(error) => tracing::warn!("the image service does not start, covers show their placeholder: {error}"),
+        }
+    });
     let (recipes, problems) = kuro_source_scrape::load_dir(&paths.scrapers_dir());
     for (file, reason) in problems {
         tracing::warn!(file, "recipe skipped: {reason}");
     }
-    if recipes.is_empty() {
-        return;
-    }
-    match crate::net_client::build(&NetworkPrefs::new(store.clone()), paths) {
-        Ok(client) => register(recipes, &client),
-        Err(error) => tracing::warn!("recipe sources do not start: {error}"),
+    if !recipes.is_empty() {
+        register(recipes, &client);
     }
 }
 

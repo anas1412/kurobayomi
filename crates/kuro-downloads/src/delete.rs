@@ -1,6 +1,6 @@
 //! Delete interactors for downloaded chapters and episodes (port of DeleteChapterDownload.kt and
-//! DeleteEpisodeDownload.kt; T-25a-010, T-25a-011, T-25a-006 parsing). The category sets come from the preference store
-//! as strings, and a value that is not a number aborts the call.
+//! DeleteEpisodeDownload.kt; T-25a-010, T-25a-011, T-25a-006). The settings diet cut the category exclusions of the
+//! delete rules, so a delete keeps no category: [`DeleteSettings::default`] is the only settings value.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -18,32 +18,8 @@ use crate::source::ChapterSource;
 /// Errors of the delete path that the caller logs.
 #[derive(Debug, thiserror::Error)]
 pub enum DeleteError {
-    /// A stored category id is not a whole number (E-05). The delete call is aborted.
-    #[error("preference {key} holds a non-numeric category id: {value}")]
-    BadCategoryId { key: &'static str, value: String },
     #[error(transparent)]
     Download(#[from] DownloadError),
-}
-
-/// The six category-set keys (`DownloadPreferences.categoryPreferenceKeys`, same order). Backup restore merges these with
-/// the library category keys (PreferenceRestorer.kt:136).
-pub const CATEGORY_KEYS: [&str; 6] = [
-    "remove_exclude_categories",
-    "remove_exclude_anime_categories",
-    "download_new_categories",
-    "download_new_anime_categories",
-    "download_new_categories_exclude",
-    "download_new_anime_categories_exclude",
-];
-
-/// Parses stored category ids. Any value that is not an integer fails the whole set, so no id is silently dropped.
-pub fn parse_category_ids(key: &'static str, values: &BTreeSet<String>) -> Result<BTreeSet<i64>, DeleteError> {
-    values
-        .iter()
-        .map(|value| {
-            value.parse::<i64>().map_err(|_| DeleteError::BadCategoryId { key, value: value.clone() })
-        })
-        .collect()
 }
 
 /// The delete settings read from the store for one kind.
@@ -53,20 +29,6 @@ pub struct DeleteSettings {
     pub exclude_categories: BTreeSet<i64>,
     /// `pref_remove_bookmarked`: allow deleting bookmarked items.
     pub remove_bookmarked: bool,
-}
-
-impl DeleteSettings {
-    /// Builds the settings from the stored category set. A value that is not a number aborts the whole call with
-    /// `BadCategoryId`, which is logged, and nothing is deleted (E-05).
-    pub fn from_stored(key: &'static str, exclude: &BTreeSet<String>, remove_bookmarked: bool) -> Result<Self, DeleteError> {
-        match parse_category_ids(key, exclude) {
-            Ok(ids) => Ok(Self { exclude_categories: ids, remove_bookmarked }),
-            Err(err) => {
-                warn!(target: "kuro_downloads", error = %err, "delete aborted: stored category id is not a number");
-                Err(err)
-            }
-        }
-    }
 }
 
 /// Looks up an installed manga or novel source by id (`sourceManager.get`). `None` means the source is not installed.
@@ -224,44 +186,6 @@ mod tests {
     use super::*;
     use crate::anime::layout::AnimeLayout;
     use crate::layout::DownloadLayout;
-
-    #[test]
-    fn category_keys_match_the_kotlin_order() {
-        assert_eq!(CATEGORY_KEYS[0], "remove_exclude_categories");
-        assert_eq!(CATEGORY_KEYS[5], "download_new_anime_categories_exclude");
-        assert_eq!(CATEGORY_KEYS.len(), 6);
-    }
-
-    #[test]
-    fn numeric_category_ids_parse_and_a_bad_one_fails_the_whole_set() {
-        let good: BTreeSet<String> = ["3", "-1", "12"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(parse_category_ids("remove_exclude_categories", &good).unwrap(), BTreeSet::from([-1, 3, 12]));
-        let bad: BTreeSet<String> = ["3", "abc"].iter().map(|s| s.to_string()).collect();
-        match parse_category_ids("download_new_categories", &bad) {
-            Err(DeleteError::BadCategoryId { key, value }) => {
-                assert_eq!(key, "download_new_categories");
-                assert_eq!(value, "abc");
-            }
-            other => panic!("E-05: expected BadCategoryId, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn an_empty_set_parses_to_an_empty_set() {
-        assert!(parse_category_ids("remove_exclude_categories", &BTreeSet::new()).unwrap().is_empty());
-    }
-
-    #[test]
-    fn delete_settings_abort_on_a_bad_stored_id() {
-        let good: BTreeSet<String> = ["4".to_owned()].into();
-        let settings = DeleteSettings::from_stored("remove_exclude_categories", &good, true).unwrap();
-        assert_eq!(settings, DeleteSettings { exclude_categories: BTreeSet::from([4]), remove_bookmarked: true });
-        let bad: BTreeSet<String> = ["x".to_owned()].into();
-        assert!(matches!(
-            DeleteSettings::from_stored("remove_exclude_categories", &bad, false),
-            Err(DeleteError::BadCategoryId { .. })
-        ));
-    }
 
     struct NoAnimeSource;
 

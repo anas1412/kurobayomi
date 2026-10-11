@@ -4,7 +4,6 @@
 
 use std::collections::BTreeSet;
 
-use crate::library::LibraryDisplayMode;
 use crate::pref_enum;
 use crate::registry::define_prefs;
 
@@ -37,28 +36,15 @@ pub fn source_setting_key(source_id: i64, key: &str) -> String {
 define_prefs! {
     /// `[sources]` section: the keys of Aniyomi `SourcePreferences`, minus the derived `animeext_updates_count` (T-19a-064).
     pub struct SourcePrefs in "sources" {
-        source_display_mode: LibraryDisplayMode = "pref_display_mode_catalogue" => LibraryDisplayMode::DEFAULT;
         enabled_languages: BTreeSet<String> = "source_languages" => kuro_i18n::source_names::default_enabled_languages(&system_locale());
         show_nsfw_source: bool = "show_nsfw_source" => true;
-        /// Kurobayomi only (T-19a-066): shows the store entries that cannot run on Linux, with badges and no install.
-        show_not_runnable: bool = "show_not_runnable" => false;
-        migration_sorting_mode: MigrationSortingMode = "pref_migration_sorting" => MigrationSortingMode::ALPHABETICAL;
-        migration_sorting_direction: MigrationDirection = "pref_migration_direction" => MigrationDirection::ASCENDING;
         anime_extension_repos: BTreeSet<String> = "anime_extension_repos" => BTreeSet::new();
         manga_extension_repos: BTreeSet<String> = "extension_repos" => BTreeSet::new();
         trusted_extensions: BTreeSet<String> = "__APP_STATE_trusted_extensions" => BTreeSet::new();
-        global_search_filter_state: bool = "__APP_STATE_has_filters_toggle_state" => false;
         disabled_anime_sources: BTreeSet<String> = "hidden_anime_catalogues" => BTreeSet::new();
         disabled_manga_sources: BTreeSet<String> = "hidden_catalogues" => BTreeSet::new();
-        incognito_anime_extensions: BTreeSet<String> = "incognito_anime_extensions" => BTreeSet::new();
-        incognito_manga_extensions: BTreeSet<String> = "incognito_manga_extensions" => BTreeSet::new();
         pinned_anime_sources: BTreeSet<String> = "pinned_anime_catalogues" => BTreeSet::new();
         pinned_manga_sources: BTreeSet<String> = "pinned_catalogues" => BTreeSet::new();
-        last_used_anime_source: i64 = "__APP_STATE_last_anime_catalogue_source" => -1;
-        last_used_manga_source: i64 = "__APP_STATE_last_catalogue_source" => -1;
-        manga_extension_updates_count: i32 = "ext_updates_count" => 0;
-        hide_in_anime_library_items: bool = "browse_hide_in_anime_library_items" => false;
-        hide_in_manga_library_items: bool = "browse_hide_in_library_items" => false;
         data_saver: DataSaver = "data_saver" => DataSaver::NONE;
         data_saver_ignore_jpeg: bool = "ignore_jpeg" => false;
         data_saver_ignore_gif: bool = "ignore_gif" => true;
@@ -88,7 +74,7 @@ mod tests {
     #[test]
     fn every_field_is_a_registered_sources_key_with_the_same_name() {
         assert_eq!(SourcePrefs::TABLE, "sources");
-        assert_eq!(SourcePrefs::FIELDS.len(), 30, "the thirty keys of section 4.1, minus the derived animeext_updates_count, plus show_not_runnable");
+        assert_eq!(SourcePrefs::FIELDS.len(), 18, "the settings diet kept eighteen keys");
         for (field, key) in SourcePrefs::FIELDS {
             let row = REGISTRY.iter().find(|m| m.key == *key).unwrap_or_else(|| panic!("{field}: {key} not registered"));
             assert_eq!(row.table, "sources", "{key}");
@@ -99,9 +85,6 @@ mod tests {
     fn the_app_state_keys_carry_the_prefix() {
         let key = |field: &str| SourcePrefs::FIELDS.iter().find(|(f, _)| *f == field).expect("field").1;
         assert_eq!(key("trusted_extensions"), "__APP_STATE_trusted_extensions");
-        assert_eq!(key("global_search_filter_state"), "__APP_STATE_has_filters_toggle_state");
-        assert_eq!(key("last_used_anime_source"), "__APP_STATE_last_anime_catalogue_source");
-        assert_eq!(key("last_used_manga_source"), "__APP_STATE_last_catalogue_source");
         assert!(!SourcePrefs::FIELDS.iter().any(|(_, k)| k.starts_with("eh_") || k.starts_with("sources_tab")));
     }
 
@@ -109,14 +92,9 @@ mod tests {
     fn defaults_match_the_registry_and_the_plan() {
         let store = PrefStore::in_memory();
         let prefs = SourcePrefs::new(store);
-        assert_eq!(prefs.source_display_mode.get(), LibraryDisplayMode::CompactGrid);
-        assert_eq!(prefs.migration_sorting_mode.get(), MigrationSortingMode::ALPHABETICAL);
-        assert_eq!(prefs.migration_sorting_direction.get(), MigrationDirection::ASCENDING);
         assert_eq!(prefs.data_saver.get(), DataSaver::NONE);
-        assert_eq!(prefs.last_used_manga_source.get(), -1);
         assert_eq!(prefs.data_saver_image_quality.get(), 80);
         assert!(prefs.show_nsfw_source.get());
-        assert!(!prefs.show_not_runnable.get());
         assert!(!prefs.data_saver_ignore_jpeg.get());
         assert!(prefs.data_saver_ignore_gif.get());
         assert!(prefs.data_saver_downloader.get());
@@ -126,15 +104,11 @@ mod tests {
     }
 
     #[test]
-    fn enum_preferences_store_the_name_and_fall_back_on_garbage() {
+    fn the_data_saver_preference_falls_back_on_garbage() {
         let store = PrefStore::in_memory();
         let prefs = SourcePrefs::new(store.clone());
-        store.set_raw("pref_migration_sorting", PrefValue::Str("TOTAL".into()));
-        assert_eq!(prefs.migration_sorting_mode.get(), MigrationSortingMode::TOTAL);
         store.set_raw("data_saver", PrefValue::Str("NOT_A_SAVER".into()));
         assert_eq!(prefs.data_saver.get(), DataSaver::NONE, "unknown names give the default");
-        store.set_raw("pref_migration_direction", PrefValue::Str("sideways".into()));
-        assert_eq!(prefs.migration_sorting_direction.get(), MigrationDirection::ASCENDING);
     }
 
     #[test]
@@ -165,20 +139,14 @@ mod tests {
     }
 
     #[test]
-    fn every_default_of_the_thirty_keys_holds_on_an_empty_store() {
+    fn every_default_of_the_kept_keys_holds_on_an_empty_store() {
         let prefs = SourcePrefs::new(PrefStore::in_memory());
         assert!(prefs.trusted_extensions.get().is_empty());
-        assert!(!prefs.global_search_filter_state.get());
-        assert_eq!(prefs.last_used_anime_source.get(), -1);
-        assert_eq!(prefs.manga_extension_updates_count.get(), 0);
-        assert!(!prefs.hide_in_anime_library_items.get());
-        assert!(!prefs.hide_in_manga_library_items.get());
         assert!(!prefs.data_saver_color_bw.get());
         assert!(!prefs.data_saver_image_format_jpeg.get());
         assert_eq!(prefs.data_saver_server.get(), "");
         assert!(prefs.data_saver_excluded_sources.get().is_empty());
         assert!(prefs.pinned_manga_sources.get().is_empty() && prefs.pinned_anime_sources.get().is_empty());
-        assert!(prefs.incognito_manga_extensions.get().is_empty() && prefs.incognito_anime_extensions.get().is_empty());
         assert!(prefs.disabled_anime_sources.get().is_empty());
         assert!(prefs.manga_extension_repos.get().is_empty() && prefs.anime_extension_repos.get().is_empty());
     }

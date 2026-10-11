@@ -1,8 +1,6 @@
-//! The pages of an online chapter, from the manga's source (the built-in Weeb Central and Comix, and any installed
-//! source the directory answers for). The page list comes from `MangaSource::get_page_list`; the images go over the
-//! built-in sources' network client with the source's image headers (`Builtin::image_headers`: the Weeb Central
-//! `Referer`, none for Comix), and a Comix image goes through its descrambler. The reader's HTTP loader keeps both in
-//! the chapter cache, the folder the cache settings clear.
+//! The pages of an online chapter, from the manga's source (any source the directory answers for). The page list comes
+//! from `MangaSource::get_page_list`; the images go over the shared client (`recipe_sources::client`) with no extra
+//! headers. The reader's HTTP loader keeps both in the chapter cache, the folder the cache settings clear.
 //!
 //! The loader calls a source from its worker thread, outside the runtime, so every call is spawned on the app's runtime
 //! and waited for. The GTK thread never asks the source: [`Prefetch`] fetches page lists on threads, and the reader
@@ -11,14 +9,12 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
 
 use kuro_core::sources::SourceGate;
 use kuro_net::NetworkClient;
 use kuro_platform::paths::Paths;
 use kuro_source::MangaSource;
 use kuro_source::model::SChapter;
-use reqwest::Url;
 use reqwest::header::HeaderMap;
 use tokio::runtime::Handle;
 use tokio::sync::watch;
@@ -26,18 +22,6 @@ use tokio::sync::watch;
 use super::cache::{CACHE_LIMIT_BYTES, DiskCache};
 use super::loader::PageEntry;
 use super::loader::http::HttpPageSource;
-
-/// A source's image fix-up: `Ok(None)` shows the body as it came, `Ok(Some)` shows these bytes instead.
-pub type Unscramble = fn(&[u8], &HeaderMap) -> Result<Option<Vec<u8>>, String>;
-
-/// Kotlin `altHostFallback` waits this long before it tries the next host.
-const ALT_HOST_GAP: Duration = Duration::from_secs(2);
-/// The statuses a Comix image host answers a passing failure with; the same url is asked again (Kotlin `proceedWithRetry`).
-const RETRY_STATUS: [u16; 5] = [502, 503, 522, 523, 404];
-const RETRY_GAP: Duration = Duration::from_millis(1500);
-const RETRIES: u32 = 10;
-/// The path segments a Comix image host serves the same file under, tried after the alt hosts.
-const PATH_VARIANTS: [&str; 7] = ["hi", "fcf", "i5", "si", "i", "sii", "ii"];
 
 /// What the reader's loader reports for a chapter whose page list is still being fetched. It is a wait, not a failure:
 /// the reader shows its spinner and asks again (see [`is_pending`]).
@@ -52,15 +36,12 @@ pub struct SourcePages {
     source: Arc<dyn MangaSource>,
     client: NetworkClient,
     headers: HeaderMap,
-    /// Set for Comix: its descrambler; its images also get the retries and fallback urls its hosts need.
-    unscramble: Option<Unscramble>,
     runtime: Handle,
 }
 
 impl SourcePages {
     pub fn new(source: Arc<dyn MangaSource>, client: NetworkClient, headers: HeaderMap, runtime: Handle) -> Self {
-        let unscramble: Option<Unscramble> = None;
-        Self { source, client, headers, unscramble, runtime }
+        Self { source, client, headers, runtime }
     }
 
     /// Runs `work` on the runtime and waits for it. Never call it on a runtime worker.
@@ -86,37 +67,8 @@ impl HttpPageSource for SourcePages {
     }
 
     fn image(&self, image_url: &str) -> Result<Vec<u8>, String> {
-        let comix = self.unscramble.is_some();
-        let (client, headers, tries) = (self.client.clone(), self.headers.clone(), attempts(image_url, comix));
-        let retries = if comix { RETRIES } else { 0 };
-        // ponytail: a page every host refuses takes minutes to fail (each url retried 10 times, 1.5 s apart, as Kotlin
-        // does), and the loader's one worker waits with it. Cap the retries if the live check shows such pages.
-        let (body, got) = self.run(async move {
-            let mut last = String::new();
-            for (n, url) in tries.iter().enumerate() {
-                if n > 0 {
-                    tokio::time::sleep(ALT_HOST_GAP).await;
-                }
-                for attempt in 0..=retries {
-                    if attempt > 0 {
-                        tokio::time::sleep(RETRY_GAP).await;
-                    }
-                    let target = if attempt == 0 { url.clone() } else { with_retry(url, attempt) };
-                    match fetch(&client, &target, &headers).await {
-                        Ok(got) => return Ok(got),
-                        Err((status, error)) => {
-                            last = error;
-                            if !status.is_some_and(|s| RETRY_STATUS.contains(&s)) {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            Err(last)
-        })??;
-        // the descrambler decodes and re-encodes the page, so it runs here on the loader's thread, not on the runtime
-        shown(body, &got, self.unscramble)
+        let (client, headers, url) = (self.client.clone(), self.headers.clone(), image_url.to_owned());
+        self.run(async move { fetch(&client, &url, &headers).await })?
     }
 }
 
@@ -125,65 +77,11 @@ fn request(url: &str, headers: &HeaderMap) -> Result<kuro_net::request::Request,
     Ok(kuro_net::get(url).map_err(|e| e.to_string())?.headers(headers.clone()))
 }
 
-/// The body and the response headers of one image. A status other than 2xx or 304 is an error with that status.
-async fn fetch(client: &NetworkClient, url: &str, headers: &HeaderMap) -> Result<(Vec<u8>, HeaderMap), (Option<u16>, String)> {
-    let response = client.execute(request(url, headers).map_err(|e| (None, e))?).await.map_err(|e| (None, e.to_string()))?;
-    kuro_images::http::check_status(response.status).map_err(|e| (Some(response.status.as_u16()), e.to_string()))?;
-    let got = response.headers.clone();
-    Ok((response.bytes().await.map_err(|e| (None, e.to_string()))?.to_vec(), got))
-}
-
-/// The bytes the reader shows: the body, or what the source's descrambler makes of it.
-fn shown(body: Vec<u8>, headers: &HeaderMap, unscramble: Option<Unscramble>) -> Result<Vec<u8>, String> {
-    match unscramble {
-        Some(unscramble) => Ok(unscramble(&body, headers)?.unwrap_or(body)),
-        None => Ok(body),
-    }
-}
-
-/// The urls an image is tried at, in order: the url without its fragment, then each host a Comix `#alt=h1,h2` fragment
-/// lists, with `r=1`, `r=2`, ... (Kotlin `altHostFallback`). For Comix, then the url with each other path variant in
-/// place of its first variant segment (`/hi/`, `/i5/`, ... or any `/s?i+/`).
-fn attempts(image_url: &str, comix: bool) -> Vec<String> {
-    let Ok(mut url) = Url::parse(image_url) else { return vec![image_url.to_owned()] };
-    let hosts: Vec<String> = url.fragment().and_then(|f| f.strip_prefix("alt=")).map(|list| list.split(',').filter(|h| !h.is_empty()).map(str::to_owned).collect()).unwrap_or_default();
-    url.set_fragment(None);
-    let mut out = vec![url.to_string()];
-    for (n, host) in hosts.iter().enumerate() {
-        let mut next = url.clone();
-        if next.set_host(Some(host)).is_ok() {
-            next.query_pairs_mut().append_pair("r", &(n + 1).to_string());
-            out.push(next.into());
-        }
-    }
-    let segments: Vec<String> = url.path().split('/').map(str::to_owned).collect();
-    // the last segment is the file name
-    let at = segments.iter().take(segments.len().saturating_sub(1)).position(|s| is_variant_segment(s));
-    if let (true, Some(at)) = (comix, at) {
-        for variant in PATH_VARIANTS.iter().filter(|v| **v != segments[at]) {
-            let mut path = segments.clone();
-            path[at] = (*variant).to_owned();
-            let mut next = url.clone();
-            next.set_path(&path.join("/"));
-            out.push(next.into());
-        }
-    }
-    out
-}
-
-/// A Comix image path segment that has variants: one of [`PATH_VARIANTS`], or `s?i+`.
-fn is_variant_segment(segment: &str) -> bool {
-    let rest = segment.strip_prefix('s').unwrap_or(segment);
-    PATH_VARIANTS.contains(&segment) || (!rest.is_empty() && rest.chars().all(|c| c == 'i'))
-}
-
-/// `url` with its `r` query parameter set to `attempt`, the rest of the query kept as it is.
-fn with_retry(url: &str, attempt: u32) -> String {
-    let Ok(mut parsed) = Url::parse(url) else { return url.to_owned() };
-    let mut query: Vec<String> = parsed.query().unwrap_or("").split('&').filter(|p| !p.is_empty() && !p.starts_with("r=")).map(str::to_owned).collect();
-    query.push(format!("r={attempt}"));
-    parsed.set_query(Some(&query.join("&")));
-    parsed.into()
+/// The body of one image. A status other than 2xx or 304 is an error with that status.
+async fn fetch(client: &NetworkClient, url: &str, headers: &HeaderMap) -> Result<Vec<u8>, String> {
+    let response = client.execute(request(url, headers)?).await.map_err(|e| e.to_string())?;
+    kuro_images::http::check_status(response.status).map_err(|e| e.to_string())?;
+    Ok(response.bytes().await.map_err(|e| e.to_string())?.to_vec())
 }
 
 /// A page-list fetch that has not reached the cache.
@@ -269,13 +167,6 @@ impl Prefetch {
     }
 }
 
-/// The pages of `source` over the built-in sources' client (one client, so one cookie jar), with the source's image
-/// headers.
-fn builtin_pages(builtin: &crate::browse::builtin::Builtin, source: Arc<dyn MangaSource>, runtime: Handle) -> Option<SourcePages> {
-    let headers = builtin.image_headers(source.id()).unwrap_or_default();
-    Some(SourcePages::new(source, builtin.client()?, headers, runtime))
-}
-
 /// The page lists and pages of the manga `manga_id` of source `source_id`, when the directory knows that source and
 /// the app's runtime runs; `None` for a local or unknown source.
 pub fn online(source_id: i64, manga_id: i64) -> Option<Arc<Prefetch>> {
@@ -283,7 +174,7 @@ pub fn online(source_id: i64, manga_id: i64) -> Option<Arc<Prefetch>> {
     let runtime = Handle::try_current().ok()?;
     let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
     let cache = DiskCache::open(paths.chapter_cache_dir(), CACHE_LIMIT_BYTES).map_err(|e| tracing::warn!(error = %e, "no chapter cache")).ok()?;
-    let pages = builtin_pages(&*crate::browse::builtin::current()?, source, runtime)?;
+    let pages = SourcePages::new(source, crate::recipe_sources::client()?, crate::recipe_sources::image_headers(source_id), runtime);
     Some(Prefetch::new(Arc::new(pages), Arc::new(cache), manga_id))
 }
 
@@ -298,6 +189,7 @@ mod tests {
     use kuro_prefs::store::PrefStore;
     use kuro_source::model::{Page, SManga};
     use reqwest::header::HeaderValue;
+    use std::time::Duration;
 
     use super::*;
     use crate::reader::loader::http::HttpLoader;
@@ -308,10 +200,10 @@ mod tests {
     #[async_trait]
     impl MangaSource for ThreePages {
         fn id(&self) -> i64 {
-            2131019126180322627
+            kuro_source::generate_id("Fixture", "en", 1)
         }
         fn name(&self) -> &str {
-            "Weeb Central"
+            "Fixture"
         }
         async fn get_manga_details(&self, manga: &SManga) -> Result<SManga, SourceError> {
             Ok(manga.clone())
@@ -345,7 +237,6 @@ mod tests {
         assert_eq!(list[2].image_url.as_deref(), Some("https://img.example/chapters/01J/2.png"));
         assert_eq!(*source.0.lock().unwrap(), ["/chapters/01J"]);
         assert!(pages.image_url("p0").is_err(), "a page without an image url has nothing to ask for");
-        assert!(pages.unscramble.is_none(), "Weeb Central pages go as they are");
     }
 
     /// The gate opens once the list is cached, and the reader's loader then reads it without asking the source again.
@@ -412,65 +303,12 @@ mod tests {
     }
 
     #[test]
-    fn an_image_is_tried_without_its_fragment_then_on_each_alt_host_then_on_each_path_variant() {
-        assert_eq!(attempts("https://img.example/a/1.png", false), ["https://img.example/a/1.png"]);
-        assert_eq!(attempts("https://img.example/i/1.png", false), ["https://img.example/i/1.png"], "only Comix has path variants");
-        assert_eq!(
-            attempts("https://s1.comix.to/i5/x/1.webp?v3#alt=s1.cdn1.net,s2.cdn2.net", true),
-            [
-                "https://s1.comix.to/i5/x/1.webp?v3",
-                "https://s1.cdn1.net/i5/x/1.webp?v3&r=1",
-                "https://s2.cdn2.net/i5/x/1.webp?v3&r=2",
-                "https://s1.comix.to/hi/x/1.webp?v3",
-                "https://s1.comix.to/fcf/x/1.webp?v3",
-                "https://s1.comix.to/si/x/1.webp?v3",
-                "https://s1.comix.to/i/x/1.webp?v3",
-                "https://s1.comix.to/sii/x/1.webp?v3",
-                "https://s1.comix.to/ii/x/1.webp?v3",
-            ]
-        );
-        assert_eq!(attempts("https://h.example/x/i.webp", true), ["https://h.example/x/i.webp"], "the file name is not a variant segment");
-        assert!(is_variant_segment("siii") && !is_variant_segment("s") && !is_variant_segment("x"));
-    }
-
-    #[test]
-    fn a_retry_sets_r_and_keeps_the_rest_of_the_query() {
-        assert_eq!(with_retry("https://s1.cdn1.net/i5/x/1.webp?v3&r=1", 4), "https://s1.cdn1.net/i5/x/1.webp?v3&r=4");
-        assert_eq!(with_retry("https://s1.comix.to/i5/x/1.webp", 1), "https://s1.comix.to/i5/x/1.webp?r=1");
-    }
-
-    #[test]
     fn the_image_request_carries_the_source_headers() {
         let mut headers = HeaderMap::new();
-        headers.insert("referer", HeaderValue::from_static("https://weebcentral.com/"));
-        let request = request("https://temp.compsci88.com/manga/x/1.png", &headers).unwrap();
-        assert_eq!(request.headers.get("referer").unwrap(), "https://weebcentral.com/");
-        assert_eq!(request.url.as_str(), "https://temp.compsci88.com/manga/x/1.png");
+        headers.insert("referer", HeaderValue::from_static("https://source.example.org/"));
+        let request = request("https://img.example.org/manga/x/1.png", &headers).unwrap();
+        assert_eq!(request.headers.get("referer").unwrap(), "https://source.example.org/");
+        assert_eq!(request.url.as_str(), "https://img.example.org/manga/x/1.png");
     }
 
-    const GRID: u32 = 5;
-    const TILE: u32 = 8;
-
-    fn colour(tile: u32) -> image::Rgb<u8> {
-        image::Rgb([(tile * 10) as u8, 255 - (tile * 10) as u8, ((tile % 5) * 60) as u8])
-    }
-
-    #[test]
-    fn a_scrambled_comix_page_comes_out_with_its_tiles_in_place() {
-        let comix = unscrambler(kuro_source::generate_id("Comix", "en", 1));
-        assert!(comix.is_some() && unscrambler(2131019126180322627).is_none());
-        let (body, headers) = scrambled_fixture(12345, 987_654_321);
-        assert!(image::load_from_memory(&body).is_err(), "the body is not an image before the descrambler");
-        let shown = shown(body, &headers, comix).unwrap();
-        let page = image::load_from_memory(&shown).expect("the shown bytes decode").to_rgb8();
-        assert_eq!(page.dimensions(), (GRID * TILE, GRID * TILE));
-        for tile in 0..GRID * GRID {
-            let (x, y) = ((tile % GRID) * TILE + TILE / 2, (tile / GRID) * TILE + TILE / 2);
-            let (got, want) = (page.get_pixel(x, y).0, colour(tile).0);
-            assert!(got.iter().zip(want).all(|(g, w)| g.abs_diff(w) <= 12), "tile {tile}: {got:?} against {want:?} (JPEG 90)");
-        }
-        let plain = b"\x89PNG plain".to_vec();
-        assert_eq!(super::shown(plain.clone(), &HeaderMap::new(), comix).unwrap(), plain, "an unscrambled page goes as it is");
-        assert_eq!(super::shown(plain.clone(), &headers, None).unwrap(), plain, "other sources never descramble");
-    }
 }

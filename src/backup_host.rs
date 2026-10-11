@@ -135,7 +135,7 @@ fn library() -> Library {
 }
 
 fn hide_content() -> bool {
-    crate::data::app().security.hide_notification_content.get()
+    crate::misc::diet_defaults::NOTIFICATION_HIDE_CONTENT
 }
 
 impl Ctx {

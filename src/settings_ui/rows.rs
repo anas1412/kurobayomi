@@ -280,15 +280,15 @@ pub fn scaled_slider(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_prefs::player::Debanding;
+    use kuro_prefs::ui::ThemeMode;
     use kuro_prefs::prefs::Prefs;
 
     #[test]
     fn visible_drops_disabled_rows_and_keeps_the_rest() {
         let prefs = Prefs::in_memory();
         let rows = vec![
-            switch("On", &prefs.reader.fullscreen, true),
-            switch("Off", &prefs.reader.fullscreen, false),
+            switch("On", &prefs.reader.crop_borders, true),
+            switch("Off", &prefs.reader.crop_borders, false),
         ];
         let kept = visible(rows);
         assert_eq!(kept.len(), 1);
@@ -337,23 +337,23 @@ mod tests {
     #[test]
     fn enum_choice_stores_the_variant_name_and_rejects_unknown_keys() {
         let prefs = Prefs::in_memory();
-        let options = [(Debanding::None, "None"), (Debanding::GPU, "GPU")];
-        let PreferenceItem::BasicList { on_change, entries, .. } = enum_choice("Debanding", &prefs.decoder.video_debanding, &options, true) else {
+        let options = [(ThemeMode::LIGHT, "Light"), (ThemeMode::DARK, "Dark")];
+        let PreferenceItem::BasicList { on_change, entries, .. } = enum_choice("Theme mode", &prefs.ui.theme_mode, &options, true) else {
             panic!("expected a list");
         };
-        assert_eq!(entries[1], ("GPU".to_owned(), "GPU".to_owned()));
+        assert_eq!(entries[1], ("DARK".to_owned(), "Dark".to_owned()));
         assert!(futures_block(on_change("NOPE".to_owned())).is_err());
     }
 
     #[test]
     fn exclusive_switch_turns_the_partner_off_when_turned_on() {
         let prefs = Prefs::in_memory();
-        prefs.reader.dual_page_rotate_to_fit.set(true).unwrap();
-        let PreferenceItem::Switch { veto, .. } = exclusive_switch("Split", &prefs.reader.dual_page_split_paged, &prefs.reader.dual_page_rotate_to_fit, true) else {
+        prefs.reader.crop_borders.set(true).unwrap();
+        let PreferenceItem::Switch { veto, .. } = exclusive_switch("Split", &prefs.reader.dual_page_split_paged, &prefs.reader.crop_borders, true) else {
             panic!("expected a switch");
         };
         assert_eq!(futures_block(veto(true)), Ok(true));
-        assert!(!prefs.reader.dual_page_rotate_to_fit.get());
+        assert!(!prefs.reader.crop_borders.get());
     }
 
     #[test]

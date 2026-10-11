@@ -13,7 +13,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::delete::ChapterSourceResolver;
 use crate::downloader::{
-    COMMAND_CAPACITY, Command, Connectivity, DownloadSettings, Downloader, ProcessHold, RemoveTarget, Shared, SpeedLimitFn,
+    COMMAND_CAPACITY, Command, Connectivity, DownloadSettings, Downloader, ProcessHold, RemoveTarget, Shared,
     unix_millis,
 };
 use crate::error::DownloadError;
@@ -57,9 +57,6 @@ pub struct ManagerParams {
     pub store: Arc<QueueStore>,
     pub free_space: FreeSpaceFn,
     pub settings: DownloadSettings,
-    /// Read at each chapter start for `download_speed_limit` in KiB/s (T-23a-015). `None` uses
-    /// `settings.speed_limit_kib_s` as it was at construction.
-    pub speed_limit_kib_s: Option<SpeedLimitFn>,
     /// Chapters whose delete waits for the reader to exit (T-23a-028).
     pub pending: Arc<MangaPendingStore>,
     /// Reader page cache (area 34). `None` when the reader does not share its cache.
@@ -752,7 +749,6 @@ mod run_tests {
             hold: Arc::new(crate::downloader::NoHold),
             restored: Vec::new(),
             kept_rows: Vec::new(),
-            speed_limit_kib_s: None,
             pending: Arc::new(crate::pending::MangaPendingStore::open_in_memory().unwrap()),
         });
         Env { mgr, conn, root, _base: base }
@@ -1085,7 +1081,6 @@ mod run_tests {
             hold: Arc::new(crate::downloader::NoHold),
             restored: Vec::new(),
             kept_rows: Vec::new(),
-            speed_limit_kib_s: None,
             pending: Arc::new(crate::pending::MangaPendingStore::open_in_memory().unwrap()),
         });
         let log = record(&mgr);
@@ -1483,7 +1478,6 @@ mod run_tests {
             hold: Arc::new(crate::downloader::NoHold),
             restored: restored.downloads,
             kept_rows: restored.kept_rows,
-            speed_limit_kib_s: None,
             pending: Arc::new(crate::pending::MangaPendingStore::open_in_memory().unwrap()),
         });
 
@@ -1646,7 +1640,6 @@ mod run_tests {
             hold: Arc::new(crate::downloader::NoHold),
             restored: restored.downloads,
             kept_rows: restored.kept_rows,
-            speed_limit_kib_s: None,
             pending: Arc::new(MangaPendingStore::open_in_memory().unwrap()),
         });
         let src = fake(1);

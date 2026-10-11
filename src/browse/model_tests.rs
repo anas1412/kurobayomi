@@ -482,8 +482,7 @@ mod global_search {
         search.set_query(Some("one"));
         let plan = search.search().expect("first search");
         search.apply(plan.generation, 1, Ok(vec![item(10)]));
-        let next = search.set_filter(SourceFilter::All).expect("the chip searches again");
-        assert_eq!(next.sources.iter().map(|s| s.id).collect::<Vec<_>>(), [2], "GS-EC-03: only the new source is fetched");
+        assert_eq!(search.set_filter(SourceFilter::All), None, "the Pinned chip is cut: every source was already searched");
         assert!(matches!(&search.rows().iter().find(|r| r.source.id == 1).expect("A").state, SearchState::Results(items) if items.len() == 1), "A keeps its result");
     }
 

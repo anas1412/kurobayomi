@@ -45,7 +45,7 @@ pub const KURO_PREFIX: &str = "kuro_";
 
 /// Registry rows that Aniyomi does not have (no match in its source; `anime_ext_last_check` is Aniyomi's
 /// `last_ext_check` under another name). They are exported with [`KURO_PREFIX`] like keys outside the registry.
-pub const KURO_ONLY_KEYS: &[&str] = &["show_not_runnable", "anime_ext_last_check"];
+pub const KURO_ONLY_KEYS: &[&str] = &["anime_ext_last_check"];
 
 /// The backup key for a stored key. A key Aniyomi knows keeps its name. A Kurobayomi-only normal key (outside the
 /// registry, or listed in [`KURO_ONLY_KEYS`]) gets [`KURO_PREFIX`]. App state and private keys are handled by their
@@ -93,8 +93,8 @@ mod tests {
     fn kurobayomi_only_keys_round_trip_through_the_kuro_prefix() {
         assert_eq!(backup_key("kuro_only_here"), "kuro_kuro_only_here");
         assert_eq!(restored_key(&backup_key("kuro_only_here")), "kuro_only_here");
-        assert_eq!(backup_key("reader_tapping_inverted"), "reader_tapping_inverted", "a registry key keeps its name");
-        assert_eq!(restored_key("reader_tapping_inverted"), "reader_tapping_inverted");
+        assert_eq!(backup_key("show_nsfw_source"), "show_nsfw_source", "a registry key keeps its name");
+        assert_eq!(restored_key("show_nsfw_source"), "show_nsfw_source");
         assert_eq!(backup_key("__APP_STATE_incognito_mode"), "__APP_STATE_incognito_mode");
     }
 
@@ -122,27 +122,27 @@ mod tests {
     fn the_aniyomi_restorer_takes_kuro_keys_as_plain_values_and_changes_nothing_else() {
         use crate::values::PrefValue;
         let exported: Vec<(String, PrefValue)> = [
-            ("reader_tapping_inverted".to_owned(), PrefValue::Bool(true)),
-            ("show_not_runnable".to_owned(), PrefValue::Bool(true)),
+            ("show_nsfw_source".to_owned(), PrefValue::Bool(true)),
+            ("anime_ext_last_check".to_owned(), PrefValue::Bool(true)),
             ("kuro_only_here".to_owned(), PrefValue::Int(9)),
         ]
         .into_iter()
         .map(|(k, v)| (backup_key(&k), v))
         .collect();
         let keys: Vec<&str> = exported.iter().map(|(k, _)| k.as_str()).collect();
-        assert_eq!(keys, ["reader_tapping_inverted", "kuro_show_not_runnable", "kuro_kuro_only_here"]);
+        assert_eq!(keys, ["show_nsfw_source", "kuro_anime_ext_last_check", "kuro_kuro_only_here"]);
         let mut device: std::collections::BTreeMap<String, PrefValue> = [
-            ("reader_tapping_inverted".to_owned(), PrefValue::Bool(false)),
-            ("show_not_runnable".to_owned(), PrefValue::Bool(false)),
+            ("show_nsfw_source".to_owned(), PrefValue::Bool(false)),
+            ("anime_ext_last_check".to_owned(), PrefValue::Bool(false)),
             ("unrelated".to_owned(), PrefValue::Str("keep".into())),
         ]
         .into_iter()
         .collect();
         let before = device.clone();
         aniyomi_restore(&mut device, &exported);
-        assert_eq!(device["reader_tapping_inverted"], PrefValue::Bool(true), "the Aniyomi key restores");
-        assert_eq!(device["kuro_show_not_runnable"], PrefValue::Bool(true), "a kuro_ key is stored as an ordinary value");
-        assert_eq!(device["show_not_runnable"], before["show_not_runnable"], "the unprefixed key is not touched");
+        assert_eq!(device["show_nsfw_source"], PrefValue::Bool(true), "the Aniyomi key restores");
+        assert_eq!(device["kuro_anime_ext_last_check"], PrefValue::Bool(true), "a kuro_ key is stored as an ordinary value");
+        assert_eq!(device["anime_ext_last_check"], before["anime_ext_last_check"], "the unprefixed key is not touched");
         assert_eq!(device["unrelated"], before["unrelated"]);
         assert_eq!(device.len(), before.len() + 2, "only the two kuro_ entries are new");
     }

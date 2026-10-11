@@ -40,13 +40,17 @@ use crate::browse::extensions::{Ext, ExtState};
 use crate::browse::ext_badges;
 use crate::browse::icons::cached_icon_file;
 
-/// The Browse lists of the anime extensions for the current preferences: the language set, `show_nsfw_source` and
-/// `show_not_runnable` are read on every call, so a change takes effect on the next rebuild (T-19a-066).
+/// Whether listings that cannot run here are shown: never (the settings diet cut the `show_not_runnable` switch).
+const SHOW_NOT_RUNNABLE: bool = false;
+
+/// The Browse lists of the anime extensions for the current preferences. The language set and `show_nsfw_source`
+/// are read on every call, so a change takes effect on the next rebuild (T-19a-066). The not-runnable rows stay
+/// hidden (the settings diet cut `show_not_runnable`).
 pub fn anime_buckets(state: &ExtensionState, prefs: &SourcePrefs) -> Buckets {
-    buckets(state, &prefs.enabled_languages.get(), prefs.show_nsfw_source.get(), prefs.show_not_runnable.get())
+    buckets(state, &prefs.enabled_languages.get(), prefs.show_nsfw_source.get(), SHOW_NOT_RUNNABLE)
 }
 
-/// The badge of every row of `buckets` that cannot run here (shown only while `show_not_runnable` is on), by package name.
+/// The badge of every row of `buckets` that cannot run here (none while the not-runnable rows are hidden), by package name.
 pub fn badges_of(buckets: &Buckets) -> BTreeMap<String, RowBadges> {
     let mut badges = BTreeMap::new();
     for row in &buckets.available {
@@ -98,12 +102,12 @@ pub fn anime_source_rows(state: &ExtensionState) -> (Vec<Source>, BTreeMap<i64, 
     (refs.iter().map(|s| Source::new(s.id, &s.name, &s.lang)).collect(), icons)
 }
 
-/// The anime sources and their icon files as the last state change left them, then the recipe and built-in sources.
+/// The anime sources and their icon files as the last state change left them, then the recipe sources.
 pub fn anime_sources() -> (Vec<Source>, BTreeMap<i64, String>) {
     LATEST.with(|l| {
         let latest = l.borrow();
         // the recipe sources (docs/source-recipes.md) have no package and no icon file
-        let sources = latest.anime_sources.iter().cloned().chain(crate::recipe_sources::anime_list()).chain(crate::browse::builtin::anime_list()).collect();
+        let sources = latest.anime_sources.iter().cloned().chain(crate::recipe_sources::anime_list()).collect();
         (sources, latest.anime_icons.clone())
     })
 }
@@ -116,7 +120,7 @@ fn publish(state: &ExtensionState, prefs: &SourcePrefs) {
     }
     let lists = anime_buckets(state, prefs);
     ext_badges::publish(badges_of(&lists));
-    ext_badges::publish_store_counts(not_runnable_by_store(state, prefs.show_not_runnable.get()));
+    ext_badges::publish_store_counts(not_runnable_by_store(state, SHOW_NOT_RUNNABLE));
     let (sources, icons) = anime_source_rows(state);
     LATEST.with(|l| {
         let mut latest = l.borrow_mut();
@@ -264,16 +268,17 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
         Ok(paths) => paths,
         Err(e) => {
             tracing::warn!("the extension host does not start: {e}");
+            // No sources will load: open the gate empty so no screen waits on it forever.
+            crate::source_gate::mark_loaded();
             return;
         }
     };
     let prefs = SourcePrefs::new(store.clone());
     let handle = tokio::runtime::Handle::current();
 
-    // declarative sources: the recipes of the scrapers folder
-    crate::recipe_sources::start(store, &paths);
-    // the sources this build ships, and the image service their covers draw through
-    crate::browse::builtin::start(store, &paths);
+    // declarative sources, then the source gate the screens wait on (startup::load_sources)
+    let shared: Arc<dyn kuro_platform::paths::Paths + Send + Sync> = Arc::new(paths.clone());
+    crate::startup::load_sources(store, &shared);
 
     // manga packages: one scan, icons into the cache, problems kept by folder
     let registry = Arc::new(ExtensionRegistry::new());
@@ -442,17 +447,16 @@ mod tests {
         state
     }
 
-    /// T-19a-066: the preference decides whether the not-runnable rows show, on each rebuild.
+    /// T-19a-066: the Browse lists hide the not-runnable rows (`anime_buckets`); `buckets` shows them when asked.
     #[test]
-    fn show_not_runnable_hides_the_rows_by_default_and_shows_them_when_set() {
+    fn the_browse_lists_hide_the_not_runnable_rows_and_buckets_shows_them_when_the_flag_is_on() {
         let prefs = SourcePrefs::new(PrefStore::in_memory());
         prefs.enabled_languages.set(["en".to_owned()].into()).unwrap();
         let state = state();
         let hidden = anime_buckets(&state, &prefs);
         assert_eq!(hidden.available.len(), 1);
         assert_eq!(hidden.not_runnable_hidden, 2);
-        prefs.show_not_runnable.set(true).unwrap();
-        let shown = anime_buckets(&state, &prefs);
+        let shown = buckets(&state, &["en".to_owned()].into(), true, true);
         assert_eq!(shown.available.len(), 3);
         assert_eq!(shown.not_runnable_hidden, 0);
     }
@@ -460,15 +464,13 @@ mod tests {
     #[test]
     fn only_the_listings_that_cannot_run_carry_a_badge() {
         let prefs = SourcePrefs::new(PrefStore::in_memory());
-    prefs.enabled_languages.set(["en".to_owned()].into()).unwrap();
-    prefs.show_not_runnable.set(true).unwrap();
-    let badges = badges_of(&anime_buckets(&state(), &prefs));
+        prefs.enabled_languages.set(["en".to_owned()].into()).unwrap();
+        let badges = badges_of(&buckets(&state(), &["en".to_owned()].into(), true, true));
         assert_eq!(badges.len(), 2);
         assert_eq!(badges["eu.apk"], RowBadges { not_runnable: true, unsigned: false });
         assert_eq!(badges["eu.unsigned"], RowBadges { not_runnable: false, unsigned: true });
         assert!(!badges.contains_key("eu.ok"));
         // hidden rows carry no badge: nothing is shown for them
-        prefs.show_not_runnable.set(false).unwrap();
         assert!(badges_of(&anime_buckets(&state(), &prefs)).is_empty());
     }
 
@@ -487,10 +489,8 @@ mod tests {
         assert_eq!(anime_lists().not_runnable_hidden, 2);
         assert_eq!(ext_badges::of("eu.apk"), None, "hidden rows carry no badge");
         prefs.enabled_languages.set(["en".to_owned()].into()).unwrap();
-        prefs.show_not_runnable.set(true).unwrap();
         publish(&state(), &prefs);
-        assert_eq!(ext_badges::store_note_for("https://s/i.json"), None, "nothing is hidden when the flag is on");
-        assert_eq!(ext_badges::of("eu.apk").map(|b| b.not_runnable), Some(true), "a shown row carries its badge");
+        assert!(ext_badges::store_note_for("https://s/i.json").is_some(), "the not-runnable rows stay hidden");
         ext_badges::publish(BTreeMap::new());
         ext_badges::publish_store_counts(BTreeMap::new());
     }

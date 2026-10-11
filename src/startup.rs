@@ -13,8 +13,8 @@ use kuro_domain::kind::EntryKind;
 use kuro_domain::updates::repo::UpdatesRepo;
 use kuro_domain::updates::window::three_months_ago;
 use kuro_platform::linux::launcher;
+use kuro_prefs::store::PrefStore;
 
-use crate::bind;
 use crate::data;
 use crate::watch::bind_watch;
 
@@ -92,6 +92,18 @@ pub fn run_with_splash<T, S>(
     });
 }
 
+/// Loads the sources the screens read, then opens the source gate (`source_gate::subscribe`). The recipe sources (and
+/// the shared client and image service) come first; the gate opens only after them, so a screen that waits on it never
+/// reads a half-loaded list. Sources of added repositories must be loaded before this call too. When the recipe sources
+/// cannot start (the client does not build) the gate still opens, with no sources, so screens show their empty state
+/// instead of a spinner that never ends; `ext_host::start` does the same when the app paths cannot be found.
+pub fn load_sources(store: &PrefStore, paths: &std::sync::Arc<dyn kuro_platform::paths::Paths + Send + Sync>) {
+    let started = std::time::Instant::now();
+    crate::recipe_sources::start(store, paths);
+    crate::source_gate::mark_loaded();
+    tracing::info!(elapsed = ?started.elapsed(), "sources loaded");
+}
+
 /// Empties the chapter cache directory once, on a worker thread, when `auto_clear_chapter_cache` is on (T-08a-037).
 /// The caller runs it after the main window is presented, so the window never waits for the deletion. Returns the
 /// worker, or `None` when the setting is off.
@@ -134,16 +146,14 @@ pub fn desktop_file_name(app_id: &str) -> String {
     format!("{app_id}.desktop")
 }
 
-/// Keeps the launcher badge at the unread updates of the last three months, cleared at 0 and hidden while the app
-/// lock is on. The window ties the lock-preference binding to its lifetime. Needs the data to be installed.
-pub fn publish_launcher_badge(win: &gtk::ApplicationWindow, app_id: &str) {
+/// Keeps the launcher badge at the unread updates of the last three months, cleared at 0. Needs the data to be installed.
+pub fn publish_launcher_badge(app_id: &str) {
     let desktop = desktop_file_name(app_id);
     let counts = Rc::new(Cell::new([0_i64; 2]));
     let push: Rc<dyn Fn()> = Rc::new({
         let counts = Rc::clone(&counts);
         move || {
-            let locked = data::app().security.use_authenticator.get();
-            let badge = launcher::badge(counts.get().iter().sum(), locked);
+            let badge = launcher::badge(counts.get().iter().sum());
             let desktop = desktop.clone();
             tokio::spawn(async move { launcher::publish(&desktop, badge).await });
         }
@@ -160,8 +170,6 @@ pub fn publish_launcher_badge(win: &gtk::ApplicationWindow, app_id: &str) {
             push();
         });
     }
-    let lock = data::app().security.use_authenticator.clone();
-    bind::bind(win, &lock, move |_, _| push());
 }
 
 #[cfg(test)]

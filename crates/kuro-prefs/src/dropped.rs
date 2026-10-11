@@ -49,9 +49,6 @@ mod tests {
         "external_downloader_selection",
     ];
 
-    /// Listed above but not registered: the Android installer choice, the hardware bitmap threshold and the display cutout.
-    const DROPPED: [&str; 3] = ["extension_installer", "pref_hardware_bitmap_threshold", "cutout_short"];
-
     /// A value of the registry kind, different from the default, so a lost value cannot pass as a default.
     fn sample(kind: Kind) -> PrefValue {
         match kind {
@@ -67,7 +64,7 @@ mod tests {
     #[test]
     fn every_android_only_key_round_trips_with_its_kind_and_value_or_is_dropped() {
         let store = PrefStore::in_memory();
-        let mut round_tripped = 0;
+        let (mut round_tripped, mut dropped) = (0, 0);
         for key in ANDROID_ONLY {
             match REGISTRY.iter().find(|meta| meta.key == key) {
                 Some(meta) => {
@@ -78,10 +75,13 @@ mod tests {
                     assert!(exported.contains(&(key.to_owned(), value)), "{key} lost its value");
                     round_tripped += 1;
                 }
-                None => assert!(DROPPED.contains(&key), "{key} is neither registered nor dropped"),
+                None => {
+                    assert!(crate::registry::is_dropped(key), "{key} is neither registered nor dropped");
+                    dropped += 1;
+                }
             }
         }
-        assert_eq!(round_tripped, ANDROID_ONLY.len() - DROPPED.len());
+        assert_eq!(round_tripped + dropped, ANDROID_ONLY.len());
     }
 
     #[test]
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn the_dropped_keys_are_not_registered() {
-        for key in DROPPED {
+        for key in ANDROID_ONLY.into_iter().filter(|k| crate::registry::is_dropped(k)) {
             assert!(REGISTRY.iter().all(|meta| meta.key != key), "{key} must not be registered");
         }
     }

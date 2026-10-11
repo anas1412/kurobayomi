@@ -27,7 +27,8 @@ const FLASH_DURATION_STORED: i32 = 1;
 use super::rules;
 
 /// The custom brightness slider range (`ColorFilterPage.kt:41`).
-pub const BRIGHTNESS_RANGE: (i32, i32) = kuro_prefs::ranges::CUSTOM_BRIGHTNESS.bounds().expect("a range");
+/// The settings diet cut the custom brightness setting; its slider range stays as the overlay's own scale.
+pub const BRIGHTNESS_RANGE: (i32, i32) = (-75, 100);
 
 /// One byte of the packed ARGB colour filter value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

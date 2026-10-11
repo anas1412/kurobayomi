@@ -561,7 +561,7 @@ mod tests {
         write_file(
             &dir,
             CONFIG_FILE,
-            "schema = 1\n[ui]\ntablet_ui_mode = \"ALWAYS\"\ntheme_dark_amoled = true\n[security]\nsecure_screen = \"NEVER\"\n\
+            "schema = 1\n[ui]\ntablet_ui_mode = \"ALWAYS\"\ntheme_mode = \"DARK\"\n[security]\nsecure_screen = \"NEVER\"\n\
              [library]\nswipe_left_chapter = \"Download\"\n[reader]\ndefault_orientation_type = 16\n\
              [player]\ndefault_player_orientation_type = \"Free\"\nremember_player_brightness = true\n\
              [player.gestures]\ngesture_volume_brightness = false\n",
@@ -569,9 +569,9 @@ mod tests {
         let b = backend(&dir).unwrap();
         let loaded = b.load().unwrap();
         assert_eq!(loaded.len(), 1, "only the kept field is a value: {loaded:?}");
-        assert_eq!(loaded.get("pref_theme_dark_amoled_key"), Some(&PrefValue::Bool(true)));
+        assert_eq!(loaded.get("pref_theme_mode_key"), Some(&PrefValue::Str("DARK".into())));
         b.save(&loaded).unwrap();
-        assert!(file(&dir, CONFIG_FILE).contains("theme_dark_amoled = true"));
+        assert!(file(&dir, CONFIG_FILE).contains("theme_mode = \"DARK\""));
     }
 
     #[test]

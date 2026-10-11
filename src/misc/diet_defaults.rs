@@ -87,5 +87,11 @@ pub const DOWNLOAD_NEW_UNREAD_ONLY: bool = false;
 pub const DOWNLOAD_REMOVE_AFTER_MARKED_READ: bool = false;
 pub const DOWNLOAD_AUTO_WHILE_AMOUNT: i32 = 0;
 
+// Player. The external player is cut for now, so the always-external switch is off; the one-off "play in external
+// player" action stays.
+pub const PLAYER_ALWAYS_EXTERNAL: bool = false;
+
 // Shell and notifications.
 pub const NOTIFICATION_HIDE_CONTENT: bool = false;
+/// The release check at startup (`check_app_updates`): off. The manual "Check for updates" action stays.
+pub const APP_UPDATE_CHECK_AT_STARTUP: bool = false;

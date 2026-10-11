@@ -138,12 +138,11 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
 }
 
 #[test]
-fn t2_sort_07_the_random_seed_is_stored_per_kind() {
-    let (_d, manga, manga_prefs) = service(EntryKind::Manga);
+fn t2_sort_07_the_random_seed_is_kept_in_memory_per_kind() {
+    let (_d, manga, _prefs) = service(EntryKind::Manga);
     let random = LibrarySort { ty: SortType::Random, dir: Direction::Ascending };
     block_on(manga.set_sort_mode(None, random, || 4242)).expect("set the manga sort");
-    assert_eq!(manga_prefs.random_manga_sort_seed.get(), 4242);
-    assert_eq!(manga_prefs.random_anime_sort_seed.get(), 0, "the anime seed is a different key");
+    assert_eq!(kuro_prefs::category::random_sort_seed(kuro_prefs::category::CategoryKind::Manga), 4242);
 }
 
 #[test]
@@ -166,17 +165,15 @@ fn t2_sort_09_equal_keys_break_by_title_ascending_even_when_descending() {
 }
 
 #[test]
-fn t2_sort_10_categorized_display_decides_which_categories_take_the_sort() {
+fn t2_sort_10_the_sort_reaches_every_category() {
     let (_d, svc, _prefs) = service(EntryKind::Manga);
     let a = block_on(svc.create("A")).expect("a");
     let b = block_on(svc.create("B")).expect("b");
     let date_added = LibrarySort { ty: SortType::DateAdded, dir: Direction::Descending };
     let flags_of = |id: i64| svc.repo().get(id).expect("read").expect("row").flags;
-    let before = (flags_of(a.id), flags_of(b.id));
 
-    block_on(svc.set_sort_mode(Some(a.id), date_added, || 0)).expect("categorized write");
-    assert_eq!(flags_of(a.id), date_added.apply_to(before.0), "the target category changes");
-    assert_eq!(flags_of(b.id), before.1, "the others do not");
+    block_on(svc.set_sort_mode(Some(a.id), date_added, || 0)).expect("write from a category");
+    assert_eq!(flags_of(a.id), flags_of(b.id), "the same flags reach every category");
 
     block_on(svc.set_sort_mode(None, date_added, || 0)).expect("global write");
     assert_eq!(flags_of(a.id), flags_of(b.id), "the same flags reach every category");

@@ -15,15 +15,14 @@ use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use crate::anime::ffmpeg::{FFMPEG, FFPROBE, build_remux_args, probe_duration, run_remux};
-use crate::anime::handoff::{Clipboard, aria2_add_uri, copy_location, handoff_location, post_rpc};
+use crate::anime::ffmpeg::{FFMPEG, FFPROBE, build_remux_args, check_on_path, probe_duration, run_remux};
 use crate::anime::layout::{AnimeLayout, episode_folder_names, rename_dir};
 use crate::anime::manager::EpisodeRunner;
 use crate::anime::model::{AnimeDownload, Video};
+use crate::anime::progress::ProgressCell;
 use crate::anime::naming::{episode_dir_name, fat_safe, file_component, unique_episode_dir_name};
 use crate::anime::resolve::{HosterResolver, resolve_video};
 use crate::anime::torrent::{TORRENT_SERVER_HOST, check_torrent};
-use crate::download_prefs::DownloadPrefs;
 use crate::error::DownloadError;
 use crate::layout::TMP_DIR_SUFFIX;
 use crate::redact::redacted_headers;
@@ -35,54 +34,68 @@ const PARTIAL_EXT: &str = ".tmp";
 /// Written into every finished episode folder so media indexers skip it (behaviour 5.9, T-24a-056).
 const NOMEDIA: &str = ".nomedia";
 
-/// The desktop external-downloader option (T-24a-024, T-24a-025). Off unless `use_external_downloader` is on and
-/// `external_downloader_selection` holds the aria2 JSON-RPC endpoint (`http://host:port/jsonrpc`). Both are read per
-/// episode, so a settings change applies to the next run.
-pub struct ExternalHandoff {
-    prefs: DownloadPrefs,
-    clipboard: Arc<dyn Clipboard>,
+/// Copies a direct video file to `out` when ffmpeg is not installed. The app implements it over its HTTP client. It
+/// reports the percent through `progress` and stops when `cancel` fires.
+#[async_trait]
+pub trait VideoFetch: Send + Sync {
+    async fn fetch_to(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+        out: &Path,
+        progress: &ProgressCell,
+        cancel: &CancellationToken,
+    ) -> Result<(), DownloadError>;
 }
 
-impl ExternalHandoff {
-    pub fn new(prefs: DownloadPrefs, clipboard: Arc<dyn Clipboard>) -> Self {
-        Self { prefs, clipboard }
-    }
-
-    /// The aria2 endpoint, or `None` when the option is off or no endpoint is configured.
-    fn endpoint(&self) -> Option<String> {
-        if !self.prefs.use_external_downloader().get() {
-            return None;
-        }
-        let selection = self.prefs.external_downloader_selection().get();
-        let endpoint = selection.trim();
-        (!endpoint.is_empty()).then(|| endpoint.to_owned())
-    }
+/// `true` for an HLS playlist, which only ffmpeg can turn into a file. The URL path ends in `.m3u8`.
+pub fn is_hls(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    path.to_ascii_lowercase().ends_with(".m3u8")
 }
 
-/// Downloads one episode with ffmpeg. `ffmpeg` and `ffprobe` are program names or paths.
+/// The extension a direct copy of `url` is finished under: the container of the URL path when it is a known video
+/// container, else `.mkv`. A copy only moves bytes, so the name must not claim a container the file does not have.
+fn copy_ext(url: &str) -> &'static str {
+    let path = url.split(['?', '#']).next().unwrap_or(url).to_ascii_lowercase();
+    [".mkv", ".mp4", ".webm", ".m4v", ".mov", ".avi", ".ts"].into_iter().find(|ext| path.ends_with(ext)).unwrap_or(FINISHED_EXT)
+}
+
+/// Downloads one episode. Video through ffmpeg when ffmpeg and ffprobe are on `PATH` (HLS and direct files). Without
+/// them a direct file is copied through the [`VideoFetch`] port, and an HLS stream fails with `FfmpegMissing`.
+/// `ffmpeg` and `ffprobe` are program names or paths.
 pub struct EpisodeEngine {
     layout: AnimeLayout,
     resolver: Arc<dyn HosterResolver>,
     ffmpeg: OsString,
     ffprobe: OsString,
-    external: Option<ExternalHandoff>,
+    ffmpeg_ready: bool,
+    fetch: Option<Arc<dyn VideoFetch>>,
 }
 
 impl EpisodeEngine {
     pub fn new(layout: AnimeLayout, resolver: Arc<dyn HosterResolver>) -> Self {
-        Self { layout, resolver, ffmpeg: FFMPEG.into(), ffprobe: FFPROBE.into(), external: None }
-    }
-
-    /// Enables the aria2 handoff (still off until the preferences turn it on).
-    pub fn with_external(mut self, external: ExternalHandoff) -> Self {
-        self.external = Some(external);
-        self
+        Self {
+            layout,
+            resolver,
+            ffmpeg: FFMPEG.into(),
+            ffprobe: FFPROBE.into(),
+            ffmpeg_ready: check_on_path().is_ok(),
+            fetch: None,
+        }
     }
 
     /// Replaces the ffmpeg and ffprobe programs. Used by tests and by a user-chosen binary.
     pub fn with_programs(mut self, ffmpeg: impl Into<OsString>, ffprobe: impl Into<OsString>) -> Self {
         self.ffmpeg = ffmpeg.into();
         self.ffprobe = ffprobe.into();
+        self.ffmpeg_ready = true;
+        self
+    }
+
+    /// Sets the port that copies a direct video file when ffmpeg is not installed.
+    pub fn with_fetch(mut self, fetch: Arc<dyn VideoFetch>) -> Self {
+        self.fetch = Some(fetch);
         self
     }
 
@@ -107,7 +120,8 @@ impl EpisodeEngine {
     }
 
     /// Makes sure `<stem>.mkv` exists in the staging folder: a finished file from an earlier run is kept (resume), else
-    /// the video is remuxed under the retry schedule and the partial file is renamed when it ends.
+    /// the video is remuxed under the retry schedule and the partial file is renamed when it ends. Without ffmpeg a direct
+    /// file is copied and keeps its own container extension ([`copy_ext`]), so it is not resumed, only fetched again.
     async fn fetch(
         &self,
         item: &AnimeDownload,
@@ -116,14 +130,22 @@ impl EpisodeEngine {
         cancel: &CancellationToken,
     ) -> Result<(), DownloadError> {
         let stem = fat_safe(&item.episode.name);
-        let finished = staging.join(file_component(&stem, FINISHED_EXT));
+        let mut finished = staging.join(file_component(&stem, FINISHED_EXT));
         if finished.is_file() {
             debug!(target: "kuro_downloads", episode = item.episode.id, "resuming a finished remux");
             return Ok(());
         }
         let partial = staging.join(file_component(&stem, PARTIAL_EXT));
         let _ = fs::remove_file(&partial);
-        with_retry(cancel, || self.remux_once(item, video, &partial, cancel)).await?;
+        let headers = video.headers.clone().unwrap_or_default();
+        match (self.ffmpeg_ready, self.fetch.as_deref()) {
+            (true, _) => with_retry(cancel, || self.remux_once(item, video, &partial, cancel)).await?,
+            (false, Some(fetch)) if !is_hls(&video.url) => {
+                finished = staging.join(file_component(&stem, copy_ext(&video.url)));
+                with_retry(cancel, || fetch.fetch_to(&video.url, &headers, &partial, &item.progress, cancel)).await?
+            }
+            (false, _) => return Err(DownloadError::FfmpegMissing),
+        }
         fs::rename(&partial, &finished)?;
         Ok(())
     }
@@ -155,17 +177,6 @@ impl EpisodeRunner for EpisodeEngine {
 
         let video = resolve_video(&item, self.resolver.as_ref(), &cancel).await?;
         check_torrent(&video.url, TORRENT_SERVER_HOST)?;
-        if let Some(external) = &self.external
-            && let Some(endpoint) = external.endpoint()
-        {
-            // Handoff: aria2 saves into the final folder, so the startup sweep of `_tmp` folders never touches it, and
-            // the episode is not finalised here (T-24a-024).
-            let headers = video.headers.clone().unwrap_or_default();
-            let request = aria2_add_uri(&video.url, &headers, &handoff_location(&staging));
-            post_rpc(&endpoint, &request).await?;
-            copy_location(external.clipboard.as_ref(), &staging);
-            return Ok(());
-        }
         fs::create_dir_all(&staging)?;
         self.fetch(&item, &video, &staging, &cancel).await?;
         if !is_download_successful(&staging) {
@@ -297,6 +308,21 @@ mod tests {
 
     fn video() -> Video {
         Video { url: "/local/source.mkv".into(), title: "v".into(), ..Default::default() }
+    }
+
+    #[test]
+    fn a_direct_copy_keeps_the_container_of_its_url() {
+        assert_eq!(copy_ext("https://cdn.example/ep1.MP4?x=1"), ".mp4");
+        assert_eq!(copy_ext("https://cdn.example/ep1.webm#t"), ".webm");
+        assert_eq!(copy_ext("https://cdn.example/stream"), ".mkv");
+    }
+
+    #[test]
+    fn only_a_playlist_url_is_hls() {
+        assert!(is_hls("https://cdn.example/master.m3u8?token=1"));
+        assert!(is_hls("https://cdn.example/A.M3U8#x"));
+        assert!(!is_hls("https://cdn.example/episode.mp4?name=master.m3u8.bak"));
+        assert!(!is_hls("/local/source.mkv"));
     }
 
     fn source(root_name: &str) -> AnimeSource {
@@ -533,62 +559,6 @@ mod tests {
         assert!(matches!(err, DownloadError::FfmpegMissing), "got {err:?}");
     }
 
-    struct Clip(std::sync::Mutex<Vec<(String, String)>>);
-
-    impl Clipboard for Clip {
-        fn set_text(&self, label: &str, text: &str) -> Result<(), String> {
-            self.0.lock().unwrap().push((label.into(), text.into()));
-            Ok(())
-        }
-    }
-
-    /// T-24a-024, T-24a-025: with the option on and an endpoint set, the episode goes to aria2, the final-folder path is
-    /// copied with its label, nothing runs ffmpeg and nothing is finalised.
-    #[tokio::test]
-    async fn the_external_path_posts_to_aria2_copies_the_location_and_does_not_finalise() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let tmp = tempfile::tempdir().unwrap();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = format!("http://{}/jsonrpc", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut buf = vec![0u8; 8192];
-            let n = socket.read(&mut buf).await.unwrap();
-            let reply = r#"{"jsonrpc":"2.0","id":"kurobayomi","result":"gid1"}"#;
-            let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{reply}", reply.len());
-            socket.write_all(head.as_bytes()).await.unwrap();
-            String::from_utf8_lossy(&buf[..n]).into_owned()
-        });
-        let prefs = DownloadPrefs::new(kuro_prefs::store::PrefStore::in_memory());
-        prefs.use_external_downloader().set(true).unwrap();
-        prefs.external_downloader_selection().set(endpoint).unwrap();
-        let clipboard = Arc::new(Clip(Default::default()));
-        let (engine, _) = engine(tmp.path(), Path::new("/nonexistent/kuro-ffmpeg"), Path::new("/nonexistent/kuro-ffprobe"));
-        let engine = engine.with_external(ExternalHandoff::new(prefs, clipboard.clone()));
-
-        engine.run(download(1, "Episode 1"), CancellationToken::new()).await.unwrap();
-
-        let request = server.await.unwrap();
-        assert!(request.contains("aria2.addUri") && request.contains("/local/source.mkv"), "{request}");
-        let folder = anime_folder(tmp.path());
-        let copied = clipboard.0.lock().unwrap().clone();
-        assert_eq!(copied, vec![("Episode download location".to_owned(), folder.join("Episode 1").display().to_string())]);
-        assert!(!folder.join("Episode 1_tmp").exists(), "no staging folder");
-        assert!(!folder.join("Episode 1").exists(), "not finalised");
-    }
-
-    /// The option is off by default, and on without an endpoint it is still off.
-    #[test]
-    fn the_handoff_needs_the_option_and_an_endpoint() {
-        let prefs = DownloadPrefs::new(kuro_prefs::store::PrefStore::in_memory());
-        let handoff = ExternalHandoff::new(prefs.clone(), Arc::new(Clip(Default::default())));
-        assert_eq!(handoff.endpoint(), None, "off by default");
-        prefs.use_external_downloader().set(true).unwrap();
-        assert_eq!(handoff.endpoint(), None, "no endpoint");
-        prefs.external_downloader_selection().set(" http://127.0.0.1:6800/jsonrpc ".to_owned()).unwrap();
-        assert_eq!(handoff.endpoint().as_deref(), Some("http://127.0.0.1:6800/jsonrpc"));
-    }
-
     #[tokio::test(start_paused = true)]
     async fn no_video_from_the_hoster_is_no_video() {
         let tmp = tempfile::tempdir().unwrap();
@@ -656,6 +626,7 @@ mod tests {
                 settings: Default::default(),
                 restored,
                 index: AnimeIndex::open(root, &root.join("cache")),
+                max_active: Arc::new(|| crate::anime::manager::ANIME_MAX_ACTIVE_SOURCES),
             })
         }
 

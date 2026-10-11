@@ -1,39 +1,18 @@
 # index	key	namespace	rust_field	kind	default
-# rows 82 to 85 (the chapter and episode swipe actions) are dropped: see DROPPED_KEYS in registry.rs
+# the settings diet kept 23 rows; the cut keys are in DROPPED_KEYS in registry.rs (the chapter and episode swipe actions were dropped earlier)
 1	pref_display_mode_library	normal	display_mode	str	COMPACT_GRID
 2	library_sorting_mode	normal	manga_sorting_mode	str	ALPHABETICAL,ASCENDING
 3	animelib_sorting_mode	normal	anime_sorting_mode	str	ALPHABETICAL,ASCENDING
 4	library_update_last_timestamp	app-state	last_updated_timestamp	long	0
 5	pref_library_update_interval_key	normal	auto_update_interval	int	0
-6	library_update_restriction	normal	auto_update_device_restrictions	set	
-7	library_update_manga_restriction	normal	auto_update_item_restrictions	set	manga_fully_read,manga_ongoing,manga_started,manga_outside_release_period
-8	auto_update_metadata	normal	auto_update_metadata	bool	false
-9	display_continue_reading_button	normal	show_continue_viewing_button	bool	false
-10	display_category_tabs	normal	category_tabs	bool	true
-11	display_number_of_items	normal	category_number_of_items	bool	false
-12	categorized_display	normal	categorized_display_settings	bool	false
-13	hidden_categories	normal	hide_hidden_categories_settings	bool	false
-14	pref_filter_library_interval_custom	normal	filter_interval_custom	str	DISABLED
 15	display_download_badge	normal	download_badge	bool	false
 16	display_unread_badge	normal	unread_badge	bool	true
-17	display_local_badge	normal	local_badge	bool	true
-18	display_language_badge	normal	language_badge	bool	false
-19	library_show_updates_count	normal	new_show_updates_count	bool	true
-20	auto_clear_chapter_cache	normal	auto_clear_item_cache	bool	false
-21	library_random_anime_sort_seed	normal	random_anime_sort_seed	int	0
-22	library_random_manga_sort_seed	normal	random_manga_sort_seed	int	0
-23	pref_animelib_columns_portrait_key	normal	anime_portrait_columns	int	0
-24	pref_library_columns_portrait_key	normal	manga_portrait_columns	int	0
 25	pref_animelib_columns_landscape_key	normal	anime_landscape_columns	int	0
 26	pref_library_columns_landscape_key	normal	manga_landscape_columns	int	0
 27	pref_filter_animelib_downloaded_v2	normal	filter_downloaded_anime	str	DISABLED
 28	pref_filter_library_downloaded_v2	normal	filter_downloaded_manga	str	DISABLED
 29	pref_filter_animelib_unread_v2	normal	filter_unseen	str	DISABLED
 30	pref_filter_library_unread_v2	normal	filter_unread	str	DISABLED
-31	pref_filter_animelib_started_v2	normal	filter_started_anime	str	DISABLED
-32	pref_filter_library_started_v2	normal	filter_started_manga	str	DISABLED
-33	pref_filter_animelib_bookmarked_v2	normal	filter_bookmarked_anime	str	DISABLED
-34	pref_filter_library_bookmarked_v2	normal	filter_bookmarked_manga	str	DISABLED
 35	pref_filter_animelib_completed_v2	normal	filter_completed_anime	str	DISABLED
 36	pref_filter_library_completed_v2	normal	filter_completed_manga	str	DISABLED
 37	pref_filter_animelib_tracked_{id}_v2	normal	filter_tracked_anime	str	DISABLED
@@ -44,42 +23,3 @@
 42	default_category	normal	default_manga_category	int	-1
 43	last_used_anime_category	app-state	last_used_anime_category	int	0
 44	last_used_category	app-state	last_used_manga_category	int	0
-45	animelib_update_categories	normal	anime_update_categories	set	
-46	library_update_categories	normal	manga_update_categories	set	
-47	animelib_update_categories_exclude	normal	anime_update_categories_exclude	set	
-48	library_update_categories_exclude	normal	manga_update_categories_exclude	set	
-49	default_episode_filter_by_seen	normal	filter_episode_by_seen	long	0
-50	default_chapter_filter_by_read	normal	filter_chapter_by_read	long	0
-51	default_episode_filter_by_downloaded	normal	filter_episode_by_downloaded	long	0
-52	default_chapter_filter_by_downloaded	normal	filter_chapter_by_downloaded	long	0
-53	default_episode_filter_by_bookmarked	normal	filter_episode_by_bookmarked	long	0
-54	default_chapter_filter_by_bookmarked	normal	filter_chapter_by_bookmarked	long	0
-55	default_episode_filter_by_fillermarked	normal	filter_episode_by_fillermarked	long	0
-56	default_episode_sort_by_source_or_number	normal	sort_episode_by_source_or_number	long	0
-57	default_chapter_sort_by_source_or_number	normal	sort_chapter_by_source_or_number	long	0
-58	default_chapter_display_by_name_or_number	normal	display_episode_by_name_or_number	long	0
-59	default_chapter_display_by_name_or_number	normal	display_chapter_by_name_or_number	long	0
-60	default_chapter_sort_by_ascending_or_descending	normal	sort_episode_by_ascending_or_descending	long	0
-61	default_chapter_sort_by_ascending_or_descending	normal	sort_chapter_by_ascending_or_descending	long	0
-62	default_episode_show_thumbnail_previews	normal	show_episode_thumbnail_previews	long	0
-63	default_episode_show_summaries	normal	show_episode_summaries	long	0
-64	default_season_filter_by_downloaded	normal	filter_season_by_download	long	0
-65	default_season_filter_by_unseen	normal	filter_season_by_unseen	long	0
-66	default_season_filter_by_started	normal	filter_season_by_started	long	0
-67	default_season_filter_by_completed	normal	filter_season_by_completed	long	0
-68	default_season_filter_by_bookmarked	normal	filter_season_by_bookmarked	long	0
-69	default_season_filter_by_fillermarked	normal	filter_season_by_fillermarked	long	0
-70	default_season_sort_by_source_or_number	normal	sort_season_by_source_or_number	long	0
-71	default_season_sort_by_ascending_or_descending	normal	sort_season_by_ascending_or_descending	long	0
-72	default_season_grid_display_mode	normal	season_display_grid_mode	long	0
-73	default_season_grid_display_size	normal	season_display_grid_size	int	0
-74	default_season_download_overlay	normal	season_download_overlay	bool	false
-75	default_season_unseen_overlay	normal	season_unseen_overlay	bool	true
-76	default_season_local_overlay	normal	season_local_overlay	bool	true
-77	default_season_lang_overlay	normal	season_lang_overlay	bool	false
-78	default_season_continue_overlay	normal	season_continue_overlay	bool	true
-79	default_season_display_mode	normal	season_display_mode	long	0
-80	pref_update_season_on_refresh	normal	update_season_on_refresh	bool	false
-81	pref_update_season_on_library_update	normal	update_season_on_library_update	bool	false
-86	mark_duplicate_read_chapter_read	normal	mark_duplicate_read_chapter_as_read	set	
-87	mark_duplicate_seen_episode_seen	normal	mark_duplicate_seen_episode_as_seen	set	

@@ -1,5 +1,5 @@
-//! Theme mode (task T-47a-011), the start screen (T-48a-005) and the app lock rows (moved here from the cut Security
-//! and privacy page). The App theme strip is cut with the palettes (settings diet).
+//! Theme mode (task T-47a-011) and the start screen (T-48a-005). The App theme strip and the app lock are cut (settings
+//! diet).
 //!
 //! Theme mode changes the look through one path, `theme::apply` (`update_settings`, `picker::change_settings_in`): the
 //! window marks and the GTK dark preference are set together, with no restart.
@@ -10,7 +10,6 @@ use kuro_prefs::ui::StartScreen;
 
 use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::pref_model::widgets::theme_mode;
-use crate::settings_ui::app_lock;
 use crate::settings_ui::rows::{enum_choice, group, REQUIRES_RESTART};
 
 /// The Theme mode row: System, Light and Dark as linked toggle buttons (`widgets::theme_mode`). A click stores the
@@ -80,14 +79,7 @@ pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     vec![
         group("Theme", vec![theme_mode_row(prefs)]),
         group("Display", vec![start_screen_row(prefs)]),
-        group("App lock", app_lock::rows(prefs)),
     ]
-}
-
-/// What the Appearance page depends on besides the stored values: whether the app lock is on, which enables the lock
-/// delay. The page is rebuilt when it changes.
-pub fn rule_state(prefs: &Prefs) -> bool {
-    prefs.security.use_authenticator.get()
 }
 
 #[cfg(test)]
@@ -115,21 +107,6 @@ mod tests {
     }
 
     #[test]
-    fn the_app_lock_group_holds_the_lock_switch_and_the_delay() {
-        let prefs = Prefs::in_memory();
-        assert_eq!(titles_of(&page_rows(&prefs), "App lock"), [app_lock::REQUIRE_UNLOCK_TITLE, app_lock::LOCK_WHEN_IDLE_TITLE]);
-    }
-
-    #[test]
-    fn the_page_rule_state_follows_the_app_lock_switch() {
-        let prefs = Prefs::in_memory();
-        let before = rule_state(&prefs);
-        prefs.security.use_authenticator.set(true).unwrap();
-        assert_ne!(before, rule_state(&prefs));
-    }
-
-    // T-47a-011: with the merged spec page, Theme mode (a spec chip, which the spec converter skips) shows in its group.
-    #[test]
     fn the_merged_page_shows_the_mode_in_the_theme_group() {
         let prefs = Prefs::in_memory();
         prefs.ui.theme_mode.set(ThemeMode::DARK).unwrap();
@@ -141,8 +118,6 @@ mod tests {
             crate::settings_ui::browse::RepoCounts::default(),
         );
         assert_eq!(titles_of(&tree, "Theme"), ["Theme mode"]);
-        // lock-when-idle is insensitive while the lock is off, and the merge drops a disabled typed row
-        assert_eq!(titles_of(&tree, "App lock"), [app_lock::REQUIRE_UNLOCK_TITLE]);
     }
 
     #[test]
@@ -178,7 +153,7 @@ mod tests {
                     g.title.as_deref() == Some(group) && g.items.iter().any(|i| crate::pref_model::spec_convert::item_title(i) == title)
                 })
             };
-            assert!(has("Display", "Start Screen") && has("App lock", app_lock::REQUIRE_UNLOCK_TITLE));
+            assert!(has("Display", "Start Screen"));
         });
     }
 

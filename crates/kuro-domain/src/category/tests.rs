@@ -4,11 +4,12 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use kuro_prefs::category::{CategoryKind, random_sort_seed};
 use kuro_prefs::library::{LibraryPrefs, SortSetting};
 use kuro_prefs::store::PrefStore;
 
 use super::model::CategoryUpdate;
-use super::service::{CategoryService, categorized_display_changed, set_display_mode};
+use super::service::{CategoryService, set_display_mode};
 use crate::SYSTEM_CATEGORY_ID;
 use crate::error::DomainError;
 use crate::kind::EntryKind;
@@ -149,16 +150,19 @@ async fn delete_renumbers_every_category_and_cleans_the_preference_sets() {
     let b = svc.create("B").await.unwrap();
     let c = svc.create("C").await.unwrap();
     let ids = |v: &[i64]| v.iter().map(|i| i.to_string()).collect::<BTreeSet<String>>();
-    prefs.manga_update_categories.set(ids(&[a.id, c.id]));
-    prefs.manga_update_categories_exclude.set(ids(&[a.id, b.id]));
+    let set_of = |key: &'static str| prefs.store().pref::<BTreeSet<String>>(key, BTreeSet::new());
+    let update = set_of("library_update_categories");
+    let update_exclude = set_of("library_update_categories_exclude");
+    update.set(ids(&[a.id, c.id]));
+    update_exclude.set(ids(&[a.id, b.id]));
     prefs.default_manga_category.set(a.id as i32);
     let download_new = prefs.store().pref::<BTreeSet<String>>("download_new_categories", BTreeSet::new());
     download_new.set(ids(&[a.id]));
     svc.delete(a.id).await.unwrap();
     assert_eq!(user_ids(&svc), vec![b.id, c.id]);
     assert_eq!(names(&svc).iter().map(|(_, _, o)| *o).collect::<Vec<_>>(), vec![0, 1, 2], "system row takes index 0");
-    assert_eq!(prefs.manga_update_categories.get(), ids(&[c.id]));
-    assert_eq!(prefs.manga_update_categories_exclude.get(), ids(&[b.id]));
+    assert_eq!(update.get(), ids(&[c.id]));
+    assert_eq!(update_exclude.get(), ids(&[b.id]));
     assert_eq!(download_new.get(), BTreeSet::new());
     assert_eq!(prefs.default_manga_category.get(), -1, "the default named the deleted category");
     assert!(matches!(svc.delete(SYSTEM_CATEGORY_ID).await, Err(DomainError::SystemCategory)));
@@ -198,19 +202,6 @@ async fn set_entry_categories_drops_default_unknown_and_duplicate_ids() {
 }
 
 #[tokio::test]
-async fn sort_mode_with_categorized_display_touches_only_the_active_category() {
-    let (_d, svc, prefs) = service(EntryKind::Manga);
-    let a = svc.create("A").await.unwrap();
-    let b = svc.create("B").await.unwrap();
-    prefs.categorized_display_settings.set(true);
-    let sort = LibrarySort { ty: SortType::DateAdded, dir: Direction::Descending };
-    svc.set_sort_mode(Some(a.id), sort, || 1).await.unwrap();
-    assert_eq!(svc.repo().get(a.id).unwrap().unwrap().flags, sort.apply_to(a.flags));
-    assert_eq!(svc.repo().get(b.id).unwrap().unwrap().flags, b.flags);
-    assert_eq!(prefs.manga_sorting_mode.get().0, "ALPHABETICAL,ASCENDING", "global sort untouched");
-}
-
-#[tokio::test]
 async fn global_sort_writes_every_category_and_random_draws_one_seed_per_call() {
     let (_d, svc, prefs) = service(EntryKind::Anime);
     svc.create("A").await.unwrap();
@@ -230,24 +221,24 @@ async fn global_sort_writes_every_category_and_random_draws_one_seed_per_call() 
     .await
     .unwrap();
     assert_eq!(draws, 2, "one draw per call, also when Random was already selected");
-    assert_eq!(prefs.random_anime_sort_seed.get(), 4243);
+    assert_eq!(random_sort_seed(CategoryKind::Anime), 4243);
     assert_eq!(prefs.anime_sorting_mode.get().0, "RANDOM,ASCENDING");
     let flags: Vec<i64> = svc.repo().all().unwrap().iter().map(|c| c.flags).collect();
     assert!(flags.iter().all(|f| *f == random.flag()));
 }
 
 #[tokio::test]
-async fn reset_writes_the_global_sort_to_every_category_and_switching_off_resets_both_kinds() {
+async fn reset_writes_the_global_sort_to_every_category() {
     let (_d, manga, prefs) = service(EntryKind::Manga);
     let (_d2, anime, prefs2) = service(EntryKind::Anime);
     manga.create("M").await.unwrap();
     anime.create("A").await.unwrap();
     prefs.manga_sorting_mode.set(SortSetting("DATE_ADDED,DESCENDING".into()));
     prefs2.anime_sorting_mode.set(SortSetting("LAST_SEEN,ASCENDING".into()));
-    categorized_display_changed(&manga, &anime, false).await.unwrap();
+    manga.reset_category_flags().await.unwrap();
+    anime.reset_category_flags().await.unwrap();
     assert!(manga.repo().all().unwrap().iter().all(|c| c.flags == LibrarySort { ty: SortType::DateAdded, dir: Direction::Descending }.flag()));
     assert!(anime.repo().all().unwrap().iter().all(|c| c.flags == LibrarySort { ty: SortType::LastActivity, dir: Direction::Ascending }.flag()));
-    categorized_display_changed(&manga, &anime, true).await.unwrap();
 }
 
 #[test]

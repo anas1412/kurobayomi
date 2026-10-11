@@ -6,7 +6,6 @@ pub mod delete_rules;
 pub mod downloader;
 pub mod enqueue;
 pub mod ffmpeg;
-pub mod handoff;
 pub mod layout;
 pub mod lifecycle;
 pub mod local_server;

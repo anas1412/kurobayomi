@@ -114,7 +114,6 @@ impl ReleaseHttp for Http {
 
 /// The forced check, off the UI thread: `done` runs on the main context with the result.
 fn run_check(done: impl FnOnce(Result<Outcome, ReleaseError>) + 'static) {
-    let base = crate::data::app().base.clone();
     let (tx, rx) = async_channel::bounded(1);
     std::thread::spawn(move || {
         let result = reqwest::blocking::Client::builder()
@@ -124,7 +123,7 @@ fn run_check(done: impl FnOnce(Result<Outcome, ReleaseError>) + 'static) {
             .map_err(|e| ReleaseError::Transport(e.to_string()))
             .and_then(|http| {
                 let service = GithubReleases::new(http, std::env::consts::ARCH);
-                app_update::check(&service, app_update::UPDATE_REPOSITORY, env!("CARGO_PKG_VERSION"), &base, chrono::Utc::now().timestamp_millis(), true)
+                app_update::check(&service, app_update::UPDATE_REPOSITORY, env!("CARGO_PKG_VERSION"), chrono::Utc::now().timestamp_millis(), true)
             });
         let _ = tx.send_blocking(result);
     });

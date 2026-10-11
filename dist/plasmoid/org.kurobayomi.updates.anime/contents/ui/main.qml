@@ -16,11 +16,10 @@ PlasmoidItem {
     readonly property string kind: Plasmoid.pluginName.indexOf(".anime") >= 0 ? "anime" : "manga"
 
     property var items: []
-    property bool locked: false
     property bool loaded: false
     property bool failed: false
     property string errorLine: ""
-    readonly property bool empty: loaded && !failed && !locked && items.length === 0
+    readonly property bool empty: loaded && !failed && items.length === 0
 
     readonly property var size: Grid.rowsCols(width, height, 0, 0)
     property int requestedRows: size.rows
@@ -80,9 +79,7 @@ PlasmoidItem {
             }
             try {
                 var payload = JSON.parse(stdout)
-                // a locked payload clears the model, so no earlier unlocked item survives
-                root.items = payload.locked ? [] : payload.items
-                root.locked = payload.locked
+                root.items = payload.items
                 root.failed = false
                 root.loaded = true
             } catch (e) {
@@ -153,27 +150,10 @@ PlasmoidItem {
             hoverEnabled: true
         }
 
-        // locked: the same text as the app; a click raises the app, whose own lock then applies
-        MouseArea {
-            anchors.fill: parent
-            visible: root.locked
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.run("kurobayomi")
-
-            QQC2.Label {
-                anchors.centerIn: parent
-                width: parent.width - Kirigami.Units.largeSpacing * 2
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                color: Kirigami.Theme.textColor
-                text: i18nd("kurobayomi", "Widget not available when app lock is enabled")
-            }
-        }
-
         // the grid is centred, and so is a short last row
         Column {
             anchors.centerIn: parent
-            visible: !root.locked && !root.failed && root.items.length > 0
+            visible: !root.failed && root.items.length > 0
 
             Repeater {
                 model: Grid.chunk(root.items, root.requestedCols)

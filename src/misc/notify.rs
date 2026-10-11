@@ -192,6 +192,24 @@ pub fn warning_post(kind: EntryKind) -> Post {
     }
 }
 
+/// The summary notice of one update pass: the new items of its entries, as the summary text gives them (T-26a-032).
+/// The titles follow the summary, so hidden content adds no list.
+pub fn summary_post(kind: EntryKind, summary: &text::SummaryText) -> Post {
+    let body = match &summary.big_text {
+        Some(titles) => format!("{}\n{titles}", summary.text),
+        None => summary.text.clone(),
+    };
+    Post {
+        id: ids::library_summary(kind),
+        title: summary.title.to_owned(),
+        body: Some(body),
+        low_priority: false,
+        timeout: None,
+        tap: None,
+        buttons: Vec::new(),
+    }
+}
+
 /// One step for the main thread, applied in the order it was sent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
@@ -446,6 +464,17 @@ pub fn attach() {
 mod tests {
     use super::*;
     use crate::library_update::source::SourceItem;
+
+    #[test]
+    fn the_summary_notice_lists_its_titles_only_when_content_shows() {
+        // T-26a-032: one desktop notice per pass, with the titles unless the content is hidden
+        let titles = vec!["A".to_owned(), "B".to_owned()];
+        let shown = summary_post(EntryKind::Manga, &text::summary(EntryKind::Manga, &titles, false));
+        assert_eq!((shown.title.as_str(), shown.body.as_deref()), ("New chapters found", Some("For 2 entries\nA\nB")));
+        let hidden = summary_post(EntryKind::Manga, &text::summary(EntryKind::Manga, &titles, true));
+        assert_eq!(hidden.body.as_deref(), Some("For 2 entries"));
+        assert_eq!(hidden.id, ids::library_summary(EntryKind::Manga));
+    }
 
     fn update(items: &[(f64, i64)]) -> EntryUpdate {
         EntryUpdate {

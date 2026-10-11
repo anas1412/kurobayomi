@@ -14,6 +14,7 @@ pub const SAVE_IMAGE: &str = "save-image";
 pub const LIBRARY_PROGRESS: &str = "library.progress";
 pub const LIBRARY_ERROR: &str = "library.error";
 pub const LIBRARY_SIZE_WARNING: &str = "library.size-warning";
+pub const LIBRARY_SUMMARY: &str = "library.summary";
 pub const DOWNLOAD_MANGA_PROGRESS: &str = "download.manga.progress";
 pub const DOWNLOAD_MANGA_ERROR: &str = "download.manga.error";
 pub const DOWNLOAD_ANIME_PROGRESS: &str = "download.anime.progress";
@@ -41,6 +42,7 @@ pub const ALL_IDS: &[&str] = &[
     LIBRARY_PROGRESS,
     LIBRARY_ERROR,
     LIBRARY_SIZE_WARNING,
+    LIBRARY_SUMMARY,
     DOWNLOAD_MANGA_PROGRESS,
     DOWNLOAD_MANGA_ERROR,
     DOWNLOAD_ANIME_PROGRESS,
@@ -92,6 +94,7 @@ impl Category {
             APP_UPDATE_PROGRESS | APP_UPDATE_INSTALL | APP_UPDATE_ERROR => Self::AppUpdate,
             LIBRARY_PROGRESS => Self::LibraryProgress,
             LIBRARY_ERROR | LIBRARY_SIZE_WARNING => Self::LibraryErrors,
+            LIBRARY_SUMMARY => Self::NewChapters,
             NEW_CHAPTERS | NEW_EPISODES => Self::NewChapters,
             DOWNLOAD_MANGA_PROGRESS | DOWNLOAD_ANIME_PROGRESS => Self::DownloadProgress,
             DOWNLOAD_MANGA_ERROR | DOWNLOAD_ANIME_ERROR => Self::DownloadErrors,
@@ -140,6 +143,11 @@ pub fn library_size_warning(kind: EntryKind) -> String {
     format!("{LIBRARY_SIZE_WARNING}:{}", kind_tag(kind))
 }
 
+/// The slot of the summary notice of one update pass: the new items of all its entries.
+pub fn library_summary(kind: EntryKind) -> String {
+    format!("{LIBRARY_SUMMARY}:{}", kind_tag(kind))
+}
+
 /// The slot of the progress notice of one update pass (T-26a-054 shares it with the update passes).
 pub fn library_progress(kind: EntryKind) -> String {
     format!("{LIBRARY_PROGRESS}:{}", kind_tag(kind))
@@ -151,11 +159,11 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
-    fn the_registry_has_22_ids_and_no_duplicates() {
+    fn the_registry_has_23_ids_and_no_duplicates() {
         // T-35a-005
         let unique: BTreeSet<&str> = ALL_IDS.iter().copied().collect();
         assert_eq!(unique.len(), ALL_IDS.len(), "no duplicate id");
-        assert_eq!(ALL_IDS.len(), 22);
+        assert_eq!(ALL_IDS.len(), 23);
     }
 
     #[test]

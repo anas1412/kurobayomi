@@ -37,8 +37,8 @@ const LAST_AUTO_KEY: &str = "__APP_STATE_last_auto_backup_timestamp";
 pub(crate) const ENABLED_AT_KEY: &str = "__APP_STATE_backup_enabled_at";
 const STORAGE_DIR_KEY: &str = "__APP_STATE_storage_dir";
 
-/// No source is installed and no tracker is signed in until the extension and tracker areas register theirs, so a check
-/// lists every source and tracker of a file as missing and a backup names no stub.
+/// No tracker is signed in until the tracker area registers its own, so a check lists every tracker of a file as missing.
+/// Its source side is not used by the app: backups and checks read sources through `LiveRegistry`.
 pub struct NothingInstalled;
 
 impl SourceRegistry for NothingInstalled {

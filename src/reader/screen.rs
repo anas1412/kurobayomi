@@ -1423,7 +1423,9 @@ fn open_overflow(screen: &Rc<Screen>, index: usize) {
     if item == Some(strings::SET_AS_COVER) {
         match screen.core.visible_page() {
             Some(page) => set_cover(screen, &page),
-            None => screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short),
+            None => {
+                screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
+            }
         }
         return;
     }

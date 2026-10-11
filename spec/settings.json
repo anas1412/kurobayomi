@@ -9,7 +9,7 @@
   {
    "id": "settings_library",
    "title": "Library",
-   "subtitle": "Categories, global update, chapter/episode behavior",
+   "subtitle": "Categories, global update",
    "icon": "view-grid-symbolic"
   },
   {
@@ -124,29 +124,6 @@
        "default": "Anime"
       }
      ]
-    },
-    {
-     "title": "App lock",
-     "items": [
-      {
-       "type": "switch",
-       "title": "Require unlock",
-       "default": false
-      },
-      {
-       "type": "list",
-       "title": "Lock when idle",
-       "options": [
-        "Always",
-        "After 1 minute",
-        "After 2 minutes",
-        "After 5 minutes",
-        "After 10 minutes",
-        "Never"
-       ],
-       "default": "Always"
-      }
-     ]
     }
    ],
    "sheets": [],
@@ -206,11 +183,6 @@
         "Always ask"
        ],
        "default": "Always ask"
-      },
-      {
-       "type": "switch",
-       "title": "Hide hidden categories from categories and storage screen",
-       "default": false
       }
      ]
     },
@@ -229,83 +201,13 @@
         "Weekly"
        ],
        "default": "Off"
-      },
-      {
-       "type": "action",
-       "title": "Anime Categories",
-       "subtitle": "Include: All\nExclude: None"
-      },
-      {
-       "type": "action",
-       "title": "Manga Categories",
-       "subtitle": "Include: All\nExclude: None"
-      },
-      {
-       "type": "switch",
-       "title": "Automatically refresh metadata",
-       "subtitle": "Check for new cover and details when updating library",
-       "default": false
-      },
-      {
-       "type": "switch",
-       "title": "Show unseen/unread count on Updates icon",
-       "default": true
-      }
-     ]
-    },
-    {
-     "title": "Episode behavior",
-     "items": [
-      {
-       "type": "multi",
-       "title": "Mark duplicate seen episode as seen",
-       "options": [
-        "After watching an episode",
-        "After fetching new episode"
-       ],
-       "default": []
-      }
-     ]
-    },
-    {
-     "title": "Chapter behavior",
-     "items": [
-      {
-       "type": "multi",
-       "title": "Mark duplicate read chapter as read",
-       "options": [
-        "After reading a chapter",
-        "After fetching new chapter"
-       ],
-       "default": []
       }
      ]
     }
    ],
    "sheets": [],
-   "dialogs": [
-    {
-     "id": "anime_update_categories",
-     "title": "Anime Categories",
-     "text": "Anime in excluded categories will not be updated even if they are also in included categories.",
-     "groups": [],
-     "buttons": [
-      "Cancel",
-      "OK"
-     ]
-    },
-    {
-     "id": "manga_update_categories",
-     "title": "Manga Categories",
-     "text": "Manga in excluded categories will not be updated even if they are also in included categories.",
-     "groups": [],
-     "buttons": [
-      "Cancel",
-      "OK"
-     ]
-    }
-   ],
-   "notes": "Edit categories rows open the Categories screen (anime / manga tab) outside settings. Default category list options are \"Always ask\" followed by every user category. Update restriction is disabled when interval is Never. The Anime/Manga categories rows open a tri-state checklist dialog (one row per category: unchecked / include check / exclude cross); subtitle summarises \"Include: ...\\nExclude: ...\"."
+   "dialogs": [],
+   "notes": "Edit categories rows open the Categories screen (anime / manga tab) outside settings. Default category list options are \"Always ask\" followed by every user category."
   },
   {
    "id": "settings_reader",
@@ -714,7 +616,7 @@
      "items": [
       {
        "type": "list",
-       "title": "Maximum downloads",
+       "title": "Maximum anime downloads",
        "options": [
         "1",
         "2",
@@ -1109,11 +1011,6 @@
        "type": "action",
        "title": "Clear chapter and episode cache",
        "subtitle": "Used: 0 B"
-      },
-      {
-       "type": "switch",
-       "title": "Clear episode/chapter cache on app launch",
-       "default": false
       }
      ]
     },

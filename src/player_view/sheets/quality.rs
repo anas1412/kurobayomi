@@ -238,7 +238,7 @@ fn switch(shared: &Shared, source: Arc<dyn AnimeSource>, pick: Pick, video: Vide
     };
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         shared.borrow_mut().resolving = false;
-        done(Err(tr(MsgKey::player_hoster_failed)));
+        crate::toast::notify(tr(MsgKey::player_hoster_failed));
         return;
     };
     let (tx, rx) = async_channel::bounded(1);
@@ -274,7 +274,7 @@ fn reload(shared: &Shared, media: Media) {
     player.media = media;
     if let Err(e) = player.playback.load(&player.media.target, player.media.headers.as_deref(), start) {
         tracing::error!(error = %e, "player: the chosen quality could not load");
-        done(Err(tr(MsgKey::player_hoster_failed)));
+        crate::toast::notify(tr(MsgKey::player_hoster_failed));
         return;
     }
     if let Err(e) = player.playback.mpv().set_property_flag("pause", paused) {

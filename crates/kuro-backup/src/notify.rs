@@ -269,12 +269,9 @@ mod tests {
     }
 
     #[test]
-    fn the_hide_preference_defaults_off_and_hides_the_restore_title_when_on() {
-        let prefs = kuro_prefs::security::SecurityPrefs::new(kuro_prefs::store::PrefStore::in_memory());
-        assert!(!prefs.hide_notification_content.get(), "default off");
-        assert!(restore_progress("One Piece", 1, 2, false, prefs.hide_notification_content.get()).body.is_some());
-        prefs.hide_notification_content.set(true).unwrap();
-        assert_eq!(restore_progress("One Piece", 1, 2, false, prefs.hide_notification_content.get()).body, None);
+    fn hide_content_is_cut_by_the_settings_diet_and_hides_the_restore_title_when_true() {
+        assert!(restore_progress("One Piece", 1, 2, false, false).body.is_some(), "the default is off");
+        assert_eq!(restore_progress("One Piece", 1, 2, false, true).body, None);
     }
 
     #[test]

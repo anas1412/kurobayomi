@@ -351,7 +351,6 @@ fn deps(kind: EntryKind) -> Deps {
     let app = crate::data::app();
     let db = app.db(kind);
     let store = app.base.store().clone();
-    let player = kuro_prefs::player::PlayerPrefs::new(store.clone());
     let prefs = Rc::new(LibraryPrefs::new(store.clone()));
     let categories = Rc::new(kuro_domain::category::service::CategoryService::new(
         db.clone(),
@@ -383,7 +382,7 @@ fn deps(kind: EntryKind) -> Deps {
         downloaded_only: Rc::new(move || downloaded_only.get()),
         logged_in: Rc::new(move || ids_logins.get()),
         tracker_names: Rc::new(move || trackers::names(kind, &names_logins.get())),
-        always_external: Rc::new(move || player.always_use_external_player.get()),
+        always_external: Rc::new(|| crate::misc::diet_defaults::PLAYER_ALWAYS_EXTERNAL),
         item_downloaded,
     }
 }

@@ -1,9 +1,8 @@
-//! Player settings. The root page holds the kept settings (the subtitle and audio languages, the default volume, autoplay,
-//! the external player and the mini player) and the links to the pages that stay: Custom buttons, Script editor and
+//! Player settings. The root page holds the kept settings (the subtitle and audio languages, the default volume, autoplay
+//! and the mini player) and the links to the pages that stay: Custom buttons, Script editor and
 //! Torrent. The Internal player, Gestures, Decoder, Subtitles, Audio and Advanced pages are cut by the settings diet.
 pub mod conf_edit;
 pub mod controls;
-pub mod external;
 pub mod files;
 pub mod highlight;
 pub mod language;

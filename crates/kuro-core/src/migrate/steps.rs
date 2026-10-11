@@ -96,7 +96,8 @@ pub fn setup_library_update(
         name: media.job_name(),
         interval: hours(interval),
         flex: FLEX,
-        constraints: library_update_constraints(&prefs.auto_update_device_restrictions.get()),
+        // the settings diet cut `library_update_restriction`: no device restriction, only the low-battery rule
+        constraints: library_update_constraints(&BTreeSet::new()),
         backoff: Backoff::Linear(BACKOFF_BASE),
     });
 }
@@ -178,11 +179,6 @@ mod tests {
         store.pref(key, 0i32).set(value).unwrap();
     }
 
-    fn set_restrictions(store: &PrefStore, items: &[&str]) {
-        let prefs = LibraryPrefs::new(store.clone());
-        prefs.auto_update_device_restrictions.set(items.iter().map(|s| (*s).to_owned()).collect()).unwrap();
-    }
-
     #[test]
     fn backup_interval_twelve_registers_one_job_named_backup_creator() {
         let store = PrefStore::in_memory();
@@ -229,17 +225,16 @@ mod tests {
     }
 
     #[test]
-    fn manga_interval_six_with_wifi_gives_one_job_with_a_connected_constraint() {
+    fn manga_interval_six_gives_one_job_with_only_the_battery_constraint() {
         let store = PrefStore::in_memory();
         set_hours(&store, "pref_library_update_interval_key", 6);
-        set_restrictions(&store, &["wifi"]);
         let sched = InProcessScheduler::default();
         setup_library_update(Media::Manga, &store, &sched, None);
         let jobs = sched.snapshot();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].name, "LibraryUpdate");
         assert_eq!(jobs[0].spec.interval, Duration::from_secs(6 * 3600));
-        assert!(jobs[0].spec.constraints.requires_connected);
+        assert!(!jobs[0].spec.constraints.requires_connected, "a wired desktop must not be blocked");
         assert!(!jobs[0].spec.constraints.requires_unmetered && !jobs[0].spec.constraints.requires_ac);
         assert!(jobs[0].spec.constraints.battery_not_low);
         assert_eq!(jobs[0].spec.backoff, Backoff::Linear(Duration::from_secs(600)));

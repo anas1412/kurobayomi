@@ -65,6 +65,5 @@ pub mod library_catalogue;
 pub mod search_provider;
 pub mod transitions;
 #[allow(dead_code)]
-pub mod unlock;
 
 pub use host::Shell;

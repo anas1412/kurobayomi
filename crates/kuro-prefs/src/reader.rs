@@ -1,21 +1,13 @@
-//! `[reader]` preferences (Aniyomi `ReaderPreferences`) and the reader value tables (`ReadingMode`,
-//! tap zones, scale types, zoom starts and colour filter modes).
+//! `[reader]` preferences (Aniyomi `ReaderPreferences`) and the reader value tables (`ReadingMode`, scale types
+//! and zoom starts).
 //!
 //! The preference value for the reading mode is an `Int` code, so the typed enum here is a plain Rust
-//! type with `from_preference` for the stored number. Keys marked DROP in the registry (volume
-//! keys) are kept for backup round trips and have no UI. The screen orientation is dropped, see
-//! `registry::DROPPED_KEYS`; the orientation bits of a stored viewer word are left as they are.
+//! type with `from_preference` for the stored number. The screen orientation and the cut reader keys are
+//! dropped, see `registry::DROPPED_KEYS`; the orientation bits of a stored viewer word are left as they are.
 
 use crate::pref_enum;
 use crate::registry::define_prefs;
 
-/// Flash duration is stored in units of 100 ms (`pref_reader_flash_duration`).
-pub const MILLI_CONVERSION: i32 = 100;
-
-/// The webtoon side padding clamped to its UI range ([`crate::ranges::WEBTOON_SIDE_PADDING`]).
-pub fn clamp_webtoon_side_padding(value: i32) -> i32 {
-    crate::ranges::WEBTOON_SIDE_PADDING.clamped(i64::from(value)) as i32
-}
 
 pref_enum! {
     /// Flash colour of the page-change flash (`ReaderPreferences.FlashColor`).
@@ -27,6 +19,12 @@ pref_enum! {
     pub enum TappingInvertMode { NONE, HORIZONTAL, VERTICAL, BOTH }
 }
 
+pref_enum! {
+    /// Hide threshold of the reader overlay (`ReaderPreferences.ReaderHideThreshold`).
+    pub enum ReaderHideThreshold { HIGHEST, HIGH, LOW, LOWEST }
+}
+
+
 impl TappingInvertMode {
     pub const fn should_invert_horizontal(self) -> bool {
         matches!(self, Self::HORIZONTAL | Self::BOTH)
@@ -35,11 +33,6 @@ impl TappingInvertMode {
     pub const fn should_invert_vertical(self) -> bool {
         matches!(self, Self::VERTICAL | Self::BOTH)
     }
-}
-
-pref_enum! {
-    /// Hide threshold of the reader overlay (`ReaderPreferences.ReaderHideThreshold`).
-    pub enum ReaderHideThreshold { HIGHEST, HIGH, LOW, LOWEST }
 }
 
 impl ReaderHideThreshold {
@@ -52,6 +45,14 @@ impl ReaderHideThreshold {
             Self::LOWEST => 47,
         }
     }
+}
+
+/// Flash duration is stored in units of 100 ms (`pref_reader_flash_duration`).
+pub const MILLI_CONVERSION: i32 = 100;
+
+/// The webtoon side padding clamped to its UI range (0 to 25).
+pub fn clamp_webtoon_side_padding(value: i32) -> i32 {
+    value.clamp(0, 25)
 }
 
 /// `ReadingMode` (`ReadingMode.kt`). The flag value is the stored `pref_default_reading_mode_key` code;
@@ -122,17 +123,6 @@ impl ReadingMode {
     }
 }
 
-/// Tap-zone layouts offered in the reader settings, as string-resource keys in Kotlin order
-/// (`ReaderPreferences.TapZones`).
-pub const TAP_ZONES: [&str; 6] = [
-    "label_default",
-    "l_nav",
-    "kindlish_nav",
-    "edge_nav",
-    "right_and_left_nav",
-    "disabled_nav",
-];
-
 /// Image scale types (`ReaderPreferences.ImageScaleType`). The UI stores index plus one in `image_scale_type`.
 pub const IMAGE_SCALE_TYPE: [&str; 6] = [
     "scale_type_fit_screen",
@@ -151,82 +141,16 @@ pub const ZOOM_START: [&str; 4] = [
     "zoom_start_center",
 ];
 
-/// The blend mode a colour filter uses. The GTK side maps each to its compositing operator.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ColorFilterBlend {
-    SrcOver,
-    Modulate,
-    Screen,
-    Overlay,
-    Lighten,
-    Darken,
-}
-
-/// Colour filter modes in index order (`ReaderPreferences.ColorFilterMode`). All six are offered on Linux.
-pub const COLOR_FILTER_MODE: [(&str, ColorFilterBlend); 6] = [
-    ("label_default", ColorFilterBlend::SrcOver),
-    ("filter_mode_multiply", ColorFilterBlend::Modulate),
-    ("filter_mode_screen", ColorFilterBlend::Screen),
-    ("filter_mode_overlay", ColorFilterBlend::Overlay),
-    ("filter_mode_lighten", ColorFilterBlend::Lighten),
-    ("filter_mode_darken", ColorFilterBlend::Darken),
-];
-
 define_prefs! {
-    /// `[reader]` section: the 52 keys of Aniyomi `ReaderPreferences` that a desktop has.
+    /// `[reader]` section: the reader keys the settings diet kept (Reader page: reading mode, background, scale type,
+    /// zoom start, crop borders and split wide pages).
     pub struct ReaderPrefs in "reader" {
-        page_transitions: bool = "pref_enable_transitions_key" => true;
-        flash_on_page_change: bool = "pref_reader_flash" => false;
-        flash_duration_millis: i32 = "pref_reader_flash_duration" => 100;
-        flash_page_interval: i32 = "pref_reader_flash_interval" => 1;
-        flash_color: FlashColor = "pref_reader_flash_mode" => FlashColor::BLACK;
-        double_tap_anim_speed: i32 = "pref_double_tap_anim_speed" => 500;
-        show_page_number: bool = "pref_show_page_number_key" => true;
-        show_reading_mode: bool = "pref_show_reading_mode" => true;
-        fullscreen: bool = "fullscreen" => false;
-        keep_screen_on: bool = "pref_keep_screen_on_key" => true;
         default_reading_mode: i32 = "pref_default_reading_mode_key" => 1;
-        webtoon_double_tap_zoom_enabled: bool = "pref_enable_double_tap_zoom_webtoon" => true;
         image_scale_type: i32 = "pref_image_scale_type_key" => 1;
         zoom_start: i32 = "pref_zoom_start_key" => 1;
         reader_theme: i32 = "pref_reader_theme_key" => 1;
-        always_show_chapter_transition: bool = "always_show_chapter_transition" => true;
-        preserve_reading_position: bool = "pref_preserve_reading_position" => false;
         crop_borders: bool = "crop_borders" => false;
-        navigate_to_pan: bool = "navigate_pan" => true;
-        landscape_zoom: bool = "landscape_zoom" => true;
-        crop_borders_webtoon: bool = "crop_borders_webtoon" => false;
-        webtoon_side_padding: i32 = "webtoon_side_padding" => 0;
-        reader_hide_threshold: ReaderHideThreshold = "reader_hide_threshold" => ReaderHideThreshold::LOW;
-        folder_per_manga: bool = "create_folder_per_manga" => false;
-        skip_read: bool = "skip_read" => false;
-        skip_filtered: bool = "skip_filtered" => true;
-        skip_dupe: bool = "skip_dupe" => false;
-        webtoon_disable_zoom_out: bool = "webtoon_disable_zoom_out" => false;
         dual_page_split_paged: bool = "pref_dual_page_split" => false;
-        dual_page_invert_paged: bool = "pref_dual_page_invert" => false;
-        dual_page_split_webtoon: bool = "pref_dual_page_split_webtoon" => false;
-        dual_page_invert_webtoon: bool = "pref_dual_page_invert_webtoon" => false;
-        dual_page_rotate_to_fit: bool = "pref_dual_page_rotate" => false;
-        dual_page_rotate_to_fit_invert: bool = "pref_dual_page_rotate_invert" => false;
-        dual_page_rotate_to_fit_webtoon: bool = "pref_dual_page_rotate_webtoon" => false;
-        dual_page_rotate_to_fit_invert_webtoon: bool = "pref_dual_page_rotate_invert_webtoon" => false;
-        custom_brightness: bool = "pref_custom_brightness_key" => false;
-        custom_brightness_value: i32 = "custom_brightness_value" => 0;
-        color_filter: bool = "pref_color_filter_key" => false;
-        color_filter_value: i32 = "color_filter_value" => 0;
-        color_filter_mode: i32 = "color_filter_mode" => 0;
-        grayscale: bool = "pref_grayscale" => false;
-        inverted_colors: bool = "pref_inverted_colors" => false;
-        read_with_long_tap: bool = "reader_long_tap" => true;
-        read_with_volume_keys: bool = "reader_volume_keys" => false;
-        read_with_volume_keys_inverted: bool = "reader_volume_keys_inverted" => false;
-        navigation_mode_pager: i32 = "reader_navigation_mode_pager" => 0;
-        navigation_mode_webtoon: i32 = "reader_navigation_mode_webtoon" => 0;
-        pager_nav_inverted: TappingInvertMode = "reader_tapping_inverted" => TappingInvertMode::NONE;
-        webtoon_nav_inverted: TappingInvertMode = "reader_tapping_inverted_webtoon" => TappingInvertMode::NONE;
-        show_navigation_overlay_new_user: bool = "reader_navigation_overlay_new_user" => true;
-        show_navigation_overlay_on_start: bool = "reader_navigation_overlay_on_start" => false;
     }
 }
 
@@ -240,33 +164,17 @@ mod tests {
 
     #[test]
     fn the_section_holds_every_reader_row() {
-        assert_eq!(ReaderPrefs::FIELDS.len(), 52);
+        assert_eq!(ReaderPrefs::FIELDS.len(), 6);
         let reader = ReaderPrefs::new(PrefStore::in_memory());
         assert_section_registered(ReaderPrefs::TABLE, ReaderPrefs::FIELDS, &reader.defaults());
     }
 
     #[test]
-    fn plan_defaults_hold_on_an_empty_store() {
-        let r = ReaderPrefs::new(PrefStore::in_memory());
-        assert!(r.page_transitions.get());
-        assert_eq!(r.flash_duration_millis.get(), 100);
-        assert_eq!(r.double_tap_anim_speed.get(), 500);
-        assert_eq!(r.default_reading_mode.get(), 1);
-        assert_eq!(r.image_scale_type.get(), 1);
-        assert_eq!(r.zoom_start.get(), 1);
-        assert_eq!(r.reader_theme.get(), 1);
-        assert_eq!(r.webtoon_side_padding.get(), 0);
-        assert_eq!(r.reader_hide_threshold.get(), ReaderHideThreshold::LOW);
-        assert_eq!(r.flash_color.get(), FlashColor::BLACK);
-        assert_eq!(r.pager_nav_inverted.get(), TappingInvertMode::NONE);
-    }
-
-    #[test]
-    fn drop_keys_are_registered_for_round_trip() {
-        for key in ["reader_volume_keys", "reader_volume_keys_inverted"] {
-            assert!(lookup(key).is_some(), "{key}");
+    fn cut_reader_keys_are_dropped_not_registered() {
+        for key in ["reader_volume_keys", "reader_volume_keys_inverted", "pref_default_orientation_type_key"] {
+            assert!(lookup(key).is_none(), "{key}");
+            assert!(crate::registry::is_dropped(key), "{key}");
         }
-        assert!(lookup("pref_default_orientation_type_key").is_none(), "the orientation default is dropped");
     }
 
     #[test]
@@ -289,29 +197,6 @@ mod tests {
         assert_eq!(ReadingMode::Default.viewer_type(), Err(UnresolvedReadingMode));
         assert_eq!(ReadingMode::ContinuousVertical.viewer_type(), Ok(ViewerType::Webtoon));
         assert_eq!(READING_MODE_MASK, 0x7);
-    }
-
-    #[test]
-    fn value_tables_have_the_documented_lengths_and_order() {
-        assert_eq!(TAP_ZONES.len(), 6);
-        assert_eq!(TAP_ZONES[1], "l_nav");
-        assert_eq!(IMAGE_SCALE_TYPE.len(), 6);
-        assert_eq!(IMAGE_SCALE_TYPE[5], "scale_type_smart_fit");
-        assert_eq!(ZOOM_START.len(), 4);
-        assert_eq!(ZOOM_START[3], "zoom_start_center");
-        assert_eq!(COLOR_FILTER_MODE.len(), 6);
-        let blends: Vec<ColorFilterBlend> = COLOR_FILTER_MODE.iter().map(|(_, b)| *b).collect();
-        assert_eq!(
-            blends,
-            [
-                ColorFilterBlend::SrcOver,
-                ColorFilterBlend::Modulate,
-                ColorFilterBlend::Screen,
-                ColorFilterBlend::Overlay,
-                ColorFilterBlend::Lighten,
-                ColorFilterBlend::Darken,
-            ]
-        );
     }
 
     #[test]
@@ -347,6 +232,16 @@ mod tests {
             TappingInvertMode::decode(&PrefValue::Str("VERTICAL".into())),
             Decoded::Ok(TappingInvertMode::VERTICAL)
         );
-        assert!(REGISTRY.iter().any(|m| m.key == "reader_tapping_inverted_webtoon"));
+        assert!(!REGISTRY.iter().any(|m| m.key == "reader_tapping_inverted_webtoon"), "the tapping inversion was cut");
+        assert!(crate::registry::is_dropped("reader_tapping_inverted_webtoon"));
     }
+
+    #[test]
+    fn value_tables_have_the_documented_lengths_and_order() {
+        assert_eq!(IMAGE_SCALE_TYPE.len(), 6);
+        assert_eq!(IMAGE_SCALE_TYPE[5], "scale_type_smart_fit");
+        assert_eq!(ZOOM_START.len(), 4);
+        assert_eq!(ZOOM_START[3], "zoom_start_center");
+    }
+
 }

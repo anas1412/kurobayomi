@@ -365,8 +365,7 @@ mod tests {
         search.set_query(Some("one"));
         let plan = search.search().expect("first search");
         assert!(search.apply(plan.generation, 1, Ok(vec![item(10), item(11)])));
-        let next = search.set_filter(SourceFilter::All).expect("the chip searches again");
-        assert_eq!(ids(&next.sources), [3, 2], "GS-EC-03: only the newly selected C and B are fetched, A is not");
+        assert_eq!(search.set_filter(SourceFilter::All), None, "the Pinned chip is cut: every source was already searched");
         let kept = search.rows().iter().find(|r| r.source.id == 1).expect("A stays");
         assert_eq!(kept.state, SearchState::Results(vec![item(10), item(11)]), "the finished result of A is kept");
     }
@@ -379,7 +378,7 @@ mod tests {
         search.apply(first.generation, 1, Ok(vec![item(10)]));
         search.set_query(Some("two"));
         let second = search.search().expect("new query");
-        assert_eq!(ids(&second.sources), [1, 3]);
+        assert_eq!(ids(&second.sources), [1, 3, 2], "every source, pinned first");
         assert!(search.rows().iter().all(|r| r.state == SearchState::Loading));
     }
 
@@ -390,7 +389,7 @@ mod tests {
         let plan = search.search().expect("search");
         assert!(search.apply(plan.generation, 1, Err("timeout".into())));
         assert_eq!(search.search(), None, "GS-EC-07: an errored source is not retried without a change");
-        assert_eq!(search.progress(), (1, 2));
+        assert_eq!(search.progress(), (1, 3));
     }
 
     #[test]

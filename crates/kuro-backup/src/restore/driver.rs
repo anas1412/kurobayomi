@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Local};
+use kuro_db::statements_anime as sa;
+use kuro_db::statements_manga::{self as sm, StubSourceRow};
 use kuro_db::{DbResult, Transaction};
 use kuro_prefs::import::CategoryMaps;
 use kuro_prefs::store::PrefStore;
@@ -138,6 +140,32 @@ fn anime_source_name(sources: &[BackupAnimeSource], id: i64) -> String {
     sources.iter().find(|s| s.source_id == id).map_or_else(|| id.to_string(), |s| s.name.clone())
 }
 
+/// Keeps the name a backup gives a source in its stub row, when the database has no name for the id yet. The library
+/// and the entry pages show that name for a source that is not installed; an installed source later replaces the row
+/// through the registry. A stored name is never overwritten, and a blank backup name writes nothing.
+fn keep_stub_name(tx: &Transaction<'_>, kind: Kind, id: i64, name: Option<&str>) -> DbResult<()> {
+    let Some(name) = name.filter(|name| !name.trim().is_empty()) else { return Ok(()) };
+    match kind {
+        Kind::Manga => {
+            let stored = sm::sources::find_one(tx, id)?;
+            if stored.as_ref().is_some_and(|row| !row.name.trim().is_empty()) {
+                return Ok(());
+            }
+            let lang = stored.map(|row| row.lang).unwrap_or_default();
+            sm::sources::upsert(tx, &StubSourceRow { id, lang, name: name.to_owned() })?;
+        }
+        Kind::Anime => {
+            let stored = sa::stub_source(tx, id)?;
+            if stored.as_ref().is_some_and(|row| !row.name.trim().is_empty()) {
+                return Ok(());
+            }
+            let lang = stored.map(|row| row.lang).unwrap_or_default();
+            sa::upsert_stub_source(tx, id, &lang, name)?;
+        }
+    }
+    Ok(())
+}
+
 impl DbRestorer<'_> {
     fn categories(&mut self, index: u32) -> Result<Item, RestoreError> {
         let (kind, title) = if index == 0 { (Kind::Anime, text::PROGRESS_ANIME_CATEGORIES.english) } else { (Kind::Manga, text::PROGRESS_MANGA_CATEGORIES.english) };
@@ -184,9 +212,13 @@ impl DbRestorer<'_> {
         }
         let entry = std::mem::take(&mut self.manga_rows.as_mut().expect("set above")[index as usize]);
         let prefix = format!("{} [{}]", entry.title, manga_source_name(&self.backup.sources, entry.source));
-        let result = in_entry_tx(self.t.manga, self.cancel, |tx| restore_manga_entry(tx, &self.clock, &entry, &self.manga_by_order));
+        let result = in_entry_tx(self.t.manga, self.cancel, |tx| {
+            restore_manga_entry(tx, &self.clock, &entry, &self.manga_by_order)?;
+            let name = self.backup.sources.iter().find(|s| s.source_id == entry.source).map(|s| s.name.as_str());
+            keep_stub_name(tx, Kind::Manga, entry.source, name)
+        });
         match result {
-            Ok(Some(_)) => done_as(entry.title, prefix, Ok(())),
+            Ok(Some(())) => done_as(entry.title, prefix, Ok(())),
             Ok(None) => Err(RestoreError::Cancelled),
             Err(e) => done_as(entry.title, prefix, Err(e.to_string())),
         }
@@ -211,7 +243,10 @@ impl DbRestorer<'_> {
         let prefix = format!("{} [{}]", entry.title, anime_source_name(&self.backup.anime_sources, entry.source));
         let mut outcome = AnimeOutcome::default();
         let result = in_entry_tx(self.t.anime, self.cancel, |tx| {
-            restore_anime_entry(tx, &self.clock, &entry, parent, &self.anime_by_order, &mut outcome)
+            let id = restore_anime_entry(tx, &self.clock, &entry, parent, &self.anime_by_order, &mut outcome)?;
+            let name = self.backup.anime_sources.iter().find(|s| s.source_id == entry.source).map(|s| s.name.as_str());
+            keep_stub_name(tx, Kind::Anime, entry.source, name)?;
+            Ok(id)
         });
         match result {
             Ok(Some(id)) => {
@@ -288,8 +323,8 @@ mod tests {
     use super::*;
     use super::super::prefs::IntervalScheduler;
     use crate::schema::{
-        BackupCategory, BackupChapter, BackupExtensionRepos, BackupExtensionStore, BackupPreference, BackupSourcePreferences,
-        PrefValue,
+        BackupCategory, BackupChapter, BackupExtensionRepos, BackupExtensionStore, BackupPreference, BackupSource,
+        BackupSourcePreferences, PrefValue,
     };
 
     struct Env {
@@ -424,6 +459,23 @@ mod tests {
         let titles: Vec<&str> = events.iter().map(|ev| ev.title.as_str()).collect();
         let pos = |t: &str| titles.iter().position(|x| *x == t).unwrap();
         assert!(pos("M fresh") < pos("M old"));
+    }
+
+    #[test]
+    fn a_backup_source_name_becomes_the_stub_row_unless_one_is_stored() {
+        // T-20a-094: the library shows the name of a source that is not installed, and a stored name stays
+        let mut e = env();
+        let stored = kuro_db::statements_manga::StubSourceRow { id: 7, lang: "en".into(), name: "Kept".into() };
+        kuro_db::statements_manga::sources::upsert(&e.manga, &stored).unwrap();
+        let backup = Backup {
+            sources: vec![BackupSource { name: "Ghost".into(), source_id: 7 }, BackupSource { name: "Lost".into(), source_id: 8 }],
+            manga: vec![manga("x", vec![]), BackupManga { source: 8, ..manga("y", vec![]) }],
+            ..Default::default()
+        };
+        run(&mut e, backup, all_but_extensions(), &|| false);
+        let row = |id: i64| kuro_db::statements_manga::sources::find_one(&e.manga, id).unwrap().unwrap();
+        assert_eq!((row(7).name.as_str(), row(7).lang.as_str()), ("Kept", "en"));
+        assert_eq!((row(8).name.as_str(), row(8).lang.as_str()), ("Lost", ""));
     }
 
     #[test]

@@ -603,6 +603,7 @@ mod tests {
 
 #[cfg(test)]
 mod anime_tests {
+    use kuro_source::error::SourceError;
     use std::sync::Arc;
 
     use kuro_source::anime::{AnimeSource, SAnime, SEpisode, Video};

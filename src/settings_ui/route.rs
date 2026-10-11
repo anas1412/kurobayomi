@@ -127,14 +127,14 @@ fn library_page() -> Option<Built> {
     ))
 }
 
-/// The Appearance page. It is rebuilt when the app lock switch changes, so the lock delay row follows it.
+/// The Appearance page. Its rows are the theme mode and the start screen, so no state of its own decides the layout.
 fn appearance_page() -> Option<Built> {
     let prefs = Rc::new(prefs());
     let store = prefs.store().clone();
-    let (for_state, for_tree) = (Rc::clone(&prefs), Rc::clone(&prefs));
+    let for_tree = Rc::clone(&prefs);
     Some(view::live_page(
         &store,
-        move || appearance::rule_state(&for_state),
+        || (),
         move || merge(spec_tree("settings_appearance", for_tree.store()), appearance::page_rows(&for_tree)),
         toolbar("settings_appearance"),
     ))
@@ -232,7 +232,7 @@ fn data_storage_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     let mut tree: Vec<Preference> = storage::rows(prefs, Rc::clone(&changed)).into_iter().map(rows::item).collect();
     let interval = rows::ranged_choice("Automatic backup frequency", &prefs.backup.backup_interval, |h| kuro_backup::settings::interval_label(h as u32).unwrap_or("").to_owned(), true);
     tree.push(rows::group("Backup and restore", vec![interval, restore_backup_row(), rows::info(&backup_info(prefs))]));
-    tree.push(rows::group("Storage usage", vec![cache::clear_row(Rc::clone(&changed)), rows::switch("Clear episode/chapter cache on app launch", &prefs.library.auto_clear_item_cache, true)]));
+    tree.push(rows::group("Storage usage", vec![cache::clear_row(Rc::clone(&changed))]));
     tree.push(rows::group("Maintenance", maintenance::data_rows()));
     tree.push(library_export::group_row());
     tree
@@ -516,7 +516,7 @@ mod tests {
                 assert!(rows_under(&split) > 8, "the sidebar and the open page");
             }
             let player = crate::settings_ui::player::root::body(&prefs()).expect("the player page");
-            assert!(rows_under(&player.content) >= 9);
+            assert!(rows_under(&player.content) >= 7, "four kept settings and three links");
 
             // the split view: one sidebar (Player inside it shows its plain list), the open page's row selected, and a
             // selected row swaps the page beside it

@@ -272,12 +272,12 @@ mod tests {
     }
 
     #[test]
-    fn category_sets_are_remapped_and_unioned_with_the_device_set() {
+    fn category_set_keys_are_cut_so_an_import_skips_them_and_leaves_the_device_set() {
         let store = PrefStore::in_memory();
         store.set_raw("library_update_categories", set(&["1"]));
         let report = run(&store, vec![("library_update_categories", set(&["5", "6", "99"]))]);
-        assert_eq!(store.get_raw("library_update_categories"), Some(set(&["1", "9", "10"])));
-        assert_eq!(report.unmapped_categories, 1);
+        assert_eq!(store.get_raw("library_update_categories"), Some(set(&["1"])));
+        assert_eq!(report.dropped_skipped, 1);
     }
 
     #[test]
@@ -318,11 +318,13 @@ mod tests {
     }
 
     #[test]
-    fn the_key_lists_hold_twelve_distinct_category_keys() {
+    fn the_key_lists_hold_twelve_distinct_category_keys_and_only_the_two_defaults_are_registered() {
         let all: BTreeSet<&str> = MANGA_CATEGORY_KEYS.iter().chain(ANIME_CATEGORY_KEYS.iter()).copied().collect();
         assert_eq!(all.len(), 12);
         for key in all {
-            assert!(registry::lookup(key).is_some(), "{key}");
+            let kept = key == "default_category" || key == "default_anime_category";
+            assert_eq!(registry::lookup(key).is_some(), kept, "{key}");
+            assert_eq!(registry::is_dropped(key), !kept, "{key}");
         }
     }
 }
