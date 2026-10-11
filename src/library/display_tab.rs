@@ -2,7 +2,6 @@
 //! label, and which preference each overlay or tab switch writes.
 
 use kuro_domain::kind::EntryKind;
-use kuro_domain::library::columns::PORTRAIT_BREAKPOINT_PX;
 use kuro_prefs::library::{LibraryDisplayMode, LibraryPrefs};
 use kuro_i18n::MsgKey;
 use kuro_prefs::pref::Pref;
@@ -31,58 +30,33 @@ pub fn slider_value_text(value: i32) -> String {
     if value > 0 { value.to_string() } else { kuro_i18n::tr(MsgKey::label_auto) }
 }
 
-/// The portrait and landscape column preferences of a kind (T-08a-043).
-pub fn column_prefs(prefs: &LibraryPrefs, kind: EntryKind) -> (&Pref<i32>, &Pref<i32>) {
+/// The landscape column preference of a kind (T-08a-043). The portrait key is cut: the slider edits this one at every
+/// window width, and the grid reads the hard-coded automatic portrait value.
+pub fn columns_pref(prefs: &LibraryPrefs, kind: EntryKind) -> &Pref<i32> {
     match kind {
-        EntryKind::Anime => (&prefs.anime_portrait_columns, &prefs.anime_landscape_columns),
-        EntryKind::Manga => (&prefs.manga_portrait_columns, &prefs.manga_landscape_columns),
+        EntryKind::Anime => &prefs.anime_landscape_columns,
+        EntryKind::Manga => &prefs.manga_landscape_columns,
     }
 }
 
-/// The columns preference the slider edits at a window `width` pixels wide: the portrait key below 900 px, the
-/// landscape key from there on, the same split the grid reads (`columns_for_width`).
-pub fn columns_pref(prefs: &LibraryPrefs, kind: EntryKind, width: i32) -> &Pref<i32> {
-    let (portrait, landscape) = column_prefs(prefs, kind);
-    if width < PORTRAIT_BREAKPOINT_PX { portrait } else { landscape }
-}
-
-/// The five overlay switches and the two tab switches. Each writes its preference as soon as it changes.
+/// The two overlay switches that stay: the download and the unread badges. Each writes its preference as soon as it
+/// changes. The other overlay and tab switches are cut from the settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Toggle {
     DownloadBadge,
     UnreadBadge,
-    LocalBadge,
-    LanguageBadge,
-    ContinueButton,
-    CategoryTabs,
-    ItemCount,
 }
 
 impl Toggle {
-    /// The overlay group: the four badges and the continue button.
-    pub const OVERLAY: [Toggle; 5] = [Toggle::DownloadBadge, Toggle::UnreadBadge, Toggle::LocalBadge, Toggle::LanguageBadge, Toggle::ContinueButton];
-    /// The tabs group.
-    pub const TABS: [Toggle; 2] = [Toggle::CategoryTabs, Toggle::ItemCount];
+    /// The overlay group.
+    pub const OVERLAY: [Toggle; 2] = [Toggle::DownloadBadge, Toggle::UnreadBadge];
     #[cfg(test)]
-    pub const ALL: [Toggle; 7] = [
-        Toggle::DownloadBadge,
-        Toggle::UnreadBadge,
-        Toggle::LocalBadge,
-        Toggle::LanguageBadge,
-        Toggle::ContinueButton,
-        Toggle::CategoryTabs,
-        Toggle::ItemCount,
-    ];
+    pub const ALL: [Toggle; 2] = [Toggle::DownloadBadge, Toggle::UnreadBadge];
 
     pub fn pref(self, prefs: &LibraryPrefs) -> &Pref<bool> {
         match self {
             Toggle::DownloadBadge => &prefs.download_badge,
             Toggle::UnreadBadge => &prefs.unread_badge,
-            Toggle::LocalBadge => &prefs.local_badge,
-            Toggle::LanguageBadge => &prefs.language_badge,
-            Toggle::ContinueButton => &prefs.show_continue_viewing_button,
-            Toggle::CategoryTabs => &prefs.category_tabs,
-            Toggle::ItemCount => &prefs.category_number_of_items,
         }
     }
 }
@@ -105,11 +79,6 @@ impl Toggle {
             (Toggle::DownloadBadge, EntryKind::Anime) => MsgKey::action_display_download_badge_anime,
             (Toggle::UnreadBadge, EntryKind::Manga) => MsgKey::action_display_unread_badge,
             (Toggle::UnreadBadge, EntryKind::Anime) => MsgKey::action_display_unseen_badge,
-            (Toggle::LocalBadge, _) => MsgKey::action_display_local_badge,
-            (Toggle::LanguageBadge, _) => MsgKey::action_display_language_badge,
-            (Toggle::ContinueButton, _) => MsgKey::action_display_show_continue_reading_button,
-            (Toggle::CategoryTabs, _) => MsgKey::action_display_show_tabs,
-            (Toggle::ItemCount, _) => MsgKey::action_display_show_number_of_items,
         }
     }
 }
@@ -142,14 +111,9 @@ mod tests {
     }
 
     #[test]
-    fn the_overlay_and_tabs_groups_cover_every_switch_once_under_their_headings() {
-        let mut both: Vec<Toggle> = Toggle::OVERLAY.iter().chain(Toggle::TABS.iter()).copied().collect();
-        both.sort_by_key(|t| *t as u8);
-        let mut all = Toggle::ALL.to_vec();
-        all.sort_by_key(|t| *t as u8);
-        assert_eq!(both, all);
+    fn the_overlay_group_holds_the_two_badge_switches() {
+        assert_eq!(Toggle::OVERLAY.to_vec(), Toggle::ALL.to_vec());
         assert_eq!(kuro_i18n::tr(MsgKey::overlay_header), "Overlay");
-        assert_eq!(kuro_i18n::tr(MsgKey::tabs_header), "Tabs");
     }
 
     #[test]
@@ -166,17 +130,9 @@ mod tests {
     #[test]
     fn columns_preference_is_one_per_kind() {
         let prefs = LibraryPrefs::new(PrefStore::in_memory());
-        columns_pref(&prefs, EntryKind::Anime, 800).set(4).unwrap();
-        assert_eq!(prefs.anime_portrait_columns.get(), 4);
-        assert_eq!(prefs.manga_portrait_columns.get(), 0);
-    }
-
-    #[test]
-    fn the_slider_edits_the_key_the_grid_reads_at_that_width() {
-        let prefs = LibraryPrefs::new(PrefStore::in_memory());
-        columns_pref(&prefs, EntryKind::Manga, 899).set(3).unwrap();
-        columns_pref(&prefs, EntryKind::Manga, 900).set(7).unwrap();
-        assert_eq!((prefs.manga_portrait_columns.get(), prefs.manga_landscape_columns.get()), (3, 7));
+        columns_pref(&prefs, EntryKind::Anime).set(4).unwrap();
+        assert_eq!(prefs.anime_landscape_columns.get(), 4);
+        assert_eq!(prefs.manga_landscape_columns.get(), 0);
     }
 
     #[test]

@@ -2,13 +2,33 @@
 //! source gate opens, then crossfades to its content over 150 ms. A gate that is already open shows the
 //! content at once, with no spinner.
 
+use std::sync::OnceLock;
+
 use gtk::prelude::*;
 use gtk::{Align, Spinner, Stack, StackTransitionType, Widget, glib};
 use kuro_core::sources::SourceGate;
+use tokio::sync::watch;
 
 /// Length of the crossfade from the spinner to the content.
 // No call site until the source screens land (T-01a-037 wiring).
 pub const CROSSFADE_MS: u32 = 150;
+
+static LOADED: OnceLock<watch::Sender<bool>> = OnceLock::new();
+
+fn loaded() -> &'static watch::Sender<bool> {
+    LOADED.get_or_init(|| watch::channel(false).0)
+}
+
+/// The source-ready flag: `false` until the built-in and recipe sources have been read at start, then `true` for good.
+/// Every view that needs sources waits on a receiver from here, so the spinner is real.
+pub fn subscribe() -> watch::Receiver<bool> {
+    loaded().subscribe()
+}
+
+/// Called once the sources are read at start (after the built-in and recipe sources have started).
+pub fn mark_loaded() {
+    loaded().send_replace(true);
+}
 
 /// What the placeholder shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +79,14 @@ mod tests {
     fn a_closed_gate_shows_the_spinner_first() {
         let (_registry, ready) = tokio::sync::watch::channel(false);
         let gate = SourceGate::new(ready);
+        assert_eq!(initial(*gate.ready_watch().borrow()), Shown::Spinner);
+    }
+
+    #[test]
+    fn the_source_flag_is_closed_until_the_sources_are_read() {
+        // Nothing in the test binary calls mark_loaded, so the process-wide flag starts closed.
+        assert!(!*subscribe().borrow());
+        let gate = SourceGate::new(subscribe());
         assert_eq!(initial(*gate.ready_watch().borrow()), Shown::Spinner);
     }
 

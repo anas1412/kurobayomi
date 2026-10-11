@@ -20,6 +20,9 @@ use super::syntax::{self, Lang};
 use crate::screens::{built, Built};
 use crate::ui::{boxed_list, column, icon_button, margins, modal, scrolled};
 
+/// The toast when a folder cannot be opened.
+const OPEN_FAILED: &str = "Could not open link";
+
 pub const REQUIRED: &str = "*required";
 pub const BUTTON_EXISTS: &str = "Button already exists!";
 /// The banner of a script file that is not UTF-8 (edge E-CE-03).
@@ -448,7 +451,7 @@ fn guide_toolbar(id: &str) -> Vec<gtk::Widget> {
             gtk::UriLauncher::new(GUIDE_URL).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
                 if let Err(err) = result {
                     tracing::warn!(%err, "could not open the custom buttons guide");
-                    crate::toast::notify(super::advanced::OPEN_FAILED);
+                    crate::toast::notify(OPEN_FAILED);
                 }
             });
         });

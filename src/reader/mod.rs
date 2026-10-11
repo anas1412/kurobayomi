@@ -38,8 +38,12 @@
 //!   kept. T-43a-071 (P3, drop) is read as "not used by default"; the plan text of T-43a-071 should be amended to say so.
 //! - The reader settings sheet (`settings_window`) is built from the preference keys directly, not from the spec items of
 //!   `src/spec.rs`: the spec `Item` has no preference key and `ui::item_row` binds no `ReaderPrefs`. Each row reads its default,
-//!   writes its key and is enabled or disabled by `settings_ui::reader::rules::row_enabled`; the acceptance text of T-43b-031 is read that way.
-//! - The data saver keeps Bandwidth Hero and wsrv.nl and drops resmush.it (`loader::saver`, D-DL-09); the HTTP page loader applies it.
+//!   writes its key straight away. The settings diet kept six reader settings and cut the dependent rows, so no row is disabled by a rule.
+//! - The data saver is cut (docs/design/settings-diet.md): the HTTP page loader requests every image as it is.
+//! - The reader's top bar is the shared header of `widgets::page_header`, the same design as the player's. Pages open at the
+//!   left-to-right default; right to left is a per-manga choice that the reader remembers. The page slider sits at the bottom.
+//! - A chapter whose page list is still being fetched shows the spinner and is asked for again (`source_pages::is_pending`);
+//!   it is not an error any more.
 #![allow(dead_code, unused_imports)] // the viewers (area 44) and the source registry (area 17) attach later
 
 pub mod backlight;

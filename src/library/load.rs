@@ -15,6 +15,9 @@ use kuro_domain::library::filter::LibraryFilters;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::page::BadgeSettings;
 use kuro_prefs::library::LibraryPrefs;
+use kuro_prefs::tristate::TriState;
+
+use crate::misc::diet_defaults as diet;
 
 use super::query::{Details, Request, Snapshot};
 
@@ -68,22 +71,12 @@ pub fn filters(
     downloaded_only: bool,
     logged_in: &BTreeSet<i64>,
 ) -> LibraryFilters {
-    let (downloaded, unread, started, bookmarked, completed) = match kind {
-        EntryKind::Anime => (
-            prefs.filter_downloaded_anime.get(),
-            prefs.filter_unseen.get(),
-            prefs.filter_started_anime.get(),
-            prefs.filter_bookmarked_anime.get(),
-            prefs.filter_completed_anime.get(),
-        ),
-        EntryKind::Manga => (
-            prefs.filter_downloaded_manga.get(),
-            prefs.filter_unread.get(),
-            prefs.filter_started_manga.get(),
-            prefs.filter_bookmarked_manga.get(),
-            prefs.filter_completed_manga.get(),
-        ),
+    // The Started, Bookmarked and interval filters are cut from the settings: they stay off.
+    let (downloaded, unread, completed) = match kind {
+        EntryKind::Anime => (prefs.filter_downloaded_anime.get(), prefs.filter_unseen.get(), prefs.filter_completed_anime.get()),
+        EntryKind::Manga => (prefs.filter_downloaded_manga.get(), prefs.filter_unread.get(), prefs.filter_completed_manga.get()),
     };
+    let (started, bookmarked, interval_custom) = (TriState::DISABLED, TriState::DISABLED, TriState::DISABLED);
     let tracking = logged_in
         .iter()
         .map(|id| {
@@ -100,10 +93,10 @@ pub fn filters(
         started,
         bookmarked,
         completed,
-        interval_custom: prefs.filter_interval_custom.get(),
+        interval_custom,
         tracking,
         downloaded_only,
-        skip_outside_release_period: prefs.auto_update_item_restrictions.get().contains("manga_outside_release_period"),
+        skip_outside_release_period: diet::LIBRARY_UPDATE_ITEM_RESTRICTIONS.contains(&"manga_outside_release_period"),
     }
 }
 
@@ -114,37 +107,22 @@ pub fn affects_library(kind: EntryKind, key: &str) -> bool {
         "pref_display_mode_library",
         "display_download_badge",
         "display_unread_badge",
-        "display_local_badge",
-        "display_language_badge",
-        "display_continue_reading_button",
-        "display_category_tabs",
-        "display_number_of_items",
-        "hidden_categories",
-        "categorized_display",
-        "pref_filter_library_interval_custom",
-        "library_update_manga_restriction",
         "__APP_STATE_pref_downloaded_only",
     ];
     const ANIME: &[&str] = &[
         "pref_filter_animelib_downloaded_v2",
         "pref_filter_animelib_unread_v2",
-        "pref_filter_animelib_started_v2",
-        "pref_filter_animelib_bookmarked_v2",
         "pref_filter_animelib_completed_v2",
         "animelib_sorting_mode",
         "library_random_anime_sort_seed",
-        "pref_animelib_columns_portrait_key",
         "pref_animelib_columns_landscape_key",
     ];
     const MANGA: &[&str] = &[
         "pref_filter_library_downloaded_v2",
         "pref_filter_library_unread_v2",
-        "pref_filter_library_started_v2",
-        "pref_filter_library_bookmarked_v2",
         "pref_filter_library_completed_v2",
         "library_sorting_mode",
         "library_random_manga_sort_seed",
-        "pref_library_columns_portrait_key",
         "pref_library_columns_landscape_key",
     ];
     if SHARED.contains(&key) {
@@ -161,8 +139,8 @@ pub fn badges(prefs: &LibraryPrefs) -> BadgeSettings {
     BadgeSettings {
         download: prefs.download_badge.get(),
         unread: prefs.unread_badge.get(),
-        local: prefs.local_badge.get(),
-        language: prefs.language_badge.get(),
+        local: diet::LIBRARY_LOCAL_BADGE,
+        language: diet::LIBRARY_LANGUAGE_BADGE,
     }
 }
 

@@ -14,11 +14,16 @@ use std::time::Duration;
 
 use gtk::glib;
 use gtk::prelude::*;
-use kuro_prefs::reader::{FlashColor, ReaderPrefs};
+use kuro_prefs::reader::FlashColor;
 
 use super::blend_box::BlendBox;
 
 use super::pref_rules;
+use crate::misc::diet_defaults as diet;
+
+/// The page-change flash is cut from the settings; these are its hard-coded interval (pages) and duration (stored units).
+const FLASH_INTERVAL_PAGES: i32 = 1;
+const FLASH_DURATION_STORED: i32 = 1;
 use super::rules;
 
 /// The custom brightness slider range (`ColorFilterPage.kt:41`).
@@ -157,10 +162,10 @@ impl Tint {
         }
     }
 
-    /// Applies the brightness, colour filter, grayscale and invert preferences. Grayscale and invert are colour-matrix
-    /// nodes over the page area only.
-    pub fn apply(&self, prefs: &ReaderPrefs) {
-        let (enabled, value) = (prefs.custom_brightness.get(), prefs.custom_brightness_value.get());
+    /// Applies the brightness, colour filter, grayscale and invert layers. The settings are cut, so the hard-coded
+    /// values (all off) apply; grayscale and invert are colour-matrix nodes over the page area only.
+    pub fn apply(&self) {
+        let (enabled, value) = (diet::READER_CUSTOM_BRIGHTNESS, 0);
         if let super::backlight::Outcome::Unavailable { notify: true } =
             super::backlight::apply(std::path::Path::new(super::backlight::SYSFS_ROOT), enabled, value)
         {
@@ -171,18 +176,18 @@ impl Tint {
         self.brightness.set_visible(alpha > 0.0);
         self.brightness.queue_draw();
 
-        self.blend.set_filter(filter_rgba(prefs.color_filter.get(), prefs.color_filter_value.get()), prefs.color_filter_mode.get());
+        self.blend.set_filter(filter_rgba(diet::READER_COLOUR_FILTER, 0), 0);
 
-        self.blend.set_page_filter(page_colour_matrix(prefs.grayscale.get(), prefs.inverted_colors.get()));
+        self.blend.set_page_filter(page_colour_matrix(diet::READER_GRAYSCALE, diet::READER_INVERTED_COLOURS));
     }
 
     /// A page changed. Counts it toward the flash interval and starts a flash when it is due. Called only while the
     /// flash feature is on (E-FLASH-1), so a later enable does not flash at once.
-    pub fn on_page_changed(&self, prefs: &ReaderPrefs) {
-        let (due, next) = rules::flash_due(self.flash_trigger.get(), pref_rules::flash_interval(prefs.flash_page_interval.get()));
+    pub fn on_page_changed(&self) {
+        let (due, next) = rules::flash_due(self.flash_trigger.get(), pref_rules::flash_interval(FLASH_INTERVAL_PAGES));
         self.flash_trigger.set(next);
         if due {
-            self.start_flash(prefs.flash_color.get(), pref_rules::flash_duration_ms(prefs.flash_duration_millis.get()));
+            self.start_flash(FlashColor::BLACK, pref_rules::flash_duration_ms(FLASH_DURATION_STORED));
         }
     }
 

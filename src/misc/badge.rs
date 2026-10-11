@@ -11,6 +11,7 @@ use gtk::prelude::*;
 use kuro_prefs::library::LibraryPrefs;
 
 use crate::bind;
+use crate::misc::diet_defaults as diet;
 
 /// The badge text for the two counters, or `None` when the badge is hidden: both counters at zero, or the switch off.
 pub fn text(manga: i32, anime: i32, show: bool) -> Option<String> {
@@ -26,8 +27,8 @@ fn paint(label: &gtk::Label, (manga, anime, show): (i32, i32, bool)) {
 
 /// Shows the live count in `label`, now and on every change of the counters or of the switch.
 pub fn bind(label: &gtk::Label, library: &LibraryPrefs) {
-    let state = Rc::new(Cell::new((0_i32, 0_i32, true)));
-    let (manga, anime, show) = (state.clone(), state.clone(), state);
+    let state = Rc::new(Cell::new((0_i32, 0_i32, diet::LIBRARY_UPDATES_COUNT)));
+    let (manga, anime) = (state.clone(), state.clone());
     bind::bind(label, &library.new_manga_updates_count, move |l, count| {
         manga.set((count, manga.get().1, manga.get().2));
         paint(l, manga.get());
@@ -36,15 +37,6 @@ pub fn bind(label: &gtk::Label, library: &LibraryPrefs) {
         anime.set((anime.get().0, count, anime.get().2));
         paint(l, anime.get());
     });
-    bind::bind(label, &library.new_show_updates_count, move |l, on| {
-        show.set((show.get().0, show.get().1, on));
-        paint(l, show.get());
-    });
-}
-
-/// Shows the stored extension update count in `label`, hidden at zero (the Browse entry's badge).
-pub fn bind_extension_updates(label: &gtk::Label, source: &kuro_prefs::source::SourcePrefs) {
-    bind::bind(label, &source.manga_extension_updates_count, move |l, count| paint(l, (count, 0, true)));
 }
 
 #[cfg(test)]

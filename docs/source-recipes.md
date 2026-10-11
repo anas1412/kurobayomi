@@ -8,6 +8,10 @@ platform data directory), one file per source, named `<id>.toml`. At start the a
 recipe shows up in Browse as a manga source, an anime recipe as an anime source. A file that is not a valid recipe is
 skipped and logged with the reason, and so is a second recipe with an id already used.
 
+A repository link is the way recipes reach this folder: the index lists each recipe with its sha256, and the file is
+fetched on first use and checked against it (`kuro-extensions` `repo` module). The app-side link flow is not built yet,
+so until it is, copy a recipe into the folder by hand.
+
 ## Rules
 
 - **Unknown keys are errors.** So are selectors and regexes that do not compile, and a missing operation.
@@ -231,5 +235,5 @@ first episode's videos.
 
 ## Not in this version
 
-Installing a recipe from a repository link, requests with a body (POST), pages loaded by script, a Cloudflare
+Requests with a body (POST), pages loaded by script, a Cloudflare
 challenge, filters, relative dates such as "3 days ago", extractors for video hosts, and seasons.

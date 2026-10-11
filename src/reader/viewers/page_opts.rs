@@ -149,13 +149,9 @@ mod tests {
 
     #[test]
     fn the_background_double_tap_time_and_long_tap_follow_the_settings() {
-        let s = settings(|p| {
-            p.reader_theme.set(0).unwrap();
-            p.double_tap_anim_speed.set(250).unwrap();
-            p.read_with_long_tap.set(false).unwrap();
-        });
+        let s = settings(|p| p.reader_theme.set(0).unwrap());
         let o = page_opts(&s, ViewerKind::Webtoon, false);
-        assert_eq!((o.background, o.double_tap_ms, o.long_tap), (Background::White, 250, false));
+        assert_eq!((o.background, o.double_tap_ms, o.long_tap), (Background::White, 500, true));
         let auto = settings(|p| p.reader_theme.set(3).unwrap());
         assert_eq!(page_opts(&auto, ViewerKind::Webtoon, true).background, Background::Gray);
         assert_eq!(page_opts(&auto, ViewerKind::Webtoon, false).background, Background::White);
@@ -174,25 +170,21 @@ mod tests {
         let normal = settings(|_| {});
         assert!(page_opts(&normal, ViewerKind::Webtoon, false).decode_to_view());
         assert!(!page_opts(&normal, ViewerKind::LeftToRight, false).decode_to_view(), "a pager page is never cut to the view");
-        // T-44a-061: the stored full-decode value is ignored
-        let stored = settings(|p| p.store().pref("pref_always_decode_long_strip_with_ssiv", false).set(true).unwrap());
-        assert!(page_opts(&stored, ViewerKind::WebtoonGapped, false).decode_to_view());
+        assert!(page_opts(&normal, ViewerKind::WebtoonGapped, false).decode_to_view());
     }
 
     #[test]
     fn t020_crop_follows_the_pager_or_the_webtoon_preference() {
         let s = settings(|p| p.crop_borders.set(true).unwrap());
         assert!(page_opts(&s, ViewerKind::RightToLeft, false).crop);
-        assert!(!page_opts(&s, ViewerKind::Webtoon, false).crop);
-        let w = settings(|p| p.crop_borders_webtoon.set(true).unwrap());
-        assert!(page_opts(&w, ViewerKind::WebtoonGapped, false).crop);
-        assert!(!page_opts(&w, ViewerKind::LeftToRight, false).crop);
+        assert!(page_opts(&s, ViewerKind::Webtoon, false).crop);
+        assert!(page_opts(&s, ViewerKind::WebtoonGapped, false).crop, "the long strip follows the one crop switch");
     }
 
     #[test]
     fn t047_the_side_padding_is_a_percent_of_the_view_width_on_the_webtoon_only() {
-        let s = settings(|p| p.webtoon_side_padding.set(10).unwrap());
-        assert_eq!(page_opts(&s, ViewerKind::Webtoon, false).side_padding, 10);
+        let s = settings(|_| {});
+        assert_eq!(page_opts(&s, ViewerKind::Webtoon, false).side_padding, 0);
         assert_eq!(page_opts(&s, ViewerKind::LeftToRight, false).side_padding, 0);
         assert_eq!(side_padding_px(800, 10), 80);
         assert_eq!(side_padding_px(800, 0), 0);
@@ -212,11 +204,9 @@ mod tests {
     fn the_dual_page_settings_of_the_family_reach_the_decode_transform() {
         let s = settings(|p| {
             p.dual_page_split_paged.set(true).unwrap();
-            p.dual_page_invert_paged.set(true).unwrap();
-            p.dual_page_split_webtoon.set(false).unwrap();
         });
         let pager = page_opts(&s, ViewerKind::LeftToRight, false).transform;
-        assert!(pager.split && pager.invert && pager.l2r && !pager.webtoon);
+        assert!(pager.split && !pager.invert && pager.l2r && !pager.webtoon);
         assert!(!page_opts(&s, ViewerKind::RightToLeft, false).transform.l2r, "only left to right reads the left half first");
         let web = page_opts(&s, ViewerKind::Webtoon, false).transform;
         assert!(!web.split && web.webtoon, "the webtoon follows its own settings");

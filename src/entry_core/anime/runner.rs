@@ -451,16 +451,14 @@ impl Shared {
             .blocking(move |store| -> DataResult<Vec<Episode>> {
                 let downloads = DownloadPrefs::new(&prefs);
                 let favorite = store.anime(anime_id)?.is_some_and(|a| a.favorite);
-                let rule = CategoryDecision {
-                    included: downloads.download_new_episode_categories.get().0,
-                    excluded: downloads.download_new_episode_categories_exclude.get().0,
-                };
+                // the episode category lists are cut from the settings: every category is eligible
+                let rule = CategoryDecision { included: Default::default(), excluded: Default::default() };
                 let eligible = should_download_new(favorite, &store.category_ids(anime_id)?, &rule);
                 Ok(auto_download_targets(
                     trigger,
                     downloads.download_new_episodes.get(),
                     eligible,
-                    downloads.download_new_unseen_episodes_only.get(),
+                    crate::misc::diet_defaults::DOWNLOAD_NEW_UNREAD_ONLY,
                     &new_episodes,
                     &store.episodes(anime_id)?,
                 ))

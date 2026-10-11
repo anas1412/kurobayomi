@@ -1,11 +1,10 @@
-//! Reader settings rows: the top-level rows and the Display, Reading, Paged and Long strip groups (T-47a-031..038).
-//! Rows that the rule table disables are left out of the tree (hidden, as on Android).
+//! Reader settings rows: the six kept reader settings (settings diet, 2026-10-11). The top row is the default reading
+//! mode; the Display group holds the background colour; the Paged group holds the scale type, the zoom start position,
+//! crop borders and split wide pages. Every other reader setting is cut.
 use kuro_prefs::prefs::Prefs;
-use kuro_prefs::reader::{FlashColor, ReaderHideThreshold, TappingInvertMode};
 
-use super::rules::{row_enabled, ReaderState, Row};
-use crate::settings_ui::rows::{enum_choice, exclusive_switch, group, int_choice, item, scaled_slider, slider, switch, switch_sub, visible};
-use crate::pref_model::model::{Preference, PreferenceItem};
+use crate::pref_model::model::Preference;
+use crate::settings_ui::rows::{group, int_choice, item, switch};
 
 /// `ReadingMode` codes (`pref_default_reading_mode_key`); 0 (Default) is not offered.
 pub const READING_MODES: [(i32, &str); 5] = [
@@ -17,17 +16,7 @@ pub const READING_MODES: [(i32, &str); 5] = [
 ];
 /// Background codes (`pref_reader_theme_key`).
 pub const BACKGROUNDS: [(i32, &str); 4] = [(1, "Black"), (2, "Gray"), (0, "White"), (3, "Auto")];
-/// Side padding range in percent (`webtoon_side_padding`).
-pub const PADDING_RANGE: std::ops::RangeInclusive<i32> = 0..=25;
-/// Tap-zone codes shared by the paged and long strip viewers.
-pub const TAP_ZONES: [(i32, &str); 6] = [
-    (0, "Default"),
-    (1, "L shaped"),
-    (2, "Kindle-ish"),
-    (3, "Edge"),
-    (4, "Right and Left"),
-    (5, "Disabled"),
-];
+/// Scale type codes (`pref_image_scale_type_key`).
 pub const SCALE_TYPES: [(i32, &str); 6] = [
     (1, "Fit screen"),
     (2, "Stretch"),
@@ -36,174 +25,23 @@ pub const SCALE_TYPES: [(i32, &str); 6] = [
     (5, "Original size"),
     (6, "Smart fit"),
 ];
-/// Double-tap zoom animation durations in ms (`pref_double_tap_anim_speed`); 1 turns the animation off.
-pub const DOUBLE_TAP_SPEEDS: [(i32, &str); 3] = [(1, "No animation"), (500, "Normal"), (250, "Fast")];
+/// Zoom start codes (`pref_zoom_start_key`).
 pub const ZOOM_STARTS: [(i32, &str); 4] = [(1, "Automatic"), (2, "Left"), (3, "Right"), (4, "Center")];
-pub const TAPPING_INVERT: [(TappingInvertMode, &str); 4] = [
-    (TappingInvertMode::NONE, "None"),
-    (TappingInvertMode::HORIZONTAL, "Horizontal"),
-    (TappingInvertMode::VERTICAL, "Vertical"),
-    (TappingInvertMode::BOTH, "Both"),
-];
-pub const HIDE_THRESHOLDS: [(ReaderHideThreshold, &str); 4] = [
-    (ReaderHideThreshold::HIGHEST, "Highest"),
-    (ReaderHideThreshold::HIGH, "High"),
-    (ReaderHideThreshold::LOW, "Low"),
-    (ReaderHideThreshold::LOWEST, "Lowest"),
-];
 
-/// The whole reader page as a preference tree, with the rows the rule table disables left out.
-#[allow(dead_code)] // the settings search is not routed yet
-pub fn rows(prefs: &Prefs) -> Vec<Preference> {
-    tree(prefs, true)
-}
-
-/// The same tree with the disabled rows kept (flagged), so a page built from the spec can tell a hidden row from one
-/// this module does not build.
+/// The reader settings rows, every one of them kept. The page is built from these rows alone; the spec only gives the title and toolbar.
 pub fn rows_all(prefs: &Prefs) -> Vec<Preference> {
-    tree(prefs, false)
-}
-
-fn tree(prefs: &Prefs, hide: bool) -> Vec<Preference> {
-    let vis = |items: Vec<PreferenceItem>| if hide { visible(items) } else { items };
     let r = &prefs.reader;
-    let s = ReaderState::from_prefs(r);
-    let mut tree: Vec<Preference> = vec![
-        item(int_choice("Default reading mode", &r.default_reading_mode, &READING_MODES, true)),
-        item(int_choice("Double tap animation speed", &r.double_tap_anim_speed, &DOUBLE_TAP_SPEEDS, true)),
-        item(switch_sub("Show reading mode", "Briefly show current mode when reader is opened", &r.show_reading_mode, true)),
-        item(switch_sub(
-            "Show tap zones overlay",
-            "Briefly show when reader is opened",
-            &r.show_navigation_overlay_on_start,
-            true,
-        )),
-        item(switch("Animate page transitions", &r.page_transitions, true)),
-    ];
-    tree.push(group(
-        "Display",
-        vis(vec![
-            int_choice("Background color", &r.reader_theme, &BACKGROUNDS, true),
-            switch("Fullscreen", &r.fullscreen, true),
-            switch("Keep screen on", &r.keep_screen_on, true),
-            switch("Show page number", &r.show_page_number, true),
-        ]),
-    ));
-    tree.push(group("E-Ink", vis(eink_rows(r, &s))));
-    tree.push(group(
-        "Reading",
-        vis(vec![
-            switch("Skip chapters marked read", &r.skip_read, true),
-            switch("Skip filtered chapters", &r.skip_filtered, true),
-            switch("Skip duplicate chapters", &r.skip_dupe, true),
-            switch("Always show chapter transition", &r.always_show_chapter_transition, true),
-            switch("Preserve reading position on read chapters", &r.preserve_reading_position, true),
-        ]),
-    ));
-    tree.push(group(
-        "Paged",
-        vis(vec![
-            int_choice("Tap zones", &r.navigation_mode_pager, &TAP_ZONES, true),
-            enum_choice(
-                "Invert tap zones",
-                &r.pager_nav_inverted,
-                &TAPPING_INVERT,
-                row_enabled(Row::PagerInvertTapZones, &s),
-            ),
-            int_choice("Scale type", &r.image_scale_type, &SCALE_TYPES, true),
-            int_choice("Zoom start position", &r.zoom_start, &ZOOM_STARTS, true),
-            switch("Crop borders", &r.crop_borders, true),
-            switch("Automatically zoom into wide images", &r.landscape_zoom, row_enabled(Row::PagerLandscapeZoom, &s)),
-            switch("Pan wide images", &r.navigate_to_pan, row_enabled(Row::PagerPanWide, &s)),
-            exclusive_switch("Split wide pages", &r.dual_page_split_paged, &r.dual_page_rotate_to_fit, true),
-            switch(
-                "Invert split page placement",
-                &r.dual_page_invert_paged,
-                row_enabled(Row::PagerInvertSplit, &s),
-            ),
-            exclusive_switch("Rotate wide pages to fit", &r.dual_page_rotate_to_fit, &r.dual_page_split_paged, true),
-            switch(
-                "Flip orientation of rotated wide pages",
-                &r.dual_page_rotate_to_fit_invert,
-                row_enabled(Row::PagerFlipRotated, &s),
-            ),
-        ]),
-    ));
-    let padding = format!("{}%", r.webtoon_side_padding.get());
-    tree.push(group(
-        "Long strip",
-        vis(vec![
-            int_choice("Tap zones", &r.navigation_mode_webtoon, &TAP_ZONES, true),
-            enum_choice(
-                "Invert tap zones",
-                &r.webtoon_nav_inverted,
-                &TAPPING_INVERT,
-                row_enabled(Row::WebtoonInvertTapZones, &s),
-            ),
-            slider(
-                "Side padding",
-                &r.webtoon_side_padding,
-                PADDING_RANGE,
-                Some(padding.as_str()),
-                true,
-            ),
-            enum_choice("Sensitivity for hiding menu on scroll", &r.reader_hide_threshold, &HIDE_THRESHOLDS, true),
-            switch("Crop borders", &r.crop_borders_webtoon, true),
-            exclusive_switch("Split wide pages", &r.dual_page_split_webtoon, &r.dual_page_rotate_to_fit_webtoon, true),
-            switch(
-                "Invert split page placement",
-                &r.dual_page_invert_webtoon,
-                row_enabled(Row::WebtoonInvertSplit, &s),
-            ),
-            exclusive_switch("Rotate wide pages to fit", &r.dual_page_rotate_to_fit_webtoon, &r.dual_page_split_webtoon, true),
-            switch(
-                "Flip orientation of rotated wide pages",
-                &r.dual_page_rotate_to_fit_invert_webtoon,
-                row_enabled(Row::WebtoonFlipRotated, &s),
-            ),
-            switch("Double tap to zoom", &r.webtoon_double_tap_zoom_enabled, true),
-            switch("Disable zoom out", &r.webtoon_disable_zoom_out, true),
-        ]),
-    ));
-    let volume_keys_on = r.read_with_volume_keys.get();
-    tree.push(group(
-        "Navigation",
-        vis(vec![
-            switch("Volume keys", &r.read_with_volume_keys, true),
-            switch("Invert volume keys", &r.read_with_volume_keys_inverted, volume_keys_on),
-        ]),
-    ));
-    tree.push(group(
-        "Actions",
-        vis(vec![
-            switch("Show actions on long tap", &r.read_with_long_tap, true),
-            switch_sub(
-                "Save pages into separate folders",
-                "Creates folders according to entries' title",
-                &r.folder_per_manga,
-                true,
-            ),
-        ]),
-    ));
-    tree
-}
-
-/// The E-Ink group (task T-47a-035): the page-change flash switch, then its duration, interval and colour, which need
-/// the switch on. The duration is stored in milliseconds and offered in 100 ms steps.
-fn eink_rows(r: &kuro_prefs::reader::ReaderPrefs, s: &ReaderState) -> Vec<PreferenceItem> {
-    let millis = r.flash_duration_millis.get();
-    let duration = format!("{millis} ms");
-    let interval = r.flash_page_interval.get();
-    let pages = if interval == 1 { "1 page".to_owned() } else { format!("{interval} pages") };
     vec![
-        switch_sub("Flash on page change", "Reduces ghosting on e-ink displays", &r.flash_on_page_change, true),
-        scaled_slider("Flash duration", &r.flash_duration_millis, 1..=15, 100, Some(duration.as_str()), row_enabled(Row::FlashDuration, s)),
-        slider("Flash every", &r.flash_page_interval, 1..=10, Some(pages.as_str()), row_enabled(Row::FlashInterval, s)),
-        enum_choice(
-            "Flash with",
-            &r.flash_color,
-            &[(FlashColor::BLACK, "Black"), (FlashColor::WHITE, "White"), (FlashColor::WHITE_BLACK, "White and Black")],
-            row_enabled(Row::FlashColor, s),
+        item(int_choice("Default reading mode", &r.default_reading_mode, &READING_MODES, true)),
+        group("Display", vec![int_choice("Background color", &r.reader_theme, &BACKGROUNDS, true)]),
+        group(
+            "Paged",
+            vec![
+                int_choice("Scale type", &r.image_scale_type, &SCALE_TYPES, true),
+                int_choice("Zoom start position", &r.zoom_start, &ZOOM_STARTS, true),
+                switch("Crop borders", &r.crop_borders, true),
+                switch("Split wide pages", &r.dual_page_split_paged, true),
+            ],
         ),
     ]
 }
@@ -221,133 +59,29 @@ mod tests {
             .collect()
     }
 
-    fn titles_of(tree: &[Preference], group: &str) -> Vec<String> {
-        tree.iter()
-            .find_map(|entry| match entry {
-                Preference::Group(g) if g.title == group => Some(g.items.iter().map(|i| i.title().to_owned()).collect()),
-                _ => None,
-            })
-            .unwrap_or_default()
-    }
-
     #[test]
-    fn the_page_has_its_groups_in_order_after_the_top_level_rows() {
+    fn the_page_has_the_top_row_then_display_and_paged_groups() {
         let prefs = Prefs::in_memory();
-        let tree = rows(&prefs);
-        assert_eq!(group_titles(&tree), ["Display", "E-Ink", "Reading", "Paged", "Long strip", "Navigation", "Actions"]);
-        let top: Vec<&str> = tree
-            .iter()
-            .filter_map(|e| match e {
-                Preference::Item(i) => Some(i.title()),
-                Preference::Group(_) => None,
-            })
-            .collect();
-        assert_eq!(
-            top,
-            ["Default reading mode", "Double tap animation speed", "Show reading mode", "Show tap zones overlay", "Animate page transitions"]
-        );
+        let tree = rows_all(&prefs);
+        assert_eq!(tree.len(), 3);
+        assert!(matches!(tree[0], Preference::Item(_)));
+        assert_eq!(group_titles(&tree), ["Display", "Paged"]);
     }
 
     #[test]
-    fn default_display_group_has_its_four_rows_in_android_order() {
-        let tree = rows(&Prefs::in_memory());
-        assert_eq!(
-            titles_of(&tree, "Display"),
-            ["Background color", "Fullscreen", "Keep screen on", "Show page number"]
-        );
-    }
-
-    #[test]
-    fn eink_shows_only_the_flash_switch_until_it_is_on_then_the_three_rows() {
+    fn the_paged_group_holds_the_four_kept_layout_rows() {
         let prefs = Prefs::in_memory();
-        assert_eq!(titles_of(&rows(&prefs), "E-Ink"), ["Flash on page change"]);
-        prefs.reader.flash_on_page_change.set(true).unwrap();
-        assert_eq!(titles_of(&rows(&prefs), "E-Ink"), ["Flash on page change", "Flash duration", "Flash every", "Flash with"]);
+        let tree = rows_all(&prefs);
+        let Preference::Group(paged) = &tree[2] else { panic!("the Paged group") };
+        let titles: Vec<&str> = paged.items.iter().map(|i| i.title()).collect();
+        assert_eq!(titles, ["Scale type", "Zoom start position", "Crop borders", "Split wide pages"]);
     }
 
     #[test]
-    fn eink_duration_slider_is_in_100_ms_steps_stored_in_milliseconds() {
-        let prefs = Prefs::in_memory();
-        prefs.reader.flash_on_page_change.set(true).unwrap();
-        let tree = rows(&prefs);
-        let PreferenceItem::Slider { value, range, on_change, common, .. } = find_item(&tree, "E-Ink", "Flash duration") else {
-            panic!("a slider")
-        };
-        assert_eq!((*value, *range.start(), *range.end()), (1, 1, 15));
-        assert_eq!(common.subtitle.as_deref(), Some("100 ms"));
-        assert!(block_on(on_change(3)).unwrap());
-        assert_eq!(prefs.reader.flash_duration_millis.get(), 300);
-    }
-
-    #[test]
-    fn paged_dependent_rows_are_hidden_until_their_switch_is_on() {
-        let prefs = Prefs::in_memory();
-        let before = titles_of(&rows(&prefs), "Paged");
-        assert!(!before.iter().any(|t| t == "Invert split page placement"));
-        assert!(!before.iter().any(|t| t == "Flip orientation of rotated wide pages"));
-        prefs.reader.dual_page_split_paged.set(true).unwrap();
-        let after = titles_of(&rows(&prefs), "Paged");
-        assert!(after.iter().any(|t| t == "Invert split page placement"));
-    }
-
-    #[test]
-    fn disabled_paged_tap_zones_hide_the_invert_and_pan_rows() {
-        let prefs = Prefs::in_memory();
-        prefs.reader.navigation_mode_pager.set(5).unwrap();
-        let titles = titles_of(&rows(&prefs), "Paged");
-        assert!(!titles.iter().any(|t| t == "Invert tap zones"));
-        assert!(!titles.iter().any(|t| t == "Pan wide images"));
-    }
-
-    #[test]
-    fn split_and_rotate_are_exclusive_through_their_vetoes() {
-        let prefs = Prefs::in_memory();
-        prefs.reader.dual_page_rotate_to_fit.set(true).unwrap();
-        let tree = rows(&prefs);
-        let PreferenceItem::Switch { veto, .. } = find_item(&tree, "Paged", "Split wide pages") else {
-            panic!("split is a switch")
-        };
-        assert_eq!(block_on(veto(true)), Ok(true));
-        assert!(!prefs.reader.dual_page_rotate_to_fit.get());
-    }
-
-    #[test]
-    fn webtoon_padding_subtitle_is_the_percent_of_the_value() {
-        let prefs = Prefs::in_memory();
-        prefs.reader.webtoon_side_padding.set(12).unwrap();
-        let tree = rows(&prefs);
-        let PreferenceItem::Slider { common, range, .. } = find_item(&tree, "Long strip", "Side padding") else {
-            panic!("slider")
-        };
-        assert_eq!(common.subtitle.as_deref(), Some("12%"));
-        assert_eq!(*range.end(), 25);
-    }
-
-    #[test]
-    fn volume_inversion_is_shown_only_with_volume_keys_and_the_actions_group_has_both_rows() {
-        let prefs = Prefs::in_memory();
-        assert_eq!(titles_of(&rows(&prefs), "Navigation"), ["Volume keys"]);
-        prefs.reader.read_with_volume_keys.set(true).unwrap();
-        assert_eq!(titles_of(&rows(&prefs), "Navigation"), ["Volume keys", "Invert volume keys"]);
-        assert_eq!(titles_of(&rows(&prefs), "Actions"), ["Show actions on long tap", "Save pages into separate folders"]);
-        assert_eq!(DOUBLE_TAP_SPEEDS.map(|(code, _)| code), [1, 500, 250]);
-    }
-
-    fn find_item<'a>(tree: &'a [Preference], group: &str, title: &str) -> &'a PreferenceItem {
-        tree.iter()
-            .find_map(|entry| match entry {
-                Preference::Group(g) if g.title == group => g.items.iter().find(|i| i.title() == title),
-                _ => None,
-            })
-            .expect("row exists")
-    }
-
-    fn block_on<F: std::future::Future>(future: F) -> F::Output {
-        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
-        let mut future = std::pin::pin!(future);
-        match future.as_mut().poll(&mut context) {
-            std::task::Poll::Ready(value) => value,
-            std::task::Poll::Pending => panic!("veto is not immediately ready"),
-        }
+    fn the_reading_mode_offers_the_five_modes_and_the_background_the_four_colours() {
+        assert_eq!(READING_MODES.len(), 5);
+        assert_eq!(BACKGROUNDS.len(), 4);
+        assert_eq!(SCALE_TYPES.len(), 6);
+        assert_eq!(ZOOM_STARTS.len(), 4);
     }
 }

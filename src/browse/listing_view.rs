@@ -76,6 +76,8 @@ struct Inner {
     error_slot: gtk::Box,
     toast_slot: gtk::Box,
     items_stack: gtk::Stack,
+    /// The loading row under the items while the next page loads (the paging spinner).
+    footer: gtk::Box,
     store: gtk::gio::ListStore,
     grid: gtk::GridView,
     list: gtk::ListView,
@@ -137,7 +139,14 @@ impl ListingView {
         stack.add_named(&stub, Some("stub"));
         stack.add_named(&error_slot, Some("error"));
         stack.add_named(&empty, Some("empty"));
-        stack.add_named(&scroller, Some("items"));
+        // the items, and under them a loading row while a later page loads
+        let footer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        footer.append(&spinner_row());
+        footer.set_visible(false);
+        let items_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        items_page.append(&scroller);
+        items_page.append(&footer);
+        stack.add_named(&items_page, Some("items"));
 
         let toast_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         toast_slot.set_valign(gtk::Align::End);
@@ -165,6 +174,7 @@ impl ListingView {
             error_slot,
             toast_slot,
             items_stack,
+            footer,
             store,
             grid,
             list,
@@ -413,7 +423,7 @@ impl Inner {
         let prefs = &self.deps.prefs;
         let columns = grid_columns(
             width,
-            BrowsePrefs::columns(prefs.library_columns_portrait.get()),
+            BrowsePrefs::columns(crate::misc::diet_defaults::LIBRARY_PORTRAIT_COLUMNS),
             BrowsePrefs::columns(prefs.library_columns_landscape.get()),
         );
         Some((columns, viewport))
@@ -499,6 +509,7 @@ impl Inner {
 
     fn render(self: &Rc<Self>) {
         let plan = self.listing.borrow().plan(self.ready.get(), self.deps.stub, self.deps.is_local, self.display.get());
+        self.footer.set_visible(matches!(plan, ContentPlan::Items { .. }) && self.listing.borrow().loading_more());
         self.clear(&self.toast_slot);
         match plan {
             ContentPlan::Spinner => self.stack.set_visible_child_name("spinner"),

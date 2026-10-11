@@ -14,15 +14,14 @@ use gtk::gdk::{self, ModifierType};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GBox, Button, CheckButton, GestureClick, GestureLongPress, Image, Label, ListBox, Orientation as O};
-use kuro_downloads::download_prefs::DownloadPrefs;
 use kuro_domain::dates::ListRow;
 use kuro_domain::kind::EntryKind;
 use kuro_domain::updates::repo::UpdatesRepo;
 use kuro_images::art::{ArtKind, ArtRef, Owner};
 use kuro_i18n::{MsgKey, tr};
-use kuro_prefs::ui::UiPrefs;
 
 use crate::data;
+use crate::misc::diet_defaults as diet;
 use crate::updates::bottom_bar::{self, BarAction, BarCommand, Selected};
 use crate::updates::bulk::{self, BulkAction};
 use crate::updates::coalesce::watch_coalesced;
@@ -171,8 +170,7 @@ impl UpdatesScreen {
                 download_watch: RefCell::default(),
                 disk: RefCell::default(),
                 index: RefCell::default(),
-                external_downloader: kind == EntryKind::Anime
-                    && DownloadPrefs::new(data::app().base.store().clone()).use_external_downloader().get(),
+                external_downloader: diet::DOWNLOAD_USE_EXTERNAL,
                 refresh_pending: std::cell::Cell::new(false),
                 invalidate_pending: std::cell::Cell::new(false),
             }
@@ -343,13 +341,12 @@ impl UpdatesScreen {
             child.unparent();
         }
         self.col.append(&last_updated_label());
-        let ui = UiPrefs::new(data::app().base.store().clone());
         let items = feed::layout(
             rows,
             &Local,
             Local::now().date_naive(),
-            ui.relative_time.get(),
-            &ui.date_format.get(),
+            diet::LIBRARY_RELATIVE_TIME,
+            diet::LIBRARY_DATE_FORMAT,
             kuro_i18n::current_locale().tag,
         );
         let mut current: Option<ListBox> = None;
@@ -559,7 +556,7 @@ impl UpdatesScreen {
 
     /// Removes the downloads of the units just marked read, grouped per entry, when the preference is on (E-U33).
     fn remove_downloads_of_read(&self, newly_read: Vec<UnitTarget>) {
-        let enabled = DownloadPrefs::new(data::app().base.store().clone()).remove_after_marked_as_read().get();
+        let enabled = diet::DOWNLOAD_REMOVE_AFTER_MARKED_READ;
         if !enabled || newly_read.is_empty() {
             return;
         }

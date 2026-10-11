@@ -1,5 +1,5 @@
-//! The extension details page: the header (112 px icon, name, package, version, language and NSFW age rating, uninstall,
-//! incognito switch), the obsolete banner, the source rows with their switches and settings buttons, and the header
+//! The extension details page: the header (112 px icon, name, package, version, language and NSFW age rating, uninstall),
+//! the obsolete banner, the source rows with their switches and settings buttons, and the header
 //! actions: the repository link and the enable all, disable all and clear cookies actions (T-40a-021, T-40a-022). The
 //! rules are in `ext_details`; this file draws them and writes the preferences.
 
@@ -26,8 +26,6 @@ pub const DETAILS_MAX_WIDTH_PX: i32 = 640;
 
 /// What the page needs from the app.
 pub struct DetailsDeps {
-    /// `incognito_extensions` of the kind: the package names whose history is paused.
-    pub incognito: Pref<BTreeSet<String>>,
     /// `hidden_catalogues` of the kind: the disabled source ids, as strings.
     pub disabled: Pref<BTreeSet<String>>,
     /// The Uninstall button.
@@ -194,9 +192,6 @@ impl Inner {
             self.column.append(&banner);
         }
         self.column.append(&self.header(&details));
-        let incognito = crate::ui::boxed_list();
-        incognito.append(&self.incognito_row(&details.pkg));
-        self.column.append(&incognito);
         self.column.append(&crate::ui::heading(&tr(MsgKey::label_sources)));
         let sources = crate::ui::boxed_list();
         for row in detail_rows(&details.sources, &self.deps.disabled.get()) {
@@ -266,31 +261,6 @@ impl Inner {
             buttons: vec![(tr(MsgKey::action_ok), ButtonStyle::Suggested)],
         };
         self.dialogs.show(&self.column, spec, |_| {});
-    }
-
-    /// The incognito row: only its switch reacts, so the row itself is not activatable.
-    fn incognito_row(self: &Rc<Self>, pkg: &str) -> gtk::ListBoxRow {
-        let row = row_box();
-        let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        text.set_hexpand(true);
-        text.append(&gtk::Label::builder().label(tr(MsgKey::pref_incognito_mode)).xalign(0.0).build());
-        text.append(&gtk::Label::builder().label(tr(MsgKey::pref_incognito_mode_extension_summary)).xalign(0.0).css_classes(["dim-label"]).wrap(true).build());
-        row.append(&text);
-        let switch = gtk::Switch::builder().active(self.deps.incognito.get().contains(pkg)).valign(gtk::Align::Center).build();
-        let (weak, pkg) = (Rc::downgrade(self), pkg.to_owned());
-        switch.connect_state_set(move |switch, on| {
-            if let Some(inner) = weak.upgrade() {
-                let mut set = inner.deps.incognito.get();
-                if on { set.insert(pkg.clone()) } else { set.remove(&pkg) };
-                if let Err(error) = inner.deps.incognito.set(set) {
-                    tracing::warn!(%error, "the incognito extensions could not be stored");
-                }
-            }
-            switch.set_state(on);
-            gtk::glib::Propagation::Stop
-        });
-        row.append(&switch);
-        gtk::ListBoxRow::builder().child(&row).activatable(false).build()
     }
 
     /// A source row: activating it (click, Enter or Space) flips the source; the switch only shows the state.
@@ -364,7 +334,6 @@ pub(crate) mod tests {
 
     struct Rig {
         page: ExtDetailsPage,
-        incognito: Pref<BTreeSet<String>>,
         disabled: Pref<BTreeSet<String>>,
         uninstalled: Rc<Cell<u32>>,
         opened: Rc<RefCell<Vec<String>>>,
@@ -375,11 +344,9 @@ pub(crate) mod tests {
 
     fn rig() -> Rig {
         let store = PrefStore::in_memory();
-        let incognito = store.pref("incognito_extensions", BTreeSet::<String>::new());
         let disabled = store.pref("hidden_catalogues", BTreeSet::<String>::new());
         let (uninstalled, opened, prefs_for, toasts, cookie_calls) = (Rc::new(Cell::new(0)), Rc::default(), Rc::default(), Rc::default(), Rc::default());
         let deps = DetailsDeps {
-            incognito: incognito.clone(),
             disabled: disabled.clone(),
             uninstall: {
                 let n = Rc::clone(&uninstalled);
@@ -405,7 +372,7 @@ pub(crate) mod tests {
                 Rc::new(move |text| log.borrow_mut().push(text))
             },
         };
-        Rig { page: ExtDetailsPage::new(deps), incognito, disabled, uninstalled, opened, prefs_for, toasts, cookie_calls }
+        Rig { page: ExtDetailsPage::new(deps), disabled, uninstalled, opened, prefs_for, toasts, cookie_calls }
     }
 
     fn details(nsfw: bool, obsolete: bool) -> ExtDetails {
@@ -466,7 +433,7 @@ pub(crate) mod tests {
         assert_eq!(rig.page.inner.stack.visible_child_name().as_deref(), Some("empty"), "no extension: empty_screen");
         rig.page.set_details(Some(details(true, true)));
         let text = labels(&rig.page.inner.column);
-        for expected in ["Foo", "en.foo", "1.4.12", &tr(MsgKey::ext_nsfw_short), &tr(MsgKey::obsolete_extension_message), &tr(MsgKey::pref_incognito_mode)] {
+        for expected in ["Foo", "en.foo", "1.4.12", &tr(MsgKey::ext_nsfw_short), &tr(MsgKey::obsolete_extension_message)] {
             assert!(text.iter().any(|t| t == expected), "{expected} is on the page: {text:?}");
         }
         let icons = all::<gtk::Image>(&rig.page.inner.column);
@@ -504,16 +471,6 @@ pub(crate) mod tests {
         none.repo_url = None;
         rig.page.set_details(Some(none));
         assert!(!rig.page.inner.repo_button.is_visible(), "no repo, no action");
-    }
-
-    fn the_incognito_switch_writes_the_package_into_the_set() {
-        let rig = rig();
-        rig.page.set_details(Some(details(false, false)));
-        let switch = all::<gtk::Switch>(&rig.page.inner.column).into_iter().find(|s| s.can_target()).expect("incognito switch");
-        switch.emit_by_name::<bool>("state-set", &[&true]);
-        assert!(rig.incognito.get().contains("eu.kanade.tachiyomi.extension.en.foo"));
-        switch.emit_by_name::<bool>("state-set", &[&false]);
-        assert!(rig.incognito.get().is_empty());
     }
 
     fn source_rows_toggle_on_a_click_and_enable_all_and_disable_all_write_every_id() {
@@ -567,7 +524,6 @@ pub(crate) mod tests {
         the_header_shows_the_facts_the_banner_and_the_age_rating_dialog();
         a_header_click_copies_the_debug_text_and_toasts();
         the_repo_action_shows_only_with_a_link_and_opens_the_github_page();
-        the_incognito_switch_writes_the_package_into_the_set();
         source_rows_toggle_on_a_click_and_enable_all_and_disable_all_write_every_id();
         clearing_cookies_goes_through_each_distinct_base_url_once();
         the_uninstall_button_calls_back_and_a_vanished_extension_shows_the_empty_screen();

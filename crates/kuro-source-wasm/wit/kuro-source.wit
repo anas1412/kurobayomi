@@ -15,7 +15,21 @@ interface host {
 
 world source {
     import host;
-    /// op is one of: "info", "create-sources", "popular", "latest", "search", "details", "chapters", "pages".
+    /// op is one of: "info", "create-sources", "popular", "latest", "search", "details", "chapters", "pages" (manga),
+    /// or "episodes", "hosters", "videos", "subtitles" (anime, see below).
     /// Unknown op → Err("unknown op: <op>").
+    ///
+    /// Input is the envelope {"sourceId": n, "args": {...}}. Output is JSON in camelCase. An anime package answers
+    /// "popular", "latest" and "search" with {"animes": [...], "hasNextPage": bool}, and an anime is {"url", "title",
+    /// "description", "thumbnailUrl"}. The anime ops are additive to ABI 1.4: a guest that lacks one answers "unknown op".
+    ///   "episodes"  args {"anime": Anime}                 → [Episode]
+    ///               Episode {"url", "name", "episodeNumber", "fillermark", "scanlator", "dateUpload", "summary"}
+    ///   "hosters"   args {"episode": Episode}             → [Hoster]
+    ///               Hoster {"hosterUrl", "hosterName", "videoList" (absent when fetched later), "internalData", "lazy"}
+    ///   "videos"    args {"hoster": Hoster} or {"episode": Episode}  → [Video]
+    ///               Video {"videoUrl", "videoTitle", "resolution", "bitrate", "headers": [[name, value]],
+    ///                      "preferred", "subtitleTracks": [Track], "audioTracks": [Track], "internalData"}
+    ///   "subtitles" args {"video": Video}                 → [Track]
+    ///               Track {"url", "lang"}
     export invoke: func(op: string, input-json: string) -> result<string, string>;
 }

@@ -202,6 +202,8 @@ fn the_area_going_away_hands_off_on_a_move_and_saves_and_stops_otherwise() {
         playback,
         tracker: Tracker::open(Arc::clone(&db), id, false),
         media,
+        episode_id: id,
+        resolving: false,
         finished_saved: false,
         closed: false,
         handoff: None,

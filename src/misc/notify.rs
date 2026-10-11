@@ -32,11 +32,11 @@ use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 use kuro_domain::kind::EntryKind;
-use kuro_downloads::download_prefs::DownloadPrefs;
 
 use crate::library_update::notice::{self, EntryAction};
 use crate::library_update::pass::EntryUpdate;
 use crate::library_update::text;
+use crate::misc::diet_defaults as diet;
 use crate::misc::ids;
 use crate::misc::router::{self, ActionHost, AppAction, QueueOp};
 use crate::misc::rules;
@@ -332,7 +332,7 @@ impl ActionHost for GtkHost {
     fn mark_read(&self, kind: EntryKind, entry_id: i64, urls: Vec<String>) {
         let data = crate::data::app();
         let db = data.db(kind);
-        let remove = DownloadPrefs::new(data.base.store().clone()).remove_after_marked_as_read().get();
+        let remove = diet::DOWNLOAD_REMOVE_AFTER_MARKED_READ;
         let backend = download_host::current();
         glib::spawn_future_local(async move {
             let done = download_host::blocking(move || {
@@ -350,7 +350,7 @@ impl ActionHost for GtkHost {
     fn download(&self, kind: EntryKind, entry_id: i64, urls: Vec<String>) {
         let data = crate::data::app();
         let db = data.db(kind);
-        let external = kind == EntryKind::Anime && DownloadPrefs::new(data.base.store().clone()).use_external_downloader().get();
+        let external = diet::DOWNLOAD_USE_EXTERNAL;
         let backend = download_host::current();
         glib::spawn_future_local(async move {
             let queued = download_host::blocking(move || {

@@ -1,5 +1,6 @@
-//! The player header's menu: the audio and subtitle tracks of the loaded file, read from mpv each time the menu
-//! opens. A row click selects the track (rows go through `widgets::row_activate`).
+//! The player header's audio and subtitle menu: the tracks of the loaded file, read from mpv each time the menu opens.
+//! Both lists start with Off (audio Off comes from `load_track_lists`, subtitle Off is added here). The current track
+//! carries the check mark. A row click selects the track. The lists use the shared popover helper in `sheets`.
 
 use std::rc::Rc;
 
@@ -8,6 +9,7 @@ use kuro_player::mpv::MpvHandle;
 use kuro_player::tracks::{TRACK_NONE, TrackProps, VideoTrack, load_track_lists, track_id_from_value, track_label};
 
 use super::Shared;
+use super::sheets::{self, Choice};
 
 /// mpv's `track-list/*` properties as the track lists read them.
 pub struct MpvTracks<'a>(pub &'a MpvHandle);
@@ -32,22 +34,13 @@ impl TrackProps for MpvTracks<'_> {
 
 /// The menu button. Its list is rebuilt whenever it opens, so tracks added after the load show up.
 pub fn tracks_menu(shared: &Shared) -> gtk::MenuButton {
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    crate::ui::margins(&column, 6);
-    let popover = gtk::Popover::builder().child(&column).build();
-    {
-        let (shared, column) = (Rc::clone(shared), column.clone());
-        popover.connect_show(move |popover| fill(&column, popover, &shared));
-    }
-    let menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).tooltip_text("Tracks").build();
-    menu.update_property(&[gtk::accessible::Property::Label("Tracks")]);
+    let shared = Rc::clone(shared);
+    let menu = sheets::menu("Tracks", move |column, popover| fill(column, popover, &shared));
+    menu.set_icon_name("view-more-symbolic");
     menu
 }
 
 fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared) {
-    while let Some(child) = column.first_child() {
-        column.remove(&child);
-    }
     let (lists, aid, sid) = {
         let player = shared.borrow();
         let mpv = player.playback.mpv();
@@ -57,22 +50,24 @@ fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared) {
     let mut subtitles = vec![VideoTrack { id: TRACK_NONE, name: "Off".to_owned(), language: None }];
     subtitles.extend(lists.subtitles);
     for (heading, property, tracks, selected) in [("Audio", "aid", lists.audio, aid), ("Subtitles", "sid", subtitles, sid)] {
-        column.append(&gtk::Label::builder().label(heading).xalign(0.0).css_classes(["heading"]).build());
-        let list = crate::ui::boxed_list();
-        for track in tracks {
-            let check = gtk::Image::from_icon_name("object-select-symbolic");
-            check.set_opacity(if track.id == selected { 1.0 } else { 0.0 });
-            let row = crate::ui::row(&track_label(track.id, &track.name, track.language.as_deref()), None, Some(check.upcast()));
-            row.set_activatable(true);
-            let (shared, popover, id) = (Rc::clone(shared), popover.clone(), track.id);
-            crate::widgets::row_activate::on_activate(&row, move |_| {
-                popover.popdown();
-                if let Err(e) = shared.borrow().playback.mpv().set_track(property, id) {
-                    tracing::warn!(error = %e, property, "player: the track was not selected");
-                }
-            });
-            list.append(&row);
-        }
-        column.append(&list);
+        let choices = tracks.into_iter().map(|track| choice(shared, property, track, selected)).collect();
+        sheets::section(column, Some(heading), choices, popover);
+    }
+}
+
+/// One track row. Choosing it selects the track in mpv under `property` (`aid` or `sid`).
+fn choice(shared: &Shared, property: &'static str, track: VideoTrack, selected: i64) -> Choice {
+    let title = track_label(track.id, &track.name, track.language.as_deref());
+    let (shared, id) = (Rc::clone(shared), track.id);
+    Choice {
+        title,
+        subtitle: None,
+        current: id == selected,
+        enabled: true,
+        pick: Box::new(move || {
+            if let Err(e) = shared.borrow().playback.mpv().set_track(property, id) {
+                tracing::warn!(error = %e, property, "player: the track was not selected");
+            }
+        }),
     }
 }

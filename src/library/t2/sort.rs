@@ -167,20 +167,18 @@ fn t2_sort_09_equal_keys_break_by_title_ascending_even_when_descending() {
 
 #[test]
 fn t2_sort_10_categorized_display_decides_which_categories_take_the_sort() {
-    let (_d, svc, prefs) = service(EntryKind::Manga);
+    let (_d, svc, _prefs) = service(EntryKind::Manga);
     let a = block_on(svc.create("A")).expect("a");
     let b = block_on(svc.create("B")).expect("b");
     let date_added = LibrarySort { ty: SortType::DateAdded, dir: Direction::Descending };
     let flags_of = |id: i64| svc.repo().get(id).expect("read").expect("row").flags;
     let before = (flags_of(a.id), flags_of(b.id));
 
-    prefs.categorized_display_settings.set(true).expect("pref");
     block_on(svc.set_sort_mode(Some(a.id), date_added, || 0)).expect("categorized write");
     assert_eq!(flags_of(a.id), date_added.apply_to(before.0), "the target category changes");
     assert_eq!(flags_of(b.id), before.1, "the others do not");
 
-    prefs.categorized_display_settings.set(false).expect("pref");
-    block_on(svc.set_sort_mode(Some(a.id), date_added, || 0)).expect("global write");
+    block_on(svc.set_sort_mode(None, date_added, || 0)).expect("global write");
     assert_eq!(flags_of(a.id), flags_of(b.id), "the same flags reach every category");
     assert_eq!(svc.global_sort(), date_added);
 }

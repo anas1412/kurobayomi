@@ -15,6 +15,7 @@ use kuro_i18n::{MsgKey, tr};
 
 use crate::screens::Built;
 use crate::data;
+use crate::misc::diet_defaults as diet;
 use crate::updates::download_host;
 use crate::updates::library_trigger::{self, Outcome};
 use crate::updates::history_screen::HistoryScreen;
@@ -238,10 +239,7 @@ pub fn stats() -> Option<Built> {
 async fn stats_of(kind: EntryKind) -> Option<stats_data::Loaded> {
     let db = crate::data::app().db(kind);
     let index = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
-    let rules = stats_data::GlobalUpdateRules::from_library_prefs(
-        &kuro_prefs::library::LibraryPrefs::new(crate::data::app().base.store().clone()),
-        kind,
-    );
+    let rules = stats_data::GlobalUpdateRules::hard_coded_rules();
     download_host::blocking(move || {
         let downloaded = match kind {
             EntryKind::Manga => index.map_or(0, |i| i.chapter_count_total() as i64),
@@ -295,7 +293,7 @@ fn storage_screen(kind: EntryKind) -> (Rc<StorageScreen>, Vec<glib::JoinHandle<(
             glib::spawn_future_local(async move {
                 let Some(screen) = weak.upgrade() else { return };
                 let db = crate::data::app().db(kind);
-                let hide_hidden = crate::data::app().library.hide_hidden_categories_settings.get();
+                let hide_hidden = diet::LIBRARY_HIDE_HIDDEN_CATEGORIES;
                 let (backend, initializing) = (download_host::current(), *download_host::hub().cache.initializing().borrow());
                 let built = download_host::blocking(move || storage_data::input(&db, kind, &*backend, hide_hidden, initializing)).await;
                 match built {

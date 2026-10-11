@@ -54,6 +54,7 @@ pub fn spawn_track_episode(
         .trackers
         .logged_in()
         .iter()
+        .filter(|t| ctx.trackers.is_enabled(t.id()))
         .filter(|t| t.as_anime().is_some())
         .map(|t| ctx.locks.for_binding(Kind::Anime, entry_id, t.id()))
         .collect();
@@ -79,6 +80,7 @@ async fn track_episode_with(
         .trackers
         .logged_in()
         .into_iter()
+        .filter(|t| ctx.trackers.is_enabled(t.id()))
         .map(|tracker| episode_for(ctx, tracker, entry_id, episode, already_locked));
     join_all(runs).await.into_iter().flatten().collect()
 }
@@ -144,6 +146,7 @@ pub fn spawn_track_chapter(
         .trackers
         .logged_in()
         .iter()
+        .filter(|t| ctx.trackers.is_enabled(t.id()))
         .filter(|t| t.as_manga().is_some())
         .map(|t| ctx.locks.for_binding(Kind::Manga, manga_id, t.id()))
         .collect();
@@ -168,6 +171,7 @@ async fn track_chapter_with(
         .trackers
         .logged_in()
         .into_iter()
+        .filter(|t| ctx.trackers.is_enabled(t.id()))
         .map(|tracker| chapter_for(ctx, tracker, manga_id, chapter, already_locked));
     join_all(runs).await.into_iter().flatten().collect()
 }

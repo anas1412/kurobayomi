@@ -33,7 +33,6 @@ pub fn change_settings_in(store: &PrefStore, change: impl FnOnce(&mut ThemeSetti
     change(&mut settings);
     prefs::write_scheme(store, settings.scheme);
     prefs::write_mode(store, settings.mode);
-    prefs::write_amoled(store, settings.amoled);
     if let Some(display) = gtk::gdk::Display::default() {
         apply::set_settings(&display, settings);
     }

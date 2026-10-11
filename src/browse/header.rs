@@ -1,12 +1,11 @@
-//! The source header bar: the display-mode button and its three radio items, and the overflow entries (T-40a-002).
-//! The stored mode itself lives in the preferences (`prefs::BrowsePrefs::display_mode`).
+//! The source header bar: the display-mode button and its two radio items, and the overflow entries (T-40a-002).
+//! The mode is held for the session only: the stored display-mode setting is cut (`prefs::BrowsePrefs::display_mode`).
 
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::library::LibraryDisplayMode;
 
-/// The three radio items of the display-mode popover, in order: comfortable grid, grid (compact), list (B§2.12).
-pub const DISPLAY_MENU: [LibraryDisplayMode; 3] =
-    [LibraryDisplayMode::ComfortableGrid, LibraryDisplayMode::CompactGrid, LibraryDisplayMode::List];
+/// The two radio items of the display-mode popover, in order: grid and list. The comfortable grid is cut (two modes only).
+pub const DISPLAY_MENU: [LibraryDisplayMode; 2] = [LibraryDisplayMode::CompactGrid, LibraryDisplayMode::List];
 
 /// Icon of the display-mode button: a list when the mode is List, a grid otherwise.
 pub fn display_button_icon(mode: LibraryDisplayMode) -> &'static str {
@@ -82,16 +81,13 @@ mod tests {
             assert!(!overflow_label(item).is_empty());
         }
         let labels: Vec<String> = DISPLAY_MENU.iter().map(|m| display_label(*m)).collect();
-        assert_eq!(labels.len(), 3);
-        assert!(labels[0] != labels[1] && labels[1] != labels[2], "the three radio items read differently");
+        assert_eq!(labels.len(), 2);
+        assert!(labels[0] != labels[1], "the two radio items read differently");
     }
 
     #[test]
-    fn the_popover_has_exactly_three_items_in_order() {
-        assert_eq!(
-            DISPLAY_MENU,
-            [LibraryDisplayMode::ComfortableGrid, LibraryDisplayMode::CompactGrid, LibraryDisplayMode::List]
-        );
+    fn the_popover_has_exactly_two_items_in_order() {
+        assert_eq!(DISPLAY_MENU, [LibraryDisplayMode::CompactGrid, LibraryDisplayMode::List]);
     }
 
     #[test]
@@ -104,8 +100,9 @@ mod tests {
 
     #[test]
     fn the_selected_radio_follows_the_mode() {
-        assert_eq!(selected_radio(LibraryDisplayMode::CompactGrid), Some(1));
-        assert_eq!(selected_radio(LibraryDisplayMode::List), Some(2));
+        assert_eq!(selected_radio(LibraryDisplayMode::CompactGrid), Some(0));
+        assert_eq!(selected_radio(LibraryDisplayMode::List), Some(1));
+        assert_eq!(selected_radio(LibraryDisplayMode::ComfortableGrid), None, "cut from the popover");
         assert_eq!(selected_radio(LibraryDisplayMode::CoverOnlyGrid), None);
     }
 

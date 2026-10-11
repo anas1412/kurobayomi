@@ -1,6 +1,6 @@
 //! The header bar of a source listing: back, the source name, the search toggle, the display-mode button with its
-//! three radio items, and the overflow menu (T-40a-002). The rules (menu items, icon, overflow entries) are in
-//! `header`; a radio selection is written through `BrowsePrefs::set_display_mode`.
+//! two radio items (grid and list), and the overflow menu (T-40a-002). The rules (menu items, icon, overflow entries) are in
+//! `header`. The display mode is cut from the settings: a radio selection changes the grid for this session only.
 
 use std::rc::Rc;
 
@@ -70,7 +70,7 @@ pub fn stub_header(title: &str, on_back: Rc<dyn Fn()>) -> gtk::HeaderBar {
     bar
 }
 
-/// The display-mode button and its popover of three radio items. Choosing one stores it, updates the icon and calls
+/// The display-mode button and its popover of two radio items. Choosing one stores it, updates the icon and calls
 /// `on_display_mode`.
 fn display_menu(deps: &HeaderDeps) -> (gtk::MenuButton, Vec<gtk::CheckButton>) {
     let mode = deps.prefs.display_mode();
@@ -88,19 +88,15 @@ fn display_menu(deps: &HeaderDeps) -> (gtk::MenuButton, Vec<gtk::CheckButton>) {
         radios.push(radio.clone());
         column.append(&radio);
     }
-    // set after grouping, so selecting the stored mode does not fire a write
+    // set after grouping, so selecting the current mode does not fire the change
     if let Some(index) = selected_radio(mode) {
         radios[index].set_active(true);
     }
     for (radio, item) in radios.iter().zip(DISPLAY_MENU) {
-        let (prefs, on_mode, button, popover) =
-            (Rc::clone(&deps.prefs), Rc::clone(&deps.on_display_mode), button.clone(), popover.clone());
+        let (on_mode, button, popover) = (Rc::clone(&deps.on_display_mode), button.clone(), popover.clone());
         radio.connect_toggled(move |radio| {
             if !radio.is_active() {
                 return;
-            }
-            if prefs.set_display_mode(item).is_err() {
-                tracing::warn!("could not store the display mode");
             }
             button.set_icon_name(display_button_icon(item));
             popover.popdown();
@@ -155,16 +151,15 @@ pub(crate) mod tests {
         }
     }
 
-    fn header_shows_the_three_radios_and_writes_the_chosen_mode() {
+    fn header_shows_the_two_radios_and_writes_the_chosen_mode() {
         let log = Rc::new(RefCell::new(Vec::new()));
         let prefs = Rc::new(BrowsePrefs::new(PrefStore::in_memory()));
         let header = build(deps(Rc::clone(&prefs), &log, false, true));
-        assert_eq!(header.radios.len(), 3, "the popover has three items");
-        assert!(header.radios[1].is_active(), "compact grid is selected by default");
+        assert_eq!(header.radios.len(), 2, "the popover has two items");
+        assert!(header.radios[0].is_active(), "compact grid is selected by default");
         assert_eq!(header.display.icon_name().as_deref(), Some("view-grid-symbolic"));
 
-        header.radios[2].set_active(true);
-        assert_eq!(prefs.display_mode(), LibraryDisplayMode::List, "the selection is stored");
+        header.radios[1].set_active(true);
         assert_eq!(header.display.icon_name().as_deref(), Some("view-list-symbolic"));
         assert_eq!(*log.borrow(), ["mode List"]);
 
@@ -172,17 +167,7 @@ pub(crate) mod tests {
         assert_eq!(log.borrow().last().map(String::as_str), Some("search true"));
     }
 
-    fn header_reads_the_stored_mode_without_writing_it_back() {
-        let log = Rc::new(RefCell::new(Vec::new()));
-        let prefs = Rc::new(BrowsePrefs::new(PrefStore::in_memory()));
-        prefs.set_display_mode(LibraryDisplayMode::ComfortableGrid).expect("set");
-        let header = build(deps(Rc::clone(&prefs), &log, false, false));
-        assert!(header.radios[0].is_active());
-        assert!(log.borrow().is_empty(), "building the header calls nothing");
-    }
-
     pub(crate) fn smoke() {
-        header_shows_the_three_radios_and_writes_the_chosen_mode();
-        header_reads_the_stored_mode_without_writing_it_back();
+        header_shows_the_two_radios_and_writes_the_chosen_mode();
     }
 }

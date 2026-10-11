@@ -1,7 +1,7 @@
-//! The anime Sources tab (T-41b-005): the header actions, the section headers and source rows, the inline error row with
-//! Retry, and the options popover. A thin view over `sources::SourcesTab` and its row model; every decision (which rows,
-//! in which order, where a press leads) is made there. The shared row, icon, popover and pin-button widgets are the
-//! manga Sources tab's. The screen lane registers this page and feeds it snapshots.
+//! The anime Sources tab (T-41b-005): the section headers and source rows, the inline error row with Retry. Sources are not
+//! pinned or hidden from the list. A thin view over `sources::SourcesTab` and its row model; every decision (which rows,
+//! in which order, where a press leads) is made there. The shared row and icon widgets are the manga Sources tab's. The
+//! screen lane registers this page and feeds it snapshots.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -17,17 +17,13 @@ use crate::browse::glue::{follow_ready, keep_alive};
 use crate::browse::icons::IconCache;
 use crate::browse::primitives::{EmptyAction, ToastSpec};
 use crate::browse::sources::{LOCAL_SOURCE_ID, Section, SourceRow, language_line, shows_latest};
-use crate::browse::sources_page::{header_label, options_popover, pin_button, section_list, sources_empty};
+use crate::browse::sources_page::{header_label, section_list, sources_empty};
 use crate::browse::view::{list_row, source_row, spinner_row};
 
 /// What a press on the page does.
 pub struct AnimeSourcesNav {
     /// A row or a Latest button: where it leads (`row_route`).
     pub route: Rc<dyn Fn(TabRoute)>,
-    /// The pin button, and the Pin and Unpin rows of the options popover.
-    pub toggle_pin: Rc<dyn Fn(i64)>,
-    /// The Disable row of the options popover.
-    pub toggle_disabled: Rc<dyn Fn(i64)>,
     /// Retry on the inline error row: the caller subscribes to the source watch again.
     pub retry: Rc<dyn Fn()>,
     /// The toast of a failure after the first list.
@@ -220,34 +216,11 @@ impl Inner {
             latest.connect_clicked(move |_| route(row_route(id, true)));
             actions.append(&latest);
         }
-        actions.append(&pin_button(&source, Rc::clone(&self.nav.toggle_pin)));
 
         let language = language_line(section, &source);
         let row = source_row(&source.name, language.as_deref(), icon, file.as_deref(), source.is_stub, Some(actions.upcast_ref()));
-        let (route, weak, id) = (Rc::clone(&self.nav.route), Rc::downgrade(self), source.id);
-        let anchor = row.downgrade();
-        list_row(
-            &row,
-            move || route(row_route(id, false)),
-            move || {
-                if let (Some(inner), Some(anchor)) = (weak.upgrade(), anchor.upgrade()) {
-                    inner.options(&anchor, &source);
-                }
-            },
-        )
-    }
-
-    /// The options of a source. The tab holds it as the open dialog until the popover closes (`SourcesTab::dialog`).
-    fn options(self: &Rc<Self>, row: &gtk::Box, source: &Source) -> gtk::Popover {
-        self.state.borrow_mut().tab.dialog = Some(source.clone());
-        let popover = options_popover(row, source, Rc::clone(&self.nav.toggle_pin), Rc::clone(&self.nav.toggle_disabled));
-        let weak = Rc::downgrade(self);
-        popover.connect_closed(move |_| {
-            if let Some(inner) = weak.upgrade() {
-                inner.state.borrow_mut().tab.dialog = None;
-            }
-        });
-        popover
+        let (route, id) = (Rc::clone(&self.nav.route), source.id);
+        list_row(&row, move || route(row_route(id, false)), || {})
     }
 }
 
@@ -268,11 +241,9 @@ pub(crate) mod tests {
     }
 
     fn page(log: &Rc<RefCell<Vec<String>>>, ready: bool) -> (AnimeSourcesPage, watch::Sender<bool>) {
-        let (route, pin, disable, retry, toast) = (Rc::clone(log), Rc::clone(log), Rc::clone(log), Rc::clone(log), Rc::clone(log));
+        let (route, retry, toast) = (Rc::clone(log), Rc::clone(log), Rc::clone(log));
         let nav = AnimeSourcesNav {
             route: Rc::new(move |to| route.borrow_mut().push(format!("route {to:?}"))),
-            toggle_pin: Rc::new(move |id| pin.borrow_mut().push(format!("pin {id}"))),
-            toggle_disabled: Rc::new(move |id| disable.borrow_mut().push(format!("disable {id}"))),
             retry: Rc::new(move || retry.borrow_mut().push("retry".into())),
             toast: Rc::new(move |spec| toast.borrow_mut().push(format!("toast {} {:?}", spec.message, spec.duration))),
         };

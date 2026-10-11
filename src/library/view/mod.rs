@@ -33,6 +33,7 @@ use kuro_images::art::{ArtKind, ArtRef, Owner};
 use kuro_prefs::library::LibraryPrefs;
 
 use crate::library::actions;
+use crate::misc::diet_defaults as diet;
 use crate::library::cells::{self, Cell};
 use crate::library::category_dialog::CategoryDialog;
 use crate::library::display_tab;
@@ -771,14 +772,14 @@ fn render(inner: &Rc<RefCell<Inner>>) {
         let pages = st.built.as_ref().map_or(&[][..], |b| b.pages.as_slice());
         let index = active_index(&st);
         let search_active = st.query.is_some();
-        let tabs_on = layout::tabs_visible(st.deps.prefs.category_tabs.get(), search_active);
+        let tabs_on = layout::tabs_visible(diet::LIBRARY_CATEGORY_TABS, search_active);
         let show_tabs = tabs_on && pages.len() > 1;
         let default_label = tr(MsgKey::label_default);
         let default_title = match st.deps.kind {
             EntryKind::Anime => tr(MsgKey::label_anime_library),
             EntryKind::Manga => tr(MsgKey::label_manga_library),
         };
-        let show_counts = st.deps.prefs.category_number_of_items.get() || search_active;
+        let show_counts = diet::LIBRARY_ITEM_COUNT || search_active;
         let labels: Vec<String> = if show_tabs {
             pages
                 .iter()
@@ -792,7 +793,7 @@ fn render(inner: &Rc<RefCell<Inner>>) {
                 let distinct = st.built.as_ref().map_or(0, |b| b.distinct_count);
                 let (title, count) = toolbar_title(
                     tabs_on,
-                    st.deps.prefs.category_number_of_items.get(),
+                    diet::LIBRARY_ITEM_COUNT,
                     &default_title,
                     page.category.display_name(&default_label),
                     page.items.len(),
@@ -913,8 +914,8 @@ fn is_list_mode(st: &Inner) -> bool {
 
 /// The row height of List mode for the current page height and list size (T-37a-021).
 fn list_row_height(st: &Inner) -> f64 {
-    let (portrait, landscape) = display_tab::column_prefs(&st.deps.prefs, st.deps.kind);
-    let size = layout::list_size(window_width(&st.scroller), portrait.get(), landscape.get());
+    let landscape = display_tab::columns_pref(&st.deps.prefs, st.deps.kind).get();
+    let size = layout::list_size(window_width(&st.scroller), diet::LIBRARY_PORTRAIT_COLUMNS, landscape);
     layout::list_row_height(f64::from(st.scroller.height()), size)
 }
 
@@ -928,9 +929,9 @@ fn window_width(widget: &impl IsA<gtk::Widget>) -> i32 {
 fn apply_columns(inner: &Rc<RefCell<Inner>>) {
     let (grid, columns) = {
         let st = inner.borrow();
-        let (portrait, landscape) = display_tab::column_prefs(&st.deps.prefs, st.deps.kind);
+        let landscape = display_tab::columns_pref(&st.deps.prefs, st.deps.kind).get();
         let width = window_width(&st.scroller);
-        (st.grid.clone(), columns_for_width(width, portrait.get(), landscape.get()) as u32)
+        (st.grid.clone(), columns_for_width(width, diet::LIBRARY_PORTRAIT_COLUMNS, landscape) as u32)
     };
     grid.set_min_columns(columns);
     grid.set_max_columns(columns);
@@ -1095,7 +1096,7 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
         (
             st.deps.prefs.display_mode.get(),
             st.selection.contains(item.row.id),
-            st.deps.prefs.show_continue_viewing_button.get(),
+            diet::LIBRARY_CONTINUE_BUTTON,
         )
     };
     let show_continue = actions::continue_visible(show_continue_pref, &item.row);
@@ -1209,7 +1210,7 @@ fn open_settings(inner: &Rc<RefCell<Inner>>, tab: sheet::Tab) {
     let (kind, prefs, categories, has_tracker, category, current_sort, downloaded_only, trackers) = {
         let st = inner.borrow();
         let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(&st)));
-        let categorized = st.deps.prefs.categorized_display_settings.get();
+        let categorized = diet::LIBRARY_CATEGORISED_DISPLAY;
         let category = page.map(|p| p.category.id).filter(|_| categorized);
         let current_sort = match page {
             Some(p) if categorized => p.category.sort(st.deps.kind),
@@ -1246,8 +1247,7 @@ fn open_settings(inner: &Rc<RefCell<Inner>>, tab: sheet::Tab) {
         }
     });
     let filter_tab = filter_tab::build(kind, prefs.clone(), downloaded_only, &trackers, on_change);
-    let window_width = window_width(&inner.borrow().scroller);
-    sheet::show(sheet::Ctx { kind, prefs, has_tracker, current_sort, set_sort, filter_tab, window_width }, tab);
+    sheet::show(sheet::Ctx { kind, prefs, has_tracker, current_sort, set_sort, filter_tab }, tab);
 }
 
 /// The continue button: opens the entry's next item, in the external player when the preference is on, or says

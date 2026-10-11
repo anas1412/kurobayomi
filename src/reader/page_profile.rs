@@ -14,9 +14,6 @@ use kuro_images::icc::{DisplayProfile, load_setting};
 
 use super::page_decode::DecodedPage;
 
-/// The base preference that holds the profile file.
-pub const DISPLAY_PROFILE_KEY: &str = "pref_display_profile_key";
-
 /// The path that was loaded last and what it gave.
 static CURRENT: Mutex<Option<(String, Option<Arc<DisplayProfile>>)>> = Mutex::new(None);
 

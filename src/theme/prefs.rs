@@ -11,7 +11,6 @@ use super::{SchemeSel, ThemeSettings};
 
 pub const KEY_APP_THEME: &str = "pref_app_theme";
 pub const KEY_THEME_MODE: &str = "pref_theme_mode_key";
-pub const KEY_AMOLED: &str = "pref_theme_dark_amoled_key";
 
 /// The stored name for the Linux-only `System` choice.
 pub const SYSTEM_NAME: &str = "SYSTEM";
@@ -75,14 +74,10 @@ pub fn read_settings(store: &PrefStore) -> ThemeSettings {
         _ => ThemeMode::SYSTEM,
     };
 
-    let amoled = match store.get_raw(KEY_AMOLED) {
-        Some(PrefValue::Bool(b)) => b,
-        _ => false,
-    };
-
+    // Pure black is cut (settings diet): the dark mode is the only dark look, so the flag is always off.
     ThemeSettings {
         scheme,
-        amoled,
+        amoled: false,
         mode,
     }
 }
@@ -100,11 +95,6 @@ pub fn write_scheme(store: &PrefStore, scheme: SchemeSel) {
 /// Writes the mode choice.
 pub fn write_mode(store: &PrefStore, mode: ThemeMode) {
     store.set_raw(KEY_THEME_MODE, PrefValue::Str(mode.name().to_string()));
-}
-
-/// Writes the AMOLED flag.
-pub fn write_amoled(store: &PrefStore, amoled: bool) {
-    store.set_raw(KEY_AMOLED, PrefValue::Bool(amoled));
 }
 
 #[cfg(test)]
@@ -191,13 +181,13 @@ mod tests {
     }
 
     #[test]
-    fn mode_and_amoled_read_their_values() {
+    fn mode_reads_its_value_and_pure_black_stays_off() {
         let store = store_with(None);
         write_mode(&store, ThemeMode::DARK);
-        write_amoled(&store, true);
+        store.set_raw("pref_theme_dark_amoled_key", PrefValue::Bool(true));
         let s = read_settings(&store);
         assert_eq!(s.mode, ThemeMode::DARK);
-        assert!(s.amoled);
+        assert!(!s.amoled);
     }
 
     // T-49b-006: the Linux default is the GTK theme, stored as SYSTEM; both spec files say the same, so the first

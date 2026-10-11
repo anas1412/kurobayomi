@@ -58,9 +58,8 @@ impl PageLoader for NoLoader {
 }
 
 /// The page of `source_id` opened on `query`. A source the directory does not know gets the missing-source page. The
-/// hide-in-library preference is read here, when the page is made (T-40b-034). `incognito` says that opening the source
-/// stores no last-used id.
-pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery, incognito: bool) -> SourcePage {
+/// hide-in-library preference is read here, when the page is made (T-40b-034).
+pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery) -> SourcePage {
     let listed = env.directory.sources().into_iter().find(|entry| entry.source.id == source_id && !entry.source.is_stub);
     let loader = listed.as_ref().and_then(|_| env.directory.loader(source_id));
     let stub = loader.is_none();
@@ -82,7 +81,6 @@ pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery, incognit
     let page = browse_source(BrowseSourceDeps {
         supports_latest: source.supports_latest,
         configurable: false,
-        incognito,
         prefs: Rc::clone(&env.prefs),
         listing: ListingDeps {
             loader: loader.unwrap_or_else(|| Arc::new(NoLoader)),
@@ -243,10 +241,7 @@ pub fn page(screen: &str) -> Option<gtk::Box> {
     if let Some(BrowseRoute::BrowseSource { source_id, query, .. }) = route {
         let directory = super::directory::current()?;
         let env = production_env(directory);
-        let package = env.directory.sources().into_iter().find(|entry| entry.source.id == source_id).map(|entry| entry.package);
-        let incognito = crate::data::app().base.incognito_mode.get()
-            || package.is_some_and(|package| env.prefs.sources.incognito_manga_extensions.get().contains(&package));
-        let root = source_page(&env, source_id, query, incognito).widget().clone();
+        let root = source_page(&env, source_id, query).widget().clone();
         crate::ui::tag(&root, screen);
         return Some(root);
     }
@@ -364,36 +359,24 @@ pub(crate) mod tests {
 
     fn a_source_the_directory_does_not_know_gets_the_missing_source_page() {
         let rig = rig();
-        let page = source_page(&rig.env, 99, BrowseQuery::Popular, false);
+        let page = source_page(&rig.env, 99, BrowseQuery::Popular);
         assert!(matches!(page, SourcePage::Stub(_)), "an unknown id is a stub page");
         assert!(rig.asked.lock().expect("lock").is_empty(), "and never loads");
-        assert_eq!(rig.env.prefs.sources.last_used_manga_source.get(), -1);
     }
 
     fn a_page_opened_on_a_search_starts_with_that_search_and_shows_the_text() {
         let rig = rig();
-        let page = source_page(&rig.env, 1, BrowseQuery::Search("one piece".into()), false);
+        let page = source_page(&rig.env, 1, BrowseQuery::Search("one piece".into()));
         let shown = browse(&page);
         assert!(pump_until(|| !rig.asked.lock().expect("lock").is_empty()));
         assert_eq!(rig.asked.lock().expect("lock")[0], BrowseQuery::Search("one piece".into()), "the first load is the search, not Popular");
         assert_eq!(shown.search.text().as_str(), "one piece");
         assert!(!shown.popular.is_active(), "no chip claims a search");
-        assert_eq!(rig.env.prefs.sources.last_used_manga_source.get(), 1, "opening the source stores it");
-    }
-
-    fn the_hide_in_library_preference_is_read_when_the_page_is_made() {
-        let rig = rig();
-        rig.env.prefs.sources.hide_in_manga_library_items.set(true).expect("set");
-        let hidden = source_page(&rig.env, 1, BrowseQuery::Popular, false);
-        assert!(pump_until(|| browse(&hidden).listing.loaded_count() == 1), "the favourite is left out of the listing");
-        rig.env.prefs.sources.hide_in_manga_library_items.set(false).expect("set");
-        let shown = source_page(&rig.env, 1, BrowseQuery::Popular, false);
-        assert!(pump_until(|| browse(&shown).listing.loaded_count() == 2), "with the flag off both are shown");
     }
 
     fn a_genre_search_reaches_the_open_page_and_restarts_its_listing_at_once() {
         let rig = rig();
-        let page = source_page(&rig.env, 1, BrowseQuery::Popular, false);
+        let page = source_page(&rig.env, 1, BrowseQuery::Popular);
         let shown = browse(&page);
         assert!(pump_until(|| !rig.asked.lock().expect("lock").is_empty()));
         assert!(shown.popular.is_active());
@@ -408,7 +391,7 @@ pub(crate) mod tests {
     fn open_in_web_view_goes_to_the_source_site() {
         let rig = rig();
         rig.failing.store(true, std::sync::atomic::Ordering::SeqCst);
-        let page = source_page(&rig.env, 1, BrowseQuery::Popular, false);
+        let page = source_page(&rig.env, 1, BrowseQuery::Popular);
         let wanted = EmptyAction::OpenInWebView.label();
         let find = || {
             let mut buttons = Vec::new();
@@ -433,7 +416,6 @@ pub(crate) mod tests {
     pub(crate) fn smoke() {
         a_source_the_directory_does_not_know_gets_the_missing_source_page();
         a_page_opened_on_a_search_starts_with_that_search_and_shows_the_text();
-        the_hide_in_library_preference_is_read_when_the_page_is_made();
         a_genre_search_reaches_the_open_page_and_restarts_its_listing_at_once();
         open_in_web_view_goes_to_the_source_site();
     }

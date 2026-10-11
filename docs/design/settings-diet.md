@@ -526,3 +526,18 @@ That is 11 keys: KEEP 3, CUT 7, KEEP-LATER 1. Cutting them follows the same rule
 - `pref_hardware_bitmap_threshold` is in `DROPPED_KEYS` yet `decode.rs` and `tiles.rs` read it.
 - `src/settings_ui/appearance.rs`, `controls.rs` and others carry `#![allow(dead_code)]`; after the cuts, remove them.
 - `library_update_restriction` default `wifi` and `download_only_over_wifi` default true would block a wired desktop.
+
+## Decisions by the user (2026-10-11) on the seven open items
+
+| Item | Decision |
+|---|---|
+| App lock | CUT |
+| External player | CUT for now |
+| Mini player | CUT (same reasoning as Detach) |
+| Random sort | CUT |
+| Custom buttons, Script editor, Code editor pages and the Lua bridge | CUT (the user's own `mpv.conf` and `input.conf` files are still honored; no editor UI) |
+| Maintenance actions | KEEP |
+| Data Saver | UNDECIDED (the user asked how it would work) |
+| Detach (the player and reader pop-out window) | UNDECIDED (being reconsidered) |
+
+These cuts are applied in a follow-up pass after the code-first build, because the build's settings lanes ran with all seven kept.

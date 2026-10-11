@@ -2,8 +2,9 @@
 //! text; a row that has a typed twin (same group title, same row title) is replaced by it, so it reads and writes the
 //! real preference. A twin that is disabled drops the spec row (the reader hides rows its rules turn off). A typed row
 //! with no twin is kept when it is enabled, placed before the next typed row that has one, so a row the spec does not
-//! build (Theme mode is a `chips` item the spec converter skips) still shows in its place. Typed groups with no spec
-//! group are dropped.
+//! build (Theme mode is a `chips` item the spec converter skips) still shows in its place. A typed group with no spec
+//! group is kept when it has an enabled row (the spec converter drops a spec group whose rows it cannot build, so the
+//! typed group takes its place); a group whose rows are all disabled is dropped.
 use std::collections::VecDeque;
 
 use crate::pref_model::model::{Preference, PreferenceItem};
@@ -69,7 +70,10 @@ pub fn merge(spec: Vec<Preference>, typed: Vec<Preference>) -> Vec<Preference> {
             (Preference::Group(a), Preference::Group(b)) => a.title == b.title,
             _ => false,
         },
-        |t| matches!(t, Preference::Item(item) if item.enabled()),
+        |t| match t {
+            Preference::Item(item) => item.enabled(),
+            Preference::Group(group) => group.items.iter().any(PreferenceItem::enabled),
+        },
         |entry, twin| match (entry, twin) {
             (Preference::Group(mut group), Preference::Group(typed)) => {
                 group.items = merge_items(group.items, typed.items);
@@ -133,13 +137,14 @@ mod tests {
     }
 
     #[test]
-    fn a_disabled_typed_row_without_a_twin_and_a_typed_group_without_a_spec_group_are_dropped() {
+    fn a_disabled_typed_row_without_a_twin_is_dropped_and_a_typed_group_without_a_spec_group_is_kept_when_it_has_an_enabled_row() {
         let prefs = Prefs::in_memory();
         let spec = vec![group("Paged", vec![switch("Pan", &prefs.reader.fullscreen, true)])];
         let typed = vec![
             group("Paged", vec![switch("Hidden", &prefs.reader.crop_borders, false)]),
-            group("Unknown", vec![switch("Lost", &prefs.reader.crop_borders, true)]),
+            group("Unknown", vec![switch("Kept", &prefs.reader.crop_borders, true)]),
+            group("Off", vec![switch("Lost", &prefs.reader.crop_borders, false)]),
         ];
-        assert_eq!(titles(&merge(spec, typed)), ["Paged/Pan"]);
+        assert_eq!(titles(&merge(spec, typed)), ["Paged/Pan", "Unknown/Kept"]);
     }
 }

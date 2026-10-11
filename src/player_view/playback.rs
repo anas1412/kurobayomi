@@ -39,6 +39,10 @@ impl Playback {
     /// Loads `target` (a path or a stream URL) at `start_ms` with the `http-header-fields` value `headers`, and plays
     /// it. mpv starts paused, so the load also unpauses.
     pub fn load(&self, target: &str, headers: Option<&str>, start_ms: i64) -> Result<(), String> {
+        if headers.is_none() {
+            // mpv keeps the option across loadfile: the previous episode's headers must not reach the next host
+            self.mpv.set_property_str("http-header-fields", "").map_err(|e| e.to_string())?;
+        }
         for command in load_commands(target, headers, start_ms) {
             self.run(&command).map_err(|e| e.to_string())?;
         }

@@ -3,12 +3,8 @@
 
 use kuro_i18n::MsgKey;
 
-/// Two panes (info and actions left, list right) at or above this window width, one column below it.
-pub const TWO_PANE_MIN_WIDTH: i32 = 900;
-
-pub fn two_pane(window_width: i32) -> bool {
-    window_width >= TWO_PANE_MIN_WIDTH
-}
+/// Two panes (info and actions left, list right) at or above `TWO_PANE_MIN_WIDTH`, one column below it.
+pub use crate::entry_core::constants::{TWO_PANE_MIN_WIDTH, two_pane};
 
 /// The width of the bottom action bar: the whole window narrow, half of it in the two-pane layout.
 pub fn bottom_bar_width(window_width: i32) -> Option<i32> {
@@ -69,13 +65,6 @@ pub fn header_fade(narrow: bool, first_visible: bool, scrolled: bool) -> HeaderF
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn two_panes_start_at_900_px() {
-        assert!(!two_pane(899));
-        assert!(two_pane(900));
-        assert!(!two_pane(360));
-    }
 
     #[test]
     fn the_bottom_bar_is_full_width_narrow_and_half_width_wide() {

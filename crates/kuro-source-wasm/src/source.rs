@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use async_trait::async_trait;
 use kuro_net::NetworkClient;
 use kuro_prefs::store::PrefStore;
+use kuro_source::anime::{AnimeSource, AnimesPage, Hoster, SAnime, SEpisode, Track, Video};
 use kuro_source::error::SourceError;
 use kuro_source::filter_list::FilterList;
 use kuro_source::model::{MangasPage, Page, SChapter, SManga};
@@ -18,6 +19,7 @@ use serde_json::json;
 use wasmtime::Store;
 use wasmtime::component::{Component, HasSelf, Linker};
 
+use crate::anime_wire::{WireAnime, WireAnimesPage, WireEpisode, WireHoster, WireTrack, WireVideo};
 use crate::bindings::Source;
 use crate::bridge::HostState;
 use crate::error::WasmError;
@@ -54,9 +56,27 @@ pub async fn instantiate_with_deadline(
     env: HostEnv,
     deadline_ticks: u64,
 ) -> Result<Vec<Arc<dyn CatalogueSource>>, WasmError> {
-    tokio::task::spawn_blocking(move || load(&bytes, hosts, factory, env, deadline_ticks))
+    let sources = tokio::task::spawn_blocking(move || load(&bytes, hosts, factory, env, deadline_ticks))
         .await
-        .map_err(|e| WasmError::Instantiate(format!("load task failed: {e}")))?
+        .map_err(|e| WasmError::Instantiate(format!("load task failed: {e}")))??;
+    Ok(sources.into_iter().map(|source| Arc::new(source) as Arc<dyn CatalogueSource>).collect())
+}
+
+/// Loads an anime package: the same guest, read through the anime ops of `wit/kuro-source.wit`. The caller picks this for
+/// an anime package and [`instantiate`] for a manga one, because the descriptor does not name the kind.
+pub async fn instantiate_anime(
+    bytes: Vec<u8>,
+    hosts: Vec<String>,
+    factory: bool,
+    env: HostEnv,
+) -> Result<Vec<Arc<dyn AnimeSource>>, WasmError> {
+    let sources = tokio::task::spawn_blocking(move || load(&bytes, hosts, factory, env, CALL_DEADLINE_TICKS))
+        .await
+        .map_err(|e| WasmError::Instantiate(format!("load task failed: {e}")))??;
+    Ok(sources
+        .into_iter()
+        .map(|source| Arc::new(WasmAnimeSource(source)) as Arc<dyn AnimeSource>)
+        .collect())
 }
 
 /// Everything the sources of one package share: the compiled component and the host settings.
@@ -73,7 +93,7 @@ fn load(
     factory: bool,
     env: HostEnv,
     deadline_ticks: u64,
-) -> Result<Vec<Arc<dyn CatalogueSource>>, WasmError> {
+) -> Result<Vec<WasmSource>, WasmError> {
     if bytes.len() > MAX_WASM_BYTES {
         return Err(WasmError::TooLarge {
             size: bytes.len(),
@@ -106,10 +126,10 @@ fn load(
         .into_iter()
         .map(|info| {
             let channel = Channel::new(Arc::clone(&package), info.id);
-            Arc::new(WasmSource {
+            WasmSource {
                 info,
                 channel: Arc::new(channel),
-            }) as Arc<dyn CatalogueSource>
+            }
         })
         .collect())
 }
@@ -213,6 +233,95 @@ impl WasmSource {
     async fn listing(&self, op: &'static str, args: serde_json::Value) -> Result<MangasPage, SourceError> {
         let page: WireMangasPage = self.typed(op, args).await?;
         Ok(MangasPage::from(page))
+    }
+}
+
+/// A source of an anime package: a [`WasmSource`] read through the anime ops, with the same guest, mutex and deadline. It
+/// is a wrapper, not a second trait impl on `WasmSource`, so the manga calls keep one meaning.
+pub struct WasmAnimeSource(WasmSource);
+
+impl WasmAnimeSource {
+    /// The subtitle tracks of one video (the `subtitles` op). Not in `AnimeSource`: the app reads tracks from `Video`.
+    pub async fn subtitles(&self, video: &Video) -> Result<Vec<Track>, SourceError> {
+        let wire: Vec<WireTrack> = self.0.typed("subtitles", json!({ "video": WireVideo::from(video) })).await?;
+        Ok(wire.into_iter().map(Track::from).collect())
+    }
+}
+
+impl WasmSource {
+    async fn anime_page(&self, op: &'static str, args: serde_json::Value) -> Result<AnimesPage, SourceError> {
+        let page: WireAnimesPage = self.typed(op, args).await?;
+        Ok(AnimesPage::from(page))
+    }
+
+    async fn videos(&self, args: serde_json::Value) -> Result<Vec<Video>, SourceError> {
+        let wire: Vec<WireVideo> = self.typed("videos", args).await?;
+        Ok(wire.into_iter().map(Video::from).collect())
+    }
+}
+
+#[async_trait]
+impl AnimeSource for WasmAnimeSource {
+    fn id(&self) -> i64 {
+        self.0.info.id
+    }
+
+    fn name(&self) -> &str {
+        &self.0.info.name
+    }
+
+    fn lang(&self) -> &str {
+        &self.0.info.lang
+    }
+
+    fn supports_latest(&self) -> bool {
+        self.0.info.supports_latest
+    }
+
+    /// The package has no `details` or `seasons` op, so a combined update must not call them.
+    fn supports_details(&self) -> bool {
+        false
+    }
+
+    fn supports_season_list(&self) -> bool {
+        false
+    }
+
+    /// Always true: an anime package answers the `hosters` op. A guest without it fails that call alone.
+    fn provides_hosters(&self) -> bool {
+        true
+    }
+
+    async fn popular(&self, page: i32) -> Result<AnimesPage, SourceError> {
+        self.0.anime_page("popular", json!({ "page": page })).await
+    }
+
+    async fn latest(&self, page: i32) -> Result<AnimesPage, SourceError> {
+        self.0.anime_page("latest", json!({ "page": page })).await
+    }
+
+    async fn search(&self, page: i32, query: &str, _filters: &FilterList) -> Result<AnimesPage, SourceError> {
+        self.0
+            .anime_page("search", json!({ "page": page, "query": query, "filters": [] }))
+            .await
+    }
+
+    async fn episode_list(&self, anime: &SAnime) -> Result<Vec<SEpisode>, SourceError> {
+        let wire: Vec<WireEpisode> = self.0.typed("episodes", json!({ "anime": WireAnime::from(anime) })).await?;
+        Ok(wire.into_iter().map(SEpisode::from).collect())
+    }
+
+    async fn hosters(&self, episode: &SEpisode) -> Result<Vec<Hoster>, SourceError> {
+        let wire: Vec<WireHoster> = self.0.typed("hosters", json!({ "episode": WireEpisode::from(episode) })).await?;
+        Ok(wire.into_iter().map(Hoster::from).collect())
+    }
+
+    async fn videos_for_hoster(&self, hoster: &Hoster) -> Result<Vec<Video>, SourceError> {
+        self.0.videos(json!({ "hoster": WireHoster::from(hoster) })).await
+    }
+
+    async fn videos_for_episode(&self, episode: &SEpisode) -> Result<Vec<Video>, SourceError> {
+        self.0.videos(json!({ "episode": WireEpisode::from(episode) })).await
     }
 }
 
@@ -489,5 +598,107 @@ mod tests {
         let (good, bad) = tokio::join!(good, bad);
         assert_eq!(good.expect("good package loads").len(), 1);
         assert!(bad.is_err());
+    }
+}
+
+#[cfg(test)]
+mod anime_tests {
+    use std::sync::Arc;
+
+    use kuro_source::anime::{AnimeSource, SAnime, SEpisode, Video};
+    use wasmtime::component::Component;
+
+    use super::{Channel, Package, WasmAnimeSource, WasmSource};
+    use crate::limits::{self, CALL_DEADLINE_TICKS};
+    use crate::test_guest::{Behaviour, env, guest};
+    use crate::wire::SourceDescriptor;
+
+    /// One anime source over a guest whose every op answers `text`.
+    fn anime(text: &str) -> WasmAnimeSource {
+        anime_with(Behaviour::Returns(text.into()))
+    }
+
+    /// One anime source over a guest with the given behaviour.
+    fn anime_with(behaviour: Behaviour) -> WasmAnimeSource {
+        let (host_env, _dir) = env();
+        let engine = limits::engine().expect("engine");
+        let component = Component::new(engine, &guest(behaviour)).expect("component");
+        let package = Arc::new(Package {
+            component,
+            hosts: Vec::new(),
+            env: host_env,
+            deadline_ticks: CALL_DEADLINE_TICKS,
+        });
+        WasmAnimeSource(WasmSource {
+            info: SourceDescriptor {
+                id: 42,
+                name: "Fixture".into(),
+                lang: "en".into(),
+                supports_latest: true,
+            },
+            channel: Arc::new(Channel::new(package, 42)),
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_anime_source_reports_its_identity_and_a_listing() {
+        let source = anime(r#"{"animes":[{"url":"/a/1","title":"One"}],"hasNextPage":true}"#);
+        assert_eq!(source.id(), 42);
+        assert!(source.supports_latest());
+        assert!(source.provides_hosters());
+        assert!(!source.supports_details());
+        assert!(!source.supports_season_list());
+        let page = source.popular(1).await.expect("popular");
+        assert_eq!(page.animes[0].title, "One");
+        assert!(page.has_next_page);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn episodes_read_the_episode_wire_shape() {
+        let source = anime(r#"[{"url":"/e/1","name":"Ep 1","episodeNumber":1.0,"dateUpload":5}]"#);
+        let list: Vec<SEpisode> = source.episode_list(&SAnime::default()).await.expect("episodes");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].episode_number, 1.0);
+        assert_eq!(list[0].date_upload, 5);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hosters_carry_their_videos() {
+        let source = anime(
+            r#"[{"hosterUrl":"https://h/1","hosterName":"Main","videoList":[{"videoUrl":"https://v/1.m3u8","videoTitle":"1080p","resolution":1080}]}]"#,
+        );
+        let hosters = source.hosters(&SEpisode::default()).await.expect("hosters");
+        assert_eq!(hosters[0].hoster_name, "Main");
+        let videos = hosters[0].video_list.clone().expect("videos");
+        assert_eq!(videos[0].resolution, Some(1080));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn videos_for_an_episode_read_the_video_shape() {
+        let source = anime(r#"[{"videoUrl":"https://v/1.m3u8","videoTitle":"720p","preferred":true}]"#);
+        let videos: Vec<Video> = source.videos_for_episode(&SEpisode::default()).await.expect("videos");
+        assert_eq!(videos[0].video_url, "https://v/1.m3u8");
+        assert!(videos[0].preferred);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn subtitles_read_the_track_shape() {
+        let source = anime(r#"[{"url":"https://s/en.vtt","lang":"en"}]"#);
+        let tracks = source
+            .subtitles(&Video::new("https://v/1.m3u8", "720p"))
+            .await
+            .expect("subtitles");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].lang, "en");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_guest_without_the_anime_ops_fails_only_that_call() {
+        let source = anime_with(Behaviour::Fails("unknown op: episodes".into()));
+        assert_eq!(
+            source.episode_list(&SAnime::default()).await,
+            Err(SourceError::Transport("unknown op: episodes".into()))
+        );
+        assert_eq!(source.id(), 42, "identity does not call the guest");
     }
 }

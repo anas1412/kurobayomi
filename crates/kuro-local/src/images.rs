@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 pub use kuro_core::image::{ImageKind as ImageType, is_image_name, sniff};
 
 use crate::fs::{FsEntry, create_nomedia, file_url, list_dir};
-use crate::names::{sanitize_name, stem};
+use crate::names::stem;
 
 /// Bytes read for sniffing: `ImageUtil.getImageType` reads 32.
 const HEAD_LEN: usize = 32;
@@ -73,7 +73,7 @@ pub fn set_image(dir: &Path, stem_name: &str, default_name: &str, bytes: &[u8]) 
 
 /// `<sanitised episode name>-thumbnail.jpg`: the episode thumbnail's file name (behavior 13.2, E-IMG-7, E-IMG-8).
 pub fn thumbnail_file_name(episode_name: &str) -> String {
-    format!("{}-thumbnail.jpg", sanitize_name(episode_name))
+    format!("{}-thumbnail.jpg", kuro_core::text::build_valid_filename(episode_name, true))
 }
 
 /// The thumbnail of an episode when the file exists and is not empty. The auto-generation policy (E-ANIME-6) uses it.

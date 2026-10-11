@@ -131,13 +131,7 @@ pub fn build_item(
 /// Spec rows (page id, title) that have no Linux counterpart: display cutout, the legacy long-strip decoder, the
 /// display profile and Aniyomi's privacy page. [`Registry::build`] leaves them out instead of showing a row that does
 /// nothing.
-pub const ANDROID_ONLY: [(&str, &str); 4] = [
-    ("settings_reader", "Show content in cutout area"),
-    ("settings_advanced", "Use legacy decoder for long strip reader"),
-    ("settings_advanced", "Custom display profile"),
-    // Aniyomi's privacy page is about the Android app; this app has no page of its own to link
-    ("settings_about", "Privacy policy"),
-];
+pub const ANDROID_ONLY: [(&str, &str); 1] = [("settings_reader", "Show content in cutout area")];
 
 /// Whether the spec row `title` of page `page` is one of [`ANDROID_ONLY`].
 pub fn is_android_only(page: &str, title: &str) -> bool {

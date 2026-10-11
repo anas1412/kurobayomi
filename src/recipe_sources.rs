@@ -13,7 +13,7 @@ use kuro_prefs::network::NetworkPrefs;
 use kuro_prefs::store::PrefStore;
 use kuro_source::anime::AnimeSource;
 use kuro_source::filter_list::FilterList;
-use kuro_source::CatalogueSource;
+use kuro_source::{CatalogueSource, MangaSource};
 use kuro_source_scrape::{Kind, Recipe, ScrapeAnime, ScrapeManga};
 
 use crate::browse::anime::directory::{AnimeInstances, install_instances};
@@ -82,6 +82,10 @@ impl SourceDirectory for MangaDirectory {
 
     fn filters(&self, source_id: i64) -> Option<FilterList> {
         self.sources.iter().find(|(_, row)| row.source.id == source_id).map(|(source, _)| source.filter_list())
+    }
+
+    fn manga_source(&self, source_id: i64) -> Option<Arc<dyn MangaSource>> {
+        self.sources.iter().find(|(_, row)| row.source.id == source_id).map(|(source, _)| Arc::clone(source) as Arc<dyn MangaSource>)
     }
 }
 

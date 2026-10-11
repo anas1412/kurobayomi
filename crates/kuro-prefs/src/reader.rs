@@ -2,7 +2,7 @@
 //! tap zones, scale types, zoom starts and colour filter modes).
 //!
 //! The preference value for the reading mode is an `Int` code, so the typed enum here is a plain Rust
-//! type with `from_preference` for the stored number. Keys marked DROP in the registry (cutout, volume
+//! type with `from_preference` for the stored number. Keys marked DROP in the registry (volume
 //! keys) are kept for backup round trips and have no UI. The screen orientation is dropped, see
 //! `registry::DROPPED_KEYS`; the orientation bits of a stored viewer word are left as they are.
 
@@ -173,7 +173,7 @@ pub const COLOR_FILTER_MODE: [(&str, ColorFilterBlend); 6] = [
 ];
 
 define_prefs! {
-    /// `[reader]` section: the 53 keys of Aniyomi `ReaderPreferences` that a desktop has.
+    /// `[reader]` section: the 52 keys of Aniyomi `ReaderPreferences` that a desktop has.
     pub struct ReaderPrefs in "reader" {
         page_transitions: bool = "pref_enable_transitions_key" => true;
         flash_on_page_change: bool = "pref_reader_flash" => false;
@@ -184,9 +184,8 @@ define_prefs! {
         show_page_number: bool = "pref_show_page_number_key" => true;
         show_reading_mode: bool = "pref_show_reading_mode" => true;
         fullscreen: bool = "fullscreen" => false;
-        cutout_short: bool = "cutout_short" => true;
         keep_screen_on: bool = "pref_keep_screen_on_key" => true;
-        default_reading_mode: i32 = "pref_default_reading_mode_key" => 2;
+        default_reading_mode: i32 = "pref_default_reading_mode_key" => 1;
         webtoon_double_tap_zoom_enabled: bool = "pref_enable_double_tap_zoom_webtoon" => true;
         image_scale_type: i32 = "pref_image_scale_type_key" => 1;
         zoom_start: i32 = "pref_zoom_start_key" => 1;
@@ -241,7 +240,7 @@ mod tests {
 
     #[test]
     fn the_section_holds_every_reader_row() {
-        assert_eq!(ReaderPrefs::FIELDS.len(), 53);
+        assert_eq!(ReaderPrefs::FIELDS.len(), 52);
         let reader = ReaderPrefs::new(PrefStore::in_memory());
         assert_section_registered(ReaderPrefs::TABLE, ReaderPrefs::FIELDS, &reader.defaults());
     }
@@ -252,7 +251,7 @@ mod tests {
         assert!(r.page_transitions.get());
         assert_eq!(r.flash_duration_millis.get(), 100);
         assert_eq!(r.double_tap_anim_speed.get(), 500);
-        assert_eq!(r.default_reading_mode.get(), 2);
+        assert_eq!(r.default_reading_mode.get(), 1);
         assert_eq!(r.image_scale_type.get(), 1);
         assert_eq!(r.zoom_start.get(), 1);
         assert_eq!(r.reader_theme.get(), 1);
@@ -264,7 +263,7 @@ mod tests {
 
     #[test]
     fn drop_keys_are_registered_for_round_trip() {
-        for key in ["cutout_short", "reader_volume_keys", "reader_volume_keys_inverted"] {
+        for key in ["reader_volume_keys", "reader_volume_keys_inverted"] {
             assert!(lookup(key).is_some(), "{key}");
         }
         assert!(lookup("pref_default_orientation_type_key").is_none(), "the orientation default is dropped");

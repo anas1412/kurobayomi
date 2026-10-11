@@ -6,7 +6,7 @@
 pub enum Destination {
     About = 0,
     DataAndStorage = 1,
-    Tracking = 2,
+    SourcesAndTracking = 2,
 }
 
 impl Destination {
@@ -15,7 +15,7 @@ impl Destination {
         match id {
             0 => Some(Self::About),
             1 => Some(Self::DataAndStorage),
-            2 => Some(Self::Tracking),
+            2 => Some(Self::SourcesAndTracking),
             _ => None,
         }
     }
@@ -25,7 +25,7 @@ impl Destination {
         match self {
             Self::About => "settings_about",
             Self::DataAndStorage => "settings_data_storage",
-            Self::Tracking => "settings_tracking",
+            Self::SourcesAndTracking => "settings_browse",
         }
     }
 }
@@ -128,7 +128,7 @@ mod tests {
     fn ids_map_to_the_three_destinations_and_unknown_ids_fall_back() {
         assert_eq!(Destination::from_id(0), Some(Destination::About));
         assert_eq!(Destination::from_id(1), Some(Destination::DataAndStorage));
-        assert_eq!(Destination::from_id(2), Some(Destination::Tracking));
+        assert_eq!(Destination::from_id(2), Some(Destination::SourcesAndTracking));
         assert_eq!(Destination::from_id(9), None);
         assert_eq!(Destination::from_id(-1), None);
     }
@@ -162,9 +162,9 @@ mod tests {
     fn destinations_name_their_screens() {
         assert_eq!(Destination::About.screen_id(), "settings_about");
         assert_eq!(Destination::DataAndStorage.screen_id(), "settings_data_storage");
-        assert_eq!(Destination::Tracking.screen_id(), "settings_tracking");
+        assert_eq!(Destination::SourcesAndTracking.screen_id(), "settings_browse");
         crate::ui::with_spec(|spec| {
-            for d in [Destination::About, Destination::DataAndStorage, Destination::Tracking] {
+            for d in [Destination::About, Destination::DataAndStorage, Destination::SourcesAndTracking] {
                 assert!(spec.screen(d.screen_id()).is_some(), "{d:?}");
             }
         });
@@ -190,10 +190,10 @@ mod tests {
     fn back_pops_inner_pages_then_closes() {
         let mut shell = Shell::default();
         shell.open(None, false);
-        shell.push(Page::Dest(Destination::Tracking));
+        shell.push(Page::Dest(Destination::SourcesAndTracking));
         shell.push(Page::Dest(Destination::DataAndStorage));
         assert_eq!(shell.back(), Back::Popped);
-        assert_eq!(shell.current(), Some(Page::Dest(Destination::Tracking)));
+        assert_eq!(shell.current(), Some(Page::Dest(Destination::SourcesAndTracking)));
         assert_eq!(shell.back(), Back::Popped);
         assert_eq!(shell.current(), Some(Page::Main));
         assert_eq!(shell.back(), Back::Closed);

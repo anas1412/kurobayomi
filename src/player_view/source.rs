@@ -7,12 +7,13 @@ use std::sync::Arc;
 
 use gtk::glib;
 use kuro_data::anime::AnimeRepo;
-use kuro_data::episode::EpisodeRepo;
+use kuro_data::episode::{Episode, EpisodeRepo};
 use kuro_domain::source::remote_update::to_s_episode;
 use kuro_i18n::{MsgKey, tr};
 use kuro_player::load::http_header_fields;
+use kuro_player::track_select::{TrackCandidate, preferred_track};
 use kuro_player::tracks::external_track_commands;
-use kuro_source::anime::{AnimeSource, Hoster, SEpisode, Track, Video, best_video};
+use kuro_source::anime::{AnimeSource, Hoster, SEpisode, Track, Video};
 
 use super::Media;
 
@@ -28,53 +29,80 @@ pub fn open_source_episode(sources: &[Arc<dyn AnimeSource>], episode_id: i64) ->
     if !crate::data::is_installed() {
         return false;
     }
-    let db = &crate::data::app().anime_db;
-    let found = EpisodeRepo::new(Arc::clone(db))
-        .by_id(episode_id)
-        .and_then(|episode| episode.map(|e| AnimeRepo::new(Arc::clone(db)).by_id(e.anime_id).map(|a| (a, e))).transpose());
-    let (anime, episode) = match found {
-        Ok(Some(found)) => found,
-        Ok(None) => return false,
-        Err(e) => {
-            tracing::error!(error = %e, "player: the episode lookup failed");
-            return false;
-        }
-    };
-    let Some(source) = sources.iter().find(|s| s.id() == anime.source).cloned() else {
-        return false;
-    };
-    let Ok(handle) = tokio::runtime::Handle::try_current() else {
-        tracing::error!("player: no async runtime on this thread; the source episode is not opened");
+    let Some(found) = source_episode(sources, episode_id) else {
         return false;
     };
     // a second click while the first still loads, or while a player is open, does nothing: the first answer opens it
     if super::is_open() || RESOLVING.with(|r| r.replace(true)) {
         return true;
     }
-    let (tx, rx) = async_channel::bounded(1);
+    let started = resolve_episode(found, move |answer| {
+        RESOLVING.with(|r| r.set(false));
+        match answer {
+            Ok(media) => super::open_media(media, episode_id, 0),
+            Err(text) => crate::toast::notify(text),
+        }
+    });
+    if !started {
+        RESOLVING.with(|r| r.set(false));
+    }
+    started
+}
+
+/// A source episode ready to resolve: its source, its row and the title it plays under.
+pub struct SourceEpisode {
+    source: Arc<dyn AnimeSource>,
+    episode: Episode,
+    title: String,
+}
+
+/// The row `episode_id` when its entry belongs to one of `sources`. `None` for a missing row, a local entry, a source
+/// that is not installed, or a failed read (logged).
+pub fn source_episode(sources: &[Arc<dyn AnimeSource>], episode_id: i64) -> Option<SourceEpisode> {
+    let db = &crate::data::app().anime_db;
+    let found = EpisodeRepo::new(Arc::clone(db))
+        .by_id(episode_id)
+        .and_then(|episode| episode.map(|e| AnimeRepo::new(Arc::clone(db)).by_id(e.anime_id).map(|a| (a, e))).transpose());
+    let (anime, episode) = match found {
+        Ok(Some(found)) => found,
+        Ok(None) => return None,
+        Err(e) => {
+            tracing::error!(error = %e, "player: the episode lookup failed");
+            return None;
+        }
+    };
+    let source = sources.iter().find(|s| s.id() == anime.source).cloned()?;
+    let title = super::episode_title(&anime.title, &episode.name);
+    Some(SourceEpisode { source, episode, title })
+}
+
+/// Resolves the best stream of `found` in the background. `done` runs on the GTK thread with the media or the toast
+/// text. `false` when no async runtime runs on this thread, and then nothing starts.
+pub fn resolve_episode(found: SourceEpisode, done: impl FnOnce(Result<Media, String>) + 'static) -> bool {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        tracing::error!("player: no async runtime on this thread; the source episode is not opened");
+        return false;
+    };
+    let SourceEpisode { source, episode, title } = found;
     let s_episode = to_s_episode(&episode);
+    let preferred = super::stored_text("pref_subtitle_lang");
+    let preferred_audio = super::stored_text("pref_audio_lang");
+    let (tx, rx) = async_channel::bounded(1);
     handle.spawn(async move {
         let _ = tx.send(best_stream(source.as_ref(), &s_episode).await).await;
     });
     let busy = crate::toast::busy(&tr(MsgKey::loading));
-    let title = format!("{} - {}", anime.title, episode.name);
     glib::spawn_future_local(async move {
         // a closed channel means the source task panicked
         let answer = rx.recv().await.unwrap_or_else(|_| Err(tr(MsgKey::video_list_empty_error)));
         drop(busy);
-        RESOLVING.with(|r| r.set(false));
-        match answer {
-            Ok(video) => {
-                super::open_media(media_of(video, title), episode_id, 0);
-            }
-            Err(text) => crate::toast::notify(text),
-        }
+        done(answer.map(|video| media_of(video, title, &preferred, &preferred_audio)));
     });
     true
 }
 
-/// The video to play: the source's hosters (or its plain video list, as one hoster) through `best_video`. The error
-/// is the text of the toast.
+/// The video to play: the source's hosters (or its plain video list, as one hoster) through `choose`, which keeps the
+/// session's last quality choice and otherwise picks the best video. The error is the text of the toast.
 async fn best_stream(source: &dyn AnimeSource, episode: &SEpisode) -> Result<Video, String> {
     let hosters = if source.provides_hosters() {
         source.sort_hosters(source.hosters(episode).await.map_err(|e| e.to_string())?)
@@ -84,7 +112,7 @@ async fn best_stream(source: &dyn AnimeSource, episode: &SEpisode) -> Result<Vid
     if hosters.is_empty() {
         return Err(tr(MsgKey::no_hosters));
     }
-    best_video(source, &hosters)
+    super::sheets::quality::choose(source, &hosters)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| tr(MsgKey::video_list_empty_error))
@@ -92,22 +120,37 @@ async fn best_stream(source: &dyn AnimeSource, episode: &SEpisode) -> Result<Vid
 
 /// Side tracks are added with the `auto` flag, which selects a track only when it matches `alang` or `slang`; the source's
 /// tracks carry a display name and no language code, so nothing matched and the video played without sound or subtitles.
-/// The first audio track (the source puts its default first) and the English subtitle (else the first one) are selected.
-fn select_defaults(mut commands: Vec<Vec<String>>) -> Vec<Vec<String>> {
-    let first_audio = commands.iter().position(|c| c[0] == "audio-add");
+/// The first audio track (the source puts its default first) is selected, and so is the subtitle in the preferred
+/// language (`pref_subtitle_lang`) when one matches; else the English subtitle, else the first one.
+fn select_defaults(mut commands: Vec<Vec<String>>, preferred: &str, preferred_audio: &str) -> Vec<Vec<String>> {
+    let audios: Vec<usize> = commands.iter().enumerate().filter(|(_, c)| c[0] == "audio-add").map(|(i, _)| i).collect();
+    let audio_candidates: Vec<TrackCandidate> = audios
+        .iter()
+        .map(|&i| TrackCandidate { id: i as i64, name: commands[i].get(3).cloned().unwrap_or_default(), lang: None })
+        .collect();
+    let audio_by_pref = (!preferred_audio.trim().is_empty())
+        .then(|| preferred_track(&audio_candidates, preferred_audio, "", "", ""))
+        .flatten()
+        .map(|id| id as usize);
+    let first_audio = audio_by_pref.or_else(|| audios.first().copied());
     let subs: Vec<usize> = commands.iter().enumerate().filter(|(_, c)| c[0] == "sub-add").map(|(i, _)| i).collect();
+    let candidates: Vec<TrackCandidate> = subs
+        .iter()
+        .map(|&i| TrackCandidate { id: i as i64, name: commands[i].get(3).cloned().unwrap_or_default(), lang: None })
+        .collect();
+    let by_pref = (!preferred.trim().is_empty()).then(|| preferred_track(&candidates, preferred, "", "", "")).flatten().map(|id| id as usize);
     let english = subs.iter().copied().find(|&i| commands[i].get(3).is_some_and(|name| name.to_lowercase().starts_with("english") || name.to_lowercase().starts_with("en")));
-    for i in first_audio.into_iter().chain(english.or_else(|| subs.first().copied())) {
+    for i in first_audio.into_iter().chain(by_pref.or(english).or_else(|| subs.first().copied())) {
         commands[i][2] = "select".to_owned();
     }
     commands
 }
 
-fn media_of(video: Video, title: String) -> Media {
+pub(super) fn media_of(video: Video, title: String, preferred: &str, preferred_audio: &str) -> Media {
     let tracks = |list: &[Track]| list.iter().map(|t| kuro_player::types::Track { url: t.url.clone(), lang: t.lang.clone() }).collect::<Vec<_>>();
     let headers = http_header_fields(true, video.headers.as_ref().map(|h| h.0.as_slice()), &[]).filter(|h| !h.is_empty());
     Media {
-        tracks: select_defaults(external_track_commands(&tracks(&video.audio_tracks), &tracks(&video.subtitle_tracks)).commands),
+        tracks: select_defaults(external_track_commands(&tracks(&video.audio_tracks), &tracks(&video.subtitle_tracks)).commands, preferred, preferred_audio),
         target: video.video_url,
         title,
         headers,
@@ -190,13 +233,13 @@ mod tests {
             strings(&["sub-add", "s1", "auto", "French (fr)"]),
             strings(&["sub-add", "s2", "auto", "English (en)"]),
         ];
-        let out = select_defaults(cmds);
+        let out = select_defaults(cmds, "", "");
         let flags: Vec<&str> = out.iter().map(|c| c[2].as_str()).collect();
         assert_eq!(flags, ["select", "auto", "auto", "select"]);
         // no English: the first subtitle is selected; no side tracks: nothing changes
-        let only_fr = select_defaults(vec![strings(&["sub-add", "s1", "auto", "French (fr)"])]);
+        let only_fr = select_defaults(vec![strings(&["sub-add", "s1", "auto", "French (fr)"])], "", "");
         assert_eq!(only_fr[0][2], "select");
-        assert!(select_defaults(Vec::new()).is_empty());
+        assert!(select_defaults(Vec::new(), "", "").is_empty());
     }
 
     #[test]
@@ -206,7 +249,7 @@ mod tests {
             hosters: vec![hoster("VidStreaming", vec![video("https://cdn.test/480.m3u8", 480), video("https://cdn.test/1080.m3u8", 1080)])],
             fail: false,
         };
-        let media = media_of(resolve(&fake).expect("a video"), "Show - 1".into());
+        let media = media_of(resolve(&fake).expect("a video"), "Show - 1".into(), "", "");
         assert_eq!(media.target, "https://cdn.test/1080.m3u8", "the source's best quality is the default");
 
         let headers = "Origin: https://krussdomi.com,User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML\\, like Gecko)";
@@ -234,7 +277,25 @@ mod tests {
     fn a_video_without_headers_sets_none() {
         let mut plain = video("https://cdn.test/a.m3u8", 720);
         plain.headers = None;
-        assert_eq!(media_of(plain, String::new()).headers, None);
+        assert_eq!(media_of(plain, String::new(), "", "").headers, None);
+    }
+
+    #[test]
+    fn the_preferred_subtitle_language_is_selected_before_english() {
+        let strings = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let cmds = vec![strings(&["sub-add", "s1", "auto", "English (en)"]), strings(&["sub-add", "s2", "auto", "French (fr)"])];
+        let out = select_defaults(cmds, "fr", "");
+        assert_eq!(out[0][2], "auto", "English waits when French is preferred");
+        assert_eq!(out[1][2], "select");
+    }
+
+    #[test]
+    fn the_preferred_audio_language_is_selected_before_the_first_track() {
+        let strings = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let cmds = vec![strings(&["audio-add", "a1", "auto", "Japanese (ja)"]), strings(&["audio-add", "a2", "auto", "English (en)"])];
+        let out = select_defaults(cmds, "", "en");
+        assert_eq!(out[0][2], "auto");
+        assert_eq!(out[1][2], "select");
     }
 
     #[test]

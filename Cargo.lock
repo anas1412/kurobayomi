@@ -3777,6 +3777,85 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuro-src-comix"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "chrono",
+ "http",
+ "image",
+ "kuro-net",
+ "kuro-platform",
+ "kuro-prefs",
+ "kuro-source",
+ "kuro-source-http",
+ "regex",
+ "scraper",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
+name = "kuro-src-kickassanime"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "async-trait",
+ "base64 0.23.1",
+ "cbc",
+ "chrono",
+ "http",
+ "kuro-net",
+ "kuro-platform",
+ "kuro-prefs",
+ "kuro-source",
+ "kuro-source-http",
+ "regex",
+ "scraper",
+ "serde",
+ "serde_json",
+ "sha1 0.11.0",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
+name = "kuro-src-weebcentral"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "chrono",
+ "http",
+ "kuro-net",
+ "kuro-platform",
+ "kuro-prefs",
+ "kuro-source",
+ "kuro-source-http",
+ "regex",
+ "scraper",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "kuro-testkit"
 version = "0.1.0"
 dependencies = [
@@ -3853,6 +3932,9 @@ dependencies = [
  "kuro-prefs",
  "kuro-source",
  "kuro-source-scrape",
+ "kuro-src-comix",
+ "kuro-src-kickassanime",
+ "kuro-src-weebcentral",
  "kuro-testkit",
  "kuro-track",
  "libc",

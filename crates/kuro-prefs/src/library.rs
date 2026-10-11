@@ -38,7 +38,7 @@ define_prefs! {
         anime_sorting_mode: SortSetting<true> = "animelib_sorting_mode" => SortSetting("ALPHABETICAL,ASCENDING".to_owned());
         last_updated_timestamp: i64 = "__APP_STATE_library_update_last_timestamp" => 0;
         auto_update_interval: i32 = "pref_library_update_interval_key" => 0;
-        auto_update_device_restrictions: BTreeSet<String> = "library_update_restriction" => BTreeSet::from(["wifi".to_owned()]);
+        auto_update_device_restrictions: BTreeSet<String> = "library_update_restriction" => BTreeSet::new();
         auto_update_item_restrictions: BTreeSet<String> = "library_update_manga_restriction" => BTreeSet::from([
             "manga_fully_read".to_owned(),
             "manga_ongoing".to_owned(),
@@ -469,7 +469,7 @@ mod tests {
         assert_eq!(lib.manga_sorting_mode.get().0, "ALPHABETICAL,ASCENDING");
         assert_eq!(
             lib.auto_update_device_restrictions.get(),
-            BTreeSet::from(["wifi".to_owned()])
+            BTreeSet::new()
         );
         assert_eq!(lib.filter_downloaded_manga.get(), TriState::DISABLED);
         assert_eq!(lib.filter_interval_custom.get(), TriState::DISABLED);

@@ -59,7 +59,7 @@ pub struct GlobalSearch {
 }
 
 impl GlobalSearch {
-    /// A new search: `PinnedOnly`, the has-results toggle as stored, no results until a search runs.
+    /// A new search: every enabled source, the has-results toggle as the caller gives it, no results until a search runs.
     pub fn new(
         candidates: Vec<Candidate>,
         enabled_languages: BTreeSet<String>,
@@ -75,7 +75,7 @@ impl GlobalSearch {
             extension: None,
             query: None,
             last: None,
-            filter: SourceFilter::PinnedOnly,
+            filter: SourceFilter::All,
             only_has_results,
             generation: 0,
             rows: Vec::new(),
@@ -140,9 +140,8 @@ impl GlobalSearch {
         Some(SearchPlan { generation: self.generation, sources })
     }
 
-    /// The sources a search selects, in the order a stable sort keeps: enabled sources, pinned first then by name.
-    /// PinnedOnly keeps the pinned ones, with no fallback when there are none (GS-EC-10). An extension filter keeps that
-    /// package's sources (GS-EC-12 gives an empty list when it has none).
+    /// The sources a search selects, in the order a stable sort keeps: enabled sources, then by name. Every enabled source
+    /// is searched; an extension filter keeps that package's sources (GS-EC-12 gives an empty list when it has none).
     fn selected(&self) -> Vec<Source> {
         let mut enabled: Vec<&Candidate> = self
             .candidates
@@ -157,7 +156,6 @@ impl GlobalSearch {
             .filter(|c| match (&self.extension, self.filter) {
                 (Some(package), _) => c.package == *package,
                 (None, SourceFilter::All) => true,
-                (None, SourceFilter::PinnedOnly) => c.source.pin.contains(Pin::Pinned),
             })
             .map(|c| c.source.clone())
             .collect()
@@ -327,21 +325,27 @@ mod tests {
     }
 
     #[test]
-    fn a_new_search_defaults_to_pinned_only_and_selects_only_pinned_sources() {
-        let mut search = engine();
+    fn a_new_search_defaults_to_all_and_selects_every_enabled_source() {
+        let mut search = GlobalSearch::new(
+            vec![cand(1, "A", "en", false, "ext.a"), cand(2, "B", "en", false, "ext.a"), cand(3, "C", "ja", false, "ext.c")],
+            langs(&["en", "ja"]),
+            BTreeSet::new(),
+            None,
+            false,
+        );
         search.set_query(Some("one"));
         let plan = search.search().expect("a search starts");
-        assert_eq!(search.filter(), SourceFilter::PinnedOnly);
-        assert_eq!(ids(&plan.sources), [1, 3], "pinned sources only, pinned first then by name");
+        assert_eq!(search.filter(), SourceFilter::All, "the pinned-only filter is cut: every source is searched");
+        assert_eq!(ids(&plan.sources), [1, 2, 3], "every enabled source, by name");
         assert_eq!(plan.generation, 1);
     }
 
     #[test]
-    fn zero_pinned_sources_gives_an_empty_selection_with_no_fallback() {
-        let mut search = GlobalSearch::new(vec![cand(2, "B", "en", false, "")], langs(&["en"]), BTreeSet::new(), None, false);
+    fn a_search_with_no_enabled_language_selects_nothing_and_has_no_rows() {
+        let mut search = GlobalSearch::new(vec![cand(2, "B", "en", false, "")], langs(&["fr"]), BTreeSet::new(), None, false);
         search.set_query(Some("one"));
         let plan = search.search().expect("the search runs with nothing to fetch");
-        assert!(plan.sources.is_empty(), "GS-EC-10: no fallback to every source");
+        assert!(plan.sources.is_empty(), "the language filter decides: a language that is off is not searched");
         assert!(search.rows().is_empty());
     }
 

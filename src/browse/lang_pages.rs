@@ -1,6 +1,6 @@
-//! The two language filters: Show/hide sources (a language switch per language and a checkbox per source, T-40a-009) and
-//! the extension language page (one switch per language, T-40a-020). Both write `source_languages` through the same
-//! toggle; the sources page also writes the hidden source ids, as strings (D§5). Ports `MangaSourcesFilterScreen` and
+//! The two language filters: the Sources language filter (one switch per language, T-40a-009) and the extension language
+//! page (one switch per language, T-40a-020). Both write `source_languages` through the same toggle. The language filter
+//! is the only way to hide sources: there are no per-source hide or pin toggles. Ports `MangaSourcesFilterScreen` and
 //! `MangaExtensionFilterScreen` with their screen models; the rules are pure and the widgets are thin.
 
 use std::cell::{Cell, RefCell};
@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use kuro_domain::source::model::Source;
-use kuro_domain::source::toggles::{flip_disabled, toggle_language};
+use kuro_domain::source::toggles::toggle_language;
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::pref::Pref;
 
@@ -20,35 +20,32 @@ use super::names::{case_insensitive_cmp, compare_languages, localized_display_na
 use super::primitives::ToastDuration;
 use super::view::spinner_row;
 
-/// One source checkbox.
+/// One source of a language group.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceCheck {
     pub id: i64,
     pub name: String,
-    /// Checked when the id string is not in `hidden_catalogues` (B§4).
-    pub checked: bool,
 }
 
-/// One language header and the sources under it.
+/// One language and the sources under it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LangGroup {
     pub lang: String,
     pub title: String,
-    /// The header switch: the language is in `source_languages`.
+    /// The switch: the language is in `source_languages`.
     pub enabled: bool,
     pub sources: Vec<SourceCheck>,
 }
 
-/// `GetLanguagesWithMangaSources`: sources sorted by `(hidden, name ignoring case)`, grouped by language, the groups
-/// sorted by `(language off, language order)`. The page shows the sources of an enabled language only.
-pub fn sources_filter_groups(sources: &[Source], enabled: &BTreeSet<String>, disabled: &BTreeSet<String>) -> Vec<LangGroup> {
-    let hidden = |s: &Source| disabled.contains(&s.id.to_string());
+/// `GetLanguagesWithMangaSources`: sources sorted by name ignoring case, grouped by language, the groups sorted by
+/// `(language off, language order)`. Every source of a language is listed; the language switch decides whether it shows.
+pub fn sources_filter_groups(sources: &[Source], enabled: &BTreeSet<String>) -> Vec<LangGroup> {
     // Only online sources are listed (E-SF-04): a stub and the local source are not HTTP sources.
     let mut sorted: Vec<&Source> = sources.iter().filter(|s| !s.is_stub && s.id != super::sources::LOCAL_SOURCE_ID).collect();
-    sorted.sort_by(|a, b| hidden(a).cmp(&hidden(b)).then_with(|| case_insensitive_cmp(&a.name, &b.name)));
+    sorted.sort_by(|a, b| case_insensitive_cmp(&a.name, &b.name));
     let mut groups: Vec<LangGroup> = Vec::new();
     for source in sorted {
-        let check = SourceCheck { id: source.id, name: source.name.clone(), checked: !hidden(source) };
+        let check = SourceCheck { id: source.id, name: source.name.clone() };
         match groups.iter_mut().find(|g| g.lang == source.lang) {
             Some(group) => group.sources.push(check),
             None => groups.push(LangGroup {
@@ -73,11 +70,11 @@ pub enum FilterScreen {
 }
 
 /// The state the page is in (E-SF-05 for the error). `ready` is the registry's readiness; `failed` is a failed load.
-pub fn filter_screen(ready: bool, failed: bool, sources: &[Source], enabled: &BTreeSet<String>, disabled: &BTreeSet<String>) -> FilterScreen {
+pub fn filter_screen(ready: bool, failed: bool, sources: &[Source], enabled: &BTreeSet<String>) -> FilterScreen {
     match (ready, failed) {
         (false, _) => FilterScreen::Loading,
         (true, true) => FilterScreen::Error,
-        (true, false) => FilterScreen::Success(sources_filter_groups(sources, enabled, disabled)),
+        (true, false) => FilterScreen::Success(sources_filter_groups(sources, enabled)),
     }
 }
 
@@ -165,7 +162,6 @@ fn clear(column: &gtk::Box) {
 
 struct SourcesInner {
     languages: Pref<BTreeSet<String>>,
-    hidden: Pref<BTreeSet<String>>,
     stack: gtk::Stack,
     column: gtk::Box,
     sources: RefCell<Vec<Source>>,
@@ -177,8 +173,8 @@ struct SourcesInner {
     errored: Cell<bool>,
 }
 
-/// The Show/hide sources page. It reads `source_languages` and the hidden ids when it draws and writes them when a
-/// switch or a checkbox is flipped, so the stored sets are the one truth. Cloning shares the page.
+/// The Sources language filter page. It reads `source_languages` when it draws and writes it when a switch is flipped, so
+/// the stored set is the one truth. Cloning shares the page.
 #[derive(Clone)]
 pub struct SourcesFilterPage {
     inner: Rc<SourcesInner>,
@@ -186,12 +182,11 @@ pub struct SourcesFilterPage {
 }
 
 impl SourcesFilterPage {
-    /// `languages` is `source_languages`; `hidden` is `hidden_catalogues` or `hidden_anime_catalogues`.
-    pub fn new(languages: Pref<BTreeSet<String>>, hidden: Pref<BTreeSet<String>>) -> Self {
+    /// `languages` is `source_languages`.
+    pub fn new(languages: Pref<BTreeSet<String>>) -> Self {
         let (stack, column) = page_stack(&tr(MsgKey::source_filter_empty_screen));
         let inner = Rc::new(SourcesInner {
             languages,
-            hidden,
             stack,
             column,
             sources: RefCell::new(Vec::new()),
@@ -233,7 +228,7 @@ impl SourcesFilterPage {
 impl SourcesInner {
     fn render(self: &Rc<Self>) {
         clear(&self.column);
-        let screen = filter_screen(self.ready.get(), self.failed.get(), &self.sources.borrow(), &self.languages.get(), &self.hidden.get());
+        let screen = filter_screen(self.ready.get(), self.failed.get(), &self.sources.borrow(), &self.languages.get());
         if error_pops_the_page(&screen) {
             self.stack.set_visible_child_name("empty");
             // the hook runs after the borrow of the slot ends: it pops the page, which may drop this one
@@ -256,9 +251,7 @@ impl SourcesInner {
             return;
         }
         for group in groups {
-            let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            list.set_visible(group.enabled);
-            let (weak, lang, shown) = (Rc::downgrade(self), group.lang.clone(), list.clone());
+            let (weak, lang) = (Rc::downgrade(self), group.lang.clone());
             let (header, _) = switch_row(&group.title, group.enabled, move |on| {
                 if let Some(inner) = weak.upgrade() {
                     let mut set = inner.languages.get();
@@ -266,41 +259,11 @@ impl SourcesInner {
                         toggle_language(&mut set, &lang);
                         write(&inner.languages, set);
                     }
-                    shown.set_visible(on);
                 }
             });
             self.column.append(&header);
-            for source in group.sources {
-                list.append(&self.check_row(&source));
-            }
-            self.column.append(&list);
         }
         self.stack.set_visible_child_name("list");
-    }
-
-    fn check_row(self: &Rc<Self>, source: &SourceCheck) -> gtk::Box {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
-        row.set_margin_start(32);
-        row.set_margin_end(16);
-        row.set_margin_top(8);
-        row.set_margin_bottom(8);
-        row.append(&gtk::Label::builder().label(&source.name).hexpand(true).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build());
-        let check = gtk::CheckButton::new();
-        check.set_active(source.checked);
-        // the row is the click target; the box is a picture of the state
-        check.set_can_target(false);
-        row.append(&check);
-        let (weak, id) = (Rc::downgrade(self), source.id);
-        let click = gtk::GestureClick::new();
-        click.connect_released(move |_, _, _, _| {
-            let Some(inner) = weak.upgrade() else { return };
-            let mut hidden = inner.hidden.get();
-            let now_hidden = flip_disabled(&mut hidden, id);
-            write(&inner.hidden, hidden);
-            check.set_active(!now_hidden);
-        });
-        row.add_controller(click);
-        row
     }
 }
 
@@ -385,24 +348,23 @@ mod pure_tests {
     }
 
     #[test]
-    fn groups_put_enabled_languages_first_and_hidden_sources_last_in_each() {
+    fn groups_put_enabled_languages_first_and_sources_by_name_in_each() {
         let sources = vec![
             Source::new(1, "Zeta", "en"),
             Source::new(2, "alpha", "en"),
             Source::new(3, "Mid", "fr"),
             Source::new(4, "Other", "de"),
         ];
-        let groups = sources_filter_groups(&sources, &set(&["en", "fr"]), &set(&["2"]));
+        let groups = sources_filter_groups(&sources, &set(&["en", "fr"]));
         let langs: Vec<&str> = groups.iter().map(|g| g.lang.as_str()).collect();
         assert_eq!(langs, ["en", "fr", "de"], "the off language goes last");
-        assert_eq!(groups[0].sources.iter().map(|s| s.id).collect::<Vec<_>>(), [1, 2], "the hidden source sorts after the shown one");
-        assert!(groups[0].sources[0].checked && !groups[0].sources[1].checked, "checked is not being in the hidden set");
+        assert_eq!(groups[0].sources.iter().map(|s| s.id).collect::<Vec<_>>(), [2, 1], "names ignore case");
         assert!(groups[0].enabled && !groups[2].enabled);
     }
 
     #[test]
     fn no_sources_means_no_groups() {
-        assert!(sources_filter_groups(&[], &set(&["en"]), &set(&[])).is_empty());
+        assert!(sources_filter_groups(&[], &set(&["en"])).is_empty());
     }
 
     fn ext(lang: Option<&str>, sources: &[(i64, &str)]) -> Ext {
@@ -438,9 +400,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::browse::extensions::{ExtSource, ExtState};
 
-    fn prefs() -> (Pref<BTreeSet<String>>, Pref<BTreeSet<String>>) {
-        let store = PrefStore::in_memory();
-        (store.pref("source_languages", BTreeSet::from(["en".to_owned()])), store.pref("hidden_catalogues", BTreeSet::new()))
+    fn prefs() -> Pref<BTreeSet<String>> {
+        PrefStore::in_memory().pref("source_languages", BTreeSet::from(["en".to_owned()]))
     }
 
     fn rows(column: &gtk::Box) -> Vec<gtk::Widget> {
@@ -481,53 +442,23 @@ pub(crate) mod tests {
         false
     }
 
-    fn the_language_switch_and_the_source_checkbox_write_their_sets_as_strings() {
-        let (languages, hidden) = prefs();
-        let page = SourcesFilterPage::new(languages.clone(), hidden.clone());
+    fn the_language_switches_write_the_set_and_a_switched_off_language_has_no_list() {
+        let languages = prefs();
+        let page = SourcesFilterPage::new(languages.clone());
         page.set_sources(vec![Source::new(11, "Alpha", "en"), Source::new(12, "Beta", "en"), Source::new(21, "Gamma", "fr")]);
         let top = rows(&page.inner.column);
-        assert_eq!(top.len(), 4, "a header and a list for each of two languages");
-        // en is on: its list shows; fr is off: its list is hidden
-        assert!(top[1].is_visible() && !top[3].is_visible());
-
-        let fr_switch = find::<gtk::Switch>(&top[2]).expect("fr switch");
+        assert_eq!(top.len(), 2, "one switch row per language, and no per-source rows");
+        let fr_switch = find::<gtk::Switch>(&top[1]).expect("fr switch");
         fr_switch.emit_by_name::<bool>("state-set", &[&true]);
         assert!(languages.get().contains("fr"), "the language joins source_languages");
-        assert!(top[3].is_visible(), "its sources appear");
-
         let en_switch = find::<gtk::Switch>(&top[0]).expect("en switch");
         en_switch.emit_by_name::<bool>("state-set", &[&false]);
-        assert!(!languages.get().contains("en"));
-        assert!(!top[1].is_visible());
-
-        let first = rows(top[1].downcast_ref::<gtk::Box>().expect("list"))[0].clone();
-        let check = find::<gtk::CheckButton>(&first).expect("checkbox");
-        assert!(check.is_active(), "not hidden means checked");
-        let list = first.observe_controllers();
-        let click = (0..list.n_items()).filter_map(|i| list.item(i)).find_map(|c| c.downcast::<gtk::GestureClick>().ok()).expect("click");
-        click.emit_by_name::<()>("released", &[&1_i32, &0.0_f64, &0.0_f64]);
-        assert_eq!(hidden.get(), BTreeSet::from(["11".to_owned()]), "the id is stored as a string");
-        assert!(!check.is_active());
-        click.emit_by_name::<()>("released", &[&1_i32, &0.0_f64, &0.0_f64]);
-        assert!(hidden.get().is_empty(), "a second click shows it again");
-    }
-
-    fn language_toggle_keeps_checkboxes() {
-        let (languages, hidden) = prefs();
-        hidden.set(BTreeSet::from(["12".to_owned()])).expect("hidden");
-        let page = SourcesFilterPage::new(languages.clone(), hidden.clone());
-        page.set_sources(vec![Source::new(11, "Alpha", "en"), Source::new(12, "Beta", "en")]);
-        let header = rows(&page.inner.column).remove(0);
-        let switch = find::<gtk::Switch>(&header).expect("switch");
-        switch.emit_by_name::<bool>("state-set", &[&false]);
-        switch.emit_by_name::<bool>("state-set", &[&true]);
-        assert_eq!(hidden.get(), BTreeSet::from(["12".to_owned()]), "switching a language off and on leaves the source checkboxes as they were");
-        assert!(languages.get().contains("en"));
+        assert!(!languages.get().contains("en"), "the language leaves source_languages");
+        assert!(find::<gtk::CheckButton>(page.inner.column.upcast_ref()).is_none(), "no source checkboxes: the language filter is the only filter");
     }
 
     fn no_sources_shows_the_source_filter_empty_screen() {
-        let (languages, hidden) = prefs();
-        let page = SourcesFilterPage::new(languages, hidden);
+        let page = SourcesFilterPage::new(prefs());
         assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("loading"));
         page.set_sources(Vec::new());
         assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("empty"));
@@ -536,8 +467,7 @@ pub(crate) mod tests {
     }
 
     fn the_filter_page_shows_loading_then_the_groups_and_an_error_toasts_and_pops_once() {
-        let (languages, hidden) = prefs();
-        let page = SourcesFilterPage::new(languages, hidden);
+        let page = SourcesFilterPage::new(prefs());
         let popped: Rc<RefCell<Vec<String>>> = Rc::default();
         let log = Rc::clone(&popped);
         page.set_on_error(Rc::new(move || log.borrow_mut().push(tr(MsgKey::internal_error))));
@@ -565,7 +495,7 @@ pub(crate) mod tests {
     }
 
     fn the_extension_language_switches_write_the_set_and_a_failed_fetch_shows_the_internal_error_banner() {
-        let (languages, _) = prefs();
+        let languages = prefs();
         let page = ExtensionLanguagesPage::new(languages.clone());
         page.set_exts(&[ext("en"), ext("ja")]);
         let list = rows(&page.inner.column);
@@ -587,8 +517,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn smoke() {
-        the_language_switch_and_the_source_checkbox_write_their_sets_as_strings();
-        language_toggle_keeps_checkboxes();
+        the_language_switches_write_the_set_and_a_switched_off_language_has_no_list();
         no_sources_shows_the_source_filter_empty_screen();
         the_filter_page_shows_loading_then_the_groups_and_an_error_toasts_and_pops_once();
         the_extension_language_switches_write_the_set_and_a_failed_fetch_shows_the_internal_error_banner();
@@ -597,16 +526,16 @@ pub(crate) mod tests {
     #[test]
     fn the_filter_page_states_follow_readiness_then_failure_then_the_groups() {
         let sources = [Source::new(1, "Zed", "en")];
-        let (enabled, disabled) = (BTreeSet::from(["en".to_owned()]), BTreeSet::new());
-        assert_eq!(filter_screen(false, false, &sources, &enabled, &disabled), FilterScreen::Loading);
-        assert_eq!(filter_screen(false, true, &sources, &enabled, &disabled), FilterScreen::Loading, "loading until the registry is ready");
-        assert_eq!(filter_screen(true, true, &sources, &enabled, &disabled), FilterScreen::Error);
+        let enabled = BTreeSet::from(["en".to_owned()]);
+        assert_eq!(filter_screen(false, false, &sources, &enabled), FilterScreen::Loading);
+        assert_eq!(filter_screen(false, true, &sources, &enabled), FilterScreen::Loading, "loading until the registry is ready");
+        assert_eq!(filter_screen(true, true, &sources, &enabled), FilterScreen::Error);
         assert!(error_pops_the_page(&FilterScreen::Error), "E-SF-05: an error shows the toast and pops the page");
         assert!(!error_pops_the_page(&FilterScreen::Loading));
-        match filter_screen(true, false, &sources, &enabled, &disabled) {
+        match filter_screen(true, false, &sources, &enabled) {
             FilterScreen::Success(groups) => assert_eq!(groups.len(), 1),
             other => panic!("a success has groups: {other:?}"),
         }
-        assert_eq!(filter_screen(true, false, &[], &enabled, &disabled), FilterScreen::Success(vec![]), "an empty success is the empty screen");
+        assert_eq!(filter_screen(true, false, &[], &enabled), FilterScreen::Success(vec![]), "an empty success is the empty screen");
     }
 }

@@ -9,6 +9,7 @@ pub mod focus;
 pub mod keyboard;
 pub mod layout;
 pub mod numeric;
+pub mod page_header;
 pub mod pill;
 pub mod refresh;
 pub mod repeat_button;

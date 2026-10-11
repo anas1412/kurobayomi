@@ -11,7 +11,6 @@ use gtk::prelude::*;
 use kuro_domain::source::browse::BrowseQuery;
 use kuro_domain::source::model::Source;
 use kuro_i18n::{Arg, MsgKey, tr, trf};
-use kuro_prefs::source::{MigrationDirection, MigrationSortingMode};
 use kuro_source::filter_list::FilterList;
 use tokio::sync::watch;
 
@@ -25,7 +24,7 @@ use super::header::OverflowItem;
 use super::header_bar::{HeaderDeps, SourceHeader, build as build_header, stub_header};
 use super::icons::resolve;
 use super::listing::ListItem;
-use super::nav::{BackAction, action_url, back_action, last_used_write};
+use super::nav::{BackAction, action_url, back_action};
 use super::listing_view::{ListingDeps, ListingView};
 use super::names::{localized_display_name, subtitle_display_name};
 use super::primitives::{ToastSpec, stub_source_label};
@@ -51,8 +50,6 @@ pub fn extensions(backend: Arc<dyn ExtensionBackend>, nav: ExtNav) -> Extensions
 pub struct MigrateSourcesSnapshot {
     /// Already sorted for display (`migration::sort_migration_sources`).
     pub sources: Vec<(Source, i64)>,
-    pub mode: MigrationSortingMode,
-    pub direction: MigrationDirection,
     /// What the page says when no source has a favourite: the manga picker says `information_empty_library`, the anime
     /// picker `texts::MIGRATE_SOURCES_EMPTY` (T-41a-036).
     pub empty_text: String,
@@ -66,8 +63,6 @@ pub struct MigrateSourcesNav {
     pub open: Rc<dyn Fn(i64)>,
     /// A long press copies the id.
     pub copy_id: Rc<dyn Fn(i64)>,
-    pub toggle_mode: Rc<dyn Fn()>,
-    pub toggle_direction: Rc<dyn Fn()>,
     /// The header's help action: the source migration guide.
     pub open_help: Rc<dyn Fn()>,
     /// The error row's Retry: reads the counts again.
@@ -76,30 +71,12 @@ pub struct MigrateSourcesNav {
 
 pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    // the prompt and the sort controls head the list column, as a section heading would
+    // the prompt and the help button head the list column, as a section heading would
     let sort = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     sort.set_margin_start(16);
     sort.set_margin_end(16);
     sort.set_margin_top(12);
     sort.append(&gtk::Label::builder().label(tr(MsgKey::migration_selection_prompt)).hexpand(true).xalign(0.0).wrap(true).css_classes(["dim-label"]).build());
-    let mode = gtk::Button::with_label(&tr(match snapshot.mode {
-        MigrationSortingMode::ALPHABETICAL => MsgKey::action_sort_alpha,
-        MigrationSortingMode::TOTAL => MsgKey::action_sort_count,
-    }));
-    let direction = gtk::Button::from_icon_name(match snapshot.direction {
-        MigrationDirection::ASCENDING => "view-sort-ascending-symbolic",
-        MigrationDirection::DESCENDING => "view-sort-descending-symbolic",
-    });
-    direction.set_tooltip_text(Some(&tr(match snapshot.direction {
-        MigrationDirection::ASCENDING => MsgKey::action_asc,
-        MigrationDirection::DESCENDING => MsgKey::action_desc,
-    })));
-    let toggle_mode = Rc::clone(&nav.toggle_mode);
-    mode.connect_clicked(move |_| toggle_mode());
-    let toggle_direction = Rc::clone(&nav.toggle_direction);
-    direction.connect_clicked(move |_| toggle_direction());
-    sort.append(&mode);
-    sort.append(&direction);
     let help = gtk::Button::from_icon_name("help-browser-symbolic");
     help.set_tooltip_text(Some(&tr(MsgKey::label_help)));
     let open_help = Rc::clone(&nav.open_help);
@@ -158,8 +135,6 @@ pub struct FavoritesDeps {
 pub struct BrowseSourceDeps {
     pub supports_latest: bool,
     pub configurable: bool,
-    /// Incognito applies to the source: opening it does not store it as the last used one (B-EC-17).
-    pub incognito: bool,
     pub prefs: Rc<super::prefs::BrowsePrefs>,
     /// The source's id, name, language and stub flag are read from here. `on_long_press` and `favorite_urls` are filled
     /// in by `browse_source` from `favorites`.
@@ -222,17 +197,11 @@ fn stub_page(listing: &ListingDeps, on_back: Rc<dyn Fn()>) -> gtk::Box {
 }
 
 pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
-    let BrowseSourceDeps { supports_latest, configurable, incognito, prefs, mut listing, filters, favorites, hide_in_library, initial_query, on_back, on_overflow, open_url } = deps;
+    let BrowseSourceDeps { supports_latest, configurable, prefs, mut listing, filters, favorites, hide_in_library, initial_query, on_back, on_overflow, open_url } = deps;
     if listing.stub {
         return SourcePage::Stub(stub_page(&listing, on_back));
     }
-    // opening a source stores it as the last used one, once, unless incognito applies
     let (source_name, is_local, source_id) = (listing.source_name.clone(), listing.is_local, listing.source_id);
-    if let Some(id) = last_used_write(incognito, source_id) {
-        if let Err(error) = prefs.sources.last_used_manga_source.set(id) {
-            tracing::warn!(%error, "could not store the last used source");
-        }
-    }
 
     // the help actions open the guide; the rest go to the caller
     let on_action = Rc::clone(&listing.on_action);
@@ -458,15 +427,15 @@ pub struct GlobalSearchSnapshot {
     pub rows: Vec<SearchRow>,
 }
 
-/// Which sources the rows are limited to: the pinned ones (the default) or all.
+/// Which sources a search covers. Every enabled source: the pinned-only filter is cut with the pins (the language filter
+/// is the only way to leave sources out).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SourceFilter {
     #[default]
-    PinnedOnly,
     All,
 }
 
-/// The chip row of the search toolbar: one of the two source filters, and the Has results toggle.
+/// The chip row of the search toolbar: the source filter, and the Has results toggle.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SearchChips {
     pub filter: SourceFilter,
@@ -481,17 +450,10 @@ pub fn progress_visible(answered: usize, total: usize) -> bool {
     answered >= 1 && answered < total
 }
 
-/// The rows the chips leave: pinned-only keeps pinned sources and the origin source; Has results keeps rows whose
-/// search found something. A chip change filters what is already here and never runs the search again (D-UI-10).
+/// The rows the chips leave: Has results keeps rows whose search found something. A chip change filters what is already
+/// here and never runs the search again (D-UI-10).
 pub fn visible_rows(rows: &[SearchRow], chips: SearchChips) -> Vec<&SearchRow> {
-    use kuro_domain::source::pin::Pin;
-    rows.iter()
-        .filter(|row| match chips.filter {
-            SourceFilter::All => true,
-            SourceFilter::PinnedOnly => row.origin || row.source.pin.contains(Pin::Pinned),
-        })
-        .filter(|row| !chips.only_has_results || matches!(&row.state, SearchState::Results(items) if !items.is_empty()))
-        .collect()
+    rows.iter().filter(|row| !chips.only_has_results || matches!(&row.state, SearchState::Results(items) if !items.is_empty())).collect()
 }
 
 /// The title of a source header: the name, with a prefix on the origin source.
@@ -566,7 +528,7 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     GlobalSearchPage { root, entry, view }
 }
 
-/// The chips: Pinned and All pick the source filter, a separator, then the Has results toggle (B§10.1).
+/// The chips: All (the source filter), a separator, then the Has results toggle (B§10.1).
 fn search_chips(view: &Rc<SearchView>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     row.set_margin_start(12);
@@ -578,21 +540,10 @@ fn search_chips(view: &Rc<SearchView>) -> gtk::Box {
         button.set_active(active);
         button
     };
-    let pinned = chip(MsgKey::pinned_sources, chips.filter == SourceFilter::PinnedOnly);
     let all = chip(MsgKey::all, chips.filter == SourceFilter::All);
-    all.set_group(Some(&pinned));
     let has_results = chip(MsgKey::has_results, chips.only_has_results);
-    for (button, filter) in [(&pinned, SourceFilter::PinnedOnly), (&all, SourceFilter::All)] {
-        let view = Rc::clone(view);
-        button.connect_toggled(move |button| {
-            if button.is_active() {
-                view.set_chips(SearchChips { filter, ..view.chips.get() });
-            }
-        });
-    }
     let toggled = Rc::clone(view);
     has_results.connect_toggled(move |button| toggled.set_chips(SearchChips { only_has_results: button.is_active(), ..toggled.chips.get() }));
-    row.append(&pinned);
     row.append(&all);
     row.append(&gtk::Separator::new(gtk::Orientation::Vertical));
     row.append(&has_results);
@@ -796,14 +747,12 @@ pub(crate) mod tests {
 
     fn no_sample_rows_in_an_empty_snapshot() {
         let log = nav_log();
-        let (a, b, c, d) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
+        let (a, b) = (Rc::clone(&log), Rc::clone(&log));
         let migrate = migrate_sources(
-            &MigrateSourcesSnapshot { sources: vec![], mode: MigrationSortingMode::ALPHABETICAL, direction: MigrationDirection::ASCENDING, empty_text: tr(MsgKey::information_empty_library), error: None },
+            &MigrateSourcesSnapshot { sources: vec![], empty_text: tr(MsgKey::information_empty_library), error: None },
             MigrateSourcesNav {
                 open: Rc::new(move |id| a.borrow_mut().push(format!("open {id}"))),
                 copy_id: Rc::new(move |id| b.borrow_mut().push(format!("copy {id}"))),
-                toggle_mode: Rc::new(move || c.borrow_mut().push("mode".into())),
-                toggle_direction: Rc::new(move || d.borrow_mut().push("direction".into())),
                 open_help: Rc::new(|| {}),
                 retry: Rc::new(|| {}),
             },
@@ -835,8 +784,6 @@ pub(crate) mod tests {
         stub.is_stub = true;
         let snapshot = MigrateSourcesSnapshot {
             sources: vec![(Source::new(1, "Alpha", "en"), 12), (stub, 3), (Source::new(3, "Nolang", ""), 1)],
-            mode: MigrationSortingMode::TOTAL,
-            direction: MigrationDirection::DESCENDING,
             empty_text: String::new(),
             error: None,
         };
@@ -845,14 +792,12 @@ pub(crate) mod tests {
             MigrateSourcesNav {
                 open: Rc::new(move |id| a.borrow_mut().push(format!("open {id}"))),
                 copy_id: Rc::new(move |id| b.borrow_mut().push(format!("copy {id}"))),
-                toggle_mode: Rc::new(|| {}),
-                toggle_direction: Rc::new(|| {}),
                 open_help: Rc::new(|| {}),
                 retry: Rc::new(|| {}),
             },
         );
         let text = all_labels(&page);
-        for expected in ["Alpha", "12 in library", "Gone", "3 in library", "Nolang", "1 in library", &tr(MsgKey::not_installed), &tr(MsgKey::action_sort_count)] {
+        for expected in ["Alpha", "12 in library", "Gone", "3 in library", "Nolang", "1 in library", &tr(MsgKey::not_installed)] {
             assert!(text.iter().any(|t| t == expected), "{expected} in {text:?}");
         }
         assert_eq!(text.iter().filter(|t| **t == tr(MsgKey::not_installed)).count(), 1, "only the stub is marked");
@@ -930,14 +875,9 @@ pub(crate) mod tests {
     fn global_search_has_chips_a_progress_bar_that_hides_at_the_ends_and_96_px_cards() {
         let (nav, log) = search_nav(SearchChips::default());
         let page = global_search(nav, watch::channel(true).1);
-        let pinned = {
-            let mut source = Source::new(1, "Alpha", "en");
-            source.pin = kuro_domain::source::pin::Pins::PINNED;
-            source
-        };
         let item = ListItem { title: "Berserk".into(), ..ListItem::default() };
         let rows = vec![
-            SearchRow { source: pinned, state: SearchState::Results(vec![item]), origin: false },
+            SearchRow { source: Source::new(1, "Alpha", "en"), state: SearchState::Results(vec![item]), origin: false },
             SearchRow { source: Source::new(2, "Beta", "en"), state: SearchState::Results(vec![]), origin: false },
             SearchRow { source: Source::new(3, "Gamma", "en"), state: SearchState::Loading, origin: true },
         ];
@@ -958,24 +898,20 @@ pub(crate) mod tests {
         assert!(!page.view.progress.is_visible(), "all answered");
 
         let text = all_labels(page.widget());
-        for expected in ["Alpha", &format!("\u{25B6} Gamma")] {
-            assert!(text.iter().any(|t| t == expected), "{expected} in {text:?}: pinned-only keeps the pinned and the origin source");
+        for expected in ["Alpha", "Beta", &format!("\u{25B6} Gamma")] {
+            assert!(text.iter().any(|t| t == expected), "{expected} in {text:?}: every source is searched and the origin is listed");
         }
-        assert!(!text.iter().any(|t| t == "Beta"), "an unpinned source is out under Pinned");
 
-        // the chips: Pinned, All, a separator, Has results
+        // the chips: All, then Has results
         let chips: Vec<gtk::ToggleButton> = descendants(page.widget());
         let names: Vec<String> = chips.iter().map(|c| c.label().map(|l| l.to_string()).unwrap_or_default()).collect();
-        assert_eq!(names, [tr(MsgKey::pinned_sources), tr(MsgKey::all), tr(MsgKey::has_results)]);
-        assert!(chips[0].is_active() && !chips[1].is_active() && !chips[2].is_active());
+        assert_eq!(names, [tr(MsgKey::all), tr(MsgKey::has_results)]);
+        assert!(chips[0].is_active() && !chips[1].is_active());
         chips[1].set_active(true);
-        assert!(!chips[0].is_active(), "Pinned and All are one choice");
-        assert!(all_labels(page.widget()).iter().any(|t| t == "Beta"), "All shows every source again, from the rows already here");
-        chips[2].set_active(true);
         let text = all_labels(page.widget());
         assert!(text.iter().any(|t| t == "Alpha") && !text.iter().any(|t| t == "Beta" || t == "\u{25B6} Gamma"), "Has results keeps only rows with results: {text:?}");
         assert!(log.borrow().iter().all(|entry| entry.starts_with("chips ")), "a chip change never runs the search: {:?}", log.borrow());
-        assert_eq!(log.borrow().len(), 2);
+        assert_eq!(log.borrow().len(), 1);
 
         // cards are 96 px wide and a long press previews
         let card = descendants::<gtk::Button>(page.widget()).into_iter().find(|b| b.has_css_class("flat") && b.child().is_some_and(|c| c.is::<gtk::Box>())).expect("card");
@@ -1044,11 +980,11 @@ pub(crate) mod tests {
         FilterList(vec![Filter::check_box("Completed")])
     }
 
-    fn source_rig(stub: bool, incognito: bool, filters: FilterList, results: Vec<Result<ListedPage, String>>) -> Rig {
-        source_rig_hiding(stub, incognito, filters, results, false)
+    fn source_rig(stub: bool, filters: FilterList, results: Vec<Result<ListedPage, String>>) -> Rig {
+        source_rig_hiding(stub, filters, results, false)
     }
 
-    fn source_rig_hiding(stub: bool, incognito: bool, filters: FilterList, results: Vec<Result<ListedPage, String>>, hide: bool) -> Rig {
+    fn source_rig_hiding(stub: bool, filters: FilterList, results: Vec<Result<ListedPage, String>>, hide: bool) -> Rig {
         let rt: &'static tokio::runtime::Runtime =
             Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_time().build().expect("runtime")));
         let entered = rt.enter();
@@ -1061,7 +997,6 @@ pub(crate) mod tests {
         let page = browse_source(BrowseSourceDeps {
             supports_latest: true,
             configurable: false,
-            incognito,
             prefs: Rc::clone(&prefs),
             listing: ListingDeps {
                 loader: Arc::clone(&script) as Arc<dyn PageLoader>,
@@ -1119,7 +1054,7 @@ pub(crate) mod tests {
     }
 
     fn a_stub_source_shows_only_its_title_back_and_the_missing_message() {
-        let rig = source_rig(true, false, defaults(), vec![]);
+        let rig = source_rig(true, defaults(), vec![]);
         let SourcePage::Stub(root) = &rig.page else { panic!("a stub source gets the missing-source page") };
         let text = all_labels(root);
         assert!(text.contains(&"Gone".to_owned()), "the title is the stub's name: {text:?}");
@@ -1142,25 +1077,13 @@ pub(crate) mod tests {
         assert_eq!(buttons.len(), 1, "back is the only control: no chips, no filter, no retry");
         buttons[0].emit_clicked();
         assert_eq!(*rig.log.borrow(), ["back"]);
-        assert_eq!(rig.prefs.sources.last_used_manga_source.get(), -1, "a stub is not stored as the last used source");
         assert!(rig.script.requests.lock().expect("lock").is_empty(), "and never loads");
         let label = stub_source_label("", "en", 42);
         assert_eq!(label, "42", "a blank name falls back to the id");
     }
 
-    fn opening_a_source_stores_it_as_the_last_used_unless_incognito_applies() {
-        let rig = source_rig(false, false, FilterList::default(), vec![]);
-        assert_eq!(rig.prefs.sources.last_used_manga_source.get(), 42);
-        let incognito = source_rig(false, true, FilterList::default(), vec![]);
-        assert_eq!(incognito.prefs.sources.last_used_manga_source.get(), -1, "incognito leaves it alone");
-        let SourcePage::Browse(page) = &rig.page else { panic!("browse page") };
-        page.popular.set_active(true);
-        page.latest.as_ref().expect("latest").set_active(true);
-        assert_eq!(rig.prefs.sources.last_used_manga_source.get(), 42, "switching listings does not write it again");
-    }
-
     fn back_clears_the_search_text_first_and_then_leaves() {
-        let rig = source_rig(false, false, FilterList::default(), vec![]);
+        let rig = source_rig(false, FilterList::default(), vec![]);
         let SourcePage::Browse(page) = &rig.page else { panic!("browse page") };
         let back = all_buttons(&page.header.bar).into_iter().find(|b| b.icon_name().as_deref() == Some("go-previous-symbolic")).expect("back");
         back.emit_clicked();
@@ -1176,7 +1099,7 @@ pub(crate) mod tests {
     }
 
     fn popular_latest_and_a_search_from_them_start_from_fresh_defaults() {
-        let rig = source_rig(false, false, defaults(), vec![]);
+        let rig = source_rig(false, defaults(), vec![]);
         let SourcePage::Browse(page) = &rig.page else { panic!("browse page") };
         assert!(pump_until(|| !rig.script.requests.lock().expect("lock").is_empty()));
         // a search from Popular starts from the defaults
@@ -1192,7 +1115,7 @@ pub(crate) mod tests {
     }
 
     fn the_filter_button_of_the_sheet_searches_with_the_sheet_values() {
-        let rig = source_rig(false, false, defaults(), vec![]);
+        let rig = source_rig(false, defaults(), vec![]);
         let SourcePage::Browse(page) = &rig.page else { panic!("browse page") };
         assert!(pump_until(|| !rig.script.requests.lock().expect("lock").is_empty()));
         page.search.set_text("naruto");
@@ -1229,29 +1152,13 @@ pub(crate) mod tests {
     }
 
     fn there_is_no_help_action_and_other_actions_go_to_the_caller() {
-        let rig = source_rig(false, false, FilterList::default(), vec![Err("offline".into())]);
+        let rig = source_rig(false, FilterList::default(), vec![Err("offline".into())]);
         let SourcePage::Browse(page) = &rig.page else { panic!("browse page") };
         assert!(pump_until(|| page.listing.widget().first_child().is_some() && !all_buttons(page.listing.widget()).is_empty()));
         let tips = |tip: String| all_buttons(page.listing.widget()).into_iter().find(|b| b.tooltip_text().as_deref() == Some(tip.as_str()));
         assert!(tips(EmptyAction::Help.label()).is_none(), "no help page, so no Help button (T-14a-047)");
         tips(EmptyAction::OpenInWebView.label()).expect("button").emit_clicked();
         assert_eq!(rig.log.borrow().last().map(String::as_str), Some("action OpenInWebView"));
-    }
-
-    fn hide_in_library_keeps_favourites_out_of_a_page_made_with_the_flag_on() {
-        let page = |favorite: bool, title: &str| ListItem { title: title.into(), url: format!("/{title}"), favorite, ..ListItem::default() };
-        let listed = || Ok(ListedPage { items: vec![page(true, "mine"), page(false, "new")], has_next: false });
-        let prefs = super::super::prefs::BrowsePrefs::new(PrefStore::in_memory());
-        assert!(!prefs.hide_in_library(), "off by default");
-        prefs.sources.hide_in_manga_library_items.set(true).expect("set");
-        assert!(prefs.hide_in_library(), "the page reads the stored preference");
-
-        let on = source_rig_hiding(false, false, FilterList::default(), vec![listed()], true);
-        let SourcePage::Browse(shown) = &on.page else { panic!("browse page") };
-        assert!(pump_until(|| shown.listing.loaded_count() == 1), "only the entry that is not in the library is kept");
-        let off = source_rig_hiding(false, false, FilterList::default(), vec![listed()], false);
-        let SourcePage::Browse(shown) = &off.page else { panic!("browse page") };
-        assert!(pump_until(|| shown.listing.loaded_count() == 2), "the flag off keeps both");
     }
 
     fn escape_closes_an_open_search_first_and_otherwise_goes_on() {
@@ -1275,9 +1182,7 @@ pub(crate) mod tests {
 
     pub(crate) fn smoke() {
         escape_closes_an_open_search_first_and_otherwise_goes_on();
-        hide_in_library_keeps_favourites_out_of_a_page_made_with_the_flag_on();
         a_stub_source_shows_only_its_title_back_and_the_missing_message();
-        opening_a_source_stores_it_as_the_last_used_unless_incognito_applies();
         back_clears_the_search_text_first_and_then_leaves();
         popular_latest_and_a_search_from_them_start_from_fresh_defaults();
         the_filter_button_of_the_sheet_searches_with_the_sheet_values();
@@ -1322,20 +1227,18 @@ mod pure_tests {
     }
 
     #[test]
-    fn the_chips_filter_the_rows_they_are_given_and_the_origin_is_never_pinned_out() {
+    fn the_chips_filter_the_rows_they_are_given() {
         let rows = vec![
             row(1, true, false, found()),
             row(2, false, false, found()),
             row(3, false, true, SearchState::Results(vec![])),
             row(4, true, false, SearchState::Loading),
         ];
-        let pinned = SearchChips { filter: SourceFilter::PinnedOnly, only_has_results: false };
-        assert_eq!(ids(&visible_rows(&rows, pinned)), [1, 3, 4]);
         let all = SearchChips { filter: SourceFilter::All, only_has_results: false };
         assert_eq!(ids(&visible_rows(&rows, all)), [1, 2, 3, 4]);
         let results = SearchChips { filter: SourceFilter::All, only_has_results: true };
         assert_eq!(ids(&visible_rows(&rows, results)), [1, 2], "an empty result or a loading row has none");
-        assert_eq!(SearchChips::default().filter, SourceFilter::PinnedOnly, "Pinned is the default chip");
+        assert_eq!(SearchChips::default().filter, SourceFilter::All, "every source is searched by default");
     }
 
     #[test]

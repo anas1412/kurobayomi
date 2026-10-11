@@ -92,3 +92,7 @@ Never hide or remove the top bar of any screen. The manga reader's top bar alway
 
 ## Target behavior
 The app flow the user decided on 2026-10-11 is in docs/design/app-flow.md. Build and keep only what serves it.
+
+## Lanes never build or test (user, 2026-10-11)
+
+Agents in a workflow lane only read and write code (and write tests); they do NOT run cargo, rustc, tests, formatters or the app. The lead does ONE build, the compile fixes and the full test run at the very end. Agents therefore read the real definition of every item they use, match signatures and imports exactly, keep edits small, and end their report with a list titled UNSURE of the places they are not certain compile. Models: Haiku 5.5 high for implement and review, Sonnet 5.5 medium for fixes, never Opus. This supersedes the older "wait for a long build with one command" rules while it is in force.

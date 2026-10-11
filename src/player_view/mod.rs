@@ -4,9 +4,12 @@
 //! [`open_episode`] for a file, or [`open_source_episode`] for an episode of an online source. Logic lives in `playback` (mpv), `source` (the source's video) and `store` (watch progress); this
 //! file is widget wiring. Main thread only.
 
+mod controls;
 mod gl;
 mod menu;
+mod neighbours;
 mod playback;
+mod sheets;
 mod source;
 mod store;
 #[cfg(test)]
@@ -17,11 +20,15 @@ pub use source::open_source_episode;
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use gtk::prelude::*;
 use gtk::glib::translate::IntoGlib;
 use gtk::{gdk, glib};
+use kuro_data::anime::AnimeRepo;
+use kuro_data::episode::EpisodeRepo;
+use kuro_i18n::{MsgKey, tr};
 use kuro_platform::linux::LinuxPaths;
 use kuro_platform::paths::Paths as _;
 use kuro_player::keys::Modifiers;
@@ -32,10 +39,12 @@ use kuro_player::seekbar_model::{drags_enabled, duration_label, fraction, positi
 use kuro_player::session::prepare_mpv_dir;
 use kuro_player::shortcuts::{Action, action_for};
 
+use neighbours::{Step, adjacent};
 use playback::{Handoff, Playback, VOLUME_MAX, seek_delta_ms, seek_target_ms, volume_after_steps};
 use store::Tracker;
 
 use crate::widgets::detachable::Detachable;
+use crate::widgets::page_header;
 
 /// How often the page reads mpv, updates the controls and saves progress when one is due.
 const TICK: Duration = Duration::from_millis(250);
@@ -60,7 +69,7 @@ pub fn open_episode(path: &Path, episode_id: i64, start_ms: i64) {
     let Some(target) = path.to_str() else {
         return tracing::error!(path = %path.display(), "player: the path is not UTF-8; not opened");
     };
-    let title = path.file_name().map_or_else(|| "Player".to_owned(), |n| n.to_string_lossy().into_owned());
+    let title = title_or_file(episode_id, path);
     open_media(Media { target: target.to_owned(), title, headers: None, tracks: Vec::new() }, episode_id, start_ms);
 }
 
@@ -80,7 +89,9 @@ fn open_media(media: Media, episode_id: i64, start_ms: i64) {
     }
     match LinuxPaths::system() {
         Ok(paths) => {
-            open_in(paths.data_dir(), media, episode_id, start_ms);
+            if open_in(paths.data_dir(), media, episode_id, start_ms).is_none() {
+                crate::toast::notify(tr(MsgKey::player_hoster_failed));
+            }
         }
         Err(e) => tracing::error!(error = %e, "player: no app directories; not opened"),
     }
@@ -93,12 +104,9 @@ fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms
         data_dir,
         ..PlayerPrefs::default()
     };
-    if crate::data::is_installed() {
-        // T-46b-043: the opt-in decoder comes from the preferences; without it the startup is the plain one
-        let decoder = kuro_prefs::player::DecoderPrefs::new(crate::data::app().base.store().clone());
-        prefs.remember_decoder = decoder.remember_decoder.get();
-        prefs.remembered_decoder = kuro_player::options::decoder_from_stored_name(&decoder.remembered_decoder.get());
-    }
+    // the kept preferences: the preferred subtitle and audio languages (mpv's `slang` and `alang`)
+    prefs.sub.lang = stored_text("pref_subtitle_lang");
+    prefs.audio.lang = stored_text("pref_audio_lang");
     prepare_mpv_dir(&prefs);
     playback::use_c_numeric_locale();
     let mpv = match MpvHandle::create(&startup_settings(&prefs)) {
@@ -124,6 +132,8 @@ fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms
         closed: false,
         handoff: None,
         media,
+        episode_id,
+        resolving: false,
     }));
     CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(&shared));
     // the page is held here until the host places it; the host only keeps it weakly
@@ -156,6 +166,10 @@ struct Player {
     playback: Playback,
     tracker: Option<Tracker>,
     media: Media,
+    /// The episode row that plays now; its neighbours come from it.
+    episode_id: i64,
+    /// A source episode is resolving for the previous or next button (or autoplay); a second one waits for it.
+    resolving: bool,
     /// The end-of-file save has run, so it runs once.
     finished_saved: bool,
     /// Playback was stopped and saved for good (Back, or the page or its window went away).
@@ -180,6 +194,26 @@ impl Player {
         };
         if let Some(position) = position {
             tracker.save(now_ms(), position, duration, forced);
+        }
+    }
+
+    /// Plays `media` as episode row `episode_id` in this window. The episode that was playing is saved first, then the
+    /// new one starts at its saved position (a seen one at zero).
+    fn play(&mut self, media: Media, episode_id: i64) {
+        self.save(true);
+        self.tracker = crate::data::is_installed()
+            .then(|| {
+                let app = crate::data::app();
+                Tracker::open(app.anime_db.clone(), episode_id, app.base.incognito_mode.get())
+            })
+            .flatten();
+        let start = self.tracker.as_ref().map_or(0, |t| t.start_ms(0));
+        self.episode_id = episode_id;
+        self.finished_saved = false;
+        self.media = media;
+        if let Err(e) = self.playback.load(&self.media.target, self.media.headers.as_deref(), start) {
+            tracing::error!(error = %e, "player: could not load the episode");
+            crate::toast::notify(tr(MsgKey::player_hoster_failed));
         }
     }
 
@@ -261,7 +295,7 @@ fn apply_action(shared: &Shared, page: &gtk::Box, action: Action) -> bool {
     true
 }
 
-/// The player page: a slim header (Back, title, Detach, the tracks menu) over the video and its control bar. The
+/// The player page: a slim header (Back, title, Detach, the quality and tracks menus) over the video and its control bar. The
 /// page is named `screen:player`, so the main window hides its sidebar while it shows. Returns the host that places
 /// it in the main window or in its own window.
 fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
@@ -271,6 +305,8 @@ fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
     area.set_auto_render(false);
 
     let play = gtk::Button::from_icon_name("media-playback-start-symbolic");
+    let previous = crate::ui::icon_button("media-skip-backward-symbolic", "Previous episode");
+    let next = crate::ui::icon_button("media-skip-forward-symbolic", "Next episode");
     let seek = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.001);
     seek.set_hexpand(true);
     seek.set_draw_value(false);
@@ -281,6 +317,8 @@ fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
     volume.set_width_request(120);
     volume.set_draw_value(false);
     let fullscreen = gtk::Button::from_icon_name("view-fullscreen-symbolic");
+    let speed = sheets::speed::button(shared);
+    let chapters = sheets::chapters::button(shared);
 
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     bar.add_css_class("osd");
@@ -289,7 +327,7 @@ fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
     bar.set_margin_end(12);
     bar.set_margin_bottom(12);
     bar.set_valign(gtk::Align::End);
-    for widget in [play.upcast_ref::<gtk::Widget>(), seek.upcast_ref(), time.upcast_ref(), volume.upcast_ref(), fullscreen.upcast_ref()] {
+    for widget in [previous.upcast_ref::<gtk::Widget>(), play.upcast_ref(), next.upcast_ref(), seek.upcast_ref(), time.upcast_ref(), speed.upcast_ref(), chapters.upcast_ref(), volume.upcast_ref(), fullscreen.upcast_ref()] {
         bar.append(widget);
     }
 
@@ -302,25 +340,29 @@ fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
     overlay.set_vexpand(true);
 
     let title = shared.borrow().media.title.clone();
-    let header = gtk::HeaderBar::new();
-    header.set_decoration_layout(Some(&crate::ui::decoration(false)));
-    // width_chars keeps the ellipsis from swallowing the whole title in a crowded header
-    let title_label = gtk::Label::builder().label(&title).css_classes(["title"]).ellipsize(gtk::pango::EllipsizeMode::End).width_chars(24).max_width_chars(100).build();
-    header.set_title_widget(Some(&title_label));
-    let back = crate::ui::icon_button("go-previous-symbolic", "Back");
-    header.pack_start(&back);
-    let menu = menu::tracks_menu(shared);
-    header.pack_end(&menu);
-
+    let title_label = page_header::title_label(&title);
     let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
     page.set_widget_name("screen:player");
     page.set_focusable(true);
+    let host = Detachable::new(&page, &title, true);
+    // the shared page header: Back stops and saves at once, then leaves the page (or closes its window)
+    let header = page_header::header(&title_label, {
+        let (shared, host, page) = (Rc::clone(shared), Rc::clone(&host), page.downgrade());
+        move || {
+            shared.borrow_mut().finish();
+            if let Some(window) = page.upgrade().and_then(|p| window_of(&p)).filter(|w| w.is_fullscreen()) {
+                window.unfullscreen();
+            }
+            host.close();
+        }
+    });
+    let menu = menu::tracks_menu(shared);
+    let quality = sheets::quality::button(shared);
+    header.pack_end(&menu);
+    header.pack_end(&quality);
+    header.pack_end(host.button());
     page.append(&header);
     page.append(&overlay);
-
-    let host = Detachable::new(&page, &title, true);
-    header.pack_end(host.button());
-    crate::ui::no_sticky_focus(&header);
 
     wire_gl(&area, shared, start, Rc::downgrade(&host));
     {
@@ -331,19 +373,16 @@ fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
     }
 
     {
-        // Back stops and saves at once, then leaves the page (or closes its window)
-        let (shared, host, page) = (Rc::clone(shared), Rc::clone(&host), page.downgrade());
-        back.connect_clicked(move |_| {
-            shared.borrow_mut().finish();
-            if let Some(window) = page.upgrade().and_then(|p| window_of(&p)).filter(|w| w.is_fullscreen()) {
-                window.unfullscreen();
-            }
-            host.close();
-        });
+        let shared = Rc::clone(shared);
+        play.connect_clicked(move |_| toggle_pause(&shared));
     }
     {
         let shared = Rc::clone(shared);
-        play.connect_clicked(move |_| toggle_pause(&shared));
+        previous.connect_clicked(move |_| play_adjacent(&shared, Step::Previous, true));
+    }
+    {
+        let shared = Rc::clone(shared);
+        next.connect_clicked(move |_| play_adjacent(&shared, Step::Next, true));
     }
     {
         let shared = Rc::clone(shared);
@@ -382,12 +421,14 @@ fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     {
         let (shared, page, menu) = (Rc::clone(shared), page.downgrade(), menu.downgrade());
+        let popovers = [quality.downgrade(), speed.downgrade(), chapters.downgrade()];
         keys.connect_key_pressed(move |_, keyval, _, state| {
             let Some(page) = page.upgrade() else {
                 return glib::Propagation::Proceed;
             };
-            // the open tracks menu keeps its own keys
-            if menu.upgrade().is_some_and(|m| m.is_active()) {
+            // an open menu (tracks, quality, speed, chapters) keeps its own keys
+            let popover_open = popovers.iter().filter_map(|b| b.upgrade()).any(|b| b.popover().is_some_and(|p| p.is_visible()));
+            if popover_open || menu.upgrade().is_some_and(|m| m.is_active()) {
                 return glib::Propagation::Proceed;
             }
             let Some(action) = action_for(keyval.into_glib(), modifiers(state), false) else {
@@ -405,7 +446,11 @@ fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
         page.grab_focus();
     });
 
-    start_ticks(&page, &header, &play, &seek, &time, &volume, &loading, shared);
+    controls::wire(
+        controls::Parts { page: &page, area: &area, bar: &bar, previous: &previous, next: &next, quality: &quality, speed: &speed, chapters: &chapters },
+        shared,
+    );
+    start_ticks(&page, &title_label, &play, &seek, &time, &volume, &loading, shared);
     (page, host)
 }
 
@@ -479,6 +524,7 @@ fn realize(area: &gtk::GLArea, shared: &Shared, start: i64, loaded: &Cell<bool>)
         restore_volume(&player.playback);
         if let Err(e) = player.playback.load(&player.media.target, player.media.headers.as_deref(), start) {
             tracing::error!(error = %e, "player: could not load the file");
+            crate::toast::notify(tr(MsgKey::player_hoster_failed));
         }
     } else if let Some(handoff) = player.handoff.take() {
         player.playback.resume_video(&handoff);
@@ -490,48 +536,151 @@ fn player_prefs() -> Option<kuro_prefs::player::PlayerPrefs> {
     crate::data::is_installed().then(|| kuro_prefs::player::PlayerPrefs::new(crate::data::app().base.store().clone()))
 }
 
-/// Session start (T-45b-053): the remembered volume is written to mpv when `pref_remember_volume` is on and the stored
-/// value is not negative.
+/// A text preference as stored, or empty before the app data is installed.
+fn stored_text(key: &'static str) -> String {
+    if !crate::data::is_installed() {
+        return String::new();
+    }
+    kuro_prefs::pref::Pref::new(crate::data::app().base.store().clone(), key, String::new()).get()
+}
+
+/// Whether the next episode starts by itself when one ends (`pref_auto_play_enabled`); off before the app data exists.
+fn autoplay_next() -> bool {
+    player_prefs().is_some_and(|p| p.autoplay_enabled.get())
+}
+
+/// The title a page shows for an episode: "anime - episode".
+pub fn episode_title(anime: &str, episode: &str) -> String {
+    format!("{anime} - {episode}")
+}
+
+/// The title of episode row `episode_id`, or the file name of `path` when the row or its entry is missing.
+fn title_or_file(episode_id: i64, path: &Path) -> String {
+    row_title(episode_id).unwrap_or_else(|| path.file_name().map_or_else(|| "Player".to_owned(), |n| n.to_string_lossy().into_owned()))
+}
+
+/// "Anime - episode" of episode row `episode_id`; `None` before the app data exists or when the row is missing.
+fn row_title(episode_id: i64) -> Option<String> {
+    if !crate::data::is_installed() {
+        return None;
+    }
+    let db = &crate::data::app().anime_db;
+    let episode = EpisodeRepo::new(Arc::clone(db)).by_id(episode_id).ok()??;
+    let anime = AnimeRepo::new(Arc::clone(db)).by_id(episode.anime_id).ok()?;
+    Some(episode_title(&anime.title, &episode.name))
+}
+
+/// Plays the episode before or after the one playing, in this window. At the ends a toast says so, unless
+/// `announce_end` is off (autoplay). Nothing starts while a source episode is still resolving.
+fn play_adjacent(shared: &Shared, step: Step, announce_end: bool) {
+    let (current, resolving) = {
+        let player = shared.borrow();
+        (player.episode_id, player.resolving)
+    };
+    if resolving || !crate::data::is_installed() {
+        return;
+    }
+    let db = crate::data::app().anime_db.clone();
+    match adjacent(&db, current, step) {
+        Ok(Some(next)) => play_episode(shared, next),
+        Ok(None) => {
+            if announce_end {
+                let key = match step {
+                    Step::Previous => MsgKey::no_prev_episode,
+                    Step::Next => MsgKey::no_next_episode,
+                };
+                crate::toast::notify(tr(key));
+            }
+        }
+        Err(e) => tracing::error!(error = %e, "player: the episode list could not be read"),
+    }
+}
+
+/// Starts episode row `episode_id` in this window: a local file at once, a source's stream once it resolves.
+fn play_episode(shared: &Shared, episode_id: i64) {
+    let db = crate::data::app().anime_db.clone();
+    match crate::local_flow_anime::open::opening_by_id(&db, episode_id) {
+        Ok(Some(found)) => {
+            let title = title_or_file(episode_id, Path::new(&found.path));
+            let media = Media { target: found.path, title, headers: None, tracks: Vec::new() };
+            shared.borrow_mut().play(media, episode_id);
+        }
+        Ok(None) => play_source_episode(shared, episode_id),
+        Err(e) => tracing::error!(error = %e, "player: the episode lookup failed"),
+    }
+}
+
+/// A source episode in this window: its stream resolves in the background, then the page plays it.
+fn play_source_episode(shared: &Shared, episode_id: i64) {
+    let Some(found) = source::source_episode(&crate::screens::anime_sources(), episode_id) else {
+        return crate::toast::notify(tr(MsgKey::episode_not_found));
+    };
+    shared.borrow_mut().resolving = true;
+    let page = Rc::clone(shared);
+    let started = source::resolve_episode(found, move |answer| {
+        page.borrow_mut().resolving = false;
+        match answer {
+            Ok(media) => {
+                let mut player = page.borrow_mut();
+                if !player.closed {
+                    player.play(media, episode_id);
+                }
+            }
+            Err(text) => crate::toast::notify(text),
+        }
+    });
+    if !started {
+        shared.borrow_mut().resolving = false;
+        crate::toast::notify(tr(MsgKey::player_hoster_failed));
+    }
+}
+
+/// Session start (T-45b-053): the remembered volume is written to mpv when the stored value is not negative.
 fn restore_volume(playback: &Playback) {
     let Some(prefs) = player_prefs() else { return };
-    if let Some(volume) = kuro_player::remember::value_to_restore(prefs.remember_player_volume.get(), prefs.player_volume_value.get())
+    if let Some(volume) = kuro_player::remember::value_to_restore(prefs.player_volume_value.get())
         && let Err(e) = playback.set_volume(f64::from(volume))
     {
         tracing::warn!(error = %e, "player: the remembered volume was not applied");
     }
 }
 
-/// A volume change: stored under `player_volume_value` when `pref_remember_volume` is on.
+/// A volume change: stored under `player_volume_value`.
 fn remember_volume(playback: &Playback) {
     let Some(prefs) = player_prefs() else { return };
-    if let Some(value) = kuro_player::remember::value_to_store(prefs.remember_player_volume.get(), playback.volume() as f32) {
+    if let Some(value) = kuro_player::remember::value_to_store(playback.volume() as f32) {
         if let Err(e) = prefs.player_volume_value.set(value) {
             tracing::warn!(error = %e, "player: the volume was not stored");
         }
     }
 }
 
-/// Reads mpv on a timer. Each tick drains mpv's events, saves progress when due, and refreshes the controls; the
-/// header hides while the window holding the page is fullscreen. It stops once the page is gone or closed.
-fn start_ticks(page: &gtk::Box, header: &gtk::HeaderBar, play: &gtk::Button, seek: &gtk::Scale, time: &gtk::Label, volume: &gtk::Scale, loading: &gtk::Spinner, shared: &Shared) {
+/// Reads mpv on a timer. Each tick drains mpv's events, saves progress when due and refreshes the controls. A failed
+/// file is a toast, and the end of an episode plays the next one when autoplay is on. The top bar never hides. The
+/// timer stops once the page is gone or closed.
+fn start_ticks(page: &gtk::Box, title_label: &gtk::Label, play: &gtk::Button, seek: &gtk::Scale, time: &gtk::Label, volume: &gtk::Scale, loading: &gtk::Spinner, shared: &Shared) {
     let loading = loading.clone();
     let opened = std::time::Instant::now();
     let page = page.downgrade();
-    let header = header.clone();
+    let title_label = title_label.clone();
     let play = play.clone();
     let seek = seek.clone();
     let time = time.clone();
     let volume = volume.clone();
     let shared = Rc::clone(shared);
     glib::timeout_add_local(TICK, move || {
-        let Some(page) = page.upgrade().filter(|_| !shared.borrow().closed) else {
+        if page.upgrade().is_none() || shared.borrow().closed {
             return glib::ControlFlow::Break;
-        };
-        let snapshot = {
+        }
+        let (snapshot, failed, ended) = {
             let mut player = shared.borrow_mut();
+            let mut failed = false;
             for event in player.playback.mpv_mut().drain_events() {
                 match event {
-                    MpvEvent::EndFile { error: Some(_), .. } => tracing::warn!("player: playback stopped with an error"),
+                    MpvEvent::EndFile { error: Some(_), .. } => {
+                        tracing::warn!("player: playback stopped with an error");
+                        failed = true;
+                    }
                     MpvEvent::FileLoaded => {
                         let tracks = std::mem::take(&mut player.media.tracks);
                         player.playback.add_tracks(&tracks);
@@ -539,24 +688,37 @@ fn start_ticks(page: &gtk::Box, header: &gtk::HeaderBar, play: &gtk::Button, see
                     _ => {}
                 }
             }
-            if player.playback.eof_reached() && !player.finished_saved {
+            let ended = player.playback.eof_reached() && !player.finished_saved;
+            if ended {
                 player.finished_saved = true;
                 player.save(true);
             } else if !player.playback.is_paused() {
                 player.save(false);
             }
-            Snapshot {
+            let snapshot = Snapshot {
                 paused: player.playback.is_paused(),
                 position_s: player.playback.position_ms().unwrap_or(0) as f32 / 1000.0,
                 duration_s: player.playback.duration_ms().unwrap_or(0) as f32 / 1000.0,
                 volume: player.playback.volume(),
-            }
+            };
+            (snapshot, failed, ended)
         };
-        header.set_visible(!window_of(&page).is_some_and(|w| w.is_fullscreen()));
+        if failed {
+            crate::toast::notify(tr(MsgKey::player_hoster_failed));
+        }
+        if ended && autoplay_next() {
+            play_adjacent(&shared, Step::Next, false);
+        }
+        let title = shared.borrow().media.title.clone();
+        if title_label.text().as_str() != title.as_str() {
+            title_label.set_text(&title);
+        }
         play.set_icon_name(if snapshot.paused { "media-playback-start-symbolic" } else { "media-playback-pause-symbolic" });
         // loading until mpv knows the duration; an idle mpv after the first seconds means the load failed, so stop
         let idle = shared.borrow().playback.mpv().get_flag("idle-active") == Some(true);
         let waiting = snapshot.duration_s <= 0.0 && !(idle && opened.elapsed() > std::time::Duration::from_secs(3));
+        // a quality or server switch shows the spinner while its stream resolves and loads
+        let waiting = waiting || shared.borrow().resolving;
         loading.set_visible(waiting);
         loading.set_spinning(waiting);
         seek.set_sensitive(drags_enabled(snapshot.duration_s));

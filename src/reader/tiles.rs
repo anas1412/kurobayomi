@@ -16,9 +16,6 @@ use crate::reader::page_decode::{DEFAULT_TILE_THRESHOLD, DecodedPage, MAX_TEXTUR
 /// The largest tile edge in pixels of a level (`hardwareBitmapThreshold`, B§10.1).
 pub const MAX_TILE_EDGE: u32 = DEFAULT_TILE_THRESHOLD;
 
-/// The preference key of the largest tile edge (T-44a-060). `kuro-prefs` lists it as dropped and has no typed entry for
-/// it, so the reader reads it from the store by key (see `ViewerSettings::from_prefs`); a stored value still counts.
-pub const TILE_THRESHOLD_KEY: &str = "pref_hardware_bitmap_threshold";
 
 /// The largest tile edge for a `pref_hardware_bitmap_threshold` value. A value below 256 is rejected for the default
 /// (T-44a-060), and one above the texture limit is held to it.

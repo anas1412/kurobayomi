@@ -16,7 +16,6 @@ pub mod background;
 #[allow(dead_code)]
 pub mod bootstrap;
 #[allow(dead_code)]
-pub mod downloaded;
 // the route table and the share flow are called by the window's launch code, which applies their steps in its own lane
 #[allow(dead_code)]
 pub mod intents;
@@ -31,9 +30,7 @@ pub mod onboarding;
 #[cfg(test)]
 mod packaging;
 #[allow(dead_code)]
-pub mod player_root;
 #[allow(dead_code)]
-pub mod reader_root;
 #[allow(dead_code)]
 pub mod search;
 pub mod tabs;

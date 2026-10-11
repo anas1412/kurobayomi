@@ -9,6 +9,7 @@ use gtk::prelude::*;
 
 use super::model::LoadError;
 use super::strings;
+use crate::widgets::page_header;
 
 /// The card text for an initial load failure. A blank message shows the generic text, so no card is empty. The
 /// downloaded-only text is shown as is, since it is not a page-load failure (T-43a-074).
@@ -20,13 +21,10 @@ pub fn error_card_message(error: &LoadError) -> String {
     strings::failed_to_load_pages(message)
 }
 
-/// The overflow entries of the top bar. HTTP sources get the three web entries; local sources get none.
+/// The menu entries of the top bar. HTTP sources get the three web entries; any other source (a local manga) gets
+/// Set as cover, which takes the page on screen.
 pub fn overflow_items(is_http_source: bool) -> &'static [&'static str] {
-    if is_http_source {
-        &[strings::ACTION_OPEN_IN_WEB_VIEW, strings::ACTION_OPEN_IN_BROWSER, strings::ACTION_SHARE]
-    } else {
-        &[]
-    }
+    if is_http_source { &[strings::ACTION_OPEN_IN_WEB_VIEW, strings::ACTION_OPEN_IN_BROWSER, strings::ACTION_SHARE] } else { &[strings::SET_AS_COVER] }
 }
 
 /// The web address of a chapter for the overflow entries: only an absolute http or https url has one. A relative
@@ -80,76 +78,50 @@ pub struct TopBarActions {
     pub on_overflow: Box<dyn Fn(usize)>,
 }
 
-/// The top bar in a revealer that slides in and out in 200 ms.
-pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> gtk::Revealer {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    row.set_margin_start(6);
-    row.set_margin_end(6);
-
-    let back = gtk::Button::from_icon_name("go-previous-symbolic");
-    back.set_tooltip_text(Some("Back"));
-    back.update_property(&[gtk::accessible::Property::Label("Back")]);
-    back.connect_clicked(move |_| (actions.on_back)());
-    row.append(&back);
-
-    let title_block = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    title_block.set_hexpand(true);
-    let title = gtk::Label::new(Some(&bar.manga_title));
-    title.set_xalign(0.0);
-    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    title.set_width_chars(16);
-    title.set_max_width_chars(80);
-    title.add_css_class("heading");
-    let subtitle = gtk::Label::new(Some(&bar.chapter_name));
-    subtitle.set_xalign(0.0);
-    subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    subtitle.set_width_chars(16);
-    subtitle.set_max_width_chars(80);
-    subtitle.add_css_class("caption");
-    title_block.append(&title);
-    title_block.append(&subtitle);
-    let open = gtk::Button::builder().child(&title_block).has_frame(false).build();
-    open.connect_clicked(move |_| (actions.on_open_manga)());
-    row.append(&open);
+/// The top bar: the themed header the player also uses (docs/design/player-reader.md). Back is on the left, the
+/// `<manga> - <chapter>` title is centred and opens the manga's page, and the bookmark, Detach and the menu are on the
+/// right. The bar is never hidden. `detach` is the page's Detach button, moved here from the bar it was in.
+pub fn build_top_bar(bar: &TopBar, actions: TopBarActions, detach: &gtk::Button) -> gtk::HeaderBar {
+    let TopBarActions { on_back, on_open_manga, on_bookmark, on_overflow } = actions;
+    let label = page_header::title_label(&page_header::page_title(&bar.manga_title, &bar.chapter_name));
+    let title = gtk::Button::builder().child(&label).has_frame(false).build();
+    title.connect_clicked(move |_| on_open_manga());
+    let header = page_header::header(&title, on_back);
 
     let bookmark = gtk::ToggleButton::builder()
         .icon_name(if bar.bookmarked { "bookmark-filled-symbolic" } else { "bookmark-new-symbolic" })
         .active(bar.bookmarked)
         .tooltip_text(bookmark_label(bar.bookmarked))
         .build();
-    bookmark.connect_clicked(move |_| (actions.on_bookmark)());
+    bookmark.connect_clicked(move |_| on_bookmark());
     bookmark.update_property(&[gtk::accessible::Property::Label(bookmark_label(bar.bookmarked))]);
-    row.append(&bookmark);
 
-    let items = overflow_items(bar.is_http_source);
-    if !items.is_empty() {
-        let popover = gtk::Popover::new();
-        let entries = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let on_overflow = Rc::new(actions.on_overflow);
-        for (index, text) in items.iter().enumerate() {
-            let item = gtk::Button::with_label(text);
-            item.add_css_class("flat");
-            let on_overflow = Rc::clone(&on_overflow);
-            let closing = popover.clone();
-            item.connect_clicked(move |_| {
-                closing.popdown();
-                on_overflow(index);
-            });
-            entries.append(&item);
-        }
-        popover.set_child(Some(&entries));
-        let menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).tooltip_text(strings::OVERFLOW_MENU).build();
-        menu.update_property(&[gtk::accessible::Property::Label(strings::OVERFLOW_MENU)]);
-        row.append(&menu);
+    let popover = gtk::Popover::new();
+    let entries = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let on_overflow = Rc::new(on_overflow);
+    for (index, text) in overflow_items(bar.is_http_source).iter().enumerate() {
+        let item = gtk::Button::with_label(text);
+        item.add_css_class("flat");
+        let on_overflow = Rc::clone(&on_overflow);
+        let closing = popover.clone();
+        item.connect_clicked(move |_| {
+            closing.popdown();
+            on_overflow(index);
+        });
+        entries.append(&item);
     }
+    popover.set_child(Some(&entries));
+    let menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).tooltip_text(strings::OVERFLOW_MENU).build();
+    menu.update_property(&[gtk::accessible::Property::Label(strings::OVERFLOW_MENU)]);
 
-    let revealer = gtk::Revealer::builder()
-        .transition_type(gtk::RevealerTransitionType::SlideDown)
-        .transition_duration(200)
-        .reveal_child(true)
-        .child(&row)
-        .build();
-    revealer
+    // pack_end puts the first widget packed at the far right: the menu, then Detach, then the bookmark
+    header.pack_end(&menu);
+    if let Some(old) = detach.ancestor(gtk::HeaderBar::static_type()).and_downcast::<gtk::HeaderBar>() {
+        old.remove(detach);
+    }
+    header.pack_end(detach);
+    header.pack_end(&bookmark);
+    header
 }
 
 #[cfg(test)]
@@ -172,9 +144,9 @@ mod tests {
     }
 
     #[test]
-    fn overflow_items_only_for_http_sources() {
+    fn a_web_source_gets_the_web_entries_and_any_other_gets_set_as_cover() {
         assert_eq!(overflow_items(true), ["Open in WebView", "Open in browser", "Share"]);
-        assert!(overflow_items(false).is_empty());
+        assert_eq!(overflow_items(false), ["Set as cover"]);
     }
 
     #[test]

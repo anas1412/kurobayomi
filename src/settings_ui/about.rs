@@ -259,9 +259,6 @@ pub fn check_row() -> PreferenceItem {
 pub const PROJECT_URL: &str = "https://github.com/anas1412/kurobayomi";
 /// Where bugs are reported.
 pub const ISSUES_URL: &str = "https://github.com/anas1412/kurobayomi/issues";
-/// The Fluent files a translator edits.
-pub const HELP_TRANSLATE_URL: &str = "https://github.com/anas1412/kurobayomi/tree/main/crates/kuro-i18n/locales";
-
 /// The release tag of a build: `v<version>` for a release, `r<commit count>` for a preview.
 pub fn release_tag(build_type: &str, version_name: &str, commit_count: u32) -> String {
     if build_type == "preview" { format!("r{commit_count}") } else { format!("v{version_name}") }
@@ -322,7 +319,7 @@ pub fn page_rows() -> Vec<Preference> {
         item(version_row()),
         item(check_row()),
         item(whats_new_row()),
-        item(link_row("Help translate", HELP_TRANSLATE_URL, true)),
+        item(crate::settings_ui::maintenance::share_crash_logs_row()),
         item(links_row()),
     ]
 }
@@ -344,7 +341,7 @@ mod link_tests {
 
     #[test]
     fn the_links_lead_to_this_apps_project_and_never_to_aniyomi() {
-        let urls = [PROJECT_URL, ISSUES_URL, HELP_TRANSLATE_URL];
+        let urls = [PROJECT_URL, ISSUES_URL];
         for url in urls {
             assert!(url.starts_with("https://github.com/anas1412/kurobayomi"), "{url}");
         }

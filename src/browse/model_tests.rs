@@ -92,7 +92,7 @@ mod source_filter {
     #[test]
     fn languages_with_sources_enabled_first() {
         let sources = [source(1, "A", "en"), source(2, "B", "ja"), source(3, "C", "de"), source(4, "D", "all")];
-        let groups = sources_filter_groups(&sources, &set(&["ja", "all"]), &set(&[]));
+        let groups = sources_filter_groups(&sources, &set(&["ja", "all"]));
         let langs: Vec<&str> = groups.iter().map(|g| g.lang.as_str()).collect();
         assert_eq!(&langs[..2], ["all", "ja"], "the enabled languages first, `all` first among them");
         assert!(groups[..2].iter().all(|g| g.enabled) && groups[2..].iter().all(|g| !g.enabled));
@@ -102,7 +102,7 @@ mod source_filter {
     #[test]
     fn languages_with_sources_no_merge() {
         let sources = [source(1, "A", "zh-CN"), source(2, "B", "zh-Hans")];
-        let groups = sources_filter_groups(&sources, &set(&["zh-CN", "zh-Hans"]), &set(&[]));
+        let groups = sources_filter_groups(&sources, &set(&["zh-CN", "zh-Hans"]));
         assert_eq!(groups.len(), 2, "E-SF-03: two tags with one display name keep both groups");
     }
 

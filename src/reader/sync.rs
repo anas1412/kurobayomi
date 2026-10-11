@@ -1,6 +1,6 @@
 //! Settings change propagation to the open reader (T-043a-080). A preference change is mapped to the reader parts
-//! it affects, and the reader applies those parts while it stays open. The download-ahead amount and the
-//! remove-after-read slots are read at open and are not listed here.
+//! it affects, and the reader applies those parts while it stays open. Only the theme and the incognito flag are still
+//! live: the other reader settings were cut from the settings and are hard-coded.
 
 use std::rc::Weak;
 use std::time::Duration;
@@ -12,18 +12,8 @@ use kuro_prefs::store::PrefStore;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
     Theme,
-    PageNumber,
-    Fullscreen,
-    KeepAwake,
-    Flash,
-    Brightness,
-    ColorFilter,
-    /// The tap zones or their inversion changed: the navigation overlay shows the new layout (G-27).
-    Navigation,
     /// The global incognito flag changed; the reader closes when it is off (E-INC-2).
     Incognito,
-    /// A chapter skip rule changed (`skip_read`, `skip_filtered`, `skip_dupe`): the chapter list is built again (E-LIST-1).
-    ChapterList,
 }
 
 /// The preference key of the global incognito flag (`BasePrefs::incognito_mode`).
@@ -38,21 +28,7 @@ pub fn closes_on_incognito(now_on: bool) -> bool {
 pub fn effects_for(key: &str) -> Vec<Effect> {
     match key {
         "pref_reader_theme_key" => vec![Effect::Theme],
-        "pref_show_page_number_key" => vec![Effect::PageNumber],
-        "fullscreen" => vec![Effect::Fullscreen],
-        "pref_keep_screen_on_key" => vec![Effect::KeepAwake],
-        "pref_reader_flash" | "pref_reader_flash_duration" | "pref_reader_flash_interval" | "pref_reader_flash_mode" => {
-            vec![Effect::Flash]
-        }
-        "pref_custom_brightness_key" | "custom_brightness_value" => vec![Effect::Brightness],
-        "pref_color_filter_key" | "color_filter_value" | "color_filter_mode" | "pref_grayscale" | "pref_inverted_colors" => {
-            vec![Effect::ColorFilter]
-        }
-        "reader_navigation_mode_pager" | "reader_navigation_mode_webtoon" | "reader_tapping_inverted" | "reader_tapping_inverted_webtoon" => {
-            vec![Effect::Navigation]
-        }
         INCOGNITO_KEY => vec![Effect::Incognito],
-        "skip_read" | "skip_filtered" | "skip_dupe" => vec![Effect::ChapterList],
         _ => Vec::new(),
     }
 }
@@ -79,14 +55,8 @@ mod tests {
     #[test]
     fn the_live_settings_map_to_their_reader_parts() {
         assert_eq!(effects_for("pref_reader_theme_key"), [Effect::Theme]);
-        assert_eq!(effects_for("pref_show_page_number_key"), [Effect::PageNumber]);
-        assert_eq!(effects_for("fullscreen"), [Effect::Fullscreen]);
-        assert_eq!(effects_for("pref_keep_screen_on_key"), [Effect::KeepAwake]);
-        assert_eq!(effects_for("pref_reader_flash_duration"), [Effect::Flash]);
-        assert_eq!(effects_for("custom_brightness_value"), [Effect::Brightness]);
-        assert_eq!(effects_for("pref_grayscale"), [Effect::ColorFilter]);
-        assert_eq!(effects_for("reader_navigation_mode_pager"), [Effect::Navigation]);
-        assert_eq!(effects_for("reader_tapping_inverted_webtoon"), [Effect::Navigation]);
+        assert!(effects_for("pref_show_page_number_key").is_empty(), "cut from the settings");
+        assert!(effects_for("reader_navigation_mode_pager").is_empty(), "cut from the settings");
     }
 
     #[test]
@@ -100,5 +70,6 @@ mod tests {
     fn the_read_at_open_settings_and_unrelated_keys_give_no_effect() {
         assert!(effects_for("pref_download_ahead_amount").is_empty());
         assert!(effects_for("reader_long_tap").is_empty());
+        assert!(effects_for("skip_read").is_empty(), "the chapter skip rules are hard-coded");
     }
 }

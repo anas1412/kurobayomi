@@ -25,7 +25,7 @@ pub fn page_list_key(manga_id: i64, chapter_url: &str) -> String {
     md5_hex(format!("{manga_id}{chapter_url}").as_bytes())
 }
 
-/// Image key: md5 of the original image url (not the data-saver url, E-HTTP-4).
+/// Image key: md5 of the image url the page list gives (E-HTTP-4).
 pub fn image_key(image_url: &str) -> String {
     md5_hex(image_url.as_bytes())
 }

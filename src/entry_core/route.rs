@@ -14,15 +14,14 @@ use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib, pango};
-use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_domain::entries::defaults::chapter_default_word;
 use kuro_domain::kind::EntryKind;
 use kuro_i18n::{Arg, MsgKey, tr, tr_plural, trf};
-use kuro_prefs::reader::ReaderPrefs;
 use kuro_prefs::tristate::TriState;
 
 use crate::data;
 use crate::entry_core::backend::SourceBackend;
+use crate::entry_core::constants::{FALLBACK_HEIGHT, FALLBACK_WIDTH, LEFT_PANE_WIDTH};
 use crate::entry_core::action_row::{TrackingClick, interval_click_opens_dialog, next_update, tracking_click};
 use crate::entry_core::action_row_view::{ActionRow, RowState};
 use crate::entry_core::banner_view::{self, BannerView};
@@ -52,9 +51,6 @@ use crate::entry_core::text::{Description, Expansion, description};
 use crate::entry_core::toolbar::{ActionMenu, Overflow, bar_state, background_opaque, title_opaque};
 use crate::ui;
 
-/// The window width assumed before the page has a window: the app's default width.
-const FALLBACK_WIDTH: i32 = 1180;
-const FALLBACK_HEIGHT: i32 = 780;
 /// The Resume or Start button fades in and out over this long.
 const FAB_FADE_MS: u32 = 150;
 
@@ -150,9 +146,9 @@ fn page_for(manga_id: i64) -> GBox {
         library_defaults: ChapterFlags(chapter_default_word(&store)),
         from_source: false,
         downloaded_only: app.base.downloaded_only.get(),
-        skip_filtered: ReaderPrefs::new(store.clone()).skip_filtered.get(),
+        skip_filtered: crate::misc::diet_defaults::READER_SKIP_FILTERED,
     };
-    let remove_after_read = DownloadPrefs::new(&store).remove_after_marked_as_read.get();
+    let remove_after_read = crate::misc::diet_defaults::DOWNLOAD_REMOVE_AFTER_MARKED_READ;
     let handle = tokio::runtime::Handle::current();
     let runner = Rc::new(runner::spawn(&handle, DbStore::new(Arc::clone(&db)), Arc::new(SourceBackend::live(db, &store)), ctx));
     runner.send(StoreCmd::Load { manga_id });
@@ -320,9 +316,9 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     left_scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
     // the info pane stays narrow so the chapter list keeps room for its titles
     left_scroll.set_hexpand(false);
-    left_scroll.set_width_request(360);
-    left_scroll.set_min_content_width(360);
-    left_scroll.set_max_content_width(360);
+    left_scroll.set_width_request(LEFT_PANE_WIDTH);
+    left_scroll.set_min_content_width(LEFT_PANE_WIDTH);
+    left_scroll.set_max_content_width(LEFT_PANE_WIDTH);
     left_scroll.set_visible(false);
     let separator = gtk::Separator::new(O::Vertical);
     separator.set_visible(false);
@@ -844,7 +840,7 @@ impl View {
         let genres = model.genres.clone();
         let large = is_large(width, height);
         self.large.set(large);
-        self.apply_layout(large, width);
+        self.apply_layout(large);
         if !self.ready_once.replace(true) {
             self.expansion.set(Expansion::new(large, from_source));
         }
@@ -869,7 +865,7 @@ impl View {
         }
         if self.shown_header.borrow().as_ref() != Some(&model) {
             clear(&self.header_slot);
-            let column = if large { width / 2 } else { width };
+            let column = if large { LEFT_PANE_WIDTH } else { width };
             self.header_slot.append(&header_view::build(&model, large, column, &self.handlers()));
             *self.shown_header.borrow_mut() = Some(model);
         }
@@ -921,13 +917,10 @@ impl View {
         self.update_scroll();
     }
 
-    /// Puts the info block where the layout wants it: in the left pane (half the width) when large, above the list when
+    /// Puts the info block where the layout wants it: in the left pane (`LEFT_PANE_WIDTH`) when large, above the list when
     /// small. A switch keeps the place in the list: the scroll value is moved by the height of the info block, which is
     /// above the list in the small layout and beside it in the large one (E-59). The selection lives in the page state.
-    fn apply_layout(&self, large: bool, width: i32) {
-        if large {
-            self.left_scroll.set_width_request(width / 2);
-        }
+    fn apply_layout(&self, large: bool) {
         if self.layout_large.replace(Some(large)) == Some(large) {
             return;
         }
@@ -1150,7 +1143,7 @@ impl View {
     /// `autoOpenTrack`: a tracker is logged in and "open the track menu on adding" is on. Both are read when asked.
     fn auto_open_tracking(&self) -> bool {
         tracking::session::refresh_from_host();
-        let pref_on = data::app().base.store().pref::<bool>("track_on_adding_to_library", true).get();
+        let pref_on = crate::misc::diet_defaults::ENTRY_TRACK_ON_ADDING;
         tracking::summary::open_track_sheet_on_add(pref_on, tracking::session::has_logged_in())
     }
 
@@ -1159,7 +1152,7 @@ impl View {
         tracking::session::refresh_from_host();
         match tracking_click(tracking::session::has_logged_in()) {
             TrackingClick::Sheet => ui::open("tracking_sheet"),
-            TrackingClick::Settings => ui::open("settings_tracking"),
+            TrackingClick::Settings => ui::open("settings_browse"),
         }
     }
 

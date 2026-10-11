@@ -5,6 +5,7 @@
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 
+use kuro_downloads::download_prefs::DownloadPrefs;
 use kuro_downloads::index::DownloadIndex;
 use kuro_platform::paths::Paths;
 use kuro_prefs::ui::{NavStyle, StartScreen};
@@ -20,6 +21,8 @@ pub struct Shell {
     boot: RefCell<Bootstrap<LaunchRequest>>,
     home: RefCell<Option<Rc<RefCell<HomeTabs>>>>,
     downloads: DownloadIndex,
+    /// The running manga download manager, once [`Shell::start_downloads`] has started it.
+    downloads_started: RefCell<Option<crate::downloads::Started>>,
 }
 
 thread_local! {
@@ -37,7 +40,13 @@ impl Shell {
                     tracing::warn!("the download index snapshot folder was not created: {e}");
                 }
                 let downloads = DownloadIndex::open(paths.default_downloads_dir(), &cache);
-                Rc::new(Shell { runtime, boot: RefCell::new(Bootstrap::new()), home: RefCell::new(None), downloads })
+                Rc::new(Shell {
+                    runtime,
+                    boot: RefCell::new(Bootstrap::new()),
+                    home: RefCell::new(None),
+                    downloads,
+                    downloads_started: RefCell::new(None),
+                })
             })
             .clone()
         })
@@ -91,6 +100,19 @@ impl Shell {
         self.boot.borrow().library_state()
     }
 
+    /// Starts the manga download manager on the data the app has opened (call once, after the migrations). A failure is
+    /// logged and the app runs without downloads. The first call wins.
+    pub fn start_downloads(&self, paths: &dyn Paths, prefs: DownloadPrefs) {
+        if self.downloads_started.borrow().is_some() {
+            return;
+        }
+        let _entered = self.runtime.enter();
+        match crate::downloads::start_manga(paths, self.downloads.clone(), prefs) {
+            Ok(started) => *self.downloads_started.borrow_mut() = Some(started),
+            Err(e) => tracing::error!("the manga download manager did not start: {e}"),
+        }
+    }
+
     /// The home tab selection. It is built once, the first time this runs, so a wide or narrow switch keeps it.
     pub fn home_tabs(&self, start: StartScreen, style: NavStyle) -> Rc<RefCell<HomeTabs>> {
         self.home.borrow_mut().get_or_insert_with(|| Rc::new(RefCell::new(HomeTabs::new(start, style)))).clone()
@@ -113,6 +135,7 @@ mod tests {
             boot: RefCell::new(Bootstrap::new()),
             home: RefCell::new(None),
             downloads: DownloadIndex::open(dir.path(), dir.path()),
+            downloads_started: RefCell::new(None),
         }
     }
 

@@ -1,4 +1,4 @@
-//! The sources this build ships (`docs/builtin-sources.md`): Weeb Central and Comix for manga, KickAssAnime for anime.
+//! The sources this build ships: Weeb Central and Comix for manga, KickAssAnime for anime.
 //! `start` builds them once over the app's network client. The manga ones are read through `directory::current`, which
 //! puts them in front of the installed directory (the recipe sources); the anime ones are added to the anime directory,
 //! the anime Sources list and the anime entry page next to the recipe sources. `start` also installs the image service,
@@ -72,11 +72,6 @@ impl Builtin {
             })
             .collect();
         Self { manga, anime, image_headers: BTreeMap::new(), client: None }
-    }
-
-    /// The sources of this build over `client`: none. Sources come from repositories the user adds.
-    pub(crate) fn ship(client: &NetworkClient) -> Self {
-        Self { client: Some(client.clone()), ..Self::new(Vec::new(), Vec::new()) }
     }
 
     fn manga_of(&self, id: i64) -> Option<&Arc<dyn CatalogueSource>> {
@@ -207,7 +202,7 @@ impl PageLoader for CatalogueLoader {
                 }
             })
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| kuro_source::messages::source_error_message(&error, true))?;
             let source_id = source.id();
             tokio::task::spawn_blocking(move || -> Result<ListedPage, String> {
                 let mut items = Vec::with_capacity(found.mangas.len());
@@ -357,6 +352,39 @@ pub(crate) mod tests {
         assert_eq!(chapters.len(), 2);
     }
 
+    /// The three shipped sources: two manga and one anime, with the ids the Kotlin extensions give (backups match).
+    #[test]
+    fn this_build_ships_weebcentral_and_comix_for_manga_and_kickassanime_for_anime() {
+        let paths = kuro_testkit::TempPaths::new().unwrap();
+        let client = crate::net_client::build(&NetworkPrefs::new(PrefStore::in_memory()), &paths).unwrap();
+        let built = Builtin::ship(&client);
+        let manga: Vec<_> = built.sources().into_iter().map(|row| (row.source.name, row.source.lang, row.source.id)).collect();
+        assert_eq!(
+            manga,
+            [("Weeb Central".to_owned(), "en".to_owned(), 2131019126180322627), ("Comix".to_owned(), "en".to_owned(), kuro_source::generate_id("Comix", "en", 1))]
+        );
+        let anime: Vec<_> = built.anime_rows().into_iter().map(|row| (row.source.name, row.source.id)).collect();
+        assert_eq!(anime, [("KickAssAnime".to_owned(), 2081771513481539599)]);
+        let referer = built.image_headers(2131019126180322627).and_then(|h| h.get("referer").map(|v| v.to_str().unwrap().to_owned()));
+        assert_eq!(referer.as_deref(), Some("https://weebcentral.com/"));
+        let comix = built.image_headers(kuro_source::generate_id("Comix", "en", 1)).expect("comix headers");
+        assert!(comix.get("referer").is_none() && comix.get("origin").is_none(), "the Comix image hosts refuse both");
+    }
+
+    /// A Browse grid cover carries the listed entry's source, so the image service picks that source's headers; the
+    /// shared cache source the tracker covers use has none. The entry is not in the library: no cover file is written.
+    #[test]
+    fn a_grid_cover_of_weeb_central_goes_out_with_its_referer() {
+        let paths = kuro_testkit::TempPaths::new().unwrap();
+        let client = crate::net_client::build(&NetworkPrefs::new(PrefStore::in_memory()), &paths).unwrap();
+        let built = Builtin::ship(&client);
+        let art = crate::browse::view::remote_art("https://temp.compsci88.com/cover/normal/1.webp", 2131019126180322627);
+        assert_eq!((art.entry_id, art.favorite), (0, false));
+        let referer = built.image_headers(art.source_id).and_then(|h| h.get("referer").map(|v| v.to_str().unwrap().to_owned()));
+        assert_eq!(referer.as_deref(), Some("https://weebcentral.com/"));
+        assert!(built.image_headers(crate::entry_core::cover_view::TRACKER_COVER_SOURCE).is_none());
+    }
+
     #[test]
     fn a_listing_maps_each_entry_to_its_library_row_and_a_failure_is_the_source_message() {
         let fake = FakeCatalogue::new(41);
@@ -390,12 +418,5 @@ pub(crate) mod tests {
         assert_eq!(both.source(5).map(|s| s.id()), Some(5));
         assert!(both.source(6).is_none());
         assert_eq!(built.anime_rows()[0].source.id, 77);
-    }
-    #[test]
-    fn this_build_ships_no_sources() {
-        let paths = kuro_testkit::TempPaths::new().unwrap();
-        let client = crate::net_client::build(&kuro_prefs::network::NetworkPrefs::new(kuro_prefs::store::PrefStore::in_memory()), &paths).unwrap();
-        let built = Builtin::ship(&client);
-        assert!(built.anime_rows().is_empty() && built.anime_sources().is_empty(), "sources come from repositories the user adds");
     }
 }

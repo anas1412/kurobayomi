@@ -105,6 +105,13 @@ pub fn write_cover_file(source: &ByteSource, cover_file: &Path) -> Result<(), St
     runtime.block_on(write_atomic(cover_file, &bytes)).map_err(|e| e.to_string())
 }
 
+/// Writes a local manga's cover into its folder, over the folder's `cover` image (Kotlin `LocalMangaCoverManager`). The
+/// result carries the thumbnail url and the cover time that the manga row takes. Blocking: call it through [`in_background`].
+pub fn write_local_cover(source: &ByteSource, folder: &Path) -> Result<kuro_local::images::CoverWrite, String> {
+    let bytes = read(source).map_err(|e| e.to_string())?;
+    kuro_local::images::set_cover(folder, &bytes).map_err(|e| e.to_string())
+}
+
 /// Copies a page into the share staging folder, emptied first so only the latest share is kept (T-43a-056), and
 /// returns the staged file.
 pub fn stage_for_share(source: &ByteSource, file_base: &str, staging: &Path) -> Result<PathBuf, String> {

@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 async-channel = { workspace = true }
 bytes = { workspace = true }
+kuro-core = { path = "../kuro-core" }
 kuro-data = { path = "../kuro-data" }
 kuro-domain = { path = "../kuro-domain" }
 kuro-i18n = { path = "../kuro-i18n" }

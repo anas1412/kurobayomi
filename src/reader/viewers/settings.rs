@@ -8,9 +8,9 @@ use kuro_prefs::reader::{ReaderHideThreshold, ReaderPrefs, TappingInvertMode};
 use kuro_prefs::store::Changed;
 
 use super::nav::NavMode;
-use crate::reader::page_decode::DEFAULT_TILE_THRESHOLD;
-use crate::reader::page_profile::{DISPLAY_PROFILE_KEY, set_display_profile};
-use crate::reader::tiles::{TILE_THRESHOLD_KEY, set_tile_threshold};
+use crate::misc::diet_defaults as diet;
+use crate::reader::page_profile::set_display_profile;
+use crate::reader::tiles::set_tile_threshold;
 use crate::reader::pref_rules::{self, NAVIGATION_MODE, READER_THEME, ZOOM_START, clamp_to};
 
 // `pref_always_decode_long_strip_with_ssiv` is dropped (T-44a-061): the viewer does not read it, and a stored value is ignored.
@@ -77,56 +77,54 @@ pub enum Reaction {
     DoubleTapZoom,
 }
 
-/// Reads `pref_hardware_bitmap_threshold` and hands it to the tile cutter, which uses it for pages decoded after this.
-fn read_tile_threshold(p: &ReaderPrefs) -> i32 {
-    let value = p.store().pref(TILE_THRESHOLD_KEY, DEFAULT_TILE_THRESHOLD as i32).get();
-    set_tile_threshold(value);
-    value
+/// The tile threshold is cut from the settings: the hard-coded value goes to the tile cutter for pages decoded from now on.
+fn read_tile_threshold() -> i32 {
+    set_tile_threshold(diet::READER_TILE_THRESHOLD);
+    diet::READER_TILE_THRESHOLD
 }
 
-/// Reads `pref_display_profile_key` and hands it to the page colour step, which loads the file when it changed.
-fn read_display_profile(p: &ReaderPrefs) -> String {
-    let value = p.store().pref(DISPLAY_PROFILE_KEY, String::new()).get();
-    set_display_profile(&value);
-    value
+/// The display profile is cut from the settings: no profile file is applied to pages.
+fn read_display_profile() -> String {
+    set_display_profile(diet::READER_DISPLAY_PROFILE);
+    diet::READER_DISPLAY_PROFILE.to_owned()
 }
 
 impl ViewerSettings {
-    /// Reads every value from the store. Unknown stored values fall back to their defaults (B§1.3).
+    /// Reads the kept values from the store; the cut ones are the hard-coded defaults. Unknown stored values fall back to their defaults (B§1.3).
     pub fn from_prefs(p: &ReaderPrefs) -> Self {
         Self {
-            long_tap: p.read_with_long_tap.get(),
-            page_transitions: p.page_transitions.get(),
-            double_tap_anim_ms: p.double_tap_anim_speed.get().max(0) as u32,
-            volume_keys: p.read_with_volume_keys.get(),
-            volume_keys_inverted: p.read_with_volume_keys_inverted.get(),
-            always_show_transition: p.always_show_chapter_transition.get(),
-            overlay_on_start: p.show_navigation_overlay_on_start.get(),
-            nav_mode_pager: NavMode::from_stored(clamp_to(p.navigation_mode_pager.get(), NAVIGATION_MODE)),
-            nav_mode_webtoon: NavMode::from_stored(clamp_to(p.navigation_mode_webtoon.get(), NAVIGATION_MODE)),
-            tapping_pager: p.pager_nav_inverted.get(),
-            tapping_webtoon: p.webtoon_nav_inverted.get(),
-            hide_threshold: p.reader_hide_threshold.get().threshold(),
-            navigate_pan: p.navigate_to_pan.get(),
-            landscape_zoom: p.landscape_zoom.get(),
+            long_tap: diet::READER_LONG_TAP,
+            page_transitions: diet::READER_PAGE_TRANSITIONS,
+            double_tap_anim_ms: diet::READER_DOUBLE_TAP_ANIM_MS,
+            volume_keys: diet::READER_VOLUME_KEYS,
+            volume_keys_inverted: diet::READER_VOLUME_KEYS_INVERTED,
+            always_show_transition: diet::READER_ALWAYS_SHOW_CHAPTER_TRANSITION,
+            overlay_on_start: diet::READER_OVERLAY_ON_START,
+            nav_mode_pager: NavMode::from_stored(clamp_to(diet::READER_NAVIGATION_MODE, NAVIGATION_MODE)),
+            nav_mode_webtoon: NavMode::from_stored(clamp_to(diet::READER_NAVIGATION_MODE, NAVIGATION_MODE)),
+            tapping_pager: TappingInvertMode::NONE,
+            tapping_webtoon: TappingInvertMode::NONE,
+            hide_threshold: ReaderHideThreshold::LOW.threshold(),
+            navigate_pan: diet::READER_NAVIGATE_PAN,
+            landscape_zoom: diet::READER_LANDSCAPE_ZOOM,
             image_scale_type: p.image_scale_type.get(),
             zoom_start: clamp_to(p.zoom_start.get(), ZOOM_START),
             reader_theme: clamp_to(p.reader_theme.get(), READER_THEME),
             crop_pager: p.crop_borders.get(),
-            crop_webtoon: p.crop_borders_webtoon.get(),
-            side_padding: pref_rules::side_padding(p.webtoon_side_padding.get()),
-            zoom_out_disabled: p.webtoon_disable_zoom_out.get(),
-            double_tap_zoom: p.webtoon_double_tap_zoom_enabled.get(),
-            tile_threshold: read_tile_threshold(p),
-            display_profile: read_display_profile(p),
+            crop_webtoon: p.crop_borders.get(),
+            side_padding: pref_rules::side_padding(diet::READER_WEBTOON_SIDE_PADDING),
+            zoom_out_disabled: diet::READER_WEBTOON_DISABLE_ZOOM_OUT,
+            double_tap_zoom: diet::READER_WEBTOON_DOUBLE_TAP_ZOOM,
+            tile_threshold: read_tile_threshold(),
+            display_profile: read_display_profile(),
             dual_split_pager: p.dual_page_split_paged.get(),
-            dual_invert_pager: p.dual_page_invert_paged.get(),
-            dual_rotate_pager: p.dual_page_rotate_to_fit.get(),
-            dual_rotate_invert_pager: p.dual_page_rotate_to_fit_invert.get(),
-            dual_split_webtoon: p.dual_page_split_webtoon.get(),
-            dual_invert_webtoon: p.dual_page_invert_webtoon.get(),
-            dual_rotate_webtoon: p.dual_page_rotate_to_fit_webtoon.get(),
-            dual_rotate_invert_webtoon: p.dual_page_rotate_to_fit_invert_webtoon.get(),
+            dual_invert_pager: diet::READER_DUAL_PAGE_INVERT,
+            dual_rotate_pager: diet::READER_DUAL_PAGE_ROTATE,
+            dual_rotate_invert_pager: diet::READER_DUAL_PAGE_ROTATE_INVERT,
+            dual_split_webtoon: diet::READER_WEBTOON_DUAL_PAGE_SPLIT,
+            dual_invert_webtoon: diet::READER_WEBTOON_DUAL_PAGE_INVERT,
+            dual_rotate_webtoon: diet::READER_WEBTOON_DUAL_PAGE_ROTATE,
+            dual_rotate_invert_webtoon: diet::READER_WEBTOON_DUAL_PAGE_ROTATE_INVERT,
         }
     }
 }
@@ -228,9 +226,9 @@ mod tests {
         let p = prefs();
         let mut watch = SettingsWatch::new(p.clone(), ViewerSettings::from_prefs(&p));
         assert_eq!(watch.poll(), None, "the initial value is not a change");
-        p.webtoon_disable_zoom_out.set(true).unwrap();
+        p.reader_theme.set(2).unwrap();
         let new = watch.poll().expect("the write is reported");
-        assert!(new.zoom_out_disabled);
+        assert_eq!(new.reader_theme, 2);
         assert_eq!(watch.poll(), None, "reported once");
     }
 
@@ -238,8 +236,8 @@ mod tests {
     fn a_write_of_another_key_or_the_same_value_reports_nothing() {
         let p = prefs();
         let mut watch = SettingsWatch::new(p.clone(), ViewerSettings::from_prefs(&p));
-        p.page_transitions.set(true).unwrap();
-        p.folder_per_manga.set(true).unwrap();
+        p.reader_theme.set(1).unwrap();
+        p.crop_borders.set(false).unwrap();
         assert_eq!(watch.poll(), None, "the viewer holds the same settings");
     }
 
@@ -249,9 +247,9 @@ mod tests {
         let mut watch = SettingsWatch::new(p.clone(), ViewerSettings::from_prefs(&p));
         p.reader_theme.set(2).unwrap();
         p.reader_theme.set(0).unwrap();
-        p.navigation_mode_webtoon.set(3).unwrap();
+        p.crop_borders.set(true).unwrap();
         let new = watch.poll().expect("reported");
-        assert_eq!((new.reader_theme, new.nav_mode_webtoon), (0, NavMode::Edge));
+        assert_eq!((new.reader_theme, new.crop_pager), (0, true));
     }
 
     fn prefs() -> ReaderPrefs {
@@ -272,31 +270,14 @@ mod tests {
     }
 
     #[test]
-    fn stored_values_are_read_and_unknown_codes_fall_back() {
-        let p = prefs();
-        p.navigation_mode_pager.set(3).unwrap();
-        p.navigation_mode_webtoon.set(-4).unwrap();
-        p.reader_hide_threshold.set(ReaderHideThreshold::HIGHEST).unwrap();
-        let s = ViewerSettings::from_prefs(&p);
-        assert_eq!(s.nav_mode_pager, NavMode::Edge);
-        assert_eq!(s.nav_mode_webtoon, NavMode::Default);
-        assert_eq!(s.hide_threshold, 5);
-    }
-
-    #[test]
     fn out_of_range_stored_values_are_clamped_on_read() {
         let p = prefs();
-        p.webtoon_side_padding.set(30).unwrap();
-        p.navigation_mode_pager.set(77).unwrap();
         p.zoom_start.set(9).unwrap();
         p.reader_theme.set(7).unwrap();
         let s = ViewerSettings::from_prefs(&p);
-        assert_eq!(s.side_padding, 25);
-        assert_eq!(s.nav_mode_pager, NavMode::Disabled);
         assert_eq!((s.zoom_start, s.reader_theme), (4, 3));
-        p.webtoon_side_padding.set(-3).unwrap();
         p.zoom_start.set(0).unwrap();
-        assert_eq!((ViewerSettings::from_prefs(&p).side_padding, ViewerSettings::from_prefs(&p).zoom_start), (0, 1));
+        assert_eq!(ViewerSettings::from_prefs(&p).zoom_start, 1);
     }
 
     #[test]
@@ -344,18 +325,6 @@ mod tests {
         new.reader_theme = 2;
         assert_eq!(diff(&old, &new, Family::Webtoon), [Reaction::Restyle]);
         assert_eq!(diff(&old, &new, Family::Pager), [Reaction::RefreshImages]);
-    }
-
-    #[test]
-    fn t044a_061_the_dropped_long_strip_key_changes_nothing_in_the_viewer() {
-        let p = prefs();
-        let old = ViewerSettings::from_prefs(&p);
-        let mut watch = SettingsWatch::new(p.clone(), old.clone());
-        p.store().pref("pref_always_decode_long_strip_with_ssiv", false).set(true).unwrap();
-        let new = ViewerSettings::from_prefs(&p);
-        assert!(diff(&old, &new, Family::Webtoon).is_empty(), "a stored value is ignored");
-        assert!(diff(&old, &new, Family::Pager).is_empty());
-        assert_eq!(watch.poll(), None, "no change is delivered for the dropped key");
     }
 
     #[test]

@@ -80,7 +80,7 @@ async fn load_page(
         }
     })
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| kuro_source::messages::source_error_message(&error, true))?;
     let source_id = source.id();
     tokio::task::spawn_blocking(move || -> Result<ListedPage, String> {
         let mut items = Vec::with_capacity(listed.animes.len());

@@ -38,6 +38,9 @@ const RESERVED_DEVICE_NAMES: [&str; 22] = [
     "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
+/// The name [`build_valid_filename`] gives a name with nothing left after trimming (Aniyomi's value).
+pub const EMPTY_FILE_NAME: &str = "(invalid)";
+
 /// The one file-name sanitiser: `DiskUtil.buildValidFilename` (trim leading and trailing dots and spaces, map control
 /// and FAT-forbidden characters to `_`, `(invalid)` for an empty result, keep at most 240 UTF-16 units).
 ///
@@ -47,7 +50,7 @@ const RESERVED_DEVICE_NAMES: [&str; 22] = [
 pub fn build_valid_filename(orig: &str, ntfs: bool) -> String {
     let trimmed = orig.trim_matches(|c| c == '.' || c == ' ');
     if trimmed.is_empty() {
-        return "(invalid)".to_owned();
+        return EMPTY_FILE_NAME.to_owned();
     }
     let mapped: String = trimmed
         .chars()

@@ -17,20 +17,17 @@ pub fn about_subtitle(app: &str, release: bool, version: &str, commit: &str) -> 
     if release { format!("{app} Stable {version}") } else { format!("Debug {commit}") }
 }
 
-/// The eleven rows in their order. `about` is the About subtitle (see [`about_subtitle`]).
+/// The eight rows in their order. `about` is the About subtitle (see [`about_subtitle`]).
 pub fn rows(about: &str) -> Vec<MenuRow> {
     let row = |title, subtitle: &str, icon, target| MenuRow { title, subtitle: subtitle.to_owned(), icon, target };
     vec![
-        row("Appearance", "Theme, date & time format", "preferences-desktop-appearance-symbolic", "settings_appearance"),
+        row("Appearance", "Theme, start screen, app lock", "preferences-desktop-appearance-symbolic", "settings_appearance"),
         row("Library", "Categories, global update, chapter/episode behavior", "view-grid-symbolic", "settings_library"),
         row("Reader", "Reading mode, display, navigation", "x-office-document-symbolic", "settings_reader"),
-        row("Player", "Internal player, gestures, decoders, subtitles", "video-display-symbolic", "settings_player"),
-        row("Downloads", "Automatic download, download ahead", "folder-download-symbolic", "settings_downloads"),
-        row("Tracking", "One-way progress sync, enhanced sync", "emblem-synchronizing-symbolic", "settings_tracking"),
-        row("Browse", "Sources, extensions, global search", "compass-symbolic", "settings_browse"),
-        row("Data and storage", "Manual & automatic backups, storage space", "drive-harddisk-symbolic", "settings_data_storage"),
-        row("Security and privacy", "App lock", "security-high-symbolic", "settings_security"),
-        row("Advanced", "Dump crash logs", "utilities-terminal-symbolic", "settings_advanced"),
+        row("Player", "Languages, default volume, autoplay, buttons", "video-display-symbolic", "settings_player"),
+        row("Downloads and storage", "Maximum downloads, auto-download, cleanup", "folder-download-symbolic", "settings_downloads"),
+        row("Sources and tracking", "Sources, repositories, AniList, cookies", "compass-symbolic", "settings_browse"),
+        row("Backup and restore", "Automatic and manual backups, maintenance", "drive-harddisk-symbolic", "settings_data_storage"),
         row("About", about, "help-about-symbolic", "settings_about"),
     ]
 }
@@ -40,7 +37,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eleven_rows_in_the_task_order() {
+    fn eight_rows_in_the_task_order() {
         let titles: Vec<&str> = rows("x").iter().map(|r| r.title).collect();
         assert_eq!(
             titles,
@@ -49,12 +46,9 @@ mod tests {
                 "Library",
                 "Reader",
                 "Player",
-                "Downloads",
-                "Tracking",
-                "Browse",
-                "Data and storage",
-                "Security and privacy",
-                "Advanced",
+                "Downloads and storage",
+                "Sources and tracking",
+                "Backup and restore",
                 "About"
             ]
         );
@@ -70,7 +64,7 @@ mod tests {
     fn player_row_opens_the_player_root_and_about_takes_the_given_subtitle() {
         let rows = rows("Kurobayomi Stable 0.1.0");
         assert_eq!(rows[3].target, "settings_player");
-        assert_eq!(rows[10].subtitle, "Kurobayomi Stable 0.1.0");
+        assert_eq!(rows[7].subtitle, "Kurobayomi Stable 0.1.0");
     }
 
     #[test]

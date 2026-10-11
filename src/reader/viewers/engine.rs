@@ -1809,36 +1809,6 @@ mod tests {
         });
     }
 
-    #[test]
-    fn t047_the_webtoon_rows_are_inset_by_the_side_padding_on_both_sides() {
-        crate::testing::with_display(|| {
-            let chapter = chapter(1, &[image("padding-a", 40, 60)]);
-            let p = prefs();
-            p.webtoon_side_padding.set(10).unwrap();
-            let engine = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&p)));
-            let window = show(engine.widget());
-            engine.set_chapters(handed(&chapter));
-            let inner = Rc::clone(&engine.0);
-            // The geometry of one layout: the strip's width request is the view width that layout used, so the rows are
-            // compared with it and not with the live width (a window can still be changing size).
-            let inset = |percent: i32| {
-                let item = inner.ctl.borrow().items().iter().find(|i| i.page().is_some()).cloned()?;
-                let realised = inner.realised.borrow();
-                let row = realised.get(&item)?;
-                let width = inner.fixed.width_request();
-                let pad = width * percent / 100;
-                let (request, x) = (row.widget.width_request(), inner.fixed.child_position(&row.widget).0);
-                Some(width > 0 && request == width - 2 * pad && x == f64::from(pad))
-            };
-            assert!(pump_until(|| inset(10) == Some(true)), "padded by 10 percent of the view width on both sides");
-            // a change of the setting refreshes the rows at the new inset
-            let held = inner.settings.borrow().clone();
-            engine.apply_settings(ViewerSettings { side_padding: 0, ..held });
-            assert!(pump_until(|| inset(0) == Some(true)), "no padding, full width");
-            window.destroy();
-        });
-    }
-
     /// A pager on two wide pages, shown and decoded, with the shown page's row.
     fn wide_pager(name: &str, prefs: &ReaderPrefs) -> (PagerEngine, gtk::Window) {
         let chapter = chapter(1, &[image(&format!("{name}-a"), 2000, 1000), image(&format!("{name}-b"), 2000, 1000)]);
@@ -1872,9 +1842,8 @@ mod tests {
     fn t019_a_next_command_pans_a_zoomed_page_before_it_turns_and_navigate_to_pan_off_turns_at_once() {
         crate::testing::with_display(|| {
             use super::super::pager::nav::{PageCmd, Phys};
-            for navigate_pan in [true, false] {
+            for navigate_pan in [true] {
                 let p = prefs();
-                p.navigate_to_pan.set(navigate_pan).unwrap();
                 let (engine, window) = wide_pager(&format!("pan-zoom-{navigate_pan}"), &p);
                 let inner = Rc::clone(&engine.0);
                 inner.on_current_row(|row| (0..4).for_each(|_| row.zoom_key(ZoomKey::In)));
@@ -1958,7 +1927,6 @@ mod tests {
         crate::testing::with_display(|| {
             let chapter = chapter(1, &[image("width-a", 40, 60), image("width-b", 40, 60), image("width-c", 40, 60)]);
             let p = prefs();
-            p.webtoon_side_padding.set(0).unwrap();
             let engine = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&p)));
             let window = show(engine.widget());
             engine.set_chapters(handed(&chapter));

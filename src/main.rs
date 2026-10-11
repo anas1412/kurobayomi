@@ -27,7 +27,6 @@ mod local_flow_anime;
 mod live;
 mod gio_notifier;
 mod incognito;
-mod locale;
 mod open_link;
 #[allow(dead_code)]
 mod player_view;
@@ -113,7 +112,7 @@ fn main() -> glib::ExitCode {
     // the hook goes in first so a panic during the rest of startup is reported too
     kuro_core::crash::install(paths.crash_dir());
     let _log = match kuro_core::logging::init(cfg!(debug_assertions), &paths.log_dir()) {
-        Ok(log) => Some(settings_ui::advanced::share_logging(log)),
+        Ok(log) => Some(log),
         Err(e) => {
             eprintln!("kurobayomi: file logging is off: {e}");
             None
@@ -234,7 +233,8 @@ fn build_window(app: &gtk::Application) {
     // one selection for every layout: the sidebar and the bottom bar show the same tab (T-36a-004)
     let host = shell::Shell::get().expect("the shell is installed in main");
     host.migration_done();
-    let home = host.home_tabs(prefs.ui.start_screen.get(), prefs.ui.nav_style.get());
+    // the navigation style is cut from the settings: the History tab stays in the More tab
+    let home = host.home_tabs(prefs.ui.start_screen.get(), kuro_prefs::ui::NavStyle::MOVE_HISTORY_TO_MORE);
     shell::tabs::bind(&tabs, &home);
     let sep = gtk::Separator::new(O::Vertical);
     let row = GBox::new(O::Horizontal, 0);
@@ -319,7 +319,7 @@ fn build_window(app: &gtk::Application) {
     startup::publish_launcher_badge(&win, &app.application_id().unwrap_or_default());
     // background work that waits for the window: the chapter cache clear and the opt-in release check
     if let Ok(paths) = kuro_platform::linux::LinuxPaths::system() {
-        startup::clear_chapter_cache_on_launch(data::app().library.auto_clear_item_cache.get(), kuro_images::platform::chapter_cache_dir(&paths));
+        startup::clear_chapter_cache_on_launch(crate::misc::diet_defaults::LIBRARY_AUTO_CLEAR_CHAPTER_CACHE, kuro_images::platform::chapter_cache_dir(&paths));
     }
     app_update::startup(&data::app().base);
     // requests that arrived before the window: --action, --search, --open and opened files
@@ -462,17 +462,14 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
         ui::margins(&h, widgets::rail::ROW_PAD);
         h.append(&gtk::Image::from_icon_name(&n.icon));
         h.append(&gtk::Label::builder().label(&n.title).xalign(0.0).hexpand(true).build());
-        // the Updates and Browse pills start empty and follow the shared counts; no count is written here
-        if matches!(n.id.as_str(), "updates" | "browse") {
+        // the Updates pill starts empty and follows the shared counts; no count is written here. The Browse pill has
+        // no count: the extension update count is cut from the settings.
+        if n.id == "updates" {
             let b = gtk::Label::builder().css_classes(["kb-nav-badge", "numeric"]).valign(gtk::Align::Center).opacity(0.0).build();
             h.append(&b);
             if data::is_installed() {
                 let store = data::app().base.store().clone();
-                if n.id == "updates" {
-                    misc::badge::bind(&b, &kuro_prefs::library::LibraryPrefs::new(store));
-                } else {
-                    misc::badge::bind_extension_updates(&b, &kuro_prefs::source::SourcePrefs::new(store));
-                }
+                misc::badge::bind(&b, &kuro_prefs::library::LibraryPrefs::new(store));
             }
         }
         let row = gtk::ListBoxRow::builder().child(&h).build();

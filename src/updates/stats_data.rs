@@ -88,13 +88,11 @@ impl GlobalUpdateRules {
         }
     }
 
-    /// The rules of one kind from the app's preferences.
-    pub fn from_library_prefs(prefs: &kuro_prefs::library::LibraryPrefs, kind: EntryKind) -> Self {
-        let (include, exclude) = match kind {
-            EntryKind::Manga => (prefs.manga_update_categories.get(), prefs.manga_update_categories_exclude.get()),
-            EntryKind::Anime => (prefs.anime_update_categories.get(), prefs.anime_update_categories_exclude.get()),
-        };
-        Self::from_prefs(&include, &exclude, &prefs.auto_update_item_restrictions.get())
+    /// The library update rules, hard-coded since the settings were cut: every category, and the default item
+    /// restrictions.
+    pub fn hard_coded_rules() -> Self {
+        let restrictions: BTreeSet<String> = crate::misc::diet_defaults::LIBRARY_UPDATE_ITEM_RESTRICTIONS.iter().map(|t| t.to_string()).collect();
+        Self::from_prefs(&BTreeSet::new(), &BTreeSet::new(), &restrictions)
     }
 
     /// `category IN (...)` over the ids, or `empty` when the set is empty. The ids are numbers, so they are inlined.

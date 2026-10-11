@@ -12,21 +12,6 @@ pub fn build_valid_filename(orig: &str) -> String {
     kuro_core::text::build_valid_filename(orig, true)
 }
 
-/// The first `n` UTF-8 bytes of `s`, cut on a character boundary (behavior section 22.2). A character cut in the
-/// middle is dropped, which is what Kotlin's decode-and-strip does.
-pub fn take_bytes(s: &str, n: usize) -> String {
-    let mut end = n.min(s.len());
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    s[..end].to_owned()
-}
-
-/// UTF-8 length of `s` in bytes (`String.byteSize`).
-pub fn byte_size(s: &str) -> usize {
-    s.len()
-}
-
 /// Name of a saved reader page: `<title> - <chapter>` cut to fit the budget, sanitised, then ` - <page number>`
 /// appended unsanitised (behavior section 22.3).
 pub fn reader_file_name(title: &str, chapter_name: &str, page_number: usize) -> String {
@@ -45,10 +30,10 @@ pub fn player_file_name(title: &str, episode_name: &str, time_text: &str) -> Str
 }
 
 fn titled_name(head: &str, suffix: &str) -> String {
-    let budget = MAX_TITLE_BYTES.saturating_sub(byte_size(suffix));
+    let budget = MAX_TITLE_BYTES.saturating_sub(kuro_core::text::byte_size(suffix));
     format!(
         "{}{suffix}",
-        build_valid_filename(&take_bytes(head, budget))
+        build_valid_filename(kuro_core::text::take_bytes(head, budget))
     )
 }
 
@@ -94,23 +79,6 @@ mod tests {
     }
 
     #[test]
-    fn take_bytes_keeps_whole_characters_only() {
-        assert_eq!(take_bytes("abc", 10), "abc");
-        assert_eq!(take_bytes("abc", 2), "ab");
-        // "é" is two bytes; cutting after the first byte drops it.
-        assert_eq!(take_bytes("aé", 2), "a");
-        assert_eq!(take_bytes("aé", 3), "aé");
-        assert_eq!(take_bytes("", 0), "");
-    }
-
-    #[test]
-    fn byte_size_counts_utf8_bytes() {
-        assert_eq!(byte_size("abc"), 3);
-        assert_eq!(byte_size("é"), 2);
-        assert_eq!(byte_size("\u{1F600}"), 4);
-    }
-
-    #[test]
     fn reader_name_is_title_chapter_then_page() {
         assert_eq!(reader_file_name("A", "B", 3), "A - B - 3");
         assert_eq!(reader_file_name("A/A", "B:1", 12), "A_A - B_1 - 12");
@@ -121,7 +89,7 @@ mod tests {
         let long = "x".repeat(400);
         let name = reader_file_name(&long, "c", 7);
         assert!(name.ends_with(" - 7"));
-        assert!(byte_size(&name) <= MAX_TITLE_BYTES);
+        assert!(name.len() <= MAX_TITLE_BYTES);
         // The sanitiser keeps 240 UTF-16 units of the 246 bytes, then the 4-byte suffix follows.
         assert_eq!(name, format!("{}{}", "x".repeat(240), " - 7"));
     }
@@ -132,7 +100,7 @@ mod tests {
         let name = reader_file_name(&long, "", 1);
         assert!(name.ends_with(" - 1"));
         assert!(name.is_char_boundary(name.len()));
-        assert!(byte_size(&name) <= MAX_TITLE_BYTES);
+        assert!(name.len() <= MAX_TITLE_BYTES);
         assert!(!name.contains('\u{FFFD}'));
     }
 

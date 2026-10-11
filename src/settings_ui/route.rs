@@ -15,8 +15,8 @@ use crate::pref_model::spec_convert::Registry;
 use crate::screens::{built, Built};
 use crate::settings_ui::category::Category;
 use crate::settings_ui::merge::merge;
-use crate::settings_ui::reader::rules::ReaderState;
-use crate::settings_ui::{about, advanced, appearance, browse, cache, chooser, downloads, library, library_export, player, reader, rows, search, security, storage, tracking, usage, view};
+use crate::settings_ui::tracker_host;
+use crate::settings_ui::{about, appearance, browse, cache, chooser, downloads, library, library_export, maintenance, player, reader, rows, search, storage, tracking, usage, view};
 use kuro_data::extension_repo::ExtensionRepoRepo;
 use kuro_data::extension_store::ExtensionStoreRepo;
 
@@ -28,22 +28,13 @@ pub fn handles(id: &str) -> bool {
             | "settings_library"
             | "settings_reader"
             | "settings_player"
-            | "settings_player_gestures"
             | "settings_player_custom_buttons"
             | "settings_player_editor"
             | "settings_player_code_editor"
             | "settings_browse"
             | "settings_search"
             | "settings_data_storage"
-            | "settings_tracking"
-            | "settings_security"
             | "settings_about"
-            | "settings_advanced"
-            | "settings_player_internal"
-            | "settings_player_decoder"
-            | "settings_player_subtitle"
-            | "settings_player_audio"
-            | "settings_player_advanced"
             | "settings_player_torrents"
             | "settings_downloads"
             | "settings_open_source_licenses"
@@ -110,11 +101,11 @@ fn open_categories(kind: EntryKind) {
 fn reader_page() -> Option<Built> {
     let prefs = Rc::new(prefs());
     let store = prefs.store().clone();
-    let (typed, for_state, spec_store) = (Rc::clone(&prefs), Rc::clone(&prefs), store.clone());
+    let typed = Rc::clone(&prefs);
     Some(view::live_page(
         &store,
-        move || ReaderState::from_prefs(&for_state.reader),
-        move || merge(spec_tree("settings_reader", &spec_store), reader::page::rows_all(&typed)),
+        || (),
+        move || reader::page::rows_all(&typed),
         toolbar("settings_reader"),
     ))
 }
@@ -136,7 +127,7 @@ fn library_page() -> Option<Built> {
     ))
 }
 
-/// The Appearance page. It is rebuilt when the theme mode changes, so the pure-black row appears and goes with it.
+/// The Appearance page. It is rebuilt when the app lock switch changes, so the lock delay row follows it.
 fn appearance_page() -> Option<Built> {
     let prefs = Rc::new(prefs());
     let store = prefs.store().clone();
@@ -149,39 +140,47 @@ fn appearance_page() -> Option<Built> {
     ))
 }
 
-fn browse_page() -> Option<Built> {
+/// The rows of Sources and tracking: the Browse rows, the tracker rows and the switches (`tracking`), the cookie and
+/// WebView rows, and the revoke of trusted extensions. `changed` redraws the page after a login or a revoke.
+fn browse_rows(prefs: &Prefs, counts: browse::RepoCounts, changed: Rc<dyn Fn()>) -> Vec<Preference> {
+    let mut out = browse::page_rows(prefs, counts);
+    out.extend(tracking::page_rows(prefs, Rc::clone(&changed)));
+    out.push(rows::group("Networking", maintenance::networking_rows()));
+    out.push(rows::group("Extensions", vec![maintenance::revoke_trust_row(prefs, changed)]));
+    out
+}
+
+/// Puts the Sources and tracking page into `holder`. The tracker services start here, and the page redraws itself
+/// once they are up and after every login change (as the Tracking page did).
+fn fill_browse(holder: &gtk::Box) {
+    while let Some(child) = holder.first_child() {
+        holder.remove(&child);
+    }
     let prefs = prefs();
-    let tree = merge(spec_tree("settings_browse", prefs.store()), browse::page_rows(&prefs, repo_counts()));
-    built(page::body(&tree).widget, toolbar("settings_browse"))
+    let weak = holder.downgrade();
+    let changed: Rc<dyn Fn()> = Rc::new(move || {
+        if let Some(holder) = weak.upgrade() {
+            fill_browse(&holder);
+        }
+    });
+    tracker_host::set_refresh(Rc::clone(&changed));
+    tracker_host::ensure();
+    let tree = merge(spec_tree("settings_browse", prefs.store()), browse_rows(&prefs, repo_counts(), changed));
+    holder.append(&page::body(&tree).widget);
 }
 
-/// The internal player page. The rows that depend on the intro skip and AniSkip switches are rebuilt when those change.
-fn internal_page() -> Option<Built> {
-    let prefs = Rc::new(prefs());
-    let store = prefs.store().clone();
-    let (for_state, typed) = (Rc::clone(&prefs), Rc::clone(&prefs));
-    Some(view::live_page(
-        &store,
-        move || (for_state.player.enable_skip_intro.get(), for_state.player.ani_skip_enabled.get()),
-        move || player::controls::internal_rows(&typed),
-        toolbar("settings_player_internal"),
-    ))
+fn browse_page() -> Option<Built> {
+    let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    holder.set_vexpand(true);
+    fill_browse(&holder);
+    built(holder, toolbar("settings_browse"))
 }
 
-/// The Downloads page: the spec rows with the typed rows in their place. The rows follow the rules of their switches.
+/// Downloads and storage: the spec page with the typed download rows in their place.
 fn downloads_page() -> Option<Built> {
-    let prefs = Rc::new(prefs());
-    let store = prefs.store().clone();
-    let (for_state, for_tree) = (Rc::clone(&prefs), Rc::clone(&prefs));
-    Some(view::live_page(
-        &store,
-        move || downloads::rule_state(&for_state),
-        move || {
-            let typed = downloads::page_rows(&for_tree, &categories_of(EntryKind::Anime), &categories_of(EntryKind::Manga));
-            merge(spec_tree("settings_downloads", for_tree.store()), typed)
-        },
-        toolbar("settings_downloads"),
-    ))
+    let prefs = prefs();
+    let tree = merge(spec_tree("settings_downloads", prefs.store()), downloads::page_rows(&prefs));
+    built(page::body(&tree).widget, toolbar("settings_downloads"))
 }
 
 /// A player page of loose typed rows, with the page toolbar.
@@ -216,19 +215,12 @@ pub fn tree_with(id: &str, prefs: &Prefs, anime: &[Category], manga: &[Category]
     match id {
         "settings_appearance" => merge(spec, appearance::page_rows(prefs)),
         "settings_library" => merge(spec, library::page_rows(prefs, anime, manga, open)),
-        "settings_reader" => merge(spec, reader::page::rows_all(prefs)),
-        "settings_browse" => merge(spec, browse::page_rows(prefs, counts)),
-        "settings_advanced" => merge(spec, advanced::page_rows(prefs, Rc::new(|| {}))),
+        "settings_reader" => reader::page::rows_all(prefs),
+        "settings_player" => player::root::page_rows(prefs, Rc::new(|_| {})),
+        "settings_browse" => merge(spec, browse_rows(prefs, counts, Rc::new(|| {}))),
         "settings_data_storage" => merge(spec, data_storage_rows(prefs, Rc::new(|| {}))),
-        "settings_downloads" => merge(spec, downloads::page_rows(prefs, anime, manga)),
-        "settings_tracking" => merge(spec, tracking::page_rows(prefs, Rc::new(|| {}))),
-        "settings_security" => merge(spec, security::page_rows(prefs)),
+        "settings_downloads" => merge(spec, downloads::page_rows(prefs)),
         "settings_about" => merge(spec, about::page_rows()),
-        "settings_player_internal" => player::controls::internal_rows(prefs),
-        "settings_player_decoder" => loose(player::decoder::page_rows(prefs)),
-        "settings_player_subtitle" => loose(player::subtitle::page_rows(prefs)),
-        "settings_player_audio" => loose(player::audio::page_rows(prefs)),
-        "settings_player_advanced" => loose(player::advanced::page_rows(prefs)),
         "settings_player_torrents" => loose(player::torrent::page_rows(prefs)),
         _ => spec,
     }
@@ -241,6 +233,7 @@ fn data_storage_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
     let interval = rows::ranged_choice("Automatic backup frequency", &prefs.backup.backup_interval, |h| kuro_backup::settings::interval_label(h as u32).unwrap_or("").to_owned(), true);
     tree.push(rows::group("Backup and restore", vec![interval, restore_backup_row(), rows::info(&backup_info(prefs))]));
     tree.push(rows::group("Storage usage", vec![cache::clear_row(Rc::clone(&changed)), rows::switch("Clear episode/chapter cache on app launch", &prefs.library.auto_clear_item_cache, true)]));
+    tree.push(rows::group("Maintenance", maintenance::data_rows()));
     tree.push(library_export::group_row());
     tree
 }
@@ -333,37 +326,11 @@ fn data_storage_page() -> Option<Built> {
     built(holder, data_storage_toolbar())
 }
 
-/// Security and privacy: the spec page with the notification switch in its place.
-fn security_page() -> Option<Built> {
-    let prefs = prefs();
-    let tree = merge(spec_tree("settings_security", prefs.store()), security::page_rows(&prefs));
-    built(page::body(&tree).widget, toolbar("settings_security"))
-}
-
 /// About: the spec page with the Version and Check for updates rows in their place.
 fn about_page() -> Option<Built> {
     let prefs = prefs();
     let tree = merge(spec_tree("settings_about", prefs.store()), about::page_rows());
     built(page::body(&tree).widget, toolbar("settings_about"))
-}
-
-/// Tracking settings: the spec page without the help button (T-27a-047, the dropped link is in the release notes).
-fn tracking_page() -> Option<Built> {
-    let mut bar = toolbar("settings_tracking");
-    bar.retain(|w| w.tooltip_text().as_deref() != Some("Tracking guide"));
-    tracking::page(bar)
-}
-
-fn gestures_page() -> Option<Built> {
-    let prefs = Rc::new(prefs());
-    let store = prefs.store().clone();
-    let (for_state, typed) = (Rc::clone(&prefs), Rc::clone(&prefs));
-    Some(view::live_page(
-        &store,
-        move || for_state.gestures.default_intro_length.get(),
-        move || player::seeking::page_rows(&typed),
-        toolbar("settings_player_gestures"),
-    ))
 }
 
 /// The screen for `id`, or `None` when this module does not build it.
@@ -372,13 +339,7 @@ pub fn body(id: &str) -> Option<Built> {
         "settings_appearance" => appearance_page(),
         "settings_library" => library_page(),
         "settings_reader" => reader_page(),
-        "settings_player" => player::root::body(crate::window_size::size_of(&crate::ui::window()).0),
-        "settings_player_internal" => internal_page(),
-        "settings_player_gestures" => gestures_page(),
-        "settings_player_decoder" => loose_page(id, player::decoder::page_rows(&prefs())),
-        "settings_player_subtitle" => loose_page(id, player::subtitle::page_rows(&prefs())),
-        "settings_player_audio" => loose_page(id, player::audio::page_rows(&prefs())),
-        "settings_player_advanced" => loose_page(id, player::advanced::page_rows(&prefs())),
+        "settings_player" => player::root::body(&prefs()),
         "settings_player_torrents" => loose_page(id, player::torrent::page_rows(&prefs())),
         "settings_downloads" => downloads_page(),
         "settings_player_custom_buttons" => player::scripts::buttons_page(),
@@ -387,9 +348,6 @@ pub fn body(id: &str) -> Option<Built> {
         "settings_browse" => browse_page(),
         "settings_search" => search::page(),
         "settings_data_storage" => data_storage_page(),
-        "settings_advanced" => advanced::page(),
-        "settings_tracking" => tracking_page(),
-        "settings_security" => security_page(),
         "settings_about" => about_page(),
         "settings_open_source_licenses" => super::licenses::list_page(),
         "settings_worker_info" => super::worker_info::page(),
@@ -408,23 +366,14 @@ mod tests {
             "settings_library",
             "settings_reader",
             "settings_player",
-            "settings_player_gestures",
             "settings_player_custom_buttons",
             "settings_player_editor",
             "settings_player_code_editor",
-            "settings_player_internal",
-            "settings_player_decoder",
-            "settings_player_subtitle",
-            "settings_player_audio",
-            "settings_player_advanced",
             "settings_player_torrents",
             "settings_downloads",
             "settings_browse",
             "settings_search",
             "settings_data_storage",
-            "settings_advanced",
-            "settings_tracking",
-            "settings_security",
             "settings_about",
         ];
         crate::ui::with_spec(|spec| {
@@ -538,23 +487,14 @@ mod tests {
                 "settings_library",
                 "settings_reader",
                 "settings_player",
-                "settings_player_gestures",
                 "settings_player_custom_buttons",
                 "settings_player_editor",
                 "settings_player_code_editor",
-                "settings_player_internal",
-                "settings_player_decoder",
-                "settings_player_subtitle",
-                "settings_player_audio",
-                "settings_player_advanced",
                 "settings_player_torrents",
                 "settings_downloads",
                 "settings_browse",
                 "settings_search",
                 "settings_data_storage",
-                "settings_advanced",
-                "settings_tracking",
-                "settings_security",
                 "settings_about",
                 "settings_open_source_licenses",
                 "settings_worker_info",
@@ -573,10 +513,10 @@ mod tests {
                     entries.into_iter().map(|e| crate::pref_model::shell::NavEntry { id: e.id, title: e.title, subtitle: e.subtitle, icon: e.icon }).collect(),
                     current,
                 );
-                assert!(rows_under(&split) > 11, "the sidebar and the open page");
+                assert!(rows_under(&split) > 8, "the sidebar and the open page");
             }
-            let player = crate::settings_ui::player::root::body(1200).expect("the player split view");
-            assert!(rows_under(&player.content) > 9);
+            let player = crate::settings_ui::player::root::body(&prefs()).expect("the player page");
+            assert!(rows_under(&player.content) >= 9);
 
             // the split view: one sidebar (Player inside it shows its plain list), the open page's row selected, and a
             // selected row swaps the page beside it
@@ -631,35 +571,6 @@ mod tests {
         });
     }
 
-    #[test]
-    fn the_reader_page_replaces_spec_rows_by_typed_ones_and_hides_what_the_rules_turn_off() {
-        let prefs = Prefs::in_memory();
-        let rows = |prefs: &Prefs| merge(spec_tree("settings_reader", prefs.store()), reader::page::rows_all(prefs));
-        let titles = |tree: &[Preference], group: &str| -> Vec<String> {
-            tree.iter()
-                .find_map(|e| match e {
-                    Preference::Group(g) if g.title == group => Some(g.items.iter().map(|i| i.title().to_owned()).collect()),
-                    _ => None,
-                })
-                .unwrap_or_default()
-        };
-        let before = titles(&rows(&prefs), "Paged");
-        for hidden in ["Invert split page placement", "Flip orientation of rotated wide pages"] {
-            assert!(!before.iter().any(|t| t == hidden), "{hidden} is hidden while its switch is off");
-        }
-        assert!(before.iter().any(|t| t == "Pan wide images"), "pan is on while tap zones are enabled");
-        prefs.reader.dual_page_split_paged.set(true).unwrap();
-        prefs.reader.navigation_mode_pager.set(5).unwrap();
-        let after = titles(&rows(&prefs), "Paged");
-        assert!(after.iter().any(|t| t == "Invert split page placement"));
-        assert!(!after.iter().any(|t| t == "Pan wide images" || t == "Invert tap zones"), "disabled tap zones hide pan and invert");
-        assert_eq!(before.len(), 11 - 2);
-        assert_eq!(after.len(), 11 - 3, "invert tap zones, pan and flip rotated are hidden; invert split is back");
-        let tree = rows(&prefs);
-        let eink = titles(&tree, "E-Ink");
-        assert_eq!(eink, ["Flash on page change"], "the E-Ink group is typed too: with the flash off only its switch shows");
-    }
-
     fn group_titles(tree: &[Preference], group: &str) -> Vec<String> {
         tree.iter()
             .find_map(|entry| match entry {
@@ -674,17 +585,17 @@ mod tests {
         let prefs = Prefs::in_memory();
         let appearance = tree_with("settings_appearance", &prefs, &[], &[], browse::RepoCounts::default());
         let display = group_titles(&appearance, "Display");
-        for title in ["App language", "Start Screen", "Date format", "Relative timestamps"] {
+        for title in ["App language", "Start Screen"] {
             assert!(display.iter().any(|t| t == title), "{title} is on the Display group");
         }
         let browse = tree_with("settings_browse", &prefs, &[], &[], browse::RepoCounts::default());
-        assert_eq!(
-            group_titles(&browse, "Sources"),
-            ["Hide anime entries already in library", "Hide manga entries already in library", "Anime extension repos", "Manga extension repos"]
-        );
+        assert_eq!(group_titles(&browse, "Sources"), ["Source languages", "Anime extension repos", "Manga extension repos"]);
         let library = tree_with("settings_library", &prefs, &[], &[], browse::RepoCounts::default());
-        assert!(group_titles(&library, "Season").iter().any(|t| t == "Update seasons with episodes on refresh"));
-        assert!(group_titles(&library, "Categories").iter().any(|t| t == "Per-category settings for sort"));
+        assert!(group_titles(&library, "Season").is_empty(), "the season switches are cut");
+        assert!(!group_titles(&library, "Categories").iter().any(|t| t == "Per-category settings for sort"), "per-category sort is cut");
+        assert!(group_titles(&library, "Global update").iter().all(|t| t != "Smart update" && t != "Automatic updates device restrictions"));
+        let downloads = tree_with("settings_downloads", &prefs, &[], &[], browse::RepoCounts::default());
+        assert!(group_titles(&downloads, "Data Saver").is_empty(), "Data Saver is cut");
     }
 
     /// The key a row writes, when it has one a test can read. Every typed row that holds a pref is covered.
@@ -709,17 +620,16 @@ mod tests {
     fn no_row_of_any_settings_page_writes_a_made_up_key() {
         let prefs = Prefs::in_memory();
         // The two backup pages are built by `pref_model::backup_pages` (check boxes over a typed screen state, not spec
-        // rows), and the gestures page by `player::seeking::page_rows`, so their spec rows are never shown.
-        let own_page = ["settings_create_backup", "settings_restore_backup", "settings_player_gestures"];
+        // rows), so their spec rows are never shown.
+        let own_page = ["settings_create_backup", "settings_restore_backup"];
         let mut ids: Vec<String> = crate::ui::with_spec(|spec| {
             spec.screens.keys().filter(|id| id.starts_with("settings_") && !own_page.contains(&id.as_str())).cloned().collect()
         });
         ids.sort();
-        let gestures = player::seeking::page_rows(&prefs);
         assert!(ids.len() > 10, "the scan finds the pages ({ids:?})");
         let mut made_up = Vec::new();
         let trees = ids.iter().map(|id| (id.as_str(), tree_with(id, &prefs, &[], &[], browse::RepoCounts::default())));
-        for (id, tree) in trees.chain([("settings_player_gestures", gestures)]) {
+        for (id, tree) in trees {
             for entry in tree {
                 let items: Vec<&PreferenceItem> = match &entry {
                     Preference::Item(item) => vec![item],
@@ -746,10 +656,7 @@ mod tests {
             "settings_reader",
             "settings_downloads",
             "settings_browse",
-            "settings_advanced",
             "settings_data_storage",
-            "settings_tracking",
-            "settings_security",
             "settings_about",
         ] {
             let tree = tree_with(id, &prefs, &[], &[], browse::RepoCounts::default());
@@ -773,12 +680,10 @@ mod tests {
     fn the_search_index_finds_the_subtitle_and_mpv_rows_on_their_player_pages() {
         let prefs = Prefs::in_memory();
         let index = search::index_from(|id| tree_with(id, &prefs, &[], &[], browse::RepoCounts::default()));
-        let subtitle = search::hits(&index, "whitelist");
-        assert!(subtitle.iter().any(|hit| hit.screen == "settings_player_subtitle"), "the Subtitles page is found");
+        let language = search::hits(&index, "subtitle languages");
+        assert!(language.iter().any(|hit| hit.screen == "settings_player"), "the subtitle language row is found on the Player page");
         let mpv = search::hits(&index, "mpv");
-        assert!(mpv.iter().any(|hit| hit.screen == "settings_player_advanced" && hit.title.contains("MPV")), "the Advanced page is found");
-        let aniskip = search::hits(&index, "aniskip");
-        assert!(aniskip.iter().any(|hit| hit.screen == "settings_player_internal"), "the intro skip group is found");
+        assert!(mpv.is_empty(), "the Advanced page with the MPV rows is cut");
     }
 
     #[test]

@@ -4,6 +4,7 @@
 
 pub mod app_update;
 pub mod badge;
+pub mod diet_defaults;
 pub mod download;
 pub mod export;
 pub mod headless;

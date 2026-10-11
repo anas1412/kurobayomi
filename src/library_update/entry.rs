@@ -52,7 +52,7 @@ where
         return Ok(EntryOutcome::default());
     }
 
-    let slot = deps.registry.get_or_stub(entry.source);
+    let slot = deps.registry.get_or_stub(kind, entry.source);
     let fetched = slot.fetch(kind, &entry.url, cx.settings.auto_update_metadata).await?;
     if fetched.items.is_empty() && !slot.is_local() {
         return Err(match kind {

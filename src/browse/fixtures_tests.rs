@@ -189,7 +189,7 @@ fn tc_40_103_extensions_group_as_updates_installed_then_languages() {
 #[test]
 fn sources_fixture_lists_online_sources_only_with_enabled_languages_first() {
     let sources = sources_fixture();
-    let groups = sources_filter_groups(&sources, &set(&["en", "ja", "all"]), &set(&["1002"]));
+    let groups = sources_filter_groups(&sources, &set(&["en", "ja", "all"]));
     let ids: Vec<i64> = groups.iter().flat_map(|g| g.sources.iter().map(|s| s.id)).collect();
     assert!(!ids.contains(&0), "the local source is not an online source (E-SF-04)");
     assert!(!ids.contains(&2002), "a stub is not an online source");
@@ -197,7 +197,7 @@ fn sources_fixture_lists_online_sources_only_with_enabled_languages_first() {
     let flags: Vec<bool> = groups.iter().map(|g| g.enabled).collect();
     assert!(flags.windows(2).all(|w| w[0] || !w[1]), "enabled languages come first: {flags:?}");
     let alpha = groups.iter().find(|g| g.lang == "en").expect("en group");
-    assert!(!alpha.sources.iter().find(|s| s.id == 1002).expect("the hidden one stays listed").checked);
+    assert!(alpha.sources.iter().any(|s| s.id == 1002), "no source is hidden per source: the language switch decides");
 }
 
 #[test]
@@ -591,16 +591,14 @@ fn tc_40_120_aniyomi_style_settings_in_a_toml_file_read_as_the_same_modes_and_se
     // the exporter writes each Aniyomi key under [sources] by its field name, with the Aniyomi spelling of the value
     std::fs::write(
         config_file(&config),
-        "[sources]\nsource_display_mode = \"LIST\"\ndisabled_manga_sources = [\"11\", \"12\"]\npinned_manga_sources = [\"5\"]\nenabled_languages = [\"en\", \"ja\"]\n",
+        "[sources]\ndisabled_manga_sources = [\"11\", \"12\"]\npinned_manga_sources = [\"5\"]\nenabled_languages = [\"en\", \"ja\"]\n",
     )
     .expect("seed");
     let backend = TomlBackend::open(&config, &state).expect("open");
     let store = PrefStore::new(Box::new(backend)).expect("store");
     let prefs = SourcePrefs::new(store);
-    assert_eq!(prefs.source_display_mode.key(), "pref_display_mode_catalogue", "the field is the Aniyomi key");
     assert_eq!(prefs.disabled_manga_sources.key(), "hidden_catalogues");
     assert_eq!(prefs.pinned_manga_sources.key(), "pinned_catalogues");
-    assert_eq!(prefs.source_display_mode.get(), LibraryDisplayMode::List, "the display mode");
     assert_eq!(prefs.disabled_manga_sources.get(), set(&["11", "12"]), "the hidden sources, as decimal ids");
     assert_eq!(prefs.pinned_manga_sources.get(), set(&["5"]), "the pinned sources");
     assert_eq!(prefs.enabled_languages.get(), set(&["en", "ja"]), "the enabled languages");

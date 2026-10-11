@@ -63,7 +63,7 @@ pub struct DownloadPrefs {
 impl DownloadPrefs {
     pub fn new(store: &PrefStore) -> Self {
         Self {
-            download_only_over_wifi: store.pref("pref_download_only_over_wifi_key", true),
+            download_only_over_wifi: store.pref("pref_download_only_over_wifi_key", false),
             use_external_downloader: store.pref("use_external_downloader", false),
             external_downloader_selection: store.pref("external_downloader_selection", String::new()),
             save_chapters_as_cbz: store.pref("save_chapter_as_cbz", true),
@@ -107,7 +107,7 @@ mod tests {
     /// Every accessor's key and encoded default, in the order of `p1-data-and-config.md` section 4.1 (TC-DL-11).
     fn table(p: &DownloadPrefs) -> Vec<(&str, PrefValue)> {
         vec![
-            (p.download_only_over_wifi.key(), true.encode()),
+            (p.download_only_over_wifi.key(), false.encode()),
             (p.use_external_downloader.key(), false.encode()),
             (p.external_downloader_selection.key(), String::new().encode()),
             (p.save_chapters_as_cbz.key(), true.encode()),

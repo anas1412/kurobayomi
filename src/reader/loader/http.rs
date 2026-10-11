@@ -21,8 +21,6 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
-use kuro_downloads::data_saver::DataSaver;
-
 use super::{LoadFailure, PageEntry};
 use crate::reader::cache::DiskCache;
 use crate::reader::model::{LoadError, PageSource, PageStatus, ReaderPage};
@@ -34,8 +32,7 @@ const PRIORITY_VISIBLE: u8 = 1;
 const PRIORITY_RETRY: u8 = 2;
 
 /// What the HTTP loader needs from a source. Errors are plain messages; the loader turns them into page or
-/// chapter errors. The data saver (see [`super::saver`]) rewrites the url `image` is asked for; the cache key is always
-/// the original image url.
+/// chapter errors. The data saver is cut (docs/design/settings-diet.md), so the image url is requested as it is.
 pub trait HttpPageSource: Send + Sync {
     /// The page list of a chapter, from the network.
     fn page_list(&self, chapter_url: &str) -> Result<Vec<PageEntry>, String>;
@@ -43,11 +40,6 @@ pub trait HttpPageSource: Send + Sync {
     fn image_url(&self, page_url: &str) -> Result<String, String>;
     /// The image bytes behind one image url.
     fn image(&self, image_url: &str) -> Result<Vec<u8>, String>;
-    /// The data saver this source's images go through and the source id it is keyed by. The loader reads it once, when
-    /// its worker starts, as Kotlin creates one `DataSaver` per `HttpPageLoader`. The default leaves images alone.
-    fn data_saver(&self) -> Option<(DataSaver, i64)> {
-        None
-    }
 }
 
 /// One entry of the priority queue. The max-heap pops the highest priority first, and the lowest sequence
@@ -348,16 +340,15 @@ impl HttpLoader {
         let shared = Arc::clone(&self.shared);
         let source = Arc::clone(&self.source);
         let cache = Arc::clone(&self.cache);
-        let saver = source.data_saver();
         std::thread::Builder::new()
             .name("kuro-http-page-loader".into())
-            .spawn(move || worker(shared, source, cache, saver))
+            .spawn(move || worker(shared, source, cache))
             .expect("the page loader worker thread starts");
     }
 }
 
 /// The single worker: dequeue, skip entries whose page is no longer `Queued`, process, repeat.
-fn worker(shared: Arc<Shared>, source: Arc<dyn HttpPageSource>, cache: Arc<DiskCache>, saver: Option<(DataSaver, i64)>) {
+fn worker(shared: Arc<Shared>, source: Arc<dyn HttpPageSource>, cache: Arc<DiskCache>) {
     loop {
         let index = {
             let mut state = shared.lock();
@@ -371,7 +362,7 @@ fn worker(shared: Arc<Shared>, source: Arc<dyn HttpPageSource>, cache: Arc<DiskC
                 }
             }
         };
-        process(&shared, source.as_ref(), &cache, saver.as_ref(), index);
+        process(&shared, source.as_ref(), &cache, index);
     }
 }
 
@@ -381,7 +372,7 @@ fn set_status(shared: &Shared, index: usize, status: PageStatus) {
 
 /// `internalLoadPage`: resolve the image url if needed, download unless cached, then `Ready`. A failure sets
 /// `Error` and the worker goes on with the next page (E-HTTP-6).
-fn process(shared: &Shared, source: &dyn HttpPageSource, cache: &DiskCache, saver: Option<&(DataSaver, i64)>, index: usize) {
+fn process(shared: &Shared, source: &dyn HttpPageSource, cache: &DiskCache, index: usize) {
     let (page_url, known_image) = {
         let state = shared.lock();
         let slot = &state.slots[index];
@@ -402,9 +393,7 @@ fn process(shared: &Shared, source: &dyn HttpPageSource, cache: &DiskCache, save
     };
     if !cache.has_image(&image_url) {
         set_status(shared, index, PageStatus::DownloadImage);
-        // the request goes through the data saver, the cache key stays the original url (`HttpSource.getImage`)
-        let request = saver.map_or_else(|| image_url.clone(), |(saver, source_id)| saver.request_url(*source_id, &image_url));
-        let stored = source.image(&request).and_then(|bytes| cache.put_image(&image_url, &bytes).map_err(|e| e.to_string()));
+        let stored = source.image(&image_url).and_then(|bytes| cache.put_image(&image_url, &bytes).map_err(|e| e.to_string()));
         if let Err(e) = stored {
             return fail(shared, index, &e);
         }
@@ -489,43 +478,6 @@ mod tests {
             assert!(Instant::now() < deadline, "page {index} never reached {want:?}");
             std::thread::sleep(Duration::from_millis(2));
         }
-    }
-
-    /// A source whose images go through a data saver.
-    struct Saving {
-        inner: Scripted,
-        saver: DataSaver,
-    }
-
-    impl HttpPageSource for Saving {
-        fn page_list(&self, chapter_url: &str) -> Result<Vec<PageEntry>, String> {
-            self.inner.page_list(chapter_url)
-        }
-        fn image_url(&self, page_url: &str) -> Result<String, String> {
-            self.inner.image_url(page_url)
-        }
-        fn image(&self, image_url: &str) -> Result<Vec<u8>, String> {
-            self.inner.image(image_url)
-        }
-        fn data_saver(&self) -> Option<(DataSaver, i64)> {
-            Some((self.saver.clone(), 7))
-        }
-    }
-
-    #[test]
-    fn images_are_requested_through_the_data_saver_and_cached_under_the_original_url() {
-        use kuro_downloads::data_saver::Service;
-        let source = Arc::new(Saving {
-            inner: Scripted { pages: entries(1, true), ..Default::default() },
-            saver: DataSaver { service: Service::WsrvNl, ..DataSaver::default() },
-        });
-        let cache = cache("data-saver");
-        let loader = HttpLoader::new(Arc::clone(&source) as Arc<dyn HttpPageSource>, 1, "/chapter/1".into(), Arc::clone(&cache));
-        loader.get_pages().ok().unwrap();
-        let _guard = loader.load_page(0);
-        wait_for(&loader, 0, PageStatus::Ready);
-        assert_eq!(*source.inner.images.lock().unwrap(), ["https://wsrv.nl/?url=https://img/p0&output=webp&q=80"]);
-        assert!(cache.has_image("https://img/p0"), "the cache key is the original image url");
     }
 
     #[test]

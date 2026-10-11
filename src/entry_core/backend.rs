@@ -12,7 +12,7 @@ use kuro_data::manga::{Manga, MangaRepo};
 use kuro_data::source::{MangaStubSourceRepo, StubSource};
 use kuro_db::handle::Db;
 use kuro_domain::entries::source_convert::{refresh_update, to_s_manga};
-use kuro_domain::items::chapter_sync::{ChapterSyncError, ChapterSyncOptions, NoRenames, SyncChapters, mark_duplicate_as_read_from_pref};
+use kuro_domain::items::chapter_sync::{ChapterSyncError, ChapterSyncOptions, NoRenames, SyncChapters};
 use kuro_domain::items::source_sync::MangaSyncLocks;
 use kuro_downloads::DownloadState;
 use kuro_source::model::SChapter;
@@ -137,9 +137,8 @@ impl SourceBackend {
     }
 
     /// The app's backend: the sources the Browse directory hands out (the built-in ones).
-    pub fn live(db: Arc<Db>, prefs: &kuro_prefs::store::PrefStore) -> Self {
-        let rule = kuro_prefs::library::LibraryPrefs::new(prefs.clone()).mark_duplicate_read_chapter_as_read.get();
-        Self::new(db, Arc::new(|id| crate::browse::directory::current()?.manga_source(id)), mark_duplicate_as_read_from_pref(&rule))
+    pub fn live(db: Arc<Db>, _prefs: &kuro_prefs::store::PrefStore) -> Self {
+        Self::new(db, Arc::new(|id| crate::browse::directory::current()?.manga_source(id)), crate::misc::diet_defaults::LIBRARY_MARK_DUPLICATE_CHAPTER_READ)
     }
 }
 

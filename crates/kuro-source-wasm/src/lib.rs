@@ -7,6 +7,7 @@
 // the shared WAT guests are also compiled into tests/sandbox.rs, where they name this crate by its own name
 extern crate self as kuro_source_wasm;
 
+pub mod anime_wire;
 pub mod bridge;
 pub mod error;
 pub mod install;
@@ -26,4 +27,4 @@ mod bindings {
 }
 
 pub use error::WasmError;
-pub use source::{HostEnv, WasmSource, instantiate};
+pub use source::{HostEnv, WasmAnimeSource, WasmSource, instantiate, instantiate_anime};

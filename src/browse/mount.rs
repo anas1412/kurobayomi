@@ -1,10 +1,9 @@
-//! Mounts the Browse tab (T-41a-011, T-40a-034): the six pages behind the shell, the header actions, the update badge on
-//! the extension tabs, and the pages the tab opens (the language filters, the extension details, global search and the
-//! extension stores). The screen registry calls [`browse`]; it returns `None` before the app data is open, so the sample
-//! page of `entry` stays until then.
+//! Mounts the Browse tab (T-41a-011, T-40a-034): the anime and manga source lists behind the shell, and the pages the tab
+//! opens (the language filter, global search, the repository links). The screen registry calls [`browse`]; it returns
+//! `None` before the app data is open, so the sample page of `entry` stays until then.
 //!
-//! The app has no source registry yet, so the Sources pages list nothing and say so; the extension pages show what the
-//! extension host last published (`ext_host`). Both fill in without a change here when those arrive.
+//! The Sources pages list what the app has: the manga directory and the anime sources the extension host published. The
+//! tab has no extension or migrate pages; a repository link adds its sources, and the language filter decides what shows.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,7 +12,6 @@ use std::sync::Arc;
 
 use gtk::prelude::*;
 use kuro_domain::source::model::Source;
-use kuro_domain::source::toggles::{flip_disabled, toggle_pin};
 use kuro_extensions::InstallStep;
 use kuro_extensions::anime::model::Buckets;
 use kuro_i18n::{MsgKey, tr};
@@ -27,9 +25,9 @@ use super::directory::SourceDirectory;
 use super::ext_details::{DetailSource, ExtDetails, label_as_name};
 use super::ext_details_page::{DetailsDeps, ExtDetailsPage};
 use super::extensions::{Ext, ExtSource, ExtState};
-use super::extensions_page::{ExtNav, ExtensionBackend, JobFuture, RefreshFuture, Reporter};
+use super::extensions_page::{ExtensionBackend, JobFuture, RefreshFuture, Reporter};
 use super::glue;
-use super::lang_pages::{ExtensionLanguagesPage, SourcesFilterPage};
+use super::lang_pages::SourcesFilterPage;
 use super::route::{BrowseKind, BrowsePage, BrowseRoute};
 use super::shell::{BrowseShell, ShellDeps};
 use super::sources_page::{SourcesNav, SourcesSnapshot};
@@ -47,14 +45,13 @@ pub fn reselect() {
     }
 }
 
-/// `show_extension()` and `show_anime_extension()`: the extension tab of a kind.
-pub fn show_extension(kind: BrowseKind) {
-    if let Some(shell) = SHELL.with(|s| s.borrow().clone()) {
-        match kind {
-            BrowseKind::Manga => shell.show_extension(),
-            BrowseKind::Anime => shell.show_anime_extension(),
-        }
-    }
+/// Opens the repository links of a kind: the anime extension stores or the manga extension repos. The empty Sources
+/// pages and the header menu both lead here.
+pub fn open_repos(kind: BrowseKind) {
+    crate::ui::open(match kind {
+        BrowseKind::Anime => "settings_anime_extension_stores",
+        BrowseKind::Manga => "settings_manga_extension_repos",
+    });
 }
 
 /// The extension rows the anime host published, as the shared list shows them (T-19a-066): the updates and installed
@@ -208,37 +205,16 @@ impl ExtensionBackend for HostBackend {
     }
 }
 
-/// A preference set with one id flipped in or out, written back (the pin and disable toggles).
-fn flip(pref: &Pref<BTreeSet<String>>, id: i64, toggle: fn(&mut BTreeSet<String>, i64) -> bool) {
-    let mut set = pref.get();
-    toggle(&mut set, id);
-    if let Err(error) = pref.set(set) {
-        tracing::warn!(key = pref.key(), %error, "a source toggle could not be stored");
-    }
-}
-
-/// The tab badge at start-up (T-40a-046): the extension manager's rows when it has published any, and then the count
-/// they give is stored as `ext_updates_count`; without them the stored count stands. A stored count below zero reads
-/// as none. Returns the badge number and the value to write, if any.
-pub fn startup_badge(stored: i32, published: Option<&[Ext]>) -> (usize, Option<i32>) {
-    match published {
-        Some(rows) => {
-            let count = i32::try_from(super::extensions::updates_count(rows)).unwrap_or(i32::MAX);
-            (usize::try_from(count).unwrap_or(0), (count != stored).then_some(count))
-        }
-        None => (usize::try_from(stored).unwrap_or(0), None),
-    }
-}
-
 /// Pushes a page of the tab with a title and a Back button.
-/// What the manga Sources page shows of its preferences (T-40b-015) and the sources the directory lists.
+/// What the manga Sources page shows of its preferences (T-40b-015) and the sources the directory lists. The pin and hide
+/// sets are cut, so the lists get none of them: the language filter alone decides which sources show.
 fn manga_sources_snapshot(prefs: &SourcePrefs) -> SourcesSnapshot {
     SourcesSnapshot {
         sources: installed_sources(BrowseKind::Manga, super::directory::current().as_deref(), Vec::new()),
         enabled_languages: prefs.enabled_languages.get(),
-        disabled: prefs.disabled_manga_sources.get(),
-        pinned: prefs.pinned_manga_sources.get(),
-        last_used: prefs.last_used_manga_source.get(),
+        disabled: BTreeSet::new(),
+        pinned: BTreeSet::new(),
+        last_used: crate::misc::diet_defaults::BROWSE_LAST_USED_SOURCE,
         icon_files: BTreeMap::new(),
     }
 }
@@ -264,134 +240,43 @@ fn open_route(route: &BrowseRoute) {
     super::pending::open(route.clone());
 }
 
-/// A Migrate tab of one kind: the library's favourite counts per source, over the installed sources (T-40b-070,
-/// T-41a-036). `read` is the kind's count read, which runs off the GTK thread.
-fn migrate_page(
-    kind: BrowseKind,
-    prefs: &Rc<SourcePrefs>,
-    read: impl Fn() -> Result<Vec<(i64, i64)>, String> + Clone + Send + 'static,
-    directory: Rc<dyn Fn() -> Option<Arc<dyn SourceDirectory>>>,
-) -> gtk::Widget {
-    use super::migrate_list::{MigrateDeps, migrate_tab};
-
-    migrate_tab(MigrateDeps {
-        kind,
-        prefs: Rc::clone(prefs),
-        counts: Rc::new(move |deliver| {
-            let read = read.clone();
-            gtk::glib::spawn_future_local(async move {
-                match gtk::gio::spawn_blocking(read).await {
-                    Ok(Ok(counts)) => deliver(Ok(counts)),
-                    Ok(Err(error)) => deliver(Err(error)),
-                    Err(_) => deliver(Err("the favourite count read was cancelled".to_owned())),
-                }
-            });
-        }),
-        toast: Rc::new(|text: String| crate::toast::notify(text)),
-        directory,
-        open: Rc::new(move |source_id| super::pending::open(BrowseRoute::MigrateEntries { kind, source_id })),
-        copy_id: Rc::new(|id| {
-            if let Some(display) = gtk::gdk::Display::default() {
-                display.clipboard().set_text(&id.to_string());
-                crate::toast::notify(tr(MsgKey::copied_to_clipboard_plain));
-            }
-        }),
-        open_url: Rc::new(|url| {
-            gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-                if let Err(error) = result {
-                    tracing::warn!(%error, "the help link could not be opened");
-                }
-            });
-        }),
-    })
-    .upcast()
-}
-
-/// The manga Migrate tab.
-fn manga_migrate(prefs: &Rc<SourcePrefs>) -> gtk::Widget {
-    use kuro_data::manga::MangaRepo;
-    use kuro_domain::kind::EntryKind;
-
-    let repo = MangaRepo::new(crate::data::app().db(EntryKind::Manga));
-    migrate_page(
-        BrowseKind::Manga,
-        prefs,
-        move || repo.favorite_counts_by_source().map_err(|error| error.to_string()),
-        Rc::new(super::directory::current),
-    )
-}
-
-/// The anime Migrate tab: the anime library's favourite counts over the anime sources the host published.
-fn anime_migrate(prefs: &Rc<SourcePrefs>) -> gtk::Widget {
-    use kuro_data::anime::AnimeRepo;
-    use kuro_domain::kind::EntryKind;
-
-    let repo = AnimeRepo::new(crate::data::app().db(EntryKind::Anime));
-    let for_sources = repo.clone();
-    migrate_page(
-        BrowseKind::Anime,
-        prefs,
-        move || repo.favorite_counts_by_source().map_err(|error| error.to_string()),
-        Rc::new(move || Some(Arc::new(super::anime::directory::AnimeDirectory::current(for_sources.clone())) as Arc<dyn SourceDirectory>)),
-    )
-}
-
 /// The language rows a language page can offer: the extension host's rows, or the failure when there is no host to ask.
 /// Without a started extension host the available languages cannot be fetched (T-41a-018).
 pub fn language_rows(host_running: bool, rows: Vec<Ext>) -> Result<Vec<Ext>, String> {
     if host_running { Ok(rows) } else { Err("the extension host is not running".to_owned()) }
 }
 
-/// The language filter of the visible page: Show/hide sources for a sources page, the language switches for an
-/// extensions page (B§4, B§8).
-fn open_filter(page: BrowsePage, prefs: &Rc<SourcePrefs>, rows: &dyn Fn(BrowsePage) -> Vec<Ext>) {
-    if page.is_extensions() {
-        let languages = ExtensionLanguagesPage::new(prefs.enabled_languages.clone());
-        match language_rows(crate::ext_host::registry().is_some(), rows(page)) {
-            Ok(rows) => languages.set_exts(&rows),
-            Err(error) => {
-                tracing::error!(%error, "the extension languages could not be fetched");
-                languages.fetch_failed();
-            }
-        }
-        push_page(&tr(MsgKey::label_extensions), languages.widget());
-    } else {
-        let kind = page.kind();
-        let hidden = match kind {
-            BrowseKind::Anime => prefs.disabled_anime_sources.clone(),
-            BrowseKind::Manga => prefs.disabled_manga_sources.clone(),
-        };
-        let filter = SourcesFilterPage::new(prefs.enabled_languages.clone(), hidden.clone());
-        let sources_now = move || installed_sources(kind, super::directory::current().as_deref(), crate::ext_host::anime_sources().0);
-        filter.set_sources(sources_now());
-        // an error shows the `internal_error` toast and pops the page (E-SF-05)
-        filter.set_on_error(Rc::new(|| {
-            crate::toast::notify(tr(MsgKey::internal_error));
-            crate::ui::pop();
-        }));
-        // the switches and checkboxes of an open page follow the languages and hidden sources (T-40b-015)
-        let checks: Vec<Box<dyn Fn() -> bool>> = vec![watch_check(&prefs.enabled_languages), watch_check(&hidden)];
-        let alive = {
-            let widget = filter.widget().downgrade();
-            move || widget.upgrade().is_some()
-        };
-        let shown = filter.clone();
-        glue::poll_pref_changes(checks, alive, move || shown.set_sources(sources_now()));
-        push_page(&tr(MsgKey::label_sources), filter.widget());
-    }
+/// The language filter of a kind's Sources page (B§4): one switch per language, which decides which sources show.
+fn open_filter(kind: BrowseKind, prefs: &Rc<SourcePrefs>) {
+    let filter = SourcesFilterPage::new(prefs.enabled_languages.clone());
+    let sources_now = move || installed_sources(kind, super::directory::current().as_deref(), crate::ext_host::anime_sources().0);
+    filter.set_sources(sources_now());
+    // an error shows the `internal_error` toast and pops the page (E-SF-05)
+    filter.set_on_error(Rc::new(|| {
+        crate::toast::notify(tr(MsgKey::internal_error));
+        crate::ui::pop();
+    }));
+    // the switches of an open page follow the languages (T-40b-015)
+    let checks: Vec<Box<dyn Fn() -> bool>> = vec![watch_check(&prefs.enabled_languages)];
+    let alive = {
+        let widget = filter.widget().downgrade();
+        move || widget.upgrade().is_some()
+    };
+    let shown = filter.clone();
+    glue::poll_pref_changes(checks, alive, move || shown.set_sources(sources_now()));
+    push_page(&tr(MsgKey::label_sources), filter.widget());
 }
 
 /// The details page of an installed extension, over the preferences of its kind. `rows` reads the kind's extension rows
 /// again: the page pops once the package is no longer installed (E18, R7).
 fn open_details(kind: BrowseKind, prefs: &Rc<SourcePrefs>, ext: Option<Ext>, rows: Rc<dyn Fn() -> Vec<Ext>>) {
-    let (incognito, disabled) = match kind {
-        BrowseKind::Anime => (prefs.incognito_anime_extensions.clone(), prefs.disabled_anime_sources.clone()),
-        BrowseKind::Manga => (prefs.incognito_manga_extensions.clone(), prefs.disabled_manga_sources.clone()),
+    let disabled = match kind {
+        BrowseKind::Anime => prefs.disabled_anime_sources.clone(),
+        BrowseKind::Manga => prefs.disabled_manga_sources.clone(),
     };
     let pkg = ext.as_ref().map(|e| e.pkg.clone());
     let remove_cookies = super::cookies::remover();
     let deps = DetailsDeps {
-        incognito,
         disabled,
         // the host's uninstall; the page leaves when the package drops out of the installed rows
         uninstall: {
@@ -442,11 +327,8 @@ fn pop_when_gone(page: &gtk::Box, pkg: String, rows: Rc<dyn Fn() -> Vec<Ext>>) {
 /// lists none of them. A change to the languages, hidden or pinned sources or the last used source also reaches the
 /// open page (T-40b-015).
 fn manga_sources_page(prefs: &Rc<SourcePrefs>, ready: watch::Receiver<bool>, snapshot: Rc<dyn Fn(&SourcePrefs) -> SourcesSnapshot>) -> super::sources_page::SourcesPage {
-    let (pin, hide) = (prefs.pinned_manga_sources.clone(), prefs.disabled_manga_sources.clone());
     let nav = SourcesNav {
         open_listing: Rc::new(|source_id, query| super::pending::open(BrowseRoute::BrowseSource { source_id, query, migrating: false })),
-        toggle_pin: Rc::new(move |id| flip(&pin, id, toggle_pin)),
-        toggle_disabled: Rc::new(move |id| flip(&hide, id, flip_disabled)),
     };
     let page = super::pages::sources(nav, ready);
     let show = {
@@ -456,12 +338,7 @@ fn manga_sources_page(prefs: &Rc<SourcePrefs>, ready: watch::Receiver<bool>, sna
     show();
     let shown = show.clone();
     page.widget().connect_map(move |_| shown());
-    let checks: Vec<Box<dyn Fn() -> bool>> = vec![
-        watch_check(&prefs.enabled_languages),
-        watch_check(&prefs.disabled_manga_sources),
-        watch_check(&prefs.pinned_manga_sources),
-        watch_check(&prefs.last_used_manga_source),
-    ];
+    let checks: Vec<Box<dyn Fn() -> bool>> = vec![watch_check(&prefs.enabled_languages)];
     let alive = {
         let widget = page.widget().downgrade();
         move || widget.upgrade().is_some()
@@ -479,29 +356,19 @@ pub fn browse() -> Option<Built> {
     let prefs = Rc::new(SourcePrefs::new(store));
     let (_ready_tx, ready) = watch::channel(true);
 
-    let manga_rows = || crate::ext_host::manga_rows();
-    let anime_rows = || anime_exts(&crate::ext_host::anime_lists());
-    let rows_of = Rc::new(move |page: BrowsePage| match page.kind() {
-        BrowseKind::Manga => manga_rows(),
-        BrowseKind::Anime => anime_rows(),
-    });
-
-    // Sources: the toggles write the sets, the lists wait for a source registry
+    // Sources: the lists wait for a source registry; the language filter decides which sources show
     let manga_sources = manga_sources_page(&prefs, ready.clone(), Rc::new(manga_sources_snapshot));
     let anime_sources = {
-        let (pin, hide) = (prefs.pinned_anime_sources.clone(), prefs.disabled_anime_sources.clone());
         let nav = AnimeSourcesNav {
             route: Rc::new(move |route| match route {
                 TabRoute::Browse { source_id, query } => open_route(&BrowseRoute::AnimeBrowseSource { source_id, query }),
             }),
-            toggle_pin: Rc::new(move |id| flip(&pin, id, toggle_pin)),
-            toggle_disabled: Rc::new(move |id| flip(&hide, id, flip_disabled)),
             retry: Rc::new(|| {}),
             toast: Rc::new(|spec| crate::toast::notify(spec.message)),
         };
         let page = AnimeSourcesPage::new(nav, ready.clone());
         // the host's installed sources, each with its package icon; read again when the tab is shown and when a
-        // language, hidden, pinned or last-used source changes
+        // language changes
         let show = {
             let (page, prefs) = (page.clone(), Rc::clone(&prefs));
             move || {
@@ -512,12 +379,7 @@ pub fn browse() -> Option<Built> {
         show();
         let shown = show.clone();
         page.widget().connect_map(move |_| shown());
-        let checks: Vec<Box<dyn Fn() -> bool>> = vec![
-            watch_check(&prefs.enabled_languages),
-            watch_check(&prefs.disabled_anime_sources),
-            watch_check(&prefs.pinned_anime_sources),
-            watch_check(&prefs.last_used_anime_source),
-        ];
+        let checks: Vec<Box<dyn Fn() -> bool>> = vec![watch_check(&prefs.enabled_languages)];
         let alive = {
             let widget = page.widget().downgrade();
             move || widget.upgrade().is_some()
@@ -526,139 +388,19 @@ pub fn browse() -> Option<Built> {
         page
     };
 
-    // Extensions: the rows are the host's, read again each time the tab is shown
-    let extension_page = |kind: BrowseKind| {
-        let (repos_label, store_page) = match kind {
-            BrowseKind::Anime => (MsgKey::extensionStores, "settings_anime_extension_stores"),
-            BrowseKind::Manga => (MsgKey::label_extension_repos, "settings_manga_extension_repos"),
-        };
-        let (details_prefs, details_rows) = (Rc::clone(&prefs), Rc::clone(&rows_of));
-        let (nsfw_prefs, trust_prefs) = (Rc::clone(&prefs), Rc::clone(&prefs));
-        let page_kind = BrowsePage::extensions_of(kind);
-        let nav = ExtNav {
-            open_details: Rc::new(move |pkg| {
-                let ext = details_rows(page_kind).into_iter().find(|e| e.pkg == pkg);
-                let again = Rc::clone(&details_rows);
-                open_details(kind, &details_prefs, ext, Rc::new(move || again(page_kind)));
-            }),
-            trust: Rc::new(move |pkg| {
-                let mut trusted = trust_prefs.trusted_extensions.get();
-                trusted.insert(pkg.to_owned());
-                if let Err(error) = trust_prefs.trusted_extensions.set(trusted) {
-                    tracing::warn!(%error, "a trusted extension could not be stored");
-                }
-            }),
-            web_view: {
-                let rows = Rc::clone(&rows_of);
-                Rc::new(move |pkg| {
-                    let target = rows(page_kind).into_iter().find(|e| e.pkg == pkg).and_then(|ext| super::extensions::webview_target(&ext));
-                    if let Some((url, title)) = target {
-                        crate::entry_core::handoff::open_webview(crate::entry_core::handoff::WebViewRequest { url, title });
-                    }
-                })
-            },
-            open_repos: Rc::new(move || crate::ui::open(store_page)),
-            repos_label,
-            show_nsfw: Rc::new(move || nsfw_prefs.show_nsfw_source.get()),
-        };
-        let page = super::pages::extensions(Arc::new(HostBackend), nav);
-        // the install state of a package comes from the local registry (`has_installed`, T-40a-047)
-        page.set_dir_exists(Rc::new(has_installed));
-        let (reload, languages) = (Rc::clone(&rows_of), Rc::clone(&prefs));
-        let shown = page.clone();
-        page.widget().connect_map(move |_| {
-            shown.set_enabled_languages(Some(languages.enabled_languages.get()));
-            shown.set_exts(reload(page_kind));
-        });
-        page
-    };
-    let (anime_extensions, manga_extensions) = (extension_page(BrowseKind::Anime), extension_page(BrowseKind::Manga));
-
     let pages: Vec<(BrowsePage, gtk::Widget)> = vec![
         (BrowsePage::AnimeSources, anime_sources.widget().clone().upcast()),
         (BrowsePage::MangaSources, manga_sources.widget().clone().upcast()),
-        (BrowsePage::AnimeExtensions, anime_extensions.widget().clone().upcast()),
-        (BrowsePage::MangaExtensions, manga_extensions.widget().clone().upcast()),
-        (BrowsePage::AnimeMigrate, anime_migrate(&prefs)),
-        (BrowsePage::MangaMigrate, manga_migrate(&prefs)),
     ];
     let filter_prefs = Rc::clone(&prefs);
-    let filter_rows = Rc::clone(&rows_of);
-    let page_actions: Vec<(BrowsePage, gtk::Widget)> = vec![
-        (BrowsePage::AnimeExtensions, anime_extensions.actions().clone().upcast()),
-        (BrowsePage::MangaExtensions, manga_extensions.actions().clone().upcast()),
-    ];
     let deps = ShellDeps {
         pages,
-        page_actions,
         on_route: Rc::new(|route| open_route(&route)),
-        on_query: {
-            let (anime, manga) = (anime_extensions.clone(), manga_extensions.clone());
-            Rc::new(move |page, text| match page {
-                BrowsePage::AnimeExtensions => anime.set_query(&text),
-                BrowsePage::MangaExtensions => manga.set_query(&text),
-                _ => {}
-            })
-        },
-        on_filter: Rc::new(move |page| open_filter(page, &filter_prefs, &*filter_rows)),
-        on_repos: Rc::new(|kind| {
-            crate::ui::open(match kind {
-                BrowseKind::Anime => "settings_anime_extension_stores",
-                BrowseKind::Manga => "settings_manga_extension_repos",
-            })
-        }),
-        on_refresh: {
-            let (anime, manga) = (anime_extensions.clone(), manga_extensions.clone());
-            Rc::new(move |page| match page {
-                BrowsePage::AnimeExtensions => anime.refresh(),
-                BrowsePage::MangaExtensions => manga.refresh(),
-                _ => {}
-            })
-        },
-        on_update_all: {
-            let (anime, manga) = (anime_extensions.clone(), manga_extensions.clone());
-            Rc::new(move |page| match page {
-                BrowsePage::AnimeExtensions => anime.update_all(),
-                BrowsePage::MangaExtensions => manga.update_all(),
-                _ => {}
-            })
-        },
+        on_filter: Rc::new(move |page: BrowsePage| open_filter(page.kind(), &filter_prefs)),
+        on_repos: Rc::new(open_repos),
         on_leave: Rc::new(crate::ui::pop),
     };
     let shell = Rc::new(BrowseShell::new(deps));
-    // the tab badge follows the update count of each extension page
-    for (page, extensions) in [(BrowsePage::AnimeExtensions, &anime_extensions), (BrowsePage::MangaExtensions, &manga_extensions)] {
-        let weak = Rc::downgrade(&shell);
-        // the manga count is stored as `ext_updates_count` (T-40a-046); a count of 0 hides the badge
-        let stored = prefs.manga_extension_updates_count.clone();
-        extensions.set_on_updates(Rc::new(move |count| {
-            if page == BrowsePage::MangaExtensions {
-                let _ = stored.set(i32::try_from(count).unwrap_or(i32::MAX));
-            }
-            if let Some(shell) = weak.upgrade() {
-                shell.set_badge(page, count);
-            }
-        }));
-    }
-    // the manga badge starts from the manager's rows (or the stored count) and follows the stored count afterwards
-    let stored = prefs.manga_extension_updates_count.clone();
-    let published = crate::ext_host::registry().map(|_| manga_rows());
-    let (badge, write) = startup_badge(stored.get(), published.as_deref());
-    if let Some(count) = write {
-        if let Err(error) = stored.set(count) {
-            tracing::warn!(%error, "the extension update count could not be stored");
-        }
-    }
-    shell.set_badge(BrowsePage::MangaExtensions, badge);
-    {
-        let (weak, alive) = (Rc::downgrade(&shell), Rc::downgrade(&shell));
-        let (checks, count): (Vec<Box<dyn Fn() -> bool>>, _) = (vec![watch_check(&stored)], stored.clone());
-        glue::poll_pref_changes(checks, move || alive.upgrade().is_some(), move || {
-            if let Some(shell) = weak.upgrade() {
-                shell.set_badge(BrowsePage::MangaExtensions, usize::try_from(count.get()).unwrap_or(0));
-            }
-        });
-    }
     let built = Built { content: shell.root.clone().upcast(), end: shell.end.clone() };
     SHELL.with(|s| *s.borrow_mut() = Some(shell));
     Some(built)
@@ -761,16 +503,6 @@ mod tests {
             state: ExtState::Installed { has_update, obsolete: false },
             icon_file: None,
         }
-    }
-
-    #[test]
-    fn the_badge_starts_from_the_managers_rows_or_else_the_stored_count() {
-        let rows = [ext_row("a", true), ext_row("b", true), ext_row("c", false)];
-        assert_eq!(startup_badge(0, Some(&rows)), (2, Some(2)), "the manager's count is shown and stored");
-        assert_eq!(startup_badge(2, Some(&rows)), (2, None), "an unchanged count is not written again");
-        assert_eq!(startup_badge(5, None), (5, None), "no manager yet: the stored count stands");
-        assert_eq!(startup_badge(-3, None), (0, None), "a stored count below zero reads as none");
-        assert_eq!(startup_badge(4, Some(&[])), (0, Some(0)), "the manager says none: the badge goes away");
     }
 
     #[test]
@@ -905,39 +637,16 @@ mod tests {
         });
     }
 
-    /// The empty Sources page of a kind has one action, Extensions, and it shows that kind's extensions.
+    /// The empty Sources page of a kind has one action, the repository links of that kind (the first-run step of the
+    /// app flow).
     #[test]
-    fn the_empty_sources_action_opens_the_extensions_of_its_kind() {
+    fn the_empty_sources_action_names_the_repository_links() {
         crate::testing::with_display(|| {
-            let pages = BrowsePage::ALL.iter().map(|p| (*p, gtk::Label::new(Some(&p.title())).upcast::<gtk::Widget>())).collect();
-            let deps = ShellDeps {
-                pages,
-                page_actions: Vec::new(),
-                on_route: Rc::new(|_| {}),
-                on_query: Rc::new(|_, _| {}),
-                on_filter: Rc::new(|_| {}),
-                on_repos: Rc::new(|_| {}),
-                on_refresh: Rc::new(|_| {}),
-                on_update_all: Rc::new(|_| {}),
-                on_leave: Rc::new(|| {}),
-            };
-            let shell = Rc::new(BrowseShell::new(deps));
-            SHELL.with(|s| *s.borrow_mut() = Some(Rc::clone(&shell)));
-            let shows = |page: BrowsePage| {
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-                while std::time::Instant::now() < deadline && shell.visible() != page {
-                    gtk::glib::MainContext::default().iteration(false);
-                }
-                shell.visible() == page
-            };
-            for (kind, page) in [(BrowseKind::Manga, BrowsePage::MangaExtensions), (BrowseKind::Anime, BrowsePage::AnimeExtensions)] {
+            for kind in [BrowseKind::Manga, BrowseKind::Anime] {
                 let empty = super::super::sources_page::sources_empty(kind);
                 let action = empty.last_child().and_downcast::<gtk::Button>().expect("the one action");
-                assert_eq!(action.label().as_deref(), Some(tr(MsgKey::label_extensions).as_str()));
-                action.emit_clicked();
-                assert!(shows(page), "{kind:?}: its extensions show");
+                assert_eq!(action.label().as_deref(), Some(tr(MsgKey::label_extension_repos).as_str()), "{kind:?}");
             }
-            SHELL.with(|s| s.borrow_mut().take());
         });
     }
 }

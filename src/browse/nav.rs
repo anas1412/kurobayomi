@@ -33,12 +33,6 @@ pub fn filter_seed(running_search: bool) -> FilterSeed {
     if running_search { FilterSeed::Keep } else { FilterSeed::SourceDefaults }
 }
 
-/// The source id to store as the last-used catalogue, or `None` when incognito applies to that source (B-EC-17). The
-/// page calls this once per open, not on each listing change (T-40b-039).
-pub fn last_used_write(incognito: bool, source_id: i64) -> Option<i64> {
-    (!incognito).then_some(source_id)
-}
-
 /// Where an error-state action opens a url, when it does: both Help actions open the help page (B-EC-14), if there is one.
 pub fn action_url(action: super::primitives::EmptyAction) -> Option<&'static str> {
     use super::primitives::EmptyAction;
@@ -72,11 +66,5 @@ mod tests {
     fn a_search_from_popular_or_latest_starts_from_the_defaults() {
         assert_eq!(filter_seed(false), FilterSeed::SourceDefaults);
         assert_eq!(filter_seed(true), FilterSeed::Keep);
-    }
-
-    #[test]
-    fn the_last_used_source_is_written_unless_incognito_applies() {
-        assert_eq!(last_used_write(false, 7), Some(7));
-        assert_eq!(last_used_write(true, 7), None);
     }
 }

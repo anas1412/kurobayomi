@@ -24,7 +24,6 @@
 
 pub mod app_info;
 pub mod archive;
-pub mod collections;
 pub mod crash;
 pub mod crash_dump;
 pub mod image;

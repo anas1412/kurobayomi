@@ -337,7 +337,7 @@ where
     R: SourceRegistry,
     M: MetadataStore,
 {
-    let Some(source) = deps.registry.get(entry.source) else {
+    let Some(source) = deps.registry.get(entry.kind, entry.source) else {
         counts.skipped.fetch_add(1, Ordering::SeqCst);
         return;
     };

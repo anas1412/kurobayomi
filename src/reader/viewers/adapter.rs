@@ -17,9 +17,9 @@ use crate::reader::model::{ReaderPage, ViewerChapters};
 use crate::reader::viewer::Viewer;
 
 /// The viewer for a resolved reading mode. The unresolved default never gets here (the reader resolves it first); it
-/// would read right to left, the default preference.
+/// reads left to right, the default preference.
 pub fn kind_of(mode: ReadingMode) -> ViewerKind {
-    ViewerKind::from_flag(i64::from(mode.flag_value())).unwrap_or(ViewerKind::RightToLeft)
+    ViewerKind::from_flag(i64::from(mode.flag_value())).unwrap_or(ViewerKind::LeftToRight)
 }
 
 /// An engine behind the core's [`Viewer`] contract. The engine's widget is added to `container` with the first
@@ -128,7 +128,7 @@ mod tests {
         assert_eq!(kind_of(ReadingMode::Vertical), ViewerKind::Vertical);
         assert_eq!(kind_of(ReadingMode::Webtoon), ViewerKind::Webtoon);
         assert_eq!(kind_of(ReadingMode::ContinuousVertical), ViewerKind::WebtoonGapped);
-        assert_eq!(kind_of(ReadingMode::Default), ViewerKind::RightToLeft, "an unresolved mode is the default preference");
+        assert_eq!(kind_of(ReadingMode::Default), ViewerKind::LeftToRight, "an unresolved mode is the default preference");
     }
 
     #[test]

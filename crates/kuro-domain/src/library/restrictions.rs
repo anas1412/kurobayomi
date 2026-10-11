@@ -96,7 +96,7 @@ pub fn global_update_items<'a>(
 pub const INTERVAL_CHOICES: [(i32, &str); 6] =
     [(0, "Off"), (12, "Every 12 hours"), (24, "Daily"), (48, "Every 2 days"), (72, "Every 3 days"), (168, "Weekly")];
 
-/// Device restrictions of the library update setting: `(stored value, label)`. The default is `wifi` alone.
+/// Device restrictions of the library update setting: `(stored value, label)`. The default is no restriction, so a wired desktop updates.
 pub const DEVICE_RESTRICTIONS: [(&str, &str); 3] = [
     (kuro_prefs::library::DEVICE_ONLY_ON_WIFI, "Only on Wi-Fi"),
     (kuro_prefs::library::DEVICE_NETWORK_NOT_METERED, "Only on unmetered network"),

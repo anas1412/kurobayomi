@@ -177,6 +177,11 @@ impl Listing {
             && prefetch_due(last_visible, self.items.len())
     }
 
+    /// A page is loading while items are already shown: the loading row under them (T-41a-006, T-41b-018).
+    pub fn loading_more(&self) -> bool {
+        self.loading && !self.items.is_empty()
+    }
+
     /// The slots of the grid. A `None` slot is a placeholder and draws nothing.
     pub fn slots(&self) -> &[Option<ListItem>] {
         &self.items
@@ -234,6 +239,19 @@ mod tests {
         assert!(listing.ask().is_none(), "a second ask while one is in flight is refused");
         listing.deliver(first.generation, page(&["a"], true));
         assert_eq!(listing.ask().map(|a| a.page), Some(2));
+    }
+
+    #[test]
+    fn the_loading_row_shows_only_while_a_later_page_loads_under_items() {
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let first = listing.ask().expect("page 1");
+        assert!(!listing.loading_more(), "the first page has the centred spinner, not the loading row");
+        listing.deliver(first.generation, page(&["a"], true));
+        assert!(!listing.loading_more(), "nothing is in flight");
+        let second = listing.ask().expect("page 2");
+        assert!(listing.loading_more(), "a page is loading under the shown items");
+        listing.deliver(second.generation, page(&["b"], true));
+        assert!(!listing.loading_more());
     }
 
     #[test]

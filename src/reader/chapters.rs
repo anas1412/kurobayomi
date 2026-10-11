@@ -269,6 +269,13 @@ mod tests {
     }
 
     #[test]
+    fn a_negative_zero_number_is_the_same_group_as_zero() {
+        let chapters = [ch(1, 0.0, false, None), ch(2, -0.0, false, None)];
+        let out = remove_duplicates(&chapters, &ch(9, 0.0, false, None));
+        assert_eq!(ids(&out), [1], "0.0 and -0.0 are one chapter number");
+    }
+
+    #[test]
     fn missing_chapters_gap_vectors_hold_on_the_domain_rule() {
         use kuro_domain::items::missing::{gap, missing_items_count};
         assert_eq!(gap(10.0, 9.0), 0);

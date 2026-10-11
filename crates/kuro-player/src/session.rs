@@ -16,7 +16,7 @@ use crate::bridge::{self, BridgeCommand};
 use crate::chapters::{self, Segment};
 use crate::completion::Completion;
 use crate::desktop::Desktop;
-use crate::config::{apply_fonts_dir, apply_user_files, write_mpv_config};
+use crate::config::{apply_fonts_dir, ensure_mpv_config};
 use crate::enums::{Decoder, GpuKind, VideoRotate};
 use crate::errors::PlayerMessage;
 use crate::external::{self, ExternalError, FinalSave, Launch, Plan, Preset};
@@ -35,7 +35,6 @@ use crate::seek::absolute_flag;
 use crate::session_init::UserData;
 use crate::skip::{Label, SkipConfig, SkipIntro, SkipSeek, Tap, Tick};
 use crate::state::PlayerState;
-use crate::stats_page::startup_commands;
 use crate::system_av::volume_max_write;
 use crate::tracks::{
     AddKind, TrackValue, add_file_args, external_track_commands, select_sub, track_id_from_value,
@@ -115,7 +114,6 @@ pub struct Session<H> {
     /// The inputs of the `vf` chain, so a filter change rewrites the whole chain (E-26).
     video: VideoChain,
     gpu: GpuKind,
-    statistics_page: i32,
     /// Media keys, now-playing and the idle inhibit; they follow the pause state of every event.
     pub desktop: Desktop,
 }
@@ -134,31 +132,14 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
             precise_seek: false,
             video: VideoChain::default(),
             gpu: GpuKind::default(),
-            statistics_page: 0,
             desktop: Desktop::default(),
         }
-    }
-
-    /// `pref_player_statistics_page`, the page the statistics overlay opens on.
-    pub fn statistics_page(&self) -> i32 {
-        self.statistics_page
     }
 
     /// The `user-data/current-anime/*` values the next load writes (T-45b-071). They come from the
     /// init plan of the episode.
     pub fn set_user_data(&mut self, user_data: UserData) {
         self.user_data = Some(user_data);
-    }
-
-    /// Runs the commands that follow mpv creation (`postInitOptions`): the statistics overlay opens
-    /// on `pref_player_statistics_page` unless it is 0 (T-45a-053). A failed command is logged.
-    pub fn post_init(&self) {
-        for command in startup_commands(i64::from(self.statistics_page)) {
-            let args: Vec<&str> = command.iter().map(String::as_str).collect();
-            if let Err(e) = self.host.command(&args) {
-                tracing::error!("failed to run {}: {e}", args.join(" "));
-            }
-        }
     }
 
     /// Sets the skip-intro preferences and starts the machine again.
@@ -516,7 +497,7 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
 }
 
 impl Session<MpvHandle> {
-    /// Writes the mpv config files, creates the mpv core from the startup table, observes the
+    /// Creates the mpv config directory and any missing empty config files, creates the mpv core from the startup table, observes the
     /// property set and points the font lookup at `fonts_dir`. The video filters are in the `vf`
     /// chain of the startup table.
     pub fn start(prefs: &PlayerPrefs, fonts_dir: &Path) -> Result<Self, MpvError> {
@@ -527,24 +508,17 @@ impl Session<MpvHandle> {
         let mut session = Self::new(host);
         session.video = VideoChain::from(prefs);
         session.gpu = prefs.gpu;
-        session.statistics_page = prefs.advanced.statistics_page;
         session.desktop = Desktop::connect();
-        session.post_init();
         Ok(session)
     }
 }
 
-/// Step before mpv is created (T-45b-034): the user script folders follow `mpv_scripts`, then
-/// `mpv.conf` and `input.conf` are rewritten from the preferences. A failure is logged and does
-/// not stop playback.
+/// Step before mpv is created: the config files are created when they are missing and never rewritten. A failure is
+/// logged and does not stop playback.
 pub fn prepare_mpv_dir(prefs: &PlayerPrefs) {
     let dir = prefs.data_dir.join("mpv");
-    let advanced = &prefs.advanced;
-    if let Err(e) = apply_user_files(&dir, &advanced.source_dir, advanced.user_files) {
-        tracing::error!("failed to apply the mpv user files: {e}");
-    }
-    if let Err(e) = write_mpv_config(&dir, &advanced.mpv_conf, &advanced.mpv_input) {
-        tracing::error!("failed to write the mpv config files: {e}");
+    if let Err(e) = ensure_mpv_config(&dir) {
+        tracing::error!("failed to create the mpv config files: {e}");
     }
 }
 
@@ -923,36 +897,18 @@ mod tests {
     }
 
     #[test]
-    fn prepare_writes_both_mpv_files_and_gates_user_scripts() {
+    fn prepare_creates_the_config_files_and_keeps_the_users_text() {
         let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("user");
-        std::fs::create_dir_all(source.join("scripts")).unwrap();
-        std::fs::write(source.join("scripts/a.lua"), b"lua").unwrap();
-        let mut prefs = PlayerPrefs {
+        let prefs = PlayerPrefs {
             data_dir: dir.path().join("data"),
             ..PlayerPrefs::default()
         };
-        prefs.advanced = crate::config::AdvancedPrefs {
-            user_files: true,
-            source_dir: source,
-            mpv_conf: "volume=40\n".to_owned(),
-            mpv_input: "SPACE cycle pause\n".to_owned(),
-            statistics_page: 2,
-        };
         prepare_mpv_dir(&prefs);
         let mpv = dir.path().join("data/mpv");
-        assert_eq!(
-            std::fs::read_to_string(mpv.join("mpv.conf")).unwrap(),
-            "volume=40\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(mpv.join("input.conf")).unwrap(),
-            "SPACE cycle pause\n"
-        );
-        assert!(mpv.join("scripts/a.lua").is_file());
-        prefs.advanced.user_files = false;
+        std::fs::write(mpv.join("mpv.conf"), "volume=40\n").unwrap();
         prepare_mpv_dir(&prefs);
-        assert!(!mpv.join("scripts").exists());
+        assert_eq!(std::fs::read_to_string(mpv.join("mpv.conf")).unwrap(), "volume=40\n");
+        assert!(mpv.join("input.conf").is_file());
     }
 
     #[test]
@@ -1082,21 +1038,6 @@ mod tests {
         assert_eq!(session.host.commands.borrow().len(), 1);
     }
 
-    #[test]
-    fn post_init_opens_the_statistics_page_unless_it_is_off() {
-        let mut session = Session::new(Fake::default());
-        session.post_init();
-        assert!(session.host.commands.borrow().is_empty());
-        session.statistics_page = 3;
-        session.post_init();
-        assert_eq!(
-            *session.host.commands.borrow(),
-            vec![
-                vec!["script-binding", "stats/display-stats-toggle"],
-                vec!["script-binding", "stats/display-page-3"],
-            ]
-        );
-    }
 
     struct Ports(std::rc::Rc<RefCell<Vec<String>>>);
 

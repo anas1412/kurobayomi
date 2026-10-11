@@ -92,8 +92,8 @@ impl Downloader {
         if request.url.is_empty() {
             return Err(DownloadError::Rejected("empty url"));
         }
-        let name = kuro_platform::filename::valid_filename(&request.asset_name);
-        if name != request.asset_name || name == kuro_platform::filename::EMPTY_NAME {
+        let name = kuro_core::text::build_valid_filename(&request.asset_name, true);
+        if name != request.asset_name || name == kuro_core::text::EMPTY_FILE_NAME {
             return Err(DownloadError::Rejected("asset name is not a plain file name"));
         }
         let cancel = CancellationToken::new();

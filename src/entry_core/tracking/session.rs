@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use kuro_track::model::Kind;
+use kuro_track::model::{Kind, TrackerId};
 use kuro_track::tracker::Tracker;
 
 use super::facts::{facts_of, summarize, Summary};
@@ -20,12 +20,17 @@ pub fn publish(trackers: Vec<Arc<dyn Tracker>>) {
 }
 
 /// Starts the tracker services when they are not up and publishes them when they are. Main thread only. Safe to call
-/// on every screen open and every tracking-button press.
-pub fn refresh_from_host() {
+/// on every screen open and every tracking-button press. Returns whether the services are up: `false` means the
+/// registry is not published yet, so "no tracker is logged in" is not an answer and the caller waits for the next ask.
+pub fn refresh_from_host() -> bool {
     crate::settings_ui::tracker_host::ensure();
-    if let Some(host) = crate::settings_ui::tracker_host::host() {
-        publish(host.manager.all().to_vec());
-    }
+    let Some(host) = crate::settings_ui::tracker_host::host() else {
+        return false;
+    };
+    // AniList is the only tracker switched on: the others are built, but get no progress write and no refresh
+    host.manager.restrict_to(TrackerId::ANILIST);
+    publish(host.manager.get(TrackerId::ANILIST).into_iter().collect());
+    true
 }
 
 fn trackers() -> Vec<Arc<dyn Tracker>> {

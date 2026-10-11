@@ -9,7 +9,6 @@ use std::sync::Arc;
 use gtk::prelude::*;
 use kuro_domain::app::source::LOCAL_SOURCE_ID;
 use kuro_domain::items::sorter::collate;
-use kuro_domain::source::migration::{toggled_direction, toggled_mode};
 use kuro_domain::source::model::Source;
 use kuro_prefs::source::{MigrationDirection, MigrationSortingMode, SourcePrefs};
 
@@ -91,36 +90,6 @@ pub fn migrate_tab(deps: MigrateDeps) -> gtk::Box {
     holder
 }
 
-/// A sort toggle: `flip` changes the stored sort, then the list is drawn again once the click has finished (it replaces the
-/// button that was pressed).
-fn toggle(deps: &Rc<MigrateDeps>, holder: &gtk::Box, flip: fn(&SourcePrefs)) -> Rc<dyn Fn()> {
-    let (deps, holder) = (Rc::clone(deps), holder.downgrade());
-    Rc::new(move || {
-        flip(&deps.prefs);
-        let (deps, holder) = (Rc::clone(&deps), holder.clone());
-        gtk::glib::idle_add_local_once(move || draw(deps, holder));
-    })
-}
-
-/// Flips the mode and writes both keys, the mode first (E-MS-07).
-fn flip_mode(prefs: &SourcePrefs) {
-    let mode = toggled_mode(prefs.migration_sorting_mode.get());
-    store_sorting(prefs, mode, prefs.migration_sorting_direction.get());
-}
-
-/// Flips the direction and writes both keys, the mode first (E-MS-07).
-fn flip_direction(prefs: &SourcePrefs) {
-    let direction = toggled_direction(prefs.migration_sorting_direction.get());
-    store_sorting(prefs, prefs.migration_sorting_mode.get(), direction);
-}
-
-fn store_sorting(prefs: &SourcePrefs, mode: MigrationSortingMode, direction: MigrationDirection) {
-    let stored = prefs.migration_sorting_mode.set(mode).and(prefs.migration_sorting_direction.set(direction));
-    if let Err(error) = stored {
-        tracing::warn!(%error, "the migration sort could not be stored");
-    }
-}
-
 /// Reads the counts and replaces the tab's content with the list in the stored sort.
 fn draw(deps: Rc<MigrateDeps>, holder: gtk::glib::WeakRef<gtk::Box>) {
     let counts = Rc::clone(&deps.counts);
@@ -132,18 +101,17 @@ fn draw(deps: Rc<MigrateDeps>, holder: gtk::glib::WeakRef<gtk::Box>) {
             (deps.toast)(kuro_i18n::tr(kuro_i18n::MsgKey::internal_error));
             Vec::new()
         });
-        let (mode, direction) = (deps.prefs.migration_sorting_mode.get(), deps.prefs.migration_sorting_direction.get());
+        // the sort is cut from the settings: alphabetical and ascending, as the upstream defaults
+        let (mode, direction) = (MigrationSortingMode::ALPHABETICAL, MigrationDirection::ASCENDING);
         let directory = (deps.directory)();
         let error = failed.then(|| kuro_i18n::tr(kuro_i18n::MsgKey::internal_error));
-        let snapshot = MigrateSourcesSnapshot { sources: migrate_list(list, directory.as_deref(), mode, direction), mode, direction, empty_text: empty_text(deps.kind), error };
+        let snapshot = MigrateSourcesSnapshot { sources: migrate_list(list, directory.as_deref(), mode, direction), empty_text: empty_text(deps.kind), error };
         let (help_deps, retry_deps, retry_holder) = (Rc::clone(&deps), Rc::clone(&deps), holder.downgrade());
         let nav = MigrateSourcesNav {
             open_help: Rc::new(move || (help_deps.open_url)(super::texts::SOURCE_MIGRATION_HELP_URL)),
             retry: Rc::new(move || draw(Rc::clone(&retry_deps), retry_holder.clone())),
             open: Rc::clone(&deps.open),
             copy_id: Rc::clone(&deps.copy_id),
-            toggle_mode: toggle(&deps, &holder, flip_mode),
-            toggle_direction: toggle(&deps, &holder, flip_direction),
         };
         while let Some(child) = holder.first_child() {
             holder.remove(&child);
@@ -174,18 +142,6 @@ pub(crate) mod tests {
         assert!(!list[1].0.is_stub, "an installed source is not a stub");
         let by_count = migrate_list(counts, Some(&*directory()), MigrationSortingMode::TOTAL, MigrationDirection::DESCENDING);
         assert_eq!(by_count.iter().map(|(s, _)| s.id).collect::<Vec<_>>(), [2, 1, 9], "descending by count reverses the whole order, so the stub is last");
-    }
-
-    #[test]
-    fn a_sort_toggle_writes_the_mode_and_the_direction_keys() {
-        let store = kuro_prefs::store::PrefStore::in_memory();
-        let prefs = SourcePrefs::new(store.clone());
-        flip_mode(&prefs);
-        assert_eq!(prefs.migration_sorting_mode.get(), MigrationSortingMode::TOTAL);
-        assert!(store.get_raw("pref_migration_direction").is_some(), "E-MS-07: the direction is written with the mode");
-        flip_direction(&prefs);
-        assert_eq!(prefs.migration_sorting_direction.get(), MigrationDirection::DESCENDING);
-        assert_eq!(prefs.migration_sorting_mode.get(), MigrationSortingMode::TOTAL, "a direction toggle keeps the mode");
     }
 
     #[test]
@@ -311,47 +267,6 @@ pub(crate) mod tests {
         assert!(labels(empty.upcast_ref()).contains(&kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library)), "E-MS-01");
     }
 
-    #[test]
-    fn the_stored_sort_uses_the_upstream_words_and_fast_taps_apply_in_order() {
-        let store = PrefStore::in_memory();
-        let prefs = SourcePrefs::new(store.clone());
-        // three taps before any redraw: each one reads the stored value, so they land in order
-        flip_mode(&prefs);
-        flip_direction(&prefs);
-        flip_mode(&prefs);
-        assert_eq!(store.get_raw("pref_migration_sorting"), Some(kuro_prefs::values::PrefValue::Str("ALPHABETICAL".into())), "E-MS-05: the last tap wins");
-        assert_eq!(store.get_raw("pref_migration_direction"), Some(kuro_prefs::values::PrefValue::Str("DESCENDING".into())));
-        flip_mode(&prefs);
-        assert_eq!(store.get_raw("pref_migration_sorting"), Some(kuro_prefs::values::PrefValue::Str("TOTAL".into())));
-    }
-
-    fn a_sort_toggle_is_stored_and_redraws_the_list() {
-        let prefs = Rc::new(SourcePrefs::new(PrefStore::in_memory()));
-        let tab = migrate_tab(deps(vec![(1, 9), (2, 1)], Rc::clone(&prefs), Rc::default()));
-        let buttons = || {
-            fn walk(widget: &gtk::Widget, out: &mut Vec<gtk::Button>) {
-                if let Some(button) = widget.downcast_ref::<gtk::Button>() {
-                    out.push(button.clone());
-                }
-                let mut child = widget.first_child();
-                while let Some(next) = child {
-                    walk(&next, out);
-                    child = next.next_sibling();
-                }
-            }
-            let mut out = Vec::new();
-            walk(tab.upcast_ref(), &mut out);
-            out
-        };
-        // the first button is the sort mode: Alphabetical becomes Total
-        buttons()[0].emit_clicked();
-        assert_eq!(prefs.migration_sorting_mode.get(), MigrationSortingMode::TOTAL, "the sort is stored");
-        assert!(pump(|| labels(tab.upcast_ref()).contains(&kuro_i18n::tr(kuro_i18n::MsgKey::action_sort_count))), "the page shows the new sort");
-        // the second button flips the direction
-        buttons()[1].emit_clicked();
-        assert_eq!(prefs.migration_sorting_direction.get(), MigrationDirection::DESCENDING);
-    }
-
     fn the_anime_picker_says_no_source_has_favorites_and_the_manga_picker_keeps_the_library_text() {
         let prefs = Rc::new(SourcePrefs::new(PrefStore::in_memory()));
         let tab = migrate_tab(MigrateDeps { kind: BrowseKind::Anime, ..deps(Vec::new(), prefs, Rc::default()) });
@@ -366,7 +281,6 @@ pub(crate) mod tests {
         the_help_action_opens_the_source_migration_guide();
         the_anime_picker_says_no_source_has_favorites_and_the_manga_picker_keeps_the_library_text();
         the_tab_lists_the_library_sources_and_an_empty_library_shows_the_empty_state();
-        a_sort_toggle_is_stored_and_redraws_the_list();
     }
 }
 

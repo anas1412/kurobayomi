@@ -96,8 +96,10 @@ fn the_top_bar_labels_the_bookmark_by_its_state_and_has_a_named_back_button() {
             on_bookmark: Box::new(|| {}),
             on_overflow: Box::new(|_| {}),
         };
-        let revealer = build_top_bar(&bar, actions);
-        let buttons = buttons_under(revealer.upcast_ref());
+        let detach = gtk::Button::new();
+        let header = build_top_bar(&bar, actions, &detach);
+        assert!(detach.parent().is_some(), "Detach sits in the bar");
+        let buttons = buttons_under(header.upcast_ref());
         assert!(position_of(&buttons, strings::ACTION_REMOVE_BOOKMARK).is_some(), "a bookmarked chapter offers to unbookmark");
         assert!(position_of(&buttons, "Back").is_some(), "the back button is named");
     });
@@ -183,39 +185,12 @@ fn check_labelled(tab: &gtk::Box, label: &str, nth: usize) -> gtk::CheckButton {
 }
 
 #[test]
-fn the_split_check_writes_the_split_key_and_the_invert_check_the_invert_key_for_each_family() {
+fn the_split_check_writes_the_split_key() {
     crate::testing::with_display(|| {
         let prefs = ReaderPrefs::new(PrefStore::in_memory());
         let tab = settings_tab(&prefs);
-        let split = |nth| check_labelled(&tab, strings::PREF_DUAL_PAGE_SPLIT, nth);
-        let invert = |nth| check_labelled(&tab, strings::PREF_DUAL_PAGE_INVERT, nth);
-
-        split(0).set_active(true);
+        check_labelled(&tab, strings::PREF_DUAL_PAGE_SPLIT, 0).set_active(true);
         assert!(prefs.dual_page_split_paged.get(), "the paged split check writes pref_dual_page_split");
-        assert!(!prefs.dual_page_invert_paged.get(), "and not the invert key (E-UI-3)");
-        invert(0).set_active(true);
-        assert!(prefs.dual_page_invert_paged.get(), "the paged invert check writes pref_dual_page_invert");
-        assert!(prefs.dual_page_split_paged.get(), "and leaves the split key alone");
-        assert!(!prefs.dual_page_split_webtoon.get() && !prefs.dual_page_invert_webtoon.get(), "the webtoon keys are untouched");
-
-        split(1).set_active(true);
-        assert!(prefs.dual_page_split_webtoon.get() && !prefs.dual_page_invert_webtoon.get());
-        invert(1).set_active(true);
-        assert!(prefs.dual_page_invert_webtoon.get());
-        invert(0).set_active(false);
-        assert!(!prefs.dual_page_invert_paged.get() && prefs.dual_page_invert_webtoon.get(), "each control writes only its own key");
     });
 }
 
-#[test]
-fn the_split_and_rotate_checks_exclude_each_other() {
-    crate::testing::with_display(|| {
-        let prefs = ReaderPrefs::new(PrefStore::in_memory());
-        let tab = settings_tab(&prefs);
-        check_labelled(&tab, strings::PREF_DUAL_PAGE_SPLIT, 0).set_active(true);
-        check_labelled(&tab, strings::PREF_PAGE_ROTATE, 0).set_active(true);
-        assert!(prefs.dual_page_rotate_to_fit.get() && !prefs.dual_page_split_paged.get(), "rotating turns the split off");
-        check_labelled(&tab, strings::PREF_DUAL_PAGE_SPLIT, 0).set_active(true);
-        assert!(prefs.dual_page_split_paged.get() && !prefs.dual_page_rotate_to_fit.get(), "and splitting turns the rotate off");
-    });
-}

@@ -1,6 +1,6 @@
-//! Browse rows this module binds to the typed preferences: the two "hide entries already in library" switches of the
-//! Sources group (task T-47a-060), the extension repo rows with their counts (task T-47a-062) and the NSFW (18+) group
-//! (task T-47a-061). Each switch is independent; the Browse lists and global search read them.
+//! Browse rows this module binds to the typed preferences: the Source languages filter and the extension repo rows
+//! with their counts (task T-47a-062) of the Sources group, and the NSFW (18+) group (task T-47a-061). The two "hide
+//! entries already in library" switches are cut (settings diet).
 use std::rc::Rc;
 
 use kuro_prefs::pref::Pref;
@@ -9,8 +9,9 @@ use kuro_prefs::prefs::Prefs;
 use crate::pref_model::bind::{self, Veto};
 use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::settings_ui::auth;
-use crate::settings_ui::rows::{group, info, switch, switch_with, text};
+use crate::settings_ui::rows::{group, info, multi_choice, switch_with, text};
 
+pub const SOURCE_LANGUAGES_TITLE: &str = "Source languages";
 pub const NSFW_SUBTITLE: &str = "Requires app restart to take effect";
 pub const NSFW_INFO: &str = "This does not prevent unofficial or potentially incorrectly flagged extensions from surfacing NSFW (18+) content within the app.";
 pub const NSFW_GATE_TITLE: &str = "NSFW (18+) sources";
@@ -32,14 +33,29 @@ pub fn store_count_label(count: i64) -> String {
     if count == 1 { "1 store".to_owned() } else { format!("{count} stores") }
 }
 
+/// The Source languages filter: the languages whose sources show. It offers `all` (Multi) and every language the app
+/// has a name for, and any other stored tag so that a stored choice is never lost; a tick is written at once.
+pub fn source_languages_row(prefs: &Prefs) -> PreferenceItem {
+    let pref = &prefs.sources.enabled_languages;
+    let mut keys: Vec<String> = std::iter::once("all".to_owned()).chain(kuro_i18n::names::NAMES.iter().map(|n| n.tag.to_owned())).collect();
+    for stored in pref.get() {
+        if !keys.contains(&stored) {
+            keys.push(stored);
+        }
+    }
+    kuro_i18n::source_names::sort_keys(&mut keys);
+    let labels: Vec<String> = keys.iter().map(|key| kuro_i18n::source_names::display_name(key)).collect();
+    let options: Vec<(&str, &str)> = keys.iter().map(String::as_str).zip(labels.iter().map(String::as_str)).collect();
+    multi_choice(SOURCE_LANGUAGES_TITLE, pref, &options, true)
+}
+
 /// The Sources group, the NSFW (18+) group. `counts` are the stores and repos the two repo rows show.
 pub fn page_rows(prefs: &Prefs, counts: RepoCounts) -> Vec<Preference> {
     vec![
         group(
             "Sources",
             vec![
-                switch("Hide anime entries already in library", &prefs.sources.hide_in_anime_library_items, true),
-                switch("Hide manga entries already in library", &prefs.sources.hide_in_manga_library_items, true),
+                source_languages_row(prefs),
                 repo_row(ANIME_REPOS_TITLE, counts.anime, ANIME_REPOS_SCREEN),
                 repo_row(MANGA_REPOS_TITLE, counts.manga, MANGA_REPOS_SCREEN),
             ],
@@ -90,14 +106,17 @@ mod tests {
     }
 
     #[test]
-    fn the_two_hide_switches_read_their_own_keys_and_default_to_off() {
+    fn the_sources_group_starts_with_the_language_filter_and_has_no_hide_switch() {
         let prefs = Prefs::in_memory();
+        prefs.sources.enabled_languages.set(["en".to_owned(), "xx-odd".to_owned()].into()).unwrap();
         let tree = page_rows(&prefs, RepoCounts::default());
         let sources = group_of(&tree, "Sources");
-        let PreferenceItem::Switch { pref, .. } = &sources.items[0] else { panic!("a switch") };
-        assert!(!pref.get());
-        assert_eq!(sources.items[0].title(), "Hide anime entries already in library");
-        assert_eq!(sources.items[1].title(), "Hide manga entries already in library");
+        let titles: Vec<&str> = sources.items.iter().map(|i| i.title()).collect();
+        assert_eq!(titles, [SOURCE_LANGUAGES_TITLE, ANIME_REPOS_TITLE, MANGA_REPOS_TITLE]);
+        let PreferenceItem::MultiSelect { pref, entries, .. } = &sources.items[0] else { panic!("a multi-select") };
+        assert_eq!(pref.key(), prefs.sources.enabled_languages.key());
+        assert!(entries.iter().any(|(key, _)| key == "all") && entries.iter().any(|(key, _)| key == "en"));
+        assert!(entries.iter().any(|(key, _)| key == "xx-odd"), "a stored tag the table does not know is kept");
     }
 
     #[test]
@@ -107,11 +126,11 @@ mod tests {
         assert_eq!(store_count_label(3), "3 stores");
         let tree = page_rows(&Prefs::in_memory(), RepoCounts { anime: 2, manga: 1 });
         let sources = group_of(&tree, "Sources");
-        let PreferenceItem::Text { common, on_click } = &sources.items[2] else { panic!("an action row") };
+        let PreferenceItem::Text { common, on_click } = &sources.items[1] else { panic!("an action row") };
         assert_eq!(common.title, ANIME_REPOS_TITLE);
         assert_eq!(common.subtitle.as_deref(), Some("2 stores"));
         assert!(on_click.is_some());
-        let PreferenceItem::Text { common, .. } = &sources.items[3] else { panic!("an action row") };
+        let PreferenceItem::Text { common, .. } = &sources.items[2] else { panic!("an action row") };
         assert_eq!(common.subtitle.as_deref(), Some("1 store"));
     }
 

@@ -4,6 +4,8 @@ use std::cell::RefCell;
 
 use gtk::prelude::*;
 
+use crate::entry_core::constants::two_pane;
+
 /// The smaller side, in logical pixels, from which the tablet layouts apply (`TABLET_UI_REQUIRED_SCREEN_WIDTH_DP`).
 pub const TABLET_UI_MIN: i32 = 720;
 
@@ -19,16 +21,18 @@ pub fn size_of(window: &impl IsA<gtk::Window>) -> (i32, i32) {
     (window.width().max(window.default_width()), window.height().max(window.default_height()))
 }
 
-/// Remembers the last tablet answer so a resize reports only when the answer flips.
+/// Remembers the last answers of both breakpoints (tablet UI and two panes) so a resize reports only when one flips.
 #[derive(Default)]
-pub struct Crossing(Option<bool>);
+pub struct Crossing(Option<(bool, bool)>);
 
 impl Crossing {
-    /// `Some(now)` when the window crossed the threshold since the last call; the first call only sets the baseline.
+    /// `Some(tablet)` when the window crossed the tablet or the two-pane threshold since the last call. The reported answer
+    /// is the tablet one, so a listener that needs the two-pane answer works it out from the width. The first call only
+    /// sets the baseline.
     pub fn update(&mut self, width: i32, height: i32) -> Option<bool> {
-        let now = is_tablet_ui(width, height);
+        let now = (is_tablet_ui(width, height), two_pane(width));
         let before = self.0.replace(now);
-        before.filter(|b| *b != now).map(|_| now)
+        before.filter(|b| *b != now).map(|_| now.0)
     }
 }
 
@@ -40,7 +44,7 @@ thread_local! {
     static LISTENERS: RefCell<Vec<Listener>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Runs `f` with the new answer every time a resize crosses the 720 px threshold, until it returns `false`.
+/// Runs `f` with the new answer every time a resize crosses the 720 px or the 900 px threshold, until it returns `false`.
 pub fn on_tablet_change(f: impl Fn(bool) -> bool + 'static) {
     LISTENERS.with(|l| l.borrow_mut().push(Box::new(f)));
 }
@@ -79,6 +83,15 @@ mod tests {
         assert!(!is_tablet_ui(719, 1800), "tall but narrow");
         assert!(is_tablet_ui(1800, 720));
         assert!(is_tablet_ui(720, 1800));
+    }
+
+    #[test]
+    fn crossing_fires_on_the_two_pane_breakpoint_as_well() {
+        let mut c = Crossing::default();
+        assert_eq!(c.update(1000, 800), None, "the first call is the baseline");
+        assert_eq!(c.update(899, 800), Some(true), "still a tablet, but the two-pane width is crossed");
+        assert_eq!(c.update(900, 800), Some(true), "back over 900 px");
+        assert_eq!(c.update(900, 800), None, "no change, no report");
     }
 
     #[test]

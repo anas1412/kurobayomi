@@ -229,7 +229,7 @@ fn two_pane(current: Page) -> gtk::Widget {
 /// at the top end. The player settings show their plain list here, never a second sidebar.
 fn pane(id: &str) -> gtk::Widget {
     let screen = crate::ui::screen(id);
-    let built = if id == "settings_player" { crate::settings_ui::player::root::body(0) } else { crate::screens::body(id) };
+    let built = if id == "settings_player" { crate::settings_ui::player::root::body(&crate::settings_ui::route::prefs()) } else { crate::screens::body(id) };
     let (content, end): (gtk::Widget, Vec<gtk::Widget>) = match built {
         Some(b) => (b.content, b.end),
         None => {
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn t_47b_003_back_pops_the_inner_page_first_then_closes_the_shell() {
-        let stack = names(&["screen:tabs", "screen:settings", "screen:settings_advanced", "screen:settings_debug_info"]);
+        let stack = names(&["screen:tabs", "screen:settings", "screen:settings_about", "screen:settings_debug_info"]);
         let mut shell = opened(false);
         assert_eq!(plan_back(&mut shell, Some("screen:settings"), &stack, 3), BackStep::Pop(Back::Popped));
         // the page above the shell is gone; the next back is the shell's own page
@@ -322,15 +322,17 @@ mod tests {
         }
     }
 
-    // T-47a-003: the rows say what this app's pages hold, not what Android's had.
+    // The eight pages: Security and privacy and Advanced are gone, their rows live on the pages above.
     #[test]
-    fn the_security_and_advanced_rows_do_not_name_android_only_settings() {
-        let subtitle = |id: &str| entries().into_iter().find(|e| e.id == id).and_then(|e| e.subtitle).expect(id);
-        assert_eq!(subtitle("settings_security"), "App lock");
-        assert_eq!(subtitle("settings_advanced"), "Dump crash logs");
+    fn the_list_has_the_eight_pages_and_no_security_or_advanced_page() {
+        let ids: Vec<String> = entries().into_iter().map(|e| e.id).collect();
+        assert_eq!(ids.len(), 8);
+        for gone in ["settings_security", "settings_advanced", "settings_tracking"] {
+            assert!(!ids.iter().any(|id| id == gone), "{gone}");
+        }
     }
 
-    // the eleven rows and their subtitles are the same in the list and in the menu table of settings_ui::menu
+    // the eight rows and their subtitles are the same in the list and in the menu table of settings_ui::menu
     #[test]
     fn the_list_matches_the_menu_table() {
         let table = crate::settings_ui::menu::rows("x");
@@ -372,7 +374,7 @@ mod tests {
             SHELL.with(|s| s.borrow_mut().open(None, false));
             ROOT.with(|r| *r.borrow_mut() = Some("screen:settings".to_owned()));
             let settings = page("settings");
-            let inner = page("settings_advanced");
+            let inner = page("settings_about");
             assert!(back(), "an inner page is popped first");
             assert_eq!(stack.visible_child().as_ref(), Some(settings.upcast_ref()));
             assert!(SHELL.with(|s| s.borrow().is_open()), "the shell stays open under it");

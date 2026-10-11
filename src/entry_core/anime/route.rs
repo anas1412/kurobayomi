@@ -17,7 +17,6 @@ use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib};
 use kuro_data::anime::{AnimeRelationGroup, SeasonAnime};
 use kuro_db::handle::Db;
-use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_db::schema_anime::FetchType;
 use kuro_domain::entries::anime::AnimeExt;
 use kuro_domain::entries::defaults::{set_episode_settings_default, set_season_settings_default};
@@ -25,9 +24,9 @@ use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_domain::kind::EntryKind;
 use kuro_downloads::anime::layout::AnimeLayout;
 use kuro_i18n::{MsgKey, tr, tr_plural};
-use kuro_prefs::source::SourcePrefs;
-use kuro_prefs::player::GesturePrefs;
 use kuro_prefs::store::PrefStore;
+
+use crate::entry_core::constants::{FALLBACK_WIDTH, LEFT_PANE_WIDTH};
 
 use super::actions::{OpenPlan, continue_plan, tap_plan};
 use super::airing::{Airing, format_airing, visible as airing_visible};
@@ -77,10 +76,9 @@ use crate::entry_core::message::{Notices, UserMessage, present};
 use crate::entry_core::text::{Description, Expansion, description};
 use crate::ui;
 
-/// The width of the left pane in the two-pane layout.
-const LEFT_WIDTH: i32 = 360;
-/// The window width assumed before the page has one: the app's default width.
-const FALLBACK_WIDTH: i32 = 1180;
+/// The skip-intro length a manual skip starts from (the Default intro length preference is cut, so this is fixed).
+const DEFAULT_INTRO_LENGTH: i32 = 85;
+
 
 thread_local! {
     static TARGET: Cell<Option<i64>> = const { Cell::new(None) };
@@ -93,7 +91,7 @@ pub fn target(anime_id: i64) {
 }
 
 /// The anime sources this build runs: the builtin ones, the recipe sources (`docs/source-recipes.md`) and the shipped
-/// source crates (`docs/builtin-sources.md`).
+/// source crates.
 fn live_anime_sources() -> Vec<Arc<dyn kuro_source::anime::AnimeSource>> {
     let mut sources = kuro_source::anime::registry::builtin_anime_sources();
     sources.extend(crate::recipe_sources::anime_sources());
@@ -120,7 +118,7 @@ fn page_for(anime_id: i64) -> GBox {
     let app = data::app();
     let db = app.db(EntryKind::Anime);
     let prefs = app.base.store().clone();
-    let show_airing = prefs.pref::<bool>("show_next_episode_airing_time", true).get();
+    let show_airing = crate::misc::diet_defaults::ENTRY_SHOW_AIRING_TIME;
     let ctx = AnimeLoadContext {
         from_source: false,
         downloaded_only: app.base.downloaded_only.get(),
@@ -376,9 +374,9 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     let left_scroll = gtk::ScrolledWindow::builder()
         .child(&left_host)
         .hscrollbar_policy(gtk::PolicyType::Never)
-        .width_request(LEFT_WIDTH)
-        .min_content_width(LEFT_WIDTH)
-        .max_content_width(LEFT_WIDTH)
+        .width_request(LEFT_PANE_WIDTH)
+        .min_content_width(LEFT_PANE_WIDTH)
+        .max_content_width(LEFT_PANE_WIDTH)
         .hexpand(false)
         .vexpand(true)
         .visible(false)
@@ -953,7 +951,7 @@ impl View {
 
     /// `pref_remove_after_marked_as_read`: a mark seen deletes the downloads of the episodes it changed (T-39b-013).
     fn remove_after_seen(&self) -> bool {
-        DownloadPrefs::new(&self.env.prefs).remove_after_marked_as_read.get()
+        crate::misc::diet_defaults::DOWNLOAD_REMOVE_AFTER_MARKED_READ
     }
 
     /// A context menu item on a row, written for that one episode. It works while selecting too (E-5).
@@ -1043,7 +1041,7 @@ impl View {
     /// `autoOpenTrack`: a tracker is logged in and "open the track menu on adding" is on.
     fn auto_open_track(&self) -> bool {
         crate::entry_core::tracking::session::refresh_from_host();
-        let pref_on = self.env.prefs.pref::<bool>("track_on_adding_to_library", true).get();
+        let pref_on = crate::misc::diet_defaults::ENTRY_TRACK_ON_ADDING;
         crate::entry_core::tracking::summary::open_track_sheet_on_add(pref_on, self.env.backend.has_logged_in_tracker())
     }
 
@@ -1113,7 +1111,7 @@ impl View {
                 self.claim_slot(AnimeDialog::TrackSheet);
                 ui::open("tracking_sheet");
             }
-            TrackingClick::Settings => ui::open("settings_tracking"),
+            TrackingClick::Settings => ui::open("settings_browse"),
         }
     }
 
@@ -1194,7 +1192,7 @@ impl View {
     /// The width the season grid has: the page, or the right pane of the two-pane layout.
     fn grid_width(&self) -> i32 {
         let width = self.width.get();
-        if self.two_pane.get() == Some(true) { (width - LEFT_WIDTH - 1).max(0) } else { width }
+        if self.two_pane.get() == Some(true) { (width - LEFT_PANE_WIDTH - 1).max(0) } else { width }
     }
 
     /// The season grid of a `Seasons` entry. Its minimum column count is the entry's size setting (`Layout::columns_for`); it
@@ -1292,7 +1290,7 @@ impl View {
             let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
             (m.anime.id, m.anime.skip_intro_length(), m.anime.skip_intro_disable())
         };
-        let default = GesturePrefs::new(self.env.prefs.clone()).default_intro_length.get();
+        let default = DEFAULT_INTRO_LENGTH;
         let runner = self.runner.clone();
         let id = self.claim_slot(AnimeDialog::ChangeAnimeSkipIntro);
         let window = intro_dialog::open(viewer::dialog_start(stored, disabled, default), move |length| {
@@ -1389,7 +1387,7 @@ impl View {
         while let Some(child) = self.top.first_child() {
             self.top.remove(&child);
         }
-        let column = if two { LEFT_WIDTH } else { self.width.get() };
+        let column = if two { LEFT_PANE_WIDTH } else { self.width.get() };
         let handlers = self.handlers();
         self.top.append(&info_view::build(&key.0, two, column, &handlers));
         let text = description_view::build(&key.1, Rc::clone(&self.expansion), Some((&key.0.genres, &handlers)));
@@ -1627,7 +1625,7 @@ impl View {
 
     /// Draws the related groups under the description when they or the display mode changed.
     fn render_related(&self) {
-        let mode = SourcePrefs::new(self.env.prefs.clone()).source_display_mode.get();
+        let mode = kuro_prefs::library::LibraryDisplayMode::CompactGrid;
         let key = (self.related.borrow().clone(), mode);
         if self.related_shown.borrow().as_ref() == Some(&key) {
             return;
@@ -1975,7 +1973,7 @@ mod tests {
             assert!(fab.is_visible() && fab.is_sensitive(), "an unseen episode exists");
             let (min, _, _, _) = page.measure(gtk::Orientation::Horizontal, -1);
             assert!(min <= 360, "no horizontal minimum above 360 px, got {min}");
-            let left = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::ScrolledWindow>().ok()).find(|w| w.width_request() == LEFT_WIDTH).expect("the left pane");
+            let left = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::ScrolledWindow>().ok()).find(|w| w.width_request() == LEFT_PANE_WIDTH).expect("the left pane");
             assert!(!left.is_visible(), "no left pane in one column");
             // from 900 px the info block moves to the left pane and the list keeps only its head
             window.set_default_size(1000, 700);

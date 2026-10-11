@@ -112,3 +112,181 @@ scheduling constraints (unmetered network, power, battery level), notifications 
 | T-desk-007 | brightness and volume gestures of the player: `pref_gesture_volume_brightness`, `pref_swap_volume_and_brightness`, `pref_remember_brightness`, `player_brightness_value` (brightness had no other control) | keyboard shortcuts, the volume slider and mouse-wheel volume | no touch drags for volume or brightness; `pref_remember_volume` and `player_volume_value` stay |
 | T-desk-008 | tablet layout mode: `tablet_ui_mode` | none | none; a stored value is ignored |
 | T-desk-009 | the Monet app theme (dynamic colours of the phone wallpaper): the `MONET` value of `pref_app_theme` | the GTK theme default and the other palettes | a stored `MONET` reads as the default theme |
+
+## Settings diet, first pass (diet-prefs lane, 2026-10-11)
+
+Source: `docs/design/settings-diet.md`. The registry CUT rows that still have a reader in a file outside the diet-prefs lane cannot be removed without changing a public item another lane uses. They stay registered until that lane removes its readers; then remove the typed field, the registry row, the `spec/settings.json` twin if any, and add the key to `DROPPED_KEYS`.
+
+| Task | Change | Replaced by | User impact |
+|---|---|---|---|
+| T-diet-001 | `cutout_short` (display cutout): registry row and typed field removed, added to `DROPPED_KEYS` (kept in the Android-only round-trip list as dropped) | fixed `true`, no reader | none; no cutout on desktop |
+| T-diet-002 | `library_update_restriction` default: was `wifi`, now no device restriction (`registry.rs`, `library.rs`, the section-5 fixture) | no restriction | a wired PC updates without Wi-Fi; the key stays, its UI row stays until the library lane drops it |
+| T-diet-003 | `pref_download_only_over_wifi_key` default: was `true`, now `false` (`registry.rs`, `kuro-domain/src/download/prefs.rs`) | off by default | the registry and the kuro-domain copy now agree; the `kuro-downloads` copy still defaults to `true` and gates the download job (see Open) |
+
+Open, outside this lane: `kuro-downloads/src/download_prefs.rs`, `kuro-downloads/src/settings.rs` and `kuro-downloads/src/downloader.rs` still default `pref_download_only_over_wifi_key` to `true`; the remaining `true` defaults are `crates/kuro-downloads/src/download_prefs.rs:50`, `crates/kuro-downloads/src/settings.rs:11` and `62`, `crates/kuro-downloads/src/downloader.rs:88` and `102`, and `src/settings_ui/downloads.rs:160`. `src/misc/runner.rs` does not read this key; the only consumer is the engine's `DownloadSettings::default()` (`downloader.rs:88`), which the downloads lane must wire to the registry value, so the trap is not gone until then. The two download prefs structs (`kuro-domain::download::prefs::DownloadPrefs` and `kuro-downloads::download_prefs::DownloadPrefs`) are both live: the domain copy is read by `src/entry_core`, `src/reader`, `src/settings_ui/downloads.rs`; the downloads copy by `src/misc`, `src/updates`. Unifying them needs both lanes.
+
+Kept for now, per the user's list (not cut in this pass, the cut rows still exist): app lock (`use_biometric_lock`, `lock_app_after`), external player (`always_use_external_player` is not in this list; `external_player_preference`), mini player (`pref_enable_pip`, `pref_pip_episode_toasts`, `pref_pip_on_exit`, `pip_replace_with_previous`), Data Saver (`data_saver`, `data_saver_excluded`, `data_saver_image_quality`, `data_saver_image_format_jpeg`, `data_saver_server`, `data_saver_color_bw`, `data_saver_downloader`, `ignore_jpeg`, `ignore_gif`), Random sort (`library_random_anime_sort_seed`, `library_random_manga_sort_seed`), Custom buttons, Script editor and Code editor (`mpv_scripts`, `pref_mpv_conf`, `pref_mpv_input`).
+
+Note: `pref_mpv_conf` and `pref_mpv_input` are kept for now with their Script and Code editor pages, so the diet's import rule (write the text to `mpv.conf` / `input.conf` when the file is missing) is not implemented yet.
+
+### Blocked: CUT keys with a reader outside this lane (first readers listed)
+
+| Key | First readers outside the lane |
+|---|---|
+| `always_show_chapter_transition` | src/settings_ui/reader/page.rs, src/reader/settings_window.rs |
+| `animelib_update_categories` | src/misc/runner.rs, src/updates/stats_data.rs |
+| `animelib_update_categories_exclude` | src/misc/runner.rs, src/settings_ui/library_update.rs |
+| `app_date_format` | crates/kuro-source-scrape/tests/check.rs, crates/kuro-source-scrape/tests/recipe.rs |
+| `__APP_STATE_has_filters_toggle_state` | src/browse/prefs.rs, src/browse/search_screen.rs |
+| `__APP_STATE_last_anime_catalogue_source` | src/browse/mount.rs, src/browse/anime/browse_screen.rs |
+| `__APP_STATE_last_app_check` | src/dropped/register.rs, src/app_update.rs |
+| `__APP_STATE_last_app_closed` | src/dropped/register.rs, src/applock_host.rs |
+| `__APP_STATE_last_catalogue_source` | src/browse/mount.rs, src/browse/pages.rs |
+| `auto_clear_chapter_cache` | src/main.rs, src/settings_ui/route.rs |
+| `auto_update_metadata` | src/misc/runner.rs, src/library_update/pass.rs |
+| `backup_flags` | crates/kuro-source/tests/dropped_android_surface.rs |
+| `bottom_rail_nav_style` | src/screens.rs, src/main.rs |
+| `browse_hide_in_anime_library_items` | src/browse/anime/prefs.rs, src/settings_ui/browse.rs |
+| `browse_hide_in_library_items` | src/settings_ui/browse.rs, src/browse/pages.rs |
+| `categorized_display` | src/library/t2/sort.rs, src/library/view/mod.rs |
+| `check_app_updates` | src/app_update.rs |
+| `color_filter_mode` | src/reader/overlay.rs, src/reader/sync.rs |
+| `color_filter_value` | src/reader/overlay.rs, src/reader/sync.rs |
+| `create_folder_per_manga` | src/reader/screen.rs, src/settings_ui/reader/page.rs |
+| `crop_borders_webtoon` | src/reader/screen.rs, src/reader/page_view.rs |
+| `custom_brightness_value` | src/reader/overlay.rs, src/reader/sync.rs |
+| `default_episode_show_summaries` | src/entry_core/anime/settings_view.rs |
+| `default_season_continue_overlay` | src/entry_core/anime/season_tile.rs |
+| `default_season_display_mode` | src/entry_core/anime/route.rs |
+| `default_season_grid_display_mode` | src/entry_core/anime/route.rs |
+| `default_season_grid_display_size` | src/entry_core/anime/route.rs |
+| `default_season_lang_overlay` | src/entry_core/anime/season_tile.rs |
+| `default_season_local_overlay` | src/entry_core/anime/season_tile.rs |
+| `default_season_unseen_overlay` | src/entry_core/anime/season_tile.rs |
+| `default_user_agent` | crates/kuro-net/tests/extension_surface.rs, crates/kuro-net/src/client.rs |
+| `display_category_tabs` | src/library/layout.rs, src/library/view/mod.rs |
+| `display_continue_reading_button` | src/library/display_tab.rs, src/library/view/mod.rs |
+| `display_language_badge` | src/entry_core/anime/season_tile.rs, src/library/layout.rs |
+| `display_local_badge` | src/library/display_tab.rs, src/library/load.rs |
+| `display_number_of_items` | src/library/display_tab.rs, src/library/view/mod.rs |
+| `doh_provider` | crates/kuro-net/src/client.rs, crates/kuro-net/src/doh.rs |
+| `ext_updates_count` | src/misc/badge.rs, crates/kuro-extensions/src/notice.rs |
+| `fullscreen` | src/player_view/tests.rs, src/player_view/mod.rs |
+| `hidden_categories` | src/updates/mount.rs, src/updates/prefs.rs |
+| `hide_notification_content` | crates/kuro-downloads/README.md, src/misc/runner.rs |
+| `incognito_anime_extensions` | src/browse/mount.rs, src/browse/anime/browse_screen.rs |
+| `incognito_manga_extensions` | src/browse/mount.rs, src/browse/browse_screen.rs |
+| `invert_duration` | crates/kuro-player/src/player_prefs.rs, crates/kuro-player/src/view.rs |
+| `landscape_zoom` | src/settings_ui/reader/page.rs, src/reader/page_view.rs |
+| `library_show_updates_count` | src/misc/badge.rs, src/settings_ui/library_update.rs |
+| `library_update_categories` | src/misc/runner.rs, src/updates/stats_data.rs |
+| `library_update_categories_exclude` | src/misc/runner.rs, src/updates/stats_data.rs |
+| `library_update_manga_restriction` | src/misc/runner.rs, src/library/load.rs |
+| `library_update_restriction` | src/misc/runner.rs, src/settings_ui/library_update.rs |
+| `mark_duplicate_read_chapter_read` | src/misc/runner.rs, src/entry_core/backend.rs |
+| `mark_duplicate_seen_episode_seen` | src/misc/runner.rs, src/settings_ui/library.rs |
+| `navigate_pan` | src/settings_ui/merge.rs, src/settings_ui/reader/page.rs |
+| `player_decoder` | src/player_view/mod.rs, crates/kuro-player/src/options.rs |
+| `player_fullscreen` | crates/kuro-player/src/player_prefs.rs, src/settings_ui/player/controls.rs |
+| `player_hide_controls` | src/settings_ui/player/controls.rs, crates/kuro-player/src/seekbar.rs |
+| `pref_allow_gestures_in_panels` | src/settings_ui/player/controls.rs |
+| `pref_always_use_external_player` | src/updates/history_screen.rs, src/updates/updates_screen.rs |
+| `pref_animelib_columns_portrait_key` | src/browse/anime/prefs.rs, src/library/display_tab.rs |
+| `pref_app_theme` | src/theme/apply.rs, src/theme/mod.rs |
+| `pref_auto_update_manga_on_mark_read` | src/settings_ui/tracking.rs |
+| `pref_center_double_tap` | src/settings_ui/player/seeking.rs |
+| `pref_color_filter_key` | src/reader/settings_window.rs, src/reader/overlay.rs |
+| `pref_custom_brightness_key` | src/reader/overlay.rs, src/reader/settings_window.rs |
+| `pref_default_intro_length` | src/entry_core/anime/route.rs, src/settings_ui/route.rs |
+| `pref_disabled_ani_skip_chapters` | src/settings_ui/player/controls.rs |
+| `pref_display_mode_catalogue` | src/browse/fixtures_tests.rs, src/browse/anime/prefs.rs |
+| `pref_display_profile_key` | crates/kuro-images/src/fetch.rs, crates/kuro-images/src/decode/mod.rs |
+| `pref_display_vol_as_per` | src/settings_ui/player/controls.rs |
+| `pref_double_tap_anim_speed` | src/reader/viewers/page_opts.rs, src/reader/viewers/settings.rs |
+| `pref_dual_page_invert` | src/settings_ui/reader/page.rs, src/reader/settings_window.rs |
+| `pref_dual_page_invert_webtoon` | src/settings_ui/reader/page.rs, src/reader/chrome_tests.rs |
+| `pref_dual_page_rotate` | src/settings_ui/rows.rs, src/settings_ui/reader/rules.rs |
+| `pref_dual_page_rotate_invert` | src/settings_ui/reader/page.rs, src/reader/viewers/settings.rs |
+| `pref_dual_page_rotate_invert_webtoon` | src/settings_ui/reader/page.rs, src/reader/settings_window.rs |
+| `pref_dual_page_rotate_webtoon` | src/settings_ui/reader/rules.rs, src/settings_ui/reader/page.rs |
+| `pref_dual_page_split_webtoon` | src/reader/settings_window.rs, src/reader/chrome_tests.rs |
+| `pref_enable_ani_skip` | src/settings_ui/route.rs, src/settings_ui/player/controls.rs |
+| `pref_enable_auto_skip_ani_skip` | src/settings_ui/player/controls.rs |
+| `pref_enable_double_tap_zoom_webtoon` | src/settings_ui/reader/page.rs, src/reader/viewers/settings.rs |
+| `pref_enable_netflixStyle_aniskip` | src/settings_ui/player/controls.rs |
+| `pref_enable_skip_intro` | src/settings_ui/route.rs, src/settings_ui/player/controls.rs |
+| `pref_enable_transitions_key` | src/reader/viewers/engine.rs, src/reader/viewers/settings.rs |
+| `pref_filter_animelib_bookmarked_v2` | src/library/filter_tab.rs, src/library/load.rs |
+| `pref_filter_animelib_started_v2` | src/library/filter_tab.rs, src/library/load.rs |
+| `pref_filter_library_bookmarked_v2` | src/library/filter_tab.rs, src/library/load.rs |
+| `pref_filter_library_interval_custom` | src/library/load.rs |
+| `pref_filter_library_started_v2` | src/library/filter_tab.rs, src/library/load.rs |
+| `pref_gesture_horizontal_seek` | src/settings_ui/player/seeking.rs, crates/kuro-player/src/gesture_prefs.rs |
+| `pref_gpu_next` | crates/kuro-player/src/options.rs, src/settings_ui/player/decoder.rs |
+| `pref_grayscale` | src/reader/screen.rs, src/reader/overlay.rs |
+| `pref_inverted_colors` | src/reader/overlay.rs, src/reader/settings_window.rs |
+| `pref_keep_screen_on_key` | src/settings_ui/reader/page.rs, src/reader/screen.rs |
+| `pref_left_double_tap` | src/settings_ui/player/seeking.rs |
+| `pref_library_columns_portrait_key` | src/browse/anime/prefs.rs, src/library/display_tab.rs |
+| `pref_media_next` | src/settings_ui/player/seeking.rs |
+| `pref_media_playpause` | src/settings_ui/player/seeking.rs |
+| `pref_media_previous` | src/settings_ui/player/seeking.rs |
+| `pref_migration_direction` | src/browse/prefs.rs, src/browse/migrate_list.rs |
+| `pref_migration_sorting` | src/browse/migrate_list.rs, src/browse/prefs.rs |
+| `pref_panel_opacity` | src/settings_ui/player/controls.rs |
+| `pref_player_smooth_seek` | src/settings_ui/player/seeking.rs |
+| `pref_player_speed` | crates/kuro-player/src/options.rs, crates/kuro-player/src/strings.rs |
+| `pref_player_time_to_disappear` | src/settings_ui/player/controls.rs |
+| `pref_preserve_reading_position` | src/settings_ui/reader/page.rs, src/reader/screen.rs |
+| `pref_preserve_watching_position` | src/settings_ui/player/controls.rs |
+| `pref_progress_preference` | src/settings_ui/player/controls.rs |
+| `pref_reader_flash` | src/reader/screen.rs, src/reader/settings_window.rs |
+| `pref_reader_flash_duration` | src/settings_ui/reader/page.rs, src/reader/overlay.rs |
+| `pref_reader_flash_interval` | src/reader/overlay.rs, src/settings_ui/reader/page.rs |
+| `pref_reader_flash_mode` | src/settings_ui/reader/page.rs, src/reader/overlay.rs |
+| `pref_reduce_motion` | src/settings_ui/player/controls.rs, crates/kuro-player/src/anim.rs |
+| `pref_remember_decoder` | src/player_view/mod.rs, crates/kuro-player/src/options.rs |
+| `pref_remember_volume` | src/player_view/mod.rs |
+| `pref_right_double_tap` | src/settings_ui/player/seeking.rs |
+| `pref_show_current_chapter` | src/settings_ui/player/controls.rs, crates/kuro-player/src/view.rs |
+| `pref_show_empty_hosters` | src/settings_ui/player/controls.rs |
+| `pref_show_failed_hosters` | src/settings_ui/player/controls.rs |
+| `pref_show_loading` | src/settings_ui/player/controls.rs |
+| `pref_show_page_number_key` | src/shell/reader_root.rs, src/settings_ui/reader/page.rs |
+| `pref_show_reading_mode` | src/settings_ui/reader/page.rs, src/reader/screen.rs |
+| `pref_show_seekbar` | src/settings_ui/player/seeking.rs, crates/kuro-player/src/model.rs |
+| `pref_skip_length_preference` | src/settings_ui/player/seeking.rs |
+| `pref_theme_dark_amoled_key` | src/shell/onboarding.rs, src/settings_ui/appearance.rs |
+| `pref_try_hwdec` | src/settings_ui/player/decoder.rs |
+| `pref_update_season_on_library_update` | src/misc/runner.rs, src/settings_ui/library.rs |
+| `pref_update_season_on_refresh` | src/settings_ui/library.rs, src/entry_core/anime/remote.rs |
+| `pref_video_debanding` | src/settings_ui/rows.rs, src/settings_ui/player/decoder.rs |
+| `pref_waiting_time_aniskip` | src/settings_ui/player/controls.rs |
+| `reader_hide_threshold` | src/settings_ui/reader/page.rs, src/reader/viewers/settings.rs |
+| `reader_long_tap` | src/settings_ui/reader/page.rs, src/reader/settings_window.rs |
+| `reader_navigation_mode_pager` | src/reader/viewers/settings.rs, src/reader/settings_window.rs |
+| `reader_navigation_mode_webtoon` | src/settings_ui/reader/rules.rs, src/settings_ui/reader/page.rs |
+| `reader_navigation_overlay_new_user` | src/reader/screen.rs |
+| `reader_navigation_overlay_on_start` | src/settings_ui/reader/page.rs, src/reader/nav_overlay.rs |
+| `reader_tapping_inverted` | src/settings.rs, src/settings_ui/reader/page.rs |
+| `reader_tapping_inverted_webtoon` | src/settings_ui/reader/page.rs, src/reader/settings_window.rs |
+| `reader_volume_keys` | src/settings_ui/reader/rules.rs, src/settings_ui/reader/page.rs |
+| `reader_volume_keys_inverted` | src/reader/viewers/settings.rs, src/reader/settings_window.rs |
+| `relative_time_v2` | src/updates/history_screen.rs, src/updates/updates_screen.rs |
+| `show_next_episode_airing_time` | src/settings_ui/tracking.rs, crates/kuro-track/src/prefs.rs |
+| `show_not_runnable` | src/ext_host.rs, crates/kuro-extensions/src/anime/browse.rs |
+| `skip_dupe` | src/settings_ui/reader/page.rs, src/reader/chapters.rs |
+| `skip_filtered` | src/settings_ui/reader/page.rs, src/reader/screen.rs |
+| `skip_read` | src/settings_ui/reader/page.rs, src/reader/screen.rs |
+| `track_on_adding_to_library` | src/entry_core/route.rs, src/entry_core/tracking/summary.rs |
+| `use_yuv420p` | crates/kuro-player/src/player_prefs.rs, crates/kuro-player/src/options.rs |
+| `verbose_logging` | src/util/logging.rs, crates/kuro-player/src/options.rs |
+| `webtoon_disable_zoom_out` | src/settings_ui/reader/page.rs, src/reader/settings_window.rs |
+| `webtoon_side_padding` | src/settings_ui/reader/page.rs, src/reader/viewers/engine.rs |
+
+### Blocked: CUT keys read by another crate's key string, or by a function another lane calls
+
+These have no field-name reader outside the lane, but the key string or a function is used elsewhere. The library entry defaults (`default_*`) are read by `kuro-domain::entries::defaults::set_*_settings_default`, which `src/entry_core` calls from the Set-as-default flows; cut them only after the entry lane removes those calls. The player keys are read by `crates/kuro-player` (`player_prefs.rs`, `aspect.rs`, `speed.rs`, `stats_page.rs`). `pref_always_decode_long_strip_with_ssiv` is read by `src/reader/viewers`. `pref_hardware_bitmap_threshold` is already in `DROPPED_KEYS` and still read by `src/settings_ui/decode.rs` and `src/reader/tiles.rs`. `incognito_extensions` is read by `src/browse/ext_details_page.rs`; the global incognito lists (`incognito_manga_extensions`, `incognito_anime_extensions`) stay, so this one is the twin to unify once that page is changed.
+
+`anime_migrate_flags`, `auto_download_while_reading`, `auto_download_while_watching`, `default_chapter_display_by_name_or_number`, `default_chapter_filter_by_bookmarked`, `default_chapter_filter_by_downloaded`, `default_chapter_filter_by_read`, `default_chapter_sort_by_ascending_or_descending`, `default_chapter_sort_by_source_or_number`, `default_episode_filter_by_bookmarked`, `default_episode_filter_by_downloaded`, `default_episode_filter_by_fillermarked`, `default_episode_filter_by_seen`, `default_episode_show_thumbnail_previews`, `default_episode_sort_by_source_or_number`, `default_season_download_overlay`, `default_season_filter_by_bookmarked`, `default_season_filter_by_completed`, `default_season_filter_by_downloaded`, `default_season_filter_by_fillermarked`, `default_season_filter_by_started`, `default_season_filter_by_unseen`, `default_season_sort_by_ascending_or_descending`, `default_season_sort_by_source_or_number`, `default_speed_presets`, `download_new_anime_categories`, `download_new_anime_categories_exclude`, `download_new_categories`, `download_new_categories_exclude`, `download_new_unread_chapters_only`, `download_new_unread_episodes_only`, `download_speed_limit`, `external_downloader_selection`, `incognito_extensions`, `migrate_flags`, `pref_always_decode_long_strip_with_ssiv`, `pref_audio_config`, `pref_audio_delay`, `pref_audio_pitch_correction`, `pref_audio_volume_boost_cap`, `pref_background_color_subtitles`, `pref_bold_subtitles`, `pref_border_color_subtitles`, `pref_border_style_subtitles`, `pref_download_fillermarked`, `pref_hardware_bitmap_threshold`, `pref_italic_subtitles`, `pref_override_subtitles_ass`, `pref_player_aspect_state`, `pref_player_filter_brightness`, `pref_player_filter_contrast`, `pref_player_filter_gamma`, `pref_player_filter_hue`, `pref_player_filter_saturation`, `pref_player_statistics_page`, `pref_remove_after_marked_as_read_key`, `pref_remove_bookmarked`, `pref_screenshot_subtitles`, `pref_show_system_status_bar`, `pref_sub_border_size`, `pref_sub_justify`, `pref_sub_pos`, `pref_sub_scale`, `pref_subtitle_blacklist`, `pref_subtitle_font`, `pref_subtitles_delay`, `pref_subtitles_font_size`, `pref_subtitles_secondary_delay`, `pref_subtitles_speed`, `pref_subtitle_whitelist`, `pref_text_color_subtitles`, `remove_exclude_anime_categories`, `remove_exclude_categories`, `restore_after_crash`, `save_chapter_as_cbz`, `split_tall_images`, `sub_shadow_offset`, `upcoming.home_returns_today`, `upcoming.week_start`, `use_external_downloader`
+

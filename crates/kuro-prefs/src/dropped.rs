@@ -29,7 +29,7 @@ mod tests {
     use crate::store::PrefStore;
     use crate::values::PrefValue;
 
-    /// The keys that Android used and the desktop hides (T-02a-032). Each one is either registered or, for the two
+    /// The keys that Android used and the desktop hides (T-02a-032). Each one is either registered or, for the three
     /// listed in `DROPPED`, deliberately absent.
     const ANDROID_ONLY: [&str; 15] = [
         "extension_installer",
@@ -49,8 +49,8 @@ mod tests {
         "external_downloader_selection",
     ];
 
-    /// Listed above but not registered: the Android installer choice and the hardware bitmap threshold.
-    const DROPPED: [&str; 2] = ["extension_installer", "pref_hardware_bitmap_threshold"];
+    /// Listed above but not registered: the Android installer choice, the hardware bitmap threshold and the display cutout.
+    const DROPPED: [&str; 3] = ["extension_installer", "pref_hardware_bitmap_threshold", "cutout_short"];
 
     /// A value of the registry kind, different from the default, so a lost value cannot pass as a default.
     fn sample(kind: Kind) -> PrefValue {

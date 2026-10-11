@@ -30,13 +30,14 @@ pub struct ListPrefs {
 }
 
 impl ListPrefs {
-    /// Reads `source_languages`, `hidden_anime_catalogues`, `pinned_anime_catalogues` and the last-used anime source.
+    /// Reads `source_languages`. Hidden and pinned sources are not read: their toggles are cut, so the language filter
+    /// alone decides which sources show.
     pub fn read(prefs: &SourcePrefs) -> Self {
         Self {
             enabled_langs: prefs.enabled_languages.get(),
-            hidden: prefs.disabled_anime_sources.get(),
-            pinned: prefs.pinned_anime_sources.get(),
-            last_used: prefs.last_used_anime_source.get(),
+            hidden: BTreeSet::new(),
+            pinned: BTreeSet::new(),
+            last_used: crate::misc::diet_defaults::BROWSE_LAST_USED_SOURCE,
             locale: system_locale(),
         }
     }
@@ -398,22 +399,6 @@ mod tests {
     }
 
     #[test]
-    fn the_last_used_duplicate_follows_the_pin_toggle() {
-        let store = PrefStore::in_memory();
-        let source_prefs = SourcePrefs::new(store);
-        source_prefs.enabled_languages.set(set(&["en"])).expect("store");
-        source_prefs.last_used_anime_source.set(1).expect("store");
-        let sources = [Source::new(1, "Alpha", "en")];
-        let toggles = anime_toggles(&source_prefs);
-        assert!(toggles.toggle_pin(1).expect("pin on"));
-        let pinned = enabled_source_rows(&sources, &ListPrefs::read(&source_prefs));
-        assert_eq!(headers(&pinned), [Section::LastUsed, Section::Pinned]);
-        assert!(!toggles.toggle_pin(1).expect("pin off"));
-        let unpinned = enabled_source_rows(&sources, &ListPrefs::read(&source_prefs));
-        assert_eq!(headers(&unpinned), [Section::LastUsed, lang("en")]);
-    }
-
-    #[test]
     fn a_bulk_disable_and_enable_write_every_id_in_one_set() {
         let store = PrefStore::in_memory();
         let source_prefs = SourcePrefs::new(store);
@@ -558,12 +543,12 @@ mod tests {
     }
 
     #[test]
-    fn list_prefs_read_the_anime_keys_and_the_last_used_source() {
+    fn list_prefs_read_only_the_languages_and_ignore_the_cut_hide_and_pin_sets() {
         let prefs = SourcePrefs::new(PrefStore::in_memory());
         prefs.disabled_anime_sources.set(set(&["9"])).expect("store");
-        prefs.last_used_anime_source.set(4).expect("store");
+        prefs.pinned_anime_sources.set(set(&["8"])).expect("store");
         let read = ListPrefs::read(&prefs);
-        assert_eq!((read.hidden, read.last_used), (set(&["9"]), 4));
+        assert_eq!((read.hidden, read.pinned, read.last_used), (BTreeSet::new(), BTreeSet::new(), -1), "the language filter alone decides");
         assert!(read.enabled_langs.contains("en"), "the default languages come from the locale");
     }
 }

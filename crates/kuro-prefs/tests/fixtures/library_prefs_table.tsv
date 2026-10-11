@@ -5,7 +5,7 @@
 3	animelib_sorting_mode	normal	anime_sorting_mode	str	ALPHABETICAL,ASCENDING
 4	library_update_last_timestamp	app-state	last_updated_timestamp	long	0
 5	pref_library_update_interval_key	normal	auto_update_interval	int	0
-6	library_update_restriction	normal	auto_update_device_restrictions	set	wifi
+6	library_update_restriction	normal	auto_update_device_restrictions	set	
 7	library_update_manga_restriction	normal	auto_update_item_restrictions	set	manga_fully_read,manga_ongoing,manga_started,manga_outside_release_period
 8	auto_update_metadata	normal	auto_update_metadata	bool	false
 9	display_continue_reading_button	normal	show_continue_viewing_button	bool	false

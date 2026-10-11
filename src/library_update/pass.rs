@@ -374,7 +374,7 @@ where
         }
         let per_source: Vec<(usize, bool)> = queued_per_source
             .into_iter()
-            .map(|(source, count)| (count, deps.registry.get_or_stub(source).is_unmetered()))
+            .map(|(source, count)| (count, deps.registry.get_or_stub(kind, source).is_unmetered()))
             .collect();
         if text::queue_needs_warning(&per_source) {
             deps.host.show_queue_warning(kind);

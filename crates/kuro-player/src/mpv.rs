@@ -395,7 +395,8 @@ mod tests {
     fn mpv_conf_in_config_dir_is_applied() {
         let data = tempfile::tempdir().unwrap();
         let mpv_dir = data.path().join("mpv");
-        crate::config::write_mpv_config(&mpv_dir, "volume=37\n", "").unwrap();
+        std::fs::create_dir_all(&mpv_dir).unwrap();
+        std::fs::write(mpv_dir.join("mpv.conf"), "volume=37\n").unwrap();
         let handle = headless_in(data.path());
         assert_eq!(handle.get_flag("config"), Some(true));
         assert_eq!(handle.get_string("config-dir").as_deref(), mpv_dir.to_str());

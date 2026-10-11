@@ -80,7 +80,7 @@ impl Library {
         let artifacts = DirArtifacts { anime_dir: self.extensions_dir.join("anime"), manga_dir: self.extensions_dir.clone() };
         let inputs = CreateInputs {
             library: &library,
-            sources: &NothingInstalled,
+            sources: &crate::library_update::live::LiveRegistry,
             prefs: &prefs,
             source_prefs: &prefs,
             // read only when the options ask for extensions, so the default is off (T-21a-019)

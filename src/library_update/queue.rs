@@ -98,30 +98,6 @@ impl SkipReason {
     }
 }
 
-/// Preference keys of the category filter of one library kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CategoryPrefKeys {
-    pub include: &'static str,
-    pub exclude: &'static str,
-}
-
-pub const MANGA_CATEGORY_KEYS: CategoryPrefKeys = CategoryPrefKeys {
-    include: "library_update_categories",
-    exclude: "library_update_categories_exclude",
-};
-
-pub const ANIME_CATEGORY_KEYS: CategoryPrefKeys = CategoryPrefKeys {
-    include: "animelib_update_categories",
-    exclude: "animelib_update_categories_exclude",
-};
-
-pub fn category_keys(kind: EntryKind) -> CategoryPrefKeys {
-    match kind {
-        EntryKind::Manga => MANGA_CATEGORY_KEYS,
-        EntryKind::Anime => ANIME_CATEGORY_KEYS,
-    }
-}
-
 pub struct QueueInput<'a> {
     pub library: &'a [LibraryEntry],
     /// `Some(id)` for a manual run of one category; it ignores the include and exclude lists.
@@ -454,13 +430,5 @@ mod tests {
             season_children: &empty_map,
         });
         assert!(missing.entries.is_empty());
-    }
-
-    #[test]
-    fn category_keys_differ_per_kind() {
-        assert_eq!(category_keys(EntryKind::Manga).include, "library_update_categories");
-        assert_eq!(category_keys(EntryKind::Manga).exclude, "library_update_categories_exclude");
-        assert_eq!(category_keys(EntryKind::Anime).include, "animelib_update_categories");
-        assert_eq!(category_keys(EntryKind::Anime).exclude, "animelib_update_categories_exclude");
     }
 }

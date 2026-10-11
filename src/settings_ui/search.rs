@@ -32,30 +32,21 @@ pub fn render(screen: &dyn SearchableSettings, prefs: &Prefs) -> PageBuilt {
 }
 
 /// The main index, in index order (Android `settingScreens`). About is not indexed.
-pub const MAIN_SCREENS: [&str; 9] = [
+pub const MAIN_SCREENS: [&str; 6] = [
     "settings_appearance",
     "settings_library",
     "settings_reader",
     "settings_downloads",
-    "settings_tracking",
     "settings_browse",
     "settings_data_storage",
-    "settings_security",
-    "settings_advanced",
 ];
 
 /// The player index (Android `playerSettingScreens`), appended after the main index.
-pub const PLAYER_SCREENS: [&str; 10] = [
+pub const PLAYER_SCREENS: [&str; 4] = [
     "settings_player",
-    "settings_player_internal",
-    "settings_player_gestures",
-    "settings_player_decoder",
-    "settings_player_subtitle",
-    "settings_player_audio",
     "settings_player_custom_buttons",
     "settings_player_editor",
     "settings_player_torrents",
-    "settings_player_advanced",
 ];
 
 /// The first breadcrumb node of a hit from the player index during a non-player search.
@@ -301,7 +292,7 @@ mod tests {
         let expected: Vec<&str> = MAIN_SCREENS.iter().chain(PLAYER_SCREENS.iter()).copied().collect();
         assert_eq!(screens, expected);
         assert!(!screens.contains(&"settings_about"));
-        assert_eq!(rows.iter().filter(|r| r.player).count(), 10);
+        assert_eq!(rows.iter().filter(|r| r.player).count(), 4);
         assert_eq!(rows[0].screen_title, "Appearance", "titles come from the spec");
     }
 
@@ -335,11 +326,11 @@ mod tests {
 
     #[test]
     fn a_player_hit_gets_the_player_prefix_first() {
-        let mut row = row_of("Seeking", None, "settings_player_gestures", Some("Seeking"), true);
-        row.screen_title = "Gestures".into();
-        assert_eq!(crumb(&row), "Player > Gestures > Seeking");
+        let mut row = row_of("Buttons", None, "settings_player_custom_buttons", Some("Buttons"), true);
+        row.screen_title = "Custom buttons".into();
+        assert_eq!(crumb(&row), "Player > Custom buttons > Buttons");
         row.player = false;
-        assert_eq!(crumb(&row), "Gestures > Seeking", "the prefix is only for the player index");
+        assert_eq!(crumb(&row), "Custom buttons > Buttons", "the prefix is only for the player index");
     }
 
     #[test]

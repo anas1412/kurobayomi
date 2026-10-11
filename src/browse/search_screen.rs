@@ -102,7 +102,7 @@ pub fn source_route_for(kind: BrowseKind, source_id: i64, typed: &str, migrating
 
 /// What a search page needs of the app.
 pub struct SearchEnv {
-    /// Which catalogue the page searches: it reads that kind's pinned and hidden sources and routes its rows.
+    /// Which catalogue the page searches: it reads that kind's languages and routes its rows.
     pub kind: BrowseKind,
     pub prefs: Rc<BrowsePrefs>,
     pub directory: Option<Arc<dyn SourceDirectory>>,
@@ -129,12 +129,11 @@ fn error_state(text: &str) -> gtk::Widget {
 pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Widget {
     let Start::Search { query, extension, origin } = start else { return error_state(&tr(MsgKey::unknown_error)) };
     let sources = &env.prefs.sources;
-    let only_has_results = sources.global_search_filter_state.get();
+    // the has-results toggle is cut from the settings: it starts off on every open
+    let only_has_results = false;
     let directory = env.directory.clone();
-    let (pinned, hidden) = match env.kind {
-        BrowseKind::Manga => (sources.pinned_manga_sources.get(), sources.disabled_manga_sources.get()),
-        BrowseKind::Anime => (sources.pinned_anime_sources.get(), sources.disabled_anime_sources.get()),
-    };
+    // the pin and hide sets are cut: every source of an enabled language is searched
+    let (pinned, hidden): (BTreeSet<String>, BTreeSet<String>) = (BTreeSet::new(), BTreeSet::new());
     let engine = GlobalSearch::new(candidates(directory.as_deref(), &pinned), sources.enabled_languages.get(), hidden_ids(&hidden), *origin, only_has_results);
     // the page and the runner reach each other: the page calls the runner through a weak slot
     let slot: Rc<RefCell<Weak<SearchRunner>>> = Rc::default();
@@ -148,7 +147,7 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
         }
     };
     let submit = with_runner(|runner, text| runner.submit(text));
-    let (typed_slot, open_route, prefs) = (Rc::clone(&slot), Rc::clone(&env.open_route), Rc::clone(&env.prefs));
+    let (typed_slot, open_route) = (Rc::clone(&slot), Rc::clone(&env.open_route));
     let (open_entry, preview) = (env.pick_entry.clone().unwrap_or_else(|| Rc::clone(&env.open_entry)), Rc::clone(&env.open_entry));
     let kind = env.kind;
     let nav = GlobalSearchNav {
@@ -159,14 +158,11 @@ pub fn search_widget(env: &SearchEnv, start: &Start, migrating: bool) -> gtk::Wi
         preview: Rc::new(move |_, item| preview(item.id)),
         load_cover: file_cover_loader(),
         chips: SearchChips {
-            filter: if extension.is_some() { SourceFilter::All } else { SourceFilter::PinnedOnly },
+            filter: SourceFilter::All,
             only_has_results,
         },
         on_chips: Rc::new(move |chips| {
-            // the toggle is stored for the next page (the same key serves the migrate search); the filter searches again
-            if let Err(error) = prefs.sources.global_search_filter_state.set(chips.only_has_results) {
-                tracing::warn!(%error, "the has-results toggle could not be stored");
-            }
+            // the filter searches again; the toggle is not stored (the setting is cut)
             let runner = typed_slot.borrow().upgrade();
             if let Some(runner) = runner {
                 runner.set_only_has_results(chips.only_has_results);
@@ -239,7 +235,7 @@ fn production_env(kind: BrowseKind, migrate_from: Option<i64>) -> SearchEnv {
 
 /// A card of an anime migrate search: the dialog of what to include for moving `old` to the card's anime. Show anime and
 /// Show seasons open the card's page, where a seasons title lists its seasons. The options come from the old title (its
-/// custom cover and background) and start from the saved `anime_migrate_flags`, which every run stores before it starts.
+/// custom cover and background) and start with every option selected; the choice is not stored.
 /// Copy and Migrate run the anime migration engine on the main context; a success pops the search and pushes the new
 /// entry, a failure shows its reason in the dialog.
 fn anime_migrate_dialog(repo: AnimeRepo, old: i64) -> Rc<dyn Fn(i64)> {
@@ -247,28 +243,22 @@ fn anime_migrate_dialog(repo: AnimeRepo, old: i64) -> Rc<dyn Fn(i64)> {
     use super::anime::migrate_dialog::{Facts, MigrateHandlers, show};
     use super::anime::migrate_engine::migrate_anime;
     use super::anime::migrate_live::AnimeLiveSteps;
-    use super::anime::prefs::AnimeBrowsePrefs;
     use super::migrate_engine::MigratePlan;
     let slot = super::dialogs::DialogSlot::new();
-    let prefs = Rc::new(AnimeBrowsePrefs::new(crate::data::app().base.store().clone()));
     Rc::new(move |new: i64| {
         let (Ok(old_anime), Ok(new_anime)) = (repo.by_id(old), repo.by_id(new)) else {
             tracing::error!(old, new, "an anime of the migrate dialog could not be read");
             crate::toast::notify(tr(MsgKey::internal_error));
             return;
         };
-        let (save, stored) = (Rc::clone(&prefs), Rc::clone(&prefs));
         let app = crate::data::app();
         let steps = Rc::new(AnimeLiveSteps::new(app.db(EntryKind::Anime), Arc::new(AnimeDirectory::current(repo.clone())), app.base.store().clone()));
         let (old_row, new_row) = (old_anime.clone(), new_anime.clone());
         let handlers = MigrateHandlers {
             show_anime: Rc::new(move || crate::entry_core::anime::route::open(new)),
             show_seasons: Rc::new(move || crate::entry_core::anime::route::open(new)),
-            save_flags: Rc::new(move |bitmap| {
-                if let Err(error) = save.save_migrate_flags(bitmap) {
-                    tracing::warn!(%error, "the anime migrate flags could not be stored");
-                }
-            }),
+            // the migrate flags are cut from the settings: the choice is not stored
+            save_flags: Rc::new(|_bitmap: i32| {}),
             run: Rc::new(move |run, done| {
                 let (steps, old_anime, new_anime) = (Rc::clone(&steps), old_row.clone(), new_row.clone());
                 let plan = MigratePlan { replace: run.replace, flags: run.flags as i32 };
@@ -301,7 +291,7 @@ fn anime_migrate_dialog(repo: AnimeRepo, old: i64) -> Rc<dyn Fn(i64)> {
             custom_background: has(kuro_images::cover_paths::Family::AnimeBackground),
             downloads: false,
         };
-        show(&slot, &crate::ui::window(), fetch(old_anime.fetch_type), fetch(new_anime.fetch_type), facts, stored.migrate_flags(), handlers);
+        show(&slot, &crate::ui::window(), fetch(old_anime.fetch_type), fetch(new_anime.fetch_type), facts, crate::misc::diet_defaults::MIGRATE_FLAGS_ALL, handlers);
     })
 }
 
@@ -322,16 +312,12 @@ pub(super) fn manga_migrate_dialog(old: i64) -> Rc<dyn Fn(i64)> {
         };
         let downloads = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
         let steps = Rc::new(LiveSteps::new(app.db(EntryKind::Manga), super::directory::current(), downloads));
-        let prefs = Rc::new(BrowsePrefs::new(app.base.store().clone()));
-        let (save, ran) = (Rc::clone(&prefs), Rc::clone(&steps));
+        let ran = Rc::clone(&steps);
         let (old_row, new_row) = (old_manga.clone(), new_manga.clone());
         let handlers = Handlers {
             show_manga: Rc::new(move || crate::entry_core::route::open(new)),
-            save_flags: Rc::new(move |bitmap| {
-                if let Err(error) = save.migrate_flags.set(bitmap) {
-                    tracing::warn!(%error, "the migrate flags could not be stored");
-                }
-            }),
+            // the migrate flags are cut from the settings: the choice is not stored
+            save_flags: Rc::new(|_bitmap: i32| {}),
             run: Rc::new(move |plan, done| {
                 let (steps, old_manga, new_manga) = (Rc::clone(&ran), old_row.clone(), new_row.clone());
                 gtk::glib::spawn_future_local(async move { done(migrate_manga(&*steps, &old_manga, &new_manga, plan).await) });
@@ -339,7 +325,7 @@ pub(super) fn manga_migrate_dialog(old: i64) -> Rc<dyn Fn(i64)> {
             finished: Rc::new(crate::ui::pop),
             toast: Rc::new(|text| crate::toast::notify(text)),
         };
-        show(&crate::ui::window(), LiveSteps::has_custom_cover(&old_manga), steps.has_downloads(&old_manga), prefs.migrate_flags.get(), handlers);
+        show(&crate::ui::window(), LiveSteps::has_custom_cover(&old_manga), steps.has_downloads(&old_manga), crate::misc::diet_defaults::MIGRATE_FLAGS_ALL, handlers);
     })
 }
 
@@ -467,7 +453,7 @@ pub(crate) mod tests {
         _entered: tokio::runtime::EnterGuard<'static>,
     }
 
-    /// Two pinned sources, 1 (ext.a) and 2 (ext.b), that each answer a search with one entry.
+    /// Two sources, 1 (ext.a) and 2 (ext.b), that each answer a search with one entry.
     fn rig() -> Rig {
         let rt: &'static tokio::runtime::Runtime =
             Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_time().build().expect("runtime")));
@@ -482,7 +468,6 @@ pub(crate) mod tests {
             }),
         });
         let prefs = Rc::new(BrowsePrefs::new(PrefStore::in_memory()));
-        prefs.sources.pinned_manga_sources.set(BTreeSet::from(["1".to_owned(), "2".to_owned()])).expect("pins");
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let (entry_log, replace_log, route_log) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
         let env = SearchEnv {
@@ -529,11 +514,11 @@ pub(crate) mod tests {
         out
     }
 
-    fn a_page_with_a_query_searches_the_pinned_sources_and_draws_their_rows() {
+    fn a_page_with_a_query_searches_every_enabled_source_and_draws_their_rows() {
         let rig = rig();
         let start = Start::Search { query: "one".into(), extension: None, origin: None };
         let page = search_widget(&rig.env, &start, false);
-        assert!(pump_until(|| rig.asked.lock().expect("lock").len() == 2), "both pinned sources are asked");
+        assert!(pump_until(|| rig.asked.lock().expect("lock").len() == 2), "both sources are asked");
         assert!(rig.asked.lock().expect("lock").iter().all(|q| *q == BrowseQuery::Search("one".into())));
         assert!(pump_until(|| {
             let text = labels(&page);
@@ -541,22 +526,17 @@ pub(crate) mod tests {
         }), "the results are drawn: {:?}", labels(&page));
     }
 
-    fn the_has_results_toggle_is_stored_and_read_again_by_the_next_page() {
+    fn the_has_results_toggle_filters_the_open_page_and_is_not_stored() {
         let rig = rig();
-        assert!(!rig.env.prefs.sources.global_search_filter_state.get());
         let start = Start::Search { query: String::new(), extension: None, origin: None };
         let page = search_widget(&rig.env, &start, false);
-        assert!(pump_until(|| toggles(&page).len() == 3), "Pinned, All and Has results");
+        assert!(pump_until(|| toggles(&page).len() == 2), "All and Has results");
         let chips = toggles(&page);
-        chips[2].set_active(true);
-        assert!(rig.env.prefs.sources.global_search_filter_state.get(), "T-40b-063: the toggle is stored");
+        assert!(!chips[1].is_active(), "the toggle starts off on every open");
         let again = search_widget(&rig.env, &start, true);
-        assert!(pump_until(|| toggles(&again).len() == 3));
-        assert!(toggles(&again)[2].is_active(), "the migrate search reads the same key");
-        chips[2].set_active(false);
-        assert!(!rig.env.prefs.sources.global_search_filter_state.get());
+        assert!(pump_until(|| toggles(&again).len() == 2));
+        assert!(!toggles(&again)[1].is_active(), "the next page does not read it back");
     }
-
     fn a_source_arrow_opens_its_listing_with_the_typed_text() {
         let rig = rig();
         let start = Start::Search { query: "one".into(), extension: None, origin: None };
@@ -617,14 +597,12 @@ pub(crate) mod tests {
         assert!(rig.asked.lock().expect("lock").is_empty());
     }
 
-    fn an_anime_page_reads_the_anime_pins_hints_what_to_search_and_sends_its_rows_to_the_anime_page() {
+    fn an_anime_page_searches_its_enabled_sources_and_sends_its_rows_to_the_anime_page() {
         let mut rig = rig();
         rig.env.kind = BrowseKind::Anime;
-        // the manga pins of the rig do not count for anime: only source 2 is pinned there
-        rig.env.prefs.sources.pinned_anime_sources.set(BTreeSet::from(["2".to_owned()])).expect("pins");
         let page = search_widget(&rig.env, &Start::Search { query: "one".into(), extension: None, origin: None }, false);
-        assert!(pump_until(|| labels(&page).iter().any(|t| t == "Found 2")), "the pinned anime source answers: {:?}", labels(&page));
-        assert_eq!(rig.asked.lock().expect("lock").len(), 1, "only the anime-pinned source is asked, not the manga-pinned ones");
+        assert!(pump_until(|| labels(&page).iter().any(|t| t == "Found 2")), "the anime source answers: {:?}", labels(&page));
+        assert_eq!(rig.asked.lock().expect("lock").len(), 2, "every enabled anime source is asked");
         let search = {
             fn find(widget: &gtk::Widget) -> Option<gtk::SearchEntry> {
                 if let Some(entry) = widget.downcast_ref::<gtk::SearchEntry>() {
@@ -657,9 +635,9 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn smoke() {
-        an_anime_page_reads_the_anime_pins_hints_what_to_search_and_sends_its_rows_to_the_anime_page();
-        a_page_with_a_query_searches_the_pinned_sources_and_draws_their_rows();
-        the_has_results_toggle_is_stored_and_read_again_by_the_next_page();
+        an_anime_page_searches_its_enabled_sources_and_sends_its_rows_to_the_anime_page();
+        a_page_with_a_query_searches_every_enabled_source_and_draws_their_rows();
+        the_has_results_toggle_filters_the_open_page_and_is_not_stored();
         a_source_arrow_opens_its_listing_with_the_typed_text();
         a_card_opens_its_entry_and_one_result_with_an_extension_filter_replaces_the_page();
         a_migrate_search_with_a_missing_manga_is_an_error_state_that_searches_nothing();

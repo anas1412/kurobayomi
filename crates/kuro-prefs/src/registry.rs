@@ -271,7 +271,7 @@ define_prefs! {
     "animelib_sorting_mode", Normal, Str, "ALPHABETICAL,ASCENDING", "library", "anime_sorting_mode";
     "__APP_STATE_library_update_last_timestamp", AppState, Long, 0, "library", "last_updated_timestamp";
     "pref_library_update_interval_key", Normal, Int, 0, "library", "auto_update_interval";
-    "library_update_restriction", Normal, Set, &["wifi"], "library", "auto_update_device_restrictions";
+    "library_update_restriction", Normal, Set, &[], "library", "auto_update_device_restrictions";
     "library_update_manga_restriction", Normal, Set, &["manga_fully_read", "manga_ongoing", "manga_started", "manga_outside_release_period"], "library", "auto_update_item_restrictions";
     "auto_update_metadata", Normal, Bool, false, "library", "auto_update_metadata";
     "display_continue_reading_button", Normal, Bool, false, "library", "show_continue_viewing_button";
@@ -349,7 +349,7 @@ define_prefs! {
     "pref_update_season_on_library_update", Normal, Bool, false, "library", "update_season_on_library_update";
     "mark_duplicate_read_chapter_read", Normal, Set, &[], "library", "mark_duplicate_read_chapter_as_read";
     "mark_duplicate_seen_episode_seen", Normal, Set, &[], "library", "mark_duplicate_seen_episode_as_seen";
-    "pref_download_only_over_wifi_key", Normal, Bool, true, "downloads", "download_only_over_wifi";
+    "pref_download_only_over_wifi_key", Normal, Bool, false, "downloads", "download_only_over_wifi";
     "use_external_downloader", Normal, Bool, false, "downloads", "use_external_downloader";
     "external_downloader_selection", Normal, Str, "", "downloads", "external_downloader_selection";
     "save_chapter_as_cbz", Normal, Bool, true, "downloads", "save_chapters_as_cbz";
@@ -398,9 +398,8 @@ define_prefs! {
     "pref_show_page_number_key", Normal, Bool, true, "reader", "show_page_number";
     "pref_show_reading_mode", Normal, Bool, true, "reader", "show_reading_mode";
     "fullscreen", Normal, Bool, false, "reader", "fullscreen";
-    "cutout_short", Normal, Bool, true, "reader", "cutout_short";
     "pref_keep_screen_on_key", Normal, Bool, true, "reader", "keep_screen_on";
-    "pref_default_reading_mode_key", Normal, Int, 2, "reader", "default_reading_mode";
+    "pref_default_reading_mode_key", Normal, Int, 1, "reader", "default_reading_mode";
     "pref_enable_double_tap_zoom_webtoon", Normal, Bool, true, "reader", "webtoon_double_tap_zoom_enabled";
     "pref_image_scale_type_key", Normal, Int, 1, "reader", "image_scale_type";
     "pref_zoom_start_key", Normal, Int, 1, "reader", "zoom_start";
@@ -544,8 +543,9 @@ define_prefs! {
 /// * `tablet_ui_mode`, the screen orientation of the reader and of the player, `secure_screen_v2` and its older
 ///   spelling `secure_screen`: phone window features;
 /// * the four swipe actions of the chapter and episode rows: touch gestures;
-/// * the brightness and volume gestures of the player, and the remembered brightness that only they changed.
-pub const DROPPED_KEYS: [&str; 19] = [
+/// * the brightness and volume gestures of the player, and the remembered brightness that only they changed;
+/// * the display cutout (`cutout_short`): the desktop has no cutout.
+pub const DROPPED_KEYS: [&str; 20] = [
     "extension_installer",
     "pref_hardware_bitmap_threshold",
     "eh_enable_source_blacklist",
@@ -565,6 +565,7 @@ pub const DROPPED_KEYS: [&str; 19] = [
     "pref_swap_volume_and_brightness",
     "pref_remember_brightness",
     "player_brightness_value",
+    "cutout_short",
 ];
 
 /// Whether `key` (as stored, without the backup prefix) belongs to a dropped feature.
@@ -664,17 +665,18 @@ mod tests {
     const PROSE_DEFAULTS: [(&str, Lit); 5] = [
         ("pref_app_theme", Lit::Str("DEFAULT")),
         ("source_languages", Lit::Set(&["all", "en"])),
-        ("library_update_restriction", Lit::Set(&["wifi"])),
+        ("library_update_restriction", Lit::Set(&[])),
         ("__APP_STATE_storage_dir", Lit::Str("")),
         ("pref_torrserver_tackers", Lit::Str(TORRSERVER_TRACKERS)),
     ];
 
-    const DESKTOP_DEFAULTS: [&str; 2] = ["fullscreen", "player_fullscreen"];
+    /// Desktop decision (2026-10-11): a wired PC must not wait for Wi-Fi, so downloads are not held back by default.
+    const DESKTOP_DEFAULTS: [&str; 3] = ["fullscreen", "player_fullscreen", "pref_download_only_over_wifi_key"];
 
     #[test]
-    fn registry_has_the_309_plan_rows_in_order() {
+    fn registry_has_the_308_plan_rows_in_order() {
         let rows = plan_rows();
-        assert_eq!(rows.len(), 309, "the plan's 328 rows minus the derived animeext_updates_count and the 18 dropped keys");
+        assert_eq!(rows.len(), 308, "the plan's 328 rows minus the derived animeext_updates_count and the 19 dropped plan rows");
         // five Kurobayomi rows after the plan's rows: `show_not_runnable` (T-19a-066), `anime_ext_last_check` (T-19a-064),
         // `check_app_updates` and `last_app_check` (T-07a-036), and `muted_notification_channels` (T-req-platform-004)
         assert_eq!(REGISTRY.len(), rows.len() + 8);

@@ -39,8 +39,14 @@ const RETRIES: u32 = 10;
 /// The path segments a Comix image host serves the same file under, tried after the alt hosts.
 const PATH_VARIANTS: [&str; 7] = ["hi", "fcf", "i5", "si", "i", "sii", "ii"];
 
-/// What the reader shows for a chapter whose page list is still being fetched.
+/// What the reader's loader reports for a chapter whose page list is still being fetched. It is a wait, not a failure:
+/// the reader shows its spinner and asks again (see [`is_pending`]).
 pub const STILL_LOADING: &str = "The page list is still loading. Try again in a moment.";
+
+/// Whether a load error is the wait for a page list that is still being fetched.
+pub fn is_pending(message: &str) -> bool {
+    message == STILL_LOADING
+}
 
 pub struct SourcePages {
     source: Arc<dyn MangaSource>,
@@ -53,7 +59,6 @@ pub struct SourcePages {
 
 impl SourcePages {
     pub fn new(source: Arc<dyn MangaSource>, client: NetworkClient, headers: HeaderMap, runtime: Handle) -> Self {
-        // plug-in sources that scramble their pages bring their own descrambler; none is built in
         let unscramble: Option<Unscramble> = None;
         Self { source, client, headers, unscramble, runtime }
     }
@@ -401,6 +406,12 @@ mod tests {
     }
 
     #[test]
+    fn only_the_still_loading_message_is_a_wait() {
+        assert!(is_pending(STILL_LOADING));
+        assert!(!is_pending("Failed to load pages: 404"));
+    }
+
+    #[test]
     fn an_image_is_tried_without_its_fragment_then_on_each_alt_host_then_on_each_path_variant() {
         assert_eq!(attempts("https://img.example/a/1.png", false), ["https://img.example/a/1.png"]);
         assert_eq!(attempts("https://img.example/i/1.png", false), ["https://img.example/i/1.png"], "only Comix has path variants");
@@ -435,5 +446,31 @@ mod tests {
         let request = request("https://temp.compsci88.com/manga/x/1.png", &headers).unwrap();
         assert_eq!(request.headers.get("referer").unwrap(), "https://weebcentral.com/");
         assert_eq!(request.url.as_str(), "https://temp.compsci88.com/manga/x/1.png");
+    }
+
+    const GRID: u32 = 5;
+    const TILE: u32 = 8;
+
+    fn colour(tile: u32) -> image::Rgb<u8> {
+        image::Rgb([(tile * 10) as u8, 255 - (tile * 10) as u8, ((tile % 5) * 60) as u8])
+    }
+
+    #[test]
+    fn a_scrambled_comix_page_comes_out_with_its_tiles_in_place() {
+        let comix = unscrambler(kuro_source::generate_id("Comix", "en", 1));
+        assert!(comix.is_some() && unscrambler(2131019126180322627).is_none());
+        let (body, headers) = scrambled_fixture(12345, 987_654_321);
+        assert!(image::load_from_memory(&body).is_err(), "the body is not an image before the descrambler");
+        let shown = shown(body, &headers, comix).unwrap();
+        let page = image::load_from_memory(&shown).expect("the shown bytes decode").to_rgb8();
+        assert_eq!(page.dimensions(), (GRID * TILE, GRID * TILE));
+        for tile in 0..GRID * GRID {
+            let (x, y) = ((tile % GRID) * TILE + TILE / 2, (tile / GRID) * TILE + TILE / 2);
+            let (got, want) = (page.get_pixel(x, y).0, colour(tile).0);
+            assert!(got.iter().zip(want).all(|(g, w)| g.abs_diff(w) <= 12), "tile {tile}: {got:?} against {want:?} (JPEG 90)");
+        }
+        let plain = b"\x89PNG plain".to_vec();
+        assert_eq!(super::shown(plain.clone(), &HeaderMap::new(), comix).unwrap(), plain, "an unscrambled page goes as it is");
+        assert_eq!(super::shown(plain.clone(), &headers, None).unwrap(), plain, "other sources never descramble");
     }
 }

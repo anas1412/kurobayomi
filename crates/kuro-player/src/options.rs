@@ -5,7 +5,6 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::config::AdvancedPrefs;
 use crate::enums::{
     AudioChannels, Debanding, Decoder, GpuKind, SubtitleJustification, SubtitlesBorderStyle,
 };
@@ -23,6 +22,8 @@ pub const CACHE_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SubtitlePrefs {
+    /// `pref_subtitle_lang`: the subtitle languages picked first, comma separated (mpv `slang`).
+    pub lang: String,
     pub delay_ms: i32,
     pub speed: f32,
     pub secondary_delay_ms: i32,
@@ -45,6 +46,7 @@ pub struct SubtitlePrefs {
 impl Default for SubtitlePrefs {
     fn default() -> Self {
         Self {
+            lang: String::new(),
             delay_ms: 0,
             speed: 1.0,
             secondary_delay_ms: 0,
@@ -106,12 +108,7 @@ pub struct PlayerPrefs {
     pub audio: AudioPrefs,
     pub data_dir: PathBuf,
     pub screenshot_dir: PathBuf,
-    /// `AdvancedPlayerPreferences`: user scripts, `mpv.conf`, `input.conf`, statistics page.
-    pub advanced: AdvancedPrefs,
-    /// `pref_remember_decoder` (T-46b-043, opt-in, default off). When on, `remembered_decoder` is applied at startup
-    /// instead of `try_hwdec`.
-    pub remember_decoder: bool,
-    /// The decoder chosen last time, stored by `decoder_stored_name`.
+    /// The decoder chosen last time, stored by `decoder_stored_name`. It is applied at startup instead of `try_hwdec`.
     pub remembered_decoder: Option<Decoder>,
 }
 
@@ -131,8 +128,6 @@ impl Default for PlayerPrefs {
             audio: AudioPrefs::default(),
             data_dir: PathBuf::new(),
             screenshot_dir: PathBuf::new(),
-            advanced: AdvancedPrefs::default(),
-            remember_decoder: false,
             remembered_decoder: None,
         }
     }
@@ -204,12 +199,6 @@ pub fn decoder_from_stored_name(name: &str) -> Option<Decoder> {
     [Decoder::AutoCopy, Decoder::Auto, Decoder::Sw, Decoder::Hw, Decoder::HwPlus]
         .into_iter()
         .find(|d| decoder_stored_name(*d) == name)
-}
-
-/// What a decoder choice writes to `player_decoder` (T-46b-043): the stored name when the opt-in
-/// `pref_remember_decoder` is on, otherwise `None`, so the choice stays session-only.
-pub fn remembered_decoder_write(remember: bool, chosen: Decoder) -> Option<&'static str> {
-    remember.then(|| decoder_stored_name(chosen))
 }
 
 /// The decoder of a stored name, or `None` for a name this build does not know.
@@ -337,16 +326,16 @@ pub fn startup_settings(p: &PlayerPrefs) -> Vec<MpvSetting> {
     let mut set = |name: &'static str, value: String| out.push(MpvSetting { name, value });
 
     // Config first (topic doc section 3 step 1): mpv reads `mpv.conf` and `input.conf` from the
-    // config dir that `config.rs` writes, and only when `config` is on.
+    // config dir (`ensure_mpv_config` creates the files if missing), and only when `config` is on.
     set("config", "yes".to_owned());
     set("config-dir", path_text(&p.data_dir.join("mpv")));
     set("vo", if p.gpu_next { "gpu-next" } else { "gpu" }.to_owned());
     set("pause", "yes".to_owned());
     set("profile", "fast".to_owned());
-    let hwdec = match (p.remember_decoder, p.remembered_decoder) {
-        (true, Some(decoder)) => resolve_hwdec(decoder, &p.hwdec_available),
-        _ if p.try_hwdec => resolve_hwdec(Decoder::Auto, &p.hwdec_available),
-        _ => "no".to_owned(),
+    let hwdec = match p.remembered_decoder {
+        Some(decoder) => resolve_hwdec(decoder, &p.hwdec_available),
+        None if p.try_hwdec => resolve_hwdec(Decoder::Auto, &p.hwdec_available),
+        None => "no".to_owned(),
     };
     set("hwdec", hwdec);
 
@@ -399,6 +388,7 @@ fn path_text(path: &Path) -> String {
 }
 
 fn push_subtitles(s: &SubtitlePrefs, set: &mut impl FnMut(&'static str, String)) {
+    set("slang", s.lang.clone());
     set("sub-delay", kotlin_f64(f64::from(s.delay_ms) / 1000.0));
     set("sub-speed", kotlin_f32(s.speed));
     set(
@@ -487,15 +477,6 @@ pub fn setting_value<'a>(settings: &'a [MpvSetting], name: &str) -> Option<&'a s
 mod tests {
     use super::*;
 
-    #[test]
-    fn t_46b_043_a_choice_is_stored_only_with_the_opt_in_and_reads_back() {
-        assert_eq!(remembered_decoder_write(false, Decoder::Hw), None);
-        let name = remembered_decoder_write(true, Decoder::HwPlus).unwrap();
-        assert_eq!(decoder_from_stored_name(name), Some(Decoder::HwPlus));
-        assert_eq!(decoder_from_stored_name(""), None);
-        assert_eq!(decoder_from_stored_name("Nope"), None);
-    }
-
     fn prefs() -> PlayerPrefs {
         PlayerPrefs {
             data_dir: PathBuf::from("/data"),
@@ -528,6 +509,7 @@ mod tests {
             ("screenshot-directory", "/pics"),
             ("speed", "1.0"),
             ("vd-lavc-film-grain", "cpu"),
+            ("slang", ""),
             ("sub-delay", "0.0"),
             ("sub-speed", "1.0"),
             ("secondary-sub-delay", "0.0"),
@@ -966,10 +948,9 @@ mod tests {
     }
 
     #[test]
-    fn t_46b_043_a_remembered_decoder_replaces_try_hwdec_only_when_opted_in() {
+    fn t_46b_043_a_remembered_decoder_replaces_try_hwdec() {
         let available = vec!["vaapi-copy".to_owned()];
         let remembered = PlayerPrefs {
-            remember_decoder: true,
             remembered_decoder: Some(Decoder::Hw),
             hwdec_available: available.clone(),
             try_hwdec: false,
@@ -980,17 +961,7 @@ mod tests {
             Some("vaapi-copy"),
             "the stored decoder is applied instead of try_hwdec"
         );
-        let off = PlayerPrefs {
-            remember_decoder: false,
-            ..remembered.clone()
-        };
-        assert_eq!(
-            setting_value(&startup_settings(&off), "hwdec"),
-            Some("no"),
-            "the default is session-only: try_hwdec decides"
-        );
         let no_stored = PlayerPrefs {
-            remember_decoder: true,
             remembered_decoder: None,
             ..remembered
         };

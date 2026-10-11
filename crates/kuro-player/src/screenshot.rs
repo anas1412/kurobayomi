@@ -8,6 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use kuro_core::text::{build_valid_filename, take_bytes};
 use kuro_i18n::{Arg, MsgKey, tr, trf};
 
 use crate::enums::{ArtType, SetAsArt};
@@ -81,45 +82,6 @@ pub fn finish_capture(cache_dir: &Path, temp: &Path) -> io::Result<PathBuf> {
     }
 }
 
-/// Cuts a string to at most `max` UTF-8 bytes, on a character boundary.
-fn take_bytes(text: &str, max: usize) -> &str {
-    if text.len() <= max {
-        return text;
-    }
-    let mut end = max;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
-}
-
-/// `DiskUtil.buildValidFilename`: trims dots and spaces, replaces control characters and the FAT
-/// reserved characters with `_`, and keeps at most 240 characters. An empty name is `(invalid)`.
-pub fn valid_filename(name: &str) -> String {
-    let trimmed = name.trim_matches(|c| c == '.' || c == ' ');
-    if trimmed.is_empty() {
-        return "(invalid)".to_owned();
-    }
-    trimmed
-        .chars()
-        .map(|c| match c {
-            '\u{0}'..='\u{1f}'
-            | '"'
-            | '*'
-            | '/'
-            | ':'
-            | '<'
-            | '>'
-            | '?'
-            | '\\'
-            | '|'
-            | '\u{7f}' => '_',
-            other => other,
-        })
-        .take(240)
-        .collect()
-}
-
 /// The name of a saved image: `<title> - <episode> - <position>`. The title and episode are cut so
 /// the whole name stays within `MAX_FILE_NAME_BYTES`. Only the title and episode are validated, so
 /// the position keeps its colons.
@@ -127,7 +89,7 @@ pub fn image_filename(title: &str, episode: &str, time_pos: &str) -> String {
     let suffix = format!(" - {time_pos}");
     let base = format!("{title} - {episode}");
     let budget = MAX_FILE_NAME_BYTES.saturating_sub(suffix.len());
-    format!("{}{suffix}", valid_filename(take_bytes(&base, budget)))
+    format!("{}{suffix}", build_valid_filename(take_bytes(&base, budget), true))
 }
 
 /// A path in `dir` for `stem.ext` that does not exist yet. A taken name gets ` (n)` appended with
@@ -145,7 +107,7 @@ pub fn unique_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
 
 /// Saves a PNG to `<pictures>/<valid title>/<name>.png` and returns the path written.
 pub fn save_image(pictures: &Path, title: &str, name: &str, png: &[u8]) -> io::Result<PathBuf> {
-    let dir = pictures.join(valid_filename(title));
+    let dir = pictures.join(build_valid_filename(title, true));
     fs::create_dir_all(&dir)?;
     let path = unique_path(&dir, name, "png");
     fs::write(&path, png)?;
@@ -288,7 +250,7 @@ pub fn include_subtitles(switch_on: bool, has_subtitle_tracks: bool) -> bool {
 
 /// Default name for Save: `<title>_<seconds>.png`, with the title validated for file names.
 pub fn save_default_name(title: &str, seconds: i64) -> String {
-    format!("{}.png", valid_filename(&format!("{title}_{seconds}")))
+    format!("{}.png", build_valid_filename(&format!("{title}_{seconds}"), true))
 }
 
 /// A capture that produced no file shows `Screenshot failed` instead of crashing (E82).
@@ -354,7 +316,7 @@ mod tests {
             image_filename("Show: Part/2", "Ep 1", "01:02"),
             "Show_ Part_2 - Ep 1 - 01:02"
         );
-        assert_eq!(valid_filename(" .. "), "(invalid)");
+        assert_eq!(build_valid_filename(" .. ", true), "(invalid)");
     }
 
     #[test]

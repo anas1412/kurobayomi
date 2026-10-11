@@ -10,7 +10,8 @@ pub enum BrowseKind {
     Manga,
 }
 
-/// The six pages of the Browse tab, in tab order.
+/// The six page ids of the Browse tab, in tab order. The tab shows only the two source pages (anime and manga); the
+/// extension and migrate pages have no place on the tab any more.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowsePage {
     AnimeSources = 0,

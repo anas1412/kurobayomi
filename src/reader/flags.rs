@@ -7,8 +7,9 @@
 use kuro_prefs::flags::{Flag, with_flag};
 use kuro_prefs::reader::{READING_MODE_MASK, ReadingMode};
 
-/// Default reading mode when the preference is unset (`ReaderPreferences.kt:38-41`, right to left).
-pub const DEFAULT_READING_MODE_PREF: i32 = 2;
+/// Default reading mode when the preference is unset: left to right (the user's decision, 2026-10-11). Right to left is
+/// picked per manga. The stored default of `pref_default_reading_mode_key` must say the same (`kuro-prefs`).
+pub const DEFAULT_READING_MODE_PREF: i32 = 1;
 
 /// The reading mode a manga's viewer flags select. Only the mode bits are read.
 pub fn reading_mode_of(viewer_flags: i64) -> ReadingMode {
@@ -16,7 +17,7 @@ pub fn reading_mode_of(viewer_flags: i64) -> ReadingMode {
 }
 
 /// `getMangaReadingMode(resolveDefault = true)`: the manga's mode, or the preference when the manga has none.
-/// A corrupt global preference that is itself DEFAULT falls back to right-to-left (D-4, E-21), so this never returns
+/// A corrupt global preference that is itself DEFAULT falls back to [`DEFAULT_READING_MODE_PREF`], so this never returns
 /// [`ReadingMode::Default`].
 pub fn resolve_reading_mode(viewer_flags: i64, default_pref: i32) -> ReadingMode {
     match reading_mode_of(viewer_flags) {
@@ -92,15 +93,16 @@ mod tests {
 
     #[test]
     fn manga_mode_zero_resolves_to_preference_and_raw_is_kept_otherwise() {
-        assert_eq!(resolve_reading_mode(0, DEFAULT_READING_MODE_PREF), ReadingMode::RightToLeft);
+        assert_eq!(resolve_reading_mode(0, DEFAULT_READING_MODE_PREF), ReadingMode::LeftToRight);
+        assert_eq!(resolve_reading_mode(0, 2), ReadingMode::RightToLeft, "a preference of right to left is still honoured");
         assert_eq!(resolve_reading_mode(0x3, DEFAULT_READING_MODE_PREF), ReadingMode::Vertical);
     }
 
     #[test]
     fn e21_resolve_never_returns_default_even_with_a_corrupt_global() {
         assert_eq!(resolve_reading_mode(0, 1), ReadingMode::LeftToRight);
-        assert_eq!(resolve_reading_mode(0, 0), ReadingMode::RightToLeft, "corrupt global falls back to RTL (D-4)");
-        assert_eq!(resolve_reading_mode(0, 9), ReadingMode::RightToLeft);
+        assert_eq!(resolve_reading_mode(0, 0), ReadingMode::LeftToRight, "corrupt global falls back to LTR");
+        assert_eq!(resolve_reading_mode(0, 9), ReadingMode::LeftToRight);
         assert_ne!(resolve_reading_mode(0, 0), ReadingMode::Default);
     }
 

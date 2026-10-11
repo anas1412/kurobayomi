@@ -132,7 +132,7 @@ pub async fn refresh_anime(
     let work: Vec<_> = bindings
         .iter()
         .filter_map(|b| ctx.trackers.get(b.tracker_id).map(|t| (b.tracker_id, t)))
-        .filter(|(_, t)| t.is_logged_in())
+        .filter(|(id, t)| t.is_logged_in() && ctx.trackers.is_enabled(*id))
         .collect();
     let results = join_all(work.iter().map(|(id, t)| async move {
         refresh_one_anime(ctx, entry_id, *id, &**t)
@@ -185,7 +185,7 @@ pub async fn refresh_manga(
     let work: Vec<_> = bindings
         .iter()
         .filter_map(|b| ctx.trackers.get(b.tracker_id).map(|t| (b.tracker_id, t)))
-        .filter(|(_, t)| t.is_logged_in())
+        .filter(|(id, t)| t.is_logged_in() && ctx.trackers.is_enabled(*id))
         .collect();
     let results = join_all(work.iter().map(|(id, t)| async move {
         refresh_one_manga(ctx, manga_id, *id, &**t)

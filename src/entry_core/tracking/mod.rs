@@ -7,6 +7,7 @@
 //! policy (`kuro_track::policy`), the row actions and link copy (`kuro_track::sheet`), the remove dialog text and the
 //! registration (`kuro_track::remove`, `kuro_track::bind`), and the tracking button text (`entry_core::action_row`).
 
+pub mod actions;
 pub mod auto_track;
 pub mod dates;
 pub mod enhanced;

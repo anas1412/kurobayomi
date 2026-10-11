@@ -20,7 +20,7 @@
 //! - T-48a-054 the PiP and fullscreen SDK gates: the mini player group follows the display probe; Fullscreen is always offered.
 
 pub mod about;
-pub mod advanced;
+pub mod app_lock;
 pub mod appearance;
 pub mod auth;
 pub mod browse;
@@ -32,7 +32,6 @@ pub mod chooser;
 pub mod clipboard;
 pub mod cookie_import;
 pub mod data_saver;
-pub mod decode;
 pub mod downloads;
 pub mod jobs;
 pub mod lang;
@@ -41,6 +40,7 @@ pub mod library_csv;
 pub mod library_export;
 pub mod library_update;
 pub mod licenses;
+pub mod maintenance;
 pub mod menu;
 pub mod merge;
 pub mod notifications;
@@ -49,7 +49,6 @@ pub mod reader;
 pub mod route;
 pub mod rows;
 pub mod search;
-pub mod security;
 pub mod storage;
 pub mod tracker_host;
 pub mod tracking;

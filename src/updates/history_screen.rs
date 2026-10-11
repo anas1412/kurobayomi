@@ -21,9 +21,9 @@ use kuro_domain::history::view::{HistoryLine, remove_action};
 use kuro_domain::kind::EntryKind;
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::player::PlayerPrefs;
-use kuro_prefs::ui::UiPrefs;
 
 use crate::data;
+use crate::misc::diet_defaults as diet;
 use crate::updates::coalesce::watch_coalesced;
 use crate::updates::history::{
     COALESCE_MS, CLEAR_DONE_TOAST_MS, HistoryDialog, HistoryState, NOT_FOUND_TOAST_MS, Resume, clear_outcome, empty_message,
@@ -160,15 +160,13 @@ impl HistoryScreen {
         while let Some(child) = self.col.first_child() {
             child.unparent();
         }
-        let store = data::app().base.store().clone();
-        let ui = UiPrefs::new(store);
         let lines = history_lines(
             rows,
             self.kind,
             Local::now().date_naive(),
             &Local,
-            ui.relative_time.get(),
-            &ui.date_format.get(),
+            diet::LIBRARY_RELATIVE_TIME,
+            diet::LIBRARY_DATE_FORMAT,
             kuro_i18n::current_locale().tag,
         );
         let mut current: Option<ListBox> = None;

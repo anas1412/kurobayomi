@@ -10,11 +10,11 @@
 //!   Central and Comix, and the installed sources): `source_pages` gives the HTTP loader the page list, the images
 //!   with the source's headers and the Comix descrambler, and the chapter cache keeps both. Page lists are fetched on
 //!   threads (`source_pages::Prefetch`): the gate waits for the opened chapter's list, Retry waits for a new fetch, and
-//!   each chapter that loads starts its neighbours' lists. A chapter whose list is not cached yet fails at once with
-//!   the fetch's error or "still loading" instead of asking the source on the GTK thread; Retry on its transition
-//!   card loads it once the list is in. A chapter on disk still opens from the downloads
+//!   each chapter that loads starts its neighbours' lists. A chapter whose list is not cached yet does not ask the
+//!   source on the GTK thread: it reports "still loading" (a wait the reader shows as a spinner, see
+//!   `source_pages::is_pending`) or the fetch's error. A chapter on disk still opens from the downloads
 //!   folder first, a local manga goes through `local_flow::reader`, and a source the directory does not know reports
-//!   "Source not found". The data saver is not applied to these sources yet.
+//!   "Source not found".
 //! - The download index and the downloads folder come from the shell. A chapter counts as downloaded when the index
 //!   knows it, a local manga counts every chapter as downloaded, and the transition cards use the same lookup.
 //! - The page viewers (area 44) are attached by the screen itself once the chapter has loaded (`screen::install_viewer`),

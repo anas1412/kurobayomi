@@ -298,7 +298,7 @@ pub fn restore_page() -> Option<Built> {
             let (screen, alive, refresh) = (screen.clone(), alive.clone(), refresh.clone());
             glib::spawn_future_local(async move {
                 let checked = file.clone();
-                let result = gio::spawn_blocking(move || check_file(&checked, &NothingInstalled, &NothingInstalled)).await;
+                let result = gio::spawn_blocking(move || check_file(&checked, &crate::library_update::live::LiveRegistry, &NothingInstalled)).await;
                 // a page that was closed meanwhile drops the answer without a toast
                 if !alive.get() {
                     return;
@@ -425,7 +425,7 @@ mod tests {
         std::fs::write(&file, b"this is not a backup").expect("write");
         let mut screen = RestoreScreen::default();
         assert!(!screen.can_restore(), "validating keeps Restore off");
-        screen.apply_check(&file, preflight_file(&file, &NothingInstalled, &NothingInstalled));
+        screen.apply_check(&file, preflight_file(&file, &crate::library_update::live::LiveRegistry, &NothingInstalled));
         assert!(matches!(screen.check, Check::Invalid { .. }));
         assert!(!screen.options_visible());
         assert!(!screen.can_restore());

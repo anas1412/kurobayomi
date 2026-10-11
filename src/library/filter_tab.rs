@@ -17,8 +17,6 @@ use crate::ui;
 pub enum Filter {
     Downloaded,
     Unseen,
-    Started,
-    Bookmarked,
     Completed,
     Tracked(i64),
 }
@@ -48,8 +46,6 @@ pub fn items(kind: EntryKind, trackers: &[(i64, String)]) -> Vec<Item> {
     let mut rows = vec![
         Item::Tri { filter: Filter::Downloaded, label: Label::Msg(MsgKey::label_downloaded) },
         Item::Tri { filter: Filter::Unseen, label: Label::Msg(unseen_key) },
-        Item::Tri { filter: Filter::Started, label: Label::Msg(MsgKey::label_started) },
-        Item::Tri { filter: Filter::Bookmarked, label: Label::Msg(MsgKey::action_filter_bookmarked) },
         Item::Tri { filter: Filter::Completed, label: Label::Msg(MsgKey::completed) },
     ];
     match trackers {
@@ -104,10 +100,6 @@ fn with_pref<R>(prefs: &LibraryPrefs, kind: EntryKind, filter: Filter, f: impl F
         (EntryKind::Manga, Filter::Downloaded) => f(&prefs.filter_downloaded_manga),
         (EntryKind::Anime, Filter::Unseen) => f(&prefs.filter_unseen),
         (EntryKind::Manga, Filter::Unseen) => f(&prefs.filter_unread),
-        (EntryKind::Anime, Filter::Started) => f(&prefs.filter_started_anime),
-        (EntryKind::Manga, Filter::Started) => f(&prefs.filter_started_manga),
-        (EntryKind::Anime, Filter::Bookmarked) => f(&prefs.filter_bookmarked_anime),
-        (EntryKind::Manga, Filter::Bookmarked) => f(&prefs.filter_bookmarked_manga),
         (EntryKind::Anime, Filter::Completed) => f(&prefs.filter_completed_anime),
         (EntryKind::Manga, Filter::Completed) => f(&prefs.filter_completed_manga),
         (EntryKind::Anime, Filter::Tracked(id)) => f(&prefs.filter_tracked_anime(id as i32)),
@@ -229,8 +221,6 @@ mod tests {
             vec![
                 Item::Tri { filter: Filter::Downloaded, label: Label::Msg(MsgKey::label_downloaded) },
                 Item::Tri { filter: Filter::Unseen, label: Label::Msg(MsgKey::action_filter_unseen) },
-                Item::Tri { filter: Filter::Started, label: Label::Msg(MsgKey::label_started) },
-                Item::Tri { filter: Filter::Bookmarked, label: Label::Msg(MsgKey::action_filter_bookmarked) },
                 Item::Tri { filter: Filter::Completed, label: Label::Msg(MsgKey::completed) },
             ]
         );
@@ -262,7 +252,7 @@ mod tests {
             Shown { state: TriState::ENABLED_IS, locked: true }
         );
         assert_eq!(shown(Filter::Downloaded, TriState::ENABLED_NOT, false), Shown { state: TriState::ENABLED_NOT, locked: false });
-        assert_eq!(shown(Filter::Started, TriState::ENABLED_NOT, true), Shown { state: TriState::ENABLED_NOT, locked: false });
+        assert_eq!(shown(Filter::Completed, TriState::ENABLED_NOT, true), Shown { state: TriState::ENABLED_NOT, locked: false });
     }
 
     #[test]

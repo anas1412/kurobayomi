@@ -20,7 +20,6 @@ use gtk::glib;
 use gtk::prelude::*;
 use kuro_core::sources::SourceGate;
 use kuro_domain::download::prefs::DownloadPrefs;
-use kuro_prefs::library::LibraryPrefs;
 use kuro_track::policy::auto_update_allowed;
 use kuro_track::prefs::TrackPrefs;
 use kuro_data::chapter::Chapter;
@@ -36,12 +35,13 @@ use super::bottom_bar::BottomBar;
 use super::chapters::ListOptions;
 use super::delete_queue::{Pending, QueueFile};
 use super::chrome::{self, TopBar, TopBarActions, build_error_card, build_top_bar};
-use super::flags::{self, CropPref};
+use super::flags;
 use super::history_rules;
 use super::page_actions;
 use super::page_save;
 use super::saved_notice;
 use super::restore;
+use crate::misc::diet_defaults as diet;
 use super::indicator::PageIndicator;
 use super::keep_awake::{self, KeepAwake};
 use super::loader::{LoadFailure, Loader, load_chapter};
@@ -54,6 +54,7 @@ use super::overlay::Tint;
 use super::session::{AdjacentOutcome, ReaderEvent, ReaderSession, ReaderStore, TrackUpdate, open_list};
 use super::settings_window::{self, MangaChoices};
 use super::sheet::{self, Sheet};
+use super::source_pages;
 use super::sync::{self, Effect};
 use super::state::{self, Dialog, EscapeAction, UiState};
 use super::strings;
@@ -181,7 +182,7 @@ impl ReaderCore {
     /// when none was asked for and `restore_after_crash` is on.
     pub fn start(&self) -> restore::Start {
         let saved = self.extras.data_dir.as_deref().and_then(|dir| restore::load(&restore::path_in(dir)));
-        let enabled = self.deps.prefs_store.pref(restore::PREF_KEY, true).get();
+        let enabled = diet::READER_RESTORE_AFTER_CRASH;
         restore::resolve(self.deps.manga_id, self.deps.chapter_id, saved, history_rules::now_ms(), enabled)
     }
 
@@ -215,11 +216,10 @@ impl ReaderCore {
 
     /// The chapter list rules, from the skip preferences of the reader.
     fn list_options(&self, manga: &Manga) -> ListOptions {
-        let prefs = &self.deps.prefs;
         ListOptions {
-            skip_read: prefs.skip_read.get(),
-            skip_filtered: prefs.skip_filtered.get(),
-            skip_dupe: prefs.skip_dupe.get(),
+            skip_read: diet::READER_SKIP_READ,
+            skip_filtered: diet::READER_SKIP_FILTERED,
+            skip_dupe: diet::READER_SKIP_DUPE,
             downloaded_only: self.deps.downloaded_only,
             chapter_flags: manga.chapter_flags,
         }
@@ -249,13 +249,12 @@ impl ReaderCore {
     /// session behind, so a retry repeats the whole load (T-43a-024).
     pub fn initial_load(&self) -> Result<(), LoadError> {
         *self.session.borrow_mut() = None;
-        let prefs = &self.deps.prefs;
         let start = self.start();
         let opened = open_list(Arc::clone(&self.deps.db), self.deps.manga_id, start.chapter_id, |manga| self.list_options(manga), |chapter| {
             (self.deps.is_downloaded)(chapter)
         })
         .map_err(LoadError::new)?;
-        let preserve = prefs.preserve_reading_position.get();
+        let preserve = diet::READER_PRESERVE_READING_POSITION;
         let chapter = Rc::clone(&opened.chapters[opened.index]);
         load_chapter(&chapter, || (self.deps.build)(&chapter), preserve).map_err(|failure| match failure {
             LoadFailure::Failed(error) => error,
@@ -277,8 +276,7 @@ impl ReaderCore {
             Rc::clone(&self.deps.store),
             tx,
         );
-        let mark_duplicates = LibraryPrefs::new(self.deps.prefs_store.clone()).mark_duplicate_read_chapter_as_read.get();
-        session.set_mark_duplicates_read(mark_duplicates.contains("existing"));
+        session.set_mark_duplicates_read(diet::LIBRARY_MARK_DUPLICATE_CHAPTER_READ);
         if let (Some(_), Some(dir)) = (&self.extras.delete_sink, self.extras.data_dir.as_deref()) {
             // the slot count is read once, when the reader opens
             let slots = DownloadPrefs::new(&self.deps.prefs_store).remove_after_read_slots.get();
@@ -293,8 +291,8 @@ impl ReaderCore {
             }));
         }
         if self.extras.download_ahead.is_some() {
-            // the amount is read once, when the reader opens
-            let amount = DownloadPrefs::new(&self.deps.prefs_store).auto_download_while_reading.get();
+            // the download-ahead amount is cut from the settings (0, off)
+            let amount = diet::DOWNLOAD_AUTO_WHILE_AMOUNT;
             let downloaded = Rc::clone(&self.deps.is_downloaded);
             session.set_download_ahead(amount, Rc::new(move |chapter| downloaded(chapter)));
         }
@@ -355,6 +353,27 @@ impl ReaderCore {
         let pages = session.current_chapter()?.pages()?;
         let index = session.current_page().checked_sub(1)? as usize;
         pages.get(index).cloned()
+    }
+
+    /// The folder of the manga when it is a local one (its url is the folder's absolute path). `None` for any other source.
+    pub fn local_folder(&self) -> Option<PathBuf> {
+        let manga = MangaRepo::new(Arc::clone(&self.deps.db)).by_id(self.deps.manga_id).ok()?;
+        kuro_local::is_local_source(manga.source).then(|| PathBuf::from(manga.url))
+    }
+
+    /// The toast after a local manga's cover write. The new thumbnail and its time go on the manga row, which the library
+    /// reads its cover from.
+    pub fn local_cover_result(&self, written: Result<kuro_local::images::CoverWrite, String>) -> &'static str {
+        let Ok(cover) = written else { return strings::NOTIFICATION_COVER_UPDATE_FAILED };
+        let update = MangaUpdate {
+            thumbnail_url: Some(cover.thumbnail_url),
+            cover_last_modified: Some(cover.cover_last_modified),
+            ..MangaUpdate::new(self.deps.manga_id)
+        };
+        match MangaRepo::new(Arc::clone(&self.deps.db)).update(&update) {
+            Ok(()) => strings::COVER_UPDATED,
+            Err(_) => strings::NOTIFICATION_COVER_UPDATE_FAILED,
+        }
     }
 
     /// The toast after a cover write (T-43a-058). The cover is written first, then the library check (E-COVER-1).
@@ -427,23 +446,14 @@ impl ReaderCore {
 
     /// The crop state for the current reading mode, for the button icon when the screen opens.
     pub fn crop_on(&self) -> bool {
-        let pref = self.crop_pref();
-        let prefs = &self.deps.prefs;
-        match pref {
-            CropPref::Pager => prefs.crop_borders.get(),
-            CropPref::Webtoon => prefs.crop_borders_webtoon.get(),
-        }
+        self.deps.prefs.crop_borders.get()
     }
 
-    /// Flips the crop preference of the current mode and stores it (T-43a-037).
+    /// Flips the crop preference and stores it (T-43a-037). One switch serves every mode, the long strip follows it.
     pub fn toggle_crop(&self) -> CropView {
         let prefs = &self.deps.prefs;
-        let toggle = flags::toggle_crop(self.mode(), prefs.crop_borders.get(), prefs.crop_borders_webtoon.get());
-        let stored = match toggle.pref {
-            CropPref::Pager => prefs.crop_borders.set(toggle.value),
-            CropPref::Webtoon => prefs.crop_borders_webtoon.set(toggle.value),
-        };
-        if let Err(e) = stored {
+        let toggle = flags::toggle_crop(self.mode(), prefs.crop_borders.get(), prefs.crop_borders.get());
+        if let Err(e) = prefs.crop_borders.set(toggle.value) {
             tracing::warn!(error = %e, "the crop preference could not be saved");
         }
         CropView { value: toggle.value, icon: crop_icon(toggle.value), toast: strings::on_off(toggle.value) }
@@ -475,7 +485,7 @@ impl ReaderCore {
     }
 
     pub fn show_page_number(&self) -> bool {
-        self.deps.prefs.show_page_number.get()
+        diet::READER_SHOW_PAGE_NUMBER
     }
 
     pub fn theme_pref(&self) -> i32 {
@@ -511,24 +521,20 @@ impl ReaderCore {
     }
 
     pub fn show_reading_mode(&self) -> bool {
-        self.deps.prefs.show_reading_mode.get()
+        diet::READER_SHOW_READING_MODE
     }
 
     pub fn fullscreen_pref(&self) -> bool {
-        self.deps.prefs.fullscreen.get()
+        diet::READER_FULLSCREEN
     }
 
     pub fn keep_awake_pref(&self) -> bool {
-        self.deps.prefs.keep_screen_on.get()
+        diet::READER_KEEP_SCREEN_ON
     }
 
     fn mode(&self) -> kuro_prefs::reader::ReadingMode {
         let flags_value = self.session.borrow().as_ref().map_or(0, |s| s.viewer_flags());
         flags::resolve_reading_mode(flags_value, self.deps.prefs.default_reading_mode.get())
-    }
-
-    fn crop_pref(&self) -> CropPref {
-        flags::crop_pref_for(self.mode())
     }
 }
 
@@ -556,11 +562,11 @@ impl ReaderChrome {
             ViewerEvent::ShowMenu => self.show_menu(),
             ViewerEvent::HideMenu => self.hide_menu(),
             ViewerEvent::PageSelected(page) => {
-                let (prefs, tint) = (&screen.core.deps.prefs, &screen.tint);
+                let tint = &screen.tint;
                 // the flash counts only while the feature is on, so enabling it later does not flash at once
                 let mut flash = || {
-                    if prefs.flash_on_page_change.get() {
-                        tint.on_page_changed(prefs);
+                    if diet::READER_FLASH_ON_PAGE_CHANGE {
+                        tint.on_page_changed();
                     }
                 };
                 let switched = screen.core.page_selected(&page, &mut |ids| screen.core.queue_ahead(ids), &mut flash);
@@ -583,21 +589,24 @@ impl ReaderChrome {
         let Some(screen) = self.screen.upgrade() else { return };
         let container = screen.viewer_box.clone();
         let chapters = screen.core.viewer_chapters();
-        let mut slot = screen.viewer_slot.borrow_mut();
-        viewer::swap(
-            &mut slot,
-            next,
-            || {
-                while let Some(child) = container.first_child() {
-                    container.remove(&child);
-                }
-            },
-            |v| {
-                if let Some(chapters) = &chapters {
-                    v.set_chapters(chapters);
-                }
-            },
-        );
+        {
+            let mut slot = screen.viewer_slot.borrow_mut();
+            viewer::swap(
+                &mut slot,
+                next,
+                || {
+                    while let Some(child) = container.first_child() {
+                        container.remove(&child);
+                    }
+                },
+                |v| {
+                    if let Some(chapters) = &chapters {
+                        v.set_chapters(chapters);
+                    }
+                },
+            );
+        }
+        move_references(&screen.viewer_refs, chapters);
     }
 
     pub fn toggle_menu(&self) {
@@ -636,6 +645,8 @@ struct Screen {
     viewer_box: gtk::Box,
     /// The viewer attached by area 44. The slider moves it; with none attached the slider has nothing to move.
     viewer_slot: RefCell<ViewerSlot>,
+    /// The chapter set the viewer holds references to. A new set is referenced before the old one is released (T-43a-002).
+    viewer_refs: RefCell<Option<ViewerChapters>>,
     /// The reader menu's flag, read by the viewers (long tap, volume keys); `set_menu` keeps it current.
     menu_open: Rc<Cell<bool>>,
     /// The reading mode the attached viewer was built for, so a reload knows whether the mode changed.
@@ -664,6 +675,8 @@ struct Screen {
 const PAGE_LOADING: &str = "loading";
 const PAGE_CARD: &str = "card";
 const PAGE_VIEWER: &str = "viewer";
+/// How often a chapter whose page list is still being fetched is asked for again. The spinner shows meanwhile.
+const PENDING_RETRY: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// `reader::open`: the reader page. It waits for the source manager, loads the manga and the requested chapter,
 /// and shows the failure card with Retry and Close when that fails. The root widget is named `screen:reader`.
@@ -716,19 +729,20 @@ pub fn open_with(
 
     let navigator = Navigator::new();
     let top_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let top_column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    top_column.append(&top_slot);
-    top_column.append(&navigator.root);
     let top = gtk::Revealer::new();
     top.set_transition_type(gtk::RevealerTransitionType::SlideDown);
     top.set_transition_duration(200);
-    top.set_child(Some(&top_column));
+    top.set_child(Some(&top_slot));
     top.set_reveal_child(true);
     let bottom_bar = BottomBar::new();
+    // the page slider with the chapter buttons sits at the bottom, above the bottom bar
+    let bottom_column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    bottom_column.append(&navigator.root);
+    bottom_column.append(&bottom_bar.root);
     let bottom = gtk::Revealer::new();
     bottom.set_transition_type(gtk::RevealerTransitionType::SlideUp);
     bottom.set_transition_duration(200);
-    bottom.set_child(Some(&bottom_bar.root));
+    bottom.set_child(Some(&bottom_column));
     bottom.set_reveal_child(true);
 
     let sheet = Sheet::new(&page_layer);
@@ -748,7 +762,7 @@ pub fn open_with(
 
     let root_ref = glib::WeakRef::new();
     root_ref.set(Some(&root));
-    let host = Detachable::new(&root, "Reader", false);
+    let host = Detachable::new(&root, "Reader", true);
     let _ = host_slot.set(Rc::downgrade(&host));
     let screen = Rc::new(Screen {
         host,
@@ -760,6 +774,7 @@ pub fn open_with(
         stack,
         viewer_box: viewer.clone(),
         viewer_slot: RefCell::new(None),
+        viewer_refs: RefCell::new(None),
         viewer_kind: Cell::new(None),
         menu_open: Rc::new(Cell::new(state::UiState::default().menu_visible)),
         events: RefCell::new(None),
@@ -866,7 +881,7 @@ pub fn open_with(
         });
     }
 
-    screen.tint.apply(&screen.core.deps.prefs);
+    screen.tint.apply();
     sync::follow(&prefs_store, weak.clone(), apply_effect);
     start(&screen);
     ReaderScreen { root, viewer, core, chrome: ReaderChrome { screen: weak } }
@@ -887,24 +902,14 @@ fn sync_keep_awake(screen: &Screen, reader_open: bool) {
     screen.keep_awake.sync(&window, want);
 }
 
-/// Applies one live setting change to the open reader (T-043a-080). The brightness, colour filter, grayscale,
-/// invert and flash layers are the reader's own (`overlay`), over the page area only.
+/// Applies one live setting change to the open reader (T-043a-080). Only the theme and the global incognito flag are
+/// live now: the other reader settings are cut from the settings and hard-coded.
 fn apply_effect(screen: &Screen, effect: Effect) {
     match effect {
         Effect::Theme => {
             if let Some(root) = screen.root.upgrade() {
                 theme::apply_background(&root, screen.core.theme_pref());
                 theme::apply_background(&screen.stack, screen.core.theme_pref());
-            }
-        }
-        Effect::PageNumber | Effect::Fullscreen => refresh(screen),
-        Effect::KeepAwake => {
-            let open = screen.root.upgrade().is_some_and(|root| root.is_mapped());
-            sync_keep_awake(screen, open);
-        }
-        Effect::Flash => {
-            if !screen.core.deps.prefs.flash_on_page_change.get() {
-                screen.tint.reset_flash();
             }
         }
         Effect::Incognito => {
@@ -914,21 +919,6 @@ fn apply_effect(screen: &Screen, effect: Effect) {
                 (screen.on_close)();
             }
         }
-        Effect::Navigation => {
-            // a changed tap-zone layout shows the new zones (`navigationModeChangedListener`)
-            if let Some(kind) = screen.viewer_kind.get() {
-                let zones = nav_overlay::zones_for(kind, &screen.core.viewer_settings());
-                screen.nav_overlay.set_navigation(zones, false);
-            }
-        }
-        Effect::Brightness | Effect::ColorFilter => screen.tint.apply(&screen.core.deps.prefs),
-        Effect::ChapterList => match screen.core.rebuild_list() {
-            Ok(()) => {
-                reload_chapters(screen);
-                refresh(screen);
-            }
-            Err(error) => tracing::warn!(%error, "the chapter list could not be rebuilt after a skip rule changed"),
-        },
     }
 }
 
@@ -1096,7 +1086,7 @@ fn save_page(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
     let Some(source) = ready_source(screen, page) else { return };
     let (title, chapter) = screen.core.page_names(page);
     let base = page_save::page_file_base(&title, &chapter, page.number() as usize);
-    let folder = screen.core.deps.prefs.folder_per_manga.get();
+    let folder = diet::READER_CREATE_FOLDER_PER_MANGA;
     let Some(app) = saved_notice::application() else { return warn_unknown(screen) };
     // the notice of an earlier save goes first; the new one replaces it (fixed id)
     saved_notice::clear(&app);
@@ -1143,9 +1133,18 @@ fn set_cover(screen: &Rc<Screen>, page: &Rc<ReaderPage>) {
         let Some(s) = weak.upgrade() else { return };
         // checked again now that the confirm has been answered
         let Some(source) = ready_source(&s, &page) else { return };
+        let weak = Rc::downgrade(&s);
+        if let Some(folder) = s.core.local_folder() {
+            // a local manga's cover is an image in its folder, and the library shows the manga's thumbnail
+            page_save::in_background(move || page_save::write_local_cover(&source, &folder), move |written| {
+                let Some(s) = weak.upgrade() else { return };
+                let message = s.core.local_cover_result(written);
+                s.toaster.show(message, ToastLength::Short);
+            });
+            return;
+        }
         let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return warn_unknown(&s) };
         let cover = kuro_images::cover_paths::custom_file(&paths, kuro_images::cover_paths::Family::MangaCover, s.core.deps.manga_id);
-        let weak = Rc::downgrade(&s);
         page_save::in_background(move || page_save::write_cover_file(&source, &cover), move |written| {
             let Some(s) = weak.upgrade() else { return };
             let message = s.core.cover_result(written);
@@ -1250,6 +1249,15 @@ fn start(screen: &Rc<Screen>) {
                 sync_top_bar(&screen);
                 refresh(&screen);
             }
+            // the page list is still being fetched: the spinner stays and the load is tried again shortly
+            Err(error) if source_pages::is_pending(&error.message) => {
+                let weak = Rc::downgrade(&screen);
+                glib::timeout_add_local_once(PENDING_RETRY, move || {
+                    if let Some(screen) = weak.upgrade() {
+                        start(&screen);
+                    }
+                });
+            }
             Err(error) => show_card(&screen, &error),
         }
     });
@@ -1271,14 +1279,8 @@ fn install_viewer(screen: &Rc<Screen>) {
         downloads: screen.core.downloads(),
         menu_open: Rc::clone(&screen.menu_open),
     };
-    // the new-user flag shows the overlay once; the preference is cleared as soon as it is read (`ViewerConfig`)
-    let prefs = screen.core.reader_prefs();
-    let new_user = prefs.show_navigation_overlay_new_user.get();
-    if new_user {
-        if let Err(e) = prefs.show_navigation_overlay_new_user.set(false) {
-            tracing::warn!(error = %e, "the new-user overlay flag could not be saved");
-        }
-    }
+    // the new-user flag was stored and cleared on read; the setting is cut, so the hard-coded value applies on each open
+    let new_user = diet::READER_OVERLAY_NEW_USER;
     let wanted = ctx.settings.overlay_on_start || new_user;
     screen.nav_overlay.set_navigation(nav_overlay::zones_for(kind, &ctx.settings), wanted);
     screen.viewer_kind.set(Some(kind));
@@ -1292,6 +1294,21 @@ fn reload_chapters(screen: &Screen) {
     if let Ok(slot) = screen.viewer_slot.try_borrow() {
         if let Some(viewer) = slot.as_ref() {
             viewer.set_chapters(&chapters);
+            move_references(&screen.viewer_refs, Some(chapters));
+        }
+    }
+}
+
+/// Moves the viewer's chapter references to `next` (T-43a-002). The new set is referenced before the old one is released,
+/// so a chapter in both keeps its pages. A chapter that leaves the window is released, and its loader is recycled.
+fn move_references(held: &RefCell<Option<ViewerChapters>>, next: Option<ViewerChapters>) {
+    let old = std::mem::replace(&mut *held.borrow_mut(), next.clone());
+    match next {
+        Some(new) => ViewerChapters::replace(old.as_ref(), &new),
+        None => {
+            if let Some(old) = old {
+                old.release_all();
+            }
         }
     }
 }
@@ -1392,26 +1409,29 @@ fn rebuild_top_bar(screen: &Rc<Screen>) {
             }
         }),
     };
-    let bar = build_top_bar(&info, actions);
-    if let Some(row) = bar.child().and_downcast::<gtk::Box>() {
-        // Back, the titles, then Detach / Attach before the bookmark; the button moves over from the last bar
-        let button = screen.host.button();
-        if let Some(old) = button.parent().and_downcast::<gtk::Box>() {
-            old.remove(button);
-        }
-        row.insert_child_after(button, row.first_child().and_then(|back| back.next_sibling()).as_ref());
-    }
+    // the Detach / Attach button moves over from the bar it was in
+    let bar = build_top_bar(&info, actions, screen.host.button());
     screen.host.set_title(&info.manga_title);
     screen.top_slot.append(&bar);
 }
 
-/// An overflow entry: open in the web view or the browser, or share (copy) the chapter's web address.
+/// A menu entry: Set as cover for the page on screen, or for a web source open in the web view or the browser, or share
+/// (copy) the chapter's web address.
 fn open_overflow(screen: &Rc<Screen>, index: usize) {
+    let web = screen.core.top_bar().is_some_and(|bar| bar.is_http_source);
+    let item = chrome::overflow_items(web).get(index).copied();
+    if item == Some(strings::SET_AS_COVER) {
+        match screen.core.visible_page() {
+            Some(page) => set_cover(screen, &page),
+            None => screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short),
+        }
+        return;
+    }
     let Some(url) = screen.core.chapter_url().and_then(|u| chrome::web_url(&u)) else {
         screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
         return;
     };
-    if chrome::overflow_items(true).get(index) == Some(&strings::ACTION_SHARE) {
+    if item == Some(strings::ACTION_SHARE) {
         if let Some(root) = screen.root.upgrade() {
             root.clipboard().set_text(&url);
         }
@@ -1431,9 +1451,24 @@ fn press(screen: &Rc<Screen>, step: Step) {
         return;
     }
     refresh(screen);
+    run_step(screen, step);
+}
+
+/// Loads the adjacent chapter on the next idle turn. A page list still being fetched keeps the navigator's spinner on
+/// and is asked for again shortly (the buttons stay disabled meanwhile); any other outcome ends the step.
+fn run_step(screen: &Rc<Screen>, step: Step) {
     let screen = Rc::clone(screen);
     glib::idle_add_local_once(move || {
         let outcome = screen.core.step(step);
+        if matches!(&outcome, AdjacentOutcome::Failed(message) if source_pages::is_pending(message)) {
+            let weak = Rc::downgrade(&screen);
+            glib::timeout_add_local_once(PENDING_RETRY, move || {
+                if let Some(screen) = weak.upgrade() {
+                    run_step(&screen, step);
+                }
+            });
+            return;
+        }
         screen.stepping.set(false);
         if matches!(outcome, AdjacentOutcome::Moved(_)) {
             // the viewer shows the new chapter from its first page
@@ -1594,11 +1629,6 @@ mod tests {
         explicit.initial_load().unwrap();
         assert_eq!(explicit.current_index(), Some(2), "the chapter the library asked for wins");
 
-        let off = PrefStore::in_memory();
-        off.pref(restore::PREF_KEY, true).set(false).unwrap();
-        let disabled = core_with(&f, 0, off, data_extras(dir.path(), None), http_build("restore-off"));
-        assert_eq!(disabled.initial_load().unwrap_err().message, "Requested chapter of id 0 not found in chapter list");
-
         restore::save(&restore::path_in(dir.path()), &record(&f, 1, 1, restore::WINDOW_MS + 1_000)).unwrap();
         let stale = core_with(&f, 0, PrefStore::in_memory(), data_extras(dir.path(), None), http_build("restore-old"));
         assert!(stale.initial_load().is_err(), "a record older than 24 hours is not used");
@@ -1740,13 +1770,12 @@ mod tests {
         let f = fixture(1);
         let core = core(&f, 0, http_build("crop"));
         core.initial_load().unwrap();
-        // the default mode preference is right to left, a pager mode
-        assert_eq!(core.mode(), ReadingMode::RightToLeft);
+        // the default mode preference is left to right, a pager mode
+        assert_eq!(core.mode(), ReadingMode::LeftToRight);
         assert!(!core.crop_on());
         let on = core.toggle_crop();
         assert_eq!(on, CropView { value: true, icon: CROP_ICON_ON, toast: "On" });
         assert!(core.deps.prefs.crop_borders.get());
-        assert!(!core.deps.prefs.crop_borders_webtoon.get(), "only the pager preference changes");
         assert!(core.crop_on());
         let off = core.toggle_crop();
         assert_eq!(off, CropView { value: false, icon: CROP_ICON_OFF, toast: "Off" });
@@ -1754,14 +1783,14 @@ mod tests {
     }
 
     #[test]
-    fn a_webtoon_manga_toggles_the_webtoon_crop_preference() {
+    fn a_webtoon_manga_flips_the_same_crop_switch() {
         let f = fixture(1);
         MangaRepo::new(Arc::clone(&f.db)).set_viewer_bits(f.manga_id, i64::from(ReadingMode::Webtoon.flag_value()), 0x7).unwrap();
         let core = core(&f, 0, http_build("crop-webtoon"));
         core.initial_load().unwrap();
         assert_eq!(core.toggle_crop().toast, "On");
-        assert!(core.deps.prefs.crop_borders_webtoon.get());
-        assert!(!core.deps.prefs.crop_borders.get());
+        assert!(core.deps.prefs.crop_borders.get(), "the long strip follows the one crop switch");
+        assert!(core.crop_on());
     }
 
     #[derive(Default)]
@@ -1791,6 +1820,23 @@ mod tests {
         assert!(core.move_viewer_to(&viewer, 1));
         assert!(!core.move_viewer_to(&viewer, 99), "an index past the last page moves nothing");
         assert_eq!(viewer.0.borrow().as_slice(), [1]);
+    }
+
+    #[test]
+    fn a_chapter_leaving_the_viewer_is_released_and_one_that_stays_is_kept() {
+        let held = RefCell::new(None);
+        let chapter = |name: &str| {
+            let mut c = kuro_data::chapter::Chapter::create();
+            c.name = name.into();
+            ReaderChapter::new(c)
+        };
+        let (a, b, c) = (chapter("a"), chapter("b"), chapter("c"));
+        move_references(&held, Some(ViewerChapters { curr: Rc::clone(&a), prev: None, next: Some(Rc::clone(&b)) }));
+        assert_eq!((a.references(), b.references()), (1, 1));
+        move_references(&held, Some(ViewerChapters { curr: Rc::clone(&b), prev: Some(Rc::clone(&a)), next: Some(Rc::clone(&c)) }));
+        assert_eq!((a.references(), b.references(), c.references()), (1, 1, 1), "a and b stay, c arrives");
+        move_references(&held, None);
+        assert_eq!((a.references(), b.references(), c.references()), (0, 0, 0), "the viewer is gone");
     }
 
     #[test]

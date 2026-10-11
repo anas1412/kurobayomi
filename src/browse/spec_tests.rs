@@ -13,9 +13,9 @@
 //! | T11 | `extensions::tests::installed_sort_obsolete_first_then_by_name_...` |
 //! | T14 | `extensions::tests::update_all_only_visible_set` |
 //! | T15, T16, T17, T19 | `installs::tests` and `extensions_page::tests` |
-//! | T18 | `shell::tests::the_search_entry_follows_the_extensions_pages_and_waits_250_ms` |
+//! | T18 | `shell::tests::enter_runs_a_global_search_of_the_visible_kind` (the extension filter is cut) |
 //! | T20, T21, T22 | `sources::tests`, `header::tests` |
-//! | T23 | `lang_pages::tests::language_toggle_keeps_checkboxes` |
+//! | T23 | `lang_pages::tests::the_language_switches_write_the_set_and_a_switched_off_language_has_no_list` |
 //! | T24 | `ext_details::tests::the_debug_text_is_the_block_of_the_header_click` |
 //! | T25, T27, T29, T38, T40, T41 | here |
 //! | T26 | `extensions::tests::details_pop_once_the_extension_is_gone` |
@@ -275,14 +275,14 @@ fn t38_source_ids_are_decimal_strings_and_nothing_parses_them() {
 }
 
 #[test]
-fn t40_the_search_starts_with_pinned_only_and_keeps_the_origin_first() {
+fn t40_the_search_starts_with_every_source_and_keeps_the_origin_first() {
     use super::pages::{SearchChips, SearchRow, SearchState, SourceFilter, visible_rows};
     use kuro_domain::source::model::Source;
-    assert_eq!(SearchChips::default().filter, SourceFilter::PinnedOnly);
+    assert_eq!(SearchChips::default().filter, SourceFilter::All, "the pinned-only filter is cut");
     let row = |id: i64, origin: bool| SearchRow { source: Source::new(id, "S", "en"), state: SearchState::Loading, origin };
     let rows = vec![row(1, true), row(2, false)];
     let shown = visible_rows(&rows, SearchChips::default());
-    assert_eq!(shown.iter().map(|r| r.source.id).collect::<Vec<_>>(), [1], "the origin stays, first, in the pinned-only list");
+    assert_eq!(shown.iter().map(|r| r.source.id).collect::<Vec<_>>(), [1, 2], "every source shows, the origin first");
 }
 
 #[test]

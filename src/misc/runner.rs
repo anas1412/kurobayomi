@@ -5,9 +5,8 @@
 //! - The runtime's `Handle` is taken at startup and the schedule loops are spawned on it. The runtime is built by
 //!   `kuro_core::runtime::build` (2 to 8 workers by core count); the 4 workers of T-26a-131 and the "keep running in the
 //!   background" check at shutdown belong to that builder and `main`, which this lane does not own.
-//! - The app has no installed-source bridge yet, so every entry of a pass ends as "source not installed" (the stub
-//!   slot of `SourceRegistry`), exactly as the backup host's registry does. The pass, the lock, the counters and the
-//!   notifications are real; a source bridge replaces [`NothingInstalled`] when it lands.
+//! - Entries find their sources through [`LiveRegistry`], the one registry over the built-in, recipe and local sources.
+//!   An id it does not know ends the entry as "source not found" (the stub slot of `SourceRegistry`).
 //! - The "only on Wi-Fi" restriction reads `kuro_platform::device::read()`. That reader cannot tell "wired" from
 //!   "NetworkManager unreadable", so [`device_facts`] treats a machine with no sign of NetworkManager as unknown
 //!   (SC-07). A `network_manager_present` flag on the platform's `DeviceState` would remove the guess.
@@ -23,7 +22,6 @@ use kuro_domain::kind::EntryKind;
 use kuro_downloads::download_prefs::DownloadPrefs;
 use kuro_prefs::Prefs;
 use kuro_prefs::library::LibraryPrefs;
-use kuro_prefs::pref::Pref;
 use kuro_prefs::store::PrefStore;
 use tokio::runtime::Handle;
 use tokio::sync::watch;
@@ -32,51 +30,19 @@ use crate::library_update::constraints::{self, DeviceFacts};
 use crate::library_update::counters::PrefsHost;
 use crate::library_update::download::DownloadPolicy;
 use crate::library_update::entry::Deps;
-use crate::library_update::error::UpdateError;
 use crate::library_update::error_log;
+use crate::library_update::live::LiveRegistry;
 use crate::library_update::metadata::{DbMetadataStore, MetadataDeps, MetadataProgress, MetadataRunner};
 use crate::library_update::pass::{EntryUpdate, Failure, Host, PassRunner, PassSettings, PassStatus, Trigger};
 use crate::library_update::queue::QueueRestrictions;
 use crate::library_update::renames::FolderRenames;
 use crate::library_update::schedule::run_schedule;
-use crate::library_update::source::{Fetched, RemoteFlags, Source, SourceDetails, SourceRegistry};
 use crate::library_update::store::SqliteLibraryStore;
 use crate::library_update::sync::DbItemSync;
 use crate::library_update::text;
+use crate::misc::diet_defaults as diet;
 use crate::misc::notify;
 use crate::updates::download_host;
-
-/// A source that cannot exist: the registry below never returns one.
-pub enum NoSource {}
-
-impl Source for NoSource {
-    fn is_local(&self) -> bool {
-        match *self {}
-    }
-
-    fn is_unmetered(&self) -> bool {
-        match *self {}
-    }
-
-    async fn fetch(&self, _kind: EntryKind, _url: &str, _with_details: bool) -> Result<Fetched, UpdateError> {
-        match *self {}
-    }
-
-    async fn refresh(&self, _kind: EntryKind, _url: &str, _flags: RemoteFlags) -> Result<Option<SourceDetails>, UpdateError> {
-        match *self {}
-    }
-}
-
-/// The registry while the app has no installed-source bridge.
-pub struct NothingInstalled;
-
-impl SourceRegistry for NothingInstalled {
-    type Source = NoSource;
-
-    fn get(&self, _source_id: i64) -> Option<NoSource> {
-        None
-    }
-}
 
 /// The notifications and downloads of a pass: a toast for the summary, and desktop notices (`notify`) for each entry,
 /// for failures and for the large-queue warning, which fall back to a toast when no notifier is attached. New items go
@@ -88,12 +54,11 @@ impl SourceRegistry for NothingInstalled {
 pub struct ToastHost {
     manga_db: Arc<Db>,
     anime_db: Arc<Db>,
-    external_downloader: Pref<bool>,
 }
 
 impl ToastHost {
-    pub fn new(manga_db: Arc<Db>, anime_db: Arc<Db>, store: &PrefStore) -> Self {
-        Self { manga_db, anime_db, external_downloader: DownloadPrefs::new(store.clone()).use_external_downloader() }
+    pub fn new(manga_db: Arc<Db>, anime_db: Arc<Db>) -> Self {
+        Self { manga_db, anime_db }
     }
 
     fn db(&self, kind: EntryKind) -> &Arc<Db> {
@@ -137,8 +102,7 @@ impl Host for ToastHost {
         if ids.is_empty() {
             return;
         }
-        let external = kind == EntryKind::Anime && self.external_downloader.get();
-        if !download_host::current().enqueue(kind, entry_id, &ids, external) {
+        if !download_host::current().enqueue(kind, entry_id, &ids, diet::DOWNLOAD_USE_EXTERNAL) {
             tracing::debug!(entry_id, items = ids.len(), "the downloads backend queued none of the new items");
         }
     }
@@ -197,42 +161,37 @@ fn device_facts(
 ///
 /// Deviation (T-26a-012): the battery level is never read, so the battery-not-low constraint is not enforced on this
 /// platform. Wi-Fi, metered network and power source are the constraints checked here.
-async fn device_allows(inputs: &Inputs) -> bool {
-    let restrictions = inputs.library.auto_update_device_restrictions.get();
+async fn device_allows(_inputs: &Inputs) -> bool {
+    // The device restrictions are cut from the settings: no restriction applies.
+    let restrictions = BTreeSet::<String>::new();
     let conditions = kuro_platform::power_network::read_conditions().await;
     let device = kuro_platform::device::read().await;
     let seen = std::path::Path::new("/run/NetworkManager").exists();
     constraints::satisfied(&restrictions, device_facts(conditions, device, seen))
 }
 
-type Runner = PassRunner<NothingInstalled, SqliteLibraryStore, DbItemSync, PrefsHost<ToastHost>>;
+type Runner = PassRunner<LiveRegistry, SqliteLibraryStore, DbItemSync, PrefsHost<ToastHost>>;
 
 /// The preferences a pass reads each time it starts.
 pub struct Inputs {
-    pub library: LibraryPrefs,
     pub download: DownloadPrefs,
-    pub hide_content: Pref<bool>,
 }
 
-fn ids(set: BTreeSet<String>) -> Vec<i64> {
-    set.iter().filter_map(|s| s.trim().parse().ok()).collect()
-}
-
-/// The download policy of a pass (T-26a-090, T-26a-091): the toggle, the unread-only switch and the category lists of
-/// the chapter keys for manga and of the episode keys for anime. The toggle is off by default.
+/// The download policy of a pass (T-26a-090, T-26a-091): the chapter or episode toggle. The unread-only switch and the
+/// category lists are cut from the settings and hard-coded (off and empty).
 pub fn download_policy(kind: EntryKind, download: &DownloadPrefs) -> DownloadPolicy {
     match kind {
         EntryKind::Manga => DownloadPolicy {
             enabled: download.download_new_chapters().get(),
-            unread_only: download.download_new_unread_chapters_only().get(),
-            include_categories: ids(download.download_new_chapter_categories().get()),
-            exclude_categories: ids(download.download_new_chapter_categories_exclude().get()),
+            unread_only: diet::DOWNLOAD_NEW_UNREAD_ONLY,
+            include_categories: Vec::new(),
+            exclude_categories: Vec::new(),
         },
         EntryKind::Anime => DownloadPolicy {
             enabled: download.download_new_episodes().get(),
-            unread_only: download.download_new_unseen_episodes_only().get(),
-            include_categories: ids(download.download_new_episode_categories().get()),
-            exclude_categories: ids(download.download_new_episode_categories_exclude().get()),
+            unread_only: diet::DOWNLOAD_NEW_UNREAD_ONLY,
+            include_categories: Vec::new(),
+            exclude_categories: Vec::new(),
         },
     }
 }
@@ -240,21 +199,18 @@ pub fn download_policy(kind: EntryKind, download: &DownloadPrefs) -> DownloadPol
 /// The settings of one pass of `kind`. A manual pass of one category passes `category`; the include and exclude lists
 /// are then ignored by the queue.
 pub fn pass_settings(kind: EntryKind, category: Option<i64>, inputs: &Inputs) -> PassSettings {
-    let lib = &inputs.library;
-    let (include, exclude) = match kind {
-        EntryKind::Manga => (lib.manga_update_categories.get(), lib.manga_update_categories_exclude.get()),
-        EntryKind::Anime => (lib.anime_update_categories.get(), lib.anime_update_categories_exclude.get()),
-    };
-    let tokens: Vec<String> = lib.auto_update_item_restrictions.get().into_iter().collect();
+    // The update category lists, the Smart update switch and the season switch are cut: all categories, the default
+    // item restrictions, no metadata refresh and no season refresh. Notifications never hide their content.
+    let tokens: Vec<String> = diet::LIBRARY_UPDATE_ITEM_RESTRICTIONS.iter().map(|token| token.to_string()).collect();
     PassSettings {
         download: download_policy(kind, &inputs.download),
         category,
-        include_categories: ids(include),
-        exclude_categories: ids(exclude),
+        include_categories: Vec::new(),
+        exclude_categories: Vec::new(),
         restrictions: QueueRestrictions::from_pref(Some(&tokens)),
-        auto_update_metadata: lib.auto_update_metadata.get(),
-        include_season_children: lib.update_season_on_library_update.get(),
-        hide_content: inputs.hide_content.get(),
+        auto_update_metadata: diet::LIBRARY_AUTO_UPDATE_METADATA,
+        include_season_children: diet::LIBRARY_UPDATE_SEASON,
+        hide_content: diet::NOTIFICATION_HIDE_CONTENT,
         ..PassSettings::new(kind)
     }
 }
@@ -280,21 +236,20 @@ fn runner() -> Arc<Runner> {
 
 /// The runner over two database handles and a preference store, for the app and for the headless pass.
 fn runner_over(manga_db: Arc<Db>, anime_db: Arc<Db>, store: &PrefStore) -> Arc<Runner> {
-    let lib = LibraryPrefs::new(store.clone());
     let renames = folder_renames();
     let sync = DbItemSync::new(
         manga_db.clone(),
         anime_db.clone(),
         Arc::new(MangaSyncLocks::default()),
         Arc::new(MangaSyncLocks::default()),
-        lib.mark_duplicate_read_chapter_as_read.get().contains(kuro_prefs::library::MARK_DUPLICATE_CHAPTER_READ_NEW),
-        kuro_domain::items::episode_sync::mark_duplicate_as_seen_from_pref(&lib.mark_duplicate_seen_episode_as_seen.get()),
+        diet::LIBRARY_MARK_DUPLICATE_CHAPTER_READ,
+        diet::LIBRARY_MARK_DUPLICATE_EPISODE_SEEN,
     )
     .with_renames(renames.clone(), renames);
     let prefs = Prefs::with_store(store.clone(), Arc::new(kuro_prefs::memory::MemorySecrets::default()));
-    let host = PrefsHost::new(ToastHost::new(manga_db.clone(), anime_db.clone(), store), &prefs);
+    let host = PrefsHost::new(ToastHost::new(manga_db.clone(), anime_db.clone()), &prefs);
     Arc::new(PassRunner::new(Deps {
-        registry: NothingInstalled,
+        registry: LiveRegistry,
         store: SqliteLibraryStore::new(manga_db, anime_db),
         sync,
         host,
@@ -308,7 +263,7 @@ fn register_buttons(start: std::rc::Rc<dyn Fn(EntryKind, Option<i64>) -> bool>, 
     crate::updates::library_trigger::install_shared(start, running);
 }
 
-type MetadataPasses = MetadataRunner<NothingInstalled, SqliteLibraryStore, DbMetadataStore>;
+type MetadataPasses = MetadataRunner<LiveRegistry, SqliteLibraryStore, DbMetadataStore>;
 
 thread_local! {
     static STARTED: OnceCell<()> = const { OnceCell::new() };
@@ -340,7 +295,7 @@ impl MetadataProgress for MetadataNotices {
 fn metadata_passes() -> Arc<MetadataPasses> {
     let app = crate::data::app();
     Arc::new(MetadataRunner::new(MetadataDeps {
-        registry: NothingInstalled,
+        registry: LiveRegistry,
         store: SqliteLibraryStore::new(app.manga_db.clone(), app.anime_db.clone()),
         writer: DbMetadataStore::new(app.manga_db.clone(), app.anime_db.clone()),
         progress: Some(Arc::new(MetadataNotices)),
@@ -368,9 +323,7 @@ pub fn start() {
     RUNNING.with(|r| *r.borrow_mut() = Some(runner.clone()));
     let app = crate::data::app();
     let inputs = Arc::new(Inputs {
-        library: LibraryPrefs::new(app.base.store().clone()),
         download: DownloadPrefs::new(app.base.store().clone()),
-        hide_content: app.security.hide_notification_content.clone(),
     });
     METADATA.with(|m| *m.borrow_mut() = Some(metadata_passes()));
 
@@ -480,9 +433,7 @@ pub fn run_headless(trigger: Trigger) -> u8 {
     };
     let store = library.prefs.clone();
     let inputs = Inputs {
-        library: LibraryPrefs::new(store.clone()),
         download: DownloadPrefs::new(store.clone()),
-        hide_content: kuro_prefs::security::SecurityPrefs::new(store.clone()).hide_notification_content.clone(),
     };
     let runner = runner_over(library.manga, library.anime, &store);
     runtime.block_on(headless_passes(&runner, &inputs, trigger))
@@ -495,31 +446,22 @@ mod tests {
 
     fn inputs() -> (PrefStore, Inputs) {
         let store = PrefStore::in_memory();
-        let hide = Pref::new(store.clone(), "hide_notification_content", false);
-        (store.clone(), Inputs { library: LibraryPrefs::new(store.clone()), download: DownloadPrefs::new(store), hide_content: hide })
+        (store.clone(), Inputs { download: DownloadPrefs::new(store) })
     }
 
     #[test]
-    fn a_pass_reads_its_category_lists_per_kind() {
+    fn a_pass_uses_the_hard_coded_category_and_restriction_settings() {
         let (_store, inputs) = inputs();
-        inputs.library.manga_update_categories.set(["3".to_owned(), "x".to_owned()].into()).unwrap();
-        inputs.library.anime_update_categories_exclude.set(["7".to_owned()].into()).unwrap();
         let manga = pass_settings(EntryKind::Manga, None, &inputs);
-        assert_eq!(manga.include_categories, vec![3], "a text that is not an id is dropped");
-        assert!(manga.exclude_categories.is_empty());
-        let anime = pass_settings(EntryKind::Anime, None, &inputs);
-        assert_eq!(anime.exclude_categories, vec![7]);
-        assert!(anime.include_categories.is_empty());
+        assert!(manga.include_categories.is_empty() && manga.exclude_categories.is_empty(), "all categories");
+        assert!(!manga.auto_update_metadata && !manga.hide_content, "cut settings keep their hard-coded values");
     }
 
     #[test]
-    fn a_manual_pass_names_its_category_and_follows_the_switches() {
+    fn a_manual_pass_names_its_category() {
         let (_store, inputs) = inputs();
-        inputs.library.auto_update_metadata.set(true).unwrap();
-        inputs.hide_content.set(true).unwrap();
         let settings = pass_settings(EntryKind::Manga, Some(5), &inputs);
         assert_eq!(settings.category, Some(5));
-        assert!(settings.auto_update_metadata && settings.hide_content);
         assert_eq!(settings.kind, EntryKind::Manga);
     }
 
@@ -529,71 +471,19 @@ mod tests {
     }
 
     #[test]
-    fn the_season_toggle_changes_the_next_pass() {
-        // T-26a-108
-        let (_store, inputs) = inputs();
-        assert!(!pass_settings(EntryKind::Anime, None, &inputs).include_season_children, "off by default");
-        inputs.library.update_season_on_library_update.set(true).unwrap();
-        assert!(pass_settings(EntryKind::Anime, None, &inputs).include_season_children);
-        inputs.library.update_season_on_library_update.set(false).unwrap();
-        assert!(!pass_settings(EntryKind::Anime, None, &inputs).include_season_children);
-    }
-
-    #[test]
-    fn the_download_policy_reads_the_chapter_keys_for_manga_and_the_episode_keys_for_anime() {
+    fn the_download_policy_follows_the_new_item_toggles_only() {
         // T-26a-090, T-26a-091
         let (_store, inputs) = inputs();
         let off = pass_settings(EntryKind::Manga, None, &inputs).download;
         assert_eq!(off, DownloadPolicy::default(), "download_new is off by default");
         assert!(!pass_settings(EntryKind::Anime, None, &inputs).download.enabled);
-        let d = &inputs.download;
-        d.download_new_chapters().set(true).unwrap();
-        d.download_new_unread_chapters_only().set(true).unwrap();
-        d.download_new_chapter_categories().set(["2".to_owned(), "x".to_owned()].into()).unwrap();
-        d.download_new_chapter_categories_exclude().set(["0".to_owned()].into()).unwrap();
-        let manga = pass_settings(EntryKind::Manga, None, &inputs).download;
-        assert_eq!(
-            manga,
-            DownloadPolicy { enabled: true, unread_only: true, include_categories: vec![2], exclude_categories: vec![0] }
-        );
-        assert!(!pass_settings(EntryKind::Anime, None, &inputs).download.enabled, "the chapter toggle does not turn anime on");
-        d.download_new_episodes().set(true).unwrap();
-        d.download_new_unseen_episodes_only().set(true).unwrap();
-        d.download_new_episode_categories().set(["5".to_owned()].into()).unwrap();
-        d.download_new_episode_categories_exclude().set(["6".to_owned()].into()).unwrap();
-        let anime = pass_settings(EntryKind::Anime, None, &inputs).download;
-        assert_eq!(
-            anime,
-            DownloadPolicy { enabled: true, unread_only: true, include_categories: vec![5], exclude_categories: vec![6] }
-        );
-    }
-
-    #[tokio::test]
-    async fn a_pass_built_from_the_prefs_queues_new_items_of_a_favourite_and_not_of_a_non_favourite() {
-        // T-26a-090: the toggle reaches the pass, so the enqueue happens for the favourite only.
-        use crate::library_update::fake::{FakeHost, FakeStore, FakeSync, entry, item};
-        use crate::library_update::queue::LibraryEntry;
-        use crate::library_update::source::fake::{FakeRegistry, FakeSource};
-        let (_store, inputs) = inputs();
-        let library = vec![entry(1, 1, "Favourite"), LibraryEntry { favorite: false, ..entry(2, 1, "Not a favourite") }];
-        let run = |settings: PassSettings| {
-            let mut registry = FakeRegistry::default();
-            registry.sources.insert(1, FakeSource::ok(vec![item(1.0, 0)]));
-            let deps = Deps { registry, store: FakeStore::with(library.clone()), sync: FakeSync::default(), host: FakeHost::default() };
-            let runner = Arc::new(PassRunner::new(deps));
-            async move { runner.run(settings, Trigger::Manual).await }
-        };
-        let mut off = pass_settings(EntryKind::Manga, None, &inputs);
-        off.restrictions = QueueRestrictions::default();
-        assert_eq!(run(off).await.queued_downloads, 0, "download_new is off");
         inputs.download.download_new_chapters().set(true).unwrap();
-        let mut on = pass_settings(EntryKind::Manga, None, &inputs);
-        on.restrictions = QueueRestrictions::default();
-        let outcome = run(on).await;
-        assert_eq!(outcome.queued_downloads, 1, "one enqueue: the favourite's, not the other entry's");
-        assert_eq!(outcome.updates.len(), 2, "both entries still update");
+        let manga = pass_settings(EntryKind::Manga, None, &inputs).download;
+        assert_eq!(manga, DownloadPolicy { enabled: true, unread_only: false, include_categories: vec![], exclude_categories: vec![] });
+        assert!(!pass_settings(EntryKind::Anime, None, &inputs).download.enabled, "the chapter toggle does not turn anime on");
+        inputs.download.download_new_episodes().set(true).unwrap();
+        assert!(pass_settings(EntryKind::Anime, None, &inputs).download.enabled);
     }
-
     #[test]
     fn t_26a_103_the_updates_button_reaches_the_registered_runner_and_shares_its_single_flight() {
         use crate::updates::library_trigger::{self, Outcome};
@@ -664,10 +554,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn nothing_installed_gives_the_stub_slot_and_a_missing_source_error() {
-        use crate::library_update::source::SourceSlot;
-        let registry = NothingInstalled;
-        let slot = registry.get_or_stub(9);
+    async fn an_unknown_source_gives_the_stub_slot_and_a_missing_source_error() {
+        use crate::library_update::error::UpdateError;
+        use crate::library_update::source::{SourceRegistry, SourceSlot};
+        let slot = LiveRegistry.get_or_stub(EntryKind::Manga, 9);
         assert!(matches!(slot, SourceSlot::Missing));
         assert_eq!(slot.fetch(EntryKind::Manga, "/m", false).await, Err(UpdateError::SourceNotInstalled));
     }

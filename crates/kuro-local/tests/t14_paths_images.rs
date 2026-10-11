@@ -9,7 +9,7 @@ use kuro_local::images::{
     ImageType, atomic_write, existing_thumbnail, find_image, set_cover, sniff, thumbnail_file_name, write_image,
     write_thumbnail,
 };
-use kuro_local::names::{extension, sanitize_name, stem};
+use kuro_local::names::{extension, stem};
 
 fn dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("temp dir")
@@ -251,10 +251,11 @@ fn t_14_thumbnail_name_sanitized() {
 
 #[test]
 fn t_14_thumbnail_name_sanitized_for_windows() {
-    assert_eq!(sanitize_name("CON"), "_CON");
-    assert_eq!(sanitize_name("lpt1.txt"), "_lpt1.txt");
-    assert_eq!(sanitize_name("Episode 1. "), "Episode 1");
-    assert_eq!(sanitize_name("CONTINUE"), "CONTINUE", "only the whole device name is reserved");
+    let sanitize = |name: &str| kuro_core::text::build_valid_filename(name, true);
+    assert_eq!(sanitize("CON"), "CON_");
+    assert_eq!(sanitize("lpt1.txt"), "lpt1_.txt");
+    assert_eq!(sanitize("Episode 1. "), "Episode 1");
+    assert_eq!(sanitize("CONTINUE"), "CONTINUE", "only the whole device name is reserved");
 }
 
 #[test]

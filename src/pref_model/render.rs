@@ -198,7 +198,7 @@ mod tests {
             let action = PreferenceItem::Text { common: ItemCommon::new("Clear"), on_click: Some(Rc::new(|| {})) };
             assert_ne!(ends_in(&action).as_deref(), Some("go-next-symbolic"), "an action row has no arrow");
             let prefs = Prefs::in_memory();
-            let lists: Vec<PreferenceItem> = items(crate::settings_ui::advanced::page_rows(&prefs, Rc::new(|| {})))
+            let lists: Vec<PreferenceItem> = items(crate::settings_ui::downloads::page_rows(&prefs))
                 .into_iter()
                 .chain(items(crate::settings_ui::library::page_rows(&prefs, &[], &[], Rc::new(|_| {}))))
                 .filter(|i| matches!(i, PreferenceItem::List { .. } | PreferenceItem::BasicList { .. } | PreferenceItem::MultiSelect { .. }))
@@ -231,9 +231,8 @@ mod tests {
             }
             assert!(opening >= 3, "the two repo rows and the debug info links");
             let library = items(crate::settings_ui::library::page_rows(&prefs, &[], &[], Rc::new(|_| {})));
-            let advanced = items(crate::settings_ui::advanced::page_rows(&prefs, Rc::new(|| {})));
-            for title in ["Edit anime categories", "Edit manga categories", "Onboarding guide"] {
-                let item = library.iter().chain(&advanced).find(|i| i.title() == title).unwrap_or_else(|| panic!("{title}"));
+            for title in ["Edit anime categories", "Edit manga categories"] {
+                let item = library.iter().find(|i| i.title() == title).unwrap_or_else(|| panic!("{title}"));
                 assert_eq!(ends_in(item).as_deref(), Some("go-next-symbolic"), "{title}");
             }
         });

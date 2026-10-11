@@ -15,7 +15,7 @@ window of its own and back while it keeps playing or reading.
 - `is_moving()` is true only while the page is between the two toplevels. GTK unrealizes the page when it leaves a
   toplevel, so content can use it to tell a move from a close.
 
-The player page has a slim header: Back, the title, Detach, and the tracks menu (audio and subtitles). The detached
+The player page has a slim header: Back, the title, Detach, the quality and server menu (online episodes), and the tracks menu (audio and subtitles). The detached
 window hides GTK's default title bar, so this header moves and closes the window. The reader keeps its own top bar
 (Back, titles, Detach, bookmark, overflow). Its detached window keeps the default title bar, because the reader's bar
 hides with the menu. Fullscreen (F11, the control bar button) acts on whichever window holds the page. The player

@@ -11,9 +11,9 @@ use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::pref::Pref;
 use kuro_prefs::store::PrefStore;
-use kuro_prefs::ui::{AppTheme, ThemeMode, UiPrefs};
+use kuro_prefs::ui::{ThemeMode, UiPrefs};
 
-use crate::pref_model::widgets::{app_theme, theme_mode};
+use crate::pref_model::widgets::theme_mode;
 use crate::settings_ui::storage;
 
 /// The app-state key of the base storage directory (`__APP_STATE_storage_dir`). The stored value is the base64 of the
@@ -226,33 +226,8 @@ fn theme_step(ui: &UiPrefs) -> gtk::Box {
             }
         });
     }
-    let themes = app_theme::strip_themes();
-    let theme_labels: Vec<String> = themes.iter().map(|t| app_theme::card_title(*t)).collect();
-    let theme_refs: Vec<&str> = theme_labels.iter().map(String::as_str).collect();
-    let theme_drop = gtk::DropDown::from_strings(&theme_refs);
-    let current = app_theme::normalise(ui.app_theme.get());
-    theme_drop.set_selected(themes.iter().position(|t| *t == current).unwrap_or(0) as u32);
-    {
-        let (ui, themes) = (ui.clone(), themes.clone());
-        theme_drop.connect_selected_notify(move |d| {
-            let theme: AppTheme = themes[d.selected() as usize];
-            let _ = ui.app_theme.set(theme);
-        });
-    }
-    let amoled = gtk::Switch::builder().active(ui.theme_dark_amoled.get()).valign(gtk::Align::Center).build();
-    {
-        let ui = ui.clone();
-        amoled.connect_active_notify(move |s| {
-            let _ = ui.theme_dark_amoled.set(s.is_active());
-        });
-    }
-    let amoled_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    amoled_row.append(&gtk::Label::builder().label(tr(MsgKey::pref_dark_theme_pure_black)).hexpand(true).xalign(0.0).build());
-    amoled_row.append(&amoled);
     let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
     column.append(&mode_drop);
-    column.append(&theme_drop);
-    column.append(&amoled_row);
     column
 }
 

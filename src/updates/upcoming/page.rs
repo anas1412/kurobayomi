@@ -18,11 +18,10 @@ use gtk::{Align, Box as GBox, Button, Label, ListBoxRow, Orientation as O};
 use kuro_domain::kind::EntryKind;
 use kuro_i18n::{MsgKey, tr};
 use kuro_images::art::{ArtKind, ArtRef, Owner};
-use kuro_prefs::ui::UiPrefs;
 
 use crate::data;
 use crate::updates::download_host;
-use crate::updates::prefs::{home_returns_today, week_start};
+use crate::misc::diet_defaults as diet;
 use crate::updates::upcoming::calendar::week_start_for;
 use crate::updates::upcoming::calendar_view::{CalendarView, ensure_css};
 use crate::updates::upcoming::layout::{self, Shape};
@@ -54,16 +53,14 @@ struct Env {
 impl Env {
     /// The live environment of one kind. Needs the app data.
     fn current(kind: EntryKind) -> Self {
-        let store = data::app().base.store().clone();
-        let ui = UiPrefs::new(store.clone());
         let locale = kuro_i18n::current_locale().tag;
         Self {
-            first: week_start_for(&week_start(&store).get(), locale),
+            first: week_start_for(diet::UPCOMING_WEEK_START, locale),
             today: Local::now().date_naive(),
-            relative: ui.relative_time.get(),
-            date_pattern: ui.date_format.get(),
+            relative: diet::LIBRARY_RELATIVE_TIME,
+            date_pattern: diet::LIBRARY_DATE_FORMAT.to_owned(),
             locale,
-            home_today: home_returns_today(&store).get(),
+            home_today: diet::LIBRARY_UPCOMING_HOME_RETURNS_TODAY,
             open: Rc::new(move |id| open_entry(kind, id)),
         }
     }

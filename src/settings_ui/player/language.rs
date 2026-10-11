@@ -15,15 +15,6 @@ pub fn language_row(title: &str, pref: &Pref<String>, dialog_info: &str) -> Pref
     edit_info_row(title, pref, dialog_info, lang::validate_text)
 }
 
-/// A free text row (whitelist, blacklist): any text is stored, an empty one too.
-pub fn text_row(title: &str, pref: &Pref<String>, dialog_info: &str) -> PreferenceItem {
-    edit_info_row(title, pref, dialog_info, accept_any)
-}
-
-fn accept_any(_: &str) -> Result<(), String> {
-    Ok(())
-}
-
 fn edit_info_row(title: &str, pref: &Pref<String>, dialog_info: &str, validate: fn(&str) -> Result<(), String>) -> PreferenceItem {
     PreferenceItem::EditText {
         common: ItemCommon::bound(title),
@@ -87,16 +78,5 @@ mod tests {
         assert_eq!(dialog_subtitle.as_deref(), Some("Two-letter codes"));
         assert!(validate("eng") && !validate("qq"));
         assert_eq!(error_message.map(|msg| msg("qq")), Some("Invalid code: \"qq\"".to_owned()));
-    }
-
-    #[test]
-    fn a_text_row_stores_anything_including_an_empty_text() {
-        let prefs = Prefs::in_memory();
-        let pref = Pref::new(prefs.store().clone(), "pref_subtitle_whitelist", "old".to_owned());
-        let row = text_row("Whitelist", &pref, "info");
-        assert_eq!(run(veto_of(&row)(String::new())), Ok(true));
-        assert_eq!(pref.get(), "");
-        assert_eq!(run(veto_of(&row)("anything, at all".to_owned())), Ok(true));
-        assert_eq!(pref.get(), "anything, at all");
     }
 }

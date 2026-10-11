@@ -11,6 +11,7 @@ pub mod loader;
 pub mod manifest;
 pub mod notice;
 pub mod registry;
+pub mod repo;
 pub mod watch;
 #[cfg(feature = "wasm")]
 pub mod instantiate;

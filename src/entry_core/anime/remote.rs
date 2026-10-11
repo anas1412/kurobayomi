@@ -18,11 +18,10 @@ use kuro_db::handle::Db;
 use kuro_db::schema_anime::FetchType;
 use kuro_domain::error::DomainError;
 use async_trait::async_trait;
-use kuro_domain::items::episode_sync::{EpisodeSyncOptions, NoEpisodeRenames, SyncEpisodes, mark_duplicate_as_seen_from_pref};
+use kuro_domain::items::episode_sync::{EpisodeSyncOptions, NoEpisodeRenames, SyncEpisodes};
 use kuro_domain::items::season_sync::SyncSeasons;
 use kuro_domain::items::source_sync::MangaSyncLocks;
 use kuro_domain::source::remote_update::{AnimeRemote, CacheFiles, DbRemoteStore, FetchFlags, ListSync, RemoteError, RemoteStore, UpdateFromRemote};
-use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
 use kuro_source::SourceError;
 use kuro_source::anime::{AnimeSource, SAnime, SAnimeEpisodeUpdate, SAnimeSeasonUpdate, SEpisode};
@@ -171,19 +170,17 @@ pub struct RemoteAnimeBackend {
     update: Arc<UpdateFromRemote>,
     episodes: AnimeStore,
     downloads: Option<AnimeDownloads>,
-    library: LibraryPrefs,
 }
 
 impl RemoteAnimeBackend {
     /// `handle` is the runtime the fetches run on, which must be a multi-threaded one.
-    pub fn new(db: Arc<Db>, prefs: &PrefStore, lookup: Arc<dyn AnimeSourceLookup>, handle: Handle) -> Self {
-        let library = LibraryPrefs::new(prefs.clone());
-        let mark_duplicate_as_seen = mark_duplicate_as_seen_from_pref(&library.mark_duplicate_seen_episode_as_seen.get());
+    pub fn new(db: Arc<Db>, _prefs: &PrefStore, lookup: Arc<dyn AnimeSourceLookup>, handle: Handle) -> Self {
+        let mark_duplicate_as_seen = crate::misc::diet_defaults::LIBRARY_MARK_DUPLICATE_EPISODE_SEEN;
         let sync = SyncEpisodes::new(Arc::clone(&db), Arc::new(MangaSyncLocks::default()), Arc::new(NoEpisodeRenames));
         let list_sync = EpisodeListSync { sync, seasons: SyncSeasons::new(Arc::clone(&db)), handle, mark_duplicate_as_seen };
         let store = Arc::new(DbRemoteStore::new(Arc::clone(&db)));
         let update = Arc::new(UpdateFromRemote::new(store.clone(), Arc::new(list_sync), Arc::new(NoCoverFiles)));
-        Self { stubs: StubAnimeBackend::new(Arc::clone(&db)), lookup, store, update, episodes: AnimeStore::new(db), downloads: None, library }
+        Self { stubs: StubAnimeBackend::new(Arc::clone(&db)), lookup, store, update, episodes: AnimeStore::new(db), downloads: None }
     }
 
     /// Gives the backend the downloads of the page: the downloads folder and the app's queue.
@@ -211,7 +208,7 @@ impl AnimeBackend for RemoteAnimeBackend {
 
     fn fetch(&self, anime_id: i64, plan: RefreshPlan, trigger: Trigger) -> AnimeFetch {
         let (store, update, lookup) = (Arc::clone(&self.store), Arc::clone(&self.update), Arc::clone(&self.lookup));
-        let season_episodes = self.library.update_season_on_refresh.get();
+        let season_episodes = crate::misc::diet_defaults::LIBRARY_UPDATE_SEASON;
         Box::pin(async move {
             let anime = store.anime(anime_id).map_err(domain_error)?;
             let Some(remote) = lookup.remote(anime.source) else {
@@ -410,11 +407,10 @@ mod tests {
     }
 
     /// Refreshes a parent that lists seasons from `source`: the temp dir to keep alive, the ids of the stored seasons and the store.
-    fn season_refresh(rt: &tokio::runtime::Runtime, update_seasons: bool, source: &Arc<FakeSource>) -> (tempfile::TempDir, Vec<i64>, AnimeStore) {
+    fn season_refresh(rt: &tokio::runtime::Runtime, source: &Arc<FakeSource>) -> (tempfile::TempDir, Vec<i64>, AnimeStore) {
         let (dir, store, id) = with_episodes(true, true, 0, 0);
         store.set_fetch_type_for_test(id, FetchType::Seasons);
         let prefs = PrefStore::in_memory();
-        LibraryPrefs::new(prefs.clone()).update_season_on_refresh.set(update_seasons).unwrap();
         let backend = RemoteAnimeBackend::new(store.db(), &prefs, Arc::new(One(source.clone())), rt.handle().clone());
         let plan = RefreshPlan { info: true, episodes: false, seasons: true };
         rt.block_on(backend.fetch(id, plan, Trigger::Manual)).expect("the refresh works");
@@ -423,22 +419,10 @@ mod tests {
     }
 
     #[test]
-    fn a_seasons_refresh_stores_every_season_and_fetches_the_episodes_of_each_when_the_pref_is_on() {
+    fn a_seasons_refresh_leaves_the_episodes_alone_because_the_season_setting_is_cut() {
         let rt = rt();
         let source = seasons_source();
-        let (_dir, ids, store) = season_refresh(&rt, true, &source);
-        assert_eq!(ids.len(), 2, "both source seasons are stored as children");
-        for id in ids {
-            assert_eq!(store.episodes(id).unwrap().len(), 1, "the episodes of the season were stored");
-        }
-        assert_eq!(*source.asked.lock().unwrap(), vec![(false, true), (false, true)], "one episode call per season, with no details");
-    }
-
-    #[test]
-    fn a_seasons_refresh_leaves_the_episodes_alone_when_the_pref_is_off() {
-        let rt = rt();
-        let source = seasons_source();
-        let (_dir, ids, store) = season_refresh(&rt, false, &source);
+        let (_dir, ids, store) = season_refresh(&rt, &source);
         assert_eq!(ids.len(), 2);
         assert!(ids.iter().all(|id| store.episodes(*id).unwrap().is_empty()));
         assert!(source.asked.lock().unwrap().is_empty());
