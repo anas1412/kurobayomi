@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use crate::enums::{
-    AudioChannels, Debanding, PlayerOrientation, SingleActionGesture, SubtitleJustification,
+    AudioChannels, Debanding, SingleActionGesture, SubtitleJustification,
     SubtitlesBorderStyle, VideoAspect,
 };
 
@@ -52,8 +52,6 @@ pub mod keys {
     pub const PREF_PLAYER_FILTER_CONTRAST: &str = "pref_player_filter_contrast";
     pub const PREF_PLAYER_FILTER_GAMMA: &str = "pref_player_filter_gamma";
     pub const PREF_PLAYER_FILTER_HUE: &str = "pref_player_filter_hue";
-    pub const PREF_GESTURE_VOLUME_BRIGHTNESS: &str = "pref_gesture_volume_brightness";
-    pub const PREF_SWAP_VOLUME_AND_BRIGHTNESS: &str = "pref_swap_volume_and_brightness";
     pub const PREF_GESTURE_HORIZONTAL_SEEK: &str = "pref_gesture_horizontal_seek";
     pub const PREF_SHOW_SEEKBAR: &str = "pref_show_seekbar";
     pub const PREF_DEFAULT_INTRO_LENGTH: &str = "pref_default_intro_length";
@@ -67,13 +65,9 @@ pub mod keys {
     pub const PREF_MEDIA_NEXT: &str = "pref_media_next";
     pub const PREF_PRESERVE_WATCHING_POSITION: &str = "pref_preserve_watching_position";
     pub const PREF_PROGRESS_PREFERENCE: &str = "pref_progress_preference";
-    pub const PREF_DEFAULT_PLAYER_ORIENTATION_TYPE_KEY: &str =
-        "pref_default_player_orientation_type_key";
     pub const PREF_ALLOW_GESTURES_IN_PANELS: &str = "pref_allow_gestures_in_panels";
     pub const PREF_SHOW_LOADING: &str = "pref_show_loading";
     pub const PREF_SHOW_CURRENT_CHAPTER: &str = "pref_show_current_chapter";
-    pub const PREF_REMEMBER_BRIGHTNESS: &str = "pref_remember_brightness";
-    pub const PLAYER_BRIGHTNESS_VALUE: &str = "player_brightness_value";
     pub const PREF_REMEMBER_VOLUME: &str = "pref_remember_volume";
     pub const PLAYER_VOLUME_VALUE: &str = "player_volume_value";
     pub const PREF_SHOW_FAILED_HOSTERS: &str = "pref_show_failed_hosters";
@@ -143,7 +137,7 @@ pub mod keys {
 
 /// Every key, in the order of the data doc (section 4.1 to 4.6, then the keys read from other
 /// files).
-pub const CATALOGUE: [PrefKey; 104] = [
+pub const CATALOGUE: [PrefKey; 99] = [
     PrefKey {
         key: keys::MPV_SCRIPTS,
         default: PrefDefault::Bool(false),
@@ -217,14 +211,6 @@ pub const CATALOGUE: [PrefKey; 104] = [
         default: PrefDefault::Int(0),
     },
     PrefKey {
-        key: keys::PREF_GESTURE_VOLUME_BRIGHTNESS,
-        default: PrefDefault::Bool(true),
-    },
-    PrefKey {
-        key: keys::PREF_SWAP_VOLUME_AND_BRIGHTNESS,
-        default: PrefDefault::Bool(false),
-    },
-    PrefKey {
         key: keys::PREF_GESTURE_HORIZONTAL_SEEK,
         default: PrefDefault::Bool(true),
     },
@@ -277,10 +263,6 @@ pub const CATALOGUE: [PrefKey; 104] = [
         default: PrefDefault::Float(0.85),
     },
     PrefKey {
-        key: keys::PREF_DEFAULT_PLAYER_ORIENTATION_TYPE_KEY,
-        default: PrefDefault::Enum("SensorLandscape"),
-    },
-    PrefKey {
         key: keys::PREF_ALLOW_GESTURES_IN_PANELS,
         default: PrefDefault::Bool(false),
     },
@@ -291,14 +273,6 @@ pub const CATALOGUE: [PrefKey; 104] = [
     PrefKey {
         key: keys::PREF_SHOW_CURRENT_CHAPTER,
         default: PrefDefault::Bool(true),
-    },
-    PrefKey {
-        key: keys::PREF_REMEMBER_BRIGHTNESS,
-        default: PrefDefault::Bool(false),
-    },
-    PrefKey {
-        key: keys::PLAYER_BRIGHTNESS_VALUE,
-        default: PrefDefault::Float(-1.0),
     },
     PrefKey {
         key: keys::PREF_REMEMBER_VOLUME,
@@ -606,11 +580,6 @@ named_enum!(SubtitleJustification {
 named_enum!(SubtitlesBorderStyle {
     OutlineAndShadow => "OutlineAndShadow", OpaqueBox => "OpaqueBox", BackgroundBox => "BackgroundBox"
 });
-named_enum!(PlayerOrientation {
-    Free => "Free", Video => "Video", Portrait => "Portrait", ReversePortrait => "ReversePortrait",
-    SensorPortrait => "SensorPortrait", Landscape => "Landscape",
-    ReverseLandscape => "ReverseLandscape", SensorLandscape => "SensorLandscape"
-});
 
 /// Where stored preference text comes from. A missing key is `None`.
 pub trait PrefStore {
@@ -684,7 +653,7 @@ pub fn enum_text<E: NamedEnum>(value: E) -> &'static str {
     value.name()
 }
 
-/// The brightness or volume to restore when a session starts (T-45b-053). It is restored only when remembering is on
+/// The volume to restore when a session starts (T-45b-053). It is restored only when remembering is on
 /// and a level was saved (a stored value below zero means none was).
 pub fn remembered_level(remember: bool, stored: f64) -> Option<f64> {
     (remember && stored >= 0.0).then_some(stored)
@@ -747,7 +716,7 @@ mod tests {
     fn keys_are_unique_and_every_source_key_is_present() {
         let mut seen = std::collections::HashSet::new();
         assert!(CATALOGUE.iter().all(|e| seen.insert(e.key)));
-        assert_eq!(CATALOGUE.len(), 104);
+        assert_eq!(CATALOGUE.len(), 99);
         for key in [
             "pref_audio_lang",
             "pref_subtitle_lang",
@@ -791,8 +760,6 @@ mod tests {
             ("pref_player_filter_contrast", Int(0)),
             ("pref_player_filter_gamma", Int(0)),
             ("pref_player_filter_hue", Int(0)),
-            ("pref_gesture_volume_brightness", Bool(true)),
-            ("pref_swap_volume_and_brightness", Bool(false)),
             ("pref_gesture_horizontal_seek", Bool(true)),
             ("pref_show_seekbar", Bool(false)),
             ("pref_default_intro_length", Int(85)),
@@ -806,15 +773,9 @@ mod tests {
             ("pref_media_next", Enum("Switch")),
             ("pref_preserve_watching_position", Bool(false)),
             ("pref_progress_preference", Float(0.85)),
-            (
-                "pref_default_player_orientation_type_key",
-                Enum("SensorLandscape"),
-            ),
             ("pref_allow_gestures_in_panels", Bool(false)),
             ("pref_show_loading", Bool(true)),
             ("pref_show_current_chapter", Bool(true)),
-            ("pref_remember_brightness", Bool(false)),
-            ("player_brightness_value", Float(-1.0)),
             ("pref_remember_volume", Bool(false)),
             ("player_volume_value", Float(-1.0)),
             ("pref_show_failed_hosters", Bool(false)),
@@ -989,10 +950,6 @@ mod tests {
         assert_eq!(
             get_enum::<Debanding>(&store, keys::PREF_VIDEO_DEBANDING),
             Debanding::Gpu
-        );
-        assert_eq!(
-            get_enum::<PlayerOrientation>(&store, keys::PREF_DEFAULT_PLAYER_ORIENTATION_TYPE_KEY),
-            PlayerOrientation::SensorLandscape
         );
     }
 

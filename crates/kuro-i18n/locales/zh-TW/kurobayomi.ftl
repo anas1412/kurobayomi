@@ -10,23 +10,11 @@ action_reorganize_by = 重新排序
 
 relative_time_now = 現在
 
-pref_library_summary = 類別、全域更新、章節/劇集滑動
-
 pref_library_update_show_tab_badge = 在「新刊」導覽圖示上標記未看/未讀章數
 
 pref_progress_mark_as_seen = 要在何時標記該集為已看
 
 pref_preserve_watching_position = 保留已看集數的進度
-
-pref_category_player_orientation = 方向
-
-rotation_reverse_landscape = 橫向反轉
-
-rotation_sensor_portrait = 豎向感測器
-
-rotation_sensor_landscape = 橫向感測器
-
-pref_remember_brightness = 記住並切換到上次使用的亮度
 
 pref_remember_volume = 記住並切換至上次使用的音量
 
@@ -71,8 +59,6 @@ pref_category_external_player = 外部播放器
 pref_always_use_external_player = 始終使用外部播放器
 
 pref_external_player_preference = 外部播放器偏好
-
-enable_volume_brightness_gestures = 啟用音量和亮度手勢
 
 pref_category_player_seeking = 尋找
 
@@ -472,10 +458,6 @@ theme_cottoncandy = 棉花糖
 
 theme_mocha = 摩卡
 
-pref_episode_swipe_end = 向右滑動操作
-
-pref_episode_swipe_start = 向左滑動操作
-
 pref_category_hide_hidden = 隱藏類別和儲存畫面中的隱藏類別
 
 pref_update_anime_release_grace_period = 預計動漫發行截止日
@@ -854,10 +836,6 @@ onboarding_permission_notifications = 通知權限
 
 onboarding_permission_notifications_description = 用以傳送書櫃更新等通知
 
-onboarding_permission_ignore_battery_opts = 背景耗電量
-
-onboarding_permission_ignore_battery_opts_description = 避免中斷書櫃更新、章節下載和還原備份等較為費時的作業
-
 onboarding_permission_crashlytics = 傳送崩潰日誌
 
 onboarding_permission_crashlytics_description = 向開發人員傳送匿名崩潰日誌
@@ -900,10 +878,6 @@ pref_browse_summary = 來源、擴充套件、全域搜尋
 
 pref_backup_summary = 手動與自動備份、儲存空間
 
-pref_security_summary = 上鎖應用程式、防窺畫面
-
-pref_advanced_summary = 傾印當機記錄、電池效能最佳化
-
 pref_category_theme = 主題
 
 pref_app_theme = 應用程式主題
@@ -913,8 +887,6 @@ theme_system = 系統
 theme_light = 淺色
 
 theme_dark = 深色
-
-theme_monet = 動態
 
 theme_greenapple = 青蘋果
 
@@ -965,10 +937,6 @@ lock_always = 立即
 lock_never = 永不
 
 hide_notification_content = 隱藏通知內容
-
-secure_screen = 防窺畫面
-
-secure_screen_summary = 在切換應用程式時隱藏預覽，並禁止擷取螢幕畫面
 
 firebase_summary = 傳送崩潰日誌及資料分析有助於我們識別並解決問題和提升效能，並使未來的更新更貼近您的需求
 
@@ -1044,10 +1012,6 @@ include = 包含：{ $arg1 }
 
 exclude = 排除：{ $arg1 }
 
-pref_chapter_swipe_end = 向右滑動
-
-pref_chapter_swipe_start = 向左滑動
-
 pref_mark_duplicate_read_chapter_read = 將重複的已讀章節標記為已讀
 
 multi_lang = 多語
@@ -1105,14 +1069,6 @@ ext_nsfw_warning = 來自此擴充套件的來源可能包含未滿十八歲之�
 ext_permission_install_apps_warning = 缺少安裝擴充套件所需的權限，輕觸此處以授予
 
 ext_install_service_notif = 正在安裝擴充套件…
-
-ext_installer_pref = 套件安裝程式
-
-ext_installer_legacy = 傳統
-
-ext_installer_shizuku_stopped = Shizuku 未執行
-
-ext_installer_shizuku_unavailable_dialog = 若要使用 Shizuku 來安裝擴充套件，請先安裝 Shizuku 並開啟
 
 ext_revoke_trust = 復原對不明擴充套件的信任
 
@@ -1334,22 +1290,6 @@ double_tap_anim_speed_normal = 正常
 
 double_tap_anim_speed_fast = 快速
 
-pref_rotation_type = 預設螢幕方向
-
-rotation_type = 螢幕方向
-
-rotation_free = 自動
-
-rotation_portrait = 直向
-
-rotation_reverse_portrait = 顛倒直向
-
-rotation_landscape = 橫向
-
-rotation_force_portrait = 鎖定直向
-
-rotation_force_landscape = 鎖定橫向
-
 color_filter_r_value = 紅色
 
 color_filter_g_value = 綠色
@@ -1566,8 +1506,6 @@ pref_refresh_library_covers = 重新整理書櫃中的封面
 
 pref_reset_viewer_flags = 重設個別閱讀器設定
 
-pref_reset_viewer_flags_summary = 將所有作品的閱讀模式和螢幕方向還原為預設值
-
 pref_reset_viewer_flags_success = 已重設所有閱讀器設定
 
 pref_reset_viewer_flags_error = 無法重設閱讀器設定
@@ -1575,20 +1513,6 @@ pref_reset_viewer_flags_error = 無法重設閱讀器設定
 pref_dump_crash_logs = 分享當機記錄
 
 pref_dump_crash_logs_summary = 產生錯誤記錄檔以便分享予開發人員
-
-label_background_activity = 背景活動
-
-pref_disable_battery_optimization = 停用電池效能最佳化
-
-pref_disable_battery_optimization_summary = 有助於背景更新書櫃與自動備份
-
-battery_optimization_disabled = 已停用電池效能最佳化
-
-battery_optimization_setting_activity_not_found = 無法前往裝置設定
-
-about_dont_kill_my_app = 部分裝置製造商設有額外的應用程式限制來終止背景服務，此網站提供了修復這項問題的詳細資訊
-
-pref_tablet_ui_mode = 平板電腦介面
 
 pref_verbose_logging = 錄製詳細記錄
 

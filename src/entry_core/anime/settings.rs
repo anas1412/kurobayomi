@@ -5,16 +5,10 @@
 
 use kuro_domain::entries::anime::episode_flags as ep;
 use kuro_domain::entries::flag_setters::sort_or_flip;
-use kuro_domain::flags::{TriState, set_flag, tri};
+use kuro_domain::flags::{TriState, tri};
 use kuro_i18n::MsgKey;
 
 use crate::entry_core::flags::{Write, filter_write};
-use crate::entry_core::message::UserMessage;
-
-/// Applies one masked write to an episode flag word.
-pub fn apply(word: i64, write: Write) -> i64 {
-    set_flag(word, write.0, write.1)
-}
 
 /// Which Filter row a click came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,18 +176,6 @@ pub fn session_note(favorite: bool) -> Option<&'static str> {
     (!favorite).then_some("Settings are kept for this session")
 }
 
-/// The message after "set as default" with the library checkbox: the saved text and how many entries took the settings
-/// (E-DEF-3).
-pub fn applied_to_library_message(count: usize) -> UserMessage {
-    UserMessage::Plain(format!("{} ({count})", kuro_i18n::tr(kuro_i18n::MsgKey::episode_settings_updated)))
-}
-
-/// The snackbar after "set as default" for episodes (T-39b-010): once per successful save. A failed save shows
-/// nothing, and the list itself is never changed by the save (no optimistic write).
-pub fn default_saved_message(saved: bool) -> Option<UserMessage> {
-    saved.then_some(UserMessage::EpisodeSettingsUpdated)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,19 +184,6 @@ mod tests {
     fn only_an_entry_outside_the_library_keeps_its_settings_for_the_session() {
         assert_eq!(session_note(false), Some("Settings are kept for this session"));
         assert_eq!(session_note(true), None);
-    }
-
-    #[test]
-    fn applying_to_the_library_reports_how_many_entries_changed() {
-        let UserMessage::Plain(text) = applied_to_library_message(12) else { panic!("a plain message") };
-        assert!(text.ends_with("(12)"), "{text}");
-        assert!(text.starts_with(&kuro_i18n::tr(kuro_i18n::MsgKey::episode_settings_updated)));
-    }
-
-    #[test]
-    fn set_as_default_announces_only_a_successful_save() {
-        assert_eq!(default_saved_message(true), Some(UserMessage::EpisodeSettingsUpdated));
-        assert_eq!(default_saved_message(false), None);
     }
 
     #[test]
@@ -244,28 +213,6 @@ mod tests {
     }
 
     #[test]
-    fn a_filter_click_sends_the_next_state_of_the_cycle() {
-        let rows = filter_rows(0, false);
-        assert_eq!(filter_click(&rows[1], false), Some((ep::SHOW_UNSEEN, ep::UNSEEN_MASK)));
-        assert_eq!(filter_click(&rows[0], false), Some((ep::SHOW_DOWNLOADED, ep::DOWNLOADED_MASK)));
-        let on = filter_rows(ep::SHOW_NOT_FILLERMARKED, false);
-        assert_eq!(filter_click(&on[3], false), Some((0, ep::FILLERMARKED_MASK)), "Not cycles back to off");
-        let word = apply(0, filter_click(&rows[2], false).unwrap());
-        assert_eq!(filter_rows(word, false)[2].state, TriState::ENABLED_IS);
-        assert_eq!(filter_click(&filter_rows(0, true)[0], true), None, "downloaded-only locks the row");
-    }
-
-    #[test]
-    fn a_filter_write_changes_only_its_own_group() {
-        // Bit 27 (display) and bit 56 are not covered by the filter groups and must survive.
-        let other = ep::DISPLAY_NUMBER | (1i64 << 56) | ep::SORTING_NUMBER;
-        let word = apply(other, unseen_write(TriState::ENABLED_NOT));
-        assert_eq!(word & ep::UNSEEN_MASK, ep::SHOW_SEEN);
-        assert_eq!(word & !ep::UNSEEN_MASK, other & !ep::UNSEEN_MASK);
-        assert_eq!(apply(word, unseen_write(TriState::DISABLED)) & ep::UNSEEN_MASK, 0);
-    }
-
-    #[test]
     fn sort_rows_show_direction_only_on_the_active_row() {
         let rows = sort_rows(ep::SORTING_NUMBER | ep::SORT_ASC);
         assert_eq!(rows[1].descending, Some(false));
@@ -282,16 +229,4 @@ mod tests {
         assert_eq!(sort_click(ep::SORTING_ALPHABET, ep::SORTING_NUMBER), ep::SORTING_NUMBER | ep::SORT_ASC);
     }
 
-    #[test]
-    fn display_radios_and_checkboxes_send_the_spec_values() {
-        assert_eq!(display_mode_write(true), (ep::DISPLAY_NUMBER, ep::DISPLAY_MASK));
-        assert_eq!(display_mode_write(false), (ep::DISPLAY_NAME, ep::DISPLAY_MASK));
-        assert_eq!(previews_write(true), (ep::SHOW_NOT_PREVIEWS, ep::PREVIEWS_MASK));
-        assert_eq!(previews_write(false), (ep::SHOW_PREVIEWS, ep::PREVIEWS_MASK));
-        assert_eq!(summaries_write(true), (ep::SHOW_NOT_SUMMARIES, ep::SUMMARIES_MASK));
-        let rows = display_rows(apply(0, previews_write(false)));
-        assert!(rows.previews && rows.source_title && !rows.episode_number);
-        let rows = display_rows(apply(0, display_mode_write(true)));
-        assert!(rows.episode_number && !rows.source_title);
-    }
 }

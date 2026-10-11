@@ -18,8 +18,6 @@ action_continue = Devam Et
 
 manga = Manga
 
-pref_library_summary = Kategoriler, genel güncelleme, bölüm kaydırma
-
 pref_behavior = Manga bölüm davranışı
 
 action_add_repo_message = { $arg1 }'ye ek depolar ekleyin. Bu, "index.min.json" ile biten bir URL olmalıdır.
@@ -80,21 +78,9 @@ pref_player_settings_summary = Dahili oynatıcı, hareketler, çözümleyiciler,
 
 pref_player_internal = Dahili oynatıcı
 
-pref_player_internal_summary = İlerleme, kontroller, yönlendirme
-
 pref_progress_mark_as_seen = Bölüm hangi noktada izlendi olarak işaretlenmeli
 
 pref_preserve_watching_position = İzlenen bölümlerde izleme konumunu koru
-
-pref_category_player_orientation = Yön
-
-rotation_video = Video
-
-rotation_reverse_landscape = Ters manzara
-
-rotation_sensor_portrait = Sensör portre
-
-rotation_sensor_landscape = Sensör manzara
 
 pref_category_controls = Kontroller
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = Şu anki bölümü göster
 pref_controls_show_chapter_indicator_info = Yalnızca videoda bölümler varsa görünür
 
 pref_controls_display_volume_percentage = Ses seviyesini yüzde olarak göster
-
-pref_remember_brightness = Son kullanılan parlaklığı hatırla ve kullan
 
 pref_remember_volume = Son kullanılan ses yüksekliğini hatırla ve kullan
 
@@ -179,12 +163,6 @@ pref_external_player_preference = Harici oynatıcı tercihi
 pref_player_gestures = Hareketler
 
 pref_player_gestures_summary = Kaydırma, çift dokunma, medya kontrolleri
-
-pref_category_player_sliders = Kaydırıcılar
-
-enable_volume_brightness_gestures = Ses ve Parlaklık Hareketlerini Etkinleştir
-
-pref_controls_swap_vol_brightness = Ses ve parlaklık kaydırıcılarının yerini değiştir
 
 pref_category_player_seeking = Kaydırma
 
@@ -948,10 +926,6 @@ theme_mocha = Mocha
 
 pref_behavior_episode = Anime bölüm davranışı
 
-pref_episode_swipe_end = Sağa kaydırma işlevi
-
-pref_episode_swipe_start = Anime bölümünü sola kaydırma
-
 pref_mark_duplicate_seen_episode_seen = Yinelenen izlenmiş bölümü izlendi olarak işaretle
 
 pref_mark_duplicate_seen_episode_seen_existing = Bir bölüm izledikten sonra
@@ -1418,10 +1392,6 @@ onboarding_permission_notifications = Bildirim izni
 
 onboarding_permission_notifications_description = Kitaplık güncellemeleri ve daha fazlası için bildirim alın.
 
-onboarding_permission_ignore_battery_opts = Arka planda pil kullanımı
-
-onboarding_permission_ignore_battery_opts_description = Uzun süren kitaplık güncellemelerinin, indirmelerin, yedeklemelerin ve geri yüklemelerinin kesintiye uğramasını önleyin.
-
 onboarding_permission_crashlytics = Çökme kayıtlarını gönder
 
 onboarding_permission_crashlytics_description = Geliştiricilere anonimleştirilmiş çökme kayıtlarını gönder.
@@ -1464,10 +1434,6 @@ pref_browse_summary = Kaynaklar, uzantılar, genel arama
 
 pref_backup_summary = Elle ve otomatik yedeklemeler, depolama alanı
 
-pref_security_summary = Uygulama kilidi, güvenli ekran
-
-pref_advanced_summary = Çökme günlükleri dökümü, pil iyileştirmeleri
-
 pref_category_theme = Tema
 
 pref_app_theme = Uygulama teması
@@ -1477,8 +1443,6 @@ theme_system = Sistem
 theme_light = Açık
 
 theme_dark = Koyu
-
-theme_monet = Dinamik
 
 theme_greenapple = Yeşil Elma
 
@@ -1529,10 +1493,6 @@ lock_always = Her zaman
 lock_never = Asla
 
 hide_notification_content = Bildirim içeriğini gizle
-
-secure_screen = Güvenli ekran
-
-secure_screen_summary = Güvenli ekran, uygulamalar arasında geçiş yaparken uygulama içeriğini gizler ve ekran görüntüsü alınmasını engeller
 
 firebase_summary = Çökme kayıtlarını ve kullanım istatistiklerini göndermek sorunları tanımlamamıza ve düzeltmemize imkan verir, performansı iyileştirmemizi sağlar ve gelecek güncellemeleri ihtiyaçlarınızla uyumlu yapmamıza olanak tanır
 
@@ -1608,10 +1568,6 @@ include = Dahil et: { $arg1 }
 
 exclude = Hariç tut: { $arg1 }
 
-pref_chapter_swipe_end = Bölümü sağa kaydırma
-
-pref_chapter_swipe_start = Bölümü sola kaydırma
-
 pref_mark_duplicate_read_chapter_read = Yinelenen okunmuş bölümleri okundu olarak işaretle
 
 pref_mark_duplicate_read_chapter_read_existing = Bölümü okuduktan sonra
@@ -1673,14 +1629,6 @@ ext_nsfw_warning = Bu uzantıdaki kaynaklar yetişkin içerik (18+) içerebilir
 ext_permission_install_apps_warning = Uzantıları yüklemek için izin gerekli. İzin vermek için buraya dokunun.
 
 ext_install_service_notif = Uzantı yükleniyor…
-
-ext_installer_pref = Yükleyici
-
-ext_installer_legacy = Eski
-
-ext_installer_shizuku_stopped = Shizuku çalışmıyor
-
-ext_installer_shizuku_unavailable_dialog = Uzantı yükleyicisi olarak Shizuku'yu kullanmak için Shizuku'yu yükleyin ve başlatın.
 
 ext_revoke_trust = Güvenilmiş bilinmeyen uzantıları geri al
 
@@ -1902,22 +1850,6 @@ double_tap_anim_speed_normal = Normal
 
 double_tap_anim_speed_fast = Hızlı
 
-pref_rotation_type = Varsayılan yön
-
-rotation_type = Yön
-
-rotation_free = Serbest
-
-rotation_portrait = Portre
-
-rotation_reverse_portrait = Ters portre
-
-rotation_landscape = Manzara
-
-rotation_force_portrait = Kilitli portre
-
-rotation_force_landscape = Kilitli manzara
-
 color_filter_r_value = Kırmızı
 
 color_filter_g_value = Yeşil
@@ -2134,8 +2066,6 @@ pref_refresh_library_covers = Kitaplıktakilerin kapaklarını yenile
 
 pref_reset_viewer_flags = Her seri için okuyucu ayarlarını sıfırla
 
-pref_reset_viewer_flags_summary = Tüm serilerin okuma modunu ve yönünü sıfırlar
-
 pref_reset_viewer_flags_success = Tüm okuyucu ayarları sıfırlandı
 
 pref_reset_viewer_flags_error = Okuyucu ayarları sıfırlanamadı
@@ -2143,20 +2073,6 @@ pref_reset_viewer_flags_error = Okuyucu ayarları sıfırlanamadı
 pref_dump_crash_logs = Çökme günlüklerini paylaş
 
 pref_dump_crash_logs_summary = Geliştiricilerle paylaşmak için hata günlüklerini bir dosyaya kaydeder
-
-label_background_activity = Arka plan etkinliği
-
-pref_disable_battery_optimization = Pil iyileştirmesini devre dışı bırak
-
-pref_disable_battery_optimization_summary = Arka plan kitaplık güncellemelerine ve yedeklemelere yardım eder
-
-battery_optimization_disabled = Pil iyileştirmesi zaten devre dışı
-
-battery_optimization_setting_activity_not_found = Cihaz ayarları açılamadı
-
-about_dont_kill_my_app = Bazı üreticilerin arka plan hizmetlerini durduran ek uygulama kısıtlamaları vardır. Bu web sitesi bu durumun nasıl düzeltileceği hakkında daha fazla bilgi verir.
-
-pref_tablet_ui_mode = Tablet arayüzü
 
 pref_verbose_logging = Ayrıntılı günlük kaydı
 

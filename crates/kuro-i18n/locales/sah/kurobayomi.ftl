@@ -250,10 +250,6 @@ lock_never = Хаһан да
 
 hide_notification_content = Биллэрии иһин кистээ
 
-secure_screen = Көмүскэл экрана
-
-secure_screen_summary = Атын эбиликкэ көһөргөр, скриншоту сабаргар, эбилик иһин кистээ
-
 pref_category_nsfw_content = NSFW (18+) төрүттэр
 
 pref_show_nsfw_source = Төрүттэр испииһэктэригэр көрдөрүү
@@ -446,14 +442,6 @@ double_tap_anim_speed_normal = Көннөрү
 
 double_tap_anim_speed_fast = Түргэнник
 
-pref_rotation_type = Эргичийии
-
-rotation_free = Босхо
-
-rotation_force_portrait = Туруору
-
-rotation_force_landscape = Сытыары
-
 color_filter_r_value = Кыһыл
 
 color_filter_g_value = От күөх
@@ -551,14 +539,6 @@ pref_clear_database_summary = Эн бэбэлэтиэкэҕэр суох маа�
 clear_database_completed = Дааннайдар сотуллубуттар
 
 pref_refresh_library_covers = Бэбэлэтиэкэҕэ баар маанга таһын чэбдигирии
-
-pref_disable_battery_optimization = Батарея тупсарыытын араарыы
-
-pref_disable_battery_optimization_summary = Бэбэлэтиэкэ уонна хаппаас куопуйатыгар кэннинээҕи саҥардыытыгар көмөлөһөр
-
-battery_optimization_disabled = Батарея тупсуруута араарыллынна
-
-battery_optimization_setting_activity_not_found = Устройства түстэлэ сатаан арыллыбата
 
 website = Үөп сир
 

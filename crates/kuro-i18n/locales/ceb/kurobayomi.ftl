@@ -288,8 +288,6 @@ theme_light = Off
 
 theme_dark = Sa
 
-theme_monet = Dinamiko
-
 theme_greenapple = Berde nga mansanas
 
 theme_lavender = Lavender
@@ -325,10 +323,6 @@ lock_always = Kanunay
 lock_never = Dili gayud
 
 hide_notification_content = Tagoa ang sulod sa pahibalo
-
-secure_screen = Lig-on nga screen
-
-secure_screen_summary = Ang luwas nga screen nagtago sa mga sulod sa app sa dihang nagbalhin-balhin og mga app ug nag-block sa mga screenshot
 
 pref_category_nsfw_content = NSFW (18+) Mga Tinubdan
 
@@ -443,14 +437,6 @@ ext_nsfw_short = 18+
 ext_nsfw_warning = Ang mga tinubdan gikan niini nga extension mahimong adunay sulod nga NSFW (18+)
 
 ext_install_service_notif = Nag-instalar og extension…
-
-ext_installer_pref = Installer
-
-ext_installer_legacy = Kabilin
-
-ext_installer_shizuku_stopped = Si Shizuku wala modagan
-
-ext_installer_shizuku_unavailable_dialog = I-install ug sugdi ang Shizuku aron gamiton ang Shizuku isip extension installer.
 
 pref_fullscreen = Fullscreen
 
@@ -606,22 +592,6 @@ double_tap_anim_speed_normal = Normal
 
 double_tap_anim_speed_fast = Paspas
 
-pref_rotation_type = Default nga tipo sa rotation
-
-rotation_type = Uri sa rotation
-
-rotation_free = Libre
-
-rotation_portrait = Hulagway
-
-rotation_reverse_portrait = Baliktad nga hulagway
-
-rotation_landscape = Landscape
-
-rotation_force_portrait = Naka-lock nga hulagway
-
-rotation_force_landscape = Naka-lock nga talan-awon
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -770,8 +740,6 @@ pref_refresh_library_covers = I-refresh ang mga hapin sa librarya
 
 pref_reset_viewer_flags = I-reset ang mga setting sa matag-serye nga magbabasa
 
-pref_reset_viewer_flags_summary = I-reset ang mode sa pagbasa ug oryentasyon sa tanan nga serye
-
 pref_reset_viewer_flags_success = Ang tanan nga mga setting sa magbabasa gi-reset
 
 pref_reset_viewer_flags_error = Dili ma-reset ang mga setting sa magbabasa
@@ -779,20 +747,6 @@ pref_reset_viewer_flags_error = Dili ma-reset ang mga setting sa magbabasa
 pref_dump_crash_logs = Dump crash logs
 
 pref_dump_crash_logs_summary = Gitipigan ang mga log sa sayup sa usa ka file aron ipaambit sa mga nag-develop
-
-label_background_activity = Kalihokan sa background
-
-pref_disable_battery_optimization = I-disable ang pag-optimize sa baterya
-
-pref_disable_battery_optimization_summary = Nagtabang sa mga update sa librarya sa background ug pag-backup
-
-battery_optimization_disabled = Ang pag-optimize sa baterya gi-disable na
-
-battery_optimization_setting_activity_not_found = Dili maablihan ang mga setting sa device
-
-about_dont_kill_my_app = Ang ubang mga tiggama adunay dugang nga mga pagdili sa app nga nagpatay sa mga serbisyo sa background. Kini nga website adunay dugang nga impormasyon kon unsaon kini pag-ayo.
-
-pref_tablet_ui_mode = Tablet UI
 
 pref_verbose_logging = Verbose logging
 

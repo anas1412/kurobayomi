@@ -312,7 +312,17 @@ fn tracker_item(index: usize, view: LoginRowView, host: Option<&Host>, changed: 
         Some(kuro_track::tracker::LogoRef::Embedded(bytes)) => Some(bytes),
         _ => None,
     };
-    tap_item(view.row.name, subtitle(host, view.row).as_deref(), true, trailing, logo, on_tap)
+    // Only AniList is switched on until the other trackers are fixed; their rows stay visible but cannot be tapped.
+    let enabled = tracker_enabled(view.row.tracker);
+    let sub = if enabled { subtitle(host, view.row) } else { Some(NOT_AVAILABLE.to_owned()) };
+    tap_item(view.row.name, sub.as_deref(), enabled, trailing, logo, on_tap)
+}
+
+const NOT_AVAILABLE: &str = "Not available yet";
+
+/// The trackers that can log in today.
+pub fn tracker_enabled(tracker: kuro_track::model::TrackerId) -> bool {
+    tracker == kuro_track::model::TrackerId::ANILIST
 }
 
 /// The enhanced trackers group: a row for each tracker whose source is installed (a tap is a no-op login), a disabled
@@ -498,6 +508,15 @@ mod tests {
         assert_eq!(titles[0], "Update progress after reading/watching");
         assert!(rows.iter().any(|entry| matches!(entry, Preference::Group(g) if g.title == "Trackers" && g.items.len() == 8)));
         assert!(rows.iter().any(|entry| matches!(entry, Preference::Group(g) if g.title == "Enhanced trackers")));
+    }
+
+    #[test]
+    fn only_anilist_can_log_in_until_the_others_are_fixed() {
+        use kuro_track::model::TrackerId;
+        assert!(tracker_enabled(TrackerId::ANILIST));
+        for other in [TrackerId::MYANIMELIST, TrackerId::KITSU, TrackerId::SIMKL] {
+            assert!(!tracker_enabled(other));
+        }
     }
 
     #[test]

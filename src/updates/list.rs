@@ -22,27 +22,6 @@ pub fn group_by_date<T>(items: Vec<(T, Option<NaiveDate>)>, label: impl Fn(Naive
     out
 }
 
-/// Positions of the item rows. Headers are not selectable and are not counted by range selection, so a range is
-/// taken over these positions only.
-pub fn selectable_positions<T>(rows: &[ListRow<T>]) -> Vec<usize> {
-    rows.iter()
-        .enumerate()
-        .filter(|(_, row)| matches!(row, ListRow::Item(_)))
-        .map(|(position, _)| position)
-        .collect()
-}
-
-/// The stable key of a row: `(entry_id, unit_id)` for an item, the header text for a date header.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum RowKey {
-    Header(String),
-    Item { entry_id: i64, unit_id: i64 },
-}
-
-pub fn item_key(entry_id: i64, unit_id: i64) -> RowKey {
-    RowKey::Item { entry_id, unit_id }
-}
-
 /// What the page shows: the loading screen until the first load, the empty message when the list has no rows, the
 /// error row after a failed load, or the list. `child_name` is the name of the matching child of the `gtk::Stack`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,18 +94,6 @@ mod tests {
                 ListRow::Item("b"),
             ]
         );
-    }
-
-    #[test]
-    fn selectable_positions_skip_headers() {
-        let rows = group_by_date(vec![("a", Some(d(9))), ("b", Some(d(8)))], label);
-        assert_eq!(selectable_positions(&rows), vec![1, 3]);
-    }
-
-    #[test]
-    fn row_keys_use_entry_and_unit_ids() {
-        assert_eq!(item_key(7, 9), RowKey::Item { entry_id: 7, unit_id: 9 });
-        assert_ne!(item_key(7, 9), item_key(9, 7));
     }
 
     #[test]

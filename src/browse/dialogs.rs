@@ -140,6 +140,7 @@ impl DialogSlot {
         });
     }
 
+    #[cfg(test)]
     /// The dialog on screen, if any.
     pub fn current(&self) -> Option<gtk::Window> {
         self.current.borrow().clone()

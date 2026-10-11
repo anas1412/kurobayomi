@@ -75,7 +75,7 @@ pub fn toast_timeout_ms(spec: &ToastSpec) -> Option<u32> {
 }
 
 /// The icon of a row, 40 px square. A built-in glyph is tinted with the error colour for a stub or an untrusted
-/// extension. The file of an installed extension shows the `PLACEHOLDER_ARGB` fill while it is read and decoded on a
+/// extension. The file of an installed extension shows the placeholder fill while it is read and decoded on a
 /// blocking thread, then the picture; a file that cannot be read leaves the default glyph (T-41a-004). The icon of an
 /// available extension is a url: the same placeholder shows while it is fetched through the image cache, and a failed
 /// fetch leaves the error glyph (T-40a-027).
@@ -144,14 +144,16 @@ pub fn source_row(
     stub: bool,
     action: Option<&gtk::Widget>,
 ) -> GBox {
-    let row = GBox::new(O::Horizontal, 16);
-    row.set_margin_start(16);
-    row.set_margin_end(16);
+    // a row of a boxed list (`look`): the list draws the frame, the row keeps the 12 px inset of the other lists
+    let row = GBox::new(O::Horizontal, 12);
+    row.set_margin_start(12);
+    row.set_margin_end(8);
     row.set_margin_top(8);
     row.set_margin_bottom(8);
     row.append(&icon_image(icon, icon_file));
     let text = GBox::new(O::Vertical, 2);
     text.set_hexpand(true);
+    text.set_valign(Align::Center);
     let title = Label::new(Some(name));
     title.set_xalign(0.0);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -178,9 +180,17 @@ pub fn source_row(
 /// What a cover load calls when it has the picture.
 pub type CoverDone = Box<dyn FnOnce(gtk::gdk::Paintable)>;
 
-/// Loads the cover at a url or path and hands the picture to `CoverDone`. The app decides how (network, cache); a failed
+/// One cover to load: its url or path, the source of the listed entry (whose image headers a remote cover is sent
+/// with), and the picture that shows it (a load still running when the picture is destroyed is cancelled).
+pub struct CoverAsk<'a> {
+    pub url: &'a str,
+    pub source_id: i64,
+    pub picture: &'a gtk::Picture,
+}
+
+/// Loads the cover asked for and hands the picture to `CoverDone`. The app decides how (network, cache); a failed
 /// load never calls it and leaves the placeholder.
-pub type CoverLoader = Rc<dyn Fn(&str, CoverDone)>;
+pub type CoverLoader = Rc<dyn Fn(&CoverAsk, CoverDone)>;
 
 /// True while the cell that asked for a cover is still bound to the item it asked for (edge R10).
 pub type CoverGuard = Rc<dyn Fn() -> bool>;
@@ -190,10 +200,18 @@ pub fn always() -> CoverGuard {
     Rc::new(|| true)
 }
 
-/// The loader for covers that are files on disk, such as the local source's. The file is read off the GTK thread.
+/// The loader of the listing covers. A file on disk, such as the local source's, is read off the GTK thread; an http(s)
+/// url goes through the app's image service (network, disk cache and decode off the GTK thread). Without the service a
+/// remote cover keeps its placeholder.
 pub fn file_cover_loader() -> CoverLoader {
-    Rc::new(|path, done| {
-        let path = path.to_owned();
+    Rc::new(|ask, done| {
+        if ask.url.starts_with("https://") || ask.url.starts_with("http://") {
+            if let (Some(service), Ok(runtime)) = (crate::entry_core::cover_view::service(), tokio::runtime::Handle::try_current()) {
+                remote_cover(service, &runtime, remote_art(ask.url, ask.source_id), ask.picture, done);
+            }
+            return;
+        }
+        let path = ask.url.to_owned();
         gtk::glib::spawn_future_local(async move {
             let read = gtk::gio::spawn_blocking(move || std::fs::read(path)).await;
             if let Ok(Ok(bytes)) = read {
@@ -205,17 +223,57 @@ pub fn file_cover_loader() -> CoverLoader {
     })
 }
 
+/// A listed entry's remote cover. The entry is not a library entry yet (entry id 0, not a favourite), so the image goes to
+/// the shared image cache only and no cover file is written; the source id picks the source's image headers.
+pub(super) fn remote_art(url: &str, source_id: i64) -> kuro_images::art::ArtRef {
+    use kuro_images::art::{ArtKind, ArtRef, Owner};
+    ArtRef { owner: Owner::Manga, entry_id: 0, source_id, kind: ArtKind::Cover, url: Some(url.to_owned()), favorite: false, last_modified: 0 }
+}
+
+/// Loads `art` through the image service. The load is cancelled when `picture` is destroyed (its cell was rebound or its
+/// page closed), which frees its blocking-pool thread, and a cancelled load never calls `done`.
+fn remote_cover(service: std::sync::Arc<kuro_images::fetch::ImageService>, runtime: &tokio::runtime::Handle, art: kuro_images::art::ArtRef, picture: &gtk::Picture, done: CoverDone) {
+    use kuro_images::fetch::LoadRequest;
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    picture.connect_destroy({
+        let cancel = cancel.clone();
+        move |_| cancel.cancel()
+    });
+    let (sender, receiver) = async_channel::bounded(1);
+    // the service's future is not `Send`, so it runs to the end on a blocking-pool thread
+    let driver = runtime.clone();
+    let request = LoadRequest { art, options: Default::default(), cancel: cancel.clone() };
+    runtime.spawn_blocking(move || {
+        let _ = sender.send_blocking(driver.block_on(service.load(&request)));
+    });
+    gtk::glib::spawn_future_local(async move {
+        if let Ok(Ok(loaded)) = receiver.recv().await
+            && !cancel.is_cancelled()
+        {
+            let spec = kuro_images::texture::TextureSpec::from_decoded(&loaded.image);
+            let bytes = gtk::glib::Bytes::from(&spec.pixels[..]);
+            let texture = gtk::gdk::MemoryTexture::new(spec.width, spec.height, gtk::gdk::MemoryFormat::R8g8b8a8, &bytes, spec.stride);
+            done(texture.upcast());
+        }
+    });
+}
+
 /// A cover: the placeholder frame with the picture over it. Only this widget carries the favourite alpha, so the
 /// title and the badge next to it stay at full strength (B§2.7).
 fn cover_widget(item: &ListItem, width: i32, height: i32, load: &CoverLoader, guard: &CoverGuard) -> gtk::Overlay {
+    // the library card's look: rounded corners, and the title's initials until the picture draws
     let overlay = gtk::Overlay::new();
-    overlay.set_child(Some(&crate::ui::cover(width, height)));
+    overlay.add_css_class("kb-card-cover");
+    overlay.set_overflow(gtk::Overflow::Hidden);
+    overlay.set_child(Some(&super::look::cover(&item.title, None, width, height)));
     if let Some(url) = item.cover.as_deref() {
         let picture = gtk::Picture::new();
         picture.set_content_fit(gtk::ContentFit::Cover);
         picture.set_can_shrink(true);
         let (weak, guard) = (picture.downgrade(), Rc::clone(guard));
-        load(url, Box::new(move |paintable| {
+        let ask = CoverAsk { url, source_id: item.source_id, picture: &picture };
+        load(&ask, Box::new(move |paintable| {
             // a cover that arrives after its cell was rebound belongs to another item
             if let (true, Some(picture)) = (guard(), weak.upgrade()) {
                 picture.set_paintable(Some(&paintable));
@@ -227,8 +285,9 @@ fn cover_widget(item: &ListItem, width: i32, height: i32, load: &CoverLoader, gu
     overlay
 }
 
-fn in_library_badge() -> Image {
-    let badge = Image::from_icon_name("bookmark-new-symbolic");
+/// The badge of an entry already in the library, in words.
+fn in_library_badge() -> Label {
+    let badge = super::look::badge(&tr(kuro_i18n::MsgKey::in_library), true);
     badge.set_halign(Align::Start);
     badge.set_valign(Align::Start);
     badge.set_margin_start(4);
@@ -275,25 +334,28 @@ pub fn grid_cell_lines(
     match mode {
         LibraryDisplayMode::CompactGrid => {
             let title = title_label(&item.title, title_lines);
-            title.add_css_class("osd");
+            title.add_css_class("kb-card-title-scrim");
             title.set_valign(Align::End);
+            title.set_halign(Align::Fill);
             stage.add_overlay(&title);
             cell.append(&stage);
         }
         LibraryDisplayMode::ComfortableGrid | LibraryDisplayMode::List => {
             cell.append(&stage);
-            cell.append(&title_label(&item.title, title_lines));
+            let title = title_label(&item.title, title_lines);
+            title.add_css_class("kb-card-title");
+            cell.append(&title);
         }
         LibraryDisplayMode::CoverOnlyGrid => cell.append(&stage),
     }
     cell
 }
 
-/// A list row: a square cover, the title on one line, and the bookmark badge at the end for favourites.
+/// A list row: a square cover, the title on one line, and the In library badge at the end for favourites.
 pub fn list_cell(item: Option<&ListItem>, load: &CoverLoader, guard: &CoverGuard) -> GBox {
     let row = GBox::new(O::Horizontal, 12);
-    row.set_margin_start(16);
-    row.set_margin_end(16);
+    row.set_margin_start(12);
+    row.set_margin_end(12);
     row.set_margin_top(8);
     row.set_margin_bottom(8);
     let Some(item) = item else { return row };
@@ -304,7 +366,7 @@ pub fn list_cell(item: Option<&ListItem>, load: &CoverLoader, guard: &CoverGuard
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     row.append(&title);
     if badge_visible(item.favorite) {
-        row.append(&Image::from_icon_name("bookmark-new-symbolic"));
+        row.append(&super::look::badge(&tr(kuro_i18n::MsgKey::in_library), true));
     }
     row
 }
@@ -334,36 +396,14 @@ pub fn attach_long_press(widget: &impl IsA<gtk::Widget>, on_long: impl Fn() + 's
     attach_menu_key(widget, on_long);
 }
 
-/// Primary click and long press are two gestures with two callbacks. A secondary click is the desktop alias of a long
-/// press (U9). A long press claims its touch sequence, so it does not also count as a click when released.
-pub fn attach_row_gestures(widget: &impl IsA<gtk::Widget>, on_primary: impl Fn() + 'static, on_long: impl Fn() + 'static) {
-    let on_long: Rc<dyn Fn()> = Rc::new(on_long);
-
-    let click = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_PRIMARY).build();
-    click.connect_released(move |_, _, _, _| on_primary());
-    widget.add_controller(click);
-
-    let long = gtk::GestureLongPress::new();
-    long.connect_pressed({
-        let on_long = Rc::clone(&on_long);
-        move |gesture, _, _| {
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            on_long();
-        }
-    });
-    widget.add_controller(long);
-
-    let secondary = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build();
-    secondary.connect_pressed({
-        let on_long = Rc::clone(&on_long);
-        move |gesture, _, _, _| {
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            on_long();
-        }
-    });
-    widget.add_controller(secondary);
-
-    attach_menu_key(widget, on_long);
+/// A boxed-list row around `child` with two callbacks: activating the row (a click, Enter or Space, through
+/// `widgets::row_activate`) runs `on_primary`; the long press, its desktop alias the secondary click (U9), and the Menu
+/// key or Shift+F10 run `on_long`. A long press claims its touch sequence, so it does not also activate the row.
+pub fn list_row(child: &impl IsA<gtk::Widget>, on_primary: impl Fn() + 'static, on_long: impl Fn() + 'static) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::builder().child(child).build();
+    crate::widgets::row_activate::on_activate(&row, move |_| on_primary());
+    attach_long_press(&row, on_long);
+    row
 }
 
 /// The keyboard's way to a context menu: the Menu key, or Shift+F10. The widget takes focus so the keys reach it.
@@ -427,31 +467,80 @@ pub(crate) mod tests {
     fn the_cover_loader_is_called_with_the_item_cover() {
         let seen = Rc::new(std::cell::RefCell::new(Vec::new()));
         let sink = Rc::clone(&seen);
-        let load: CoverLoader = Rc::new(move |url, _| sink.borrow_mut().push(url.to_owned()));
-        let item = ListItem { title: "A".into(), cover: Some("/covers/a.png".into()), ..ListItem::default() };
+        let load: CoverLoader = Rc::new(move |ask: &CoverAsk, _| sink.borrow_mut().push((ask.url.to_owned(), ask.source_id)));
+        let item = ListItem { title: "A".into(), source_id: 41, cover: Some("/covers/a.png".into()), ..ListItem::default() };
         let _ = grid_cell(Some(&item), LibraryDisplayMode::CompactGrid, &load, &always(), 136);
         let _ = list_cell(Some(&item), &load, &always());
-        assert_eq!(*seen.borrow(), ["/covers/a.png", "/covers/a.png"]);
+        let want = ("/covers/a.png".to_owned(), 41);
+        assert_eq!(*seen.borrow(), [want.clone(), want], "the url and the listed entry's source");
+    }
+
+    /// The http branch: the cover goes out through the image service. Destroying its picture (the cell was rebound or
+    /// the page closed) cancels the request in flight, and the picture is never drawn. The server is a local socket
+    /// that takes the request and never answers.
+    fn a_remote_cover_is_cancelled_with_its_picture_and_never_drawn() {
+        use std::io::Read;
+        use std::sync::Arc;
+
+        struct NoHeaders;
+        impl kuro_images::fetch::SourceHttp for NoHeaders {
+            fn http_source(&self, _: i64) -> Option<kuro_images::fetch::SourceClient> {
+                None
+            }
+        }
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("runtime");
+        let paths = kuro_testkit::TempPaths::new().expect("paths");
+        let client = crate::net_client::build(&kuro_prefs::network::NetworkPrefs::new(kuro_prefs::store::PrefStore::in_memory()), &paths).expect("client");
+        let service = rt.block_on(kuro_images::fetch::ImageService::new(client, Arc::new(NoHeaders), Arc::new(paths))).expect("service");
+        let server = std::net::TcpListener::bind("127.0.0.1:0").expect("a local socket");
+        let url = format!("http://{}/cover.jpg", server.local_addr().expect("address"));
+
+        let holder = GBox::new(O::Vertical, 0);
+        let picture = gtk::Picture::new();
+        holder.append(&picture);
+        let drawn = Rc::new(Cell::new(false));
+        let flag = Rc::clone(&drawn);
+        remote_cover(Arc::new(service), rt.handle(), remote_art(&url, 41), &picture, Box::new(move |_| flag.set(true)));
+        let (mut request, _) = server.accept().expect("the cover request reaches the service's client");
+        holder.remove(&picture);
+        drop(picture);
+        request.set_read_timeout(Some(std::time::Duration::from_secs(5))).expect("timeout");
+        let mut buffer = [0_u8; 4096];
+        let closed = loop {
+            match request.read(&mut buffer) {
+                Ok(0) => break true,
+                Ok(_) => continue,
+                Err(_) => break false,
+            }
+        };
+        assert!(closed, "the destroyed picture cancels the request in flight");
+        let until = std::time::Instant::now() + std::time::Duration::from_millis(300);
+        while std::time::Instant::now() < until {
+            gtk::glib::MainContext::default().iteration(false);
+        }
+        assert!(!drawn.get(), "a cancelled cover never reaches its picture");
     }
 
     fn primary_click_and_long_press_call_different_callbacks() {
-        let row = GBox::new(O::Horizontal, 0);
         let (clicks, longs) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
         let (c, l) = (Rc::clone(&clicks), Rc::clone(&longs));
-        attach_row_gestures(&row, move || c.set(c.get() + 1), move || l.set(l.get() + 1));
+        let row = list_row(&GBox::new(O::Horizontal, 0), move || c.set(c.get() + 1), move || l.set(l.get() + 1));
+        let list = gtk::ListBox::new();
+        list.append(&row);
+        crate::widgets::row_activate::click_row(&row);
+        assert_eq!(clicks.get(), 1, "a click activates the row once");
+        row.emit_by_name::<()>("activate", &[]);
+        assert_eq!(clicks.get(), 2, "so does Enter or Space");
         let mut controllers = Vec::new();
-        let list = row.observe_controllers();
-        for i in 0..list.n_items() {
-            controllers.push(list.item(i).expect("controller"));
+        let all = row.observe_controllers();
+        for i in 0..all.n_items() {
+            controllers.push(all.item(i).expect("controller"));
         }
-        assert_eq!(controllers.len(), 4, "primary click, long press, secondary click and the menu key");
+        assert_eq!(controllers.len(), 3, "long press, secondary click and the menu key; no primary click of its own");
         for controller in &controllers {
             if let Some(click) = controller.downcast_ref::<gtk::GestureClick>() {
-                if click.button() == gtk::gdk::BUTTON_PRIMARY {
-                    click.emit_by_name::<()>("released", &[&1_i32, &0.0_f64, &0.0_f64]);
-                } else {
-                    click.emit_by_name::<()>("pressed", &[&1_i32, &0.0_f64, &0.0_f64]);
-                }
+                assert_eq!(click.button(), gtk::gdk::BUTTON_SECONDARY);
+                click.emit_by_name::<()>("pressed", &[&1_i32, &0.0_f64, &0.0_f64]);
             } else if let Some(long) = controller.downcast_ref::<gtk::GestureLongPress>() {
                 long.emit_by_name::<()>("pressed", &[&0.0_f64, &0.0_f64]);
             } else if let Some(keys) = controller.downcast_ref::<gtk::EventControllerKey>() {
@@ -462,7 +551,7 @@ pub(crate) mod tests {
                 assert!(!keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::F10, &0_u32, &none]), "F10 alone is not");
             }
         }
-        assert_eq!(clicks.get(), 1, "one primary click");
+        assert_eq!(clicks.get(), 2, "the menu gestures never activate the row");
         assert_eq!(longs.get(), 4, "the long press, the right click and both menu keys reach the long-press callback");
     }
 
@@ -488,6 +577,7 @@ pub(crate) mod tests {
         a_cell_has_half_a_gap_of_margin_on_every_side();
         cover_only_has_no_title_and_comfortable_has_one_under_the_cover();
         the_cover_loader_is_called_with_the_item_cover();
+        a_remote_cover_is_cancelled_with_its_picture_and_never_drawn();
         primary_click_and_long_press_call_different_callbacks();
         a_listing_cell_opens_the_menu_from_the_keyboard_too();
     }

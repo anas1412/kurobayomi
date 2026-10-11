@@ -63,6 +63,7 @@ impl Toggle {
     pub const OVERLAY: [Toggle; 5] = [Toggle::DownloadBadge, Toggle::UnreadBadge, Toggle::LocalBadge, Toggle::LanguageBadge, Toggle::ContinueButton];
     /// The tabs group.
     pub const TABS: [Toggle; 2] = [Toggle::CategoryTabs, Toggle::ItemCount];
+    #[cfg(test)]
     pub const ALL: [Toggle; 7] = [
         Toggle::DownloadBadge,
         Toggle::UnreadBadge,

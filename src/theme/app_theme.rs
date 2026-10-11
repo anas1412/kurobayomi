@@ -6,6 +6,8 @@
 //!   installs and for any unknown stored value.
 //! - The stored names of the deprecated `DARK_BLUE`, `HOT_PINK` and `BLUE` still parse, and they
 //!   resolve to `GtkTheme`. They are never offered and have no title.
+//! - There is no dynamic (`MONET`) choice. Its stored name is not known here, so it reads as `GtkTheme`
+//!   like any unknown value.
 
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::ui::AppTheme as Scheme;
@@ -15,7 +17,6 @@ use kuro_prefs::ui::AppTheme as Scheme;
 pub enum AppTheme {
     GtkTheme,
     Default,
-    Monet,
     Cloudflare,
     CottonCandy,
     Doom,
@@ -42,10 +43,9 @@ pub enum AppTheme {
 
 impl AppTheme {
     /// Every variant, including the deprecated ones kept for parsing.
-    pub const ALL: [AppTheme; 24] = [
+    pub const ALL: [AppTheme; 23] = [
         AppTheme::GtkTheme,
         AppTheme::Default,
-        AppTheme::Monet,
         AppTheme::Cloudflare,
         AppTheme::CottonCandy,
         AppTheme::Doom,
@@ -69,11 +69,10 @@ impl AppTheme {
         AppTheme::Blue,
     ];
 
-    /// The picker order: `GtkTheme`, then the 19 selectable Android themes, then Tokyo Night.
-    pub const PICKER: [AppTheme; 21] = [
+    /// The picker order: `GtkTheme`, then the 18 selectable Android themes, then Tokyo Night.
+    pub const PICKER: [AppTheme; 20] = [
         AppTheme::GtkTheme,
         AppTheme::Default,
-        AppTheme::Monet,
         AppTheme::Cloudflare,
         AppTheme::CottonCandy,
         AppTheme::Doom,
@@ -94,12 +93,12 @@ impl AppTheme {
         AppTheme::TokyoNight,
     ];
 
-    /// The stored name: `GTK_THEME` for `GtkTheme`, otherwise the Android constant name.
+    /// The stored name: `SYSTEM` for `GtkTheme` (the value `theme::prefs` writes on first run and the specs show), otherwise
+    /// the Android constant name.
     pub const fn stored_name(self) -> &'static str {
         match self {
-            AppTheme::GtkTheme => "GTK_THEME",
+            AppTheme::GtkTheme => "SYSTEM",
             AppTheme::Default => "DEFAULT",
-            AppTheme::Monet => "MONET",
             AppTheme::Cloudflare => "CLOUDFLARE",
             AppTheme::CottonCandy => "COTTONCANDY",
             AppTheme::Doom => "DOOM",
@@ -146,26 +145,9 @@ impl AppTheme {
     }
 
     /// True when a stored value must be written back. Unknown values are never written back
-    /// (they stay until the user picks a theme); deprecated names are migrated to `GTK_THEME`.
+    /// (they stay until the user picks a theme); deprecated names are migrated to `SYSTEM`.
     pub fn needs_write_back(stored: &str) -> bool {
         AppTheme::parse(stored).is_some_and(AppTheme::is_deprecated)
-    }
-
-    /// The picker entries for the current Monet availability: Monet is listed only with a seed
-    /// (E-49-06, T-49a-007).
-    pub fn picker(monet_available: bool) -> Vec<AppTheme> {
-        AppTheme::PICKER
-            .into_iter()
-            .filter(|t| *t != AppTheme::Monet || monet_available)
-            .collect()
-    }
-
-    /// The entry the picker marks selected: a stored Monet without a seed shows System (`GtkTheme`).
-    pub fn selected_in_picker(stored: AppTheme, monet_available: bool) -> AppTheme {
-        match stored.effective() {
-            AppTheme::Monet if !monet_available => AppTheme::GtkTheme,
-            other => other,
-        }
     }
 
     /// The picker title, from the translation catalogue. `None` for the deprecated names.
@@ -174,8 +156,6 @@ impl AppTheme {
             // The Linux default follows the desktop theme; the catalogue has no key of its own.
             AppTheme::GtkTheme => MsgKey::theme_system,
             AppTheme::Default => MsgKey::label_default,
-            // T-48a-058: Android's wallpaper colours are not reproduced; the choice follows the desktop accent or GTK theme.
-            AppTheme::Monet => return Some("System colours".to_string()),
             AppTheme::Cloudflare => MsgKey::theme_cloudflare,
             AppTheme::CottonCandy => MsgKey::theme_cottoncandy,
             AppTheme::Doom => MsgKey::theme_doom,
@@ -200,15 +180,14 @@ impl AppTheme {
         Some(tr(key))
     }
 
-    /// The colour scheme this theme uses. Monet maps to its own `MONET` choice, which resolves from
-    /// the seed (`monet`). `None` means no palette: `GtkTheme` and the deprecated names.
+    /// The colour scheme this theme uses. `None` means no palette: `GtkTheme`, Tokyo Night (its own
+    /// scheme) and the deprecated names.
     pub fn scheme(self) -> Option<Scheme> {
         Some(match self {
             AppTheme::GtkTheme | AppTheme::TokyoNight | AppTheme::DarkBlue | AppTheme::HotPink | AppTheme::Blue => {
                 return None;
             }
             AppTheme::Default => Scheme::DEFAULT,
-            AppTheme::Monet => Scheme::MONET,
             AppTheme::Cloudflare => Scheme::CLOUDFLARE,
             AppTheme::CottonCandy => Scheme::COTTONCANDY,
             AppTheme::Doom => Scheme::DOOM,
@@ -236,12 +215,12 @@ mod tests {
     use crate::theme::SchemeSel;
 
     #[test]
-    fn picker_lists_gtk_theme_first_then_nineteen_schemes_then_tokyo_night() {
-        assert_eq!(AppTheme::PICKER.len(), 21);
+    fn picker_lists_gtk_theme_first_then_eighteen_schemes_then_tokyo_night() {
+        assert_eq!(AppTheme::PICKER.len(), 20);
         assert_eq!(AppTheme::PICKER[0], AppTheme::GtkTheme);
         assert_eq!(AppTheme::PICKER[1], AppTheme::Default);
-        assert_eq!(AppTheme::PICKER[19], AppTheme::Monochrome);
-        assert_eq!(AppTheme::PICKER[20], AppTheme::TokyoNight);
+        assert_eq!(AppTheme::PICKER[18], AppTheme::Monochrome);
+        assert_eq!(AppTheme::PICKER[19], AppTheme::TokyoNight);
     }
 
     // T-49a-063: an addition, stored as TOKYO_NIGHT, with no Aniyomi scheme of its own.
@@ -260,7 +239,6 @@ mod tests {
                 assert!(theme.scheme().is_some(), "{theme:?}");
             }
         }
-        assert_eq!(AppTheme::Monet.scheme(), Some(Scheme::MONET));
         assert_eq!(AppTheme::GtkTheme.scheme(), None);
     }
 
@@ -270,7 +248,8 @@ mod tests {
             assert_eq!(AppTheme::parse(theme.stored_name()), Some(theme));
         }
         assert_eq!(AppTheme::Cloudflare.stored_name(), "CLOUDFLARE");
-        assert_eq!(AppTheme::GtkTheme.stored_name(), "GTK_THEME");
+        assert_eq!(AppTheme::GtkTheme.stored_name(), "SYSTEM", "the name theme::prefs writes");
+        assert_eq!(AppTheme::GtkTheme.stored_name(), crate::theme::prefs::SYSTEM_NAME);
     }
 
     #[test]
@@ -298,7 +277,6 @@ mod tests {
     fn titles_come_from_the_catalogue() {
         assert_eq!(AppTheme::Default.title().as_deref(), Some("Default"));
         assert_eq!(AppTheme::Cloudflare.title().as_deref(), Some("Cloudflare"));
-        assert_eq!(AppTheme::Monet.title().as_deref(), Some("System colours"), "the Dynamic choice is shown as System colours");
         assert!(AppTheme::Monochrome.title().is_some());
     }
 
@@ -310,19 +288,12 @@ mod tests {
 }
 
 #[cfg(test)]
-mod monet_picker_tests {
+mod monet_removed_tests {
     use super::AppTheme;
 
     #[test]
-    fn monet_is_listed_only_when_a_seed_exists() {
-        assert!(!AppTheme::picker(false).contains(&AppTheme::Monet));
-        assert!(AppTheme::picker(true).contains(&AppTheme::Monet));
-    }
-
-    #[test]
-    fn a_stored_monet_without_a_seed_selects_system() {
-        assert_eq!(AppTheme::selected_in_picker(AppTheme::Monet, false), AppTheme::GtkTheme);
-        assert_eq!(AppTheme::selected_in_picker(AppTheme::Monet, true), AppTheme::Monet);
-        assert_eq!(AppTheme::selected_in_picker(AppTheme::Nord, false), AppTheme::Nord);
+    fn a_stored_monet_is_unknown_here_and_reads_as_the_gtk_theme() {
+        assert_eq!(AppTheme::parse("MONET"), None);
+        assert_eq!(AppTheme::from_stored("MONET"), AppTheme::GtkTheme);
     }
 }

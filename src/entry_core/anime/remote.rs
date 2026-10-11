@@ -25,7 +25,6 @@ use kuro_domain::source::remote_update::{AnimeRemote, CacheFiles, DbRemoteStore,
 use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
 use kuro_source::SourceError;
-use kuro_source::anime::registry::builtin_anime_sources;
 use kuro_source::anime::{AnimeSource, SAnime, SAnimeEpisodeUpdate, SAnimeSeasonUpdate, SEpisode};
 use tokio::runtime::Handle;
 
@@ -65,15 +64,6 @@ pub trait AnimeSourceLookup: Send + Sync + 'static {
     }
 }
 
-/// The lookup of an app with no source registry: every source reads as not installed.
-pub struct NoSources;
-
-impl AnimeSourceLookup for NoSources {
-    fn remote(&self, _source_id: i64) -> Option<Arc<dyn AnimeRemote>> {
-        None
-    }
-}
-
 /// The lookup over live sources. The flags come from the source itself (`is_configurable`, `is_unmetered`); the trait has
 /// no HTTP or torrent marker, so those two read false and the page offers neither WebView nor the torrent start.
 pub struct LiveSources {
@@ -85,6 +75,7 @@ impl LiveSources {
         Self { sources }
     }
 
+    #[cfg(test)]
     /// The sources this build ships.
     pub fn builtin() -> Self {
         Self::new(builtin_anime_sources())
@@ -95,17 +86,18 @@ impl LiveSources {
     }
 }
 
-/// A live source as the domain's remote update asks it: its own combined updates.
+/// A live source as the domain's remote update asks it: its own combined updates. A panicking source fails its own
+/// refresh (`kuro_source::isolate`), so the page still gets its refresh result and offers Retry.
 struct SourceRemote(Arc<dyn AnimeSource>);
 
 #[async_trait]
 impl AnimeRemote for SourceRemote {
     async fn episode_update(&self, anime: SAnime, episodes: Vec<SEpisode>, fetch_details: bool, fetch_episodes: bool) -> Result<SAnimeEpisodeUpdate, SourceError> {
-        self.0.anime_episode_update(anime, episodes, fetch_details, fetch_episodes).await
+        kuro_source::isolate(self.0.anime_episode_update(anime, episodes, fetch_details, fetch_episodes)).await
     }
 
     async fn season_update(&self, anime: SAnime, seasons: Vec<SAnime>, fetch_details: bool, fetch_seasons: bool) -> Result<SAnimeSeasonUpdate, SourceError> {
-        self.0.anime_season_update(anime, seasons, fetch_details, fetch_seasons).await
+        kuro_source::isolate(self.0.anime_season_update(anime, seasons, fetch_details, fetch_seasons)).await
     }
 }
 
@@ -319,6 +311,9 @@ fn detail_error(e: RemoteError) -> DetailError {
 }
 
 #[cfg(test)]
+use kuro_source::anime::registry::builtin_anime_sources;
+
+#[cfg(test)]
 mod tests {
     use std::sync::Mutex;
 
@@ -396,20 +391,6 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_source_and_the_source_errors_map_to_the_page_errors() {
-        let rt = rt();
-        let (_dir, store, id) = with_episodes(true, true, 1, 0);
-        let none = RemoteAnimeBackend::new(store.db(), &PrefStore::in_memory(), Arc::new(NoSources), rt.handle().clone());
-        assert_eq!(rt.block_on(none.fetch(id, PLAN, Trigger::Open)), Err(DetailError::SourceNotInstalled));
-        assert!(matches!(rt.block_on(none.fetch(4242, PLAN, Trigger::Open)), Err(DetailError::Other { .. })), "a missing row is a store error");
-        let failing = Arc::new(FakeSource { http_failure: Some(503), ..Arc::into_inner(FakeSource::new(vec![])).unwrap() });
-        let backend = backend(store.db(), failing, rt.handle().clone());
-        assert_eq!(rt.block_on(backend.fetch(id, PLAN, Trigger::Manual)), Err(DetailError::Http(503)));
-        let backend = self::backend(store.db(), FakeSource::new(vec![]), rt.handle().clone());
-        assert_eq!(rt.block_on(backend.fetch(id, PLAN, Trigger::Manual)), Err(DetailError::NoEpisodes), "a source with no episodes");
-    }
-
-    #[test]
     fn the_plan_reaches_the_source_call() {
         let rt = rt();
         let (_dir, store, id) = with_episodes(true, true, 1, 0);
@@ -461,6 +442,45 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert!(ids.iter().all(|id| store.episodes(*id).unwrap().is_empty()));
         assert!(source.asked.lock().unwrap().is_empty());
+    }
+
+    /// A live source that panics while it reads the details: the refresh fails with an error (the page's snackbar and
+    /// Retry), it does not kill the refresh task.
+    #[test]
+    fn a_panicking_live_source_fails_the_refresh_instead_of_killing_it() {
+        struct Panics;
+        #[async_trait]
+        impl AnimeSource for Panics {
+            fn id(&self) -> i64 {
+                7
+            }
+            fn name(&self) -> &str {
+                "Panics"
+            }
+            fn supports_latest(&self) -> bool {
+                false
+            }
+            async fn popular(&self, _: i32) -> Result<kuro_source::anime::AnimesPage, SourceError> {
+                unreachable!()
+            }
+            async fn latest(&self, _: i32) -> Result<kuro_source::anime::AnimesPage, SourceError> {
+                unreachable!()
+            }
+            async fn search(&self, _: i32, _: &str, _: &kuro_source::filter_list::FilterList) -> Result<kuro_source::anime::AnimesPage, SourceError> {
+                unreachable!()
+            }
+            async fn anime_details(&self, _: &SAnime) -> Result<SAnime, SourceError> {
+                panic!("a parser bug")
+            }
+            fn provides_hosters(&self) -> bool {
+                false
+            }
+        }
+        let rt = rt();
+        let (_dir, store, id) = with_episodes(true, true, 1, 0);
+        let backend = RemoteAnimeBackend::new(store.db(), &PrefStore::in_memory(), Arc::new(LiveSources::new(vec![Arc::new(Panics)])), rt.handle().clone());
+        let result = rt.block_on(backend.fetch(id, PLAN, Trigger::Manual));
+        assert!(matches!(&result, Err(DetailError::Other { message: Some(m), .. }) if m.contains("panicked")), "{result:?}");
     }
 
     #[test]

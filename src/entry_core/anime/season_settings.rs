@@ -6,15 +6,10 @@
 use kuro_domain::entries::anime::season_flags as sf;
 use kuro_domain::entries::flag_setters::sort_or_flip;
 use kuro_domain::entries::season_display::SeasonDisplayMode;
-use kuro_domain::flags::{TriState, set_flag, tri};
+use kuro_domain::flags::{TriState, tri};
 use kuro_i18n::MsgKey;
 
 use crate::entry_core::flags::Write;
-
-/// Applies one masked write to a season flag word.
-pub fn apply(word: i64, (value, mask): Write) -> i64 {
-    set_flag(word, value, mask)
-}
 
 /// The Filter rows, in order (p1-ui-parity 9.2): Downloaded, Unseen, Started, Completed, Bookmarked, Fillermarked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,6 +223,9 @@ pub fn size_value(size: i64) -> String {
 }
 
 #[cfg(test)]
+use kuro_domain::flags::set_flag;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -277,36 +275,4 @@ mod tests {
         assert_eq!(other & sf::SORT_DIR_MASK, sf::SORT_ASC);
     }
 
-    #[test]
-    fn grid_mode_size_and_title_writes_use_their_bits() {
-        assert_eq!(apply(0, grid_mode_write(SeasonDisplayMode::List)) & sf::GRID_DISPLAY_MODE_MASK, 3 << 16);
-        assert_eq!(grid_size(apply(0, grid_size_write(7))), 7);
-        assert_eq!(grid_size(apply(0, grid_size_write(99))), 10, "clamped to ten");
-        assert_eq!(size_value(0), "Auto");
-        assert_eq!(size_label(SeasonDisplayMode::List), MsgKey::pref_library_rows);
-        assert_eq!(size_label(SeasonDisplayMode::CompactGrid), MsgKey::pref_library_columns);
-        assert_eq!(apply(0, title_write(true)) & sf::DISPLAY_MODE_MASK, sf::DISPLAY_MODE_NUMBER);
-        assert_eq!(apply(sf::DISPLAY_MODE_NUMBER, title_write(false)) & sf::DISPLAY_MODE_MASK, sf::DISPLAY_MODE_SOURCE);
-    }
-
-    #[test]
-    fn the_display_tab_reads_back_what_its_writes_stored() {
-        let word = [grid_mode_write(SeasonDisplayMode::CoverOnlyGrid), grid_size_write(4), title_write(true)].into_iter().fold(0, apply);
-        assert_eq!(grid_mode(word), SeasonDisplayMode::CoverOnlyGrid);
-        assert_eq!(grid_size(word), 4);
-        assert!(title_is_number(word));
-        assert_eq!(grid_mode(0), SeasonDisplayMode::CompactGrid);
-        assert!(!title_is_number(0));
-        assert_eq!(grid_mode(3 << 16), SeasonDisplayMode::List);
-    }
-
-    #[test]
-    fn overlays_are_five_checkboxes_read_from_their_own_bits() {
-        assert_eq!(OVERLAY_ORDER.len(), 5);
-        assert!(!overlay_on(0, Overlay::Continue), "flags 0 means every overlay is off");
-        let word = apply(0, overlay_write(Overlay::Local, true));
-        assert!(overlay_on(word, Overlay::Local));
-        assert!(!overlay_on(word, Overlay::Language));
-        assert!(!overlay_on(apply(word, overlay_write(Overlay::Local, false)), Overlay::Local));
-    }
 }

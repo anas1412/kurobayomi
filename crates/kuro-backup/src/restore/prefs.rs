@@ -6,8 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use kuro_prefs::import::{ANIME_CATEGORY_KEYS, CategoryMaps, ImportReport, MANGA_CATEGORY_KEYS, import_preferences};
 use kuro_prefs::keys::restored_key;
 use kuro_prefs::legacy::{
-    EXTENSION_REPO_SETS, LEGACY_SECURE_SCREEN, LEGACY_UPDATE_ONLY_NON_COMPLETED, SECURE_SCREEN_V2, UPDATE_INTERVAL,
-    UPDATE_RESTRICTIONS,
+    EXTENSION_REPO_SETS, LEGACY_UPDATE_ONLY_NON_COMPLETED, UPDATE_INTERVAL, UPDATE_RESTRICTIONS,
 };
 use kuro_prefs::registry::{self, Kind};
 use kuro_prefs::store::PrefStore;
@@ -70,9 +69,7 @@ const APP_STATE_PREFIX: &str = "__APP_STATE_";
 
 /// Legacy names that `legacy::convert` rewrites before the write. They are not in the registry, but a restore must
 /// keep them (T-22a-052).
-const RESTORABLE_LEGACY_KEYS: [&str; 7] = [
-    LEGACY_SECURE_SCREEN,
-    SECURE_SCREEN_V2,
+const RESTORABLE_LEGACY_KEYS: [&str; 5] = [
     LEGACY_UPDATE_ONLY_NON_COMPLETED,
     UPDATE_INTERVAL,
     UPDATE_RESTRICTIONS,
@@ -80,19 +77,17 @@ const RESTORABLE_LEGACY_KEYS: [&str; 7] = [
     EXTENSION_REPO_SETS[1],
 ];
 
-/// Keys of retired features. Their value is read from a backup and ignored (T-19a-037): the installer choice went with
-/// the Android installers, and the single kuroext install path has no setting for it.
-const RETIRED_KEYS: [&str; 1] = ["extension_installer"];
-
 /// The allowlist of an app-preference restore (T-22a-052). A key is written only when the Kurobayomi schema names it or
-/// it is a legacy key above. App-state keys and retired keys are never written. Everything else, such as a key the app
+/// it is a legacy key above. App-state keys and the keys of dropped features (`registry::DROPPED_KEYS`: the installer
+/// choice, orientation, secure screen, tablet mode, swipe actions, volume and brightness gestures) are never written;
+/// their value is read from the backup and ignored, with no error. Everything else, such as a key the app
 /// does not know, is skipped and counted.
 fn is_restorable(key: &str) -> bool {
     if key.starts_with(APP_STATE_PREFIX) {
         return false;
     }
     let current = restored_key(key);
-    if RETIRED_KEYS.contains(&current.as_str()) {
+    if registry::is_dropped(&current) {
         return false;
     }
     registry::lookup(&current).is_some() || RESTORABLE_LEGACY_KEYS.contains(&current.as_str())
@@ -297,6 +292,28 @@ mod tests {
     }
 
     #[test]
+    fn keys_of_removed_desktop_features_are_skipped_without_error() {
+        let store = PrefStore::in_memory();
+        let prefs = vec![
+            pref("tablet_ui_mode", PrefValue::String("ALWAYS".into())),
+            pref("pref_default_orientation_type_key", PrefValue::Int(16)),
+            pref("pref_default_player_orientation_type_key", PrefValue::String("Free".into())),
+            pref("secure_screen_v2", PrefValue::String("ALWAYS".into())),
+            pref("secure_screen", PrefValue::Boolean(true)),
+            pref("pref_chapter_swipe_end_action", PrefValue::String("Download".into())),
+            pref("pref_episode_swipe_start_action", PrefValue::String("Disabled".into())),
+            pref("pref_gesture_volume_brightness", PrefValue::Boolean(false)),
+            pref("pref_remember_brightness", PrefValue::Boolean(true)),
+            pref("pref_app_theme", PrefValue::String("MONET".into())),
+            pref("show_nsfw_source", PrefValue::Boolean(true)),
+        ];
+        let outcome = restore_app_prefs(&store, &prefs, &CategoryMaps::default(), None, &Count::default());
+        assert_eq!(outcome.skipped, 9, "the nine dropped keys");
+        assert_eq!(store.all().len(), 2, "only the theme (an enum name that now reads as the default) and the flag are written");
+        assert_eq!(store.get_raw("show_nsfw_source"), Some(Value::Bool(true)));
+    }
+
+    #[test]
     fn a_backup_with_only_known_keys_skips_nothing() {
         let store = PrefStore::in_memory();
         let outcome = restore_app_prefs(
@@ -315,13 +332,13 @@ mod tests {
         let store = PrefStore::in_memory();
         let outcome = restore_app_prefs(
             &store,
-            &[pref("secure_screen", PrefValue::Boolean(true))],
+            &[pref("pref_library_update_interval_key", PrefValue::Int(1))],
             &CategoryMaps::default(),
             None,
             &Count::default(),
         );
         assert_eq!(outcome.skipped, 0);
-        assert!(!outcome.report.conversions.is_empty(), "secure_screen is converted, not dropped");
+        assert!(!outcome.report.conversions.is_empty(), "an interval of one hour is converted, not dropped");
     }
 
     #[test]

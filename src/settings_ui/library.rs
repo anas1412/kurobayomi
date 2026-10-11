@@ -1,17 +1,16 @@
-//! Library rows this module owns: the default category lists (task T-47a-020) and the chapter and episode swipe
-//! actions (task T-47a-028).
+//! Library rows this module owns: the default category lists (task T-47a-020) and the chapter and episode behavior
+//! groups (task T-47a-028).
 use std::rc::Rc;
 
+use kuro_domain::category::service::{CategoryService, categorized_display_changed};
 use kuro_domain::kind::EntryKind;
-use kuro_domain::library::swipe::{chapter_swipe_label, episode_swipe_label};
-use kuro_prefs::library::{ChapterSwipeAction, EpisodeSwipeAction};
 use kuro_prefs::prefs::Prefs;
 use kuro_prefs::pref::Pref;
 
 use crate::pref_model::bind;
 use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::settings_ui::category::Category;
-use crate::settings_ui::rows::{enum_choice, group, int_choice, item, multi_choice, switch, switch_with, text};
+use crate::settings_ui::rows::{group, int_choice, multi_choice, switch, switch_with, text};
 
 /// Stored value meaning "ask every time" for the default category.
 pub const ALWAYS_ASK: i32 = -1;
@@ -29,23 +28,36 @@ pub fn normalize_default(value: i32, ids: &[i32]) -> i32 {
     if value == ALWAYS_ASK || ids.contains(&value) { value } else { ALWAYS_ASK }
 }
 
-/// The per-category sort switch. Turning it off first resets every manga category's flags to the global sort (Kotlin
-/// `ResetMangaCategoryFlags`, the domain `reset_category_flags`); a failed reset refuses the change with its message.
-/// Turning it on only stores the value.
+/// The per-category sort switch. Turning it off first resets the flags of every manga and every anime category to the
+/// global sort (Kotlin `ResetMangaCategoryFlags` and `ResetAnimeCategoryFlags`, the domain
+/// `categorized_display_changed`); a failed reset refuses the change with its message. Turning it on only stores the
+/// value.
+///
+/// Decision (T-37a-040, as in Kotlin): the per-category sorts are not kept while the switch is off, so turning it back
+/// on starts every category from the global sort; nothing restores the earlier per-category choices.
 pub fn categorized_row(prefs: &Prefs) -> PreferenceItem {
-    let veto = bind::veto(|on: bool| {
-        let app = crate::data::app();
+    categorized_row_over(prefs, crate::data::app, crate::data::App::categories)
+}
+
+/// [`categorized_row`] over the app data `app` hands out and the way `categories` picks a kind's service from it.
+fn categorized_row_over<A: 'static>(
+    prefs: &Prefs,
+    app: impl Fn() -> Rc<A> + 'static,
+    categories: fn(&A, EntryKind) -> &CategoryService,
+) -> PreferenceItem {
+    let veto = bind::veto(move |on: bool| {
+        let app = app();
         async move {
-            if on {
-                return Ok(true);
-            }
-            app.categories(EntryKind::Manga).reset_category_flags().await.map(|()| true).map_err(|err| err.to_string())
+            categorized_display_changed(categories(&app, EntryKind::Manga), categories(&app, EntryKind::Anime), on)
+                .await
+                .map(|()| true)
+                .map_err(|err| err.to_string())
         }
     });
     switch_with("Per-category settings for sort", None, &prefs.library.categorized_display_settings, true, veto)
 }
 
-/// The page of the Categories screen a kind opens on (`kind_tabs` names its pages `anime` and `manga`).
+/// The page of the Categories screen a kind opens on (`screens::kind_switch` names its pages `anime` and `manga`).
 pub fn categories_tab(kind: EntryKind) -> &'static str {
     match kind {
         EntryKind::Anime => "anime",
@@ -56,8 +68,9 @@ pub fn categories_tab(kind: EntryKind) -> &'static str {
 /// `Edit anime categories`-style row: the subtitle is the count of user categories, a tap runs `open`.
 pub fn edit_categories_row(title: &str, user_categories: usize, open: Rc<dyn Fn()>) -> PreferenceItem {
     let mut row = text(title, Some(&category_count(user_categories)), true);
-    if let PreferenceItem::Text { on_click, .. } = &mut row {
+    if let PreferenceItem::Text { common, on_click } = &mut row {
         *on_click = Some(open);
+        common.link = true;
     }
     row
 }
@@ -78,33 +91,18 @@ pub fn default_category_row(title: &str, pref: &Pref<i32>, categories: &[Categor
     int_choice(title, pref, &options, true)
 }
 
-/// Chapter swipe actions in menu order, labelled by `kuro_domain::library::swipe`. The row titled "Swipe to left" reads
-/// `pref_chapter_swipe_end_action` (see `kuro-prefs`).
-pub fn chapter_swipe_options() -> [(ChapterSwipeAction, &'static str); 4] {
-    use ChapterSwipeAction::*;
-    [Disabled, ToggleBookmark, ToggleRead, Download].map(|action| (action, chapter_swipe_label(action)))
-}
-
-/// Episode swipe actions in menu order, labelled by `kuro_domain::library::swipe`.
-pub fn episode_swipe_options() -> [(EpisodeSwipeAction, &'static str); 5] {
-    use EpisodeSwipeAction::*;
-    [Disabled, ToggleBookmark, ToggleFillermark, ToggleSeen, Download].map(|action| (action, episode_swipe_label(action)))
-}
-
 /// The chapter mark-duplicate options: marked as read after reading a chapter, or after fetching a new one.
 pub const DUPLICATE_READ_CHAPTER: [(&str, &str); 2] = [("existing", "After reading a chapter"), ("new", "After fetching new chapter")];
 /// The episode mark-duplicate options: marked as seen after watching an episode, or after fetching a new one.
 pub const DUPLICATE_SEEN_EPISODE: [(&str, &str); 2] =
     [("existing_episode", "After watching an episode"), ("new_episode", "After fetching new episode")];
 
-/// The chapter swipe rows, titled as `spec/settings.json` titles them.
-pub fn chapter_swipe_group(prefs: &Prefs) -> Preference {
+/// The chapter behavior group, titled as `spec/settings.json` titles it.
+pub fn chapter_behavior_group(prefs: &Prefs) -> Preference {
     let l = &prefs.library;
     group(
         "Chapter behavior",
         vec![
-            enum_choice("Chapter on swipe to left", &l.swipe_left_chapter, &chapter_swipe_options(), true),
-            enum_choice("Chapter on swipe to right", &l.swipe_right_chapter, &chapter_swipe_options(), true),
             multi_choice(
                 "Mark duplicate read chapter as read",
                 &l.mark_duplicate_read_chapter_as_read,
@@ -115,14 +113,12 @@ pub fn chapter_swipe_group(prefs: &Prefs) -> Preference {
     )
 }
 
-/// The episode swipe rows, titled as `spec/settings.json` titles them.
-pub fn episode_swipe_group(prefs: &Prefs) -> Preference {
+/// The episode behavior group, titled as `spec/settings.json` titles it.
+pub fn episode_behavior_group(prefs: &Prefs) -> Preference {
     let l = &prefs.library;
     group(
         "Episode behavior",
         vec![
-            enum_choice("Episode on swipe to left", &l.swipe_left_episode, &episode_swipe_options(), true),
-            enum_choice("Episode on swipe to right", &l.swipe_right_episode, &episode_swipe_options(), true),
             multi_choice(
                 "Mark duplicate seen episode as seen",
                 &l.mark_duplicate_seen_episode_as_seen,
@@ -144,13 +140,13 @@ pub fn season_group(prefs: &Prefs) -> Preference {
     )
 }
 
-/// The swipe groups as top-level entries of the library page.
-pub fn swipe_rows(prefs: &Prefs) -> Vec<Preference> {
-    vec![chapter_swipe_group(prefs), episode_swipe_group(prefs)]
+/// The chapter and episode behavior groups as top-level entries of the library page.
+pub fn behavior_rows(prefs: &Prefs) -> Vec<Preference> {
+    vec![chapter_behavior_group(prefs), episode_behavior_group(prefs)]
 }
 
 /// The rows of the library page this module builds: the Categories group (edit rows that open the Categories screen,
-/// default category lists) and the swipe groups. `open` shows the Categories screen of a kind.
+/// default category lists) and the behavior groups. `open` shows the Categories screen of a kind.
 pub fn page_rows(prefs: &Prefs, anime: &[Category], manga: &[Category], open: Rc<dyn Fn(EntryKind)>) -> Vec<Preference> {
     let edit = |title: &str, kind: EntryKind, count: usize| {
         let open = Rc::clone(&open);
@@ -170,24 +166,14 @@ pub fn page_rows(prefs: &Prefs, anime: &[Category], manga: &[Category], open: Rc
     )];
     tree.push(crate::settings_ui::library_update::global_update_group(prefs, anime, manga));
     tree.push(season_group(prefs));
-    tree.extend(swipe_rows(prefs));
+    tree.extend(behavior_rows(prefs));
     tree
-}
-
-/// Default anime category row, from the anime category list.
-#[allow(dead_code)] // `page_rows` builds both default rows itself
-pub fn default_anime_category(prefs: &Prefs, categories: &[Category]) -> Preference {
-    item(default_category_row("Default anime category", &prefs.library.default_anime_category, categories))
-}
-
-/// Default manga category row, from the manga category list.
-#[allow(dead_code)] // `page_rows` builds both default rows itself
-pub fn default_manga_category(prefs: &Prefs, categories: &[Category]) -> Preference {
-    item(default_category_row("Default manga category", &prefs.library.default_manga_category, categories))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     fn categories() -> Vec<Category> {
@@ -211,27 +197,6 @@ mod tests {
         assert_eq!(normalize_default(9, &[3, 7]), ALWAYS_ASK);
     }
 
-    #[test]
-    fn default_list_offers_always_ask_then_categories_in_order() {
-        let prefs = Prefs::in_memory();
-        let Preference::Item(PreferenceItem::BasicList { entries, value, .. }) =
-            default_anime_category(&prefs, &categories())
-        else {
-            panic!("list")
-        };
-        let labels: Vec<&str> = entries.iter().map(|(_, l)| l.as_str()).collect();
-        assert_eq!(labels, ["Always ask", "Reading", "Later"]);
-        assert_eq!(value, "-1");
-    }
-
-    #[test]
-    fn deleted_default_is_written_back_on_read() {
-        let prefs = Prefs::in_memory();
-        prefs.library.default_manga_category.set(42).unwrap();
-        let _ = default_manga_category(&prefs, &categories());
-        assert_eq!(prefs.library.default_manga_category.get(), ALWAYS_ASK);
-    }
-
     /// Runs a veto future that resolves at once (the writes here never wait).
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
@@ -245,7 +210,7 @@ mod tests {
     #[test]
     fn the_mark_duplicate_rows_store_their_selection_under_the_two_keys() {
         let prefs = Prefs::in_memory();
-        let rows = swipe_rows(&prefs);
+        let rows = behavior_rows(&prefs);
         let mut found = 0;
         for entry in &rows {
             let Preference::Group(g) = entry else { panic!("group") };
@@ -262,24 +227,6 @@ mod tests {
         }
         assert_eq!(found, 2);
         assert!(prefs.library.mark_duplicate_read_chapter_as_read.get().contains("new"));
-    }
-
-    #[test]
-    fn chapter_swipe_rows_read_the_inverted_keys() {
-        let prefs = Prefs::in_memory();
-        assert_eq!(prefs.library.swipe_left_chapter.get(), ChapterSwipeAction::ToggleRead);
-        assert_eq!(prefs.library.swipe_right_chapter.get(), ChapterSwipeAction::ToggleBookmark);
-        let rows = swipe_rows(&prefs);
-        assert_eq!(rows.len(), 2);
-    }
-
-    #[test]
-    fn episode_defaults_are_seen_left_and_bookmark_right() {
-        let prefs = Prefs::in_memory();
-        assert_eq!(prefs.library.swipe_left_episode.get(), EpisodeSwipeAction::ToggleSeen);
-        assert_eq!(prefs.library.swipe_right_episode.get(), EpisodeSwipeAction::ToggleBookmark);
-        let labels: Vec<&str> = episode_swipe_options().iter().map(|(_, l)| *l).collect();
-        assert_eq!(labels, ["Disabled", "Bookmark episode", "Fillermark episode", "Mark as watched", "Download"]);
     }
 
     #[test]
@@ -324,6 +271,111 @@ mod tests {
         let PreferenceItem::Text { common, .. } = &g.items[0] else { panic!("text row") };
         assert_eq!(common.subtitle.as_deref(), Some("2 categories"));
         assert_eq!(tree.len(), 5, "Categories, Global update, Season, Chapter behavior, Episode behavior");
+    }
+
+    /// Two real category services over fresh databases, standing in for the app data.
+    struct Fake {
+        manga_db: Arc<kuro_db::handle::Db>,
+        manga: CategoryService,
+        anime: CategoryService,
+        library: Arc<kuro_prefs::library::LibraryPrefs>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl Fake {
+        fn new() -> Rc<Self> {
+            use kuro_db::handle::Db;
+            let dir = tempfile::tempdir().unwrap();
+            let (mp, ap) = (dir.path().join("manga.db"), dir.path().join("anime.db"));
+            let manga_db = Arc::new(Db::new(&mp, kuro_db::schema_manga::open(&mp).unwrap()).unwrap());
+            let anime_db = Arc::new(Db::new(&ap, kuro_db::schema_anime::open(&ap).unwrap()).unwrap());
+            let library = Arc::new(kuro_prefs::library::LibraryPrefs::new(kuro_prefs::store::PrefStore::in_memory()));
+            Rc::new(Self {
+                manga: CategoryService::new(Arc::clone(&manga_db), EntryKind::Manga, Arc::clone(&library)),
+                anime: CategoryService::new(anime_db, EntryKind::Anime, Arc::clone(&library)),
+                manga_db,
+                library,
+                _dir: dir,
+            })
+        }
+
+        fn categories(&self, kind: EntryKind) -> &CategoryService {
+            match kind {
+                EntryKind::Manga => &self.manga,
+                EntryKind::Anime => &self.anime,
+            }
+        }
+    }
+
+    fn run<T>(future: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(future)
+    }
+
+    fn flags(svc: &CategoryService) -> Vec<i64> {
+        svc.repo().all().unwrap().iter().map(|c| c.flags).collect()
+    }
+
+    // T-08a-012, T-37a-040: the row's own veto, run with false, resets the flags of both kinds to the global sort.
+    #[test]
+    fn turning_the_categorized_switch_off_resets_both_kinds_to_the_global_sort() {
+        use kuro_domain::library::sort::{Direction, LibrarySort, SortType};
+        use kuro_prefs::library::SortSetting;
+        let fake = Fake::new();
+        run(async {
+            fake.manga.create("M").await.unwrap();
+            fake.anime.create("A").await.unwrap();
+        });
+        fake.library.manga_sorting_mode.set(SortSetting("DATE_ADDED,DESCENDING".into()));
+        fake.library.anime_sorting_mode.set(SortSetting("LAST_SEEN,ASCENDING".into()));
+        let manga_sort = LibrarySort { ty: SortType::DateAdded, dir: Direction::Descending }.flag();
+        let anime_sort = LibrarySort { ty: SortType::LastActivity, dir: Direction::Ascending }.flag();
+        assert_ne!(flags(&fake.manga), vec![manga_sort; 2], "the categories start on another sort");
+
+        let prefs = Prefs::in_memory();
+        let shared = Rc::clone(&fake);
+        let PreferenceItem::Switch { veto, .. } = categorized_row_over(&prefs, move || Rc::clone(&shared), Fake::categories) else {
+            panic!("switch")
+        };
+        assert_eq!(run(veto(false)), Ok(true));
+        assert_eq!(flags(&fake.manga), vec![manga_sort; 2], "system category and M");
+        assert_eq!(flags(&fake.anime), vec![anime_sort; 2], "system category and A");
+    }
+
+    #[test]
+    fn turning_the_categorized_switch_on_resets_nothing() {
+        let fake = Fake::new();
+        run(async { fake.manga.create("M").await.unwrap() });
+        let before = flags(&fake.manga);
+        let prefs = Prefs::in_memory();
+        let shared = Rc::clone(&fake);
+        let PreferenceItem::Switch { veto, .. } = categorized_row_over(&prefs, move || Rc::clone(&shared), Fake::categories) else {
+            panic!("switch")
+        };
+        assert_eq!(run(veto(true)), Ok(true));
+        assert_eq!(flags(&fake.manga), before);
+    }
+
+    // A failed reset refuses the change: the veto reports the error, `bind::write` then leaves the pref alone.
+    #[test]
+    fn a_failed_reset_refuses_the_change_and_keeps_the_pref() {
+        let fake = Fake::new();
+        run(async { fake.manga.create("M").await.unwrap() });
+        fake.manga_db.write(|tx| {
+            tx.execute_batch("CREATE TRIGGER refuse BEFORE UPDATE ON categories BEGIN SELECT RAISE(ABORT, 'refused'); END;")?;
+            Ok(())
+        })
+        .unwrap();
+        let prefs = Prefs::in_memory();
+        prefs.library.categorized_display_settings.set(true).unwrap();
+        let shared = Rc::clone(&fake);
+        let PreferenceItem::Switch { veto, pref, .. } = categorized_row_over(&prefs, move || Rc::clone(&shared), Fake::categories) else {
+            panic!("switch")
+        };
+        let result = run(veto(false));
+        let message = result.clone().expect_err("the reset failed, so the change is refused");
+        assert!(message.contains("refused"), "{message}");
+        assert_eq!(bind::decide(result, true), Err(message));
+        assert!(pref.get(), "the pref is only written after an accepted veto");
     }
 
     #[test]

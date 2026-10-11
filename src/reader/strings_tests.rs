@@ -86,12 +86,3 @@ fn the_pages_plural_has_every_form_the_english_catalog_uses() {
     assert!(text.contains("*[other]"), "the default plural form is missing: {text}");
 }
 
-#[test]
-fn page_label_reads_the_page_out_of_the_total() {
-    assert_eq!(super::strings::page_label(3, 20), "Page 3 of 20");
-}
-
-#[test]
-fn the_cutout_drop_note_names_the_dropped_setting() {
-    assert!(super::strings::CUTOUT_DROPPED_NOTE.starts_with(super::strings::PREF_CUTOUT_SHORT));
-}

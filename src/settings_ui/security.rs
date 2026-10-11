@@ -1,7 +1,7 @@
 //! The Security and privacy page rows this module binds: Require unlock (T-47a-063), Lock when idle (T-47a-064), the
 //! Hide notification content switch (T-47a-065); the unlock gate every lock change passes is `auth` (T-47a-067, T-47a-068).
 //! The runner already shows the generic summary when Hide notification content is on (`misc::runner`), so that row only
-//! writes its preference. The secure screen list is left to the spec page.
+//! writes its preference.
 use kuro_prefs::prefs::Prefs;
 
 use crate::pref_model::bind::{self, Veto};

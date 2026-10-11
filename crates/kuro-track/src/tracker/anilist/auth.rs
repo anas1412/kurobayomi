@@ -47,7 +47,7 @@ pub enum RedirectOutcome {
 
 /// The browser login URL. Query order is `client_id` then `response_type`, as the Kotlin builder produced.
 pub const AUTHORIZE_URL: &str =
-    "https://anilist.co/api/v2/oauth/authorize?client_id=5338&response_type=token";
+    "https://anilist.co/api/v2/oauth/authorize?client_id=53424&response_type=token";
 
 /// Reads `access_token` and `expires_in` from the fragment as form data. No trailing `&` is needed (E-02).
 pub fn parse_redirect(uri: &Url) -> RedirectOutcome {
@@ -133,7 +133,7 @@ mod tests {
     fn t_28a_008_authorize_url_is_exact() {
         assert_eq!(
             AUTHORIZE_URL,
-            "https://anilist.co/api/v2/oauth/authorize?client_id=5338&response_type=token"
+            "https://anilist.co/api/v2/oauth/authorize?client_id=53424&response_type=token"
         );
     }
 

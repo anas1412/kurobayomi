@@ -18,8 +18,6 @@ action_continue = Melanjutkan
 
 manga = Komik
 
-pref_library_summary = Kategori, pembaruan global, geser chapter
-
 pref_behavior = Perilaku bab
 
 action_add_repo_message = Tambahkan repo ke { $arg1 }. Ini harus berupa URL yang diakhiri dengan "index.min.json".
@@ -80,21 +78,9 @@ pref_player_settings_summary = bawahan player, gestur, dekoder, teks terjemahan
 
 pref_player_internal = Pemutar internal
 
-pref_player_internal_summary = Kemajuan, kontrol, orientasi
-
 pref_progress_mark_as_seen = kapan menandai episode telah dilihat
 
 pref_preserve_watching_position = Posisi menonton episode terlihat
-
-pref_category_player_orientation = Orientasi/arah
-
-rotation_video = Video
-
-rotation_reverse_landscape = Lanskap terbalik
-
-rotation_sensor_portrait = Sensor potret
-
-rotation_sensor_landscape = Sensor pemandangan
 
 pref_category_controls = Kontrol
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = Tampilkan indikator bab saat ini
 pref_controls_show_chapter_indicator_info = Hanya tampilkan jika video mempunyai bab
 
 pref_controls_display_volume_percentage = Tampilkan volume sebagai presentase
-
-pref_remember_brightness = Ingat dan beralih ke kecerahan terakhir yang digunakan
 
 pref_remember_volume = Ingat dan beralih ke volume terakhir yang digunakan
 
@@ -179,12 +163,6 @@ pref_external_player_preference = Pemilihan pemutaran eksternal
 pref_player_gestures = Gestur
 
 pref_player_gestures_summary = Mencari, ketuk dua kali, kontrol media
-
-pref_category_player_sliders = Penggeser
-
-enable_volume_brightness_gestures = Ubah volume dan gestur kecerahan
-
-pref_controls_swap_vol_brightness = Tukar penggeser volume dan kecerahan
 
 pref_category_player_seeking = Pencarian
 
@@ -946,10 +924,6 @@ theme_mocha = Moka
 
 pref_behavior_episode = Perilaku episode
 
-pref_episode_swipe_end = Geser ke Kanan
-
-pref_episode_swipe_start = Episode di gesek ke kiri
-
 pref_mark_duplicate_seen_episode_seen = Tandai episode yang sudah ditonton sebagai sudah ditonton
 
 pref_mark_duplicate_seen_episode_seen_existing = Setelah menonton episode
@@ -1409,10 +1383,6 @@ onboarding_permission_notifications = Izin notifikasi
 
 onboarding_permission_notifications_description = Dapatkan notifikasi untuk pembaruan pustaka dan sebagainya.
 
-onboarding_permission_ignore_battery_opts = Penggunaan baterai di latar belakang
-
-onboarding_permission_ignore_battery_opts_description = Hindari gangguan pada pembaruan pustaka, pengunduhan, dan pemulihan cadangan yang berlangsung lama.
-
 onboarding_permission_crashlytics = Kirim log kerusakan
 
 onboarding_permission_crashlytics_description = Kirim catatan kerusakan yang anonim ke pengembang.
@@ -1455,10 +1425,6 @@ pref_browse_summary = Sumber, ekstensi, pencarian global
 
 pref_backup_summary = Pencadangan manual & otomatis, ruang penyimpanan
 
-pref_security_summary = Kunci aplikasi, amankan layar
-
-pref_advanced_summary = Buat log kerusakan, pengoptimalan baterai
-
 pref_category_theme = Tema
 
 pref_app_theme = Tema aplikasi
@@ -1468,8 +1434,6 @@ theme_system = Sistem
 theme_light = Terang
 
 theme_dark = Gelap
-
-theme_monet = Dinamis
 
 theme_greenapple = Hijau Apel
 
@@ -1520,10 +1484,6 @@ lock_always = Selalu
 lock_never = Tidak pernah
 
 hide_notification_content = Sembunyikan konten notifikasi
-
-secure_screen = Amankan layar
-
-secure_screen_summary = Sembunyikan konten aplikasi saat berpindah aplikasi dan blokir tangkapan layar
 
 firebase_summary = Mengirim log kerusakan dan analitik akan memungkinkan kami mengidentifikasi dan memperbaiki masalah, meningkatkan kinerja, dan membuat pembaruan mendatang lebih relevan dengan kebutuhan anda
 
@@ -1599,10 +1559,6 @@ include = Termasuk: { $arg1 }
 
 exclude = Kecuali: { $arg1 }
 
-pref_chapter_swipe_end = Geser kekanan
-
-pref_chapter_swipe_start = Geser kekiri
-
 pref_mark_duplicate_read_chapter_read = Tandai bab duplikat sebagai sudah dibaca
 
 multi_lang = Semua
@@ -1660,14 +1616,6 @@ ext_nsfw_warning = Sumber dari ekstensi ini mungkin berisi konten DEWASA (NSFW 1
 ext_permission_install_apps_warning = Izin diperlukan untuk memasang ekstensi. Klik disini untuk memberi izin.
 
 ext_install_service_notif = Memasang ekstensi…
-
-ext_installer_pref = Pemasang
-
-ext_installer_legacy = Warisan
-
-ext_installer_shizuku_stopped = Shizuku tidak berjalan
-
-ext_installer_shizuku_unavailable_dialog = Pasang dan mulai Shizuku untuk menggunakan Shizuku sebagai pemasang ekstensi.
 
 ext_revoke_trust = Cabut izin ekstensi tidak dikenal yang tepercaya
 
@@ -1889,22 +1837,6 @@ double_tap_anim_speed_normal = Normal
 
 double_tap_anim_speed_fast = Cepat
 
-pref_rotation_type = Rotasi bawaan
-
-rotation_type = Rotasi
-
-rotation_free = Bebas
-
-rotation_portrait = Layar Tegak
-
-rotation_reverse_portrait = Layar tegak terbalik
-
-rotation_landscape = Layar mendatar
-
-rotation_force_portrait = Terkunci tegak
-
-rotation_force_landscape = Terkunci mendatar
-
 color_filter_r_value = Merah
 
 color_filter_g_value = Hijau
@@ -2121,8 +2053,6 @@ pref_refresh_library_covers = Muat ulang sampul pustaka
 
 pref_reset_viewer_flags = Muat ulang pengaturan per-pengguna
 
-pref_reset_viewer_flags_summary = Atur ulang mode dan orientasi dari semua seri
-
 pref_reset_viewer_flags_success = Atur ulang semua pengaturan pengguna
 
 pref_reset_viewer_flags_error = Tidak bisa mengatur ulang setelan pembaca
@@ -2130,20 +2060,6 @@ pref_reset_viewer_flags_error = Tidak bisa mengatur ulang setelan pembaca
 pref_dump_crash_logs = Bagikan log kerusakan
 
 pref_dump_crash_logs_summary = Simpan log kerusakan ke sebuah berkas untuk dibagikan dengan pengembang aplikasi
-
-label_background_activity = Aktivitas latar belakang
-
-pref_disable_battery_optimization = Nonaktifkan optimisasi baterai
-
-pref_disable_battery_optimization_summary = Membantu pembaruan pustaka dan pencadangan di latar belakang
-
-battery_optimization_disabled = Optimalisasi baterai sudah dimatikan
-
-battery_optimization_setting_activity_not_found = Tidak dapat membuka pengaturan perangkat
-
-about_dont_kill_my_app = Beberapa pabrikan mempunyai batasan aplikasi tambahan yang mematikan layanan latar belakang. Website ini memiliki info lebih lanjut untuk memperbaikinya.
-
-pref_tablet_ui_mode = UI tablet
 
 pref_verbose_logging = Pencatatan berlebihan
 

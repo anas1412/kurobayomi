@@ -22,7 +22,7 @@ pub fn rows(about: &str) -> Vec<MenuRow> {
     let row = |title, subtitle: &str, icon, target| MenuRow { title, subtitle: subtitle.to_owned(), icon, target };
     vec![
         row("Appearance", "Theme, date & time format", "preferences-desktop-appearance-symbolic", "settings_appearance"),
-        row("Library", "Categories, global update, chapter/episode swipe", "view-grid-symbolic", "settings_library"),
+        row("Library", "Categories, global update, chapter/episode behavior", "view-grid-symbolic", "settings_library"),
         row("Reader", "Reading mode, display, navigation", "x-office-document-symbolic", "settings_reader"),
         row("Player", "Internal player, gestures, decoders, subtitles", "video-display-symbolic", "settings_player"),
         row("Downloads", "Automatic download, download ahead", "folder-download-symbolic", "settings_downloads"),
@@ -33,13 +33,6 @@ pub fn rows(about: &str) -> Vec<MenuRow> {
         row("Advanced", "Dump crash logs", "utilities-terminal-symbolic", "settings_advanced"),
         row("About", about, "help-about-symbolic", "settings_about"),
     ]
-}
-
-/// Lightness of the selected-pane background in two-pane mode: `-0.05` in dark mode, `+0.02` in light mode,
-/// clamped to `[0, 1]`.
-pub fn pane_lightness(lightness: f64, dark: bool) -> f64 {
-    let shifted = if dark { lightness - 0.05 } else { lightness + 0.02 };
-    shifted.clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -86,11 +79,4 @@ mod tests {
         assert_eq!(about_subtitle("Kurobayomi", false, "0.1.0", "abc1234"), "Debug abc1234");
     }
 
-    #[test]
-    fn pane_lightness_shifts_by_theme_and_clamps() {
-        assert!((pane_lightness(0.5, false) - 0.52).abs() < 1e-9);
-        assert!((pane_lightness(0.5, true) - 0.45).abs() < 1e-9);
-        assert_eq!(pane_lightness(0.99, false), 1.0);
-        assert_eq!(pane_lightness(0.02, true), 0.0);
-    }
 }

@@ -72,13 +72,33 @@ pub fn gtk_fallback_dark(prefer_dark: bool, theme_name: &str) -> bool {
     prefer_dark || theme_name.to_ascii_lowercase().ends_with("-dark")
 }
 
-/// Reads the GTK settings fallback on the main thread (cheap, no IPC).
+thread_local! {
+    /// `gtk-application-prefer-dark-theme` as the user's desktop had it before this app first wrote it.
+    static STARTUP_PREFER_DARK: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// The value `gtk-application-prefer-dark-theme` had at startup, read once before the first write
+/// (`apply::install` calls this first). Theme mode System restores it, so System never forces light.
+/// `false` while there is no display; that is not remembered.
+pub fn startup_prefer_dark() -> bool {
+    if let Some(value) = STARTUP_PREFER_DARK.with(std::cell::Cell::get) {
+        return value;
+    }
+    let Some(settings) = gtk::Settings::default() else {
+        return false;
+    };
+    let value = settings.is_gtk_application_prefer_dark_theme();
+    STARTUP_PREFER_DARK.with(|c| c.set(Some(value)));
+    value
+}
+
+/// Reads the GTK settings fallback on the main thread (cheap, no IPC). It uses the startup value of
+/// the preference, not the live one, so the mode this app applied never feeds back into System.
 pub fn gtk_fallback() -> bool {
     match gtk::Settings::default() {
         Some(settings) => {
-            let prefer = settings.is_gtk_application_prefer_dark_theme();
             let name = settings.gtk_theme_name().map(|s| s.to_string()).unwrap_or_default();
-            gtk_fallback_dark(prefer, &name)
+            gtk_fallback_dark(startup_prefer_dark(), &name)
         }
         None => false,
     }

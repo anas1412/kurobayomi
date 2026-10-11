@@ -9,8 +9,8 @@
 //!
 //! Android theme items that Kurobayomi does not port (area 49b, T-49ba-007, 008, 023, 033, 039,
 //! 040, 042, 047). Each has one reason here:
-//! - Dynamic colour: the Android `m3_sys_color_dynamic_*` tokens are never read. Monet here is the
-//!   desktop accent colour from the settings portal, a Linux feature (T-49a-005).
+//! - Dynamic colour: the Android `m3_sys_color_dynamic_*` tokens are never read and there is no dynamic scheme.
+//!   A stored `MONET` reads as the GTK theme (`prefs`).
 //! - `lightStatusBar`, `windowLightStatusBar`, `lightNavigationBar`, `elevationOverlayEnabled`, `windowLightNavigationBar`
 //!   and the API-27 navigation-bar overrides: GTK has no system bars and no forced dark mode; the
 //!   dark decision comes from the window background (`dark::`).
@@ -33,12 +33,9 @@ pub mod components;
 pub mod cover;
 pub mod css;
 pub mod dark;
-pub mod elevation;
 pub mod empty_state;
 pub mod icons;
 pub mod loading;
-pub mod margins;
-pub mod monet;
 pub mod motion;
 pub mod picker;
 pub mod prefs;
@@ -52,7 +49,8 @@ mod schemes_xml;
 pub mod style;
 pub mod tokens;
 pub mod tokyo_night;
-pub mod widget_names;
+#[cfg(test)]
+mod tests_49;
 
 use kuro_prefs::ui::{AppTheme as Scheme, ThemeMode};
 
@@ -64,7 +62,7 @@ pub use tokens::Tokens;
 pub enum SchemeSel {
     /// Linux default for new installs. Emits no GTK named-colour overrides.
     System,
-    /// One of the Aniyomi schemes. `Scheme(MONET)` is the dynamic choice (see `monet`).
+    /// One of the Aniyomi schemes.
     Scheme(Scheme),
     /// The bundled Kurobayomi Tokyo Night scheme (T-49a-063), stored as `TOKYO_NIGHT`.
     TokyoNight,
@@ -113,8 +111,7 @@ pub fn window_class() -> size_class::WindowClass {
 }
 
 /// Installs the theme before the first window: the icon bundle, the stored choice (read from the
-/// preference store), the stylesheets, the portal follower, and the Monet seed read. A seed that
-/// arrives later re-renders the palette (T-49a-005, T-49a-058).
+/// preference store), the stylesheets and the portal follower (T-49a-058).
 pub fn startup() {
     let Some(display) = gtk::gdk::Display::default() else {
         return;
@@ -122,10 +119,14 @@ pub fn startup() {
     icons::register(&display);
     let store = crate::data::app().base.store().clone();
     apply::install(&display, prefs::read_settings(&store));
+    follow_mode(&kuro_prefs::ui::UiPrefs::new(store).theme_mode);
     apply::follow_system();
-    monet::read_seed(|_seed| {
-        apply::refresh();
-    });
+}
+
+/// Applies the theme mode again on every change of `pref`, from anywhere (a backup import, a second window), not
+/// only while the Appearance page is open (T-01a-021). The apply is a no-op when the mode is already the applied one.
+fn follow_mode(pref: &kuro_prefs::pref::Pref<ThemeMode>) {
+    crate::pref_model::bind::follow(pref, || true, crate::pref_model::widgets::theme_mode::apply);
 }
 
 /// Tracks the window's size class and records each change (T-49a-058). Call once the window exists.
@@ -154,20 +155,8 @@ pub fn is_dark(mode: ThemeMode, system_dark: bool) -> bool {
     }
 }
 
-/// Entry point: settings and the system dark flag in, tokens out. Reads the stored Monet seed,
-/// then calls `resolve_with_seed`; the seed lives in `monet` and is set by the startup read.
+/// Entry point: settings and the system dark flag in, tokens out (pure, no GTK calls, unit-tested).
 pub fn resolve(settings: &ThemeSettings, system_dark: bool) -> Resolved {
-    resolve_with_seed(settings, system_dark, monet::seed(), monet::contrast())
-}
-
-/// Pure resolution with an explicit Monet seed (no GTK calls, unit-tested).
-/// Monet with a seed generates its palette; Monet without one resolves to `System` (E-49-06).
-pub fn resolve_with_seed(
-    settings: &ThemeSettings,
-    system_dark: bool,
-    seed: Option<tokens::Rgba>,
-    contrast: f64,
-) -> Resolved {
     let dark = is_dark(settings.mode, system_dark);
     if settings.scheme == SchemeSel::TokyoNight {
         return Resolved {
@@ -175,26 +164,14 @@ pub fn resolve_with_seed(
             system_scheme: false,
         };
     }
-    let monet_choice = settings.scheme == SchemeSel::Scheme(Scheme::MONET);
-    if let (true, Some(seed)) = (monet_choice, seed) {
-        let mut tokens = monet::generate(seed, dark, contrast);
-        if dark && settings.amoled {
-            resolve::apply_amoled(&mut tokens.colors);
-        }
-        tokens.amoled = dark && settings.amoled;
-        return Resolved {
-            tokens,
-            system_scheme: false,
-        };
-    }
     let app = match settings.scheme {
-        SchemeSel::Scheme(app) if !monet_choice => app,
+        SchemeSel::Scheme(app) => app,
         _ => Scheme::DEFAULT,
     };
     let scheme = resolve::scheme_for(app);
     Resolved {
         tokens: resolve::tokens_for(scheme, dark, settings.amoled),
-        system_scheme: settings.scheme == SchemeSel::System || monet_choice,
+        system_scheme: settings.scheme == SchemeSel::System,
     }
 }
 
@@ -239,21 +216,6 @@ mod tests {
         assert!(!resolve(&s, false).system_scheme);
     }
 
-    // T-49a-007: a stored Monet with no seed resolves to System.
-    #[test]
-    fn monet_without_a_seed_resolves_to_system() {
-        let s = ThemeSettings {
-            scheme: SchemeSel::Scheme(Scheme::MONET),
-            mode: ThemeMode::LIGHT,
-            ..ThemeSettings::default()
-        };
-        let none = resolve_with_seed(&s, false, None, 0.0);
-        assert!(none.system_scheme);
-        assert_eq!(none.tokens, resolve_with_seed(&ThemeSettings::default(), false, None, 0.0).tokens);
-        let seeded = resolve_with_seed(&s, false, Some(Rgba::argb(0xFF1E_88E5)), 0.0);
-        assert!(!seeded.system_scheme);
-    }
-
     #[test]
     fn cloudflare_primary_is_its_orange() {
         let s = ThemeSettings {
@@ -262,5 +224,30 @@ mod tests {
             ..ThemeSettings::default()
         };
         assert_eq!(resolve(&s, false).tokens.get(Role::Primary), Rgba::argb(0xFFF3_8020));
+    }
+
+    // T-01a-021: a change of the stored mode from anywhere is applied, with no Appearance page open.
+    #[test]
+    fn a_stored_mode_change_is_applied_without_the_appearance_page() {
+        crate::testing::with_display(|| {
+            let Some(display) = gtk::gdk::Display::default() else { return };
+            apply::install(&display, ThemeSettings::default());
+            let pref = kuro_prefs::ui::UiPrefs::new(kuro_prefs::store::PrefStore::in_memory()).theme_mode;
+            follow_mode(&pref);
+            let prefers_dark = || gtk::Settings::default().is_some_and(|s| s.is_gtk_application_prefer_dark_theme());
+            let pump = |ms: u64| {
+                let until = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+                while std::time::Instant::now() < until {
+                    gtk::glib::MainContext::default().iteration(false);
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            };
+            pref.set(ThemeMode::DARK).unwrap();
+            pump(600);
+            assert!(prefers_dark());
+            pref.set(ThemeMode::LIGHT).unwrap();
+            pump(600);
+            assert!(!prefers_dark());
+        });
     }
 }

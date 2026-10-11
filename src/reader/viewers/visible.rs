@@ -1,7 +1,6 @@
 //! The visible-on-screen check and the landscape zoom decision (T-34a-063, `ViewExtensions.isVisibleOnScreen`,
 //! `ReaderPageImageView.landscapeZoom`). The page image calls [`landscape_zoom_on_load`] once, when its image
 //! finishes loading.
-#![allow(dead_code)] // called by the page image widget as page decoding lands; the rules are tested here
 
 use gtk::prelude::*;
 

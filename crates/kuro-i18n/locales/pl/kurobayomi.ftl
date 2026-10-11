@@ -18,8 +18,6 @@ action_continue = Kontynuuj
 
 manga = Manga
 
-pref_library_summary = Kategorie, aktualizacja globalna, przesunięcie rozdziału
-
 pref_behavior = Zachowanie rozdziału
 
 action_add_repo_message = Dodaj dodatkowe repozytoria do { $arg1 }. Powinien to być adres URL kończący się na „index.min.json”.
@@ -80,21 +78,9 @@ pref_player_settings_summary = Wbudowany odtwarzacz, gesty, dekodery, napisy
 
 pref_player_internal = Wbudowany odtwarzacz
 
-pref_player_internal_summary = Postęp, kontrolki, orientacja
-
 pref_progress_mark_as_seen = W jakim momencie oznaczyć odcinek jako obejrzany
 
 pref_preserve_watching_position = Zachowaj postęp oglądania na obejrzanych odcinkach
-
-pref_category_player_orientation = Orientacja odtwarzacza
-
-rotation_video = Wideo
-
-rotation_reverse_landscape = Odwrotny tryb krajobrazowy
-
-rotation_sensor_portrait = Sensor portret
-
-rotation_sensor_landscape = Sensor krajobrazowa
 
 pref_category_controls = Kontrolki
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = Pokaż wskaźnik bieżącego rozdziału
 pref_controls_show_chapter_indicator_info = Pojawia się tylko wtedy, gdy wideo ma rozdziały
 
 pref_controls_display_volume_percentage = Wyświetlaj głośność w procentach
-
-pref_remember_brightness = Pamiętaj i przełącz się na ostatnio użyty poziom jasności
 
 pref_remember_volume = Pamiętaj i przełącz się na ostatnio użyty poziom głośnośći
 
@@ -179,12 +163,6 @@ pref_external_player_preference = Preferencja zewnętrznego odtwarzacza
 pref_player_gestures = Gesty
 
 pref_player_gestures_summary = Szukanie, podwójne dotknięcie, kontrolki mediów
-
-pref_category_player_sliders = Suwaki
-
-enable_volume_brightness_gestures = Włącz gesty głośności i jasności
-
-pref_controls_swap_vol_brightness = Zamień miejscami suwaki głośności i jasności
 
 pref_category_player_seeking = Pzewijanie
 
@@ -668,10 +646,6 @@ choose_video_quality = Wybierz jakość wideo:
 
 extension_settings = Ustawienia rozszerzeń
 
-pref_episode_swipe_end = Akcja przesunięcia w prawo
-
-pref_episode_swipe_start = Odcinek po przesunięciu w lewo
-
 data_saver_summary = Kompresuj obrazy przed pobraniem lub załadowaniem do czytnika
 
 data_saver_ignore_jpeg = Ignoruj obrazy JPEG
@@ -1078,10 +1052,6 @@ onboarding_permission_notifications = Uprawnienia powiadomień
 
 onboarding_permission_notifications_description = Otrzymuj powiadomienia ze swojej biblioteki i więcej.
 
-onboarding_permission_ignore_battery_opts = Zużycie baterii w tle
-
-onboarding_permission_ignore_battery_opts_description = Unikaj przerywania długich operacji takich jak pobieranie rozdziałów, aktualizacje bibliotek lub przywracanie kopii zapasowej.
-
 onboarding_permission_crashlytics = Wyślij dziennik awarii
 
 onboarding_permission_crashlytics_description = Wyślij zanonimizowny dziennik awarii do deweloperów.
@@ -1124,10 +1094,6 @@ pref_browse_summary = Źródła, rozszerzenia, globalne wyszukiwanie
 
 pref_backup_summary = Manualna & automatyczna kopia
 
-pref_security_summary = Blokada aplikacji, bezpieczny ekran
-
-pref_advanced_summary = Zrzuć logi, optymalizacje baterii
-
 pref_category_theme = Motyw
 
 pref_app_theme = Motyw aplikacji
@@ -1137,8 +1103,6 @@ theme_system = Systemowy
 theme_light = Jasny
 
 theme_dark = Ciemny
-
-theme_monet = Dynamiczny
 
 theme_greenapple = Zielone jabłko
 
@@ -1187,10 +1151,6 @@ lock_always = Zawsze
 lock_never = Nigdy
 
 hide_notification_content = Ukryj zawartość powiadomienia
-
-secure_screen = Ukryj ekran
-
-secure_screen_summary = Ukrywa zawartość ekranu przy przełączaniu między aplikacjami i blokuj zrzuty ekranu
 
 firebase_summary = Przesyłanie dzienników awarii i danych użytkowania pozwoli nam na zidentyfikowanie i naprawę błędów, poprawę wydajności oraz dopasowanie przyszłych wersji aplikacji do twoich potrzeb
 
@@ -1266,10 +1226,6 @@ include = Uwzględnij: { $arg1 }
 
 exclude = Wyklucz: { $arg1 }
 
-pref_chapter_swipe_end = Przesuń palcem w prawo
-
-pref_chapter_swipe_start = Przesuń palcem w lewo
-
 multi_lang = Wielojęzyczne
 
 ext_updates_pending = Dostępne aktualizacje
@@ -1325,14 +1281,6 @@ ext_nsfw_warning = Źródła z tej wtyczki mogą zawierać treści NSFW (18+)
 ext_permission_install_apps_warning = Uprawnienia są wymagane aby zainstalować rozszerzenia. Kliknij tutaj aby je przyznać.
 
 ext_install_service_notif = Instalowanie rozszerzenia…
-
-ext_installer_pref = Instalator
-
-ext_installer_legacy = Przestarzały
-
-ext_installer_shizuku_stopped = Shizuku nie jest aktywne
-
-ext_installer_shizuku_unavailable_dialog = Zainstaluj i uruchom Shizuku, aby używać go jako instalatora rozszerzeń.
 
 ext_revoke_trust = Unieważnij zaufanie nieznanym rozszerzeniom
 
@@ -1552,22 +1500,6 @@ double_tap_anim_speed_normal = Normalna
 
 double_tap_anim_speed_fast = Szybka
 
-pref_rotation_type = Domyślna orientacja ekranu
-
-rotation_type = Orientacja ekranu
-
-rotation_free = Dowolna
-
-rotation_portrait = Pionowo
-
-rotation_reverse_portrait = Do góry nogami
-
-rotation_landscape = Poziomo
-
-rotation_force_portrait = Wymuś pionowo
-
-rotation_force_landscape = Wymuś poziomo
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -1778,8 +1710,6 @@ pref_refresh_library_covers = Odśwież okładki w bibliotece
 
 pref_reset_viewer_flags = Resetowanie ustawień czytników serii
 
-pref_reset_viewer_flags_summary = Resetuje tryb czytania i orientację wszystkich serii
-
 pref_reset_viewer_flags_success = Reset wszystkich ustawień czytnika
 
 pref_reset_viewer_flags_error = Nie można zresetować ustawień czytnika
@@ -1787,20 +1717,6 @@ pref_reset_viewer_flags_error = Nie można zresetować ustawień czytnika
 pref_dump_crash_logs = Udostępnij logi crasha
 
 pref_dump_crash_logs_summary = Zapisuje logi błędów do pliku do udostępnienia programistom
-
-label_background_activity = Aktywność w tle
-
-pref_disable_battery_optimization = Wyłącz oszczędzanie baterii
-
-pref_disable_battery_optimization_summary = Pomaga z aktualizacjami biblioteki i backupami w tle
-
-battery_optimization_disabled = Oszczędzanie baterii jest już wyłączone
-
-battery_optimization_setting_activity_not_found = Niepowodzenie otwarcia ustawień urządzenia
-
-about_dont_kill_my_app = Niektórzy producenci mają dodatkowe ograniczenia, które zabijają usługi działające w tle. Ta strona zawiera więcej informacji na ten temat.
-
-pref_tablet_ui_mode = Wymuś UI dla tabletu
 
 pref_verbose_logging = Szczegółowe logi
 

@@ -556,7 +556,7 @@ mod ui {
     use crate::updates::history_data::{apply_remove, resume_row};
     use crate::updates::stats::{MangaStats, StatsState};
     use crate::updates::stats_screen::StatsScreen;
-    use crate::updates::updates_page::{BackAction, back_action, cover_click_enabled, refresh_enabled};
+    use crate::updates::updates_page::{BackAction, back_action, cover_click_enabled};
 
     #[test]
     fn resume_opens_next_unit() {
@@ -598,9 +598,8 @@ mod ui {
 
     #[test]
     fn selection_mode_hides_cover_and_indicator_actions() {
-        assert!(cover_click_enabled(false) && refresh_enabled(false));
+        assert!(cover_click_enabled(false));
         assert!(!cover_click_enabled(true), "the cover tap is off while selecting");
-        assert!(!refresh_enabled(true), "so is the pull to refresh");
     }
 
     #[test]

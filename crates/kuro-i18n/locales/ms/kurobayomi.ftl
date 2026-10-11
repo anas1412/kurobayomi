@@ -4,8 +4,6 @@ action_reorganize_by = Susun semula
 
 manga = Komik
 
-pref_library_summary = Kategori, Kemas kini keseluruhan, leret bab
-
 action_add_repo_message = Tambahkan repo pada { $arg1 }. Ini mestilah URL yang berakhir dengan "index.min.json".
 
 download_ahead_info = Hanya berfungsi jika bab/episod semasa + yang seterusnya telah dimuat turun.
@@ -396,10 +394,6 @@ onboarding_permission_notifications = Kebenaran pemberitahuan
 
 onboarding_permission_notifications_description = Dapatkan pemberitahuan untuk kemas kini pustaka dan banyak lagi.
 
-onboarding_permission_ignore_battery_opts = Penggunaan bateri latar belakang
-
-onboarding_permission_ignore_battery_opts_description = Elak gangguan pada kemas kini yang panjang, muat turun, dan pemulihan sandaran.
-
 onboarding_permission_action_grant = Benarkan
 
 onboarding_guides_new_user = Baru ke { $arg1 }? kami cadang lihat panduan permulaan.
@@ -434,10 +428,6 @@ pref_browse_summary = Sumber, sambungan, carian keseluruhan
 
 pref_backup_summary = Manual & sandaran automatik
 
-pref_security_summary = Kekunci aplikasi, skrin keselamatan
-
-pref_advanced_summary = Kumpulan log kerosakan, pengoptimuman bateri
-
 pref_category_theme = Tema
 
 pref_app_theme = Tema aplikasi
@@ -447,8 +437,6 @@ theme_system = Sistem
 theme_light = Terang
 
 theme_dark = Gelap
-
-theme_monet = Dinamik
 
 theme_greenapple = Epal Hijau
 
@@ -493,10 +481,6 @@ lock_always = Selalu
 lock_never = Tidak akan
 
 hide_notification_content = Sembunyikan kandungan pemberitahuan
-
-secure_screen = Skrin keselamatan
-
-secure_screen_summary = Skrin keselamatan menyembunyikan kandungan aplikasi apabila menukar aplikasi dan sekat tangkapan skrin
 
 pref_category_nsfw_content = Sumber NSFW (18+)
 
@@ -570,10 +554,6 @@ include = Hanya: { $arg1 }
 
 exclude = Kecuali: { $arg1 }
 
-pref_chapter_swipe_end = Tindakan leret ke kanan
-
-pref_chapter_swipe_start = Tindakan leret ke kiri
-
 multi_lang = Pelbagai
 
 ext_updates_pending = Kemas kini baharu
@@ -623,14 +603,6 @@ ext_nsfw_warning = Sumber daripada sambungan ini mungkin mengandungi kandungan 1
 ext_permission_install_apps_warning = Kebenaran diperlukan untuk pasang sambungan. Ketik di sini untuk benarkan.
 
 ext_install_service_notif = Memasang sambungan…
-
-ext_installer_pref = Pemasang
-
-ext_installer_legacy = Legasi
-
-ext_installer_shizuku_stopped = Shizuku tidak dijalankan
-
-ext_installer_shizuku_unavailable_dialog = Pasang dan mulakan Shizuku untuk guna Shizuku sebagai pemasang sambungan.
 
 ext_revoke_trust = Batalkan sambungan dipercayakan yang tidak diketahui
 
@@ -819,22 +791,6 @@ double_tap_anim_speed_0 = Tiada animasi
 double_tap_anim_speed_normal = Biasa
 
 double_tap_anim_speed_fast = Laju
-
-pref_rotation_type = Jenis putaran skrin lalai
-
-rotation_type = Jenis putaran skrin
-
-rotation_free = Bebas
-
-rotation_portrait = Potret
-
-rotation_reverse_portrait = Potret terbalik
-
-rotation_landscape = Landskap
-
-rotation_force_portrait = Kekal potret
-
-rotation_force_landscape = Kekal landskap
 
 color_filter_r_value = R
 
@@ -1036,8 +992,6 @@ pref_refresh_library_covers = Segar semula muka hadapan pustaka
 
 pref_reset_viewer_flags = Set semula tetapan pembaca setiap siri
 
-pref_reset_viewer_flags_summary = Menetapkan semula mod bacaan dan orientasi semua siri
-
 pref_reset_viewer_flags_success = Tetapan pembaca diset semula
 
 pref_reset_viewer_flags_error = Tidak dapat set semula tetapan pembaca
@@ -1045,20 +999,6 @@ pref_reset_viewer_flags_error = Tidak dapat set semula tetapan pembaca
 pref_dump_crash_logs = Kongsi log kerosakan
 
 pref_dump_crash_logs_summary = Simpan log ralat untuk dikongsi dengan pembangunan aplikasi
-
-label_background_activity = Aktiviti latar belakang
-
-pref_disable_battery_optimization = Nyahdaya pengoptimuman bateri
-
-pref_disable_battery_optimization_summary = Membantu dengan pengemaskinian latar belakang pustaka dan sandaran
-
-battery_optimization_disabled = Pengoptimuman bateri sudah dinyahdayakan
-
-battery_optimization_setting_activity_not_found = Tetapan peranti tidak dapat dibuka
-
-about_dont_kill_my_app = Sesetengah pengeluar ada sekatan tambahan pada aplikasi yang akan menghentikan perkidmatan latar belakang. Laman web ini ada maklumat cara membaikinya.
-
-pref_tablet_ui_mode = UI tablet
 
 pref_verbose_logging = Pengelogan berjela-jela
 

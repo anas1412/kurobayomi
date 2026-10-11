@@ -71,6 +71,7 @@ impl PagerController {
         &self.items
     }
 
+    #[cfg(test)]
     pub fn current(&self) -> Option<&ItemKey> {
         self.current.as_ref()
     }
@@ -152,6 +153,7 @@ impl PagerController {
         fx
     }
 
+    #[cfg(test)]
     /// Set while the page slider drags, so the page it lands on keeps the menu open.
     pub fn set_slider_moving(&mut self, moving: bool) {
         self.slider_moving = moving;

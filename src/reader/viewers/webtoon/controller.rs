@@ -42,6 +42,7 @@ impl WebtoonController {
         &self.items
     }
 
+    #[cfg(test)]
     pub fn current(&self) -> Option<&ItemKey> {
         self.current.as_ref()
     }

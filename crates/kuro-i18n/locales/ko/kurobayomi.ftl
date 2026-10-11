@@ -8,23 +8,11 @@ action_sort_airing_time = 방영시간
 
 action_reorganize_by = 재정렬
 
-pref_library_summary = 카테고리, 전역 업데이트, 회차 스와이프
-
 pref_library_update_show_tab_badge = 업데이트 아이콘에 읽지 않은 횟수 표시
 
 pref_progress_mark_as_seen = 에피소드를 본 것으로 표시할 시점
 
 pref_preserve_watching_position = 시청한 에피소드의 마지막 위치 기억
-
-pref_category_player_orientation = 방향
-
-rotation_reverse_landscape = 가로 반전
-
-rotation_sensor_portrait = 자동 세로
-
-rotation_sensor_landscape = 자동 가로
-
-pref_remember_brightness = 마지막으로 사용한 밝기를 기억하고 전환
 
 pref_remember_volume = 마지막으로 사용한 볼륨을 기억하고 전환
 
@@ -69,8 +57,6 @@ pref_category_external_player = 외부 플레이어
 pref_always_use_external_player = 항상 외부 플레이어 사용
 
 pref_external_player_preference = 외부 플레이어 기본 설정
-
-enable_volume_brightness_gestures = 볼륨 및 밝기 제스처 활성화
 
 pref_category_player_seeking = 찾기
 
@@ -463,10 +449,6 @@ extension_settings = 확장 앱 설정
 theme_cottoncandy = 솜사탕
 
 theme_mocha = 모카
-
-pref_episode_swipe_end = 오른쪽으로 스와이프
-
-pref_episode_swipe_start = 왼쪽으로 스와이프
 
 pref_category_hide_hidden = 카테고리 화면에서 카테고리 숨기기
 
@@ -869,10 +851,6 @@ onboarding_permission_notifications = 알림 권한
 
 onboarding_permission_notifications_description = 서재 업데이트 등의 알림을 보냅니다.
 
-onboarding_permission_ignore_battery_opts = 백그라운드 배터리 사용
-
-onboarding_permission_ignore_battery_opts_description = 시간이 많이 걸리는 서재 업데이트, 다운로드 및 백업 복원이 중단되지 않도록 합니다.
-
 onboarding_permission_action_grant = 허용
 
 onboarding_guides_new_user = { $arg1 }가 처음입니까? 시작 가이드를 확인하는 것을 추천합니다.
@@ -907,10 +885,6 @@ pref_browse_summary = 소스, 확장 기능, 전체 검색
 
 pref_backup_summary = 수동 및 자동 백업
 
-pref_security_summary = 앱 잠금, 화면 보안
-
-pref_advanced_summary = 오류 로그 덤프, 배터리 최적화
-
 pref_category_theme = 테마
 
 pref_app_theme = 앱 테마
@@ -920,8 +894,6 @@ theme_system = 시스템
 theme_light = 라이트
 
 theme_dark = 다크
-
-theme_monet = 다이내믹
 
 theme_greenapple = 청사과
 
@@ -966,10 +938,6 @@ lock_always = 항상
 lock_never = 끄기
 
 hide_notification_content = 알림 내용 숨기기
-
-secure_screen = 화면 보안
-
-secure_screen_summary = 화면 보안을 켜면 앱을 전환할 때 내용이 숨겨지며 스크린샷을 찍을 수 없습니다
 
 pref_category_nsfw_content = 성인 콘텐츠 소스
 
@@ -1043,10 +1011,6 @@ include = 포함: { $arg1 }
 
 exclude = 제외: { $arg1 }
 
-pref_chapter_swipe_end = 오른쪽으로 스와이프 액션
-
-pref_chapter_swipe_start = 왼쪽으로 스와이프 액션
-
 multi_lang = 다언어
 
 ext_updates_pending = 업데이트 대기 중
@@ -1096,14 +1060,6 @@ ext_nsfw_warning = 이 확장 앱의 소스는 성인 컨텐츠가 포함될 수
 ext_permission_install_apps_warning = 확장 앱을 설치하려면 권한이 필요합니다. 부가하려면 여기를 탭하세요.
 
 ext_install_service_notif = 확장 앱 설치 중…
-
-ext_installer_pref = 인스톨러
-
-ext_installer_legacy = 레거시
-
-ext_installer_shizuku_stopped = Shizuku가 실행 중이 아닙니다
-
-ext_installer_shizuku_unavailable_dialog = Shizuku를 확장 앱 인스톨러로 사용하려면 Shizuku를 먼저 설치해 주세요.
 
 ext_revoke_trust = 신뢰한 알수없는 확장 앱 신뢰 취소
 
@@ -1290,22 +1246,6 @@ double_tap_anim_speed_0 = 애니메이션 없음
 double_tap_anim_speed_normal = 보통
 
 double_tap_anim_speed_fast = 빠름
-
-pref_rotation_type = 기본 회전 설정
-
-rotation_type = 회전 설정
-
-rotation_free = 자유
-
-rotation_portrait = 세로
-
-rotation_reverse_portrait = 세로 (거꾸로 보기)
-
-rotation_landscape = 가로
-
-rotation_force_portrait = 세로로 고정
-
-rotation_force_landscape = 가로로 고정
 
 color_filter_r_value = R
 
@@ -1507,8 +1447,6 @@ pref_refresh_library_covers = 서재 표지 새로고침
 
 pref_reset_viewer_flags = 시리즈마다 뷰어 설정 초기화
 
-pref_reset_viewer_flags_summary = 모든 시리즈의 읽기 모드와 화면 방향 초기화
-
 pref_reset_viewer_flags_success = 모든 뷰어 설정을 초기화했습니다
 
 pref_reset_viewer_flags_error = 뷰어 설정을 초기화 할 수 없습니다
@@ -1516,20 +1454,6 @@ pref_reset_viewer_flags_error = 뷰어 설정을 초기화 할 수 없습니다
 pref_dump_crash_logs = 오류 로그 공유
 
 pref_dump_crash_logs_summary = 개발자와 공유할 수 있는 오류 로그 파일을 생성합니다
-
-label_background_activity = 백그라운드 활동
-
-pref_disable_battery_optimization = 배터리 최적화 끄기
-
-pref_disable_battery_optimization_summary = 백그라운드 서재 업데이트와 라이브러리 업데이트를 도울 수 있습니다
-
-battery_optimization_disabled = 배터리 최적화가 이미 꺼져 있습니다
-
-battery_optimization_setting_activity_not_found = 디바이스 설정을 열 수 없습니다
-
-about_dont_kill_my_app = 일부 제조사는 백그라운드 서비스를 종료하는 추가적인 제한 사항이 있습니다. 자세한 사항은 웹사이트를 참조하세요.
-
-pref_tablet_ui_mode = 태블릿 UI
 
 pref_verbose_logging = 자세한 로그
 

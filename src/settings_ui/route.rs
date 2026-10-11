@@ -80,26 +80,12 @@ pub fn toolbar(id: &str) -> Vec<gtk::Widget> {
     named(crate::ui::toolbar(&crate::ui::screen(id)))
 }
 
-/// Where the help action of Data and storage goes (`SettingsDataScreen.HELP_URL`).
-const STORAGE_HELP_URL: &str = "https://aniyomi.org/docs/faq/storage";
-/// The toolbar of a screen whose help action (the spec's `Tracking guide` button) opens `url` in the browser.
-fn help_toolbar(id: &str, url: &'static str) -> Vec<gtk::Widget> {
-    let widgets = toolbar(id);
-    if let Some(help) = widgets.iter().find(|w| w.tooltip_text().as_deref() == Some("Tracking guide")).and_then(|w| w.downcast_ref::<gtk::Button>()) {
-        help.connect_clicked(move |_| {
-            gtk::UriLauncher::new(url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-                if let Err(err) = result {
-                    tracing::warn!(%err, "could not open the help page");
-                }
-            });
-        });
-    }
-    widgets
-}
-
-/// The toolbar of Data and storage; its help action opens the storage FAQ.
+/// The toolbar of Data and storage. The spec's help button (`Tracking guide`) opens Aniyomi's Android storage FAQ,
+/// which does not describe this app, so the button is left out (the dropped link is in the release notes).
 fn data_storage_toolbar() -> Vec<gtk::Widget> {
-    help_toolbar("settings_data_storage", STORAGE_HELP_URL)
+    let mut bar = toolbar("settings_data_storage");
+    bar.retain(|w| w.tooltip_text().as_deref() != Some("Tracking guide"));
+    bar
 }
 
 /// The user categories of a kind (the Default category is not one of them), as the settings lists need them.
@@ -150,10 +136,17 @@ fn library_page() -> Option<Built> {
     ))
 }
 
+/// The Appearance page. It is rebuilt when the theme mode changes, so the pure-black row appears and goes with it.
 fn appearance_page() -> Option<Built> {
-    let prefs = prefs();
-    let tree = merge(spec_tree("settings_appearance", prefs.store()), appearance::page_rows(&prefs));
-    built(page::body(&tree).widget, toolbar("settings_appearance"))
+    let prefs = Rc::new(prefs());
+    let store = prefs.store().clone();
+    let (for_state, for_tree) = (Rc::clone(&prefs), Rc::clone(&prefs));
+    Some(view::live_page(
+        &store,
+        move || appearance::rule_state(&for_state),
+        move || merge(spec_tree("settings_appearance", for_tree.store()), appearance::page_rows(&for_tree)),
+        toolbar("settings_appearance"),
+    ))
 }
 
 fn browse_page() -> Option<Built> {
@@ -444,6 +437,200 @@ mod tests {
         }
     }
 
+    /// Every row under `root`.
+    fn rows_under(root: &gtk::Widget) -> usize {
+        let mut n = usize::from(root.is::<gtk::ListBoxRow>());
+        let mut child = root.first_child();
+        while let Some(c) = child {
+            n += rows_under(&c);
+            child = c.next_sibling();
+        }
+        n
+    }
+
+    /// Every widget under `root` (itself included) that `keep` accepts.
+    fn all_under(root: &gtk::Widget, keep: &dyn Fn(&gtk::Widget) -> bool) -> Vec<gtk::Widget> {
+        let mut out = Vec::new();
+        if keep(root) {
+            out.push(root.clone());
+        }
+        let mut child = root.first_child();
+        while let Some(c) = child {
+            out.extend(all_under(&c, keep));
+            child = c.next_sibling();
+        }
+        out
+    }
+
+    /// The label under `root` reading `text`.
+    fn label_under(root: &gtk::Widget, text: &str) -> gtk::Label {
+        all_under(root, &|w| w.downcast_ref::<gtk::Label>().is_some_and(|l| l.label() == text))
+            .into_iter()
+            .next()
+            .and_downcast()
+            .unwrap_or_else(|| panic!("no label {text}"))
+    }
+
+    /// Whether `w` and every parent up to `root` is visible.
+    fn shown_in(w: &gtk::Widget, root: &gtk::Widget) -> bool {
+        let mut cur = Some(w.clone());
+        while let Some(c) = cur {
+            if !c.is_visible() {
+                return false;
+            }
+            if &c == root {
+                return true;
+            }
+            cur = c.parent();
+        }
+        true
+    }
+
+    /// Runs the main loop until `done` or a second has passed.
+    fn spin_until(done: impl Fn() -> bool) {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while !done() && std::time::Instant::now() < until {
+            gtk::glib::MainContext::default().iteration(false);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// Set in the child process that runs [`every_settings_page_builds_and_shows_rows`] on its own.
+    const ALONE: &str = "KUROBAYOMI_TEST_ALONE";
+
+    /// Builds every settings page the app routes (this module's, `pref_model::pages` and the shell in both layouts)
+    /// over fresh data, and checks each shows rows; then the wide split view, the settings search and Categories. It
+    /// installs the app data on the GTK thread for good, which would change what other display tests see, so the
+    /// normal run starts this test binary again for this one test and checks that it passed.
+    #[test]
+    fn every_settings_page_builds_and_shows_rows() {
+        if std::env::var_os(ALONE).is_none() {
+            let path = module_path!().split_once("::").map_or(module_path!(), |(_, rest)| rest);
+            let name = format!("{path}::every_settings_page_builds_and_shows_rows");
+            let out = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+                .args([name.as_str(), "--exact", "--test-threads=1", "--nocapture"])
+                .env(ALONE, "1")
+                .output()
+                .expect("the test binary runs");
+            let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            assert!(out.status.success() && stdout.contains("1 passed"), "the child run failed:\n{stdout}\n{stderr}");
+            return;
+        }
+        crate::testing::with_display(|| {
+            // the app runs the GTK thread inside the async runtime; the live lists subscribe through it
+            let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+            let _inside = runtime.enter();
+            let dir = kuro_testkit::TempDir::new().expect("a temporary folder");
+            crate::data::install(crate::data::open_in(dir.path()).expect("fresh data")).expect("installed");
+            let _nav = crate::testing::nav();
+            // pages whose rows come later or only on demand: a live list that loads, a search before a query, a
+            // script editor with no file open
+            let may_be_empty = [
+                "settings_search",
+                "settings_player_custom_buttons",
+                "settings_player_editor",
+                "settings_player_code_editor",
+                "settings_anime_extension_stores",
+                "settings_manga_extension_repos",
+            ];
+            let ids = [
+                "settings_appearance",
+                "settings_library",
+                "settings_reader",
+                "settings_player",
+                "settings_player_gestures",
+                "settings_player_custom_buttons",
+                "settings_player_editor",
+                "settings_player_code_editor",
+                "settings_player_internal",
+                "settings_player_decoder",
+                "settings_player_subtitle",
+                "settings_player_audio",
+                "settings_player_advanced",
+                "settings_player_torrents",
+                "settings_downloads",
+                "settings_browse",
+                "settings_search",
+                "settings_data_storage",
+                "settings_advanced",
+                "settings_tracking",
+                "settings_security",
+                "settings_about",
+                "settings_open_source_licenses",
+                "settings_worker_info",
+            ];
+            for id in ids.iter().chain(crate::pref_model::pages::IDS.iter()) {
+                assert!(handles(id) || crate::pref_model::pages::IDS.contains(id), "{id} is routed here");
+                eprintln!("building {id}");
+                let page = crate::screens::build(id);
+                let rows = rows_under(page.upcast_ref());
+                assert!(rows > 0 || may_be_empty.contains(id), "{id} shows rows");
+            }
+            // the wide settings shell, opened on a plain page and on Player (whose own split view must not nest)
+            for current in ["settings_appearance", "settings_player"] {
+                let entries: Vec<_> = crate::ui::with_spec(|s| s.settings_main.clone());
+                let split = crate::pref_model::shell::split(
+                    entries.into_iter().map(|e| crate::pref_model::shell::NavEntry { id: e.id, title: e.title, subtitle: e.subtitle, icon: e.icon }).collect(),
+                    current,
+                );
+                assert!(rows_under(&split) > 11, "the sidebar and the open page");
+            }
+            let player = crate::settings_ui::player::root::body(1200).expect("the player split view");
+            assert!(rows_under(&player.content) > 9);
+
+            // the split view: one sidebar (Player inside it shows its plain list), the open page's row selected, and a
+            // selected row swaps the page beside it
+            let entries = || -> Vec<crate::pref_model::shell::NavEntry> {
+                crate::ui::with_spec(|s| s.settings_main.clone())
+                    .into_iter()
+                    .map(|e| crate::pref_model::shell::NavEntry { id: e.id, title: e.title, subtitle: e.subtitle, icon: e.icon })
+                    .collect()
+            };
+            let ids: Vec<String> = entries().into_iter().map(|e| e.id).collect();
+            let sidebars = |root: &gtk::Widget| all_under(root, &|w| w.is::<gtk::ListBox>() && w.has_css_class("navigation-sidebar"));
+            let split = crate::pref_model::shell::split(entries(), "settings_player");
+            let found = sidebars(&split);
+            assert_eq!(found.len(), 1, "Player inside the settings split shows its plain list, not a second sidebar");
+            let list = found[0].clone().downcast::<gtk::ListBox>().expect("the sidebar");
+            let at = ids.iter().position(|id| id == "settings_player").expect("Player is a settings page");
+            assert_eq!(list.selected_row().map(|r| r.index()), i32::try_from(at).ok(), "the open page's row is selected");
+            let right = split.last_child().expect("the page side");
+            let open_page = || right.first_child().map(|w| w.widget_name().to_string());
+            assert_eq!(open_page(), Some("screen:settings_player".to_owned()));
+            list.select_row(list.row_at_index(2).as_ref());
+            assert_eq!(open_page(), Some(format!("screen:{}", ids[2])), "selecting a row swaps the page");
+
+            // the settings search: the field in the header, a hint before a query, "No results found" after a miss
+            let search = crate::screens::build("settings_search");
+            let header = search.first_child().and_downcast::<gtk::HeaderBar>().expect("the header row");
+            let entry = all_under(header.upcast_ref(), &|w| w.is::<gtk::SearchEntry>());
+            assert_eq!(entry.len(), 1, "the search field sits in the header");
+            let entry = entry[0].clone().downcast::<gtk::SearchEntry>().expect("a search entry");
+            let root = search.upcast_ref::<gtk::Widget>();
+            let hint = label_under(root, "Type to search every setting");
+            let miss = label_under(root, "No results found");
+            let results = all_under(root, &|w| w.has_css_class("boxed-list"));
+            assert!(shown_in(hint.upcast_ref(), root) && !shown_in(miss.upcast_ref(), root), "the hint before a query");
+            entry.set_text("zzqxjv");
+            spin_until(|| shown_in(miss.upcast_ref(), root));
+            assert!(shown_in(miss.upcast_ref(), root), "a query with no hit says so");
+            assert!(!shown_in(hint.upcast_ref(), root), "and the hint goes");
+            assert!(results.iter().all(|r| !shown_in(r, root)), "and no result list shows");
+
+            // Categories: one header row holding the Anime | Manga switch and Add; with no category the empty state
+            let page = crate::screens::build("categories");
+            let root = page.upcast_ref::<gtk::Widget>();
+            let headers = all_under(root, &|w| w.is::<gtk::HeaderBar>());
+            assert_eq!(headers.len(), 1, "one header row");
+            let switches = all_under(root, &|w| w.is::<gtk::StackSwitcher>());
+            assert_eq!(switches.len(), 1);
+            assert!(switches[0].is_ancestor(&headers[0]), "the kind switch is in the header row");
+            assert!(all_under(&headers[0], &|w| w.tooltip_text().as_deref() == Some("Add category")).len() == 1, "Add in the header");
+            let empty = all_under(root, &|w| w.downcast_ref::<gtk::Label>().is_some_and(|l| l.label().starts_with("You have no categories")));
+            assert!(empty.iter().any(|w| shown_in(w, root)), "the empty state of the visible kind");
+        });
+    }
+
     #[test]
     fn the_reader_page_replaces_spec_rows_by_typed_ones_and_hides_what_the_rules_turn_off() {
         let prefs = Prefs::in_memory();
@@ -498,6 +685,88 @@ mod tests {
         let library = tree_with("settings_library", &prefs, &[], &[], browse::RepoCounts::default());
         assert!(group_titles(&library, "Season").iter().any(|t| t == "Update seasons with episodes on refresh"));
         assert!(group_titles(&library, "Categories").iter().any(|t| t == "Per-category settings for sort"));
+    }
+
+    /// The key a row writes, when it has one a test can read. Every typed row that holds a pref is covered.
+    fn written_key(item: &PreferenceItem) -> Option<&str> {
+        match item {
+            PreferenceItem::Switch { pref, .. } => Some(pref.key()),
+            PreferenceItem::List { pref, .. } => Some(pref.key()),
+            PreferenceItem::MultiSelect { pref, .. } => Some(pref.key()),
+            PreferenceItem::EditText { pref, .. }
+            | PreferenceItem::EditTextInfo { pref, .. }
+            | PreferenceItem::MultiLineEdit { pref, .. }
+            | PreferenceItem::MpvConf { pref, .. } => Some(pref.key()),
+            _ => None,
+        }
+    }
+
+    // T-02a-030: the spec converter binds a row it has no typed twin for to the made-up key "<page>/<title>", which
+    // looks live and changes nothing. A typed row that is retitled would leave its spec row like that, so on every
+    // settings page no switch, list, multi-select or text row may write a made-up key.
+    // Slider rows carry no pref (only a value and a veto), so a key check cannot cover them.
+    #[test]
+    fn no_row_of_any_settings_page_writes_a_made_up_key() {
+        let prefs = Prefs::in_memory();
+        // The two backup pages are built by `pref_model::backup_pages` (check boxes over a typed screen state, not spec
+        // rows), and the gestures page by `player::seeking::page_rows`, so their spec rows are never shown.
+        let own_page = ["settings_create_backup", "settings_restore_backup", "settings_player_gestures"];
+        let mut ids: Vec<String> = crate::ui::with_spec(|spec| {
+            spec.screens.keys().filter(|id| id.starts_with("settings_") && !own_page.contains(&id.as_str())).cloned().collect()
+        });
+        ids.sort();
+        let gestures = player::seeking::page_rows(&prefs);
+        assert!(ids.len() > 10, "the scan finds the pages ({ids:?})");
+        let mut made_up = Vec::new();
+        let trees = ids.iter().map(|id| (id.as_str(), tree_with(id, &prefs, &[], &[], browse::RepoCounts::default())));
+        for (id, tree) in trees.chain([("settings_player_gestures", gestures)]) {
+            for entry in tree {
+                let items: Vec<&PreferenceItem> = match &entry {
+                    Preference::Item(item) => vec![item],
+                    Preference::Group(group) => group.items.iter().collect(),
+                };
+                for item in items {
+                    if let Some(key) = written_key(item).filter(|key| key.starts_with(&format!("{id}/"))) {
+                        made_up.push(format!("{id}: {:?} -> {key}", item.title()));
+                    }
+                }
+            }
+        }
+        assert!(made_up.is_empty(), "rows bound to a made-up key:\n{}", made_up.join("\n"));
+    }
+
+    // A spec row whose typed twin does not match its title shows twice (the Tracking page once showed "Show next
+    // episode's airing time" with and without a trailing space). No group of a typed page may repeat a title.
+    #[test]
+    fn no_group_of_a_typed_page_shows_a_row_twice() {
+        let prefs = Prefs::in_memory();
+        for id in [
+            "settings_appearance",
+            "settings_library",
+            "settings_reader",
+            "settings_downloads",
+            "settings_browse",
+            "settings_advanced",
+            "settings_data_storage",
+            "settings_tracking",
+            "settings_security",
+            "settings_about",
+        ] {
+            let tree = tree_with(id, &prefs, &[], &[], browse::RepoCounts::default());
+            let loose: Vec<&PreferenceItem> = tree.iter().filter_map(|e| if let Preference::Item(i) = e { Some(i) } else { None }).collect();
+            let mut groups: Vec<(String, Vec<&PreferenceItem>)> = vec![("(loose rows)".to_owned(), loose)];
+            for entry in &tree {
+                if let Preference::Group(g) = entry {
+                    groups.push((g.title.clone(), g.items.iter().collect()));
+                }
+            }
+            for (group, items) in groups {
+                let mut seen = std::collections::BTreeSet::new();
+                for item in items.iter().filter(|i| !i.title().is_empty()) {
+                    assert!(seen.insert(item.title().to_owned()), "{id} / {group}: {:?} is shown twice", item.title());
+                }
+            }
+        }
     }
 
     #[test]

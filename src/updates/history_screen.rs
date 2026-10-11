@@ -10,7 +10,8 @@ use std::sync::Arc;
 use chrono::Local;
 use gtk::glib;
 use gtk::prelude::*;
-use gtk::{Box as GBox, ListBox, Orientation as O};
+use gtk::{Box as GBox, ListBox};
+use kuro_images::art::{ArtKind, ArtRef, Owner};
 use crate::browse::entries::FavoriteStore;
 use crate::browse::favorite::{DuplicateAnswer, duplicate_answer, duplicate_dialog};
 use kuro_domain::dates::ListRow;
@@ -31,10 +32,19 @@ use crate::updates::history::{
 use crate::updates::history_add::{self, Step};
 use crate::updates::history_data::{self, Unit};
 use crate::updates::history_dialog::{self, ConfirmCopy};
-use crate::updates::history_row::{RowActions, history_row};
+use crate::updates::history_row::{self, RowActions, history_row};
 use crate::updates::list::PageState;
+use crate::updates::open_route::{self, Route};
 use crate::updates::screen_toast::ScreenToast;
 use crate::updates::state_page::PageStates;
+
+/// The icon of the empty History page of a kind, the same as the empty Library page's.
+pub fn empty_icon(kind: EntryKind) -> &'static str {
+    match kind {
+        EntryKind::Anime => "video-x-generic-symbolic",
+        EntryKind::Manga => "accessories-dictionary-symbolic",
+    }
+}
 
 /// Whether a resume plays in the external player: the preference applies to anime only (the reader has no external
 /// mode).
@@ -46,6 +56,8 @@ pub struct HistoryScreen {
     kind: EntryKind,
     root: gtk::Overlay,
     search: gtk::SearchEntry,
+    /// The empty page's way to the Library; hidden while a search finds nothing.
+    to_library: gtk::Button,
     col: GBox,
     pages: PageStates,
     toast: ScreenToast,
@@ -57,8 +69,7 @@ impl HistoryScreen {
     /// Builds the screen and starts its query.
     pub fn new(kind: EntryKind) -> Rc<Self> {
         let screen = Rc::new_cyclic(|weak: &Weak<Self>| {
-            let col = GBox::new(O::Vertical, 6);
-            crate::ui::margins(&col, 12);
+            let col = crate::ui::column();
             let list = crate::ui::scrolled(&col);
             let retry = weak.clone();
             let pages = PageStates::new(&list, move || {
@@ -67,15 +78,17 @@ impl HistoryScreen {
                     screen.start();
                 }
             });
-            let search = gtk::SearchEntry::builder().placeholder_text(tr(MsgKey::action_search)).margin_start(12).margin_end(12).margin_top(6).build();
-            let body = GBox::new(O::Vertical, 0);
-            body.append(&search);
-            body.append(pages.widget());
+            // nothing to resume yet: the library is where reading and watching start
+            let library = gtk::Button::with_label(&tr(MsgKey::label_library));
+            library.connect_clicked(|_| crate::ui::open("library"));
+            pages.set_empty_look(empty_icon(kind), Some(&library));
+            // the entry sits in the page header (`mount::history`), like the Library search
+            let search = gtk::SearchEntry::builder().placeholder_text(tr(MsgKey::action_search_hint)).width_chars(28).build();
             let root = gtk::Overlay::new();
-            root.set_child(Some(&body));
+            root.set_child(Some(pages.widget()));
             let toast = ScreenToast::new();
             root.add_overlay(toast.widget());
-            Self { kind, root, search, col, pages, toast, state: RefCell::default(), watch: RefCell::default() }
+            Self { kind, root, search, to_library: library, col, pages, toast, state: RefCell::default(), watch: RefCell::default() }
         });
         let weak = Rc::downgrade(&screen);
         screen.search.connect_search_changed(move |entry| {
@@ -92,6 +105,11 @@ impl HistoryScreen {
 
     pub fn widget(&self) -> &gtk::Overlay {
         &self.root
+    }
+
+    /// The search entry of this kind, for the page header.
+    pub fn search(&self) -> &gtk::SearchEntry {
+        &self.search
     }
 
     fn db(&self) -> std::sync::Arc<kuro_db::handle::Db> {
@@ -134,6 +152,7 @@ impl HistoryScreen {
         if let Some(rows) = &list {
             self.fill(rows);
         }
+        self.to_library.set_visible(!searching);
         self.pages.show(&page);
     }
 
@@ -189,13 +208,21 @@ impl HistoryScreen {
             remove: act(Self::ask_remove),
             add_to_library: act(Self::add_to_library),
         };
-        history_row(&line.title, &line.text, &gtk::Picture::new(), line.cover.favorite, actions)
+        let art = ArtRef {
+            owner: if self.kind == EntryKind::Anime { Owner::Anime } else { Owner::Manga },
+            entry_id: line.cover.entry_id,
+            source_id: line.cover.source_id,
+            kind: ArtKind::Cover,
+            url: line.cover.url.clone(),
+            favorite: line.cover.favorite,
+            last_modified: line.cover.cover_last_modified,
+        };
+        let cover = crate::browse::look::row_cover(&line.title, Some(&art), history_row::COVER_WIDTH, history_row::COVER_HEIGHT);
+        history_row(&line.title, &line.text, &cover, line.cover.favorite, actions)
     }
 
     fn open_entry(self: &Rc<Self>, line: &HistoryLine) {
-        if let Some(title) = history_data::entry_title(&self.db(), self.kind, line.entry_id) {
-            crate::screens::open_entry(&title, self.kind == EntryKind::Anime);
-        }
+        crate::screens::open_entry(self.kind == EntryKind::Anime, line.entry_id);
     }
 
     /// The favourite button: duplicate check, then the default category, as the Browse add does (T-42a-019).
@@ -245,9 +272,7 @@ impl HistoryScreen {
             let Some(screen) = weak.upgrade() else { return };
             match duplicate_answer(Some(index)) {
                 DuplicateAnswer::ShowExisting => {
-                    if let Some(title) = history_data::entry_title(&db, kind, existing) {
-                        crate::screens::open_entry(&title, anime);
-                    }
+                    crate::screens::open_entry(anime, existing);
                 }
                 DuplicateAnswer::MigrateExisting => {
                     let title = history_data::entry_title(&db, kind, existing).unwrap_or_default();
@@ -278,7 +303,7 @@ impl HistoryScreen {
 
     fn finish_resume(&self, entry_id: i64, outcome: Resume<Unit>) {
         match outcome {
-            Resume::Open(unit) => open_unit(&self.db(), self.kind, entry_id, &unit),
+            Resume::Open(unit) => open_unit(self.kind, entry_id, &unit),
             Resume::NotFound { message, toast_ms } => self.toast.show(&message, toast_ms),
         }
     }
@@ -338,15 +363,12 @@ impl HistoryScreen {
     }
 }
 
-/// Opens a unit in the reader or the player. The external player is chosen by `pref_always_use_external_player`; the
-/// app has no external launcher yet, so the internal player is the fallback, as the entry screen does.
-fn open_unit(db: &std::sync::Arc<kuro_db::handle::Db>, kind: EntryKind, entry_id: i64, unit: &Unit) {
-    let Some(title) = history_data::entry_title(db, kind, entry_id) else { return };
+/// Opens a unit in the reader or the player. The external player is chosen by `pref_always_use_external_player` and
+/// opened through `open_route`, the one launcher hook; without a launcher the internal player is the fallback.
+fn open_unit(kind: EntryKind, entry_id: i64, unit: &Unit) {
     let always = PlayerPrefs::new(data::app().base.store().clone()).always_use_external_player.get();
-    if uses_external(always, kind) {
-        tracing::debug!(entry_id, unit = unit.id, "no external player launcher; using the internal player");
-    }
-    crate::screens::open_media(kind == EntryKind::Anime, &title, &unit.name);
+    let route = if uses_external(always, kind) { Route::External } else { Route::Internal };
+    open_route::open(kind == EntryKind::Anime, entry_id, unit.id, route);
 }
 
 #[cfg(test)]

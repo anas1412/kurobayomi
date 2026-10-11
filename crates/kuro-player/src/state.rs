@@ -107,14 +107,11 @@ pub struct PlayerState {
     pub double_tap_seek_amount: i32,
     pub is_seeking_forwards: bool,
 
-    // volume, brightness and one-shots (PlayerViewModel.kt:288-312)
+    // volume and one-shots (PlayerViewModel.kt:288-312)
     pub volume_system: i32,
     pub volume_mpv: i32,
     /// `volume-max - 100`.
     pub volume_boost_cap: i32,
-    pub brightness: f32,
-    pub is_brightness_slider_shown: bool,
-    pub is_volume_slider_shown: bool,
     pub player_update: PlayerUpdate,
     /// `_remainingTime` of the sleep timer, in seconds.
     pub remaining_sleep: i32,
@@ -178,9 +175,6 @@ impl Default for PlayerState {
             volume_system: 0,
             volume_mpv: 100,
             volume_boost_cap: 30,
-            brightness: 0.0,
-            is_brightness_slider_shown: false,
-            is_volume_slider_shown: false,
             player_update: PlayerUpdate::None,
             remaining_sleep: 0,
             custom_buttons: FetchState::Loading,
@@ -465,8 +459,6 @@ mod tests {
         assert_eq!(s.paused, None);
         assert!(s.controls_shown && s.seek_bar_shown && !s.controls_locked);
         assert_eq!(s.player_update, PlayerUpdate::None);
-        assert!(!s.is_brightness_slider_shown && !s.is_volume_slider_shown);
-        assert_eq!(s.brightness, 0.0);
         assert_eq!(
             (s.volume_system, s.volume_mpv, s.volume_boost_cap),
             (0, 100, 30)

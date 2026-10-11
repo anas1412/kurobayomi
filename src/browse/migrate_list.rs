@@ -305,7 +305,7 @@ pub(crate) mod tests {
         let text = labels(tab.upcast_ref());
         let (alpha, zulu) = (text.iter().position(|t| t == "Alpha"), text.iter().position(|t| t == "Zulu"));
         assert!(alpha.is_some() && zulu.is_some() && alpha < zulu, "listed by name: {text:?}");
-        assert!(text.iter().any(|t| t == "5") && text.iter().any(|t| t == "3"), "with their favourite counts: {text:?}");
+        assert!(text.iter().any(|t| t == "5 in library") && text.iter().any(|t| t == "3 in library"), "with their favourite counts, in words: {text:?}");
 
         let empty = migrate_tab(deps(Vec::new(), prefs, Rc::default()));
         assert!(labels(empty.upcast_ref()).contains(&kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library)), "E-MS-01");

@@ -1,20 +1,10 @@
 //! Gesture math (area 46 `GestureHandler.kt` helpers, T-46a-039). Pure. Steps truncate toward zero,
-//! as Kotlin's `Float.toInt()` does. The brightness and volume sensitivities are in `vertical.rs`.
+//! as Kotlin's `Float.toInt()` does.
 
 use crate::controls::Zone;
 
 /// Horizontal seek sensitivity: seconds of target move per pixel of drag (`calculateNewHorizontal`).
 pub const SEEK_SENS: f32 = 0.15;
-
-/// Integer value after a vertical drag. Upward movement (smaller `new_y`) increases the value.
-pub fn vertical_step_int(original: i32, starting_y: f32, new_y: f32, sensitivity: f32) -> i32 {
-    original + ((starting_y - new_y) * sensitivity) as i32
-}
-
-/// Float value after a vertical drag, without truncation.
-pub fn vertical_step_f32(original: f32, starting_y: f32, new_y: f32, sensitivity: f32) -> f32 {
-    original + (starting_y - new_y) * sensitivity
-}
 
 /// Integer value after a horizontal drag. Rightward movement increases the value.
 pub fn horizontal_step(original: i32, starting_x: f32, new_x: f32, sensitivity: f32) -> i32 {
@@ -154,16 +144,9 @@ mod tests {
     }
 
     #[test]
-    fn upward_drag_increases_the_vertical_value() {
-        assert_eq!(vertical_step_int(10, 100.0, 90.0, 0.5), 15);
-        assert_eq!(vertical_step_f32(0.5, 100.0, 90.0, 0.01), 0.6);
-    }
-
-    #[test]
     fn steps_truncate_toward_zero() {
         // 2.9 truncates to 2, -2.9 truncates to -2.
-        assert_eq!(vertical_step_int(0, 10.0, 7.1, 1.0), 2);
-        assert_eq!(vertical_step_int(0, 10.0, 12.9, 1.0), -2);
+        assert_eq!(horizontal_step(0, 0.0, 2.9, 1.0), 2);
         assert_eq!(horizontal_step(0, 0.0, -2.9, 1.0), -2);
     }
 

@@ -8,23 +8,11 @@ action_sort_airing_time = Hora d’emissió
 
 action_reorganize_by = Reordena
 
-pref_library_summary = Categories, actualitzacions globals i lliscament en capítols
-
 pref_library_update_show_tab_badge = Mostra el comptador de no llegits a la icona d'actualitzacions
 
 pref_progress_mark_as_seen = Punt on marcar l'episodi com a vist
 
 pref_preserve_watching_position = Mantindre la posició de visionat als capítols finalitzats
-
-pref_category_player_orientation = Orientació
-
-rotation_reverse_landscape = Format apaisat invertit
-
-rotation_sensor_portrait = Sensor vertical
-
-rotation_sensor_landscape = Sensor apaisat
-
-pref_remember_brightness = Recorda i canvia l'última brillantor utilitzada
 
 pref_remember_volume = Recorda i canvia l'últim volum usat
 
@@ -69,8 +57,6 @@ pref_category_external_player = Reproductor extern
 pref_always_use_external_player = Utilitza sempre un reproductor extern
 
 pref_external_player_preference = Preferències del reproductor extern
-
-enable_volume_brightness_gestures = Activa els gestos per controlar el volum i la lluentor
 
 pref_category_player_seeking = Buscant
 
@@ -449,10 +435,6 @@ extension_settings = Configuració de l'extensió
 theme_cottoncandy = Caramel de cotó
 
 theme_mocha = Mocha
-
-pref_episode_swipe_end = Acció en lliscar cap a la dreta
-
-pref_episode_swipe_start = Acció en lliscar cap a l’esquerra
 
 pref_category_hide_hidden = Amaga les categories ocultes de categories i pantalla d'emmagatzematge
 
@@ -836,10 +818,6 @@ onboarding_permission_notifications = Permís de notificacions
 
 onboarding_permission_notifications_description = Rebeu notificacions quan hi hagi actualitzacions de la biblioteca i més.
 
-onboarding_permission_ignore_battery_opts = Ús de la bateria en segon pla
-
-onboarding_permission_ignore_battery_opts_description = Eviteu interrupcions en actualitzacions de la biblioteca, baixades i restauracions de còpies de seguretat que tinguin una llarga durada.
-
 onboarding_permission_crashlytics = Envia registres d’errors
 
 onboarding_permission_crashlytics_description = Envia registres d’errors anonimitzats als desenvolupadors.
@@ -882,10 +860,6 @@ pref_browse_summary = Fonts, extensions i cerca global
 
 pref_backup_summary = Còpies de seguretat automàtiques i manuals i espai d’emmagatzematge
 
-pref_security_summary = Blocatge de l’aplicació i mode discret
-
-pref_advanced_summary = Bolcatge de registres d’errors i optimitzacions de la bateria
-
 pref_category_theme = Tema
 
 pref_app_theme = Tema de l’aplicació
@@ -895,8 +869,6 @@ theme_system = Sistema
 theme_light = Clar
 
 theme_dark = Fosc
-
-theme_monet = Dinàmic
 
 theme_greenapple = Verd poma
 
@@ -947,10 +919,6 @@ lock_always = Sempre
 lock_never = Mai
 
 hide_notification_content = Amaga el contingut de les notificacions
-
-secure_screen = Mode discret
-
-secure_screen_summary = El mode discret amaga el contingut de l’aplicació en canviar entre aplicacions i bloca les captures de pantalla
 
 firebase_summary = Si envieu registres d’errors i analítiques, ens permetreu identificar i solucionar problemes, millorar el rendiment i fer que les futures actualitzacions siguin més adequades a les vostres necessitats
 
@@ -1026,10 +994,6 @@ include = Inclou: { $arg1 }
 
 exclude = Exclou: { $arg1 }
 
-pref_chapter_swipe_end = Acció en lliscar cap a la dreta
-
-pref_chapter_swipe_start = Acció en lliscar cap a l’esquerra
-
 multi_lang = Múltiples
 
 ext_updates_pending = Actualitzacions pendents
@@ -1085,14 +1049,6 @@ ext_nsfw_warning = Les fonts d’aquesta extensió poden contenir contingut NSFW
 ext_permission_install_apps_warning = Calen permisos per a instal·lar extensions. Premeu aquí per a concedir-les.
 
 ext_install_service_notif = S’està instal·lant l’extensió…
-
-ext_installer_pref = Instal·lador
-
-ext_installer_legacy = Antic
-
-ext_installer_shizuku_stopped = El Shizuku no s’està executant
-
-ext_installer_shizuku_unavailable_dialog = Instal·leu i inicieu el Shizuku per a utilitzar-lo com a instal·lador d’extensions.
 
 ext_revoke_trust = Revoca les extensions de confiança desconegudes
 
@@ -1312,22 +1268,6 @@ double_tap_anim_speed_normal = Normal
 
 double_tap_anim_speed_fast = Ràpida
 
-pref_rotation_type = Rotació per defecte
-
-rotation_type = Rotació
-
-rotation_free = Lliure
-
-rotation_portrait = Vertical
-
-rotation_reverse_portrait = Vertical inversa
-
-rotation_landscape = Horitzontal
-
-rotation_force_portrait = Vertical forçada
-
-rotation_force_landscape = Horitzontal forçada
-
 color_filter_r_value = Vermell
 
 color_filter_g_value = Verd
@@ -1544,8 +1484,6 @@ pref_refresh_library_covers = Refresca les portades de la biblioteca
 
 pref_reset_viewer_flags = Restableix les opcions del lector per sèrie
 
-pref_reset_viewer_flags_summary = Restableix el mode de lectura i l’orientació de totes les sèries
-
 pref_reset_viewer_flags_success = S’han restablert tota la configuració del lector
 
 pref_reset_viewer_flags_error = No s’ha pogut restablir la configuració del lector
@@ -1553,20 +1491,6 @@ pref_reset_viewer_flags_error = No s’ha pogut restablir la configuració del l
 pref_dump_crash_logs = Comparteix el registre d’errors
 
 pref_dump_crash_logs_summary = Desa els registres d’errors en un fitxer perquè el pugueu compartir amb els desenvolupadors
-
-label_background_activity = Activitat en segon pla
-
-pref_disable_battery_optimization = Desactiva l’optimització de la bateria
-
-pref_disable_battery_optimization_summary = Fa que funcionin millor les actualitzacions de la biblioteca en segon pla i les còpies de seguretat
-
-battery_optimization_disabled = L’optimització de la bateria ja està desactivada
-
-battery_optimization_setting_activity_not_found = No s’ha pogut obrir la configuració del dispositiu
-
-about_dont_kill_my_app = Alguns fabricants tenen restriccions addicionals per a les aplicacions que finalitzen els serveis en segon pla. Aquest lloc web té més informació de com solucionar-ho.
-
-pref_tablet_ui_mode = Interfície de tauleta
 
 pref_verbose_logging = Registre detallat
 

@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use image::{GenericImageView, Rgba, imageops::FilterType};
+use image::{Rgba, imageops::FilterType};
 
 /// Side of the notification icon in pixels (T-26a-127).
 pub const ICON_SIZE: u32 = 192;

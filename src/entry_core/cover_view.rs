@@ -50,12 +50,6 @@ pub fn needs_load(shown: Option<&ArtRef>, wanted: &ArtRef) -> bool {
 /// image cache (area 12) only; the tracker never stores covers (T-32a-067).
 pub const TRACKER_COVER_SOURCE: i64 = -2;
 
-/// Whether the cover shows the placeholder: while loading, and after a failed load such as a 404, which shows no toast
-/// (TST-67).
-pub fn shows_placeholder(state: &CoverState) -> bool {
-    !matches!(state, CoverState::Loaded(_))
-}
-
 /// The cover of one tracker search card: the placeholder first, then the image from `CardView::cover_url` through the
 /// shared image cache. A missing url or a failed load keeps the placeholder.
 pub fn tracker_search_cover(width: i32, height: i32, cover_url: Option<&str>) -> CoverView {
@@ -147,16 +141,6 @@ mod tests {
 
     fn art(last_modified: i64) -> ArtRef {
         ArtRef { owner: Owner::Anime, entry_id: 1, source_id: 7, kind: ArtKind::Cover, url: Some("https://x/a.jpg".into()), favorite: false, last_modified }
-    }
-
-    #[test]
-    fn tst_67_a_404_cover_keeps_the_placeholder_and_a_loaded_one_does_not() {
-        let mut binding = CoverBinding::default();
-        assert!(shows_placeholder(binding.state()));
-        let (generation, _cancel) = binding.bind();
-        let missing = kuro_images::error::ImageError::Http { code: 404, reason: "Not Found".into() };
-        assert!(binding.finish(generation, Err(missing)));
-        assert!(shows_placeholder(binding.state()), "the 404 shows the placeholder");
     }
 
     #[test]

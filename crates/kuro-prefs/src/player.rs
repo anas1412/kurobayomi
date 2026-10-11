@@ -11,11 +11,6 @@ use crate::pref_enum;
 use crate::registry::define_prefs;
 
 pref_enum! {
-    /// Orientation the player locks to (`PlayerEnums.kt`, `PlayerOrientation`).
-    pub enum PlayerOrientation { Free, Video, Portrait, ReversePortrait, SensorPortrait, Landscape, ReverseLandscape, SensorLandscape }
-}
-
-pref_enum! {
     /// Video aspect mode (`VideoAspect`).
     pub enum VideoAspect { Crop, Fit, Stretch }
 }
@@ -89,21 +84,18 @@ pub fn should_mark_seen(last_second_seen: i64, total_seconds: i64, progress: f32
 }
 
 define_prefs! {
-    /// `[player]` section: the 36 keys of Aniyomi `PlayerPreferences`.
+    /// `[player]` section: the 33 keys of Aniyomi `PlayerPreferences` that a desktop has.
     pub struct PlayerPrefs in "player" {
         preserve_watching_position: bool = "pref_preserve_watching_position" => false;
         progress_preference: f32 = "pref_progress_preference" => 0.85f32;
-        default_player_orientation_type: PlayerOrientation = "pref_default_player_orientation_type_key" => PlayerOrientation::SensorLandscape;
         allow_gestures: bool = "pref_allow_gestures_in_panels" => false;
         show_loading_circle: bool = "pref_show_loading" => true;
         show_current_chapter: bool = "pref_show_current_chapter" => true;
-        remember_player_brightness: bool = "pref_remember_brightness" => false;
-        player_brightness_value: f32 = "player_brightness_value" => -1.0f32;
         remember_player_volume: bool = "pref_remember_volume" => false;
         player_volume_value: f32 = "player_volume_value" => -1.0f32;
         show_failed_hosters: bool = "pref_show_failed_hosters" => false;
         show_empty_hosters: bool = "pref_show_empty_hosters" => false;
-        player_fullscreen: bool = "player_fullscreen" => true;
+        player_fullscreen: bool = "player_fullscreen" => false;
         hide_controls: bool = "player_hide_controls" => false;
         display_vol_per: bool = "pref_display_vol_as_per" => true;
         show_system_status_bar: bool = "pref_show_system_status_bar" => false;
@@ -131,10 +123,8 @@ define_prefs! {
 }
 
 define_prefs! {
-    /// `[player.gestures]` section: the 13 keys of Aniyomi `GesturePreferences`.
+    /// `[player.gestures]` section: the 11 keys of Aniyomi `GesturePreferences` that a desktop has.
     pub struct GesturePrefs in "player.gestures" {
-        gesture_volume_brightness: bool = "pref_gesture_volume_brightness" => true;
-        swap_volume_brightness: bool = "pref_swap_volume_and_brightness" => false;
         gesture_horizontal_seek: bool = "pref_gesture_horizontal_seek" => true;
         show_seek_bar: bool = "pref_show_seekbar" => false;
         default_intro_length: i32 = "pref_default_intro_length" => 85;
@@ -167,6 +157,14 @@ define_prefs! {
     }
 }
 
+define_prefs! {
+    /// `[player.window]` section (Kurobayomi): the player opens detached in its own window when the last Detach or
+    /// Attach left it that way, and inside the main window otherwise.
+    pub struct PlayerWindowPrefs in "player.window" {
+        open_detached: bool = "player_open_detached" => false;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,14 +177,24 @@ mod tests {
     fn every_player_section_matches_its_registry_rows() {
         let store = PrefStore::in_memory();
         let player = PlayerPrefs::new(store.clone());
-        assert_eq!(PlayerPrefs::FIELDS.len(), 36);
+        assert_eq!(PlayerPrefs::FIELDS.len(), 33);
         assert_section_registered(PlayerPrefs::TABLE, PlayerPrefs::FIELDS, &player.defaults());
         let gestures = GesturePrefs::new(store.clone());
-        assert_eq!(GesturePrefs::FIELDS.len(), 13);
+        assert_eq!(GesturePrefs::FIELDS.len(), 11);
         assert_section_registered(GesturePrefs::TABLE, GesturePrefs::FIELDS, &gestures.defaults());
         let decoder = DecoderPrefs::new(store);
         assert_eq!(DecoderPrefs::FIELDS.len(), 11);
         assert_section_registered(DecoderPrefs::TABLE, DecoderPrefs::FIELDS, &decoder.defaults());
+    }
+
+    #[test]
+    fn the_player_opens_embedded_until_a_detach_is_remembered() {
+        let store = PrefStore::in_memory();
+        let window = PlayerWindowPrefs::new(store.clone());
+        assert_section_registered(PlayerWindowPrefs::TABLE, PlayerWindowPrefs::FIELDS, &window.defaults());
+        assert!(!window.open_detached.get(), "embedded by default");
+        window.open_detached.set(true).unwrap();
+        assert!(PlayerWindowPrefs::new(store).open_detached.get(), "the choice is read back by a new handle");
     }
 
     #[test]
@@ -197,7 +205,6 @@ mod tests {
         assert_eq!(p.player_time_to_disappear.get(), 4000);
         assert_eq!(p.panel_opacity.get(), 60);
         assert_eq!(p.aspect_state.get(), VideoAspect::Fit);
-        assert_eq!(p.default_player_orientation_type.get(), PlayerOrientation::SensorLandscape);
         assert_eq!(p.speed_presets.get().len(), 12);
         let g = GesturePrefs::new(store.clone());
         assert_eq!(g.default_intro_length.get(), 85);
@@ -210,6 +217,24 @@ mod tests {
         assert!(d.use_yuv420p.get());
         assert_eq!(d.video_debanding.get(), Debanding::None);
         assert_eq!(d.brightness_filter.get(), 0);
+    }
+
+    #[test]
+    fn the_dropped_player_keys_have_no_row_and_the_kept_volume_keys_stay() {
+        for key in [
+            "pref_default_player_orientation_type_key",
+            "pref_gesture_volume_brightness",
+            "pref_swap_volume_and_brightness",
+            "pref_remember_brightness",
+            "player_brightness_value",
+        ] {
+            assert!(REGISTRY.iter().all(|m| m.key != key), "{key} is registered");
+            assert!(crate::registry::is_dropped(key), "{key} is not in DROPPED_KEYS");
+        }
+        let p = PlayerPrefs::new(PrefStore::in_memory());
+        assert!(!p.remember_player_volume.get());
+        assert_eq!(p.player_volume_value.get(), -1.0);
+        assert!(p.display_vol_per.get());
     }
 
     #[test]
@@ -243,8 +268,6 @@ mod tests {
 
     #[test]
     fn enums_are_stored_by_name_and_custom_codes_are_fixed() {
-        assert_eq!(PlayerOrientation::SensorLandscape.encode(), PrefValue::Str("SensorLandscape".into()));
-        assert_eq!(PlayerOrientation::ALL.len(), 8);
         assert_eq!(VideoAspect::ALL.len(), 3);
         assert_eq!(SingleActionGesture::ALL.len(), 5);
         assert_eq!(Debanding::decode(&PrefValue::Str("GPU".into())), Decoded::Ok(Debanding::GPU));

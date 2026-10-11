@@ -27,22 +27,7 @@ pub enum VideoAspect {
     Stretch,
 }
 
-/// Orientation the player locks to (`PlayerEnums.kt:41-50`). Default `SensorLandscape`. Desktop
-/// windows ignore it, but the preference is stored and read by name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum PlayerOrientation {
-    Free,
-    Video,
-    Portrait,
-    ReversePortrait,
-    SensorPortrait,
-    Landscape,
-    ReverseLandscape,
-    #[default]
-    SensorLandscape,
-}
-
-/// Rotation the desktop control sets in place of the orientation lock (T-45a-035): mpv `video-rotate`.
+/// Rotation the desktop control sets (T-45a-035): mpv `video-rotate`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum VideoRotate {
     #[default]

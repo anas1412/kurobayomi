@@ -10,8 +10,6 @@ action_reorganize_by = 再注文
 
 relative_time_now = いま
 
-pref_library_summary = カテゴリ、グローバル アップデート、章の間のスワイプ
-
 pref_library_update_show_tab_badge = 更新アイコンで未読カウンターを表示
 
 label_player_settings = プレイヤー設定
@@ -460,10 +458,6 @@ onboarding_permission_notifications = 通知の許可
 
 onboarding_permission_notifications_description = ライブラリ更新などの通知を送信します。
 
-onboarding_permission_ignore_battery_opts = バックグラウンドでのバッテリー使用量
-
-onboarding_permission_ignore_battery_opts_description = 時間のかかるライブラリ更新、ダウンロードやバックアップの復元などへの中断を防ぎます。
-
 onboarding_permission_crashlytics = クラッシュログを送信する
 
 onboarding_permission_crashlytics_description = 匿名化されたクラッシュ ログを開発者に送信します。
@@ -506,10 +500,6 @@ pref_browse_summary = ソース、拡張機能、グローバル検索
 
 pref_backup_summary = 手動・自動バックアップ、ストレージ領域
 
-pref_security_summary = アプリロック、セキュア画面
-
-pref_advanced_summary = クラッシュ ログのダンプ、バッテリーの最適化
-
 pref_category_theme = テーマ
 
 pref_app_theme = アプリテーマ
@@ -519,8 +509,6 @@ theme_system = システム
 theme_light = ライト
 
 theme_dark = ダーク
-
-theme_monet = ダイナミック
 
 theme_greenapple = 青りんご
 
@@ -569,10 +557,6 @@ lock_always = 常時
 lock_never = しない
 
 hide_notification_content = 通知内容を非表示
-
-secure_screen = セキュア画面
-
-secure_screen_summary = セキュア画面はアプリを切り替える時アプリの内容を非表示し、画面キャプチャを無効化します
 
 firebase_summary = クラッシュ ログと分析を送信することで、問題を特定して修正し、パフォーマンスを向上させ、今後のアップデートを貴方のニーズに合わせたものにすることができます
 
@@ -648,10 +632,6 @@ include = 下記を含む: { $arg1 }
 
 exclude = 下記を除外: { $arg1 }
 
-pref_chapter_swipe_end = 右へスワイプ時の操作
-
-pref_chapter_swipe_start = 左へスワイプ時の操作
-
 multi_lang = 多言語
 
 ext_updates_pending = 更新あり
@@ -707,14 +687,6 @@ ext_nsfw_warning = この拡張機能のソースには成人向けのコンテ�
 ext_permission_install_apps_warning = 拡張機能をインストールするためには権限が必要です。タップで許可してください。
 
 ext_install_service_notif = 拡張機能をインストール中…
-
-ext_installer_pref = インストーラ
-
-ext_installer_legacy = レガシー
-
-ext_installer_shizuku_stopped = Shizukuは実行中ではありません
-
-ext_installer_shizuku_unavailable_dialog = Shizukuを拡張機能インストーラーとして使用するには、Shizukuをインストールして起動してください。
 
 ext_revoke_trust = 不明な拡張機能の信頼を取り消す
 
@@ -934,22 +906,6 @@ double_tap_anim_speed_normal = 通常
 
 double_tap_anim_speed_fast = 速い
 
-pref_rotation_type = 既定の画面向き
-
-rotation_type = 画面向き
-
-rotation_free = 自動回転
-
-rotation_portrait = 縦向き
-
-rotation_reverse_portrait = 縦向き (反転)
-
-rotation_landscape = 横向き
-
-rotation_force_portrait = 縦向き画面を強制
-
-rotation_force_landscape = 横向き画面を強制
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -1160,8 +1116,6 @@ pref_refresh_library_covers = ライブラリの表紙を更新
 
 pref_reset_viewer_flags = シリーズ別のビューア設定をリセット
 
-pref_reset_viewer_flags_summary = 各シリーズのビューアモードと画面向きをリセットします
-
 pref_reset_viewer_flags_success = ビューア設定を全てリセットしました
 
 pref_reset_viewer_flags_error = ビューア設定をリセットできませんでした
@@ -1169,20 +1123,6 @@ pref_reset_viewer_flags_error = ビューア設定をリセットできません
 pref_dump_crash_logs = クラッシュ ログを共有
 
 pref_dump_crash_logs_summary = 開発者に渡すよう、エラー ログを保存します
-
-label_background_activity = バックグラウンドアクティビティ
-
-pref_disable_battery_optimization = バッテリー最適化を無効にする
-
-pref_disable_battery_optimization_summary = バックグラウンドでのライブラリ更新とバックアップの役に立ちます
-
-battery_optimization_disabled = バッテリー最適化は既に無効です
-
-battery_optimization_setting_activity_not_found = デバイス設定を開きませんでした
-
-about_dont_kill_my_app = 一部のスマホメーカーはバックグラウンドサービスを終了する追加のアプリ制限を施しています。修正する方法についてはこのWebサイトをご覧ください。
-
-pref_tablet_ui_mode = タブレットUI
 
 pref_verbose_logging = Verboseログ出力
 

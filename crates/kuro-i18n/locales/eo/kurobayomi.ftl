@@ -340,10 +340,6 @@ onboarding_permission_notifications = Sciiga permeso
 
 onboarding_permission_notifications_description = Ricevi sciigojn pri bibliotekaj ĝisdatigoj kaj pli.
 
-onboarding_permission_ignore_battery_opts = Fona bateria uzado
-
-onboarding_permission_ignore_battery_opts_description = Malebligi interrompojn por longedaŭraj bibliotekaj ĝisdatigoj, elŝutoj kaj savkopiaj restaŭroj.
-
 onboarding_permission_crashlytics = Sendi prikolapsajn protokolojn
 
 onboarding_permission_crashlytics_description = Sendi anonimigajn prikolapsajn protokolojn al la programistoj.
@@ -386,10 +382,6 @@ pref_browse_summary = Fontoj, etendaĵoj, ĉiea serĉo
 
 pref_backup_summary = Permanaj & aŭtomataj savkopioj, konserveja spaco
 
-pref_security_summary = Apa ŝloso, sekura ekrano
-
-pref_advanced_summary = Deponi protokolojn, bateriaj optimumigoj
-
 pref_category_theme = Etoso
 
 pref_app_theme = Apa etoso
@@ -399,8 +391,6 @@ theme_system = Operaciume
 theme_light = Hela
 
 theme_dark = Malhela
-
-theme_monet = Dinamika
 
 theme_greenapple = Verda pomo
 
@@ -449,10 +439,6 @@ lock_always = Ĉiam
 lock_never = Neniam
 
 hide_notification_content = Kaŝi enhavon de sciigoj
-
-secure_screen = Sekura ekrano
-
-secure_screen_summary = Sekura ekrano kaŝas apan enhavon dum apa ŝanĝado kaj malpermesas ekrankopiojn
 
 firebase_summary = Sendado de prikolapsaj protokoloj kaj analitikoj eblos al ni identigi kaj ripari problemojn, plibonigi rendimenton kaj igi estontajn ĝisdatigojn pli rilataj al viaj bezonoj
 
@@ -528,10 +514,6 @@ include = Inkluzivi: { $arg1 }
 
 exclude = Ekskluzivi: { $arg1 }
 
-pref_chapter_swipe_end = Ago de ŝovumo dekstren
-
-pref_chapter_swipe_start = Ago de ŝovumo maldekstren
-
 multi_lang = Mult
 
 ext_updates_pending = Ĝisdatigoj atendantaj
@@ -587,14 +569,6 @@ ext_nsfw_warning = Fontoj de tiu etendaĵo eble enhavas NSFW-enhavon (18+)
 ext_permission_install_apps_warning = Permesoj bezonatas por instali etendaĵojn. Tuŝetu ĉi tie por permesi.
 
 ext_install_service_notif = Instalado de etendaĵo…
-
-ext_installer_pref = Instalilo
-
-ext_installer_legacy = Malmoderna
-
-ext_installer_shizuku_stopped = Shizuku ne ruliĝas
-
-ext_installer_shizuku_unavailable_dialog = Instali kaj lanĉi Shizuku por uzi Shizuku kiel etendaĵa instalilo.
 
 ext_revoke_trust = Eksvalidigi fidintajn nekonatajn etendaĵojn
 
@@ -814,22 +788,6 @@ double_tap_anim_speed_normal = Normala
 
 double_tap_anim_speed_fast = Rapida
 
-pref_rotation_type = Defaŭlta orientiĝo
-
-rotation_type = Orientiĝo
-
-rotation_free = Libera
-
-rotation_portrait = Vertikala
-
-rotation_reverse_portrait = Inversa vertikala
-
-rotation_landscape = Horizontala
-
-rotation_force_portrait = Deviga vertikala
-
-rotation_force_landscape = Deviga horizontala
-
 color_filter_r_value = Ruĝa
 
 color_filter_g_value = Verda
@@ -1040,8 +998,6 @@ pref_refresh_library_covers = Aktualigi kovrilojn en biblioteko
 
 pref_reset_viewer_flags = Restarigi legilajn agordojn de individuaj serioj
 
-pref_reset_viewer_flags_summary = Restarigas legadan reĝimon kaj orientiĝon de ĉiuj serioj
-
 pref_reset_viewer_flags_success = Restarigo de ĉiuj legilaj agordoj
 
 pref_reset_viewer_flags_error = Ne povis restarigi legilajn agordojn
@@ -1049,20 +1005,6 @@ pref_reset_viewer_flags_error = Ne povis restarigi legilajn agordojn
 pref_dump_crash_logs = Konigi prikolapsajn protokolojn
 
 pref_dump_crash_logs_summary = Konservas protokolojn pri eraroj dosieren por konigi kun la programistoj
-
-label_background_activity = Fona aktiveco
-
-pref_disable_battery_optimization = Malŝalti baterian optimumigon
-
-pref_disable_battery_optimization_summary = Helpas pri fonaj bibliotekaj ĝisdatigoj kaj savkopioj
-
-battery_optimization_disabled = Bateria optimumigo jam estas malŝaltita
-
-battery_optimization_setting_activity_not_found = Ne povis malfermi aparatajn agordojn
-
-about_dont_kill_my_app = Kelkaj fabrikantoj havas aldonajn apajn malpermesojn kiuj ĉesigas fonajn servojn. Jena retpaĝo havas pli da informoj pri kiel ripari tion.
-
-pref_tablet_ui_mode = Tabulkomputila fasado
 
 pref_verbose_logging = Malkonciza protokolado
 

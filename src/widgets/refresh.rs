@@ -1,5 +1,4 @@
 //! Refresh (T-49b-019): the header refresh button and the `win.refresh` action, on F5 and Ctrl+R.
-//! Pull-to-refresh is a touch gesture with no desktop equivalent, so no overscroll is added.
 //!
 //! The button is insensitive and shows a spinner while a refresh runs. The caller's refresh
 //! receives a `done` callback and must call it when the refresh ends, on success and on error.

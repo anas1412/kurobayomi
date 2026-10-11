@@ -108,7 +108,7 @@ fn build(common: &ItemCommon, initial: String, entries: Vec<Entry>, commit: Comm
             set_subtitle(&subtitle, text.as_deref());
         })
     };
-    built.row.connect_activate({
+    crate::widgets::row_activate::on_activate(&built.row, {
         let (current, entries, commit, on_written) = (current.clone(), entries.clone(), commit.clone(), on_written.clone());
         move |row| {
             let Some(parent) = row.root().and_downcast::<gtk::Window>() else {
@@ -135,6 +135,44 @@ fn refresher(
             .and_then(|t| super::super::model::format_subtitle(t, &label_for(&entries, key)));
         set_subtitle(&subtitle, text.as_deref());
     }
+}
+
+/// The list of a dialog is at most 60% of the window's height (ui-parity 3.1). Before the window has a size the old
+/// fixed 420 px applies.
+pub fn max_list_height(window_height: i32) -> i32 {
+    if window_height <= 0 { 420 } else { window_height * 6 / 10 }
+}
+
+/// Which dividers a scrolling list shows: one above when content is hidden above, one below when content is hidden
+/// below (`value` is the scroll offset, `page` the visible height, `upper` the content height).
+pub fn scroll_dividers(value: f64, page: f64, upper: f64) -> (bool, bool) {
+    (value > 0.5, value + page < upper - 0.5)
+}
+
+/// `scroll` between two separators that show only while the list can scroll that way.
+fn with_scroll_dividers(scroll: &ScrolledWindow) -> GBox {
+    let (top, bottom) = (gtk::Separator::new(Orientation::Horizontal), gtk::Separator::new(Orientation::Horizontal));
+    let update = {
+        let (top, bottom, scroll) = (top.clone(), bottom.clone(), scroll.clone());
+        move || {
+            let adjustment = scroll.vadjustment();
+            let (above, below) = scroll_dividers(adjustment.value(), adjustment.page_size(), adjustment.upper());
+            top.set_opacity(if above { 1.0 } else { 0.0 });
+            bottom.set_opacity(if below { 1.0 } else { 0.0 });
+        }
+    };
+    update();
+    let adjustment = scroll.vadjustment();
+    adjustment.connect_value_changed({
+        let update = update.clone();
+        move |_| update()
+    });
+    adjustment.connect_changed(move |_| update());
+    let column = GBox::new(Orientation::Vertical, 0);
+    column.append(&top);
+    column.append(scroll);
+    column.append(&bottom);
+    column
 }
 
 /// Opens the radio dialog. Cancel only; an empty list shows no choices.
@@ -179,8 +217,30 @@ fn choose(parent: &gtk::Window, title: &str, current: String, entries: &[Entry],
     let scroll = ScrolledWindow::new();
     scroll.set_hscrollbar_policy(PolicyType::Never);
     scroll.set_propagate_natural_height(true);
-    scroll.set_max_content_height(420);
+    scroll.set_max_content_height(max_list_height(parent.height()));
     scroll.set_child(Some(&body));
-    let dialog = dialog::show(parent, title, &scroll, None, |_| {}, || {});
+    let framed = with_scroll_dividers(&scroll);
+    let dialog = dialog::show(parent, title, &framed, None, |_| {}, || {});
     *slot.borrow_mut() = Some(dialog);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // T-47ba-046: at most 60% of the window, and a divider only on the side with hidden content.
+    #[test]
+    fn the_list_is_capped_at_sixty_percent_of_the_window() {
+        assert_eq!(max_list_height(1000), 600);
+        assert_eq!(max_list_height(780), 468);
+        assert_eq!(max_list_height(0), 420, "before the window has a size");
+    }
+
+    #[test]
+    fn dividers_show_only_on_the_side_that_can_scroll() {
+        assert_eq!(scroll_dividers(0.0, 300.0, 300.0), (false, false), "a list that fits has none");
+        assert_eq!(scroll_dividers(0.0, 300.0, 800.0), (false, true));
+        assert_eq!(scroll_dividers(200.0, 300.0, 800.0), (true, true));
+        assert_eq!(scroll_dividers(500.0, 300.0, 800.0), (true, false));
+    }
 }

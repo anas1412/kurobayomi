@@ -170,6 +170,7 @@ impl IconCache {
         *self.by_id.entry(id).or_insert_with(|| resolve_for(untrusted, is_stub, has_custom_icon, is_local))
     }
 
+    #[cfg(test)]
     /// Forgets one source's icon, for example after its extension was updated.
     pub fn invalidate(&mut self, id: i64) {
         self.by_id.remove(&id);
@@ -179,6 +180,7 @@ impl IconCache {
         self.by_id.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }

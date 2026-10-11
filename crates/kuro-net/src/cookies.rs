@@ -116,6 +116,11 @@ impl CookieJar {
         Self { inner }
     }
 
+    /// The file the jar saves to.
+    pub fn path(&self) -> &Path {
+        &self.inner.path
+    }
+
     /// The store as reqwest's cookie provider. Cookies from responses mark the jar changed.
     pub fn provider(&self) -> Arc<CookieProvider> {
         Arc::new(CookieProvider {

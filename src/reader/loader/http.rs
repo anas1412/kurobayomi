@@ -9,6 +9,8 @@
 //! (T-43a-092). It can go stale, because image urls expire or the source re-uploads a chapter. The refresh rule is
 //! [`HttpLoader::refresh_if_stale`]: once an image of a list that came from the cache has failed, the source is asked
 //! for the list; when it differs, the cache is replaced and the caller reloads the chapter to use it.
+//! The reader does not call it: a failed page of a cached list drops that list instead (`sync_page`), so the next
+//! open of the chapter fetches a fresh one off the GTK thread.
 //!
 //! Page status lives in the shared state, written by the worker. The GTK side copies it into the `ReaderPage`
 //! cells with [`HttpLoader::apply_statuses`] (the loader never touches those cells from the worker, plan 43 section 2).
@@ -163,6 +165,7 @@ impl HttpLoader {
         self.recycled.get()
     }
 
+    #[cfg(test)]
     /// Whether the worker thread has been started (it starts on the first `load_page`).
     pub fn worker_running(&self) -> bool {
         self.worker_started.get()
@@ -203,6 +206,7 @@ impl HttpLoader {
             .collect())
     }
 
+    #[cfg(test)]
     /// The stale-cache rule (T-43a-092). Does nothing, and asks the source for nothing, unless the list came from the
     /// cache and a page has failed. Then it fetches the source's list: when it differs from the cached one, the
     /// cache is replaced and `true` is returned, so the caller reloads the chapter to use the new list. The source
@@ -300,26 +304,27 @@ impl HttpLoader {
         None
     }
 
-    /// Copies the worker's status and image url into the page cells. Runs on the GTK thread.
-    pub fn apply_statuses(&self, pages: &[Rc<ReaderPage>]) {
-        let state = self.shared.lock();
-        for page in pages {
-            if let Some(slot) = state.slots.get(page.index as usize) {
-                page.status.set(slot.status);
-                if slot.image_url.is_some() {
-                    *page.image_url.borrow_mut() = slot.image_url.clone();
-                }
-            }
-        }
-    }
-
-    /// Copies the worker's status and image url of one page into its cells. Runs on the GTK thread.
+    /// Copies the worker's status and image url of one page into its cells. Runs on the GTK thread. A failed page of a
+    /// list that came from the cache drops that list (see [`HttpLoader::drop_stale_list`]).
     pub fn sync_page(&self, page: &ReaderPage) {
         let state = self.shared.lock();
         if let Some(slot) = state.slots.get(page.index as usize) {
             page.status.set(slot.status);
             if slot.image_url.is_some() {
                 *page.image_url.borrow_mut() = slot.image_url.clone();
+            }
+            if slot.status == PageStatus::Error {
+                self.drop_stale_list();
+            }
+        }
+    }
+
+    /// The cached list may be stale (image urls rotate or expire), so it is removed and the next open of the chapter asks
+    /// the source for a fresh one. Once per loader, and only for a list that came from the cache.
+    fn drop_stale_list(&self) {
+        if self.list_from_cache.replace(false) {
+            if let Err(error) = std::fs::remove_file(self.cache.page_list_path(self.manga_id, &self.chapter_url)) {
+                tracing::warn!(%error, "the stale page list could not be removed");
             }
         }
     }
@@ -595,6 +600,32 @@ mod tests {
         assert_eq!(reopened.refresh_if_stale(), Ok(true), "a different list replaces the cache");
         assert_eq!(shared.get_page_list(1, "/chapter/1").unwrap().len(), 3);
         assert_eq!(open().get_pages().ok().unwrap().len(), 3, "the next open reads the new list");
+    }
+
+    #[test]
+    fn a_failed_page_of_a_cached_list_drops_the_list_so_the_next_open_fetches_it() {
+        let source = Arc::new(Scripted { pages: entries(2, true), fail_images: vec!["https://img/p0".into()], ..Default::default() });
+        let shared = cache("drop-stale");
+        let open = || HttpLoader::new(Arc::clone(&source) as Arc<dyn HttpPageSource>, 1, "/chapter/1".into(), Arc::clone(&shared));
+        let fresh = open();
+        let pages = fresh.get_pages().ok().unwrap();
+        let _guard = fresh.load_page(0);
+        wait_for(&fresh, 0, PageStatus::Error);
+        fresh.sync_page(&pages[0]);
+        assert!(shared.get_page_list(1, "/chapter/1").is_some(), "a list fresh from the source stays");
+
+        let reopened = open();
+        let pages = reopened.get_pages().ok().unwrap();
+        let _guard = reopened.load_page(0);
+        wait_for(&reopened, 0, PageStatus::Error);
+        reopened.sync_page(&pages[1]);
+        assert!(shared.get_page_list(1, "/chapter/1").is_some(), "a page that did not fail drops nothing");
+        reopened.sync_page(&pages[0]);
+        assert_eq!(pages[0].status.get(), PageStatus::Error);
+        assert!(shared.get_page_list(1, "/chapter/1").is_none(), "the failed page drops the cached list");
+        assert_eq!(source.lists.load(AtomicOrdering::SeqCst), 1);
+        open().get_pages().ok().unwrap();
+        assert_eq!(source.lists.load(AtomicOrdering::SeqCst), 2, "the next open asks the source again");
     }
 
     #[test]

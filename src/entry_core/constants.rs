@@ -1,12 +1,6 @@
 //! Shared constants of the entry screens (T-38a-045, T-38a-043). Upstream: `EntryScreenConstants.kt` (the three enums)
 //! and `DotSeparatorText.kt` (the separator labels). Pure: the widgets read these values.
 
-/// The separator between two words on one line: a space, U+2022 and a space.
-pub const DOT_SEPARATOR: &str = " \u{2022} ";
-
-/// The separator without the spaces.
-pub const DOT: &str = "\u{2022}";
-
 /// How many unread items a Download action queues (`DownloadAction`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DownloadAction {
@@ -29,6 +23,7 @@ impl DownloadAction {
         }
     }
 
+    #[cfg(test)]
     /// The ids the action queues. `unread` is already in reading order, so the next items come first.
     pub fn targets(self, unread: &[i64]) -> Vec<i64> {
         let take = self.count().unwrap_or(unread.len());
@@ -36,34 +31,9 @@ impl DownloadAction {
     }
 }
 
-/// The two actions of the cover edit menu (`EditCoverAction`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EditCoverAction {
-    Edit,
-    Delete,
-}
-
-/// The rows of the entry screen (`EntryScreenItem`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EntryScreenItem {
-    InfoBox,
-    ActionRow,
-    DescriptionWithTag,
-    ItemHeader,
-    Item,
-    AiringTime,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn separators_are_the_exact_code_points() {
-        assert_eq!(DOT_SEPARATOR, " \u{2022} ");
-        assert_eq!(DOT_SEPARATOR.chars().count(), 3);
-        assert_eq!(DOT, "\u{2022}");
-    }
 
     #[test]
     fn download_actions_take_the_next_n_unread_or_all_of_them() {
@@ -76,9 +46,4 @@ mod tests {
         assert!(DownloadAction::UnviewedItems.targets(&[]).is_empty());
     }
 
-    #[test]
-    fn the_enum_variants_are_distinct() {
-        assert_ne!(EditCoverAction::Edit, EditCoverAction::Delete);
-        assert_ne!(EntryScreenItem::InfoBox, EntryScreenItem::AiringTime);
-    }
 }

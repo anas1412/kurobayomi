@@ -199,16 +199,19 @@ impl SearchRunner {
         self.changed();
     }
 
+    #[cfg(test)]
     /// The fetches running now.
     pub fn in_flight(&self) -> usize {
         self.running.get()
     }
 
+    #[cfg(test)]
     /// The sources still waiting for a free slot.
     pub fn queued(&self) -> usize {
         self.queue.borrow().len()
     }
 
+    #[cfg(test)]
     pub fn snapshot(&self) -> GlobalSearchSnapshot {
         self.engine.borrow().snapshot()
     }

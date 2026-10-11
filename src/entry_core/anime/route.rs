@@ -24,8 +24,7 @@ use kuro_domain::entries::defaults::{set_episode_settings_default, set_season_se
 use kuro_domain::entries::season_display::SeasonDisplayMode;
 use kuro_domain::kind::EntryKind;
 use kuro_downloads::anime::layout::AnimeLayout;
-use kuro_i18n::{Arg, MsgKey, tr, tr_plural, trf};
-use kuro_prefs::library::EpisodeSwipeAction;
+use kuro_i18n::{MsgKey, tr, tr_plural};
 use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::player::GesturePrefs;
 use kuro_prefs::store::PrefStore;
@@ -34,7 +33,8 @@ use super::actions::{OpenPlan, continue_plan, tap_plan};
 use super::airing::{Airing, format_airing, visible as airing_visible};
 use super::bottom::{BottomAction, MenuContext, Selected, bottom_actions};
 use super::download_backend::{AnimeDownloads, installed_queue};
-use super::dispatch::{bottom_cmds, swipe_cmds};
+use super::actions::EpisodeMenuAction;
+use super::dispatch::{bottom_cmds, menu_cmds};
 use super::details_error::{DetailsError, required};
 use super::downloads::{DownloadMenu, NEXT_COUNTS, menu_visible};
 use super::intro_dialog;
@@ -50,14 +50,14 @@ use super::season_settings_view::SeasonSettingsWindow;
 use super::season_pipeline::process_seasons;
 use super::season_tile::{SeasonFacts, SeasonItem, continue_episode, season_facts};
 use super::set_default::{self, Scope};
-use super::swipe_look::{self, DownloadState, EpisodeState};
+use super::row_menu::{self, DownloadState, EpisodeState};
 use super::selection::Click;
 use super::info::header_model;
 use super::layout::{bottom_bar_width, fab_expanded, header_fade, two_pane};
 use super::model::{AnimeEntryModel, AnimeLoadContext};
 use super::refresh::refresh_snack;
 use super::remote::{LiveSources, RemoteAnimeBackend};
-use super::row_view::{EpisodeList, EpisodeSwipe};
+use super::row_view::{EpisodeList, EpisodeMenu};
 use super::runner::{self, AnimeBackend, AnimeCmd, AnimeEvent, AnimeRunner};
 use super::settings_view::{Change, SettingsWindow};
 use super::store::AnimeStore;
@@ -78,7 +78,7 @@ use crate::entry_core::text::{Description, Expansion, description};
 use crate::ui;
 
 /// The width of the left pane in the two-pane layout.
-const LEFT_WIDTH: i32 = 380;
+const LEFT_WIDTH: i32 = 360;
 /// The window width assumed before the page has one: the app's default width.
 const FALLBACK_WIDTH: i32 = 1180;
 
@@ -90,6 +90,15 @@ thread_local! {
 /// the target first.
 pub fn target(anime_id: i64) {
     TARGET.with(|t| t.set(Some(anime_id)));
+}
+
+/// The anime sources this build runs: the builtin ones, the recipe sources (`docs/source-recipes.md`) and the shipped
+/// source crates (`docs/builtin-sources.md`).
+fn live_anime_sources() -> Vec<Arc<dyn kuro_source::anime::AnimeSource>> {
+    let mut sources = kuro_source::anime::registry::builtin_anime_sources();
+    sources.extend(crate::recipe_sources::anime_sources());
+    sources.extend(crate::browse::builtin::anime_sources());
+    sources
 }
 
 /// Pushes the details page of one anime.
@@ -122,7 +131,7 @@ fn page_for(anime_id: i64) -> GBox {
     let root = crate::shell::host::Shell::get().map(|shell| shell.downloads().root().to_path_buf());
     let downloads = AnimeDownloads::new(AnimeLayout::new(root), installed_queue());
     let backend: Arc<dyn AnimeBackend> =
-        Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::builtin()), handle.clone()).with_downloads(downloads));
+        Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::new(live_anime_sources())), handle.clone()).with_downloads(downloads));
     let runner = Rc::new(runner::spawn(&handle, AnimeStore::new(Arc::clone(&db)), prefs.clone(), Arc::clone(&backend), ctx));
     runner.send(AnimeCmd::Load { anime_id });
     assemble(runner, show_airing, Env { prefs, backend, db, handle: Some(handle) })
@@ -338,31 +347,23 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
                 }
             })
         },
-        crate::data::is_installed().then(|| EpisodeSwipe {
-            prefs: Rc::new((*data::app().library).clone()),
+        EpisodeMenu {
             run: {
                 let weak = Rc::clone(&weak_view);
                 Rc::new(move |id: i64, action| {
                     if let Some(view) = weak.borrow().upgrade() {
-                        view.swipe_pressed(id, action);
+                        view.menu_pressed(id, action);
                     }
-                })
-            },
-            look: {
-                let weak = Rc::clone(&weak_view);
-                Rc::new(move |id: i64, action: EpisodeSwipeAction| {
-                    let state = weak.borrow().upgrade().and_then(|view| view.episode_state(id));
-                    state.and_then(|state| swipe_look::look(action, state))
                 })
             },
             menu: {
                 let weak = Rc::clone(&weak_view);
                 Rc::new(move |id: i64| {
                     let view = weak.borrow().upgrade();
-                    view.and_then(|view| view.episode_state(id).map(|state| swipe_look::menu(state, view.env.backend.has_download_handler()))).unwrap_or_default()
+                    view.and_then(|view| view.episode_state(id).map(|state| row_menu::menu(state, view.env.backend.has_download_handler()))).unwrap_or_default()
                 })
             },
-        }),
+        },
     );
     let scroller = gtk::ScrolledWindow::builder()
         .child(&list.widget)
@@ -376,6 +377,9 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         .child(&left_host)
         .hscrollbar_policy(gtk::PolicyType::Never)
         .width_request(LEFT_WIDTH)
+        .min_content_width(LEFT_WIDTH)
+        .max_content_width(LEFT_WIDTH)
+        .hexpand(false)
         .vexpand(true)
         .visible(false)
         .build();
@@ -753,7 +757,14 @@ impl View {
             AnimeEvent::RefreshEnded(result) => {
                 // a failed refresh says why in a snackbar (behaviour 19)
                 if let Some(message) = result.as_ref().err().and_then(refresh_snack) {
-                    self.present(message, None);
+                    // Retry runs the refresh again; an uninstalled source has nothing to retry
+                    let anime_id = self.model.borrow().as_ref().map(|m| m.anime.id);
+                    match anime_id.filter(|_| !matches!(result, Err(crate::entry_core::errors::DetailError::SourceNotInstalled))) {
+                        Some(anime_id) => {
+                            self.notices.borrow_mut().show(crate::entry_core::message::with_retry(message), Some(AnimeCmd::Refresh { anime_id }), now_ms_u64(self.clock));
+                        }
+                        None => self.present(message, None),
+                    }
                 }
                 if let Some(m) = self.model.borrow_mut().as_mut() {
                     m.finish_refresh(result);
@@ -945,12 +956,12 @@ impl View {
         DownloadPrefs::new(&self.env.prefs).remove_after_marked_as_read.get()
     }
 
-    /// A swipe on a row: the action of the side, written for that one episode. It works while selecting too (E-5).
-    fn swipe_pressed(self: &Rc<Self>, id: i64, action: kuro_prefs::library::EpisodeSwipeAction) {
+    /// A context menu item on a row, written for that one episode. It works while selecting too (E-5).
+    fn menu_pressed(self: &Rc<Self>, id: i64, action: EpisodeMenuAction) {
         let cmds = {
             let model = self.model.borrow();
             let Some(m) = model.as_ref().filter(|m| m.accepts_dispatch()) else { return };
-            swipe_cmds(m, id, action, self.env.backend.has_download_handler(), self.remove_after_seen())
+            menu_cmds(m, id, action, self.env.backend.has_download_handler(), self.remove_after_seen())
         };
         for cmd in cmds {
             self.runner.send(cmd);
@@ -1523,6 +1534,10 @@ impl View {
     /// Starts the torrent server when the plan says so, then plays in the external player, or in the internal one when
     /// the external one cannot start.
     fn play(&self, anime_id: i64, episode_id: i64, title: &str, name: &str, plan: OpenPlan) {
+        // repeated clicks, or clicks queued while the window was busy, open the player once
+        if !crate::ui::first_within("player", 1500) {
+            return;
+        }
         // a local episode plays in the internal player at its saved position, whatever the plan says
         if crate::local_flow_anime::open_local_episode(episode_id) {
             return;
@@ -1552,6 +1567,10 @@ impl View {
         if plan.external && backend.play_external(anime_id, episode_id) {
             return;
         }
+        // an episode of an online source resolves its video and plays in the internal player
+        if crate::player_view::open_source_episode(&live_anime_sources(), episode_id) {
+            return;
+        }
         crate::screens::open_media(true, title, name);
     }
 
@@ -1578,7 +1597,7 @@ impl View {
         }
     }
 
-    /// The state of one episode the swipe strip and the row menu read.
+    /// The state of one episode the row menu reads.
     fn episode_state(&self, id: i64) -> Option<EpisodeState> {
         let model = self.model.borrow();
         let m = model.as_ref()?;
@@ -1832,6 +1851,83 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         done()
+    }
+
+    /// A backend whose every fetch fails with `error`; it counts the fetches.
+    struct Failing(crate::entry_core::errors::DetailError, std::sync::atomic::AtomicUsize);
+    impl runner::AnimeBackend for Failing {
+        fn source_info(&self, _: i64) -> crate::entry_core::detail::SourceInfo {
+            crate::entry_core::detail::SourceInfo { name: "Src".into(), stub: false }
+        }
+        fn fetch(&self, _: i64, _: super::super::entry_state::RefreshPlan, _: super::super::refresh::Trigger) -> runner::AnimeFetch {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let error = self.0.clone();
+            Box::pin(async move { Err(error) })
+        }
+    }
+
+    /// A failed refresh (HTTP 503) shows its snackbar with Retry, and Retry refreshes again; an uninstalled source shows
+    /// its snackbar with no Retry.
+    #[test]
+    fn a_failed_refresh_offers_retry_and_an_uninstalled_source_does_not() {
+        use crate::entry_core::errors::DetailError;
+        use std::sync::atomic::Ordering;
+        crate::testing::with_display(|| {
+            let ctx = glib::MainContext::default();
+            let _owner = ctx.acquire().expect("main context");
+            let rt = kuro_core::runtime::build().expect("runtime");
+            let (_dir, store, id) = super::super::store::fixture::with_episodes(true, true, 3, 1);
+            for (error, retry) in [(DetailError::Http(503), true), (DetailError::SourceNotInstalled, false)] {
+                let backend = Arc::new(Failing(error.clone(), Default::default()));
+                let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), AnimeLoadContext::default()));
+                let page = assemble(Rc::clone(&runner), true, Env { backend: backend.clone(), ..env_of(&store) });
+                runner.send(AnimeCmd::Load { anime_id: id });
+                let stack = descendants(page.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::Stack>().ok()).expect("the page has a stack");
+                assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
+                runner.send(AnimeCmd::Refresh { anime_id: id });
+                let snack = descendants(page.upcast_ref())
+                    .into_iter()
+                    .filter_map(|w| w.downcast::<gtk::Revealer>().ok())
+                    .find(|r| r.child().is_some_and(|c| c.has_css_class("osd")))
+                    .expect("the snackbar");
+                assert!(pump(&ctx, || snack.reveals_child()), "{error:?}: the failed refresh shows a snackbar");
+                let action = snack.child().and_then(|bar| bar.first_child()).and_then(|label| label.next_sibling()).and_downcast::<Button>().expect("the action button");
+                assert_eq!(action.is_visible(), retry, "{error:?}: Retry only when there is something to retry");
+                if retry {
+                    assert_eq!(action.label().as_deref(), Some(tr(MsgKey::action_retry).as_str()));
+                    let before = backend.1.load(Ordering::SeqCst);
+                    action.emit_clicked();
+                    assert!(pump(&ctx, || backend.1.load(Ordering::SeqCst) > before), "Retry sends the refresh to the runner");
+                }
+                runner.send(AnimeCmd::Shutdown);
+            }
+        });
+    }
+
+    /// Add to library on an entry opened from Browse (not a favorite, never refreshed): the click writes favorite=1 in
+    /// the default category and the button turns to "In library".
+    #[test]
+    fn add_to_library_from_the_details_page_writes_the_row_and_flips_the_button() {
+        crate::testing::with_display(|| {
+            let ctx = glib::MainContext::default();
+            let _owner = ctx.acquire().expect("main context");
+            let rt = kuro_core::runtime::build().expect("runtime");
+            let (_dir, store, id) = super::super::store::fixture::with_episodes(false, false, 2, 0);
+            let category = kuro_data::category::create_anime_category(&store.db(), "Watching", 0).expect("category");
+            let prefs = PrefStore::in_memory();
+            kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(category as i32).expect("default category");
+            let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), prefs, Arc::new(Stub), AnimeLoadContext::default()));
+            let page = assemble(Rc::clone(&runner), true, env_of(&store));
+            runner.send(AnimeCmd::Load { anime_id: id });
+            let label = |text: &str| descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.label() == text);
+            assert!(pump(&ctx, || label("Add to library").is_some()), "the page shows Add to library");
+            let button = label("Add to library").and_then(|l| l.ancestor(Button::static_type())).and_downcast::<Button>().expect("the library button");
+            button.emit_clicked();
+            assert!(pump(&ctx, || store.anime(id).unwrap().is_some_and(|a| a.favorite)), "the click writes favorite=1");
+            assert_eq!(store.category_ids(id).unwrap(), vec![category], "the default category is linked");
+            assert!(pump(&ctx, || label("In library").is_some()), "the button turns to In library");
+            runner.send(AnimeCmd::Shutdown);
+        });
     }
 
     /// One display test (GTK is bound to the thread that starts it): Loading, then the page with its rows and a

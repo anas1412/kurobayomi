@@ -7,10 +7,6 @@
 #[allow(dead_code)]
 pub mod app_lock_auth;
 #[allow(dead_code)]
-pub mod build_flags;
-#[allow(dead_code)]
-pub mod collections;
-#[allow(dead_code)]
 pub mod dropped;
 #[allow(dead_code)]
 pub mod keep_awake;

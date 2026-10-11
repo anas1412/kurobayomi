@@ -27,8 +27,10 @@ use kuro_data::chapter::Chapter;
 use kuro_db::Db;
 use kuro_platform::toast::{ToastLength, Toaster};
 use kuro_data::manga::{Manga, MangaRepo, MangaUpdate};
-use kuro_prefs::reader::{ReaderOrientation, ReaderPrefs, ReadingMode};
+use kuro_prefs::reader::{ReaderPrefs, ReadingMode};
 use tokio::sync::watch;
+
+use crate::widgets::detachable::Detachable;
 
 use super::bottom_bar::BottomBar;
 use super::chapters::ListOptions;
@@ -50,7 +52,6 @@ use super::nav_overlay::{self, NavOverlay};
 use super::navigator::{Navigator, NavigatorState};
 use super::overlay::Tint;
 use super::session::{AdjacentOutcome, ReaderEvent, ReaderSession, ReaderStore, TrackUpdate, open_list};
-use super::rotation_sheet;
 use super::settings_window::{self, MangaChoices};
 use super::sheet::{self, Sheet};
 use super::sync::{self, Effect};
@@ -99,6 +100,9 @@ pub struct ReaderExtras {
     pub track_update: Option<TrackUpdate>,
     /// Queues the chapters download-ahead picked: the manga id and the chapter ids (T-43a-034). Without it the rule is off.
     pub download_ahead: Option<DownloadAheadSink>,
+    /// Starts the source work Retry on the failure card waits for (an online chapter's page-list fetch), and gives its
+    /// gate. Without it Retry loads again at once.
+    pub retry_gate: Option<Rc<dyn Fn() -> SourceGate>>,
 }
 
 /// Queues the given chapters of a manga for download.
@@ -106,7 +110,7 @@ pub type DownloadAheadSink = Rc<dyn Fn(i64, &[i64])>;
 
 impl Default for ReaderExtras {
     fn default() -> Self {
-        Self { data_dir: None, delete_sink: None, downloads: DownloadCheck::default(), track_update: None, download_ahead: None }
+        Self { data_dir: None, delete_sink: None, downloads: DownloadCheck::default(), track_update: None, download_ahead: None, retry_gate: None }
     }
 }
 
@@ -415,6 +419,7 @@ impl ReaderCore {
         }
     }
 
+    #[cfg(test)]
     /// The current chapter's position in the reader list.
     pub fn current_index(&self) -> Option<usize> {
         self.session.borrow().as_ref().and_then(|s| s.current_index())
@@ -454,11 +459,6 @@ impl ReaderCore {
         self.session.borrow().as_ref().map_or(ReadingMode::Default, |s| flags::reading_mode_of(s.viewer_flags()))
     }
 
-    /// The raw orientation of the manga, Default included.
-    pub fn manga_orientation(&self) -> ReaderOrientation {
-        self.session.borrow().as_ref().map_or(ReaderOrientation::Default, |s| flags::orientation_of(s.viewer_flags()))
-    }
-
     /// The visible page (1-based, `-1` before any page) and the page total of the current chapter.
     pub fn page_counts(&self) -> (i32, i32) {
         self.session.borrow().as_ref().map_or((-1, 0), |s| {
@@ -471,14 +471,6 @@ impl ReaderCore {
     pub fn apply_mode(&self, mode: ReadingMode) {
         if let Some(session) = self.session.borrow_mut().as_mut() {
             session.set_reading_mode(mode);
-        }
-    }
-
-    /// Writes the manga's orientation and reloads the viewers (T-043a-036).
-    pub fn apply_orientation(&self, orientation: ReaderOrientation) {
-        let default_pref = self.deps.prefs.default_orientation_type.get();
-        if let Some(session) = self.session.borrow_mut().as_mut() {
-            session.set_orientation(orientation, default_pref);
         }
     }
 
@@ -632,9 +624,12 @@ impl ReaderChrome {
 /// widget alive.
 struct Screen {
     core: Rc<ReaderCore>,
-    ready: watch::Receiver<bool>,
+    /// The gate the initial load waits for; Retry replaces it with the retry gate's.
+    ready: RefCell<watch::Receiver<bool>>,
     toaster: Toaster,
     on_close: Rc<dyn Fn()>,
+    /// Moves the reader between the main window and a window of its own (the top bar's Detach / Attach button).
+    host: Rc<Detachable>,
     root: glib::WeakRef<gtk::Box>,
     stack: gtk::Stack,
     /// The widget the viewers fill (`ReaderScreen::viewer`).
@@ -692,12 +687,17 @@ pub fn open_with(
     let theme_value = deps.prefs.reader_theme.get();
     let prefs_store = deps.prefs_store.clone();
     let core = Rc::new(ReaderCore::with_extras(deps, extras));
+    // the host is made once the root exists; a detached reader closes its own window instead of the caller's close
+    let host_slot: Rc<std::cell::OnceCell<Weak<Detachable>>> = Rc::new(std::cell::OnceCell::new());
     // closing the reader first hands the delete-after-read queue over (T-43a-032)
     let on_close = {
-        let core = Rc::clone(&core);
+        let (core, host_slot) = (Rc::clone(&core), Rc::clone(&host_slot));
         move || {
             core.flush_deletes();
-            on_close();
+            match host_slot.get().and_then(Weak::upgrade).filter(|host| host.is_detached()) {
+                Some(host) => host.close(),
+                None => on_close(),
+            }
         }
     };
 
@@ -748,9 +748,12 @@ pub fn open_with(
 
     let root_ref = glib::WeakRef::new();
     root_ref.set(Some(&root));
+    let host = Detachable::new(&root, "Reader", false);
+    let _ = host_slot.set(Rc::downgrade(&host));
     let screen = Rc::new(Screen {
+        host,
         core: Rc::clone(&core),
-        ready: gate.ready_watch(),
+        ready: RefCell::new(gate.ready_watch()),
         toaster,
         on_close: Rc::new(on_close),
         root: root_ref,
@@ -789,7 +792,7 @@ pub fn open_with(
             }
         },
     );
-    // a resize across the tablet threshold changes the navigator padding
+    // a resize across the wide-window threshold changes the navigator padding
     crate::window_size::on_tablet_change({
         let weak = weak.clone();
         move |_| match weak.upgrade() {
@@ -800,16 +803,11 @@ pub fn open_with(
             None => false,
         }
     });
-    let (mode_weak, rotation_weak, crop_weak, settings_weak) = (weak.clone(), weak.clone(), weak.clone(), weak.clone());
+    let (mode_weak, crop_weak, settings_weak) = (weak.clone(), weak.clone(), weak.clone());
     bottom_bar.connect(
         move || {
             if let Some(s) = mode_weak.upgrade() {
                 open_mode_sheet(&s);
-            }
-        },
-        move || {
-            if let Some(s) = rotation_weak.upgrade() {
-                open_rotation_sheet(&s);
             }
         },
         move || {
@@ -852,7 +850,12 @@ pub fn open_with(
     {
         // a reader taken out of the window without its close button still hands its queue over
         let core = Rc::clone(&core);
-        root.connect_destroy(move |_| core.flush_deletes());
+        // and the decoded pages (they stay cached after their views go) are freed with the reader, so a closed reader
+        // keeps no pixels in memory
+        root.connect_destroy(move |_| {
+            core.flush_deletes();
+            super::page_view::clear_decoded_cache();
+        });
     }
     {
         let screen = Rc::clone(&screen);
@@ -944,7 +947,7 @@ fn refresh(screen: &Screen) {
     screen.navigator.update(&state, size_of(screen));
     let ui = *screen.ui.borrow();
     screen.indicator.update(page, total, ui.menu_visible, screen.core.show_page_number());
-    screen.bottom_bar.update(screen.core.manga_mode(), screen.core.manga_orientation(), screen.core.crop_on());
+    screen.bottom_bar.update(screen.core.manga_mode(), screen.core.crop_on());
     apply_fullscreen(screen, ui.menu_visible);
 }
 
@@ -959,7 +962,8 @@ fn apply_fullscreen(screen: &Screen, menu_visible: bool) {
 fn set_menu(screen: &Screen, visible: bool) {
     screen.ui.borrow_mut().set_menu_visible(visible);
     screen.menu_open.set(visible);
-    screen.top.set_reveal_child(visible);
+    // the top bar (back, title, chapter, bookmark, detach) is always shown; only the bottom bar follows the menu
+    screen.top.set_reveal_child(true);
     screen.bottom.set_reveal_child(visible);
     refresh(screen);
 }
@@ -1028,22 +1032,6 @@ fn open_mode_sheet(screen: &Rc<Screen>) {
     });
     let content = mode_sheet::build(screen.core.manga_mode(), screen.core.show_reading_mode(), done);
     screen.ui.borrow_mut().open(Dialog::ReadingModeSelect);
-    screen.sheet.show(&content);
-}
-
-/// The rotation sheet (T-043a-044). Apply stores the manga's orientation, toasts its label and closes the sheet.
-fn open_rotation_sheet(screen: &Rc<Screen>) {
-    let weak = Rc::downgrade(screen);
-    let done: Rc<dyn Fn(ReaderOrientation, &'static str)> = Rc::new(move |orientation, toast| {
-        let Some(s) = weak.upgrade() else { return };
-        s.core.apply_orientation(orientation);
-        s.toaster.show(toast, ToastLength::Short);
-        drain_events(&s);
-        s.sheet.dismiss();
-        refresh(&s);
-    });
-    let content = rotation_sheet::build(screen.core.manga_orientation(), done);
-    screen.ui.borrow_mut().open(Dialog::OrientationSelect);
     screen.sheet.show(&content);
 }
 
@@ -1212,7 +1200,7 @@ fn toggle_crop(screen: &Screen) {
 /// The reader settings window (T-043a-046, T-043a-047). Its chips apply to this manga at once.
 fn open_settings(screen: &Rc<Screen>) {
     let Some(window) = window_of(screen) else { return };
-    let (mode_weak, orientation_weak) = (Rc::downgrade(screen), Rc::downgrade(screen));
+    let mode_weak = Rc::downgrade(screen);
     let choices = MangaChoices {
         on_mode: Rc::new(move |mode| {
             if let Some(s) = mode_weak.upgrade() {
@@ -1221,15 +1209,8 @@ fn open_settings(screen: &Rc<Screen>) {
                 refresh(&s);
             }
         }),
-        on_orientation: Rc::new(move |orientation| {
-            if let Some(s) = orientation_weak.upgrade() {
-                s.core.apply_orientation(orientation);
-                drain_events(&s);
-                refresh(&s);
-            }
-        }),
     };
-    let body = settings_window::notebook(&screen.core.deps.prefs, screen.core.manga_mode(), screen.core.manga_orientation(), choices);
+    let body = settings_window::notebook(&screen.core.deps.prefs, screen.core.manga_mode(), choices);
     let dialog = sheet::modal_window(&window, strings::ACTION_SETTINGS, &body);
     screen.ui.borrow_mut().open(Dialog::Settings);
     let closed = Rc::downgrade(screen);
@@ -1252,7 +1233,8 @@ fn start(screen: &Rc<Screen>) {
     refresh(screen);
     let screen = Rc::clone(screen);
     glib::spawn_future_local(async move {
-        let result = if wait_ready(screen.ready.clone()).await {
+        let ready = screen.ready.borrow().clone();
+        let result = if wait_ready(ready).await {
             // one frame, so the spinner is on screen before the load takes the thread
             glib::timeout_future(std::time::Duration::ZERO).await;
             screen.core.initial_load()
@@ -1330,9 +1312,8 @@ fn drain_events(screen: &Rc<Screen>) {
     for event in events {
         match event {
             ReaderEvent::ReloadViewerChapters => reload_viewer(screen),
-            // the window keeps its shape on the desktop, and the image actions belong to the page sheet (T-043a-045)
-            ReaderEvent::SetOrientation(_)
-            | ReaderEvent::PageChanged
+            // the image actions belong to the page sheet (T-043a-045)
+            ReaderEvent::PageChanged
             | ReaderEvent::SetCoverResult(_)
             | ReaderEvent::SavedImage(_)
             | ReaderEvent::ShareImage(_)
@@ -1356,7 +1337,13 @@ fn watch_events(screen: &Rc<Screen>) {
 
 fn show_card(screen: &Rc<Screen>, error: &LoadError) {
     let (retry_screen, close) = (Rc::clone(screen), Rc::clone(&screen.on_close));
-    let card = build_error_card(error, move || start(&retry_screen), move || close());
+    let retry = move || {
+        if let Some(gate) = &retry_screen.core.extras.retry_gate {
+            *retry_screen.ready.borrow_mut() = gate().ready_watch();
+        }
+        start(&retry_screen);
+    };
+    let card = build_error_card(error, retry, move || close());
     screen.stack.add_named(&card, Some(PAGE_CARD));
     screen.stack.set_visible_child_name(PAGE_CARD);
 }
@@ -1405,7 +1392,17 @@ fn rebuild_top_bar(screen: &Rc<Screen>) {
             }
         }),
     };
-    screen.top_slot.append(&build_top_bar(&info, actions));
+    let bar = build_top_bar(&info, actions);
+    if let Some(row) = bar.child().and_downcast::<gtk::Box>() {
+        // Back, the titles, then Detach / Attach before the bookmark; the button moves over from the last bar
+        let button = screen.host.button();
+        if let Some(old) = button.parent().and_downcast::<gtk::Box>() {
+            old.remove(button);
+        }
+        row.insert_child_after(button, row.first_child().and_then(|back| back.next_sibling()).as_ref());
+    }
+    screen.host.set_title(&info.manga_title);
+    screen.top_slot.append(&bar);
 }
 
 /// An overflow entry: open in the web view or the browser, or share (copy) the chapter's web address.
@@ -1906,6 +1903,75 @@ mod tests {
             assert!(pump_until(|| screen.viewer.first_child().is_some_and(|w| w.is::<gtk::ScrolledWindow>())));
             assert_eq!(screen.viewer.observe_children().n_items(), 1);
             window.destroy();
+        });
+    }
+
+    /// The reader's top bar carries the Detach / Attach button: the reader moves into its own window and back onto the
+    /// navigation stack as the same page, and closing it while detached closes that window, not a page of the stack.
+    #[test]
+    fn the_reader_detaches_into_its_own_window_and_attaches_back() {
+        crate::testing::with_display(|| {
+            let f = fixture(2);
+            let build: BuildLoader = Rc::new(|chapter| {
+                let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/reader-screen-tests/detach");
+                let _ = std::fs::remove_dir_all(&root);
+                let cache = Arc::new(DiskCache::open(root, CACHE_LIMIT_BYTES).unwrap());
+                Ok(Loader::Http(HttpLoader::new(Arc::new(PngPages), 1, chapter.chapter.url.clone(), cache)))
+            });
+            let deps = ReaderDeps {
+                db: Arc::clone(&f.db),
+                manga_id: f.manga_id,
+                chapter_id: f.chapter_ids[0],
+                prefs: ReaderPrefs::new(PrefStore::in_memory()),
+                store: Rc::new(NoStore),
+                build,
+                is_downloaded: Rc::new(|_| false),
+                downloaded_only: false,
+                incognito: false,
+                prefs_store: PrefStore::in_memory(),
+            };
+            let (stack, window) = crate::testing::nav();
+            // Attach needs a main window that shows
+            window.present();
+            let below = gtk::Label::new(Some("details"));
+            stack.add_child(&below);
+            let (toaster, _feed) = kuro_platform::toast::toast_channel();
+            let screen = open(deps, &crate::reader::launch::open_gate(), toaster, crate::ui::pop);
+            crate::ui::push(&screen.root);
+            let button = |tip: &str| {
+                let mut found = None;
+                let mut todo = vec![screen.root.clone().upcast::<gtk::Widget>()];
+                while let Some(w) = todo.pop() {
+                    if w.tooltip_text().as_deref() == Some(tip) {
+                        found = w.downcast::<gtk::Button>().ok();
+                        break;
+                    }
+                    let mut child = w.first_child();
+                    while let Some(c) = child {
+                        child = c.next_sibling();
+                        todo.push(c);
+                    }
+                }
+                found
+            };
+            assert!(pump_until(|| button("Detach into its own window").is_some()), "the top bar shows Detach once the chapter is in");
+
+            button("Detach into its own window").unwrap().emit_clicked();
+            let detached = screen.root.root().and_downcast::<gtk::Window>().expect("the reader is in a window");
+            assert!(!detached.is::<gtk::ApplicationWindow>(), "its own window, not the main one");
+            assert_eq!(stack.visible_child().as_ref(), Some(below.upcast_ref::<gtk::Widget>()));
+            assert!(button("Attach to the main window").is_some(), "the same button now attaches");
+
+            button("Attach to the main window").unwrap().emit_clicked();
+            assert_eq!(screen.root.parent().as_ref(), Some(stack.upcast_ref::<gtk::Widget>()), "back on the stack");
+            assert_eq!(stack.visible_child().as_ref(), Some(screen.root.upcast_ref::<gtk::Widget>()));
+
+            button("Detach into its own window").unwrap().emit_clicked();
+            let screen_state = screen.chrome.screen.upgrade().expect("the screen is alive");
+            (screen_state.on_close)();
+            pump_until(|| screen.root.root().is_none());
+            assert!(screen.root.root().is_none(), "closing a detached reader closes its window");
+            assert_eq!(stack.visible_child().as_ref(), Some(below.upcast_ref::<gtk::Widget>()), "the stack keeps its page");
         });
     }
 }

@@ -74,6 +74,21 @@ Do not start these before the plan waves, the P0 audit and the first push of a g
 - **oomd exemption** is only set on the running Claude app cgroups; make it permanent with a user systemd drop-in if the user agrees.
 - **Docs:** refresh the README progress table with an audited number after the P0 audit.
 
-## Standing instruction (user, 2026-10-10): the P0 audit and everything after it are ON HOLD
+## Standing instruction update (user, 2026-10-11): the P0 audit is started
 
-Run the remaining build waves and push green commits as usual. Do NOT run the P0 audit, the cleanup wave, or the "small improvements" list, and do not suggest starting them as a next step, until the user changes their mind and says so. This hold stays in force across restarts until the user explicitly lifts it. When the last build wave and its verified push are done, report the state and wait.
+The user lifted the hold on the P0 audit (read-only, no cargo, reports in docs/audit/). The cleanup wave and the "small improvements" list stay on hold until the user says so.
+
+
+## Top bar rule (user, 2026-10-11)
+Never hide or remove the top bar of any screen. The manga reader's top bar always stays visible; only its bottom bar may follow the menu toggle (guard test in src/reader/topbar_guard.rs).
+
+## Design principles (user, 2026-10-11)
+
+1. Fewer, better defaults: a setting is either kept as a visible setting or cut completely (code, row, tests, stored key); no hiding of bloat.
+2. One way to do each thing, and as much modularity as possible (shared helpers and constants; OS-specific code only in crates/kuro-platform so a Windows port stays easy).
+3. Keep data compatibility: Aniyomi backups and source ids must keep loading even when a setting is cut.
+4. Power-user features are decided one by one (keep or delete) with the user; never parked in a hidden corner. The only exception already agreed: the player's own mpv config file, with no UI.
+
+
+## Target behavior
+The app flow the user decided on 2026-10-11 is in docs/design/app-flow.md. Build and keep only what serves it.

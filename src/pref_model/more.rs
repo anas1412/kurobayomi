@@ -9,6 +9,8 @@ use kuro_i18n::{MsgKey, tr, tr_plural};
 use kuro_prefs::prefs::Prefs;
 use kuro_prefs::ui::{NavStyle, Tab};
 
+use crate::theme::icons::Icon;
+
 use super::bind::accept;
 use super::model::ItemCommon;
 use super::widgets::row::{self, PrefRow};
@@ -76,10 +78,6 @@ impl MorePage {
         row::set_subtitle(&self.queue.subtitle, subtitle);
     }
 
-    /// Shows the queue state (stopped, paused, downloading) in the row's subtitle.
-    pub fn set_queue_state(&self, state: QueueState) {
-        self.set_queue_subtitle(queue_subtitle(state).as_deref());
-    }
 }
 
 /// Builds the page. `queue_subtitle` is the initial queue state text (from the queue combiner).
@@ -162,7 +160,7 @@ fn open_help() {
 
 fn logo() -> GBox {
     let logo = GBox::new(Orientation::Vertical, 0);
-    let icon = Image::from_icon_name("applications-multimedia-symbolic");
+    let icon = Image::from_icon_name(Icon::Logo.name());
     icon.set_pixel_size(64);
     icon.set_focusable(false);
     icon.set_accessible_role(gtk::AccessibleRole::Presentation);
@@ -184,6 +182,15 @@ fn divider() -> Separator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // T-47ba-049: the page shows the bundled app logo, not a stock icon.
+    #[test]
+    fn the_logo_is_the_bundled_app_icon() {
+        crate::testing::with_display(|| {
+            let image = logo().first_child().and_downcast::<Image>().expect("the logo is an image");
+            assert_eq!(image.icon_name().as_deref(), Some(Icon::Logo.name()));
+        });
+    }
 
     #[test]
     fn the_moved_tab_is_never_a_visible_destination() {
@@ -218,7 +225,8 @@ mod tests {
     }
 
     #[test]
-    fn help_points_at_the_troubleshooting_page() {
-        assert_eq!(HELP_URL, "https://aniyomi.org/docs/guides/troubleshooting/");
+    fn help_points_at_this_apps_project_page_not_aniyomis_site() {
+        assert!(HELP_URL.starts_with("https://github.com/anas1412/kurobayomi"));
+        assert!(!HELP_URL.contains("aniyomi.org"));
     }
 }

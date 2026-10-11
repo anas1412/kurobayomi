@@ -104,6 +104,33 @@ mod manga_repo {
         assert!(matches!(MangaRepo::new(db).by_id(404), Err(DataError::NotFound)));
     }
 
+    /// T-43b-011, E-20b: the reading mode is bits 0..2 and the orientation bits 3..5 of `mangas.viewer`. Writing one
+    /// group keeps the other, and the column value round-trips through the database unchanged.
+    #[test]
+    fn viewer_bits_write_keeps_the_other_group_and_the_column_round_trips() {
+        const MODE: i64 = 0x7;
+        const ORIENTATION: i64 = 0x38;
+        let (_d, db) = manga_db();
+        let repo = MangaRepo::new(db);
+        let id = repo.insert(&Manga { viewer_flags: 0b101_010, ..new_manga("v", "V", true) }).unwrap();
+        assert_eq!(repo.by_id(id).unwrap().viewer_flags, 0b101_010, "stored as given");
+
+        assert!(repo.set_viewer_bits(id, 0b011, MODE).unwrap());
+        assert_eq!(repo.by_id(id).unwrap().viewer_flags, 0b101_011, "mode replaced, orientation bits kept");
+
+        // A value wider than the mask cannot leak into the other group.
+        assert!(repo.set_viewer_bits(id, 0b111_100, MODE).unwrap());
+        assert_eq!(repo.by_id(id).unwrap().viewer_flags, 0b101_100);
+
+        assert!(repo.set_viewer_bits(id, 0b010 << 3, ORIENTATION).unwrap());
+        assert_eq!(repo.by_id(id).unwrap().viewer_flags, 0b010_100, "orientation replaced, mode kept");
+
+        // An unrelated update leaves the column alone.
+        repo.update(&MangaUpdate { title: Some("W".into()), ..MangaUpdate::new(id) }).unwrap();
+        assert_eq!(repo.by_id(id).unwrap().viewer_flags, 0b010_100);
+        assert!(!repo.set_viewer_bits(id + 1, 1, MODE).unwrap(), "no such manga");
+    }
+
     #[test]
     fn by_url_and_source_returns_the_lowest_id_on_duplicates() {
         let (_d, db) = manga_db();

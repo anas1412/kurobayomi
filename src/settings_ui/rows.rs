@@ -132,20 +132,6 @@ pub fn edit_text(
     }
 }
 
-/// A multi-line text field (no validation; blank allowed only when `can_be_blank`).
-pub fn multi_line_edit(title: &str, pref: &Pref<String>, can_be_blank: bool, enabled: bool) -> PreferenceItem {
-    PreferenceItem::MultiLineEdit {
-        common: common(title, Some("%s"), enabled),
-        pref: pref.clone(),
-        can_be_blank,
-        veto: text_veto(pref, can_be_blank, accept_any),
-    }
-}
-
-fn accept_any(_: &str) -> Result<(), String> {
-    Ok(())
-}
-
 /// The write of a text row: a blank text that is not allowed is not applied (`Ok(false)`), an invalid one is an error.
 pub(crate) fn text_veto(pref: &Pref<String>, can_be_blank: bool, validate: fn(&str) -> Result<(), String>) -> Veto<String> {
     let pref = pref.clone();
@@ -387,22 +373,6 @@ mod tests {
         assert_eq!(futures_block(veto("abcd".to_owned())), Err("too long".to_owned()));
         assert_eq!(futures_block(veto("ab".to_owned())), Ok(true));
         assert_eq!(store.get(), "ab");
-    }
-
-    #[test]
-    fn a_blank_text_is_allowed_only_when_the_row_says_so() {
-        let prefs = Prefs::in_memory();
-        let store = Pref::new(prefs.store().clone(), "test_blank_text", "x".to_owned());
-        let PreferenceItem::MultiLineEdit { veto, .. } = multi_line_edit("Notes", &store, true, true) else {
-            panic!("expected a multi-line row");
-        };
-        assert_eq!(futures_block(veto(String::new())), Ok(true));
-        assert_eq!(store.get(), "");
-        let PreferenceItem::MultiLineEdit { veto, .. } = multi_line_edit("Notes", &store, false, true) else {
-            panic!("expected a multi-line row");
-        };
-        assert_eq!(futures_block(veto(" ".to_owned())), Ok(false));
-        assert_eq!(store.get(), "");
     }
 
     /// Runs a veto future to completion without a GTK main loop (the futures resolve immediately).

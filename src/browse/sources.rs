@@ -273,15 +273,6 @@ pub fn list_failure_toast() -> ToastSpec {
     }
 }
 
-/// The two header actions of the Sources tab, in order (B§2.6, T-40b-014). Both sit in the header, not an overflow.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SourcesTabAction {
-    GlobalSearch,
-    Filter,
-}
-
-pub const HEADER_ACTIONS: [SourcesTabAction; 2] = [SourcesTabAction::GlobalSearch, SourcesTabAction::Filter];
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,11 +469,6 @@ mod tests {
         assert_eq!(toast.message, kuro_i18n::tr(kuro_i18n::MsgKey::internal_error));
         assert_eq!(toast.duration, ToastDuration::Seconds(3));
         assert_eq!(toast.action, None);
-    }
-
-    #[test]
-    fn the_header_carries_global_search_then_filter() {
-        assert_eq!(HEADER_ACTIONS, [SourcesTabAction::GlobalSearch, SourcesTabAction::Filter]);
     }
 
     #[test]

@@ -18,8 +18,6 @@ action_continue = Pokračovat
 
 manga = Manga
 
-pref_library_summary = Kategorie, globální aktualizace, přejetí po kapitole
-
 pref_behavior = Chování kapitoly
 
 action_add_repo_message = Přidejte další repozitáře do { $arg1 }. Měla by to být URL adresa končící na „index.min.json“.
@@ -80,21 +78,9 @@ pref_player_settings_summary = Interní přehrávač, gesta, dekodéry, titulky
 
 pref_player_internal = Vnitřní přehrávač
 
-pref_player_internal_summary = Progres, ovládání, orientace
-
 pref_progress_mark_as_seen = Od jakého okamžiku označovat epizodu jako viděnou
 
 pref_preserve_watching_position = Zachovat pozici přehrávání u zhlédnutých epizod
-
-pref_category_player_orientation = Orientace
-
-rotation_video = Video
-
-rotation_reverse_landscape = Obrácená rotace na šířku
-
-rotation_sensor_portrait = Snímek na výšku
-
-rotation_sensor_landscape = Snímek na šířku
 
 pref_category_controls = Ovládání
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = Zobrazit ukazatel aktuální kapitoly
 pref_controls_show_chapter_indicator_info = Zobrazí se pouze v případě, že video obsahuje kapitoly
 
 pref_controls_display_volume_percentage = Zobrazit hlasitost jako procento
-
-pref_remember_brightness = Zapamatovat si naposledy použitou úroveň jasu a automaticky na ni přepnout
 
 pref_remember_volume = Zapamatovat si naposledy použitou hlasitost a automaticky na ni přepnout
 
@@ -179,12 +163,6 @@ pref_external_player_preference = Preference externího přehrávače
 pref_player_gestures = Gesta
 
 pref_player_gestures_summary = Vyhledávání, dvojité klepnutí, ovládání médií
-
-pref_category_player_sliders = Posuvníky
-
-enable_volume_brightness_gestures = Přepnutí gest pro hlasitost a jas
-
-pref_controls_swap_vol_brightness = Vyměnit posuvník hlasitosti a jasu
 
 pref_category_player_seeking = Vyhledávání
 
@@ -1252,10 +1230,6 @@ onboarding_permission_notifications = Povolení oznámení
 
 onboarding_permission_notifications_description = Buďte upozorněni na aktualizaci knihovny atd.
 
-onboarding_permission_ignore_battery_opts = Využití baterie na pozadí
-
-onboarding_permission_ignore_battery_opts_description = Vyhněte se přerušením dlouhých aktualizací knihovny, stahování a obnovení záloh.
-
 onboarding_permission_crashlytics = Posílat chybová hlášení
 
 onboarding_permission_crashlytics_description = Pošle anonymizovaná chybová hlášení vývojářům.
@@ -1298,10 +1272,6 @@ pref_browse_summary = Zdroje, rozšíření, globální vyhledávání
 
 pref_backup_summary = Ruční a automatické zálohování, místo v úložišti
 
-pref_security_summary = Zámek aplikace, zabezpečená obrazovka
-
-pref_advanced_summary = Výpis protokolů selhání, optimalizace baterie
-
 pref_category_theme = Vzhled
 
 pref_app_theme = Motiv aplikace
@@ -1311,8 +1281,6 @@ theme_system = Systém
 theme_light = Světlý
 
 theme_dark = Tmavý
-
-theme_monet = Dynamické
 
 theme_greenapple = Zelené Jablko
 
@@ -1363,10 +1331,6 @@ lock_always = Vždy
 lock_never = Nikdy
 
 hide_notification_content = Skrýt obsah oznámení
-
-secure_screen = Chráněná obrazovka
-
-secure_screen_summary = Secure screen skryje obsah aplikace při přepínání aplikací a blokuje tvorbu snímků obrazovky
 
 firebase_summary = Odesílání záznamů o pádech a analytických dat nám umožní identifikovat a opravit problémy, zlepšit výkon a přizpůsobit budoucí aktualizace vašim potřebám
 
@@ -1442,10 +1406,6 @@ include = Zahrnout: { $arg1 }
 
 exclude = Vynechat: { $arg1 }
 
-pref_chapter_swipe_end = Přejetí prstem doprava
-
-pref_chapter_swipe_start = Přejetí prstem doleva
-
 pref_mark_duplicate_read_chapter_read = Označit duplicitní přečtené kapitoly jako přečtené
 
 multi_lang = Více
@@ -1503,14 +1463,6 @@ ext_nsfw_warning = Zdroje z tohoto rozšíření mohou obsahovat NSFW (18+) obsa
 ext_permission_install_apps_warning = K instalaci rozšíření je nutné povolení. Klepněte zde pro udělení povolení.
 
 ext_install_service_notif = Instaluji rozšíření…
-
-ext_installer_pref = Instalátor
-
-ext_installer_legacy = Původní
-
-ext_installer_shizuku_stopped = Shizuku neběží
-
-ext_installer_shizuku_unavailable_dialog = Nainstalujte a spusťte Shizuku, abyste jej mohli používat jako instalátor rozšíření.
 
 ext_revoke_trust = Zrušit důvěryhodná neznámá rozšíření
 
@@ -1730,22 +1682,6 @@ double_tap_anim_speed_normal = Normální
 
 double_tap_anim_speed_fast = Rychle
 
-pref_rotation_type = Výchozí otáčení
-
-rotation_type = Otáčení
-
-rotation_free = Volné
-
-rotation_portrait = Na výšku
-
-rotation_reverse_portrait = Obrácené na výšku
-
-rotation_landscape = Na šířku
-
-rotation_force_portrait = Zamknuto na výšku
-
-rotation_force_landscape = Zamknuto na šířku
-
 color_filter_r_value = Červená
 
 color_filter_g_value = Zelená
@@ -1962,8 +1898,6 @@ pref_refresh_library_covers = Obnovit přebaly v knihovně
 
 pref_reset_viewer_flags = Resetování nastavení čtečky pro jednotlivé série
 
-pref_reset_viewer_flags_summary = Resetuje režim čtení a orientaci všech sérií
-
 pref_reset_viewer_flags_success = Všechna nastavení čtečky byla resetována
 
 pref_reset_viewer_flags_error = Nastavení čtečky se nepodařilo resetovat
@@ -1971,20 +1905,6 @@ pref_reset_viewer_flags_error = Nastavení čtečky se nepodařilo resetovat
 pref_dump_crash_logs = Sdílet protokoly o selhání
 
 pref_dump_crash_logs_summary = Uloží chybové protokoly do souboru pro sdílení s vývojáři
-
-label_background_activity = Činnost na pozadí
-
-pref_disable_battery_optimization = Vypnout optimalizaci baterie
-
-pref_disable_battery_optimization_summary = Pomáhá s aktualizacemi knihovny a záloh na pozadí
-
-battery_optimization_disabled = Optimalizace je již vypnuta
-
-battery_optimization_setting_activity_not_found = Nelze otevřít nastavení zařízení
-
-about_dont_kill_my_app = Někteří výrobci používají další omezení aplikací, která vypíná služby na pozadí. Na této webové stránce najdete další informace o tom, jak to opravit.
-
-pref_tablet_ui_mode = Uživatelské rozhraní tabletu
 
 pref_verbose_logging = Podrobné protokolování
 

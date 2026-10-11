@@ -1,5 +1,5 @@
 //! Header shortcuts of the entry screens (T-38a-046). The chapter and episode list keys are `selection::key_command`. In the
-//! header: F opens the filter sheet, R or Ctrl+R refreshes (Ctrl+R replaces the dropped pull gesture, T-38a-050), Ctrl+M
+//! header: F opens the filter sheet, R or Ctrl+R refreshes (T-38a-050), Ctrl+M
 //! migrates and W opens the WebView when it is available. Upstream: `MangaScreen.kt` key handling. Pure: the window asks
 //! `header_key` and shows `HELP`.
 

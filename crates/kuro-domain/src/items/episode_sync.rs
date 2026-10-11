@@ -16,7 +16,9 @@ use crate::entries::fetch_interval::{ItemDates, Stored, to_update};
 use crate::error::NoEpisodes;
 use crate::items::recognition::parse_episode_number;
 use crate::items::should_update::should_update_db_episode;
-use crate::items::source_sync::{MangaSyncLocks, sanitize_chapter_name};
+use crate::items::source_sync::MangaSyncLocks;
+use crate::items::model::widen_source_number;
+use kuro_data::sanitize::sanitize_item_name;
 use crate::items::sync_plan::{PlanInput, SyncRow, plan_sync};
 
 /// The download folder rename of a changed episode (`downloadManager.renameEpisode`). Same contract as the chapter port:
@@ -63,10 +65,10 @@ pub fn mark_duplicate_as_seen_from_pref(rule: &std::collections::BTreeSet<String
 fn episode_from_source(anime: &Anime, source: &SEpisode, position: usize) -> Episode {
     Episode {
         anime_id: anime.id,
-        name: sanitize_chapter_name(&source.name, &anime.title),
+        name: sanitize_item_name(&source.name, &anime.title),
         url: source.url.clone(),
         date_upload: source.date_upload,
-        episode_number: f64::from(source.episode_number),
+        episode_number: widen_source_number(source.episode_number),
         fillermark: source.fillermark,
         scanlator: blank_to_none(source.scanlator.as_deref()),
         summary: blank_to_none(source.summary.as_deref()),
@@ -418,5 +420,100 @@ mod tests {
         let anime = Anime { title: "A".into(), ..Anime::create() };
         let ep = episode_from_source(&anime, &SEpisode { scanlator: Some("  Team  ".into()), ..src("/x", "Ep") }, 0);
         assert_eq!(ep.scanlator.as_deref(), Some("  Team  "), "episodes do not trim (unlike chapters)");
+    }
+
+    /// The delete, insert and the rest run in one transaction: a failing insert rolls back the delete.
+    #[tokio::test]
+    async fn a_failing_insert_rolls_back_the_delete() {
+        let (_dir, db, sync, anime) = fixture();
+        let gone = Episode { anime_id: anime.id, url: "/gone".into(), name: "Ep 1".into(), episode_number: 1.0, ..Episode::create() };
+        db.write(|tx| Ok(insert_episode(tx, &episode_row(&gone))?)).expect("insert");
+        db.write(|tx| {
+            tx.execute_batch("CREATE TRIGGER boom BEFORE INSERT ON episodes WHEN NEW.url = '/boom' BEGIN SELECT RAISE(ABORT, 'boom'); END;")?;
+            Ok(())
+        })
+        .expect("trigger");
+        let urls = |db: &Db| -> Vec<String> { db.read(|c| Ok(episodes_by_anime_id(c, anime.id)?)).expect("read").into_iter().map(|r| r.url).collect() };
+        let err = sync.run(vec![src("/boom", "Ep 2")], &anime, opts(false)).await.expect_err("the insert fails");
+        assert!(matches!(err, EpisodeSyncError::Db(_)));
+        assert_eq!(urls(&db), ["/gone"], "the removed row is still stored");
+        assert_eq!(read_anime(&db, anime.id).last_update, anime.last_update, "no last_update write survived either");
+        // Control: without the failing insert the same plan does delete the row.
+        db.write(|tx| {
+            tx.execute_batch("DROP TRIGGER boom;")?;
+            Ok(())
+        })
+        .expect("drop");
+        sync.run(vec![src("/boom", "Ep 2")], &anime, opts(false)).await.expect("sync");
+        assert_eq!(urls(&db), ["/boom"]);
+    }
+
+    /// RC-08: `run` takes the per-entry lock, so a held lock stops it before any write.
+    #[tokio::test]
+    async fn run_waits_for_the_per_entry_lock() {
+        let (_dir, db, _sync, anime) = fixture();
+        let locks = Arc::new(MangaSyncLocks::default());
+        let sync = SyncEpisodes::new(db.clone(), locks.clone(), Arc::new(NoEpisodeRenames));
+        let held = locks.lock(anime.id).await;
+        let blocked = tokio::time::timeout(std::time::Duration::from_millis(50), sync.run(vec![src("/a", "Ep 1")], &anime, opts(false))).await;
+        assert!(blocked.is_err(), "the sync waits while the lock is held");
+        assert!(db.read(|c| Ok(episodes_by_anime_id(c, anime.id)?)).expect("read").is_empty(), "nothing was written");
+        drop(held);
+        assert_eq!(sync.run(vec![src("/a", "Ep 1")], &anime, opts(false)).await.expect("sync").len(), 1);
+    }
+
+    const SENTINEL_NEXT: i64 = 7_777_777;
+    const WINDOW: (i64, i64) = (1_000_000, 2_000_000);
+
+    fn set_interval(db: &Arc<Db>, id: i64, interval: i64, next_update: i64) {
+        let patch = DbAnimeUpdate { next_update: Some(next_update), fetch_interval: Some(interval), ..empty_anime_update(id) };
+        db.write(|tx| Ok(kuro_db::statements_anime::update_anime(tx, &patch)?)).expect("patch");
+    }
+
+    fn read_anime(db: &Arc<Db>, id: i64) -> Anime {
+        kuro_data::anime::AnimeRepo::new(db.clone()).by_id(id).expect("read")
+    }
+
+    async fn second_sync_row(interval: i64, next_update: i64, manual: bool) -> (Anime, Anime) {
+        let (_dir, db, sync, anime) = fixture();
+        let raw = vec![src("/a", "Ep 1"), src("/b", "Ep 2")];
+        sync.run(raw.clone(), &anime, EpisodeSyncOptions { window: WINDOW, ..opts(false) }).await.expect("first");
+        set_interval(&db, anime.id, interval, next_update);
+        let before = read_anime(&db, anime.id);
+        let again = EpisodeSyncOptions { window: WINDOW, manual, ..opts(false) };
+        assert!(sync.run(raw, &before, again).await.expect("second").is_empty());
+        (before, read_anime(&db, anime.id))
+    }
+
+    /// S-11 for episodes.
+    #[tokio::test]
+    async fn s11_no_change_and_no_trigger_recomputes_nothing() {
+        let (before, after) = second_sync_row(7, SENTINEL_NEXT, false).await;
+        assert_eq!(after.next_update, SENTINEL_NEXT);
+        assert_eq!(after.fetch_interval, 7);
+        assert_eq!(after.last_update, before.last_update);
+    }
+
+    /// S-12 for episodes.
+    #[tokio::test]
+    async fn s12_no_change_recomputes_on_manual_interval_zero_or_overdue() {
+        for (interval, next_update, manual, why) in [(7, SENTINEL_NEXT, true, "manual"), (0, SENTINEL_NEXT, false, "interval 0"), (7, 5, false, "next update before the window start")] {
+            let (before, after) = second_sync_row(interval, next_update, manual).await;
+            assert!(after.next_update != next_update || after.fetch_interval != i32::try_from(interval).unwrap(), "{why}: recomputed");
+            assert_eq!(after.last_update, before.last_update, "{why}: last_update is not touched");
+        }
+    }
+
+    /// S-13 for episodes.
+    #[tokio::test]
+    async fn s13_changes_recompute_and_set_last_update_to_now() {
+        let (_dir, db, sync, anime) = fixture();
+        set_interval(&db, anime.id, 7, SENTINEL_NEXT);
+        let before = read_anime(&db, anime.id);
+        let o = EpisodeSyncOptions { window: WINDOW, ..opts(false) };
+        assert_eq!(sync.run(vec![src("/a", "Ep 1")], &before, o).await.expect("sync").len(), 1);
+        let after = read_anime(&db, anime.id);
+        assert_eq!(after.last_update, 1_000_000);
+        assert_ne!(after.next_update, SENTINEL_NEXT, "recomputed");
     }
 }

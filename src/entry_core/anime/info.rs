@@ -58,22 +58,6 @@ pub fn header_model(anime: &Anime, source: &SourceInfo) -> HeaderModel {
     )
 }
 
-/// `getNameForAnimeInfo`. `enabled` is the enabled language list. The `all` and `other` pseudo-languages are ignored.
-/// With exactly one enabled language, a source in that language shows only its name. Every other case shows
-/// `"{name} ({LANG})"` with the language code upper-cased.
-pub fn source_display_name(name: &str, lang: &str, enabled: &[&str]) -> String {
-    let enabled: Vec<&str> = enabled
-        .iter()
-        .copied()
-        .filter(|l| *l != "all" && *l != "other")
-        .collect();
-    if enabled.len() == 1 && enabled.contains(&lang) {
-        name.to_owned()
-    } else {
-        format!("{name} ({})", lang.to_uppercase())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,20 +91,6 @@ mod tests {
         let model = header_model(&known, &SourceInfo::default());
         assert_eq!((model.title.as_str(), model.author.as_str(), model.artist), ("Frieren", "A", None));
         assert!(!model.stub);
-    }
-
-    #[test]
-    fn source_name_table_t_sn1() {
-        assert_eq!(source_display_name("Src", "en", &["en"]), "Src");
-        assert_eq!(source_display_name("Src", "ja", &["en"]), "Src (JA)");
-        assert_eq!(source_display_name("Src", "en", &["en", "ja"]), "Src (EN)");
-        assert_eq!(source_display_name("Src", "en", &["all", "other"]), "Src (EN)");
-    }
-
-    #[test]
-    fn single_enabled_language_ignores_the_pseudo_languages() {
-        assert_eq!(source_display_name("Src", "en", &["all", "en", "other"]), "Src");
-        assert_eq!(source_display_name("Src", "de", &["all", "en"]), "Src (DE)");
     }
 
     #[test]

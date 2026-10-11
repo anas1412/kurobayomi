@@ -69,6 +69,7 @@ T-11a-029 is PARTIAL: the table, `lookup()`, `report()` and their tests exist, b
 | T-35a-027 | Samsung S Pen remote actions | the five actions as keyboard keys (T-35a-028) | S Pen remote gestures |
 | T-35a-029 | searchable.xml, the Android global search hint and search provider | the in-app global search entry; the GNOME search provider is an optional extra of T-53a-066, not part of v1 | system-wide search for library titles on Android |
 | T-35a-030 | FileProvider paths (provider_paths.xml) | plain file paths; no content URIs are created | none |
+| T-35a-031 | network_security_config.xml (the Android cleartext and certificate-authority policy) | the reqwest client: rustls with the system certificate verifier, so the system and user-installed CAs are trusted, and http:// URLs are not refused | none |
 | T-35a-056 | APK install and in-place AppImage self-replacement | the update notice offers Open folder and the user replaces the file | the app cannot replace itself |
 | T-35a-059 | foreground service and the data sync service type | none; a desktop process is not suspended | none |
 | T-35a-060 | the OsTooOld result of the update check | none; the check has no operating system version gate | none |
@@ -88,3 +89,26 @@ T-11a-029 is PARTIAL: the table, `lookup()`, `report()` and their tests exist, b
 | T-53a-065 | S Pen remote actions | keys Right, Left, Page Up, Page Down, N and P in the reader and player; Escape and Alt+Left go back | S Pen remote gestures |
 | T-53a-067 | the empty module manifests and the macrobenchmark module | one Cargo crate per module, none needs a manifest | none |
 | T-53a-068 | the home-screen widget receivers and provider files | the Updates tab (area 42) and desktop notices (area 35); the optional Plasma applets read the same data | the Android home-screen widget |
+
+## Phone-only features removed (desktop)
+
+A desktop window has no touch screen, no sensors, no task switcher and no battery-saver service, so these phone
+features are removed, not hidden. The preference keys are listed in `DROPPED_KEYS` in `crates/kuro-prefs/src/registry.rs`
+(the registry has no row for them), the text names in `DROPPED_NAMES` in `crates/kuro-i18n/src/import.rs` (the importer
+leaves them out of every catalog). A key that an old `config.toml` or an Aniyomi backup still carries is ignored: the
+config loader does not read a field it does not know, and the restore skips the key, counts it and reports no error.
+Kept on purpose: page turning by swipe or drag in the reader viewers, the horizontal seek gesture and the double taps of
+the player, the keyboard shortcuts, the volume slider and mouse-wheel volume, the remembered volume, the update and backup
+scheduling constraints (unmetered network, power, battery level), notifications and the torrent server.
+
+| Task | Dropped | Replaced by | User impact |
+|---|---|---|---|
+| T-desk-001 | screen orientation lock of the reader and the player: `pref_default_orientation_type_key`, `pref_default_player_orientation_type_key`, the per-series orientation bits of the reader flags, and the migration steps that renumbered the old values (rows 12, 13 and 42 of the migration table are DROP) | none; a window is resized by the window manager | none; the stored values are ignored |
+| T-desk-002 | battery optimisation rows and the "don't kill my app" note (no preference existed; the texts `pref_disable_battery_optimization`, `battery_optimization_disabled` and their neighbours are gone) | none | none; the backup battery threshold and the update constraint `battery_not_low` stay |
+| T-desk-003 | secure screen: `secure_screen_v2` and its older spelling `secure_screen`, with the conversion between them | none; a window cannot be hidden from capture or from the window list | none; screenshots of the app are not blocked, as before |
+| T-desk-004 | Shizuku and the extension installer choice: `extension_installer` (already unregistered), the installer texts | the single kuroext install path | none |
+| T-desk-005 | swipe actions of the chapter and episode rows: `pref_chapter_swipe_start_action`, `pref_chapter_swipe_end_action`, `pref_episode_swipe_start_action`, `pref_episode_swipe_end_action`, the enums `ChapterSwipeAction` and `EpisodeSwipeAction`, the swipe threshold and the swipe labels (quirk Q22, the crossed keys, goes with them) | the row context menu | row actions are one right click away |
+| T-desk-006 | pull to refresh and haptics (no preference existed) | none | none |
+| T-desk-007 | brightness and volume gestures of the player: `pref_gesture_volume_brightness`, `pref_swap_volume_and_brightness`, `pref_remember_brightness`, `player_brightness_value` (brightness had no other control) | keyboard shortcuts, the volume slider and mouse-wheel volume | no touch drags for volume or brightness; `pref_remember_volume` and `player_volume_value` stay |
+| T-desk-008 | tablet layout mode: `tablet_ui_mode` | none | none; a stored value is ignored |
+| T-desk-009 | the Monet app theme (dynamic colours of the phone wallpaper): the `MONET` value of `pref_app_theme` | the GTK theme default and the other palettes | a stored `MONET` reads as the default theme |

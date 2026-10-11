@@ -18,8 +18,14 @@ pub const SYSTEM_NAME: &str = "SYSTEM";
 /// The stored name for the bundled Tokyo Night scheme (T-49a-063).
 pub const TOKYO_NIGHT_NAME: &str = "TOKYO_NIGHT";
 
-/// The deprecated Android names. They are rewritten to the Linux default once, on read.
-const DEPRECATED: [&str; 3] = ["DARK_BLUE", "HOT_PINK", "BLUE"];
+/// The Android names that are no longer offered: the three deprecated themes and the dynamic `MONET` (it needs
+/// Android's dynamic colours, which a desktop does not have). They are rewritten to the Linux default once, on read.
+///
+/// Decision (T-47ba-042, T-49ba-002, deliberate deviation from their text): the acceptance says these read as
+/// `DEFAULT` and are written back. On Linux the default is the GTK theme (`SYSTEM`, T-49b-006), so they are
+/// rewritten to `SYSTEM`, not `DEFAULT`. The tests of this module (`read_settings`) pin the rule; the onboarding
+/// list (`app_theme::normalise`) maps them to `DEFAULT` because its list has no GTK theme entry.
+const DEPRECATED: [&str; 4] = ["MONET", "DARK_BLUE", "HOT_PINK", "BLUE"];
 
 /// What a raw `pref_app_theme` string means. `None` is the unknown-value case.
 fn decode_scheme(raw: &str) -> Option<SchemeSel> {
@@ -32,7 +38,6 @@ fn decode_scheme(raw: &str) -> Option<SchemeSel> {
     if DEPRECATED.contains(&raw) {
         return Some(SchemeSel::System);
     }
-    // A stored Monet is kept; it resolves to System while no seed is available (E-49-06).
     AppTheme::from_name(raw).map(SchemeSel::Scheme)
 }
 
@@ -179,11 +184,10 @@ mod tests {
     }
 
     #[test]
-    fn stored_monet_is_kept_and_read_as_the_monet_choice() {
-        assert_eq!(
-            read_settings(&store_with(Some("MONET"))).scheme,
-            SchemeSel::Scheme(AppTheme::MONET)
-        );
+    fn a_stored_monet_falls_back_to_the_gtk_theme_and_is_written_back() {
+        let store = store_with(Some("MONET"));
+        assert_eq!(read_settings(&store).scheme, SchemeSel::System);
+        assert_eq!(store.get_raw(KEY_APP_THEME), Some(PrefValue::Str("SYSTEM".into())));
     }
 
     #[test]
@@ -194,5 +198,32 @@ mod tests {
         let s = read_settings(&store);
         assert_eq!(s.mode, ThemeMode::DARK);
         assert!(s.amoled);
+    }
+
+    // T-49b-006: the Linux default is the GTK theme, stored as SYSTEM; both spec files say the same, so the first
+    // value written and the value the spec shows agree.
+    #[test]
+    fn the_spec_defaults_of_the_app_theme_match_the_first_value_written() {
+        use crate::spec::Item;
+        assert_eq!(SYSTEM_NAME, "SYSTEM");
+        crate::ui::with_spec(|spec| {
+            let mut seen = 0;
+            for id in ["settings_appearance", "onboarding"] {
+                let screen = spec.screen(id).unwrap_or_else(|| panic!("{id} is a spec screen"));
+                for item in screen.groups.iter().flat_map(|g| &g.items) {
+                    let (title, options, default) = match item {
+                        Item::Chips { title, options, default } | Item::List { title, options, default, .. } => (title, options, default),
+                        _ => continue,
+                    };
+                    if title != "App theme" {
+                        continue;
+                    }
+                    seen += 1;
+                    assert_eq!(default.as_str(), Some("System"), "{id}");
+                    assert_eq!(options.first().map(String::as_str), Some("System"), "{id}: the GTK theme is the first choice");
+                }
+            }
+            assert_eq!(seen, 2, "one App theme item on each screen");
+        });
     }
 }

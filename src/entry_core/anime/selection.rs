@@ -46,6 +46,7 @@ impl Selection {
         list.iter().filter(|id| self.ids.contains(id)).count()
     }
 
+    #[cfg(test)]
     /// The two anchors as view indexes, `-1` when unset.
     pub fn anchors(&self) -> [i64; 2] {
         self.anchors

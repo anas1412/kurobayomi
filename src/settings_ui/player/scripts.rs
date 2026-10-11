@@ -269,7 +269,8 @@ fn confirm_delete(screen: &str, dialog: &str, sample: &str, name: &str, on_ok: i
 struct ButtonsView {
     service: CustomButtonService,
     list: gtk::ListBox,
-    empty: Label,
+    /// The empty state with its Add button, shown instead of the list when there are no buttons.
+    empty: GBox,
     /// Shown instead of the list when the database cannot be read; its Retry button renders again.
     failed: GBox,
 }
@@ -288,6 +289,7 @@ impl ButtonsView {
         };
         self.failed.set_visible(failed);
         self.empty.set_visible(buttons.is_empty() && !failed);
+        self.list.set_visible(!buttons.is_empty());
         let last = buttons.len().saturating_sub(1);
         for (at, button) in buttons.iter().enumerate() {
             self.list.append(&self.row(button, at, last, &buttons));
@@ -358,7 +360,7 @@ impl ButtonsView {
             card.append(&Label::builder().label(lines).xalign(0.0).wrap(true).lines(3).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["monospace", "dim-label"]).build());
         }
         let row = gtk::ListBoxRow::builder().child(&card).build();
-        row.connect_activate(move |_| open_edit());
+        crate::widgets::row_activate::on_activate(&row, move |_| open_edit());
         self.drag(&row, &handle, id, at);
         let (view, keys) = (Rc::clone(self), gtk::EventControllerKey::new());
         keys.connect_key_pressed(move |_, key, _, state| {
@@ -396,35 +398,32 @@ impl ButtonsView {
     }
 }
 
-/// The custom button list with its Add button.
+/// Empty-state wording for a desktop (the spec's Android text says "Tap the plus button").
+pub const NO_BUTTONS: &str = "You have no custom buttons";
+pub const ADD_BUTTON: &str = "Add a custom button";
+pub const NO_FILES: &str = "This folder has no files";
+pub const ADD_FILE: &str = "Add a file";
+
+/// The custom button list with its Add button. With no buttons the list hides and the empty state offers Add; a failed
+/// read shows the error state with Retry.
 pub fn buttons_page() -> Option<Built> {
     let service = CustomButtonService::new(CustomButtonRepo::new(crate::data::app().anime_db.clone()));
-    let empty_text = crate::ui::screen("settings_player_custom_buttons").empty.unwrap_or_default();
-    let failed = GBox::new(O::Vertical, 6);
-    margins(&failed, 12);
-    failed.append(&Label::builder().label(READ_FAILED).wrap(true).xalign(0.0).build());
+    let add_first = Button::with_label(ADD_BUTTON);
+    let (empty, _) = crate::browse::look::empty_state("view-app-grid-symbolic", NO_BUTTONS, Some(&add_first));
     let retry = Button::with_label("Retry");
-    retry.set_halign(Align::Start);
-    failed.append(&retry);
+    let (failed, _) = crate::browse::look::empty_state("dialog-error-symbolic", READ_FAILED, Some(&retry));
     failed.set_visible(false);
-    let view = Rc::new(ButtonsView {
-        service,
-        list: boxed_list(),
-        empty: Label::builder().label(&empty_text).wrap(true).xalign(0.0).build(),
-        failed: failed.clone(),
-    });
+    let view = Rc::new(ButtonsView { service, list: boxed_list(), empty: empty.clone(), failed: failed.clone() });
     let col = column();
     col.append(&view.list);
-    margins(&view.empty, 12);
-    col.append(&view.empty);
+    col.append(&empty);
     col.append(&failed);
     let again = Rc::clone(&view);
     retry.connect_clicked(move |_| again.render());
     view.render();
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&scrolled(&col)));
-    let add = crate::screens::fab(&overlay, "Add", "list-add-symbolic");
-    add.connect_clicked(move |_| {
+    let add: Rc<dyn Fn()> = Rc::new(move || {
         let taken: Vec<String> = view.service.list().unwrap_or_default().into_iter().map(|b| b.name).collect();
         let view = Rc::clone(&view);
         button_form("Add button", "Add", None, taken, move |f| {
@@ -432,6 +431,9 @@ pub fn buttons_page() -> Option<Built> {
             view.render();
         });
     });
+    let again = Rc::clone(&add);
+    add_first.connect_clicked(move |_| again());
+    crate::screens::fab(&overlay, "Add", "list-add-symbolic").connect_clicked(move |_| add());
     built(overlay, guide_toolbar("settings_player_custom_buttons"))
 }
 
@@ -475,7 +477,8 @@ fn folder(kind: Kind) -> Option<PathBuf> {
 struct EditorView {
     kind: Cell<Kind>,
     list: gtk::ListBox,
-    empty: Label,
+    /// The empty state with its Add button, shown instead of the list when the folder has no files.
+    empty: GBox,
 }
 
 impl EditorView {
@@ -487,6 +490,7 @@ impl EditorView {
         let dir = folder(kind);
         let names = dir.as_deref().map(|d| files::list(d, kind)).unwrap_or_default();
         self.empty.set_visible(names.is_empty());
+        self.list.set_visible(!names.is_empty());
         for name in names {
             self.list.append(&self.row(&name));
         }
@@ -506,7 +510,7 @@ impl EditorView {
         }
         r.set_activatable(true);
         let file = name.to_owned();
-        r.connect_activate(move |_| {
+        crate::widgets::row_activate::on_activate(&r, move |_| {
             let Some(dir) = folder(kind) else { return };
             OPEN_FILE.with(|f| *f.borrow_mut() = Some((dir, file.clone())));
             crate::ui::open("settings_player_code_editor");
@@ -556,17 +560,12 @@ impl EditorView {
     }
 }
 
-/// The file list, a Scripts | Script options switch and the Add button.
+/// The file list, a Scripts | Script options switch and the Add button. With no files the list hides and the empty
+/// state offers Add.
 pub fn editor_page() -> Option<Built> {
-    let view = Rc::new(EditorView {
-        kind: Cell::new(Kind::Scripts),
-        list: boxed_list(),
-        empty: Label::builder()
-            .label(crate::ui::screen("settings_player_editor").empty.unwrap_or_default())
-            .wrap(true)
-            .xalign(0.0)
-            .build(),
-    });
+    let add_first = Button::with_label(ADD_FILE);
+    let (empty, _) = crate::browse::look::empty_state("folder-symbolic", NO_FILES, Some(&add_first));
+    let view = Rc::new(EditorView { kind: Cell::new(Kind::Scripts), list: boxed_list(), empty: empty.clone() });
     let kinds = gtk::DropDown::from_strings(&[Kind::Scripts.label(), Kind::Options.label()]);
     kinds.set_halign(Align::Start);
     let v = Rc::clone(&view);
@@ -577,13 +576,11 @@ pub fn editor_page() -> Option<Built> {
     let col = column();
     col.append(&kinds);
     col.append(&view.list);
-    margins(&view.empty, 12);
-    col.append(&view.empty);
+    col.append(&empty);
     view.render();
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&scrolled(&col)));
-    let add = crate::screens::fab(&overlay, "Add", "list-add-symbolic");
-    add.connect_clicked(move |_| {
+    let add: Rc<dyn Fn()> = Rc::new(move || {
         let kind = view.kind.get();
         let existing = view.existing();
         let view = Rc::clone(&view);
@@ -603,6 +600,9 @@ pub fn editor_page() -> Option<Built> {
             view.render();
         });
     });
+    let again = Rc::clone(&add);
+    add_first.connect_clicked(move |_| again());
+    crate::screens::fab(&overlay, "Add", "list-add-symbolic").connect_clicked(move |_| add());
     built(overlay, vec![])
 }
 

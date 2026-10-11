@@ -35,6 +35,7 @@ impl EngineViewer {
         Self { engine, container, destroyed: Cell::new(false) }
     }
 
+    #[cfg(test)]
     pub fn kind(&self) -> ViewerKind {
         self.engine.kind()
     }

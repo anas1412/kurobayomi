@@ -19,30 +19,6 @@ pub fn next_delay(current: u64) -> u64 {
     next.max(REPEAT_MIN_MS)
 }
 
-/// The first `count` gaps between clicks, starting at 750 ms.
-pub fn delays(count: usize) -> Vec<u64> {
-    let mut out = Vec::with_capacity(count);
-    let mut delay = REPEAT_MAX_MS;
-    for _ in 0..count {
-        out.push(delay);
-        delay = next_delay(delay);
-    }
-    out
-}
-
-/// How many clicks happen while the button is held until `release_at_ms`. The press click is at 0.
-pub fn clicks_until(release_at_ms: u64) -> usize {
-    let mut at = 0u64;
-    let mut delay = REPEAT_MAX_MS;
-    let mut clicks = 0;
-    while at <= release_at_ms {
-        clicks += 1;
-        at += delay;
-        delay = next_delay(delay);
-    }
-    clicks
-}
-
 /// The repeat state: the callback and the one pending timer.
 struct Repeater {
     pending: RefCell<Option<SourceId>>,
@@ -120,23 +96,6 @@ pub fn repeat_button(icon_name: &str, on_click: impl Fn() + 'static) -> gtk::But
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // TEST-49-14
-    #[test]
-    fn schedule_matches_the_source_for_twenty_steps() {
-        let expected = [
-            750, 562, 421, 315, 236, 177, 132, 99, 74, 55, 41, 30, 22, 16, 12, 9, 6, 5, 5, 5,
-        ];
-        assert_eq!(delays(20), expected.to_vec());
-    }
-
-    // TEST-49-15: release at 1500 ms leaves clicks at 0, 750 and 1312.
-    #[test]
-    fn release_cancels_the_later_clicks() {
-        assert_eq!(clicks_until(1500), 3);
-        assert_eq!(clicks_until(0), 1);
-        assert_eq!(clicks_until(750), 2);
-    }
 
     fn counting_repeater() -> (Rc<Repeater>, Rc<std::cell::Cell<u32>>) {
         let count = Rc::new(std::cell::Cell::new(0));

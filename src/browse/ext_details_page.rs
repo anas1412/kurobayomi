@@ -1,6 +1,6 @@
 //! The extension details page: the header (112 px icon, name, package, version, language and NSFW age rating, uninstall,
-//! incognito switch), the obsolete banner, the source rows with their switches and settings buttons, and the toolbar
-//! with the repository link and the enable all, disable all and clear cookies actions (T-40a-021, T-40a-022). The
+//! incognito switch), the obsolete banner, the source rows with their switches and settings buttons, and the header
+//! actions: the repository link and the enable all, disable all and clear cookies actions (T-40a-021, T-40a-022). The
 //! rules are in `ext_details`; this file draws them and writes the preferences.
 
 use std::cell::RefCell;
@@ -46,8 +46,9 @@ struct Inner {
     deps: DetailsDeps,
     stack: gtk::Stack,
     column: gtk::Box,
-    toolbar: gtk::Box,
-    /// "Cleared n cookies" (T-41a-021), a 4 s banner under the toolbar.
+    /// The repository link and the overflow menu, packed at the end of the pushed page's header.
+    actions: gtk::Box,
+    /// "Cleared n cookies" (T-41a-021), a 4 s banner over the details.
     banner: InfoBanner,
     dialogs: DialogSlot,
     details: RefCell<Option<ExtDetails>>,
@@ -65,25 +66,16 @@ pub struct ExtDetailsPage {
 
 impl ExtDetailsPage {
     pub fn new(deps: DetailsDeps) -> Self {
-        let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        toolbar.set_margin_start(16);
-        toolbar.set_margin_end(16);
-        toolbar.set_margin_top(8);
-        toolbar.append(&gtk::Label::builder().label(tr(MsgKey::label_extension_info)).hexpand(true).xalign(0.0).css_classes(["title-4"]).build());
-        let repo_button = gtk::Button::from_icon_name("web-browser-symbolic");
-        repo_button.set_tooltip_text(Some(&tr(MsgKey::action_open_repo)));
+        // the header's end actions; the header itself (title and back) is the pushed page's
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let repo_button = crate::ui::icon_button("web-browser-symbolic", &tr(MsgKey::action_open_repo));
         repo_button.set_visible(false);
-        toolbar.append(&repo_button);
+        actions.append(&repo_button);
 
-        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let scroller = gtk::ScrolledWindow::builder().child(&column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+        let column = crate::ui::column();
         // the content is centred and never wider than the details page maximum (T-41a-050)
-        scroller.set_propagate_natural_width(true);
-        scroller.set_max_content_width(DETAILS_MAX_WIDTH_PX);
-        column.set_halign(gtk::Align::Center);
-        let empty = gtk::Label::new(Some(&tr(MsgKey::empty_screen)));
-        empty.set_valign(gtk::Align::Center);
-        empty.set_vexpand(true);
+        let scroller = crate::ui::scrolled(&crate::ui::clamp(&column, DETAILS_MAX_WIDTH_PX));
+        let (empty, _) = super::look::empty_state("application-x-addon-symbolic", &tr(MsgKey::empty_screen), None);
         let stack = gtk::Stack::new();
         stack.add_named(&empty, Some("empty"));
         stack.add_named(&scroller, Some("details"));
@@ -92,14 +84,13 @@ impl ExtDetailsPage {
 
         let banner = InfoBanner::new();
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.append(&toolbar);
         root.append(banner.widget());
         root.append(&stack);
         let inner = Rc::new(Inner {
             deps,
             stack,
             column,
-            toolbar,
+            actions,
             banner,
             dialogs: DialogSlot::new(),
             details: RefCell::new(None),
@@ -119,6 +110,11 @@ impl ExtDetailsPage {
 
     pub fn widget(&self) -> &gtk::Box {
         &self.root
+    }
+
+    /// The repository link and the overflow menu (enable all, disable all, clear cookies), for the header's end.
+    pub fn actions(&self) -> gtk::Widget {
+        self.inner.actions.clone().upcast()
     }
 
     /// The extension to show. `None` shows `empty_screen` (the extension is not installed any more).
@@ -152,7 +148,7 @@ impl Inner {
                 inner.clear_cookies();
             }
         });
-        self.toolbar.append(&menu);
+        self.actions.append(&menu);
     }
 
     fn open_repo(&self) {
@@ -195,26 +191,24 @@ impl Inner {
         if details.obsolete {
             let banner = gtk::Label::builder().label(tr(MsgKey::obsolete_extension_message)).wrap(true).xalign(0.0).build();
             banner.add_css_class("error");
-            banner.set_margin_start(16);
-            banner.set_margin_end(16);
-            banner.set_margin_top(12);
             self.column.append(&banner);
         }
         self.column.append(&self.header(&details));
-        self.column.append(&self.incognito_row(&details.pkg));
-        self.column.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        let incognito = crate::ui::boxed_list();
+        incognito.append(&self.incognito_row(&details.pkg));
+        self.column.append(&incognito);
+        self.column.append(&crate::ui::heading(&tr(MsgKey::label_sources)));
+        let sources = crate::ui::boxed_list();
         for row in detail_rows(&details.sources, &self.deps.disabled.get()) {
-            self.column.append(&self.source_row(&row));
+            sources.append(&self.source_row(&row));
         }
+        self.column.append(&sources);
         self.stack.set_visible_child_name("details");
     }
 
     fn header(self: &Rc<Self>, d: &ExtDetails) -> gtk::Box {
         let header = gtk::Box::new(gtk::Orientation::Vertical, 8);
         let top = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        top.set_margin_start(16);
-        top.set_margin_end(16);
-        top.set_margin_top(16);
         top.set_halign(gtk::Align::Fill);
         let icon = icon_image_sized(resolve(false, d.icon_file.is_some(), false), d.icon_file.as_deref(), DETAILS_ICON_PX);
         icon.set_halign(gtk::Align::Center);
@@ -254,8 +248,7 @@ impl Inner {
         header.append(&info);
 
         let uninstall = gtk::Button::with_label(&tr(MsgKey::ext_uninstall));
-        uninstall.set_margin_start(16);
-        uninstall.set_margin_end(16);
+        uninstall.set_halign(gtk::Align::Center);
         let weak = Rc::downgrade(self);
         uninstall.connect_clicked(move |_| {
             if let Some(inner) = weak.upgrade() {
@@ -275,12 +268,9 @@ impl Inner {
         self.dialogs.show(&self.column, spec, |_| {});
     }
 
-    fn incognito_row(self: &Rc<Self>, pkg: &str) -> gtk::Box {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
-        row.set_margin_start(16);
-        row.set_margin_end(16);
-        row.set_margin_top(12);
-        row.set_margin_bottom(12);
+    /// The incognito row: only its switch reacts, so the row itself is not activatable.
+    fn incognito_row(self: &Rc<Self>, pkg: &str) -> gtk::ListBoxRow {
+        let row = row_box();
         let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
         text.set_hexpand(true);
         text.append(&gtk::Label::builder().label(tr(MsgKey::pref_incognito_mode)).xalign(0.0).build());
@@ -300,15 +290,12 @@ impl Inner {
             gtk::glib::Propagation::Stop
         });
         row.append(&switch);
-        row
+        gtk::ListBoxRow::builder().child(&row).activatable(false).build()
     }
 
-    fn source_row(self: &Rc<Self>, row: &super::ext_details::DetailRow) -> gtk::Box {
-        let widget = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        widget.set_margin_start(16);
-        widget.set_margin_end(16);
-        widget.set_margin_top(8);
-        widget.set_margin_bottom(8);
+    /// A source row: activating it (click, Enter or Space) flips the source; the switch only shows the state.
+    fn source_row(self: &Rc<Self>, row: &super::ext_details::DetailRow) -> gtk::ListBoxRow {
+        let widget = row_box();
         widget.append(&gtk::Label::builder().label(row.title()).hexpand(true).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build());
         let id = row.row.id;
         if row.configurable {
@@ -327,9 +314,9 @@ impl Inner {
         let switch = gtk::Switch::builder().active(row.row.enabled).valign(gtk::Align::Center).can_target(false).focusable(false).build();
         widget.append(&switch);
         self.switches.borrow_mut().push((id, switch.clone()));
+        let list_row = gtk::ListBoxRow::builder().child(&widget).build();
         let weak = Rc::downgrade(self);
-        let click = gtk::GestureClick::new();
-        click.connect_released(move |_, _, _, _| {
+        crate::widgets::row_activate::on_activate(&list_row, move |_| {
             let Some(inner) = weak.upgrade() else { return };
             let mut disabled = inner.deps.disabled.get();
             let now_disabled = flip_disabled(&mut disabled, id);
@@ -339,9 +326,19 @@ impl Inner {
             }
             switch.set_active(!now_disabled);
         });
-        widget.add_controller(click);
-        widget
+        list_row
     }
+}
+
+/// The content box of a boxed-list row, with the shared row metrics (`ui::row`).
+fn row_box() -> gtk::Box {
+    let b = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    b.set_margin_start(crate::ui::ROW_PAD_H);
+    b.set_margin_end(crate::ui::ROW_PAD_H);
+    b.set_margin_top(crate::ui::ROW_PAD_V);
+    b.set_margin_bottom(crate::ui::ROW_PAD_V);
+    b.set_size_request(-1, crate::ui::ROW_MIN_HEIGHT - 2 * crate::ui::ROW_PAD_V);
+    b
 }
 
 /// A primary line over a secondary one, centred. `class` styles the primary line.
@@ -522,26 +519,16 @@ pub(crate) mod tests {
     fn source_rows_toggle_on_a_click_and_enable_all_and_disable_all_write_every_id() {
         let rig = rig();
         rig.page.set_details(Some(details(false, false)));
-        let rows: Vec<gtk::Box> = {
-            let mut out = Vec::new();
-            let mut child = rig.page.inner.column.first_child();
-            while let Some(w) = child {
-                child = w.next_sibling();
-                if let Some(b) = w.downcast_ref::<gtk::Box>() {
-                    if labels(b) == ["Alpha"] || labels(b) == ["Beta"] || labels(b) == ["Gamma"] {
-                        out.push(b.clone());
-                    }
-                }
-            }
-            out
-        };
-        assert_eq!(rows.len(), 3, "one row per source, in label order");
-        click(&rows[1]);
+        use crate::widgets::row_activate::{click_row, row_titled};
+        let rows: Vec<gtk::ListBoxRow> = ["Alpha", "Beta", "Gamma"].iter().map(|t| row_titled(&rig.page.inner.column, t)).collect();
+        let list = rows[0].parent().expect("the sources list");
+        assert!(rows.iter().enumerate().all(|(i, r)| r.parent().as_ref() == Some(&list) && r.index() == i as i32), "one row per source, in label order");
+        click_row(&rows[1]);
         assert_eq!(rig.disabled.get(), BTreeSet::from(["2".to_owned()]), "a click disables; the id is a string");
         let switch = all::<gtk::Switch>(&rows[1])[0].clone();
         assert!(!switch.is_active());
-        click(&rows[1]);
-        assert!(rig.disabled.get().is_empty());
+        rows[1].emit_by_name::<()>("activate", &[]);
+        assert!(rig.disabled.get().is_empty(), "Enter or Space flips it back");
 
         rig.page.set_all(false);
         assert_eq!(rig.disabled.get().len(), 3, "disable all acts on every id of the extension");

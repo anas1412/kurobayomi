@@ -129,7 +129,7 @@ fn every_key_renders_with_its_declared_arguments() {
 #[test]
 fn key_table_matches_english_file() {
     assert_eq!(MsgKey::ALL.len(), MSG_COUNT);
-    assert_eq!(MSG_COUNT, 1456, "1434 from the Aniyomi base plus the 22 in kurobayomi-extra.ftl");
+    assert_eq!(MSG_COUNT, 1416, "1389 from the Aniyomi base (1434 minus the 45 dropped names) plus the 27 in kurobayomi-extra.ftl");
     let ids: HashSet<&str> = MsgKey::ALL.iter().map(|k| k.id()).collect();
     assert_eq!(ids.len(), MSG_COUNT, "ids are unique");
     assert_eq!(MsgKey::r#type.id(), "type");
@@ -167,13 +167,10 @@ fn every_plural_has_an_other_variant() {
 }
 
 #[test]
-fn all_22_non_translatable_names_are_present() {
+fn the_19_kept_non_translatable_names_are_present() {
     let names = [
         "app_name",
         "action_web_view",
-        "ext_installer_packageinstaller",
-        "ext_installer_shizuku",
-        "ext_installer_private",
         "pref_progress_70",
         "pref_progress_75",
         "pref_progress_80",
@@ -192,7 +189,7 @@ fn all_22_non_translatable_names_are_present() {
         "player_sheets_track_lang_wo_title",
         "player_gesture_seek_indicator",
     ];
-    assert_eq!(names.len(), 22);
+    assert_eq!(names.len(), 19);
     let ids: HashSet<&str> = MsgKey::ALL.iter().map(|k| k.id()).collect();
     for name in names {
         assert!(ids.contains(name), "{name}");

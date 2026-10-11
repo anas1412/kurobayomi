@@ -100,18 +100,6 @@ pub fn error_toast(message: &str) -> ToastSpec {
     ToastSpec { message: message.to_owned(), action: Some(ToastAction::Retry), duration: ToastDuration::Indefinite }
 }
 
-/// A warning banner. It cannot be closed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Banner {
-    pub message: String,
-    pub closable: bool,
-}
-
-/// The banner for an obsolete extension (`obsolete_extension_message`), absent for any other.
-pub fn obsolete_banner(obsolete: bool) -> Option<Banner> {
-    obsolete.then(|| Banner { message: tr(MsgKey::obsolete_extension_message), closable: false })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,14 +150,6 @@ mod tests {
     #[test]
     fn the_default_toast_lasts_three_seconds() {
         assert_eq!(DEFAULT_TOAST, ToastDuration::Seconds(3));
-    }
-
-    #[test]
-    fn the_obsolete_banner_shows_only_for_obsolete_extensions_and_cannot_close() {
-        assert_eq!(obsolete_banner(false), None);
-        let banner = obsolete_banner(true).expect("banner");
-        assert!(!banner.closable);
-        assert!(!banner.message.is_empty());
     }
 
     #[test]

@@ -1,6 +1,7 @@
-//! Episode name sanitizer (`EpisodeSanitizer.kt`): the name a source gives an episode, cleaned of the
-//! anime title and of the separators around it. Applied where episodes are created from source data,
-//! not by SQL (`p1-behavior.md` section 12). Pure.
+//! The item name sanitizer (`ChapterSanitizer.kt` and `EpisodeSanitizer.kt`, which are the same algorithm with the same
+//! trim array): the name a source gives a chapter or episode, cleaned of the title and of the separators around it.
+//! Applied where items are created from source data, not by SQL (`p1-behavior.md` section 12). Pure.
+//! This is the only copy; `kuro_data::sanitize::sanitize_item_name` is the public entry point the sync code calls.
 
 /// The characters stripped from both ends in the last step: the 30 entries of `EPISODE_TRIM_CHARS`
 /// (space appears twice there, so 29 distinct characters).
@@ -56,6 +57,14 @@ mod tests {
         for (name, title, want) in cases {
             assert_eq!(sanitize(name, title), *want, "name {name:?} title {title:?}");
         }
+    }
+
+    #[test]
+    fn kotlin_whitespace_includes_the_separator_controls_and_excludes_next_line() {
+        assert!(is_kotlin_whitespace('\u{001F}'));
+        assert!(is_kotlin_whitespace('\u{3000}'));
+        assert!(!is_kotlin_whitespace('\u{0085}'));
+        assert!(!is_kotlin_whitespace('.'));
     }
 
     #[test]

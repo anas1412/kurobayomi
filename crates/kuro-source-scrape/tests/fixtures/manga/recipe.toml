@@ -1,0 +1,70 @@
+id = "example-manga"
+name = "Example Manga"
+lang = "en"
+kind = "manga"
+base_urls = ["https://manga.example.org"]
+rate_limit_ms = 1000
+
+[headers]
+Referer = "https://manga.example.org/"
+
+[urls]
+popular = "/popular?page={page}"
+latest = "/latest?page={page}"
+search = "/search?q={query}&page={page}"
+
+[popular]
+items = "div.series-card"
+title = { select = "h3 a" }
+url = { select = "h3 a", attr = "href" }
+cover = { select = "img", attr = "data-src" }
+next_page = "a.next"
+
+[latest]
+items = "ul.updates li"
+title = { select = "a.name" }
+url = { select = "a.name", attr = "href" }
+cover = { select = "img", attr = "src" }
+last_page = { select = "span.pages", regex = "of (\\d+)" }
+
+[search]
+items = "div.series-card"
+title = { select = "h3 a" }
+url = { select = "h3 a", attr = "href" }
+cover = { select = "img", attr = "data-src" }
+next_page = "a.next"
+
+[details]
+title = { select = "h1.title" }
+author = { select = "dl dd", nth = 0 }
+artist = { select = "dl dd", nth = 1 }
+description = { select = "div.summary p", all = true, join = "\n\n" }
+genre = { select = "ul.genres li", all = true }
+cover = { select = "div.poster img", attr = "src" }
+status = { select = "span.status" }
+
+[details.status_map]
+ongoing = ["ongoing"]
+completed = ["completed", "finished"]
+
+[chapters]
+items = "ol.chapters li"
+name = { select = "a" }
+url = { select = "a", attr = "href" }
+number = { select = "a", regex = "Chapter ([0-9.]+)" }
+date = { select = "time", attr = "datetime" }
+date_format = "%Y-%m-%d"
+reverse = true
+
+[pages]
+items = "div.reader img"
+image = { attr = "data-src" }
+
+[tests]
+popular = "popular.html"
+latest = "latest.html"
+search = "search.html"
+details = "series.html"
+chapters = "series.html"
+pages = "chapter.html"
+query = "one piece"

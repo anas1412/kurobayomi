@@ -64,7 +64,7 @@ pub fn row(
     };
     let gate = Rc::new(WriteGate::default());
     let title = common.title.clone();
-    built.row.connect_activate({
+    crate::widgets::row_activate::on_activate(&built.row, {
         let (stored, refresh, pref, veto, gate) = (stored.clone(), refresh.clone(), pref.clone(), veto.clone(), gate.clone());
         move |row| {
             let Some(parent) = row.root().and_downcast::<gtk::Window>() else {

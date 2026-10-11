@@ -1,11 +1,10 @@
-//! Layout chrome: sidebar or bottom bar, from the window width and the immersive rule (T-36a-005, T-36a-031, T-48a-007).
+//! Layout chrome: sidebar or bottom bar, from the window width and the immersive rule (T-36a-005, T-36a-031).
 //!
-//! Desktop decides by width only; the stored tablet UI mode has no effect.
+//! Desktop decides by width only.
 
 use gtk::prelude::*;
 
-/// Width from which the window is wide in Automatic mode (`TABLET_UI_REQUIRED_SCREEN_WIDTH_DP`, table TC-53: 719 is
-/// compact, 720 is wide).
+/// Width from which the window is wide (table TC-53: 719 is compact, 720 is wide).
 pub const WIDE_MIN_WIDTH_PX: i32 = 720;
 
 /// The smallest window the app can be shrunk to (table TC-53, the phone size of the layout rules).

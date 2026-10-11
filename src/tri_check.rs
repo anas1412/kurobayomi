@@ -29,6 +29,7 @@ impl Model {
         (self.on_change)(next);
     }
 
+    #[cfg(test)]
     fn set_state(&self, state: State, show: &dyn Fn(&State)) {
         self.applying.set(true);
         *self.state.borrow_mut() = state.clone();
@@ -83,10 +84,12 @@ impl TriCheck {
         &self.button
     }
 
+    #[cfg(test)]
     pub fn state(&self) -> State {
         self.model.state.borrow().clone()
     }
 
+    #[cfg(test)]
     /// Changes the state and the look without calling `on_change`.
     pub fn set_state(&self, state: State) {
         self.model.set_state(state, &|s| show(&self.button, s));

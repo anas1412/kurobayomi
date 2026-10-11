@@ -189,11 +189,14 @@ fn result_row(hit: &Hit) -> gtk::ListBoxRow {
     let title = gtk::Label::builder().label(&hit.title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
     let crumb = gtk::Label::builder().label(&hit.crumb).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
     crumb.add_css_class("dim-label");
+    crumb.add_css_class("caption");
     let body = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    body.set_margin_top(10);
-    body.set_margin_bottom(10);
-    body.set_margin_start(12);
-    body.set_margin_end(12);
+    body.set_margin_top(crate::ui::ROW_PAD_V);
+    body.set_margin_bottom(crate::ui::ROW_PAD_V);
+    body.set_margin_start(crate::ui::ROW_PAD_H);
+    body.set_margin_end(crate::ui::ROW_PAD_H);
+    body.set_size_request(-1, crate::ui::ROW_MIN_HEIGHT - 2 * crate::ui::ROW_PAD_V);
+    body.set_valign(gtk::Align::Center);
     body.append(&title);
     body.append(&crumb);
     let row = gtk::ListBoxRow::new();
@@ -221,32 +224,33 @@ fn scoped_index(player_only: bool) -> Vec<Row> {
     }
 }
 
-/// The settings search screen. Each keystroke re-runs the search. Opening it focuses the field; Enter gives the focus
-/// back; a result opens its screen and asks that screen to highlight the row.
+/// The settings search screen. The field is the first header widget, so it takes the middle of the page header
+/// (`ui::page`) in place of a title. Each keystroke re-runs the search. Opening it focuses the field; Enter gives the
+/// focus back; a result opens its screen and asks that screen to highlight the row. Before a query the page says what
+/// to type; a query with no hit says so.
 fn search_page(player_only: bool) -> Option<Built> {
-    let col = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    col.set_margin_start(16);
-    col.set_margin_end(16);
-    col.set_margin_top(8);
+    let col = crate::ui::column();
     let entry = gtk::SearchEntry::builder().placeholder_text("Search settings").hexpand(true).build();
     entry.update_property(&[gtk::accessible::Property::Label("Search settings")]);
-    col.append(&entry);
-    let results = gtk::ListBox::new();
-    results.add_css_class("boxed-list");
-    results.set_selection_mode(gtk::SelectionMode::None);
+    let results = crate::ui::boxed_list();
+    results.set_visible(false);
     col.append(&results);
-    let empty = gtk::Label::new(Some("No results found"));
+    let hint = crate::ui::status("system-search-symbolic", "Type to search every setting");
+    col.append(&hint);
+    let empty = crate::ui::status("system-search-symbolic", "No results found");
     empty.set_visible(false);
     col.append(&empty);
 
     let shown: Rc<RefCell<Vec<Hit>>> = Rc::new(RefCell::new(Vec::new()));
     {
-        let (results, empty, shown) = (results.clone(), empty.clone(), Rc::clone(&shown));
+        let (results, hint, empty, shown) = (results.clone(), hint.clone(), empty.clone(), Rc::clone(&shown));
         entry.connect_search_changed(move |entry| {
             clear(&results);
             let query = entry.text();
             let found = hits(&scoped_index(player_only), query.as_str());
+            hint.set_visible(query.is_empty());
             empty.set_visible(!query.is_empty() && found.is_empty());
+            results.set_visible(!found.is_empty());
             for hit in &found {
                 results.append(&result_row(hit));
             }
@@ -270,8 +274,7 @@ fn search_page(player_only: bool) -> Option<Built> {
     entry.connect_map(|entry| {
         entry.grab_focus();
     });
-    let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&col).build();
-    built(scroll, vec![])
+    built(crate::ui::scrolled(&col), vec![entry.upcast()])
 }
 
 #[cfg(test)]
@@ -279,15 +282,6 @@ mod tests {
     use super::*;
     use crate::settings_ui::rows::{group, item, switch, text};
     use crate::pref_model::model::PreferenceItem as Item;
-    use crate::settings_ui::reader::page::ReaderScreen;
-
-    #[test]
-    fn a_screen_exposes_a_title_and_a_tree_without_an_action_by_default() {
-        let screen = ReaderScreen;
-        assert_eq!(screen.title(), "Reader");
-        assert!(screen.app_bar_action().is_none());
-        assert!(!screen.preferences(&Prefs::in_memory()).is_empty());
-    }
 
     fn row_of(title: &str, subtitle: Option<&str>, screen: &str, group: Option<&str>, player: bool) -> Row {
         Row {

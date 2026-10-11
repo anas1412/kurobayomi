@@ -3,7 +3,10 @@
 //! * Names with no literal reference (T-51a-019). Keep all 133 names (86 from the core base and 47 from the app
 //!   base), so no translation is lost for a later feature. Dynamic lookups are checked before any removal: the
 //!   debanding names (`pref_debanding_none`, `pref_debanding_cpu`, `pref_debanding_gpu`, `pref_debanding_yuv420p`) are
-//!   read through the preference registry in `kuro-prefs`. No name is removed.
+//!   read through the preference registry in `kuro-prefs`. No unused name is removed. The names of features that the
+//!   desktop app does not have are another matter: `import::DROPPED_NAMES` lists them and the importer leaves them
+//!   out of every catalog (no orientation, battery optimisation, secure screen, extension installer, swipe action,
+//!   volume and brightness gesture, tablet mode or dynamic colour text).
 //! * Data-quality fixes in the English catalog (T-51a-020). The generated catalog is not edited by hand. These are the
 //!   rules the catalog keeps, and the tests below check them:
 //!   - `confirm_exit` has the text "Enable Horizontal Seek". It is not used, and its text is not reused for an exit

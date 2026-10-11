@@ -18,8 +18,6 @@ action_continue = Jatkaa
 
 manga = Manga
 
-pref_library_summary = Luokat, yleinen päivitys, luvun/jakson pyyhkäisy
-
 pref_behavior = Luvun käyttäytyminen
 
 action_add_repo_message = Lisää tietovarastot kohteeseen { $arg1 }. Tämän URL-osoitteen tulisi päättyä "index.min.json".
@@ -80,21 +78,9 @@ pref_player_settings_summary = Sisäinen soitin, eleet, dekooderit, tekstitykset
 
 pref_player_internal = Sisäinen soitin
 
-pref_player_internal_summary = Edistyminen, säätimet, asettelu
-
 pref_progress_mark_as_seen = Missä vaiheessa jakso merkitään katsotuksi
 
 pref_preserve_watching_position = Säilytä katselusijainti katsotuissa jaksoissa
-
-pref_category_player_orientation = Suunta
-
-rotation_video = Video
-
-rotation_reverse_landscape = Käänteinen maisema
-
-rotation_sensor_portrait = Anturin muotokuva
-
-rotation_sensor_landscape = Anturin maisema
 
 pref_category_controls = Säätimet
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = Näytä nykyisen luvun ilmaisin
 pref_controls_show_chapter_indicator_info = Näkyy vain, jos videossa on lukuja
 
 pref_controls_display_volume_percentage = Näytä äänenvoimakkuus prosentteina
-
-pref_remember_brightness = Muista viimeksi käytetty kirkkaus ja käytä sitä
 
 pref_remember_volume = Muista viimeksi käytetty äänenvoimakkuus ja käytä sitä
 
@@ -177,12 +161,6 @@ pref_external_player_preference = Ulkoisen soittimen asetus
 pref_player_gestures = Eleet
 
 pref_player_gestures_summary = Haku, kaksoisnapautus, mediasäätimet
-
-pref_category_player_sliders = Liukusäätimet
-
-enable_volume_brightness_gestures = Ota äänenvoimakkuuden ja kirkkauden eleet käyttöön
-
-pref_controls_swap_vol_brightness = Vaihda äänenvoimakkuus ja kirkkauden liukusäätin
 
 pref_category_player_seeking = Etsitään
 
@@ -940,10 +918,6 @@ internal_error = Sisäinen virhe: Lisätietoja saat kaatumisen lokitiedoista
 
 app_not_available = Sovellus ei ole saatavilla
 
-onboarding_permission_ignore_battery_opts = Akun käyttö taustalla
-
-onboarding_permission_ignore_battery_opts_description = Vältä keskeytyksiä pitkään jatkuvissa toimenpiteissä, kuten kirjaston päivitys, lataukset, ja varmuuskopion palautukset.
-
 pref_category_general = Yleiset
 
 pref_category_appearance = Ulkonäkö
@@ -972,10 +946,6 @@ pref_browse_summary = Lähteet, laajennokset, globaali haku
 
 pref_backup_summary = Manuaaliset ja automaattiset varmuuskopiot, tallennustila
 
-pref_security_summary = Applikaation lukko, turvallinen ruutu
-
-pref_advanced_summary = Kaatumislokien vedos, akun optimoinnit
-
 pref_category_theme = Teema
 
 pref_app_theme = Sovelluksen teema
@@ -985,8 +955,6 @@ theme_system = Seuraa järjestelmää
 theme_light = Pois päältä
 
 theme_dark = Päällä
-
-theme_monet = Dynaaminen
 
 theme_greenapple = Vihreä omena
 
@@ -1031,10 +999,6 @@ lock_always = Aina
 lock_never = Ei koskaan
 
 hide_notification_content = Piilota ilmoitusten sisältö
-
-secure_screen = Salaa näyttö
-
-secure_screen_summary = Turvallinen ruutu piilottaa sovelluksen sisällön sovelluksia vaihdettaessa ja estää kuvakaappauksen ottamisen
 
 pref_category_nsfw_content = NSFW (18+) lähteet
 
@@ -1151,14 +1115,6 @@ ext_nsfw_warning = Tämän laajennoksen lähteet voivat sisältää NSFW (18+) -
 ext_permission_install_apps_warning = Laajennosten asentamiseen tarvitaan lupia. Napauta tästä myöntääksesi luvat.
 
 ext_install_service_notif = Asennetaan laajennusta…
-
-ext_installer_pref = Asentaja
-
-ext_installer_legacy = Perinteinen
-
-ext_installer_shizuku_stopped = Shizuku on pysähtynyt
-
-ext_installer_shizuku_unavailable_dialog = Asenna ja aja Shizuku käyttääksesi Shizukua laajennusten asentamiseen.
 
 action_add_repo = Lisää laajennosten lähde
 
@@ -1338,22 +1294,6 @@ double_tap_anim_speed_normal = Normaali
 
 double_tap_anim_speed_fast = Nopea
 
-pref_rotation_type = Oletuskiertotyyppi
-
-rotation_type = Kierron tyyppi
-
-rotation_free = Vapaa
-
-rotation_portrait = Pystysuunnassa
-
-rotation_reverse_portrait = Käänteinen kuva
-
-rotation_landscape = Vaakatasossa
-
-rotation_force_portrait = Lukittu pystysuunta
-
-rotation_force_landscape = Lukittu vaakataso
-
 color_filter_r_value = Punainen
 
 color_filter_g_value = Vihreä
@@ -1510,8 +1450,6 @@ pref_refresh_library_covers = Päivitä kirjaston manga-kannet
 
 pref_reset_viewer_flags = Poista sarjakohtaiset lukijan asetukset
 
-pref_reset_viewer_flags_summary = Poista kaikkien sarjojen lukutila ja lukusuunta
-
 pref_reset_viewer_flags_success = Kaikki lukijan asetukset poistettu
 
 pref_reset_viewer_flags_error = Lukijan asetuksia ei voitu poistaa
@@ -1519,18 +1457,6 @@ pref_reset_viewer_flags_error = Lukijan asetuksia ei voitu poistaa
 pref_dump_crash_logs = Poista kaatumislokit
 
 pref_dump_crash_logs_summary = Tallentaa virhelokit tiedostoon jaettavaksi kehittäjien kanssa
-
-label_background_activity = Taustatoiminta
-
-pref_disable_battery_optimization = Poista akun optimointi käytöstä
-
-pref_disable_battery_optimization_summary = Auttaa taustalla pyörivien kirjaston päivitysten ja varmuuskopioiden kanssa
-
-battery_optimization_disabled = Akun optimointi on jo poistettu käytöstä
-
-battery_optimization_setting_activity_not_found = Laiteasetuksia ei voitu avata
-
-pref_tablet_ui_mode = Tabletti käyttöliittymä
 
 pref_verbose_logging = Yksityiskohtainen kirjaaminen
 

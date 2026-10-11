@@ -85,26 +85,6 @@ impl BannerKind {
     }
 }
 
-/// The banners to show, in order.
-#[allow(dead_code)]
-pub fn visible(state: BannerState) -> Vec<BannerKind> {
-    BannerKind::ALL.into_iter().filter(|k| k.on(state)).collect()
-}
-
-/// The first banner that sets the header accent (MainActivity status-bar rule, first match wins).
-#[allow(dead_code)]
-pub fn accent(state: BannerState) -> Option<BannerKind> {
-    visible(state).first().copied()
-}
-
-/// The header tint accent as an optional CSS class (T-36a-019): the class of the banner that sets the accent. The Android
-/// system-bar rules (status-bar luminance of 0.5, transparent bars) have no Linux equivalent and are dropped; GTK draws
-/// the title bar.
-#[allow(dead_code)]
-pub fn header_tint_class(state: BannerState) -> Option<&'static str> {
-    accent(state).map(BannerKind::css_class)
-}
-
 /// One revealer per banner. `update` shows and hides them; the reveal is an animated slide, so the banner is visible
 /// on the frame after the state changes.
 pub struct Banners {
@@ -163,36 +143,6 @@ impl Default for Banners {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn banners_show_in_indexing_downloaded_incognito_order() {
-        let all = BannerState { indexing: true, downloaded_only: true, incognito: true };
-        assert_eq!(visible(all), vec![BannerKind::Indexing, BannerKind::DownloadedOnly, BannerKind::Incognito]);
-        let some = BannerState { indexing: false, downloaded_only: true, incognito: true };
-        assert_eq!(visible(some), vec![BannerKind::DownloadedOnly, BannerKind::Incognito]);
-    }
-
-    #[test]
-    fn no_state_shows_no_banner() {
-        assert!(visible(BannerState::default()).is_empty());
-        assert_eq!(accent(BannerState::default()), None);
-    }
-
-    #[test]
-    fn accent_is_the_first_visible_banner() {
-        let state = BannerState { indexing: false, downloaded_only: true, incognito: true };
-        assert_eq!(accent(state), Some(BannerKind::DownloadedOnly));
-        let indexing = BannerState { indexing: true, downloaded_only: true, incognito: true };
-        assert_eq!(accent(indexing), Some(BannerKind::Indexing));
-    }
-
-    #[test]
-    fn the_header_tint_is_the_css_class_of_the_accent_banner_or_none() {
-        assert_eq!(header_tint_class(BannerState::default()), None);
-        let state = BannerState { indexing: false, downloaded_only: false, incognito: true };
-        assert_eq!(header_tint_class(state), accent(state).map(BannerKind::css_class));
-        assert!(header_tint_class(state).is_some());
-    }
 
     #[test]
     fn css_colours_each_banner_by_its_role_pair() {

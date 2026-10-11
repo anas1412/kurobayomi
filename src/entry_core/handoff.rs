@@ -5,7 +5,6 @@
 
 use std::cell::RefCell;
 
-use gtk::prelude::WidgetExt;
 use kuro_domain::kind::EntryKind;
 
 use crate::entry_core::header::SearchRequest;
@@ -25,29 +24,6 @@ pub struct MigrateRequest {
     pub anime: bool,
     /// The old entry's title, shown in the migrate dialog; a click on it opens the old entry (`open_old`).
     pub title: String,
-}
-
-impl MigrateRequest {
-    /// The migrate dialog's click on the old title: opens the old entry's page.
-    pub fn open_old(&self) {
-        if self.anime {
-            crate::entry_core::anime::route::open(self.entry_id);
-        } else {
-            crate::entry_core::route::open(self.entry_id);
-        }
-    }
-
-    /// The migration is done: the pages above the old details page and the old page itself go, and the details page of
-    /// the new entry takes their place (E-23).
-    pub fn replace_old_page(&self, new_id: i64) {
-        ui::pop_until(|page| matches!(page.widget_name().as_str(), "screen:manga_entry_details" | "screen:anime_entry_details"));
-        ui::pop();
-        if self.anime {
-            crate::entry_core::anime::route::open(new_id);
-        } else {
-            crate::entry_core::route::open(new_id);
-        }
-    }
 }
 
 /// The source whose preferences the Settings item of the overflow menu opens. `anime` picks the registry the id lives in.
@@ -84,10 +60,6 @@ pub fn take_source_prefs() -> Option<SourcePrefsRequest> {
 
 pub fn park_webview(request: WebViewRequest) {
     WEBVIEW.with(|s| *s.borrow_mut() = Some(request));
-}
-
-pub fn take_webview() -> Option<WebViewRequest> {
-    WEBVIEW.with(|s| s.borrow_mut().take())
 }
 
 pub fn park_migrate(request: MigrateRequest) {
@@ -273,10 +245,4 @@ mod tests {
         assert_eq!(take_source_prefs(), None);
     }
 
-    #[test]
-    fn a_parked_webview_request_is_handed_out_once() {
-        park_webview(WebViewRequest { url: "https://example.org/a".into(), title: "A".into() });
-        assert_eq!(take_webview().map(|r| r.url), Some("https://example.org/a".to_owned()));
-        assert_eq!(take_webview(), None);
-    }
 }

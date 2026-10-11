@@ -75,7 +75,10 @@ impl AnimeDirectory {
 
     /// The directory of the app now: what the extension host published, the installed instances, and `repo` as the library.
     pub fn current(repo: AnimeRepo) -> Self {
-        Self::new(sources_of(&crate::ext_host::anime_lists()), instances(), Arc::new(move |id| repo_lookup(repo.clone(), id)))
+        let mut sources = sources_of(&crate::ext_host::anime_lists());
+        sources.extend(crate::recipe_sources::anime_rows());
+        sources.extend(crate::browse::builtin::anime_rows());
+        Self::new(sources, crate::browse::builtin::with_anime(instances()), Arc::new(move |id| repo_lookup(repo.clone(), id)))
     }
 
     /// The runnable source of an id, for a page that needs more of it than its loader (its latest flag).

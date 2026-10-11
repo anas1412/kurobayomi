@@ -5,7 +5,6 @@
 
 use std::collections::BTreeSet;
 
-use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 use kuro_platform::linux::notifier::{Command, QueuedNotifier, to_notification};

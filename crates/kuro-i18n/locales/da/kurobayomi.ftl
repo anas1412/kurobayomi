@@ -310,8 +310,6 @@ theme_light = Fra
 
 theme_dark = Til
 
-theme_monet = Dynamisk
-
 theme_greenapple = Æble grøn
 
 theme_lavender = Lavendel
@@ -353,10 +351,6 @@ lock_always = Altid
 lock_never = Aldrig
 
 hide_notification_content = Skjul notifikationsindhold
-
-secure_screen = Sikker skærm
-
-secure_screen_summary = Sikker skærm skjuler app indhold, når der skiftes mellem apps, og blokerer for skærmbilleder
 
 pref_category_nsfw_content = NSFW (18+) kilder
 
@@ -454,8 +448,6 @@ ext_nsfw_short = 18+
 
 ext_install_service_notif = Installerer udvidelse…
 
-ext_installer_pref = Installationsprogram
-
 pref_fullscreen = Fuldskærmsvisning
 
 pref_show_page_number = Vis sidetal
@@ -501,14 +493,6 @@ scale_type_stretch = Stræk
 scale_type_fit_width = Tilpas bredde
 
 scale_type_fit_height = Tilpas højde
-
-rotation_type = Rotation
-
-rotation_free = Fri
-
-rotation_portrait = Stående
-
-rotation_landscape = Liggende
 
 pref_always_show_chapter_transition = Vis altid kapitelovergang
 

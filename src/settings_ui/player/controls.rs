@@ -1,7 +1,6 @@
 //! Internal player page rows: progress and preserve position (T-48a-015), Controls and Hosters (T-48a-013) and the
 //! Display group (T-48a-014), the Intro skip group (T-48a-016) and the External player group (T-48a-018). The PiP group
 //! (T-48a-017) is the mini player group, shown only when the display probe reports support.
-#![allow(dead_code)]
 use kuro_prefs::pref::Pref;
 use kuro_prefs::prefs::Prefs;
 
@@ -9,7 +8,6 @@ use crate::pref_model::bind;
 use crate::pref_model::model::{ItemCommon, Preference, PreferenceItem};
 use crate::settings_ui::player::external;
 use crate::settings_ui::rows::{group, info, int_choice, item, slider, switch, switch_sub};
-use crate::settings_ui::search::SearchableSettings;
 
 /// Progress values (fraction of the episode) offered for "mark as seen".
 pub const PROGRESS_VALUES: [f32; 7] = [1.00, 0.95, 0.90, 0.85, 0.80, 0.75, 0.70];
@@ -92,7 +90,6 @@ pub fn internal_rows(prefs: &Prefs) -> Vec<Preference> {
                 switch("Allow gesture in panels", &p.allow_gestures, true),
                 switch("Show loading circle", &p.show_loading_circle, true),
                 switch_sub("Show current chapter indicator", "Only appears if the video has chapters", &p.show_current_chapter, true),
-                switch("Remember and switch to the last used brightness", &p.remember_player_brightness, true),
             ],
         ),
         group(
@@ -111,8 +108,6 @@ pub fn internal_rows(prefs: &Prefs) -> Vec<Preference> {
                 switch("Reduce player animation", &p.reduce_motion, true),
                 int_choice("Hide player controls time", &p.player_time_to_disappear, &hide_options, true),
                 slider("Panel opacity", &p.panel_opacity, 0..=100, Some(opacity.as_str()), true),
-                // T-48a-019: the orientation row is dropped; the stored value is ignored
-                info(ROTATION_NOTE),
             ],
         ),
         intro_skip_group(prefs),
@@ -164,19 +159,6 @@ pub fn intro_skip_group(prefs: &Prefs) -> Preference {
     )
 }
 
-/// Screen-search contract for the internal player page.
-pub struct InternalScreen;
-
-impl SearchableSettings for InternalScreen {
-    fn title(&self) -> &'static str {
-        "Internal player"
-    }
-
-    fn preferences(&self, prefs: &Prefs) -> Vec<Preference> {
-        internal_rows(prefs)
-    }
-}
-
 /// The text of the info row under the gesture options (desktop key names).
 pub fn info_text_for_custom() -> &'static str {
     "When a tap gesture is set to \"Custom\", it can be bound through input.conf. The key names are kurobayomi-double-tap-left, kurobayomi-double-tap-center and kurobayomi-double-tap-right."
@@ -185,9 +167,6 @@ pub fn info_text_for_custom() -> &'static str {
 pub fn info_row() -> PreferenceItem {
     info(info_text_for_custom())
 }
-
-/// The help line that replaces the orientation row (T-48a-019).
-pub const ROTATION_NOTE: &str = "Screen rotation is not used on desktop.";
 
 #[cfg(test)]
 mod tests {
@@ -278,7 +257,7 @@ mod tests {
             _ => panic!("group"),
         };
         assert_eq!(controls.title, "Controls");
-        assert_eq!(controls.items.len(), 4);
+        assert_eq!(controls.items.len(), 3);
         assert!(!prefs.player.allow_gestures.get());
         assert!(prefs.player.show_loading_circle.get());
         let subtitle = common_of(&controls.items[2]).subtitle.as_deref();
@@ -294,9 +273,8 @@ mod tests {
         let tree = internal_rows(&prefs);
         let display = group_titled(&tree, "Display");
         let titles: Vec<&str> = display.items.iter().map(|i| i.title()).collect();
-        assert_eq!(titles.len(), 7);
-        assert!(!titles.iter().any(|t| t.contains("status bar") || t.contains("cutout") || t.contains("orientation")));
-        assert_eq!(display.items[6].title(), ROTATION_NOTE, "the help line says rotation is dropped");
+        assert_eq!(titles.len(), 6);
+        assert!(!titles.iter().any(|t| t.contains("status bar") || t.contains("cutout") || t.contains("orientation") || t.contains("rotation")));
         let PreferenceItem::Slider { common, value, .. } = &display.items[5] else { panic!("slider") };
         assert_eq!(*value, 60);
         assert_eq!(common.subtitle.as_deref(), Some("60%"));
@@ -308,7 +286,7 @@ mod tests {
         let tree = internal_rows(&prefs);
         let Preference::Group(controls) = &tree[2] else { panic!("group") };
         assert!(!controls.items.iter().any(|i| i.title().contains("last used volume")));
-        assert!(controls.items.iter().any(|i| i.title().contains("last used brightness")));
+        assert!(!controls.items.iter().any(|i| i.title().contains("brightness")), "the brightness memory is gone");
     }
 
     #[test]

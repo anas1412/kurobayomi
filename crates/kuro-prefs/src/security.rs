@@ -1,22 +1,14 @@
-//! `[security]` preferences (Aniyomi `SecurityPreferences`): the app lock and the secure screen mode.
+//! `[security]` preferences (Aniyomi `SecurityPreferences`): the app lock and the notification privacy switch.
 //!
-//! `last_app_closed` is app state and lives in `state.toml`. The secure screen mode is stored but
-//! has no effect on Linux.
+//! `last_app_closed` is app state and lives in `state.toml`. The secure screen mode (`secure_screen_v2`) is dropped.
 
-use crate::pref_enum;
 use crate::registry::define_prefs;
 
-pref_enum! {
-    /// `secure_screen_v2`, stored as the Kotlin constant name.
-    pub enum SecureScreenMode { ALWAYS, INCOGNITO, NEVER }
-}
-
 define_prefs! {
-    /// `[security]` section: the five keys of Aniyomi `SecurityPreferences`.
+    /// `[security]` section: the four keys of Aniyomi `SecurityPreferences` that a desktop has.
     pub struct SecurityPrefs in "security" {
         use_authenticator: bool = "use_biometric_lock" => false;
         lock_app_after: i32 = "lock_app_after" => 0;
-        secure_screen: SecureScreenMode = "secure_screen_v2" => SecureScreenMode::INCOGNITO;
         hide_notification_content: bool = "hide_notification_content" => false;
         last_app_closed: i64 = "__APP_STATE_last_app_closed" => 0;
     }
@@ -31,7 +23,6 @@ mod tests {
     use crate::settings_load::open;
     use crate::store::PrefStore;
     use crate::testutil::{TestDir, TestPaths, assert_section_registered, read_toml};
-    use crate::values::PrefValue;
 
     #[test]
     fn keys_are_the_aniyomi_keys_in_their_security_fields() {
@@ -40,7 +31,6 @@ mod tests {
             &[
                 ("use_authenticator", "use_biometric_lock"),
                 ("lock_app_after", "lock_app_after"),
-                ("secure_screen", "secure_screen_v2"),
                 ("hide_notification_content", "hide_notification_content"),
                 ("last_app_closed", "__APP_STATE_last_app_closed"),
             ]
@@ -59,29 +49,8 @@ mod tests {
         let sec = SecurityPrefs::new(PrefStore::in_memory());
         assert!(!sec.use_authenticator.get());
         assert_eq!(sec.lock_app_after.get(), 0);
-        assert_eq!(sec.secure_screen.get(), SecureScreenMode::INCOGNITO);
         assert!(!sec.hide_notification_content.get());
         assert_eq!(sec.last_app_closed.get(), 0);
-    }
-
-    #[test]
-    fn an_unknown_secure_screen_name_gives_the_default() {
-        let store = PrefStore::in_memory();
-        store.set_raw("secure_screen_v2", PrefValue::Str("SOMETIMES".into()));
-        let sec = SecurityPrefs::new(store);
-        assert_eq!(sec.secure_screen.get(), SecureScreenMode::INCOGNITO);
-    }
-
-    #[test]
-    fn secure_screen_is_stored_by_its_constant_name() {
-        let store = PrefStore::in_memory();
-        SecurityPrefs::new(store.clone())
-            .secure_screen
-            .set(SecureScreenMode::NEVER).unwrap();
-        assert_eq!(
-            store.get_raw("secure_screen_v2"),
-            Some(PrefValue::Str("NEVER".into()))
-        );
     }
 
     #[test]

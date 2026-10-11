@@ -80,7 +80,7 @@ pub fn tri_state_row(
     let r = row(label, Some(icon.upcast_ref()), activatable);
     if let Some(on_click) = on_click {
         let current = std::cell::Cell::new(state);
-        r.connect_activate(move |_| {
+        crate::widgets::row_activate::on_activate(&r, move |_| {
             let next = current.get().next();
             current.set(next);
             icon.set_icon_name(Some(next.icon()));

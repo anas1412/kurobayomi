@@ -298,8 +298,6 @@ theme_light = Выключаны
 
 theme_dark = Уключаны
 
-theme_monet = Дынамічная
-
 theme_greenapple = Зялёны яблык
 
 theme_lavender = Лаванда
@@ -335,10 +333,6 @@ lock_always = Заўсёды
 lock_never = Ніколі
 
 hide_notification_content = Схаваць змесціва апавяшчэнняў
-
-secure_screen = Абарона экрана
-
-secure_screen_summary = Схаваць змесціва прыкладання пры пераключэнні на іншыя прыкладання і блакаваць скрыншоты
 
 pref_category_nsfw_content = Крыніцы NSFW (18+)
 
@@ -453,12 +447,6 @@ ext_nsfw_short = 18+
 ext_nsfw_warning = Можа ўтрымліваць кантэнт NSFW (18+)
 
 ext_install_service_notif = Устаноўка пашырэнняў…
-
-ext_installer_pref = Усталёўнік
-
-ext_installer_legacy = па змаўчанні
-
-ext_installer_shizuku_stopped = Shizuku не працуе
 
 pref_fullscreen = Поўнаэкранны рэжым
 
@@ -607,20 +595,6 @@ double_tap_anim_speed_0 = Ніякай анімацыі
 double_tap_anim_speed_normal = Звычайная
 
 double_tap_anim_speed_fast = Хуткая
-
-pref_rotation_type = Тып арыентацыі па змаўчанні
-
-rotation_type = Тып арыентацыі
-
-rotation_free = Свабодная
-
-rotation_portrait = Партрэтная
-
-rotation_landscape = Альбомная
-
-rotation_force_portrait = Заблакаваная партрэтная
-
-rotation_force_landscape = Заблакаваная альбомная
 
 color_filter_r_value = R
 

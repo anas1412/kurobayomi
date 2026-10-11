@@ -14,8 +14,6 @@ action_continue = जारी रखे
 
 manga = Manga
 
-pref_library_summary = श्रेणियाँ, सब कुछ अपडेट करें, अध्याय स्वाइप
-
 pref_library_update_show_tab_badge = अपडेट आइकन पर अपठित संख्या दिखाएं
 
 action_hide = छुपाएँ
@@ -426,10 +424,6 @@ pref_browse_summary = स्रोत, विस्तार, वैश्वि
 
 pref_backup_summary = मैनुअल और स्वचालित बैकअप
 
-pref_security_summary = ऐप लॉक, सुरक्षित स्क्रीन
-
-pref_advanced_summary = डंप क्रैश लॉग, बैटरी अनुकूलन
-
 pref_category_theme = थीम
 
 pref_app_theme = एप थीम
@@ -439,8 +433,6 @@ theme_system = सिस्टम का पालन करें
 theme_light = बंद
 
 theme_dark = चालू करे
-
-theme_monet = डायनेमिक
 
 theme_greenapple = हरा सेब
 
@@ -479,10 +471,6 @@ lock_always = हमेशा
 lock_never = कभी नहीँ
 
 hide_notification_content = अधिसूचना सामग्री छुपाएं
-
-secure_screen = स्क्रीन सुरक्षित करें
-
-secure_screen_summary = सुरक्षित स्क्रीन एप्लिकेशन स्विच करते समय एप्लिकेशन सामग्री छिपाता हैं और स्क्रीनशॉट ब्लॉक करता हैं
 
 pref_category_nsfw_content = NSFW (18+) स्रोत
 
@@ -554,10 +542,6 @@ include = शामिल करें: { $arg1 }
 
 exclude = बहिष्कृत करें: { $arg1 }
 
-pref_chapter_swipe_end = दाईं ओर स्वाइप करने पर
-
-pref_chapter_swipe_start = बाईं ओर स्वाइप करने पर
-
 multi_lang = मल्टी
 
 ext_updates_pending = अपडेट लंबित हैं
@@ -605,14 +589,6 @@ ext_nsfw_short = 18+
 ext_nsfw_warning = इसमें NSFW (18+) सामग्री हो सकती है
 
 ext_install_service_notif = एक्सटेंशन इंस्टॉल किया जा रहा है…
-
-ext_installer_pref = इंस्टालर
-
-ext_installer_legacy = विरासत
-
-ext_installer_shizuku_stopped = शिज़ुकु नहीं चल रहा है
-
-ext_installer_shizuku_unavailable_dialog = शिज़ुकु को एक्सटेंशन इंस्टॉलर के रूप में उपयोग करने के लिए शिज़ुकु को इंस्टॉल और प्रारंभ करें।
 
 pref_fullscreen = पूर्ण स्क्रीन
 
@@ -771,22 +747,6 @@ double_tap_anim_speed_0 = कोई एनीमेशन नहीं
 double_tap_anim_speed_normal = साधारण
 
 double_tap_anim_speed_fast = तेज
-
-pref_rotation_type = नियमित आवर्तन
-
-rotation_type = रोटेशन प्रकार
-
-rotation_free = मुक्त
-
-rotation_portrait = सीधा
-
-rotation_reverse_portrait = रिवर्स पोर्ट्रेट
-
-rotation_landscape = परिदृश्य
-
-rotation_force_portrait = सीधे बंद
-
-rotation_force_landscape = मजबूर लैंडस्केप
 
 color_filter_r_value = R
 
@@ -954,8 +914,6 @@ pref_refresh_library_covers = रिफ्रेश पुस्तकालय 
 
 pref_reset_viewer_flags = प्रति श्रृंखला रीडर सेटिंग्स को रीसेट करें
 
-pref_reset_viewer_flags_summary = सभी श्रृंखलाओं के रीडिंग मोड और ओरिएंटेशन को रीसेट करता है
-
 pref_reset_viewer_flags_success = सभी रीडर सेटिंग्स रीसेट करें
 
 pref_reset_viewer_flags_error = पाठक सेटिंग रीसेट नहीं की जा सकी
@@ -963,20 +921,6 @@ pref_reset_viewer_flags_error = पाठक सेटिंग रीसेट 
 pref_dump_crash_logs = क्रैश लॉग शेयर करें
 
 pref_dump_crash_logs_summary = डेवलपर्स के साथ साझा करने के लिए फ़ाइल में त्रुटि लॉग सहेजता है
-
-label_background_activity = पृष्ठभूमि गतिविधि
-
-pref_disable_battery_optimization = बैटरी अनुकूलन को अक्षम करना
-
-pref_disable_battery_optimization_summary = पृष्ठभूमि पुस्तकालय अपडेट और बैकअप के साथ मदद करता है
-
-battery_optimization_disabled = बैटरी अनुकूलन पहले से ही अक्षम है
-
-battery_optimization_setting_activity_not_found = डिवाइस सेटिंग नहीं खोल सका
-
-about_dont_kill_my_app = कुछ निर्माताओं के पास अतिरिक्त ऐप प्रतिबंध हैं जो पृष्ठभूमि सेवाओं को मारते हैं। इस वेबसाइट में इसे ठीक करने के बारे में अधिक जानकारी है।
-
-pref_tablet_ui_mode = टैबलेट यूआई
 
 pref_verbose_logging = वर्बोज़ लॉगिंग
 

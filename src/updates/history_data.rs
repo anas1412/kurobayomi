@@ -6,10 +6,9 @@
 use std::sync::Arc;
 
 use kuro_data::anime::AnimeRepo;
-use kuro_data::anime::AnimeUpdate;
 use kuro_data::chapter::ChapterRepo;
 use kuro_data::episode::EpisodeRepo;
-use kuro_data::manga::{MangaRepo, MangaUpdate};
+use kuro_data::manga::MangaRepo;
 use kuro_db::handle::Db;
 use kuro_domain::entries::anime::AnimeExt;
 use kuro_domain::entries::manga::MangaExt;
@@ -89,18 +88,6 @@ pub fn entry_title(db: &Arc<Db>, kind: EntryKind, id: i64) -> Option<String> {
     }
 }
 
-/// The favorite button of a history row: the entry joins the library now.
-pub fn add_to_library(db: &Arc<Db>, kind: EntryKind, id: i64) -> Result<(), String> {
-    let now = kuro_data::time::now_millis();
-    match kind {
-        EntryKind::Manga => MangaRepo::new(db.clone())
-            .update(&MangaUpdate { favorite: Some(true), date_added: Some(now), ..MangaUpdate::new(id) }),
-        EntryKind::Anime => AnimeRepo::new(db.clone())
-            .update(&AnimeUpdate { favorite: Some(true), date_added: Some(now), ..AnimeUpdate::new(id) }),
-    }
-    .map_err(|e| e.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use kuro_data::chapter::Chapter;
@@ -175,13 +162,4 @@ mod tests {
         assert!(repo.by_entry(EntryKind::Manga, manga).expect("rows").iter().all(|r| r.at == 0));
     }
 
-    #[test]
-    fn history_add_to_library_sets_the_favorite() {
-        let (_dir, db, manga, _ids) = manga_with(1, 0);
-        MangaRepo::new(db.clone()).update(&MangaUpdate { favorite: Some(false), ..MangaUpdate::new(manga) }).expect("unfavorite");
-        add_to_library(&db, EntryKind::Manga, manga).expect("add");
-        assert!(MangaRepo::new(db.clone()).by_id(manga).expect("stored").favorite);
-        assert_eq!(entry_title(&db, EntryKind::Manga, manga).as_deref(), Some("M"));
-        assert_eq!(entry_title(&db, EntryKind::Manga, 9_999), None);
-    }
 }

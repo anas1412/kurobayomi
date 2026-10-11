@@ -420,7 +420,7 @@ fn open_details(kind: BrowseKind, prefs: &Rc<SourcePrefs>, ext: Option<Ext>, row
     if let Some(pkg) = pkg {
         pop_when_gone(page.widget(), pkg, rows);
     }
-    push_page(&tr(MsgKey::label_extension_info), page.widget());
+    crate::ui::push(&crate::ui::page(&tr(MsgKey::label_extension_info), page.widget(), vec![page.actions()], true));
 }
 
 /// Pops the details page once its package is gone from the installed rows, checked each second while the page is the one on
@@ -435,6 +435,39 @@ fn pop_when_gone(page: &gtk::Box, pkg: String, rows: Rc<dyn Fn() -> Vec<Ext>>) {
         }
         gtk::glib::ControlFlow::Continue
     });
+}
+
+/// The manga Sources page over `snapshot`, which reads the directory and the prefs. It reads again each time the page is
+/// shown, as the anime page does: the tab is built before the built-in and recipe sources start, so the first read
+/// lists none of them. A change to the languages, hidden or pinned sources or the last used source also reaches the
+/// open page (T-40b-015).
+fn manga_sources_page(prefs: &Rc<SourcePrefs>, ready: watch::Receiver<bool>, snapshot: Rc<dyn Fn(&SourcePrefs) -> SourcesSnapshot>) -> super::sources_page::SourcesPage {
+    let (pin, hide) = (prefs.pinned_manga_sources.clone(), prefs.disabled_manga_sources.clone());
+    let nav = SourcesNav {
+        open_listing: Rc::new(|source_id, query| super::pending::open(BrowseRoute::BrowseSource { source_id, query, migrating: false })),
+        toggle_pin: Rc::new(move |id| flip(&pin, id, toggle_pin)),
+        toggle_disabled: Rc::new(move |id| flip(&hide, id, flip_disabled)),
+    };
+    let page = super::pages::sources(nav, ready);
+    let show = {
+        let (page, prefs) = (page.clone(), Rc::clone(prefs));
+        move || page.update(snapshot(&prefs))
+    };
+    show();
+    let shown = show.clone();
+    page.widget().connect_map(move |_| shown());
+    let checks: Vec<Box<dyn Fn() -> bool>> = vec![
+        watch_check(&prefs.enabled_languages),
+        watch_check(&prefs.disabled_manga_sources),
+        watch_check(&prefs.pinned_manga_sources),
+        watch_check(&prefs.last_used_manga_source),
+    ];
+    let alive = {
+        let widget = page.widget().downgrade();
+        move || widget.upgrade().is_some()
+    };
+    glue::poll_pref_changes(checks, alive, show);
+    page
 }
 
 /// Builds the tab. `None` before the app data is open.
@@ -454,38 +487,11 @@ pub fn browse() -> Option<Built> {
     });
 
     // Sources: the toggles write the sets, the lists wait for a source registry
-    let manga_sources = {
-        let (pin, hide) = (prefs.pinned_manga_sources.clone(), prefs.disabled_manga_sources.clone());
-        let nav = SourcesNav {
-            open_listing: Rc::new(|source_id, query| super::pending::open(BrowseRoute::BrowseSource { source_id, query, migrating: false })),
-            toggle_pin: Rc::new(move |id| flip(&pin, id, toggle_pin)),
-            toggle_disabled: Rc::new(move |id| flip(&hide, id, flip_disabled)),
-        };
-        let page = super::pages::sources(nav, ready.clone());
-        page.update(manga_sources_snapshot(&prefs));
-        // a change to the languages, hidden or pinned sources or the last used source reaches the open page (T-40b-015)
-        let checks: Vec<Box<dyn Fn() -> bool>> = vec![
-            watch_check(&prefs.enabled_languages),
-            watch_check(&prefs.disabled_manga_sources),
-            watch_check(&prefs.pinned_manga_sources),
-            watch_check(&prefs.last_used_manga_source),
-        ];
-        let alive = {
-            let widget = page.widget().downgrade();
-            move || widget.upgrade().is_some()
-        };
-        let (shown, prefs_for_page) = (page.clone(), Rc::clone(&prefs));
-        glue::poll_pref_changes(checks, alive, move || shown.update(manga_sources_snapshot(&prefs_for_page)));
-        page
-    };
+    let manga_sources = manga_sources_page(&prefs, ready.clone(), Rc::new(manga_sources_snapshot));
     let anime_sources = {
         let (pin, hide) = (prefs.pinned_anime_sources.clone(), prefs.disabled_anime_sources.clone());
-        let filter_prefs = Rc::clone(&prefs);
-        let filter_rows = Rc::clone(&rows_of);
         let nav = AnimeSourcesNav {
             route: Rc::new(move |route| match route {
-                TabRoute::GlobalSearch => open_route(&BrowseRoute::GlobalSearch { kind: BrowseKind::Anime, source_id: None, query: String::new() }),
-                TabRoute::Visibility => open_filter(BrowsePage::AnimeSources, &filter_prefs, &*filter_rows),
                 TabRoute::Browse { source_id, query } => open_route(&BrowseRoute::AnimeBrowseSource { source_id, query }),
             }),
             toggle_pin: Rc::new(move |id| flip(&pin, id, toggle_pin)),
@@ -578,8 +584,13 @@ pub fn browse() -> Option<Built> {
     ];
     let filter_prefs = Rc::clone(&prefs);
     let filter_rows = Rc::clone(&rows_of);
+    let page_actions: Vec<(BrowsePage, gtk::Widget)> = vec![
+        (BrowsePage::AnimeExtensions, anime_extensions.actions().clone().upcast()),
+        (BrowsePage::MangaExtensions, manga_extensions.actions().clone().upcast()),
+    ];
     let deps = ShellDeps {
         pages,
+        page_actions,
         on_route: Rc::new(|route| open_route(&route)),
         on_query: {
             let (anime, manga) = (anime_extensions.clone(), manga_extensions.clone());
@@ -848,5 +859,85 @@ mod tests {
         assert_eq!(language_rows(true, vec![ext_row("a", false)]).map(|rows| rows.len()), Ok(1));
         assert!(language_rows(true, Vec::new()).is_ok_and(|rows| rows.is_empty()), "an empty list is the empty screen, not a failure");
         assert!(language_rows(false, vec![ext_row("a", false)]).is_err(), "T-41a-018: no host, no languages: the banner");
+    }
+
+    /// The page is built before the sources start (main builds the tabs first): a source that arrives afterwards is
+    /// listed once the page is shown, with no pref written in between.
+    #[test]
+    fn the_manga_sources_page_lists_sources_that_arrive_after_it_was_built() {
+        crate::testing::with_display(|| {
+            let prefs = Rc::new(SourcePrefs::new(kuro_prefs::store::PrefStore::in_memory()));
+            let arrived: Rc<RefCell<Vec<Source>>> = Rc::default();
+            let read = {
+                let arrived = Rc::clone(&arrived);
+                Rc::new(move |_: &SourcePrefs| SourcesSnapshot {
+                    sources: arrived.borrow().clone(),
+                    enabled_languages: BTreeSet::from(["en".to_owned()]),
+                    last_used: -1,
+                    ..SourcesSnapshot::default()
+                })
+            };
+            let (_ready_tx, ready) = watch::channel(true);
+            let page = manga_sources_page(&prefs, ready, read);
+            arrived.borrow_mut().push(Source::new(2131019126180322627, "Weeb Central", "en"));
+            let window = gtk::Window::builder().default_width(600).default_height(600).child(page.widget()).build();
+            window.present();
+            let lists_it = || {
+                let mut stack = vec![page.widget().clone().upcast::<gtk::Widget>()];
+                while let Some(widget) = stack.pop() {
+                    if widget.downcast_ref::<gtk::Label>().is_some_and(|l| l.label() == "Weeb Central") {
+                        return true;
+                    }
+                    let mut child = widget.first_child();
+                    while let Some(c) = child {
+                        child = c.next_sibling();
+                        stack.push(c);
+                    }
+                }
+                false
+            };
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while std::time::Instant::now() < deadline && !lists_it() {
+                gtk::glib::MainContext::default().iteration(false);
+            }
+            assert!(lists_it(), "the source that arrived after the build is listed once the page is shown");
+            window.close();
+        });
+    }
+
+    /// The empty Sources page of a kind has one action, Extensions, and it shows that kind's extensions.
+    #[test]
+    fn the_empty_sources_action_opens_the_extensions_of_its_kind() {
+        crate::testing::with_display(|| {
+            let pages = BrowsePage::ALL.iter().map(|p| (*p, gtk::Label::new(Some(&p.title())).upcast::<gtk::Widget>())).collect();
+            let deps = ShellDeps {
+                pages,
+                page_actions: Vec::new(),
+                on_route: Rc::new(|_| {}),
+                on_query: Rc::new(|_, _| {}),
+                on_filter: Rc::new(|_| {}),
+                on_repos: Rc::new(|_| {}),
+                on_refresh: Rc::new(|_| {}),
+                on_update_all: Rc::new(|_| {}),
+                on_leave: Rc::new(|| {}),
+            };
+            let shell = Rc::new(BrowseShell::new(deps));
+            SHELL.with(|s| *s.borrow_mut() = Some(Rc::clone(&shell)));
+            let shows = |page: BrowsePage| {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                while std::time::Instant::now() < deadline && shell.visible() != page {
+                    gtk::glib::MainContext::default().iteration(false);
+                }
+                shell.visible() == page
+            };
+            for (kind, page) in [(BrowseKind::Manga, BrowsePage::MangaExtensions), (BrowseKind::Anime, BrowsePage::AnimeExtensions)] {
+                let empty = super::super::sources_page::sources_empty(kind);
+                let action = empty.last_child().and_downcast::<gtk::Button>().expect("the one action");
+                assert_eq!(action.label().as_deref(), Some(tr(MsgKey::label_extensions).as_str()));
+                action.emit_clicked();
+                assert!(shows(page), "{kind:?}: its extensions show");
+            }
+            SHELL.with(|s| s.borrow_mut().take());
+        });
     }
 }

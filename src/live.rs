@@ -1,183 +1,35 @@
-//! The live library, categories, history and updates screens (T-08a-033, T-08a-034). Rows come from the app's
-//! databases ([`crate::data`]). Each screen renders once, then again on the GTK main loop whenever its live query
-//! publishes (see [`crate::watch::bind_watch`]).
+//! The live Categories screen (T-08a-033, T-08a-034). Rows come from the app's databases ([`crate::data`]). The screen
+//! renders once, then again on the GTK main loop whenever its live query publishes (see [`crate::watch::bind_watch`]).
+//! The library, history and updates screens have their own modules (`library`, `updates`).
 
-use std::cell::Cell;
 use std::rc::Rc;
 
-use chrono::{Local, Months};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, ListBox, Orientation as O};
-use kuro_core::text::primary_cmp;
-use kuro_data::anime::AnimeRepo;
-use kuro_data::manga::MangaRepo;
 use kuro_domain::category::model::Category;
-use kuro_domain::dates::ListRow;
-use kuro_domain::history::repo::HistoryRepo;
-use kuro_domain::history::view::{HistoryLine, build_lines};
 use kuro_domain::kind::EntryKind;
-use kuro_domain::library::model::LibraryRow;
-use kuro_domain::library::repo::LibraryRepo;
-use kuro_domain::updates::repo::UpdatesRepo;
-use kuro_domain::updates::tab::{UpdateLine, group};
 
-use crate::data::{self, App};
-use crate::screens::{badge, dialog_then, fab, list_row, open_media, thumb};
-use crate::ui::{boxed_list, cover, dim, heading, icon_button, margins, modal, scrolled, screen};
+use crate::data;
+use crate::screens::{dialog_then_named, list_row};
+use crate::ui::{boxed_list, column, icon_button, margins, modal, scrolled, screen};
 use crate::watch::bind_watch;
-
-/// Milliseconds in the Updates window: the last three months, as the Android Updates tab shows.
-fn updates_since() -> i64 {
-    Local::now().checked_sub_months(Months::new(3)).map_or(0, |t| t.timestamp_millis())
-}
 
 fn kind_of(anime: bool) -> EntryKind {
     if anime { EntryKind::Anime } else { EntryKind::Manga }
 }
 
-fn clear_box(b: &impl IsA<gtk::Widget>) {
-    let b = b.upcast_ref::<gtk::Widget>();
-    while let Some(child) = b.first_child() {
-        child.unparent();
+/// A category write that failed is a toast; the list stays as the database has it.
+fn report<T, E: std::fmt::Display>(result: Result<T, E>) {
+    if let Err(e) = result {
+        tracing::error!(error = %e, "a category change failed");
+        crate::toast::notify(e.to_string());
     }
 }
 
 fn clear_list(list: &ListBox) {
     while let Some(row) = list.first_child() {
         list.remove(&row);
-    }
-}
-
-/// The library tabs of one kind: `(category id, label)`. The Default page (id 0) is kept when an entry is in it, or
-/// when the library is empty; the visible categories follow in their order.
-fn library_pages(app: &App, kind: EntryKind, rows: &[LibraryRow]) -> Vec<(i64, String)> {
-    let mut pages = Vec::new();
-    if rows.is_empty() || rows.iter().any(|r| r.category == 0) {
-        pages.push((0, "Default".to_owned()));
-    }
-    let visible = app.categories(kind).repo().visible().unwrap_or_default();
-    pages.extend(visible.into_iter().map(|c| (c.id, c.name)));
-    pages
-}
-
-/// One library body: the category tabs over a grid of covers. The grid shows the page of the active tab.
-struct LibraryView {
-    anime: bool,
-    grid: gtk::FlowBox,
-    tabs: GBox,
-    active: Cell<usize>,
-}
-
-impl LibraryView {
-    fn render(self: &Rc<Self>) {
-        let app = data::app();
-        let kind = kind_of(self.anime);
-        let rows = LibraryRepo::new(app.db(kind)).all(kind).unwrap_or_default();
-        let pages = library_pages(&app, kind, &rows);
-        let active = self.active.get().min(pages.len().saturating_sub(1));
-        self.active.set(active);
-        clear_box(&self.tabs);
-        let mut first: Option<gtk::ToggleButton> = None;
-        for (i, (_, name)) in pages.iter().enumerate() {
-            let tab = gtk::ToggleButton::with_label(name);
-            match &first {
-                Some(f) => tab.set_group(Some(f)),
-                None => first = Some(tab.clone()),
-            }
-            tab.set_active(i == active);
-            let view = Rc::clone(self);
-            tab.connect_toggled(move |b| {
-                if b.is_active() {
-                    view.active.set(i);
-                    view.render_cards();
-                }
-            });
-            self.tabs.append(&tab);
-        }
-        self.render_cards();
-    }
-
-    fn render_cards(&self) {
-        let app = data::app();
-        let kind = kind_of(self.anime);
-        let rows = LibraryRepo::new(app.db(kind)).all(kind).unwrap_or_default();
-        let pages = library_pages(&app, kind, &rows);
-        while let Some(child) = self.grid.first_child() {
-            self.grid.remove(&child);
-        }
-        let Some((page, _)) = pages.get(self.active.get()) else { return };
-        let mut members: Vec<&LibraryRow> = rows.iter().filter(|r| r.category == *page).collect();
-        members.sort_by(|a, b| primary_cmp(&a.title, &b.title));
-        members.dedup_by_key(|r| r.id);
-        if members.is_empty() {
-            // the library's own empty text from the spec; "Category is empty" is the plan's text (not a spec key)
-            let text = if rows.is_empty() {
-                screen(if self.anime { "anime_library" } else { "manga_library" }).empty.unwrap_or_default()
-            } else {
-                "Category is empty".to_owned()
-            };
-            self.grid.insert(&dim(&text), -1);
-            return;
-        }
-        for row in members {
-            self.grid.insert(&self.card(row), -1);
-        }
-    }
-
-    /// A cover card: the unread badge when entries are pending, a resume button and the title as the last label.
-    fn card(&self, row: &LibraryRow) -> GBox {
-        let anime = self.anime;
-        let card = GBox::new(O::Vertical, 4);
-        let ov = gtk::Overlay::new();
-        ov.set_child(Some(&cover(140, 200)));
-        let pending = row.pending();
-        if pending > 0 {
-            let badges = GBox::new(O::Horizontal, 0);
-            badges.add_css_class("linked");
-            badges.set_halign(Align::Start);
-            badges.set_valign(Align::Start);
-            margins(&badges, 4);
-            badges.append(&badge(&format!(" {pending} "), "accent"));
-            ov.add_overlay(&badges);
-        }
-        let resume = Button::builder()
-            .icon_name("media-playback-start-symbolic")
-            .css_classes(["circular", "osd"])
-            .halign(Align::End)
-            .valign(Align::End)
-            .tooltip_text("Resume")
-            .build();
-        margins(&resume, 6);
-        let title = row.title.clone();
-        let t = title.clone();
-        resume.connect_clicked(move |_| open_media(anime, &t, if anime { "Episode 2" } else { "Chapter 2" }));
-        ov.add_overlay(&resume);
-        card.append(&ov);
-        card.append(
-            &Label::builder()
-                .label(&title)
-                .xalign(0.0)
-                .lines(2)
-                .wrap(true)
-                .ellipsize(gtk::pango::EllipsizeMode::End)
-                .max_width_chars(16)
-                .build(),
-        );
-        card
-    }
-}
-
-/// Fills the library grid and the tabs of one kind, and keeps them in step with the library rows.
-pub fn attach_library(grid: &gtk::FlowBox, tabs: &GBox, anime: bool) {
-    let view = Rc::new(LibraryView { anime, grid: grid.clone(), tabs: tabs.clone(), active: Cell::new(0) });
-    view.render();
-    let app = data::app();
-    let db = app.db(kind_of(anime));
-    if anime {
-        bind_watch(AnimeRepo::new(db).subscribe_library(), move |_| view.render());
-    } else {
-        bind_watch(MangaRepo::new(db).subscribe_library(), move |_| view.render());
     }
 }
 
@@ -229,12 +81,15 @@ fn name_dialog(dialog: &str, initial: &str, taken: impl Fn(&str) -> bool + 'stat
         });
         buttons.append(&button);
     }
+    win.present();
 }
 
-/// One category row list of one kind. Rename, hide and delete write through the category service.
+/// One category row list of one kind. Rename, hide and delete write through the category service. With no user
+/// category the list hides and `empty` (the empty state with its Add button) shows.
 struct CategoryList {
     kind: EntryKind,
     list: ListBox,
+    empty: GBox,
 }
 
 /// Whether a user category other than `except` already has the trimmed name `new` (the same exact-name rule the
@@ -251,12 +106,16 @@ fn taken_by_user(all: &[Category], new: &str, except: Option<i64>) -> bool {
 
 impl CategoryList {
     fn render(self: &Rc<Self>) {
-        clear_list(&self.list);
         let app = data::app();
-        let cats: Vec<_> = app.categories(self.kind).repo().all().unwrap_or_default().into_iter().filter(|c| !c.is_system()).collect();
-        if cats.is_empty() {
-            self.list.append(&dim(&screen("categories").empty.unwrap_or_default()));
-        }
+        // a failed read is a toast and leaves the list as it was
+        let all = match app.categories(self.kind).repo().all() {
+            Ok(all) => all,
+            Err(e) => return report::<(), _>(Err(e)),
+        };
+        clear_list(&self.list);
+        let cats: Vec<_> = all.into_iter().filter(|c| !c.is_system()).collect();
+        self.list.set_visible(!cats.is_empty());
+        self.empty.set_visible(cats.is_empty());
         for c in cats {
             let (id, name, kind) = (c.id, c.name.clone(), self.kind);
             let edit = icon_button("document-edit-symbolic", "Rename category");
@@ -267,7 +126,7 @@ impl CategoryList {
                 name_dialog("category_rename", &rename_from, taken, move |new| {
                     let app = Rc::clone(&app);
                     glib::spawn_future_local(async move {
-                        let _ = app.categories(kind).rename(id, &new).await;
+                        report(app.categories(kind).rename(id, &new).await);
                     });
                 });
             });
@@ -279,15 +138,16 @@ impl CategoryList {
             hide.connect_toggled(move |_| {
                 let app = data::app();
                 glib::spawn_future_local(async move {
-                    let _ = app.categories(kind).toggle_hidden(id).await;
+                    report(app.categories(kind).toggle_hidden(id).await);
                 });
             });
             let del = icon_button("user-trash-symbolic", "Delete");
+            let delete_name = name.clone();
             del.connect_clicked(move |_| {
-                dialog_then("categories", "category_delete", move || {
+                dialog_then_named("categories", "category_delete", &delete_name, move || {
                     let app = data::app();
                     glib::spawn_future_local(async move {
-                        let _ = app.categories(kind).delete(id).await;
+                        report(app.categories(kind).delete(id).await);
                     });
                 });
             });
@@ -307,7 +167,7 @@ impl CategoryList {
                 }
                 let app = data::app();
                 glib::spawn_future_local(async move {
-                    let _ = app.categories(kind).move_before(dragged, Some(id)).await;
+                    report(app.categories(kind).move_before(dragged, Some(id)).await);
                 });
                 true
             });
@@ -317,149 +177,38 @@ impl CategoryList {
     }
 }
 
-/// The categories screen of one kind: a live list of the non-system categories with an Add button.
+/// The categories screen of one kind: a live list of the non-system categories in the page column, or the empty
+/// state with an Add button. The header's Add button (`screens::categories`) runs [`add_category`] too.
 pub fn categories_content(anime: bool) -> gtk::Widget {
     let kind = kind_of(anime);
-    let list = boxed_list();
-    let column = GBox::new(O::Vertical, 0);
-    margins(&column, 12);
-    column.append(&list);
-    let overlay = gtk::Overlay::new();
-    overlay.set_child(Some(&scrolled(&column)));
-    let view = Rc::new(CategoryList { kind, list });
+    let add = Button::with_label("Add category");
+    add.connect_clicked(move |_| add_category(anime));
+    let (empty, _) = crate::browse::look::empty_state("tag-symbolic", &screen("categories").empty.unwrap_or_default(), Some(&add));
+    let column = column();
+    column.append(&boxed_list());
+    column.append(&empty);
+    let list = column.first_child().and_downcast::<ListBox>().expect("the list");
+    let view = Rc::new(CategoryList { kind, list, empty });
     view.render();
     bind_watch(data::app().categories(kind).repo().watch_all(), move |_| view.render());
-    fab(&overlay, "Add", "list-add-symbolic").connect_clicked(move |_| {
-        name_dialog("category_create", "", move |new| user_names_taken(kind, new, None), move |name| {
-            let app = data::app();
-            glib::spawn_future_local(async move {
-                let _ = app.categories(kind).create(&name).await;
-            });
+    scrolled(&column).upcast()
+}
+
+/// The Add category dialog of one kind; the name is created through the category service.
+pub fn add_category(anime: bool) {
+    let kind = kind_of(anime);
+    name_dialog("category_create", "", move |new| user_names_taken(kind, new, None), move |name| {
+        let app = data::app();
+        glib::spawn_future_local(async move {
+            report(app.categories(kind).create(&name).await);
         });
     });
-    overlay.upcast()
-}
-
-/// The history list of one kind, grouped under date headers, with a remove button per row.
-struct HistoryView {
-    kind: EntryKind,
-    col: GBox,
-}
-
-impl HistoryView {
-    fn render(self: &Rc<Self>) {
-        clear_box(&self.col);
-        let app = data::app();
-        let rows = HistoryRepo::new(app.db(self.kind)).list(self.kind, "").unwrap_or_default();
-        let lines = build_lines(&rows, self.kind, Local::now().date_naive(), &Local, true, None);
-        let mut current: Option<ListBox> = None;
-        for line in lines {
-            match line {
-                ListRow::Header(text) => {
-                    self.col.append(&heading(&text));
-                    let list = boxed_list();
-                    self.col.append(&list);
-                    current = Some(list);
-                }
-                ListRow::Item(line) => {
-                    let list = current.get_or_insert_with(|| {
-                        let list = boxed_list();
-                        self.col.append(&list);
-                        list
-                    });
-                    list.append(&self.row(&line));
-                }
-            }
-        }
-    }
-
-    fn row(&self, line: &HistoryLine) -> gtk::ListBoxRow {
-        let anime = self.kind == EntryKind::Anime;
-        let remove = icon_button("user-trash-symbolic", "Delete");
-        let (kind, history_id) = (self.kind, line.history_id);
-        let dialog = if anime { "history_remove_anime" } else { "history_remove_manga" };
-        remove.connect_clicked(move |_| {
-            dialog_then("history", dialog, move || {
-                let app = data::app();
-                let _ = HistoryRepo::new(app.db(kind)).reset_one(kind, history_id);
-            });
-        });
-        let row = list_row(Some(thumb(48, 70).upcast()), &line.title, &line.text, vec![remove.upcast()]);
-        let (title, text) = (line.title.clone(), line.text.clone());
-        row.connect_activate(move |_| open_media(anime, &title, &text));
-        row
-    }
-}
-
-/// The history screen of one kind. The rows follow the history table.
-pub fn history_content(anime: bool) -> gtk::Widget {
-    let kind = kind_of(anime);
-    let col = GBox::new(O::Vertical, 6);
-    margins(&col, 12);
-    let view = Rc::new(HistoryView { kind, col: col.clone() });
-    view.render();
-    bind_watch(HistoryRepo::new(data::app().db(kind)).watch_list(kind, String::new()), move |_| view.render());
-    scrolled(&col).upcast()
-}
-
-/// `history_remove_everything` for the history of one kind, then clears it.
-pub fn confirm_clear_history(anime: bool) {
-    let kind = kind_of(anime);
-    dialog_then("history", "history_remove_everything", move || {
-        let app = data::app();
-        HistoryRepo::new(app.db(kind)).clear_all(kind);
-    });
-}
-
-/// The updates feed of one kind, grouped by day over the last three months.
-struct UpdatesView {
-    kind: EntryKind,
-    since: i64,
-    col: GBox,
-}
-
-impl UpdatesView {
-    fn render(self: &Rc<Self>) {
-        clear_box(&self.col);
-        let app = data::app();
-        let rows = UpdatesRepo::new(app.db(self.kind)).recent(self.kind, self.since).unwrap_or_default();
-        for item in group(&rows, Local::now().date_naive(), &Local, true, None) {
-            match item {
-                ListRow::Header(text) => self.col.append(&heading(&text)),
-                ListRow::Item(line) => {
-                    let list = boxed_list();
-                    list.append(&self.row(&line));
-                    self.col.append(&list);
-                }
-            }
-        }
-    }
-
-    fn row(&self, line: &UpdateLine) -> gtk::ListBoxRow {
-        let anime = self.kind == EntryKind::Anime;
-        let pre = thumb(40, 40);
-        let row = list_row(Some(pre.upcast()), &line.entry_title, &line.text, Vec::new());
-        let (title, text) = (line.entry_title.clone(), line.text.clone());
-        row.connect_activate(move |_| open_media(anime, &title, &text));
-        row
-    }
-}
-
-/// The updates screen of one kind. The feed follows the updates table.
-pub fn updates_content(anime: bool) -> gtk::Widget {
-    let kind = kind_of(anime);
-    let since = updates_since();
-    let col = GBox::new(O::Vertical, 6);
-    margins(&col, 12);
-    let view = Rc::new(UpdatesView { kind, since, col: col.clone() });
-    view.render();
-    bind_watch(UpdatesRepo::new(data::app().db(kind)).watch_recent(kind, since), move |_| view.render());
-    scrolled(&col).upcast()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::screens::alone::{self, descendants, pump};
 
     fn cat(id: i64, name: &str) -> Category {
         Category { id, name: name.to_owned(), order: id, flags: 0, hidden: false }
@@ -473,5 +222,100 @@ mod tests {
         assert!(!taken_by_user(&all, "Reading", Some(1)), "renaming to the current name is not a duplicate");
         assert!(!taken_by_user(&all, "Default", None), "the system category never blocks a name");
         assert!(!taken_by_user(&all, "reading", None), "names are exact, not case-folded, as in the service");
+    }
+
+    /// The modal dialog on screen and its own buttons in order (the last one is OK).
+    fn confirm() -> (gtk::Window, Vec<Button>) {
+        let window = gtk::Window::list_toplevels().into_iter().filter_map(|w| w.downcast::<gtk::Window>().ok()).find(|w| w.is_modal() && w.is_visible()).expect("a dialog is on screen");
+        // the dialog's own buttons have labels; the title bar's window controls are icons
+        let buttons = descendants(window.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Button>().ok()).filter(|b| b.label().is_some()).collect();
+        (window, buttons)
+    }
+
+    /// [`confirm`] for a name dialog, with its entry.
+    fn dialog() -> (gtk::Window, gtk::Entry, Vec<Button>) {
+        let (window, buttons) = confirm();
+        let entry = descendants(window.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::Entry>().ok()).expect("the name entry");
+        (window, entry, buttons)
+    }
+
+    fn named(root: &gtk::Widget, tooltip: &str) -> Vec<gtk::Widget> {
+        descendants(root).into_iter().filter(|w| w.tooltip_text().as_deref() == Some(tooltip)).collect()
+    }
+
+    fn row_names(root: &gtk::Widget) -> Vec<String> {
+        let rows = descendants(root).into_iter().filter(|w| w.is::<gtk::ListBoxRow>());
+        rows.filter_map(|row| descendants(&row).into_iter().filter_map(|w| w.downcast::<Label>().ok()).map(|l| l.text().to_string()).next()).collect()
+    }
+
+    /// Needs a display and runs in a child process with fresh app data (see [`alone`]).
+    #[test]
+    fn the_categories_screen_creates_renames_hides_reorders_and_deletes_and_shows_errors() {
+        alone::run(module_path!(), "the_categories_screen_creates_renames_hides_reorders_and_deletes_and_shows_errors", |ctx| {
+            let (_stack, _window) = crate::testing::nav();
+            let toast = alone::toast_label();
+            let page = categories_content(false);
+            let names = || row_names(&page);
+            let kind = EntryKind::Manga;
+            let create = |name: &str| {
+                add_category(false);
+                let (window, entry, buttons) = dialog();
+                entry.set_text(name);
+                buttons.last().expect("OK").emit_clicked();
+                (window, buttons)
+            };
+            assert!(names().is_empty(), "no category yet: the empty state shows");
+
+            // create
+            create("Reading");
+            assert!(pump(ctx, || names() == ["Reading"]), "the new category is listed, got {:?}; stored {:?}; toast {:?}", names(), data::app().categories(kind).repo().all().map(|a| a.into_iter().map(|c| c.name).collect::<Vec<_>>()), toast.text());
+
+            // a taken name keeps the dialog open and says why
+            let (window, buttons) = create("Reading");
+            let (_, _, again) = dialog();
+            assert_eq!(again.len(), buttons.len(), "the dialog is still the one on screen");
+            let error = descendants(window.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).find(|l| l.text() == DUPLICATE_CATEGORY).expect("the duplicate error label");
+            assert!(error.is_visible(), "the duplicate-name error shows");
+            buttons.first().expect("Cancel").emit_clicked();
+            assert!(!window.is_visible(), "Cancel closes the dialog");
+            assert_eq!(names(), ["Reading"], "the duplicate was not created");
+
+            // rename
+            named(page.upcast_ref(), "Rename category")[0].clone().downcast::<Button>().expect("button").emit_clicked();
+            let (_, entry, buttons) = dialog();
+            assert_eq!(entry.text(), "Reading", "the dialog starts on the current name");
+            entry.set_text("Watching");
+            buttons.last().expect("OK").emit_clicked();
+            assert!(pump(ctx, || names() == ["Watching"]), "the rename shows, got {:?}", names());
+
+            // hide
+            let hide = named(page.upcast_ref(), "Hide")[0].clone().downcast::<gtk::ToggleButton>().expect("toggle");
+            hide.set_active(true);
+            let hidden = || descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).any(|l| l.text() == "Hidden");
+            assert!(pump(ctx, hidden), "a hidden category says Hidden");
+            assert!(data::app().categories(kind).repo().all().expect("read").iter().any(|c| c.name == "Watching" && c.hidden), "stored as hidden");
+
+            // reorder: a second category, dropped before the first
+            let app = data::app();
+            glib::spawn_future_local(async move { report(app.categories(kind).create("Later").await) });
+            assert!(pump(ctx, || names() == ["Watching", "Later"]), "the second category is listed, got {:?}", names());
+            let ids = |name: &str| data::app().categories(kind).repo().all().expect("read").iter().find(|c| c.name == name).map(|c| c.id).expect("category");
+            let first = descendants(page.upcast_ref()).into_iter().find(|w| w.is::<gtk::ListBoxRow>()).expect("first row");
+            let target = first.observe_controllers().iter::<glib::Object>().flatten().find_map(|c| c.downcast::<gtk::DropTarget>().ok()).expect("the row takes drops");
+            let dropped = target.emit_by_name::<bool>("drop", &[&glib::BoxedValue(ids("Later").to_value()), &0.0_f64, &0.0_f64]);
+            assert!(dropped, "the drop is accepted");
+            assert!(pump(ctx, || names() == ["Later", "Watching"]), "the dragged category moved before the other, got {:?}", names());
+
+            // delete, after the confirmation
+            named(page.upcast_ref(), "Delete")[0].clone().downcast::<Button>().expect("button").emit_clicked();
+            let (window, buttons) = confirm();
+            assert!(descendants(window.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Label>().ok()).any(|l| l.text().contains("\"Later\"")), "the question names the category");
+            buttons.last().expect("Delete").emit_clicked();
+            assert!(pump(ctx, || names() == ["Watching"]), "the category is gone, got {:?}", names());
+
+            // a failed service call is a toast
+            report::<(), _>(Err("the database is locked"));
+            assert!(pump(ctx, || toast.text() == "the database is locked"), "the error reaches a toast, got {:?}", toast.text());
+        });
     }
 }

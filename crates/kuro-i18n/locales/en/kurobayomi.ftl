@@ -28,9 +28,6 @@ action_continue = Continue
 manga = Manga
 
 # source: i18n-aniyomi
-pref_library_summary = Categories, global update, chapter/episode swipe
-
-# source: i18n-aniyomi
 pref_behavior = Chapter behavior
 
 # source: i18n-aniyomi
@@ -121,9 +118,6 @@ pref_player_settings_summary = Internal player, gestures, decoders, subtitles
 pref_player_internal = Internal player
 
 # source: i18n-aniyomi
-pref_player_internal_summary = Progress, controls, orientation
-
-# source: i18n-aniyomi
 pref_progress_mark_as_seen = At what point to mark the episode as seen
 
 # source: i18n-aniyomi
@@ -151,21 +145,6 @@ pref_progress_100 = 100%
 pref_preserve_watching_position = Preserve watch position on seen episodes
 
 # source: i18n-aniyomi
-pref_category_player_orientation = Orientation
-
-# source: i18n-aniyomi
-rotation_video = Video
-
-# source: i18n-aniyomi
-rotation_reverse_landscape = Reverse landscape
-
-# source: i18n-aniyomi
-rotation_sensor_portrait = Sensor portrait
-
-# source: i18n-aniyomi
-rotation_sensor_landscape = Sensor landscape
-
-# source: i18n-aniyomi
 pref_category_controls = Controls
 
 # source: i18n-aniyomi
@@ -182,9 +161,6 @@ pref_controls_show_chapter_indicator_info = Only appears if the video has chapte
 
 # source: i18n-aniyomi
 pref_controls_display_volume_percentage = Display volume as percentage
-
-# source: i18n-aniyomi
-pref_remember_brightness = Remember and switch to the last used brightness
 
 # source: i18n-aniyomi
 pref_remember_volume = Remember and switch to the last used volume
@@ -290,15 +266,6 @@ pref_player_gestures = Gestures
 
 # source: i18n-aniyomi
 pref_player_gestures_summary = Seeking, double tap, media controls
-
-# source: i18n-aniyomi
-pref_category_player_sliders = Sliders
-
-# source: i18n-aniyomi
-enable_volume_brightness_gestures = Enable Volume and Brightness Gestures
-
-# source: i18n-aniyomi
-pref_controls_swap_vol_brightness = Swap volume and brightness slider
 
 # source: i18n-aniyomi
 pref_category_player_seeking = Seeking
@@ -1555,12 +1522,6 @@ theme_mocha = Mocha
 pref_behavior_episode = Episode behavior
 
 # source: i18n-aniyomi
-pref_episode_swipe_end = Episode on swipe to right
-
-# source: i18n-aniyomi
-pref_episode_swipe_start = Episode on swipe to left
-
-# source: i18n-aniyomi
 pref_mark_duplicate_seen_episode_seen = Mark duplicate seen episode as seen
 
 # source: i18n-aniyomi
@@ -2311,12 +2272,6 @@ onboarding_permission_notifications = Notification permission
 onboarding_permission_notifications_description = Get notified for library updates and more.
 
 # source: i18n
-onboarding_permission_ignore_battery_opts = Background battery usage
-
-# source: i18n
-onboarding_permission_ignore_battery_opts_description = Avoid interruptions to long-running library updates, downloads, and backup restores.
-
-# source: i18n
 onboarding_permission_crashlytics = Send crash logs
 
 # source: i18n
@@ -2380,12 +2335,6 @@ pref_browse_summary = Sources, extensions, global search
 pref_backup_summary = Manual & automatic backups, storage space
 
 # source: i18n
-pref_security_summary = App lock, secure screen
-
-# source: i18n
-pref_advanced_summary = Dump crash logs, battery optimizations
-
-# source: i18n
 pref_category_theme = Theme
 
 # source: i18n
@@ -2399,9 +2348,6 @@ theme_light = Light
 
 # source: i18n
 theme_dark = Dark
-
-# source: i18n
-theme_monet = Dynamic
 
 # source: i18n
 theme_greenapple = Green Apple
@@ -2477,12 +2423,6 @@ lock_never = Never
 
 # source: i18n
 hide_notification_content = Hide notification content
-
-# source: i18n
-secure_screen = Secure screen
-
-# source: i18n
-secure_screen_summary = Secure screen hides app contents when switching apps and block screenshots
 
 # source: i18n
 firebase_summary = Sending crash logs and analytics will allow us to identify and fix issues, improve performance, and make future updates more relevant to your needs
@@ -2596,12 +2536,6 @@ include = Include: { $arg1 }
 exclude = Exclude: { $arg1 }
 
 # source: i18n
-pref_chapter_swipe_end = Chapter on swipe to right
-
-# source: i18n
-pref_chapter_swipe_start = Chapter on swipe to left
-
-# source: i18n
 pref_mark_duplicate_read_chapter_read = Mark duplicate read chapter as read
 
 # source: i18n
@@ -2693,27 +2627,6 @@ ext_permission_install_apps_warning = Permissions are needed to install extensio
 
 # source: i18n
 ext_install_service_notif = Installing extension…
-
-# source: i18n
-ext_installer_pref = Installer
-
-# source: i18n
-ext_installer_legacy = Legacy
-
-# source: i18n
-ext_installer_packageinstaller = PackageInstaller
-
-# source: i18n
-ext_installer_shizuku = Shizuku
-
-# source: i18n
-ext_installer_private = Private
-
-# source: i18n
-ext_installer_shizuku_stopped = Shizuku is not running
-
-# source: i18n
-ext_installer_shizuku_unavailable_dialog = Install and start Shizuku to use Shizuku as extension installer.
 
 # source: i18n
 ext_revoke_trust = Revoke trusted unknown extensions
@@ -3076,30 +2989,6 @@ double_tap_anim_speed_normal = Normal
 double_tap_anim_speed_fast = Fast
 
 # source: i18n
-pref_rotation_type = Default rotation
-
-# source: i18n
-rotation_type = Rotation
-
-# source: i18n
-rotation_free = Free
-
-# source: i18n
-rotation_portrait = Portrait
-
-# source: i18n
-rotation_reverse_portrait = Reverse portrait
-
-# source: i18n
-rotation_landscape = Landscape
-
-# source: i18n
-rotation_force_portrait = Locked portrait
-
-# source: i18n
-rotation_force_landscape = Locked landscape
-
-# source: i18n
 color_filter_r_value = Red
 
 # source: i18n
@@ -3424,9 +3313,6 @@ pref_refresh_library_covers = Refresh library covers
 pref_reset_viewer_flags = Reset per-series reader settings
 
 # source: i18n
-pref_reset_viewer_flags_summary = Resets reading mode and orientation of all series
-
-# source: i18n
 pref_reset_viewer_flags_success = All reader settings reset
 
 # source: i18n
@@ -3437,27 +3323,6 @@ pref_dump_crash_logs = Share crash logs
 
 # source: i18n
 pref_dump_crash_logs_summary = Saves error logs to a file for sharing with the developers
-
-# source: i18n
-label_background_activity = Background activity
-
-# source: i18n
-pref_disable_battery_optimization = Disable battery optimization
-
-# source: i18n
-pref_disable_battery_optimization_summary = Helps with background library updates and backups
-
-# source: i18n
-battery_optimization_disabled = Battery optimization is already disabled
-
-# source: i18n
-battery_optimization_setting_activity_not_found = Couldn't open device settings
-
-# source: i18n
-about_dont_kill_my_app = Some manufacturers have additional app restrictions that kill background services. This website has more info on how to fix it.
-
-# source: i18n
-pref_tablet_ui_mode = Tablet UI
 
 # source: i18n
 pref_verbose_logging = Verbose logging
@@ -4507,3 +4372,18 @@ cookie_import_title = Import Cloudflare cookie
 
 # source: kurobayomi
 cookie_import_hint = Paste the value of the cf_clearance cookie from your browser and the browser's user agent.
+
+# source: kurobayomi
+pref_library_summary = Categories, global update
+
+# source: kurobayomi
+pref_player_internal_summary = Progress, controls
+
+# source: kurobayomi
+pref_security_summary = App lock
+
+# source: kurobayomi
+pref_advanced_summary = Dump crash logs
+
+# source: kurobayomi
+pref_reset_viewer_flags_summary = Resets reading mode of all series

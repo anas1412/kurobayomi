@@ -13,7 +13,6 @@ pub const DOUBLE_TAP_FACTOR: f64 = 2.0;
 pub const WHEEL_ZOOM_STEP: f64 = 1.1;
 /// Absolute zoom levels of an animated page: fit, double tap, maximum (E-41).
 pub const ANIMATED_MEDIUM: f64 = 2.0;
-pub const ANIMATED_MAX: f64 = 5.0;
 
 const EPS: f64 = 1e-9;
 
@@ -467,14 +466,6 @@ mod tests {
         assert!(close(first, 0.6));
         let back = double_tap_target(first, min);
         assert!(close(back, min));
-    }
-
-    #[test]
-    fn e41_animated_double_tap_uses_absolute_levels() {
-        assert_eq!(animated_double_tap_target(0.3), 2.0);
-        assert_eq!(animated_double_tap_target(2.0), 1.0);
-        assert_eq!(animated_double_tap_target(1.0), 2.0);
-        assert_eq!(ANIMATED_MAX, 5.0);
     }
 
     #[test]

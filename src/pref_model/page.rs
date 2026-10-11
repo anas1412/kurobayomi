@@ -1,5 +1,6 @@
-//! Settings page scaffold: header bar, a scrolled column with one ListBox per group, 12 px between groups,
-//! and the highlight target. Groups that are disabled are not built.
+//! Settings page scaffold: header bar, a scrolled column with one boxed list per group (a `heading` above it, 24 px
+//! between groups, 16 px gutters, at most `ui::PAGE_WIDTH` wide and centred; the same layout as `ui::column`), and
+//! the highlight target. Groups that are disabled are not built.
 
 use std::rc::Rc;
 
@@ -39,10 +40,12 @@ pub fn body(tree: &[Preference]) -> Built {
     style::install();
     let pending = highlight::take();
 
-    let content = GBox::new(Orientation::Vertical, 0);
+    let content = GBox::new(Orientation::Vertical, GROUP_SPACER);
     content.set_hexpand(true);
-    content.set_margin_top(8);
-    content.set_margin_bottom(16);
+    content.set_margin_start(16);
+    content.set_margin_end(16);
+    content.set_margin_top(16);
+    content.set_margin_bottom(24);
     let mut targets: Vec<(String, ListBoxRow)> = Vec::new();
 
     let sections = tree.iter().filter(|entry| match entry {
@@ -50,9 +53,8 @@ pub fn body(tree: &[Preference]) -> Built {
         Preference::Item(_) => true,
     });
     let entries: Vec<&Preference> = sections.collect();
-    let last = entries.len().saturating_sub(1);
     let mut loose: Option<ListBox> = None;
-    for (index, entry) in entries.iter().enumerate() {
+    for entry in &entries {
         match entry {
             Preference::Item(item) => {
                 let list = loose.get_or_insert_with(|| new_list(&content));
@@ -75,9 +77,6 @@ pub fn body(tree: &[Preference]) -> Built {
                         targets.push((group_entry.title.clone(), first));
                     }
                 }
-                if index != last {
-                    block.set_margin_bottom(GROUP_SPACER);
-                }
                 content.append(&block);
             }
         }
@@ -85,10 +84,8 @@ pub fn body(tree: &[Preference]) -> Built {
 
     let scrolled = ScrolledWindow::new();
     scrolled.set_hscrollbar_policy(PolicyType::Never);
-    scrolled.set_propagate_natural_width(true);
-    scrolled.set_max_content_width(PAGE_MAX_WIDTH);
     scrolled.set_vexpand(true);
-    scrolled.set_child(Some(&content));
+    scrolled.set_child(Some(&crate::clamp::clamp(&content, PAGE_MAX_WIDTH)));
 
     if let Some(key) = pending {
         let titles: Vec<&str> = targets.iter().map(|(t, _)| t.as_str()).collect();
@@ -104,8 +101,6 @@ fn new_list(parent: &GBox) -> ListBox {
     let list = ListBox::new();
     list.add_css_class("boxed-list");
     list.set_selection_mode(SelectionMode::None);
-    list.set_margin_start(16);
-    list.set_margin_end(16);
     parent.append(&list);
     list
 }

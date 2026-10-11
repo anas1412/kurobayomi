@@ -8,7 +8,6 @@ use kuro_core::sources::SourceGate;
 
 /// Length of the crossfade from the spinner to the content.
 // No call site until the source screens land (T-01a-037 wiring).
-#[allow(dead_code)]
 pub const CROSSFADE_MS: u32 = 150;
 
 /// What the placeholder shows.
@@ -26,7 +25,6 @@ pub fn initial(gate_open: bool) -> Shown {
 /// `content` once the source gate is open. Until then a centred spinner is shown, and the content
 /// replaces it with a crossfade when the gate opens.
 // No call site until the source screens land (T-01a-037 wiring).
-#[allow(dead_code)]
 pub fn when_sources_ready(gate: &SourceGate, content: &impl IsA<Widget>) -> Widget {
     let content: Widget = content.clone().upcast();
     let mut ready = gate.ready_watch();

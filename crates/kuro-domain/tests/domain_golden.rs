@@ -12,6 +12,8 @@ use kuro_domain::app::status::{ChapterDownloads, SetReadStatus, SetSeenResult, S
 use kuro_domain::app::update::{CoverCache, UpdateManga};
 use kuro_domain::items::chapter_sync::{ChapterSyncOptions, NoRenames, SyncChapters};
 use kuro_domain::items::source_sync::MangaSyncLocks;
+use kuro_domain::kind::EntryKind;
+use kuro_domain::track::delayed::{DelayedTrackingStore, DelayedTrackingWorker, QUEUE_FILE, ReplayOutcome, TrackReplay};
 use kuro_prefs::store::PrefStore;
 use kuro_source::model::SChapter;
 use kuro_testkit::{InMemorySettings, TempDir, TestDb};
@@ -169,7 +171,7 @@ mod sync_chapters {
         let raw = vec![SChapter { chapter_number: 12.1_f32, ..source_chapter("/c12", "Ch 12.1", 0) }];
         let manga = manga_row(&db, id);
         sync(&db, &locks).run(raw.clone(), &manga, options(NOW_MS), &no_hook).await.expect("first");
-        assert_eq!(stored_chapters(&db, id)[0].chapter_number, f64::from(12.1_f32));
+        assert_eq!(stored_chapters(&db, id)[0].chapter_number, 12.1_f64, "EC-CH-07: the decimal form, not 12.100000762939453");
         let after = manga_row(&db, id);
         let second = sync(&db, &locks).run(raw, &after, options(NOW_MS), &no_hook).await.expect("second");
         assert!(second.is_empty(), "an identical second sync reports nothing");
@@ -399,7 +401,7 @@ mod domain_end_to_end {
     use super::*;
 
     /// Sync new chapters, mark one read, then refresh again: the read state survives and the second refresh reports
-    /// nothing. The track update and the offline queue stages of the plan are not built yet (area 27, T-10a-026 onward).
+    /// nothing. The track and offline-queue stages are in [`sync_mark_read_track_offline_then_replay`].
     #[tokio::test]
     async fn sync_then_mark_read_then_refresh() {
         let (_dir, db, id) = manga_fixture("Foo");
@@ -429,6 +431,77 @@ mod domain_end_to_end {
         assert!(again.is_empty(), "nothing new on the second refresh");
         let c1 = stored_chapters(&db, id).into_iter().find(|c| c.url == "/c1").expect("c1");
         assert!(c1.read, "the read state survives the refresh");
+    }
+
+    /// A tracker the test switches online: `replay` pushes the progress and records it.
+    struct FakeTracker {
+        online: tokio::sync::watch::Sender<bool>,
+        pushed: Mutex<Vec<(EntryKind, i64, f32)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl TrackReplay for FakeTracker {
+        async fn wait_online(&self) {
+            let mut rx = self.online.subscribe();
+            let _ = rx.wait_for(|up| *up).await;
+        }
+
+        async fn replay(&self, kind: EntryKind, track_id: i64, progress: f32) -> ReplayOutcome {
+            self.pushed.lock().expect("lock").push((kind, track_id, progress));
+            ReplayOutcome::Done
+        }
+    }
+
+    /// `domain_end_to_end` of the plan: sync (new chapters) -> mark read -> track update while offline (queued) -> go
+    /// online -> the worker replays. Asserts the final database, queue file and tracker state.
+    #[tokio::test]
+    async fn sync_mark_read_track_offline_then_replay() {
+        let (dir, db, id) = manga_fixture("Foo");
+        let locks = Arc::new(MangaSyncLocks::default());
+        let raw = vec![source_chapter("/c2", "Ch 2", 0), source_chapter("/c1", "Ch 1", 0)];
+        let manga = manga_row(&db, id);
+        sync(&db, &locks).run(raw, &manga, options(NOW_MS), &no_hook).await.expect("sync");
+
+        let read: Vec<Chapter> = stored_chapters(&db, id).into_iter().filter(|c| c.chapter_number == 1.0).collect();
+        let progress = read.iter().map(|c| c.chapter_number).fold(0.0, f64::max);
+        let pref = {
+            let settings = InMemorySettings::new();
+            let store: PrefStore = PrefStore::clone(&settings);
+            let p = store.pref("pref_remove_after_marked_as_read_key", false);
+            p.set(false);
+            p
+        };
+        let set = SetReadStatus::new(ChapterRepo::new(db.clone()), MangaRepo::new(db.clone()), pref, Arc::new(NoDownloads));
+        assert_eq!(set.run(true, read).await, SetStatusResult::Success);
+
+        // The tracker is offline: the push cannot happen, so the progress is queued under the track row id.
+        let (up, _keep) = tokio::sync::watch::channel(false);
+        let tracker = Arc::new(FakeTracker { online: up, pushed: Mutex::default() });
+        let queue_path = dir.path().join(QUEUE_FILE);
+        let store = Arc::new(DelayedTrackingStore::new(queue_path.clone()));
+        store.add(EntryKind::Manga, 7, progress).expect("queue");
+        let worker = DelayedTrackingWorker::new(store.clone(), tracker.clone());
+        worker.schedule();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(tracker.pushed.lock().expect("lock").is_empty(), "offline: nothing is pushed");
+        assert_eq!(store.items(EntryKind::Manga), vec![(7, 1.0_f32)], "and the progress waits in the queue");
+
+        // Online again: the worker replays the item and empties the queue.
+        tracker.online.send_replace(true);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while worker.is_running() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the worker finishes");
+
+        assert_eq!(*tracker.pushed.lock().expect("lock"), vec![(EntryKind::Manga, 7, 1.0_f32)], "tracker state");
+        assert!(store.is_empty(), "queue state");
+        assert!(DelayedTrackingStore::new(queue_path).is_empty(), "the queue file is empty too");
+        let c1 = stored_chapters(&db, id).into_iter().find(|c| c.url == "/c1").expect("c1");
+        let c2 = stored_chapters(&db, id).into_iter().find(|c| c.url == "/c2").expect("c2");
+        assert!(c1.read && !c2.read, "database state");
     }
 
     struct NoDownloads;

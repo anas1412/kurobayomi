@@ -89,6 +89,7 @@ impl Listing {
         &self.filters
     }
 
+    #[cfg(test)]
     /// Starts a new listing (a search, a Popular or Latest switch, a refresh) with the filters it had. Pages still in
     /// flight are dropped.
     pub fn restart(&mut self, query: BrowseQuery) {

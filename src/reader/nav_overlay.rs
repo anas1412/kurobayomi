@@ -120,6 +120,7 @@ impl NavOverlay {
         }
     }
 
+    #[cfg(test)]
     /// Whether the overlay is showing or fading in.
     pub fn is_shown(&self) -> bool {
         self.shown.get()

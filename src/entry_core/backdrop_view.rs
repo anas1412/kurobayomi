@@ -35,11 +35,6 @@ fn cached(key: &str) -> Option<gdk::Texture> {
     CACHE.with(|c| c.borrow().get(key).cloned())
 }
 
-/// How many blurred covers are kept.
-pub fn cached_count() -> usize {
-    CACHE.with(|c| c.borrow().len())
-}
-
 /// The backdrop widget: it fills the space it is given and shows nothing until the picture is ready.
 pub fn build(art: Option<&ArtRef>) -> gtk::Overlay {
     ensure_css();
@@ -77,34 +72,4 @@ fn load(art: ArtRef, picture: &gtk::Picture) {
             picture.set_paintable(Some(&texture));
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_backdrop_is_faint_and_a_cached_cover_shows_at_once() {
-        crate::testing::with_display(|| {
-            let bytes = glib::Bytes::from_owned(vec![1u8; 4 * 4 * 4]);
-            let texture: gdk::Texture = gdk::MemoryTexture::new(4, 4, gdk::MemoryFormat::R8g8b8a8, &bytes, 16).upcast();
-            CACHE.with(|c| c.borrow_mut().insert(cache_key("https://x/c.jpg", 7), texture));
-            let art = ArtRef {
-                owner: kuro_images::art::Owner::Manga,
-                entry_id: 1,
-                source_id: 1,
-                kind: kuro_images::art::ArtKind::Cover,
-                url: Some("https://x/c.jpg".into()),
-                favorite: false,
-                last_modified: 7,
-            };
-            let overlay = build(Some(&art));
-            let picture = overlay.child().and_downcast::<gtk::Picture>().expect("the cover picture");
-            assert!((picture.opacity() - BACKDROP_ALPHA).abs() < 0.01);
-            assert!(picture.paintable().is_some(), "the cached blur is used without a load");
-            assert!(cached_count() >= 1);
-            let bare = build(None).child().and_downcast::<gtk::Picture>().expect("picture");
-            assert!(bare.paintable().is_none(), "no cover, no backdrop");
-        });
-    }
 }

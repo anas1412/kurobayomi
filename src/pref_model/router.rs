@@ -10,6 +10,7 @@ pub enum Destination {
 }
 
 impl Destination {
+    #[cfg(test)]
     pub fn from_id(id: i64) -> Option<Self> {
         match id {
             0 => Some(Self::About),
@@ -29,7 +30,7 @@ impl Destination {
     }
 }
 
-/// Two panes in the tablet UI: the smaller side of the window is at least 720 px, so 719 is one pane (T-47b-002).
+/// Two panes in a wide window: the smaller side of the window is at least 720 px, so 719 is one pane (T-47b-002).
 pub fn two_pane(width: i32, height: i32) -> bool {
     crate::window_size::is_tablet_ui(width, height)
 }
@@ -113,6 +114,7 @@ impl Shell {
         self.pages.last().copied()
     }
 
+    #[cfg(test)]
     pub fn is_open(&self) -> bool {
         !self.pages.is_empty()
     }

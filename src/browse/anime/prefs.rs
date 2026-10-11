@@ -7,12 +7,11 @@ use std::rc::Rc;
 
 use kuro_prefs::PrefError;
 use kuro_prefs::base::BasePrefs;
-use kuro_prefs::library::{LibraryDisplayMode, LibraryPrefs};
+use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
 use kuro_prefs::values::PrefValue;
 
-use crate::browse::grid::{GridColumns, grid_columns};
 use crate::browse::nav::last_used_write;
 use crate::browse::prefs::{BrowsePrefs, MIGRATE_FLAGS_DEFAULT};
 
@@ -39,22 +38,26 @@ impl AnimeBrowsePrefs {
         Rc::new(prefs)
     }
 
+    #[cfg(test)]
     /// `pref_display_mode_catalogue`, default CompactGrid. Unknown stored text reads as the default (E-BR-22).
     pub fn display_mode(&self) -> LibraryDisplayMode {
         self.sources.source_display_mode.get()
     }
 
+    #[cfg(test)]
     /// Writes the global display mode. The grid re-renders from the same listing; nothing is queried again.
     pub fn set_display_mode(&self, mode: LibraryDisplayMode) -> Result<(), PrefError> {
         self.sources.source_display_mode.set(mode)
     }
 
+    #[cfg(test)]
     /// The grid columns for a window `width` wide: the landscape key from 720 px, otherwise the portrait key (T-41a-050).
     /// Zero or less is adaptive (E-BR-23).
     pub fn columns(&self, width: i32) -> GridColumns {
         grid_columns(width, self.library.anime_portrait_columns.get(), self.library.anime_landscape_columns.get())
     }
 
+    #[cfg(test)]
     /// `default_anime_category`, default -1 (ask every time). The system category 0 is never offered.
     pub fn default_category(&self) -> i64 {
         i64::from(self.library.default_anime_category.get())
@@ -110,6 +113,13 @@ impl AnimeBrowsePrefs {
 
 const ANIME_MIGRATE_FLAGS: &str = "anime_migrate_flags";
 const ANIME_MIGRATE_IMPORTED: &str = "__APP_STATE_anime_migrate_flags_imported";
+
+#[cfg(test)]
+use crate::browse::grid::GridColumns;
+#[cfg(test)]
+use kuro_prefs::library::LibraryDisplayMode;
+#[cfg(test)]
+use crate::browse::grid::grid_columns;
 
 #[cfg(test)]
 mod tests {

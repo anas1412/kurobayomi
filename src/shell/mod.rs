@@ -40,8 +40,6 @@ pub mod tabs;
 pub mod uri;
 
 // the screens that use these build them in their own lanes; the rules are tested here
-#[allow(dead_code)]
-pub mod date_text;
 // the resolvers (T-53a-048, T-53a-050) are installed with `deep_link_page::install_resolver` by the source lanes
 #[allow(dead_code)]
 pub mod deep_link_page;
@@ -49,10 +47,7 @@ pub mod deep_link_page;
 pub mod empty;
 #[allow(dead_code)]
 pub mod entry_route;
-#[allow(dead_code)]
 pub mod lifecycle;
-#[allow(dead_code)]
-pub mod tabbed;
 #[allow(dead_code)]
 pub mod warning;
 #[allow(dead_code)]
@@ -71,7 +66,6 @@ pub mod player_result;
 pub mod library_catalogue;
 #[allow(dead_code)]
 pub mod search_provider;
-#[allow(dead_code)]
 pub mod transitions;
 #[allow(dead_code)]
 pub mod unlock;

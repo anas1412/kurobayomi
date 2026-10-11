@@ -80,6 +80,7 @@ impl<E: Send + 'static> PageTasks<E> {
         self.generation.accepts(event.generation)
     }
 
+    #[cfg(test)]
     /// Loaders not yet finished or aborted.
     pub fn live_tasks(&self) -> usize {
         self.tasks.len()

@@ -57,11 +57,6 @@ pub fn status_text(status: i64) -> String {
     })
 }
 
-/// The "expected next update" line is hidden for completed manga (status 2).
-pub fn expected_next_update_enabled(status: i64) -> bool {
-    status != 2
-}
-
 /// The description in both forms. `expanded` is the raw text. `shrunk` is the collapsed text used when collapsed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Description {
@@ -185,13 +180,6 @@ mod tests {
         assert_eq!(status_text(6), "On hiatus");
         assert_eq!(status_text(0), "Unknown");
         assert_eq!(status_text(42), "Unknown");
-    }
-
-    #[test]
-    fn next_update_hidden_only_for_completed() {
-        assert!(!expected_next_update_enabled(2));
-        assert!(expected_next_update_enabled(1));
-        assert!(expected_next_update_enabled(0));
     }
 
     #[test]

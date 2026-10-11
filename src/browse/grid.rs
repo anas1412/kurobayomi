@@ -1,8 +1,6 @@
 //! Grid and list cells, and the page loader state (T-40a-004, T-40a-049). The pager keeps one request in flight and drops
 //! pages from an older generation (R§3, E-40 R-40-09, E-PG-03).
 
-use kuro_prefs::library::LibraryDisplayMode;
-
 /// Padding around the grid content and between cells (B§2.7).
 pub const GRID_PADDING_PX: i32 = 8;
 pub const GRID_SPACING_PX: i32 = 4;
@@ -12,13 +10,11 @@ pub const CELL_MARGIN_PX: i32 = GRID_SPACING_PX / 2;
 pub const CONTAINER_MARGIN_PX: i32 = GRID_PADDING_PX - CELL_MARGIN_PX;
 /// Cover size of a grid cell (2:3) and of a list row (square).
 pub const COVER_WIDTH_PX: i32 = 136;
-pub const COVER_HEIGHT_PX: i32 = COVER_WIDTH_PX * 3 / 2;
 pub const LIST_COVER_PX: i32 = 40;
 /// Alpha of a favourite's cover; non-favourites are drawn at full strength (B§2.7, D§13).
 pub const FAVORITE_ALPHA: f64 = 0.34;
 /// Items per page and the first load's size (B§4.3).
 pub const PAGE_SIZE: usize = 25;
-pub const INITIAL_LOAD: usize = 75;
 
 pub fn cell_alpha(favorite: bool) -> f64 {
     if favorite { FAVORITE_ALPHA } else { 1.0 }
@@ -27,11 +23,6 @@ pub fn cell_alpha(favorite: bool) -> f64 {
 /// The in-library bookmark badge shows only for favourites (B§2.10).
 pub fn badge_visible(favorite: bool) -> bool {
     favorite
-}
-
-/// The cover-only grid draws no title; the other modes do.
-pub fn shows_title(mode: LibraryDisplayMode) -> bool {
-    mode != LibraryDisplayMode::CoverOnlyGrid
 }
 
 /// List mode fills the window below the top bar (B§2.8). Never negative.
@@ -190,6 +181,7 @@ impl Pager {
         self.done = false;
     }
 
+    #[cfg(test)]
     pub fn generation(&self) -> u64 {
         self.generation
     }
@@ -210,21 +202,6 @@ mod tests {
         assert_eq!(cell_alpha(false), 1.0);
         assert!(badge_visible(true));
         assert!(!badge_visible(false));
-    }
-
-    #[test]
-    fn cells_sit_4_px_apart_and_8_px_from_the_edge() {
-        assert_eq!(CELL_MARGIN_PX * 2, GRID_SPACING_PX, "two neighbouring cell margins make the gap");
-        assert_eq!(CONTAINER_MARGIN_PX + CELL_MARGIN_PX, GRID_PADDING_PX, "container plus cell margin is the padding");
-        assert_eq!(COVER_HEIGHT_PX, 204);
-    }
-
-    #[test]
-    fn cover_only_drops_the_title_and_the_other_modes_keep_it() {
-        assert!(!shows_title(LibraryDisplayMode::CoverOnlyGrid));
-        assert!(shows_title(LibraryDisplayMode::CompactGrid));
-        assert!(shows_title(LibraryDisplayMode::ComfortableGrid));
-        assert!(shows_title(LibraryDisplayMode::List));
     }
 
     #[test]

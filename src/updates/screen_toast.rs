@@ -33,10 +33,12 @@ impl ToastQueue {
         self.waiting.pop_front()
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.waiting.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.waiting.is_empty()
     }

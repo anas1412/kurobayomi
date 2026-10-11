@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Orientation as O};
+use gtk::{Box as GBox, Orientation as O};
 use kuro_domain::kind::EntryKind;
 use gtk::glib;
 use kuro_i18n::{MsgKey, tr};
@@ -44,35 +44,46 @@ fn kind_of(name: Option<&str>) -> EntryKind {
     if name == Some(MANGA) { EntryKind::Manga } else { EntryKind::Anime }
 }
 
-/// An Anime | Manga switcher over two pages.
-fn kind_pages(anime: &gtk::Widget, manga: &gtk::Widget) -> (GBox, gtk::Stack) {
+/// Which of the Updates refresh buttons (anime first, as the screens are built) belongs to `kind`.
+fn refresh_index(kind: EntryKind) -> usize {
+    usize::from(kind == EntryKind::Manga)
+}
+
+/// A pushed page with a view per kind (Statistics, Storage): the two views, and the Anime | Manga switch that goes in
+/// the page's one header row as an `end` widget, as on Categories, not on a row of its own.
+fn kind_switch(anime: &gtk::Widget, manga: &gtk::Widget) -> Built {
     let stack = gtk::Stack::new();
     stack.set_transition_type(gtk::StackTransitionType::Crossfade);
     stack.add_titled(anime, Some(ANIME), "Anime");
     stack.add_titled(manga, Some(MANGA), "Manga");
-    stack.set_vexpand(true);
-    let switcher = gtk::StackSwitcher::builder().stack(&stack).halign(Align::Center).margin_top(6).build();
-    let page = GBox::new(O::Vertical, 6);
-    page.append(&switcher);
-    page.append(&stack);
+    let switch = gtk::StackSwitcher::builder().stack(&stack).build();
+    Built { content: stack.upcast(), end: vec![switch.upcast()] }
+}
+
+/// A tab with the Library's one-row header (docs/design/other-tabs.md): the Anime | Manga switch, the visible kind's
+/// search (when it has one) and its actions; no page title. Returns the page and the stack of the two kinds.
+fn tab_page(views: [Built; 2]) -> (GBox, gtk::Stack) {
+    let page = crate::screens::library_page(views);
+    let stack = page.last_child().and_downcast::<gtk::Stack>().expect("the kinds stack follows the header");
     (page, stack)
 }
 
-/// The History page: both kinds, and the Clear history button for the visible kind. `None` before the app data is open.
+/// The History page: both kinds, each with its search and its Clear history button in the header. `None` before the
+/// app data is open.
 pub fn history() -> Option<Built> {
     if !crate::data::is_installed() {
         return None;
     }
     let (anime, manga) = (HistoryScreen::new(EntryKind::Anime), HistoryScreen::new(EntryKind::Manga));
-    let (page, stack) = kind_pages(anime.widget().upcast_ref(), manga.widget().upcast_ref());
-    let clear = crate::ui::icon_button("edit-clear-all-symbolic", &tr(MsgKey::pref_clear_history));
-    let (clear_anime, clear_manga, visible) = (anime.clone(), manga.clone(), stack.clone());
-    clear.connect_clicked(move |_| match kind_of(visible.visible_child_name().as_deref()) {
-        EntryKind::Anime => clear_anime.ask_clear(),
-        EntryKind::Manga => clear_manga.ask_clear(),
-    });
+    let view = |screen: &Rc<HistoryScreen>| {
+        let clear = crate::ui::icon_button("edit-clear-all-symbolic", &tr(MsgKey::pref_clear_history));
+        let target = Rc::clone(screen);
+        clear.connect_clicked(move |_| target.ask_clear());
+        Built { content: screen.widget().clone().upcast(), end: vec![screen.search().clone().upcast(), clear.upcast()] }
+    };
+    let (page, stack) = tab_page([view(&anime), view(&manga)]);
     HISTORY.with(|h| *h.borrow_mut() = Some((stack, anime, manga)));
-    Some(Built { content: page.upcast(), end: vec![clear.upcast()] })
+    Some(Built { content: page.upcast(), end: vec![] })
 }
 
 /// The spec label of the toolbar button that starts a library update.
@@ -99,42 +110,57 @@ pub fn updates() -> Option<Built> {
     }
     // before the screens: their rows offer Show qualities only while a sheet is registered
     qualities::install_episode_options();
-    let (anime, manga) = (UpdatesScreen::new(EntryKind::Anime), UpdatesScreen::new(EntryKind::Manga));
-    let (page, stack) = kind_pages(anime.widget().upcast_ref(), manga.widget().upcast_ref());
+    let screens = [UpdatesScreen::new(EntryKind::Anime), UpdatesScreen::new(EntryKind::Manga)];
+    let spec = crate::ui::screen("updates");
+    let mut refresh: Vec<gtk::Button> = Vec::new();
+    let views = screens.each_ref().map(|screen| {
+        let kind = screen.kind();
+        let mut end: Vec<gtk::Widget> = Vec::new();
+        for item in &spec.toolbar {
+            let button = if item.label == UPDATE_LIBRARY {
+                let button = crate::ui::icon_button(&item.icon, &item.label);
+                button.connect_clicked(move |button| update_library(button, kind));
+                refresh.push(button.clone());
+                button
+            } else if item.label == VIEW_UPCOMING {
+                // each kind has its own Upcoming page, as in the source (the anime tab opens the anime one); the
+                // calendar alone does not say what it opens, so the button carries a word
+                let button = labelled_button(&item.icon, &tr(MsgKey::label_upcoming), &item.label);
+                button.connect_clicked(move |_| {
+                    UPCOMING_KIND.with(|k| k.set(kind));
+                    crate::ui::open("upcoming");
+                });
+                button
+            } else {
+                let button = crate::ui::icon_button(&item.icon, &item.label);
+                let label = item.label.clone();
+                button.connect_clicked(move |_| {
+                    crate::ui::resolve("updates", &label);
+                });
+                button
+            };
+            end.push(button.upcast());
+        }
+        Built { content: screen.widget().clone().upcast(), end }
+    });
+    let (page, stack) = tab_page(views);
     page.connect_map(|_| reset_new_updates());
     page.connect_unmap(|_| reset_new_updates());
-    let spec = crate::ui::screen("updates");
-    let mut end: Vec<gtk::Widget> = Vec::new();
-    let mut refresh: Option<gtk::Button> = None;
-    for item in &spec.toolbar {
-        let button = crate::ui::icon_button(&item.icon, &item.label);
-        if item.label == UPDATE_LIBRARY {
-            let stack = stack.clone();
-            button.connect_clicked(move |button| update_library(button, &stack));
-            refresh = Some(button.clone());
-        } else if item.label == VIEW_UPCOMING {
-            // each kind has its own Upcoming page, as in the source (the anime tab opens the anime one)
-            let stack = stack.clone();
-            button.connect_clicked(move |_| {
-                UPCOMING_KIND.with(|k| k.set(kind_of(stack.visible_child_name().as_deref())));
-                crate::ui::open("upcoming");
-            });
-        } else {
-            let label = item.label.clone();
-            button.connect_clicked(move |_| {
-                crate::ui::resolve("updates", &label);
-            });
+    if refresh.len() == 2 {
+        // an empty feed offers the same pass as its kind's refresh button, which then spins
+        for screen in &screens {
+            let action = gtk::Button::with_label(&tr(MsgKey::action_update_library));
+            let kind = screen.kind();
+            let button = refresh[refresh_index(kind)].clone();
+            action.connect_clicked(move |_| update_library(&button, kind));
+            screen.set_empty_action(&action);
         }
-        end.push(button.upcast());
-    }
-    end.reverse();
-    if let Some(refresh) = refresh {
-        // F5 starts the same pass as the Refresh button (T-42b-042, in place of pull-to-refresh)
+        // F5 starts the same pass as the Refresh button of the visible kind (T-42b-042)
         let keys = gtk::EventControllerKey::new();
-        let stack = stack.clone();
         keys.connect_key_pressed(move |_, key, _, _| {
             if library_trigger::is_refresh_key(key) {
-                update_library(&refresh, &stack);
+                let kind = kind_of(stack.visible_child_name().as_deref());
+                update_library(&refresh[refresh_index(kind)], kind);
                 glib::Propagation::Stop
             } else {
                 glib::Propagation::Proceed
@@ -142,8 +168,18 @@ pub fn updates() -> Option<Built> {
         });
         page.add_controller(keys);
     }
-    UPDATES.with(|u| *u.borrow_mut() = vec![anime, manga]);
-    Some(Built { content: page.upcast(), end })
+    UPDATES.with(|u| *u.borrow_mut() = screens.into());
+    Some(Built { content: page.upcast(), end: vec![] })
+}
+
+/// A header button with an icon and a word; `tip` is the longer tooltip.
+fn labelled_button(icon: &str, label: &str, tip: &str) -> gtk::Button {
+    let content = GBox::new(O::Horizontal, crate::library::layout::SPACE_S);
+    content.append(&gtk::Image::from_icon_name(icon));
+    content.append(&gtk::Label::new(Some(label)));
+    let button = gtk::Button::builder().child(&content).tooltip_text(tip).build();
+    button.update_property(&[gtk::accessible::Property::Label(tip)]);
+    button
 }
 
 /// Clears the two new-updates counters (T-42b-020).
@@ -153,10 +189,9 @@ fn reset_new_updates() {
     let _ = library.new_anime_updates_count.set(0);
 }
 
-/// The refresh button: starts a library pass for the visible kind, shows the outcome on that kind's page, and spins
+/// The refresh button of `kind`: starts a library pass for it, shows the outcome on that kind's page, and spins
 /// until the pass ends (T-42a-033). A refused start shows its toast and no spinner.
-fn update_library(button: &gtk::Button, stack: &gtk::Stack) {
-    let kind = kind_of(stack.visible_child_name().as_deref());
+fn update_library(button: &gtk::Button, kind: EntryKind) {
     let outcome = library_trigger::trigger(kind);
     UPDATES.with(|u| {
         if let Some(screen) = u.borrow().iter().find(|screen| screen.kind() == kind) {
@@ -182,7 +217,7 @@ fn spin_until_done(button: &gtk::Button, kind: EntryKind) {
     });
 }
 
-/// The Statistics page: one page per kind under the Anime | Manga switcher (sidebar item "stats"). `None` before the
+/// The Statistics page: one page per kind, the Anime | Manga switch in the header (opened from More, "stats"). `None` before the
 /// app data is open.
 pub fn stats() -> Option<Built> {
     if !crate::data::is_installed() {
@@ -194,9 +229,9 @@ pub fn stats() -> Option<Built> {
         let task = glib::spawn_future_local(async move { feed.set_loaded(stats_of(kind).await) });
         (screen, task)
     });
-    let (page, _) = kind_pages(screens[0].0.widget().upcast_ref(), screens[1].0.widget().upcast_ref());
+    let page = kind_switch(screens[0].0.widget().upcast_ref(), screens[1].0.widget().upcast_ref());
     STATS.with(|s| *s.borrow_mut() = screens.into());
-    Some(Built { content: page.upcast(), end: vec![] })
+    Some(page)
 }
 
 /// Aggregates the statistics of one kind off the GTK thread.
@@ -222,7 +257,7 @@ async fn stats_of(kind: EntryKind) -> Option<stats_data::Loaded> {
     .await
 }
 
-/// The Storage page: one page per kind under the same switcher (sidebar index 8). It follows the download cache: the
+/// The Storage page: one page per kind, with the same switch in the header. It follows the download cache: the
 /// first snapshot comes at once and a new one after each change, with `initializing` taken from the cache (T-42a-054).
 pub fn storage() -> Option<Built> {
     if !crate::data::is_installed() {
@@ -230,9 +265,9 @@ pub fn storage() -> Option<Built> {
     }
     let screens = [EntryKind::Anime, EntryKind::Manga].map(|kind| storage_screen(kind));
     let widgets = screens.each_ref().map(|(screen, _)| crate::ui::scrolled(screen.widget()).upcast::<gtk::Widget>());
-    let (page, _) = kind_pages(&widgets[0], &widgets[1]);
+    let page = kind_switch(&widgets[0], &widgets[1]);
     STORAGE.with(|s| *s.borrow_mut() = screens.into());
-    Some(Built { content: page.upcast(), end: vec![] })
+    Some(page)
 }
 
 /// One kind's Storage page and its watch on the download cache.
@@ -312,5 +347,49 @@ pub fn reselect(nav_id: &str, already_visible: bool) {
         }
         Reselect::OpenDownloads => crate::ui::open("download_queue"),
         Reselect::Nothing => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// docs/design/other-tabs.md: Updates and History use the Library's one-row header, and the stack the page hands
+    /// back is the one the switch drives, so the header actions and the sidebar reselect act on the visible kind.
+    #[test]
+    fn updates_and_history_have_the_library_header_and_follow_the_switch() {
+        crate::testing::with_display(|| {
+            let view = |word: &str| Built {
+                content: gtk::Label::new(Some(word)).upcast(),
+                end: vec![gtk::SearchEntry::new().upcast(), crate::ui::icon_button("edit-clear-all-symbolic", "Clear history").upcast()],
+            };
+            let (page, stack) = tab_page([view("anime list"), view("manga list")]);
+            let header = page.first_child().and_downcast::<gtk::HeaderBar>().expect("the header row comes first");
+            assert!(header.next_sibling().is_some_and(|w| w == stack), "then the two kinds");
+            assert_eq!(kind_of(stack.visible_child_name().as_deref()), EntryKind::Anime, "Anime shows first");
+            stack.set_visible_child_name(MANGA);
+            assert_eq!(kind_of(stack.visible_child_name().as_deref()), EntryKind::Manga);
+        });
+    }
+
+    /// F5 and the empty feed's Update library press the refresh button of their own kind: anime's is built first.
+    #[test]
+    fn f5_and_the_empty_feed_use_the_refresh_button_of_their_kind() {
+        assert_eq!(refresh_index(kind_of(Some(ANIME))), 0);
+        assert_eq!(refresh_index(kind_of(Some(MANGA))), 1);
+        assert_eq!(refresh_index(kind_of(None)), 0, "before the stack has a page, anime");
+    }
+
+    /// Statistics and Storage carry their Anime | Manga switch in the header row, driving the two views.
+    #[test]
+    fn a_kind_page_puts_its_switch_in_the_header() {
+        crate::testing::with_display(|| {
+            let page = kind_switch(gtk::Label::new(Some("anime")).upcast_ref(), gtk::Label::new(Some("manga")).upcast_ref());
+            let stack = page.content.downcast::<gtk::Stack>().expect("the two kinds");
+            let [switch] = page.end.as_slice() else { panic!("one header widget") };
+            let switch = switch.downcast_ref::<gtk::StackSwitcher>().expect("the switch");
+            assert_eq!(switch.stack().as_ref(), Some(&stack));
+            assert_eq!(kind_of(stack.visible_child_name().as_deref()), EntryKind::Anime, "Anime shows first");
+        });
     }
 }

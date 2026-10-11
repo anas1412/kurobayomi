@@ -2,7 +2,6 @@
 //! language fields. Codes are checked against a static table: every ISO 639-1 code, its ISO 639-2 three-letter
 //! forms (terminology and bibliographic), and a few common ISO 639-3 codes (decision D-03: both lengths are accepted).
 // Not reachable from the player pages yet: the subtitle and audio pages are built by `pref_model/pages.rs`.
-#![allow(dead_code)]
 use std::fmt;
 
 /// ISO 639-1 code and its ISO 639-2/T code.

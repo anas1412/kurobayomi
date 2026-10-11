@@ -30,13 +30,26 @@ pub struct Ctx {
     pub window_width: i32,
 }
 
-/// Opens the sheet over the main window.
-pub fn show(ctx: Ctx) {
+/// The tab the sheet opens on; the header menu has one entry per tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tab {
+    Filter,
+    Sort,
+    Display,
+}
+
+/// Opens the sheet over the main window, on `tab`.
+pub fn show(ctx: Ctx, tab: Tab) {
     let stack = gtk::Stack::new();
     let filter = ctx.filter_tab.clone();
-    stack.add_titled(&filter, None, &tr(MsgKey::action_filter));
-    stack.add_titled(&sort_tab(&ctx), None, &tr(MsgKey::action_sort));
-    stack.add_titled(&display_tab(&ctx), None, &tr(MsgKey::action_display));
+    stack.add_titled(&filter, Some("filter"), &tr(MsgKey::action_filter));
+    stack.add_titled(&sort_tab(&ctx), Some("sort"), &tr(MsgKey::action_sort));
+    stack.add_titled(&display_tab(&ctx), Some("display"), &tr(MsgKey::action_display));
+    stack.set_visible_child_name(match tab {
+        Tab::Filter => "filter",
+        Tab::Sort => "sort",
+        Tab::Display => "display",
+    });
     let switcher = gtk::StackSwitcher::builder().stack(&stack).build();
     crate::ui::modal(switcher.upcast_ref(), &stack, 520, 620).present();
 }

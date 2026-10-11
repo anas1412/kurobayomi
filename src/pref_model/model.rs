@@ -39,6 +39,8 @@ pub struct ItemCommon {
     pub icon: Option<&'static str>,
     /// A live flag that overrides `enabled` after the build; flipping it slides the row in or makes it insensitive.
     pub enabled_flag: Option<super::enabled::EnabledFlag>,
+    /// The row opens another page: it ends in the dim arrow (`ui::chevron`), like every link row in the app.
+    pub link: bool,
 }
 
 /// Default subtitle template for bound lists and edit fields.
@@ -47,7 +49,7 @@ pub const BOUND_SUBTITLE: &str = "%s";
 impl ItemCommon {
     /// Static row: no subtitle, no icon, enabled.
     pub fn new(title: impl Into<String>) -> Self {
-        Self { title: title.into(), enabled: true, subtitle: None, icon: None, enabled_flag: None }
+        Self { title: title.into(), enabled: true, subtitle: None, icon: None, enabled_flag: None, link: false }
     }
 
     /// Bound row: subtitle template `%s` (list, multi-select and edit fields).
@@ -65,11 +67,18 @@ impl ItemCommon {
         self
     }
 
+    /// Marks the row as one that opens another page.
+    pub fn with_link(mut self) -> Self {
+        self.link = true;
+        self
+    }
+
     pub fn disabled(mut self) -> Self {
         self.enabled = false;
         self
     }
 
+    #[cfg(test)]
     /// Binds the row's enabled state to `flag` (its current value is the initial state).
     pub fn with_enabled_flag(mut self, flag: super::enabled::EnabledFlag) -> Self {
         self.enabled = flag.get();

@@ -18,8 +18,6 @@ action_continue = המשך
 
 manga = מנגה
 
-pref_library_summary = קטגוריות, עדכון כללי, החלקת פרק
-
 pref_behavior = התנהגות פרק
 
 action_add_repo_message = הוסף/י ספריות נוספות ל- { $arg1 }. כתובת ה- URL אמורה להסתיים ב- "index.min.json".
@@ -74,16 +72,6 @@ pref_progress_mark_as_seen = באיזו נקודה לסמן את הפרק כנצ
 
 pref_preserve_watching_position = שמור על עמדת הצפייה בפרקים שנראו
 
-pref_category_player_orientation = אוריינטציה
-
-rotation_reverse_landscape = תצוגה הפוכה לרוחב
-
-rotation_sensor_portrait = חיישן תצוגת דיוקן
-
-rotation_sensor_landscape = חיישן תצוגת רוחב
-
-pref_remember_brightness = זכור ועבור לבהירות האחרונה שבה נעשה שימוש
-
 pref_remember_volume = זכור ועבור לעוצמת הקול האחרונה שבה השתמשת
 
 pref_player_fullscreen = הצג תוכן בחתך תצוגה
@@ -125,8 +113,6 @@ pref_category_external_player = נגן חיצוני
 pref_always_use_external_player = השתמש תמיד בנגן חיצוני
 
 pref_external_player_preference = העדפת נגן חיצוני
-
-enable_volume_brightness_gestures = הפעל מחוות עוצמת הקול והבהירות
 
 pref_category_player_seeking = מחפש
 
@@ -802,10 +788,6 @@ pref_browse_summary = מקורות, הרחבות, חיפוש כללי
 
 pref_backup_summary = מדריך וגיבויים אוטומטיים
 
-pref_security_summary = נעילת אפליקציה, מסך מוגן
-
-pref_advanced_summary = הורד קבצי קריסה, אופטימיזציה לסוללה
-
 pref_category_theme = נושא
 
 pref_app_theme = ערכת הנושא של האפליקציה
@@ -815,8 +797,6 @@ theme_system = עקוב אחר המערכת
 theme_light = כבוי
 
 theme_dark = פעיל
-
-theme_monet = דינמי
 
 theme_greenapple = ירוק תפוח
 
@@ -855,10 +835,6 @@ lock_always = תמיד
 lock_never = לעולם לא
 
 hide_notification_content = הסתר תוכן התראות
-
-secure_screen = מסך מאובטח
-
-secure_screen_summary = מסך מאובטח מסתיר את תוכן האפליקציה בעת החלפת אפליקציות וחוסם צילומי מסך
 
 pref_category_nsfw_content = מקורות NSFW (18+)
 
@@ -930,10 +906,6 @@ include = כלול: { $arg1 }
 
 exclude = החרגה: { $arg1 }
 
-pref_chapter_swipe_end = פעולה בהחלקה ימינה
-
-pref_chapter_swipe_start = פעולה בהחלקה שמאלה
-
 multi_lang = רבים
 
 ext_updates_pending = עדכונים ממתינים
@@ -981,14 +953,6 @@ ext_nsfw_short = 18+
 ext_nsfw_warning = עלול להכיל תוכן שלא מתאים למקום העבודה (18+)
 
 ext_install_service_notif = מתקין הרחבה…
-
-ext_installer_pref = מתקין
-
-ext_installer_legacy = מורשת
-
-ext_installer_shizuku_stopped = Shizuku לא פועל
-
-ext_installer_shizuku_unavailable_dialog = התקן והפעל את Shizuku כדי להשתמש בShizuku כמתקין ההרחבות.
 
 pref_fullscreen = מסך מלא
 
@@ -1151,22 +1115,6 @@ double_tap_anim_speed_0 = בלי אנימציה
 double_tap_anim_speed_normal = רגילה
 
 double_tap_anim_speed_fast = מהירה
-
-pref_rotation_type = ברירת המחדל של סוג הסיבוב
-
-rotation_type = סוג הסיבוב
-
-rotation_free = חופשי
-
-rotation_portrait = מאונך
-
-rotation_reverse_portrait = מאונך הפוך
-
-rotation_landscape = מאוזן
-
-rotation_force_portrait = מאונך נעול
-
-rotation_force_landscape = מאוזן נעול
 
 color_filter_r_value = אדום
 
@@ -1346,8 +1294,6 @@ pref_refresh_library_covers = רענן כריכות ספרייה
 
 pref_reset_viewer_flags = אפס את הגדרות מצב הקריאה של כל סדרה בנפרד
 
-pref_reset_viewer_flags_summary = אפס מצב קריאה ואוריינטציה לכל הסדרות
-
 pref_reset_viewer_flags_success = כל הגדרות מצב הקריאה אופסו
 
 pref_reset_viewer_flags_error = נכשל איפוס הגדרות מצב הקריאה
@@ -1355,20 +1301,6 @@ pref_reset_viewer_flags_error = נכשל איפוס הגדרות מצב הקרי
 pref_dump_crash_logs = שתף יומני קריסה
 
 pref_dump_crash_logs_summary = שומר דוח שגיאות לקובץ עבור שיתוף עם המפתחים
-
-label_background_activity = פעילות רקע
-
-pref_disable_battery_optimization = השבתת האופטימיזציה של הסוללה
-
-pref_disable_battery_optimization_summary = עוזר בעדכוני ספריות רקע וגיבויים
-
-battery_optimization_disabled = אופטימיזציית סוללה כבר מושבתת
-
-battery_optimization_setting_activity_not_found = לא הצליח לפתוח הגדרות מכשיר
-
-about_dont_kill_my_app = לחלק מהיצרנים יש הגבלות אפליקציה שהורגות תהליכים ברקע. באתר הזה יש עוד מידע לגבי איך לתקן את זה.
-
-pref_tablet_ui_mode = ממשק משתמש טאבלט
 
 pref_verbose_logging = לוג מפורט
 

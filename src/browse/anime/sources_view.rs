@@ -12,17 +12,17 @@ use kuro_domain::source::model::Source;
 use kuro_i18n::{MsgKey, tr};
 use tokio::sync::watch;
 
-use super::sources::{ListPrefs, SourcesTab, TabRoute, anime_section_title, enabled_source_rows, header_actions, header_route, row_route};
+use super::sources::{ListPrefs, SourcesTab, TabRoute, anime_section_title, enabled_source_rows, row_route};
 use crate::browse::glue::{follow_ready, keep_alive};
 use crate::browse::icons::IconCache;
 use crate::browse::primitives::{EmptyAction, ToastSpec};
-use crate::browse::sources::{LOCAL_SOURCE_ID, Section, SourceRow, SourcesTabAction, language_line, shows_latest};
-use crate::browse::sources_page::{header_label, options_popover, pin_button};
-use crate::browse::view::{attach_row_gestures, source_row, spinner_row};
+use crate::browse::sources::{LOCAL_SOURCE_ID, Section, SourceRow, language_line, shows_latest};
+use crate::browse::sources_page::{header_label, options_popover, pin_button, section_list, sources_empty};
+use crate::browse::view::{list_row, source_row, spinner_row};
 
 /// What a press on the page does.
 pub struct AnimeSourcesNav {
-    /// A header action, a row or a Latest button: where it leads (`header_route`, `row_route`).
+    /// A row or a Latest button: where it leads (`row_route`).
     pub route: Rc<dyn Fn(TabRoute)>,
     /// The pin button, and the Pin and Unpin rows of the options popover.
     pub toggle_pin: Rc<dyn Fn(i64)>,
@@ -61,10 +61,9 @@ pub struct AnimeSourcesPage {
 impl AnimeSourcesPage {
     /// `ready` is `SourceRegistry::subscribe_initialized()`: the page shows a spinner until it is true.
     pub fn new(nav: AnimeSourcesNav, ready: watch::Receiver<bool>) -> Self {
-        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let scroller = gtk::ScrolledWindow::builder().child(&column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
-        let empty = gtk::Label::new(Some(&tr(MsgKey::source_empty_screen)));
-        empty.set_valign(gtk::Align::Center);
+        let column = crate::ui::column();
+        let scroller = crate::ui::scrolled(&column);
+        let empty = sources_empty(crate::browse::route::BrowseKind::Anime);
         let stack = gtk::Stack::new();
         stack.set_vexpand(true);
         stack.add_named(&spinner_row(), Some("spinner"));
@@ -85,8 +84,8 @@ impl AnimeSourcesPage {
             }),
             nav,
         });
+        // global search and the filter are in the Browse header (`shell`), so the page has no header of its own
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.append(&inner.header());
         root.append(&inner.stack);
         keep_alive(&root, &inner);
         let weak = Rc::downgrade(&inner);
@@ -134,27 +133,6 @@ impl AnimeSourcesPage {
 }
 
 impl Inner {
-    /// The two header actions, Global search then Filter, which opens the visibility page.
-    fn header(self: &Rc<Self>) -> gtk::Box {
-        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        bar.set_halign(gtk::Align::End);
-        bar.set_margin_end(8);
-        for action in header_actions() {
-            let (icon, name) = match action {
-                SourcesTabAction::GlobalSearch => ("system-search-symbolic", tr(MsgKey::action_global_search)),
-                SourcesTabAction::Filter => ("view-filter-symbolic", tr(MsgKey::action_filter)),
-            };
-            let button = gtk::Button::from_icon_name(icon);
-            button.add_css_class("flat");
-            button.set_tooltip_text(Some(&name));
-            button.update_property(&[gtk::accessible::Property::Label(&name)]);
-            let route = Rc::clone(&self.nav.route);
-            button.connect_clicked(move |_| route(header_route(action)));
-            bar.append(&button);
-        }
-        bar
-    }
-
     fn render(self: &Rc<Self>) {
         let scroll = self.scroller.vadjustment().value();
         let page = {
@@ -211,18 +189,23 @@ impl Inner {
             (state.tab.rows.clone(), state.prefs.locale.clone())
         };
         let mut section = Section::LastUsed;
+        let mut list: Option<gtk::ListBox> = None;
         for row in rows {
             match row {
                 SourceRow::Header(next) => {
                     self.column.append(&header_label(&anime_section_title(&next, &locale)));
+                    list = None;
                     section = next;
                 }
-                SourceRow::Item(source) => self.column.append(&self.row(&section, source)),
+                SourceRow::Item(source) => {
+                    let row = self.row(&section, source);
+                    section_list(&self.column, &mut list).append(&row);
+                }
             }
         }
     }
 
-    fn row(self: &Rc<Self>, section: &Section, source: Source) -> gtk::Box {
+    fn row(self: &Rc<Self>, section: &Section, source: Source) -> gtk::ListBoxRow {
         let (icon, file) = {
             let mut state = self.state.borrow_mut();
             let file = state.icon_files.get(&source.id).cloned();
@@ -243,7 +226,7 @@ impl Inner {
         let row = source_row(&source.name, language.as_deref(), icon, file.as_deref(), source.is_stub, Some(actions.upcast_ref()));
         let (route, weak, id) = (Rc::clone(&self.nav.route), Rc::downgrade(self), source.id);
         let anchor = row.downgrade();
-        attach_row_gestures(
+        list_row(
             &row,
             move || route(row_route(id, false)),
             move || {
@@ -251,8 +234,7 @@ impl Inner {
                     inner.options(&anchor, &source);
                 }
             },
-        );
-        row
+        )
     }
 
     /// The options of a source. The tab holds it as the open dialog until the popover closes (`SourcesTab::dialog`).
@@ -327,15 +309,12 @@ pub(crate) mod tests {
         out
     }
 
-    fn the_header_actions_route_to_global_search_and_the_visibility_page() {
+    /// Global search and the filter live in the Browse header (`shell`); the page repeats neither.
+    fn the_page_has_no_header_of_its_own() {
         let log = Rc::new(RefCell::new(Vec::new()));
         let (page, _tx) = page(&log, true);
-        let found = all_buttons(&page);
-        let search = found.iter().find(|b| b.tooltip_text().as_deref() == Some(tr(MsgKey::action_global_search).as_str())).expect("search");
-        let filter = found.iter().find(|b| b.tooltip_text().as_deref() == Some(tr(MsgKey::action_filter).as_str())).expect("filter");
-        search.emit_clicked();
-        filter.emit_clicked();
-        assert_eq!(*log.borrow(), ["route GlobalSearch", "route Visibility"]);
+        let named = |key: MsgKey| all_buttons(&page).iter().any(|b| b.tooltip_text().as_deref() == Some(tr(key).as_str()));
+        assert!(!named(MsgKey::action_global_search) && !named(MsgKey::action_filter));
     }
 
     fn the_list_uses_the_anime_section_order_and_a_row_and_latest_press_open_the_browse_page() {
@@ -418,7 +397,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn smoke() {
-        the_header_actions_route_to_global_search_and_the_visibility_page();
+        the_page_has_no_header_of_its_own();
         the_list_uses_the_anime_section_order_and_a_row_and_latest_press_open_the_browse_page();
         a_failure_before_the_first_list_is_an_inline_error_and_retry_asks_again();
         a_failure_after_the_first_list_keeps_the_rows_and_toasts();

@@ -24,7 +24,7 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use kuro_prefs::pref::Pref;
-use kuro_prefs::reader::{FlashColor, ReaderHideThreshold, ReaderOrientation, ReaderPrefs, ReadingMode, TappingInvertMode};
+use kuro_prefs::reader::{FlashColor, ReaderHideThreshold, ReaderPrefs, ReadingMode, TappingInvertMode};
 use kuro_prefs::values::PrefType;
 
 use super::overlay::{self, BRIGHTNESS_RANGE, Channel};
@@ -32,8 +32,6 @@ use super::restore;
 use super::strings;
 use crate::settings_ui::reader::rules::{ReaderState, Row, row_enabled};
 
-/// The tap zone chip index that disables taps, which hides the inversion row.
-pub const TAP_ZONE_DISABLED: i32 = 5;
 /// Flash duration as the slider sees it: units of 100 ms, `1..=15`.
 pub const FLASH_SLIDER_RANGE: (i32, i32) = (1, 15);
 pub const FLASH_INTERVAL_RANGE: (i32, i32) = (1, 10);
@@ -160,7 +158,6 @@ pub fn is_webtoon_family(mode: ReadingMode, default_pref: i32) -> bool {
 #[derive(Clone)]
 pub struct MangaChoices {
     pub on_mode: Rc<dyn Fn(ReadingMode)>,
-    pub on_orientation: Rc<dyn Fn(ReaderOrientation)>,
 }
 
 fn save<T: PrefType>(pref: &Pref<T>, value: T) {
@@ -275,8 +272,8 @@ fn slider(
     root
 }
 
-/// The reading-mode tab (T-043a-046). The mode and rotation chips apply to this manga immediately.
-pub fn reading_tab(prefs: &ReaderPrefs, mode: ReadingMode, orientation: ReaderOrientation, choices: MangaChoices) -> gtk::Box {
+/// The reading-mode tab (T-043a-046). The mode chips apply to this manga immediately.
+pub fn reading_tab(prefs: &ReaderPrefs, mode: ReadingMode, choices: MangaChoices) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
     root.set_margin_start(16);
     root.set_margin_end(16);
@@ -308,15 +305,6 @@ pub fn reading_tab(prefs: &ReaderPrefs, mode: ReadingMode, orientation: ReaderOr
         on_mode(chosen);
     }));
 
-    let orientation_options: Vec<(&str, i32)> = ReaderOrientation::ALL
-        .iter()
-        .map(|o| (orientation_name(*o), o.flag_value()))
-        .collect();
-    let on_orientation = choices.on_orientation.clone();
-    root.append(&chips(&orientation_options, orientation.flag_value(), move |v| {
-        on_orientation(ReaderOrientation::from_preference(v));
-    }));
-
     root.append(&pager);
     root.append(&webtoon);
     root
@@ -330,18 +318,6 @@ pub fn block_visibility(mode: ReadingMode, default_pref: i32) -> (bool, bool) {
 
 fn mode_name(mode: ReadingMode) -> &'static str {
     super::mode_sheet::mode_label(mode)
-}
-
-fn orientation_name(orientation: ReaderOrientation) -> &'static str {
-    match orientation {
-        ReaderOrientation::Default => strings::LABEL_DEFAULT,
-        ReaderOrientation::Free => strings::ROTATION_FREE,
-        ReaderOrientation::Portrait => strings::ROTATION_PORTRAIT,
-        ReaderOrientation::Landscape => strings::ROTATION_LANDSCAPE,
-        ReaderOrientation::LockedPortrait => strings::ROTATION_FORCE_PORTRAIT,
-        ReaderOrientation::LockedLandscape => strings::ROTATION_FORCE_LANDSCAPE,
-        ReaderOrientation::ReversePortrait => strings::ROTATION_REVERSE_PORTRAIT,
-    }
 }
 
 /// Which dependent rows a viewer family's controls feed.
@@ -641,10 +617,10 @@ pub fn filter_tab(prefs: &ReaderPrefs) -> gtk::Box {
 }
 
 /// The whole window body: a notebook with the reading mode, general and custom filter tabs, in that order.
-pub fn notebook(prefs: &ReaderPrefs, mode: ReadingMode, orientation: ReaderOrientation, choices: MangaChoices) -> gtk::Notebook {
+pub fn notebook(prefs: &ReaderPrefs, mode: ReadingMode, choices: MangaChoices) -> gtk::Notebook {
     let notebook = gtk::Notebook::new();
     let reading = gtk::ScrolledWindow::new();
-    reading.set_child(Some(&reading_tab(prefs, mode, orientation, choices)));
+    reading.set_child(Some(&reading_tab(prefs, mode, choices)));
     let general = gtk::ScrolledWindow::new();
     general.set_child(Some(&general_tab(prefs)));
     notebook.append_page(&reading, Some(&gtk::Label::new(Some(strings::PREF_CATEGORY_READING_MODE))));
@@ -696,7 +672,7 @@ mod tests {
         let p = prefs();
         assert_eq!(p.reader_theme.get(), 1, "black background");
         assert!(p.show_page_number.get());
-        assert!(p.fullscreen.get());
+        assert!(!p.fullscreen.get(), "desktop: the reader does not take the whole screen by itself");
         assert!(p.keep_screen_on.get());
         assert!(p.read_with_long_tap.get());
         assert!(p.always_show_chapter_transition.get());
@@ -760,10 +736,4 @@ mod tests {
         assert_eq!(changes.try_recv().unwrap().key.as_deref(), Some("pref_show_page_number_key"));
     }
 
-    #[test]
-    fn disabled_taps_is_the_last_zone_and_the_side_padding_is_a_percent() {
-        assert_eq!(TAP_ZONE_CHIPS[TAP_ZONE_DISABLED as usize], "Disabled");
-        assert_eq!(side_padding_text(10), "10%");
-        assert_eq!(SIDE_PADDING_RANGE, (0, 25));
-    }
 }

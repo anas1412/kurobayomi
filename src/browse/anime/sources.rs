@@ -16,7 +16,7 @@ use kuro_prefs::source::{SourcePrefs, system_locale};
 
 use crate::browse::names::{case_insensitive_cmp, source_display_name};
 use crate::browse::primitives::{ToastDuration, ToastSpec};
-use crate::browse::sources::{HEADER_ACTIONS, ListInput, LOCAL_SOURCE_ID, Section, SourceRow, SourceToggles, SourcesTabAction, source_list};
+use crate::browse::sources::{ListInput, LOCAL_SOURCE_ID, Section, SourceRow, SourceToggles, source_list};
 
 /// The stored source sets the anime sources list reads. Ids are decimal strings, as stored.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -240,34 +240,18 @@ pub fn list_failure_toast() -> ToastSpec {
     ToastSpec { message: tr(MsgKey::internal_error), action: None, duration: ToastDuration::Seconds(4) }
 }
 
-/// Where a Sources tab action or row leads.
+/// Where a Sources row or its Latest button leads. Global search and the visibility page are the Browse header's
+/// (`browse::shell`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TabRoute {
-    /// Global search with an empty query.
-    GlobalSearch,
-    /// The visibility page.
-    Visibility,
     /// One source's browse page on the given listing.
     Browse { source_id: i64, query: BrowseQuery },
-}
-
-/// The header actions: Global search, then Filter (which opens the visibility page).
-pub fn header_route(action: SourcesTabAction) -> TabRoute {
-    match action {
-        SourcesTabAction::GlobalSearch => TabRoute::GlobalSearch,
-        SourcesTabAction::Filter => TabRoute::Visibility,
-    }
 }
 
 /// A row opens the source's Popular listing. Its Latest button opens the Latest listing.
 pub fn row_route(source_id: i64, latest: bool) -> TabRoute {
     let query = if latest { BrowseQuery::Latest } else { BrowseQuery::Popular };
     TabRoute::Browse { source_id, query }
-}
-
-/// The header actions in display order.
-pub fn header_actions() -> [SourcesTabAction; 2] {
-    HEADER_ACTIONS
 }
 
 /// The pin and disable writers over `pinned_anime_catalogues` and `hidden_anime_catalogues`.
@@ -541,10 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn header_actions_and_rows_route_to_the_right_pages() {
-        assert_eq!(header_actions(), HEADER_ACTIONS);
-        assert_eq!(header_route(SourcesTabAction::GlobalSearch), TabRoute::GlobalSearch);
-        assert_eq!(header_route(SourcesTabAction::Filter), TabRoute::Visibility);
+    fn rows_route_to_the_right_pages() {
         assert_eq!(row_route(7, false), TabRoute::Browse { source_id: 7, query: BrowseQuery::Popular });
         assert_eq!(row_route(7, true), TabRoute::Browse { source_id: 7, query: BrowseQuery::Latest });
     }

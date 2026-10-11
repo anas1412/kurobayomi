@@ -136,6 +136,7 @@ impl DbStore {
         Ok((Some(manga), self.chapter_list(manga_id, downloads)?))
     }
 
+    #[cfg(test)]
     /// How many trackers the manga is bound to, for the tracking button of the action row.
     pub fn track_count(&self, manga_id: i64) -> DataResult<usize> {
         Ok(kuro_data::track::MangaTrackRepo::new(Arc::clone(&self.db)).by_entry(manga_id)?.len())

@@ -1,9 +1,9 @@
 //! Anime entry details (plan areas 39a and 39b). Pure rules and state: `airing`, `entry_state`, `episode_row`, `format`,
 //! `header`, `info`, `layout`, `model` (the load sequence), `remote` (the source refresh), `runner` (the store
-//! runner), `settings` and `store`, plus `dispatch` (what the bar and the swipes send), `downloads` (the Download menu rules)
+//! runner), `settings` and `store`, plus `dispatch` (what the bar and the menu send), `downloads` (the Download menu rules)
 //! and `download_backend` (the downloads folder and queue). The thin widgets are `info_view`, `row_view`,
 //! `season_grid`, `settings_view`, `season_settings_view`, `images_view`, `duplicate_view` and `route`; they read those
-//! values (`swipe_look` is the pure side of the swipe strip and the row menu, `images_io` of the image files).
+//! values (`row_menu` is the pure side of the row menu, `images_io` of the image files).
 //!
 //! Reused from the domain layer, not copied here: episode and season flag masks and codecs
 //! (`kuro_domain::entries::anime`), the flag setters (`kuro_domain::entries::flag_setters`), the episode sorter
@@ -13,13 +13,11 @@
 
 pub mod airing;
 pub mod airing_load;
-pub mod related_sync;
 pub mod torrent_server;
 pub mod entry_state;
 pub mod episode_item;
 pub mod episode_row;
 pub mod format;
-pub mod next_update;
 pub mod playlist_filter;
 pub mod selection;
 pub mod header;
@@ -49,7 +47,7 @@ pub mod details_error;
 pub mod duplicate;
 pub mod duplicate_view;
 pub mod summary;
-pub mod swipe_look;
+pub mod row_menu;
 pub mod images;
 pub mod images_io;
 pub mod images_view;

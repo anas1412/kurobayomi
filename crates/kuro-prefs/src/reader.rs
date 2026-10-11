@@ -1,9 +1,10 @@
 //! `[reader]` preferences (Aniyomi `ReaderPreferences`) and the reader value tables (`ReadingMode`,
-//! `ReaderOrientation`, tap zones, scale types, zoom starts and colour filter modes).
+//! tap zones, scale types, zoom starts and colour filter modes).
 //!
-//! Preference values for reading mode and orientation are `Int` codes, so the typed enums here are
-//! plain Rust types with `from_preference` for the stored number. Keys marked DROP in the registry
-//! (cutout, volume keys, orientation) are kept for backup round trips and have no UI.
+//! The preference value for the reading mode is an `Int` code, so the typed enum here is a plain Rust
+//! type with `from_preference` for the stored number. Keys marked DROP in the registry (cutout, volume
+//! keys) are kept for backup round trips and have no UI. The screen orientation is dropped, see
+//! `registry::DROPPED_KEYS`; the orientation bits of a stored viewer word are left as they are.
 
 use crate::pref_enum;
 use crate::registry::define_prefs;
@@ -121,50 +122,6 @@ impl ReadingMode {
     }
 }
 
-/// `ReaderOrientation` (`ReaderOrientation.kt`). The flag values are the stored
-/// `pref_default_orientation_type_key` codes; the mask is [`ORIENTATION_MASK`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReaderOrientation {
-    Default,
-    Free,
-    Portrait,
-    Landscape,
-    LockedPortrait,
-    LockedLandscape,
-    ReversePortrait,
-}
-
-pub const ORIENTATION_MASK: i32 = 0x38;
-
-impl ReaderOrientation {
-    pub const ALL: [ReaderOrientation; 7] = [
-        Self::Default,
-        Self::Free,
-        Self::Portrait,
-        Self::Landscape,
-        Self::LockedPortrait,
-        Self::LockedLandscape,
-        Self::ReversePortrait,
-    ];
-
-    pub const fn flag_value(self) -> i32 {
-        match self {
-            Self::Default => 0x00,
-            Self::Free => 0x08,
-            Self::Portrait => 0x10,
-            Self::Landscape => 0x18,
-            Self::LockedPortrait => 0x20,
-            Self::LockedLandscape => 0x28,
-            Self::ReversePortrait => 0x30,
-        }
-    }
-
-    /// The orientation for a stored code, [`ReaderOrientation::Default`] when unknown.
-    pub fn from_preference(code: i32) -> Self {
-        Self::ALL.into_iter().find(|o| o.flag_value() == code).unwrap_or(Self::Default)
-    }
-}
-
 /// Tap-zone layouts offered in the reader settings, as string-resource keys in Kotlin order
 /// (`ReaderPreferences.TapZones`).
 pub const TAP_ZONES: [&str; 6] = [
@@ -216,7 +173,7 @@ pub const COLOR_FILTER_MODE: [(&str, ColorFilterBlend); 6] = [
 ];
 
 define_prefs! {
-    /// `[reader]` section: the 54 keys of Aniyomi `ReaderPreferences`.
+    /// `[reader]` section: the 53 keys of Aniyomi `ReaderPreferences` that a desktop has.
     pub struct ReaderPrefs in "reader" {
         page_transitions: bool = "pref_enable_transitions_key" => true;
         flash_on_page_change: bool = "pref_reader_flash" => false;
@@ -226,11 +183,10 @@ define_prefs! {
         double_tap_anim_speed: i32 = "pref_double_tap_anim_speed" => 500;
         show_page_number: bool = "pref_show_page_number_key" => true;
         show_reading_mode: bool = "pref_show_reading_mode" => true;
-        fullscreen: bool = "fullscreen" => true;
+        fullscreen: bool = "fullscreen" => false;
         cutout_short: bool = "cutout_short" => true;
         keep_screen_on: bool = "pref_keep_screen_on_key" => true;
         default_reading_mode: i32 = "pref_default_reading_mode_key" => 2;
-        default_orientation_type: i32 = "pref_default_orientation_type_key" => 8;
         webtoon_double_tap_zoom_enabled: bool = "pref_enable_double_tap_zoom_webtoon" => true;
         image_scale_type: i32 = "pref_image_scale_type_key" => 1;
         zoom_start: i32 = "pref_zoom_start_key" => 1;
@@ -285,7 +241,7 @@ mod tests {
 
     #[test]
     fn the_section_holds_every_reader_row() {
-        assert_eq!(ReaderPrefs::FIELDS.len(), 54);
+        assert_eq!(ReaderPrefs::FIELDS.len(), 53);
         let reader = ReaderPrefs::new(PrefStore::in_memory());
         assert_section_registered(ReaderPrefs::TABLE, ReaderPrefs::FIELDS, &reader.defaults());
     }
@@ -297,7 +253,6 @@ mod tests {
         assert_eq!(r.flash_duration_millis.get(), 100);
         assert_eq!(r.double_tap_anim_speed.get(), 500);
         assert_eq!(r.default_reading_mode.get(), 2);
-        assert_eq!(r.default_orientation_type.get(), 8);
         assert_eq!(r.image_scale_type.get(), 1);
         assert_eq!(r.zoom_start.get(), 1);
         assert_eq!(r.reader_theme.get(), 1);
@@ -309,9 +264,10 @@ mod tests {
 
     #[test]
     fn drop_keys_are_registered_for_round_trip() {
-        for key in ["cutout_short", "reader_volume_keys", "reader_volume_keys_inverted", "pref_default_orientation_type_key"] {
+        for key in ["cutout_short", "reader_volume_keys", "reader_volume_keys_inverted"] {
             assert!(lookup(key).is_some(), "{key}");
         }
+        assert!(lookup("pref_default_orientation_type_key").is_none(), "the orientation default is dropped");
     }
 
     #[test]
@@ -334,15 +290,6 @@ mod tests {
         assert_eq!(ReadingMode::Default.viewer_type(), Err(UnresolvedReadingMode));
         assert_eq!(ReadingMode::ContinuousVertical.viewer_type(), Ok(ViewerType::Webtoon));
         assert_eq!(READING_MODE_MASK, 0x7);
-    }
-
-    #[test]
-    fn orientation_codes_match_the_flag_table() {
-        let codes: Vec<i32> = ReaderOrientation::ALL.iter().map(|o| o.flag_value()).collect();
-        assert_eq!(codes, [0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30]);
-        assert_eq!(ReaderOrientation::from_preference(0x18), ReaderOrientation::Landscape);
-        assert_eq!(ReaderOrientation::from_preference(0x7), ReaderOrientation::Default);
-        assert_eq!(ORIENTATION_MASK, 0x38);
     }
 
     #[test]

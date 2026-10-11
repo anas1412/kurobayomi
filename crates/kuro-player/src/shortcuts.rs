@@ -5,9 +5,6 @@
 use crate::enums::Sheets;
 use crate::keys::Modifiers;
 
-/// Fraction of brightness one Shift+Up or Shift+Down step changes.
-pub const BRIGHTNESS_STEP: f32 = 0.05;
-
 /// What a shortcut does.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
@@ -19,8 +16,6 @@ pub enum Action {
     },
     /// Device volume by this many steps (Up is +1).
     VolumeStep(i32),
-    /// Screen brightness by this fraction (Shift+Up is positive).
-    BrightnessStep(f32),
     /// One frame back (`false`) or forward (`true`).
     FrameStep {
         forward: bool,
@@ -97,10 +92,6 @@ fn arrow_or_symbol(keyval: u32, mods: Modifiers) -> Option<Action> {
             forward: keyval == KS_RIGHT,
             long: shift,
         },
-        KS_UP | KS_DOWN if shift => {
-            let sign = if keyval == KS_UP { 1.0 } else { -1.0 };
-            Action::BrightnessStep(sign * BRIGHTNESS_STEP)
-        }
         KS_UP if plain => Action::VolumeStep(1),
         KS_DOWN if plain => Action::VolumeStep(-1),
         KS_COMMA if plain => Action::FrameStep { forward: false },
@@ -144,8 +135,6 @@ const ACTION_NAMES: &[(&str, Action)] = &[
     ),
     ("volume-up", Action::VolumeStep(1)),
     ("volume-down", Action::VolumeStep(-1)),
-    ("brightness-up", Action::BrightnessStep(BRIGHTNESS_STEP)),
-    ("brightness-down", Action::BrightnessStep(-BRIGHTNESS_STEP)),
     ("frame-back", Action::FrameStep { forward: false }),
     ("frame-forward", Action::FrameStep { forward: true }),
     ("speed-down", Action::SpeedStep(-1)),
@@ -313,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn arrows_seek_volume_and_brightness() {
+    fn arrows_seek_and_change_volume() {
         let none = m(false, false);
         assert_eq!(
             action_for(KS_LEFT, none, false),
@@ -334,10 +323,7 @@ mod tests {
             action_for(KS_DOWN, none, false),
             Some(Action::VolumeStep(-1))
         );
-        assert_eq!(
-            action_for(KS_DOWN, m(true, false), false),
-            Some(Action::BrightnessStep(-BRIGHTNESS_STEP))
-        );
+        assert_eq!(action_for(KS_DOWN, m(true, false), false), None);
     }
 
     #[test]

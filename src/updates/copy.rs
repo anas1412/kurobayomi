@@ -71,10 +71,6 @@ pub fn not_available() -> String {
     tr(MsgKey::not_applicable)
 }
 
-/// Storage copy (p1-ui-parity 5 and EC-42-T).
-pub fn storage_category() -> String {
-    tr(MsgKey::label_category)
-}
 pub fn storage_all() -> String {
     tr(MsgKey::label_all)
 }
@@ -95,7 +91,6 @@ pub const STORAGE_SOURCE_MISSING: &str = "Source not installed; files not delete
 /// Updates copy (T-42a-032, T-42a-038, T-42b-003, T-42b-016).
 pub const SHOWING_LATEST_500: &str = "Showing latest 500";
 pub const DELETE_SOURCE_MISSING: &str = "Source not installed, downloads were not deleted";
-pub const LIBRARY_UPDATE_RUNNING: &str = "Library update already running";
 pub fn confirm_delete_chapters() -> String {
     tr(MsgKey::confirm_delete_chapters)
 }
@@ -106,7 +101,3 @@ pub fn internal_error() -> String {
     tr(MsgKey::internal_error)
 }
 pub const LAST_UPDATED_PREFIX: &str = "Library last updated: ";
-pub const JUST_NOW: &str = "Just now";
-pub fn confirm_ok() -> String {
-    tr(MsgKey::action_ok)
-}

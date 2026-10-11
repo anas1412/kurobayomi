@@ -340,8 +340,6 @@ theme_light = Vyp.
 
 theme_dark = Zap.
 
-theme_monet = Dynamické
-
 theme_greenapple = Zelené jablko
 
 theme_lavender = Levanduľa
@@ -381,10 +379,6 @@ lock_always = Vždy
 lock_never = Nikdy
 
 hide_notification_content = Skryť obsah upozornení
-
-secure_screen = Zabezpečená obrazovka
-
-secure_screen_summary = Skryť obsah aplikácie pri prepínaní aplikácie a blokovať tvorbu snímkov obrazovky
 
 pref_category_nsfw_content = NSFW (18+) zdroje
 
@@ -507,14 +501,6 @@ ext_nsfw_short = 18+
 ext_nsfw_warning = Zdroje z tohto rozšírenia môžu obsahovať obsah pre dospleých (18+)
 
 ext_install_service_notif = Inštaluje sa rozšírenie…
-
-ext_installer_pref = Inštalátor
-
-ext_installer_legacy = Pôvodný
-
-ext_installer_shizuku_stopped = Shizuku nebeží
-
-ext_installer_shizuku_unavailable_dialog = Nainštalujte a spustite Shizuku, aby ste mohli používať Shizuku ako inštalátor rozšírení.
 
 action_replace_repo = Nahradiť
 
@@ -674,22 +660,6 @@ double_tap_anim_speed_normal = Normálne
 
 double_tap_anim_speed_fast = Rýchlo
 
-pref_rotation_type = Predvolený typ rotácie
-
-rotation_type = Typ rotácie
-
-rotation_free = Voľná
-
-rotation_portrait = Na výšku
-
-rotation_reverse_portrait = Obrátený portrét
-
-rotation_landscape = Na šírku
-
-rotation_force_portrait = Zamknuté na výšku
-
-rotation_force_landscape = Zamknuté na šírku
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -846,8 +816,6 @@ pref_refresh_library_covers = Obnoviť obaly knižnice
 
 pref_reset_viewer_flags = Obnovenie nastavení čítačky pre jednotlivé série
 
-pref_reset_viewer_flags_summary = Obnovenie režimu čítania a orientácie pre všetky série
-
 pref_reset_viewer_flags_success = Všetky nastavenia čítačky sa obnovia
 
 pref_reset_viewer_flags_error = Nepodarilo sa obnoviť nastavenia čítačky
@@ -855,20 +823,6 @@ pref_reset_viewer_flags_error = Nepodarilo sa obnoviť nastavenia čítačky
 pref_dump_crash_logs = Výpis logu o zlyhaní
 
 pref_dump_crash_logs_summary = Uložiť logy o chybách do súboru na zdieľanie s vývojármi
-
-label_background_activity = Aktivita na pozadí
-
-pref_disable_battery_optimization = Zakázať optimalizáciu batérie
-
-pref_disable_battery_optimization_summary = Pomáha s aktualizáciami a zálohovaním knižnice na pozadí
-
-battery_optimization_disabled = Optimalizácia batérie je už vypnutá
-
-battery_optimization_setting_activity_not_found = Nepodarilo sa otvoriť nastavenia zariadenia
-
-about_dont_kill_my_app = Niektorí výrobcovia majú ďalšie obmedzenia aplikácií, ktoré vypínajú služby na pozadí. Na tejto webovej stránke nájdete viac informácií o tom, ako to opraviť.
-
-pref_tablet_ui_mode = Používateľské rozhranie tabletu
 
 pref_verbose_logging = Podrobné logovanie
 

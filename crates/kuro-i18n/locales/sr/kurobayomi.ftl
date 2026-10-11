@@ -10,8 +10,6 @@ action_reorganize_by = Промени редослед
 
 relative_time_now = Сада
 
-pref_library_summary = Категорије, глобално ажурирање, листање поглавља
-
 pref_library_update_show_tab_badge = Прикажи број непрочитаних на икони "Ново"
 
 label_player_settings = Подешавања плејера
@@ -20,21 +18,9 @@ action_search_player_settings = Подешавања плејера претра
 
 pref_player_internal = Интерни плејер
 
-pref_player_internal_summary = Напредак, контроле, оријентација
-
 pref_progress_mark_as_seen = У ком тренутку означити епизоду као виђену
 
 pref_preserve_watching_position = Сачувај позицију гледања на виђеним епизодама
-
-pref_category_player_orientation = Оријентација
-
-rotation_video = Видео
-
-rotation_reverse_landscape = Обрнути пејзаж
-
-rotation_sensor_portrait = Сензор портрет
-
-rotation_sensor_landscape = Сензор пејзаж
 
 pref_category_controls = Контроле
 
@@ -47,8 +33,6 @@ pref_controls_show_chapter_indicator = Прикажи индикатор тре�
 pref_controls_show_chapter_indicator_info = Појављује се само ако видео има поглавља
 
 pref_controls_display_volume_percentage = Прикажи јачину звука као проценат
-
-pref_remember_brightness = Запамти и пребаци на последње коришћену осветљеност
 
 pref_remember_volume = Запамти и пребаци на последње коришћену јачину звука
 
@@ -107,12 +91,6 @@ pref_external_player_preference = Преференција екстерног п
 pref_player_gestures = Гестови
 
 pref_player_gestures_summary = Претраживање, двоструки тап, контроле медија
-
-pref_category_player_sliders = Клизачи
-
-enable_volume_brightness_gestures = Омогући гестове за јачину звука и осветљеност
-
-pref_controls_swap_vol_brightness = Размените клизач јачине звука и осветљености
 
 pref_category_player_seeking = Претраживање
 
@@ -734,10 +712,6 @@ theme_cottoncandy = Шећерна вуна
 
 theme_mocha = Мока
 
-pref_episode_swipe_end = Превлачење десно
-
-pref_episode_swipe_start = Превлачење лево
-
 pref_category_hide_hidden = Сакриј скривене категорије са екрана категорија и складишта
 
 pref_update_anime_release_grace_period = Очекујени период милости за издавање анимеа
@@ -1110,10 +1084,6 @@ onboarding_permission_notifications = Дозвола за обавештења
 
 onboarding_permission_notifications_description = За примање обавештења о ажурурању библиотеке и др.
 
-onboarding_permission_ignore_battery_opts = Коришћење батерије у позадини
-
-onboarding_permission_ignore_battery_opts_description = Избегни прекиде при дуготрајном ажурирању колекције, преузимању и обнављању резервне копије
-
 onboarding_permission_action_grant = Одобри
 
 onboarding_guides_new_user = Користш { $arg1 } први пут? Препоручујемо да погледаш водич за покретање
@@ -1148,10 +1118,6 @@ pref_browse_summary = Извори, додаци, глобална претра�
 
 pref_backup_summary = Ручне и аутоматске резервне копије
 
-pref_security_summary = Закључавање апликације, сигуран екран
-
-pref_advanced_summary = Записници гашења апликације, оптимизације батерије
-
 pref_category_theme = Тема
 
 pref_app_theme = Тема апликације
@@ -1161,8 +1127,6 @@ theme_system = По систему
 theme_light = Светла
 
 theme_dark = Тамна
-
-theme_monet = Динамично
 
 theme_greenapple = Зелена јабука
 
@@ -1207,10 +1171,6 @@ lock_always = Увек
 lock_never = Никада
 
 hide_notification_content = Сакриј обавештења
-
-secure_screen = Безбедносни екран
-
-secure_screen_summary = Сакриј приказ апликације приликом пребацивања између апликација и онемогући снимке екрана
 
 pref_category_nsfw_content = NSFW - извори за одрасле (18+)
 
@@ -1284,10 +1244,6 @@ include = Укључи: { $arg1 }
 
 exclude = Искључи: { $arg1 }
 
-pref_chapter_swipe_end = Превуци удесно
-
-pref_chapter_swipe_start = Превуци улево
-
 multi_lang = Више језика
 
 ext_updates_pending = Ажурирања на чекању
@@ -1337,14 +1293,6 @@ ext_nsfw_warning = Може садржати садржај за одрасле 
 ext_permission_install_apps_warning = За инсталацију додатака потребне су дозволе. Додирни овде за одобрење
 
 ext_install_service_notif = Инсталирање додатка…
-
-ext_installer_pref = Инсталер
-
-ext_installer_legacy = Првобитни метод
-
-ext_installer_shizuku_stopped = Shizuku није укључен
-
-ext_installer_shizuku_unavailable_dialog = Инсталирајте и покрените Shizuku да би користили Shizuku као инсталер додатака.
 
 ext_revoke_trust = Опозови поверење непознатим екстензијама
 
@@ -1535,22 +1483,6 @@ double_tap_anim_speed_0 = Без анимације
 double_tap_anim_speed_normal = Нормална
 
 double_tap_anim_speed_fast = Брзa
-
-pref_rotation_type = Подразумевана оријентација
-
-rotation_type = Оријентација
-
-rotation_free = Слободно
-
-rotation_portrait = Усправно
-
-rotation_reverse_portrait = Обрнути портрет
-
-rotation_landscape = Положено
-
-rotation_force_portrait = Усправно закључано
-
-rotation_force_landscape = Положено закључано
 
 color_filter_r_value = R
 
@@ -1754,8 +1686,6 @@ pref_refresh_library_covers = Освежи омоте у колекцији
 
 pref_reset_viewer_flags = Ресетуј подешавања читача по наслову
 
-pref_reset_viewer_flags_summary = Ресетуј режим читања и оријентацију свих серија
-
 pref_reset_viewer_flags_success = Сва подешавања читача су ресетована
 
 pref_reset_viewer_flags_error = Није могуће ресетовати подешавања читача
@@ -1763,20 +1693,6 @@ pref_reset_viewer_flags_error = Није могуће ресетовати по�
 pref_dump_crash_logs = Дели извештаје о паду
 
 pref_dump_crash_logs_summary = Чува евиденцију грешака у датотеку за дељење са програмерима
-
-label_background_activity = Активност у позадини
-
-pref_disable_battery_optimization = Искључи оптимизацију коришћења батерије
-
-pref_disable_battery_optimization_summary = Помаже при ажурирању колекције и резервних копија
-
-battery_optimization_disabled = Оптимизација потрошње батерије је већ искључена
-
-battery_optimization_setting_activity_not_found = Није могуће отворити подешавања уређаја
-
-about_dont_kill_my_app = Неки произвођачи имају додатна ограничења за апликације која гасе сервисе које су у позадини. Овај сајт садржи више информација о могућим решењима.
-
-pref_tablet_ui_mode = Изглед за таблет
 
 pref_verbose_logging = Детаљно извештавање
 

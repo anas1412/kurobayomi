@@ -103,6 +103,7 @@ impl WeakListingView {
 }
 
 impl ListingView {
+    #[cfg(test)]
     pub fn new(deps: ListingDeps, query: BrowseQuery) -> Self {
         Self::with_filters(deps, query, FilterList::default())
     }
@@ -182,6 +183,7 @@ impl ListingView {
         WeakListingView { inner: Rc::downgrade(&self.inner), root: self.root.downgrade() }
     }
 
+    #[cfg(test)]
     /// Starts a new listing with the filters it had: a Popular or Latest switch or a refresh (B-EC-08). Loaders of
     /// the old one are aborted and their late pages dropped.
     pub fn restart(&self, query: BrowseQuery) {
@@ -200,6 +202,7 @@ impl ListingView {
         self.inner.listing.borrow_mut().set_hide_in_library(hide);
     }
 
+    #[cfg(test)]
     /// How many covers the listing holds.
     pub fn loaded_count(&self) -> u32 {
         self.inner.store.n_items()
@@ -216,6 +219,7 @@ impl ListingView {
         self.inner.listing.borrow().query().clone()
     }
 
+    #[cfg(test)]
     /// The listing's filters, as its running search holds them.
     pub fn filters(&self) -> FilterList {
         self.inner.listing.borrow().filters().clone()

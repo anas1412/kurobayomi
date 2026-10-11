@@ -14,8 +14,6 @@ relative_time_now = الآن
 
 manga = مانغا
 
-pref_library_summary = الفئات، التحديث الشامل، عند سحب الحلقة/الفصل
-
 action_add_repo_message = إضافة مستودعات إضافية إلى { $arg1 } . يجب أن يكون هذا الرابط ينتهي بـ "index.min.json".
 
 download_ahead_info = لا يشتغل إلا حين يكون الفصل أو الحلقة الحاليِّة والتي تليها منزَّلين.
@@ -66,21 +64,9 @@ action_search_player_settings = بحث في إعدادات المشغل
 
 pref_player_internal = مشغل داخلي
 
-pref_player_internal_summary = التقدم، والتحكم، والإتجاه
-
 pref_progress_mark_as_seen = في أي نسبة تحدد الحلقة كـ"تم مشاهدتها"
 
 pref_preserve_watching_position = الحفاظ على موضع المشاهدة على الحلقات التي تمت مشاهدتها
-
-pref_category_player_orientation = التوجيه
-
-rotation_video = تدوير الفيديو
-
-rotation_reverse_landscape = الوضع الأفقي العكسي
-
-rotation_sensor_portrait = المستشعر الرأسي
-
-rotation_sensor_landscape = الوضع الأفقي حسب المستشعر
 
 pref_category_controls = عناصر التحكم
 
@@ -93,8 +79,6 @@ pref_controls_show_chapter_indicator = عرض مؤشر الفصل
 pref_controls_show_chapter_indicator_info = يظهر فقط إذا كان الفيديو لديه حلقات أخرى
 
 pref_controls_display_volume_percentage = عرض نسبة الصوت
-
-pref_remember_brightness = تذكر وقم بالتغيير إلى آخر سطوع تم استخدامه
 
 pref_remember_volume = تذكر وقم بالتغيير إلى آخر مستوى صوت تم إستخدامه
 
@@ -165,12 +149,6 @@ pref_external_player_preference = تفضيل مشغل الوسائط الخار�
 pref_player_gestures = إيماءات المشغل
 
 pref_player_gestures_summary = البحث، والنقر المزدوج، وعناصر التحكم في الوسائط
-
-pref_category_player_sliders = أشرطة تمرير المشغل
-
-enable_volume_brightness_gestures = تفعيل إيماءات الصوت والسطوع
-
-pref_controls_swap_vol_brightness = تبديل الصوت والسطوع
 
 pref_category_player_seeking = البحث عن
 
@@ -878,10 +856,6 @@ theme_cottoncandy = حلوى القطن
 
 theme_mocha = موكا
 
-pref_episode_swipe_end = مرر لليمين للإجراء الأيمن
-
-pref_episode_swipe_start = مرر لليسار للإجراء الأيسر
-
 pref_category_hide_hidden = إخفاء الفئات المخفية من شاشة الفئات
 
 pref_update_anime_release_grace_period = فترة السماح المتوقعة لإصدار الأنمي
@@ -1326,10 +1300,6 @@ onboarding_permission_notifications = إذن الإشعار
 
 onboarding_permission_notifications_description = احصل على تنبيهات لتحديثات المكتبة والمزيد.
 
-onboarding_permission_ignore_battery_opts = استخدام البطارية في الخلفية
-
-onboarding_permission_ignore_battery_opts_description = تجنّب الانقطاعات في تحديثات المكتبة الطويلة الأمد والتنزيلات واستعادة النسخ الاحتياطية.
-
 onboarding_permission_action_grant = منح
 
 onboarding_guides_new_user = أحديث العهد بـ{ $arg1 }؟ طالع دليل البدء.
@@ -1364,10 +1334,6 @@ pref_browse_summary = المصادر، الامتدادات، البحث الع�
 
 pref_backup_summary = النسخ الاحتياطي اليدوي والآلي وحيِّز التخزين
 
-pref_security_summary = قفل التطبيق، شاشة آمنة
-
-pref_advanced_summary = تفريغ سجلات الأعطال وتحسينات البطارية
-
 pref_category_theme = السمة
 
 pref_app_theme = مظهر التطبيق
@@ -1377,8 +1343,6 @@ theme_system = النظام
 theme_light = فاتح
 
 theme_dark = داكن
-
-theme_monet = ديناميك
 
 theme_greenapple = أخضر
 
@@ -1423,10 +1387,6 @@ lock_always = دائماً
 lock_never = أبدًا
 
 hide_notification_content = أخفِ محتوى الإشعارات
-
-secure_screen = الشاشة الآمنة
-
-secure_screen_summary = تُخفي الشاشة الآمنة محتوى التطبيق عند التبديل بين التطبيقات، وتمنع التقاط الشاشة كذلك
 
 pref_category_nsfw_content = محتوى +18
 
@@ -1500,10 +1460,6 @@ include = تضمين: { $arg1 }
 
 exclude = إستثناء: { $arg1 }
 
-pref_chapter_swipe_end = إجراء التمرير الأيسر
-
-pref_chapter_swipe_start = إجراء التمرير الأيمن
-
 multi_lang = متعدد
 
 ext_updates_pending = التحديثات معلقة
@@ -1553,14 +1509,6 @@ ext_nsfw_warning = بعض المصادر من هذا الامتداد قد تح�
 ext_permission_install_apps_warning = الأذونات مطلوبة لتثبيت الإضافات. انقر هنا لمنحها.
 
 ext_install_service_notif = جارٍ تثبيت الإضافة …
-
-ext_installer_pref = المثبِّت
-
-ext_installer_legacy = قياسي
-
-ext_installer_shizuku_stopped = «Shizuku» لا يعمل
-
-ext_installer_shizuku_unavailable_dialog = ثبِّت «شيزوكو» وشغِّله لتستخدمه مثبِّت إضافات.
 
 ext_revoke_trust = إبطال الإضافات غير الموثوق بها
 
@@ -1770,22 +1718,6 @@ double_tap_anim_speed_normal = طبيعي
 
 double_tap_anim_speed_fast = سريع
 
-pref_rotation_type = التدوير الافتراضي
-
-rotation_type = التدوير
-
-rotation_free = حر
-
-rotation_portrait = رأسي
-
-rotation_reverse_portrait = رأسي بالعكس
-
-rotation_landscape = افقي
-
-rotation_force_portrait = الوضع الرأسي اﻹجباري
-
-rotation_force_landscape = الوضع الأفقي الإجباري
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -1994,8 +1926,6 @@ pref_refresh_library_covers = حدّث صور اغلفة المكتبة
 
 pref_reset_viewer_flags = إعادة ضبط إعدادات قراءة السلسلة
 
-pref_reset_viewer_flags_summary = إعادة تعيين اعدادات القراءه لكل القصص
-
 pref_reset_viewer_flags_success = اعادة تعيين جميع اعدادات القارئ
 
 pref_reset_viewer_flags_error = لم يمكن إعادة تعيين إعدادات القارئ
@@ -2003,20 +1933,6 @@ pref_reset_viewer_flags_error = لم يمكن إعادة تعيين إعدادا
 pref_dump_crash_logs = شارك سجلَّات الاعطال
 
 pref_dump_crash_logs_summary = يحفظ سجلات الأخطاء في ملف للمشاركة مع المطورين
-
-label_background_activity = الأنشطة التي تعمل في الخلفية
-
-pref_disable_battery_optimization = إطفاء وضع تحسين البطارية
-
-pref_disable_battery_optimization_summary = يساعد في عملية تحديث المكتبة والنسخ الإحتياطي في الخلفية
-
-battery_optimization_disabled = تم إلغاء وضع تحسين البطارية مُسبقاً
-
-battery_optimization_setting_activity_not_found = تعذر فتح إعدادات الجهاز
-
-about_dont_kill_my_app = تقوم بعض الشركات المصنعة بوضع قيود إضافية على التطبيقات التي قد تقضي على الخدمات التي تعمل في الخلفية. يحتوي هذا الموقع على مزيد من المعلومات حول كيفية إصلاحه.
-
-pref_tablet_ui_mode = واجهة مستخدم الجهاز اللوحي
 
 pref_verbose_logging = التسجيل المطول
 

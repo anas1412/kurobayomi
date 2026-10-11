@@ -1,7 +1,6 @@
-//! Remembered brightness and volume (T-45b-053; `pref_remember_brightness`, `pref_remember_volume`). The stored
-//! values `player_brightness_value` and `player_volume_value` default to `-1.0`, which means nothing is stored.
-//! The session start restores a value only when its switch is on and the value is not negative; a change is stored
-//! only under the same conditions. Pure: the app reads and writes the preferences.
+//! Remembered volume (T-45b-053; `pref_remember_volume`). The stored value `player_volume_value` defaults to
+//! `-1.0`, which means nothing is stored. The session start restores the value only when its switch is on and the
+//! value is not negative; a change is stored only under the same conditions. Pure: the app reads and writes the preferences.
 
 /// The stored value that means no value was stored.
 pub const UNSET: f32 = -1.0;

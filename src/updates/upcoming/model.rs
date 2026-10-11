@@ -11,8 +11,6 @@ use kuro_domain::dates::local_date;
 pub const MANGA_STATUSES: [i64; 2] = [1, 4];
 /// Anime statuses that can have an upcoming update: ongoing (1), publishing finished (4) and upcoming (7).
 pub const ANIME_STATUSES: [i64; 3] = [1, 4, 7];
-/// `SManga.COMPLETED`.
-pub const COMPLETED: i64 = 2;
 
 /// One favourite entry with an upcoming update.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,11 +22,6 @@ pub struct Entry {
     pub next_update_ms: i64,
     pub cover_url: Option<String>,
     pub cover_last_modified: i64,
-}
-
-/// `expectedNextUpdate`: the next update time, or none for a completed entry (D§1.6).
-pub fn expected_next_update(status: i64, next_update_ms: i64) -> Option<i64> {
-    (status != COMPLETED).then_some(next_update_ms)
 }
 
 /// A line of the list: a day header with its count, or the entry at this index of the sorted entries.
@@ -78,15 +71,6 @@ pub fn build<Tz: TimeZone>(mut entries: Vec<Entry>, zone: &Tz) -> Upcoming {
     Upcoming { entries, index }
 }
 
-/// Local midnight of the day `now` falls in, in epoch milliseconds (the query's cut-off).
-pub fn start_of_day_ms<Tz: TimeZone>(now: &chrono::DateTime<Tz>) -> i64 {
-    let midnight = now.date_naive().and_hms_opt(0, 0, 0).expect("midnight exists");
-    now.timezone()
-        .from_local_datetime(&midnight)
-        .earliest()
-        .map_or(now.timestamp_millis(), |t| t.timestamp_millis())
-}
-
 /// The list position a click on a calendar day scrolls to (E-C8, E-C9): the day's header, plus one on the single
 /// column where the calendar row comes first. A day without a header gives `None` and nothing scrolls.
 pub fn day_jump(index: &Index, day: NaiveDate, single_column: bool) -> Option<usize> {
@@ -100,7 +84,7 @@ pub fn needs_requery(loaded_for: NaiveDate, today: NaiveDate) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Local, NaiveDate, TimeZone, Utc};
+    use chrono::{NaiveDate, TimeZone, Utc};
 
     use super::*;
 
@@ -171,22 +155,9 @@ mod tests {
     }
 
     #[test]
-    fn expected_next_update_is_none_for_completed() {
-        assert_eq!(expected_next_update(COMPLETED, 5), None);
-        assert_eq!(expected_next_update(1, 5), Some(5));
-    }
-
-    #[test]
     fn status_sets_match_the_spec() {
         assert_eq!(MANGA_STATUSES, [1, 4]);
         assert_eq!(ANIME_STATUSES, [1, 4, 7]);
-    }
-
-    #[test]
-    fn midnight_is_the_start_of_the_local_day() {
-        let now = Local.with_ymd_and_hms(2026, 10, 8, 15, 30, 0).single().unwrap();
-        let midnight = Local.with_ymd_and_hms(2026, 10, 8, 0, 0, 0).single().unwrap();
-        assert_eq!(start_of_day_ms(&now), midnight.timestamp_millis());
     }
 
     #[test]

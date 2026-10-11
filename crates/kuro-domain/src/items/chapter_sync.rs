@@ -12,13 +12,15 @@ use kuro_data::manga::Manga;
 use kuro_db::Db;
 use kuro_db::statements_manga::{ChapterPatch, ChapterRow, MangaPatch};
 use kuro_db::sql::{chapters, excluded_scanlators, mangas};
-use kuro_source::model::SChapter;
+use kuro_source::model::{SChapter, normalize_scanlator};
 
 use crate::entries::fetch_interval::{ItemDates, Stored, to_update};
 use crate::error::NoChapters;
 use crate::items::recognition::parse_chapter_number;
 use crate::items::should_update::should_update_db_chapter;
-use crate::items::source_sync::{MangaSyncLocks, sanitize_chapter_name};
+use crate::items::source_sync::MangaSyncLocks;
+use crate::items::model::widen_source_number;
+use kuro_data::sanitize::sanitize_item_name;
 use crate::items::sync_plan::{PlanInput, SyncRow, plan_sync};
 
 /// The download folder rename of a changed chapter (`downloadManager.renameChapter`). The implementation decides whether a
@@ -66,11 +68,11 @@ pub fn mark_duplicate_as_read_from_pref(rule: &std::collections::BTreeSet<String
 fn chapter_from_source(manga: &Manga, source: &SChapter, position: usize) -> Chapter {
     Chapter {
         manga_id: manga.id,
-        name: sanitize_chapter_name(&source.name, &manga.title),
+        name: sanitize_item_name(&source.name, &manga.title),
         url: source.url.clone(),
         date_upload: source.date_upload,
-        chapter_number: f64::from(source.chapter_number),
-        scanlator: source.scanlator.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned),
+        chapter_number: widen_source_number(source.chapter_number),
+        scanlator: normalize_scanlator(source.scanlator.as_deref()),
         source_order: i64::try_from(position).unwrap_or(i64::MAX),
         ..Chapter::create()
     }
@@ -93,8 +95,8 @@ fn copy_from_s_chapter(base: &Chapter, source: &SChapter) -> Chapter {
         name: source.name.clone(),
         url: source.url.clone(),
         date_upload: source.date_upload,
-        chapter_number: f64::from(source.chapter_number),
-        scanlator: source.scanlator.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned),
+        chapter_number: widen_source_number(source.chapter_number),
+        scanlator: normalize_scanlator(source.scanlator.as_deref()),
         ..base.clone()
     }
 }
@@ -488,5 +490,101 @@ mod tests {
         let returned = sync.run(raw, &manga, opts(false), &no_hook).await.expect("sync");
         assert_eq!(returned.iter().map(|c| c.url.as_str()).collect::<Vec<_>>(), ["/x", "/y"]);
         assert_eq!(returned[1].source_order, 1, "EC-03: the second distinct URL is at position 1");
+    }
+
+    /// The delete, insert and the rest run in one transaction: a failing insert rolls back the delete.
+    #[tokio::test]
+    async fn a_failing_insert_rolls_back_the_delete() {
+        let (_dir, db, sync, id) = fixture(Arc::new(RecordingRenames::default()));
+        insert_db_chapter(&db, &Chapter { manga_id: id, url: "/gone".into(), name: "Ch 1".into(), chapter_number: 1.0, ..Chapter::create() });
+        db.write(|tx| {
+            tx.execute_batch("CREATE TRIGGER boom BEFORE INSERT ON chapters WHEN NEW.url = '/boom' BEGIN SELECT RAISE(ABORT, 'boom'); END;")?;
+            Ok(())
+        })
+        .expect("trigger");
+        let manga = manga_of(&db, id);
+        let urls = |db: &Db| -> Vec<String> { db.read(|c| Ok(chapters::get_by_manga_id(c, id, false)?)).expect("read").into_iter().map(|r| r.url).collect() };
+        let err = sync.run(vec![s("/boom", "Ch 2", 0)], &manga, opts(false), &no_hook).await.expect_err("the insert fails");
+        assert!(matches!(err, ChapterSyncError::Db(_)));
+        assert_eq!(urls(&db), ["/gone"], "the removed row is still stored");
+        assert_eq!(manga_of(&db, id).last_update, manga.last_update, "no last_update write survived either");
+        // Control: without the failing insert the same plan does delete the row.
+        db.write(|tx| {
+            tx.execute_batch("DROP TRIGGER boom;")?;
+            Ok(())
+        })
+        .expect("drop");
+        sync.run(vec![s("/boom", "Ch 2", 0)], &manga, opts(false), &no_hook).await.expect("sync");
+        assert_eq!(urls(&db), ["/boom"]);
+    }
+
+    /// RC-08: `run` takes the per-manga lock, so a held lock stops it before any write.
+    #[tokio::test]
+    async fn run_waits_for_the_per_manga_lock() {
+        let (_dir, db, _sync, id) = fixture(Arc::new(RecordingRenames::default()));
+        let locks = Arc::new(MangaSyncLocks::default());
+        let sync = SyncChapters::new(db.clone(), locks.clone(), Arc::new(NoRenames));
+        let manga = manga_of(&db, id);
+        let held = locks.lock(id).await;
+        let blocked = tokio::time::timeout(std::time::Duration::from_millis(50), sync.run(vec![s("/a", "Ch 1", 0)], &manga, opts(false), &no_hook)).await;
+        assert!(blocked.is_err(), "the sync waits while the lock is held");
+        assert!(db.read(|c| Ok(chapters::get_by_manga_id(c, id, false)?)).expect("read").is_empty(), "nothing was written");
+        drop(held);
+        assert_eq!(sync.run(vec![s("/a", "Ch 1", 0)], &manga, opts(false), &no_hook).await.expect("sync").len(), 1);
+    }
+
+    /// A stored manga with an automatic interval and a `next_update` no recompute would produce, so a recompute shows.
+    const SENTINEL_NEXT: i64 = 7_777_777;
+    const WINDOW: (i64, i64) = (1_000_000, 2_000_000);
+
+    fn set_interval(db: &Db, id: i64, interval: i64, next_update: i64) {
+        let patch = MangaPatch { next_update: Some(next_update), calculate_interval: Some(interval), ..empty_manga_patch(id) };
+        db.write(|tx| Ok(mangas::update(tx, &patch)?)).expect("patch");
+    }
+
+    /// Syncs once (changes), pins the interval fields, then syncs the same list again with the given options.
+    async fn second_sync_row(interval: i64, next_update: i64, manual: bool) -> (Manga, Manga) {
+        let (_dir, db, sync, id) = fixture(Arc::new(RecordingRenames::default()));
+        let raw = vec![s("/a", "Ch 1", 10), s("/b", "Ch 2", 20)];
+        let first = ChapterSyncOptions { window: WINDOW, ..opts(false) };
+        sync.run(raw.clone(), &manga_of(&db, id), first, &no_hook).await.expect("first");
+        set_interval(&db, id, interval, next_update);
+        let before = manga_of(&db, id);
+        let again = ChapterSyncOptions { window: WINDOW, ..opts(manual) };
+        let out = sync.run(raw, &before, again, &no_hook).await.expect("second");
+        assert!(out.is_empty());
+        (before, manga_of(&db, id))
+    }
+
+    /// S-11: no change, interval set, next update not before the window start, not manual: nothing is written.
+    #[tokio::test]
+    async fn s11_no_change_and_no_trigger_recomputes_nothing() {
+        let (before, after) = second_sync_row(7, SENTINEL_NEXT, false).await;
+        assert_eq!(after.next_update, SENTINEL_NEXT);
+        assert_eq!(after.fetch_interval, 7);
+        assert_eq!(after.last_update, before.last_update);
+    }
+
+    /// S-12: no change, but a manual refresh, interval 0, or a next update before the window start recomputes. `last_update` stays.
+    #[tokio::test]
+    async fn s12_no_change_recomputes_on_manual_interval_zero_or_overdue() {
+        for (interval, next_update, manual, why) in [(7, SENTINEL_NEXT, true, "manual"), (0, SENTINEL_NEXT, false, "interval 0"), (7, 5, false, "next update before the window start")] {
+            let (before, after) = second_sync_row(interval, next_update, manual).await;
+            assert!(after.next_update != next_update || after.fetch_interval != i32::try_from(interval).unwrap(), "{why}: recomputed");
+            assert_eq!(after.last_update, before.last_update, "{why}: last_update is not touched");
+        }
+    }
+
+    /// S-13: with changes the interval is recomputed even when no trigger holds, and `last_update` becomes now.
+    #[tokio::test]
+    async fn s13_changes_recompute_and_set_last_update_to_now() {
+        let (_dir, db, sync, id) = fixture(Arc::new(RecordingRenames::default()));
+        set_interval(&db, id, 7, SENTINEL_NEXT);
+        let before = manga_of(&db, id);
+        let o = ChapterSyncOptions { window: WINDOW, ..opts(false) };
+        assert_eq!(sync.run(vec![s("/a", "Ch 1", 10)], &before, o, &no_hook).await.expect("sync").len(), 1);
+        let after = manga_of(&db, id);
+        assert_eq!(after.last_update, NOW_MS);
+        assert_ne!(after.next_update, SENTINEL_NEXT, "recomputed");
     }
 }

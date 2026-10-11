@@ -18,8 +18,6 @@ action_continue = Continuar
 
 manga = Manga
 
-pref_library_summary = Categorías, actualizaciones generales y acciones al deslizar el dedo
-
 pref_behavior = Comportamiento del capítulo
 
 action_add_repo_message = Añade más repositorios a { $arg1 }; la dirección URL debería de terminar en "index.min.json".
@@ -80,21 +78,9 @@ pref_player_settings_summary = Reproductor interno, gestos, decodificadores, sub
 
 pref_player_internal = Reproductor interno
 
-pref_player_internal_summary = Progreso, controles, orientación
-
 pref_progress_mark_as_seen = A qué punto marcar el episodio como visto
 
 pref_preserve_watching_position = Obtener la posición de reproducción en los episodios vistos
-
-pref_category_player_orientation = Orientación
-
-rotation_video = Video
-
-rotation_reverse_landscape = Paisaje invertido
-
-rotation_sensor_portrait = Retrato del sensor
-
-rotation_sensor_landscape = Paisaje de sensores
 
 pref_category_controls = Controles
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = Mostrar indicador de capítulo actual
 pref_controls_show_chapter_indicator_info = Solo aparece si el vídeo tiene capítulos
 
 pref_controls_display_volume_percentage = Mostrar el volumen como porcentaje
-
-pref_remember_brightness = Recordar y cambiar al último brillo utilizado
 
 pref_remember_volume = Recordar y cambiar al último volumen utilizado
 
@@ -179,12 +163,6 @@ pref_external_player_preference = Preferencia de reproductor externo
 pref_player_gestures = Gestos
 
 pref_player_gestures_summary = Búsqueda, doble toque, controles multimedia
-
-pref_category_player_sliders = Controles deslizantes
-
-enable_volume_brightness_gestures = Gestos para cambiar el volumen y el brillo
-
-pref_controls_swap_vol_brightness = Intercambiar el control deslizante de volumen y brillo
 
 pref_category_player_seeking = En curso
 
@@ -946,10 +924,6 @@ theme_mocha = Moca
 
 pref_behavior_episode = Comportamiento del episodio
 
-pref_episode_swipe_end = Deslizar a la derecha
-
-pref_episode_swipe_start = Deslizar a la izquierda
-
 pref_mark_duplicate_seen_episode_seen = Marca múltiples episodios vistos como vistos
 
 pref_mark_duplicate_seen_episode_seen_existing = Después de ver un episodio
@@ -1423,10 +1397,6 @@ onboarding_permission_notifications = Permitir notificaciones
 
 onboarding_permission_notifications_description = Recibe notificaciones sobre actualizaciones de la biblioteca y mucho más.
 
-onboarding_permission_ignore_battery_opts = Uso de batería en segundo plano
-
-onboarding_permission_ignore_battery_opts_description = Evita interrupciones en las actualizaciones de las bibliotecas, descargas y restauraciones de copias de seguridad.
-
 onboarding_permission_crashlytics = Enviar registros de errores
 
 onboarding_permission_crashlytics_description = Envía registros anónimos de errores a los desarrolladores.
@@ -1469,10 +1439,6 @@ pref_browse_summary = Fuentes, extensiones y búsqueda global
 
 pref_backup_summary = Copias de seguridad manuales y automáticas, almacenamiento
 
-pref_security_summary = Pantalla segura y desbloqueo biométrico
-
-pref_advanced_summary = Informes de fallos y ahorro de batería
-
 pref_category_theme = Esquema de colores
 
 pref_app_theme = Tema de la aplicación
@@ -1482,8 +1448,6 @@ theme_system = Del sistema
 theme_light = Claro
 
 theme_dark = Oscuro
-
-theme_monet = Dinámico
 
 theme_greenapple = Manzana verde
 
@@ -1534,10 +1498,6 @@ lock_always = Siempre
 lock_never = Nunca
 
 hide_notification_content = Ocultar el contenido de las notificaciones
-
-secure_screen = Pantalla segura
-
-secure_screen_summary = Activando «pantalla segura» ocultas la vista previa del contenido de la ventana al cambiar de aplicación y se bloquean las capturas de pantalla
 
 firebase_summary = El envío de registros de errores y estadísticas de uso nos permitirá identificar y solucionar problemas, mejorar el rendimiento y hacer que las versiones futuras se adapten mejor a tus necesidades
 
@@ -1613,10 +1573,6 @@ include = Incluir: { $arg1 }
 
 exclude = Excluir: { $arg1 }
 
-pref_chapter_swipe_end = Capítulo al deslizar a la derecha
-
-pref_chapter_swipe_start = Capítulo al deslizar a la izquierda
-
 pref_mark_duplicate_read_chapter_read = Marcar capítulos duplicados como ya leídos
 
 pref_mark_duplicate_read_chapter_read_existing = Al terminar de leer un capítulo
@@ -1678,14 +1634,6 @@ ext_nsfw_warning = Puede contener contenido para adultos (+18)
 ext_permission_install_apps_warning = Toca aquí para conceder los permisos necesarios para instalar extensiones.
 
 ext_install_service_notif = Instalando extensión…
-
-ext_installer_pref = Instalador
-
-ext_installer_legacy = Clásico
-
-ext_installer_shizuku_stopped = Shizuku no está activo
-
-ext_installer_shizuku_unavailable_dialog = Instala e inicia Shizuku para utilizar Shizuku como instalador de extensiones.
 
 ext_revoke_trust = Dejar de marcar todas la extensiones desconocidas como de confianza
 
@@ -1907,22 +1855,6 @@ double_tap_anim_speed_normal = Normal
 
 double_tap_anim_speed_fast = Rápida
 
-pref_rotation_type = Tipo de rotación inicial
-
-rotation_type = Tipo de rotación
-
-rotation_free = Cualquier dirección
-
-rotation_portrait = En vertical
-
-rotation_reverse_portrait = En vertical, al revés
-
-rotation_landscape = En horizontal
-
-rotation_force_portrait = Forzar en vertical
-
-rotation_force_landscape = Forzar en horizontal
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -2139,8 +2071,6 @@ pref_refresh_library_covers = Actualizar las portadas de la biblioteca
 
 pref_reset_viewer_flags = Restablecer los ajustes del visor en cada serie
 
-pref_reset_viewer_flags_summary = Restablece el modo de lectura y orientación en toda la biblioteca
-
 pref_reset_viewer_flags_success = Se han restablecido los ajustes del visor
 
 pref_reset_viewer_flags_error = No se pudieron restablecer los ajustes del visor
@@ -2148,20 +2078,6 @@ pref_reset_viewer_flags_error = No se pudieron restablecer los ajustes del visor
 pref_dump_crash_logs = Compartir los registros de fallos
 
 pref_dump_crash_logs_summary = Guarda los registros de errores en un archivo para compartirlos con los desarrolladores
-
-label_background_activity = Actividad en segundo plano
-
-pref_disable_battery_optimization = Desactivar la optimización de batería
-
-pref_disable_battery_optimization_summary = Mejora la cadencia de las actualizaciones y las copias de respaldo que se hagan en segundo plano
-
-battery_optimization_disabled = La optimización de la batería ya está desactivada
-
-battery_optimization_setting_activity_not_found = No se pudieron abrir los ajustes del dispositivo
-
-about_dont_kill_my_app = Algunos fabricantes restringen aún más ciertas aplicaciones y detienen sus servicios en segundo plano. Esta página web tiene más información sobre cómo solucionarlo.
-
-pref_tablet_ui_mode = Interfaz de tableta
 
 pref_verbose_logging = Registro detallado
 

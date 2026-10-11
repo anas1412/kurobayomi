@@ -19,10 +19,6 @@ use super::migrate_rules::offer;
 use crate::browse::dialogs::DialogSlot;
 use crate::browse::migrate_flags::{self, ANIME_KNOWN, RunGuard, anime_options, preselected, stored_bitmap};
 
-/// `AnimeMigrationFlags`: the bits the dialog can offer.
-pub const FLAG_EPISODES: u32 = migrate_flags::EPISODES;
-pub const FLAG_CATEGORIES: u32 = migrate_flags::CATEGORIES;
-
 /// A button of the dialog, in display order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -91,11 +87,6 @@ pub fn plan(old: FetchType, new: FetchType, facts: Facts, saved: i32) -> DialogP
         actions.extend([Action::Copy, Action::Migrate]);
     }
     DialogPlan { message, flags, selected, actions }
-}
-
-/// The bit map of the selected options (`getSelectedFlagsBitMap`).
-pub fn bitmap(selected: &[u32]) -> u32 {
-    selected.iter().fold(0, |map, flag| map | flag)
 }
 
 /// What Copy and Migrate ask for: whether the old entry leaves the library, and the bitmap that was stored (the selected
@@ -268,21 +259,6 @@ mod pure_tests {
     use super::*;
 
     #[test]
-    fn matching_episodes_titles_offer_the_options_show_anime_copy_and_migrate() {
-        let plan = plan(FetchType::Episodes, FetchType::Episodes, Facts::default(), i32::MAX);
-        assert_eq!(plan.message, None);
-        assert_eq!(plan.actions, [Action::ShowAnime, Action::Copy, Action::Migrate], "no Show seasons for an episodes title");
-        assert_eq!(plan.flags.iter().map(|(flag, _)| *flag).collect::<Vec<_>>(), [FLAG_EPISODES, FLAG_CATEGORIES]);
-    }
-
-    #[test]
-    fn matching_seasons_titles_offer_show_seasons_and_no_episodes_option() {
-        let plan = plan(FetchType::Seasons, FetchType::Seasons, Facts::default(), i32::MAX);
-        assert_eq!(plan.actions, [Action::ShowAnime, Action::ShowSeasons, Action::Copy, Action::Migrate]);
-        assert_eq!(plan.flags.iter().map(|(flag, _)| *flag).collect::<Vec<_>>(), [FLAG_CATEGORIES], "E-flag: episodes only for an old episodes title");
-    }
-
-    #[test]
     fn a_mismatch_shows_the_error_for_the_old_kind_and_only_the_two_show_buttons() {
         let to_seasons = plan(FetchType::Episodes, FetchType::Seasons, Facts::default(), i32::MAX);
         assert_eq!(to_seasons.message, Some(tr(MsgKey::label_cant_migrate_episode)), "E41");
@@ -309,12 +285,6 @@ mod pure_tests {
         assert_eq!(saved.selected, [migrate_flags::CATEGORIES, migrate_flags::DELETE_DOWNLOADED], "only the saved bits start ticked");
     }
 
-    #[test]
-    fn the_bit_map_is_the_or_of_the_selected_options() {
-        assert_eq!(bitmap(&[]), 0);
-        assert_eq!(bitmap(&[FLAG_EPISODES, FLAG_CATEGORIES]), 0b11);
-        assert_eq!(bitmap(&[FLAG_CATEGORIES, FLAG_CATEGORIES]), FLAG_CATEGORIES, "a repeated option is one bit");
-    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,58 @@
+id = "example-anime"
+name = "Example Anime"
+lang = "en"
+kind = "anime"
+base_urls = ["https://anime.example.org"]
+rate_limit_ms = 1000
+
+[headers]
+Referer = "https://anime.example.org/"
+
+[urls]
+popular = "/anime?sort=popular&page={page}"
+search = "/search?keyword={query}&page={page}"
+
+[popular]
+items = "div.film"
+title = { select = "a.film-name" }
+url = { select = "a.film-name", attr = "href" }
+cover = { select = "img", attr = "data-src" }
+next_page = "li.next a"
+
+[search]
+items = "div.film"
+title = { select = "a.film-name" }
+url = { select = "a.film-name", attr = "href" }
+cover = { select = "img", attr = "data-src" }
+last_page = { select = "div.pager", regex = "/ (\\d+)" }
+
+[details]
+title = { select = "h1" }
+description = { select = "p.plot" }
+genre = { select = "a.genre", all = true }
+cover = { select = "img.poster", attr = "src" }
+status = { select = "span.airing" }
+
+[details.status_map]
+ongoing = ["airing", "ongoing"]
+completed = ["finished"]
+
+[episodes]
+items = "ul.episodes li a"
+name = {}
+url = { attr = "href" }
+number = { regex = "Episode (\\d+)" }
+
+[videos]
+items = "video source"
+url = { attr = "src" }
+title = { attr = "label" }
+default_title = "Video"
+
+[tests]
+popular = "popular.html"
+search = "search.html"
+details = "show.html"
+episodes = "show.html"
+videos = "episode.html"
+query = "frieren"

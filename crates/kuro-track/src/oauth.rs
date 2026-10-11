@@ -17,7 +17,8 @@ pub const PENDING_TTL_MS: i64 = 5 * 60 * 1000;
 /// `state` bytes. 32 bytes encode to 43 URL-safe characters.
 const STATE_BYTES: usize = 32;
 
-const ANILIST_CLIENT_ID: &str = "5338";
+/// Kurobayomi's own AniList client (redirect `kurobayomi://anilist-auth`); the implicit grant needs no secret.
+const ANILIST_CLIENT_ID: &str = "53424";
 const SIMKL_CLIENT_ID: &str = "aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e";
 
 /// The client secrets of the trackers that exchange a code with one (T-27b-022). They come from configuration, never
@@ -823,7 +824,7 @@ mod tests {
     fn tr_27a_021_authorize_urls_keep_the_source_order_and_add_state_last() {
         assert_eq!(
             authorize_url(TrackerId::ANILIST, "S").unwrap(),
-            "https://anilist.co/api/v2/oauth/authorize?client_id=5338&response_type=token&state=S"
+            "https://anilist.co/api/v2/oauth/authorize?client_id=53424&response_type=token&state=S"
         );
         assert_eq!(
             authorize_url(TrackerId::SIMKL, "S").unwrap(),

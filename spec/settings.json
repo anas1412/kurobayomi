@@ -9,7 +9,7 @@
   {
    "id": "settings_library",
    "title": "Library",
-   "subtitle": "Categories, global update, chapter/episode swipe",
+   "subtitle": "Categories, global update, chapter/episode behavior",
    "icon": "view-grid-symbolic"
   },
   {
@@ -51,13 +51,13 @@
   {
    "id": "settings_security",
    "title": "Security and privacy",
-   "subtitle": "App lock, secure screen",
+   "subtitle": "App lock",
    "icon": "security-high-symbolic"
   },
   {
    "id": "settings_advanced",
    "title": "Advanced",
-   "subtitle": "Dump crash logs, battery optimizations",
+   "subtitle": "Dump crash logs",
    "icon": "utilities-terminal-symbolic"
   },
   {
@@ -123,8 +123,8 @@
        "type": "chips",
        "title": "App theme",
        "options": [
+        "System",
         "Default",
-        "Dynamic",
         "Cloudflare",
         "Cotton Candy",
         "Doom",
@@ -141,9 +141,10 @@
         "Tidal Wave",
         "Yin & Yang",
         "Yotsuba",
-        "Monochrome"
+        "Monochrome",
+        "Tokyo Night"
        ],
-       "default": "Dynamic"
+       "default": "System"
       },
       {
        "type": "switch",
@@ -159,17 +160,6 @@
        "type": "link",
        "title": "App language",
        "target": "settings_app_language"
-      },
-      {
-       "type": "list",
-       "title": "Tablet UI",
-       "options": [
-        "Auto",
-        "Always",
-        "Landscape",
-        "Never"
-       ],
-       "default": "Auto"
       },
       {
        "type": "list",
@@ -218,7 +208,7 @@
    ],
    "sheets": [],
    "dialogs": [],
-   "notes": "App theme row: a segmented button row (System / Light / Dark) above a horizontally scrolling row of theme preview cards (mini app mockups) with the theme name under each; selected card has a check badge. \"Dynamic\" (Monet) only on Android 12+. Pure black switch is disabled when theme mode is Light. Changing tablet UI / start screen shows a \"Requires app restart to take effect\" toast. Search toolbar action exists on every SearchableSettings screen in two-pane mode only; listed for completeness."
+   "notes": "App theme row: a segmented button row (System / Light / Dark) above a horizontally scrolling row of theme preview cards (mini app mockups) with the theme name under each; selected card has a check badge. Pure black switch is disabled when theme mode is Light. Changing the start screen shows a \"Requires app restart to take effect\" toast. Search toolbar action exists on every SearchableSettings screen in two-pane mode only; listed for completeness."
   },
   {
    "id": "settings_app_language",
@@ -373,30 +363,6 @@
      "title": "Episode behavior",
      "items": [
       {
-       "type": "list",
-       "title": "Episode on swipe to left",
-       "options": [
-        "Disabled",
-        "Bookmark episode",
-        "Fillermark episode",
-        "Mark as watched",
-        "Download"
-       ],
-       "default": "Mark as watched"
-      },
-      {
-       "type": "list",
-       "title": "Episode on swipe to right",
-       "options": [
-        "Disabled",
-        "Bookmark episode",
-        "Fillermark episode",
-        "Mark as watched",
-        "Download"
-       ],
-       "default": "Bookmark episode"
-      },
-      {
        "type": "multi",
        "title": "Mark duplicate seen episode as seen",
        "options": [
@@ -410,28 +376,6 @@
     {
      "title": "Chapter behavior",
      "items": [
-      {
-       "type": "list",
-       "title": "Chapter on swipe to left",
-       "options": [
-        "Disabled",
-        "Bookmark chapter",
-        "Mark as read",
-        "Download"
-       ],
-       "default": "Mark as read"
-      },
-      {
-       "type": "list",
-       "title": "Chapter on swipe to right",
-       "options": [
-        "Disabled",
-        "Bookmark chapter",
-        "Mark as read",
-        "Download"
-       ],
-       "default": "Bookmark chapter"
-      },
       {
        "type": "multi",
        "title": "Mark duplicate read chapter as read",
@@ -529,19 +473,6 @@
     {
      "title": "Display",
      "items": [
-      {
-       "type": "list",
-       "title": "Default rotation",
-       "options": [
-        "Free",
-        "Portrait",
-        "Landscape",
-        "Locked portrait",
-        "Locked landscape",
-        "Reverse portrait"
-       ],
-       "default": "Free"
-      },
       {
        "type": "list",
        "title": "Background color",
@@ -873,7 +804,7 @@
       {
        "type": "link",
        "title": "Internal player",
-       "subtitle": "Progress, controls, orientation",
+       "subtitle": "Progress, controls",
        "target": "settings_player_internal"
       },
       {
@@ -965,21 +896,6 @@
        "type": "switch",
        "title": "Preserve watch position on seen episodes",
        "default": false
-      },
-      {
-       "type": "list",
-       "title": "Orientation",
-       "options": [
-        "Free",
-        "Video",
-        "Portrait",
-        "Reverse portrait",
-        "Sensor portrait",
-        "Landscape",
-        "Reverse landscape",
-        "Sensor landscape"
-       ],
-       "default": "Sensor landscape"
       }
      ]
     },
@@ -1001,11 +917,6 @@
        "title": "Show current chapter indicator",
        "subtitle": "Only appears if the video has chapters",
        "default": true
-      },
-      {
-       "type": "switch",
-       "title": "Remember and switch to the last used brightness",
-       "default": false
       },
       {
        "type": "switch",
@@ -1193,21 +1104,6 @@
    "menu": [],
    "tabs": [],
    "groups": [
-    {
-     "title": "Sliders",
-     "items": [
-      {
-       "type": "switch",
-       "title": "Enable Volume and Brightness Gestures",
-       "default": true
-      },
-      {
-       "type": "switch",
-       "title": "Swap volume and brightness slider",
-       "default": false
-      }
-     ]
-    },
     {
      "title": "Seeking",
      "items": [
@@ -2067,7 +1963,7 @@
       },
       {
        "type": "switch",
-       "title": "Show next episode's airing time ",
+       "title": "Show next episode's airing time",
        "default": true
       },
       {
@@ -2700,20 +2596,6 @@
        "type": "switch",
        "title": "Hide notification content",
        "default": false
-      },
-      {
-       "type": "list",
-       "title": "Secure screen",
-       "options": [
-        "Always",
-        "Incognito mode",
-        "Never"
-       ],
-       "default": "Incognito mode"
-      },
-      {
-       "type": "info",
-       "title": "Secure screen hides app contents when switching apps and block screenshots"
       }
      ]
     }
@@ -2761,21 +2643,6 @@
       {
        "type": "action",
        "title": "Manage notifications"
-      }
-     ]
-    },
-    {
-     "title": "Background activity",
-     "items": [
-      {
-       "type": "action",
-       "title": "Disable battery optimization",
-       "subtitle": "Helps with background library updates and backups"
-      },
-      {
-       "type": "action",
-       "title": "Don't kill my app!",
-       "subtitle": "Some manufacturers have additional app restrictions that kill background services. This website has more info on how to fix it."
       }
      ]
     },
@@ -2854,7 +2721,7 @@
       {
        "type": "action",
        "title": "Reset per-series reader settings",
-       "subtitle": "Resets reading mode and orientation of all series"
+       "subtitle": "Resets reading mode of all series"
       }
      ]
     },
@@ -2888,17 +2755,6 @@
     {
      "title": "Extensions",
      "items": [
-      {
-       "type": "list",
-       "title": "Installer",
-       "options": [
-        "Legacy",
-        "PackageInstaller",
-        "Shizuku",
-        "Private"
-       ],
-       "default": "PackageInstaller"
-      },
       {
        "type": "action",
        "title": "Revoke trusted unknown extensions"
@@ -2972,19 +2828,8 @@
     }
    ],
    "sheets": [],
-   "dialogs": [
-    {
-     "id": "shizuku_missing",
-     "title": "Shizuku",
-     "text": "Install and start Shizuku to use Shizuku as extension installer.",
-     "groups": [],
-     "buttons": [
-      "Cancel",
-      "OK"
-     ]
-    }
-   ],
-   "notes": "Onboarding guide opens the onboarding flow (outside settings); manage notifications opens the system notification settings. Reset user agent enabled only when the UA differs from default. Hardware bitmap threshold options are device-dependent multiples of 1024 (first = device max, marked default) and the row is disabled if the device limit <= 2048. \"Private\" installer is hidden on release builds; Package installer is hidden on MIUI. Data saver children: server + B/W only for Bandwidth Hero, image format disabled for reSmush.it, others disabled when Disabled. Image format subtitle switches to \"The Jpeg file size is considerably smaller then Webp is(meaning more data is saved), but it makes the images lose more quality as well.\nCurrently compresses to Jpeg\" when on."
+   "dialogs": [],
+   "notes": "Onboarding guide opens the onboarding flow (outside settings); manage notifications opens the system notification settings. Reset user agent enabled only when the UA differs from default. Hardware bitmap threshold options are device-dependent multiples of 1024 (first = device max, marked default) and the row is disabled if the device limit <= 2048. Data saver children: server + B/W only for Bandwidth Hero, image format disabled for reSmush.it, others disabled when Disabled. Image format subtitle switches to \"The Jpeg file size is considerably smaller then Webp is(meaning more data is saved), but it makes the images lose more quality as well.\nCurrently compresses to Jpeg\" when on."
   },
   {
    "id": "settings_debug_info",

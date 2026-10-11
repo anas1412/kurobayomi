@@ -32,7 +32,7 @@ use super::primitives::{ToastSpec, stub_source_label};
 use super::route::search_listing;
 use super::sources::LOCAL_SOURCE_ID;
 use super::sources_page::{SourcesNav, SourcesPage};
-use super::view::{CoverLoader, attach_row_gestures, source_row, spinner_row};
+use super::view::{CoverLoader, list_row, source_row, spinner_row};
 
 /// `sources`: the installed-sources tab of one kind.
 pub fn sources(nav: SourcesNav, ready: watch::Receiver<bool>) -> SourcesPage {
@@ -76,11 +76,12 @@ pub struct MigrateSourcesNav {
 
 pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    // the prompt and the sort controls head the list column, as a section heading would
     let sort = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     sort.set_margin_start(16);
     sort.set_margin_end(16);
-    sort.set_margin_top(8);
-    sort.append(&gtk::Label::builder().label(tr(MsgKey::migration_selection_prompt)).hexpand(true).xalign(0.0).build());
+    sort.set_margin_top(12);
+    sort.append(&gtk::Label::builder().label(tr(MsgKey::migration_selection_prompt)).hexpand(true).xalign(0.0).wrap(true).css_classes(["dim-label"]).build());
     let mode = gtk::Button::with_label(&tr(match snapshot.mode {
         MigrationSortingMode::ALPHABETICAL => MsgKey::action_sort_alpha,
         MigrationSortingMode::TOTAL => MsgKey::action_sort_count,
@@ -107,37 +108,34 @@ pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav
     root.append(&sort);
 
     if let Some(message) = &snapshot.error {
-        let error = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        error.set_vexpand(true);
-        error.set_valign(gtk::Align::Center);
-        error.append(&gtk::Label::new(Some(message)));
         let retry = gtk::Button::with_label(&tr(MsgKey::action_retry));
-        retry.set_halign(gtk::Align::Center);
         let on_retry = Rc::clone(&nav.retry);
         retry.connect_clicked(move |_| on_retry());
-        error.append(&retry);
-        root.append(&error);
+        root.append(&super::look::empty_state("dialog-warning-symbolic", message, Some(&retry)).0);
         return root;
     }
     if snapshot.sources.is_empty() {
-        let empty = gtk::Label::new(Some(&snapshot.empty_text));
-        empty.set_vexpand(true);
-        root.append(&empty);
+        root.append(&super::look::empty_state("view-list-symbolic", &snapshot.empty_text, None).0);
         return root;
     }
-    let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let column = crate::ui::column();
+    let list = crate::ui::boxed_list();
     for (source, count) in &snapshot.sources {
         let language = (!source.lang.is_empty()).then(|| localized_display_name(&source.lang));
-        let badge = gtk::Label::new(Some(&count.to_string()));
-        badge.add_css_class("accent");
+        let badge = super::look::badge(&migrate_count(*count), false);
         let icon = resolve(source.is_stub, false, source.id == LOCAL_SOURCE_ID);
         let row = source_row(&source.name, language.as_deref(), icon, None, source.is_stub, Some(badge.upcast_ref()));
         let (open, copy, id) = (Rc::clone(&nav.open), Rc::clone(&nav.copy_id), source.id);
-        attach_row_gestures(&row, move || open(id), move || copy(id));
-        list.append(&row);
+        list.append(&list_row(&row, move || open(id), move || copy(id)));
     }
-    root.append(&gtk::ScrolledWindow::builder().child(&list).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
+    column.append(&list);
+    root.append(&crate::ui::scrolled(&column));
     root
+}
+
+/// The badge of a migrate source row, in words: how many library entries come from it.
+pub fn migrate_count(count: impl std::fmt::Display) -> String {
+    format!("{count} in library")
 }
 
 // ---------- browse_source ----------
@@ -742,14 +740,16 @@ pub fn migrate_entries(entries: &[MigrateEntry], error: Option<&str>, nav: Migra
     }
     let mut sorted: Vec<&MigrateEntry> = entries.iter().collect();
     sorted.sort_by_key(|e| e.title.to_lowercase());
-    let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let column = crate::ui::column();
+    let list = crate::ui::boxed_list();
     for entry in sorted {
         let item = ListItem { id: entry.id, title: entry.title.clone(), cover: entry.cover.clone(), ..ListItem::default() };
         let row = super::view::list_cell(Some(&item), &nav.load_cover, &super::view::always());
         let (open_search, id) = (Rc::clone(&nav.open_search), entry.id);
         // a click on the row opens the migrate search; a click on the cover opens the entry and claims the click
-        attach_row_gestures(&row, move || open_search(id), || {});
-        if let Some(cover) = row.first_child() {
+        let cell = row.clone();
+        let row = list_row(&cell, move || open_search(id), || {});
+        if let Some(cover) = cell.first_child() {
             let open_entry = Rc::clone(&nav.open_entry);
             let click = gtk::GestureClick::new();
             click.connect_released(move |gesture, _, _, _| {
@@ -760,7 +760,10 @@ pub fn migrate_entries(entries: &[MigrateEntry], error: Option<&str>, nav: Migra
         }
         list.append(&row);
     }
-    root.append(&gtk::ScrolledWindow::builder().child(&list).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
+    // an empty boxed list would still draw its frame
+    list.set_visible(list.first_child().is_some());
+    column.append(&list);
+    root.append(&crate::ui::scrolled(&column));
     root
 }
 
@@ -849,7 +852,7 @@ pub(crate) mod tests {
             },
         );
         let text = all_labels(&page);
-        for expected in ["Alpha", "12", "Gone", "3", "Nolang", "1", &tr(MsgKey::not_installed), &tr(MsgKey::action_sort_count)] {
+        for expected in ["Alpha", "12 in library", "Gone", "3 in library", "Nolang", "1 in library", &tr(MsgKey::not_installed), &tr(MsgKey::action_sort_count)] {
             assert!(text.iter().any(|t| t == expected), "{expected} in {text:?}");
         }
         assert_eq!(text.iter().filter(|t| **t == tr(MsgKey::not_installed)).count(), 1, "only the stub is marked");
@@ -997,7 +1000,8 @@ pub(crate) mod tests {
             MigrateEntriesNav { open_search: Rc::new(|_| {}), open_entry: Rc::new(|_| {}), load_cover: Rc::new(|_, _| {}) },
         );
         let text = all_labels(&page);
-        assert_eq!(text, ["could not load", "Apple", "banana", "zebra"]);
+        // each cover shows the title's initials until its picture loads
+        assert_eq!(text, ["could not load", "A", "Apple", "B", "banana", "Z", "zebra"]);
     }
 
     // ----- browse_source -----

@@ -16,7 +16,7 @@ use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::pref_model::widgets::dialog;
 use crate::settings_ui::category::Category;
 use crate::settings_ui::category_sets::{CategorySets, categories_row, category_multi_row};
-use crate::settings_ui::rows::{group, info, int_choice, item, ranged_choice, switch, switch_sub, text};
+use crate::settings_ui::rows::{edit_text, group, info, int_choice, item, ranged_choice, switch, switch_sub, text};
 
 pub const WIFI_TITLE: &str = "Only on Wi-Fi";
 pub const WIFI_KEY: &str = "pref_download_only_over_wifi_key";
@@ -107,19 +107,43 @@ fn open_speed_dialog(pref: Pref<i32>) {
     );
 }
 
+pub const EXTERNAL_SWITCH_TITLE: &str = "Always use external downloader for anime";
+pub const EXTERNAL_ENDPOINT_TITLE: &str = "Downloader app preference";
+/// What the endpoint row asks for: the downloader on Linux is an aria2 JSON-RPC server (`kuro-downloads`).
+pub const EXTERNAL_ENDPOINT_HINT: &str = "Address of the aria2 JSON-RPC server, for example http://127.0.0.1:6800/jsonrpc. Leave empty to download with the app.";
+
+/// The endpoint is empty (use the app) or an http(s) address.
+pub fn validate_endpoint(text: &str) -> Result<(), String> {
+    let text = text.trim();
+    if text.is_empty() || text.starts_with("http://") || text.starts_with("https://") {
+        Ok(())
+    } else {
+        Err("The address must start with http:// or https://".to_owned())
+    }
+}
+
+/// The external downloader rows: the switch and the aria2 endpoint, over the keys the download engine reads.
+pub fn external_rows(d: &DownloadPrefs) -> Vec<PreferenceItem> {
+    let mut endpoint = edit_text(EXTERNAL_ENDPOINT_TITLE, &d.external_downloader_selection, true, validate_endpoint, d.use_external_downloader.get());
+    if let PreferenceItem::EditText { dialog_subtitle, .. } = &mut endpoint {
+        *dialog_subtitle = Some(EXTERNAL_ENDPOINT_HINT.to_owned());
+    }
+    vec![switch(EXTERNAL_SWITCH_TITLE, &d.use_external_downloader, true), endpoint]
+}
+
 /// The category sets the auto-download rules and the delete rules read and write.
 fn sets(prefs: &Prefs, include: &'static str, exclude: &'static str) -> CategorySets {
     CategorySets { include: prefs.store().pref(include, BTreeSet::new()), exclude: prefs.store().pref(exclude, BTreeSet::new()) }
 }
 
 /// The values the Downloads rows read when built. The page is rebuilt when this changes.
-pub fn rule_state(prefs: &Prefs) -> (bool, bool, i32, Vec<BTreeSet<String>>) {
+pub fn rule_state(prefs: &Prefs) -> (bool, bool, i32, bool, Vec<BTreeSet<String>>) {
     let d = DownloadPrefs::new(prefs.store());
     let sets = [ANIME_NEW_INCLUDE, ANIME_NEW_EXCLUDE, MANGA_NEW_INCLUDE, MANGA_NEW_EXCLUDE, ANIME_REMOVE_EXCLUDE, MANGA_REMOVE_EXCLUDE]
         .into_iter()
         .map(|key| prefs.store().pref(key, BTreeSet::<String>::new()).get())
         .collect();
-    (d.download_new_episodes.get(), d.download_new_chapters.get(), d.download_speed_limit.get(), sets)
+    (d.download_new_episodes.get(), d.download_new_chapters.get(), d.download_speed_limit.get(), d.use_external_downloader.get(), sets)
 }
 
 /// Borrowed `(id, label)` pairs for [`int_choice`], from owned labels.
@@ -181,6 +205,7 @@ pub fn page_rows(prefs: &Prefs, anime: &[Category], manga: &[Category]) -> Vec<P
                 info("Only works if the current chapter/episode + the next one are already downloaded."),
             ],
         ),
+        group("External downloader", external_rows(&d)),
     ]
 }
 
@@ -299,6 +324,21 @@ mod tests {
             panic!("a multi-select")
         };
         assert_eq!(entries, &[("2".to_owned(), "Series".to_owned())]);
+    }
+
+    #[test]
+    fn the_external_downloader_rows_write_the_keys_the_download_engine_reads() {
+        let prefs = Prefs::in_memory();
+        let rows = page_rows(&prefs, &[], &[]);
+        let group_rows = find(&rows, "External downloader");
+        assert_eq!(titles(group_rows), [EXTERNAL_SWITCH_TITLE, EXTERNAL_ENDPOINT_TITLE]);
+        let PreferenceItem::Switch { pref, .. } = &group_rows[0] else { panic!("a switch") };
+        assert_eq!(pref.key(), "use_external_downloader");
+        let PreferenceItem::EditText { pref, .. } = &group_rows[1] else { panic!("an edit row") };
+        assert_eq!(pref.key(), "external_downloader_selection");
+        assert!(!group_rows[1].enabled(), "the endpoint waits for the switch");
+        assert!(validate_endpoint("").is_ok() && validate_endpoint(" http://127.0.0.1:6800/jsonrpc ").is_ok());
+        assert!(validate_endpoint("com.example.app").is_err());
     }
 
     #[test]

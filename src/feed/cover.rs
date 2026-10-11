@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use image::{DynamicImage, GenericImageView, RgbaImage, imageops::FilterType};
+use image::{DynamicImage, RgbaImage, imageops::FilterType};
 
 use super::UpdateRow;
 
@@ -102,7 +102,7 @@ pub fn log_failure(line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::{GenericImage, Rgba};
+    use image::{GenericImage, GenericImageView, Rgba};
 
     fn solid(w: u32, h: u32) -> DynamicImage {
         let mut img = DynamicImage::new_rgba8(w, h);

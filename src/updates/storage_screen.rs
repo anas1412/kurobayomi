@@ -57,8 +57,10 @@ impl StorageScreen {
     /// Builds the page with nothing in it. The caller pushes its data with [`StorageScreen::set_input`].
     pub fn new(anime: bool) -> Rc<Self> {
         Rc::new_cyclic(|weak: &Weak<Self>| {
+            // the column spacing of the other pages (`ui::column`), unclamped: the page goes two columns from 720 px
             let root = GBox::new(O::Vertical, 12);
-            crate::ui::margins(&root, 12);
+            crate::ui::margins(&root, 16);
+            root.set_margin_bottom(24);
 
             let category = Label::builder().label(&tr(MsgKey::label_category)).xalign(0.0).css_classes(["heading"]).build();
             let dropdown = DropDown::from_strings(&[]);
@@ -190,6 +192,7 @@ impl StorageScreen {
         self.rebuild();
     }
 
+    #[cfg(test)]
     /// The page state of the current input (T-42a-054): "Scanning downloads…" while the cache initializes.
     pub fn state(&self) -> PageState {
         storage::page_state(self.input.borrow().initializing)

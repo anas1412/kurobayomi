@@ -4,9 +4,6 @@
 //! D-2 (no image is an error), D-3 (background uses the background url), D-4 (safe directory names), D-13 (open failure
 //! shows the update message), D-14 (log before the snackbar), D-15 (an empty share shows the share error).
 
-use std::path::PathBuf;
-
-use kuro_core::hash::md5_hex;
 use kuro_data::anime::Anime;
 use kuro_i18n::MsgKey;
 
@@ -42,24 +39,6 @@ impl ImageKind {
         url.filter(|u| !u.is_empty())
     }
 
-    /// The cache folder of the custom image of this kind, under the app data directory (T-39a-065). The name is the md5
-    /// of the anime id, as the Android app stores it, so a file made there is found without renaming.
-    pub fn custom_dir(self) -> &'static str {
-        match self {
-            Self::Cover => "animecovers/custom",
-            Self::Background => "animebackgrounds/custom",
-        }
-    }
-}
-
-/// The path, relative to the app data directory, of the custom image of an anime (`animecovers/custom/<md5(id)>`).
-pub fn custom_relative_path(kind: ImageKind, anime_id: i64) -> PathBuf {
-    PathBuf::from(kind.custom_dir()).join(md5_hex(anime_id.to_string().as_bytes()))
-}
-
-/// Whether the anime has a custom image of this kind on disk under `data_dir`.
-pub fn has_custom(data_dir: &std::path::Path, kind: ImageKind, anime_id: i64) -> bool {
-    data_dir.join(custom_relative_path(kind, anime_id)).is_file()
 }
 
 /// The extension a saved image gets, from its magic bytes (PNG, JPEG or WebP). Anything else is not an image.
@@ -285,31 +264,6 @@ mod tests {
         assert_eq!(sanitize_dir_name("a:b*c"), "a_b_c");
         assert_eq!(sanitize_dir_name(" .x. "), "x");
         assert_eq!(sanitize_dir_name("tab\there"), "tab_here");
-    }
-
-    #[test]
-    fn custom_images_live_under_the_md5_of_the_id() {
-        // T-39a-065
-        assert_eq!(
-            custom_relative_path(ImageKind::Cover, 7),
-            PathBuf::from("animecovers/custom").join(md5_hex(b"7")),
-        );
-        assert_eq!(
-            custom_relative_path(ImageKind::Background, 7),
-            PathBuf::from("animebackgrounds/custom").join(md5_hex(b"7")),
-        );
-    }
-
-    #[test]
-    fn an_android_custom_cover_is_found_without_renaming() {
-        // T-39a-065: the file the Android app wrote under the md5 of the id is the one the page reads
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("animecovers/custom").join(md5_hex(b"42"));
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(&file, [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]).unwrap();
-        assert!(has_custom(dir.path(), ImageKind::Cover, 42));
-        assert!(!has_custom(dir.path(), ImageKind::Background, 42));
-        assert!(!has_custom(dir.path(), ImageKind::Cover, 43));
     }
 
     #[test]

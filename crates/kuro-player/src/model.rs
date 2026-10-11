@@ -58,10 +58,8 @@ pub enum Change {
     Seek,
     /// `seek_text`.
     SeekText,
-    /// `volume_system`, `volume_mpv`, `volume_boost_cap`, `is_volume_slider_shown`.
+    /// `volume_system`, `volume_mpv`, `volume_boost_cap`.
     VolumeLevel,
-    /// `brightness` or `is_brightness_slider_shown`.
-    Brightness,
     /// `player_update`.
     PlayerUpdate,
     /// `remaining_sleep`.
@@ -175,13 +173,7 @@ pub fn changes(before: &PlayerState, after: &PlayerState) -> Vec<Change> {
             Change::VolumeLevel,
             before.volume_system != after.volume_system
                 || before.volume_mpv != after.volume_mpv
-                || before.volume_boost_cap != after.volume_boost_cap
-                || before.is_volume_slider_shown != after.is_volume_slider_shown,
-        ),
-        (
-            Change::Brightness,
-            before.brightness != after.brightness
-                || before.is_brightness_slider_shown != after.is_brightness_slider_shown,
+                || before.volume_boost_cap != after.volume_boost_cap,
         ),
         (
             Change::PlayerUpdate,

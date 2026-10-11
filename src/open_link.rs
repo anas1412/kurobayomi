@@ -4,6 +4,7 @@
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
+use kuro_domain::kind::EntryKind;
 use kuro_platform::deep_link::{DeepLink, NAMES};
 
 use crate::{screens, ui};
@@ -12,7 +13,7 @@ use crate::{screens, ui};
 enum Dest {
     /// A nav tab or a pushed screen of the spec, by id.
     Open(&'static str),
-    /// Library tab, then the entry. Entries are looked up by the mockup title `Title <id>`.
+    /// Library tab, then the entry's page, opened by its id.
     Entry { anime: bool, id: i64 },
 }
 
@@ -36,7 +37,8 @@ fn go(win: &gtk::ApplicationWindow, link: &DeepLink) {
         Dest::Open(id) => ui::open(id),
         Dest::Entry { anime, id } => {
             ui::open("library");
-            screens::open_entry(&screens::title_n(id.max(0) as usize), anime);
+            crate::library::mount::show_kind(if anime { EntryKind::Anime } else { EntryKind::Manga });
+            screens::open_entry(anime, id);
         }
     }
 }

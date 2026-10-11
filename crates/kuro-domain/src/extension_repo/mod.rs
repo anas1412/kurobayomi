@@ -60,6 +60,11 @@ impl<'a> ExtensionRepoService<'a> {
             }
         };
         match serde_json::from_str::<ExtensionRepoMetaDto>(&body) {
+            // an empty fingerprint is not a key: every such repo would collide on the UNIQUE column (T-47b-020)
+            Ok(dto) if dto.meta.signing_key_fingerprint.trim().is_empty() => {
+                tracing::error!(repo = base_url, "Failed to fetch repo details: the signing key fingerprint is empty");
+                None
+            }
             Ok(dto) => Some(to_extension_repo(dto, base_url)),
             Err(e) => {
                 tracing::error!(error = %e, repo = base_url, "Failed to fetch repo details");
@@ -295,6 +300,19 @@ mod tests {
         let service = ExtensionRepoService::new(&http);
         assert_eq!(service.fetch_repo_details("https://missing.test"), None);
         assert_eq!(service.fetch_repo_details("https://bad.test"), None);
+    }
+
+    // T-47b-020, T-47b-066: a repo.json with an empty (or blank) fingerprint is an invalid repo, and nothing is stored.
+    #[test]
+    fn an_empty_signing_fingerprint_is_an_invalid_repo() {
+        let (_d, repos) = repos();
+        for fingerprint in ["", "  "] {
+            let http = http_with(&[("empty", "Empty", fingerprint)]);
+            let service = ExtensionRepoService::new(&http);
+            assert_eq!(service.fetch_repo_details("https://empty.test"), None);
+            assert_eq!(add_manga_repo(&repos, &service, "https://empty.test/index.min.json"), AddRepoOutcome::InvalidUrl);
+        }
+        assert!(repos.all().expect("all").is_empty(), "no row was written");
     }
 
     #[test]

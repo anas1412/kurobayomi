@@ -10,7 +10,7 @@ use kuro_images::art::{ArtKind, ArtRef, Owner};
 use kuro_images::viewer::{EditButton, ZOOM_MS, edit_button};
 
 use super::anime::images::{ImageAction, ImageError, ImageKind, outcome};
-pub use super::anime::images::{ZOOM_MAX, ZOOM_MIN, bumped_last_modified, hits_image, zoom_after_pinch, zoom_after_scroll};
+pub use super::anime::images::{ZOOM_MIN, bumped_last_modified, hits_image, zoom_after_pinch, zoom_after_scroll};
 use super::detail::MangaRow;
 
 /// The length of the zoom transition when the window opens.
@@ -68,6 +68,9 @@ pub fn click_closes(widget: (f64, f64), image: Option<(f64, f64)>, point: (f64, 
 
 /// The mime filter of the file picker.
 pub const PICKER_MIME: &str = "image/*";
+
+#[cfg(test)]
+use super::anime::images::ZOOM_MAX;
 
 #[cfg(test)]
 mod tests {

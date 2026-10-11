@@ -42,19 +42,9 @@ pub fn is_image_file(path: &Path) -> bool {
     is_image_entry(name, || read_head(path))
 }
 
-/// The image format of a byte head, found by magic bytes alone.
-pub fn detect_kind(head: &[u8]) -> Option<ImageKind> {
-    sniff(head).map(|s| s.kind)
-}
-
 /// Natural, case-insensitive order (`2.jpg < 10.jpg`, `PAGE 1 < Page 2 < page 10`).
 pub fn natural_name_cmp(a: &str, b: &str) -> Ordering {
     natural_cmp(a, b)
-}
-
-/// Sorts page names into reading order. Stable, so equal names keep their input order.
-pub fn sort_names(names: &mut [String]) {
-    names.sort_by(|a, b| natural_name_cmp(a, b));
 }
 
 #[cfg(test)]
@@ -85,25 +75,4 @@ mod tests {
         assert!(!is_image_entry("notes.txt", || Some(b"hello".to_vec())));
     }
 
-    #[test]
-    fn magic_bytes_identify_each_supported_format() {
-        assert_eq!(detect_kind(PNG), Some(ImageKind::Png));
-        assert_eq!(detect_kind(JPEG), Some(ImageKind::Jpeg));
-        assert_eq!(detect_kind(WEBP), Some(ImageKind::Webp));
-        assert_eq!(detect_kind(GIF), Some(ImageKind::Gif));
-        assert_eq!(detect_kind(AVIF), Some(ImageKind::Avif));
-        assert_eq!(detect_kind(HEIF), Some(ImageKind::Heif));
-        assert_eq!(detect_kind(JXL), Some(ImageKind::Jxl));
-        assert_eq!(detect_kind(b"plain text"), None);
-    }
-
-    #[test]
-    fn natural_order_ignores_case_and_compares_digit_runs_numerically() {
-        let mut names: Vec<String> = ["10.jpg", "2.jpg", "PAGE 1", "page 10", "Page 2"].map(String::from).to_vec();
-        sort_names(&mut names);
-        assert_eq!(names, ["2.jpg", "10.jpg", "PAGE 1", "Page 2", "page 10"]);
-        assert_eq!(natural_name_cmp("2.jpg", "10.jpg"), Ordering::Less);
-        assert_eq!(natural_name_cmp("PAGE 1", "Page 2"), Ordering::Less);
-        assert_eq!(natural_name_cmp("Page 2", "page 10"), Ordering::Less);
-    }
 }

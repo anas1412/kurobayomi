@@ -64,6 +64,7 @@ impl ArchiveLoader {
         }
     }
 
+    #[cfg(test)]
     /// The typed "closed" error for any page access after recycle.
     pub fn check_open(&self) -> Result<(), LoadError> {
         if self.is_recycled() { Err(LoadError::new("Archive loader was recycled")) } else { Ok(()) }
@@ -84,6 +85,7 @@ impl ArchiveLoader {
             .collect())
     }
 
+    #[cfg(test)]
     /// Streams one indexed page entry.
     pub fn open_page(&self, entry: &str) -> Result<EntryReader, LoadError> {
         self.check_open()?;

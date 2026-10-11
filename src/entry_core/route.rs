@@ -22,7 +22,7 @@ use kuro_prefs::reader::ReaderPrefs;
 use kuro_prefs::tristate::TriState;
 
 use crate::data;
-use crate::entry_core::backend::StubBackend;
+use crate::entry_core::backend::SourceBackend;
 use crate::entry_core::action_row::{TrackingClick, interval_click_opens_dialog, next_update, tracking_click};
 use crate::entry_core::action_row_view::{ActionRow, RowState};
 use crate::entry_core::banner_view::{self, BannerView};
@@ -42,7 +42,7 @@ use crate::entry_core::flags::{ChapterFlags, save_as_default, scanlator_filter_a
 use crate::entry_core::header::{GenreChip, HeaderModel, SearchRequest, is_large};
 use crate::entry_core::header_view::{self, Handlers, LibraryButton};
 use crate::entry_core::list_model::list_header;
-use crate::entry_core::list_view::{ChapterList, RowActions, Swipe, ensure_css};
+use crate::entry_core::list_view::{ChapterList, OnMenu, RowActions, ensure_css};
 use crate::entry_core::page::{Page, UiAction};
 use crate::entry_core::runner::{self, Runner};
 use crate::entry_core::scanlator_sheet;
@@ -154,7 +154,7 @@ fn page_for(manga_id: i64) -> GBox {
     };
     let remove_after_read = DownloadPrefs::new(&store).remove_after_marked_as_read.get();
     let handle = tokio::runtime::Handle::current();
-    let runner = Rc::new(runner::spawn(&handle, DbStore::new(Arc::clone(&db)), Arc::new(StubBackend::new(db)), ctx));
+    let runner = Rc::new(runner::spawn(&handle, DbStore::new(Arc::clone(&db)), Arc::new(SourceBackend::live(db, &store)), ctx));
     runner.send(StoreCmd::Load { manga_id });
     let mut page = Page::new(manga_id, remove_after_read);
     page.default_category = i64::from(app.library.default_manga_category.get());
@@ -226,17 +226,14 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         })),
     );
     let library = action_row.library.clone();
-    let swipe = crate::data::is_installed().then(|| Swipe {
-        prefs: Rc::new((*data::app().library).clone()),
-        run: {
-            let weak = Rc::clone(&on_row_view);
-            Rc::new(move |id: i64, action| {
-                if let Some(view) = weak.borrow().upgrade() {
-                    view.act(UiAction::Swipe { id, action });
-                }
-            })
-        },
-    });
+    let on_menu: OnMenu = {
+        let weak = Rc::clone(&on_row_view);
+        Rc::new(move |id: i64, action| {
+            if let Some(view) = weak.borrow().upgrade() {
+                view.act(UiAction::RowMenu { id, action });
+            }
+        })
+    };
     let list = ChapterList::new(
         {
             let weak = Rc::clone(&on_row_view);
@@ -246,7 +243,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
                 }
             })
         },
-        swipe,
+        on_menu,
         RowActions {
             on_indicator: {
                 let weak = Rc::clone(&on_row_view);
@@ -321,6 +318,11 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     let left_host = GBox::new(O::Vertical, 0);
     let left_scroll = ui::scrolled(&left_host);
     left_scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+    // the info pane stays narrow so the chapter list keeps room for its titles
+    left_scroll.set_hexpand(false);
+    left_scroll.set_width_request(360);
+    left_scroll.set_min_content_width(360);
+    left_scroll.set_max_content_width(360);
     left_scroll.set_visible(false);
     let separator = gtk::Separator::new(O::Vertical);
     separator.set_visible(false);
@@ -695,6 +697,10 @@ impl View {
     }
 
     fn open_chapter(&self, id: i64) {
+        // repeated clicks, or clicks queued while the window was busy, open the reader once
+        if !ui::first_within("reader", 1500) {
+            return;
+        }
         let page = self.page.borrow();
         let Some(ready) = page.ready() else { return };
         if ready.manga.source == kuro_local::LOCAL_SOURCE_ID {
@@ -702,8 +708,8 @@ impl View {
             ui::push(&crate::local_flow::reader::open_local_chapter(ready.manga.id, id));
             return;
         }
-        let name = ready.chapters.iter().find(|c| c.id == id).map(|c: &ChapterRow| c.name.clone()).unwrap_or_default();
-        crate::screens::open_media(false, &ready.manga.title, &name);
+        // by ids, as the local chapter: a browsed manga is not a favourite, so a lookup by title would not find it
+        ui::push(&crate::reader::launch::open_chapter(ready.manga.id, id));
     }
 
     /// The Resume or Start button: opens the next unread chapter, and does nothing when there is none.
@@ -1721,7 +1727,7 @@ mod tests {
                 .collect();
             let model_list = ChapterList::new(
                 Rc::new(|_: i64, _: Mods, _: bool| {}),
-                None,
+                Rc::new(|_, _| {}),
                 RowActions { on_indicator: Rc::new(|_, _| {}), on_previous: Rc::new(|_| {}) },
             );
             let signals = Rc::new(Cell::new(0));
@@ -1746,6 +1752,57 @@ mod tests {
             assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("missing")), "a missing row ends in the missing state");
             let has_back = descendants(missing.upcast_ref()).iter().filter_map(|w| w.clone().downcast::<Button>().ok()).any(|b| b.label().as_deref() == Some("Back"));
             assert!(has_back, "the missing state offers Back");
+        });
+    }
+
+    /// Set in the child process that runs [`a_chapter_of_an_online_source_opens_the_reader`] on its own.
+    const ALONE: &str = "KUROBAYOMI_TEST_ALONE";
+
+    /// Start on a manga of an online source (not the local one, not a favourite) pushes the reader page, opened by ids.
+    /// The reader needs the app data, which is installed on the GTK thread for good, so the normal run starts this test
+    /// binary again for this one test, with a temporary home so nothing reaches the user's data folders.
+    #[test]
+    fn a_chapter_of_an_online_source_opens_the_reader() {
+        if std::env::var_os(ALONE).is_none() {
+            let home = tempfile::tempdir().expect("a temporary home");
+            let path = module_path!().split_once("::").map_or(module_path!(), |(_, rest)| rest);
+            let name = format!("{path}::a_chapter_of_an_online_source_opens_the_reader");
+            let mut child = std::process::Command::new(std::env::current_exe().expect("the test binary"));
+            // the platform's base-directory variables would point past the temporary home
+            for (key, _) in std::env::vars().filter(|(k, _)| ["_DATA_HOME", "_CONFIG_HOME", "_CACHE_HOME", "_STATE_HOME"].iter().any(|s| k.ends_with(s))) {
+                child.env_remove(key);
+            }
+            let out = child.args([name.as_str(), "--exact", "--test-threads=1", "--nocapture"]).env(ALONE, "1").env("HOME", home.path()).output().expect("the test binary runs");
+            let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            assert!(out.status.success() && stdout.contains("1 passed"), "the child run failed:\n{stdout}\n{stderr}");
+            assert!(!crate::testing::has_display() || !stderr.contains("skipped: no display"), "the child lost the display:\n{stderr}");
+            return;
+        }
+        crate::testing::with_display(|| {
+            let ctx = glib::MainContext::default();
+            let _owner = ctx.acquire().expect("main context");
+            let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+            let _inside = runtime.enter();
+            let dir = tempfile::tempdir().expect("a temporary folder");
+            crate::data::install(crate::data::open_in(dir.path()).expect("fresh data")).expect("installed");
+            let (nav, _window) = crate::testing::nav();
+            let db = crate::data::app().db(EntryKind::Manga);
+            let mangas = MangaRepo::new(Arc::clone(&db));
+            let id = mangas.insert(&Manga { source: 2131019126180322627, url: "/series/1".into(), title: "Browsed".into(), ..Manga::create() }).unwrap();
+            mangas.update(&MangaUpdate { initialized: Some(true), ..MangaUpdate::new(id) }).unwrap();
+            let chapter = Chapter { manga_id: id, url: "/chapters/1".into(), name: "Chapter 1".into(), chapter_number: 1.0, ..Chapter::create() };
+            ChapterRepo::new(Arc::clone(&db)).add_all(&[chapter]).unwrap();
+
+            let runner = Rc::new(runner::spawn(runtime.handle(), DbStore::new(Arc::clone(&db)), Arc::new(StubBackend::new(Arc::clone(&db))), LoadContext::default()));
+            let page = assemble(Page::new(id, false), Rc::clone(&runner));
+            runner.send(StoreCmd::Load { manga_id: id });
+            ui::push(&page);
+            let all = || descendants(page.upcast_ref());
+            let fab = all().into_iter().filter_map(|w| w.downcast::<gtk::Revealer>().ok()).find(|r| r.transition_duration() == FAB_FADE_MS).expect("the Start button");
+            assert!(pump(&ctx, || fab.reveals_child()), "an unread chapter: Start shows");
+            fab.child().and_downcast::<Button>().expect("the button").emit_clicked();
+            let shown = || nav.visible_child().is_some_and(|c| c.widget_name() == "screen:reader");
+            assert!(pump(&ctx, shown), "Start pushes the reader");
         });
     }
 }

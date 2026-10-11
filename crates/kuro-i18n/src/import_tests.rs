@@ -80,18 +80,33 @@ fn parse_moko_counts_match_the_inventory() {
 }
 
 #[test]
-fn english_generation_counts_1444_messages() {
+fn english_generation_counts_1416_messages() {
     let (core, aniyomi) = base();
     let text = generate_english(&core, &aniyomi).expect("generates");
     let ids = text
         .lines()
         .filter(|l| l.contains(" =") && !l.starts_with('#') && !l.starts_with(' '))
         .count();
-    assert_eq!(ids, 1456, "1434 from the Aniyomi base plus the 22 in kurobayomi-extra.ftl");
+    assert_eq!(ids, 1416, "1389 from the Aniyomi base (1434 minus the 45 dropped names) plus the 27 in kurobayomi-extra.ftl");
     assert_eq!(
         text, ENGLISH_FTL,
         "the committed English file is the generator output"
     );
+}
+
+#[test]
+fn dropped_names_are_left_out_of_english_and_of_every_locale() {
+    let (core, aniyomi) = base();
+    let english = generate_english(&core, &aniyomi).expect("generates");
+    let build = generate_locale(&core, &aniyomi, &ru_core(), &[]).expect("builds");
+    for name in crate::import::DROPPED_NAMES {
+        let id = format!("{name} =");
+        assert!(!build.ftl.contains(&id), "{name} is in a locale");
+        assert!(!has_warning(&build, name), "{name} is warned about, not skipped silently");
+        // the five replaced texts are the only dropped ids that English still has, from kurobayomi-extra.ftl
+        let in_english = english.lines().any(|l| l.starts_with(&id));
+        assert_eq!(in_english, crate::import::REPLACED_NAMES.contains(name), "{name}");
+    }
 }
 
 #[test]
@@ -228,7 +243,8 @@ fn russian_plural_categories_select_few_and_many() {
 #[test]
 fn overlap_precedence() {
     // T-51a-018 (test 22): each of the 27 names both modules define has the Aniyomi text in the
-    // English file, converted, and the core copy is not emitted as a second definition.
+    // English file, converted, and the core copy is not emitted as a second definition. One of them
+    // (`pref_library_summary`) is a dropped name, so the file has the text of `kurobayomi-extra.ftl` for it.
     let (core_all, _) = base();
     let aniyomi_all = {
         let mut all = parse(ANIYOMI_STRINGS);
@@ -242,6 +258,9 @@ fn overlap_precedence() {
         };
         assert_ne!(core_source.body, source.body, "{}", source.name);
         overlaps += 1;
+        if crate::import::DROPPED_NAMES.contains(&source.name.as_str()) {
+            continue;
+        }
         let id = source.name.replace('.', "_");
         let prefix = format!("{id} =");
         let defined = ENGLISH_FTL

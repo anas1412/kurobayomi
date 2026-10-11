@@ -64,7 +64,16 @@ fn hits_in(crates: &[&str], tokens: &[&str]) -> Vec<String> {
             let text = fs::read_to_string(&file).unwrap();
             // production code only: a test may name a dropped key to assert that it is gone
             let code_part = text.split("#[cfg(test)]").next().unwrap_or_default();
+            let mut in_dropped_keys = false;
             for (number, line) in code_part.lines().enumerate() {
+                // the table of dropped preference keys names them on purpose, so a restore can skip them
+                if line.contains("DROPPED_KEYS: [") {
+                    in_dropped_keys = true;
+                }
+                if in_dropped_keys {
+                    in_dropped_keys = line.trim() != "];";
+                    continue;
+                }
                 let code = line.split("//").next().unwrap_or_default();
                 for token in tokens {
                     if code.contains(token) {

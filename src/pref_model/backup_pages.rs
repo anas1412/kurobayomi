@@ -122,7 +122,7 @@ fn check_row(label: &str, active: bool) -> (gtk::ListBoxRow, gtk::CheckButton) {
     let row = crate::ui::row(label, None, Some(check.clone().upcast()));
     row.set_activatable(true);
     let toggle = check.clone();
-    row.connect_activate(move |_| toggle.set_active(!toggle.is_active()));
+    crate::widgets::row_activate::on_activate(&row, move |_| toggle.set_active(!toggle.is_active()));
     (row, check)
 }
 
@@ -240,7 +240,9 @@ pub fn restore_page() -> Option<Built> {
     choose.set_halign(gtk::Align::Start);
     column.append(&choose);
     let card = gtk::Label::builder().wrap(true).xalign(0.0).selectable(true).build();
-    let frame = gtk::Frame::builder().child(&card).build();
+    // the backup summary sits in a one-row boxed list: the same rounded card as the option lists under it
+    let frame = crate::ui::boxed_list();
+    frame.append(&gtk::ListBoxRow::builder().child(&card).activatable(false).build());
     card.set_margin_start(12);
     card.set_margin_end(12);
     card.set_margin_top(12);

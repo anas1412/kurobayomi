@@ -4,7 +4,7 @@
 use gtk::prelude::*;
 use gtk::{Box as GBox, Orientation, ToggleButton};
 use kuro_prefs::pref::Pref;
-use kuro_prefs::ui::{apply_theme, ThemeChoice, ThemeMode};
+use kuro_prefs::ui::ThemeMode;
 
 use super::super::model::ItemCommon;
 use super::row::{self, PrefRow, RowSpec};
@@ -26,16 +26,12 @@ pub fn should_write(current: ThemeMode, next: ThemeMode) -> bool {
     current != next
 }
 
-/// Pushes the choice to GTK. System resets the property so the desktop decides again (P-theme-dark).
+/// Applies the mode through the theme's one path (`theme::apply::update_settings`): the palette, the window marks
+/// and `gtk-application-prefer-dark-theme` change together. Light and Dark force the GTK preference; System puts
+/// back the value the desktop had at startup and follows the portal, so it never forces light. A no-op without a
+/// display, and when the mode is already the applied one.
 pub fn apply(mode: ThemeMode) {
-    let Some(settings) = gtk::Settings::default() else {
-        return;
-    };
-    match apply_theme(mode) {
-        ThemeChoice::Light => settings.set_gtk_application_prefer_dark_theme(false),
-        ThemeChoice::Dark => settings.set_gtk_application_prefer_dark_theme(true),
-        ThemeChoice::FollowSystem => settings.reset_property("gtk-application-prefer-dark-theme"),
-    }
+    crate::theme::apply::update_settings(|settings| settings.mode = mode);
 }
 
 pub fn row(common: &ItemCommon, pref: Pref<ThemeMode>) -> PrefRow {
@@ -83,6 +79,7 @@ pub fn row(common: &ItemCommon, pref: Pref<ThemeMode>) -> PrefRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuro_prefs::ui::{apply_theme, ThemeChoice};
 
     #[test]
     fn system_comes_first_and_the_same_value_is_not_written() {
@@ -96,5 +93,22 @@ mod tests {
         assert_eq!(apply_theme(ThemeMode::SYSTEM), ThemeChoice::FollowSystem);
         assert_eq!(apply_theme(ThemeMode::LIGHT), ThemeChoice::Light);
         assert_eq!(apply_theme(ThemeMode::DARK), ThemeChoice::Dark);
+    }
+
+    // T-47ba-040, T-01a-021: the one apply path sets the GTK preference, and System restores the startup value.
+    #[test]
+    fn each_mode_reaches_gtk_and_system_restores_the_startup_value() {
+        crate::testing::with_display(|| {
+            let Some(display) = gtk::gdk::Display::default() else { return };
+            let startup = crate::theme::dark::startup_prefer_dark();
+            crate::theme::apply::install(&display, crate::theme::ThemeSettings::default());
+            let gtk_prefers_dark = || gtk::Settings::default().is_some_and(|s| s.is_gtk_application_prefer_dark_theme());
+            apply(ThemeMode::DARK);
+            assert!(gtk_prefers_dark());
+            apply(ThemeMode::LIGHT);
+            assert!(!gtk_prefers_dark());
+            apply(ThemeMode::SYSTEM);
+            assert_eq!(gtk_prefers_dark(), startup);
+        });
     }
 }

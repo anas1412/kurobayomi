@@ -2,8 +2,7 @@
 //! update passes counted, hidden at zero and when the "show updates count" switch is off. The Updates page resets the
 //! counters when it opens; this only shows them.
 //!
-//! The label and the icon-only dot keep their place when hidden (their opacity goes to zero) because the sidebar's
-//! collapse toggle sets their visibility itself.
+//! The label keeps its place when hidden (its opacity goes to zero), so the rows do not shift.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -19,39 +18,33 @@ pub fn text(manga: i32, anime: i32, show: bool) -> Option<String> {
     (show && total > 0).then(|| total.to_string())
 }
 
-fn paint(label: &gtk::Label, dot: &gtk::Widget, (manga, anime, show): (i32, i32, bool)) {
+fn paint(label: &gtk::Label, (manga, anime, show): (i32, i32, bool)) {
     let shown = text(manga, anime, show);
     label.set_label(shown.as_deref().unwrap_or(""));
-    let opacity = if shown.is_some() { 1.0 } else { 0.0 };
-    label.set_opacity(opacity);
-    dot.set_opacity(opacity);
+    label.set_opacity(if shown.is_some() { 1.0 } else { 0.0 });
 }
 
-/// Shows the live count in `label` and the dot, now and on every change of the counters or of the switch.
-pub fn bind(label: &gtk::Label, dot: &impl IsA<gtk::Widget>, library: &LibraryPrefs) {
-    let dot: gtk::Widget = dot.clone().upcast();
+/// Shows the live count in `label`, now and on every change of the counters or of the switch.
+pub fn bind(label: &gtk::Label, library: &LibraryPrefs) {
     let state = Rc::new(Cell::new((0_i32, 0_i32, true)));
     let (manga, anime, show) = (state.clone(), state.clone(), state);
-    let dot_manga = dot.clone();
     bind::bind(label, &library.new_manga_updates_count, move |l, count| {
         manga.set((count, manga.get().1, manga.get().2));
-        paint(l, &dot_manga, manga.get());
+        paint(l, manga.get());
     });
-    let dot_anime = dot.clone();
     bind::bind(label, &library.new_anime_updates_count, move |l, count| {
         anime.set((anime.get().0, count, anime.get().2));
-        paint(l, &dot_anime, anime.get());
+        paint(l, anime.get());
     });
     bind::bind(label, &library.new_show_updates_count, move |l, on| {
         show.set((show.get().0, show.get().1, on));
-        paint(l, &dot, show.get());
+        paint(l, show.get());
     });
 }
 
-/// Shows the stored extension update count in `label` and the dot, hidden at zero (the Browse entry's badge).
-pub fn bind_extension_updates(label: &gtk::Label, dot: &impl IsA<gtk::Widget>, source: &kuro_prefs::source::SourcePrefs) {
-    let dot: gtk::Widget = dot.clone().upcast();
-    bind::bind(label, &source.manga_extension_updates_count, move |l, count| paint(l, &dot, (count, 0, true)));
+/// Shows the stored extension update count in `label`, hidden at zero (the Browse entry's badge).
+pub fn bind_extension_updates(label: &gtk::Label, source: &kuro_prefs::source::SourcePrefs) {
+    bind::bind(label, &source.manga_extension_updates_count, move |l, count| paint(l, (count, 0, true)));
 }
 
 #[cfg(test)]

@@ -1,6 +1,5 @@
 //! Include and exclude summary of category sets (task T-47a-005).
 // Not reachable from `route.rs` yet: the include/exclude summary is for the update-category rows, which are still spec rows.
-#![allow(dead_code)]
 use std::collections::BTreeSet;
 
 /// A library category as the settings need it: its stored id, display name and sort order.

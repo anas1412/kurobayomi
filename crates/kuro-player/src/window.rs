@@ -100,8 +100,7 @@ pub fn on_resume(state: &mut PlayerState) {
 }
 
 /// The mpv volume to write after a resume from a hidden window (T-45a-046). It is 100 when the
-/// device volume is below its maximum (`volume::resume_volume`), and it is taken once. No brightness
-/// step runs here (T-45a-045 is dropped on desktop).
+/// device volume is below its maximum (`volume::resume_volume`), and it is taken once.
 pub fn take_volume_restore(state: &mut PlayerState, device_steps: i32) -> Option<i64> {
     if !std::mem::take(&mut state.restore_volume_on_resume) {
         return None;

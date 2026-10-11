@@ -228,10 +228,6 @@ lock_never = कधीही नाही
 
 hide_notification_content = सूचना सामग्री लपवा
 
-secure_screen = स्क्रीन सुरक्षित करा
-
-secure_screen_summary = अ‍ॅप्स स्विच करताना अॅप मधील सामग्री लपवा व स्क्रीनशॉट अवरोधित करा
-
 pref_category_display = दाखवा
 
 pref_library_columns = आयटम प्रती पंक्ती

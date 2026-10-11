@@ -255,11 +255,12 @@ pub fn check_row() -> PreferenceItem {
     tap_item(app_update::CHECK_ROW_TITLE, None, true, Some(spinner), None, Rc::new(check_tapped))
 }
 
-pub const HELP_TRANSLATE_URL: &str = "https://aniyomi.org/docs/contribute#translation";
-pub const PRIVACY_URL: &str = "https://aniyomi.org/privacy/";
-pub const WEBSITE_URL: &str = "https://aniyomi.org";
-pub const DISCORD_URL: &str = "https://discord.gg/F32UjdJZrR";
-pub const GITHUB_URL: &str = "https://github.com/aniyomiorg/aniyomi";
+/// This app's project page. Aniyomi's website, Discord and privacy page describe the Android app, so none is linked.
+pub const PROJECT_URL: &str = "https://github.com/anas1412/kurobayomi";
+/// Where bugs are reported.
+pub const ISSUES_URL: &str = "https://github.com/anas1412/kurobayomi/issues";
+/// The Fluent files a translator edits.
+pub const HELP_TRANSLATE_URL: &str = "https://github.com/anas1412/kurobayomi/tree/main/crates/kuro-i18n/locales";
 
 /// The release tag of a build: `v<version>` for a release, `r<commit count>` for a preview.
 pub fn release_tag(build_type: &str, version_name: &str, commit_count: u32) -> String {
@@ -298,12 +299,12 @@ fn whats_new_row() -> PreferenceItem {
     link_row("What's new", &release_page_url(repo, &tag), info.build_type != "debug" && !repo.is_empty())
 }
 
-/// The bottom row of three links: Website, Discord and GitHub.
+/// The bottom row of links: the project page and the issue tracker.
 fn links_row() -> PreferenceItem {
     let build: Rc<dyn Fn() -> gtk::Widget> = Rc::new(|| {
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         bar.set_halign(gtk::Align::Center);
-        for (label, url) in [("Website", WEBSITE_URL), ("Discord", DISCORD_URL), ("GitHub", GITHUB_URL)] {
+        for (label, url) in [("GitHub", PROJECT_URL), ("Report an issue", ISSUES_URL)] {
             let button = gtk::Button::with_label(label);
             button.add_css_class("flat");
             button.connect_clicked(move |_| open_url(url));
@@ -322,7 +323,6 @@ pub fn page_rows() -> Vec<Preference> {
         item(check_row()),
         item(whats_new_row()),
         item(link_row("Help translate", HELP_TRANSLATE_URL, true)),
-        item(link_row("Privacy policy", PRIVACY_URL, true)),
         item(links_row()),
     ]
 }
@@ -343,11 +343,20 @@ mod link_tests {
     }
 
     #[test]
-    fn the_fixed_link_targets_are_the_acceptance_urls() {
-        assert_eq!(HELP_TRANSLATE_URL, "https://aniyomi.org/docs/contribute#translation");
-        assert_eq!(PRIVACY_URL, "https://aniyomi.org/privacy/");
-        assert_eq!(DISCORD_URL, "https://discord.gg/F32UjdJZrR");
-        assert_eq!(GITHUB_URL, "https://github.com/aniyomiorg/aniyomi");
+    fn the_links_lead_to_this_apps_project_and_never_to_aniyomi() {
+        let urls = [PROJECT_URL, ISSUES_URL, HELP_TRANSLATE_URL];
+        for url in urls {
+            assert!(url.starts_with("https://github.com/anas1412/kurobayomi"), "{url}");
+        }
+        assert!(!urls.iter().any(|u| u.contains("aniyomi")));
+    }
+
+    #[test]
+    fn the_page_has_no_privacy_row_and_the_link_bar_is_the_last_row() {
+        let rows = page_rows();
+        let titles: Vec<&str> = rows.iter().map(|r| match r { Preference::Item(i) => i.title(), Preference::Group(g) => g.title.as_str() }).collect();
+        assert!(!titles.contains(&"Privacy policy"));
+        assert_eq!(titles.last(), Some(&"Links"));
     }
 }
 

@@ -18,8 +18,7 @@ impl StatsScreen {
         let root = Stack::new();
         let spinner = Spinner::builder().spinning(true).halign(Align::Center).valign(Align::Center).vexpand(true).build();
         root.add_named(&spinner, Some("loading"));
-        let content = GBox::new(O::Vertical, 12);
-        crate::ui::margins(&content, 12);
+        let content = crate::ui::column();
         root.add_named(&crate::ui::scrolled(&content), Some("content"));
         root.set_visible_child_name("loading");
         Self { root, content }
@@ -29,6 +28,7 @@ impl StatsScreen {
         &self.root
     }
 
+    #[cfg(test)]
     /// Shows `state`: the spinner while loading, else the cards in order.
     pub fn set_state(&self, state: &StatsState) {
         self.set_state_with(state, Failed::default());
@@ -66,9 +66,9 @@ impl Default for StatsScreen {
 
 /// One section card: the heading, then the tiles in one equal-width row.
 fn card_widget(card: &Card) -> GBox {
-    let col = GBox::new(O::Vertical, 6);
+    let col = GBox::new(O::Vertical, 12);
     col.append(&crate::ui::heading(&card.title));
-    let row = GBox::new(O::Horizontal, 6);
+    let row = GBox::new(O::Horizontal, 8);
     row.set_homogeneous(true);
     for tile in &card.tiles {
         row.append(&tile_widget(tile));
@@ -77,15 +77,19 @@ fn card_widget(card: &Card) -> GBox {
     col
 }
 
-/// One tile: the icon when it has one, the value in bold, and the caption dimmed.
+/// One tile: a rounded card with the icon when it has one, the value in bold, and the caption dimmed.
 fn tile_widget(tile: &Tile) -> GBox {
     let col = GBox::new(O::Vertical, 4);
-    col.add_css_class("card");
-    crate::ui::margins(&col, 10);
+    crate::ui::margins(&col, 12);
     if let Some(icon) = tile.icon {
         col.append(&Image::from_icon_name(icon));
     }
     col.append(&Label::builder().label(&tile.value).css_classes(["title-4"]).build());
-    col.append(&crate::ui::dim(&tile.caption));
-    col
+    let caption = crate::ui::dim(&tile.caption);
+    caption.set_xalign(0.5);
+    col.append(&caption);
+    let card = GBox::new(O::Vertical, 0);
+    card.add_css_class("card");
+    card.append(&col);
+    card
 }

@@ -19,7 +19,6 @@ fn browse_widgets_smoke() {
         super::listing_view::tests::smoke();
         super::browse_screen::tests::smoke();
         super::search_screen::tests::smoke();
-        super::migrate_nav::tests::smoke();
         super::migrate_list::tests::smoke();
         super::spec_tests::smoke();
         super::anime::sources_view::tests::smoke();

@@ -4,7 +4,6 @@ use kuro_prefs::prefs::Prefs;
 use kuro_prefs::reader::{FlashColor, ReaderHideThreshold, TappingInvertMode};
 
 use super::rules::{row_enabled, ReaderState, Row};
-use crate::settings_ui::search::SearchableSettings;
 use crate::settings_ui::rows::{enum_choice, exclusive_switch, group, int_choice, item, scaled_slider, slider, switch, switch_sub, visible};
 use crate::pref_model::model::{Preference, PreferenceItem};
 
@@ -15,15 +14,6 @@ pub const READING_MODES: [(i32, &str); 5] = [
     (3, "Paged (vertical)"),
     (4, "Long strip"),
     (5, "Long strip with gaps"),
-];
-/// `ReaderOrientation` codes (`pref_default_orientation_type_key`).
-pub const ROTATIONS: [(i32, &str); 6] = [
-    (8, "Free"),
-    (16, "Portrait"),
-    (24, "Landscape"),
-    (32, "Locked portrait"),
-    (40, "Locked landscape"),
-    (48, "Reverse portrait"),
 ];
 /// Background codes (`pref_reader_theme_key`).
 pub const BACKGROUNDS: [(i32, &str); 4] = [(1, "Black"), (2, "Gray"), (0, "White"), (3, "Auto")];
@@ -62,20 +52,6 @@ pub const HIDE_THRESHOLDS: [(ReaderHideThreshold, &str); 4] = [
     (ReaderHideThreshold::LOWEST, "Lowest"),
 ];
 
-/// The reader screen, for the settings search contract.
-#[allow(dead_code)] // the settings search is not routed yet
-pub struct ReaderScreen;
-
-impl SearchableSettings for ReaderScreen {
-    fn title(&self) -> &'static str {
-        "Reader"
-    }
-
-    fn preferences(&self, prefs: &Prefs) -> Vec<Preference> {
-        rows(prefs)
-    }
-}
-
 /// The whole reader page as a preference tree, with the rows the rule table disables left out.
 #[allow(dead_code)] // the settings search is not routed yet
 pub fn rows(prefs: &Prefs) -> Vec<Preference> {
@@ -107,7 +83,6 @@ fn tree(prefs: &Prefs, hide: bool) -> Vec<Preference> {
     tree.push(group(
         "Display",
         vis(vec![
-            int_choice("Default rotation", &r.default_orientation_type, &ROTATIONS, true),
             int_choice("Background color", &r.reader_theme, &BACKGROUNDS, true),
             switch("Fullscreen", &r.fullscreen, true),
             switch("Keep screen on", &r.keep_screen_on, true),
@@ -274,11 +249,11 @@ mod tests {
     }
 
     #[test]
-    fn default_display_group_has_its_five_rows_in_android_order() {
+    fn default_display_group_has_its_four_rows_in_android_order() {
         let tree = rows(&Prefs::in_memory());
         assert_eq!(
             titles_of(&tree, "Display"),
-            ["Default rotation", "Background color", "Fullscreen", "Keep screen on", "Show page number"]
+            ["Background color", "Fullscreen", "Keep screen on", "Show page number"]
         );
     }
 

@@ -53,6 +53,7 @@ impl DeleteQueue {
         std::mem::take(&mut self.entries)
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

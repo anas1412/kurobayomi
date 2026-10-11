@@ -1,6 +1,6 @@
 //! The reader (area 43). Pure models and loaders are GTK-free; the widget builders are `transition` and `chrome`.
 //!
-//! `model` holds the chapter, page and transition types. `flags` holds mode, orientation and crop state. `image`
+//! `model` holds the chapter, page and transition types. `flags` holds mode and crop state. `image`
 //! and `cache` hold the page rules and the disk cache. `loader` holds the page loaders and the chapter state
 //! machine. `chapters` builds the reader list. `session` runs the reader state. `launch` opens the reader for the app. `screen` is the reader page: open, failure card, chapter buttons, crop. `writer` is the database writer.
 //!
@@ -10,7 +10,6 @@
 //! - Hardware bitmap config, `BitmapRegionDecoder` and the SDK gates: none. `pref_hardware_bitmap_threshold` is the tile
 //!   threshold (`tiles`).
 //! - "Always decode the long strip with SSIV" is dropped: a webtoon page decodes at the view width, and a stored value is ignored.
-//! - Haptic feedback on long press: none. The long press still works (`long_press`).
 //! - DirectionalViewPager is replaced by the pager of `viewers::pager`; no visible loss.
 //! - The webtoon frame's touch translation, the touch-ignoring tile view and the ViewPager exception guards: not needed, the
 //!   widgets keep the behaviour.
@@ -81,17 +80,17 @@ pub mod page_profile;
 pub mod page_save;
 pub mod page_transform;
 pub mod page_view;
+mod topbar_guard;
 pub mod page_zoom;
 pub mod pref_rules;
 pub mod progress;
 pub mod restore;
-pub mod rotation_sheet;
 pub mod saved_notice;
 pub mod quick_scale;
-pub mod release_notes;
 pub mod rules;
 pub mod screen;
 pub mod session;
+pub mod source_pages;
 pub mod settings_model;
 pub mod settings_window;
 pub mod sheet;

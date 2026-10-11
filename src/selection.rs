@@ -4,7 +4,6 @@
 //! Order of work as upstream: view filters (unread, bookmarked, downloaded), then the entry's sort, then the first
 //! unread of the result, or the last one when the entry sorts descending. The unread filter runs before the search,
 //! so "show read only" finds nothing, as upstream.
-#![allow(dead_code)] // called by the entry screens' continue button and the player as they land
 
 use std::cmp::Ordering;
 
@@ -240,5 +239,26 @@ mod tests {
         let picked = next_unread(&m, &list, false, |_| true).unwrap();
         let continued = kuro_domain::library::active::continue_target(&list, false, |c| !c.read).unwrap();
         assert_eq!(picked.id, continued.id);
+    }
+
+    #[test]
+    fn the_entry_page_resume_target_is_the_one_the_library_list_shows() {
+        // T-52a-008: the player's "resume next" (`AnimeEntryModel::next_unseen`) and the library's continue button
+        // (`selection::next_unseen`) pick the same episode on a fixture anime, in either sort order
+        use crate::entry_core::anime::model::{AnimeEntryModel, AnimeLoadContext};
+        use crate::entry_core::anime::store::fixture::with_episodes;
+        use crate::entry_core::detail::SourceInfo;
+        use kuro_prefs::store::PrefStore;
+        for (total, seen) in [(4, 2), (5, 0), (3, 3), (6, 1)] {
+            for flag in [episode_flags::SORT_ASC, episode_flags::SORT_DESC] {
+                let (_dir, store, id) = with_episodes(true, true, total, seen);
+                store.set_flag_bits(id, flag, episode_flags::SORT_DIR_MASK).unwrap();
+                let model = AnimeEntryModel::load(&store, &PrefStore::in_memory(), id, AnimeLoadContext::default(), |_| SourceInfo { name: "Fake".into(), stub: false })
+                    .unwrap()
+                    .expect("the entry exists");
+                let list = next_unseen(&model.anime, &model.episodes, false, |_| false).map(|e| e.id);
+                assert_eq!(model.next_unseen(), list, "{total} episodes, {seen} seen, sort {flag}");
+            }
+        }
     }
 }

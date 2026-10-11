@@ -402,8 +402,6 @@ ext_permission_install_apps_warning = വിപുലീകരണങ്ങൾ �
 
 ext_install_service_notif = വിപുലീകരണം ഇൻസ്റ്റാൾ ചെയ്യുന്നു…
 
-ext_installer_shizuku_stopped = ഷിസുകു പ്രവർത്തനമല്ല
-
 automatic_background = സ്വയമേവ
 
 nav_zone_left = ഇടത്

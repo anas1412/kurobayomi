@@ -18,7 +18,7 @@ const fn o(v: u32) -> Option<Rgba> {
     Some(Rgba::argb(v))
 }
 
-/// The scheme itself. Monet and System do not use it; `SchemeSel::TokyoNight` resolves to it.
+/// The scheme itself. System does not use it; `SchemeSel::TokyoNight` resolves to it.
 pub const TOKYO_NIGHT: SchemeDef = SchemeDef {
     name: "TokyoNight",
     light: [
@@ -108,7 +108,7 @@ mod tests {
     use super::*;
     use crate::theme::resolve::tokens_for;
     use crate::theme::tokens::Role;
-    use crate::theme::{resolve_with_seed, SchemeSel, ThemeSettings};
+    use crate::theme::{resolve, SchemeSel, ThemeSettings};
     use kuro_prefs::ui::ThemeMode;
 
     #[test]
@@ -125,23 +125,13 @@ mod tests {
     }
 
     #[test]
-    fn css_passes_the_offline_check_in_both_modes_and_amoled() {
-        for dark in [false, true] {
-            for amoled in [false, true] {
-                let css = crate::theme::css::render(&tokens_for(&TOKYO_NIGHT, dark, amoled), false);
-                assert_eq!(crate::theme::css::check(&css), Ok(()), "dark={dark} amoled={amoled}");
-            }
-        }
-    }
-
-    #[test]
     fn selecting_tokyo_night_resolves_to_its_palette_and_overrides_named_colours() {
         let settings = ThemeSettings {
             scheme: SchemeSel::TokyoNight,
             amoled: false,
             mode: ThemeMode::DARK,
         };
-        let resolved = resolve_with_seed(&settings, false, None, 0.0);
+        let resolved = resolve(&settings, false);
         assert!(!resolved.system_scheme);
         assert_eq!(resolved.tokens, tokens_for(&TOKYO_NIGHT, true, false));
     }

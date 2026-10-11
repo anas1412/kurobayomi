@@ -1,8 +1,6 @@
 //! The filter sheet's buttons, widget values and tri-state display (T-40b-050, T-40b-051, T-40b-053). The state rules
 //! are in `kuro_source::filter_sheet`; this file holds the decisions the sheet widgets read from them. Pure.
 
-use kuro_source::filter::TriStateState;
-
 /// The two buttons of the filter sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SheetButton {
@@ -32,15 +30,6 @@ pub fn select_label(values: &[String], state: i32) -> Option<&str> {
     usize::try_from(state).ok().and_then(|i| values.get(i)).or(values.first()).map(String::as_str)
 }
 
-/// The tri-state a raw value shows. An unknown raw value (for example 3) shows as Disabled and logs a warning
-/// (B-EC-20, D-BR-02).
-pub fn tri_shown(raw: i32) -> TriStateState {
-    TriStateState::from_raw(raw).unwrap_or_else(|_| {
-        tracing::warn!(raw, "unknown tri-state value shown as disabled");
-        TriStateState::Ignore
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,17 +53,4 @@ mod tests {
         assert_eq!(select_label(&[], 0), None);
     }
 
-    #[test]
-    fn tri_state_raw_values_cycle_zero_one_two_zero() {
-        assert_eq!(tri_shown(0), TriStateState::Ignore);
-        assert_eq!(tri_shown(0).next(), tri_shown(1));
-        assert_eq!(tri_shown(1).next(), tri_shown(2));
-        assert_eq!(tri_shown(2).next(), tri_shown(0));
-    }
-
-    #[test]
-    fn an_unknown_tri_state_shows_as_disabled() {
-        assert_eq!(tri_shown(3), TriStateState::Ignore);
-        assert_eq!(tri_shown(-1), TriStateState::Ignore);
-    }
 }

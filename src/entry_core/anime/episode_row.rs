@@ -180,10 +180,6 @@ pub fn changed_span(indices: &[usize]) -> Option<(usize, usize)> {
     Some((*first, last - first + 1))
 }
 
-pub fn diff(old: &[EpisodeRow], new: &[EpisodeRow]) -> Diff {
-    diff_by(old, new, |row| row.id.to_string())
-}
-
 /// The diff of list lines: a line keeps its place when it has the same slot (an episode id or a separator key).
 pub fn diff_lines(old: &[Line], new: &[Line]) -> Diff {
     diff_by(old, new, Line::slot)
@@ -306,21 +302,4 @@ mod tests {
         assert!(hidden.selected);
     }
 
-    #[test]
-    fn diff_reports_changed_rows_and_resets_on_structure_changes() {
-        let mk = |id| row(&Episode { id, ..episode() }, false, true, true, false);
-        let old = [mk(1), mk(2), mk(3)];
-        assert_eq!(diff(&old, &old), Diff::Same);
-        let mut changed = old.clone();
-        changed[1].selected = true;
-        assert_eq!(diff(&old, &changed), Diff::Rows(vec![1]));
-        assert_eq!(diff(&old, &old[..2]), Diff::Reset);
-        assert_eq!(diff(&old, &[mk(1), mk(3), mk(2)]), Diff::Reset);
-        // separators keep their slot too: a new count is a change, a new neighbour is a reset
-        let sep = |count| Line::Missing { key: "missing-count-1-5".into(), count };
-        let lines = vec![Line::Episode(mk(1)), sep(2)];
-        assert_eq!(diff_lines(&lines, &lines), Diff::Same);
-        assert_eq!(diff_lines(&lines, &[Line::Episode(mk(1)), sep(3)]), Diff::Rows(vec![1]));
-        assert_eq!(diff_lines(&lines, &[Line::Episode(mk(1))]), Diff::Reset);
-    }
 }

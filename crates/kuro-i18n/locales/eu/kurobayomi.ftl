@@ -324,8 +324,6 @@ theme_light = Itzali
 
 theme_dark = Piztu
 
-theme_monet = Dinamikoa
-
 theme_greenapple = Sagar Berdea
 
 theme_midnightdusk = Gauerdiko ilunabarra
@@ -359,10 +357,6 @@ lock_always = Beti
 lock_never = Inoiz ere ez
 
 hide_notification_content = Ezkutatu jakinarazpenen edukia
-
-secure_screen = Pantaila segurua
-
-secure_screen_summary = Pantaila seguruak aplikazioaren edukia ezkutatzen du aplikazioak aldatzean, eta pantaila-argazkiak blokeatzen ditu
 
 pref_category_nsfw_content = NSFW (18+) iturriak
 
@@ -475,14 +469,6 @@ ext_nsfw_short = 18+
 ext_nsfw_warning = NSFW (18+) edukia izan dezake
 
 ext_install_service_notif = Luzapena instalatzen…
-
-ext_installer_pref = Instalatzailea
-
-ext_installer_legacy = Ondare
-
-ext_installer_shizuku_stopped = Shizuku ez dago martxan
-
-ext_installer_shizuku_unavailable_dialog = Instalatu eta abiarazi Shizuku luzapen instalatzaile gisa erabiltzeko.
 
 pref_fullscreen = Pantaila osoa
 
@@ -632,20 +618,6 @@ double_tap_anim_speed_normal = Normala
 
 double_tap_anim_speed_fast = Azkar
 
-pref_rotation_type = Biraketa mota lehenetsia
-
-rotation_type = Biraketa mota
-
-rotation_free = Librea
-
-rotation_portrait = Bertikala
-
-rotation_landscape = Horizontala
-
-rotation_force_portrait = Bertikal blokeatua
-
-rotation_force_landscape = Horizontal blokeatua
-
 color_filter_r_value = G
 
 color_filter_g_value = B
@@ -783,20 +755,6 @@ pref_refresh_library_covers = Eguneratu liburutegiko manga azalak
 pref_dump_crash_logs = Sortu erroreen erregistroak
 
 pref_dump_crash_logs_summary = Erroreen erregistroak fitxategi batean gordetzen ditu garatzaileekin partekatzeko
-
-label_background_activity = Atzeko planoko ekintzak
-
-pref_disable_battery_optimization = Desgaitu bateriaren optimizazioa
-
-pref_disable_battery_optimization_summary = Liburutegiaren eguneraketak eta babeskopiak atzeko planoan egiten laguntzen du
-
-battery_optimization_disabled = Bateriaren optimizazioa desgaituta dago dagoeneko
-
-battery_optimization_setting_activity_not_found = Ezin izan dira gailuaren ezarpenak ireki
-
-about_dont_kill_my_app = Fabrikatzaile batzuek aplikazioen murrizketa gehigarriak dituzte, atzeko planoko zerbitzuak akabatzen dituztenak. Webgune honek informazio gehiago du nola konpondu jakiteko.
-
-pref_tablet_ui_mode = Tablet interfazea
 
 pref_verbose_logging = Erregistroaren bertsio luzea
 

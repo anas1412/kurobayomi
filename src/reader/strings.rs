@@ -27,7 +27,6 @@ pub const TRANSITION_PAGES_LOADING: &str = "Loading pages…";
 pub const LABEL_DOWNLOADED: &str = "Downloaded";
 
 pub const PICTURE_SAVED: &str = "Picture saved";
-pub const SHARE_PAGE_INFO: &str = "%1$s: %2$s, page %3$d";
 pub const COVER_UPDATED: &str = "Cover updated";
 pub const NOTIFICATION_FIRST_ADD_TO_LIBRARY: &str = "Please add the entry to your library before doing this";
 pub const NOTIFICATION_COVER_UPDATE_FAILED: &str = "Failed to update cover";
@@ -50,28 +49,14 @@ pub const ACTION_OPEN_IN_BROWSER: &str = "Open in browser";
 pub const ACTION_NEXT_CHAPTER: &str = "Next chapter";
 pub const ACTION_PREVIOUS_CHAPTER: &str = "Previous chapter";
 pub const VIEWER: &str = "Reading mode";
-pub const ROTATION_TYPE: &str = "Rotation";
 pub const PREF_CROP_BORDERS: &str = "Crop borders";
 pub const ACTION_SETTINGS: &str = "Settings";
 
 pub const LABEL_DEFAULT: &str = "Default";
-pub const ROTATION_FREE: &str = "Free";
-pub const ROTATION_PORTRAIT: &str = "Portrait";
-pub const ROTATION_LANDSCAPE: &str = "Landscape";
-pub const ROTATION_FORCE_PORTRAIT: &str = "Locked portrait";
-pub const ROTATION_FORCE_LANDSCAPE: &str = "Locked landscape";
-pub const ROTATION_REVERSE_PORTRAIT: &str = "Reverse portrait";
-/// The note under the rotation choices: the value is stored but no rotation follows (E-ORI-1).
-pub const ROTATION_NO_EFFECT: &str = "Rotation has no effect on this platform";
 /// PROPOSAL (E-BRIGHT-2): shown when a positive custom brightness is asked for, since there is no backlight control.
 pub const CUSTOM_BRIGHTNESS_UNAVAILABLE: &str = "Custom brightness is not available on this display";
 /// The accessible name and tooltip of the top bar overflow button (the Kotlin content description, in English).
 pub const OVERFLOW_MENU: &str = "More";
-/// PROPOSAL (E-SAVE-2): the suffix a saved page gets when its file name is taken, as in ` (2)`, ` (3)`.
-/// The accessible label of a page image (T-44a-084): "Page {n} of {total}".
-pub fn page_label(n: usize, total: usize) -> String {
-    format!("Page {n} of {total}")
-}
 
 pub fn name_collision_suffix(n: u32) -> String {
     format!(" ({n})")
@@ -99,7 +84,6 @@ pub const PREF_WEBTOON_DISABLE_ZOOM_OUT: &str = "Disable zoom out";
 pub const PREF_READER_THEME: &str = "Background color";
 pub const PREF_SHOW_PAGE_NUMBER: &str = "Show page number";
 pub const PREF_FULLSCREEN: &str = "Fullscreen";
-pub const PREF_CUTOUT_SHORT: &str = "Show content in cutout area";
 /// The help line that records the dropped cutout setting on Linux (T-43b-050). The key stays in the store.
 pub const CUTOUT_DROPPED_NOTE: &str = "Show content in cutout area is not used on Linux: there is no display cutout.";
 pub const PREF_KEEP_SCREEN_ON: &str = "Keep screen on";
@@ -236,7 +220,6 @@ mod tests {
     fn proposal_messages_match_the_spec_text() {
         assert_eq!(CHAPTER_NOT_DOWNLOADED, "The chapter is not downloaded. Turn off downloaded-only mode or download it first.");
         assert_eq!(UNKNOWN_ERROR, "Unknown error");
-        assert_eq!(ROTATION_NO_EFFECT, "Rotation has no effect on this platform");
         assert_eq!(CUSTOM_BRIGHTNESS_UNAVAILABLE, "Custom brightness is not available on this display");
         assert_eq!(name_collision_suffix(2), " (2)");
         assert_eq!(name_collision_suffix(10), " (10)");

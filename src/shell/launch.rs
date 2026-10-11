@@ -35,8 +35,8 @@ pub enum Target {
     Restore(PathBuf),
     /// A repository or store link: open its settings page and hand it the address.
     Repo(UriRoute),
-    /// Raise the window; the request has no screen of its own yet.
-    Present,
+    /// A tracker sign-in redirect (whole link, fragment kept): the tracker host finishes the login (T-28a-040).
+    TrackerAuth(String),
     /// Return to Settings and show `toast` (an unknown `*-auth` host, E-23).
     SettingsToast(String),
 }
@@ -58,7 +58,7 @@ pub fn target_of(request: &LaunchRequest) -> Result<Target, RouteError> {
             UriRoute::TrackerAuth { host, .. } if !uri::TRACKER_AUTH_HOSTS.contains(&host.as_str()) => {
                 Target::SettingsToast(uri::UriError::UnknownHost(host).to_string())
             }
-            UriRoute::TrackerAuth { .. } => Target::Present,
+            UriRoute::TrackerAuth { uri, .. } => Target::TrackerAuth(uri),
             route => Target::Repo(route),
         },
     })
@@ -163,7 +163,13 @@ pub fn apply(app: &gtk::Application, win: &gtk::ApplicationWindow, request: &Lau
             crate::pref_model::backup_pages::set_restore_file(path);
             crate::ui::open(RESTORE_SCREEN);
         }
-        Ok(Target::Present) => win.present(),
+        Ok(Target::TrackerAuth(link)) => {
+            win.present();
+            // `false` while the tracker services are not built: no login was started in this run, so there is nothing to finish
+            if !crate::settings_ui::tracker_host::on_redirect(&link) {
+                tracing::debug!("a tracker redirect arrived before the tracker services were built");
+            }
+        }
         Ok(Target::SettingsToast(message)) => {
             win.present();
             crate::ui::pop_to_root();
@@ -270,7 +276,9 @@ mod tests {
             Ok(Target::Search { query: "frieren".into(), kind: Kind::Anime })
         );
         assert_eq!(target_of(&LaunchRequest::OpenFile("/tmp/a.tachibk".into())), Ok(Target::Restore("/tmp/a.tachibk".into())));
-        assert_eq!(target_of(&LaunchRequest::OpenUri("kurobayomi://anilist-auth#access_token=a".into())), Ok(Target::Present));
+        // the whole link goes on, fragment included
+        let link = "kurobayomi://anilist-auth#access_token=a";
+        assert_eq!(target_of(&LaunchRequest::OpenUri(link.into())), Ok(Target::TrackerAuth(link.into())));
     }
 
     #[test]
@@ -278,7 +286,8 @@ mod tests {
         let unknown = target_of(&LaunchRequest::OpenUri("kurobayomi://nosuch-auth#access_token=a".into()));
         assert_eq!(unknown, Ok(Target::SettingsToast("Unknown link nosuch-auth".into())));
         for host in uri::TRACKER_AUTH_HOSTS {
-            assert_eq!(target_of(&LaunchRequest::OpenUri(format!("kurobayomi://{host}?code=x"))), Ok(Target::Present), "{host}");
+            let link = format!("kurobayomi://{host}?code=x");
+            assert_eq!(target_of(&LaunchRequest::OpenUri(link.clone())), Ok(Target::TrackerAuth(link)), "{host}");
         }
     }
 
@@ -312,5 +321,77 @@ mod tests {
         );
         assert_eq!(request_for_open(None, "aniyomi://add-repo?url=x"), Some(LaunchRequest::OpenUri("aniyomi://add-repo?url=x".into())));
         assert_eq!(request_for_open(None, "plain"), None);
+    }
+
+    /// Set in the child process that runs [`a_repo_link_parks_its_address_and_the_opened_page_takes_it`] on its own.
+    const ALONE: &str = "KUROBAYOMI_TEST_ALONE";
+
+    /// T-47b-017: `apply` parks the address and opens the matching settings page, whose builder takes it (the page then
+    /// opens the deep-link dialog). Installing the app data lasts for the GTK thread, so the normal run starts this test
+    /// binary again for this one test.
+    #[test]
+    fn a_repo_link_parks_its_address_and_the_opened_page_takes_it() {
+        if std::env::var_os(ALONE).is_none() {
+            let path = module_path!().split_once("::").map_or(module_path!(), |(_, rest)| rest);
+            let name = format!("{path}::a_repo_link_parks_its_address_and_the_opened_page_takes_it");
+            let out = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+                .args([name.as_str(), "--exact", "--test-threads=1", "--nocapture"])
+                .env(ALONE, "1")
+                .output()
+                .expect("the test binary runs");
+            let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            assert!(out.status.success() && stdout.contains("1 passed"), "the child run failed:\n{stdout}\n{stderr}");
+            return;
+        }
+        crate::testing::with_display(|| {
+            let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+            let _inside = runtime.enter();
+            let dir = tempfile::tempdir().expect("a temporary folder");
+            crate::data::install(crate::data::open_in(dir.path()).expect("fresh data")).expect("installed");
+            let (_nav, win) = crate::testing::nav();
+            let app = win.application().expect("the test window has an application");
+            for link in ["aniyomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json", "tachiyomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json"] {
+                apply(&app, &win, &LaunchRequest::OpenUri(link.into()));
+                assert_eq!(uri::take_repo_url(), None, "{link}: the page that opened took the parked address");
+                // the page may still be loading its list, which queues the dialog: wait for it to appear
+                let field = wait_for_deep_link_field(&win).unwrap_or_else(|| panic!("{link}: the deep-link dialog did not open"));
+                assert_eq!(field.text(), "https://a.test/i.json", "{link}: the dialog shows the parked address");
+                assert!(!field.is_editable(), "{link}: the address is read-only");
+                for window in gtk::Window::list_toplevels().into_iter().filter_map(|w| w.downcast::<gtk::Window>().ok()) {
+                    if window.transient_for().as_ref() == Some(win.upcast_ref()) {
+                        window.destroy();
+                    }
+                }
+            }
+        });
+    }
+
+    /// The read-only entry of a dialog that is open over `win`, found by running the main loop for up to 5 seconds.
+    fn wait_for_deep_link_field(win: &gtk::ApplicationWindow) -> Option<gtk::Entry> {
+        fn find(widget: &gtk::Widget) -> Option<gtk::Entry> {
+            if let Ok(entry) = widget.clone().downcast::<gtk::Entry>() {
+                return Some(entry);
+            }
+            let mut child = widget.first_child();
+            while let Some(c) = child {
+                if let Some(found) = find(&c) {
+                    return Some(found);
+                }
+                child = c.next_sibling();
+            }
+            None
+        }
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < end {
+            let dialogs = gtk::Window::list_toplevels().into_iter().filter_map(|w| w.downcast::<gtk::Window>().ok());
+            for window in dialogs.filter(|w| w.transient_for().as_ref() == Some(win.upcast_ref())) {
+                if let Some(entry) = window.child().and_then(|c| find(&c)) {
+                    return Some(entry);
+                }
+            }
+            gtk::glib::MainContext::default().iteration(false);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        None
     }
 }

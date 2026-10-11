@@ -6,10 +6,9 @@
 //! - The tablet check and the fast-scroll animation: the 720 px width breakpoint replaces them (`storage`, `upcoming::layout`).
 //! - Voyager navigation and animated tab icons: the `gtk::Stack` navigation and static symbolic icons.
 //! - Compose previews: not ported; deterministic test fixtures replace their data (T-42a-060).
-//! - Haptic feedback on long press: none. The GTK long press still selects the row.
 //! - The splash hand-off: the window shows when the GTK application activates.
 //! - `TAB_ANIME`/`TAB_MANGA`, the anime `onInvertSelection` and the search query state: no port. Invert stays in `selection`.
-//! - Pull-to-refresh: the Refresh button and F5 (`mount`). The back gesture: Escape. `animateItem`: dropped.
+//! - Refresh: the Refresh button and F5 (`mount`). The back gesture: Escape. `animateItem`: dropped.
 //!   `FastScrollLazyColumn`: the GTK scrollbar.
 #![allow(dead_code)] // wired by the screens lane; the helpers are tested here before the screens call them
 
@@ -41,7 +40,6 @@ pub mod prefs;
 pub mod qualities;
 pub mod screen_toast;
 pub mod selection;
-pub mod shell;
 pub mod signals;
 pub mod state_page;
 pub mod stats;

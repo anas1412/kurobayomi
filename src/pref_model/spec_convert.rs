@@ -9,7 +9,7 @@ use kuro_prefs::pref::Pref;
 use kuro_prefs::store::PrefStore;
 
 use super::bind::accept;
-use super::model::{slider_steps, ItemCommon, Kind, Preference, PreferenceGroup, PreferenceItem};
+use super::model::{slider_steps, ItemCommon, Preference, PreferenceGroup, PreferenceItem};
 use crate::spec::{Group, Item, Spec};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -34,37 +34,6 @@ pub fn item_title(item: &Item) -> String {
         | Item::Info { title } => title.clone(),
         Item::Unknown => String::new(),
     }
-}
-
-/// The model kind for a spec item.
-pub fn kind(item: &Item) -> Result<Kind, Skip> {
-    Ok(match item {
-        Item::Switch { .. } => Kind::Switch,
-        Item::List { .. } => Kind::List,
-        Item::Multi { .. } => Kind::MultiSelect,
-        Item::Slider { .. } => Kind::Slider,
-        Item::Text { .. } => Kind::EditText,
-        Item::Link { .. } | Item::Action { .. } => Kind::Text,
-        Item::Info { .. } => Kind::Info,
-        Item::Tristate { .. } => return Err(Skip::Unsupported("tristate")),
-        Item::Sort { .. } => return Err(Skip::Unsupported("sort")),
-        Item::Chips { .. } => return Err(Skip::Unsupported("chips")),
-        Item::Unknown { .. } => return Err(Skip::Unsupported("unknown")),
-    })
-}
-
-/// Converts `items`, logging and dropping the unsupported ones.
-pub fn kinds(items: &[Item]) -> Vec<Kind> {
-    items
-        .iter()
-        .filter_map(|item| match kind(item) {
-            Ok(k) => Some(k),
-            Err(Skip::Unsupported(what)) => {
-                tracing::warn!(kind = what, "settings item skipped: unsupported kind");
-                None
-            }
-        })
-        .collect()
 }
 
 fn common(title: &str, subtitle: &Option<String>) -> ItemCommon {
@@ -138,7 +107,7 @@ pub fn build_item(
         Item::Link { title, subtitle, target } => {
             let (navigate, target) = (navigate.clone(), target.clone());
             let on_click: Rc<dyn Fn()> = Rc::new(move || navigate(&target));
-            PreferenceItem::Text { common: common(title, subtitle), on_click: Some(on_click) }
+            PreferenceItem::Text { common: common(title, subtitle).with_link(), on_click: Some(on_click) }
         }
         Item::Action { title, subtitle } => {
             // an action whose title names a dialog, sheet or screen of this page opens it, as on the generic page
@@ -159,6 +128,22 @@ pub fn build_item(
     })
 }
 
+/// Spec rows (page id, title) that have no Linux counterpart: display cutout, the legacy long-strip decoder, the
+/// display profile and Aniyomi's privacy page. [`Registry::build`] leaves them out instead of showing a row that does
+/// nothing.
+pub const ANDROID_ONLY: [(&str, &str); 4] = [
+    ("settings_reader", "Show content in cutout area"),
+    ("settings_advanced", "Use legacy decoder for long strip reader"),
+    ("settings_advanced", "Custom display profile"),
+    // Aniyomi's privacy page is about the Android app; this app has no page of its own to link
+    ("settings_about", "Privacy policy"),
+];
+
+/// Whether the spec row `title` of page `page` is one of [`ANDROID_ONLY`].
+pub fn is_android_only(page: &str, title: &str) -> bool {
+    ANDROID_ONLY.iter().any(|(p, t)| *p == page && *t == title)
+}
+
 /// Settings pages by screen id, each a list of spec groups. Pages without groups are not registered.
 pub struct Registry {
     pages: HashMap<String, Vec<Group>>,
@@ -175,6 +160,7 @@ impl Registry {
         Self { pages }
     }
 
+    #[cfg(test)]
     pub fn contains(&self, id: &str) -> bool {
         self.pages.contains_key(id)
     }
@@ -186,7 +172,7 @@ impl Registry {
         let mut tree = Vec::new();
         for group in groups {
             let mut items = Vec::new();
-            for item in &group.items {
+            for item in group.items.iter().filter(|item| !is_android_only(id, &item_title(item))) {
                 match build_item(store, id, item, navigate) {
                     Ok(built) => items.push(built),
                     Err(Skip::Unsupported(what)) => {
@@ -214,26 +200,6 @@ mod tests {
 
     fn nav() -> Rc<dyn Fn(&str)> {
         Rc::new(|_| {})
-    }
-
-    #[test]
-    fn every_supported_spec_item_builds_the_matching_model_item() {
-        let store = PrefStore::in_memory();
-        let cases = [
-            (r#"{"type":"switch","title":"A","default":true}"#, Kind::Switch),
-            (r#"{"type":"list","title":"A","options":["x","y"],"default":"y"}"#, Kind::List),
-            (r#"{"type":"multi","title":"A","options":["x"],"default":["x"]}"#, Kind::MultiSelect),
-            (r#"{"type":"slider","title":"A","min":0,"max":10,"default":4}"#, Kind::Slider),
-            (r#"{"type":"text","title":"A","default":"hi"}"#, Kind::EditText),
-            (r#"{"type":"link","title":"A","target":"t"}"#, Kind::Text),
-            (r#"{"type":"action","title":"A"}"#, Kind::Text),
-            (r#"{"type":"info","title":"A"}"#, Kind::Info),
-        ];
-        for (json, expected) in cases {
-            let built = build_item(&store, "page", &item(json), &nav()).expect("supported");
-            assert_eq!(built.kind(), expected, "{json}");
-            assert_eq!(kind(&item(json)), Ok(expected), "{json}");
-        }
     }
 
     #[test]
@@ -272,46 +238,31 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_builds_pages_by_id_and_skips_unsupported_items() {
+    fn the_android_only_rows_exist_in_the_spec_and_are_left_out_of_the_pages() {
         let spec = Spec::load();
         let registry = Registry::new(&spec);
         let store = PrefStore::in_memory();
-        assert!(registry.build("no_such_page", &store, &nav()).is_none());
-        let id = spec
-            .screens
-            .values()
-            .find(|s| s.groups.iter().any(|g| g.items.iter().any(|i| kind(i).is_ok())))
-            .map(|s| s.id.clone())
-            .expect("a screen with supported items");
-        assert!(registry.contains(&id));
-        let tree = registry.build(&id, &store, &nav()).expect("registered page");
-        let built: usize = tree
-            .iter()
-            .map(|p| match p {
-                Preference::Item(_) => 1,
-                Preference::Group(g) => g.items.len(),
-            })
-            .sum();
-        let supported: usize = spec.screens[&id].groups.iter().flat_map(|g| &g.items).filter(|i| kind(i).is_ok()).count();
-        assert_eq!(built, supported);
+        for (page, title) in ANDROID_ONLY {
+            let in_spec = spec.screens[page].groups.iter().flat_map(|g| &g.items).any(|i| item_title(i) == title);
+            assert!(in_spec, "{page}: {title} is a spec row, so this list is not stale");
+            let tree = registry.build(page, &store, &nav()).expect("registered page");
+            let shown = tree.iter().any(|entry| match entry {
+                Preference::Item(i) => i.title() == title,
+                Preference::Group(g) => g.items.iter().any(|i| i.title() == title),
+            });
+            assert!(!shown, "{page}: {title} is not shown");
+        }
     }
 
     #[test]
-    fn supported_spec_kinds_map_to_model_kinds() {
-        assert_eq!(kind(&item(r#"{"type":"switch","title":"A"}"#)), Ok(Kind::Switch));
-        assert_eq!(kind(&item(r#"{"type":"multi","title":"A"}"#)), Ok(Kind::MultiSelect));
-        assert_eq!(kind(&item(r#"{"type":"link","title":"A","target":"x"}"#)), Ok(Kind::Text));
-        assert_eq!(kind(&item(r#"{"type":"text","title":"A"}"#)), Ok(Kind::EditText));
-        assert_eq!(kind(&item(r#"{"type":"info","title":"A"}"#)), Ok(Kind::Info));
+    fn no_spec_title_has_a_stray_space_that_would_stop_a_typed_row_from_replacing_it() {
+        let spec = Spec::load();
+        for screen in spec.screens.values() {
+            for item in screen.groups.iter().flat_map(|g| &g.items) {
+                let title = item_title(item);
+                assert_eq!(title, title.trim(), "{}: {title:?}", screen.id);
+            }
+        }
     }
 
-    #[test]
-    fn unsupported_spec_kinds_are_skipped_not_fatal() {
-        let items = vec![
-            item(r#"{"type":"chips","title":"A"}"#),
-            item(r#"{"type":"text","title":"B"}"#),
-            item(r#"{"type":"sort","title":"C"}"#),
-        ];
-        assert_eq!(kinds(&items), vec![Kind::EditText]);
-    }
 }

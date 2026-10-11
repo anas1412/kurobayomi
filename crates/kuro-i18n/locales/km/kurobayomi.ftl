@@ -290,8 +290,6 @@ theme_light = បិទ
 
 theme_dark = បើក
 
-theme_monet = ឌីណាមិច
-
 theme_greenapple = ប៉ោមបៃតង
 
 theme_midnightdusk = មីដណាយdusk
@@ -323,10 +321,6 @@ lock_always = គ្រប់ពេល
 lock_never = មិនដែល
 
 hide_notification_content = លាក់ការជូនដំណឹង
-
-secure_screen = ការពារអេក្រង់
-
-secure_screen_summary = ការពារអេក្រង់លាក់contentរបស់កម្មវិធីនៅពេលswitchingកម្មីធីនិងប្លុកscreenshots
 
 pref_category_nsfw_content = ប្រភពមិនល្អ(១៨+)
 

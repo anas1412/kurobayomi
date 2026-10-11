@@ -81,7 +81,6 @@ window { background-color: @kuro_background; color: @kuro_on_background; }
 .kb-surface:active { background-color: rgba(227, 226, 230, 0.1); }
 .kb-selected { background-color: rgba(176, 198, 255, 0.16); }
 .kb-header { font-weight: 600; font-size: 14px; color: rgba(197, 198, 208, 1); }
-.kb-wheel-selected { background-color: rgba(176, 198, 255, 0.2); border: 1px solid rgba(176, 198, 255, 1); border-radius: 16px; }
 .kb-active { color: rgba(255, 235, 59, 1); }
 .kb-pill { background-color: rgba(41, 39, 48, 1); color: rgba(227, 226, 230, 1); }
 .kb-tab-pill { background-color: rgba(227, 226, 230, 0.12); }

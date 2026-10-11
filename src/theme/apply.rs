@@ -146,6 +146,8 @@ fn load_into(
 /// Installs the base stylesheet, then applies `settings` through the palette provider. Call once,
 /// before the first window is presented (T-49ba-001).
 pub fn install(display: &gdk::Display, settings: ThemeSettings) -> bool {
+    // before the first write, so System can restore what the desktop had
+    dark::startup_prefer_dark();
     let base = CssProvider::new();
     connect_parse_log(&base);
     base.load_from_string(style::BASE_CSS);
@@ -191,17 +193,22 @@ pub fn apply(display: &gdk::Display, settings: &ThemeSettings, system_dark: bool
     set_tints(display, &tints) && ok
 }
 
-/// Sets the GTK dark preference for a mode: Light and Dark force it; System follows `system_dark`.
-pub fn sync_gtk_preference(mode: ThemeMode, system_dark: bool) {
+/// The `gtk-application-prefer-dark-theme` value for a mode: Light and Dark force it, System puts
+/// back the value the desktop had at startup (`startup`), so System never forces light.
+pub fn gtk_prefer_dark(mode: ThemeMode, startup: bool) -> bool {
+    match mode {
+        ThemeMode::LIGHT => false,
+        ThemeMode::DARK => true,
+        ThemeMode::SYSTEM => startup,
+    }
+}
+
+/// Sets the GTK dark preference for a mode. A no-op without a display.
+pub fn sync_gtk_preference(mode: ThemeMode) {
     let Some(settings) = gtk::Settings::default() else {
         return;
     };
-    let prefer_dark = match mode {
-        ThemeMode::LIGHT => false,
-        ThemeMode::DARK => true,
-        ThemeMode::SYSTEM => system_dark,
-    };
-    settings.set_gtk_application_prefer_dark_theme(prefer_dark);
+    settings.set_gtk_application_prefer_dark_theme(gtk_prefer_dark(mode, dark::startup_prefer_dark()));
 }
 
 /// Stores the settings, then applies them with the last known system value.
@@ -215,9 +222,16 @@ pub fn set_settings(display: &gdk::Display, settings: ThemeSettings) -> bool {
     apply_current()
 }
 
-/// Re-applies the stored settings with the last known system value (after a Monet seed arrives).
-pub fn refresh() -> bool {
-    apply_current()
+/// Changes part of the applied settings and applies them (palette, window marks, GTK preference). This is
+/// the one path every theme-mode, scheme and pure-black change takes; the caller stores the value. A no-op
+/// without a display, before `install`, or when nothing changes.
+pub fn update_settings(change: impl FnOnce(&mut ThemeSettings)) -> bool {
+    let Some((display, mut settings)) = CURRENT.with(|c| c.borrow().clone()) else {
+        return false;
+    };
+    let before = settings;
+    change(&mut settings);
+    settings == before || set_settings(&display, settings)
 }
 
 fn apply_current() -> bool {
@@ -226,7 +240,7 @@ fn apply_current() -> bool {
         return false;
     };
     let system_dark = SYSTEM_DARK.with(Cell::get).unwrap_or(false);
-    sync_gtk_preference(settings.mode, system_dark);
+    sync_gtk_preference(settings.mode);
     let dark = resolve(&settings, system_dark).tokens.dark;
     WINDOW_MARKS.with(|m| m.set((dark, settings.amoled)));
     mark_windows();
@@ -319,17 +333,20 @@ mod tests {
         assert_eq!(amoled.1, include_str!("fixtures/css/doom-dark-amoled.css"));
     }
 
+    // T-01a-021: Light and Dark force the GTK preference, System puts back the startup value.
     #[test]
-    fn gtk_theme_palette_is_empty_and_the_tints_carry_the_kb_rules() {
-        let settings = ThemeSettings { scheme: SchemeSel::from(AppTheme::GtkTheme), ..ThemeSettings::default() };
-        let (dark, light) = (resolve(&settings, true), resolve(&ThemeSettings::default(), false));
-        assert_eq!(palette_text(&dark), "");
-        assert_eq!(palette_text(&light), "");
-        let (dark, light) = (tint_text(&dark), tint_text(&light));
-        assert!(!dark.contains("@define-color") && !light.contains("@define-color"));
-        assert!(dark.contains(", 0.16)") && dark.contains("rgba(255, 235, 59, 1)"));
-        assert!(light.contains(", 0.22)") && light.contains("rgba(255, 193, 7, 1)"));
-        assert_eq!(css::check(&dark), Ok(()));
+    fn system_restores_the_startup_value_and_never_forces_light() {
+        for startup in [false, true] {
+            assert!(!gtk_prefer_dark(ThemeMode::LIGHT, startup));
+            assert!(gtk_prefer_dark(ThemeMode::DARK, startup));
+            assert_eq!(gtk_prefer_dark(ThemeMode::SYSTEM, startup), startup);
+        }
+    }
+
+    // T-01a-021: no display, no panic, nothing applied.
+    #[test]
+    fn a_mode_change_without_an_installed_theme_is_a_no_op() {
+        assert!(!update_settings(|s| s.mode = ThemeMode::DARK));
     }
 
     #[test]

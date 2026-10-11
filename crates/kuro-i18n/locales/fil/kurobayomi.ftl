@@ -10,8 +10,6 @@ action_reorganize_by = Muling ayusin
 
 relative_time_now = Ngayon
 
-pref_library_summary = Mga kategorya, panlahatang update, pag-swipe ng kabanata
-
 pref_library_update_show_tab_badge = Ipakita ang bilang ng di pa nakita/nabasa sa Bago
 
 label_player_settings = Mga setting sa player
@@ -20,21 +18,9 @@ action_search_player_settings = Maghanap sa mga setting ng player
 
 pref_player_internal = Internal na player
 
-pref_player_internal_summary = Progress, mga kontrol, oryentasyon
-
 pref_progress_mark_as_seen = Sa anong punto upang markahan ang episode bilang nakita
 
 pref_preserve_watching_position = Panatilihin ang posisyon ng panonood sa mga nakitang episode
-
-pref_category_player_orientation = Oryentasyon
-
-rotation_video = Video
-
-rotation_reverse_landscape = Baliktad na landscape
-
-rotation_sensor_portrait = Sensor na portrait
-
-rotation_sensor_landscape = Sensor na landscape
 
 pref_category_controls = Mga kontrol
 
@@ -47,8 +33,6 @@ pref_controls_show_chapter_indicator = Ipakita ang indicator ng kasalukuyang kab
 pref_controls_show_chapter_indicator_info = Lumalabas lang kung may mga kabanata ang video
 
 pref_controls_display_volume_percentage = Ipakita ang volume bilang porsyento
-
-pref_remember_brightness = Tandaan at lumipat sa huling ginamit na liwanag
 
 pref_remember_volume = Tandaan at lumipat sa huling ginamit na volume
 
@@ -107,12 +91,6 @@ pref_external_player_preference = Kagustuhan sa panlabas na player
 pref_player_gestures = Mga gesture
 
 pref_player_gestures_summary = Pagse-seek, doubleng pag-tap, mga kontrol sa media
-
-pref_category_player_sliders = Mga slider
-
-enable_volume_brightness_gestures = Paganahin ang mga gesture ng Volume at Linawag
-
-pref_controls_swap_vol_brightness = Ipagpalit ang volume at brightness slider
 
 pref_category_player_seeking = Pagse-seek
 
@@ -732,10 +710,6 @@ theme_cottoncandy = Koton Kendi
 
 theme_mocha = Mocha
 
-pref_episode_swipe_end = Mag-swipe ng pakanang pagkilos
-
-pref_episode_swipe_start = Mag-swipe ng pakaliwang pagkilos
-
 pref_category_hide_hidden = Itago ang nakatagong kategorya mula sa screen ng mga kategorya
 
 pref_update_anime_release_grace_period = Inaasahan na paglabas ng anime
@@ -1156,10 +1130,6 @@ onboarding_permission_notifications = Pahintulot sa mga abiso
 
 onboarding_permission_notifications_description = Maabisuhan para sa mga update sa aklatan at higit pa.
 
-onboarding_permission_ignore_battery_opts = Paggamit ng baterya sa background
-
-onboarding_permission_ignore_battery_opts_description = Ma-iwasan ang mga hadlang sa mahahabang pag-update ng aklatan, pag-download, at pag-restore ng mga backup.
-
 onboarding_permission_crashlytics = Magpadala ang mga crash log
 
 onboarding_permission_crashlytics_description = Magpadala ng hindi nagpapakilalang mga crash log sa mga developer.
@@ -1202,10 +1172,6 @@ pref_browse_summary = Mga source, extension, panlahatang paghanap
 
 pref_backup_summary = Mano-mano at awtomatikong pag-backup, espasyo sa storage
 
-pref_security_summary = Pag-lock sa app, bantayan ang screen
-
-pref_advanced_summary = Itambak ang mga crash log, pag-o-optimisa sa baterya
-
 pref_category_theme = Tema
 
 pref_app_theme = Tema
@@ -1215,8 +1181,6 @@ theme_system = Sistema
 theme_light = Maliwanag
 
 theme_dark = Madilim
-
-theme_monet = Nagbabago
 
 theme_greenapple = Berdeng Mansanas
 
@@ -1267,10 +1231,6 @@ lock_always = Palagi
 lock_never = Hindi
 
 hide_notification_content = Itago ang laman ng abiso
-
-secure_screen = Bantayan ang screen
-
-secure_screen_summary = Tinatago ng seguridad sa screen ang laman ng app habang nagpapalit ng app at hinaharangan din nito ang mga screenshot
 
 firebase_summary = Ang pagpapadala ng mga crash log at analitiko ay magbibigay-daan sa amin na tukuyin at ayusin ang mga isyu, pahusayin ang performance, at gawing mas nauugnay ang mga update sa hinaharap sa iyong mga pangangailangan
 
@@ -1346,10 +1306,6 @@ include = Kasali ang: { $arg1 }
 
 exclude = Di-isali: { $arg1 }
 
-pref_chapter_swipe_end = Mag-swipe ng pakanang pagkilos
-
-pref_chapter_swipe_start = Mag-swipe ng pakaliwang pagkilos
-
 pref_mark_duplicate_read_chapter_read = Markahan ang mga nadobleng nabasa na kabanata bilang nabasa na
 
 multi_lang = Marami
@@ -1407,14 +1363,6 @@ ext_nsfw_warning = Posibleng may NSFW (18+) content ang mga source mula sa exten
 ext_permission_install_apps_warning = Kinakailangan ng permiso para mag-install ng mga extension. I-tap upang mapayagan ito.
 
 ext_install_service_notif = Ini-install ang extension…
-
-ext_installer_pref = Taga-install
-
-ext_installer_legacy = Legasiya
-
-ext_installer_shizuku_stopped = Di tumatakbo ang Shizuku
-
-ext_installer_shizuku_unavailable_dialog = I-Install at buksan ang Shizuku para magamit ito bilang taga-install ng extension.
 
 ext_revoke_trust = Bawiin ang mga pinagkakatiwalaang hindi kilalang extension
 
@@ -1636,22 +1584,6 @@ double_tap_anim_speed_normal = Normal
 
 double_tap_anim_speed_fast = Mabilis
 
-pref_rotation_type = Default na pag-ikot
-
-rotation_type = Pag-ikot
-
-rotation_free = Malaya
-
-rotation_portrait = Patayo
-
-rotation_reverse_portrait = Baligtad na patayo
-
-rotation_landscape = Pahiga
-
-rotation_force_portrait = Piliting nakatayo
-
-rotation_force_landscape = Piliting nakahiga
-
 color_filter_r_value = Pula
 
 color_filter_g_value = Berde
@@ -1868,8 +1800,6 @@ pref_refresh_library_covers = I-refresh ang mga pabalat ng aklatan
 
 pref_reset_viewer_flags = I-reset ang pagsasaayos sa reader kada serye
 
-pref_reset_viewer_flags_summary = Rine-reset ang paraan ng pagbasa at orientation para sa lahat ng mga serye
-
 pref_reset_viewer_flags_success = Na-reset na ang lahat ng setting sa reader
 
 pref_reset_viewer_flags_error = Di ma-reset ang pagsasaayos sa reader
@@ -1877,20 +1807,6 @@ pref_reset_viewer_flags_error = Di ma-reset ang pagsasaayos sa reader
 pref_dump_crash_logs = Magbahagi ng mga crash log
 
 pref_dump_crash_logs_summary = Sine-save ang mga error log sa isang file para maibahagi sa mga developer
-
-label_background_activity = Aktibidad sa background
-
-pref_disable_battery_optimization = Patayin ang pag-o-optimisa sa baterya
-
-pref_disable_battery_optimization_summary = Nakatutulong sa pag-update ng aklatan sa background at pag-backup
-
-battery_optimization_disabled = Nakapatay na ang pag-o-optimisa sa baterya
-
-battery_optimization_setting_activity_not_found = Di mabuksan ang pagsasaayos ng iyong device
-
-about_dont_kill_my_app = May dagdag na mga restriksyon sa app ang ilang mga modelo ng phone na pumapatay sa mga serbisyo sa background. May impormasyon sa site na ito para maayos ang naturang problema.
-
-pref_tablet_ui_mode = Pang-tablet na UI
 
 pref_verbose_logging = Verbose na pagla-log
 

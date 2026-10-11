@@ -97,10 +97,14 @@ pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> gtk::Revealer {
     let title = gtk::Label::new(Some(&bar.manga_title));
     title.set_xalign(0.0);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    title.set_width_chars(16);
+    title.set_max_width_chars(80);
     title.add_css_class("heading");
     let subtitle = gtk::Label::new(Some(&bar.chapter_name));
     subtitle.set_xalign(0.0);
     subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    subtitle.set_width_chars(16);
+    subtitle.set_max_width_chars(80);
     subtitle.add_css_class("caption");
     title_block.append(&title);
     title_block.append(&subtitle);

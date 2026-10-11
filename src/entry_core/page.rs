@@ -3,18 +3,26 @@
 //! Upstream: `MangaScreenModel.kt` (selection `:971-1057`, mark read `:788-840`, setters `:878-949`).
 
 use kuro_i18n::{MsgKey, tr};
-use kuro_prefs::library::ChapterSwipeAction;
 use kuro_prefs::tristate::TriState;
 
 use crate::entry_core::banner::{Banners, Length};
 use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, acts_on, download_targets, indicator_action, previous_ids, state_after_cancel};
 use crate::entry_core::detail::{EntryState, LoadState, StoreCmd, StoreEvent, apply_snapshot};
 use crate::entry_core::dialog::{CategoryConfirm, Dialog};
+use crate::entry_core::errors::DetailError;
 use crate::entry_core::flags::{bookmarked_write, display_write, downloaded_write, unread_write};
 use crate::entry_core::list_model::{RowItem, focus_after, row_items};
 use crate::entry_core::live::{DownloadEvent, ProgressThrottle, apply_event};
 use crate::entry_core::selection::{Command, Key, Mods, Pick, back_clears_selection, click_command, key_command};
 use crate::entry_core::view::view;
+
+/// What a row's context menu runs on that one chapter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowMenuAction {
+    ToggleRead,
+    ToggleBookmark,
+    Download,
+}
 
 /// A user action on the page.
 #[derive(Clone, Debug, PartialEq)]
@@ -34,10 +42,10 @@ pub enum UiAction {
     },
     MarkRead(bool),
     Bookmark(bool),
-    /// A swipe action on one row (T-08a-029): from a touch drag or the row's context menu.
-    Swipe {
+    /// An item of one row's context menu.
+    RowMenu {
         id: i64,
-        action: ChapterSwipeAction,
+        action: RowMenuAction,
     },
     SetUnread(TriState),
     SetBookmarked(TriState),
@@ -54,7 +62,7 @@ pub enum UiAction {
     DismissCategory { auto_open: bool },
     /// The Back button or Escape: a selection is cleared first, and the page pops only when nothing is selected.
     Back,
-    /// A download action on rows: the indicator of one row, or the Download swipe (`runChapterDownloadActions`).
+    /// A download action on rows: the indicator of one row, or the Download item of the context menu (`runChapterDownloadActions`).
     Download {
         ids: Vec<i64>,
         action: IndicatorAction,
@@ -118,6 +126,13 @@ impl Page {
         }
     }
 
+    /// The Retry button of a failed fetch: a manual refresh. None for an uninstalled source or a cancelled fetch, which a
+    /// retry cannot change.
+    fn retry(&self, error: &DetailError) -> Option<(String, StoreCmd)> {
+        let hopeless = matches!(error, DetailError::SourceNotInstalled | DetailError::Cancelled);
+        (!hopeless).then(|| (tr(MsgKey::action_retry), StoreCmd::FetchAll { manga_id: self.manga_id, manual: true }))
+    }
+
     /// True once after the store asked for the category dialog.
     pub fn take_category_request(&mut self) -> bool {
         std::mem::take(&mut self.choose_category)
@@ -168,10 +183,12 @@ impl Page {
                 }
             }
             StoreEvent::Failed(error) => {
-                self.banners.push(error.user_message(), None, Length::Short, now_ms);
+                let retry = self.retry(&error);
+                self.banners.push(error.user_message(), retry, Length::Short, now_ms);
             }
             StoreEvent::ChapterFetchFailed(error) => {
-                self.banners.push(error.chapter_fetch_message(), None, Length::Short, now_ms);
+                let retry = self.retry(&error);
+                self.banners.push(error.chapter_fetch_message(), retry, Length::Short, now_ms);
             }
             StoreEvent::Categories { all, membership } => {
                 if let Some(page) = self.ready_mut() {
@@ -269,22 +286,21 @@ impl Page {
                     });
                 }
             }
-            UiAction::Swipe { id, action } => {
+            UiAction::RowMenu { id, action } => {
                 if let Some((read, bookmark, download)) = page.chapters.iter().find(|c| c.id == id).map(|c| (c.read, c.bookmark, c.download)) {
                     match action {
-                        ChapterSwipeAction::ToggleRead => out.cmds.push(StoreCmd::MarkRead {
+                        RowMenuAction::ToggleRead => out.cmds.push(StoreCmd::MarkRead {
                             manga_id,
                             chapter_ids: vec![id],
                             read: !read,
                             remove_after_read,
                         }),
-                        ChapterSwipeAction::ToggleBookmark => out.cmds.push(StoreCmd::SetBookmark {
+                        RowMenuAction::ToggleBookmark => out.cmds.push(StoreCmd::SetBookmark {
                             manga_id,
                             chapter_ids: vec![id],
                             bookmark: !bookmark,
                         }),
-                        ChapterSwipeAction::Download => download_cmd(page, manga_id, vec![id], indicator_action(download), &mut out),
-                        ChapterSwipeAction::Disabled => {}
+                        RowMenuAction::Download => download_cmd(page, manga_id, vec![id], indicator_action(download), &mut out),
                     }
                 }
             }
@@ -623,6 +639,12 @@ mod tests {
         assert_eq!(page.banners.current().unwrap().text, "No chapters found");
         page.apply(StoreEvent::Failed(DetailError::Http(500)), 20);
         assert_eq!(page.banners.queued(), 1);
+        // a failed fetch offers Retry, which runs a manual refresh; an uninstalled source offers none
+        let retry = page.banners.activate_action(true, 30);
+        assert_eq!(retry, Some(StoreCmd::FetchAll { manga_id: 1, manual: true }));
+        page.banners.dismiss(40);
+        page.apply(StoreEvent::Failed(DetailError::SourceNotInstalled), 50);
+        assert_eq!(page.banners.current().unwrap().action, None);
     }
 
     #[test]
@@ -670,14 +692,13 @@ mod tests {
     }
 
     #[test]
-    fn a_swipe_toggles_read_or_bookmark_on_that_one_row() {
+    fn a_menu_item_toggles_read_or_bookmark_on_that_one_row() {
         let mut page = ready(3);
-        let out = page.act(UiAction::Swipe { id: 2, action: ChapterSwipeAction::ToggleRead });
+        let out = page.act(UiAction::RowMenu { id: 2, action: RowMenuAction::ToggleRead });
         assert_eq!(out.cmds, vec![StoreCmd::MarkRead { manga_id: 1, chapter_ids: vec![2], read: true, remove_after_read: false }]);
-        let out = page.act(UiAction::Swipe { id: 3, action: ChapterSwipeAction::ToggleBookmark });
+        let out = page.act(UiAction::RowMenu { id: 3, action: RowMenuAction::ToggleBookmark });
         assert_eq!(out.cmds, vec![StoreCmd::SetBookmark { manga_id: 1, chapter_ids: vec![3], bookmark: true }]);
-        assert!(page.act(UiAction::Swipe { id: 2, action: ChapterSwipeAction::Disabled }).cmds.is_empty());
-        assert!(page.act(UiAction::Swipe { id: 99, action: ChapterSwipeAction::ToggleRead }).cmds.is_empty(), "unknown row");
+        assert!(page.act(UiAction::RowMenu { id: 99, action: RowMenuAction::ToggleRead }).cmds.is_empty(), "unknown row");
     }
 
     #[test]
@@ -719,14 +740,14 @@ mod tests {
     }
 
     #[test]
-    fn the_download_swipe_follows_the_state_of_the_row() {
+    fn the_download_menu_item_follows_the_state_of_the_row() {
         let mut page = ready(2);
-        let swipe = |id| UiAction::Swipe { id, action: ChapterSwipeAction::Download };
-        assert_eq!(page.act(swipe(1)).cmds, vec![StoreCmd::Download { manga_id: 1, chapter_ids: vec![1], start_now: true }]);
+        let menu_item = |id| UiAction::RowMenu { id, action: RowMenuAction::Download };
+        assert_eq!(page.act(menu_item(1)).cmds, vec![StoreCmd::Download { manga_id: 1, chapter_ids: vec![1], start_now: true }]);
         page.apply_download(DownloadEvent::Status { chapter_id: 2, state: DownloadState::Downloaded }, 0);
-        assert_eq!(page.act(swipe(2)).cmds, vec![StoreCmd::DeleteDownloads { manga_id: 1, chapter_ids: vec![2] }]);
+        assert_eq!(page.act(menu_item(2)).cmds, vec![StoreCmd::DeleteDownloads { manga_id: 1, chapter_ids: vec![2] }]);
         page.apply_download(DownloadEvent::Status { chapter_id: 1, state: DownloadState::Queue }, 0);
-        assert_eq!(page.act(swipe(1)).cmds, vec![StoreCmd::CancelDownload { manga_id: 1, chapter_id: 1 }]);
+        assert_eq!(page.act(menu_item(1)).cmds, vec![StoreCmd::CancelDownload { manga_id: 1, chapter_id: 1 }]);
     }
 
     #[test]

@@ -64,19 +64,23 @@ impl<K: Hash + Eq + Clone, V: Clone> ByteLru<K, V> {
         self.total = 0;
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
+    #[cfg(test)]
     /// The bytes held.
     pub fn bytes(&self) -> usize {
         self.total
     }
 
+    #[cfg(test)]
     pub fn contains(&self, key: &K) -> bool {
         self.entries.contains_key(key)
     }

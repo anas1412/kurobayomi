@@ -533,6 +533,76 @@ fn render_entry(source: &Source, id: &str) -> Result<String> {
     }
 }
 
+/// Upstream names that the English base and every locale leave out, because the feature they belong to is not in the
+/// desktop app (the decisions are in `docs/drop-decisions.md`). The moko XML is the unchanged input, so the importer
+/// is where a name is dropped: running it again gives the same files. The last five names are not dropped for good:
+/// their upstream text names a removed feature, so `locales/en/kurobayomi-extra.ftl` carries the same id with a text
+/// that does not, and no locale has an out-of-date translation of it.
+pub const DROPPED_NAMES: &[&str] = &[
+    // screen orientation of the reader and the player
+    "pref_category_player_orientation",
+    "rotation_video",
+    "rotation_reverse_landscape",
+    "rotation_sensor_portrait",
+    "rotation_sensor_landscape",
+    "pref_rotation_type",
+    "rotation_type",
+    "rotation_free",
+    "rotation_portrait",
+    "rotation_reverse_portrait",
+    "rotation_landscape",
+    "rotation_force_portrait",
+    "rotation_force_landscape",
+    // battery optimisation
+    "label_background_activity",
+    "onboarding_permission_ignore_battery_opts",
+    "onboarding_permission_ignore_battery_opts_description",
+    "pref_disable_battery_optimization",
+    "pref_disable_battery_optimization_summary",
+    "battery_optimization_disabled",
+    "battery_optimization_setting_activity_not_found",
+    "about_dont_kill_my_app",
+    // secure screen
+    "secure_screen",
+    "secure_screen_summary",
+    // the extension installer choice and Shizuku
+    "ext_installer_pref",
+    "ext_installer_legacy",
+    "ext_installer_packageinstaller",
+    "ext_installer_shizuku",
+    "ext_installer_private",
+    "ext_installer_shizuku_stopped",
+    "ext_installer_shizuku_unavailable_dialog",
+    // swipe actions of the chapter and episode rows
+    "pref_episode_swipe_end",
+    "pref_episode_swipe_start",
+    "pref_chapter_swipe_end",
+    "pref_chapter_swipe_start",
+    // brightness and volume gestures of the player
+    "pref_category_player_sliders",
+    "enable_volume_brightness_gestures",
+    "pref_controls_swap_vol_brightness",
+    "pref_remember_brightness",
+    // tablet layout mode and the dynamic colours theme
+    "pref_tablet_ui_mode",
+    "theme_monet",
+    // texts that name a removed feature: replaced in `kurobayomi-extra.ftl`
+    "pref_library_summary",
+    "pref_player_internal_summary",
+    "pref_security_summary",
+    "pref_advanced_summary",
+    "pref_reset_viewer_flags_summary",
+];
+
+/// The dropped names whose id `kurobayomi-extra.ftl` defines again with a text that names no removed feature.
+pub const REPLACED_NAMES: &[&str] = &[
+    "pref_library_summary",
+    "pref_player_internal_summary",
+    "pref_security_summary",
+    "pref_advanced_summary",
+    "pref_reset_viewer_flags_summary",
+];
+
 /// Base entries after the overlap rule: Aniyomi names first in source order, then core names that
 /// Aniyomi does not define. Names defined twice inside one module are an error (T-51a-002).
 fn base_entries<'a>(
@@ -567,6 +637,7 @@ fn base_entries<'a>(
         }
         entries.push((Module::Core, id, source));
     }
+    entries.retain(|(_, id, _)| !DROPPED_NAMES.contains(&id.as_str()));
     Ok((entries, aniyomi_ids))
 }
 
@@ -712,6 +783,9 @@ pub fn generate_locale(
                 continue;
             }
         };
+        if DROPPED_NAMES.contains(&id.as_str()) {
+            continue;
+        }
         let Some((_, base)) = base_by_id.get(id.as_str()) else {
             warnings.push(format!("{id}: not in the English base, dropped"));
             continue;

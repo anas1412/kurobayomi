@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::screens::{built, Built};
 use crate::ui::*;
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Button, Label, Orientation as O};
+use gtk::{Box as GBox, Button, Label, Orientation as O};
 use kuro_domain::kind::EntryKind;
 
 pub fn body(id: &str) -> Option<Built> {
@@ -15,14 +15,8 @@ pub fn body(id: &str) -> Option<Built> {
     }
     match id {
         "settings_search" => search(),
-        "settings_player_custom_buttons" => cards(id, &["Skip opening", "Toggle shader"], true),
-        "settings_player_editor" => editor(),
-        "settings_player_code_editor" => code_editor(),
-        "settings_worker_info" => text_dump(id, "Enqueued\n-\n\nFinished\nId: 1a2b\nTags: LibraryUpdate\nState: SUCCEEDED\n\nRunning\n-"),
         "settings_backup_schema" => backup_schema(id),
         "settings_clear_manga_database" | "settings_clear_anime_database" => clear_db(id),
-        "settings_open_source_licenses" => licenses(),
-        "settings_open_source_library_license" => text_dump(id, "Apache License\nVersion 2.0, January 2004\nhttp://www.apache.org/licenses/"),
         _ => None,
     }
 }
@@ -122,7 +116,7 @@ fn search() -> Option<Built> {
             let r = row(&hit.title, Some(&hit.crumb), None);
             r.set_activatable(true);
             let id = hit.id.clone();
-            r.connect_activate(move |_| open(&id));
+            crate::widgets::row_activate::on_activate(&r, move |_| open(&id));
             r2.append(&r);
         }
     });
@@ -162,106 +156,6 @@ fn item_title(it: &crate::spec::Item) -> String {
         Switch { title, .. } | List { title, .. } | Multi { title, .. } | Slider { title, .. } | Text { title, .. } | Tristate { title } | Sort { title, .. } | Chips { title, .. } | Link { title, .. } | Action { title, .. } | Info { title } => title.clone(),
         Unknown => String::new(),
     }
-}
-
-fn dialog_of(id: &str, dialog: &str) {
-    if let Some(d) = screen(id).dialogs.iter().find(|d| d.id == dialog) {
-        show_dialog(d);
-    }
-}
-
-fn first_dialog_like(id: &str, prefix: &str) -> Option<String> {
-    screen(id).dialogs.iter().find(|d| d.id.starts_with(prefix)).map(|d| d.id.clone())
-}
-
-/// Card lists with an Add FAB: custom player buttons, extension stores, extension repos.
-fn cards(id: &str, names: &[&str], star: bool) -> Option<Built> {
-    let ov = gtk::Overlay::new();
-    let col = column();
-    let l = boxed_list();
-    for n in names {
-        let h = GBox::new(O::Horizontal, 6);
-        margins(&h, 10);
-        if star {
-            h.append(&gtk::Image::from_icon_name("list-drag-handle-symbolic"));
-        } else {
-            h.append(&gtk::Image::from_icon_name("tag-symbolic"));
-        }
-        let name = Label::builder().label(*n).xalign(0.0).hexpand(true).build();
-        h.append(&name);
-        if star {
-            let s = gtk::ToggleButton::builder().icon_name("non-starred-symbolic").tooltip_text("Primary button").build();
-            s.connect_toggled(|b| b.set_icon_name(if b.is_active() { "starred-symbolic" } else { "non-starred-symbolic" }));
-            h.append(&s);
-            let e = icon_button("document-edit-symbolic", "Edit");
-            let i = id.to_string();
-            e.connect_clicked(move |_| dialog_of(&i, "edit_button"));
-            h.append(&e);
-        } else {
-            h.append(&icon_button("web-browser-symbolic", "Open website"));
-            h.append(&icon_button("edit-copy-symbolic", "Copy to clipboard"));
-        }
-        let d = icon_button("user-trash-symbolic", "Delete");
-        let (i, del) = (id.to_string(), first_dialog_like(id, "delete").unwrap_or_default());
-        d.connect_clicked(move |_| dialog_of(&i, &del));
-        h.append(&d);
-        l.append(&gtk::ListBoxRow::builder().child(&h).activatable(false).build());
-    }
-    col.append(&l);
-    ov.set_child(Some(&scrolled(&col)));
-    let add = Button::builder().label("Add").css_classes(["suggested-action", "pill"]).halign(Align::End).valign(Align::End).build();
-    margins(&add, 18);
-    let (i, a) = (id.to_string(), first_dialog_like(id, "add").unwrap_or_default());
-    add.connect_clicked(move |_| dialog_of(&i, &a));
-    ov.add_overlay(&add);
-    built(ov, toolbar(&screen(id)))
-}
-
-fn editor() -> Option<Built> {
-    let id = "settings_player_editor";
-    let ov = gtk::Overlay::new();
-    let col = column();
-    let kind = gtk::DropDown::from_strings(&["Scripts", "Script options"]);
-    kind.set_halign(Align::Start);
-    col.append(&kind);
-    let l = boxed_list();
-    for (icon, f) in [("text-x-script-symbolic", "autoskip.lua"), ("text-x-script-symbolic", "aniskip.lua"), ("emblem-system-symbolic", "aniskip.conf")] {
-        let menu = menu_button("view-more-symbolic", &["Rename file".into(), "Delete file".into()], |l| {
-            dialog_of("settings_player_editor", if l.starts_with("Rename") { "rename_file" } else { "delete_file" })
-        });
-        let r = row(f, None, Some(menu.upcast()));
-        r.child().and_downcast::<GBox>().unwrap().prepend(&gtk::Image::from_icon_name(icon));
-        r.set_activatable(true);
-        r.connect_activate(|_| open("settings_player_code_editor"));
-        l.append(&r);
-    }
-    col.append(&l);
-    ov.set_child(Some(&scrolled(&col)));
-    let add = Button::builder().icon_name("list-add-symbolic").css_classes(["suggested-action", "circular"]).halign(Align::End).valign(Align::End).build();
-    margins(&add, 18);
-    add.connect_clicked(move |_| dialog_of(id, "create_file"));
-    ov.add_overlay(&add);
-    built(ov, vec![])
-}
-
-fn code_editor() -> Option<Built> {
-    let id = "settings_player_code_editor";
-    let buf = gtk::TextBuffer::new(None);
-    buf.set_text("-- autoskip.lua\nlocal mp = require 'mp'\n\nmp.register_event('file-loaded', function()\n  mp.osd_message('loaded')\nend)\n");
-    let view = gtk::TextView::builder().buffer(&buf).monospace(true).left_margin(12).top_margin(12).build();
-    let save = icon_button("document-save-symbolic", "Save");
-    save.set_sensitive(false);
-    let s2 = save.clone();
-    buf.connect_changed(move |_| s2.set_sensitive(true));
-    save.connect_clicked(|b| b.set_sensitive(false));
-    let _ = id;
-    built(gtk::ScrolledWindow::builder().child(&view).vexpand(true).build(), vec![save.upcast()])
-}
-
-fn text_dump(id: &str, text: &str) -> Option<Built> {
-    let l = Label::builder().label(text).xalign(0.0).yalign(0.0).selectable(true).css_classes(["monospace"]).build();
-    margins(&l, 16);
-    built(scrolled(&l), toolbar(&screen(id)))
 }
 
 /// The debug screen of the backup schema: the 13 `Backup` fields, and the Copy button puts the text on the clipboard (T-21a-035).
@@ -432,19 +326,6 @@ fn after_clear(anime: bool, removed: usize) {
             });
         }
     });
-}
-
-fn licenses() -> Option<Built> {
-    let col = column();
-    let l = boxed_list();
-    for (name, author, ver, lic) in [("gtk4-rs", "gtk-rs", "0.11.5", "MIT"), ("serde", "David Tolnay", "1.0", "MIT / Apache-2.0"), ("glib", "gtk-rs", "0.22", "MIT")] {
-        let r = row(name, Some(&format!("{author} · {lic}")), Some(Label::new(Some(ver)).upcast()));
-        r.set_activatable(true);
-        r.connect_activate(|_| open("settings_open_source_library_license"));
-        l.append(&r);
-    }
-    col.append(&l);
-    built(scrolled(&col), vec![])
 }
 
 /// Advanced > "Clear WebView data" (T-12a-034): the toast text for the outcome of `clear_data`.

@@ -1,11 +1,11 @@
 //! Reader settings model (T-43b-030, `ReaderSettingsScreenModel.kt`). Pure: it holds the manga the settings act on, the
-//! viewer in use, and the reading mode and orientation writes. Equality is by manga id and viewer flags, not by object
+//! viewer in use, and the reading mode writes. Equality is by manga id and viewer flags, not by object
 //! identity (edge cases section 3.2).
 //!
 //! The Kotlin callbacks become return values: each write returns the new viewer flags, and the caller saves them to the
 //! manga row (the `mangas.viewer` column) and reopens the viewer when the mode changed.
 
-use kuro_prefs::reader::{ReaderOrientation, ReadingMode};
+use kuro_prefs::reader::ReadingMode;
 
 use crate::reader::flags;
 use crate::reader::viewers::ViewerKind;
@@ -54,21 +54,10 @@ impl ReaderSettingsModel {
         flags::resolve_reading_mode(self.viewer_flags, default_pref)
     }
 
-    /// The orientation in effect, falling back to the global preference when the manga has none.
-    pub fn orientation(&self, default_pref: i32) -> ReaderOrientation {
-        flags::resolve_orientation(self.viewer_flags, default_pref)
-    }
-
     /// Applies a reading-mode choice and updates the viewer kind. Returns the new flags to save.
     pub fn choose_reading_mode(&mut self, mode: ReadingMode) -> i64 {
         self.viewer_flags = flags::set_reading_mode(self.viewer_flags, mode);
         self.viewer = ViewerKind::from_flag(i64::from(mode.flag_value())).ok();
-        self.viewer_flags
-    }
-
-    /// Applies an orientation choice. Returns the new flags to save.
-    pub fn choose_orientation(&mut self, orientation: ReaderOrientation) -> i64 {
-        self.viewer_flags = flags::set_orientation(self.viewer_flags, orientation);
         self.viewer_flags
     }
 }
@@ -104,11 +93,9 @@ mod tests {
     }
 
     #[test]
-    fn an_orientation_choice_keeps_the_mode_bits() {
-        let mut model = ReaderSettingsModel::new(1, 0x2);
-        assert_eq!(model.choose_orientation(ReaderOrientation::Landscape), 0x2 | 0x18);
-        assert_eq!(model.reading_mode(2), ReadingMode::RightToLeft);
-        assert_eq!(model.orientation(8), ReaderOrientation::Landscape);
+    fn the_reading_mode_resolves_from_the_flags_or_the_preference() {
+        assert_eq!(ReaderSettingsModel::new(1, 0x2).reading_mode(1), ReadingMode::RightToLeft);
+        assert_eq!(ReaderSettingsModel::new(1, 0).reading_mode(1), ReadingMode::LeftToRight);
     }
 
     #[test]

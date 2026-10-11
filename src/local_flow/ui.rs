@@ -31,7 +31,8 @@ pub fn attach(window: &gtk::ApplicationWindow) {
     }
 }
 
-fn pick_folder() {
+/// Asks for a folder and adds it.
+pub fn pick_folder() {
     let dialog = gtk::FileDialog::new();
     dialog.set_title("Add local manga folder");
     dialog.select_folder(Some(&crate::ui::window()), None::<&gio::Cancellable>, |result| {
@@ -42,7 +43,7 @@ fn pick_folder() {
 }
 
 /// Rescans every entry of the library that came from a local folder.
-fn rescan_all() {
+pub fn rescan_all() {
     let db = crate::data::app().db(EntryKind::Manga);
     let folders: Vec<PathBuf> = MangaRepo::new(db)
         .favorites_by_source(LOCAL_SOURCE_ID)
@@ -83,21 +84,4 @@ fn store(scanned: &ScannedManga) {
         }
         Err(error) => crate::toast::notify(format!("Could not save {}: {error}", scanned.title)),
     }
-}
-
-/// The library header button that asks for a folder and adds it.
-pub fn add_button() -> gtk::Button {
-    let button = crate::ui::icon_button("folder-new-symbolic", "Add local manga folder");
-    button.connect_clicked(|_| pick_folder());
-    button
-}
-
-/// The library header controls for local manga: add a folder, and rescan the ones already added.
-pub fn header_actions() -> gtk::Box {
-    let rescan = crate::ui::icon_button("view-refresh-symbolic", "Rescan local manga folders");
-    rescan.set_action_name(Some(&format!("win.{RESCAN_ACTION}")));
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    row.append(&add_button());
-    row.append(&rescan);
-    row
 }

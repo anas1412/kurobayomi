@@ -1,4 +1,4 @@
-//! The header controls of the anime library (wire-local-anime): "Add local anime folder" and "Rescan local anime". The
+//! The library menu's local anime actions (wire-local-anime): "Add local anime folder" and "Rescan local anime". The
 //! folder dialog picks the root that holds one folder per series. A scan runs on a worker thread, and its result is a
 //! toast.
 
@@ -7,24 +7,8 @@ use gtk::{gio, glib};
 
 use super::sync::{ScanReport, rescan_library, scan_root};
 
-/// The header button. Choosing a folder scans it, so choosing the same folder again is a rescan that keeps seen state.
-pub fn add_button() -> gtk::Button {
-    let button = crate::ui::icon_button("folder-new-symbolic", "Add local anime folder");
-    button.connect_clicked(|_| choose_folder());
-    button
-}
-
-/// The header controls of the anime library: add a folder, and rescan the series already in the library.
-pub fn header_actions() -> gtk::Box {
-    let rescan = crate::ui::icon_button("view-refresh-symbolic", "Rescan local anime folders");
-    rescan.connect_clicked(|_| rescan_in_background());
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    row.append(&add_button());
-    row.append(&rescan);
-    row
-}
-
-fn choose_folder() {
+/// Asks for a root folder and scans it. Choosing the same folder again is a rescan that keeps seen state.
+pub fn choose_folder() {
     let dialog = gtk::FileDialog::builder().title("Add local anime folder").modal(true).build();
     dialog.select_folder(Some(&crate::ui::window()), gio::Cancellable::NONE, |picked| {
         let Some(root) = picked.ok().and_then(|file| file.path()) else { return };
@@ -32,7 +16,8 @@ fn choose_folder() {
     });
 }
 
-fn rescan_in_background() {
+/// Rescans the series already in the library.
+pub fn rescan_in_background() {
     scan_in_background(|db| rescan_library(db, chrono::Utc::now().timestamp_millis()));
 }
 

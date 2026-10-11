@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use kuro_prefs::reader::{ReaderOrientation, ReaderPrefs, ReadingMode};
+use kuro_prefs::reader::{ReaderPrefs, ReadingMode};
 use kuro_prefs::store::PrefStore;
 
 use super::bottom_bar::{BottomBar, bar_buttons};
@@ -75,13 +75,13 @@ fn the_navigator_keeps_previous_on_the_left_in_ltr() {
 fn the_bottom_bar_shows_the_crop_button_toggled_while_crop_is_on() {
     crate::testing::with_display(|| {
         let bar = BottomBar::new();
-        bar.update(ReadingMode::LeftToRight, ReaderOrientation::Free, true);
+        bar.update(ReadingMode::LeftToRight, true);
         let buttons = buttons_under(bar.root.upcast_ref());
-        let crop = bar_buttons(ReadingMode::LeftToRight, ReaderOrientation::Free, true)[2].description;
+        let crop = bar_buttons(ReadingMode::LeftToRight, true)[1].description;
         let index = position_of(&buttons, crop).expect("the crop button");
         assert!(buttons[index].has_css_class("toggled"));
 
-        bar.update(ReadingMode::LeftToRight, ReaderOrientation::Free, false);
+        bar.update(ReadingMode::LeftToRight, false);
         assert!(!buttons[index].has_css_class("toggled"), "the same button follows the new state");
     });
 }
@@ -173,8 +173,8 @@ fn the_reading_mode_sheet_offers_revert_only_for_a_manga_with_its_own_mode() {
 }
 
 fn settings_tab(prefs: &ReaderPrefs) -> gtk::Box {
-    let choices = MangaChoices { on_mode: Rc::new(|_| {}), on_orientation: Rc::new(|_| {}) };
-    settings_window::reading_tab(prefs, ReadingMode::LeftToRight, ReaderOrientation::Free, choices)
+    let choices = MangaChoices { on_mode: Rc::new(|_| {}) };
+    settings_window::reading_tab(prefs, ReadingMode::LeftToRight, choices)
 }
 
 /// The nth check button with `label` in the tab: 0 is the pager block, 1 the webtoon block.

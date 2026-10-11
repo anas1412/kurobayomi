@@ -2,8 +2,6 @@
 
 confirm_exit = ব্যাক এ আবার চাপ দিন বেরোবার জন্য
 
-pref_library_summary = বিভাগসমূহ, সার্বজনীন হালনাগাদ
-
 pref_library_update_show_tab_badge = অপঠিত গণনা আপডেট আইকন এ দেখাও
 
 manga_categories = বিভাগসমূহ
@@ -428,8 +426,6 @@ onboarding_permission_notifications = নোটিফিকেশনের প�
 
 onboarding_permission_notifications_description = লাইব্রেরি আপডেট এবং আরও অনেক কিছুর জন্য বিজ্ঞপ্তি পান।
 
-onboarding_permission_ignore_battery_opts = অবজ্ঞাত অবস্থায় ব্যাটারি ব্যবহার
-
 pref_category_general = সাধারণ
 
 pref_category_appearance = দৃশ্য
@@ -452,8 +448,6 @@ pref_reader_summary = পঠনের ধরন, ডিসপ্লে,নেভ
 
 pref_backup_summary = ম্যানুয়াল ও সয়ংক্রিয় ব্যাকআপ
 
-pref_security_summary = অ্যাপ লক,নিরাপদ পর্দা
-
 pref_category_theme = থিম
 
 pref_app_theme = অ্যাপ থিম
@@ -463,8 +457,6 @@ theme_system = সিস্টেমকে অনুসরণ করুন
 theme_light = বন্ধ করুন
 
 theme_dark = চালু করুন
-
-theme_monet = প্রগতিশীল
 
 theme_greenapple = সবুজ আপেল
 
@@ -501,10 +493,6 @@ lock_always = সবসময়
 lock_never = কখনই না
 
 hide_notification_content = বিজ্ঞপ্তির বিষয়বস্তু লুকান
-
-secure_screen = পর্দা নিরাপদ করুন
-
-secure_screen_summary = অ্যাপ পাল্টানোর সময় অ্যাপের কন্টেন্ট লুকান ও স্ক্রিনসট ব্লক করুন
 
 pref_category_nsfw_content = প্রাপ্তবয়স্কদের জন্য (18+) উৎস
 
@@ -613,14 +601,6 @@ ext_nsfw_short = ১৮+
 ext_nsfw_warning = প্রাপ্তবয়স্কদের (18+) কন্টেন্ট থাকতে পারে
 
 ext_install_service_notif = এক্সটেনশন ইন্সটল করা হচ্ছে…
-
-ext_installer_pref = ইন্সটলআর
-
-ext_installer_legacy = লেগাছি
-
-ext_installer_shizuku_stopped = শিজুকু চলছে না
-
-ext_installer_shizuku_unavailable_dialog = এক্সটেনশন ইনস্টলার হিসাবে Shizuku ব্যবহার করতে Shizuku ইনস্টল করুন এবং শুরু করুন।
 
 pref_fullscreen = সম্পূর্ণ পর্দা
 
@@ -770,20 +750,6 @@ double_tap_anim_speed_normal = সাধারণ
 
 double_tap_anim_speed_fast = দ্রুত
 
-pref_rotation_type = প্রকৃত ঘূর্ণনের ধরন
-
-rotation_type = ঘূর্ণনের ধরন
-
-rotation_free = মুক্ত
-
-rotation_portrait = প্রতিকৃতি
-
-rotation_landscape = ভূদৃশ্য
-
-rotation_force_portrait = লক করা পোর্ট্রেট
-
-rotation_force_landscape = লক করা ল্যান্ডস্কেপ
-
 color_filter_r_value = ল
 
 color_filter_g_value = স
@@ -931,20 +897,6 @@ pref_reset_viewer_flags_success = সমস্ত পাঠক সেটিং�
 pref_dump_crash_logs = ডাম্প ক্র্যাশ লগ
 
 pref_dump_crash_logs_summary = বিকাশকারীদের সাথে সেয়ার করার জন্য এরর লগগুলো একটি ফাইলে সংরক্ষণ করে
-
-label_background_activity = পটভূমি কার্যকলাপ
-
-pref_disable_battery_optimization = ব্যাটারি অপ্টিমাইজেশন অক্ষম করুন
-
-pref_disable_battery_optimization_summary = পিছেনে লাইব্রেরী হালনাগাদ ও ব্যাকআপে সাহায্য করে
-
-battery_optimization_disabled = ব্যাটারি অপ্টিমাইজেশন ইতিমধ্যে অক্ষম করা আছে
-
-battery_optimization_setting_activity_not_found = যন্ত্রের সেটিংস খোলা সম্ভব হয়নি
-
-about_dont_kill_my_app = কিছু নির্মাতাদের অতিরিক্ত অ্যাপ সীমাবদ্ধতা রয়েছে যা ব্যাকগ্রাউন্ড পরিষেবাগুলিকে হত্যা করে। এই ওয়েবসাইটে কিভাবে এটি ঠিক করা যায় সে সম্পর্কে আরও তথ্য রয়েছে।
-
-pref_tablet_ui_mode = তাব্লেত উই
 
 pref_verbose_logging = ভার্বোস লগিং
 

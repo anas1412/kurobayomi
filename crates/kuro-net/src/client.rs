@@ -67,8 +67,18 @@ impl NetworkClient {
         webview: Arc<dyn WebViewHost>,
         toaster: Toaster,
     ) -> Result<Self, NetError> {
+        Self::with_cookies(prefs, CookieJar::load(cookie_file), webview, toaster)
+    }
+
+    /// As [`NetworkClient::new`] over a jar that is already open, so several clients and the settings code share one
+    /// jar (T-12a-009). Clones of a jar share one store.
+    pub fn with_cookies(
+        prefs: &NetworkPrefs,
+        cookies: CookieJar,
+        webview: Arc<dyn WebViewHost>,
+        toaster: Toaster,
+    ) -> Result<Self, NetError> {
         let settings = NetworkSettings::from_prefs(prefs);
-        let cookies = CookieJar::load(cookie_file);
         let doh = DohProvider::from_pref(settings.doh_provider)
             .map(|provider| DohResolver::new(provider, &settings.default_user_agent))
             .transpose()?;
@@ -104,10 +114,22 @@ impl NetworkClient {
         opener: Arc<dyn kuro_platform::opener::Opener>,
         toaster: Toaster,
     ) -> Result<Self, NetError> {
+        Self::for_desktop_with_cookies(prefs, paths, CookieJar::load(paths.cookie_jar_file()), embedded, opener, toaster)
+    }
+
+    /// As [`NetworkClient::for_desktop`] over a jar that is already open (see [`NetworkClient::with_cookies`]).
+    pub fn for_desktop_with_cookies(
+        prefs: &NetworkPrefs,
+        paths: &dyn kuro_platform::paths::Paths,
+        cookies: CookieJar,
+        embedded: Option<Arc<dyn WebViewHost>>,
+        opener: Arc<dyn kuro_platform::opener::Opener>,
+        toaster: Toaster,
+    ) -> Result<Self, NetError> {
         let webview = embedded
             .filter(|view| view.available())
             .unwrap_or_else(|| Arc::new(BrowserHost::new(opener, paths.cookies_import_file())));
-        Self::new(prefs, paths.cookie_jar_file(), webview, toaster)
+        Self::with_cookies(prefs, cookies, webview, toaster)
     }
 
     /// A copy of this client's chain, to add interceptors to. The original client is not changed.
@@ -468,6 +490,33 @@ mod preference_and_extension_tests {
     fn app_client(prefs: &NetworkPrefs, dir: &std::path::Path) -> NetworkClient {
         let (toaster, _feed) = toast_channel();
         NetworkClient::new(prefs, dir.join("cookies.json"), Arc::new(NoWebView), toaster).unwrap()
+    }
+
+    /// T-35a-031: the app client (rustls with the system roots) does not refuse a plain `http://` server.
+    #[tokio::test]
+    async fn the_app_client_does_not_refuse_cleartext_http() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::any()).respond_with(wiremock::ResponseTemplate::new(200)).mount(&server).await;
+        assert!(server.uri().starts_with("http://"));
+        let dir = tempfile::tempdir().unwrap();
+        let resp = app_client(&prefs(), dir.path()).get(&server.uri()).await.unwrap();
+        assert_eq!(resp.status, http::StatusCode::OK);
+    }
+
+    /// T-12a-009: clients built over one jar see each other's changes, and the jar remembers its file.
+    #[test]
+    fn clients_over_one_jar_share_its_cookies() {
+        let dir = tempfile::tempdir().unwrap();
+        let jar = CookieJar::load(dir.path().join("cookies.json"));
+        let (toaster, _feed) = toast_channel();
+        let a = NetworkClient::with_cookies(&prefs(), jar.clone(), Arc::new(NoWebView), toaster.clone()).unwrap();
+        let b = NetworkClient::with_cookies(&prefs(), jar.clone(), Arc::new(NoWebView), toaster).unwrap();
+        let site = reqwest::Url::parse("https://site.test/").unwrap();
+        a.cookies().import_clearance(&site, "abc", "Mozilla/5.0 Firefox/136.0").unwrap();
+        assert!(b.cookies().get(&site).iter().any(|c| c.name() == "cf_clearance"));
+        jar.remove_all().unwrap();
+        assert!(a.cookies().get(&site).is_empty() && b.cookies().get(&site).is_empty());
+        assert_eq!(jar.path(), dir.path().join("cookies.json"));
     }
 
     #[tokio::test]

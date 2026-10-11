@@ -10,8 +10,6 @@ action_reorganize_by = மறுவரிசை
 
 relative_time_now = இப்போது
 
-pref_library_summary = வகைகள், உலகளாவிய புதுப்பிப்பு, அத்தியாயம்/எபிசோட் ச்வைப்
-
 pref_library_update_show_tab_badge = புதுப்பிப்புகள் ஐகானில் காணப்படாத/படிக்காத எண்ணிக்கையைக் காட்டுங்கள்
 
 label_player_settings = பிளேயர் அமைப்புகள்
@@ -20,21 +18,9 @@ action_search_player_settings = பிளேயர் அமைப்புக�
 
 pref_player_internal = உள் வீரர்
 
-pref_player_internal_summary = முன்னேற்றம், கட்டுப்பாடுகள், நோக்குநிலை
-
 pref_progress_mark_as_seen = எபிசோடைக் காண எந்த கட்டத்தில்
 
 pref_preserve_watching_position = பார்த்த அத்தியாயங்களில் வாட்ச் நிலையைப் பாதுகாக்கவும்
-
-pref_category_player_orientation = நோக்குநிலை
-
-rotation_reverse_landscape = தலைகீழ் நிலப்பரப்பு
-
-rotation_sensor_portrait = சென்சார் உருவப்படம்
-
-rotation_sensor_landscape = சென்சார் நிலப்பரப்பு
-
-pref_remember_brightness = நினைவில் வைத்துக் கொள்ளுங்கள் மற்றும் கடைசியாக பயன்படுத்தப்பட்ட பிரகாசத்திற்கு மாறவும்
 
 pref_remember_volume = கடைசியாக பயன்படுத்தப்பட்ட தொகுதிக்கு நினைவில் வைத்துக் கொள்ளுங்கள்
 
@@ -83,8 +69,6 @@ pref_external_player_preference = வெளிப்புற பிளேயர
 pref_player_gestures = சைகைகள்
 
 pref_player_gestures_summary = தேடுவது, இரட்டை குழாய், ஊடக கட்டுப்பாடுகள்
-
-enable_volume_brightness_gestures = தொகுதி மற்றும் பிரகாச சைகைகளை இயக்கவும்
 
 pref_category_player_seeking = தேடுவது
 
@@ -564,10 +548,6 @@ theme_cottoncandy = பருத்தி மிட்டாய்
 
 theme_mocha = மோச்சா
 
-pref_episode_swipe_end = சரியான செயலுக்கு ச்வைப் செய்யுங்கள்
-
-pref_episode_swipe_start = இடது செயலுக்கு ச்வைப் செய்யவும்
-
 pref_category_hide_hidden = வகைகள் மற்றும் சேமிப்பக திரையில் இருந்து மறைக்கப்பட்ட வகைகளை மறைக்கவும்
 
 pref_update_anime_release_grace_period = அனிம் வெளியீட்டு சலுகை காலம் என்று எதிர்பார்க்கப்படுகிறது
@@ -944,10 +924,6 @@ onboarding_permission_notifications = அறிவிப்பு இசைவ�
 
 onboarding_permission_notifications_description = நூலக புதுப்பிப்புகள் மற்றும் பலவற்றிற்கு அறிவிக்கப்படுங்கள்.
 
-onboarding_permission_ignore_battery_opts = பின்னணி பேட்டரி பயன்பாடு
-
-onboarding_permission_ignore_battery_opts_description = நீண்டகால நூலக புதுப்பிப்புகள், பதிவிறக்கம் மற்றும் காப்புப்பிரதி மீட்டமைப்புக்கு குறுக்கீடுகளைத் தவிர்க்கவும்.
-
 onboarding_permission_crashlytics = செயலிழப்பு பதிவுகளை அனுப்பவும்
 
 onboarding_permission_crashlytics_description = டெவலப்பர்களுக்கு அநாமதேய செயலிழப்பு பதிவுகளை அனுப்பவும்.
@@ -990,10 +966,6 @@ pref_browse_summary = ஆதாரங்கள், நீட்டிப்ப�
 
 pref_backup_summary = கையேடு மற்றும் தானியங்கி காப்புப்பிரதிகள், சேமிப்பு இடம்
 
-pref_security_summary = பயன்பாட்டு பூட்டு, பாதுகாப்பான திரை
-
-pref_advanced_summary = செயலிழப்பு பதிவுகள், பேட்டரி மேம்படுத்தல்கள்
-
 pref_category_theme = கருப்பொருள்
 
 pref_app_theme = பயன்பாட்டு கருப்பொருள்
@@ -1003,8 +975,6 @@ theme_system = மண்டலம்
 theme_light = ஒளி
 
 theme_dark = இருண்ட
-
-theme_monet = மாறும்
 
 theme_greenapple = பச்சை ஆப்பிள்
 
@@ -1053,10 +1023,6 @@ lock_always = எப்போதும்
 lock_never = ஒருபோதும்
 
 hide_notification_content = அறிவிப்பு உள்ளடக்கத்தை மறைக்கவும்
-
-secure_screen = பாதுகாப்பான திரை
-
-secure_screen_summary = பயன்பாடுகளை மாற்றும்போது பயன்பாட்டு உள்ளடக்கத்தை பாதுகாப்பான திரை மறைக்கவும், திரை சாட்களைத் தடுக்கவும்
 
 firebase_summary = செயலிழப்பு பதிவுகள் மற்றும் பகுப்பாய்வுகளை அனுப்புவது சிக்கல்களைக் கண்டறிந்து சரிசெய்யவும், செயல்திறனை மேம்படுத்தவும், எதிர்கால புதுப்பிப்புகளை உங்கள் தேவைகளுக்கு மிகவும் பொருத்தமானதாக மாற்றவும் அனுமதிக்கும்
 
@@ -1132,10 +1098,6 @@ include = அடங்கும்: { $arg1 }
 
 exclude = விலக்கு: { $arg1 }
 
-pref_chapter_swipe_end = சரியான செயலுக்கு ச்வைப் செய்யுங்கள்
-
-pref_chapter_swipe_start = இடது செயலுக்கு ச்வைப் செய்யவும்
-
 multi_lang = பல
 
 ext_updates_pending = புதுப்பிப்புகள் நிலுவையில் உள்ளன
@@ -1191,14 +1153,6 @@ ext_nsfw_warning = இந்த நீட்டிப்பின் ஆதா�
 ext_permission_install_apps_warning = நீட்டிப்புகளை நிறுவ அனுமதிகள் தேவை. வழங்க இங்கே தட்டவும்.
 
 ext_install_service_notif = நீட்டிப்பை நிறுவுதல்…
-
-ext_installer_pref = நிறுவி
-
-ext_installer_legacy = மரபு
-
-ext_installer_shizuku_stopped = சிசுகு ஓடவில்லை
-
-ext_installer_shizuku_unavailable_dialog = சிசுகுவை நீட்டிப்பு நிறுவியாகப் பயன்படுத்த சிசுகுவை நிறுவி தொடங்கவும்.
 
 ext_revoke_trust = நம்பகமான அறியப்படாத நீட்டிப்புகளைத் திரும்பப் பெறுங்கள்
 
@@ -1418,22 +1372,6 @@ double_tap_anim_speed_normal = சாதாரண
 
 double_tap_anim_speed_fast = வேகமாக
 
-pref_rotation_type = இயல்புநிலை சுழற்சி
-
-rotation_type = சுழற்சி
-
-rotation_free = இலவசம்
-
-rotation_portrait = உருவப்படம்
-
-rotation_reverse_portrait = தலைகீழ் உருவப்படம்
-
-rotation_landscape = நிலப்பரப்பு
-
-rotation_force_portrait = பூட்டப்பட்ட உருவப்படம்
-
-rotation_force_landscape = பூட்டப்பட்ட நிலப்பரப்பு
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -1642,8 +1580,6 @@ pref_refresh_library_covers = நூலக அட்டைகளைப் பு
 
 pref_reset_viewer_flags = ஒவ்வொரு தொடர் வாசகர் அமைப்புகளையும் மீட்டமைக்கவும்
 
-pref_reset_viewer_flags_summary = அனைத்து தொடர்களின் வாசிப்பு முறை மற்றும் நோக்குநிலையை மீட்டமைக்கிறது
-
 pref_reset_viewer_flags_success = அனைத்து வாசகர் அமைப்புகளும் மீட்டமைக்கப்படுகின்றன
 
 pref_reset_viewer_flags_error = வாசகர் அமைப்புகளை மீட்டமைக்க முடியவில்லை
@@ -1651,20 +1587,6 @@ pref_reset_viewer_flags_error = வாசகர் அமைப்புகள�
 pref_dump_crash_logs = செயலிழப்பு பதிவுகளைப் பகிரவும்
 
 pref_dump_crash_logs_summary = டெவலப்பர்களுடன் பகிர்வதற்காக பிழை பதிவுகளை ஒரு கோப்பில் சேமிக்கிறது
-
-label_background_activity = பின்னணி செயல்பாடு
-
-pref_disable_battery_optimization = பேட்டரி தேர்வுமுறை முடக்கு
-
-pref_disable_battery_optimization_summary = பின்னணி நூலக புதுப்பிப்புகள் மற்றும் காப்புப்பிரதிகளுக்கு உதவுகிறது
-
-battery_optimization_disabled = பேட்டரி தேர்வுமுறை ஏற்கனவே முடக்கப்பட்டுள்ளது
-
-battery_optimization_setting_activity_not_found = சாதன அமைப்புகளைத் திறக்க முடியவில்லை
-
-about_dont_kill_my_app = சில உற்பத்தியாளர்களுக்கு பின்னணி சேவைகளைக் கொல்லும் கூடுதல் பயன்பாட்டு கட்டுப்பாடுகள் உள்ளன. இந்த வலைத்தளத்தை எவ்வாறு சரிசெய்வது என்பது பற்றிய கூடுதல் தகவல்கள் உள்ளன.
-
-pref_tablet_ui_mode = டேப்லெட் இடைமுகம்
 
 pref_verbose_logging = சொற்களஞ்சியம் பதிவு
 

@@ -1,96 +1,55 @@
-//! Theme mode (task T-47a-011), the pure-black visibility rule (T-47a-014 gate) and the start screen (T-48a-005).
-// Some helpers (the pure-black row outside the page, the portal read used only at apply time) are kept for the search index and tests.
-#![allow(dead_code)]
+//! Theme mode (task T-47a-011), the App theme strip (T-47ba-041), the pure-black visibility rule (T-47a-014 gate) and
+//! the start screen (T-48a-005).
+//!
+//! Theme mode, the App theme strip and the pure-black switch change the look through one path, `theme::apply`
+//! (`update_settings`, `picker::change_settings_in`): the palette, the window marks and the GTK dark preference are
+//! set together, with no restart.
+// Some helpers (the start tab, the row builders used only by the search index) are kept for the index and tests.
 use std::rc::Rc;
 
 use chrono::{Local, NaiveDate};
-use kuro_prefs::datefmt;
 use kuro_prefs::prefs::Prefs;
 use kuro_prefs::ui::{NavStyle, StartScreen, ThemeMode};
 
 use crate::pref_model::bind;
 use crate::pref_model::model::{Preference, PreferenceItem};
+use crate::pref_model::widgets::{app_theme, theme_mode};
 use crate::settings_ui::rows::{enum_choice, group, switch_sub, switch_with, text_choice, REQUIRES_RESTART};
-
-/// XDG portal `color-scheme` value for "prefer dark" (0 = no preference, 2 = light).
-pub const PORTAL_PREFER_DARK: u32 = 1;
-
-/// Whether the dark theme is in effect. LIGHT and DARK force it; SYSTEM follows the portal, and "no preference" or
-/// a missing portal means light (the GTK default).
-pub fn effective_dark(mode: ThemeMode, portal_color_scheme: Option<u32>) -> bool {
-    match mode {
-        ThemeMode::LIGHT => false,
-        ThemeMode::DARK => true,
-        ThemeMode::SYSTEM => portal_color_scheme == Some(PORTAL_PREFER_DARK),
-    }
-}
+use crate::theme::apply;
 
 /// The pure-black switch is only offered while the dark theme is in effect.
-pub fn amoled_visible(mode: ThemeMode, portal_color_scheme: Option<u32>) -> bool {
-    effective_dark(mode, portal_color_scheme)
+pub fn amoled_visible(mode: ThemeMode, system_dark: bool) -> bool {
+    crate::theme::is_dark(mode, system_dark)
 }
 
-/// The colour scheme the desktop portal reports (`org.freedesktop.appearance` `color-scheme`), or `None` when the
-/// portal is absent or does not answer within a second.
-pub fn portal_color_scheme() -> Option<u32> {
-    use gtk::gio::{self, prelude::*};
-    use gtk::glib::prelude::ToVariant;
-    let proxy = gio::DBusProxy::for_bus_sync(
-        gio::BusType::Session,
-        gio::DBusProxyFlags::NONE,
-        None,
-        "org.freedesktop.portal.Desktop",
-        "/org/freedesktop/portal/desktop",
-        "org.freedesktop.portal.Settings",
-        None::<&gio::Cancellable>,
-    )
-    .ok()?;
-    let reply = proxy
-        .call_sync(
-            "Read",
-            Some(&("org.freedesktop.appearance", "color-scheme").to_variant()),
-            gio::DBusCallFlags::NONE,
-            1000,
-            None::<&gio::Cancellable>,
-        )
-        .ok()?;
-    // `Read` answers `(v)`: the variant holds the `u` value
-    reply.child_value(0).child_value(0).get::<u32>()
-}
-
-/// Applies the theme mode to GTK without a restart (`gtk-application-prefer-dark-theme`). LIGHT and DARK force it;
-/// SYSTEM follows the portal, and with no portal answer the preference is off, which is GTK's default.
-pub fn apply_theme_mode(mode: ThemeMode) {
-    let Some(settings) = gtk::Settings::default() else { return };
-    settings.set_gtk_application_prefer_dark_theme(effective_dark(mode, portal_color_scheme()));
-}
-
-/// Theme mode list: System, Light, Dark. Stored by constant name. A change is applied to GTK at once.
+/// The Theme mode row: System, Light and Dark as linked toggle buttons (`widgets::theme_mode`). A click stores the
+/// mode and applies it through `theme::apply`; a click on the selected segment writes nothing.
 pub fn theme_mode_row(prefs: &Prefs) -> PreferenceItem {
-    let mut row = enum_choice(
-        "Theme mode",
-        &prefs.ui.theme_mode,
-        &[(ThemeMode::SYSTEM, "System"), (ThemeMode::LIGHT, "Light"), (ThemeMode::DARK, "Dark")],
-        true,
-    );
-    if let PreferenceItem::BasicList { on_change, .. } = &mut row {
-        let written = Rc::clone(on_change);
-        let stored = prefs.ui.theme_mode.clone();
-        let amoled = prefs.ui.theme_dark_amoled.clone();
-        *on_change = bind::veto(move |key: String| {
-            let result = written(key);
-            let (stored, amoled) = (stored.clone(), amoled.clone());
-            async move {
-                let result = result.await;
-                if result == Ok(true) {
-                    apply_theme_mode(stored.get());
-                    apply_saved_pure_black(amoled.get(), stored.get());
-                }
-                result
-            }
-        });
+    let (pref, title) = (prefs.ui.theme_mode.clone(), "Theme mode");
+    PreferenceItem::Custom {
+        title: title.to_owned(),
+        build: Rc::new(move || {
+            let built = theme_mode::row(&crate::pref_model::model::ItemCommon::new(title), pref.clone());
+            custom_content(built.row)
+        }),
     }
-    row
+}
+
+/// The App theme row: the strip of preview cards (`widgets::app_theme`).
+pub fn app_theme_row(prefs: &Prefs) -> PreferenceItem {
+    let store = prefs.store().clone();
+    PreferenceItem::Custom {
+        title: "App theme".to_owned(),
+        build: Rc::new(move || gtk::prelude::Cast::upcast(app_theme::picker_strip(&store))),
+    }
+}
+
+/// The content of a built list row, taken out of it so it can be a `Custom` row's widget.
+fn custom_content(row: gtk::ListBoxRow) -> gtk::Widget {
+    use gtk::prelude::*;
+    let content = row.child().expect("the row content");
+    row.set_child(None::<&gtk::Widget>);
+    content
 }
 
 /// The navigation styles in list order: the tab each one moves into More.
@@ -124,28 +83,23 @@ pub fn start_screen_row(prefs: &Prefs) -> PreferenceItem {
     row
 }
 
-/// The `app_date_format` patterns in list order; the empty one is the short date.
-pub const DATE_PATTERNS: [&str; 6] = ["", "MM/dd/yy", "dd/MM/yy", "yyyy-MM-dd", "dd MMM yyyy", "MMM dd, yyyy"];
-
 /// Each pattern as `<pattern or Default> (<today formatted>)`, the stored value being the pattern (task T-47a-016).
+/// Month names and the Default short date follow the UI locale (`kuro_i18n::date`), not a fixed en-US form.
 pub fn date_format_options(today: NaiveDate) -> Vec<(String, String)> {
-    DATE_PATTERNS
-        .iter()
-        .map(|pattern| {
-            let name = if pattern.is_empty() { "Default" } else { pattern };
-            (pattern.to_string(), format!("{name} ({})", datefmt::format(pattern, today)))
-        })
+    kuro_i18n::date::previews(today, kuro_i18n::current_locale().tag)
+        .into_iter()
+        .map(|preview| (preview.pref.to_owned(), preview.label))
         .collect()
 }
 
-/// The date format list. A stored pattern outside [`DATE_PATTERNS`] shows the default.
+/// The date format list. A stored pattern outside the offered formats shows the default.
 pub fn date_format_row(prefs: &Prefs, today: NaiveDate) -> PreferenceItem {
     text_choice("Date format", &prefs.ui.date_format, &date_format_options(today), true)
 }
 
 /// The subtitle of the relative timestamps switch: `"Today" instead of "<today formatted>"`.
 pub fn relative_subtitle(today: NaiveDate) -> String {
-    format!("\"Today\" instead of \"{}\"", datefmt::format("", today))
+    format!("\"Today\" instead of \"{}\"", kuro_i18n::date::DateFormat::LocaleShort.format(today, kuro_i18n::current_locale().tag))
 }
 
 /// The relative timestamps switch (`relative_time_v2`).
@@ -175,12 +129,17 @@ pub fn open_start_tab(tabs: &gtk::Stack, prefs: &Prefs) {
     }
 }
 
-/// The rows of the Appearance page this module binds to the typed preferences: the pure-black switch and the start
-/// screen list. The rest of the page stays as the spec builds it.
+/// The rows of the Appearance page this module binds to the typed preferences: Theme mode, the App theme strip, the
+/// pure-black switch (only while the dark theme is in effect) and the Display rows. The rest of the page stays as the
+/// spec builds it.
 pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     let today = Local::now().date_naive();
+    let mode = prefs.ui.theme_mode.get();
     vec![
-        group("Theme", std::iter::once(theme_mode_row(prefs)).chain(amoled_row(prefs, prefs.ui.theme_mode.get(), portal_color_scheme())).collect()),
+        group(
+            "Theme",
+            vec![theme_mode_row(prefs), app_theme_row(prefs), amoled_row(prefs, mode, apply::system_is_dark())],
+        ),
         group(
             "Display",
             vec![start_screen_row(prefs), nav_style_row(prefs), date_format_row(prefs, today), relative_time_row(prefs, today)],
@@ -188,49 +147,21 @@ pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     ]
 }
 
-/// The pure-black switch, offered only while the dark theme is in effect (none otherwise).
-pub fn amoled_row(prefs: &Prefs, mode: ThemeMode, portal_color_scheme: Option<u32>) -> Option<PreferenceItem> {
-    let dark = effective_dark(mode, portal_color_scheme);
-    amoled_visible(mode, portal_color_scheme).then(|| {
-        let veto = bind::veto(move |on: bool| {
-            apply_pure_black(on, dark);
-            async { Ok(true) }
-        });
-        switch_with("Pure black dark mode", None, &prefs.ui.theme_dark_amoled, true, veto)
-    })
+/// What the Appearance page depends on besides the stored values: the mode and whether the desktop is dark. The page
+/// is rebuilt when it changes, so the pure-black row appears and goes with the mode.
+pub fn rule_state(prefs: &Prefs) -> (ThemeMode, bool) {
+    (prefs.ui.theme_mode.get(), apply::system_is_dark())
 }
 
-/// The CSS of pure black dark mode (T-47a-014): window and background surfaces at #000000.
-const PURE_BLACK_CSS: &str = "window, .background { background-color: #000000; }";
-
-/// The override CSS for the switch and the dark state: the black surfaces only while both hold.
-pub fn pure_black_css(on: bool, dark: bool) -> &'static str {
-    if on && dark { PURE_BLACK_CSS } else { "" }
-}
-
-thread_local! {
-    /// The pure-black provider, added to the display once and swapped in place.
-    static PURE_BLACK: std::cell::RefCell<Option<gtk::CssProvider>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Applies pure black live (T-47a-014): a CSS provider swap, no restart.
-pub fn apply_pure_black(on: bool, dark: bool) {
-    let Some(display) = gtk::gdk::Display::default() else { return };
-    let provider = PURE_BLACK.with(|slot| {
-        slot.borrow_mut()
-            .get_or_insert_with(|| {
-                let provider = gtk::CssProvider::new();
-                gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_USER);
-                provider
-            })
-            .clone()
+/// The pure-black switch. It is enabled only while the dark theme is in effect; a disabled row is dropped by the page
+/// merge together with its spec twin, so the switch is not shown otherwise. Turning it on or off applies the scheme's
+/// AMOLED overlay through `theme::apply`, the same path as the mode.
+pub fn amoled_row(prefs: &Prefs, mode: ThemeMode, system_dark: bool) -> PreferenceItem {
+    let veto = bind::veto(move |on: bool| {
+        apply::update_settings(|settings| settings.amoled = on);
+        async { Ok(true) }
     });
-    provider.load_from_string(pure_black_css(on, dark));
-}
-
-/// Applies the stored pure-black choice for the stored theme mode, at start and after a mode change.
-pub fn apply_saved_pure_black(on: bool, mode: ThemeMode) {
-    apply_pure_black(on, effective_dark(mode, portal_color_scheme()));
+    switch_with("Pure black dark mode", None, &prefs.ui.theme_dark_amoled, amoled_visible(mode, system_dark), veto)
 }
 
 #[cfg(test)]
@@ -238,48 +169,76 @@ mod tests {
     use super::*;
 
     #[test]
-    fn light_and_dark_ignore_the_portal() {
-        assert!(!effective_dark(ThemeMode::LIGHT, Some(PORTAL_PREFER_DARK)));
-        assert!(effective_dark(ThemeMode::DARK, Some(2)));
-        assert!(effective_dark(ThemeMode::DARK, None));
-    }
-
-    #[test]
-    fn system_follows_the_portal_and_falls_back_to_light() {
-        assert!(effective_dark(ThemeMode::SYSTEM, Some(1)));
-        assert!(!effective_dark(ThemeMode::SYSTEM, Some(2)));
-        assert!(!effective_dark(ThemeMode::SYSTEM, Some(0)));
-        assert!(!effective_dark(ThemeMode::SYSTEM, None));
-    }
-
-    #[test]
-    fn pure_black_css_is_set_only_while_the_switch_is_on_and_dark_is_in_effect() {
-        assert!(pure_black_css(true, true).contains("#000000"));
-        assert_eq!(pure_black_css(true, false), "");
-        assert_eq!(pure_black_css(false, true), "");
-    }
-
-    #[test]
-    fn pure_black_is_offered_only_in_dark() {
-        assert!(!amoled_visible(ThemeMode::LIGHT, Some(1)));
-        assert!(amoled_visible(ThemeMode::SYSTEM, Some(1)));
+    fn light_and_dark_ignore_the_desktop_and_system_follows_it() {
+        assert!(!amoled_visible(ThemeMode::LIGHT, true));
+        assert!(amoled_visible(ThemeMode::DARK, false));
+        assert!(amoled_visible(ThemeMode::SYSTEM, true));
+        assert!(!amoled_visible(ThemeMode::SYSTEM, false));
     }
 
     #[test]
     fn the_pure_black_row_is_absent_outside_dark_and_stores_its_switch() {
         let prefs = Prefs::in_memory();
-        assert!(amoled_row(&prefs, ThemeMode::LIGHT, Some(1)).is_none());
-        assert!(amoled_row(&prefs, ThemeMode::SYSTEM, Some(2)).is_none());
-        let Some(row) = amoled_row(&prefs, ThemeMode::DARK, None) else { panic!("visible in dark") };
+        assert!(!amoled_row(&prefs, ThemeMode::LIGHT, true).enabled());
+        assert!(!amoled_row(&prefs, ThemeMode::SYSTEM, false).enabled());
+        let row = amoled_row(&prefs, ThemeMode::DARK, false);
+        assert!(row.enabled());
         assert_eq!(row.title(), "Pure black dark mode");
+        let PreferenceItem::Switch { pref, .. } = row else { panic!("switch") };
+        assert_eq!(pref.key(), "pref_theme_dark_amoled_key");
+    }
+
+    // T-47ba-040: the segmented widget is on the page, with the App theme strip below it and pure black last.
+    #[test]
+    fn the_theme_group_holds_mode_strip_and_pure_black_in_that_order() {
+        let prefs = Prefs::in_memory();
+        let titles = |prefs: &Prefs| -> Vec<String> {
+            let tree = page_rows(prefs);
+            let Preference::Group(theme) = &tree[0] else { panic!("group") };
+            theme.items.iter().filter(|i| i.enabled()).map(|i| i.title().to_owned()).collect()
+        };
+        prefs.ui.theme_mode.set(ThemeMode::LIGHT).unwrap();
+        assert_eq!(titles(&prefs), ["Theme mode", "App theme"], "pure black waits for dark");
+        prefs.ui.theme_mode.set(ThemeMode::DARK).unwrap();
+        assert_eq!(titles(&prefs), ["Theme mode", "App theme", "Pure black dark mode"]);
+        let tree = page_rows(&prefs);
+        let Preference::Group(theme) = &tree[0] else { panic!("group") };
+        assert!(matches!(theme.items[0], PreferenceItem::Custom { .. }) && matches!(theme.items[1], PreferenceItem::Custom { .. }));
     }
 
     #[test]
-    fn theme_row_defaults_to_system_and_offers_three_modes() {
+    fn the_page_rule_state_follows_the_stored_mode() {
         let prefs = Prefs::in_memory();
-        let PreferenceItem::BasicList { value, entries, .. } = theme_mode_row(&prefs) else { panic!("list") };
-        assert_eq!(value, "SYSTEM");
-        assert_eq!(entries.len(), 3);
+        let before = rule_state(&prefs);
+        prefs.ui.theme_mode.set(ThemeMode::DARK).unwrap();
+        assert_ne!(before, rule_state(&prefs));
+    }
+
+    // T-47a-011, T-47ba-041: with the merged spec page, Theme mode and App theme (spec chips are skipped) both show,
+    // in their place before Pure black.
+    #[test]
+    fn the_merged_page_shows_mode_strip_and_pure_black_in_the_theme_group() {
+        let prefs = Prefs::in_memory();
+        prefs.ui.theme_mode.set(ThemeMode::DARK).unwrap();
+        let tree = crate::settings_ui::route::tree_with(
+            "settings_appearance",
+            &prefs,
+            &[],
+            &[],
+            crate::settings_ui::browse::RepoCounts::default(),
+        );
+        let Some(Preference::Group(theme)) = tree.iter().find(|e| matches!(e, Preference::Group(g) if g.title == "Theme")) else {
+            panic!("the Theme group")
+        };
+        let titles: Vec<&str> = theme.items.iter().map(|i| i.title()).collect();
+        assert_eq!(titles, ["Theme mode", "App theme", "Pure black dark mode"]);
+        prefs.ui.theme_mode.set(ThemeMode::LIGHT).unwrap();
+        let tree = crate::settings_ui::route::tree_with("settings_appearance", &prefs, &[], &[], crate::settings_ui::browse::RepoCounts::default());
+        let Some(Preference::Group(theme)) = tree.iter().find(|e| matches!(e, Preference::Group(g) if g.title == "Theme")) else {
+            panic!("the Theme group")
+        };
+        let titles: Vec<&str> = theme.items.iter().map(|i| i.title()).collect();
+        assert_eq!(titles, ["Theme mode", "App theme"], "in Light the pure-black row and its spec twin are both gone");
     }
 
     #[test]
@@ -335,7 +294,7 @@ mod tests {
     #[test]
     fn date_labels_show_the_pattern_or_default_and_today_in_that_pattern() {
         let labels: Vec<String> = date_format_options(day()).into_iter().map(|(_, label)| label).collect();
-        assert_eq!(labels[0], "Default (10/08/26)");
+        assert_eq!(labels[0], "Default (10/8/26)");
         assert_eq!(labels[1], "MM/dd/yy (10/08/26)");
         assert_eq!(labels[2], "dd/MM/yy (08/10/26)");
         assert_eq!(labels[3], "yyyy-MM-dd (2026-10-08)");
@@ -344,27 +303,13 @@ mod tests {
     }
 
     #[test]
-    fn the_date_list_stores_the_pattern_and_defaults_to_the_short_date() {
-        let prefs = Prefs::in_memory();
-        let PreferenceItem::BasicList { value, entries, .. } = date_format_row(&prefs, day()) else { panic!("list") };
-        assert_eq!(value, "", "the empty pattern is the default");
-        assert_eq!(entries.len(), DATE_PATTERNS.len());
-        prefs.ui.date_format.set("yyyy-MM-dd".into()).unwrap();
-        let PreferenceItem::BasicList { value, .. } = date_format_row(&prefs, day()) else { panic!("list") };
-        assert_eq!(value, "yyyy-MM-dd");
-        prefs.ui.date_format.set("not-a-pattern".into()).unwrap();
-        let PreferenceItem::BasicList { value, .. } = date_format_row(&prefs, day()) else { panic!("list") };
-        assert_eq!(value, "", "a stored text the list does not offer shows the default");
-    }
-
-    #[test]
     fn relative_subtitle_names_today_as_the_short_date_and_the_switch_is_on_by_default() {
-        assert_eq!(relative_subtitle(day()), "\"Today\" instead of \"10/08/26\"");
+        assert_eq!(relative_subtitle(day()), "\"Today\" instead of \"10/8/26\"");
         let prefs = Prefs::in_memory();
         let row = relative_time_row(&prefs, day());
         assert_eq!(row.title(), "Relative timestamps");
         let PreferenceItem::Switch { common, pref, .. } = row else { panic!("switch") };
-        assert_eq!(common.subtitle.as_deref(), Some("\"Today\" instead of \"10/08/26\""));
+        assert_eq!(common.subtitle.as_deref(), Some("\"Today\" instead of \"10/8/26\""));
         assert!(pref.get());
     }
 
@@ -373,7 +318,7 @@ mod tests {
         let prefs = Prefs::in_memory();
         let PreferenceItem::BasicList { common, .. } = start_screen_row(&prefs) else { panic!("list") };
         assert_eq!(common.subtitle.as_deref(), Some(REQUIRES_RESTART));
-        let PreferenceItem::Switch { common, .. } = amoled_row(&prefs, ThemeMode::DARK, None).expect("dark") else {
+        let PreferenceItem::Switch { common, .. } = amoled_row(&prefs, ThemeMode::DARK, false) else {
             panic!("switch")
         };
         assert_eq!(common.subtitle, None, "pure black is applied live");
@@ -392,18 +337,6 @@ mod tests {
 #[cfg(test)]
 mod theme_tests {
     use super::*;
-
-    #[test]
-    fn the_theme_mode_row_is_titled_as_the_spec_and_shows_the_stored_mode() {
-        let prefs = Prefs::in_memory();
-        let row = theme_mode_row(&prefs);
-        assert_eq!(row.title(), "Theme mode");
-        let PreferenceItem::BasicList { value, .. } = row else { panic!("list") };
-        assert_eq!(value, "SYSTEM");
-        prefs.ui.theme_mode.set(ThemeMode::DARK).unwrap();
-        let PreferenceItem::BasicList { value, .. } = theme_mode_row(&prefs) else { panic!("list") };
-        assert_eq!(value, "DARK");
-    }
 
     #[test]
     fn the_navigation_style_list_offers_the_four_styles_and_stores_the_pick() {

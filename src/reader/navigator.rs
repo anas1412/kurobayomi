@@ -32,7 +32,7 @@ pub fn slider_target(value: f64, current_page: i32) -> Option<usize> {
     if page == current_page { None } else { Some((page - 1).max(0) as usize) }
 }
 
-/// The horizontal padding of the navigator for a window size: 24 px in the tablet UI, 8 px otherwise.
+/// The horizontal padding of the navigator for a window size: 24 px in a wide window, 8 px otherwise.
 pub fn horizontal_padding(window_width: i32, window_height: i32) -> i32 {
     if crate::window_size::is_tablet_ui(window_width, window_height) { 24 } else { 8 }
 }
@@ -232,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn tablet_width_uses_24_px_padding_otherwise_8() {
+    fn wide_window_uses_24_px_padding_otherwise_8() {
         assert_eq!(horizontal_padding(1000, 800), 24);
         assert_eq!(horizontal_padding(719, 800), 8);
         assert_eq!(horizontal_padding(1000, 719), 8, "the smaller side decides");

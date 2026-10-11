@@ -18,8 +18,6 @@ action_continue = Nastavi
 
 manga = Manga
 
-pref_library_summary = Kategorije, globalno ažuriranje, prelistavanje poglavlja
-
 pref_behavior = Ponašanje poglavlja
 
 action_add_repo_message = Dodaj dodatne repozitorije u { $arg1 }. To bi trebao biti URL koji završava s „index.min.json”.
@@ -80,21 +78,9 @@ pref_player_settings_summary = Interni player, geste, dekoderi, titlovi
 
 pref_player_internal = Interni player
 
-pref_player_internal_summary = Napredak, kontrole, položaj
-
 pref_progress_mark_as_seen = U kojem trenutku označiti epizodu kao pogledanu
 
 pref_preserve_watching_position = Zadrži poziciju gledanja za pogledane epizode
-
-pref_category_player_orientation = Položaj
-
-rotation_video = Video
-
-rotation_reverse_landscape = Preokreni ležeći format
-
-rotation_sensor_portrait = Uspravni format
-
-rotation_sensor_landscape = Ležeći format
 
 pref_category_controls = Kontrole
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = Prikaži indikator trenutačnog poglavlja
 pref_controls_show_chapter_indicator_info = Pojavljuje se samo ako video ima poglavlja
 
 pref_controls_display_volume_percentage = Prikaži glasnoću kao postotak
-
-pref_remember_brightness = Zapamti i prebaci na zadnju korištenu svjetlinu
 
 pref_remember_volume = Zapamti i prebaci na zadnju korištenu glasnoću
 
@@ -179,12 +163,6 @@ pref_external_player_preference = Postavke eksternog playera
 pref_player_gestures = Geste
 
 pref_player_gestures_summary = Prematanje, dvostruki dodir, medijske kontrole
-
-pref_category_player_sliders = Klizači
-
-enable_volume_brightness_gestures = Aktiviraj geste za glasnoću i svjetlinu
-
-pref_controls_swap_vol_brightness = Zamijeni klizač za glasnoću i svjetlinu
 
 pref_category_player_seeking = Prematanje
 
@@ -924,10 +902,6 @@ theme_mocha = Mocha
 
 pref_behavior_episode = Ponašanje epizoda
 
-pref_episode_swipe_end = Epizoda pri povlačenju prema desno
-
-pref_episode_swipe_start = Epizoda pri povlačenju prema lijevo
-
 pref_mark_duplicate_seen_episode_seen = Označi duplikat gledane epizode kao gledanu
 
 pref_mark_duplicate_seen_episode_seen_existing = Nakon gledanja epizode
@@ -1359,10 +1333,6 @@ onboarding_permission_notifications = Dozvola za obavijesti
 
 onboarding_permission_notifications_description = Primaj obavijesti o aktualiziranju biblioteke i više.
 
-onboarding_permission_ignore_battery_opts = Upotreba baterije u pozadini
-
-onboarding_permission_ignore_battery_opts_description = Izbjegni prekide pri dugotrajnim aktualiziranjima biblioteke, preuzimanjima i obnavljanja sigurnosnih kopija.
-
 onboarding_permission_crashlytics = Pošalji zapis o prekidu aplikacije
 
 onboarding_permission_crashlytics_description = Šalji anonimne zapise o prekidu aplikacije programerima.
@@ -1405,10 +1375,6 @@ pref_browse_summary = Izvori, ekstenzije, globalno pretraživanje
 
 pref_backup_summary = Ručne i automatske sigurnosne kopije, količina spremišta
 
-pref_security_summary = Zaključavanje aplikacije, siguran zaslon
-
-pref_advanced_summary = Zapisnici iznenadnog gašenja aplikacije, optimizacije baterije
-
 pref_category_theme = Tema
 
 pref_app_theme = Tema aplikacije
@@ -1418,8 +1384,6 @@ theme_system = Sustav
 theme_light = Svijetla
 
 theme_dark = Tamna
-
-theme_monet = Dinamički
 
 theme_greenapple = Zelena jabuka
 
@@ -1468,10 +1432,6 @@ lock_always = Uvijek
 lock_never = Nikada
 
 hide_notification_content = Sakrij sadržaj obavijesti
-
-secure_screen = Siguran ekran
-
-secure_screen_summary = Siguran ekran skriva sadržaj aplikacije prilikom prebacivanja između aplikacija i blokira snimke ekrana
 
 firebase_summary = Slanje zapisa o prekidima rada aplikacije i analitike omogućit će nam identificirati i riješiti probleme, poboljšati performancu i prilagoditi buduća aktualiziranja kako bi što bolje odgovarala tvojim potrebama
 
@@ -1547,10 +1507,6 @@ include = Uključi: { $arg1 }
 
 exclude = Isključi: { $arg1 }
 
-pref_chapter_swipe_end = Prelistaj udesno
-
-pref_chapter_swipe_start = Prelistaj ulijevo
-
 multi_lang = Višejezičnost
 
 ext_updates_pending = Aktualiziranja na čekanju
@@ -1606,14 +1562,6 @@ ext_nsfw_warning = Izvori ovog proširenja mogu sadržavati neprikladan sadržaj
 ext_permission_install_apps_warning = Za instaliranje proširenja su potrebne dozvole. Dodirni ovdje za odobrenje.
 
 ext_install_service_notif = Instaliranje proširenja …
-
-ext_installer_pref = Instalacijski program
-
-ext_installer_legacy = Stari način
-
-ext_installer_shizuku_stopped = Shizuku ne radi
-
-ext_installer_shizuku_unavailable_dialog = Instaliraj i pokreni Shizuku za korištenje Shizukua kao instalacijskog programa za proširenja.
 
 ext_revoke_trust = Opozovi pouzdana nepoznata proširenja
 
@@ -1833,22 +1781,6 @@ double_tap_anim_speed_normal = Normalno
 
 double_tap_anim_speed_fast = Brzo
 
-pref_rotation_type = Standardno okretanje
-
-rotation_type = Okretanje
-
-rotation_free = Slobodno
-
-rotation_portrait = Uspravno
-
-rotation_reverse_portrait = Preokrenuto uspravno
-
-rotation_landscape = Polegnuto
-
-rotation_force_portrait = Prisili uspravno
-
-rotation_force_landscape = Prisili polegnuto
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -2059,8 +1991,6 @@ pref_refresh_library_covers = Aktualiziraj naslovnice biblioteke
 
 pref_reset_viewer_flags = Obnovi postavke čitača serija
 
-pref_reset_viewer_flags_summary = Obnavlja modus čitanja i položaj svih serija
-
 pref_reset_viewer_flags_success = Sve postavke čitača su obnovljene
 
 pref_reset_viewer_flags_error = Neuspjelo obnavljanje postavki čitača
@@ -2068,20 +1998,6 @@ pref_reset_viewer_flags_error = Neuspjelo obnavljanje postavki čitača
 pref_dump_crash_logs = Dijeli zapise prekida rada aplikacije
 
 pref_dump_crash_logs_summary = Sprema zapise grešaka u datoteku za dijeljenje podataka s programerima
-
-label_background_activity = Aktivnost u pozadini
-
-pref_disable_battery_optimization = Deaktiviraj optimiranje baterije
-
-pref_disable_battery_optimization_summary = Pomaže pri aktualiziranju biblioteke i spremanju sigurnosnih kopija u pozadini
-
-battery_optimization_disabled = Optimiranje baterije je već deaktivirano
-
-battery_optimization_setting_activity_not_found = Nije moguće otvoriti postavke uređaja
-
-about_dont_kill_my_app = Neki proizvođači imaju dodatna ograničenja za aplikaciju koja onemogućuju usluge u pozadini. Ova web-stranica sadrži daljnje informacije o tome kako to popraviti.
-
-pref_tablet_ui_mode = Korisničko sučelje tableta
 
 pref_verbose_logging = Opširno zapisivanje
 

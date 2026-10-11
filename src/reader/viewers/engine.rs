@@ -352,6 +352,7 @@ impl PagerEngine {
         Self(PagerInner::new(kind, ctx))
     }
 
+    #[cfg(test)]
     /// Applies a settings change and carries out its reactions (T-44a-005).
     pub fn apply_settings(&self, new: ViewerSettings) {
         self.0.apply_settings(new);
@@ -841,6 +842,7 @@ impl WebtoonEngine {
         Self(WebtoonInner::new(gapped, ctx))
     }
 
+    #[cfg(test)]
     /// Applies a settings change and carries out its reactions (T-44a-005).
     pub fn apply_settings(&self, new: ViewerSettings) {
         self.0.apply_settings(new);

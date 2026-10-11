@@ -57,8 +57,9 @@ pub fn page_rows(prefs: &Prefs, counts: RepoCounts) -> Vec<Preference> {
 /// A repo row: its subtitle is the count, a tap opens the repo screen.
 fn repo_row(title: &str, count: i64, screen: &'static str) -> PreferenceItem {
     let mut row = text(title, Some(&store_count_label(count)), true);
-    if let PreferenceItem::Text { on_click, .. } = &mut row {
+    if let PreferenceItem::Text { common, on_click } = &mut row {
         *on_click = Some(Rc::new(move || crate::ui::open(screen)));
+        common.link = true;
     }
     row
 }

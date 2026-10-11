@@ -236,8 +236,6 @@ theme_light = მსუბუქი
 
 theme_dark = ჩართული
 
-theme_monet = დინამიური
-
 theme_greenapple = მწვანე ვაშლი
 
 pref_date_format = თარიღის ფორმატი
@@ -255,10 +253,6 @@ lock_always = ყოველთვის
 lock_never = არასდროს
 
 hide_notification_content = შეტყობინების შიგთავსის დამალვა
-
-secure_screen = უსაფრთხოების ფანჯარა
-
-secure_screen_summary = აპლიკაციებს შორის გადართვისას შემადგენლობის დამალვა და სკრინშოტების დაბლოკვა
 
 parental_controls_info = ეს არ აღმოფხვრავს პროგრამაში NSFW (18+) შიგთავსის არაოფიციალურ, ან შესაძლო არასწორად მონიშნული გაფართოებებოიდან გამოჩენას.
 
@@ -446,14 +440,6 @@ double_tap_anim_speed_normal = ნორმალური
 
 double_tap_anim_speed_fast = სწარფი
 
-pref_rotation_type = გადმოტრიალება
-
-rotation_free = თავისუფალი
-
-rotation_force_portrait = პორტრეტის რეჟიმი
-
-rotation_force_landscape = პეიზაჟის რეჟიმი
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -549,14 +535,6 @@ pref_clear_database_summary = ისტორიიდან წაიშლე�
 clear_database_completed = ჩანაწერები წაშლილია
 
 pref_refresh_library_covers = ბიბლიოთეკის მანგების ყდის ცვლილება
-
-pref_disable_battery_optimization = გამორთე ბატარეის ოპტიმიზაცია
-
-pref_disable_battery_optimization_summary = ეხმარება უკანა ფონში მიმდინარე ბიბლიოთეკის განახლებებსდა რეზერვს
-
-battery_optimization_disabled = ელემენტის ოპტიმიზაცუა უკვე გამორთულია
-
-battery_optimization_setting_activity_not_found = ვერ მოხერხდა მოწყობილობის პარამეტრების გახსნა
 
 website = ვებსაიტი
 

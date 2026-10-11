@@ -3,7 +3,6 @@
 //! source keeps its files: removing one of its entries deletes no cover and no background (B§4.8.1).
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use kuro_data::anime::{AnimeRepo, AnimeUpdate};
 use kuro_data::category::CategoryRepo;
@@ -29,17 +28,6 @@ pub struct AnimeStore {
     defaults: Option<PrefStore>,
     /// Binds the enhanced trackers of an added entry. `None` binds nothing.
     binder: Option<TrackerBinder>,
-}
-
-/// The production binder: every logged-in enhanced anime tracker that accepts the source is matched and bound, on the
-/// runtime and detached, so the add does not wait (B§5.2). Needs a tokio runtime.
-pub fn enhanced_anime_binder(ctx: Arc<kuro_track::ctx::TrackCtx>) -> TrackerBinder {
-    Arc::new(move |id, title, source| {
-        let (ctx, title) = (Arc::clone(&ctx), title.to_owned());
-        tokio::spawn(async move {
-            kuro_track::bind::bind_enhanced_anime(&ctx, id, &title, &source.to_string()).await;
-        });
-    })
 }
 
 impl AnimeStore {

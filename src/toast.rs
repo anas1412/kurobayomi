@@ -16,6 +16,38 @@ use kuro_platform::toast::{ToastFeed, Toaster, ToastMessage, toast_channel};
 
 static GLOBAL: std::sync::OnceLock<Toaster> = std::sync::OnceLock::new();
 
+thread_local! {
+    /// The overlay that [`busy`] adds its spinner card to (set by [`attach`]).
+    static OVERLAY: std::cell::RefCell<Option<gtk::Overlay>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A centred spinner card with `text` over the main window until the returned guard is dropped: the "Loading..."
+/// state of an action that waits for the network. Without an overlay (tests without a window) it does nothing.
+pub fn busy(text: &str) -> Busy {
+    let card = OVERLAY.with(|o| o.borrow().clone()).map(|overlay| {
+        let spinner = gtk::Spinner::builder().spinning(true).width_request(32).height_request(32).build();
+        let label = gtk::Label::new(Some(text));
+        let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).margin_top(14).margin_bottom(14).margin_start(18).margin_end(18).build();
+        row.append(&spinner);
+        row.append(&label);
+        let card = gtk::Frame::builder().child(&row).halign(gtk::Align::Center).valign(gtk::Align::Center).css_classes(["app-notification", "osd"]).can_target(false).build();
+        overlay.add_overlay(&card);
+        (overlay, card)
+    });
+    Busy(card)
+}
+
+/// Removes the spinner card of [`busy`] when dropped.
+pub struct Busy(Option<(gtk::Overlay, gtk::Frame)>);
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        if let Some((overlay, card)) = self.0.take() {
+            overlay.remove_overlay(&card);
+        }
+    }
+}
+
 /// Short toast through the overlay attached by [`attach`]; dropped when no overlay exists yet.
 pub fn notify(text: impl Into<String>) {
     if let Some(t) = GLOBAL.get() {
@@ -71,6 +103,7 @@ pub fn attach(overlay: &gtk::Overlay) -> Toaster {
     overlay.add_controller(keys);
 
     overlay.add_overlay(&revealer);
+    OVERLAY.with(|o| *o.borrow_mut() = Some(overlay.clone()));
     glib::spawn_future_local(present(feed, label, revealer, generation, toaster.clone()));
     let _ = GLOBAL.set(toaster.clone());
     toaster
@@ -107,4 +140,63 @@ async fn present(
         show(message, &label, &revealer, &generation);
     }
     drop(keep_open);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuro_platform::toast::ToastLength;
+
+    /// The first widget below `root` that is a `T`.
+    fn find<T: IsA<gtk::Widget>>(root: &gtk::Widget) -> Option<T> {
+        if let Some(found) = root.downcast_ref::<T>() {
+            return Some(found.clone());
+        }
+        let mut child = root.first_child();
+        while let Some(c) = child {
+            if let Some(found) = find::<T>(&c) {
+                return Some(found);
+            }
+            child = c.next_sibling();
+        }
+        None
+    }
+
+    fn pump(ms: u64) {
+        let until = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+        while std::time::Instant::now() < until {
+            glib::MainContext::default().iteration(false);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    // T-47b-052, E73: one toast at a time in a Revealer over the overlay; a new one replaces the visible one and
+    // the last one hides after its 2 s. No libadwaita widget is involved.
+    #[test]
+    fn a_new_toast_replaces_the_visible_one_and_the_last_hides_after_two_seconds() {
+        crate::testing::with_display(|| {
+            assert_eq!(ToastLength::Short.duration(), std::time::Duration::from_secs(2));
+            let overlay = gtk::Overlay::new();
+            let toaster = attach(&overlay);
+            let revealer: gtk::Revealer = find(overlay.upcast_ref()).expect("the toast revealer");
+            let label: gtk::Label = find(revealer.upcast_ref()).expect("the toast label");
+            assert!(!revealer.reveals_child(), "nothing shows before the first toast");
+            assert_eq!(revealer.halign(), gtk::Align::Center);
+            assert_eq!(revealer.valign(), gtk::Align::End, "bottom centre");
+
+            toaster.show("first", ToastLength::Short);
+            pump(1000);
+            assert!(revealer.reveals_child());
+            assert_eq!(label.text(), "first");
+            toaster.show("second", ToastLength::Short);
+            pump(100);
+            assert_eq!(label.text(), "second", "a new toast replaces the visible one");
+
+            // the first toast's 2 s run out here; they must not hide the second one
+            pump(1200);
+            assert!(revealer.reveals_child(), "the first toast's timer does not hide the second");
+            pump(1200);
+            assert!(!revealer.reveals_child(), "hidden 2 s after the last toast");
+        });
+    }
 }

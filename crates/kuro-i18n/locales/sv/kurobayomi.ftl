@@ -6,13 +6,9 @@ action_filter_started = Börjat
 
 relative_time_now = Nu
 
-pref_library_summary = Kategorier, global uppdatering, kapitel svepning
-
 pref_library_update_show_tab_badge = Visa antalet olästa på ikonen Uppdateringar
 
 label_player_settings = Player inställningar
-
-pref_player_internal_summary = Framsteg, kontroll, orientering
 
 manga_categories = Kategorier
 
@@ -360,10 +356,6 @@ onboarding_permission_notifications = Aviseringsbehörigheter
 
 onboarding_permission_notifications_description = Få aviseringar om biblioteksuppdateringar och mer.
 
-onboarding_permission_ignore_battery_opts = Bakgrundsbatterianvändning
-
-onboarding_permission_ignore_battery_opts_description = Undvik avbrott i långvariga biblioteksuppdateringar, nedladdningar och säkerhetskopieringsåterställningar.
-
 onboarding_permission_crashlytics = Skicka kraschloggar
 
 onboarding_permission_crashlytics_description = Skicka anonymiserade kraschloggar till utvecklarna.
@@ -406,10 +398,6 @@ pref_browse_summary = Källor, tillägg, global sökning
 
 pref_backup_summary = Manuell och automatisk säkerhetskopiering, lagringsutrymme
 
-pref_security_summary = Applikations lås, säkerhetsskärm
-
-pref_advanced_summary = Dumpa krasch logg, batterioptimering
-
 pref_category_theme = Tema
 
 pref_app_theme = App-tema
@@ -419,8 +407,6 @@ theme_system = System
 theme_light = Ljus
 
 theme_dark = Mörk
-
-theme_monet = Dynamisk
 
 theme_greenapple = Grönt äpple
 
@@ -471,10 +457,6 @@ lock_always = Alltid
 lock_never = Aldrig
 
 hide_notification_content = Dölj notisinnehåll
-
-secure_screen = Säker skärm
-
-secure_screen_summary = Säker skärm döljer appinnehållet när du byter app och blockerar skärmdumpar
 
 firebase_summary = Att skicka kraschloggar och användningsdata tillåter oss att identifiera och korrigera fel, förbättra prestanda samt göra framtida uppdateringar mer relevanta till dina behov
 
@@ -550,10 +532,6 @@ include = Inkludera: { $arg1 }
 
 exclude = Exkludera: { $arg1 }
 
-pref_chapter_swipe_end = Svep till höger åtgärd
-
-pref_chapter_swipe_start = Svep till vänster åtgärd
-
 multi_lang = Flerspråkig
 
 ext_updates_pending = Uppdateringar väntar
@@ -609,14 +587,6 @@ ext_nsfw_warning = Källor från detta tillägg kan innehålla NSFW(18+) innehå
 ext_permission_install_apps_warning = Behörigheter krävs för att installera tillägg. Tryck här för att bevilja.
 
 ext_install_service_notif = Installerar tillägg…
-
-ext_installer_pref = Installatör
-
-ext_installer_legacy = Äldre
-
-ext_installer_shizuku_stopped = Shizuku körs inte
-
-ext_installer_shizuku_unavailable_dialog = Installera och starta Shizuku för att använda Shizuku som tilläggsinstallationsprogram.
 
 ext_revoke_trust = Återkalla tillförlitliga okända tillägg
 
@@ -836,22 +806,6 @@ double_tap_anim_speed_normal = Normal
 
 double_tap_anim_speed_fast = Snabb
 
-pref_rotation_type = Standard rotation
-
-rotation_type = Rotation
-
-rotation_free = Upplåst
-
-rotation_portrait = Porträtt
-
-rotation_reverse_portrait = Omvänt porträtt
-
-rotation_landscape = Liggande
-
-rotation_force_portrait = Låst porträtt
-
-rotation_force_landscape = Låst liggande
-
 color_filter_r_value = Röd
 
 color_filter_g_value = Grön
@@ -1066,8 +1020,6 @@ pref_refresh_library_covers = Uppdatera bibliotekets omslag
 
 pref_reset_viewer_flags = Återställ läsinställningarna per serie
 
-pref_reset_viewer_flags_summary = Återställer läsläge och orientering för alla serier
-
 pref_reset_viewer_flags_success = Återställning av läsarens inställningar
 
 pref_reset_viewer_flags_error = Kunde inte återställa läsarinställningarna
@@ -1075,20 +1027,6 @@ pref_reset_viewer_flags_error = Kunde inte återställa läsarinställningarna
 pref_dump_crash_logs = Dela kraschloggar
 
 pref_dump_crash_logs_summary = Sparar felloggar till en fil för delning med utvecklarna
-
-label_background_activity = Bakgrundsaktivitet
-
-pref_disable_battery_optimization = Inaktivera batterioptimering
-
-pref_disable_battery_optimization_summary = Hjälper till med uppdateringar och säkerhetskopior i bakgrunden
-
-battery_optimization_disabled = Batterioptimering är redan inaktiverat
-
-battery_optimization_setting_activity_not_found = Det gick inte att öppna enhetsinställningarna
-
-about_dont_kill_my_app = Vissa tillverkare har ytterligare appbegränsningar som dödar bakgrundstjänster. Denna webbplats har mer information om hur du åtgärdar det.
-
-pref_tablet_ui_mode = Tablettgränssnitt
 
 pref_verbose_logging = Omfattande loggning
 

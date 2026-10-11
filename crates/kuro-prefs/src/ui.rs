@@ -12,9 +12,10 @@ pref_enum! {
 }
 
 pref_enum! {
-    /// `pref_app_theme`. The three deprecated themes stay valid stored values but are not offered.
+    /// `pref_app_theme`. The three deprecated themes stay valid stored values but are not offered. A stored `MONET`
+    /// (the Android dynamic colours theme, not available here) is no name any more and reads as `DEFAULT`.
     pub enum AppTheme {
-        DEFAULT, MONET, CLOUDFLARE, COTTONCANDY, DOOM, GREEN_APPLE, LAVENDER, MATRIX,
+        DEFAULT, CLOUDFLARE, COTTONCANDY, DOOM, GREEN_APPLE, LAVENDER, MATRIX,
         MIDNIGHT_DUSK, MOCHA, SAPPHIRE, NORD, STRAWBERRY_DAIQUIRI, TAKO, TEALTURQUOISE,
         TIDAL_WAVE, YINYANG, YOTSUBA, MONOCHROME, DARK_BLUE, HOT_PINK, BLUE,
     }
@@ -25,7 +26,6 @@ impl AppTheme {
     pub fn title_key(self) -> Option<&'static str> {
         Some(match self {
             Self::DEFAULT => "label_default",
-            Self::MONET => "theme_monet",
             Self::CLOUDFLARE => "theme_cloudflare",
             Self::COTTONCANDY => "theme_cottoncandy",
             Self::DOOM => "theme_doom",
@@ -111,11 +111,6 @@ impl StartScreen {
     }
 }
 
-pref_enum! {
-    /// `tablet_ui_mode`. Kept for backups; it has no effect on desktop.
-    pub enum TabletUiMode { AUTOMATIC, ALWAYS, LANDSCAPE, NEVER }
-}
-
 /// What the GTK layer must do for a theme mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeChoice {
@@ -137,14 +132,13 @@ pub fn apply_theme(mode: ThemeMode) -> ThemeChoice {
 }
 
 define_prefs! {
-    /// `[ui]` section: the eight keys of Aniyomi `UiPreferences`.
+    /// `[ui]` section: the seven keys of Aniyomi `UiPreferences` that a desktop has.
     pub struct UiPrefs in "ui" {
         theme_mode: ThemeMode = "pref_theme_mode_key" => ThemeMode::SYSTEM;
         app_theme: AppTheme = "pref_app_theme" => AppTheme::DEFAULT;
         theme_dark_amoled: bool = "pref_theme_dark_amoled_key" => false;
         relative_time: bool = "relative_time_v2" => true;
         date_format: String = "app_date_format" => String::new();
-        tablet_ui_mode: TabletUiMode = "tablet_ui_mode" => TabletUiMode::AUTOMATIC;
         start_screen: StartScreen = "start_screen" => StartScreen::ANIME;
         nav_style: NavStyle = "bottom_rail_nav_style" => NavStyle::MOVE_HISTORY_TO_MORE;
     }
@@ -171,7 +165,6 @@ mod tests {
                 ("theme_dark_amoled", "pref_theme_dark_amoled_key"),
                 ("relative_time", "relative_time_v2"),
                 ("date_format", "app_date_format"),
-                ("tablet_ui_mode", "tablet_ui_mode"),
                 ("start_screen", "start_screen"),
                 ("nav_style", "bottom_rail_nav_style"),
             ]
@@ -193,7 +186,6 @@ mod tests {
         assert!(!ui.theme_dark_amoled.get());
         assert!(ui.relative_time.get());
         assert_eq!(ui.date_format.get(), "");
-        assert_eq!(ui.tablet_ui_mode.get(), TabletUiMode::AUTOMATIC);
         assert_eq!(ui.start_screen.get(), StartScreen::ANIME);
         assert_eq!(ui.nav_style.get(), NavStyle::MOVE_HISTORY_TO_MORE);
     }
@@ -224,16 +216,27 @@ mod tests {
     }
 
     #[test]
-    fn app_theme_has_the_22_names_and_the_three_deprecated_have_no_title() {
-        assert_eq!(AppTheme::ALL.len(), 22);
+    fn app_theme_has_the_21_names_and_the_three_deprecated_have_no_title() {
+        assert_eq!(AppTheme::ALL.len(), 21);
         assert_eq!(AppTheme::ALL[0], AppTheme::DEFAULT);
-        assert_eq!(AppTheme::ALL[18], AppTheme::MONOCHROME);
-        assert_eq!(AppTheme::ALL[21], AppTheme::BLUE);
+        assert_eq!(AppTheme::ALL[17], AppTheme::MONOCHROME);
+        assert_eq!(AppTheme::ALL[20], AppTheme::BLUE);
         assert_eq!(AppTheme::DEFAULT.title_key(), Some("label_default"));
         assert_eq!(AppTheme::MONOCHROME.title_key(), Some("theme_monochrome"));
         for deprecated in [AppTheme::DARK_BLUE, AppTheme::HOT_PINK, AppTheme::BLUE] {
             assert_eq!(deprecated.title_key(), None);
         }
+    }
+
+    #[test]
+    fn a_stored_monet_theme_and_an_old_tablet_key_do_not_break_loading() {
+        let store = PrefStore::in_memory();
+        store.set_raw("pref_app_theme", PrefValue::Str("MONET".into()));
+        store.set_raw("tablet_ui_mode", PrefValue::Str("ALWAYS".into()));
+        let ui = UiPrefs::new(store);
+        assert_eq!(ui.app_theme.get(), AppTheme::DEFAULT, "MONET reads as the default theme");
+        assert!(ui.app_theme.is_set(), "the stored text is kept");
+        assert_eq!(ui.theme_mode.get(), ThemeMode::SYSTEM);
     }
 
     #[test]

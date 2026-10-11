@@ -1,7 +1,6 @@
 //! Mounts the library view in the window (T-37a-061): builds the view's dependencies from the app data, registers
 //! the views so the shell can reach them, and exposes what the shell needs. The two kinds share one sidebar
-//! destination (`library`) with an Anime and a Manga page; each kind still has its own sidebar index per nav style
-//! ([`sidebar_index`]).
+//! destination (`library`) with an Anime and a Manga page; each kind still has its own sidebar index per nav style.
 //!
 //! Decision (T-37a-045, replaces B-14.11): with `MOVE_MANGA_TO_MORE` the manga library is a page under More, at index
 //! 5. Aniyomi jumps from it to the anime tab; here Back returns to the tab it was opened from, and to More when it was
@@ -19,29 +18,31 @@ use std::sync::Arc;
 use gtk::glib;
 use gtk::prelude::*;
 use kuro_data::anime::{AnimeRepo, AnimeUpdate};
+use kuro_data::chapter::ChapterRepo;
 use kuro_data::manga::{MangaRepo, MangaUpdate};
 use kuro_db::handle::Db;
 use kuro_domain::kind::EntryKind;
 use kuro_i18n::{MsgKey, tr};
 use kuro_images::art::{ArtKind, ArtRef, Owner};
 use kuro_images::invalidate::remove_covers;
-use kuro_local::LOCAL_SOURCE_ID;
 use kuro_platform::linux::LinuxPaths;
 use kuro_platform::paths::Paths;
 use kuro_prefs::library::LibraryPrefs;
-use kuro_prefs::ui::NavStyle;
 
 use crate::library::actions::delete_plan;
 use crate::library::trackers::{self, Logins};
 use crate::library::download_facts;
 use crate::library::query::{Facts, SourceInfo};
 use crate::library::view::{Deps, LibraryView, Nav};
+use crate::browse::route::{BrowseKind, BrowseRoute};
 use crate::screens::Built;
 
 thread_local! {
     static VIEWS: RefCell<Vec<(EntryKind, LibraryView)>> = const { RefCell::new(Vec::new()) };
     /// Bit 0: the anime view is selecting. Bit 1: the manga view is.
     static SELECTING: Cell<u8> = const { Cell::new(0) };
+    /// The kinds whose database watch is bound (same bits as `SELECTING`): one watch serves every view of a kind.
+    static WATCHED: Cell<u8> = const { Cell::new(0) };
     static LISTENER: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
     /// Searches injected before the view of their kind was built; each is applied when that view mounts.
     static PENDING_SEARCH: RefCell<Vec<(EntryKind, String)>> = const { RefCell::new(Vec::new()) };
@@ -52,20 +53,7 @@ thread_local! {
     static DOWNLOAD_SINK: RefCell<Option<Rc<dyn Fn(EntryKind, Vec<i64>, DownloadAmount)>>> = const { RefCell::new(None) };
 }
 
-/// The screen id of the global search page (`spec/entries.json`).
-pub const GLOBAL_SEARCH_SCREEN: &str = "global_search";
-
 pub use crate::library::actions::DownloadAmount;
-
-/// The sidebar index of a kind's library for a nav style: anime is 0, manga is 1, or 5 when the style moves the
-/// manga library into More (`MangaLibraryTab.kt`, B-1.1).
-pub fn sidebar_index(kind: EntryKind, style: NavStyle) -> u8 {
-    match kind {
-        EntryKind::Anime => 0,
-        EntryKind::Manga if style == NavStyle::MOVE_MANGA_TO_MORE => 5,
-        EntryKind::Manga => 1,
-    }
-}
 
 /// What the library's refresh button asks of the app (T-26a-102).
 #[derive(Clone)]
@@ -131,7 +119,7 @@ fn visible(kind: Option<EntryKind>) -> Option<LibraryView> {
 /// The Library sidebar item was selected while it was already showing: open the settings sheet of the visible kind.
 pub fn reselect() {
     if let Some(view) = visible(None) {
-        view.open_settings();
+        view.open_settings(crate::library::view::sheet::Tab::Filter);
     }
 }
 
@@ -156,6 +144,11 @@ pub fn search_library(kind: EntryKind, query: &str) {
     crate::ui::pop_to_root();
     crate::ui::open("library");
     inject_search(kind, query);
+    show_kind(kind);
+}
+
+/// Switches the Library tab to `kind`'s page (T-36a-060: a deep link to an entry selects the matching library).
+pub fn show_kind(kind: EntryKind) {
     if let Some(view) = visible(Some(kind)) {
         let page = if kind == EntryKind::Anime { "anime" } else { "manga" };
         if let Some(stack) = view.widget().ancestor(gtk::Stack::static_type()).and_downcast::<gtk::Stack>() {
@@ -164,44 +157,16 @@ pub fn search_library(kind: EntryKind, query: &str) {
     }
 }
 
-/// Opens the global search page with `query` in its search box (T-37a-022).
-fn open_global_search(query: &str) {
-    crate::ui::open(GLOBAL_SEARCH_SCREEN);
-    if query.is_empty() {
-        return;
-    }
-    let name = format!("screen:{GLOBAL_SEARCH_SCREEN}");
-    let window = crate::ui::window();
-    // the page pushed last is the newest widget carrying the screen name
-    if let Some(entry) = find_in_named(window.upcast_ref(), &name).and_then(|page| first_search_entry(&page)) {
-        entry.set_text(query);
-    }
+/// The route of "search globally" from the library of `kind`: the global search page, with `query` in its box.
+fn global_search_route(kind: EntryKind, query: &str) -> BrowseRoute {
+    let kind = if kind == EntryKind::Anime { BrowseKind::Anime } else { BrowseKind::Manga };
+    BrowseRoute::GlobalSearch { kind, source_id: None, query: query.to_owned() }
 }
 
-fn find_in_named(root: &gtk::Widget, name: &str) -> Option<gtk::Widget> {
-    let mut found = (root.widget_name() == name).then(|| root.clone());
-    let mut child = root.first_child();
-    while let Some(c) = child {
-        if let Some(inner) = find_in_named(&c, name) {
-            found = Some(inner);
-        }
-        child = c.next_sibling();
-    }
-    found
-}
-
-fn first_search_entry(root: &gtk::Widget) -> Option<gtk::SearchEntry> {
-    if let Some(entry) = root.downcast_ref::<gtk::SearchEntry>() {
-        return Some(entry.clone());
-    }
-    let mut child = root.first_child();
-    while let Some(c) = child {
-        if let Some(entry) = first_search_entry(&c) {
-            return Some(entry);
-        }
-        child = c.next_sibling();
-    }
-    None
+/// Opens the global search page with `query` in its search box (T-37a-022). The request is parked first, because the
+/// page builds itself from it (`browse::search_screen::body`).
+fn open_global_search(kind: EntryKind, query: &str) {
+    crate::browse::pending::open(global_search_route(kind, query));
 }
 
 /// `(id, is_local)` for each entry. An entry that cannot be read counts as local, so its files are never deleted.
@@ -215,14 +180,6 @@ fn local_flags(db: &Arc<Db>, kind: EntryKind, ids: &[i64]) -> Vec<(i64, bool)> {
             (*id, source.map_or(true, |s| s == 0))
         })
         .collect()
-}
-
-/// The title of an entry, for the pages that still open by title.
-pub fn entry_title(db: &Arc<Db>, kind: EntryKind, id: i64) -> Option<String> {
-    match kind {
-        EntryKind::Manga => MangaRepo::new(db.clone()).by_id(id).ok().map(|m| m.title),
-        EntryKind::Anime => AnimeRepo::new(db.clone()).by_id(id).ok().map(|a| a.title),
-    }
 }
 
 /// Source name and language for the search and the language badge. A source with no stored row shows its id.
@@ -306,53 +263,14 @@ fn remove_anime(paths: &dyn Paths, db: &Arc<Db>, id: i64, now: i64) -> kuro_data
     })
 }
 
-fn spec_id(kind: EntryKind) -> &'static str {
-    match kind {
-        EntryKind::Anime => "anime_library",
-        EntryKind::Manga => "manga_library",
-    }
-}
-
-/// Whether the entry is a local one (source 0). Local entries open by id, so two folders with one title stay apart.
-fn is_local_entry(db: &Arc<Db>, kind: EntryKind, id: i64) -> bool {
-    let source = match kind {
-        EntryKind::Manga => MangaRepo::new(db.clone()).by_id(id).map(|m| m.source),
-        EntryKind::Anime => AnimeRepo::new(db.clone()).by_id(id).map(|a| a.source),
-    };
-    source.is_ok_and(|s| s == LOCAL_SOURCE_ID)
-}
-
 fn nav(kind: EntryKind, db: Arc<Db>) -> Nav {
     let anime = kind == EntryKind::Anime;
-    let open = {
-        let db = db.clone();
-        Rc::new(move |id| {
-            if is_local_entry(&db, kind, id) {
-                match kind {
-                    EntryKind::Manga => crate::local_flow::open::entry(id),
-                    EntryKind::Anime => crate::entry_core::anime::route::open(id),
-                }
-            } else if let Some(title) = entry_title(&db, kind, id) {
-                crate::screens::open_entry(&title, anime);
-            }
-        })
-    };
-    let resume = {
-        let db = db.clone();
-        Rc::new(move |r: crate::library::view::Resume| {
-            if is_local_entry(&db, kind, r.entry) {
-                // the item is a chapter or episode id, so the local reader or player finds it without its name
-                match kind {
-                    EntryKind::Manga => crate::ui::push(&crate::local_flow::reader::open_local_chapter(r.entry, r.item)),
-                    EntryKind::Anime => {
-                        crate::local_flow_anime::open_local_episode(r.item);
-                    }
-                }
-            } else if let Some(title) = entry_title(&db, kind, r.entry) {
-                crate::screens::open_media(anime, &title, &r.item.to_string());
-            }
-        })
-    };
+    // every entry opens by its id: the page for its kind, and the reader or the player for a chapter or an episode
+    let open = Rc::new(move |id| crate::screens::open_entry(anime, id));
+    // one launcher hook for every opener: the external player when the preference says so and a launcher is installed
+    let resume = Rc::new(move |r: crate::library::view::Resume| {
+        crate::updates::open_route::open(anime, r.entry, r.item, crate::updates::open_route::route(anime, r.external, false))
+    });
     let delete = {
         let db = db.clone();
         Rc::new(move |ids: Vec<i64>| {
@@ -394,7 +312,7 @@ fn nav(kind: EntryKind, db: Arc<Db>) -> Nav {
             }
         }),
         delete,
-        global_search: Rc::new(open_global_search),
+        global_search: Rc::new(move |query| open_global_search(kind, query)),
         edit_categories: Rc::new(|| crate::ui::open("categories")),
         selecting: Rc::new(move |on| set_selecting(kind, on)),
         update: Rc::new(move |category| match UPDATE_HOST.with(|h| h.borrow().clone()) {
@@ -416,10 +334,24 @@ fn open_secrets() -> Arc<dyn kuro_platform::secrets::SecretStore> {
     }
 }
 
+/// Whether a chapter is on disk, for the continue button's downloaded filter. A local manga has every chapter; the
+/// app keeps no anime download cache yet, so an episode is never downloaded.
+fn item_downloaded(kind: EntryKind, db: Arc<Db>, index: Option<kuro_downloads::index::DownloadIndex>) -> Rc<dyn Fn(i64) -> bool> {
+    Rc::new(move |id| {
+        if kind == EntryKind::Anime {
+            return false;
+        }
+        let Some(chapter) = ChapterRepo::new(db.clone()).by_id(id).ok().flatten() else { return false };
+        let Ok(manga) = MangaRepo::new(db.clone()).by_id(chapter.manga_id) else { return false };
+        crate::reader::launch::downloaded_lookup(index.clone(), &manga)(&chapter)
+    })
+}
+
 fn deps(kind: EntryKind) -> Deps {
     let app = crate::data::app();
     let db = app.db(kind);
     let store = app.base.store().clone();
+    let player = kuro_prefs::player::PlayerPrefs::new(store.clone());
     let prefs = Rc::new(LibraryPrefs::new(store.clone()));
     let categories = Rc::new(kuro_domain::category::service::CategoryService::new(
         db.clone(),
@@ -430,6 +362,7 @@ fn deps(kind: EntryKind) -> Deps {
     let downloaded_only = app.base.downloaded_only.clone();
     // the per-row download count comes from the download index; the tracker logins from the secret store
     let index = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
+    let item_downloaded = item_downloaded(kind, db.clone(), index.clone());
     let logins = Rc::new(Logins::new(kind, open_secrets, move || {
         glib::MainContext::default().invoke(move || {
             if let Some(view) = visible(Some(kind)) {
@@ -450,16 +383,55 @@ fn deps(kind: EntryKind) -> Deps {
         downloaded_only: Rc::new(move || downloaded_only.get()),
         logged_in: Rc::new(move || ids_logins.get()),
         tracker_names: Rc::new(move || trackers::names(kind, &names_logins.get())),
-        always_external: Rc::new(|| false),
-        item_downloaded: Rc::new(|_| false),
+        always_external: Rc::new(move || player.always_use_external_player.get()),
+        item_downloaded,
     }
 }
 
-/// The library page of one kind: the view and the header actions (settings sheet, overflow menu). `None` when the
-/// worker thread cannot start, so the caller keeps its fallback.
+/// Marks `kind` as watched in `slot`; `false` when it already was.
+fn claim_watch(slot: &Cell<u8>, kind: EntryKind) -> bool {
+    let fresh = slot.get() & bit(kind) == 0;
+    slot.set(slot.get() | bit(kind));
+    fresh
+}
+
+/// Reloads the library of `kind` whenever the database changes under it: a chapter read, an entry added from Browse, a
+/// library update, a category renamed (T-08a-032). The first publication of each watch is the state the view loads
+/// itself, so it is skipped; an error publication is logged and the next change tries again. Bound once per kind:
+/// `refresh` reloads the visible view, so a second watch (another build of the page) would only reload it twice.
+fn watch_database(kind: EntryKind) {
+    use crate::watch::bind_watch;
+    if !WATCHED.with(|w| claim_watch(w, kind)) {
+        return;
+    }
+    let app = crate::data::app();
+    let rows = on_change("library", move || refresh(kind));
+    let categories = on_change("categories", move || refresh(kind));
+    match kind {
+        EntryKind::Anime => bind_watch(AnimeRepo::new(app.db(kind)).subscribe_library(), move |p| rows(p.and_then(|s| (*s).as_ref().map(drop).map_err(String::clone)))),
+        EntryKind::Manga => bind_watch(MangaRepo::new(app.db(kind)).subscribe_library(), move |p| rows(p.and_then(|s| (*s).as_ref().map(drop).map_err(String::clone)))),
+    }
+    bind_watch(app.categories(kind).repo().watch_all(), move |p| categories(p.map(drop)));
+}
+
+/// A watch callback: the first publication is ignored (the view loaded that state itself), an error is logged, and
+/// every later change runs `reload`.
+fn on_change(label: &'static str, reload: impl Fn() + 'static) -> impl Fn(Result<(), String>) {
+    let first = Cell::new(true);
+    move |published| match published {
+        Err(error) => tracing::warn!(%error, watch = label, "the library watch published an error"),
+        Ok(()) if first.replace(false) => {}
+        Ok(()) => reload(),
+    }
+}
+
+/// The library page of one kind: the view, and for the page header its search entry, its refresh button and the one
+/// menu (docs/design/main-window.md). `None` when the worker thread cannot start, so the caller keeps its fallback.
 pub fn build(anime: bool) -> Option<Built> {
     let kind = if anime { EntryKind::Anime } else { EntryKind::Manga };
     let app = crate::data::app();
+    // subscribed before the view's first load, so a write between the two is not missed
+    watch_database(kind);
     let view = match LibraryView::new(deps(kind), nav(kind, app.db(kind))) {
         Ok(view) => view,
         Err(e) => {
@@ -477,40 +449,128 @@ pub fn build(anime: bool) -> Option<Built> {
     if let Some(query) = pending.last() {
         view.set_query(query);
     }
-    let filter = crate::ui::icon_button("view-filter-symbolic", &tr(MsgKey::action_filter));
-    let v = view.clone();
-    filter.connect_clicked(move |_| v.open_settings());
-    // tinted while a filter is on, the forced downloaded-only view included (T-37a-056)
-    let tinted = filter.clone();
+    let menu = header_menu(kind, &view);
+    // the menu icon takes the theme's selected colour while a filter is on, the forced downloaded-only view included
+    // (T-37a-056)
+    let tinted = menu.clone();
     view.on_filters_active(move |active| {
         if active {
-            tinted.add_css_class("accent");
+            tinted.add_css_class(crate::theme::style::class::ACTIVE);
         } else {
-            tinted.remove_css_class("accent");
+            tinted.remove_css_class(crate::theme::style::class::ACTIVE);
         }
     });
-    let mut entries = crate::ui::screen(spec_id(kind)).menu;
-    let update_label = tr(MsgKey::action_update_library);
-    if !entries.contains(&update_label) {
-        entries.insert(0, update_label.clone());
+    let (search, refresh) = view.controls();
+    Some(Built { content: view.widget(), end: vec![search.upcast(), refresh.upcast(), menu.upcast()] })
+}
+
+/// The labels of the header menu, section by section: the sheet tabs, the library actions, the local folders.
+pub fn menu_sections(kind: EntryKind) -> [Vec<(String, &'static str)>; 3] {
+    let what = if kind == EntryKind::Anime { "anime" } else { "manga" };
+    [
+        vec![
+            (format!("{}…", tr(MsgKey::action_filter)), "filter"),
+            (format!("{}…", tr(MsgKey::action_sort)), "sort"),
+            (format!("{}…", tr(MsgKey::action_display)), "display"),
+        ],
+        vec![(tr(MsgKey::action_update_library), "update-library"), ("Open random entry".to_owned(), "random")],
+        vec![(format!("Add local {what} folder…"), "add-local"), (format!("Rescan local {what} folders"), "rescan-local")],
+    ]
+}
+
+/// The one header menu: a `GtkPopoverMenu` over the actions of a `lib` group on the button.
+fn header_menu(kind: EntryKind, view: &LibraryView) -> gtk::MenuButton {
+    let model = gtk::gio::Menu::new();
+    for section in menu_sections(kind) {
+        let part = gtk::gio::Menu::new();
+        for (label, action) in section {
+            part.append(Some(&label), Some(&format!("lib.{action}")));
+        }
+        model.append_section(None, &part);
+    }
+    let button = gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&model).tooltip_text("Library menu").build();
+    button.update_property(&[gtk::accessible::Property::Label("Library menu")]);
+    button.insert_action_group("lib", Some(&menu_actions(kind, view)));
+    button
+}
+
+/// The `lib` actions behind the header menu's items.
+fn menu_actions(kind: EntryKind, view: &LibraryView) -> gtk::gio::SimpleActionGroup {
+    use crate::library::view::sheet::Tab;
+    let group = gtk::gio::SimpleActionGroup::new();
+    let add = |name: &str, run: Box<dyn Fn()>| {
+        let action = gtk::gio::SimpleAction::new(name, None);
+        action.connect_activate(move |_, _| run());
+        group.add_action(&action);
+    };
+    for (name, tab) in [("filter", Tab::Filter), ("sort", Tab::Sort), ("display", Tab::Display)] {
+        let v = view.clone();
+        add(name, Box::new(move || v.open_settings(tab)));
     }
     let v = view.clone();
-    let menu = crate::ui::menu_button("view-more-symbolic", &entries, move |label| {
-        if label == "Open random entry" {
-            v.open_random();
-        } else if label == update_label {
-            v.update_library();
-        }
-    });
-    Some(Built { content: view.widget(), end: vec![filter.upcast(), menu.upcast()] })
+    add("update-library", Box::new(move || v.update_library()));
+    let v = view.clone();
+    add("random", Box::new(move || v.open_random()));
+    let (folder, rescan) = local_folder_actions(kind);
+    add("add-local", folder);
+    add("rescan-local", rescan);
+    group
+}
+
+/// Add-folder and rescan, from the local modules of `kind`.
+fn local_folder_actions(kind: EntryKind) -> (Box<dyn Fn()>, Box<dyn Fn()>) {
+    let [add, rescan]: [(&'static str, fn()); 2] = match kind {
+        EntryKind::Manga => [("manga add", crate::local_flow::ui::pick_folder), ("manga rescan", crate::local_flow::ui::rescan_all)],
+        EntryKind::Anime => [("anime add", crate::local_flow_anime::choose_folder), ("anime rescan", crate::local_flow_anime::rescan_in_background)],
+    };
+    (Box::new(move || run_local(add)), Box::new(move || run_local(rescan)))
+}
+
+#[cfg(test)]
+thread_local! {
+    static LOCAL_CALLS: RefCell<Option<Vec<&'static str>>> = const { RefCell::new(None) };
+}
+
+fn run_local((name, run): (&'static str, fn())) {
+    #[cfg(test)]
+    if LOCAL_CALLS.with(|c| c.borrow_mut().as_mut().map(|calls| calls.push(name)).is_some()) {
+        return;
+    }
+    let _ = name;
+    run();
 }
 
 #[cfg(test)]
 mod tests {
-    use kuro_data::manga::Manga;
+    use kuro_data::manga::{Manga, MangaUpdate};
     use kuro_testkit::TempPaths;
 
     use super::*;
+
+    #[test]
+    fn the_database_watch_binds_once_per_kind() {
+        let slot = Cell::new(0);
+        assert!(claim_watch(&slot, EntryKind::Manga), "the first build binds it");
+        assert!(!claim_watch(&slot, EntryKind::Manga), "a second build of the page does not");
+        assert!(claim_watch(&slot, EntryKind::Anime), "the other kind has its own");
+    }
+
+    /// Needs a display and runs in a child process with fresh app data (see `screens::alone`).
+    #[test]
+    fn a_favourite_added_to_the_database_shows_in_the_mounted_library() {
+        crate::screens::alone::run(module_path!(), "a_favourite_added_to_the_database_shows_in_the_mounted_library", |ctx| {
+            let (_stack, _window) = crate::testing::nav();
+            let built = build(false).expect("the library mounts");
+            build(false).expect("a second build of the page");
+            let view = visible(Some(EntryKind::Manga)).expect("the manga view is registered");
+            assert!(crate::screens::alone::pump(ctx, || view.cover_count() == 0), "an empty library loads");
+            let repo = MangaRepo::new(crate::data::app().db(EntryKind::Manga));
+            let id = repo.insert(&Manga { source: 7, url: "/b".into(), title: "Berserk".into(), ..Manga::create() }).expect("insert");
+            repo.update(&MangaUpdate { favorite: Some(true), ..MangaUpdate::new(id) }).expect("favourite");
+            assert!(crate::screens::alone::pump(ctx, || view.cover_count() == 1), "the favourite shows without a refresh");
+            drop(built);
+        });
+    }
 
     fn manga_db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -540,7 +600,7 @@ mod tests {
         let (_dir, db) = manga_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() }).expect("insert");
-        assert_eq!(entry_title(&db, EntryKind::Manga, id).as_deref(), Some("Berserk"));
+        assert_eq!(repo.by_id(id).expect("stored").title, "Berserk");
         let paths = TempPaths::new().expect("temp paths");
         assert_eq!(remove_from_library(&paths, &db, EntryKind::Manga, &[id]), 1);
         assert!(!repo.by_id(id).expect("still stored").favorite);
@@ -583,18 +643,16 @@ mod tests {
     }
 
     #[test]
-    fn t_37a_061_anime_is_index_zero_and_manga_one_or_five_by_nav_style() {
-        for style in NavStyle::ALL.iter().copied() {
-            assert_eq!(sidebar_index(EntryKind::Anime, style), 0, "{style:?}");
-            let manga = if style == NavStyle::MOVE_MANGA_TO_MORE { 5 } else { 1 };
-            assert_eq!(sidebar_index(EntryKind::Manga, style), manga, "{style:?}");
-        }
-    }
-
-    #[test]
-    fn t_37a_022_the_global_search_screen_is_a_spec_screen() {
-        crate::ui::with_spec(|s| assert!(s.screen(GLOBAL_SEARCH_SCREEN).is_some()));
-        assert_ne!(GLOBAL_SEARCH_SCREEN, "browse", "the Browse sidebar destination is not the search screen");
+    fn t_08a_032_a_library_watch_skips_its_first_publication_and_reloads_on_each_change_after_it() {
+        let reloads = Rc::new(Cell::new(0));
+        let seen = reloads.clone();
+        let watch = on_change("library", move || seen.set(seen.get() + 1));
+        watch(Ok(()));
+        assert_eq!(reloads.get(), 0, "the state the view already loaded");
+        watch(Ok(()));
+        watch(Err("database is locked".into()));
+        watch(Ok(()));
+        assert_eq!(reloads.get(), 2, "each change reloads; an error only logs and the watcher goes on");
     }
 
     #[test]
@@ -607,8 +665,46 @@ mod tests {
     }
 
     #[test]
+    fn the_header_menu_holds_the_sheet_tabs_the_library_actions_and_the_local_folders_once_each() {
+        for kind in [EntryKind::Anime, EntryKind::Manga] {
+            let sections = menu_sections(kind);
+            let actions: Vec<&str> = sections.iter().flatten().map(|(_, a)| *a).collect();
+            assert_eq!(actions, ["filter", "sort", "display", "update-library", "random", "add-local", "rescan-local"]);
+            let labels: Vec<&str> = sections.iter().flatten().map(|(l, _)| l.as_str()).collect();
+            assert!(!labels.iter().any(|l| l.contains("Update category")), "the header refresh button is the only category update");
+        }
+        assert_eq!(menu_sections(EntryKind::Anime)[2][0].0, "Add local anime folder…");
+        assert_eq!(menu_sections(EntryKind::Manga)[2][1].0, "Rescan local manga folders");
+    }
+
+    #[test]
     fn an_unknown_source_shows_its_id_and_no_language() {
         let (_dir, db) = manga_db();
         assert_eq!(source_info(&db, EntryKind::Manga, 42), SourceInfo { name: "42".into(), language: String::new() });
+    }
+
+    #[test]
+    fn the_real_header_menu_registers_every_action_and_reaches_the_local_flow() {
+        crate::testing::with_display(|| {
+            let (_dir, view) = crate::library::view::test_view(crate::library::view::test_nav());
+            for (kind, word) in [(EntryKind::Manga, "manga"), (EntryKind::Anime, "anime")] {
+                let group = menu_actions(kind, &view);
+                let mut names: Vec<String> = group.list_actions().iter().map(|n| n.to_string()).collect();
+                names.sort();
+                assert_eq!(names, ["add-local", "display", "filter", "random", "rescan-local", "sort", "update-library"]);
+                for section in menu_sections(kind) {
+                    for (_, action) in section {
+                        assert!(group.has_action(action), "the menu item lib.{action} has an action");
+                    }
+                }
+                LOCAL_CALLS.with(|c| *c.borrow_mut() = Some(Vec::new()));
+                // through the real button, so the group must be inserted under `lib`
+                let button = header_menu(kind, &view);
+                button.activate_action("lib.add-local", None).expect("lib.add-local");
+                button.activate_action("lib.rescan-local", None).expect("lib.rescan-local");
+                let calls = LOCAL_CALLS.with(|c| c.borrow_mut().take()).unwrap_or_default();
+                assert_eq!(calls, [format!("{word} add"), format!("{word} rescan")]);
+            }
+        });
     }
 }

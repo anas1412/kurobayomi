@@ -44,7 +44,7 @@ pub const POLICIES: [(&str, &str); 22] = [
     ("Q19", "RENAME"),
     ("Q20", "CHANGE"),
     ("Q21", "FIX"),
-    ("Q22", "NOTE"),
+    ("Q22", "DROP"),
 ];
 
 /// The rows that deviate from upstream, in table order. Generated into `quirks/DEVIATIONS.md`.
@@ -292,14 +292,19 @@ fn q21_grid_size_is_clamped_to_fifteen_before_shifting() {
     assert_eq!(clamp_grid_size(9), 9);
 }
 
-/// Q22: the swipe keys are crossed upstream (end key for the left action). The keys stay as they are, so backups still
-/// read.
+/// Q22: the swipe keys were crossed upstream. The whole feature is dropped on desktop, so the keys are not registered
+/// any more and a backup that still carries them is skipped.
 #[test]
-fn q22_swipe_keys_stay_crossed_as_upstream() {
-    let prefs = lib_prefs();
-    assert_eq!(prefs.swipe_left_episode.key(), "pref_episode_swipe_end_action");
-    assert_eq!(prefs.swipe_right_episode.key(), "pref_episode_swipe_start_action");
-    assert_eq!(prefs.swipe_left_chapter.key(), "pref_chapter_swipe_end_action");
+fn q22_the_swipe_keys_are_dropped() {
+    for key in [
+        "pref_episode_swipe_end_action",
+        "pref_episode_swipe_start_action",
+        "pref_chapter_swipe_end_action",
+        "pref_chapter_swipe_start_action",
+    ] {
+        assert!(kuro_prefs::registry::lookup(key).is_none(), "{key}");
+        assert!(kuro_prefs::registry::is_dropped(key), "{key}");
+    }
 }
 
 #[test]

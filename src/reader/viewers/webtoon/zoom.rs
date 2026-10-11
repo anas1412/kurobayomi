@@ -86,6 +86,7 @@ impl WebtoonZoom {
         scale.max(self.min_rate()).min(MAX_RATE)
     }
 
+    #[cfg(test)]
     /// The height of an item of the strip at the current scale: `original / scale` below 1, else `original` (E-31).
     pub fn item_height(&self, original: i32) -> i32 {
         if self.scale < 1.0 { (f64::from(original) / self.scale) as i32 } else { original }

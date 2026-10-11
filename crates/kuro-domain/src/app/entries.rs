@@ -10,27 +10,15 @@ use crate::entries::anime::viewer_flags::{AIRING_EPISODE_MASK, AIRING_TIME_MASK,
 
 /// Reading mode: bits 0-2 of `mangas.viewer` (`p1-data-and-config.md` 3.1).
 pub const READING_MODE_MASK: i64 = 0x7;
-/// Reader orientation: bits 3-5 of `mangas.viewer`.
-pub const ORIENTATION_MASK: i64 = 0x38;
 
 /// `Manga::reading_mode()`: the reading-mode bits of a `viewer` word, raw. Unknown values are the caller's to map.
 pub fn reading_mode(viewer: i64) -> i64 {
     viewer & READING_MODE_MASK
 }
 
-/// `Manga::reader_orientation()`: the orientation bits of a `viewer` word, raw.
-pub fn reader_orientation(viewer: i64) -> i64 {
-    viewer & ORIENTATION_MASK
-}
-
 /// `SetMangaViewerFlags.awaitSetReadingMode`. Only bits 0-2 change; `flag` is masked, so other bits of `flag` are ignored.
 pub fn set_manga_reading_mode(repo: &MangaRepo, manga_id: i64, flag: i64) -> DataResult<bool> {
     repo.set_viewer_bits(manga_id, flag, READING_MODE_MASK)
-}
-
-/// `SetMangaViewerFlags.awaitSetOrientation`. Only bits 3-5 change.
-pub fn set_manga_orientation(repo: &MangaRepo, manga_id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_viewer_bits(manga_id, flag, ORIENTATION_MASK)
 }
 
 /// `SetAnimeViewerFlags.awaitSetSkipIntroLength`: the length goes in its eight bits (`length and 0xFF`, EC-21: 300 stores
@@ -105,7 +93,6 @@ mod tests {
     #[test]
     fn the_manga_getters_return_the_raw_bit_groups() {
         assert_eq!(reading_mode(0x3D), 0x5);
-        assert_eq!(reader_orientation(0x3D), 0x38);
         assert_eq!(reading_mode(0x8), 0);
     }
 
@@ -115,28 +102,28 @@ mod tests {
         let id = repo.insert(&kuro_data::manga::Manga { viewer_flags: 0x38, ..kuro_data::manga::Manga::create() }).expect("insert");
         assert!(set_manga_reading_mode(&repo, id, 0x0D).expect("write"), "masked to 0b101");
         assert_eq!(repo.by_id(id).expect("read").viewer_flags, 0x3D);
-        assert!(set_manga_orientation(&repo, id, 0x10).expect("write"));
-        assert_eq!(repo.by_id(id).expect("read").viewer_flags, 0x15);
     }
 
     #[test]
-    fn parallel_setters_on_one_manga_keep_both_bits() {
-        let (_dir, repo) = manga_repo();
-        let id = repo.insert(&kuro_data::manga::Manga::create()).expect("insert");
+    fn parallel_setters_on_one_anime_keep_both_bits() {
+        let (_dir, repo) = anime_repo();
+        let id = repo.insert(&kuro_data::anime::Anime::create()).expect("insert");
         thread::scope(|scope| {
             scope.spawn(|| {
                 for _ in 0..200 {
-                    set_manga_reading_mode(&repo, id, 0x2).expect("reading mode");
+                    set_anime_skip_intro_length(&repo, id, 30).expect("skip intro");
                 }
             });
             scope.spawn(|| {
                 for _ in 0..200 {
-                    set_manga_orientation(&repo, id, 0x30).expect("orientation");
+                    set_anime_next_episode_airing(&repo, id, 7, 1_700_000_000).expect("airing");
                 }
             });
         });
         let viewer = repo.by_id(id).expect("read").viewer_flags;
-        assert_eq!(viewer, 0x32, "EC-23: both bit groups are set");
+        assert_eq!(viewer & INTRO_MASK, 30, "EC-23: the intro group is set");
+        assert_eq!((viewer & AIRING_EPISODE_MASK) >> 8, 7, "EC-23: the airing group is set");
+        assert_eq!((viewer & AIRING_TIME_MASK) >> 24, 1_700_000_000);
     }
 
     #[test]

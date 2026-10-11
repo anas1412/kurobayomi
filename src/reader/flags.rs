@@ -1,16 +1,14 @@
-//! Reading mode, orientation and crop-borders state of one manga (`ReadingMode.kt`, `ReaderOrientation.kt`,
-//! `SetMangaViewerFlags.kt`, `ReaderViewModel.kt:669-749`). T-43a-004, T-43a-036, T-43a-037.
+//! Reading mode and crop-borders state of one manga (`ReadingMode.kt`, `SetMangaViewerFlags.kt`,
+//! `ReaderViewModel.kt:669-749`). T-43a-004, T-43a-036, T-43a-037.
 //!
-//! Writes merge under the mask so bits outside the field survive, as `Flag` does upstream. The Linux port does
-//! not apply the orientation lock (T-43a-068); the value is still stored and resolved here.
+//! Writes merge under the mask so bits outside the field survive, as `Flag` does upstream. A viewer word restored
+//! from a backup keeps whatever other bits it carries; only the reading-mode bits are read and written here.
 
 use kuro_prefs::flags::{Flag, with_flag};
-use kuro_prefs::reader::{ORIENTATION_MASK, READING_MODE_MASK, ReaderOrientation, ReadingMode};
+use kuro_prefs::reader::{READING_MODE_MASK, ReadingMode};
 
 /// Default reading mode when the preference is unset (`ReaderPreferences.kt:38-41`, right to left).
 pub const DEFAULT_READING_MODE_PREF: i32 = 2;
-/// Default orientation when the preference is unset (`ReaderPreferences.kt:43-46`, free).
-pub const DEFAULT_ORIENTATION_PREF: i32 = 8;
 
 /// The reading mode a manga's viewer flags select. Only the mode bits are read.
 pub fn reading_mode_of(viewer_flags: i64) -> ReadingMode {
@@ -33,24 +31,6 @@ pub fn resolve_reading_mode(viewer_flags: i64, default_pref: i32) -> ReadingMode
 /// Writes a reading mode into the viewer flags, keeping every bit outside [`READING_MODE_MASK`].
 pub fn set_reading_mode(viewer_flags: i64, mode: ReadingMode) -> i64 {
     with_flag(viewer_flags, Flag::new(i64::from(mode.flag_value()), i64::from(READING_MODE_MASK)))
-}
-
-/// The orientation a manga's viewer flags select. Only the orientation bits are read; unknown codes are `Default`.
-pub fn orientation_of(viewer_flags: i64) -> ReaderOrientation {
-    ReaderOrientation::from_preference((viewer_flags & i64::from(ORIENTATION_MASK)) as i32)
-}
-
-/// `getMangaOrientation(resolveDefault = true)`.
-pub fn resolve_orientation(viewer_flags: i64, default_pref: i32) -> ReaderOrientation {
-    match orientation_of(viewer_flags) {
-        ReaderOrientation::Default => ReaderOrientation::from_preference(default_pref),
-        orientation => orientation,
-    }
-}
-
-/// Writes an orientation into the viewer flags, keeping every bit outside [`ORIENTATION_MASK`].
-pub fn set_orientation(viewer_flags: i64, orientation: ReaderOrientation) -> i64 {
-    with_flag(viewer_flags, Flag::new(i64::from(orientation.flag_value()), i64::from(ORIENTATION_MASK)))
 }
 
 /// Which crop-borders preference a reading mode uses (`ReaderViewModel.toggleCropBorders`, `:742-749`).
@@ -96,22 +76,11 @@ mod tests {
     }
 
     #[test]
-    fn orientation_values_match_the_flag_table_under_the_mask() {
-        let expected = [0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30];
-        for (orientation, value) in ReaderOrientation::ALL.into_iter().zip(expected) {
-            assert_eq!(orientation.flag_value(), value);
-        }
-        assert_eq!(ORIENTATION_MASK, 0x38);
-    }
-
-    #[test]
     #[allow(non_snake_case)] // the name is the acceptance test name in the plan
     fn reading_mode_fromPreference_unknown_is_default() {
         assert_eq!(ReadingMode::from_preference(0x06), ReadingMode::Default);
         assert_eq!(reading_mode_of(0x06), ReadingMode::Default);
         assert_eq!(ReadingMode::from_preference(0x38), ReadingMode::Default);
-        assert_eq!(orientation_of(0x06), ReaderOrientation::Default);
-        assert_eq!(orientation_of(0x38), ReaderOrientation::Default);
     }
 
     #[test]
@@ -119,17 +88,12 @@ mod tests {
         let flags = 0x18 | 0x100 | 0x3;
         let after_mode = set_reading_mode(flags, ReadingMode::Webtoon);
         assert_eq!(after_mode, 0x18 | 0x100 | 0x4);
-        let after_orientation = set_orientation(flags, ReaderOrientation::LockedPortrait);
-        assert_eq!(after_orientation, 0x20 | 0x100 | 0x3);
-        assert_eq!(set_orientation(0x3, ReaderOrientation::Free) & 0x7, 0x3);
     }
 
     #[test]
     fn manga_mode_zero_resolves_to_preference_and_raw_is_kept_otherwise() {
         assert_eq!(resolve_reading_mode(0, DEFAULT_READING_MODE_PREF), ReadingMode::RightToLeft);
         assert_eq!(resolve_reading_mode(0x3, DEFAULT_READING_MODE_PREF), ReadingMode::Vertical);
-        assert_eq!(resolve_orientation(0, DEFAULT_ORIENTATION_PREF), ReaderOrientation::Free);
-        assert_eq!(resolve_orientation(0x10, DEFAULT_ORIENTATION_PREF), ReaderOrientation::Portrait);
     }
 
     #[test]
@@ -141,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn e20b_writing_a_mode_keeps_the_orientation_bits() {
+    fn e20b_writing_a_mode_keeps_the_bits_outside_the_mode_field() {
         assert_eq!(set_reading_mode(0x38, ReadingMode::RightToLeft), 0x3A);
         assert_eq!(reading_mode_of(set_reading_mode(0x38, ReadingMode::Webtoon) as i64), ReadingMode::Webtoon);
     }

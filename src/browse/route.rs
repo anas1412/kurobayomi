@@ -112,27 +112,6 @@ pub fn search_listing(query: &str) -> BrowseQuery {
     BrowseQuery::Search(query.to_owned())
 }
 
-/// A stub source never starts a listing (B-EC-07).
-pub fn start_listing(stub: bool, query: BrowseQuery) -> Option<BrowseQuery> {
-    (!stub).then_some(query)
-}
-
-/// The tab-switch channel: bounded at one with drop-oldest (E-40 R-40-08). A new request replaces an unread one.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PageRequest {
-    pending: Option<BrowsePage>,
-}
-
-impl PageRequest {
-    pub fn send(&mut self, page: BrowsePage) {
-        self.pending = Some(page);
-    }
-
-    pub fn take(&mut self) -> Option<BrowsePage> {
-        self.pending.take()
-    }
-}
-
 /// Search box debounce (B§5.1).
 pub const SEARCH_DEBOUNCE_MS: u64 = 250;
 
@@ -185,15 +164,6 @@ mod tests {
     }
 
     #[test]
-    fn the_request_channel_keeps_only_the_newest_unread_page() {
-        let mut channel = PageRequest::default();
-        channel.send(BrowsePage::AnimeExtensions);
-        channel.send(BrowsePage::MangaExtensions);
-        assert_eq!(channel.take(), Some(BrowsePage::MangaExtensions));
-        assert_eq!(channel.take(), None);
-    }
-
-    #[test]
     fn reselect_opens_global_search_for_the_visible_kind() {
         assert_eq!(
             reselect_route(BrowsePage::MangaSources),
@@ -210,13 +180,6 @@ mod tests {
         assert!(!search_due(1_000, 1_249));
         assert!(search_due(1_000, 1_250));
         assert!(search_due(1_000, 2_000));
-    }
-
-    #[test]
-    fn blank_search_sends_empty_text_and_stubs_never_list() {
-        assert_eq!(search_listing(""), BrowseQuery::Search(String::new()));
-        assert_eq!(start_listing(true, BrowseQuery::Popular), None);
-        assert_eq!(start_listing(false, BrowseQuery::Latest), Some(BrowseQuery::Latest));
     }
 
     #[test]

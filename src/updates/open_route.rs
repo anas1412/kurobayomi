@@ -1,6 +1,6 @@
 //! Which player opens a unit from the Updates feed (T-42b-018, T-42a-035, behaviour 12.5). The anime row tap uses the
 //! player preference as it is (`alt` is false); the bar's play actions pass `alt` and so open the other player. The
-//! internal player is `screens::open_media`. The external launcher belongs to the player area; it registers with
+//! internal player is `screens::open_unit`. The external launcher belongs to the player area; it registers with
 //! [`install_external`], and until it does an external route falls back to the internal player.
 
 use std::cell::RefCell;
@@ -24,27 +24,28 @@ pub fn resolve(route: Route, launcher_installed: bool) -> Route {
     if route == Route::External && launcher_installed { Route::External } else { Route::Internal }
 }
 
-type Launcher = Rc<dyn Fn(&str, &str) -> bool>;
+/// Takes the entry id and the unit (episode) id.
+type Launcher = Rc<dyn Fn(i64, i64) -> bool>;
 
 thread_local! {
     static EXTERNAL: RefCell<Option<Launcher>> = const { RefCell::new(None) };
 }
 
-/// Registers the external player launcher: it gets the entry title and the unit name and says whether it launched.
-pub fn install_external(launcher: impl Fn(&str, &str) -> bool + 'static) {
+/// Registers the external player launcher: it gets the entry id and the unit id and says whether it launched.
+pub fn install_external(launcher: impl Fn(i64, i64) -> bool + 'static) {
     EXTERNAL.with(|l| *l.borrow_mut() = Some(Rc::new(launcher)));
 }
 
 /// Opens the unit by `route`. A launcher that declines, or none, leaves the unit to the internal player.
-pub fn open(anime: bool, title: &str, unit: &str, route: Route) {
+pub fn open(anime: bool, entry_id: i64, unit_id: i64, route: Route) {
     let launcher = EXTERNAL.with(|l| l.borrow().clone());
-    if resolve(route, launcher.is_some()) == Route::External && launcher.is_some_and(|launch| launch(title, unit)) {
+    if resolve(route, launcher.is_some()) == Route::External && launcher.is_some_and(|launch| launch(entry_id, unit_id)) {
         return;
     }
     if route == Route::External {
         tracing::info!("no external player took the unit; opening it in the internal player");
     }
-    crate::screens::open_media(anime, title, unit);
+    crate::screens::open_unit(anime, entry_id, unit_id);
 }
 
 #[cfg(test)]
@@ -70,5 +71,21 @@ mod tests {
         assert_eq!(resolve(Route::External, false), Route::Internal);
         assert_eq!(resolve(Route::External, true), Route::External);
         assert_eq!(resolve(Route::Internal, true), Route::Internal);
+    }
+
+    /// The one hook behind the Library, History and Updates openers: the installed launcher gets an external anime
+    /// unit and nothing else. With no app data the internal fallback opens nothing, so the calls are all it shows.
+    #[test]
+    fn the_installed_launcher_is_asked_for_external_anime_units_only() {
+        let asked: Rc<RefCell<Vec<(i64, i64)>>> = Rc::default();
+        let log = Rc::clone(&asked);
+        install_external(move |entry, unit| {
+            log.borrow_mut().push((entry, unit));
+            true
+        });
+        open(true, 1, 10, route(true, true, false));
+        open(true, 2, 20, route(true, false, false));
+        open(false, 3, 30, route(false, true, false));
+        assert_eq!(*asked.borrow(), [(1, 10)], "only the anime unit whose preference is external");
     }
 }

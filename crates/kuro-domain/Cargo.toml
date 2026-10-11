@@ -30,7 +30,6 @@ tracing = { workspace = true }
 mlua = { version = "0.10", features = ["lua51", "vendored"] }
 
 [dev-dependencies]
-wiremock = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 kuro-testkit = { path = "../kuro-testkit" }
 tracing-subscriber = { workspace = true }

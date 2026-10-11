@@ -4,10 +4,6 @@
 
 use crate::values::PrefValue;
 
-/// Legacy key holding the old "secure screen" boolean (retired; secure screen is now a mode).
-pub const LEGACY_SECURE_SCREEN: &str = "secure_screen";
-/// Current key of the secure screen mode.
-pub const SECURE_SCREEN_V2: &str = "secure_screen_v2";
 /// Legacy boolean: when false the "ongoing only" restriction of library updates was on in the old split.
 pub const LEGACY_UPDATE_ONLY_NON_COMPLETED: &str = "pref_update_only_non_completed_key";
 /// Library update interval (hours), `Int`.
@@ -22,8 +18,6 @@ pub const EXTENSION_REPO_SETS: [&str; 2] = ["extension_repos", "anime_extension_
 /// One conversion that was applied. Shown in the restore report.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Conversion {
-    /// `secure_screen = true` became `secure_screen_v2 = ALWAYS`.
-    SecureScreenAlways,
     /// An interval of 1 or 2 hours (removed in 2.x) became 3.
     IntervalRaised { from: i32 },
     /// A removed quick interval (3, 4, 6 or 8 hours) became 12.
@@ -49,11 +43,6 @@ fn set_value(entries: &mut Vec<(String, PrefValue)>, key: &str, value: PrefValue
 /// Applies every conversion to `entries` in place and returns the ones that ran, in a fixed order.
 pub fn convert(entries: &mut Vec<(String, PrefValue)>) -> Vec<Conversion> {
     let mut done = Vec::new();
-
-    if take(entries, LEGACY_SECURE_SCREEN) == Some(PrefValue::Bool(true)) {
-        set_value(entries, SECURE_SCREEN_V2, PrefValue::Str("ALWAYS".into()));
-        done.push(Conversion::SecureScreenAlways);
-    }
 
     if let Some(PrefValue::Int(hours)) = entries.iter().find(|(k, _)| k == UPDATE_INTERVAL).map(|(_, v)| v.clone()) {
         let next = match hours {
@@ -107,20 +96,6 @@ mod tests {
 
     fn entry(key: &str, value: PrefValue) -> (String, PrefValue) {
         (key.to_owned(), value)
-    }
-
-    #[test]
-    fn secure_screen_true_becomes_always_and_the_legacy_key_is_consumed() {
-        let mut e = vec![entry(LEGACY_SECURE_SCREEN, PrefValue::Bool(true))];
-        assert_eq!(convert(&mut e), vec![Conversion::SecureScreenAlways]);
-        assert_eq!(e, vec![entry(SECURE_SCREEN_V2, PrefValue::Str("ALWAYS".into()))]);
-    }
-
-    #[test]
-    fn secure_screen_false_is_consumed_and_changes_nothing_else() {
-        let mut e = vec![entry(LEGACY_SECURE_SCREEN, PrefValue::Bool(false))];
-        assert!(convert(&mut e).is_empty());
-        assert!(e.is_empty());
     }
 
     #[test]
@@ -185,10 +160,9 @@ mod tests {
     #[test]
     fn the_import_report_lists_the_conversions_and_writes_the_new_values() {
         let store = PrefStore::in_memory();
-        let entries = vec![entry(LEGACY_SECURE_SCREEN, PrefValue::Bool(true)), entry(UPDATE_INTERVAL, PrefValue::Int(1))];
+        let entries = vec![entry(UPDATE_INTERVAL, PrefValue::Int(1))];
         let report = import_preferences(&store, entries, &CategoryMaps::default(), None, false).unwrap();
-        assert_eq!(report.conversions, vec![Conversion::SecureScreenAlways, Conversion::IntervalRaised { from: 1 }]);
-        assert_eq!(store.get_raw(SECURE_SCREEN_V2), Some(PrefValue::Str("ALWAYS".into())));
+        assert_eq!(report.conversions, vec![Conversion::IntervalRaised { from: 1 }]);
         assert_eq!(store.get_raw(UPDATE_INTERVAL), Some(PrefValue::Int(3)));
     }
 }

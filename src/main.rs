@@ -16,13 +16,11 @@ mod data;
 mod entry;
 #[allow(dead_code)]
 mod entry_core;
-mod entry_model;
 mod ext_host;
 mod library;
 mod library_update;
 mod misc;
 // no screen calls the client yet; the extension host and the trackers take it from here
-#[allow(dead_code)]
 mod net_client;
 mod local_flow;
 mod local_flow_anime;
@@ -31,11 +29,11 @@ mod gio_notifier;
 mod incognito;
 mod locale;
 mod open_link;
-mod player;
 #[allow(dead_code)]
 mod player_view;
 mod player_scripts;
 mod reader;
+mod recipe_sources;
 mod reporter;
 mod screens;
 mod selection;
@@ -151,6 +149,7 @@ fn main() -> glib::ExitCode {
         let _entered = rt.enter();
         app.run()
     };
+    net_client::flush_jars();
     // detached history flushes get up to 2 s to finish before the runtime goes away
     let unfinished = kuro_domain::history::repo::join_pending_flushes(std::time::Duration::from_secs(2));
     if unfinished > 0 {
@@ -232,8 +231,6 @@ fn build_window(app: &gtk::Application) {
     let sidebar = sidebar(&tabs);
     let prefs = settings_ui::route::prefs();
     settings_ui::appearance::open_start_tab(&tabs, &prefs);
-    settings_ui::appearance::apply_theme_mode(prefs.ui.theme_mode.get());
-    settings_ui::appearance::apply_saved_pure_black(prefs.ui.theme_dark_amoled.get(), prefs.ui.theme_mode.get());
     // one selection for every layout: the sidebar and the bottom bar show the same tab (T-36a-004)
     let host = shell::Shell::get().expect("the shell is installed in main");
     host.migration_done();
@@ -252,7 +249,7 @@ fn build_window(app: &gtk::Application) {
     // the toast layer sits over the whole window (T-12a-014)
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&outer));
-    let _toaster = toast::attach(&overlay);
+    net_client::set_toaster(toast::attach(&overlay));
     win.set_child(Some(&overlay));
     // the app-state banners above everything: indexing, downloaded only, incognito (T-36a-018). The incognito module
     // keeps the action, the notification and the More switch; its own banner is not placed.
@@ -407,8 +404,6 @@ fn build_window(app: &gtk::Application) {
                 }
             }
         }
-        screens::open_entry("Title 1", true);
-        screens::open_entry("Title 1", false);
         println!("smoke: {} screens, {sheets} sheets, {dialogs} dialogs opened", ids.len());
         app.quit();
     }
@@ -439,70 +434,51 @@ fn tabs() -> gtk::Stack {
     tabs.set_hhomogeneous(false);
     for n in ui::with_spec(|s| s.nav.clone()) {
         let Some(b) = screens::body(&n.id) else { continue };
-        let title = if n.id == "library" { n.title.clone() } else { ui::screen(&n.id).title };
-        tabs.add_titled(&ui::page(&title, &b.content, b.end, false), Some(&n.id), &n.title).set_icon_name(&n.icon);
+        // a page that starts with its own one-row header (Library, Updates, History, Browse) is used as it is; the
+        // sidebar already names the tab, so it carries no title
+        let own_header = b.content.first_child().is_some_and(|w| w.is::<gtk::HeaderBar>());
+        let page: gtk::Widget = if own_header { b.content } else { ui::page(&ui::screen(&n.id).title, &b.content, b.end, false).upcast() };
+        tabs.add_titled(&page, Some(&n.id), &n.title).set_icon_name(&n.icon);
     }
     tabs
 }
 
-/// GNOME-style navigation sidebar with Aniyomi's badges (new updates, extension updates).
+/// The navigation sidebar: app name in a split header, then one row per destination (icon, label, badge) from the top.
+/// Always full width; there is no collapsed mode (docs/design/main-window.md).
 fn sidebar(tabs: &gtk::Stack) -> GBox {
     let header = gtk::HeaderBar::new();
     header.set_decoration_layout(Some(&ui::decoration(true)));
-    let title = gtk::Label::builder().label("Kurobayomi").css_classes(["title"]).build();
-    header.set_title_widget(Some(&title));
-    let toggle = gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Collapse sidebar").build();
-    header.pack_start(&toggle);
+    header.set_title_widget(Some(&gtk::Label::builder().label("Kurobayomi").css_classes(["title"]).build()));
     ui::no_sticky_focus(&header);
 
     let list = gtk::ListBox::new();
     list.add_css_class("navigation-sidebar");
-    list.set_valign(gtk::Align::Center);
+    list.set_valign(gtk::Align::Start);
     list.set_margin_top(widgets::rail::PAD_V);
     list.set_margin_bottom(widgets::rail::PAD_V);
     let ids: Vec<String> = ui::with_spec(|s| s.nav.iter().map(|n| n.id.clone()).collect());
-    // widgets that hide in icon-only mode, and the dots that replace badges there
-    let (mut expanded, mut dots, mut rows): (Vec<gtk::Widget>, Vec<gtk::Widget>, Vec<GBox>) = (vec![], vec![], vec![]);
-    let mut squares: Vec<(gtk::Image, gtk::ListBoxRow)> = vec![]; // bigger icon + square selection in icon-only mode
     for n in ui::with_spec(|s| s.nav.clone()) {
-        let h = GBox::new(O::Horizontal, 8);
-        h.set_margin_start(6);
-        h.set_margin_end(6);
-        h.set_margin_top(6);
-        h.set_margin_bottom(6);
-        // both badges start empty and are bound to the shared counts below; no count is written here
-        let badge = if matches!(n.id.as_str(), "updates" | "browse") { " " } else { "" };
-        let icon = gtk::Overlay::new();
-        let img = gtk::Image::from_icon_name(&n.icon);
-        icon.set_child(Some(&img));
-        h.append(&icon);
-        let label = gtk::Label::builder().label(&n.title).xalign(0.0).hexpand(true).build();
-        h.append(&label);
-        expanded.push(label.upcast());
-        if !badge.is_empty() {
-            let b = gtk::Label::builder().label(badge).css_classes(["accent", "caption-heading"]).width_chars(3).xalign(1.0).build();
+        let h = GBox::new(O::Horizontal, 12);
+        ui::margins(&h, widgets::rail::ROW_PAD);
+        h.append(&gtk::Image::from_icon_name(&n.icon));
+        h.append(&gtk::Label::builder().label(&n.title).xalign(0.0).hexpand(true).build());
+        // the Updates and Browse pills start empty and follow the shared counts; no count is written here
+        if matches!(n.id.as_str(), "updates" | "browse") {
+            let b = gtk::Label::builder().css_classes(["kb-nav-badge", "numeric"]).valign(gtk::Align::Center).opacity(0.0).build();
             h.append(&b);
-            b.set_label("");
-            let updates_label = (n.id == "updates").then(|| b.clone());
-            let browse_label = (n.id == "browse").then(|| b.clone());
-            expanded.push(b.upcast());
-            let dot = gtk::Label::builder().use_markup(true).label("<span size=\"5pt\">●</span>").css_classes(["accent"]).halign(gtk::Align::End).valign(gtk::Align::Start).visible(false).build();
-            icon.add_overlay(&dot);
-            if let Some(label) = updates_label.as_ref().filter(|_| data::is_installed()) {
-                misc::badge::bind(label, &dot, &kuro_prefs::library::LibraryPrefs::new(data::app().base.store().clone()));
+            if data::is_installed() {
+                let store = data::app().base.store().clone();
+                if n.id == "updates" {
+                    misc::badge::bind(&b, &kuro_prefs::library::LibraryPrefs::new(store));
+                } else {
+                    misc::badge::bind_extension_updates(&b, &kuro_prefs::source::SourcePrefs::new(store));
+                }
             }
-            if let Some(label) = browse_label.as_ref().filter(|_| data::is_installed()) {
-                misc::badge::bind_extension_updates(label, &dot, &kuro_prefs::source::SourcePrefs::new(data::app().base.store().clone()));
-            }
-            dots.push(dot.upcast());
         }
-        let tip = n.title.clone();
-        let row = gtk::ListBoxRow::builder().child(&h).tooltip_text(tip).build();
+        let row = gtk::ListBoxRow::builder().child(&h).build();
         row.set_margin_top(widgets::rail::ITEM_SPACING / 2);
         row.set_margin_bottom(widgets::rail::ITEM_SPACING / 2);
         list.append(&row);
-        squares.push((img, row));
-        rows.push(h);
     }
     {
         let (tabs, ids) = (tabs.clone(), ids.clone());
@@ -532,36 +508,10 @@ fn sidebar(tabs: &gtk::Stack) -> GBox {
     });
     list.select_row(list.row_at_index(0).as_ref());
 
-    let b = GBox::new(O::Vertical, widgets::rail::HEADER_GAP);
-    b.set_size_request(widgets::rail::MIN_WIDTH, -1);
+    let b = GBox::new(O::Vertical, 0);
+    b.set_size_request(widgets::rail::WIDTH, -1);
+    b.add_css_class("kb-sidebar");
     b.append(&header);
-    b.append(&gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_width(true).vexpand(true).build());
-
-    // icon-only rail: hide labels/badges/title, show badge dots, drop the app-icon decoration
-    let narrow = std::rc::Rc::new(std::cell::Cell::new(false));
-    let narrow_now = narrow.clone();
-    toggle.connect_toggled(move |t| {
-        let rail = t.is_active() || narrow_now.get();
-        expanded.iter().for_each(|w| w.set_visible(!rail));
-        dots.iter().for_each(|w| w.set_visible(rail));
-        rows.iter().for_each(|h| h.set_halign(if rail { gtk::Align::Center } else { gtk::Align::Fill }));
-        for (img, row) in &squares {
-            img.set_pixel_size(if rail { 24 } else { -1 });
-            row.set_halign(if rail { gtk::Align::Center } else { gtk::Align::Fill });
-            row.set_size_request(if rail { 48 } else { -1 }, if rail { 48 } else { -1 });
-        }
-        title.set_visible(!rail);
-        header.set_decoration_layout(Some(if rail { ":".to_string() } else { ui::decoration(true) }.as_str()));
-        t.set_tooltip_text(Some(if t.is_active() { "Expand sidebar" } else { "Collapse sidebar" }));
-    });
-    // below 600 px the labels hide and the icons remain, whatever the toggle says
-    let follower = toggle.clone();
-    widgets::rail::follow_width(&b, move |now| {
-        narrow.set(now);
-        follower.emit_by_name::<()>("toggled", &[]);
-    });
-    if std::env::var("KUROBAYOMI_RAIL").is_ok() {
-        toggle.set_active(true);
-    }
+    b.append(&gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build());
     b
 }

@@ -158,6 +158,16 @@ pub fn install(opened: Opened) -> Result<(), String> {
     APP.with(|cell| cell.set(Rc::new(app))).map_err(|_| "the app data is already open".to_owned())
 }
 
+/// Test helper: fresh databases in `dir` and an in-memory preference store, for [`install`]. Installing is for the
+/// life of the GTK thread, so only a test that runs alone (`--ignored`) may use it.
+#[cfg(test)]
+pub fn open_in(dir: &std::path::Path) -> Result<Opened, String> {
+    let (manga_path, anime_path) = (dir.join("manga.db"), dir.join("anime.db"));
+    let manga_db = Arc::new(Db::new(&manga_path, kuro_db::schema_manga::open(&manga_path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?);
+    let anime_db = Arc::new(Db::new(&anime_path, kuro_db::schema_anime::open(&anime_path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?);
+    Ok(Opened { prefs_store: PrefStore::in_memory(), manga_db, anime_db })
+}
+
 /// True once [`install`] has succeeded.
 pub fn is_installed() -> bool {
     APP.with(|cell| cell.get().is_some())

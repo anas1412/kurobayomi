@@ -1,6 +1,6 @@
 //! Selection engine of the Updates lists (behaviour 2.5, T-42a-006). The selected flags live on the rows; this keeps
-//! only the two bounds (`positions[0..1]`), so a stale id set cannot exist (EC-42-U-04). The bounds are NOT recomputed
-//! when the list is replaced (B 5.4, T-42b-006); [`Selection::sync`] is for a caller that wants that. Indices are positions in the row list; headers are not rows.
+//! only the two bounds (`positions[0..1]`), so a stale id set cannot exist (EC-42-U-04). The bounds are recomputed
+//! with [`Selection::sync`] whenever the list is replaced (EC-42-U-05, `feed::replace_rows`). Indices are positions in the row list; headers are not rows.
 
 use std::ops::Range;
 
@@ -24,6 +24,7 @@ impl Default for Selection {
 }
 
 impl Selection {
+    #[cfg(test)]
     pub fn bounds(&self) -> [isize; 2] {
         self.bounds
     }

@@ -117,6 +117,7 @@ impl<A: Clone> Banners<A> {
         self.current.as_ref().map(|s| &s.banner)
     }
 
+    #[cfg(test)]
     pub fn queued(&self) -> usize {
         self.queue.len()
     }

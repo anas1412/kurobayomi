@@ -15,8 +15,8 @@ Labels use the Aniyomi string keys (behaviour §16). Visible English strings are
 - Badges: a count bubble at the top-end of the icon. Updates count and Browse extension count (§1.4).
 
 ### 1.2 Layout, wide (tablet / desktop)
-- Left: `NavigationRail` equivalent: a sidebar `gtk::ListBox` (`navigation-sidebar` class), icon + label per entry, a collapse toggle in the sidebar header (mockup: `sidebar-show-symbolic`, tooltip "Collapse sidebar").
-- Collapsed (icon-only) mode is the mockup's existing behaviour (square selection, dots for badges). Keep.
+- Left: `NavigationRail` equivalent: a sidebar `gtk::ListBox` (`navigation-sidebar` class), icon + label per entry.
+- DROPPED: the collapse toggle and the collapsed (icon-only) mode. See `docs/design/main-window.md`.
 - Hidden on reader and player pages (mockup `immersive` rule, src/main.rs refresh closure).
 
 ### 1.3 Banners (AppStateBanners)

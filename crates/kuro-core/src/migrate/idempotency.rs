@@ -113,8 +113,6 @@ fn entry(key: &str, value: PrefValue) -> (String, PrefValue) {
 /// Entries that exercise every conversion rule of `kuro_prefs::legacy` once.
 fn legacy_fixtures() -> Vec<(&'static str, Vec<(String, PrefValue)>)> {
     vec![
-        ("secure screen on", vec![entry("secure_screen", PrefValue::Bool(true))]),
-        ("secure screen off", vec![entry("secure_screen", PrefValue::Bool(false))]),
         ("a valid interval", vec![entry(UPDATE_INTERVAL, PrefValue::Int(24))]),
         ("a retired quick interval", vec![entry(UPDATE_INTERVAL, PrefValue::Int(6))]),
         (

@@ -3,23 +3,29 @@
 
 use kuro_data::chapter::{Chapter, ChapterUpdate};
 use kuro_data::episode::{Episode, EpisodeUpdate};
+use kuro_source::model::normalize_scanlator;
 
 /// `s` as `None` when it is empty or only whitespace (`ifBlank { null }`).
 fn blank_to_none(s: Option<&str>) -> Option<String> {
     s.filter(|v| !v.trim().is_empty()).map(str::to_owned)
 }
 
-/// A source's chapter or episode number, parsed as `f32` and widened to `f64` the way Kotlin's
-/// `Float.toDouble()` does. The widened value keeps the `f32` rounding (T-06a-034).
+/// A source's chapter or episode number, parsed as `f32` and widened to `f64` through its shortest decimal text, so
+/// `1.1f32` is stored as `1.1` and not `1.100000023841858`. This deliberately corrects Kotlin's `Float.toDouble()`
+/// (EC-CH-07, T-15a-004, T-06a-034). The one widening rule of the app: `kuro_source::model::domain_chapter_number`.
 pub fn widen_source_number(n: f32) -> f64 {
-    f64::from(n)
+    kuro_source::model::domain_chapter_number(n)
 }
+
+/// Identity of a chapter or episode: its row id and url, as `ChapterImpl.equals` (T-06a-034). One definition, in kuro-data.
+pub use kuro_data::chapter::ChapterKey;
+pub use kuro_data::episode::EpisodeKey;
 
 /// Behaviour of a chapter row.
 pub trait ChapterExt {
     /// `chapterNumber >= 0`. `-1` (unknown) and `-2` (numberless sentinel) are not recognised.
     fn is_recognized_number(&self) -> bool;
-    /// Copies the source's name, url, upload date and number, and its scanlator (blank becomes `None`).
+    /// Copies the source's name, url, upload date and number, and its scanlator (blank becomes `None`, otherwise trimmed).
     /// Every other field of `self` is kept.
     fn copy_from(&self, other: &Chapter) -> Chapter;
     /// `Chapter.toChapterUpdate()`: all 12 optional fields filled.
@@ -37,7 +43,7 @@ impl ChapterExt for Chapter {
             url: other.url.clone(),
             date_upload: other.date_upload,
             chapter_number: other.chapter_number,
-            scanlator: blank_to_none(other.scanlator.as_deref()),
+            scanlator: normalize_scanlator(other.scanlator.as_deref()),
             ..self.clone()
         }
     }
@@ -120,11 +126,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn source_numbers_widen_from_f32_like_float_to_double() {
+    fn source_numbers_widen_through_their_decimal_form() {
         assert_eq!(widen_source_number(1.5), 1.5);
+        assert_eq!(widen_source_number(1.1), 1.1);
         let parsed: f32 = "0.1".parse().unwrap();
-        assert_eq!(widen_source_number(parsed), f64::from(0.1f32));
-        assert_ne!(widen_source_number(parsed), 0.1f64, "the f32 rounding is kept, as on Android");
+        assert_eq!(widen_source_number(parsed), 0.1f64);
+        assert_eq!(widen_source_number(-1.0), -1.0);
     }
 
     fn chapter() -> Chapter {
@@ -215,6 +222,8 @@ mod tests {
         source.chapter_number = 4.5;
         source.scanlator = Some("   ".into());
         let out = mine.copy_from(&source);
+        source.scanlator = Some(" Team X ".into());
+        assert_eq!(mine.copy_from(&source).scanlator.as_deref(), Some("Team X"), "T-15a-004: trimmed");
         assert_eq!(out.name, "New name");
         assert_eq!(out.url, "/new");
         assert_eq!(out.date_upload, 99);

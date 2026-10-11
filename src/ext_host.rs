@@ -98,11 +98,13 @@ pub fn anime_source_rows(state: &ExtensionState) -> (Vec<Source>, BTreeMap<i64, 
     (refs.iter().map(|s| Source::new(s.id, &s.name, &s.lang)).collect(), icons)
 }
 
-/// The anime sources and their icon files as the last state change left them.
+/// The anime sources and their icon files as the last state change left them, then the recipe and built-in sources.
 pub fn anime_sources() -> (Vec<Source>, BTreeMap<i64, String>) {
     LATEST.with(|l| {
         let latest = l.borrow();
-        (latest.anime_sources.clone(), latest.anime_icons.clone())
+        // the recipe sources (docs/source-recipes.md) have no package and no icon file
+        let sources = latest.anime_sources.iter().cloned().chain(crate::recipe_sources::anime_list()).chain(crate::browse::builtin::anime_list()).collect();
+        (sources, latest.anime_icons.clone())
     })
 }
 
@@ -267,6 +269,11 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
     };
     let prefs = SourcePrefs::new(store.clone());
     let handle = tokio::runtime::Handle::current();
+
+    // declarative sources: the recipes of the scrapers folder
+    crate::recipe_sources::start(store, &paths);
+    // the sources this build ships, and the image service their covers draw through
+    crate::browse::builtin::start(store, &paths);
 
     // manga packages: one scan, icons into the cache, problems kept by folder
     let registry = Arc::new(ExtensionRegistry::new());

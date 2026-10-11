@@ -1,40 +1,15 @@
 //! Chapter and episode name sanitizer (`ChapterSanitizer.kt`, `EpisodeSanitizer.kt`, T-05a-009). The two
 //! Kotlin objects are the same algorithm with the same 30-entry trim array, so one function serves both.
-//! Pure: no allocation beyond the returned string.
+//! Pure: no allocation beyond the returned string. T-05a-009, T-05a-016.
 
-/// The characters stripped from both ends in step 3: the Kotlin whitespace list without U+001C-U+001F,
-/// plus `-`, `_`, `,` and `:`. The 30 array entries of the Kotlin source hold 29 distinct characters.
-pub const TRIM_CHARS: [char; 29] = [
-    '\u{0020}', '\u{0009}', '\u{000A}', '\u{000B}', '\u{000C}', '\u{000D}', '\u{0085}', '\u{00A0}', '\u{1680}',
-    '\u{2000}', '\u{2001}', '\u{2002}', '\u{2003}', '\u{2004}', '\u{2005}', '\u{2006}', '\u{2007}', '\u{2008}',
-    '\u{2009}', '\u{200A}', '\u{2028}', '\u{2029}', '\u{202F}', '\u{205F}', '\u{3000}', '-', '_', ',', ':',
-];
-
-/// Kotlin `Char.isWhitespace()`: `Character.isWhitespace || Character.isSpaceChar`. Differs from Rust's
-/// `char::is_whitespace` in both directions (U+001C-U+001F in, U+0085 out).
-fn is_kotlin_whitespace(c: char) -> bool {
-    matches!(
-        c,
-        '\u{0009}'..='\u{000D}'
-            | '\u{001C}'..='\u{0020}'
-            | '\u{00A0}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200A}'
-            | '\u{2028}'
-            | '\u{2029}'
-            | '\u{202F}'
-            | '\u{205F}'
-            | '\u{3000}'
-    )
-}
+pub use kuro_db::episode_sanitizer::TRIM_CHARS;
 
 /// `sChapter.name.sanitize(manga.title)` and `sEpisode.name.sanitize(anime.title)`:
 /// 1. trim Kotlin whitespace, 2. drop one case-sensitive `title` prefix, 3. trim [`TRIM_CHARS`] from both ends.
+/// The one implementation lives in `kuro_db::episode_sanitizer` (kuro-db sits below this crate); chapter sync,
+/// episode sync and the episode wrapper all reach it through this function.
 pub fn sanitize_item_name(name: &str, title: &str) -> String {
-    let trimmed = name.trim_matches(is_kotlin_whitespace);
-    // An empty title is a no-op prefix, as `removePrefix("")` is.
-    let without_title = trimmed.strip_prefix(title).unwrap_or(trimmed);
-    without_title.trim_matches(|c| TRIM_CHARS.contains(&c)).to_owned()
+    kuro_db::episode_sanitizer::sanitize(name, title)
 }
 
 #[cfg(test)]
@@ -62,20 +37,27 @@ mod tests {
         }
     }
 
+    /// T-05a-016: the episode wrapper is the chapter function, so the vectors and every trim character agree.
+    #[test]
+    fn the_episode_wrapper_gives_the_same_results_as_the_item_function() {
+        use crate::episode::sanitize_episode_name;
+        let cases = [("One Piece - 12", "One Piece"), ("\u{001F}One Piece 1", "One Piece"), ("_-:Special,", ""), ("One Piece", "One Piece")];
+        for (name, title) in cases {
+            assert_eq!(sanitize_episode_name(name, title), sanitize_item_name(name, title), "{name:?}");
+        }
+        for c in TRIM_CHARS {
+            let padded = format!("{c}x{c}");
+            assert_eq!(sanitize_item_name(&padded, ""), "x", "U+{:04X}", c as u32);
+            assert_eq!(sanitize_episode_name(&padded, ""), "x", "U+{:04X}", c as u32);
+        }
+    }
+
     #[test]
     fn trim_set_has_29_distinct_characters() {
         let mut sorted = TRIM_CHARS.to_vec();
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), 29);
-    }
-
-    #[test]
-    fn kotlin_whitespace_includes_the_separator_controls_and_excludes_next_line() {
-        assert!(is_kotlin_whitespace('\u{001F}'));
-        assert!(is_kotlin_whitespace('\u{3000}'));
-        assert!(!is_kotlin_whitespace('\u{0085}'));
-        assert!(!is_kotlin_whitespace('.'));
     }
 
     #[test]

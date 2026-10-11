@@ -19,7 +19,7 @@ use tokio::sync::watch;
 use super::directory::SourceDirectory;
 use kuro_data::anime::AnimeRepo;
 use kuro_domain::kind::EntryKind;
-use super::global_search::{Candidate, GlobalSearch, MigrateStart, deep_link_fallback, migrate_start, row_text_route};
+use super::global_search::{Candidate, GlobalSearch, MigrateStart, migrate_start, row_text_route};
 use super::pages::{GlobalSearchNav, SearchChips, SourceFilter, global_search as search_page_widget};
 use super::pending::{self, SearchIntent};
 use super::prefs::BrowsePrefs;
@@ -98,12 +98,6 @@ pub fn source_route_for(kind: BrowseKind, source_id: i64, typed: &str, migrating
         (BrowseKind::Anime, BrowseRoute::BrowseSource { source_id, query, .. }) => BrowseRoute::AnimeBrowseSource { source_id, query },
         (_, route) => route,
     }
-}
-
-/// A deep link that found nothing replaces its page with global search for the query (GS-EC-16).
-pub fn replace_with_global_search(query: &str) {
-    crate::ui::pop();
-    pending::open(deep_link_fallback(query));
 }
 
 /// What a search page needs of the app.

@@ -8,7 +8,6 @@ pub mod archive;
 pub mod dir;
 pub mod download;
 pub mod http;
-pub mod saver;
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -49,6 +48,7 @@ impl Loader {
         !matches!(self, Loader::Http(_))
     }
 
+    #[cfg(test)]
     pub fn is_recycled(&self) -> bool {
         match self {
             Loader::Directory(l) => l.is_recycled(),
@@ -69,6 +69,7 @@ impl Loader {
         Ok(pages)
     }
 
+    #[cfg(test)]
     /// `loadPage`. Local loaders check that they are still open. The HTTP loader queues the page and returns a
     /// guard that cancels the entries it queued when dropped.
     pub fn load_page(&self, index: usize) -> Result<Option<http::PageGuard>, LoadError> {

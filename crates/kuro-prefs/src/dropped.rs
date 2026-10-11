@@ -14,6 +14,11 @@
 //! * External downloader choice (T-09a-022). `use_external_downloader` and `external_downloader_selection` are read for
 //!   backup parity only. The UI does not offer the option. The loss is third-party Android download apps.
 //!
+//! * Phone-only features removed on purpose (the screen orientation of the reader and the player, the tablet layout
+//!   mode, the secure screen mode, the swipe actions of the chapter and episode rows, the brightness and volume
+//!   gestures of the player). Their keys are not registered, a restore skips them, and nothing reads them: see
+//!   `registry::DROPPED_KEYS` and `docs/drop-decisions.md`.
+//!
 //! The round-trip test below keeps the list of registered Android-only keys true.
 
 #[cfg(test)]
@@ -26,13 +31,11 @@ mod tests {
 
     /// The keys that Android used and the desktop hides (T-02a-032). Each one is either registered or, for the two
     /// listed in `DROPPED`, deliberately absent.
-    const ANDROID_ONLY: [&str; 19] = [
+    const ANDROID_ONLY: [&str; 15] = [
         "extension_installer",
         "pref_display_profile_key",
         "pref_hardware_bitmap_threshold",
         "pref_always_decode_long_strip_with_ssiv",
-        "tablet_ui_mode",
-        "pref_default_player_orientation_type_key",
         "pref_show_system_status_bar",
         "pref_enable_pip",
         "pref_pip_episode_toasts",
@@ -41,8 +44,6 @@ mod tests {
         "cutout_short",
         "reader_volume_keys",
         "reader_volume_keys_inverted",
-        "pref_default_orientation_type_key",
-        "secure_screen_v2",
         "backup_flags",
         "use_external_downloader",
         "external_downloader_selection",
@@ -81,6 +82,19 @@ mod tests {
             }
         }
         assert_eq!(round_tripped, ANDROID_ONLY.len() - DROPPED.len());
+    }
+
+    #[test]
+    fn the_removed_feature_keys_are_dropped_not_kept_for_round_trip() {
+        for key in [
+            "tablet_ui_mode",
+            "pref_default_player_orientation_type_key",
+            "pref_default_orientation_type_key",
+            "secure_screen_v2",
+        ] {
+            assert!(!ANDROID_ONLY.contains(&key), "{key} is dropped, not kept");
+            assert!(crate::registry::is_dropped(key), "{key} is not in DROPPED_KEYS");
+        }
     }
 
     #[test]

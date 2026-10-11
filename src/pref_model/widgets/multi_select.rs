@@ -51,7 +51,7 @@ pub fn row(common: &ItemCommon, pref: Pref<BTreeSet<String>>, entries: Vec<Entry
     {
         let (stored, refresh, entries, pref, veto, gate) =
             (stored.clone(), refresh.clone(), entries.clone(), pref.clone(), veto.clone(), gate.clone());
-        built.row.connect_activate(move |row| {
+        crate::widgets::row_activate::on_activate(&built.row, move |row| {
             let Some(parent) = row.root().and_downcast::<gtk::Window>() else {
                 return;
             };

@@ -1,11 +1,6 @@
 //! Root navigator (Kotlin `Navigator`, Voyager). One stack per window; `Route::Home` is always the root.
 //!
-//! `Navigator` is pure. `NavHost` puts the stack on a `gtk::Stack` and runs the slide transitions.
-
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use gtk::prelude::*;
+//! `Navigator` is pure.
 
 /// Duration of a forward or back slide, in milliseconds (T-36a-002).
 pub const TRANSITION_MS: u32 = 250;
@@ -63,6 +58,7 @@ impl Navigator {
         self.stack.last().unwrap_or(&Route::Home)
     }
 
+    #[cfg(test)]
     pub fn direction(&self) -> Direction {
         self.last
     }
@@ -90,6 +86,7 @@ impl Navigator {
         self.stack.last_mut().map(|top| std::mem::replace(top, route))
     }
 
+    #[cfg(test)]
     /// Pops everything above `Home` and returns the popped routes, top first.
     pub fn pop_until_root(&mut self) -> Vec<Route> {
         let mut popped = Vec::new();
@@ -97,74 +94,6 @@ impl Navigator {
             popped.push(route);
         }
         popped
-    }
-}
-
-/// A `gtk::Stack` showing the navigator's top page. Popped pages are removed once the back slide has finished.
-pub struct NavHost {
-    stack: gtk::Stack,
-    nav: RefCell<Navigator>,
-    /// Child names, parallel to the navigator stack (`names[0]` is the home page).
-    names: RefCell<Vec<String>>,
-    serial: RefCell<u64>,
-}
-
-impl NavHost {
-    pub fn new(home: &impl IsA<gtk::Widget>) -> Rc<Self> {
-        let stack = gtk::Stack::new();
-        stack.set_transition_duration(TRANSITION_MS);
-        stack.set_hexpand(true);
-        stack.set_vexpand(true);
-        stack.add_named(home, Some("route-0"));
-        stack.set_visible_child_name("route-0");
-        Rc::new(Self { stack, nav: RefCell::new(Navigator::new()), names: RefCell::new(vec!["route-0".into()]), serial: RefCell::new(0) })
-    }
-
-    pub fn widget(&self) -> &gtk::Stack {
-        &self.stack
-    }
-
-    /// Pushes a page under a fresh child name, so two pushes of the same route are two pages.
-    pub fn push(&self, route: Route, page: &impl IsA<gtk::Widget>) {
-        let name = {
-            let mut serial = self.serial.borrow_mut();
-            *serial += 1;
-            format!("route-{}", *serial)
-        };
-        self.stack.add_named(page, Some(&name));
-        self.nav.borrow_mut().push(route);
-        self.names.borrow_mut().push(name.clone());
-        self.stack.set_transition_type(gtk::StackTransitionType::SlideLeft);
-        self.stack.set_visible_child_name(&name);
-    }
-
-    /// Pops the top page. Returns false on the root.
-    pub fn pop(&self) -> bool {
-        if self.nav.borrow_mut().pop().is_none() {
-            return false;
-        }
-        let Some(gone) = self.names.borrow_mut().pop() else { return false };
-        let previous = self.names.borrow().last().cloned().unwrap_or_else(|| "route-0".into());
-        self.stack.set_transition_type(gtk::StackTransitionType::SlideRight);
-        self.stack.set_visible_child_name(&previous);
-        // the page leaves the stack after the slide, so the transition is not cut short
-        let stack = self.stack.clone();
-        gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(u64::from(TRANSITION_MS) + 10), move || {
-            if let Some(page) = stack.child_by_name(&gone) {
-                stack.remove(&page);
-            }
-        });
-        true
-    }
-
-    /// Pops every page above the root.
-    pub fn pop_until_root(&self) {
-        while self.pop() {}
-    }
-
-    /// The top route.
-    pub fn last(&self) -> Route {
-        self.nav.borrow().last().clone()
     }
 }
 

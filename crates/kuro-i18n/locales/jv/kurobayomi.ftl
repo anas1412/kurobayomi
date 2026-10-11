@@ -294,8 +294,6 @@ theme_light = Mati
 
 theme_dark = Murup
 
-theme_monet = Dinamis
-
 theme_greenapple = Ijo apel
 
 theme_lavender = Lavender
@@ -329,10 +327,6 @@ lock_always = Tansah
 lock_never = ora tau
 
 hide_notification_content = Umpetake konten notifikasi
-
-secure_screen = Amanaken layar
-
-secure_screen_summary = Amanaken layar sembunikan konten aplikasi wektu ngaleh aplikasi lan blokir tangkapan layar
 
 pref_category_nsfw_content = Sumber NSFW (18+)
 
@@ -445,12 +439,6 @@ ext_nsfw_short = 18+
 ext_nsfw_warning = Sumber saka ekstensi iki bisa ngemot konten NSFW (18+)
 
 ext_install_service_notif = Masang ekstensi…
-
-ext_installer_pref = Pemasang
-
-ext_installer_shizuku_stopped = Shizuku ora lumaku
-
-ext_installer_shizuku_unavailable_dialog = Pasang lan wiwit Shizuku kanggo migunakake Shizuku dadi pemasang ekstensi.
 
 pref_fullscreen = Layar wutuh
 

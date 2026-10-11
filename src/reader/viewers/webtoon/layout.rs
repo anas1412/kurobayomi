@@ -47,6 +47,7 @@ impl StripLayout {
         self.heights.get(index).copied().unwrap_or(0)
     }
 
+    #[cfg(test)]
     /// Changes one item's height (a decode finished, or a placeholder was resized).
     pub fn set_height(&mut self, index: usize, height: i32) {
         if let Some(h) = self.heights.get_mut(index) {

@@ -18,8 +18,6 @@ action_continue = Продовжити
 
 manga = Манґа
 
-pref_library_summary = Категорії, глобальне оновлення, гортання розділів
-
 pref_behavior = Поведінка розділу
 
 action_add_repo_message = Додайте додаткові репозиторії до { $arg1 }. Це має бути URL-адреса, яка закінчується на "index.min.json".
@@ -80,21 +78,9 @@ pref_player_settings_summary = Вбудований програвач, жест
 
 pref_player_internal = Внутрішній програвач
 
-pref_player_internal_summary = Прогрес, контроль, орієнтація
-
 pref_progress_mark_as_seen = В який момент позначити епізод як переглянутий
 
 pref_preserve_watching_position = Зберігати положення перегляду на переглянутих епізодах
-
-pref_category_player_orientation = Орієнтація
-
-rotation_video = відео
-
-rotation_reverse_landscape = Зворотний ландшафт
-
-rotation_sensor_portrait = Вертикальне зображення
-
-rotation_sensor_landscape = Горизонтальне зображення
 
 pref_category_controls = Елементи керування
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = Показати індикатор по�
 pref_controls_show_chapter_indicator_info = Відображається, лише якщо у відео є розділи
 
 pref_controls_display_volume_percentage = Показати гучність у відсотках
-
-pref_remember_brightness = Запам'ятати та переключитися на останню використану яскравість
 
 pref_remember_volume = Запам'ятати та переключитися на останню використану гучність
 
@@ -179,12 +163,6 @@ pref_external_player_preference = Налаштування зовнішньог�
 pref_player_gestures = Жести
 
 pref_player_gestures_summary = Пошук, подвійне торкання, керування медіа
-
-pref_category_player_sliders = Повзунки
-
-enable_volume_brightness_gestures = Ввімкнути жести гучності та яскравості
-
-pref_controls_swap_vol_brightness = Поміняти повзунок гучності та яскравості
 
 pref_category_player_seeking = Пошук
 
@@ -948,10 +926,6 @@ theme_mocha = Моча
 
 pref_behavior_episode = Поведінка епізоду
 
-pref_episode_swipe_end = Проведіть пальцем праворуч
-
-pref_episode_swipe_start = Епізод при проведенні пальцем ліворуч
-
 pref_mark_duplicate_seen_episode_seen = Позначити дублікат переглянутого епізоду як переглянуте
 
 pref_mark_duplicate_seen_episode_seen_existing = Після перегляду епізоду
@@ -1430,10 +1404,6 @@ onboarding_permission_notifications = Дозвіл на сповіщення
 
 onboarding_permission_notifications_description = Отримувати сповіщення про оновлення бібліотек та інше.
 
-onboarding_permission_ignore_battery_opts = Використання батареї на фоні
-
-onboarding_permission_ignore_battery_opts_description = Уникати переривань для довготривалих оновлень бібліотек, завантажень, та бекапів.
-
 onboarding_permission_crashlytics = Надіслати звіт про помилку
 
 onboarding_permission_crashlytics_description = Надіслати анонімний звіт про помилку
@@ -1476,10 +1446,6 @@ pref_browse_summary = Джерела, розширення, глобальний
 
 pref_backup_summary = Ручне та автоматичне резервування, сховище
 
-pref_security_summary = Блокування застосунку, захист екрану
-
-pref_advanced_summary = Вивантаження журнала з помилками, оптимізація батареї
-
 pref_category_theme = Тема
 
 pref_app_theme = Тема застосунку
@@ -1489,8 +1455,6 @@ theme_system = Системна
 theme_light = Світла
 
 theme_dark = Темна
-
-theme_monet = Динамічна
 
 theme_greenapple = Зелене яблуко
 
@@ -1539,10 +1503,6 @@ lock_always = Завжди
 lock_never = Ніколи
 
 hide_notification_content = Приховати вміст сповіщень
-
-secure_screen = Захистити екран додатку
-
-secure_screen_summary = Ховати вміст застосунку при перемиканні застосунків та блокувати скріншоти
 
 firebase_summary = Надсилання звітів про помилки та аналітику дозволить нам ідентифікувати та виправити недоліки, покращити працездатність та зробити майбутні оновлення більш актуальними для ваших потреб
 
@@ -1618,10 +1578,6 @@ include = Включати: { $arg1 }
 
 exclude = Виключати: { $arg1 }
 
-pref_chapter_swipe_end = Проведіть пальцем праворуч
-
-pref_chapter_swipe_start = Проведіть пальцем ліворуч
-
 multi_lang = Багатомовне
 
 ext_updates_pending = Очікуються оновлення
@@ -1677,14 +1633,6 @@ ext_nsfw_warning = Джерела з цього розширення можут�
 ext_permission_install_apps_warning = Потребуються дозволи для встановлення додатків. Натисніть сюди для отримання.
 
 ext_install_service_notif = Встановлюю розширення…
-
-ext_installer_pref = Встановлювач
-
-ext_installer_legacy = Спадок
-
-ext_installer_shizuku_stopped = Shizuku не запущений
-
-ext_installer_shizuku_unavailable_dialog = Встановіть і запустіть Shizuku, щоб використовувати Shizuku як інсталятор розширення.
 
 ext_revoke_trust = Скинути довірені невідомі розширення
 
@@ -1883,22 +1831,6 @@ double_tap_anim_speed_0 = Без анімації
 double_tap_anim_speed_normal = Нормальна
 
 double_tap_anim_speed_fast = Швидка
-
-pref_rotation_type = Орієнтація за замовчуванням
-
-rotation_type = Орієнтація
-
-rotation_free = Вільна
-
-rotation_portrait = Портретна
-
-rotation_reverse_portrait = Портретна навпаки
-
-rotation_landscape = Альбомна
-
-rotation_force_portrait = Заблокована портретна
-
-rotation_force_landscape = Заблокована альбомна
 
 color_filter_r_value = R
 
@@ -2104,8 +2036,6 @@ pref_refresh_library_covers = Оновити обкладинки в біблі�
 
 pref_reset_viewer_flags = Скинути налаштування читалки для кожної серії
 
-pref_reset_viewer_flags_summary = Скидує режим читання та орієнтацію всіх серій
-
 pref_reset_viewer_flags_success = Скидання всіх налаштувань
 
 pref_reset_viewer_flags_error = Не вдалось скинути налаштування
@@ -2113,20 +2043,6 @@ pref_reset_viewer_flags_error = Не вдалось скинути налашт�
 pref_dump_crash_logs = Поділіться журналами збоїв
 
 pref_dump_crash_logs_summary = Зберігає логи помилок до файлу для надсилання розробникам
-
-label_background_activity = Фонова активність
-
-pref_disable_battery_optimization = Вимкнути збереження батареї
-
-pref_disable_battery_optimization_summary = Допомагає фоновому оновленню бібліотеки та резервним копіям
-
-battery_optimization_disabled = Збереження батареї вже вимкнено
-
-battery_optimization_setting_activity_not_found = Не вдалось відкрити налаштування пристрою
-
-about_dont_kill_my_app = У деяких виробників є додаткові обмеження застосунків, котрі вбивають фонові сервіси. На цьому сайті більше інформації з приводу того, як це виправити.
-
-pref_tablet_ui_mode = Планшетний інтерфейс
 
 pref_verbose_logging = Докладне журналювання
 

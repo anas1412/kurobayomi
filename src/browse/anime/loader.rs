@@ -71,11 +71,15 @@ async fn load_page(
     page: u32,
 ) -> Result<ListedPage, String> {
     let page = i32::try_from(page).map_err(|error| error.to_string())?;
-    let listed = match query {
-        BrowseQuery::Popular => source.popular(page).await,
-        BrowseQuery::Latest => source.latest(page).await,
-        BrowseQuery::Search(text) => source.search(page, &text, &filters).await,
-    }
+    // a panicking source is an error of this listing, not a dead task
+    let listed = kuro_source::isolate(async {
+        match query {
+            BrowseQuery::Popular => source.popular(page).await,
+            BrowseQuery::Latest => source.latest(page).await,
+            BrowseQuery::Search(text) => source.search(page, &text, &filters).await,
+        }
+    })
+    .await
     .map_err(|error| error.to_string())?;
     let source_id = source.id();
     tokio::task::spawn_blocking(move || -> Result<ListedPage, String> {

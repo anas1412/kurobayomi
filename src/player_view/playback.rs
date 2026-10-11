@@ -1,8 +1,6 @@
 //! Playback over one libmpv handle: loading an episode, the transport, seeking and volume. No GTK here; the
 //! window and the headless test both drive it. Times are read back from mpv and kept in milliseconds.
 
-use std::path::Path;
-
 use kuro_player::load::start_command_ms;
 use kuro_player::mpv::{MpvError, MpvHandle};
 use kuro_player::seek::{absolute_flag, relative_flag};
@@ -18,6 +16,13 @@ pub struct Playback {
     mpv: MpvHandle,
 }
 
+/// What a move between windows keeps across the render context swap: the video track and the pause state.
+#[derive(Debug)]
+pub struct Handoff {
+    vid: String,
+    paused: bool,
+}
+
 impl Playback {
     pub fn new(mpv: MpvHandle) -> Self {
         Self { mpv }
@@ -31,21 +36,28 @@ impl Playback {
         &mut self.mpv
     }
 
-    /// Loads `path` at `start_ms` and plays it. mpv starts paused, so the load also unpauses.
-    pub fn load(&self, path: &Path, start_ms: i64) -> Result<(), String> {
-        let text = path
-            .to_str()
-            .ok_or_else(|| format!("path is not UTF-8: {}", path.display()))?;
-        let start = start_command_ms(start_ms);
-        let start: Vec<&str> = start.iter().map(String::as_str).collect();
-        self.mpv.command(&start).map_err(|e| e.to_string())?;
-        self.mpv
-            // No index argument: mpv before 0.38 reads the third argument as the options.
-            .command(&["loadfile", text, "replace"])
-            .map_err(|e| e.to_string())?;
+    /// Loads `target` (a path or a stream URL) at `start_ms` with the `http-header-fields` value `headers`, and plays
+    /// it. mpv starts paused, so the load also unpauses.
+    pub fn load(&self, target: &str, headers: Option<&str>, start_ms: i64) -> Result<(), String> {
+        for command in load_commands(target, headers, start_ms) {
+            self.run(&command).map_err(|e| e.to_string())?;
+        }
         self.mpv
             .set_property_flag("pause", false)
             .map_err(|e| e.to_string())
+    }
+
+    /// Adds the side tracks of a stream (`audio-add`, `sub-add`). Runs once mpv has loaded the file; a track that
+    /// fails is logged and the others still load.
+    /// Adds the side tracks off the GTK thread: each one is fetched over the network, so a source with a dozen
+    /// languages froze the window for seconds when they ran here.
+    pub fn add_tracks(&self, commands: &[Vec<String>]) {
+        self.mpv.run_commands_in_background(commands.to_vec());
+    }
+
+    fn run(&self, command: &[String]) -> Result<(), MpvError> {
+        let args: Vec<&str> = command.iter().map(String::as_str).collect();
+        self.mpv.command(&args)
     }
 
     pub fn is_paused(&self) -> bool {
@@ -63,6 +75,28 @@ impl Playback {
     pub fn stop(&self) {
         if let Err(e) = self.mpv.command(&["stop"]) {
             tracing::warn!(error = %e, "mpv stop failed");
+        }
+    }
+
+    /// Before the GL render context is freed for a move to another window: turns the video track off. Freeing the
+    /// context with video still on makes mpv drop the track as failed, which ends a file that has no audio; switched
+    /// off first, the file keeps playing (audio goes on) and the video output is closed cleanly.
+    pub fn hand_off_video(&self) -> Handoff {
+        let handoff = Handoff { vid: self.mpv.get_string("vid").unwrap_or_else(|| "auto".to_owned()), paused: self.is_paused() };
+        if let Err(e) = self.mpv.set_property_str("vid", "no") {
+            tracing::warn!(error = %e, "player: video was not switched off for the move");
+        }
+        handoff
+    }
+
+    /// Once the new render context exists: the video track comes back at the current position (mpv catches the
+    /// picture up to the audio) with the pause state from before the move.
+    pub fn resume_video(&self, handoff: &Handoff) {
+        if let Err(e) = self.mpv.set_property_str("vid", &handoff.vid) {
+            tracing::warn!(error = %e, "player: video did not come back after the move");
+        }
+        if let Err(e) = self.mpv.set_property_flag("pause", handoff.paused) {
+            tracing::warn!(error = %e, "player: the pause state was not restored after the move");
         }
     }
 
@@ -111,6 +145,16 @@ pub fn use_c_numeric_locale() {
             libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
         }
     }
+}
+
+/// The commands of one load: the start position, the request headers when there are any, then `loadfile`. A window
+/// plays one stream, so the headers are set on the core rather than as `loadfile` options.
+pub fn load_commands(target: &str, headers: Option<&str>, start_ms: i64) -> Vec<Vec<String>> {
+    let mut commands = vec![start_command_ms(start_ms)];
+    commands.extend(headers.map(|h| vec!["set".to_owned(), "http-header-fields".to_owned(), h.to_owned()]));
+    // No index argument: mpv before 0.38 reads the third argument as the options.
+    commands.push(vec!["loadfile".to_owned(), target.to_owned(), "replace".to_owned()]);
+    commands
 }
 
 fn secs_to_ms(secs: f64) -> i64 {
@@ -175,6 +219,14 @@ mod tests {
         assert_eq!(seek_target_ms(0.0, 4_000), 0);
         assert_eq!(seek_target_ms(1.7, 4_000), 4_000);
         assert_eq!(seek_target_ms(-0.2, 4_000), 0);
+    }
+
+    #[test]
+    fn a_local_file_sets_no_headers_and_loadfile_has_no_index_argument() {
+        assert_eq!(
+            load_commands("/v/ep.mkv", None, 90_000),
+            vec![start_command_ms(90_000), vec!["loadfile".to_owned(), "/v/ep.mkv".to_owned(), "replace".to_owned()]]
+        );
     }
 
     #[test]

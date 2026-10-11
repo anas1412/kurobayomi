@@ -3,24 +3,10 @@
 
 use std::fmt::Write as _;
 
-use super::tokens::{self as tk, Role, Tokens, DISABLED_ALPHA, PAD_SMALL, Rgba, SECONDARY_ALPHA};
-
-/// `EasingEmphasizedCubicBezier(0.2, 0, 0, 1)` (`p1-behavior.md` 22).
-const EMPHASIZED: &str = "cubic-bezier(0.2, 0, 0, 1)";
+use super::tokens::{self as tk, Role, Tokens};
 
 /// The base stylesheet: GTK named colours and static rules, loaded before the palette.
 pub const BASE_CSS: &str = include_str!("style.css");
-
-/// Shows or hides the modal scrim on a window overlay while a modal dialog or sheet is open
-/// (T-49ba-049). The scrim is `.kb-scrim` in `style.css`, alpha 0.32.
-pub fn set_scrim(overlay: &impl gtk::prelude::IsA<gtk::Widget>, on: bool) {
-    use gtk::prelude::WidgetExt as _;
-    if on {
-        overlay.add_css_class(class::SCRIM);
-    } else {
-        overlay.remove_css_class(class::SCRIM);
-    }
-}
 
 /// CSS class names for the Kurobayomi component classes.
 pub mod class {
@@ -36,26 +22,16 @@ pub mod class {
     pub const HIT_TARGET: &str = "kb-hit-target";
     pub const NOINDICATION: &str = "kb-noindication";
     pub const INFO_BAR: &str = "kb-info-bar";
-    pub const COLLAPSIBLE: &str = "kb-collapsible";
-    pub const ICON_TOGGLE: &str = "kb-icon-toggle";
-    pub const WHEEL: &str = "kb-wheel";
-    pub const WHEEL_SELECTED: &str = "kb-wheel-selected";
     pub const DRAGGED: &str = "kb-dragged";
     pub const FAST_THUMB: &str = "kb-fast-thumb";
     pub const FAST_SHOWN: &str = "kb-fast-shown";
     pub const BUTTON_FILLED: &str = "kb-button-filled";
     pub const BUTTON_TEXT: &str = "kb-button-text";
-    pub const FAB: &str = "kb-fab";
-    pub const FAB_EXPANDED: &str = "kb-fab-expanded";
-    pub const FAB_ROW: &str = "kb-fab-row";
-    pub const FAB_LABEL: &str = "kb-fab-label";
     pub const SHEET: &str = "kb-sheet";
     pub const SHEET_TABLET: &str = "kb-sheet-tablet";
     pub const SHEET_SHOWN: &str = "kb-sheet-shown";
-    pub const LINK_ICON: &str = "kb-link-icon";
     /// A glyph in the primary colour (the info screen icon).
     pub const PRIMARY_ICON: &str = "kb-primary-icon";
-    pub const SCRIM: &str = "kb-scrim";
 }
 
 /// Alpha of the onSurface state layer under a hovered clickable surface; a press uses
@@ -65,31 +41,6 @@ pub const HOVER_ALPHA: f32 = 0.08;
 /// Alpha of the selected-row tint: 0.16 in dark, 0.22 in light (`selectedBackground`, M1).
 pub fn selected_alpha(dark: bool) -> f32 {
     if dark { 0.16 } else { 0.22 }
-}
-
-/// Opacity of a list item. A disabled item uses only the disabled alpha, never both (M5).
-pub fn item_opacity(enabled: bool, secondary: bool) -> f32 {
-    if !enabled {
-        DISABLED_ALPHA
-    } else if secondary {
-        SECONDARY_ALPHA
-    } else {
-        1.0
-    }
-}
-
-/// Padding per edge, in logical pixels.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Edges {
-    pub top: f32,
-    pub right: f32,
-    pub bottom: f32,
-    pub left: f32,
-}
-
-/// `topSmallPaddingValues`: the top edge equals the small padding, the other edges are zero.
-pub fn top_small_padding() -> Edges {
-    Edges { top: PAD_SMALL, ..Edges::default() }
 }
 
 /// The dark-aware rules for the GTK-theme choice: the selection tint keeps the GTK theme's own
@@ -124,12 +75,6 @@ pub fn fast_thumb_rules() -> String {
     )
 }
 
-/// One rule that gives a single fast-scroll thumb its own colour (`thumb_class` is unique to it).
-/// The two-class selector outranks the default thumb rule whatever the provider order.
-pub fn fast_thumb_color_rule(thumb_class: &str, color: Rgba) -> String {
-    format!(".{}.{thumb_class} {{ background-color: {}; }}\n", class::FAST_THUMB, color.to_css())
-}
-
 /// The rules that depend on the system dark flag or the tokens of the widget layer, added to the
 /// tint provider for every choice.
 pub fn widget_rules(system_dark: bool) -> String {
@@ -146,49 +91,24 @@ pub fn widget_static_rules() -> String {
 .{filled}:disabled {{ background-color: alpha(@accent_bg_color, 0.12); color: alpha(@window_fg_color, 0.38); }}
 .{text} {{ background: none; color: @accent_color; padding: 0 12px; }}
 .{text}:disabled {{ color: alpha(@window_fg_color, 0.38); }}
-.{fab} {{ min-width: 56px; min-height: 56px; border-radius: 16px; background-color: @accent_bg_color; color: @accent_fg_color; transition: min-width {w}ms {ease}; }}
-.{fab}.{fab_expanded} {{ min-width: 80px; }}
-.{fab_row} {{ padding-left: 0; transition: padding-left {pad_out}ms {ease}; }}
-.{fab}.{fab_expanded} .{fab_row} {{ padding-left: 12px; transition: padding-left {pad_in}ms {ease}; }}
-.{fab_label} {{ opacity: 0; transition: opacity {fade_out}ms linear; }}
-.{fab}.{fab_expanded} .{fab_label} {{ opacity: 1; transition: opacity {fade_in}ms linear {fade_delay}ms; }}
 .{sheet} {{ background-color: @popover_bg_color; border-radius: 28px 28px 0 0; padding: 24px; }}
 .{sheet_tablet} {{ border-radius: 28px; opacity: 0; transition: opacity {sheet_ms}ms linear; }}
 .{sheet_tablet}.{sheet_shown} {{ opacity: 1; }}
-.{link} {{ color: @accent_color; }}
 .{pill} {{ padding: 1px 6px; border-radius: 999px; }}
 .{hit} {{ min-width: 48px; min-height: 48px; }}
 .{noind}:hover, .{noind}:active {{ background-image: none; background-color: transparent; }}
 .{info_bar} {{ border-top: 1px solid alpha(@window_fg_color, 0.12); padding: 8px 0 16px 0; }}
-.{collapsible} > title {{ padding: 12px 24px; }}
-.{icon_toggle} {{ min-height: 48px; }}
-.{wheel} {{ border-radius: 16px; }}
 ",
         filled = class::BUTTON_FILLED,
         text = class::BUTTON_TEXT,
-        fab = class::FAB,
-        fab_expanded = class::FAB_EXPANDED,
-        fab_row = class::FAB_ROW,
-        fab_label = class::FAB_LABEL,
-        w = tk::FAB_WIDTH_MS,
-        ease = EMPHASIZED,
-        pad_in = tk::FAB_START_PAD_EXPAND_MS,
-        pad_out = tk::FAB_START_PAD_COLLAPSE_MS,
-        fade_in = tk::FAB_EXPAND_FADE_MS,
-        fade_delay = tk::FAB_EXPAND_FADE_DELAY_MS,
-        fade_out = tk::FAB_COLLAPSE_FADE_MS,
         sheet = class::SHEET,
         sheet_tablet = class::SHEET_TABLET,
         sheet_shown = class::SHEET_SHOWN,
         sheet_ms = tk::SHEET_ANIM_MS,
-        link = class::LINK_ICON,
         pill = class::PILL,
         hit = class::HIT_TARGET,
         noind = class::NOINDICATION,
         info_bar = class::INFO_BAR,
-        collapsible = class::COLLAPSIBLE,
-        icon_toggle = class::ICON_TOGGLE,
-        wheel = class::WHEEL,
     )
 }
 
@@ -241,13 +161,6 @@ pub fn palette_rules(tokens: &Tokens) -> String {
         ".{} {{ font-weight: 600; font-size: 14px; color: {}; }}",
         class::HEADER,
         tokens.get(Role::OnSurfaceVariant).to_css()
-    );
-    let _ = writeln!(
-        out,
-        ".{} {{ background-color: {}; border: 1px solid {}; border-radius: 16px; }}",
-        class::WHEEL_SELECTED,
-        tokens.get(Role::Primary).to_css_with_alpha(0.2),
-        tokens.get(Role::Primary).to_css()
     );
     let _ = writeln!(out, ".{} {{ color: {}; }}", class::ACTIVE, tokens.active().to_css());
     let _ = writeln!(
@@ -357,17 +270,6 @@ mod tests {
         assert!(system_rules(true).contains(".kb-primary-icon { color: @accent_color; }"));
     }
 
-    // T-49a-052 / TEST-49-21: the FAB rules carry the source timings.
-    #[test]
-    fn fab_rules_use_the_source_timings() {
-        let css = widget_static_rules();
-        assert!(css.contains("transition: min-width 500ms cubic-bezier(0.2, 0, 0, 1)"));
-        assert!(css.contains(".kb-fab-row { padding-left: 0; transition: padding-left 900ms"));
-        assert!(css.contains(".kb-fab.kb-fab-expanded .kb-fab-row { padding-left: 12px; transition: padding-left 300ms"));
-        assert!(css.contains(".kb-fab-label { opacity: 0; transition: opacity 100ms linear; }"));
-        assert!(css.contains(".kb-fab.kb-fab-expanded .kb-fab-label { opacity: 1; transition: opacity 200ms linear 100ms; }"));
-    }
-
     // T-49a-023: the tablet sheet fades in and out over the sheet duration.
     #[test]
     fn tablet_sheet_fades_over_350_ms() {
@@ -377,27 +279,8 @@ mod tests {
     }
 
     #[test]
-    fn fast_thumb_colour_rule_targets_one_thumb() {
-        let rule = fast_thumb_color_rule("kb-thumb-7", Rgba::argb(0xFF1E_88E5));
-        assert_eq!(rule, ".kb-fast-thumb.kb-thumb-7 { background-color: rgba(30, 136, 229, 1); }\n");
-    }
-
-    #[test]
     fn base_stylesheet_leaves_dark_aware_rules_to_the_generated_css() {
         assert!(!BASE_CSS.contains(".kb-active") && !BASE_CSS.contains(".kb-selected"));
-    }
-
-    #[test]
-    fn disabled_item_uses_one_alpha_only() {
-        assert_eq!(item_opacity(false, true), DISABLED_ALPHA);
-        assert_eq!(item_opacity(false, false), DISABLED_ALPHA);
-        assert_eq!(item_opacity(true, true), SECONDARY_ALPHA);
-        assert_eq!(item_opacity(true, false), 1.0);
-    }
-
-    #[test]
-    fn top_small_padding_is_only_on_top() {
-        assert_eq!(top_small_padding(), Edges { top: 8.0, right: 0.0, bottom: 0.0, left: 0.0 });
     }
 
     #[test]
@@ -427,13 +310,6 @@ mod tests {
         assert_eq!(BASE_CSS.matches('{').count(), BASE_CSS.matches('}').count());
     }
 
-    #[test]
-    fn palette_rules_reference_no_undefined_tokens() {
-        let tokens = tokens_for(scheme_for(AppTheme::DOOM), true, true);
-        let css = crate::theme::css::render(&tokens, false);
-        assert_eq!(crate::theme::css::check(&css), Ok(()));
-        assert!(css.contains(".kb-pill"));
-    }
 }
 
 #[cfg(test)]

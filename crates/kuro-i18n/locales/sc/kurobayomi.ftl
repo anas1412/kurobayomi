@@ -6,11 +6,7 @@ action_reorganize_by = Torra a ordinare
 
 relative_time_now = Como
 
-pref_library_summary = Categorias, agiornamentos globales, iscurrimentu de capìtulos
-
 pref_library_update_show_tab_badge = Ammustra su nùmeru de capìtulos non lèghidos in s'icona de sos agiornamentos
-
-pref_category_player_orientation = Orientamentu
 
 pref_player_audio_channels = Canales àudio
 
@@ -434,10 +430,6 @@ onboarding_permission_notifications = Permissu pro sas notìficas
 
 onboarding_permission_notifications_description = Retzi notìficas pro agiornamentos de sa biblioteca e àteru.
 
-onboarding_permission_ignore_battery_opts = Impreu de sa bateria in s'isfundu
-
-onboarding_permission_ignore_battery_opts_description = Èvita interrutziones a agiornamentos longos de sa biblioteca, iscarrigamentos, e riprìstinos de còpias de seguresa.
-
 onboarding_permission_crashlytics = Imbia registros de arrestos anòmalos
 
 onboarding_permission_crashlytics_description = Imbia registros de arrestos anòmalos anonimizados a sos isvilupadores.
@@ -480,10 +472,6 @@ pref_browse_summary = Fontes, estensiones, chirca globale
 
 pref_backup_summary = Còpias de seguresa manuales e globales
 
-pref_security_summary = Blocu de s'aplicatzione, ischermu seguru
-
-pref_advanced_summary = Registros de serraduras anòmalas, otimizatziones de sa bateria
-
 pref_category_theme = Tema
 
 pref_app_theme = Tema de s'aplicatzione
@@ -493,8 +481,6 @@ theme_system = Sighi su sistema
 theme_light = Istudadu
 
 theme_dark = Allutu
-
-theme_monet = Dinàmicu
 
 theme_greenapple = Mela birde
 
@@ -545,10 +531,6 @@ lock_always = Semper
 lock_never = Mai
 
 hide_notification_content = Cua su cuntenutu de sas notìficas
-
-secure_screen = Ischermu seguru
-
-secure_screen_summary = S'ischermu seguru cuat sos cuntenutos de s'aplicatzione cando mudas de aplicatzione e blocat sas ischermadas
 
 firebase_summary = S'imbiu de sos registros de sos arrestos anòmalos e de sas istatìsticas de impreu non ant a permìtere de identificare e acontzare problemas, megiorare su rendimentu, e fàghere in manera chi sas atualizatziones imbenientes siant prus rilevantes pro sos bisòngios tuos
 
@@ -624,10 +606,6 @@ include = Include: { $arg1 }
 
 exclude = Esclude: { $arg1 }
 
-pref_chapter_swipe_end = Atzione de iscurrimentu a destra
-
-pref_chapter_swipe_start = Atzione de iscurrimentu a manca
-
 multi_lang = Mùltiplas
 
 ext_updates_pending = Agiornamentos in suspesu
@@ -683,14 +661,6 @@ ext_nsfw_warning = Sas fontes de custa estensione diant pòdere cuntènnere cunt
 ext_permission_install_apps_warning = B'at bisòngiu de sos permissos pro installare estensiones. Toca inoghe pro los frunire.
 
 ext_install_service_notif = Installende s'estensione…
-
-ext_installer_pref = Installadore
-
-ext_installer_legacy = In disusu
-
-ext_installer_shizuku_stopped = Shizuku no est in esecutzione
-
-ext_installer_shizuku_unavailable_dialog = Installa e avia Shizuku pro l'impreare comente installadore de estensiones.
 
 ext_revoke_trust = Rèvoca sas estensiones disconnotas afidàbiles
 
@@ -912,22 +882,6 @@ double_tap_anim_speed_normal = Normale
 
 double_tap_anim_speed_fast = Lestra
 
-pref_rotation_type = Rotatzione predefinida
-
-rotation_type = Rotatzione
-
-rotation_free = Lìbera
-
-rotation_portrait = Verticale
-
-rotation_reverse_portrait = Verticale a s'imbesse
-
-rotation_landscape = Orizontale
-
-rotation_force_portrait = Blocadu in verticale
-
-rotation_force_landscape = Blocadu in orizontale
-
 color_filter_r_value = Ruju
 
 color_filter_g_value = Birde
@@ -1142,8 +1096,6 @@ pref_refresh_library_covers = Annoa sas coberteddas de sa biblioteca
 
 pref_reset_viewer_flags = Reseta sas impostatziones de su leghidore pro cada sèrie
 
-pref_reset_viewer_flags_summary = Resetat sa modalidade de leghidura e s'orientamentu de totu sas sèries
-
 pref_reset_viewer_flags_success = Totu sas impostatziones de su leghidore resetadas
 
 pref_reset_viewer_flags_error = No at fatu a resetare sas impostatziones de su leghidore
@@ -1151,20 +1103,6 @@ pref_reset_viewer_flags_error = No at fatu a resetare sas impostatziones de su l
 pref_dump_crash_logs = Cumpartzi sos registros de sos arrestos anòmalos
 
 pref_dump_crash_logs_summary = Sarva sos registros de sos errores in unu documentu pro lu cumpartzire cun sos isvilupadores
-
-label_background_activity = Atividade in s'isfundu
-
-pref_disable_battery_optimization = Disabìlita s'otimizatzione de sa bateria
-
-pref_disable_battery_optimization_summary = Agiudat cun sos agiornamentos de sa biblioteca e sas còpias de seguresa
-
-battery_optimization_disabled = S'otimizatzione de sa bateria est giai disabilitada
-
-battery_optimization_setting_activity_not_found = Abertura de sas impostatziones de sistema fallida
-
-about_dont_kill_my_app = Unos cantos produtores tenent restritziones de s'aplicatzione chi istudant sos servìtzios in s'isfundu. Custu situ web tenet informatziones in prus in subra de comente acontzare su problema.
-
-pref_tablet_ui_mode = Modalidade pro tauleddas
 
 pref_verbose_logging = Registru a sa minuda
 

@@ -181,6 +181,7 @@ impl GlobalSearch {
         true
     }
 
+    #[cfg(test)]
     /// Whether a fetch of `generation` is still the current search (a task of an older one is aborted).
     pub fn is_current(&self, generation: u64) -> bool {
         generation == self.generation
@@ -254,12 +255,6 @@ pub fn auto_open(query: &str, extension: &str, total_sources: usize, rows: &[Sea
         },
         _ => AutoOpen::Show,
     }
-}
-
-/// A deep link whose search found nothing (or could not run) replaces the page with global search for the query
-/// (GS-EC-16).
-pub fn deep_link_fallback(query: &str) -> BrowseRoute {
-    deep_link_fallback_for(BrowseKind::Manga, query)
 }
 
 /// The same fallback for either catalogue: an anime entry page's search that no browse page can take opens the anime
@@ -559,20 +554,6 @@ mod tests {
         assert_eq!(auto_open("q", "", 1, std::slice::from_ref(&one)), AutoOpen::Show, "no extension filter: no auto-open");
         assert_eq!(auto_open("q", "ext", 2, std::slice::from_ref(&one)), AutoOpen::Show, "more than one source: results");
         assert_eq!(auto_open(" ", "ext", 1, std::slice::from_ref(&one)), AutoOpen::Show, "a blank query: results");
-    }
-
-    #[test]
-    fn entry_routes_match_the_deep_link_and_row_rules() {
-        assert_eq!(
-            deep_link_fallback("one piece"),
-            BrowseRoute::GlobalSearch { kind: BrowseKind::Manga, source_id: None, query: "one piece".into() },
-            "GS-EC-16"
-        );
-        assert_eq!(
-            row_text_route(7, "typed"),
-            BrowseRoute::BrowseSource { source_id: 7, query: BrowseQuery::Search("typed".into()), migrating: false },
-            "GS-EC-15"
-        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 # index	key	namespace	rust_field	kind	default
+# rows 82 to 85 (the chapter and episode swipe actions) are dropped: see DROPPED_KEYS in registry.rs
 1	pref_display_mode_library	normal	display_mode	str	COMPACT_GRID
 2	library_sorting_mode	normal	manga_sorting_mode	str	ALPHABETICAL,ASCENDING
 3	animelib_sorting_mode	normal	anime_sorting_mode	str	ALPHABETICAL,ASCENDING
@@ -80,9 +81,5 @@
 79	default_season_display_mode	normal	season_display_mode	long	0
 80	pref_update_season_on_refresh	normal	update_season_on_refresh	bool	false
 81	pref_update_season_on_library_update	normal	update_season_on_library_update	bool	false
-82	pref_episode_swipe_end_action	normal	swipe_left_episode	str	ToggleSeen
-83	pref_episode_swipe_start_action	normal	swipe_right_episode	str	ToggleBookmark
-84	pref_chapter_swipe_end_action	normal	swipe_left_chapter	str	ToggleRead
-85	pref_chapter_swipe_start_action	normal	swipe_right_chapter	str	ToggleBookmark
 86	mark_duplicate_read_chapter_read	normal	mark_duplicate_read_chapter_as_read	set	
 87	mark_duplicate_seen_episode_seen	normal	mark_duplicate_seen_episode_as_seen	set	

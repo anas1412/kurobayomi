@@ -175,24 +175,10 @@ mod collate {
 
 /// Module `listing`.
 mod listing {
-    use kuro_domain::source::browse::{BrowseQuery, LEGACY_ANIME_LATEST, LEGACY_ANIME_POPULAR, LEGACY_MANGA_LATEST, LEGACY_MANGA_POPULAR};
+    use kuro_domain::source::browse::BrowseQuery;
 
-    use crate::browse::anime::browse::{Back, back, listing_from_nav_arg};
+    
     use crate::browse::route::search_listing;
-
-    #[test]
-    fn listing_from_nav() {
-        assert_eq!(listing_from_nav_arg(Some(LEGACY_MANGA_POPULAR)), BrowseQuery::Popular);
-        assert_eq!(listing_from_nav_arg(Some(LEGACY_ANIME_POPULAR)), BrowseQuery::Popular);
-        assert_eq!(listing_from_nav_arg(Some(LEGACY_MANGA_LATEST)), BrowseQuery::Latest);
-        assert_eq!(listing_from_nav_arg(Some(LEGACY_ANIME_LATEST)), BrowseQuery::Latest);
-        assert_eq!(listing_from_nav_arg(Some("one piece")), BrowseQuery::Search("one piece".into()));
-        // `is_user_query`: only a search the user did not type has its toolbar text cleared by Back
-        assert_eq!(back(false, Some("text")), Back::ClearToolbarText);
-        assert_eq!(back(true, Some("text")), Back::Leave);
-        assert_eq!(back(false, None), Back::Leave);
-        assert_eq!(back(true, None), Back::Leave);
-    }
 
     #[test]
     fn to_remote_blank_query() {
@@ -297,7 +283,6 @@ mod browse_source {
     use crate::browse::filters::SourceFilters;
     use crate::browse::listing::Listing;
     use crate::browse::nav::{BackAction, FilterSeed, back_action, filter_seed};
-    use crate::browse::route::start_listing;
 
     fn defaults() -> FilterList {
         FilterList(vec![Filter::check_box("Flag"), Filter::text("Author")])
@@ -339,13 +324,6 @@ mod browse_source {
         assert_eq!(back_action(false, ""), BackAction::Leave);
     }
 
-    #[test]
-    fn browse_state_init_search_listing() {
-        let listing = Listing::new(BrowseQuery::Search("one piece".into()));
-        assert_eq!(listing.query(), &BrowseQuery::Search("one piece".into()), "B-EC-02: a page opened on a search starts with it");
-        assert_eq!(start_listing(false, BrowseQuery::Search("x".into())), Some(BrowseQuery::Search("x".into())));
-        assert_eq!(start_listing(true, BrowseQuery::Popular), None, "B-EC-07: a stub never starts a listing");
-    }
 }
 
 /// Module `paging`.

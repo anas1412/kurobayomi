@@ -67,3 +67,18 @@ cookie_import_title = Import Cloudflare cookie
 
 # source: kurobayomi
 cookie_import_hint = Paste the value of the cf_clearance cookie from your browser and the browser's user agent.
+
+# source: kurobayomi
+pref_library_summary = Categories, global update
+
+# source: kurobayomi
+pref_player_internal_summary = Progress, controls
+
+# source: kurobayomi
+pref_security_summary = App lock
+
+# source: kurobayomi
+pref_advanced_summary = Dump crash logs
+
+# source: kurobayomi
+pref_reset_viewer_flags_summary = Resets reading mode of all series

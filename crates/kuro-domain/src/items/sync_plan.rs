@@ -343,7 +343,7 @@ mod tests {
     /// A chapter number widened from f32 is equal to itself on the next sync (no requeue).
     #[test]
     fn a_widened_f32_number_is_not_updated_twice() {
-        let number = f64::from(12.1_f32);
+        let number = crate::items::model::widen_source_number(12.1_f32);
         let db = [Row { source_order: 0, ..row(1, "/c", number) }];
         let source = vec![Row { ..row(0, "/c", number) }];
         assert!(run(source, &db, 1000, false).is_empty());
@@ -356,5 +356,47 @@ mod tests {
         let plan = run(source, &db, 1000, false);
         assert_eq!(plan.updated.len(), 1, "a null scanlator differs from the stored one every run");
         assert_eq!(plan.updated[0].scanlator.as_deref(), Some("Team"), "EC-08: the stored scanlator stays");
+    }
+
+    /// EC-06: a new row without a date takes `now` until a dated row is seen, then the largest date seen so far.
+    #[test]
+    fn a_new_row_without_a_date_takes_now_then_the_largest_date_seen() {
+        let dates = |raw: &[i64]| -> Vec<i64> {
+            let source = raw.iter().enumerate().map(|(i, d)| Row { date_upload: *d, ..row(0, &format!("/n{i}"), -1.0) }).collect();
+            run(source, &[], 500, false).added.iter().map(|r| r.date_upload).collect()
+        };
+        assert_eq!(dates(&[0, 0, 0]), [500, 500, 500]);
+        assert_eq!(dates(&[0, 1000, 0]), [500, 1000, 1000]);
+        assert_eq!(dates(&[2000, 0, 1000]), [2000, 2000, 1000]);
+    }
+
+    /// EC-04: new rows get fetch dates counting down from `now + count`, so the first listed is the highest.
+    #[test]
+    fn new_rows_get_fetch_dates_counting_down_from_now_plus_count() {
+        let source = vec![row(0, "/a", -1.0), row(0, "/b", -1.0), row(0, "/c", -1.0)];
+        let fetch: Vec<i64> = run(source, &[], 1000, false).added.iter().map(|r| r.date_fetch).collect();
+        assert_eq!(fetch, [1003, 1002, 1001]);
+    }
+
+    /// EC-05: the removed-twin state overrides the duplicate-read marking. A read stored row marks its duplicate read, but
+    /// a removed unread twin of the same number sets the new row back to unread.
+    #[test]
+    fn a_removed_twin_overrides_the_duplicate_read_marking() {
+        let db = [Row { read: true, ..row(1, "/kept", 4.0) }, Row { read: false, date_fetch: 300, ..row(2, "/gone", 4.0) }];
+        let source = vec![row(0, "/kept", 4.0), row(0, "/new", 4.0)];
+        let plan = run(source, &db, 1000, true);
+        let new = plan.added.iter().find(|r| r.url == "/new").expect("new row");
+        assert!(!new.read, "the removed twin was unread, so the duplicate-read mark is overridden");
+        assert_eq!(new.date_fetch, 300);
+    }
+
+    /// An unrecognised number (-1) never inherits from a removed twin or is marked as a duplicate.
+    #[test]
+    fn an_unrecognised_number_inherits_nothing_from_a_removed_row() {
+        let db = [Row { read: true, bookmark: true, date_fetch: 300, ..row(1, "/gone", -1.0) }];
+        let plan = run(vec![row(0, "/new", -1.0)], &db, 1000, true);
+        let new = &plan.added[0];
+        assert!(!new.read && !new.bookmark);
+        assert_eq!(new.date_fetch, 1001);
     }
 }

@@ -93,11 +93,7 @@ pub fn show(
     column.set_margin_bottom(16);
     column.set_margin_start(24);
     column.set_margin_end(24);
-    let heading = Label::new(Some(title));
-    heading.add_css_class("title-4");
-    heading.set_halign(Align::Start);
-    heading.set_wrap(true);
-    column.append(&heading);
+    // the window title shows the title once; the body does not repeat it
     column.append(body);
     let error = Label::new(None);
     error.add_css_class("pref-error");
@@ -159,6 +155,33 @@ pub fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// How many labels at or below `root` read exactly `text`.
+    fn labels_reading(root: &gtk::Widget, text: &str) -> usize {
+        let mut n = usize::from(root.downcast_ref::<Label>().is_some_and(|l| l.text() == text));
+        let mut child = root.first_child();
+        while let Some(c) = child {
+            n += labels_reading(&c, text);
+            child = c.next_sibling();
+        }
+        n
+    }
+
+    // the dialog title is the window title only; the body does not say it a second time
+    #[test]
+    fn the_title_is_shown_once_in_the_window_title_and_not_repeated_in_the_body() {
+        crate::testing::with_display(|| {
+            let parent = gtk::Window::new();
+            let body = Label::new(Some("Some text"));
+            let dialog = show(&parent, "Pick one", &body, Some("OK"), |_| {}, || {});
+            assert_eq!(dialog.window.title().as_deref(), Some("Pick one"));
+            let content = dialog.window.child().expect("the dialog content");
+            assert_eq!(labels_reading(&content, "Pick one"), 0);
+            assert_eq!(labels_reading(&content, "Some text"), 1);
+            dialog.window.destroy();
+            parent.destroy();
+        });
+    }
 
     #[test]
     fn t_19a_067_every_enter_key_submits_and_other_keys_do_not() {

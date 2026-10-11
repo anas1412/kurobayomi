@@ -25,12 +25,25 @@ pub fn pill_text(subtitle: Option<&str>, value: i32) -> String {
     }
 }
 
+/// The distance between two stops of a slider with `steps` stops between its ends (Material `steps`): `(last - first)
+/// / (steps + 1)`. The default `steps` of the model, `last - first - 1`, gives 1.
+pub fn step_size(range: &RangeInclusive<i32>, steps: u32) -> f64 {
+    let span = f64::from(*range.end()) - f64::from(*range.start());
+    (span / (f64::from(steps) + 1.0)).max(1.0)
+}
+
+/// The stop nearest to `value`, counted from the start of the range, kept inside it.
+pub fn snap_to_step(value: f64, range: &RangeInclusive<i32>, steps: u32) -> i32 {
+    let (first, step) = (f64::from(*range.start()), step_size(range, steps));
+    clamp_to_range((first + ((value - first) / step).round() * step).round() as i32, range)
+}
+
 /// A drag that lands on the current value is not a change and does not write (E-39).
 pub fn is_change(current: i32, next: i32) -> bool {
     current != next
 }
 
-pub fn row(common: &ItemCommon, value: i32, range: RangeInclusive<i32>, on_change: Veto<i32>) -> ListBoxRow {
+pub fn row(common: &ItemCommon, value: i32, range: RangeInclusive<i32>, steps: u32, on_change: Veto<i32>) -> ListBoxRow {
     let start = clamp_to_range(value, &range);
     let current = Rc::new(Cell::new(start));
     let suppress = Rc::new(Cell::new(false));
@@ -54,7 +67,8 @@ pub fn row(common: &ItemCommon, value: i32, range: RangeInclusive<i32>, on_chang
     header.append(&pill);
     outer.append(&header);
 
-    let scale = Scale::with_range(Orientation::Horizontal, f64::from(*range.start()), f64::from(*range.end()), 1.0);
+    let step = step_size(&range, steps);
+    let scale = Scale::with_range(Orientation::Horizontal, f64::from(*range.start()), f64::from(*range.end()), step);
     scale.set_draw_value(false);
     scale.set_round_digits(0);
     scale.set_hexpand(true);
@@ -71,7 +85,7 @@ pub fn row(common: &ItemCommon, value: i32, range: RangeInclusive<i32>, on_chang
             if suppress.get() {
                 return;
             }
-            let next = clamp_to_range(scale.value().round() as i32, &range);
+            let next = snap_to_step(scale.value(), &range, steps);
             if !is_change(current.get(), next) {
                 return;
             }
@@ -124,6 +138,18 @@ mod tests {
         assert_eq!(pill_text(Some(""), 7), "7");
         assert_eq!(pill_text(None, 7), "7");
         assert_eq!(pill_text(Some("ms"), 7), "ms");
+    }
+
+    // T-47ba-052: the model's `steps` set the stops of the scale; the default is every whole number.
+    #[test]
+    fn steps_set_the_stops_and_a_drag_snaps_to_one() {
+        assert_eq!(step_size(&(0..=10), 9), 1.0, "the model default");
+        assert_eq!(step_size(&(0..=100), 9), 10.0);
+        assert_eq!(snap_to_step(34.0, &(0..=100), 9), 30);
+        assert_eq!(snap_to_step(36.0, &(0..=100), 9), 40);
+        assert_eq!(snap_to_step(7.4, &(0..=10), 9), 7);
+        assert_eq!(snap_to_step(500.0, &(0..=100), 9), 100, "inside the range");
+        assert_eq!(step_size(&(5..=5), 0), 1.0, "a one-value range does not divide by zero");
     }
 
     #[test]

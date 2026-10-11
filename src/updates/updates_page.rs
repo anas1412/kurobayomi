@@ -4,7 +4,6 @@
 use crate::updates::copy;
 use crate::updates::format;
 use crate::updates::list::PageState;
-use crate::updates::selection::{Selectable, Selection};
 
 /// What the Back gesture or Escape does (EC-42-U-23): in selection mode it clears the selection and does not leave the
 /// page; otherwise it navigates back.
@@ -18,28 +17,9 @@ pub fn back_action(selection_mode: bool) -> BackAction {
     if selection_mode { BackAction::ClearSelection } else { BackAction::Navigate }
 }
 
-/// Pull-to-refresh, the cover click and the download indicator are off in selection mode.
-pub fn refresh_enabled(selection_mode: bool) -> bool {
-    !selection_mode
-}
-
+/// The cover click and the download indicator are off in selection mode.
 pub fn cover_click_enabled(selection_mode: bool) -> bool {
     !selection_mode
-}
-
-/// After a read-state write: success clears the selection; a failure keeps it and returns the toast text (EC-42-U-11).
-pub fn after_mark_read<T: Selectable>(
-    result: Result<(), String>,
-    selection: &mut Selection,
-    items: &mut [T],
-) -> Option<String> {
-    match result {
-        Ok(()) => {
-            selection.toggle_all(items, false);
-            None
-        }
-        Err(message) => Some(format!("Could not mark the updates: {message}")),
-    }
 }
 
 /// The load state of the feed. A failed load stops the spinner and shows the error row with a retry (EC-42-U-03).
@@ -114,6 +94,9 @@ pub fn limit_footer(rows: usize) -> Option<&'static str> {
 }
 
 #[cfg(test)]
+use crate::updates::selection::Selectable;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -172,19 +155,7 @@ mod tests {
     fn updates_back_clears_selection_in_selection_mode() {
         assert_eq!(back_action(true), BackAction::ClearSelection);
         assert_eq!(back_action(false), BackAction::Navigate);
-        assert!(!refresh_enabled(true));
         assert!(!cover_click_enabled(true));
-        assert!(refresh_enabled(false));
-    }
-
-    #[test]
-    fn updates_mark_read_success_clears_selection_and_failure_keeps_it() {
-        let mut items = vec![Row { id: 1, selected: true }, Row { id: 2, selected: true }];
-        let mut selection = Selection::default();
-        assert_eq!(after_mark_read(Err("disk full".into()), &mut selection, &mut items), Some("Could not mark the updates: disk full".into()));
-        assert!(items.iter().all(|r| r.selected));
-        assert_eq!(after_mark_read(Ok(()), &mut selection, &mut items), None);
-        assert!(items.iter().all(|r| !r.selected));
     }
 
     #[test]

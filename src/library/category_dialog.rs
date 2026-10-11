@@ -28,6 +28,7 @@ impl CategoryDialog {
         Self { entries, rows }
     }
 
+    #[cfg(test)]
     /// The entries the dialog changes.
     pub fn entries(&self) -> &[i64] {
         &self.entries

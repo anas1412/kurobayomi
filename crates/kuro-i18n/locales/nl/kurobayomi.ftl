@@ -6,8 +6,6 @@ action_filter_started = Begonnen
 
 action_sort_airing_time = Uitzendtijd
 
-pref_library_summary = Categorieën, globaal bijwerken
-
 pref_library_update_show_tab_badge = Geef ongelezen aantal weer op het Update icoon
 
 manga_categories = Manga Categorieën
@@ -424,8 +422,6 @@ onboarding_permission_install_apps_description = Om bronextensies te installeren
 
 onboarding_permission_notifications_description = Ontvang meldingen over bibliotheekupdates en meer.
 
-onboarding_permission_ignore_battery_opts_description = Vermijd onderbrekingen van langlopende bibliotheekupdates, downloads en back-upherstellen.
-
 onboarding_permission_crashlytics = Crashlogs verzenden
 
 onboarding_permission_crashlytics_description = Stuur geanonimiseerde crashlogs naar de ontwikkelaars.
@@ -468,10 +464,6 @@ pref_browse_summary = Bronnen, extensies, globaal zoeken
 
 pref_backup_summary = Handmatige & automatische back-ups, opslagruimte
 
-pref_security_summary = App-vergrendeling, schermbeveiliging
-
-pref_advanced_summary = Crashlogboeken opslaan, batterijoptimalisaties
-
 pref_category_theme = Thema
 
 pref_app_theme = Appthema
@@ -481,8 +473,6 @@ theme_system = Volg systeeminstelling
 theme_light = Uit
 
 theme_dark = Aan
-
-theme_monet = Dynamisch
 
 theme_greenapple = Groene Appel
 
@@ -531,10 +521,6 @@ lock_always = Altijd
 lock_never = Nooit
 
 hide_notification_content = Meldingsinhoud verbergen
-
-secure_screen = Scherm beveiligen
-
-secure_screen_summary = Veilig scherm modus verbergt de inhoud van de app bij het wisselen en blokkeert schermafbeeldingen
 
 pref_category_nsfw_content = NSFW-bronnen (18+)
 
@@ -608,10 +594,6 @@ include = Inbegrepen: { $arg1 }
 
 exclude = Uitgezonderd: { $arg1 }
 
-pref_chapter_swipe_end = Swipe naar de juiste actie
-
-pref_chapter_swipe_start = Swipe naar de linker actie
-
 multi_lang = Meerdere
 
 ext_updates_pending = Updates in de wachtrij
@@ -667,14 +649,6 @@ ext_nsfw_warning = Kan NSFW-inhoud (18+) bevatten
 ext_permission_install_apps_warning = Er zijn rechten nodig om extensies te installeren. Tik hier om deze toe te staan.
 
 ext_install_service_notif = Extensies installeren…
-
-ext_installer_pref = Installatieprogramma
-
-ext_installer_legacy = Verouderd
-
-ext_installer_shizuku_stopped = Shizuku wordt niet uitgevoerd
-
-ext_installer_shizuku_unavailable_dialog = Installeer en start Shizuku om deze als extensie-installatieprogramma te gebruiken.
 
 ext_revoke_trust = Vertrouwde onbekende extensies intrekken
 
@@ -881,22 +855,6 @@ double_tap_anim_speed_0 = Geen animatie
 double_tap_anim_speed_normal = Normaal
 
 double_tap_anim_speed_fast = Snel
-
-pref_rotation_type = Standaardoriëntatie
-
-rotation_type = Oriëntatie
-
-rotation_free = Vrij
-
-rotation_portrait = Staand
-
-rotation_reverse_portrait = Omgedraaid portret-modus
-
-rotation_landscape = Liggend
-
-rotation_force_portrait = Vergrendeld staand
-
-rotation_force_landscape = Vergrendeld liggend
 
 color_filter_r_value = R
 
@@ -1106,8 +1064,6 @@ pref_refresh_library_covers = Omslagen van manga in bibliotheek bijwerken
 
 pref_reset_viewer_flags = Leesinstellingen voor alle series terugzetten naar standaardwaarde
 
-pref_reset_viewer_flags_summary = Zet de instellingen voor de leesmodus en het draaitype terug naar de standaardwaarden voor alle series
-
 pref_reset_viewer_flags_success = Alle leesinstellingen teruggezet naar de standaardwaarden
 
 pref_reset_viewer_flags_error = Kon leesinstellingen niet terugzetten naar standaardwaarden
@@ -1115,20 +1071,6 @@ pref_reset_viewer_flags_error = Kon leesinstellingen niet terugzetten naar stand
 pref_dump_crash_logs = Crashlogboeken opslaan
 
 pref_dump_crash_logs_summary = Slaat foutmeldingslogboeken op in een bestand om te delen met de ontwikkelaars
-
-label_background_activity = Achtergrond activiteit
-
-pref_disable_battery_optimization = Batterijoptimalisatie uitzetten
-
-pref_disable_battery_optimization_summary = Helpt bij het bijwerken van bibliotheek en back-ups op de achtergrond
-
-battery_optimization_disabled = Batterijoptimalisatie is al uitgeschakeld
-
-battery_optimization_setting_activity_not_found = Kon de apparaatinstellingen niet openen
-
-about_dont_kill_my_app = Sommige fabrikanten hebben extra beperkingen op apps die achtergronddiensten uitschakelen. Informatie over hoe je dit kan oplossen kan je vinden op de deze website.
-
-pref_tablet_ui_mode = Tablet UI
 
 pref_verbose_logging = Uitgebreide logging
 

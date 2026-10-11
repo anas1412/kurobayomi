@@ -87,6 +87,27 @@ fn libmpv_format(format: PropFormat) -> Format {
     }
 }
 
+/// `tls-verify` is on and `tls-ca-file` points at the bundled `cacert.pem`, which nothing had installed: every https
+/// stream then failed with "Peer certificate failed verification". Installs the bundled assets next to it; when the
+/// file is still missing (read-only folder), the option is dropped so mpv uses the system certificate store.
+fn ca_file_missing(settings: &[MpvSetting]) -> bool {
+    let Some(setting) = settings.iter().find(|s| s.name == "tls-ca-file") else {
+        return false;
+    };
+    let path = std::path::Path::new(&setting.value);
+    if path.is_file() {
+        return false;
+    }
+    if let Some(dir) = path.parent() {
+        crate::assets::install_assets(dir);
+    }
+    if path.is_file() {
+        return false;
+    }
+    tracing::warn!(file = %setting.value, "the TLS certificate file is missing; mpv uses the system certificates");
+    true
+}
+
 pub struct MpvHandle {
     // Declared before `inner`, so the render context is freed before `mpv_destroy` runs.
     render: Option<RenderContext<'static>>,
@@ -97,8 +118,12 @@ pub struct MpvHandle {
 impl MpvHandle {
     /// Creates the core with every setting applied before initialisation, in order.
     pub fn create(settings: &[MpvSetting]) -> Result<Self, MpvError> {
+        let drop_ca_file = ca_file_missing(settings);
         let inner = libmpv2::Mpv::with_initializer(|init| {
             for setting in settings {
+                if drop_ca_file && setting.name == "tls-ca-file" {
+                    continue;
+                }
                 // An older libmpv (Ubuntu 24.04 ships 0.37) does not know every option; skip those
                 // instead of failing to start the player.
                 match init.set_option(setting.name, setting.value.as_str()) {
@@ -163,6 +188,26 @@ impl MpvHandle {
     pub fn command(&self, args: &[&str]) -> Result<(), MpvError> {
         let (name, rest) = args.split_first().ok_or(MpvError::EmptyCommand)?;
         Ok(self.inner.command(name, rest)?)
+    }
+
+    /// Runs `commands` one after another on a worker thread, through a client handle of the same player core, so a slow
+    /// one (a side audio or subtitle track is fetched over the network, 25 of them for some sources) never blocks the
+    /// thread that asks, which is the GTK thread. Failures are logged. The handle is only destroyed, not terminated,
+    /// so a close of the player in the meantime just makes the remaining commands fail.
+    pub fn run_commands_in_background(&self, commands: Vec<Vec<String>>) {
+        let client = match self.inner.create_client(None) {
+            Ok(client) => client,
+            Err(e) => return tracing::warn!(error = %e, "mpv: no client handle for the background commands"),
+        };
+        std::thread::spawn(move || {
+            for command in commands {
+                let Some((name, rest)) = command.split_first() else { continue };
+                let rest: Vec<&str> = rest.iter().map(String::as_str).collect();
+                if let Err(e) = client.command(name, &rest) {
+                    tracing::warn!(error = %e, command = %name, "mpv: a background command failed");
+                }
+            }
+        });
     }
 
     /// Registers the wakeup callback. The GTK side uses it to schedule `drain_events` on the
@@ -297,6 +342,39 @@ mod tests {
     fn headless() -> MpvHandle {
         let dir = tempfile::tempdir().expect("temp data dir");
         headless_in(dir.path())
+    }
+
+    #[test]
+    fn a_missing_ca_file_is_installed_or_dropped_so_https_can_verify() {
+        let dir = tempfile::tempdir().unwrap();
+        let ca = dir.path().join("mpv").join("cacert.pem");
+        let mut settings = startup_settings(&PlayerPrefs::default());
+        settings.retain(|s| s.name != "tls-ca-file");
+        settings.push(MpvSetting { name: "ao", value: "null".to_owned() });
+        settings.push(MpvSetting { name: "tls-ca-file", value: ca.to_string_lossy().into_owned() });
+        assert!(MpvHandle::create(&settings).is_ok());
+        assert!(ca.is_file(), "the bundled certificates are installed where the option points");
+        // a folder that cannot be written: the option is dropped and mpv still starts
+        let blocked = dir.path().join("file");
+        std::fs::write(&blocked, b"x").unwrap();
+        settings.retain(|s| s.name != "tls-ca-file");
+        settings.push(MpvSetting { name: "tls-ca-file", value: blocked.join("mpv").join("cacert.pem").to_string_lossy().into_owned() });
+        assert!(MpvHandle::create(&settings).is_ok());
+    }
+
+    #[test]
+    fn background_commands_never_block_the_caller() {
+        let handle = headless();
+        let start = std::time::Instant::now();
+        // three side tracks that cannot load (nothing is playing): each would block a synchronous call
+        handle.run_commands_in_background(vec![
+            vec!["audio-add".into(), "https://invalid.test/a.m3u8".into(), "select".into(), "x".into()],
+            vec!["sub-add".into(), "https://invalid.test/s.vtt".into(), "select".into(), "x".into()],
+            Vec::new(),
+        ]);
+        assert!(start.elapsed() < std::time::Duration::from_millis(500), "returns at once");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(handle.get_flag("idle-active"), Some(true), "the core is still alive and idle");
     }
 
     #[test]

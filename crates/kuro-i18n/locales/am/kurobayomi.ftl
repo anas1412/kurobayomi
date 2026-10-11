@@ -278,10 +278,6 @@ lock_never = በጭራሽ
 
 hide_notification_content = የማሳወቂያ ይዘትን ደብቅ
 
-secure_screen = ደህንነቱ የተጠበቀ ማያ ገጽ
-
-secure_screen_summary = መተግበሪያዎችን ሲቀይሩ የመተግበሪያ ይዘቶችን ደብቅ እና ቅጽበታዊ ገጽ እይታዎችን ያግዳል
-
 parental_controls_info = ይህ በይፋዊ ወይም በስህተት የተጠቆሙ ሊሆኑ የሚችሉ ቅጥያዎች በመተግበሪያው ውስጥ 18+ ይዘትን እንዳያሳዩ አያግደውም ፡፡
 
 pref_category_display = ማሳያ
@@ -463,14 +459,6 @@ double_tap_anim_speed_0 = ምንም እነማ የለም
 double_tap_anim_speed_normal = መደበኛ
 
 double_tap_anim_speed_fast = በፍጥነት
-
-pref_rotation_type = ማሽከርከር
-
-rotation_free = ፍርይ
-
-rotation_force_portrait = የግዳጅ ምስል
-
-rotation_force_landscape = የመሬት ገጽታን ያስገድዱ
 
 color_filter_r_value = ቀ
 

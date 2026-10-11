@@ -55,6 +55,7 @@ impl AnimeStore {
         Ok(self.categories.by_entry(anime_id)?.into_iter().map(|c| c.id).collect())
     }
 
+    #[cfg(test)]
     /// How many trackers the entry is bound to, for the tracking button of the action row.
     pub fn track_count(&self, anime_id: i64) -> DataResult<usize> {
         Ok(kuro_data::track::AnimeTrackRepo::new(Arc::clone(&self.db)).by_entry(anime_id)?.len())
@@ -176,6 +177,7 @@ impl AnimeStore {
         Ok(true)
     }
 
+    #[cfg(test)]
     /// One masked UPDATE of `animes.viewer_flags`, so a write never reads back and touches the other groups (E-AIR-1).
     pub fn set_viewer_bits(&self, anime_id: i64, value: i64, mask: i64) -> DataResult<bool> {
         self.animes.set_viewer_bits(anime_id, value, mask)

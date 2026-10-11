@@ -24,6 +24,7 @@ impl DownloadLoader {
         }
     }
 
+    #[cfg(test)]
     pub fn is_recycled(&self) -> bool {
         match self {
             Self::Archive(l) => l.is_recycled(),
@@ -38,6 +39,7 @@ impl DownloadLoader {
         }
     }
 
+    #[cfg(test)]
     pub fn check_open(&self) -> Result<(), LoadError> {
         match self {
             Self::Archive(l) => l.check_open(),

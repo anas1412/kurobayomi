@@ -2,8 +2,6 @@
 
 confirm_exit = Paspauskite atgal dar kartą, kad išeitumėte
 
-pref_library_summary = Kategorijos, visuotinis atnaujinimas
-
 pref_library_update_show_tab_badge = Rodyti neperskaitytų skyrių skaičių prie "Naujiniai" ikonos
 
 manga_categories = Kategorijos
@@ -308,10 +306,6 @@ pref_browse_summary = Šaltiniai, plėtiniai, visuotinė paieška
 
 pref_backup_summary = Rankinės ir automatinės atsarginės kopijos
 
-pref_security_summary = Programos užraktas, saugus ekranas
-
-pref_advanced_summary = Eksportuoti gedimų žurnalus, akumuliatoriaus optimizavimą
-
 pref_category_theme = Tema
 
 pref_app_theme = Programos tema
@@ -321,8 +315,6 @@ theme_system = Pagal sistemą
 theme_light = Išjungta
 
 theme_dark = Įjungta
-
-theme_monet = Dinamiška
 
 theme_greenapple = Obuolių žalia
 
@@ -361,10 +353,6 @@ lock_always = Visada
 lock_never = Niekada
 
 hide_notification_content = Slėpti pranešimo turinį
-
-secure_screen = Saugus užraktas
-
-secure_screen_summary = Slėpti programos turinį, kai įjungiama kita programa ir neleisti daryti ekrano nuotraukų
 
 pref_category_nsfw_content = N18+ šaltiniai
 
@@ -481,14 +469,6 @@ ext_nsfw_short = 18+
 ext_nsfw_warning = Šaltiniuose gali būti N18 turinio
 
 ext_install_service_notif = Instaliuojamas papildinys…
-
-ext_installer_pref = Diegimo programa
-
-ext_installer_legacy = Pasenusi
-
-ext_installer_shizuku_stopped = Shizuku neveikia
-
-ext_installer_shizuku_unavailable_dialog = Instaliuoti ir paleisti Shizuku, kad galėtumėte naudoti Shizuku kaip papildinių instaliuotoją.
 
 pref_fullscreen = Pilno ekrano rėžimas
 
@@ -645,22 +625,6 @@ double_tap_anim_speed_0 = Be animacijų
 double_tap_anim_speed_normal = Įprastai
 
 double_tap_anim_speed_fast = Greitai
-
-pref_rotation_type = Numatytas sukimosi tipas
-
-rotation_type = Sukimosi tipas
-
-rotation_free = Neribojamas
-
-rotation_portrait = Portretas
-
-rotation_reverse_portrait = Apverstas portretas
-
-rotation_landscape = Peizažas
-
-rotation_force_portrait = Fiksuoti vertikaliai
-
-rotation_force_landscape = Fiksuoti horizontaliai
 
 color_filter_r_value = R
 
@@ -826,8 +790,6 @@ pref_refresh_library_covers = Atnaujinti bibliotekos viršelius
 
 pref_reset_viewer_flags = Iš naujo nustatyti kiekvienos serijos skaitytuvo nustatymus
 
-pref_reset_viewer_flags_summary = Iš naujo nustatyti visų serijų skaitymo režimą ir orientaciją
-
 pref_reset_viewer_flags_success = Visų skaitytuvo nustatymų nustatymas iš naujo
 
 pref_reset_viewer_flags_error = Nepavyko atstatyti skaitytuvo nustatymų
@@ -835,20 +797,6 @@ pref_reset_viewer_flags_error = Nepavyko atstatyti skaitytuvo nustatymų
 pref_dump_crash_logs = Išmeskite strigčių žurnalus
 
 pref_dump_crash_logs_summary = Įrašyti strigčių žurnalus į failą, kad būtų galima juos bendrinti su kūrėjais
-
-label_background_activity = Fono veikla
-
-pref_disable_battery_optimization = Išjungti akumuliatoriaus optimizavimą
-
-pref_disable_battery_optimization_summary = Padeda su fono bibliotekos naujinimais ir atsarginėmis kopijomis
-
-battery_optimization_disabled = Akumuliatoriaus optimizavimas jau išjungtas
-
-battery_optimization_setting_activity_not_found = Nepavyko atidaryti įrenginio nustatymų
-
-about_dont_kill_my_app = Kai kurie gamintojai taiko papildomus programėlių apribojimus, kurie išjungia fono paslaugas. Šioje svetainėje rasite daugiau informacijos, kaip tai ištaisyti.
-
-pref_tablet_ui_mode = Planšetinio kompiuterio UI
 
 pref_verbose_logging = Daugiažodis registravimas
 

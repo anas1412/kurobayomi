@@ -5,13 +5,18 @@ and are not in this release. Each one names its replacement, or "none".
 
 ## Losses
 
-- **Rotation lock is no longer available.** Windows have no device orientation. The rotation control sets the
-  picture rotation instead (0, 90, 180 or 270 degrees). The old default orientation setting is kept but has no
-  effect. Replacement: the rotation control (T-45a-035). The rotate button and the rotation cycle are gone
-  (T-45b-058, T-46a-048).
+- **Rotation lock is no longer available.** Windows have no device orientation. The default orientation setting is
+  removed; a settings file or backup that still has it loads and the value is ignored. The rotation control sets the
+  picture rotation instead (0, 90, 180 or 270 degrees). Replacement: the rotation control (T-45a-035). The rotate
+  button and the rotation cycle are gone (T-45b-058, T-46a-048).
 - **Android status bar setting does nothing.** There is no status bar to hide. Replacement: fullscreen (T-45b-059).
-- **Window brightness control is gone.** The monitor brightness cannot be set from the player. Replacement: the mpv
+- **Window brightness control is gone.** The monitor brightness cannot be set from the player, so the brightness
+  shortcuts (Shift+Up and Shift+Down) and the "remember brightness" setting are gone too. Replacement: the mpv
   brightness filter, which changes the picture only (T-45a-032, T-45a-045).
+- **The volume and brightness drag on the video is gone.** Dragging up or down on the picture no longer changes
+  the volume or the brightness, and the two gesture settings are removed (an old settings file or backup that still has
+  them loads and the values are ignored). Replacement: the volume slider and the Up and Down keys for volume (T-46a-019,
+  T-46a-021, T-46a-022).
 - **Software keyboard is not shown.** Text fields use the normal desktop keyboard. Replacement: none (T-45b-065).
 - **Android picture-in-picture is gone.** The player does not shrink to a floating window when you leave the app,
   and the picture-in-picture buttons are not there. Replacement: none (T-46a-047).
@@ -19,7 +24,7 @@ and are not in this release. Each one names its replacement, or "none".
   the desktop. Replacement: the file picker (T-45a-081).
 - **Automatic pause on audio focus is gone.** The player does not pause when a call or another app takes the sound,
   and the volume is not lowered for other apps. Replacement: none (T-45a-042).
-- **The haptic tick on sliders is gone.** The pill and the moving thumb still show the change. Replacement: none
+- **The haptic tick on sliders is gone.** The moving thumb still shows the change. Replacement: none
   (T-46a-045, T-46b-040).
 - **Ripple tint on buttons is not the same.** Buttons show a hover and a pressed state. Replacement: GTK states
   (T-46a-057).

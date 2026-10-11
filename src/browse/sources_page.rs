@@ -17,7 +17,7 @@ use super::sources::{
     ListInput, LOCAL_SOURCE_ID, OptionsEffect, Section, SourceRow, is_pinned, language_line, options_actions, options_effect, options_label,
     options_title, pin_button_style, section_title, shows_latest, source_list,
 };
-use super::view::{attach_row_gestures, source_row, spinner_row};
+use super::view::{list_row, source_row, spinner_row};
 
 /// The installed sources and the preferences that shape the list, as one snapshot of the models.
 #[derive(Clone, Debug, Default)]
@@ -69,11 +69,9 @@ impl SourcesPage {
     /// `ready` is `SourceRegistry::subscribe_initialized()`: the page shows a spinner until it is true and fills in
     /// when it turns true, without being reopened.
     pub fn new(nav: SourcesNav, ready: watch::Receiver<bool>) -> Self {
-        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let scroller = gtk::ScrolledWindow::builder().child(&column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
-        let empty = gtk::Label::new(Some(&tr(MsgKey::source_empty_screen)));
-        empty.set_valign(gtk::Align::Center);
-        empty.set_vexpand(true);
+        let column = crate::ui::column();
+        let scroller = crate::ui::scrolled(&column);
+        let empty = sources_empty(super::route::BrowseKind::Manga);
         let stack = gtk::Stack::new();
         stack.add_named(&spinner_row(), Some("spinner"));
         stack.add_named(&empty, Some("empty"));
@@ -139,19 +137,24 @@ impl Inner {
             return;
         }
         let mut section = Section::LastUsed;
+        let mut list: Option<gtk::ListBox> = None;
         for row in rows {
             match row {
                 SourceRow::Header(next) => {
                     self.column.append(&header_label(&section_title(&next)));
+                    list = None;
                     section = next;
                 }
-                SourceRow::Item(source) => self.column.append(&self.row(&section, source)),
+                SourceRow::Item(source) => {
+                    let row = self.row(&section, source);
+                    section_list(&self.column, &mut list).append(&row);
+                }
             }
         }
         self.stack.set_visible_child_name("list");
     }
 
-    fn row(self: &Rc<Self>, section: &Section, source: Source) -> gtk::Box {
+    fn row(self: &Rc<Self>, section: &Section, source: Source) -> gtk::ListBoxRow {
         let (icon, file) = {
             let mut state = self.state.borrow_mut();
             let file = state.snapshot.icon_files.get(&source.id).cloned();
@@ -176,7 +179,7 @@ impl Inner {
         let row = source_row(&source.name, language.as_deref(), icon, file.as_deref(), source.is_stub, Some(actions.upcast_ref()));
         let (open, options, id) = (Rc::downgrade(self), Rc::downgrade(self), source.id);
         let anchor = row.downgrade();
-        attach_row_gestures(
+        list_row(
             &row,
             move || {
                 if let Some(inner) = open.upgrade() {
@@ -188,8 +191,7 @@ impl Inner {
                     inner.options_popover(&anchor, &source);
                 }
             },
-        );
-        row
+        )
     }
 
     /// The options of a source (long press, right click or the menu key); see `options_popover`.
@@ -251,14 +253,24 @@ pub(super) fn pin_button(source: &Source, toggle_pin: Rc<dyn Fn(i64)>) -> gtk::B
 }
 
 pub(super) fn header_label(text: &str) -> gtk::Label {
-    let label = gtk::Label::new(Some(text));
-    label.set_xalign(0.0);
-    label.add_css_class("heading");
-    label.set_margin_start(16);
-    label.set_margin_end(16);
-    label.set_margin_top(16);
-    label.set_margin_bottom(8);
-    label
+    crate::ui::heading(text)
+}
+
+/// The boxed list of the current section, started under its heading on first use. The anime Sources tab uses it too.
+pub(super) fn section_list(column: &gtk::Box, list: &mut Option<gtk::ListBox>) -> gtk::ListBox {
+    list.get_or_insert_with(|| {
+        let list = crate::ui::boxed_list();
+        column.append(&list);
+        list
+    })
+    .clone()
+}
+
+/// The empty Sources tab: no source is installed yet, so its one action goes to the extensions of the same kind.
+pub(super) fn sources_empty(kind: super::route::BrowseKind) -> gtk::Box {
+    let extensions = gtk::Button::with_label(&tr(MsgKey::label_extensions));
+    extensions.connect_clicked(move |_| super::mount::show_extension(kind));
+    super::look::empty_state("system-search-symbolic", &tr(MsgKey::source_empty_screen), Some(&extensions)).0
 }
 
 /// The `SourceIcon` a row resolves to, for callers that need to know without building the page.
@@ -301,6 +313,12 @@ pub(crate) mod tests {
         while let Some(widget) = child {
             if let Some(label) = widget.downcast_ref::<gtk::Label>() {
                 out.push(label.label().to_string());
+            } else if let Some(list) = widget.downcast_ref::<gtk::ListBox>() {
+                let mut row = list.first_child();
+                while let Some(r) = row {
+                    out.push("row".into());
+                    row = r.next_sibling();
+                }
             } else {
                 out.push("row".into());
             }

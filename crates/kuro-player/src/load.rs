@@ -129,8 +129,7 @@ pub fn on_device_path(local_source: bool, downloaded: bool, video_url: &str) -> 
     (local_source || downloaded).then_some(video_url)
 }
 
-/// The steps that run on `FILE_LOADED`, in order (behaviour 4.2). Orientation is dropped on
-/// desktop (T-45a-035), so it has no step here.
+/// The steps that run on `FILE_LOADED`, in order (behaviour 4.2).
 pub trait FileLoadedSteps {
     /// `setMpvOptions`: metadata to mpv options.
     fn mpv_options(&mut self);

@@ -44,7 +44,15 @@ pub trait Ops<T>: Send + Sync + 'static {
     /// Re-fetches every stored entry. A failing one is logged and skipped.
     fn refresh(&self);
     fn remove(&self, key: &str);
+    /// Whether the add dialog closes as soon as Add is pressed (repos, as in Kotlin) instead of staying open with
+    /// "Processing…" until the fetch ends (stores). The result then comes as a toast or the conflict dialog.
+    fn closes_on_submit(&self) -> bool {
+        false
+    }
 }
+
+/// The toast of an add that failed for a reason the domain does not name (a deliberate deviation: Kotlin is silent).
+pub const COULD_NOT_ADD_REPO: &str = "Could not add the repo";
 
 /// The anime extension stores (`AnimeExtensionStoresScreenModel`).
 pub struct StoreOps {
@@ -111,9 +119,8 @@ pub fn repo_outcome(outcome: AddRepoOutcome, repos: &ExtensionRepoRepo) -> AddOu
         AddRepoOutcome::Success => AddOutcome::Added,
         AddRepoOutcome::InvalidUrl => AddOutcome::Notice(tr(MsgKey::invalid_repo_name)),
         AddRepoOutcome::RepoAlreadyExists => AddOutcome::Notice(tr(MsgKey::error_repo_exists)),
-        // Kotlin is silent here; a toast is the one deliberate deviation (T-47b-020). The string table has no
-        // "Could not add the repo" text, so it says "Unknown error".
-        AddRepoOutcome::Error => AddOutcome::Notice(stores::unknown_error()),
+        // Kotlin is silent here; a toast is the one deliberate deviation (T-47b-020)
+        AddRepoOutcome::Error => AddOutcome::Notice(COULD_NOT_ADD_REPO.to_owned()),
         AddRepoOutcome::DuplicateFingerprint { old, new } => {
             let repos = repos.clone();
             let (old_name, new_name) = (old.name.clone(), new.name.clone());
@@ -131,6 +138,10 @@ pub fn repo_outcome(outcome: AddRepoOutcome, repos: &ExtensionRepoRepo) -> AddOu
 }
 
 impl Ops<ExtensionRepo> for RepoOps {
+    fn closes_on_submit(&self) -> bool {
+        true
+    }
+
     fn card(&self, repo: &ExtensionRepo) -> Card {
         Card {
             key: repo.base_url.clone(),
@@ -324,6 +335,14 @@ mod tests {
         assert_eq!(repos.all().expect("rows")[0].name, "Repo A");
         let AddOutcome::Notice(text) = ops.add("https://a.test/index.min.json") else { panic!("a repeat is a notice") };
         assert_eq!(text, "This repo already exists!");
+    }
+
+    #[test]
+    fn t_47b_020_an_unnamed_failure_toasts_could_not_add_the_repo_and_the_repo_dialog_closes_on_submit() {
+        let (_dir, repos, ops) = repo_ops(&[]);
+        let AddOutcome::Notice(text) = repo_outcome(AddRepoOutcome::Error, &repos) else { panic!("a notice") };
+        assert_eq!(text, "Could not add the repo");
+        assert!(ops.closes_on_submit(), "T-47b-024: Add closes the dialog at once");
     }
 
     #[test]

@@ -208,8 +208,6 @@ theme_light = Av
 
 theme_dark = På
 
-theme_monet = Dynamisk
-
 pref_date_format = Datoformat
 
 pref_manage_notifications = Handter varslingar
@@ -298,12 +296,6 @@ ext_nsfw_warning = Kan innehalda NSFW (18+) innhald
 
 ext_install_service_notif = Installerer utviding…
 
-ext_installer_pref = Installatør
-
-ext_installer_shizuku_stopped = Shizuku køyrar ikkje
-
-ext_installer_shizuku_unavailable_dialog = Installer og start Shizuku for å bruka Shizuku som utvidingsinstallatør.
-
 pref_show_page_number = Vis sidetal
 
 pref_custom_brightness = Eigendefinert lysstyrke
@@ -372,8 +364,6 @@ zoom_start_left = Venstre
 
 zoom_start_right = Høgre
 
-rotation_landscape = Liggjande
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -441,8 +431,6 @@ label_network = Nettverk
 pref_dns_over_https = DNS over HTTPS (DoH)
 
 clear_database_source_item_count = { NUMBER($arg1, useGrouping: "false") } ikkje-bibliotek manga i databasen
-
-about_dont_kill_my_app = Nokre produsentar har ytterlegare appavgrensingar som drep bakgrunnstenester. Denne nettstaden har meir info om korleis det kan fiksast.
 
 website = Nettstaden
 

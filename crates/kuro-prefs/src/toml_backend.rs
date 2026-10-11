@@ -556,6 +556,25 @@ mod tests {
     }
 
     #[test]
+    fn a_config_written_before_a_feature_was_dropped_still_loads_without_its_keys() {
+        let dir = TestDir::new("dropped-keys");
+        write_file(
+            &dir,
+            CONFIG_FILE,
+            "schema = 1\n[ui]\ntablet_ui_mode = \"ALWAYS\"\ntheme_dark_amoled = true\n[security]\nsecure_screen = \"NEVER\"\n\
+             [library]\nswipe_left_chapter = \"Download\"\n[reader]\ndefault_orientation_type = 16\n\
+             [player]\ndefault_player_orientation_type = \"Free\"\nremember_player_brightness = true\n\
+             [player.gestures]\ngesture_volume_brightness = false\n",
+        );
+        let b = backend(&dir).unwrap();
+        let loaded = b.load().unwrap();
+        assert_eq!(loaded.len(), 1, "only the kept field is a value: {loaded:?}");
+        assert_eq!(loaded.get("pref_theme_dark_amoled_key"), Some(&PrefValue::Bool(true)));
+        b.save(&loaded).unwrap();
+        assert!(file(&dir, CONFIG_FILE).contains("theme_dark_amoled = true"));
+    }
+
+    #[test]
     fn values_round_trip_through_a_reopen() {
         let dir = TestDir::new("roundtrip");
         let b = backend(&dir).unwrap();

@@ -30,11 +30,6 @@ pub fn page_screen_id(page: Page) -> &'static str {
     }
 }
 
-/// The destination whose screen is `id`, if it is one of the three other areas open by id.
-pub fn destination_of(id: &str) -> Option<Destination> {
-    [Destination::About, Destination::DataAndStorage, Destination::Tracking].into_iter().find(|d| d.screen_id() == id)
-}
-
 /// What a back action does with the window's stack.
 #[derive(Debug, PartialEq, Eq)]
 pub enum BackStep {
@@ -99,11 +94,6 @@ pub fn open(dest: Option<Destination>) {
     }
 }
 
-/// Opens settings on the destination an area asks for by id (`SettingsScreen.kt`). An unknown id opens the default page.
-pub fn open_id(id: i64) {
-    open(Destination::from_id(id));
-}
-
 fn two_pane_now() -> bool {
     let (width, height) = window_size();
     router::two_pane(width, height)
@@ -122,7 +112,7 @@ pub fn body() -> Option<Built> {
     Some(Built { content, end: vec![search.upcast()] })
 }
 
-/// A resize across the tablet threshold: the shell's own page, when it is on top, is rebuilt for one pane or two.
+/// A resize across the wide-window threshold: the shell's own page, when it is on top, is rebuilt for one pane or two.
 fn rebuild_for_resize() {
     let (names, shown) = crate::ui::page_stack();
     let root = widget_name("settings");
@@ -140,42 +130,89 @@ pub fn follow_resizes() {
     });
 }
 
-/// The settings list: one row per settings page. `on_select` gets the page's screen id.
+/// A settings page as a row: the screen it opens, its title, its one-line summary and its icon.
+pub struct NavEntry {
+    pub id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub icon: String,
+}
+
+/// The About subtitle (T-47a-003): `Kurobayomi Stable <version>` in a release build, `Debug <commit>` in any other.
+fn about_subtitle() -> String {
+    let info = &*kuro_core::app_info::APP_INFO;
+    crate::settings_ui::menu::about_subtitle("Kurobayomi", info.build_type == "release", env!("CARGO_PKG_VERSION"), info.git_sha)
+}
+
+/// The rows of the settings list, from the spec. About shows this app's build, not the Android one.
+fn entries() -> Vec<NavEntry> {
+    crate::ui::with_spec(|s| s.settings_main.clone())
+        .into_iter()
+        .map(|e| {
+            let subtitle = if e.id == "settings_about" { Some(about_subtitle()) } else { e.subtitle };
+            NavEntry { id: e.id, title: e.title, subtitle, icon: e.icon }
+        })
+        .collect()
+}
+
+/// The settings list on a narrow window: one boxed list, a row per page (icon, title, summary, arrow).
 fn main_list(on_select: Rc<dyn Fn(&str)>) -> gtk::Widget {
     let column = crate::ui::column();
     let list = crate::ui::boxed_list();
-    for entry in crate::ui::with_spec(|s| s.settings_main.clone()) {
-        let next = gtk::Image::from_icon_name("go-next-symbolic");
-        let row = crate::ui::row(&entry.title, entry.subtitle.as_deref(), Some(next.upcast()));
+    for entry in entries() {
+        let row = crate::ui::row(&entry.title, entry.subtitle.as_deref(), Some(crate::ui::chevron().upcast()));
         // the page's icon goes in front of its title
         if let Some(inner) = row.child().and_downcast::<gtk::Box>() {
             inner.prepend(&gtk::Image::from_icon_name(&entry.icon));
         }
         row.set_activatable(true);
         let (id, on_select) = (entry.id.clone(), on_select.clone());
-        row.connect_activate(move |_| on_select(&id));
+        crate::widgets::row_activate::on_activate(&row, move |_| on_select(&id));
         list.append(&row);
     }
     column.append(&list);
     crate::ui::scrolled(&column).upcast()
 }
 
-/// The main list on the left and the open page on the right. Choosing a row replaces the right pane.
-fn two_pane(current: Page) -> gtk::Widget {
+/// Width of the settings sidebar in the split view.
+pub const SIDEBAR_WIDTH: i32 = 240;
+
+/// The split view of the settings shell and the player settings: a sidebar in the app sidebar's look
+/// (`navigation-sidebar`, icon and title, the summary as tooltip) and the selected page beside it. The selected row
+/// names the page, so the page shows no title of its own (docs/design/other-tabs.md).
+pub fn split(entries: Vec<NavEntry>, current: &str) -> gtk::Widget {
     let right = gtk::Box::new(gtk::Orientation::Vertical, 0);
     right.set_hexpand(true);
-    let show = {
-        let right = right.clone();
-        move |id: &str| {
+    let list = gtk::ListBox::new();
+    list.add_css_class("navigation-sidebar");
+    list.set_valign(gtk::Align::Start);
+    list.set_margin_top(crate::widgets::rail::PAD_V);
+    list.set_margin_bottom(crate::widgets::rail::PAD_V);
+    for entry in &entries {
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        crate::ui::margins(&line, crate::widgets::rail::ROW_PAD);
+        line.append(&gtk::Image::from_icon_name(&entry.icon));
+        line.append(&gtk::Label::builder().label(&entry.title).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build());
+        let row = gtk::ListBoxRow::builder().child(&line).build();
+        row.set_tooltip_text(entry.subtitle.as_deref());
+        list.append(&row);
+    }
+    let ids: Vec<String> = entries.into_iter().map(|e| e.id).collect();
+    {
+        let (right, ids) = (right.clone(), ids.clone());
+        // selection follows the mouse and the arrow keys alike, so the page always matches the highlighted row
+        list.connect_row_selected(move |_, row| {
+            let Some(id) = row.and_then(|r| usize::try_from(r.index()).ok()).and_then(|i| ids.get(i)) else { return };
             while let Some(child) = right.first_child() {
                 right.remove(&child);
             }
             right.append(&pane(id));
-        }
-    };
-    show(page_screen_id(current));
-    let left = main_list(Rc::new(show));
-    left.set_size_request(300, -1);
+        });
+    }
+    let at = ids.iter().position(|id| id == current).unwrap_or(0);
+    list.select_row(list.row_at_index(i32::try_from(at).unwrap_or(0)).as_ref());
+    let left = gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).build();
+    left.set_size_request(SIDEBAR_WIDTH, -1);
     let both = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     both.append(&left);
     both.append(&gtk::Separator::new(gtk::Orientation::Vertical));
@@ -183,10 +220,17 @@ fn two_pane(current: Page) -> gtk::Widget {
     both.upcast()
 }
 
-/// A settings page inside the right pane: its title and header actions on a bar, then its content.
+/// The main list on the left and the open page on the right.
+fn two_pane(current: Page) -> gtk::Widget {
+    split(entries(), page_screen_id(current))
+}
+
+/// A settings page inside the split view's right side: its content, with its header actions (if any) on a slim row
+/// at the top end. The player settings show their plain list here, never a second sidebar.
 fn pane(id: &str) -> gtk::Widget {
     let screen = crate::ui::screen(id);
-    let (content, end): (gtk::Widget, Vec<gtk::Widget>) = match crate::screens::body(id) {
+    let built = if id == "settings_player" { crate::settings_ui::player::root::body(0) } else { crate::screens::body(id) };
+    let (content, end): (gtk::Widget, Vec<gtk::Widget>) = match built {
         Some(b) => (b.content, b.end),
         None => {
             let column = crate::ui::column();
@@ -194,14 +238,21 @@ fn pane(id: &str) -> gtk::Widget {
             (crate::ui::scrolled(&column).upcast(), crate::ui::toolbar(&screen))
         }
     };
-    let bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    crate::ui::margins(&bar, 6);
-    bar.append(&gtk::Label::builder().label(&screen.title).xalign(0.0).hexpand(true).css_classes(["title-4"]).build());
-    for widget in end {
-        bar.append(&widget);
-    }
     let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    page.append(&bar);
+    crate::ui::tag(&page, id);
+    if !end.is_empty() {
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        bar.set_halign(gtk::Align::End);
+        bar.set_margin_top(8);
+        bar.set_margin_end(16);
+        for widget in end {
+            if let Some(button) = widget.downcast_ref::<gtk::Button>() {
+                button.add_css_class("flat");
+            }
+            bar.append(&widget);
+        }
+        page.append(&bar);
+    }
     content.set_vexpand(true);
     page.append(&content);
     page.upcast()
@@ -259,10 +310,38 @@ mod tests {
     }
 
     #[test]
-    fn t_47b_001_each_destination_is_found_by_its_screen_id() {
-        assert_eq!(destination_of("settings_data_storage"), Some(Destination::DataAndStorage));
-        assert_eq!(destination_of("settings_about"), Some(Destination::About));
-        assert_eq!(destination_of("settings_player"), None);
+    fn the_about_row_names_this_app_and_its_build() {
+        let about = entries().into_iter().find(|e| e.id == "settings_about").expect("the About row");
+        let subtitle = about.subtitle.expect("a subtitle");
+        assert!(!subtitle.contains("Aniyomi"));
+        let info = &*kuro_core::app_info::APP_INFO;
+        if info.build_type == "release" {
+            assert_eq!(subtitle, format!("Kurobayomi Stable {}", env!("CARGO_PKG_VERSION")));
+        } else {
+            assert_eq!(subtitle, format!("Debug {}", info.git_sha));
+        }
+    }
+
+    // T-47a-003: the rows say what this app's pages hold, not what Android's had.
+    #[test]
+    fn the_security_and_advanced_rows_do_not_name_android_only_settings() {
+        let subtitle = |id: &str| entries().into_iter().find(|e| e.id == id).and_then(|e| e.subtitle).expect(id);
+        assert_eq!(subtitle("settings_security"), "App lock");
+        assert_eq!(subtitle("settings_advanced"), "Dump crash logs");
+    }
+
+    // the eleven rows and their subtitles are the same in the list and in the menu table of settings_ui::menu
+    #[test]
+    fn the_list_matches_the_menu_table() {
+        let table = crate::settings_ui::menu::rows("x");
+        let live = entries();
+        assert_eq!(live.len(), table.len());
+        for (live, row) in live.iter().zip(&table) {
+            assert_eq!((live.id.as_str(), live.title.as_str(), live.icon.as_str()), (row.target, row.title, row.icon));
+            if row.target != "settings_about" {
+                assert_eq!(live.subtitle.as_deref(), Some(row.subtitle.as_str()), "{}", row.title);
+            }
+        }
     }
 
     #[test]

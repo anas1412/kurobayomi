@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::{Local, Months};
-use gtk::gdk::ModifierType;
+use gtk::gdk::{self, ModifierType};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GBox, Button, CheckButton, GestureClick, GestureLongPress, Image, Label, ListBox, Orientation as O};
@@ -23,7 +23,6 @@ use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::ui::UiPrefs;
 
 use crate::data;
-use crate::entry_core::cover_view::CoverView;
 use crate::updates::bottom_bar::{self, BarAction, BarCommand, Selected};
 use crate::updates::bulk::{self, BulkAction};
 use crate::updates::coalesce::watch_coalesced;
@@ -40,6 +39,10 @@ use crate::updates::selection::{Selection, is_selection_mode};
 use crate::updates::state_page::PageStates;
 use crate::updates::updates_dialog::confirm_bulk_delete;
 use crate::updates::updates_page::{self, BackAction, UpdatesLoad, back_action, cover_click_enabled};
+use crate::library::layout::{SPACE_L, SPACE_S};
+
+/// The icon of the empty feed.
+const EMPTY_ICON: &str = "software-update-available-symbolic";
 
 /// How long the screen's toasts stay (the Updates failure and the bar's errors).
 const TOAST_MS: u64 = 4_000;
@@ -55,9 +58,29 @@ fn click_gesture(state: ModifierType) -> Gesture {
     }
 }
 
+/// Runs `run` when Enter or Space is pressed on the focused `row`. The row is not activatable (its mouse clicks are the
+/// gestures'), so the list's own activation never fires and nothing runs twice.
+fn on_key_activate(row: &gtk::ListBoxRow, run: impl Fn() + 'static) {
+    let key = gtk::EventControllerKey::new();
+    key.connect_key_pressed(move |_, keyval, _, _| {
+        if matches!(keyval, gdk::Key::Return | gdk::Key::KP_Enter | gdk::Key::space) {
+            run();
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    row.add_controller(key);
+}
+
 pub struct UpdatesScreen {
     kind: EntryKind,
     root: gtk::Overlay,
+    /// The selection row under the header: the count, then Select all, Select inverse and Cancel.
+    sel_header: GBox,
+    sel_label: Label,
+    /// The bottom action bar of the selection and the box its buttons go in.
+    bar_revealer: gtk::Revealer,
     bar: GBox,
     col: GBox,
     pages: PageStates,
@@ -81,8 +104,7 @@ impl UpdatesScreen {
     /// Builds the screen and starts its query.
     pub fn new(kind: EntryKind) -> Rc<Self> {
         let screen = Rc::new_cyclic(|weak: &Weak<Self>| {
-            let col = GBox::new(O::Vertical, 6);
-            crate::ui::margins(&col, 12);
+            let col = crate::ui::column();
             let list = crate::ui::scrolled(&col);
             let retry = weak.clone();
             let pages = PageStates::new(&list, move || {
@@ -91,12 +113,44 @@ impl UpdatesScreen {
                     screen.start();
                 }
             });
-            let bar = GBox::new(O::Horizontal, 6);
-            crate::ui::margins(&bar, 6);
-            bar.set_visible(false);
+            // the selection looks as on the Library page: the count and the selection buttons under the header, the
+            // actions in a bar that slides up at the bottom
+            let sel_label = Label::builder().hexpand(true).xalign(0.0).css_classes(["title-2"]).build();
+            let sel_header = GBox::new(O::Horizontal, SPACE_S);
+            sel_header.set_margin_start(SPACE_L);
+            sel_header.set_margin_end(SPACE_L);
+            sel_header.set_margin_top(SPACE_S);
+            sel_header.set_visible(false);
+            sel_header.append(&sel_label);
+            for (label, run) in [
+                (MsgKey::action_select_all, Self::select_all as fn(&Rc<Self>)),
+                (MsgKey::action_select_inverse, Self::select_inverse as fn(&Rc<Self>)),
+                (MsgKey::action_cancel, Self::clear_selection as fn(&Rc<Self>)),
+            ] {
+                let button = Button::with_label(&tr(label));
+                let weak = weak.clone();
+                button.connect_clicked(move |_| {
+                    if let Some(screen) = weak.upgrade() {
+                        run(&screen);
+                    }
+                });
+                sel_header.append(&button);
+            }
+            let bar = GBox::new(O::Horizontal, SPACE_S);
+            // more actions than the window is wide scroll sideways instead of widening the window
+            let bar_scroller = gtk::ScrolledWindow::builder()
+                .child(&bar)
+                .hexpand(true)
+                .vscrollbar_policy(gtk::PolicyType::Never)
+                .propagate_natural_height(true)
+                .build();
+            let action_bar = gtk::ActionBar::new();
+            action_bar.pack_start(&bar_scroller);
+            let bar_revealer = gtk::Revealer::builder().child(&action_bar).transition_type(gtk::RevealerTransitionType::SlideUp).build();
             let body = GBox::new(O::Vertical, 0);
-            body.append(&bar);
+            body.append(&sel_header);
             body.append(pages.widget());
+            body.append(&bar_revealer);
             let root = gtk::Overlay::new();
             root.set_child(Some(&body));
             let toast = ScreenToast::new();
@@ -104,6 +158,9 @@ impl UpdatesScreen {
             Self {
                 kind,
                 root,
+                sel_header,
+                sel_label,
+                bar_revealer,
                 bar,
                 col,
                 pages,
@@ -120,6 +177,7 @@ impl UpdatesScreen {
                 invalidate_pending: std::cell::Cell::new(false),
             }
         });
+        screen.pages.set_empty_look(EMPTY_ICON, None);
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let weak = Rc::downgrade(&screen);
@@ -170,6 +228,11 @@ impl UpdatesScreen {
 
     pub fn widget(&self) -> &gtk::Overlay {
         &self.root
+    }
+
+    /// The one action of the empty feed: Update library, wired by the page header (`mount::updates`).
+    pub fn set_empty_action(&self, action: &Button) {
+        self.pages.set_empty_look(EMPTY_ICON, Some(action));
     }
 
     fn db(&self) -> std::sync::Arc<kuro_db::handle::Db> {
@@ -332,10 +395,7 @@ impl UpdatesScreen {
         dot.set_visible(!row.done);
         line.append(&dot);
 
-        let cover = CoverView::new(updates_page::COVER_WIDTH, updates_page::ROW_HEIGHT - 2 * updates_page::COVER_INSET);
-        cover.frame.set_valign(gtk::Align::Center);
-        cover.frame.set_halign(gtk::Align::Center);
-        cover.load(ArtRef {
+        let art = ArtRef {
             owner: if anime { Owner::Anime } else { Owner::Manga },
             entry_id: row.entry_id,
             source_id: row.source_id,
@@ -343,18 +403,20 @@ impl UpdatesScreen {
             url: row.thumbnail_url.clone(),
             favorite: true,
             last_modified: row.cover_last_modified,
-        });
+        };
+        let cover = crate::browse::look::row_cover(&row.entry_title, Some(&art), updates_page::COVER_WIDTH, updates_page::ROW_HEIGHT - 2 * updates_page::COVER_INSET);
+        cover.set_halign(gtk::Align::Center);
         let cover_tap = GestureClick::new();
-        let (weak, title) = (Rc::downgrade(self), row.entry_title.clone());
+        let (weak, entry_id) = (Rc::downgrade(self), row.entry_id);
         cover_tap.connect_pressed(move |gesture, _, _, _| {
             let Some(screen) = weak.upgrade() else { return };
             if cover_click_enabled(screen.selection_mode()) {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                crate::screens::open_entry(&title, screen.kind == EntryKind::Anime);
+                crate::screens::open_entry(screen.kind == EntryKind::Anime, entry_id);
             }
         });
-        cover.frame.add_controller(cover_tap);
-        line.append(&cover.frame);
+        cover.add_controller(cover_tap);
+        line.append(&cover);
 
         let alpha = updates_page::row_alpha(row.done);
         let texts = GBox::new(O::Vertical, 2);
@@ -388,6 +450,9 @@ impl UpdatesScreen {
         line.append(&self.download_indicator(feed_row));
 
         let list_row = gtk::ListBoxRow::builder().child(&line).activatable(false).name(feed::row_name(row.item_id)).build();
+        if feed_row.selected {
+            list_row.add_css_class(crate::theme::style::class::SELECTED);
+        }
         self.attach_gestures(&list_row, row.item_id);
         list_row
     }
@@ -418,6 +483,13 @@ impl UpdatesScreen {
             }
         });
         row.add_controller(click);
+        // Enter and Space on the focused row act as a tap
+        let weak = Rc::downgrade(self);
+        on_key_activate(row, move || {
+            if let Some(screen) = weak.upgrade() {
+                screen.press_later(Gesture::Tap, id);
+            }
+        });
     }
 
     /// Handles the press after the gesture callback returns, because a change rebuilds the row that owns the gesture.
@@ -446,13 +518,13 @@ impl UpdatesScreen {
     /// tap passes `false`, the bar's play actions `true`. Manga opens in the reader.
     fn open_unit(&self, id: i64, alt: bool) {
         let target = match &*self.load.borrow() {
-            UpdatesLoad::Loaded(rows) => rows.iter().find(|r| r.row.item_id == id).map(|r| (r.row.entry_title.clone(), r.row.item_name.clone())),
+            UpdatesLoad::Loaded(rows) => rows.iter().find(|r| r.row.item_id == id).map(|r| r.row.entry_id),
             _ => None,
         };
         let anime = self.kind == EntryKind::Anime;
-        if let Some((title, unit)) = target {
+        if let Some(entry_id) = target {
             let always_external = anime && kuro_prefs::player::PlayerPrefs::new(data::app().base.store().clone()).always_use_external_player.get();
-            open_route::open(anime, &title, &unit, open_route::route(anime, always_external, alt));
+            open_route::open(anime, entry_id, id, open_route::route(anime, always_external, alt));
         }
     }
 
@@ -699,13 +771,14 @@ impl UpdatesScreen {
 }
 
 impl UpdatesScreen {
-    /// Rebuilds the bulk bar from the selection (T-42a-036): the close button and the "N selected" count, then the
-    /// actions the predicates allow (up to the ten of `bottom_bar`), then select-all.
+    /// Rebuilds the selection row and the bulk bar from the selection (T-42a-036): the "N selected" count with select
+    /// all, select inverse and cancel, and the actions the predicates allow (up to the ten of `bottom_bar`).
     fn fill_bar(self: &Rc<Self>, rows: &[FeedRow], mode: bool) {
         while let Some(child) = self.bar.first_child() {
             self.bar.remove(&child);
         }
-        self.bar.set_visible(mode);
+        self.sel_header.set_visible(mode);
+        self.bar_revealer.set_reveal_child(mode);
         if !mode {
             return;
         }
@@ -721,41 +794,11 @@ impl UpdatesScreen {
                 state: r.download.state,
             })
             .collect();
-        let close = Button::from_icon_name("window-close-symbolic");
-        close.set_tooltip_text(Some(&tr(MsgKey::action_cancel)));
-        let weak = Rc::downgrade(self);
-        close.connect_clicked(move |_| {
-            if let Some(screen) = weak.upgrade() {
-                screen.clear_selection();
-            }
-        });
-        self.bar.append(&close);
-        self.bar.append(&Label::new(Some(&bottom_bar::selected_text(selected.len()))));
+        self.sel_label.set_label(&bottom_bar::selected_text(selected.len()));
         let always_external = kuro_prefs::player::PlayerPrefs::new(data::app().base.store().clone()).always_use_external_player.get();
         for action in bottom_bar::visible_actions(anime, &selected, always_external) {
             self.bar.append(&self.bar_button(action, anime));
         }
-        let spacer = GBox::new(O::Horizontal, 0);
-        spacer.set_hexpand(true);
-        self.bar.append(&spacer);
-        let select_all = Button::from_icon_name("edit-select-all-symbolic");
-        select_all.set_tooltip_text(Some(&tr(MsgKey::action_select_all)));
-        let weak = Rc::downgrade(self);
-        select_all.connect_clicked(move |_| {
-            if let Some(screen) = weak.upgrade() {
-                screen.select_all();
-            }
-        });
-        self.bar.append(&select_all);
-        let select_inverse = Button::from_icon_name("edit-select-invert-symbolic");
-        select_inverse.set_tooltip_text(Some(&tr(MsgKey::action_select_inverse)));
-        let weak = Rc::downgrade(self);
-        select_inverse.connect_clicked(move |_| {
-            if let Some(screen) = weak.upgrade() {
-                screen.select_inverse();
-            }
-        });
-        self.bar.append(&select_inverse);
     }
 
     fn bar_button(self: &Rc<Self>, action: BarAction, anime: bool) -> Button {
@@ -786,11 +829,33 @@ impl UpdatesScreen {
     }
 }
 
-/// The "Library last updated: ..." row at the top of the feed (T-42b-016), in italics.
+/// The "Library last updated: ..." line at the top of the feed (T-42b-016), the context line of the Library page.
 fn last_updated_label() -> Label {
     let last = data::app().library.last_updated_timestamp.get();
     let text = format::last_updated_line(last, Local::now().timestamp_millis());
-    let label = Label::builder().xalign(0.0).css_classes(["dim-label"]).build();
-    label.set_markup(&format!("<i>{}</i>", gtk::glib::markup_escape_text(&text)));
-    label
+    Label::builder().label(text).xalign(0.0).css_classes(["kb-library-context"]).build()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    #[test]
+    fn enter_and_space_on_an_updates_row_run_its_tap_once_each_and_other_keys_do_not() {
+        crate::testing::with_display(|| {
+            let row = gtk::ListBoxRow::builder().activatable(false).build();
+            let taps = Rc::new(Cell::new(0));
+            let seen = Rc::clone(&taps);
+            on_key_activate(&row, move || seen.set(seen.get() + 1));
+            let controllers = row.observe_controllers();
+            let key = (0..controllers.n_items()).filter_map(|i| controllers.item(i)).find_map(|c| c.downcast::<gtk::EventControllerKey>().ok()).expect("the row's key controller");
+            let press = |keyval: gdk::Key| key.emit_by_name::<bool>("key-pressed", &[&keyval, &0u32, &ModifierType::empty()]);
+            assert!(press(gdk::Key::Return));
+            assert!(press(gdk::Key::space));
+            assert!(!press(gdk::Key::a), "other keys pass through");
+            assert_eq!(taps.get(), 2);
+        });
+    }
 }

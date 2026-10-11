@@ -3,9 +3,6 @@
 //! `AnimeScreen.kt:136-144`. Behaviour 11.2 and 17.4 and 17.5. The caller writes the flags and clears the selection.
 
 use kuro_data::episode::Episode;
-use kuro_prefs::library::{EpisodeSwipeAction, LibraryPrefs};
-
-use crate::entry_core::swipe::Side;
 
 /// The per-episode flags a bulk action sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,37 +39,37 @@ pub fn starts_torrent_server(is_torrent: bool) -> bool {
     is_torrent
 }
 
-/// What a swipe on a row does (T-39b-015): the stored action of the side the drag ended on. A swipe on a left drag reads
-/// the left preference, as the manga rows do.
-pub fn swipe_action(prefs: &LibraryPrefs, side: Side) -> EpisodeSwipeAction {
-    match side {
-        Side::Left => prefs.swipe_left_episode.get(),
-        Side::Right => prefs.swipe_right_episode.get(),
-    }
+/// What an item of an episode row's context menu does (T-39b-015).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EpisodeMenuAction {
+    ToggleSeen,
+    ToggleBookmark,
+    ToggleFillermark,
+    Download,
 }
 
-/// The write of a swipe action on one episode, or `None` when it writes nothing: Disabled, and Download while the page
-/// has no anime download queue. Bookmark and fillermark go through `bulk_mark_targets`, as the bottom bar does, so
-/// a swipe and a bulk action write the same way.
-pub fn swipe_effect(action: EpisodeSwipeAction, episode: &Episode) -> Option<SwipeEffect> {
+/// The write of a menu item on one episode, or `None` when it writes nothing: Download, while the page has no anime
+/// download queue. Bookmark and fillermark go through `bulk_mark_targets`, as the bottom bar does, so a menu item and
+/// a bulk action write the same way.
+pub fn menu_effect(action: EpisodeMenuAction, episode: &Episode) -> Option<MenuEffect> {
     let one = std::slice::from_ref(episode);
     match action {
-        EpisodeSwipeAction::ToggleSeen => Some(SwipeEffect::Seen { id: episode.id, seen: !episode.seen }),
-        EpisodeSwipeAction::ToggleBookmark => {
+        EpisodeMenuAction::ToggleSeen => Some(MenuEffect::Seen { id: episode.id, seen: !episode.seen }),
+        EpisodeMenuAction::ToggleBookmark => {
             let on = !episode.bookmark;
-            Some(SwipeEffect::Mark { ids: bulk_mark_targets(one, Mark::Bookmark, on), mark: Mark::Bookmark, on })
+            Some(MenuEffect::Mark { ids: bulk_mark_targets(one, Mark::Bookmark, on), mark: Mark::Bookmark, on })
         }
-        EpisodeSwipeAction::ToggleFillermark => {
+        EpisodeMenuAction::ToggleFillermark => {
             let on = !episode.fillermark;
-            Some(SwipeEffect::Mark { ids: bulk_mark_targets(one, Mark::Fillermark, on), mark: Mark::Fillermark, on })
+            Some(MenuEffect::Mark { ids: bulk_mark_targets(one, Mark::Fillermark, on), mark: Mark::Fillermark, on })
         }
-        EpisodeSwipeAction::Download | EpisodeSwipeAction::Disabled => None,
+        EpisodeMenuAction::Download => None,
     }
 }
 
-/// The write a swipe asks for.
+/// The write a menu item asks for.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SwipeEffect {
+pub enum MenuEffect {
     Seen { id: i64, seen: bool },
     Mark { ids: Vec<i64>, mark: Mark, on: bool },
 }
@@ -100,20 +97,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_swipe_toggles_the_mark_it_names_through_the_same_targets_as_the_bar() {
+    fn a_menu_item_toggles_the_mark_it_names_through_the_same_targets_as_the_bar() {
         let marked = ep(1, true, false);
-        assert_eq!(swipe_effect(EpisodeSwipeAction::ToggleBookmark, &marked), Some(SwipeEffect::Mark { ids: vec![1], mark: Mark::Bookmark, on: false }));
-        assert_eq!(swipe_effect(EpisodeSwipeAction::ToggleFillermark, &marked), Some(SwipeEffect::Mark { ids: vec![1], mark: Mark::Fillermark, on: true }));
-        assert_eq!(swipe_effect(EpisodeSwipeAction::ToggleSeen, &marked), Some(SwipeEffect::Seen { id: 1, seen: true }));
-        assert_eq!(swipe_effect(EpisodeSwipeAction::Disabled, &marked), None, "Disabled never dispatches");
-        assert_eq!(swipe_effect(EpisodeSwipeAction::Download, &marked), None, "no anime download queue yet");
-    }
-
-    #[test]
-    fn each_side_reads_its_own_episode_preference() {
-        let prefs = LibraryPrefs::new(kuro_prefs::store::PrefStore::in_memory());
-        assert_eq!(swipe_action(&prefs, Side::Left), EpisodeSwipeAction::ToggleSeen);
-        assert_eq!(swipe_action(&prefs, Side::Right), EpisodeSwipeAction::ToggleBookmark);
+        assert_eq!(menu_effect(EpisodeMenuAction::ToggleBookmark, &marked), Some(MenuEffect::Mark { ids: vec![1], mark: Mark::Bookmark, on: false }));
+        assert_eq!(menu_effect(EpisodeMenuAction::ToggleFillermark, &marked), Some(MenuEffect::Mark { ids: vec![1], mark: Mark::Fillermark, on: true }));
+        assert_eq!(menu_effect(EpisodeMenuAction::ToggleSeen, &marked), Some(MenuEffect::Seen { id: 1, seen: true }));
+        assert_eq!(menu_effect(EpisodeMenuAction::Download, &marked), None, "no anime download queue yet");
     }
 
     #[test]

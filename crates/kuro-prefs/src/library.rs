@@ -9,7 +9,6 @@ use std::collections::BTreeSet;
 
 use crate::PrefError;
 use crate::pref::Pref;
-use crate::pref_enum;
 use crate::registry;
 use crate::flags::{
     CHAPTER_BOOKMARKED_MASK, CHAPTER_DISPLAY_MASK, CHAPTER_DOWNLOADED_MASK, CHAPTER_SORTING_MASK,
@@ -85,14 +84,6 @@ define_prefs! {
         manga_update_categories: BTreeSet<String> = "library_update_categories" => BTreeSet::new();
         anime_update_categories_exclude: BTreeSet<String> = "animelib_update_categories_exclude" => BTreeSet::new();
         manga_update_categories_exclude: BTreeSet<String> = "library_update_categories_exclude" => BTreeSet::new();
-        /// Swipe LEFT on an episode (the key says `end`, Kotlin `swipeEpisodeStartAction`).
-        swipe_left_episode: EpisodeSwipeAction = "pref_episode_swipe_end_action" => EpisodeSwipeAction::ToggleSeen;
-        /// Swipe RIGHT on an episode (the key says `start`, Kotlin `swipeEpisodeEndAction`).
-        swipe_right_episode: EpisodeSwipeAction = "pref_episode_swipe_start_action" => EpisodeSwipeAction::ToggleBookmark;
-        /// Swipe LEFT on a chapter (the key says `end`, Kotlin `swipeChapterStartAction`).
-        swipe_left_chapter: ChapterSwipeAction = "pref_chapter_swipe_end_action" => ChapterSwipeAction::ToggleRead;
-        /// Swipe RIGHT on a chapter (the key says `start`, Kotlin `swipeChapterEndAction`).
-        swipe_right_chapter: ChapterSwipeAction = "pref_chapter_swipe_start_action" => ChapterSwipeAction::ToggleBookmark;
         mark_duplicate_read_chapter_as_read: BTreeSet<String> = "mark_duplicate_read_chapter_read" => BTreeSet::new();
         mark_duplicate_seen_episode_as_seen: BTreeSet<String> = "mark_duplicate_seen_episode_seen" => BTreeSet::new();
         filter_episode_by_seen: i64 = "default_episode_filter_by_seen" => 0;
@@ -133,16 +124,6 @@ define_prefs! {
         update_season_on_refresh: bool = "pref_update_season_on_refresh" => false;
         update_season_on_library_update: bool = "pref_update_season_on_library_update" => false;
     }
-}
-
-pref_enum! {
-    /// `ChapterSwipeAction` (`LibraryPreferences.kt`), stored by constant name.
-    pub enum ChapterSwipeAction { ToggleRead, ToggleBookmark, Download, Disabled }
-}
-
-pref_enum! {
-    /// `EpisodeSwipeAction` (`LibraryPreferences.kt`), stored by constant name.
-    pub enum EpisodeSwipeAction { ToggleSeen, ToggleBookmark, ToggleFillermark, Download, Disabled }
 }
 
 /// `LibraryDisplayMode` (`LibraryDisplayMode.kt`). One key serves both libraries and is stored as the
@@ -521,7 +502,7 @@ mod tests {
         assert!(!lib.filter_downloaded_manga.is_set());
     }
 
-    /// Table of `p1-data-and-config.md` section 5 (87 rows). Columns: index, key, namespace, Rust field, kind
+    /// Table of `p1-data-and-config.md` section 5 (83 rows, the four swipe rows are dropped). Columns: index, key, namespace, Rust field, kind
     /// (`bool`, `int`, `long`, `str`, `set`) and the default in stored form (a set is comma-separated, empty for `{}`).
     const SECTION_5: &str = include_str!("../tests/fixtures/library_prefs_table.tsv");
 
@@ -565,9 +546,9 @@ mod tests {
     }
 
     #[test]
-    fn section_5_table_has_87_accessors_registered_with_their_namespace() {
+    fn section_5_table_has_83_accessors_registered_with_their_namespace() {
         let rows = section_5_rows();
-        assert_eq!(rows.len(), 87);
+        assert_eq!(rows.len(), 83);
         let fields: Vec<&str> = LibraryPrefs::FIELDS.iter().map(|(_, key)| *key).collect();
         for row in &rows {
             let stored = stored_key(row);
@@ -613,24 +594,24 @@ mod tests {
     }
 
     #[test]
-    fn swipe_accessors_are_named_by_effect_and_keep_the_kotlin_keys() {
-        let lib = LibraryPrefs::new(PrefStore::in_memory());
-        assert_eq!(lib.swipe_left_chapter.key(), "pref_chapter_swipe_end_action");
-        assert_eq!(lib.swipe_left_chapter.get(), ChapterSwipeAction::ToggleRead);
-        assert_eq!(lib.swipe_right_chapter.key(), "pref_chapter_swipe_start_action");
-        assert_eq!(lib.swipe_right_chapter.get(), ChapterSwipeAction::ToggleBookmark);
-        assert_eq!(lib.swipe_left_episode.get(), EpisodeSwipeAction::ToggleSeen);
-        assert_eq!(lib.swipe_right_episode.get(), EpisodeSwipeAction::ToggleBookmark);
+    fn the_dropped_swipe_keys_have_no_accessor_and_no_registry_row() {
+        let fields: Vec<&str> = LibraryPrefs::FIELDS.iter().map(|(_, key)| *key).collect();
+        for key in [
+            "pref_chapter_swipe_end_action",
+            "pref_chapter_swipe_start_action",
+            "pref_episode_swipe_end_action",
+            "pref_episode_swipe_start_action",
+        ] {
+            assert!(!fields.contains(&key), "{key} has a LibraryPrefs field");
+            assert!(registry::lookup(key).is_none(), "{key} is registered");
+            assert!(registry::is_dropped(key), "{key} is not in DROPPED_KEYS");
+        }
     }
 
     #[test]
     fn known_enum_names_decode_to_their_variants() {
         let store = PrefStore::in_memory();
         let lib = LibraryPrefs::new(store.clone());
-        store.set_raw("pref_chapter_swipe_end_action", PrefValue::Str("Download".into()));
-        assert_eq!(lib.swipe_left_chapter.get(), ChapterSwipeAction::Download);
-        store.set_raw("pref_episode_swipe_start_action", PrefValue::Str("ToggleFillermark".into()));
-        assert_eq!(lib.swipe_right_episode.get(), EpisodeSwipeAction::ToggleFillermark);
         store.set_raw("pref_filter_library_downloaded_v2", PrefValue::Str("ENABLED_NOT".into()));
         assert_eq!(lib.filter_downloaded_manga.get(), TriState::ENABLED_NOT);
         store.set_raw("pref_display_mode_library", PrefValue::Str("COVER_ONLY_GRID".into()));
@@ -638,20 +619,12 @@ mod tests {
     }
 
     #[test]
-    fn unknown_tristate_and_swipe_names_read_the_default_and_stay_stored() {
+    fn an_unknown_tristate_name_reads_the_default_and_stay_stored() {
         let store = PrefStore::in_memory();
         let lib = LibraryPrefs::new(store.clone());
         store.set_raw("pref_filter_library_downloaded_v2", PrefValue::Str("BANANA".into()));
         assert_eq!(lib.filter_downloaded_manga.get(), TriState::DISABLED, "TriState BANANA reads as DISABLED");
         assert_eq!(store.get_raw("pref_filter_library_downloaded_v2"), Some(PrefValue::Str("BANANA".into())));
-
-        store.set_raw("pref_chapter_swipe_start_action", PrefValue::Str("Banana".into()));
-        assert_eq!(lib.swipe_right_chapter.get(), ChapterSwipeAction::ToggleBookmark, "swipe Banana reads as the default");
-        assert_eq!(store.get_raw("pref_chapter_swipe_start_action"), Some(PrefValue::Str("Banana".into())));
-
-        store.set_raw("pref_episode_swipe_end_action", PrefValue::Str("Banana".into()));
-        assert_eq!(lib.swipe_left_episode.get(), EpisodeSwipeAction::ToggleSeen);
-        assert_eq!(store.get_raw("pref_episode_swipe_end_action"), Some(PrefValue::Str("Banana".into())));
     }
 
     #[test]

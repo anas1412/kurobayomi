@@ -10,9 +10,9 @@ pub fn header_text(date: NaiveDate, today: NaiveDate, relative: bool, pref: &str
     relative_date(date, today, DateStyle { relative, format: DateFormat::from_pref(pref), locale })
 }
 
-/// The text of the count badge of a heading.
+/// The text of the count badge of a heading, in words: `1 entry`, `3 entries`.
 pub fn badge_text(count: u32) -> String {
-    count.to_string()
+    if count == 1 { "1 entry".to_owned() } else { format!("{count} entries") }
 }
 
 #[cfg(test)]
@@ -38,6 +38,7 @@ mod tests {
 
     #[test]
     fn rows_badge_is_the_count() {
-        assert_eq!(badge_text(3), "3");
+        assert_eq!(badge_text(1), "1 entry");
+        assert_eq!(badge_text(3), "3 entries");
     }
 }

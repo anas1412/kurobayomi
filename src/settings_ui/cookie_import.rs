@@ -1,8 +1,7 @@
 //! The manual Cloudflare cookie import (T-12a-033): paste the `cf_clearance` value and the user agent of the browser
 //! that earned it. The cookie is stored for the site's domain and the user agent becomes the default `User-Agent`
 //! for that domain, since a clearance only works with the agent that earned it. Like Clear cookies, it works on the
-//! jar file in the platform data directory.
-use std::path::Path;
+//! app's shared jar (`net_client::app_jar`), so the running clients send the clearance on their next request.
 use std::rc::Rc;
 
 use gtk::prelude::*;
@@ -42,10 +41,9 @@ fn site_url(site: &str) -> Option<reqwest::Url> {
     reqwest::Url::parse(&text).ok().filter(|url| url.host_str().is_some())
 }
 
-/// Stores the pasted clearance for `site` in the jar file `file` with `user_agent` as the domain default.
-pub fn import_at(file: &Path, site: &str, value: &str, user_agent: &str) -> Result<(), ImportError> {
+/// Stores the pasted clearance for `site` in `jar` with `user_agent` as the domain default.
+pub fn import_at(jar: &CookieJar, site: &str, value: &str, user_agent: &str) -> Result<(), ImportError> {
     let url = site_url(site).ok_or(ImportError::Site)?;
-    let jar = CookieJar::load(file.to_path_buf());
     jar.import_clearance(&url, value.trim(), user_agent).map_err(ImportError::Clearance)?;
     jar.flush().map_err(|err| {
         tracing::warn!(%err, "the imported cookie could not be saved");
@@ -89,9 +87,9 @@ pub fn show(parent: &impl IsA<gtk::Window>) {
     let confirm = {
         let (site, value, agent) = (site.clone(), value.clone(), agent.clone());
         move |dialog: dialog::Dialog| {
-            let result = crate::browse::cookies::jar_file()
+            let result = crate::net_client::app_jar()
                 .ok_or(ImportError::Save)
-                .and_then(|file| import_at(&file, &site.text(), &value.text(), &agent.text()));
+                .and_then(|jar| import_at(&jar, &site.text(), &value.text(), &agent.text()));
             match result {
                 Ok(()) => dialog.finish(),
                 Err(err) => dialog.set_error(Some(err.message())),
@@ -127,7 +125,8 @@ mod tests {
     fn a_pasted_clearance_and_agent_are_stored_for_the_domain() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("cookies.json");
-        import_at(&file, "site.test", " abc123 ", UA).unwrap();
+        let jar = CookieJar::load(file.clone());
+        import_at(&jar, "site.test", " abc123 ", UA).unwrap();
         let jar = CookieJar::load(file);
         let url = reqwest::Url::parse("https://www.site.test/x").unwrap();
         assert!(jar.get(&url).iter().any(|c| c.name() == "cf_clearance" && c.value() == "abc123"));
@@ -138,11 +137,12 @@ mod tests {
     fn a_refused_import_names_the_reason_and_stores_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("cookies.json");
-        assert_eq!(import_at(&file, "", "abc", UA), Err(ImportError::Site));
-        assert_eq!(import_at(&file, "site.test", "", UA), Err(ImportError::Clearance(ClearanceImportError::Empty)));
-        assert_eq!(import_at(&file, "site.test", "a;b", UA), Err(ImportError::Clearance(ClearanceImportError::Malformed)));
-        assert_eq!(import_at(&file, "site.test", "a b", UA), Err(ImportError::Clearance(ClearanceImportError::Malformed)));
-        assert_eq!(import_at(&file, "site.test", "abc", " "), Err(ImportError::Clearance(ClearanceImportError::InvalidUserAgent)));
+        let jar = CookieJar::load(file.clone());
+        assert_eq!(import_at(&jar, "", "abc", UA), Err(ImportError::Site));
+        assert_eq!(import_at(&jar, "site.test", "", UA), Err(ImportError::Clearance(ClearanceImportError::Empty)));
+        assert_eq!(import_at(&jar, "site.test", "a;b", UA), Err(ImportError::Clearance(ClearanceImportError::Malformed)));
+        assert_eq!(import_at(&jar, "site.test", "a b", UA), Err(ImportError::Clearance(ClearanceImportError::Malformed)));
+        assert_eq!(import_at(&jar, "site.test", "abc", " "), Err(ImportError::Clearance(ClearanceImportError::InvalidUserAgent)));
         assert!(!file.exists());
         assert!(ImportError::Site.message().contains("site"));
     }

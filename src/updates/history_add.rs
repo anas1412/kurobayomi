@@ -64,39 +64,6 @@ pub fn confirm_chooser(store: &dyn FavoriteStore, id: i64, now_ms: i64, picked: 
     }
 }
 
-/// What a button of the chooser does, by its index in dialog order: OK, Cancel, Edit categories.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChooserAnswer {
-    Ok,
-    Cancel,
-    EditCategories,
-}
-
-pub fn chooser_answer(pressed: Option<usize>) -> ChooserAnswer {
-    match pressed {
-        Some(0) => ChooserAnswer::Ok,
-        Some(2) => ChooserAnswer::EditCategories,
-        _ => ChooserAnswer::Cancel,
-    }
-}
-
-/// The category kind of the Categories page that "Edit categories" opens. Nothing is written by it.
-pub fn categories_kind(kind: EntryKind) -> CategoryKind {
-    match kind {
-        EntryKind::Manga => CategoryKind::Manga,
-        EntryKind::Anime => CategoryKind::Anime,
-    }
-}
-
-/// The entry the navigation stack shows once a migration finishes. Manga replaces the stack with the NEW entry; anime
-/// with the OLD one, as observed (EC-42-H-17).
-pub fn after_migrate(kind: EntryKind, old_id: i64, new_id: i64) -> i64 {
-    match kind {
-        EntryKind::Manga => new_id,
-        EntryKind::Anime => old_id,
-    }
-}
-
 /// The production store of one kind over the app databases. An add also applies the default episode flags (anime) and
 /// binds the enhanced trackers through [`track_binding`] (EC-42-H-14); the confirm path reaches both through the same
 /// `after_add`.
@@ -202,17 +169,4 @@ mod tests {
         assert!(at("categories 3 [1]") < at("favorite 3 true 100"));
     }
 
-    #[test]
-    fn chooser_buttons_map_to_answers() {
-        assert_eq!(chooser_answer(Some(0)), ChooserAnswer::Ok);
-        assert_eq!(chooser_answer(Some(1)), ChooserAnswer::Cancel);
-        assert_eq!(chooser_answer(Some(2)), ChooserAnswer::EditCategories);
-        assert_eq!(chooser_answer(None), ChooserAnswer::Cancel);
-    }
-
-    #[test]
-    fn migrate_manga_keeps_the_new_entry_and_anime_the_old() {
-        assert_eq!(after_migrate(EntryKind::Manga, 1, 2), 2);
-        assert_eq!(after_migrate(EntryKind::Anime, 1, 2), 1);
-    }
 }

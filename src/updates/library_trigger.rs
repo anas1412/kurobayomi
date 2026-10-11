@@ -77,7 +77,7 @@ pub fn message(outcome: Outcome) -> &'static str {
     }
 }
 
-/// True for the key that starts a library pass on the Updates page, in place of pull-to-refresh (T-42b-042): F5.
+/// True for the key that starts a library pass on the Updates page (T-42b-042): F5.
 pub fn is_refresh_key(key: gtk::gdk::Key) -> bool {
     key == gtk::gdk::Key::F5
 }

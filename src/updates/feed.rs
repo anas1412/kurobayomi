@@ -77,12 +77,14 @@ impl Selectable for FeedRow {
     }
 }
 
-/// A new list from the query. Rows that were selected stay selected by unit id. The bounds are left alone, as in the
-/// source (B 5.4, E-U46): `selection` may point past the new list, and `Selection::toggle` clamps what it reads. The
-/// 42a rule that recomputes them on a refresh (EC-42-U-05) lost to the exact port of T-42b-006.
-pub fn replace_rows(rows: Vec<UpdateRow>, previous: &[FeedRow], _selection: &mut Selection) -> Vec<FeedRow> {
+/// A new list from the query. Rows that were selected stay selected by unit id, and the bounds are recomputed from the
+/// selected flags (EC-42-U-05, T-42a-006), so they never point past a shorter list. The source leaves them stale
+/// (B 5.4, E-U46); the plan's 42a rule wins here because a stale bound makes a long press select the wrong range.
+pub fn replace_rows(rows: Vec<UpdateRow>, previous: &[FeedRow], selection: &mut Selection) -> Vec<FeedRow> {
     let was_selected = |id: i64| previous.iter().any(|p| p.selected && p.row.item_id == id);
-    rows.into_iter().map(|row| FeedRow { selected: was_selected(row.item_id), row, download: NOT_DOWNLOADED }).collect()
+    let fresh: Vec<FeedRow> = rows.into_iter().map(|row| FeedRow { selected: was_selected(row.item_id), row, download: NOT_DOWNLOADED }).collect();
+    selection.sync(&fresh);
+    fresh
 }
 
 /// The list under date headers by fetch day; each item is an index into `rows`.
@@ -246,29 +248,32 @@ mod tests {
     }
 
     #[test]
-    fn feed_new_list_keeps_selected_ids_and_leaves_the_bounds() {
+    fn feed_new_list_keeps_selected_ids_and_recomputes_the_bounds() {
         let (mut items, mut sel) = (rows(5), Selection::default());
         press(Gesture::LongPress, &mut sel, &mut items, 2);
         press(Gesture::LongPress, &mut sel, &mut items, 3);
         let fresh = replace_rows(vec![update(9), update(3), update(2), update(8)], &items, &mut sel);
         assert_eq!(flags(&fresh), [false, true, true, false]);
-        assert_eq!(sel.bounds(), [2, 3], "the anchors are not recomputed on a refresh");
+        assert_eq!(sel.bounds(), [1, 2], "rows 3 and 2 moved to indices 1 and 2");
     }
 
     #[test]
-    fn stale_anchor_after_refresh_is_preserved() {
+    fn selection_bounds_are_recomputed_after_the_list_shrinks() {
+        // EC-42-U-05: select 6 and 7 of 8, refresh to a list of 3 where row 6 is at index 0
         let (mut items, mut sel) = (rows(8), Selection::default());
         press(Gesture::LongPress, &mut sel, &mut items, 6);
         press(Gesture::LongPress, &mut sel, &mut items, 7);
         assert_eq!(sel.bounds(), [6, 7]);
-        // the refreshed list is shorter than the anchors; the selected row 6 is now at index 0
         let mut fresh = replace_rows(vec![update(6), update(30), update(31)], &items, &mut sel);
-        assert_eq!(sel.bounds(), [6, 7]);
+        assert_eq!(sel.bounds(), [0, 0], "row 6 is the only selected row left");
         assert_eq!(flags(&fresh), [true, false, false]);
-        // a long press below the stale lower anchor fills up to it, clamped to the list: no panic
+        // a long press on the last row now fills the gap up from the real bound: no stale range
         assert_eq!(press(Gesture::LongPress, &mut sel, &mut fresh, 31), Press::Changed);
-        assert_eq!(flags(&fresh), [true, false, true]);
-        assert_eq!(sel.bounds(), [2, 7]);
+        assert_eq!(flags(&fresh), [true, true, true]);
+        // and a refresh that drops every selected row clears the bounds
+        let none = replace_rows(vec![update(40), update(41)], &fresh, &mut sel);
+        assert_eq!(flags(&none), [false, false]);
+        assert_eq!(sel.bounds(), [-1, -1]);
     }
 
     #[test]

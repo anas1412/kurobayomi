@@ -4,9 +4,6 @@
 use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
 
-/// Consumers debounce filtering by this long; the toolbar itself does not debounce (behaviour 5.1).
-pub const SEARCH_DEBOUNCE_MILLIS: u64 = 250;
-
 /// The query to submit on Enter, or `None` for a blank query (blank never searches).
 pub fn submit(query: &str) -> Option<&str> {
     if query.trim().is_empty() { None } else { Some(query) }
@@ -144,8 +141,4 @@ mod tests {
         assert_eq!(tr(MsgKey::action_reset), "Reset");
     }
 
-    #[test]
-    fn debounce_is_250_ms() {
-        assert_eq!(SEARCH_DEBOUNCE_MILLIS, 250);
-    }
 }

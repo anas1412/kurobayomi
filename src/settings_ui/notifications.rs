@@ -9,7 +9,6 @@ use std::rc::Rc;
 
 use crate::pref_model::model::PreferenceItem;
 use crate::settings_ui::rows::{multi_choice, text};
-use kuro_platform::notifications::CATEGORIES;
 
 pub const TITLE: &str = "Manage notifications";
 pub const PROGRAM: &str = "systemsettings";
@@ -62,6 +61,9 @@ fn open() {
         tracing::warn!(%err, "the notification settings did not open");
     }
 }
+
+#[cfg(test)]
+use kuro_platform::notifications::CATEGORIES;
 
 #[cfg(test)]
 mod tests {

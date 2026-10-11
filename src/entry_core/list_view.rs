@@ -11,12 +11,11 @@ use gtk::{Align, Box as GBox, Label, Orientation as O, gio, glib, pango};
 use kuro_downloads::DownloadState;
 
 use kuro_i18n::{MsgKey, tr};
-use kuro_prefs::library::{ChapterSwipeAction, LibraryPrefs};
 
 use crate::entry_core::chapter_actions::{IndicatorAction, Outcome, Press, menu_label, outcome, ring};
 use crate::entry_core::list_model::{DOT_SIZE, Diff, ROW_PADDING, RowItem, diff, row_alpha};
 use crate::entry_core::selection::Mods;
-use crate::entry_core::swipe::{action_for, menu, side_of_drag};
+use crate::entry_core::page::RowMenuAction;
 
 /// A click or long press on a row: (chapter id, modifiers, long press or right click).
 pub type OnRow = Rc<dyn Fn(i64, Mods, bool)>;
@@ -34,12 +33,15 @@ pub struct RowActions {
     pub on_previous: OnChapter,
 }
 
-/// The swipe actions of a row (T-08a-029): the stored action per side, and what to run for one row.
-#[derive(Clone)]
-pub struct Swipe {
-    pub prefs: Rc<LibraryPrefs>,
-    pub run: Rc<dyn Fn(i64, ChapterSwipeAction)>,
-}
+/// What to run for one row when an item of its context menu is chosen.
+pub type OnMenu = Rc<dyn Fn(i64, RowMenuAction)>;
+
+/// The items of a row's context menu after Select, with their labels.
+const MENU: [(RowMenuAction, &str); 3] = [
+    (RowMenuAction::ToggleRead, "Mark as read"),
+    (RowMenuAction::ToggleBookmark, "Bookmark chapter"),
+    (RowMenuAction::Download, "Download"),
+];
 
 pub struct ChapterList {
     pub widget: gtk::ListView,
@@ -199,8 +201,8 @@ impl RowWidgets {
     }
 }
 
-/// The right-click menu of a row: Select, then each swipe action that runs on this page.
-fn context_menu(root: &GBox, list_item: &gtk::ListItem, swipe: &Swipe, on_row: &OnRow, on_previous: &OnChapter, at: (f64, f64)) {
+/// The right-click menu of a row: Select, the read, bookmark and download items, then Mark previous as read.
+fn context_menu(root: &GBox, list_item: &gtk::ListItem, on_menu: &OnMenu, on_row: &OnRow, on_previous: &OnChapter, at: (f64, f64)) {
     let Some(item) = item_of(list_item) else { return };
     let id = item.borrow::<RowItem>().id;
     if item.borrow::<RowItem>().missing.is_some() {
@@ -222,8 +224,8 @@ fn context_menu(root: &GBox, list_item: &gtk::ListItem, swipe: &Swipe, on_row: &
     };
     let on_row = Rc::clone(on_row);
     entry("Select", Box::new(move || on_row(id, Mods::default(), true)));
-    for (action, label) in menu(&swipe.prefs) {
-        let run = Rc::clone(&swipe.run);
+    for (action, label) in MENU {
+        let run = Rc::clone(on_menu);
         entry(label, Box::new(move || run(id, action)));
     }
     let on_previous = Rc::clone(on_previous);
@@ -334,7 +336,7 @@ fn bind(w: &RowWidgets, row: &RowItem) {
 }
 
 impl ChapterList {
-    pub fn new(on_row: OnRow, swipe: Option<Swipe>, actions: RowActions) -> Rc<Self> {
+    pub fn new(on_row: OnRow, on_menu: OnMenu, actions: RowActions) -> Rc<Self> {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(move |_, object| {
@@ -361,12 +363,8 @@ impl ChapterList {
             });
             let right = gtk::GestureClick::builder().button(3).build();
             right.connect_pressed({
-                let (list_item, on_row, swipe, root, actions) = (list_item.clone(), Rc::clone(&on_row), swipe.clone(), widgets.root.clone(), actions.clone());
-                move |g, _, x, y| match &swipe {
-                    // the context menu holds Select and the swipe actions of the two sides
-                    Some(swipe) => context_menu(&root, &list_item, swipe, &on_row, &actions.on_previous, (x, y)),
-                    None => report(&list_item, &on_row, g.current_event_state(), true),
-                }
+                let (list_item, on_row, on_menu, root, actions) = (list_item.clone(), Rc::clone(&on_row), Rc::clone(&on_menu), widgets.root.clone(), actions.clone());
+                move |_, _, x, y| context_menu(&root, &list_item, &on_menu, &on_row, &actions.on_previous, (x, y))
             });
             let long = gtk::GestureLongPress::new();
             long.connect_pressed({
@@ -378,20 +376,6 @@ impl ChapterList {
             });
             for c in [left.upcast_ref::<gtk::EventController>(), right.upcast_ref(), long.upcast_ref()] {
                 widgets.root.add_controller(c.clone());
-            }
-            if let Some(swipe) = swipe.clone() {
-                // a horizontal drag on a touch screen runs the action of the side it ends on
-                let drag = gtk::GestureDrag::new();
-                drag.set_touch_only(true);
-                let list_item = list_item.clone();
-                drag.connect_drag_end(move |_, dx, dy| {
-                    let (Some(side), Some(item)) = (side_of_drag(dx, dy), item_of(&list_item)) else { return };
-                    let row = item.borrow::<RowItem>();
-                    if row.missing.is_none() {
-                        (swipe.run)(row.id, action_for(&swipe.prefs, side));
-                    }
-                });
-                widgets.root.add_controller(drag);
             }
             // a press on the indicator follows `chapter_actions::outcome` by the state of its row: an action at once, or a menu
             let press_indicator = {

@@ -1,5 +1,5 @@
 //! The reader session: progress on page change, completion, chapter switching, adjacent navigation, preload,
-//! and the per-manga mode and orientation writes. It runs on the GTK thread and talks to the database only
+//! and the per-manga mode writes. It runs on the GTK thread and talks to the database only
 //! through [`ReaderStore`]. T-43a-023 (initial index), T-43a-025, T-43a-026, T-43a-027, T-43a-028, T-43a-029,
 //! T-43a-036, T-43a-086 (event channel).
 
@@ -11,7 +11,7 @@ use std::sync::mpsc::Sender;
 use kuro_data::chapter::{Chapter, ChapterRepo};
 use kuro_data::manga::{Manga, MangaRepo};
 use kuro_db::Db;
-use kuro_prefs::reader::{ORIENTATION_MASK, READING_MODE_MASK, ReaderOrientation, ReadingMode};
+use kuro_prefs::reader::{READING_MODE_MASK, ReadingMode};
 
 use super::chapters::{ListError, ListOptions, build_reader_list};
 use super::delete_queue::{self, DeleteQueue, Pending, QueueFile};
@@ -45,7 +45,6 @@ pub trait ReaderStore {
 pub enum ReaderEvent {
     ReloadViewerChapters,
     PageChanged,
-    SetOrientation(ReaderOrientation),
     SetCoverResult(bool),
     SavedImage(PathBuf),
     ShareImage(PathBuf),
@@ -426,16 +425,6 @@ impl ReaderSession {
         let _ = self.events.send(ReaderEvent::ReloadViewerChapters);
     }
 
-    /// `setMangaOrientationType` (036). `default_pref` resolves a manga that has no orientation of its own.
-    pub fn set_orientation(&mut self, orientation: ReaderOrientation, default_pref: i32) {
-        self.store.set_viewer_flags(self.manga_id, i64::from(orientation.flag_value()), i64::from(ORIENTATION_MASK));
-        self.viewer_flags = flags::set_orientation(self.viewer_flags, orientation);
-        self.restore_saved_page();
-        let resolved = flags::resolve_orientation(self.viewer_flags, default_pref);
-        let _ = self.events.send(ReaderEvent::SetOrientation(resolved));
-        let _ = self.events.send(ReaderEvent::ReloadViewerChapters);
-    }
-
     /// `onPageSelected` (T-043a-093). An insert page is ignored. Otherwise the progress is saved, a chapter switch
     /// runs when the page belongs to another chapter, then download-ahead and the flash run, in that order.
     /// `download_ahead` gets the chapter ids to queue, and is not called when there are none.
@@ -506,6 +495,7 @@ impl ReaderSession {
         self.chapters.iter().position(|c| Rc::ptr_eq(c, chapter))
     }
 
+    #[cfg(test)]
     /// Sends an event on the reader's ordered channel.
     pub fn notify(&self, event: ReaderEvent) {
         let _ = self.events.send(event);
@@ -845,17 +835,6 @@ mod tests {
         s.set_reading_mode(ReadingMode::Webtoon);
         assert_eq!(rec.flags.borrow().as_slice(), [(7, 4, 0x7)]);
         assert_eq!(a.requested_page.get(), 2);
-        assert_eq!(rx.try_recv(), Ok(ReaderEvent::ReloadViewerChapters));
-    }
-
-    #[test]
-    fn orientation_write_sends_the_resolved_value_then_reloads() {
-        let rec = Rc::new(Recorder::default());
-        let a = chapter(1, false);
-        let (mut s, rx) = session(Rc::clone(&rec), vec![Rc::clone(&a)], 0, false);
-        s.set_orientation(ReaderOrientation::Default, 8);
-        assert_eq!(rec.flags.borrow().as_slice(), [(7, 0, 0x38)]);
-        assert_eq!(rx.try_recv(), Ok(ReaderEvent::SetOrientation(ReaderOrientation::Free)));
         assert_eq!(rx.try_recv(), Ok(ReaderEvent::ReloadViewerChapters));
     }
 

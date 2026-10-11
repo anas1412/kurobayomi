@@ -1,10 +1,11 @@
-//! The library view: toolbar with title and count, search, category tabs, the cover grid of the active page, the
-//! selection bar and the empty states. Pipeline work runs on the worker (`worker`); this file applies its replies.
+//! The library view: category tabs, a context line, the cover grid of the active page, the selection row and bar,
+//! and the empty states. Its search entry and refresh button sit in the page header (`controls`, placed by
+//! `screens::libraries`). Pipeline work runs on the worker (`worker`); this file applies its replies.
 //! Borrows of the shared state are never held across a widget call, because widget calls can re-enter the handlers.
 
 mod card;
 mod dialog;
-mod sheet;
+pub mod sheet;
 mod tabs;
 
 use std::cell::{Cell as FlagCell, RefCell};
@@ -26,8 +27,9 @@ use kuro_domain::library::columns::columns_for_width;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::page::{LibraryItem, toolbar_title};
 use kuro_domain::library::sort::LibrarySort;
-use kuro_i18n::{MsgKey, tr};
+use kuro_i18n::{MsgKey, tr, tr_plural};
 use kuro_domain::library::search::{SEARCH_DEBOUNCE, empty_page, shows_global_search};
+use kuro_images::art::{ArtKind, ArtRef, Owner};
 use kuro_prefs::library::LibraryPrefs;
 
 use crate::library::actions;
@@ -119,9 +121,11 @@ struct Inner {
     on_filters: Option<Rc<dyn Fn(bool)>>,
     last_resume: HashMap<i64, Instant>,
     store: gio::ListStore,
+    /// The context line: the category name and counts, shown only when the header switch does not already say it.
     title: gtk::Label,
-    /// The toolbar; the selection header replaces it while entries are selected (U-1.1).
-    header: gtk::Box,
+    /// "Use -term to exclude", shown while the search text starts with `-` (E-04).
+    hint: gtk::Label,
+    /// The selection row (count, select all, invert, cancel); the header's search and refresh hide while it shows (U-1.1).
     sel_header: gtk::Box,
     download_button: gtk::MenuButton,
     search: gtk::SearchEntry,
@@ -158,21 +162,19 @@ impl LibraryView {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
 
         let title = gtk::Label::new(None);
-        title.add_css_class("title-2");
+        title.add_css_class("kb-library-context");
         title.set_xalign(0.0);
-        title.set_hexpand(true);
+        title.set_margin_start(layout::SPACE_L);
+        title.set_margin_top(layout::SPACE_S);
+        let hint = gtk::Label::new(Some(layout::EXCLUDE_HINT));
+        hint.add_css_class("dim-label");
+        hint.set_xalign(0.0);
+        hint.set_margin_start(layout::SPACE_L);
+        hint.set_visible(false);
         let search = gtk::SearchEntry::new();
         search.set_placeholder_text(Some(&tr(MsgKey::action_search_hint)));
-        search.set_hexpand(true);
-        let header = gtk::Box::new(O::Horizontal, 12);
-        header.set_margin_start(16);
-        header.set_margin_end(16);
-        header.set_margin_top(8);
-        header.append(&title);
-        header.append(&search);
-        let refresh_button = gtk::Button::from_icon_name("view-refresh-symbolic");
-        refresh_button.set_tooltip_text(Some(&tr(MsgKey::action_update_category)));
-        header.append(&refresh_button);
+        search.set_width_chars(28);
+        let refresh_button = crate::ui::icon_button("view-refresh-symbolic", &tr(MsgKey::action_update_category));
 
         let tabs = tabs::TabStrip::new();
         let grid = gtk::GridView::new(
@@ -181,6 +183,7 @@ impl LibraryView {
         );
         grid.set_vexpand(true);
         grid.set_single_click_activate(false);
+        grid.add_css_class("kb-library-grid");
         let list = gtk::ListView::new(
             Some(gtk::NoSelection::new(Some(store.clone()))),
             Some(gtk::SignalListItemFactory::new()),
@@ -190,26 +193,35 @@ impl LibraryView {
         let scroller = gtk::ScrolledWindow::builder().child(&grid).vexpand(true).build();
 
         let empty_label = gtk::Label::new(None);
-        empty_label.add_css_class("dim-label");
+        empty_label.add_css_class("kb-empty-title");
         let global_button = gtk::Button::new();
         global_button.set_visible(false);
-        let empty = gtk::Box::new(O::Vertical, 12);
+        global_button.set_halign(gtk::Align::Center);
+        let empty = gtk::Box::new(O::Vertical, layout::SPACE_M);
         empty.set_valign(gtk::Align::Center);
         empty.set_vexpand(true);
+        let empty_icon = gtk::Image::from_icon_name(match deps.kind {
+            EntryKind::Anime => "video-x-generic-symbolic",
+            EntryKind::Manga => "accessories-dictionary-symbolic",
+        });
+        empty_icon.set_pixel_size(64);
+        empty_icon.add_css_class("dim-label");
+        empty.append(&empty_icon);
         empty.append(&empty_label);
         empty.append(&global_button);
         let guide_button = gtk::Button::with_label(&tr(MsgKey::getting_started_guide));
         guide_button.set_visible(false);
+        guide_button.set_halign(gtk::Align::Center);
         empty.append(&guide_button);
 
         let bar_label = gtk::Label::new(None);
         bar_label.set_hexpand(true);
         bar_label.set_xalign(0.0);
         bar_label.add_css_class("title-2");
-        let sel_header = gtk::Box::new(O::Horizontal, 12);
-        sel_header.set_margin_start(16);
-        sel_header.set_margin_end(16);
-        sel_header.set_margin_top(8);
+        let sel_header = gtk::Box::new(O::Horizontal, layout::SPACE_S);
+        sel_header.set_margin_start(layout::SPACE_L);
+        sel_header.set_margin_end(layout::SPACE_L);
+        sel_header.set_margin_top(layout::SPACE_S);
         sel_header.set_visible(false);
         sel_header.append(&bar_label);
         let download_button = gtk::MenuButton::builder().label(tr(MsgKey::action_download)).build();
@@ -221,13 +233,16 @@ impl LibraryView {
         let root = gtk::Box::new(O::Vertical, 0);
         root.set_hexpand(true);
         root.set_vexpand(true);
-        root.append(&header);
         root.append(&sel_header);
         root.append(&tabs.scroller);
+        root.append(&title);
+        root.append(&hint);
         root.append(&scroller);
         root.append(&empty);
         root.append(&bar);
 
+        // the library opens on the tab it was left on (T-37a-017); an id that is no longer a page falls back to the first
+        let remembered = remembered_category(&deps.prefs, deps.kind);
         let inner = Rc::new(RefCell::new(Inner {
             deps,
             nav,
@@ -235,7 +250,7 @@ impl LibraryView {
             gate: Gate::default(),
             built: None,
             page: 0,
-            active: None,
+            active: Some(remembered),
             query: None,
             search_turn: 0,
             selection: Selection::default(),
@@ -244,7 +259,7 @@ impl LibraryView {
             last_resume: HashMap::new(),
             store,
             title,
-            header,
+            hint,
             sel_header,
             download_button,
             search,
@@ -291,6 +306,12 @@ impl LibraryView {
         self.shell.clone().upcast()
     }
 
+    /// The search entry and the refresh button, for the page header.
+    pub fn controls(&self) -> (gtk::SearchEntry, gtk::Button) {
+        let st = self.inner.borrow();
+        (st.search.clone(), st.refresh_button.clone())
+    }
+
     /// Reruns the pipeline with the current preferences and query.
     pub fn refresh(&self) {
         submit(&self.inner);
@@ -334,6 +355,13 @@ impl LibraryView {
         }
     }
 
+    /// How many cells the grid shows. Test-only.
+    #[cfg(test)]
+    pub(crate) fn cover_count(&self) -> usize {
+        self.inner.borrow().store.n_items() as usize
+    }
+
+    #[cfg(test)]
     /// Whether entries are selected (selection mode).
     pub fn selection_active(&self) -> bool {
         !self.inner.borrow().selection.is_empty()
@@ -356,9 +384,9 @@ impl LibraryView {
         }
     }
 
-    /// Opens the library settings sheet: Filter, Sort and Display (B-1.2, T-37a-038, T-37a-039).
-    pub fn open_settings(&self) {
-        open_settings(&self.inner);
+    /// Opens the library settings sheet on one of its tabs: Filter, Sort and Display (B-1.2, T-37a-038, T-37a-039).
+    pub fn open_settings(&self, tab: sheet::Tab) {
+        open_settings(&self.inner, tab);
     }
 
     fn wire(&self, replies: &async_channel::Receiver<Reply>) {
@@ -387,6 +415,7 @@ impl LibraryView {
             let text = entry.text().to_string();
             let turn = {
                 let mut st = inner.borrow_mut();
+                st.hint.set_visible(layout::shows_exclude_hint(&text));
                 st.search_turn += 1;
                 st.search_turn
             };
@@ -441,21 +470,20 @@ impl LibraryView {
                 return glib::Propagation::Proceed;
             }
             let Some(inner) = weak_esc.upgrade() else { return glib::Propagation::Proceed };
-            let (has_selection, search) = {
-                let st = inner.borrow();
-                (!st.selection.is_empty(), st.search.clone())
-            };
-            match keys::escape(has_selection, !search.text().is_empty()) {
-                keys::Escape::ClearSelection => select_with(&inner, |sel, _| sel.clear()),
-                keys::Escape::ClearSearch => search.set_text(""),
-                keys::Escape::Ignore => return glib::Propagation::Proceed,
-            }
-            glib::Propagation::Stop
+            if escape(&inner) { glib::Propagation::Stop } else { glib::Propagation::Proceed }
         });
         self.root.add_controller(esc);
+        // the search entry sits in the page header, outside the root, so Escape typed in it arrives as stop-search
+        let weak_stop = weak.clone();
+        search.connect_stop_search(move |_| {
+            if let Some(inner) = weak_stop.upgrade() {
+                escape(&inner);
+            }
+        });
 
         self.wire_bar(&weak);
         self.watch_prefs();
+        self.watch_rows();
 
         let weak_reply = weak.clone();
         let replies = replies.clone();
@@ -485,6 +513,59 @@ impl LibraryView {
                 submit(&inner);
             }
             glib::ControlFlow::Continue
+        });
+    }
+
+    /// Reloads the library when its rows change in the database: an entry added or removed on its details page, a
+    /// refresh, an episode watched (upstream collects the library flow). The live query runs on the tokio runtime the
+    /// GTK thread has entered; without one (some tests) only the explicit reloads run.
+    fn watch_rows(&self) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+        let (db, kind) = {
+            let st = self.inner.borrow();
+            (st.deps.db.clone(), st.deps.kind)
+        };
+        let (changed_tx, changed_rx) = async_channel::unbounded::<()>();
+        // the query pauses while the view is off screen (a progress save in the player touches its tables) and runs
+        // once when it is shown again, which reloads only when the rows changed meanwhile
+        let (shown_tx, shown_rx) = tokio::sync::watch::channel(true);
+        // ponytail: the live query reads the library and the worker reads it again; hand its rows to the worker if
+        // the double read ever shows on a large library
+        async fn forward<T>(
+            mut sub: kuro_db::subscribe::Subscription<T>,
+            mut shown: tokio::sync::watch::Receiver<bool>,
+            changed: async_channel::Sender<()>,
+        ) {
+            loop {
+                tokio::select! {
+                    got = sub.changed() => if got.is_none() || changed.send(()).await.is_err() { break },
+                    seen = shown.changed() => match seen {
+                        Ok(()) if *shown.borrow_and_update() => sub.resume(),
+                        Ok(()) => sub.pause(),
+                        // the view is gone
+                        Err(_) => break,
+                    },
+                }
+            }
+        }
+        match kind {
+            EntryKind::Anime => runtime.spawn(forward(AnimeRepo::new(db).subscribe_library(), shown_rx, changed_tx)),
+            EntryKind::Manga => runtime.spawn(forward(MangaRepo::new(db).subscribe_library(), shown_rx, changed_tx)),
+        };
+        let shown_tx = Rc::new(shown_tx);
+        let shown_map = shown_tx.clone();
+        self.root.connect_map(move |_| {
+            shown_map.send_replace(true);
+        });
+        self.root.connect_unmap(move |_| {
+            shown_tx.send_replace(false);
+        });
+        let weak = Rc::downgrade(&self.inner);
+        glib::spawn_future_local(async move {
+            while changed_rx.recv().await.is_ok() {
+                let Some(inner) = weak.upgrade() else { break };
+                submit(&inner);
+            }
         });
     }
 
@@ -612,6 +693,9 @@ fn submit(inner: &Rc<RefCell<Inner>>) {
     }
 }
 
+/// The toast when the library cannot be read; the error itself goes to the log.
+const LOAD_FAILED: &str = "Could not load the library";
+
 fn apply_reply(inner: &Rc<RefCell<Inner>>, reply: Reply) {
     {
         let mut st = inner.borrow_mut();
@@ -626,6 +710,8 @@ fn apply_reply(inner: &Rc<RefCell<Inner>>, reply: Reply) {
             }
             Err(e) => {
                 tracing::error!(error = %e, "loading the library failed");
+                drop(st);
+                crate::library::toast::notify(LOAD_FAILED);
                 return;
             }
         }
@@ -634,6 +720,39 @@ fn apply_reply(inner: &Rc<RefCell<Inner>>, reply: Reply) {
 }
 
 /// Index of the active tab: the remembered category when it is still shown, else the clamped stored index.
+/// The line under the header: the category name with its count, or only the count when the name would repeat the
+/// kind the header switch already shows ("Never a second Anime").
+fn context_line(title: &str, count: Option<usize>, default_title: &str) -> String {
+    match (title == default_title, count) {
+        (true, Some(n)) => tr_plural(MsgKey::anime_num_entries, n as i64, &[]),
+        (true, None) => String::new(),
+        (false, Some(n)) => format!("{title} ({n})"),
+        (false, None) => title.to_string(),
+    }
+}
+
+/// Escape: clears the selection first, then the search. Returns whether it cleared anything.
+fn escape(inner: &Rc<RefCell<Inner>>) -> bool {
+    let (has_selection, search) = {
+        let st = inner.borrow();
+        (!st.selection.is_empty(), st.search.clone())
+    };
+    match keys::escape(has_selection, !search.text().is_empty()) {
+        keys::Escape::ClearSelection => select_with(inner, |sel, _| sel.clear()),
+        keys::Escape::ClearSearch => search.set_text(""),
+        keys::Escape::Ignore => return false,
+    }
+    true
+}
+
+/// The category the library showed last (`last_used_*_category`, written by `select_tab`).
+fn remembered_category(prefs: &LibraryPrefs, kind: EntryKind) -> i64 {
+    i64::from(match kind {
+        EntryKind::Manga => prefs.last_used_manga_category.get(),
+        EntryKind::Anime => prefs.last_used_anime_category.get(),
+    })
+}
+
 fn active_index(st: &Inner) -> usize {
     let pages = st.built.as_ref().map_or(&[][..], |b| b.pages.as_slice());
     if let Some(id) = st.active {
@@ -679,12 +798,9 @@ fn render(inner: &Rc<RefCell<Inner>>) {
                     page.items.len(),
                     distinct,
                 );
-                match count {
-                    Some(n) => format!("{title} ({n})"),
-                    None => title,
-                }
+                context_line(&title, count, &default_title)
             }
-            None => default_title.clone(),
+            None => String::new(),
         };
         let items: Vec<LibraryItem> = pages.get(index).map_or_else(Vec::new, |p| p.items.clone());
         let grid_cells = cells::cells(&items, st.query.as_deref());
@@ -733,12 +849,13 @@ fn render(inner: &Rc<RefCell<Inner>>) {
             st.global_button.clone(),
             st.bar.clone(),
             st.bar_label.clone(),
-            st.header.clone(),
+            [st.search.clone().upcast::<gtk::Widget>(), st.refresh_button.clone().upcast()],
             st.sel_header.clone(),
             st.download_button.clone(),
         )
     };
     title_label.set_label(&view.title);
+    title_label.set_visible(!view.title.is_empty());
     let on_select: Rc<dyn Fn(usize)> = Rc::new(move |index| {
         if let Some(inner) = weak.upgrade() {
             select_tab(&inner, index);
@@ -760,7 +877,7 @@ fn render(inner: &Rc<RefCell<Inner>>) {
     guide.set_visible(view.show_guide);
     bar_label.set_label(&view.bar_text);
     bar.set_reveal_child(view.bar_open);
-    header.set_visible(!view.bar_open);
+    header.iter().for_each(|w| w.set_visible(!view.bar_open));
     sel_header.set_visible(view.bar_open);
     download.set_visible(view.download_visible);
     let on_filters = inner.borrow().on_filters.clone();
@@ -982,13 +1099,26 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
         )
     };
     let show_continue = actions::continue_visible(show_continue_pref, &item.row);
-    let thumbnail = local_thumbnail(&inner.borrow(), &item);
-    let season_parent = is_season_parent(&inner.borrow(), &item);
+    let art = cover_art(&inner.borrow(), &item);
+    let (kind, db) = {
+        let st = inner.borrow();
+        (st.deps.kind, st.deps.db.clone())
+    };
+    // a local anime without a cover gets one from its folder or a video frame, once; the cards then reload
+    if kind == EntryKind::Anime && item.row.is_local() && art.as_ref().is_none_or(|a| a.url.is_none()) {
+        let weak_cover = weak.clone();
+        crate::library::frame_cover::ensure(db, item.row.id, move || {
+            if let Some(inner) = weak_cover.upgrade() {
+                submit(&inner);
+            }
+        });
+    }
+    let extras = card::Extras { art: art.as_ref(), anime: kind == EntryKind::Anime, season_parent: is_season_parent(&inner.borrow(), &item) };
     let card = if mode == kuro_prefs::library::LibraryDisplayMode::List {
         let row_height = list_row_height(&inner.borrow());
-        card::build_list(&item, selected, show_continue, row_height, thumbnail.as_deref(), season_parent)
+        card::build_list(&item, selected, show_continue, row_height, &extras)
     } else {
-        card::build(&item, mode, selected, show_continue, thumbnail.as_deref(), season_parent)
+        card::build(&item, mode, selected, show_continue, &extras)
     };
     list_item.set_child(Some(&card.root));
 
@@ -1062,21 +1192,20 @@ fn is_season_parent(st: &Inner, item: &LibraryItem) -> bool {
         && AnimeRepo::new(st.deps.db.clone()).by_id(item.row.id).is_ok_and(|a| a.fetch_type == FetchType::Seasons)
 }
 
-/// The stored cover of a local entry, which its card draws in place of the placeholder. Other entries have none here.
-fn local_thumbnail(st: &Inner, item: &LibraryItem) -> Option<String> {
-    if !item.row.is_local() {
-        return None;
-    }
+/// The stored cover of an entry, local or not; the card decides what it can draw (`layout::cover_kind`).
+/// ponytail: one row read per bind; carry the thumbnail in `LibraryRow` if large libraries scroll slowly.
+fn cover_art(st: &Inner, item: &LibraryItem) -> Option<ArtRef> {
     let db = st.deps.db.clone();
-    match st.deps.kind {
-        EntryKind::Manga => MangaRepo::new(db).by_id(item.row.id).ok()?.thumbnail_url,
-        EntryKind::Anime => AnimeRepo::new(db).by_id(item.row.id).ok()?.thumbnail_url,
-    }
+    let (owner, source, url, favorite, last_modified) = match st.deps.kind {
+        EntryKind::Manga => MangaRepo::new(db).by_id(item.row.id).ok().map(|m| (Owner::Manga, m.source, m.thumbnail_url, m.favorite, m.cover_last_modified))?,
+        EntryKind::Anime => AnimeRepo::new(db).by_id(item.row.id).ok().map(|a| (Owner::Anime, a.source, a.thumbnail_url, a.favorite, a.cover_last_modified))?,
+    };
+    Some(ArtRef { owner, entry_id: item.row.id, source_id: source, kind: ArtKind::Cover, url: url.filter(|u| !u.is_empty()), favorite, last_modified })
 }
 
 /// The settings sheet over the active page. The sort tab writes through `CategoryService::set_sort_mode`, which
 /// draws a new Random seed itself; the library reloads when the write is done.
-fn open_settings(inner: &Rc<RefCell<Inner>>) {
+fn open_settings(inner: &Rc<RefCell<Inner>>, tab: sheet::Tab) {
     let (kind, prefs, categories, has_tracker, category, current_sort, downloaded_only, trackers) = {
         let st = inner.borrow();
         let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(&st)));
@@ -1118,7 +1247,7 @@ fn open_settings(inner: &Rc<RefCell<Inner>>) {
     });
     let filter_tab = filter_tab::build(kind, prefs.clone(), downloaded_only, &trackers, on_change);
     let window_width = window_width(&inner.borrow().scroller);
-    sheet::show(sheet::Ctx { kind, prefs, has_tracker, current_sort, set_sort, filter_tab, window_width });
+    sheet::show(sheet::Ctx { kind, prefs, has_tracker, current_sort, set_sort, filter_tab, window_width }, tab);
 }
 
 /// The continue button: opens the entry's next item, in the external player when the preference is on, or says
@@ -1145,12 +1274,79 @@ fn resume_entry(inner: &Rc<RefCell<Inner>>, row: &LibraryRow) {
     }
 }
 
+/// A manga library view over a temporary database holding one favorite, "Berserk", for tests.
+#[cfg(test)]
+pub(crate) fn test_view(nav: Nav) -> (tempfile::TempDir, LibraryView) {
+    test_view_of(EntryKind::Manga, nav)
+}
+
+/// A library view of `kind` over a temporary database holding one favorite, "Berserk", for tests.
+#[cfg(test)]
+fn test_view_of(kind: EntryKind, nav: Nav) -> (tempfile::TempDir, LibraryView) {
+    use crate::library::query::SourceInfo;
+    use kuro_data::anime::Anime;
+    use kuro_data::manga::Manga;
+    use kuro_prefs::store::PrefStore;
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db = match kind {
+        EntryKind::Manga => {
+            let path = dir.path().join("manga.db");
+            let db = Arc::new(Db::new(&path, kuro_db::schema_manga::open(&path).expect("open manga db")).expect("manga db handle"));
+            MangaRepo::new(db.clone())
+                .insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() })
+                .expect("insert");
+            db
+        }
+        EntryKind::Anime => {
+            let path = dir.path().join("anime.db");
+            let db = Arc::new(Db::new(&path, kuro_db::schema_anime::open(&path).expect("open anime db")).expect("anime db handle"));
+            AnimeRepo::new(db.clone())
+                .insert(&Anime { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Anime::create() })
+                .expect("insert");
+            db
+        }
+    };
+    let store = PrefStore::in_memory();
+    let prefs = Rc::new(LibraryPrefs::new(store.clone()));
+    let categories = Rc::new(CategoryService::new(db.clone(), kind, Arc::new(LibraryPrefs::new(store))));
+    let deps = Deps {
+        kind,
+        db,
+        prefs,
+        categories,
+        facts: Facts {
+            downloads: Arc::new(|_| 0),
+            source: Arc::new(|_| SourceInfo { name: "Local".into(), language: "en".into() }),
+        },
+        downloaded_only: Rc::new(|| false),
+        logged_in: Rc::new(BTreeSet::new),
+        tracker_names: Rc::new(Vec::new),
+        always_external: Rc::new(|| false),
+        item_downloaded: Rc::new(|_| false),
+    };
+    let view = LibraryView::new(deps, nav).expect("view");
+    (dir, view)
+}
+
+/// Navigation that does nothing, for tests.
+#[cfg(test)]
+pub(crate) fn test_nav() -> Nav {
+    Nav {
+        open: Rc::new(|_| {}),
+        resume: Rc::new(|_| {}),
+        download: Rc::new(|_, _| {}),
+        delete: Rc::new(|_| {}),
+        global_search: Rc::new(|_| {}),
+        edit_categories: Rc::new(|| {}),
+        selecting: Rc::new(|_| {}),
+        update: Rc::new(|_| true),
+        update_running: Rc::new(|| false),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::library::query::SourceInfo;
-    use kuro_data::manga::{Manga, MangaRepo};
-    use kuro_prefs::store::PrefStore;
     use std::time::Duration;
 
     /// Pumps the default main context until `done` holds or two seconds pass.
@@ -1168,66 +1364,37 @@ mod tests {
     }
 
     #[test]
+    fn t_37a_017_the_library_reopens_on_the_category_it_was_left_on() {
+        let prefs = LibraryPrefs::new(kuro_prefs::store::PrefStore::in_memory());
+        assert_eq!(remembered_category(&prefs, EntryKind::Manga), 0, "the Default category before any tab was picked");
+        prefs.last_used_manga_category.set(7).expect("write");
+        prefs.last_used_anime_category.set(9).expect("write");
+        assert_eq!(remembered_category(&prefs, EntryKind::Manga), 7);
+        assert_eq!(remembered_category(&prefs, EntryKind::Anime), 9);
+    }
+
+    #[test]
     fn the_view_loads_the_worker_reply_and_renders_selection_and_search() {
         crate::testing::with_display(|| {
             let ctx = glib::MainContext::default();
             let _owner = ctx.acquire().expect("main context");
-            let dir = tempfile::tempdir().expect("temp dir");
-            let path = dir.path().join("manga.db");
-            let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
-            let db = Arc::new(Db::new(&path, writer).expect("manga db handle"));
-            let store = PrefStore::in_memory();
-            let prefs = Rc::new(LibraryPrefs::new(store.clone()));
-            MangaRepo::new(db.clone())
-                .insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() })
-                .expect("insert");
-            let categories =
-                Rc::new(CategoryService::new(db.clone(), EntryKind::Manga, Arc::new(LibraryPrefs::new(store))));
-            let deps = Deps {
-                kind: EntryKind::Manga,
-                db,
-                prefs,
-                categories,
-                facts: Facts {
-                    downloads: Arc::new(|_| 0),
-                    source: Arc::new(|_| SourceInfo { name: "Local".into(), language: "en".into() }),
-                },
-                downloaded_only: Rc::new(|| false),
-                logged_in: Rc::new(BTreeSet::new),
-                tracker_names: Rc::new(Vec::new),
-                always_external: Rc::new(|| false),
-                item_downloaded: Rc::new(|_| false),
-            };
             let selecting_calls: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
-            let nav = Nav {
-                open: Rc::new(|_| {}),
-                resume: Rc::new(|_| {}),
-                download: Rc::new(|_, _| {}),
-                delete: Rc::new(|_| {}),
-                global_search: Rc::new(|_| {}),
-                edit_categories: Rc::new(|| {}),
-                selecting: Rc::new({
-                    let seen = selecting_calls.clone();
-                    move |on| seen.borrow_mut().push(on)
-                }),
-                update: Rc::new(|_| true),
-                update_running: Rc::new(|| false),
-            };
-            let view = LibraryView::new(deps, nav).expect("view");
+            let seen = selecting_calls.clone();
+            let (_dir, view) = test_view(Nav { selecting: Rc::new(move |on| seen.borrow_mut().push(on)), ..test_nav() });
             let inner = view.inner.clone();
             assert!(pump_until(|| inner.borrow().built.is_some()), "the worker reply arrives");
             assert_eq!(inner.borrow().store.n_items(), 1, "one cover for the one entry");
-            assert_eq!(inner.borrow().title.label().as_str(), "Manga", "B-7.3: tabs on shows the default title, even with one page");
+            assert!(!inner.borrow().title.is_visible(), "B-7.3: the default title is the header switch's word, so the context line hides");
 
             let row = inner.borrow().built.as_ref().expect("built").pages[0].items[0].row.clone();
             select_with(&inner, |sel, _| sel.toggle(&row));
             assert!(inner.borrow().bar.reveals_child(), "the selection bar opens");
             assert_eq!(inner.borrow().bar_label.label().as_str(), "1 selected");
-            assert!(inner.borrow().sel_header.is_visible() && !inner.borrow().header.is_visible(), "the selection header replaces the toolbar");
+            assert!(inner.borrow().sel_header.is_visible() && !inner.borrow().search.is_visible() && !inner.borrow().refresh_button.is_visible(), "the selection row replaces the header controls");
             assert!(inner.borrow().download_button.is_visible(), "no local entry is selected");
             select_with(&inner, |sel, _| sel.clear());
             assert!(!inner.borrow().bar.reveals_child());
-            assert!(inner.borrow().header.is_visible() && !inner.borrow().sel_header.is_visible());
+            assert!(inner.borrow().search.is_visible() && inner.borrow().refresh_button.is_visible() && !inner.borrow().sel_header.is_visible());
 
             assert_eq!(*selecting_calls.borrow(), vec![true, false], "the shell hears selection start and end once each (B-1.4)");
 
@@ -1243,6 +1410,92 @@ mod tests {
             assert!(search_done, "a search with no match empties the page");
             assert_eq!(inner.borrow().store.n_items(), 0);
             assert_eq!(inner.borrow().empty_label.label().as_str(), "No results found");
+
+            // Escape typed in the header's search entry arrives as stop-search and clears the query
+            view.controls().0.emit_by_name::<()>("stop-search", &[]);
+            assert_eq!(inner.borrow().search.text().as_str(), "");
+            assert!(pump_until(|| inner.borrow().query.is_none()), "clearing the box clears the query");
         });
+    }
+
+    /// An entry added from its details page (a write the library did not make) shows up without a manual refresh.
+    #[test]
+    fn an_entry_added_elsewhere_appears_without_a_refresh() {
+        use kuro_data::manga::{Manga, MangaUpdate};
+        crate::testing::with_display(|| {
+            let ctx = glib::MainContext::default();
+            let _owner = ctx.acquire().expect("main context");
+            let rt = kuro_core::runtime::build().expect("runtime");
+            let _enter = rt.enter();
+            let (_dir, view) = test_view(test_nav());
+            let inner = view.inner.clone();
+            assert!(pump_until(|| inner.borrow().store.n_items() == 1), "the one favorite");
+            let repo = MangaRepo::new(inner.borrow().deps.db.clone());
+            let browsed = repo.insert(&Manga { source: 7, url: "b".into(), title: "Vagabond".into(), ..Manga::create() }).expect("insert");
+            repo.update(&MangaUpdate { favorite: Some(true), ..MangaUpdate::new(browsed) }).expect("favorite");
+            assert!(pump_until(|| inner.borrow().store.n_items() == 2), "the added entry appears");
+        });
+    }
+
+    /// The reported bug was on anime: an anime added on its details page shows up in the Library on its own. While
+    /// the Library is off screen its live query pauses, and showing it again brings the rows up to date.
+    #[test]
+    fn an_anime_added_elsewhere_appears_and_the_hidden_library_waits_until_shown() {
+        use kuro_data::anime::{Anime, AnimeUpdate};
+        crate::testing::with_display(|| {
+            let ctx = glib::MainContext::default();
+            let _owner = ctx.acquire().expect("main context");
+            let rt = kuro_core::runtime::build().expect("runtime");
+            let _enter = rt.enter();
+            let (_dir, view) = test_view_of(EntryKind::Anime, test_nav());
+            let window = gtk::Window::new();
+            window.set_child(Some(&view.widget()));
+            window.present();
+            let inner = view.inner.clone();
+            assert!(pump_until(|| view.root.is_mapped() && inner.borrow().store.n_items() == 1), "the one favorite");
+            let repo = AnimeRepo::new(inner.borrow().deps.db.clone());
+            let add = |url: &str| {
+                let id = repo.insert(&Anime { source: 7, url: url.into(), title: url.into(), ..Anime::create() }).expect("insert");
+                repo.update(&AnimeUpdate { favorite: Some(true), ..AnimeUpdate::new(id) }).expect("favorite");
+            };
+            add("Bungou Stray Dogs");
+            assert!(pump_until(|| inner.borrow().store.n_items() == 2), "the added anime appears");
+
+            window.set_visible(false);
+            assert!(pump_until(|| !view.root.is_mapped()), "the library is off screen");
+            add("Vagabond");
+            assert!(!pump_until(|| inner.borrow().store.n_items() == 3), "a hidden library does not reload");
+            window.present();
+            assert!(pump_until(|| inner.borrow().store.n_items() == 3), "showing it again brings the new anime");
+            window.destroy();
+        });
+    }
+
+    /// A library that cannot be read says so instead of staying silent.
+    #[test]
+    fn a_failed_load_shows_a_toast() {
+        crate::testing::with_display(|| {
+            let ctx = glib::MainContext::default();
+            let _owner = ctx.acquire().expect("main context");
+            let (_dir, view) = test_view(test_nav());
+            let window = gtk::Window::new();
+            window.set_child(Some(&view.widget()));
+            window.present();
+            let inner = view.inner.clone();
+            assert!(pump_until(|| view.root.is_mapped() && inner.borrow().built.is_some()), "the first load");
+            let generation = inner.borrow_mut().gate.issue();
+            apply_reply(&inner, Reply { generation, result: Err("disk I/O error".into()) });
+            let label = view.shell.last_child().and_downcast::<gtk::Revealer>().and_then(|r| r.child()).and_downcast::<gtk::Label>();
+            assert_eq!(label.expect("toast label").text().as_str(), LOAD_FAILED);
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn the_context_line_never_repeats_the_kind_word() {
+        assert_eq!(context_line("Manga", Some(12), "Manga"), "12 entries");
+        assert_eq!(context_line("Manga", None, "Manga"), "");
+        assert_eq!(context_line("Default", Some(4), "Manga"), "Default (4)");
+        assert_eq!(context_line("Default", None, "Manga"), "Default");
     }
 }

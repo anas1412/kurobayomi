@@ -258,8 +258,6 @@ theme_light = کوژاوە
 
 theme_dark = داگیرساو
 
-theme_monet = داینامیک
-
 theme_greenapple = سەوز
 
 theme_midnightdusk = مۆر
@@ -291,10 +289,6 @@ lock_always = هەمیشە
 lock_never = هەرگیز
 
 hide_notification_content = شاردنەوەی ناوەرۆکی ئاگانامە
-
-secure_screen = شاشە پارێزراو کردن
-
-secure_screen_summary = سکرین شۆت بلۆکردن و شاردنەوەی ناوەڕۆک، لە کاتی گۆڕین و دەرچوون لە بەرنامە
 
 pref_category_nsfw_content = سەرچاوەی سەروو (18) ساڵ
 
@@ -413,20 +407,6 @@ double_tap_anim_speed_0 = بێ ئەنیمەیشن
 double_tap_anim_speed_normal = سرووشتی
 
 double_tap_anim_speed_fast = خێرا
-
-pref_rotation_type = جۆری خولانەوەی بنەڕەتی
-
-rotation_type = جۆری خولانەوە
-
-rotation_free = ئازاد
-
-rotation_portrait = باری ستوونی
-
-rotation_landscape = باری ئاسۆیی
-
-rotation_force_portrait = باری ستوونی قوفڵکراو
-
-rotation_force_landscape = باری ئاسۆیی قوفڵکراو
 
 color_filter_r_value = R
 

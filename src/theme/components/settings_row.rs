@@ -99,7 +99,7 @@ pub fn icon_row(label: &str, icon_name: &str, on_click: impl Fn() + 'static) -> 
     let icon = gtk::Image::from_icon_name(icon_name);
     icon.add_css_class(classes::SETTINGS_ICON);
     let row = row(label, Some(icon.upcast_ref()), true);
-    row.connect_activate(move |_| on_click());
+    crate::widgets::row_activate::on_activate(&row, move |_| on_click());
     row
 }
 
@@ -114,7 +114,7 @@ pub fn sort_row(label: &str, desc: Option<bool>, on_click: impl Fn() + 'static) 
         }
     };
     let row = row(label, Some(&trailing), true);
-    row.connect_activate(move |_| on_click());
+    crate::widgets::row_activate::on_activate(&row, move |_| on_click());
     row
 }
 
@@ -145,7 +145,7 @@ pub fn checkbox_row(
         }));
     }
     let row = row(label, Some(check.upcast_ref()), true);
-    row.connect_activate(move |_| {
+    crate::widgets::row_activate::on_activate(&row, move |_| {
         let next = !check.is_active();
         check.set_active(next);
         on_toggle(next);
@@ -159,7 +159,7 @@ pub fn radio_row(label: &str, selected: bool, on_select: impl Fn() + 'static) ->
     check.set_active(selected);
     check.set_sensitive(false);
     let row = row(label, Some(check.upcast_ref()), true);
-    row.connect_activate(move |_| on_select());
+    crate::widgets::row_activate::on_activate(&row, move |_| on_select());
     row
 }
 
@@ -236,7 +236,7 @@ pub fn player_switch_row(label: &str, active: bool, on_toggle: impl Fn(bool) + '
     switch.set_can_target(false);
     switch.update_property(&[gtk::accessible::Property::Label(label)]);
     let row = row(label, Some(switch.upcast_ref()), true);
-    row.connect_activate(move |_| {
+    crate::widgets::row_activate::on_activate(&row, move |_| {
         let next = !switch.is_active();
         switch.set_active(next);
         on_toggle(next);
@@ -313,7 +313,9 @@ mod tests {
                 let seen = Rc::clone(&seen);
                 player_switch_row("Auto-play", false, move |on| seen.set(Some(on)))
             };
-            row.emit_by_name::<()>("activate", &[]);
+            let list = gtk::ListBox::new();
+            list.append(&row);
+            crate::widgets::row_activate::click_row(&row);
             assert_eq!(seen.get(), Some(true));
             row.emit_by_name::<()>("activate", &[]);
             assert_eq!(seen.get(), Some(false));

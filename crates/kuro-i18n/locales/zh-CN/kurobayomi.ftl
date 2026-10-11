@@ -18,8 +18,6 @@ action_continue = 继续
 
 manga = 漫画
 
-pref_library_summary = 分类 • 全局更新 • 章节/剧集目录左右滑动
-
 pref_behavior = 章节行为
 
 action_add_repo_message = 在 { $arg1 } 中添加仓库，输入的网址结尾应为 "index.min.json" 。
@@ -80,21 +78,9 @@ pref_player_settings_summary = 内置播放器，手势，解码器，字幕
 
 pref_player_internal = 内置播放器
 
-pref_player_internal_summary = 进度条、控制器、屏幕方向
-
 pref_progress_mark_as_seen = 在观看进度为多少时将剧集标记为已看
 
 pref_preserve_watching_position = 记住已看剧集的上次观看位置
-
-pref_category_player_orientation = 播放器方向
-
-rotation_video = 视频
-
-rotation_reverse_landscape = 翻转横屏
-
-rotation_sensor_portrait = 感应竖屏
-
-rotation_sensor_landscape = 感应横屏
 
 pref_category_controls = 控制
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = 显示当前章节指示器
 pref_controls_show_chapter_indicator_info = 仅当视频包含章节时显示
 
 pref_controls_display_volume_percentage = 以百分比形式显示音量
-
-pref_remember_brightness = 保持并切换到最近使用的亮度
 
 pref_remember_volume = 保持并切换到最近使用的音量
 
@@ -179,12 +163,6 @@ pref_external_player_preference = 外部播放器首选项
 pref_player_gestures = 手势
 
 pref_player_gestures_summary = 划动、双击、媒体控制
-
-pref_category_player_sliders = 滑 块
-
-enable_volume_brightness_gestures = 开启音量和亮度手势
-
-pref_controls_swap_vol_brightness = 交换音量和亮度滑块
 
 pref_category_player_seeking = 定位
 
@@ -926,10 +904,6 @@ theme_mocha = 摩卡
 
 pref_behavior_episode = 剧集行为
 
-pref_episode_swipe_end = 向右滑动操作
-
-pref_episode_swipe_start = 向左滑动操作
-
 pref_mark_duplicate_seen_episode_seen = 将重复的已看剧集标记为已看
 
 pref_mark_duplicate_seen_episode_seen_existing = 看完一集后
@@ -1329,10 +1303,6 @@ onboarding_permission_notifications = 通知权限
 
 onboarding_permission_notifications_description = 用来发送书架更新等通知。
 
-onboarding_permission_ignore_battery_opts = 后台运行权限
-
-onboarding_permission_ignore_battery_opts_description = 避免需要长时间运行的书架更新、下载、备份恢复任务受到中断。
-
 onboarding_permission_crashlytics = 发送崩溃日志
 
 onboarding_permission_crashlytics_description = 向开发者发送匿名的崩溃日志
@@ -1375,10 +1345,6 @@ pref_browse_summary = 图源 • 插件 • 全局搜索
 
 pref_backup_summary = 手动备份 • 自动备份 • 存储空间
 
-pref_security_summary = 应用锁 • 隐私界面
-
-pref_advanced_summary = 导出崩溃日志 • 电池优化
-
 pref_category_theme = 主题
 
 pref_app_theme = 应用主题
@@ -1388,8 +1354,6 @@ theme_system = 跟随系统
 theme_light = 浅色
 
 theme_dark = 深色
-
-theme_monet = 动态
 
 theme_greenapple = 青苹果
 
@@ -1440,10 +1404,6 @@ lock_always = 始终开启
 lock_never = 关闭
 
 hide_notification_content = 隐藏通知内容
-
-secure_screen = 隐私界面
-
-secure_screen_summary = 阻止截屏，并在切换后台时隐藏预览图
 
 firebase_summary = 允许发送崩溃日志和数据分析帮助开发者辨别并修复问题，提高应用体验，以期更新符合你需要的功能
 
@@ -1519,10 +1479,6 @@ include = 包含：{ $arg1 }
 
 exclude = 排除：{ $arg1 }
 
-pref_chapter_swipe_end = 向右滑动操作
-
-pref_chapter_swipe_start = 向左滑动操作
-
 pref_mark_duplicate_read_chapter_read = 将重复的已读章节标记为已读
 
 multi_lang = 多语言
@@ -1580,14 +1536,6 @@ ext_nsfw_warning = 来自此插件的图源可能包含 NSFW (18+) 内容
 ext_permission_install_apps_warning = 需要安装插件的权限，点击此处授权。
 
 ext_install_service_notif = 正在安装插件…
-
-ext_installer_pref = 安装程序
-
-ext_installer_legacy = 旧式安装程序
-
-ext_installer_shizuku_stopped = Shizuku 未在运行
-
-ext_installer_shizuku_unavailable_dialog = 安装并启动 Shizuku 后才能设置 Shizuku 为插件安装程序。
 
 ext_revoke_trust = 撤销已信任的未知插件
 
@@ -1809,22 +1757,6 @@ double_tap_anim_speed_normal = 正常
 
 double_tap_anim_speed_fast = 快速
 
-pref_rotation_type = 默认屏幕方向
-
-rotation_type = 屏幕方向
-
-rotation_free = 跟随系统
-
-rotation_portrait = 竖屏
-
-rotation_reverse_portrait = 反向竖屏
-
-rotation_landscape = 横屏
-
-rotation_force_portrait = 锁定竖屏
-
-rotation_force_landscape = 锁定横屏
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -2041,8 +1973,6 @@ pref_refresh_library_covers = 刷新书架封面
 
 pref_reset_viewer_flags = 重置各作品阅读器独立设置
 
-pref_reset_viewer_flags_summary = 重置所有作品的阅读模式和屏幕方向
-
 pref_reset_viewer_flags_success = 已重置所有阅读器设置
 
 pref_reset_viewer_flags_error = 重置阅读器设置失败
@@ -2050,20 +1980,6 @@ pref_reset_viewer_flags_error = 重置阅读器设置失败
 pref_dump_crash_logs = 导出崩溃日志
 
 pref_dump_crash_logs_summary = 将错误日志保存到文件中，以便提供给开发者
-
-label_background_activity = 后台活动
-
-pref_disable_battery_optimization = 关闭电池优化
-
-pref_disable_battery_optimization_summary = 有助于后台更新书架和备份
-
-battery_optimization_disabled = 电池优化已经关闭
-
-battery_optimization_setting_activity_not_found = 打开系统设置失败
-
-about_dont_kill_my_app = 部分厂商杀掉后台服务的现象比较严重，此网站提供了一些解决方法。
-
-pref_tablet_ui_mode = 平板界面
 
 pref_verbose_logging = 详细日志记录
 

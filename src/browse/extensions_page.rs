@@ -148,6 +148,8 @@ struct Inner {
 pub struct ExtensionsPage {
     inner: Rc<Inner>,
     root: gtk::Box,
+    /// The refresh button and its spinner, for the Browse header.
+    actions: gtk::Box,
 }
 
 impl ExtensionsPage {
@@ -155,16 +157,10 @@ impl ExtensionsPage {
         let refresh_spinner = gtk::Spinner::new();
         let refresh_button = gtk::Button::from_icon_name("view-refresh-symbolic");
         refresh_button.set_tooltip_text(Some(&tr(MsgKey::action_webview_refresh)));
-        let repos = gtk::Button::from_icon_name("folder-download-symbolic");
-        repos.set_tooltip_text(Some(&tr(nav.repos_label)));
-        let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        toolbar.set_margin_start(16);
-        toolbar.set_margin_end(16);
-        toolbar.set_margin_top(8);
-        toolbar.append(&gtk::Label::builder().label(tr(MsgKey::label_extensions)).hexpand(true).xalign(0.0).css_classes(["title-4"]).build());
-        toolbar.append(&refresh_spinner);
-        toolbar.append(&refresh_button);
-        toolbar.append(&repos);
+        // the Browse header shows these while this page is visible; the section switch already says Extensions
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        actions.append(&refresh_spinner);
+        actions.append(&refresh_button);
 
         let banner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         banner.set_margin_start(16);
@@ -176,19 +172,15 @@ impl ExtensionsPage {
         banner.append(&retry);
         banner.set_visible(false);
 
-        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let scroller = gtk::ScrolledWindow::builder().child(&column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+        let column = crate::ui::column();
         // the list is centred and never wider than the extension list maximum (T-41a-050)
-        scroller.set_propagate_natural_width(true);
-        scroller.set_max_content_width(EXT_LIST_MAX_WIDTH_PX);
-        column.set_halign(gtk::Align::Center);
-        let empty_label = gtk::Label::new(None);
-        let empty = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        empty.set_valign(gtk::Align::Center);
-        empty.append(&empty_label);
+        let scroller = gtk::ScrolledWindow::builder()
+            .child(&crate::ui::clamp(&column, EXT_LIST_MAX_WIDTH_PX))
+            .vexpand(true)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .build();
         let repos_in_empty = gtk::Button::with_label(&tr(nav.repos_label));
-        repos_in_empty.set_halign(gtk::Align::Center);
-        empty.append(&repos_in_empty);
+        let (empty, empty_label) = super::look::empty_state("application-x-addon-symbolic", "", Some(&repos_in_empty));
         let stack = gtk::Stack::new();
         stack.add_named(&spinner_row(), Some("loading"));
         stack.add_named(&empty, Some("empty"));
@@ -196,7 +188,6 @@ impl ExtensionsPage {
         stack.set_visible_child_name("loading");
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.append(&toolbar);
         root.append(&banner);
         root.append(&stack);
         stack.set_vexpand(true);
@@ -267,19 +258,22 @@ impl ExtensionsPage {
                 inner.opened();
             }
         });
-        for button in [repos, repos_in_empty] {
-            let weak = Rc::downgrade(&inner);
-            button.connect_clicked(move |_| {
-                if let Some(inner) = weak.upgrade() {
-                    (inner.nav.open_repos)();
-                }
-            });
-        }
-        Self { inner, root }
+        let weak = Rc::downgrade(&inner);
+        repos_in_empty.connect_clicked(move |_| {
+            if let Some(inner) = weak.upgrade() {
+                (inner.nav.open_repos)();
+            }
+        });
+        Self { inner, root, actions }
     }
 
     pub fn widget(&self) -> &gtk::Box {
         &self.root
+    }
+
+    /// The refresh button with its spinner, for the header of the Browse tab.
+    pub fn actions(&self) -> &gtk::Box {
+        &self.actions
     }
 
     /// The extensions from the models, replacing the list. Rows keep the install steps of their jobs.
@@ -601,10 +595,11 @@ impl Inner {
                 GroupKey::Language(lang) => (language_header(lang), false),
             };
             self.column.append(&self.header(&title, updates));
+            let list = crate::ui::boxed_list();
             for index in group.rows {
-                let row = self.row(&exts[index]);
-                self.column.append(&row);
+                list.append(&self.row(&exts[index]));
             }
+            self.column.append(&list);
         }
         if let Some(problems) = super::ext_problems::section(&self.problems.borrow()) {
             self.column.append(&problems);
@@ -614,11 +609,9 @@ impl Inner {
 
     fn header(self: &Rc<Self>, title: &str, with_update_all: bool) -> gtk::Box {
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        header.set_margin_start(16);
-        header.set_margin_end(16);
-        header.set_margin_top(16);
-        header.set_margin_bottom(8);
-        header.append(&gtk::Label::builder().label(title).hexpand(true).xalign(0.0).css_classes(["heading"]).build());
+        let label = crate::ui::heading(title);
+        label.set_hexpand(true);
+        header.append(&label);
         if with_update_all {
             let button = gtk::Button::with_label(&tr(MsgKey::ext_update_all));
             let weak = Rc::downgrade(self);
@@ -633,10 +626,10 @@ impl Inner {
     }
 
     /// One 40 px row: the icon with a spinner over it, the name, the secondary line and the buttons.
-    fn row(self: &Rc<Self>, ext: &Ext) -> gtk::Box {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
-        row.set_margin_start(16);
-        row.set_margin_end(16);
+    fn row(self: &Rc<Self>, ext: &Ext) -> gtk::ListBoxRow {
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        row.set_margin_start(12);
+        row.set_margin_end(8);
         row.set_margin_top(8);
         row.set_margin_bottom(8);
 
@@ -697,32 +690,24 @@ impl Inner {
             ExtState::Installed { .. } => RowAction::Settings,
             ExtState::Untrusted => RowAction::Trust,
         };
+        // the long press, the secondary click and the Menu key open the row's menu
         let (weak, pkg) = (Rc::downgrade(self), ext.pkg.clone());
-        let click = gtk::GestureClick::new();
-        click.connect_released(move |_, _, _, _| {
-            if let Some(inner) = weak.upgrade() {
-                if inner.installs.borrow().step(&pkg).is_completed() {
-                    inner.press(&pkg, primary);
+        let (weak_long, pkg_long) = (Rc::downgrade(self), ext.pkg.clone());
+        super::view::list_row(
+            &row,
+            move || {
+                if let Some(inner) = weak.upgrade() {
+                    if inner.installs.borrow().step(&pkg).is_completed() {
+                        inner.press(&pkg, primary);
+                    }
                 }
-            }
-        });
-        row.add_controller(click);
-        let (long, secondary) = (gtk::GestureLongPress::new(), gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build());
-        let on_long = |weak: std::rc::Weak<Inner>, pkg: String| move || {
-            if let Some(inner) = weak.upgrade() {
-                inner.long_press(&pkg);
-            }
-        };
-        let run = on_long(Rc::downgrade(self), ext.pkg.clone());
-        long.connect_pressed(move |_, _, _| run());
-        let run = on_long(Rc::downgrade(self), ext.pkg.clone());
-        secondary.connect_pressed(move |gesture, _, _, _| {
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            run();
-        });
-        row.add_controller(long);
-        row.add_controller(secondary);
-        row
+            },
+            move || {
+                if let Some(inner) = weak_long.upgrade() {
+                    inner.long_press(&pkg_long);
+                }
+            },
+        )
     }
 }
 

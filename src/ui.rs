@@ -28,6 +28,10 @@ fn nav() -> (gtk::Stack, gtk::ApplicationWindow) {
     NAV.with(|n| n.get().cloned().expect("nav not initialised"))
 }
 
+pub fn stack() -> gtk::Stack {
+    nav().0
+}
+
 pub fn window() -> gtk::ApplicationWindow {
     nav().1
 }
@@ -66,17 +70,6 @@ pub fn page_stack() -> (Vec<String>, usize) {
     (names, shown)
 }
 
-/// Pops pages until `stop` accepts the page on top, or only the root is left (Voyager `popUntil`). `stop` is asked
-/// about the visible page first, so a page that already satisfies it is not popped.
-pub fn pop_until(stop: impl Fn(&gtk::Widget) -> bool) {
-    while let Some(cur) = nav().0.visible_child() {
-        if stop(&cur) || cur.prev_sibling().is_none() {
-            break;
-        }
-        pop();
-    }
-}
-
 /// Drop every pushed page and show the root (sidebar destination clicked).
 pub fn pop_to_root() {
     let stack = nav().0;
@@ -108,17 +101,31 @@ pub fn no_sticky_focus(header: &impl IsA<gtk::Widget>) {
     }
 }
 
-/// A navigation page: its own header bar (title, optional back button, end widgets) above `content`.
+/// A navigation page: one header row above `content` (docs/design/other-tabs.md). A pushed page (`back`) shows the
+/// back button and its title; a sidebar destination shows no title, because the sidebar already names it. When the
+/// first `end` widget is a search entry it takes the middle of the row in place of the title.
 pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>, back: bool) -> GBox {
     let header = gtk::HeaderBar::new();
     header.set_decoration_layout(Some(&decoration(false)));
-    header.set_title_widget(Some(&Label::builder().label(title).css_classes(["title"]).build()));
+    let mut end = end.into_iter().peekable();
+    let centre: gtk::Widget = match end.next_if(|w| w.is::<gtk::SearchEntry>()) {
+        Some(search) => {
+            search.set_hexpand(true);
+            clamp(&search, SEARCH_WIDTH).upcast()
+        }
+        None if back => Label::builder().label(title).css_classes(["title"]).build().upcast(),
+        // an empty box, not None: without a title widget GTK shows the window title
+        None => GBox::new(O::Horizontal, 0).upcast(),
+    };
+    header.set_title_widget(Some(&centre));
     if back {
         let b = Button::from_icon_name("go-previous-symbolic");
         b.set_tooltip_text(Some("Back"));
+        b.update_property(&[gtk::accessible::Property::Label("Back")]);
         b.connect_clicked(|_| pop());
         header.pack_start(&b);
     }
+    let end: Vec<gtk::Widget> = end.collect();
     for w in end.iter().rev() {
         header.pack_end(w);
     }
@@ -131,7 +138,29 @@ pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>,
 }
 
 /// Open a screen by id: hand-built if one exists, otherwise rendered from its spec.
+thread_local! {
+    static LAST_OPENED: std::cell::RefCell<std::collections::HashMap<&'static str, std::time::Instant>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// `true` when `what` (a reader or player open) has not been done in the last `window_ms`; a repeated click, or clicks
+/// that queued while the window was busy, then open it once instead of stacking pages.
+pub fn first_within(what: &'static str, window_ms: u64) -> bool {
+    LAST_OPENED.with(|m| {
+        let now = std::time::Instant::now();
+        let mut map = m.borrow_mut();
+        if map.get(what).is_some_and(|t| now.duration_since(*t).as_millis() < u128::from(window_ms)) {
+            return false;
+        }
+        map.insert(what, now);
+        true
+    })
+}
+
 pub fn open(id: &str) {
+    #[cfg(test)]
+    if OPENED.with(|o| o.borrow_mut().as_mut().map(|v| v.push(id.to_owned())).is_some()) {
+        return;
+    }
     if with_spec(|s| s.nav.iter().any(|n| n.id == id)) {
         // sidebar destinations switch tabs instead of stacking a second copy
         pop_to_root();
@@ -143,11 +172,36 @@ pub fn open(id: &str) {
     push(&crate::screens::build(id));
 }
 
+#[cfg(test)]
+thread_local! {
+    static OPENED: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Test hook: runs `body` with [`open`] recording the screen ids instead of navigating, and returns them.
+#[cfg(test)]
+pub fn opened_during(body: impl FnOnce()) -> Vec<String> {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            OPENED.with(|o| o.borrow_mut().take());
+        }
+    }
+    OPENED.with(|o| *o.borrow_mut() = Some(Vec::new()));
+    let _reset = Reset;
+    body();
+    OPENED.with(|o| o.borrow_mut().clone().unwrap_or_default())
+}
+
 // ---------- layout helpers ----------
+
+/// The widest a list page's column gets (settings pages, More, the boxed lists); wider windows centre it.
+pub const PAGE_WIDTH: i32 = 720;
+/// The widest a header search entry gets.
+pub const SEARCH_WIDTH: i32 = 420;
 
 pub fn scrolled(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
     let child = child.as_ref();
-    let child = if child.has_css_class("column") { clamp(child, 640).upcast() } else { child.clone() };
+    let child = if child.has_css_class("column") { clamp(child, PAGE_WIDTH).upcast() } else { child.clone() };
     gtk::ScrolledWindow::builder().child(&child).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build()
 }
 
@@ -160,16 +214,21 @@ pub fn margins(w: &impl IsA<gtk::Widget>, m: i32) {
     w.set_margin_end(m);
 }
 
-/// Centered column with a max-ish width, like AdwClamp.
+/// Centred column of boxed lists, at most [`PAGE_WIDTH`] wide once [`scrolled`] wraps it. The spacing scale is the
+/// Library's (4, 8, 12, 16, 24): 16 px gutters, 12 px between a heading and its list, 24 px between groups.
 pub fn column() -> GBox {
     let b = GBox::new(O::Vertical, 12);
-    margins(&b, 18);
+    b.set_margin_start(16);
+    b.set_margin_end(16);
+    b.set_margin_top(16);
+    b.set_margin_bottom(24);
     b.add_css_class("column");
     b
 }
 
+/// A group heading over a boxed list. With the column's 12 px spacing it leaves 24 px above and 12 px below.
 pub fn heading(text: &str) -> Label {
-    Label::builder().label(text).xalign(0.0).css_classes(["heading"]).margin_top(6).build()
+    Label::builder().label(text).xalign(0.0).wrap(true).css_classes(["heading"]).margin_top(12).build()
 }
 
 pub fn dim(text: &str) -> Label {
@@ -190,11 +249,20 @@ pub fn icon_button(icon: &str, tip: &str) -> Button {
     b
 }
 
+/// The row metrics every boxed list shares (this row and `pref_model::widgets::row`): 12 px sides, 8 px top and
+/// bottom, 12 px between the parts, at least 48 px tall.
+pub const ROW_PAD_H: i32 = 12;
+pub const ROW_PAD_V: i32 = 8;
+pub const ROW_MIN_HEIGHT: i32 = 48;
+
 /// Title/subtitle row with an optional trailing widget.
 pub fn row(title: &str, subtitle: Option<&str>, suffix: Option<gtk::Widget>) -> gtk::ListBoxRow {
     let h = GBox::new(O::Horizontal, 12);
-    margins(&h, 10);
-    h.set_margin_start(12);
+    h.set_margin_start(ROW_PAD_H);
+    h.set_margin_end(ROW_PAD_H);
+    h.set_margin_top(ROW_PAD_V);
+    h.set_margin_bottom(ROW_PAD_V);
+    h.set_size_request(-1, ROW_MIN_HEIGHT - 2 * ROW_PAD_V);
     let v = GBox::new(O::Vertical, 2);
     v.set_hexpand(true);
     v.set_valign(Align::Center);
@@ -210,13 +278,20 @@ pub fn row(title: &str, subtitle: Option<&str>, suffix: Option<gtk::Widget>) -> 
     gtk::ListBoxRow::builder().child(&h).build()
 }
 
+/// The dim "opens a page" arrow at the end of a link row.
+pub fn chevron() -> gtk::Image {
+    gtk::Image::builder().icon_name("go-next-symbolic").css_classes(["dim-label"]).build()
+}
+
+/// An empty state in the Library's look (docs/design/main-window.md): a large dim icon over the message. A caller with
+/// one matching action appends its button to the returned box.
 pub fn status(icon: &str, text: &str) -> GBox {
     let b = GBox::new(O::Vertical, 12);
     b.set_valign(Align::Center);
     b.set_halign(Align::Center);
     b.set_vexpand(true);
-    b.append(&gtk::Image::builder().icon_name(icon).pixel_size(96).css_classes(["dim-label"]).build());
-    b.append(&Label::builder().label(text).wrap(true).justify(gtk::Justification::Center).css_classes(["title-3", "dim-label"]).build());
+    b.append(&gtk::Image::builder().icon_name(icon).pixel_size(64).css_classes(["dim-label"]).build());
+    b.append(&Label::builder().label(text).wrap(true).justify(gtk::Justification::Center).css_classes(["kb-empty-title"]).build());
     b
 }
 
@@ -268,16 +343,9 @@ pub fn menu_button(icon: &str, entries: &[String], on: impl Fn(&str) + Clone + '
 pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
     Some(match item {
         Item::Switch { title, subtitle, default } => {
-            let s = gtk::Switch::new();
-            s.set_active(default.as_bool().unwrap_or(false));
-            // the More screen's incognito switch is the real preference (T-01a-020)
-            if title == "Incognito mode" && subtitle.as_deref() == Some("Pauses your history") {
-                crate::incognito::bind_switch(&s);
-            }
-            let r = row(title, subtitle.as_deref(), Some(s.clone().upcast()));
-            r.set_activatable(true);
-            r.connect_activate(move |_| s.set_active(!s.is_active()));
-            r
+            // the More screen's two switches are the real preferences (T-01a-020)
+            let pref = crate::data::is_installed().then(|| more_switch_pref(&crate::data::app().base, title, subtitle.as_deref())).flatten();
+            switch_item_row(title, subtitle.as_deref(), default.as_bool().unwrap_or(false), pref)
         }
         Item::List { title, subtitle, options, default } => {
             let opts: Vec<&str> = options.iter().map(String::as_str).collect();
@@ -324,7 +392,7 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
             let t = crate::tri_check::tri_check(kuro_prefs::checkbox::TriState::None(()), |_| {});
             let r = row(title, None, Some(t.widget().clone().upcast()));
             r.set_activatable(true);
-            r.connect_activate(move |_| t.activate());
+            crate::widgets::row_activate::on_activate(&r, move |_| t.activate());
             r
         }
         Item::Sort { title, options } => {
@@ -361,10 +429,10 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
             gtk::ListBoxRow::builder().child(&v).activatable(false).build()
         }
         Item::Link { title, subtitle, target } => {
-            let r = row(title, subtitle.as_deref(), Some(gtk::Image::from_icon_name("go-next-symbolic").upcast()));
+            let r = row(title, subtitle.as_deref(), Some(chevron().upcast()));
             r.set_activatable(true);
             let t = target.clone();
-            r.connect_activate(move |_| open(&t));
+            crate::widgets::row_activate::on_activate(&r, move |_| open(&t));
             r
         }
         Item::Action { title, subtitle } => {
@@ -374,7 +442,7 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
             let r = row(title, subtitle.as_deref(), None);
             r.set_activatable(true);
             let t = title.clone();
-            r.connect_activate(move |r| {
+            crate::widgets::row_activate::on_activate(&r, move |r| {
                 if t == "Clear WebView data" {
                     crate::settings::clear_webview_data();
                     return;
@@ -392,8 +460,11 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
             r
         }
         Item::Info { title } => {
-            let h = GBox::new(O::Horizontal, 8);
-            margins(&h, 10);
+            let h = GBox::new(O::Horizontal, 12);
+            h.set_margin_start(ROW_PAD_H);
+            h.set_margin_end(ROW_PAD_H);
+            h.set_margin_top(12);
+            h.set_margin_bottom(12);
             h.append(&gtk::Image::from_icon_name("dialog-information-symbolic"));
             let l = dim(title);
             l.set_hexpand(true);
@@ -402,6 +473,28 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
         }
         Item::Unknown => return None,
     })
+}
+
+/// A switch row; a click or Enter flips the switch. With `pref` the switch shows and writes that preference.
+fn switch_item_row(title: &str, subtitle: Option<&str>, default: bool, pref: Option<kuro_prefs::pref::Pref<bool>>) -> gtk::ListBoxRow {
+    let s = gtk::Switch::new();
+    s.set_active(default);
+    if let Some(pref) = pref {
+        crate::incognito::bind_switch(&s, pref);
+    }
+    let r = row(title, subtitle, Some(s.clone().upcast()));
+    r.set_activatable(true);
+    crate::widgets::row_activate::on_activate(&r, move |_| s.set_active(!s.is_active()));
+    r
+}
+
+/// The preference behind a More-screen switch row, picked by its spec title and subtitle.
+fn more_switch_pref(base: &kuro_prefs::base::BasePrefs, title: &str, subtitle: Option<&str>) -> Option<kuro_prefs::pref::Pref<bool>> {
+    match (title, subtitle?) {
+        ("Incognito mode", "Pauses your history") => Some(base.incognito_mode.clone()),
+        ("Downloaded only", "Filters all entries in your library") => Some(base.downloaded_only.clone()),
+        _ => None,
+    }
 }
 
 fn scrolled_max(child: &impl IsA<gtk::Widget>, h: i32) -> gtk::ScrolledWindow {
@@ -587,4 +680,100 @@ pub fn generic(s: &Screen) -> GBox {
     let p = page(&s.title, &content, toolbar(s), true);
     tag(&p, &s.id);
     p
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every widget at or below `root`.
+    fn all(root: &gtk::Widget, out: &mut Vec<gtk::Widget>) {
+        out.push(root.clone());
+        let mut child = root.first_child();
+        while let Some(w) = child {
+            all(&w, out);
+            child = w.next_sibling();
+        }
+    }
+
+    fn labels(root: &gtk::Widget) -> Vec<String> {
+        let mut found = Vec::new();
+        all(root, &mut found);
+        found.iter().filter_map(|w| w.downcast_ref::<Label>().map(|l| l.label().to_string())).collect()
+    }
+
+    #[test]
+    fn a_sidebar_page_has_no_title_and_a_pushed_page_has_its_title_and_back() {
+        crate::testing::with_display(|| {
+            let root = page("Updates", &GBox::new(O::Vertical, 0), vec![], false);
+            let header = root.first_child().and_downcast::<gtk::HeaderBar>().expect("the header row");
+            assert!(!labels(header.upcast_ref()).iter().any(|l| l == "Updates"), "the sidebar names the tab");
+            assert!(header.title_widget().is_some(), "an empty title widget keeps GTK from showing the window title");
+            let pushed = page("Appearance", &GBox::new(O::Vertical, 0), vec![], true);
+            let header = pushed.first_child().expect("the header row");
+            assert!(labels(&header).iter().any(|l| l == "Appearance"));
+            let mut w = Vec::new();
+            all(&header, &mut w);
+            assert!(w.iter().any(|w| w.downcast_ref::<Button>().is_some_and(|b| b.icon_name().as_deref() == Some("go-previous-symbolic"))));
+        });
+    }
+
+    #[test]
+    fn a_search_entry_handed_first_takes_the_middle_of_the_header() {
+        crate::testing::with_display(|| {
+            let search = gtk::SearchEntry::new();
+            let refresh = icon_button("view-refresh-symbolic", "Refresh");
+            let p = page("Search settings", &GBox::new(O::Vertical, 0), vec![search.clone().upcast(), refresh.upcast()], true);
+            let header = p.first_child().and_downcast::<gtk::HeaderBar>().expect("the header row");
+            assert!(search.is_ancestor(&header.title_widget().expect("the middle")), "the entry is the title widget");
+            assert!(!labels(header.upcast_ref()).iter().any(|l| l == "Search settings"), "no title beside the search");
+        });
+    }
+
+    #[test]
+    fn more_shows_three_lists_of_rows_with_icons_and_no_logo_or_title() {
+        crate::testing::with_display(|| {
+            let built = crate::screens::body("more").expect("the More page");
+            let mut found = Vec::new();
+            all(&built.content, &mut found);
+            let lists: Vec<&ListBox> = found.iter().filter_map(|w| w.downcast_ref::<ListBox>()).collect();
+            assert_eq!(lists.len(), 3);
+            assert!(lists.iter().all(|l| l.has_css_class("boxed-list")));
+            let rows: Vec<&gtk::ListBoxRow> = found.iter().filter_map(|w| w.downcast_ref::<gtk::ListBoxRow>()).collect();
+            assert_eq!(rows.len(), 10, "2 switches, 4 library rows, 4 settings and help rows");
+            for row in rows {
+                let first = row.child().and_then(|c| c.first_child());
+                assert!(first.is_some_and(|w| w.is::<gtk::Image>()), "every row starts with its icon");
+            }
+            let texts = labels(&built.content);
+            for gone in ["More", "Kurobayomi", "History"] {
+                assert!(!texts.iter().any(|l| l == gone), "{gone} is not on the page");
+            }
+            assert!(texts.iter().any(|l| l == "Help"));
+        });
+    }
+
+    #[test]
+    fn the_more_switches_write_their_preference_and_flip_once_per_click_or_key() {
+        crate::testing::with_display(|| {
+            let base = kuro_prefs::base::BasePrefs::new(kuro_prefs::store::PrefStore::in_memory());
+            let mut seen = Vec::new();
+            for item in screen("more").groups.into_iter().flat_map(|g| g.items) {
+                let Item::Switch { title, subtitle, default } = item else { continue };
+                let pref = more_switch_pref(&base, &title, subtitle.as_deref()).expect("each More switch has a preference");
+                let row = switch_item_row(&title, subtitle.as_deref(), default.as_bool().unwrap_or(false), Some(pref.clone()));
+                let list = ListBox::new();
+                list.append(&row);
+                crate::widgets::row_activate::click_row(&row);
+                assert!(pref.get(), "{title}: a click turns it on");
+                row.emit_by_name::<()>("activate", &[]);
+                assert!(!pref.get(), "{title}: Enter turns it off again");
+                seen.push(title);
+            }
+            assert_eq!(seen, ["Downloaded only", "Incognito mode"]);
+            let key = |t, s| more_switch_pref(&base, t, Some(s)).map(|p| p.key().to_owned());
+            assert_eq!(key("Downloaded only", "Filters all entries in your library").as_deref(), Some(base.downloaded_only.key()));
+            assert_eq!(key("Incognito mode", "Pauses your history").as_deref(), Some(base.incognito_mode.key()));
+        });
+    }
 }

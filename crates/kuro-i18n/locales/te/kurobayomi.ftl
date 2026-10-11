@@ -274,8 +274,6 @@ theme_light = ఆపుము
 
 theme_dark = ప్రారంభించుము
 
-theme_monet = క్రియాశీలము
-
 theme_greenapple = ఆకుపచ్చ సేవఫలము
 
 theme_midnightdusk = సందెచీకటి
@@ -307,10 +305,6 @@ lock_always = ఎల్లప్పుడు
 lock_never = ఎప్పుడూ వద్దు
 
 hide_notification_content = సూచన విషయములను దాయుము
-
-secure_screen = తెరను సంరక్షించుము
-
-secure_screen_summary = అనువర్తనములను మారునపుడు వర్తక విషయములను దాయుము మరియు తెర యొక్క చిత్రములను తీయుటను నిరోధించుము
 
 pref_category_nsfw_content = పెద్దలకు మాత్రమే (+18) మూలాలు
 

@@ -18,8 +18,6 @@ action_continue = Continuar
 
 manga = Manga
 
-pref_library_summary = Categorias, atualização global, trocar de capítulo
-
 pref_behavior = Comportamento do capítulo
 
 action_add_repo_message = Adicione repositórios a { $arg1 }. Deve ser uma URL que termine com "index.min.json".
@@ -80,21 +78,9 @@ pref_player_settings_summary = Reprodutor interno, gestos, descodificadores, leg
 
 pref_player_internal = Reprodutor interno
 
-pref_player_internal_summary = Progresso, controlos, orientação
-
 pref_progress_mark_as_seen = Em que ponto marcar o episódio como visto
 
 pref_preserve_watching_position = Lembrar a posição de reprodução nos episódios vistos
-
-pref_category_player_orientation = Orientação
-
-rotation_video = Vídeo
-
-rotation_reverse_landscape = Paisagem reversa
-
-rotation_sensor_portrait = Retrato (Sensor)
-
-rotation_sensor_landscape = Paisagem (Sensor)
 
 pref_category_controls = Controlos
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = Mostrar indicador do capítulo atual
 pref_controls_show_chapter_indicator_info = Só aparece se o vídeo tiver capítulos
 
 pref_controls_display_volume_percentage = Exibir volume como percentagem
-
-pref_remember_brightness = Lembrar e mudar para o último brilho usado
 
 pref_remember_volume = Lembrar e mudar para o último volume usado
 
@@ -175,12 +159,6 @@ pref_external_player_preference = Preferência do reprodutor externo
 pref_player_gestures = Gestos
 
 pref_player_gestures_summary = Procurar, toque duplo, controlos de multimédia
-
-pref_category_player_sliders = Cursores
-
-enable_volume_brightness_gestures = Ativar Gestos de Volume e Brilho
-
-pref_controls_swap_vol_brightness = Trocar cursor do volume e brilho
 
 pref_category_player_seeking = A procurar
 
@@ -844,10 +822,6 @@ theme_cottoncandy = Algodão doce
 
 theme_mocha = Café
 
-pref_episode_swipe_end = deslize para a direita
-
-pref_episode_swipe_start = Avançar para o episódio ao deslizar para a esquerda
-
 pref_category_hide_hidden = Ocultar Categorias Ocultas das categorias e da tela de armazenamento
 
 pref_update_anime_release_grace_period = Período de tempo previsto para lançamento
@@ -1271,10 +1245,6 @@ onboarding_permission_notifications = Permissão de notificação
 
 onboarding_permission_notifications_description = Seja notificado para atualizações da biblioteca e mais.
 
-onboarding_permission_ignore_battery_opts = Uso de pilha em plano de fundo
-
-onboarding_permission_ignore_battery_opts_description = Evite interrupções para tarefas longas como atualizações da biblioteca, descargas e restauração de backups.
-
 onboarding_permission_crashlytics = Enviar logs de crash
 
 onboarding_permission_crashlytics_description = Enviar logs de crash anónimos para os desenvolvedores.
@@ -1317,10 +1287,6 @@ pref_browse_summary = Fontes, extensões, pesquisa global
 
 pref_backup_summary = Backups manuais e automáticos
 
-pref_security_summary = Bloqueio da app, ecrã seguro
-
-pref_advanced_summary = Exportar registos de travamento, otimizações de bateria
-
 pref_category_theme = Tema
 
 pref_app_theme = Tema da aplicação
@@ -1330,8 +1296,6 @@ theme_system = Seguir o do sistema
 theme_light = Desligado
 
 theme_dark = Ligado
-
-theme_monet = Dinâmico
 
 theme_greenapple = Maçã Verde
 
@@ -1380,10 +1344,6 @@ lock_always = Sempre
 lock_never = Nunca
 
 hide_notification_content = Esconder conteúdo das notificações
-
-secure_screen = Ecrã seguro
-
-secure_screen_summary = Ecrã seguro esconde os conteúdos da app durante a troca de apps e impedir capturas de ecrã
 
 firebase_summary = A enviar logs de crash e estatísticas para permitir-nos identificar e resolver problemas, melhorar a performance e realizar futuras atualizações que sejam mais revelantes aos teus desejos
 
@@ -1459,10 +1419,6 @@ include = Incluir: { $arg1 }
 
 exclude = Excluir: { $arg1 }
 
-pref_chapter_swipe_end = Ação de deslizar para a direita
-
-pref_chapter_swipe_start = Ação de deslizar para a esquerda
-
 multi_lang = Multi
 
 ext_updates_pending = Atualizações pendentes
@@ -1518,14 +1474,6 @@ ext_nsfw_warning = Fontes desta extensão poderão conter conteúdo NSFW (18+)
 ext_permission_install_apps_warning = Permissões são necessárias para instalar extensões. Toque aqui para conceder.
 
 ext_install_service_notif = Instalando a extensão…
-
-ext_installer_pref = Instalador
-
-ext_installer_legacy = Legado
-
-ext_installer_shizuku_stopped = O Shizuku não está em execução
-
-ext_installer_shizuku_unavailable_dialog = Instale e inicie o Shizuku para utilizá-lo como o instalador de extensões.
 
 ext_revoke_trust = Revogar a confiabilidade de extensões desconhecidas
 
@@ -1730,22 +1678,6 @@ double_tap_anim_speed_0 = Sem animação
 double_tap_anim_speed_normal = Normal
 
 double_tap_anim_speed_fast = Rápido
-
-pref_rotation_type = Tipo de rotação padrão
-
-rotation_type = Tipo de rotação
-
-rotation_free = Livre
-
-rotation_portrait = Vertical
-
-rotation_reverse_portrait = Vertical invertido
-
-rotation_landscape = Horizontal
-
-rotation_force_portrait = Vertical bloqueado
-
-rotation_force_landscape = Horizontal bloqueado
 
 color_filter_r_value = R
 
@@ -1957,8 +1889,6 @@ pref_refresh_library_covers = Atualizar capas da biblioteca
 
 pref_reset_viewer_flags = Repor as definições do leitor por série
 
-pref_reset_viewer_flags_summary = Repõe o modo de leitura e orientação de todas as séries
-
 pref_reset_viewer_flags_success = Todas as definições do leitor reiniciadas
 
 pref_reset_viewer_flags_error = Não foi possível repor as definições do leitor
@@ -1966,20 +1896,6 @@ pref_reset_viewer_flags_error = Não foi possível repor as definições do leit
 pref_dump_crash_logs = Compartilhar registros de falha
 
 pref_dump_crash_logs_summary = Guarda registos de erros num ficheiro para partilhar com os desenvolvedores
-
-label_background_activity = Atividade em segundo plano
-
-pref_disable_battery_optimization = Desativar otimização de bateria
-
-pref_disable_battery_optimization_summary = Ajuda com a atualização e cópia de segurança da biblioteca em segundo plano
-
-battery_optimization_disabled = A otimização de bateria já está desativada
-
-battery_optimization_setting_activity_not_found = Não foi possível abrir as definições do aparelho
-
-about_dont_kill_my_app = Alguns fabricantes têm restrições adicionais de aplicação que desligam os serviços em segundo plano. Este sítio web tem mais informações sobre como corrigi-lo.
-
-pref_tablet_ui_mode = Interface de tablet
 
 pref_verbose_logging = Registo de eventos detalhado
 

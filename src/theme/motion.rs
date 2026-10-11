@@ -19,26 +19,10 @@ pub const fn ring_spins(enabled: bool) -> bool {
     enabled
 }
 
-/// Player overlay show and hide transitions (T-49ba-035): every `player_*` transition is 200 ms.
-pub const PLAYER_ANIM_MS: u32 = 200;
-/// Play and pause crossfade in the player (T-49ba-024, `anim_play_to_pause`).
-pub const PLAY_PAUSE_CROSSFADE_MS: u32 = 300;
-/// Tab-enter crossfades between a static icon and its end state (T-49ba-022).
-pub const TAB_CROSSFADE_MS: u32 = 300;
 /// Browse icon rotation, 0 to 180 degrees (T-49ba-022, `anim_browse_enter`).
 pub const BROWSE_ROTATE_MS: u32 = 300;
 /// History icon rotation, 360 to 0 degrees (T-49ba-022, `anim_history_enter`).
 pub const HISTORY_ROTATE_MS: u32 = 500;
-/// Splash exit crossfade (T-49ba-020, `SPLASH_EXIT_ANIM_DURATION`).
-pub const SPLASH_EXIT_MS: u32 = 400;
-
-/// Watches `gtk-enable-animations` and calls `on_change` with the new value (T-49ba-046). Does
-/// nothing when there is no settings object (no display).
-pub fn watch<F: Fn(bool) + 'static>(on_change: F) {
-    if let Some(settings) = gtk::Settings::default() {
-        settings.connect_gtk_enable_animations_notify(move |s| on_change(s.is_gtk_enable_animations()));
-    }
-}
 
 #[cfg(test)]
 mod tests {

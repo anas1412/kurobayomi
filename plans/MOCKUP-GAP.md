@@ -79,7 +79,7 @@ Each row is data the mockup shows that does not exist in Aniyomi or in any plan.
 ### 2.4 Mockup features that work and should be kept
 
 - The sidebar plus bottom-bar responsive switch (`src/main.rs:43-62`, `:70-81`). Area:36 keeps the same shape.
-- The icon-only rail toggle, badge dots and `Collapse sidebar` tooltip (`src/main.rs:166-199`). Keep the behaviour; the plan wants it (area:36, T-36a-002, T-36a-004).
+- DROPPED: the icon-only rail toggle and `Collapse sidebar` tooltip (see `docs/design/main-window.md`); nav badges are now pills (`kb-nav-badge`).
 - Generic spec rendering of groups, empty states and tab chips (`src/ui.rs:506-523`). Keep it as the fallback for read-only static text pages. Do not use it for pages with live state.
 - The spec-consistency unit test (`src/spec.rs:131-191`): every spec link target exists and no item type is unknown. Keep it and extend it to the registry check of area:02 (T-02a-030, `every_pref_exists_in_registry`).
 - The `ui::with_spec` / `Spec::load` split and the JSON schema in `spec/SCHEMA.md`. The schema is the seed for the typed page builders of area:36.

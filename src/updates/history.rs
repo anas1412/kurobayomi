@@ -133,6 +133,7 @@ impl<T> Default for HistoryState<T> {
 }
 
 impl<T> HistoryState<T> {
+    #[cfg(test)]
     pub fn is_loading(&self) -> bool {
         self.list.is_none()
     }
@@ -163,17 +164,6 @@ impl<T> HistoryState<T> {
         self.search = text.to_owned();
         true
     }
-}
-
-/// Whether a change to `table` re-runs the list of `kind` (`history` for manga, `animehistory` for anime).
-pub fn watches_table(kind: EntryKind, table: &str) -> bool {
-    kind.history_table() == table
-}
-
-/// The search rule: a case-insensitive substring of the title, with no pattern characters (`_` and `%` are literal).
-/// An empty query matches every title.
-pub fn matches_search(title: &str, query: &str) -> bool {
-    query.is_empty() || title.to_lowercase().contains(&query.to_lowercase())
 }
 
 /// The copy of the remove dialog (T-42a-018). The checkbox resets every unit of the entry; unchecked resets one row.
@@ -266,22 +256,6 @@ mod tests {
         assert!(state.set_search("one"));
         assert!(!state.set_search("one"));
         assert!(state.set_search(""));
-    }
-
-    #[test]
-    fn history_watches_only_its_own_table() {
-        assert!(watches_table(EntryKind::Manga, "history"));
-        assert!(!watches_table(EntryKind::Manga, "animehistory"));
-        assert!(watches_table(EntryKind::Anime, "animehistory"));
-    }
-
-    #[test]
-    fn history_search_is_literal_and_case_insensitive() {
-        assert!(matches_search("Chainsaw Man", "SAW"));
-        assert!(matches_search("a_b", "_"));
-        assert!(!matches_search("axb", "_"));
-        assert!(!matches_search("100% fun", "%f%"));
-        assert!(matches_search("anything", ""));
     }
 
     #[test]

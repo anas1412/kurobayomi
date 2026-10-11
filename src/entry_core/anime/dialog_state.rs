@@ -31,10 +31,12 @@ impl DialogSlot {
         self.current = Some(dialog);
     }
 
+    #[cfg(test)]
     pub fn current(&self) -> Option<&AnimeDialog> {
         self.current.as_ref()
     }
 
+    #[cfg(test)]
     /// The settings sheet of the entry's kind: seasons get the season sheet, episodes the episode sheet.
     pub fn open_settings(&mut self, seasons: bool) {
         self.open(if seasons { AnimeDialog::SeasonSettingsSheet } else { AnimeDialog::EpisodeSettingsSheet });

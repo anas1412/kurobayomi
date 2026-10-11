@@ -8,7 +8,6 @@
 //!   `ui::pop` and `ui::pop_until`, and Back follows B 4.6.2 at every level.
 //! - T-41a-025: the "install unknown apps" banner is dropped (D2). Linux has no such permission, so there is no banner and
 //!   no permission request. The installer preference is still read for export parity and has no effect on the list.
-//! - T-41b-055: no haptic on a browse long press. The dialog or added badge is the visible result.
 //! - T-41b-056: no assist-content hook. The source home URL stays reachable through "Open in WebView". Loss: Android
 //!   assistant only.
 //! - T-41b-057: no row movement animation. Results reorder as they arrive. Pages change with the stack's crossfade only.
@@ -29,6 +28,7 @@
 pub mod anime;
 pub mod banner;
 pub mod browse_screen;
+pub mod builtin;
 pub mod content;
 pub mod cookies;
 pub mod deep_link;
@@ -55,6 +55,7 @@ pub mod installs;
 pub mod keys;
 pub mod lang_pages;
 pub mod listing;
+pub mod look;
 pub mod listing_view;
 pub mod loader;
 pub mod manga_migrate_dialog;
@@ -63,7 +64,6 @@ pub mod migrate_flags;
 pub mod migrate_list;
 pub mod migrate_live;
 pub mod migrate_merge;
-pub mod migrate_nav;
 pub mod migrate_screen;
 pub mod mount;
 pub mod nav;

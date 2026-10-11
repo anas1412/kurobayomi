@@ -43,7 +43,6 @@ use kuro_track::trackers::suwayomi::SuwayomiTracker;
 
 /// The services of the Tracking screen.
 // the redirect fields are read by `on_redirect`, which has no caller until the shell passes login links on
-#[allow(dead_code)]
 pub struct Host {
     pub manager: TrackerManager,
     pub pending: RefCell<PendingLogins>,
@@ -201,7 +200,6 @@ pub fn now_ms() -> i64 {
 }
 
 /// What finishing a login shows: the toast text.
-#[allow(dead_code)] // used by `on_redirect`
 fn finished(name: &str, result: Result<(), kuro_track::error::TrackError>) -> String {
     match result {
         Ok(()) => english(&MsgKey::TrackerLoggedIn(name.to_owned())),
@@ -212,7 +210,6 @@ fn finished(name: &str, result: Result<(), kuro_track::error::TrackError>) -> St
 /// A login link arrived (`aniyomi://anilist-auth#access_token=...` and the like). Routes it to the pending attempt and
 /// finishes the login on the runtime; the toast and the redraw follow on the main context. False when the services are
 /// not built, so the caller can treat the link as not its own.
-#[allow(dead_code)] // no call site until the shell hands login links to this module
 pub fn on_redirect(uri: &str) -> bool {
     let Some(host) = host() else { return false };
     let handled = handle_redirect(&mut host.pending.borrow_mut(), &host.manager, uri, now_ms());

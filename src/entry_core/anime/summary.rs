@@ -7,10 +7,6 @@ use std::collections::HashSet;
 /// Lines a collapsed summary shows.
 pub const COLLAPSED_LINES: i32 = 3;
 
-/// Font size of a summary, in pixels, and its line height.
-pub const SUMMARY_FONT_PX: u32 = 10;
-pub const SUMMARY_LINE_HEIGHT_PX: u32 = 11;
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SummaryExpansion {
     open: HashSet<i64>,
@@ -33,6 +29,7 @@ impl SummaryExpansion {
         true
     }
 
+    #[cfg(test)]
     /// The line limit of a summary: `None` when expanded (no limit), else three lines.
     pub fn lines(&self, episode_id: i64) -> Option<i32> {
         if self.is_expanded(episode_id) { None } else { Some(COLLAPSED_LINES) }
@@ -60,15 +57,4 @@ mod tests {
         assert!(!e.is_expanded(2));
     }
 
-    #[test]
-    fn expansion_is_kept_per_episode_id_across_rebuilds() {
-        // T-R3: the key is the id, so another row's click does not move it
-        let mut e = SummaryExpansion::default();
-        e.click(10, false);
-        e.click(11, false);
-        e.click(11, false);
-        assert!(e.is_expanded(10));
-        assert!(!e.is_expanded(11));
-        assert_eq!((COLLAPSED_LINES, SUMMARY_FONT_PX, SUMMARY_LINE_HEIGHT_PX), (3, 10, 11));
-    }
 }

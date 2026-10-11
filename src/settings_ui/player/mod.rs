@@ -52,7 +52,7 @@ pub struct RootRow {
 
 /// The nine rows in order (`PlayerSettingsMainScreen.kt`).
 pub const ROOT_ROWS: [RootRow; 9] = [
-    RootRow { title: "Internal player", subtitle: "Progress, controls, orientation", icon: "media-playback-start-symbolic", target: "settings_player_internal" },
+    RootRow { title: "Internal player", subtitle: "Progress, controls", icon: "media-playback-start-symbolic", target: "settings_player_internal" },
     RootRow { title: "Gestures", subtitle: "Seeking, double tap, media controls", icon: "input-touchpad-symbolic", target: "settings_player_gestures" },
     RootRow { title: "Decoder", subtitle: "Hardware decoding, pixel format, debanding", icon: "cpu-symbolic", target: "settings_player_decoder" },
     RootRow { title: "Subtitles", subtitle: "Preferred languages, whitelist, blacklist", icon: "media-view-subtitles-symbolic", target: "settings_player_subtitle" },
@@ -71,6 +71,7 @@ pub fn root_rows(open: Rc<dyn Fn(&'static str)>) -> Vec<Preference> {
             let mut item = text(row.title, Some(row.subtitle), true);
             if let PreferenceItem::Text { common, on_click } = &mut item {
                 common.icon = Some(row.icon);
+                common.link = true;
                 let (open, target) = (Rc::clone(&open), row.target);
                 *on_click = Some(Rc::new(move || open(target)));
             }

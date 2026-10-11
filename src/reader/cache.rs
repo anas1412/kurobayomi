@@ -44,6 +44,7 @@ impl DiskCache {
         Ok(Self { root, limit })
     }
 
+    #[cfg(test)]
     pub fn root(&self) -> &Path {
         &self.root
     }

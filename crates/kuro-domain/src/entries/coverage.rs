@@ -6,7 +6,8 @@
 //! setters need it (see `flag_setters.rs`).
 //!
 //! `None` marks a method that `kuro-data` does not have yet. Those gaps are owned by area 05 and are listed in
-//! `KNOWN_GAPS`; the test fails for any other gap, and names the Kotlin method in the message.
+//! `KNOWN_GAPS`; the test fails for any other gap, and names the Kotlin method in the message. The signature
+//! differences are in `SIGNATURE_DIFFERENCES`.
 
 /// (Kotlin method, Rust method). `None` is a gap.
 pub const MATRIX: &[(&str, Option<&str>)] = &[
@@ -50,24 +51,24 @@ pub const MATRIX: &[(&str, Option<&str>)] = &[
     ("getDeletableParentAnime", Some("AnimeRepo::deletable_parents")),
     ("getChildrenByParentId", Some("AnimeRepo::children_by_parent")),
     // ChapterRepository (11)
-    ("addAllChapters", None),
+    ("addAllChapters", Some("ChapterRepo::add_all")),
     ("updateChapter", Some("ChapterRepo::update")),
     ("updateAllChapters", Some("ChapterRepo::update_all")),
-    ("removeChaptersWithIds", None),
+    ("removeChaptersWithIds", Some("ChapterRepo::remove_with_ids")),
     ("getChapterByMangaId", Some("ChapterRepo::by_manga_id")),
-    ("getScanlatorsByMangaId", None),
+    ("getScanlatorsByMangaId", Some("ChapterRepo::scanlators")),
     ("getScanlatorsByMangaIdAsFlow", None),
-    ("getBookmarkedChaptersByMangaId", None),
+    ("getBookmarkedChaptersByMangaId", Some("ChapterRepo::bookmarked")),
     ("getChapterById", Some("ChapterRepo::by_id")),
     ("getChapterByMangaIdAsFlow", Some("ChapterRepo::subscribe_by_manga_id")),
     ("getChapterByUrlAndMangaId", Some("ChapterRepo::by_url_and_manga_id")),
     // EpisodeRepository (9)
-    ("addAllEpisodes", None),
+    ("addAllEpisodes", Some("EpisodeRepo::add_all")),
     ("updateEpisode", Some("EpisodeRepo::update")),
     ("updateAllEpisodes", Some("EpisodeRepo::update_all")),
-    ("removeEpisodesWithIds", None),
+    ("removeEpisodesWithIds", Some("EpisodeRepo::remove_with_ids")),
     ("getEpisodeByAnimeId", Some("EpisodeRepo::by_anime_id")),
-    ("getBookmarkedEpisodesByAnimeId", None),
+    ("getBookmarkedEpisodesByAnimeId", Some("EpisodeRepo::bookmarked")),
     ("getEpisodeById", Some("EpisodeRepo::by_id")),
     ("getEpisodeByAnimeIdAsFlow", Some("EpisodeRepo::subscribe_by_anime_id")),
     ("getEpisodeByUrlAndAnimeId", Some("EpisodeRepo::by_url_and_anime_id")),
@@ -75,15 +76,19 @@ pub const MATRIX: &[(&str, Option<&str>)] = &[
 
 /// Gaps that are known and owned by area 05 (`kuro-data`). Adding a gap here needs a reason; the test rejects any
 /// gap not in this list.
-pub const KNOWN_GAPS: &[&str] = &[
-    "addAllChapters",
-    "removeChaptersWithIds",
-    "getScanlatorsByMangaId",
-    "getScanlatorsByMangaIdAsFlow",
-    "getBookmarkedChaptersByMangaId",
-    "addAllEpisodes",
-    "removeEpisodesWithIds",
-    "getBookmarkedEpisodesByAnimeId",
+///
+/// `getScanlatorsByMangaIdAsFlow`: `ChapterRepo` has `scanlators` but no `subscribe_scanlators` yet; it belongs in
+/// `kuro-data/src/chapter.rs` next to `subscribe_by_manga_id` (a `db.subscribe` over `CHAPTER_TABLES` with
+/// `get_scanlators_by_manga_id`).
+pub const KNOWN_GAPS: &[&str] = &["getScanlatorsByMangaIdAsFlow"];
+
+/// The signature differences between a Kotlin repository method and its Rust twin, by kind (T-07a-033).
+pub const SIGNATURE_DIFFERENCES: &[(&str, &str)] = &[
+    ("suspend fun xxxAsFlow(..): Flow<T>", "subscribe_xxx(..) -> Subscription<T> (re-run on a table change, debounced)"),
+    ("suspend fun xxx(..): T", "xxx(..) -> DataResult<T>, synchronous on the reader or writer connection"),
+    ("suspend fun update(..)", "update(..) -> DataResult<()>; the Boolean flag setters live in flag_setters.rs"),
+    ("addAll(list): List<T>?", "add_all(&[T]) -> DataResult<Vec<T>>, one transaction, ids in order (EC-07)"),
+    ("getChapterByMangaId(id, applyFilter = false)", "by_manga_id(id, apply_scanlator_filter) with the flag required"),
 ];
 
 #[cfg(test)]
@@ -135,12 +140,19 @@ mod tests {
         let _ = AnimeRepo::remove_parent_ids;
         let _ = AnimeRepo::deletable_parents;
         let _ = AnimeRepo::children_by_parent;
+        let _ = ChapterRepo::add_all;
+        let _ = ChapterRepo::remove_with_ids;
+        let _ = ChapterRepo::scanlators;
+        let _ = ChapterRepo::bookmarked;
         let _ = ChapterRepo::update;
         let _ = ChapterRepo::update_all;
         let _ = ChapterRepo::by_manga_id;
         let _ = ChapterRepo::by_id;
         let _ = ChapterRepo::subscribe_by_manga_id;
         let _ = ChapterRepo::by_url_and_manga_id;
+        let _ = EpisodeRepo::add_all;
+        let _ = EpisodeRepo::remove_with_ids;
+        let _ = EpisodeRepo::bookmarked;
         let _ = EpisodeRepo::update;
         let _ = EpisodeRepo::update_all;
         let _ = EpisodeRepo::by_anime_id;
@@ -170,5 +182,10 @@ mod tests {
         assert_eq!(gaps.len(), KNOWN_GAPS.len(), "a known gap was fixed: remove it from KNOWN_GAPS");
         assert!(MATRIX.iter().filter_map(|(_, r)| *r).all(|r| r.contains("Repo::")));
         compile_checked_references();
+    }
+
+    #[test]
+    fn the_signature_differences_are_listed() {
+        assert!(SIGNATURE_DIFFERENCES.len() >= 4);
     }
 }

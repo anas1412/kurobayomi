@@ -30,14 +30,6 @@ pub fn direction_override(chosen: LocaleInfo, system_rtl: bool) -> Option<bool> 
     (chosen.rtl != system_rtl).then_some(chosen.rtl)
 }
 
-/// The swipe-setting control side (T-51a-014, R4): in an RTL locale the "Chapter on swipe to
-/// right" control sits on the left. The label text is not mirrored. `true` means the control is
-/// at the end of the row in LTR and at the start in RTL; the app uses GTK's own direction for
-/// that, so this only reports which physical side is expected.
-pub fn swipe_control_on_left(chosen: LocaleInfo) -> bool {
-    chosen.rtl
-}
-
 /// Android locale directory name to BCP 47 tag, following `LocalesConfigTask` (`base` is English,
 /// `-r` and `+` separate the region). The legacy Indonesian directory `in` becomes `id`.
 pub fn android_dir_to_tag(dir: &str) -> String {
@@ -237,13 +229,6 @@ mod tests {
                 "{tag}"
             );
         }
-    }
-
-    #[test]
-    fn swipe_control_side_flips_in_rtl() {
-        // R4: the control is on the left in RTL only.
-        assert!(swipe_control_on_left(LocaleInfo::new("ar")));
-        assert!(!swipe_control_on_left(LocaleInfo::new("en")));
     }
 
     #[test]

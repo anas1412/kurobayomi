@@ -50,6 +50,8 @@ pub struct ImportReport {
     pub written: usize,
     pub kind_mismatch: usize,
     pub unknown_kept: usize,
+    /// Keys of dropped features (`registry::DROPPED_KEYS`): not written, not kept in `[extra]`.
+    pub dropped_skipped: usize,
     pub app_state_skipped: usize,
     pub private_skipped: usize,
     pub private_restored: usize,
@@ -87,7 +89,7 @@ fn remap(map: &BTreeMap<i64, i64>, old: i64) -> Option<i64> {
 ///
 /// Rules: app-state keys are skipped; private keys go to the secret store only when `include_private` is set
 /// (`creds` must be given for that); keys the registry knows are written only when the value kind matches the
-/// registry kind; unknown keys are kept, so they land in `[extra]`. Category-id keys are remapped through the
+/// registry kind; keys of dropped features are counted and ignored; unknown keys are kept, so they land in `[extra]`. Category-id keys are remapped through the
 /// manga or anime map. A set is unioned with the device set, and ids that do not map are dropped.
 pub fn import_preferences(
     store: &PrefStore,
@@ -100,6 +102,10 @@ pub fn import_preferences(
     let mut writes: Vec<(String, PrefValue)> = Vec::new();
     for (key, value) in entries {
         let key = crate::keys::restored_key(&key);
+        if registry::is_dropped(&key) {
+            report.dropped_skipped += 1;
+            continue;
+        }
         match Namespace::of(&key) {
             Namespace::AppState => report.app_state_skipped += 1,
             Namespace::Private => match creds {
@@ -204,6 +210,27 @@ mod tests {
         assert_eq!(store.get_raw("some_future_key"), Some(PrefValue::Long(7)));
         assert_eq!(store.get_raw("__APP_STATE_incognito_mode"), None);
         assert_eq!((report.unknown_kept, report.app_state_skipped), (1, 1));
+    }
+
+    #[test]
+    fn keys_of_dropped_features_are_ignored_not_kept() {
+        let store = PrefStore::in_memory();
+        let report = run(
+            &store,
+            vec![
+                ("tablet_ui_mode", PrefValue::Str("ALWAYS".into())),
+                ("secure_screen", PrefValue::Bool(true)),
+                ("secure_screen_v2", PrefValue::Str("ALWAYS".into())),
+                ("pref_chapter_swipe_end_action", PrefValue::Str("Download".into())),
+                ("kuro_pref_gesture_volume_brightness", PrefValue::Bool(true)),
+                ("show_nsfw_source", PrefValue::Bool(true)),
+            ],
+        );
+        assert_eq!((report.dropped_skipped, report.unknown_kept, report.written), (5, 0, 1));
+        for key in ["tablet_ui_mode", "secure_screen", "secure_screen_v2", "pref_chapter_swipe_end_action", "pref_gesture_volume_brightness"] {
+            assert_eq!(store.get_raw(key), None, "{key}");
+        }
+        assert_eq!(store.get_raw("show_nsfw_source"), Some(PrefValue::Bool(true)));
     }
 
     #[test]

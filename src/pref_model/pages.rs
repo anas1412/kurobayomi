@@ -62,24 +62,31 @@ fn with_storage_rows(built: Built) -> Built {
 fn anime_extension_stores() -> Option<Built> {
     let db = crate::data::app().anime_db.clone();
     let ops = Arc::new(StoreOps::new(ExtensionStoreRepo::new(db.clone()), BlockingHttp::shared()));
-    let (built, _page) = stores_page::build(ops, Texts::stores(), move |push| {
+    let (built, page) = stores_page::build(ops, Texts::stores(), move |push| {
         bind_watch(kuro_domain::extension_store::subscribe_all(&db), move |published| match published {
             Ok(stores) => push(stores.as_ref().clone()),
             Err(err) => tracing::warn!(%err, "the extension store list could not be read"),
         });
     });
+    // an `aniyomi://add-repo` link parked its address for this page (T-47b-017)
+    if let Some(url) = crate::shell::uri::take_repo_url() {
+        page.open_deep_link(&url);
+    }
     Some(built)
 }
 
 fn manga_extension_repos() -> Option<Built> {
     let repos = ExtensionRepoRepo::new(crate::data::app().manga_db.clone());
     let ops = Arc::new(RepoOps::new(repos.clone(), BlockingHttp::shared()));
-    let (built, _page) = stores_page::build(ops, Texts::repos(), move |push| {
+    let (built, page) = stores_page::build(ops, Texts::repos(), move |push| {
         bind_watch(repos.watch_all(), move |published| match published {
             Ok(list) => push(list.as_ref().clone()),
             Err(err) => tracing::warn!(%err, "the extension repo list could not be read"),
         });
     });
+    if let Some(url) = crate::shell::uri::take_repo_url() {
+        page.open_deep_link(&url);
+    }
     Some(built)
 }
 

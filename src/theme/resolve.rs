@@ -9,12 +9,11 @@ use super::baseline::fallback_for;
 use super::schemes::{SchemeDef, SCHEMES};
 use super::tokens::{Role, Rgba, Tokens, ROLE_COUNT};
 
-/// The `SCHEMES` name for an app theme. Monet has no static table yet, and the deprecated names
-/// never reach here, so both map to the Default scheme.
+/// The `SCHEMES` name for an app theme. The names with no static table (the deprecated ones and the dynamic
+/// `MONET`) never reach here and map to the Default scheme.
 fn scheme_name(app: AppTheme) -> &'static str {
     match app {
-        AppTheme::DEFAULT | AppTheme::MONET | AppTheme::DARK_BLUE | AppTheme::HOT_PINK
-        | AppTheme::BLUE => "Default",
+        AppTheme::DEFAULT => "Default",
         AppTheme::CLOUDFLARE => "Cloudflare",
         AppTheme::COTTONCANDY => "CottonCandy",
         AppTheme::DOOM => "Doom",
@@ -32,6 +31,7 @@ fn scheme_name(app: AppTheme) -> &'static str {
         AppTheme::YINYANG => "YinYang",
         AppTheme::YOTSUBA => "Yotsuba",
         AppTheme::MONOCHROME => "Monochrome",
+        _ => "Default",
     }
 }
 
@@ -235,7 +235,6 @@ mod tests {
         assert_eq!(scheme_for(AppTheme::HOT_PINK).name, default);
         assert_eq!(scheme_for(AppTheme::DARK_BLUE).name, default);
         assert_eq!(scheme_for(AppTheme::BLUE).name, default);
-        assert_eq!(scheme_for(AppTheme::MONET).name, default);
     }
 
     #[test]

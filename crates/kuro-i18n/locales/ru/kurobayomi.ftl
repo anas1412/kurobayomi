@@ -18,8 +18,6 @@ action_continue = Продолжить
 
 manga = Манга
 
-pref_library_summary = Категории, глобальное обновление, смахивание глав/эпизодов
-
 pref_behavior = Поведение главы
 
 action_add_repo_message = Добавьте дополнительные репозитории к { $arg1 }. Должно быть URL на окончании которого будет "index.min.json".
@@ -80,21 +78,9 @@ pref_player_settings_summary = Внутренний плеер, жесты, де
 
 pref_player_internal = Внутренний проигрыватель
 
-pref_player_internal_summary = Прогресс, управление, ориентация
-
 pref_progress_mark_as_seen = В какой момент пометить эпизод как просмотренный
 
 pref_preserve_watching_position = Сохранять положение времени на просмотренных эпизодах
-
-pref_category_player_orientation = Ориентация
-
-rotation_video = Видео
-
-rotation_reverse_landscape = Обратный альбомный режим
-
-rotation_sensor_portrait = Вертикальное изображение
-
-rotation_sensor_landscape = Горизонтальное изображение
 
 pref_category_controls = Управление
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = Показывать указатель �
 pref_controls_show_chapter_indicator_info = Появляется лишь при наличии эпизодов у видео
 
 pref_controls_display_volume_percentage = Показывать громкость в виде процентов
-
-pref_remember_brightness = Запомнить и переключиться на последнюю использованную яркость
 
 pref_remember_volume = Запомнить и переключиться на последнюю использованную громкость
 
@@ -179,12 +163,6 @@ pref_external_player_preference = Настройка внешнего проиг
 pref_player_gestures = Жесты
 
 pref_player_gestures_summary = Перемотка, двойное касание, элементы управления медиа
-
-pref_category_player_sliders = Ползунки
-
-enable_volume_brightness_gestures = Включить жесты управления громкостью и яркостью
-
-pref_controls_swap_vol_brightness = Поменять местами ползунки громкости и яркости
 
 pref_category_player_seeking = Перемотка
 
@@ -946,10 +924,6 @@ theme_mocha = Мокко
 
 pref_behavior_episode = Поведение серии
 
-pref_episode_swipe_end = Проведите пальцем вправо
-
-pref_episode_swipe_start = Для включения серии проведите пальцем влево
-
 pref_mark_duplicate_seen_episode_seen = Пометить дупликаты просмотренных серий как просмотренные
 
 pref_mark_duplicate_seen_episode_seen_existing = После просмотра серии
@@ -1376,10 +1350,6 @@ onboarding_permission_notifications = Разрешения для уведомл
 
 onboarding_permission_notifications_description = Получать уведомления об обновлениях библиотеки и т.д.
 
-onboarding_permission_ignore_battery_opts = Использование батареи в фоне
-
-onboarding_permission_ignore_battery_opts_description = Позволит избежать прерывания длительных обновлений библиотеки, загрузок и восстановлений резервных копий.
-
 onboarding_permission_crashlytics = Отправить журнал сбоев
 
 onboarding_permission_crashlytics_description = Отправить анонимно журнал сбоев разработчикам.
@@ -1422,10 +1392,6 @@ pref_browse_summary = Источники, расширения, глобальн
 
 pref_backup_summary = Ручные и автоматические резервные копий, хранилище
 
-pref_security_summary = Блокировка приложения, защита экрана
-
-pref_advanced_summary = Выгрузка журнала сбоев, оптимизация батареи
-
 pref_category_theme = Тема
 
 pref_app_theme = Тема приложения
@@ -1435,8 +1401,6 @@ theme_system = Система
 theme_light = Светлая
 
 theme_dark = Тёмная
-
-theme_monet = Динамическая
 
 theme_greenapple = Зелёное Яблоко
 
@@ -1487,10 +1451,6 @@ lock_always = Всегда
 lock_never = Никогда
 
 hide_notification_content = Скрыть содержимое уведомлений
-
-secure_screen = Защита экрана приложения
-
-secure_screen_summary = Защита экрана скрывает содержимое при переключении между приложениями, а также блокирует создание скриншотов
 
 firebase_summary = Отправляя журнал сбоев и аналитику, вы позволите нам обнаружить и исправить ошибки, улучшить производительность и сделать будущие обновления более актуальными для ваших потребностей
 
@@ -1566,10 +1526,6 @@ include = Включать: { $arg1 }
 
 exclude = Исключать: { $arg1 }
 
-pref_chapter_swipe_end = Глава при смахивании вправо
-
-pref_chapter_swipe_start = Глава при смахивании влево
-
 pref_mark_duplicate_read_chapter_read = Отмечать дублированную прочитанную главу как "Прочитано"
 
 pref_mark_duplicate_read_chapter_read_existing = После прочтения главы
@@ -1631,14 +1587,6 @@ ext_nsfw_warning = Источики из этого расширения мог�
 ext_permission_install_apps_warning = Нужны разрешения для установки расширений. Нажмите сюда, чтобы их предоставить.
 
 ext_install_service_notif = Установка расширения…
-
-ext_installer_pref = Установщик
-
-ext_installer_legacy = По умолчанию
-
-ext_installer_shizuku_stopped = Shizuku не работает
-
-ext_installer_shizuku_unavailable_dialog = Установите и запустите Shizuku, чтобы использовать его как установщик расширений.
 
 ext_revoke_trust = Убрать доверие к ненадёжным расширениям
 
@@ -1860,22 +1808,6 @@ double_tap_anim_speed_normal = Нормальная
 
 double_tap_anim_speed_fast = Быстрая
 
-pref_rotation_type = Ориентация по умолчанию
-
-rotation_type = Ориентация
-
-rotation_free = Системная
-
-rotation_portrait = Портретная
-
-rotation_reverse_portrait = Портретная наоборот
-
-rotation_landscape = Альбомная
-
-rotation_force_portrait = Заблокированная портретная
-
-rotation_force_landscape = Заблокированная альбомная
-
 color_filter_r_value = Красный
 
 color_filter_g_value = Зелёный
@@ -2092,8 +2024,6 @@ pref_refresh_library_covers = Обновить обложки серий
 
 pref_reset_viewer_flags = Сбросить настройки читалки для каждой серии
 
-pref_reset_viewer_flags_summary = Сбрасывает режим чтения и ориентацию для всех серий
-
 pref_reset_viewer_flags_success = Все настройки читалки сброшены
 
 pref_reset_viewer_flags_error = Не удалось сбросить настройки читалки
@@ -2101,20 +2031,6 @@ pref_reset_viewer_flags_error = Не удалось сбросить настр�
 pref_dump_crash_logs = Поделиться журналом сбоев
 
 pref_dump_crash_logs_summary = Сохраняет журнал сбоев в файл для отправки разработчикам
-
-label_background_activity = Фоновая активность
-
-pref_disable_battery_optimization = Отключить оптимизацию батареи
-
-pref_disable_battery_optimization_summary = Помогает с обновлением библиотеки и резервной копией в фоне
-
-battery_optimization_disabled = Оптимизация батареи уже выключена
-
-battery_optimization_setting_activity_not_found = Не удалось открыть настройки устройства
-
-about_dont_kill_my_app = У некоторых производителей есть дополнительные ограничения для приложений, которые убивают фоновые службы. На этом сайте есть более подробная информация о том, как это исправить.
-
-pref_tablet_ui_mode = Планшетный интерфейс
 
 pref_verbose_logging = Подробное ведение журнала
 

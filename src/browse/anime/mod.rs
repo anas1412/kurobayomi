@@ -16,11 +16,9 @@ pub mod migrate_dialog;
 pub mod migrate_engine;
 pub mod migrate_live;
 pub mod migrate_rules;
-pub mod migrate_seasons;
 pub mod prefs;
-pub mod source_filters;
 pub mod sources;
 pub mod sources_view;
 
 #[cfg(test)]
-mod fixtures;
+pub(crate) mod fixtures;

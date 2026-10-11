@@ -66,6 +66,7 @@ pub enum SnackAction {
     Delete,
     Add,
     Ok,
+    Retry,
 }
 
 impl SnackAction {
@@ -74,6 +75,7 @@ impl SnackAction {
             Self::Delete => tr(MsgKey::action_delete),
             Self::Add => tr(MsgKey::action_add),
             Self::Ok => tr(MsgKey::action_ok),
+            Self::Retry => tr(MsgKey::action_retry),
         }
     }
 }
@@ -107,6 +109,11 @@ pub fn present(message: UserMessage) -> Presentation {
         UserMessage::ConfirmTrackerUpdateAnime(_) => Presentation::Snack(snack(Some(SnackAction::Ok), true)),
         _ => Presentation::Snack(snack(None, false)),
     }
+}
+
+/// A failed refresh's snack: its text with Retry and a dismiss button.
+pub fn with_retry(message: UserMessage) -> Presentation {
+    Presentation::Snack(Snack { message, action: Some(SnackAction::Retry), dismiss: true, duration: SNACK_DURATION })
 }
 
 /// The host of the snackbar layer: one message at a time (E-UI-3). A new message replaces the one on screen and
@@ -192,6 +199,8 @@ mod tests {
         let Presentation::Snack(saved) = present(UserMessage::EpisodeSettingsUpdated) else { panic!("snack") };
         assert_eq!((saved.action, saved.dismiss), (None, false));
         assert_eq!(SnackAction::Ok.label(), "OK");
+        let Presentation::Snack(failed) = with_retry(UserMessage::Plain("HTTP error 503".into())) else { panic!("snack") };
+        assert_eq!((failed.action.map(SnackAction::label), failed.dismiss), (Some("Retry".to_owned()), true));
     }
 
     #[test]

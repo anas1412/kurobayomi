@@ -69,19 +69,6 @@ fn dto_from_meta(meta: &TorrentMeta) -> TorrentDto {
     }
 }
 
-/// Maps a server failure to the user-facing lookup failure. Timeout is a dead torrent, a refused connection means the
-/// server is not running, and every other failure keeps its own message (E-18).
-fn map_server_error(err: CoreError) -> TorrentError {
-    match err {
-        CoreError::ServerTimeout => TorrentError::Dead,
-        CoreError::ServerUnavailable => TorrentError::ServerNotRunning,
-        CoreError::ServerRejected(code) => TorrentError::Http(code),
-        CoreError::InvalidTorrent(msg) | CoreError::Bencode(msg) => TorrentError::Parse(msg),
-        CoreError::Http(msg) | CoreError::Failed(msg) => TorrentError::Transport(msg),
-        other => TorrentError::Transport(other.to_string()),
-    }
-}
-
 /// `addTorrent` for a magnet link. Only a timeout is a dead torrent; every other failure means the server is not
 /// usable, as the Kotlin `catch (_: Exception) { DisabledTorrServerException }` does (T-20a-070).
 async fn add_magnet(server: &TorrServerClient, url: &str, title: &str) -> Result<TorrentDto, TorrentError> {

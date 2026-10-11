@@ -7,18 +7,17 @@ use kuro_domain::dates::{ListRow, local_date};
 use kuro_i18n::date::DateFormat;
 use kuro_i18n::{MsgKey, tr, tr_plural};
 
+use crate::updates::format::{RelativeDate, relative_date};
+
 /// The text of a date header: Today, Yesterday and "N days ago" (days 2 to 6) while `relative` is on, otherwise the
 /// absolute date in the stored `pref` format.
 pub fn header_text(date: NaiveDate, today: NaiveDate, relative: bool, pref: &str, locale: &str) -> String {
-    let days = (today - date).num_days();
-    if relative {
-        match days {
-            0 => return tr(MsgKey::relative_time_today),
-            1..=6 => return tr_plural(MsgKey::relative_time, days, &[]),
-            _ => {}
-        }
+    // the thresholds are `format::relative_date`'s (T-42a-002); a date after today has no relative word in these lists
+    match relative_date(date, today, relative, "") {
+        RelativeDate::Today => tr(MsgKey::relative_time_today),
+        RelativeDate::Ago(days) => tr_plural(MsgKey::relative_time, days, &[]),
+        RelativeDate::InDays(_) | RelativeDate::Absolute(_) => DateFormat::from_pref(pref).format(date, locale),
     }
-    DateFormat::from_pref(pref).format(date, locale)
 }
 
 /// Groups `(item, epoch ms)` pairs, already in display order, under a header per local date. An item whose timestamp
@@ -50,6 +49,13 @@ mod tests {
         assert_eq!(header_text(d(9), d(9), true, "", "en"), "Today");
         assert_eq!(header_text(d(8), d(9), true, "", "en"), "Yesterday");
         assert_eq!(header_text(d(4), d(9), true, "", "en"), "5 days ago");
+    }
+
+    #[test]
+    fn dates_a_week_ago_or_a_later_date_is_absolute() {
+        assert_eq!(header_text(d(2), d(9), true, "yyyy-MM-dd", "en"), "2026-10-02", "7 days back is absolute");
+        assert_eq!(header_text(d(3), d(9), true, "yyyy-MM-dd", "en"), "6 days ago");
+        assert_eq!(header_text(d(10), d(9), true, "yyyy-MM-dd", "en"), "2026-10-10", "a date after today has no relative word here");
     }
 
     #[test]

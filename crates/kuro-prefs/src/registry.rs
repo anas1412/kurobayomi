@@ -226,7 +226,6 @@ define_prefs! {
     "pref_theme_dark_amoled_key", Normal, Bool, false, "ui", "theme_dark_amoled";
     "relative_time_v2", Normal, Bool, true, "ui", "relative_time";
     "app_date_format", Normal, Str, "", "ui", "date_format";
-    "tablet_ui_mode", Normal, Str, "AUTOMATIC", "ui", "tablet_ui_mode";
     "start_screen", Normal, Str, "ANIME", "ui", "start_screen";
     "bottom_rail_nav_style", Normal, Str, "MOVE_HISTORY_TO_MORE", "ui", "nav_style";
     "pref_display_mode_catalogue", Normal, Str, "COMPACT_GRID", "sources", "source_display_mode";
@@ -348,10 +347,6 @@ define_prefs! {
     "default_season_display_mode", Normal, Long, 0, "library", "season_display_mode";
     "pref_update_season_on_refresh", Normal, Bool, false, "library", "update_season_on_refresh";
     "pref_update_season_on_library_update", Normal, Bool, false, "library", "update_season_on_library_update";
-    "pref_episode_swipe_end_action", Normal, Str, "ToggleSeen", "library", "swipe_left_episode";
-    "pref_episode_swipe_start_action", Normal, Str, "ToggleBookmark", "library", "swipe_right_episode";
-    "pref_chapter_swipe_end_action", Normal, Str, "ToggleRead", "library", "swipe_left_chapter";
-    "pref_chapter_swipe_start_action", Normal, Str, "ToggleBookmark", "library", "swipe_right_chapter";
     "mark_duplicate_read_chapter_read", Normal, Set, &[], "library", "mark_duplicate_read_chapter_as_read";
     "mark_duplicate_seen_episode_seen", Normal, Set, &[], "library", "mark_duplicate_seen_episode_as_seen";
     "pref_download_only_over_wifi_key", Normal, Bool, true, "downloads", "download_only_over_wifi";
@@ -383,7 +378,6 @@ define_prefs! {
     "__APP_STATE_storage_dir", AppState, Str, "", "storage", "base_storage_directory";
     "use_biometric_lock", Normal, Bool, false, "security", "use_authenticator";
     "lock_app_after", Normal, Int, 0, "security", "lock_app_after";
-    "secure_screen_v2", Normal, Str, "INCOGNITO", "security", "secure_screen";
     "hide_notification_content", Normal, Bool, false, "security", "hide_notification_content";
     "__APP_STATE_last_app_closed", AppState, Long, 0, "security", "last_app_closed";
     "verbose_logging", Normal, Bool, false, "network", "verbose_logging";
@@ -403,11 +397,10 @@ define_prefs! {
     "pref_double_tap_anim_speed", Normal, Int, 500, "reader", "double_tap_anim_speed";
     "pref_show_page_number_key", Normal, Bool, true, "reader", "show_page_number";
     "pref_show_reading_mode", Normal, Bool, true, "reader", "show_reading_mode";
-    "fullscreen", Normal, Bool, true, "reader", "fullscreen";
+    "fullscreen", Normal, Bool, false, "reader", "fullscreen";
     "cutout_short", Normal, Bool, true, "reader", "cutout_short";
     "pref_keep_screen_on_key", Normal, Bool, true, "reader", "keep_screen_on";
     "pref_default_reading_mode_key", Normal, Int, 2, "reader", "default_reading_mode";
-    "pref_default_orientation_type_key", Normal, Int, 8, "reader", "default_orientation_type";
     "pref_enable_double_tap_zoom_webtoon", Normal, Bool, true, "reader", "webtoon_double_tap_zoom_enabled";
     "pref_image_scale_type_key", Normal, Int, 1, "reader", "image_scale_type";
     "pref_zoom_start_key", Normal, Int, 1, "reader", "zoom_start";
@@ -451,17 +444,14 @@ define_prefs! {
     "reader_navigation_overlay_on_start", Normal, Bool, false, "reader", "show_navigation_overlay_on_start";
     "pref_preserve_watching_position", Normal, Bool, false, "player", "preserve_watching_position";
     "pref_progress_preference", Normal, Float, 0.85f32, "player", "progress_preference";
-    "pref_default_player_orientation_type_key", Normal, Str, "SensorLandscape", "player", "default_player_orientation_type";
     "pref_allow_gestures_in_panels", Normal, Bool, false, "player", "allow_gestures";
     "pref_show_loading", Normal, Bool, true, "player", "show_loading_circle";
     "pref_show_current_chapter", Normal, Bool, true, "player", "show_current_chapter";
-    "pref_remember_brightness", Normal, Bool, false, "player", "remember_player_brightness";
-    "player_brightness_value", Normal, Float, -1.0f32, "player", "player_brightness_value";
     "pref_remember_volume", Normal, Bool, false, "player", "remember_player_volume";
     "player_volume_value", Normal, Float, -1.0f32, "player", "player_volume_value";
     "pref_show_failed_hosters", Normal, Bool, false, "player", "show_failed_hosters";
     "pref_show_empty_hosters", Normal, Bool, false, "player", "show_empty_hosters";
-    "player_fullscreen", Normal, Bool, true, "player", "player_fullscreen";
+    "player_fullscreen", Normal, Bool, false, "player", "player_fullscreen";
     "player_hide_controls", Normal, Bool, false, "player", "hide_controls";
     "pref_display_vol_as_per", Normal, Bool, true, "player", "display_vol_per";
     "pref_show_system_status_bar", Normal, Bool, false, "player", "show_system_status_bar";
@@ -485,8 +475,6 @@ define_prefs! {
     "invert_duration", Normal, Bool, false, "player", "invert_duration";
     "pref_player_aspect_state", Normal, Str, "Fit", "player", "aspect_state";
     "pref_auto_play_enabled", Normal, Bool, false, "player", "autoplay_enabled";
-    "pref_gesture_volume_brightness", Normal, Bool, true, "player.gestures", "gesture_volume_brightness";
-    "pref_swap_volume_and_brightness", Normal, Bool, false, "player.gestures", "swap_volume_brightness";
     "pref_gesture_horizontal_seek", Normal, Bool, true, "player.gestures", "gesture_horizontal_seek";
     "pref_show_seekbar", Normal, Bool, false, "player.gestures", "show_seek_bar";
     "pref_default_intro_length", Normal, Int, 85, "player.gestures", "default_intro_length";
@@ -544,6 +532,44 @@ define_prefs! {
     "muted_notification_channels", Normal, Set, &[], "base", "muted_notification_channels";
     "pref_remember_decoder", Normal, Bool, false, "player.decoder", "remember_decoder";
     "player_decoder", Normal, Str, "", "player.decoder", "remembered_decoder";
+    "player_open_detached", Normal, Bool, false, "player.window", "open_detached";
+}
+
+/// Keys of features this desktop app does not have. The registry holds no row for them, a restore skips them
+/// ([`is_dropped`]) and nothing reads them, so an old `config.toml` or an Aniyomi backup that still carries one loads
+/// and restores without it. Each key and its reason is recorded in `docs/drop-decisions.md`.
+///
+/// * the Android installer choice (T-19a-037), the four commented-out SY keys (T-17a-039) and the hardware bitmap
+///   threshold (T-13a-030);
+/// * `tablet_ui_mode`, the screen orientation of the reader and of the player, `secure_screen_v2` and its older
+///   spelling `secure_screen`: phone window features;
+/// * the four swipe actions of the chapter and episode rows: touch gestures;
+/// * the brightness and volume gestures of the player, and the remembered brightness that only they changed.
+pub const DROPPED_KEYS: [&str; 19] = [
+    "extension_installer",
+    "pref_hardware_bitmap_threshold",
+    "eh_enable_source_blacklist",
+    "sources_tab_categories",
+    "sources_tab_categories_filter",
+    "sources_tab_source_categories",
+    "tablet_ui_mode",
+    "pref_default_orientation_type_key",
+    "pref_default_player_orientation_type_key",
+    "secure_screen_v2",
+    "secure_screen",
+    "pref_episode_swipe_end_action",
+    "pref_episode_swipe_start_action",
+    "pref_chapter_swipe_end_action",
+    "pref_chapter_swipe_start_action",
+    "pref_gesture_volume_brightness",
+    "pref_swap_volume_and_brightness",
+    "pref_remember_brightness",
+    "player_brightness_value",
+];
+
+/// Whether `key` (as stored, without the backup prefix) belongs to a dropped feature.
+pub fn is_dropped(key: &str) -> bool {
+    DROPPED_KEYS.contains(&key)
 }
 
 #[cfg(test)]
@@ -557,17 +583,6 @@ mod tests {
     const SHARED_KEYS: [&str; 2] = [
         "default_chapter_display_by_name_or_number",
         "default_chapter_sort_by_ascending_or_descending",
-    ];
-
-    /// Plan rows that are not ported: the Android installer choice (T-19a-037), the four commented-out SY keys
-    /// (T-17a-039) and the hardware bitmap threshold (T-13a-030). The registry must not hold them.
-    const DROPPED_KEYS: [&str; 6] = [
-        "extension_installer",
-        "pref_hardware_bitmap_threshold",
-        "eh_enable_source_blacklist",
-        "sources_tab_categories",
-        "sources_tab_categories_filter",
-        "sources_tab_source_categories",
     ];
 
     /// Rows of the plan's registry tables as (key, store, kind, default).
@@ -654,13 +669,15 @@ mod tests {
         ("pref_torrserver_tackers", Lit::Str(TORRSERVER_TRACKERS)),
     ];
 
+    const DESKTOP_DEFAULTS: [&str; 2] = ["fullscreen", "player_fullscreen"];
+
     #[test]
-    fn registry_has_the_321_plan_rows_in_order() {
+    fn registry_has_the_309_plan_rows_in_order() {
         let rows = plan_rows();
-        assert_eq!(rows.len(), 321, "the plan's 328 rows minus the derived animeext_updates_count and the six dropped keys");
+        assert_eq!(rows.len(), 309, "the plan's 328 rows minus the derived animeext_updates_count and the 18 dropped keys");
         // five Kurobayomi rows after the plan's rows: `show_not_runnable` (T-19a-066), `anime_ext_last_check` (T-19a-064),
         // `check_app_updates` and `last_app_check` (T-07a-036), and `muted_notification_channels` (T-req-platform-004)
-        assert_eq!(REGISTRY.len(), rows.len() + 7);
+        assert_eq!(REGISTRY.len(), rows.len() + 8);
         assert_eq!(REGISTRY[rows.len()].key, "show_not_runnable");
         assert_eq!(REGISTRY[rows.len() + 1].key, "anime_ext_last_check");
         assert_eq!(REGISTRY[rows.len() + 2].key, "check_app_updates");
@@ -669,6 +686,8 @@ mod tests {
         // T-46b-043: the opt-in and the remembered decoder
         assert_eq!(REGISTRY[rows.len() + 5].key, "pref_remember_decoder");
         assert_eq!(REGISTRY[rows.len() + 6].key, "player_decoder");
+        // the player opens in its own window or in the main window, as it was left last time
+        assert_eq!(REGISTRY[rows.len() + 7].key, "player_open_detached");
         let mut pinned = 0;
         for (meta, (key, store, kind, default)) in REGISTRY.iter().zip(&rows) {
             assert_eq!(meta.key, key);
@@ -682,6 +701,9 @@ mod tests {
             assert_eq!(Namespace::of(meta.key), ns, "{key}");
             assert!(kind_matches(meta.kind, kind), "{key}: kind {kind}");
             match default_matches(meta.default, default) {
+                // Desktop decision (2026-10-11): the reader and the player do not take the whole screen by themselves, so
+                // these two defaults differ from the plan's Android rows (fullscreen is one click or F11 away).
+                Some(false) if DESKTOP_DEFAULTS.contains(&meta.key) => assert!(matches!(meta.default, Lit::Bool(false)), "{key}"),
                 Some(matches) => assert!(matches, "{key}: default {default} vs {:?}", meta.default),
                 None => {
                     let (_, want) = PROSE_DEFAULTS

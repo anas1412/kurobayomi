@@ -119,137 +119,12 @@ fn component_rules() -> String {
     )
 }
 
-/// A CSS rule with an undefined `@kuro_*` name, or unbalanced braces.
-#[derive(Debug, PartialEq, Eq)]
-pub enum CssError {
-    /// The selector that uses an undefined token, and the token name.
-    UndefinedToken { selector: String, token: String },
-    /// The braces do not balance.
-    UnbalancedBraces,
-}
-
-impl std::fmt::Display for CssError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CssError::UndefinedToken { selector, token } => {
-                write!(f, "rule `{selector}` uses undefined token `@{token}`")
-            }
-            CssError::UnbalancedBraces => write!(f, "unbalanced braces in generated CSS"),
-        }
-    }
-}
-
-/// Checks that every `@kuro_*` reference is defined, and that braces balance. It does not parse
-/// GTK CSS; `CssProvider` does that at runtime. Failures name the offending selector (F-49-02).
-pub fn check(css: &str) -> Result<(), CssError> {
-    let mut defined: Vec<&str> = Vec::new();
-    for line in css.lines() {
-        if let Some(name) = line
-            .strip_prefix("@define-color ")
-            .and_then(|rest| rest.split_whitespace().next())
-        {
-            defined.push(name);
-        }
-    }
-    let mut depth: i32 = 0;
-    for ch in css.chars() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth < 0 {
-                    return Err(CssError::UnbalancedBraces);
-                }
-            }
-            _ => {}
-        }
-    }
-    if depth != 0 {
-        return Err(CssError::UnbalancedBraces);
-    }
-    for block in css.split('}') {
-        let Some((selector, body)) = block.split_once('{') else {
-            continue;
-        };
-        let selector = selector.trim().lines().last().unwrap_or("").trim();
-        for token in tokens_in(body) {
-            if !defined.contains(&token) {
-                return Err(CssError::UndefinedToken {
-                    selector: selector.to_string(),
-                    token: token.to_string(),
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-/// The `kuro_*` names referenced as `@kuro_name` in a rule body.
-fn tokens_in(body: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut rest = body;
-    while let Some(pos) = rest.find("@kuro_") {
-        let after = &rest[pos + 1..];
-        let end = after
-            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-            .unwrap_or(after.len());
-        out.push(&after[..end]);
-        rest = &after[end..];
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::theme::resolve::{scheme_for, tokens_for};
     use crate::theme::schemes::SCHEMES;
     use kuro_prefs::ui::AppTheme;
-
-    #[test]
-    fn every_scheme_and_mode_passes_the_check() {
-        for scheme in SCHEMES.iter() {
-            for dark in [false, true] {
-                for amoled in [false, true] {
-                    let tokens = tokens_for(scheme, dark, amoled);
-                    for system in [false, true] {
-                        let css = render(&tokens, system);
-                        assert_eq!(check(&css), Ok(()), "{} dark={dark} system={system}", scheme.name);
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn all_nineteen_palettes_pass_with_the_default_mode() {
-        let mut count = 0;
-        for app in [
-            AppTheme::DEFAULT,
-            AppTheme::CLOUDFLARE,
-            AppTheme::COTTONCANDY,
-            AppTheme::DOOM,
-            AppTheme::GREEN_APPLE,
-            AppTheme::LAVENDER,
-            AppTheme::MATRIX,
-            AppTheme::MIDNIGHT_DUSK,
-            AppTheme::MOCHA,
-            AppTheme::SAPPHIRE,
-            AppTheme::NORD,
-            AppTheme::STRAWBERRY_DAIQUIRI,
-            AppTheme::TAKO,
-            AppTheme::TEALTURQUOISE,
-            AppTheme::TIDAL_WAVE,
-            AppTheme::YINYANG,
-            AppTheme::YOTSUBA,
-            AppTheme::MONOCHROME,
-        ] {
-            let css = render(&tokens_for(scheme_for(app), false, false), false);
-            assert_eq!(check(&css), Ok(()));
-            count += 1;
-        }
-        assert_eq!(count, 18);
-    }
 
     #[test]
     fn output_stays_under_twenty_kilobytes() {
@@ -275,24 +150,6 @@ mod tests {
         assert!(css.contains("@define-color accent_color @kuro_primary;"));
         assert!(css.contains("@define-color theme_selected_bg_color @kuro_primary;"));
         assert!(css.contains("window {"));
-    }
-
-    #[test]
-    fn check_names_the_selector_with_the_missing_token() {
-        let css = "@define-color kuro_a rgba(0, 0, 0, 1);\n.kuro-x { color: @kuro_b; }\n";
-        assert_eq!(
-            check(css),
-            Err(CssError::UndefinedToken {
-                selector: ".kuro-x".into(),
-                token: "kuro_b".into()
-            })
-        );
-    }
-
-    #[test]
-    fn check_rejects_unbalanced_braces() {
-        assert_eq!(check(".a { color: red;"), Err(CssError::UnbalancedBraces));
-        assert_eq!(check(".a { color: red; } }"), Err(CssError::UnbalancedBraces));
     }
 
     #[test]

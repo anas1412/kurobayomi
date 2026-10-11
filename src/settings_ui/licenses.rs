@@ -75,7 +75,7 @@ pub fn list_page() -> Option<Built> {
         let subtitle = Some(library.license.as_str()).filter(|l| !l.is_empty());
         let r = row(&library.name, subtitle, Some(gtk::Label::new(Some(&library.version)).upcast()));
         r.set_activatable(true);
-        r.connect_activate(move |_| push(&detail_page(&library)));
+        crate::widgets::row_activate::on_activate(&r, move |_| push(&detail_page(&library)));
         list.append(&r);
     }
     col.append(&list);

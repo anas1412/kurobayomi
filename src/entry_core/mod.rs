@@ -6,12 +6,11 @@
 //! `route`; they read those types and draw them.
 //!
 //! Decision records (Android-only parts dropped or replaced; the user loses no function unless a line says so):
-//! - T-38a-047: haptics dropped. The 1-second label reveal of the bulk bar (`route::bulk_button`) is the feedback.
 //! - T-38a-048: the assist content URL is dropped. The Share overflow item (`toolbar::Overflow::Share`) gives the same address.
 //! - T-38a-049: Voyager, the Compose runtime, Injekt, Coil, Android Intents and ContentResolver are replaced by page
 //!   structs, `ui::push` and `ui::pop`, constructor injection and the Rust equivalents of the rust design table (section 4).
-//! - T-38a-050: the pull-to-refresh gesture is not ported. Refresh is R or Ctrl+R (`shortcuts::header_key`), the overflow
-//!   Refresh item (`toolbar::Overflow::Refresh`) and the header spinner. The desktop has no pull gesture to keep.
+//! - T-38a-050: Refresh is R or Ctrl+R (`shortcuts::header_key`), the overflow Refresh item (`toolbar::Overflow::Refresh`)
+//!   and the header spinner.
 //! - T-38a-060: the Android reset-job bug (E-12) is not ported. Each long press starts a new generation, so an earlier
 //!   1-second timeout hides nothing.
 //! - T-38b-042: dropped: Voyager `StateScreenModel` and `rememberScreenModel` (the reducer, T-38b-039, replaces them),
@@ -19,19 +18,17 @@
 //!   `MangaTrack` (plain structs), and `Lifecycle` flows (widget map and unmap). No visible change; state survives a
 //!   restart only in the DB and preferences, as upstream.
 //! - T-39a-052: the ignorePadding layout trick is dropped. Rows take their own GTK margins instead.
-//! - T-39a-053: haptics and the preview composables are dropped; `AnimeEpisodeListItemPreview` is not ported.
+//! - T-39a-053: the preview composables are dropped; `AnimeEpisodeListItemPreview` is not ported.
 //! - T-39a-059: Compose item keys are dropped. The GTK list model's items (`glib::BoxedAnyObject` rows) replace them.
 //! - T-39a-064: the fast scroller is dropped. GTK overlay scrollbars are used.
 //! - T-39b-066: `AssistContentScreen` and `onProvideAssistUrl` are dropped. Loss: the Android assistant cannot read the
 //!   entry URL. Share, which copies the address (T-39b-051), replaces it.
-//! - T-39b-067: the haptic pulse on library add is dropped. Loss: a tactile pulse on phones. The button state is the feedback.
-//! - T-39b-068: swipe-to-dismiss on the track sheet and the Voyager `Screen` and `Navigator` are dropped. Sheets are pages on
+//! - T-39b-068: the Voyager `Screen` and `Navigator` are dropped. Sheets are pages on
 //!   the GTK stack: Escape and Back pop them (`escape_controller`), and the close button works too.
 //! - T-39b-069: `rememberScreenModel` retention is dropped. The entry model lives in the page object, so a window resize
 //!   keeps it.
 
 pub mod action_row;
-pub mod empty_state;
 pub mod action_row_view;
 pub mod fetch_interval;
 pub mod fetch_interval_dialog;
@@ -65,7 +62,6 @@ pub mod runner;
 pub mod scanlator_sheet;
 pub mod selection;
 pub mod store;
-pub mod swipe;
 pub mod text;
 pub mod toolbar;
 pub mod view;
@@ -78,9 +74,7 @@ pub mod cover_model;
 pub mod full_cover_view;
 pub mod shortcut_help_view;
 pub mod constants;
-pub mod cover_frame;
 pub mod list_row;
-pub mod list_row_view;
 pub mod shortcuts;
 
 /// Anime entry details (plan areas 39a and 39b): pure rules for the anime screen.

@@ -58,18 +58,19 @@ pub fn copy_text(sections: &[String; 3]) -> String {
 
 const TITLES: [&str; 3] = ["Enqueued", "Finished", "Running"];
 
-/// The page: a section title and a monospace text per section, refreshed every second while the page is alive.
+/// The page: per section a heading over a boxed list holding its monospace text (the settings page look), refreshed
+/// every second while the page is alive.
 pub fn page() -> Option<Built> {
-    let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    body.set_margin_start(16);
-    body.set_margin_end(16);
+    let body = crate::ui::column();
     let texts = TITLES.map(|title| {
-        let heading = gtk::Label::builder().label(title).xalign(0.0).css_classes(["title-4"]).build();
-        heading.set_margin_top(8);
-        heading.set_margin_bottom(8);
         let text = gtk::Label::builder().xalign(0.0).yalign(0.0).selectable(true).wrap(false).css_classes(["monospace"]).build();
-        body.append(&heading);
-        body.append(&text);
+        crate::ui::margins(&text, 12);
+        // the long lines scroll sideways inside their row, so the page keeps the clamped column
+        let sideways = gtk::ScrolledWindow::builder().child(&text).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).build();
+        let list = crate::ui::boxed_list();
+        list.append(&gtk::ListBoxRow::builder().child(&sideways).activatable(false).build());
+        body.append(&crate::ui::heading(title));
+        body.append(&list);
         text
     });
     let refresh = {
@@ -91,7 +92,6 @@ pub fn page() -> Option<Built> {
         }
         None => gtk::glib::ControlFlow::Break,
     });
-    let scroller = gtk::ScrolledWindow::builder().child(&body).vexpand(true).build();
     let tools = super::route::toolbar("settings_worker_info");
     for copy in tools.iter().filter_map(|w| w.downcast_ref::<gtk::Button>()) {
         let texts = texts.clone();
@@ -100,7 +100,7 @@ pub fn page() -> Option<Built> {
             copy_to_clipboard(&copy_text(&dumps));
         });
     }
-    built(scroller, tools)
+    built(crate::ui::scrolled(&body), tools)
 }
 
 #[cfg(test)]

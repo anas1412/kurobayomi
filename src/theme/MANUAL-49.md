@@ -7,5 +7,5 @@ Run before a release, on a Plasma 6 session unless noted. Source: `plans/49-them
 - [ ] MANUAL-49-03 Settings rows: keyboard operation (Tab, Space, arrows) works on every row variant.
 - [ ] MANUAL-49-04 Fast scroller: drag the thumb over a 5000-item list, nothing skips at either end.
 - [ ] MANUAL-49-05 Numeric chooser hold: repeat acceleration matches the schedule (750 ms down to 5 ms, decay 0.25) within 20 ms. Use a stopwatch or log timestamps.
-- [ ] MANUAL-49-06 Sheet: narrow window (phone width) and wide window (tablet width) take their own branches.
+- [ ] MANUAL-49-06 Sheet: narrow window and wide window take their own branches.
 - [ ] MANUAL-49-07 Player ripple colour: white in system dark, black in light (player screen, area 46).

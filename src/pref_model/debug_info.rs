@@ -102,7 +102,7 @@ pub fn tree() -> Vec<Preference> {
                         Some(text) => ItemCommon::new(title).with_subtitle(text),
                         None => ItemCommon::new(title),
                     };
-                    Some(PreferenceItem::Text { common, on_click: Some(on_click) })
+                    Some(PreferenceItem::Text { common: common.with_link(), on_click: Some(on_click) })
                 }
                 _ => None,
             })

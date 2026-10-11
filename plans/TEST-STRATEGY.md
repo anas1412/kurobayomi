@@ -30,7 +30,6 @@ Dev hooks that already exist in `src/main.rs` and are the starting point for UI 
 | `KUROBAYOMI_SHEET=<sheet id>` | With `KUROBAYOMI_OPEN`, shows the named sheet of that screen. | `src/main.rs:94-96` |
 | `KUROBAYOMI_SHOT=<file.png>` | Waits 1200 ms, renders the window to a PNG with `gtk::WidgetPaintable` and `render_texture`, then quits. | `src/main.rs:98-108` |
 | `KUROBAYOMI_SIZE=WxH` | Sets the default window size. Defaults in the parser are 1180 and 780. | `src/main.rs:89-91` |
-| `KUROBAYOMI_RAIL` | Starts with the sidebar in rail (collapsed) mode. | `src/main.rs:233-235` |
 | Non-unique flag | If any of `KUROBAYOMI_SMOKE`, `KUROBAYOMI_OPEN` or `KUROBAYOMI_SHOT` is set, the application runs with `ApplicationFlags::NON_UNIQUE`, so a dev run never hands off to an open window. | `src/main.rs:15-17` |
 
 Limits of the current hooks (OBSERVED): the smoke run has no assertions. It passes if the process does not crash, and it does not fail on GTK critical warnings. The screenshot hook has no reference image and no comparison.

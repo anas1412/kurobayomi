@@ -64,7 +64,7 @@ pub const CHECKLIST: [Check; 5] = [
     Check {
         id: "TC-53-42",
         steps: "Open and close the reader and the web view, with the desktop animation setting on and then off.",
-        expected: "With animations on the page slides for 300 ms; with them off it switches at once.",
+        expected: "With animations on the page slides for 250 ms; with them off it switches at once.",
         desktops: BOTH,
         result: Outcome::NotRun,
     },

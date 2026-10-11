@@ -1,6 +1,5 @@
 //! Copy to the clipboard with a confirmation toast (tasks T-47b-046 and T-47b-070). The message shows at most 50
 //! characters of the copied text, cut from the middle with `kuro_core` `truncate_center`; blank text is a no-op.
-#![allow(dead_code)] // no screen copies yet; the Debug and entry screens call this when they are routed here
 use gtk::prelude::*;
 use kuro_core::util::text::truncate_center;
 

@@ -41,7 +41,6 @@ use super::global_search::{Candidate, GlobalSearch};
 use super::installs::{Effect, Event, Input, Installs};
 use super::lang_pages::sources_filter_groups;
 use super::listing::{ListItem, ListedPage, Listing, LoadFuture, PageLoader};
-use super::migrate_nav::{AfterMigrate, after_migrate};
 use super::names::compare_languages;
 use super::pages::{SourceFilter, progress_visible};
 use super::primitives::{EmptyAction, ToastAction, ToastDuration, error_actions};
@@ -580,18 +579,6 @@ fn tc_40_111_toggling_a_language_saves_the_set_and_the_group_list_follows() {
     prefs.enabled_languages.set(now).expect("saved");
     assert_eq!(prefs.enabled_languages.get(), set(&["en", "ja"]), "the preference holds the new set");
     assert_eq!(languages(&prefs.enabled_languages.get()), set(&["en", "ja"]), "the group list follows the stored languages");
-}
-
-#[test]
-fn tc_40_114_a_migrate_from_a_per_source_search_goes_to_the_root_then_the_browse_tab_then_the_new_entry() {
-    // B§13.2: popUntilRoot, open the Browse tab, push the new entry; it does not depend on what is on top
-    assert_eq!(super::migrate_nav::after_source_search_migrate(), AfterMigrate::RootBrowseThenPush);
-}
-
-#[test]
-fn tc_40_115_a_migrate_from_global_search_pops_to_the_entry_page_below_or_replaces_the_search() {
-    assert_eq!(after_migrate(true), AfterMigrate::PopToLastThenPush, "an entry page on top: pop to it, push the new entry");
-    assert_eq!(after_migrate(false), AfterMigrate::Replace, "anything else: the new entry replaces the search page");
 }
 
 #[test]

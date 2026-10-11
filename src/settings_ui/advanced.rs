@@ -136,7 +136,7 @@ pub fn clear_webview_row() -> PreferenceItem {
     row
 }
 
-/// Clears every manga's reader viewer flags (reading mode and orientation) and says so in a toast.
+/// Clears every manga's reader viewer flags (the reading mode) and says so in a toast.
 pub fn reset_reader_settings() {
     let repo = MangaRepo::new(crate::data::app().db(EntryKind::Manga));
     if kuro_domain::entries::viewer_flags::reset_viewer_flags_manga(&repo) {
@@ -148,7 +148,7 @@ pub fn reset_reader_settings() {
 
 /// The "Reset per-series reader settings" row. The anime equivalent is not offered (Android parity).
 pub fn reset_reader_row() -> PreferenceItem {
-    let mut row = text("Reset per-series reader settings", Some("Resets reading mode and orientation of all series"), true);
+    let mut row = text("Reset per-series reader settings", Some("Resets reading mode of all series"), true);
     if let PreferenceItem::Text { on_click, .. } = &mut row {
         *on_click = Some(Rc::new(reset_reader_settings));
     }
@@ -186,8 +186,9 @@ pub fn page_rows(prefs: &Prefs, changed: Rc<dyn Fn()>) -> Vec<Preference> {
 pub fn onboarding_guide_row(prefs: &Prefs) -> PreferenceItem {
     let store = prefs.store().clone();
     let mut row = text("Onboarding guide", None, true);
-    if let PreferenceItem::Text { on_click, .. } = &mut row {
+    if let PreferenceItem::Text { common, on_click } = &mut row {
         *on_click = Some(Rc::new(move || open_onboarding(&store)));
+        common.link = true;
     }
     row
 }
@@ -640,7 +641,7 @@ mod tests {
     #[test]
     fn the_reader_reset_row_has_its_spec_subtitle() {
         let PreferenceItem::Text { common, on_click, .. } = reset_reader_row() else { panic!("text row") };
-        assert_eq!(common.subtitle.as_deref(), Some("Resets reading mode and orientation of all series"));
+        assert_eq!(common.subtitle.as_deref(), Some("Resets reading mode of all series"));
         assert!(on_click.is_some());
     }
 }

@@ -20,7 +20,8 @@ struct State {
     label: gtk::Label,
     button: gtk::Button,
     notifier: GioNotifier,
-    switches: Vec<glib::WeakRef<gtk::Switch>>,
+    /// The bound More-screen switches, each with the preference it shows.
+    switches: Vec<(glib::WeakRef<gtk::Switch>, Pref<bool>)>,
 }
 
 thread_local! {
@@ -61,18 +62,25 @@ pub fn attach(app: &gtk::Application, incognito: Pref<bool>, downloaded_only: Pr
     revealer.upcast()
 }
 
-/// Binds a More-screen switch to the preference: it shows the stored value and writes changes through [`set`].
-pub fn bind_switch(switch: &gtk::Switch) {
-    let Some(on) = STATE.with(|s| {
-        s.borrow_mut().as_mut().map(|st| {
-            st.switches.push(switch.downgrade());
-            st.incognito.get()
-        })
-    }) else {
-        return;
-    };
-    switch.set_active(on);
-    switch.connect_active_notify(|sw| set(sw.is_active()));
+/// Binds a More-screen switch (incognito mode or downloaded only) to `pref`: it shows the stored value, writes changes
+/// and refreshes the banner and the notification. It keeps working before [`attach`] (then nothing else is refreshed).
+pub fn bind_switch(switch: &gtk::Switch, pref: Pref<bool>) {
+    switch.set_active(pref.get());
+    STATE.with(|s| {
+        if let Some(st) = s.borrow_mut().as_mut() {
+            st.switches.push((switch.downgrade(), pref.clone()));
+        }
+    });
+    switch.connect_active_notify(move |sw| {
+        let on = sw.is_active();
+        if pref.get() == on {
+            return;
+        }
+        if let Err(e) = pref.set(on) {
+            tracing::warn!(error = %e, "could not save a More-screen switch");
+        }
+        refresh();
+    });
 }
 
 /// Stores `on` and updates the banner, the notification and every bound switch. No-op when unchanged.
@@ -97,9 +105,9 @@ fn refresh() {
     }
     st.revealer.set_reveal_child(banner.is_some());
     platform::sync_notification(on, &st.notifier);
-    for sw in st.switches.iter().filter_map(|w| w.upgrade()) {
-        if sw.is_active() != on {
-            sw.set_active(on);
+    for (sw, pref) in st.switches.iter().filter_map(|(w, p)| Some((w.upgrade()?, p))) {
+        if sw.is_active() != pref.get() {
+            sw.set_active(pref.get());
         }
     }
 }
@@ -107,6 +115,18 @@ fn refresh() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bound_switch_shows_and_writes_its_preference() {
+        crate::testing::with_display(|| {
+            let pref = Pref::new(kuro_prefs::store::PrefStore::in_memory(), "k", true);
+            let switch = gtk::Switch::new();
+            bind_switch(&switch, pref.clone());
+            assert!(switch.is_active(), "shows the stored value");
+            switch.set_active(false);
+            assert!(!pref.get(), "writes the change");
+        });
+    }
 
     #[test]
     fn the_incognito_banner_has_the_disable_button_and_the_others_do_not() {

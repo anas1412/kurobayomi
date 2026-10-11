@@ -7,7 +7,8 @@
 //! The other 41 steps of `Migrations.kt` are not registered. Each one rewrites a key of the Android shared
 //! preferences file, deletes an Android directory, cancels an Android job or logs a tracker out, and a Kurobayomi
 //! profile starts without any of that. Where the conversion still matters for an imported Aniyomi backup it lives in
-//! `kuro_prefs::legacy` (NORM); the rest is dropped (DROP). The disposition of every row, in run order
+//! `kuro_prefs::legacy` (NORM); the rest is dropped (DROP). A key of a removed desktop feature (`kuro_prefs::registry::DROPPED_KEYS`)
+//! is ignored by the import, so its steps are DROP too. The disposition of every row, in run order
 //! (`plans/11-app-migrations/p1-topic-migration-catalogue.md` section 1):
 //!
 //! ```text
@@ -20,15 +21,15 @@
 //!  9  MigrateToTriStateMigration               52   NORM  library filters become tri-state values
 //! 10  ForceMALLogOutMigration                  54   DROP  login state lives in the secret store only
 //! 11  DOHMigration                             57   NORM  the DNS-over-HTTPS flag becomes a provider number
-//! 12  ResetRotationMigration                   59   NORM  reader orientation value reset
-//! 13  MigrateRotationViewerValuesMigration     60   NORM  reader orientation values renumbered
+//! 12  ResetRotationMigration                   59   DROP  reader orientation removed; the key is ignored on import
+//! 13  MigrateRotationViewerValuesMigration     60   DROP  reader orientation removed; the key is ignored on import
 //! 14  RemoveOneTwoHourUpdateMigration          61   NORM  update interval of 1 or 2 hours becomes 3
 //! 15  SetupBackgroundTasksMigration            64   DROP  Android job tags; the scheduler owns the jobs
 //! 16  MigrateSortingModeMigration              64   NORM  library sort numbers become sort names
 //! 17  AddAllLangMigration                      70   NORM  the language set gains the all entry
 //! 18  RemoveQuickUpdateMigration               71   NORM  quick update intervals become 12 hours
 //! 19  CombineUpdateRestrictionMigration        72   NORM  the ongoing-only flag joins the restriction set
-//! 20  MigrateSecureScreenMigration             75   NORM  secure screen flag becomes a mode (MIUI installer DROP)
+//! 20  MigrateSecureScreenMigration             75   DROP  secure screen and the installer choice removed; the keys are ignored on import
 //! 21  RemoveReaderTapMigration                 77   NORM  reader tap flag becomes a navigation mode
 //! 22  RenameEnumMigration                      81   NORM  enum names renamed
 //! 23  MergeSortTypeDirectionMigration          82   NORM  sort type and direction merged into one string
@@ -50,7 +51,7 @@
 //! 39  LogOutMALMigration                      121   DROP  login state lives in the secret store only
 //! 40  EnumsMigration                          123   NORM  player enums stored by name
 //! 41  VideoPlayerPreferenceMigration          126   NORM  subtitle selection JSON split into three lists
-//! 42  VideoOrientationMigration               127   NORM  Android orientation numbers become player modes
+//! 42  VideoOrientationMigration               127   DROP  player orientation removed; the key is ignored on import
 //! 43  CategoryPreferencesCleanupMigration     129   PORT  `kuro_prefs::category::prune_dangling_category_ids`
 //! 44  PrefLangMigration                       130   NORM  language codes validated
 //! ```

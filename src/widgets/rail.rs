@@ -1,67 +1,50 @@
-//! Sidebar geometry, the NavigationRail equivalent (T-49b-017): the numbers and the label rule that
-//! `src/main.rs::sidebar` applies, and the window-width follower that drives the label rule.
+//! Sidebar geometry (T-49b-017): the numbers `src/main.rs::sidebar` applies. The sidebar always shows icon, label and
+//! badge, with the list at the top; there is no collapsed or icon-only state (docs/design/main-window.md).
 
-use std::cell::Cell;
-use std::rc::Rc;
-
-use gtk::prelude::*;
-
-use crate::theme::tokens::MEDIUM_WIDTH_WINDOW_SIZE;
-
-/// Minimum sidebar width in px.
-pub const MIN_WIDTH: i32 = 80;
-/// Vertical padding of the item column in px.
-pub const PAD_V: i32 = 4;
-/// Spacing between items in px.
+/// Sidebar width in px.
+pub const WIDTH: i32 = 200;
+/// Space above and below the item list in px.
+pub const PAD_V: i32 = 8;
+/// Gap between items in px.
 pub const ITEM_SPACING: i32 = 4;
-/// Gap after the header slot in px.
-pub const HEADER_GAP: i32 = 8;
-
-/// Labels show at a window width of 600 dp and above; below it only the icons remain.
-pub fn labels_visible(width_dp: f32) -> bool {
-    width_dp >= MEDIUM_WIDTH_WINDOW_SIZE
-}
-
-/// Calls `on_narrow` with `true` when the window of `widget` becomes narrower than 600 dp, and with
-/// `false` when it widens again. It fires only when that state flips.
-pub fn follow_width(widget: &impl IsA<gtk::Widget>, on_narrow: impl Fn(bool) + 'static) {
-    let on_narrow: Rc<dyn Fn(bool)> = Rc::new(on_narrow);
-    let hook = move |widget: &gtk::Widget| {
-        let Some(surface) = widget.native().and_then(|native| native.surface()) else { return };
-        let narrow = Rc::new(Cell::new(false));
-        let on_narrow = on_narrow.clone();
-        surface.connect_layout(move |_, width, _| {
-            let now = !labels_visible(width as f32);
-            if narrow.replace(now) != now {
-                on_narrow(now);
-            }
-        });
-    };
-    if widget.is_realized() {
-        hook(widget.upcast_ref());
-    } else {
-        let done = Cell::new(false);
-        widget.connect_realize(move |w| {
-            if !done.replace(true) {
-                hook(w.upcast_ref());
-            }
-        });
-    }
-}
+/// Padding inside one row in px.
+pub const ROW_PAD: i32 = 8;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gtk::prelude::*;
 
     #[test]
     fn geometry_constants() {
-        assert_eq!((MIN_WIDTH, PAD_V, ITEM_SPACING, HEADER_GAP), (80, 4, 4, 8));
+        assert_eq!((WIDTH, PAD_V, ITEM_SPACING, ROW_PAD), (200, 8, 4, 8));
+    }
+
+    fn descendants(root: &gtk::Widget, out: &mut Vec<gtk::Widget>) {
+        let mut child = root.first_child();
+        while let Some(w) = child {
+            descendants(&w, out);
+            child = w.next_sibling();
+            out.push(w);
+        }
     }
 
     #[test]
-    fn labels_hide_below_600_dp() {
-        assert!(!labels_visible(599.0));
-        assert!(labels_visible(600.0));
-        assert!(labels_visible(900.0));
+    fn the_sidebar_rows_always_show_their_labels_at_the_top() {
+        crate::testing::with_display(|| {
+            let sidebar = crate::sidebar(&gtk::Stack::new());
+            let mut all = vec![];
+            descendants(sidebar.upcast_ref(), &mut all);
+            let titles: Vec<String> = crate::ui::with_spec(|s| s.nav.iter().map(|n| n.title.clone()).collect());
+            assert!(!titles.is_empty());
+            for title in titles {
+                let label = all.iter().filter_map(|w| w.downcast_ref::<gtk::Label>()).find(|l| l.label() == title.as_str()).unwrap_or_else(|| panic!("a label for {title}"));
+                assert!(label.is_visible(), "{title} is visible");
+            }
+            let list = all.iter().find_map(|w| w.downcast_ref::<gtk::ListBox>().cloned()).expect("the nav list");
+            assert_eq!(list.valign(), gtk::Align::Start, "the nav list sits at the top");
+            assert!(all.iter().all(|w| !w.is::<gtk::ToggleButton>()), "no collapse toggle");
+            assert_eq!(sidebar.width_request(), WIDTH);
+        });
     }
 }

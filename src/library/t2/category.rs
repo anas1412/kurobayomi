@@ -46,7 +46,6 @@ fn t2_cat_04_common_and_mixed_categories() {
 }
 
 /// T2-CAT-08, a compile check: creating, renaming and deleting a category all fail with the one `DomainError`.
-#[allow(dead_code)]
 fn t2_cat_08_every_category_write_has_one_error_type(svc: &CategoryService) {
     fn same_error<A, B, C, E>(
         _: impl std::future::Future<Output = Result<A, E>>,

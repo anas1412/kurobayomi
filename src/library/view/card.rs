@@ -1,14 +1,15 @@
-//! One library cover card, built for the active display mode (T-37a-018 to T-37a-020). Thin: every number and
-//! string comes from `layout`, and the click handling lives in the view.
+//! One library card (docs/design/main-window.md): a 2:3 cover carrying worded badges, the title under it (on it in the
+//! compact grid, none in the cover-only grid), and the List mode row. What shows is decided by `layout::card_model`;
+//! this file only places widgets, and the click handling lives in the view.
 
 use gtk::prelude::*;
 use gtk::{Align, Orientation as O};
 use kuro_domain::library::columns::COLUMN_WIDTH_PX;
 use kuro_domain::library::page::LibraryItem;
+use kuro_images::art::ArtRef;
 use kuro_prefs::library::LibraryDisplayMode;
 
-use crate::library::layout;
-use crate::local_flow::cover::cover_widget;
+use crate::library::layout::{self, CardModel, CoverKind, TitlePlace, SPACE_XS, SPACE_S};
 
 /// The widgets of one card. `continue_button` is present when the card shows one.
 pub struct Card {
@@ -16,130 +17,178 @@ pub struct Card {
     pub continue_button: Option<gtk::Button>,
 }
 
-/// The cover of a card: a local entry with a stored thumbnail shows that image cropped, anything else the placeholder.
-/// The row decides it, not `item.is_local`, which also depends on the local badge switch.
-fn cover_of(item: &LibraryItem, thumbnail: Option<&str>, width: i32, height: i32) -> gtk::Widget {
-    match thumbnail.filter(|_| item.row.is_local()) {
-        Some(url) => cover_widget(Some(url), width, height).upcast(),
-        None => crate::ui::cover(width, height).upcast(),
+/// What a card needs besides the item: the cover art (any entry with a stored thumbnail), whether the entry is anime,
+/// and whether its unread count counts seasons (T-37a-048).
+pub struct Extras<'a> {
+    pub art: Option<&'a ArtRef>,
+    pub anime: bool,
+    pub season_parent: bool,
+}
+
+/// The cover: the stored image when it can be drawn, else the initials tile. Always `width` x `height`.
+fn cover(model: &CardModel, art: Option<&ArtRef>, width: i32, height: i32) -> gtk::Widget {
+    let remote_loader = crate::entry_core::cover_view::service().is_some();
+    match layout::cover_kind(art.and_then(|a| a.url.as_deref()), remote_loader) {
+        CoverKind::File(url) => crate::local_flow::cover::cover_widget(Some(&url), width, height).upcast(),
+        CoverKind::Remote(_) => {
+            let view = crate::entry_core::cover_view::CoverView::new(width, height);
+            if let Some(art) = art {
+                view.load(art.clone());
+            }
+            view.frame.upcast()
+        }
+        CoverKind::Initials => initials_tile(&model.initials, width, height),
     }
 }
 
-/// Builds the card of `item`. `selected` styles it as selected; `show_continue` adds the continue button; `thumbnail`
-/// is the stored cover of a local entry; `season_parent` words the unread badge as seasons (T-37a-048).
-pub fn build(
-    item: &LibraryItem,
-    mode: LibraryDisplayMode,
-    selected: bool,
-    show_continue: bool,
-    thumbnail: Option<&str>,
-    season_parent: bool,
-) -> Card {
-    let width = COLUMN_WIDTH_PX;
-    let cover = cover_of(item, thumbnail, width, layout::cover_height(width));
-    cover.add_css_class("library-cover");
-    if selected {
-        cover.set_opacity(0.76);
+/// The placeholder: the title's initials on a tile in the theme's selected colour.
+pub fn initials_tile(text: &str, width: i32, height: i32) -> gtk::Widget {
+    let label = gtk::Label::new(Some(text));
+    label.add_css_class("kb-cover-initials-text");
+    label.set_vexpand(true);
+    label.set_valign(Align::Center);
+    let tile = gtk::Box::new(O::Vertical, 0);
+    tile.add_css_class("kb-cover-initials");
+    tile.set_size_request(width, height);
+    tile.append(&label);
+    tile.upcast()
+}
+
+fn badge(text: &str, tooltip: Option<&str>, accent: bool) -> gtk::Label {
+    let label = gtk::Label::new(Some(text));
+    label.add_css_class("kb-badge");
+    if accent {
+        label.add_css_class("kb-badge-unread");
     }
+    label.set_tooltip_text(tooltip);
+    label
+}
+
+/// Unread and downloaded, top start.
+fn count_badges(model: &CardModel) -> gtk::Box {
+    let group = gtk::Box::new(O::Horizontal, SPACE_XS);
+    if let Some(text) = &model.unread {
+        group.append(&badge(text, model.unread_tooltip.or(Some("Not yet watched or read")), true));
+    }
+    if let Some(text) = &model.downloads {
+        group.append(&badge(text, Some("Downloaded"), false));
+    }
+    group
+}
+
+/// Local (icon and word) or the source language, top end.
+fn origin_badge(model: &CardModel) -> gtk::Box {
+    let group = gtk::Box::new(O::Horizontal, SPACE_XS);
+    if model.local {
+        group.add_css_class("kb-badge");
+        group.set_tooltip_text(Some("From a local folder"));
+        group.append(&gtk::Image::from_icon_name("folder-symbolic"));
+        group.append(&gtk::Label::new(Some(layout::LOCAL_BADGE)));
+    } else if let Some(text) = &model.language {
+        group.append(&badge(text, Some("Source language"), false));
+    }
+    group
+}
+
+fn continue_button(mode: LibraryDisplayMode) -> gtk::Button {
+    let size = layout::continue_size(mode);
+    let button = gtk::Button::from_icon_name("media-playback-start-symbolic");
+    button.set_css_classes(&["circular", "osd"]);
+    button.set_size_request(size, size);
+    button.set_tooltip_text(Some("Resume"));
+    button
+}
+
+fn title_label(text: &str, class: &str) -> gtk::Label {
+    let label = gtk::Label::new(Some(text));
+    label.add_css_class(class);
+    label.set_wrap(true);
+    label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    label.set_lines(2);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    label.set_xalign(0.0);
+    label
+}
+
+/// Builds the grid card of `item`. `selected` marks it; `show_continue` adds the continue button.
+pub fn build(item: &LibraryItem, mode: LibraryDisplayMode, selected: bool, show_continue: bool, extras: &Extras) -> Card {
+    let model = layout::card_model(item, mode, extras.anime, extras.season_parent);
+    let width = COLUMN_WIDTH_PX;
     let overlay = gtk::Overlay::new();
-    overlay.set_child(Some(&cover));
+    overlay.add_css_class("kb-card-cover");
+    overlay.set_overflow(gtk::Overflow::Hidden);
+    overlay.set_child(Some(&cover(&model, extras.art, width, layout::cover_height(width))));
 
-    let badges = badge_group(item, season_parent);
-    badges.set_halign(Align::Start);
-    badges.set_valign(Align::Start);
-    overlay.add_overlay(&badges);
-
-    let language = language_badge(item);
-    language.set_halign(Align::End);
-    language.set_valign(Align::Start);
-    overlay.add_overlay(&language);
-
+    let counts = count_badges(&model);
+    counts.set_halign(Align::Start);
+    counts.set_valign(Align::Start);
+    ui_inset(&counts);
+    overlay.add_overlay(&counts);
+    let origin = origin_badge(&model);
+    origin.set_halign(Align::End);
+    origin.set_valign(Align::Start);
+    ui_inset(&origin);
+    overlay.add_overlay(&origin);
+    if model.title_place == TitlePlace::OnCover {
+        let title = title_label(&model.title, "kb-card-title-scrim");
+        title.set_valign(Align::End);
+        overlay.add_overlay(&title);
+    }
     let continue_button = show_continue.then(|| {
-        let size = layout::continue_size(mode);
-        let button = gtk::Button::from_icon_name("media-playback-start-symbolic");
-        button.set_css_classes(&["circular", "osd"]);
-        button.set_size_request(size, size);
-        button.set_tooltip_text(Some("Resume"));
+        let button = continue_button(mode);
         button.set_halign(Align::End);
         button.set_valign(Align::End);
-        button.set_margin_end(6);
-        button.set_margin_bottom(6);
+        ui_inset(&button);
         overlay.add_overlay(&button);
         button
     });
 
-    let root = gtk::Box::new(O::Vertical, 4);
+    let root = gtk::Box::new(O::Vertical, SPACE_S);
     root.set_size_request(width, -1);
-    root.add_css_class("library-card");
+    root.set_halign(Align::Center);
+    root.add_css_class("kb-card");
     if selected {
-        root.add_css_class("selected");
+        root.add_css_class("kb-card-selected");
     }
     root.append(&overlay);
-
-    match mode {
-        LibraryDisplayMode::CompactGrid => {
-            if layout::shows_title_overlay(mode) {
-                let title = title_label(&item.row.title, 2, 8);
-                title.add_css_class("title-scrim");
-                title.set_valign(Align::End);
-                overlay.add_overlay(&title);
-            }
-        }
-        LibraryDisplayMode::ComfortableGrid => root.append(&title_label(&item.row.title, 2, 4)),
-        LibraryDisplayMode::CoverOnlyGrid | LibraryDisplayMode::List => {}
+    if model.title_place == TitlePlace::Below {
+        root.append(&title_label(&model.title, "kb-card-title"));
     }
     Card { root: root.upcast(), continue_button }
 }
 
-/// Builds the row of `item` for List mode (T-37a-021): a square cover, the title, the badges, then the continue
+/// Builds the List mode row of `item` (T-37a-021): a small 2:3 cover, the title, the badges, then the continue
 /// button. `row_height` comes from `layout::list_row_height`.
-pub fn build_list(
-    item: &LibraryItem,
-    selected: bool,
-    show_continue: bool,
-    row_height: f64,
-    thumbnail: Option<&str>,
-    season_parent: bool,
-) -> Card {
-    let height = row_height.round() as i32;
-    let edge = (height - 8).max(40);
-    let cover = cover_of(item, thumbnail, edge, edge);
-    cover.add_css_class("library-cover");
-    if selected {
-        cover.set_opacity(0.76);
-    }
-    let root = gtk::Box::new(O::Horizontal, 8);
-    root.set_size_request(-1, height);
-    root.set_margin_start(8);
-    root.set_margin_end(8);
-    root.add_css_class("library-card");
-    if selected {
-        root.add_css_class("selected");
-    }
-    root.append(&cover);
+pub fn build_list(item: &LibraryItem, selected: bool, show_continue: bool, row_height: f64, extras: &Extras) -> Card {
+    let model = layout::card_model(item, LibraryDisplayMode::List, extras.anime, extras.season_parent);
+    let height = (row_height.round() as i32 - 2 * SPACE_XS).max(40);
+    let overlay = gtk::Overlay::new();
+    overlay.add_css_class("kb-card-cover");
+    overlay.set_overflow(gtk::Overflow::Hidden);
+    overlay.set_valign(Align::Center);
+    overlay.set_child(Some(&cover(&model, extras.art, height * 2 / 3, height)));
 
-    let title = gtk::Label::new(Some(&item.row.title));
+    let root = gtk::Box::new(O::Horizontal, layout::SPACE_M);
+    root.set_size_request(-1, row_height.round() as i32);
+    root.set_margin_start(layout::SPACE_L);
+    root.set_margin_end(layout::SPACE_L);
+    root.add_css_class("kb-card");
+    if selected {
+        root.add_css_class("kb-card-selected");
+        // a selected row of the list view also takes the selected-row tint (T-49b-029)
+        root.add_css_class(crate::theme::style::class::SELECTED);
+    }
+    root.append(&overlay);
+    let title = title_label(&model.title, "kb-card-title");
     title.set_hexpand(true);
-    title.set_xalign(0.0);
     title.set_valign(Align::Center);
-    title.set_wrap(true);
-    title.set_lines(2);
-    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     root.append(&title);
-
-    let badges = badge_group(item, season_parent);
-    badges.set_valign(Align::Center);
-    root.append(&badges);
-    let language = language_badge(item);
-    language.set_valign(Align::Center);
-    root.append(&language);
-
+    for group in [count_badges(&model), origin_badge(&model)] {
+        group.set_valign(Align::Center);
+        root.append(&group);
+    }
     let continue_button = show_continue.then(|| {
-        let size = layout::continue_size(LibraryDisplayMode::List);
-        let button = gtk::Button::from_icon_name("media-playback-start-symbolic");
-        button.set_css_classes(&["circular", "osd"]);
-        button.set_size_request(size, size);
-        button.set_tooltip_text(Some("Resume"));
+        let button = continue_button(LibraryDisplayMode::List);
         button.set_valign(Align::Center);
         root.append(&button);
         button
@@ -147,55 +196,75 @@ pub fn build_list(
     Card { root: root.upcast(), continue_button }
 }
 
-fn title_label(text: &str, lines: i32, inset: i32) -> gtk::Label {
-    let label = gtk::Label::new(Some(text));
-    label.set_wrap(true);
-    label.set_lines(lines);
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    label.set_max_width_chars(14);
-    label.set_xalign(0.0);
-    label.set_margin_start(inset);
-    label.set_margin_end(inset);
-    label.set_margin_bottom(inset / 2);
-    label
+fn ui_inset(widget: &impl IsA<gtk::Widget>) {
+    crate::ui::margins(widget, SPACE_S - 2);
 }
 
-/// Download count and unread count, top start. Hidden when both are zero or not computed.
-fn badge_group(item: &LibraryItem, season_parent: bool) -> gtk::Box {
-    let group = gtk::Box::new(O::Horizontal, 2);
-    group.set_margin_start(4);
-    group.set_margin_top(4);
-    if let Some(text) = layout::count_badge(item.download_count) {
-        group.append(&badge(&text, "badge-download"));
-    }
-    if let Some(text) = layout::count_badge(item.unread_count) {
-        let unread = badge(&text, "badge-unread");
-        if let Some(tip) = layout::unread_badge_tooltip(season_parent) {
-            unread.set_tooltip_text(Some(tip));
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn labels(root: &gtk::Widget, out: &mut Vec<String>) {
+        let mut child = root.first_child();
+        while let Some(w) = child {
+            if let Some(l) = w.downcast_ref::<gtk::Label>() {
+                out.push(l.label().to_string());
+            }
+            labels(&w, out);
+            child = w.next_sibling();
         }
-        group.append(&unread);
     }
-    group
-}
 
-/// Local folder icon, or the source language, top end.
-fn language_badge(item: &LibraryItem) -> gtk::Box {
-    let group = gtk::Box::new(O::Horizontal, 2);
-    group.set_margin_end(4);
-    group.set_margin_top(4);
-    if item.is_local {
-        let icon = gtk::Image::from_icon_name("folder-symbolic");
-        icon.add_css_class("badge-language");
-        group.append(&icon);
-    } else if let Some(text) = layout::language_badge(&item.source_language) {
-        group.append(&badge(&text, "badge-language"));
+    fn local_anime() -> LibraryItem {
+        let row = kuro_domain::library::model::LibraryRow { title: "Core Concepts".into(), source: 0, ..crate::library::fixtures::row(1, 0) };
+        LibraryItem { row, download_count: 0, unread_count: 6, is_local: true, source_language: String::new() }
     }
-    group
-}
 
-fn badge(text: &str, class: &str) -> gtk::Label {
-    let label = gtk::Label::new(Some(text));
-    label.add_css_class("badge");
-    label.add_css_class(class);
-    label
+    #[test]
+    fn a_card_without_a_cover_shows_initials_worded_badges_and_the_title_below() {
+        crate::testing::with_display(|| {
+            let extras = Extras { art: None, anime: true, season_parent: false };
+            let card = build(&local_anime(), LibraryDisplayMode::ComfortableGrid, false, false, &extras);
+            let mut text = vec![];
+            labels(&card.root, &mut text);
+            assert_eq!(text, ["CC", "6", "Local", "Core Concepts"]);
+            assert!(card.continue_button.is_none());
+            let cover = card.root.first_child().expect("the cover");
+            assert!(cover.has_css_class("kb-card-cover"));
+            let tile = cover.first_child().expect("the tile");
+            assert!(tile.has_css_class("kb-cover-initials"));
+            assert_eq!(tile.size_request(), (COLUMN_WIDTH_PX, layout::cover_height(COLUMN_WIDTH_PX)), "2:3");
+            assert_eq!(cover.next_sibling().and_downcast::<gtk::Label>().map(|l| l.label().to_string()).as_deref(), Some("Core Concepts"), "the title sits under the cover");
+        });
+    }
+
+    #[test]
+    fn t_49b_029_a_selected_list_row_takes_the_selected_tint_and_an_unselected_one_none() {
+        crate::testing::with_display(|| {
+            let extras = Extras { art: None, anime: true, season_parent: false };
+            let selected = build_list(&local_anime(), true, false, 76.0, &extras);
+            assert!(selected.root.has_css_class("kb-selected") && selected.root.has_css_class("kb-card-selected"));
+            let plain = build_list(&local_anime(), false, false, 76.0, &extras);
+            assert!(!plain.root.has_css_class("kb-selected"));
+        });
+    }
+
+    #[test]
+    fn the_cover_only_grid_has_no_title_and_the_compact_grid_puts_it_on_the_cover() {
+        crate::testing::with_display(|| {
+            let extras = Extras { art: None, anime: false, season_parent: false };
+            let bare = build(&local_anime(), LibraryDisplayMode::CoverOnlyGrid, false, true, &extras);
+            let mut text = vec![];
+            labels(&bare.root, &mut text);
+            assert!(!text.iter().any(|t| t == "Core Concepts"));
+            assert!(bare.continue_button.is_some());
+            let compact = build(&local_anime(), LibraryDisplayMode::CompactGrid, true, false, &extras);
+            assert!(compact.root.has_css_class("kb-card-selected"));
+            assert!(compact.root.first_child().and_then(|c| c.next_sibling()).is_none(), "nothing under the cover");
+            let mut text = vec![];
+            labels(&compact.root, &mut text);
+            assert!(text.iter().any(|t| t == "Core Concepts"));
+            assert!(text.iter().any(|t| t == "6"), "manga words");
+        });
+    }
 }

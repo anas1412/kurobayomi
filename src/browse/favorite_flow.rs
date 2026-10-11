@@ -54,6 +54,7 @@ fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static, then: 
 }
 
 impl FavoriteFlow {
+    #[cfg(test)]
     pub fn new(store: Arc<dyn FavoriteStore>, anchor: &impl IsA<gtk::Widget>, hooks: FavoriteHooks) -> Rc<Self> {
         Self::new_for(store, anchor, hooks, false)
     }
@@ -63,6 +64,7 @@ impl FavoriteFlow {
         Rc::new(Self { store, dialogs: DialogSlot::new(), hooks, anchor: anchor.upcast_ref::<gtk::Widget>().downgrade(), presses: Cell::new(0), anime })
     }
 
+    #[cfg(test)]
     /// The dialog on screen, if any.
     pub fn dialog(&self) -> Option<gtk::Window> {
         self.dialogs.current()

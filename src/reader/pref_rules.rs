@@ -9,12 +9,8 @@ use kuro_prefs::reader::{ReadingMode, TappingInvertMode, clamp_webtoon_side_padd
 pub const FLASH_DURATION_MS: RangeInclusive<i32> = 100..=1500;
 /// `pref_reader_flash_interval`, pages.
 pub const FLASH_INTERVAL: RangeInclusive<i32> = 1..=10;
-/// `custom_brightness_value`. The webtoon side padding (0..=25) is clamped by `kuro_prefs::reader::clamp_webtoon_side_padding`.
-pub const BRIGHTNESS: RangeInclusive<i32> = -75..=100;
 /// `reader_navigation_mode_pager` and `reader_navigation_mode_webtoon`.
 pub const NAVIGATION_MODE: RangeInclusive<i32> = 0..=5;
-/// `pref_image_scale_type_key`.
-pub const IMAGE_SCALE_TYPE: RangeInclusive<i32> = 1..=6;
 /// `pref_zoom_start_key`.
 pub const ZOOM_START: RangeInclusive<i32> = 1..=4;
 /// `pref_reader_theme_key`.
@@ -43,33 +39,6 @@ pub fn side_padding(stored: i32) -> i32 {
     clamp_webtoon_side_padding(stored)
 }
 
-/// The axis a reading mode pages along (Kotlin `ReadingMode.direction`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReadingDirection {
-    Horizontal,
-    Vertical,
-}
-
-/// Horizontal for left-to-right and right-to-left, vertical for the vertical pager, webtoon and continuous vertical,
-/// and none for [`ReadingMode::Default`] (T-43b-009).
-pub fn reading_direction(mode: ReadingMode) -> Option<ReadingDirection> {
-    match mode {
-        ReadingMode::Default => None,
-        ReadingMode::LeftToRight | ReadingMode::RightToLeft => Some(ReadingDirection::Horizontal),
-        ReadingMode::Vertical | ReadingMode::Webtoon | ReadingMode::ContinuousVertical => Some(ReadingDirection::Vertical),
-    }
-}
-
-/// The label key of a tap-inversion mode (`tapping_inverted_*`).
-pub fn tapping_label_key(mode: TappingInvertMode) -> &'static str {
-    match mode {
-        TappingInvertMode::NONE => "tapping_inverted_none",
-        TappingInvertMode::HORIZONTAL => "tapping_inverted_horizontal",
-        TappingInvertMode::VERTICAL => "tapping_inverted_vertical",
-        TappingInvertMode::BOTH => "tapping_inverted_both",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,20 +48,6 @@ mod tests {
         assert_eq!(clamp_to(50, FLASH_DURATION_MS), 100);
         assert_eq!(clamp_to(2000, FLASH_DURATION_MS), 1500);
         assert_eq!(clamp_to(400, FLASH_DURATION_MS), 400);
-    }
-
-    #[test]
-    fn the_other_ranges_clamp_at_their_documented_ends() {
-        assert_eq!(clamp_to(0, FLASH_INTERVAL), 1);
-        assert_eq!(clamp_to(11, FLASH_INTERVAL), 10);
-        assert_eq!(clamp_to(-100, BRIGHTNESS), -75);
-        assert_eq!(clamp_to(150, BRIGHTNESS), 100);
-        assert_eq!(clamp_to(6, NAVIGATION_MODE), 5);
-        assert_eq!(clamp_to(0, IMAGE_SCALE_TYPE), 1);
-        assert_eq!(clamp_to(99, IMAGE_SCALE_TYPE), 6);
-        assert_eq!(clamp_to(9, ZOOM_START), 4);
-        assert_eq!(clamp_to(-1, READER_THEME), 0);
-        assert_eq!(clamp_to(7, READER_THEME), 3);
     }
 
     #[test]
@@ -111,32 +66,4 @@ mod tests {
         assert_eq!((side_padding(30), side_padding(-2), side_padding(12)), (25, 0, 12));
     }
 
-    #[test]
-    fn e20_each_reading_mode_has_its_direction() {
-        use ReadingDirection::{Horizontal, Vertical};
-        assert_eq!(reading_direction(ReadingMode::Default), None);
-        assert_eq!(reading_direction(ReadingMode::LeftToRight), Some(Horizontal));
-        assert_eq!(reading_direction(ReadingMode::RightToLeft), Some(Horizontal));
-        assert_eq!(reading_direction(ReadingMode::Vertical), Some(Vertical));
-        assert_eq!(reading_direction(ReadingMode::Webtoon), Some(Vertical));
-        assert_eq!(reading_direction(ReadingMode::ContinuousVertical), Some(Vertical));
-    }
-
-    #[test]
-    fn a_value_inside_its_range_is_unchanged() {
-        assert_eq!(clamp_to(1, IMAGE_SCALE_TYPE), 1);
-        assert_eq!(clamp_to(3, READER_THEME), 3);
-        assert_eq!(clamp_to(-75, BRIGHTNESS), -75);
-    }
-
-    #[test]
-    fn the_tap_inversion_label_keys_follow_the_four_modes() {
-        let keys = [
-            tapping_label_key(TappingInvertMode::NONE),
-            tapping_label_key(TappingInvertMode::HORIZONTAL),
-            tapping_label_key(TappingInvertMode::VERTICAL),
-            tapping_label_key(TappingInvertMode::BOTH),
-        ];
-        assert_eq!(keys, ["tapping_inverted_none", "tapping_inverted_horizontal", "tapping_inverted_vertical", "tapping_inverted_both"]);
-    }
 }

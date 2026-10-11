@@ -21,6 +21,7 @@ kuro-i18n = { path = "crates/kuro-i18n" }
 kuro-platform = { path = "crates/kuro-platform" }
 kuro-prefs = { path = "crates/kuro-prefs" }
 kuro-source = { path = "crates/kuro-source" }
+kuro-source-scrape = { path = "crates/kuro-source-scrape" }
 kuro-extensions = { path = "crates/kuro-extensions" }
 kuro-backup = { path = "crates/kuro-backup" }
 kuro-local = { path = "crates/kuro-local" }
@@ -29,7 +30,6 @@ kuro-player = { path = "crates/kuro-player" }
 kuro-track = { path = "crates/kuro-track" }
 kuro-net = { workspace = true }
 libc = "0.2.189"
-material-colors = "0.5.0"
 reqwest = { workspace = true, features = ["blocking"] }
 async-channel = { workspace = true }
 async-trait = { workspace = true }
@@ -42,9 +42,6 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 sha2 = { workspace = true }
 fancy-regex = "0.19.2"
-jiff = "0.2.37"
-icu_datetime = "2.3.0"
-icu_locale = { workspace = true }
 argon2 = "0.6.0"
 tracing = { workspace = true }
 toml_edit = { workspace = true }
@@ -55,7 +52,7 @@ kuro-testkit = { path = "crates/kuro-testkit" }
 proptest = "1.11.0"
 
 [workspace]
-members =["crates/kuro-core", "crates/kuro-i18n", "crates/kuro-platform", "crates/kuro-testkit", "crates/kuro-prefs", "crates/kuro-db", "crates/kuro-data", "crates/kuro-domain", "crates/kuro-source", "crates/kuro-source-http", "crates/kuro-net", "crates/kuro-extensions", "crates/kuro-player", "crates/kuro-source-wasm", "crates/kuro-downloads", "crates/kuro-images", "crates/kuro-local", "crates/kuro-archive", "crates/kuro-track", "crates/kuro-backup"]
+members =["crates/kuro-core", "crates/kuro-i18n", "crates/kuro-platform", "crates/kuro-testkit", "crates/kuro-prefs", "crates/kuro-db", "crates/kuro-data", "crates/kuro-domain", "crates/kuro-source", "crates/kuro-source-http", "crates/kuro-source-scrape", "crates/kuro-net", "crates/kuro-extensions", "crates/kuro-player", "crates/kuro-source-wasm", "crates/kuro-downloads", "crates/kuro-images", "crates/kuro-local", "crates/kuro-archive", "crates/kuro-track", "crates/kuro-backup"]
 resolver = "3"
 
 [workspace.package]
@@ -74,8 +71,6 @@ keyring = "4.2.0"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp", "avif-native"] }
 md-5 = "0.11.0"
 sha2 = "0.11.0"
-unicode-normalization = "0.1.25"
-unicode-segmentation = "1.13.3"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }

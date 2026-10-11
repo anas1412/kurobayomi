@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 kuro-i18n = { path = "../kuro-i18n" }
 kuro-platform = { path = "../kuro-platform" }
-serde = { workspace = true }
 toml_edit = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

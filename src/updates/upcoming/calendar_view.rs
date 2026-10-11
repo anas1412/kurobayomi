@@ -21,15 +21,14 @@ const TITLE_SLIDE_MS: u32 = 200;
 /// The smallest side of a day cell, in pixels.
 const CELL_SIZE: i32 = 40;
 
-/// The cell look: the ring of today is 1 px in the text colour, the dots are the accent colour, and the whole cell is
-/// a circle so its hover and ring follow the click area.
+/// The cell look: the ring of today is 1 px in the text colour, the dots are the theme's selected colour, and the whole
+/// cell is a circle so its hover and ring follow the click area. Plain GTK theme colours only.
 const CSS: &str = "
 .kuro-cal-day { border-radius: 9999px; border: 1px solid transparent; }
 .kuro-cal-day:hover { background-color: alpha(currentColor, 0.08); }
-.kuro-cal-day:focus-visible { outline: 2px solid @accent_color; outline-offset: -2px; }
+.kuro-cal-day:focus-visible { outline: 2px solid @theme_selected_bg_color; outline-offset: -2px; }
 .kuro-cal-today { border-color: currentColor; }
-.kuro-cal-dot { background-color: @accent_color; border-radius: 9999px; }
-.kuro-badge { background-color: @accent_bg_color; color: @accent_fg_color; border-radius: 9999px; padding: 0 6px; font-size: 0.85em; }
+.kuro-cal-dot { background-color: @theme_selected_bg_color; border-radius: 9999px; }
 ";
 
 thread_local! {
@@ -113,6 +112,7 @@ impl CalendarView {
         &self.root
     }
 
+    #[cfg(test)]
     /// The month on show.
     pub fn month(&self) -> (i32, u32) {
         self.month.get()

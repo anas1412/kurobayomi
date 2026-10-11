@@ -1,5 +1,5 @@
 //! The Upcoming page of one kind (T-42b-027 to T-42b-035, T-42b-038): the calendar and the list of entries with an
-//! update coming, under date headings with a count badge. On a content width of 720 px or more the calendar and the list
+//! update coming, a boxed list per day under its date heading with a worded count badge. On a content width of 720 px or more the calendar and the list
 //! sit in a resizable [`gtk::Paned`]; below that the calendar is the first row of the list. A click on a day scrolls the
 //! list to that day's heading. The page has no empty-state text and no toast (U§2.1, U§3).
 //!
@@ -14,14 +14,13 @@ use gtk::glib;
 #[cfg(test)]
 use gtk::glib::translate::IntoGlib;
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Button, Label, Orientation as O};
+use gtk::{Align, Box as GBox, Button, Label, ListBoxRow, Orientation as O};
 use kuro_domain::kind::EntryKind;
 use kuro_i18n::{MsgKey, tr};
 use kuro_images::art::{ArtKind, ArtRef, Owner};
 use kuro_prefs::ui::UiPrefs;
 
 use crate::data;
-use crate::entry_core::cover_view::CoverView;
 use crate::updates::download_host;
 use crate::updates::prefs::{home_returns_today, week_start};
 use crate::updates::upcoming::calendar::week_start_for;
@@ -81,8 +80,11 @@ pub struct UpcomingPage {
     root: GBox,
     paned: gtk::Paned,
     scroll: gtk::ScrolledWindow,
-    /// The list: the calendar row on a single column, then a heading and its rows per day.
+    /// The list: the calendar row on a single column, then a heading and its boxed list per day.
     content: GBox,
+    /// The widget of each list position of [`model::day_jump`]: the calendar row on a single column, then each
+    /// heading and each entry row in index order.
+    targets: RefCell<Vec<gtk::Widget>>,
     /// Holds the calendar, or the clamp that caps its width; it moves between the paned and the list.
     calendar_slot: GBox,
     calendar: Rc<CalendarView>,
@@ -102,8 +104,9 @@ impl UpcomingPage {
                 }
             });
             calendar.set_home_returns_today(env.home_today);
-            let content = GBox::new(O::Vertical, 0);
-            let scroll = gtk::ScrolledWindow::builder().child(&content).vexpand(true).hexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+            let content = crate::ui::column();
+            let scroll = crate::ui::scrolled(&content);
+            scroll.set_hexpand(true);
             let paned = gtk::Paned::builder()
                 .orientation(O::Horizontal)
                 .wide_handle(true)
@@ -122,6 +125,7 @@ impl UpcomingPage {
                 paned,
                 scroll,
                 content,
+                targets: RefCell::default(),
                 calendar_slot: GBox::new(O::Vertical, 0),
                 calendar,
                 env,
@@ -237,42 +241,53 @@ impl UpcomingPage {
         self.shape.get().is_some_and(|shape| shape.two_panels)
     }
 
-    /// Rebuilds the list: the calendar row first on a single column, then a heading per day with its rows.
+    /// Rebuilds the list: the calendar row first on a single column, then a heading and a boxed list per day.
     fn fill(self: &Rc<Self>) {
         while let Some(child) = self.content.first_child() {
             self.content.remove(&child);
         }
+        let mut targets = self.targets.borrow_mut();
+        targets.clear();
         if self.shape.get().is_none() {
             return;
         }
         if !self.two_panels() {
             self.content.append(&self.calendar_slot);
+            targets.push(self.calendar_slot.clone().upcast());
         }
         let loaded = self.loaded.borrow();
         let Some(loaded) = loaded.as_ref() else { return };
         let env = &self.env;
+        let mut list = crate::ui::boxed_list();
         for row in &loaded.up.index.rows {
             match row {
                 Row::Header { date, count } => {
-                    self.content.append(&heading(&rows::header_text(*date, loaded.day, env.relative, &env.date_pattern, env.locale), *count));
+                    let line = heading(&rows::header_text(*date, loaded.day, env.relative, &env.date_pattern, env.locale), *count);
+                    list = crate::ui::boxed_list();
+                    self.content.append(&line);
+                    self.content.append(&list);
+                    targets.push(line.upcast());
                 }
-                Row::Item(i) => self.content.append(&self.item(&loaded.up.entries[*i])),
+                Row::Item(i) => {
+                    let item = self.item(&loaded.up.entries[*i]);
+                    list.append(&item);
+                    targets.push(item.upcast());
+                }
             }
         }
     }
 
-    /// One entry: the book cover and the title (two lines at most); a click opens the entry by id.
-    fn item(&self, entry: &Entry) -> Button {
+    /// One entry row: the book cover (initials until an image draws) and the title (two lines at most); activating
+    /// the row (click, Enter or Space) opens the entry by id.
+    fn item(&self, entry: &Entry) -> ListBoxRow {
         let (cover_width, cover_height) = layout::cover_size();
-        let line = GBox::new(O::Horizontal, 16);
-        line.set_size_request(-1, layout::ROW_HEIGHT);
-        line.set_margin_start(16);
-        line.set_margin_end(16);
+        let line = GBox::new(O::Horizontal, 12);
+        line.set_size_request(-1, layout::ROW_HEIGHT - 2 * layout::ROW_PADDING);
+        line.set_margin_start(crate::ui::ROW_PAD_H);
+        line.set_margin_end(crate::ui::ROW_PAD_H);
         line.set_margin_top(layout::ROW_PADDING);
         line.set_margin_bottom(layout::ROW_PADDING);
-        let cover = CoverView::new(cover_width, cover_height);
-        cover.frame.set_valign(Align::Center);
-        cover.load(ArtRef {
+        let art = ArtRef {
             owner: if self.kind == EntryKind::Anime { Owner::Anime } else { Owner::Manga },
             entry_id: entry.id,
             source_id: entry.source_id,
@@ -280,8 +295,8 @@ impl UpcomingPage {
             url: entry.cover_url.clone(),
             favorite: true,
             last_modified: entry.cover_last_modified,
-        });
-        line.append(&cover.frame);
+        };
+        line.append(&crate::browse::look::row_cover(&entry.title, Some(&art), cover_width, cover_height));
         let title = Label::builder()
             .label(&entry.title)
             .xalign(0.0)
@@ -293,10 +308,10 @@ impl UpcomingPage {
             .css_classes(["heading"])
             .build();
         line.append(&title);
-        let button = Button::builder().child(&line).css_classes(["flat"]).build();
+        let row = ListBoxRow::builder().child(&line).build();
         let (open, id) = (Rc::clone(&self.env.open), entry.id);
-        button.connect_clicked(move |_| open(id));
-        button
+        crate::widgets::row_activate::on_activate(&row, move |_| open(id));
+        row
     }
 
     /// A click on a day: scrolls to its heading, one row further down on a single column where the calendar row comes
@@ -304,25 +319,22 @@ impl UpcomingPage {
     fn jump(&self, day: NaiveDate) {
         let target = self.loaded.borrow().as_ref().and_then(|loaded| model::day_jump(&loaded.up.index, day, !self.two_panels()));
         let Some(position) = target else { return };
-        let mut widget = self.content.first_child();
-        for _ in 0..position {
-            widget = widget.and_then(|w| w.next_sibling());
-        }
+        let widget = self.targets.borrow().get(position).cloned();
         if let Some(bounds) = widget.and_then(|w| w.compute_bounds(&self.content)) {
             self.scroll.vadjustment().set_value(f64::from(bounds.y()));
         }
     }
 }
 
-/// The heading of a day: its text and a badge with the number of entries.
+/// The heading of a day (`ui::heading`) and a badge that says how many entries it has.
 fn heading(text: &str, count: u32) -> GBox {
     let line = GBox::new(O::Horizontal, 8);
-    line.set_margin_start(16);
-    line.set_margin_end(16);
-    line.set_margin_top(8);
-    line.set_margin_bottom(4);
-    line.append(&Label::builder().label(text).xalign(0.0).css_classes(["heading", "dim-label"]).build());
-    line.append(&Label::builder().label(rows::badge_text(count)).valign(Align::Center).css_classes(["kuro-badge"]).build());
+    let label = crate::ui::heading(text);
+    // the margin goes on the line, so the badge sits level with the text
+    label.set_margin_top(0);
+    line.set_margin_top(12);
+    line.append(&label);
+    line.append(&crate::browse::look::badge(&rows::badge_text(count), false));
     line
 }
 
@@ -441,16 +453,20 @@ mod tests {
             let page = page(&Rc::default());
             page.apply_shape(SINGLE, 500);
             let rows = children(&page.content);
-            assert_eq!(rows.len(), 1 + 3 + 4, "the calendar row, 3 headings and 4 entries");
+            assert_eq!(rows.len(), 1 + 3 * 2, "the calendar row, then 3 headings each over its boxed list");
             assert_eq!(rows[0], page.calendar_slot.clone().upcast::<gtk::Widget>(), "the calendar is the first row");
             assert_eq!(page.calendar_slot.first_child().as_ref(), Some(page.calendar.widget().upcast_ref()), "no cap below 600 px");
             let heading = rows[1].first_child().and_downcast::<Label>().expect("the heading text");
             assert_eq!(heading.label(), "Today");
             let badge = rows[1].last_child().and_downcast::<Label>().expect("the badge");
-            assert_eq!(badge.label(), "2");
-            assert!(badge.has_css_class("kuro-badge"));
-            let row = rows[2].clone().downcast::<Button>().expect("an entry row is a button");
-            assert_eq!(row.child().expect("the row line").height_request(), 96, "rows are 96 px");
+            assert_eq!(badge.label(), "2 entries");
+            assert!(badge.has_css_class("kb-badge"));
+            let list = rows[2].clone().downcast::<gtk::ListBox>().expect("the day's entries are a list");
+            assert!(list.has_css_class("boxed-list"));
+            let row = list.row_at_index(0).expect("an entry row");
+            let line = row.child().expect("the row line");
+            assert_eq!(line.height_request() + 2 * layout::ROW_PADDING, 96, "rows are 96 px");
+            assert!(line.first_child().is_some_and(|c| c.has_css_class("kb-row-cover") && c.has_css_class("kb-cover-initials")), "no stored cover: the initials");
         });
     }
 
@@ -461,7 +477,7 @@ mod tests {
             page.apply_shape(SINGLE, 500);
             page.apply_shape(TWO, 800);
             assert_eq!(page.paned.start_child().as_ref(), Some(page.calendar_slot.upcast_ref()), "the calendar is the start panel");
-            assert_eq!(children(&page.content).len(), 3 + 4, "the list has no calendar row");
+            assert_eq!(children(&page.content).len(), 3 * 2, "the list has no calendar row");
             let cap = page.calendar_slot.first_child().expect("the capped calendar");
             assert_eq!(cap.type_().name(), "KurobayomiClamp", "the width is capped in the medium band");
             assert_eq!(cap.first_child().as_ref(), Some(page.calendar.widget().upcast_ref()));
@@ -469,21 +485,20 @@ mod tests {
             assert_eq!(page.calendar_slot.first_child().as_ref(), Some(page.calendar.widget().upcast_ref()), "uncapped above 840 px");
             page.apply_shape(SINGLE, 500);
             assert!(page.paned.start_child().is_none(), "back to one column empties the start panel");
-            assert_eq!(children(&page.content).len(), 1 + 3 + 4);
+            assert_eq!(children(&page.content).len(), 1 + 3 * 2);
         });
     }
 
     #[test]
-    fn upcoming_page_a_row_click_opens_the_entry_by_id() {
+    fn upcoming_page_a_row_click_or_key_opens_the_entry_by_id() {
         crate::testing::with_display(|| {
+            use crate::widgets::row_activate::{click_row, row_titled};
             let opened: Rc<RefCell<Vec<i64>>> = Rc::default();
             let page = page(&opened);
             page.apply_shape(TWO, 800);
-            let rows = children(&page.content);
-            // [heading, 1, 2, heading, 3, heading, 4]
-            rows[2].clone().downcast::<Button>().expect("a row button").emit_clicked();
-            rows[6].clone().downcast::<Button>().expect("a row button").emit_clicked();
-            assert_eq!(opened.borrow().as_slice(), [2, 4]);
+            click_row(&row_titled(&page.content, "Entry 2"));
+            row_titled(&page.content, "Entry 4").emit_by_name::<()>("activate", &[]);
+            assert_eq!(opened.borrow().as_slice(), [2, 4], "once per click and once per Enter or Space");
         });
     }
 
@@ -498,7 +513,7 @@ mod tests {
             page.jump(d(20));
             assert_eq!(adjustment.value(), 0.0, "a day with no heading does nothing");
             page.jump(d(15));
-            let heading = children(&page.content)[1 + 5].clone();
+            let heading = children(&page.content)[1 + 2 * 2].clone();
             let top = heading.compute_bounds(&page.content).expect("bounds").y();
             assert!(adjustment.value() > 0.0, "the list scrolled");
             assert!((adjustment.value() - f64::from(top).min(adjustment.upper() - adjustment.page_size())).abs() < 1.0, "to the heading of the 15th, one row down for the calendar");

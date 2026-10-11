@@ -266,10 +266,6 @@ lock_never = ಎಂದಿಗೂ ಇಲ್ಲ
 
 hide_notification_content = ಸೂಚನೆ ವಿಷಯವನ್ನು ಮರೆಮಾಡಿ
 
-secure_screen = ಸುರಕ್ಷಿತ ಪುಟ
-
-secure_screen_summary = ಅಪ್ಲಿಕೇಶನ್‌ಗಳನ್ನು ಬದಲಾಯಿಸುವಾಗ ಮತ್ತು ಸ್ಕ್ರೀನ್‌ಶಾಟ್‌ಗಳನ್ನು ನಿರ್ಬಂಧಿಸುವಾಗ ಅಪ್ಲಿಕೇಶನ್ ವಿಷಯಗಳನ್ನು ಮರೆಮಾಡಿ
-
 pref_category_nsfw_content = ವಯಸ್ಕ (18+) ಮೂಲಗಳು
 
 pref_show_nsfw_source = ಮೂಲಗಳ ಪಟ್ಟಿಯಲ್ಲಿ ತೋರಿಸಿ
@@ -506,20 +502,6 @@ double_tap_anim_speed_normal = ಸಾಮಾನ್ಯ
 
 double_tap_anim_speed_fast = ವೇಗವಾಗಿ
 
-pref_rotation_type = ಡೀಫಾಲ್ಟ್ ತಿರುಗುವಿಕೆ ಪ್ರಕಾರ
-
-rotation_type = ತಿರುಗುವಿಕೆಯ ಪ್ರಕಾರ
-
-rotation_free = ಉಚಿತ
-
-rotation_portrait = ಉದ್ದವಾದ ಪುಟ
-
-rotation_landscape = ಅಡ್ಡವಾದ ಪುಟ
-
-rotation_force_portrait = ಲಾಕ್ ಮಾಡಿದ ಉದ್ದಚಿತ್ರ
-
-rotation_force_landscape = ಲಾಕ್ ಮಾಡಿದ ಅಗಲಚಿತ್ರ
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -631,14 +613,6 @@ pref_refresh_library_covers = ಗ್ರಂಥಾಲಯದ ಮಾಂಗಾ ಕವ
 pref_dump_crash_logs = ಕ್ರ್ಯಾಶ್ ಲಾಗ್‌ಗಳನ್ನು ಡಂಪ್ ಮಾಡಿ
 
 pref_dump_crash_logs_summary = ಡೆವಲಪರ್‌ಗಳೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಲು ದೋಷದೆ ಲಾಗ್‌ಗಳನ್ನು ಫೈಲ್‌ಗೆ ಸೇರಿಸಿ
-
-pref_disable_battery_optimization = ಬ್ಯಾಟರಿ ಆಪ್ಟಿಮೈಸೇಶನ್ ಅನ್ನು ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಿ
-
-pref_disable_battery_optimization_summary = ಹಿನ್ನೆಲೆ ಗ್ರಂಥಾಲಯದ ನವೀಕರಣಗಳು ಮತ್ತು ಬ್ಯಾಕಪ್‌ಗಳೊಂದಿಗೆ ಸಹಾಯ ಮಾಡುತ್ತದೆ
-
-battery_optimization_disabled = ಬ್ಯಾಟರಿ ಆಪ್ಟಿಮೈಸೇಶನ್ ಅನ್ನು ಈಗಾಗಲೇ ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ
-
-battery_optimization_setting_activity_not_found = ಡಿವೈಸ್ ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ತೆರೆಯಲಾಗಲಿಲ್ಲ
 
 website = ವೆಬ್ಸೈಟ್
 

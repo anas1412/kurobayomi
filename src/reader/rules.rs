@@ -8,9 +8,6 @@ use std::time::Duration;
 
 use kuro_prefs::reader::FlashColor;
 
-/// The title budget of a saved page name in UTF-8 bytes, suffix included (`DiskUtil.MAX_FILE_NAME_BYTES`).
-pub const MAX_FILE_NAME_BYTES: usize = 250;
-
 /// The chapter to delete after reading `current`, `slots` positions back. `-1` is off, and so is every other
 /// negative value, so a negative number never deletes a chapter ahead (E-DEL-1). `0` is the current chapter itself
 /// (E-DEL-2). The caller asks only when the chapter was completed.
@@ -46,35 +43,6 @@ pub fn flash_phases(colour: FlashColor, duration: Duration) -> Vec<FlashPhase> {
         FlashColor::WHITE => vec![first(WHITE)],
         FlashColor::WHITE_BLACK => vec![first(WHITE), FlashPhase { start: duration / 2, rgb: BLACK }],
     }
-}
-
-/// The colour on screen `elapsed` into a flash, or `None` once it is over.
-pub fn flash_colour_at(colour: FlashColor, duration: Duration, elapsed: Duration) -> Option<(f64, f64, f64)> {
-    if elapsed >= duration {
-        return None;
-    }
-    flash_phases(colour, duration).into_iter().rev().find(|phase| elapsed >= phase.start).map(|phase| phase.rgb)
-}
-
-const FORBIDDEN: &str = "\"*/:<>?\\|";
-
-/// `DiskUtil.buildValidFilename` for the part of a name that is sanitised: dots and spaces trimmed at both ends,
-/// forbidden and control characters become `_`, and an empty result reads `(invalid)`.
-fn valid_filename(raw: &str) -> String {
-    let trimmed = raw.trim_matches(|c| c == '.' || c == ' ');
-    if trimmed.is_empty() {
-        return "(invalid)".to_owned();
-    }
-    trimmed.chars().map(|c| if c <= '\u{1f}' || c == '\u{7f}' || FORBIDDEN.contains(c) { '_' } else { c }).collect()
-}
-
-/// The name of a saved page: `<title> - <chapter>` cut to the byte budget left by the suffix, sanitised, then
-/// ` - <page number>` appended unsanitised (E-PATH-1). The cut keeps whole characters.
-pub fn save_filename(title: &str, chapter_name: &str, page_number: usize) -> String {
-    let suffix = format!(" - {page_number}");
-    let budget = MAX_FILE_NAME_BYTES.saturating_sub(suffix.len());
-    let head = format!("{title} - {chapter_name}");
-    format!("{}{suffix}", valid_filename(kuro_core::text::take_bytes(&head, budget)))
 }
 
 #[cfg(test)]
@@ -117,42 +85,6 @@ mod tests {
         let every: Vec<bool> = (0..4).scan(0, |c, _| { let (d, n) = flash_due(*c, 1); *c = n; Some(d) }).collect();
         assert_eq!(every, [true; 4], "interval 1 flashes every page");
         assert_eq!(flash_due(0, 0), (true, 0), "an interval below 1 counts as 1");
-    }
-
-    #[test]
-    fn flash_colour_white_black_halves() {
-        let duration = Duration::from_millis(100);
-        let at = |ms| flash_colour_at(FlashColor::WHITE_BLACK, duration, Duration::from_millis(ms));
-        assert_eq!(at(25), Some(WHITE));
-        assert_eq!(at(75), Some(BLACK));
-        assert_eq!(at(100), None, "the flash is over at the full duration");
-        let whole = |c, ms| flash_colour_at(c, duration, Duration::from_millis(ms));
-        assert_eq!(whole(FlashColor::WHITE, 75), Some(WHITE), "white keeps white for the whole duration");
-        assert_eq!(whole(FlashColor::BLACK, 75), Some(BLACK));
-    }
-
-    #[test]
-    fn filename_suffix_and_limit() {
-        assert_eq!(save_filename("Title", "Ch. 1", 7), "Title - Ch. 1 - 7");
-        assert_eq!(save_filename("A/B", "C:D", 12), "A_B - C_D - 12");
-        assert_eq!(valid_filename(" .. "), "(invalid)");
-        let long = save_filename(&"x".repeat(400), "chapter", 123);
-        assert!(long.len() <= MAX_FILE_NAME_BYTES, "the whole name, suffix included, fits the budget");
-        assert!(long.ends_with(" - 123"));
-    }
-
-    #[test]
-    fn take_bytes_utf8_boundary() {
-        // a 300-byte multi-byte title is cut without a broken character
-        let title = "漫".repeat(100);
-        assert_eq!(title.len(), 300);
-        let name = save_filename(&title, "c", 1);
-        assert!(name.len() <= MAX_FILE_NAME_BYTES);
-        assert!(!name.contains('\u{FFFD}'));
-        assert!(name.ends_with(" - 1"));
-        let head = name.strip_suffix(" - 1").unwrap();
-        assert!(head.chars().all(|c| c == '漫'), "only whole characters are kept");
-        assert_eq!(head.len() % 3, 0);
     }
 
     fn db() -> (tempfile::TempDir, Arc<Db>) {

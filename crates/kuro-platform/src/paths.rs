@@ -49,6 +49,10 @@ pub trait Paths {
     fn extensions_dir(&self) -> PathBuf {
         self.data_dir().join("extensions")
     }
+    /// Source recipes: one `<id>.toml` per declarative source (`docs/source-recipes.md`).
+    fn scrapers_dir(&self) -> PathBuf {
+        self.data_dir().join("scrapers")
+    }
     /// Installed anime extensions.
     fn anime_extensions_dir(&self) -> PathBuf {
         self.extensions_dir().join("anime")
@@ -221,6 +225,7 @@ mod role_tests {
         assert_eq!(p.share_staging_dir(), PathBuf::from("/k/shared_image"));
         assert_eq!(p.extensions_dir(), PathBuf::from("/d/extensions"));
         assert_eq!(p.anime_extensions_dir(), PathBuf::from("/d/extensions/anime"));
+        assert_eq!(p.scrapers_dir(), PathBuf::from("/d/scrapers"));
         assert_eq!(p.extension_icons_dir(), PathBuf::from("/k/extensions/icons"));
         assert_eq!(p.anime_extension_icons_dir(), PathBuf::from("/k/ext-icons"));
         assert_eq!(p.extension_download_dir(), PathBuf::from("/k/ext-download"));

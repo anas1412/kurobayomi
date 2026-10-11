@@ -18,8 +18,6 @@ action_continue = Tiếp tục
 
 manga = Manga
 
-pref_library_summary = Danh mục, cập nhật toàn bộ, vuốt chương
-
 pref_behavior = Biểu hiện chương
 
 action_add_repo_message = Thêm các repo vào { $arg1 }. Đây là nơi nhập các URL có kết thúc như "index.min.json".
@@ -59,16 +57,6 @@ clear_database_confirmation = Bạn có chắc không? Các chương/tập đã 
 pref_progress_mark_as_seen = Thời điểm tính để đánh dấu tập đã xem
 
 pref_preserve_watching_position = Lưu vị trí đang xem tại tập đã xem
-
-pref_category_player_orientation = Hướng
-
-rotation_reverse_landscape = Màn hình ngang (ngược)
-
-rotation_sensor_portrait = Cảm biến màn hình dọc
-
-rotation_sensor_landscape = Cảm biến màn hình ngang
-
-pref_remember_brightness = Lưu và sửa dụng độ sáng lưu gần nhất
 
 pref_remember_volume = Lưu và sử dụng âm lượng lưu gần nhất
 
@@ -113,8 +101,6 @@ pref_category_external_player = Trình phát ngoài
 pref_always_use_external_player = Luôn dùng trình phát ngoài
 
 pref_external_player_preference = Tuỳ chọn trình phát ngoài
-
-enable_volume_brightness_gestures = Bật cử chỉ Âm lượng và Độ sáng
 
 pref_category_player_seeking = Lướt tua
 
@@ -514,10 +500,6 @@ theme_cottoncandy = Cotton Candy
 
 theme_mocha = Mocha
 
-pref_episode_swipe_end = Hành động cho vuốt sang phải
-
-pref_episode_swipe_start = Hành động cho vuốt sang trái
-
 pref_category_hide_hidden = Ẩn danh mục ẩn khỏi danh mục và mục bộ nhớ
 
 pref_update_anime_release_grace_period = Thời gian ân hạn phát hành anime dự kiến
@@ -894,10 +876,6 @@ onboarding_permission_notifications = Quyền thông báo
 
 onboarding_permission_notifications_description = Gửi thông báo khi thư viện cấp nhật và nhiều hơn thế.
 
-onboarding_permission_ignore_battery_opts = Sử dụng pin nền
-
-onboarding_permission_ignore_battery_opts_description = Tránh gián đoạn quá trình cập nhật thư viện, tải xuống và khôi phục bản sao lưu trong thời gian dài.
-
 onboarding_permission_crashlytics = Gửi nhật ký sự cố (crash log)
 
 onboarding_permission_crashlytics_description = Gửi nhật ký sự cố ẩn danh tới nhà phát triển để giúp phát triển ứng dụng tốt hơn.
@@ -940,10 +918,6 @@ pref_browse_summary = Nguồn, tiện ích, tìm kiếm toàn bộ
 
 pref_backup_summary = Sao lưu thủ công & tự động
 
-pref_security_summary = Khoá ứng dụng, bảo vệ màn hình
-
-pref_advanced_summary = Tệp báo lỗi tạm, tối ưu hoá pin
-
 pref_category_theme = Chủ đề
 
 pref_app_theme = Chủ đề ứng dụng
@@ -953,8 +927,6 @@ theme_system = Hệ thống
 theme_light = Sáng
 
 theme_dark = Tối
-
-theme_monet = Chủ đề: Động
 
 theme_greenapple = Chủ đề: Táo Xanh
 
@@ -1003,10 +975,6 @@ lock_always = Luôn luôn
 lock_never = Không bao giờ
 
 hide_notification_content = Ẩn nội dung thông báo
-
-secure_screen = Bảo vệ màn hình
-
-secure_screen_summary = Bảo vệ màn hình sẽ ẩn nội dung khi chuyển đổi ứng dụng và chặn chụp màn hình
 
 firebase_summary = Gửi nhật ký sự cố và phân tích, giúp nhà phát triển xác định và khắc phục sự cố, cải thiện hiệu suất và thực hiện các bản cập nhật trong tương lai phù hợp hơn với nhu cầu của bạn
 
@@ -1082,10 +1050,6 @@ include = Bao gồm: { $arg1 }
 
 exclude = Loại trừ:{ $arg1 }
 
-pref_chapter_swipe_end = Thao tác vuốt sang phải
-
-pref_chapter_swipe_start = Thao tác vuốt sang trái
-
 multi_lang = Đa Ngôn Ngữ
 
 ext_updates_pending = Cập nhật đang chờ
@@ -1141,14 +1105,6 @@ ext_nsfw_warning = Nguồn truyền từ tiện ích mở rộng này có thể 
 ext_permission_install_apps_warning = Cần phải cấp phép để cài đặt tiện ích mở rộng. Bấm đây để cấp.
 
 ext_install_service_notif = Đang cài đặt tiện ích mở rộng…
-
-ext_installer_pref = Trình cài đặt
-
-ext_installer_legacy = Phần kế thừa
-
-ext_installer_shizuku_stopped = Shizuku đang không chạy
-
-ext_installer_shizuku_unavailable_dialog = Cài và chạy Shizuku để sử dụng Shizuku như một trình cài đặt tiện ích mở rộng.
 
 ext_revoke_trust = Thu hồi quyền truy cập của tiện ích không xác định
 
@@ -1368,22 +1324,6 @@ double_tap_anim_speed_normal = Bình thường
 
 double_tap_anim_speed_fast = Nhanh
 
-pref_rotation_type = Kiểu xoay mặc định
-
-rotation_type = Kiểu xoay
-
-rotation_free = Tự do
-
-rotation_portrait = Chế độ dọc
-
-rotation_reverse_portrait = Đảo ngược chân dung
-
-rotation_landscape = Chế độ nằm ngang
-
-rotation_force_portrait = Khoá theo chiều dọc
-
-rotation_force_landscape = Khoá theo chiều ngang
-
 color_filter_r_value = R
 
 color_filter_g_value = G
@@ -1594,8 +1534,6 @@ pref_refresh_library_covers = Làm mới ảnh bìa trong thư viện
 
 pref_reset_viewer_flags = Cài lại cài đặt đọc từng bộ truyện
 
-pref_reset_viewer_flags_summary = Cài lại chế độ đọc và điều hướng của tất cả các bộ truyện
-
 pref_reset_viewer_flags_success = Tất cả cài đặt đọc đã được cài lại
 
 pref_reset_viewer_flags_error = Không thể cài lại cài đặt đọc
@@ -1603,20 +1541,6 @@ pref_reset_viewer_flags_error = Không thể cài lại cài đặt đọc
 pref_dump_crash_logs = Chia sẻ tệp báo lỗi tạm
 
 pref_dump_crash_logs_summary = Lưu thông tin lỗi và gửi về nhà phát triển
-
-label_background_activity = Hoạt động nền
-
-pref_disable_battery_optimization = Tắt tối ưu pin
-
-pref_disable_battery_optimization_summary = Giúp cập nhật và sao lưu thư viện nền
-
-battery_optimization_disabled = Tối ưu pin đã được tắt
-
-battery_optimization_setting_activity_not_found = Không thể mở tuỳ chỉnh thiết bị
-
-about_dont_kill_my_app = Một vài nhà sản xuất có các hạn chế về việc chạy ngầm của ứng dụng có thể gây dừng hiện thị dịch vụ nền. Xem thêm ở địa chỉ này để sửa chữa chúng.
-
-pref_tablet_ui_mode = Giao diện máy tính bảng
 
 pref_verbose_logging = Đăng nhập tường tận
 

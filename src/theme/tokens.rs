@@ -22,6 +22,7 @@ impl Rgba {
         }
     }
 
+    #[cfg(test)]
     /// Parses `#RRGGBB` (opaque) or `#AARRGGBB`. Anything else is `None`.
     pub fn parse_hex(s: &str) -> Option<Self> {
         let digits = s.strip_prefix('#')?;
@@ -37,11 +38,13 @@ impl Rgba {
         }
     }
 
+    #[cfg(test)]
     /// The same colour with alpha `alpha` (0..1), rounded to the nearest 8-bit step (`0.22` gives 56).
     pub fn with_alpha(self, alpha: f32) -> Self {
         Rgba { a: (alpha.clamp(0.0, 1.0) * 255.0).round() as u8, ..self }
     }
 
+    #[cfg(test)]
     /// `self` composited over `dst` (source-over). Alpha 0 returns `dst`; alpha 255 returns `self`.
     pub fn over(self, dst: Rgba) -> Rgba {
         let (sa, da) = (f64::from(self.a) / 255.0, f64::from(dst.a) / 255.0);
@@ -247,61 +250,33 @@ impl Tokens {
 // --- Spacing, alpha, duration and radius (T-49a-051) ---
 
 pub const PAD_EXTRA_LARGE: f32 = 32.0;
-pub const PAD_LARGE: f32 = 24.0;
 pub const PAD_MEDIUM: f32 = 16.0;
 pub const PAD_MEDIUM_SMALL: f32 = 12.0;
 pub const PAD_SMALL: f32 = 8.0;
 pub const PAD_EXTRA_SMALL: f32 = 4.0;
 pub const DISABLED_ALPHA: f32 = 0.38;
-pub const SECONDARY_ALPHA: f32 = 0.78;
-pub const ICON_STATE_LAYER: f32 = 40.0;
 pub const RIPPLE_ALPHA: f32 = 0.10;
 pub const SHEET_MAX_WIDTH_LANDSCAPE: f32 = 600.0;
 pub const SHEET_MAX_WIDTH_PORTRAIT: f32 = 460.0;
 pub const SHEET_ANIM_MS: u32 = 350;
 pub const SHEET_POSITIONAL_THRESHOLD: f32 = 56.0;
 pub const SHEET_VELOCITY_THRESHOLD: f32 = 125.0;
-pub const THUMB_LENGTH: f32 = 48.0;
-pub const THUMB_THICKNESS: f32 = 12.0;
 pub const SCROLLBAR_FADE_MS: u32 = 250;
-pub const SCROLLBAR_FADE_DELAY_MS: u32 = 2000;
-pub const SCROLL_SAMPLE_MS: u32 = 100;
-pub const WHEEL_ROWS: u32 = 3;
-pub const WHEEL_SIZE: (f32, f32) = (128.0, 128.0);
 pub const REPEAT_MAX_MS: u64 = 750;
 pub const REPEAT_MIN_MS: u64 = 5;
 pub const REPEAT_DECAY: f64 = 0.25;
-pub const NUMERIC_MIN_WIDTH: f32 = 140.0;
 pub const DIALOG_MIN_WIDTH: f32 = 280.0;
 pub const DIALOG_MAX_WIDTH: f32 = 560.0;
 pub const DIALOG_PAD: f32 = 24.0;
-pub const FAB_COLLAPSED_WIDTH: f32 = 56.0;
-pub const FAB_EXPANDED_MIN_WIDTH: f32 = 80.0;
-pub const FAB_ICON_PAD: f32 = 12.0;
-pub const FAB_TEXT_PAD: f32 = 20.0;
 pub const PROGRESS_ROTATION_MS: u32 = 2000;
-pub const TWO_PANEL_FIRST_MAX: f32 = 450.0;
 pub const SETTINGS_PAD_H: f32 = 24.0;
 pub const SETTINGS_PAD_V: f32 = 10.0;
-pub const RADIUS_EXTRA_SMALL: f32 = 4.0;
 pub const RADIUS_SMALL: f32 = 8.0;
-pub const RADIUS_MEDIUM: f32 = 12.0;
-pub const RADIUS_LARGE: f32 = 16.0;
 pub const RADIUS_EXTRA_LARGE: f32 = 28.0;
 
 /// Window-size class breakpoints, dp (`WindowSize.kt`): medium from 600, expanded from 840.
 pub const MEDIUM_WIDTH_WINDOW_SIZE: f32 = 600.0;
 pub const EXPANDED_WIDTH_WINDOW_SIZE: f32 = 840.0;
-
-/// ExtendedFab timings, ms (`FloatingActionButton.kt:58-131`).
-pub const FAB_WIDTH_MS: u32 = 500;
-pub const FAB_START_PAD_EXPAND_MS: u32 = 300;
-pub const FAB_START_PAD_COLLAPSE_MS: u32 = 900;
-pub const FAB_EXPAND_FADE_MS: u32 = 200;
-pub const FAB_EXPAND_FADE_DELAY_MS: u32 = 100;
-pub const FAB_COLLAPSE_FADE_MS: u32 = 100;
-pub const FAB_EXPAND_SIZE_MS: u32 = 500;
-pub const FAB_COLLAPSE_SIZE_MS: u32 = 500;
 
 /// One text style: the CSS class it is emitted under, `font-size` in em, an optional weight
 /// (omitted means normal) and an optional `line-height` in px.
@@ -321,9 +296,6 @@ pub const TYPOGRAPHY: [TypeStyle; 6] = [
     TypeStyle { class: "kuro-headline-small", size_em: 1.5, weight: None, line_height_px: Some(32.0) },
     TypeStyle { class: "kuro-body-small", size_em: 0.75, weight: None, line_height_px: Some(16.0) },
 ];
-
-pub const EASE_EMPHASIZED: (f32, f32, f32, f32) = (0.2, 0.0, 0.0, 1.0);
-pub const EASE_LINEAR: (f32, f32, f32, f32) = (0.0, 0.0, 1.0, 1.0);
 
 #[cfg(test)]
 mod tests {
@@ -400,16 +372,6 @@ mod tests {
         assert_eq!(t.active(), Rgba::argb(0xFFFF_EB3B));
         t.dark = false;
         assert_eq!(t.active(), Rgba::argb(0xFFFF_C107));
-    }
-
-    #[test]
-    fn section_25_constants_have_their_values() {
-        assert_eq!((MEDIUM_WIDTH_WINDOW_SIZE, EXPANDED_WIDTH_WINDOW_SIZE), (600.0, 840.0));
-        assert_eq!(FAB_WIDTH_MS, 500);
-        assert_eq!((FAB_START_PAD_EXPAND_MS, FAB_START_PAD_COLLAPSE_MS), (300, 900));
-        assert_eq!((FAB_EXPAND_FADE_MS, FAB_EXPAND_FADE_DELAY_MS), (200, 100));
-        assert_eq!(FAB_COLLAPSE_FADE_MS, 100);
-        assert_eq!((FAB_EXPAND_SIZE_MS, FAB_COLLAPSE_SIZE_MS), (500, 500));
     }
 
     #[test]

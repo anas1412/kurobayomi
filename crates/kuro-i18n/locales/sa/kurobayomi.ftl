@@ -284,8 +284,6 @@ theme_light = अशक्तं कुरु
 
 theme_dark = सशक्तं कुरु
 
-theme_monet = गतिशीलम्
-
 theme_greenapple = हरितसेवम्
 
 theme_midnightdusk = निशीथसन्ध्या
@@ -317,10 +315,6 @@ lock_always = सदा
 lock_never = न कदापि
 
 hide_notification_content = आवेदनवस्तु वृणोतु
-
-secure_screen = पटलम् अभिरक्षतु
-
-secure_screen_summary = अभिरक्षणपटलम् अनुप्रयोगाणां परिवर्तने अनुप्रयोगवस्तु वृणोति पटलप्रतिकृतीनां च सृष्टिं निवारयति॥
 
 pref_category_nsfw_content = प्रौढानां कृते एव (१८+) वस्तुमूलानि
 
@@ -425,14 +419,6 @@ ext_nsfw_short = १८+
 ext_nsfw_warning = प्रौढानां कृते एव (१८+) वस्तु अन्तः स्यात्
 
 ext_install_service_notif = विस्तारं प्रतिष्ठापयति …
-
-ext_installer_pref = प्रतिष्ठापनसहायकम्
-
-ext_installer_legacy = क्रमगतम्
-
-ext_installer_shizuku_stopped = शिज़ुकुः न चलति
-
-ext_installer_shizuku_unavailable_dialog = शिजुकुं विस्तारप्रतिष्ठापनसहायकम् इव उपयोगं कर्तुं शिजुकुं प्रतिष्ठापयित्वा आरभताम्।
 
 pref_fullscreen = पूर्णपटलम्
 
@@ -586,22 +572,6 @@ double_tap_anim_speed_normal = साधारणम्
 
 double_tap_anim_speed_fast = शीघ्रम्
 
-pref_rotation_type = प्राथमिकभ्रमणप्रकारः
-
-rotation_type = भ्रमणप्रकारः
-
-rotation_free = मुक्तम्
-
-rotation_portrait = लम्बदर्शम्
-
-rotation_reverse_portrait = विपरीतं लम्बदर्शनम्
-
-rotation_landscape = अनुप्रस्थम्
-
-rotation_force_portrait = नियतलम्बदर्शम्
-
-rotation_force_landscape = नियतानुप्रस्थम्
-
 color_filter_r_value = आर्
 
 color_filter_g_value = जी
@@ -735,18 +705,6 @@ pref_refresh_library_covers = ग्रन्थालयमाङ्गाम�
 pref_dump_crash_logs = ध्वंसेतिवृत्तानि पातयतु
 
 pref_dump_crash_logs_summary = व्युत्पादकेभ्यः प्रसारयितुं दोषदत्तम् एकस्यां सञ्चिकायां रक्षति
-
-label_background_activity = पृष्ठभूमिकार्यक्रमम्
-
-pref_disable_battery_optimization = विद्युत्कोषवृद्धिकरणम् अशक्तं करोतु
-
-pref_disable_battery_optimization_summary = पृष्ठभूमौ ग्रन्थालयस्य नवीकरणेषु प्रतिलेखनेषु च साहाय्यं करोति
-
-battery_optimization_disabled = विद्युत्कोषवृद्धिकरणं पूर्वमेव अशक्तं कृतम्
-
-battery_optimization_setting_activity_not_found = साधनसमायोजनानि उद्घाटयितुं न अशक्नोम्
-
-pref_tablet_ui_mode = टाबलेट् यू॰ऐ
 
 pref_verbose_logging = अतिविस्तीर्णेतिवृत्तलेखनम्
 

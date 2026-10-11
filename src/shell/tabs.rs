@@ -111,11 +111,6 @@ impl HomeTabs {
         self.current
     }
 
-    #[allow(dead_code)]
-    pub fn default_tab(&self) -> Tab {
-        self.default
-    }
-
     pub fn more_tab(&self) -> Tab {
         self.more
     }
@@ -137,8 +132,8 @@ impl HomeTabs {
         true
     }
 
+    #[cfg(test)]
     /// The bar entries shown for `style`, in order.
-    #[allow(dead_code)]
     pub fn bar_tabs(style: NavStyle) -> Vec<Tab> {
         style.tabs()
     }

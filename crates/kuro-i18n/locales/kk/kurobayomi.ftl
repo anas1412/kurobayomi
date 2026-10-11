@@ -18,8 +18,6 @@ action_continue = Жалғастыру
 
 manga = Манга
 
-pref_library_summary = Санаттар, ауқымды жаңарту, бөлімдерді парақтау
-
 action_add_repo_message = { $arg1 } қолданбасына қосымша репозиторий қосыңыз. Ол "index.min.json" деп бітетін URL пішімінде болуы керек.
 
 download_ahead_info = Ағымдағы және келесі тарау/бөлім әлдеқашан жүктелген болса ғана.
@@ -78,21 +76,9 @@ pref_player_settings_summary = Қолданба ойнатқышы, ымдар, 
 
 pref_player_internal = Қолданба ойнатқышы
 
-pref_player_internal_summary = Прогресс, басқару батырмалары, бағдар
-
 pref_progress_mark_as_seen = Қай кезде бөлімді көрілген деп есептеу керек
 
 pref_preserve_watching_position = Көрілген бөлімдерде де тоқтаған кезді есте сақтау
-
-pref_category_player_orientation = Бағдар
-
-rotation_video = Бейне
-
-rotation_reverse_landscape = Кері ландшафт
-
-rotation_sensor_portrait = Сенсор портрет
-
-rotation_sensor_landscape = Сенсор ландшафт
 
 pref_category_controls = Басқару
 
@@ -418,10 +404,6 @@ pref_browse_summary = Дереккөздер, кеңейтулер, ауқымд
 
 pref_backup_summary = Қолмен және автоматты сақтық көшірмелері
 
-pref_security_summary = Қолданбаны бұғаттау, экранды қорғау
-
-pref_advanced_summary = Қателер тіркеуін түсіру, батареяны оңтайландыру
-
 pref_category_theme = Кейіп
 
 pref_app_theme = Қолданба кейпі
@@ -431,8 +413,6 @@ theme_system = Жүйе бойынша
 theme_light = Өшірулі
 
 theme_dark = Қосулы
-
-theme_monet = Динамикалық
 
 theme_greenapple = Жасыл Алма
 
@@ -471,10 +451,6 @@ lock_always = Әрдайым
 lock_never = Ешқашан
 
 hide_notification_content = Хабарландыру мазмұнын жасыру
-
-secure_screen = Қолданба экранын қорғау
-
-secure_screen_summary = Қауіпсіз экран қолданбаларды ауыстырған кезде қолданба мазмұнын жасырады және скриншот жасауды бұғаттайды
 
 pref_category_nsfw_content = NSFW (18+) дереккөздері
 
@@ -591,14 +567,6 @@ ext_nsfw_short = 18+
 ext_nsfw_warning = Бұл кеңейту дереккөзінде NSFW (18+) мазмұны болуы мүмкін
 
 ext_install_service_notif = Кеңейту орнатылуда…
-
-ext_installer_pref = Орнатушы
-
-ext_installer_legacy = Әдепкі қалпы
-
-ext_installer_shizuku_stopped = Shizuku қосылмаған
-
-ext_installer_shizuku_unavailable_dialog = Shizuku-ны кеңейту орнатушысы ретінде пайдалану үшін Shizuku-ны орнатып іске қосыңыз.
 
 pref_fullscreen = Толық экранды
 
@@ -759,22 +727,6 @@ double_tap_anim_speed_0 = Анимациясыз
 double_tap_anim_speed_normal = Қалыпты
 
 double_tap_anim_speed_fast = Жылдам
-
-pref_rotation_type = Әдепкі айналу түрі
-
-rotation_type = Айналу түрі
-
-rotation_free = Жүйелі
-
-rotation_portrait = Портрет
-
-rotation_reverse_portrait = Кері портрет
-
-rotation_landscape = Көлденең
-
-rotation_force_portrait = Құлыпталған портрет
-
-rotation_force_landscape = Құлыпталған көлденең
 
 color_filter_r_value = Қ
 
@@ -944,8 +896,6 @@ pref_refresh_library_covers = Туындылар мұқабасын жаңарт
 
 pref_reset_viewer_flags = Оқыма баптауын әрбір туынды үшін қалпына келтіру
 
-pref_reset_viewer_flags_summary = Барлық туындылар үшін оқу режимі мен бағдарын қалпына келтіреді
-
 pref_reset_viewer_flags_success = Оқыманың барлық баптауы қалпына келді
 
 pref_reset_viewer_flags_error = Оқыма баптауы қалпына келтірілмеді
@@ -953,20 +903,6 @@ pref_reset_viewer_flags_error = Оқыма баптауы қалпына кел�
 pref_dump_crash_logs = Қателер тіркеулерімен бөлісу
 
 pref_dump_crash_logs_summary = Қателіктер тіркеуін әзірлеушілерге жіберу үшін файлға сақтайды
-
-label_background_activity = Аялық белсенділік
-
-pref_disable_battery_optimization = Батареяның оңтайландыруын өшіру
-
-pref_disable_battery_optimization_summary = Аялық кітапхананың жаңартуымен және сақтық көшірмесіне көмектеседі
-
-battery_optimization_disabled = Баттареяның оңтайландыруы әлдеқашан өшірілу
-
-battery_optimization_setting_activity_not_found = Құрылғы баптауы ашылмады
-
-about_dont_kill_my_app = Кейбір өндірушілерде аялық қызметтерді өшіретін қолданбаларға қосымша шектеулер бар. Бұл сайтта оны қалай түзетуге болатыны туралы толығырақ ақпарат бар.
-
-pref_tablet_ui_mode = Планшетті интерфейс
 
 pref_verbose_logging = Тіркеуді жан-жақты жүргізу
 

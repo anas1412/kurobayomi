@@ -9,13 +9,11 @@ use kuro_data::chapter::{ChapterRepo, ChapterUpdate};
 use kuro_data::episode::{EpisodeRepo, EpisodeUpdate};
 use kuro_data::manga::MangaRepo;
 use kuro_db::handle::Db;
-use kuro_domain::app::items::{apply_filters, chapter_filters, episode_filters};
 use kuro_domain::app::status::{chapter_status_update, chapters_to_change, episode_status_update, episodes_to_change};
 use kuro_domain::category::bulk;
 use kuro_domain::category::service::CategoryService;
 use kuro_domain::error::DomainError;
 use kuro_domain::kind::EntryKind;
-use kuro_domain::library::active::continue_target;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::search::EmptyPage;
 
@@ -108,11 +106,6 @@ pub fn mark_items_by_url_changed(
             Ok(items)
         }
     }
-}
-
-/// As [`mark_items_by_url_changed`], returning only how many changed.
-pub fn mark_items_by_url(db: &Arc<Db>, kind: EntryKind, entry_id: i64, urls: &[String], read: bool) -> Result<usize, DomainError> {
-    Ok(mark_items_by_url_changed(db, kind, entry_id, urls, read)?.len())
 }
 
 /// The title and source id of an entry, for the download disk check. `None` when the entry is gone.
@@ -326,18 +319,17 @@ pub fn next_item(
     downloaded_only: bool,
     is_downloaded: impl Fn(i64) -> bool,
 ) -> Result<Option<i64>, DomainError> {
+    // the one next-unread rule, shared with the player's "resume next" (`crate::selection`)
     match kind {
         EntryKind::Manga => {
-            let filters = chapter_filters(&MangaRepo::new(db.clone()).by_id(row.id)?, downloaded_only)?;
+            let manga = MangaRepo::new(db.clone()).by_id(row.id)?;
             let list = ChapterRepo::new(db.clone()).by_manga_id(row.id, true)?;
-            let list = apply_filters(list, &filters, row.is_local(), |c| is_downloaded(c.id));
-            Ok(continue_target(&list, filters.descending, |c| !c.read).map(|c| c.id))
+            Ok(crate::selection::next_unread(&manga, &list, downloaded_only, |c| is_downloaded(c.id)).map(|c| c.id))
         }
         EntryKind::Anime => {
-            let filters = episode_filters(&AnimeRepo::new(db.clone()).by_id(row.id)?, downloaded_only)?;
+            let anime = AnimeRepo::new(db.clone()).by_id(row.id)?;
             let list = EpisodeRepo::new(db.clone()).by_anime_id(row.id)?;
-            let list = apply_filters(list, &filters, row.is_local(), |e| is_downloaded(e.id));
-            Ok(continue_target(&list, filters.descending, |e| !e.seen).map(|e| e.id))
+            Ok(crate::selection::next_unseen(&anime, &list, downloaded_only, |e| is_downloaded(e.id)).map(|e| e.id))
         }
     }
 }
@@ -554,30 +546,6 @@ mod tests {
         assert_eq!(mark_manga(&db, id, true).expect("mark read"), 2);
         assert_eq!(mark_manga(&db, id, true).expect("mark read again"), 0);
         assert_eq!(mark_manga(&db, id, false).expect("mark unread"), 3);
-    }
-
-    #[test]
-    fn mark_items_by_url_changes_only_the_named_chapters() {
-        let (_dir, db) = db();
-        let id = MangaRepo::new(db.clone())
-            .insert(&Manga { favorite: true, source: 7, url: "m".into(), title: "m".into(), ..Manga::create() })
-            .expect("insert");
-        db.write(|tx| {
-            for n in 1..=3 {
-                tx.execute(
-                    "INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload) \
-                     VALUES (?1, ?2, 'c', NULL, 0, 0, 0, ?3, ?3, 0, 0)",
-                    (id, format!("c{n}"), n as f64),
-                )?;
-            }
-            Ok(())
-        })
-        .expect("chapters");
-        let named = ["c2".to_owned(), "c3".to_owned(), "missing".to_owned()];
-        assert_eq!(mark_items_by_url(&db, EntryKind::Manga, id, &named, true).expect("mark"), 2);
-        assert_eq!(mark_items_by_url(&db, EntryKind::Manga, id, &named, true).expect("again"), 0);
-        let unread = ChapterRepo::new(db.clone()).by_manga_id(id, false).expect("read").into_iter().filter(|c| !c.read).count();
-        assert_eq!(unread, 1, "c1 stays unread");
     }
 
     fn notified_manga(db: &Arc<Db>) -> (i64, Vec<(String, i64)>) {

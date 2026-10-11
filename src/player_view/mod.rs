@@ -1,16 +1,22 @@
-//! The player window (areas 45 and 46): a GL area that shows libmpv's render output, a control bar and keyboard
-//! shortcuts. A window is opened through [`open_episode`]. Logic lives in `playback` (mpv) and `store` (watch
-//! progress); this file is widget wiring. Main thread only.
+//! The player page (areas 45 and 46): a GL area that shows libmpv's render output, a control bar and keyboard
+//! shortcuts. It opens inside the main window, or detached in its own window when that was the last choice, and the
+//! header's Detach / Attach button moves it while it plays (docs/design/player-reader.md). It is opened through
+//! [`open_episode`] for a file, or [`open_source_episode`] for an episode of an online source. Logic lives in `playback` (mpv), `source` (the source's video) and `store` (watch progress); this
+//! file is widget wiring. Main thread only.
 
 mod gl;
+mod menu;
 mod playback;
+mod source;
 mod store;
 #[cfg(test)]
 mod tests;
 
+pub use source::open_source_episode;
+
 use std::cell::{Cell, RefCell};
 use std::path::Path;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use gtk::prelude::*;
@@ -26,24 +32,65 @@ use kuro_player::seekbar_model::{drags_enabled, duration_label, fraction, positi
 use kuro_player::session::prepare_mpv_dir;
 use kuro_player::shortcuts::{Action, action_for};
 
-use playback::{Playback, VOLUME_MAX, seek_delta_ms, seek_target_ms, volume_after_steps};
+use playback::{Handoff, Playback, VOLUME_MAX, seek_delta_ms, seek_target_ms, volume_after_steps};
 use store::Tracker;
 
-/// How often the window reads mpv, updates the controls and saves progress when one is due.
+use crate::widgets::detachable::Detachable;
+
+/// How often the page reads mpv, updates the controls and saves progress when one is due.
 const TICK: Duration = Duration::from_millis(250);
 
-/// Opens `path` in a new player window for the anime episode `episode_id`.
+/// What the player plays: a file or a source's stream with its request headers and side tracks.
+struct Media {
+    /// The path or URL `loadfile` gets.
+    target: String,
+    title: String,
+    /// The `http-header-fields` value; `None` for a file.
+    headers: Option<String>,
+    /// `audio-add` and `sub-add` commands, sent once mpv has loaded the stream.
+    tracks: Vec<Vec<String>>,
+}
+
+/// Opens `path` in the player for the anime episode `episode_id`.
 ///
 /// `start_ms` above zero starts there. Zero or less resumes from the saved progress: an unseen episode resumes at
 /// its last second, a seen one restarts at zero. Progress is saved every five seconds while playing, on pause, at
 /// the end of the file and on close. An episode missing from the database plays without saving.
 pub fn open_episode(path: &Path, episode_id: i64, start_ms: i64) {
-    let paths = match LinuxPaths::system() {
-        Ok(paths) => paths,
-        Err(e) => return tracing::error!(error = %e, "player: no app directories; not opened"),
+    let Some(target) = path.to_str() else {
+        return tracing::error!(path = %path.display(), "player: the path is not UTF-8; not opened");
     };
+    let title = path.file_name().map_or_else(|| "Player".to_owned(), |n| n.to_string_lossy().into_owned());
+    open_media(Media { target: target.to_owned(), title, headers: None, tracks: Vec::new() }, episode_id, start_ms);
+}
+
+thread_local! {
+    /// The player that was opened last, held weakly: it is open while it lives and has not been closed.
+    static CURRENT: RefCell<std::rc::Weak<RefCell<Player>>> = RefCell::new(std::rc::Weak::new());
+}
+
+/// A player page is open (embedded or detached). A second click on an episode then opens nothing more.
+pub fn is_open() -> bool {
+    CURRENT.with(|c| c.borrow().upgrade().is_some_and(|p| p.try_borrow().map_or(true, |p| !p.closed)))
+}
+
+fn open_media(media: Media, episode_id: i64, start_ms: i64) {
+    if is_open() {
+        return;
+    }
+    match LinuxPaths::system() {
+        Ok(paths) => {
+            open_in(paths.data_dir(), media, episode_id, start_ms);
+        }
+        Err(e) => tracing::error!(error = %e, "player: no app directories; not opened"),
+    }
+}
+
+/// Opens the player with mpv's config files under `data_dir`. Returns the host that places the page and the state
+/// the page shares, or `None` when libmpv did not start.
+fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms: i64) -> Option<(Rc<Detachable>, Shared)> {
     let mut prefs = PlayerPrefs {
-        data_dir: paths.data_dir(),
+        data_dir,
         ..PlayerPrefs::default()
     };
     if crate::data::is_installed() {
@@ -56,7 +103,10 @@ pub fn open_episode(path: &Path, episode_id: i64, start_ms: i64) {
     playback::use_c_numeric_locale();
     let mpv = match MpvHandle::create(&startup_settings(&prefs)) {
         Ok(mpv) => mpv,
-        Err(e) => return tracing::error!(error = %e, "player: libmpv did not start; not opened"),
+        Err(e) => {
+            tracing::error!(error = %e, "player: libmpv did not start; not opened");
+            return None;
+        }
     };
     let (tracker, start) = if crate::data::is_installed() {
         let app = crate::data::app();
@@ -71,18 +121,47 @@ pub fn open_episode(path: &Path, episode_id: i64, start_ms: i64) {
         playback: Playback::new(mpv),
         tracker,
         finished_saved: false,
+        closed: false,
+        handoff: None,
+        media,
     }));
-    let window = build_window(path, &shared, start);
-    window.present();
+    CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(&shared));
+    // the page is held here until the host places it; the host only keeps it weakly
+    let (_page, host) = build_page(&shared, start);
+    let window_prefs = window_prefs();
+    host.show(window_prefs.as_ref().is_some_and(|p| p.open_detached.get()));
+    if let Some(window_prefs) = window_prefs {
+        remember_choice(&host, window_prefs);
+    }
+    Some((host, shared))
 }
 
-/// Everything the window reads and writes on mpv and the database. Shared by the GTK closures; a `RefCell` borrow
+/// Each Detach or Attach is stored, so the next playback opens the same way.
+fn remember_choice(host: &Detachable, prefs: kuro_prefs::player::PlayerWindowPrefs) {
+    host.connect_moved(move |detached| {
+        if let Err(e) = prefs.open_detached.set(detached) {
+            tracing::warn!(error = %e, "player: the detached choice was not stored");
+        }
+    });
+}
+
+/// The `[player.window]` preferences, or `None` before the app data is installed.
+fn window_prefs() -> Option<kuro_prefs::player::PlayerWindowPrefs> {
+    crate::data::is_installed().then(|| kuro_prefs::player::PlayerWindowPrefs::new(crate::data::app().base.store().clone()))
+}
+
+/// Everything the page reads and writes on mpv and the database. Shared by the GTK closures; a `RefCell` borrow
 /// never spans a GTK call, so a re-entrant render cannot panic.
 struct Player {
     playback: Playback,
     tracker: Option<Tracker>,
+    media: Media,
     /// The end-of-file save has run, so it runs once.
     finished_saved: bool,
+    /// Playback was stopped and saved for good (Back, or the page or its window went away).
+    closed: bool,
+    /// Set while the page moves between windows: the GL area is between its old and new render context.
+    handoff: Option<Handoff>,
 }
 
 type Shared = Rc<RefCell<Player>>;
@@ -101,6 +180,27 @@ impl Player {
         };
         if let Some(position) = position {
             tracker.save(now_ms(), position, duration, forced);
+        }
+    }
+
+    /// Closing: saves the progress and stops playback, once.
+    fn finish(&mut self) {
+        if !self.closed {
+            self.closed = true;
+            self.save(true);
+            self.playback.stop();
+        }
+    }
+
+    /// The GL area is going away. While the host moves the page (and playback is still open) the video is handed
+    /// off to the next area; any other unrealize closes. Returns `true` for a close.
+    fn area_gone(&mut self, moving: bool) -> bool {
+        if moving && !self.closed {
+            self.handoff = Some(self.playback.hand_off_video());
+            false
+        } else {
+            self.finish();
+            true
         }
     }
 }
@@ -122,7 +222,13 @@ fn toggle_pause(shared: &Shared) {
     }
 }
 
-fn toggle_fullscreen(window: &gtk::Window) {
+/// The window that holds the page now: the main window while embedded, its own while detached.
+fn window_of(page: &impl IsA<gtk::Widget>) -> Option<gtk::Window> {
+    page.as_ref().root().and_downcast::<gtk::Window>()
+}
+
+fn toggle_fullscreen(page: &gtk::Box) {
+    let Some(window) = window_of(page) else { return };
     if window.is_fullscreen() {
         window.unfullscreen();
     } else {
@@ -130,8 +236,9 @@ fn toggle_fullscreen(window: &gtk::Window) {
     }
 }
 
-/// Runs one shortcut. `false` when the window does nothing with it, so the key goes on to GTK.
-fn apply_action(shared: &Shared, window: &gtk::Window, action: Action) -> bool {
+/// Runs one shortcut. `false` when the page does nothing with it, so the key goes on to GTK.
+fn apply_action(shared: &Shared, page: &gtk::Box, action: Action) -> bool {
+    let fullscreen = window_of(page).is_some_and(|w| w.is_fullscreen());
     match action {
         Action::TogglePause => toggle_pause(shared),
         Action::Seek { forward, long } => {
@@ -147,14 +254,17 @@ fn apply_action(shared: &Shared, window: &gtk::Window, action: Action) -> bool {
             }
             remember_volume(&player.playback);
         }
-        Action::ToggleFullscreen => toggle_fullscreen(window),
-        Action::Escape if window.is_fullscreen() => window.unfullscreen(),
+        Action::ToggleFullscreen => toggle_fullscreen(page),
+        Action::Escape if fullscreen => toggle_fullscreen(page),
         _ => return false,
     }
     true
 }
 
-fn build_window(path: &Path, shared: &Shared, start: i64) -> gtk::Window {
+/// The player page: a slim header (Back, title, Detach, the tracks menu) over the video and its control bar. The
+/// page is named `screen:player`, so the main window hides its sidebar while it shows. Returns the host that places
+/// it in the main window or in its own window.
+fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
     let area = gtk::GLArea::new();
     area.set_hexpand(true);
     area.set_vexpand(true);
@@ -186,20 +296,51 @@ fn build_window(path: &Path, shared: &Shared, start: i64) -> gtk::Window {
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&area));
     overlay.add_overlay(&bar);
+    // shown from the first frame until mpv knows the duration: the stream, its audio and its subtitles take a moment
+    let loading = gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).valign(gtk::Align::Center).width_request(48).height_request(48).can_target(false).build();
+    overlay.add_overlay(&loading);
+    overlay.set_vexpand(true);
 
-    let title = path.file_name().map_or_else(|| "Player".to_owned(), |n| n.to_string_lossy().into_owned());
-    let window = gtk::Window::builder()
-        .title(title)
-        .default_width(960)
-        .default_height(540)
-        .child(&overlay)
-        .build();
-    if let Some(app) = gtk::gio::Application::default().and_then(|a| a.downcast::<gtk::Application>().ok()) {
-        window.set_application(Some(&app));
+    let title = shared.borrow().media.title.clone();
+    let header = gtk::HeaderBar::new();
+    header.set_decoration_layout(Some(&crate::ui::decoration(false)));
+    // width_chars keeps the ellipsis from swallowing the whole title in a crowded header
+    let title_label = gtk::Label::builder().label(&title).css_classes(["title"]).ellipsize(gtk::pango::EllipsizeMode::End).width_chars(24).max_width_chars(100).build();
+    header.set_title_widget(Some(&title_label));
+    let back = crate::ui::icon_button("go-previous-symbolic", "Back");
+    header.pack_start(&back);
+    let menu = menu::tracks_menu(shared);
+    header.pack_end(&menu);
+
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    page.set_widget_name("screen:player");
+    page.set_focusable(true);
+    page.append(&header);
+    page.append(&overlay);
+
+    let host = Detachable::new(&page, &title, true);
+    header.pack_end(host.button());
+    crate::ui::no_sticky_focus(&header);
+
+    wire_gl(&area, shared, start, Rc::downgrade(&host));
+    {
+        // Escape, Alt+Left and the mouse back button pop the page without this file knowing: stop at once, not when
+        // the stack removes the page 400 ms later
+        let shared = Rc::clone(shared);
+        host.connect_left(move || shared.borrow_mut().finish());
     }
 
-    wire_gl(&area, shared, path, start);
-
+    {
+        // Back stops and saves at once, then leaves the page (or closes its window)
+        let (shared, host, page) = (Rc::clone(shared), Rc::clone(&host), page.downgrade());
+        back.connect_clicked(move |_| {
+            shared.borrow_mut().finish();
+            if let Some(window) = page.upgrade().and_then(|p| window_of(&p)).filter(|w| w.is_fullscreen()) {
+                window.unfullscreen();
+            }
+            host.close();
+        });
+    }
     {
         let shared = Rc::clone(shared);
         play.connect_clicked(move |_| toggle_pause(&shared));
@@ -228,62 +369,72 @@ fn build_window(path: &Path, shared: &Shared, start: i64) -> gtk::Window {
         });
     }
     {
-        let weak = window.downgrade();
+        let page = page.downgrade();
         fullscreen.connect_clicked(move |_| {
-            if let Some(window) = weak.upgrade() {
-                toggle_fullscreen(&window);
+            if let Some(page) = page.upgrade() {
+                toggle_fullscreen(&page);
             }
         });
     }
 
+    // capture phase: the shortcuts work wherever the focus is in the page, before a focused button sees the key
     let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     {
-        let shared = Rc::clone(shared);
-        let weak = window.downgrade();
+        let (shared, page, menu) = (Rc::clone(shared), page.downgrade(), menu.downgrade());
         keys.connect_key_pressed(move |_, keyval, _, state| {
-            let Some(window) = weak.upgrade() else {
+            let Some(page) = page.upgrade() else {
                 return glib::Propagation::Proceed;
             };
+            // the open tracks menu keeps its own keys
+            if menu.upgrade().is_some_and(|m| m.is_active()) {
+                return glib::Propagation::Proceed;
+            }
             let Some(action) = action_for(keyval.into_glib(), modifiers(state), false) else {
                 return glib::Propagation::Proceed;
             };
-            if apply_action(&shared, &window, action) {
+            if apply_action(&shared, &page, action) {
                 glib::Propagation::Stop
             } else {
                 glib::Propagation::Proceed
             }
         });
     }
-    window.add_controller(keys);
+    page.add_controller(keys);
+    page.connect_map(|page| {
+        page.grab_focus();
+    });
 
-    {
-        let shared = Rc::clone(shared);
-        window.connect_close_request(move |_| {
-            let mut player = shared.borrow_mut();
-            player.save(true);
-            player.playback.stop();
-            glib::Propagation::Proceed
-        });
-    }
-
-    start_ticks(&window, &play, &seek, &time, &volume, shared);
-    window
+    start_ticks(&page, &header, &play, &seek, &time, &volume, &loading, shared);
+    (page, host)
 }
 
 /// Connects the GL area: the render context is made on realize, frames are drawn on render, and the context is
-/// freed on unrealize while the GL context is still current.
-fn wire_gl(area: &gtk::GLArea, shared: &Shared, path: &Path, start: i64) {
+/// freed on unrealize while the GL context is still current. An unrealize while `host` moves the page is a handoff:
+/// video is switched off before the context goes and comes back once the next realize made a new one. Any other
+/// unrealize is a close (the page was popped, its window closed, the app quit): progress is saved and playback stops.
+fn wire_gl(area: &gtk::GLArea, shared: &Shared, start: i64, host: Weak<Detachable>) {
     let loaded = Rc::new(Cell::new(false));
     {
         let shared = Rc::clone(shared);
-        let path = path.to_owned();
-        area.connect_realize(move |area| realize(area, &shared, &path, start, &loaded));
+        area.connect_realize(move |area| realize(area, &shared, start, &loaded));
     }
     {
         let shared = Rc::clone(shared);
         area.connect_unrealize(move |area| {
-            area.make_current();
-            shared.borrow_mut().playback.mpv_mut().destroy_render_context();
+            let moving = host.upgrade().is_some_and(|h| h.is_moving());
+            let closed = {
+                let mut player = shared.borrow_mut();
+                let closed = player.area_gone(moving);
+                area.make_current();
+                player.playback.mpv_mut().destroy_render_context();
+                closed
+            };
+            // however the page left (Back, Escape, Alt+Left, the mouse back button, a closed window), the window
+            // that held it leaves fullscreen
+            if closed && let Some(window) = window_of(area).filter(|w| w.is_fullscreen()) {
+                window.unfullscreen();
+            }
         });
     }
     {
@@ -299,7 +450,7 @@ fn wire_gl(area: &gtk::GLArea, shared: &Shared, path: &Path, start: i64) {
     }
 }
 
-fn realize(area: &gtk::GLArea, shared: &Shared, path: &Path, start: i64, loaded: &Cell<bool>) {
+fn realize(area: &gtk::GLArea, shared: &Shared, start: i64, loaded: &Cell<bool>) {
     area.make_current();
     if let Some(error) = area.error() {
         return tracing::error!(error = %error, "player: no GL context; the video cannot be drawn");
@@ -326,9 +477,11 @@ fn realize(area: &gtk::GLArea, shared: &Shared, path: &Path, start: i64, loaded:
     }
     if !loaded.replace(true) {
         restore_volume(&player.playback);
-        if let Err(e) = player.playback.load(path, start) {
+        if let Err(e) = player.playback.load(&player.media.target, player.media.headers.as_deref(), start) {
             tracing::error!(error = %e, "player: could not load the file");
         }
+    } else if let Some(handoff) = player.handoff.take() {
+        player.playback.resume_video(&handoff);
     }
 }
 
@@ -338,7 +491,7 @@ fn player_prefs() -> Option<kuro_prefs::player::PlayerPrefs> {
 }
 
 /// Session start (T-45b-053): the remembered volume is written to mpv when `pref_remember_volume` is on and the stored
-/// value is not negative. Brightness has no control on the desktop (T-45a-045), so its stored value is kept as it is.
+/// value is not negative.
 fn restore_volume(playback: &Playback) {
     let Some(prefs) = player_prefs() else { return };
     if let Some(volume) = kuro_player::remember::value_to_restore(prefs.remember_player_volume.get(), prefs.player_volume_value.get())
@@ -358,24 +511,32 @@ fn remember_volume(playback: &Playback) {
     }
 }
 
-/// Reads mpv on a timer. Each tick drains mpv's events, saves progress when due, and refreshes the controls.
-/// It stops when the window is gone.
-fn start_ticks(window: &gtk::Window, play: &gtk::Button, seek: &gtk::Scale, time: &gtk::Label, volume: &gtk::Scale, shared: &Shared) {
-    let weak = window.downgrade();
+/// Reads mpv on a timer. Each tick drains mpv's events, saves progress when due, and refreshes the controls; the
+/// header hides while the window holding the page is fullscreen. It stops once the page is gone or closed.
+fn start_ticks(page: &gtk::Box, header: &gtk::HeaderBar, play: &gtk::Button, seek: &gtk::Scale, time: &gtk::Label, volume: &gtk::Scale, loading: &gtk::Spinner, shared: &Shared) {
+    let loading = loading.clone();
+    let opened = std::time::Instant::now();
+    let page = page.downgrade();
+    let header = header.clone();
     let play = play.clone();
     let seek = seek.clone();
     let time = time.clone();
     let volume = volume.clone();
     let shared = Rc::clone(shared);
     glib::timeout_add_local(TICK, move || {
-        if weak.upgrade().is_none() {
+        let Some(page) = page.upgrade().filter(|_| !shared.borrow().closed) else {
             return glib::ControlFlow::Break;
-        }
+        };
         let snapshot = {
             let mut player = shared.borrow_mut();
             for event in player.playback.mpv_mut().drain_events() {
-                if let MpvEvent::EndFile { error: Some(_), .. } = event {
-                    tracing::warn!("player: playback stopped with an error");
+                match event {
+                    MpvEvent::EndFile { error: Some(_), .. } => tracing::warn!("player: playback stopped with an error"),
+                    MpvEvent::FileLoaded => {
+                        let tracks = std::mem::take(&mut player.media.tracks);
+                        player.playback.add_tracks(&tracks);
+                    }
+                    _ => {}
                 }
             }
             if player.playback.eof_reached() && !player.finished_saved {
@@ -391,7 +552,13 @@ fn start_ticks(window: &gtk::Window, play: &gtk::Button, seek: &gtk::Scale, time
                 volume: player.playback.volume(),
             }
         };
+        header.set_visible(!window_of(&page).is_some_and(|w| w.is_fullscreen()));
         play.set_icon_name(if snapshot.paused { "media-playback-start-symbolic" } else { "media-playback-pause-symbolic" });
+        // loading until mpv knows the duration; an idle mpv after the first seconds means the load failed, so stop
+        let idle = shared.borrow().playback.mpv().get_flag("idle-active") == Some(true);
+        let waiting = snapshot.duration_s <= 0.0 && !(idle && opened.elapsed() > std::time::Duration::from_secs(3));
+        loading.set_visible(waiting);
+        loading.set_spinning(waiting);
         seek.set_sensitive(drags_enabled(snapshot.duration_s));
         seek.set_value(f64::from(fraction(snapshot.position_s, snapshot.duration_s)));
         time.set_label(&format!(

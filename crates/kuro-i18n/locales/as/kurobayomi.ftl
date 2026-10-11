@@ -18,8 +18,6 @@ action_continue = চালাই যাওক
 
 manga = মান্গা
 
-pref_library_summary = শ্ৰেণীসমূহ, বিশ্বজনীন আপডেট, অধ্যায়/পৰ্ব সোঁৱৰণ
-
 pref_behavior = অধ্যায়ৰ আচৰণ
 
 action_add_repo_message = { $arg1 }'ত অতিৰিক্ত ৰেপ’ যোগ কৰক। এইটো এটা URL হ’ব লাগে যি "index.min.json"ৰে শেষ হয়।
@@ -80,21 +78,9 @@ pref_player_settings_summary = অভ্যন্তৰীণ প্লেয়
 
 pref_player_internal = অভ্যন্তৰীণ প্লেয়াৰ
 
-pref_player_internal_summary = অগ্ৰগতি, নিয়ন্ত্ৰণ, দিশ
-
 pref_progress_mark_as_seen = পৰ্বটো কেতিয়া দেখা বুলি চিহ্নিত কৰিব
 
 pref_preserve_watching_position = দেখা পৰ্বসমূহৰ চাওঁতাৰ অৱস্থান সাঁচি ৰাখক
-
-pref_category_player_orientation = দিশ
-
-rotation_video = ভিডিঅ’
-
-rotation_reverse_landscape = উলোট লেণ্ডস্কেপ
-
-rotation_sensor_portrait = চেন্সৰ প’ৰ্ট্ৰেইট
-
-rotation_sensor_landscape = চেন্সৰ লেণ্ডস্কেপ
 
 pref_category_controls = নিয়ন্ত্ৰণ
 
@@ -107,8 +93,6 @@ pref_controls_show_chapter_indicator = বৰ্তমানৰ অধ্যা�
 pref_controls_show_chapter_indicator_info = ভিডিঅ’ত অধ্যায় থাকিলেহে দেখা যায়
 
 pref_controls_display_volume_percentage = শতাংশ হিচাপে শব্দৰ মাত্ৰা দেখুৱাওক
-
-pref_remember_brightness = শেষৰ ব্যৱহৃত উজ্জ্বলতা মনত ৰাখক আৰু সলনি কৰক
 
 pref_remember_volume = শেষৰ ব্যৱহৃত শব্দৰ মাত্ৰা মনত ৰাখক আৰু সলনি কৰক
 
@@ -179,12 +163,6 @@ pref_external_player_preference = বাহ্যিক প্লেয়াৰ
 pref_player_gestures = অঙ্গভঙ্গি
 
 pref_player_gestures_summary = অনুসন্ধান, দুইবাৰ টিপা, মিডিয়া নিয়ন্ত্ৰণ
-
-pref_category_player_sliders = স্লাইডাৰ
-
-enable_volume_brightness_gestures = শব্দ আৰু উজ্জ্বলতাৰ অঙ্গভঙ্গি সক্ৰিয় কৰক
-
-pref_controls_swap_vol_brightness = শব্দ আৰু উজ্জ্বলতাৰ স্লাইডাৰ সলনি কৰক
 
 pref_category_player_seeking = বিচাৰণ
 
@@ -924,10 +902,6 @@ theme_mocha = ম’কা
 
 pref_behavior_episode = এপিচ’ডৰ আচৰণ
 
-pref_episode_swipe_end = সোঁৱৰণৰ সোঁ দিশৰ কাৰ্য
-
-pref_episode_swipe_start = সোঁৱৰণৰ বাওঁ দিশৰ কাৰ্য
-
 pref_mark_duplicate_seen_episode_seen = ডুপ্লিকেট দেখা এপিচ’ডক দেখা বুলি চিহ্নিত কৰক
 
 pref_mark_duplicate_seen_episode_seen_existing = এপিচ’ড চোৱাৰ পিছত
@@ -1312,10 +1286,6 @@ onboarding_permission_notifications = নটিফিকেচনৰ অনু�
 
 onboarding_permission_notifications_description = লাইব্ৰেৰীৰ আপডেট আৰু আন বহু বস্তুৰ বাবে সতৰ্কতা পাব।
 
-onboarding_permission_ignore_battery_opts = পটভূমি বেটাৰী ব্যৱহাৰ
-
-onboarding_permission_ignore_battery_opts_description = দীৰ্ঘম্যাদী লাইব্ৰেৰী আপডেট, ডাউনলোড আৰু বেকআপ পুনৰ স্থাপনৰ অন্তৰায় নোহোৱাৰ বাবে।
-
 onboarding_permission_crashlytics = ক্ৰেছ লগসমূহ পঠাওক
 
 onboarding_permission_crashlytics_description = ডেভেলপাৰসকললৈ নামৰহিত ক্ৰেছ লগসমূহ পঠাওক|
@@ -1358,10 +1328,6 @@ pref_browse_summary = উৎসসমূহ, এক্সটেনচন, গ্
 
 pref_backup_summary = ম্যানুৱেল আৰু স্বয়ংক্ৰিয় বেকআপ, সঞ্চয় স্থান
 
-pref_security_summary = এপ লক, সুৰক্ষিত পৰ্দা
-
-pref_advanced_summary = ক্ৰেশ লগসমূহ ডাম্প কৰক, বেটাৰী অপ্টিমাইজেশ্বন
-
 pref_category_theme = থীম
 
 pref_app_theme = এপ থীম
@@ -1371,8 +1337,6 @@ theme_system = পদ্ধতি
 theme_light = হালধীয়া
 
 theme_dark = গাঢ়
-
-theme_monet = ডাইনামিক
 
 theme_greenapple = সেউজ আপেল
 
@@ -1423,10 +1387,6 @@ lock_always = সদায়
 lock_never = কেতিয়াও নহয়
 
 hide_notification_content = নটিফিকেশনৰ সামগ্ৰী লুকুৱাওক
-
-secure_screen = সুৰক্ষিত পৰ্দা
-
-secure_screen_summary = সুৰক্ষিত পৰ্দাই এপৰ সামগ্ৰীসমূহক এপ সলনি কৰাৰ সময়ত লুকুৱায় আৰু স্ক্ৰীনশ্বট ব্লক কৰে
 
 firebase_summary = ক্ৰেছ লগ আৰু এনেলিটিক্স পঠাওঁতে আমাক সমস্যাবোৰ চিনাক্ত কৰি সমাধান কৰিবলৈ, কাৰ্যক্ষমতা উন্নত কৰিবলৈ আৰু আপোনাৰ প্ৰয়োজনৰ অনুসাৰে ভৱিষ্যতৰ আপডেটসমূহ অধিক প্ৰাসংগিক কৰিবলৈ সহায় কৰিব।
 
@@ -1502,10 +1462,6 @@ include = অন্তৰ্ভুক্ত: { $arg1 }
 
 exclude = বাদ দিয়া: { $arg1 }
 
-pref_chapter_swipe_end = সোঁফালে চুইপ কৰা কাৰ্য
-
-pref_chapter_swipe_start = বাওঁফালে চুইপ কৰা কাৰ্য
-
 multi_lang = বহুভাষী
 
 ext_updates_pending = আপডেট মুলতুবি আছে
@@ -1561,14 +1517,6 @@ ext_nsfw_warning = এই এক্সটেনচনৰ উৎসসমূহ�
 ext_permission_install_apps_warning = এক্সটেনচন ইন্সটল কৰিবলৈ অনুমতিৰ প্ৰয়োজন। ইয়াত টিপক।
 
 ext_install_service_notif = এক্সটেনচন ইন্সটল কৰি আছে…
-
-ext_installer_pref = ইন্সটলাৰ
-
-ext_installer_legacy = পুৰণি
-
-ext_installer_shizuku_stopped = Shizuku চলি নাই
-
-ext_installer_shizuku_unavailable_dialog = Shizuku ইন্সটল কৰক আৰু আৰম্ভ কৰক Shizuku এক্সটেনচন ইন্সটলাৰ হিচাপে ব্যৱহাৰ কৰিবলৈ।
 
 ext_revoke_trust = অজ্ঞাত এক্সটেনচন বিশ্বাসৰ অধিকার বাতিল কৰক
 
@@ -1788,22 +1736,6 @@ double_tap_anim_speed_normal = সাধাৰণ
 
 double_tap_anim_speed_fast = দ্ৰুত
 
-pref_rotation_type = ডিফল্ট ঘূৰণ
-
-rotation_type = ঘূৰণ
-
-rotation_free = মুক্ত
-
-rotation_portrait = প’ৰট্ৰেইট
-
-rotation_reverse_portrait = প’ৰট্ৰেইট বিপৰীত
-
-rotation_landscape = ল্যান্ডস্কেপ
-
-rotation_force_portrait = প’ৰট্ৰেইট তালাচি
-
-rotation_force_landscape = ল্যান্ডস্কেপ তালাচি
-
 color_filter_r_value = ৰঙা
 
 color_filter_g_value = সেউজীয়া
@@ -2014,8 +1946,6 @@ pref_refresh_library_covers = লাইব্ৰেৰীৰ কভাৰসম�
 
 pref_reset_viewer_flags = প্ৰতি-সিৰিজ পাঠক স্থিতি পুনৰ চমা
 
-pref_reset_viewer_flags_summary = সকল সিৰিজৰ পঢ়াৰ মড আৰু দিশ পুনৰ চমা
-
 pref_reset_viewer_flags_success = সকলো পাঠক স্থিতি পুনৰ চমা
 
 pref_reset_viewer_flags_error = পাঠক স্থিতি পুনৰ চমা হোৱা নাই
@@ -2023,20 +1953,6 @@ pref_reset_viewer_flags_error = পাঠক স্থিতি পুনৰ চ
 pref_dump_crash_logs = ক্রাশ লগসমূহ ভাগ কৰক
 
 pref_dump_crash_logs_summary = ডেভেলপাৰসকলৰ সৈতে ভাগ কৰিবলৈ ত্ৰুটি লগসমূহ ফাইলত সংৰক্ষণ কৰক
-
-label_background_activity = পটভূমি কাৰ্যকলাপ
-
-pref_disable_battery_optimization = বেটাৰী অপ্টিমাইজেশন বন্ধ কৰক
-
-pref_disable_battery_optimization_summary = পটভূমি লাইব্ৰেৰী আপডেট আৰু বেকআপত সহায় কৰে
-
-battery_optimization_disabled = বেটাৰী অপ্টিমাইজেশন ইতিমধ্যে বন্ধ হৈছে
-
-battery_optimization_setting_activity_not_found = ডিভাইচৰ ছেটিংচ খোলাত অক্ষম
-
-about_dont_kill_my_app = কিছুমান নিৰ্মাতাৰ অতিরিক্ত এপ নিষেধাজ্ঞা থাকে যি পটভূমি সেৱাসমূহ বন্ধ কৰে। ইয়াত অধিক তথ্য উপলব্ধ হৈছে কিদৰে সুৰ কৰক।
-
-pref_tablet_ui_mode = টেবলেট UI
 
 pref_verbose_logging = বিৱৰণযুক্ত লগিং
 

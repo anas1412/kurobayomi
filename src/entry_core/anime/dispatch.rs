@@ -1,11 +1,10 @@
-//! What a press on the bottom bar, a swipe or a mark seen sends to the runner (T-39b-013, T-39b-063). Pure: the page
+//! What a press on the bottom bar, a menu item or a mark seen sends to the runner (T-39b-013, T-39b-063). Pure: the page
 //! hands in the model and the preferences it read, and gets the commands back. Upstream: `AnimeScreenModel.kt`
 //! (`markEpisodesSeen`, `runEpisodeDownloadActions`, `markPreviousEpisodeSeen`).
 
 use kuro_data::episode::Episode;
-use kuro_prefs::library::EpisodeSwipeAction;
 
-use super::actions::{SwipeEffect, bulk_mark_targets, swipe_effect};
+use super::actions::{EpisodeMenuAction, MenuEffect, bulk_mark_targets, menu_effect};
 use super::bottom::Effect;
 use super::downloads::{selection_to_delete, selection_to_download};
 use super::model::AnimeEntryModel;
@@ -64,14 +63,14 @@ pub fn bottom_cmds(m: &AnimeEntryModel, effect: Effect, remove_after_seen: bool)
     out
 }
 
-/// What a swipe on one row sends. The Download swipe deletes a downloaded episode and queues any other one, and only
+/// What a context menu item on one row sends. The Download item deletes a downloaded episode and queues any other one, and only
 /// when the app can queue downloads.
-pub fn swipe_cmds(m: &AnimeEntryModel, id: i64, action: EpisodeSwipeAction, has_download_handler: bool, remove_after_seen: bool) -> Vec<AnimeCmd> {
+pub fn menu_cmds(m: &AnimeEntryModel, id: i64, action: EpisodeMenuAction, has_download_handler: bool, remove_after_seen: bool) -> Vec<AnimeCmd> {
     let Some(episode) = m.episodes.iter().find(|e| e.id == id) else { return Vec::new() };
-    match swipe_effect(action, episode) {
-        Some(SwipeEffect::Seen { seen, .. }) => seen_cmds(m, std::slice::from_ref(episode), seen, remove_after_seen),
-        Some(SwipeEffect::Mark { ids, mark, on }) => vec![AnimeCmd::SetMark { ids, mark, on }],
-        None if action == EpisodeSwipeAction::Download && has_download_handler => {
+    match menu_effect(action, episode) {
+        Some(MenuEffect::Seen { seen, .. }) => seen_cmds(m, std::slice::from_ref(episode), seen, remove_after_seen),
+        Some(MenuEffect::Mark { ids, mark, on }) => vec![AnimeCmd::SetMark { ids, mark, on }],
+        None if action == EpisodeMenuAction::Download && has_download_handler => {
             let (anime_id, ids) = (m.anime.id, vec![id]);
             vec![if m.downloaded.contains(&id) { AnimeCmd::DeleteEpisodeDownloads { anime_id, ids } } else { AnimeCmd::Download { anime_id, ids, start_now: false } }]
         }
@@ -170,18 +169,17 @@ mod tests {
     }
 
     #[test]
-    fn a_seen_swipe_follows_the_preference_and_the_download_swipe_toggles_the_download() {
+    fn a_seen_menu_item_follows_the_preference_and_the_download_item_toggles_the_download() {
         let mut m = model(2, 0);
         m.downloaded.insert(id_of(&m, 1.0));
         let one = id_of(&m, 1.0);
-        let swipe = |m: &AnimeEntryModel, id, action, handler, remove| swipe_cmds(m, id, action, handler, remove);
-        let seen = swipe(&m, one, EpisodeSwipeAction::ToggleSeen, false, true);
+        let menu = |m: &AnimeEntryModel, id, action, handler, remove| menu_cmds(m, id, action, handler, remove);
+        let seen = menu(&m, one, EpisodeMenuAction::ToggleSeen, false, true);
         assert_eq!(seen.len(), 2, "the write and the delete");
-        assert_eq!(swipe(&m, one, EpisodeSwipeAction::Download, true, false), vec![AnimeCmd::DeleteEpisodeDownloads { anime_id: m.anime.id, ids: vec![one] }]);
+        assert_eq!(menu(&m, one, EpisodeMenuAction::Download, true, false), vec![AnimeCmd::DeleteEpisodeDownloads { anime_id: m.anime.id, ids: vec![one] }]);
         let two = id_of(&m, 2.0);
-        assert_eq!(swipe(&m, two, EpisodeSwipeAction::Download, true, false), vec![AnimeCmd::Download { anime_id: m.anime.id, ids: vec![two], start_now: false }]);
-        assert!(swipe(&m, two, EpisodeSwipeAction::Download, false, false).is_empty(), "no download handler");
-        assert!(swipe(&m, two, EpisodeSwipeAction::Disabled, true, false).is_empty());
-        assert!(swipe(&m, 9999, EpisodeSwipeAction::ToggleSeen, true, false).is_empty(), "a row that is gone");
+        assert_eq!(menu(&m, two, EpisodeMenuAction::Download, true, false), vec![AnimeCmd::Download { anime_id: m.anime.id, ids: vec![two], start_now: false }]);
+        assert!(menu(&m, two, EpisodeMenuAction::Download, false, false).is_empty(), "no download handler");
+        assert!(menu(&m, 9999, EpisodeMenuAction::ToggleSeen, true, false).is_empty(), "a row that is gone");
     }
 }

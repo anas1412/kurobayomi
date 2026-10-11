@@ -6,8 +6,8 @@ use gtk::prelude::*;
 use gtk::{pango, Align, Box as GBox, Image, Label, ListBoxRow, Orientation};
 
 use super::{
-    ICON_END_MARGIN, PREF_HORIZONTAL_PADDING, PREF_MIN_HEIGHT, PREF_VERTICAL_PADDING,
-    SECONDARY_ALPHA, SUBTITLE_MAX_LINES, TITLE_MAX_LINES, TRAILING_WIDGET_BUFFER,
+    ICON_END_MARGIN, PREF_HORIZONTAL_PADDING, PREF_MIN_HEIGHT, PREF_VERTICAL_PADDING, SUBTITLE_MAX_LINES,
+    TITLE_MAX_LINES, TRAILING_WIDGET_BUFFER,
 };
 
 /// Handles to the parts of a built row. The caller updates labels and attaches the trailing widget.
@@ -62,14 +62,15 @@ pub fn build(spec: RowSpec) -> PrefRow {
     title.set_ellipsize(pango::EllipsizeMode::End);
     text.append(&title);
 
+    // the same subtitle style as `crate::ui::dim`: the theme's dim colour at caption size
     let subtitle = Label::new(None);
     subtitle.add_css_class("dim-label");
+    subtitle.add_css_class("caption");
     subtitle.set_xalign(0.0);
     subtitle.set_halign(Align::Start);
     subtitle.set_wrap(true);
     subtitle.set_lines(SUBTITLE_MAX_LINES);
     subtitle.set_ellipsize(pango::EllipsizeMode::End);
-    subtitle.set_opacity(SECONDARY_ALPHA);
     set_subtitle(&subtitle, spec.subtitle);
     text.append(&subtitle);
     inner.append(&text);
@@ -84,7 +85,7 @@ pub fn build(spec: RowSpec) -> PrefRow {
 
     row.set_child(Some(&inner));
     if let Some(on_click) = spec.on_click {
-        row.connect_activate(move |_| on_click());
+        crate::widgets::row_activate::on_activate(&row, move |_| on_click());
     }
     PrefRow { row, title, subtitle, trailing }
 }

@@ -340,6 +340,11 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             Effect::None => {}
             Effect::Fetch(url) => {
                 let (weak, ops) = (Rc::downgrade(self), self.ops.clone());
+                // the repo dialog closes at once; a failure then comes as a toast, as there is no dialog to show it
+                let close = ops.closes_on_submit();
+                if close {
+                    self.dispatch(Event::Dismiss);
+                }
                 glib::spawn_future_local(async move {
                     let outcome = gio::spawn_blocking(move || ops.add(&url)).await;
                     let Some(page) = weak.upgrade() else { return };
@@ -348,6 +353,7 @@ impl<T: Keyed + Send + 'static> Inner<T> {
                             page.dispatch(Event::AddSucceeded);
                             reload_extensions();
                         }
+                        Ok(AddOutcome::Failed(text)) if close => crate::toast::notify(text),
                         Ok(AddOutcome::Failed(text)) => page.dispatch(Event::AddFailed(text)),
                         Ok(AddOutcome::Notice(text)) => {
                             crate::toast::notify(text);
@@ -357,6 +363,7 @@ impl<T: Keyed + Send + 'static> Inner<T> {
                             page.dispatch(Event::AddSucceeded);
                             page.show_conflict(&old_name, &new_name, replace);
                         }
+                        Err(_) if close => crate::toast::notify(stores::unknown_error()),
                         Err(_) => page.dispatch(Event::AddFailed(stores::unknown_error())),
                     }
                 });
@@ -408,8 +415,11 @@ impl<T: Keyed + Send + 'static> Inner<T> {
 
     fn card_row(self: &Rc<Self>, card: &Card) -> gtk::ListBoxRow {
         let actions = stores::card_actions(&card.website, card.discord.as_deref());
-        let h = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        crate::ui::margins(&h, 10);
+        let h = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        h.set_margin_start(crate::ui::ROW_PAD_H);
+        h.set_margin_end(crate::ui::ROW_PAD_H);
+        h.set_margin_top(crate::ui::ROW_PAD_V);
+        h.set_margin_bottom(crate::ui::ROW_PAD_V);
         let tag = gtk::Image::from_icon_name("tag-symbolic");
         h.append(&tag);
         let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -686,6 +696,7 @@ mod tests {
     struct Fake {
         fail_with: Option<String>,
         added: std::sync::Mutex<Vec<String>>,
+        closes: bool,
     }
 
     impl Ops<Item> for Fake {
@@ -701,6 +712,9 @@ mod tests {
         }
         fn refresh(&self) {}
         fn remove(&self, _key: &str) {}
+        fn closes_on_submit(&self) -> bool {
+            self.closes
+        }
     }
 
     fn pump_until(done: impl Fn() -> bool) {
@@ -718,7 +732,7 @@ mod tests {
         crate::testing::with_display(|| {
             let _nav = crate::testing::nav();
 
-            let ops = Arc::new(Fake { fail_with: Some("HTTP 500".into()), added: Default::default() });
+            let ops = Arc::new(Fake { fail_with: Some("HTTP 500".into()), added: Default::default(), closes: false });
             let feed: Rc<RefCell<Option<Box<dyn Fn(Vec<Item>)>>>> = Rc::new(RefCell::new(None));
             let sink = feed.clone();
             let (built, page) = build(ops.clone(), Texts::stores(), move |push| *sink.borrow_mut() = Some(push));
@@ -775,6 +789,27 @@ mod tests {
             pump_until(|| !inner.spinner.is_visible());
             assert!(!inner.spinner.is_visible());
             assert_eq!(built.end.len(), 2, "spinner and Refresh in the header");
+        });
+    }
+
+    // T-47b-024: with a repo list, Add closes the dialog at once; the stores keep theirs open until the fetch ends.
+    #[test]
+    fn a_repo_dialog_closes_the_moment_add_is_pressed() {
+        crate::testing::with_display(|| {
+            let _nav = crate::testing::nav();
+            let ops = Arc::new(Fake { fail_with: None, added: Default::default(), closes: true });
+            let feed: Rc<RefCell<Option<Box<dyn Fn(Vec<Item>)>>>> = Rc::new(RefCell::new(None));
+            let sink = feed.clone();
+            let (_built, page) = build(ops.clone(), Texts::repos(), move |push| *sink.borrow_mut() = Some(push));
+            (feed.borrow().as_ref().expect("subscribed"))(vec![]);
+            let inner = page.inner.clone();
+            inner.dispatch(Event::Open(Dialog::Add(Entry::default())));
+            inner.dispatch(Event::Type("https://x.test/index.min.json".into()));
+            assert!(inner.dialog.borrow().is_some());
+            inner.dispatch(Event::Submit);
+            assert!(inner.dialog.borrow().is_none(), "closed at once, not after the fetch");
+            pump_until(|| !ops.added.lock().unwrap().is_empty());
+            assert_eq!(ops.added.lock().unwrap().as_slice(), ["https://x.test/index.min.json"]);
         });
     }
 }

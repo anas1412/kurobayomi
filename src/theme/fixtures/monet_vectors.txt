@@ -1,8 +1,0 @@
-# Frozen reference vectors for TEST-49-08 (T-49a-006).
-# Source: materialyoucolor 3.0.4 (a port of material-color-utilities), SchemeContent, seed 0xFF1E88E5.
-# Columns: dark contrast then the 36 Material roles as RRGGBB in Role::ALL order
-# (primary .. surface_container_lowest, scrim after outline_variant). Regenerate with the same package.
-light 0 005ea4,ffffff,0077ce,fdfcff,a2c9ff,446084,ffffff,b7d4fd,3f5b7f,843ca0,ffffff,9f56bb,fffbff,f8f9ff,181c22,f8f9ff,181c22,dce3f0,404752,0060a8,2d3137,eef0f9,ba1a1a,ffffff,ffdad6,93000a,707783,c0c7d4,000000,f8f9ff,d7dae2,ebeef6,e5e8f0,e0e2ea,f1f3fc,ffffff
-light 1 002d54,ffffff,004b85,ffffff,a2c9ff,0b2d4f,ffffff,2e4b6d,ffffff,4c0067,ffffff,6f268c,ffffff,f8f9ff,181c22,f8f9ff,000000,dce3f0,000000,0060a8,2d3137,ffffff,600004,ffffff,98000a,ffffff,262d37,434a55,000000,f8f9ff,b6b9c0,e0e2ea,d2d4dc,c4c6ce,eef0f9,ffffff
-dark 0 a2c9ff,00315b,3394f1,001f3c,0060a8,acc8f2,113253,2b486b,9bb7e0,edb1ff,530070,be72da,36004b,101419,e0e2ea,101419,e0e2ea,404752,c0c7d4,a2c9ff,e0e2ea,2d3137,ffb4ab,690005,93000a,ffdad6,8a919e,404752,000000,363940,101419,1c2026,262a30,31353b,181c22,0b0e14
-dark 1 e9f0ff,000000,9ac5ff,000c1c,004983,e9f0ff,000000,a8c5ee,000c1c,feeaff,000000,ebacff,190025,101419,e0e2ea,101419,ffffff,404752,ffffff,a2c9ff,e0e2ea,000000,ffece9,000000,ffaea4,220001,eaf0fe,bcc3d0,000000,4d5057,101419,2d3137,383c42,43474d,1c2026,000000

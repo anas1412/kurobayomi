@@ -111,7 +111,6 @@ pub fn park_repo_url(url: String) {
 }
 
 /// The parked repository address, handed out once.
-#[allow(dead_code)] // the extension repos and stores pages take it when they build (pref_model lane)
 pub fn take_repo_url() -> Option<String> {
     PENDING_REPO.with(|slot| slot.borrow_mut().take())
 }

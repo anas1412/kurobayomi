@@ -568,3 +568,74 @@ mod brand_tests {
         );
     }
 }
+
+/// The release gate of T-47ba-049: every themed icon name the app asks for exists in the stock Adwaita theme or in
+/// the bundle, so a desktop whose icon theme lacks a name still shows an icon.
+#[cfg(test)]
+mod name_gate {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    fn svg_names(dir: &Path, out: &mut BTreeSet<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                svg_names(&path, out);
+            } else if path.extension().is_some_and(|e| e == "svg") {
+                if let Some(stem) = path.file_stem() {
+                    out.insert(stem.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+
+    /// Every `"<name>-symbolic"` literal in the Rust sources and the spec files under `dir`.
+    fn symbolic_names(dir: &Path, out: &mut BTreeSet<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                // the bundle itself and generated data hold no icon requests
+                if path.file_name().is_some_and(|n| n == "icons" || n == "fixtures" || n == "gen") {
+                    continue;
+                }
+                symbolic_names(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs" || e == "json") {
+                let Ok(text) = std::fs::read_to_string(&path) else { continue };
+                for line in text.lines() {
+                    for piece in line.split('"') {
+                        let valid = !piece.is_empty() && piece.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+                        if valid && piece.len() > "-symbolic".len() && piece.ends_with("-symbolic") && !piece.starts_with("kb-") {
+                            out.insert(piece.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_symbolic_icon_name_the_app_asks_for_is_in_adwaita_or_bundled() {
+        let adwaita = Path::new("/usr/share/icons/Adwaita");
+        if !adwaita.is_dir() {
+            // The gate has nothing to check against without Adwaita: fail, unless the skip is asked for.
+            assert!(
+                std::env::var_os("KURO_SKIP_ICON_GATE").is_some(),
+                "the Adwaita icon theme is not installed at /usr/share/icons/Adwaita; install adwaita-icon-theme or set KURO_SKIP_ICON_GATE=1 to skip this gate"
+            );
+            eprintln!("skipped: KURO_SKIP_ICON_GATE is set and the Adwaita icon theme is not installed");
+            return;
+        }
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut have = BTreeSet::new();
+        svg_names(adwaita, &mut have);
+        svg_names(&root.join("src/theme/icons"), &mut have);
+        let mut asked = BTreeSet::new();
+        symbolic_names(&root.join("src"), &mut asked);
+        symbolic_names(&root.join("spec"), &mut asked);
+        assert!(asked.len() > 50, "the scan finds the icon names ({} found)", asked.len());
+        let missing: Vec<&String> = asked.iter().filter(|name| !have.contains(*name)).collect();
+        assert!(missing.is_empty(), "add these to src/theme/icons/scalable/actions or use a stock name: {missing:?}");
+    }
+}
