@@ -79,6 +79,9 @@ pub const SPACE_XS: i32 = 4;
 pub const SPACE_S: i32 = 8;
 pub const SPACE_M: i32 = 12;
 pub const SPACE_L: i32 = 16;
+/// Where a library card's edge sits from the page edge: the grid's padding (12, `.kb-library-grid`), a cell's padding
+/// (4, `.kb-library-grid > child`) and the card's own inset (`SPACE_S - 2`). The category tabs line up with it.
+pub const CARD_EDGE: i32 = 12 + 4 + (SPACE_S - 2);
 
 /// The text of the local badge.
 pub const LOCAL_BADGE: &str = "Local";

@@ -17,7 +17,9 @@ impl TabStrip {
         // `linked`: GTK draws the buttons as one segmented control, the look of the Anime | Manga switcher
         let row = gtk::Box::builder().orientation(O::Horizontal).css_classes(["linked"]).build();
         row.set_halign(gtk::Align::Start);
-        row.set_margin_start(12);
+        // the tabs start where the cards start, with some air above them
+        row.set_margin_start(crate::library::layout::CARD_EDGE);
+        row.set_margin_top(crate::library::layout::SPACE_S);
         row.set_margin_end(12);
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Automatic)
