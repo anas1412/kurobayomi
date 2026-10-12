@@ -87,7 +87,8 @@ impl CoverView {
         stack.add_named(&picture, Some("image"));
         // the image sits on an overlay over an empty base, so its natural size never reaches the layout: the cover is
         // always the size it is given (a large image made a history row as tall as the image)
-        let sized = crate::ui::sized(&stack, width, height);
+        // the frame sets the size (border included); the overlay only keeps the image's natural size out of it
+        let sized = crate::ui::sized(&stack, -1, -1);
         let frame = gtk::Frame::new(None);
         frame.set_size_request(width, height);
         frame.set_overflow(gtk::Overflow::Hidden);
