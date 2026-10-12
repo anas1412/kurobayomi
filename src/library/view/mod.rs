@@ -289,7 +289,7 @@ impl LibraryView {
         let (weak, seen) = (Rc::downgrade(&inner), FlagCell::new((-1, -1)));
         let scroller = inner.borrow().scroller.clone();
         scroller.add_tick_callback(move |scroller, _| {
-            let size = (window_width(scroller), scroller.height());
+            let size = (scroller.width(), scroller.height());
             let before = seen.replace(size);
             if before != size {
                 if let Some(inner) = weak.upgrade() {
@@ -914,10 +914,16 @@ fn window_width(widget: &impl IsA<gtk::Widget>) -> i32 {
 fn apply_columns(inner: &Rc<RefCell<Inner>>) {
     let (grid, columns) = {
         let st = inner.borrow();
-        let width = window_width(&st.scroller);
+        // the grid's own area, not the window (which includes the sidebar): a count taken from the window asked for
+        // more width than the page has, which grew the window without end once the page stopped scrolling sideways
+        let width = match st.scroller.width() {
+            0 => window_width(&st.scroller),
+            own => own,
+        };
         (st.grid.clone(), columns_for_width(width, diet::LIBRARY_COLUMNS, diet::LIBRARY_COLUMNS) as u32)
     };
-    grid.set_min_columns(columns);
+    // never force a minimum: a forced count makes the grid demand width, so the window can only grow
+    grid.set_min_columns(1);
     grid.set_max_columns(columns);
 }
 
