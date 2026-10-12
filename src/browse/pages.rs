@@ -308,20 +308,24 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
         view.restart_with(search_listing(entry.text().as_str()), seed.for_search(running));
     });
 
-    let chips = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    // the shared top row of a page (`ui::pill_row`), as the library's categories and the download queue's actions
+    let chips = crate::ui::pill_row();
     chips.set_margin_start(12);
     chips.set_margin_end(12);
-    chips.set_margin_top(8);
-    chips.set_margin_bottom(8);
-    let popular = gtk::ToggleButton::with_label(&tr(MsgKey::popular));
-    popular.set_active(matches!(initial_query, BrowseQuery::Popular));
-    chips.append(&popular);
-    let mut latest_chip = None;
+    let mut labels = vec![tr(MsgKey::popular)];
     if supports_latest {
-        let latest = gtk::ToggleButton::with_label(&tr(MsgKey::latest));
-        latest.set_group(Some(&popular));
-        latest.set_active(matches!(initial_query, BrowseQuery::Latest));
-        chips.append(&latest);
+        labels.push(tr(MsgKey::latest));
+    }
+    // a page that opens on a search has neither pressed (`usize::MAX` matches no index)
+    let active = match initial_query {
+        BrowseQuery::Popular => 0,
+        BrowseQuery::Latest if supports_latest => 1,
+        _ => usize::MAX,
+    };
+    let mut pills = crate::ui::choice_pills(&chips, &labels, active).into_iter();
+    let popular = pills.next().expect("the Popular pill");
+    let mut latest_chip = None;
+    if let Some(latest) = pills.next() {
         let (view, seed) = (listing_view.clone(), Rc::clone(&filters));
         latest.connect_toggled(move |button| {
             if button.is_active() {

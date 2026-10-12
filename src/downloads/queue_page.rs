@@ -34,7 +34,8 @@ pub fn page() -> Option<gtk::Widget> {
     column.set_margin_bottom(16);
     column.set_margin_start(16);
     column.set_margin_end(16);
-    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    // the shared top row of a page (`ui::pill_row`), as the library's categories
+    let actions = crate::ui::pill_row();
     let toggle = gtk::Button::new();
     let clear = gtk::Button::with_label("Clear");
     actions.append(&toggle);
@@ -43,7 +44,7 @@ pub fn page() -> Option<gtk::Widget> {
     column.append(&actions);
     column.append(&rows);
 
-    let page = Page { queues: queues.clone(), toggle: toggle.clone(), rows, shown: Rc::new(RefCell::new(None)), buttons: Rc::default() };
+    let page = Page { queues: queues.clone(), toggle: toggle.clone(), actions: actions.clone(), rows, shown: Rc::new(RefCell::new(None)), buttons: Rc::default() };
     let on_toggle = page.clone();
     toggle.connect_clicked(move |_| {
         let resume = !running(&on_toggle.queues);
@@ -85,6 +86,8 @@ pub fn page() -> Option<gtk::Widget> {
 struct Page {
     queues: Queues,
     toggle: gtk::Button,
+    /// Resume or Pause and Clear: hidden while nothing is queued.
+    actions: gtk::Box,
     rows: gtk::Box,
     /// The key of the rows last drawn. The list is rebuilt only when it changes.
     shown: Rc<RefCell<Option<String>>>,
@@ -122,8 +125,13 @@ impl Page {
             self.rows.remove(&child);
         }
         self.buttons.borrow_mut().clear();
-        if items.is_empty() && waiting.is_empty() {
-            self.rows.append(&gtk::Label::new(Some("No downloads are queued.")));
+        let empty = items.is_empty() && waiting.is_empty();
+        self.actions.set_visible(!empty);
+        if empty {
+            // the app's empty state (icon, line), as the library and history show theirs
+            let (state, _) = crate::browse::look::empty_state("folder-download-symbolic", "No downloads are queued.", None);
+            state.set_vexpand(true);
+            self.rows.append(&state);
         }
         for item in items {
             self.rows.append(&self.row(item));

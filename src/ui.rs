@@ -236,6 +236,35 @@ pub fn scrolled(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
 
 pub use crate::clamp::clamp;
 
+/// The row of buttons at the top of a page, under its header: choices (the library's categories) or actions (Resume and
+/// Clear of the download queue). One spacing and one top margin, so every page's top row looks the same; the caller sets
+/// the start inset to line up with its own content.
+pub fn pill_row() -> GBox {
+    let row = GBox::new(O::Horizontal, 8);
+    row.set_halign(Align::Start);
+    row.set_margin_top(8);
+    row.set_margin_bottom(4);
+    row
+}
+
+/// Appends one toggle per label to `row` as a group (one active at a time), `active` pressed (none when it matches no
+/// index), and returns them in order.
+/// The buttons exist before any handler is connected, so setting the active one fires nothing. The library's categories
+/// and Browse's Popular | Latest are built with it.
+pub fn choice_pills(row: &GBox, labels: &[String], active: usize) -> Vec<gtk::ToggleButton> {
+    let mut buttons: Vec<gtk::ToggleButton> = Vec::new();
+    for (index, label) in labels.iter().enumerate() {
+        let button = gtk::ToggleButton::with_label(label);
+        if let Some(first) = buttons.first() {
+            button.set_group(Some(first));
+        }
+        button.set_active(index == active);
+        row.append(&button);
+        buttons.push(button);
+    }
+    buttons
+}
+
 /// `child` shown at exactly `width` x `height`, whatever its own natural size: an image's size never reaches the layout.
 /// The child sits on an overlay over an empty base, so only the requested size counts; it is clipped to it.
 pub fn sized(child: &impl IsA<gtk::Widget>, width: i32, height: i32) -> gtk::Overlay {
