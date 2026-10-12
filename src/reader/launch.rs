@@ -136,7 +136,7 @@ fn delete_sink(db: Arc<Db>, index: DownloadIndex, data_dir: PathBuf) -> DeleteSi
 pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     let app = crate::data::app();
     let store = app.base.store().clone();
-    let db = app.db(Kind::Manga);
+    let db = app.db.clone();
     let data_dir = kuro_platform::linux::LinuxPaths::system().ok().map(|paths| paths.data_dir());
     let index = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
     let manga = MangaRepo::new(Arc::clone(&db)).by_id(manga_id).ok();
@@ -164,6 +164,7 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     let gate = retry_gate.as_ref().map_or_else(open_gate, |fetch| fetch());
     let in_reader = Arc::clone(&lookup);
     let (neighbours_db, on_disk) = (Arc::clone(&db), Arc::clone(&lookup));
+    let incognito = app.base.incognito_mode.get();
     let deps = ReaderDeps {
         db: Arc::clone(&db),
         manga_id,
@@ -179,7 +180,7 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
         }),
         is_downloaded: Rc::new(move |chapter| in_reader(chapter)),
         downloaded_only: app.base.downloaded_only.get(),
-        incognito: app.base.incognito_mode.get(),
+        incognito,
         prefs_store: store.clone(),
     };
     let extras = ReaderExtras {
@@ -189,8 +190,10 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
         },
         data_dir,
         downloads: DownloadCheck::new(manga_is_local, lookup),
-        // the app starts no tracker layer and no download manager yet, so these have nothing to call
-        track_update: None,
+        // the app starts no download manager yet, so the download-ahead hook has nothing to call
+        track_update: Some(Rc::new(move |manga_id, number| {
+            crate::entry_core::tracking::progress::item_finished(Kind::Manga, manga_id, number, incognito);
+        })),
         download_ahead: None,
         retry_gate,
     };
@@ -199,7 +202,7 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
 
 /// The reader page for the entry screens' title and chapter name.
 pub fn page_for(title: &str, chapter_name: &str) -> gtk::Box {
-    let (manga_id, chapter_id) = find_ids(&crate::data::app().db(Kind::Manga), title, chapter_name);
+    let (manga_id, chapter_id) = find_ids(&crate::data::app().db.clone(), title, chapter_name);
     open_chapter(manga_id, chapter_id)
 }
 
@@ -213,8 +216,8 @@ mod tests {
 
     fn db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().unwrap();
-        let path = kuro_db::schema_manga::db_path(dir.path());
-        let writer = kuro_db::schema_manga::open(&path).unwrap();
+        let path = kuro_db::schema_unified::db_path(dir.path());
+        let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         (dir, Arc::new(Db::new(&path, writer).unwrap()))
     }
 
@@ -342,6 +345,7 @@ mod tests {
         assert_eq!(find_ids(&db, "Browsed", &added[0].id.to_string()), (manga_id, added[0].id), "Continue passes the chapter id");
         let mut favourite = Manga::create();
         favourite.title = "Browsed".into();
+        favourite.url = "/favourite".into();
         favourite.favorite = true;
         let favourite_id = MangaRepo::new(Arc::clone(&db)).insert(&favourite).unwrap();
         assert_eq!(find_ids(&db, "Browsed", "Chapter 1"), (favourite_id, 0), "a favourite with the title comes first");

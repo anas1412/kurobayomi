@@ -161,7 +161,7 @@ pub fn publish_launcher_badge(app_id: &str) {
     let since = three_months_ago(&Local::now());
     for (slot, kind) in [Kind::Manga, Kind::Anime].into_iter().enumerate() {
         let (counts, push) = (Rc::clone(&counts), Rc::clone(&push));
-        let feed = UpdatesRepo::new(data::app().db(kind)).watch_with_read(kind, false, since);
+        let feed = UpdatesRepo::new(data::app().db.clone()).watch_with_read(kind, false, since);
         bind_watch(feed, move |rows| {
             let Ok(rows) = rows else { return };
             let mut all = counts.get();

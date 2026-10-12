@@ -1,5 +1,5 @@
-//! The app's databases and preference store, opened once on the GTK thread. The screens read them through [`app`].
-//! The startup cleanup of the category-id preference sets (T-08a-035) runs here, after both databases open.
+//! The app's database and preference store, opened once on the GTK thread. The screens read them through [`app`].
+//! The startup cleanup of the category-id preference sets (T-08a-035) runs here, after the database opens.
 
 use std::cell::OnceCell;
 use std::collections::BTreeSet;
@@ -19,8 +19,7 @@ use kuro_prefs::store::PrefStore;
 
 /// The shared state of the library screens.
 pub struct App {
-    pub manga_db: Arc<Db>,
-    pub anime_db: Arc<Db>,
+    pub db: Arc<Db>,
     pub manga_categories: CategoryService,
     pub anime_categories: CategoryService,
     /// App-state switches (incognito, downloaded only) over the shared store.
@@ -37,14 +36,6 @@ impl App {
             Kind::Anime => &self.anime_categories,
         }
     }
-
-    /// The database of one kind.
-    pub fn db(&self, kind: Kind) -> Arc<Db> {
-        match kind {
-            Kind::Manga => Arc::clone(&self.manga_db),
-            Kind::Anime => Arc::clone(&self.anime_db),
-        }
-    }
 }
 
 thread_local! {
@@ -54,11 +45,10 @@ thread_local! {
 /// The stores opened by [`open_blocking`], ready to move to the GTK thread for [`install`].
 pub struct Opened {
     prefs_store: PrefStore,
-    manga_db: Arc<Db>,
-    anime_db: Arc<Db>,
+    db: Arc<Db>,
 }
 
-/// Opens the preference store and both databases, running the raw-key and schema migrations. This is the slow part of
+/// Opens the preference store and the database, running the raw-key and schema migrations. This is the slow part of
 /// startup, so it runs off the GTK thread while the splash timer ticks (T-01a-043).
 pub fn open_blocking() -> Result<Opened, String> {
     let paths = LinuxPaths::system().map_err(|e| e.to_string())?;
@@ -69,13 +59,17 @@ pub fn open_blocking() -> Result<Opened, String> {
     // raw-key migrations run before any typed section is built over the store
     kuro_prefs::migrate::migrate(&prefs_store, kuro_core::app_info::APP_INFO.version_code as i32).map_err(|e| e.to_string())?;
     let data_dir = paths.data_dir();
-    let manga_path = kuro_db::schema_manga::db_path(&data_dir);
-    let anime_path = kuro_db::schema_anime::db_path(&data_dir);
-    let manga_writer = open_or_restore(&manga_path, kuro_db::schema_manga::open)?;
-    let anime_writer = open_or_restore(&anime_path, kuro_db::schema_anime::open)?;
-    let manga_db = Arc::new(Db::new(&manga_path, manga_writer).map_err(|e| e.to_string())?);
-    let anime_db = Arc::new(Db::new(&anime_path, anime_writer).map_err(|e| e.to_string())?);
-    Ok(Opened { prefs_store, manga_db, anime_db })
+    let path = kuro_db::schema_unified::db_path(&data_dir);
+    let existed = std::fs::metadata(&path).is_ok_and(|m| m.len() > 0);
+    let writer = open_or_restore(&path, kuro_db::schema_unified::open_file)?;
+    let db = Arc::new(Db::new(&path, writer).map_err(|e| e.to_string())?);
+    if !existed {
+        let old = kuro_db::schema_unified::legacy_files(&data_dir);
+        if !old.is_empty() {
+            tracing::warn!(files = ?old, "old per-kind databases found; left untouched and not read; use Restore to bring the data over");
+        }
+    }
+    Ok(Opened { prefs_store, db })
 }
 
 /// Opens one database file. A damaged file is moved aside by the open (`<file>.corrupt-<UTC>`, which returns
@@ -134,34 +128,32 @@ pub fn install(opened: Opened) -> Result<(), String> {
     if APP.with(|cell| cell.get().is_some()) {
         return Ok(());
     }
-    let Opened { prefs_store, manga_db, anime_db } = opened;
+    let Opened { prefs_store, db } = opened;
     watch_save_failures(&prefs_store);
     let prefs = Arc::new(LibraryPrefs::new(prefs_store.clone()));
-    let known_manga = known_ids(&CategoryRepo::new(Arc::clone(&manga_db), Kind::Manga))?;
-    let known_anime = known_ids(&CategoryRepo::new(Arc::clone(&anime_db), Kind::Anime))?;
+    let known_manga = known_ids(&CategoryRepo::new(Arc::clone(&db), Kind::Manga))?;
+    let known_anime = known_ids(&CategoryRepo::new(Arc::clone(&db), Kind::Anime))?;
     startup_cleanup(&prefs_store, &prefs, &known_manga, &known_anime);
 
     let base = BasePrefs::new(prefs_store.clone());
     crate::startup::probe_texture_limit();
     let app = App {
-        manga_categories: CategoryService::new(Arc::clone(&manga_db), Kind::Manga, Arc::clone(&prefs)),
-        anime_categories: CategoryService::new(Arc::clone(&anime_db), Kind::Anime, Arc::clone(&prefs)),
-        manga_db,
-        anime_db,
+        manga_categories: CategoryService::new(Arc::clone(&db), Kind::Manga, Arc::clone(&prefs)),
+        anime_categories: CategoryService::new(Arc::clone(&db), Kind::Anime, Arc::clone(&prefs)),
+        db,
         base,
         library: prefs,
     };
     APP.with(|cell| cell.set(Rc::new(app))).map_err(|_| "the app data is already open".to_owned())
 }
 
-/// Test helper: fresh databases in `dir` and an in-memory preference store, for [`install`]. Installing is for the
+/// Test helper: a fresh database in `dir` and an in-memory preference store, for [`install`]. Installing is for the
 /// life of the GTK thread, so only a test that runs alone (`--ignored`) may use it.
 #[cfg(test)]
 pub fn open_in(dir: &std::path::Path) -> Result<Opened, String> {
-    let (manga_path, anime_path) = (dir.join("manga.db"), dir.join("anime.db"));
-    let manga_db = Arc::new(Db::new(&manga_path, kuro_db::schema_manga::open(&manga_path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?);
-    let anime_db = Arc::new(Db::new(&anime_path, kuro_db::schema_anime::open(&anime_path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?);
-    Ok(Opened { prefs_store: PrefStore::in_memory(), manga_db, anime_db })
+    let path = kuro_db::schema_unified::db_path(dir);
+    let db = Arc::new(Db::new(&path, kuro_db::schema_unified::open_file(&path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?);
+    Ok(Opened { prefs_store: PrefStore::in_memory(), db })
 }
 
 /// True once [`install`] has succeeded.
@@ -190,10 +182,10 @@ mod tests {
     #[test]
     fn a_corrupt_database_is_replaced_by_the_newest_backup_or_a_fresh_file() {
         let dir = tempfile::tempdir().unwrap();
-        let path = kuro_db::schema_manga::db_path(dir.path());
+        let path = kuro_db::schema_unified::db_path(dir.path());
         std::fs::write(&path, b"not a database ".repeat(300)).unwrap();
         // no backup: the damaged file is kept beside a new empty database
-        drop(open_or_restore(&path, kuro_db::schema_manga::open).unwrap());
+        drop(open_or_restore(&path, kuro_db::schema_unified::open_file).unwrap());
         let kept = std::fs::read_dir(dir.path()).unwrap().filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().contains(".corrupt-"));
         assert!(kept);
         assert!(path.exists());

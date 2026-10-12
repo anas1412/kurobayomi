@@ -20,19 +20,11 @@ use kuro_domain::items::sorter::sort_seasons;
 use kuro_domain::release::version::is_newer;
 use kuro_prefs::store::PrefStore;
 
-/// A migrated anime database. Keep the `TempDir` alive.
-fn anime_db() -> (tempfile::TempDir, Arc<Db>) {
+/// A migrated database. Keep the `TempDir` alive.
+fn test_db() -> (tempfile::TempDir, Arc<Db>) {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("tachiyomi.animedb");
-    let writer = kuro_db::schema_anime::open(&path).expect("anime schema");
-    (dir, Arc::new(Db::new(&path, writer).expect("anime handle")))
-}
-
-/// A migrated manga database. Keep the `TempDir` alive.
-fn manga_db() -> (tempfile::TempDir, Arc<Db>) {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("tachiyomi.db");
-    let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
+    let path = dir.path().join("kurobayomi.db");
+    let writer = kuro_db::schema_unified::open_file(&path).expect("manga schema");
     (dir, Arc::new(Db::new(&path, writer).expect("manga handle")))
 }
 
@@ -81,7 +73,7 @@ fn q03_chapter_and_episode_defaults_share_their_keys() {
 #[test]
 fn q04_network_to_local_has_no_source_manager_and_overlays_only_in_memory() {
     use kuro_domain::entries::network_to_local::network_to_local_anime;
-    let (_d, db) = anime_db();
+    let (_d, db) = test_db();
     let repo = AnimeRepo::new(db);
     let stored = repo.insert(&Anime { url: "u".into(), title: "Stored".into(), source: 1, ..Anime::create() }).unwrap();
     let got = network_to_local_anime(&repo, &Anime { url: "u".into(), title: "Fresh".into(), source: 1, ..Anime::create() })
@@ -214,7 +206,7 @@ fn q17_airing_episode_and_time_are_written_together() {
 /// Q18: an update cannot clear a text field, because `None` means untouched.
 #[test]
 fn q18_an_absent_text_field_in_an_update_keeps_the_stored_text() {
-    let (_d, db) = anime_db();
+    let (_d, db) = test_db();
     let repo = AnimeRepo::new(db);
     let id = repo.insert(&Anime { url: "u".into(), title: "T".into(), description: Some("old".into()), source: 1, ..Anime::create() }).unwrap();
     repo.update(&AnimeUpdate { description: None, ..AnimeUpdate::new(id) }).unwrap();
@@ -224,7 +216,7 @@ fn q18_an_absent_text_field_in_an_update_keeps_the_stored_text() {
 /// Q19: the lookup's second parameter is the entry id, named for what it is.
 #[test]
 fn q19_the_second_parameter_of_the_chapter_lookup_is_the_manga_id() {
-    let (_d, db) = manga_db();
+    let (_d, db) = test_db();
     let manga = kuro_data::manga::MangaRepo::new(db.clone())
         .insert(&Manga { url: "m".into(), title: "M".into(), source: 1, ..Manga::create() })
         .unwrap();

@@ -311,7 +311,7 @@ mod awaits_and_joins {
     use tokio::sync::watch;
 
     use super::*;
-    use crate::testdb::{anime_db, manga_db};
+    use crate::testdb::test_db;
 
     fn manga_row(url: &str) -> Manga {
         Manga {
@@ -373,28 +373,27 @@ mod awaits_and_joins {
 
     #[test]
     fn await_manga_and_anime_pass_the_missing_row_error_through() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let mangas = MangaRepo::new(db.clone());
         let id = mangas.insert(&manga_row("/m")).expect("insert");
         assert_eq!(await_manga(&mangas, id).expect("row").url, "/m");
         assert!(matches!(await_manga(&mangas, id + 99), Err(DataError::NotFound)));
 
-        let (_d2, adb) = anime_db();
-        let animes = AnimeRepo::new(adb);
+        let animes = AnimeRepo::new(db);
         assert!(matches!(await_anime(&animes, 99), Err(DataError::NotFound)));
     }
 
     #[test]
     fn await_chapters_episodes_and_seasons_pass_results_through() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let mangas = MangaRepo::new(db.clone());
         let mid = mangas.insert(&manga_row("/m")).expect("insert");
         db.write(|tx| Ok(chapters::insert(tx, &chapter_row(mid, "c1"))?)).expect("chapter");
-        let chapter_repo = ChapterRepo::new(db);
+        let chapter_repo = ChapterRepo::new(db.clone());
         assert_eq!(await_chapters(&chapter_repo, mid, false).expect("ok").len(), 1);
         assert!(await_chapters(&chapter_repo, mid + 99, false).expect("ok").is_empty());
 
-        let (_d2, adb) = anime_db();
+        let adb = db;
         let animes = AnimeRepo::new(adb.clone());
         let aid = animes
             .insert(&Anime {
@@ -412,8 +411,8 @@ mod awaits_and_joins {
 
     #[test]
     fn seasons_facade_is_empty_when_the_read_fails() {
-        let (_d, db) = anime_db();
-        db.write(|tx| Ok(tx.execute_batch("DROP VIEW animeseasonsView;")?))
+        let (_d, db) = test_db();
+        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE entries RENAME TO entries_gone;")?))
             .expect("drop view");
         let repo = AnimeRepo::new(db);
         assert!(get_seasons_by_parent_id(&repo, 1).is_empty(), "logged, then an empty list");
@@ -421,8 +420,8 @@ mod awaits_and_joins {
 
     #[test]
     fn await_chapters_passes_a_database_error_through() {
-        let (_d, db) = manga_db();
-        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE chapters RENAME TO chapters_gone;")?))
+        let (_d, db) = test_db();
+        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE items RENAME TO items_gone;")?))
             .expect("rename");
         let repo = ChapterRepo::new(db);
         assert!(await_chapters(&repo, 1, false).is_err(), "the error reaches the caller");
@@ -430,11 +429,11 @@ mod awaits_and_joins {
 
     #[tokio::test]
     async fn manga_with_chapters_emits_after_both_then_on_a_read_toggle() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let mangas = MangaRepo::new(db.clone());
         let mid = mangas.insert(&manga_row("/m")).expect("insert");
         let cid = db.write(|tx| Ok(chapters::insert(tx, &chapter_row(mid, "c1"))?)).expect("chapter");
-        let chapter_repo = ChapterRepo::new(db);
+        let chapter_repo = ChapterRepo::new(db.clone());
         let (mut rx, _handle) = subscribe_manga_with_chapters(&mangas, &chapter_repo, mid, false);
         let pair = wait_for(&mut rx, |(m, c)| m.is_some() && !c.is_empty()).await;
         assert_eq!(pair.0.as_ref().as_ref().map(|m| m.url.clone()), Some("/m".into()));
@@ -449,7 +448,7 @@ mod awaits_and_joins {
 
     #[tokio::test]
     async fn dropping_the_manga_with_chapters_receiver_stops_its_task() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let mangas = MangaRepo::new(db.clone());
         let mid = mangas.insert(&manga_row("/m")).expect("insert");
         let (rx, handle) = subscribe_manga_with_chapters(&mangas, &ChapterRepo::new(db), mid, false);
@@ -462,7 +461,7 @@ mod awaits_and_joins {
 
     #[tokio::test]
     async fn anime_with_episodes_and_seasons_emits_after_all_three_then_on_an_episode_insert() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let animes = AnimeRepo::new(db.clone());
         let aid = animes
             .insert(&Anime {
@@ -493,7 +492,7 @@ mod awaits_and_joins {
 
     #[tokio::test]
     async fn dropping_the_anime_joined_receiver_stops_its_task() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let animes = AnimeRepo::new(db.clone());
         let aid = animes
             .insert(&Anime {

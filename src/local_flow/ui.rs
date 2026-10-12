@@ -45,7 +45,7 @@ pub fn rescan(kind: Kind) {
 
 /// Runs `job` on a worker thread with the database of `kind`, then shows its result as toasts and reloads the library.
 fn run(kind: Kind, job: impl FnOnce(&Arc<Db>, i64) -> Result<Vec<Outcome>, String> + Send + 'static) {
-    let db = crate::data::app().db(kind);
+    let db = crate::data::app().db.clone();
     let (sender, receiver) = async_channel::bounded(1);
     std::thread::spawn(move || {
         let _ = sender.send_blocking(job(&db, chrono::Utc::now().timestamp_millis()));

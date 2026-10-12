@@ -19,14 +19,10 @@ use rusqlite::{Connection, named_params};
 use crate::{DataResult, ENTRY_DEBOUNCE};
 
 /// Tables a manga history list reads.
-const MANGA_HISTORY_TABLES: &[&str] = &["history", "chapters", "mangas"];
+const MANGA_HISTORY_TABLES: &[&str] = &["history", "items", "entries"];
 
 /// Tables an anime history list reads.
-const ANIME_HISTORY_TABLES: &[&str] = &["animehistory", "episodes", "animes"];
-
-/// The newest history row of each manga, as the history screen lists it. The columns of `historyView`.
-const HISTORY_COLUMNS: &str = "id, mangaId, chapterId, title, thumbnailUrl, source, favorite, cover_last_modified, \
-     chapterNumber, readAt, readDuration";
+const ANIME_HISTORY_TABLES: &[&str] = &["history", "items", "entries"];
 
 /// One `history` row of a chapter.
 #[derive(Clone, Debug, PartialEq)]
@@ -105,8 +101,7 @@ pub(crate) fn manga_list(c: &Connection, query: &str, parity: bool) -> DataResul
 /// The newest history row with `readAt > 0`, or `None`. Ties broken by the higher id, so it equals the first
 /// row of [`manga_list`] with an empty query.
 fn manga_latest(c: &Connection) -> DataResult<Option<HistoryItem>> {
-    let sql = format!("SELECT {HISTORY_COLUMNS} FROM historyView WHERE readAt > 0 ORDER BY readAt DESC, id DESC LIMIT 1");
-    let mut st = c.prepare_cached(&sql)?;
+    let mut st = c.prepare_cached(manga_views::GET_LATEST_HISTORY)?;
     let mut rows = st.query_map([], HistoryViewRow::from_row)?;
     Ok(rows.next().transpose()?.map(HistoryItem::from))
 }
@@ -237,8 +232,9 @@ impl AnimeHistoryRepo {
     /// The lowest history id wins when rows repeat. `None` when no episode has that url.
     pub fn by_episode_url(c: &Connection, url: &str) -> DataResult<Option<AnimeHistory>> {
         let mut st = c.prepare_cached(
-            "SELECT H._id, H.episode_id, H.last_seen FROM animehistory H \
-             JOIN episodes E ON E._id = H.episode_id WHERE E.url = :url ORDER BY H._id LIMIT 1",
+            "SELECT H._id, H.item_id, H.last_at FROM history H \
+             JOIN items E ON E._id = H.item_id JOIN entries N ON N._id = E.entry_id \
+             WHERE N.kind = 'anime' AND E.url = :url ORDER BY H._id LIMIT 1",
         )?;
         let mut rows = st.query_map(named_params! {":url": url}, |r| {
             Ok(AnimeHistory { id: r.get(0)?, episode_id: r.get(1)?, last_seen: r.get(2)? })
@@ -255,8 +251,8 @@ impl AnimeHistoryRepo {
     pub fn by_anime_id(&self, anime_id: i64) -> DataResult<Vec<AnimeHistory>> {
         self.db.read(|c| {
             let mut st = c.prepare_cached(
-                "SELECT H._id, H.episode_id, H.last_seen FROM animehistory H \
-                 JOIN episodes E ON E._id = H.episode_id WHERE E.anime_id = :animeId ORDER BY H._id",
+                "SELECT H._id, H.item_id, H.last_at FROM history H \
+                 JOIN items E ON E._id = H.item_id WHERE E.entry_id = :animeId ORDER BY H._id",
             )?;
             let rows = st.query_map(named_params! {":animeId": anime_id}, |r| {
                 Ok(AnimeHistory { id: r.get(0)?, episode_id: r.get(1)?, last_seen: r.get(2)? })
@@ -399,10 +395,10 @@ impl HistoryWrites {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::support::{anime_db, insert_anime, insert_chapter, insert_episode, insert_manga, manga_db};
+    use crate::support::{test_db, insert_anime, insert_chapter, insert_episode, insert_manga};
 
     fn repo_with_chapters(titles: &[(&str, &[&str])]) -> (tempfile::TempDir, Arc<Db>, Vec<(i64, i64)>) {
-        let (dir, db) = manga_db();
+        let (dir, db) = test_db();
         let mut ids = Vec::new();
         for (title, urls) in titles {
             let m = insert_manga(&db, title, true);
@@ -493,7 +489,7 @@ mod tests {
 
     #[test]
     fn list_rows_carry_the_manga_favorite_flag() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let fav = insert_manga(&db, "Fav", true);
         let not = insert_manga(&db, "Not", false);
         let repo = MangaHistoryRepo::new(db.clone());
@@ -506,7 +502,7 @@ mod tests {
     /// The worked example of section 3: upserts accumulate time, resets keep it, a new read adds to it.
     #[test]
     fn upsert_accumulates_read_time_across_reset_and_reread() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let c10 = insert_chapter(&db, m, "c10");
         let repo = MangaHistoryRepo::new(db.clone());
@@ -525,7 +521,7 @@ mod tests {
 
     #[test]
     fn reset_by_manga_id_touches_only_that_manga_rows() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let a = insert_manga(&db, "a", false);
         let b = insert_manga(&db, "b", false);
         let repo = MangaHistoryRepo::new(db.clone());
@@ -539,7 +535,7 @@ mod tests {
 
     #[test]
     fn delete_all_removes_rows_and_time_and_reports_success() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let repo = MangaHistoryRepo::new(db.clone());
         repo.upsert(insert_chapter(&db, m, "c"), 10, 500);
@@ -550,7 +546,7 @@ mod tests {
 
     #[test]
     fn a_failing_upsert_is_logged_and_does_not_propagate() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaHistoryRepo::new(db.clone());
         // Chapter 999 does not exist: the foreign key fails and the call returns normally.
         assert!(!repo.upsert(999, 10, 0));
@@ -560,7 +556,7 @@ mod tests {
 
     #[test]
     fn a_manga_history_watch_re_emits_after_upsert_reset_and_chapter_delete() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let chapter = insert_chapter(&db, m, "c");
         let repo = MangaHistoryRepo::new(db.clone());
@@ -574,14 +570,14 @@ mod tests {
             assert!(sub.changed().await.unwrap().unwrap().is_empty());
             repo.try_upsert(chapter, 20, 0).unwrap();
             assert_eq!(sub.changed().await.unwrap().unwrap().len(), 1);
-            db.write(|tx| Ok(tx.execute("DELETE FROM chapters WHERE _id = ?1", [chapter]).map(drop)?)).unwrap();
+            db.write(|tx| Ok(tx.execute("DELETE FROM items WHERE _id = ?1", [chapter]).map(drop)?)).unwrap();
             assert!(sub.changed().await.unwrap().unwrap().is_empty(), "cascade removes the history row");
         });
     }
 
     #[test]
     fn delete_all_notifies_a_history_watch() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let chapter = insert_chapter(&db, m, "c");
         let repo = MangaHistoryRepo::new(db.clone());
@@ -597,7 +593,7 @@ mod tests {
 
     #[test]
     fn anime_upsert_overwrites_last_seen_even_when_older() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let a = insert_anime(&db, "a", false);
         let e = insert_episode(&db, a, "e1");
         let repo = AnimeHistoryRepo::new(db.clone());
@@ -610,7 +606,7 @@ mod tests {
 
     #[test]
     fn anime_reset_keeps_the_row_and_delete_all_removes_it() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let a = insert_anime(&db, "a", false);
         let e = insert_episode(&db, a, "e1");
         let repo = AnimeHistoryRepo::new(db.clone());
@@ -625,7 +621,7 @@ mod tests {
 
     #[test]
     fn anime_list_is_newest_first() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let a = insert_anime(&db, "Show", false);
         let b = insert_anime(&db, "Other", false);
         let repo = AnimeHistoryRepo::new(db.clone());
@@ -637,7 +633,7 @@ mod tests {
 
     #[test]
     fn recorder_stores_elapsed_time_then_zero_and_clamps_negative_spans() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let chapter = insert_chapter(&db, m, "c");
         let repo = MangaHistoryRepo::new(db.clone());
@@ -655,7 +651,7 @@ mod tests {
 
     #[test]
     fn recorder_writes_nothing_in_incognito_and_keeps_its_start() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let chapter = insert_chapter(&db, m, "c");
         let repo = MangaHistoryRepo::new(db.clone());
@@ -672,7 +668,7 @@ mod tests {
 
     #[test]
     fn reader_hooks_flush_then_restart_when_a_new_chapter_loads() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let first = insert_chapter(&db, m, "first");
         let second = insert_chapter(&db, m, "second");
@@ -690,7 +686,7 @@ mod tests {
 
     #[test]
     fn record_episode_writes_last_seen_and_nothing_in_incognito() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let a = insert_anime(&db, "a", false);
         let e = insert_episode(&db, a, "e");
         let repo = AnimeHistoryRepo::new(db.clone());
@@ -704,7 +700,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn drain_waits_for_every_outstanding_write() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let first = insert_chapter(&db, m, "first");
         let second = insert_chapter(&db, m, "second");
@@ -728,11 +724,11 @@ mod tests {
 #[cfg(test)]
 mod maintenance_tests {
     use super::*;
-    use crate::support::{anime_db, insert_anime, insert_chapter, insert_episode, insert_manga, manga_db};
+    use crate::support::{test_db, insert_anime, insert_chapter, insert_episode, insert_manga};
 
     #[test]
     fn remove_resetted_deletes_only_reset_manga_rows_and_returns_the_count() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let (a, b) = (insert_chapter(&db, m, "a"), insert_chapter(&db, m, "b"));
         let repo = MangaHistoryRepo::new(db.clone());
@@ -749,7 +745,7 @@ mod maintenance_tests {
 
     #[test]
     fn by_chapter_url_returns_the_row_of_that_url_or_none() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let a = insert_chapter(&db, m, "a");
         let repo = MangaHistoryRepo::new(db.clone());
@@ -761,7 +757,7 @@ mod maintenance_tests {
 
     #[test]
     fn anime_remove_resetted_deletes_only_reset_rows_and_by_episode_url_finds_the_row() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let a = insert_anime(&db, "Show", false);
         let (e1, e2) = (insert_episode(&db, a, "e1"), insert_episode(&db, a, "e2"));
         let repo = AnimeHistoryRepo::new(db.clone());

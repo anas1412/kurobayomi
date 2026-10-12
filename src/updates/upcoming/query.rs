@@ -54,16 +54,16 @@ mod tests {
 
     use super::*;
 
-    fn manga_db() -> (tempfile::TempDir, Arc<Db>) {
+    fn test_db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         (dir, Arc::new(Db::new(&path, writer).expect("manga db handle")))
     }
 
     #[test]
     fn upcoming_query_keeps_favourites_with_a_listed_status_from_local_midnight() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let now = Local.with_ymd_and_hms(2026, 10, 8, 12, 0, 0).single().expect("noon");
         let midnight = Local.with_ymd_and_hms(2026, 10, 8, 0, 0, 0).single().expect("midnight");
         let yesterday_late = midnight - Duration::minutes(1);

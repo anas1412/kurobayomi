@@ -19,13 +19,13 @@ pub fn reset_viewer_flags_anime(repo: &AnimeRepo) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testdb::{anime_db, manga_db};
+    use crate::testdb::test_db;
     use kuro_data::anime::{Anime, AnimeRepo};
     use kuro_data::manga::{Manga, MangaRepo};
 
     #[test]
     fn manga_reset_zeroes_three_entries_and_reports_success() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let ids: Vec<i64> = (0..3)
             .map(|i| {
@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn anime_reset_clears_skip_intro_disable_and_airing_bits() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let intro = 90_i64;
         let airing = 1_700_000_000_i64 << 24;

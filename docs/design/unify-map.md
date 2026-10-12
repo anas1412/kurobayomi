@@ -190,6 +190,15 @@ Behaviour differences that look like bugs. "Decide" = no right answer from code;
 | Mark read: Updates removes read downloads, Library does not. Decide | src/library/actions.rs:51-70 vs src/updates/bulk.rs:35-76 |
 
 ### Tracking (step 8)
+
+Added 2026-10-12 after the tracker wiring (src/entry_core/tracking/progress.rs: one `send` for reader, player and
+title-page mark-as-read):
+- Mark-as-read from Library and Updates does not reach the trackers yet (step 7 moves those screens onto `progress::marked`).
+- kuro-track's track_chapter_with / track_episode_with also check `auto_update_track`, so mark-as-read with "Always" is
+  blocked when the reader switch is off; Aniyomi checks only `auto_update_on_mark_read` there (step 8).
+- No "Trackers updated" toast after a send (`auto_track::success_toast_shown` is unused) (step 8).
+- The anime season and related tiles draw `ui::cover` placeholders: SeasonItem and the related rows carry no art (step 6).
+
 | Drift | Where |
 |---|---|
 | TrackChanged{entry_id} has no kind; anime 7 and manga 7 collide | kuro-track/src/events.rs:12, ctx.rs:146,160 (fixed by step 3 ids) |

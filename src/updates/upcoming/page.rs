@@ -184,7 +184,7 @@ impl UpcomingPage {
 
     /// Reads the entries off the GTK thread and shows them. A failure leaves the page as it is: there is no toast.
     fn reload(self: &Rc<Self>) {
-        let (db, kind) = (data::app().db(self.kind), self.kind);
+        let (db, kind) = (data::app().db.clone(), self.kind);
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let now = Local::now();

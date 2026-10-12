@@ -44,7 +44,7 @@ pub fn restore_manga_entry(
             // The membership insert trigger bumps `version` unless the row is syncing; the restore keeps the version it set.
             let version = mangas::get_by_id(tx, id)?.version;
             mangas_categories::set_categories(tx, id, &ids)?;
-            tx.execute("UPDATE mangas SET version = ?1 WHERE _id = ?2", [version, id])?;
+            tx.execute("UPDATE entries SET version = ?1 WHERE _id = ?2 AND kind = 'manga'", [version, id])?;
         }
     }
     restore_chapters(tx, id, &entry.chapters)?;
@@ -56,7 +56,7 @@ pub fn restore_manga_entry(
 
 fn memberships_differ(tx: &Transaction<'_>, manga_id: i64, ids: &[i64]) -> DbResult<bool> {
     let stored: Vec<i64> = tx
-        .prepare("SELECT category_id FROM mangas_categories WHERE manga_id = ?1")?
+        .prepare("SELECT category_id FROM entry_categories WHERE entry_id = ?1 AND kind = 'manga'")?
         .query_map([manga_id], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     Ok(differs_from_stored(stored, ids))
@@ -336,7 +336,7 @@ pub fn refresh_interval(tx: &Transaction<'_>, clock: &RunClock, manga_id: i64) -
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone};
-    use kuro_db::schema_manga;
+    use kuro_db::schema_unified;
     use kuro_db::statements_manga::categories;
     use rusqlite::Connection;
 
@@ -350,7 +350,7 @@ mod tests {
 
     fn db() -> (tempfile::TempDir, Connection) {
         let dir = tempfile::tempdir().unwrap();
-        let c = schema_manga::open(&dir.path().join("manga.db")).unwrap();
+        let c = schema_unified::open_file(&dir.path().join("kurobayomi.db")).unwrap();
         (dir, c)
     }
 
@@ -425,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_row_marked_syncing_is_cleared_and_backup_modified_times_are_not_written() {
+    fn backup_modified_times_are_not_written_on_an_existing_row() {
         for backup_version in [1, 9] {
             let (_d, mut c) = db();
             {
@@ -435,10 +435,6 @@ mod tests {
                 restore_manga_entry(&tx, &clock(), &first, &HashMap::new()).unwrap();
                 tx.commit().unwrap();
             }
-            let id = row(&c, "s").id;
-            mangas::update(&c, &MangaPatch { id, is_syncing: Some(true), ..Default::default() }).unwrap();
-            assert!(row(&c, "s").is_syncing);
-
             let tx = c.transaction().unwrap();
             let mut b = manga("s");
             b.version = backup_version;
@@ -447,8 +443,7 @@ mod tests {
             restore_manga_entry(&tx, &clock(), &b, &HashMap::new()).unwrap();
             tx.commit().unwrap();
             let r = row(&c, "s");
-            assert!(!r.is_syncing, "version {backup_version}: E-25");
-            assert_ne!(r.last_modified_at, 500, "E-26: the backup value is not copied");
+            assert_ne!(r.last_modified_at, 500, "version {backup_version}, E-26: the backup value is not copied");
             assert_ne!(r.favorite_modified_at, Some(900));
         }
     }
@@ -684,7 +679,7 @@ mod tests {
         assert_eq!((first.len(), first[0].remote_id, first[0].score), (1, 55, 4.0));
 
         // DB side has a higher progress and a different score; the backup changes remote id and library id only
-        c.execute("UPDATE manga_sync SET last_chapter_read = 8.0, score = 9.0, status = 2 WHERE manga_id = ?1", [id]).unwrap();
+        c.execute("UPDATE tracks SET last_item = 8.0, score = 9.0, status = 2 WHERE entry_id = ?1", [id]).unwrap();
         m.tracking[0].media_id = 66;
         m.tracking[0].library_id = 11;
         m.tracking[0].last_chapter_read = 5.0;

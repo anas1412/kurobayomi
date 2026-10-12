@@ -118,7 +118,7 @@ fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms
     };
     let (tracker, start) = if crate::data::is_installed() {
         let app = crate::data::app();
-        let tracker = Tracker::open(app.anime_db.clone(), episode_id, app.base.incognito_mode.get());
+        let tracker = Tracker::open(app.db.clone(), episode_id, app.base.incognito_mode.get());
         let start = tracker.as_ref().map_or(start_ms.max(0), |t| t.start_ms(start_ms));
         (tracker, start)
     } else {
@@ -184,7 +184,7 @@ impl Player {
         self.tracker = crate::data::is_installed()
             .then(|| {
                 let app = crate::data::app();
-                Tracker::open(app.anime_db.clone(), episode_id, app.base.incognito_mode.get())
+                Tracker::open(app.db.clone(), episode_id, app.base.incognito_mode.get())
             })
             .flatten();
         let start = self.tracker.as_ref().map_or(0, |t| t.start_ms(0));
@@ -626,7 +626,7 @@ fn row_title(episode_id: i64) -> Option<String> {
     if !crate::data::is_installed() {
         return None;
     }
-    let db = &crate::data::app().anime_db;
+    let db = &crate::data::app().db;
     let episode = EpisodeRepo::new(Arc::clone(db)).by_id(episode_id).ok()??;
     let anime = AnimeRepo::new(Arc::clone(db)).by_id(episode.anime_id).ok()?;
     Some(episode_title(&anime.title, &episode.name))
@@ -642,7 +642,7 @@ fn play_adjacent(shared: &Shared, step: Step, announce_end: bool) {
     if resolving || !crate::data::is_installed() {
         return;
     }
-    let db = crate::data::app().anime_db.clone();
+    let db = crate::data::app().db.clone();
     match adjacent(&db, current, step) {
         Ok(Some(next)) => play_episode(shared, next),
         Ok(None) => {
@@ -660,7 +660,7 @@ fn play_adjacent(shared: &Shared, step: Step, announce_end: bool) {
 
 /// Starts episode row `episode_id` in this window: a local file at once, a source's stream once it resolves.
 fn play_episode(shared: &Shared, episode_id: i64) {
-    let db = crate::data::app().anime_db.clone();
+    let db = crate::data::app().db.clone();
     match crate::local_flow::open::opening_by_id(&db, episode_id) {
         Ok(Some(found)) => {
             let title = title_or_file(episode_id, Path::new(&found.path));

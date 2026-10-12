@@ -1,17 +1,6 @@
-//! SQL of `track_retry_queue` (`p1-data-and-config.md` section 7.2). Kept as constants so the schema
-//! and the statements sit side by side.
-
-/// Creates the table when missing. The key is `(kind, entry_id, tracker_id)`, so anime and manga with the
-/// same numbers stay apart and a binding has one pending progress.
-pub const CREATE: &str = "CREATE TABLE IF NOT EXISTS track_retry_queue (
-    kind        TEXT    NOT NULL CHECK (kind IN ('anime', 'manga')),
-    entry_id    INTEGER NOT NULL,
-    tracker_id  INTEGER NOT NULL,
-    progress    REAL    NOT NULL,
-    queued_at   INTEGER NOT NULL,
-    attempts    INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (kind, entry_id, tracker_id)
-)";
+//! SQL of `track_retry_queue` (`p1-data-and-config.md` section 7.2). The table is part of the unified database schema
+//! (`kuro-db/sql/unified/schema.sql`); its key is `(kind, entry_id, tracker_id)`, so anime and manga with the same
+//! numbers stay apart and a binding has one pending progress.
 
 /// One statement. The highest pending progress wins, so a lower value never replaces a higher one.
 pub const UPSERT: &str = "INSERT INTO track_retry_queue (kind, entry_id, tracker_id, progress, queued_at, attempts)

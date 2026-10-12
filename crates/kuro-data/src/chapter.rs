@@ -11,7 +11,7 @@ use rusqlite::named_params;
 use crate::{DataResult, ENTRY_DEBOUNCE, ID_CHUNK, none_if_not_found};
 
 /// Tables a chapter list reads: the rows and the scanlator exclusions of the filter.
-const CHAPTER_TABLES: &[&str] = &["chapters", "excluded_scanlators"];
+const CHAPTER_TABLES: &[&str] = &["items", "excluded_scanlators"];
 
 /// One `chapters` row as the domain sees it. `scanlator` is `None` for a blank scanlator.
 #[derive(Clone, Debug, PartialEq)]
@@ -116,7 +116,9 @@ impl ChapterRepo {
     pub fn by_url_and_manga_id(&self, url: &str, manga_id: i64) -> DataResult<Option<Chapter>> {
         let rows = self.db.read(|c| {
             let mut st = c.prepare_cached(
-                "SELECT * FROM chapters WHERE url = :chapterUrl AND manga_id = :mangaId ORDER BY _id",
+                "SELECT _id, entry_id AS manga_id, url, name, scanlator, done AS read, bookmark, progress AS last_page_read, \
+                 number AS chapter_number, source_order, date_fetch, date_upload, last_modified_at, version, 0 AS is_syncing \
+                 FROM items WHERE url = :chapterUrl AND entry_id = :mangaId ORDER BY _id",
             )?;
             let rows = st
                 .query_map(named_params! {":chapterUrl": url, ":mangaId": manga_id}, ChapterRow::from_row)?
@@ -261,7 +263,7 @@ fn to_patch(u: &ChapterUpdate) -> ChapterPatch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::support::{insert_chapter, insert_manga, manga_db};
+    use crate::support::{insert_chapter, insert_manga, test_db};
 
     fn chapter(manga_id: i64, url: &str, scanlator: Option<&str>) -> Chapter {
         Chapter {
@@ -282,7 +284,7 @@ mod tests {
 
     #[test]
     fn add_all_returns_new_ids_in_input_order() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let repo = ChapterRepo::new(db.clone());
         let added = repo.add_all(&[chapter(m, "a", None), chapter(m, "b", None), chapter(m, "c", None)]).unwrap();
@@ -294,7 +296,7 @@ mod tests {
 
     #[test]
     fn add_all_with_a_failing_row_leaves_the_table_unchanged() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let repo = ChapterRepo::new(db.clone());
         // The second row points at a manga that does not exist: a foreign key failure.
@@ -305,7 +307,7 @@ mod tests {
 
     #[test]
     fn remove_with_ids_handles_1200_ids_in_one_call() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let repo = ChapterRepo::new(db.clone());
         let chapters: Vec<Chapter> = (0..1200).map(|i| chapter(m, &format!("u{i}"), None)).collect();
@@ -317,7 +319,7 @@ mod tests {
 
     #[test]
     fn by_manga_id_applies_the_scanlator_filter_exactly() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let repo = ChapterRepo::new(db.clone());
         repo.add_all(&[chapter(m, "a", Some("Group A")), chapter(m, "b", Some("Group B")), chapter(m, "c", None)])
@@ -332,7 +334,7 @@ mod tests {
     /// T-05a-021: a chapter without a scanlator is never excluded, even when a NULL-like name is listed.
     #[test]
     fn a_null_scanlator_chapter_is_never_excluded() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let repo = ChapterRepo::new(db.clone());
         repo.add_all(&[chapter(m, "c", None)]).unwrap();
@@ -345,7 +347,7 @@ mod tests {
     /// filter flag is 0, because the join runs regardless of the flag. With the flag set, the row is kept once.
     #[test]
     fn duplicate_exclusion_rows_multiply_chapters_only_when_the_filter_flag_is_zero() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let repo = ChapterRepo::new(db.clone());
         repo.add_all(&[chapter(m, "a", Some("Group A"))]).unwrap();
@@ -364,7 +366,7 @@ mod tests {
 
     #[test]
     fn scanlators_map_null_to_empty_and_keep_duplicates() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let repo = ChapterRepo::new(db.clone());
         repo.add_all(&[chapter(m, "a", Some("G")), chapter(m, "b", Some("G")), chapter(m, "c", None)]).unwrap();
@@ -375,7 +377,7 @@ mod tests {
 
     #[test]
     fn bookmarked_returns_only_bookmarked_chapters() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let repo = ChapterRepo::new(db.clone());
         let added = repo.add_all(&[chapter(m, "a", None), chapter(m, "b", None)]).unwrap();
@@ -386,7 +388,7 @@ mod tests {
 
     #[test]
     fn duplicate_url_returns_the_lowest_id() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let m = insert_manga(&db, "m", false);
         let first = insert_chapter(&db, m, "dup");
         let second = insert_chapter(&db, m, "dup");
@@ -397,7 +399,7 @@ mod tests {
 
     #[test]
     fn a_chapter_list_subscription_re_emits_when_the_manga_is_deleted() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let m = insert_manga(&db, "m", false);
         insert_chapter(&db, m, "a");
         let repo = ChapterRepo::new(db.clone());
@@ -406,7 +408,7 @@ mod tests {
             let mut sub = repo.subscribe_by_manga_id(m, false);
             let first = sub.changed().await.unwrap().unwrap();
             assert_eq!(first.len(), 1);
-            db.write(|tx| Ok(tx.execute("DELETE FROM mangas WHERE _id = ?1", [m]).map(drop)?)).unwrap();
+            db.write(|tx| Ok(tx.execute("DELETE FROM entries WHERE _id = ?1", [m]).map(drop)?)).unwrap();
             let after = sub.changed().await.unwrap().unwrap();
             assert!(after.is_empty(), "chapters of a deleted manga are gone");
         });

@@ -193,7 +193,7 @@ fn aniskip_request(episode_id: i64, load: u64, duration_s: f32) -> Option<Reques
     if !crate::data::is_installed() {
         return None;
     }
-    let db = crate::data::app().anime_db.clone();
+    let db = crate::data::app().db.clone();
     let episode = EpisodeRepo::new(db.clone()).by_id(episode_id).ok()??;
     let title = AnimeRepo::new(db.clone()).by_id(episode.anime_id).ok().map(|anime| anime.title);
     let tracks = AnimeTrackRepo::new(db).by_entry(episode.anime_id).ok()?;

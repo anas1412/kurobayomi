@@ -31,12 +31,8 @@ pub struct RetryQueue {
 }
 
 impl RetryQueue {
-    /// Opens the queue, creating its table when missing.
+    /// Opens the queue over the unified database, which already holds its table.
     pub fn new(db: Arc<Db>) -> Result<Self, TrackError> {
-        db.write(|tx| {
-            tx.execute_batch(store::CREATE)?;
-            Ok(())
-        })?;
         Ok(Self {
             db,
             announced: Mutex::new(0),
@@ -205,7 +201,7 @@ mod tests {
 
     fn queue() -> (TempDir, RetryQueue) {
         let dir = TempDir::new().unwrap();
-        let db = TestDb::anime_handle(&dir);
+        let db = TestDb::handle(&dir);
         let q = RetryQueue::new(db).unwrap();
         (dir, q)
     }
@@ -213,9 +209,21 @@ mod tests {
     #[test]
     fn tr_27_025_create_is_idempotent() {
         let dir = TempDir::new().unwrap();
-        let db = TestDb::anime_handle(&dir);
+        let db = TestDb::handle(&dir);
         RetryQueue::new(db.clone()).unwrap();
         assert!(RetryQueue::new(db).unwrap().is_empty().unwrap());
+    }
+
+    #[test]
+    fn retry_queue_lives_in_the_unified_file() {
+        let dir = TempDir::new().unwrap();
+        let db = TestDb::handle(&dir);
+        let q = RetryQueue::new(db.clone()).unwrap();
+        q.add(Kind::Manga, 1, TrackerId::KITSU, 2.0, 1).unwrap();
+        let table: String = db
+            .read(|c| Ok(c.query_row("SELECT name FROM sqlite_master WHERE name = 'track_retry_queue'", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(table, "track_retry_queue");
     }
 
     #[test]
@@ -352,7 +360,7 @@ mod property_tests {
     #[ignore = "slow: run on demand"]
     fn tr_27_302_the_queued_value_never_decreases() {
         let dir = TempDir::new().unwrap();
-        let q = RetryQueue::new(TestDb::anime_handle(&dir)).unwrap();
+        let q = RetryQueue::new(TestDb::handle(&dir)).unwrap();
         let mut seed: u64 = 11;
         let mut largest = [f64::MIN; 3];
         for step in 0..300_i64 {

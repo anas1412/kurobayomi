@@ -27,12 +27,11 @@ use crate::download::prefs::DownloadPrefs;
 use crate::storage::StorageManager;
 use crate::track::delayed::{DelayedTrackingStore, DelayedTrackingWorker, QUEUE_FILE, TrackReplay};
 
-/// What a [`Domain`] is built from: the preference store, the two databases, and the base storage directory used until
+/// What a [`Domain`] is built from: the preference store, the database, and the base storage directory used until
 /// the user picks one.
 pub struct DomainDeps {
     pub prefs: PrefStore,
-    pub manga_db: Arc<Db>,
-    pub anime_db: Arc<Db>,
+    pub db: Arc<Db>,
     /// The platform data directory plus `kurobayomi`, from `kuro_platform::paths::Paths::data_dir`.
     pub default_storage: PathBuf,
 }
@@ -47,7 +46,7 @@ pub struct Domain {
     toggles: Arc<SourceToggles>,
     manga: MangaRepo,
     anime: AnimeRepo,
-    anime_db: Arc<Db>,
+    db: Arc<Db>,
     delayed_store: Arc<DelayedTrackingStore>,
     delayed_worker: Arc<OnceLock<Arc<DelayedTrackingWorker>>>,
 }
@@ -56,16 +55,16 @@ impl Domain {
     /// Builds the container. Nothing is read from disk here; the storage tree is created on first use (see
     /// `StorageManager::ensure_tree`).
     pub fn new(deps: DomainDeps) -> Self {
-        let DomainDeps { prefs, manga_db, anime_db, default_storage } = deps;
+        let DomainDeps { prefs, db, default_storage } = deps;
         Self {
             source_prefs: SourcePrefs::new(prefs.clone()),
             backup_prefs: BackupPrefs::new(&prefs),
             download_prefs: DownloadPrefs::new(&prefs),
             storage: Arc::new(StorageManager::open(&prefs, default_storage.clone())),
             toggles: Arc::new(SourceToggles::default()),
-            manga: MangaRepo::new(manga_db),
-            anime: AnimeRepo::new(Arc::clone(&anime_db)),
-            anime_db,
+            manga: MangaRepo::new(Arc::clone(&db)),
+            anime: AnimeRepo::new(Arc::clone(&db)),
+            db,
             delayed_store: Arc::new(DelayedTrackingStore::new(default_storage.join(QUEUE_FILE))),
             delayed_worker: Arc::new(OnceLock::new()),
         }
@@ -121,9 +120,9 @@ impl Domain {
         }
     }
 
-    /// The anime database handle.
-    pub fn anime_db(&self) -> &Arc<Db> {
-        &self.anime_db
+    /// The database handle.
+    pub fn db(&self) -> &Arc<Db> {
+        &self.db
     }
 }
 
@@ -134,12 +133,11 @@ mod tests {
     use kuro_platform::kind::Kind;
     use super::*;
 
-    /// The container's inputs built from `kuro-testkit` fakes: in-memory settings, and migrated databases in `dir`.
+    /// The container's inputs built from `kuro-testkit` fakes: in-memory settings, and the migrated database in `dir`.
     fn deps(dir: &TempDir, settings: &InMemorySettings) -> DomainDeps {
         DomainDeps {
             prefs: PrefStore::clone(settings),
-            manga_db: TestDb::manga_handle(dir),
-            anime_db: TestDb::anime_handle(dir),
+            db: TestDb::handle(dir),
             default_storage: dir.path().join("no-such-base"),
         }
     }
@@ -154,7 +152,7 @@ mod tests {
         let clone = domain.clone();
         assert!(Arc::ptr_eq(&domain.storage(), &clone.storage()), "clones share the storage manager");
         assert!(Arc::ptr_eq(&domain.source_toggles(), &clone.source_toggles()));
-        assert!(Arc::ptr_eq(domain.anime_db(), clone.anime_db()), "clones share the anime database");
+        assert!(Arc::ptr_eq(domain.db(), clone.db()), "clones share the database");
         assert!(domain.manga().by_id(1).is_err(), "an empty database has no entry 1");
     }
 

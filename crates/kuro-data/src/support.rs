@@ -14,20 +14,12 @@ use crate::episode::EpisodeRepo;
 use crate::manga::{Manga, MangaRepo};
 use crate::time::Clock;
 
-/// A migrated manga file in a fresh directory, behind a `Db`. Keep the `TempDir` alive.
-pub(crate) fn manga_db() -> (TempDir, Arc<Db>) {
+/// A migrated unified file in a fresh directory, behind a `Db`. Keep the `TempDir` alive.
+pub(crate) fn test_db() -> (TempDir, Arc<Db>) {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("tachiyomi.db");
-    let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
-    (dir, Arc::new(Db::new(&path, writer).expect("manga handle")))
-}
-
-/// A migrated anime file in a fresh directory, behind a `Db`. Keep the `TempDir` alive.
-pub(crate) fn anime_db() -> (TempDir, Arc<Db>) {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("tachiyomi.animedb");
-    let writer = kuro_db::schema_anime::open(&path).expect("anime schema");
-    (dir, Arc::new(Db::new(&path, writer).expect("anime handle")))
+    let path = kuro_db::schema_unified::db_path(dir.path());
+    let writer = kuro_db::schema_unified::open_file(&path).expect("unified schema");
+    (dir, Arc::new(Db::new(&path, writer).expect("handle")))
 }
 
 /// A clock that always reads the same instant, for tests of time-dependent code.

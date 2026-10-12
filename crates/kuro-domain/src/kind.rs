@@ -20,32 +20,32 @@ pub trait EntryKindExt {
 impl EntryKindExt for Kind {
     fn membership_table(self) -> &'static str {
         match self {
-            Self::Manga => "mangas_categories",
-            Self::Anime => "animes_categories",
+            Self::Manga => "entry_categories",
+            Self::Anime => "entry_categories",
         }
     }
     fn entry_fk(self) -> &'static str {
         match self {
-            Self::Manga => "manga_id",
-            Self::Anime => "anime_id",
+            Self::Manga => "entry_id",
+            Self::Anime => "entry_id",
         }
     }
     fn history_table(self) -> &'static str {
         match self {
             Self::Manga => "history",
-            Self::Anime => "animehistory",
+            Self::Anime => "history",
         }
     }
     fn item_fk(self) -> &'static str {
         match self {
-            Self::Manga => "chapter_id",
-            Self::Anime => "episode_id",
+            Self::Manga => "item_id",
+            Self::Anime => "item_id",
         }
     }
     fn timestamp_col(self) -> &'static str {
         match self {
-            Self::Manga => "last_read",
-            Self::Anime => "last_seen",
+            Self::Manga => "last_at",
+            Self::Anime => "last_at",
         }
     }
 }
@@ -56,15 +56,15 @@ mod tests {
 
     #[test]
     fn identifiers_match_the_schema_names() {
-        assert_eq!(Kind::Manga.membership_table(), "mangas_categories");
-        assert_eq!(Kind::Anime.membership_table(), "animes_categories");
-        assert_eq!(Kind::Manga.entry_fk(), "manga_id");
-        assert_eq!(Kind::Anime.entry_fk(), "anime_id");
+        assert_eq!(Kind::Manga.membership_table(), "entry_categories");
+        assert_eq!(Kind::Anime.membership_table(), "entry_categories");
+        assert_eq!(Kind::Manga.entry_fk(), "entry_id");
+        assert_eq!(Kind::Anime.entry_fk(), "entry_id");
         assert_eq!(Kind::Manga.history_table(), "history");
-        assert_eq!(Kind::Anime.history_table(), "animehistory");
-        assert_eq!(Kind::Manga.item_fk(), "chapter_id");
-        assert_eq!(Kind::Anime.item_fk(), "episode_id");
-        assert_eq!(Kind::Manga.timestamp_col(), "last_read");
-        assert_eq!(Kind::Anime.timestamp_col(), "last_seen");
+        assert_eq!(Kind::Anime.history_table(), "history");
+        assert_eq!(Kind::Manga.item_fk(), "item_id");
+        assert_eq!(Kind::Anime.item_fk(), "item_id");
+        assert_eq!(Kind::Manga.timestamp_col(), "last_at");
+        assert_eq!(Kind::Anime.timestamp_col(), "last_at");
     }
 }

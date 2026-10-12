@@ -21,7 +21,7 @@ const CATEGORY_DEBOUNCE: Duration = Duration::from_millis(20);
 const CATEGORY_TABLES: &[&str] = &["categories"];
 
 /// Tables a by-entry category list reads.
-const MEMBERSHIP_TABLES: &[&str] = &["categories", "mangas_categories", "animes_categories"];
+const MEMBERSHIP_TABLES: &[&str] = &["categories", "entry_categories"];
 
 /// Read side of the categories of one kind. Writes are in [`super::service::CategoryService`].
 #[derive(Clone)]

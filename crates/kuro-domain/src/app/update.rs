@@ -222,7 +222,7 @@ mod tests {
     use kuro_source::model::UpdateStrategy as SourceUpdateStrategy;
 
     use super::*;
-    use crate::testdb::{anime_db, manga_db};
+    use crate::testdb::test_db;
     use kuro_data::anime::AnimeRepo;
     use kuro_data::episode::EpisodeRepo;
     use kuro_data::manga::MangaRepo;
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn a_favourite_keeps_its_title_and_a_browse_row_takes_the_remote_one() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let chapters = ChapterRepo::new(db);
         let covers = FakeCovers::new(false);
@@ -308,7 +308,7 @@ mod tests {
         interactor.update_from_source(&local, &remote(None, "Remote"), false, &covers, &at(9)).expect("update");
         assert_eq!(repo.by_id(id).expect("read").title, "Kept", "EC-18");
 
-        let browse = repo.insert(&Manga { title: "Old".into(), favorite: false, ..Manga::create() }).expect("insert");
+        let browse = repo.insert(&Manga { title: "Old".into(), favorite: false, url: "/browse".into(), ..Manga::create() }).expect("insert");
         let local = repo.by_id(browse).expect("read");
         interactor.update_from_source(&local, &remote(None, "Remote"), false, &covers, &at(9)).expect("update");
         assert_eq!(repo.by_id(browse).expect("read").title, "Remote");
@@ -316,7 +316,7 @@ mod tests {
 
     #[test]
     fn a_blank_genre_text_leaves_the_stored_genres_alone() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let interactor = UpdateManga::new(repo.clone(), ChapterRepo::new(db));
         let id = repo.insert(&Manga { genre: Some(vec!["Action".into()]), ..Manga::create() }).expect("insert");
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn favorite_sets_and_clears_date_added() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let interactor = UpdateManga::new(repo.clone(), ChapterRepo::new(db));
         let id = repo.insert(&Manga::create()).expect("insert");
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn a_fetch_interval_update_writes_next_update_and_interval() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let interactor = UpdateManga::new(repo.clone(), ChapterRepo::new(db));
         let id = repo.insert(&Manga::create()).expect("insert");
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn anime_update_from_source_writes_the_remote_metadata_and_the_background_rule() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let episodes = EpisodeRepo::new(db);
         let interactor = UpdateAnime::new(repo.clone(), episodes);

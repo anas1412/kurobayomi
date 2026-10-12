@@ -250,13 +250,13 @@ impl MigrateTx for LiveTx<'_, '_> {
         match self.kind {
             Kind::Manga => mangas_categories::set_categories(self.tx, id, ids).map_err(text),
             Kind::Anime => {
-                self.tx.execute("DELETE FROM animes_categories WHERE anime_id = ?1", [id]).map_err(text)?;
+                self.tx.execute("DELETE FROM entry_categories WHERE entry_id = ?1 AND kind = 'anime'", [id]).map_err(text)?;
                 let mut unique = ids.to_vec();
                 unique.sort_unstable();
                 unique.dedup();
                 unique
                     .into_iter()
-                    .try_for_each(|category| self.tx.execute("INSERT INTO animes_categories(anime_id, category_id) VALUES (?1, ?2)", (id, category)).map(drop))
+                    .try_for_each(|category| self.tx.execute("INSERT INTO entry_categories(entry_id, kind, category_id) VALUES (?1, 'anime', ?2)", (id, category)).map(drop))
                     .map_err(text)
             }
         }
@@ -399,13 +399,10 @@ mod tests {
         Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("runtime")))
     }
 
-    fn db(kind: Kind) -> (tempfile::TempDir, Arc<Db>) {
+    fn db(_kind: Kind) -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().expect("dir");
         let path = dir.path().join("library.db");
-        let writer = match kind {
-            Kind::Manga => kuro_db::schema_manga::open(&path).expect("schema"),
-            Kind::Anime => kuro_db::schema_anime::open(&path).expect("schema"),
-        };
+        let writer = kuro_db::schema_unified::open_file(&path).expect("schema");
         (dir, Arc::new(Db::new(&path, writer).expect("db")))
     }
 
@@ -588,9 +585,9 @@ mod tests {
     #[test]
     fn migrate_counts_query_orders_by_source() {
         let memory = rusqlite::Connection::open_in_memory().expect("in-memory database");
-        memory.execute_batch("CREATE TABLE mangas(_id INTEGER PRIMARY KEY AUTOINCREMENT, source INTEGER NOT NULL, favorite INTEGER NOT NULL);").expect("table");
+        memory.execute_batch("CREATE TABLE entries(_id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, source INTEGER NOT NULL, favorite INTEGER NOT NULL);").expect("table");
         for (source, favorite) in [(9, 1), (3, 1), (9, 1), (5, 0), (5, 1), (7, 0)] {
-            memory.execute("INSERT INTO mangas(source, favorite) VALUES (?1, ?2)", (source, favorite)).expect("row");
+            memory.execute("INSERT INTO entries(kind, source, favorite) VALUES ('manga', ?1, ?2)", (source, favorite)).expect("row");
         }
         assert!(kuro_db::sql::mangas::GET_SOURCE_ID_WITH_FAVORITE_COUNT.contains("ORDER BY source"));
         assert_eq!(kuro_db::sql::mangas::get_source_id_with_favorite_count(&memory).expect("counts"), [(3, 1), (5, 1), (9, 2)], "ordered by source; source 7 has no favourite");

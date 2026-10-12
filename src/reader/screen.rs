@@ -1537,8 +1537,8 @@ mod tests {
 
     fn fixture(chapters: usize) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
-        let path = kuro_db::schema_manga::db_path(dir.path());
-        let writer = kuro_db::schema_manga::open(&path).unwrap();
+        let path = kuro_db::schema_unified::db_path(dir.path());
+        let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         let db = Arc::new(Db::new(&path, writer).unwrap());
         let manga_id = MangaRepo::new(Arc::clone(&db)).insert(&Manga::create()).unwrap();
         let new: Vec<Chapter> = (0..chapters)

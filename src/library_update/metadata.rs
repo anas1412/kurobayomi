@@ -136,15 +136,14 @@ pub trait MetadataStore: Send + Sync {
     ) -> impl Future<Output = Result<(), UpdateError>> + Send;
 }
 
-/// The writer over the two databases. The repository calls block, so they run on tokio's blocking pool.
+/// The writer over the app database. The repository calls block, so they run on tokio's blocking pool.
 pub struct DbMetadataStore {
-    manga: Arc<Db>,
-    anime: Arc<Db>,
+    db: Arc<Db>,
 }
 
 impl DbMetadataStore {
-    pub fn new(manga: Arc<Db>, anime: Arc<Db>) -> Self {
-        Self { manga, anime }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -152,9 +151,9 @@ impl MetadataStore for DbMetadataStore {
     async fn apply(&self, entry: &LibraryEntry, details: &SourceDetails, now_ms: i64) -> Result<(), UpdateError> {
         let change = plan_change(entry, details, now_ms);
         let (id, kind) = (entry.id, entry.kind);
-        let (manga, anime) = (Arc::clone(&self.manga), Arc::clone(&self.anime));
+        let db = Arc::clone(&self.db);
         tokio::task::spawn_blocking(move || match kind {
-            Kind::Manga => MangaRepo::new(manga).update(&MangaUpdate {
+            Kind::Manga => MangaRepo::new(db).update(&MangaUpdate {
                 title: change.title,
                 status: Some(change.status),
                 thumbnail_url: change.thumbnail_url,
@@ -162,7 +161,7 @@ impl MetadataStore for DbMetadataStore {
                 initialized: Some(true),
                 ..MangaUpdate::new(id)
             }),
-            Kind::Anime => AnimeRepo::new(anime).update(&AnimeUpdate {
+            Kind::Anime => AnimeRepo::new(db).update(&AnimeUpdate {
                 title: change.title,
                 status: Some(change.status),
                 thumbnail_url: change.thumbnail_url,
@@ -557,27 +556,24 @@ mod tests {
         assert_eq!((change.title, change.thumbnail_url, change.cover_last_modified), (None, None, None));
     }
 
-    fn open_dbs(dir: &std::path::Path) -> (Arc<Db>, Arc<Db>) {
-        let manga_path = dir.join("manga.db");
-        let manga = Arc::new(Db::new(&manga_path, kuro_db::schema_manga::open(&manga_path).expect("manga db")).expect("handle"));
-        let anime_path = dir.join("anime.db");
-        let anime = Arc::new(Db::new(&anime_path, kuro_db::schema_anime::open(&anime_path).expect("anime db")).expect("handle"));
-        (manga, anime)
+    fn open_db(dir: &std::path::Path) -> Arc<Db> {
+        let path = kuro_db::schema_unified::db_path(dir);
+        Arc::new(Db::new(&path, kuro_db::schema_unified::open_file(&path).expect("db")).expect("handle"))
     }
 
     #[tokio::test]
     async fn the_database_writer_stores_status_and_cover_and_the_title_of_a_non_favourite() {
         use kuro_data::manga::Manga;
         let dir = tempfile::tempdir().expect("temp dir");
-        let (manga_db, anime_db) = open_dbs(dir.path());
-        let id = MangaRepo::new(manga_db.clone())
+        let db = open_db(dir.path());
+        let id = MangaRepo::new(db.clone())
             .insert(&Manga { favorite: false, source: 7, url: "/m".into(), title: "Old".into(), ..Manga::create() })
             .expect("insert");
-        let writer = DbMetadataStore::new(manga_db.clone(), anime_db);
+        let writer = DbMetadataStore::new(db.clone());
         let mut target = entry(id, 7, "Old");
         target.favorite = false;
         writer.apply(&target, &details(), 777).await.expect("write");
-        let stored = MangaRepo::new(manga_db).by_id(id).expect("row");
+        let stored = MangaRepo::new(db).by_id(id).expect("row");
         assert_eq!(stored.title, "New");
         assert_eq!(stored.status, 2);
         assert_eq!(stored.thumbnail_url.as_deref(), Some("https://x/c.jpg"));

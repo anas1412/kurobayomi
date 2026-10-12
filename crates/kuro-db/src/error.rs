@@ -8,12 +8,8 @@ pub enum DbError {
     Constraint(String),
     #[error("Database is newer than this version of Kurobayomi (found {found}, supported {supported})")]
     TooNew { found: i64, supported: i64 },
-    #[error("database must be imported first (schema {found} is an Aniyomi file)")]
-    LegacyFile { found: i64 },
-    #[error("database needs the legacy import first (schema {found} is an Aniyomi file)")]
-    NeedsLegacyImport { found: i64 },
-    #[error("database is too old to import (schema {found} is an Aniyomi file)")]
-    TooOldForImport { found: i64 },
+    #[error("not a Kurobayomi database (schema {found})")]
+    ForeignFile { found: i64 },
     #[error("bad memo in {table} row {id}")]
     BadMemo { table: &'static str, id: i64 },
     #[error("integrity check failed: {0}")]

@@ -1,7 +1,6 @@
 //! Tests of the anime handle (T-04a-007 to T-04a-012, T-04a-027): the change bus, the write and read
 //! paths, the repository batches and the library read model.
 
-use kuro_platform::kind::Kind;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,7 +11,8 @@ use tokio::sync::broadcast;
 
 use crate::error::{DbError, DbResult};
 use crate::notify::Changed;
-use crate::runtime::{Db, DbKindExt, TxExt};
+use crate::runtime::{Db, TxExt};
+use crate::schema_unified::db_path;
 use crate::statements_anime::{self as sql, AnimeUpdate};
 use crate::testdb::{AnimeBuilder, EpisodeBuilder, HistoryBuilder};
 
@@ -20,7 +20,7 @@ const QUIET: Duration = Duration::from_millis(400);
 
 fn open() -> (TempPaths, Arc<Db>) {
     let paths = TempPaths::new().unwrap();
-    let db = Db::open(Kind::Anime, &paths).unwrap();
+    let db = Db::open(&paths).unwrap();
     (paths, db)
 }
 
@@ -44,15 +44,15 @@ fn full_anime(tx: &Connection) -> (i64, i64) {
     let other = AnimeBuilder::new("/b").insert(tx);
     let episode = EpisodeBuilder::new(anime, "/a/1").insert(tx);
     HistoryBuilder::new(episode).insert(tx);
-    tx.execute("INSERT INTO categories(_id, name, sort, flags) VALUES (1, 'c', 1, 0)", []).unwrap();
-    tx.execute("INSERT INTO animes_categories(anime_id, category_id) VALUES (?1, 1)", [anime]).unwrap();
+    tx.execute("INSERT INTO categories(kind, _id, name, sort, flags) VALUES ('anime', 1, 'c', 1, 0)", []).unwrap();
+    tx.execute("INSERT INTO entry_categories(entry_id, kind, category_id) VALUES (?1, 'anime', 1)", [anime]).unwrap();
     tx.execute(
-        "INSERT INTO anime_sync(anime_id, sync_id, remote_id, title, last_episode_seen, total_episodes, status, score, \
+        "INSERT INTO tracks(entry_id, tracker_id, remote_id, title, last_item, total_items, status, score, \
          remote_url, start_date, finish_date) VALUES (?1, 1, 1, 't', 0, 0, 1, 0, 'u', 0, 0)",
         [anime],
     )
     .unwrap();
-    tx.execute("INSERT INTO anime_relations(anime_id, related_anime_id, name, sort_order, last_fetched_at) VALUES (?1, ?2, 'Sequel', 0, 0)", [anime, other])
+    tx.execute("INSERT INTO anime_relations(entry_id, related_id, name, sort_order, last_fetched_at) VALUES (?1, ?2, 'Sequel', 0, 0)", [anime, other])
         .unwrap();
     (anime, episode)
 }
@@ -64,9 +64,9 @@ fn deleting_an_anime_publishes_every_table_the_cascade_touches() {
     let (_p, db) = open();
     let (anime, _) = db.write(|tx| Ok(full_anime(tx))).unwrap();
     let mut rx = db.changes.subscribe();
-    db.write(|tx| Ok(tx.execute("DELETE FROM animes WHERE _id = ?1", [anime]).map(drop)?)).unwrap();
+    db.write(|tx| Ok(tx.execute("DELETE FROM entries WHERE _id = ?1", [anime]).map(drop)?)).unwrap();
     let got = published(&mut rx);
-    for table in ["animes", "episodes", "animehistory", "animes_categories", "anime_sync", "anime_relations"] {
+    for table in ["entries", "items", "history", "entry_categories", "tracks", "anime_relations"] {
         assert!(got.contains(table), "{table} missing from {got:?}");
     }
 }
@@ -76,9 +76,9 @@ fn trigger_writes_are_published() {
     let (_p, db) = open();
     let (_, episode) = db.write(|tx| Ok(full_anime(tx))).unwrap();
     let mut rx = db.changes.subscribe();
-    // Marking an episode seen fires the version triggers, which write `animes` and `episodes`.
-    db.write(|tx| Ok(tx.execute("UPDATE episodes SET seen = 1 WHERE _id = ?1", [episode]).map(drop)?)).unwrap();
-    assert_eq!(published(&mut rx), names(&["animes", "episodes"]));
+    // Marking an episode seen fires the version triggers, which write `entries` and `items`.
+    db.write(|tx| Ok(tx.execute("UPDATE items SET done = 1 WHERE _id = ?1", [episode]).map(drop)?)).unwrap();
+    assert_eq!(published(&mut rx), names(&["entries", "items"]));
 }
 
 #[test]
@@ -97,11 +97,11 @@ fn a_rolled_back_write_publishes_nothing() {
 fn touch_names_a_table_the_hook_did_not_see() {
     let (_p, db) = open();
     let mut rx = db.changes.subscribe();
-    db.write(|tx| tx.touch(&["animehistory", "episodes"])).unwrap();
-    assert_eq!(published(&mut rx), names(&["animehistory", "episodes"]));
+    db.write(|tx| tx.touch(&["history", "items"])).unwrap();
+    assert_eq!(published(&mut rx), names(&["history", "items"]));
     // Touching in a write that then fails publishes nothing.
     let _: DbResult<()> = db.write(|tx| {
-        tx.touch(&["animes"])?;
+        tx.touch(&["entries"])?;
         Err(DbError::NotFound)
     });
     assert!(published(&mut rx).is_empty());
@@ -112,7 +112,7 @@ async fn a_failing_query_is_an_item_not_the_end_of_the_stream() {
     let (_p, db) = open();
     let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let flag = Arc::clone(&fail);
-    let mut sub = db.subscribe(&["animes"], Duration::ZERO, move |c| {
+    let mut sub = db.subscribe(&["entries"], Duration::ZERO, move |c| {
         if flag.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(DbError::NotFound);
         }
@@ -147,7 +147,7 @@ fn two_concurrent_writes_serialize() {
     };
     std::thread::sleep(Duration::from_millis(50));
     let seen_by_second = db
-        .write(|tx| Ok(tx.query_row("SELECT count(*) FROM animes", [], |r| r.get::<_, i64>(0))?))
+        .write(|tx| Ok(tx.query_row("SELECT count(*) FROM entries", [], |r| r.get::<_, i64>(0))?))
         .unwrap();
     first.join().unwrap();
     assert_eq!(seen_by_second, 1, "the second write started after the first committed");
@@ -173,7 +173,7 @@ fn a_long_write_does_not_block_readers() {
     };
     std::thread::sleep(Duration::from_millis(100));
     let t = Instant::now();
-    let count = db.read(|c| Ok(c.query_row("SELECT count(*) FROM animes", [], |r| r.get::<_, i64>(0))?)).unwrap();
+    let count = db.read(|c| Ok(c.query_row("SELECT count(*) FROM entries", [], |r| r.get::<_, i64>(0))?)).unwrap();
     assert!(t.elapsed() < Duration::from_millis(200), "the read waited for the write");
     assert_eq!(count, 1, "the reader sees the last committed state");
     writer.join().unwrap();
@@ -190,7 +190,7 @@ async fn a_write_future_dropped_before_it_starts_leaves_nothing_behind() {
         .await
         .unwrap();
     assert!(urls.is_empty());
-    let total: i64 = db.read_async(|c| Ok(c.query_row("SELECT count(*) FROM animes", [], |r| r.get(0))?)).await.unwrap();
+    let total: i64 = db.read_async(|c| Ok(c.query_row("SELECT count(*) FROM entries", [], |r| r.get(0))?)).await.unwrap();
     assert_eq!(total, 1, "only the second write ran");
 }
 
@@ -211,7 +211,7 @@ fn a_savepoint_rolls_back_unless_released() {
         })
         .unwrap();
     let urls: Vec<String> = db
-        .read(|c| Ok(c.prepare("SELECT url FROM animes ORDER BY _id")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?))
+        .read(|c| Ok(c.prepare("SELECT url FROM entries ORDER BY _id")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?))
         .unwrap();
     assert_eq!(urls, ["/keep", "/released"]);
 }
@@ -221,7 +221,7 @@ fn close_folds_the_wal_into_the_database_file() {
     let (paths, db) = open();
     db.write(|tx| Ok(AnimeBuilder::new("/a").insert(tx))).unwrap();
     db.close().unwrap();
-    let wal = Kind::Anime.path(&kuro_platform::paths::Paths::data_dir(&paths)).with_extension("db-wal");
+    let wal = db_path(&kuro_platform::paths::Paths::data_dir(&paths)).with_extension("db-wal");
     let size = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
     assert_eq!(size, 0, "the checkpoint truncated the WAL");
     // The handle still works afterwards.
@@ -244,12 +244,12 @@ fn update_all_anime_logs_and_returns_false_instead_of_failing() {
 }
 
 #[test]
-fn duplicate_source_and_url_resolve_to_the_first_row() {
+fn a_second_anime_with_the_same_source_and_url_is_refused() {
     let (_p, db) = open();
-    let (first, second) = db
-        .write(|tx| Ok((AnimeBuilder::new("/same").insert(tx), AnimeBuilder::new("/same").insert(tx))))
-        .unwrap();
-    assert!(first < second);
+    let first = db.write(|tx| Ok(AnimeBuilder::new("/same").insert(tx))).unwrap();
+    let row = sql::AnimeRow { source: 1, url: "/same".into(), title: "t".into(), season_number: -1.0, ..Default::default() };
+    let second = db.write(|tx| Ok(sql::insert_anime(tx, &row)?));
+    assert!(second.is_err(), "UNIQUE (kind, source, url)");
     let found = db.read(|c| Ok(sql::anime_by_url_and_source(c, "/same", 1)?.unwrap().id)).unwrap();
     assert_eq!(found, first);
 }
@@ -261,7 +261,7 @@ fn source_ids_above_2_pow_63_round_trip_and_the_highest_id_is_reused() {
     db
         .write(|tx| {
             let id = AnimeBuilder::new("/a").insert(tx);
-            tx.execute("UPDATE animes SET source = ?2 WHERE _id = ?1", [id, source])?;
+            tx.execute("UPDATE entries SET source = ?2 WHERE _id = ?1", [id, source])?;
             Ok(())
         })
         .unwrap();
@@ -270,7 +270,7 @@ fn source_ids_above_2_pow_63_round_trip_and_the_highest_id_is_reused() {
     let (last, reused) = db
         .write(|tx| {
             let last = AnimeBuilder::new("/b").insert(tx);
-            tx.execute("DELETE FROM animes WHERE _id = ?1", [last])?;
+            tx.execute("DELETE FROM entries WHERE _id = ?1", [last])?;
             Ok((last, AnimeBuilder::new("/c").insert(tx)))
         })
         .unwrap();
@@ -284,9 +284,9 @@ fn an_update_cannot_clear_parent_id() {
         .write(|tx| {
             let parent = AnimeBuilder::new("/p").insert(tx);
             let child = AnimeBuilder::new("/c").insert(tx);
-            tx.execute("UPDATE animes SET parent_id = ?2 WHERE _id = ?1", [child, parent])?;
+            tx.execute("UPDATE entries SET parent_id = ?2 WHERE _id = ?1", [child, parent])?;
             sql::update_anime(tx, &AnimeUpdate { id: child, parent_id: None, title: Some("x".into()), ..Default::default() })?;
-            let still: Option<i64> = tx.query_row("SELECT parent_id FROM animes WHERE _id = ?1", [child], |r| r.get(0))?;
+            let still: Option<i64> = tx.query_row("SELECT parent_id FROM entries WHERE _id = ?1", [child], |r| r.get(0))?;
             assert_eq!(still, Some(parent));
             Ok(())
         })
@@ -320,11 +320,11 @@ fn library_rows_carry_one_row_per_category_and_category_zero_when_there_is_none(
         .write(|tx| {
             let a = AnimeBuilder::new("/a").insert(tx);
             let b = AnimeBuilder::new("/b").insert(tx);
-            tx.execute("UPDATE animes SET favorite = 1", [])?;
-            tx.execute("INSERT INTO categories(_id, name, sort, flags) VALUES (1, 'a', 0, 0), (2, 'b', 1, 0)", [])?;
-            tx.execute("INSERT INTO animes_categories(anime_id, category_id) VALUES (?1, 1), (?1, 2)", [a])?;
+            tx.execute("UPDATE entries SET favorite = 1", [])?;
+            tx.execute("INSERT INTO categories(kind, _id, name, sort, flags) VALUES ('anime', 1, 'a', 0, 0), ('anime', 2, 'b', 1, 0)", [])?;
+            tx.execute("INSERT INTO entry_categories(entry_id, kind, category_id) VALUES (?1, 'anime', 1), (?1, 'anime', 2)", [a])?;
             let e = EpisodeBuilder::new(a, "/a/1").insert(tx);
-            tx.execute("UPDATE episodes SET seen = 1, bookmark = 1, date_fetch = 200, date_upload = 150 WHERE _id = ?1", [e])?;
+            tx.execute("UPDATE items SET done = 1, bookmark = 1, date_fetch = 200, date_upload = 150 WHERE _id = ?1", [e])?;
             HistoryBuilder::new(e).seen_at(3000).insert(tx);
             let _ = b;
             Ok(())
@@ -345,10 +345,10 @@ fn library_rows_carry_one_row_per_category_and_category_zero_when_there_is_none(
 fn count_columns_are_truncated_like_the_kotlin_mapper() {
     let c = crate::testdb::TestDb::anime();
     let a = AnimeBuilder::new("/a").insert(&c);
-    c.execute("UPDATE animes SET favorite = 1", []).unwrap();
+    c.execute("UPDATE entries SET favorite = 1", []).unwrap();
     EpisodeBuilder::new(a, "/a/1").insert(&c);
     // A view column that comes back as REAL still reads as a whole number.
-    c.execute_batch("DROP VIEW animelibView; CREATE VIEW animelibView AS SELECT M.*, 3 AS totalCount, 2.9 AS seenCount, 1.5 AS bookmarkCount, 0.0 AS fillermarkCount, 0 AS latestUpload, 0 AS episodeFetchedAt, 0 AS lastSeen, 0 AS category FROM animes M")
+    c.execute_batch("DROP VIEW libraryView; CREATE VIEW libraryView AS SELECT e.*, 3 AS totalCount, 2.9 AS doneCount, 1.5 AS bookmarkCount, 0.0 AS fillermarkCount, 0 AS latestUpload, 0 AS itemFetchedAt, 0 AS lastActivity, 0 AS category FROM entries e")
         .unwrap();
     let rows = sql::library(&c).unwrap();
     assert_eq!((rows[0].seen_count, rows[0].bookmark_count, rows[0].fillermark_count), (2, 1, 0));
@@ -358,16 +358,16 @@ fn count_columns_are_truncated_like_the_kotlin_mapper() {
 fn seasons_of_lists_children_with_their_aggregates() {
     let c = crate::testdb::TestDb::anime();
     let parent = AnimeBuilder::new("/p").insert(&c);
-    c.execute("UPDATE animes SET favorite = 1, fetch_type = 0 WHERE _id = ?1", [parent]).unwrap();
+    c.execute("UPDATE entries SET favorite = 1, fetch_type = 0 WHERE _id = ?1", [parent]).unwrap();
     let mut seasons = Vec::new();
     for url in ["/s1", "/s2", "/s3"] {
         let id = AnimeBuilder::new(url).insert(&c);
-        c.execute("UPDATE animes SET parent_id = ?2 WHERE _id = ?1", [id, parent]).unwrap();
+        c.execute("UPDATE entries SET parent_id = ?2 WHERE _id = ?1", [id, parent]).unwrap();
         seasons.push(id);
     }
     for (i, seen) in [(0, 1), (0, 1), (1, 1), (1, 0)] {
         let e = EpisodeBuilder::new(seasons[i], &format!("/e{i}{seen}{}", i + seen)).insert(&c);
-        c.execute("UPDATE episodes SET seen = ?2 WHERE _id = ?1", [e, seen as i64]).unwrap();
+        c.execute("UPDATE items SET done = ?2 WHERE _id = ?1", [e, seen as i64]).unwrap();
     }
     let rows = sql::seasons_of(&c, parent).unwrap();
     let got: Vec<(i64, i64, i64)> = rows.iter().map(|r| (r.anime.id, r.total_count, r.seen_count)).collect();
@@ -395,12 +395,12 @@ fn episode_by_url_may_return_several_rows_and_the_first_wins() {
 #[test]
 fn opening_a_file_from_a_newer_app_through_the_handle_is_refused_and_untouched() {
     let paths = TempPaths::new().unwrap();
-    let file = Kind::Anime.path(&kuro_platform::paths::Paths::data_dir(&paths));
-    drop(Db::open(Kind::Anime, &paths).unwrap());
-    Connection::open(&file).unwrap().pragma_update(None, "user_version", 141).unwrap();
+    let file = db_path(&kuro_platform::paths::Paths::data_dir(&paths));
+    drop(Db::open(&paths).unwrap());
+    Connection::open(&file).unwrap().pragma_update(None, "user_version", 2).unwrap();
     let before = std::fs::read(&file).unwrap();
-    let err = Db::open(Kind::Anime, &paths).err().expect("refused");
-    assert!(matches!(err, DbError::TooNew { found: 141, supported: 140 }), "{err:?}");
+    let err = Db::open(&paths).err().expect("refused");
+    assert!(matches!(err, DbError::TooNew { found: 2, supported: 1 }), "{err:?}");
     assert_eq!(std::fs::read(&file).unwrap(), before);
 }
 
@@ -409,7 +409,7 @@ fn a_history_row_cannot_outlive_its_episode_and_empty_database_is_empty() {
     let (_p, db) = open();
     let counts = db
         .read(|c| {
-            Ok(["animes", "episodes", "animehistory"]
+            Ok(["entries", "items", "history"]
                 .map(|t| c.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get::<_, i64>(0)).unwrap()))
         })
         .unwrap();

@@ -1,5 +1,5 @@
 //! Category definitions and entry membership (area 22, T-22a-008 and T-22a-017). One code path serves manga and anime;
-//! only the table behind the connection differs.
+//! only the kind differs.
 
 use kuro_platform::kind::Kind;
 use std::collections::{HashMap, HashSet};
@@ -105,7 +105,7 @@ pub fn differs_from_stored(mut stored: Vec<i64>, ids: &[i64]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_db::schema_manga;
+    use kuro_db::schema_unified;
 
     #[test]
     fn membership_change_ignores_order_and_duplicates() {
@@ -118,9 +118,9 @@ mod tests {
         BackupCategory { name: name.into(), order, id, flags }
     }
 
-    fn manga_db() -> (tempfile::TempDir, Connection) {
+    fn test_db() -> (tempfile::TempDir, Connection) {
         let dir = tempfile::tempdir().unwrap();
-        let c = schema_manga::open(&dir.path().join("manga.db")).unwrap();
+        let c = schema_unified::open_file(&dir.path().join("kurobayomi.db")).unwrap();
         (dir, c)
     }
 
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn existing_name_keeps_db_flags_and_new_names_follow_max_order() {
-        let (_d, c) = manga_db();
+        let (_d, c) = test_db();
         statements_manga::categories::insert(&c, "Read", 0, 1).unwrap();
         statements_manga::categories::insert(&c, "Later", 4, 2).unwrap();
         let backup = vec![cat("Later", 0, 10, 9), cat("Fresh", 1, 11, 3)];
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn new_categories_start_at_zero_when_the_db_is_empty_and_in_backup_order() {
-        let (_d, c) = manga_db();
+        let (_d, c) = test_db();
         let backup = vec![cat("B", 2, 1, 0), cat("A", 1, 2, 0)];
         restore_categories(&c, Kind::Manga, &backup).unwrap();
         assert_eq!(names(&c), vec![("A".into(), 0, 0), ("B".into(), 1, 0)]);
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn duplicate_backup_names_create_one_row_and_map_to_it() {
-        let (_d, c) = manga_db();
+        let (_d, c) = test_db();
         let backup = vec![cat("Same", 0, 1, 0), cat("Same", 1, 2, 0)];
         let out = restore_categories(&c, Kind::Manga, &backup).unwrap();
         assert_eq!(names(&c).len(), 1);
@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn categorized_display_is_true_only_with_two_distinct_flags() {
-        let (_d, c) = manga_db();
+        let (_d, c) = test_db();
         let same = restore_categories(&c, Kind::Manga, &[cat("X", 0, 1, 0)]).unwrap();
         assert_eq!(same.categorized_display, Some(false));
         let differ = restore_categories(&c, Kind::Manga, &[cat("Y", 1, 2, 5)]).unwrap();
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn empty_backup_writes_nothing_and_reports_no_flag() {
-        let (_d, c) = manga_db();
+        let (_d, c) = test_db();
         let out = restore_categories(&c, Kind::Manga, &[]).unwrap();
         assert_eq!(out.categorized_display, None);
         assert!(names(&c).is_empty());

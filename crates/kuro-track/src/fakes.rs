@@ -964,7 +964,7 @@ impl Harness {
         let chapters = Arc::new(MemUnits::default());
         let anime_history = Arc::new(MemHistory::default());
         let net = Arc::new(MemNet(AtomicBool::new(true)));
-        let queue = Arc::new(RetryQueue::new(TestDb::anime_handle(&dir)).unwrap());
+        let queue = Arc::new(RetryQueue::new(TestDb::handle(&dir)).unwrap());
         let scheduler = Arc::new(RetryScheduler::new(Arc::clone(&queue), net.clone()));
         let ctx = Arc::new(TrackCtx {
             trackers: Arc::new(TrackerManager::new(trackers).unwrap()),

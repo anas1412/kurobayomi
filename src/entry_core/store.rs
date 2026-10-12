@@ -29,8 +29,11 @@ use kuro_platform::kind::Kind;
 /// `LocalSource.ID`: rows of the local source are always downloaded.
 const LOCAL_SOURCE_ID: i64 = kuro_source::local::LOCAL_SOURCE_ID;
 
-const MASKED_WRITE: &str =
-    "UPDATE mangas SET chapter_flags = (chapter_flags & ~?2) | (?1 & ?2), version = version + 1 WHERE _id = ?3";
+/// The flags column holds the unified layout, so the manga flag and mask are translated in SQL:
+/// `tr(x) = (x & ~768) | ((x & 768) << 1)` moves the sorting bits up one place.
+const MASKED_WRITE: &str = "UPDATE entries SET item_flags = (item_flags & ~((?2 & ~768) | ((?2 & 768) << 1))) \
+     | (((?1 & ~768) | ((?1 & 768) << 1)) & ((?2 & ~768) | ((?2 & 768) << 1))), version = version + 1 \
+     WHERE _id = ?3 AND kind = 'manga'";
 
 /// Every chapter-flag bit the library defaults write (`SetMangaDefaultChapterFlags`).
 pub const ALL_CHAPTER_FLAG_BITS: i64 = c::SORT_DIR_MASK
@@ -174,7 +177,7 @@ impl DbStore {
         set_manga_fetch_interval(&self.mangas, &self.chapters, &manga, wheel, &now, window, now.timestamp_millis())
     }
 
-    /// One masked UPDATE of `mangas.chapter_flags`: `(old & !mask) | (flag & mask)`. The schema trigger bumps
+    /// One masked UPDATE of `entries.item_flags` (the unified layout, see `MASKED_WRITE`): `(old & !mask) | (flag & mask)`. The schema trigger bumps
     /// `mangas.version` only for url, description and favorite changes, so the statement bumps it itself: every flag
     /// write is a versioned write (E-DB-1). `Ok(false)` when the row is gone.
     pub fn set_flag_bits(&self, manga_id: i64, flag: i64, mask: i64) -> DataResult<bool> {
@@ -301,8 +304,8 @@ pub(crate) mod fixture {
     /// A migrated temp database with one manga and `chapters` chapters. Keep the `TempDir` alive.
     pub fn store(favorite: bool, chapters: usize) -> (tempfile::TempDir, DbStore, i64) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("manga schema");
         let db = Arc::new(Db::new(&path, writer).expect("manga handle"));
         let store = DbStore::new(Arc::clone(&db));
         let manga_id = MangaRepo::new(Arc::clone(&db))

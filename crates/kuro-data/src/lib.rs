@@ -18,8 +18,6 @@ pub mod compat;
 pub mod dropped;
 pub mod episode;
 pub mod error;
-pub mod extension_repo;
-pub mod extension_store;
 pub mod history;
 pub mod manga;
 mod flags_write;
@@ -111,7 +109,7 @@ mod open_tests {
     use kuro_platform::kind::Kind;
     use rusqlite::Connection;
 
-    use crate::support::{anime_db, manga_db};
+    use crate::support::test_db;
 
     fn assert_pragmas(c: &Connection) {
         let fk: i64 = c.pragma_query_value(None, "foreign_keys", |r| r.get(0)).unwrap();
@@ -138,23 +136,21 @@ mod open_tests {
     }
 
     #[test]
-    fn both_kinds_open_with_the_required_pragmas_on_the_writer_and_every_reader() {
-        let (_m, manga) = manga_db();
-        let (_a, anime) = anime_db();
-        check_every_connection(&manga);
-        check_every_connection(&anime);
+    fn the_database_opens_with_the_required_pragmas_on_the_writer_and_every_reader() {
+        let (_d, db) = test_db();
+        check_every_connection(&db);
     }
 
     #[test]
     fn a_newer_schema_version_is_refused_without_touching_the_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tachiyomi.db");
-        drop(kuro_db::schema_manga::open(&path).unwrap());
+        drop(kuro_db::schema_unified::open_file(&path).unwrap());
         {
             let c = Connection::open(&path).unwrap();
             c.pragma_update(None, "user_version", 999_999i64).unwrap();
         }
-        let err = kuro_db::schema_manga::open(&path).expect_err("a newer file is refused");
+        let err = kuro_db::schema_unified::open_file(&path).expect_err("a newer file is refused");
         assert!(matches!(err, kuro_db::DbError::TooNew { .. }), "{err}");
         let c = Connection::open(&path).unwrap();
         let version: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
@@ -163,7 +159,7 @@ mod open_tests {
 
     #[test]
     fn a_thousand_subscriptions_created_and_dropped_leave_no_task_behind() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let repo = crate::category::CategoryRepo::new(db.clone(), Kind::Manga);
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
         rt.block_on(async {

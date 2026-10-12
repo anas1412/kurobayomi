@@ -111,8 +111,7 @@ impl HistoryRepo {
         query: String,
     ) -> kuro_db::subscribe::Subscription<Vec<HistoryWithRelations>> {
         let tables: &'static [&'static str] = match kind {
-            Kind::Manga => &["history", "chapters", "mangas"],
-            Kind::Anime => &["animehistory", "episodes", "animes"],
+            Kind::Manga | Kind::Anime => &["history", "items", "entries"],
         };
         self.db.subscribe(tables, std::time::Duration::from_millis(30), move |c| match kind {
             Kind::Manga => Ok(manga_views::history(c, &query)?.into_iter().map(manga_row).collect()),
@@ -137,8 +136,8 @@ impl HistoryRepo {
                 .collect(),
             Kind::Anime => self.db.read(|c| {
                 let mut st = c.prepare(
-                    "SELECT H._id, H.episode_id, H.last_seen FROM animehistory H \
-                     JOIN episodes E ON H.episode_id = E._id WHERE E.anime_id = ?1",
+                    "SELECT H._id, H.item_id, H.last_at FROM history H \
+                     JOIN items E ON H.item_id = E._id WHERE E.entry_id = ?1",
                 )?;
                 let mut out = Vec::new();
                 for row in st.query_map([entry_id], |r| {
@@ -243,7 +242,7 @@ impl HistoryRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testdb::manga_db;
+    use crate::testdb::test_db;
     use kuro_data::manga::{Manga, MangaRepo};
 
     /// A favourite manga with `n` chapters, `source_order` descending so the reading order is the insert order.
@@ -261,7 +260,7 @@ mod tests {
             .map(|i| {
                 db.write(|tx| {
                     tx.execute(
-                        "INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload) \
+                        "INSERT INTO items(entry_id, url, name, scanlator, done, bookmark, progress, number, source_order, date_fetch, date_upload) \
                          VALUES (?1, ?2, ?3, NULL, 0, 0, 0, ?4, ?5, 0, 0)",
                         (manga, format!("{title}/{i}"), format!("c{i}"), (i + 1) as f64, n - 1 - i),
                     )?;
@@ -279,7 +278,7 @@ mod tests {
 
     #[test]
     fn two_upserts_for_one_chapter_leave_one_row_with_the_sum_of_sessions() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let (_m, c) = manga_with_chapters(&db, "M", 1);
         let repo = HistoryRepo::new(db.clone());
         repo.upsert(Kind::Manga, c[0], 1000, 5000).unwrap();
@@ -291,7 +290,7 @@ mod tests {
 
     #[test]
     fn list_shows_the_newest_row_per_entry_and_reveals_the_previous_after_a_reset() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let (m, mc) = manga_with_chapters(&db, "M", 3);
         let (n, nc) = manga_with_chapters(&db, "N", 1);
         let repo = HistoryRepo::new(db.clone());
@@ -309,7 +308,7 @@ mod tests {
 
     #[test]
     fn search_is_a_literal_case_insensitive_substring() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let (_a, ca) = manga_with_chapters(&db, "100% Real", 1);
         let (_b, cb) = manga_with_chapters(&db, "Other", 1);
         let repo = HistoryRepo::new(db.clone());
@@ -324,7 +323,7 @@ mod tests {
 
     #[test]
     fn total_duration_keeps_reset_rows_and_clear_all_zeroes_it() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let (_m, c) = manga_with_chapters(&db, "M", 4);
         let repo = HistoryRepo::new(db.clone());
         repo.upsert(Kind::Manga, c[0], 1, 0).unwrap();
@@ -341,7 +340,7 @@ mod tests {
 
     #[test]
     fn a_detached_flush_is_recorded_before_shutdown_joins_it() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let (_m, c) = manga_with_chapters(&db, "M", 1);
         let repo = HistoryRepo::new(db.clone());
         repo.record_detached(HistoryUpdate { kind: Kind::Manga, item_id: c[0], at: 1000, session_ms: 4000 });
@@ -351,7 +350,7 @@ mod tests {
 
     #[test]
     fn a_failing_record_is_swallowed_and_a_foreign_key_error_is_reported_by_upsert() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = HistoryRepo::new(db.clone());
         assert!(repo.upsert(Kind::Manga, 999_999, 1, 0).is_err(), "chapter does not exist");
         repo.record(HistoryUpdate { kind: Kind::Manga, item_id: 999_999, at: 1, session_ms: 0 });
@@ -359,12 +358,12 @@ mod tests {
 
     #[test]
     fn next_items_follow_the_reading_order_of_a_real_manga() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let (m, c) = manga_with_chapters(&db, "M", 6);
         let repo = HistoryRepo::new(db.clone());
         repo.upsert(Kind::Manga, c[1], 10, 0).unwrap();
         db.write(|tx| {
-            tx.execute("UPDATE chapters SET read = 1 WHERE _id = ?1", [c[1]])?;
+            tx.execute("UPDATE items SET done = 1 WHERE _id = ?1", [c[1]])?;
             Ok(())
         })
         .unwrap();
@@ -381,9 +380,9 @@ mod tests {
 
     #[test]
     fn anime_history_keeps_one_row_per_episode_and_lists_the_newest_per_anime() {
-        use crate::testdb::anime_db;
+        use crate::testdb::test_db;
         use kuro_data::anime::{Anime, AnimeRepo};
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let anime = AnimeRepo::new(db.clone())
             .insert(&Anime { favorite: true, source: 3, url: "a".into(), title: "Show".into(), ..Anime::create() })
             .unwrap();
@@ -391,7 +390,7 @@ mod tests {
             .map(|i| {
                 db.write(|tx| {
                     tx.execute(
-                        "INSERT INTO episodes(anime_id, url, name, seen, bookmark, last_second_seen, total_seconds, episode_number, source_order, date_fetch, date_upload, fillermark) \
+                        "INSERT INTO items(entry_id, url, name, done, bookmark, progress, total_seconds, number, source_order, date_fetch, date_upload, fillermark) \
                          VALUES (?1, ?2, ?3, 0, 0, 0, 0, ?4, ?5, 0, 0, 0)",
                         (anime, format!("e{i}"), format!("ep{i}"), (i + 1) as f64, 2 - i),
                     )?;

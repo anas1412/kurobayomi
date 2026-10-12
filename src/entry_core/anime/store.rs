@@ -243,8 +243,8 @@ pub(crate) mod fixture {
     /// `seen` of them seen. Keep the `TempDir` alive.
     pub fn with_episodes(favorite: bool, initialized: bool, episodes: usize, seen: usize) -> (tempfile::TempDir, AnimeStore, i64) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("anime.db");
-        let writer = kuro_db::schema_anime::open(&path).expect("anime schema");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("anime schema");
         let db = Arc::new(Db::new(&path, writer).expect("anime handle"));
         let id = AnimeRepo::new(Arc::clone(&db))
             .insert(&Anime {

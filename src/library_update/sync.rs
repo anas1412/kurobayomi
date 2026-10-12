@@ -24,12 +24,11 @@ use crate::library_update::pass::ItemSync;
 use crate::library_update::queue::LibraryEntry;
 use crate::library_update::source::{Fetched, SourceItem};
 
-/// The item sync over the two databases. `chapter_locks` and `episode_locks` are separate because the domain keys its
+/// The item sync over the app database. `chapter_locks` and `episode_locks` are separate because the domain keys its
 /// locks by manga id and anime id, which are different id spaces. The caller shares them with other writers of the
 /// same rows, so a pass and a manual refresh never interleave.
 pub struct DbItemSync {
-    manga_db: Arc<Db>,
-    anime_db: Arc<Db>,
+    db: Arc<Db>,
     chapter_locks: Arc<MangaSyncLocks>,
     episode_locks: Arc<MangaSyncLocks>,
     chapters: SyncChapters,
@@ -40,22 +39,21 @@ pub struct DbItemSync {
 
 impl DbItemSync {
     pub fn new(
-        manga_db: Arc<Db>,
-        anime_db: Arc<Db>,
+        db: Arc<Db>,
         chapter_locks: Arc<MangaSyncLocks>,
         episode_locks: Arc<MangaSyncLocks>,
         mark_duplicate_read: bool,
         mark_duplicate_seen: bool,
     ) -> Self {
-        let chapters = SyncChapters::new(manga_db.clone(), chapter_locks.clone(), Arc::new(NoRenames));
-        let episodes = SyncEpisodes::new(anime_db.clone(), episode_locks.clone(), Arc::new(NoEpisodeRenames));
-        Self { manga_db, anime_db, chapter_locks, episode_locks, chapters, episodes, mark_duplicate_read, mark_duplicate_seen }
+        let chapters = SyncChapters::new(db.clone(), chapter_locks.clone(), Arc::new(NoRenames));
+        let episodes = SyncEpisodes::new(db.clone(), episode_locks.clone(), Arc::new(NoEpisodeRenames));
+        Self { db, chapter_locks, episode_locks, chapters, episodes, mark_duplicate_read, mark_duplicate_seen }
     }
 
     /// Takes the folder renames of downloaded chapters and episodes instead of the no-op ones (T-26a-086).
     pub fn with_renames(mut self, chapter_renames: Arc<dyn ChapterRenames>, episode_renames: Arc<dyn EpisodeRenames>) -> Self {
-        self.chapters = SyncChapters::new(self.manga_db.clone(), self.chapter_locks.clone(), chapter_renames);
-        self.episodes = SyncEpisodes::new(self.anime_db.clone(), self.episode_locks.clone(), episode_renames);
+        self.chapters = SyncChapters::new(self.db.clone(), self.chapter_locks.clone(), chapter_renames);
+        self.episodes = SyncEpisodes::new(self.db.clone(), self.episode_locks.clone(), episode_renames);
         self
     }
 }
@@ -153,7 +151,7 @@ impl ItemSync for DbItemSync {
         let prepare = |_: &mut SChapter| {};
         match entry.kind {
             Kind::Manga => {
-                let manga = load_manga(self.manga_db.clone(), entry.id).await?;
+                let manga = load_manga(self.db.clone(), entry.id).await?;
                 let raw: Vec<SChapter> = fetched.items.iter().map(to_source_chapter).collect();
                 let opts = ChapterSyncOptions {
                     now_ms,
@@ -166,7 +164,7 @@ impl ItemSync for DbItemSync {
                 Ok(new.iter().map(chapter_item).collect())
             }
             Kind::Anime => {
-                let anime = load_anime(self.anime_db.clone(), entry.id).await?;
+                let anime = load_anime(self.db.clone(), entry.id).await?;
                 let raw: Vec<SEpisode> = fetched.items.iter().map(to_source_episode).collect();
                 let opts = EpisodeSyncOptions {
                     now_ms,
@@ -242,14 +240,14 @@ mod tests {
         assert_eq!(episode_error(EpisodeSyncError::NoEpisodes(NoEpisodes)), UpdateError::NoEpisodes);
     }
 
-    fn manga_db(dir: &std::path::Path) -> Arc<Db> {
-        let path = dir.join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+    fn test_db(dir: &std::path::Path) -> Arc<Db> {
+        let path = kuro_db::schema_unified::db_path(dir);
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         Arc::new(Db::new(&path, writer).expect("manga db handle"))
     }
 
-    fn sync_for(manga: Arc<Db>, anime: Arc<Db>) -> DbItemSync {
-        DbItemSync::new(manga, anime, Arc::new(MangaSyncLocks::default()), Arc::new(MangaSyncLocks::default()), false, false)
+    fn sync_for(manga: Arc<Db>) -> DbItemSync {
+        DbItemSync::new(manga, Arc::new(MangaSyncLocks::default()), Arc::new(MangaSyncLocks::default()), false, false)
     }
 
     fn entry(id: i64) -> LibraryEntry {
@@ -267,14 +265,11 @@ mod tests {
     #[tokio::test]
     async fn the_second_sync_of_the_same_list_finds_nothing_new() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let manga = manga_db(dir.path());
-        let anime_path = dir.path().join("anime.db");
-        let anime_writer = kuro_db::schema_anime::open(&anime_path).expect("open anime db");
-        let anime = Arc::new(Db::new(&anime_path, anime_writer).expect("anime db handle"));
+        let manga = test_db(dir.path());
         let id = MangaRepo::new(manga.clone())
             .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Manga::create() })
             .expect("insert manga");
-        let sync = sync_for(manga, anime);
+        let sync = sync_for(manga);
         let list = fetched(vec![item("/c/1", 1.0), item("/c/2", 2.0)]);
         let first = sync.sync(&entry(id), &list, window(), 1_000).await.expect("first sync");
         assert_eq!(first.len(), 2, "both chapters are new on the first sync");
@@ -287,14 +282,11 @@ mod tests {
     async fn perf_02_a_500_item_sync_is_fast() {
         // The plan's bound is 100 ms in a release build; a debug build is held to a loose bound.
         let dir = tempfile::tempdir().expect("temp dir");
-        let manga = manga_db(dir.path());
-        let anime_path = dir.path().join("anime.db");
-        let anime_writer = kuro_db::schema_anime::open(&anime_path).expect("open anime db");
-        let anime = Arc::new(Db::new(&anime_path, anime_writer).expect("anime db handle"));
+        let manga = test_db(dir.path());
         let id = MangaRepo::new(manga.clone())
             .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Manga::create() })
             .expect("insert manga");
-        let sync = sync_for(manga, anime);
+        let sync = sync_for(manga);
         let items: Vec<SourceItem> = (0..500).map(|n| SourceItem { source_order: n, ..item(&format!("/c/{n}"), f64::from(n as i32)) }).collect();
         let list = fetched(items);
         let limit = if cfg!(debug_assertions) { std::time::Duration::from_secs(5) } else { std::time::Duration::from_millis(100) };
@@ -319,15 +311,12 @@ mod tests {
     async fn a_pass_sync_hands_a_renamed_chapter_to_the_rename_port_it_was_given() {
         // T-26a-086: the pass takes the real port in place of `NoRenames`.
         let dir = tempfile::tempdir().expect("temp dir");
-        let manga = manga_db(dir.path());
-        let anime_path = dir.path().join("anime.db");
-        let anime_writer = kuro_db::schema_anime::open(&anime_path).expect("open anime db");
-        let anime = Arc::new(Db::new(&anime_path, anime_writer).expect("anime db handle"));
+        let manga = test_db(dir.path());
         let id = MangaRepo::new(manga.clone())
             .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Manga::create() })
             .expect("insert manga");
         let renames = Arc::new(RecordingRenames::default());
-        let sync = sync_for(manga, anime).with_renames(renames.clone(), Arc::new(NoEpisodeRenames));
+        let sync = sync_for(manga).with_renames(renames.clone(), Arc::new(NoEpisodeRenames));
         sync.sync(&entry(id), &fetched(vec![item("/c/1", 1.0)]), window(), 1_000).await.expect("first sync");
         assert!(renames.0.lock().unwrap().is_empty(), "a new chapter has nothing to rename");
         let renamed = SourceItem { name: "Chapter 1 v2".into(), ..item("/c/1", 1.0) };
@@ -338,14 +327,11 @@ mod tests {
     #[tokio::test]
     async fn an_empty_list_from_a_remote_source_is_no_chapters_and_writes_nothing() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let manga = manga_db(dir.path());
-        let anime_path = dir.path().join("anime.db");
-        let anime_writer = kuro_db::schema_anime::open(&anime_path).expect("open anime db");
-        let anime = Arc::new(Db::new(&anime_path, anime_writer).expect("anime db handle"));
+        let manga = test_db(dir.path());
         let id = MangaRepo::new(manga.clone())
             .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Manga::create() })
             .expect("insert manga");
-        let sync = sync_for(manga, anime);
+        let sync = sync_for(manga);
         let result = sync.sync(&entry(id), &fetched(Vec::new()), window(), 1_000).await;
         assert_eq!(result, Err(UpdateError::NoChapters));
     }

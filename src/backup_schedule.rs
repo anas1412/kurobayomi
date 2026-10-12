@@ -75,7 +75,7 @@ pub fn start(app: &gtk::Application) {
         }
         None => return,
     };
-    let library = Library { prefs: store, manga: state.manga_db.clone(), anime: state.anime_db.clone(), extensions_dir: paths.extensions_dir() };
+    let library = Library { prefs: store, db: state.db.clone(), extensions_dir: paths.extensions_dir() };
     let host = CliHost {
         library,
         auto_dir,
@@ -95,17 +95,16 @@ mod tests {
     use std::sync::Arc;
 
     use kuro_db::handle::Db;
-    use kuro_db::{schema_anime, schema_manga};
+    use kuro_db::schema_unified;
     use kuro_prefs::store::PrefStore;
 
     use super::*;
 
     fn host(dir: &std::path::Path, now: i64) -> CliHost {
-        let (manga_path, anime_path) = (dir.join("manga.db"), dir.join("anime.db"));
-        let manga = Arc::new(Db::new(&manga_path, schema_manga::open(&manga_path).unwrap()).unwrap());
-        let anime = Arc::new(Db::new(&anime_path, schema_anime::open(&anime_path).unwrap()).unwrap());
+        let path = schema_unified::db_path(dir);
+        let db = Arc::new(Db::new(&path, schema_unified::open_file(&path).unwrap()).unwrap());
         CliHost {
-            library: Library { prefs: PrefStore::in_memory(), manga, anime, extensions_dir: dir.join("extensions") },
+            library: Library { prefs: PrefStore::in_memory(), db, extensions_dir: dir.join("extensions") },
             auto_dir: dir.join("autobackup"),
             now_ms: Box::new(move || now),
             power: PowerState { on_battery: false, percent: None },

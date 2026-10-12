@@ -33,7 +33,7 @@ pub enum OptionId {
 
 impl OptionId {
     /// Rows in display order, grouped by card (p1-ui-parity section 2.1).
-    pub const ROWS: [(Card, OptionId); 11] = [
+    pub const ROWS: [(Card, OptionId); 10] = [
         (Card::Library, OptionId::LibraryEntries),
         (Card::Library, OptionId::Chapters),
         (Card::Library, OptionId::Tracking),
@@ -41,7 +41,6 @@ impl OptionId {
         (Card::Library, OptionId::Categories),
         (Card::Library, OptionId::ReadEntries),
         (Card::Settings, OptionId::AppSettings),
-        (Card::Settings, OptionId::ExtensionStores),
         (Card::Settings, OptionId::SourceSettings),
         (Card::Settings, OptionId::PrivateSettings),
         (Card::Extensions, OptionId::Extensions),
@@ -170,10 +169,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn three_cards_with_six_four_and_one_rows() {
+    fn three_cards_with_six_three_and_one_rows() {
         let count = |c: Card| OptionId::ROWS.iter().filter(|(card, _)| *card == c).count();
         assert_eq!(count(Card::Library), 6);
-        assert_eq!(count(Card::Settings), 4);
+        assert_eq!(count(Card::Settings), 3);
         assert_eq!(count(Card::Extensions), 1);
     }
 
@@ -214,7 +213,7 @@ mod tests {
         assert!(s.create_enabled());
         assert_eq!(s.on_create(false, "x.tachibk").unwrap(), "x.tachibk");
         assert!(matches!(s.on_create(true, "x.tachibk"), Err(BackupError::InProgress)));
-        for id in [OptionId::LibraryEntries, OptionId::Categories, OptionId::AppSettings, OptionId::ExtensionStores, OptionId::CustomButtons, OptionId::SourceSettings] {
+        for id in [OptionId::LibraryEntries, OptionId::Categories, OptionId::AppSettings, OptionId::SourceSettings] {
             id.set(&mut s.options, false);
         }
         assert!(!s.create_enabled());

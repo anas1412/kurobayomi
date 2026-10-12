@@ -46,17 +46,17 @@ fn cbz_chapter(target: &Path, pages: usize) {
     fs::remove_dir_all(&scratch).expect("remove scratch");
 }
 
-pub(super) fn manga_db(dir: &Path) -> Arc<Db> {
-    let path = dir.join("manga.db");
-    let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+pub(super) fn db_in(dir: &Path) -> Arc<Db> {
+    let path = dir.join("test.db");
+    let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
     Arc::new(Db::new(&path, writer).expect("manga db handle"))
 }
 
-/// An anime database in a temporary folder, opened the way the app opens it.
-pub(super) fn anime_db() -> (tempfile::TempDir, Arc<Db>) {
+/// A database in a temporary folder, opened the way the app opens it.
+pub(super) fn test_db() -> (tempfile::TempDir, Arc<Db>) {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("anime.db");
-    let writer = kuro_db::schema_anime::open(&path).expect("open anime db");
+    let path = dir.path().join("test.db");
+    let writer = kuro_db::schema_unified::open_file(&path).expect("open anime db");
     (dir, Arc::new(Db::new(&path, writer).expect("anime db handle")))
 }
 
@@ -96,7 +96,7 @@ fn anime_id(db: &Arc<Db>, root: &Path, series: &str) -> i64 {
 #[test]
 fn a_folder_is_stored_once_with_its_chapters_and_cover() {
     let root = tempfile::tempdir().expect("temp dir");
-    let db = manga_db(root.path());
+    let db = db_in(root.path());
     let series = series(root.path());
 
     let scanned = scan(Kind::Manga, &series).expect("scan");
@@ -119,7 +119,7 @@ fn a_folder_is_stored_once_with_its_chapters_and_cover() {
 #[test]
 fn a_rescan_adds_new_chapters_and_keeps_read_state() {
     let root = tempfile::tempdir().expect("temp dir");
-    let db = manga_db(root.path());
+    let db = db_in(root.path());
     let series = series(root.path());
     let done = sync(&db, Kind::Manga, &scan(Kind::Manga, &series).expect("scan"), 1_000).expect("sync");
 
@@ -160,7 +160,7 @@ fn the_reader_loads_the_pages_of_a_folder_and_an_archive() {
 #[test]
 fn a_title_and_chapter_name_find_the_local_entry_and_its_chapter() {
     let root = tempfile::tempdir().expect("temp dir");
-    let db = manga_db(root.path());
+    let db = db_in(root.path());
     let series = series(root.path());
     let done = sync(&db, Kind::Manga, &scan(Kind::Manga, &series).expect("scan"), 1_000).expect("sync");
 
@@ -178,7 +178,7 @@ fn a_title_and_chapter_name_find_the_local_entry_and_its_chapter() {
 #[test]
 fn a_chapter_id_from_the_library_and_a_preferred_entry_pick_the_right_rows() {
     let root = tempfile::tempdir().expect("temp dir");
-    let db = manga_db(root.path());
+    let db = db_in(root.path());
     let first = series(root.path());
     let other_parent = root.path().join("other");
     fs::create_dir_all(&other_parent).expect("other parent");
@@ -208,7 +208,7 @@ fn a_folder_and_an_archive_with_one_name_become_two_chapter_names() {
 
 #[test]
 fn an_anime_folder_adds_each_series_with_its_episodes() {
-    let (_db_dir, db) = anime_db();
+    let (_db_dir, db) = test_db();
     let root = tempfile::tempdir().expect("root");
     video(root.path(), "Show", "Show - 1.mkv");
     video(root.path(), "Show", "Show - 2.mkv");
@@ -236,7 +236,7 @@ fn an_anime_folder_adds_each_series_with_its_episodes() {
 
 #[test]
 fn an_anime_rescan_keeps_seen_state_and_position_and_follows_the_files() {
-    let (_db_dir, db) = anime_db();
+    let (_db_dir, db) = test_db();
     let root = tempfile::tempdir().expect("root");
     video(root.path(), "Show", "Show - 1.mkv");
     video(root.path(), "Show", "Show - 2.mkv");
@@ -259,7 +259,7 @@ fn an_anime_rescan_keeps_seen_state_and_position_and_follows_the_files() {
 
 #[test]
 fn an_anime_folder_without_episodes_is_not_added_and_an_existing_row_loses_its_episodes() {
-    let (_db_dir, db) = anime_db();
+    let (_db_dir, db) = test_db();
     let root = tempfile::tempdir().expect("root");
     fs::create_dir(root.path().join("Bare")).expect("folder without episodes");
     assert!(add(&db, Kind::Anime, root.path(), 1_000).expect("scan").is_empty());
@@ -274,7 +274,7 @@ fn an_anime_folder_without_episodes_is_not_added_and_an_existing_row_loses_its_e
 
 #[test]
 fn an_anime_library_rescan_follows_its_series_and_leaves_removed_ones_out() {
-    let (_db_dir, db) = anime_db();
+    let (_db_dir, db) = test_db();
     let root = tempfile::tempdir().expect("root");
     video(root.path(), "Show", "Show - 1.mkv");
     video(root.path(), "Gone", "Gone - 1.mkv");
@@ -293,7 +293,7 @@ fn an_anime_library_rescan_follows_its_series_and_leaves_removed_ones_out() {
 
 #[test]
 fn choosing_an_anime_folder_again_puts_its_series_back_in_the_library() {
-    let (_db_dir, db) = anime_db();
+    let (_db_dir, db) = test_db();
     let root = tempfile::tempdir().expect("root");
     video(root.path(), "Show", "Show - 1.mkv");
     add(&db, Kind::Anime, root.path(), 1_000).expect("first scan");

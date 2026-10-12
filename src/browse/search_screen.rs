@@ -242,7 +242,7 @@ fn production_env(kind: Kind, migrate_from: Option<i64>) -> SearchEnv {
 fn live_steps(kind: Kind) -> LiveSteps {
     let app = crate::data::app();
     let downloads = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
-    LiveSteps::new(kind, app.db(kind), super::directory::current(kind), downloads, app.base.store().clone())
+    LiveSteps::new(kind, app.db.clone(), super::directory::current(kind), downloads, app.base.store().clone())
 }
 
 /// The dialog of what to include for moving `old` to a card's entry of `kind`. Show manga, Show anime and Show seasons

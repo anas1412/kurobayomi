@@ -1,6 +1,6 @@
 //! Change notification. The writer's hooks collect the tables a write touched (triggers and foreign
 //! key cascades included), and the write publishes them once its commit has returned. The set is
-//! carried by table name, so every database file works; `Tables` names the manga tables as bits.
+//! carried by table name; `Tables` names the tables of the unified file as bits.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -14,25 +14,46 @@ use crate::error::DbResult;
 /// Names of the tables one committed write touched, in name order.
 pub type Changed = Arc<BTreeSet<String>>;
 
-/// A set of manga tables, one bit per table in `MANGA_TABLES` order.
+/// The tables of the unified file, in the order of the [`Tables`] bits. Exported as `kuro_db::DB_TABLES`.
+pub const TABLES: &[&str] = &[
+    "entries",
+    "items",
+    "history",
+    "categories",
+    "entry_categories",
+    "excluded_scanlators",
+    "tracks",
+    "stub_sources",
+    "anime_relations",
+    "download_queue",
+    "download_pending_delete",
+    "download_pending_corrupt",
+    "track_retry_queue",
+];
+
+/// A set of tables, one bit per table in [`TABLES`] order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Tables(pub u16);
 
 impl Tables {
     pub const NONE: Tables = Tables(0);
-    pub const MANGAS: Tables = Tables(1);
-    pub const CHAPTERS: Tables = Tables(2);
+    pub const ENTRIES: Tables = Tables(1);
+    pub const ITEMS: Tables = Tables(2);
     pub const HISTORY: Tables = Tables(4);
     pub const CATEGORIES: Tables = Tables(8);
-    pub const MANGAS_CATEGORIES: Tables = Tables(16);
+    pub const ENTRY_CATEGORIES: Tables = Tables(16);
     pub const EXCLUDED_SCANLATORS: Tables = Tables(32);
-    pub const MANGA_SYNC: Tables = Tables(64);
-    pub const SOURCES: Tables = Tables(128);
-    pub const EXTENSION_REPOS: Tables = Tables(256);
+    pub const TRACKS: Tables = Tables(64);
+    pub const STUB_SOURCES: Tables = Tables(128);
+    pub const ANIME_RELATIONS: Tables = Tables(256);
+    pub const DOWNLOAD_QUEUE: Tables = Tables(512);
+    pub const DOWNLOAD_PENDING_DELETE: Tables = Tables(1024);
+    pub const DOWNLOAD_PENDING_CORRUPT: Tables = Tables(2048);
+    pub const TRACK_RETRY_QUEUE: Tables = Tables(4096);
 
-    /// The manga table names of this set, in bit order.
+    /// The table names of this set, in bit order.
     pub fn names(self) -> Vec<&'static str> {
-        crate::schema::MANGA_TABLES
+        TABLES
             .iter()
             .enumerate()
             .filter(|(bit, _)| self.0 & (1 << bit) != 0)
@@ -40,15 +61,12 @@ impl Tables {
             .collect()
     }
 
-    /// The bit of a manga table name; `NONE` for any other name.
+    /// The bit of a table name; `NONE` for any other name.
     pub fn from_name(name: &str) -> Tables {
-        crate::schema::MANGA_TABLES
-            .iter()
-            .position(|t| *t == name)
-            .map_or(Tables::NONE, |bit| Tables(1 << bit))
+        TABLES.iter().position(|t| *t == name).map_or(Tables::NONE, |bit| Tables(1 << bit))
     }
 
-    /// The set of the manga tables named in `changed`.
+    /// The set of the tables named in `changed`.
     pub fn of_changed(changed: &BTreeSet<String>) -> Tables {
         changed.iter().fold(Tables::NONE, |acc, name| acc | Tables::from_name(name))
     }
@@ -65,20 +83,30 @@ impl std::ops::BitOr for Tables {
     }
 }
 
+const fn of(parts: &[Tables]) -> Tables {
+    let mut bits = 0;
+    let mut i = 0;
+    while i < parts.len() {
+        bits |= parts[i].0;
+        i += 1;
+    }
+    Tables(bits)
+}
+
 // Dependency sets of the live queries (plan section 3.4). A query subscribes to the tables it reads.
-pub const MANGA_DEPS: Tables = Tables::MANGAS;
-pub const LIBRARY_DEPS: Tables = Tables(Tables::MANGAS.0 | Tables::CHAPTERS.0 | Tables::EXCLUDED_SCANLATORS.0 | Tables::HISTORY.0 | Tables::MANGAS_CATEGORIES.0);
+pub const ENTRY_DEPS: Tables = Tables::ENTRIES;
+pub const LIBRARY_DEPS: Tables =
+    of(&[Tables::ENTRIES, Tables::ITEMS, Tables::EXCLUDED_SCANLATORS, Tables::HISTORY, Tables::ENTRY_CATEGORIES]);
 pub const CATEGORIES_DEPS: Tables = Tables::CATEGORIES;
-pub const CATEGORIES_OF_MANGA_DEPS: Tables = Tables(Tables::CATEGORIES.0 | Tables::MANGAS_CATEGORIES.0);
-pub const CHAPTERS_OF_MANGA_DEPS: Tables = Tables(Tables::CHAPTERS.0 | Tables::EXCLUDED_SCANLATORS.0);
-pub const SCANLATORS_DEPS: Tables = Tables::CHAPTERS;
-pub const HISTORY_DEPS: Tables = Tables(Tables::MANGAS.0 | Tables::CHAPTERS.0 | Tables::HISTORY.0);
+pub const CATEGORIES_OF_ENTRY_DEPS: Tables = of(&[Tables::CATEGORIES, Tables::ENTRY_CATEGORIES]);
+pub const ITEMS_OF_ENTRY_DEPS: Tables = of(&[Tables::ITEMS, Tables::EXCLUDED_SCANLATORS]);
+pub const SCANLATORS_DEPS: Tables = Tables::ITEMS;
+pub const HISTORY_DEPS: Tables = of(&[Tables::ENTRIES, Tables::ITEMS, Tables::HISTORY]);
 pub const EXCLUDED_SCANLATORS_DEPS: Tables = Tables::EXCLUDED_SCANLATORS;
-pub const TRACKS_DEPS: Tables = Tables::MANGA_SYNC;
-pub const UPDATES_DEPS: Tables = Tables(Tables::MANGAS.0 | Tables::CHAPTERS.0);
-pub const EXTENSION_REPOS_DEPS: Tables = Tables::EXTENSION_REPOS;
-pub const STUB_SOURCES_DEPS: Tables = Tables::SOURCES;
-pub const SOURCE_COUNTS_DEPS: Tables = Tables::MANGAS;
+pub const TRACKS_DEPS: Tables = Tables::TRACKS;
+pub const UPDATES_DEPS: Tables = of(&[Tables::ENTRIES, Tables::ITEMS]);
+pub const STUB_SOURCES_DEPS: Tables = Tables::STUB_SOURCES;
+pub const SOURCE_COUNTS_DEPS: Tables = Tables::ENTRIES;
 
 /// What the writer's hooks collect. `open` holds the names of the write in progress; `staged` holds
 /// the names of commits whose publication is still pending.
@@ -143,27 +171,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_nine_manga_bits_follow_the_table_order() {
-        assert_eq!(Tables::MANGAS.0, 1);
-        assert_eq!(Tables::EXTENSION_REPOS.0, 256);
-        assert_eq!(Tables::from_name("chapters"), Tables::CHAPTERS);
-        assert_eq!(Tables::from_name("extension_repos"), Tables::EXTENSION_REPOS);
-        assert_eq!(Tables::from_name("animes"), Tables::NONE, "other files' tables are not manga bits");
-        assert_eq!((Tables::MANGAS | Tables::CHAPTERS).names(), ["mangas", "chapters"]);
+    fn the_thirteen_bits_follow_the_table_order() {
+        assert_eq!(TABLES.len(), 13);
+        assert_eq!(Tables::ENTRIES.0, 1);
+        assert_eq!(Tables::TRACK_RETRY_QUEUE.0, 4096);
+        assert_eq!(Tables::from_name("items"), Tables::ITEMS);
+        assert_eq!(Tables::from_name("tracks"), Tables::TRACKS);
+        assert_eq!(Tables::from_name("mangas"), Tables::NONE, "old table names are no bits");
+        assert_eq!((Tables::ENTRIES | Tables::ITEMS).names(), ["entries", "items"]);
     }
 
     #[test]
     fn dependency_sets_are_the_plan_table() {
-        assert_eq!(LIBRARY_DEPS.names(), ["mangas", "chapters", "history", "mangas_categories", "excluded_scanlators"]);
-        assert_eq!(HISTORY_DEPS.names(), ["mangas", "chapters", "history"]);
-        assert_eq!(UPDATES_DEPS.names(), ["mangas", "chapters"]);
-        assert_eq!(CATEGORIES_OF_MANGA_DEPS.names(), ["categories", "mangas_categories"]);
-        assert_eq!(SCANLATORS_DEPS, Tables::CHAPTERS);
+        assert_eq!(LIBRARY_DEPS.names(), ["entries", "items", "history", "entry_categories", "excluded_scanlators"]);
+        assert_eq!(HISTORY_DEPS.names(), ["entries", "items", "history"]);
+        assert_eq!(UPDATES_DEPS.names(), ["entries", "items"]);
+        assert_eq!(CATEGORIES_OF_ENTRY_DEPS.names(), ["categories", "entry_categories"]);
+        assert_eq!(SCANLATORS_DEPS, Tables::ITEMS);
     }
 
     #[test]
     fn of_changed_maps_names_and_ignores_unknown_ones() {
-        let names: BTreeSet<String> = ["chapters", "mangas", "sqlite_sequence"].map(String::from).into();
-        assert_eq!(Tables::of_changed(&names), Tables::CHAPTERS | Tables::MANGAS);
+        let names: BTreeSet<String> = ["items", "entries", "sqlite_sequence"].map(String::from).into();
+        assert_eq!(Tables::of_changed(&names), Tables::ITEMS | Tables::ENTRIES);
     }
 }

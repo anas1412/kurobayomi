@@ -15,9 +15,8 @@ use kuro_backup::validate::{TrackerRegistry, preflight_file};
 use kuro_data::anime::Anime;
 use kuro_data::category::Category;
 use kuro_data::chapter::Chapter;
-use kuro_data::extension_repo::ExtensionRepo;
 use kuro_data::manga::Manga;
-use kuro_db::{schema_anime, schema_manga};
+use kuro_db::schema_unified;
 use kuro_platform::kind::Kind;
 use kuro_prefs::store::PrefStore as Store;
 use kuro_prefs::values::PrefValue as Stored;
@@ -72,15 +71,6 @@ impl LibraryReader for Library {
     }
     fn anime_categories(&self) -> Result<Vec<Category>, BackupError> {
         Ok(vec![Category { id: 5, name: "Watching".into(), order: 1, flags: 0, hidden: false }])
-    }
-    fn manga_extension_repos(&self) -> Result<Vec<ExtensionRepo>, BackupError> {
-        Ok(vec![ExtensionRepo {
-            base_url: "https://repo.example".into(),
-            name: "Repo".into(),
-            short_name: None,
-            website: "w".into(),
-            signing_key_fingerprint: "fp".into(),
-        }])
     }
 }
 
@@ -143,20 +133,13 @@ fn create(dir: &std::path::Path, opts: &BackupOptions) -> std::path::PathBuf {
 }
 
 struct Dbs {
-    manga: Connection,
-    anime: Connection,
+    db: Connection,
     app: Store,
     source: Store,
 }
 
 fn fresh() -> Dbs {
-    let manga = Connection::open_in_memory().unwrap();
-    manga.pragma_update(None, "foreign_keys", "ON").unwrap();
-    kuro_db::open::register_functions(&manga).unwrap();
-    manga.execute_batch(schema_manga::BASELINE_SQL).unwrap();
-    let anime = schema_anime::open_in_memory().unwrap();
-    anime.execute("DELETE FROM custom_buttons", []).unwrap();
-    Dbs { manga, anime, app: Store::in_memory(), source: Store::in_memory() }
+    Dbs { db: schema_unified::open_in_memory().unwrap(), app: Store::in_memory(), source: Store::in_memory() }
 }
 
 fn restore(dbs: &mut Dbs, path: &std::path::Path) {
@@ -165,7 +148,7 @@ fn restore(dbs: &mut Dbs, path: &std::path::Path) {
     let sched = IntervalScheduler { store: &dbs.app, library_timer: &nothing, backup_timer: &nothing };
     let source = dbs.source.clone();
     let open = move |_: &str| source.clone();
-    let targets = Targets { manga: &mut dbs.manga, anime: &mut dbs.anime, app_prefs: &dbs.app, source_prefs: &open, scheduler: &sched };
+    let targets = Targets { db: &mut dbs.db, app_prefs: &dbs.app, source_prefs: &open, scheduler: &sched };
     let now = Local.with_ymd_and_hms(2026, 10, 9, 12, 0, 0).single().unwrap();
     let run = restore_backup(backup, RestoreOptions::from_bits([true; 7]), now, targets, &|| false, &mut |_| {});
     assert!(run.errors.is_empty(), "{:?}", run.errors);
@@ -176,21 +159,22 @@ fn rows(c: &Connection, table: &str) -> i64 {
     c.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()
 }
 
+fn entries(c: &Connection, kind: &str) -> i64 {
+    c.query_row("SELECT count(*) FROM entries WHERE kind = ?1", [kind], |r| r.get(0)).unwrap()
+}
+
 #[test]
 fn x112_default_backup_restores_into_an_empty_database_with_the_same_counts() {
     let dir = tempfile::tempdir().unwrap();
     let path = create(dir.path(), &BackupOptions::default());
     preflight_file(&path, &Sources, &Trackers).unwrap();
     let mut dbs = fresh();
-    let seeded = rows(&dbs.manga, "categories");
+    let seeded = rows(&dbs.db, "categories");
     restore(&mut dbs, &path);
-    assert_eq!(rows(&dbs.manga, "mangas"), 1);
-    assert_eq!(rows(&dbs.manga, "chapters"), 1);
-    assert_eq!(rows(&dbs.anime, "animes"), 1);
-    assert_eq!(rows(&dbs.manga, "categories") - seeded, 1);
-    // Repo rows become links in the prefs link list, and custom buttons are not restored: neither writes a row.
-    assert_eq!(rows(&dbs.manga, "extension_repos"), 0);
-    assert_eq!(rows(&dbs.anime, "custom_buttons"), 0);
+    assert_eq!(entries(&dbs.db, "manga"), 1);
+    assert_eq!(rows(&dbs.db, "items"), 1);
+    assert_eq!(entries(&dbs.db, "anime"), 1);
+    assert_eq!(rows(&dbs.db, "categories") - seeded, 2, "one manga and one anime category");
     assert_eq!(dbs.app.get_raw("show_nsfw_source"), Some(Stored::Bool(true)));
     assert_eq!(dbs.source.get_raw("show_nsfw"), Some(Stored::Bool(true)));
 }
@@ -199,11 +183,10 @@ fn x112_default_backup_restores_into_an_empty_database_with_the_same_counts() {
 #[test]
 fn every_single_option_the_create_side_allows_restores() {
     let dir = tempfile::tempdir().unwrap();
-    let singles: [(&str, BackupOptions, fn(&Dbs) -> bool); 5] = [
-        ("library entries", BackupOptions { library_entries: true, ..none() }, |d| rows(&d.manga, "mangas") == 1 && rows(&d.anime, "animes") == 1),
-        ("categories", BackupOptions { categories: true, ..none() }, |d| rows(&d.anime, "categories") >= 1),
+    let singles: [(&str, BackupOptions, fn(&Dbs) -> bool); 4] = [
+        ("library entries", BackupOptions { library_entries: true, ..none() }, |d| entries(&d.db, "manga") == 1 && entries(&d.db, "anime") == 1),
+        ("categories", BackupOptions { categories: true, ..none() }, |d| rows(&d.db, "categories") > 2),
         ("app settings", BackupOptions { app_settings: true, ..none() }, |d| d.app.get_raw("show_nsfw_source").is_some()),
-        ("extension stores", BackupOptions { extension_stores: true, ..none() }, |d| rows(&d.manga, "extension_repos") == 0),
         ("source settings", BackupOptions { source_settings: true, ..none() }, |d| d.source.get_raw("show_nsfw").is_some()),
     ];
     // Custom buttons are cut: that option alone would write an empty file, so it does not enable Create.
@@ -214,7 +197,7 @@ fn every_single_option_the_create_side_allows_restores() {
         preflight_file(&path, &Sources, &Trackers).unwrap_or_else(|e| panic!("{name}: {e}"));
         let mut dbs = fresh();
         restore(&mut dbs, &path);
-        // Extension stores are accepted and restore without error, but write no row any more.
+        // Extension stores alone are not listed: the creator writes no repo rows any more (the links travel in the prefs).
         assert!(applied(&dbs), "{name}: the restore wrote what the file carries");
     }
 }

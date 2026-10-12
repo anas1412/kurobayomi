@@ -112,7 +112,7 @@ impl HistoryScreen {
     }
 
     fn db(&self) -> std::sync::Arc<kuro_db::handle::Db> {
-        data::app().db(self.kind)
+        data::app().db.clone()
     }
 
     /// (Re)starts the live query for the current search text. The previous run is aborted.

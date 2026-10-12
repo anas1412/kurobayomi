@@ -17,10 +17,7 @@ use crate::library::display_mode::LibraryDisplayMode;
 use crate::library::sort::{Direction, LibrarySort, SortType};
 
 fn service(kind: Kind) -> (tempfile::TempDir, CategoryService, Arc<LibraryPrefs>) {
-    let (dir, db) = match kind {
-        Kind::Manga => crate::testdb::manga_db(),
-        Kind::Anime => crate::testdb::anime_db(),
-    };
+    let (dir, db) = crate::testdb::test_db();
     let prefs = Arc::new(LibraryPrefs::new(PrefStore::in_memory()));
     (dir, CategoryService::new(db, kind, prefs.clone()), prefs)
 }
@@ -170,7 +167,7 @@ async fn delete_renumbers_every_category_and_cleans_the_preference_sets() {
 
 #[tokio::test]
 async fn deleting_a_category_drops_its_links_and_the_entry_falls_back_to_default() {
-    let (_d, db) = crate::testdb::manga_db();
+    let (_d, db) = crate::testdb::test_db();
     let prefs = Arc::new(LibraryPrefs::new(PrefStore::in_memory()));
     let svc = CategoryService::new(db.clone(), Kind::Manga, prefs);
     let cat = svc.create("A").await.unwrap();
@@ -186,7 +183,7 @@ async fn deleting_a_category_drops_its_links_and_the_entry_falls_back_to_default
 
 #[tokio::test]
 async fn set_entry_categories_drops_default_unknown_and_duplicate_ids() {
-    let (_d, db) = crate::testdb::manga_db();
+    let (_d, db) = crate::testdb::test_db();
     let prefs = Arc::new(LibraryPrefs::new(PrefStore::in_memory()));
     let svc = CategoryService::new(db.clone(), Kind::Manga, prefs);
     let two = svc.create("Two").await.unwrap();
@@ -253,7 +250,7 @@ fn initial_flags_follow_the_global_sort_and_display_mode_is_one_key() {
 
 #[tokio::test]
 async fn by_entry_is_ordered_and_visible_filter_drops_hidden() {
-    let (_d, db) = crate::testdb::manga_db();
+    let (_d, db) = crate::testdb::test_db();
     let prefs = Arc::new(LibraryPrefs::new(PrefStore::in_memory()));
     let svc = CategoryService::new(db.clone(), Kind::Manga, prefs);
     let a = svc.create("A").await.unwrap();

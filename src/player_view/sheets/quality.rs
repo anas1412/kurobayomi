@@ -162,7 +162,7 @@ fn online_episode(episode_id: i64) -> Option<(Arc<dyn AnimeSource>, SEpisode)> {
     if !crate::data::is_installed() {
         return None;
     }
-    let db = &crate::data::app().anime_db;
+    let db = &crate::data::app().db;
     let episode = EpisodeRepo::new(Arc::clone(db)).by_id(episode_id).ok()??;
     let anime = AnimeRepo::new(Arc::clone(db)).by_id(episode.anime_id).ok()?;
     let source = crate::screens::anime_sources().into_iter().find(|s| s.id() == anime.source)?;

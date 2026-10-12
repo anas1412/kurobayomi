@@ -346,7 +346,7 @@ mod tests {
     #[tokio::test]
     async fn tr_27_d01_upsert_keeps_the_row_id_and_returns_it() {
         let dir = TempDir::new().unwrap();
-        let db: Arc<Db> = TestDb::anime_handle(&dir);
+        let db: Arc<Db> = TestDb::handle(&dir);
         let anime_id = db.write(|tx| Ok(AnimeBuilder::new().insert(tx))).unwrap();
         let repo = kuro_data::track::AnimeTrackRepo::new(db.clone());
 
@@ -366,7 +366,7 @@ mod tests {
     #[tokio::test]
     async fn tr_27_015_a_second_tracker_gets_its_own_row() {
         let dir = TempDir::new().unwrap();
-        let db: Arc<Db> = TestDb::anime_handle(&dir);
+        let db: Arc<Db> = TestDb::handle(&dir);
         let anime_id = db.write(|tx| Ok(AnimeBuilder::new().insert(tx))).unwrap();
         let repo = kuro_data::track::AnimeTrackRepo::new(db.clone());
         let a = AnimeTrackRepo::upsert(&repo, &track(anime_id, 1.0))
@@ -389,7 +389,7 @@ mod tests {
     #[tokio::test]
     async fn tr_27_027_episode_repo_reads_numbers_and_marks_seen() {
         let dir = TempDir::new().unwrap();
-        let db: Arc<Db> = TestDb::anime_handle(&dir);
+        let db: Arc<Db> = TestDb::handle(&dir);
         let anime_id = db.write(|tx| Ok(AnimeBuilder::new().insert(tx))).unwrap();
         db.write(|tx| {
             EpisodeBuilder::new(anime_id).episode_number(1.0).insert(tx);

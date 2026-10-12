@@ -4,7 +4,6 @@
 
 use std::collections::BTreeSet;
 
-use kuro_data::extension_repo::ExtensionRepoRepo;
 use kuro_prefs::pref::Pref;
 
 /// The identity of an installed extension package. Area 20 supplies it. `fingerprints` holds the signing
@@ -19,21 +18,6 @@ pub struct PackageIdentity {
 /// The signing keys of the repositories (manga) or stores (anime) the user added.
 pub trait SigningKeys: Send + Sync {
     fn signing_keys(&self) -> Vec<String>;
-}
-
-/// Manga: the signing keys of the extension repositories.
-pub struct MangaRepoKeys(pub ExtensionRepoRepo);
-
-impl SigningKeys for MangaRepoKeys {
-    fn signing_keys(&self) -> Vec<String> {
-        match self.0.all() {
-            Ok(repos) => repos.into_iter().map(|r| r.signing_key_fingerprint).collect(),
-            Err(e) => {
-                tracing::warn!("cannot read extension repos for trust: {e:?}");
-                Vec::new()
-            }
-        }
-    }
 }
 
 /// `<package>:<versionCode>:<hash>`.

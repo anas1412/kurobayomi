@@ -49,13 +49,13 @@ mod tests {
     #[test]
     fn a_burst_of_writes_ends_with_the_newest_value() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("manga schema");
         let db = Arc::new(Db::new(&path, writer).expect("manga handle"));
         let rt = kuro_core::runtime::build().expect("runtime");
         let _entered = rt.enter();
-        let sub = db.subscribe(&["mangas"], Duration::ZERO, |c| {
-            Ok(c.query_row("SELECT count(*) FROM mangas", [], |r| r.get::<_, i64>(0))?)
+        let sub = db.subscribe(&["entries"], Duration::ZERO, |c| {
+            Ok(c.query_row("SELECT count(*) FROM entries", [], |r| r.get::<_, i64>(0))?)
         });
         let ctx = glib::MainContext::new();
         let seen: Rc<RefCell<Vec<i64>>> = Rc::new(RefCell::new(Vec::new()));

@@ -51,23 +51,15 @@ use crate::updates::download_host;
 /// to the downloads backend (`download_host::current`) paused, and one start at the end of the pass. Progress and
 /// counters have no surface here: the counters are written by `PrefsHost`.
 ///
-/// The host runs on the runtime's workers, where the app's thread-bound handles are out of reach, so it keeps the two
-/// database handles and the external-downloader preference it needs.
+/// The host runs on the runtime's workers, where the app's thread-bound handles are out of reach, so it keeps the
+/// database handle and the external-downloader preference it needs.
 pub struct ToastHost {
-    manga_db: Arc<Db>,
-    anime_db: Arc<Db>,
+    db: Arc<Db>,
 }
 
 impl ToastHost {
-    pub fn new(manga_db: Arc<Db>, anime_db: Arc<Db>) -> Self {
-        Self { manga_db, anime_db }
-    }
-
-    fn db(&self, kind: Kind) -> &Arc<Db> {
-        match kind {
-            Kind::Manga => &self.manga_db,
-            Kind::Anime => &self.anime_db,
-        }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 
     /// What the error log calls a source: `Name (LANG)` for a source the app holds, else the name its stub row keeps
@@ -76,7 +68,7 @@ impl ToastHost {
         if let Some(source) = LiveRegistry.get(kind, id) {
             return source.label();
         }
-        let db = Arc::clone(self.db(kind));
+        let db = Arc::clone(&self.db);
         let stored = match kind {
             Kind::Manga => MangaStubSourceRepo::new(db).get(id),
             Kind::Anime => AnimeStubSourceRepo::new(db).get(id),
@@ -121,7 +113,7 @@ impl Host for ToastHost {
 
     fn enqueue_downloads(&self, kind: Kind, entry_id: i64, items: &[crate::library_update::source::SourceItem]) {
         let urls: Vec<String> = items.iter().map(|item| item.url.clone()).collect();
-        let ids = crate::library::actions::item_ids_by_url(self.db(kind), kind, entry_id, &urls);
+        let ids = crate::library::actions::item_ids_by_url(&self.db, kind, entry_id, &urls);
         if ids.is_empty() {
             return;
         }
@@ -249,15 +241,14 @@ fn folder_renames() -> Arc<FolderRenames> {
 
 fn runner() -> Arc<Runner> {
     let app = crate::data::app();
-    runner_over(app.manga_db.clone(), app.anime_db.clone(), app.base.store())
+    runner_over(app.db.clone(), app.base.store())
 }
 
-/// The runner over two database handles and a preference store, for the app and for the headless pass.
-fn runner_over(manga_db: Arc<Db>, anime_db: Arc<Db>, store: &PrefStore) -> Arc<Runner> {
+/// The runner over the database handle and a preference store, for the app and for the headless pass.
+fn runner_over(db: Arc<Db>, store: &PrefStore) -> Arc<Runner> {
     let renames = folder_renames();
     let sync = DbItemSync::new(
-        manga_db.clone(),
-        anime_db.clone(),
+        db.clone(),
         Arc::new(MangaSyncLocks::default()),
         Arc::new(MangaSyncLocks::default()),
         diet::LIBRARY_MARK_DUPLICATE_CHAPTER_READ,
@@ -265,10 +256,10 @@ fn runner_over(manga_db: Arc<Db>, anime_db: Arc<Db>, store: &PrefStore) -> Arc<R
     )
     .with_renames(renames.clone(), renames);
     let prefs = Prefs::with_store(store.clone(), Arc::new(kuro_prefs::memory::MemorySecrets::default()));
-    let host = PrefsHost::new(ToastHost::new(manga_db.clone(), anime_db.clone()), &prefs);
+    let host = PrefsHost::new(ToastHost::new(db.clone()), &prefs);
     Arc::new(PassRunner::new(Deps {
         registry: LiveRegistry,
-        store: SqliteLibraryStore::new(manga_db, anime_db),
+        store: SqliteLibraryStore::new(db),
         sync,
         host,
     }))
@@ -314,8 +305,8 @@ fn metadata_passes() -> Arc<MetadataPasses> {
     let app = crate::data::app();
     Arc::new(MetadataRunner::new(MetadataDeps {
         registry: LiveRegistry,
-        store: SqliteLibraryStore::new(app.manga_db.clone(), app.anime_db.clone()),
-        writer: DbMetadataStore::new(app.manga_db.clone(), app.anime_db.clone()),
+        store: SqliteLibraryStore::new(app.db.clone()),
+        writer: DbMetadataStore::new(app.db.clone()),
         progress: Some(Arc::new(MetadataNotices)),
     }))
 }
@@ -453,7 +444,7 @@ pub fn run_headless(trigger: Trigger) -> u8 {
     let inputs = Inputs {
         download: DownloadPrefs::new(store.clone()),
     };
-    let runner = runner_over(library.manga, library.anime, &store);
+    let runner = runner_over(library.db, &store);
     runtime.block_on(headless_passes(&runner, &inputs, trigger))
 }
 

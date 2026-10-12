@@ -13,25 +13,24 @@ use kuro_db::handle::Db;
 use kuro_platform::kind::Kind;
 use super::search_provider::{self, Catalogue, Hit, Provider};
 
-/// The library databases as a [`Catalogue`].
+/// The library database as a [`Catalogue`].
 pub struct LibraryCatalogue {
-    manga: Arc<Db>,
-    anime: Arc<Db>,
+    db: Arc<Db>,
 }
 
 impl LibraryCatalogue {
-    pub fn new(manga: Arc<Db>, anime: Arc<Db>) -> Self {
-        Self { manga, anime }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 
     /// Every library title once (a row exists per category).
     fn hits(&self) -> Vec<Hit> {
         let mut hits = Vec::new();
-        match MangaRepo::new(self.manga.clone()).library() {
+        match MangaRepo::new(self.db.clone()).library() {
             Ok(rows) => hits.extend(rows.into_iter().map(|r| Hit { kind: Kind::Manga, entry_id: r.manga.id, title: r.manga.title })),
             Err(e) => tracing::warn!("the search provider could not read the manga library: {e}"),
         }
-        match AnimeRepo::new(self.anime.clone()).library() {
+        match AnimeRepo::new(self.db.clone()).library() {
             Ok(rows) => hits.extend(rows.into_iter().map(|r| Hit { kind: Kind::Anime, entry_id: r.anime.id, title: r.anime.title })),
             Err(e) => tracing::warn!("the search provider could not read the anime library: {e}"),
         }
@@ -65,8 +64,8 @@ impl Catalogue for LibraryCatalogue {
         let (kind, entry_id) = id.split_once(':')?;
         let entry_id: i64 = entry_id.parse().ok()?;
         match kind {
-            "manga" => MangaRepo::new(self.manga.clone()).by_id(entry_id).ok().map(|m| Hit { kind: Kind::Manga, entry_id, title: m.title }),
-            "anime" => AnimeRepo::new(self.anime.clone()).by_id(entry_id).ok().map(|a| Hit { kind: Kind::Anime, entry_id, title: a.title }),
+            "manga" => MangaRepo::new(self.db.clone()).by_id(entry_id).ok().map(|m| Hit { kind: Kind::Manga, entry_id, title: m.title }),
+            "anime" => AnimeRepo::new(self.db.clone()).by_id(entry_id).ok().map(|a| Hit { kind: Kind::Anime, entry_id, title: a.title }),
             _ => None,
         }
     }
@@ -78,10 +77,10 @@ thread_local! {
 }
 
 /// Registers the provider over the open library, once. Call it after the application is registered.
-pub fn serve(app: &gtk::Application, manga: Arc<Db>, anime: Arc<Db>) {
+pub fn serve(app: &gtk::Application, db: Arc<Db>) {
     PROVIDER.with(|slot| {
         if slot.borrow().is_none() {
-            *slot.borrow_mut() = search_provider::serve(app, Rc::new(LibraryCatalogue::new(manga, anime)));
+            *slot.borrow_mut() = search_provider::serve(app, Rc::new(LibraryCatalogue::new(db)));
         }
     });
 }
@@ -115,10 +114,9 @@ mod tests {
     #[test]
     fn an_empty_library_has_no_results_and_no_title_for_an_id() {
         let dir = tempfile::TempDir::new().unwrap();
-        let (manga_path, anime_path) = (dir.path().join("m.db"), dir.path().join("a.db"));
-        let manga = Arc::new(Db::new(&manga_path, kuro_db::schema_manga::open(&manga_path).unwrap()).unwrap());
-        let anime = Arc::new(Db::new(&anime_path, kuro_db::schema_anime::open(&anime_path).unwrap()).unwrap());
-        let catalogue = LibraryCatalogue::new(manga, anime);
+        let path = dir.path().join("a.db");
+        let db = Arc::new(Db::new(&path, kuro_db::schema_unified::open_file(&path).unwrap()).unwrap());
+        let catalogue = LibraryCatalogue::new(db);
         assert!(catalogue.search(&terms(&["x"])).is_empty());
         assert_eq!(catalogue.get("anime:5"), None);
         assert_eq!(catalogue.get("bogus"), None);

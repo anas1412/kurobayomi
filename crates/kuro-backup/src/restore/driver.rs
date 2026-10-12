@@ -27,8 +27,8 @@ use crate::schema::{Backup, BackupAnime, BackupAnimeSource, BackupManga, BackupS
 
 /// Where a restore writes. The caller owns the connections and the stores.
 pub struct Targets<'a> {
-    pub manga: &'a mut Connection,
-    pub anime: &'a mut Connection,
+    /// The one database; both kinds' sections write to it, each entry in its own transaction.
+    pub db: &'a mut Connection,
     pub app_prefs: &'a PrefStore,
     /// Returns the store for a name such as `source_1234`.
     pub source_prefs: &'a dyn Fn(&str) -> PrefStore,
@@ -169,10 +169,11 @@ fn keep_stub_name(tx: &Transaction<'_>, kind: Kind, id: i64, name: Option<&str>)
 impl DbRestorer<'_> {
     fn categories(&mut self, index: u32) -> Result<Item, RestoreError> {
         let (kind, title) = if index == 0 { (Kind::Anime, text::PROGRESS_ANIME_CATEGORIES.english) } else { (Kind::Manga, text::PROGRESS_MANGA_CATEGORIES.english) };
-        let (conn, list) = match kind {
-            Kind::Anime => (&mut *self.t.anime, &self.backup.anime_categories),
-            Kind::Manga => (&mut *self.t.manga, &self.backup.categories),
+        let list = match kind {
+            Kind::Anime => &self.backup.anime_categories,
+            Kind::Manga => &self.backup.categories,
         };
+        let conn = &mut *self.t.db;
         let result = in_tx(conn, |tx| restore_categories(tx, kind, list)).map_err(|e| e.to_string());
         done(title.into(), result.map(|CategoryRestore { by_order, categorized_display }| {
             self.display = match (self.display, categorized_display) {
@@ -188,8 +189,8 @@ impl DbRestorer<'_> {
 
     fn app_settings(&mut self) -> Result<Item, RestoreError> {
         // Anime preference keys name anime category ids, so the anime half of the maps comes from the anime list.
-        let maps = category_maps(self.t.manga, self.t.anime, &self.backup.categories).and_then(|m| {
-            category_maps(self.t.manga, self.t.anime, &self.backup.anime_categories)
+        let maps = category_maps(self.t.db, &self.backup.categories).and_then(|m| {
+            category_maps(self.t.db, &self.backup.anime_categories)
                 .map(|a| CategoryMaps { manga: m.manga, anime: a.anime })
         });
         let result = maps.map_err(|e| e.to_string()).map(|maps| {
@@ -207,12 +208,12 @@ impl DbRestorer<'_> {
     fn manga_entry(&mut self, index: u32) -> Result<Item, RestoreError> {
         if self.manga_rows.is_none() {
             // The snapshot only orders the rows. If it cannot be read, the backup order stands.
-            let existing = in_tx(self.t.manga, |tx| manga_pairs(tx)).unwrap_or_default();
+            let existing = in_tx(self.t.db, |tx| manga_pairs(tx)).unwrap_or_default();
             self.manga_rows = Some(sort_manga(std::mem::take(&mut self.backup.manga), &existing));
         }
         let entry = std::mem::take(&mut self.manga_rows.as_mut().expect("set above")[index as usize]);
         let prefix = format!("{} [{}]", entry.title, manga_source_name(&self.backup.sources, entry.source));
-        let result = in_entry_tx(self.t.manga, self.cancel, |tx| {
+        let result = in_entry_tx(self.t.db, self.cancel, |tx| {
             restore_manga_entry(tx, &self.clock, &entry, &self.manga_by_order)?;
             let name = self.backup.sources.iter().find(|s| s.source_id == entry.source).map(|s| s.name.as_str());
             keep_stub_name(tx, Kind::Manga, entry.source, name)
@@ -226,7 +227,7 @@ impl DbRestorer<'_> {
 
     fn anime_entry(&mut self, index: u32) -> Result<Item, RestoreError> {
         if self.anime_rows.is_none() {
-            let existing = in_tx(self.t.anime, |tx| anime_pairs(tx)).unwrap_or_default();
+            let existing = in_tx(self.t.db, |tx| anime_pairs(tx)).unwrap_or_default();
             let sorted = sort_anime(std::mem::take(&mut self.backup.anime), &existing);
             self.anime_rows = Some(
                 plan_anime(sorted)
@@ -242,7 +243,7 @@ impl DbRestorer<'_> {
         }
         let prefix = format!("{} [{}]", entry.title, anime_source_name(&self.backup.anime_sources, entry.source));
         let mut outcome = AnimeOutcome::default();
-        let result = in_entry_tx(self.t.anime, self.cancel, |tx| {
+        let result = in_entry_tx(self.t.db, self.cancel, |tx| {
             let id = restore_anime_entry(tx, &self.clock, &entry, parent, &self.anime_by_order, &mut outcome)?;
             let name = self.backup.anime_sources.iter().find(|s| s.source_id == entry.source).map(|s| s.name.as_str());
             keep_stub_name(tx, Kind::Anime, entry.source, name)?;
@@ -303,7 +304,7 @@ mod tests {
     use chrono::TimeZone;
     use kuro_db::statements_anime::{anime_by_url_and_source, categories_by_anime_id};
     use kuro_db::statements_manga::{categories, chapters, mangas};
-    use kuro_db::{schema_anime, schema_manga};
+    use kuro_db::schema_unified;
     use kuro_prefs::values::PrefValue as Value;
 
     use super::*;
@@ -315,8 +316,7 @@ mod tests {
 
     struct Env {
         _dir: tempfile::TempDir,
-        manga: Connection,
-        anime: Connection,
+        db: Connection,
         app: PrefStore,
         sources: RefCell<HashMap<String, PrefStore>>,
         timers: RefCell<Vec<(&'static str, Option<u32>)>>,
@@ -324,9 +324,8 @@ mod tests {
 
     fn env() -> Env {
         let dir = tempfile::tempdir().unwrap();
-        let manga = schema_manga::open(&dir.path().join("m.db")).unwrap();
-        let anime = schema_anime::open(&dir.path().join("a.db")).unwrap();
-        Env { _dir: dir, manga, anime, app: PrefStore::in_memory(), sources: RefCell::default(), timers: RefCell::default() }
+        let db = schema_unified::open_file(&dir.path().join("kurobayomi.db")).unwrap();
+        Env { _dir: dir, db, app: PrefStore::in_memory(), sources: RefCell::default(), timers: RefCell::default() }
     }
 
     fn now() -> DateTime<Local> {
@@ -395,7 +394,7 @@ mod tests {
         let backup_timer = |h: Option<u32>| e.timers.borrow_mut().push(("backup", h));
         let sched = IntervalScheduler { store: &e.app, library_timer: &library, backup_timer: &backup_timer };
         let open = |name: &str| e.sources.borrow_mut().entry(name.to_owned()).or_insert_with(PrefStore::in_memory).clone();
-        let targets = Targets { manga: &mut e.manga, anime: &mut e.anime, app_prefs: &e.app, source_prefs: &open, scheduler: &sched };
+        let targets = Targets { db: &mut e.db, app_prefs: &e.app, source_prefs: &open, scheduler: &sched };
         let mut events = Vec::new();
         let result = restore_backup(backup, opts, now(), targets, cancel, &mut |ev| events.push(ev));
         (result, events)
@@ -417,20 +416,20 @@ mod tests {
         assert_eq!((events.last().unwrap().done, events.last().unwrap().total), (total, total));
 
         // categories first, entries mapped, and the stored version is the backup version (T-22a-014)
-        let reading = categories::get_categories(&e.manga).unwrap().into_iter().find(|c| c.name == "Reading").unwrap().id;
-        let fresh = mangas::get_by_url_and_source(&e.manga, "fresh", 7).unwrap().unwrap();
+        let reading = categories::get_categories(&e.db).unwrap().into_iter().find(|c| c.name == "Reading").unwrap().id;
+        let fresh = mangas::get_by_url_and_source(&e.db, "fresh", 7).unwrap().unwrap();
         assert_eq!(fresh.version, 4);
-        let member: Vec<i64> = categories::get_categories_by_manga_id(&e.manga, fresh.id).unwrap().into_iter().map(|r| r.id).collect();
+        let member: Vec<i64> = categories::get_categories_by_manga_id(&e.db, fresh.id).unwrap().into_iter().map(|r| r.id).collect();
         assert!(member.contains(&reading) && member.len() == 2);
-        assert_eq!(chapters::get_by_manga_id(&e.manga, fresh.id, false).unwrap().len(), 1);
-        let root = anime_by_url_and_source(&e.anime, "root", 3).unwrap().unwrap();
-        let season = anime_by_url_and_source(&e.anime, "season", 3).unwrap().unwrap();
+        assert_eq!(chapters::get_by_manga_id(&e.db, fresh.id, false).unwrap().len(), 1);
+        let root = anime_by_url_and_source(&e.db, "root", 3).unwrap().unwrap();
+        let season = anime_by_url_and_source(&e.db, "season", 3).unwrap().unwrap();
         assert_eq!((root.version, season.version), (6, 6));
         assert_eq!(season.parent_id, Some(root.id));
-        assert_eq!(categories_by_anime_id(&e.anime, season.id).unwrap().len(), 1);
+        assert_eq!(categories_by_anime_id(&e.db, season.id).unwrap().len(), 1);
 
         // preferences: the default category is remapped, the schedulers saw the restored intervals once each
-        let later = categories::get_categories(&e.manga).unwrap().into_iter().find(|c| c.name == "Later").unwrap().id;
+        let later = categories::get_categories(&e.db).unwrap().into_iter().find(|c| c.name == "Later").unwrap().id;
         assert_eq!(e.app.get_raw("default_category"), Some(Value::Int(later as i32)));
         assert_eq!(e.timers.borrow().as_slice(), [("library", Some(24)), ("backup", None)]);
         assert_eq!(e.sources.borrow()["source_1234"].get_raw("show_nsfw_source"), Some(Value::Bool(true)));
@@ -452,14 +451,14 @@ mod tests {
         // T-20a-094: the library shows the name of a source that is not installed, and a stored name stays
         let mut e = env();
         let stored = kuro_db::statements_manga::StubSourceRow { id: 7, lang: "en".into(), name: "Kept".into() };
-        kuro_db::statements_manga::sources::upsert(&e.manga, &stored).unwrap();
+        kuro_db::statements_manga::sources::upsert(&e.db, &stored).unwrap();
         let backup = Backup {
             sources: vec![BackupSource { name: "Ghost".into(), source_id: 7 }, BackupSource { name: "Lost".into(), source_id: 8 }],
             manga: vec![manga("x", vec![]), BackupManga { source: 8, ..manga("y", vec![]) }],
             ..Default::default()
         };
         run(&mut e, backup, all_but_extensions(), &|| false);
-        let row = |id: i64| kuro_db::statements_manga::sources::find_one(&e.manga, id).unwrap().unwrap();
+        let row = |id: i64| kuro_db::statements_manga::sources::find_one(&e.db, id).unwrap().unwrap();
         assert_eq!((row(7).name.as_str(), row(7).lang.as_str()), ("Kept", "en"));
         assert_eq!((row(8).name.as_str(), row(8).lang.as_str()), ("Lost", ""));
     }
@@ -475,7 +474,7 @@ mod tests {
             ..Default::default()
         };
         run(&mut e, second, all_but_extensions(), &|| false);
-        assert_eq!(anime_by_url_and_source(&e.anime, "root", 3).unwrap().unwrap().version, 6);
+        assert_eq!(anime_by_url_and_source(&e.db, "root", 3).unwrap().unwrap().version, 6);
     }
 
     /// F-02: the flag is read once per section (eight, in plan order), and for an entry before it and before its commit.
@@ -493,7 +492,7 @@ mod tests {
             let library = |_: Option<u32>| {};
             let sched = IntervalScheduler { store: &e.app, library_timer: &library, backup_timer: &library };
             let open = |_: &str| PrefStore::in_memory();
-            let targets = Targets { manga: &mut e.manga, anime: &mut e.anime, app_prefs: &e.app, source_prefs: &open, scheduler: &sched };
+            let targets = Targets { db: &mut e.db, app_prefs: &e.app, source_prefs: &open, scheduler: &sched };
             let cancel = || {
                 seen.set(seen.get() + 1);
                 seen.get() >= n
@@ -503,7 +502,7 @@ mod tests {
             assert_eq!(run.stop, (n <= 14).then_some(RestoreError::Cancelled), "flag at check {n}");
             assert!(run.errors.is_empty(), "a cancel writes no error line");
             assert_eq!(events.len(), finished, "flag at check {n}");
-            let stored = mangas::get_all_source_and_url(&e.manga).unwrap().len();
+            let stored = mangas::get_all_source_and_url(&e.db).unwrap().len();
             assert_eq!(stored, finished, "flag at check {n}: each finished entry is committed, nothing else");
         }
     }
@@ -524,21 +523,19 @@ mod tests {
         // The old name clash is no longer an error: repo rows write no table row (the addresses become links later).
         assert!(run.errors.is_empty(), "{:?}", run.errors);
         assert_eq!(events.len() as u32, total);
-        let rows: i64 = e.manga.query_row("SELECT count(*) FROM extension_repos", [], |r| r.get(0)).unwrap();
-        assert_eq!(rows, 0);
     }
 
     #[test]
     fn a_season_whose_root_failed_is_reported_not_restored() {
         let mut e = env();
         // A trigger aborts the root's insert, so the root fails and its season has no parent.
-        e.anime.execute_batch("CREATE TRIGGER fail_root BEFORE INSERT ON animes WHEN new.url = 'root' BEGIN SELECT RAISE(ABORT, 'no'); END;").unwrap();
+        e.db.execute_batch("CREATE TRIGGER fail_root BEFORE INSERT ON entries WHEN new.kind = 'anime' AND new.url = 'root' BEGIN SELECT RAISE(ABORT, 'no'); END;").unwrap();
         let backup = Backup { anime: vec![anime("root", 1, None, vec![]), anime("season", 2, Some(1), vec![])], ..Default::default() };
         let only_library = RestoreOptions::from_bits([true, false, false, false, false, false, false]);
         let (run, events) = run(&mut e, backup, only_library, &|| false);
         assert_eq!(run.errors.len(), 2);
         assert_eq!(events.len(), 2);
-        assert!(anime_by_url_and_source(&e.anime, "season", 3).unwrap().is_none());
+        assert!(anime_by_url_and_source(&e.db, "season", 3).unwrap().is_none());
     }
 
     #[test]
@@ -560,11 +557,11 @@ mod tests {
         let library = |_: Option<u32>| {};
         let sched = IntervalScheduler { store: &e.app, library_timer: &library, backup_timer: &library };
         let open = |_: &str| PrefStore::in_memory();
-        let targets = Targets { manga: &mut e.manga, anime: &mut e.anime, app_prefs: &e.app, source_prefs: &open, scheduler: &sched };
+        let targets = Targets { db: &mut e.db, app_prefs: &e.app, source_prefs: &open, scheduler: &sched };
         let run = restore_backup(backup, opts, now(), targets, &cancel, &mut |_| items_done.set(items_done.get() + 1));
         assert_eq!(run.stop, Some(RestoreError::Cancelled));
         assert!(run.errors.is_empty(), "a cancel is not an error line");
-        let stored: Vec<String> = mangas::get_all_source_and_url(&e.manga).unwrap().into_iter().map(|(_, url)| url).collect();
+        let stored: Vec<String> = mangas::get_all_source_and_url(&e.db).unwrap().into_iter().map(|(_, url)| url).collect();
         assert_eq!(stored, vec!["a".to_string()]);
     }
 

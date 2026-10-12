@@ -237,7 +237,7 @@ impl UpdatesScreen {
     }
 
     fn db(&self) -> std::sync::Arc<kuro_db::handle::Db> {
-        data::app().db(self.kind)
+        data::app().db.clone()
     }
 
     fn selection_mode(&self) -> bool {

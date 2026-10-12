@@ -196,7 +196,7 @@ impl EpisodeRepo {
 }
 
 /// Tables an episode list reads.
-const EPISODE_TABLES: &[&str] = &["episodes"];
+const EPISODE_TABLES: &[&str] = &["items"];
 
 /// One `episodes` row as the domain sees it; `is_syncing` is dropped.
 pub fn map_episode(r: &EpisodeRow) -> Episode {
@@ -282,7 +282,7 @@ fn to_update(u: &EpisodeUpdate) -> DbEpisodeUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::support::{anime_db, insert_anime, insert_episode};
+    use crate::support::{test_db, insert_anime, insert_episode};
 
     fn episode(anime_id: i64, url: &str) -> Episode {
         Episode { anime_id, url: url.to_owned(), name: url.to_owned(), ..Episode::create() }
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn add_all_binds_every_column_and_returns_ids_in_order() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         let a = insert_anime(&db, "a", false);
         let repo = EpisodeRepo::new(db.clone());
         let mut first = episode(a, "e1");
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn add_all_with_a_failing_row_leaves_the_table_unchanged() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         let a = insert_anime(&db, "a", false);
         let repo = EpisodeRepo::new(db.clone());
         assert!(repo.add_all(&[episode(a, "ok"), episode(999, "bad")]).is_err());
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn remove_with_ids_chunks_large_lists() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         let a = insert_anime(&db, "a", false);
         let repo = EpisodeRepo::new(db.clone());
         let eps: Vec<Episode> = (0..1200).map(|i| episode(a, &format!("e{i}"))).collect();
@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn by_anime_id_has_no_scanlator_filter_and_bookmarked_lists_only_bookmarks() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         let a = insert_anime(&db, "a", false);
         let repo = EpisodeRepo::new(db.clone());
         let mut scanned = episode(a, "x");
@@ -346,10 +346,10 @@ mod tests {
 
     #[test]
     fn a_corrupt_memo_does_not_fail_the_list_query() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         let a = insert_anime(&db, "a", false);
         let id = insert_episode(&db, a, "e");
-        db.write(|tx| Ok(tx.execute("UPDATE episodes SET memo = CAST('not json' AS BLOB) WHERE _id = ?1", [id]).map(drop)?))
+        db.write(|tx| Ok(tx.execute("UPDATE items SET memo = CAST('not json' AS BLOB) WHERE _id = ?1", [id]).map(drop)?))
             .unwrap();
         let listed = EpisodeRepo::new(db.clone()).by_anime_id(a).unwrap();
         assert_eq!(listed.len(), 1);

@@ -239,7 +239,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
-    use crate::testdb::{anime_db, manga_db};
+    use crate::testdb::test_db;
     use kuro_db::Db;
     use kuro_prefs::store::PrefStore;
     use kuro_testkit::InMemorySettings;
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn a_no_op_list_is_no_items_and_writes_nothing() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let chapters = ChapterRepo::new(db.clone());
         let mangas = MangaRepo::new(db);
         let id = mangas.insert(&Manga::create()).expect("manga");
@@ -363,11 +363,11 @@ mod tests {
 
     #[test]
     fn downloads_are_deleted_only_for_read_rows_with_the_preference_grouped_by_manga() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let chapters = ChapterRepo::new(db.clone());
         let mangas = MangaRepo::new(db.clone());
         let a = mangas.insert(&Manga::create()).expect("manga a");
-        let b = mangas.insert(&Manga::create()).expect("manga b");
+        let b = mangas.insert(&Manga { url: "other".into(), ..Manga::create() }).expect("manga b");
         let db_chapters: Vec<Chapter> = vec![
             Chapter { manga_id: a, url: "a1".into(), chapter_number: 1.0, ..Chapter::create() },
             Chapter { manga_id: a, url: "a2".into(), chapter_number: 2.0, ..Chapter::create() },
@@ -405,7 +405,7 @@ mod tests {
 
     #[test]
     fn a_seen_run_deletes_episode_downloads_per_anime_when_asked() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         let episodes = EpisodeRepo::new(db.clone());
         let animes = AnimeRepo::new(db.clone());
         let anime = animes.insert(&Anime::create()).expect("anime");

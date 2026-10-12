@@ -148,11 +148,11 @@ fn favourites(kind: Kind, source_id: i64) -> Result<Vec<MigrateEntry>, String> {
     use kuro_data::manga::MangaRepo;
 
     match kind {
-        Kind::Manga => MangaRepo::new(crate::data::app().db(Kind::Manga))
+        Kind::Manga => MangaRepo::new(crate::data::app().db.clone())
             .favorites_by_source(source_id)
             .map(|list| list.into_iter().map(|m| MigrateEntry { id: m.id, title: m.title, cover: m.thumbnail_url }).collect())
             .map_err(|error| error.to_string()),
-        Kind::Anime => AnimeRepo::new(crate::data::app().db(Kind::Anime))
+        Kind::Anime => AnimeRepo::new(crate::data::app().db.clone())
             .favorites_by_source(source_id)
             .map(|list| list.into_iter().map(|a| MigrateEntry { id: a.id, title: a.title, cover: a.thumbnail_url }).collect())
             .map_err(|error| error.to_string()),

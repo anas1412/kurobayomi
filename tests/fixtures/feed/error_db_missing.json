@@ -1,1 +1,1 @@
-{"schema":1,"error":"database not found: $TMP/data/manga.db","code":"db_missing"}
+{"schema":1,"error":"database not found: $TMP/data/a.db","code":"db_missing"}

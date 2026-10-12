@@ -122,7 +122,7 @@ mod tests {
     use kuro_db::statements_manga::{ChapterRow, chapters, excluded_scanlators};
 
     use super::*;
-    use crate::testdb::{anime_db, manga_db};
+    use crate::testdb::test_db;
 
     fn chapter_row(manga_id: i64, url: &str, scanlator: Option<&str>) -> ChapterRow {
         ChapterRow {
@@ -156,7 +156,7 @@ mod tests {
 
     /// A manga with two chapters, one of them from scanlator `Excluded`. Returns the kept chapter's id.
     fn manga_with_chapters() -> (tempfile::TempDir, Arc<Db>, i64, i64) {
-        let (dir, db) = manga_db();
+        let (dir, db) = test_db();
         let manga_id = MangaRepo::new(db.clone())
             .insert(&Manga {
                 url: "/m".into(),
@@ -178,12 +178,12 @@ mod tests {
 
     /// Makes every read and write of the chapters table fail (its name no longer exists).
     fn break_chapters(db: &Db) {
-        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE chapters RENAME TO chapters_gone;")?))
+        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE items RENAME TO items_gone;")?))
             .expect("rename");
     }
 
     fn anime_with_episodes() -> (tempfile::TempDir, Arc<Db>, i64, i64) {
-        let (dir, db) = anime_db();
+        let (dir, db) = test_db();
         let anime_id = AnimeRepo::new(db.clone())
             .insert(&Anime {
                 url: "/a".into(),
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn episode_reads_fail_quietly_on_error() {
         let (_d, db, anime_id, episode_id) = anime_with_episodes();
-        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE episodes RENAME TO episodes_gone;")?))
+        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE items RENAME TO items_gone;")?))
             .expect("rename");
         let repo = EpisodeRepo::new(db);
         assert_eq!(get_episode(&repo, episode_id), None);
@@ -280,7 +280,7 @@ mod tests {
         let repo = EpisodeRepo::new(db.clone());
         update_episode(&repo, &EpisodeUpdate { seen: Some(true), ..EpisodeUpdate::new(episode_id) });
         assert!(get_episode(&repo, episode_id).expect("row").seen);
-        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE episodes RENAME TO episodes_gone;")?))
+        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE items RENAME TO items_gone;")?))
             .expect("rename");
         update_all_episodes(&repo, &[EpisodeUpdate { seen: Some(false), ..EpisodeUpdate::new(episode_id) }]);
         update_episode(&repo, &EpisodeUpdate { seen: Some(false), ..EpisodeUpdate::new(episode_id) });

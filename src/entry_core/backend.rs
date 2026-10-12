@@ -304,7 +304,7 @@ mod tests {
     use super::*;
 
     fn db_of(path: &std::path::Path) -> Arc<Db> {
-        let writer = kuro_db::schema_manga::open(path).expect("schema");
+        let writer = kuro_db::schema_unified::open_file(path).expect("schema");
         Arc::new(Db::new(path, writer).expect("db"))
     }
 
@@ -325,7 +325,7 @@ mod tests {
         use crate::browse::listing::PageLoader;
 
         let dir = tempfile::tempdir().unwrap();
-        let db = db_of(&dir.path().join("manga.db"));
+        let db = db_of(&dir.path().join("test.db"));
         let prefs = crate::browse::prefs::BrowsePrefs::new(kuro_prefs::store::PrefStore::in_memory(), crate::browse::route::BrowseKind::Manga);
         let store = Arc::new(crate::browse::repo_store::RepoStore::new(
             MangaRepo::new(Arc::clone(&db)),
@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn a_known_stub_shows_its_name_and_an_unknown_one_its_id() {
         let dir = tempfile::tempdir().unwrap();
-        let db = db_of(&dir.path().join("manga.db"));
+        let db = db_of(&dir.path().join("test.db"));
         MangaStubSourceRepo::new(Arc::clone(&db)).upsert(7, "en", "Reader").unwrap();
         let backend = StubBackend::new(db);
         assert_eq!(
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn the_local_source_is_not_a_stub_and_fetches_report_not_installed() {
         let dir = tempfile::tempdir().unwrap();
-        let backend = StubBackend::new(db_of(&dir.path().join("manga.db")));
+        let backend = StubBackend::new(db_of(&dir.path().join("test.db")));
         let local = backend.source_info(LOCAL_SOURCE_ID);
         assert!(!local.stub);
         assert!(!local.name.is_empty());
@@ -424,7 +424,7 @@ mod tests {
         use crate::browse::fake_catalogue::FakeCatalogue;
 
         let dir = tempfile::tempdir().unwrap();
-        let db = db_of(&dir.path().join("manga.db"));
+        let db = db_of(&dir.path().join("test.db"));
         let fake = FakeCatalogue::new(41);
         let source: Arc<dyn MangaSource> = fake.clone();
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();

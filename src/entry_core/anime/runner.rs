@@ -937,8 +937,8 @@ mod tests {
     #[test]
     fn the_stub_backend_reads_unknown_sources_as_missing_and_fetches_fail() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("anime.db");
-        let writer = kuro_db::schema_anime::open(&path).unwrap();
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         let db = Arc::new(Db::new(&path, writer).unwrap());
         AnimeStubSourceRepo::new(Arc::clone(&db)).upsert(7, "en", "Player").unwrap();
         let backend = StubAnimeBackend::new(db);

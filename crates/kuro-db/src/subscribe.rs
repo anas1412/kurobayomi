@@ -211,7 +211,7 @@ mod tests {
 
     use super::*;
     use crate::open::DbError;
-    use crate::schema_manga;
+    use crate::schema_unified;
     use crate::statements_manga::{CategoryPatch, categories};
 
     const CATEGORIES: &[&str] = &["categories"];
@@ -221,8 +221,8 @@ mod tests {
 
     fn fixture() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("manga.db");
-        let writer = schema_manga::open(&path).unwrap();
+        let path = schema_unified::db_path(dir.path());
+        let writer = schema_unified::open_file(&path).unwrap();
         (dir, Arc::new(Db::new(&path, writer).unwrap()))
     }
 

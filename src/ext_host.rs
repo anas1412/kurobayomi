@@ -17,13 +17,12 @@ use std::sync::Arc;
 
 use gtk::glib;
 use kuro_core::crash_dump::ExtensionStatus;
-use kuro_data::extension_store::ExtensionStoreRepo;
 use kuro_extensions::anime::browse::buckets;
 use kuro_extensions::anime::icons::IconCache;
 use kuro_extensions::anime::languages::enable_first_run_languages;
 use kuro_extensions::anime::loader::PackageDir;
 use kuro_extensions::anime::manager::ExtensionState;
-use kuro_extensions::anime::model::{Buckets, StoreRow};
+use kuro_extensions::anime::model::Buckets;
 use kuro_extensions::anime::sources::icon_for_source;
 use kuro_extensions::anime::service::{AnimeExtensions, pump};
 use kuro_extensions::anime::trust::TrustStore;
@@ -170,26 +169,9 @@ pub fn anime_update_count() -> usize {
     HOST.with(|h| h.borrow().as_ref().map_or(0, |host| host.state.borrow().update_count()))
 }
 
-fn store_rows(repo: &ExtensionStoreRepo) -> Vec<StoreRow> {
-    repo.all()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| StoreRow {
-            index_url: s.index_url,
-            name: s.name,
-            badge_label: s.badge_label,
-            signing_key: s.signing_key,
-            contact_website: s.contact_website,
-            contact_discord: s.contact_discord,
-            is_legacy: s.is_legacy,
-            extension_list_url: s.extension_list_url,
-        })
-        .collect()
-}
-
 /// Starts the host: scans both package folders and pumps the anime events into the state. Call once from the GTK main
 /// thread inside the app's runtime.
-pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
+pub fn start(store: &PrefStore) {
     if HOST.with(|h| h.borrow().is_some()) {
         return;
     }
@@ -222,12 +204,11 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
     let (events, inbox) = async_channel::unbounded();
     let service = Rc::new(AnimeExtensions::new(handle, events));
     let state = Rc::new(RefCell::new(ExtensionState::new()));
-    let repo = ExtensionStoreRepo::new(anime_db);
     service.scan(
         PackageDir::from_paths(&paths),
         PackageDir::download_dir(&paths),
         TrustStore::new(prefs.trusted_extensions.clone()),
-        store_rows(&repo),
+        Vec::new(),
         &prefs,
         IconCache::from_paths(&paths),
     );

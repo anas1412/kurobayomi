@@ -58,13 +58,13 @@ mod tests {
         let paths = paths_under(dir.path());
         std::fs::create_dir_all(webkit_data_dir(&paths).join("cookies")).unwrap();
         std::fs::create_dir_all(webkit_cache_dir(&paths)).unwrap();
-        std::fs::write(paths.data_dir().join("anime.db"), b"db").unwrap();
+        std::fs::write(paths.data_dir().join("test.db"), b"db").unwrap();
 
         clear_data(&paths).unwrap();
 
         assert!(!webkit_data_dir(&paths).exists());
         assert!(!webkit_cache_dir(&paths).exists());
-        assert!(paths.data_dir().join("anime.db").exists());
+        assert!(paths.data_dir().join("test.db").exists());
     }
 
     #[test]

@@ -59,7 +59,7 @@ pub struct SourceEpisode {
 /// The row `episode_id` when its entry belongs to one of `sources`. `None` for a missing row, a local entry, a source
 /// that is not installed, or a failed read (logged).
 pub fn source_episode(sources: &[Arc<dyn AnimeSource>], episode_id: i64) -> Option<SourceEpisode> {
-    let db = &crate::data::app().anime_db;
+    let db = &crate::data::app().db;
     let found = EpisodeRepo::new(Arc::clone(db))
         .by_id(episode_id)
         .and_then(|episode| episode.map(|e| AnimeRepo::new(Arc::clone(db)).by_id(e.anime_id).map(|a| (a, e))).transpose());

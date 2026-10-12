@@ -20,15 +20,15 @@ impl Env {
         self.home.path().join(name)
     }
 
-    fn manga_db(&self) -> PathBuf {
-        let path = self.path("manga.db");
-        kuro_db::schema_manga::open(&path).unwrap().execute_batch(&fixture("manga.sql")).unwrap();
+    fn manga_fixture(&self) -> PathBuf {
+        let path = self.path("a.db");
+        kuro_db::schema_unified::open_file(&path).unwrap().execute_batch(&fixture("manga.sql")).unwrap();
         path
     }
 
-    fn anime_db(&self) -> PathBuf {
-        let path = self.path("anime.db");
-        kuro_db::schema_anime::open(&path).unwrap().execute_batch(&fixture("anime.sql")).unwrap();
+    fn anime_fixture(&self) -> PathBuf {
+        let path = self.path("b.db");
+        kuro_db::schema_unified::open_file(&path).unwrap().execute_batch(&fixture("anime.sql")).unwrap();
         path
     }
 
@@ -77,7 +77,7 @@ fn stderr_lines(out: &Output) -> usize {
 #[test]
 fn normal_manga_envelope_matches_the_golden_file() {
     let env = Env::new();
-    let db = env.manga_db();
+    let db = env.manga_fixture();
     let out = env.run(&[
         "--updates-json", "--kind", "manga", "--rows", "2", "--cols", "3", "--now-ms", NOW,
         "--db", db.to_str().unwrap(), "--cover-cache", &format!("{FIXTURES}/covers"),
@@ -96,7 +96,7 @@ fn normal_manga_envelope_matches_the_golden_file() {
 #[test]
 fn one_column_three_rows_gives_three_items_in_feed_order() {
     let env = Env::new();
-    let db = env.manga_db();
+    let db = env.manga_fixture();
     let out = env.run(&["--updates-json", "--kind", "manga", "--rows", "3", "--cols", "1", "--now-ms", NOW, "--db", db.to_str().unwrap()]);
     let v = json(&String::from_utf8(out.stdout).unwrap());
     let ids: Vec<i64> = v["items"].as_array().unwrap().iter().map(|i| i["entry_id"].as_i64().unwrap()).collect();
@@ -107,7 +107,7 @@ fn one_column_three_rows_gives_three_items_in_feed_order() {
 #[test]
 fn normal_anime_envelope_matches_the_golden_file() {
     let env = Env::new();
-    let db = env.anime_db();
+    let db = env.anime_fixture();
     let out = env.run(&["--updates-json", "--kind", "anime", "--now-ms", NOW, "--db", db.to_str().unwrap(), "--cover-cache", &format!("{FIXTURES}/covers")]);
     assert_eq!(out.status.code(), Some(0));
     assert_golden("anime_normal.json", &env.stdout(&out));
@@ -116,7 +116,7 @@ fn normal_anime_envelope_matches_the_golden_file() {
 #[test]
 fn empty_envelope_matches_the_golden_file() {
     let env = Env::new();
-    let db = env.manga_db();
+    let db = env.manga_fixture();
     let out = env.run(&["--updates-json", "--kind", "manga", "--now-ms", "1900000000000", "--db", db.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
     assert_golden("manga_empty.json", &env.stdout(&out));
@@ -134,7 +134,7 @@ fn exit_2_usage_matches_the_golden_file() {
 #[test]
 fn exit_3_missing_database_matches_the_golden_file_and_creates_nothing() {
     let env = Env::new();
-    let db = env.path("data/manga.db");
+    let db = env.path("data/a.db");
     let out = env.run(&["--updates-json", "--kind", "manga", "--db", db.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(3));
     assert_eq!(stderr_lines(&out), 1);
@@ -156,7 +156,7 @@ fn exit_3_for_a_file_that_is_not_a_database() {
 #[test]
 fn the_database_file_is_never_written() {
     let env = Env::new();
-    let db = env.manga_db();
+    let db = env.manga_fixture();
     let before = std::fs::read(&db).unwrap();
     let names = |p: &Path| {
         // SQLite's own WAL index and log appear beside any WAL database a reader opens; nothing else may
@@ -180,17 +180,17 @@ fn the_database_file_is_never_written() {
 #[ignore = "benchmark"]
 fn five_hundred_rows_finish_under_50_ms() {
     let env = Env::new();
-    let db = env.path("manga.db");
-    let c = kuro_db::schema_manga::open(&db).unwrap();
+    let db = env.path("a.db");
+    let c = kuro_db::schema_unified::open_file(&db).unwrap();
     let after = 1_783_512_000_000_i64;
     for i in 1..=500 {
         c.execute(
-            "INSERT INTO mangas(_id,source,url,title,status,favorite,initialized,viewer,chapter_flags,cover_last_modified,date_added) VALUES(?1,1,'/m','T',1,1,1,0,0,0,1000)",
+            "INSERT INTO entries(_id,kind,source,url,title,status,favorite,initialized,viewer,item_flags,cover_last_modified,date_added) VALUES(?1,'manga',1,'/m'||?1,'T',1,1,1,0,0,0,1000)",
             [i],
         )
         .unwrap();
         c.execute(
-            "INSERT INTO chapters(_id,manga_id,url,name,read,bookmark,last_page_read,chapter_number,source_order,date_fetch,date_upload) VALUES(?1,?1,'/c','C',0,0,0,1.0,0,5000,?2)",
+            "INSERT INTO items(_id,entry_id,url,name,done,bookmark,progress,number,source_order,date_fetch,date_upload) VALUES(?1,?1,'/c','C',0,0,0,1.0,0,5000,?2)",
             rusqlite::params![i, after + 1000],
         )
         .unwrap();

@@ -136,7 +136,7 @@ fn now_ms(clock: Instant) -> u64 {
 fn page_for(manga_id: i64) -> GBox {
     tracking::session::refresh_from_host();
     let app = data::app();
-    let db = app.db(Kind::Manga);
+    let db = app.db.clone();
     let store = app.base.store().clone();
     let ctx = LoadContext {
         library_defaults: ChapterFlags(chapter_default_word(&store)),
@@ -619,6 +619,7 @@ impl View {
     fn act(self: &Rc<Self>, action: UiAction) {
         let out = self.page.borrow_mut().act(action);
         for cmd in out.cmds {
+            self.track_marked(&cmd);
             self.runner.send(cmd);
         }
         if let Some(id) = out.open_chapter {
@@ -635,6 +636,15 @@ impl View {
         if let Some(id) = out.focus {
             self.list.focus_row(id);
         }
+    }
+
+    /// A mark read goes to the trackers too, with the numbers of the chapters that were not read yet.
+    fn track_marked(&self, cmd: &StoreCmd) {
+        let StoreCmd::MarkRead { manga_id, chapter_ids, read: true, .. } = cmd else { return };
+        let page = self.page.borrow();
+        let Some(ready) = page.ready() else { return };
+        let numbers: Vec<f64> = ready.chapters.iter().filter(|c| chapter_ids.contains(&c.id) && !c.read).map(|c| c.number).collect();
+        tracking::progress::marked(Kind::Manga, *manga_id, true, &numbers, crate::data::app().base.incognito_mode.get());
     }
 
     fn open_chapter(&self, id: i64) {
@@ -1151,7 +1161,7 @@ impl View {
             self.toast(message);
             return;
         };
-        let repo = kuro_data::manga::MangaRepo::new(app.db(Kind::Manga));
+        let repo = kuro_data::manga::MangaRepo::new(app.db.clone());
         let (done, count) = async_channel::bounded::<usize>(1);
         // detached: closing the page does not stop the run (`withNonCancellableContext`)
         handle.spawn(async move {
@@ -1189,7 +1199,7 @@ impl View {
             ui::DialogButton::new(tr(MsgKey::action_migrate_duplicate), ui::Role::Normal, move || {
                 if let Some(view) = weak_migrate.upgrade() {
                     // one primary-key read names the old entry for the migrate dialog
-                    let title = kuro_data::manga::MangaRepo::new(data::app().db(Kind::Manga)).by_id(duplicate_id).map(|m| m.title).unwrap_or_default();
+                    let title = kuro_data::manga::MangaRepo::new(data::app().db.clone()).by_id(duplicate_id).map(|m| m.title).unwrap_or_default();
                     view.migrate_entry(duplicate_id, title);
                 }
             }),
@@ -1288,8 +1298,8 @@ mod tests {
             let _owner = ctx.acquire().expect("main context");
             let rt = kuro_core::runtime::build().expect("runtime");
             let dir = tempfile::tempdir().expect("temp dir");
-            let path = dir.path().join("manga.db");
-            let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
+            let path = dir.path().join("test.db");
+            let writer = kuro_db::schema_unified::open_file(&path).expect("manga schema");
             let db = Arc::new(Db::new(&path, writer).expect("manga handle"));
             let mangas = MangaRepo::new(Arc::clone(&db));
             let id = mangas.insert(&Manga { source: 7, url: "/m".into(), title: "Berserk".into(), favorite: true, ..Manga::create() }).unwrap();
@@ -1416,7 +1426,7 @@ mod tests {
             let dir = tempfile::tempdir().expect("a temporary folder");
             crate::data::install(crate::data::open_in(dir.path()).expect("fresh data")).expect("installed");
             let (nav, _window) = crate::testing::nav();
-            let db = crate::data::app().db(Kind::Manga);
+            let db = crate::data::app().db.clone();
             let mangas = MangaRepo::new(Arc::clone(&db));
             let id = mangas.insert(&Manga { source: kuro_source::generate_id("Fixture", "en", 1), url: "/series/1".into(), title: "Browsed".into(), ..Manga::create() }).unwrap();
             mangas.update(&MangaUpdate { initialized: Some(true), ..MangaUpdate::new(id) }).unwrap();

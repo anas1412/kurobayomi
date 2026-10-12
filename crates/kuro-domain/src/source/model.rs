@@ -17,8 +17,8 @@ pub trait SourceKindExt {
 impl SourceKindExt for Kind {
     fn stub_table(self) -> &'static str {
         match self {
-            Self::Manga => "sources",
-            Self::Anime => "animesources",
+            Self::Manga => "stub_sources",
+            Self::Anime => "stub_sources",
         }
     }
 }
@@ -66,8 +66,8 @@ mod tests {
 
     #[test]
     fn each_kind_names_its_own_stub_table() {
-        assert_eq!(Kind::Manga.stub_table(), "sources");
-        assert_eq!(Kind::Anime.stub_table(), "animesources");
+        assert_eq!(Kind::Manga.stub_table(), "stub_sources");
+        assert_eq!(Kind::Anime.stub_table(), "stub_sources");
         let entry: SourceEntry = Source::new(3, "Named", "en");
         assert_eq!(entry.visual_name(), "Named (EN)");
     }

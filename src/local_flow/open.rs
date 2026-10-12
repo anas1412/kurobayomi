@@ -71,13 +71,13 @@ pub fn opening_by_id(db: &Arc<Db>, episode_id: i64) -> DataResult<Option<Opening
 /// Plays a local episode by its row id in the player. `false` when the row is not a local episode, so the caller keeps
 /// its own player.
 pub fn open_local_episode(episode_id: i64) -> bool {
-    crate::data::is_installed() && play(opening_by_id(&crate::data::app().anime_db, episode_id))
+    crate::data::is_installed() && play(opening_by_id(&crate::data::app().db, episode_id))
 }
 
 /// Plays the episode named `episode_name` of the local anime titled `title`. `false` when they match no local episode,
 /// so the caller opens its own player instead.
 pub fn open_episode(title: &str, episode_name: &str) -> bool {
-    crate::data::is_installed() && play(opening_of(&crate::data::app().anime_db, title, episode_name))
+    crate::data::is_installed() && play(opening_of(&crate::data::app().db, title, episode_name))
 }
 
 fn play(found: DataResult<Option<Opening>>) -> bool {
@@ -101,12 +101,12 @@ mod tests {
 
     use super::*;
     use crate::local_flow::sync::add;
-    use crate::local_flow::tests::{anime_db, manga_db, series, video};
+    use crate::local_flow::tests::{db_in, test_db, series, video};
 
     #[test]
     fn only_a_local_library_title_resolves() {
         let root = tempfile::tempdir().expect("temp dir");
-        let db = manga_db(root.path());
+        let db = db_in(root.path());
         let done = add(&db, Kind::Manga, &series(root.path()), 1_000).expect("add").remove(0).result.expect("sync");
         assert_eq!(local_id_with_title(&db, Kind::Manga, "Series").expect("lookup"), Some(done.entry_id));
         assert_eq!(local_id_with_title(&db, Kind::Manga, "Title 1").expect("lookup"), None);
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn a_local_episode_opens_at_its_saved_position_and_other_titles_do_not() {
-        let (_db_dir, db) = anime_db();
+        let (_db_dir, db) = test_db();
         let root = tempfile::tempdir().expect("root");
         video(root.path(), "Show", "Show - 1.mkv");
         video(root.path(), "Show", "Show - 2.mkv");
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn an_episode_id_opens_only_a_local_episode() {
-        let (_db_dir, db) = anime_db();
+        let (_db_dir, db) = test_db();
         let root = tempfile::tempdir().expect("root");
         video(root.path(), "Show", "Show - 1.mkv");
         add(&db, Kind::Anime, root.path(), 1_000).expect("scan");

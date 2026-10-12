@@ -285,7 +285,7 @@ fn reveal(path: &Path) {
 
 /// Both rows of an open-item action exist, and the item belongs to the entry.
 fn item_rows_exist(kind: Kind, entry_id: i64, item_id: i64) -> bool {
-    let db = crate::data::app().db(kind);
+    let db = crate::data::app().db.clone();
     match kind {
         Kind::Manga => {
             MangaRepo::new(db.clone()).by_id(entry_id).is_ok()
@@ -349,7 +349,7 @@ impl ActionHost for GtkHost {
 
     fn mark_read(&self, kind: Kind, entry_id: i64, urls: Vec<String>) {
         let data = crate::data::app();
-        let db = data.db(kind);
+        let db = data.db.clone();
         let remove = diet::DOWNLOAD_REMOVE_AFTER_MARKED_READ;
         let backend = download_host::current();
         glib::spawn_future_local(async move {
@@ -367,7 +367,7 @@ impl ActionHost for GtkHost {
 
     fn download(&self, kind: Kind, entry_id: i64, urls: Vec<String>) {
         let data = crate::data::app();
-        let db = data.db(kind);
+        let db = data.db.clone();
         let external = diet::DOWNLOAD_USE_EXTERNAL;
         let backend = download_host::current();
         glib::spawn_future_local(async move {

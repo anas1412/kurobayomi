@@ -635,7 +635,7 @@ mod wrappers {
     use kuro_db::statements_manga::{ChapterRow, chapters, excluded_scanlators};
 
     use super::*;
-    use crate::testdb::{anime_db, manga_db};
+    use crate::testdb::test_db;
 
     /// 2020-01-01T00:00Z, as in the upstream tests.
     const T0: i64 = 1_577_836_800_000;
@@ -685,7 +685,7 @@ mod wrappers {
     /// A manga whose kept scanlator has uploads on days 0, 2, 4 and 6; the excluded scanlator uploads on
     /// every day 0 to 6. Counting the excluded chapters would give interval 1 instead of 2.
     fn manga_fixture() -> (tempfile::TempDir, std::sync::Arc<kuro_db::handle::Db>, MangaRepo, ChapterRepo, Manga) {
-        let (dir, db) = manga_db();
+        let (dir, db) = test_db();
         let mangas = MangaRepo::new(db.clone());
         let id = mangas
             .insert(&Manga {
@@ -711,7 +711,7 @@ mod wrappers {
     }
 
     fn anime_fixture() -> (tempfile::TempDir, AnimeRepo, EpisodeRepo, Anime) {
-        let (dir, db) = anime_db();
+        let (dir, db) = test_db();
         let animes = AnimeRepo::new(db.clone());
         let id = animes
             .insert(&Anime {
@@ -765,7 +765,7 @@ mod wrappers {
     #[test]
     fn a_failed_chapter_read_samples_nothing_and_gives_the_seven_day_default() {
         let (_d, db, _mangas, chapters, manga) = manga_fixture();
-        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE chapters RENAME TO chapters_gone;")?))
+        db.write(|tx| Ok(tx.execute_batch("ALTER TABLE items RENAME TO items_gone;")?))
             .expect("rename");
         let update = to_manga_update(&chapters, &manga, &now(), window(), day(7));
         assert_eq!(update.fetch_interval, Some(7), "an empty sample gives the default");

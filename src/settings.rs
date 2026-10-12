@@ -178,7 +178,7 @@ fn backup_schema(id: &str) -> Option<Built> {
 /// check per row, and Delete (after the spec's confirm dialog) removes the checked sources' entries.
 fn clear_db(id: &str) -> Option<Built> {
     let kind = Kind::from_anime(id == "settings_clear_anime_database");
-    let db = crate::data::app().db(kind);
+    let db = crate::data::app().db.clone();
     // (source id, row title, non-library count), read from the database; a failed read shows nothing to clear.
     let sources: Vec<(i64, String, i64)> = db
         .read(|c| {
@@ -245,15 +245,14 @@ fn clear_db(id: &str) -> Option<Built> {
                     return;
                 }
                 let written = db.write(|tx| {
-                    let table = if kind.is_anime() { "episodes" } else { "chapters" };
-                    let sql = format!("SELECT count(*) FROM {table}");
-                    let before = tx.query_row(&sql, [], |r| r.get::<_, i64>(0))?;
+                    let sql = "SELECT count(*) FROM items i JOIN entries e ON e._id = i.entry_id WHERE e.kind = ?1";
+                    let before = tx.query_row(sql, [kind.as_str()], |r| r.get::<_, i64>(0))?;
                     if kind.is_anime() {
                         kuro_db::statements_anime::clear_non_library_anime_by_sources(tx, &selected)?;
                     } else {
                         kuro_db::statements_manga::clear_non_library_by_sources(tx, &selected)?;
                     }
-                    let after = tx.query_row(&sql, [], |r| r.get::<_, i64>(0))?;
+                    let after = tx.query_row(sql, [kind.as_str()], |r| r.get::<_, i64>(0))?;
                     Ok((before - after).max(0) as usize)
                 });
                 match written {
@@ -297,9 +296,8 @@ fn after_clear(kind: Kind, removed: usize) {
     use crate::ui::{DialogButton, Role};
     use kuro_platform::paths::Paths as _;
     let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return };
-    let path = if kind.is_anime() { kuro_db::schema_anime::db_path(&paths.data_dir()) } else { kuro_db::schema_manga::db_path(&paths.data_dir()) };
-    let open = move || if kind.is_anime() { kuro_db::schema_anime::open(&path) } else { kuro_db::schema_manga::open(&path) };
-    let after = match open().and_then(|c| kuro_db::maintenance::after_chapter_delete(&c, removed)) {
+    let path = kuro_db::schema_unified::db_path(&paths.data_dir());
+    let after = match kuro_db::schema_unified::open_file(&path).and_then(|c| kuro_db::maintenance::after_chapter_delete(&c, removed)) {
         Ok(after) => after,
         Err(e) => {
             tracing::warn!(error = %e, "database housekeeping after the clear failed");
@@ -310,9 +308,9 @@ fn after_clear(kind: Kind, removed: usize) {
         return;
     }
     let compact = DialogButton::new("Compact", Role::Suggested, move || {
-        let open = open.clone();
+        let path = path.clone();
         std::thread::spawn(move || {
-            if let Err(e) = open().and_then(|c| kuro_db::maintenance::vacuum(&c)) {
+            if let Err(e) = kuro_db::schema_unified::open_file(&path).and_then(|c| kuro_db::maintenance::vacuum(&c)) {
                 tracing::warn!(error = %e, "VACUUM failed");
             }
         });

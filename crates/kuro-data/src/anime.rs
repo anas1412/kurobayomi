@@ -11,7 +11,7 @@ use crate::flags_write;
 use kuro_db::schema_anime::{FetchType, Memo};
 use kuro_db::statements_anime::{
     AnimeRow, AnimeUpdate as DbAnimeUpdate, anime_by_id, anime_by_url_and_source, clearable_tree, favorite_animes,
-    favorite_animes_by_source, insert_anime, reset_viewer_flags, source_favorite_counts, update_anime,
+    favorite_animes_by_source, insert_anime, reset_viewer_flags, SeasonAnimeRow, seasons_of, source_favorite_counts, update_anime,
     upcoming_animes, watched_not_in_library,
 };
 use kuro_db::subscribe::Subscription;
@@ -23,28 +23,31 @@ use crate::{
 };
 
 /// Tables of one anime row (`subscribe_by_id`, `subscribe_by_url_and_source`, `subscribe_favorites_by_source`).
-const ANIME_TABLE: &[&str] = &["animes"];
+const ANIME_TABLE: &[&str] = &["entries"];
 
 /// Tables an `animelibView` row reads (`subscribe_library`).
-const ANIME_LIBRARY_TABLES: &[&str] = &["animes", "episodes", "animehistory", "animes_categories"];
+const ANIME_LIBRARY_TABLES: &[&str] = &["entries", "items", "history", "entry_categories"];
 
 /// Upcoming-tab statuses for anime: ONGOING (1), PUBLISHING_FINISHED (4) and ONGOING_ANNOUNCED (7),
 /// as `GetUpcomingAnime` passes them.
 pub const UPCOMING_STATUSES: [i64; 3] = [1, 4, 7];
 
-const LIBRARY_VIEW: &str = "SELECT * FROM animelibView";
-const SEASONS_BY_PARENT: &str = "SELECT * FROM animeseasonsView WHERE parent_id = :parentId";
-const DELETABLE_PARENTS: &str = "SELECT * FROM animedeletableView";
-const CHILDREN_BY_PARENT: &str = "SELECT * FROM animes WHERE parent_id = :parentId";
-const SOURCE_AND_URL: &str = "SELECT source, url FROM animes";
+/// Unified `entries` columns under the names `AnimeRow::from_row` reads.
+const LIBRARY_VIEW: &str = "SELECT *, item_flags AS episode_flags, 0 AS is_syncing, doneCount AS seenCount, \
+     itemFetchedAt AS episodeFetchedAt, lastActivity AS lastSeen FROM libraryView WHERE kind = 'anime'";
+const DELETABLE_PARENTS: &str =
+    "SELECT _id, source, fetch_type FROM entries WHERE kind = 'anime' AND favorite = 0 AND parent_id IS NULL";
+const CHILDREN_BY_PARENT: &str = "SELECT *, item_flags AS episode_flags, 0 AS is_syncing FROM entries \
+     WHERE kind = 'anime' AND parent_id = :parentId";
+const SOURCE_AND_URL: &str = "SELECT source, url FROM entries WHERE kind = 'anime'";
 /// Ids per `remove_parent_ids` statement; all statements run in one transaction.
 const PARENT_ID_CHUNK: usize = 500;
 const REMOVE_PARENT_IDS: &str =
-    "UPDATE animes SET parent_id = NULL WHERE _id IN (SELECT value FROM json_each(?1))";
+    "UPDATE entries SET parent_id = NULL WHERE kind = 'anime' AND _id IN (SELECT value FROM json_each(?1))";
 const DELETE_NOT_IN_LIBRARY: &str =
-    "DELETE FROM animes WHERE favorite = 0 AND _id IN (SELECT value FROM json_each(?1))";
-const CATEGORY_LINKS_DELETE: &str = "DELETE FROM animes_categories WHERE anime_id = ?1";
-const CATEGORY_LINK_INSERT: &str = "INSERT INTO animes_categories(anime_id, category_id) VALUES (?1, ?2)";
+    "DELETE FROM entries WHERE kind = 'anime' AND favorite = 0 AND _id IN (SELECT value FROM json_each(?1))";
+const CATEGORY_LINKS_DELETE: &str = "DELETE FROM entry_categories WHERE kind = 'anime' AND entry_id = ?1";
+const CATEGORY_LINK_INSERT: &str = "INSERT INTO entry_categories(entry_id, kind, category_id) VALUES (?1, 'anime', ?2)";
 
 /// One `animes` row as the domain sees it (`Anime.kt`). `is_syncing` is not exposed.
 #[derive(Clone, Debug, PartialEq)]
@@ -325,17 +328,17 @@ pub fn map_library_anime(r: &Row<'_>) -> rusqlite::Result<LibraryAnime> {
 
 /// `AnimeMapper.mapSeasonAnime`: the `animeseasonsView` aggregates, which have no category column.
 /// NULL stat columns read as 0.
-pub fn map_season_anime(r: &Row<'_>) -> rusqlite::Result<SeasonAnime> {
-    Ok(SeasonAnime {
-        anime: map_anime(&AnimeRow::from_row(r)?),
-        total_count: stat(r, "totalCount")?,
-        seen_count: stat(r, "seenCount")?,
-        bookmark_count: stat(r, "bookmarkCount")?,
-        fillermark_count: stat(r, "fillermarkCount")?,
-        latest_upload: stat(r, "latestUpload")?,
-        fetched_at: stat(r, "episodeFetchedAt")?,
-        last_seen: stat(r, "lastSeen")?,
-    })
+pub fn map_season_anime(r: SeasonAnimeRow) -> SeasonAnime {
+    SeasonAnime {
+        anime: map_anime(&r.anime),
+        total_count: r.total_count,
+        seen_count: r.seen_count,
+        bookmark_count: r.bookmark_count,
+        fillermark_count: r.fillermark_count,
+        latest_upload: r.latest_upload,
+        fetched_at: r.episode_fetched_at,
+        last_seen: r.last_seen,
+    }
 }
 
 /// `AnimeMapper` for one row of the related query: every `animes` column plus the group `name` of
@@ -513,7 +516,7 @@ impl AnimeRepo {
     /// Season rows of one parent, published again after a change to any table they read.
     pub fn subscribe_seasons_by_parent(&self, parent_id: i64) -> Subscription<Vec<SeasonAnime>> {
         self.db.subscribe(ANIME_LIBRARY_TABLES, LIBRARY_DEBOUNCE, move |c| {
-            Ok(query(c, SEASONS_BY_PARENT, &[(":parentId", &parent_id)], map_season_anime)?)
+            Ok(seasons_of(c, parent_id)?.into_iter().map(map_season_anime).collect())
         })
     }
 
@@ -635,7 +638,7 @@ impl AnimeRepo {
 
     /// Season rows (`animeseasonsView`) of one `Seasons` parent. Includes non-favourite children.
     pub fn seasons_by_parent(&self, parent_id: i64) -> DataResult<Vec<SeasonAnime>> {
-        Ok(self.db.read(|c| Ok(query(c, SEASONS_BY_PARENT, &[(":parentId", &parent_id)], map_season_anime)?))?)
+        Ok(self.db.read(|c| Ok(seasons_of(c, parent_id)?.into_iter().map(map_season_anime).collect()))?)
     }
 
     /// Every row whose `parent_id` is `parent_id`, favourite or not.

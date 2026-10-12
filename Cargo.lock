@@ -3458,6 +3458,7 @@ dependencies = [
  "image",
  "kuro-archive",
  "kuro-core",
+ "kuro-db",
  "kuro-platform",
  "kuro-prefs",
  "kuro-source",

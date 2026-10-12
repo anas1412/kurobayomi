@@ -23,18 +23,11 @@ pub mod fixtures {
         pub db: Arc<Db>,
     }
 
-    pub fn manga_db() -> Fixture {
+    pub fn test_db() -> Fixture {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         Fixture { db: Arc::new(Db::new(&path, writer).expect("manga db handle")), _dir: dir }
-    }
-
-    pub fn anime_db() -> Fixture {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("anime.db");
-        let writer = kuro_db::schema_anime::open(&path).expect("open anime db");
-        Fixture { db: Arc::new(Db::new(&path, writer).expect("anime db handle")), _dir: dir }
     }
 
     /// A manga row; `favorite` says whether it is in the library.
@@ -153,7 +146,7 @@ mod data {
     use kuro_platform::kind::Kind;
     use kuro_domain::updates::repo::UpdatesRepo;
 
-    use super::fixtures::{chapters, manga, manga_db};
+    use super::fixtures::{chapters, manga, test_db};
     use crate::updates::storage_data::library_entries;
 
     fn titles(repo: &HistoryRepo) -> Vec<String> {
@@ -167,7 +160,7 @@ mod data {
     #[test]
     fn manga_list_latest_chapter_only() {
         // EC-42-H-01: one row per manga, its newest chapter
-        let f = manga_db();
+        let f = test_db();
         let m = manga(&f.db, "M", true);
         let ids = chapters(&f.db, m, 3);
         let repo = HistoryRepo::new(f.db.clone());
@@ -181,7 +174,7 @@ mod data {
     #[test]
     fn manga_list_search_escapes_wildcards() {
         // EC-42-H-02: `%` and `_` in the search text are literal
-        let f = manga_db();
+        let f = test_db();
         let repo = HistoryRepo::new(f.db.clone());
         for (n, title) in ["100%", "1000", "a_b", "axb"].into_iter().enumerate() {
             let m = manga(&f.db, title, true);
@@ -194,7 +187,7 @@ mod data {
     #[test]
     fn manga_list_search_ascii_case_insensitive() {
         // EC-42-H-03
-        let f = manga_db();
+        let f = test_db();
         let m = manga(&f.db, "Berserk", true);
         let repo = HistoryRepo::new(f.db.clone());
         repo.upsert(Kind::Manga, chapters(&f.db, m, 1)[0], 100, 1).expect("record");
@@ -206,7 +199,7 @@ mod data {
     #[test]
     fn reset_row_hides_from_list_keeps_time() {
         // EC-42-H-11 and EC-42-S-01: a reset row leaves the list but its time stays in the total
-        let f = manga_db();
+        let f = test_db();
         let m = manga(&f.db, "M", true);
         let ids = chapters(&f.db, m, 1);
         let repo = HistoryRepo::new(f.db.clone());
@@ -220,7 +213,7 @@ mod data {
     #[test]
     fn reset_entry_resets_all_rows() {
         // EC-42-H-12
-        let f = manga_db();
+        let f = test_db();
         let m = manga(&f.db, "M", true);
         let ids = chapters(&f.db, m, 2);
         let repo = HistoryRepo::new(f.db.clone());
@@ -234,7 +227,7 @@ mod data {
     #[test]
     fn delete_all_drops_time_read() {
         // EC-42-H-10: clearing the history takes the read duration with it
-        let f = manga_db();
+        let f = test_db();
         let m = manga(&f.db, "M", true);
         let repo = HistoryRepo::new(f.db.clone());
         repo.upsert(Kind::Manga, chapters(&f.db, m, 1)[0], 100, 9_000).expect("record");
@@ -246,7 +239,7 @@ mod data {
     #[test]
     fn latest_manga_not_limited_to_max_row() {
         // behaviour 1.1: the newest read decides, not the chapter with the highest number or the highest row id
-        let f = manga_db();
+        let f = test_db();
         let (a, b) = (manga(&f.db, "A", true), manga(&f.db, "B", true));
         let (ca, cb) = (chapters(&f.db, a, 2), chapters(&f.db, b, 1));
         let repo = HistoryRepo::new(f.db.clone());
@@ -281,7 +274,7 @@ mod data {
     #[test]
     fn window_uses_upload_date() {
         // EC-42-U-01: the window cuts on the upload date, so an old upload fetched now is not an update
-        let f = manga_db();
+        let f = test_db();
         let m = library_manga(&f.db, "M", true);
         let old = dated(&f.db, m, "old upload", ADDED + 10, AFTER - 10);
         let unknown = dated(&f.db, m, "unknown upload", ADDED + 10, 0);
@@ -293,7 +286,7 @@ mod data {
 
     #[test]
     fn favorites_only_and_fetched_after_added() {
-        let f = manga_db();
+        let f = test_db();
         let (kept, left) = (library_manga(&f.db, "Kept", true), library_manga(&f.db, "Left", false));
         let fresh = dated(&f.db, kept, "fresh", ADDED + 1, AFTER + 10);
         dated(&f.db, kept, "backfill", ADDED - 1, AFTER + 10);
@@ -303,7 +296,7 @@ mod data {
 
     #[test]
     fn order_by_fetch_desc_and_limit_500() {
-        let f = manga_db();
+        let f = test_db();
         let m = library_manga(&f.db, "M", true);
         let ids: Vec<i64> = (0..600).map(|i| dated(&f.db, m, &format!("c{i}"), ADDED + 1 + i, AFTER + 1 + i)).collect();
         let got = feed(&f.db);
@@ -317,7 +310,7 @@ mod data {
     fn library_rows_dedupe_across_categories() {
         // an entry in two categories is one storage row
         use kuro_data::category::create_manga_category;
-        let f = manga_db();
+        let f = test_db();
         let m = manga(&f.db, "M", true);
         let (a, b) = (create_manga_category(&f.db, "a", 0).expect("category"), create_manga_category(&f.db, "b", 0).expect("category"));
         kuro_data::manga::MangaRepo::new(f.db.clone()).set_categories(m, &[a, b]).expect("links");
@@ -337,7 +330,7 @@ mod ui {
     use kuro_domain::history::model::CoverKey;
     use kuro_platform::kind::Kind;
 
-    use super::fixtures::{chapters, manga, manga_db};
+    use super::fixtures::{chapters, manga, test_db};
     use crate::updates::history::Resume;
     use crate::updates::history_data::{apply_remove, resume_row};
     use crate::updates::updates_page::{BackAction, back_action, cover_click_enabled};
@@ -345,7 +338,7 @@ mod ui {
     #[test]
     fn resume_opens_next_unit() {
         // clicking a row opens the unit that follows the one the row names
-        let f = manga_db();
+        let f = test_db();
         let m = manga(&f.db, "M", true);
         let ids = chapters(&f.db, m, 3);
         kuro_data::chapter::ChapterRepo::new(f.db.clone())
@@ -357,7 +350,7 @@ mod ui {
 
     #[test]
     fn remove_dialog_checkbox_maps_to_entry_reset() {
-        let f = manga_db();
+        let f = test_db();
         let m = manga(&f.db, "M", true);
         let ids = chapters(&f.db, m, 2);
         let repo = HistoryRepo::new(f.db.clone());

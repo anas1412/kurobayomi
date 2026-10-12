@@ -17,8 +17,8 @@ pub const GROUP_TITLE: &str = "Export";
 /// The favourites of both databases, manga first, each in the repository's order.
 fn favourites() -> Vec<Entry> {
     let app = crate::data::app();
-    let manga = MangaRepo::new(app.manga_db.clone()).favorites().unwrap_or_default();
-    let anime = AnimeRepo::new(app.anime_db.clone()).favorites().unwrap_or_default();
+    let manga = MangaRepo::new(app.db.clone()).favorites().unwrap_or_default();
+    let anime = AnimeRepo::new(app.db.clone()).favorites().unwrap_or_default();
     let manga = manga.into_iter().map(|m| Entry { title: m.title, kind: "manga", author: m.author, artist: m.artist });
     let anime = anime.into_iter().map(|a| Entry { title: a.title, kind: "anime", author: a.author, artist: a.artist });
     manga.chain(anime).collect()

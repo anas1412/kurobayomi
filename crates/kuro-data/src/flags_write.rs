@@ -31,18 +31,24 @@ pub(crate) fn read_modify_write(
     })
 }
 
-/// `mangas.chapter_flags`.
-pub(crate) const MANGA_CHAPTER_READ: &str = "SELECT chapter_flags FROM mangas WHERE _id = ?1";
-pub(crate) const MANGA_CHAPTER_WRITE: &str = "UPDATE mangas SET chapter_flags = ?1 WHERE _id = ?2";
-pub(crate) const MANGA_CHAPTER_MASKED: &str =
-    "UPDATE mangas SET chapter_flags = (chapter_flags & ~?2) | (?1 & ?2) WHERE _id = ?3";
-/// `animes.episode_flags`.
-pub(crate) const ANIME_EPISODE_READ: &str = "SELECT episode_flags FROM animes WHERE _id = ?1";
-pub(crate) const ANIME_EPISODE_WRITE: &str = "UPDATE animes SET episode_flags = ?1 WHERE _id = ?2";
+/// Manga chapter flags: `entries.item_flags` holds the anime superset layout for both kinds, while Rust keeps the
+/// manga layout, so manga reads and writes translate. `tr(x)` moves the sorting bits 0x300 up to 0x600 and the read
+/// expression is its inverse (`manga_item_flags_to_unified` / `_from_unified` in `kuro_db::flags`).
+pub(crate) const MANGA_CHAPTER_READ: &str = "SELECT (item_flags & ~1536) | ((item_flags & 1536) >> 1) FROM entries \
+     WHERE _id = ?1 AND kind = 'manga'";
+pub(crate) const MANGA_CHAPTER_WRITE: &str =
+    "UPDATE entries SET item_flags = (?1 & ~768) | ((?1 & 768) << 1) WHERE _id = ?2 AND kind = 'manga'";
+pub(crate) const MANGA_CHAPTER_MASKED: &str = "UPDATE entries SET item_flags = \
+     (item_flags & ~((?2 & ~768) | ((?2 & 768) << 1))) \
+     | (((?1 & ~768) | ((?1 & 768) << 1)) & ((?2 & ~768) | ((?2 & 768) << 1))) \
+     WHERE _id = ?3 AND kind = 'manga'";
+/// Anime `item_flags` (the old `animes.episode_flags`).
+pub(crate) const ANIME_EPISODE_READ: &str = "SELECT item_flags FROM entries WHERE _id = ?1 AND kind = 'anime'";
+pub(crate) const ANIME_EPISODE_WRITE: &str = "UPDATE entries SET item_flags = ?1 WHERE _id = ?2 AND kind = 'anime'";
 pub(crate) const ANIME_EPISODE_MASKED: &str =
-    "UPDATE animes SET episode_flags = (episode_flags & ~?2) | (?1 & ?2) WHERE _id = ?3";
-/// `animes.season_flags`.
-pub(crate) const ANIME_SEASON_READ: &str = "SELECT season_flags FROM animes WHERE _id = ?1";
-pub(crate) const ANIME_SEASON_WRITE: &str = "UPDATE animes SET season_flags = ?1 WHERE _id = ?2";
+    "UPDATE entries SET item_flags = (item_flags & ~?2) | (?1 & ?2) WHERE _id = ?3 AND kind = 'anime'";
+/// `entries.season_flags`.
+pub(crate) const ANIME_SEASON_READ: &str = "SELECT season_flags FROM entries WHERE _id = ?1 AND kind = 'anime'";
+pub(crate) const ANIME_SEASON_WRITE: &str = "UPDATE entries SET season_flags = ?1 WHERE _id = ?2 AND kind = 'anime'";
 pub(crate) const ANIME_SEASON_MASKED: &str =
-    "UPDATE animes SET season_flags = (season_flags & ~?2) | (?1 & ?2) WHERE _id = ?3";
+    "UPDATE entries SET season_flags = (season_flags & ~?2) | (?1 & ?2) WHERE _id = ?3 AND kind = 'anime'";

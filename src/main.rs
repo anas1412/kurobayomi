@@ -154,13 +154,10 @@ fn main() -> glib::ExitCode {
     if unfinished > 0 {
         eprintln!("kurobayomi: {unfinished} history flush(es) were still running at exit");
     }
-    // WAL checkpoint and PRAGMA optimize on both writers (T-03a-028)
+    // WAL checkpoint and PRAGMA optimize on the writer (T-03a-028)
     if data::is_installed() {
-        let app = data::app();
-        for (name, db) in [("manga", &app.manga_db), ("anime", &app.anime_db)] {
-            if let Err(e) = db.close() {
-                eprintln!("kurobayomi: closing the {name} database failed: {e}");
-            }
+        if let Err(e) = data::app().db.close() {
+            eprintln!("kurobayomi: closing the database failed: {e}");
         }
     }
     kuro_core::runtime::shutdown(rt);
@@ -272,7 +269,7 @@ fn build_window(app: &gtk::Application) {
         });
     }
     // the extension host: package scans, icons, load problems and the first-run languages
-    ext_host::start(base.store(), data::app().anime_db.clone());
+    ext_host::start(base.store());
     // the library update runner behind the refresh button and the automatic schedule
     misc::start();
     // the restore banner, the Create and Restore hosts, and the close dialog of a running restore
@@ -326,7 +323,7 @@ fn build_window(app: &gtk::Application) {
     // requests that arrived before the window: --action, --search, --open and opened files
     shell::launch::window_built(app, &win);
     // the desktop search provider serves library titles while the app runs (T-53a-066)
-    shell::library_catalogue::serve(app, data::app().manga_db.clone(), data::app().anime_db.clone());
+    shell::library_catalogue::serve(app, data::app().db.clone());
     // no keyboard focus ring on the first header button at startup
     GtkWindowExt::set_focus(&win, None::<&gtk::Widget>);
 

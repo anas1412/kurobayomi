@@ -69,7 +69,7 @@ pub fn confirm_chooser(store: &dyn FavoriteStore, id: i64, now_ms: i64, picked: 
 /// `after_add`.
 pub fn store(kind: Kind) -> Arc<dyn FavoriteStore> {
     let app = crate::data::app();
-    let db = app.db(kind);
+    let db = app.db.clone();
     let library = LibraryPrefs::new(app.base.store().clone());
     match kind {
         Kind::Manga => {

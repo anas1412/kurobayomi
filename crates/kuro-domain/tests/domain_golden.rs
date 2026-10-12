@@ -23,7 +23,7 @@ const NOW_MS: i64 = 1_000_000;
 /// A migrated manga database and a manga row titled `title`.
 fn manga_fixture(title: &str) -> (TempDir, Arc<Db>, i64) {
     let dir = TempDir::new().expect("temp dir");
-    let db = TestDb::manga_handle(&dir);
+    let db = TestDb::handle(&dir);
     let id = MangaRepo::new(db.clone()).insert(&Manga { title: title.into(), ..Manga::create() }).expect("insert manga");
     (dir, db, id)
 }
@@ -202,7 +202,7 @@ mod sync_episodes {
     #[tokio::test]
     async fn fillermark_sticky_and_preview_fill() {
         let dir = TempDir::new().expect("temp dir");
-        let db = TestDb::anime_handle(&dir);
+        let db = TestDb::handle(&dir);
         let anime_id = AnimeRepo::new(db.clone()).insert(&Anime::create()).expect("anime");
         let anime = AnimeRepo::new(db.clone()).by_id(anime_id).expect("read");
         db.write(|tx| {
@@ -346,7 +346,7 @@ mod set_seen_status {
     #[tokio::test]
     async fn last_second_reset() {
         let dir = TempDir::new().expect("temp dir");
-        let db = TestDb::anime_handle(&dir);
+        let db = TestDb::handle(&dir);
         let animes = kuro_data::anime::AnimeRepo::new(db.clone());
         let episodes = kuro_data::episode::EpisodeRepo::new(db.clone());
         let anime_id = animes.insert(&kuro_data::anime::Anime::create()).expect("anime");
@@ -379,7 +379,7 @@ mod set_seen_status {
         })
         .expect("insert");
         let set = SetSeenStatus::new(episodes.clone(), animes, pref(false), Arc::new(EpisodeDl));
-        db.write(|tx| Ok(tx.execute("UPDATE episodes SET last_second_seen = 40 WHERE anime_id = ?1", [anime_id])?)).expect("progress");
+        db.write(|tx| Ok(tx.execute("UPDATE items SET progress = 40 WHERE entry_id = ?1", [anime_id])?)).expect("progress");
         let rows = episodes.by_anime_id(anime_id).expect("read");
         assert_eq!(set.run(false, rows).await, SetSeenResult::Success);
         let row = episodes.by_anime_id(anime_id).expect("read").remove(0);

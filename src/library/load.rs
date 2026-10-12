@@ -171,16 +171,16 @@ mod tests {
     use super::*;
     use kuro_data::manga::Manga;
 
-    fn manga_db() -> (tempfile::TempDir, Arc<Db>) {
+    fn test_db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         (dir, Arc::new(Db::new(&path, writer).expect("manga db handle")))
     }
 
     #[test]
     fn snapshot_lists_visible_categories_and_one_row_per_membership() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo
             .insert(&Manga {

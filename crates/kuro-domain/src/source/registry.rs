@@ -369,7 +369,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::testdb::manga_db;
+    use crate::testdb::test_db;
 
     struct Fake {
         id: Id,
@@ -409,7 +409,7 @@ mod tests {
     fn registry_with(
         index: Arc<dyn ExtensionCatalog>,
     ) -> (tempfile::TempDir, SourceRegistry<Fake>, Arc<kuro_data::source::MangaStubSourceRepo>) {
-        let (dir, db) = manga_db();
+        let (dir, db) = test_db();
         let stubs = Arc::new(kuro_data::source::MangaStubSourceRepo::new(db));
         let reg = SourceRegistry::new(Kind::Manga, stubs.clone(), index);
         (dir, reg, stubs)
@@ -547,7 +547,7 @@ mod tests {
     }
 
     fn watched() -> (tempfile::TempDir, SourceRegistry<Fake>, Arc<Watched>) {
-        let (dir, db) = manga_db();
+        let (dir, db) = test_db();
         let store = Arc::new(Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db))));
         let reg = SourceRegistry::new(Kind::Manga, store.clone(), Arc::new(NoIndex));
         (dir, reg, store)
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn a_failing_write_is_logged_and_the_other_registrations_still_run() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let mut store = Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db)));
         store.fail_id = Some(13);
         let reg: SourceRegistry<Fake> = SourceRegistry::new(Kind::Manga, Arc::new(store), Arc::new(NoIndex));
@@ -649,7 +649,7 @@ mod tests {
 
     #[test]
     fn manga_stub_list_hides_only_http_sources_and_anime_hides_every_live_source() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let store: Arc<dyn StubSourceRepo> = Arc::new(kuro_data::source::MangaStubSourceRepo::new(db));
         store.upsert(1, "en", "Online").unwrap();
         store.upsert(2, "en", "Local").unwrap();
@@ -750,7 +750,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_second_snapshot_does_not_abort_the_registrations_of_the_first() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let store = Arc::new(Watched {
             delay: Duration::from_millis(200),
             ..Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db)))
@@ -781,7 +781,7 @@ mod tests {
     fn an_index_hit_on_a_thread_without_a_runtime_returns_before_the_row_is_written() {
         assert!(tokio::runtime::Handle::try_current().is_err(), "this test thread has no runtime");
         let (open, gate) = std::sync::mpsc::channel();
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let store = Arc::new(Watched {
             gate: Some(Mutex::new(gate)),
             ..Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db)))

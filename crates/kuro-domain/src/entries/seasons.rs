@@ -34,7 +34,7 @@ pub fn get_deletable_parent_anime(repo: &AnimeRepo) -> DataResult<Vec<DeletableE
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testdb::anime_db;
+    use crate::testdb::test_db;
 
     fn season(total: i64, seen: i64, bookmarks: i64, fillers: i64) -> SeasonAnime {
         SeasonAnime {
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn detaching_seasons_keeps_the_rows_with_a_null_parent() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let parent = repo.insert(&Anime { favorite: true, source: 1, url: "p".into(), title: "P".into(), ..kuro_testkit::domain::anime() }).unwrap();
         let child = repo

@@ -14,7 +14,7 @@ use kuro_backup::schema::{Backup, BackupAnime, BackupAnimeTracking, BackupManga,
 use kuro_backup::wire::Message;
 use kuro_db::statements_anime;
 use kuro_db::statements_manga::manga_sync;
-use kuro_db::{schema_anime, schema_manga};
+use kuro_db::schema_unified;
 use kuro_prefs::store::PrefStore;
 use rusqlite::Connection;
 
@@ -108,17 +108,12 @@ fn write_gzip(path: &Path, backup: &Backup) {
 }
 
 struct Dbs {
-    manga: Connection,
-    anime: Connection,
+    db: Connection,
     app: PrefStore,
 }
 
 fn fresh() -> Dbs {
-    let manga = Connection::open_in_memory().unwrap();
-    manga.pragma_update(None, "foreign_keys", "ON").unwrap();
-    kuro_db::open::register_functions(&manga).unwrap();
-    manga.execute_batch(schema_manga::BASELINE_SQL).unwrap();
-    Dbs { manga, anime: schema_anime::open_in_memory().unwrap(), app: PrefStore::in_memory() }
+    Dbs { db: schema_unified::open_in_memory().unwrap(), app: PrefStore::in_memory() }
 }
 
 fn restore(dbs: &mut Dbs, path: &Path) {
@@ -127,7 +122,7 @@ fn restore(dbs: &mut Dbs, path: &Path) {
     let sched = IntervalScheduler { store: &dbs.app, library_timer: &library, backup_timer: &library };
     let open = |_: &str| PrefStore::in_memory();
     let now = Local.with_ymd_and_hms(2026, 10, 9, 12, 0, 0).single().unwrap();
-    let targets = Targets { manga: &mut dbs.manga, anime: &mut dbs.anime, app_prefs: &dbs.app, source_prefs: &open, scheduler: &sched };
+    let targets = Targets { db: &mut dbs.db, app_prefs: &dbs.app, source_prefs: &open, scheduler: &sched };
     let opts = RestoreOptions { extensions: false, ..RestoreOptions::from_bits([true; 7]) };
     let run = restore_backup(backup, opts, now, targets, &|| false, &mut |_| {});
     assert!(run.errors.is_empty(), "{:?}", run.errors);
@@ -141,7 +136,7 @@ fn t_31a_048_shikimori_and_bangumi_manga_tracks_restore_unchanged() {
     let mut dbs = fresh();
     restore(&mut dbs, &file);
 
-    let mut rows = manga_sync::get_tracks(&dbs.manga).unwrap();
+    let mut rows = manga_sync::get_tracks(&dbs.db).unwrap();
     rows.sort_by_key(|t| t.sync_id);
     assert_eq!(rows.len(), 2);
 
@@ -165,7 +160,7 @@ fn t_31a_048_shikimori_and_bangumi_anime_tracks_restore_unchanged() {
     let mut dbs = fresh();
     restore(&mut dbs, &file);
 
-    let mut rows = statements_anime::tracks(&dbs.anime).unwrap();
+    let mut rows = statements_anime::tracks(&dbs.db).unwrap();
     rows.sort_by_key(|t| t.sync_id);
     assert_eq!(rows.len(), 2);
 

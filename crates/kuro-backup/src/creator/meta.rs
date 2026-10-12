@@ -3,10 +3,9 @@
 use std::collections::{BTreeMap, HashSet};
 
 use kuro_data::category::Category;
-use kuro_data::extension_repo::ExtensionRepo;
 
 use crate::creator::SourceRegistry;
-use crate::schema::{BackupAnime, BackupAnimeSource, BackupCategory, BackupExtensionRepos, BackupManga, BackupSource};
+use crate::schema::{BackupAnime, BackupAnimeSource, BackupCategory, BackupManga, BackupSource};
 
 /// Categories other than the system category (id 0), with name, order, id and flags. Duplicate orders are logged
 /// and still written (E-15).
@@ -43,19 +42,6 @@ pub fn anime_sources(entries: &[BackupAnime], reg: &dyn SourceRegistry) -> Vec<B
     distinct(entries.iter().map(|e| e.source))
         .into_iter()
         .map(|id| BackupAnimeSource { name: reg.name_of(id), source_id: id })
-        .collect()
-}
-
-pub fn manga_repos(repos: &[ExtensionRepo]) -> Vec<BackupExtensionRepos> {
-    repos
-        .iter()
-        .map(|r| BackupExtensionRepos {
-            base_url: r.base_url.clone(),
-            name: r.name.clone(),
-            short_name: r.short_name.clone(),
-            website: r.website.clone(),
-            signing_key_fingerprint: r.signing_key_fingerprint.clone(),
-        })
         .collect()
 }
 
@@ -110,13 +96,5 @@ mod tests {
         assert_eq!(got.len(), 2, "system category excluded, duplicate order still written");
         assert_eq!(got[0], BackupCategory { name: "A".into(), order: 1, id: 3, flags: 4 });
         assert!(categories(&[]).is_empty());
-    }
-
-    #[test]
-    fn repos_map_fields() {
-        let repos = vec![ExtensionRepo { base_url: "b".into(), name: "n".into(), short_name: None, website: "w".into(), signing_key_fingerprint: "f".into() }];
-        let got = manga_repos(&repos);
-        assert_eq!(got[0].signing_key_fingerprint, "f");
-        assert_eq!(got[0].short_name, None);
     }
 }

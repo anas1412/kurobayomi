@@ -1,5 +1,5 @@
 //! Kurobayomi migrations: version N to N+1, one transaction per step together with the
-//! `user_version` bump, after a `VACUUM INTO` backup. The list itself lives in `schema_manga`.
+//! `user_version` bump, after a `VACUUM INTO` backup. The list itself lives in `schema_unified`.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -152,7 +152,7 @@ pub fn utc_stamp(secs: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema_manga::MANGA_SCHEMA;
+    use crate::schema_unified::UNIFIED_SCHEMA;
 
     #[test]
     fn latest_is_last_migration_or_baseline() {
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn shipped_migration_list_is_contiguous() {
-        assert!(is_contiguous(MANGA_SCHEMA.baseline_version, MANGA_SCHEMA.migrations));
+        assert!(is_contiguous(UNIFIED_SCHEMA.baseline_version, UNIFIED_SCHEMA.migrations));
     }
 
     /// Shared buffer that the test subscriber writes into.

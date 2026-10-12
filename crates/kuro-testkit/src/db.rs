@@ -1,5 +1,5 @@
-//! In-memory anime database for tests, and builders for its rows. The schema, the statements and
-//! the row types are `kuro-db`'s. The builders start from the defaults of Aniyomi's
+//! Test databases (the unified schema, in memory or in a file) and builders for anime rows. The schema, the
+//! statements and the row types are `kuro-db`'s. The builders start from the defaults of Aniyomi's
 //! `Anime.create()`, `Episode.create()` and `AnimeHistory.create()`, so a test states only the
 //! columns it reads. Builder inputs are plain Rust types, so they do not depend on which copy of
 //! `kuro-db` a test links.
@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use kuro_db::handle::Db;
 use kuro_db::open::BUSY_TIMEOUT;
-use kuro_db::schema_anime::{self, Millis};
+use kuro_db::schema_anime::Millis;
+use kuro_db::schema_unified;
 use kuro_db::statements_anime::{
     AnimeRow, EpisodeRow, insert_anime, insert_episode, upsert_history,
 };
@@ -16,38 +17,34 @@ use rusqlite::Connection;
 
 use crate::TempDir;
 
-/// The anime database in memory.
+/// The unified database for tests.
 pub struct TestDb;
 
 impl TestDb {
-    /// A fresh anime database at `user_version` 139 with every table, index, trigger and view of the
-    /// anime schema. It has the foreign keys, busy timeout and synchronous mode of a file database.
-    /// WAL does not apply to memory databases, so `journal_mode` stays `memory`.
+    /// A fresh unified database in memory at `user_version` 1 with every table, index, trigger and view. It has
+    /// the foreign keys, busy timeout and synchronous mode of a file database. WAL does not apply to memory
+    /// databases, so `journal_mode` stays `memory`.
     pub fn anime() -> Connection {
-        let c = schema_anime::open_in_memory().expect("fresh anime schema");
+        let c = schema_unified::open_in_memory().expect("fresh unified schema");
         c.busy_timeout(BUSY_TIMEOUT).expect("busy timeout");
         c.pragma_update(None, "synchronous", "NORMAL")
             .expect("synchronous");
         c
     }
 
-    /// A migrated manga database behind the shared handle `kuro_db::handle::Db`, in a file under `dir`. A `Db` reads
+    /// The unified database behind the shared handle `kuro_db::handle::Db`, in one file under `dir`. A `Db` reads
     /// through its own connections, so unlike [`TestDb::anime`] it cannot be a memory database. Keep `dir` alive.
-    pub fn manga_handle(dir: &TempDir) -> Arc<Db> {
-        let path = dir.path().join("tachiyomi.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
-        Arc::new(Db::new(&path, writer).expect("manga handle"))
+    pub fn handle(dir: &TempDir) -> Arc<Db> {
+        Self::at(&schema_unified::db_path(dir.path()))
     }
 
-    /// A migrated anime database behind the shared handle, in a file under `dir`. Keep `dir` alive.
-    pub fn anime_handle(dir: &TempDir) -> Arc<Db> {
-        let path = dir.path().join("tachiyomi.animedb");
-        let writer = schema_anime::open(&path).expect("anime schema");
-        Arc::new(Db::new(&path, writer).expect("anime handle"))
+    fn at(path: &std::path::Path) -> Arc<Db> {
+        let writer = schema_unified::open_file(path).expect("unified schema");
+        Arc::new(Db::new(path, writer).expect("handle"))
     }
 }
 
-/// One `animes` row. [`AnimeBuilder::new`] starts from `Anime.create()`.
+/// One anime `entries` row. [`AnimeBuilder::new`] starts from `Anime.create()`.
 #[derive(Clone, Debug)]
 pub struct AnimeBuilder(AnimeRow);
 
@@ -103,7 +100,7 @@ impl Default for AnimeBuilder {
     }
 }
 
-/// One `episodes` row. [`EpisodeBuilder::new`] starts from `Episode.create()`.
+/// One anime `items` row. [`EpisodeBuilder::new`] starts from `Episode.create()`.
 #[derive(Clone, Debug)]
 pub struct EpisodeBuilder(EpisodeRow);
 
@@ -161,8 +158,8 @@ impl EpisodeBuilder {
     }
 }
 
-/// One `animehistory` row of an episode. Inserting again for the same episode moves its
-/// `last_seen`, as the statement does.
+/// One `history` row of an episode. Inserting again for the same episode moves its
+/// `last_at`, as the statement does.
 #[derive(Clone, Debug)]
 pub struct HistoryBuilder {
     episode_id: i64,
@@ -192,7 +189,7 @@ impl HistoryBuilder {
 
 #[cfg(test)]
 mod tests {
-    use kuro_db::schema_anime::{ANIME_APPLICATION_ID, ANIME_SCHEMA, ANIME_SCHEMA_VERSION};
+    use kuro_db::schema_unified::{APPLICATION_ID, SCHEMA_VERSION, UNIFIED_SCHEMA};
     use kuro_db::statements_anime::{anime_by_id, episode_by_id};
 
     use super::*;
@@ -209,12 +206,18 @@ mod tests {
             .collect()
     }
 
+    /// The unified inventory: 13 tables and 3 views, each created by the baseline and present in a fresh file.
     #[test]
-    fn every_table_and_view_of_the_anime_schema_exists() {
-        let tables = names_after(ANIME_SCHEMA.baseline_sql, "CREATE TABLE ");
-        let views = names_after(ANIME_SCHEMA.baseline_sql, "CREATE VIEW ");
-        assert_eq!(tables.len(), 10, "tables in schema.sql: {tables:?}");
-        assert_eq!(views.len(), 8, "views in views.sql: {views:?}");
+    fn every_table_and_view_of_the_unified_schema_exists() {
+        let tables = names_after(UNIFIED_SCHEMA.baseline_sql, "CREATE TABLE ");
+        let views = names_after(UNIFIED_SCHEMA.baseline_sql, "CREATE VIEW ");
+        assert_eq!(tables.len(), 13, "tables in schema.sql and downloads.sql: {tables:?}");
+        assert_eq!(views.len(), 3, "views in views.sql: {views:?}");
+        let mut named: Vec<&str> = UNIFIED_SCHEMA.tables.to_vec();
+        named.sort_unstable();
+        let mut created: Vec<&str> = tables.iter().map(String::as_str).collect();
+        created.sort_unstable();
+        assert_eq!(named, created, "the notification bit list names the created tables");
 
         let c = TestDb::anime();
         for (kind, names) in [("table", &tables), ("view", &views)] {
@@ -239,8 +242,23 @@ mod tests {
         assert_eq!(pragma("foreign_keys"), 1);
         assert_eq!(pragma("synchronous"), 1, "NORMAL");
         assert_eq!(pragma("busy_timeout"), 5000);
-        assert_eq!(pragma("user_version"), ANIME_SCHEMA_VERSION);
-        assert_eq!(pragma("application_id"), ANIME_APPLICATION_ID);
+        assert_eq!(pragma("user_version"), SCHEMA_VERSION);
+        assert_eq!(pragma("application_id"), APPLICATION_ID);
+    }
+
+    #[test]
+    fn the_file_handle_is_one_unified_file() {
+        let dir = crate::TempDir::new().unwrap();
+        let db = TestDb::handle(&dir);
+        let categories: i64 =
+            db.read(|c| Ok(c.query_row("SELECT count(*) FROM categories", [], |r| r.get(0))?)).unwrap();
+        assert_eq!(categories, 2, "the two system categories");
+        let files: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".db"))
+            .collect();
+        assert_eq!(files, ["kurobayomi.db"]);
     }
 
     #[test]
@@ -266,7 +284,7 @@ mod tests {
             (-1, 0, false, false, 0)
         );
         assert_eq!(row.season_number, -1.0);
-        assert_eq!(row.fetch_type, schema_anime::FetchType::Episodes);
+        assert_eq!(row.fetch_type, kuro_db::schema_anime::FetchType::Episodes);
 
         let mut expected = AnimeBuilder::new().build();
         expected.id = id;
@@ -348,7 +366,7 @@ mod tests {
         HistoryBuilder::new(episode).seen_at(9000).insert(&c);
 
         let rows: Vec<(i64, i64)> = c
-            .prepare("SELECT episode_id, last_seen FROM animehistory")
+            .prepare("SELECT item_id, last_at FROM history")
             .unwrap()
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
             .unwrap()

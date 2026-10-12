@@ -217,7 +217,7 @@ mod tests {
 
     fn setup(online: bool) -> (TempDir, Arc<RetryQueue>, Arc<Net>, Arc<RetryScheduler>) {
         let dir = TempDir::new().unwrap();
-        let db = TestDb::anime_handle(&dir);
+        let db = TestDb::handle(&dir);
         let queue = Arc::new(RetryQueue::new(db).unwrap());
         let net = Arc::new(Net(AtomicBool::new(online)));
         let sched = Arc::new(RetryScheduler::new(queue.clone(), net.clone()));
@@ -337,11 +337,11 @@ mod tests {
     fn tr_27_125_queue_survives_a_restart() {
         let dir = TempDir::new().unwrap();
         {
-            let db = TestDb::anime_handle(&dir);
+            let db = TestDb::handle(&dir);
             let queue = RetryQueue::new(db).unwrap();
             queue.add(Kind::Anime, 8, TrackerId::KITSU, 4.0, 0).unwrap();
         }
-        let db = TestDb::anime_handle(&dir);
+        let db = TestDb::handle(&dir);
         let queue = RetryQueue::new(db).unwrap();
         let items = queue.list(Kind::Anime).unwrap();
         assert_eq!(items.len(), 1);

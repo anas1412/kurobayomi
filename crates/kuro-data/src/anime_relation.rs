@@ -12,13 +12,13 @@ use crate::anime::{AnimeRelationGroup, map_anime};
 use crate::{DataResult, ENTRY_DEBOUNCE};
 
 /// Tables a related-anime query reads.
-const RELATION_TABLES: &[&str] = &["anime_relations", "animes"];
+const RELATION_TABLES: &[&str] = &["anime_relations", "entries"];
 
 /// Deletes the rows of one anime (the `replace_relations` first step).
-const RELATION_DELETE: &str = "DELETE FROM anime_relations WHERE anime_id = :animeId";
+const RELATION_DELETE: &str = "DELETE FROM anime_relations WHERE entry_id = :animeId";
 
 /// Inserts one relation row. A repeated `(anime_id, related_anime_id)` pair replaces the earlier row.
-const RELATION_INSERT: &str = "INSERT OR REPLACE INTO anime_relations(anime_id, related_anime_id, name, sort_order, last_fetched_at) \
+const RELATION_INSERT: &str = "INSERT OR REPLACE INTO anime_relations(entry_id, related_id, name, sort_order, last_fetched_at) \
      VALUES (:animeId, :relatedAnimeId, :name, :sortOrder, :lastFetchedAt)";
 
 /// Typed access to `anime_relations`. Shares one `Db` with the other anime repositories.
@@ -82,7 +82,7 @@ fn groups(c: &Connection, anime_id: i64) -> rusqlite::Result<Vec<AnimeRelationGr
 mod tests {
     use super::*;
     use crate::anime::{Anime, AnimeRepo};
-    use crate::support::anime_db;
+    use crate::support::test_db;
 
     fn anime(repo: &AnimeRepo, url: &str) -> i64 {
         repo.insert(&Anime { url: url.into(), title: url.into(), source: 1, status: 1, ..Anime::create() }).unwrap()
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn no_rows_means_no_last_fetch_and_no_groups() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRelationRepo::new(db.clone());
         let a = anime(&AnimeRepo::new(db), "a");
         assert_eq!(repo.last_fetched_at(a).unwrap(), None);
@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn replace_then_read_returns_the_groups_in_order_with_the_fetch_time() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let animes = AnimeRepo::new(db.clone());
         let repo = AnimeRelationRepo::new(db.clone());
         let (a, b, c, d) = (anime(&animes, "a"), anime(&animes, "b"), anime(&animes, "c"), anime(&animes, "d"));
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn a_second_replace_drops_the_old_rows() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let animes = AnimeRepo::new(db.clone());
         let repo = AnimeRelationRepo::new(db.clone());
         let (a, b, c) = (anime(&animes, "a"), anime(&animes, "b"), anime(&animes, "c"));
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn the_same_name_in_two_places_is_one_group_in_first_position_order() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let animes = AnimeRepo::new(db.clone());
         let repo = AnimeRelationRepo::new(db.clone());
         let (a, b, c, d) = (anime(&animes, "a"), anime(&animes, "b"), anime(&animes, "c"), anime(&animes, "d"));
@@ -147,19 +147,19 @@ mod tests {
 
     #[test]
     fn deleting_either_anime_cascades_its_relation_rows() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let animes = AnimeRepo::new(db.clone());
         let repo = AnimeRelationRepo::new(db.clone());
         let (a, b) = (anime(&animes, "a"), anime(&animes, "b"));
         repo.replace_relations(a, &[group("G", &[b])], 1).unwrap();
-        db.write(|tx| Ok(tx.execute("DELETE FROM animes WHERE _id = ?1", [b]).map(drop)?)).unwrap();
+        db.write(|tx| Ok(tx.execute("DELETE FROM entries WHERE _id = ?1", [b]).map(drop)?)).unwrap();
         assert!(repo.related(a).unwrap().is_empty(), "the linked anime is gone");
 
         let c = anime(&animes, "c");
         repo.replace_relations(c, &[group("G", &[a])], 1).unwrap();
-        db.write(|tx| Ok(tx.execute("DELETE FROM animes WHERE _id = ?1", [c]).map(drop)?)).unwrap();
+        db.write(|tx| Ok(tx.execute("DELETE FROM entries WHERE _id = ?1", [c]).map(drop)?)).unwrap();
         let count: i64 = db
-            .read(|conn| Ok(conn.query_row("SELECT count(*) FROM anime_relations WHERE anime_id = ?1", [c], |r| r.get(0))?))
+            .read(|conn| Ok(conn.query_row("SELECT count(*) FROM anime_relations WHERE entry_id = ?1", [c], |r| r.get(0))?))
             .unwrap();
         assert_eq!(count, 0, "the owner's rows go with it");
     }

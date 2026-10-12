@@ -1261,16 +1261,16 @@ fn test_view_of(kind: Kind, nav: Nav) -> (tempfile::TempDir, LibraryView) {
     let dir = tempfile::tempdir().expect("temp dir");
     let db = match kind {
         Kind::Manga => {
-            let path = dir.path().join("manga.db");
-            let db = Arc::new(Db::new(&path, kuro_db::schema_manga::open(&path).expect("open manga db")).expect("manga db handle"));
+            let path = dir.path().join("a.db");
+            let db = Arc::new(Db::new(&path, kuro_db::schema_unified::open_file(&path).expect("open the db")).expect("db handle"));
             MangaRepo::new(db.clone())
                 .insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() })
                 .expect("insert");
             db
         }
         Kind::Anime => {
-            let path = dir.path().join("anime.db");
-            let db = Arc::new(Db::new(&path, kuro_db::schema_anime::open(&path).expect("open anime db")).expect("anime db handle"));
+            let path = dir.path().join("a.db");
+            let db = Arc::new(Db::new(&path, kuro_db::schema_unified::open_file(&path).expect("open the db")).expect("db handle"));
             AnimeRepo::new(db.clone())
                 .insert(&Anime { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Anime::create() })
                 .expect("insert");

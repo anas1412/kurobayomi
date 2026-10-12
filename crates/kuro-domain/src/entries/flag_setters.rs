@@ -366,7 +366,7 @@ mod tests {
     }
 
     fn manga_repo_with_one_entry() -> (tempfile::TempDir, MangaRepo, i64) {
-        let (dir, db) = crate::testdb::manga_db();
+        let (dir, db) = crate::testdb::test_db();
         let repo = MangaRepo::new(db);
         let id = repo
             .insert(&kuro_data::manga::Manga { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::manga() })
@@ -375,7 +375,7 @@ mod tests {
     }
 
     fn anime_repo_with_one_entry() -> (tempfile::TempDir, AnimeRepo, i64) {
-        let (dir, db) = crate::testdb::anime_db();
+        let (dir, db) = crate::testdb::test_db();
         let repo = AnimeRepo::new(db);
         let id = repo
             .insert(&kuro_data::anime::Anime { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::anime() })

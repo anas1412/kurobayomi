@@ -312,28 +312,6 @@ pub struct TrackPatch {
     pub private: Option<bool>,
 }
 
-/// Row of `extension_repos`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ExtensionRepoRow {
-    pub base_url: String,
-    pub name: String,
-    pub short_name: Option<String>,
-    pub website: String,
-    pub signing_key_fingerprint: String,
-}
-
-impl ExtensionRepoRow {
-    pub fn from_row(r: &Row<'_>) -> Result<Self> {
-        Ok(Self {
-            base_url: r.get("base_url")?,
-            name: r.get("name")?,
-            short_name: r.get("short_name")?,
-            website: r.get("website")?,
-            signing_key_fingerprint: r.get("signing_key_fingerprint")?,
-        })
-    }
-}
-
 /// Row of `sources` (stub source: a source whose extension is no longer installed).
 #[derive(Clone, Debug, PartialEq)]
 pub struct StubSourceRow {

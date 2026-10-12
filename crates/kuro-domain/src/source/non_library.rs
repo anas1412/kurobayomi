@@ -107,8 +107,8 @@ mod tests {
 
     #[test]
     fn deletable_children_returns_only_the_children_of_that_parent() {
-        use crate::testdb::anime_db;
-        let (_d, db) = anime_db();
+        use crate::testdb::test_db;
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let parent = repo.insert(&Anime { url: "/p".into(), title: "P".into(), source: 1, ..Anime::create() }).unwrap();
         let other = repo.insert(&Anime { url: "/o".into(), title: "O".into(), source: 1, ..Anime::create() }).unwrap();

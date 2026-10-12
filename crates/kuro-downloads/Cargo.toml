@@ -19,6 +19,7 @@ futures = { workspace = true }
 image = { workspace = true }
 kuro-archive = { path = "../kuro-archive" }
 kuro-core = { path = "../kuro-core" }
+kuro-db = { path = "../kuro-db" }
 kuro-platform = { path = "../kuro-platform" }
 kuro-prefs = { path = "../kuro-prefs" }
 notify = "8.2.0"

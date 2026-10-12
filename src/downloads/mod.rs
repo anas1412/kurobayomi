@@ -14,7 +14,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 
 use kuro_db::handle::Db;
-use kuro_db::schema_manga;
+use kuro_db::schema_unified;
 use kuro_platform::kind::Kind;
 use kuro_domain::storage::StorageManager;
 use kuro_downloads::anime::manager::AnimeQueue;
@@ -61,16 +61,15 @@ pub fn free_space(path: &Path) -> Option<u64> {
 pub fn start(
     paths: &dyn Paths,
     index: DownloadIndex,
-    manga_db: Arc<Db>,
-    anime_db: Arc<kuro_db::handle::Db>,
+    db: Arc<Db>,
     prefs: PrefStore,
     notifier: Arc<dyn Notifier>,
 ) -> Result<Started, String> {
     let waiting = Arc::new(RwLock::new(Vec::new()));
     let (cancel_waiting, cancels) = mpsc::unbounded_channel();
     let storage = crate::settings_ui::storage::manager(&prefs).ok_or("the storage folder could not be resolved")?;
-    let (manga, connectivity) = start_manga(paths, &storage, index, notifier.clone(), manga_db, waiting.clone(), cancels)?;
-    let anime = match anime_queue::start(paths, &storage, anime_db, prefs, notifier) {
+    let (manga, connectivity) = start_manga(paths, &storage, index, notifier.clone(), db.clone(), waiting.clone(), cancels)?;
+    let anime = match anime_queue::start(paths, &storage, db, prefs, notifier) {
         Ok(queue) => Some(queue),
         Err(e) => {
             tracing::error!("the anime download queue did not start: {e}");
@@ -146,13 +145,13 @@ fn start_manga(
     storage: &StorageManager,
     index: DownloadIndex,
     notifier: Arc<dyn Notifier>,
-    manga_db: Arc<Db>,
+    db: Arc<Db>,
     shown: Arc<RwLock<Vec<Waiting>>>,
     cancels: mpsc::UnboundedReceiver<i64>,
 ) -> Result<(Arc<DownloadManager>, watch::Sender<Connectivity>), String> {
     let root = storage.downloads_dir(Kind::Manga).map_err(|e| format!("the manga downloads folder is not available: {e}"))?;
-    let store = QueueStore::open(schema_manga::open_in_data_dir(paths).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    let pending = MangaPendingStore::open(schema_manga::open_in_data_dir(paths).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let store = QueueStore::open(schema_unified::open_in_data_dir(paths).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let pending = MangaPendingStore::open(schema_unified::open_in_data_dir(paths).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let saved = saved_rows(&store);
     // The Wi-Fi-only rule and the speed limit are off (the settings diet cut both switches), and the connectivity watch
     // starts as online and unmetered.
@@ -171,7 +170,7 @@ fn start_manga(
         kept_rows: saved.clone(),
     }));
     spawn_notifier(manga.events(), Arc::new(NotifierSink::new(notifier)), Arc::new(AtomicBool::new(false)));
-    spawn_restore(manga.clone(), manga_db, saved, shown, cancels);
+    spawn_restore(manga.clone(), db, saved, shown, cancels);
     Ok((manga, connectivity_tx))
 }
 
@@ -181,14 +180,7 @@ mod tests {
 
     #[test]
     fn the_saved_manga_rows_are_read_back_for_the_manager_to_keep() {
-        // the queue tables point at the library tables, so the stand-ins exist before the store opens
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE mangas(_id INTEGER PRIMARY KEY); CREATE TABLE chapters(_id INTEGER PRIMARY KEY);
-             INSERT INTO mangas(_id) VALUES (1); INSERT INTO chapters(_id) VALUES (10), (11);",
-        )
-        .unwrap();
-        let store = QueueStore::open(conn).unwrap();
+        let store = QueueStore::open_in_memory().unwrap();
         let rows = vec![
             QueueRow { chapter_id: 10, manga_id: 1, source_id: 7, position: 0, status: 1, enqueued_at: 5 },
             QueueRow { chapter_id: 11, manga_id: 1, source_id: 7, position: 1, status: 1, enqueued_at: 5 },

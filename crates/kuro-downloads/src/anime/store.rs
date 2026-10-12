@@ -1,12 +1,9 @@
-//! SQLite store for the anime queue (T-24a-009, data 5.1). The manager writes the whole queue after each membership or
-//! order change, so `ord` stays dense. Only the queue actor calls it.
+//! SQLite store for the anime queue (T-24a-009), rows of `download_queue` with `kind = 'anime'`. The manager writes the whole
+//! queue after each membership or order change, so `ord` (= `position`) stays dense. Only the queue actor calls it.
 
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::{Connection, params};
-
-/// DDL for `anime_download_queue`.
-pub const SCHEMA: &str = include_str!("../../sql/anime_download_queue.sql");
 
 #[derive(Debug, thiserror::Error)]
 pub enum AnimeStoreError {
@@ -16,18 +13,27 @@ pub enum AnimeStoreError {
     Poisoned,
 }
 
+/// `source` comes from the entry; a row whose entry is missing gets 0 (the foreign key rejects it in the real database).
+const INSERT_ROW: &str = "INSERT INTO download_queue(unit_id, kind, entry_id, source, position, enqueued_at) \
+     VALUES (?1, 'anime', ?2, COALESCE((SELECT source FROM entries WHERE _id = ?2), 0), ?3, strftime('%s','now'))";
+const REPLACE_ROW: &str = "INSERT OR REPLACE INTO download_queue(unit_id, kind, entry_id, source, position, enqueued_at) \
+     VALUES (?1, 'anime', ?2, COALESCE((SELECT source FROM entries WHERE _id = ?2), 0), ?3, strftime('%s','now'))";
+
 pub struct AnimeQueueStore {
     conn: Mutex<Connection>,
 }
 
 impl AnimeQueueStore {
+    /// The table belongs to the unified database schema; the connection is used as given.
     pub fn open(conn: Connection) -> Result<Self, AnimeStoreError> {
-        conn.execute_batch(SCHEMA)?;
         Ok(Self { conn: Mutex::new(conn) })
     }
 
     pub fn open_in_memory() -> Result<Self, AnimeStoreError> {
-        Self::open(Connection::open_in_memory()?)
+        let conn = crate::memory_downloads_db()?;
+        // Stand-in for the unified `entries` table, which `INSERT_ROW` reads the source from.
+        conn.execute_batch("CREATE TABLE entries(_id INTEGER PRIMARY KEY, source INTEGER)")?;
+        Self::open(conn)
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>, AnimeStoreError> {
@@ -40,7 +46,7 @@ impl AnimeQueueStore {
         let tx = conn.transaction()?;
         for (episode_id, anime_id, ord) in rows {
             tx.execute(
-                "INSERT OR REPLACE INTO anime_download_queue(episode_id, anime_id, ord) VALUES (?1, ?2, ?3)",
+                REPLACE_ROW,
                 params![episode_id, anime_id, ord],
             )?;
         }
@@ -49,7 +55,7 @@ impl AnimeQueueStore {
     }
 
     pub fn remove(&self, episode_id: i64) -> Result<(), AnimeStoreError> {
-        self.lock()?.execute("DELETE FROM anime_download_queue WHERE episode_id = ?1", params![episode_id])?;
+        self.lock()?.execute("DELETE FROM download_queue WHERE unit_id = ?1 AND kind = 'anime'", params![episode_id])?;
         Ok(())
     }
 
@@ -57,14 +63,14 @@ impl AnimeQueueStore {
         let mut conn = self.lock()?;
         let tx = conn.transaction()?;
         for id in episode_ids {
-            tx.execute("DELETE FROM anime_download_queue WHERE episode_id = ?1", params![id])?;
+            tx.execute("DELETE FROM download_queue WHERE unit_id = ?1 AND kind = 'anime'", params![id])?;
         }
         tx.commit()?;
         Ok(())
     }
 
     pub fn clear(&self) -> Result<(), AnimeStoreError> {
-        self.lock()?.execute("DELETE FROM anime_download_queue", [])?;
+        self.lock()?.execute("DELETE FROM download_queue WHERE kind = 'anime'", [])?;
         Ok(())
     }
 
@@ -72,10 +78,10 @@ impl AnimeQueueStore {
     pub fn replace_all(&self, episode_ids: &[(i64, i64)]) -> Result<(), AnimeStoreError> {
         let mut conn = self.lock()?;
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM anime_download_queue", [])?;
+        tx.execute("DELETE FROM download_queue WHERE kind = 'anime'", [])?;
         for (ord, (episode_id, anime_id)) in episode_ids.iter().enumerate() {
             tx.execute(
-                "INSERT INTO anime_download_queue(episode_id, anime_id, ord) VALUES (?1, ?2, ?3)",
+                INSERT_ROW,
                 params![episode_id, anime_id, ord as i64],
             )?;
         }
@@ -91,16 +97,16 @@ impl AnimeQueueStore {
         let mut conn = self.lock()?;
         let tx = conn.transaction()?;
         let rows: Vec<(i64, i64)> = {
-            let mut stmt = tx.prepare("SELECT episode_id, anime_id FROM anime_download_queue ORDER BY ord ASC")?;
+            let mut stmt = tx.prepare("SELECT unit_id, entry_id FROM download_queue WHERE kind = 'anime' ORDER BY position ASC")?;
             let mapped = stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?;
             mapped.collect::<Result<_, _>>()?
         };
-        tx.execute("DELETE FROM anime_download_queue", [])?;
+        tx.execute("DELETE FROM download_queue WHERE kind = 'anime'", [])?;
         let mut kept = Vec::new();
         for (episode_id, anime_id) in rows {
             if keep(anime_id, episode_id) {
                 tx.execute(
-                    "INSERT INTO anime_download_queue(episode_id, anime_id, ord) VALUES (?1, ?2, ?3)",
+                    INSERT_ROW,
                     params![episode_id, anime_id, kept.len() as i64],
                 )?;
                 kept.push((anime_id, episode_id));
@@ -113,7 +119,7 @@ impl AnimeQueueStore {
     /// Every stored `(episode_id, anime_id, ord)` in order. Used by tests and by the manager's diagnostics.
     pub fn rows(&self) -> Result<Vec<(i64, i64, i64)>, AnimeStoreError> {
         let conn = self.lock()?;
-        let mut stmt = conn.prepare("SELECT episode_id, anime_id, ord FROM anime_download_queue ORDER BY ord ASC")?;
+        let mut stmt = conn.prepare("SELECT unit_id, entry_id, position FROM download_queue WHERE kind = 'anime' ORDER BY position ASC")?;
         let mapped = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         Ok(mapped.collect::<Result<_, _>>()?)
     }

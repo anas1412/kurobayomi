@@ -23,7 +23,7 @@ use kuro_backup::restore::extensions::legacy_repo_urls;
 use kuro_backup::schema::Backup;
 use kuro_backup::validate::TrackerRegistry;
 use kuro_db::handle::Db;
-use kuro_db::{schema_anime, schema_manga};
+use kuro_db::schema_unified;
 use kuro_domain::extension_repo::{HttpGet, import_legacy_repos};
 use kuro_platform::paths::Paths;
 use kuro_prefs::pref::Pref;
@@ -62,12 +62,11 @@ impl TrackerRegistry for NothingInstalled {
     }
 }
 
-/// The databases and the preference store one backup run reads.
+/// The database and the preference store one backup run reads.
 #[derive(Clone)]
 pub struct Library {
     pub prefs: PrefStore,
-    pub manga: Arc<Db>,
-    pub anime: Arc<Db>,
+    pub db: Arc<Db>,
     /// `<data>/extensions`, where the installed extension packages live.
     pub extensions_dir: PathBuf,
 }
@@ -75,7 +74,7 @@ pub struct Library {
 impl Library {
     /// Writes one backup to `target`. Returns its path and the extension packages that were skipped.
     pub fn create(&self, opts: &BackupOptions, target: &Target) -> Result<(PathBuf, Vec<String>), BackupError> {
-        let library = DbLibrary::new(self.manga.clone(), self.anime.clone());
+        let library = DbLibrary::new(self.db.clone());
         let prefs = StorePrefs(&self.prefs);
         let artifacts = DirArtifacts { anime_dir: self.extensions_dir.join("anime"), manga_dir: self.extensions_dir.clone() };
         let inputs = CreateInputs {
@@ -90,14 +89,13 @@ impl Library {
     }
 }
 
-/// Opens the preference store and both databases without GTK, for `--run-backup`.
+/// Opens the preference store and the database without GTK, for `--run-backup`.
 pub fn open_headless(paths: &dyn Paths) -> Result<Library, String> {
     let prefs = kuro_prefs::settings_load::open(paths).map_err(|e| e.to_string())?;
     let data = paths.data_dir();
-    let (manga_path, anime_path) = (schema_manga::db_path(&data), schema_anime::db_path(&data));
-    let manga = Arc::new(Db::new(&manga_path, schema_manga::open(&manga_path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?);
-    let anime = Arc::new(Db::new(&anime_path, schema_anime::open(&anime_path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?);
-    Ok(Library { prefs, manga, anime, extensions_dir: data.join("extensions") })
+    let path = schema_unified::db_path(&data);
+    let db = Arc::new(Db::new(&path, schema_unified::open_file(&path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?);
+    Ok(Library { prefs, db, extensions_dir: data.join("extensions") })
 }
 
 /// The battery state from `/sys/class/power_supply`: on battery when a battery reports `Discharging`, with the level of
@@ -247,7 +245,7 @@ pub struct LegacyImport<'a> {
     pub repo_http: &'a dyn HttpGet,
 }
 
-/// Runs one restore on this thread over its own connections to the two database files. Source settings land in the app
+/// Runs one restore on this thread over its own connection to the database file. Source settings land in the app
 /// store as `source_<id>.<key>`. Returns how the run ended.
 pub fn run_restore(
     library: &Library,
@@ -261,8 +259,7 @@ pub fn run_restore(
 ) -> Result<RestoreEnd, String> {
     let legacy_urls = (opts.extension_stores).then(|| legacy_repo_urls(&backup));
     let (manga_entries, anime_entries) = (backup.manga.len(), backup.anime.len());
-    let mut manga = schema_manga::open(&schema_manga::db_path(data_dir)).map_err(|e| e.to_string())?;
-    let mut anime = schema_anime::open(&schema_anime::db_path(data_dir)).map_err(|e| e.to_string())?;
+    let mut conn = schema_unified::open_file(&schema_unified::db_path(data_dir)).map_err(|e| e.to_string())?;
     let held: RefCell<HashMap<String, PrefStore>> = RefCell::default();
     let source_prefs = |name: &str| -> PrefStore {
         held.borrow_mut()
@@ -285,17 +282,24 @@ pub fn run_restore(
         backup,
         opts,
         Local::now(),
-        Targets { manga: &mut manga, anime: &mut anime, app_prefs: &library.prefs, source_prefs: &source_prefs, scheduler: &scheduler },
+        Targets { db: &mut conn, app_prefs: &library.prefs, source_prefs: &source_prefs, scheduler: &scheduler },
         &|| stop.requested(),
         emit,
         log_dir,
     );
     if matches!(end, RestoreEnd::Completed(_)) {
         // a big restore leaves the planner without statistics for the new rows (T-03a-028)
-        for (conn, count) in [(&manga, manga_entries), (&anime, anime_entries)] {
-            if let Err(e) = kuro_db::maintenance::after_restore(conn, count) {
-                tracing::warn!("ANALYZE after the restore failed: {e}");
-            }
+        if let Err(e) = kuro_db::maintenance::after_restore(&conn, manga_entries + anime_entries) {
+            tracing::warn!("ANALYZE after the restore failed: {e}");
+        }
+    }
+    // the restore wrote through its own connection, which tells no one: mark every table changed on the app's handle
+    // so the screens already open (the library of the other kind, history, updates) read the restored rows
+    // (a cancelled restore may have written part of the rows too)
+    {
+        use kuro_db::TxExt;
+        if let Err(e) = library.db.write(|tx| tx.touch(kuro_db::DB_TABLES)) {
+            tracing::warn!("announcing the restored rows failed: {e}");
         }
     }
     for (name, store) in held.borrow().iter() {
@@ -321,11 +325,9 @@ mod tests {
     use super::*;
 
     fn library(dir: &Path) -> Library {
-        let manga_path = dir.join("manga.db");
-        let anime_path = dir.join("anime.db");
-        let manga = Arc::new(Db::new(&manga_path, schema_manga::open(&manga_path).unwrap()).unwrap());
-        let anime = Arc::new(Db::new(&anime_path, schema_anime::open(&anime_path).unwrap()).unwrap());
-        Library { prefs: PrefStore::in_memory(), manga, anime, extensions_dir: dir.join("extensions") }
+        let path = schema_unified::db_path(dir);
+        let db = Arc::new(Db::new(&path, schema_unified::open_file(&path).unwrap()).unwrap());
+        Library { prefs: PrefStore::in_memory(), db, extensions_dir: dir.join("extensions") }
     }
 
     fn host(dir: &Path, now: i64) -> CliHost {
@@ -352,7 +354,7 @@ mod tests {
         m.url = "/m".into();
         m.title = "T".into();
         m.favorite = true;
-        kuro_data::manga::MangaRepo::new(host.library.manga.clone()).insert(&m).unwrap();
+        kuro_data::manga::MangaRepo::new(host.library.db.clone()).insert(&m).unwrap();
         host.library.prefs.pref("__APP_STATE_backup_enabled_at".to_owned(), 0_i64).set(1).unwrap();
         let first = run_once(&host.config(), &host, &host.auto_dir);
         assert!(matches!(first, OnceOutcome::Ran(_)), "{first:?}");
@@ -419,7 +421,7 @@ mod tests {
         let opts = RestoreOptions { app_settings: false, ..RestoreOptions::default() };
         let end = run_restore(&lib, dir.path(), &dir.path().join("logs"), backup, opts, &StopFlag::default(), &mut |e| events.lock().unwrap().push(e.title), Some(legacy)).unwrap();
         assert!(matches!(end, RestoreEnd::Completed(_)), "{end:?}");
-        assert!(kuro_data::manga::MangaRepo::new(lib.manga.clone()).by_url_and_source("/m", 7).unwrap().is_some());
+        assert!(kuro_data::manga::MangaRepo::new(lib.db.clone()).by_url_and_source("/m", 7).unwrap().is_some());
         // only the address that is a repository link is listed; the other one is ignored without error
         assert_eq!(links.get().into_iter().collect::<Vec<_>>(), ["https://a.test/index.min.json"]);
     }

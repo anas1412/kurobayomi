@@ -130,9 +130,9 @@ mod tests {
 
     fn fixture(source: i64) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
-        let path = kuro_db::schema_manga::db_path(&dir.path().join("data"));
+        let path = kuro_db::schema_unified::db_path(&dir.path().join("data"));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let writer = kuro_db::schema_manga::open(&path).unwrap();
+        let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         let db = Arc::new(Db::new(&path, writer).unwrap());
         let mut manga = Manga::create();
         manga.title = "Manga Title".into();

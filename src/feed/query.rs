@@ -1,4 +1,4 @@
-//! Unread-updates queries over `updatesView` and `animeupdatesView` (T-50a-005, T-50a-006) and the read-only database
+//! Unread-updates query over `updatesView` (T-50a-005, T-50a-006) and the read-only database
 //! open (T-50a-016). The CLI never creates, migrates or writes a database.
 
 use std::path::Path;
@@ -12,10 +12,8 @@ use super::{FeedError, Kind, UpdateRow};
 pub const BUSY_TIMEOUT: Duration = Duration::from_millis(250);
 
 // The ORDER BY is explicit: Android relied on the view order. LIMIT comes before the per-entry dedupe (E-5).
-const MANGA_SQL: &str = "SELECT mangaId, mangaTitle, chapterId, thumbnailUrl, coverLastModified FROM updatesView \
-     WHERE read = 0 AND dateUpload > ?1 ORDER BY datefetch DESC, chapterId DESC LIMIT ?2";
-const ANIME_SQL: &str = "SELECT animeId, animeTitle, episodeId, thumbnailUrl, coverLastModified FROM animeupdatesView \
-     WHERE seen = 0 AND dateUpload > ?1 ORDER BY datefetch DESC, episodeId DESC LIMIT ?2";
+const SQL: &str = "SELECT entryId, entryTitle, itemId, thumbnailUrl, coverLastModified FROM updatesView \
+     WHERE kind = ?3 AND done = 0 AND dateUpload > ?1 ORDER BY datefetch DESC, itemId DESC LIMIT ?2";
 
 /// Opens an existing database read-only: no `SQLITE_OPEN_CREATE`, busy timeout 250 ms. A missing file is
 /// [`FeedError::DbMissing`] and stays missing.
@@ -31,13 +29,13 @@ pub fn open_read_only(path: &Path) -> Result<Connection, FeedError> {
 
 /// Favourite entries with an unread (unseen) update uploaded strictly after `after_ms`, newest fetch first.
 pub fn unread_updates(conn: &Connection, kind: Kind, after_ms: i64, limit: usize) -> Result<Vec<UpdateRow>, FeedError> {
-    let sql = match kind {
-        Kind::Manga => MANGA_SQL,
-        Kind::Anime => ANIME_SQL,
+    let kind = match kind {
+        Kind::Manga => "manga",
+        Kind::Anime => "anime",
     };
-    let mut stmt = conn.prepare(sql).map_err(db_error)?;
+    let mut stmt = conn.prepare(SQL).map_err(db_error)?;
     let rows = stmt
-        .query_map(rusqlite::params![after_ms, limit as i64], |r| {
+        .query_map(rusqlite::params![after_ms, limit as i64, kind], |r| {
             Ok(UpdateRow {
                 entry_id: r.get(0)?,
                 title: r.get(1)?,
@@ -66,9 +64,9 @@ mod tests {
     const ANIME_FIXTURE: &str = include_str!("../../tests/fixtures/feed/anime.sql");
     const AFTER: i64 = 1_783_512_000_000;
 
-    fn manga_db(dir: &Path) -> std::path::PathBuf {
-        let path = dir.join("manga.db");
-        let c = kuro_db::schema_manga::open(&path).unwrap();
+    fn test_db(dir: &Path) -> std::path::PathBuf {
+        let path = dir.join("test.db");
+        let c = kuro_db::schema_unified::open_file(&path).unwrap();
         c.execute_batch(MANGA_FIXTURE).unwrap();
         path
     }
@@ -76,7 +74,7 @@ mod tests {
     #[test]
     fn manga_filters_and_order() {
         let dir = tempfile::tempdir().unwrap();
-        let conn = open_read_only(&manga_db(dir.path())).unwrap();
+        let conn = open_read_only(&test_db(dir.path())).unwrap();
         let rows = unread_updates(&conn, Kind::Manga, AFTER, 500).unwrap();
         let got: Vec<(i64, i64)> = rows.iter().map(|r| (r.entry_id, r.update_id)).collect();
         // not favourite (c4), read (c6), upload == window start (c7) and fetched before added (c8) are out
@@ -88,7 +86,7 @@ mod tests {
     #[test]
     fn limit_applies_before_dedupe() {
         let dir = tempfile::tempdir().unwrap();
-        let conn = open_read_only(&manga_db(dir.path())).unwrap();
+        let conn = open_read_only(&test_db(dir.path())).unwrap();
         let rows = unread_updates(&conn, Kind::Manga, AFTER, 2).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].entry_id, rows[1].entry_id);
@@ -97,11 +95,11 @@ mod tests {
     #[test]
     fn large_fixture_is_capped_at_the_limit() {
         let dir = tempfile::tempdir().unwrap();
-        let path = manga_db(dir.path());
+        let path = test_db(dir.path());
         let w = rusqlite::Connection::open(&path).unwrap();
         for i in 100..700 {
             w.execute(
-                "INSERT INTO chapters(_id,manga_id,url,name,read,bookmark,last_page_read,chapter_number,source_order,date_fetch,date_upload) \
+                "INSERT INTO items(_id,entry_id,url,name,done,bookmark,progress,number,source_order,date_fetch,date_upload) \
                  VALUES(?1,1,'/x','X',0,0,0,1.0,0,9000,?2)",
                 rusqlite::params![i, AFTER + 5],
             )
@@ -115,8 +113,8 @@ mod tests {
     #[test]
     fn anime_uses_unseen_and_episode_ids() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("anime.db");
-        kuro_db::schema_anime::open(&path).unwrap().execute_batch(ANIME_FIXTURE).unwrap();
+        let path = dir.path().join("test.db");
+        kuro_db::schema_unified::open_file(&path).unwrap().execute_batch(ANIME_FIXTURE).unwrap();
         let conn = open_read_only(&path).unwrap();
         let rows = unread_updates(&conn, Kind::Anime, AFTER, 500).unwrap();
         let got: Vec<(i64, i64)> = rows.iter().map(|r| (r.entry_id, r.update_id)).collect();
@@ -135,8 +133,8 @@ mod tests {
     #[test]
     fn the_connection_cannot_write() {
         let dir = tempfile::tempdir().unwrap();
-        let conn = open_read_only(&manga_db(dir.path())).unwrap();
-        assert!(conn.execute("DELETE FROM chapters", []).is_err());
+        let conn = open_read_only(&test_db(dir.path())).unwrap();
+        assert!(conn.execute("DELETE FROM items", []).is_err());
         let timeout: i64 = conn.query_row("PRAGMA busy_timeout", [], |r| r.get(0)).unwrap();
         assert_eq!(timeout, 250);
     }
@@ -146,10 +144,10 @@ mod tests {
     #[test]
     fn a_held_write_transaction_gives_data_or_busy_in_time() {
         let dir = tempfile::tempdir().unwrap();
-        let path = manga_db(dir.path());
+        let path = test_db(dir.path());
         let mut writer = rusqlite::Connection::open(&path).unwrap();
         let tx = writer.transaction().unwrap();
-        tx.execute("UPDATE mangas SET title = 'Changed' WHERE _id = 1", []).unwrap();
+        tx.execute("UPDATE entries SET title = 'Changed' WHERE _id = 1", []).unwrap();
         let started = std::time::Instant::now();
         let result = open_read_only(&path).and_then(|c| unread_updates(&c, Kind::Manga, AFTER, 500));
         assert!(started.elapsed() < Duration::from_millis(300));

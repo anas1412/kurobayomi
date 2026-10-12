@@ -29,7 +29,7 @@ pub fn replace_relations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testdb::anime_db;
+    use crate::testdb::test_db;
     use kuro_data::anime::{Anime, AnimeRepo};
 
     fn anime(repo: &AnimeRepo, url: &str) -> i64 {
@@ -42,7 +42,7 @@ mod tests {
 
     #[tokio::test]
     async fn replace_then_subscribe_yields_the_new_groups() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let animes = AnimeRepo::new(db.clone());
         let repo = AnimeRelationRepo::new(db);
         let (a, b, c) = (anime(&animes, "a"), anime(&animes, "b"), anime(&animes, "c"));
@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn the_last_fetch_is_none_until_the_first_replace() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let animes = AnimeRepo::new(db.clone());
         let repo = AnimeRelationRepo::new(db);
         let a = anime(&animes, "a");

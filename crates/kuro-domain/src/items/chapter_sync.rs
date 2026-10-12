@@ -345,7 +345,7 @@ mod tests {
         assert!(!mark_duplicate_as_read_from_pref(&set(&[])), "off");
         assert!(!mark_duplicate_as_read_from_pref(&set(&["existing"])), "existing is another rule");
     }
-    use crate::testdb::manga_db;
+    use crate::testdb::test_db;
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -360,7 +360,7 @@ mod tests {
     }
 
     fn fixture(renames: Arc<RecordingRenames>) -> (tempfile::TempDir, Arc<Db>, SyncChapters, i64) {
-        let (dir, db) = manga_db();
+        let (dir, db) = test_db();
         let manga_id = db.write(|tx| Ok(mangas::insert(tx, &empty_insert_row())?)).expect("manga");
         let sync = SyncChapters::new(db.clone(), Arc::new(MangaSyncLocks::default()), renames);
         (dir, db, sync, manga_id)
@@ -498,7 +498,7 @@ mod tests {
         let (_dir, db, sync, id) = fixture(Arc::new(RecordingRenames::default()));
         insert_db_chapter(&db, &Chapter { manga_id: id, url: "/gone".into(), name: "Ch 1".into(), chapter_number: 1.0, ..Chapter::create() });
         db.write(|tx| {
-            tx.execute_batch("CREATE TRIGGER boom BEFORE INSERT ON chapters WHEN NEW.url = '/boom' BEGIN SELECT RAISE(ABORT, 'boom'); END;")?;
+            tx.execute_batch("CREATE TRIGGER boom BEFORE INSERT ON items WHEN NEW.url = '/boom' BEGIN SELECT RAISE(ABORT, 'boom'); END;")?;
             Ok(())
         })
         .expect("trigger");

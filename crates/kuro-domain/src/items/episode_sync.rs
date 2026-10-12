@@ -309,12 +309,12 @@ mod tests {
         assert!(!mark_duplicate_as_seen_from_pref(&set(&[])), "off");
         assert!(!mark_duplicate_as_seen_from_pref(&set(&["existing_episode"])), "existing is another rule");
     }
-    use crate::testdb::anime_db;
+    use crate::testdb::test_db;
     use kuro_db::statements_anime::{episodes_by_anime_id, insert_episode};
 
 
     fn fixture() -> (tempfile::TempDir, Arc<Db>, SyncEpisodes, Anime) {
-        let (dir, db) = anime_db();
+        let (dir, db) = test_db();
         let anime_id = kuro_data::anime::AnimeRepo::new(db.clone()).insert(&Anime::create()).expect("insert anime");
         let anime = kuro_data::anime::AnimeRepo::new(db.clone()).by_id(anime_id).expect("read");
         let sync = SyncEpisodes::new(db.clone(), Arc::new(MangaSyncLocks::default()), Arc::new(NoEpisodeRenames));
@@ -429,7 +429,7 @@ mod tests {
         let gone = Episode { anime_id: anime.id, url: "/gone".into(), name: "Ep 1".into(), episode_number: 1.0, ..Episode::create() };
         db.write(|tx| Ok(insert_episode(tx, &episode_row(&gone))?)).expect("insert");
         db.write(|tx| {
-            tx.execute_batch("CREATE TRIGGER boom BEFORE INSERT ON episodes WHEN NEW.url = '/boom' BEGIN SELECT RAISE(ABORT, 'boom'); END;")?;
+            tx.execute_batch("CREATE TRIGGER boom BEFORE INSERT ON items WHEN NEW.url = '/boom' BEGIN SELECT RAISE(ABORT, 'boom'); END;")?;
             Ok(())
         })
         .expect("trigger");

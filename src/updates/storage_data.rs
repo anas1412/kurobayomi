@@ -27,18 +27,14 @@ pub struct EntryInfo {
 
 /// The library entries of `kind`, each with its lowest category id (0 when uncategorized).
 pub fn library_entries(db: &Arc<Db>, kind: Kind) -> DbResult<Vec<EntryInfo>> {
-    let (entries, links, fk) = match kind {
-        Kind::Manga => ("mangas", "mangas_categories", "manga_id"),
-        Kind::Anime => ("animes", "animes_categories", "anime_id"),
-    };
     db.read(|c| {
-        let mut stmt = c.prepare(&format!(
+        let mut stmt = c.prepare(
             "SELECT e._id, e.source, e.title, e.thumbnail_url, \
-             COALESCE((SELECT MIN(l.category_id) FROM {links} l WHERE l.{fk} = e._id), 0) \
-             FROM {entries} e WHERE e.favorite = 1"
-        ))?;
+             COALESCE((SELECT MIN(l.category_id) FROM entry_categories l WHERE l.entry_id = e._id), 0) \
+             FROM entries e WHERE e.favorite = 1 AND e.kind = ?1",
+        )?;
         let rows = stmt
-            .query_map([], |r| {
+            .query_map([kind.as_str()], |r| {
                 Ok(EntryInfo { id: r.get(0)?, source_id: r.get(1)?, title: r.get(2)?, thumbnail_url: r.get(3)?, category_id: r.get(4)? })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -94,10 +90,10 @@ mod tests {
     use super::*;
     use crate::updates::download_host::fake::Fake;
 
-    fn manga_db() -> (tempfile::TempDir, Arc<Db>) {
+    fn test_db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         (dir, Arc::new(Db::new(&path, writer).expect("manga db handle")))
     }
 
@@ -109,7 +105,7 @@ mod tests {
 
     #[test]
     fn storage_entries_are_the_library_with_the_default_category_when_uncategorized() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let kept = manga(&db, "Kept", true);
         manga(&db, "Left", false);
         let entries = library_entries(&db, Kind::Manga).expect("entries");
@@ -134,7 +130,7 @@ mod tests {
 
     #[test]
     fn storage_categories_list_default_and_hide_hidden_ones_from_all() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let (categories, visible) = categories(&db, Kind::Manga, true).expect("categories");
         assert!(categories.iter().any(|(id, _)| *id == 0), "Default is listed");
         assert!(visible.contains(&0));
@@ -142,7 +138,7 @@ mod tests {
 
     #[test]
     fn storage_input_carries_rows_sources_and_the_cache_flag() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let id = manga(&db, "Kept", true);
         let backend = Fake::default();
         let (input, sources) = input(&db, Kind::Manga, &backend, false, true).expect("input");

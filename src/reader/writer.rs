@@ -267,8 +267,8 @@ mod tests {
     #[test]
     fn flush_returns_only_after_the_earlier_writes_are_in_the_database() {
         let dir = tempfile::tempdir().unwrap();
-        let path = kuro_db::schema_manga::db_path(dir.path());
-        let writer = kuro_db::schema_manga::open(&path).unwrap();
+        let path = kuro_db::schema_unified::db_path(dir.path());
+        let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         let db = Arc::new(Db::new(&path, writer).unwrap());
         let manga_id = MangaRepo::new(Arc::clone(&db)).insert(&kuro_data::manga::Manga::create()).unwrap();
         let mut chapter = kuro_data::chapter::Chapter::create();
@@ -299,8 +299,8 @@ mod tests {
     #[test]
     fn the_handle_writes_the_restore_record_to_its_file_and_a_plain_handle_writes_none() {
         let dir = tempfile::tempdir().unwrap();
-        let path = kuro_db::schema_manga::db_path(dir.path());
-        let writer = kuro_db::schema_manga::open(&path).unwrap();
+        let path = kuro_db::schema_unified::db_path(dir.path());
+        let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         let db = Arc::new(Db::new(&path, writer).unwrap());
         let record = SavedSession { manga_id: 1, chapter_id: 2, page_index: 3, saved_at: 4 };
 

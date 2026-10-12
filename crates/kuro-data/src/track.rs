@@ -14,10 +14,10 @@ use serde::{Deserialize, Serialize};
 use crate::{DataResult, ENTRY_DEBOUNCE, none_if_not_found};
 
 /// Tables a manga track listing reads.
-const MANGA_SYNC: &[&str] = &["manga_sync"];
+const MANGA_SYNC: &[&str] = &["tracks"];
 
 /// Tables an anime track listing reads.
-const ANIME_SYNC: &[&str] = &["anime_sync"];
+const ANIME_SYNC: &[&str] = &["tracks"];
 
 /// One tracker binding of a manga (`MangaTrack.kt`). `tracker_id` is the `sync_id` column. `id` is `-1` until a write
 /// assigns the row id and `-1` is never persisted (decision for T-10a-027: the plan asks for `Option<i64>`, but this
@@ -176,20 +176,20 @@ pub struct AnimeTrackPatch {
     pub private: Option<bool>,
 }
 
-const MANGA_UPDATE_COALESCED: &str = "UPDATE manga_sync SET \
-    manga_id = coalesce(:mangaId, manga_id), sync_id = coalesce(:syncId, sync_id), \
+const MANGA_UPDATE_COALESCED: &str = "UPDATE tracks SET \
+    entry_id = coalesce(:mangaId, entry_id), tracker_id = coalesce(:syncId, tracker_id), \
     remote_id = coalesce(:remoteId, remote_id), library_id = coalesce(:libraryId, library_id), \
-    title = coalesce(:title, title), last_chapter_read = coalesce(:lastChapterRead, last_chapter_read), \
-    total_chapters = coalesce(:totalChapters, total_chapters), status = coalesce(:status, status), \
+    title = coalesce(:title, title), last_item = coalesce(:lastChapterRead, last_item), \
+    total_items = coalesce(:totalChapters, total_items), status = coalesce(:status, status), \
     score = coalesce(:score, score), remote_url = coalesce(:remoteUrl, remote_url), \
     start_date = coalesce(:startDate, start_date), finish_date = coalesce(:finishDate, finish_date), \
     private = coalesce(:private, private) WHERE _id = :id";
 
-const ANIME_UPDATE_COALESCED: &str = "UPDATE anime_sync SET \
-    anime_id = coalesce(:animeId, anime_id), sync_id = coalesce(:syncId, sync_id), \
+const ANIME_UPDATE_COALESCED: &str = "UPDATE tracks SET \
+    entry_id = coalesce(:animeId, entry_id), tracker_id = coalesce(:syncId, tracker_id), \
     remote_id = coalesce(:remoteId, remote_id), library_id = coalesce(:libraryId, library_id), \
-    title = coalesce(:title, title), last_episode_seen = coalesce(:lastEpisodeSeen, last_episode_seen), \
-    total_episodes = coalesce(:totalEpisodes, total_episodes), status = coalesce(:status, status), \
+    title = coalesce(:title, title), last_item = coalesce(:lastEpisodeSeen, last_item), \
+    total_items = coalesce(:totalEpisodes, total_items), status = coalesce(:status, status), \
     score = coalesce(:score, score), remote_url = coalesce(:remoteUrl, remote_url), \
     start_date = coalesce(:startDate, start_date), finish_date = coalesce(:finishDate, finish_date), \
     private = coalesce(:private, private) WHERE _id = :id";
@@ -437,7 +437,7 @@ mod tests {
     use super::*;
     use crate::anime::{Anime, AnimeRepo};
     use crate::manga::{Manga, MangaRepo};
-    use crate::tests::{anime_db, manga_db};
+    use crate::tests::test_db;
 
     fn manga_track(manga_id: i64, tracker: i64, title: &str, progress: f64) -> MangaTrack {
         MangaTrack {
@@ -485,7 +485,7 @@ mod tests {
 
     #[test]
     fn insert_then_by_entry_round_trips_every_field() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let id = new_manga_id(&db);
         let repo = MangaTrackRepo::new(db);
         let id_inserted = repo.insert(&manga_track(id, 2, "Read", 12.5)).expect("insert");
@@ -499,7 +499,7 @@ mod tests {
     // Decision (T-06a-030 T1 vs area 09 Q-TRK-2): the row id is kept. Area 06 T1 asks for the Kotlin REPLACE (new `_id`,
     // `by_id(old)` None); area 09 T-09a-012 and `kuro-track` rely on a stable id, so the upsert stands and T1 is not met.
     fn a_second_track_for_the_same_pair_updates_the_row_and_keeps_its_id() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let id = new_manga_id(&db);
         let repo = MangaTrackRepo::new(db);
         let first = repo.insert(&manga_track(id, 2, "Old", 1.0)).expect("insert");
@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn insert_all_with_a_duplicate_pair_keeps_one_row_with_the_last_values() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let id = new_manga_id(&db);
         let repo = MangaTrackRepo::new(db);
         repo.insert_all(&[manga_track(id, 3, "first", 1.0), manga_track(id, 3, "last", 2.0)]).expect("insert all");
@@ -524,7 +524,7 @@ mod tests {
 
     #[test]
     fn delete_of_an_absent_pair_is_ok_and_delete_removes_a_present_one() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let id = new_manga_id(&db);
         let repo = MangaTrackRepo::new(db);
         repo.delete(id, 99).expect("absent pair is not an error (TC-TRK-03)");
@@ -535,7 +535,7 @@ mod tests {
 
     #[tokio::test]
     async fn deleting_a_manga_cascades_its_tracks_and_notifies_watch_all() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let id = new_manga_id(&db);
         let repo = MangaTrackRepo::new(db.clone());
         repo.insert(&manga_track(id, 5, "t", 0.0)).expect("insert");
@@ -551,14 +551,14 @@ mod tests {
                 .expect("query ok");
         };
         wait(1).await;
-        db.write(|tx| Ok(tx.execute("DELETE FROM mangas WHERE _id = ?1", [id])?)).expect("delete manga");
+        db.write(|tx| Ok(tx.execute("DELETE FROM entries WHERE _id = ?1", [id])?)).expect("delete manga");
         wait(0).await;
         assert!(repo.by_entry(id).expect("by entry").is_empty(), "E-TRK-05: foreign_keys is on");
     }
 
     #[test]
     fn anime_track_round_trip_and_upsert_keep_the_row_id() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let anime_id = AnimeRepo::new(db.clone())
             .insert(&Anime { url: "/a".into(), title: "A".into(), source: 1, ..Anime::create() })
             .expect("insert anime");
@@ -586,7 +586,7 @@ mod tests {
 
     #[tokio::test]
     async fn watch_all_emits_after_insert_and_delete() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let id = new_manga_id(&db);
         let repo = MangaTrackRepo::new(db);
         let mut sub = repo.watch_all();
@@ -613,7 +613,7 @@ mod patch_and_model_tests {
     use super::*;
     use crate::anime::{Anime, AnimeRepo};
     use crate::manga::{Manga, MangaRepo};
-    use crate::tests::{anime_db, manga_db};
+    use crate::tests::test_db;
 
     fn new_manga(db: &Arc<Db>) -> i64 {
         MangaRepo::new(db.clone())
@@ -648,7 +648,7 @@ mod patch_and_model_tests {
 
     #[test]
     fn a_patch_with_every_field_none_leaves_the_manga_row_unchanged() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = new_manga(&db);
         let repo = MangaTrackRepo::new(db.clone());
         let id = repo.insert(&full_manga(m)).unwrap();
@@ -660,7 +660,7 @@ mod patch_and_model_tests {
 
     #[test]
     fn a_manga_patch_with_only_last_chapter_read_changes_only_that_column() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = new_manga(&db);
         let repo = MangaTrackRepo::new(db.clone());
         let id = repo.insert(&full_manga(m)).unwrap();
@@ -673,7 +673,7 @@ mod patch_and_model_tests {
 
     #[test]
     fn an_anime_patch_sets_every_column_and_all_none_changes_nothing() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let a = new_anime(&db);
         let repo = AnimeTrackRepo::new(db.clone());
         let base = AnimeTrack {
@@ -736,7 +736,7 @@ mod patch_and_model_tests {
 
     #[test]
     fn insert_all_is_one_transaction_and_a_failing_row_rolls_back_the_rest() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = new_manga(&db);
         let repo = MangaTrackRepo::new(db.clone());
         let mut missing = full_manga(999_999);
@@ -747,7 +747,7 @@ mod patch_and_model_tests {
 
     #[test]
     fn fractional_progress_round_trips_exactly_for_both_kinds() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = new_manga(&db);
         let repo = MangaTrackRepo::new(db.clone());
         let mut t = full_manga(m);
@@ -755,9 +755,8 @@ mod patch_and_model_tests {
         let id = repo.insert(&t).unwrap();
         assert_eq!(repo.by_id(id).unwrap().unwrap().last_chapter_read, 1.0 / 3.0);
 
-        let (_d2, adb) = anime_db();
-        let a = new_anime(&adb);
-        let arepo = AnimeTrackRepo::new(adb);
+        let a = new_anime(&db);
+        let arepo = AnimeTrackRepo::new(db);
         let at = AnimeTrack {
             id: -1,
             anime_id: a,
@@ -780,13 +779,13 @@ mod patch_and_model_tests {
 
     #[test]
     fn deleting_an_anime_cascades_its_tracks() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let a = new_anime(&db);
         let repo = AnimeTrackRepo::new(db.clone());
         let mut t = AnimeTrack::new(4);
         t.anime_id = a;
         repo.insert(&t).unwrap();
-        db.write(|tx| Ok(tx.execute("DELETE FROM animes WHERE _id = ?1", [a])?)).unwrap();
+        db.write(|tx| Ok(tx.execute("DELETE FROM entries WHERE _id = ?1", [a])?)).unwrap();
         assert!(repo.by_entry(a).unwrap().is_empty());
     }
 

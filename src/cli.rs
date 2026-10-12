@@ -80,10 +80,7 @@ fn run_feed(args: &[String], paths: Result<&dyn Paths, String>, now: i64) -> Res
     let paths = paths.map_err(FeedError::Prefs)?;
     let dirs = Dirs {
         config_file: kuro_prefs::toml_backend::config_file(&paths.config_dir()),
-        db: p.db.unwrap_or_else(|| match p.kind {
-            Kind::Manga => kuro_db::schema_manga::db_path(&paths.data_dir()),
-            Kind::Anime => kuro_db::schema_anime::db_path(&paths.data_dir()),
-        }),
+        db: p.db.unwrap_or_else(|| kuro_db::schema_unified::db_path(&paths.data_dir())),
         covers: p.cover_cache.unwrap_or_else(|| paths.widget_covers_dir()),
     };
     let req = Request { kind: p.kind, rows: p.rows, cols: p.cols, now_ms: p.now_ms.unwrap_or(now) };
@@ -169,7 +166,7 @@ mod tests {
     #[test]
     fn missing_database_is_exit_3_and_stays_missing() {
         let paths = kuro_testkit::TempPaths::new().unwrap();
-        let db = kuro_db::schema_manga::db_path(&paths.data_dir());
+        let db = kuro_db::schema_unified::db_path(&paths.data_dir());
         let (code, out, _) = go("--updates-json --kind manga", &paths);
         assert_eq!(code, 3);
         assert!(out.contains("\"code\":\"db_missing\""));

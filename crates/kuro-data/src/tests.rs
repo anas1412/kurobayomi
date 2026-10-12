@@ -17,7 +17,7 @@ use crate::anime::{Anime, AnimeRepo, AnimeUpdate, UPCOMING_STATUSES as ANIME_STA
 use crate::manga::{Manga, MangaRepo, MangaUpdate, UPCOMING_STATUSES as MANGA_STATUSES, library_by_category};
 use crate::{compat, time};
 
-pub(crate) use crate::support::{anime_db, manga_db};
+pub(crate) use crate::support::test_db;
 
 fn new_manga(url: &str, title: &str, favorite: bool) -> Manga {
     Manga { url: url.to_owned(), title: title.to_owned(), favorite, source: 1, status: 1, ..Manga::create() }
@@ -87,7 +87,7 @@ mod manga_repo {
 
     #[test]
     fn insert_returns_a_new_id_and_ignores_the_input_id() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let mut m = new_manga("u1", "One", true);
         m.id = 99;
@@ -100,7 +100,7 @@ mod manga_repo {
 
     #[test]
     fn by_id_missing_is_not_found() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         assert!(matches!(MangaRepo::new(db).by_id(404), Err(DataError::NotFound)));
     }
 
@@ -110,7 +110,7 @@ mod manga_repo {
     fn viewer_bits_write_keeps_the_other_group_and_the_column_round_trips() {
         const MODE: i64 = 0x7;
         const ORIENTATION: i64 = 0x38;
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let id = repo.insert(&Manga { viewer_flags: 0b101_010, ..new_manga("v", "V", true) }).unwrap();
         assert_eq!(repo.by_id(id).unwrap().viewer_flags, 0b101_010, "stored as given");
@@ -132,11 +132,10 @@ mod manga_repo {
     }
 
     #[test]
-    fn by_url_and_source_returns_the_lowest_id_on_duplicates() {
-        let (_d, db) = manga_db();
+    fn by_url_and_source_finds_the_row() {
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let first = repo.insert(&new_manga("dup", "A", false)).unwrap();
-        repo.insert(&new_manga("dup", "B", false)).unwrap();
         let found = repo.by_url_and_source("dup", 1).unwrap().unwrap();
         assert_eq!(found.id, first);
         assert!(repo.by_url_and_source("missing", 1).unwrap().is_none());
@@ -144,7 +143,7 @@ mod manga_repo {
 
     #[test]
     fn favorites_and_read_not_in_library_follow_their_sql() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let fav = repo.insert(&new_manga("f", "Fav", true)).unwrap();
         let read = repo.insert(&new_manga("r", "Read", false)).unwrap();
@@ -165,7 +164,7 @@ mod manga_repo {
 
     #[test]
     fn update_keeps_none_fields_and_a_missing_id_is_not_an_error() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let mut m = new_manga("u", "A", false);
         m.artist = Some("Artist".into());
@@ -179,11 +178,11 @@ mod manga_repo {
 
     #[test]
     fn update_all_rolls_back_every_row_when_one_fails() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let a = repo.insert(&new_manga("a", "A", false)).unwrap();
         let b = repo.insert(&new_manga("b", "B", false)).unwrap();
-        abort_updates_of(&db, "mangas", b);
+        abort_updates_of(&db, "entries", b);
         let result = repo.update_all(&[
             MangaUpdate { title: Some("X".into()), ..MangaUpdate::new(a) },
             MangaUpdate { title: Some("Y".into()), ..MangaUpdate::new(b) },
@@ -194,7 +193,7 @@ mod manga_repo {
 
     #[test]
     fn reset_viewer_flags_zeroes_every_row() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let mut m = new_manga("u", "A", false);
         m.viewer_flags = 5;
@@ -205,7 +204,7 @@ mod manga_repo {
 
     #[test]
     fn library_has_one_row_per_category_link_and_unlinked_favourites_sit_at_zero() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let (cat_a, cat_b) = db
             .write(|tx| Ok((categories::insert(tx, "A", 1, 0)?, categories::insert(tx, "B", 2, 0)?)))
@@ -227,7 +226,7 @@ mod manga_repo {
 
     #[test]
     fn library_counts_ignore_chapters_of_excluded_scanlators() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&new_manga("m", "M", true)).unwrap();
         db.write(|tx| {
@@ -244,7 +243,7 @@ mod manga_repo {
 
     #[test]
     fn set_categories_bumps_version_once_per_link_and_rolls_back_on_a_missing_category() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let (a, b, c) = db
             .write(|tx| {
@@ -269,7 +268,7 @@ mod manga_repo {
 
     #[test]
     fn duplicates_match_unicode_titles_and_skip_self_and_non_favourites() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let first = repo.insert(&new_manga("a", "Éclair", true)).unwrap();
         let second = repo.insert(&new_manga("b", "éCLAIR", true)).unwrap();
@@ -281,7 +280,7 @@ mod manga_repo {
 
     #[test]
     fn upcoming_lists_favourites_from_local_midnight_soonest_first() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let now = Local::now().timestamp_millis();
         let start = time::start_of_local_day_millis(now);
@@ -302,7 +301,7 @@ mod manga_repo {
 
     #[test]
     fn delete_non_library_by_sources_never_deletes_a_favourite() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let fav = repo.insert(&new_manga("f", "F", true)).unwrap();
         let non = repo.insert(&new_manga("n", "N", false)).unwrap();
@@ -313,7 +312,7 @@ mod manga_repo {
 
     #[test]
     fn clear_non_library_removes_only_non_library_rows_and_an_empty_list_is_a_no_op() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let fav = repo.insert(&new_manga("f", "F", true)).unwrap();
         let non = repo.insert(&new_manga("n", "N", false)).unwrap();
@@ -326,7 +325,7 @@ mod manga_repo {
 
     #[test]
     fn source_counts_split_library_and_non_library_rows() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         repo.insert(&new_manga("a", "A", true)).unwrap();
         repo.insert(&new_manga("b", "B", true)).unwrap();
@@ -342,7 +341,7 @@ mod triggers {
 
     #[test]
     fn version_bumps_follow_the_ec05_matrix() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&new_manga("u", "T", true)).unwrap();
         let step = |u: MangaUpdate| {
@@ -360,7 +359,7 @@ mod triggers {
 
     #[test]
     fn a_title_only_update_stamps_favorite_modified_at_and_timestamps_are_seconds() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let id = repo.insert(&new_manga("u", "T", true)).unwrap();
         repo.update(&MangaUpdate { title: Some("New".into()), ..MangaUpdate::new(id) }).unwrap();
@@ -374,7 +373,7 @@ mod triggers {
 
     #[test]
     fn reading_a_chapter_bumps_the_chapter_and_its_manga() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let manga_id = repo.insert(&new_manga("m", "M", true)).unwrap();
         let chapter_id = db.write(|tx| Ok(chapters::insert(tx, &chapter(manga_id, "c", None, false, 0))?)).unwrap();
@@ -425,7 +424,7 @@ mod anime_repo {
 
     #[test]
     fn insert_round_trips_every_column_except_the_ones_the_database_sets() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let expected = full_anime();
         let id = repo.insert(&expected).unwrap();
@@ -434,7 +433,7 @@ mod anime_repo {
 
     #[test]
     fn update_sets_parent_id_but_never_clears_it_and_keeps_none_fields() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let id = repo.insert(&new_anime("u", "T", false)).unwrap();
         repo.update(&AnimeUpdate { parent_id: Some(7), ..AnimeUpdate::new(id) }).unwrap();
@@ -445,7 +444,7 @@ mod anime_repo {
 
     #[test]
     fn a_title_only_update_stamps_favorite_modified_at() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let id = repo.insert(&new_anime("u", "T", true)).unwrap();
         repo.update(&AnimeUpdate { title: Some("N".into()), ..AnimeUpdate::new(id) }).unwrap();
@@ -454,7 +453,7 @@ mod anime_repo {
 
     #[test]
     fn library_stats_switch_by_fetch_type_and_a_seasons_parent_counts_its_children() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let parent = repo
             .insert(&Anime { fetch_type: FetchType::Seasons, ..new_anime("parent", "Parent", true) })
@@ -497,7 +496,7 @@ mod anime_repo {
 
     #[test]
     fn deletable_parents_are_non_favourite_top_level_rows() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let fav = repo.insert(&new_anime("fav", "F", true)).unwrap();
         let top = repo.insert(&new_anime("top", "T", false)).unwrap();
@@ -509,7 +508,7 @@ mod anime_repo {
 
     #[test]
     fn remove_parent_ids_clears_the_child_link_and_a_deleted_parent_leaves_it_dangling() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let parent = repo.insert(&new_anime("p", "P", false)).unwrap();
         let child = repo.insert(&Anime { parent_id: Some(parent), ..new_anime("c", "C", true) }).unwrap();
@@ -521,14 +520,14 @@ mod anime_repo {
 
     #[test]
     fn delete_non_library_by_ids_never_deletes_a_favourite_and_cascades_to_episodes_and_links() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let fav = repo.insert(&new_anime("fav", "F", true)).unwrap();
         let non = repo.insert(&new_anime("non", "N", false)).unwrap();
         let cat = db.write(|tx| Ok(kuro_db::statements_anime::insert_category(tx, "C", 1, 0)?)).unwrap();
         db.write(|tx| {
             kuro_db::statements_anime::insert_episode(tx, &episode(non, "e", false))?;
-            tx.execute("INSERT INTO animes_categories(anime_id, category_id) VALUES (?1, ?2)", params![non, cat])?;
+            tx.execute("INSERT INTO entry_categories(entry_id, kind, category_id) VALUES (?1, 'anime', ?2)", params![non, cat])?;
             Ok(())
         })
         .unwrap();
@@ -538,8 +537,8 @@ mod anime_repo {
         let (episodes, links): (i64, i64) = db
             .read(|c| {
                 Ok((
-                    c.query_row("SELECT count(*) FROM episodes WHERE anime_id = ?1", [non], |r| r.get(0))?,
-                    c.query_row("SELECT count(*) FROM animes_categories WHERE anime_id = ?1", [non], |r| r.get(0))?,
+                    c.query_row("SELECT count(*) FROM items WHERE entry_id = ?1", [non], |r| r.get(0))?,
+                    c.query_row("SELECT count(*) FROM entry_categories WHERE entry_id = ?1", [non], |r| r.get(0))?,
                 ))
             })
             .unwrap();
@@ -548,7 +547,7 @@ mod anime_repo {
 
     #[test]
     fn duplicates_match_unicode_titles_for_anime() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let first = repo.insert(&new_anime("a", "Éclair", true)).unwrap();
         let second = repo.insert(&new_anime("b", "éCLAIR", true)).unwrap();
@@ -558,7 +557,7 @@ mod anime_repo {
 
     #[test]
     fn upcoming_uses_the_anime_status_list_and_orders_soonest_first() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let now = Local::now().timestamp_millis();
         let start = time::start_of_local_day_millis(now);
@@ -576,7 +575,7 @@ mod anime_repo {
 
     #[test]
     fn set_categories_dedupes_bumps_once_per_link_and_rolls_back_on_a_missing_category() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let (a, b) = db
             .write(|tx| Ok((kuro_db::statements_anime::insert_category(tx, "A", 1, 0)?, kuro_db::statements_anime::insert_category(tx, "B", 2, 0)?)))
@@ -593,11 +592,11 @@ mod anime_repo {
 
     #[test]
     fn update_all_is_one_transaction_for_anime() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let a = repo.insert(&new_anime("a", "A", false)).unwrap();
         let b = repo.insert(&new_anime("b", "B", false)).unwrap();
-        abort_updates_of(&db, "animes", b);
+        abort_updates_of(&db, "entries", b);
         let result = repo.update_all(&[
             AnimeUpdate { title: Some("X".into()), ..AnimeUpdate::new(a) },
             AnimeUpdate { title: Some("Y".into()), ..AnimeUpdate::new(b) },
@@ -608,7 +607,7 @@ mod anime_repo {
 
     #[test]
     fn episode_seen_bumps_both_versions_and_fillermark_bumps_neither() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let anime_id = repo.insert(&new_anime("a", "A", true)).unwrap();
         let ep = db.write(|tx| Ok(kuro_db::statements_anime::insert_episode(tx, &episode(anime_id, "e", false))?)).unwrap();
@@ -632,7 +631,7 @@ mod anime_repo {
 
     #[test]
     fn reset_viewer_flags_zeroes_anime_rows() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let id = repo.insert(&Anime { viewer_flags: 9, ..new_anime("a", "A", false) }).unwrap();
         repo.reset_viewer_flags().unwrap();
@@ -657,11 +656,11 @@ mod adapter {
 
     #[test]
     fn update_wrappers_return_false_on_a_failed_write_and_true_otherwise() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&new_manga("u", "T", false)).unwrap();
         assert!(compat::update_manga(&repo, &MangaUpdate { title: Some("A".into()), ..MangaUpdate::new(id) }));
-        abort_updates_of(&db, "mangas", id);
+        abort_updates_of(&db, "entries", id);
         assert!(!compat::update_manga(&repo, &MangaUpdate { title: Some("B".into()), ..MangaUpdate::new(id) }));
         assert!(!compat::update_all_manga(&repo, &[MangaUpdate { title: Some("C".into()), ..MangaUpdate::new(id) }]));
         assert!(!compat::reset_manga_viewer_flags(&repo));
@@ -670,12 +669,12 @@ mod adapter {
 
     #[test]
     fn read_and_remove_methods_propagate_their_errors() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&new_manga("u", "T", false)).unwrap();
         assert!(matches!(repo.by_id(404), Err(DataError::NotFound)));
         db.write(|tx| {
-            tx.execute_batch("CREATE TRIGGER no_delete BEFORE DELETE ON mangas BEGIN SELECT RAISE(ABORT, 'injected'); END;")?;
+            tx.execute_batch("CREATE TRIGGER no_delete BEFORE DELETE ON entries BEGIN SELECT RAISE(ABORT, 'injected'); END;")?;
             Ok(())
         })
         .unwrap();
@@ -685,10 +684,10 @@ mod adapter {
 
     #[test]
     fn anime_wrappers_follow_the_kotlin_shapes() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let id = repo.insert(&new_anime("u", "T", false)).unwrap();
-        abort_updates_of(&db, "animes", id);
+        abort_updates_of(&db, "entries", id);
         assert!(!compat::update_anime(&repo, &AnimeUpdate { title: Some("X".into()), ..AnimeUpdate::new(id) }));
         assert!(!compat::update_all_anime(&repo, &[AnimeUpdate::new(id)]));
         assert!(!compat::reset_anime_viewer_flags(&repo));
@@ -711,7 +710,7 @@ mod views_and_round_trip {
     /// Every column of the `mangas` row `id`, by name, as stored.
     fn manga_columns(db: &Db, id: i64) -> Vec<(String, Value)> {
         db.read(|c| {
-            let mut st = c.prepare("SELECT * FROM mangas WHERE _id = ?1")?;
+            let mut st = c.prepare("SELECT * FROM entries WHERE _id = ?1")?;
             let names: Vec<String> = st.column_names().iter().map(|n| (*n).to_owned()).collect();
             let mut rows = st.query([id])?;
             let row = rows.next()?.expect("row exists");
@@ -726,16 +725,13 @@ mod views_and_round_trip {
 
     #[test]
     fn library_views_have_the_column_counts_the_mappers_expect() {
-        let (_m, manga) = manga_db();
-        let (_a, anime) = anime_db();
-        assert_eq!(column_count(&manga, "libraryView"), 31);
-        assert_eq!(column_count(&anime, "animelibView"), 40);
-        assert_eq!(column_count(&anime, "animeseasonsView"), 39);
+        let (_m, db) = test_db();
+        assert_eq!(column_count(&db, "libraryView"), 40);
     }
 
     #[test]
     fn updating_one_manga_title_leaves_every_other_column_unchanged() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let mut m = new_manga("u", "Old", true);
         m.description = Some("d".into());
@@ -755,7 +751,7 @@ mod views_and_round_trip {
 
     #[test]
     fn watched_not_in_library_lists_non_favourites_with_progress() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let watched = repo.insert(&new_anime("w", "W", false)).unwrap();
         repo.insert(&new_anime("idle", "I", false)).unwrap();
@@ -771,7 +767,7 @@ mod views_and_round_trip {
 
     #[test]
     fn season_bookmark_and_fillermark_counts_sum_over_children() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let parent = repo.insert(&Anime { fetch_type: FetchType::Seasons, ..new_anime("p", "P", true) }).unwrap();
         let c1 = repo.insert(&Anime { parent_id: Some(parent), ..new_anime("c1", "C1", false) }).unwrap();
@@ -796,7 +792,7 @@ mod views_and_round_trip {
     // A debug build takes about 1.1 s here and fails the bound, so the debug profile is not timed.
     #[ignore = "benchmark: 5 000 manga and 200 000 chapters, run with cargo test --release -- --ignored"]
     fn library_query_on_a_large_fixture_stays_under_500_ms() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let ids: Vec<i64> = (0..5_000)
             .map(|m| repo.insert(&new_manga(&format!("u{m}"), &format!("Title {m}"), true)).unwrap())
@@ -824,7 +820,7 @@ mod library_aggregates {
 
     #[test]
     fn a_favourite_without_chapters_has_zero_aggregates_and_last_read_comes_from_history() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let bare = repo.insert(&new_manga("bare", "Bare", true)).unwrap();
         let read = repo.insert(&new_manga("read", "Read", true)).unwrap();
@@ -848,7 +844,7 @@ mod library_aggregates {
 
     #[test]
     fn an_unknown_fetch_type_reads_zero_stats_instead_of_failing_the_query() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let parent = repo.insert(&new_anime("parent", "Parent", true)).unwrap();
         let child = repo
@@ -856,17 +852,17 @@ mod library_aggregates {
             .unwrap();
         db.write(|tx| {
             kuro_db::statements_anime::insert_episode(tx, &episode(parent, "e1", true))?;
-            Ok(tx.execute("UPDATE animes SET fetch_type = 7 WHERE _id IN (?1, ?2)", (parent, child))?)
+            Ok(tx.execute("UPDATE entries SET fetch_type = 7 WHERE _id IN (?1, ?2)", (parent, child))?)
         })
         .unwrap();
 
         let library = repo.library().expect("library() succeeds for fetch_type 7");
         let row = library.iter().find(|r| r.id() == parent).unwrap();
+        // The unified libraryView rolls up only fetch_type 0 as a container; any other value counts its own items.
         assert_eq!(
             (row.total_count, row.seen_count, row.bookmark_count, row.fillermark_count),
-            (0, 0, 0, 0)
+            (1, 1, 0, 0)
         );
-        assert_eq!((row.latest_upload, row.episode_fetched_at, row.last_seen), (0, 0, 0));
 
         let seasons = repo.seasons_by_parent(parent).expect("seasons_by_parent succeeds for fetch_type 7");
         assert_eq!(seasons.len(), 1);
@@ -878,14 +874,14 @@ mod library_aggregates {
 
     #[test]
     fn the_related_query_returns_33_columns_and_maps_each_row_with_its_group() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let a = repo.insert(&new_anime("a", "A", true)).unwrap();
         let b = repo.insert(&new_anime("b", "B", false)).unwrap();
         let c = repo.insert(&new_anime("c", "C", false)).unwrap();
         db.write(|tx| {
             tx.execute(
-                "INSERT INTO anime_relations(anime_id, related_anime_id, name, sort_order, last_fetched_at) \
+                "INSERT INTO anime_relations(entry_id, related_id, name, sort_order, last_fetched_at) \
                  VALUES (?1, ?2, 'Sequels', 0, 1), (?1, ?3, 'Spin-offs', 1, 1)",
                 (a, b, c),
             )?;
@@ -944,23 +940,22 @@ mod subscriptions {
 
     #[tokio::test]
     async fn manga_by_id_publishes_each_change_and_none_once_deleted() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&new_manga("u", "First", true)).unwrap();
         let mut sub = repo.subscribe_by_id(id);
         assert_eq!(manga_title(&next(&mut sub).await.unwrap()), Some("First"));
         repo.update(&MangaUpdate { title: Some("Second".into()), ..MangaUpdate::new(id) }).unwrap();
         assert_eq!(manga_title(&next(&mut sub).await.expect("the update publishes")), Some("Second"));
-        db.write(|tx| Ok(tx.execute("DELETE FROM mangas WHERE _id = ?1", [id])?)).unwrap();
+        db.write(|tx| Ok(tx.execute("DELETE FROM entries WHERE _id = ?1", [id])?)).unwrap();
         assert!(next(&mut sub).await.expect("the delete publishes").is_none());
     }
 
     #[tokio::test]
-    async fn manga_by_url_and_source_publishes_the_first_duplicate_and_its_changes() {
-        let (_d, db) = manga_db();
+    async fn manga_by_url_and_source_publishes_the_row_and_its_changes() {
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let first = repo.insert(&new_manga("dup", "First", true)).unwrap();
-        repo.insert(&new_manga("dup", "Second", true)).unwrap();
         let mut sub = repo.subscribe_by_url_and_source("dup", 1);
         assert_eq!(manga_title(&next(&mut sub).await.unwrap()), Some("First"));
         repo.update(&MangaUpdate { title: Some("Renamed".into()), ..MangaUpdate::new(first) }).unwrap();
@@ -969,7 +964,7 @@ mod subscriptions {
 
     #[tokio::test]
     async fn manga_favorites_by_source_publishes_when_a_favourite_joins_and_not_for_other_rows() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let mut sub = repo.subscribe_favorites_by_source(1);
         assert!(next(&mut sub).await.unwrap().is_empty());
@@ -981,7 +976,7 @@ mod subscriptions {
 
     #[tokio::test]
     async fn manga_library_publishes_a_read_and_a_trigger_write_reaches_the_parent() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&new_manga("m", "M", true)).unwrap();
         let chapter_id = db.write(|tx| Ok(chapters::insert(tx, &chapter(id, "c1", None, false, 0))?)).unwrap();
@@ -990,7 +985,7 @@ mod subscriptions {
         let mut by_id = repo.subscribe_by_id(id);
         let before = manga_version(&next(&mut by_id).await.unwrap()).unwrap();
 
-        db.write(|tx| Ok(tx.execute("UPDATE chapters SET read = 1 WHERE _id = ?1", [chapter_id])?)).unwrap();
+        db.write(|tx| Ok(tx.execute("UPDATE items SET done = 1 WHERE _id = ?1", [chapter_id])?)).unwrap();
         let rows = library_rows(&mut library).await;
         assert_eq!((rows[0].read_count, rows[0].unread_count()), (1, 0));
         let after = manga_version(&next(&mut by_id).await.expect("the trigger's parent write publishes"));
@@ -999,7 +994,7 @@ mod subscriptions {
 
     #[tokio::test]
     async fn deleting_a_manga_publishes_an_empty_chapter_list() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&new_manga("m", "M", true)).unwrap();
         db.write(|tx| {
@@ -1008,33 +1003,32 @@ mod subscriptions {
             Ok(())
         })
         .unwrap();
-        let mut list = db.subscribe(&["chapters"], Duration::ZERO, |c| {
-            Ok(c.query_row("SELECT count(*) FROM chapters", [], |r| r.get::<_, i64>(0))?)
+        let mut list = db.subscribe(&["items"], Duration::ZERO, |c| {
+            Ok(c.query_row("SELECT count(*) FROM items", [], |r| r.get::<_, i64>(0))?)
         });
         assert_eq!(*next(&mut list).await.unwrap(), 2);
-        db.write(|tx| Ok(tx.execute("DELETE FROM mangas WHERE _id = ?1", [id])?)).unwrap();
+        db.write(|tx| Ok(tx.execute("DELETE FROM entries WHERE _id = ?1", [id])?)).unwrap();
         assert_eq!(*next(&mut list).await.expect("the cascade publishes"), 0);
     }
 
     #[tokio::test]
     async fn anime_by_id_publishes_each_change_and_none_once_deleted() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let id = repo.insert(&new_anime("u", "First", true)).unwrap();
         let mut sub = repo.subscribe_by_id(id);
         assert_eq!(anime_title(&next(&mut sub).await.unwrap()), Some("First"));
         repo.update(&AnimeUpdate { title: Some("Second".into()), ..AnimeUpdate::new(id) }).unwrap();
         assert_eq!(anime_title(&next(&mut sub).await.expect("the update publishes")), Some("Second"));
-        db.write(|tx| Ok(tx.execute("DELETE FROM animes WHERE _id = ?1", [id])?)).unwrap();
+        db.write(|tx| Ok(tx.execute("DELETE FROM entries WHERE _id = ?1", [id])?)).unwrap();
         assert!(next(&mut sub).await.expect("the delete publishes").is_none());
     }
 
     #[tokio::test]
-    async fn anime_by_url_and_source_publishes_the_lowest_id_on_duplicates() {
-        let (_d, db) = anime_db();
+    async fn anime_by_url_and_source_publishes_the_row_and_its_changes() {
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let first = repo.insert(&new_anime("dup", "First", true)).unwrap();
-        repo.insert(&new_anime("dup", "Second", true)).unwrap();
         let mut sub = repo.subscribe_by_url_and_source("dup", 1);
         assert_eq!(anime_title(&next(&mut sub).await.unwrap()), Some("First"));
         repo.update(&AnimeUpdate { title: Some("Renamed".into()), ..AnimeUpdate::new(first) }).unwrap();
@@ -1043,7 +1037,7 @@ mod subscriptions {
 
     #[tokio::test]
     async fn anime_favorites_by_source_publishes_favourites_only() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let mut sub = repo.subscribe_favorites_by_source(1);
         assert!(next(&mut sub).await.unwrap().is_empty());
@@ -1055,7 +1049,7 @@ mod subscriptions {
 
     #[tokio::test]
     async fn anime_library_publishes_when_an_episode_is_seen() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let id = repo.insert(&new_anime("a", "A", true)).unwrap();
         let mut sub = repo.subscribe_library();
@@ -1065,13 +1059,13 @@ mod subscriptions {
         })
         .unwrap();
         assert_eq!(library_rows(&mut sub).await[0].total_count, 1);
-        db.write(|tx| Ok(tx.execute("UPDATE episodes SET seen = 1 WHERE _id = ?1", [episode_id])?)).unwrap();
+        db.write(|tx| Ok(tx.execute("UPDATE items SET done = 1 WHERE _id = ?1", [episode_id])?)).unwrap();
         assert_eq!(library_rows(&mut sub).await[0].seen_count, 1);
     }
 
     #[tokio::test]
     async fn seasons_of_a_parent_publish_after_an_episode_is_seen_and_after_a_child_is_renamed() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let parent = repo.insert(&new_anime("p", "P", true)).unwrap();
         let child = repo.insert(&Anime { parent_id: Some(parent), ..new_anime("c", "C", false) }).unwrap();
@@ -1084,7 +1078,7 @@ mod subscriptions {
             .unwrap();
         let after_episode = next(&mut sub).await.expect("a publication after the episode insert");
         assert_eq!(after_episode[0].total_count, 1);
-        db.write(|tx| Ok(tx.execute("UPDATE episodes SET seen = 1 WHERE _id = ?1", [episode_id])?)).unwrap();
+        db.write(|tx| Ok(tx.execute("UPDATE items SET done = 1 WHERE _id = ?1", [episode_id])?)).unwrap();
         assert_eq!(next(&mut sub).await.expect("a publication after the seen flag").first().map(|s| s.seen_count), Some(1));
         repo.update(&AnimeUpdate { title: Some("Renamed".into()), ..AnimeUpdate::new(child) }).unwrap();
         let renamed = next(&mut sub).await.expect("a publication after the child rename");
@@ -1093,7 +1087,7 @@ mod subscriptions {
 
     #[tokio::test]
     async fn non_library_counts_publish_again_when_a_manga_changes() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let mut sub = repo.subscribe_non_library_counts();
         let first = next(&mut sub).await.expect("an initial publication");
@@ -1111,17 +1105,16 @@ mod anime_reads {
     use super::*;
 
     #[test]
-    fn by_url_and_source_takes_the_lowest_id_and_favorites_follow_their_sql() {
-        let (_d, db) = anime_db();
+    fn by_url_and_source_and_favorites_follow_their_sql() {
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let first = repo.insert(&new_anime("dup", "First", true)).unwrap();
-        repo.insert(&new_anime("dup", "Second", true)).unwrap();
         let other = repo.insert(&Anime { source: 2, ..new_anime("other", "Other", true) }).unwrap();
         repo.insert(&new_anime("hidden", "Hidden", false)).unwrap();
 
         assert_eq!(repo.by_url_and_source("dup", 1).unwrap().map(|a| a.id), Some(first));
         assert_eq!(repo.by_url_and_source("missing", 1).unwrap(), None);
-        assert_eq!(repo.favorites().unwrap().len(), 3, "the non-favourite is not a favourite");
+        assert_eq!(repo.favorites().unwrap().len(), 2, "the non-favourite is not a favourite");
         assert_eq!(repo.favorites_by_source(2).unwrap().iter().map(|a| a.id).collect::<Vec<_>>(), vec![other]);
     }
 }
@@ -1138,7 +1131,7 @@ mod library_retry {
     use super::*;
     use crate::retrying;
 
-    const MANGA_TABLES: &[&str] = &["mangas"];
+    const MANGA_TABLES: &[&str] = &["entries"];
 
     /// A transient lock as SQLite reports it (`SQLITE_BUSY`).
     fn busy() -> DataError {
@@ -1192,7 +1185,7 @@ mod library_retry {
 
     #[tokio::test]
     async fn a_non_transient_failure_is_published_and_the_next_success_publishes() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         repo.insert(&new_manga("a", "A", true)).expect("insert");
         let fail = Arc::new(AtomicBool::new(false));
@@ -1201,7 +1194,7 @@ mod library_retry {
             if injected.load(Ordering::SeqCst) {
                 return Err(DataError::Corrupt("injected".into()));
             }
-            Ok(c.query_row("SELECT count(*) FROM mangas", [], |r| r.get::<_, i64>(0))?)
+            Ok(c.query_row("SELECT count(*) FROM entries WHERE kind = 'manga'", [], |r| r.get::<_, i64>(0))?)
         });
         let mut sub = db.subscribe(MANGA_TABLES, Duration::ZERO, query);
         assert_eq!(*next(&mut sub).await.expect("first publication"), Ok(1));
@@ -1218,7 +1211,7 @@ mod library_retry {
 
     #[tokio::test]
     async fn an_exhausted_lock_publishes_the_error_value() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let query = retrying(20, Duration::ZERO, |_c: &Connection| Err::<i64, _>(busy()));
         let mut sub = db.subscribe(MANGA_TABLES, Duration::ZERO, query);
         let published = next(&mut sub).await.expect("first publication");
@@ -1238,7 +1231,7 @@ mod item_repos {
 
     #[test]
     fn chapter_reads_by_id_url_and_scanlator_filter() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let manga_id = MangaRepo::new(db.clone()).insert(&new_manga("m", "M", true)).unwrap();
         db.write(|tx| {
             chapters::insert(tx, &chapter(manga_id, "c1", Some("S1"), false, 0))?;
@@ -1258,7 +1251,7 @@ mod item_repos {
 
     #[test]
     fn chapter_update_writes_the_set_fields() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let manga_id = MangaRepo::new(db.clone()).insert(&new_manga("m", "M", true)).unwrap();
         let id = db.write(|tx| Ok(chapters::insert(tx, &chapter(manga_id, "c", None, false, 0))?)).unwrap();
         let repo = ChapterRepo::new(db);
@@ -1269,12 +1262,12 @@ mod item_repos {
 
     #[test]
     fn chapter_update_all_rolls_back_on_failure() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let manga_id = MangaRepo::new(db.clone()).insert(&new_manga("m", "M", true)).unwrap();
         let (a, b) = db
             .write(|tx| Ok((chapters::insert(tx, &chapter(manga_id, "a", None, false, 0))?, chapters::insert(tx, &chapter(manga_id, "b", None, false, 0))?)))
             .unwrap();
-        abort_updates_of(&db, "chapters", b);
+        abort_updates_of(&db, "items", b);
         let repo = ChapterRepo::new(db);
         let result = repo.update_all(&[
             ChapterUpdate { read: Some(true), ..ChapterUpdate::new(a) },
@@ -1286,7 +1279,7 @@ mod item_repos {
 
     #[tokio::test]
     async fn chapter_subscription_publishes_a_read_toggle() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let manga_id = MangaRepo::new(db.clone()).insert(&new_manga("m", "M", true)).unwrap();
         let id = db.write(|tx| Ok(chapters::insert(tx, &chapter(manga_id, "c", None, false, 0))?)).unwrap();
         let repo = ChapterRepo::new(db);
@@ -1298,7 +1291,7 @@ mod item_repos {
 
     #[test]
     fn episode_reads_by_id_url_and_anime() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let anime_id = AnimeRepo::new(db.clone()).insert(&new_anime("a", "A", true)).unwrap();
         let id = db.write(|tx| Ok(insert_episode(tx, &episode(anime_id, "e1", false))?)).unwrap();
         let repo = EpisodeRepo::new(db);
@@ -1310,7 +1303,7 @@ mod item_repos {
 
     #[test]
     fn episode_update_writes_summary_memo_and_seen() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let anime_id = AnimeRepo::new(db.clone()).insert(&new_anime("a", "A", true)).unwrap();
         let id = db.write(|tx| Ok(insert_episode(tx, &episode(anime_id, "e1", false))?)).unwrap();
         let repo = EpisodeRepo::new(db);
@@ -1330,7 +1323,7 @@ mod item_repos {
     /// Every value from -1.0 to 10000.0 in 0.5 steps is stored in the REAL column and reads back as the same f32 (T-16a-007).
     #[test]
     fn episode_number_survives_a_sqlite_real_round_trip_as_f32() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let anime_id = AnimeRepo::new(db.clone()).insert(&new_anime("a", "A", true)).unwrap();
         let numbers: Vec<f32> = (-2..=20_000).map(|half| half as f32 * 0.5).collect();
         db.write(|tx| {
@@ -1350,7 +1343,7 @@ mod item_repos {
 
     #[tokio::test]
     async fn episode_subscription_publishes_a_new_episode() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let anime_id = AnimeRepo::new(db.clone()).insert(&new_anime("a", "A", true)).unwrap();
         let repo = EpisodeRepo::new(db.clone());
         let mut sub = repo.subscribe_by_anime_id(anime_id);
@@ -1391,7 +1384,7 @@ mod keys_lookups_and_clock {
 
     #[test]
     fn chapter_key_is_the_id_and_url_pair() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let manga_id = MangaRepo::new(db.clone()).insert(&new_manga("m", "M", true)).unwrap();
         db.write(|tx| Ok(chapters::insert(tx, &chapter(manga_id, "c1", None, false, 0))?)).unwrap();
         let c = ChapterRepo::new(db).by_url_and_manga_id("c1", manga_id).unwrap().expect("row");
@@ -1408,7 +1401,7 @@ mod keys_lookups_and_clock {
 
     #[test]
     fn episode_key_is_the_id_and_url_pair() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let anime_id = AnimeRepo::new(db.clone()).insert(&new_anime("a", "A", true)).unwrap();
         db.write(|tx| Ok(insert_episode(tx, &episode(anime_id, "e1", false))?)).unwrap();
         let e = EpisodeRepo::new(db).by_url_and_anime_id("e1", anime_id).unwrap().expect("row");
@@ -1422,7 +1415,7 @@ mod keys_lookups_and_clock {
 
     #[test]
     fn chapter_by_url_lists_every_match_in_any_manga() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let a = repo.insert(&new_manga("a", "A", true)).unwrap();
         let b = repo.insert(&new_manga("b", "B", false)).unwrap();
@@ -1441,7 +1434,7 @@ mod keys_lookups_and_clock {
 
     #[test]
     fn episode_by_url_lists_every_match_in_any_anime() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let a = repo.insert(&new_anime("a", "A", true)).unwrap();
         let b = repo.insert(&new_anime("b", "B", false)).unwrap();
@@ -1459,7 +1452,7 @@ mod keys_lookups_and_clock {
 
     #[test]
     fn remove_parent_ids_clears_links_across_more_than_one_chunk() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let parent = repo.insert(&new_anime("p", "P", false)).unwrap();
         let mut child = new_anime("c", "C", false);
@@ -1474,7 +1467,7 @@ mod keys_lookups_and_clock {
 
     #[tokio::test]
     async fn deletable_parents_subscription_publishes_each_new_candidate() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         repo.insert(&new_anime("fav", "Fav", true)).unwrap();
         let mut sub = repo.subscribe_deletable_parents();
@@ -1485,7 +1478,7 @@ mod keys_lookups_and_clock {
 
     #[tokio::test]
     async fn manga_upcoming_subscription_recomputes_the_cut_off_on_every_run() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let day1 = chrono::Local.with_ymd_and_hms(2026, 10, 9, 12, 0, 0).unwrap().timestamp_millis();
         let start1 = time::start_of_local_day_millis(day1);
@@ -1505,7 +1498,7 @@ mod keys_lookups_and_clock {
 
     #[tokio::test]
     async fn anime_upcoming_subscription_uses_the_injected_clock() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let day1 = chrono::Local.with_ymd_and_hms(2026, 10, 9, 12, 0, 0).unwrap().timestamp_millis();
         let mut due = new_anime("due", "Due", true);

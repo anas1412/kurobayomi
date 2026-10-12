@@ -1,6 +1,9 @@
 //! Manga SQL statements, one module per `.sq` file, plus the storage row and patch structs.
 //!
-//! SQL text is the `.sq` text. Deliberate changes: `IN :list` becomes
+//! The manga kind lives in the unified tables (`entries`, `items`, `tracks`, ...) with `kind = 'manga'` pinned in
+//! every statement. SELECT lists alias the unified columns back to the old manga names, so every row struct and
+//! `from_row` is unchanged, and the manga `chapter_flags` layout is translated to and from the unified
+//! `item_flags` in SQL (design section 3.4). The text is otherwise the `.sq` text. Deliberate changes: `IN :list` becomes
 //! `IN (SELECT value FROM json_each(:list))` (see `codec::ids_json`); category lists add `_id` as a
 //! tie-break after `sort`; history search escapes `%`, `_` and `\` (`views::history`); and the
 //! renumbering statements have no `.sq` source (`categories::renumber_all`). Functions take
@@ -10,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::types::ToSql;
-use rusqlite::{Connection, ErrorCode, OptionalExtension, Result, Row, Transaction};
+use rusqlite::{Connection, OptionalExtension, Result, Row, Transaction};
 
 use crate::codec::{ids_json, strings_json};
 use crate::error::{DbError, DbResult};
@@ -46,37 +49,106 @@ fn exec(c: &Connection, sql: &str, p: Params<'_>) -> Result<usize> {
 
 pub use crate::models::*;
 
+/// The unified `entries.item_flags` read as the manga `chapter_flags` layout, `un(x)` of design 3.4, inside a column
+/// list of the old `mangas` columns. `$p` is a table alias with its dot, or empty.
+macro_rules! manga_cols {
+    ($p:literal) => {
+        concat!(
+            $p, "_id, ", $p, "source, ", $p, "url, ", $p, "artist, ", $p, "author, ", $p, "description, ", $p, "genre, ",
+            $p, "title, ", $p, "status, ", $p, "thumbnail_url, ", $p, "favorite, ", $p, "last_update, ", $p, "next_update, ",
+            $p, "initialized, ", $p, "viewer, ((", $p, "item_flags & ~1536) | ((", $p, "item_flags & 1536) >> 1)) AS chapter_flags, ",
+            $p, "cover_last_modified, ", $p, "date_added, ", $p, "update_strategy, ", $p, "calculate_interval, ",
+            $p, "last_modified_at, ", $p, "favorite_modified_at, ", $p, "version, 0 AS is_syncing"
+        )
+    };
+}
+
+/// The old `chapters` columns of an `items` row (`$p` is an alias with its dot, or empty).
+macro_rules! chapter_cols {
+    ($p:literal) => {
+        concat!(
+            $p, "_id, ", $p, "entry_id AS manga_id, ", $p, "url, ", $p, "name, ", $p, "scanlator, ", $p, "done AS read, ",
+            $p, "bookmark, ", $p, "progress AS last_page_read, ", $p, "number AS chapter_number, ", $p, "source_order, ",
+            $p, "date_fetch, ", $p, "date_upload, ", $p, "last_modified_at, ", $p, "version, 0 AS is_syncing"
+        )
+    };
+}
+
+/// The old `manga_sync` columns of a `tracks` row (`$p` is an alias with its dot, or empty).
+macro_rules! track_cols {
+    ($p:literal) => {
+        concat!(
+            $p, "_id, ", $p, "entry_id AS manga_id, ", $p, "tracker_id AS sync_id, ", $p, "remote_id, ", $p, "library_id, ",
+            $p, "title, ", $p, "last_item AS last_chapter_read, ", $p, "total_items AS total_chapters, ", $p, "status, ",
+            $p, "score, ", $p, "remote_url, ", $p, "start_date, ", $p, "finish_date, ", $p, "private"
+        )
+    };
+}
+
+/// `tr(:chapterFlags)` of design 3.4: a manga `chapter_flags` value as the unified `item_flags`.
+macro_rules! tr {
+    ($x:literal) => {
+        concat!("((", $x, " & ~768) | ((", $x, " & 768) << 1))")
+    };
+}
+
+/// The ids of the manga entries, as a subquery.
+macro_rules! manga_ids {
+    () => {
+        "(SELECT _id FROM entries WHERE kind = 'manga')"
+    };
+}
+
+/// The ids of the manga items, as a subquery.
+macro_rules! manga_item_ids {
+    () => {
+        "(SELECT i._id FROM items i JOIN entries e ON e._id = i.entry_id WHERE e.kind = 'manga')"
+    };
+}
+
 /// Statements of `mangas.sq`.
 pub mod mangas {
     use super::*;
 
-    pub const GET_BY_ID: &str = "SELECT * FROM mangas WHERE _id = :id;";
+    pub const GET_BY_ID: &str = concat!("SELECT ", manga_cols!(""), " FROM entries WHERE _id = :id AND kind = 'manga';");
     pub const GET_BY_URL_AND_SOURCE: &str =
-        "SELECT * FROM mangas WHERE url = :url AND source = :source LIMIT 1;";
-    pub const GET_FAVORITES: &str = "SELECT * FROM mangas WHERE favorite = 1;";
-    pub const GET_READ_NOT_IN_LIBRARY: &str = "SELECT * FROM mangas WHERE favorite = 0 AND _id IN ( SELECT DISTINCT chapters.manga_id FROM chapters WHERE read = 1 OR last_page_read != 0 );";
-    pub const GET_ALL: &str = "SELECT * FROM mangas;";
-    pub const GET_ALL_SOURCE_AND_URL: &str = "SELECT source, url FROM mangas;";
+        concat!("SELECT ", manga_cols!(""), " FROM entries WHERE url = :url AND source = :source AND kind = 'manga' LIMIT 1;");
+    pub const GET_FAVORITES: &str = concat!("SELECT ", manga_cols!(""), " FROM entries WHERE favorite = 1 AND kind = 'manga';");
+    pub const GET_READ_NOT_IN_LIBRARY: &str = concat!(
+        "SELECT ", manga_cols!(""), " FROM entries WHERE kind = 'manga' AND favorite = 0 AND _id IN ( SELECT DISTINCT entry_id FROM items WHERE done = 1 OR progress != 0 );"
+    );
+    pub const GET_ALL: &str = concat!("SELECT ", manga_cols!(""), " FROM entries WHERE kind = 'manga';");
+    pub const GET_ALL_SOURCE_AND_URL: &str = "SELECT source, url FROM entries WHERE kind = 'manga';";
     pub const GET_WITH_FAVORITE_TIMESTAMP: &str =
-        "SELECT * FROM mangas WHERE favorite_modified_at IS NOT NULL;";
+        concat!("SELECT ", manga_cols!(""), " FROM entries WHERE kind = 'manga' AND favorite_modified_at IS NOT NULL;");
     pub const GET_SOURCE_ID_WITH_FAVORITE_COUNT: &str =
-        "SELECT source, count(*) FROM mangas WHERE favorite = 1 GROUP BY source ORDER BY source;";
+        "SELECT source, count(*) FROM entries WHERE kind = 'manga' AND favorite = 1 GROUP BY source ORDER BY source;";
     pub const GET_FAVORITE_BY_SOURCE_ID: &str =
-        "SELECT * FROM mangas WHERE favorite = 1 AND source = :sourceId;";
+        concat!("SELECT ", manga_cols!(""), " FROM entries WHERE kind = 'manga' AND favorite = 1 AND source = :sourceId;");
     pub const GET_DUPLICATE_LIBRARY_MANGA: &str =
-        "SELECT * FROM mangas WHERE favorite = 1 AND kuro_lower(title) = :title AND _id != :id;";
-    pub const GET_UPCOMING_MANGA: &str = "SELECT * FROM mangas WHERE next_update >= :startOfDay AND favorite = 1 AND status IN (SELECT value FROM json_each(:statuses)) ORDER BY next_update ASC;";
-    pub const RESET_VIEWER_FLAGS: &str = "UPDATE mangas SET viewer = 0;";
+        concat!("SELECT ", manga_cols!(""), " FROM entries WHERE kind = 'manga' AND favorite = 1 AND kuro_lower(title) = :title AND _id != :id;");
+    pub const GET_UPCOMING_MANGA: &str = concat!(
+        "SELECT ", manga_cols!(""), " FROM entries WHERE kind = 'manga' AND next_update >= :startOfDay AND favorite = 1 AND status IN (SELECT value FROM json_each(:statuses)) ORDER BY next_update ASC;"
+    );
+    pub const RESET_VIEWER_FLAGS: &str = "UPDATE entries SET viewer = 0 WHERE kind = 'manga';";
     /// Replaces only the bits of `mask` in `viewer`, in one statement, so two setters of different bit groups cannot
     /// lose each other's write (EC-23). Named parameters: `:mangaId`, `:value`, `:mask`.
     pub const SET_VIEWER_BITS: &str =
-        "UPDATE mangas SET viewer = (viewer & ~:mask) | (:value & :mask) WHERE _id = :mangaId;";
-    pub const RESET_IS_SYNCING: &str = "UPDATE mangas SET is_syncing = 0 WHERE is_syncing = 1;";
+        "UPDATE entries SET viewer = (viewer & ~:mask) | (:value & :mask) WHERE _id = :mangaId AND kind = 'manga';";
     pub const GET_SOURCE_IDS_WITH_NON_LIBRARY_MANGA: &str =
-        "SELECT source, COUNT(*) AS manga_count FROM mangas WHERE favorite = 0 GROUP BY source;";
-    pub const DELETE_NOT_IN_LIBRARY_BY_SOURCE_IDS: &str = "DELETE FROM mangas WHERE favorite = 0 AND source IN (SELECT value FROM json_each(:sourceIds));";
-    pub const INSERT: &str = "INSERT INTO mangas(source, url, artist, author, description, genre, title, status, thumbnail_url, favorite, last_update, next_update, initialized, viewer, chapter_flags, cover_last_modified, date_added, update_strategy, calculate_interval, last_modified_at, version) VALUES (:source, :url, :artist, :author, :description, :genre, :title, :status, :thumbnailUrl, :favorite, :lastUpdate, :nextUpdate, :initialized, :viewerFlags, :chapterFlags, :coverLastModified, :dateAdded, :updateStrategy, :calculateInterval, 0, :version);";
-    pub const UPDATE: &str = "UPDATE mangas SET source = coalesce(:source, source), url = coalesce(:url, url), artist = coalesce(:artist, artist), author = coalesce(:author, author), description = coalesce(:description, description), genre = coalesce(:genre, genre), title = coalesce(:title, title), status = coalesce(:status, status), thumbnail_url = coalesce(:thumbnailUrl, thumbnail_url), favorite = coalesce(:favorite, favorite), last_update = coalesce(:lastUpdate, last_update), next_update = coalesce(:nextUpdate, next_update), initialized = coalesce(:initialized, initialized), viewer = coalesce(:viewer, viewer), chapter_flags = coalesce(:chapterFlags, chapter_flags), cover_last_modified = coalesce(:coverLastModified, cover_last_modified), date_added = coalesce(:dateAdded, date_added), update_strategy = coalesce(:updateStrategy, update_strategy), calculate_interval = coalesce(:calculateInterval, calculate_interval), version = coalesce(:version, version), is_syncing = coalesce(:isSyncing, is_syncing) WHERE _id = :mangaId;";
+        "SELECT source, COUNT(*) AS manga_count FROM entries WHERE kind = 'manga' AND favorite = 0 GROUP BY source;";
+    pub const DELETE_NOT_IN_LIBRARY_BY_SOURCE_IDS: &str =
+        "DELETE FROM entries WHERE kind = 'manga' AND favorite = 0 AND source IN (SELECT value FROM json_each(:sourceIds));";
+    pub const INSERT: &str = concat!(
+        "INSERT INTO entries(kind, source, url, artist, author, description, genre, title, status, thumbnail_url, favorite, last_update, next_update, initialized, viewer, item_flags, cover_last_modified, date_added, update_strategy, calculate_interval, last_modified_at, version) VALUES ('manga', :source, :url, :artist, :author, :description, :genre, :title, :status, :thumbnailUrl, :favorite, :lastUpdate, :nextUpdate, :initialized, :viewerFlags, ",
+        tr!(":chapterFlags"),
+        ", :coverLastModified, :dateAdded, :updateStrategy, :calculateInterval, 0, :version);"
+    );
+    pub const UPDATE: &str = concat!(
+        "UPDATE entries SET source = coalesce(:source, source), url = coalesce(:url, url), artist = coalesce(:artist, artist), author = coalesce(:author, author), description = coalesce(:description, description), genre = coalesce(:genre, genre), title = coalesce(:title, title), status = coalesce(:status, status), thumbnail_url = coalesce(:thumbnailUrl, thumbnail_url), favorite = coalesce(:favorite, favorite), last_update = coalesce(:lastUpdate, last_update), next_update = coalesce(:nextUpdate, next_update), initialized = coalesce(:initialized, initialized), viewer = coalesce(:viewer, viewer), item_flags = coalesce(",
+        tr!(":chapterFlags"),
+        ", item_flags), cover_last_modified = coalesce(:coverLastModified, cover_last_modified), date_added = coalesce(:dateAdded, date_added), update_strategy = coalesce(:updateStrategy, update_strategy), calculate_interval = coalesce(:calculateInterval, calculate_interval), version = coalesce(:version, version) WHERE _id = :mangaId AND kind = 'manga';"
+    );
     pub const LAST_INSERT_ROWID: &str = "SELECT last_insert_rowid();";
 
     /// Upcoming-tab statuses: ONGOING (1) and PUBLISHING_FINISHED (4), as `GetUpcomingManga` passes them.
@@ -160,10 +232,6 @@ pub mod mangas {
         })
     }
 
-    pub fn reset_is_syncing(c: &Connection) -> Result<usize> {
-        exec(c, RESET_IS_SYNCING, &[])
-    }
-
     /// `(source, non-library manga count)` for every source with at least one such entry.
     pub fn get_source_ids_with_non_library_manga(c: &Connection) -> Result<Vec<(i64, i64)>> {
         query_all(c, GET_SOURCE_IDS_WITH_NON_LIBRARY_MANGA, &[], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -239,7 +307,6 @@ pub mod mangas {
                 (":updateStrategy", &p.update_strategy),
                 (":calculateInterval", &p.calculate_interval),
                 (":version", &p.version),
-                (":isSyncing", &p.is_syncing),
                 (":mangaId", &p.id),
             ],
         )
@@ -254,16 +321,30 @@ pub mod mangas {
 pub mod chapters {
     use super::*;
 
-    pub const GET_BY_ID: &str = "SELECT * FROM chapters WHERE _id = :id;";
-    pub const GET_BY_MANGA_ID: &str = "SELECT C.* FROM chapters C LEFT JOIN excluded_scanlators ES ON C.manga_id = ES.manga_id AND C.scanlator = ES.scanlator WHERE C.manga_id = :mangaId AND ( :applyScanlatorFilter = 0 OR ES.scanlator IS NULL );";
-    pub const GET_SCANLATORS_BY_MANGA_ID: &str = "SELECT scanlator FROM chapters WHERE manga_id = :mangaId;";
-    pub const GET_BOOKMARKED_BY_MANGA_ID: &str = "SELECT * FROM chapters WHERE bookmark AND manga_id = :mangaId;";
-    pub const GET_BY_URL: &str = "SELECT * FROM chapters WHERE url = :chapterUrl;";
-    pub const GET_BY_URL_AND_MANGA_ID: &str = "SELECT * FROM chapters WHERE url = :chapterUrl AND manga_id = :mangaId;";
-    pub const REMOVE_WITH_IDS: &str = "DELETE FROM chapters WHERE _id IN (SELECT value FROM json_each(:chapterIds));";
-    pub const RESET_IS_SYNCING: &str = "UPDATE chapters SET is_syncing = 0 WHERE is_syncing = 1;";
-    pub const INSERT: &str = "INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order,date_fetch, date_upload, last_modified_at, version, is_syncing) VALUES (:mangaId, :url, :name, :scanlator, :read, :bookmark, :lastPageRead, :chapterNumber, :sourceOrder, :dateFetch, :dateUpload, 0, :version, 0);";
-    pub const UPDATE: &str = "UPDATE chapters SET manga_id = coalesce(:mangaId, manga_id), url = coalesce(:url, url), name = coalesce(:name, name), scanlator = coalesce(:scanlator, scanlator), read = coalesce(:read, read), bookmark = coalesce(:bookmark, bookmark), last_page_read = coalesce(:lastPageRead, last_page_read), chapter_number = coalesce(:chapterNumber, chapter_number), source_order = coalesce(:sourceOrder, source_order), date_fetch = coalesce(:dateFetch, date_fetch), date_upload = coalesce(:dateUpload, date_upload), version = coalesce(:version, version), is_syncing = coalesce(:isSyncing, is_syncing) WHERE _id = :chapterId;";
+    pub const GET_BY_ID: &str = concat!(
+        "SELECT ", chapter_cols!("i."), " FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'manga' WHERE i._id = :id;"
+    );
+    pub const GET_BY_MANGA_ID: &str = concat!(
+        "SELECT ", chapter_cols!("i."), " FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'manga' LEFT JOIN excluded_scanlators ES ON i.entry_id = ES.entry_id AND i.scanlator = ES.scanlator WHERE i.entry_id = :mangaId AND ( :applyScanlatorFilter = 0 OR ES.scanlator IS NULL );"
+    );
+    pub const GET_SCANLATORS_BY_MANGA_ID: &str =
+        "SELECT i.scanlator FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'manga' WHERE i.entry_id = :mangaId;";
+    pub const GET_BOOKMARKED_BY_MANGA_ID: &str = concat!(
+        "SELECT ", chapter_cols!("i."), " FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'manga' WHERE i.bookmark AND i.entry_id = :mangaId;"
+    );
+    pub const GET_BY_URL: &str = concat!(
+        "SELECT ", chapter_cols!("i."), " FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'manga' WHERE i.url = :chapterUrl;"
+    );
+    pub const GET_BY_URL_AND_MANGA_ID: &str = concat!(
+        "SELECT ", chapter_cols!("i."), " FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'manga' WHERE i.url = :chapterUrl AND i.entry_id = :mangaId;"
+    );
+    pub const REMOVE_WITH_IDS: &str = concat!(
+        "DELETE FROM items WHERE _id IN (SELECT value FROM json_each(:chapterIds)) AND entry_id IN ", manga_ids!(), ";"
+    );
+    pub const INSERT: &str = "INSERT INTO items(entry_id, url, name, scanlator, done, bookmark, progress, number, source_order, date_fetch, date_upload, last_modified_at, version) VALUES (:mangaId, :url, :name, :scanlator, :read, :bookmark, :lastPageRead, :chapterNumber, :sourceOrder, :dateFetch, :dateUpload, 0, :version);";
+    pub const UPDATE: &str = concat!(
+        "UPDATE items SET entry_id = coalesce(:mangaId, entry_id), url = coalesce(:url, url), name = coalesce(:name, name), scanlator = coalesce(:scanlator, scanlator), done = coalesce(:read, done), bookmark = coalesce(:bookmark, bookmark), progress = coalesce(:lastPageRead, progress), number = coalesce(:chapterNumber, number), source_order = coalesce(:sourceOrder, source_order), date_fetch = coalesce(:dateFetch, date_fetch), date_upload = coalesce(:dateUpload, date_upload), version = coalesce(:version, version) WHERE _id = :chapterId AND entry_id IN ", manga_ids!(), ";"
+    );
     pub const LAST_INSERT_ROWID: &str = "SELECT last_insert_rowid();";
 
     pub fn get_by_id(c: &Connection, id: i64) -> DbResult<ChapterRow> {
@@ -320,10 +401,6 @@ pub mod chapters {
         exec(c, REMOVE_WITH_IDS, &[(":chapterIds", &json)])
     }
 
-    pub fn reset_is_syncing(c: &Connection) -> Result<usize> {
-        exec(c, RESET_IS_SYNCING, &[])
-    }
-
     /// Inserts `r` and returns its new id. `r.id`, `r.last_modified_at` and `r.is_syncing` are ignored.
     pub fn insert(c: &Connection, r: &ChapterRow) -> Result<i64> {
         exec(
@@ -374,7 +451,6 @@ pub mod chapters {
                 (":dateFetch", &p.date_fetch),
                 (":dateUpload", &p.date_upload),
                 (":version", &p.version),
-                (":isSyncing", &p.is_syncing),
                 (":chapterId", &p.id),
             ],
         )
@@ -389,19 +465,19 @@ pub mod chapters {
 pub mod categories {
     use super::*;
 
-    pub const GET_CATEGORY: &str = "SELECT * FROM categories WHERE _id = :id LIMIT 1;";
-    pub const GET_CATEGORIES: &str = "SELECT _id AS id, name, sort AS `order`, flags, hidden FROM categories ORDER BY sort, _id;";
-    pub const GET_VISIBLE_CATEGORIES: &str = "SELECT _id AS id, name, sort AS `order`, flags, hidden FROM categories WHERE hidden = 0 ORDER BY sort, _id;";
-    pub const GET_CATEGORIES_BY_MANGA_ID: &str = "SELECT C._id AS id, C.name, C.sort AS `order`, C.flags, C.hidden FROM categories C JOIN mangas_categories MC ON C._id = MC.category_id WHERE MC.manga_id = :mangaId;";
-    pub const GET_VISIBLE_CATEGORIES_BY_MANGA_ID: &str = "SELECT C._id AS id, C.name, C.sort AS `order`, C.flags, C.hidden FROM categories C JOIN mangas_categories MC ON C._id = MC.category_id WHERE MC.manga_id = :mangaId AND C.hidden = 0;";
-    pub const INSERT: &str = "INSERT INTO categories(name, sort, flags) VALUES (:name, :order, :flags);";
-    pub const DELETE: &str = "DELETE FROM categories WHERE _id = :categoryId;";
-    pub const UPDATE: &str = "UPDATE categories SET name = coalesce(:name, name), sort = coalesce(:order, sort), flags = coalesce(:flags, flags), hidden = coalesce(:hidden, hidden) WHERE _id = :categoryId;";
-    pub const UPDATE_ALL_FLAGS: &str = "UPDATE categories SET flags = coalesce(?, flags);";
-    pub const LAST_INSERT_ROWID: &str = "SELECT last_insert_rowid();";
+    pub const GET_CATEGORY: &str = "SELECT _id, name, sort, flags, hidden FROM categories WHERE _id = :id AND kind = 'manga' LIMIT 1;";
+    pub const GET_CATEGORIES: &str = "SELECT _id AS id, name, sort AS `order`, flags, hidden FROM categories WHERE kind = 'manga' ORDER BY sort, _id;";
+    pub const GET_VISIBLE_CATEGORIES: &str = "SELECT _id AS id, name, sort AS `order`, flags, hidden FROM categories WHERE kind = 'manga' AND hidden = 0 ORDER BY sort, _id;";
+    pub const GET_CATEGORIES_BY_MANGA_ID: &str = "SELECT C._id AS id, C.name, C.sort AS `order`, C.flags, C.hidden FROM categories C JOIN entry_categories EC ON C._id = EC.category_id AND C.kind = EC.kind WHERE EC.entry_id = :mangaId AND C.kind = 'manga';";
+    pub const GET_VISIBLE_CATEGORIES_BY_MANGA_ID: &str = "SELECT C._id AS id, C.name, C.sort AS `order`, C.flags, C.hidden FROM categories C JOIN entry_categories EC ON C._id = EC.category_id AND C.kind = EC.kind WHERE EC.entry_id = :mangaId AND C.kind = 'manga' AND C.hidden = 0;";
+    /// The new id is `max(_id) + 1` of the kind (ids are per kind), returned with `RETURNING`.
+    pub const INSERT: &str = "INSERT INTO categories(kind, _id, name, sort, flags) SELECT 'manga', coalesce(max(_id), 0) + 1, :name, :order, :flags FROM categories WHERE kind = 'manga' RETURNING _id;";
+    pub const DELETE: &str = "DELETE FROM categories WHERE _id = :categoryId AND kind = 'manga';";
+    pub const UPDATE: &str = "UPDATE categories SET name = coalesce(:name, name), sort = coalesce(:order, sort), flags = coalesce(:flags, flags), hidden = coalesce(:hidden, hidden) WHERE _id = :categoryId AND kind = 'manga';";
+    pub const UPDATE_ALL_FLAGS: &str = "UPDATE categories SET flags = coalesce(?, flags) WHERE kind = 'manga';";
     /// Every category id in display order, the system category (0) included.
-    pub const IDS_BY_ORDER: &str = "SELECT _id FROM categories ORDER BY sort, _id;";
-    pub const SET_ORDER: &str = "UPDATE categories SET sort = :order WHERE _id = :categoryId;";
+    pub const IDS_BY_ORDER: &str = "SELECT _id FROM categories WHERE kind = 'manga' ORDER BY sort, _id;";
+    pub const SET_ORDER: &str = "UPDATE categories SET sort = :order WHERE _id = :categoryId AND kind = 'manga';";
 
     pub fn get_category(c: &Connection, id: i64) -> Result<Option<CategoryRow>> {
         query_opt(c, GET_CATEGORY, &[(":id", &id)], CategoryRow::from_row)
@@ -423,10 +499,9 @@ pub mod categories {
         query_all(c, GET_VISIBLE_CATEGORIES_BY_MANGA_ID, &[(":mangaId", &manga_id)], CategoryRow::from_row)
     }
 
-    /// Creates a category and returns its id (`max(_id) + 1`).
+    /// Creates a manga category and returns its id (`max(_id) + 1` among the manga categories).
     pub fn insert(c: &Connection, name: &str, order: i64, flags: i64) -> Result<i64> {
-        exec(c, INSERT, &[(":name", &name), (":order", &order), (":flags", &flags)])?;
-        Ok(c.last_insert_rowid())
+        query_one(c, INSERT, &[(":name", &name), (":order", &order), (":flags", &flags)], |r| r.get(0))
     }
 
     /// Deletes a category; its links cascade. Id 0 fails with `System category can't be deleted`.
@@ -453,10 +528,6 @@ pub mod categories {
         c.prepare_cached(UPDATE_ALL_FLAGS)?.execute([flags])
     }
 
-    pub fn last_inserted_row_id(c: &Connection) -> Result<i64> {
-        query_one(c, LAST_INSERT_ROWID, &[], |r| r.get(0))
-    }
-
     /// Renumbers every category, the system row included, to its index in display order, from 0 (as
     /// Aniyomi `DeleteMangaCategory` does; plans 05 EC-10 and 08 T-08a-010). Run inside the transaction
     /// of the delete; each category is one UPDATE, not a correlated subquery, because SQLite would
@@ -474,8 +545,8 @@ pub mod categories {
 pub mod mangas_categories {
     use super::*;
 
-    pub const INSERT: &str = "INSERT INTO mangas_categories(manga_id, category_id) VALUES (:mangaId, :categoryId);";
-    pub const DELETE_BY_MANGA_ID: &str = "DELETE FROM mangas_categories WHERE manga_id = :mangaId;";
+    pub const INSERT: &str = "INSERT OR IGNORE INTO entry_categories(entry_id, kind, category_id) VALUES (:mangaId, 'manga', :categoryId);";
+    pub const DELETE_BY_MANGA_ID: &str = "DELETE FROM entry_categories WHERE entry_id = :mangaId AND kind = 'manga';";
 
     pub fn insert(c: &Connection, manga_id: i64, category_id: i64) -> Result<usize> {
         exec(c, INSERT, &[(":mangaId", &manga_id), (":categoryId", &category_id)])
@@ -504,14 +575,14 @@ pub mod mangas_categories {
 pub mod history {
     use super::*;
 
-    pub const GET_BY_MANGA_ID: &str = "SELECT H._id, H.chapter_id, H.last_read, H.time_read FROM history H JOIN chapters C ON H.chapter_id = C._id WHERE C.manga_id = :mangaId AND C._id = H.chapter_id;";
-    pub const GET_BY_CHAPTER_URL: &str = "SELECT H._id, H.chapter_id, H.last_read, H.time_read FROM history H JOIN chapters C ON H.chapter_id = C._id WHERE C.url = :chapterUrl AND C._id = H.chapter_id;";
-    pub const RESET_BY_ID: &str = "UPDATE history SET last_read = 0 WHERE _id = :historyId;";
-    pub const RESET_BY_MANGA_ID: &str = "UPDATE history SET last_read = 0 WHERE _id IN ( SELECT H._id FROM mangas M INNER JOIN chapters C ON M._id = C.manga_id INNER JOIN history H ON C._id = H.chapter_id WHERE M._id = :mangaId );";
-    pub const REMOVE_ALL: &str = "DELETE FROM history;";
-    pub const REMOVE_RESETTED: &str = "DELETE FROM history WHERE last_read = 0;";
-    pub const UPSERT: &str = "INSERT INTO history(chapter_id, last_read, time_read) VALUES (:chapterId, :readAt, :time_read) ON CONFLICT(chapter_id) DO UPDATE SET last_read = :readAt, time_read = time_read + :time_read WHERE chapter_id = :chapterId;";
-    pub const GET_READ_DURATION: &str = "SELECT coalesce(sum(time_read), 0) FROM history;";
+    pub const GET_BY_MANGA_ID: &str = "SELECT H._id, H.item_id AS chapter_id, H.last_at AS last_read, H.duration_ms AS time_read FROM history H JOIN items I ON H.item_id = I._id JOIN entries E ON E._id = I.entry_id AND E.kind = 'manga' WHERE I.entry_id = :mangaId;";
+    pub const GET_BY_CHAPTER_URL: &str = "SELECT H._id, H.item_id AS chapter_id, H.last_at AS last_read, H.duration_ms AS time_read FROM history H JOIN items I ON H.item_id = I._id JOIN entries E ON E._id = I.entry_id AND E.kind = 'manga' WHERE I.url = :chapterUrl;";
+    pub const RESET_BY_ID: &str = concat!("UPDATE history SET last_at = 0 WHERE _id = :historyId AND item_id IN ", manga_item_ids!(), ";");
+    pub const RESET_BY_MANGA_ID: &str = "UPDATE history SET last_at = 0 WHERE _id IN ( SELECT H._id FROM entries M INNER JOIN items C ON M._id = C.entry_id INNER JOIN history H ON C._id = H.item_id WHERE M._id = :mangaId AND M.kind = 'manga' );";
+    pub const REMOVE_ALL: &str = concat!("DELETE FROM history WHERE item_id IN ", manga_item_ids!(), ";");
+    pub const REMOVE_RESETTED: &str = concat!("DELETE FROM history WHERE last_at = 0 AND item_id IN ", manga_item_ids!(), ";");
+    pub const UPSERT: &str = "INSERT INTO history(item_id, last_at, duration_ms) VALUES (:chapterId, :readAt, :time_read) ON CONFLICT(item_id) DO UPDATE SET last_at = :readAt, duration_ms = duration_ms + :time_read WHERE item_id = :chapterId;";
+    pub const GET_READ_DURATION: &str = concat!("SELECT coalesce(sum(duration_ms), 0) FROM history WHERE item_id IN ", manga_item_ids!(), ";");
 
     pub fn get_by_manga_id(c: &Connection, manga_id: i64) -> Result<Vec<HistoryRow>> {
         query_all(c, GET_BY_MANGA_ID, &[(":mangaId", &manga_id)], HistoryRow::from_row)
@@ -554,15 +625,17 @@ pub mod history {
     }
 }
 
-/// Statements of `libraryView.sq`, `historyView.sq` (the views are in `sql/schema_v33.sql`).
+/// Statements of `libraryView.sq`, `historyView.sq` (the views are in `sql/unified/views.sql`).
 pub mod views {
     use super::*;
 
-    pub const LIBRARY: &str = "SELECT * FROM libraryView;";
-    pub const HISTORY: &str = "SELECT id, mangaId, chapterId, title, thumbnailUrl, source, favorite, cover_last_modified, chapterNumber, readAt, readDuration FROM historyView WHERE historyView.readAt > 0 AND maxReadAtChapterId = historyView.chapterId AND lower(historyView.title) LIKE ('%' || :query || '%') ESCAPE '\\' ORDER BY readAt DESC;";
-    pub const GET_LATEST_HISTORY: &str = "SELECT id, mangaId, chapterId, title, thumbnailUrl, source, favorite, cover_last_modified, chapterNumber, readAt, readDuration FROM historyView WHERE historyView.readAt > 0 ORDER BY readAt DESC LIMIT 1;";
-    pub const GET_RECENT_UPDATES: &str = "SELECT * FROM updatesView WHERE dateUpload > :after ORDER BY datefetch DESC LIMIT :limit;";
-    pub const GET_UPDATES_BY_READ_STATUS: &str = "SELECT * FROM updatesView WHERE read = :read AND dateUpload > :after ORDER BY datefetch DESC LIMIT :limit;";
+    pub const LIBRARY: &str = concat!(
+        "SELECT ", manga_cols!(""), ", totalCount, doneCount AS readCount, latestUpload, itemFetchedAt AS chapterFetchedAt, lastActivity AS lastRead, bookmarkCount, category FROM libraryView WHERE kind = 'manga';"
+    );
+    pub const HISTORY: &str = "SELECT id, entryId AS mangaId, itemId AS chapterId, title, thumbnailUrl, source, favorite, cover_last_modified, itemNumber AS chapterNumber, lastAt AS readAt, durationMs AS readDuration FROM historyView WHERE kind = 'manga' AND lastAt > 0 AND maxLastAtItemId = itemId AND kuro_lower(title) LIKE ('%' || kuro_lower(:query) || '%') ESCAPE '\\' ORDER BY lastAt DESC;";
+    pub const GET_LATEST_HISTORY: &str = "SELECT id, entryId AS mangaId, itemId AS chapterId, title, thumbnailUrl, source, favorite, cover_last_modified, itemNumber AS chapterNumber, lastAt AS readAt, durationMs AS readDuration FROM historyView WHERE kind = 'manga' AND lastAt > 0 ORDER BY lastAt DESC LIMIT 1;";
+    pub const GET_RECENT_UPDATES: &str = "SELECT entryId AS mangaId, entryTitle AS mangaTitle, itemId AS chapterId, itemName AS chapterName, scanlator, done AS read, bookmark, progress AS last_page_read, source, favorite, thumbnailUrl, coverLastModified, dateUpload, datefetch FROM updatesView WHERE kind = 'manga' AND dateUpload > :after ORDER BY datefetch DESC LIMIT :limit;";
+    pub const GET_UPDATES_BY_READ_STATUS: &str = "SELECT entryId AS mangaId, entryTitle AS mangaTitle, itemId AS chapterId, itemName AS chapterName, scanlator, done AS read, bookmark, progress AS last_page_read, source, favorite, thumbnailUrl, coverLastModified, dateUpload, datefetch FROM updatesView WHERE kind = 'manga' AND done = :read AND dateUpload > :after ORDER BY datefetch DESC LIMIT :limit;";
 
     /// Row limit the Updates screen passes to both update queries (`GetMangaUpdates`).
     pub const UPDATES_PAGE_LIMIT: i64 = 500;
@@ -594,7 +667,7 @@ pub mod views {
     }
 
     /// One row per manga (its latest-read chapter), newest read first. An empty `query` matches all.
-    /// The search is a substring match on the title, case-insensitive for ASCII (SQLite `lower`).
+    /// The search is a substring match on the title, case-insensitive for every Unicode letter (`kuro_lower`).
     pub fn history(c: &Connection, query: &str) -> Result<Vec<HistoryViewRow>> {
         let escaped = escape_like(query);
         query_all(c, HISTORY, &[(":query", &escaped)], HistoryViewRow::from_row)
@@ -635,7 +708,7 @@ pub mod views {
 pub mod manga_sync {
     use super::*;
 
-    /// Tracker ids stored in `sync_id` (`TrackerManager.kt`, manga trackers 1 to 9).
+    /// Tracker ids stored in `tracker_id` (`TrackerManager.kt`, manga trackers 1 to 9).
     pub const MYANIMELIST: i64 = 1;
     pub const ANILIST: i64 = 2;
     pub const KITSU: i64 = 3;
@@ -646,13 +719,15 @@ pub mod manga_sync {
     pub const KAVITA: i64 = 8;
     pub const SUWAYOMI: i64 = 9;
 
-    pub const DELETE: &str = "DELETE FROM manga_sync WHERE manga_id = :mangaId AND sync_id = :syncId;";
-    pub const GET_TRACKS: &str = "SELECT * FROM manga_sync;";
-    pub const GET_TRACK_BY_ID: &str = "SELECT * FROM manga_sync WHERE _id = :id;";
-    pub const GET_TRACKS_BY_MANGA_ID: &str = "SELECT * FROM manga_sync WHERE manga_id = :mangaId;";
-    pub const UPSERT: &str = "INSERT INTO manga_sync(manga_id,sync_id,remote_id,library_id,title,last_chapter_read,total_chapters,status,score,remote_url,start_date,finish_date,private) VALUES (:mangaId,:syncId,:remoteId,:libraryId,:title,:lastChapterRead,:totalChapters,:status,:score,:remoteUrl,:startDate,:finishDate,:private) ON CONFLICT(manga_id, sync_id) DO UPDATE SET remote_id = excluded.remote_id, library_id = excluded.library_id, title = excluded.title, last_chapter_read = excluded.last_chapter_read, total_chapters = excluded.total_chapters, status = excluded.status, score = excluded.score, remote_url = excluded.remote_url, start_date = excluded.start_date, finish_date = excluded.finish_date, private = excluded.private RETURNING _id;";
-    pub const INSERT: &str = "INSERT INTO manga_sync(manga_id,sync_id,remote_id,library_id,title,last_chapter_read,total_chapters,status,score,remote_url,start_date,finish_date,private) VALUES (:mangaId,:syncId,:remoteId,:libraryId,:title,:lastChapterRead,:totalChapters,:status,:score,:remoteUrl,:startDate,:finishDate,:private);";
-    pub const UPDATE: &str = "UPDATE manga_sync SET manga_id = coalesce(:mangaId, manga_id), sync_id = coalesce(:syncId, sync_id), remote_id = coalesce(:mediaId, remote_id), library_id = coalesce(:libraryId, library_id), title = coalesce(:title, title), last_chapter_read = coalesce(:lastChapterRead, last_chapter_read), total_chapters = coalesce(:totalChapter, total_chapters), status = coalesce(:status, status), score = coalesce(:score, score), remote_url = coalesce(:trackingUrl, remote_url), start_date = coalesce(:startDate, start_date), finish_date = coalesce(:finishDate, finish_date), private = coalesce(:private, private) WHERE _id = :id;";
+    pub const DELETE: &str = concat!("DELETE FROM tracks WHERE entry_id = :mangaId AND tracker_id = :syncId AND entry_id IN ", manga_ids!(), ";");
+    pub const GET_TRACKS: &str = concat!("SELECT ", track_cols!("t."), " FROM tracks t JOIN entries e ON e._id = t.entry_id AND e.kind = 'manga';");
+    pub const GET_TRACK_BY_ID: &str = concat!("SELECT ", track_cols!("t."), " FROM tracks t JOIN entries e ON e._id = t.entry_id AND e.kind = 'manga' WHERE t._id = :id;");
+    pub const GET_TRACKS_BY_MANGA_ID: &str = concat!("SELECT ", track_cols!("t."), " FROM tracks t JOIN entries e ON e._id = t.entry_id AND e.kind = 'manga' WHERE t.entry_id = :mangaId;");
+    pub const UPSERT: &str = "INSERT INTO tracks(entry_id,tracker_id,remote_id,library_id,title,last_item,total_items,status,score,remote_url,start_date,finish_date,private) VALUES (:mangaId,:syncId,:remoteId,:libraryId,:title,:lastChapterRead,:totalChapters,:status,:score,:remoteUrl,:startDate,:finishDate,:private) ON CONFLICT(entry_id, tracker_id) DO UPDATE SET remote_id = excluded.remote_id, library_id = excluded.library_id, title = excluded.title, last_item = excluded.last_item, total_items = excluded.total_items, status = excluded.status, score = excluded.score, remote_url = excluded.remote_url, start_date = excluded.start_date, finish_date = excluded.finish_date, private = excluded.private RETURNING _id;";
+    pub const INSERT: &str = "INSERT INTO tracks(entry_id,tracker_id,remote_id,library_id,title,last_item,total_items,status,score,remote_url,start_date,finish_date,private) VALUES (:mangaId,:syncId,:remoteId,:libraryId,:title,:lastChapterRead,:totalChapters,:status,:score,:remoteUrl,:startDate,:finishDate,:private);";
+    pub const UPDATE: &str = concat!(
+        "UPDATE tracks SET entry_id = coalesce(:mangaId, entry_id), tracker_id = coalesce(:syncId, tracker_id), remote_id = coalesce(:mediaId, remote_id), library_id = coalesce(:libraryId, library_id), title = coalesce(:title, title), last_item = coalesce(:lastChapterRead, last_item), total_items = coalesce(:totalChapter, total_items), status = coalesce(:status, status), score = coalesce(:score, score), remote_url = coalesce(:trackingUrl, remote_url), start_date = coalesce(:startDate, start_date), finish_date = coalesce(:finishDate, finish_date), private = coalesce(:private, private) WHERE _id = :id AND entry_id IN ", manga_ids!(), ";"
+    );
 
     /// Removes the binding of `manga_id` to tracker `sync_id`.
     pub fn delete(c: &Connection, manga_id: i64, sync_id: i64) -> Result<usize> {
@@ -750,9 +825,9 @@ pub mod manga_sync {
 pub mod excluded_scanlators {
     use super::*;
 
-    pub const INSERT: &str = "INSERT INTO excluded_scanlators(manga_id, scanlator) VALUES (:mangaId, :scanlator);";
-    pub const REMOVE: &str = "DELETE FROM excluded_scanlators WHERE manga_id = :mangaId AND scanlator IN (SELECT value FROM json_each(:scanlators));";
-    pub const GET_BY_MANGA_ID: &str = "SELECT scanlator FROM excluded_scanlators WHERE manga_id = :mangaId;";
+    pub const INSERT: &str = "INSERT INTO excluded_scanlators(entry_id, scanlator) VALUES (:mangaId, :scanlator);";
+    pub const REMOVE: &str = "DELETE FROM excluded_scanlators WHERE entry_id = :mangaId AND scanlator IN (SELECT value FROM json_each(:scanlators));";
+    pub const GET_BY_MANGA_ID: &str = "SELECT scanlator FROM excluded_scanlators WHERE entry_id = :mangaId;";
 
     pub fn insert(c: &Connection, manga_id: i64, scanlator: &str) -> Result<usize> {
         exec(c, INSERT, &[(":mangaId", &manga_id), (":scanlator", &scanlator)])
@@ -785,105 +860,13 @@ pub mod excluded_scanlators {
     }
 }
 
-/// Statements of `extension_repos.sq`. `upsert` and `replace` spell `website = :website`: the
-/// `.sq` text `website =: website` is accepted by SQLDelight only.
-pub mod extension_repos {
-    use super::*;
-
-    pub const FIND_ONE: &str = "SELECT * FROM extension_repos WHERE base_url = :base_url;";
-    pub const FIND_ONE_BY_SIGNING_KEY_FINGERPRINT: &str = "SELECT * FROM extension_repos WHERE signing_key_fingerprint = :fingerprint;";
-    pub const FIND_ALL: &str = "SELECT * FROM extension_repos;";
-    pub const COUNT: &str = "SELECT COUNT(*) FROM extension_repos;";
-    pub const INSERT: &str = "INSERT INTO extension_repos(base_url, name, short_name, website, signing_key_fingerprint) VALUES (:base_url, :name, :short_name, :website, :fingerprint);";
-    pub const UPSERT: &str = "INSERT INTO extension_repos(base_url, name, short_name, website, signing_key_fingerprint) VALUES (:base_url, :name, :short_name, :website, :fingerprint) ON CONFLICT(base_url) DO UPDATE SET name = :name, short_name = :short_name, website = :website, signing_key_fingerprint = :fingerprint WHERE base_url = base_url;";
-    pub const REPLACE: &str = "INSERT INTO extension_repos(base_url, name, short_name, website, signing_key_fingerprint) VALUES (:base_url, :name, :short_name, :website, :fingerprint) ON CONFLICT(signing_key_fingerprint) DO UPDATE SET base_url = :base_url, name = :name, short_name = :short_name, website = :website WHERE signing_key_fingerprint = signing_key_fingerprint;";
-    pub const DELETE: &str = "DELETE FROM extension_repos WHERE base_url = :base_url;";
-
-    /// Which repo an insert collided with, as `CreateMangaExtensionRepo.handleInsertionError` decides it.
-    #[derive(Clone, Debug, PartialEq)]
-    pub enum RepoConflict {
-        RepoAlreadyExists,
-        DuplicateFingerprint(ExtensionRepoRow),
-        Other,
-    }
-
-    /// Maps a SQLite constraint failure to [`DbError::Constraint`]; other failures stay [`DbError::Sqlite`].
-    fn constraint(e: rusqlite::Error) -> DbError {
-        if let rusqlite::Error::SqliteFailure(f, _) = &e {
-            if f.code == ErrorCode::ConstraintViolation {
-                return DbError::Constraint(e.to_string());
-            }
-        }
-        e.into()
-    }
-
-    fn bind(r: &ExtensionRepoRow) -> [(&'static str, &dyn ToSql); 5] {
-        [
-            (":base_url", &r.base_url),
-            (":name", &r.name),
-            (":short_name", &r.short_name),
-            (":website", &r.website),
-            (":fingerprint", &r.signing_key_fingerprint),
-        ]
-    }
-
-    pub fn find_one(c: &Connection, base_url: &str) -> Result<Option<ExtensionRepoRow>> {
-        query_opt(c, FIND_ONE, &[(":base_url", &base_url)], ExtensionRepoRow::from_row)
-    }
-
-    pub fn find_one_by_signing_key_fingerprint(c: &Connection, fingerprint: &str) -> Result<Option<ExtensionRepoRow>> {
-        query_opt(c, FIND_ONE_BY_SIGNING_KEY_FINGERPRINT, &[(":fingerprint", &fingerprint)], ExtensionRepoRow::from_row)
-    }
-
-    pub fn find_all(c: &Connection) -> Result<Vec<ExtensionRepoRow>> {
-        query_all(c, FIND_ALL, &[], ExtensionRepoRow::from_row)
-    }
-
-    pub fn count(c: &Connection) -> Result<i64> {
-        query_one(c, COUNT, &[], |r| r.get(0))
-    }
-
-    /// Fails with [`DbError::Constraint`] when `base_url` or the fingerprint already exists.
-    pub fn insert(c: &Connection, r: &ExtensionRepoRow) -> DbResult<usize> {
-        exec(c, INSERT, &bind(r)).map_err(constraint)
-    }
-
-    /// Inserts, or updates the row with the same `base_url`. A fingerprint held by another repo
-    /// fails with [`DbError::Constraint`].
-    pub fn upsert(c: &Connection, r: &ExtensionRepoRow) -> DbResult<usize> {
-        exec(c, UPSERT, &bind(r)).map_err(constraint)
-    }
-
-    /// Inserts, or on a fingerprint match overwrites `base_url`, `name`, `short_name` and `website` of
-    /// the existing row. A `base_url` held by a different row fails with [`DbError::Constraint`].
-    pub fn replace(c: &Connection, r: &ExtensionRepoRow) -> DbResult<usize> {
-        exec(c, REPLACE, &bind(r)).map_err(constraint)
-    }
-
-    pub fn delete(c: &Connection, base_url: &str) -> Result<usize> {
-        exec(c, DELETE, &[(":base_url", &base_url)])
-    }
-
-    /// Classifies a failed insert of `base_url` with `fingerprint`: an existing `base_url` wins, then
-    /// an existing fingerprint (returned), else [`RepoConflict::Other`].
-    pub fn classify_conflict(c: &Connection, base_url: &str, fingerprint: &str) -> Result<RepoConflict> {
-        if find_one(c, base_url)?.is_some() {
-            return Ok(RepoConflict::RepoAlreadyExists);
-        }
-        Ok(match find_one_by_signing_key_fingerprint(c, fingerprint)? {
-            Some(existing) => RepoConflict::DuplicateFingerprint(existing),
-            None => RepoConflict::Other,
-        })
-    }
-}
-
 /// Statements of `sources.sq`: stub sources (names of sources whose extension is gone).
 pub mod sources {
     use super::*;
 
-    pub const FIND_ALL: &str = "SELECT * FROM sources;";
-    pub const FIND_ONE: &str = "SELECT * FROM sources WHERE _id = :id;";
-    pub const UPSERT: &str = "INSERT INTO sources(_id, lang, name) VALUES (:id, :lang, :name) ON CONFLICT(_id) DO UPDATE SET lang = :lang, name = :name WHERE _id = :id;";
+    pub const FIND_ALL: &str = "SELECT id AS _id, lang, name FROM stub_sources WHERE kind = 'manga' ORDER BY rowid;";
+    pub const FIND_ONE: &str = "SELECT id AS _id, lang, name FROM stub_sources WHERE kind = 'manga' AND id = :id;";
+    pub const UPSERT: &str = "INSERT INTO stub_sources(kind, id, lang, name) VALUES ('manga', :id, :lang, :name) ON CONFLICT(kind, id) DO UPDATE SET lang = :lang, name = :name;";
 
     pub fn find_all(c: &Connection) -> Result<Vec<StubSourceRow>> {
         query_all(c, FIND_ALL, &[], StubSourceRow::from_row)
@@ -973,7 +956,11 @@ mod tests {
     use super::*;
     use crate::codec::{GenreList, UpdateStrategy};
     use crate::flags::library_sort;
-    use crate::schema_manga::test_db;
+    use crate::schema_unified::open_in_memory;
+
+    fn test_db() -> Connection {
+        open_in_memory().expect("in-memory unified database")
+    }
 
     fn scalar(c: &Connection, sql: &str) -> i64 {
         c.query_row(sql, [], |r| r.get(0)).unwrap()
@@ -985,6 +972,49 @@ mod tests {
 
     fn insert_chapter(c: &Connection, manga_id: i64, url: &str) -> i64 {
         chapters::insert(c, &chapter(manga_id, url)).unwrap()
+    }
+
+    #[test]
+    fn every_statement_prepares_against_the_unified_schema() {
+        let c = test_db();
+        for sql in [
+            mangas::GET_BY_ID, mangas::GET_BY_URL_AND_SOURCE, mangas::GET_FAVORITES, mangas::GET_READ_NOT_IN_LIBRARY,
+            mangas::GET_ALL, mangas::GET_ALL_SOURCE_AND_URL, mangas::GET_WITH_FAVORITE_TIMESTAMP,
+            mangas::GET_SOURCE_ID_WITH_FAVORITE_COUNT, mangas::GET_FAVORITE_BY_SOURCE_ID, mangas::GET_DUPLICATE_LIBRARY_MANGA,
+            mangas::GET_UPCOMING_MANGA, mangas::RESET_VIEWER_FLAGS, mangas::SET_VIEWER_BITS,
+            mangas::GET_SOURCE_IDS_WITH_NON_LIBRARY_MANGA, mangas::DELETE_NOT_IN_LIBRARY_BY_SOURCE_IDS, mangas::INSERT,
+            mangas::UPDATE, chapters::GET_BY_ID, chapters::GET_BY_MANGA_ID, chapters::GET_SCANLATORS_BY_MANGA_ID,
+            chapters::GET_BOOKMARKED_BY_MANGA_ID, chapters::GET_BY_URL, chapters::GET_BY_URL_AND_MANGA_ID,
+            chapters::REMOVE_WITH_IDS, chapters::INSERT, chapters::UPDATE, categories::GET_CATEGORY,
+            categories::GET_CATEGORIES, categories::GET_VISIBLE_CATEGORIES, categories::GET_CATEGORIES_BY_MANGA_ID,
+            categories::GET_VISIBLE_CATEGORIES_BY_MANGA_ID, categories::INSERT, categories::DELETE, categories::UPDATE,
+            categories::UPDATE_ALL_FLAGS, categories::IDS_BY_ORDER, categories::SET_ORDER, mangas_categories::INSERT,
+            mangas_categories::DELETE_BY_MANGA_ID, history::GET_BY_MANGA_ID, history::GET_BY_CHAPTER_URL,
+            history::RESET_BY_ID, history::RESET_BY_MANGA_ID, history::REMOVE_ALL, history::REMOVE_RESETTED,
+            history::UPSERT, history::GET_READ_DURATION, views::LIBRARY, views::HISTORY, views::GET_LATEST_HISTORY,
+            views::GET_RECENT_UPDATES, views::GET_UPDATES_BY_READ_STATUS, manga_sync::DELETE, manga_sync::GET_TRACKS,
+            manga_sync::GET_TRACK_BY_ID, manga_sync::GET_TRACKS_BY_MANGA_ID, manga_sync::UPSERT, manga_sync::INSERT,
+            manga_sync::UPDATE, excluded_scanlators::INSERT, excluded_scanlators::REMOVE,
+            excluded_scanlators::GET_BY_MANGA_ID, sources::FIND_ALL, sources::FIND_ONE, sources::UPSERT,
+        ] {
+            c.prepare(sql).unwrap_or_else(|e| panic!("{e}: {sql}"));
+        }
+    }
+
+    #[test]
+    fn statements_pin_the_kind_and_a_wrong_kind_id_is_not_found() {
+        let c = test_db();
+        c.execute(
+            "INSERT INTO entries(kind, source, url, title, status, favorite, initialized, viewer, item_flags, cover_last_modified, date_added, fetch_type, season_flags, season_number, season_source_order, background_last_modified, memo) VALUES ('anime', 1, '/a', 'A', 1, 1, 1, 0, 0, 0, 0, 1, 0, -1, 0, 0, x'7b7d')",
+            [],
+        )
+        .unwrap();
+        let anime_id = scalar(&c, "SELECT _id FROM entries");
+        assert!(matches!(mangas::get_by_id(&c, anime_id), Err(DbError::NotFound)));
+        assert!(mangas::get_favorites(&c).unwrap().is_empty());
+        assert_eq!(mangas::update(&c, &MangaPatch { id: anime_id, title: Some("x".into()), ..Default::default() }).unwrap(), 0);
+        assert_eq!(mangas::reset_viewer_flags(&c).unwrap(), 0);
+        assert!(views::library(&c).unwrap().is_empty());
     }
 
     #[test]
@@ -1004,12 +1034,12 @@ mod tests {
         );
         let tx = c.transaction().unwrap();
         clear_non_library_by_sources(&tx, &[]).unwrap();
-        assert_eq!(scalar(&tx, "SELECT count(*) FROM mangas"), 3, "an empty list is a no-op");
+        assert_eq!(scalar(&tx, "SELECT count(*) FROM entries WHERE kind = 'manga'"), 3, "an empty list is a no-op");
         clear_non_library_by_sources(&tx, &[2]).unwrap();
         tx.commit().unwrap();
         let urls: Vec<String> = mangas::get_all(&c).unwrap().into_iter().map(|m| m.url).collect();
         assert_eq!(urls, ["/keep", "/other"]);
-        assert_eq!(scalar(&c, "SELECT count(*) FROM chapters"), 2);
+        assert_eq!(scalar(&c, "SELECT count(*) FROM items"), 2);
         assert_eq!(scalar(&c, "SELECT count(*) FROM history"), 0);
     }
 
@@ -1041,10 +1071,10 @@ mod tests {
     }
 
     #[test]
-    fn mangas_url_and_source_returns_lowest_rowid_on_duplicates() {
+    fn a_second_manga_with_the_same_source_and_url_is_refused() {
         let c = test_db();
         let first = insert_manga(&c, "/x");
-        insert_manga(&c, "/x");
+        assert!(mangas::insert(&c, &manga("/x")).is_err(), "UNIQUE (kind, source, url)");
         let got = mangas::get_by_url_and_source(&c, "/x", 1).unwrap();
         assert_eq!(got.map(|m| m.id), Some(first));
     }
@@ -1122,12 +1152,12 @@ mod tests {
         let progress = insert_manga(&c, "/p");
         let untouched = insert_manga(&c, "/u");
         for id in [read, progress, untouched] {
-            c.execute("UPDATE mangas SET favorite = 0 WHERE _id = ?1", [id]).unwrap();
+            c.execute("UPDATE entries SET favorite = 0 WHERE _id = ?1", [id]).unwrap();
         }
         let ch = insert_chapter(&c, read, "/r1");
-        c.execute("UPDATE chapters SET read = 1 WHERE _id = ?1", [ch]).unwrap();
+        c.execute("UPDATE items SET done = 1 WHERE _id = ?1", [ch]).unwrap();
         let ch = insert_chapter(&c, progress, "/p1");
-        c.execute("UPDATE chapters SET last_page_read = 3 WHERE _id = ?1", [ch]).unwrap();
+        c.execute("UPDATE items SET progress = 3 WHERE _id = ?1", [ch]).unwrap();
         insert_chapter(&c, untouched, "/u1");
         let ids: Vec<i64> = mangas::get_read_not_in_library(&c).unwrap().iter().map(|m| m.id).collect();
         assert_eq!(ids, [read, progress]);
@@ -1160,6 +1190,7 @@ mod tests {
         let dup_id = mangas::insert(&c, &dup).unwrap();
         let mut hidden = dup.clone();
         hidden.favorite = false;
+        hidden.url = "/three".into();
         mangas::insert(&c, &hidden).unwrap();
         // The caller lowercases the title; the match is on LOWER(title).
         let found = mangas::get_duplicate_library_manga(&c, "same title", original).unwrap();
@@ -1181,19 +1212,15 @@ mod tests {
 
         assert_eq!(mangas::delete_not_in_library_by_source_ids(&c, &[]).unwrap(), 0);
         assert_eq!(mangas::delete_not_in_library_by_source_ids(&c, &[1]).unwrap(), 1);
-        assert_eq!(scalar(&c, "SELECT count(*) FROM mangas"), 2);
-        assert_eq!(scalar(&c, "SELECT count(*) FROM mangas WHERE url = '/gone'"), 0);
+        assert_eq!(scalar(&c, "SELECT count(*) FROM entries WHERE kind = 'manga'"), 2);
+        assert_eq!(scalar(&c, "SELECT count(*) FROM entries WHERE url = '/gone'"), 0);
     }
 
     #[test]
-    fn mangas_reset_viewer_flags_and_is_syncing() {
+    fn mangas_reset_viewer_flags() {
         let c = test_db();
         let id = insert_manga(&c, "/v");
         mangas::update(&c, &MangaPatch { id, viewer: Some(7), ..Default::default() }).unwrap();
-        mangas::update(&c, &MangaPatch { id, is_syncing: Some(true), ..Default::default() }).unwrap();
-        assert_eq!(mangas::reset_is_syncing(&c).unwrap(), 1);
-        assert_eq!(mangas::reset_is_syncing(&c).unwrap(), 0);
-
         assert_eq!(mangas::reset_viewer_flags(&c).unwrap(), 1);
         let got = mangas::get_by_id(&c, id).unwrap();
         assert_eq!(got.viewer, 0);
@@ -1235,7 +1262,7 @@ mod tests {
             ch.scanlator = scanlator.map(str::to_owned);
             chapters::insert(&c, &ch).unwrap();
         }
-        c.execute("INSERT INTO excluded_scanlators(manga_id, scanlator) VALUES (?1, 'G')", [m]).unwrap();
+        c.execute("INSERT INTO excluded_scanlators(entry_id, scanlator) VALUES (?1, 'G')", [m]).unwrap();
         assert_eq!(chapters::get_by_manga_id(&c, m, false).unwrap().len(), 3);
         let filtered: Vec<String> = chapters::get_by_manga_id(&c, m, true)
             .unwrap()
@@ -1284,7 +1311,7 @@ mod tests {
         tx.commit().unwrap();
         assert_eq!(chapters::remove_with_ids(&c, &[]).unwrap(), 0);
         assert_eq!(chapters::remove_with_ids(&c, &ids).unwrap(), 40_000);
-        assert_eq!(scalar(&c, "SELECT count(*) FROM chapters"), 0);
+        assert_eq!(scalar(&c, "SELECT count(*) FROM items"), 0);
     }
 
     #[test]
@@ -1295,17 +1322,7 @@ mod tests {
         let rows = [chapter(m, "/ok"), chapter(999, "/orphan")];
         assert!(chapters::insert_all(&tx, &rows).is_err());
         drop(tx);
-        assert_eq!(scalar(&c, "SELECT count(*) FROM chapters"), 0);
-    }
-
-    #[test]
-    fn chapters_reset_is_syncing() {
-        let c = test_db();
-        let m = insert_manga(&c, "/m");
-        let id = insert_chapter(&c, m, "/c1");
-        c.execute("UPDATE chapters SET is_syncing = 1 WHERE _id = ?1", [id]).unwrap();
-        assert_eq!(chapters::reset_is_syncing(&c).unwrap(), 1);
-        assert!(!chapters::get_by_id(&c, id).unwrap().is_syncing);
+        assert_eq!(scalar(&c, "SELECT count(*) FROM items"), 0);
     }
 
     #[test]
@@ -1357,7 +1374,7 @@ mod tests {
         let id = categories::insert(&c, "a", 0, 5).unwrap();
         categories::update_all_flags(&c, None).unwrap();
         assert_eq!(categories::get_category(&c, id).unwrap().unwrap().flags, 5);
-        assert_eq!(categories::get_category(&c, 0).unwrap().unwrap().flags, 0, "the seed row keeps its flags");
+        assert_eq!(categories::get_category(&c, 0).unwrap().unwrap().flags, 64, "the seed row keeps its flags");
         categories::update_all_flags(&c, Some(64)).unwrap();
         assert_eq!(categories::get_category(&c, id).unwrap().unwrap().flags, 64);
         assert_eq!(categories::get_category(&c, 0).unwrap().unwrap().flags, 64, "system row included");
@@ -1399,9 +1416,9 @@ mod tests {
         categories::insert(&c, "b", 1, 0).unwrap();
         assert_eq!(mangas_categories::insert(&c, m, 1).unwrap(), 1);
         mangas_categories::insert(&c, m, 2).unwrap();
-        assert_eq!(scalar(&c, "SELECT count(*) FROM mangas_categories"), 2);
+        assert_eq!(scalar(&c, "SELECT count(*) FROM entry_categories"), 2);
         assert_eq!(mangas_categories::delete_by_manga_id(&c, m).unwrap(), 2);
-        assert_eq!(scalar(&c, "SELECT count(*) FROM mangas_categories"), 0);
+        assert_eq!(scalar(&c, "SELECT count(*) FROM entry_categories"), 0);
     }
 
     #[test]
@@ -1414,12 +1431,12 @@ mod tests {
         let tx = c.transaction().unwrap();
         mangas_categories::set_categories(&tx, m, &[2, 2, 1]).unwrap();
         tx.commit().unwrap();
-        assert_eq!(scalar(&c, "SELECT count(*) FROM mangas_categories"), 2);
+        assert_eq!(scalar(&c, "SELECT count(*) FROM entry_categories"), 2);
 
         let tx = c.transaction().unwrap();
         mangas_categories::set_categories(&tx, m, &[]).unwrap();
         tx.commit().unwrap();
-        assert_eq!(scalar(&c, "SELECT count(*) FROM mangas_categories"), 0);
+        assert_eq!(scalar(&c, "SELECT count(*) FROM entry_categories"), 0);
     }
 
     #[test]
@@ -1485,9 +1502,9 @@ mod tests {
         let c1 = insert_chapter(&c, m, "/c1");
         let c2 = insert_chapter(&c, m, "/c2");
         let c3 = insert_chapter(&c, m, "/c3");
-        c.execute("UPDATE chapters SET read = 1, date_upload = 10 WHERE _id = ?1", [c1]).unwrap();
-        c.execute("UPDATE chapters SET date_upload = 20 WHERE _id = ?1", [c3]).unwrap();
-        c.execute("UPDATE chapters SET read = 1, bookmark = 1, date_upload = 30 WHERE _id = ?1", [c2]).unwrap();
+        c.execute("UPDATE items SET done = 1, date_upload = 10 WHERE _id = ?1", [c1]).unwrap();
+        c.execute("UPDATE items SET date_upload = 20 WHERE _id = ?1", [c3]).unwrap();
+        c.execute("UPDATE items SET done = 1, bookmark = 1, date_upload = 30 WHERE _id = ?1", [c2]).unwrap();
         history::upsert(&c, c2, 500, 1).unwrap();
 
         let rows = views::library(&c).unwrap();
@@ -1529,14 +1546,14 @@ mod tests {
             ch.scanlator = s.map(str::to_owned);
             chapters::insert(&c, &ch).unwrap();
         }
-        c.execute("INSERT INTO excluded_scanlators(manga_id, scanlator) VALUES (?1, 'G')", [m]).unwrap();
+        c.execute("INSERT INTO excluded_scanlators(entry_id, scanlator) VALUES (?1, 'G')", [m]).unwrap();
         assert_eq!(views::library(&c).unwrap()[0].total_count, 1, "NULL scanlator still counted");
 
         let all_excluded = insert_manga(&c, "/all");
         let mut g = chapter(all_excluded, "/g");
         g.scanlator = Some("G".into());
         chapters::insert(&c, &g).unwrap();
-        c.execute("INSERT INTO excluded_scanlators(manga_id, scanlator) VALUES (?1, 'G')", [all_excluded]).unwrap();
+        c.execute("INSERT INTO excluded_scanlators(entry_id, scanlator) VALUES (?1, 'G')", [all_excluded]).unwrap();
         let rows = views::library(&c).unwrap();
         let row = rows.iter().find(|r| r.manga.id == all_excluded).expect("manga stays listed");
         assert_eq!((row.total_count, row.read_count), (0, 0));
@@ -1546,13 +1563,13 @@ mod tests {
     fn history_view_latest_per_manga_newest_first_and_search() {
         let c = test_db();
         let a = insert_manga(&c, "/a");
-        c.execute("UPDATE mangas SET title = 'Alpha 100%' WHERE _id = ?1", [a]).unwrap();
+        c.execute("UPDATE entries SET title = 'Alpha 100%' WHERE _id = ?1", [a]).unwrap();
         let a1 = insert_chapter(&c, a, "/a1");
         let a2 = insert_chapter(&c, a, "/a2");
         history::upsert(&c, a1, 100, 1).unwrap();
         history::upsert(&c, a2, 300, 1).unwrap();
         let b = insert_manga(&c, "/b");
-        c.execute("UPDATE mangas SET title = 'Beta_gamma' WHERE _id = ?1", [b]).unwrap();
+        c.execute("UPDATE entries SET title = 'Beta_gamma' WHERE _id = ?1", [b]).unwrap();
         let b1 = insert_chapter(&c, b, "/b1");
         history::upsert(&c, b1, 200, 1).unwrap();
         let unread = insert_manga(&c, "/c");
@@ -1684,7 +1701,7 @@ mod tests {
         manga_sync::insert(&c, &track_row(b, manga_sync::ANILIST)).unwrap();
         assert_eq!(manga_sync::delete(&c, a, manga_sync::KITSU).unwrap(), 1);
         assert_eq!(manga_sync::get_tracks(&c).unwrap().len(), 2);
-        c.execute("DELETE FROM mangas WHERE _id = ?1", [a]).unwrap();
+        c.execute("DELETE FROM entries WHERE _id = ?1", [a]).unwrap();
         let left: Vec<i64> = manga_sync::get_tracks(&c).unwrap().iter().map(|t| t.manga_id).collect();
         assert_eq!(left, [b], "TC-S03: deleting the manga removes its tracks");
     }
@@ -1741,7 +1758,7 @@ mod tests {
         let c = test_db();
         let m = insert_manga(&c, "/m");
         let hidden = insert_manga(&c, "/hidden");
-        c.execute("UPDATE mangas SET favorite = 0 WHERE _id = ?1", [hidden]).unwrap();
+        c.execute("UPDATE entries SET favorite = 0 WHERE _id = ?1", [hidden]).unwrap();
         let upd = |manga_id: i64, url: &str, date_fetch: i64, date_upload: i64, read: bool| {
             chapters::insert(&c, &ChapterRow { date_fetch, date_upload, read, ..chapter(manga_id, url) }).unwrap()
         };
@@ -1781,83 +1798,5 @@ mod tests {
         assert_eq!(row("pt-BR", "Foo").visual_name(), "Foo (PT-BR)");
         assert_eq!(row("", "Foo").visual_name(), "77");
         assert_eq!(row("en", "  ").visual_name(), "77");
-    }
-
-    fn repo(base: &str, fingerprint: &str) -> ExtensionRepoRow {
-        ExtensionRepoRow {
-            base_url: base.into(),
-            name: format!("Repo {base}"),
-            short_name: Some("R".into()),
-            website: format!("{base}/site"),
-            signing_key_fingerprint: fingerprint.into(),
-        }
-    }
-
-    #[test]
-    fn extension_repo_find_count_delete_in_insertion_order() {
-        let c = test_db();
-        extension_repos::insert(&c, &repo("https://z", "f1")).unwrap();
-        extension_repos::insert(&c, &repo("https://a", "f2")).unwrap();
-        assert_eq!(extension_repos::find_one(&c, "https://a").unwrap(), Some(repo("https://a", "f2")));
-        assert_eq!(extension_repos::find_one_by_signing_key_fingerprint(&c, "f1").unwrap(), Some(repo("https://z", "f1")));
-        assert_eq!(extension_repos::find_one(&c, "https://none").unwrap(), None);
-        assert_eq!(extension_repos::count(&c).unwrap(), 2);
-        let order: Vec<String> = extension_repos::find_all(&c).unwrap().into_iter().map(|r| r.base_url).collect();
-        assert_eq!(order, ["https://z", "https://a"], "insertion order, not base_url order");
-        assert_eq!(extension_repos::delete(&c, "https://z").unwrap(), 1);
-        assert_eq!(extension_repos::count(&c).unwrap(), 1);
-    }
-
-    #[test]
-    fn extension_repo_insert_conflicts_map_to_constraint() {
-        let c = test_db();
-        extension_repos::insert(&c, &repo("https://a", "f1")).unwrap();
-        assert!(matches!(extension_repos::insert(&c, &repo("https://a", "f9")), Err(DbError::Constraint(_))), "TC-R01");
-        assert!(matches!(extension_repos::insert(&c, &repo("https://b", "f1")), Err(DbError::Constraint(_))), "TC-R02");
-        assert!(matches!(extension_repos::upsert(&c, &repo("https://b", "f1")), Err(DbError::Constraint(_))));
-        assert_eq!(extension_repos::count(&c).unwrap(), 1);
-    }
-
-    #[test]
-    fn extension_repo_upsert_updates_the_row_with_the_same_base_url() {
-        let c = test_db();
-        extension_repos::insert(&c, &repo("https://a", "f1")).unwrap();
-        let changed = ExtensionRepoRow { name: "Renamed".into(), short_name: None, signing_key_fingerprint: "f2".into(), ..repo("https://a", "f1") };
-        extension_repos::upsert(&c, &changed).unwrap();
-        assert_eq!(extension_repos::find_one(&c, "https://a").unwrap(), Some(changed));
-        assert_eq!(extension_repos::count(&c).unwrap(), 1);
-    }
-
-    #[test]
-    fn extension_repo_replace_on_fingerprint_match_overwrites_the_old_row() {
-        let c = test_db();
-        extension_repos::insert(&c, &repo("https://old", "f1")).unwrap();
-        let new = ExtensionRepoRow {
-            base_url: "https://new".into(),
-            name: "New".into(),
-            short_name: None,
-            website: "https://w".into(),
-            signing_key_fingerprint: "f1".into(),
-        };
-        extension_repos::replace(&c, &new).unwrap();
-        assert_eq!(extension_repos::find_one(&c, "https://old").unwrap(), None, "TC-R03: old base_url is gone");
-        assert_eq!(extension_repos::find_one(&c, "https://new").unwrap(), Some(new), "TC-R04");
-        assert_eq!(extension_repos::count(&c).unwrap(), 1);
-        extension_repos::insert(&c, &repo("https://other", "f2")).unwrap();
-        let clash = ExtensionRepoRow { base_url: "https://other".into(), ..repo("https://x", "f1") };
-        assert!(matches!(extension_repos::replace(&c, &clash), Err(DbError::Constraint(_))));
-    }
-
-    #[test]
-    fn classify_conflict_checks_base_url_then_fingerprint() {
-        let c = test_db();
-        extension_repos::insert(&c, &repo("https://a", "f1")).unwrap();
-        use extension_repos::RepoConflict;
-        assert_eq!(extension_repos::classify_conflict(&c, "https://a", "zz").unwrap(), RepoConflict::RepoAlreadyExists);
-        assert_eq!(
-            extension_repos::classify_conflict(&c, "https://b", "f1").unwrap(),
-            RepoConflict::DuplicateFingerprint(repo("https://a", "f1"))
-        );
-        assert_eq!(extension_repos::classify_conflict(&c, "https://b", "f9").unwrap(), RepoConflict::Other);
     }
 }

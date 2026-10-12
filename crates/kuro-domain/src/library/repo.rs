@@ -43,7 +43,7 @@ mod tests {
     use kuro_data::manga::{Manga, MangaRepo};
 
     use super::*;
-    use crate::testdb::{anime_db, manga_db};
+    use crate::testdb::test_db;
 
     fn favourite(title: &str) -> Manga {
         Manga { favorite: true, source: 7, url: format!("u/{title}"), title: title.into(), ..Manga::create() }
@@ -53,7 +53,7 @@ mod tests {
     fn chapter(db: &Db, manga: i64, scanlator: Option<&str>, read: bool) {
         db.write(|tx| {
             tx.execute(
-                "INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload) \
+                "INSERT INTO items(entry_id, url, name, scanlator, done, bookmark, progress, number, source_order, date_fetch, date_upload) \
                  VALUES (?1, ?2, 'c', ?3, ?4, 0, 0, 1, 0, 10, 20)",
                 (manga, format!("c{manga}{scanlator:?}{read}"), scanlator, read),
             )?;
@@ -64,7 +64,7 @@ mod tests {
 
     fn exclude(db: &Db, manga: i64, scanlator: &str) {
         db.write(|tx| {
-            tx.execute("INSERT INTO excluded_scanlators(manga_id, scanlator) VALUES (?1, ?2)", (manga, scanlator))?;
+            tx.execute("INSERT INTO excluded_scanlators(entry_id, scanlator) VALUES (?1, ?2)", (manga, scanlator))?;
             Ok(())
         })
         .unwrap();
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn an_entry_in_three_categories_gives_three_rows_and_no_category_gives_zero() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let in_three = repo.insert(&favourite("three")).unwrap();
         let none = repo.insert(&favourite("none")).unwrap();
@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn counts_exclude_chapters_of_excluded_scanlators_and_derive_pending() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&favourite("counted")).unwrap();
         chapter(&db, id, Some("A"), true);
@@ -104,9 +104,9 @@ mod tests {
 
     #[test]
     fn an_empty_library_gives_no_rows_and_anime_rows_follow_the_same_rule() {
-        let (_d, db) = manga_db();
-        assert!(LibraryRepo::new(db).all(Kind::Manga).unwrap().is_empty());
-        let (_d2, adb) = anime_db();
+        let (_d, db) = test_db();
+        assert!(LibraryRepo::new(db.clone()).all(Kind::Manga).unwrap().is_empty());
+        let adb = db;
         let anime = kuro_data::anime::AnimeRepo::new(adb.clone());
         let id = anime
             .insert(&Anime { favorite: true, source: 3, url: "a".into(), title: "A".into(), ..Anime::create() })

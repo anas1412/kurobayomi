@@ -51,7 +51,7 @@ pub fn networking_rows() -> Vec<PreferenceItem> {
 
 /// Clears every manga's reader viewer flags (the reading mode) and says so in a toast.
 pub fn reset_reader_settings() {
-    let repo = MangaRepo::new(crate::data::app().db(Kind::Manga));
+    let repo = MangaRepo::new(crate::data::app().db.clone());
     if kuro_domain::entries::viewer_flags::reset_viewer_flags_manga(&repo) {
         crate::toast::notify("All reader settings reset");
     } else {

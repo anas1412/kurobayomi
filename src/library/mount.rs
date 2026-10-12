@@ -340,7 +340,7 @@ fn item_downloaded(kind: Kind, db: Arc<Db>, index: Option<kuro_downloads::index:
 
 fn deps(kind: Kind) -> Deps {
     let app = crate::data::app();
-    let db = app.db(kind);
+    let db = app.db.clone();
     let store = app.base.store().clone();
     let prefs = Rc::new(LibraryPrefs::new(store.clone()));
     let categories = Rc::new(kuro_domain::category::service::CategoryService::new(
@@ -396,8 +396,8 @@ fn watch_database(kind: Kind) {
     let rows = on_change("library", move || refresh(kind));
     let categories = on_change("categories", move || refresh(kind));
     match kind {
-        Kind::Anime => bind_watch(AnimeRepo::new(app.db(kind)).subscribe_library(), move |p| rows(p.and_then(|s| (*s).as_ref().map(drop).map_err(String::clone)))),
-        Kind::Manga => bind_watch(MangaRepo::new(app.db(kind)).subscribe_library(), move |p| rows(p.and_then(|s| (*s).as_ref().map(drop).map_err(String::clone)))),
+        Kind::Anime => bind_watch(AnimeRepo::new(app.db.clone()).subscribe_library(), move |p| rows(p.and_then(|s| (*s).as_ref().map(drop).map_err(String::clone)))),
+        Kind::Manga => bind_watch(MangaRepo::new(app.db.clone()).subscribe_library(), move |p| rows(p.and_then(|s| (*s).as_ref().map(drop).map_err(String::clone)))),
     }
     bind_watch(app.categories(kind).repo().watch_all(), move |p| categories(p.map(drop)));
 }
@@ -419,7 +419,7 @@ pub fn build(kind: Kind) -> Option<Built> {
     let app = crate::data::app();
     // subscribed before the view's first load, so a write between the two is not missed
     watch_database(kind);
-    let view = match LibraryView::new(deps(kind), nav(kind, app.db(kind))) {
+    let view = match LibraryView::new(deps(kind), nav(kind, app.db.clone())) {
         Ok(view) => view,
         Err(e) => {
             tracing::error!(error = %e, "the library view could not start");
@@ -536,7 +536,7 @@ mod tests {
             build(Kind::Manga).expect("a second build of the page");
             let view = visible(Some(Kind::Manga)).expect("the manga view is registered");
             assert!(crate::screens::alone::pump(ctx, || view.cover_count() == 0), "an empty library loads");
-            let repo = MangaRepo::new(crate::data::app().db(Kind::Manga));
+            let repo = MangaRepo::new(crate::data::app().db.clone());
             let id = repo.insert(&Manga { source: 7, url: "/b".into(), title: "Berserk".into(), ..Manga::create() }).expect("insert");
             repo.update(&MangaUpdate { favorite: Some(true), ..MangaUpdate::new(id) }).expect("favourite");
             assert!(crate::screens::alone::pump(ctx, || view.cover_count() == 1), "the favourite shows without a refresh");
@@ -544,10 +544,10 @@ mod tests {
         });
     }
 
-    fn manga_db() -> (tempfile::TempDir, Arc<Db>) {
+    fn test_db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         (dir, Arc::new(Db::new(&path, writer).expect("manga db handle")))
     }
 
@@ -569,7 +569,7 @@ mod tests {
 
     #[test]
     fn t2_del_01_removal_clears_the_favorite_and_leaves_the_rest() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() }).expect("insert");
         assert_eq!(repo.by_id(id).expect("stored").title, "Berserk");
@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn t2_del_03_removal_deletes_the_cover_and_stamps_its_timestamp() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let paths = TempPaths::new().expect("temp paths");
         let repo = MangaRepo::new(db.clone());
         let id = repo
@@ -606,7 +606,7 @@ mod tests {
     #[test]
     fn a_removal_with_no_cached_cover_leaves_the_cover_timestamp_alone() {
         // Kotlin's removeCovers moves the timestamp only when it deleted a file.
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         let paths = TempPaths::new().expect("temp paths");
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() }).expect("insert");
@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn an_unknown_source_shows_its_id_and_no_language() {
-        let (_dir, db) = manga_db();
+        let (_dir, db) = test_db();
         assert_eq!(source_info(&db, Kind::Manga, 42), SourceInfo { name: "42".into(), language: String::new() });
     }
 

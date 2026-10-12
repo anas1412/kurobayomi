@@ -26,7 +26,7 @@ notification delivery are injected by the GUI crate.
 | `anime::naming` | `fat_safe`, episode, legacy and source folder names (T-24a-004, T-24a-005) |
 | `anime::layout` | anime folder lookups, creation, episode and source rename, free-space precheck (T-24a-006 to T-24a-008, T-24a-017) |
 | `anime::progress` | `ProgressCell` (0..=100, publishes on change) and the ffmpeg percent rule (T-24a-002) |
-| `anime::store` | SQLite `anime_download_queue`: add, remove, clear, restore (T-24a-009) |
+| `anime::store` | SQLite `download_queue` (anime rows): add, remove, clear, restore (T-24a-009) |
 | `anime::enqueue` | enqueue filter and order, queue-size warning (T-24a-012, T-24a-013) |
 | `anime::resolve` | `HosterResolver` seam and `resolve_video` (T-24a-014) |
 | `anime::manager` | queue actor, command channel, per-source scheduler with 3 sources, delete cascade (T-24a-010, T-24a-011, T-24a-034) |
@@ -44,7 +44,7 @@ notification delivery are injected by the GUI crate.
 | `anime::downloader` | `EpisodeEngine`, the `EpisodeRunner` for one episode: staging, resume, retry, success check, finalise with collision handling; startup `sweep_staging` (T-24a-016, T-24a-049, T-24a-062, T-24a-066) |
 | `engine` | `QueueEngine` adapters for the two kinds (start, stop, pause_and_stop, clear, reorder, remove) (T-25a-017) |
 | `download_prefs` | typed download preferences: 23 accessors returning `Pref<T>` on the area 02 store (T-25a-001) |
-| `pending` | manga remove-after-read list: `manga_pending_delete` store, take-all transaction, flush plan (T-23a-028) |
+| `pending` | manga remove-after-read list: `download_pending_delete` store (manga rows), take-all transaction, flush plan (T-23a-028) |
 | `watch` | `notify` watcher on the downloads root and a 2 s debouncer that invalidates the index (T-23a-045) |
 | `local` | local manga source counts (directories and archives) and recursive size (T-23a-042) |
 | `redact` | log redaction: URL query, fragment and userinfo removed, header values replaced by `<redacted>` (T-24a-060) |
@@ -140,8 +140,8 @@ notification delivery are injected by the GUI crate.
 - **`ntfs-names` (default on), D-DL-01.** A reserved device name gets `_` appended before its extension
   (`CON` becomes `CON_`, `LPT1.txt` becomes `LPT1_.txt`), so folders copied to a Windows disk stay valid. Titles
   without a reserved name produce the Kotlin output byte for byte.
-- **Queue table DDL** lives in `sql/download_queue.sql` and is applied idempotently by `QueueStore::open`. Area 03
-  may move it into its numbered migrations.
+- **Queue table DDL** lives in the unified database (`kuro-db/sql/unified/downloads.sql`, exported as
+  `schema_unified::DOWNLOAD_DDL`). The stores only read and write it; `open_in_memory` applies it for tests.
 - **Index snapshot** is `KIDX\x01` followed by JSON, in `download-index-v1.bin`. bincode is not in the local
   registry cache, and JSON keeps the format inspectable. A file that fails to parse, or was written for another
   root, is deleted.

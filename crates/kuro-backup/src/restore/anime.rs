@@ -33,9 +33,9 @@ pub struct AnimeOutcome {
     pub dropped_read_durations: usize,
 }
 
-/// The `(source, url)` pairs already in `animes`, read once per section (T-22a-022).
+/// The `(source, url)` pairs of the anime already in `entries`, read once per section (T-22a-022).
 pub fn existing_pairs(tx: &Transaction<'_>) -> DbResult<HashSet<(i64, String)>> {
-    let mut stmt = tx.prepare("SELECT source, url FROM animes")?;
+    let mut stmt = tx.prepare("SELECT source, url FROM entries WHERE kind = 'anime'")?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
     Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
 }
@@ -77,7 +77,7 @@ pub fn restore_anime_root(
 
 fn memberships_differ(tx: &Transaction<'_>, anime_id: i64, ids: &[i64]) -> DbResult<bool> {
     let stored: Vec<i64> = tx
-        .prepare("SELECT category_id FROM animes_categories WHERE anime_id = ?1")?
+        .prepare("SELECT category_id FROM entry_categories WHERE entry_id = ?1 AND kind = 'anime'")?
         .query_map([anime_id], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     Ok(differs_from_stored(stored, ids))
@@ -120,10 +120,10 @@ fn update_is_noop(p: &AnimeUpdate, d: &AnimeRow) -> bool {
 /// Replaces the category memberships of one anime (T-22a-025). Written here because the `kuro-db` helper opens its own
 /// transaction, which SQLite refuses inside the entry transaction.
 fn set_categories(tx: &Transaction<'_>, anime_id: i64, ids: &[i64]) -> DbResult<()> {
-    tx.execute("DELETE FROM animes_categories WHERE anime_id = ?1", [anime_id])?;
+    tx.execute("DELETE FROM entry_categories WHERE entry_id = ?1 AND kind = 'anime'", [anime_id])?;
     let unique: BTreeSet<i64> = ids.iter().copied().collect();
     for id in unique {
-        tx.execute("INSERT INTO animes_categories(anime_id, category_id) VALUES (?1, ?2)", [anime_id, id])?;
+        tx.execute("INSERT OR IGNORE INTO entry_categories(entry_id, kind, category_id) VALUES (?1, 'anime', ?2)", [anime_id, id])?;
     }
     Ok(())
 }
@@ -152,9 +152,9 @@ pub fn restore_anime_entry(
     if let Some(ids) = membership_ids(categories, &b.categories) {
         if memberships_differ(tx, id, &ids)? {
             // The membership insert trigger bumps `version` unless the row is syncing; the restore keeps the version it set.
-            let version: i64 = tx.query_row("SELECT version FROM animes WHERE _id = ?1", [id], |r| r.get(0))?;
+            let version: i64 = tx.query_row("SELECT version FROM entries WHERE _id = ?1 AND kind = 'anime'", [id], |r| r.get(0))?;
             set_categories(tx, id, &ids)?;
-            tx.execute("UPDATE animes SET version = ?1 WHERE _id = ?2", [version, id])?;
+            tx.execute("UPDATE entries SET version = ?1 WHERE _id = ?2 AND kind = 'anime'", [version, id])?;
         }
     }
     restore_episodes(tx, id, &b.episodes)?;
@@ -379,7 +379,7 @@ fn restore_history(
             continue;
         };
         let stored: Option<i64> = tx
-            .query_row("SELECT last_seen FROM animehistory WHERE episode_id = ?1", [episode_id], |r| r.get(0))
+            .query_row("SELECT last_at FROM history WHERE item_id = ?1", [episode_id], |r| r.get(0))
             .optional()?;
         let seen_at = stored.map_or(h.last_read, |db| h.last_read.max(db));
         if stored == Some(seen_at) {
@@ -421,7 +421,7 @@ pub fn refresh_interval(tx: &Transaction<'_>, clock: &RunClock, anime_id: i64) -
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone};
-    use kuro_db::schema_anime;
+    use kuro_db::schema_unified;
     use kuro_db::statements_anime::{categories_by_anime_id, episodes_by_url_and_anime_id, insert_category};
     use rusqlite::Connection;
 
@@ -433,7 +433,7 @@ mod tests {
 
     fn db() -> (tempfile::TempDir, Connection) {
         let dir = tempfile::tempdir().unwrap();
-        let c = schema_anime::open(&dir.path().join("anime.db")).unwrap();
+        let c = schema_unified::open_file(&dir.path().join("kurobayomi.db")).unwrap();
         (dir, c)
     }
 
@@ -508,7 +508,7 @@ mod tests {
         root.id = Some(1);
         restore(&mut c, &AnimeRoot { entry: root.clone(), seasons: vec![] });
         let db_id = by_url(&c, "keep").id;
-        c.execute("UPDATE animes SET parent_id = 42 WHERE _id = ?1", [db_id]).unwrap();
+        c.execute("UPDATE entries SET parent_id = 42 WHERE _id = ?1", [db_id]).unwrap();
         root.parent_id = Some(7);
         restore(&mut c, &AnimeRoot { entry: root, seasons: vec![] });
         assert_eq!(by_url(&c, "keep").parent_id, Some(42), "a root never writes the raw backup parent");
@@ -565,12 +565,12 @@ mod tests {
         assert_eq!(out.dropped_read_durations, 1, "E-42: readDuration not stored");
         let id = by_url(&c, "hist").id;
         let ep = episodes_by_anime_id(&c, id).unwrap()[0].id;
-        let seen: i64 = c.query_row("SELECT last_seen FROM animehistory WHERE episode_id = ?1", [ep], |r| r.get(0)).unwrap();
+        let seen: i64 = c.query_row("SELECT last_at FROM history WHERE item_id = ?1", [ep], |r| r.get(0)).unwrap();
         assert_eq!(seen, 500);
 
         a.history = vec![BackupAnimeHistory { url: "h1".into(), last_read: 100, read_duration: 0 }];
         restore(&mut c, &AnimeRoot { entry: a, seasons: vec![] });
-        let seen: i64 = c.query_row("SELECT last_seen FROM animehistory WHERE episode_id = ?1", [ep], |r| r.get(0)).unwrap();
+        let seen: i64 = c.query_row("SELECT last_at FROM history WHERE item_id = ?1", [ep], |r| r.get(0)).unwrap();
         assert_eq!(seen, 500, "max keeps the later DB value");
     }
 

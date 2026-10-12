@@ -11,9 +11,6 @@ use crate::manager::{DeleteRules, chapters_to_delete};
 use crate::model::{ChapterRef, MangaRef};
 use crate::store::StoreError;
 
-/// DDL for `manga_pending_delete`.
-pub const SCHEMA: &str = include_str!("../sql/manga_pending_delete.sql");
-
 /// The chapters pending for one manga, in insertion order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PendingManga {
@@ -26,13 +23,13 @@ pub struct MangaPendingStore {
 }
 
 impl MangaPendingStore {
+    /// Rows live in `download_pending_delete` with `kind = 'manga'`; the table belongs to the unified schema.
     pub fn open(conn: Connection) -> Result<Self, StoreError> {
-        conn.execute_batch(SCHEMA)?;
         Ok(Self { conn: Mutex::new(conn) })
     }
 
     pub fn open_in_memory() -> Result<Self, StoreError> {
-        Self::open(Connection::open_in_memory()?)
+        Self::open(crate::memory_downloads_db()?)
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>, StoreError> {
@@ -51,13 +48,20 @@ impl MangaPendingStore {
         let selected = chapters_to_delete(chapters.to_vec(), rules);
         let mut conn = self.lock()?;
         let tx = conn.transaction()?;
+        let mut seq: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(seq), -1) + 1 FROM download_pending_delete WHERE entry_id = ?1",
+            params![manga.id],
+            |row| row.get(0),
+        )?;
         let mut added = 0;
         for c in &selected {
-            added += tx.execute(
-                "INSERT OR IGNORE INTO manga_pending_delete(chapter_id, manga_id, manga_title, manga_url, source_id, \
-                 chapter_name, chapter_url, scanlator, enqueued_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![c.id, manga.id, manga.title, manga.url, manga.source_id, c.name, c.url, c.scanlator, now],
+            let n = tx.execute(
+                "INSERT OR IGNORE INTO download_pending_delete(unit_id, kind, entry_id, entry_title, entry_url, source, \
+                 unit_name, unit_url, scanlator, seq, enqueued_at) VALUES (?1, 'manga', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![c.id, manga.id, manga.title, manga.url, manga.source_id, c.name, c.url, c.scanlator, seq, now],
             )?;
+            seq += n as i64;
+            added += n;
         }
         tx.commit()?;
         Ok(added)
@@ -70,8 +74,8 @@ impl MangaPendingStore {
         let tx = conn.transaction()?;
         let rows: Vec<(MangaRef, ChapterRef)> = {
             let mut stmt = tx.prepare(
-                "SELECT chapter_id, manga_id, manga_title, manga_url, source_id, chapter_name, chapter_url, scanlator \
-                 FROM manga_pending_delete ORDER BY enqueued_at, chapter_id",
+                "SELECT unit_id, entry_id, entry_title, entry_url, source, unit_name, unit_url, scanlator \
+                 FROM download_pending_delete WHERE kind = 'manga' ORDER BY enqueued_at, unit_id",
             )?;
             let mapped = stmt.query_map([], |row| {
                 let manga = MangaRef {
@@ -101,7 +105,7 @@ impl MangaPendingStore {
             })?;
             mapped.collect::<Result<_, _>>()?
         };
-        tx.execute("DELETE FROM manga_pending_delete", [])?;
+        tx.execute("DELETE FROM download_pending_delete WHERE kind = 'manga'", [])?;
         tx.commit()?;
         Ok(group(rows))
     }

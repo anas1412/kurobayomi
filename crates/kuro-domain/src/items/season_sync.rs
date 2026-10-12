@@ -128,13 +128,13 @@ fn season_update(local: &Anime, season_number: f64, memo: serde_json::Map<String
 #[cfg(test)]
 mod sync_seasons {
     use super::*;
-    use crate::testdb::anime_db;
+    use crate::testdb::test_db;
 
     const NOW: i64 = 1_700_000_000_000;
     const SOURCE: i64 = 7;
 
     fn setup() -> (tempfile::TempDir, SyncSeasons, AnimeRepo, Anime) {
-        let (dir, db) = anime_db();
+        let (dir, db) = test_db();
         let sync = SyncSeasons::new(db.clone());
         let repo = AnimeRepo::new(db);
         let mut parent = Anime { url: "/show".into(), title: "Show".into(), source: SOURCE, ..Anime::create() };

@@ -59,7 +59,7 @@ fn wait_for(mut check: impl FnMut() -> bool) -> bool {
 
 /// One anime with one episode whose url is the clip. Returns the database and the episode id.
 fn library(dir: &TempDir, clip: &Path) -> (Arc<Db>, i64) {
-    let db = TestDb::anime_handle(dir);
+    let db = TestDb::handle(dir);
     let anime_id = AnimeRepo::new(Arc::clone(&db)).insert(&Anime::create()).expect("anime row");
     let episode = Episode {
         anime_id,

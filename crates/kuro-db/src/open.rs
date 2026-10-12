@@ -13,9 +13,6 @@ pub use crate::schema::SchemaBundle;
 
 use crate::migrate;
 
-/// `PRAGMA application_id` of every Kurobayomi database: ASCII "KUR0". Aniyomi files keep 0.
-pub const APPLICATION_ID: i64 = 0x4B55_5230;
-
 /// Busy timeout of every connection, in milliseconds (`PRAGMA busy_timeout`).
 pub const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 
@@ -64,7 +61,7 @@ pub fn register_functions(c: &Connection) -> DbResult<()> {
 
 /// Opens (creating the file and its parent directory when needed) and brings the database to the
 /// bundle's latest version. The gate runs before any write: a `user_version` above the bundle, or a
-/// file with another application id (an Aniyomi file), is refused and left untouched.
+/// file with another application id (an Aniyomi or an old per-kind file), is refused and left untouched.
 ///
 /// A file that fails its check, or is not a database at all, is renamed to `<file>.corrupt-<UTC>` (with its
 /// `-wal` and `-shm` siblings) and the call returns [`DbError::Corrupt`] naming where it went. The path is then
@@ -227,41 +224,43 @@ pub(crate) fn create_baseline(c: &mut Connection, bundle: &SchemaBundle) -> DbRe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{BASELINE_SQL, MANGA_SCHEMA};
+    use crate::schema_unified::{APPLICATION_ID, UNIFIED_SCHEMA};
 
-    /// Baseline 33 plus one test migration that creates a table.
-    const WITH_34: SchemaBundle = SchemaBundle {
+    const BASELINE_SQL: &str = UNIFIED_SCHEMA.baseline_sql;
+
+    /// Baseline 1 plus one test migration that creates a table.
+    const WITH_2: SchemaBundle = SchemaBundle {
         baseline_sql: BASELINE_SQL,
-        baseline_version: 33,
-        migrations: &[(34, "CREATE TABLE t(x);")],
+        baseline_version: 1,
+        migrations: &[(2, "CREATE TABLE t(x);")],
         application_id: APPLICATION_ID,
         tables: &[],
-        refuse_foreign: |found| DbError::LegacyFile { found },
+        refuse_foreign: |found| DbError::ForeignFile { found },
     };
 
-    /// Migration 34 that leaves a deferred foreign key violation, caught only by foreign_key_check.
-    const BAD_34: SchemaBundle = SchemaBundle {
+    /// Migration 2 that leaves a deferred foreign key violation, caught only by foreign_key_check.
+    const BAD_2: SchemaBundle = SchemaBundle {
         baseline_sql: BASELINE_SQL,
-        baseline_version: 33,
+        baseline_version: 1,
         migrations: &[(
-            34,
+            2,
             "CREATE TABLE p(id INTEGER PRIMARY KEY); \
              CREATE TABLE c(pid INTEGER REFERENCES p(id) DEFERRABLE INITIALLY DEFERRED); \
              INSERT INTO c VALUES (5);",
         )],
         application_id: APPLICATION_ID,
         tables: &[],
-        refuse_foreign: |found| DbError::LegacyFile { found },
+        refuse_foreign: |found| DbError::ForeignFile { found },
     };
 
-    /// The baseline alone (version 33, no migrations): a file that still needs migration 34.
+    /// The baseline alone (version 1, no migrations): a file that still needs migration 2.
     const BASELINE_ONLY: SchemaBundle = SchemaBundle {
         baseline_sql: BASELINE_SQL,
-        baseline_version: 33,
+        baseline_version: 1,
         migrations: &[],
         application_id: APPLICATION_ID,
         tables: &[],
-        refuse_foreign: |found| DbError::LegacyFile { found },
+        refuse_foreign: |found| DbError::ForeignFile { found },
     };
 
     fn pragma_i64(c: &Connection, name: &str) -> i64 {
@@ -276,18 +275,18 @@ mod tests {
             .collect()
     }
 
-    /// Creates a Kurobayomi file at version 33 (baseline only) and closes it.
+    /// Creates a Kurobayomi file at version 1 (baseline only) and closes it.
     fn kur_file(dir: &Path) -> std::path::PathBuf {
-        let p = dir.join("manga.db");
+        let p = dir.join("kurobayomi.db");
         drop(open_and_migrate(&p, &BASELINE_ONLY).unwrap());
         p
     }
 
     #[test]
-    fn new_file_gets_baseline_pragmas_and_seed_row() {
+    fn new_file_gets_baseline_pragmas_and_seed_rows() {
         let dir = tempfile::tempdir().unwrap();
-        let c = open_and_migrate(&dir.path().join("manga.db"), &MANGA_SCHEMA).unwrap();
-        assert_eq!(pragma_i64(&c, "user_version"), 34);
+        let c = open_and_migrate(&dir.path().join("kurobayomi.db"), &UNIFIED_SCHEMA).unwrap();
+        assert_eq!(pragma_i64(&c, "user_version"), 1);
         assert_eq!(pragma_i64(&c, "application_id"), APPLICATION_ID);
         assert_eq!(pragma_i64(&c, "foreign_keys"), 1);
         assert_eq!(pragma_i64(&c, "recursive_triggers"), 0);
@@ -295,19 +294,25 @@ mod tests {
         assert_eq!(pragma_i64(&c, "synchronous"), 1);
         let mode: String = c.pragma_query_value(None, "journal_mode", |r| r.get(0)).unwrap();
         assert_eq!(mode, "wal");
-        let seed: (i64, String, i64, i64, i64) = c
-            .query_row("SELECT * FROM categories", [], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-            })
-            .unwrap();
-        assert_eq!(seed, (0, String::new(), -1, 0, 0), "TC-O01: the baseline seed row");
+        let seed: Vec<(String, i64, String, i64, i64, i64)> = c
+            .prepare("SELECT * FROM categories ORDER BY kind")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            seed,
+            [("anime".to_owned(), 0, String::new(), -1, 64, 0), ("manga".to_owned(), 0, String::new(), -1, 64, 0)],
+            "the system category of each kind"
+        );
     }
 
     fn corrupt_siblings(dir: &Path) -> Vec<String> {
         let mut names: Vec<String> = std::fs::read_dir(dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .filter(|n| n.starts_with("manga.db.corrupt-"))
+            .filter(|n| n.starts_with("kurobayomi.db.corrupt-"))
             .collect();
         names.sort();
         names
@@ -317,39 +322,39 @@ mod tests {
     fn a_healthy_file_is_not_quarantined() {
         let dir = tempfile::tempdir().unwrap();
         let p = kur_file(dir.path());
-        drop(open_and_migrate(&p, &MANGA_SCHEMA).unwrap());
+        drop(open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap());
         assert!(corrupt_siblings(dir.path()).is_empty());
     }
 
     #[test]
     fn a_corrupt_file_is_moved_aside_and_the_open_returns_corrupt() {
         let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("manga.db");
+        let p = dir.path().join("kurobayomi.db");
         std::fs::write(&p, b"this is not a sqlite database, just bytes ".repeat(200)).unwrap();
-        let err = open_and_migrate(&p, &MANGA_SCHEMA).unwrap_err();
+        let err = open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap_err();
         let DbError::Corrupt(msg) = err else { panic!("expected Corrupt, got {err}") };
         let kept = corrupt_siblings(dir.path());
         assert_eq!(kept.len(), 1);
         assert!(msg.contains(&kept[0]), "the error names the quarantine path: {msg}");
-        let stamp = kept[0].strip_prefix("manga.db.corrupt-").unwrap();
+        let stamp = kept[0].strip_prefix("kurobayomi.db.corrupt-").unwrap();
         assert_eq!(stamp.len(), 16, "UTC stamp like the backup names: {stamp}");
         assert!(stamp.ends_with('Z') && stamp.as_bytes()[8] == b'T');
         assert!(std::fs::read(dir.path().join(&kept[0])).unwrap().starts_with(b"this is not"), "bytes are kept");
         assert!(!p.exists() && !dirty_marker(&p).exists(), "the path is free for a new database");
-        let c = open_and_migrate(&p, &MANGA_SCHEMA).unwrap();
-        assert_eq!(pragma_i64(&c, "user_version"), 34, "the next open creates an empty database");
+        let c = open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap();
+        assert_eq!(pragma_i64(&c, "user_version"), 1, "the next open creates an empty database");
     }
 
     #[test]
     fn quarantine_never_overwrites_an_earlier_one() {
         let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("manga.db");
+        let p = dir.path().join("kurobayomi.db");
         let junk = b"not a database ".repeat(300);
         for round in 0..3u8 {
             let mut bytes = junk.clone();
             bytes.push(round);
             std::fs::write(&p, &bytes).unwrap();
-            assert!(matches!(open_and_migrate(&p, &MANGA_SCHEMA), Err(DbError::Corrupt(_))));
+            assert!(matches!(open_and_migrate(&p, &UNIFIED_SCHEMA), Err(DbError::Corrupt(_))));
         }
         let kept = corrupt_siblings(dir.path());
         assert_eq!(kept.len(), 3, "{kept:?}");
@@ -361,19 +366,19 @@ mod tests {
     #[test]
     fn an_empty_file_is_not_treated_as_corrupt() {
         let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("manga.db");
+        let p = dir.path().join("kurobayomi.db");
         std::fs::write(&p, b"").unwrap();
-        drop(open_and_migrate(&p, &MANGA_SCHEMA).unwrap());
+        drop(open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap());
         assert!(corrupt_siblings(dir.path()).is_empty());
     }
 
     #[test]
     fn open_puts_the_dirty_marker_down_and_a_clean_shutdown_takes_it_up() {
         let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("manga.db");
-        let c = open_and_migrate(&p, &MANGA_SCHEMA).unwrap();
+        let p = dir.path().join("kurobayomi.db");
+        let c = open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap();
         assert!(dirty_marker(&p).is_file(), "marker exists while the database is open");
-        assert_eq!(dirty_marker(&p).file_name().unwrap(), "manga.db.dirty");
+        assert_eq!(dirty_marker(&p).file_name().unwrap(), "kurobayomi.db.dirty");
         drop(c);
         mark_clean_shutdown(&p).unwrap();
         assert!(!dirty_marker(&p).exists());
@@ -387,7 +392,7 @@ mod tests {
         std::fs::write(dirty_marker(&p), b"").unwrap();
         let bytes = std::fs::read(&p).unwrap();
         std::fs::write(&p, &bytes[..bytes.len().min(100)]).unwrap();
-        assert!(matches!(open_and_migrate(&p, &MANGA_SCHEMA), Err(DbError::Corrupt(_))), "a truncated dirty file is quarantined");
+        assert!(matches!(open_and_migrate(&p, &UNIFIED_SCHEMA), Err(DbError::Corrupt(_))), "a truncated dirty file is quarantined");
         assert_eq!(corrupt_siblings(dir.path()).len(), 1);
     }
 
@@ -395,20 +400,20 @@ mod tests {
     fn restore_newest_backup_brings_back_the_pre_migration_copy_of_a_truncated_file() {
         let dir = tempfile::tempdir().unwrap();
         let p = kur_file(dir.path());
-        drop(open_and_migrate(&p, &WITH_34).unwrap());
-        assert_eq!(backup_files(dir.path()).len(), 1, "migrating 33 to 34 kept one pre-migration backup");
+        drop(open_and_migrate(&p, &WITH_2).unwrap());
+        assert_eq!(backup_files(dir.path()).len(), 1, "migrating 1 to 2 kept one pre-migration backup");
         let bytes = std::fs::read(&p).unwrap();
         std::fs::write(&p, &bytes[..100]).unwrap();
 
         let restored = restore_newest_backup(&p).unwrap();
-        assert!(restored.file_name().unwrap().to_string_lossy().contains(".pre-v33-"));
+        assert!(restored.file_name().unwrap().to_string_lossy().contains(".pre-v1-"));
         let quarantined = std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
-            .any(|n| n.starts_with("manga.db.corrupt-"));
+            .any(|n| n.starts_with("kurobayomi.db.corrupt-"));
         assert!(quarantined, "the truncated file is kept aside, not deleted");
         let c = open_and_migrate(&p, &BASELINE_ONLY).unwrap();
-        assert_eq!(pragma_i64(&c, "user_version"), 33, "the restored copy is the version it was taken at");
+        assert_eq!(pragma_i64(&c, "user_version"), 1, "the restored copy is the version it was taken at");
     }
 
     #[test]
@@ -421,18 +426,18 @@ mod tests {
     #[test]
     fn creates_parent_directory() {
         let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("nested").join("manga.db");
-        drop(open_and_migrate(&p, &MANGA_SCHEMA).unwrap());
+        let p = dir.path().join("nested").join("kurobayomi.db");
+        drop(open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap());
         assert!(p.exists());
     }
 
     #[test]
     fn reopen_keeps_version_and_writes_no_backup() {
         let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("manga.db");
-        drop(open_and_migrate(&p, &MANGA_SCHEMA).unwrap());
-        let c = open_and_migrate(&p, &MANGA_SCHEMA).unwrap();
-        assert_eq!(pragma_i64(&c, "user_version"), 34);
+        let p = dir.path().join("kurobayomi.db");
+        drop(open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap());
+        let c = open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap();
+        assert_eq!(pragma_i64(&c, "user_version"), 1);
         assert!(backup_files(dir.path()).is_empty());
     }
 
@@ -443,7 +448,7 @@ mod tests {
         let reader = open_connection(&p).unwrap();
         assert_eq!(pragma_i64(&reader, "foreign_keys"), 1);
         let orphan = reader.execute(
-            "INSERT INTO chapters(manga_id, url, name, read, bookmark, last_page_read, chapter_number, \
+            "INSERT INTO items(entry_id, url, name, done, bookmark, progress, number, \
              source_order, date_fetch, date_upload) VALUES (99, 'u', 'n', 0, 0, 0, 1, 0, 0, 0)",
             [],
         );
@@ -454,7 +459,7 @@ mod tests {
     fn kuro_lower_is_registered_on_every_file_connection() {
         let dir = tempfile::tempdir().unwrap();
         let p = kur_file(dir.path());
-        let writer = crate::schema_manga::open(&p).unwrap();
+        let writer = crate::schema_unified::open_file(&p).unwrap();
         for c in [writer, open_connection(&p).unwrap()] {
             let folded: String = c.query_row("SELECT kuro_lower('ÉCLAIR')", [], |r| r.get(0)).unwrap();
             assert_eq!(folded, "éclair");
@@ -464,17 +469,17 @@ mod tests {
     }
 
     #[test]
-    fn aniyomi_file_is_refused_without_writes() {
+    fn a_file_with_another_application_id_is_refused_without_writes() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("tachiyomi.db");
         {
             let c = Connection::open(&p).unwrap();
-            c.execute_batch(BASELINE_SQL).unwrap();
-            c.pragma_update(None, "user_version", 33).unwrap();
+            c.execute_batch("CREATE TABLE mangas(_id INTEGER PRIMARY KEY);").unwrap();
+            c.pragma_update(None, "user_version", 1).unwrap();
         }
         let before = std::fs::read(&p).unwrap();
-        let err = open_and_migrate(&p, &MANGA_SCHEMA).unwrap_err();
-        assert!(matches!(err, DbError::LegacyFile { found: 33 }), "TC-O03: {err}");
+        let err = open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap_err();
+        assert!(matches!(err, DbError::ForeignFile { found: 1 }), "TC-O03: {err}");
         assert_eq!(std::fs::read(&p).unwrap(), before);
     }
 
@@ -484,8 +489,8 @@ mod tests {
         let p = kur_file(dir.path());
         Connection::open(&p).unwrap().pragma_update(None, "user_version", 99).unwrap();
         let before = std::fs::read(&p).unwrap();
-        let err = open_and_migrate(&p, &MANGA_SCHEMA).unwrap_err();
-        assert!(matches!(err, DbError::TooNew { found: 99, supported: 34 }), "TC-O04: {err}");
+        let err = open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap_err();
+        assert!(matches!(err, DbError::TooNew { found: 99, supported: 1 }), "TC-O04: {err}");
         assert_eq!(std::fs::read(&p).unwrap(), before);
     }
 
@@ -493,8 +498,8 @@ mod tests {
     fn version_below_baseline_is_corrupt() {
         let dir = tempfile::tempdir().unwrap();
         let p = kur_file(dir.path());
-        Connection::open(&p).unwrap().pragma_update(None, "user_version", 20).unwrap();
-        let err = open_and_migrate(&p, &MANGA_SCHEMA).unwrap_err();
+        Connection::open(&p).unwrap().pragma_update(None, "user_version", 0).unwrap();
+        let err = open_and_migrate(&p, &UNIFIED_SCHEMA).unwrap_err();
         assert!(matches!(err, DbError::Corrupt(_)), "{err}");
     }
 
@@ -502,42 +507,27 @@ mod tests {
     fn pending_migration_runs_once_with_backup() {
         let dir = tempfile::tempdir().unwrap();
         let p = kur_file(dir.path());
-        let c = open_and_migrate(&p, &WITH_34).unwrap();
-        assert_eq!(pragma_i64(&c, "user_version"), 34);
+        let c = open_and_migrate(&p, &WITH_2).unwrap();
+        assert_eq!(pragma_i64(&c, "user_version"), 2);
         let t: i64 = c
             .query_row("SELECT count(*) FROM sqlite_master WHERE name = 't'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(t, 1);
         drop(c);
         assert_eq!(backup_files(dir.path()).len(), 1);
-        let again = open_and_migrate(&p, &WITH_34).unwrap();
-        assert_eq!(pragma_i64(&again, "user_version"), 34);
+        let again = open_and_migrate(&p, &WITH_2).unwrap();
+        assert_eq!(pragma_i64(&again, "user_version"), 2);
         assert_eq!(backup_files(dir.path()).len(), 1);
-    }
-
-    #[test]
-    fn aniyomi_fresh_ddl_fixture_is_refused_as_a_legacy_file_without_writes() {
-        // TC-O03 with the Aniyomi `.sq` text (history.last_read nullable, as upstream writes it).
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("tachiyomi.db");
-        Connection::open(&p)
-            .unwrap()
-            .execute_batch(include_str!("../tests/fixtures/aniyomi_fresh_v33.sql"))
-            .unwrap();
-        let before = std::fs::read(&p).unwrap();
-        let err = open_and_migrate(&p, &MANGA_SCHEMA).unwrap_err();
-        assert!(matches!(err, DbError::LegacyFile { found: 33 }), "TC-O03: {err}");
-        assert_eq!(std::fs::read(&p).unwrap(), before, "the Aniyomi file stays byte-identical");
     }
 
     #[test]
     fn migration_with_foreign_key_violation_rolls_back() {
         let dir = tempfile::tempdir().unwrap();
         let p = kur_file(dir.path());
-        let err = open_and_migrate(&p, &BAD_34).unwrap_err();
+        let err = open_and_migrate(&p, &BAD_2).unwrap_err();
         assert!(matches!(err, DbError::Constraint(_)), "{err}");
         let c = Connection::open(&p).unwrap();
-        assert_eq!(pragma_i64(&c, "user_version"), 33);
+        assert_eq!(pragma_i64(&c, "user_version"), 1);
         let p_table: i64 = c
             .query_row("SELECT count(*) FROM sqlite_master WHERE name = 'p'", [], |r| r.get(0))
             .unwrap();

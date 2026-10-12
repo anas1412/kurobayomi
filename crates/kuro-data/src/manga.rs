@@ -17,8 +17,8 @@ use crate::{
 };
 
 /// Tables of one manga row (`subscribe_by_id`, `subscribe_by_url_and_source`, `subscribe_favorites_by_source`).
-const MANGA_TABLE: &[&str] = &["mangas"];
-const CHAPTER_TABLE: &[&str] = &["chapters"];
+const MANGA_TABLE: &[&str] = &["entries"];
+const CHAPTER_TABLE: &[&str] = &["items"];
 const EXCLUDED_TABLE: &[&str] = &["excluded_scanlators"];
 
 /// The non-blank scanlators of a list (`GetAvailableScanlators` drops blank names).
@@ -27,7 +27,7 @@ fn available(scanlators: Vec<String>) -> BTreeSet<String> {
 }
 
 /// Tables a `libraryView` row reads (`subscribe_library`).
-const LIBRARY_TABLES: &[&str] = &["mangas", "chapters", "mangas_categories", "excluded_scanlators", "history"];
+const LIBRARY_TABLES: &[&str] = &["entries", "items", "entry_categories", "excluded_scanlators", "history"];
 
 /// Upcoming-tab statuses for manga: ONGOING (1) and PUBLISHING_FINISHED (4), as `GetUpcomingManga`
 /// passes them.
@@ -545,7 +545,7 @@ mod excluded_scanlator_tests {
     use kuro_db::statements_manga::{ChapterRow, chapters};
 
     use super::*;
-    use crate::tests::manga_db;
+    use crate::tests::test_db;
 
     fn set(items: &[&str]) -> BTreeSet<String> {
         items.iter().map(|s| (*s).to_owned()).collect()
@@ -573,7 +573,7 @@ mod excluded_scanlator_tests {
 
     #[test]
     fn set_makes_the_excluded_set_equal_to_the_wanted_one() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(Arc::clone(&db));
         let id = repo.insert(&Manga::create()).expect("insert");
         repo.set_excluded_scanlators(id, &set(&["A", "B"])).expect("set");
@@ -588,7 +588,7 @@ mod excluded_scanlator_tests {
     fn the_excluded_list_is_published_after_each_set() {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_time().build().expect("runtime");
         let _guard = rt.enter();
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(Arc::clone(&db));
         let id = repo.insert(&Manga::create()).expect("insert");
         let mut sub = repo.subscribe_excluded_scanlators(id);
@@ -605,7 +605,7 @@ mod excluded_scanlator_tests {
 
     #[test]
     fn available_scanlators_are_distinct_and_drop_blank_names() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(Arc::clone(&db));
         let id = repo.insert(&Manga::create()).expect("insert");
         db.write(|tx| {
@@ -622,7 +622,7 @@ mod excluded_scanlator_tests {
 
     #[test]
     fn excluding_one_of_several_names_keeps_the_others() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(Arc::clone(&db));
         let id = repo.insert(&Manga::create()).expect("insert");
         repo.set_excluded_scanlators(id, &set(&["G1", "G2"])).expect("both");

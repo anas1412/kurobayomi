@@ -608,8 +608,8 @@ crate's tests before it is merged. Rollback is section 7.
   read/write `download_queue` / `download_pending_delete` / `download_pending_corrupt` with the kind literal and
   `entry_id/unit_id` names (anime store fills `source` from `entries` in the insert: `INSERT ... SELECT`); `open(conn)`
   stops running `SCHEMA`; `open_in_memory()` applies the unified DDL for those three tables, exported by kuro-db as
-  `kuro_db::schema_unified::DOWNLOAD_DDL` (same text as in the baseline; FKs are off on a plain in-memory connection, so
-  tests keep inserting arbitrary ids). The unreadable guard and the other behaviours do not change (they are step 5).
+  `kuro_db::schema_unified::DOWNLOAD_DDL` (same text as in the baseline; rusqlite builds with foreign keys ON, so a plain
+  in-memory connection enforces them and tests must insert real entry ids). The unreadable guard and the other behaviours do not change (they are step 5).
   `testdata/` fixtures regenerate. Delete the four `sql/*.sql` files.
 - `crates/kuro-track/src/queue/{store.rs, mod.rs}`: drop `CREATE` (the table exists); `kuro-track/src/{repo.rs, fakes.rs}`
   tests use `TestDb::handle`.

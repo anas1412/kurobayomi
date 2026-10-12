@@ -115,7 +115,7 @@ pub const NO_ENTRY: i64 = 0;
 fn page_for(anime_id: i64) -> GBox {
     crate::entry_core::tracking::session::refresh_from_host();
     let app = data::app();
-    let db = app.db(Kind::Anime);
+    let db = app.db.clone();
     let prefs = app.base.store().clone();
     let show_airing = crate::misc::diet_defaults::ENTRY_SHOW_AIRING_TIME;
     let ctx = AnimeLoadContext {
@@ -891,6 +891,7 @@ impl View {
             dispatch
         };
         for cmd in dispatch.cmds {
+            self.track_marked(&cmd);
             self.runner.send(cmd);
         }
         if let Some((id, external)) = dispatch.open {
@@ -912,8 +913,18 @@ impl View {
             menu_cmds(m, id, action, self.env.backend.has_download_handler(), self.remove_after_seen())
         };
         for cmd in cmds {
+            self.track_marked(&cmd);
             self.runner.send(cmd);
         }
+    }
+
+    /// A mark seen goes to the trackers too, with the numbers of the episodes it changed.
+    fn track_marked(&self, cmd: &AnimeCmd) {
+        let AnimeCmd::SetSeen { ids, seen: true } = cmd else { return };
+        let model = self.model.borrow();
+        let Some(m) = model.as_ref() else { return };
+        let numbers: Vec<f64> = m.episodes.iter().filter(|e| ids.contains(&e.id)).map(|e| e.episode_number).collect();
+        crate::entry_core::tracking::progress::marked(Kind::Anime, m.anime.id, true, &numbers, crate::data::app().base.incognito_mode.get());
     }
 
     /// Whether the entry's source is a torrent source and the torrent server is on (17.4, 17.5).

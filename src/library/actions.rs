@@ -403,8 +403,8 @@ mod tests {
     fn t2_cont_03_an_excluded_scanlator_is_never_the_next_chapter() {
         // The only unread chapter belongs to an excluded scanlator, so there is nothing to continue with.
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         let db = Arc::new(Db::new(&path, writer).expect("manga db handle"));
         let manga_id = MangaRepo::new(db.clone())
             .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "t".into(), ..Manga::create() })
@@ -454,8 +454,8 @@ mod tests {
 
     fn db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         (dir, Arc::new(Db::new(&path, writer).expect("manga db handle")))
     }
 
@@ -497,7 +497,7 @@ mod tests {
         db.write(|tx| {
             for (n, read, bookmark) in chapters {
                 tx.execute(
-                    "INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload) \
+                    "INSERT INTO items(entry_id, url, name, scanlator, done, bookmark, progress, number, source_order, date_fetch, date_upload) \
                      VALUES (?1, ?2, 'c', NULL, ?3, ?4, 0, ?5, ?5, 0, 0)",
                     (id, format!("c{n}"), read, bookmark, *n as f64),
                 )?;
@@ -548,8 +548,8 @@ mod tests {
         let (_dir, db) = db();
         let row = manga_with_chapters(&db, SORTING_NUMBER | SORT_ASC, &[(1, true, false), (2, false, false), (3, false, false)]);
         db.write(|tx| {
-            tx.execute("UPDATE chapters SET scanlator = 'Bad' WHERE manga_id = ?1 AND chapter_number = 2", [row.id])?;
-            tx.execute("INSERT INTO excluded_scanlators(manga_id, scanlator) VALUES (?1, 'Bad')", [row.id])?;
+            tx.execute("UPDATE items SET scanlator = 'Bad' WHERE entry_id = ?1 AND number = 2", [row.id])?;
+            tx.execute("INSERT INTO excluded_scanlators(entry_id, scanlator) VALUES (?1, 'Bad')", [row.id])?;
             Ok(())
         })
         .expect("exclude a scanlator");
@@ -579,7 +579,7 @@ mod tests {
         db.write(|tx| {
             for (n, read) in [(1, true), (2, false), (3, false)] {
                 tx.execute(
-                    "INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload) \
+                    "INSERT INTO items(entry_id, url, name, scanlator, done, bookmark, progress, number, source_order, date_fetch, date_upload) \
                      VALUES (?1, ?2, 'c', NULL, ?3, 0, 0, ?4, ?4, 0, 0)",
                     (id, format!("c{n}"), read, n as f64),
                 )?;
@@ -599,7 +599,7 @@ mod tests {
         db.write(|tx| {
             for n in 1..=3 {
                 tx.execute(
-                    "INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload) \
+                    "INSERT INTO items(entry_id, url, name, scanlator, done, bookmark, progress, number, source_order, date_fetch, date_upload) \
                      VALUES (?1, ?2, ?3, NULL, 0, 0, 0, ?4, ?4, 0, 0)",
                     (id, format!("u{n}"), format!("c{n}"), n as f64),
                 )?;

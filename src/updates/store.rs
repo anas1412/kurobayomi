@@ -25,8 +25,8 @@ mod tests {
 
     fn fixture() -> Fixture {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         let db = Arc::new(Db::new(&path, writer).expect("manga db handle"));
         Fixture { _dir: dir, db }
     }
@@ -150,7 +150,7 @@ mod tests {
         bulk::apply(&f.db, Kind::Manga, &[ids[1]], BulkAction::MarkRead(true)).expect("pre-read");
         f.db.write(|tx| {
             for (id, name) in ids.iter().zip(["c1", "c2", "c3", "c4"]) {
-                tx.execute("UPDATE chapters SET name = ?1 WHERE _id = ?2", (name, id))?;
+                tx.execute("UPDATE items SET name = ?1 WHERE _id = ?2", (name, id))?;
             }
             Ok(())
         })

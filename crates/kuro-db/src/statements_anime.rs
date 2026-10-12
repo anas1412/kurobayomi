@@ -2,10 +2,11 @@
 //! T-04a-012). Plain functions over `&Connection` with no runtime, so an async wrapper can call them
 //! from `spawn_blocking` later. Rows are read by column name.
 //!
-//! The SQL text is the Aniyomi `.sq` text of the named statements (`dataanime/animes.sq`,
-//! `episodes.sq`, `animehistory.sq`, `view/animehistoryView.sq`), byte for byte, except for two
-//! documented changes: `HISTORY_LIST` adds `ESCAPE '\'` so that `%` and `_` typed by the user match
-//! literally (decision D5), and the `IN :list` statements get their placeholder list at run time.
+//! The anime kind lives in the unified tables (`entries`, `items`, `tracks`, ...) with `kind = 'anime'` pinned in
+//! every statement. SELECT lists alias the unified columns back to the old anime names, so every row struct and
+//! `from_row` is unchanged. The SQL is otherwise the Aniyomi `.sq` text, except that `HISTORY_LIST` adds
+//! `ESCAPE '\'` so that `%` and `_` typed by the user match literally (decision D5), and the `IN :list` statements
+//! get their placeholder list at run time.
 
 use rusqlite::{named_params, params_from_iter, Connection, Row};
 
@@ -15,46 +16,106 @@ use crate::schema_anime::{FetchType, Memo, Millis};
 /// Ids per `IN (...)` statement, the chunk size of the Kotlin repositories.
 const IN_CHUNK: usize = 500;
 
-// SQL text: the Aniyomi .sq named statements, byte for byte (see the module doc for the two changes).
-const ANIME_BY_ID: &str = r#"SELECT *
-FROM animes
-WHERE _id = :id"#;
+/// The old `animes` columns of an `entries` row (`$p` is a table alias with its dot, or empty). `item_flags` is the
+/// anime layout already, `is_syncing` is gone and reads as 0.
+macro_rules! anime_cols {
+    ($p:literal) => {
+        concat!(
+            $p, "_id, ", $p, "source, ", $p, "url, ", $p, "artist, ", $p, "author, ", $p, "description, ", $p, "genre, ",
+            $p, "title, ", $p, "status, ", $p, "thumbnail_url, ", $p, "favorite, ", $p, "last_update, ", $p, "next_update, ",
+            $p, "initialized, ", $p, "viewer, ", $p, "item_flags AS episode_flags, ", $p, "cover_last_modified, ",
+            $p, "date_added, ", $p, "update_strategy, ", $p, "calculate_interval, ", $p, "last_modified_at, ",
+            $p, "favorite_modified_at, ", $p, "version, 0 AS is_syncing, ", $p, "fetch_type, ", $p, "parent_id, ",
+            $p, "season_flags, ", $p, "season_number, ", $p, "season_source_order, ", $p, "background_url, ",
+            $p, "background_last_modified, ", $p, "memo"
+        )
+    };
+}
 
-const ANIME_BY_URL_AND_SOURCE: &str = r#"SELECT *
-FROM animes
-WHERE url = :url AND source = :source
-LIMIT 1"#;
+/// The old `episodes` columns of an `items` row (`$p` is an alias with its dot, or empty).
+macro_rules! episode_cols {
+    ($p:literal) => {
+        concat!(
+            $p, "_id, ", $p, "entry_id AS anime_id, ", $p, "url, ", $p, "name, ", $p, "scanlator, ", $p, "done AS seen, ",
+            $p, "bookmark, ", $p, "progress AS last_second_seen, ", $p, "total_seconds, ", $p, "number AS episode_number, ",
+            $p, "source_order, ", $p, "date_fetch, ", $p, "date_upload, ", $p, "last_modified_at, ", $p, "version, ",
+            "0 AS is_syncing, ", $p, "summary, ", $p, "preview_url, ", $p, "fillermark, ", $p, "memo"
+        )
+    };
+}
 
-const ANIME_FAVORITES: &str = r#"SELECT *
-FROM animes
-WHERE favorite = 1"#;
+/// The old `anime_sync` columns of a `tracks` row (`$p` is an alias with its dot, or empty).
+macro_rules! anime_track_cols {
+    ($p:literal) => {
+        concat!(
+            $p, "_id, ", $p, "entry_id AS anime_id, ", $p, "tracker_id AS sync_id, ", $p, "remote_id, ", $p, "library_id, ",
+            $p, "title, ", $p, "last_item AS last_episode_seen, ", $p, "total_items AS total_episodes, ", $p, "status, ",
+            $p, "score, ", $p, "remote_url, ", $p, "start_date, ", $p, "finish_date, ", $p, "private"
+        )
+    };
+}
 
-const ANIME_WATCHED_NOT_IN_LIBRARY: &str = r#"SELECT *
-FROM animes
-WHERE favorite = 0 AND _id IN (
-    SELECT DISTINCT episodes.anime_id
-    FROM episodes
-    WHERE seen = 1 OR last_second_seen != 0
-)"#;
+/// The ids of the anime entries, as a subquery.
+macro_rules! anime_ids {
+    () => {
+        "(SELECT _id FROM entries WHERE kind = 'anime')"
+    };
+}
 
-const ANIME_FAVORITES_BY_SOURCE: &str = r#"SELECT *
-FROM animes
-WHERE favorite = 1
-AND source = :sourceId"#;
+/// The ids of the anime items, as a subquery.
+macro_rules! anime_item_ids {
+    () => {
+        "(SELECT i._id FROM items i JOIN entries e ON e._id = i.entry_id WHERE e.kind = 'anime')"
+    };
+}
 
-const ANIME_RESET_VIEWER_FLAGS: &str = r#"UPDATE animes
-SET viewer = 0"#;
+/// The two aggregate CTEs of the library view, over a scope of entry ids. `$scope` is the body of
+/// `scope(entry_id)`; `$seasons` is the filter on the entries whose children roll up (design section 1.1).
+macro_rules! stats_ctes {
+    ($scope:literal, $seasons:literal) => {
+        concat!(
+            "WITH scope(entry_id) AS (", $scope, "), ",
+            "item_stats AS (SELECT i.entry_id, count(*) AS total, sum(i.done) AS doneCount, ",
+            "coalesce(max(i.date_upload), 0) AS latestUpload, coalesce(max(i.date_fetch), 0) AS fetchedAt, ",
+            "sum(i.bookmark) AS bookmarkCount, sum(i.fillermark) AS fillermarkCount, coalesce(max(h.last_at), 0) AS lastActivity ",
+            "FROM items i LEFT JOIN excluded_scanlators x ON x.entry_id = i.entry_id AND x.scanlator = i.scanlator ",
+            "LEFT JOIN history h ON h.item_id = i._id ",
+            "WHERE x.scanlator IS NULL AND i.entry_id IN (SELECT entry_id FROM scope) GROUP BY i.entry_id), ",
+            "season_stats AS (SELECT s.parent_id, count(*) AS child_count, ",
+            "sum(CASE WHEN s.fetch_type = 1 AND coalesce(t.total, 0) = coalesce(t.doneCount, 0) THEN 1 ELSE 0 END) AS fully_done, ",
+            "max(coalesce(t.latestUpload, 0)) AS latestUpload, max(coalesce(t.fetchedAt, 0)) AS fetchedAt, ",
+            "max(coalesce(t.lastActivity, 0)) AS lastActivity, sum(coalesce(t.bookmarkCount, 0)) AS bookmarkCount, ",
+            "sum(coalesce(t.fillermarkCount, 0)) AS fillermarkCount ",
+            "FROM entries s LEFT JOIN item_stats t ON t.entry_id = s._id WHERE s.parent_id IN (", $seasons, ") GROUP BY s.parent_id) "
+        )
+    };
+}
+
+const ANIME_BY_ID: &str = concat!("SELECT ", anime_cols!(""), " FROM entries WHERE _id = :id AND kind = 'anime'");
+
+const ANIME_BY_URL_AND_SOURCE: &str =
+    concat!("SELECT ", anime_cols!(""), " FROM entries WHERE url = :url AND source = :source AND kind = 'anime' LIMIT 1");
+
+const ANIME_FAVORITES: &str = concat!("SELECT ", anime_cols!(""), " FROM entries WHERE favorite = 1 AND kind = 'anime'");
+
+const ANIME_WATCHED_NOT_IN_LIBRARY: &str = concat!(
+    "SELECT ", anime_cols!(""), " FROM entries WHERE kind = 'anime' AND favorite = 0 AND _id IN (SELECT DISTINCT entry_id FROM items WHERE done = 1 OR progress != 0)"
+);
+
+const ANIME_FAVORITES_BY_SOURCE: &str =
+    concat!("SELECT ", anime_cols!(""), " FROM entries WHERE kind = 'anime' AND favorite = 1 AND source = :sourceId");
+
+const ANIME_RESET_VIEWER_FLAGS: &str = "UPDATE entries SET viewer = 0 WHERE kind = 'anime'";
 
 /// Replaces only the bits of `mask` in `viewer` of one anime, in one statement (EC-21 and EC-22 write their fields this
 /// way, so the skip-intro and the airing groups never overwrite each other).
-const ANIME_SET_VIEWER_BITS: &str = r#"UPDATE animes
-SET viewer = (viewer & ~:mask) | (:value & :mask)
-WHERE _id = :animeId"#;
+const ANIME_SET_VIEWER_BITS: &str =
+    "UPDATE entries SET viewer = (viewer & ~:mask) | (:value & :mask) WHERE _id = :animeId AND kind = 'anime'";
 
-const ANIME_INSERT: &str = r#"INSERT INTO animes(source, url, artist, author, description, genre, title, status, thumbnail_url, favorite, last_update, next_update, initialized, viewer, episode_flags, cover_last_modified, date_added, update_strategy, calculate_interval, last_modified_at, version, fetch_type, parent_id, season_flags, season_number, season_source_order, background_url, background_last_modified, memo)
-VALUES (:source, :url, :artist, :author, :description, :genre, :title, :status, :thumbnailUrl, :favorite, :lastUpdate, :nextUpdate, :initialized, :viewerFlags, :episodeFlags, :coverLastModified,:dateAdded, :updateStrategy, :calculateInterval, 0, :version, :fetchType, :parentId, :seasonFlags, :seasonNumber, :seasonSourceOrder, :backgroundUrl, :backgroundLastModified, :memo)"#;
+const ANIME_INSERT: &str = "INSERT INTO entries(kind, source, url, artist, author, description, genre, title, status, thumbnail_url, favorite, last_update, next_update, initialized, viewer, item_flags, cover_last_modified, date_added, update_strategy, calculate_interval, last_modified_at, version, fetch_type, parent_id, season_flags, season_number, season_source_order, background_url, background_last_modified, memo)
+VALUES ('anime', :source, :url, :artist, :author, :description, :genre, :title, :status, :thumbnailUrl, :favorite, :lastUpdate, :nextUpdate, :initialized, :viewerFlags, :episodeFlags, :coverLastModified,:dateAdded, :updateStrategy, :calculateInterval, 0, :version, :fetchType, :parentId, :seasonFlags, :seasonNumber, :seasonSourceOrder, :backgroundUrl, :backgroundLastModified, :memo)";
 
-const ANIME_UPDATE: &str = r#"UPDATE animes SET
+const ANIME_UPDATE: &str = r#"UPDATE entries SET
     source = coalesce(:source, source),
     url = coalesce(:url, url),
     artist = coalesce(:artist, artist),
@@ -69,13 +130,12 @@ const ANIME_UPDATE: &str = r#"UPDATE animes SET
     next_update = coalesce(:nextUpdate, next_update),
     initialized = coalesce(:initialized, initialized),
     viewer = coalesce(:viewer, viewer),
-    episode_flags = coalesce(:episodeFlags, episode_flags),
+    item_flags = coalesce(:episodeFlags, item_flags),
     cover_last_modified = coalesce(:coverLastModified, cover_last_modified),
     date_added = coalesce(:dateAdded, date_added),
     update_strategy = coalesce(:updateStrategy, update_strategy),
     calculate_interval = coalesce(:calculateInterval, calculate_interval),
     version = coalesce(:version, version),
-    is_syncing = coalesce(:isSyncing, is_syncing),
     fetch_type = coalesce(:fetchType, fetch_type),
     parent_id = coalesce(:parentId, parent_id),
     season_flags = coalesce(:seasonFlags, season_flags),
@@ -84,99 +144,95 @@ const ANIME_UPDATE: &str = r#"UPDATE animes SET
     background_url = coalesce(:backgroundUrl, background_url),
     background_last_modified = coalesce(:backgroundLastModified, background_last_modified),
     memo = coalesce(:memo, memo)
-WHERE _id = :animeId"#;
+WHERE _id = :animeId AND kind = 'anime'"#;
 
-const EPISODE_BY_ID: &str = r#"SELECT *
-FROM episodes
-WHERE _id = :id"#;
+const EPISODE_BY_ID: &str = concat!(
+    "SELECT ", episode_cols!("i."), " FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'anime' WHERE i._id = :id"
+);
 
-const EPISODES_BY_ANIME_ID: &str = r#"SELECT *
-FROM episodes
-WHERE anime_id = :animeId"#;
+const EPISODES_BY_ANIME_ID: &str = concat!(
+    "SELECT ", episode_cols!("i."), " FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'anime' WHERE i.entry_id = :animeId"
+);
 
-const BOOKMARKED_EPISODES_BY_ANIME_ID: &str = r#"SELECT *
-FROM episodes
-WHERE bookmark
-AND anime_id = :animeId"#;
+const BOOKMARKED_EPISODES_BY_ANIME_ID: &str = concat!(
+    "SELECT ", episode_cols!("i."), " FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'anime' WHERE i.bookmark AND i.entry_id = :animeId"
+);
 
-const EPISODE_BY_URL: &str = r#"SELECT *
-FROM episodes
-WHERE url = :episodeUrl"#;
+const EPISODE_BY_URL: &str = concat!(
+    "SELECT ", episode_cols!("i."), " FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'anime' WHERE i.url = :episodeUrl"
+);
 
-const EPISODE_BY_URL_AND_ANIME_ID: &str = r#"SELECT *
-FROM episodes
-WHERE url = :episodeUrl
-AND anime_id = :animeId"#;
+const EPISODE_BY_URL_AND_ANIME_ID: &str = concat!(
+    "SELECT ", episode_cols!("i."), " FROM items i JOIN entries e ON e._id = i.entry_id AND e.kind = 'anime' WHERE i.url = :episodeUrl AND i.entry_id = :animeId"
+);
 
-const EPISODE_INSERT: &str = r#"INSERT INTO episodes(anime_id, url, name, scanlator, seen, bookmark, last_second_seen, total_seconds, episode_number, source_order, date_fetch, date_upload, last_modified_at, version, is_syncing, summary, preview_url, fillermark, memo)
-VALUES (:animeId, :url, :name, :scanlator, :seen, :bookmark, :lastSecondSeen, :totalSeconds, :episodeNumber, :sourceOrder, :dateFetch, :dateUpload, 0, :version, 0, :summary, :previewUrl, :fillermark, :memo)"#;
+const EPISODE_INSERT: &str = r#"INSERT INTO items(entry_id, url, name, scanlator, done, bookmark, progress, total_seconds, number, source_order, date_fetch, date_upload, last_modified_at, version, summary, preview_url, fillermark, memo)
+VALUES (:animeId, :url, :name, :scanlator, :seen, :bookmark, :lastSecondSeen, :totalSeconds, :episodeNumber, :sourceOrder, :dateFetch, :dateUpload, 0, :version, :summary, :previewUrl, :fillermark, :memo)"#;
 
-const EPISODE_UPDATE: &str = r#"UPDATE episodes
-SET anime_id = coalesce(:animeId, anime_id),
+const EPISODE_UPDATE: &str = r#"UPDATE items
+SET entry_id = coalesce(:animeId, entry_id),
     url = coalesce(:url, url),
     name = coalesce(:name, name),
     scanlator = coalesce(:scanlator, scanlator),
-    seen = coalesce(:seen, seen),
+    done = coalesce(:seen, done),
     bookmark = coalesce(:bookmark, bookmark),
-    last_second_seen = coalesce(:lastSecondSeen, last_second_seen),
+    progress = coalesce(:lastSecondSeen, progress),
     total_seconds = coalesce(:totalSeconds, total_seconds),
-    episode_number = coalesce(:episodeNumber, episode_number),
+    number = coalesce(:episodeNumber, number),
     source_order = coalesce(:sourceOrder, source_order),
     date_fetch = coalesce(:dateFetch, date_fetch),
     date_upload = coalesce(:dateUpload, date_upload),
     version = coalesce(:version, version),
-    is_syncing = coalesce(:isSyncing, is_syncing),
     summary = coalesce(:summary, summary),
     preview_url = coalesce(:previewUrl, preview_url),
     fillermark = coalesce(:fillermark, fillermark),
     memo = coalesce(:memo, memo)
-WHERE _id = :episodeId"#;
+WHERE _id = :episodeId AND entry_id IN (SELECT _id FROM entries WHERE kind = 'anime')"#;
 
-const HISTORY_RESET_BY_ID: &str = r#"UPDATE animehistory
-SET last_seen = 0
-WHERE _id = :historyId"#;
+const HISTORY_RESET_BY_ID: &str =
+    concat!("UPDATE history SET last_at = 0 WHERE _id = :historyId AND item_id IN ", anime_item_ids!());
 
-const HISTORY_RESET_BY_ANIME_ID: &str = r#"UPDATE animehistory
-SET last_seen = 0
+const HISTORY_RESET_BY_ANIME_ID: &str = r#"UPDATE history
+SET last_at = 0
 WHERE _id IN (
     SELECT H._id
-    FROM animes M
-    INNER JOIN episodes EP
-    ON M._id = EP.anime_id
-    INNER JOIN animehistory H
-    ON EP._id = H.episode_id
-    WHERE M._id = :animeId
+    FROM entries M
+    INNER JOIN items EP
+    ON M._id = EP.entry_id
+    INNER JOIN history H
+    ON EP._id = H.item_id
+    WHERE M._id = :animeId AND M.kind = 'anime'
 )"#;
 
-const HISTORY_DELETE_ALL: &str = r#"DELETE FROM animehistory"#;
+const HISTORY_DELETE_ALL: &str = concat!("DELETE FROM history WHERE item_id IN ", anime_item_ids!());
 
-const HISTORY_REMOVE_RESETTED: &str = r#"DELETE FROM animehistory
-WHERE last_seen = 0"#;
+const HISTORY_REMOVE_RESETTED: &str = concat!("DELETE FROM history WHERE last_at = 0 AND item_id IN ", anime_item_ids!());
 
-const HISTORY_UPSERT: &str = r#"INSERT INTO animehistory(episode_id, last_seen)
+const HISTORY_UPSERT: &str = r#"INSERT INTO history(item_id, last_at)
 VALUES (:episodeId, :seenAt)
-ON CONFLICT(episode_id)
+ON CONFLICT(item_id)
 DO UPDATE
 SET
-    last_seen = :seenAt
-WHERE episode_id = :episodeId"#;
+    last_at = :seenAt
+WHERE item_id = :episodeId"#;
 
 const HISTORY_LIST: &str = r#"SELECT
 id,
-animeId,
-episodeId,
+entryId AS animeId,
+itemId AS episodeId,
 title,
 thumbnailUrl,
 source,
 favorite,
 cover_last_modified,
-episodeNumber,
-seenAt
-FROM animehistoryView
-WHERE animehistoryView.seenAt > 0
-AND maxSeenAtEpisodeId = animehistoryView.episodeId
-AND kuro_lower(animehistoryView.title) LIKE ('%' || kuro_lower(:query) || '%') ESCAPE '\'
-ORDER BY seenAt DESC"#;
+itemNumber AS episodeNumber,
+lastAt AS seenAt
+FROM historyView
+WHERE kind = 'anime'
+AND lastAt > 0
+AND maxLastAtItemId = itemId
+AND kuro_lower(title) LIKE ('%' || kuro_lower(:query) || '%') ESCAPE '\'
+ORDER BY lastAt DESC"#;
 
 /// One `animes` row, all 32 columns.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -421,7 +477,7 @@ fn episode_rows(c: &Connection, sql: &str, params: &[(&str, &dyn rusqlite::ToSql
 }
 
 /// Inserts an anime. `id`, `last_modified_at` (written as the literal 0), `favorite_modified_at` and
-/// `is_syncing` are not bound: the first two come from the statement, the others take column defaults.
+/// is not bound: the first two come from the statement, the other takes its column default.
 /// Returns the new `_id`.
 pub fn insert_anime(c: &Connection, a: &AnimeRow) -> rusqlite::Result<i64> {
     c.prepare_cached(ANIME_INSERT)?.execute(named_params! {
@@ -457,8 +513,7 @@ pub fn insert_anime(c: &Connection, a: &AnimeRow) -> rusqlite::Result<i64> {
     Ok(c.last_insert_rowid())
 }
 
-/// Coalesce update: every `None` keeps the stored column. Always writes `is_syncing = 0`, so the
-/// version triggers fire again after a restore (`p1-topic-triggers-and-versioning.md` section 4).
+/// Coalesce update: every `None` keeps the stored column.
 pub fn update_anime(c: &Connection, u: &AnimeUpdate) -> rusqlite::Result<usize> {
     c.prepare_cached(ANIME_UPDATE)?.execute(named_params! {
         ":source": u.source,
@@ -481,7 +536,6 @@ pub fn update_anime(c: &Connection, u: &AnimeUpdate) -> rusqlite::Result<usize> 
         ":updateStrategy": u.update_strategy,
         ":calculateInterval": u.fetch_interval,
         ":version": u.version,
-        ":isSyncing": 0_i64,
         ":fetchType": u.fetch_type,
         ":parentId": u.parent_id,
         ":seasonFlags": u.season_flags,
@@ -498,7 +552,7 @@ pub fn anime_by_id(c: &Connection, id: i64) -> rusqlite::Result<Option<AnimeRow>
     Ok(anime_rows(c, ANIME_BY_ID, named_params! {":id": id})?.into_iter().next())
 }
 
-/// At most one row (`LIMIT 1`): duplicates are possible because no unique index exists.
+/// At most one row: `(kind, source, url)` is unique.
 pub fn anime_by_url_and_source(c: &Connection, url: &str, source: i64) -> rusqlite::Result<Option<AnimeRow>> {
     let params = named_params! {":url": url, ":source": source};
     Ok(anime_rows(c, ANIME_BY_URL_AND_SOURCE, params)?.into_iter().next())
@@ -531,8 +585,7 @@ pub fn set_viewer_bits(c: &Connection, anime_id: i64, value: i64, mask: i64) -> 
     })
 }
 
-/// Inserts an episode and returns its new `_id`. `last_modified_at` and `is_syncing` are written as
-/// literal 0 by the statement.
+/// Inserts an episode and returns its new `_id`. `last_modified_at` is written as literal 0 by the statement.
 pub fn insert_episode(c: &Connection, e: &EpisodeRow) -> rusqlite::Result<i64> {
     c.prepare_cached(EPISODE_INSERT)?.execute(named_params! {
         ":animeId": e.anime_id,
@@ -556,7 +609,7 @@ pub fn insert_episode(c: &Connection, e: &EpisodeRow) -> rusqlite::Result<i64> {
     Ok(c.last_insert_rowid())
 }
 
-/// Coalesce update of an episode; always writes `is_syncing = 0`.
+/// Coalesce update of an episode.
 pub fn update_episode(c: &Connection, u: &EpisodeUpdate) -> rusqlite::Result<usize> {
     c.prepare_cached(EPISODE_UPDATE)?.execute(named_params! {
         ":animeId": u.anime_id,
@@ -572,7 +625,6 @@ pub fn update_episode(c: &Connection, u: &EpisodeUpdate) -> rusqlite::Result<usi
         ":dateFetch": u.date_fetch,
         ":dateUpload": u.date_upload,
         ":version": u.version,
-        ":isSyncing": 0_i64,
         ":summary": u.summary,
         ":previewUrl": u.preview_url,
         ":fillermark": u.fillermark,
@@ -606,7 +658,7 @@ pub fn episodes_by_url_and_anime_id(c: &Connection, url: &str, anime_id: i64) ->
 pub fn remove_episodes_with_ids(c: &Connection, ids: &[i64]) -> rusqlite::Result<usize> {
     let mut removed = 0;
     for chunk in ids.chunks(IN_CHUNK) {
-        let sql = format!("DELETE FROM episodes\nWHERE _id IN ({})", in_placeholders(chunk.len()));
+        let sql = format!("DELETE FROM items\nWHERE _id IN ({}) AND entry_id IN {}", in_placeholders(chunk.len()), anime_ids!());
         removed += c.prepare(&sql)?.execute(params_from_iter(chunk))?;
     }
     Ok(removed)
@@ -647,7 +699,7 @@ pub fn remove_resetted_history(c: &Connection) -> rusqlite::Result<usize> {
     c.prepare_cached(HISTORY_REMOVE_RESETTED)?.execute([])
 }
 
-/// One `animelibView` row (T-04a-010): the entry, its aggregates and one category it belongs to
+/// One `libraryView` row of the anime kind (T-04a-010): the entry, its aggregates and one category it belongs to
 /// (`0` when it has none).
 #[derive(Clone, Debug, PartialEq)]
 pub struct LibraryAnimeRow {
@@ -684,15 +736,37 @@ impl LibraryAnimeRow {
     }
 }
 
+const LIBRARY: &str = concat!(
+    "SELECT ", anime_cols!(""), ", category, totalCount, doneCount AS seenCount, bookmarkCount, fillermarkCount, latestUpload, itemFetchedAt AS episodeFetchedAt, lastActivity AS lastSeen FROM libraryView WHERE kind = 'anime'"
+);
+
+/// The seasons of one parent: the two stats CTEs of the library view over the children of `:parentId` and their
+/// children. A browsed parent that is not a favourite has seasons too, which the view's favourites prefilter would
+/// zero out, so this is a statement and not a view.
+const SEASONS_OF: &str = concat!(
+    stats_ctes!(
+        "SELECT _id FROM entries WHERE parent_id = :parentId UNION SELECT _id FROM entries WHERE parent_id IN (SELECT _id FROM entries WHERE parent_id = :parentId)",
+        "SELECT _id FROM entries WHERE parent_id = :parentId"
+    ),
+    "SELECT ", anime_cols!("e."), ", ",
+    "CASE WHEN e.fetch_type = 0 THEN coalesce(ss.child_count, 0) ELSE coalesce(st.total, 0) END AS totalCount, ",
+    "CASE WHEN e.fetch_type = 0 THEN coalesce(ss.fully_done, 0) ELSE coalesce(st.doneCount, 0) END AS seenCount, ",
+    "CASE WHEN e.fetch_type = 0 THEN coalesce(ss.latestUpload, 0) ELSE coalesce(st.latestUpload, 0) END AS latestUpload, ",
+    "CASE WHEN e.fetch_type = 0 THEN coalesce(ss.fetchedAt, 0) ELSE coalesce(st.fetchedAt, 0) END AS episodeFetchedAt, ",
+    "CASE WHEN e.fetch_type = 0 THEN coalesce(ss.lastActivity, 0) ELSE coalesce(st.lastActivity, 0) END AS lastSeen, ",
+    "CASE WHEN e.fetch_type = 0 THEN coalesce(ss.bookmarkCount, 0) ELSE coalesce(st.bookmarkCount, 0) END AS bookmarkCount, ",
+    "CASE WHEN e.fetch_type = 0 THEN coalesce(ss.fillermarkCount, 0) ELSE coalesce(st.fillermarkCount, 0) END AS fillermarkCount ",
+    "FROM entries e LEFT JOIN item_stats st ON st.entry_id = e._id LEFT JOIN season_stats ss ON ss.parent_id = e._id ",
+    "WHERE e.parent_id = :parentId AND e.kind = 'anime' ORDER BY e._id"
+);
+
 /// Every library entry, one row per category membership. Read by column name, so a column added to
-/// `animes` does not shift the aggregates.
+/// `entries` does not shift the aggregates.
 pub fn library(c: &Connection) -> rusqlite::Result<Vec<LibraryAnimeRow>> {
-    c.prepare_cached("SELECT * FROM animelibView")?
-        .query_map([], LibraryAnimeRow::from_row)?
-        .collect()
+    c.prepare_cached(LIBRARY)?.query_map([], LibraryAnimeRow::from_row)?.collect()
 }
 
-/// One `animeseasonsView` row: a season (child entry) with its episode aggregates.
+/// One row of [`seasons_of`]: a season (child entry) with its episode aggregates.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SeasonAnimeRow {
     pub anime: AnimeRow,
@@ -705,9 +779,9 @@ pub struct SeasonAnimeRow {
     pub last_seen: i64,
 }
 
-/// The seasons of one parent entry, in `_id` order (the view itself leaves the order open).
+/// The seasons of one parent entry, in `_id` order.
 pub fn seasons_of(c: &Connection, parent_id: i64) -> rusqlite::Result<Vec<SeasonAnimeRow>> {
-    c.prepare_cached("SELECT * FROM animeseasonsView WHERE parent_id = :parentId ORDER BY _id")?
+    c.prepare_cached(SEASONS_OF)?
         .query_map(named_params! {":parentId": parent_id}, |r| {
             Ok(SeasonAnimeRow {
                 anime: AnimeRow::from_row(r)?,
@@ -815,52 +889,34 @@ pub fn delete_all_history_logged(c: &Connection) -> bool {
     }
 }
 
-const CATEGORY_BY_ID: &str = r#"SELECT _id AS id, name, sort AS "order", flags, hidden
-FROM categories
-WHERE _id = :id
-LIMIT 1"#;
+const CATEGORY_BY_ID: &str = "SELECT _id AS id, name, sort AS \"order\", flags, hidden FROM categories WHERE _id = :id AND kind = 'anime' LIMIT 1";
 
-const CATEGORIES: &str = r#"SELECT _id AS id, name, sort AS "order", flags, hidden
-FROM categories
-ORDER BY sort, _id"#;
+const CATEGORIES: &str = "SELECT _id AS id, name, sort AS \"order\", flags, hidden FROM categories WHERE kind = 'anime' ORDER BY sort, _id";
 
-const VISIBLE_CATEGORIES: &str = r#"SELECT _id AS id, name, sort AS "order", flags, hidden
-FROM categories
-WHERE hidden = 0
-ORDER BY sort, _id"#;
+const VISIBLE_CATEGORIES: &str = "SELECT _id AS id, name, sort AS \"order\", flags, hidden FROM categories WHERE kind = 'anime' AND hidden = 0 ORDER BY sort, _id";
 
-const CATEGORIES_BY_ANIME_ID: &str = r#"SELECT C._id AS id, C.name, C.sort AS "order", C.flags, C.hidden
-FROM categories C
-JOIN animes_categories AC
-ON C._id = AC.category_id
-WHERE AC.anime_id = :animeId
-ORDER BY C.sort, C._id"#;
+const CATEGORIES_BY_ANIME_ID: &str = "SELECT C._id AS id, C.name, C.sort AS \"order\", C.flags, C.hidden FROM categories C JOIN entry_categories AC ON C._id = AC.category_id AND C.kind = AC.kind WHERE AC.entry_id = :animeId AND C.kind = 'anime' ORDER BY C.sort, C._id";
 
-const VISIBLE_CATEGORIES_BY_ANIME_ID: &str = r#"SELECT C._id AS id, C.name, C.sort AS "order", C.flags, C.hidden
-FROM categories C
-JOIN animes_categories AC
-ON C._id = AC.category_id
-WHERE AC.anime_id = :animeId AND C.hidden = 0
-ORDER BY C.sort, C._id"#;
+const VISIBLE_CATEGORIES_BY_ANIME_ID: &str = "SELECT C._id AS id, C.name, C.sort AS \"order\", C.flags, C.hidden FROM categories C JOIN entry_categories AC ON C._id = AC.category_id AND C.kind = AC.kind WHERE AC.entry_id = :animeId AND C.kind = 'anime' AND C.hidden = 0 ORDER BY C.sort, C._id";
 
-const CATEGORY_INSERT: &str = "INSERT INTO categories(name, sort, flags) VALUES (:name, :order, :flags)";
+const CATEGORY_INSERT: &str = "INSERT INTO categories(kind, _id, name, sort, flags) SELECT 'anime', coalesce(max(_id), 0) + 1, :name, :order, :flags FROM categories WHERE kind = 'anime' RETURNING _id";
 
 const CATEGORY_UPDATE: &str = r#"UPDATE categories
 SET name = coalesce(:name, name),
     sort = coalesce(:order, sort),
     flags = coalesce(:flags, flags),
     hidden = coalesce(:hidden, hidden)
-WHERE _id = :categoryId"#;
+WHERE _id = :categoryId AND kind = 'anime'"#;
 
-const CATEGORY_DELETE: &str = "DELETE FROM categories WHERE _id = :categoryId";
+const CATEGORY_DELETE: &str = "DELETE FROM categories WHERE _id = :categoryId AND kind = 'anime'";
 
-const CATEGORY_SET_ORDER: &str = "UPDATE categories SET sort = :order WHERE _id = :categoryId";
+const CATEGORY_SET_ORDER: &str = "UPDATE categories SET sort = :order WHERE _id = :categoryId AND kind = 'anime'";
 
-const CATEGORY_UPDATE_ALL_FLAGS: &str = "UPDATE categories SET flags = coalesce(:flags, flags)";
+const CATEGORY_UPDATE_ALL_FLAGS: &str = "UPDATE categories SET flags = coalesce(:flags, flags) WHERE kind = 'anime'";
 
-const ANIME_CATEGORY_INSERT: &str = "INSERT INTO animes_categories(anime_id, category_id) VALUES (:animeId, :categoryId)";
+const ANIME_CATEGORY_INSERT: &str = "INSERT OR IGNORE INTO entry_categories(entry_id, kind, category_id) VALUES (:animeId, 'anime', :categoryId)";
 
-const ANIME_CATEGORY_DELETE_BY_ANIME_ID: &str = "DELETE FROM animes_categories WHERE anime_id = :animeId";
+const ANIME_CATEGORY_DELETE_BY_ANIME_ID: &str = "DELETE FROM entry_categories WHERE entry_id = :animeId AND kind = 'anime'";
 
 /// A row of `categories`. `order` is the `sort` column.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -910,8 +966,8 @@ pub fn visible_categories_by_anime_id(c: &Connection, anime_id: i64) -> rusqlite
 
 /// Inserts a category and returns its `_id`. `hidden` takes its default (0).
 pub fn insert_category(c: &Connection, name: &str, order: i64, flags: i64) -> rusqlite::Result<i64> {
-    c.prepare_cached(CATEGORY_INSERT)?.execute(named_params! {":name": name, ":order": order, ":flags": flags})?;
-    Ok(c.last_insert_rowid())
+    c.prepare_cached(CATEGORY_INSERT)?
+        .query_row(named_params! {":name": name, ":order": order, ":flags": flags}, |r| r.get(0))
 }
 
 /// Coalesce update: every `None` keeps the stored value.
@@ -967,34 +1023,21 @@ pub fn set_anime_categories(c: &Connection, anime_id: i64, category_ids: &[i64])
     tx.commit()
 }
 
-const TRACKS: &str = "SELECT * FROM anime_sync";
+const TRACKS: &str = concat!("SELECT ", anime_track_cols!("t."), " FROM tracks t JOIN entries e ON e._id = t.entry_id AND e.kind = 'anime'");
 
-const TRACK_BY_ID: &str = "SELECT * FROM anime_sync WHERE _id = :id";
+const TRACK_BY_ID: &str = concat!("SELECT ", anime_track_cols!("t."), " FROM tracks t JOIN entries e ON e._id = t.entry_id AND e.kind = 'anime' WHERE t._id = :id");
 
-const TRACKS_BY_ANIME_ID: &str = "SELECT * FROM anime_sync WHERE anime_id = :animeId";
+const TRACKS_BY_ANIME_ID: &str = concat!("SELECT ", anime_track_cols!("t."), " FROM tracks t JOIN entries e ON e._id = t.entry_id AND e.kind = 'anime' WHERE t.entry_id = :animeId");
 
-const TRACK_INSERT: &str = "INSERT INTO anime_sync(anime_id,sync_id,remote_id,library_id,title,last_episode_seen,total_episodes,status,score,remote_url,start_date,finish_date,private) VALUES (:animeId,:syncId,:remoteId,:libraryId,:title,:lastEpisodeSeen,:totalEpisodes,:status,:score,:remoteUrl,:startDate,:finishDate,:private)";
+const TRACK_INSERT: &str = "INSERT INTO tracks(entry_id,tracker_id,remote_id,library_id,title,last_item,total_items,status,score,remote_url,start_date,finish_date,private) VALUES (:animeId,:syncId,:remoteId,:libraryId,:title,:lastEpisodeSeen,:totalEpisodes,:status,:score,:remoteUrl,:startDate,:finishDate,:private)";
 
-const TRACK_UPDATE: &str = r#"UPDATE anime_sync
-SET
-    anime_id = coalesce(:animeId, anime_id),
-    sync_id = coalesce(:syncId, sync_id),
-    remote_id = coalesce(:mediaId, remote_id),
-    library_id = coalesce(:libraryId, library_id),
-    title = coalesce(:title, title),
-    last_episode_seen = coalesce(:lastEpisodeSeen, last_episode_seen),
-    total_episodes = coalesce(:totalEpisodes, total_episodes),
-    status = coalesce(:status, status),
-    score = coalesce(:score, score),
-    remote_url = coalesce(:trackingUrl, remote_url),
-    start_date = coalesce(:startDate, start_date),
-    finish_date = coalesce(:finishDate, finish_date),
-    private = coalesce(:private, private)
-WHERE _id = :id"#;
+const TRACK_UPDATE: &str = concat!(
+    "UPDATE tracks SET entry_id = coalesce(:animeId, entry_id), tracker_id = coalesce(:syncId, tracker_id), remote_id = coalesce(:mediaId, remote_id), library_id = coalesce(:libraryId, library_id), title = coalesce(:title, title), last_item = coalesce(:lastEpisodeSeen, last_item), total_items = coalesce(:totalEpisodes, total_items), status = coalesce(:status, status), score = coalesce(:score, score), remote_url = coalesce(:trackingUrl, remote_url), start_date = coalesce(:startDate, start_date), finish_date = coalesce(:finishDate, finish_date), private = coalesce(:private, private) WHERE _id = :id AND entry_id IN ", anime_ids!()
+);
 
 /// Upsert keyed by `(anime_id, sync_id)`: the row keeps its `_id` (Q-TRK-2). Returns the row id.
-const TRACK_UPSERT: &str = "INSERT INTO anime_sync(anime_id,sync_id,remote_id,library_id,title,last_episode_seen,total_episodes,status,score,remote_url,start_date,finish_date,private) VALUES (:animeId,:syncId,:remoteId,:libraryId,:title,:lastEpisodeSeen,:totalEpisodes,:status,:score,:remoteUrl,:startDate,:finishDate,:private) ON CONFLICT(anime_id, sync_id) DO UPDATE SET remote_id = excluded.remote_id, library_id = excluded.library_id, title = excluded.title, last_episode_seen = excluded.last_episode_seen, total_episodes = excluded.total_episodes, status = excluded.status, score = excluded.score, remote_url = excluded.remote_url, start_date = excluded.start_date, finish_date = excluded.finish_date, private = excluded.private RETURNING _id";
-const TRACK_DELETE: &str = "DELETE FROM anime_sync WHERE anime_id = :animeId AND sync_id = :syncId";
+const TRACK_UPSERT: &str = "INSERT INTO tracks(entry_id,tracker_id,remote_id,library_id,title,last_item,total_items,status,score,remote_url,start_date,finish_date,private) VALUES (:animeId,:syncId,:remoteId,:libraryId,:title,:lastEpisodeSeen,:totalEpisodes,:status,:score,:remoteUrl,:startDate,:finishDate,:private) ON CONFLICT(entry_id, tracker_id) DO UPDATE SET remote_id = excluded.remote_id, library_id = excluded.library_id, title = excluded.title, last_item = excluded.last_item, total_items = excluded.total_items, status = excluded.status, score = excluded.score, remote_url = excluded.remote_url, start_date = excluded.start_date, finish_date = excluded.finish_date, private = excluded.private RETURNING _id";
+const TRACK_DELETE: &str = concat!("DELETE FROM tracks WHERE entry_id = :animeId AND tracker_id = :syncId AND entry_id IN ", anime_ids!());
 
 /// A row of `anime_sync`. `private` is read as a boolean.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1144,15 +1187,17 @@ pub fn tracks_by_anime_id(c: &Connection, anime_id: i64) -> rusqlite::Result<Vec
     track_rows(c, TRACKS_BY_ANIME_ID, named_params! {":animeId": anime_id})
 }
 
-const RECENT_UPDATES: &str = r#"SELECT *
-FROM animeupdatesView
-WHERE dateUpload > :after
+const RECENT_UPDATES: &str = r#"SELECT entryId AS animeId, entryTitle AS animeTitle, itemId AS episodeId, itemName AS episodeName, scanlator, done AS seen, bookmark, fillermark, progress AS last_second_seen, totalSeconds, source, favorite, thumbnailUrl, coverLastModified, dateUpload, datefetch
+FROM updatesView
+WHERE kind = 'anime'
+AND dateUpload > :after
 ORDER BY datefetch DESC
 LIMIT :limit"#;
 
-const UPDATES_BY_SEEN: &str = r#"SELECT *
-FROM animeupdatesView
-WHERE seen = :seen
+const UPDATES_BY_SEEN: &str = r#"SELECT entryId AS animeId, entryTitle AS animeTitle, itemId AS episodeId, itemName AS episodeName, scanlator, done AS seen, bookmark, fillermark, progress AS last_second_seen, totalSeconds, source, favorite, thumbnailUrl, coverLastModified, dateUpload, datefetch
+FROM updatesView
+WHERE kind = 'anime'
+AND done = :seen
 AND dateUpload > :after
 ORDER BY datefetch DESC
 LIMIT :limit"#;
@@ -1215,18 +1260,17 @@ pub fn updates_by_seen(c: &Connection, seen: bool, after: i64, limit: i64) -> ru
     update_rows(c, UPDATES_BY_SEEN, named_params! {":seen": seen, ":after": after, ":limit": limit})
 }
 
-const STUB_SOURCE_UPSERT: &str = r#"INSERT INTO animesources(_id, lang, name)
-VALUES (:id, :lang, :name)
-ON CONFLICT(_id)
+const STUB_SOURCE_UPSERT: &str = r#"INSERT INTO stub_sources(kind, id, lang, name)
+VALUES ('anime', :id, :lang, :name)
+ON CONFLICT(kind, id)
 DO UPDATE
 SET
     lang = :lang,
-    name = :name
-WHERE _id = :id"#;
+    name = :name"#;
 
-const STUB_SOURCE_FIND_ONE: &str = "SELECT * FROM animesources WHERE _id = :id";
+const STUB_SOURCE_FIND_ONE: &str = "SELECT id AS _id, lang, name FROM stub_sources WHERE kind = 'anime' AND id = :id";
 
-const STUB_SOURCE_FIND_ALL: &str = "SELECT * FROM animesources";
+const STUB_SOURCE_FIND_ALL: &str = "SELECT id AS _id, lang, name FROM stub_sources WHERE kind = 'anime' ORDER BY rowid";
 
 /// A row of `animesources`. The id is the signed 64-bit form of the source id.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1258,19 +1302,16 @@ pub fn stub_sources(c: &Connection) -> rusqlite::Result<Vec<StubSource>> {
     c.prepare_cached(STUB_SOURCE_FIND_ALL)?.query_map([], StubSource::from_row)?.collect()
 }
 
-/// Every `animes` column plus the group `name` of each related row, in `sort_order`.
-pub const RELATED_BY_ANIME_ID: &str = r#"SELECT A.*, R.name
-FROM anime_relations AS R
-JOIN animes AS A
-ON A._id = R.related_anime_id
-WHERE R.anime_id = :animeId
-ORDER BY R.sort_order ASC"#;
+/// Every anime column (old names) plus the group `name` of each related row, in `sort_order`.
+pub const RELATED_BY_ANIME_ID: &str = concat!(
+    "SELECT ", anime_cols!("A."), ", R.name FROM anime_relations AS R JOIN entries AS A ON A._id = R.related_id AND A.kind = 'anime' WHERE R.entry_id = :animeId ORDER BY R.sort_order ASC"
+);
 
-const RELATION_LAST_FETCHED_AT: &str = "SELECT last_fetched_at FROM anime_relations WHERE anime_id = :animeId LIMIT 1";
+const RELATION_LAST_FETCHED_AT: &str = "SELECT last_fetched_at FROM anime_relations WHERE entry_id = :animeId LIMIT 1";
 
-const RELATION_INSERT: &str = "INSERT OR REPLACE INTO anime_relations(anime_id, related_anime_id, name, sort_order, last_fetched_at) VALUES (:animeId, :relatedAnimeId, :name, :sortOrder, :lastFetchedAt)";
+const RELATION_INSERT: &str = "INSERT OR REPLACE INTO anime_relations(entry_id, related_id, name, sort_order, last_fetched_at) VALUES (:animeId, :relatedAnimeId, :name, :sortOrder, :lastFetchedAt)";
 
-const RELATION_DELETE_BY_ANIME_ID: &str = "DELETE FROM anime_relations WHERE anime_id = :animeId";
+const RELATION_DELETE_BY_ANIME_ID: &str = "DELETE FROM anime_relations WHERE entry_id = :animeId";
 
 /// Replaces the relation groups of one anime in one transaction. `sort_order` counts up from 0
 /// across all groups, in the order given.
@@ -1324,286 +1365,15 @@ pub fn relations_last_fetched_at(c: &Connection, anime_id: i64) -> rusqlite::Res
         .transpose()
 }
 
-const CUSTOM_BUTTONS: &str = "SELECT * FROM custom_buttons ORDER BY sortIndex";
+const ANIME_CHILDREN: &str = concat!("SELECT ", anime_cols!(""), " FROM entries WHERE parent_id = :parentId AND kind = 'anime'");
 
-const CUSTOM_BUTTON_NEXT_SORT_INDEX: &str = "SELECT coalesce(max(sortIndex) + 1, 0) FROM custom_buttons";
+const ANIME_DUPLICATE_LIBRARY: &str = concat!("SELECT ", anime_cols!(""), " FROM entries WHERE kind = 'anime' AND favorite = 1 AND kuro_lower(title) = :titleLowercased AND _id != :id");
 
-const CUSTOM_BUTTON_INSERT: &str = "INSERT INTO custom_buttons(name, isFavorite, sortIndex, content, longPressContent, onStartup) VALUES (:name, :isFavorite, :sortIndex, :content, :longPressContent, :onStartup)";
+const ANIME_SOURCE_FAVORITE_COUNTS: &str = "SELECT source, count(*) FROM entries WHERE kind = 'anime' AND favorite = 1 GROUP BY source ORDER BY source";
 
-const CUSTOM_BUTTON_UPDATE: &str = r#"UPDATE custom_buttons
-SET name = coalesce(:name, name),
-    isFavorite = coalesce(:isFavorite, isFavorite),
-    sortIndex = coalesce(:sortIndex, sortIndex),
-    content = coalesce(:content, content),
-    longPressContent = coalesce(:longPressContent, longPressContent),
-    onStartup = coalesce(:onStartup, onStartup)
-WHERE _id = :customButtonId"#;
-
-const CUSTOM_BUTTON_DELETE: &str = "DELETE FROM custom_buttons WHERE _id = :customButtonId";
-
-const CUSTOM_BUTTON_SET_SORT_INDEX: &str = "UPDATE custom_buttons SET sortIndex = :sortIndex WHERE _id = :customButtonId";
-
-/// A row of `custom_buttons`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct CustomButton {
-    pub id: i64,
-    pub name: String,
-    pub is_favorite: bool,
-    pub sort_index: i64,
-    pub content: String,
-    pub long_press_content: String,
-    pub on_startup: String,
-}
-
-impl CustomButton {
-    fn from_row(r: &Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: r.get("_id")?,
-            name: r.get("name")?,
-            is_favorite: r.get("isFavorite")?,
-            sort_index: r.get("sortIndex")?,
-            content: r.get("content")?,
-            long_press_content: r.get("longPressContent")?,
-            on_startup: r.get("onStartup")?,
-        })
-    }
-
-    /// The button with `$id` replaced by its id, then `$isPrimary` replaced by `true` or `false`
-    /// (the button whose id is `primary_id` is the primary one). Applied to `content`,
-    /// `long_press_content` and `on_startup`.
-    pub fn content_for(&self, primary_id: i64) -> CustomButton {
-        let primary = if self.id == primary_id { "true" } else { "false" };
-        let expand = |text: &str| text.replace("$id", &self.id.to_string()).replace("$isPrimary", primary);
-        CustomButton {
-            content: expand(&self.content),
-            long_press_content: expand(&self.long_press_content),
-            on_startup: expand(&self.on_startup),
-            ..self.clone()
-        }
-    }
-}
-
-/// Partial update of one button. `None` keeps the stored value.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct CustomButtonUpdate {
-    pub name: Option<String>,
-    pub is_favorite: Option<bool>,
-    pub sort_index: Option<i64>,
-    pub content: Option<String>,
-    pub long_press_content: Option<String>,
-    pub on_startup: Option<String>,
-}
-
-pub fn custom_buttons(c: &Connection) -> rusqlite::Result<Vec<CustomButton>> {
-    c.prepare_cached(CUSTOM_BUTTONS)?.query_map([], CustomButton::from_row)?.collect()
-}
-
-/// Creates a button with `sortIndex = max + 1` (0 when there is none). A new button is never a
-/// favourite. Returns its `_id`.
-pub fn create_custom_button(
-    c: &Connection,
-    name: &str,
-    content: &str,
-    long_press_content: &str,
-    on_startup: &str,
-) -> rusqlite::Result<i64> {
-    let sort_index: i64 = c.query_row(CUSTOM_BUTTON_NEXT_SORT_INDEX, [], |r| r.get(0))?;
-    c.prepare_cached(CUSTOM_BUTTON_INSERT)?.execute(named_params! {
-        ":name": name,
-        ":isFavorite": false,
-        ":sortIndex": sort_index,
-        ":content": content,
-        ":longPressContent": long_press_content,
-        ":onStartup": on_startup,
-    })?;
-    Ok(c.last_insert_rowid())
-}
-
-/// Coalesce update of one button.
-pub fn update_custom_button(c: &Connection, id: i64, u: &CustomButtonUpdate) -> rusqlite::Result<usize> {
-    c.prepare_cached(CUSTOM_BUTTON_UPDATE)?.execute(named_params! {
-        ":name": u.name,
-        ":isFavorite": u.is_favorite,
-        ":sortIndex": u.sort_index,
-        ":content": u.content,
-        ":longPressContent": u.long_press_content,
-        ":onStartup": u.on_startup,
-        ":customButtonId": id,
-    })
-}
-
-fn custom_button_ids(c: &Connection) -> rusqlite::Result<Vec<i64>> {
-    c.prepare_cached("SELECT _id FROM custom_buttons ORDER BY sortIndex, _id")?
-        .query_map([], |r| r.get(0))?
-        .collect()
-}
-
-/// Writes `sortIndex = position` for each id, in the order given.
-fn write_custom_button_positions(c: &Connection, ids: &[i64]) -> rusqlite::Result<()> {
-    for (index, id) in ids.iter().enumerate() {
-        c.prepare_cached(CUSTOM_BUTTON_SET_SORT_INDEX)?
-            .execute(named_params! {":sortIndex": index as i64, ":customButtonId": id})?;
-    }
-    Ok(())
-}
-
-/// Deletes a button and renumbers the survivors `0..n-1` in `sortIndex` order.
-pub fn delete_custom_button(c: &Connection, id: i64) -> rusqlite::Result<usize> {
-    let tx = c.unchecked_transaction()?;
-    let removed = tx.prepare_cached(CUSTOM_BUTTON_DELETE)?.execute(named_params! {":customButtonId": id})?;
-    let ids = custom_button_ids(&tx)?;
-    write_custom_button_positions(&tx, &ids)?;
-    tx.commit()?;
-    Ok(removed)
-}
-
-/// Moves one button to position `to_index` and renumbers all buttons `0..n-1`. An unknown id does
-/// nothing.
-pub fn reorder_custom_button(c: &Connection, id: i64, to_index: usize) -> rusqlite::Result<()> {
-    let tx = c.unchecked_transaction()?;
-    let mut ids = custom_button_ids(&tx)?;
-    let Some(from) = ids.iter().position(|&x| x == id) else {
-        return Ok(());
-    };
-    ids.remove(from);
-    ids.insert(to_index.min(ids.len()), id);
-    write_custom_button_positions(&tx, &ids)?;
-    tx.commit()
-}
-
-/// Makes exactly one button the favourite. Turning the favourite off clears only that button.
-pub fn toggle_custom_button_favorite(c: &Connection, id: i64) -> rusqlite::Result<()> {
-    let tx = c.unchecked_transaction()?;
-    let was_favorite: bool = tx.query_row("SELECT isFavorite FROM custom_buttons WHERE _id = ?1", [id], |r| r.get(0))?;
-    if was_favorite {
-        tx.execute("UPDATE custom_buttons SET isFavorite = 0 WHERE _id = ?1", [id])?;
-    } else {
-        tx.execute("UPDATE custom_buttons SET isFavorite = 0", [])?;
-        tx.execute("UPDATE custom_buttons SET isFavorite = 1 WHERE _id = ?1", [id])?;
-    }
-    tx.commit()
-}
-
-const EXTENSION_STORE_UPSERT: &str = r#"INSERT INTO extension_store(index_url, name, badge_label, signing_key, contact_website, contact_discord, is_legacy, extension_list_url, resolved_index_url)
-VALUES (:indexUrl, :name, :badgeLabel, :signingKey, :contactWebsite, :contactDiscord, :isLegacy, :extensionListUrl, :resolvedIndexUrl)
-ON CONFLICT(index_url)
-DO UPDATE
-SET
-    name = :name,
-    badge_label = :badgeLabel,
-    signing_key = :signingKey,
-    contact_website = :contactWebsite,
-    contact_discord = :contactDiscord,
-    is_legacy = :isLegacy,
-    extension_list_url = :extensionListUrl,
-    resolved_index_url = :resolvedIndexUrl
-WHERE index_url = :indexUrl"#;
-
-const EXTENSION_STORE_GET: &str = "SELECT * FROM extension_store WHERE index_url = :indexUrl";
-
-const EXTENSION_STORE_ALL: &str = "SELECT * FROM extension_store ORDER BY rowid";
-
-const EXTENSION_STORE_COUNT: &str = "SELECT COUNT(*) FROM extension_store";
-
-const EXTENSION_STORE_DELETE: &str = "DELETE FROM extension_store WHERE index_url = :indexUrl";
-
-/// A row of `extension_store`. `resolved_index_url` is the document the store's data came from: the key itself, or the
-/// `indexV2` target the user's URL pointed at (the list of a non-legacy store is read from it).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ExtensionStore {
-    pub index_url: String,
-    pub name: String,
-    pub badge_label: String,
-    pub signing_key: String,
-    pub contact_website: String,
-    pub contact_discord: Option<String>,
-    pub is_legacy: bool,
-    pub extension_list_url: Option<String>,
-    pub resolved_index_url: String,
-}
-
-impl ExtensionStore {
-    fn from_row(r: &Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            index_url: r.get("index_url")?,
-            name: r.get("name")?,
-            badge_label: r.get("badge_label")?,
-            signing_key: r.get("signing_key")?,
-            contact_website: r.get("contact_website")?,
-            contact_discord: r.get("contact_discord")?,
-            is_legacy: r.get("is_legacy")?,
-            extension_list_url: r.get("extension_list_url")?,
-            resolved_index_url: r.get("resolved_index_url")?,
-        })
-    }
-}
-
-/// Writes all 9 columns; a conflict on `index_url` overwrites the other 8.
-pub fn upsert_extension_store(c: &Connection, s: &ExtensionStore) -> rusqlite::Result<usize> {
-    c.prepare_cached(EXTENSION_STORE_UPSERT)?.execute(named_params! {
-        ":indexUrl": s.index_url,
-        ":name": s.name,
-        ":badgeLabel": s.badge_label,
-        ":signingKey": s.signing_key,
-        ":contactWebsite": s.contact_website,
-        ":contactDiscord": s.contact_discord,
-        ":isLegacy": s.is_legacy,
-        ":extensionListUrl": s.extension_list_url,
-        ":resolvedIndexUrl": s.resolved_index_url,
-    })
-}
-
-/// Writes a store row from a preference entry: the badge is the name, there is no signing key,
-/// the website is the index URL, and there is no Discord, legacy flag or list URL. The resolved URL is the index URL.
-pub fn insert_extension_store_from_preference(c: &Connection, index_url: &str, name: &str) -> rusqlite::Result<usize> {
-    upsert_extension_store(
-        c,
-        &ExtensionStore {
-            index_url: index_url.to_owned(),
-            name: name.to_owned(),
-            badge_label: name.to_owned(),
-            signing_key: "NO_SIGNING_KEY".to_owned(),
-            contact_website: index_url.to_owned(),
-            contact_discord: None,
-            is_legacy: false,
-            extension_list_url: None,
-            resolved_index_url: index_url.to_owned(),
-        },
-    )
-}
-
-pub fn extension_store(c: &Connection, index_url: &str) -> rusqlite::Result<Option<ExtensionStore>> {
-    c.prepare_cached(EXTENSION_STORE_GET)?
-        .query_map(named_params! {":indexUrl": index_url}, ExtensionStore::from_row)?
-        .next()
-        .transpose()
-}
-
-pub fn extension_stores(c: &Connection) -> rusqlite::Result<Vec<ExtensionStore>> {
-    c.prepare_cached(EXTENSION_STORE_ALL)?.query_map([], ExtensionStore::from_row)?.collect()
-}
-
-pub fn extension_store_count(c: &Connection) -> rusqlite::Result<i64> {
-    c.prepare_cached(EXTENSION_STORE_COUNT)?.query_row([], |r| r.get(0))
-}
-
-pub fn delete_extension_store(c: &Connection, index_url: &str) -> rusqlite::Result<usize> {
-    c.prepare_cached(EXTENSION_STORE_DELETE)?.execute(named_params! {":indexUrl": index_url})
-}
-
-const ANIME_CHILDREN: &str = "SELECT * FROM animes WHERE parent_id = :parentId";
-
-const ANIME_DUPLICATE_LIBRARY: &str = "SELECT * FROM animes WHERE favorite = 1 AND kuro_lower(title) = :titleLowercased AND _id != :id";
-
-const ANIME_SOURCE_FAVORITE_COUNTS: &str = "SELECT source, count(*) FROM animes WHERE favorite = 1 GROUP BY source ORDER BY source";
-
-const ANIME_UPCOMING: &str = r#"SELECT *
-FROM animes
-WHERE next_update >= :startOfDay
-AND next_update > 0
-AND favorite = 1
-AND status IN (SELECT value FROM json_each(:statuses))
-ORDER BY next_update ASC"#;
+const ANIME_UPCOMING: &str = concat!(
+    "SELECT ", anime_cols!(""), " FROM entries WHERE kind = 'anime' AND next_update >= :startOfDay AND next_update > 0 AND favorite = 1 AND status IN (SELECT value FROM json_each(:statuses)) ORDER BY next_update ASC"
+);
 
 /// The ids an anime clear removes for one non-library entry `root`, and the ids it orphans. The
 /// root is always removed. Below it, the Kotlin recursion of `ClearAnimeDatabaseScreenModel`
@@ -1636,7 +1406,7 @@ fn clearable_children(c: &Connection, parent: i64) -> rusqlite::Result<(Vec<i64>
 
 /// Non-library anime counted per source: `(source, count)` for every source with a non-favourite row.
 pub fn non_library_counts_by_source(c: &Connection) -> rusqlite::Result<Vec<(i64, i64)>> {
-    let mut st = c.prepare_cached("SELECT source, COUNT(*) FROM animes WHERE favorite = 0 GROUP BY source ORDER BY source;")?;
+    let mut st = c.prepare_cached("SELECT source, COUNT(*) FROM entries WHERE kind = 'anime' AND favorite = 0 GROUP BY source ORDER BY source;")?;
     let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
     rows.collect()
 }
@@ -1649,18 +1419,18 @@ pub fn clear_non_library_anime_by_sources(tx: &rusqlite::Transaction<'_>, source
     if source_ids.is_empty() {
         return Ok(());
     }
-    let ids = query_ids(tx, &format!("SELECT _id FROM animes WHERE favorite = 0 AND source IN ({})", in_placeholders(source_ids.len())), source_ids)?;
+    let ids = query_ids(tx, &format!("SELECT _id FROM entries WHERE kind = 'anime' AND favorite = 0 AND source IN ({})", in_placeholders(source_ids.len())), source_ids)?;
     for chunk in ids.chunks(IN_CHUNK) {
-        let sql = format!("DELETE FROM animes WHERE favorite = 0 AND _id IN ({})", in_placeholders(chunk.len()));
+        let sql = format!("DELETE FROM entries WHERE kind = 'anime' AND favorite = 0 AND _id IN ({})", in_placeholders(chunk.len()));
         tx.prepare(&sql)?.execute(params_from_iter(chunk))?;
     }
     let orphaned = if ids.is_empty() {
         Vec::new()
     } else {
-        query_ids(tx, &format!("SELECT _id FROM animes WHERE favorite = 1 AND parent_id IN ({})", in_placeholders(ids.len())), &ids)?
+        query_ids(tx, &format!("SELECT _id FROM entries WHERE kind = 'anime' AND favorite = 1 AND parent_id IN ({})", in_placeholders(ids.len())), &ids)?
     };
     for chunk in orphaned.chunks(IN_CHUNK) {
-        let sql = format!("UPDATE animes SET parent_id = NULL WHERE _id IN ({})", in_placeholders(chunk.len()));
+        let sql = format!("UPDATE entries SET parent_id = NULL WHERE kind = 'anime' AND _id IN ({})", in_placeholders(chunk.len()));
         tx.prepare(&sql)?.execute(params_from_iter(chunk))?;
     }
     tx.execute(HISTORY_REMOVE_RESETTED, [])?;
@@ -1679,13 +1449,13 @@ fn query_ids(tx: &rusqlite::Transaction<'_>, sql: &str, ids: &[i64]) -> rusqlite
 pub fn clear_non_library_anime(c: &Connection, ids: &[i64], orphaned: &[i64]) -> rusqlite::Result<()> {
     let tx = c.unchecked_transaction()?;
     for chunk in ids.chunks(IN_CHUNK) {
-        let sql = format!("DELETE FROM animes WHERE favorite = 0 AND _id IN ({})", in_placeholders(chunk.len()));
+        let sql = format!("DELETE FROM entries WHERE kind = 'anime' AND favorite = 0 AND _id IN ({})", in_placeholders(chunk.len()));
         tx.prepare(&sql)?.execute(params_from_iter(chunk))?;
     }
     let deleted: std::collections::HashSet<i64> = ids.iter().copied().collect();
     let kept: Vec<i64> = orphaned.iter().copied().filter(|id| !deleted.contains(id)).collect();
     for chunk in kept.chunks(IN_CHUNK) {
-        let sql = format!("UPDATE animes SET parent_id = NULL WHERE _id IN ({})", in_placeholders(chunk.len()));
+        let sql = format!("UPDATE entries SET parent_id = NULL WHERE kind = 'anime' AND _id IN ({})", in_placeholders(chunk.len()));
         tx.prepare(&sql)?.execute(params_from_iter(chunk))?;
     }
     tx.execute(HISTORY_REMOVE_RESETTED, [])?;
@@ -1716,7 +1486,7 @@ pub fn upcoming_animes(c: &Connection, statuses: &[i64], start_of_day_ms: i64) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema_anime::open_in_memory;
+    use crate::schema_unified::open_in_memory;
 
     fn now_secs(c: &Connection) -> i64 {
         c.query_row("SELECT CAST(strftime('%s', 'now') AS INTEGER)", [], |r| r.get(0)).unwrap()
@@ -1811,9 +1581,9 @@ mod tests {
         assert_eq!(id, 1);
         assert_eq!(anime_by_id(&c, 1).unwrap(), Some(row));
         assert_eq!(anime_by_id(&c, 2).unwrap(), None);
-        let stored: String = c.query_row("SELECT genre FROM animes", [], |r| r.get(0)).unwrap();
+        let stored: String = c.query_row("SELECT genre FROM entries WHERE kind = 'anime'", [], |r| r.get(0)).unwrap();
         assert_eq!(stored, "Action, Sci-Fi");
-        let memo: Vec<u8> = c.query_row("SELECT memo FROM animes", [], |r| r.get(0)).unwrap();
+        let memo: Vec<u8> = c.query_row("SELECT memo FROM entries WHERE kind = 'anime'", [], |r| r.get(0)).unwrap();
         assert_eq!(memo, br#"{"k":1}"#);
     }
 
@@ -1838,10 +1608,9 @@ mod tests {
     }
 
     #[test]
-    fn anime_update_with_every_field_none_stamps_favorite_and_sets_syncing_to_zero() {
+    fn anime_update_with_every_field_none_stamps_favorite() {
         let c = open_in_memory().unwrap();
         let id = insert_anime(&c, &sample_anime("/a", false)).unwrap();
-        c.execute("UPDATE animes SET is_syncing = 1 WHERE _id = ?1", [id]).unwrap();
         update_anime(&c, &AnimeUpdate { id, ..Default::default() }).unwrap();
         let row = anime_by_id(&c, id).unwrap().unwrap();
         assert_eq!(row.is_syncing, 0);
@@ -1854,7 +1623,7 @@ mod tests {
         let c = open_in_memory().unwrap();
         let id = insert_anime(&c, &sample_anime("/a", false)).unwrap();
         update_anime(&c, &AnimeUpdate { id, genre: Some(GenreList(vec![])), ..Default::default() }).unwrap();
-        let stored: String = c.query_row("SELECT genre FROM animes", [], |r| r.get(0)).unwrap();
+        let stored: String = c.query_row("SELECT genre FROM entries WHERE kind = 'anime'", [], |r| r.get(0)).unwrap();
         assert_eq!(stored, "");
         assert_eq!(anime_by_id(&c, id).unwrap().unwrap().genre, Some(GenreList(vec![])));
     }
@@ -1863,7 +1632,8 @@ mod tests {
     fn lookups_by_url_source_and_favorite() {
         let c = open_in_memory().unwrap();
         insert_anime(&c, &sample_anime("/a", true)).unwrap();
-        insert_anime(&c, &sample_anime("/a", true)).unwrap();
+        assert!(insert_anime(&c, &sample_anime("/a", true)).is_err(), "UNIQUE (kind, source, url)");
+        insert_anime(&c, &sample_anime("/a2", true)).unwrap();
         let mut other = sample_anime("/b", true);
         other.source = 2;
         insert_anime(&c, &other).unwrap();
@@ -1942,11 +1712,10 @@ mod tests {
     }
 
     #[test]
-    fn episode_update_changes_only_given_columns_and_clears_syncing() {
+    fn episode_update_changes_only_given_columns() {
         let c = open_in_memory().unwrap();
         let anime = insert_anime(&c, &sample_anime("/a", true)).unwrap();
         insert_episode(&c, &sample_episode(anime, "e1")).unwrap();
-        c.execute("UPDATE episodes SET is_syncing = 1 WHERE _id = 1", []).unwrap();
         let n = update_episode(
             &c,
             &EpisodeUpdate { id: 1, name: Some("New".into()), last_second_seen: Some(12), ..Default::default() },
@@ -1978,7 +1747,7 @@ mod tests {
         let c = open_in_memory().unwrap();
         let anime = insert_anime(&c, &sample_anime("/a", true)).unwrap();
         insert_episode(&c, &sample_episode(anime, "e1")).unwrap();
-        c.execute("DELETE FROM animes WHERE _id = ?1", [anime]).unwrap();
+        c.execute("DELETE FROM entries WHERE _id = ?1", [anime]).unwrap();
         assert!(episodes_by_anime_id(&c, anime).unwrap().is_empty());
     }
 
@@ -1997,7 +1766,7 @@ mod tests {
     }
 
     fn history_row_id(c: &Connection, episode_id: i64) -> i64 {
-        c.query_row("SELECT _id FROM animehistory WHERE episode_id = ?1", [episode_id], |r| r.get(0)).unwrap()
+        c.query_row("SELECT _id FROM history WHERE item_id = ?1", [episode_id], |r| r.get(0)).unwrap()
     }
 
     #[test]
@@ -2007,7 +1776,7 @@ mod tests {
         upsert_history(&c, 1, Millis(5000)).unwrap();
         let (rows, last): (i64, i64) = c
             .query_row(
-                "SELECT count(*), max(last_seen) FROM animehistory WHERE episode_id = 1",
+                "SELECT count(*), max(last_at) FROM history WHERE item_id = 1",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -2024,7 +1793,7 @@ mod tests {
         upsert_history(&c, 1, Millis(7000)).unwrap();
         let (rows, last): (i64, i64) = c
             .query_row(
-                "SELECT count(*), max(last_seen) FROM animehistory WHERE episode_id = 1",
+                "SELECT count(*), max(last_at) FROM history WHERE item_id = 1",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -2088,7 +1857,7 @@ mod tests {
         assert!(history(&c, "").unwrap().is_empty());
         upsert_history(&c, 1, Millis(1)).unwrap();
         assert_eq!(delete_all_history(&c).unwrap(), 3);
-        let rows: i64 = c.query_row("SELECT count(*) FROM animehistory", [], |r| r.get(0)).unwrap();
+        let rows: i64 = c.query_row("SELECT count(*) FROM history", [], |r| r.get(0)).unwrap();
         assert_eq!(rows, 0);
     }
 
@@ -2097,7 +1866,7 @@ mod tests {
     }
 
     fn version_of(c: &Connection, anime_id: i64) -> i64 {
-        c.query_row("SELECT version FROM animes WHERE _id = ?1", [anime_id], |r| r.get(0)).unwrap()
+        c.query_row("SELECT version FROM entries WHERE _id = ?1", [anime_id], |r| r.get(0)).unwrap()
     }
 
     #[test]
@@ -2129,7 +1898,7 @@ mod tests {
     }
 
     #[test]
-    fn update_all_episodes_changes_only_the_listed_fields_and_clears_syncing() {
+    fn update_all_episodes_changes_only_the_listed_fields() {
         let c = open_in_memory().unwrap();
         let a = library_anime(&c, "/a");
         let added = add_all_episodes(&c, &[sample_episode(a, "/e1"), sample_episode(a, "/e2")]);
@@ -2142,10 +1911,6 @@ mod tests {
             let row = episode_by_id(&c, before.id).unwrap().unwrap();
             assert_eq!(row.name, format!("renamed {}", before.id));
             assert_eq!(row.url, before.url, "url untouched");
-            let syncing: i64 = c
-                .query_row("SELECT is_syncing FROM episodes WHERE _id = ?1", [before.id], |r| r.get(0))
-                .unwrap();
-            assert_eq!(syncing, 0);
         }
     }
 
@@ -2266,7 +2031,7 @@ mod tests {
         replace_relations(&c, a1, vec![("Sequel", vec![a2, a3]), ("Spin-off", vec![a4])], 500).unwrap();
 
         let orders: Vec<i64> = c
-            .prepare("SELECT sort_order FROM anime_relations WHERE anime_id = ?1 ORDER BY sort_order")
+            .prepare("SELECT sort_order FROM anime_relations WHERE entry_id = ?1 ORDER BY sort_order")
             .unwrap()
             .query_map([a1], |r| r.get(0))
             .unwrap()
@@ -2284,52 +2049,8 @@ mod tests {
         assert_eq!(groups(&c), vec![("Sequel".to_string(), vec![a2, a3]), ("Spin-off".to_string(), vec![a4])]);
         assert_eq!(relations_last_fetched_at(&c, a1).unwrap(), Some(500));
 
-        c.execute("DELETE FROM animes WHERE _id = ?1", [a3]).unwrap();
+        c.execute("DELETE FROM entries WHERE _id = ?1", [a3]).unwrap();
         assert_eq!(groups(&c), vec![("Sequel".to_string(), vec![a2]), ("Spin-off".to_string(), vec![a4])]);
-    }
-
-    #[test]
-    fn extension_store_upsert_twice_then_delete_and_preference_insert() {
-        let c = open_in_memory().unwrap();
-        assert_eq!(extension_store_count(&c).unwrap(), 0);
-        let mut row = ExtensionStore {
-            index_url: "https://repo.test/index.min.json".into(),
-            name: "Repo".into(),
-            badge_label: "R".into(),
-            signing_key: "k1".into(),
-            contact_website: "https://repo.test".into(),
-            contact_discord: None,
-            is_legacy: false,
-            extension_list_url: None,
-            resolved_index_url: "https://repo.test/index.min.json".into(),
-        };
-        upsert_extension_store(&c, &row).unwrap();
-        assert_eq!(extension_store_count(&c).unwrap(), 1);
-
-        row.name = "Renamed".into();
-        row.badge_label = "B".into();
-        row.signing_key = "k2".into();
-        row.contact_website = "https://other.test".into();
-        row.contact_discord = Some("discord".into());
-        row.is_legacy = true;
-        row.extension_list_url = Some("https://list.test".into());
-        row.resolved_index_url = "https://followed.test/v2/index.min.json".into();
-        upsert_extension_store(&c, &row).unwrap();
-        assert_eq!(extension_store(&c, &row.index_url).unwrap().unwrap(), row, "all 8 columns overwritten");
-        assert_eq!(extension_store_count(&c).unwrap(), 1);
-
-        insert_extension_store_from_preference(&c, "https://pref.test/index.min.json", "Pref").unwrap();
-        let p = extension_store(&c, "https://pref.test/index.min.json").unwrap().unwrap();
-        assert_eq!(p.badge_label, "Pref");
-        assert_eq!(p.signing_key, "NO_SIGNING_KEY");
-        assert_eq!(p.contact_website, "https://pref.test/index.min.json");
-        assert_eq!(p.resolved_index_url, "https://pref.test/index.min.json", "a preference entry resolves to its own key");
-        assert_eq!((p.contact_discord, p.is_legacy, p.extension_list_url), (None, false, None));
-        assert_eq!(extension_store_count(&c).unwrap(), 2);
-
-        delete_extension_store(&c, &p.index_url).unwrap();
-        delete_extension_store(&c, &row.index_url).unwrap();
-        assert_eq!(extension_store_count(&c).unwrap(), 0);
     }
 
     #[test]
@@ -2361,7 +2082,7 @@ mod tests {
         }
         assert_eq!(anime_by_id(&c, c2).unwrap().unwrap().parent_id, None, "favourite child kept, orphaned");
         assert!(anime_by_id(&c, lib).unwrap().is_some(), "library anime untouched");
-        let history_rows: i64 = c.query_row("SELECT COUNT(*) FROM animehistory", [], |r| r.get(0)).unwrap();
+        let history_rows: i64 = c.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0)).unwrap();
         assert_eq!(history_rows, 1, "only the reset row is removed");
     }
 
@@ -2398,7 +2119,7 @@ mod tests {
         clear_non_library_anime_by_sources(&tx, &[]).unwrap();
         clear_non_library_anime_by_sources(&tx, &[2]).unwrap();
         tx.commit().unwrap();
-        let mut st = c.prepare("SELECT _id FROM animes ORDER BY _id").unwrap();
+        let mut st = c.prepare("SELECT _id FROM entries WHERE kind = 'anime' ORDER BY _id").unwrap();
         let left: Vec<i64> = st.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
         assert_eq!(left, [keep, other], "the library row and the other source survive");
         assert!(!left.contains(&gone), "the listed source's non-library row is deleted");

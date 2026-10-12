@@ -65,16 +65,17 @@ chapter_cbz("Unknown (XX)", "Other", "Chapter 1.cbz")
 with open(path("index", "corrupt.bin"), "wb") as f:
     f.write(bytes([0x13, 0x37, 0x42, 0x99, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C]))
 
-# db/queue_v1.sql: `mangas` and `chapters` (the columns the queue tables reference), then the two queue tables.
-queue_sql = open(os.path.join(HERE, "..", "sql", "download_queue.sql")).read()
+# db/queue_v1.sql: `entries` and `items` (the columns the queue tables reference), then the unified download tables.
+queue_sql = open(os.path.join(HERE, "..", "..", "kuro-db", "sql", "unified", "downloads.sql")).read()
 with open(path("db", "queue_v1.sql"), "w") as f:
     f.write(
-        "-- Fixture for TST-42 to TST-46: the parent tables of area 03 reduced to their keys, then the queue DDL.\n"
-        "CREATE TABLE mangas(_id INTEGER PRIMARY KEY, source INTEGER NOT NULL, url TEXT NOT NULL, title TEXT NOT NULL);\n"
-        "CREATE TABLE chapters(_id INTEGER PRIMARY KEY, manga_id INTEGER NOT NULL REFERENCES mangas(_id) ON DELETE CASCADE,"
+        "-- Fixture for TST-42 to TST-46: the parent tables of the unified schema reduced to their keys, then the download DDL.\n"
+        "CREATE TABLE entries(_id INTEGER PRIMARY KEY, kind TEXT NOT NULL, source INTEGER NOT NULL, url TEXT NOT NULL,"
+        " title TEXT NOT NULL, UNIQUE (_id, kind));\n"
+        "CREATE TABLE items(_id INTEGER PRIMARY KEY, entry_id INTEGER NOT NULL REFERENCES entries(_id) ON DELETE CASCADE,"
         " url TEXT NOT NULL, name TEXT NOT NULL);\n"
-        "INSERT INTO mangas VALUES (1, 1, '/manga/1', 'Berserk');\n"
-        "INSERT INTO chapters VALUES (10, 1, '/chapter/10', 'Chapter 10'), (11, 1, '/chapter/11', 'Chapter 11'),"
+        "INSERT INTO entries VALUES (1, 'manga', 1, '/manga/1', 'Berserk');\n"
+        "INSERT INTO items VALUES (10, 1, '/chapter/10', 'Chapter 10'), (11, 1, '/chapter/11', 'Chapter 11'),"
         " (12, 1, '/chapter/12', 'Chapter 12');\n" + queue_sql
     )
 sqlite3.connect(":memory:").executescript(open(path("db", "queue_v1.sql")).read())  # parses

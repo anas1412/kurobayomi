@@ -204,17 +204,17 @@ fn build(secrets: Arc<kuro_platform::secrets::FallbackSecrets>, config_dir: &std
     let manager = Arc::new(TrackerManager::new(all).map_err(|e| text(&e))?);
 
     // The queue lives in the anime database (its rows carry the kind, so both kinds share it).
-    let queue = Arc::new(RetryQueue::new(Arc::clone(&app.anime_db)).map_err(|e| text(&e))?);
+    let queue = Arc::new(RetryQueue::new(Arc::clone(&app.db)).map_err(|e| text(&e))?);
     let net: Arc<dyn Connectivity> = Arc::new(crate::misc::download::GioNetwork);
     let scheduler = Arc::new(RetryScheduler::new(Arc::clone(&queue), Arc::clone(&net)));
     let ctx = Arc::new(TrackCtx {
         trackers: Arc::clone(&manager),
-        anime_tracks: Arc::new(kuro_data::track::AnimeTrackRepo::new(Arc::clone(&app.anime_db))),
-        manga_tracks: Arc::new(kuro_data::track::MangaTrackRepo::new(Arc::clone(&app.manga_db))),
-        anime_episodes: Arc::new(kuro_data::episode::EpisodeRepo::new(Arc::clone(&app.anime_db))),
-        manga_chapters: Arc::new(kuro_data::chapter::ChapterRepo::new(Arc::clone(&app.manga_db))),
-        anime_history: Arc::new(kuro_data::history::AnimeHistoryRepo::new(Arc::clone(&app.anime_db))),
-        manga_history: Arc::new(kuro_data::history::MangaHistoryRepo::new(Arc::clone(&app.manga_db))),
+        anime_tracks: Arc::new(kuro_data::track::AnimeTrackRepo::new(Arc::clone(&app.db))),
+        manga_tracks: Arc::new(kuro_data::track::MangaTrackRepo::new(Arc::clone(&app.db))),
+        anime_episodes: Arc::new(kuro_data::episode::EpisodeRepo::new(Arc::clone(&app.db))),
+        manga_chapters: Arc::new(kuro_data::chapter::ChapterRepo::new(Arc::clone(&app.db))),
+        anime_history: Arc::new(kuro_data::history::AnimeHistoryRepo::new(Arc::clone(&app.db))),
+        manga_history: Arc::new(kuro_data::history::MangaHistoryRepo::new(Arc::clone(&app.db))),
         queue,
         scheduler,
         net,

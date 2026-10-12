@@ -75,7 +75,7 @@ pub fn build(id: &str) -> GBox {
 
 /// Whether manga row `id` belongs to the local source.
 fn is_local_manga(id: i64) -> bool {
-    crate::data::is_installed() && kuro_data::manga::MangaRepo::new(crate::data::app().db(Kind::Manga)).by_id(id).is_ok_and(|m| m.source == kuro_local::LOCAL_SOURCE_ID)
+    crate::data::is_installed() && kuro_data::manga::MangaRepo::new(crate::data::app().db.clone()).by_id(id).is_ok_and(|m| m.source == kuro_local::LOCAL_SOURCE_ID)
 }
 
 /// Opens the details page of entry `id`, by id. A local manga is opened through the local flow, which also remembers
@@ -102,11 +102,11 @@ pub fn open_unit(kind: Kind, entry_id: i64, unit_id: i64) {
     if crate::local_flow::open::open_local_episode(unit_id) || crate::player_view::open_source_episode(&anime_sources(), unit_id) {
         return;
     }
-    let source = kuro_data::episode::EpisodeRepo::new(crate::data::app().anime_db.clone())
+    let source = kuro_data::episode::EpisodeRepo::new(crate::data::app().db.clone())
         .by_id(unit_id)
         .ok()
         .flatten()
-        .and_then(|e| kuro_data::anime::AnimeRepo::new(crate::data::app().anime_db.clone()).by_id(e.anime_id).ok())
+        .and_then(|e| kuro_data::anime::AnimeRepo::new(crate::data::app().db.clone()).by_id(e.anime_id).ok())
         .map_or_else(|| unit_id.to_string(), |a| a.source.to_string());
     crate::toast::notify(crate::reader::strings::source_not_installed(&source));
 }
@@ -426,7 +426,7 @@ mod tests {
             let toast = alone::toast_label();
             let app = crate::data::app();
             let top = || nav.visible_child().map(|c| c.widget_name().to_string());
-            let (mangas, chapters) = (MangaRepo::new(app.db(Kind::Manga)), ChapterRepo::new(app.db(Kind::Manga)));
+            let (mangas, chapters) = (MangaRepo::new(app.db.clone()), ChapterRepo::new(app.db.clone()));
             let manga = |source: i64, url: &str| {
                 let id = mangas.insert(&Manga { source, url: url.into(), title: url.into(), ..Manga::create() }).expect("manga");
                 let added = chapters.add_all(&[Chapter { manga_id: id, url: "/c1".into(), name: "Chapter 1".into(), chapter_number: 1.0, ..Chapter::create() }]).expect("chapter");
@@ -454,8 +454,8 @@ mod tests {
             assert!(alone::pump(ctx, || top().as_deref() == Some("screen:reader")), "a local chapter opens the reader");
 
             // an episode of a source that is not installed says so, and opens nothing
-            let anime = AnimeRepo::new(app.anime_db.clone()).insert(&Anime { source: 7, url: "/a".into(), title: "A".into(), ..Anime::create() }).expect("anime");
-            let episodes = EpisodeRepo::new(app.anime_db.clone());
+            let anime = AnimeRepo::new(app.db.clone()).insert(&Anime { source: 7, url: "/a".into(), title: "A".into(), ..Anime::create() }).expect("anime");
+            let episodes = EpisodeRepo::new(app.db.clone());
             let episode = episodes.add_all(&[Episode { anime_id: anime, url: "/e1".into(), name: "Episode 1".into(), episode_number: 1.0, ..Episode::create() }]).expect("episode")[0].id;
             let before = top();
             open_unit(Kind::Anime, anime, episode);

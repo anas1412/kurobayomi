@@ -37,6 +37,17 @@ pub mod chapter {
     pub const DISPLAY_MASK: i64 = 0x100000;
 }
 
+/// Manga `chapter_flags` to the unified `entries.item_flags` (the anime layout): the two sorting bits 0x300 move up
+/// one place to 0x600. Manga rows never carry the fillermark, preview or summary bits, so `un(tr(x)) == x`.
+pub const fn manga_item_flags_to_unified(x: i64) -> i64 {
+    (x & !0x300) | ((x & 0x300) << 1)
+}
+
+/// The inverse of [`manga_item_flags_to_unified`]. The statements use the same expression in SQL.
+pub const fn manga_item_flags_from_unified(x: i64) -> i64 {
+    (x & !0x600) | ((x & 0x600) >> 1)
+}
+
 /// `categories.flags`: the library sort of one category. The default is Alphabetical, Ascending.
 pub mod library_sort {
     pub const TYPE_MASK: i64 = 0b0011_1100;
@@ -170,6 +181,21 @@ pub mod viewer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manga_item_flags_round_trip_through_the_unified_layout() {
+        for x in 0..0x20_0000_i64 {
+            // manga-legal: no bit above the display bit, none of 0x80, 0x400..0x800 range is used by manga
+            if x & 0x1880 != 0 || x & 0x400 != 0 {
+                continue;
+            }
+            assert_eq!(manga_item_flags_from_unified(manga_item_flags_to_unified(x)), x, "{x:#x}");
+        }
+        assert_eq!(manga_item_flags_to_unified(chapter::SORTING_NUMBER), 0x200);
+        assert_eq!(manga_item_flags_to_unified(chapter::SORTING_UPLOAD_DATE), 0x400);
+        assert_eq!(manga_item_flags_to_unified(chapter::SORTING_ALPHABET), 0x600);
+        assert_eq!(manga_item_flags_to_unified(chapter::DISPLAY_NUMBER | chapter::SORT_ASC), 0x100001);
+    }
 
     #[test]
     fn set_flag_follows_the_kotlin_formula() {

@@ -85,7 +85,7 @@ mod tests {
     use kuro_source::filter_list::FilterList;
 
     use super::*;
-    use crate::testdb::anime_db;
+    use crate::testdb::test_db;
 
     /// A source that lists one group of related anime and counts its calls.
     struct Related {
@@ -131,7 +131,7 @@ mod tests {
     }
 
     fn setup() -> (tempfile::TempDir, Arc<kuro_db::handle::Db>, Anime) {
-        let (dir, db) = anime_db();
+        let (dir, db) = test_db();
         let animes = AnimeRepo::new(db.clone());
         let id = animes.insert(&Anime { url: "/parent".into(), title: "Parent".into(), source: 42, status: 1, ..Anime::create() }).unwrap();
         let parent = animes.by_id(id).unwrap();

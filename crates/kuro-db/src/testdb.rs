@@ -1,21 +1,22 @@
-//! Test fixtures for the anime database: an in-memory file with the production pragmas, and
-//! builders for `animes`, `episodes` and `animehistory` rows. The defaults are those of
+//! Test fixtures for the anime kind: an in-memory unified database with the production pragmas, and
+//! builders for anime `entries`, `items` and `history` rows. The defaults are those of
 //! `Anime.create()` and `Episode.create()` (p1-edge-cases-and-tests.md section 3), so a test sets
 //! only the columns it reads.
 
 use rusqlite::Connection;
 
 use crate::open::BUSY_TIMEOUT;
-use crate::schema_anime::{self, Millis};
+use crate::schema_anime::Millis;
+use crate::schema_unified;
 use crate::statements_anime::{AnimeRow, EpisodeRow, insert_anime, insert_episode, upsert_history};
 
-/// The anime schema in a fresh in-memory database.
+/// The unified schema in a fresh in-memory database.
 pub struct TestDb;
 
 impl TestDb {
-    /// The fresh anime schema with the busy timeout and synchronous mode of a file database.
+    /// The fresh unified schema with the busy timeout and synchronous mode of a file database.
     pub fn anime() -> Connection {
-        let c = schema_anime::open_in_memory().expect("fresh anime schema");
+        let c = schema_unified::open_in_memory().expect("fresh unified schema");
         c.busy_timeout(BUSY_TIMEOUT).expect("busy timeout");
         c.pragma_update(None, "synchronous", "NORMAL")
             .expect("synchronous");
@@ -100,10 +101,10 @@ mod tests {
 
         let anime_defaults: (i64, i64, i64, i64, i64, i64, i64, f64, i64, i64, String) = c
             .query_row(
-                "SELECT source, status, initialized, viewer, episode_flags, cover_last_modified,
+                "SELECT source, status, initialized, viewer, item_flags, cover_last_modified,
                     season_flags, season_number, season_source_order, background_last_modified,
                     CAST(memo AS TEXT)
-                 FROM animes WHERE _id = ?1",
+                 FROM entries WHERE _id = ?1 AND kind = 'anime'",
                 [anime],
                 |r| {
                     Ok((
@@ -129,7 +130,7 @@ mod tests {
 
         let episode_defaults: (i64, i64, i64, i64) = c
             .query_row(
-                "SELECT last_second_seen, total_seconds, source_order, date_fetch FROM episodes WHERE _id = ?1",
+                "SELECT progress, total_seconds, source_order, date_fetch FROM items WHERE _id = ?1",
                 [episode],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
@@ -138,7 +139,7 @@ mod tests {
 
         let seen: i64 = c
             .query_row(
-                "SELECT last_seen FROM animehistory WHERE episode_id = ?1",
+                "SELECT last_at FROM history WHERE item_id = ?1",
                 [episode],
                 |r| r.get(0),
             )

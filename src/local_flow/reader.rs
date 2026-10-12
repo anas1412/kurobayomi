@@ -48,11 +48,11 @@ pub fn open_local_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     let app = crate::data::app();
     let store = app.base.store().clone();
     let deps = ReaderDeps {
-        db: app.db(Kind::Manga),
+        db: app.db.clone(),
         manga_id,
         chapter_id,
         prefs: ReaderPrefs::new(store.clone()),
-        store: Rc::new(WriterHandle::spawn(app.db(Kind::Manga))),
+        store: Rc::new(WriterHandle::spawn(app.db.clone())),
         build: Rc::new(build_loader),
         is_downloaded: Rc::new(|_| false),
         downloaded_only: app.base.downloaded_only.get(),
@@ -66,7 +66,7 @@ pub fn open_local_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
 /// A title that names a local entry in the library opens the local reader; any other title keeps the old route. The
 /// library's Continue button passes a chapter id as the name, which `find_local_ids` also accepts.
 pub fn page_for(title: &str, chapter_name: &str) -> gtk::Box {
-    let db = crate::data::app().db(Kind::Manga);
+    let db = crate::data::app().db.clone();
     match find_local_ids(&db, title, chapter_name, super::open::current()) {
         Some((manga_id, chapter_id)) => open_local_chapter(manga_id, chapter_id),
         None => launch::page_for(title, chapter_name),

@@ -91,8 +91,8 @@ mod tests {
     /// A manga of `n` chapters whose reading order is the insert order; the first `read` of them are read.
     fn manga_with(n: i64, read: i64) -> (tempfile::TempDir, Arc<Db>, i64, Vec<i64>) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         let db = Arc::new(Db::new(&path, writer).expect("manga db handle"));
         let manga = MangaRepo::new(db.clone())
             .insert(&Manga { favorite: true, source: 1, url: "m".into(), title: "M".into(), ..Manga::create() })

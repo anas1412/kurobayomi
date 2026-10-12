@@ -54,7 +54,7 @@ impl Live {
         let episode = shared.borrow().episode_id;
         self.episode.set(episode);
         let (has_previous, has_next) = if crate::data::is_installed() {
-            let db = &crate::data::app().anime_db;
+            let db = &crate::data::app().db;
             let has = |step| adjacent(db, episode, step).ok().flatten().is_some();
             (has(Step::Previous), has(Step::Next))
         } else {

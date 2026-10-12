@@ -193,8 +193,8 @@ mod tests {
         use kuro_data::chapter::Chapter;
         use kuro_data::manga::{Manga, MangaRepo};
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("open manga db");
+        let path = dir.path().join("test.db");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         let db = Arc::new(Db::new(&path, writer).expect("manga db handle"));
         let manga = MangaRepo::new(db.clone())
             .insert(&Manga { favorite: true, source: 1, url: "m".into(), title: "M".into(), ..Manga::create() })

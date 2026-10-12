@@ -1,5 +1,5 @@
-//! Reads the library for a pass from the shared databases (T-26a-004 and T-26a-005). Rows come from the views
-//! `kuro-db` already defines (`libraryView`, `animelibView`, `animeseasonsView`). Reads run on tokio's blocking pool.
+//! Reads the library for a pass from the shared database (T-26a-004 and T-26a-005). Rows come from the view
+//! `kuro-db` defines (`libraryView`) and the season statement. Reads run on tokio's blocking pool.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -25,20 +25,12 @@ pub trait LibraryStore: Send + Sync {
 }
 
 pub struct SqliteLibraryStore {
-    manga: Arc<Db>,
-    anime: Arc<Db>,
+    db: Arc<Db>,
 }
 
 impl SqliteLibraryStore {
-    pub fn new(manga: Arc<Db>, anime: Arc<Db>) -> Self {
-        Self { manga, anime }
-    }
-
-    fn db(&self, kind: Kind) -> &Arc<Db> {
-        match kind {
-            Kind::Manga => &self.manga,
-            Kind::Anime => &self.anime,
-        }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -109,14 +101,14 @@ impl LibraryStore for SqliteLibraryStore {
     async fn library(&self, kind: Kind) -> Result<Vec<LibraryEntry>, UpdateError> {
         let entries = match kind {
             Kind::Manga => self
-                .manga
+                .db
                 .read_async(|c| {
                     let rows = kuro_db::statements_manga::views::library(c)?;
                     Ok(rows.into_iter().map(manga_entry).collect::<Vec<_>>())
                 })
                 .await?,
             Kind::Anime => self
-                .anime
+                .db
                 .read_async(|c| {
                     let rows = kuro_db::statements_anime::library(c)?;
                     Ok(rows.into_iter().map(anime_entry).collect::<Vec<_>>())
@@ -128,7 +120,7 @@ impl LibraryStore for SqliteLibraryStore {
 
     async fn season_children(&self, parent_id: i64) -> Vec<LibraryEntry> {
         let result = self
-            .anime
+            .db
             .read_async(move |c| {
                 let rows = kuro_db::statements_anime::seasons_of(c, parent_id)?;
                 Ok(rows.into_iter().map(season_entry).collect::<Vec<_>>())
@@ -144,17 +136,12 @@ impl LibraryStore for SqliteLibraryStore {
     }
 
     async fn is_favorite(&self, id: i64, kind: Kind) -> Result<bool, UpdateError> {
-        let table = match kind {
-            Kind::Manga => "mangas",
-            Kind::Anime => "animes",
-        };
-        let sql = format!("SELECT favorite FROM {table} WHERE _id = ?1");
         let rows = self
-            .db(kind)
+            .db
             .read_async(move |c| {
-                let mut statement = c.prepare(&sql)?;
+                let mut statement = c.prepare("SELECT favorite FROM entries WHERE _id = ?1 AND kind = ?2")?;
                 let mut rows: Vec<bool> = Vec::new();
-                for row in statement.query_map([id], |r| r.get(0))? {
+                for row in statement.query_map((id, kind.as_str()), |r| r.get(0))? {
                     rows.push(row?);
                 }
                 Ok(rows)
@@ -164,16 +151,12 @@ impl LibraryStore for SqliteLibraryStore {
     }
 
     async fn categories(&self, id: i64, kind: Kind) -> Result<Vec<i64>, UpdateError> {
-        let sql = match kind {
-            Kind::Manga => "SELECT category_id FROM mangas_categories WHERE manga_id = ?1 ORDER BY category_id",
-            Kind::Anime => "SELECT category_id FROM animes_categories WHERE anime_id = ?1 ORDER BY category_id",
-        };
         let ids = self
-            .db(kind)
+            .db
             .read_async(move |c| {
-                let mut statement = c.prepare(sql)?;
+                let mut statement = c.prepare("SELECT category_id FROM entry_categories WHERE entry_id = ?1 AND kind = ?2 ORDER BY category_id")?;
                 let mut ids: Vec<i64> = Vec::new();
-                for row in statement.query_map([id], |r| r.get(0))? {
+                for row in statement.query_map((id, kind.as_str()), |r| r.get(0))? {
                     ids.push(row?);
                 }
                 Ok(ids)
@@ -183,16 +166,15 @@ impl LibraryStore for SqliteLibraryStore {
     }
 
     async fn read_numbers(&self, id: i64, kind: Kind) -> Result<Vec<f64>, UpdateError> {
-        let sql = match kind {
-            Kind::Manga => "SELECT chapter_number FROM chapters WHERE manga_id = ?1 AND read = 1 AND chapter_number >= 0",
-            Kind::Anime => "SELECT episode_number FROM episodes WHERE anime_id = ?1 AND seen = 1 AND episode_number >= 0",
-        };
         let numbers = self
-            .db(kind)
+            .db
             .read_async(move |c| {
-                let mut statement = c.prepare(sql)?;
+                let mut statement = c.prepare(
+                    "SELECT i.number FROM items i JOIN entries e ON e._id = i.entry_id \
+                     WHERE i.entry_id = ?1 AND e.kind = ?2 AND i.done = 1 AND i.number >= 0",
+                )?;
                 let mut numbers: Vec<f64> = Vec::new();
-                for row in statement.query_map([id], |r| r.get(0))? {
+                for row in statement.query_map((id, kind.as_str()), |r| r.get(0))? {
                     numbers.push(row?);
                 }
                 Ok(numbers)
@@ -229,15 +211,14 @@ mod tests {
     async fn calculate_interval_round_trips_a_negative_override() {
         // T-26a-004: -3 written, -3 read.
         let dir = TempDir::new().expect("temp dir");
-        let anime_db = TestDb::anime_handle(&dir);
-        let manga_db = TestDb::manga_handle(&dir);
-        anime_db
+        let db = TestDb::handle(&dir);
+        db
             .write(|tx| {
                 AnimeBuilder::new().title("Show").source(1).url("/s").favorite(true).with(|a| a.calculate_interval = -3).insert(tx);
                 Ok(())
             })
             .expect("insert anime");
-        let store = SqliteLibraryStore::new(manga_db, anime_db);
+        let store = SqliteLibraryStore::new(db);
         let rows = store.library(Kind::Anime).await.expect("library");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].fetch_interval, -3);
@@ -247,16 +228,15 @@ mod tests {
     #[tokio::test]
     async fn library_rows_carry_counts_and_favourite_checks_read_correctly() {
         let dir = TempDir::new().expect("temp dir");
-        let anime_db = TestDb::anime_handle(&dir);
-        let manga_db = TestDb::manga_handle(&dir);
-        anime_db
+        let db = TestDb::handle(&dir);
+        db
             .write(|tx| {
                 AnimeBuilder::new().title("Fav").source(1).url("/f").favorite(true).insert(tx);
                 AnimeBuilder::new().title("NotFav").source(1).url("/n").favorite(false).insert(tx);
                 Ok(())
             })
             .expect("insert anime");
-        let store = SqliteLibraryStore::new(manga_db, anime_db.clone());
+        let store = SqliteLibraryStore::new(db.clone());
         let rows = store.library(Kind::Anime).await.expect("library");
         // Only favourites are in the library view.
         assert_eq!(rows.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), vec!["Fav"]);

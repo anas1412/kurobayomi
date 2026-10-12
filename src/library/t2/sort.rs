@@ -116,19 +116,9 @@ fn t2_sort_06_tracker_mean_uses_minus_one_for_unscored() {
 
 fn service(kind: Kind) -> (tempfile::TempDir, CategoryService, Arc<LibraryPrefs>) {
     let dir = tempfile::tempdir().expect("temp dir");
-    let (path, db) = match kind {
-        Kind::Manga => {
-            let path = dir.path().join("manga.db");
-            let writer = kuro_db::schema_manga::open(&path).expect("manga db");
-            (path.clone(), Arc::new(kuro_db::handle::Db::new(&path, writer).expect("handle")))
-        }
-        Kind::Anime => {
-            let path = dir.path().join("anime.db");
-            let writer = kuro_db::schema_anime::open(&path).expect("anime db");
-            (path.clone(), Arc::new(kuro_db::handle::Db::new(&path, writer).expect("handle")))
-        }
-    };
-    let _ = path;
+    let path = kuro_db::schema_unified::db_path(dir.path());
+    let writer = kuro_db::schema_unified::open_file(&path).expect("db");
+    let db = Arc::new(kuro_db::handle::Db::new(&path, writer).expect("handle"));
     let prefs = Arc::new(LibraryPrefs::new(PrefStore::in_memory()));
     (dir, CategoryService::new(db, kind, prefs.clone()), prefs)
 }

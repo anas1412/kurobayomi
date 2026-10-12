@@ -79,9 +79,10 @@ impl BackupOptions {
     }
 
     /// The Create button rule (B-02, E-06). Chapters, tracking, history, read entries, sensitive settings and
-    /// extensions alone do not enable it, nor do custom buttons (the feature is cut, so they back up nothing).
+    /// extensions alone do not enable it, nor do custom buttons or extension stores (the creator writes no rows for them; the repo links travel with the app
+    /// settings).
     pub fn can_create(&self) -> bool {
-        self.library_entries || self.categories || self.app_settings || self.extension_stores || self.source_settings
+        self.library_entries || self.categories || self.app_settings || self.source_settings
     }
 
     /// "Include sensitive settings" applies only while App or Source settings is on (E-27).
@@ -171,8 +172,8 @@ mod tests {
             o.extension_stores = bits & 8 != 0;
             o.custom_button = bits & 16 != 0;
             o.source_settings = bits & 32 != 0;
-            // custom buttons alone back up nothing (the feature is cut)
-            assert_eq!(o.can_create(), bits & !16 != 0);
+            // custom buttons and extension stores alone back up nothing
+            assert_eq!(o.can_create(), bits & !(8 | 16) != 0);
         }
         let only_extensions = BackupOptions { library_entries: false, categories: false, chapters: false, tracking: false, history: false, read_entries: false, app_settings: false, extension_stores: false, custom_button: false, source_settings: false, private_settings: false, extensions: true };
         assert!(!only_extensions.can_create());

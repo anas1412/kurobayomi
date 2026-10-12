@@ -21,8 +21,8 @@ const UPDATES_WINDOW: &str = include_str!("updates_window.sql");
 /// A migrated manga database with one fixture loaded. Keep the `TempDir` alive for the test.
 fn fixture(sql: &str) -> (TempDir, Arc<Db>) {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("tachiyomi.db");
-    let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
+    let path = dir.path().join("kurobayomi.db");
+    let writer = kuro_db::schema_unified::open_file(&path).expect("manga schema");
     let db = Arc::new(Db::new(&path, writer).expect("manga handle"));
     db.write(|tx| Ok(tx.execute_batch(sql)?)).expect("the fixture loads");
     (dir, db)

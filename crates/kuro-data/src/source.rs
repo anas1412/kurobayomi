@@ -75,7 +75,7 @@ impl MangaStubSourceRepo {
 
     /// Every stub, published again after each upsert.
     pub fn watch_all(&self) -> Subscription<Vec<StubSource>> {
-        self.db.subscribe(&["sources"], ENTRY_DEBOUNCE, |c| {
+        self.db.subscribe(&["stub_sources"], ENTRY_DEBOUNCE, |c| {
             Ok(sm::sources::find_all(c)?.into_iter().map(map_manga).collect::<Vec<_>>())
         })
     }
@@ -111,7 +111,7 @@ impl AnimeStubSourceRepo {
 
     /// Every stub, published again after each upsert.
     pub fn watch_all(&self) -> Subscription<Vec<StubSource>> {
-        self.db.subscribe(&["animesources"], ENTRY_DEBOUNCE, |c| {
+        self.db.subscribe(&["stub_sources"], ENTRY_DEBOUNCE, |c| {
             Ok(sa::stub_sources(c)?.into_iter().map(map_anime).collect::<Vec<_>>())
         })
     }
@@ -130,7 +130,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::tests::{anime_db, manga_db};
+    use crate::tests::test_db;
 
     #[test]
     fn a_blank_stub_is_representable_and_prints_its_id() {
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn manga_stub_upsert_reads_back_and_unknown_ids_are_none() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaStubSourceRepo::new(db);
         assert_eq!(repo.get(5).expect("get"), None);
         repo.upsert(5, "en", "Old").expect("upsert");
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn anime_stub_upsert_reads_back_and_unknown_ids_are_none() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeStubSourceRepo::new(db);
         assert_eq!(repo.get(9).expect("get"), None);
         repo.upsert(9, "ja", "Alpha").expect("upsert");
@@ -174,11 +174,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("tachiyomi.db");
         {
-            let writer = kuro_db::schema_manga::open(&path).expect("schema");
+            let writer = kuro_db::schema_unified::open_file(&path).expect("schema");
             let db = Arc::new(kuro_db::handle::Db::new(&path, writer).expect("handle"));
             MangaStubSourceRepo::new(db).upsert(3, "en", "Kept").expect("upsert");
         }
-        let writer = kuro_db::schema_manga::open(&path).expect("reopen");
+        let writer = kuro_db::schema_unified::open_file(&path).expect("reopen");
         let db = Arc::new(kuro_db::handle::Db::new(&path, writer).expect("handle"));
         let got = MangaStubSourceRepo::new(db).get(3).expect("get");
         assert_eq!(got, Some(StubSource { id: 3, lang: "en".into(), name: "Kept".into() }));
@@ -199,7 +199,7 @@ mod tests {
 
     #[tokio::test]
     async fn watch_all_emits_after_each_upsert() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaStubSourceRepo::new(db);
         let mut sub = repo.watch_all();
         wait_until(&mut sub, &[]).await;
@@ -209,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn anime_watch_all_emits_after_each_upsert() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeStubSourceRepo::new(db);
         let mut sub = repo.watch_all();
         wait_until(&mut sub, &[]).await;

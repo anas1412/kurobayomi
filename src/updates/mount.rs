@@ -252,7 +252,7 @@ fn storage_screen(kind: Kind) -> (Rc<StorageScreen>, Vec<glib::JoinHandle<()>>) 
             let (weak, sources) = (weak.clone(), Rc::clone(&sources));
             glib::spawn_future_local(async move {
                 let Some(screen) = weak.upgrade() else { return };
-                let db = crate::data::app().db(kind);
+                let db = crate::data::app().db.clone();
                 let hide_hidden = diet::LIBRARY_HIDE_HIDDEN_CATEGORIES;
                 let (backend, initializing) = (download_host::current(), *download_host::hub().cache.initializing().borrow());
                 let built = download_host::blocking(move || storage_data::input(&db, kind, &*backend, hide_hidden, initializing)).await;

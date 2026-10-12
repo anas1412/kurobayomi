@@ -252,7 +252,7 @@ pub fn set_season_settings_default(store: &PrefStore, flags: i64) -> &'static st
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testdb::{anime_db, manga_db};
+    use crate::testdb::test_db;
 
     fn store() -> PrefStore {
         PrefStore::in_memory()
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn a_non_favourite_opened_with_defaults_zero_loses_its_stored_chapter_word() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let mut manga = Manga { favorite: false, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::manga() };
         manga.id = repo.insert(&manga).unwrap();
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn a_favourite_keeps_its_stored_word_when_opened() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let mut manga = Manga { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::manga() };
         manga.id = repo.insert(&manga).unwrap();
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn season_defaults_write_the_word_and_browse_add_applies_only_episode_defaults() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let mut anime = Anime { favorite: false, source: 1, url: "a".into(), title: "A".into(), ..kuro_testkit::domain::anime() };
         anime.id = repo.insert(&anime).unwrap();
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn apply_anime_defaults_to_library_changes_only_favourites_and_counts_them() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db);
         let mut fav = Anime { favorite: true, source: 1, url: "f".into(), title: "F".into(), ..kuro_testkit::domain::anime() };
         fav.id = repo.insert(&fav).unwrap();
@@ -349,7 +349,7 @@ mod tests {
 
     #[tokio::test]
     async fn detached_apply_finishes_after_the_caller_is_aborted() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let mut fav = Manga { favorite: true, source: 1, url: "f".into(), title: "F".into(), ..kuro_testkit::domain::manga() };
         fav.id = repo.insert(&fav).unwrap();
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn apply_to_library_changes_only_favourites() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db);
         let mut fav = Manga { favorite: true, source: 1, url: "f".into(), title: "F".into(), ..kuro_testkit::domain::manga() };
         fav.id = repo.insert(&fav).unwrap();

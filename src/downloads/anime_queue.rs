@@ -1,7 +1,7 @@
-//! The anime download queue at startup (lane D): the queue starts over the download tables of the anime database, the
+//! The anime download queue at startup (lane D): the queue starts over the download tables of the app database, the
 //! saved rows come back as QUEUE, and the progress, pause and completion notices go to the desktop.
 //!
-//! Each saved row keeps only ids, so a restore reads the episode and its anime from the anime database. The source name
+//! Each saved row keeps only ids, so a restore reads the episode and its anime from the app database. The source name
 //! comes from the live source when it is installed, else from the stub table, which keeps the names of sources that were
 //! listed before. A row whose episode, anime or source name is unknown is dropped; its folder stays on disk.
 
@@ -17,7 +17,7 @@ use kuro_db::handle::Db;
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_platform::kind::Kind;
 use kuro_domain::storage::StorageManager;
-use kuro_db::schema_anime;
+use kuro_db::schema_unified;
 use kuro_downloads::anime::downloader::EpisodeEngine;
 use kuro_downloads::anime::layout::AnimeLayout;
 use kuro_downloads::anime::manager::{AnimeQueue, AnimeQueueParams, AnimeSettings, QueueEntry, spawn};
@@ -39,7 +39,7 @@ use crate::entry_core::detail::SourceInfo;
 /// How often the progress line is checked. The notifier itself shows at most one update a second.
 const TICK: Duration = Duration::from_secs(1);
 
-/// Starts the anime queue on the current runtime, downloading into the anime folder of `storage`. `db` is the app's anime database (the restore reads it), `prefs` the
+/// Starts the anime queue on the current runtime, downloading into the anime folder of `storage`. `db` is the app database (the restore reads it), `prefs` the
 /// store the network client reads, and `notifier` the desktop notifications.
 pub fn start(
     paths: &dyn Paths,
@@ -51,9 +51,9 @@ pub fn start(
     let root = storage.downloads_dir(Kind::Anime).map_err(|e| format!("the anime downloads folder is not available: {e}"))?;
     let index = crate::updates::download_host::anime_index(storage).ok_or("the anime download index has no folder")?;
     let layout = AnimeLayout::new(Some(root));
-    let store = AnimeQueueStore::open(schema_anime::open_in_data_dir(paths).map_err(|e| e.to_string())?)
+    let store = AnimeQueueStore::open(schema_unified::open_in_data_dir(paths).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    let pending = AnimePendingStore::open(schema_anime::open_in_data_dir(paths).map_err(|e| e.to_string())?)
+    let pending = AnimePendingStore::open(schema_unified::open_in_data_dir(paths).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     let restored = restore(&store, &db)?;
     // Read at every scheduling pass, so a change in Settings > Downloads applies to the running queue.
@@ -151,10 +151,10 @@ mod tests {
     use kuro_data::anime::Anime;
     use kuro_data::episode::Episode;
 
-    fn anime_db() -> (tempfile::TempDir, Arc<Db>) {
+    fn test_db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("tachiyomi.animedb");
-        let writer = schema_anime::open(&path).unwrap();
+        let path = schema_unified::db_path(dir.path());
+        let writer = schema_unified::open_file(&path).unwrap();
         (dir, Arc::new(Db::new(&path, writer).unwrap()))
     }
 
@@ -169,20 +169,20 @@ mod tests {
 
     #[test]
     fn a_source_with_only_a_stub_row_is_named_by_it_and_flagged_as_a_stub() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         AnimeStubSourceRepo::new(Arc::clone(&db)).upsert(77, "en", "Site").unwrap();
         assert_eq!(source_name(&db, 77), Some(("Site (EN)".to_owned(), true)));
     }
 
     #[test]
     fn a_source_with_no_live_source_and_no_stub_has_no_name() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         assert_eq!(source_name(&db, 88), None);
     }
 
     #[test]
     fn a_saved_row_comes_back_with_its_stub_flag_and_ids() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         AnimeStubSourceRepo::new(Arc::clone(&db)).upsert(77, "en", "Site").unwrap();
         let (anime_id, episode_id) = add(&db, "a", 77);
         let entry = restore_entry(&db, anime_id, episode_id).expect("the row is rebuilt");
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn a_row_is_dropped_when_its_episode_anime_or_source_name_is_unknown() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         AnimeStubSourceRepo::new(Arc::clone(&db)).upsert(77, "en", "Site").unwrap();
         let (anime_id, episode_id) = add(&db, "a", 77);
         let (no_name_anime, no_name_episode) = add(&db, "b", 88);
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn restore_keeps_the_rebuilt_rows_in_saved_order_and_drops_the_rest_from_the_store() {
-        let (_dir, db) = anime_db();
+        let (_dir, db) = test_db();
         AnimeStubSourceRepo::new(Arc::clone(&db)).upsert(77, "en", "Site").unwrap();
         let (a1, e1) = add(&db, "a", 77);
         let (a2, e2) = add(&db, "b", 77);

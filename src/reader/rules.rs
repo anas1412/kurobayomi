@@ -89,8 +89,8 @@ mod tests {
 
     fn db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().unwrap();
-        let path = kuro_db::schema_manga::db_path(dir.path());
-        let writer = kuro_db::schema_manga::open(&path).unwrap();
+        let path = kuro_db::schema_unified::db_path(dir.path());
+        let writer = kuro_db::schema_unified::open_file(&path).unwrap();
         (dir, Arc::new(Db::new(&path, writer).unwrap()))
     }
 

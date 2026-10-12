@@ -17,7 +17,6 @@ use kuro_backup::schema::PrefValue;
 use kuro_data::category::Category;
 use kuro_data::chapter::Chapter;
 use kuro_data::manga::Manga;
-use kuro_data::extension_repo::ExtensionRepo;
 use kuro_platform::kind::Kind;
 use tokio::sync::watch;
 
@@ -42,9 +41,6 @@ impl LibraryReader for Library {
         Ok(vec![Category { id: 4, name: "Reading".into(), order: 1, flags: 0, hidden: false }])
     }
     fn anime_categories(&self) -> Result<Vec<Category>, BackupError> {
-        Ok(Vec::new())
-    }
-    fn manga_extension_repos(&self) -> Result<Vec<ExtensionRepo>, BackupError> {
         Ok(Vec::new())
     }
 }

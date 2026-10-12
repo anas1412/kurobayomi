@@ -3,7 +3,6 @@
 //! what the repositories call; `read_async`/`write_async` run the same closures on tokio's blocking
 //! pool. Nothing here needs a runtime, except those two and the subscriptions (`subscribe.rs`).
 
-use kuro_platform::kind::Kind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -16,8 +15,7 @@ use tokio::sync::broadcast;
 use crate::error::{DbError, DbResult};
 use crate::notify::{self, Changed, Pending};
 use crate::open::{mark_clean_shutdown, open_connection};
-use crate::schema_anime;
-use crate::schema_manga;
+use crate::schema_unified;
 
 /// Reader connections per database file.
 pub const READERS: usize = 4;
@@ -40,39 +38,6 @@ struct Upkeep {
     optimized_at: Instant,
 }
 
-/// What differs between the two database files.
-pub trait DbKindExt {
-    /// File name inside the data directory.
-    fn file_name(self) -> &'static str;
-    /// The file of this kind inside `data_dir`.
-    fn path(self, data_dir: &Path) -> PathBuf;
-    /// `PRAGMA user_version` a fresh file of this kind is created at.
-    fn schema_version(self) -> i64;
-}
-
-impl DbKindExt for Kind {
-    fn file_name(self) -> &'static str {
-        match self {
-            Self::Manga => schema_manga::MANGA_DB_FILE,
-            Self::Anime => crate::anime::consts::FILE_NAME,
-        }
-    }
-
-    fn path(self, data_dir: &Path) -> PathBuf {
-        match self {
-            Self::Manga => schema_manga::db_path(data_dir),
-            Self::Anime => schema_anime::db_path(data_dir),
-        }
-    }
-
-    fn schema_version(self) -> i64 {
-        match self {
-            Self::Manga => crate::schema::SCHEMA_VERSION,
-            Self::Anime => crate::anime::consts::SCHEMA_VERSION,
-        }
-    }
-}
-
 /// One writer and [`READERS`] readers on one file. Share it behind an `Arc`.
 pub struct Db {
     /// The database file, so `close` can take up its dirty marker.
@@ -88,18 +53,14 @@ pub struct Db {
 }
 
 impl Db {
-    /// Opens the database of `kind` in the data directory of `paths` (`<data_dir>/manga.db` or
-    /// `<data_dir>/anime.db`), creating or migrating it through the schema's open gate.
-    pub fn open(kind: Kind, paths: &dyn Paths) -> DbResult<Arc<Self>> {
-        let path = kind.path(&paths.data_dir());
-        let writer = match kind {
-            Kind::Manga => schema_manga::open(&path)?,
-            Kind::Anime => schema_anime::open(&path)?,
-        };
+    /// Opens the one database (`<data_dir>/kurobayomi.db`) of `paths`, creating it through the schema's open gate.
+    pub fn open(paths: &dyn Paths) -> DbResult<Arc<Self>> {
+        let path = schema_unified::db_path(&paths.data_dir());
+        let writer = schema_unified::open_file(&path)?;
         Ok(Arc::new(Self::new(&path, writer)?))
     }
 
-    /// Wraps `writer`, which must already be open and migrated (see `schema_manga::open`), and opens
+    /// Wraps `writer`, which must already be open and migrated (see `schema_unified::open_file`), and opens
     /// the readers on `path`. Readers refuse writes (`query_only`). The hooks go on `writer` only.
     pub fn new(path: &Path, writer: Connection) -> DbResult<Self> {
         let readers = (0..READERS)
@@ -269,14 +230,13 @@ mod tests {
 
     use super::*;
     use crate::open::DbError;
-    use crate::schema_manga;
     use crate::statements_manga::{CategoryPatch, categories};
 
-    /// A migrated manga file in a fresh directory, with a handle on it.
+    /// A unified file in a fresh directory, with a handle on it.
     fn fixture() -> (tempfile::TempDir, Db) {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("manga.db");
-        let writer = schema_manga::open(&path).unwrap();
+        let path = dir.path().join("kurobayomi.db");
+        let writer = schema_unified::open_file(&path).unwrap();
         let db = Db::new(&path, writer).unwrap();
         (dir, db)
     }
@@ -293,8 +253,8 @@ mod tests {
     #[test]
     fn the_dirty_marker_is_down_after_open_and_up_after_close() {
         let paths = kuro_testkit::TempPaths::new().unwrap();
-        let db = Db::open(Kind::Manga, &paths).unwrap();
-        let marker = crate::open::dirty_marker(&Kind::Manga.path(&paths.data_dir()));
+        let db = Db::open(&paths).unwrap();
+        let marker = crate::open::dirty_marker(&schema_unified::db_path(&paths.data_dir()));
         assert!(marker.is_file(), "created on open");
         db.close().unwrap();
         assert!(!marker.exists(), "removed on clean shutdown");
@@ -375,12 +335,12 @@ mod publication_tests {
 
     fn fixture() -> (tempfile::TempDir, Db) {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("manga.db");
-        let writer = schema_manga::open(&path).unwrap();
+        let path = dir.path().join("kurobayomi.db");
+        let writer = schema_unified::open_file(&path).unwrap();
         (dir, Db::new(&path, writer).unwrap())
     }
 
-    /// Every publication since the last call, as the manga bits it names.
+    /// Every publication since the last call, as the table bits it names.
     fn published(rx: &mut broadcast::Receiver<Changed>) -> Vec<Tables> {
         let mut out = Vec::new();
         while let Ok(changed) = rx.try_recv() {
@@ -390,11 +350,11 @@ mod publication_tests {
     }
 
     #[test]
-    fn a_single_insert_publishes_the_mangas_bit() {
+    fn a_single_insert_publishes_the_entries_bit() {
         let (_d, db) = fixture();
         let mut rx = db.changes.subscribe();
         db.write(|tx| Ok(mangas::insert(tx, &manga("/a"))?)).unwrap();
-        assert_eq!(published(&mut rx), [Tables::MANGAS], "TC-N01");
+        assert_eq!(published(&mut rx), [Tables::ENTRIES], "TC-N01");
     }
 
     #[test]
@@ -411,7 +371,7 @@ mod publication_tests {
     }
 
     #[test]
-    fn a_chapter_read_update_publishes_chapters_and_the_trigger_driven_mangas() {
+    fn a_chapter_read_update_publishes_items_and_the_trigger_driven_entries() {
         let (_d, db) = fixture();
         let chapter_id = db
             .write(|tx| {
@@ -424,23 +384,23 @@ mod publication_tests {
             Ok(chapters::update(tx, &ChapterPatch { id: chapter_id, read: Some(true), ..Default::default() })?)
         })
         .unwrap();
-        assert_eq!(published(&mut rx), [Tables::CHAPTERS | Tables::MANGAS], "TC-N03");
+        assert_eq!(published(&mut rx), [Tables::ITEMS | Tables::ENTRIES], "TC-N03");
     }
 
     #[test]
-    fn a_cascade_delete_publishes_mangas_chapters_and_history() {
+    fn a_cascade_delete_publishes_entries_items_and_history() {
         let (_d, db) = fixture();
         let manga_id = db
             .write(|tx| {
                 let m = mangas::insert(tx, &manga("/a"))?;
                 let c = chapters::insert(tx, &chapter(m, "/a/1"))?;
-                tx.execute("INSERT INTO history(chapter_id, last_read, time_read) VALUES (?1, 1, 0)", [c])?;
+                tx.execute("INSERT INTO history(item_id, last_at, duration_ms) VALUES (?1, 1, 0)", [c])?;
                 Ok(m)
             })
             .unwrap();
         let mut rx = db.changes.subscribe();
-        db.write(|tx| Ok(tx.execute("DELETE FROM mangas WHERE _id = ?1", [manga_id]).map(drop)?)).unwrap();
-        assert_eq!(published(&mut rx), [Tables::MANGAS | Tables::CHAPTERS | Tables::HISTORY], "TC-N09");
+        db.write(|tx| Ok(tx.execute("DELETE FROM entries WHERE _id = ?1", [manga_id]).map(drop)?)).unwrap();
+        assert_eq!(published(&mut rx), [Tables::ENTRIES | Tables::ITEMS | Tables::HISTORY], "TC-N09");
     }
 
     #[test]
@@ -477,27 +437,24 @@ mod publication_tests {
     }
 
     #[test]
-    fn open_creates_each_file_in_the_data_dir_with_the_connection_pragmas() {
+    fn open_creates_the_one_file_in_the_data_dir_with_the_connection_pragmas() {
         let paths = TempPaths::new().unwrap();
-        for kind in [Kind::Manga, Kind::Anime] {
-            let db = Db::open(kind, &paths).unwrap();
-            assert!(kind.path(&paths.data_dir()).is_file());
-            db.read(|c| {
-                let pragma = |name: &str| -> DbResult<i64> { Ok(c.pragma_query_value(None, name, |r| r.get(0))?) };
-                assert_eq!(pragma("foreign_keys")?, 1);
-                assert_eq!(pragma("synchronous")?, 1);
-                assert_eq!(pragma("busy_timeout")?, 5000);
-                assert_eq!(pragma("recursive_triggers")?, 0);
-                let mode: String = c.pragma_query_value(None, "journal_mode", |r| r.get(0))?;
-                assert_eq!(mode, "wal");
-                Ok(())
-            })
-            .unwrap();
-        }
-        assert_eq!(Kind::Anime.file_name(), "anime.db");
-        assert_eq!(Kind::Anime.schema_version(), 140);
-        assert_eq!(Kind::Manga.file_name(), "manga.db");
-        assert_eq!(Kind::Manga.schema_version(), 34);
+        let db = Db::open(&paths).unwrap();
+        assert!(schema_unified::db_path(&paths.data_dir()).is_file());
+        assert!(schema_unified::legacy_files(&paths.data_dir()).is_empty());
+        db.read(|c| {
+            let pragma = |name: &str| -> DbResult<i64> { Ok(c.pragma_query_value(None, name, |r| r.get(0))?) };
+            assert_eq!(pragma("foreign_keys")?, 1);
+            assert_eq!(pragma("synchronous")?, 1);
+            assert_eq!(pragma("busy_timeout")?, 5000);
+            assert_eq!(pragma("recursive_triggers")?, 0);
+            assert_eq!(pragma("user_version")?, schema_unified::SCHEMA_VERSION);
+            assert_eq!(pragma("application_id")?, schema_unified::APPLICATION_ID);
+            let mode: String = c.pragma_query_value(None, "journal_mode", |r| r.get(0))?;
+            assert_eq!(mode, "wal");
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[tokio::test]
@@ -509,7 +466,7 @@ mod publication_tests {
             let db = Arc::clone(db);
             async move { db.read_async(|c| Ok(categories::get_categories(c)?.len())).await.unwrap() }
         };
-        assert_eq!(count(&db).await, 2, "the seed row and the new category");
+        assert_eq!(count(&db).await, 2, "the system row and the new category");
         let rolled_back: DbResult<()> = db
             .write_async(|tx| {
                 categories::insert(tx, "Gone", 2, 0)?;
@@ -532,38 +489,17 @@ mod publication_tests {
         let inline = db.read(|_| Ok(std::thread::current().id())).unwrap();
         assert_eq!(inline, caller, "the synchronous read runs on the calling thread");
     }
-
-    /// How many publications are waiting on `rx`.
-    fn drain(rx: &mut broadcast::Receiver<Changed>) -> usize {
-        std::iter::from_fn(|| rx.try_recv().ok()).count()
-    }
-
-    #[test]
-    fn a_commit_on_one_database_never_publishes_on_the_other() {
-        let paths = TempPaths::new().unwrap();
-        let manga = Db::open(Kind::Manga, &paths).unwrap();
-        let anime = Db::open(Kind::Anime, &paths).unwrap();
-        let mut manga_rx = manga.changes.subscribe();
-        let mut anime_rx = anime.changes.subscribe();
-        manga.write(|tx| Ok(categories::insert(tx, "Reading", 1, 0)?)).unwrap();
-        assert_eq!(drain(&mut manga_rx), 1, "the manga write publishes on the manga handle");
-        assert_eq!(drain(&mut anime_rx), 0, "the manga write never publishes on the anime handle");
-        anime.write(|tx| Ok(tx.execute("INSERT INTO categories(_id, name, sort, flags) VALUES (1, 'a', 0, 0)", [])?)).unwrap();
-        assert_eq!(drain(&mut anime_rx), 1, "the anime write publishes on the anime handle");
-        assert_eq!(drain(&mut manga_rx), 0, "the anime write never publishes on the manga handle");
-    }
 }
 
 #[cfg(test)]
 mod upkeep_tests {
     use super::*;
-    use crate::schema_manga;
 
     #[test]
     fn a_passive_checkpoint_runs_after_every_thousand_commits_and_not_before() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("manga.db");
-        let db = Db::new(&path, schema_manga::open(&path).unwrap()).unwrap();
+        let path = dir.path().join("kurobayomi.db");
+        let db = Db::new(&path, schema_unified::open_file(&path).unwrap()).unwrap();
         for _ in 0..(CHECKPOINT_EVERY - 1) {
             db.write(|_tx| Ok(())).unwrap();
         }
@@ -575,8 +511,8 @@ mod upkeep_tests {
     #[test]
     fn a_failed_write_is_not_counted_as_a_commit() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("manga.db");
-        let db = Db::new(&path, schema_manga::open(&path).unwrap()).unwrap();
+        let path = dir.path().join("kurobayomi.db");
+        let db = Db::new(&path, schema_unified::open_file(&path).unwrap()).unwrap();
         for _ in 0..CHECKPOINT_EVERY {
             let _ = db.write::<()>(|_tx| Err(DbError::Task("boom".into())));
         }

@@ -262,7 +262,7 @@ mod tests {
     use super::*;
     use crate::source::repo::ExtensionCatalog;
     use crate::source::stub::StubSource;
-    use crate::testdb::{anime_db, manga_db};
+    use crate::testdb::test_db;
 
     /// An index with no rows, for a registry that never finds index data.
     struct NoIndex;
@@ -351,7 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn manga_lists_leave_out_favourite_only_sources_and_resolve_stubs() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let stubs = Arc::new(MangaStubSourceRepo::new(db));
         stubs.upsert(2, "en", "Two").unwrap();
@@ -386,7 +386,7 @@ mod tests {
 
     #[tokio::test]
     async fn anime_lists_count_the_clear_tree_and_list_orphaned_children() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let stubs = Arc::new(AnimeStubSourceRepo::new(db));
         stubs.upsert(3, "ja", "Three").unwrap();
@@ -420,7 +420,7 @@ mod tests {
 
     #[tokio::test]
     async fn online_sources_are_the_installed_http_sources_and_follow_the_registry() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = MangaRepo::new(db.clone());
         let registry = Arc::new(SourceRegistry::<Installed>::new(
             Kind::Manga,

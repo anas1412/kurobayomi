@@ -6,6 +6,7 @@ use std::sync::Arc;
 use kuro_data::episode::{Episode, EpisodeRepo, EpisodeUpdate};
 use kuro_data::history::AnimeHistoryRepo;
 use kuro_db::handle::Db;
+use kuro_platform::kind::Kind;
 use kuro_player::progress::{self, EpisodeChanges, EpisodeProgress, SaveContext, WriteThrottle, HISTORY_INTERVAL_MS};
 
 /// Watched past this fraction of the duration counts as seen. Kotlin's default.
@@ -60,6 +61,8 @@ pub struct Tracker {
     stored: Episode,
     incognito: bool,
     throttle: WriteThrottle,
+    /// Called once with the anime id and the episode number when an episode crosses the threshold.
+    on_seen: Box<dyn Fn(i64, f64)>,
 }
 
 impl Tracker {
@@ -84,6 +87,9 @@ impl Tracker {
             stored,
             incognito,
             throttle: WriteThrottle::new(HISTORY_INTERVAL_MS),
+            on_seen: Box::new(move |anime_id, number| {
+                crate::entry_core::tracking::progress::item_finished(Kind::Anime, anime_id, number, incognito);
+            }),
         })
     }
 
@@ -130,7 +136,12 @@ impl Tracker {
                 ..EpisodeUpdate::new(self.episode_id)
             };
             match self.episodes.update(&update) {
-                Ok(()) => apply(&mut self.stored, &changes),
+                Ok(()) => {
+                    apply(&mut self.stored, &changes);
+                    if changes.seen == Some(true) {
+                        (self.on_seen)(self.stored.anime_id, self.stored.episode_number);
+                    }
+                }
                 Err(e) => tracing::error!(episode_id = self.episode_id, error = %e, "progress write failed"),
             }
         }
@@ -155,7 +166,7 @@ mod tests {
 
     /// One anime with one episode in a fresh anime database. Returns the database and the episode id.
     fn seeded(dir: &TempDir) -> (Arc<Db>, i64) {
-        let db = TestDb::anime_handle(dir);
+        let db = TestDb::handle(dir);
         let anime_id = AnimeRepo::new(Arc::clone(&db)).insert(&Anime::create()).expect("anime row");
         let episode = Episode {
             anime_id,
@@ -216,6 +227,22 @@ mod tests {
         assert!(row(&db, id).seen);
         assert!(tracker.seen());
         assert!(Tracker::open(db, id, false).unwrap().seen());
+    }
+
+    #[test]
+    fn crossing_the_threshold_reports_the_episode_to_the_trackers_once() {
+        let dir = TempDir::new().unwrap();
+        let (db, id) = seeded(&dir);
+        let calls = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut tracker = Tracker::open(Arc::clone(&db), id, false).expect("tracker");
+        let sink = std::rc::Rc::clone(&calls);
+        tracker.on_seen = Box::new(move |anime, number| sink.borrow_mut().push((anime, number)));
+        tracker.save(0, 50_000, 100_000, true);
+        assert!(calls.borrow().is_empty(), "below the threshold");
+        tracker.save(10_000, 90_000, 100_000, true);
+        tracker.save(20_000, 95_000, 100_000, true);
+        let anime_id = row(&db, id).anime_id;
+        assert_eq!(*calls.borrow(), vec![(anime_id, row(&db, id).episode_number)]);
     }
 
     #[test]

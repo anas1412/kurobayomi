@@ -28,13 +28,13 @@ mod tests {
     #[test]
     fn the_first_result_reaches_the_callback_on_the_main_context() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
+        let path = kuro_db::schema_unified::db_path(dir.path());
+        let writer = kuro_db::schema_unified::open_file(&path).expect("schema");
         let db = Arc::new(Db::new(&path, writer).expect("manga handle"));
         let rt = kuro_core::runtime::build().expect("runtime");
         let _entered = rt.enter();
         let sub = db.subscribe(&["categories"], Duration::ZERO, |c| {
-            Ok(c.query_row("SELECT count(*) FROM categories", [], |r| r.get::<_, i64>(0))?)
+            Ok(c.query_row("SELECT count(*) FROM categories WHERE kind = 'manga'", [], |r| r.get::<_, i64>(0))?)
         });
         let ctx = glib::MainContext::new();
         let seen: Rc<RefCell<Vec<i64>>> = Rc::new(RefCell::new(Vec::new()));

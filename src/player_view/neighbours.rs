@@ -43,7 +43,7 @@ mod tests {
     #[test]
     fn the_neighbours_follow_the_episode_numbers_and_stop_at_the_ends() {
         let dir = TempDir::new().unwrap();
-        let db = TestDb::anime_handle(&dir);
+        let db = TestDb::handle(&dir);
         let anime_id = AnimeRepo::new(Arc::clone(&db)).insert(&Anime::create()).expect("anime row");
         let episodes: Vec<Episode> = [3.0, 1.0, 2.0]
             .iter()

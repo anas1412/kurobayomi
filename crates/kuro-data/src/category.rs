@@ -74,11 +74,8 @@ pub struct CategoryRepo {
 }
 
 /// Tables a category list reads, per kind.
-fn tables(kind: Kind) -> &'static [&'static str] {
-    match kind {
-        Kind::Manga => &["categories", "mangas_categories"],
-        Kind::Anime => &["categories", "animes_categories"],
-    }
+fn tables(_kind: Kind) -> &'static [&'static str] {
+    &["categories", "entry_categories"]
 }
 
 /// The column list of every category read. `hidden = 1` makes only the value 1 hidden (EC-30); a row with any
@@ -88,22 +85,14 @@ const CATEGORY_COLUMNS: &str = "C._id, C.name, C.sort, C.flags, C.hidden = 1";
 /// The SQL of one category read for `kind` and `scope`. The by-entry scopes join the link table; the order
 /// is `sort, _id` for every scope, which is what the upstream lists use.
 fn read_sql(kind: Kind, scope: Scope) -> String {
-    let (link, entry_col) = match kind {
-        Kind::Manga => ("mangas_categories", "manga_id"),
-        Kind::Anime => ("animes_categories", "anime_id"),
-    };
+    let k = kind.as_str();
     let visible = "C.hidden != 1";
+    let by_entry = format!(" JOIN entry_categories L ON C.kind = L.kind AND C._id = L.category_id");
     let (join, filter) = match scope {
-        Scope::All => (String::new(), String::new()),
-        Scope::Visible => (String::new(), format!(" WHERE {visible}")),
-        Scope::ByEntry(_) => (
-            format!(" JOIN {link} L ON C._id = L.category_id"),
-            format!(" WHERE L.{entry_col} = :entry"),
-        ),
-        Scope::VisibleByEntry(_) => (
-            format!(" JOIN {link} L ON C._id = L.category_id"),
-            format!(" WHERE L.{entry_col} = :entry AND {visible}"),
-        ),
+        Scope::All => (String::new(), format!(" WHERE C.kind = '{k}'")),
+        Scope::Visible => (String::new(), format!(" WHERE C.kind = '{k}' AND {visible}")),
+        Scope::ByEntry(_) => (by_entry, format!(" WHERE C.kind = '{k}' AND L.entry_id = :entry")),
+        Scope::VisibleByEntry(_) => (by_entry, format!(" WHERE C.kind = '{k}' AND L.entry_id = :entry AND {visible}")),
     };
     format!("SELECT {CATEGORY_COLUMNS} FROM categories C{join}{filter} ORDER BY C.sort, C._id")
 }
@@ -132,7 +121,8 @@ impl CategoryRepo {
     /// The category with `id`, or `None`.
     pub fn get(&self, id: i64) -> DataResult<Option<Category>> {
         let sql = format!(
-            "SELECT {CATEGORY_COLUMNS} FROM categories C WHERE C._id = :id"
+            "SELECT {CATEGORY_COLUMNS} FROM categories C WHERE C.kind = '{}' AND C._id = :id",
+            self.kind.as_str()
         );
         let found = self.db.read(|c| {
             let mut st = c.prepare_cached(&sql)?;
@@ -255,7 +245,7 @@ impl CategoryRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::manga_db;
+    use crate::tests::test_db;
     use kuro_db::flags::library_sort;
 
     fn manga_orders(db: &Db) -> Vec<(i64, String, i64)> {
@@ -265,7 +255,7 @@ mod tests {
 
     #[test]
     fn create_gives_the_next_order_and_the_first_user_category_zero() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let a = create_manga_category(&db, "A", 0).unwrap();
         let b = create_manga_category(&db, "B", 0).unwrap();
         let orders: Vec<(i64, i64)> = manga_orders(&db).into_iter().map(|(id, _, o)| (id, o)).collect();
@@ -274,7 +264,7 @@ mod tests {
 
     #[test]
     fn created_categories_take_the_sort_flags_of_the_global_preference() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let flags = library_sort::from_serialized("LAST_MANGA_UPDATE,DESCENDING");
         let id = create_manga_category(&db, "A", flags).unwrap();
         let stored = manga_flags(&db, id);
@@ -289,7 +279,7 @@ mod tests {
 #[cfg(test)]
 mod repo_tests {
     use super::*;
-    use crate::support::{anime_db, insert_anime, insert_category, insert_manga, manga_db};
+    use crate::support::{test_db, insert_anime, insert_category, insert_manga};
 
     fn names(list: &[Category]) -> Vec<String> {
         list.iter().map(|c| c.name.clone()).collect()
@@ -297,7 +287,7 @@ mod repo_tests {
 
     #[test]
     fn all_starts_with_the_system_row_and_orders_by_sort_then_id() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Manga);
         insert_category(&db, Kind::Manga, "B", 1);
         insert_category(&db, Kind::Manga, "A", 0);
@@ -308,7 +298,7 @@ mod repo_tests {
 
     #[test]
     fn the_anime_kind_lists_its_system_row_first() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Anime);
         insert_category(&db, Kind::Anime, "Watching", 0);
         let all = repo.all().unwrap();
@@ -318,7 +308,7 @@ mod repo_tests {
 
     #[test]
     fn hidden_categories_are_excluded_from_all_visible_and_only_one_hides() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Anime);
         let shown = insert_category(&db, Kind::Anime, "Shown", 0);
         let hidden = insert_category(&db, Kind::Anime, "Hidden", 1);
@@ -331,16 +321,16 @@ mod repo_tests {
 
     #[test]
     fn hidden_values_other_than_one_read_as_visible() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Manga);
         let id = insert_category(&db, Kind::Manga, "Odd", 0);
-        db.write(|tx| Ok(tx.execute("UPDATE categories SET hidden = 2 WHERE _id = ?1", [id]).map(drop)?)).unwrap();
+        db.write(|tx| Ok(tx.execute("UPDATE categories SET hidden = 2 WHERE kind = 'manga' AND _id = ?1", [id]).map(drop)?)).unwrap();
         assert!(repo.all_visible().unwrap().iter().any(|c| c.id == id), "hidden = 2 is visible (EC-30)");
     }
 
     #[test]
     fn insert_ignores_the_passed_id_and_hidden_and_returns_the_new_id() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Manga);
         let id = repo.insert(&Category { id: 77, name: "New".into(), order: 3, flags: 9, hidden: true }).unwrap();
         assert_ne!(id, 77);
@@ -350,7 +340,7 @@ mod repo_tests {
 
     #[test]
     fn update_partial_coalesces_and_writes_hidden_as_a_flag() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Anime);
         let id = insert_category(&db, Kind::Anime, "Keep", 0);
         repo.update_partial(&CategoryUpdate { id, flags: Some(5), hidden: Some(true), ..Default::default() }).unwrap();
@@ -360,7 +350,7 @@ mod repo_tests {
 
     #[test]
     fn update_partials_is_atomic() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Manga);
         let a = insert_category(&db, Kind::Manga, "A", 0);
         db.write(|tx| {
@@ -382,7 +372,7 @@ mod repo_tests {
 
     #[test]
     fn update_all_flags_with_none_changes_nothing() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Manga);
         let a = insert_category(&db, Kind::Manga, "A", 0);
         repo.update_partial(&CategoryUpdate { id: a, flags: Some(4), ..Default::default() }).unwrap();
@@ -394,14 +384,14 @@ mod repo_tests {
 
     #[test]
     fn deleting_the_system_category_fails_and_deleting_another_cascades_links() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Manga);
         let err = repo.delete(0).unwrap_err();
         assert!(err.to_string().contains("System category can't be deleted"), "{err}");
 
         let m = insert_manga(&db, "m", true);
         let cat = insert_category(&db, Kind::Manga, "Tag", 0);
-        db.write(|tx| Ok(tx.execute("INSERT INTO mangas_categories(manga_id, category_id) VALUES (?1, ?2)", [m, cat]).map(drop)?))
+        db.write(|tx| Ok(tx.execute("INSERT INTO entry_categories(entry_id, kind, category_id) VALUES (?1, 'manga', ?2)", [m, cat]).map(drop)?))
             .unwrap();
         assert_eq!(names(&repo.by_entry(m).unwrap()), ["Tag"]);
         repo.delete(cat).unwrap();
@@ -410,7 +400,7 @@ mod repo_tests {
 
     #[test]
     fn by_entry_lists_the_entry_categories_in_display_order() {
-        let (_d, db) = anime_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Anime);
         let a = insert_anime(&db, "a", true);
         let late = insert_category(&db, Kind::Anime, "Late", 5);
@@ -418,7 +408,7 @@ mod repo_tests {
         let _other = insert_category(&db, Kind::Anime, "Other", 0);
         db.write(|tx| {
             for cat in [late, early] {
-                tx.execute("INSERT INTO animes_categories(anime_id, category_id) VALUES (?1, ?2)", [a, cat])?;
+                tx.execute("INSERT INTO entry_categories(entry_id, kind, category_id) VALUES (?1, 'anime', ?2)", [a, cat])?;
             }
             Ok(())
         })
@@ -428,7 +418,7 @@ mod repo_tests {
 
     #[test]
     fn a_subscription_re_emits_after_an_insert() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Manga);
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(async {

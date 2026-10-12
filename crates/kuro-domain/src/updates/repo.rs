@@ -16,8 +16,8 @@ use super::model::UpdateRow;
 use crate::error::DomainError;
 
 /// Tables the feed reads; a write to any of them re-runs the feed.
-const MANGA_TABLES: &[&str] = &["chapters", "mangas"];
-const ANIME_TABLES: &[&str] = &["episodes", "animes"];
+const MANGA_TABLES: &[&str] = &["items", "entries"];
+const ANIME_TABLES: &[&str] = &["items", "entries"];
 const FEED_DEBOUNCE: Duration = Duration::from_millis(30);
 
 #[derive(Clone)]
@@ -149,7 +149,7 @@ impl UpdatesRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testdb::manga_db;
+    use crate::testdb::test_db;
     use kuro_data::manga::{Manga, MangaRepo};
 
     fn manga(db: &Arc<Db>, title: &str, favorite: bool, date_added: i64) -> i64 {
@@ -168,7 +168,7 @@ mod tests {
     fn chapter(db: &Arc<Db>, manga_id: i64, name: &str, date_fetch: i64, date_upload: i64, read: bool) -> i64 {
         db.write(|tx| {
             tx.execute(
-                "INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload) \
+                "INSERT INTO items(entry_id, url, name, scanlator, done, bookmark, progress, number, source_order, date_fetch, date_upload) \
                  VALUES (?1, ?2, ?3, NULL, ?4, 0, 0, 1, 0, ?5, ?6)",
                 (manga_id, format!("{name}-{manga_id}-{date_fetch}"), name, read, date_fetch, date_upload),
             )?;
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn the_fixture_of_the_feed_window_yields_d_then_b() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = manga(&db, "M", true, 1000);
         let n = manga(&db, "N", false, 0);
         chapter(&db, m, "a", 900, 5000, false);
@@ -200,7 +200,7 @@ mod tests {
     /// The anime twin reads `seen`, not `read`, and keeps the same window.
     #[test]
     fn the_anime_twin_filters_by_seen_inside_the_window() {
-        let (_d, db) = crate::testdb::anime_db();
+        let (_d, db) = crate::testdb::test_db();
         let anime = kuro_data::anime::AnimeRepo::new(db.clone())
             .insert(&kuro_data::anime::Anime {
                 favorite: true,
@@ -214,7 +214,7 @@ mod tests {
         db.write(|tx| {
             for (name, seen, date_fetch) in [("old", false, 900), ("new", false, 2000), ("done", true, 4000)] {
                 tx.execute(
-                    "INSERT INTO episodes(anime_id, url, name, seen, bookmark, last_second_seen, total_seconds, episode_number, source_order, date_fetch, date_upload, fillermark) \
+                    "INSERT INTO items(entry_id, url, name, done, bookmark, progress, total_seconds, number, source_order, date_fetch, date_upload, fillermark) \
                      VALUES (?1, ?2, ?3, ?4, 0, 0, 0, 1, 0, ?5, 5000, 0)",
                     (anime, format!("u-{name}"), name, seen, date_fetch),
                 )?;
@@ -229,7 +229,7 @@ mod tests {
 
     #[tokio::test]
     async fn watch_with_read_publishes_the_filtered_feed() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = manga(&db, "M", true, 1000);
         chapter(&db, m, "b", 2000, 5000, false);
         let mut sub = UpdatesRepo::new(db.clone()).watch_with_read(Kind::Manga, false, 1000);
@@ -242,14 +242,14 @@ mod tests {
 
     #[test]
     fn re_adding_an_entry_hides_items_fetched_before_the_new_date_added() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = manga(&db, "M", true, 1000);
         chapter(&db, m, "a", 900, 5000, false);
         chapter(&db, m, "b", 2000, 5000, false);
         chapter(&db, m, "d", 4000, 6000, true);
         let repo = UpdatesRepo::new(db.clone());
         db.write(|tx| {
-            tx.execute("UPDATE mangas SET date_added = 3500 WHERE _id = ?1", [m])?;
+            tx.execute("UPDATE entries SET date_added = 3500 WHERE _id = ?1", [m])?;
             Ok(())
         })
         .unwrap();
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn the_feed_is_capped_at_500_rows_newest_fetch_first() {
-        let (_d, db) = manga_db();
+        let (_d, db) = test_db();
         let m = manga(&db, "Big", true, 0);
         for i in 0..600 {
             chapter(&db, m, &format!("c{i}"), 1000 + i, 5000, false);

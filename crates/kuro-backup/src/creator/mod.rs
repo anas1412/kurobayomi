@@ -12,7 +12,6 @@ use kuro_data::anime::Anime;
 use kuro_data::category::Category;
 use kuro_data::chapter::Chapter;
 use kuro_data::episode::Episode;
-use kuro_data::extension_repo::ExtensionRepo;
 use kuro_data::history::{AnimeHistory, MangaHistory};
 use kuro_data::manga::Manga;
 use kuro_data::track::{AnimeTrack, MangaTrack};
@@ -62,7 +61,6 @@ pub trait LibraryReader {
     /// All manga categories, system category (id 0) included; the creator filters it.
     fn manga_categories(&self) -> Result<Vec<Category>, BackupError>;
     fn anime_categories(&self) -> Result<Vec<Category>, BackupError>;
-    fn manga_extension_repos(&self) -> Result<Vec<ExtensionRepo>, BackupError>;
 }
 
 /// Source identity for source references and stub names (B-08d, B-14).
@@ -159,10 +157,11 @@ fn build_pass(inputs: &CreateInputs<'_>, opts: &BackupOptions) -> Built {
         Vec::new()
     };
 
-    // Anime stores and custom buttons are cut: the field stays in the file (empty) so Aniyomi reads it, and restore skips them.
+    // Anime stores, custom buttons and manga repo rows are cut: the fields stay in the file (empty) so Aniyomi reads
+    // it, and restore skips them. The repo links travel in the preferences section.
     let anime_extension_stores = Vec::new();
     let custom_buttons = Vec::new();
-    let manga_extension_repos = if opts.extension_stores { meta::manga_repos(&lib.manga_extension_repos()?) } else { Vec::new() };
+    let manga_extension_repos = Vec::new();
 
     let (extensions, skipped_extensions) = match inputs.extensions {
         Some(source) if opts.extensions => extensions::collect(source),
@@ -232,9 +231,6 @@ mod tests {
             Ok(self.manga_cats.clone())
         }
         fn anime_categories(&self) -> Result<Vec<Category>, BackupError> {
-            Ok(Vec::new())
-        }
-        fn manga_extension_repos(&self) -> Result<Vec<kuro_data::extension_repo::ExtensionRepo>, BackupError> {
             Ok(Vec::new())
         }
     }
