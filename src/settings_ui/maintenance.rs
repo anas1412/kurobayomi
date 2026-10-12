@@ -5,7 +5,7 @@
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
 use kuro_platform::kind::Kind;
 use kuro_prefs::prefs::Prefs;
 
@@ -51,8 +51,8 @@ pub fn networking_rows() -> Vec<PreferenceItem> {
 
 /// Clears every manga's reader viewer flags (the reading mode) and says so in a toast.
 pub fn reset_reader_settings() {
-    let repo = MangaRepo::new(crate::data::app().db.clone());
-    if kuro_domain::entries::viewer_flags::reset_viewer_flags_manga(&repo) {
+    let repo = EntryRepo::new(crate::data::app().db.clone());
+    if kuro_domain::entries::viewer_flags::reset_viewer_flags(&repo, Kind::Manga) {
         crate::toast::notify("All reader settings reset");
     } else {
         crate::toast::notify("Couldn't reset reader settings");

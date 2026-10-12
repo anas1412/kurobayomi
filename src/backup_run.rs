@@ -349,12 +349,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let host = host(dir.path(), 1_000_000_000_000);
         // seed one library entry so the backup is not empty
-        let mut m = kuro_data::manga::Manga::create();
+        let mut m = kuro_data::entry::Entry::create(kuro_platform::kind::Kind::Manga);
         m.source = 1;
         m.url = "/m".into();
         m.title = "T".into();
         m.favorite = true;
-        kuro_data::manga::MangaRepo::new(host.library.db.clone()).insert(&m).unwrap();
+        kuro_data::entry::EntryRepo::new(host.library.db.clone()).insert(&m).unwrap();
         host.library.prefs.pref("__APP_STATE_backup_enabled_at".to_owned(), 0_i64).set(1).unwrap();
         let first = run_once(&host.config(), &host, &host.auto_dir);
         assert!(matches!(first, OnceOutcome::Ran(_)), "{first:?}");
@@ -421,7 +421,7 @@ mod tests {
         let opts = RestoreOptions { app_settings: false, ..RestoreOptions::default() };
         let end = run_restore(&lib, dir.path(), &dir.path().join("logs"), backup, opts, &StopFlag::default(), &mut |e| events.lock().unwrap().push(e.title), Some(legacy)).unwrap();
         assert!(matches!(end, RestoreEnd::Completed(_)), "{end:?}");
-        assert!(kuro_data::manga::MangaRepo::new(lib.db.clone()).by_url_and_source("/m", 7).unwrap().is_some());
+        assert!(kuro_data::entry::EntryRepo::new(lib.db.clone()).by_url_and_source(kuro_platform::kind::Kind::Manga, "/m", 7).unwrap().is_some());
         // only the address that is a repository link is listed; the other one is ignored without error
         assert_eq!(links.get().into_iter().collect::<Vec<_>>(), ["https://a.test/index.min.json"]);
     }

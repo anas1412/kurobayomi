@@ -13,12 +13,10 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use kuro_data::anime::Anime;
-use kuro_data::chapter::Chapter;
-use kuro_data::episode::Episode;
-use kuro_data::manga::Manga;
-use kuro_domain::items::chapter_sync::ChapterRenames;
-use kuro_domain::items::episode_sync::EpisodeRenames;
+use kuro_data::entry::Entry;
+use kuro_data::item::Item;
+use kuro_domain::items::sync::ItemRenames;
+use kuro_platform::kind::Kind;
 use kuro_downloads::anime::layout::AnimeLayout;
 use kuro_downloads::anime::model::{AnimeRef, AnimeSource, EpisodeRef};
 use kuro_downloads::index::DownloadIndex;
@@ -64,23 +62,23 @@ pub fn rename_chapter_folder(
 }
 
 /// The anime episode as the downloads crate names it.
-fn episode_ref(e: &Episode) -> EpisodeRef {
+fn episode_ref(i: &Item) -> EpisodeRef {
     EpisodeRef {
-        id: e.id,
-        anime_id: e.anime_id,
-        url: e.url.clone(),
-        name: e.name.clone(),
-        scanlator: e.scanlator.clone(),
-        seen: e.seen,
-        bookmark: e.bookmark,
-        fillermark: e.fillermark,
-        source_order: e.source_order,
-        upload_date: e.date_upload,
-        episode_number: e.episode_number,
+        id: i.id,
+        anime_id: i.entry_id,
+        url: i.url.clone(),
+        name: i.name.clone(),
+        scanlator: i.scanlator.clone(),
+        seen: i.done,
+        bookmark: i.bookmark,
+        fillermark: i.fillermark,
+        source_order: i.source_order,
+        upload_date: i.date_upload,
+        episode_number: i.number,
     }
 }
 
-/// The folder renames behind the two sync ports.
+/// The folder renames behind the sync port, per kind.
 pub struct FolderRenames {
     manga_root: PathBuf,
     anime_root: PathBuf,
@@ -96,8 +94,8 @@ impl FolderRenames {
     }
 }
 
-impl ChapterRenames for FolderRenames {
-    fn rename(&self, manga: &Manga, stored: &Chapter, prepared: &Chapter) {
+impl FolderRenames {
+    fn rename_chapter(&self, manga: &Entry, stored: &Item, prepared: &Item) {
         let Some(source_name) = (self.source_names)(manga.source) else { return };
         let layout = DownloadLayout::new(&self.manga_root);
         let old = (stored.name.as_str(), stored.scanlator.as_deref());
@@ -113,10 +111,8 @@ impl ChapterRenames for FolderRenames {
             Err(error) => tracing::error!(%error, chapter = stored.id, "could not rename the downloaded chapter"),
         }
     }
-}
 
-impl EpisodeRenames for FolderRenames {
-    fn rename(&self, anime: &Anime, stored: &Episode, prepared: &Episode) {
+    fn rename_episode(&self, anime: &Entry, stored: &Item, prepared: &Item) {
         let Some(shown) = (self.source_names)(anime.source) else { return };
         let (name, lang) = split_source_name(&shown);
         let source = AnimeSource { id: anime.source, name, lang, is_http: true, unmetered: false };
@@ -130,6 +126,15 @@ impl EpisodeRenames for FolderRenames {
         }
         if let Err(error) = layout.rename_episode(&source, &show, &old, &new) {
             tracing::error!(%error, episode = stored.id, "could not rename the downloaded episode");
+        }
+    }
+}
+
+impl ItemRenames for FolderRenames {
+    fn rename(&self, e: &Entry, stored: &Item, prepared: &Item) {
+        match e.kind {
+            Kind::Manga => self.rename_chapter(e, stored, prepared),
+            Kind::Anime => self.rename_episode(e, stored, prepared),
         }
     }
 }
@@ -201,14 +206,14 @@ mod tests {
         let (dir, _) = tree();
         let manga_folder = manga_dir(&dir);
         fs::create_dir(manga_folder.join("Ch 1")).expect("chapter folder");
-        let manga = Manga { source: 7, title: "Title".into(), ..Manga::create() };
-        let stored = Chapter { name: "Ch 1".into(), ..Chapter::create() };
-        let prepared = Chapter { name: "Ch 1 v2".into(), ..Chapter::create() };
+        let manga = Entry { source: 7, title: "Title".into(), ..Entry::create(Kind::Manga) };
+        let stored = Item { name: "Ch 1".into(), ..Item::create(Kind::Manga) };
+        let prepared = Item { name: "Ch 1 v2".into(), ..Item::create(Kind::Manga) };
         let unknown = FolderRenames::new(dir.path().to_path_buf(), dir.path().to_path_buf(), names("Other (EN)"), None);
-        ChapterRenames::rename(&unknown, &Manga { source: 8, ..manga.clone() }, &stored, &prepared);
+        ItemRenames::rename(&unknown, &Entry { source: 8, ..manga.clone() }, &stored, &prepared);
         assert!(manga_folder.join("Ch 1").is_dir(), "a source the lookup does not know is not touched");
         let known = FolderRenames::new(dir.path().to_path_buf(), dir.path().to_path_buf(), names("Src (EN)"), None);
-        ChapterRenames::rename(&known, &manga, &stored, &prepared);
+        ItemRenames::rename(&known, &manga, &stored, &prepared);
         assert!(manga_folder.join("Ch 1 v2").is_dir());
     }
 
@@ -216,14 +221,14 @@ mod tests {
     fn s_17_the_episode_port_renames_only_a_downloaded_episode() {
         let (dir, _) = tree();
         let anime_dir = dir.path().join("Src (EN)").join("Show");
-        let anime = Anime { source: 7, title: "Show".into(), ..Anime::create() };
-        let stored = Episode { name: "Ep 1".into(), ..Episode::create() };
-        let prepared = Episode { name: "Ep 1 fixed".into(), ..Episode::create() };
+        let anime = Entry { source: 7, title: "Show".into(), ..Entry::create(Kind::Anime) };
+        let stored = Item { name: "Ep 1".into(), ..Item::create(Kind::Anime) };
+        let prepared = Item { name: "Ep 1 fixed".into(), ..Item::create(Kind::Anime) };
         let renames = FolderRenames::new(dir.path().join("elsewhere"), dir.path().to_path_buf(), names("Src (EN)"), None);
-        EpisodeRenames::rename(&renames, &anime, &stored, &prepared);
+        ItemRenames::rename(&renames, &anime, &stored, &prepared);
         assert!(!anime_dir.exists(), "not downloaded: nothing is renamed or created");
         fs::create_dir_all(anime_dir.join("Ep 1")).expect("episode folder");
-        EpisodeRenames::rename(&renames, &anime, &stored, &prepared);
+        ItemRenames::rename(&renames, &anime, &stored, &prepared);
         assert!(anime_dir.join("Ep 1 fixed").is_dir() && !anime_dir.join("Ep 1").exists());
     }
 }

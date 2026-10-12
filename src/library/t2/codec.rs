@@ -2,7 +2,7 @@
 
 use kuro_domain::library::flags::{contains, merge};
 use kuro_platform::kind::Kind;
-use kuro_domain::library::sort::{Direction, LibrarySort, SORT_MASK, SortType};
+use kuro_platform::sort::{Direction, LibrarySort, SORT_MASK, SortType};
 use kuro_prefs::library::LibraryDisplayMode;
 
 const KINDS: [Kind; 2] = [Kind::Manga, Kind::Anime];

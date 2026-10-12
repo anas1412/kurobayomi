@@ -4,9 +4,8 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use kuro_data::anime::AnimeRepo;
-use kuro_data::manga::MangaRepo;
-use kuro_data::track::{AnimeTrackRepo, MangaTrackRepo};
+use kuro_data::entry::EntryRepo;
+use kuro_data::track::TrackRepo;
 use kuro_db::handle::Db;
 use kuro_domain::category::repo::CategoryRepo;
 use kuro_domain::error::DomainError;
@@ -14,6 +13,7 @@ use kuro_platform::kind::Kind;
 use kuro_domain::library::filter::LibraryFilters;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::page::BadgeSettings;
+use kuro_domain::track::repo::TrackPort;
 use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::tristate::TriState;
 
@@ -25,41 +25,20 @@ use super::query::{Details, Request, Snapshot};
 pub fn snapshot(db: &Arc<Db>, kind: Kind) -> Result<Snapshot, DomainError> {
     let categories = CategoryRepo::new(db.clone(), kind).visible()?;
     let mut snap = Snapshot { categories, ..Snapshot::default() };
-    match kind {
-        Kind::Manga => {
-            for l in MangaRepo::new(db.clone()).library()? {
-                snap.rows.push(LibraryRow::from_manga(&l));
-                snap.details.insert(
-                    l.manga.id,
-                    Details {
-                        author: l.manga.author.clone(),
-                        artist: l.manga.artist.clone(),
-                        description: l.manga.description.clone(),
-                        genres: l.manga.genre.clone().unwrap_or_default(),
-                    },
-                );
-            }
-            for t in MangaTrackRepo::new(db.clone()).all()? {
-                snap.tracks.entry(t.manga_id).or_default().push((t.tracker_id, t.score));
-            }
-        }
-        Kind::Anime => {
-            for l in AnimeRepo::new(db.clone()).library()? {
-                snap.rows.push(LibraryRow::from_anime(&l));
-                snap.details.insert(
-                    l.anime.id,
-                    Details {
-                        author: l.anime.author.clone(),
-                        artist: l.anime.artist.clone(),
-                        description: l.anime.description.clone(),
-                        genres: l.anime.genre.clone().unwrap_or_default(),
-                    },
-                );
-            }
-            for t in AnimeTrackRepo::new(db.clone()).all()? {
-                snap.tracks.entry(t.anime_id).or_default().push((t.tracker_id, t.score));
-            }
-        }
+    for l in EntryRepo::new(db.clone()).library(kind)? {
+        snap.rows.push(LibraryRow::from_entry(&l));
+        snap.details.insert(
+            l.entry.id,
+            Details {
+                author: l.entry.author.clone(),
+                artist: l.entry.artist.clone(),
+                description: l.entry.description.clone(),
+                genres: l.entry.genre.clone().unwrap_or_default(),
+            },
+        );
+    }
+    for t in TrackPort::all(&TrackRepo::new(db.clone()), kind)? {
+        snap.tracks.entry(t.entry_id).or_default().push((t.tracker_id, t.score));
     }
     Ok(snap)
 }
@@ -72,21 +51,13 @@ pub fn filters(
     logged_in: &BTreeSet<i64>,
 ) -> LibraryFilters {
     // The Started, Bookmarked and interval filters are cut from the settings: they stay off.
-    let (downloaded, unread, completed) = match kind {
-        Kind::Anime => (prefs.filter_downloaded_anime.get(), prefs.filter_unseen.get(), prefs.filter_completed_anime.get()),
-        Kind::Manga => (prefs.filter_downloaded_manga.get(), prefs.filter_unread.get(), prefs.filter_completed_manga.get()),
-    };
-    let (downloaded, unread, completed) = (include_only(downloaded), include_only(unread), include_only(completed));
+    let downloaded = include_only(prefs.filter_downloaded(kind).get());
+    let unread = include_only(prefs.filter_unread(kind).get());
+    let completed = include_only(prefs.filter_completed(kind).get());
     let (started, bookmarked, interval_custom) = (TriState::DISABLED, TriState::DISABLED, TriState::DISABLED);
     let tracking = logged_in
         .iter()
-        .map(|id| {
-            let state = match kind {
-                Kind::Anime => prefs.filter_tracked_anime(*id as i32).get(),
-                Kind::Manga => prefs.filter_tracked_manga(*id as i32).get(),
-            };
-            (*id, include_only(state))
-        })
+        .map(|id| (*id, include_only(prefs.filter_tracked(kind, *id as i32).get())))
         .collect();
     LibraryFilters {
         downloaded,
@@ -169,7 +140,7 @@ pub fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_data::manga::Manga;
+    use kuro_data::entry::Entry;
 
     fn test_db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -181,15 +152,15 @@ mod tests {
     #[test]
     fn snapshot_lists_visible_categories_and_one_row_per_membership() {
         let (_dir, db) = test_db();
-        let repo = MangaRepo::new(db.clone());
+        let repo = EntryRepo::new(db.clone());
         let id = repo
-            .insert(&Manga {
+            .insert(&Entry {
                 favorite: true,
                 source: 7,
                 url: "u".into(),
                 title: "Title".into(),
                 author: Some("Someone".into()),
-                ..Manga::create()
+                ..Entry::create(Kind::Manga)
             })
             .expect("insert");
         let a = kuro_data::category::create_manga_category(&db, "a", 0).expect("category a");

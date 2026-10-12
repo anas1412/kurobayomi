@@ -78,7 +78,10 @@ pub fn build(id: &str) -> GBox {
 
 /// Whether manga row `id` belongs to the local source.
 fn is_local_manga(id: i64) -> bool {
-    crate::data::is_installed() && kuro_data::manga::MangaRepo::new(crate::data::app().db.clone()).by_id(id).is_ok_and(|m| m.source == kuro_local::LOCAL_SOURCE_ID)
+    crate::data::is_installed()
+        && kuro_data::entry::EntryRepo::new(crate::data::app().db.clone())
+            .by_id(id)
+            .is_ok_and(|e| e.kind == Kind::Manga && e.source == kuro_local::LOCAL_SOURCE_ID)
 }
 
 /// Opens the details page of entry `id`, by id. A local manga is opened through the local flow, which also remembers
@@ -105,12 +108,12 @@ pub fn open_unit(kind: Kind, entry_id: i64, unit_id: i64) {
     if crate::local_flow::open::open_local_episode(unit_id) || crate::player_view::open_source_episode(&anime_sources(), unit_id) {
         return;
     }
-    let source = kuro_data::episode::EpisodeRepo::new(crate::data::app().db.clone())
+    let source = kuro_data::item::ItemRepo::new(crate::data::app().db.clone())
         .by_id(unit_id)
         .ok()
         .flatten()
-        .and_then(|e| kuro_data::anime::AnimeRepo::new(crate::data::app().db.clone()).by_id(e.anime_id).ok())
-        .map_or_else(|| unit_id.to_string(), |a| a.source.to_string());
+        .and_then(|i| kuro_data::entry::EntryRepo::new(crate::data::app().db.clone()).by_id(i.entry_id).ok())
+        .map_or_else(|| unit_id.to_string(), |e| e.source.to_string());
     crate::toast::notify(crate::reader::strings::source_not_installed(&source));
 }
 
@@ -355,19 +358,17 @@ mod tests {
     /// Needs a display and runs in a child process with fresh app data (see [`alone`]).
     #[test]
     fn opening_by_id_reaches_the_entry_page_the_reader_and_the_source_not_installed_toast() {
-        use kuro_data::anime::{Anime, AnimeRepo};
-        use kuro_data::chapter::{Chapter, ChapterRepo};
-        use kuro_data::episode::{Episode, EpisodeRepo};
-        use kuro_data::manga::{Manga, MangaRepo};
+        use kuro_data::entry::{Entry, EntryRepo};
+        use kuro_data::item::{Item, ItemRepo};
         alone::run(module_path!(), "opening_by_id_reaches_the_entry_page_the_reader_and_the_source_not_installed_toast", |ctx| {
             let (nav, _window) = crate::testing::nav();
             let toast = alone::toast_label();
             let app = crate::data::app();
             let top = || nav.visible_child().map(|c| c.widget_name().to_string());
-            let (mangas, chapters) = (MangaRepo::new(app.db.clone()), ChapterRepo::new(app.db.clone()));
+            let (entries, items) = (EntryRepo::new(app.db.clone()), ItemRepo::new(app.db.clone()));
             let manga = |source: i64, url: &str| {
-                let id = mangas.insert(&Manga { source, url: url.into(), title: url.into(), ..Manga::create() }).expect("manga");
-                let added = chapters.add_all(&[Chapter { manga_id: id, url: "/c1".into(), name: "Chapter 1".into(), chapter_number: 1.0, ..Chapter::create() }]).expect("chapter");
+                let id = entries.insert(&Entry { source, url: url.into(), title: url.into(), ..Entry::create(Kind::Manga) }).expect("manga");
+                let added = items.add_all(&[Item { entry_id: id, url: "/c1".into(), name: "Chapter 1".into(), number: 1.0, ..Item::create(Kind::Manga) }]).expect("chapter");
                 (id, added[0].id)
             };
             let (remote, remote_chapter) = manga(7, "/remote");
@@ -392,9 +393,8 @@ mod tests {
             assert!(alone::pump(ctx, || top().as_deref() == Some("screen:reader")), "a local chapter opens the reader");
 
             // an episode of a source that is not installed says so, and opens nothing
-            let anime = AnimeRepo::new(app.db.clone()).insert(&Anime { source: 7, url: "/a".into(), title: "A".into(), ..Anime::create() }).expect("anime");
-            let episodes = EpisodeRepo::new(app.db.clone());
-            let episode = episodes.add_all(&[Episode { anime_id: anime, url: "/e1".into(), name: "Episode 1".into(), episode_number: 1.0, ..Episode::create() }]).expect("episode")[0].id;
+            let anime = entries.insert(&Entry { source: 7, url: "/a".into(), title: "A".into(), ..Entry::create(Kind::Anime) }).expect("anime");
+            let episode = items.add_all(&[Item { entry_id: anime, url: "/e1".into(), name: "Episode 1".into(), number: 1.0, ..Item::create(Kind::Anime) }]).expect("episode")[0].id;
             let before = top();
             open_unit(Kind::Anime, anime, episode);
             assert!(alone::pump(ctx, || toast.text() == crate::reader::strings::source_not_installed("7")), "the toast names the missing source, got {:?}", toast.text());

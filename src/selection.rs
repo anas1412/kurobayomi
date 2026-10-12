@@ -1,264 +1,124 @@
 //! Next-unread chapter and next-unseen episode (`ChapterGetNextUnread.kt`, `EpsiodeGetNextUnseen.kt`, T-52a-007 and
-//! T-52a-008). Pure: the caller passes the stored list, the entry, the downloaded-only switch and a download lookup.
+//! T-52a-008): one rule for both kinds over an `Entry` and its `Item`s. Pure: the caller passes the stored list, the
+//! entry, the downloaded-only switch and a download lookup.
 //!
 //! Order of work as upstream: view filters (unread, bookmarked, downloaded), then the entry's sort, then the first
 //! unread of the result, or the last one when the entry sorts descending. The unread filter runs before the search,
-//! so "show read only" finds nothing, as upstream.
+//! so "show read only" finds nothing, as upstream. The fillermark filter is not part of the search (as before).
 
-use std::cmp::Ordering;
-
-use kuro_data::anime::Anime;
-use kuro_data::chapter::Chapter;
-use kuro_data::episode::Episode;
-use kuro_domain::entries::anime::{AnimeExt, episode_flags};
-use kuro_domain::entries::manga::{MangaExt, chapter_flags};
-use kuro_domain::flags::{TriState, tri};
-use kuro_domain::items::sorter::{chapter_cmp, episode_cmp};
+use kuro_data::entry::Entry;
+use kuro_data::item::Item;
+use kuro_domain::app::items::{ListFilters, apply_filters, item_filters};
+use kuro_domain::error::DomainError;
+use kuro_domain::library::active::continue_target;
+use kuro_prefs::tristate::TriState;
 use kuro_source::local::LOCAL_SOURCE_ID;
 
-/// The three view filters of an entry, already resolved.
-#[derive(Clone, Copy, Debug)]
-pub struct ViewFilter {
-    pub unread: TriState,
-    pub bookmarked: TriState,
-    pub downloaded: TriState,
-}
-
-/// What the search needs from a chapter or an episode.
-pub trait Pending {
-    /// `!read` for a chapter, `!seen` for an episode.
-    fn is_pending(&self) -> bool;
-    fn is_bookmarked(&self) -> bool;
-}
-
-impl Pending for Chapter {
-    fn is_pending(&self) -> bool {
-        !self.read
-    }
-    fn is_bookmarked(&self) -> bool {
-        self.bookmark
-    }
-}
-
-impl Pending for Episode {
-    fn is_pending(&self) -> bool {
-        !self.seen
-    }
-    fn is_bookmarked(&self) -> bool {
-        self.bookmark
-    }
-}
-
-/// The generic search. `is_downloaded` is asked only when the downloaded filter is on; a local entry counts every
-/// item as downloaded.
-pub fn next_pending<U: Pending + Clone>(
-    items: &[U],
-    filter: &ViewFilter,
-    cmp: impl Fn(&U, &U) -> Ordering,
-    descending: bool,
-    is_local: bool,
-    is_downloaded: impl Fn(&U) -> bool,
-) -> Option<U> {
-    let mut kept: Vec<U> = items
-        .iter()
-        .filter(|u| filter.unread.apply_filter(|| u.is_pending()))
-        .filter(|u| filter.bookmarked.apply_filter(|| u.is_bookmarked()))
-        .filter(|u| filter.downloaded.apply_filter(|| is_local || is_downloaded(u)))
-        .cloned()
-        .collect();
-    kept.sort_by(cmp);
-    if descending {
-        kept.into_iter().rev().find(|u| u.is_pending())
-    } else {
-        kept.into_iter().find(|u| u.is_pending())
-    }
-}
-
-/// `Manga.downloadedFilter`: downloaded-only mode forces `EnabledIs` whatever the entry's own filter says.
-fn downloaded_filter(downloaded_only: bool, raw: i64, show: i64, hide: i64) -> TriState {
-    if downloaded_only { TriState::ENABLED_IS } else { tri(raw, show, hide) }
-}
-
-/// `getNextUnread(manga, chapters)`. `is_downloaded` answers for one chapter of this manga.
-pub fn next_unread(
-    manga: &kuro_data::manga::Manga,
-    chapters: &[Chapter],
+/// `getNextUnread(manga, chapters)` and `getNextUnseen(anime, episodes)`. `is_downloaded` answers for one item of this
+/// entry and is asked only when the downloaded filter is on; a local entry counts every item as downloaded.
+pub fn next_pending(
+    entry: &Entry,
+    items: Vec<Item>,
     downloaded_only: bool,
-    is_downloaded: impl Fn(&Chapter) -> bool,
-) -> Option<Chapter> {
-    let filter = ViewFilter {
-        unread: manga.unread_filter(),
-        bookmarked: manga.bookmarked_filter(),
-        downloaded: downloaded_filter(
-            downloaded_only,
-            manga.downloaded_filter_raw(),
-            chapter_flags::SHOW_DOWNLOADED,
-            chapter_flags::SHOW_NOT_DOWNLOADED,
-        ),
-    };
-    let descending = manga.sort_descending();
-    next_pending(
-        chapters,
-        &filter,
-        chapter_cmp(manga.sorting(), descending),
-        descending,
-        manga.source == LOCAL_SOURCE_ID,
-        is_downloaded,
-    )
-}
-
-/// `getNextUnseen(anime, episodes)`: the same rules over `seen`.
-pub fn next_unseen(
-    anime: &Anime,
-    episodes: &[Episode],
-    downloaded_only: bool,
-    is_downloaded: impl Fn(&Episode) -> bool,
-) -> Option<Episode> {
-    let filter = ViewFilter {
-        unread: anime.unseen_filter(),
-        bookmarked: anime.bookmarked_filter(),
-        downloaded: downloaded_filter(
-            downloaded_only,
-            anime.downloaded_filter_raw(),
-            episode_flags::SHOW_DOWNLOADED,
-            episode_flags::SHOW_NOT_DOWNLOADED,
-        ),
-    };
-    let descending = anime.sort_descending();
-    next_pending(
-        episodes,
-        &filter,
-        episode_cmp(anime.sorting(), descending),
-        descending,
-        anime.source == LOCAL_SOURCE_ID,
-        is_downloaded,
-    )
+    is_downloaded: impl Fn(&Item) -> bool,
+) -> Result<Option<Item>, DomainError> {
+    let filters = ListFilters { fillermarked: TriState::DISABLED, ..item_filters(entry, downloaded_only)? };
+    let kept = apply_filters(items, &filters, entry.source == LOCAL_SOURCE_ID, is_downloaded);
+    Ok(continue_target(&kept, filters.descending, |i| !i.done).cloned())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_data::manga::Manga;
+    use kuro_db::flags::item::{SHOW_BOOKMARKED, SHOW_DONE, SHOW_DOWNLOADED, SHOW_NOT_DOWNLOADED, SHOW_UNDONE, SORTING_NUMBER, SORT_ASC, SORT_DESC};
+    use kuro_platform::kind::Kind;
 
-    fn chapter(id: i64, number: f64, read: bool) -> Chapter {
-        Chapter { id, chapter_number: number, read, source_order: id, ..Chapter::create() }
+    fn item(kind: Kind, id: i64, number: f64, done: bool) -> Item {
+        Item { id, number, done, source_order: id, ..Item::create(kind) }
     }
 
-    fn episode(id: i64, number: f64, seen: bool) -> Episode {
-        Episode { id, episode_number: number, seen, source_order: id, ..Episode::create() }
+    /// Sorted by number, remote source.
+    fn entry(kind: Kind, flags: i64) -> Entry {
+        Entry { source: 7, item_flags: flags | SORTING_NUMBER, ..Entry::create(kind) }
     }
 
-    /// Sorted by chapter number, remote source.
-    fn manga(flags: i64) -> Manga {
-        Manga { source: 7, chapter_flags: flags | chapter_flags::SORTING_NUMBER, ..Manga::create() }
+    fn next(e: &Entry, items: Vec<Item>, downloaded_only: bool, is_downloaded: impl Fn(&Item) -> bool) -> Option<i64> {
+        next_pending(e, items, downloaded_only, is_downloaded).expect("known sorting").map(|i| i.id)
     }
-
-    fn id_of(c: Option<Chapter>) -> Option<i64> {
-        c.map(|c| c.id)
-    }
-
-    const ASC: i64 = chapter_flags::SORT_ASC;
-    const DESC: i64 = chapter_flags::SORT_DESC;
 
     #[test]
-    fn empty_list_and_all_read_give_none() {
-        let m = manga(ASC);
-        assert_eq!(id_of(next_unread(&m, &[], false, |_| true)), None);
-        let read = [chapter(1, 1.0, true), chapter(2, 2.0, true), chapter(3, 3.0, true)];
-        assert_eq!(id_of(next_unread(&m, &read, false, |_| true)), None);
+    fn empty_list_and_all_done_give_none() {
+        for kind in [Kind::Manga, Kind::Anime] {
+            let e = entry(kind, SORT_ASC);
+            assert_eq!(next(&e, vec![], false, |_| true), None);
+            let done = vec![item(kind, 1, 1.0, true), item(kind, 2, 2.0, true), item(kind, 3, 3.0, true)];
+            assert_eq!(next(&e, done, false, |_| true), None);
+        }
     }
 
     #[test]
     fn ascending_takes_the_first_unread_and_descending_the_last_fixture_s1() {
-        let s1 = [chapter(1, 1.0, true), chapter(2, 2.0, false), chapter(3, 3.0, false)];
-        assert_eq!(id_of(next_unread(&manga(ASC), &s1, false, |_| true)), Some(2));
-        // sorted descending the list is [3 unread, 2 unread, 1 read]; the last unread is chapter 2
-        assert_eq!(id_of(next_unread(&manga(DESC), &s1, false, |_| true)), Some(2));
-        let unsorted = [chapter(3, 3.0, false), chapter(1, 1.0, true), chapter(2, 2.0, false)];
-        assert_eq!(id_of(next_unread(&manga(ASC), &unsorted, false, |_| true)), Some(2));
+        for kind in [Kind::Manga, Kind::Anime] {
+            let s1 = || vec![item(kind, 1, 1.0, true), item(kind, 2, 2.0, false), item(kind, 3, 3.0, false)];
+            assert_eq!(next(&entry(kind, SORT_ASC), s1(), false, |_| true), Some(2));
+            // sorted descending the list is [3 unread, 2 unread, 1 read]; the last unread is item 2
+            assert_eq!(next(&entry(kind, SORT_DESC), s1(), false, |_| true), Some(2));
+            let unsorted = vec![item(kind, 3, 3.0, false), item(kind, 1, 1.0, true), item(kind, 2, 2.0, false)];
+            assert_eq!(next(&entry(kind, SORT_ASC), unsorted, false, |_| true), Some(2));
+        }
     }
 
     #[test]
-    fn show_read_only_with_nothing_unread_matching_returns_none_as_upstream() {
-        let m = manga(ASC | chapter_flags::SHOW_READ);
-        let list = [chapter(1, 1.0, true), chapter(2, 2.0, true)];
-        assert_eq!(id_of(next_unread(&m, &list, false, |_| true)), None);
-        let with_unread = [chapter(1, 1.0, true), chapter(2, 2.0, false)];
-        assert_eq!(id_of(next_unread(&m, &with_unread, false, |_| true)), None, "the unread one is filtered out first");
+    fn show_done_only_with_nothing_unread_matching_returns_none_as_upstream() {
+        for kind in [Kind::Manga, Kind::Anime] {
+            let e = entry(kind, SORT_ASC | SHOW_DONE);
+            let list = vec![item(kind, 1, 1.0, true), item(kind, 2, 2.0, true)];
+            assert_eq!(next(&e, list, false, |_| true), None);
+            let with_unread = vec![item(kind, 1, 1.0, true), item(kind, 2, 2.0, false)];
+            assert_eq!(next(&e, with_unread, false, |_| true), None, "the unread one is filtered out first");
+        }
     }
 
     #[test]
-    fn downloaded_only_ignores_chapters_that_are_not_downloaded() {
-        let m = manga(ASC);
-        let list = [chapter(1, 1.0, false), chapter(2, 2.0, false)];
-        assert_eq!(id_of(next_unread(&m, &list, true, |_| false)), None);
-        assert_eq!(id_of(next_unread(&m, &list, true, |c| c.id == 2)), Some(2));
-        assert_eq!(id_of(next_unread(&m, &list, false, |_| false)), Some(1), "off: the lookup is not consulted");
+    fn show_undone_keeps_only_unread_rows() {
+        let e = entry(Kind::Anime, SORT_ASC | SHOW_UNDONE);
+        let list = vec![item(Kind::Anime, 1, 1.0, true), item(Kind::Anime, 2, 2.0, false)];
+        assert_eq!(next(&e, list, false, |_| true), Some(2));
+    }
+
+    #[test]
+    fn downloaded_only_ignores_items_that_are_not_downloaded() {
+        let e = entry(Kind::Manga, SORT_ASC);
+        let list = || vec![item(Kind::Manga, 1, 1.0, false), item(Kind::Manga, 2, 2.0, false)];
+        assert_eq!(next(&e, list(), true, |_| false), None);
+        assert_eq!(next(&e, list(), true, |i| i.id == 2), Some(2));
+        assert_eq!(next(&e, list(), false, |_| false), Some(1), "off: the lookup is not consulted");
     }
 
     #[test]
     fn the_entry_own_downloaded_filter_and_a_local_entry() {
-        let shown = manga(ASC | chapter_flags::SHOW_DOWNLOADED);
-        let list = [chapter(1, 1.0, false), chapter(2, 2.0, false)];
-        assert_eq!(id_of(next_unread(&shown, &list, false, |c| c.id == 2)), Some(2));
-        let hidden = manga(ASC | chapter_flags::SHOW_NOT_DOWNLOADED);
-        assert_eq!(id_of(next_unread(&hidden, &list, false, |c| c.id == 1)), Some(2));
-        let local = Manga { source: LOCAL_SOURCE_ID, ..shown };
-        assert_eq!(id_of(next_unread(&local, &list, true, |_| false)), Some(1), "every local chapter counts as downloaded");
+        let shown = entry(Kind::Manga, SORT_ASC | SHOW_DOWNLOADED);
+        let list = || vec![item(Kind::Manga, 1, 1.0, false), item(Kind::Manga, 2, 2.0, false)];
+        assert_eq!(next(&shown, list(), false, |i| i.id == 2), Some(2));
+        let hidden = entry(Kind::Manga, SORT_ASC | SHOW_NOT_DOWNLOADED);
+        assert_eq!(next(&hidden, list(), false, |i| i.id == 1), Some(2));
+        let local = Entry { source: LOCAL_SOURCE_ID, ..shown };
+        assert_eq!(next(&local, list(), true, |_| false), Some(1), "every local item counts as downloaded");
     }
 
     #[test]
     fn bookmark_filter_applies_before_the_search() {
-        let m = manga(ASC | chapter_flags::SHOW_BOOKMARKED);
-        let mut marked = chapter(2, 2.0, false);
-        marked.bookmark = true;
-        let list = [chapter(1, 1.0, false), marked];
-        assert_eq!(id_of(next_unread(&m, &list, false, |_| true)), Some(2));
-    }
-
-    #[test]
-    fn episodes_follow_the_same_rules_with_seen() {
-        let anime = |flags: i64| Anime { source: 7, episode_flags: flags | episode_flags::SORTING_NUMBER, ..Anime::create() };
-        let id = |e: Option<Episode>| e.map(|e| e.id);
-        let s1 = [episode(1, 1.0, true), episode(2, 2.0, false), episode(3, 3.0, false)];
-        assert_eq!(id(next_unseen(&anime(episode_flags::SORT_ASC), &s1, false, |_| true)), Some(2));
-        assert_eq!(id(next_unseen(&anime(episode_flags::SORT_DESC), &s1, false, |_| true)), Some(2));
-        assert_eq!(id(next_unseen(&anime(episode_flags::SORT_ASC), &[], false, |_| true)), None);
-        let all_seen = [episode(1, 1.0, true)];
-        assert_eq!(id(next_unseen(&anime(episode_flags::SORT_ASC), &all_seen, false, |_| true)), None);
-        assert_eq!(id(next_unseen(&anime(episode_flags::SORT_ASC), &s1, true, |_| false)), None);
-        let show_seen = anime(episode_flags::SORT_ASC | episode_flags::SHOW_SEEN);
-        assert_eq!(id(next_unseen(&show_seen, &s1, false, |_| true)), None);
+        let e = entry(Kind::Manga, SORT_ASC | SHOW_BOOKMARKED);
+        let marked = Item { bookmark: true, ..item(Kind::Manga, 2, 2.0, false) };
+        assert_eq!(next(&e, vec![item(Kind::Manga, 1, 1.0, false), marked], false, |_| true), Some(2));
     }
 
     #[test]
     fn the_library_continue_target_agrees_with_the_selection() {
         // player "resume next" and the list's next item both come from one rule: first pending, last when descending
-        let list = [chapter(1, 1.0, true), chapter(2, 2.0, false), chapter(3, 3.0, false)];
-        let m = manga(ASC);
-        let picked = next_unread(&m, &list, false, |_| true).unwrap();
-        let continued = kuro_domain::library::active::continue_target(&list, false, |c| !c.read).unwrap();
-        assert_eq!(picked.id, continued.id);
-    }
-
-    #[test]
-    fn the_entry_page_resume_target_is_the_one_the_library_list_shows() {
-        // T-52a-008: the player's "resume next" (`AnimeEntryModel::next_unseen`) and the library's continue button
-        // (`selection::next_unseen`) pick the same episode on a fixture anime, in either sort order
-        use crate::entry_core::anime::model::{AnimeEntryModel, AnimeLoadContext};
-        use crate::entry_core::anime::store::fixture::with_episodes;
-        use crate::entry_core::detail::SourceInfo;
-        use kuro_prefs::store::PrefStore;
-        for (total, seen) in [(4, 2), (5, 0), (3, 3), (6, 1)] {
-            for flag in [episode_flags::SORT_ASC, episode_flags::SORT_DESC] {
-                let (_dir, store, id) = with_episodes(true, true, total, seen);
-                store.set_flag_bits(id, flag, episode_flags::SORT_DIR_MASK).unwrap();
-                let model = AnimeEntryModel::load(&store, &PrefStore::in_memory(), id, AnimeLoadContext::default(), |_| SourceInfo { name: "Fake".into(), stub: false })
-                    .unwrap()
-                    .expect("the entry exists");
-                let list = next_unseen(&model.anime, &model.episodes, false, |_| false).map(|e| e.id);
-                assert_eq!(model.next_unseen(), list, "{total} episodes, {seen} seen, sort {flag}");
-            }
-        }
+        let list = vec![item(Kind::Manga, 1, 1.0, true), item(Kind::Manga, 2, 2.0, false), item(Kind::Manga, 3, 3.0, false)];
+        let picked = next(&entry(Kind::Manga, SORT_ASC), list.clone(), false, |_| true).unwrap();
+        let continued = continue_target(&list, false, |i| !i.done).unwrap();
+        assert_eq!(picked, continued.id);
     }
 }

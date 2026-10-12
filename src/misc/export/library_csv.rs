@@ -2,12 +2,11 @@
 //! p1-topic-library-csv-export.md sections 3 to 6: no header row, one row per favourite, the enabled cells joined with
 //! `,`, rows joined with `\r\n` and no trailing newline, and the fixed column order Title, Type, Author, Artist.
 //!
-//! Decision: the rows are built from `Anime` and `Manga` values the caller read from the repositories, so the
-//! favourites query is an ordering and a map and needs no SQL of its own. The caller reads both lists when Save is
+//! Decision: the rows are built from `Entry` values (either kind) the caller read from the repository, so the
+//! favourites query is an ordering and a map and needs no SQL of its own. The caller reads both kinds when Save is
 //! confirmed (T-35a-076).
 
-use kuro_data::anime::Anime;
-use kuro_data::manga::Manga;
+use kuro_data::entry::Entry;
 use kuro_platform::kind::Kind;
 
 /// Which columns the export includes. Every column is on at first (`Default`).
@@ -64,20 +63,16 @@ pub fn by_id<T: Clone>(rows: &[T], id: impl Fn(&T) -> i64) -> Vec<T> {
 }
 
 /// The favourites in export order (T-35a-070): anime rows first, then manga rows, each by ascending `_id`.
-pub fn favourite_entries(anime: &[Anime], manga: &[Manga]) -> Vec<ExportEntry> {
-    let from_anime = by_id(anime, |row| row.id).into_iter().map(|row| ExportEntry {
-        title: row.title,
-        kind: Kind::Anime,
-        author: row.author,
-        artist: row.artist,
-    });
-    let from_manga = by_id(manga, |row| row.id).into_iter().map(|row| ExportEntry {
-        title: row.title,
-        kind: Kind::Manga,
-        author: row.author,
-        artist: row.artist,
-    });
-    from_anime.chain(from_manga).collect()
+pub fn favourite_entries(entries: &[Entry]) -> Vec<ExportEntry> {
+    let of_kind = |kind: Kind| {
+        let rows: Vec<Entry> = entries.iter().filter(|row| row.kind == kind).cloned().collect();
+        by_id(&rows, |row| row.id)
+    };
+    [Kind::Anime, Kind::Manga]
+        .into_iter()
+        .flat_map(of_kind)
+        .map(|row| ExportEntry { title: row.title, kind: row.kind, author: row.author, artist: row.artist })
+        .collect()
 }
 
 /// One cell (section 4): a blank or missing value is empty; a value with `\r`, `\n`, `"` or `,` is quoted with each `"`
@@ -179,6 +174,14 @@ mod tests {
         let on_again = off.with_title(true);
         assert_eq!(on_again, ExportOptions { title: true, ..NONE });
         assert!(on_again.others_enabled());
+    }
+
+    #[test]
+    fn favourites_list_anime_first_then_manga_each_by_ascending_id() {
+        let row = |id: i64, kind: Kind, title: &str| Entry { id, title: title.into(), favorite: true, ..Entry::create(kind) };
+        let rows = [row(3, Kind::Manga, "m3"), row(9, Kind::Anime, "a9"), row(1, Kind::Manga, "m1"), row(2, Kind::Anime, "a2")];
+        let titles: Vec<String> = favourite_entries(&rows).into_iter().map(|e| e.title).collect();
+        assert_eq!(titles, ["a2", "a9", "m1", "m3"]);
     }
 
     #[test]

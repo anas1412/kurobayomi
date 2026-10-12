@@ -1,12 +1,12 @@
-//! Reads the library for a pass from the shared database (T-26a-004 and T-26a-005). Rows come from the view
-//! `kuro-db` defines (`libraryView`) and the season statement. Reads run on tokio's blocking pool.
+//! Reads the library for a pass from the shared database (T-26a-004 and T-26a-005). Rows come from `EntryRepo`
+//! (`libraryView` and the season statement), one path for both kinds. Reads run on tokio's blocking pool.
 
 use std::future::Future;
 use std::sync::Arc;
 
+use kuro_data::entry::{EntryRepo, LibraryEntry as DataEntry};
+use kuro_data::DataResult;
 use kuro_db::handle::Db;
-use kuro_db::statements_anime::{LibraryAnimeRow, SeasonAnimeRow};
-use kuro_db::models::LibraryRow;
 use kuro_platform::kind::Kind;
 
 use crate::library_update::error::UpdateError;
@@ -34,102 +34,47 @@ impl SqliteLibraryStore {
     }
 }
 
-fn manga_entry(row: LibraryRow) -> LibraryEntry {
+/// The pass's row of a library entry of either kind: a manga has no parent and the `Episodes` fetch type.
+fn pass_entry(l: &DataEntry) -> LibraryEntry {
+    let e = &l.entry;
     LibraryEntry {
-        id: row.manga.id,
-        source: row.manga.source,
-        url: row.manga.url,
-        title: row.manga.title,
-        kind: Kind::Manga,
-        category: row.category,
-        update_strategy: row.manga.update_strategy,
-        status: row.manga.status,
-        favorite: row.manga.favorite,
-        total: row.total_count,
-        read: row.read_count,
-        next_update_ms: row.manga.next_update.unwrap_or(0),
-        fetch_type: FetchType::Episodes,
-        parent_id: None,
-        fetch_interval: row.manga.calculate_interval as i32,
-        last_update_ms: row.manga.last_update.unwrap_or(0),
+        id: e.id,
+        source: e.source,
+        url: e.url.clone(),
+        title: e.title.clone(),
+        kind: e.kind,
+        category: l.category,
+        update_strategy: e.update_strategy,
+        status: e.status,
+        favorite: e.favorite,
+        total: l.total,
+        read: l.done,
+        next_update_ms: e.next_update,
+        fetch_type: e.fetch_type(),
+        parent_id: e.parent_id,
+        fetch_interval: e.fetch_interval,
+        last_update_ms: e.last_update,
     }
 }
 
-fn anime_entry(row: LibraryAnimeRow) -> LibraryEntry {
-    LibraryEntry {
-        id: row.anime.id,
-        source: row.anime.source,
-        url: row.anime.url,
-        title: row.anime.title,
-        kind: Kind::Anime,
-        category: row.category,
-        update_strategy: row.anime.update_strategy,
-        status: row.anime.status,
-        favorite: row.anime.favorite,
-        total: row.total_count,
-        read: row.seen_count,
-        next_update_ms: row.anime.next_update.unwrap_or(0),
-        fetch_type: row.anime.fetch_type,
-        parent_id: row.anime.parent_id,
-        fetch_interval: row.anime.calculate_interval as i32,
-        last_update_ms: row.anime.last_update.unwrap_or(0),
-    }
-}
-
-fn season_entry(row: SeasonAnimeRow) -> LibraryEntry {
-    LibraryEntry {
-        id: row.anime.id,
-        source: row.anime.source,
-        url: row.anime.url,
-        title: row.anime.title,
-        kind: Kind::Anime,
-        category: -1,
-        update_strategy: row.anime.update_strategy,
-        status: row.anime.status,
-        favorite: row.anime.favorite,
-        total: row.total_count,
-        read: row.seen_count,
-        next_update_ms: row.anime.next_update.unwrap_or(0),
-        fetch_type: row.anime.fetch_type,
-        parent_id: row.anime.parent_id,
-        fetch_interval: row.anime.calculate_interval as i32,
-        last_update_ms: row.anime.last_update.unwrap_or(0),
-    }
+/// Runs a repository read on the blocking pool.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> DataResult<T> + Send + 'static) -> Result<T, UpdateError> {
+    Ok(tokio::task::spawn_blocking(work).await.map_err(|e| UpdateError::Other(e.to_string()))??)
 }
 
 impl LibraryStore for SqliteLibraryStore {
     async fn library(&self, kind: Kind) -> Result<Vec<LibraryEntry>, UpdateError> {
-        let entries = match kind {
-            Kind::Manga => self
-                .db
-                .read_async(|c| {
-                    let rows = kuro_db::statements_manga::views::library(c)?;
-                    Ok(rows.into_iter().map(manga_entry).collect::<Vec<_>>())
-                })
-                .await?,
-            Kind::Anime => self
-                .db
-                .read_async(|c| {
-                    let rows = kuro_db::statements_anime::library(c)?;
-                    Ok(rows.into_iter().map(anime_entry).collect::<Vec<_>>())
-                })
-                .await?,
-        };
-        Ok(entries)
+        let repo = EntryRepo::new(self.db.clone());
+        let rows = blocking(move || repo.library(kind)).await?;
+        Ok(rows.iter().map(pass_entry).collect())
     }
 
     async fn season_children(&self, parent_id: i64) -> Vec<LibraryEntry> {
-        let result = self
-            .db
-            .read_async(move |c| {
-                let rows = kuro_db::statements_anime::seasons_of(c, parent_id)?;
-                Ok(rows.into_iter().map(season_entry).collect::<Vec<_>>())
-            })
-            .await;
-        match result {
-            Ok(children) => children,
+        let repo = EntryRepo::new(self.db.clone());
+        match blocking(move || repo.seasons_by_parent(parent_id)).await {
+            Ok(children) => children.iter().map(|c| pass_entry(&c.to_library_entry())).collect(),
             Err(error) => {
-                tracing::warn!(parent_id, %error, "season children query failed; treating as none");
+                tracing::warn!(parent_id, ?error, "season children query failed; treating as none");
                 Vec::new()
             }
         }

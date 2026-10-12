@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use kuro_db::handle::Db;
-use kuro_domain::items::source_sync::MangaSyncLocks;
-use kuro_data::source::{AnimeStubSourceRepo, MangaStubSourceRepo};
+use kuro_domain::items::source_sync::EntrySyncLocks;
+use kuro_data::source::StubSourceRepo;
 use kuro_platform::kind::Kind;
 use kuro_downloads::download_prefs::DownloadPrefs;
 use kuro_prefs::Prefs;
@@ -69,11 +69,7 @@ impl ToastHost {
             return source.label();
         }
         let db = Arc::clone(&self.db);
-        let stored = match kind {
-            Kind::Manga => MangaStubSourceRepo::new(db).get(id),
-            Kind::Anime => AnimeStubSourceRepo::new(db).get(id),
-        };
-        match stored.ok().flatten() {
+        match StubSourceRepo::new(db, kind).get(id).ok().flatten() {
             Some(stub) if stub.name.trim().is_empty() => id.to_string(),
             Some(stub) if stub.lang.trim().is_empty() => stub.name,
             Some(stub) => kuro_source::display_name(&stub.name, &stub.lang),
@@ -113,7 +109,7 @@ impl Host for ToastHost {
 
     fn enqueue_downloads(&self, kind: Kind, entry_id: i64, items: &[crate::library_update::source::SourceItem]) {
         let urls: Vec<String> = items.iter().map(|item| item.url.clone()).collect();
-        let ids = crate::library::actions::item_ids_by_url(&self.db, kind, entry_id, &urls);
+        let ids = crate::library::actions::item_ids_by_url(&self.db, entry_id, &urls);
         if ids.is_empty() {
             return;
         }
@@ -249,12 +245,11 @@ fn runner_over(db: Arc<Db>, store: &PrefStore) -> Arc<Runner> {
     let renames = folder_renames();
     let sync = DbItemSync::new(
         db.clone(),
-        Arc::new(MangaSyncLocks::default()),
-        Arc::new(MangaSyncLocks::default()),
+        Arc::new(EntrySyncLocks::default()),
         diet::LIBRARY_MARK_DUPLICATE_CHAPTER_READ,
         diet::LIBRARY_MARK_DUPLICATE_EPISODE_SEEN,
     )
-    .with_renames(renames.clone(), renames);
+    .with_renames(renames);
     let prefs = Prefs::with_store(store.clone(), Arc::new(kuro_prefs::memory::MemorySecrets::default()));
     let host = PrefsHost::new(ToastHost::new(db.clone()), &prefs);
     Arc::new(PassRunner::new(Deps {

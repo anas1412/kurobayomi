@@ -9,7 +9,7 @@ use std::rc::{Rc, Weak};
 
 use gtk::glib;
 use kuro_platform::kind::Kind;
-use kuro_domain::library::sort::{Direction, LibrarySort, SortType};
+use kuro_platform::sort::{Direction, LibrarySort, SortType};
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::library::{LibraryDisplayMode, LibraryPrefs};
 use kuro_prefs::pref::Pref;
@@ -57,16 +57,11 @@ impl Show {
 
 /// The stored keys behind one check: one key, or one per logged-in tracker for Tracked.
 fn keys(prefs: &LibraryPrefs, kind: Kind, show: Show, logged_in: &BTreeSet<i64>) -> Vec<Pref<TriState>> {
-    use Kind::{Anime, Manga};
-    match (kind, show) {
-        (Anime, Show::Downloaded) => vec![prefs.filter_downloaded_anime.clone()],
-        (Manga, Show::Downloaded) => vec![prefs.filter_downloaded_manga.clone()],
-        (Anime, Show::Unseen) => vec![prefs.filter_unseen.clone()],
-        (Manga, Show::Unseen) => vec![prefs.filter_unread.clone()],
-        (Anime, Show::Completed) => vec![prefs.filter_completed_anime.clone()],
-        (Manga, Show::Completed) => vec![prefs.filter_completed_manga.clone()],
-        (Anime, Show::Tracked) => logged_in.iter().map(|id| prefs.filter_tracked_anime(*id as i32)).collect(),
-        (Manga, Show::Tracked) => logged_in.iter().map(|id| prefs.filter_tracked_manga(*id as i32)).collect(),
+    match show {
+        Show::Downloaded => vec![prefs.filter_downloaded(kind).clone()],
+        Show::Unseen => vec![prefs.filter_unread(kind).clone()],
+        Show::Completed => vec![prefs.filter_completed(kind).clone()],
+        Show::Tracked => logged_in.iter().map(|id| prefs.filter_tracked(kind, *id as i32)).collect(),
     }
 }
 

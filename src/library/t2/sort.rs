@@ -7,7 +7,7 @@ use kuro_domain::category::service::CategoryService;
 use kuro_platform::kind::Kind;
 use kuro_domain::library::order::{SortContext, sort_page, tracker_mean};
 use kuro_domain::library::page::LibraryItem;
-use kuro_domain::library::sort::{Direction, LibrarySort, SortType};
+use kuro_platform::sort::{Direction, LibrarySort, SortType};
 use kuro_prefs::library::LibraryPrefs;
 use kuro_prefs::store::PrefStore;
 

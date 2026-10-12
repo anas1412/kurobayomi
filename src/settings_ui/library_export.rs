@@ -2,8 +2,8 @@
 //! dialog; Export asks for a save file and writes the favourites as CSV (`library_csv`). The favourites are read when the
 //! dialog opens, so Export is never pressed while they are still loading.
 use gtk::prelude::*;
-use kuro_data::anime::AnimeRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_platform::kind::Kind;
 
 use crate::pref_model::model::PreferenceItem;
 use crate::settings_ui::library_csv::{self, Columns, Entry};
@@ -17,11 +17,16 @@ pub const GROUP_TITLE: &str = "Export";
 /// The favourites of both databases, manga first, each in the repository's order.
 fn favourites() -> Vec<Entry> {
     let app = crate::data::app();
-    let manga = MangaRepo::new(app.db.clone()).favorites().unwrap_or_default();
-    let anime = AnimeRepo::new(app.db.clone()).favorites().unwrap_or_default();
-    let manga = manga.into_iter().map(|m| Entry { title: m.title, kind: "manga", author: m.author, artist: m.artist });
-    let anime = anime.into_iter().map(|a| Entry { title: a.title, kind: "anime", author: a.author, artist: a.artist });
-    manga.chain(anime).collect()
+    let repo = EntryRepo::new(app.db.clone());
+    [(Kind::Manga, "manga"), (Kind::Anime, "anime")]
+        .into_iter()
+        .flat_map(|(kind, word)| {
+            repo.favorites(kind)
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |e| Entry { title: e.title, kind: word, author: e.author, artist: e.artist })
+        })
+        .collect()
 }
 
 /// The row: a plain text row whose tap opens the dialog.

@@ -12,17 +12,19 @@
 //! is logged and ignored, and the pass completes.
 //!
 //! Decisions:
-//! - The cover rule keeps `manualFetch = true`: a new cover url always refreshes the cover. The custom-cover check
-//!   needs the cover cache, which this lane does not own, so a custom cover is not protected here.
+//! - The cover rule is the domain's one `image_action` (through `prepare_update`) with `manualFetch = true`: a new cover
+//!   url always refreshes the cover. No cover cache is wired here ([`NoCacheFiles`]), so a custom cover is not
+//!   protected and no cached file is deleted.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use kuro_data::anime::{AnimeRepo, AnimeUpdate};
-use kuro_data::manga::{MangaRepo, MangaUpdate};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_data::item::ItemRepo;
 use kuro_db::handle::Db;
+use kuro_domain::entries::update::{CacheFiles, RemoteEntry, UpdateEntry, prepare_update};
 use kuro_platform::kind::Kind;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -107,23 +109,36 @@ pub fn distinct_by_id(entries: Vec<LibraryEntry>) -> Vec<LibraryEntry> {
     entries.into_iter().filter(|entry| seen.insert(entry.id)).collect()
 }
 
-/// What a pass writes for one entry (behaviour 5.3 over the fields a source's details carry here).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MetadataChange {
-    /// The remote title, only when it is not empty and the entry is not a favourite.
-    pub title: Option<String>,
-    pub status: i64,
-    /// The new cover url and the cover timestamp that makes the cover reload; both `None` without a cover url.
-    pub thumbnail_url: Option<String>,
-    pub cover_last_modified: Option<i64>,
+/// The remote entry a details refresh reports: the source's title, status and cover url. Everything else a metadata pass
+/// leaves as stored (`None` fields keep the column; the update strategy is the stored one).
+pub fn remote_of(local: &Entry, details: &SourceDetails) -> RemoteEntry {
+    RemoteEntry {
+        title: details.title.clone(),
+        author: None,
+        artist: None,
+        description: None,
+        genre: None,
+        thumbnail_url: details.thumbnail_url.clone(),
+        background_url: None,
+        status: details.status,
+        update_strategy: local.update_strategy,
+        initialized: true,
+        memo: None,
+    }
 }
 
-/// The change `details` makes to `entry`.
-pub fn plan_change(entry: &LibraryEntry, details: &SourceDetails, now_ms: i64) -> MetadataChange {
-    let title = details.title.as_deref().filter(|t| !t.is_empty() && !entry.favorite).map(str::to_owned);
-    let thumbnail_url = details.thumbnail_url.as_deref().filter(|u| !u.is_empty()).map(str::to_owned);
-    let cover_last_modified = thumbnail_url.as_ref().map(|_| now_ms);
-    MetadataChange { title, status: details.status, thumbnail_url, cover_last_modified }
+/// The cover cache of a metadata pass: none is wired, so no entry has a custom cover and no cached file is deleted.
+pub struct NoCacheFiles;
+
+impl CacheFiles for NoCacheFiles {
+    fn has_custom_cover(&self, _e: &Entry) -> bool {
+        false
+    }
+    fn has_custom_background(&self, _e: &Entry) -> bool {
+        false
+    }
+    fn delete_cover(&self, _e: &Entry) {}
+    fn delete_background(&self, _e: &Entry) {}
 }
 
 /// Writes the details of one entry (`UpdateManga.await`, `UpdateAnimeFromRemote.awaitUpdateFromSource`).
@@ -149,26 +164,14 @@ impl DbMetadataStore {
 
 impl MetadataStore for DbMetadataStore {
     async fn apply(&self, entry: &LibraryEntry, details: &SourceDetails, now_ms: i64) -> Result<(), UpdateError> {
-        let change = plan_change(entry, details, now_ms);
-        let (id, kind) = (entry.id, entry.kind);
+        let id = entry.id;
+        let details = details.clone();
         let db = Arc::clone(&self.db);
-        tokio::task::spawn_blocking(move || match kind {
-            Kind::Manga => MangaRepo::new(db).update(&MangaUpdate {
-                title: change.title,
-                status: Some(change.status),
-                thumbnail_url: change.thumbnail_url,
-                cover_last_modified: change.cover_last_modified,
-                initialized: Some(true),
-                ..MangaUpdate::new(id)
-            }),
-            Kind::Anime => AnimeRepo::new(db).update(&AnimeUpdate {
-                title: change.title,
-                status: Some(change.status),
-                thumbnail_url: change.thumbnail_url,
-                cover_last_modified: change.cover_last_modified,
-                initialized: Some(true),
-                ..AnimeUpdate::new(id)
-            }),
+        tokio::task::spawn_blocking(move || {
+            let repo = EntryRepo::new(Arc::clone(&db));
+            let local = repo.by_id(id)?;
+            let update = prepare_update(&local, &remote_of(&local, &details), true, &NoCacheFiles, now_ms);
+            UpdateEntry::new(repo, ItemRepo::new(db)).update(&update)
         })
         .await
         .map_err(|e| UpdateError::Other(e.to_string()))?
@@ -544,15 +547,16 @@ mod tests {
 
     #[test]
     fn the_title_changes_only_for_a_non_favourite_and_an_empty_cover_url_keeps_the_cover() {
-        // behaviour 5.3
-        let mut entry = entry(1, 1, "Old");
-        let change = plan_change(&entry, &details(), 50);
+        // behaviour 5.3, through the domain's one rule
+        let plan = |local: &Entry, details: &SourceDetails| prepare_update(local, &remote_of(local, details), true, &NoCacheFiles, 50);
+        let mut local = Entry { id: 1, source: 1, favorite: true, title: "Old".into(), ..Entry::create(Kind::Manga) };
+        let change = plan(&local, &details());
         assert_eq!(change.title, None, "a favourite keeps its title");
         assert_eq!((change.thumbnail_url.as_deref(), change.cover_last_modified), (Some("https://x/c.jpg"), Some(50)));
-        entry.favorite = false;
-        assert_eq!(plan_change(&entry, &details(), 50).title.as_deref(), Some("New"));
+        local.favorite = false;
+        assert_eq!(plan(&local, &details()).title.as_deref(), Some("New"));
         let blank = SourceDetails { title: Some(String::new()), status: 1, thumbnail_url: Some(String::new()) };
-        let change = plan_change(&entry, &blank, 50);
+        let change = plan(&local, &blank);
         assert_eq!((change.title, change.thumbnail_url, change.cover_last_modified), (None, None, None));
     }
 
@@ -563,17 +567,16 @@ mod tests {
 
     #[tokio::test]
     async fn the_database_writer_stores_status_and_cover_and_the_title_of_a_non_favourite() {
-        use kuro_data::manga::Manga;
         let dir = tempfile::tempdir().expect("temp dir");
         let db = open_db(dir.path());
-        let id = MangaRepo::new(db.clone())
-            .insert(&Manga { favorite: false, source: 7, url: "/m".into(), title: "Old".into(), ..Manga::create() })
+        let id = EntryRepo::new(db.clone())
+            .insert(&Entry { favorite: false, source: 7, url: "/m".into(), title: "Old".into(), ..Entry::create(Kind::Manga) })
             .expect("insert");
         let writer = DbMetadataStore::new(db.clone());
         let mut target = entry(id, 7, "Old");
         target.favorite = false;
         writer.apply(&target, &details(), 777).await.expect("write");
-        let stored = MangaRepo::new(db).by_id(id).expect("row");
+        let stored = EntryRepo::new(db).by_id(id).expect("row");
         assert_eq!(stored.title, "New");
         assert_eq!(stored.status, 2);
         assert_eq!(stored.thumbnail_url.as_deref(), Some("https://x/c.jpg"));

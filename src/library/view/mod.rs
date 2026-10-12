@@ -16,8 +16,7 @@ use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
 use gtk::{Orientation as O, gdk, gio, glib};
-use kuro_data::anime::AnimeRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
 use kuro_db::handle::Db;
 use kuro_db::schema_anime::FetchType;
 use kuro_domain::category::service::CategoryService;
@@ -501,10 +500,7 @@ impl LibraryView {
                 }
             }
         }
-        match kind {
-            Kind::Anime => runtime.spawn(forward(AnimeRepo::new(db).subscribe_library(), shown_rx, changed_tx)),
-            Kind::Manga => runtime.spawn(forward(MangaRepo::new(db).subscribe_library(), shown_rx, changed_tx)),
-        };
+        runtime.spawn(forward(EntryRepo::new(db).subscribe_library(kind), shown_rx, changed_tx));
         let shown_tx = Rc::new(shown_tx);
         let shown_map = shown_tx.clone();
         self.root.connect_map(move |_| {
@@ -723,10 +719,7 @@ fn escape(inner: &Rc<RefCell<Inner>>) -> bool {
 
 /// The category the library showed last (`last_used_*_category`, written by `select_tab`).
 fn remembered_category(prefs: &LibraryPrefs, kind: Kind) -> i64 {
-    i64::from(match kind {
-        Kind::Manga => prefs.last_used_manga_category.get(),
-        Kind::Anime => prefs.last_used_anime_category.get(),
-    })
+    i64::from(prefs.last_used_category(kind).get())
 }
 
 fn active_index(st: &Inner) -> usize {
@@ -949,11 +942,7 @@ fn select_tab(inner: &Rc<RefCell<Inner>>, index: usize) {
         (id, st.deps.prefs.clone(), st.deps.kind)
     };
     if let Some(id) = id {
-        let saved = match kind {
-            Kind::Manga => prefs.last_used_manga_category.set(id as i32),
-            Kind::Anime => prefs.last_used_anime_category.set(id as i32),
-        };
-        if let Err(e) = saved {
+        if let Err(e) = prefs.last_used_category(kind).set(id as i32) {
             tracing::warn!(error = %e, "remembering the library tab failed");
         }
     }
@@ -997,15 +986,19 @@ fn selected_action(inner: &Rc<RefCell<Inner>>, hook: impl Fn(&Nav) -> Rc<dyn Fn(
 
 /// Marks every item of the entries `ids` read (or unread), reports a partial failure and reloads.
 fn mark(inner: &Rc<RefCell<Inner>>, ids: &[i64], read: bool) {
-    let (db, kind) = {
-        let st = inner.borrow();
-        (st.deps.db.clone(), st.deps.kind)
-    };
-    let ok = actions::mark_many(&db, kind, ids, read);
-    if let Some(text) = actions::partial_failure_toast(ok, ids.len()) {
-        crate::toast::notify_for(&text, crate::library::TOAST_TIME);
-    }
-    submit(inner);
+    let db = inner.borrow().deps.db.clone();
+    let ids = ids.to_vec();
+    let weak = Rc::downgrade(inner);
+    glib::spawn_future_local(async move {
+        let backend = crate::updates::download_host::current();
+        let ok = actions::mark_many(&db, backend, &ids, read, actions::remove_after_marked_read()).await;
+        if let Some(text) = actions::partial_failure_toast(ok, ids.len()) {
+            crate::toast::notify_for(&text, crate::library::TOAST_TIME);
+        }
+        if let Some(inner) = weak.upgrade() {
+            submit(&inner);
+        }
+    });
 }
 
 /// Marks every selected entry and clears the selection once the writes are done (E-35).
@@ -1176,19 +1169,15 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
 
 /// Whether the item is an anime season parent: its unread badge counts seasons (T-37a-048).
 fn is_season_parent(st: &Inner, item: &LibraryItem) -> bool {
-    st.deps.kind == Kind::Anime
-        && AnimeRepo::new(st.deps.db.clone()).by_id(item.row.id).is_ok_and(|a| a.fetch_type == FetchType::Seasons)
+    EntryRepo::new(st.deps.db.clone()).by_id(item.row.id).is_ok_and(|e| e.fetch_type() == FetchType::Seasons)
 }
 
 /// The stored cover of an entry, local or not; the card decides what it can draw (`layout::cover_kind`).
 /// ponytail: one row read per bind; carry the thumbnail in `LibraryRow` if large libraries scroll slowly.
 fn cover_art(st: &Inner, item: &LibraryItem) -> Option<ArtRef> {
     let db = st.deps.db.clone();
-    let (owner, source, url, favorite, last_modified) = match st.deps.kind {
-        Kind::Manga => MangaRepo::new(db).by_id(item.row.id).ok().map(|m| (Kind::Manga, m.source, m.thumbnail_url, m.favorite, m.cover_last_modified))?,
-        Kind::Anime => AnimeRepo::new(db).by_id(item.row.id).ok().map(|a| (Kind::Anime, a.source, a.thumbnail_url, a.favorite, a.cover_last_modified))?,
-    };
-    Some(crate::browse::look::cover_art(owner, item.row.id, source, url.filter(|u| !u.is_empty()), favorite, last_modified))
+    let e = EntryRepo::new(db).by_id(item.row.id).ok()?;
+    Some(crate::browse::look::cover_art(e.kind, item.row.id, e.source, e.thumbnail_url.filter(|u| !u.is_empty()), e.favorite, e.cover_last_modified))
 }
 
 /// The right-click menu of one cover (`actions::cover_menu`). Each item acts on this entry only and leaves any
@@ -1228,18 +1217,17 @@ fn cover_menu(weak: &Weak<RefCell<Inner>>, row: &LibraryRow) -> Vec<Item> {
 /// The continue button: opens the entry's next item, in the external player when the preference is on, or says
 /// that nothing is left (E-25).
 fn resume_entry(inner: &Rc<RefCell<Inner>>, row: &LibraryRow) {
-    let (db, kind, downloaded_only, item_downloaded, always_external, resume) = {
+    let (db, downloaded_only, item_downloaded, always_external, resume) = {
         let st = inner.borrow();
         (
             st.deps.db.clone(),
-            st.deps.kind,
             (st.deps.downloaded_only)(),
             st.deps.item_downloaded.clone(),
             st.deps.always_external.clone(),
             st.nav.resume.clone(),
         )
     };
-    match actions::next_item(&db, kind, row, downloaded_only, |item| item_downloaded(item)) {
+    match actions::next_item(&db, row, downloaded_only, |item| item_downloaded(item)) {
         Ok(Some(item)) => resume(Resume { entry: row.id, item, external: always_external() }),
         Ok(None) => crate::toast::notify_for(actions::NO_NEXT_ITEM, crate::library::TOAST_TIME),
         Err(e) => {
@@ -1259,28 +1247,14 @@ pub(crate) fn test_view(nav: Nav) -> (tempfile::TempDir, LibraryView) {
 #[cfg(test)]
 fn test_view_of(kind: Kind, nav: Nav) -> (tempfile::TempDir, LibraryView) {
     use crate::library::query::SourceInfo;
-    use kuro_data::anime::Anime;
-    use kuro_data::manga::Manga;
+    use kuro_data::entry::Entry;
     use kuro_prefs::store::PrefStore;
     let dir = tempfile::tempdir().expect("temp dir");
-    let db = match kind {
-        Kind::Manga => {
-            let path = dir.path().join("a.db");
-            let db = Arc::new(Db::new(&path, kuro_db::schema_unified::open_file(&path).expect("open the db")).expect("db handle"));
-            MangaRepo::new(db.clone())
-                .insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() })
-                .expect("insert");
-            db
-        }
-        Kind::Anime => {
-            let path = dir.path().join("a.db");
-            let db = Arc::new(Db::new(&path, kuro_db::schema_unified::open_file(&path).expect("open the db")).expect("db handle"));
-            AnimeRepo::new(db.clone())
-                .insert(&Anime { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Anime::create() })
-                .expect("insert");
-            db
-        }
-    };
+    let path = dir.path().join("a.db");
+    let db = Arc::new(Db::new(&path, kuro_db::schema_unified::open_file(&path).expect("open the db")).expect("db handle"));
+    EntryRepo::new(db.clone())
+        .insert(&Entry { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Entry::create(kind) })
+        .expect("insert");
     let store = PrefStore::in_memory();
     let prefs = Rc::new(LibraryPrefs::new(store.clone()));
     let categories = Rc::new(CategoryService::new(db.clone(), kind, Arc::new(LibraryPrefs::new(store))));
@@ -1407,7 +1381,7 @@ mod tests {
     /// An entry added from its details page (a write the library did not make) shows up without a manual refresh.
     #[test]
     fn an_entry_added_elsewhere_appears_without_a_refresh() {
-        use kuro_data::manga::{Manga, MangaUpdate};
+        use kuro_data::entry::{Entry, EntryUpdate};
         crate::testing::with_display(|| {
             let ctx = glib::MainContext::default();
             let _owner = ctx.acquire().expect("main context");
@@ -1416,9 +1390,9 @@ mod tests {
             let (_dir, view) = test_view(test_nav());
             let inner = view.inner.clone();
             assert!(pump_until(|| inner.borrow().store.n_items() == 1), "the one favorite");
-            let repo = MangaRepo::new(inner.borrow().deps.db.clone());
-            let browsed = repo.insert(&Manga { source: 7, url: "b".into(), title: "Vagabond".into(), ..Manga::create() }).expect("insert");
-            repo.update(&MangaUpdate { favorite: Some(true), ..MangaUpdate::new(browsed) }).expect("favorite");
+            let repo = EntryRepo::new(inner.borrow().deps.db.clone());
+            let browsed = repo.insert(&Entry { source: 7, url: "b".into(), title: "Vagabond".into(), ..Entry::create(Kind::Manga) }).expect("insert");
+            repo.update(&EntryUpdate { favorite: Some(true), ..EntryUpdate::new(browsed) }).expect("favorite");
             assert!(pump_until(|| inner.borrow().store.n_items() == 2), "the added entry appears");
         });
     }
@@ -1427,7 +1401,7 @@ mod tests {
     /// the Library is off screen its live query pauses, and showing it again brings the rows up to date.
     #[test]
     fn an_anime_added_elsewhere_appears_and_the_hidden_library_waits_until_shown() {
-        use kuro_data::anime::{Anime, AnimeUpdate};
+        use kuro_data::entry::{Entry, EntryUpdate};
         crate::testing::with_display(|| {
             let ctx = glib::MainContext::default();
             let _owner = ctx.acquire().expect("main context");
@@ -1439,10 +1413,10 @@ mod tests {
             window.present();
             let inner = view.inner.clone();
             assert!(pump_until(|| view.root.is_mapped() && inner.borrow().store.n_items() == 1), "the one favorite");
-            let repo = AnimeRepo::new(inner.borrow().deps.db.clone());
+            let repo = EntryRepo::new(inner.borrow().deps.db.clone());
             let add = |url: &str| {
-                let id = repo.insert(&Anime { source: 7, url: url.into(), title: url.into(), ..Anime::create() }).expect("insert");
-                repo.update(&AnimeUpdate { favorite: Some(true), ..AnimeUpdate::new(id) }).expect("favorite");
+                let id = repo.insert(&Entry { source: 7, url: url.into(), title: url.into(), ..Entry::create(Kind::Anime) }).expect("insert");
+                repo.update(&EntryUpdate { favorite: Some(true), ..EntryUpdate::new(id) }).expect("favorite");
             };
             add("Bungou Stray Dogs");
             assert!(pump_until(|| inner.borrow().store.n_items() == 2), "the added anime appears");

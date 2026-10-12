@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gtk::glib;
-use kuro_data::anime::{AnimeRepo, AnimeUpdate};
-use kuro_data::episode::{Episode, EpisodeRepo};
+use kuro_data::entry::{EntryRepo, EntryUpdate};
+use kuro_data::item::{Item, ItemRepo};
 use kuro_db::handle::Db;
 use kuro_local::media::FrameExtractor;
 
@@ -31,8 +31,8 @@ pub fn find_or_make(dir: &Path, lowest_episode: Option<&Path>, frames: &FrameExt
 }
 
 /// The lowest episode: the smallest number, then the first name (an unnumbered -1 comes first, as in kuro-local).
-pub fn lowest(episodes: &[Episode]) -> Option<&Episode> {
-    episodes.iter().min_by(|a, b| a.episode_number.total_cmp(&b.episode_number).then_with(|| a.name.cmp(&b.name)))
+pub fn lowest(episodes: &[Item]) -> Option<&Item> {
+    episodes.iter().min_by(|a, b| a.number.total_cmp(&b.number).then_with(|| a.name.cmp(&b.name)))
 }
 
 /// Finds or makes the cover of local anime `anime_id` off the GTK thread, stores it as the row's thumbnail, then runs
@@ -57,13 +57,13 @@ pub fn ensure(db: Arc<Db>, anime_id: i64, done: impl FnOnce() + 'static) {
 }
 
 fn store_cover(db: &Arc<Db>, anime_id: i64) -> bool {
-    let Ok(anime) = AnimeRepo::new(db.clone()).by_id(anime_id) else { return false };
-    let episodes = EpisodeRepo::new(db.clone()).by_anime_id(anime_id).unwrap_or_default();
+    let Ok(anime) = EntryRepo::new(db.clone()).by_id(anime_id) else { return false };
+    let episodes = ItemRepo::new(db.clone()).by_entry_id(anime_id, false).unwrap_or_default();
     let video = lowest(&episodes).map(|e| PathBuf::from(&e.url));
     let frames = FrameExtractor::from_path(std::env::temp_dir());
     let Some(url) = find_or_make(Path::new(&anime.url), video.as_deref(), &frames).and_then(|p| kuro_local::fs::file_url(&p)) else { return false };
-    let update = AnimeUpdate { thumbnail_url: Some(url), cover_last_modified: Some(kuro_data::time::now_millis()), ..AnimeUpdate::new(anime_id) };
-    AnimeRepo::new(db.clone()).update(&update).inspect_err(|e| tracing::warn!(error = %e, "the local anime cover was not stored")).is_ok()
+    let update = EntryUpdate { thumbnail_url: Some(url), cover_last_modified: Some(kuro_data::time::now_millis()), ..EntryUpdate::new(anime_id) };
+    EntryRepo::new(db.clone()).update(&update).inspect_err(|e| tracing::warn!(error = %e, "the local anime cover was not stored")).is_ok()
 }
 
 #[cfg(test)]
@@ -74,8 +74,8 @@ mod tests {
 
     use super::*;
 
-    fn episode(number: f64, name: &str) -> Episode {
-        Episode { episode_number: number, name: name.into(), url: format!("/s/{name}.mkv"), ..Episode::create() }
+    fn episode(number: f64, name: &str) -> Item {
+        Item { number, name: name.into(), url: format!("/s/{name}.mkv"), ..Item::create(kuro_platform::kind::Kind::Anime) }
     }
 
     #[test]

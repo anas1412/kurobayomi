@@ -6,8 +6,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use kuro_data::anime::AnimeRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
 use kuro_db::handle::Db;
 
 use kuro_platform::kind::Kind;
@@ -25,14 +24,13 @@ impl LibraryCatalogue {
 
     /// Every library title once (a row exists per category).
     fn hits(&self) -> Vec<Hit> {
+        let repo = EntryRepo::new(self.db.clone());
         let mut hits = Vec::new();
-        match MangaRepo::new(self.db.clone()).library() {
-            Ok(rows) => hits.extend(rows.into_iter().map(|r| Hit { kind: Kind::Manga, entry_id: r.manga.id, title: r.manga.title })),
-            Err(e) => tracing::warn!("the search provider could not read the manga library: {e}"),
-        }
-        match AnimeRepo::new(self.db.clone()).library() {
-            Ok(rows) => hits.extend(rows.into_iter().map(|r| Hit { kind: Kind::Anime, entry_id: r.anime.id, title: r.anime.title })),
-            Err(e) => tracing::warn!("the search provider could not read the anime library: {e}"),
+        for kind in [Kind::Manga, Kind::Anime] {
+            match repo.library(kind) {
+                Ok(rows) => hits.extend(rows.into_iter().map(|r| Hit { kind, entry_id: r.entry.id, title: r.entry.title })),
+                Err(e) => tracing::warn!("the search provider could not read the {kind} library: {e}"),
+            }
         }
         hits
     }
@@ -63,11 +61,12 @@ impl Catalogue for LibraryCatalogue {
     fn get(&self, id: &str) -> Option<Hit> {
         let (kind, entry_id) = id.split_once(':')?;
         let entry_id: i64 = entry_id.parse().ok()?;
-        match kind {
-            "manga" => MangaRepo::new(self.db.clone()).by_id(entry_id).ok().map(|m| Hit { kind: Kind::Manga, entry_id, title: m.title }),
-            "anime" => AnimeRepo::new(self.db.clone()).by_id(entry_id).ok().map(|a| Hit { kind: Kind::Anime, entry_id, title: a.title }),
-            _ => None,
-        }
+        let kind = match kind {
+            "manga" => Kind::Manga,
+            "anime" => Kind::Anime,
+            _ => return None,
+        };
+        EntryRepo::new(self.db.clone()).by_id(entry_id).ok().filter(|e| e.kind == kind).map(|e| Hit { kind, entry_id, title: e.title })
     }
 }
 

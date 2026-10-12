@@ -1,18 +1,18 @@
 //! The database side of the item sync of a pass (behaviour 5.4 and 5.5): the `ItemSync` the pass calls for each
-//! entry. The diff is the domain's (`kuro_domain::items::chapter_sync`, `episode_sync` and `sync_plan`). This file
-//! turns the pass's `SourceItem`s into the source models, runs the domain sync on the entry's row and maps the new
-//! rows back to `SourceItem`.
+//! entry. The diff is the domain's (`kuro_domain::items::sync::SyncItems`, one for both kinds). This file turns the
+//! pass's `SourceItem`s into the domain's source items (the scanlator rule stays per kind in the two adapters), runs
+//! the shared sync on the entry's row and maps the new rows back to `SourceItem`.
 
 use std::sync::Arc;
 
-use kuro_data::anime::AnimeRepo;
-use kuro_data::chapter::Chapter;
-use kuro_data::episode::Episode;
-use kuro_data::manga::{Manga, MangaRepo};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_data::item::Item;
 use kuro_db::handle::Db;
-use kuro_domain::items::chapter_sync::{ChapterRenames, ChapterSyncError, ChapterSyncOptions, NoRenames, SyncChapters};
-use kuro_domain::items::episode_sync::{EpisodeRenames, EpisodeSyncError, EpisodeSyncOptions, NoEpisodeRenames, SyncEpisodes};
-use kuro_domain::items::source_sync::MangaSyncLocks;
+use kuro_domain::items::source_sync::EntrySyncLocks;
+use kuro_domain::items::sync::{
+    ItemRenames, NoRenames, SourceItem as DomainItem, SyncItems, SyncItemsError, SyncOptions, source_item_from_chapter,
+    source_item_from_episode,
+};
 use kuro_platform::kind::Kind;
 use kuro_source::anime::SEpisode;
 use kuro_source::local::LOCAL_SOURCE_ID;
@@ -24,37 +24,33 @@ use crate::library_update::pass::ItemSync;
 use crate::library_update::queue::LibraryEntry;
 use crate::library_update::source::{Fetched, SourceItem};
 
-/// The item sync over the app database. `chapter_locks` and `episode_locks` are separate because the domain keys its
-/// locks by manga id and anime id, which are different id spaces. The caller shares them with other writers of the
-/// same rows, so a pass and a manual refresh never interleave.
+/// The item sync over the app database. One lock set serves both kinds (the key is the entry id, unique across them);
+/// the caller shares it with other writers of the same rows, so a pass and a manual refresh never interleave.
 pub struct DbItemSync {
     db: Arc<Db>,
-    chapter_locks: Arc<MangaSyncLocks>,
-    episode_locks: Arc<MangaSyncLocks>,
-    chapters: SyncChapters,
-    episodes: SyncEpisodes,
+    locks: Arc<EntrySyncLocks>,
+    sync: SyncItems,
     mark_duplicate_read: bool,
     mark_duplicate_seen: bool,
 }
 
 impl DbItemSync {
-    pub fn new(
-        db: Arc<Db>,
-        chapter_locks: Arc<MangaSyncLocks>,
-        episode_locks: Arc<MangaSyncLocks>,
-        mark_duplicate_read: bool,
-        mark_duplicate_seen: bool,
-    ) -> Self {
-        let chapters = SyncChapters::new(db.clone(), chapter_locks.clone(), Arc::new(NoRenames));
-        let episodes = SyncEpisodes::new(db.clone(), episode_locks.clone(), Arc::new(NoEpisodeRenames));
-        Self { db, chapter_locks, episode_locks, chapters, episodes, mark_duplicate_read, mark_duplicate_seen }
+    pub fn new(db: Arc<Db>, locks: Arc<EntrySyncLocks>, mark_duplicate_read: bool, mark_duplicate_seen: bool) -> Self {
+        let sync = SyncItems::new(db.clone(), locks.clone(), Arc::new(NoRenames));
+        Self { db, locks, sync, mark_duplicate_read, mark_duplicate_seen }
     }
 
-    /// Takes the folder renames of downloaded chapters and episodes instead of the no-op ones (T-26a-086).
-    pub fn with_renames(mut self, chapter_renames: Arc<dyn ChapterRenames>, episode_renames: Arc<dyn EpisodeRenames>) -> Self {
-        self.chapters = SyncChapters::new(self.db.clone(), self.chapter_locks.clone(), chapter_renames);
-        self.episodes = SyncEpisodes::new(self.db.clone(), self.episode_locks.clone(), episode_renames);
+    /// Takes the folder renames of downloaded items instead of the no-op one (T-26a-086).
+    pub fn with_renames(mut self, renames: Arc<dyn ItemRenames>) -> Self {
+        self.sync = SyncItems::new(self.db.clone(), self.locks.clone(), renames);
         self
+    }
+
+    fn mark_duplicate(&self, kind: Kind) -> bool {
+        match kind {
+            Kind::Manga => self.mark_duplicate_read,
+            Kind::Anime => self.mark_duplicate_seen,
+        }
     }
 }
 
@@ -81,27 +77,23 @@ pub(crate) fn to_source_episode(item: &SourceItem) -> SEpisode {
     }
 }
 
-/// The pass item of a stored chapter (the rows the domain returns as new).
-pub(crate) fn chapter_item(c: &Chapter) -> SourceItem {
-    SourceItem {
-        url: c.url.clone(),
-        name: c.name.clone(),
-        number: c.chapter_number,
-        date_upload_ms: c.date_upload,
-        source_order: c.source_order,
-        scanlator: c.scanlator.clone(),
+/// The domain source item of a pass item: the per-kind adapter keeps the kind's scanlator rule.
+fn domain_item(kind: Kind, item: &SourceItem) -> DomainItem {
+    match kind {
+        Kind::Manga => source_item_from_chapter(&to_source_chapter(item)),
+        Kind::Anime => source_item_from_episode(&to_source_episode(item)),
     }
 }
 
-/// The pass item of a stored episode.
-pub(crate) fn episode_item(e: &Episode) -> SourceItem {
+/// The pass item of a stored item (the rows the domain returns as new).
+pub(crate) fn item_of(i: &Item) -> SourceItem {
     SourceItem {
-        url: e.url.clone(),
-        name: e.name.clone(),
-        number: e.episode_number,
-        date_upload_ms: e.date_upload,
-        source_order: e.source_order,
-        scanlator: e.scanlator.clone(),
+        url: i.url.clone(),
+        name: i.name.clone(),
+        number: i.number,
+        date_upload_ms: i.date_upload,
+        source_order: i.source_order,
+        scanlator: i.scanlator.clone(),
     }
 }
 
@@ -109,30 +101,19 @@ fn window_pair(window: Window) -> (i64, i64) {
     (window.lower_ms, window.upper_ms)
 }
 
-fn chapter_error(error: ChapterSyncError) -> UpdateError {
+fn sync_error(kind: Kind, error: SyncItemsError) -> UpdateError {
     match error {
-        ChapterSyncError::NoChapters(_) => UpdateError::NoChapters,
-        ChapterSyncError::Db(e) => UpdateError::from(e),
+        SyncItemsError::NoItems => match kind {
+            Kind::Manga => UpdateError::NoChapters,
+            Kind::Anime => UpdateError::NoEpisodes,
+        },
+        SyncItemsError::Db(e) => UpdateError::from(e),
     }
 }
 
-fn episode_error(error: EpisodeSyncError) -> UpdateError {
-    match error {
-        EpisodeSyncError::NoEpisodes(_) => UpdateError::NoEpisodes,
-        EpisodeSyncError::Db(e) => UpdateError::from(e),
-    }
-}
-
-/// Reads the manga row off the async worker: the repository call blocks.
-async fn load_manga(db: Arc<Db>, id: i64) -> Result<Manga, UpdateError> {
-    tokio::task::spawn_blocking(move || MangaRepo::new(db).by_id(id))
-        .await
-        .map_err(|e| UpdateError::Other(e.to_string()))?
-        .map_err(|e| UpdateError::Other(e.to_string()))
-}
-
-async fn load_anime(db: Arc<Db>, id: i64) -> Result<kuro_data::anime::Anime, UpdateError> {
-    tokio::task::spawn_blocking(move || AnimeRepo::new(db).by_id(id))
+/// Reads the entry row off the async worker: the repository call blocks.
+async fn load_entry(db: Arc<Db>, id: i64) -> Result<Entry, UpdateError> {
+    tokio::task::spawn_blocking(move || EntryRepo::new(db).by_id(id))
         .await
         .map_err(|e| UpdateError::Other(e.to_string()))?
         .map_err(|e| UpdateError::Other(e.to_string()))
@@ -147,44 +128,25 @@ impl ItemSync for DbItemSync {
         now_ms: i64,
     ) -> Result<Vec<SourceItem>, UpdateError> {
         // The pass does not say whether the refresh was manual; an automatic pass is the default (see DECISIONS).
-        let is_local = entry.source == LOCAL_SOURCE_ID;
-        let prepare = |_: &mut SChapter| {};
-        match entry.kind {
-            Kind::Manga => {
-                let manga = load_manga(self.db.clone(), entry.id).await?;
-                let raw: Vec<SChapter> = fetched.items.iter().map(to_source_chapter).collect();
-                let opts = ChapterSyncOptions {
-                    now_ms,
-                    manual: false,
-                    window: window_pair(window),
-                    mark_duplicate_as_read: self.mark_duplicate_read,
-                    is_local,
-                };
-                let new = self.chapters.run(raw, &manga, opts, &prepare).await.map_err(chapter_error)?;
-                Ok(new.iter().map(chapter_item).collect())
-            }
-            Kind::Anime => {
-                let anime = load_anime(self.db.clone(), entry.id).await?;
-                let raw: Vec<SEpisode> = fetched.items.iter().map(to_source_episode).collect();
-                let opts = EpisodeSyncOptions {
-                    now_ms,
-                    manual: false,
-                    window: window_pair(window),
-                    mark_duplicate_as_seen: self.mark_duplicate_seen,
-                    is_local,
-                };
-                let new = self.episodes.run(raw, &anime, opts).await.map_err(episode_error)?;
-                Ok(new.iter().map(episode_item).collect())
-            }
-        }
+        let kind = entry.kind;
+        let stored = load_entry(self.db.clone(), entry.id).await?;
+        let raw: Vec<DomainItem> = fetched.items.iter().map(|i| domain_item(kind, i)).collect();
+        let opts = SyncOptions {
+            now_ms,
+            manual: false,
+            window: window_pair(window),
+            mark_duplicate_done: self.mark_duplicate(kind),
+            is_local: entry.source == LOCAL_SOURCE_ID,
+        };
+        let new = self.sync.run(raw, &stored, opts, None).await.map_err(|e| sync_error(kind, e))?;
+        Ok(new.iter().map(item_of).collect())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_domain::error::NoEpisodes;
-    use kuro_domain::error::NoChapters;
+    use kuro_data::item::Item;
 
     fn item(url: &str, number: f64) -> SourceItem {
         SourceItem {
@@ -221,23 +183,23 @@ mod tests {
 
     #[test]
     fn stored_rows_map_back_to_pass_items() {
-        let chapter = Chapter {
+        let stored = Item {
             url: "/c/9".into(),
             name: "Nine".into(),
-            chapter_number: 9.0,
+            number: 9.0,
             date_upload: 7,
             source_order: 4,
             scanlator: None,
-            ..Chapter::create()
+            ..Item::create(Kind::Manga)
         };
-        let back = chapter_item(&chapter);
+        let back = item_of(&stored);
         assert_eq!(back, SourceItem { url: "/c/9".into(), name: "Nine".into(), number: 9.0, date_upload_ms: 7, source_order: 4, scanlator: None });
     }
 
     #[test]
     fn the_domain_errors_map_to_the_pass_errors() {
-        assert_eq!(chapter_error(ChapterSyncError::NoChapters(NoChapters)), UpdateError::NoChapters);
-        assert_eq!(episode_error(EpisodeSyncError::NoEpisodes(NoEpisodes)), UpdateError::NoEpisodes);
+        assert_eq!(sync_error(Kind::Manga, SyncItemsError::NoItems), UpdateError::NoChapters);
+        assert_eq!(sync_error(Kind::Anime, SyncItemsError::NoItems), UpdateError::NoEpisodes);
     }
 
     fn test_db(dir: &std::path::Path) -> Arc<Db> {
@@ -247,7 +209,7 @@ mod tests {
     }
 
     fn sync_for(manga: Arc<Db>) -> DbItemSync {
-        DbItemSync::new(manga, Arc::new(MangaSyncLocks::default()), Arc::new(MangaSyncLocks::default()), false, false)
+        DbItemSync::new(manga, Arc::new(EntrySyncLocks::default()), false, false)
     }
 
     fn entry(id: i64) -> LibraryEntry {
@@ -266,8 +228,8 @@ mod tests {
     async fn the_second_sync_of_the_same_list_finds_nothing_new() {
         let dir = tempfile::tempdir().expect("temp dir");
         let manga = test_db(dir.path());
-        let id = MangaRepo::new(manga.clone())
-            .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Manga::create() })
+        let id = EntryRepo::new(manga.clone())
+            .insert(&Entry { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Entry::create(Kind::Manga) })
             .expect("insert manga");
         let sync = sync_for(manga);
         let list = fetched(vec![item("/c/1", 1.0), item("/c/2", 2.0)]);
@@ -283,8 +245,8 @@ mod tests {
         // The plan's bound is 100 ms in a release build; a debug build is held to a loose bound.
         let dir = tempfile::tempdir().expect("temp dir");
         let manga = test_db(dir.path());
-        let id = MangaRepo::new(manga.clone())
-            .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Manga::create() })
+        let id = EntryRepo::new(manga.clone())
+            .insert(&Entry { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Entry::create(Kind::Manga) })
             .expect("insert manga");
         let sync = sync_for(manga);
         let items: Vec<SourceItem> = (0..500).map(|n| SourceItem { source_order: n, ..item(&format!("/c/{n}"), f64::from(n as i32)) }).collect();
@@ -301,8 +263,8 @@ mod tests {
     #[derive(Default)]
     struct RecordingRenames(std::sync::Mutex<Vec<(String, String)>>);
 
-    impl ChapterRenames for RecordingRenames {
-        fn rename(&self, _manga: &Manga, stored: &Chapter, prepared: &Chapter) {
+    impl ItemRenames for RecordingRenames {
+        fn rename(&self, _e: &Entry, stored: &Item, prepared: &Item) {
             self.0.lock().unwrap().push((stored.name.clone(), prepared.name.clone()));
         }
     }
@@ -312,11 +274,11 @@ mod tests {
         // T-26a-086: the pass takes the real port in place of `NoRenames`.
         let dir = tempfile::tempdir().expect("temp dir");
         let manga = test_db(dir.path());
-        let id = MangaRepo::new(manga.clone())
-            .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Manga::create() })
+        let id = EntryRepo::new(manga.clone())
+            .insert(&Entry { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Entry::create(Kind::Manga) })
             .expect("insert manga");
         let renames = Arc::new(RecordingRenames::default());
-        let sync = sync_for(manga).with_renames(renames.clone(), Arc::new(NoEpisodeRenames));
+        let sync = sync_for(manga).with_renames(renames.clone());
         sync.sync(&entry(id), &fetched(vec![item("/c/1", 1.0)]), window(), 1_000).await.expect("first sync");
         assert!(renames.0.lock().unwrap().is_empty(), "a new chapter has nothing to rename");
         let renamed = SourceItem { name: "Chapter 1 v2".into(), ..item("/c/1", 1.0) };
@@ -328,8 +290,8 @@ mod tests {
     async fn an_empty_list_from_a_remote_source_is_no_chapters_and_writes_nothing() {
         let dir = tempfile::tempdir().expect("temp dir");
         let manga = test_db(dir.path());
-        let id = MangaRepo::new(manga.clone())
-            .insert(&Manga { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Manga::create() })
+        let id = EntryRepo::new(manga.clone())
+            .insert(&Entry { favorite: true, source: 7, url: "/m".into(), title: "Berserk".into(), ..Entry::create(Kind::Manga) })
             .expect("insert manga");
         let sync = sync_for(manga);
         let result = sync.sync(&entry(id), &fetched(Vec::new()), window(), 1_000).await;

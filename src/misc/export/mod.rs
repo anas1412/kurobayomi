@@ -9,8 +9,7 @@ pub mod write;
 
 use std::path::Path;
 
-use kuro_data::anime::Anime;
-use kuro_data::manga::Manga;
+use kuro_data::entry::Entry;
 
 use library_csv::{ExportOptions, favourite_entries, render};
 use write::ExportError;
@@ -22,8 +21,8 @@ pub const DONE_EMPTY: &str = "Library Exported (0 entries)";
 
 /// Snapshots the favourites and writes the file (T-35a-076). Call it when Save is confirmed, with the lists read then,
 /// so a favourite changed after the page opened is in the file. Returns the number of rows written.
-pub async fn save(target: &Path, anime: &[Anime], manga: &[Manga], options: ExportOptions) -> Result<usize, ExportError> {
-    let entries = favourite_entries(anime, manga);
+pub async fn save(target: &Path, favourites: &[Entry], options: ExportOptions) -> Result<usize, ExportError> {
+    let entries = favourite_entries(favourites);
     let text = render(&entries, options);
     write::write_csv_off_thread(target.to_path_buf(), text).await?;
     Ok(entries.len())

@@ -6,6 +6,8 @@ use crate::screens::{built, Built};
 use crate::ui::*;
 use gtk::prelude::*;
 use gtk::{Box as GBox, Button, Label, Orientation as O};
+use kuro_data::entry::EntryRepo;
+use kuro_data::source::StubSourceRepo;
 use kuro_platform::kind::Kind;
 
 pub fn body(id: &str) -> Option<Built> {
@@ -42,21 +44,17 @@ fn clear_db(id: &str) -> Option<Built> {
     let kind = Kind::from_anime(id == "settings_clear_anime_database");
     let db = crate::data::app().db.clone();
     // (source id, row title, non-library count), read from the database; a failed read shows nothing to clear.
-    let sources: Vec<(i64, String, i64)> = db
-        .read(|c| {
-            let mut out = Vec::new();
-            if kind.is_anime() {
-                for (source, count) in kuro_db::statements_anime::non_library_counts_by_source(c)? {
-                    let name = kuro_db::statements_anime::stub_source(c, source)?.map(|s| s.name);
-                    out.push((source, name.filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Source {source}")), count));
-                }
-            } else {
-                for (source, count) in kuro_db::statements_manga::mangas::get_source_ids_with_non_library_manga(c)? {
-                    let name = kuro_db::statements_manga::sources::find_one(c, source)?.map(|s| s.visual_name());
-                    out.push((source, name.filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Source {source}")), count));
-                }
-            }
-            Ok(out)
+    let entries_repo = EntryRepo::new(db.clone());
+    let stubs = StubSourceRepo::new(db.clone(), kind);
+    let sources: Vec<(i64, String, i64)> = entries_repo
+        .non_library_counts_by_source(kind)
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(source, count)| {
+                    let name = stubs.get(source).ok().flatten().map(|s| s.display_name());
+                    (source, name.filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Source {source}")), count)
+                })
+                .collect()
         })
         .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "cannot list the non-library entries to clear");
@@ -106,16 +104,14 @@ fn clear_db(id: &str) -> Option<Built> {
                 if selected.is_empty() {
                     return;
                 }
-                let written = db.write(|tx| {
+                let item_count = || {
                     let sql = "SELECT count(*) FROM items i JOIN entries e ON e._id = i.entry_id WHERE e.kind = ?1";
-                    let before = tx.query_row(sql, [kind.as_str()], |r| r.get::<_, i64>(0))?;
-                    if kind.is_anime() {
-                        kuro_db::statements_anime::clear_non_library_anime_by_sources(tx, &selected)?;
-                    } else {
-                        kuro_db::statements_manga::clear_non_library_by_sources(tx, &selected)?;
-                    }
-                    let after = tx.query_row(sql, [kind.as_str()], |r| r.get::<_, i64>(0))?;
-                    Ok((before - after).max(0) as usize)
+                    db.read(|c| Ok(c.query_row(sql, [kind.as_str()], |r| r.get::<_, i64>(0))?)).map_err(|e| e.to_string())
+                };
+                let written = item_count().and_then(|before| {
+                    // one path for both kinds: non-favourites go, favourite seasons are orphaned, reset history goes
+                    EntryRepo::new(Arc::clone(&db)).clear_non_library(kind, &selected).map_err(|e| e.to_string())?;
+                    Ok((before - item_count()?).max(0) as usize)
                 });
                 match written {
                     Ok(removed) => {

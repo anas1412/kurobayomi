@@ -24,9 +24,8 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use kuro_data::chapter::ChapterRepo;
-use kuro_data::episode::EpisodeRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_data::item::ItemRepo;
 
 use gtk::gio;
 use gtk::glib;
@@ -286,16 +285,8 @@ fn reveal(path: &Path) {
 /// Both rows of an open-item action exist, and the item belongs to the entry.
 fn item_rows_exist(kind: Kind, entry_id: i64, item_id: i64) -> bool {
     let db = crate::data::app().db.clone();
-    match kind {
-        Kind::Manga => {
-            MangaRepo::new(db.clone()).by_id(entry_id).is_ok()
-                && ChapterRepo::new(db).by_id(item_id).ok().flatten().is_some_and(|c| c.manga_id == entry_id)
-        }
-        Kind::Anime => {
-            kuro_data::anime::AnimeRepo::new(db.clone()).by_id(entry_id).is_ok()
-                && EpisodeRepo::new(db).by_id(item_id).ok().flatten().is_some_and(|e| e.anime_id == entry_id)
-        }
-    }
+    EntryRepo::new(db.clone()).by_id(entry_id).is_ok_and(|e| e.kind == kind)
+        && ItemRepo::new(db).by_id(item_id).ok().flatten().is_some_and(|i| i.entry_id == entry_id)
 }
 
 /// Raises the window and opens the entry page by its id.
@@ -347,20 +338,14 @@ impl ActionHost for GtkHost {
         });
     }
 
-    fn mark_read(&self, kind: Kind, entry_id: i64, urls: Vec<String>) {
+    fn mark_read(&self, _kind: Kind, entry_id: i64, urls: Vec<String>) {
         let data = crate::data::app();
         let db = data.db.clone();
-        let remove = diet::DOWNLOAD_REMOVE_AFTER_MARKED_READ;
+        let remove = crate::library::actions::remove_after_marked_read();
         let backend = download_host::current();
         glib::spawn_future_local(async move {
-            let done = download_host::blocking(move || {
-                crate::library::actions::mark_notified_read(&db, &*backend, kind, entry_id, &urls, remove)
-            })
-            .await;
-            match done {
-                Some(Ok(_)) => {}
-                Some(Err(error)) => tracing::error!(%error, entry_id, "marking the notified items read failed"),
-                None => tracing::error!(entry_id, "marking the notified items read did not finish"),
+            if let Err(error) = crate::library::actions::mark_notified_read(&db, backend, entry_id, &urls, remove).await {
+                tracing::error!(%error, entry_id, "marking the notified items read failed");
             }
         });
     }
