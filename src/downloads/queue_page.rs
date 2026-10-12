@@ -1,4 +1,4 @@
-//! The download queue page (lane D): the manga queue and the anime queue as one list, with Pause or Resume for both,
+//! The download queue page (lane D): one kind's queue as a list, with Pause or Resume for it,
 //! Clear, and the shared download button on each row (a click cancels, or retries a failed row). The commands go through
 //! `kuro_downloads::engine::QueueEngine`, and the rows come from its models. A row's right-click menu offers Cancel, Retry
 //! (a failed row), Move to top and Move to bottom. The list is rebuilt once a second, only
@@ -27,8 +27,9 @@ use crate::widgets::download_button::{DownloadButton, Request};
 /// How often the page checks the queues.
 const REFRESH: Duration = Duration::from_secs(1);
 
-/// The queue page, or `None` when the app runs no download manager (the Download tab then shows its empty state).
-pub fn page() -> Option<gtk::Widget> {
+/// The queue page of one kind and its title search for the page header, or `None` when the app runs no download
+/// manager (the Download tab then shows its empty state).
+pub fn page(kind: Kind) -> Option<(gtk::Widget, gtk::SearchEntry)> {
     let queues = crate::shell::host::Shell::get()?.download_queues()?;
     let column = crate::ui::column();
     // the shared top row of a page (`ui::pill_row`), as the library's categories
@@ -37,15 +38,20 @@ pub fn page() -> Option<gtk::Widget> {
     let clear = gtk::Button::with_label("Clear");
     actions.append(&toggle);
     actions.append(&clear);
-    let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let list = crate::ui::boxed_list();
+    // the app's empty state (icon, line), as the library and history show theirs
+    let (empty, _) = look::empty_state("folder-download-symbolic", "No downloads are queued.", None);
+    empty.set_vexpand(true);
     column.append(&actions);
-    column.append(&rows);
+    column.append(&list);
+    column.append(&empty);
+    let search = crate::ui::list_search(&list);
 
-    let page = Page { queues: queues.clone(), toggle: toggle.clone(), actions: actions.clone(), rows, shown: Rc::new(RefCell::new(None)), buttons: Rc::default() };
+    let page = Page { kind, queues: queues.clone(), toggle: toggle.clone(), actions: actions.clone(), list, empty, shown: Rc::new(RefCell::new(None)), buttons: Rc::default() };
     let on_toggle = page.clone();
     toggle.connect_clicked(move |_| {
-        let resume = !running(&on_toggle.queues);
-        for_each_engine(&on_toggle.queues, |engine| {
+        let resume = !running(&on_toggle.queues, kind);
+        for_each_engine_of(&on_toggle.queues, kind, |engine| {
             if resume {
                 engine.start();
             } else {
@@ -55,7 +61,7 @@ pub fn page() -> Option<gtk::Widget> {
         on_toggle.draw();
     });
     let on_clear = queues.clone();
-    clear.connect_clicked(move |_| for_each_engine(&on_clear, |engine| engine.clear()));
+    clear.connect_clicked(move |_| for_each_engine_of(&on_clear, kind, |engine| engine.clear()));
 
     page.draw();
     live::follow(&column, {
@@ -75,17 +81,27 @@ pub fn page() -> Option<gtk::Widget> {
         refresh.draw();
         glib::ControlFlow::Continue
     });
-    Some(column.upcast())
+    Some((column.upcast(), search))
+}
+
+/// The rows of `kind`'s queue: the manga model for manga, the anime model (when that queue is up) for anime.
+fn items_of<'a>(kind: Kind, manga: &'a QueueModel, anime: Option<&'a QueueModel>) -> Vec<&'a QueueItem> {
+    match kind {
+        Kind::Manga => manga.flat().iter().collect(),
+        Kind::Anime => anime.map_or_else(Vec::new, |model| model.flat().iter().collect()),
+    }
 }
 
 /// The state the page draws: the queues and the widgets that change.
 #[derive(Clone)]
 struct Page {
+    kind: Kind,
     queues: Queues,
     toggle: gtk::Button,
     /// Resume or Pause and Clear: hidden while nothing is queued.
     actions: gtk::Box,
-    rows: gtk::Box,
+    list: gtk::ListBox,
+    empty: gtk::Box,
     /// The key of the rows last drawn. The list is rebuilt only when it changes.
     shown: Rc<RefCell<Option<String>>>,
     /// The download button of each row drawn, by kind and item id, so the live progress reaches it.
@@ -94,51 +110,38 @@ struct Page {
 
 impl Page {
     fn draw(&self) {
-        self.toggle.set_label(if running(&self.queues) { "Pause" } else { "Resume" });
+        self.toggle.set_label(if running(&self.queues, self.kind) { "Pause" } else { "Resume" });
         let snapshot = self.queues.manga.snapshot();
         let manga = manga_model(&snapshot);
         let anime = self.queues.anime.as_ref().map(|queue| anime_model(&queue.snapshot()));
-        let mut items: Vec<&QueueItem> = manga.flat().iter().collect();
-        if let Some(anime) = &anime {
-            items.extend(anime.flat().iter());
-        }
+        let items = items_of(self.kind, &manga, anime.as_ref());
         // A waiting row that was queued again (enqueued after its source came back) shows once, as the queued row.
+        // Waiting rows are saved chapters, so they belong to the manga page.
         let queued: Vec<i64> = snapshot.iter().map(|d| d.chapter.id).collect();
-        let waiting: Vec<Waiting> = self
-            .queues
-            .waiting
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .filter(|w| !queued.contains(&w.row.chapter_id))
-            .cloned()
-            .collect();
+        let waiting: Vec<Waiting> = if self.kind == Kind::Manga {
+            self.queues.waiting.read().unwrap_or_else(|e| e.into_inner()).iter().filter(|w| !queued.contains(&w.row.chapter_id)).cloned().collect()
+        } else {
+            Vec::new()
+        };
         let key: String = items.iter().map(|item| row_key(item)).chain(waiting.iter().map(|w| format!("w{}", w.row.chapter_id))).collect::<Vec<_>>().join("|");
         if self.shown.borrow().as_deref() == Some(key.as_str()) {
             return;
         }
         *self.shown.borrow_mut() = Some(key);
-        while let Some(child) = self.rows.first_child() {
-            self.rows.remove(&child);
+        while let Some(child) = self.list.first_child() {
+            self.list.remove(&child);
         }
         self.buttons.borrow_mut().clear();
         let empty = items.is_empty() && waiting.is_empty();
         self.actions.set_visible(!empty);
-        if empty {
-            // the app's empty state (icon, line), as the library and history show theirs
-            let (state, _) = look::empty_state("folder-download-symbolic", "No downloads are queued.", None);
-            state.set_vexpand(true);
-            self.rows.append(&state);
-            return;
-        }
-        let list = crate::ui::boxed_list();
+        self.empty.set_visible(empty);
+        self.list.set_visible(!empty);
         for item in items {
-            list.append(&self.row(item));
+            self.list.append(&self.row(item));
         }
         for line in &waiting {
-            list.append(&self.waiting_row(line));
+            self.list.append(&self.waiting_row(line));
         }
-        self.rows.append(&list);
     }
 
     /// A saved download whose source is not installed. It is queued again when the source comes back. Cancel removes it.
@@ -214,16 +217,11 @@ fn move_item(queues: &Queues, kind: Kind, id: i64, top: bool) {
     }
 }
 
-/// Whether either queue is running.
-fn running(queues: &Queues) -> bool {
-    queues.manga.running() || queues.anime.as_ref().is_some_and(|queue| queue.running())
-}
-
-/// Calls `f` on the engine of each queue that is up.
-fn for_each_engine(queues: &Queues, mut f: impl FnMut(&dyn QueueEngine)) {
-    f(&MangaEngine::new(queues.manga.clone()));
-    if let Some(anime) = &queues.anime {
-        f(&AnimeEngine::new(anime.clone()));
+/// Whether `kind`'s queue is running.
+fn running(queues: &Queues, kind: Kind) -> bool {
+    match kind {
+        Kind::Manga => queues.manga.running(),
+        Kind::Anime => queues.anime.as_ref().is_some_and(|queue| queue.running()),
     }
 }
 
@@ -282,6 +280,17 @@ mod tests {
             pages_total: pages.map(|(_, total)| total),
             progress,
         }
+    }
+
+    #[test]
+    fn each_kind_page_lists_only_its_own_queue() {
+        let manga = QueueModel::from_flat(vec![item(Kind::Manga, DownloadState::Queue, 0, None)]);
+        let anime = QueueModel::from_flat(vec![item(Kind::Anime, DownloadState::Queue, 0, None), item(Kind::Anime, DownloadState::Error, 0, None)]);
+        assert!(items_of(Kind::Manga, &manga, Some(&anime)).iter().all(|i| i.kind == Kind::Manga));
+        assert_eq!(items_of(Kind::Manga, &manga, Some(&anime)).len(), 1);
+        assert!(items_of(Kind::Anime, &manga, Some(&anime)).iter().all(|i| i.kind == Kind::Anime));
+        assert_eq!(items_of(Kind::Anime, &manga, Some(&anime)).len(), 2);
+        assert!(items_of(Kind::Anime, &manga, None).is_empty(), "no anime queue, no anime rows");
     }
 
     #[test]

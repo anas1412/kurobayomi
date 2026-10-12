@@ -162,8 +162,8 @@ impl CategoryList {
 }
 
 /// The categories screen of one kind: a live list of the non-system categories in the page column, or the empty
-/// state with an Add button. The header's Add button (`screens::categories`) runs [`add_category`] too.
-pub fn categories_content(kind: Kind) -> gtk::Widget {
+/// state with an Add button. The header gets the name search and an Add button, which runs [`add_category`] too.
+pub fn categories_content(kind: Kind) -> crate::screens::Built {
     let add = Button::with_label("Add category");
     add.connect_clicked(move |_| add_category(kind));
     let (empty, _) = crate::browse::look::empty_state("tag-symbolic", &screen("categories").empty.unwrap_or_default(), Some(&add));
@@ -171,10 +171,13 @@ pub fn categories_content(kind: Kind) -> gtk::Widget {
     column.append(&boxed_list());
     column.append(&empty);
     let list = column.first_child().and_downcast::<ListBox>().expect("the list");
+    let search = crate::ui::list_search(&list);
     let view = Rc::new(CategoryList { kind, list, empty });
     view.render();
     bind_watch(data::app().categories(kind).repo().watch_all(), move |_| view.render());
-    scrolled(&column).upcast()
+    let header_add = icon_button("list-add-symbolic", "Add category");
+    header_add.connect_clicked(move |_| add_category(kind));
+    crate::screens::Built { content: scrolled(&column).upcast(), end: vec![search.upcast(), header_add.upcast()] }
 }
 
 /// The Add category dialog of one kind; the name is created through the category service.
@@ -236,7 +239,7 @@ mod tests {
         alone::run(module_path!(), "the_categories_screen_creates_renames_hides_reorders_and_deletes_and_shows_errors", |ctx| {
             let (_stack, _window) = crate::testing::nav();
             let toast = alone::toast_label();
-            let page = categories_content(Kind::Manga);
+            let page = categories_content(Kind::Manga).content;
             let names = || row_names(&page);
             let kind = Kind::Manga;
             let create = |name: &str| {

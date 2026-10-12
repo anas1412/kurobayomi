@@ -46,6 +46,8 @@ pub struct StorageScreen {
     input: RefCell<StorageInput>,
     snapshot: RefCell<StorageSnapshot>,
     list: ListBox,
+    /// The title filter of the rows, for the page header (`mount::storage`).
+    search: gtk::SearchEntry,
     scanning: GBox,
     helper: Label,
     /// Answers whether the entry's source is installed and deletes its downloads when it is (the download manager is
@@ -94,6 +96,7 @@ impl StorageScreen {
             scanning.append(&Label::new(Some(copy::STORAGE_SCANNING)));
 
             let list = crate::ui::boxed_list();
+            let search = crate::ui::list_search(&list);
             let helper = crate::ui::dim(copy::STORAGE_EMPTY_CATEGORY);
             helper.set_visible(false);
 
@@ -133,11 +136,17 @@ impl StorageScreen {
                 input: RefCell::new(StorageInput { rows: Vec::new(), categories: Vec::new(), visible: Vec::new(), initializing: true }),
                 snapshot: RefCell::default(),
                 list,
+                search,
                 scanning,
                 helper,
                 on_delete: RefCell::default(),
             }
         })
+    }
+
+    /// The title search for the page header.
+    pub fn search(&self) -> &gtk::SearchEntry {
+        &self.search
     }
 
     /// The page widget: the column.

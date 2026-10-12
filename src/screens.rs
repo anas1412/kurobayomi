@@ -62,7 +62,11 @@ pub fn build(id: &str) -> GBox {
     let s = screen(id);
     match body(id) {
         Some(b) => {
-            let p = page(&s.title, &b.content, b.end, true);
+            // a page with its own one-row header (the kind pages) is used as it is
+            let p = match b.content.clone().downcast::<GBox>() {
+                Ok(own) if own.first_child().is_some_and(|w| w.is::<gtk::HeaderBar>()) => own,
+                _ => page(&s.title, &b.content, b.end, true),
+            };
             tag(&p, id);
             p
         }
@@ -141,17 +145,6 @@ fn empty_built(id: &str) -> Built {
     Built { content: crate::browse::look::empty_state("system-search-symbolic", &text, None).0.upcast(), end: vec![] }
 }
 
-/// A pushed page with a view per kind: the Anime | Manga switch goes in the page's one header row (as an `end` widget
-/// of `ui::page`), not on a row of its own under it. The stack pages are named `anime` and `manga`.
-fn kind_switch(f: impl Fn(Kind) -> gtk::Widget) -> (gtk::Stack, gtk::StackSwitcher) {
-    let stack = gtk::Stack::new();
-    stack.set_transition_type(gtk::StackTransitionType::Crossfade);
-    stack.add_titled(&f(Kind::Anime), Some("anime"), "Anime");
-    stack.add_titled(&f(Kind::Manga), Some("manga"), "Manga");
-    let switch = gtk::StackSwitcher::builder().stack(&stack).build();
-    (stack, switch)
-}
-
 /// Opens the spec dialog `dialog` of screen `id`, its text naming `name` where it has `%s` (the delete-category
 /// question). The last button runs `on_ok` before closing.
 pub(crate) fn dialog_then_named(id: &str, dialog: &str, name: &str, on_ok: impl Fn() + 'static) {
@@ -177,12 +170,14 @@ pub(crate) fn fab(overlay: &gtk::Overlay, label: &str, icon: &str) -> Button {
 /// The Library destination as a whole page: one header row (Anime | Manga switch, the visible kind's search, its
 /// refresh and menu) over the two library views (docs/design/main-window.md). The page has no title of its own.
 fn libraries() -> Option<Built> {
-    built(library_page([Kind::Anime, Kind::Manga].map(|kind| library(if kind.is_anime() { "anime_library" } else { "manga_library" }, kind))), vec![])
+    built(kind_page([Kind::Anime, Kind::Manga].map(|kind| library(if kind.is_anime() { "anime_library" } else { "manga_library" }, kind)), false), vec![])
 }
 
-/// The Library page from the Anime and the Manga views, in that order. Updates and History use the same header
-/// (`updates::mount`).
-pub(crate) fn library_page(views: [Built; 2]) -> GBox {
+/// The one builder of a page with a view per kind, from the Anime and the Manga views in that order: the switch at the
+/// start of the header row, the visible kind's search in the middle (the view hands its `gtk::SearchEntry` first in
+/// `Built.end`) and its other `end` widgets at the end; `back` adds Back before the switch, for a pushed page. Library, Updates, History, Downloads, Categories and Storage
+/// use it (`updates::mount` for the tabs).
+pub(crate) fn kind_page(views: [Built; 2], back: bool) -> GBox {
     let kinds = gtk::Stack::new();
     kinds.set_transition_type(gtk::StackTransitionType::Crossfade);
     kinds.set_vexpand(true);
@@ -204,6 +199,9 @@ pub(crate) fn library_page(views: [Built; 2]) -> GBox {
     }
     let header = crate::ui::header_bar();
     header.set_decoration_layout(Some(&decoration(false)));
+    if back {
+        header.pack_start(&crate::ui::back_button());
+    }
     header.pack_start(&gtk::StackSwitcher::builder().stack(&kinds).build());
     header.set_title_widget(Some(&centre));
     header.pack_end(&end);
@@ -220,24 +218,25 @@ fn library(id: &str, kind: Kind) -> Built {
 
 // ---------- downloads & categories ----------
 
-/// Download queue: the managers' queue page once they run, else the Library's empty state with one way forward.
+/// Download queue: a page per kind from the managers' queue, else the Library's empty state with one way forward.
 fn downloads() -> Option<Built> {
-    if let Some(page) = crate::downloads::queue_page::page() {
-        return built(scrolled(&page), vec![]);
+    built(kind_page([Kind::Anime, Kind::Manga].map(downloads_view), false), vec![])
+}
+
+fn downloads_view(kind: Kind) -> Built {
+    if let Some((page, search)) = crate::downloads::queue_page::page(kind) {
+        return Built { content: scrolled(&page).upcast(), end: vec![search.upcast()] };
     }
     let library = Button::with_label("Library");
     library.connect_clicked(|_| open("library"));
     let (page, _) = crate::browse::look::empty_state("folder-download-symbolic", &screen("download_queue").empty.unwrap_or_default(), Some(&library));
-    built(page, vec![])
+    // nothing to filter, but the header keeps its search
+    Built { content: page.upcast(), end: vec![gtk::SearchEntry::builder().hexpand(true).sensitive(false).build().upcast()] }
 }
 
-/// Categories: the Anime | Manga switch and Add (for the visible kind) in the header row, a page per kind.
+/// Categories: a page per kind under the shared header, with Add (for that kind) at the end.
 fn categories() -> Option<Built> {
-    let (kinds, switch) = kind_switch(crate::live::categories_content);
-    let add = icon_button("list-add-symbolic", "Add category");
-    let visible = kinds.clone();
-    add.connect_clicked(move |_| crate::live::add_category(Kind::from_anime(visible.visible_child_name().as_deref() == Some("anime"))));
-    built(kinds, vec![switch.upcast(), add.upcast()])
+    built(kind_page([Kind::Anime, Kind::Manga].map(crate::live::categories_content), true), vec![])
 }
 
 fn storage() -> Option<Built> {
@@ -423,14 +422,16 @@ mod tests {
             assert_eq!(count(&|w| w.is::<gtk::ListBoxRow>()), 0, "no made-up queue rows");
             assert_eq!(count(&|w| w.downcast_ref::<Label>().is_some_and(|l| l.label() == "No downloads")), 1);
             assert_eq!(count(&|w| w.downcast_ref::<Button>().is_some_and(|b| b.label().as_deref() == Some("Library"))), 1, "one action");
-            assert_eq!(count(&|w| w.is::<gtk::MenuButton>() || w.is::<gtk::StackSwitcher>()), 0, "no menus that do nothing");
+            assert_eq!(count(&|w| w.is::<gtk::MenuButton>()), 0, "no menus that do nothing");
+            assert_eq!(count(&|w| w.is::<gtk::StackSwitcher>()), 1, "the Anime | Manga switch");
+            assert_eq!(count(&|w| w.is::<gtk::SearchEntry>()), 1, "the header search");
         });
     }
 
     #[test]
     fn the_library_header_is_one_row_with_each_control_once() {
         crate::testing::with_display(|| {
-            let page = library_page([view("anime grid"), view("manga grid")]);
+            let page = kind_page([view("anime grid"), view("manga grid")], false);
             assert!(page.first_child().is_some_and(|w| w.is::<gtk::HeaderBar>()), "the header row comes first");
             assert!(page.first_child().and_then(|w| w.next_sibling()).is_some_and(|w| !w.is::<gtk::HeaderBar>() && w.next_sibling().is_none()), "then only the views");
             let mut all = vec![];

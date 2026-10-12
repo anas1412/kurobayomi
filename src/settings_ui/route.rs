@@ -541,7 +541,8 @@ mod tests {
             let switches = all_under(root, &|w| w.is::<gtk::StackSwitcher>());
             assert_eq!(switches.len(), 1);
             assert!(switches[0].is_ancestor(&headers[0]), "the kind switch is in the header row");
-            assert!(all_under(&headers[0], &|w| w.tooltip_text().as_deref() == Some("Add category")).len() == 1, "Add in the header");
+            let add = all_under(&headers[0], &|w| w.tooltip_text().as_deref() == Some("Add category"));
+            assert_eq!(add.len(), 2, "one Add per kind in the header, the visible kind's shows");
             let empty = all_under(root, &|w| w.downcast_ref::<gtk::Label>().is_some_and(|l| l.label().starts_with("No categories yet")));
             assert!(empty.iter().any(|w| shown_in(w, root)), "the empty state of the visible kind");
         });

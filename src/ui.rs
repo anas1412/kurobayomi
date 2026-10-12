@@ -122,6 +122,15 @@ pub fn header_bar() -> gtk::HeaderBar {
     header
 }
 
+/// The Back button of a pushed page's header.
+pub fn back_button() -> Button {
+    let b = Button::from_icon_name("go-previous-symbolic");
+    b.set_tooltip_text(Some("Back"));
+    b.update_property(&[gtk::accessible::Property::Label("Back")]);
+    b.connect_clicked(|_| pop());
+    b
+}
+
 /// A navigation page: one header row above `content` (docs/design/other-tabs.md). A pushed page (`back`) shows the
 /// back button and its title; a sidebar destination shows no title, because the sidebar already names it. When the
 /// first `end` widget is a search entry it takes the middle of the row in place of the title. An Anime | Manga switch
@@ -141,11 +150,7 @@ pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>,
     };
     header.set_title_widget(Some(&centre));
     if back {
-        let b = Button::from_icon_name("go-previous-symbolic");
-        b.set_tooltip_text(Some("Back"));
-        b.update_property(&[gtk::accessible::Property::Label("Back")]);
-        b.connect_clicked(|_| pop());
-        header.pack_start(&b);
+        header.pack_start(&back_button());
     }
     let (switches, end): (Vec<gtk::Widget>, Vec<gtk::Widget>) = end.partition(|w| w.is::<gtk::StackSwitcher>());
     for w in &switches {
@@ -310,6 +315,36 @@ pub fn boxed_list() -> ListBox {
     l.set_selection_mode(gtk::SelectionMode::None);
     l.add_css_class("boxed-list");
     l
+}
+
+/// Plain case-insensitive substring match of a row title against a search query.
+pub fn title_matches(title: &str, query: &str) -> bool {
+    title.to_lowercase().contains(&query.trim().to_lowercase())
+}
+
+/// The text of the first heading label under `w`: the title of a `browse::look::list_row`.
+fn row_title_text(w: &gtk::Widget) -> Option<String> {
+    if let Some(label) = w.downcast_ref::<Label>().filter(|l| l.has_css_class("heading")) {
+        return Some(label.text().to_string());
+    }
+    std::iter::successors(w.first_child(), |c| c.next_sibling()).find_map(|c| row_title_text(&c))
+}
+
+/// The header search entry of a page that lists rows: it hides the rows of `list` whose title lacks the typed text
+/// (`title_matches`). The filter stays on the list, so rows added later are filtered too. Hand it first in `Built.end`.
+pub fn list_search(list: &ListBox) -> gtk::SearchEntry {
+    let search = gtk::SearchEntry::builder().placeholder_text(kuro_i18n::tr(kuro_i18n::MsgKey::action_search_hint)).hexpand(true).build();
+    let query = Rc::new(std::cell::RefCell::new(String::new()));
+    let seen = Rc::clone(&query);
+    list.set_filter_func(move |row| row_title_text(row.upcast_ref()).is_none_or(|title| title_matches(&title, &seen.borrow())));
+    let list = list.downgrade();
+    search.connect_search_changed(move |entry| {
+        *query.borrow_mut() = entry.text().to_string();
+        if let Some(list) = list.upgrade() {
+            list.invalidate_filter();
+        }
+    });
+    search
 }
 
 pub fn icon_button(icon: &str, tip: &str) -> Button {
@@ -890,6 +925,27 @@ pub fn generic(s: &Screen) -> GBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_list_search_hides_rows_whose_title_lacks_the_text_ignoring_case() {
+        assert!(title_matches("One Piece", "piece") && title_matches("One Piece", " ONE ") && title_matches("x", ""));
+        assert!(!title_matches("One Piece", "bleach"));
+        crate::testing::with_display(|| {
+            let list = boxed_list();
+            let rows: Vec<_> = ["One Piece", "Bleach"].map(|t| crate::browse::look::list_row(None, t, Some("Piece of cake"), None)).into();
+            rows.iter().for_each(|r| list.append(r));
+            let search = list_search(&list);
+            let visible = || rows.iter().map(|r| r.is_child_visible()).collect::<Vec<_>>();
+            let type_in = |text: &str| {
+                search.set_text(text);
+                search.emit_by_name::<()>("search-changed", &[]);
+            };
+            type_in("PIECE");
+            assert_eq!(visible(), [true, false], "only the title counts, not the subtitle");
+            type_in("");
+            assert_eq!(visible(), [true, true]);
+        });
+    }
 
     /// Every widget at or below `root`.
     fn all(root: &gtk::Widget, out: &mut Vec<gtk::Widget>) {

@@ -26,7 +26,7 @@ pub fn normalize_default(value: i32, ids: &[i32]) -> i32 {
     if value == ALWAYS_ASK || ids.contains(&value) { value } else { ALWAYS_ASK }
 }
 
-/// The page of the Categories screen a kind opens on (`screens::kind_switch` names its pages `anime` and `manga`).
+/// The page of the Categories screen a kind opens on (`screens::kind_page` names its pages `anime` and `manga`).
 pub fn categories_tab(kind: Kind) -> &'static str {
     match kind {
         Kind::Anime => "anime",

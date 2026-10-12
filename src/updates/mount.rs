@@ -47,21 +47,10 @@ fn refresh_index(kind: Kind) -> usize {
     usize::from(kind == Kind::Manga)
 }
 
-/// A pushed page with a view per kind (Storage): the two views, and the Anime | Manga switch that goes in
-/// the page's one header row as an `end` widget, as on Categories, not on a row of its own.
-fn kind_switch(anime: &gtk::Widget, manga: &gtk::Widget) -> Built {
-    let stack = gtk::Stack::new();
-    stack.set_transition_type(gtk::StackTransitionType::Crossfade);
-    stack.add_titled(anime, Some(ANIME), "Anime");
-    stack.add_titled(manga, Some(MANGA), "Manga");
-    let switch = gtk::StackSwitcher::builder().stack(&stack).build();
-    Built { content: stack.upcast(), end: vec![switch.upcast()] }
-}
-
 /// A tab with the Library's one-row header (docs/design/other-tabs.md): the Anime | Manga switch, the visible kind's
 /// search (when it has one) and its actions; no page title. Returns the page and the stack of the two kinds.
 fn tab_page(views: [Built; 2]) -> (GBox, gtk::Stack) {
-    let page = crate::screens::library_page(views);
+    let page = crate::screens::kind_page(views, false);
     let stack = page.last_child().and_downcast::<gtk::Stack>().expect("the kinds stack follows the header");
     (page, stack)
 }
@@ -215,17 +204,17 @@ fn spin_until_done(button: &gtk::Button, kind: Kind) {
     });
 }
 
-/// The Storage page: one page per kind, with the same switch in the header. It follows the download cache: the
+/// The Storage page: one page per kind, with the shared kind header (switch and title search). It follows the download cache: the
 /// first snapshot comes at once and a new one after each change, with `initializing` taken from the cache (T-42a-054).
 pub fn storage() -> Option<Built> {
     if !crate::data::is_installed() {
         return None;
     }
     let screens = [Kind::Anime, Kind::Manga].map(|kind| storage_screen(kind));
-    let widgets = screens.each_ref().map(|(screen, _)| crate::ui::scrolled(screen.widget()).upcast::<gtk::Widget>());
-    let page = kind_switch(&widgets[0], &widgets[1]);
+    let views = screens.each_ref().map(|(screen, _)| Built { content: crate::ui::scrolled(screen.widget()).upcast(), end: vec![screen.search().clone().upcast()] });
+    let page = crate::screens::kind_page(views, true);
     STORAGE.with(|s| *s.borrow_mut() = screens.into());
-    Some(page)
+    Some(Built { content: page.upcast(), end: vec![] })
 }
 
 /// One kind's Storage page and its watch on the download cache.
@@ -316,18 +305,5 @@ mod tests {
         assert_eq!(refresh_index(kind_of(Some(ANIME))), 0);
         assert_eq!(refresh_index(kind_of(Some(MANGA))), 1);
         assert_eq!(refresh_index(kind_of(None)), 0, "before the stack has a page, anime");
-    }
-
-    /// Storage carries its Anime | Manga switch in the header row, driving the two views.
-    #[test]
-    fn a_kind_page_puts_its_switch_in_the_header() {
-        crate::testing::with_display(|| {
-            let page = kind_switch(gtk::Label::new(Some("anime")).upcast_ref(), gtk::Label::new(Some("manga")).upcast_ref());
-            let stack = page.content.downcast::<gtk::Stack>().expect("the two kinds");
-            let [switch] = page.end.as_slice() else { panic!("one header widget") };
-            let switch = switch.downcast_ref::<gtk::StackSwitcher>().expect("the switch");
-            assert_eq!(switch.stack().as_ref(), Some(&stack));
-            assert_eq!(kind_of(stack.visible_child_name().as_deref()), Kind::Anime, "Anime shows first");
-        });
     }
 }
