@@ -9,15 +9,12 @@ use kuro_data::DataError;
 use kuro_data::anime::AnimeRepo;
 use kuro_data::category::{Category, CategoryKind, CategoryRepo};
 use kuro_data::chapter::ChapterRepo;
-use kuro_data::custom_button::CustomButtonRepo;
 use kuro_data::episode::EpisodeRepo;
 use kuro_data::extension_repo::{ExtensionRepo, ExtensionRepoRepo};
-use kuro_data::extension_store::ExtensionStoreRepo;
 use kuro_data::history::{AnimeHistoryRepo, MangaHistoryRepo};
 use kuro_data::manga::{Manga, MangaRepo};
 use kuro_data::track::{AnimeTrackRepo, MangaTrackRepo};
 use kuro_db::handle::Db;
-use kuro_db::statements_anime::{CustomButton, ExtensionStore};
 use kuro_prefs::values::PrefValue as AppValue;
 
 use super::{AnimeEntry, Built, ExtensionArtifacts, LibraryReader, MangaEntry, PrefStore, SourcePrefStore};
@@ -117,13 +114,6 @@ impl LibraryReader for DbLibrary {
         ExtensionRepoRepo::new(self.manga.clone()).all().map_err(read)
     }
 
-    fn anime_extension_stores(&self) -> Result<Vec<ExtensionStore>, BackupError> {
-        ExtensionStoreRepo::new(self.anime.clone()).all().map_err(read)
-    }
-
-    fn custom_buttons(&self) -> Result<Vec<CustomButton>, BackupError> {
-        CustomButtonRepo::new(self.anime.clone()).get_all().map_err(read)
-    }
 }
 
 /// The backup value of a stored preference value.
@@ -231,8 +221,6 @@ mod tests {
         assert!(lib.anime_watched_not_in_library().unwrap().is_empty());
         assert!(lib.manga_categories().unwrap().iter().all(|c| c.id == 0), "only the system row");
         assert!(lib.manga_extension_repos().unwrap().is_empty());
-        assert!(lib.anime_extension_stores().unwrap().is_empty());
-        assert!(lib.custom_buttons().unwrap().iter().all(|b| !b.name.is_empty()));
     }
 
     /// E-05: a write that starts during the pass commits only after it, so the pass reads one state.

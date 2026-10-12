@@ -26,7 +26,7 @@ use super::listing_view::{ListingDeps, WeakListingView};
 use super::pages::{BrowseSourceDeps, FavoritesDeps, SourcePage, browse_source};
 use super::pending;
 use super::prefs::BrowsePrefs;
-use super::primitives::{EmptyAction, ToastSpec};
+use super::primitives::ToastSpec;
 use super::route::{BrowseRoute, search_listing};
 use super::sources::LOCAL_SOURCE_ID;
 use super::view::file_cover_loader;
@@ -77,7 +77,6 @@ pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery) -> Sourc
             }
         })
     };
-    let (web_overflow, web_action) = (Rc::clone(&open_web), open_web);
     let page = browse_source(BrowseSourceDeps {
         supports_latest: source.supports_latest,
         configurable: false,
@@ -98,11 +97,7 @@ pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery) -> Sourc
             },
             on_long_press: Rc::new(|_| {}),
             favorite_urls: None,
-            on_action: Rc::new(move |action| {
-                if action == EmptyAction::OpenInWebView {
-                    web_action();
-                }
-            }),
+            on_action: Rc::new(|_| {}),
         },
         filters: Rc::clone(&filters),
         favorites: Some(FavoritesDeps {
@@ -119,7 +114,7 @@ pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery) -> Sourc
         on_back: Rc::clone(&env.on_back),
         on_overflow: Rc::new(move |item| {
             if item == OverflowItem::OpenInWebView {
-                web_overflow();
+                open_web();
             }
         }),
         open_url: Rc::clone(&env.open_url),
@@ -268,7 +263,7 @@ fn entry_search(screen: &str) -> Option<gtk::Box> {
             crate::ui::pop();
             crate::ui::pop();
         });
-        let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let placeholder = crate::ui::page("", &gtk::Box::new(gtk::Orientation::Vertical, 0), Vec::new(), true);
         crate::ui::tag(&placeholder, screen);
         return Some(placeholder);
     }
@@ -388,12 +383,12 @@ pub(crate) mod tests {
         drop(page);
     }
 
-    fn open_in_web_view_goes_to_the_source_site() {
+    fn a_failed_first_page_offers_only_retry_and_retry_asks_again() {
+        use super::super::primitives::EmptyAction;
         let rig = rig();
         rig.failing.store(true, std::sync::atomic::Ordering::SeqCst);
         let page = source_page(&rig.env, 1, BrowseQuery::Popular);
-        let wanted = EmptyAction::OpenInWebView.label();
-        let find = || {
+        let error_buttons = || {
             let mut buttons = Vec::new();
             fn walk(widget: &gtk::Widget, out: &mut Vec<gtk::Button>) {
                 if let Some(button) = widget.downcast_ref::<gtk::Button>() {
@@ -406,18 +401,24 @@ pub(crate) mod tests {
                 }
             }
             walk(browse(&page).listing.widget().upcast_ref(), &mut buttons);
-            buttons.into_iter().find(|b| b.tooltip_text().as_deref() == Some(wanted.as_str()))
+            buttons.into_iter().filter(|b| b.tooltip_text().is_some()).collect::<Vec<_>>()
         };
-        assert!(pump_until(|| find().is_some()), "a failed first page shows the error actions");
-        find().expect("button").emit_clicked();
-        assert_eq!(*rig.log.borrow(), ["webview https://alpha.example Alpha"], "the source's site opens in the web view");
+        assert!(pump_until(|| !error_buttons().is_empty()), "a failed first page shows the error actions");
+        let buttons = error_buttons();
+        assert_eq!(buttons.len(), 1, "retry is the only button");
+        assert_eq!(buttons[0].tooltip_text().as_deref(), Some(EmptyAction::Retry.label().as_str()));
+        rig.failing.store(false, std::sync::atomic::Ordering::SeqCst);
+        let asked = rig.asked.lock().expect("lock").len();
+        buttons[0].emit_clicked();
+        assert!(pump_until(|| rig.asked.lock().expect("lock").len() > asked), "retry asks the first page again");
+        assert!(rig.log.borrow().is_empty(), "and opens nothing in the web view");
     }
 
     pub(crate) fn smoke() {
         a_source_the_directory_does_not_know_gets_the_missing_source_page();
         a_page_opened_on_a_search_starts_with_that_search_and_shows_the_text();
         a_genre_search_reaches_the_open_page_and_restarts_its_listing_at_once();
-        open_in_web_view_goes_to_the_source_site();
+        a_failed_first_page_offers_only_retry_and_retry_asks_again();
     }
 
     #[test]

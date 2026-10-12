@@ -17,7 +17,6 @@ use kuro_data::category::Category;
 use kuro_data::chapter::Chapter;
 use kuro_data::extension_repo::ExtensionRepo;
 use kuro_data::manga::Manga;
-use kuro_db::statements_anime::{CustomButton, ExtensionStore};
 use kuro_db::{schema_anime, schema_manga};
 use kuro_prefs::store::PrefStore as Store;
 use kuro_prefs::values::PrefValue as Stored;
@@ -81,12 +80,6 @@ impl LibraryReader for Library {
             website: "w".into(),
             signing_key_fingerprint: "fp".into(),
         }])
-    }
-    fn anime_extension_stores(&self) -> Result<Vec<ExtensionStore>, BackupError> {
-        Ok(vec![ExtensionStore { index_url: "https://store.example/index.json".into(), name: "Store".into(), ..Default::default() }])
-    }
-    fn custom_buttons(&self) -> Result<Vec<CustomButton>, BackupError> {
-        Ok(vec![CustomButton { id: 1, name: "Skip".into(), is_favorite: true, sort_index: 0, content: "seek 85".into(), ..Default::default() }])
     }
 }
 

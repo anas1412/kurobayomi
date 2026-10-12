@@ -261,7 +261,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     let header_row = GBox::new(O::Horizontal, 8);
     header_row.append(&count);
     header_row.append(&missing);
-    header_row.append(&gtk::Image::from_icon_name("view-filter-symbolic"));
+    header_row.append(&gtk::Image::from_icon_name("view-sort-descending-symbolic"));
     let header_button = Button::builder().child(&header_row).css_classes(["flat"]).build();
     header_button.set_margin_start(8);
     header_button.set_margin_end(8);
@@ -446,7 +446,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     let cancel = icon_button("window-close-symbolic", &tr(MsgKey::action_cancel));
     let bar_count = Label::builder().xalign(0.0).hexpand(true).build();
     let select_all = icon_button("edit-select-all-symbolic", &tr(MsgKey::action_select_all));
-    let invert = icon_button("edit-select-invert-symbolic", &tr(MsgKey::action_select_inverse));
+    let invert = icon_button("object-flip-horizontal-symbolic", &tr(MsgKey::action_select_inverse));
     let bar_row = GBox::new(O::Horizontal, 6);
     bar_row.add_css_class("toolbar");
     for w in [cancel.upcast_ref::<gtk::Widget>(), bar_count.upcast_ref(), select_all.upcast_ref(), invert.upcast_ref()] {
@@ -467,12 +467,12 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     ready.append(&bottom);
     stack.add_named(&ready, Some("ready"));
 
-    let filter = icon_button("view-filter-symbolic", &tr(MsgKey::action_filter));
+    let filter = icon_button("view-sort-descending-symbolic", &tr(MsgKey::action_filter));
     let refresh_button = icon_button("view-refresh-symbolic", &tr(MsgKey::action_webview_refresh));
     // the Download menu: shown for an entry that is not local, when the app can queue downloads
-    let download_menu = gtk::MenuButton::builder().icon_name("folder-download-symbolic").tooltip_text(tr(MsgKey::action_download)).visible(false).build();
+    let download_menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("folder-download-symbolic").tooltip_text(tr(MsgKey::action_download)).visible(false).build());
     // the overflow menu: the items `overflow::items` gives for this entry and its source (T-39a-075)
-    let overflow_menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text(tr(MsgKey::action_menu_overflow_description)).build();
+    let overflow_menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text(tr(MsgKey::action_menu_overflow_description)).build());
     let toolbar: Vec<gtk::Widget> =
         vec![download_menu.clone().upcast(), refresh_button.clone().upcast(), filter.clone().upcast(), overflow_menu.clone().upcast()];
     let page = ui::page("", &stack, toolbar.clone(), false);
@@ -484,6 +484,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     back.set_focus_on_click(false);
     if let Some(header) = &header {
         header.pack_start(&back);
+        ui::no_sticky_focus(header);
     }
 
     let view = Rc::new(View {

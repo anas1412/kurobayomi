@@ -42,7 +42,14 @@ pub trait Ops<T>: Send + Sync + 'static {
     fn closes_on_submit(&self) -> bool {
         false
     }
+    /// The text of the busy card the page shows over the window while `add` runs. `None` shows none.
+    fn busy_text(&self) -> Option<&'static str> {
+        None
+    }
 }
+
+/// The busy card text while a repo link's index and sources download.
+pub const ADDING_REPO: &str = "Adding repository…";
 
 /// The toast of an add that failed for a reason the domain does not name (a deliberate deviation: Kotlin is silent).
 pub const COULD_NOT_ADD_REPO: &str = "Could not add the repo";
@@ -57,6 +64,11 @@ impl RepoOps {
     pub fn new(links: Pref<BTreeSet<String>>) -> Self {
         Self { links }
     }
+}
+
+/// The toast after a repo link was added: how many sources its index lists.
+pub fn added_text(count: usize) -> String {
+    if count == 1 { "Added 1 source".to_owned() } else { format!("Added {count} sources") }
 }
 
 /// The toast text of a repo link that could not be added.
@@ -78,6 +90,10 @@ impl Ops<RepoLink> for RepoOps {
         true
     }
 
+    fn busy_text(&self) -> Option<&'static str> {
+        Some(ADDING_REPO)
+    }
+
     fn card(&self, repo: &RepoLink) -> Card {
         Card { key: repo.0.clone(), name: repo.0.clone(), website: String::new(), discord: None, copy: repo.0.clone(), note: None }
     }
@@ -92,10 +108,13 @@ impl Ops<RepoLink> for RepoOps {
         if links.iter().any(|known| known.as_str() == link) {
             return AddOutcome::Notice(tr(MsgKey::error_repo_exists));
         }
-        if let Err(error) = crate::recipe_sources::sync_link(link) {
-            tracing::warn!(%error, link, "adding the repo failed");
-            return AddOutcome::Notice(repo_error_text(&error));
-        }
+        let count = match crate::recipe_sources::sync_link(link) {
+            Ok(count) => count,
+            Err(error) => {
+                tracing::warn!(%error, link, "adding the repo failed");
+                return AddOutcome::Notice(repo_error_text(&error));
+            }
+        };
         if let Err(error) = add_link(&mut links, link) {
             return AddOutcome::Notice(repo_error_text(&error));
         }
@@ -104,6 +123,7 @@ impl Ops<RepoLink> for RepoOps {
             return AddOutcome::Notice(COULD_NOT_ADD_REPO.to_owned());
         }
         crate::recipe_sources::reload();
+        crate::toast::notify(added_text(count));
         AddOutcome::Added
     }
 
@@ -187,6 +207,8 @@ mod tests {
         assert_eq!(repo_error_text(&RepoError::Write("disk".into())), COULD_NOT_ADD_REPO);
         let (_saved, ops) = repo_ops(&[]);
         assert!(ops.closes_on_submit(), "T-47b-024: Add closes the dialog at once");
+        assert_eq!(ops.busy_text(), Some("Adding repository…"));
+        assert_eq!((added_text(1), added_text(3)), ("Added 1 source".to_owned(), "Added 3 sources".to_owned()));
     }
 
     #[test]

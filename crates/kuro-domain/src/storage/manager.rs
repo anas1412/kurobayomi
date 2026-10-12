@@ -59,9 +59,13 @@ impl StorageManager {
         self.changes.subscribe()
     }
 
-    /// The base directory. A base that is missing or not a directory is `StorageUnavailable` (Q-STO-3).
+    /// The base directory. A base that is missing or not a directory is `StorageUnavailable` (Q-STO-3). The default
+    /// base is created on first use, so the user is never asked for a folder.
     pub fn base(&self) -> Result<PathBuf, DomainError> {
         let base = self.configured();
+        if base == self.default_base {
+            std::fs::create_dir_all(&base)?;
+        }
         if base.is_dir() {
             Ok(base)
         } else {
@@ -91,9 +95,6 @@ impl StorageManager {
     /// Creates the folder tree under the base. The first-run path calls this so the tree exists at startup (Q-STO-2).
     /// The default base is created here when it is missing; a configured base that is gone stays unavailable.
     pub fn ensure_tree(&self) -> Result<(), DomainError> {
-        if self.pref.get().is_empty() {
-            std::fs::create_dir_all(&self.default_base)?;
-        }
         create_tree(&self.base()?)
     }
 
@@ -197,6 +198,15 @@ mod tests {
         assert!(!default.exists(), "open does not create the default base");
         m.ensure_tree().expect("first run");
         assert!(tree_exists(&default));
+    }
+
+    #[test]
+    fn the_default_base_is_created_on_first_use_without_asking() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let default = dir.path().join("Videos").join("Kurobayomi");
+        let (_store, m) = manager(&default);
+        let downloads = m.downloads_dir().expect("first use creates the default base");
+        assert!(downloads.is_dir() && downloads.starts_with(&default));
     }
 
     #[test]

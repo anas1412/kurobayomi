@@ -21,8 +21,9 @@ use kuro_downloads::engine::{MangaEngine, QueueEngine};
 use kuro_downloads::manager::{DeleteRules, DownloadManager};
 use kuro_downloads::model::{ChapterRef, SourceRef};
 use kuro_source::model::SChapter;
-use kuro_source::{MangaSource, SourceError};
+use kuro_source::MangaSource;
 
+use crate::browse::errors::limited;
 use crate::downloads::manga_io::{LiveChapterSource, chapter_ref, manga_ref};
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
@@ -127,7 +128,8 @@ pub type MangaLookup = Arc<dyn Fn(i64) -> Option<Arc<dyn MangaSource>> + Send + 
 /// The backend over the live manga sources (`awaitUpdateFromSource` and `syncChaptersWithSource`): the details are
 /// written with the library refresh rules (`refresh_update`), the chapter list through the domain's chapter sync, both on
 /// the row the Browse listing inserted with its source id. A source the lookup does not know reads as [`StubBackend`].
-/// Source calls run under `isolate`, so a panicking source is an error on the page, not a crash.
+/// Source calls run under `limited` (the panic guard and the 30 second limit), so a panicking or silent source is an error
+/// on the page, not a crash or an endless refresh.
 pub struct SourceBackend {
     stub: StubBackend,
     db: Arc<Db>,
@@ -176,16 +178,6 @@ impl SourceBackend {
     }
 }
 
-fn source_error(error: SourceError) -> DetailError {
-    match error {
-        SourceError::NotInstalled(_) => DetailError::SourceNotInstalled,
-        SourceError::Http(code) => DetailError::Http(i64::from(code)),
-        SourceError::UnknownHost { host } => DetailError::UnknownHost { online: true, host },
-        SourceError::Cancelled => DetailError::Cancelled,
-        other => DetailError::Other { class: "IOException".to_owned(), message: Some(other.to_string()) },
-    }
-}
-
 fn db_error(error: impl std::fmt::Display) -> DetailError {
     DetailError::Other { class: "SQLiteException".to_owned(), message: Some(error.to_string()) }
 }
@@ -213,7 +205,7 @@ impl Backend for SourceBackend {
         let (db, lookup) = (Arc::clone(&self.db), Arc::clone(&self.lookup));
         Box::pin(async move {
             let (manga, source) = target(Arc::clone(&db), lookup, manga_id).await?;
-            let remote = kuro_source::isolate(source.get_manga_details(&to_s_manga(&manga))).await.map_err(source_error)?;
+            let remote = limited(source.get_manga_details(&to_s_manga(&manga))).await.map_err(|error| DetailError::from_source(source.name(), error))?;
             let update = refresh_update(manga.id, manga.favorite, &remote, manga.thumbnail_url.as_deref(), chrono::Utc::now().timestamp_millis());
             tokio::task::spawn_blocking(move || MangaRepo::new(db).update(&update)).await.map_err(db_error)?.map_err(db_error)
         })
@@ -224,7 +216,7 @@ impl Backend for SourceBackend {
         Box::pin(async move {
             let (manga, source) = target(db, lookup, manga_id).await?;
             let listed = to_s_manga(&manga);
-            let raw = kuro_source::isolate(source.get_chapter_list(&listed)).await.map_err(source_error)?;
+            let raw = limited(source.get_chapter_list(&listed)).await.map_err(|error| DetailError::from_source(source.name(), error))?;
             let options = ChapterSyncOptions { now_ms: chrono::Utc::now().timestamp_millis(), manual: true, window: (0, 0), mark_duplicate_as_read, is_local: false };
             let prepare = |chapter: &mut SChapter| source.prepare_new_chapter(chapter, &listed);
             sync.run(raw, &manga, options, &prepare).await.map(drop).map_err(|error| match error {
@@ -369,8 +361,10 @@ mod tests {
 
         // a failing source and an unknown one are errors the page shows
         fake.fail.store(true, std::sync::atomic::Ordering::SeqCst);
-        assert_eq!(rt.block_on(backend.fetch_details(id)), Err(DetailError::Http(503)));
-        assert_eq!(rt.block_on(backend.fetch_chapters(id)), Err(DetailError::Http(503)));
+        for failed in [rt.block_on(backend.fetch_details(id)), rt.block_on(backend.fetch_chapters(id))] {
+            let text = failed.expect_err("the source is down").user_message();
+            assert!(text.starts_with("Fake Central ") && text.contains("isn't working right now") && !text.contains("503"), "{text}");
+        }
         assert_eq!(ChapterRepo::new(Arc::clone(&db)).by_manga_id(id, false).unwrap().len(), 2, "a failed refresh keeps the chapters");
         let other = MangaRepo::new(Arc::clone(&db)).insert(&Manga { source: 99, url: "/x".into(), title: "X".into(), ..Manga::create() }).unwrap();
         assert_eq!(rt.block_on(backend.fetch_details(other)), Err(DetailError::SourceNotInstalled));

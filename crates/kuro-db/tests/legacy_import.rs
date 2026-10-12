@@ -162,6 +162,23 @@ fn a_shared_date_added_is_reported_as_the_migration_10_bug() {
 }
 
 #[test]
+fn extension_repos_are_not_copied_and_the_table_stays_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let (src, dest) = (dir.path().join("a.db"), dir.path().join("b.db"));
+    aniyomi_file(&src, 33);
+    Connection::open(&src)
+        .unwrap()
+        .execute(
+            "INSERT INTO extension_repos(base_url, name, short_name, website, signing_key_fingerprint) VALUES ('https://r.test', 'R', 'R', 'https://r.test', 'fp')",
+            [],
+        )
+        .unwrap();
+    let report = run(&src, &dest).unwrap();
+    assert!(!report.copied.contains_key("extension_repos"));
+    assert_eq!(one(&Connection::open(&dest).unwrap(), "SELECT count(*) FROM extension_repos"), 0);
+}
+
+#[test]
 fn tc_i05_orphan_rows_are_deleted_and_counted() {
     let dir = tempfile::tempdir().unwrap();
     let (src, dest) = (dir.path().join("a.db"), dir.path().join("b.db"));

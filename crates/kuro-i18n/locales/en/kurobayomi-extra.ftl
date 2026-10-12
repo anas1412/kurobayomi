@@ -82,3 +82,21 @@ pref_advanced_summary = Dump crash logs
 
 # source: kurobayomi
 pref_reset_viewer_flags_summary = Resets reading mode of all series
+
+# source: kurobayomi
+add_source_repository = Add a source repository
+
+# source: kurobayomi
+restore_from_backup = Restore from a backup
+
+# source: kurobayomi
+library_empty_search_hint = Your library is empty. Search for something in Browse to add it.
+
+# source: kurobayomi
+welcome_title = Welcome to Kurobayomi
+
+# source: kurobayomi
+welcome_intro = Add a source repository to start watching anime and reading manga.
+
+# source: kurobayomi
+welcome_guide = Getting started guide

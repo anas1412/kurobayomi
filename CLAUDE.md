@@ -82,6 +82,10 @@ The user lifted the hold on the P0 audit (read-only, no cargo, reports in docs/a
 ## Top bar rule (user, 2026-10-11)
 Never hide or remove the top bar of any screen. The manga reader's top bar always stays visible; only its bottom bar may follow the menu toggle (guard test in src/reader/topbar_guard.rs).
 
+**Every screen has a top bar with the window buttons, and the window can always be dragged by it (user, 2026-10-12: "did I mention the top bar should ALWAYS be there except the fullscreen button?").** The window's own titlebar slot is hidden, so a screen that builds no header is undraggable and has no minimize/maximize/close. Every full-page screen (wizard-like pages, dialogs pages, webview, settings, empty states, error pages) must be built with ui::page / page_header::header or an equivalent HeaderBar that carries the decoration layout. A guard test must fail if a pushed page has no HeaderBar.
+
+The one exception (user, 2026-10-12): the fullscreen button of the anime player fullscreens the video ENTIRELY: no top bar, no window chrome, only the video (the control bar appears on mouse move and hides after a moment). Esc or the fullscreen button leaves it and the top bar is back. The manga reader has no such exception.
+
 ## Design principles (user, 2026-10-11)
 
 1. Fewer, better defaults: a setting is either kept as a visible setting or cut completely (code, row, tests, stored key); no hiding of bloat.

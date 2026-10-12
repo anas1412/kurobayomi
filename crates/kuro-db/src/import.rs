@@ -16,9 +16,9 @@ use crate::legacy::{self, NEWEST_IMPORTABLE, OLDEST_IMPORTABLE};
 use crate::open::APPLICATION_ID;
 use crate::schema::{BASELINE_SQL, MANGA_MIGRATIONS};
 
-/// Tables copied into the new file, in dependency order.
-const COPY_ORDER: [&str; 9] =
-    ["categories", "mangas", "chapters", "mangas_categories", "history", "manga_sync", "excluded_scanlators", "sources", "extension_repos"];
+/// Tables copied into the new file, in dependency order. `extension_repos` is not copied: its old addresses become
+/// repository links through `kuro_domain::extension_repo::import_legacy_repos`, so the table stays empty here.
+const COPY_ORDER: [&str; 8] = ["categories", "mangas", "chapters", "mangas_categories", "history", "manga_sync", "excluded_scanlators", "sources"];
 
 /// A deviation of the old file that the importer saw or applied (reported, never silently fixed).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

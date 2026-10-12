@@ -20,7 +20,7 @@ use crate::browse::entries::FavoriteStore;
 use crate::browse::filters::SourceFilters;
 use crate::browse::listing_view::ListingDeps;
 use crate::browse::pages::{FavoritesDeps, SourcePage};
-use crate::browse::primitives::{EmptyAction, ToastSpec};
+use crate::browse::primitives::ToastSpec;
 use crate::browse::sources::LOCAL_SOURCE_ID;
 use crate::browse::view::file_cover_loader;
 
@@ -54,14 +54,6 @@ pub fn source_page(env: &AppServices, source_id: i64, query: BrowseQuery) -> Sou
     let filters = Rc::new(SourceFilters::new(defaults));
     let (_never_sent, ready) = watch::channel(true);
 
-    let open_web: Rc<dyn Fn()> = {
-        let (open, name, url) = (Rc::clone(&env.open_webview), source.name.clone(), home_url.clone());
-        Rc::new(move || {
-            if let Some(url) = &url {
-                open(url, &name);
-            }
-        })
-    };
     let settings = {
         let open = Rc::clone(&env.on_settings);
         Rc::new(move || open(source_id))
@@ -87,11 +79,7 @@ pub fn source_page(env: &AppServices, source_id: i64, query: BrowseQuery) -> Sou
             },
             on_long_press: Rc::new(|_| {}),
             favorite_urls: None,
-            on_action: Rc::new(move |action| {
-                if action == EmptyAction::OpenInWebView {
-                    open_web();
-                }
-            }),
+            on_action: Rc::new(|_| {}),
         },
         filters: Rc::clone(&filters),
         favorites: Some(FavoritesDeps {

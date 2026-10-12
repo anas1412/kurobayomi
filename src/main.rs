@@ -50,6 +50,8 @@ mod watch;
 mod window_size;
 #[cfg(test)]
 mod testing;
+#[cfg(test)]
+mod header_guard;
 mod updates;
 mod pref_model;
 mod browse;
@@ -214,8 +216,12 @@ fn build_window(app: &gtk::Application) {
         .default_width(1180)
         .default_height(780)
         .build();
-    // each page brings its own header bar, so the window titlebar stays empty
-    win.set_titlebar(Some(&GBox::new(O::Horizontal, 0)));
+    // each page brings its own header bar, so the window titlebar stays empty. It is hidden, not just empty: GTK gives a
+    // visible titlebar widget the theme's titlebar height (the built-in `.titlebar:not(headerbar)` min-height), which
+    // shows as an empty band above the app's header. A hidden one takes no space and GTK does not add a default one.
+    let titlebar = GBox::new(O::Horizontal, 0);
+    titlebar.set_visible(false);
+    win.set_titlebar(Some(&titlebar));
 
     // [sidebar | content nav stack], plus a bottom tab bar that replaces the sidebar when narrow
     let nav = gtk::Stack::new();
@@ -279,7 +285,7 @@ fn build_window(app: &gtk::Application) {
     let refresh = {
         let (win, nav, tabs, home) = (win.clone(), nav.clone(), tabs.clone(), home.clone());
         move || {
-            let immersive = nav.visible_child().is_some_and(|c| matches!(c.widget_name().as_str(), "screen:reader" | "screen:player" | shell::onboarding::PAGE_NAME));
+            let immersive = nav.visible_child().is_some_and(|c| matches!(c.widget_name().as_str(), "screen:reader" | "screen:player"));
             let (width, _) = window_size::size_of(&win);
             let chrome = shell::layout::chrome_for(width, win.is_maximized());
             // the bottom bar belongs to the tab pages, and it hides on the tab that moved into More
@@ -322,8 +328,6 @@ fn build_window(app: &gtk::Application) {
     shell::launch::window_built(app, &win);
     // the desktop search provider serves library titles while the app runs (T-53a-066)
     shell::library_catalogue::serve(app, data::app().manga_db.clone(), data::app().anime_db.clone());
-    // the first launch starts the onboarding wizard (T-36a-024)
-    shell::onboarding::show_if_needed(&win, base.store(), !kuro_platform::single_instance::is_unique(|v| std::env::var(v).is_ok()));
     // no keyboard focus ring on the first header button at startup
     GtkWindowExt::set_focus(&win, None::<&gtk::Widget>);
 
@@ -375,6 +379,29 @@ fn build_window(app: &gtk::Application) {
                 r.render_texture(&node, None).save_to_png(&path).expect("save png");
             }
             app.quit();
+        });
+    }
+    // KUROBAYOMI_SHOT_DIR=dir: creating the file dir/take saves every open window as dir/shot-N.png (dialogs as
+    // shot-N-K.png) and deletes the file again (screenshots for the docs, taken while the app is driven by hand)
+    if let Ok(dir) = std::env::var("KUROBAYOMI_SHOT_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        let mut count = 0u32;
+        glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
+            if std::fs::remove_file(dir.join("take")).is_ok() {
+                count += 1;
+                let windows = gtk::Window::list_toplevels().into_iter().filter_map(|w| w.downcast::<gtk::Window>().ok()).filter(|w| w.is_visible());
+                for (k, w) in windows.enumerate() {
+                    let name = if k == 0 { format!("shot-{count}.png") } else { format!("shot-{count}-{k}.png") };
+                    let snap = gtk::Snapshot::new();
+                    gtk::WidgetPaintable::new(Some(&w)).snapshot(&snap, w.width() as f64, w.height() as f64);
+                    if let (Some(node), Some(r)) = (snap.to_node(), w.renderer()) {
+                        if let Err(e) = r.render_texture(&node, None).save_to_png(dir.join(name)) {
+                            tracing::warn!(error = %e, "screenshot not saved");
+                        }
+                    }
+                }
+            }
+            glib::ControlFlow::Continue
         });
     }
     if std::env::var("KUROBAYOMI_SMOKE").is_ok() {
@@ -442,14 +469,13 @@ fn tabs() -> gtk::Stack {
 /// The navigation sidebar: app name in a split header, then one row per destination (icon, label, badge) from the top.
 /// Always full width; there is no collapsed mode (docs/design/main-window.md).
 fn sidebar(tabs: &gtk::Stack) -> GBox {
-    let header = gtk::HeaderBar::new();
+    let header = ui::header_bar();
     header.set_decoration_layout(Some(&ui::decoration(true)));
     header.set_title_widget(Some(&gtk::Label::builder().label("Kurobayomi").css_classes(["title"]).build()));
     ui::no_sticky_focus(&header);
 
     let list = gtk::ListBox::new();
     list.add_css_class("navigation-sidebar");
-    list.set_valign(gtk::Align::Start);
     list.set_margin_top(widgets::rail::PAD_V);
     list.set_margin_bottom(widgets::rail::PAD_V);
     let ids: Vec<String> = ui::with_spec(|s| s.nav.iter().map(|n| n.id.clone()).collect());

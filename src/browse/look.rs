@@ -62,6 +62,11 @@ pub fn cover(title: &str, art: Option<&ArtRef>, width: i32, height: i32) -> gtk:
             tile.upcast()
         }
     };
+    // a fixed size: never grow with the room around it (the initials' vexpand would otherwise bubble up to the page)
+    cover.set_halign(Align::Start);
+    cover.set_valign(Align::Start);
+    cover.set_hexpand(false);
+    cover.set_vexpand(false);
     cover
 }
 

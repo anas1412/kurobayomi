@@ -50,6 +50,16 @@ pub fn skip_label(kind: ChapterType) -> Option<String> {
     type_label(kind).map(|label| trf(MsgKey::player_skip_action, &[("arg1", Arg::Str(&label))]))
 }
 
+/// The type of an mpv chapter from its title: "Opening" or "OP" is an opening, "Ending" or "ED" an ending, matched
+/// without case or surrounding spaces. Any other title is `Other`.
+pub fn kind_of_title(title: &str) -> ChapterType {
+    match title.trim().to_ascii_lowercase().as_str() {
+        "opening" | "op" => ChapterType::Opening,
+        "ending" | "ed" => ChapterType::Ending,
+        _ => ChapterType::Other,
+    }
+}
+
 /// Gives an unnamed timestamp the label of its type. A named one, or one of type `Other`, is kept.
 pub fn named(stamps: &[TimeStamp]) -> Vec<TimeStamp> {
     stamps
@@ -505,6 +515,16 @@ mod tests {
             Some("Skip Mixed opening")
         );
         assert_eq!(skip_label(ChapterType::Other), None);
+    }
+
+    #[test]
+    fn mpv_chapter_titles_name_openings_and_endings() {
+        assert_eq!(kind_of_title("Opening"), ChapterType::Opening);
+        assert_eq!(kind_of_title(" op "), ChapterType::Opening);
+        assert_eq!(kind_of_title("ENDING"), ChapterType::Ending);
+        assert_eq!(kind_of_title("ED"), ChapterType::Ending);
+        assert_eq!(kind_of_title("Episode"), ChapterType::Other);
+        assert_eq!(kind_of_title(""), ChapterType::Other);
     }
 
     #[test]

@@ -6,9 +6,6 @@ use directories::{ProjectDirs, UserDirs};
 
 use crate::paths::Paths;
 
-/// App directory name for the user's downloads folder.
-const APP_DIR: &str = "Kurobayomi";
-
 /// XDG directory name (`~/.config/kurobayomi` and so on), lowercase as plans/ARCHITECTURE.md says.
 const XDG_APP_DIR: &str = "kurobayomi";
 
@@ -19,7 +16,13 @@ pub struct Roots {
     pub config: PathBuf,
     pub cache: PathBuf,
     pub state: PathBuf,
-    pub downloads: PathBuf,
+    /// The user's Videos folder, which holds the app's default storage folder.
+    pub videos: PathBuf,
+}
+
+/// The user's Videos folder: the platform's video directory when it names one, else `Videos` in the home folder.
+pub fn video_folder(configured: Option<&Path>, home: &Path) -> PathBuf {
+    configured.map_or_else(|| home.join("Videos"), Path::to_path_buf)
 }
 
 /// Failure to resolve the XDG directories.
@@ -46,17 +49,14 @@ impl LinuxPaths {
         let project =
             ProjectDirs::from_path(PathBuf::from(XDG_APP_DIR)).ok_or(PathError::NoHome)?;
         let user = UserDirs::new().ok_or(PathError::NoHome)?;
-        let downloads = user
-            .download_dir()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| user.home_dir().join("Downloads"));
+        let videos = video_folder(user.video_dir(), user.home_dir());
         let state = project.state_dir().ok_or(PathError::NoHome)?.to_path_buf();
         Ok(Self::new(Roots {
             data: project.data_dir().to_path_buf(),
             config: project.config_dir().to_path_buf(),
             cache: project.cache_dir().to_path_buf(),
             state,
-            downloads,
+            videos,
         }))
     }
 }
@@ -90,12 +90,8 @@ impl Paths for LinuxPaths {
         self.roots.state.join("crashes")
     }
 
-    fn default_downloads_dir(&self) -> PathBuf {
-        self.roots.downloads.join(APP_DIR)
-    }
-
-    fn default_backups_dir(&self) -> PathBuf {
-        self.roots.data.join("backups")
+    fn videos_dir(&self) -> PathBuf {
+        self.roots.videos.clone()
     }
 
     fn covers_dir(&self) -> PathBuf {
@@ -118,8 +114,15 @@ mod tests {
             config: base.join("config"),
             cache: base.join("cache"),
             state: base.join("state"),
-            downloads: base.join("Downloads"),
+            videos: base.join("Videos"),
         }
+    }
+
+    #[test]
+    fn the_configured_video_folder_wins_over_the_home_videos_folder() {
+        let home = Path::new("/home/u");
+        assert_eq!(video_folder(Some(Path::new("/media/Clips")), home), PathBuf::from("/media/Clips"));
+        assert_eq!(video_folder(None, home), PathBuf::from("/home/u/Videos"));
     }
 
     #[test]
@@ -134,8 +137,10 @@ mod tests {
         assert_eq!(paths.log_dir(), base.join("state/logs"));
         assert_eq!(paths.temp_dir(), base.join("cache/tmp"));
         assert_eq!(paths.crash_dir(), base.join("state/crashes"));
-        assert_eq!(paths.default_downloads_dir(), base.join("Downloads/Kurobayomi"));
-        assert_eq!(paths.default_backups_dir(), base.join("data/backups"));
+        assert_eq!(paths.default_storage_dir(), base.join("Videos/Kurobayomi"));
+        assert_eq!(paths.default_downloads_dir(), base.join("Videos/Kurobayomi/Downloads"));
+        assert_eq!(paths.default_backups_dir(), base.join("Videos/Kurobayomi/Backups"));
+        assert_eq!(paths.auto_backups_dir(), base.join("Videos/Kurobayomi/Backups"));
         assert_eq!(paths.covers_dir(), base.join("cache/covers"));
         assert_eq!(paths.plugin_dir(), base.join("data/plugins"));
     }
@@ -159,10 +164,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let paths = LinuxPaths::new(roots_under(tmp.path()));
         let folder = FolderProvider::new(&paths);
-        assert_eq!(folder.directory(), tmp.path().join("Downloads/Kurobayomi"));
+        assert_eq!(folder.directory(), tmp.path().join("Videos/Kurobayomi/Downloads"));
         let url = folder.url().unwrap().to_string();
         assert!(url.starts_with("file://"), "{url}");
-        assert!(url.ends_with("Kurobayomi"), "{url}");
+        assert!(url.ends_with("Kurobayomi/Downloads"), "{url}");
     }
 
     #[test]

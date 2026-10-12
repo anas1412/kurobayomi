@@ -361,8 +361,7 @@ fn tc_40_101_a_failing_source_shows_its_actions_in_order_and_retry_loads_the_fir
         ContentPlan::Error { message, actions } => {
             assert_eq!(message, "offline");
             assert_eq!(actions, error_actions(false), "the actions of a web source, in their order");
-            assert_eq!(&actions[..2], [EmptyAction::Retry, EmptyAction::OpenInWebView], "Retry first, then Open in web view");
-            assert!(actions.len() <= 3, "at most three actions");
+            assert_eq!(actions, [EmptyAction::Retry], "retry is the only action of a web source's error state");
         }
         other => panic!("an error state: {other:?}"),
     }

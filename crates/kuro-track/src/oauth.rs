@@ -69,7 +69,7 @@ pub fn authorize_url(tracker: TrackerId, state: &str) -> Option<String> {
             vec![
                 ("response_type", "code"),
                 ("client_id", SIMKL_CLIENT_ID),
-                ("redirect_uri", "aniyomi://simkl-auth"),
+                ("redirect_uri", "kurobayomi://simkl-auth"),
             ],
         ),
         _ => return None,
@@ -94,7 +94,7 @@ pub struct PendingLogin {
 /// What a redirect carried, with the pending attempt applied. `Accepted` consumes the attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Route {
-    /// Not an `aniyomi://` URI. Ignored.
+    /// Not a `kurobayomi://` (or `aniyomi://`) URI. Ignored.
     Ignored,
     /// Unknown host or unreadable link. The caller shows "Unrecognized login link".
     Unrecognized,
@@ -264,13 +264,13 @@ pub enum Handled {
     /// Exchange the credential for a token (or store it, for an implicit grant), then save it with
     /// [`crate::base::BaseTracker::save_oauth`].
     Exchange(Credential),
-    /// The Simkl redirect `aniyomi://simkl-auth...`. Simkl's login carries no `state` and no pending attempt, so it is
+    /// The Simkl redirect `kurobayomi://simkl-auth...`. Simkl's login carries no `state` and no pending attempt, so it is
     /// not checked here: pass the URI to `simkl::SimklTracker::handle_launch_uri` (or the open dialog's
     /// `simkl::login::SimklLogin::on_launch_uri`), which exchanges the code or logs out when there is none (T-32a-031).
     SimklRedirect(String),
 }
 
-/// Routes an `aniyomi://<tracker>-auth` URI received by the application's open handler: the GUI passes every opened
+/// Routes a `kurobayomi://<tracker>-auth` URI received by the application's open handler: the GUI passes every opened
 /// URI here, shows the toast of [`Handled::Toast`], and starts the token exchange for [`Handled::Exchange`].
 pub fn handle_redirect(
     pending: &mut PendingLogins,
@@ -317,9 +317,9 @@ pub fn handle_redirect(
 /// What a redirect URI carried, before any pending check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Redirect {
-    /// Not an `aniyomi://` URI. Ignored.
+    /// Not a `kurobayomi://` (or `aniyomi://`) URI. Ignored.
     Ignored,
-    /// `aniyomi://<unknown>-auth`: "Unrecognized login link".
+    /// `kurobayomi://<unknown>-auth`: "Unrecognized login link".
     Unexpected,
     /// A known host with an empty `code`, so the link is malformed: "Unrecognized login link" with no network call.
     Malformed,
@@ -361,7 +361,7 @@ pub fn parse_callback(uri: &str) -> Redirect {
     let Ok(url) = Url::parse(uri) else {
         return Redirect::Ignored;
     };
-    // AniList's registered redirect for the shared client id is `aniyomi://`; `kurobayomi://` is accepted too (T-28a-040).
+    // Every login redirect Kurobayomi asks for is `kurobayomi://<tracker>-auth`; `aniyomi://` is still accepted as input.
     if !matches!(url.scheme(), "aniyomi" | "kurobayomi") {
         return Redirect::Ignored;
     }

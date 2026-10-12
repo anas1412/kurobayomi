@@ -25,6 +25,14 @@ pub fn spinner_row() -> GBox {
     row
 }
 
+/// The spinner row of a Sources tab with its "Loading sources…" line under the spinner.
+pub fn loading_sources_row() -> GBox {
+    let row = spinner_row();
+    row.set_spacing(12);
+    row.append(&Label::new(Some(super::texts::LOADING_SOURCES)));
+    row
+}
+
 /// A centred message with its action buttons, in the order given. `on_action` runs for the button pressed.
 pub fn empty_state(message: &str, actions: &[EmptyAction], on_action: impl Fn(EmptyAction) + Clone + 'static) -> GBox {
     let column = GBox::new(O::Vertical, 12);
@@ -35,8 +43,12 @@ pub fn empty_state(message: &str, actions: &[EmptyAction], on_action: impl Fn(Em
     let row = GBox::new(O::Horizontal, 8);
     row.set_halign(Align::Center);
     for action in actions.iter().copied().take(super::primitives::EMPTY_ACTION_LIMIT) {
-        let button = Button::with_label(&action.label());
-        button.set_child(Some(&Image::from_icon_name(action.icon())));
+        // icon and words: a person who does not know the icon still reads what the button does
+        let content = GBox::new(O::Horizontal, 6);
+        content.append(&Image::from_icon_name(action.icon()));
+        content.append(&Label::new(Some(&action.label())));
+        let button = Button::new();
+        button.set_child(Some(&content));
         button.set_tooltip_text(Some(&action.label()));
         let callback = on_action.clone();
         button.connect_clicked(move |_| callback(action));
@@ -144,13 +156,31 @@ pub fn source_row(
     stub: bool,
     action: Option<&gtk::Widget>,
 ) -> GBox {
+    source_row_with(name, language, icon, icon_file, stub, false, action)
+}
+
+/// [`source_row`] for the Sources lists: `failing` adds the "Not working right now" line of a source that failed
+/// several times in a row (`errors::is_failing`).
+pub fn source_row_with(
+    name: &str,
+    language: Option<&str>,
+    icon: SourceIcon,
+    icon_file: Option<&str>,
+    stub: bool,
+    failing: bool,
+    action: Option<&gtk::Widget>,
+) -> GBox {
     // a row of a boxed list (`look`): the list draws the frame, the row keeps the 12 px inset of the other lists
     let row = GBox::new(O::Horizontal, 12);
     row.set_margin_start(12);
     row.set_margin_end(8);
     row.set_margin_top(8);
     row.set_margin_bottom(8);
-    row.append(&icon_image(icon, icon_file));
+    if icon == SourceIcon::Letter && icon_file.is_none() {
+        row.append(&super::look::row_cover(name, None, ICON_HEIGHT_PX, ICON_HEIGHT_PX));
+    } else {
+        row.append(&icon_image(icon, icon_file));
+    }
     let text = GBox::new(O::Vertical, 2);
     text.set_hexpand(true);
     text.set_valign(Align::Center);
@@ -166,6 +196,12 @@ pub fn source_row(
     }
     if stub {
         let note = Label::new(Some(&tr(kuro_i18n::MsgKey::not_installed)));
+        note.set_xalign(0.0);
+        note.add_css_class("error");
+        text.append(&note);
+    }
+    if failing && !stub {
+        let note = Label::new(Some(super::errors::NOT_WORKING_BADGE));
         note.set_xalign(0.0);
         note.add_css_class("error");
         text.append(&note);
@@ -425,6 +461,18 @@ pub(crate) mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    #[test]
+    fn a_source_without_an_icon_shows_a_letter_tile_and_one_with_its_own_icon_keeps_it() {
+        crate::testing::with_display(|| {
+            let letter = source_row("MangaDex", None, SourceIcon::Letter, None, false, None);
+            let tile = letter.first_child().expect("the icon slot");
+            assert!(tile.has_css_class("kb-cover-initials") && tile.has_css_class("kb-row-cover"));
+            assert_eq!(tile.first_child().and_downcast::<Label>().expect("the letter").label(), "M");
+            let plain = source_row("Local", None, SourceIcon::Local, None, false, None);
+            assert!(plain.first_child().is_some_and(|w| w.is::<Image>()));
+        });
+    }
 
     fn favorite(title: &str) -> ListItem {
         ListItem { title: title.into(), favorite: true, ..ListItem::default() }

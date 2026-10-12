@@ -526,7 +526,7 @@
      "items": [
       {
        "type": "link",
-       "title": "Extension repos",
+       "title": "Repositories",
        "subtitle": "0 repos",
        "target": "settings_extension_repos"
       }
@@ -576,7 +576,7 @@
   },
   {
    "id": "settings_extension_repos",
-   "title": "Extension repos",
+   "title": "Repositories",
    "kind": "custom",
    "toolbar": [
     {

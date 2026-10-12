@@ -1,13 +1,12 @@
-//! Category, source, extension store and repo and custom button creators (T-21a-015..018).
+//! Category, source and repo creators (T-21a-015..018).
 
 use std::collections::{BTreeMap, HashSet};
 
 use kuro_data::category::Category;
 use kuro_data::extension_repo::ExtensionRepo;
-use kuro_db::statements_anime::{CustomButton, ExtensionStore};
 
 use crate::creator::SourceRegistry;
-use crate::schema::{BackupAnime, BackupAnimeSource, BackupCategory, BackupCustomButtons, BackupExtensionRepos, BackupExtensionStore, BackupManga, BackupSource};
+use crate::schema::{BackupAnime, BackupAnimeSource, BackupCategory, BackupExtensionRepos, BackupManga, BackupSource};
 
 /// Categories other than the system category (id 0), with name, order, id and flags. Duplicate orders are logged
 /// and still written (E-15).
@@ -56,37 +55,6 @@ pub fn manga_repos(repos: &[ExtensionRepo]) -> Vec<BackupExtensionRepos> {
             short_name: r.short_name.clone(),
             website: r.website.clone(),
             signing_key_fingerprint: r.signing_key_fingerprint.clone(),
-        })
-        .collect()
-}
-
-pub fn anime_stores(stores: &[ExtensionStore]) -> Vec<BackupExtensionStore> {
-    stores
-        .iter()
-        .map(|s| BackupExtensionStore {
-            index_url: s.index_url.clone(),
-            name: s.name.clone(),
-            badge_label: Some(s.badge_label.clone()),
-            contact_website: s.contact_website.clone(),
-            signing_key: s.signing_key.clone(),
-            contact_discord: s.contact_discord.clone(),
-            is_legacy: Some(s.is_legacy),
-            extension_list_url: s.extension_list_url.clone(),
-        })
-        .collect()
-}
-
-/// Custom buttons without the row id (restore assigns new ids, B-08f).
-pub fn custom_buttons(buttons: &[CustomButton]) -> Vec<BackupCustomButtons> {
-    buttons
-        .iter()
-        .map(|b| BackupCustomButtons {
-            name: b.name.clone(),
-            is_favorite: b.is_favorite,
-            sort_index: b.sort_index,
-            content: b.content.clone(),
-            long_press_content: b.long_press_content.clone(),
-            on_startup: b.on_startup.clone(),
         })
         .collect()
 }
@@ -145,25 +113,10 @@ mod tests {
     }
 
     #[test]
-    fn repos_and_stores_map_fields() {
+    fn repos_map_fields() {
         let repos = vec![ExtensionRepo { base_url: "b".into(), name: "n".into(), short_name: None, website: "w".into(), signing_key_fingerprint: "f".into() }];
         let got = manga_repos(&repos);
         assert_eq!(got[0].signing_key_fingerprint, "f");
         assert_eq!(got[0].short_name, None);
-        let stores = vec![ExtensionStore { index_url: "i".into(), name: "n".into(), badge_label: "B".into(), signing_key: "k".into(), contact_website: "w".into(), contact_discord: None, is_legacy: false, extension_list_url: Some("x".into()), resolved_index_url: "i".into() }];
-        let got = anime_stores(&stores);
-        assert_eq!(got[0].is_legacy, Some(false));
-        assert_eq!(got[0].extension_list_url.as_deref(), Some("x"));
-        assert_eq!(got[0].contact_discord, None);
-    }
-
-    #[test]
-    fn custom_buttons_roundtrip_without_id() {
-        let buttons = vec![
-            CustomButton { id: 9, name: "a".into(), is_favorite: true, sort_index: 1, content: "c".into(), long_press_content: "l".into(), on_startup: String::new() },
-        ];
-        let got = custom_buttons(&buttons);
-        assert_eq!(got[0].on_startup, "");
-        assert_eq!(got[0].sort_index, 1);
     }
 }

@@ -5,7 +5,7 @@
 
 use rusqlite::{named_params, Connection};
 
-use crate::statements_anime::{self as sql, AnimeRow, CustomButton, EpisodeRow, EpisodeUpdate};
+use crate::statements_anime::{self as sql, AnimeRow, EpisodeRow, EpisodeUpdate};
 
 /// Which side supplies the fields of an anime that already exists (`restoreExistingAnime`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,11 +98,6 @@ pub fn update_episode_restore(
 /// Inserts a category and returns its `_id`.
 pub fn insert_category_returning_id(c: &Connection, name: &str, order: i64, flags: i64) -> rusqlite::Result<i64> {
     sql::insert_category(c, name, order, flags)
-}
-
-/// Inserts a custom button at the end of the list and returns its `_id`.
-pub fn insert_custom_button_returning_id(c: &Connection, button: &CustomButton) -> rusqlite::Result<i64> {
-    sql::create_custom_button(c, &button.name, &button.content, &button.long_press_content, &button.on_startup)
 }
 
 #[cfg(test)]

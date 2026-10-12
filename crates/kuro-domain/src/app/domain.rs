@@ -2,7 +2,7 @@
 //! share and gives each one out by a cheap clone, so nothing is a global.
 //!
 //! Built: the source, backup and download preferences, the storage manager, the source toggles, the manga and anime
-//! repositories, and the extension-store repository (accessors above). The construction test uses `kuro-testkit` fakes.
+//! repositories (accessors above). The construction test uses `kuro-testkit` fakes.
 //!
 //! Deferred, with the exact gap:
 //! - None of the 47 owner-`area:10` rows of `p1-topic-domainmodule-registry.md` has its accessor on `Domain` yet. Some
@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use kuro_data::anime::AnimeRepo;
-use kuro_data::extension_store::ExtensionStoreRepo;
 use kuro_data::manga::MangaRepo;
 use kuro_db::handle::Db;
 use kuro_prefs::source::SourcePrefs;
@@ -48,7 +47,6 @@ pub struct Domain {
     toggles: Arc<SourceToggles>,
     manga: MangaRepo,
     anime: AnimeRepo,
-    extension_stores: ExtensionStoreRepo,
     anime_db: Arc<Db>,
     delayed_store: Arc<DelayedTrackingStore>,
     delayed_worker: Arc<OnceLock<Arc<DelayedTrackingWorker>>>,
@@ -67,7 +65,6 @@ impl Domain {
             toggles: Arc::new(SourceToggles::default()),
             manga: MangaRepo::new(manga_db),
             anime: AnimeRepo::new(Arc::clone(&anime_db)),
-            extension_stores: ExtensionStoreRepo::new(Arc::clone(&anime_db)),
             anime_db,
             delayed_store: Arc::new(DelayedTrackingStore::new(default_storage.join(QUEUE_FILE))),
             delayed_worker: Arc::new(OnceLock::new()),
@@ -102,9 +99,6 @@ impl Domain {
         &self.anime
     }
 
-    pub fn extension_stores(&self) -> &ExtensionStoreRepo {
-        &self.extension_stores
-    }
 
     /// The delayed tracking queue (`<data dir>/tracking_queue.json`).
     pub fn delayed_tracking(&self) -> Arc<DelayedTrackingStore> {
@@ -128,7 +122,7 @@ impl Domain {
         }
     }
 
-    /// The anime database handle, for the live store lists (`extension_store::subscribe_all`).
+    /// The anime database handle.
     pub fn anime_db(&self) -> &Arc<Db> {
         &self.anime_db
     }

@@ -186,7 +186,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     let header_row = GBox::new(O::Horizontal, 8);
     header_row.append(&count);
     header_row.append(&missing);
-    header_row.append(&gtk::Image::from_icon_name("view-filter-symbolic"));
+    header_row.append(&gtk::Image::from_icon_name("view-sort-descending-symbolic"));
     let header_button = Button::builder().child(&header_row).css_classes(["flat"]).build();
     // UI parity 1: a spinner while refreshing, and a line when there are no chapters
     let spinner = gtk::Spinner::builder().halign(Align::Center).build();
@@ -336,11 +336,11 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     body.append(&selection_bar);
 
     // the header bar: created disabled, enabled when the page is Ready
-    let download_menu = gtk::MenuButton::builder().icon_name("folder-download-symbolic").tooltip_text(tr(MsgKey::action_download)).build();
-    let filter = gtk::MenuButton::builder().icon_name("view-filter-symbolic").tooltip_text(tr(MsgKey::action_filter)).build();
-    let overflow = gtk::MenuButton::builder().icon_name("view-more-symbolic").build();
+    let download_menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("folder-download-symbolic").tooltip_text(tr(MsgKey::action_download)).build());
+    let filter = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-sort-descending-symbolic").tooltip_text(tr(MsgKey::action_filter)).build());
+    let overflow = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-more-symbolic").build());
     let select_all = ui::icon_button("edit-select-all-symbolic", &tr(MsgKey::action_select_all));
-    let select_inverse = ui::icon_button("edit-select-invert-symbolic", &tr(MsgKey::action_select_inverse));
+    let select_inverse = ui::icon_button("object-flip-horizontal-symbolic", &tr(MsgKey::action_select_inverse));
     select_all.set_visible(false);
     select_inverse.set_visible(false);
     let toolbar: Vec<gtk::Widget> = vec![
@@ -360,6 +360,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     back.set_focus_on_click(false);
     if let Some(header) = &header_bar {
         header.pack_start(&back);
+        ui::no_sticky_focus(header);
     }
 
     let view = Rc::new(View {
@@ -1302,7 +1303,7 @@ impl View {
         stack.add_titled(&sort_tab, Some("sort"), &tr(MsgKey::action_sort));
         stack.add_titled(&display_tab, Some("display"), &tr(MsgKey::action_display));
         let switcher = gtk::StackSwitcher::builder().stack(&stack).hexpand(true).build();
-        let menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").css_classes(["flat"]).build();
+        let menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-more-symbolic").css_classes(["flat"]).build());
         menu.set_popover(Some(&self.defaults_popover(&popover)));
         let top = GBox::new(O::Horizontal, 6);
         top.append(&switcher);

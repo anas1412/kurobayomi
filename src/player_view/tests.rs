@@ -237,12 +237,16 @@ fn fullscreen_and_escape_act_on_the_window_that_holds_the_player() {
         let shared = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
         let page = stack.visible_child().and_downcast::<gtk::Box>().expect("the page is the visible child");
 
+        // the header is the page's first child: fullscreen hides it, and leaving fullscreen brings it back
+        let header = page.first_child().expect("the page has its header");
         super::toggle_fullscreen(&page);
         pump_for(700);
         if window.is_fullscreen() {
+            assert!(!header.is_visible(), "fullscreen hides the header");
             assert!(super::apply_action(&shared, &page, kuro_player::shortcuts::Action::Escape), "Escape leaves fullscreen");
             pump_for(700);
             assert!(!window.is_fullscreen(), "back to normal");
+            assert!(header.is_visible(), "leaving fullscreen shows the header again");
         } else {
             eprintln!("skipped: the compositor did not fullscreen the window");
         }

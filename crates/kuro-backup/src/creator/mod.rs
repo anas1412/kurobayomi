@@ -16,7 +16,6 @@ use kuro_data::extension_repo::ExtensionRepo;
 use kuro_data::history::{AnimeHistory, MangaHistory};
 use kuro_data::manga::Manga;
 use kuro_data::track::{AnimeTrack, MangaTrack};
-use kuro_db::statements_anime::{CustomButton, ExtensionStore};
 
 use crate::error::BackupError;
 use crate::options::BackupOptions;
@@ -63,8 +62,6 @@ pub trait LibraryReader {
     fn manga_categories(&self) -> Result<Vec<Category>, BackupError>;
     fn anime_categories(&self) -> Result<Vec<Category>, BackupError>;
     fn manga_extension_repos(&self) -> Result<Vec<ExtensionRepo>, BackupError>;
-    fn anime_extension_stores(&self) -> Result<Vec<ExtensionStore>, BackupError>;
-    fn custom_buttons(&self) -> Result<Vec<CustomButton>, BackupError>;
 }
 
 /// Source identity for source references and stub names (B-08d, B-14).
@@ -161,17 +158,10 @@ fn build_pass(inputs: &CreateInputs<'_>, opts: &BackupOptions) -> Built {
         Vec::new()
     };
 
-    let (anime_extension_stores, manga_extension_repos) = if opts.extension_stores {
-        (meta::anime_stores(&lib.anime_extension_stores()?), meta::manga_repos(&lib.manga_extension_repos()?))
-    } else {
-        (Vec::new(), Vec::new())
-    };
-
-    let custom_buttons = if opts.custom_button {
-        meta::custom_buttons(&lib.custom_buttons()?)
-    } else {
-        Vec::new()
-    };
+    // Anime stores and custom buttons are cut: the field stays in the file (empty) so Aniyomi reads it, and restore skips them.
+    let anime_extension_stores = Vec::new();
+    let custom_buttons = Vec::new();
+    let manga_extension_repos = if opts.extension_stores { meta::manga_repos(&lib.manga_extension_repos()?) } else { Vec::new() };
 
     let (extensions, skipped_extensions) = match inputs.extensions {
         Some(source) if opts.extensions => extensions::collect(source),
@@ -244,12 +234,6 @@ mod tests {
             Ok(Vec::new())
         }
         fn manga_extension_repos(&self) -> Result<Vec<kuro_data::extension_repo::ExtensionRepo>, BackupError> {
-            Ok(Vec::new())
-        }
-        fn anime_extension_stores(&self) -> Result<Vec<kuro_db::statements_anime::ExtensionStore>, BackupError> {
-            Ok(Vec::new())
-        }
-        fn custom_buttons(&self) -> Result<Vec<kuro_db::statements_anime::CustomButton>, BackupError> {
             Ok(Vec::new())
         }
     }

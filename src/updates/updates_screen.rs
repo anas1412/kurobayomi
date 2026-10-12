@@ -145,6 +145,7 @@ impl UpdatesScreen {
                 .build();
             let action_bar = gtk::ActionBar::new();
             action_bar.pack_start(&bar_scroller);
+            crate::ui::no_sticky_focus(&action_bar);
             let bar_revealer = gtk::Revealer::builder().child(&action_bar).transition_type(gtk::RevealerTransitionType::SlideUp).build();
             let body = GBox::new(O::Vertical, 0);
             body.append(&sel_header);
@@ -733,7 +734,7 @@ impl UpdatesScreen {
         if state == DownloadState::Downloading {
             content.append(&Label::new(Some(&format!("{}%", feed_row.download.progress.clamp(0, 100)))));
         }
-        let button = gtk::MenuButton::builder().child(&content).has_frame(false).valign(gtk::Align::Center).build();
+        let button = crate::ui::quiet_menu(gtk::MenuButton::builder().child(&content).has_frame(false).valign(gtk::Align::Center).build());
         let popover = gtk::Popover::new();
         let menu = GBox::new(O::Vertical, 2);
         for action in download_actions::indicator_actions(self.kind == EntryKind::Anime, state, qualities::available()) {

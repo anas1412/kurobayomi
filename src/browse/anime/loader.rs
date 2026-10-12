@@ -59,7 +59,13 @@ impl AnimeLoader {
 
 impl PageLoader for AnimeLoader {
     fn load(&self, query: BrowseQuery, filters: FilterList, page: u32) -> LoadFuture {
-        Box::pin(load_page(Arc::clone(&self.source), Arc::clone(&self.lookup), query, filters, page))
+        let (source, lookup) = (Arc::clone(&self.source), Arc::clone(&self.lookup));
+        Box::pin(async move {
+            let source_id = source.id();
+            let result = load_page(source, lookup, query, filters, page).await;
+            crate::browse::errors::note(source_id, result.is_ok());
+            result
+        })
     }
 }
 
@@ -70,18 +76,19 @@ async fn load_page(
     filters: FilterList,
     page: u32,
 ) -> Result<ListedPage, String> {
+    use crate::browse::errors;
     let page = i32::try_from(page).map_err(|error| error.to_string())?;
-    // a panicking source is an error of this listing, not a dead task
-    let listed = kuro_source::isolate(async {
+    // a panicking or silent source is an error of this listing, not a dead task or an endless spinner
+    let listed = errors::plain(source.name(), async {
         match query {
             BrowseQuery::Popular => source.popular(page).await,
             BrowseQuery::Latest => source.latest(page).await,
             BrowseQuery::Search(text) => source.search(page, &text, &filters).await,
         }
     })
-    .await
-    .map_err(|error| kuro_source::messages::source_error_message(&error, true))?;
+    .await?;
     let source_id = source.id();
+    let source_name = source.name().to_owned();
     tokio::task::spawn_blocking(move || -> Result<ListedPage, String> {
         let mut items = Vec::with_capacity(listed.animes.len());
         for anime in &listed.animes {
@@ -99,7 +106,12 @@ async fn load_page(
         Ok(ListedPage { items, has_next: listed.has_next_page })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
+    .and_then(|stored| stored)
+    .map_err(|text| {
+        tracing::warn!(source = source_name.as_str(), error = text.as_str(), "a listing could not be stored");
+        errors::GENERIC.to_owned()
+    })
 }
 
 #[cfg(test)]
@@ -199,12 +211,13 @@ mod tests {
     }
 
     #[test]
-    fn a_source_error_reaches_the_page_as_text_and_no_row_is_looked_up() {
+    fn a_source_error_reaches_the_page_as_a_plain_sentence_and_no_row_is_looked_up() {
         let source = FakeSource::new(3, vec![Err(SourceError::Http(503))]);
         let (lookup, lookups) = lookup(&[]);
         let loader = AnimeLoader::new(source, lookup);
         let error = run(loader.load(BrowseQuery::Popular, FilterList::default(), 1)).expect_err("source error");
-        assert!(error.contains("503"), "{error}");
+        assert!(!error.contains("503") && !error.contains("HTTP"), "the code stays in the log: {error}");
+        assert!(error.contains("isn't working right now"), "{error}");
         assert!(lookups.lock().expect("log").is_empty());
     }
 }

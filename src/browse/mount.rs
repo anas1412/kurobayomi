@@ -51,6 +51,21 @@ pub fn open_repos() {
     crate::ui::open("settings_extension_repos");
 }
 
+thread_local! {
+    static ADD_REQUEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Opens the repository list with its add dialog already open: the first-run button, where the user came to add one.
+pub fn open_repos_to_add() {
+    ADD_REQUEST.with(|r| r.set(true));
+    open_repos();
+}
+
+/// Whether the repository list should open its add dialog, handed out once.
+pub fn take_add_request() -> bool {
+    ADD_REQUEST.with(std::cell::Cell::take)
+}
+
 /// The extension rows the anime host published, as the shared list shows them (T-19a-066): the updates and installed
 /// packages, the untrusted ones, and the listed packages split per source. A listed package carries its icon url, which
 /// the row fetches through the image cache.
@@ -216,6 +231,19 @@ fn manga_sources_snapshot(prefs: &SourcePrefs) -> SourcesSnapshot {
     }
 }
 
+/// Calls `show` each time a load of the repository sources ends, until `widget` is gone: the open Sources tabs and the
+/// language filter read their lists again, so a source that finished loading appears without reopening anything.
+fn follow_loads(widget: &gtk::Box, show: impl Fn() + 'static) {
+    let weak = widget.downgrade();
+    glue::follow_changes(crate::recipe_sources::changes(), move |_| {
+        if weak.upgrade().is_none() {
+            return false;
+        }
+        show();
+        true
+    });
+}
+
 /// One preference's change check for [`glue::poll_pref_changes`]: true once when the value changed since the last tick.
 fn watch_check<T: kuro_prefs::values::PrefType + 'static>(pref: &Pref<T>) -> Box<dyn Fn() -> bool> {
     let watch = pref.watch();
@@ -246,7 +274,7 @@ pub fn language_rows(host_running: bool, rows: Vec<Ext>) -> Result<Vec<Ext>, Str
 /// The language filter of a kind's Sources page (B§4): one switch per language, which decides which sources show.
 fn open_filter(kind: BrowseKind, prefs: &Rc<SourcePrefs>) {
     let filter = SourcesFilterPage::new(prefs.enabled_languages.clone());
-    let sources_now = move || installed_sources(kind, super::directory::current().as_deref(), crate::ext_host::anime_sources().0);
+    let sources_now = Rc::new(move || installed_sources(kind, super::directory::current().as_deref(), crate::ext_host::anime_sources().0));
     filter.set_sources(sources_now());
     // an error shows the `internal_error` toast and pops the page (E-SF-05)
     filter.set_on_error(Rc::new(|| {
@@ -260,7 +288,9 @@ fn open_filter(kind: BrowseKind, prefs: &Rc<SourcePrefs>) {
         move || widget.upgrade().is_some()
     };
     let shown = filter.clone();
-    glue::poll_pref_changes(checks, alive, move || shown.set_sources(sources_now()));
+    let by_pref = (shown.clone(), Rc::clone(&sources_now));
+    glue::poll_pref_changes(checks, alive, move || by_pref.0.set_sources((by_pref.1)()));
+    follow_loads(filter.widget(), move || shown.set_sources(sources_now()));
     push_page(&tr(MsgKey::label_sources), filter.widget());
 }
 
@@ -340,7 +370,8 @@ fn manga_sources_page(prefs: &Rc<SourcePrefs>, ready: watch::Receiver<bool>, sna
         let widget = page.widget().downgrade();
         move || widget.upgrade().is_some()
     };
-    glue::poll_pref_changes(checks, alive, show);
+    glue::poll_pref_changes(checks, alive, show.clone());
+    follow_loads(page.widget(), show);
     page
 }
 
@@ -351,7 +382,8 @@ pub fn browse() -> Option<Built> {
     }
     let store = crate::data::app().base.store().clone();
     let prefs = Rc::new(SourcePrefs::new(store));
-    let (_ready_tx, ready) = watch::channel(true);
+    // the Sources tabs show a spinner while the repository sources load
+    let ready = crate::recipe_sources::ready();
 
     // Sources: the lists wait for a source registry; the language filter decides which sources show
     let manga_sources = manga_sources_page(&prefs, ready.clone(), Rc::new(manga_sources_snapshot));
@@ -381,7 +413,8 @@ pub fn browse() -> Option<Built> {
             let widget = page.widget().downgrade();
             move || widget.upgrade().is_some()
         };
-        glue::poll_pref_changes(checks, alive, show);
+        glue::poll_pref_changes(checks, alive, show.clone());
+        follow_loads(page.widget(), show);
         page
     };
 

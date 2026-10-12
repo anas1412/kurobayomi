@@ -570,7 +570,7 @@ mod tests {
             assert!(display.iter().any(|t| t == title), "{title} is on the Display group");
         }
         let browse = tree_with("settings_browse", &prefs, &[], &[], browse::RepoCounts::default());
-        assert_eq!(group_titles(&browse, "Sources"), ["Source languages", "Extension repos"]);
+        assert_eq!(group_titles(&browse, "Sources"), ["Source languages", "Repositories"]);
         let library = tree_with("settings_library", &prefs, &[], &[], browse::RepoCounts::default());
         assert!(group_titles(&library, "Season").is_empty(), "the season switches are cut");
         assert!(!group_titles(&library, "Categories").iter().any(|t| t == "Per-category settings for sort"), "per-category sort is cut");

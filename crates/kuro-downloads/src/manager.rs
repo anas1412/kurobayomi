@@ -227,6 +227,11 @@ impl DownloadManager {
         self.commands.try_send(cmd).map_err(|_| stopped())
     }
 
+    /// Startup restore (see [`Command::Restore`]): queues `downloads` and keeps `kept_rows` as the saved rows that stay out.
+    pub async fn restore(&self, downloads: Vec<QueuedDownload>, kept_rows: Vec<QueueRow>) -> Result<(), DownloadError> {
+        self.send(Command::Restore { downloads, kept_rows }).await
+    }
+
     pub async fn start(&self) -> Result<(), DownloadError> {
         self.send(Command::Start).await
     }

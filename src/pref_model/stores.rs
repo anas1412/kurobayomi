@@ -2,7 +2,7 @@
 //! entry rules, and what each card offers. Storage reads and network fetches are kuro-domain's; the GTK page runs
 //! the returned [`Effect`] and feeds the result back as an [`Event`].
 
-use kuro_i18n::{Arg, MsgKey, tr, trf};
+use kuro_i18n::{MsgKey, tr};
 
 /// Store or repo identity: the key the database holds it by (`index_url`, or the repo link).
 pub trait Keyed: Clone {
@@ -106,11 +106,12 @@ pub fn helper(entry: &Entry, existing_keys: &[&str]) -> Helper {
     }
 }
 
-/// The text under the URL entry. `*required` is the normal line; a duplicate or an error replaces it and is drawn as an
+/// The text under the URL entry: empty normally; a duplicate or an error fills it and is drawn as an
 /// error ([`Helper::is_error`]).
 pub fn helper_text(helper: &Helper) -> String {
     match helper {
-        Helper::Required | Helper::Plain => tr(MsgKey::information_required_plain),
+        // nothing under an empty or valid link: the disabled Add button already says a link is needed
+        Helper::Required | Helper::Plain => String::new(),
         Helper::Duplicate => tr(MsgKey::extensionStoresScreen_addStore_alreadyExists),
         Helper::Error(text) => text.clone(),
     }
@@ -322,10 +323,10 @@ mod tests {
     fn t_47b_016_the_helper_line_is_required_duplicate_or_the_error_text() {
         let existing = ["https://x/index.min.json"];
         let required = helper(&Entry::default(), &existing);
-        assert_eq!(helper_text(&required), "*required");
+        assert_eq!(helper_text(&required), "");
         assert!(!required.is_error());
         let typed = Entry { input: "https://y/index.min.json".into(), ..Entry::default() };
-        assert_eq!(helper_text(&helper(&typed, &existing)), "*required", "a fresh URL keeps the normal line");
+        assert_eq!(helper_text(&helper(&typed, &existing)), "", "a fresh link shows nothing under it");
         let dup = helper(&Entry { input: "https://x/index.min.json".into(), ..Entry::default() }, &existing);
         assert_eq!(helper_text(&dup), "This extension store already exists");
         assert!(dup.is_error());

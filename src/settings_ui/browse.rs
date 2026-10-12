@@ -16,7 +16,7 @@ pub const NSFW_SUBTITLE: &str = "Requires app restart to take effect";
 pub const NSFW_INFO: &str = "This does not prevent unofficial or potentially incorrectly flagged extensions from surfacing NSFW (18+) content within the app.";
 pub const NSFW_GATE_TITLE: &str = "NSFW (18+) sources";
 pub const NSFW_REFUSED: &str = "Authentication is required to change this setting";
-pub const REPOS_TITLE: &str = "Extension repos";
+pub const REPOS_TITLE: &str = "Repositories";
 pub const REPOS_SCREEN: &str = "settings_extension_repos";
 
 /// The number of repository links the one repo row shows.

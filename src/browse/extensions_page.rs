@@ -58,7 +58,7 @@ pub struct ExtNav {
     pub trust: Rc<dyn Fn(&str)>,
     /// The web view button of an available extension.
     pub web_view: Rc<dyn Fn(&str)>,
-    /// The repos button and the empty-state action. Manga says "Extension repos", anime "Extension stores" (T-41a-010).
+    /// The repos button and the empty-state action. Manga says "Repositories", anime "Extension stores" (T-41a-010).
     pub open_repos: Rc<dyn Fn()>,
     pub repos_label: MsgKey,
     /// The NSFW setting, read on every rebuild.

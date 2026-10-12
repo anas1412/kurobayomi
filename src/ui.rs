@@ -89,23 +89,44 @@ pub fn decoration(sidebar: bool) -> String {
     if sidebar { format!("{left}:") } else { format!(":{right}") }
 }
 
-/// A clicked header button keeps keyboard focus, and some GTK themes paint a focused header button like a pressed one, so it looks stuck.
-pub fn no_sticky_focus(header: &impl IsA<gtk::Widget>) {
-    let mut child = header.as_ref().first_child();
+/// A clicked button keeps keyboard focus, and some GTK themes paint a focused button like a pressed one, so it looks stuck.
+/// Covers `root` and every button under it: call it after the header or bar is packed. The app stylesheet paints a
+/// focused button that has no keyboard focus ring as idle (style.css), so this only stops the focus from landing.
+pub fn no_sticky_focus(root: &impl IsA<gtk::Widget>) {
+    let root = root.as_ref();
+    if root.is::<Button>() || root.is::<gtk::MenuButton>() {
+        root.set_focus_on_click(false);
+    }
+    let mut child = root.first_child();
     while let Some(w) = child {
-        if w.is::<Button>() || w.is::<gtk::MenuButton>() {
-            w.set_focus_on_click(false);
-        }
         no_sticky_focus(&w);
         child = w.next_sibling();
     }
+}
+
+/// A menu button that does not take focus on a mouse click. Its popover hands focus back to the button when it closes,
+/// so every menu button is built through this (the inner toggle button is covered by [`no_sticky_focus`]).
+pub fn quiet_menu(menu: gtk::MenuButton) -> gtk::MenuButton {
+    no_sticky_focus(&menu);
+    menu
+}
+
+/// A header bar of the main window. Every one joins one vertical size group, so the sidebar's bar and the page's bar
+/// next to it are always the same height, whatever the page puts in its own bar (a search entry is taller than a title).
+pub fn header_bar() -> gtk::HeaderBar {
+    thread_local! {
+        static SAME_HEIGHT: gtk::SizeGroup = gtk::SizeGroup::new(gtk::SizeGroupMode::Vertical);
+    }
+    let header = gtk::HeaderBar::new();
+    SAME_HEIGHT.with(|group| group.add_widget(&header));
+    header
 }
 
 /// A navigation page: one header row above `content` (docs/design/other-tabs.md). A pushed page (`back`) shows the
 /// back button and its title; a sidebar destination shows no title, because the sidebar already names it. When the
 /// first `end` widget is a search entry it takes the middle of the row in place of the title.
 pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>, back: bool) -> GBox {
-    let header = gtk::HeaderBar::new();
+    let header = header_bar();
     header.set_decoration_layout(Some(&decoration(false)));
     let mut end = end.into_iter().peekable();
     let centre: gtk::Widget = match end.next_if(|w| w.is::<gtk::SearchEntry>()) {
@@ -335,7 +356,7 @@ pub fn menu_button(icon: &str, entries: &[String], on: impl Fn(&str) + Clone + '
         col.append(&b);
     }
     pop.set_child(Some(&col));
-    gtk::MenuButton::builder().icon_name(icon).popover(&pop).tooltip_text("More").build()
+    quiet_menu(gtk::MenuButton::builder().icon_name(icon).popover(&pop).tooltip_text("More").build())
 }
 
 // ---------- spec items ----------
@@ -364,7 +385,7 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
                 col.append(&gtk::CheckButton::builder().label(o).active(defaults.contains(o)).build());
             }
             let pop = gtk::Popover::builder().child(&scrolled_max(&col, 360)).build();
-            let mb = gtk::MenuButton::builder().label(format!("{} selected", defaults.len())).popover(&pop).build();
+            let mb = quiet_menu(gtk::MenuButton::builder().label(format!("{} selected", defaults.len())).popover(&pop).build());
             row(title, subtitle.as_deref(), Some(mb.upcast()))
         }
         Item::Slider { title, min, max, step, default, unit } => {
@@ -450,8 +471,7 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
                 // an action whose title names a dialog/sheet/screen of the current spec opens it
                 let owner = owner_screen(r.upcast_ref());
                 if let Some(id) = owner {
-                    // the onboarding's Restore backup finishes onboarding and opens Data and storage
-                    if crate::pref_model::onboarding::on_action(&id, &t) || crate::app_update::on_action(&id, &t) {
+                    if crate::app_update::on_action(&id, &t) {
                         return;
                     }
                     resolve(&id, &t);
@@ -522,6 +542,7 @@ pub fn groups_into(col: &GBox, groups: &[Group]) {
 
 pub fn modal(title: &gtk::Widget, content: &impl IsA<gtk::Widget>, w: i32, h: i32) -> gtk::Window {
     let header = gtk::HeaderBar::new();
+    header.set_decoration_layout(Some(&decoration(false)));
     header.set_title_widget(Some(title));
     let win = gtk::Window::builder()
         .transient_for(&window())

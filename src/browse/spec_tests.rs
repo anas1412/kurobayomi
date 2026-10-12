@@ -414,9 +414,8 @@ fn i2_error_state_buttons_in_order() {
         stack.extend(children.into_iter().rev());
     }
     let expected: Vec<String> = actions.iter().map(|a| a.label()).collect();
-    assert_eq!(tips, expected, "Retry, Open in WebView, then Help when there is a help page");
+    assert_eq!(tips, expected, "Retry alone; Help only when there is a help page");
     assert_eq!(expected[0], tr(MsgKey::action_retry));
-    assert_eq!(expected[1], tr(MsgKey::action_open_in_web_view));
 }
 
 /// I3: the migrate dialog has no widget in this lane: the migration lane owns it, so the check is skipped, loudly.

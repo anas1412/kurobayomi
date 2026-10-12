@@ -89,7 +89,7 @@ pub fn overflow_button(overflow_items: usize) -> Option<gtk::MenuButton> {
         return None;
     }
     let text = tr(MsgKey::action_menu_overflow_description);
-    Some(gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text(text.as_str()).build())
+    Some(crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text(text.as_str()).build()))
 }
 
 /// What Escape does in the bar.

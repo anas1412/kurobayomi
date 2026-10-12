@@ -460,7 +460,7 @@ mod tests {
     #[test]
     fn observe_registers_properties() {
         let mut handle = headless();
-        crate::observer::observe_all(&mut handle).expect("observe all 34");
+        crate::observer::observe_all(&mut handle).expect("observe all");
         assert_eq!(handle.next_observe_id, 35);
     }
 }

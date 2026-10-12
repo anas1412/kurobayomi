@@ -1,6 +1,6 @@
 //! `[base]` preferences (Aniyomi `BasePreferences`) that the desktop keeps.
 //!
-//! `downloaded_only`, `incognito_mode` and `shown_onboarding_flow` are app state and live in `state.toml`. The keys the
+//! `downloaded_only` and `incognito_mode` are app state and live in `state.toml`. The keys the
 //! settings diet cut (display profile, long-strip decoding, the release check and its last lookup) are dropped: a
 //! backed-up value is skipped on restore.
 
@@ -13,7 +13,6 @@ define_prefs! {
     pub struct BasePrefs in "base" {
         downloaded_only: bool = "__APP_STATE_pref_downloaded_only" => false;
         incognito_mode: bool = "__APP_STATE_incognito_mode" => false;
-        shown_onboarding_flow: bool = "__APP_STATE_onboarding_complete" => false;
         // Linux addition: the notification channel ids (`notifications::CATEGORIES`) the user muted
         muted_notification_channels: BTreeSet<String> = "muted_notification_channels" => BTreeSet::new();
     }
@@ -38,7 +37,6 @@ mod tests {
             &[
                 ("downloaded_only", "__APP_STATE_pref_downloaded_only"),
                 ("incognito_mode", "__APP_STATE_incognito_mode"),
-                ("shown_onboarding_flow", "__APP_STATE_onboarding_complete"),
                 ("muted_notification_channels", "muted_notification_channels"),
             ]
         );
@@ -56,7 +54,6 @@ mod tests {
         let base = BasePrefs::new(PrefStore::in_memory());
         assert!(!base.downloaded_only.get());
         assert!(!base.incognito_mode.get());
-        assert!(!base.shown_onboarding_flow.get());
         assert!(base.muted_notification_channels.get().is_empty(), "no channel is muted by default");
     }
 
@@ -68,14 +65,12 @@ mod tests {
             let base = BasePrefs::new(store.clone());
             base.downloaded_only.set(true).unwrap();
             base.incognito_mode.set(true).unwrap();
-            base.shown_onboarding_flow.set(true).unwrap();
             store.flush().unwrap();
         }
         let store = open(&paths).unwrap();
         let base = BasePrefs::new(store.clone());
         assert!(base.downloaded_only.get());
         assert!(base.incognito_mode.get());
-        assert!(base.shown_onboarding_flow.get());
         assert_eq!(
             store.get_raw("__APP_STATE_pref_downloaded_only"),
             Some(PrefValue::Bool(true))
@@ -87,7 +82,6 @@ mod tests {
         let state = read_toml(&state_file(&paths.state_dir()));
         assert_eq!(state["base"]["downloaded_only"].as_bool(), Some(true));
         assert_eq!(state["base"]["incognito_mode"].as_bool(), Some(true));
-        assert_eq!(state["base"]["shown_onboarding_flow"].as_bool(), Some(true));
     }
 
     #[test]

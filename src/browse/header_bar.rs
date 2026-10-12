@@ -34,7 +34,8 @@ pub struct SourceHeader {
 }
 
 pub fn build(deps: HeaderDeps) -> SourceHeader {
-    let bar = gtk::HeaderBar::new();
+    let bar = crate::ui::header_bar();
+    bar.set_decoration_layout(Some(&crate::ui::decoration(false)));
     bar.set_title_widget(Some(&gtk::Label::builder().label(&deps.source_name).css_classes(["title"]).ellipsize(gtk::pango::EllipsizeMode::End).build()));
 
     let back = gtk::Button::from_icon_name("go-previous-symbolic");
@@ -55,18 +56,21 @@ pub fn build(deps: HeaderDeps) -> SourceHeader {
     let on_search = Rc::clone(&deps.on_search);
     search.connect_toggled(move |button| on_search(button.is_active()));
     bar.pack_end(&search);
+    crate::ui::no_sticky_focus(&bar);
 
     SourceHeader { bar, search, display, overflow, radios }
 }
 
 /// The header of a page that has nothing but its title and a way back: the missing-source page (T-41a-008).
 pub fn stub_header(title: &str, on_back: Rc<dyn Fn()>) -> gtk::HeaderBar {
-    let bar = gtk::HeaderBar::new();
+    let bar = crate::ui::header_bar();
+    bar.set_decoration_layout(Some(&crate::ui::decoration(false)));
     bar.set_title_widget(Some(&gtk::Label::builder().label(title).css_classes(["title"]).ellipsize(gtk::pango::EllipsizeMode::End).build()));
     let back = gtk::Button::from_icon_name("go-previous-symbolic");
     back.set_tooltip_text(Some(&tr(MsgKey::action_webview_back)));
     back.connect_clicked(move |_| on_back());
     bar.pack_start(&back);
+    crate::ui::no_sticky_focus(&bar);
     bar
 }
 

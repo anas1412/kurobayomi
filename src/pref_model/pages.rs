@@ -18,7 +18,7 @@ use super::{backup_pages, debug_info, language, page, shell};
 use crate::screens::Built;
 
 /// The screens of this area: the settings shell, the language picker, the one repository list, the two backup pages,
-/// Debug info, and Data and storage (built from the spec so the onboarding restore can highlight its backup rows).
+/// Debug info, and Data and storage (built from the spec so the empty library's restore can highlight its backup rows).
 pub const IDS: [&str; 7] = [
     "settings",
     "settings_app_language",
@@ -67,6 +67,8 @@ fn extension_repos() -> Option<Built> {
     let (built, page) = stores_page::build(ops, Texts::repos(), move |push| follow_links(links, push));
     if let Some(url) = crate::shell::uri::take_repo_url() {
         page.open_deep_link(&url);
+    } else if crate::browse::mount::take_add_request() {
+        page.open_add();
     }
     Some(built)
 }
@@ -104,7 +106,7 @@ mod tests {
     #[test]
     fn t_47b_058_the_pages_have_the_titles_of_their_spec_screens() {
         let titles = |id: &str| crate::ui::screen(id).title;
-        assert_eq!(titles("settings_extension_repos"), "Extension repos");
+        assert_eq!(titles("settings_extension_repos"), "Repositories");
         assert_eq!(titles("settings_app_language"), "App language");
         assert_eq!(titles("settings_create_backup"), "Create backup");
         assert_eq!(titles("settings_restore_backup"), "Restore backup");

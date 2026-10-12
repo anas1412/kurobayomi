@@ -20,7 +20,7 @@ pub fn title_label(text: &str) -> gtk::Label {
 /// The header with Back on the left (`on_back`) and `title` in the centre. The right side is left to the caller: the
 /// first widget it packs with `pack_end` sits at the far right.
 pub fn header(title: &impl IsA<gtk::Widget>, on_back: impl Fn() + 'static) -> gtk::HeaderBar {
-    let header = gtk::HeaderBar::new();
+    let header = crate::ui::header_bar();
     header.set_decoration_layout(Some(&crate::ui::decoration(false)));
     header.set_title_widget(Some(title.upcast_ref()));
     let back = crate::ui::icon_button("go-previous-symbolic", "Back");

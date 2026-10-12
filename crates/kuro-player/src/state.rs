@@ -5,7 +5,6 @@ use kuro_data::anime::Anime;
 use kuro_data::episode::Episode;
 
 use crate::chapters::Segment;
-use crate::custom_buttons::{CustomButton, FetchState};
 use crate::enums::{Decoder, Dialogs, Panels, Sheets};
 use crate::pill::PlayerUpdate;
 use crate::tracks::VideoTrack;
@@ -55,10 +54,6 @@ pub struct PlayerState {
     pub seek_bar_shown: bool,
     /// `_dismissSheet`: set by `dismiss_sheet`, cleared by `reset_dismiss_sheet` and by closing.
     pub dismiss_sheet: bool,
-    /// `_primaryButton`: the custom button shown beside the controls. `None` hides it.
-    pub primary_button: Option<CustomButton>,
-    /// `_primaryButtonTitle`: set by `set_button_title` or from the favourite button's name.
-    pub primary_button_title: String,
 
     // playlist and episode (PlayerViewModel.kt:180-206)
     /// `_currentPlaylist`: the episodes after the filter.
@@ -115,7 +110,6 @@ pub struct PlayerState {
     pub player_update: PlayerUpdate,
     /// `_remainingTime` of the sleep timer, in seconds.
     pub remaining_sleep: i32,
-    pub custom_buttons: FetchState,
 }
 
 impl Default for PlayerState {
@@ -140,8 +134,6 @@ impl Default for PlayerState {
             controls_shown: true,
             seek_bar_shown: true,
             dismiss_sheet: false,
-            primary_button: None,
-            primary_button_title: String::new(),
             playlist: Vec::new(),
             current_episode: None,
             current_anime: None,
@@ -177,7 +169,6 @@ impl Default for PlayerState {
             volume_boost_cap: 30,
             player_update: PlayerUpdate::None,
             remaining_sleep: 0,
-            custom_buttons: FetchState::Loading,
         }
     }
 }
@@ -467,8 +458,6 @@ mod tests {
         assert_eq!(s.double_tap_seek_amount, 0);
         assert!(!s.is_seeking_forwards);
         assert_eq!(s.remaining_sleep, 0);
-        assert_eq!(s.custom_buttons, FetchState::Loading);
-        assert!(s.primary_button.is_none() && s.primary_button_title.is_empty());
         assert_eq!(s.playlist_flags, 0);
         assert!(!s.dismiss_sheet);
         assert_eq!(s.sheet, Sheets::None);

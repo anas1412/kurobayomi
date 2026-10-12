@@ -402,6 +402,37 @@ mod tests {
         assert!(listing.filters().is_empty());
     }
 
+    /// The whole path of a source that does not answer: spinner, then the "not answering" sentence with Retry (never an
+    /// endless spinner), then the content once a retry works.
+    #[test]
+    fn a_silent_source_ends_the_spinner_with_a_sentence_and_a_retry_shows_the_content() {
+        use crate::browse::errors::settle;
+        use std::time::Duration;
+        let run = |future: LoadFuture| {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().expect("runtime");
+            rt.block_on(settle(Duration::from_millis(20), "Comix", future))
+        };
+        let mut listing = Listing::new(BrowseQuery::Popular);
+        let ask = listing.ask().expect("page 1");
+        assert_eq!(plan(&listing), ContentPlan::Spinner);
+        let silent: LoadFuture = Box::pin(std::future::pending::<Result<ListedPage, String>>());
+        let message = run(silent).expect_err("the limit ends the load");
+        assert!(listing.fail(ask.generation, message));
+        match plan(&listing) {
+            ContentPlan::Error { message, actions } => {
+                assert_eq!(message, "Comix is not answering. Try again in a moment.");
+                assert!(actions.contains(&EmptyAction::Retry));
+            }
+            other => panic!("unexpected plan {other:?}"),
+        }
+        listing.clear_errors();
+        let again = listing.ask().expect("retry asks page 1 again");
+        assert_eq!(plan(&listing), ContentPlan::Spinner);
+        let answered: LoadFuture = Box::pin(async { Ok(page(&["a"], false)) });
+        listing.deliver(again.generation, run(answered).expect("the answer"));
+        assert!(matches!(plan(&listing), ContentPlan::Items { .. }));
+    }
+
     #[test]
     fn a_favourite_flag_changes_in_place() {
         let mut listing = Listing::new(BrowseQuery::Popular);

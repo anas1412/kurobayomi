@@ -28,13 +28,11 @@ use kuro_extensions::anime::model::{Buckets, StoreRow};
 use kuro_extensions::anime::sources::icon_for_source;
 use kuro_extensions::anime::service::{AnimeExtensions, pump};
 use kuro_extensions::anime::trust::TrustStore;
-use kuro_extensions::anime::update::LAST_CHECK_KEY;
 use kuro_extensions::registry::{ExtensionRegistry, Snapshot};
 use kuro_domain::source::model::Source;
 use kuro_platform::paths::Paths;
 use kuro_prefs::source::{SourcePrefs, system_locale};
 use kuro_prefs::store::PrefStore;
-use tokio_util::sync::CancellationToken;
 
 use crate::browse::extensions::{Ext, ExtState};
 use crate::browse::ext_badges;
@@ -258,8 +256,8 @@ fn store_rows(repo: &ExtensionStoreRepo) -> Vec<StoreRow> {
         .collect()
 }
 
-/// Starts the host: scans both package folders, pumps the anime events into the state, schedules the daily store check
-/// and reloads the listing when the stores change. Call once from the GTK main thread inside the app's runtime.
+/// Starts the host: scans both package folders and pumps the anime events into the state. Call once from the GTK main
+/// thread inside the app's runtime.
 pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
     if HOST.with(|h| h.borrow().is_some()) {
         return;
@@ -327,20 +325,6 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
         }
     }));
 
-    // the daily check, and a refresh whenever the stores change
-    match reqwest::Client::builder().user_agent(concat!("Kurobayomi/", env!("CARGO_PKG_VERSION"))).timeout(std::time::Duration::from_secs(30)).build() {
-        Ok(client) => {
-            let urls_repo = repo.clone();
-            let urls: Arc<dyn Fn() -> Vec<String> + Send + Sync> = Arc::new(move || urls_repo.all().unwrap_or_default().into_iter().map(|s| s.index_url).collect());
-            let cancel = CancellationToken::new();
-            service.schedule_checks(client.clone(), urls.clone(), store.pref(LAST_CHECK_KEY, 0_i64), cancel);
-            let refresh = service.clone();
-            crate::pref_model::stores_page::on_extensions_reload(move || {
-                refresh.refresh(client.clone(), urls(), CancellationToken::new());
-            });
-        }
-        Err(e) => tracing::warn!("the extension store check does not run: {e}"),
-    }
     HOST.with(|h| *h.borrow_mut() = Some(Host { registry, state }));
 }
 

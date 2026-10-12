@@ -22,7 +22,7 @@ pub const CLIENT_SECRET: &str = "2bec9c1d0c00a1e9b0e9e096a71f88d555a6f52da7923df
 pub const SITE_URL: &str = "https://simkl.com";
 pub const API_URL: &str = "https://api.simkl.com";
 /// The redirect the Simkl app registration expects (B-3.7). Linux handles it through the desktop scheme (O-6).
-pub const REDIRECT_URL: &str = "aniyomi://simkl-auth";
+pub const REDIRECT_URL: &str = "kurobayomi://simkl-auth";
 /// Content type of the JSON bodies (`jsonMime`, `OkHttpExtensions.kt:22`).
 const JSON_MIME: &str = "application/json; charset=utf-8";
 /// Sent on every request. Replaces the Aniyomi string (B-3.13).
@@ -395,7 +395,7 @@ mod tests {
     fn t_32a_031_the_client_constants_are_the_source_values() {
         assert_eq!(CLIENT_ID.len(), 64);
         assert_eq!(CLIENT_SECRET.len(), 64);
-        assert_eq!(REDIRECT_URL, "aniyomi://simkl-auth");
+        assert_eq!(REDIRECT_URL, "kurobayomi://simkl-auth");
         assert_eq!(API_URL, "https://api.simkl.com");
     }
 

@@ -40,7 +40,7 @@ fn genre_chip(chip: &GenreChip, h: &Handlers) -> gtk::MenuButton {
     menu.append(&search);
     menu.append(&copy);
     let popover = gtk::Popover::builder().child(&menu).build();
-    let button = gtk::MenuButton::builder().label(&chip.label).popover(&popover).css_classes(["pill"]).build();
+    let button = crate::ui::quiet_menu(gtk::MenuButton::builder().label(&chip.label).popover(&popover).css_classes(["pill"]).build());
     let (on_search, request) = (Rc::clone(&h.on_search), chip.search.clone());
     search.connect_clicked({
         let popover = popover.clone();

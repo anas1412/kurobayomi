@@ -48,7 +48,7 @@ pub fn code_from_paste(input: &str) -> Option<String> {
 /// True for a launch argument that is the Simkl redirect (`aniyomi://simkl-auth...`), so the app can route it here
 /// from startup or from a second instance's activation and leave other `aniyomi://` links alone.
 pub fn is_simkl_redirect(uri: &str) -> bool {
-    Url::parse(uri).is_ok_and(|u| u.scheme() == "aniyomi" && u.host_str() == Some("simkl-auth"))
+    Url::parse(uri).is_ok_and(|u| matches!(u.scheme(), "kurobayomi" | "aniyomi") && u.host_str() == Some("simkl-auth"))
 }
 
 #[cfg(test)]
@@ -58,7 +58,8 @@ mod tests {
     #[test]
     fn t_32a_031_only_the_simkl_auth_host_is_a_simkl_redirect() {
         assert!(is_simkl_redirect("aniyomi://simkl-auth?code=x"));
-        assert!(is_simkl_redirect("aniyomi://simkl-auth"));
+        assert!(is_simkl_redirect("kurobayomi://simkl-auth"));
+        assert!(is_simkl_redirect("aniyomi://simkl-auth"), "the old scheme is still accepted");
         assert!(!is_simkl_redirect("aniyomi://add-repo?url=x"));
         assert!(!is_simkl_redirect("https://simkl-auth/?code=x"));
         assert!(!is_simkl_redirect("not a url"));

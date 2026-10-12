@@ -130,3 +130,30 @@ lto = "fat"
 # keep target/ small: no incremental cache, line tables only
 incremental = false
 debug = "line-tables-only"
+
+# Compiling a plug-in with an unoptimised Cranelift takes minutes; optimised, seconds. Only the compiler crates, so the
+# rest of a debug build stays fast to build.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+[profile.dev.package.cranelift-entity]
+opt-level = 3
+[profile.dev.package.cranelift-bforest]
+opt-level = 3
+[profile.dev.package.cranelift-control]
+opt-level = 3
+[profile.dev.package.regalloc2]
+opt-level = 3
+[profile.dev.package.wasmparser]
+opt-level = 3
+[profile.dev.package.wasmtime-environ]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
+[profile.dev.package.wasmtime]
+opt-level = 3
+[profile.dev.package.object]
+opt-level = 3
+[profile.dev.package.gimli]
+opt-level = 3

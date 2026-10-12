@@ -148,3 +148,9 @@ popover.menu > contents {
 .kb-row-cover > .kb-cover-initials-text {
   font-size: 1.1em;
 }
+
+/* The search icon of a search field sits apart from the text, as GTK's own theme draws it. Some themes (Breeze, the
+ * KDE default) space the icon of a plain entry but not of a search entry. */
+entry.search > image:first-child {
+  margin-right: 6px;
+}

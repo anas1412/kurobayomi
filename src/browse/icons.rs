@@ -80,6 +80,8 @@ pub enum SourceIcon {
     Local,
     /// The generic source icon.
     Default,
+    /// A source with no icon of its own: a tile with the first letter of its name (`look::row_cover`).
+    Letter,
     /// An untrusted extension: the dangerous glyph in the error colour.
     Untrusted,
 }
@@ -97,6 +99,7 @@ impl SourceIcon {
             SourceIcon::Custom => None,
             SourceIcon::Local => Some(crate::theme::icons::APP_ID),
             SourceIcon::Default => Some("application-x-addon-symbolic"),
+            SourceIcon::Letter => None,
             SourceIcon::Untrusted => Some("security-low-symbolic"),
         }
     }
@@ -107,7 +110,7 @@ pub fn resolve_for(untrusted: bool, is_stub: bool, has_custom_icon: bool, is_loc
     if untrusted { SourceIcon::Untrusted } else { resolve(is_stub, has_custom_icon, is_local) }
 }
 
-/// The order: a stub without an icon, then a custom icon, then the local source, then the default.
+/// The order: a stub without an icon, then a custom icon, then the local source, then the letter tile.
 pub fn resolve(is_stub: bool, has_custom_icon: bool, is_local: bool) -> SourceIcon {
     if is_stub && !has_custom_icon {
         SourceIcon::Warning
@@ -116,7 +119,7 @@ pub fn resolve(is_stub: bool, has_custom_icon: bool, is_local: bool) -> SourceIc
     } else if is_local {
         SourceIcon::Local
     } else {
-        SourceIcon::Default
+        SourceIcon::Letter
     }
 }
 
@@ -203,9 +206,9 @@ mod tests {
     }
 
     #[test]
-    fn local_then_default_when_nothing_else_applies() {
+    fn local_then_letter_when_nothing_else_applies() {
         assert_eq!(resolve(false, false, true), SourceIcon::Local);
-        assert_eq!(resolve(false, false, false), SourceIcon::Default);
+        assert_eq!(resolve(false, false, false), SourceIcon::Letter, "a source with no icon of its own gets a letter tile");
     }
 
     #[test]
@@ -214,6 +217,7 @@ mod tests {
         assert!(SourceIcon::Warning.icon_name().is_some());
         assert_eq!(SourceIcon::Local.icon_name(), Some(crate::theme::icons::APP_ID), "the local source shows the app icon");
         assert!(SourceIcon::Default.icon_name().is_some());
+        assert_eq!(SourceIcon::Letter.icon_name(), None, "the letter tile is drawn, not looked up");
         assert_eq!(ICON_HEIGHT_PX, 40);
     }
 
@@ -228,9 +232,9 @@ mod tests {
     #[test]
     fn the_cache_resolves_once_per_id_and_can_be_invalidated() {
         let mut cache = IconCache::default();
-        assert_eq!(cache.get(7, false, false, false, false), SourceIcon::Default);
+        assert_eq!(cache.get(7, false, false, false, false), SourceIcon::Letter);
         // A second lookup with different inputs keeps the first answer until the id is invalidated.
-        assert_eq!(cache.get(7, false, true, false, false), SourceIcon::Default);
+        assert_eq!(cache.get(7, false, true, false, false), SourceIcon::Letter);
         assert_eq!(cache.len(), 1);
         cache.invalidate(7);
         assert!(cache.is_empty());

@@ -1,5 +1,5 @@
 //! App shell: the root navigator, the tab host, layout chrome, app-state banners, the app bar and search
-//! toolbar, the onboarding wizard, launch bootstrap and argv parsing.
+//! toolbar, launch bootstrap and argv parsing.
 //!
 //! Decisions and logic are pure Rust with unit tests. The GTK functions in each module are thin wrappers.
 
@@ -25,7 +25,6 @@ pub mod layout;
 // the stack-based navigator is replaced in the window by `ui::push`; it stays for the route table
 #[allow(dead_code)]
 pub mod nav;
-pub mod onboarding;
 // the installed desktop, MIME and icon files in `data/`; the module holds their tests
 #[cfg(test)]
 mod packaging;

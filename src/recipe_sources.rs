@@ -6,10 +6,11 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 
 use http::header::{HeaderMap, HeaderName, HeaderValue};
+use tokio::sync::watch;
 
 use kuro_domain::source::browse::BrowseQuery;
 use kuro_domain::source::model::Source;
@@ -130,33 +131,50 @@ impl PageLoader for MangaLoader {
     fn load(&self, query: BrowseQuery, filters: FilterList, page: u32) -> LoadFuture {
         let (source, store) = (Arc::clone(&self.source), Arc::clone(&self.store));
         Box::pin(async move {
-            let page = i32::try_from(page).map_err(|error| error.to_string())?;
-            let found = match query {
-                BrowseQuery::Popular => source.popular(page).await,
-                BrowseQuery::Latest => source.latest(page).await,
-                BrowseQuery::Search(text) => source.search(page, &text, &filters).await,
-            }
-            .map_err(|error| error.to_string())?;
+            let name = source.name().to_owned();
             let source_id = source.id();
-            tokio::task::spawn_blocking(move || -> Result<ListedPage, String> {
-                let mut items = Vec::with_capacity(found.mangas.len());
-                for manga in &found.mangas {
-                    let local = store.local_entry(source_id, &manga.url, &manga.title, manga.thumbnail_url.as_deref())?;
-                    items.push(ListItem {
-                        id: local.id,
-                        source_id,
-                        url: manga.url.clone(),
-                        title: local.title,
-                        favorite: local.favorite,
-                        cover: manga.thumbnail_url.clone(),
-                    });
-                }
-                Ok(ListedPage { items, has_next: found.has_next_page })
-            })
-            .await
-            .map_err(|error| error.to_string())?
+            let result = list_page(&name, source, store, query, filters, page).await;
+            crate::browse::errors::note(source_id, result.is_ok());
+            result
         })
     }
+}
+
+/// One page of a manga listing. A failure is the sentence for the user; the technical text goes to the log.
+async fn list_page(name: &str, source: Arc<dyn CatalogueSource>, store: Arc<dyn FavoriteStore>, query: BrowseQuery, filters: FilterList, page: u32) -> Result<ListedPage, String> {
+    use crate::browse::errors;
+    let page = i32::try_from(page).map_err(|error| error.to_string())?;
+    let found = errors::plain(name, async {
+        match query {
+            BrowseQuery::Popular => source.popular(page).await,
+            BrowseQuery::Latest => source.latest(page).await,
+            BrowseQuery::Search(text) => source.search(page, &text, &filters).await,
+        }
+    })
+    .await?;
+    let source_id = source.id();
+    let stored = tokio::task::spawn_blocking(move || -> Result<ListedPage, String> {
+        let mut items = Vec::with_capacity(found.mangas.len());
+        for manga in &found.mangas {
+            let local = store.local_entry(source_id, &manga.url, &manga.title, manga.thumbnail_url.as_deref())?;
+            items.push(ListItem {
+                id: local.id,
+                source_id,
+                url: manga.url.clone(),
+                title: local.title,
+                favorite: local.favorite,
+                cover: manga.thumbnail_url.clone(),
+            });
+        }
+        Ok(ListedPage { items, has_next: found.has_next_page })
+    })
+    .await
+    .map_err(|error| error.to_string())
+    .and_then(|stored| stored);
+    stored.map_err(|text| {
+        tracing::warn!(source = name, error = text.as_str(), "a listing could not be stored");
+        errors::GENERIC.to_owned()
+    })
 }
 
 /// The app values a reload reads, set once at start: the folders, the preferences and the runtime.
@@ -189,13 +207,14 @@ pub fn repo_http() -> reqwest::Client {
     .clone()
 }
 
-/// Fetches a repo link's index and its sources into the link's folder. Blocks, so call it off the GTK thread.
-pub fn sync_link(link: &str) -> Result<(), RepoError> {
+/// Fetches a repo link's index and its sources into the link's folder and returns how many sources it lists. Blocks, so
+/// call it off the GTK thread.
+pub fn sync_link(link: &str) -> Result<usize, RepoError> {
     let root = repo_root().ok_or_else(|| RepoError::Write("the app folders are not set".to_owned()))?;
     let dir = repo::link_dir(&root, link);
     let http = repo_http();
     match block(repo::sync_link(&http, &dir, link)) {
-        Some(result) => result.map(|_| ()),
+        Some(result) => result.map(|index| index.sources.len()),
         None => Err(RepoError::Network("the app runtime is not running".to_owned())),
     }
 }
@@ -244,11 +263,97 @@ fn build(
     (MangaDirectory { sources: manga }, Loaded { anime })
 }
 
+/// Whether the sources are being (re)loaded, and a counter of finished loads. The Browse pages follow both: they show a
+/// spinner while loading and rebuild their lists when the counter moves.
+struct LoadState {
+    pending: Mutex<usize>,
+    ready: watch::Sender<bool>,
+    changes: watch::Sender<u64>,
+}
+
+impl LoadState {
+    fn new() -> Self {
+        Self { pending: Mutex::new(0), ready: watch::channel(true).0, changes: watch::channel(0).0 }
+    }
+
+    /// A load starts. The state is "loading" until every started load has ended.
+    fn begin(&self) {
+        let mut pending = self.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *pending += 1;
+        self.ready.send_replace(false);
+    }
+
+    /// A load ended and its result is installed. The change goes out before "ready", so a page that wakes on "ready"
+    /// already holds the new lists.
+    fn end(&self) {
+        let mut pending = self.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *pending = pending.saturating_sub(1);
+        self.changes.send_modify(|count| *count += 1);
+        if *pending == 0 {
+            self.ready.send_replace(true);
+        }
+    }
+}
+
+static LOAD_STATE: LazyLock<LoadState> = LazyLock::new(LoadState::new);
+
+/// `false` while the sources load (the Sources tabs show "Loading sources…"), `true` once they are listed.
+pub fn ready() -> watch::Receiver<bool> {
+    LOAD_STATE.ready.subscribe()
+}
+
+/// Tells the Browse pages to read their source lists again, for a change that is not a load (a source's badge).
+pub fn notify_changed() {
+    LOAD_STATE.changes.send_modify(|count| *count += 1);
+}
+
+/// A counter that moves each time a load has installed new sources. Pages read their lists again when it changes.
+pub fn changes() -> watch::Receiver<u64> {
+    LOAD_STATE.changes.subscribe()
+}
+
+/// Ends the load it was made for, also when the load panics, so the spinner never stays.
+struct EndOnDrop;
+
+impl Drop for EndOnDrop {
+    fn drop(&mut self) {
+        LOAD_STATE.end();
+    }
+}
+
+/// One load at a time, so two quick reloads (an add, then a refresh) install in the order they were asked.
+static RELOAD_LOCK: Mutex<()> = Mutex::new(());
+
+/// Reloads the sources on a worker thread and returns at once; never blocks the GTK thread. The Browse pages follow
+/// [`ready`] and [`changes`]. A plug-in that does not load is named in a toast.
+pub fn reload() {
+    LOAD_STATE.begin();
+    let spawned = std::thread::Builder::new().name("kuro-sources".to_owned()).spawn(|| {
+        let _end = EndOnDrop;
+        let _one_at_a_time = RELOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let failed = load_sources();
+        if !failed.is_empty() {
+            crate::toast::notify(failed_text(&failed));
+        }
+    });
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "the sources could not be loaded: no thread");
+        LOAD_STATE.end();
+    }
+}
+
+/// The toast naming the sources that did not load.
+fn failed_text(ids: &[String]) -> String {
+    format!("Could not load: {}", ids.join(", "))
+}
+
 /// Reads the recipes of the scrapers folder and the saved copies of every repo link, instantiates the plug-ins, and
 /// installs the result for the Browse pages. A call replaces the last one, so a link that was added or removed shows at
-/// once. Plug-ins load on the runtime, and the call waits for them, so it runs off the GTK thread after start.
-pub fn reload() {
-    let (Some(paths), Some(store), Some(client)) = (PATHS.get(), PREFS.get(), client()) else { return };
+/// once. It waits for the plug-ins to compile, so only [`reload`] calls it, on a worker thread. Returns the ids of the
+/// sources that could not be loaded.
+fn load_sources() -> Vec<String> {
+    let mut failed = Vec::new();
+    let (Some(paths), Some(store), Some(client)) = (PATHS.get(), PREFS.get(), client()) else { return failed };
     let (mut recipes, problems) = kuro_source_scrape::load_dir(&paths.scrapers_dir());
     for (file, reason) in problems {
         tracing::warn!(file, "recipe skipped: {reason}");
@@ -261,11 +366,13 @@ pub fn reload() {
         let dir = repo::link_dir(&root, link);
         let Some(index) = repo::read_index(&dir) else {
             tracing::warn!(link = link.as_str(), "the saved index of a repo is missing or not valid; its sources are skipped");
+            failed.push(link.clone());
             continue;
         };
         for entry in &index.sources {
             let Some(bytes) = repo::read_source(&dir, entry) else {
                 tracing::warn!(id = entry.id.as_str(), "a repo source is missing or changed; it is skipped until the next check");
+                failed.push(entry.id.clone());
                 continue;
             };
             if entry.file.ends_with(".wasm") {
@@ -277,29 +384,42 @@ pub fn reload() {
                     tracing::warn!(id = entry.id.as_str(), "repo recipe skipped: its id is already used");
                 }
                 Ok(recipe) => recipes.push(recipe),
-                Err(reason) => tracing::warn!(id = entry.id.as_str(), "repo recipe skipped: {reason}"),
+                Err(reason) => {
+                    tracing::warn!(id = entry.id.as_str(), "repo recipe skipped: {reason}");
+                    failed.push(entry.id.clone());
+                }
             }
         }
     }
 
     let (mut manga_plugins, mut anime_plugins) = (Vec::new(), Vec::new());
-    for (id, anime, hosts, bytes) in plugins {
+    // the plug-ins compile side by side (the compile cache makes a later start fast)
+    let ids: Vec<String> = plugins.iter().map(|(id, ..)| id.clone()).collect();
+    let loads = plugins.into_iter().map(|(_id, anime, hosts, bytes)| instantiate_repo_plugin(bytes, hosts, anime, client.clone(), store.clone()));
+    let results = block(futures::future::join_all(loads));
+    for (index, id) in ids.iter().enumerate() {
         let package = format!("repo.{id}");
-        match block(instantiate_repo_plugin(bytes, hosts, anime, client.clone(), store.clone())) {
+        match results.as_ref().map(|all| &all[index]) {
             Some(Ok(RepoPlugin::Manga(sources))) => {
                 for source in sources {
                     let row = DirectorySource { source: Source::new(source.id(), source.name(), source.lang()), package: package.clone(), home_url: None };
-                    manga_plugins.push((source, row));
+                    manga_plugins.push((Arc::clone(source), row));
                 }
             }
             Some(Ok(RepoPlugin::Anime(sources))) => {
                 for source in sources {
                     let row = DirectorySource { source: Source::new(source.id(), source.name(), source.lang()), package: package.clone(), home_url: None };
-                    anime_plugins.push((source, row));
+                    anime_plugins.push((Arc::clone(source), row));
                 }
             }
-            Some(Err(reason)) => tracing::warn!(id = id.as_str(), "repo plug-in skipped: {reason}"),
-            None => tracing::warn!(id = id.as_str(), "repo plug-in skipped: the app runtime is not running"),
+            Some(Err(reason)) => {
+                tracing::warn!(id = id.as_str(), "repo plug-in skipped: {reason}");
+                failed.push(id.clone());
+            }
+            None => {
+                tracing::warn!(id = id.as_str(), "repo plug-in skipped: the app runtime is not running");
+                failed.push(id.clone());
+            }
         }
     }
 
@@ -312,6 +432,7 @@ pub fn reload() {
     let loaded = Arc::new(anime);
     install_instances(Arc::new(Instances(Arc::clone(&loaded))));
     *LOADED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(loaded);
+    failed
 }
 
 /// The daily check: each link whose saved index is older than a day is fetched again on a thread of its own, so the window
@@ -401,6 +522,7 @@ pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
             Err(error) => tracing::warn!("the image service does not start, covers show their placeholder: {error}"),
         }
     });
+    kuro_extensions::instantiate::set_compile_cache_dir(paths.wasm_cache_dir());
     reload();
     let links: Vec<String> = SourcePrefs::new(store.clone()).manga_extension_repos.get().into_iter().collect();
     schedule_daily_check(&links);
@@ -441,6 +563,29 @@ mod tests {
         assert_eq!(anime.anime.iter().map(|(_, row)| row.source.name.as_str()).collect::<Vec<_>>(), ["Example Anime"]);
         let id = anime.anime[0].1.source.id;
         assert!(Instances(anime).source(id).is_some(), "the anime instance can be asked");
+    }
+
+    #[test]
+    fn the_state_is_loading_from_the_first_begin_to_the_last_end_and_each_end_moves_the_counter() {
+        let state = LoadState::new();
+        let (ready, changes) = (state.ready.subscribe(), state.changes.subscribe());
+        assert!(*ready.borrow(), "nothing is loading before a load starts");
+        state.begin();
+        state.begin();
+        assert!(!*ready.borrow());
+        state.end();
+        assert!(!*ready.borrow(), "one load is still running");
+        assert_eq!(*changes.borrow(), 1);
+        state.end();
+        assert!(*ready.borrow(), "ready again after the last end");
+        assert_eq!(*changes.borrow(), 2);
+        state.end();
+        assert!(*ready.borrow(), "an extra end does not break the state");
+    }
+
+    #[test]
+    fn the_toast_for_sources_that_did_not_load_names_them() {
+        assert_eq!(failed_text(&["a".to_owned(), "b".to_owned()]), "Could not load: a, b");
     }
 
     #[test]

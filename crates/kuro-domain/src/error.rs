@@ -9,9 +9,6 @@
 //! | Interactor (module) | Pattern | Result to the caller |
 //! |---|---|---|
 //! | Track reads and writes (`track::service`, the manga and anime `GetMangaTracks`, `InsertMangaTrack`, `DeleteMangaTrack` and twins) | swallow and log, via `log_and_default` | `*_or_default`: `None`, empty list or nothing, one `error` log line. `try_*`: `Result`, for new UI |
-//! | Extension store add (`extension_store::add_store`, `fetch_store`) | propagate | `Result<(), DomainError>`; a failed fetch saves nothing |
-//! | Extension store refresh (`extension_store::refresh_all`) | log per store and go on | `Ok(())`; each failure logs `Failed to refresh extension store 'name (url)'` at `error` |
-//! | Extension store lists (`extension_store::fetch_extensions`) | log per store and drop it | the union of the stores that answered; a panic in one store is logged too |
 //! | Storage (`storage::StorageManager`) | propagate | `StorageUnavailable` for a missing or refused base, `Io` for a folder that cannot be created, `Invalid` for a non-directory |
 //! | Backup preferences (`backup`) | no failure path | values are plain preferences |
 //! | Custom buttons (`InternalError` cases) | propagate, carrying the source error and logged at `error` | not in this chunk: custom buttons land with T-09a-036 to T-09a-040 |

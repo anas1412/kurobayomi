@@ -120,7 +120,12 @@ pub fn open(manga: MangaRow, env: Env) -> gtk::Window {
     for w in [&left, &right, &edit_pill, &notice] {
         overlay.add_overlay(w);
     }
-    let window = gtk::Window::builder().transient_for(&ui::window()).modal(true).decorated(false).default_width(900).default_height(700).child(&overlay).build();
+    // a header row with the window buttons, so the window can be dragged, minimised and closed like every other screen
+    let header = gtk::HeaderBar::new();
+    header.set_decoration_layout(Some(&ui::decoration(false)));
+    header.set_title_widget(Some(&GBox::new(O::Horizontal, 0)));
+    ui::no_sticky_focus(&header);
+    let window = gtk::Window::builder().transient_for(&ui::window()).modal(true).default_width(900).default_height(700).titlebar(&header).child(&overlay).build();
     window.maximize();
 
     let this = Rc::new(State { window, manga: RefCell::new(manga), stack, picture, scroller, error, edit_slot, notice, notice_text, notice_id: Cell::new(0), zoom: Cell::new(ZOOM_MIN), env });
@@ -370,7 +375,7 @@ impl State {
                     col.append(&b);
                 }
                 popover.set_child(Some(&col));
-                self.edit_slot.append(&gtk::MenuButton::builder().label(&label).popover(&popover).css_classes(["flat"]).build());
+                self.edit_slot.append(&crate::ui::quiet_menu(gtk::MenuButton::builder().label(&label).popover(&popover).css_classes(["flat"]).build()));
             }
         }
     }

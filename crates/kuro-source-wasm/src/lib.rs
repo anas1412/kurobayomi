@@ -10,6 +10,7 @@ extern crate self as kuro_source_wasm;
 
 pub mod anime_wire;
 pub mod bridge;
+pub mod cache;
 pub mod error;
 pub mod install;
 pub mod limits;

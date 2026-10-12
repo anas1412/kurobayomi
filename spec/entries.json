@@ -1762,7 +1762,7 @@
    ],
    "menu": [
     "Filter",
-    "Extension repos",
+    "Repositories",
     "Extension stores"
    ],
    "tabs": [
@@ -1986,7 +1986,7 @@
   },
   {
    "id": "extension_repos",
-   "title": "Extension repos",
+   "title": "Repositories",
    "kind": "custom",
    "toolbar": [
     {

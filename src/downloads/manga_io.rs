@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use kuro_data::chapter::Chapter;
-use kuro_data::manga::Manga;
-use kuro_downloads::model::{ChapterRef, MangaRef, Page};
+use kuro_data::chapter::{Chapter, ChapterRepo};
+use kuro_data::manga::{Manga, MangaRepo};
+use kuro_db::handle::Db;
+use kuro_downloads::model::{ChapterRef, DownloadState, MangaRef, Page, QueuedDownload};
 use kuro_downloads::source::{ChapterSource, ImageResponse};
+use kuro_downloads::store::QueueRow;
 use kuro_source::model::SChapter;
 use kuro_source::{MangaSource, SourceError};
 use reqwest::header::CONTENT_TYPE;
@@ -103,6 +105,46 @@ pub fn manga_ref(manga: &Manga) -> MangaRef {
         genre: manga.genre.clone(),
         status: manga.status,
     }
+}
+
+/// A saved manga row whose source is not installed. The queue page lists it as Waiting for source until the source is back.
+#[derive(Clone, Debug)]
+pub struct Waiting {
+    pub row: QueueRow,
+    pub title: String,
+    pub chapter: String,
+}
+
+/// What one restore pass makes of the saved rows: the downloads to queue, and the rows still waiting for their source.
+#[derive(Default)]
+pub struct RestorePass {
+    pub ready: Vec<QueuedDownload>,
+    pub waiting: Vec<Waiting>,
+}
+
+/// Reads the saved rows, in saved order, against the manga database and the installed sources (`source_of`). A row
+/// whose manga or chapter is gone is dropped. A row whose source is not installed waits.
+pub fn restore_rows(rows: &[QueueRow], db: &Arc<Db>, source_of: &dyn Fn(i64) -> Option<Arc<dyn MangaSource>>) -> RestorePass {
+    let mut pass = RestorePass::default();
+    for row in rows {
+        let manga = MangaRepo::new(Arc::clone(db)).by_id(row.manga_id).ok();
+        let chapter = ChapterRepo::new(Arc::clone(db)).by_id(row.chapter_id).ok().flatten();
+        let (Some(manga), Some(chapter)) = (manga, chapter) else {
+            tracing::info!(chapter_id = row.chapter_id, "dropped a saved download whose chapter or manga is gone");
+            continue;
+        };
+        match source_of(manga.source) {
+            Some(source) => pass.ready.push(QueuedDownload {
+                source: Arc::new(LiveChapterSource::new(source)),
+                manga: manga_ref(&manga),
+                chapter: chapter_ref(&chapter),
+                status: DownloadState::Queue,
+                pages: None,
+            }),
+            None => pass.waiting.push(Waiting { row: row.clone(), title: manga.title.clone(), chapter: chapter.name.clone() }),
+        }
+    }
+    pass
 }
 
 /// A manga download manager over in-memory stores, for the backend tests. The connectivity is offline, so queued

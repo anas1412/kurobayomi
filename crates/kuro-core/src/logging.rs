@@ -75,8 +75,18 @@ pub fn log(priority: LogPriority, message: &str, error: Option<&(dyn std::error:
     }
 }
 
+/// Dependencies that log every compiler opcode or every byte at TRACE: a plug-in compile at TRACE writes hundreds of
+/// megabytes and takes minutes. They stay at WARN (INFO for the network stack) even when verbose logging is on.
+const NOISY: &str = "wasmtime=warn,wasmtime_internal_cranelift=warn,wasmtime_internal_cache=warn,cranelift_codegen=warn,cranelift_frontend=warn,cranelift_entity=warn,cranelift_bforest=warn,regalloc2=warn,hyper=info,hyper_util=info,h2=info,rustls=info,reqwest=info,tokio_util=info";
+
 fn env_filter(verbose: bool) -> EnvFilter {
-    EnvFilter::builder().with_default_directive(level_for(verbose).into()).from_env_lossy()
+    let base = EnvFilter::builder().with_default_directive(level_for(verbose).into());
+    match std::env::var("RUST_LOG") {
+        Ok(_) => base.from_env_lossy(),
+        // the base level is part of the string: a default directive is dropped as soon as any other directive is given
+        Err(_) if verbose => base.parse_lossy(format!("trace,{NOISY}")),
+        Err(_) => base.from_env_lossy(),
+    }
 }
 
 /// The non-blocking file writer's guard. It sits in a static so the panic hook can flush the log
@@ -276,6 +286,19 @@ mod tests {
         let text = file.text();
         assert!(!text.contains("before-reload"), "{text}");
         assert!(text.contains("after-reload"), "{text}");
+    }
+
+    #[test]
+    fn verbose_keeps_the_app_at_trace_and_the_compiler_at_warn() {
+        let file = Capture::default();
+        let (subscriber, _filter) = build_subscriber(true, io::sink, file.clone());
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::trace!(target: "kurobayomi::app", "app-line");
+            tracing::trace!(target: "cranelift_codegen::egraph", "compiler-line");
+        });
+        let text = file.text();
+        assert!(text.contains("app-line"), "{text}");
+        assert!(!text.contains("compiler-line"), "{text}");
     }
 
     #[test]

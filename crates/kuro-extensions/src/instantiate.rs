@@ -29,6 +29,11 @@ pub async fn instantiate_verified(result: LoadResult, env: HostEnv) -> LoadResul
     }
 }
 
+/// Where compiled plug-ins are cached between starts (see `kuro_source_wasm::cache`). Call once at start.
+pub fn set_compile_cache_dir(dir: std::path::PathBuf) {
+    kuro_source_wasm::cache::set_dir(dir);
+}
+
 /// The sources of one plug-in of a repository link, by the kind its index entry names.
 pub enum RepoPlugin {
     Manga(Vec<std::sync::Arc<dyn kuro_source::CatalogueSource>>),

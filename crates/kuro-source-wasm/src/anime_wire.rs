@@ -17,6 +17,13 @@ pub struct WireAnime {
     pub description: Option<String>,
     #[serde(default)]
     pub thumbnail_url: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub genre: Option<String>,
+    /// `AnimeStatus` as its number (0 unknown, 1 ongoing, 2 completed, ...).
+    #[serde(default)]
+    pub status: i32,
 }
 
 /// The answer of `popular`, `latest` and `search` in an anime package.
@@ -99,6 +106,9 @@ impl From<&SAnime> for WireAnime {
             title: anime.title.clone(),
             description: anime.description.clone(),
             thumbnail_url: anime.thumbnail_url.clone(),
+            author: anime.author.clone(),
+            genre: anime.genre.clone(),
+            status: 0,
         }
     }
 }
@@ -110,6 +120,9 @@ impl From<WireAnime> for SAnime {
             title: wire.title,
             description: wire.description,
             thumbnail_url: wire.thumbnail_url,
+            author: wire.author.filter(|a| !a.trim().is_empty()),
+            genre: wire.genre.filter(|g| !g.trim().is_empty()),
+            status: kuro_source::anime::model::AnimeStatus::from_i32(wire.status),
             ..SAnime::default()
         }
     }

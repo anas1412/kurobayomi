@@ -6,6 +6,11 @@
    "icon": "view-grid-symbolic"
   },
   {
+   "id": "browse",
+   "title": "Browse",
+   "icon": "system-search-symbolic"
+  },
+  {
    "id": "updates",
    "title": "Updates",
    "icon": "view-refresh-symbolic"
@@ -16,14 +21,9 @@
    "icon": "document-open-recent-symbolic"
   },
   {
-   "id": "browse",
-   "title": "Browse",
-   "icon": "system-search-symbolic"
-  },
-  {
    "id": "more",
    "title": "More",
-   "icon": "view-more-horizontal-symbolic"
+   "icon": "open-menu-symbolic"
   }
  ],
  "screens": [

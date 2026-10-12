@@ -17,6 +17,7 @@ use kuro_source::filter_list::FilterList;
 use super::global_search::{AutoOpen, GlobalSearch, SearchPlan, auto_open, shared_gate, take_starts};
 use super::glue::{consume_events, keep_alive, own_tasks};
 use super::deep_link::is_link;
+use super::errors::{BACKSTOP, couldnt_load, settle};
 use super::listing::{LinkFuture, ListItem, PageLoader};
 use super::pages::{GlobalSearchSnapshot, SourceFilter};
 use super::primitives::stub_source_label;
@@ -239,12 +240,19 @@ impl SearchRunner {
             let loader = (self.loaders)(id);
             let filters = self.filters.borrow().as_ref().and_then(|defaults| defaults(id)).unwrap_or_default();
             let missing = trf(MsgKey::source_not_installed, &[("arg1", Arg::Str(&stub_source_label(&source.name, &source.lang, id)))]);
-            let gate = Arc::clone(&self.gate);
+            let (gate, name) = (Arc::clone(&self.gate), source.name.clone());
             self.tasks.borrow_mut().spawn(async move {
                 let result = {
                     let _permit = gate.acquire_owned().await;
                     match loader {
-                        Some(loader) => loader.load(BrowseQuery::Search(query), filters, 1).await.map(|page| page.items),
+                        // one source that fails, hangs or panics is one line in its own section; the others go on
+                        Some(loader) => settle(BACKSTOP, &name, loader.load(BrowseQuery::Search(query), filters, 1))
+                            .await
+                            .map(|page| page.items)
+                            .map_err(|text| {
+                                tracing::warn!(source = name.as_str(), error = text.as_str(), "a source did not answer the global search");
+                                couldnt_load(&name)
+                            }),
                         None => Err(missing),
                     }
                 };
@@ -474,6 +482,12 @@ mod tests {
             assert_eq!((snapshot.answered, snapshot.total), (5, 5), "progress = total");
             let errors: Vec<i64> = snapshot.rows.iter().filter(|row| matches!(row.state, SearchState::Error(_))).map(|row| row.source.id).collect();
             assert_eq!(errors, [3], "only the failing source is an error row");
+            let line = snapshot.rows.iter().find_map(|row| match &row.state {
+                SearchState::Error(message) => Some((row.source.name.clone(), message.clone())),
+                _ => None,
+            });
+            let (name, message) = line.expect("the failing source has its line");
+            assert_eq!(message, format!("Couldn't load {name}"), "one plain line, not the source's own text");
             assert_eq!(snapshot.rows.iter().filter(|row| matches!(&row.state, SearchState::Results(items) if items.len() == 1)).count(), 4);
         });
     }

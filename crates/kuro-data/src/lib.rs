@@ -11,7 +11,6 @@ use rusqlite::{Connection, ErrorCode};
 
 pub mod anime;
 pub mod anime_relation;
-pub mod custom_button;
 pub mod category;
 pub mod chapter;
 pub mod columns;

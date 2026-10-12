@@ -9,6 +9,7 @@ mod menu;
 mod neighbours;
 mod playback;
 mod sheets;
+mod skip_button;
 mod source;
 mod store;
 #[cfg(test)]
@@ -131,6 +132,7 @@ fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms
         media,
         episode_id,
         resolving: false,
+        skip: skip_button::State::default(),
     }));
     CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(&shared));
     crate::ui::push(&build_page(&shared, start));
@@ -151,6 +153,8 @@ struct Player {
     finished_saved: bool,
     /// Playback was stopped and saved for good (Back, or the page or its window went away).
     closed: bool,
+    /// The skip button's state for the playing file.
+    skip: skip_button::State,
 }
 
 type Shared = Rc<RefCell<Player>>;
@@ -281,6 +285,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     let fullscreen = gtk::Button::from_icon_name("view-fullscreen-symbolic");
     let speed = sheets::speed::button(shared);
     let chapters = sheets::chapters::button(shared);
+    let skip = skip_button::Ui::new(shared);
 
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     bar.add_css_class("osd");
@@ -296,6 +301,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&area));
     overlay.add_overlay(&bar);
+    overlay.add_overlay(skip.widget());
     // shown from the first frame until mpv knows the duration: the stream, its audio and its subtitles take a moment
     let loading = gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).valign(gtk::Align::Center).width_request(48).height_request(48).can_target(false).build();
     overlay.add_overlay(&loading);
@@ -321,8 +327,11 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     let quality = sheets::quality::button(shared);
     header.pack_end(&menu);
     header.pack_end(&quality);
+    // the buttons packed here came after page_header::header made its pass, so they need their own
+    crate::ui::no_sticky_focus(&header);
     page.append(&header);
     page.append(&overlay);
+    watch_fullscreen(&page, &header);
 
     wire_gl(&area, shared, start);
     watch_left(&page, shared, &area);
@@ -405,7 +414,7 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
         controls::Parts { page: &page, area: &area, bar: &bar, previous: &previous, next: &next, quality: &quality, speed: &speed, chapters: &chapters },
         shared,
     );
-    start_ticks(&page, &title_label, &play, &seek, &time, &volume, &loading, shared);
+    start_ticks(&page, &title_label, &play, &seek, &time, &volume, &loading, &skip, shared);
     page
 }
 
@@ -420,12 +429,45 @@ fn watch_left(page: &gtk::Box, shared: &Shared, area: &gtk::GLArea) {
             && stack.visible_child().as_ref() != Some(page.upcast_ref::<gtk::Widget>());
         if left {
             shared.borrow_mut().finish();
+            // leaving the page leaves fullscreen first, so the page below is not shown full screen
+            if let Some(window) = window_of(&page).filter(|w| w.is_fullscreen()) {
+                window.unfullscreen();
+            }
         }
     });
     let id = Cell::new(Some(id));
     area.connect_unrealize(move |_| {
         if let Some(id) = id.take() {
             stack.disconnect(id);
+        }
+    });
+}
+
+/// Fullscreen shows only the video: the header follows the window's fullscreen state, so it hides on entering and is
+/// back on leaving (Escape, the fullscreen button, the window manager). The window is known only once the page is
+/// mapped, so the connection is made then, once per mapping, and dropped on unmap.
+fn watch_fullscreen(page: &gtk::Box, header: &gtk::HeaderBar) {
+    let link: Rc<RefCell<Option<(gtk::Window, glib::SignalHandlerId)>>> = Rc::default();
+    let header = header.downgrade();
+    {
+        let link = Rc::clone(&link);
+        page.connect_map(move |page| {
+            let (Some(window), Some(header), false) = (window_of(page), header.upgrade(), link.borrow().is_some()) else {
+                return;
+            };
+            header.set_visible(!window.is_fullscreen());
+            let weak = header.downgrade();
+            let id = window.connect_fullscreened_notify(move |window| {
+                if let Some(header) = weak.upgrade() {
+                    header.set_visible(!window.is_fullscreen());
+                }
+            });
+            *link.borrow_mut() = Some((window, id));
+        });
+    }
+    page.connect_unmap(move |_| {
+        if let Some((window, id)) = link.borrow_mut().take() {
+            window.disconnect(id);
         }
     });
 }
@@ -626,10 +668,10 @@ fn remember_volume(playback: &Playback) {
     }
 }
 
-/// Reads mpv on a timer. Each tick drains mpv's events, saves progress when due and refreshes the controls. A failed
-/// file is a toast, and the end of an episode plays the next one when autoplay is on. The top bar never hides. The
-/// timer stops once the page is gone or closed.
-fn start_ticks(page: &gtk::Box, title_label: &gtk::Label, play: &gtk::Button, seek: &gtk::Scale, time: &gtk::Label, volume: &gtk::Scale, loading: &gtk::Spinner, shared: &Shared) {
+/// Reads mpv on a timer. Each tick drains mpv's events, saves progress when due and refreshes the controls and the skip
+/// button. A failed file is a toast, and the end of an episode plays the next one when autoplay is on. The header hides
+/// only in fullscreen (`watch_fullscreen`). The timer stops once the page is gone or closed.
+fn start_ticks(page: &gtk::Box, title_label: &gtk::Label, play: &gtk::Button, seek: &gtk::Scale, time: &gtk::Label, volume: &gtk::Scale, loading: &gtk::Spinner, skip: &skip_button::Ui, shared: &Shared) {
     let loading = loading.clone();
     let opened = std::time::Instant::now();
     let page = page.downgrade();
@@ -638,6 +680,7 @@ fn start_ticks(page: &gtk::Box, title_label: &gtk::Label, play: &gtk::Button, se
     let seek = seek.clone();
     let time = time.clone();
     let volume = volume.clone();
+    let skip = skip.clone();
     let shared = Rc::clone(shared);
     glib::timeout_add_local(TICK, move || {
         if page.upgrade().is_none() || shared.borrow().closed {
@@ -655,6 +698,7 @@ fn start_ticks(page: &gtk::Box, title_label: &gtk::Label, play: &gtk::Button, se
                     MpvEvent::FileLoaded => {
                         let tracks = std::mem::take(&mut player.media.tracks);
                         player.playback.add_tracks(&tracks);
+                        player.skip.file_loaded();
                     }
                     _ => {}
                 }
@@ -674,6 +718,7 @@ fn start_ticks(page: &gtk::Box, title_label: &gtk::Label, play: &gtk::Button, se
             };
             (snapshot, failed, ended)
         };
+        skip_button::tick(&shared, &skip);
         if failed {
             crate::toast::notify(tr(MsgKey::player_hoster_failed));
         }

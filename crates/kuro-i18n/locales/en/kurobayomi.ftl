@@ -1558,9 +1558,6 @@ label_manga_extension_repos = Manga extension repos
 label_anime_extension_repos = Anime extension repos
 
 # source: i18n-aniyomi
-onboarding_storage_action_create_folder = Create default Aniyomi folder
-
-# source: i18n-aniyomi
 download_speed_limit = Chapter download speed limit
 
 # source: i18n-aniyomi
@@ -2173,70 +2170,7 @@ internal_error = InternalError: Check crash logs for further information
 app_not_available = App not available
 
 # source: i18n
-pref_onboarding_guide = Onboarding guide
-
-# source: i18n
-onboarding_heading = Welcome!
-
-# source: i18n
-onboarding_description = Let's set some things up first. You can always change these in the settings later too.
-
-# source: i18n
-onboarding_action_next = Next
-
-# source: i18n
-onboarding_action_finish = Get started
-
-# source: i18n
-onboarding_action_skip = Skip
-
-# source: i18n
 onboarding_storage_info = Select a folder where { $arg1 } will store chapter downloads, backups, and more.{"\u000A"}{"\u000A"}A dedicated folder is recommended.{"\u000A"}{"\u000A"}Selected folder: { $arg2 }
-
-# source: i18n
-onboarding_storage_action_select = Select a folder
-
-# source: i18n
-onboarding_storage_selection_required = A folder must be selected
-
-# source: i18n
-onboarding_storage_help_info = Updating from an older version and not sure what to select? Refer to the storage guide for more information.
-
-# source: i18n
-onboarding_storage_help_action = Storage guide
-
-# source: i18n
-onboarding_permission_install_apps = Install apps permission
-
-# source: i18n
-onboarding_permission_install_apps_description = To install source extensions.
-
-# source: i18n
-onboarding_permission_notifications = Notification permission
-
-# source: i18n
-onboarding_permission_notifications_description = Get notified for library updates and more.
-
-# source: i18n
-onboarding_permission_crashlytics = Send crash logs
-
-# source: i18n
-onboarding_permission_crashlytics_description = Send anonymized crash logs to the developers.
-
-# source: i18n
-onboarding_permission_analytics = Allow analytics
-
-# source: i18n
-onboarding_permission_analytics_description = Send anonymized usage data to improve app features.
-
-# source: i18n
-onboarding_permission_action_grant = Grant
-
-# source: i18n
-onboarding_guides_new_user = New to { $arg1 }? We recommend checking out the getting started guide.
-
-# source: i18n
-onboarding_guides_returning_user = Reinstalling { $arg1 }?
 
 # source: i18n
 pref_category_general = General
@@ -2578,7 +2512,7 @@ ext_install_service_notif = Installing extension…
 ext_revoke_trust = Revoke trusted unknown extensions
 
 # source: i18n
-label_extension_repos = Extension repos
+label_extension_repos = Repositories
 
 # source: i18n
 information_empty_repos = You have no repos set.
@@ -4018,9 +3952,6 @@ information_no_manga_category = Category is empty
 information_no_entries_found = No entries found in this category
 
 # source: i18n
-getting_started_guide = Getting started guide
-
-# source: i18n
 information_empty_category = You have no categories. Tap the plus button to create one for organizing your library.
 
 # source: i18n
@@ -4333,3 +4264,21 @@ pref_advanced_summary = Dump crash logs
 
 # source: kurobayomi
 pref_reset_viewer_flags_summary = Resets reading mode of all series
+
+# source: kurobayomi
+add_source_repository = Add a source repository
+
+# source: kurobayomi
+restore_from_backup = Restore from a backup
+
+# source: kurobayomi
+library_empty_search_hint = Your library is empty. Search for something in Browse to add it.
+
+# source: kurobayomi
+welcome_title = Welcome to Kurobayomi
+
+# source: kurobayomi
+welcome_intro = Add a source repository to start watching anime and reading manga.
+
+# source: kurobayomi
+welcome_guide = Getting started guide

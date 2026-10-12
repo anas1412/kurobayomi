@@ -159,7 +159,8 @@ pub fn open(kind: Kind, link: &str) {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let page = Rc::new(Page { kind, link: link.to_owned(), state: RefCell::new(State::Loading), root, resolver });
     draw(&page);
-    crate::ui::push(&page.root);
+    // its own header, so Back and the window buttons show while the link resolves
+    crate::ui::push(&crate::ui::page("", &page.root, Vec::new(), true));
     resolve(&page);
 }
 

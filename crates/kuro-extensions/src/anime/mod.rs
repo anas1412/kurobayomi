@@ -14,7 +14,6 @@ pub mod runtime;
 pub mod service;
 pub mod browse;
 pub mod dialog;
-pub mod backup;
 pub mod package;
 pub mod sources;
 pub mod store;

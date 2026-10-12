@@ -28,7 +28,7 @@ pub fn body(id: &str) -> Option<Built> {
         "categories" => categories(),
         "stats" => stats(),
         "storage" => storage(),
-        "onboarding" | "new_update" | "crash" => info_screen(id),
+        "new_update" | "crash" => info_screen(id),
         id if crate::settings_ui::handles(id) => crate::settings_ui::body(id),
         _ => crate::entry::body(id),
     }
@@ -231,7 +231,7 @@ pub(crate) fn library_page(views: [Built; 2]) -> GBox {
     for follower in [&centre, &end] {
         kinds.bind_property("visible-child-name", follower, "visible-child-name").sync_create().build();
     }
-    let header = gtk::HeaderBar::new();
+    let header = crate::ui::header_bar();
     header.add_css_class("kb-library-header");
     header.set_decoration_layout(Some(&decoration(false)));
     header.pack_start(&gtk::StackSwitcher::builder().stack(&kinds).build());
@@ -394,12 +394,11 @@ fn storage() -> Option<Built> {
     crate::updates::mount::storage()
 }
 
-// Onboarding / New update / Crash share Aniyomi's InfoScreen layout.
+// New update / Crash share Aniyomi's InfoScreen layout.
 fn info_screen(id: &str) -> Option<Built> {
     let s = screen(id);
     let col = column();
     let (icon, subtitle, buttons): (&str, &str, &[&str]) = match id {
-        "onboarding" => ("starred-symbolic", "Let's set some things up first. You can always change these in the settings later too.", &["Next"]),
         "new_update" => ("software-update-available-symbolic", concat!("v", env!("CARGO_PKG_VERSION")), &["Download", "Not now"]),
         _ => ("dialog-error-symbolic", "Kurobayomi ran into an unexpected error. We suggest you share the crash logs in our support channel on Discord.", &["Share crash logs", "Restart the application"]),
     };
@@ -408,18 +407,10 @@ fn info_screen(id: &str) -> Option<Built> {
     col.append(&dim(subtitle));
     let stack = gtk::Stack::new();
     stack.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
-    if id == "onboarding" {
-        for g in &s.groups {
-            let c = GBox::new(O::Vertical, 12);
-            groups_into(&c, std::slice::from_ref(g));
-            stack.add_child(&c);
-        }
-    } else {
-        // no crash log or release notes are recorded yet: say so rather than show made-up text
-        let text = if id == "crash" { "No crash log was recorded." } else { "No release notes available." };
-        stack.add_child(&gtk::Frame::builder().child(&Label::builder().label(text).wrap(true).xalign(0.0).margin_start(12).margin_top(12).margin_end(12).margin_bottom(12).build()).build());
-        groups_into(&col, &s.groups);
-    }
+    // no crash log or release notes are recorded yet: say so rather than show made-up text
+    let text = if id == "crash" { "No crash log was recorded." } else { "No release notes available." };
+    stack.add_child(&gtk::Frame::builder().child(&Label::builder().label(text).wrap(true).xalign(0.0).margin_start(12).margin_top(12).margin_end(12).margin_bottom(12).build()).build());
+    groups_into(&col, &s.groups);
     col.append(&stack);
     let row = GBox::new(O::Vertical, 6);
     for (i, b) in buttons.iter().enumerate() {
@@ -428,20 +419,7 @@ fn info_screen(id: &str) -> Option<Built> {
             btn.add_css_class("suggested-action");
         }
         row.append(&btn);
-        if id == "onboarding" {
-            let st = stack.clone();
-            btn.connect_clicked(move |btn| {
-                match st.visible_child().and_then(|c| c.next_sibling()) {
-                    Some(n) => {
-                        st.set_visible_child(&n);
-                        if n.next_sibling().is_none() {
-                            btn.set_label("Get started");
-                        }
-                    }
-                    None => pop(),
-                }
-            });
-        } else if i == 1 {
+        if i == 1 {
             btn.connect_clicked(|_| pop());
         }
     }
@@ -555,7 +533,7 @@ mod tests {
     fn view(word: &str) -> Built {
         let search = gtk::SearchEntry::new();
         let refresh = icon_button("view-refresh-symbolic", "Update category");
-        let menu = gtk::MenuButton::builder().icon_name("open-menu-symbolic").build();
+        let menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("open-menu-symbolic").build());
         Built { content: Label::new(Some(word)).upcast(), end: vec![search.upcast(), refresh.upcast(), menu.upcast()] }
     }
 

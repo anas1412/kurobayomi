@@ -1,12 +1,10 @@
-//! Trust of installed extensions (`TrustMangaExtension`, `TrustAnimeExtension`; T-10a-024). One implementation
-//! serves both kinds. They differ only in the signing keys they read: manga reads the extension repositories,
-//! anime reads the extension stores. The stored triple `<package>:<versionCode>:<hash>` keeps the Aniyomi format,
+//! Trust of installed extensions (`TrustMangaExtension`, `TrustAnimeExtension`; T-10a-024). The signing keys come from
+//! the extension repositories. The anime extension stores were cut, so there is no anime key source here. The stored triple `<package>:<versionCode>:<hash>` keeps the Aniyomi format,
 //! so a backup of `trusted_extensions` restores unchanged.
 
 use std::collections::BTreeSet;
 
 use kuro_data::extension_repo::ExtensionRepoRepo;
-use kuro_data::extension_store::ExtensionStoreRepo;
 use kuro_prefs::pref::Pref;
 
 /// The identity of an installed extension package. Area 20 supplies it. `fingerprints` holds the signing
@@ -32,21 +30,6 @@ impl SigningKeys for MangaRepoKeys {
             Ok(repos) => repos.into_iter().map(|r| r.signing_key_fingerprint).collect(),
             Err(e) => {
                 tracing::warn!("cannot read extension repos for trust: {e:?}");
-                Vec::new()
-            }
-        }
-    }
-}
-
-/// Anime: the signing keys of the extension stores.
-pub struct AnimeStoreKeys(pub ExtensionStoreRepo);
-
-impl SigningKeys for AnimeStoreKeys {
-    fn signing_keys(&self) -> Vec<String> {
-        match self.0.all() {
-            Ok(stores) => stores.into_iter().map(|s| s.signing_key).collect(),
-            Err(e) => {
-                tracing::warn!("cannot read extension stores for trust: {e:?}");
                 Vec::new()
             }
         }

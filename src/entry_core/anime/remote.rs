@@ -33,6 +33,7 @@ use super::refresh::Trigger;
 use super::runner::{AnimeBackend, AnimeFetch, StubAnimeBackend};
 use super::season_fetch::fetch_episodes_of;
 use super::store::AnimeStore;
+use crate::browse::errors::limited;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
 
@@ -40,6 +41,10 @@ use crate::entry_core::errors::DetailError;
 pub trait AnimeSourceLookup: Send + Sync + 'static {
     /// The source, or `None` when its extension is not installed.
     fn remote(&self, source_id: i64) -> Option<Arc<dyn AnimeRemote>>;
+    /// The bare name of an installed source, for the sentences of a failed refresh. `None` reads "This source".
+    fn name(&self, _source_id: i64) -> Option<String> {
+        None
+    }
     /// The source line of the info box for an installed source. `None` falls back to the stub reading.
     fn info(&self, _source_id: i64) -> Option<SourceInfo> {
         None
@@ -86,17 +91,18 @@ impl LiveSources {
 }
 
 /// A live source as the domain's remote update asks it: its own combined updates. A panicking source fails its own
-/// refresh (`kuro_source::isolate`), so the page still gets its refresh result and offers Retry.
+/// refresh (`limited`: the panic guard and the 30 second limit), so the page always gets its refresh result and offers
+/// Retry.
 struct SourceRemote(Arc<dyn AnimeSource>);
 
 #[async_trait]
 impl AnimeRemote for SourceRemote {
     async fn episode_update(&self, anime: SAnime, episodes: Vec<SEpisode>, fetch_details: bool, fetch_episodes: bool) -> Result<SAnimeEpisodeUpdate, SourceError> {
-        kuro_source::isolate(self.0.anime_episode_update(anime, episodes, fetch_details, fetch_episodes)).await
+        limited(self.0.anime_episode_update(anime, episodes, fetch_details, fetch_episodes)).await
     }
 
     async fn season_update(&self, anime: SAnime, seasons: Vec<SAnime>, fetch_details: bool, fetch_seasons: bool) -> Result<SAnimeSeasonUpdate, SourceError> {
-        kuro_source::isolate(self.0.anime_season_update(anime, seasons, fetch_details, fetch_seasons)).await
+        limited(self.0.anime_season_update(anime, seasons, fetch_details, fetch_seasons)).await
     }
 }
 
@@ -107,6 +113,10 @@ impl AnimeSourceLookup for LiveSources {
 
     fn info(&self, source_id: i64) -> Option<SourceInfo> {
         self.find(source_id).map(|source| SourceInfo { name: source.display_name(), stub: false })
+    }
+
+    fn name(&self, source_id: i64) -> Option<String> {
+        self.find(source_id).map(|source| source.name().to_owned())
     }
 
     fn is_configurable(&self, source_id: i64) -> bool {
@@ -214,6 +224,7 @@ impl AnimeBackend for RemoteAnimeBackend {
             let Some(remote) = lookup.remote(anime.source) else {
                 return Err(DetailError::SourceNotInstalled);
             };
+            let name = lookup.name(anime.source).unwrap_or_default();
             let flags = FetchFlags {
                 fetch_details: plan.info,
                 fetch_episodes: plan.episodes,
@@ -222,9 +233,9 @@ impl AnimeBackend for RemoteAnimeBackend {
                 fetch_window: (0, 0),
             };
             match anime.fetch_type {
-                FetchType::Episodes => update.episodes(&anime, &*remote, flags).await.map(|r| r.new_episodes).map_err(detail_error),
+                FetchType::Episodes => update.episodes(&anime, &*remote, flags).await.map(|r| r.new_episodes).map_err(|e| detail_error(e, &name)),
                 FetchType::Seasons => {
-                    let seasons = update.seasons(&anime, &*remote, flags).await.map_err(detail_error)?.new_seasons;
+                    let seasons = update.seasons(&anime, &*remote, flags).await.map_err(|e| detail_error(e, &name))?.new_seasons;
                     // behaviour 6.4.1: with "update seasons on refresh" on, the episodes of the unfinished seasons follow
                     if season_episodes {
                         let episode_flags = FetchFlags { fetch_details: false, fetch_episodes: true, fetch_seasons: false, ..flags };
@@ -292,14 +303,11 @@ fn domain_error(e: DomainError) -> DetailError {
     DetailError::Other { class: "SQLiteException".to_owned(), message: Some(e.to_string()) }
 }
 
-/// The page's error for a failed remote update.
-fn detail_error(e: RemoteError) -> DetailError {
+/// The page's error for a failed remote update of the source called `source`.
+fn detail_error(e: RemoteError, source: &str) -> DetailError {
     match e {
-        RemoteError::Source(SourceError::NotInstalled(_)) => DetailError::SourceNotInstalled,
-        RemoteError::Source(SourceError::Http(code)) => DetailError::Http(i64::from(code)),
-        RemoteError::Source(SourceError::UnknownHost { host }) => DetailError::UnknownHost { online: true, host },
-        RemoteError::Source(SourceError::Cancelled) | RemoteError::Cancelled => DetailError::Cancelled,
-        RemoteError::Source(other) => DetailError::Other { class: "IOException".to_owned(), message: Some(other.to_string()) },
+        RemoteError::Source(error) => DetailError::from_source(source, error),
+        RemoteError::Cancelled => DetailError::Cancelled,
         RemoteError::Db(e) => domain_error(e),
         RemoteError::Fetch(message) => DetailError::Other { class: "Exception".to_owned(), message: Some(message) },
         RemoteError::NoEpisodes(_) => DetailError::NoEpisodes,
@@ -464,7 +472,7 @@ mod tests {
         let (_dir, store, id) = with_episodes(true, true, 1, 0);
         let backend = RemoteAnimeBackend::new(store.db(), &PrefStore::in_memory(), Arc::new(LiveSources::new(vec![Arc::new(Panics)])), rt.handle().clone());
         let result = rt.block_on(backend.fetch(id, PLAN, Trigger::Manual));
-        assert!(matches!(&result, Err(DetailError::Other { message: Some(m), .. }) if m.contains("panicked")), "{result:?}");
+        assert!(matches!(&result, Err(DetailError::Plain(text)) if text.starts_with("Panics ") && text.contains("isn't working right now")), "{result:?}");
     }
 
     #[test]
@@ -477,9 +485,9 @@ mod tests {
 
     #[test]
     fn an_error_of_each_kind_has_a_page_error() {
-        assert_eq!(detail_error(RemoteError::Source(SourceError::NotInstalled(1))), DetailError::SourceNotInstalled);
-        assert_eq!(detail_error(RemoteError::Cancelled), DetailError::Cancelled);
-        assert_eq!(detail_error(RemoteError::Source(SourceError::UnknownHost { host: "h".into() })), DetailError::UnknownHost { online: true, host: "h".into() });
-        assert!(matches!(detail_error(RemoteError::Fetch("x".into())), DetailError::Other { .. }));
+        assert_eq!(detail_error(RemoteError::Source(SourceError::NotInstalled(1)), "S"), DetailError::SourceNotInstalled);
+        assert_eq!(detail_error(RemoteError::Cancelled, "S"), DetailError::Cancelled);
+        assert!(matches!(detail_error(RemoteError::Source(SourceError::UnknownHost { host: "h".into() }), "S"), DetailError::Plain(_)));
+        assert!(matches!(detail_error(RemoteError::Fetch("x".into()), "S"), DetailError::Other { .. }));
     }
 }

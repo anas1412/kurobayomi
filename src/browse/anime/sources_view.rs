@@ -18,7 +18,7 @@ use crate::browse::icons::IconCache;
 use crate::browse::primitives::{EmptyAction, ToastSpec};
 use crate::browse::sources::{LOCAL_SOURCE_ID, Section, SourceRow, language_line, shows_latest};
 use crate::browse::sources_page::{header_label, section_list, sources_empty};
-use crate::browse::view::{list_row, source_row, spinner_row};
+use crate::browse::view::{list_row, loading_sources_row, source_row_with};
 
 /// What a press on the page does.
 pub struct AnimeSourcesNav {
@@ -62,7 +62,7 @@ impl AnimeSourcesPage {
         let empty = sources_empty();
         let stack = gtk::Stack::new();
         stack.set_vexpand(true);
-        stack.add_named(&spinner_row(), Some("spinner"));
+        stack.add_named(&loading_sources_row(), Some("spinner"));
         stack.add_named(&empty, Some("empty"));
         stack.add_named(&gtk::Box::new(gtk::Orientation::Vertical, 0), Some("error"));
         stack.add_named(&scroller, Some("list"));
@@ -218,7 +218,7 @@ impl Inner {
         }
 
         let language = language_line(section, &source);
-        let row = source_row(&source.name, language.as_deref(), icon, file.as_deref(), source.is_stub, Some(actions.upcast_ref()));
+        let row = source_row_with(&source.name, language.as_deref(), icon, file.as_deref(), source.is_stub, crate::browse::errors::is_failing(source.id), Some(actions.upcast_ref()));
         let (route, id) = (Rc::clone(&self.nav.route), source.id);
         list_row(&row, move || route(row_route(id, false)), || {})
     }

@@ -78,6 +78,12 @@ pub struct TopBarActions {
     pub on_overflow: Box<dyn Fn(usize)>,
 }
 
+/// The top bar before a chapter is known (the page list is loading, or the load failed): Back and the window buttons,
+/// with no title. The reader always has a bar, so the window can be dragged while it loads.
+pub fn build_bare_top_bar(on_back: impl Fn() + 'static) -> gtk::HeaderBar {
+    page_header::header(&gtk::Box::new(gtk::Orientation::Horizontal, 0), on_back)
+}
+
 /// The top bar: the themed header the player also uses (docs/design/player-reader.md). Back is on the left, the
 /// `<manga> - <chapter>` title is centred and opens the manga's page, and the bookmark and the menu are on the right.
 /// The bar is never hidden.
@@ -117,6 +123,8 @@ pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> gtk::HeaderBar {
     // pack_end puts the first widget packed at the far right: the menu, then the bookmark
     header.pack_end(&menu);
     header.pack_end(&bookmark);
+    // the buttons packed here came after page_header::header made its pass, so they need their own
+    crate::ui::no_sticky_focus(&header);
     header
 }
 

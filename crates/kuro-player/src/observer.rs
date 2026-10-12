@@ -14,8 +14,8 @@ pub enum PropFormat {
     Double,
 }
 
-/// The 34 observed properties, in source order (`AniyomiMPVView.kt:210-252`).
-pub const OBSERVED: [(&str, PropFormat); 34] = [
+/// The observed properties, in source order (`AniyomiMPVView.kt:210-252`). The `user-data/*` bridge is cut.
+pub const OBSERVED: [(&str, PropFormat); 19] = [
     ("chapter", PropFormat::Int),
     ("chapter-list", PropFormat::None),
     ("track-list", PropFormat::None),
@@ -35,21 +35,6 @@ pub const OBSERVED: [(&str, PropFormat); 34] = [
     ("paused-for-cache", PropFormat::Flag),
     ("seeking", PropFormat::Flag),
     ("eof-reached", PropFormat::Flag),
-    ("user-data/aniyomi/show_text", PropFormat::Str),
-    ("user-data/aniyomi/toggle_ui", PropFormat::Str),
-    ("user-data/aniyomi/show_panel", PropFormat::Str),
-    ("user-data/aniyomi/software_keyboard", PropFormat::Str),
-    ("user-data/aniyomi/set_button_title", PropFormat::Str),
-    ("user-data/aniyomi/reset_button_title", PropFormat::Str),
-    ("user-data/aniyomi/toggle_button", PropFormat::Str),
-    ("user-data/aniyomi/switch_episode", PropFormat::Str),
-    ("user-data/aniyomi/pause", PropFormat::Str),
-    ("user-data/aniyomi/seek_by", PropFormat::Str),
-    ("user-data/aniyomi/seek_to", PropFormat::Str),
-    ("user-data/aniyomi/seek_by_with_text", PropFormat::Str),
-    ("user-data/aniyomi/seek_to_with_text", PropFormat::Str),
-    ("user-data/aniyomi/launch_int_picker", PropFormat::Str),
-    ("user-data/current-anime/intro-length", PropFormat::Int),
 ];
 
 /// Format class of an observed property, or `None` for names outside the table.
@@ -98,28 +83,6 @@ pub fn property_event(name: &str, format: PropFormat, raw: RawValue) -> Option<M
         (PropFormat::Double, RawValue::Double(d)) => Some(MpvEvent::PropertyDouble(name, d)),
         (PropFormat::Double, RawValue::Int(i)) => Some(MpvEvent::PropertyDouble(name, i as f64)),
         _ => None,
-    }
-}
-
-/// Where an event is handled. `Bridge` is the `user-data/aniyomi/*` protocol (T-45a-020).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Route {
-    Bridge,
-    Controller,
-}
-
-pub fn route(event: &MpvEvent) -> Route {
-    match event {
-        MpvEvent::Property(name)
-        | MpvEvent::PropertyInt(name, _)
-        | MpvEvent::PropertyFlag(name, _)
-        | MpvEvent::PropertyStr(name, _)
-        | MpvEvent::PropertyDouble(name, _)
-            if name.starts_with("user-data/aniyomi/") =>
-        {
-            Route::Bridge
-        }
-        _ => Route::Controller,
     }
 }
 
@@ -257,10 +220,10 @@ mod tests {
     }
 
     #[test]
-    fn observes_all_34_with_their_formats() {
+    fn observes_all_19_with_their_formats() {
         let mut fake = FakeMpv::default();
         observe_all(&mut fake).unwrap();
-        assert_eq!(fake.observed.len(), 34);
+        assert_eq!(fake.observed.len(), 19);
         assert_eq!(fake.observed[0], ("chapter".to_owned(), PropFormat::Int));
         assert!(
             fake.observed
@@ -309,26 +272,6 @@ mod tests {
             property_event("pause", PropFormat::Flag, RawValue::Int(1)),
             None
         );
-    }
-
-    #[test]
-    fn fake_handle_routes_aniyomi_pause_to_bridge() {
-        let mut fake = FakeMpv::default();
-        observe_all(&mut fake).unwrap();
-        assert!(
-            fake.observed
-                .iter()
-                .any(|(n, _)| n == "user-data/aniyomi/pause")
-        );
-        let ev = property_event(
-            "user-data/aniyomi/pause",
-            PropFormat::Str,
-            RawValue::Str("pause".into()),
-        )
-        .unwrap();
-        assert_eq!(route(&ev), Route::Bridge);
-        let other = property_event("pause", PropFormat::Flag, RawValue::Flag(false)).unwrap();
-        assert_eq!(route(&other), Route::Controller);
     }
 
     #[test]

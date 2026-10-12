@@ -81,7 +81,7 @@ impl BrowseShell {
         let search = gtk::SearchEntry::new();
         search.set_width_chars(28);
 
-        let header = gtk::HeaderBar::new();
+        let header = crate::ui::header_bar();
         header.set_decoration_layout(Some(&crate::ui::decoration(false)));
         header.pack_start(&kind_row);
         header.set_title_widget(Some(&search));
@@ -218,7 +218,7 @@ impl Inner {
     }
 
     fn header_actions(self: &Rc<Self>) -> Vec<gtk::Widget> {
-        let filter = crate::ui::icon_button("view-filter-symbolic", &tr(MsgKey::action_filter));
+        let filter = crate::ui::icon_button("view-sort-descending-symbolic", &tr(MsgKey::action_filter));
         let weak = Rc::downgrade(self);
         filter.connect_clicked(move |_| {
             if let Some(inner) = weak.upgrade() {

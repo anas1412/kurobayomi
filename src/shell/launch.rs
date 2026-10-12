@@ -129,12 +129,6 @@ pub fn window_built(app: &gtk::Application, win: &gtk::ApplicationWindow) {
 
 /// Applies one request to the window.
 pub fn apply(app: &gtk::Application, win: &gtk::ApplicationWindow, request: &LaunchRequest) {
-    // the onboarding wizard is not left by a launch request: the window is only raised
-    let (names, shown) = crate::ui::page_stack();
-    if names.get(shown).is_some_and(|n| n == super::onboarding::PAGE_NAME) {
-        win.present();
-        return;
-    }
     match target_of(request) {
         Ok(Target::Link(link)) => crate::open_link::dispatch(app, win, &link.to_arg()),
         Ok(Target::Search { query, kind }) => {

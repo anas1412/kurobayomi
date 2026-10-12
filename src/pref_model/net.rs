@@ -1,11 +1,10 @@
-//! The one HTTP client of the extension store and repo pages. Both domain flows take a blocking GET behind a port
-//! ([`StoreHttp`] for the store index, [`HttpGet`] for `repo.json`), so the page runs them on a worker thread.
+//! The one HTTP client of the extension repo pages. The domain flow takes a blocking GET behind a port
+//! ([`HttpGet`] for an index), so the page runs it on a worker thread.
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use kuro_domain::extension_repo::HttpGet;
-use kuro_domain::extension_store::StoreHttp;
 
 /// A store document is limited to 16 MiB, as in `kuro-extensions`.
 const BODY_LIMIT: u64 = 16 * 1024 * 1024;
@@ -59,12 +58,6 @@ fn too_large() -> String {
     "The document is larger than 16 MiB".to_owned()
 }
 
-impl StoreHttp for BlockingHttp {
-    fn get(&self, url: &str) -> Result<Vec<u8>, String> {
-        self.bytes(url)
-    }
-}
-
 impl HttpGet for BlockingHttp {
     fn get_text(&self, url: &str) -> Result<String, String> {
         self.bytes(url).and_then(|b| String::from_utf8(b).map_err(|e| e.to_string()))
@@ -97,7 +90,7 @@ mod tests {
     fn a_success_returns_the_body_bytes_and_text() {
         let http = BlockingHttp::new();
         let url = serve_once("200 OK", "{\"a\":1}");
-        assert_eq!(StoreHttp::get(&http, &url).expect("body"), b"{\"a\":1}".to_vec());
+        assert_eq!(http.bytes(&url).expect("body"), b"{\"a\":1}".to_vec());
         let url = serve_once("200 OK", "hello");
         assert_eq!(http.get_text(&url).expect("text"), "hello");
     }
@@ -106,6 +99,6 @@ mod tests {
     fn a_failing_status_is_the_error_text() {
         let http = BlockingHttp::new();
         let url = serve_once("404 Not Found", "nope");
-        assert_eq!(StoreHttp::get(&http, &url), Err("HTTP 404".to_owned()));
+        assert_eq!(http.bytes(&url), Err("HTTP 404".to_owned()));
     }
 }

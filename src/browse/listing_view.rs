@@ -363,9 +363,11 @@ impl Inner {
             (listing.query().clone(), listing.filters().clone())
         };
         let load = self.deps.loader.load(query, filters, ask.page);
+        let name = self.deps.source_name.clone();
         let (generation, tx) = self.tasks.borrow().sender();
         self.tasks.borrow_mut().spawn(async move {
-            let result = load.await;
+            // whatever the loader does (fail, hang, panic) the spinner ends with a sentence and the Retry button
+            let result = super::errors::settle(super::errors::BACKSTOP, &name, load).await;
             let _ = tx.send(Tagged { generation, event: Loaded { ask_generation: ask.generation, result } }).await;
         });
         self.render();
@@ -700,10 +702,9 @@ pub(crate) mod tests {
             }
         }
         buttons(rig.view.inner.error_slot.upcast_ref(), &mut found);
-        assert_eq!(found.len(), 2, "retry and open in web view; there is no help page to open");
-        found[1].emit_clicked();
-        assert_eq!(*rig.actions.borrow(), [EmptyAction::OpenInWebView], "only retry is handled inside the view");
+        assert_eq!(found.len(), 1, "retry is the only button; there is no help page to open");
         found[0].emit_clicked();
+        assert!(rig.actions.borrow().is_empty(), "retry is handled inside the view");
         assert!(pump(|| shown(&rig) == "items"), "retry asks the failed page again");
     }
 

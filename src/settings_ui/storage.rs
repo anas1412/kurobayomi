@@ -57,10 +57,11 @@ pub fn accept_choice(path: &Path) -> Result<(), &'static str> {
     tempfile::tempfile_in(path).map(drop).map_err(|_| REFUSED)
 }
 
-/// The storage manager over the stored base folder (the mpv-config tree and the downloads resolve through it).
+/// The storage manager over the stored base folder (the mpv-config tree and the downloads resolve through it). Nothing
+/// stored means the default storage folder.
 pub fn manager(store: &PrefStore) -> Option<StorageManager> {
     let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
-    Some(StorageManager::open(store, paths.data_dir()))
+    Some(StorageManager::open(store, paths.default_storage_dir()))
 }
 
 /// Stores `path` as the base folder and creates the mpv-config tree under it. A folder that cannot be used is refused.
@@ -96,11 +97,19 @@ fn choose_folder(store: PrefStore, changed: Rc<dyn Fn()>) {
     });
 }
 
-/// The stored folder and whether it can be listed; `None` while nothing (decodable) is stored.
+/// The folder in use and whether it can be listed. Nothing stored means the default storage folder, which is created on
+/// first use, so it counts as usable.
 fn stored(prefs: &Prefs) -> Option<(String, bool)> {
     let raw = Pref::new(prefs.store().clone(), STORAGE_DIR_KEY, String::new()).get();
-    let path = decode(&raw)?;
-    Some((path.to_string_lossy().into_owned(), is_readable_dir(&path)))
+    match decode(&raw) {
+        Some(path) => Some((path.to_string_lossy().into_owned(), is_readable_dir(&path))),
+        None => default_storage().map(|path| (path.to_string_lossy().into_owned(), true)),
+    }
+}
+
+/// The default storage folder, `None` when no home folder exists.
+fn default_storage() -> Option<PathBuf> {
+    kuro_platform::linux::LinuxPaths::system().ok().map(|paths| paths.default_storage_dir())
 }
 
 /// The banner row for a chosen base folder that is gone, to put above the page (E-SY-05).
@@ -154,7 +163,8 @@ mod tests {
     fn the_row_reads_the_stored_folder_and_a_gone_one_shows_a_banner() {
         let prefs = Prefs::in_memory();
         let first = rows(&prefs, Rc::new(|| {}));
-        assert_eq!(subtitle_of(&first).as_deref(), Some(NO_LOCATION));
+        let default = default_storage().map(|path| path.to_string_lossy().into_owned());
+        assert_eq!(subtitle_of(&first), default, "nothing stored shows the default storage folder");
         assert_eq!(first.len(), 2);
         assert!(banner_row(&prefs).is_none(), "no banner while nothing is chosen");
         prefs.store().set_raw(STORAGE_DIR_KEY, encoded("/no/such/kuro"));

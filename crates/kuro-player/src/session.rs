@@ -1,6 +1,6 @@
 //! The player session: the non-GTK half of the player window (area 45 `PlayerActivity`). It owns
 //! the mpv host and the `PlayerState`, and joins the pure modules into the runtime paths: observer
-//! event, bridge parse, dispatch and reset (T-45a-020); launch (T-45a-070, T-45a-011); the
+//! event, dispatch (T-45a-020); launch (T-45a-070, T-45a-011); the
 //! `FILE_LOADED` steps (T-45a-013, T-45a-016); filters, fonts, volume restore, screenshots and the
 //! external-player run (T-45a-061). The GTK window forwards events here and applies what comes back.
 
@@ -12,7 +12,6 @@ use std::time::Duration;
 use kuro_platform::media::MediaCommand;
 use kuro_source_http::local_server::LocalHandler;
 
-use crate::bridge::{self, BridgeCommand};
 use crate::chapters::{self, Segment};
 use crate::completion::Completion;
 use crate::desktop::Desktop;
@@ -24,7 +23,7 @@ use crate::ipc;
 use crate::load::{FileLoadedSteps, VideoSpec, loadfile_command, run_file_loaded};
 use crate::local_server::{LocalServer, prepare_url};
 use crate::mpv::{MpvError, MpvHandle, PropertySink, PropertySource};
-use crate::observer::{MpvEvent, Route, observe_all, route};
+use crate::observer::{MpvEvent, observe_all};
 use crate::options::{
     FILTER_NAMES, PlayerPrefs, VideoChain, filter_write, get_decoder, startup_settings,
     update_decoder,
@@ -32,7 +31,6 @@ use crate::options::{
 use crate::progress::{self, SecondAction};
 use crate::screenshot::screenshot_result;
 use crate::seek::absolute_flag;
-use crate::session_init::UserData;
 use crate::skip::{Label, SkipConfig, SkipIntro, SkipSeek, Tap, Tick};
 use crate::state::PlayerState;
 use crate::system_av::volume_max_write;
@@ -57,8 +55,6 @@ pub enum FileLoadedStep {
 pub enum Dispatch {
     /// The window is exiting, so the event was dropped.
     Dropped,
-    /// A `user-data/aniyomi/*` request. The property was already reset to empty.
-    Bridge(BridgeCommand),
     /// `FILE_LOADED` ran. The metadata options were applied and the side tracks were added.
     FileLoaded {
         pending: Vec<FileLoadedStep>,
@@ -105,7 +101,6 @@ pub struct Session<H> {
     /// The trackers of the playing anime and the ports a seen episode is sent through.
     pub tracking: Tracking,
     loaded: Loaded,
-    user_data: Option<UserData>,
     skip_config: SkipConfig,
     skip: SkipIntro,
     completion: Completion,
@@ -125,7 +120,6 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
             state: PlayerState::default(),
             tracking: Tracking::default(),
             loaded: Loaded::default(),
-            user_data: None,
             skip_config: SkipConfig::default(),
             skip: SkipIntro::new(SkipConfig::default()),
             completion: Completion::default(),
@@ -134,12 +128,6 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
             gpu: GpuKind::default(),
             desktop: Desktop::default(),
         }
-    }
-
-    /// The `user-data/current-anime/*` values the next load writes (T-45b-071). They come from the
-    /// init plan of the episode.
-    pub fn set_user_data(&mut self, user_data: UserData) {
-        self.user_data = Some(user_data);
     }
 
     /// Sets the skip-intro preferences and starts the machine again.
@@ -210,9 +198,6 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
             subtitles: video.subtitle_tracks.clone(),
             timestamps: video.timestamps.clone(),
         };
-        if let Some(user_data) = &self.user_data {
-            user_data.apply(&self.host);
-        }
         if let Some(command) = loadfile_command(Some(&spec)) {
             let args: Vec<&str> = command.iter().map(String::as_str).collect();
             execute(&self.state, &self.host, &args)?;
@@ -220,14 +205,10 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
         Ok(())
     }
 
-    /// Handles one drained mpv event. A bridge property is parsed and, when it carries a value,
-    /// reset to empty so a repeated identical request fires again.
+    /// Handles one drained mpv event.
     pub fn on_event(&mut self, event: MpvEvent) -> Dispatch {
         if !accepts_event(&self.state) {
             return Dispatch::Dropped;
-        }
-        if route(&event) == Route::Bridge {
-            return self.on_bridge(&event);
         }
         match &event {
             MpvEvent::FileLoaded => self.on_file_loaded(),
@@ -245,20 +226,6 @@ impl<H: PropertySink + PropertySource + CommandSink> Session<H> {
             }
             _ => Dispatch::Forward(event),
         }
-    }
-
-    fn on_bridge(&mut self, event: &MpvEvent) -> Dispatch {
-        let MpvEvent::PropertyStr(name, value) = event else {
-            return Dispatch::Handled;
-        };
-        let command = bridge::parse(name, value);
-        if bridge::reset_needed(value) {
-            let (property, empty) = bridge::reset_write(name);
-            if let Err(e) = self.host.set_str(&property, empty) {
-                tracing::error!("failed to reset {property}: {e}");
-            }
-        }
-        command.map_or(Dispatch::Handled, Dispatch::Bridge)
     }
 
     fn on_file_loaded(&mut self) -> Dispatch {
@@ -627,10 +594,6 @@ mod tests {
         }
     }
 
-    fn bridge_event(name: &str, value: &str) -> MpvEvent {
-        MpvEvent::PropertyStr(format!("{}{name}", bridge::PREFIX), value.to_owned())
-    }
-
     #[test]
     fn media_keys_drive_the_player_and_episode_switches_go_to_the_window() {
         let session = Session::new(Fake::default());
@@ -662,44 +625,11 @@ mod tests {
     }
 
     #[test]
-    fn bridge_event_is_parsed_dispatched_and_reset_to_empty() {
-        let mut session = Session::new(Fake::default());
-        let out = session.on_event(bridge_event("show_text", "\"Hi\""));
-        assert_eq!(
-            out,
-            Dispatch::Bridge(BridgeCommand::ShowText("Hi".to_owned()))
-        );
-        assert_eq!(
-            *session.host.writes.borrow(),
-            vec![("user-data/aniyomi/show_text".to_owned(), String::new())]
-        );
-        // The reset itself comes back as an empty value: nothing to run, nothing to reset.
-        assert_eq!(
-            session.on_event(bridge_event("show_text", "")),
-            Dispatch::Handled
-        );
-        assert_eq!(session.host.writes.borrow().len(), 1);
-    }
-
-    #[test]
-    fn unknown_bridge_value_is_reset_but_runs_nothing() {
-        let mut session = Session::new(Fake::default());
-        assert_eq!(
-            session.on_event(bridge_event("toggle_ui", "sideways")),
-            Dispatch::Handled
-        );
-        assert_eq!(session.host.writes.borrow().len(), 1);
-    }
-
-    #[test]
     fn exiting_window_drops_events() {
         let mut session = Session::new(Fake::default());
         session.state.is_exiting = true;
-        assert_eq!(
-            session.on_event(bridge_event("show_text", "x")),
-            Dispatch::Dropped
-        );
-        assert!(session.host.writes.borrow().is_empty());
+        assert_eq!(session.on_event(MpvEvent::Seek), Dispatch::Dropped);
+        assert!(!session.state.is_loading);
     }
 
     #[test]
@@ -1014,30 +944,14 @@ mod tests {
     }
 
     #[test]
-    fn load_writes_the_current_anime_user_data_with_its_types() {
+    fn load_sends_one_loadfile_command_and_writes_no_properties() {
         let mut session = Session::new(Fake::default());
-        session.set_user_data(UserData {
-            anime_title: "Show".to_owned(),
-            intro_length: 90,
-            category: "Action, Drama".to_owned(),
-            episode_number: 2.5,
-        });
         session
             .load_video(&video("file:///a.mkv"), &mut LocalServer::default(), || None)
             .unwrap();
-        let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
-        assert_eq!(
-            *session.host.writes.borrow(),
-            vec![
-                pair("user-data/current-anime/anime-title", "Show"),
-                pair("user-data/current-anime/intro-length", "i64:90"),
-                pair("user-data/current-anime/category", "Action, Drama"),
-                pair("user-data/current-anime/episode-number", "f64:2.5"),
-            ]
-        );
+        assert!(session.host.writes.borrow().is_empty());
         assert_eq!(session.host.commands.borrow().len(), 1);
     }
-
 
     struct Ports(std::rc::Rc<RefCell<Vec<String>>>);
 

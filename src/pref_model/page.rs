@@ -70,7 +70,7 @@ pub fn body(tree: &[Preference]) -> Built {
                 for item in &group_entry.items {
                     append_item(&list, item, &mut targets);
                 }
-                // a request for the group's title (the onboarding restore asks for "Backup and restore") flashes its
+                // a request for the group's title (the restore link asks for "Backup and restore") flashes its
                 // first row, because a group header is not a row
                 if let Some(first) = list.row_at_index(0) {
                     if !group_entry.title.trim().is_empty() {
@@ -162,6 +162,7 @@ fn header_bar(title: &str, on_back: Option<Rc<dyn Fn()>>) -> HeaderBar {
         button.connect_clicked(move |_| back());
         bar.pack_start(&button);
     }
+    crate::ui::no_sticky_focus(&bar);
     bar
 }
 

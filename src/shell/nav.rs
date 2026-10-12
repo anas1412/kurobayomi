@@ -20,7 +20,6 @@ pub enum Route {
     GlobalSearch { kind: Kind, query: String },
     Settings { dest: Option<String> },
     Downloads,
-    Onboarding,
     RestoreBackup { uri: String },
 }
 

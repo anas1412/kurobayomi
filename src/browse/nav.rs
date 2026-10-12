@@ -46,11 +46,10 @@ mod tests {
     #[test]
     fn no_action_opens_an_aniyomi_guide_and_the_others_open_nothing() {
         use super::super::primitives::EmptyAction;
-        for action in [EmptyAction::LocalHelp, EmptyAction::Help, EmptyAction::Retry, EmptyAction::OpenInWebView] {
+        for action in [EmptyAction::LocalHelp, EmptyAction::Help, EmptyAction::Retry] {
             assert!(action_url(action).is_none_or(|url| !url.contains("aniyomi.org")), "{action:?}");
         }
         assert_eq!(action_url(EmptyAction::Retry), None);
-        assert_eq!(action_url(EmptyAction::OpenInWebView), None);
         assert_eq!(action_url(EmptyAction::Help), help_url());
         assert_eq!(action_url(EmptyAction::LocalHelp), help_url());
     }

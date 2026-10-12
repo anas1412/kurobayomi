@@ -1,6 +1,6 @@
 //! The player's control bar and its behaviour. The bottom bar hides after three seconds without mouse movement or key
-//! press (`autohide`); the header never hides. A click on the video toggles pause and a double click toggles
-//! fullscreen. The buttons follow the playing episode and file: previous and next are enabled only with a neighbour,
+//! press (`autohide`, 2.5 seconds in fullscreen, where the pointer hides with it). The header hides only in fullscreen.
+//! A click on the video toggles pause and a double click toggles fullscreen. The buttons follow the playing episode and file: previous and next are enabled only with a neighbour,
 //! the quality button shows only for an online episode, and the speed and chapter buttons show what plays now.
 //! Main thread only; the shared logic is in the parent module (`toggle_pause`, `toggle_fullscreen`, `adjacent`).
 
@@ -128,14 +128,24 @@ pub fn wire(parts: Parts, shared: &Shared) {
     live.episode_changed(shared);
     let (page, shared) = (parts.page.downgrade(), Rc::clone(shared));
     glib::timeout_add_local(TICK, move || {
-        if page.upgrade().is_none() || shared.borrow().closed {
+        let Some(page) = page.upgrade() else {
+            return glib::ControlFlow::Break;
+        };
+        if shared.borrow().closed {
             return glib::ControlFlow::Break;
         }
         if live.episode.get() != shared.borrow().episode_id {
             live.episode_changed(&shared);
         }
-        if autohide::hidden(activity.get().elapsed(), live.menu_open()) {
+        let fullscreen = super::window_of(&page).is_some_and(|w| w.is_fullscreen());
+        let hide = autohide::hidden(activity.get().elapsed(), live.menu_open(), fullscreen);
+        if hide {
             live.bar.set_visible(false);
+        }
+        // in fullscreen the pointer hides with the bar, and comes back with it
+        let pointer_hidden = fullscreen && hide;
+        if page.cursor().is_some() != pointer_hidden {
+            page.set_cursor_from_name(pointer_hidden.then_some("none"));
         }
         sheets::speed::refresh(&live.speed, &shared);
         sheets::chapters::refresh(&live.chapters, &shared);

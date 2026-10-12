@@ -1,5 +1,5 @@
 //! Settings preference model and widgets (area 47b): the page tree, veto-gated writes, the search-jump
-//! highlight, the More tab, the onboarding gate and the theme pickers. Widgets are thin; logic is pure and tested.
+//! highlight, the More tab and the theme pickers. Widgets are thin; logic is pure and tested.
 //!
 //! `settings::body` builds these screens through [`pages::body`]; Escape, Alt+Left and the mouse back button reach
 //! the settings shell through [`shell::go_back`].
@@ -14,7 +14,6 @@ pub mod language;
 pub mod model;
 pub mod net;
 pub mod more;
-pub mod onboarding;
 pub mod page;
 pub mod pages;
 pub mod queue_state;

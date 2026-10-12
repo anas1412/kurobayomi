@@ -155,6 +155,11 @@ impl Row {
         }
     }
 
+    /// The decoded size of the row's page, `None` until the page is shown. The webtoon strip sizes the row from it.
+    pub fn source_size(&self) -> Option<(u32, u32)> {
+        self.image.as_ref().and_then(|i| i.view.source_size())
+    }
+
     /// Whether the row shows its error card (a webtoon row is then 0.8 of the viewport tall).
     pub fn errored(&self) -> bool {
         self.image.as_ref().is_some_and(|i| i.errored.get())
@@ -208,12 +213,15 @@ struct Image {
 }
 
 impl Image {
-    fn build(base: &str, page: &Rc<ReaderPage>, host: &PageHost, located: Located) -> Rc<Self> {
+    fn build(_base: &str, page: &Rc<ReaderPage>, host: &PageHost, located: Located) -> Rc<Self> {
         let stack = gtk::Stack::new();
-        let status_text = label(base);
+        // A page that is not shown yet is a centred spinner on a neutral surface and nothing else; the row keeps the
+        // height its viewer reserved for it.
         let indicator = LoadingIndicator::new();
-        let status = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        status.append(&status_text);
+        let status = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        status.add_css_class("background");
+        status.set_hexpand(true);
+        status.set_vexpand(true);
         status.append(indicator.widget());
         stack.add_named(&status, Some("status"));
 
@@ -256,6 +264,8 @@ impl Image {
         image.view.connect_image_loaded(move || {
             if let Some(image) = weak.upgrade() {
                 image.set_child("page");
+                // the row now has the page's own height
+                (image.on_layout)();
             }
         });
         let weak = image.me.clone();
@@ -802,7 +812,7 @@ mod tests {
             *fetch.file.borrow_mut() = Some(png_file("retried"));
             fetch.status.set(PageStatus::Ready);
             assert!(pump_until(|| visible(&row) == "page"));
-            assert_eq!(layouts.get(), 2, "leaving the error card is reported too");
+            assert_eq!(layouts.get(), 3, "leaving the error card is reported, and so is the page's own size");
         });
     }
 

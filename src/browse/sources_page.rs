@@ -14,7 +14,7 @@ use tokio::sync::watch;
 use super::glue::{follow_ready, keep_alive};
 use super::icons::{IconCache, SourceIcon};
 use super::sources::{ListInput, LOCAL_SOURCE_ID, Section, SourceRow, language_line, section_title, shows_latest, source_list};
-use super::view::{list_row, source_row, spinner_row};
+use super::view::{list_row, loading_sources_row, source_row_with};
 
 /// The installed sources and the preferences that shape the list, as one snapshot of the models.
 #[derive(Clone, Debug, Default)]
@@ -68,7 +68,7 @@ impl SourcesPage {
         let scroller = crate::ui::scrolled(&column);
         let empty = sources_empty();
         let stack = gtk::Stack::new();
-        stack.add_named(&spinner_row(), Some("spinner"));
+        stack.add_named(&loading_sources_row(), Some("spinner"));
         stack.add_named(&empty, Some("empty"));
         stack.add_named(&scroller, Some("list"));
         let inner = Rc::new(Inner {
@@ -170,7 +170,7 @@ impl Inner {
         }
 
         let language = language_line(section, &source);
-        let row = source_row(&source.name, language.as_deref(), icon, file.as_deref(), source.is_stub, Some(actions.upcast_ref()));
+        let row = source_row_with(&source.name, language.as_deref(), icon, file.as_deref(), source.is_stub, crate::browse::errors::is_failing(source.id), Some(actions.upcast_ref()));
         let (open, id) = (Rc::downgrade(self), source.id);
         list_row(
             &row,

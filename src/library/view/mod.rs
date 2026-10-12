@@ -7,6 +7,7 @@ mod card;
 mod dialog;
 pub mod sheet;
 mod tabs;
+mod welcome;
 
 use std::cell::{Cell as FlagCell, RefCell};
 use std::collections::{BTreeSet, HashMap};
@@ -140,8 +141,10 @@ struct Inner {
     empty: gtk::Box,
     empty_label: gtk::Label,
     global_button: gtk::Button,
-    /// The getting-started guide on an empty library (T-37a-053).
-    guide_button: gtk::Button,
+    /// The action of an empty library that has a repository: open Browse (T-37a-053).
+    empty_action: gtk::Button,
+    /// The welcome view of an empty library with no repository yet (docs/design/app-flow.md, first run).
+    welcome: welcome::Welcome,
     bar: gtk::Revealer,
     bar_label: gtk::Label,
 }
@@ -210,10 +213,12 @@ impl LibraryView {
         empty.append(&empty_icon);
         empty.append(&empty_label);
         empty.append(&global_button);
-        let guide_button = gtk::Button::with_label(&tr(MsgKey::getting_started_guide));
-        guide_button.set_visible(false);
-        guide_button.set_halign(gtk::Align::Center);
-        empty.append(&guide_button);
+        let empty_action = gtk::Button::with_label(&tr(MsgKey::browse));
+        empty_action.add_css_class("suggested-action");
+        empty_action.set_visible(false);
+        empty_action.set_halign(gtk::Align::Center);
+        empty.append(&empty_action);
+        let welcome = welcome::Welcome::new();
 
         let bar_label = gtk::Label::new(None);
         bar_label.set_hexpand(true);
@@ -225,7 +230,7 @@ impl LibraryView {
         sel_header.set_margin_top(layout::SPACE_S);
         sel_header.set_visible(false);
         sel_header.append(&bar_label);
-        let download_button = gtk::MenuButton::builder().label(tr(MsgKey::action_download)).build();
+        let download_button = crate::ui::quiet_menu(gtk::MenuButton::builder().label(tr(MsgKey::action_download)).build());
         let action_bar = gtk::ActionBar::new();
         let bar = gtk::Revealer::new();
         bar.set_transition_type(gtk::RevealerTransitionType::SlideUp);
@@ -240,6 +245,7 @@ impl LibraryView {
         root.append(&hint);
         root.append(&scroller);
         root.append(&empty);
+        root.append(welcome.widget());
         root.append(&bar);
 
         // the library opens on the tab it was left on (T-37a-017); an id that is no longer a page falls back to the first
@@ -272,7 +278,8 @@ impl LibraryView {
             empty,
             empty_label,
             global_button,
-            guide_button,
+            empty_action,
+            welcome,
             bar,
             bar_label,
         }));
@@ -649,6 +656,7 @@ impl LibraryView {
             }
             download_button.set_popover(Some(&popover));
             bar_box.pack_start(&download_button);
+            crate::ui::no_sticky_focus(&bar_box);
         }
         let weak_global = weak.clone();
         let global = self.inner.borrow().global_button.clone();
@@ -660,16 +668,16 @@ impl LibraryView {
                 open(&query);
             }
         });
-        let guide = self.inner.borrow().guide_button.clone();
-        guide.connect_clicked(|button| {
-            let window = button.root().and_then(|r| r.downcast::<gtk::Window>().ok());
-            gtk::UriLauncher::new(crate::shell::onboarding::GETTING_STARTED_URL).launch(
-                window.as_ref(),
-                gio::Cancellable::NONE,
-                |_| {},
-            );
-        });
+        // shown only once a repository exists (`render`); without one the welcome view leads the user
+        let action = self.inner.borrow().empty_action.clone();
+        action.connect_clicked(|_| crate::ui::open("browse"));
     }
+}
+
+/// Whether any manga or anime source repository is set up. Decides what the empty library offers.
+fn repositories_exist() -> bool {
+    let sources = kuro_prefs::source::SourcePrefs::new(crate::data::app().base.store().clone());
+    !sources.manga_extension_repos.get().is_empty() || !sources.anime_extension_repos.get().is_empty()
 }
 
 /// Disables the refresh button while a pass of this kind runs.
@@ -806,13 +814,18 @@ fn render(inner: &Rc<RefCell<Inner>>) {
         let items: Vec<LibraryItem> = pages.get(index).map_or_else(Vec::new, |p| p.items.clone());
         let grid_cells = cells::cells(&items, st.query.as_deref());
         let global_label = cells::global_label(st.query.as_deref().unwrap_or_default());
-        let (empty_text, show_global, show_guide) = if items.is_empty() && st.built.is_some() {
+        let (empty_text, show_global, empty_action) = if items.is_empty() && st.built.is_some() {
             let filters = st.built.as_ref().is_some_and(|b| b.has_active_filters);
             let library_empty = st.built.as_ref().is_none_or(|b| b.is_library_empty());
             let page = empty_page(search_active, filters, library_empty);
-            (page.text(), shows_global_search(search_active, true), actions::shows_getting_started(page))
+            let action = actions::empty_library_action(page, repositories_exist());
+            let text = match action {
+                Some(actions::EmptyLibraryAction::Browse) => tr(MsgKey::library_empty_search_hint),
+                _ => page.text().to_owned(),
+            };
+            (text, shows_global_search(search_active, true), action)
         } else {
-            ("", false, false)
+            (String::new(), false, None)
         };
         let hidden = st.selection.hidden_count(&items);
         let selected = st.selection.len();
@@ -829,7 +842,7 @@ fn render(inner: &Rc<RefCell<Inner>>) {
             grid_cells,
             empty_text,
             show_global,
-            show_guide,
+            empty_action,
             global_label,
             bar_text,
             bar_open: !st.selection.is_empty(),
@@ -870,12 +883,18 @@ fn render(inner: &Rc<RefCell<Inner>>) {
     store.splice(0, store.n_items(), objects.as_slice());
     let has_items = !view.items.is_empty();
     scroller.set_visible(has_items);
-    empty.set_visible(!has_items);
-    empty_label.set_label(view.empty_text);
+    let welcome_shown = !has_items && view.empty_action == Some(actions::EmptyLibraryAction::AddRepository);
+    empty.set_visible(!has_items && !welcome_shown);
+    empty_label.set_label(&view.empty_text);
     global.set_visible(view.show_global);
     global.set_label(&view.global_label);
-    let guide = inner.borrow().guide_button.clone();
-    guide.set_visible(view.show_guide);
+    let (action, welcome) = {
+        let st = inner.borrow();
+        (st.empty_action.clone(), st.welcome.clone())
+    };
+    action.set_visible(view.empty_action == Some(actions::EmptyLibraryAction::Browse));
+    action.set_label(&tr(MsgKey::browse));
+    welcome.widget().set_visible(welcome_shown);
     bar_label.set_label(&view.bar_text);
     bar.set_reveal_child(view.bar_open);
     header.iter().for_each(|w| w.set_visible(!view.bar_open));
@@ -944,9 +963,9 @@ struct Rendered {
     index: usize,
     items: Vec<LibraryItem>,
     grid_cells: Vec<Cell>,
-    empty_text: &'static str,
+    empty_text: String,
     show_global: bool,
-    show_guide: bool,
+    empty_action: Option<actions::EmptyLibraryAction>,
     global_label: String,
     bar_text: String,
     bar_open: bool,

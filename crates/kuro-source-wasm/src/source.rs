@@ -105,7 +105,7 @@ fn load(
         });
     }
     let engine = limits::engine()?;
-    let component = Component::new(engine, bytes).map_err(|e| WasmError::Compile(format!("{e:#}")))?;
+    let component = crate::cache::compile(engine, bytes)?;
     if component.get_export_index(None, "invoke").is_none() {
         return Err(WasmError::Instantiate("missing export invoke".to_owned()));
     }
@@ -325,8 +325,14 @@ impl AnimeSource for WasmAnimeSource {
     }
 
     /// The package has no `details` or `seasons` op, so a combined update must not call them.
+    /// The `details` op is optional: a plug-in without it keeps what the listing gave (see `anime_details`).
     fn supports_details(&self) -> bool {
-        false
+        true
+    }
+
+    async fn anime_details(&self, anime: &SAnime) -> Result<SAnime, SourceError> {
+        let wire: Option<WireAnime> = self.0.optional("details", json!({ "anime": WireAnime::from(anime) })).await?;
+        Ok(wire.map_or_else(|| anime.clone(), |wire| SAnime { url: anime.url.clone(), ..SAnime::from(wire) }))
     }
 
     fn supports_season_list(&self) -> bool {

@@ -117,13 +117,7 @@ impl PlayerView {
                     )
                 })
                 .map(chapter_button_label),
-            primary: primary_slot(
-                state.skip_intro_text.as_deref(),
-                state
-                    .primary_button
-                    .as_ref()
-                    .map(|_| state.primary_button_title.as_str()),
-            ),
+            primary: primary_slot(state.skip_intro_text.as_deref()),
             speed_label: speed::speed_label(state.playback_speed),
             aspect_label: crate::aspect::pill_text(options.aspect),
         }

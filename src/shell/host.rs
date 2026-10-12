@@ -117,7 +117,7 @@ impl Shell {
             }
         };
         let app = crate::data::app();
-        match crate::downloads::start(&paths, self.downloads.clone(), Arc::clone(&app.anime_db), app.base.store().clone(), notifier) {
+        match crate::downloads::start(&paths, self.downloads.clone(), Arc::clone(&app.manga_db), Arc::clone(&app.anime_db), app.base.store().clone(), notifier) {
             Ok(started) => {
                 if let Some(queue) = &started.queues.anime {
                     crate::entry_core::anime::download_backend::install_queue(queue.clone());

@@ -126,6 +126,12 @@ pub enum Command {
         reply: oneshot::Sender<bool>,
     },
     ResumeAfterMutation,
+    /// Startup restore (lane C): appends `downloads` as QUEUE (repeats skipped, nothing starts) and replaces the saved
+    /// rows that stay out of the queue with `kept_rows`.
+    Restore {
+        downloads: Vec<QueuedDownload>,
+        kept_rows: Vec<QueueRow>,
+    },
     Shutdown,
 }
 
@@ -281,6 +287,12 @@ impl Downloader {
                 let _ = reply.send(paused);
             }
             Command::ResumeAfterMutation => self.resume_run().await,
+            Command::Restore { downloads, kept_rows } => {
+                self.kept_rows = kept_rows;
+                self.queue.add_all(downloads);
+                self.persist().await;
+                self.emit(DownloadEvent::QueueChanged);
+            }
             Command::Shutdown => {}
         }
     }
@@ -716,8 +728,11 @@ impl Downloader {
             })
             .collect();
         let mut rows = rows;
+        // A kept row that is queued again (a chapter enqueued before the restore) is written once, as the queue row.
+        let queued: HashSet<i64> = rows.iter().map(|row| row.chapter_id).collect();
         let base = rows.len() as i64;
-        rows.extend(self.kept_rows.iter().enumerate().map(|(i, row)| QueueRow { position: base + i as i64, ..row.clone() }));
+        let kept = self.kept_rows.iter().filter(|row| !queued.contains(&row.chapter_id));
+        rows.extend(kept.enumerate().map(|(i, row)| QueueRow { position: base + i as i64, ..row.clone() }));
         let store = self.store.clone();
         match tokio::task::spawn_blocking(move || store.replace_all(&rows)).await {
             Ok(Ok(())) => {}

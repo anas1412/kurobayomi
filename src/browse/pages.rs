@@ -512,7 +512,7 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     }
     let progress = gtk::ProgressBar::new();
     progress.set_visible(false);
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).valign(gtk::Align::Start).build();
     column.set_margin_start(12);
     column.set_margin_end(12);
     let view = Rc::new(SearchView { column, progress, chips: Cell::new(nav.chips), nav, last: RefCell::new(None), typed: Rc::default() });
@@ -614,7 +614,7 @@ fn draw(entry: &gtk::SearchEntry, view: &SearchView, snapshot: &GlobalSearchSnap
 }
 
 fn search_row(row: &SearchRow, nav: &GlobalSearchNav, typed: Rc<RefCell<String>>) -> gtk::Box {
-    let section = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).vexpand(false).valign(gtk::Align::Start).build();
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let titles = gtk::Box::new(gtk::Orientation::Vertical, 0);
     titles.set_hexpand(true);
@@ -642,7 +642,7 @@ fn search_row(row: &SearchRow, nav: &GlobalSearchNav, typed: Rc<RefCell<String>>
             section.append(&gtk::Label::builder().label(tr(MsgKey::no_results_found)).xalign(0.0).css_classes(["dim-label"]).build());
         }
         SearchState::Results(items) => {
-            let covers = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let covers = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).valign(gtk::Align::Start).vexpand(false).build();
             for item in items {
                 let cell = super::view::grid_cell_lines(
                     Some(item),
@@ -652,14 +652,16 @@ fn search_row(row: &SearchRow, nav: &GlobalSearchNav, typed: Rc<RefCell<String>>
                     SEARCH_CARD_WIDTH_PX,
                     3,
                 );
-                let button = gtk::Button::builder().child(&cell).css_classes(["flat"]).build();
+                cell.set_vexpand(false);
+                let button = gtk::Button::builder().child(&cell).css_classes(["flat"]).valign(gtk::Align::Start).vexpand(false).build();
                 let (open, entry, id) = (Rc::clone(&nav.open_entry), item.clone(), row.source.id);
                 button.connect_clicked(move |_| open(id, &entry));
                 let (preview, entry) = (Rc::clone(&nav.preview), item.clone());
                 super::view::attach_long_press(&button, move || preview(id, &entry));
                 covers.append(&button);
             }
-            section.append(&gtk::ScrolledWindow::builder().child(&covers).vscrollbar_policy(gtk::PolicyType::Never).build());
+            // the row is as tall as its cards; the page scrolls through the sources
+            section.append(&gtk::ScrolledWindow::builder().child(&covers).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).vexpand(false).build());
         }
     }
     section
@@ -1151,14 +1153,17 @@ pub(crate) mod tests {
         assert!(matches!(&filters.0[0], Filter::CheckBox { state: true, .. }), "and the sheet's values");
     }
 
-    fn there_is_no_help_action_and_other_actions_go_to_the_caller() {
+    fn the_error_state_has_only_retry_and_retry_asks_again() {
         let rig = source_rig(false, FilterList::default(), vec![Err("offline".into())]);
         let SourcePage::Browse(page) = &rig.page else { panic!("browse page") };
-        assert!(pump_until(|| page.listing.widget().first_child().is_some() && !all_buttons(page.listing.widget()).is_empty()));
-        let tips = |tip: String| all_buttons(page.listing.widget()).into_iter().find(|b| b.tooltip_text().as_deref() == Some(tip.as_str()));
-        assert!(tips(EmptyAction::Help.label()).is_none(), "no help page, so no Help button (T-14a-047)");
-        tips(EmptyAction::OpenInWebView.label()).expect("button").emit_clicked();
-        assert_eq!(rig.log.borrow().last().map(String::as_str), Some("action OpenInWebView"));
+        let error_buttons = || all_buttons(page.listing.widget()).into_iter().filter(|b| b.tooltip_text().is_some()).collect::<Vec<_>>();
+        assert!(pump_until(|| !error_buttons().is_empty()));
+        let buttons = error_buttons();
+        assert_eq!(buttons.len(), 1, "retry only: no help page (T-14a-047), no web view button");
+        assert_eq!(buttons[0].tooltip_text().as_deref(), Some(EmptyAction::Retry.label().as_str()));
+        buttons[0].emit_clicked();
+        assert!(pump_until(|| rig.script.requests.lock().expect("lock").len() == 2), "retry asks the first page again");
+        assert!(rig.log.borrow().is_empty(), "retry is handled inside the listing");
     }
 
     fn escape_closes_an_open_search_first_and_otherwise_goes_on() {
@@ -1186,7 +1191,7 @@ pub(crate) mod tests {
         back_clears_the_search_text_first_and_then_leaves();
         popular_latest_and_a_search_from_them_start_from_fresh_defaults();
         the_filter_button_of_the_sheet_searches_with_the_sheet_values();
-        there_is_no_help_action_and_other_actions_go_to_the_caller();
+        the_error_state_has_only_retry_and_retry_asks_again();
         no_sample_rows_in_an_empty_snapshot();
         migrate_sources_lists_the_snapshot_with_counts_and_marks_stubs();
         global_search_shows_each_state_of_a_source();

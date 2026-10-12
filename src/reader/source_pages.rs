@@ -58,7 +58,8 @@ impl SourcePages {
 impl HttpPageSource for SourcePages {
     fn page_list(&self, chapter_url: &str) -> Result<Vec<PageEntry>, String> {
         let (source, chapter) = (Arc::clone(&self.source), SChapter::new(chapter_url, ""));
-        let pages = self.run(async move { kuro_source::isolate(source.get_page_list(&chapter)).await })?.map_err(|e| e.to_string())?;
+        // the answer is the sentence the reader's error card shows; a source that stays silent ends after 30 seconds
+        let pages = self.run(async move { crate::browse::errors::plain(source.name(), source.get_page_list(&chapter)).await })??;
         Ok(pages.into_iter().map(|page| PageEntry { url: page.url, image_url: page.image_url }).collect())
     }
 
@@ -79,7 +80,7 @@ impl HttpPageSource for SourcePages {
 
 /// The headers of one page image request: the source's own set when it declares one (ABI 1.5), else the default.
 pub(crate) async fn page_image_headers(source: &dyn MangaSource, default: HeaderMap) -> HeaderMap {
-    match source.request_headers().await {
+    match crate::browse::errors::limited(source.request_headers()).await {
         Ok(Some(pairs)) => header_map(&pairs),
         Ok(None) => default,
         Err(error) => {
@@ -189,7 +190,10 @@ impl Prefetch {
         let (me, url) = (Arc::clone(self), chapter_url.to_owned());
         std::thread::spawn(move || {
             let outcome = me.pages.page_list(&url).and_then(|list| {
-                me.cache.put_page_list(me.manga_id, &url, &list).map_err(|e| format!("the page list could not be cached: {e}"))
+                me.cache.put_page_list(me.manga_id, &url, &list).map_err(|e| {
+                    tracing::warn!(error = %e, "the page list could not be cached");
+                    crate::browse::errors::GENERIC.to_owned()
+                })
             });
             let mut fetches = me.lock();
             let done = match outcome {

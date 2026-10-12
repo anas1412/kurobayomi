@@ -84,20 +84,17 @@ pub fn chapter_pill_visible(has_current_chapter: bool, show_current_chapter: boo
     has_current_chapter && show_current_chapter
 }
 
-/// The primary slot on the bottom-right row. The skip-intro text wins, then the custom primary
-/// button, then nothing.
+/// The primary slot on the bottom-right row: the skip-intro text, or nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PrimarySlot {
     Skip(String),
-    Custom(String),
     Empty,
 }
 
-pub fn primary_slot(skip_text: Option<&str>, custom_title: Option<&str>) -> PrimarySlot {
-    match (skip_text, custom_title) {
-        (Some(text), _) => PrimarySlot::Skip(text.to_owned()),
-        (None, Some(title)) => PrimarySlot::Custom(title.to_owned()),
-        (None, None) => PrimarySlot::Empty,
+pub fn primary_slot(skip_text: Option<&str>) -> PrimarySlot {
+    match skip_text {
+        Some(text) => PrimarySlot::Skip(text.to_owned()),
+        None => PrimarySlot::Empty,
     }
 }
 
@@ -214,16 +211,12 @@ mod tests {
     }
 
     #[test]
-    fn primary_slot_prefers_skip_then_custom() {
+    fn primary_slot_shows_the_skip_text_or_nothing() {
         assert_eq!(
-            primary_slot(Some("Skip intro"), Some("X")),
+            primary_slot(Some("Skip intro")),
             PrimarySlot::Skip("Skip intro".into())
         );
-        assert_eq!(
-            primary_slot(None, Some("X")),
-            PrimarySlot::Custom("X".into())
-        );
-        assert_eq!(primary_slot(None, None), PrimarySlot::Empty);
+        assert_eq!(primary_slot(None), PrimarySlot::Empty);
     }
 
     #[test]

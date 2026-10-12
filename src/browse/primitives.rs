@@ -12,7 +12,6 @@ pub const EMPTY_ACTION_LIMIT: usize = 3;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EmptyAction {
     Retry,
-    OpenInWebView,
     Help,
     /// The local source's help guide, the only action for `LocalMangaSource` (B§2.4).
     LocalHelp,
@@ -23,7 +22,6 @@ impl EmptyAction {
     pub fn label(self) -> String {
         match self {
             EmptyAction::Retry => tr(MsgKey::action_retry),
-            EmptyAction::OpenInWebView => tr(MsgKey::action_open_in_web_view),
             EmptyAction::Help => tr(MsgKey::label_help),
             EmptyAction::LocalHelp => tr(MsgKey::local_source_help_guide),
         }
@@ -33,15 +31,15 @@ impl EmptyAction {
     pub fn icon(self) -> &'static str {
         match self {
             EmptyAction::Retry => "view-refresh-symbolic",
-            EmptyAction::OpenInWebView => "web-browser-symbolic",
             EmptyAction::Help | EmptyAction::LocalHelp => "help-about-symbolic",
         }
     }
 }
 
-/// The actions of an error empty state. A local source offers its help guide only; any other source offers retry,
-/// open in web view, and help, in that order (B§2.4). Help is left out while there is no help page to open, and a local
-/// source then offers Retry, so its error state is never empty (decision: T-14a-047 forbids opening the Aniyomi guide).
+/// The actions of an error empty state. A local source offers its help guide only; any other source offers retry, and
+/// help after it. Help is left out while there is no help page to open, so a web source's error state is Retry alone, and
+/// a local source then offers Retry, so its error state is never empty (decision: T-14a-047 forbids opening the Aniyomi
+/// guide). "Open in WebView" lives in the page overflow menu only, where a login may be needed.
 pub fn error_actions(is_local: bool) -> Vec<EmptyAction> {
     error_actions_with(is_local, super::nav::help_url().is_some())
 }
@@ -50,7 +48,7 @@ fn error_actions_with(is_local: bool, has_help: bool) -> Vec<EmptyAction> {
     let mut actions = if is_local {
         vec![EmptyAction::LocalHelp]
     } else {
-        vec![EmptyAction::Retry, EmptyAction::OpenInWebView, EmptyAction::Help]
+        vec![EmptyAction::Retry, EmptyAction::Help]
     };
     if !has_help {
         actions.retain(|a| !matches!(a, EmptyAction::Help | EmptyAction::LocalHelp));
@@ -112,11 +110,8 @@ mod tests {
     }
 
     #[test]
-    fn error_actions_for_a_web_source_are_retry_web_view_and_help_in_order() {
-        assert_eq!(
-            error_actions_with(false, true),
-            vec![EmptyAction::Retry, EmptyAction::OpenInWebView, EmptyAction::Help]
-        );
+    fn error_actions_for_a_web_source_are_retry_and_help_in_order() {
+        assert_eq!(error_actions_with(false, true), vec![EmptyAction::Retry, EmptyAction::Help]);
     }
 
     #[test]
@@ -126,7 +121,7 @@ mod tests {
 
     #[test]
     fn without_a_help_page_the_help_actions_are_left_out() {
-        assert_eq!(error_actions_with(false, false), vec![EmptyAction::Retry, EmptyAction::OpenInWebView]);
+        assert_eq!(error_actions_with(false, false), vec![EmptyAction::Retry], "a web source's error state is retry alone");
         assert_eq!(error_actions_with(true, false), vec![EmptyAction::Retry], "a local error state is never empty");
         // kuro-local has no Kurobayomi help page yet, so the shipped lists have none either
         assert!(!error_actions(true).contains(&EmptyAction::LocalHelp));

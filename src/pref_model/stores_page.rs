@@ -54,14 +54,19 @@ pub struct Texts {
     pub add: String,
 }
 
+/// Plain words for a first-time user: the Aniyomi strings ('repo', 'URL', 'index.min.json') are not.
+const REPOS_EMPTY: &str = "No repositories yet. Add a link someone gave you to get sources.";
+const ADD_TITLE: &str = "Add a repository";
+const ADD_INTRO: &str = "Paste the repository link.";
+const INPUT_LABEL: &str = "Repository link";
+
 impl Texts {
     pub fn repos() -> Self {
-        let app = "Kurobayomi";
         Self {
-            empty: tr(MsgKey::information_empty_repos),
-            add_title: tr(MsgKey::action_add_repo),
-            add_intro: Some(trf(MsgKey::action_add_repo_message, &[("arg1", Arg::Str(app))])),
-            input_label: tr(MsgKey::label_add_repo_input),
+            empty: REPOS_EMPTY.to_owned(),
+            add_title: ADD_TITLE.to_owned(),
+            add_intro: Some(ADD_INTRO.to_owned()),
+            input_label: INPUT_LABEL.to_owned(),
             deep_link_intro: None,
             remove_title: tr(MsgKey::action_delete_repo),
             remove_body: super::stores_backend::repo_remove_body,
@@ -149,6 +154,8 @@ struct Inner<T: Keyed + Send + 'static> {
     state: RefCell<Page<T>>,
     /// A deep link that arrived while loading; it opens as the confirm dialog once the list is there.
     queued_link: RefCell<Option<String>>,
+    /// The add dialog asked for before the list loaded.
+    queued_add: std::cell::Cell<bool>,
     stack: gtk::Stack,
     list: gtk::ListBox,
     fab: gtk::Button,
@@ -167,6 +174,11 @@ impl<T: Keyed + Send + 'static> StoresPage<T> {
     /// A deep link to add a store. While the list is loading it waits and opens when the list is ready (RACE-01).
     pub fn open_deep_link(&self, url: &str) {
         self.inner.open_deep_link(url);
+    }
+
+    /// Opens the empty add dialog, at once or as soon as the list has loaded.
+    pub fn open_add(&self) {
+        self.inner.open_add();
     }
 }
 
@@ -203,6 +215,7 @@ pub fn build<T: Keyed + Send + 'static>(
         texts,
         state: RefCell::new(Page::Loading),
         queued_link: RefCell::new(None),
+        queued_add: std::cell::Cell::new(false),
         stack,
         list,
         fab: fab.clone(),
@@ -290,6 +303,8 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             let queued = self.queued_link.borrow_mut().take();
             if let Some(url) = queued {
                 self.open_deep_link(&url);
+            } else if self.queued_add.take() {
+                self.open_add();
             }
         }
         self.run(effect);
@@ -307,6 +322,14 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             Shortcut::Refresh => Event::Refresh,
         });
         Some(())
+    }
+
+    fn open_add(self: &Rc<Self>) {
+        if matches!(*self.state.borrow(), Page::Loading) {
+            self.queued_add.set(true);
+            return;
+        }
+        self.dispatch(Event::Open(Dialog::Add(Entry::default())));
     }
 
     fn open_deep_link(self: &Rc<Self>, url: &str) {
@@ -327,13 +350,22 @@ impl<T: Keyed + Send + 'static> Inner<T> {
                 if close {
                     self.dispatch(Event::Dismiss);
                 }
+                // a spinner card over the window while the fetch runs, as the repo link has no dialog left to show it
+                let busy = ops.busy_text().map(crate::toast::busy);
                 glib::spawn_future_local(async move {
                     let outcome = gio::spawn_blocking(move || ops.add(&url)).await;
+                    drop(busy);
                     let Some(page) = weak.upgrade() else { return };
                     match outcome {
                         Ok(AddOutcome::Added) => {
                             page.dispatch(Event::AddSucceeded);
                             reload_extensions();
+                            // the new sources are what the user came for: show them, and let the library swap its
+                            // welcome view for the 'search in Browse' one
+                            for kind in [kuro_domain::kind::EntryKind::Manga, kuro_domain::kind::EntryKind::Anime] {
+                                crate::library::mount::refresh(kind);
+                            }
+                            crate::ui::open("browse");
                         }
                         Ok(AddOutcome::Failed(text)) if close => crate::toast::notify(text),
                         Ok(AddOutcome::Failed(text)) => page.dispatch(Event::AddFailed(text)),
@@ -614,9 +646,9 @@ mod tests {
     #[test]
     fn t_47b_016_the_texts_come_from_the_string_table() {
         let repos = Texts::repos();
-        assert_eq!(repos.empty, "You have no repos set.");
-        assert_eq!(repos.add_title, "Add repo");
-        assert_eq!(repos.input_label, "Repo URL");
+        assert_eq!(repos.empty, REPOS_EMPTY);
+        assert_eq!(repos.add_title, "Add a repository");
+        assert_eq!(repos.input_label, "Repository link");
         assert!(repos.add_intro.as_deref().is_some_and(|t| t.contains("index.min.json")));
     }
 

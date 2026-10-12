@@ -611,6 +611,31 @@ pub const DROPPED_NAMES: &[&str] = &[
     "pref_security_summary",
     "pref_advanced_summary",
     "pref_reset_viewer_flags_summary",
+    // first-run wizard (removed 2026-10-12: the empty library and Settings replace it); onboarding_storage_info stays
+    // because the placeholder test uses it as its fixture
+    "getting_started_guide",
+    "pref_onboarding_guide",
+    "onboarding_heading",
+    "onboarding_description",
+    "onboarding_action_next",
+    "onboarding_action_finish",
+    "onboarding_action_skip",
+    "onboarding_storage_action_select",
+    "onboarding_storage_action_create_folder",
+    "onboarding_storage_selection_required",
+    "onboarding_storage_help_info",
+    "onboarding_storage_help_action",
+    "onboarding_permission_install_apps",
+    "onboarding_permission_install_apps_description",
+    "onboarding_permission_notifications",
+    "onboarding_permission_notifications_description",
+    "onboarding_permission_crashlytics",
+    "onboarding_permission_crashlytics_description",
+    "onboarding_permission_analytics",
+    "onboarding_permission_analytics_description",
+    "onboarding_permission_action_grant",
+    "onboarding_guides_new_user",
+    "onboarding_guides_returning_user",
 ];
 
 /// The dropped names whose id `kurobayomi-extra.ftl` defines again with a text that names no removed feature.

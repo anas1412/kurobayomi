@@ -218,7 +218,6 @@ pub const TORRSERVER_TRACKERS: &str = concat!(
 define_prefs! {
     "__APP_STATE_pref_downloaded_only", AppState, Bool, false, "base", "downloaded_only";
     "__APP_STATE_incognito_mode", AppState, Bool, false, "base", "incognito_mode";
-    "__APP_STATE_onboarding_complete", AppState, Bool, false, "base", "shown_onboarding_flow";
     "pref_theme_mode_key", Normal, Str, "SYSTEM", "ui", "theme_mode";
     "start_screen", Normal, Str, "ANIME", "ui", "start_screen";
     "source_languages", Normal, Set, &["all", "en"], "sources", "enabled_languages";
@@ -290,7 +289,7 @@ define_prefs! {
 /// The registry holds no row for them, a restore skips them ([`is_dropped`]) and nothing reads them, so an old
 /// `config.toml` or an Aniyomi backup that still carries one loads and restores without it. Each key and its reason
 /// is recorded in `docs/drop-decisions.md`.
-pub const DROPPED_KEYS: [&str; 272] = [
+pub const DROPPED_KEYS: [&str; 273] = [
     "extension_installer",
     "pref_hardware_bitmap_threshold",
     "eh_enable_source_blacklist",
@@ -563,6 +562,7 @@ pub const DROPPED_KEYS: [&str; 272] = [
     "data_saver_excluded",
     "data_saver_downloader",
     "player_open_detached",
+    "__APP_STATE_onboarding_complete",
 ];
 
 /// Whether `key` (as stored, without the backup prefix) belongs to a dropped feature.
@@ -662,9 +662,9 @@ mod tests {
     ];
 
     #[test]
-    fn registry_has_the_66_plan_rows_in_order() {
+    fn registry_has_the_65_plan_rows_in_order() {
         let rows = plan_rows();
-        assert_eq!(rows.len(), 66, "the plan's rows minus the derived animeext_updates_count and the dropped (cut) plan rows");
+        assert_eq!(rows.len(), 65, "the plan's rows minus the derived animeext_updates_count and the dropped (cut) plan rows");
         // two Kurobayomi rows after the plan's rows: `anime_ext_last_check` (T-19a-064) and `muted_notification_channels`
         // (T-req-platform-004)
         assert_eq!(REGISTRY.len(), rows.len() + 2);

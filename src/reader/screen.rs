@@ -32,7 +32,7 @@ use tokio::sync::watch;
 use super::bottom_bar::BottomBar;
 use super::chapters::ListOptions;
 use super::delete_queue::{Pending, QueueFile};
-use super::chrome::{self, TopBar, TopBarActions, build_error_card, build_top_bar};
+use super::chrome::{self, TopBar, TopBarActions, build_bare_top_bar, build_error_card, build_top_bar};
 use super::flags;
 use super::history_rules;
 use super::page_actions;
@@ -1216,6 +1216,9 @@ fn start(screen: &Rc<Screen>) {
     if let Some(card) = screen.stack.child_by_name(PAGE_CARD) {
         screen.stack.remove(&card);
     }
+    if screen.top_slot.first_child().is_none() {
+        rebuild_top_bar(screen);
+    }
     screen.stack.set_visible_child_name(PAGE_LOADING);
     refresh(screen);
     let screen = Rc::clone(screen);
@@ -1371,12 +1374,19 @@ fn sync_top_bar(screen: &Rc<Screen>) {
 /// Builds the top bar for the current chapter (T-043a-040): back, the manga and chapter title, the bookmark toggle
 /// and the overflow menu. Back returns to the page below; the title opens the manga's details.
 fn rebuild_top_bar(screen: &Rc<Screen>) {
-    let Some(info) = screen.core.top_bar() else { return };
-    screen.shown_chapter.set(screen.core.current_chapter_id().unwrap_or(-1));
+    let info = screen.core.top_bar();
+    if info.is_some() {
+        screen.shown_chapter.set(screen.core.current_chapter_id().unwrap_or(-1));
+    }
     while let Some(child) = screen.top_slot.first_child() {
         screen.top_slot.remove(&child);
     }
     let back = Rc::clone(&screen.on_close);
+    let Some(info) = info else {
+        // no chapter yet (the page list is loading, or the load failed): the bar still holds Back and the window buttons
+        screen.top_slot.append(&build_bare_top_bar(move || back()));
+        return;
+    };
     let manga_id = screen.core.deps.manga_id;
     let (bookmark, overflow) = (Rc::downgrade(screen), Rc::downgrade(screen));
     let actions = TopBarActions {
@@ -1890,6 +1900,31 @@ mod tests {
 
     /// T-44a-070 end to end: the reader attaches the viewer of the manga's mode once the chapter has loaded, the network
     /// pages reach it through the loader, and a mode switch destroys the old viewer before the new one is attached.
+    /// The top bar is there while the chapter is still loading, so the window can be dragged and closed from it.
+    #[test]
+    fn the_reader_has_its_header_bar_before_the_chapter_loads() {
+        crate::testing::with_display(|| {
+            let f = fixture(2);
+            let deps = ReaderDeps {
+                db: Arc::clone(&f.db),
+                manga_id: f.manga_id,
+                chapter_id: f.chapter_ids[0],
+                prefs: ReaderPrefs::new(PrefStore::in_memory()),
+                store: Rc::new(NoStore),
+                build: http_build("header"),
+                is_downloaded: Rc::new(|_| false),
+                downloaded_only: false,
+                incognito: false,
+                prefs_store: PrefStore::in_memory(),
+            };
+            let (toaster, _feed) = kuro_platform::toast::toast_channel();
+            let screen = open(deps, &crate::reader::launch::open_gate(), toaster, || {});
+            let root: gtk::Widget = screen.root.clone().upcast();
+            let bars = crate::screens::alone::descendants(&root);
+            assert!(bars.iter().any(|w| w.is::<gtk::HeaderBar>()), "the reader shows its header bar while the chapter loads");
+        });
+    }
+
     #[test]
     fn the_reader_attaches_its_viewer_shows_network_pages_and_swaps_the_viewer_on_a_mode_switch() {
         crate::testing::with_display(|| {

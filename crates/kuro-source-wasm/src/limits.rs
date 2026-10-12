@@ -3,7 +3,7 @@
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use wasmtime::{Config, Engine, StoreLimits, StoreLimitsBuilder};
+use wasmtime::{Config, Engine, OptLevel, StoreLimits, StoreLimitsBuilder};
 
 use crate::error::WasmError;
 
@@ -70,6 +70,8 @@ fn build_engine() -> Result<Engine, String> {
     let mut config = Config::new();
     config.wasm_component_model(true);
     config.epoch_interruption(true);
+    // Speed is wasmtime's default, set here so the compile speed is a decision of ours; the compile cache hides the cost
+    config.cranelift_opt_level(OptLevel::Speed);
     let engine = Engine::new(&config).map_err(|e| e.to_string())?;
     let ticker = engine.clone();
     std::thread::Builder::new()

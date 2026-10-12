@@ -116,6 +116,46 @@ impl StripLayout {
     }
 }
 
+/// A page that is not decoded yet and has no known size is as tall as a typical manga page: this many times its width.
+pub const PLACEHOLDER_RATIO: f64 = 1.4;
+
+/// The height of a page of source size `src` (width, height) shown `width` pixels wide. At least 1.
+pub fn scaled_height(src: (u32, u32), width: i32) -> i32 {
+    if src.0 == 0 {
+        return 1;
+    }
+    ((f64::from(width.max(0)) * f64::from(src.1) / f64::from(src.0)).round() as i32).max(1)
+}
+
+/// The height a page takes in the strip (the gap not included). A known size wins, then the height of the previous
+/// decoded page (already at this width), then [`PLACEHOLDER_RATIO`] times the width. Never 0, so an undecoded page
+/// cannot make the strip short and let one wheel notch land in the next chapter.
+pub fn reserved_height(known: Option<(u32, u32)>, previous: Option<i32>, width: i32) -> i32 {
+    match (known, previous) {
+        (Some(src), _) => scaled_height(src, width),
+        (None, Some(h)) => h.max(1),
+        (None, None) => ((f64::from(width.max(0)) * PLACEHOLDER_RATIO).round() as i32).max(1),
+    }
+}
+
+/// How far to move the scroll position so the item that holds the top of the viewport stays where it is: the shift of
+/// that item's top between the old layout (`old_index`) and the new one (`new_index`). Items below it, and the item
+/// itself growing, change nothing; pages above it that grew or shrank shift it.
+pub fn anchor_delta(old: &StripLayout, old_index: usize, new: &StripLayout, new_index: usize) -> i64 {
+    new.offset(new_index) - old.offset(old_index)
+}
+
+/// One scroll input never moves more than a viewport.
+pub fn clamp_step(delta: f64, viewport: i32) -> f64 {
+    let max = f64::from(viewport.max(0));
+    delta.clamp(-max, max)
+}
+
+/// The distance of a wheel scroll of `dy` notches: the usual `viewport^(2/3)` per notch, clamped by [`clamp_step`].
+pub fn wheel_delta(dy: f64, viewport: i32) -> f64 {
+    clamp_step(dy * f64::from(viewport.max(0)).powf(2.0 / 3.0), viewport)
+}
+
 /// The items whose decoded page is rebound after a display setting changes: exactly `[centre-3, centre+3]`
 /// (B§7.7, E-30). `None` when there is nothing to rebind.
 pub fn refresh_range(centre: Option<usize>, count: usize) -> Option<std::ops::RangeInclusive<usize>> {
@@ -149,6 +189,43 @@ mod tests {
         assert!(!strip.fits_range(0.0));
         assert!(!strip.fits_range(2999.0));
         assert!(strip.fits_range(3000.0));
+    }
+
+    #[test]
+    fn an_undecoded_page_reserves_height_from_its_size_then_the_previous_page_then_the_width() {
+        assert_eq!(reserved_height(Some((800, 2400)), Some(500), 400), 1200, "a known size wins");
+        assert_eq!(reserved_height(None, Some(900), 400), 900, "the previous decoded page");
+        assert_eq!(reserved_height(None, None, 500), 700, "1.4 times the width");
+        assert_eq!(reserved_height(None, None, 0), 1, "never 0");
+        assert_eq!(scaled_height((40, 60), 400), 600);
+        assert_eq!(scaled_height((0, 60), 400), 1);
+    }
+
+    #[test]
+    fn anchoring_follows_pages_above_the_viewport_and_ignores_the_one_at_the_top() {
+        let old = StripLayout::new(vec![700, 700, 700]);
+        // item 0 decodes taller: item 1 (holding the viewport top) moves down by 300
+        let grown_above = StripLayout::new(vec![1000, 700, 700]);
+        assert_eq!(anchor_delta(&old, 1, &grown_above, 1), 300);
+        // item 1 itself resizes: its top stays, so nothing moves
+        let grown_at_top = StripLayout::new(vec![700, 1500, 700]);
+        assert_eq!(anchor_delta(&old, 1, &grown_at_top, 1), 0);
+        // a page above shrinks
+        let shrunk = StripLayout::new(vec![400, 700, 700]);
+        assert_eq!(anchor_delta(&old, 1, &shrunk, 1), -300);
+        // the first item at the top of the strip never shifts
+        assert_eq!(anchor_delta(&old, 0, &grown_above, 0), 0);
+    }
+
+    #[test]
+    fn one_scroll_input_never_moves_more_than_a_viewport() {
+        assert_eq!(clamp_step(5000.0, 800), 800.0);
+        assert_eq!(clamp_step(-5000.0, 800), -800.0);
+        assert_eq!(clamp_step(300.0, 800), 300.0);
+        assert_eq!(clamp_step(300.0, 0), 0.0);
+        assert!((wheel_delta(1.0, 1000) - 100.0).abs() < 1e-6, "1000^(2/3) is 100");
+        assert_eq!(wheel_delta(1000.0, 1000), 1000.0, "a huge delta is clamped to the viewport");
+        assert_eq!(wheel_delta(-1000.0, 1000), -1000.0);
     }
 
     /// A 50-item strip of 100 px items in a 400 px viewport.

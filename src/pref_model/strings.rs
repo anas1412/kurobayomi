@@ -21,7 +21,7 @@ pub fn logged_in() -> String {
     tr(MsgKey::login_success)
 }
 
-/// Title of the backup group on Data and storage. The onboarding restore highlights this exact title (T-E68).
+/// Title of the backup group on Data and storage. The restore link of the empty library highlights this exact title.
 pub fn label_backup() -> String {
     tr(MsgKey::label_backup)
 }

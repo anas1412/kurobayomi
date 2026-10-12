@@ -131,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn no_items_with_an_error_offers_retry_web_view_and_help_for_a_web_source() {
+    fn no_items_with_an_error_offers_retry_for_a_web_source() {
         let mut i = input();
         i.refresh_error = Some("offline");
         let plan = content_plan(&i);

@@ -17,7 +17,6 @@ use kuro_backup::schema::PrefValue;
 use kuro_data::category::Category;
 use kuro_data::chapter::Chapter;
 use kuro_data::manga::Manga;
-use kuro_db::statements_anime::{CustomButton, ExtensionStore};
 use kuro_data::extension_repo::ExtensionRepo;
 use tokio::sync::watch;
 
@@ -45,12 +44,6 @@ impl LibraryReader for Library {
         Ok(Vec::new())
     }
     fn manga_extension_repos(&self) -> Result<Vec<ExtensionRepo>, BackupError> {
-        Ok(Vec::new())
-    }
-    fn anime_extension_stores(&self) -> Result<Vec<ExtensionStore>, BackupError> {
-        Ok(Vec::new())
-    }
-    fn custom_buttons(&self) -> Result<Vec<CustomButton>, BackupError> {
         Ok(Vec::new())
     }
 }

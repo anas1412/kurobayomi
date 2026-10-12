@@ -31,7 +31,7 @@ use super::pager::controller::{PagerController, PagerOptions};
 use super::settings::{self, Family, Reaction, SettingsWatch, ViewerSettings};
 use super::webtoon::controller::{WebtoonController, WebtoonOptions};
 use super::webtoon::frame::ZoomFrame;
-use super::webtoon::layout::{StripLayout, gap_px, refresh_range};
+use super::webtoon::layout::{StripLayout, anchor_delta, clamp_step, gap_px, refresh_range, reserved_height, wheel_delta};
 use super::webtoon::zoom::{Anim, WebtoonZoom};
 use super::{Emitter, ViewerContext, ViewerEngine, ViewerKind};
 use crate::reader::error_card;
@@ -256,6 +256,10 @@ trait Surface: 'static {
     fn tap(&self, gesture: Gesture);
     fn key(&self, ev: KeyEvent) -> bool;
     fn wheel(&self, dy: f64) -> bool;
+    /// Whether the wheel handler runs before the scrolled window's own one, which it replaces.
+    fn wheel_first(&self) -> bool {
+        false
+    }
 }
 
 /// Connects the click, motion, key, wheel and gesture-timer controllers of an engine. Handlers hold a weak
@@ -305,6 +309,9 @@ fn wire_surface<T: Surface>(this: &Rc<T>) {
     root.add_controller(keys);
 
     let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    if this.wheel_first() {
+        wheel.set_propagation_phase(gtk::PropagationPhase::Capture);
+    }
     let weak = Rc::downgrade(this);
     wheel.connect_scroll(move |_, _, dy| match weak.upgrade() {
         Some(s) if s.wheel(dy) => Propagation::Stop,
@@ -898,6 +905,10 @@ struct WebtoonInner {
     /// Realised rows, keyed by item so a rebuild reuses the rows that survive it (the keyed diff of T-44a-031).
     realised: RefCell<HashMap<ItemKey, Row>>,
     layout: RefCell<StripLayout>,
+    /// The items `layout` was made for, so a change of heights can be anchored to the item at the top of the view.
+    laid_items: RefCell<Vec<ItemKey>>,
+    /// The decoded size of every page that has shown one, so a page that left the screen keeps its height.
+    sizes: RefCell<HashMap<ItemKey, (u32, u32)>>,
     watch: RefCell<Option<SettingsWatch>>,
     /// The chapters the core handed over, kept so a chapter's state change can hand them to the controller again.
     chapters: RefCell<Option<ViewerChapters>>,
@@ -962,6 +973,8 @@ impl WebtoonInner {
             menu_open: ctx.menu_open,
             realised: RefCell::default(),
             layout: RefCell::default(),
+            laid_items: RefCell::default(),
+            sizes: RefCell::default(),
             watch: RefCell::new(ctx.prefs.map(|p| SettingsWatch::new(p, settings))),
             chapters: RefCell::default(),
             chapter_tasks: RefCell::default(),
@@ -1070,25 +1083,59 @@ impl WebtoonInner {
         h
     }
 
-    /// The strip geometry for the current items: pages fill the viewport until decoded, a page that failed is the error
-    /// card, 0.8 of the viewport (B§8.5), and transition cards have a fixed height. The viewport is the strip's own
-    /// height, which the frame makes `original / scale` below a scale of 1 (E-31).
+    /// The width of a page row: the strip less the side padding on both sides.
+    fn row_width(&self) -> i32 {
+        let width = self.root.width().max(0);
+        (width - 2 * side_padding_px(width, self.settings.borrow().side_padding)).max(0)
+    }
+
+    /// The strip geometry for the current items. A decoded page is as tall as it is at the row width. A page that is not
+    /// decoded keeps a reserved height (its known size, else the previous decoded page's, else 1.4 times the width) under
+    /// its spinner, so the strip is never short. A page that failed is the error card, 0.8 of the viewport (B§8.5), and
+    /// transition cards have a fixed height. The viewport is the strip's own height, which the frame makes
+    /// `original / scale` below a scale of 1 (E-31).
     fn current_layout(&self) -> (Vec<ItemKey>, StripLayout) {
         let items = self.ctl.borrow().items().to_vec();
         let vh = self.viewport();
+        let width = self.row_width();
         // gapped mode leaves room under every item; the row itself is the item height without the gap
         let gap = gap_px(self.kind == ViewerKind::WebtoonGapped);
-        let heights = items.iter().map(|i| self.item_height(i, vh) + gap).collect();
+        {
+            let mut sizes = self.sizes.borrow_mut();
+            for (key, row) in self.realised.borrow().iter() {
+                if let Some(size) = row.source_size() {
+                    sizes.insert(key.clone(), size);
+                }
+            }
+        }
+        let sizes = self.sizes.borrow();
+        let mut previous = None;
+        let heights = items
+            .iter()
+            .map(|item| {
+                let height = match item.page() {
+                    None => CARD_HEIGHT,
+                    Some(page) if self.is_errored(item, page) => error_card::webtoon_card_height(vh),
+                    Some(_) => {
+                        let known = sizes.get(item).copied();
+                        let height = reserved_height(known, previous, width);
+                        if known.is_some() {
+                            previous = Some(height);
+                        }
+                        height
+                    }
+                };
+                height + gap
+            })
+            .collect();
         (items, StripLayout::new(heights))
     }
 
-    fn item_height(&self, item: &ItemKey, viewport: i32) -> i32 {
-        let Some(page) = item.page() else { return CARD_HEIGHT };
-        let errored = match self.realised.borrow().get(item) {
+    fn is_errored(&self, item: &ItemKey, page: &PageRef) -> bool {
+        match self.realised.borrow().get(item) {
             Some(row) => row.errored(),
             None => self.lookup.borrow().pages.get(page).is_some_and(|p| p.status.get() == PageStatus::Error),
-        };
-        if errored { error_card::webtoon_card_height(viewport) } else { viewport }
+        }
     }
 
     /// Takes the chapters and follows their load state: each change hands them to the controller again (B§11.3).
@@ -1175,13 +1222,46 @@ impl WebtoonInner {
         if vh <= 0 {
             return (None, None);
         }
-        let scroll = self.root.vadjustment().value().round() as i64;
         let (items, layout) = self.current_layout();
+        let scroll = self.anchor(&items, &layout);
         let range = layout.realised(scroll, vh);
         let last = layout.last_end_visible(scroll, vh, range.clone());
         let first = layout.first_visible(scroll);
         self.reconcile(&items, &layout, range);
         (last, first)
+    }
+
+    /// Keeps what the reader looks at in place when page heights change: the item that held the top of the view
+    /// keeps its place, so pages that grow or shrink above it move the scroll position by the same amount. Nothing
+    /// moves while the first jump to a page is still waiting. Returns the scroll position to lay out for.
+    fn anchor(&self, items: &[ItemKey], layout: &StripLayout) -> i64 {
+        let adj = self.root.vadjustment();
+        let scroll = adj.value().round() as i64;
+        if self.pending_scroll.get().is_some() {
+            return scroll;
+        }
+        let (old, old_items) = (self.layout.borrow(), self.laid_items.borrow());
+        let Some(old_index) = old.first_visible(scroll) else { return scroll };
+        let Some(key) = old_items.get(old_index) else { return scroll };
+        let new_index = if items.get(old_index) == Some(key) { Some(old_index) } else { items.iter().position(|i| i == key) };
+        let Some(new_index) = new_index else { return scroll };
+        let delta = anchor_delta(&old, old_index, layout, new_index);
+        drop((old, old_items));
+        if delta == 0 {
+            return scroll;
+        }
+        // the range follows the strip's size one frame later, so it is widened here or the move would be clamped
+        let total = layout.total_height() as f64;
+        if adj.upper() < total {
+            adj.set_upper(total);
+        }
+        // the move is not a scroll of the user, and must not run `sync` again
+        let was_busy = self.busy.replace(true);
+        adj.set_value((scroll + delta) as f64);
+        self.busy.set(was_busy);
+        let moved = adj.value().round() as i64;
+        self.last_scroll.set(moved);
+        moved
     }
 
     fn reconcile(&self, items: &[ItemKey], layout: &StripLayout, range: Range<usize>) {
@@ -1216,6 +1296,7 @@ impl WebtoonInner {
         drop(realised);
         self.fixed.set_size_request(width, layout.total_height() as i32);
         *self.layout.borrow_mut() = layout.clone();
+        *self.laid_items.borrow_mut() = items.to_vec();
     }
 
     /// The geometry the zoom math is done in: half the frame's width and original height (B§10.7).
@@ -1428,7 +1509,7 @@ impl WebtoonInner {
     /// Scrolls by `delta` pixels, animated when page transitions are on (B§7.4).
     fn scroll_by(&self, delta: f64) {
         let adj = self.root.vadjustment();
-        let target = adj.value() + delta;
+        let target = adj.value() + clamp_step(delta, self.root.height());
         let smooth = self.transitions_live.get() && self.settings.borrow().page_transitions;
         animate(&self.root, adj, Rc::clone(&self.anim), target, smooth, || {});
     }
@@ -1564,8 +1645,18 @@ impl Surface for WebtoonInner {
         WebtoonInner::key(self, ev)
     }
 
-    fn wheel(&self, _dy: f64) -> bool {
-        false
+    /// The wheel moves the strip by `viewport^(2/3)` a notch, as the scrolled window does, but never by more than a
+    /// viewport, so one input cannot jump over pages that are still loading.
+    fn wheel(&self, dy: f64) -> bool {
+        let adj = self.root.vadjustment();
+        // a running tap or key animation yields to the wheel
+        self.anim.set(self.anim.get() + 1);
+        adj.set_value(adj.value() + wheel_delta(dy, self.root.height()));
+        true
+    }
+
+    fn wheel_first(&self) -> bool {
+        true
     }
 }
 
@@ -1667,7 +1758,14 @@ mod tests {
             let viewport = inner.root.height();
             assert!(viewport > 0);
             assert!(pump_until(|| height_of(0).is_some_and(|(_, h)| h == error_card::webtoon_card_height(viewport))), "0.8 of the viewport");
-            assert_eq!(height_of(1).map(|(errored, h)| (errored, h)), Some((false, viewport)), "a good page keeps the viewport height");
+            // a good page is as tall as its 40 x 60 image is at the row width, once it is decoded
+            let good = || {
+                let item = inner.ctl.borrow().items().iter().find(|i| i.page().is_some_and(|p| p.index == 1)).cloned()?;
+                let realised = inner.realised.borrow();
+                let row = realised.get(&item)?;
+                row.source_size().map(|_| (row.widget.width_request(), row.widget.height_request()))
+            };
+            assert!(pump_until(|| good().is_some_and(|(w, h)| h == (f64::from(w) * 1.5).round() as i32)), "a decoded page has its own height");
             window.destroy();
         });
     }

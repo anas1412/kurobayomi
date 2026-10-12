@@ -13,6 +13,7 @@ use kuro_downloads::engine::{AnimeEngine, MangaEngine, QueueEngine, anime_model,
 use kuro_downloads::queue_model::{EntryKind, QueueItem};
 
 use crate::downloads::Queues;
+use crate::downloads::manga_io::Waiting;
 
 /// How often the page checks the queues.
 const REFRESH: Duration = Duration::from_secs(1);
@@ -76,13 +77,25 @@ struct Page {
 impl Page {
     fn draw(&self) {
         self.toggle.set_label(if running(&self.queues) { "Pause" } else { "Resume" });
-        let manga = manga_model(&self.queues.manga.snapshot());
+        let snapshot = self.queues.manga.snapshot();
+        let manga = manga_model(&snapshot);
         let anime = self.queues.anime.as_ref().map(|queue| anime_model(&queue.snapshot()));
         let mut items: Vec<&QueueItem> = manga.flat().iter().collect();
         if let Some(anime) = &anime {
             items.extend(anime.flat().iter());
         }
-        let key: String = items.iter().map(|item| row_key(item)).collect::<Vec<_>>().join("|");
+        // A waiting row that was queued again (enqueued after its source came back) shows once, as the queued row.
+        let queued: Vec<i64> = snapshot.iter().map(|d| d.chapter.id).collect();
+        let waiting: Vec<Waiting> = self
+            .queues
+            .waiting
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|w| !queued.contains(&w.row.chapter_id))
+            .cloned()
+            .collect();
+        let key: String = items.iter().map(|item| row_key(item)).chain(waiting.iter().map(|w| format!("w{}", w.row.chapter_id))).collect::<Vec<_>>().join("|");
         if self.shown.borrow().as_deref() == Some(key.as_str()) {
             return;
         }
@@ -90,12 +103,33 @@ impl Page {
         while let Some(child) = self.rows.first_child() {
             self.rows.remove(&child);
         }
-        if items.is_empty() {
+        if items.is_empty() && waiting.is_empty() {
             self.rows.append(&gtk::Label::new(Some("No downloads are queued.")));
         }
         for item in items {
             self.rows.append(&self.row(item));
         }
+        for line in &waiting {
+            self.rows.append(&self.waiting_row(line));
+        }
+    }
+
+    /// A saved download whose source is not installed. It is queued again when the source comes back. Cancel removes it.
+    fn waiting_row(&self, line: &Waiting) -> gtk::Box {
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let text = gtk::Label::new(Some(&format!("{} · {}", line.title, line.chapter)));
+        text.set_xalign(0.0);
+        text.set_hexpand(true);
+        let status = gtk::Label::new(Some("Waiting for source"));
+        let cancel = gtk::Button::with_label("Cancel");
+        let (queues, chapter_id) = (self.queues.clone(), line.row.chapter_id);
+        cancel.connect_clicked(move |_| {
+            let _ = queues.cancel_waiting.send(chapter_id);
+        });
+        row.append(&text);
+        row.append(&status);
+        row.append(&cancel);
+        row
     }
 
     fn row(&self, item: &QueueItem) -> gtk::Box {

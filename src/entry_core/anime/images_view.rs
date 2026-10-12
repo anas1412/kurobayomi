@@ -145,6 +145,7 @@ impl State {
             header.pack_end(&share);
             header.pack_end(&save);
             header.pack_end(&edit_slot);
+            crate::ui::no_sticky_focus(&header);
         }
         let this = Rc::new(Self {
             window,
@@ -432,7 +433,7 @@ impl State {
                     }),
                 );
                 popover.set_child(Some(&col));
-                self.edit_slot.append(&gtk::MenuButton::builder().label(&label).popover(&popover).css_classes(["flat"]).build());
+                self.edit_slot.append(&crate::ui::quiet_menu(gtk::MenuButton::builder().label(&label).popover(&popover).css_classes(["flat"]).build()));
             }
         }
     }

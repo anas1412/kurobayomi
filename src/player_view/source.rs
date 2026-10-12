@@ -89,7 +89,9 @@ pub fn resolve_episode(found: SourceEpisode, done: impl FnOnce(Result<Media, Str
     let preferred_audio = super::stored_text("pref_audio_lang");
     let (tx, rx) = async_channel::bounded(1);
     handle.spawn(async move {
-        let _ = tx.send(best_stream(source.as_ref(), &s_episode).await).await;
+        // the "Loading…" card never stays: after 30 seconds the toast says the source is not answering
+        let answer = crate::browse::errors::settle(crate::browse::errors::LOAD_TIMEOUT, source.name(), best_stream(source.as_ref(), &s_episode)).await;
+        let _ = tx.send(answer).await;
     });
     let busy = crate::toast::busy(&tr(MsgKey::loading));
     glib::spawn_future_local(async move {
@@ -104,18 +106,18 @@ pub fn resolve_episode(found: SourceEpisode, done: impl FnOnce(Result<Media, Str
 /// The video to play: the source's hosters (or its plain video list, as one hoster) through `choose`, which keeps the
 /// session's last quality choice and otherwise picks the best video. The error is the text of the toast.
 async fn best_stream(source: &dyn AnimeSource, episode: &SEpisode) -> Result<Video, String> {
+    use crate::browse::errors::plain;
+    let name = source.name();
+    // every call of the source ends within 30 seconds with a sentence for the toast; the technical text is in the log
     let hosters = if source.provides_hosters() {
-        source.sort_hosters(source.hosters(episode).await.map_err(|e| e.to_string())?)
+        source.sort_hosters(plain(name, source.hosters(episode)).await?)
     } else {
-        vec![Hoster::synthetic(source.videos_for_episode(episode).await.map_err(|e| e.to_string())?)]
+        vec![Hoster::synthetic(plain(name, source.videos_for_episode(episode)).await?)]
     };
     if hosters.is_empty() {
         return Err(tr(MsgKey::no_hosters));
     }
-    super::sheets::quality::choose(source, &hosters)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| tr(MsgKey::video_list_empty_error))
+    plain(name, super::sheets::quality::choose(source, &hosters)).await?.ok_or_else(|| tr(MsgKey::video_list_empty_error))
 }
 
 /// Side tracks are added with the `auto` flag, which selects a track only when it matches `alang` or `slang`; the source's
@@ -220,7 +222,7 @@ mod tests {
     }
 
     fn resolve(fake: &Fake) -> Result<Video, String> {
-        let rt = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().expect("runtime");
         rt.block_on(best_stream(fake, &SEpisode::default()))
     }
 
@@ -300,7 +302,8 @@ mod tests {
 
     #[test]
     fn a_failed_or_empty_video_list_is_the_toast_text() {
-        assert_eq!(resolve(&Fake { hosters: Vec::new(), fail: true }).unwrap_err(), SourceError::Parse("HTTP 503".into()).to_string());
+        let failed = resolve(&Fake { hosters: Vec::new(), fail: true }).unwrap_err();
+        assert!(failed.starts_with("Fake ") && failed.contains("isn't working right now") && !failed.contains("503"), "{failed}");
         assert_eq!(resolve(&Fake { hosters: Vec::new(), fail: false }).unwrap_err(), tr(MsgKey::no_hosters));
         let empty = Fake { hosters: vec![Hoster { hoster_name: "A".into(), video_list: Some(Vec::new()), ..Hoster::default() }], fail: false };
         assert_eq!(resolve(&empty).unwrap_err(), tr(MsgKey::video_list_empty_error));

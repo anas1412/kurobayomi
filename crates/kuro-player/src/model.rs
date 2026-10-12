@@ -35,8 +35,6 @@ pub enum Change {
     KeepAwake,
     /// `restore_volume_on_resume`.
     Volume,
-    /// `primary_button` or `primary_button_title`.
-    PrimaryButton,
     /// `is_exiting`.
     Exiting,
     /// `sub_tracks`, `audio_tracks`, `selected_sub`, `selected_audio`.
@@ -64,8 +62,6 @@ pub enum Change {
     PlayerUpdate,
     /// `remaining_sleep`.
     Sleep,
-    /// `custom_buttons`.
-    CustomButtons,
 }
 
 /// The change groups between two states, in declaration order, each at most once.
@@ -112,11 +108,6 @@ pub fn changes(before: &PlayerState, after: &PlayerState) -> Vec<Change> {
         (
             Change::Volume,
             before.restore_volume_on_resume != after.restore_volume_on_resume,
-        ),
-        (
-            Change::PrimaryButton,
-            before.primary_button != after.primary_button
-                || before.primary_button_title != after.primary_button_title,
         ),
         (Change::Exiting, before.is_exiting != after.is_exiting),
         (
@@ -182,10 +173,6 @@ pub fn changes(before: &PlayerState, after: &PlayerState) -> Vec<Change> {
         (
             Change::Sleep,
             before.remaining_sleep != after.remaining_sleep,
-        ),
-        (
-            Change::CustomButtons,
-            before.custom_buttons != after.custom_buttons,
         ),
     ];
     checks

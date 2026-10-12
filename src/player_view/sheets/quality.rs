@@ -201,7 +201,9 @@ fn load(source: Arc<dyn AnimeSource>, episode: SEpisode, done: impl FnOnce(Resul
     };
     let (tx, rx) = async_channel::bounded(1);
     handle.spawn(async move {
-        let _ = tx.send(all_states(source.as_ref(), &episode).await).await;
+        // the spinner of the menu never stays: after 30 seconds the toast says the source is not answering
+        let answer = crate::browse::errors::settle(crate::browse::errors::LOAD_TIMEOUT, source.name(), all_states(source.as_ref(), &episode)).await;
+        let _ = tx.send(answer).await;
     });
     glib::spawn_future_local(async move {
         match rx.recv().await {
@@ -213,7 +215,7 @@ fn load(source: Arc<dyn AnimeSource>, episode: SEpisode, done: impl FnOnce(Resul
 }
 
 async fn all_states(source: &dyn AnimeSource, episode: &SEpisode) -> Result<Vec<HosterState>, String> {
-    let hosters = http_hosters(source, episode).await.map_err(|e| e.to_string())?;
+    let hosters = crate::browse::errors::plain(source.name(), http_hosters(source, episode)).await?;
     let mut states = Vec::with_capacity(hosters.len());
     for hoster in &hosters {
         let state = load_hoster(source, hoster, true)
@@ -243,7 +245,7 @@ fn switch(shared: &Shared, source: Arc<dyn AnimeSource>, pick: Pick, video: Vide
     };
     let (tx, rx) = async_channel::bounded(1);
     handle.spawn(async move {
-        let _ = tx.send(resolve_once(source.as_ref(), video).await.map_err(|e| e.to_string())).await;
+        let _ = tx.send(crate::browse::errors::plain(source.name(), resolve_once(source.as_ref(), video)).await).await;
     });
     let shared = Rc::clone(shared);
     glib::spawn_future_local(async move {

@@ -142,6 +142,7 @@ Note: `pref_mpv_conf` and `pref_mpv_input` are kept for now with their Script an
 | `__APP_STATE_last_app_check` | src/dropped/register.rs, src/app_update.rs |
 | `__APP_STATE_last_app_closed` | src/dropped/register.rs, src/applock_host.rs |
 | `__APP_STATE_last_catalogue_source` | src/browse/mount.rs, src/browse/pages.rs |
+| `__APP_STATE_onboarding_complete` | src/shell/onboarding.rs, src/pref_model/onboarding.rs (first-run wizard, removed 2026-10-12) |
 | `auto_clear_chapter_cache` | src/main.rs, src/settings_ui/route.rs |
 | `auto_update_metadata` | src/misc/runner.rs, src/library_update/pass.rs |
 | `backup_flags` | crates/kuro-source/tests/dropped_android_surface.rs |

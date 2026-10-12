@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_dir_follows_the_platform_data_folder() {
+    fn automatic_dir_follows_the_default_storage_when_no_base_is_chosen() {
         use kuro_platform::linux::paths::{LinuxPaths, Roots};
         let r = |p: &str| PathBuf::from(p);
         let paths = LinuxPaths::new(Roots {
@@ -150,9 +150,9 @@ mod tests {
             config: r("/c"),
             cache: r("/k"),
             state: r("/s"),
-            downloads: r("/d"),
+            videos: r("/v"),
         });
-        assert_eq!(automatic_dir_for(None, &paths), r("/home/u/.local/share/kurobayomi/autobackup"));
+        assert_eq!(automatic_dir_for(None, &paths), r("/v/Kurobayomi/Backups"));
         assert_eq!(automatic_dir_for(Some(Path::new("/mnt/bk")), &paths), r("/mnt/bk/autobackup"));
     }
 

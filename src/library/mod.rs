@@ -16,8 +16,9 @@
 //! - T-37a-050: the global update says "Updating library"; a category update says "Updating category".
 //! - T-37a-052: dropped: animated vector tab icons and the splash ready flag.
 //!   Nothing functional is lost; only motion feedback.
-//! - T-37a-053: the getting-started link opens through `gtk::UriLauncher` from the empty library
-//!   (`actions::shows_getting_started`). The Android intent path is removed.
+//! - T-37a-053: an empty library with no repository shows the welcome view (`view::welcome`: the steps, the add button,
+//!   the storage folder, AniList, restore and the guide). Once a repository exists it offers Browse
+//!   (`actions::empty_library_action`).
 //! - T-37a-057: the interval-custom row is not drawn on the desktop. The filter still runs when the restriction is on
 //!   (`t2::filter`, T2-FILTER-06).
 //! - T-37a-058: an entry with only logged-out tracks sorts as -1.0 (E-14). A NaN mean counts as unscored

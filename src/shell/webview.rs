@@ -150,6 +150,7 @@ pub fn header(
     widget.pack_end(&overflow_menu(overflow));
     widget.pack_end(&forward_button);
     widget.pack_end(&back_button);
+    crate::ui::no_sticky_focus(&widget);
 
     let progress = gtk::ProgressBar::new();
     progress.set_visible(false);
@@ -186,7 +187,7 @@ fn overflow_menu(overflow: impl Fn(Overflow) + 'static) -> gtk::MenuButton {
         popover_box.append(&button);
     }
     popover.set_child(Some(&popover_box));
-    gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).build()
+    crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).build())
 }
 
 impl Header {

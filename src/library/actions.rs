@@ -301,10 +301,18 @@ pub fn update_toast(scope: UpdateScope, already_running: bool) -> String {
     })
 }
 
-/// The getting-started button shows only on the empty state of a library with no entries, no search and no filter
-/// (T-37a-053; upstream's empty-library action). Opens the guide through `gtk::UriLauncher`, not an intent.
-pub fn shows_getting_started(page: EmptyPage) -> bool {
-    page == EmptyPage::LibraryEmpty
+/// What the empty library offers (T-37a-053), shown only when it has no entries, no search and no filter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EmptyLibraryAction {
+    /// No source repository is set up yet: the welcome view (`view::welcome`) leads with adding one.
+    AddRepository,
+    /// A repository exists: the library is simply empty, so the button leads to Browse.
+    Browse,
+}
+
+/// The action on the empty library page, `None` on any other empty page (a search, a filter or an empty category).
+pub fn empty_library_action(page: EmptyPage, has_repositories: bool) -> Option<EmptyLibraryAction> {
+    (page == EmptyPage::LibraryEmpty).then_some(if has_repositories { EmptyLibraryAction::Browse } else { EmptyLibraryAction::AddRepository })
 }
 
 /// The toast when the continue button finds nothing to open (E-25).
@@ -627,12 +635,19 @@ mod tests {
     }
 
     #[test]
-    fn t_37a_053_getting_started_shows_only_for_an_empty_library() {
+    fn t_37a_053_an_empty_library_offers_a_repository_first_and_browse_once_one_exists() {
         use kuro_domain::library::search::empty_page;
-        assert!(shows_getting_started(empty_page(false, false, true)));
-        assert!(!shows_getting_started(empty_page(true, false, true)), "a search leaves no room for it");
-        assert!(!shows_getting_started(empty_page(false, true, true)), "an active filter does not");
-        assert!(!shows_getting_started(empty_page(false, false, false)), "an empty category is not an empty library");
+        let library_empty = empty_page(false, false, true);
+        assert_eq!(empty_library_action(library_empty, false), Some(EmptyLibraryAction::AddRepository));
+        assert_eq!(empty_library_action(library_empty, true), Some(EmptyLibraryAction::Browse));
+    }
+
+    #[test]
+    fn t_37a_053_the_empty_library_action_never_shows_for_a_search_a_filter_or_an_empty_category() {
+        use kuro_domain::library::search::empty_page;
+        assert_eq!(empty_library_action(empty_page(true, false, true), false), None, "a search leaves no room for it");
+        assert_eq!(empty_library_action(empty_page(false, true, true), true), None, "an active filter does not");
+        assert_eq!(empty_library_action(empty_page(false, false, false), false), None, "an empty category is not an empty library");
     }
 
     #[test]

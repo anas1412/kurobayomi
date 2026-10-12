@@ -957,6 +957,13 @@ impl PageView {
         self.imp().state.get()
     }
 
+    /// The size in pixels of the decoded page on show, `None` until it is ready.
+    pub fn source_size(&self) -> Option<(u32, u32)> {
+        let imp = self.imp();
+        let src = imp.src.get();
+        (imp.state.get() == LoadState::Ready && src.w >= 1.0 && src.h >= 1.0).then(|| (src.w as u32, src.h as u32))
+    }
+
     pub fn scale(&self) -> f64 {
         self.imp().zoom.get().scale
     }
