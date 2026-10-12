@@ -287,7 +287,7 @@ mod tests {
         let outcome = rt.block_on(migrate(&steps, &old, &new, MigratePlan { replace: true, flags })).expect("migrates");
         assert!(outcome.warnings.is_empty());
 
-        let moved = items.by_entry(new_id, false).expect("new chapters");
+        let moved = items.by_entry_id(new_id, false).expect("new chapters");
         let first = moved.iter().find(|c| c.number == 1.0).expect("chapter 1");
         assert!(first.done && first.bookmark && first.date_fetch == 9, "the old state carried over: {first:?}");
         assert_eq!(TrackRepo::new(Arc::clone(&db)).by_entry(new_id).expect("tracks").len(), 1, "the track follows");
@@ -353,7 +353,7 @@ mod tests {
                 .expect("commit");
             assert_eq!(categories.by_entry(new_id).expect("categories").into_iter().map(|c| c.id).collect::<Vec<_>>(), [category], "{kind}");
             assert_eq!(tracks.by_entry(new_id).expect("tracks").len(), 1, "{kind}: the binding moved");
-            let moved = items.by_entry(new_id, false).expect("items");
+            let moved = items.by_entry_id(new_id, false).expect("items");
             assert_eq!((moved[0].done, moved[0].bookmark, moved[0].date_fetch), (true, true, 500), "{kind}: the old state carried over");
             let (old_row, new_row) = (repo.by_id(old_id).expect("old"), repo.by_id(new_id).expect("new"));
             assert!(!old_row.favorite && new_row.favorite);

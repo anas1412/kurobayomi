@@ -92,7 +92,7 @@ mod tests {
     async fn an_empty_library_writes_an_empty_file_and_reports_zero_rows() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("kurobayomi_library.csv");
-        let written = save(&target, &[], &[], ExportOptions::ALL).await.unwrap();
+        let written = save(&target, &[], ExportOptions::ALL).await.unwrap();
         assert_eq!(written, 0);
         assert_eq!(std::fs::read(&target).unwrap(), b"");
     }

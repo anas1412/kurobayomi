@@ -79,8 +79,8 @@ pub fn store(kind: Kind) -> Arc<dyn FavoriteStore> {
         Arc::new(|_| 0),
     )
     .with_tracker_binder(track_binding::binder(kind));
-    // Manga adds from History apply no default chapter flags, as before; drop the condition to give them the defaults.
-    Arc::new(if kind.is_anime() { store.with_default_flags(app.base.store().clone()) } else { store })
+    // an add from History takes the default item flags like every other add, for both kinds
+    Arc::new(store.with_default_flags(app.base.store().clone()))
 }
 
 #[cfg(test)]

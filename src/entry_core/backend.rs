@@ -328,9 +328,11 @@ mod tests {
         let db = db_of(&dir.path().join("test.db"));
         let prefs = crate::browse::prefs::BrowsePrefs::new(kuro_prefs::store::PrefStore::in_memory(), crate::browse::route::BrowseKind::Manga);
         let store = Arc::new(crate::browse::repo_store::RepoStore::new(
-            MangaRepo::new(Arc::clone(&db)),
+            Kind::Manga,
+            kuro_data::entry::EntryRepo::new(Arc::clone(&db)),
             CategoryRepo::new(Arc::clone(&db), Kind::Manga),
             prefs.default_category.clone(),
+            Arc::new(|_| 0),
             Arc::new(|_| 0),
         ));
         let fake = FakeCatalogue::new(41);
