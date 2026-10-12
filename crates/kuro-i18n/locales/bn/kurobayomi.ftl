@@ -68,8 +68,6 @@ action_mark_as_seen = দেখা হয়েছে হিসাবে চি�
 
 action_mark_as_unseen = অদেখা হিসেবে চিহ্নিত করুন
 
-action_mark_previous_as_seen = আগের দেখা হিসাবে চিহ্নিত করুন
-
 action_play_internally = অভ্যন্তরীণভাবে খেলুন
 
 action_play_externally = বাহ্যিকভাবে খেলুন
@@ -398,34 +396,6 @@ internal_error = ইন্টারনাল ইরর: বাকি ইনফ�
 
 app_not_available = অ্যাপটি অনুপলব্ধ
 
-pref_onboarding_guide = অনবর্ডিং গাইড
-
-onboarding_heading = স্বাগতম
-
-onboarding_description = প্রথমে কিছু ঠিক করে নিন , পরবর্তীতে আপনি চাইলে সেটিং থেকে সবকিছু পরিবর্তন করতে পারবেন।
-
-onboarding_action_next = পরবর্তী
-
-onboarding_action_finish = শুরু করুন
-
-onboarding_action_skip = বাদ দিন
-
-onboarding_storage_action_select = ফোল্ডার নির্বাচন করুন
-
-onboarding_storage_selection_required = একটি ফোল্ডার অবশ্যই ঠিক করতে হবে
-
-onboarding_storage_help_info = পুরোনো ভার্সন থেকে আপডেট করছেন এবং কী নির্বাচন করবেন তা নিশ্চিত নন? আরও তথ্যের জন্য স্টোরেজ গাইডটি দেখুন।
-
-onboarding_storage_help_action = স্টোরেজ গাইড
-
-onboarding_permission_install_apps = অ্যাপের ইন্সটল করার পারমিশন
-
-onboarding_permission_install_apps_description = সোর্স এক্সটেনশন ইনস্টল করার জন্য
-
-onboarding_permission_notifications = নোটিফিকেশনের পারমিশন
-
-onboarding_permission_notifications_description = লাইব্রেরি আপডেট এবং আরও অনেক কিছুর জন্য বিজ্ঞপ্তি পান।
-
 pref_category_general = সাধারণ
 
 pref_category_appearance = দৃশ্য
@@ -705,12 +675,6 @@ nav_zone_next = পরবর্তী
 nav_zone_left = বাম
 
 nav_zone_right = ডান
-
-left_to_right_viewer = বাম থেকে ডানে
-
-right_to_left_viewer = ডান থেকে বামে
-
-vertical_viewer = উল্লম্ব
 
 webtoon_viewer = ওয়েবটুন
 
@@ -1241,8 +1205,6 @@ information_no_recent = কোন নতুন হালনাগাদ নে�
 information_no_recent_manga = সম্প্রতি কিছু পড়া হয়নি
 
 information_empty_library = আপনার সংগ্রহশালা খালি
-
-getting_started_guide = শুরু হওয়ার গাইড
 
 information_empty_category = আপনার কোন বিভাগ নেই। আপনার সংগ্রহশালা সাজাতে যোগ চিহ্ন বাটনে চেপে একটি বিভাগ তৈরী করুন।
 

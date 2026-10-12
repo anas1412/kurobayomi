@@ -396,10 +396,6 @@ internal_error = आंतरिक त्रुटि : अधिक जान�
 
 app_not_available = ऐप उपलब्ध नहीं
 
-pref_onboarding_guide = ऑनबोर्डिंग मार्गदर्शक
-
-onboarding_heading = नमस्ते!आपका स्वागत है!
-
 pref_category_general = सामान्य
 
 pref_category_appearance = रूप
@@ -699,12 +695,6 @@ nav_zone_next = अगला
 nav_zone_left = बाएं
 
 nav_zone_right = दाईं
-
-left_to_right_viewer = बाएं से दाएं
-
-right_to_left_viewer = दाएं से बाएं
-
-vertical_viewer = सीधा
 
 webtoon_viewer = लंबी पट्टी
 
@@ -1301,8 +1291,6 @@ information_no_recent = कोई हालिया अपडेट नही�
 information_no_recent_manga = हाल ही में कुछ भी नहीं पढ़ा
 
 information_empty_library = आपका पुस्तकालय खाली है़ें। स्रोतों से अपने पुस्तकालय में श्रृंखला जोड़ें
-
-getting_started_guide = प्रारंभिक मार्गदर्शन
 
 information_empty_category = आपके पास कोई श्रेणियां नहीं हैं। अपने पुस्तकालय के आयोजन के लिए एक बनाने के लिए प्लस बटन को दबाएं।
 

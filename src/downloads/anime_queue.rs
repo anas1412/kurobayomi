@@ -24,14 +24,12 @@ use kuro_downloads::anime::manager::{AnimeQueue, AnimeQueueParams, AnimeSettings
 use kuro_downloads::anime::notify::AnimeNotifier;
 use kuro_downloads::anime::pending::AnimePendingStore;
 use kuro_downloads::anime::store::AnimeQueueStore;
-use kuro_downloads::model::DownloadState;
 use kuro_downloads::notify::{NotificationSink, NotifierSink};
 use kuro_net::NetworkClient;
 use kuro_platform::notifier::Notifier;
 use kuro_platform::paths::Paths;
 use kuro_prefs::network::NetworkPrefs;
 use kuro_prefs::store::PrefStore;
-use kuro_source::anime::AnimeSource as _;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::downloads::anime_io::{HttpVideoFetch, LiveHosters, live_source};

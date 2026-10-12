@@ -480,8 +480,6 @@ action_mark_as_seen = Означи као гледано
 
 action_mark_as_unseen = Означи као негледано
 
-action_mark_previous_as_seen = Означи претходно као виђено
-
 action_play_internally = Пуштај интерно
 
 action_play_externally = Пуштај екстерно
@@ -723,8 +721,6 @@ unseen = Невидљиво
 label_manga_extension_repos = Репозиторијуми манга екстензија
 
 label_anime_extension_repos = Репозиторијуми аниме екстензија
-
-onboarding_storage_action_create_folder = Креирај подразумевану Aniyomi фасциклу
 
 download_speed_limit = Ограничење брзине преузимања
 
@@ -1018,41 +1014,7 @@ internal_error = InternalError: Провери записнике о преки�
 
 app_not_available = Апликација није доступна
 
-pref_onboarding_guide = Водич за прво покретање
-
-onboarding_heading = Добро дошли!
-
-onboarding_description = Хајде да обавимо нека подешавања. Ако желиш можеш их касније променити у подешавањима.
-
-onboarding_action_next = Следеће
-
-onboarding_action_finish = Започни
-
-onboarding_action_skip = Пресокочи
-
 onboarding_storage_info = Одабери путању у коју ће { $arg1 } чувати преузимања поглавља, резервне копије и друго.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Препоручујемо коришћење засебне путање{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Одабрана путања: { $arg2 }
-
-onboarding_storage_action_select = Изабери путању
-
-onboarding_storage_selection_required = Мораш да изабереш једну путању
-
-onboarding_storage_help_info = Ажурураш са старије верзије и не знаш шта да изабереш? Потражи информације у водичу складиштења.
-
-onboarding_storage_help_action = Водич складиштења
-
-onboarding_permission_install_apps = Дозвола за инсталацију апликација
-
-onboarding_permission_install_apps_description = За инсталирање додатака.
-
-onboarding_permission_notifications = Дозвола за обавештења
-
-onboarding_permission_notifications_description = За примање обавештења о ажурурању библиотеке и др.
-
-onboarding_permission_action_grant = Одобри
-
-onboarding_guides_new_user = Користш { $arg1 } први пут? Препоручујемо да погледаш водич за покретање
-
-onboarding_guides_returning_user = Поново инсталираш { $arg1 }?
 
 pref_category_general = Опште
 
@@ -1260,8 +1222,6 @@ ext_install_service_notif = Инсталирање додатка…
 
 ext_revoke_trust = Опозови поверење непознатим екстензијама
 
-label_extension_repos = Репозиторије додатака
-
 information_empty_repos = Немате додатих репозиторија.
 
 action_add_repo = Додај репозиторију
@@ -1399,12 +1359,6 @@ nav_zone_next = След.
 nav_zone_left = Лево
 
 nav_zone_right = Десно
-
-left_to_right_viewer = Страница (слева надесно)
-
-right_to_left_viewer = Страница (сдесна налево)
-
-vertical_viewer = Страница (вертикално)
 
 webtoon_viewer = Дуги стрип
 
@@ -2127,8 +2081,6 @@ information_empty_library = Ваша колекција је празна
 information_no_manga_category = Категорија је празна
 
 information_no_entries_found = Нема наслова у овој категорији
-
-getting_started_guide = Почетни водич
 
 information_empty_category = Немате категорија. Додирните дугме плус да бисте направили нову категорију за организовање колекције.
 

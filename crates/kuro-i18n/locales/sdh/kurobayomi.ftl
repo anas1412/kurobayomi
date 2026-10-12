@@ -364,12 +364,6 @@ nav_zone_left = چەپ
 
 nav_zone_right = ڕاست
 
-left_to_right_viewer = چەپ بۆ ڕاست
-
-right_to_left_viewer = ڕاست بۆ چەپ
-
-vertical_viewer = ستوونی
-
 webtoon_viewer = شێوازی وێبتوون
 
 vertical_plus_viewer = ستوونی بەردەوام

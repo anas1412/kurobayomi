@@ -458,12 +458,6 @@ nav_zone_left = ಎಡಕ್ಕೆ
 
 nav_zone_right = ಬಲಕ್ಕೆ
 
-left_to_right_viewer = ಎಡದಿಂದ ಬಲಕ್ಕೆ
-
-right_to_left_viewer = ಬಲದಿಂದ ಎಡಕ್ಕೆ
-
-vertical_viewer = ಲಂಬ
-
 webtoon_viewer = ವೆಬ್‌ಟೂನ್
 
 vertical_plus_viewer = ನಿರಂತರ ಲಂಬ

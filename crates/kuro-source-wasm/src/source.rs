@@ -765,7 +765,7 @@ mod anime_tests {
         assert_eq!(source.id(), 42);
         assert!(source.supports_latest());
         assert!(source.provides_hosters());
-        assert!(!source.supports_details());
+        assert!(source.supports_details());
         assert!(!source.supports_season_list());
         let page = source.popular(1).await.expect("popular");
         assert_eq!(page.animes[0].title, "One");

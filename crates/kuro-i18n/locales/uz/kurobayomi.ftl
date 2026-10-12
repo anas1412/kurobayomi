@@ -546,12 +546,6 @@ nav_zone_left = Chap
 
 nav_zone_right = O'ng
 
-left_to_right_viewer = Chapdan o'ngga
-
-right_to_left_viewer = O'ngdan chapga
-
-vertical_viewer = Vertikal
-
 webtoon_viewer = Vebtun
 
 vertical_plus_viewer = Uzluksiz vertikal

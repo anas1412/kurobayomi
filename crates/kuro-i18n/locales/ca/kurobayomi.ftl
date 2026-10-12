@@ -206,8 +206,6 @@ action_mark_as_seen = Marcar com llegit
 
 action_mark_as_unseen = Marcar com no mirat
 
-action_mark_previous_as_seen = Marcar previ com llegit
-
 action_play_internally = Reproduir internament
 
 action_play_externally = Reproduir externament
@@ -768,49 +766,7 @@ internal_error = Error intern: Reviseu els registres de fallades per a més info
 
 app_not_available = Aplicació no disponible
 
-pref_onboarding_guide = Guia de benvinguda
-
-onboarding_heading = Et donem la benvinguda!
-
-onboarding_description = Primer cal configurar unes quantes coses. Sempre podràs canviar aquestes opcions a la configuració.
-
-onboarding_action_next = Següent
-
-onboarding_action_finish = Comença
-
-onboarding_action_skip = Omet
-
 onboarding_storage_info = Seleccioneu una carpeta on el { $arg1 } emmagatzemarà les baixades dels capítols, les còpies de seguretat i més.{"\u000A"}{"\u000A"}És recomanable fer servir una carpeta dedicada.{"\u000A"}{"\u000A"}Carpeta seleccionada: { $arg2 }
-
-onboarding_storage_action_select = Selecciona una carpeta
-
-onboarding_storage_selection_required = Cal que seleccioneu una carpeta
-
-onboarding_storage_help_info = Heu actualitzat d’una versió més antiga i no sabeu què heu de seleccionar? Consulteu la guia d’emmagatzematge per a més informació.
-
-onboarding_storage_help_action = Guia d’emmagatzematge
-
-onboarding_permission_install_apps = Permís per a instal·lar aplicacions
-
-onboarding_permission_install_apps_description = Per a instal·lar extensions de fonts.
-
-onboarding_permission_notifications = Permís de notificacions
-
-onboarding_permission_notifications_description = Rebeu notificacions quan hi hagi actualitzacions de la biblioteca i més.
-
-onboarding_permission_crashlytics = Envia registres d’errors
-
-onboarding_permission_crashlytics_description = Envia registres d’errors anonimitzats als desenvolupadors.
-
-onboarding_permission_analytics = Permet les analítiques
-
-onboarding_permission_analytics_description = Envia dades d’ús anonimitzades per a millorar les funcionalitats de l’aplicació.
-
-onboarding_permission_action_grant = Permet
-
-onboarding_guides_new_user = No heu fet servir mai el { $arg1 }? Us recomanem que reviseu la guia de benvinguda.
-
-onboarding_guides_returning_user = Heu reinstal·lat { $arg1 }?
 
 pref_category_general = General
 
@@ -1032,8 +988,6 @@ ext_install_service_notif = S’està instal·lant l’extensió…
 
 ext_revoke_trust = Revoca les extensions de confiança desconegudes
 
-label_extension_repos = Repositoris d’extensions
-
 information_empty_repos = No heu definit cap repositori.
 
 action_add_repo = Afegeix un repositori
@@ -1199,12 +1153,6 @@ nav_zone_next = Següent
 nav_zone_left = Esquerra
 
 nav_zone_right = Dreta
-
-left_to_right_viewer = Paginat (d’esquerra a dreta)
-
-right_to_left_viewer = Paginat (de dreta a esquerra)
-
-vertical_viewer = Paginat (vertical)
 
 webtoon_viewer = Tira vertical
 
@@ -1969,8 +1917,6 @@ information_empty_library = La vostra biblioteca és buida
 information_no_manga_category = La categoria és buida
 
 information_no_entries_found = No s’ha trobat cap element en aquesta categoria
-
-getting_started_guide = Guia d’introducció
 
 information_empty_category = No teniu categories. Premeu el botó més per a crear-ne una i organitzar la vostra biblioteca.
 

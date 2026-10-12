@@ -314,41 +314,7 @@ internal_error = InternalError: Sjekk krasjlogger for mer informasjon
 
 app_not_available = Program ikke tilgjengelig
 
-pref_onboarding_guide = Introduksjonsguide
-
-onboarding_heading = Velkommen!
-
-onboarding_description = La oss sette opp noen ting først. Du kan alltid endre disse i innstillingene senere også.
-
-onboarding_action_next = Neste
-
-onboarding_action_finish = Kom i gang
-
-onboarding_action_skip = Hopp over
-
 onboarding_storage_info = Velg en mappe der { $arg1 } vil lagre kapittelnedlastinger, sikkerhetskopier og mer.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}En dedikert mappe anbefales.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Valgt mappe: { $arg2 }
-
-onboarding_storage_action_select = Velg en mappe
-
-onboarding_storage_selection_required = En mappe må velges
-
-onboarding_storage_help_info = Oppdaterer du fra en eldre versjon og er usikker på hva du skal velge? Sjekk lagringsguiden for mer informasjon.
-
-onboarding_storage_help_action = Lagringsguiden
-
-onboarding_permission_install_apps = Tillat å installere apper
-
-onboarding_permission_install_apps_description = For å installere kildeutvidelser.
-
-onboarding_permission_notifications = Tillat varslinger
-
-onboarding_permission_notifications_description = Få varsler for oppdateringer i biblioteket og mer.
-
-onboarding_permission_action_grant = Tillat
-
-onboarding_guides_new_user = Ny til { $arg1 }? Vi anbefaler å sjekke ut startveiledningen.
-
-onboarding_guides_returning_user = Reinstallerer du { $arg1 }?
 
 pref_category_general = Generelt
 
@@ -556,8 +522,6 @@ ext_install_service_notif = Installerer utvidelse …
 
 ext_revoke_trust = Fjern tilliten til ukjente utvidelser
 
-label_extension_repos = Utvidelsepakkebrønner
-
 information_empty_repos = Du har ingen pakkebrønner satt opp.
 
 action_add_repo = Legg til pakkebrønn
@@ -693,12 +657,6 @@ nav_zone_next = Neste
 nav_zone_left = Venstre
 
 nav_zone_right = Høyre
-
-left_to_right_viewer = Sider (venstre til høyre)
-
-right_to_left_viewer = Sider (høyre til venstre)
-
-vertical_viewer = Sider (loddrett)
 
 webtoon_viewer = Lang stripe
 
@@ -1419,8 +1377,6 @@ information_empty_library = Biblioteket ditt er tomt
 information_no_manga_category = Kategorien er tom
 
 information_no_entries_found = Fant ingen oppføringer i denne kategorien
-
-getting_started_guide = Oppstartsveiledning
 
 information_empty_category = Du har ingen kategorier. Trykk på pluss-knappen for å lage en for å organisere biblioteket ditt.
 

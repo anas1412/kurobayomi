@@ -26,3 +26,8 @@ before 0.38 accepts it.
 
 The reader's top bar (back, title, bookmark, overflow menu) is always shown; only the bottom bar follows the menu
 toggle (guard test in `src/reader/topbar_guard.rs`).
+
+The title is two lines: `<manga> - <chapter>` and a small dim `Page n of total` under it (`page_header::two_line_title`).
+The line is empty on a chapter transition card. Nothing is drawn over the pages. The menu is a native popover menu
+(`chrome::overflow_menu`) on the page's `reader` actions: five radio reading modes that apply at once, Crop borders,
+Reader settings, then Open in browser and Share (Set as cover for a local manga).

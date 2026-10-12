@@ -196,6 +196,7 @@ mod tests {
         let domain = Domain::new(deps(&dir, &settings));
         domain.backup_prefs().interval.set(0);
         assert_eq!(settings.get_raw("backup_interval"), Some(kuro_prefs::values::PrefValue::Int(0)));
-        assert!(matches!(domain.storage().base(), Err(crate::error::DomainError::StorageUnavailable)));
+        // The default base is created on first use, so the user is never asked for a folder.
+        assert_eq!(domain.storage().base().unwrap(), dir.path().join("no-such-base"));
     }
 }

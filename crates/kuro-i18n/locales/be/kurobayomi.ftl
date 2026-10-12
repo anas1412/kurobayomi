@@ -552,12 +552,6 @@ nav_zone_left = Злева
 
 nav_zone_right = Справа
 
-left_to_right_viewer = Злева направа
-
-right_to_left_viewer = Справа налева
-
-vertical_viewer = Вертыкальна
-
 webtoon_viewer = Вэб-комікс
 
 vertical_plus_viewer = Бесперапынна вертыкальна

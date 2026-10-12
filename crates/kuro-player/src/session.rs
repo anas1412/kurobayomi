@@ -627,6 +627,7 @@ mod tests {
     #[test]
     fn exiting_window_drops_events() {
         let mut session = Session::new(Fake::default());
+        session.state.is_loading = false;
         session.state.is_exiting = true;
         assert_eq!(session.on_event(MpvEvent::Seek), Dispatch::Dropped);
         assert!(!session.state.is_loading);

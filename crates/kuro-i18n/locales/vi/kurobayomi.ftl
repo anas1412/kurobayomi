@@ -270,8 +270,6 @@ action_mark_as_seen = Đánh dấu đã xem
 
 action_mark_as_unseen = Đánh dấu chưa xem
 
-action_mark_previous_as_seen = Đánh dấu tập trước đã xem
-
 action_play_internally = Mở trong ứng dụng
 
 action_play_externally = Mở ngoài ứng dụng
@@ -511,8 +509,6 @@ unseen = Bỏ đã xem
 label_manga_extension_repos = Repo Manga Extension
 
 label_anime_extension_repos = Repo Anime Extension
-
-onboarding_storage_action_create_folder = Tạo thư mục Aniyomi mặc định
 
 download_speed_limit = Giới hạn tốc độ tải xuống
 
@@ -810,49 +806,7 @@ internal_error = Lỗi nội bộ: Kiểm tra nhật ký bị ngắt ứng dụn
 
 app_not_available = Ứng dụng không có sẵn
 
-pref_onboarding_guide = Hướng dẫn làm quen
-
-onboarding_heading = Xin chào!
-
-onboarding_description = Trước tiên hãy thiết lập một số thứ nhé. Bạn có thể tùy ý chỉnh lại những cài đặt này lại sau.
-
-onboarding_action_next = Tiếp
-
-onboarding_action_finish = Bắt đầu
-
-onboarding_action_skip = Bỏ qua
-
 onboarding_storage_info = Chọn thư mục nơi mà { $arg1 } sẽ chứa chương truyện tải xuống, sao lưu, và những thứ khác.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Khuyến khích sử dụng một thư mục chuyên dụng.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Thư mục được chọn: { $arg2 }
-
-onboarding_storage_action_select = Chọn một thư mục
-
-onboarding_storage_selection_required = Phải chọn một thư mục
-
-onboarding_storage_help_info = Cập nhật từ phiên bản cũ hơn và không biết nên chọn gì? Tham khảo hướng dẫn để biết thêm thông tin.
-
-onboarding_storage_help_action = Hướng dẫn
-
-onboarding_permission_install_apps = Cài đặt quyền ứng dụng
-
-onboarding_permission_install_apps_description = Để cài đặt nguồn mở rộng.
-
-onboarding_permission_notifications = Quyền thông báo
-
-onboarding_permission_notifications_description = Gửi thông báo khi thư viện cấp nhật và nhiều hơn thế.
-
-onboarding_permission_crashlytics = Gửi nhật ký sự cố (crash log)
-
-onboarding_permission_crashlytics_description = Gửi nhật ký sự cố ẩn danh tới nhà phát triển để giúp phát triển ứng dụng tốt hơn.
-
-onboarding_permission_analytics = Cho phép phân tích dữ liệu
-
-onboarding_permission_analytics_description = Gửi dữ liệu sử dụng ẩn danh để cải thiện các tính năng của ứng dụng.
-
-onboarding_permission_action_grant = Cho phép
-
-onboarding_guides_new_user = Mới với { $arg1 } sao? Chúng tôi khuyên bạn nên xem hướng dẫn bắt đầu.
-
-onboarding_guides_returning_user = Đã sử dụng { $arg1 } từ trước rồi sao?
 
 pref_category_general = Chung
 
@@ -1072,8 +1026,6 @@ ext_install_service_notif = Đang cài đặt tiện ích mở rộng…
 
 ext_revoke_trust = Thu hồi quyền truy cập của tiện ích không xác định
 
-label_extension_repos = Quản lý nguồn
-
 information_empty_repos = Bạn chưa có nguồn nào.
 
 action_add_repo = Thêm nguồn
@@ -1239,12 +1191,6 @@ nav_zone_next = Tiếp theo
 nav_zone_left = Trái
 
 nav_zone_right = Phải
-
-left_to_right_viewer = Phân trang (trái sang phải)
-
-right_to_left_viewer = Phân trang (phải sang trái)
-
-vertical_viewer = Phân trang (chiều dọc)
 
 webtoon_viewer = Cuộc dọc
 
@@ -1993,8 +1939,6 @@ information_empty_library = Thư viện trống
 information_no_manga_category = Hạng mục trống
 
 information_no_entries_found = Không có gì trong danh mục này
-
-getting_started_guide = Hướng dẫn sử dụng khởi đầu
 
 information_empty_category = Không có danh mục. Nhấn vào dấu cộng để tạo một nhóm từ thư viện.
 

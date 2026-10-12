@@ -664,8 +664,6 @@ action_mark_as_seen = 标记为已看
 
 action_mark_as_unseen = 标记为未看
 
-action_mark_previous_as_seen = 标记前一个为已观看
-
 action_play_internally = 使用内置播放器播放
 
 action_play_externally = 使用外置播放器播放
@@ -921,8 +919,6 @@ unseen = 未看
 label_manga_extension_repos = 漫画插件仓库
 
 label_anime_extension_repos = 动画插件仓库
-
-onboarding_storage_action_create_folder = 创建默认 Aniyomi 文件夹
 
 download_speed_limit = 限速下载
 
@@ -1237,49 +1233,7 @@ internal_error = InternalError: 内部错误，详情请见崩溃日志
 
 app_not_available = 应用无法使用
 
-pref_onboarding_guide = 首次启动引导
-
-onboarding_heading = 欢迎！
-
-onboarding_description = 首先调整一些设置。稍后也可以在设置中修改。
-
-onboarding_action_next = 下一步
-
-onboarding_action_finish = 开始使用
-
-onboarding_action_skip = 跳过
-
 onboarding_storage_info = 选择一个文件夹供 { $arg1 } 存放下载章节、备份文件等。{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}推荐使用一个专门的文件夹。{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}已选文件夹：{ $arg2 }
-
-onboarding_storage_action_select = 选择文件夹
-
-onboarding_storage_selection_required = 必须选择一个文件夹
-
-onboarding_storage_help_info = 如果你是从旧版更新而来，可以查看存储指南了解详情。
-
-onboarding_storage_help_action = 存储指南
-
-onboarding_permission_install_apps = 应用安装权限
-
-onboarding_permission_install_apps_description = 用来安装图源插件。
-
-onboarding_permission_notifications = 通知权限
-
-onboarding_permission_notifications_description = 用来发送书架更新等通知。
-
-onboarding_permission_crashlytics = 发送崩溃日志
-
-onboarding_permission_crashlytics_description = 向开发者发送匿名的崩溃日志
-
-onboarding_permission_analytics = 数据分析
-
-onboarding_permission_analytics_description = 发送匿名的应用数据以提升用户体验
-
-onboarding_permission_action_grant = 允许
-
-onboarding_guides_new_user = 如果你是第一次使用 { $arg1 }，推荐查看入门指南。
-
-onboarding_guides_returning_user = 如果你是重新安装了 { $arg1 }，可以使用以下功能。
 
 pref_category_general = 常规
 
@@ -1503,8 +1457,6 @@ ext_install_service_notif = 正在安装插件…
 
 ext_revoke_trust = 撤销已信任的未知插件
 
-label_extension_repos = 插件仓库
-
 information_empty_repos = 尚未设置仓库
 
 action_add_repo = 添加仓库
@@ -1672,12 +1624,6 @@ nav_zone_next = 下一页
 nav_zone_left = 往左
 
 nav_zone_right = 往右
-
-left_to_right_viewer = 单页式（从左到右）
-
-right_to_left_viewer = 单页式（从右到左）
-
-vertical_viewer = 单页式（从上到下）
 
 webtoon_viewer = 条漫
 
@@ -2442,8 +2388,6 @@ information_empty_library = 书架为空
 information_no_manga_category = 分类为空
 
 information_no_entries_found = 此分类没有作品
-
-getting_started_guide = 入门指南
 
 information_empty_category = 尚无分类，点击加号按钮创建分类用来管理书架。
 

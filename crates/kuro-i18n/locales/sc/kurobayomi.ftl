@@ -400,49 +400,7 @@ internal_error = Errore internu: verìfica sos registros de sas serradas improvi
 
 app_not_available = Aplicatzione non disponìbile
 
-pref_onboarding_guide = Ghia de introdutzione
-
-onboarding_heading = Bene bènnidu!
-
-onboarding_description = In antis de totus tocat a cunfigurare una paja de cosas. L'as a pòdere semper modificare a pustis dae sas impostatziones.
-
-onboarding_action_next = Imbeniente
-
-onboarding_action_finish = Incumintzemus
-
-onboarding_action_skip = Brinca
-
 onboarding_storage_info = Seletziona una cartella in ue { $arg1 } at a archiviare sos capìtulos iscarrigados, sas còpias de seguresa e àteru.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Si cussìgiat una cartella dedicada.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Cartella seletzionada: { $arg2 }
-
-onboarding_storage_action_select = Seletziona una cartella
-
-onboarding_storage_selection_required = Depes seletzionare una cartella
-
-onboarding_storage_help_info = Ses agiornende dae una versione betza e non ses seguru de ite seletzionare? Abbista·ti sa ghia a s'archiviatzione pro àteras informatziones.
-
-onboarding_storage_help_action = Ghia a s'archiviatzione
-
-onboarding_permission_install_apps = Permissos pro installare s'aplicatzione
-
-onboarding_permission_install_apps_description = Pro installare estensiones de fontes.
-
-onboarding_permission_notifications = Permissu pro sas notìficas
-
-onboarding_permission_notifications_description = Retzi notìficas pro agiornamentos de sa biblioteca e àteru.
-
-onboarding_permission_crashlytics = Imbia registros de arrestos anòmalos
-
-onboarding_permission_crashlytics_description = Imbia registros de arrestos anòmalos anonimizados a sos isvilupadores.
-
-onboarding_permission_analytics = Permite sas istatìsticas de impreu
-
-onboarding_permission_analytics_description = Imbia datos de impreu anonimizados pro megiorare sas funtzionalidades de s'aplicatzione.
-
-onboarding_permission_action_grant = Fruni
-
-onboarding_guides_new_user = Nou in { $arg1 }? Ti cussigiamus de t'abbistare sa ghia de introdutzione.
-
-onboarding_guides_returning_user = Ses torrende a installare { $arg1 }?
 
 pref_category_general = Generales
 
@@ -664,8 +622,6 @@ ext_install_service_notif = Installende s'estensione…
 
 ext_revoke_trust = Rèvoca sas estensiones disconnotas afidàbiles
 
-label_extension_repos = Depòsitos de estensiones
-
 information_empty_repos = Non tenes galu depòsitos impostados.
 
 action_add_repo = Annanghe unu depòsitu
@@ -833,12 +789,6 @@ nav_zone_next = Imbeniente
 nav_zone_left = Manca
 
 nav_zone_right = Destra
-
-left_to_right_viewer = Pro pàgina (dae manca a destra)
-
-right_to_left_viewer = Pro pàgina (dae destra a manca)
-
-vertical_viewer = Pro pàgina (verticale)
 
 webtoon_viewer = Verticale longu
 
@@ -1591,8 +1541,6 @@ information_empty_library = Sa biblioteca tua est bòida
 information_no_manga_category = Sa categoria est bòida
 
 information_no_entries_found = Perunu elementu atzapadu in custa categoria
-
-getting_started_guide = Ghia pro incumintzare
 
 information_empty_category = Non tenes categorias. Incarca su butone de su "prus" pro nde creare una pro organizare sa biblioteca tua.
 

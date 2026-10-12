@@ -674,8 +674,6 @@ action_mark_as_seen = Marcar como visto
 
 action_mark_as_unseen = Marcar como no visto
 
-action_mark_previous_as_seen = Marcar anteriores como vistos
-
 action_play_internally = Reproducir internamente
 
 action_play_externally = Reproducir externamente
@@ -947,8 +945,6 @@ unseen = Sin ver
 label_manga_extension_repos = Repositorios de extensiones de manga
 
 label_anime_extension_repos = Repositorios de extensiones de anime
-
-onboarding_storage_action_create_folder = Crear carpeta de Aniyomi por defecto
 
 download_speed_limit = Límite de velocidad de la descarga
 
@@ -1333,48 +1329,6 @@ internal_error = ErrorInterno: Mira el registro de depuración para más informa
 
 app_not_available = La aplicación no está disponible
 
-pref_onboarding_guide = Guía para principiantes
-
-onboarding_heading = ¡Hola!
-
-onboarding_description = Lo primero de todo es dejar las cosas a tu gusto. Siempre puedes volver a cambiarlas más tarde en los ajustes.
-
-onboarding_action_next = Siguiente
-
-onboarding_action_finish = Comenzar
-
-onboarding_action_skip = Saltar
-
-onboarding_storage_action_select = Elige una carpeta
-
-onboarding_storage_selection_required = Tienes que elegir una carpeta
-
-onboarding_storage_help_info = ¿Acabas de actualizar desde una versión más antigua y no sabes qué hacer? Échale un vistazo a la guía de almacenamiento.
-
-onboarding_storage_help_action = Guía de almacenamiento
-
-onboarding_permission_install_apps = Permiso para instalar aplicaciones
-
-onboarding_permission_install_apps_description = Para poder instalar extensiones que te dejen encontrar y descargar contenido.
-
-onboarding_permission_notifications = Permitir notificaciones
-
-onboarding_permission_notifications_description = Recibe notificaciones sobre actualizaciones de la biblioteca y mucho más.
-
-onboarding_permission_crashlytics = Enviar registros de errores
-
-onboarding_permission_crashlytics_description = Envía registros anónimos de errores a los desarrolladores.
-
-onboarding_permission_analytics = Enviar estadísticas de uso
-
-onboarding_permission_analytics_description = Compartir estadísticas de uso para mejorar la aplicación.
-
-onboarding_permission_action_grant = Conceder
-
-onboarding_guides_new_user = ¿Es la primera vez que instalas { $arg1 }? Te recomendamos leer la guía de introducción.
-
-onboarding_guides_returning_user = ¿No es la primera vez que instalas { $arg1 }?
-
 pref_category_general = General
 
 pref_category_appearance = Apariencia
@@ -1601,8 +1555,6 @@ ext_install_service_notif = Instalando extensión…
 
 ext_revoke_trust = Dejar de marcar todas la extensiones desconocidas como de confianza
 
-label_extension_repos = Repositorios de extensiones
-
 information_empty_repos = Todavía no has añadido ningún repositorio.
 
 action_add_repo = Añadir un repositorio
@@ -1770,12 +1722,6 @@ nav_zone_next = Siguiente
 nav_zone_left = Izquierda
 
 nav_zone_right = Derecha
-
-left_to_right_viewer = Por páginas, de izquierda a derecha
-
-right_to_left_viewer = Por páginas, de derecha a izquierda
-
-vertical_viewer = Por páginas, de arriba abajo
 
 webtoon_viewer = Tira vertical continua
 
@@ -2540,8 +2486,6 @@ information_empty_library = Tu biblioteca está vacía
 information_no_manga_category = La categoría está vacía
 
 information_no_entries_found = Parece que esta categoría está vacía
-
-getting_started_guide = Guía de introducción
 
 information_empty_category = No hay categorías. Pulsa el botón «+» para crear una y organizar tu biblioteca.
 

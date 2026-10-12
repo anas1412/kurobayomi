@@ -358,12 +358,6 @@ nav_zone_left = डावी
 
 nav_zone_right = उजवी
 
-left_to_right_viewer = डावीकडून उजवीकडे
-
-right_to_left_viewer = उजवीकडून डावीकडे
-
-vertical_viewer = सरळ
-
 webtoon_viewer = वेबटून
 
 vertical_plus_viewer = सतत उभे

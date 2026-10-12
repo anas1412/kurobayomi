@@ -642,6 +642,9 @@ impl LibraryView {
 
 /// Whether any manga or anime source repository is set up. Decides what the empty library offers.
 fn repositories_exist() -> bool {
+    if !crate::data::is_installed() {
+        return false;
+    }
     let sources = kuro_prefs::source::SourcePrefs::new(crate::data::app().base.store().clone());
     !sources.manga_extension_repos.get().is_empty() || !sources.anime_extension_repos.get().is_empty()
 }

@@ -828,7 +828,7 @@ mod tests {
         );
         assert_eq!(
             authorize_url(TrackerId::SIMKL, "S").unwrap(),
-            "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=aniyomi%3A%2F%2Fsimkl-auth&state=S"
+            "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=kurobayomi%3A%2F%2Fsimkl-auth&state=S"
         );
     }
 
@@ -987,7 +987,7 @@ mod tests {
                 "kurobayomi://simkl-auth?code=x",
                 0
             ),
-            Handled::Toast(MsgKey::LoginExpired),
+            Handled::SimklRedirect("kurobayomi://simkl-auth?code=x".into()),
             "routed like aniyomi://, with no attempt pending"
         );
     }

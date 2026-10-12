@@ -278,8 +278,12 @@ impl AnimeEntryModel {
     /// skip numbers (`insertSeparators`, T-39a-015). The markers follow the filtered list (OD-1, Kotlin parity).
     pub fn lines(&self) -> Vec<RowItem> {
         let descending = self.anime.sort_descending();
-        insert_missing_separators(self.processed(), descending)
+        let shown = self.processed();
+        // a gap is only a missing episode when no filter hides any: a hidden episode is not missing
+        let complete = shown.len() == self.episodes.len();
+        insert_missing_separators(shown, descending)
             .into_iter()
+            .filter(|row| complete || matches!(row, ListRow::Item(_)))
             .map(|item| match item {
                 ListRow::Item(ep) => self.row_of(&ep),
                 ListRow::MissingCount { id, count } => RowItem::marker(id, count, tr_plural(MsgKey::missing_items, i64::from(count), &[])),
@@ -414,6 +418,14 @@ mod tests {
         let (_dir, store, id) = with_episodes(true, true, 2, 0);
         store.set_flag_bits(id, ep::SHOW_SEEN, ep::UNSEEN_MASK).unwrap();
         assert_eq!(load(&store, id).anime.episode_flags & ep::UNSEEN_MASK, ep::SHOW_SEEN);
+    }
+
+    #[test]
+    fn a_filter_that_hides_an_episode_adds_no_missing_marker() {
+        let (_dir, store, id) = with_episodes(true, true, 3, 1);
+        store.set_flag_bits(id, ep::SHOW_UNSEEN, ep::UNSEEN_MASK).unwrap();
+        let lines = load(&store, id).lines();
+        assert_eq!(lines.len(), 2, "the two unseen episodes and no \"1 missing\" line for the hidden one");
     }
 
     #[test]

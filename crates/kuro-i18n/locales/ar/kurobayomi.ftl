@@ -624,8 +624,6 @@ action_mark_as_seen = وضع علامة كـ"مشاهد"
 
 action_mark_as_unseen = وضع علامة كـ"غير مشاهد"
 
-action_mark_previous_as_seen = وضع علامة على السابق كـ"غير مشاهد"
-
 action_play_internally = تشغيل داخليا
 
 action_play_externally = تشغيل خارجيا
@@ -867,8 +865,6 @@ unseen = إزالة المشاهدة
 label_manga_extension_repos = مخزن إضافة المانغا
 
 label_anime_extension_repos = مخزن إضافة الأنمي
-
-onboarding_storage_action_create_folder = إنشاء مجلد Aniyomi افتراضي
 
 download_speed_limit = حد سرعة التنزيل
 
@@ -1234,41 +1230,7 @@ internal_error = خطأ داخلي: تحقق من سجل الاعطال لمزي
 
 app_not_available = التطبيق غير متوفر
 
-pref_onboarding_guide = دليل البدء
-
-onboarding_heading = أهلًا وسهلًا!
-
-onboarding_description = أول أمرنا أن نضبط بعض الأمور، ولك أن تغيرها في الإعدادات لاحقًا.
-
-onboarding_action_next = التالي
-
-onboarding_action_finish = ابدأ
-
-onboarding_action_skip = تخطَّ
-
 onboarding_storage_info = حدِّد مجلَّدًا يُخزِّن فيه { $arg1 } الفصول المنزَّلة والاحتياطات وغيرها.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}والأحسن أن يكون المجلَّد مخصوصًا لذلك.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}المجلَّد المحدَّد: { $arg2 }
-
-onboarding_storage_action_select = حدِّد مجلَّدًا
-
-onboarding_storage_selection_required = لا بد من تحديد مجلَّد
-
-onboarding_storage_help_info = هل تقوم بالتحديث من إصدار أقدم ولست متأكداً مما تختاره؟ ارجع إلى دليل التخزين لمزيد من المعلومات.
-
-onboarding_storage_help_action = دليل التخزين
-
-onboarding_permission_install_apps = إذن تثبيت التطبيقات
-
-onboarding_permission_install_apps_description = لتثبيت ملحقات المصدر.
-
-onboarding_permission_notifications = إذن الإشعار
-
-onboarding_permission_notifications_description = احصل على تنبيهات لتحديثات المكتبة والمزيد.
-
-onboarding_permission_action_grant = منح
-
-onboarding_guides_new_user = أحديث العهد بـ{ $arg1 }؟ طالع دليل البدء.
-
-onboarding_guides_returning_user = أستخدمتَ { $arg1 } قبلًا؟
 
 pref_category_general = عام
 
@@ -1476,8 +1438,6 @@ ext_install_service_notif = جارٍ تثبيت الإضافة …
 
 ext_revoke_trust = إبطال الإضافات غير الموثوق بها
 
-label_extension_repos = مستودع الإضافات
-
 information_empty_repos = لم يتم تعيين أي مستودع .
 
 action_add_repo = إضافة مستودع
@@ -1633,12 +1593,6 @@ nav_zone_next = التالي
 nav_zone_left = يسار
 
 nav_zone_right = يمين
-
-left_to_right_viewer = صفحيٌّ (يسارًا فيمينًا)
-
-right_to_left_viewer = صفحيٌّ (يمينًا فيسارًا)
-
-vertical_viewer = صفحيٌّ (عموديٌّ)
 
 webtoon_viewer = شريط طويل
 
@@ -2379,8 +2333,6 @@ information_empty_library = مكتبتك فارغة
 information_no_manga_category = الفئة فارغة
 
 information_no_entries_found = لم يتم العثور على إدخالات في هذه الفئة
-
-getting_started_guide = دليل البدء
 
 information_empty_category = ليست لديك أيّة فئات، اضغط زر اﻹضافة لإنشاء واحدة لتنظيم مكتبتك.
 

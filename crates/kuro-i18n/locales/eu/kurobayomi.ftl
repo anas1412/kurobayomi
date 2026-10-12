@@ -284,20 +284,6 @@ loading = Kargatzen…
 
 app_not_available = Aplikazioa ez dago erabilgarri
 
-onboarding_heading = Ongi etorri!
-
-onboarding_action_next = Hurrengoa
-
-onboarding_storage_action_select = Aukeratu karpeta bat
-
-onboarding_storage_selection_required = Karpeta bat aukeratu behar da
-
-onboarding_permission_install_apps = Aplikazioak instalatzeko baimena
-
-onboarding_permission_notifications = Notifikazioetarako baimena
-
-onboarding_guides_returning_user = { $arg1 } erabili duzu dagoeneko?
-
 pref_category_general = Orokorra
 
 pref_category_appearance = Itxura
@@ -573,12 +559,6 @@ nav_zone_next = Hurrengoa
 nav_zone_left = Ezkerra
 
 nav_zone_right = Eskuina
-
-left_to_right_viewer = Ezkerretik eskuinera
-
-right_to_left_viewer = Eskuinetik ezkerrera
-
-vertical_viewer = Bertikalki
 
 webtoon_viewer = Webtoon
 
@@ -1091,8 +1071,6 @@ information_no_recent = Ez dago azkenaldiko eguneraketarik
 information_no_recent_manga = Ez da ezer irakurri azkenaldian
 
 information_empty_library = Zure liburutegia hutsik dago
-
-getting_started_guide = Hasiberrientzako gida
 
 information_empty_category = Ez daukazu kategoriarik. Sakatu gehiketa botoia zure liburutegia antolatzeko bat sortzeko.
 

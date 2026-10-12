@@ -674,8 +674,6 @@ action_mark_as_seen = Tandai sudah ditonton
 
 action_mark_as_unseen = tandai belum ditonton
 
-action_mark_previous_as_seen = Tandai sebelumnya telah dilihat
-
 action_play_internally = Mulai secara internal
 
 action_play_externally = Mulai secara eksternal
@@ -947,8 +945,6 @@ unseen = Tak terlihat
 label_manga_extension_repos = Repo ekstensi manga
 
 label_anime_extension_repos = Repo ekstensi anime
-
-onboarding_storage_action_create_folder = Buat folder Aniyomi bawaan
 
 download_speed_limit = Batas kecepatan unduh
 
@@ -1317,49 +1313,7 @@ internal_error = InternalError: Periksa log kerusakan untuk informasi lebih lanj
 
 app_not_available = Aplikasi tidak tersedia
 
-pref_onboarding_guide = Panduan awal
-
-onboarding_heading = Selamat Datang!
-
-onboarding_description = Mari kita atur beberapa hal terlebih dahulu. Anda juga selalu dapat mengubahnya di menu pengaturan nanti.
-
-onboarding_action_next = Selanjutnya
-
-onboarding_action_finish = Selesai
-
-onboarding_action_skip = Lewati
-
 onboarding_storage_info = Pilih direktori untuk menyimpan konten dari { $arg1 }, termasuk unduhan chapter, data backup, dan lainnya.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Sebaiknya menggunakan direktori terpisah.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Direktori yang dipilih: { $arg2 }
-
-onboarding_storage_action_select = Pilih direktori
-
-onboarding_storage_selection_required = Harap pilih direktori terlebih dahulu
-
-onboarding_storage_help_info = Memperbarui dari versi lama dan tak yakin harus pilih mana? lihat panduan penyimpanan untuk informasi lebih lanjut.
-
-onboarding_storage_help_action = Panduan penyimpanan
-
-onboarding_permission_install_apps = Izin pasang aplikasi
-
-onboarding_permission_install_apps_description = Untuk memasang ekstensi.
-
-onboarding_permission_notifications = Izin notifikasi
-
-onboarding_permission_notifications_description = Dapatkan notifikasi untuk pembaruan pustaka dan sebagainya.
-
-onboarding_permission_crashlytics = Kirim log kerusakan
-
-onboarding_permission_crashlytics_description = Kirim catatan kerusakan yang anonim ke pengembang.
-
-onboarding_permission_analytics = Izinkan analitik
-
-onboarding_permission_analytics_description = Kirim data penggunaan anonim untuk meningkatkan fitur aplikasi.
-
-onboarding_permission_action_grant = Izinkan
-
-onboarding_guides_new_user = Baru mengenal { $arg1 }? Kami menyarankan Anda membaca panduan awal.
-
-onboarding_guides_returning_user = Install ulang { $arg1 }?
 
 pref_category_general = Umum
 
@@ -1583,8 +1537,6 @@ ext_install_service_notif = Memasang ekstensi…
 
 ext_revoke_trust = Cabut izin ekstensi tidak dikenal yang tepercaya
 
-label_extension_repos = Repositori ekstensi
-
 information_empty_repos = Anda tidak memiliki repositori yang ditetapkan.
 
 action_add_repo = Tambahkan repo
@@ -1752,12 +1704,6 @@ nav_zone_next = Lanjut
 nav_zone_left = Kiri
 
 nav_zone_right = Kanan
-
-left_to_right_viewer = Halaman (kiri ke kanan)
-
-right_to_left_viewer = Halaman (kanan ke kiri)
-
-vertical_viewer = Halaman (vertikal)
 
 webtoon_viewer = Strip panjang
 
@@ -2522,8 +2468,6 @@ information_empty_library = Pustaka Anda kosong
 information_no_manga_category = Kategori ini kosong
 
 information_no_entries_found = Tidak ada entri yang ditemukan dalam kategori ini
-
-getting_started_guide = Panduan awal mulai
 
 information_empty_category = Anda belum memiliki kategori. Tekan tombol tambah untuk menambahkan kategori baru untuk mengatur pustaka Anda.
 

@@ -544,12 +544,6 @@ nav_zone_left = Sa wala
 
 nav_zone_right = Husto
 
-left_to_right_viewer = Wala ngadto sa tuo
-
-right_to_left_viewer = Tuo ngadto sa wala
-
-vertical_viewer = Bertikal
-
 webtoon_viewer = Webtoon
 
 vertical_plus_viewer = Padayon nga bertikal

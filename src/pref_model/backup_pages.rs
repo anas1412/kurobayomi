@@ -253,6 +253,8 @@ pub fn restore_page() -> Option<Built> {
     let start = screen.borrow().options.to_bits();
     for (index, on) in start.iter().enumerate() {
         let (row, check) = check_row(&restore_label(index), *on);
+        // custom buttons are cut: nothing to restore them into
+        row.set_visible(index != 4);
         options_list.append(&row);
         checks.push(check);
     }
@@ -355,16 +357,16 @@ mod tests {
     use kuro_backup::validate::{TrackerRegistry, preflight_file};
 
     #[test]
-    fn t_47b_029_the_three_cards_and_twelve_rows_come_from_the_string_table() {
+    fn t_47b_029_the_three_cards_and_eleven_rows_come_from_the_string_table() {
         assert_eq!(card_title(Card::Library), "Library");
         assert_eq!(card_title(Card::Settings), "Settings");
         assert_eq!(card_title(Card::Extensions), "Extensions");
         let labels: Vec<String> = OptionId::ROWS.iter().map(|(_, id)| option_label(*id)).collect();
-        assert_eq!(labels.len(), 12);
+        assert_eq!(labels.len(), 11);
         assert_eq!(labels[0], "Library entries");
         assert_eq!(labels[1], "Chapters and episodes");
         assert_eq!(labels[5], "All read/watched entries");
-        assert_eq!(labels[10], "Include sensitive settings (e.g., tracker login tokens)");
+        assert_eq!(labels[9], "Include sensitive settings (e.g., tracker login tokens)");
         for (_, id) in OptionId::ROWS {
             assert_eq!(option_label(id), id.label(), "{id:?}: the table and kuro-backup agree");
         }

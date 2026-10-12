@@ -138,8 +138,11 @@ pub fn row_items(page: &EntryState) -> Vec<RowItem> {
     let flags = page.manga.flags;
     let local = page.manga.local;
     let shown = view(&page.chapters, flags, page.downloaded_only, local);
+    // a gap is only a missing chapter when no filter hides any: a hidden chapter is not missing
+    let complete = shown.len() == page.chapters.len();
     insert_missing_separators(shown, flags.sort_descending())
         .into_iter()
+        .filter(|row| complete || matches!(row, ListRow::Item(_)))
         .map(|row| match row {
             ListRow::Item(row) => RowItem {
                 subtitle: chapter_line(row),

@@ -228,8 +228,6 @@ action_mark_as_seen = 標記為已看
 
 action_mark_as_unseen = 標記為未看
 
-action_mark_previous_as_seen = 將上一個標記為已看
-
 action_play_internally = 內部播放
 
 action_play_externally = 外部播放
@@ -469,8 +467,6 @@ unseen = 未看
 label_manga_extension_repos = 漫畫擴充庫
 
 label_anime_extension_repos = 動漫擴充庫
-
-onboarding_storage_action_create_folder = 建立預設的 Aniyomi 資料夾
 
 download_speed_limit = 下載速度限制
 
@@ -770,49 +766,7 @@ internal_error = InternalError：請檢視當機記錄以瞭解詳情
 
 app_not_available = 應用程式無法使用
 
-pref_onboarding_guide = 新手上路精靈
-
-onboarding_heading = 歡迎！
-
-onboarding_description = 讓我們先設定一些東西，隨後你隨時可至設定中變更這些選項
-
-onboarding_action_next = 下一步
-
-onboarding_action_finish = 開始使用
-
-onboarding_action_skip = 略過
-
 onboarding_storage_info = 選擇供 { $arg1 } 存放下載的章節、備份檔等內容的資料夾 {"\u000A"} {"\u000A"}建議使用專屬的資料夾 {"\u000A"} {"\u000A"}選擇的資料夾：{ $arg2 }
-
-onboarding_storage_action_select = 選擇資料夾
-
-onboarding_storage_selection_required = 必須選擇一個資料夾
-
-onboarding_storage_help_info = 從舊版升級而不確定該如何選擇嗎？請參閱儲存空間指南以取得更多資訊
-
-onboarding_storage_help_action = 儲存空間指南
-
-onboarding_permission_install_apps = 安裝應用程式權限
-
-onboarding_permission_install_apps_description = 用以安裝來源擴充套件
-
-onboarding_permission_notifications = 通知權限
-
-onboarding_permission_notifications_description = 用以傳送書櫃更新等通知
-
-onboarding_permission_crashlytics = 傳送崩潰日誌
-
-onboarding_permission_crashlytics_description = 向開發人員傳送匿名崩潰日誌
-
-onboarding_permission_analytics = 允許資料分析
-
-onboarding_permission_analytics_description = 傳送匿名使用資料來改進應用程式功能
-
-onboarding_permission_action_grant = 授予
-
-onboarding_guides_new_user = 初探 { $arg1 }？我們建議你查看入門指南
-
-onboarding_guides_returning_user = 重新安裝 { $arg1 }？
 
 pref_category_general = 一般
 
@@ -1036,8 +990,6 @@ ext_install_service_notif = 正在安裝擴充套件…
 
 ext_revoke_trust = 復原對不明擴充套件的信任
 
-label_extension_repos = 擴充套件儲存庫
-
 information_empty_repos = 尚未新增任何儲存庫
 
 action_add_repo = 新增儲存庫
@@ -1205,12 +1157,6 @@ nav_zone_next = 下一頁
 nav_zone_left = 左邊
 
 nav_zone_right = 右邊
-
-left_to_right_viewer = 單頁(左至右)
-
-right_to_left_viewer = 單頁(右至左)
-
-vertical_viewer = 單頁(上至下)
 
 webtoon_viewer = 捲動(連續)
 
@@ -1975,8 +1921,6 @@ information_empty_library = 尚未收藏任何作品
 information_no_manga_category = 類別尚無作品
 
 information_no_entries_found = 類別沒有作品
-
-getting_started_guide = 入門指南
 
 information_empty_category = 尚無任何類別，輕觸新增按鈕即可建立類別以組織你的書櫃
 

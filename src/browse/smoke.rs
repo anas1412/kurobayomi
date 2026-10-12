@@ -4,6 +4,7 @@
 #[test]
 fn browse_widgets_smoke() {
     crate::testing::with_display(|| {
+        let _nav = crate::testing::nav();
         super::view::tests::smoke();
         super::dialogs::tests::smoke();
         super::filter_sheet::tests::smoke();

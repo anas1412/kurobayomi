@@ -297,13 +297,16 @@ pub struct ReaderPage {
 }
 
 impl ReaderPage {
-    /// A page in `Queued` state with no chapter yet (`ChapterLoader` sets it).
+    /// A page with no chapter yet (`ChapterLoader` sets it). A page fetched over the network starts `Queued`; one whose
+    /// bytes are already on disk (a download, a local folder or archive) is `Ready` at once, as the archive and
+    /// directory loaders set it upstream, or nothing would ever leave the spinner.
     pub fn new(index: u32, url: impl Into<String>, image_url: Option<String>, source: PageSource) -> Rc<Self> {
+        let status = if matches!(source, PageSource::Http) { PageStatus::Queued } else { PageStatus::Ready };
         Rc::new(Self {
             index,
             url: url.into(),
             image_url: RefCell::new(image_url),
-            status: Observable::new(PageStatus::Queued),
+            status: Observable::new(status),
             progress: Observable::new(0),
             source,
             chapter: RefCell::new(Weak::new()),
@@ -459,6 +462,15 @@ mod tests {
         let e = c.finish_loading(vec![]).unwrap_err();
         assert_eq!(e.message, "Page list is empty");
         assert!(matches!(&*c.state(), ChapterState::Error(_)));
+    }
+
+    #[test]
+    fn a_page_on_disk_is_ready_at_once_and_a_fetched_one_waits() {
+        assert_eq!(ReaderPage::new(0, "p", None, PageSource::Http).status.get(), PageStatus::Queued);
+        let file = ReaderPage::new(0, "p", None, PageSource::File(std::path::PathBuf::from("/tmp/p.png")));
+        assert_eq!(file.status.get(), PageStatus::Ready);
+        let entry = ReaderPage::new(0, "p", None, PageSource::ArchiveEntry { archive: "/tmp/c.cbz".into(), entry: "1.png".into() });
+        assert_eq!(entry.status.get(), PageStatus::Ready, "a downloaded chapter's pages show without a fetch");
     }
 
     #[test]

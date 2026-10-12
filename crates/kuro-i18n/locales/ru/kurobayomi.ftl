@@ -674,8 +674,6 @@ action_mark_as_seen = Пометить как просмотренное
 
 action_mark_as_unseen = Пометить как непросмотренное
 
-action_mark_previous_as_seen = Пометить предыдущее как просмотренное
-
 action_play_internally = Смотреть в приложении
 
 action_play_externally = Смотреть в другом плеере
@@ -947,8 +945,6 @@ unseen = Не просмотрено
 label_manga_extension_repos = Репозитории расширений манги
 
 label_anime_extension_repos = Репозитории расширений аниме
-
-onboarding_storage_action_create_folder = Создать папку Aniyomi по умолчанию
 
 download_speed_limit = Ограничение скорости загрузки
 
@@ -1284,49 +1280,7 @@ internal_error = InternalError: Проверьте журнал сбоев дл�
 
 app_not_available = Приложение недоступно
 
-pref_onboarding_guide = Руководство для начинающих
-
-onboarding_heading = Добро пожаловать!
-
-onboarding_description = Давайте настроем парочку вещей. Вы всегда можете их поменять позже в настройках.
-
-onboarding_action_next = Следующее
-
-onboarding_action_finish = Начать
-
-onboarding_action_skip = Пропустить
-
 onboarding_storage_info = Выберите папку где { $arg1 } будет хранить загруженные главы, резервные копии и другое.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Рекомендуется использовать выделенную папку.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Выбранная папка: { $arg2 }
-
-onboarding_storage_action_select = Выбрать папку
-
-onboarding_storage_selection_required = Необходимо выбрать папку
-
-onboarding_storage_help_info = Обновляетесь со старой версии и не знаете, что выбрать? Обратите внимание на руководство по хранению для большей информации.
-
-onboarding_storage_help_action = Руководство по хранению
-
-onboarding_permission_install_apps = Разрешения для установки приложений
-
-onboarding_permission_install_apps_description = Позволит устанавливать расширения источников.
-
-onboarding_permission_notifications = Разрешения для уведомлений
-
-onboarding_permission_notifications_description = Получать уведомления об обновлениях библиотеки и т.д.
-
-onboarding_permission_crashlytics = Отправить журнал сбоев
-
-onboarding_permission_crashlytics_description = Отправить анонимно журнал сбоев разработчикам.
-
-onboarding_permission_analytics = Разрешить аналитику
-
-onboarding_permission_analytics_description = Отправить анонимно данные об использовании для улучшения функций приложения.
-
-onboarding_permission_action_grant = Предоставить
-
-onboarding_guides_new_user = Новичок в { $arg1 }? Мы настоятельно рекомендуем ознакомиться с нашим руководством.
-
-onboarding_guides_returning_user = Переустанавливаете { $arg1 }?
 
 pref_category_general = Основные
 
@@ -1554,8 +1508,6 @@ ext_install_service_notif = Установка расширения…
 
 ext_revoke_trust = Убрать доверие к ненадёжным расширениям
 
-label_extension_repos = Репозитории расширений
-
 information_empty_repos = У вас нет репозиториев.
 
 action_add_repo = Добавить репозиторий
@@ -1723,12 +1675,6 @@ nav_zone_next = Следующая
 nav_zone_left = Слева
 
 nav_zone_right = Справа
-
-left_to_right_viewer = Постранично (Слева направо)
-
-right_to_left_viewer = Постранично (Справа налево)
-
-vertical_viewer = Постранично (Вертикально)
 
 webtoon_viewer = Длинные страницы
 
@@ -2493,8 +2439,6 @@ information_empty_library = Ваша библиотека пуста
 information_no_manga_category = Категория пуста
 
 information_no_entries_found = В этой категории нет серий
-
-getting_started_guide = Руководство по началу работы с приложением
 
 information_empty_category = Нет категорий в библиотеке. Нажмите кнопку «Добавить» чтобы создать категорию для организации вашей библиотеки.
 

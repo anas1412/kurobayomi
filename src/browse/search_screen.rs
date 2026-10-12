@@ -457,22 +457,6 @@ pub(crate) mod tests {
         out
     }
 
-    fn toggles(root: &gtk::Widget) -> Vec<gtk::ToggleButton> {
-        fn walk(widget: &gtk::Widget, out: &mut Vec<gtk::ToggleButton>) {
-            if let Some(toggle) = widget.downcast_ref::<gtk::ToggleButton>() {
-                out.push(toggle.clone());
-            }
-            let mut child = widget.first_child();
-            while let Some(next) = child {
-                walk(&next, out);
-                child = next.next_sibling();
-            }
-        }
-        let mut out = Vec::new();
-        walk(root, &mut out);
-        out
-    }
-
     fn a_page_with_a_query_searches_every_enabled_source_and_draws_their_rows() {
         let rig = rig();
         let start = Start::Search { query: "one".into(), extension: None, origin: None };
@@ -486,15 +470,32 @@ pub(crate) mod tests {
     }
 
     fn the_has_results_toggle_filters_the_open_page_and_is_not_stored() {
+        // the search options menu: its button, and the dot that shows while a Show only filter is on
+        fn options(root: &gtk::Widget) -> Option<(gtk::MenuButton, gtk::Widget)> {
+            if let Some(button) = root.downcast_ref::<gtk::MenuButton>().filter(|b| b.tooltip_text().as_deref() == Some(super::super::pages::SEARCH_OPTIONS)) {
+                let dot = button.parent()?.last_child()?;
+                return Some((button.clone(), dot));
+            }
+            let mut child = root.first_child();
+            while let Some(next) = child {
+                if let Some(found) = options(&next) {
+                    return Some(found);
+                }
+                child = next.next_sibling();
+            }
+            None
+        }
         let rig = rig();
         let start = Start::Search { query: String::new(), extension: None, origin: None };
         let page = search_widget(&rig.env, &start, false);
-        assert!(pump_until(|| toggles(&page).len() == 2), "All and Has results");
-        let chips = toggles(&page);
-        assert!(!chips[1].is_active(), "the toggle starts off on every open");
+        assert!(pump_until(|| options(&page).is_some()), "the search options menu");
+        let (button, dot) = options(&page).expect("menu");
+        assert!(!dot.is_visible(), "Has results starts off on every open");
+        button.activate_action("viewopt.has_results", None).expect("the Has results check");
+        assert!(dot.is_visible(), "Has results is on in this page");
         let again = search_widget(&rig.env, &start, true);
-        assert!(pump_until(|| toggles(&again).len() == 2));
-        assert!(!toggles(&again)[1].is_active(), "the next page does not read it back");
+        assert!(pump_until(|| options(&again).is_some()));
+        assert!(!options(&again).expect("menu").1.is_visible(), "the next page does not read it back");
     }
     fn a_source_arrow_opens_its_listing_with_the_typed_text() {
         let rig = rig();

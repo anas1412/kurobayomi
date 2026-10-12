@@ -318,8 +318,6 @@ action_mark_as_seen = பார்த்தபடி குறி
 
 action_mark_as_unseen = குறிக்கப்படாத எனக் குறிக்கவும்
 
-action_mark_previous_as_seen = பார்த்தபடி முந்தையதைக் குறிக்கவும்
-
 action_play_internally = உள்நாட்டில் விளையாடுங்கள்
 
 action_play_externally = வெளிப்புறமாக விளையாடுங்கள்
@@ -559,8 +557,6 @@ unseen = காணப்படாதது
 label_manga_extension_repos = மங்கா நீட்டிப்பு களஞ்சியங்கள்
 
 label_anime_extension_repos = அனிம் நீட்டிப்பு களஞ்சியங்கள்
-
-onboarding_storage_action_create_folder = இயல்புநிலை அனியோமி கோப்புறையை உருவாக்கவும்
 
 download_speed_limit = வேக வரம்பைப் பதிவிறக்கவும்
 
@@ -858,49 +854,7 @@ internal_error = இன்டர்னெர்ர்: மேலும் தக
 
 app_not_available = பயன்பாடு கிடைக்கவில்லை
 
-pref_onboarding_guide = ஆன் போர்டிங் வழிகாட்டி
-
-onboarding_heading = வரவேற்கிறோம்!
-
-onboarding_description = முதலில் சில விசயங்களை அமைப்போம். நீங்கள் எப்போதும் அமைப்புகளில் இவற்றை மாற்றலாம்.
-
-onboarding_action_next = அடுத்தது
-
-onboarding_action_finish = தொடங்கவும்
-
-onboarding_action_skip = தவிர்
-
 onboarding_storage_info = { $arg1 } அத்தியாய பதிவிறக்கங்கள், காப்புப்பிரதிகள் மற்றும் பலவற்றை சேமிக்கும் ஒரு கோப்புறையைத் தேர்ந்தெடுக்கவும்.{"\u000A"}{"\u000A"} ஒரு பிரத்யேக கோப்புறை பரிந்துரைக்கப்படுகிறது.{"\u000A"}{"\u000A"} தேர்ந்தெடுக்கப்பட்ட கோப்புறை: { $arg2 }
-
-onboarding_storage_action_select = ஒரு கோப்புறையைத் தேர்ந்தெடுக்கவும்
-
-onboarding_storage_selection_required = ஒரு கோப்புறை தேர்ந்தெடுக்கப்பட வேண்டும்
-
-onboarding_storage_help_info = பழைய பதிப்பிலிருந்து புதுப்பித்தல் மற்றும் எதைத் தேர்ந்தெடுப்பது என்று தெரியவில்லையா? மேலும் தகவலுக்கு சேமிப்பக வழிகாட்டியைப் பார்க்கவும்.
-
-onboarding_storage_help_action = சேமிப்பக வழிகாட்டி
-
-onboarding_permission_install_apps = பயன்பாடுகளின் அனுமதியை நிறுவவும்
-
-onboarding_permission_install_apps_description = மூல நீட்டிப்புகளை நிறுவ.
-
-onboarding_permission_notifications = அறிவிப்பு இசைவு
-
-onboarding_permission_notifications_description = நூலக புதுப்பிப்புகள் மற்றும் பலவற்றிற்கு அறிவிக்கப்படுங்கள்.
-
-onboarding_permission_crashlytics = செயலிழப்பு பதிவுகளை அனுப்பவும்
-
-onboarding_permission_crashlytics_description = டெவலப்பர்களுக்கு அநாமதேய செயலிழப்பு பதிவுகளை அனுப்பவும்.
-
-onboarding_permission_analytics = பகுப்பாய்வுகளை அனுமதிக்கவும்
-
-onboarding_permission_analytics_description = பயன்பாட்டு அம்சங்களை மேம்படுத்த அநாமதேய பயன்பாட்டு தரவை அனுப்பவும்.
-
-onboarding_permission_action_grant = மானியம்
-
-onboarding_guides_new_user = { $arg1 } க்கு புதியதா? தொடங்கும் வழிகாட்டியைப் பார்க்க பரிந்துரைக்கிறோம்.
-
-onboarding_guides_returning_user = { $arg1 } ஐ மீண்டும் நிறுவுகிறீர்களா?
 
 pref_category_general = பொது
 
@@ -1120,8 +1074,6 @@ ext_install_service_notif = நீட்டிப்பை நிறுவுத
 
 ext_revoke_trust = நம்பகமான அறியப்படாத நீட்டிப்புகளைத் திரும்பப் பெறுங்கள்
 
-label_extension_repos = நீட்டிப்பு களஞ்சியங்கள்
-
 information_empty_repos = உங்களிடம் எந்த களஞ்சியமும் இல்லை.
 
 action_add_repo = ரெப்போ சேர்க்கவும்
@@ -1287,12 +1239,6 @@ nav_zone_next = அடுத்தது
 nav_zone_left = இடது
 
 nav_zone_right = வலது
-
-left_to_right_viewer = பேச் (இடமிருந்து வலமாக)
-
-right_to_left_viewer = பேச் (வலமிருந்து இடமாக)
-
-vertical_viewer = பேச் செய்யப்பட்ட (செங்குத்து)
 
 webtoon_viewer = நீண்ட துண்டு
 
@@ -2039,8 +1985,6 @@ information_empty_library = உங்கள் நூலகம் காலி�
 information_no_manga_category = வகை காலியாக உள்ளது
 
 information_no_entries_found = இந்த பிரிவில் உள்ளீடுகள் எதுவும் காணப்படவில்லை
-
-getting_started_guide = தொடங்குதல் வழிகாட்டி
 
 information_empty_category = உங்களிடம் வகைகள் இல்லை. உங்கள் நூலகத்தை ஒழுங்கமைக்க ஒன்றை உருவாக்க பிளச் பொத்தானைத் தட்டவும்.
 

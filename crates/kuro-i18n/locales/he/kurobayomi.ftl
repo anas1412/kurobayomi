@@ -228,8 +228,6 @@ action_mark_as_seen = סמן כנצפה
 
 action_mark_as_unseen = סמן כלא נצפה
 
-action_mark_previous_as_seen = סמן פרק קודם כנצפה
-
 action_play_internally = נגן בנגן פנימי
 
 action_play_externally = נגן בנגן חיצוני
@@ -1068,12 +1066,6 @@ nav_zone_left = שמאל
 
 nav_zone_right = ימין
 
-left_to_right_viewer = סידור עמודים (שמאל לימין)
-
-right_to_left_viewer = סידור עמודים (ימין לשמאל)
-
-vertical_viewer = סידור עמודים (אנכי)
-
 webtoon_viewer = רצועה מוארכת
 
 vertical_plus_viewer = רצועה מוארכת עם רווחים
@@ -1755,8 +1747,6 @@ information_empty_library = הספרייה שלך ריקה
 information_no_manga_category = קטגוריה ריקה
 
 information_no_entries_found = לא נמצאו פריטים בקטגוריה זו
-
-getting_started_guide = מדריך למתחיל
 
 information_empty_category = אין לך קטגוריות. לחץ על כפתור הפלוס כדי ליצור אחד לארגון הספרייה שלך.
 

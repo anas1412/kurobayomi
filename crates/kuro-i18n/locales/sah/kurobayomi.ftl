@@ -398,12 +398,6 @@ kindlish_nav = Kindle курдук
 
 edge_nav = Кытыы
 
-left_to_right_viewer = Уҥа диэки
-
-right_to_left_viewer = Хаҥас диэки
-
-vertical_viewer = Туруору
-
 webtoon_viewer = Webtoon
 
 vertical_plus_viewer = Тохтообоххо туруору

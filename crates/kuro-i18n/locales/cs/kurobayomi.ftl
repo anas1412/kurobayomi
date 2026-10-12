@@ -662,8 +662,6 @@ action_mark_as_seen = Označit jako zhlédnuté
 
 action_mark_as_unseen = Označit jako nezhlédnuté
 
-action_mark_previous_as_seen = Označit předchozí jako zhlédnuté
-
 action_play_internally = Hrát uvnitř aplikace
 
 action_play_externally = Hrát mimio aplikaci
@@ -1200,49 +1198,7 @@ internal_error = InternalError: Zkontrolujte záznamy pádu pro další informac
 
 app_not_available = Aplikace není k dispozici
 
-pref_onboarding_guide = Nástupní průvodce
-
-onboarding_heading = Vítejte!
-
-onboarding_description = Pojďme nastavit nějaké věci. Vždy můžete tyto změny později změnit v nastavení.
-
-onboarding_action_next = Další
-
-onboarding_action_finish = Začínáme
-
-onboarding_action_skip = Přeskočit
-
 onboarding_storage_info = Vyberte složku, kde { $arg1 } bude ukládat stahování kapitol, zálohy a další.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Je doporučena vyhrazená složka.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Vybraná složka: { $arg2 }
-
-onboarding_storage_action_select = Vybrat složku
-
-onboarding_storage_selection_required = Složka musí být vybrána
-
-onboarding_storage_help_info = Aktualizujete ze starší verze a nevíte, co vybrat? Další informace naleznete v průvodci úložištěm.
-
-onboarding_storage_help_action = Průvodce uložištěm
-
-onboarding_permission_install_apps = Povolení stahovat aplikace
-
-onboarding_permission_install_apps_description = K nainstalování rozšíření zdrojů.
-
-onboarding_permission_notifications = Povolení oznámení
-
-onboarding_permission_notifications_description = Buďte upozorněni na aktualizaci knihovny atd.
-
-onboarding_permission_crashlytics = Posílat chybová hlášení
-
-onboarding_permission_crashlytics_description = Pošle anonymizovaná chybová hlášení vývojářům.
-
-onboarding_permission_analytics = Povolit analytiku
-
-onboarding_permission_analytics_description = Pošle anonymizované údaje o používání pro vylepšení aplikace.
-
-onboarding_permission_action_grant = Udělit
-
-onboarding_guides_new_user = Jste v { $arg1 } noví? Doporučujeme se podívat se na průvodce pro začátečníky.
-
-onboarding_guides_returning_user = Přeinstalováváte { $arg1 }?
 
 pref_category_general = Obecné
 
@@ -1466,8 +1422,6 @@ ext_install_service_notif = Instaluji rozšíření…
 
 ext_revoke_trust = Zrušit důvěryhodná neznámá rozšíření
 
-label_extension_repos = Repozitáře rozšíření
-
 information_empty_repos = Nemáte nastaveny žádné repozitáře.
 
 action_add_repo = Přidat repozitář
@@ -1633,12 +1587,6 @@ nav_zone_next = Další
 nav_zone_left = Vlevo
 
 nav_zone_right = Vpravo
-
-left_to_right_viewer = Stránkované (zleva doprava)
-
-right_to_left_viewer = Stránkované (zprava doleva)
-
-vertical_viewer = Stránkovaný (svisle)
 
 webtoon_viewer = Dlouhý pruh
 
@@ -2403,8 +2351,6 @@ information_empty_library = Vaše knihovna je prázdná
 information_no_manga_category = Kategorie je prázdná
 
 information_no_entries_found = V této kategorii nebyly nalezeny žádné položky
-
-getting_started_guide = Příručka Začínáme
 
 information_empty_category = Nemáte žádné kategorie. Klikněte na tlačítko plus a vytvořte nějakou pro zorganizování vaší knihovny.
 

@@ -1989,7 +1989,12 @@ mod tests {
 
     /// A pager on two wide pages, shown and decoded, with the shown page's row.
     fn wide_pager(name: &str, prefs: &ReaderPrefs) -> (PagerEngine, gtk::Window) {
-        let chapter = chapter(1, &[image(&format!("{name}-a"), 2000, 1000), image(&format!("{name}-b"), 2000, 1000)]);
+        pager_of(name, prefs, 2000, 1000)
+    }
+
+    /// A pager over two pages of `width` x `height`; a wide page pans before it turns.
+    fn pager_of(name: &str, prefs: &ReaderPrefs, width: u32, height: u32) -> (PagerEngine, gtk::Window) {
+        let chapter = chapter(1, &[image(&format!("{name}-a"), width, height), image(&format!("{name}-b"), width, height)]);
         let engine = PagerEngine::new(ViewerKind::LeftToRight, context(ViewerSettings::from_prefs(prefs)));
         let window = show(engine.widget());
         engine.set_chapters(handed(&chapter));
@@ -2071,15 +2076,21 @@ mod tests {
     }
 
     #[test]
-    fn t016_the_wheel_pages_the_pager_down_for_a_down_step_and_back_otherwise_and_the_webtoon_keeps_it() {
+    fn t016_the_wheel_pages_the_pager_down_for_a_down_step_and_back_for_an_up_step_and_the_webtoon_keeps_it() {
         crate::testing::with_display(|| {
-            let (engine, window) = wide_pager("wheel-a", &prefs());
+            // portrait pages, as in a manga: a wide page would pan on the up step instead of turning
+            let (engine, window) = pager_of("wheel-a", &prefs(), 800, 1200);
             let inner = Rc::clone(&engine.0);
             let first = inner.ctl.borrow().view_index();
             assert!(engine.handle_scroll(3.0));
             assert_eq!(inner.ctl.borrow().view_index(), first + 1, "a down step is the next page");
             assert!(engine.handle_scroll(0.0));
-            assert_eq!(inner.ctl.borrow().view_index(), first, "no movement is the previous page (E-24)");
+            assert_eq!(inner.ctl.borrow().view_index(), first + 1, "no movement turns nothing, and the rest of a swipe is dropped");
+            pump_ms(400);
+            // the wait lets the pager settle, which may renumber the views around the current one
+            let settled = inner.ctl.borrow().view_index();
+            assert!(engine.handle_scroll(-1.0));
+            assert_eq!(inner.ctl.borrow().view_index(), settled - 1, "an up step after the gap is the previous page");
             window.destroy();
             let webtoon = WebtoonEngine::new(false, context(ViewerSettings::from_prefs(&prefs())));
             assert!(!webtoon.handle_scroll(1.0), "the webtoon scrolls natively and does not claim the wheel");

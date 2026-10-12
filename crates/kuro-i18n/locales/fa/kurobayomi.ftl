@@ -152,8 +152,6 @@ action_mark_as_seen = نشانه گذاری دیده شده
 
 action_mark_as_unseen = نشانه گذاری دیده نشده
 
-action_mark_previous_as_seen = نشانه گذاری قبلی بعنوان دیده شده
-
 action_play_internally = پخش داخلی
 
 action_play_externally = پخش خارجی
@@ -690,36 +688,6 @@ internal_error = خطای داخلی: برای اطلاعات بیشتر گزا�
 
 app_not_available = برنامه موجود نیست
 
-onboarding_heading = خوش آمدید!
-
-onboarding_description = بیاید برخی چیز ها را تنظیم کنیم. شما همیشه میتوانید این تنظیمات را در بخش تنظیمات تغییر دهید.
-
-onboarding_action_next = بعدی
-
-onboarding_action_finish = شروع کنید
-
-onboarding_action_skip = پرش
-
-onboarding_storage_action_select = انتخاب یک پوشه
-
-onboarding_storage_selection_required = یک پوشه باید انتخاب شود
-
-onboarding_storage_help_action = راهنمای زخیره سازی
-
-onboarding_permission_install_apps = مجوز نصب برنامه ها
-
-onboarding_permission_install_apps_description = برای نصب افزانه منبع.
-
-onboarding_permission_notifications = دسترسی اعلان ها
-
-onboarding_permission_notifications_description = برای به روز رسانی های کتابخانه و بیشتر مطلع شوید.
-
-onboarding_permission_action_grant = اعطا کردن
-
-onboarding_guides_new_user = به { $arg1 } نا آشنا هستید؟ ما پیشنهاد میکنیم تا یک سر به راهنمای شروع بزنید.
-
-onboarding_guides_returning_user = نصب مجدد { $arg1 }؟
-
 pref_category_general = عمومی
 
 pref_category_appearance = ظاهر
@@ -924,8 +892,6 @@ ext_install_service_notif = در حال نصب کردن افزونه …
 
 ext_revoke_trust = لغو اعتماد افزونه های ناشناخته
 
-label_extension_repos = مخازن افزونه ها
-
 information_empty_repos = شما هیچ مخزنی برای تنظیم ندارید.
 
 action_add_repo = اضافه کردن مخزن
@@ -1059,12 +1025,6 @@ nav_zone_next = بعدی
 nav_zone_left = چپ
 
 nav_zone_right = راست
-
-left_to_right_viewer = چپ به راست
-
-right_to_left_viewer = راست به چپ
-
-vertical_viewer = عمودی
 
 webtoon_viewer = وب تون(Webtoon)
 
@@ -1591,8 +1551,6 @@ information_no_recent = هیچ قسمت جدیدی یافت نشد
 information_no_recent_manga = هیچ چیز مانگاای به تازگی خوانده شده
 
 information_empty_library = کتابخانه شما خالی است
-
-getting_started_guide = راهنمای شروع
 
 information_empty_category = هیچ دسته بندی وجود ندارد. با زدن دکمه به علاوه دسته بندی جدیدی بسازید.
 

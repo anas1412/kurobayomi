@@ -418,12 +418,6 @@ black_background = ጥቁር
 
 pref_viewer_type = ነባሪ የንባብ ሁነታ
 
-left_to_right_viewer = ከግራ ወደ ቀኝ
-
-right_to_left_viewer = ከቀኝ ወደ ግራ
-
-vertical_viewer = አቀባዊ
-
 webtoon_viewer = ዌብቱን
 
 vertical_plus_viewer = ቀጣይነት ያለው አቀባዊ

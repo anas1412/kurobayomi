@@ -100,3 +100,27 @@ welcome_intro = Add a source repository to start watching anime and reading mang
 
 # source: kurobayomi
 welcome_guide = Getting started guide
+
+# source: kurobayomi
+action_select = Select
+
+# source: kurobayomi
+episode_time_left = { $arg1 } left
+
+# source: kurobayomi
+action_delete_download = Delete download
+
+# source: kurobayomi
+action_mark_previous_as_seen = Mark previous as watched
+
+# source: kurobayomi
+label_extension_repos = Repositories
+
+# source: kurobayomi
+left_to_right_viewer = Paged, left to right
+
+# source: kurobayomi
+right_to_left_viewer = Paged, right to left
+
+# source: kurobayomi
+vertical_viewer = Paged, vertical

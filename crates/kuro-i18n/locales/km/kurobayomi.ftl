@@ -402,8 +402,6 @@ information_no_recent_manga = អ្នកពុំបានអានអ្វ�
 
 information_empty_library = បណ្ណាល័យរបស់អ្នកទទេស្អាត
 
-getting_started_guide = ម​គ្គុ​ទេស​ក៍​
-
 information_empty_category = អ្នកពុំមានការទម្រៀបម៊េងហ្គាឡើយ។ ចុចប៊ូតុងសញ្ញាបូកដើម្បីទម្រៀបម៊េងហ្គាសម្រាប់បណ្ណាល័យរបស់អ្នក។
 
 information_cloudflare_bypass_failure = បរាជ័យក្នុងការឆ្លងកាត់Cloudflare

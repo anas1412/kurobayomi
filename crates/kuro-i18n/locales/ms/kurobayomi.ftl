@@ -364,41 +364,7 @@ internal_error = RalatDalam: semak log kerosakan untuk maklumat lanjut
 
 app_not_available = Aplikasi tidak tersedia
 
-pref_onboarding_guide = Panduan pertama penggunaan
-
-onboarding_heading = Selamat datang!
-
-onboarding_description = Mari menetapkan sesuai terdahulu. Anda juga boleh menukar perkara ini di tetapan kemudian.
-
-onboarding_action_next = Seterusnya
-
-onboarding_action_finish = Mari memulakan
-
-onboarding_action_skip = Langkau
-
 onboarding_storage_info = Pilih folder dimana { $arg1 } akan simpan bab yang dibuat turun, sandaran, dan banyak lagi.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Folder khas sangat digalakkan.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Folder yang dipilih: { $arg2 }
-
-onboarding_storage_action_select = Pilih folder
-
-onboarding_storage_selection_required = Folder mestilah dipilih
-
-onboarding_storage_help_info = Mengemaskini daripada versi lama dan tidak pasti yang mana nak dipilih? Rujuk pada panduan storan untuk maklumat lanjut.
-
-onboarding_storage_help_action = Panduan storan
-
-onboarding_permission_install_apps = Pasang kebenaran aplikasi
-
-onboarding_permission_install_apps_description = Untuk pasang sumber sambungan.
-
-onboarding_permission_notifications = Kebenaran pemberitahuan
-
-onboarding_permission_notifications_description = Dapatkan pemberitahuan untuk kemas kini pustaka dan banyak lagi.
-
-onboarding_permission_action_grant = Benarkan
-
-onboarding_guides_new_user = Baru ke { $arg1 }? kami cadang lihat panduan permulaan.
-
-onboarding_guides_returning_user = Memasang semula { $arg1 }?
 
 pref_category_general = Umum
 
@@ -606,8 +572,6 @@ ext_install_service_notif = Memasang sambungan…
 
 ext_revoke_trust = Batalkan sambungan dipercayakan yang tidak diketahui
 
-label_extension_repos = repositori sambungan
-
 information_empty_repos = Anda tidak menetapkan repositori.
 
 action_add_repo = Tambah repositori
@@ -743,12 +707,6 @@ nav_zone_next = Seterusnya
 nav_zone_left = Kiri
 
 nav_zone_right = Kanan
-
-left_to_right_viewer = Muka surat (kiri ke kanan)
-
-right_to_left_viewer = Muka surat (kanan ke kiri)
-
-vertical_viewer = Muka surat (menegak)
 
 webtoon_viewer = Sebaris panjang
 
@@ -1469,8 +1427,6 @@ information_empty_library = Pustaka kosong
 information_no_manga_category = Kategori kosong
 
 information_no_entries_found = Tiada entri dijumpai di kategori ini
-
-getting_started_guide = Panduan penggunaan
 
 information_empty_category = Anda tidak mempunyai kategori. Ketik butang tambah untuk membuat satu untuk mengatur pustaka anda.
 

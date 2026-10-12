@@ -165,6 +165,12 @@ impl ViewOptions {
         widget.set_child(Some(&button));
         widget.add_overlay(&dot);
         let inner = Rc::new(Inner { dot, actions: RefCell::default(), filters: RefCell::default(), extra: Cell::new(false), handler: RefCell::default() });
+        // the actions reach the menu's state weakly, so the button keeps it alive: a caller may drop this value once the
+        // button is placed
+        let keep = Rc::clone(&inner);
+        button.connect_destroy(move |_| {
+            let _ = &keep;
+        });
         let this = Self { widget, button, group, inner };
         this.set_sections(sections);
         this

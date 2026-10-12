@@ -318,6 +318,10 @@ Source: `docs/design/settings-diet.md`, section 6 tables ("If CUT: hard-code"). 
 | `library_random_anime_sort_seed` | 0 | Library page (settings_library) and the library window sheets |
 | `library_random_manga_sort_seed` | 0 | Library page (settings_library) and the library window sheets |
 | `pref_animelib_columns_portrait_key` | 0 (auto) | Library page (settings_library) and the library window sheets |
+| `pref_animelib_columns_landscape_key` | 0 (auto) | Library view menu (round 5: its control was gone) |
+| `pref_library_columns_landscape_key` | 0 (auto) | Library view menu (round 5: its control was gone) |
+| `display_download_badge` | false | Library view menu (round 5: its control was gone) |
+| `display_unread_badge` | true | Library view menu (round 5: its control was gone) |
 | `pref_library_columns_portrait_key` | 0 (auto) | Library page (settings_library) and the library window sheets |
 | `pref_filter_animelib_started_v2` | DISABLED | Library page (settings_library) and the library window sheets |
 | `pref_filter_library_started_v2` | DISABLED | Library page (settings_library) and the library window sheets |

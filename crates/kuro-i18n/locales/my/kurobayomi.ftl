@@ -290,47 +290,7 @@ internal_error = InternalError: ပြဿနာဖြေရှင်းရန်
 
 app_not_available = အက်ပလီကေးရှင်းရရှိနိုင်ခြင်းမရှိပါ
 
-pref_onboarding_guide = လမ်းညွှန်အကြောင်း
-
-onboarding_heading = ကြိုဆိုပါတယ်။
-
-onboarding_description = လိုအပ်တာတွေကို အရင်ဆုံး လုပ်ဆောင်ပါ။ နောက်မှ ဆက်တင်များကို ပြန်လည်သတ်မှတ်လို့ရပါတယ်။
-
-onboarding_action_next = နောက်တစ်ဆင့်
-
-onboarding_action_finish = စတင်မည်။
-
-onboarding_action_skip = ကျော်မည်။
-
 onboarding_storage_info = အခန်းဒေါင်းလုဒ်များ၊ ဘက်အပ်များနှင့် အခြားသော ဖိုင်များကို { $arg1 } သိမ်းဆည်းမည့် ဖိုလ်ဒါကို ရွေးချယ်ပါ။{"\u000A"}{"\u000A"}သီးခြားဖိုင်တစ်ခု သတ်မှတ်ရန် အကြံပြုပါသည်။{"\u000A"}{"\u000A"}ရွေးချယ်ထားသော ဖိုင် - { $arg2 }
-
-onboarding_storage_action_select = ဖိုင် ရွေးချယ်ပါ
-
-onboarding_storage_selection_required = ဖိုင်တစ်ခုကို ရွေးချယ်ရပါမည်
-
-onboarding_storage_help_info = ဗားရှင်းဟောင်းမှ တင်မြှင့်မှု ပြုလုပ်နေပြီး ရွေးချယ်ရန် သေချာမသိပါက သိုလှောင်မှုလမ်းညွှန်ကို ဖတ်ပါ။
-
-onboarding_storage_help_action = သိုလှောင်မှုလမ်းညွှန်
-
-onboarding_permission_install_apps = အက်ပလီကေးရှင်းများတပ်ဆင်ခွင့်
-
-onboarding_permission_install_apps_description = အက်ပလီကေးရှင်းတပ်ဆင်ရန်ခွင့်ပြုပါ
-
-onboarding_permission_notifications = သတိပေးချက်များခွင့်ပြုမည်
-
-onboarding_permission_notifications_description = စာအုပ်စင် အပ်ဒေ့များနှင့် အခြားသော အကြောင်းအရာများအတွက် အကြောင်းကြားမှုများ ရယူပါ။
-
-onboarding_permission_crashlytics = အမှားဖြစ်သောအချက်အလက်များမှတ်တမ်းတင်ခြင်း
-
-onboarding_permission_crashlytics_description = အမှားအချက်များအတွက်ပါဝင်ရန်
-
-onboarding_permission_analytics = စွမ်းဆောင်မှုများစာရင်း
-
-onboarding_permission_analytics_description = မှတ်တမ်းများနှင့်ယခုနှင့်အတူ စွမ်းဆောင်မှုစစ်ဆေးမှု
-
-onboarding_permission_action_grant = ခွင့်ပြုခြင်း
-
-onboarding_guides_new_user = { $arg1 } ကို ခုမှ စသုံးသူးလား? စတင်အသုံးပြုနည်းလမ်းညွှန်ကို ကြည့်ရှုရန် အကြံပြုပါတယ်။
 
 pref_category_general = ယေဘူယျ
 

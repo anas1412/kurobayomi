@@ -1360,7 +1360,7 @@ mod tests {
                 runner.send(StoreCmd::Load { manga_id });
                 page
             };
-            let stack_of = |page: &GBox| descendants(page.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::Stack>().ok()).expect("the page has a stack");
+            let stack_of = |page: &GBox| descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
             let enabled = |page: &GBox| {
                 let header = page.first_child().and_downcast::<gtk::HeaderBar>().expect("header bar");
                 descendants(header.upcast_ref()).into_iter().filter_map(|w| w.downcast::<Button>().ok()).filter(|b| b.is_sensitive()).count()

@@ -34,12 +34,23 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_base_gives_no_root() {
+    fn the_default_base_is_made_on_first_use() {
         let base = tempfile::tempdir().expect("temp dir");
         let store = PrefStore::in_memory();
         let storage = StorageManager::open(&store, base.path().join("not-yet"));
+        assert!(!base.path().join("not-yet").exists(), "opening creates nothing");
+        assert_eq!(manga_root(&storage), Some(base.path().join("not-yet/Local/Manga")));
+        assert_eq!(anime_root(&storage), Some(base.path().join("not-yet/Local/Anime")));
+    }
+
+    #[test]
+    fn an_unusable_base_gives_no_root() {
+        let base = tempfile::tempdir().expect("temp dir");
+        let file = base.path().join("a-file");
+        std::fs::write(&file, b"x").expect("file");
+        let store = PrefStore::in_memory();
+        let storage = StorageManager::open(&store, file);
         assert_eq!(manga_root(&storage), None);
         assert_eq!(anime_root(&storage), None);
-        assert!(!base.path().join("not-yet").exists(), "opening creates nothing");
     }
 }

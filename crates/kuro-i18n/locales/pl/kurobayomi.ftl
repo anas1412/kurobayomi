@@ -428,8 +428,6 @@ action_mark_as_seen = Oznacz jako obejrzane
 
 action_mark_as_unseen = Oznacz jako nieobejrzane
 
-action_mark_previous_as_seen = Oznacz jako widziane wcześniej
-
 action_play_internally = Odtwórz wewnętrznie
 
 action_play_externally = Odtwórz zewnętrznie
@@ -994,49 +992,7 @@ internal_error = InternalError: sprawdź log błędów po więcej informacji
 
 app_not_available = Aplikacja niedostępna
 
-pref_onboarding_guide = Szybka konfiguracja
-
-onboarding_heading = Witaj!
-
-onboarding_description = Na początek ustawmy kilka rzeczy. Zawsze możesz je później zmienić w ustawieniach.
-
-onboarding_action_next = Następny
-
-onboarding_action_finish = Zaczynajmy
-
-onboarding_action_skip = Pomiń
-
 onboarding_storage_info = Wybierz folder gdzie { $arg1 } będzie zapisywał pobrane rozdziały, kopie zapasowe i inne.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Zalecany jest dedykowany folder.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Wybrany folder:{ $arg2 }
-
-onboarding_storage_action_select = Wybierz folder
-
-onboarding_storage_selection_required = Folder musi być wybrany
-
-onboarding_storage_help_info = Aktualizujesz ze starszej wersji i nie jesteś pewien co wybrać? Zobacz na przewodnik po pamięci.
-
-onboarding_storage_help_action = Przewodnik po pamięci
-
-onboarding_permission_install_apps = Zainstaluj uprawnienia aplikacji
-
-onboarding_permission_install_apps_description = Do instalacji rozszerzeń.
-
-onboarding_permission_notifications = Uprawnienia powiadomień
-
-onboarding_permission_notifications_description = Otrzymuj powiadomienia ze swojej biblioteki i więcej.
-
-onboarding_permission_crashlytics = Wyślij dziennik awarii
-
-onboarding_permission_crashlytics_description = Wyślij zanonimizowny dziennik awarii do deweloperów.
-
-onboarding_permission_analytics = Zezwól na analizę danych
-
-onboarding_permission_analytics_description = Wysyłaj zanonimizowane dane użytkowania aplikacji w celu ulepszenia jej funkcjonalności.
-
-onboarding_permission_action_grant = Zezwól
-
-onboarding_guides_new_user = Pierwszy raz w { $arg1 }? Zalecamy zapoznać się z poradnikiem.
-
-onboarding_guides_returning_user = Ponowna instalacja { $arg1 }?
 
 pref_category_general = Ogólne
 
@@ -1256,8 +1212,6 @@ ext_install_service_notif = Instalowanie rozszerzenia…
 
 ext_revoke_trust = Unieważnij zaufanie nieznanym rozszerzeniom
 
-label_extension_repos = Repozytoria rozszerzeń
-
 information_empty_repos = Nie masz ustawionych repozytoriów.
 
 action_add_repo = Dodaj repozytorium
@@ -1423,12 +1377,6 @@ nav_zone_next = Następne
 nav_zone_left = Lewo
 
 nav_zone_right = Prawo
-
-left_to_right_viewer = Od lewej do prawej
-
-right_to_left_viewer = Od prawej do lewej
-
-vertical_viewer = Pionowy
 
 webtoon_viewer = Długi pasek
 
@@ -2177,8 +2125,6 @@ information_empty_library = Twoja biblioteka jest pusta
 information_no_manga_category = Kategoria jest pusta
 
 information_no_entries_found = Nie znaleziono wpisów w tej kategorii
-
-getting_started_guide = Wprowadzenie - poradnik
 
 information_empty_category = Nie masz żadnych kategorii. Dotknij plusa, aby je utworzyć i zorganizować swoją bibliotekę.
 

@@ -1,6 +1,6 @@
 # Other tabs
 
-Updates, History, Browse, More and the Settings pages in the language of `main-window.md`: plain GTK 4, theme colours
+Updates, History, Browse and the Settings pages in the language of `main-window.md`: plain GTK 4, theme colours
 and stock style classes only, the spacing scale 4, 8, 12, 16, 24.
 
 ## Shared chrome (`src/ui.rs`)
@@ -54,7 +54,7 @@ destination gets `ui::page`. Updates and History use the Library's header (`scre
 
 ### Lists
 
-- `ui::column` + `ui::scrolled` (720 px, the More and Settings family; extensions keep their 960 px from T-41a-050),
+- `ui::column` + `ui::scrolled` (720 px, the Settings family; extensions keep their 960 px from T-41a-050),
   `ui::heading` over each section, every section a boxed list.
 - Rows: 12 px inset, 8 px top and bottom; a cover is the Library's (stored image, else initials) with 6 px corners
   (`browse::look::row_cover`, `.kb-row-cover`).
@@ -114,16 +114,12 @@ at the three tabs in the Tokyo Night theme yet.
 | Typed link rows (extension repos, Edit categories, Onboarding guide, Worker info and schema) | no arrow | Spec link rows had one, so the same kind of row looked different from page to page. |
 | Tracking | the logged-in check in a fixed green | Ignores the theme. |
 
-### More
+### More (cut)
 
-- No title, no logo. Three boxed lists in the page column, each row with its icon:
-  1. Downloaded only, Incognito mode (switches bound to their preferences).
-  2. Download queue (derived state as subtitle), Categories, Statistics, Data and storage.
-  3. Settings, Player settings, About, Help (opens the help site in the browser).
-- History stays out: it has its own sidebar entry (Aniyomi's moved-tab rule).
-- The lists have no headings, so the page column spaces them 24 px apart (the gap between groups).
-- Download queue: no download manager runs yet, so the page is the empty state "No downloads" with a Library button
-  (no switch, sort, menus or pause button until the manager exists).
+- There is no More page. Its items moved (user, 2026-10-12): Download queue to the Downloads sidebar item (shown while
+  something downloads); Settings, Player settings and Data and storage to the one Settings page (the gear at the bottom
+  of the sidebar); Categories to the Library menu; Downloaded only to the Library filter; Incognito mode, Keyboard
+  shortcuts, Help and About to the app menu on the "Kurobayomi" title. Statistics is cut.
 - Categories: one header row, `[back] Categories   [Anime | Manga] [+]`; Add creates a category of the visible kind.
   Each kind is a boxed list in the page column (shared row metrics); with no category the empty state "You have no
   categories" with an Add category button.

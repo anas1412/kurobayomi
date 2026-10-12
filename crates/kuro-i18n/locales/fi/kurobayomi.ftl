@@ -1246,12 +1246,6 @@ nav_zone_left = Vasen
 
 nav_zone_right = Oikea
 
-left_to_right_viewer = Vasemmalta oikealle
-
-right_to_left_viewer = Oikealta vasemmalle
-
-vertical_viewer = Pystysuora
-
 webtoon_viewer = Webtoon-tyylinen
 
 vertical_plus_viewer = Jatkuva pystysuora
@@ -1831,8 +1825,6 @@ information_no_recent = Ei viimeisimpiä päivityksiä
 information_no_recent_manga = Ei mitään luettu viime aikoina
 
 information_empty_library = Kirjastosi on tyhjä
-
-getting_started_guide = Aloitusopas
 
 information_empty_category = Sinulla ei ole kategorioita. Napauta pluspainiketta, jos haluat luoda sellaisen kirjaston järjestämistä varten.
 

@@ -66,8 +66,6 @@ label_manga_extension_repos = Bronnen voor Manga extensies
 
 label_anime_extension_repos = Bronnen voor Anime extensies
 
-onboarding_storage_action_create_folder = Maak standaard Aniyomi-map
-
 download_speed_limit = Beperk downloadsnelheid
 
 download_speed_limit_hint = Zet op 0 voor onbeperkte downloadsnelheid.
@@ -364,42 +362,6 @@ internal_error = InternalError: Bekijk de crash logs voor meer informatie
 
 app_not_available = App niet beschikbaar
 
-pref_onboarding_guide = Onboarding gids
-
-onboarding_heading = Welkom!
-
-onboarding_description = Laten we eerst enkele dingen instellen. Je kunt deze later altijd wijzigen in de instellingen.
-
-onboarding_action_next = Volgende
-
-onboarding_action_skip = Overslaan
-
-onboarding_storage_action_select = Selecteer een map
-
-onboarding_storage_selection_required = Er moet een map geselecteerd zijn
-
-onboarding_storage_help_info = Aan het updaten van een oudere versie en niet zeker wat te selecteren? Raadpleeg de opslaggids voor meer informatie.
-
-onboarding_storage_help_action = Opslaggids
-
-onboarding_permission_install_apps_description = Om bronextensies te installeren.
-
-onboarding_permission_notifications_description = Ontvang meldingen over bibliotheekupdates en meer.
-
-onboarding_permission_crashlytics = Crashlogs verzenden
-
-onboarding_permission_crashlytics_description = Stuur geanonimiseerde crashlogs naar de ontwikkelaars.
-
-onboarding_permission_analytics = Analytics toestaan
-
-onboarding_permission_analytics_description = Stuur geanonimiseerde gebruiksgegevens om functies van de app te verbeteren.
-
-onboarding_permission_action_grant = Toestaan
-
-onboarding_guides_new_user = Nieuw bij { $arg1 }? Wij raden je aan om de opstartgids te lezen.
-
-onboarding_guides_returning_user = { $arg1 } aan het herinstalleren?
-
 pref_category_general = Algemeen
 
 pref_category_appearance = Uiterlijk
@@ -616,8 +578,6 @@ ext_install_service_notif = Extensies installeren…
 
 ext_revoke_trust = Vertrouwde onbekende extensies intrekken
 
-label_extension_repos = Extensierepo's
-
 information_empty_repos = Je hebt geen repo's ingesteld.
 
 action_add_repo = Repo toevoegen
@@ -771,12 +731,6 @@ nav_zone_next = Volgende
 nav_zone_left = Links
 
 nav_zone_right = Rechts
-
-left_to_right_viewer = Links naar rechts
-
-right_to_left_viewer = Rechts naar links
-
-vertical_viewer = Verticaal
 
 webtoon_viewer = Webtoon
 
@@ -1519,8 +1473,6 @@ information_empty_library = Je bibliotheek is leeg
 information_no_manga_category = Category is leeg
 
 information_no_entries_found = Geen titels gevonden in deze categorie
-
-getting_started_guide = Gids voor beginners
 
 information_empty_category = Er zijn nog geen categorieën. Druk op de plus-knop om er een aan te maken.
 

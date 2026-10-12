@@ -296,49 +296,7 @@ internal_error = ErroInterno: Revisa o rexistro de erros para máis información
 
 app_not_available = Aplicación non dispoñible
 
-pref_onboarding_guide = Guía de benvida
-
-onboarding_heading = Dámosche a benvida!
-
-onboarding_description = Primeiro hai que configurar algunhas cousas. Sempre podes modificalas nos axustes.
-
-onboarding_action_next = Seguinte
-
-onboarding_action_finish = Comecemos
-
-onboarding_action_skip = Omitir
-
 onboarding_storage_info = Elixe o cartafol onde { $arg1 } almacenará os capítulos descargados, as copias de seguridade e máis.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Recoméndase usar un cartafol dedicado.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Elixir cartafol: { $arg2 }
-
-onboarding_storage_action_select = Elixe un cartafol
-
-onboarding_storage_selection_required = Debes elexir un cartafol
-
-onboarding_storage_help_info = Actualizaches dende unha versión máis antiga e non sabes que elixir? Bótalle unha ollada á guía de almacenamento.
-
-onboarding_storage_help_action = Guía de almacenamento
-
-onboarding_permission_install_apps = Permiso para instalar aplicacións
-
-onboarding_permission_install_apps_description = Para instalar as extensións das fontes.
-
-onboarding_permission_notifications = Pemiso para amosar notificacións
-
-onboarding_permission_notifications_description = Recibe notificacións cando se actualice a biblioteca e máis cousas.
-
-onboarding_permission_crashlytics = Enviar rexistro de erros
-
-onboarding_permission_crashlytics_description = Envía rexistros de erros anónimos aos desenvolvedores.
-
-onboarding_permission_analytics = Permitir analíticas
-
-onboarding_permission_analytics_description = Enviar estatísticas de uso anónimas para mellorar as funcións da aplicación.
-
-onboarding_permission_action_grant = Permitir
-
-onboarding_guides_new_user = Primeira vez usando { $arg1 }? Recomendámosche ler a guía de introdución.
-
-onboarding_guides_returning_user = Volvendo instalar { $arg1 }?
 
 pref_category_general = Xeral
 
@@ -558,8 +516,6 @@ ext_install_service_notif = Instalando a extensión…
 
 ext_revoke_trust = Revogar as extensións de confianza de orixe descoñecida
 
-label_extension_repos = Repositorios de extensións
-
 information_empty_repos = Aínda non engadiches ningún repositorio.
 
 action_add_repo = Engadir un repositorio
@@ -725,12 +681,6 @@ nav_zone_next = Seguinte
 nav_zone_left = Esquerda
 
 nav_zone_right = Dereita
-
-left_to_right_viewer = Por páxinas (de esquerda a dereita)
-
-right_to_left_viewer = Páxinas (De dereita a esquerda)
-
-vertical_viewer = Por páxinas (vertical)
 
 webtoon_viewer = Tira longa
 
@@ -1479,8 +1429,6 @@ information_empty_library = A túa biblioteca está vacía
 information_no_manga_category = A categoría está baleira
 
 information_no_entries_found = Non se atoparon elementos nesta categoría
-
-getting_started_guide = Guía de introdución
 
 information_empty_category = Non tes categorías. Toca o botón cun máis para crear unha e organizar a túa biblioteca.
 

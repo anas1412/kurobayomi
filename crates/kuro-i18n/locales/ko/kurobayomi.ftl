@@ -220,8 +220,6 @@ action_mark_as_seen = 시청함으로 표시
 
 action_mark_as_unseen = 시청하지 않음으로 표시
 
-action_mark_previous_as_seen = 항목 바로 전까지 시청함으로 표시
-
 action_play_internally = 내부에서 재생
 
 action_play_externally = 외부에서 재생
@@ -461,8 +459,6 @@ unseen = 보지 않음
 label_manga_extension_repos = 만화 확장앱 저장소
 
 label_anime_extension_repos = 애니메이션 확장앱 저장소
-
-onboarding_storage_action_create_folder = 기본 Aniyomi 폴더 생성
 
 download_speed_limit = 다운로드 속도 제한
 
@@ -785,41 +781,7 @@ internal_error = 내부 오류: 더 자세한 정보를 보고 싶으면 충돌 
 
 app_not_available = 앱 이용 불가
 
-pref_onboarding_guide = 초보자 가이드
-
-onboarding_heading = 환영합니다!
-
-onboarding_description = 먼저 몇 가지 사항을 설정해 보겠습니다. 나중에 언제든지 설정에서 변경할 수도 있습니다.
-
-onboarding_action_next = 다음
-
-onboarding_action_finish = 시작하기
-
-onboarding_action_skip = 건너뛰기
-
 onboarding_storage_info = { $arg1 }가 다운로드, 백업 등을 할 폴더를 선택합니다.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}앱 전용폴더를 추천합니다.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}선택된 폴더: { $arg2 }
-
-onboarding_storage_action_select = 폴더를 선택하기
-
-onboarding_storage_selection_required = 폴더를 선택해야 합니다
-
-onboarding_storage_help_info = 이전 버전에서 업데이트하는데 무엇을 선택해야 할지 모르시나요? 자세한 내용은 저장공간 가이드를 참조하세요.
-
-onboarding_storage_help_action = 저장공간 가이드
-
-onboarding_permission_install_apps = 앱 다운로드 권한
-
-onboarding_permission_install_apps_description = 확장 앱 설치를 위해 필요합니다.
-
-onboarding_permission_notifications = 알림 권한
-
-onboarding_permission_notifications_description = 서재 업데이트 등의 알림을 보냅니다.
-
-onboarding_permission_action_grant = 허용
-
-onboarding_guides_new_user = { $arg1 }가 처음입니까? 시작 가이드를 확인하는 것을 추천합니다.
-
-onboarding_guides_returning_user = { $arg1 }를 재설치 하시겠습니까?
 
 pref_category_general = 일반
 
@@ -1027,8 +989,6 @@ ext_install_service_notif = 확장 앱 설치 중…
 
 ext_revoke_trust = 신뢰한 알수없는 확장 앱 신뢰 취소
 
-label_extension_repos = 확장 앱 저장소
-
 information_empty_repos = 저장소를 추가하지 않았습니다.
 
 action_add_repo = 저장소 추가
@@ -1162,12 +1122,6 @@ nav_zone_next = 다음
 nav_zone_left = 왼쪽
 
 nav_zone_right = 오른쪽
-
-left_to_right_viewer = 페이지 (왼쪽에서 오른쪽)
-
-right_to_left_viewer = 페이지 (오른쪽에서 왼쪽)
-
-vertical_viewer = 페이지 (수직)
 
 webtoon_viewer = 긴 스트립
 
@@ -1888,8 +1842,6 @@ information_empty_library = 서재가 비어있습니다
 information_no_manga_category = 카테고리가 비어 있습니다
 
 information_no_entries_found = 이 카테고리에 항목이 없습니다
-
-getting_started_guide = 초기 설정 도움말
 
 information_empty_category = 카테고리가 없습니다. 서재 구성을 위해 + 버튼을 눌러 생성하세요.
 

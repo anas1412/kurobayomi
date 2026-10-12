@@ -135,7 +135,7 @@ mod tests {
         let (dialog, url) = SimklLogin::start();
         assert_eq!(
             url,
-            "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=aniyomi%3A%2F%2Fsimkl-auth"
+            "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=kurobayomi%3A%2F%2Fsimkl-auth"
         );
         assert!(dialog.is_waiting());
         assert_eq!(dialog.error_text(), None);

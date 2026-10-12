@@ -318,49 +318,7 @@ internal_error = InternalError: Nézze meg a hibaüzenetet további információ
 
 app_not_available = Az app nem elérhető
 
-pref_onboarding_guide = Bevezetési útmutató
-
-onboarding_heading = Üdvözöljük!
-
-onboarding_description = Kezdetnek állítsunk be néhány dolgot. Ezeket később bármikor módosíthatja a beállításokban.
-
-onboarding_action_next = Következő
-
-onboarding_action_finish = Kezdjünk hozzá
-
-onboarding_action_skip = Kihagyás
-
 onboarding_storage_info = Válasszon ki egy mappát, ahol a(z) { $arg1 } a fejezetek letöltéseit, biztonsági mentéseket és egyebeket tárolja.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Ajánlott egy külön mappa használata.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Kiválasztott mappa: { $arg2 }
-
-onboarding_storage_action_select = Válasszon ki egy mappát
-
-onboarding_storage_selection_required = Ki kell választani egy mappát
-
-onboarding_storage_help_info = Régebbi verzióról frissít, és nem tudja, mit válasszon? További információkért olvassa el a tárolási útmutatót.
-
-onboarding_storage_help_action = Tárolási útmutató
-
-onboarding_permission_install_apps = Alkalmazások telepítésének engedélyezése
-
-onboarding_permission_install_apps_description = A forrásbővítmények telepítéséhez.
-
-onboarding_permission_notifications = Értesítési engedély
-
-onboarding_permission_notifications_description = Értesüljön a könyvtári frissítésekről és egyéb információkról.
-
-onboarding_permission_crashlytics = Összeomlási jelentés küldése
-
-onboarding_permission_crashlytics_description = Anonimizált összeomlási jelentés küldése a fejlesztőknek.
-
-onboarding_permission_analytics = Analitika engedélyezése
-
-onboarding_permission_analytics_description = Anonimizált használati adatok küldése a funkciók fejlesztésének érdekében.
-
-onboarding_permission_action_grant = Engedélyezés
-
-onboarding_guides_new_user = Új a(z) { $arg1 } az ön számára? Javasoljuk, hogy olvassa el a Kezdő útmutatót.
-
-onboarding_guides_returning_user = Újratelepíti a(z) { $arg1 }?
 
 pref_category_general = Általános
 
@@ -572,8 +530,6 @@ ext_install_service_notif = Bővítmény telepítése…
 
 ext_revoke_trust = Megbízható ismeretlen kiterjesztések visszavonása
 
-label_extension_repos = Bővítmény tárolók
-
 information_empty_repos = Nincsenek beállítva tárolók.
 
 action_add_repo = Tároló felvétele
@@ -715,12 +671,6 @@ nav_zone_next = Következő
 nav_zone_left = Bal
 
 nav_zone_right = Jobb
-
-left_to_right_viewer = Lapozott (balról jobbra)
-
-right_to_left_viewer = Lapozott (jobbról balra)
-
-vertical_viewer = Lapozott (függőlegesen)
 
 webtoon_viewer = Hosszú szalag
 
@@ -1451,8 +1401,6 @@ information_empty_library = A könyvtárad üres
 information_no_manga_category = Kategória üres
 
 information_no_entries_found = Nem található elem ebben a kategóriában
-
-getting_started_guide = Kezdési útmutató
 
 information_empty_category = Nincsenek kategóriái. Érintse meg a plusz gombot, hogy létrehozzon egyet a könyvtára rendezéséhez.
 

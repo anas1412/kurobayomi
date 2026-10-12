@@ -6,7 +6,7 @@ use gtk::prelude::*;
 use kuro_prefs::pref::Pref;
 use kuro_prefs::prefs::Prefs;
 
-use super::{controls, language, link_rows};
+use super::{controls, language};
 use crate::pref_model::bind;
 use crate::pref_model::model::{ItemCommon, Preference, PreferenceItem};
 use crate::pref_model::page;
@@ -55,7 +55,7 @@ pub fn volume_row(pref: &Pref<f32>) -> PreferenceItem {
 }
 
 /// The root page rows: the kept settings, the mini player when the display allows it, and the links.
-pub fn page_rows(prefs: &Prefs, open: Rc<dyn Fn(&'static str)>) -> Vec<Preference> {
+pub fn page_rows(prefs: &Prefs) -> Vec<Preference> {
     let p = &prefs.player;
     let store = prefs.store();
     let subtitles = Pref::new(store.clone(), "pref_subtitle_lang", String::new());
@@ -69,7 +69,6 @@ pub fn page_rows(prefs: &Prefs, open: Rc<dyn Fn(&'static str)>) -> Vec<Preferenc
             switch("Autoplay next episode", &p.autoplay_enabled, true),
         ],
     )];
-    tree.extend(link_rows(open));
     tree
 }
 
@@ -87,7 +86,7 @@ fn search_button() -> gtk::Widget {
 /// The root page. The rows are read once when the page opens.
 pub fn body(prefs: &Prefs) -> Option<Built> {
     let end = vec![search_button()];
-    built(page::body(&page_rows(prefs, Rc::new(crate::ui::open))).widget, end)
+    built(page::body(&page_rows(prefs)).widget, end)
 }
 
 #[cfg(test)]
@@ -98,7 +97,7 @@ mod tests {
     #[test]
     fn the_root_holds_the_four_kept_settings_first() {
         let prefs = Prefs::in_memory();
-        let tree = page_rows(&prefs, Rc::new(|_| {}));
+        let tree = page_rows(&prefs);
         let Preference::Group(first) = &tree[0] else { panic!("group") };
         let titles: Vec<&str> = first.items.iter().map(|i| i.title()).collect();
         assert_eq!(titles, ["Subtitle language", "Audio language", VOLUME_TITLE, "Autoplay next episode"]);

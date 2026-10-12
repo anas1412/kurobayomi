@@ -524,12 +524,6 @@ nav_zone_left = वामतः
 
 nav_zone_right = दक्षिणतः
 
-left_to_right_viewer = दक्षिणेतरात् दक्षिणतः
-
-right_to_left_viewer = वामेतरात् वामतः
-
-vertical_viewer = ऊर्ध्वम्
-
 webtoon_viewer = वेब्-टून्
 
 vertical_plus_viewer = सततम् ऊर्ध्वम्
@@ -1041,8 +1035,6 @@ information_no_recent = सद्यः नवीकरणानि न सन�
 information_no_recent_manga = सद्यः किमपि न पठितम्
 
 information_empty_library = तव ग्रन्थालयः रिक्तम् अस्ति
-
-getting_started_guide = प्रारम्भिकमार्गदर्शनम्
 
 information_empty_category = तव वर्गाः एव न सन्ति। नूतनं निर्माणं कृत्वा व्यवस्थापयितुम् अधिकचिह्नं नोदयतु॥
 

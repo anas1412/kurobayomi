@@ -761,7 +761,8 @@ pub fn open_with(
     root.set_widget_name("screen:reader");
     root.set_focusable(true);
     root.append(&column);
-    theme::apply_background(&root, theme_value);
+    // only the pages take the reader's colours: the top bar keeps the GTK theme's, or its title turns white on a
+    // light bar
     // the pages sit on their own background, so the colour filter blends with it and not with what is behind
     theme::apply_background(&stack, theme_value);
 
@@ -893,10 +894,7 @@ fn sync_keep_awake(screen: &Screen, reader_open: bool) {
 fn apply_effect(screen: &Screen, effect: Effect) {
     match effect {
         Effect::Theme => {
-            if let Some(root) = screen.root.upgrade() {
-                theme::apply_background(&root, screen.core.theme_pref());
-                theme::apply_background(&screen.stack, screen.core.theme_pref());
-            }
+            theme::apply_background(&screen.stack, screen.core.theme_pref());
         }
         Effect::Incognito => {
             // turning the global flag off closes the reader (E-INC-2)

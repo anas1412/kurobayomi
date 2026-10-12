@@ -198,21 +198,22 @@ fn x112_default_backup_restores_into_an_empty_database_with_the_same_counts() {
 #[test]
 fn every_single_option_the_create_side_allows_restores() {
     let dir = tempfile::tempdir().unwrap();
-    let singles: [(&str, BackupOptions, fn(&Dbs) -> bool); 6] = [
+    let singles: [(&str, BackupOptions, fn(&Dbs) -> bool); 5] = [
         ("library entries", BackupOptions { library_entries: true, ..none() }, |d| rows(&d.manga, "mangas") == 1 && rows(&d.anime, "animes") == 1),
         ("categories", BackupOptions { categories: true, ..none() }, |d| rows(&d.anime, "categories") >= 1),
         ("app settings", BackupOptions { app_settings: true, ..none() }, |d| d.app.get_raw("show_nsfw_source").is_some()),
         ("extension stores", BackupOptions { extension_stores: true, ..none() }, |d| rows(&d.manga, "extension_repos") == 0),
-        ("custom buttons", BackupOptions { custom_button: true, ..none() }, |d| rows(&d.anime, "custom_buttons") == 0),
         ("source settings", BackupOptions { source_settings: true, ..none() }, |d| d.source.get_raw("show_nsfw").is_some()),
     ];
+    // Custom buttons are cut: that option alone would write an empty file, so it does not enable Create.
+    assert!(!BackupOptions { custom_button: true, ..none() }.can_create());
     for (name, opts, applied) in singles {
         assert!(opts.can_create(), "{name}");
         let path = create(dir.path(), &opts);
         preflight_file(&path, &Sources, &Trackers).unwrap_or_else(|e| panic!("{name}: {e}"));
         let mut dbs = fresh();
         restore(&mut dbs, &path);
-        // Extension stores and custom buttons are accepted and restore without error, but write no row any more.
+        // Extension stores are accepted and restore without error, but write no row any more.
         assert!(applied(&dbs), "{name}: the restore wrote what the file carries");
     }
 }

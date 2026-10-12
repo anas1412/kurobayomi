@@ -33,7 +33,7 @@ pub enum OptionId {
 
 impl OptionId {
     /// Rows in display order, grouped by card (p1-ui-parity section 2.1).
-    pub const ROWS: [(Card, OptionId); 12] = [
+    pub const ROWS: [(Card, OptionId); 11] = [
         (Card::Library, OptionId::LibraryEntries),
         (Card::Library, OptionId::Chapters),
         (Card::Library, OptionId::Tracking),
@@ -42,7 +42,6 @@ impl OptionId {
         (Card::Library, OptionId::ReadEntries),
         (Card::Settings, OptionId::AppSettings),
         (Card::Settings, OptionId::ExtensionStores),
-        (Card::Settings, OptionId::CustomButtons),
         (Card::Settings, OptionId::SourceSettings),
         (Card::Settings, OptionId::PrivateSettings),
         (Card::Extensions, OptionId::Extensions),
@@ -171,10 +170,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn three_cards_with_six_five_and_one_rows() {
+    fn three_cards_with_six_four_and_one_rows() {
         let count = |c: Card| OptionId::ROWS.iter().filter(|(card, _)| *card == c).count();
         assert_eq!(count(Card::Library), 6);
-        assert_eq!(count(Card::Settings), 5);
+        assert_eq!(count(Card::Settings), 4);
         assert_eq!(count(Card::Extensions), 1);
     }
 

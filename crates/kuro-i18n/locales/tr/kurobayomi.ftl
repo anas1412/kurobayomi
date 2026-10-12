@@ -676,8 +676,6 @@ action_mark_as_seen = İzlenmiş olarak işaretle
 
 action_mark_as_unseen = İzlenmemiş olarak işaretle
 
-action_mark_previous_as_seen = Öncekini izlenmiş olarak işaretle
-
 action_play_internally = Dahili olarak oynat
 
 action_play_externally = Harici olarak oynat
@@ -949,8 +947,6 @@ unseen = İzlenmemiş
 label_manga_extension_repos = Manga uzantı depoları
 
 label_anime_extension_repos = Anime uzantı depoları
-
-onboarding_storage_action_create_folder = Varsayılan Aniyomi klasörünü oluştur
 
 download_speed_limit = Bölüm indirme hızı sınırı
 
@@ -1328,49 +1324,7 @@ internal_error = İç Hata: Daha çok bilgi için çökme günlüklerine bakın
 
 app_not_available = Uygulama kullanılamıyor
 
-pref_onboarding_guide = Başlangıç rehberi
-
-onboarding_heading = Hoş geldiniz!
-
-onboarding_description = Hadi bazı şeyleri ayarlayalım. Bunları daha sonra ayarlardan da değiştirebilirsiniz.
-
-onboarding_action_next = Sonraki
-
-onboarding_action_finish = Başlayın
-
-onboarding_action_skip = Atla
-
 onboarding_storage_info = { $arg1 }'un bölüm indirmelerini, yedeklemeleri ve daha fazlasını kaydedeceği bir klasör seçin.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Yalnızca buna ait bir klasör tavsiye edilir.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Seçilen klasör: { $arg2 }
-
-onboarding_storage_action_select = Klasör seç
-
-onboarding_storage_selection_required = Bir klasör seçilmelidir
-
-onboarding_storage_help_info = Eski bir sürümden güncelleme yapıyorsunuz ve neyi seçeceğinizden emin değil misiniz? Daha fazla bilgi için depolama kılavuzuna bakın.
-
-onboarding_storage_help_action = Depolama kılavuzu
-
-onboarding_permission_install_apps = Uygulama yükleme izni
-
-onboarding_permission_install_apps_description = Kaynak uzantılarını yüklemek için.
-
-onboarding_permission_notifications = Bildirim izni
-
-onboarding_permission_notifications_description = Kitaplık güncellemeleri ve daha fazlası için bildirim alın.
-
-onboarding_permission_crashlytics = Çökme kayıtlarını gönder
-
-onboarding_permission_crashlytics_description = Geliştiricilere anonimleştirilmiş çökme kayıtlarını gönder.
-
-onboarding_permission_analytics = Kullanım istatistiklerine izin ver
-
-onboarding_permission_analytics_description = Uygulama özelliklerini geliştirmek için anonimleştirilmiş kullanım verileri gönder.
-
-onboarding_permission_action_grant = İzin Ver
-
-onboarding_guides_new_user = { $arg1 }'da yeni misiniz? Başlangıç rehberine göz atmanızı tavsiye ederiz.
-
-onboarding_guides_returning_user = { $arg1 }'u yeniden mi yüklüyorsunuz?
 
 pref_category_general = Genel
 
@@ -1598,8 +1552,6 @@ ext_install_service_notif = Uzantı yükleniyor…
 
 ext_revoke_trust = Güvenilmiş bilinmeyen uzantıları geri al
 
-label_extension_repos = Uzantı depoları
-
 information_empty_repos = Hiç depo ayarlamadınız.
 
 action_add_repo = Depo ekle
@@ -1767,12 +1719,6 @@ nav_zone_next = Sonraki
 nav_zone_left = Sol
 
 nav_zone_right = Sağ
-
-left_to_right_viewer = Sayfalı (soldan sağa)
-
-right_to_left_viewer = Sayfalı (sağdan sola)
-
-vertical_viewer = Sayfalı (dikey)
 
 webtoon_viewer = Uzun şerit
 
@@ -2537,8 +2483,6 @@ information_empty_library = Kitaplığınız boş
 information_no_manga_category = Kategori boş
 
 information_no_entries_found = Bu kategoride girdi bulunamadı
-
-getting_started_guide = Başlangıç kılavuzu
 
 information_empty_category = Kategoriniz yok. Kitaplığınızı düzenlemek için artı düğmesine basarak bir tane oluşturun.
 

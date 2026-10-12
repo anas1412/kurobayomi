@@ -21,9 +21,9 @@
    "icon": "document-open-recent-symbolic"
   },
   {
-   "id": "more",
-   "title": "More",
-   "icon": "open-menu-symbolic"
+   "id": "download_queue",
+   "title": "Downloads",
+   "icon": "folder-download-symbolic"
   }
  ],
  "screens": [
@@ -644,91 +644,6 @@
    "notes": "Title 'History' with top tab row 'Anime' | 'Manga'; SearchToolbar (separate query per tab) + 'Clear history' action (DeleteSweep icon) -> 'Remove everything' dialog; snackbar 'History deleted'. Back arrow only when opened from More (default nav style). List grouped by date headers (Today / Yesterday / date). ROW: height 96dp, padding 16dp horizontal / 8dp vertical, whole row clickable = resume. Left: book cover (2:3, fills height, tap opens entry). Middle (weight 1, 16dp start, 8dp end): title (bodyMedium SemiBold, max 2 lines); below with 4dp top: 'Ep. 12 - 21:30' (manga 'Ch. 12 - 21:30'), or just the time if no number. Right: heart-outline IconButton 'Add to library' (only if not in library; may trigger duplicate dialog then Set categories dialog) and trash IconButton 'Delete' -> Remove dialog with reset-all checkbox. Empty: 'Nothing watched recently' (manga tab: 'Nothing read recently'); with search: 'No results found'. Snackbar 'Next Episode not found!' / 'Next chapter not found' when resuming fails. Re-selecting the History nav item resumes the last watched episode."
   },
   {
-   "id": "more",
-   "title": "More",
-   "kind": "settings",
-   "toolbar": [],
-   "menu": [],
-   "tabs": [],
-   "groups": [
-    {
-     "title": null,
-     "items": [
-      {
-       "type": "switch",
-       "title": "Downloaded only",
-       "subtitle": "Filters all entries in your library",
-       "default": false
-      },
-      {
-       "type": "switch",
-       "title": "Incognito mode",
-       "subtitle": "Pauses your history",
-       "default": false
-      }
-     ]
-    },
-    {
-     "title": null,
-     "items": [
-      {
-       "type": "link",
-       "title": "History",
-       "target": "history"
-      },
-      {
-       "type": "link",
-       "title": "Download queue",
-       "subtitle": "Paused • 3 remaining",
-       "target": "download_queue"
-      },
-      {
-       "type": "link",
-       "title": "Categories",
-       "target": "categories"
-      },
-      {
-       "type": "link",
-       "title": "Statistics",
-       "target": "stats"
-      },
-      {
-       "type": "link",
-       "title": "Data and storage",
-       "target": "settings_data_storage"
-      }
-     ]
-    },
-    {
-     "title": null,
-     "items": [
-      {
-       "type": "link",
-       "title": "Settings",
-       "target": "settings"
-      },
-      {
-       "type": "link",
-       "title": "Player settings",
-       "target": "settings_player"
-      },
-      {
-       "type": "link",
-       "title": "About",
-       "target": "settings_about"
-      },
-      {
-       "type": "action",
-       "title": "Help"
-      }
-     ]
-    }
-   ],
-   "sheets": [],
-   "dialogs": [],
-   "notes": "No top app bar. Scrollable list starting with LogoHeader (centered app logo, then a divider). Rows are preference rows with leading icons: 'Downloaded only' (CloudOff icon, switch), 'Incognito mode' (glasses icon, switch); divider; first link is the nav-style 'moved' tab (default History, History icon; would be Manga/Updates/Browse with CollectionsBookmark/updates/Explore icon for other nav styles); 'Download queue' (GetApp icon; subtitle hidden when stopped, 'N remaining' while downloading, 'Paused' or 'Paused • N remaining' when paused); 'Categories' (Label icon); 'Statistics' (QueryStats icon); 'Data and storage' (Storage icon -> Settings > Data and storage, which links to the storage screen); divider; 'Settings' (gear), 'Player settings' (VideoSettings icon), 'About' (Info icon), 'Help' (HelpOutline icon, opens help website in browser). Re-selecting More pops back to More root."
-  },
-  {
    "id": "download_queue",
    "title": "Download queue",
    "kind": "custom",
@@ -817,90 +732,6 @@
    ],
    "empty": "You have no categories. Tap the plus button to create one for organizing your library.",
    "notes": "App bar with back arrow, title 'Categories', tab row 'Anime' | 'Manga'. Reorderable LazyColumn of ElevatedCards (8dp spacing, 16dp padding): each card row = drag handle icon (DragHandle, 16dp padding, drag to reorder), category name (weight 1, tap = rename), IconButtons: Edit ('Rename category'), Visibility/VisibilityOff ('Hide' - toggles hidden; shows Visibility when currently hidden), Delete. Default/system category not listed. Extended FAB bottom-end 'Add' with plus icon (collapses on scroll) -> Add category dialog. Name field error text 'A category with this name already exists!' when duplicate, '*required' supporting text when empty; confirm disabled while invalid. Empty: EmptyScreen with the empty text."
-  },
-  {
-   "id": "stats",
-   "title": "Statistics",
-   "kind": "custom",
-   "toolbar": [],
-   "menu": [],
-   "tabs": [
-    "Anime",
-    "Manga"
-   ],
-   "groups": [
-    {
-     "title": "Overview",
-     "items": [
-      {
-       "type": "info",
-       "title": "In library"
-      },
-      {
-       "type": "info",
-       "title": "Watched duration"
-      },
-      {
-       "type": "info",
-       "title": "Completed entries"
-      }
-     ]
-    },
-    {
-     "title": "Entries",
-     "items": [
-      {
-       "type": "info",
-       "title": "In global update"
-      },
-      {
-       "type": "info",
-       "title": "Started"
-      },
-      {
-       "type": "info",
-       "title": "Local"
-      }
-     ]
-    },
-    {
-     "title": "Episodes",
-     "items": [
-      {
-       "type": "info",
-       "title": "Total"
-      },
-      {
-       "type": "info",
-       "title": "Watched"
-      },
-      {
-       "type": "info",
-       "title": "Downloaded"
-      }
-     ]
-    },
-    {
-     "title": "Trackers",
-     "items": [
-      {
-       "type": "info",
-       "title": "Tracked entries"
-      },
-      {
-       "type": "info",
-       "title": "Mean score"
-      },
-      {
-       "type": "info",
-       "title": "Used"
-      }
-     ]
-    }
-   ],
-   "sheets": [],
-   "dialogs": [],
-   "notes": "App bar with back arrow, title 'Statistics', tab row 'Anime' | 'Manga'. LazyColumn of SectionCards (card with section title in titleSmall above, 16dp padding, 8dp between cards). Overview card: Row of 3 StatsOverviewItems, each = icon (CollectionsBookmark / Schedule / LocalLibrary) above big bold value above small caption: library count 'In library', duration like '2d 4h 10m' ('Watched duration'; manga 'Read duration'; 'None' if zero), 'Completed entries'. Other cards: Row of 3 equal StatsItems = bold value (titleMedium) over caption (labelSmall, secondary alpha). Third card is 'Episodes' for anime (Total / Watched / Downloaded) and 'Chapters' for manga (Total / Read / Downloaded). Trackers: mean score shows e.g. '7.40 ★' or 'N/A'; 'Used' = number of logged-in trackers. Loading spinner while computing."
   },
   {
    "id": "storage",

@@ -72,6 +72,7 @@ Do not start these before the plan waves, the P0 audit and the first push of a g
 - **Warnings:** about 19 unused-`Result` warnings in `kuro-domain` tests and a few dead-code warnings in the GUI.
 - **CI:** the GitHub Actions run on the real runner has never been checked; add a headless-display job (xvfb) so the GTK tests run in CI instead of skipping.
 - **oomd exemption** is only set on the running Claude app cgroups; make it permanent with a user systemd drop-in if the user agrees.
+- **AnimePahe (user, 2026-10-12: separate job for later):** test the automatic Cloudflare window (`src/cloudflare_window.rs`) on AnimePahe and see whether the site accepts the app's requests with the cookie it collects; if the TLS fingerprint is refused, no cookie import helps. The manual cookie import and the Torrent settings page were deleted the same day; torrent streaming comes back only with a torrent source (bundled TorrServer or a Rust engine, no settings).
 - **Docs:** refresh the README progress table with an audited number after the P0 audit.
 
 ## Standing instruction update (user, 2026-10-11): the P0 audit is started

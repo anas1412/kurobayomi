@@ -31,7 +31,6 @@ pub fn handles(id: &str) -> bool {
             | "settings_search"
             | "settings_data_storage"
             | "settings_about"
-            | "settings_player_torrents"
             | "settings_downloads"
             | "settings_open_source_licenses"
             | "settings_worker_info"
@@ -211,12 +210,11 @@ pub fn tree_with(id: &str, prefs: &Prefs, anime: &[Category], manga: &[Category]
         "settings_appearance" => merge(spec, appearance::page_rows(prefs)),
         "settings_library" => merge(spec, library::page_rows(prefs, anime, manga, open)),
         "settings_reader" => reader::page::rows_all(prefs),
-        "settings_player" => player::root::page_rows(prefs, Rc::new(|_| {})),
+        "settings_player" => player::root::page_rows(prefs),
         "settings_browse" => merge(spec, browse_rows(prefs, counts, Rc::new(|| {}))),
         "settings_data_storage" => merge(spec, data_storage_rows(prefs, Rc::new(|| {}))),
         "settings_downloads" => merge(spec, downloads::page_rows(prefs)),
         "settings_about" => merge(spec, about::page_rows()),
-        "settings_player_torrents" => loose(player::torrent::page_rows(prefs)),
         _ => spec,
     }
 }
@@ -335,7 +333,6 @@ pub fn body(id: &str) -> Option<Built> {
         "settings_library" => library_page(),
         "settings_reader" => reader_page(),
         "settings_player" => player::root::body(&prefs()),
-        "settings_player_torrents" => loose_page(id, player::torrent::page_rows(&prefs())),
         "settings_downloads" => downloads_page(),
         "settings_browse" => browse_page(),
         "settings_search" => search::page(),
@@ -358,7 +355,6 @@ mod tests {
             "settings_library",
             "settings_reader",
             "settings_player",
-            "settings_player_torrents",
             "settings_downloads",
             "settings_browse",
             "settings_search",
@@ -471,8 +467,7 @@ mod tests {
                 "settings_library",
                 "settings_reader",
                 "settings_player",
-                "settings_player_torrents",
-                "settings_downloads",
+                    "settings_downloads",
                 "settings_browse",
                 "settings_search",
                 "settings_data_storage",
@@ -497,7 +492,7 @@ mod tests {
                 assert!(rows_under(&split) > 8, "the sidebar and the open page");
             }
             let player = crate::settings_ui::player::root::body(&prefs()).expect("the player page");
-            assert!(rows_under(&player.content) >= 5, "four kept settings and one link");
+            assert!(rows_under(&player.content) >= 4, "the four kept settings");
 
             // the split view: one sidebar (Player inside it shows its plain list), the open page's row selected, and a
             // selected row swaps the page beside it

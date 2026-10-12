@@ -290,7 +290,7 @@ mod tests {
         assert!(!lib.filter_downloaded_manga.is_set());
     }
 
-    /// Table of `p1-data-and-config.md` section 5 (the 23 rows the settings diet kept). Columns: index, key, namespace, Rust field, kind
+    /// Table of `p1-data-and-config.md` section 5 (the 19 rows the settings diet kept). Columns: index, key, namespace, Rust field, kind
     /// (`bool`, `int`, `long`, `str`, `set`) and the default in stored form (a set is comma-separated, empty for `{}`).
     const SECTION_5: &str = include_str!("../tests/fixtures/library_prefs_table.tsv");
 
@@ -334,9 +334,9 @@ mod tests {
     }
 
     #[test]
-    fn section_5_table_has_23_accessors_registered_with_their_namespace() {
+    fn section_5_table_has_19_accessors_registered_with_their_namespace() {
         let rows = section_5_rows();
-        assert_eq!(rows.len(), 23);
+        assert_eq!(rows.len(), 19);
         let fields: Vec<&str> = LibraryPrefs::FIELDS.iter().map(|(_, key)| *key).collect();
         for row in &rows {
             let stored = stored_key(row);

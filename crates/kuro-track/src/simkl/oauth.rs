@@ -6,7 +6,7 @@ use url::Url;
 use super::api::{CLIENT_ID, REDIRECT_URL, SITE_URL};
 
 /// The URL the browser opens. Parameters come in the source's order and encode the same way as `Uri.Builder`
-/// (`redirect_uri=aniyomi%3A%2F%2Fsimkl-auth`).
+/// (`redirect_uri=kurobayomi%3A%2F%2Fsimkl-auth`).
 pub fn authorize_url() -> String {
     let mut url = Url::parse(&format!("{SITE_URL}/oauth/authorize"))
         .expect("the Simkl site URL is a constant that parses");
@@ -69,7 +69,7 @@ mod tests {
     fn t_32a_031_the_authorise_url_is_byte_equal_to_the_source_form() {
         assert_eq!(
             authorize_url(),
-            "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=aniyomi%3A%2F%2Fsimkl-auth"
+            "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=kurobayomi%3A%2F%2Fsimkl-auth"
         );
     }
 

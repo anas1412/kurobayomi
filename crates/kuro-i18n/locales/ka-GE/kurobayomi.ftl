@@ -398,12 +398,6 @@ pref_viewer_type = ნაგულისხმევი კითხვის �
 
 right_and_left_nav = მარჯვენა და მარცხენა
 
-left_to_right_viewer = მარცხნიდან მარჯვნივ
-
-right_to_left_viewer = მარჯვნიდან მარცხნივ
-
-vertical_viewer = ვერტიკალური
-
 webtoon_viewer = ვებ კომიქსი
 
 vertical_plus_viewer = ვერტიკალური განგრძობითი

@@ -680,12 +680,6 @@ nav_zone_left = Сол
 
 nav_zone_right = Оң
 
-left_to_right_viewer = Бет (солдан оңға қарай)
-
-right_to_left_viewer = Бет (оңнан солға)
-
-vertical_viewer = Беттік (тік)
-
 webtoon_viewer = Ұзын жолақ
 
 vertical_plus_viewer = Тоқтаусыз тік
@@ -1341,8 +1335,6 @@ information_empty_library = Кітапханаңыз бос
 information_no_manga_category = Бұл санат бос
 
 information_no_entries_found = Бұл санатта жазба жоқ
-
-getting_started_guide = Қолдана бастау нұсқаулығы
 
 information_empty_category = Санаттарыңыз жоқ. Жаңа санат жасау үшін және кітапханаңызды ұйымдастыру үшін қосу батырмасын басыңыз.
 

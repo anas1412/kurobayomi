@@ -1147,9 +1147,6 @@ action_mark_as_seen = Mark as watched
 action_mark_as_unseen = Mark as unwatched
 
 # source: i18n-aniyomi
-action_mark_previous_as_seen = Mark previous as watched
-
-# source: i18n-aniyomi
 action_play_internally = Play internally
 
 # source: i18n-aniyomi
@@ -2512,9 +2509,6 @@ ext_install_service_notif = Installing extension…
 ext_revoke_trust = Revoke trusted unknown extensions
 
 # source: i18n
-label_extension_repos = Repositories
-
-# source: i18n
 information_empty_repos = You have no repos set.
 
 # source: i18n
@@ -2795,15 +2789,6 @@ nav_zone_left = Left
 
 # source: i18n
 nav_zone_right = Right
-
-# source: i18n
-left_to_right_viewer = Paged, left to right
-
-# source: i18n
-right_to_left_viewer = Paged, right to left
-
-# source: i18n
-vertical_viewer = Paged, vertical
 
 # source: i18n
 webtoon_viewer = Long strip
@@ -4291,3 +4276,18 @@ episode_time_left = { $arg1 } left
 
 # source: kurobayomi
 action_delete_download = Delete download
+
+# source: kurobayomi
+action_mark_previous_as_seen = Mark previous as watched
+
+# source: kurobayomi
+label_extension_repos = Repositories
+
+# source: kurobayomi
+left_to_right_viewer = Paged, left to right
+
+# source: kurobayomi
+right_to_left_viewer = Paged, right to left
+
+# source: kurobayomi
+vertical_viewer = Paged, vertical

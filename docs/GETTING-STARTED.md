@@ -13,7 +13,7 @@ The first time you open Kurobayomi, you see the welcome screen.
 
 ![The welcome screen, with the Add a source repository button](images/getting-started/01-welcome.png)
 
-There is nothing to set up first. Downloads and backups go to a **Kurobayomi** folder inside your **Videos** folder;
+There is nothing to set up first. Downloads and backups go to a **Kurobayomi** folder in your home folder;
 you can change that later in Settings.
 
 ## 2. Add a repository
@@ -80,25 +80,30 @@ The sidebar also has:
 
 - **Updates**: new episodes and chapters of the titles in your library.
 - **History**: what you watched and read recently.
-- **More**: downloads, settings and everything else.
+- **Downloads**: shows up while something downloads, with how many are left.
+- **Settings**: the gear at the bottom of the sidebar.
+
+Incognito mode, keyboard shortcuts, help and About are in the menu on the **Kurobayomi** title.
 
 ---
 
 ## Where your files are saved
 
-Downloads and backups go to **Videos → Kurobayomi** in your home folder. To use another folder, open **More →
-Settings → Backup and restore** and click **Storage location**.
+Downloads and backups go to **Kurobayomi** in your home folder: **Anime** and **Manga** hold the downloads,
+**Backups** the backups and **Local** your own folders. To use another folder, open **Settings → Data and storage**
+and click **Storage location**. The new folder is used for new downloads after a restart; files already downloaded
+stay where they are.
 
 ## Restore a backup
 
 You can bring back a backup from Kurobayomi, Aniyomi or Tachiyomi (a file that ends in `.tachibk`):
 
 - On the welcome screen, click **Restore from a backup**, or
-- open **More → Settings → Backup and restore** and click **Restore backup**.
+- open **Settings → Data and storage** and click **Restore backup**.
 
 ## Connect AniList (optional)
 
-To keep your progress on AniList, open **More → Settings → Sources and tracking** and log in to AniList. You can skip
+To keep your progress on AniList, open **Settings → Sources and tracking** and log in to AniList. You can skip
 this.
 
 ## If a source is not working

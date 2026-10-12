@@ -326,7 +326,7 @@ mod tests {
                 0
             ),
             Some(RowTap::StartSimklLogin(
-                "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=aniyomi%3A%2F%2Fsimkl-auth"
+                "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=kurobayomi%3A%2F%2Fsimkl-auth"
                     .into()
             )),
             "byte-equal, no state, no ClientSecrets"

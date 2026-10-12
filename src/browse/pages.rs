@@ -1193,7 +1193,8 @@ pub(crate) mod tests {
             let all = widget.observe_controllers();
             (0..all.n_items()).filter_map(|i| all.item(i)).filter_map(|c| c.downcast::<gtk::EventControllerKey>().ok()).count()
         };
-        let body = entry.parent().expect("body");
+        // the entry sits in the top row of the page body
+        let body = entry.parent().and_then(|top| top.parent()).expect("body");
         assert_eq!(controller(&body), 1, "the page carries the Escape step");
         let all = body.observe_controllers();
         let keys = (0..all.n_items()).filter_map(|i| all.item(i)).find_map(|c| c.downcast::<gtk::EventControllerKey>().ok()).expect("controller");

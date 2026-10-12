@@ -676,8 +676,6 @@ action_mark_as_seen = Позначити як переглянуте
 
 action_mark_as_unseen = Позначити як не переглянуте
 
-action_mark_previous_as_seen = Позначити попереднє як переглянуте
-
 action_play_internally = Дивитися в застосунку
 
 action_play_externally = Дивитися іншому плеєрі
@@ -949,8 +947,6 @@ unseen = Небачений
 label_manga_extension_repos = Сховища розширення манґи
 
 label_anime_extension_repos = Repos розширення аніме
-
-onboarding_storage_action_create_folder = Створіть папку Aniyomi за замовчуванням
 
 download_speed_limit = Обмеження швидкості завантаження розділу
 
@@ -1338,49 +1334,7 @@ internal_error = InternalError: Перевірте журнал халеп за�
 
 app_not_available = Застосунок не відповідає
 
-pref_onboarding_guide = Гайд новачка
-
-onboarding_heading = Вітаємо!
-
-onboarding_description = Давайте для початку налаштуємо дещо. Ви завжди зможете змінити ці налаштування потім.
-
-onboarding_action_next = Далі
-
-onboarding_action_finish = Почнемо
-
-onboarding_action_skip = Пропустити
-
 onboarding_storage_info = Оберіть папку де { $arg1 } буде зберігати збережені глави, бекапи, та інше.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Рекомендуємо обрати окрему папку.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Обрана папка: { $arg2 }
-
-onboarding_storage_action_select = Оберіть папку
-
-onboarding_storage_selection_required = Потрібно обрати папку
-
-onboarding_storage_help_info = Оновлюєтесь з попередньої версії і не впевнені яку обрати? Перегляньте гайд по сховищу для додаткової інформації.
-
-onboarding_storage_help_action = Гайд по сховищу
-
-onboarding_permission_install_apps = Встановити дозволи додатка
-
-onboarding_permission_install_apps_description = Щоб встановити джерело розширеннь.
-
-onboarding_permission_notifications = Дозвіл на сповіщення
-
-onboarding_permission_notifications_description = Отримувати сповіщення про оновлення бібліотек та інше.
-
-onboarding_permission_crashlytics = Надіслати звіт про помилку
-
-onboarding_permission_crashlytics_description = Надіслати анонімний звіт про помилку
-
-onboarding_permission_analytics = Дозволити аналітику
-
-onboarding_permission_analytics_description = Надсилати анонімну інформацію про використання для покращення застосунку.
-
-onboarding_permission_action_grant = Отримати
-
-onboarding_guides_new_user = Новачки у { $arg1 }? Ми рекомендуємо переглянути стартовий гайд.
-
-onboarding_guides_returning_user = Перевстановлюєте { $arg1 }?
 
 pref_category_general = Головні
 
@@ -1600,8 +1554,6 @@ ext_install_service_notif = Встановлюю розширення…
 
 ext_revoke_trust = Скинути довірені невідомі розширення
 
-label_extension_repos = Репозиторії розширень
-
 information_empty_repos = У вас нема встановлених репозиторіїв.
 
 action_add_repo = Додати репозиторій
@@ -1747,12 +1699,6 @@ nav_zone_next = Наступний
 nav_zone_left = Зліва
 
 nav_zone_right = Зправа
-
-left_to_right_viewer = Посторінково (зліва направо)
-
-right_to_left_viewer = Посторінково (справа наліво)
-
-vertical_viewer = Посторінковий (вертикальний)
 
 webtoon_viewer = Довга смуга
 
@@ -2485,8 +2431,6 @@ information_empty_library = Ваша бібліотека порожня
 information_no_manga_category = Категорія порожня
 
 information_no_entries_found = В цій категорії немає записів
-
-getting_started_guide = Посібник з початку роботи
 
 information_empty_category = У вас немає категорій. Тицьніть кнопку плюс, для початку облаштування вашої бібліотеки.
 

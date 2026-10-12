@@ -311,90 +311,10 @@
    ],
    "menu": [],
    "tabs": [],
-   "groups": [
-    {
-     "title": null,
-     "items": [
-      {
-       "type": "link",
-       "title": "Torrent",
-       "subtitle": "TorrServer options",
-       "target": "settings_player_torrents"
-      }
-     ]
-    }
-   ],
+   "groups": [],
    "sheets": [],
    "dialogs": [],
    "notes": "Second-level menu styled like the main settings menu: each row has a leading icon (play-circle, gesture, memory chip, subtitles, audio track, terminal, edit-note, magnet, code), title and summary. Title is \"Player\" when opened from Settings and \"Player settings\" when opened from inside the player. Search opens player-only settings search (placeholder \"Search player settings\")."
-  },
-  {
-   "id": "settings_player_torrents",
-   "title": "Torrent",
-   "kind": "settings",
-   "toolbar": [
-    {
-     "label": "Search",
-     "icon": "system-search-symbolic"
-    }
-   ],
-   "menu": [],
-   "tabs": [],
-   "groups": [
-    {
-     "title": null,
-     "items": [
-      {
-       "type": "switch",
-       "title": "Enable TorrServer",
-       "default": false
-      },
-      {
-       "type": "text",
-       "title": "TorrServer port",
-       "default": "8090"
-      },
-      {
-       "type": "text",
-       "title": "Torrent trackers",
-       "default": "http://nyaa.tracker.wf:7777/announce\nhttp://anidex.moe:6969/announce\n..."
-      },
-      {
-       "type": "action",
-       "title": "Reset default torrent trackers string"
-      },
-      {
-       "type": "list",
-       "title": "Proxy mode",
-       "options": [
-        "None",
-        "Tracker",
-        "Peers",
-        "Full"
-       ],
-       "default": "None"
-      },
-      {
-       "type": "text",
-       "title": "Proxy url",
-       "default": ""
-      }
-     ]
-    }
-   ],
-   "sheets": [],
-   "dialogs": [
-    {
-     "id": "torrent_notice",
-     "title": "Legal Notice",
-     "text": "TorrServer relies on peer to peer file sharing to access content. By doing so, you also upload files to others. Any content you share is your sole responsibility.\n\nNo further notices will be issued.",
-     "groups": [],
-     "buttons": [
-      "OK"
-     ]
-    }
-   ],
-   "notes": "Notice dialog shown the first time torrents are enabled. All other rows disabled while torrents are off; proxy URL also disabled when proxy mode is None. Port dialog info \"Enter 0 to let system choose a port\", error \"Port must be a number between 0 and 65535\". Trackers is a multi-line edit (subtitle shows first two lines + \"...\"); default is a 26-line tracker list. Reset is enabled only when trackers differ from default. Proxy URL dialog info \"Supports http, https, socks4, socks4a, socks5, socks5h\"."
   },
   {
    "id": "settings_downloads",
@@ -670,7 +590,7 @@
       },
       {
        "type": "info",
-       "title": "Used for automatic backups, chapter downloads, and local source."
+       "title": "Holds downloads (Anime, Manga), backups and local folders. A new location is used for new downloads after a restart; files already there stay where they are."
       }
      ]
     },

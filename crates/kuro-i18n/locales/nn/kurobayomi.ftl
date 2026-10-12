@@ -346,12 +346,6 @@ nav_zone_left = Venstre
 
 nav_zone_right = Høgre
 
-left_to_right_viewer = Venstre til høgre
-
-right_to_left_viewer = Høgre til venstre
-
-vertical_viewer = Loddrett
-
 webtoon_viewer = Webtoon
 
 vertical_plus_viewer = Kontinuerleg loddrett

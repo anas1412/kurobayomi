@@ -1703,7 +1703,7 @@ mod tests {
                 let runner = Rc::new(runner::spawn(rt.handle(), store.clone(), PrefStore::in_memory(), backend.clone(), AnimeLoadContext::default()));
                 let page = assemble(Rc::clone(&runner), true, Env { backend: backend.clone(), ..env_of(&store) });
                 runner.send(AnimeCmd::Load { anime_id: id });
-                let stack = descendants(page.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::Stack>().ok()).expect("the page has a stack");
+                let stack = descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
                 assert!(pump(&ctx, || stack.visible_child_name().as_deref() == Some("ready")), "the page becomes ready");
                 runner.send(AnimeCmd::Refresh { anime_id: id });
                 let snack = descendants(page.upcast_ref())
@@ -1768,7 +1768,7 @@ mod tests {
                 runner.send(AnimeCmd::Load { anime_id });
                 (page, runner)
             };
-            let stack_of = |page: &GBox| descendants(page.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::Stack>().ok()).expect("the page has a stack");
+            let stack_of = |page: &GBox| descendants(page.upcast_ref()).into_iter().filter_map(|w| w.downcast::<gtk::Stack>().ok()).find(|s| s.child_by_name("ready").is_some()).expect("the page has a stack");
 
             let (page, _runner) = spawn(id);
             let stack = stack_of(&page);
@@ -1818,7 +1818,7 @@ mod tests {
             let unseen = |on: bool| move || rows.anime(id).unwrap().is_some_and(|a| (a.episode_flags & ep::UNSEEN_MASK == ep::SHOW_UNSEEN) == on);
             options[0].activate_action("viewopt.unseen", None).expect("the Unwatched check");
             assert!(pump(&ctx, unseen(true)), "the check writes the flag");
-            assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 4)), "two leading rows and two unwatched episodes");
+            assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 4)), "two leading rows and two unwatched episodes, got {:?}", list.model().map(|m| m.n_items()));
             options[0].activate_action("viewopt.unseen", None).expect("the Unwatched check");
             assert!(pump(&ctx, unseen(false)), "off clears the group");
             assert!(pump(&ctx, || list.model().is_some_and(|m| m.n_items() == 5)), "every episode again");

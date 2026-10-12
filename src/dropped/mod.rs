@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn t35a029_the_in_app_global_search_entry_exists() {
-        assert!(code_lines().iter().any(|(_, l)| l.contains("Global search")));
+        assert!(code_lines().iter().any(|(_, l)| l.contains("BrowseRoute::GlobalSearch")));
     }
 
     #[test]

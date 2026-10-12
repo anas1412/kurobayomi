@@ -312,49 +312,7 @@ internal_error = InternalError: Хушма хыпар-пӗлӳ пӑхма тӑв
 
 app_not_available = Апа кӗме май ҫук
 
-pref_onboarding_guide = Пуҫлама пӗлкӗч
-
-onboarding_heading = Килӗрех!
-
-onboarding_description = Айтӑр темиҫе йапала ӗнерӗпӗр. Есӗ вӗсене йаланах кайран ӗнерӳсенче улӑштарма пултаратӑн.
-
-onboarding_action_next = Малалла
-
-onboarding_action_finish = Пуҫла
-
-onboarding_action_skip = Ирттер
-
 onboarding_storage_info = { $arg1 } тийенӗ сыпӑксене, йантӑлав ӑтӑвӗсене тата ыттине упрамалли папкӑ суйла.{"\u000A"}{"\u000A"}Уйтӑм папкӑ усӑ курма сӗнетпӗр.{"\u000A"}{"\u000A"}Суйланӑ папкӑ: { $arg2 }
-
-onboarding_storage_action_select = Папкӑ суйла
-
-onboarding_storage_selection_required = Папкӑ суйламалла
-
-onboarding_storage_help_info = Кивӗ верҫҫирен ҫӗнӗлетӗн те мӗн суламаллине пӗлместӗн? Нумайрах пӗлме усрав пӗлкӗчне кӗрсе пӑх.
-
-onboarding_storage_help_action = Усрав пӗлкӗчӗ
-
-onboarding_permission_install_apps = Апсене лартма ирӗк
-
-onboarding_permission_install_apps_description = Ҫӑл куҫсен хушмисене лартма ирӗк парӗ.
-
-onboarding_permission_notifications = Систерӳсем килме ирӗк
-
-onboarding_permission_notifications_description = Вулавӑшри ҫӗнетӳсем пурри пирки тата ытти пирки пӗлтерӗ.
-
-onboarding_permission_crashlytics = Йӑнӑшсен кӗнекине йар
-
-onboarding_permission_crashlytics_description = Вӑрттӑнлатнӑ йӑнӑшсен кӗнекине хатӗрлевҫӗсене йарса парӗ.
-
-onboarding_permission_analytics = Тӗпчевлеме ирӗк
-
-onboarding_permission_analytics_description = Апӑн ӗҫ-тивӗҫсене лайӑхлатма вӑрттӑнлатнӑ усӑ курав пӗлӗмӗсене йарса парӗ.
-
-onboarding_permission_action_grant = Ирӗк пар
-
-onboarding_guides_new_user = { $arg1 } апра ҫӗнни? Епӗр пуҫлав пӗлкӗчӗпе паллашма сӗнетпӗр.
-
-onboarding_guides_returning_user = { $arg1 } ҫӗнӗрен лартатӑн?
 
 pref_category_general = Тӗп
 
@@ -653,12 +611,6 @@ nav_zone_next = Малалли
 nav_zone_left = Сулахай
 
 nav_zone_right = Сылтӑм
-
-left_to_right_viewer = Елсерен (сулахайран сылтӑмалла)
-
-right_to_left_viewer = Елсерен (сылтӑмран сулахайалла)
-
-vertical_viewer = Елсерен (урлӑ)
 
 webtoon_viewer = Вӑрӑм елсем
 

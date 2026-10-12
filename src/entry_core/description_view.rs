@@ -9,6 +9,7 @@ use gtk::{Align, Box as GBox, Orientation as O};
 
 use crate::entry_core::header::{GenreChip, GenreLayout, genre_layout};
 use crate::entry_core::header_view::Handlers;
+use crate::entry_core::markdown::to_markup;
 use crate::entry_core::text::{COLLAPSED_LINES, Description, Expansion, SCRIM_PX};
 
 /// The scrim: the window background fading in over the last collapsed line.
@@ -95,6 +96,10 @@ impl Genres {
 pub fn build(description: &Description, expansion: Rc<Cell<Expansion>>, genres: Option<(&[GenreChip], &Handlers)>) -> GBox {
     let genres = genres.map(|(chips, handlers)| Genres::new(chips, handlers));
     let label = gtk::Label::builder().xalign(0.0).wrap(true).build();
+    label.connect_activate_link(|label, uri| {
+        crate::browse::nav::open_external(uri, label.root().and_downcast_ref::<gtk::Window>());
+        gtk::glib::Propagation::Stop
+    });
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&label));
     let fade = scrim(label.upcast_ref());
@@ -104,15 +109,16 @@ pub fn build(description: &Description, expansion: Rc<Cell<Expansion>>, genres: 
     let chips = genres.as_ref().map(|g| (g.row.clone(), g.wrap.clone()));
     let genres = genres.map(Rc::new);
     let render = {
-        let (label, fade, caret, description) = (label.clone(), fade.clone(), caret.clone(), description.clone());
+        let (label, fade, caret) = (label.clone(), fade.clone(), caret.clone());
+        let (expanded, shrunk) = (to_markup(&description.expanded), to_markup(&description.shrunk));
         move |state: Expansion| {
             if state.is_expanded() {
-                label.set_label(&description.expanded);
+                label.set_markup(&expanded);
                 label.set_lines(-1);
                 label.set_ellipsize(gtk::pango::EllipsizeMode::None);
                 caret.set_icon_name("go-up-symbolic");
             } else {
-                label.set_label(&description.shrunk);
+                label.set_markup(&shrunk);
                 label.set_lines(COLLAPSED_LINES);
                 label.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 caret.set_icon_name("go-down-symbolic");
@@ -135,7 +141,13 @@ pub fn build(description: &Description, expansion: Rc<Cell<Expansion>>, genres: 
     };
     let on_text = toggle.clone();
     let tap = gtk::GestureClick::new();
-    tap.connect_released(move |_, _, _, _| on_text());
+    // a click on a link opens the link and leaves the text as it is
+    let link = label.clone();
+    tap.connect_released(move |_, _, _, _| {
+        if link.current_uri().is_none() {
+            on_text();
+        }
+    });
     overlay.add_controller(tap);
     caret.connect_clicked(move |_| toggle());
 

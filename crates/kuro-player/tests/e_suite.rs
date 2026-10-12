@@ -477,7 +477,9 @@ fn sources() -> String {
 #[test]
 fn every_numbered_test_t1_to_t79_is_present() {
     let text = sources();
+    // T69 to T73 tested the `user-data/aniyomi` Lua bridge, which was removed.
     let missing: Vec<u32> = (1..=79)
+        .filter(|n| !(69..=73).contains(n))
         .filter(|n| !text.contains(&format!("fn t{n}_")))
         .collect();
     assert!(missing.is_empty(), "no test named for T{missing:?}");

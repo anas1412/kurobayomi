@@ -322,8 +322,6 @@ kindlish_nav = కిండల్ మాదిరి
 
 edge_nav = అంచు
 
-vertical_viewer = నిలువు
-
 disabled = అశక్తమైనది
 
 services = సేవలు

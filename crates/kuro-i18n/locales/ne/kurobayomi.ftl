@@ -320,49 +320,7 @@ internal_error = आन्तरिक त्रुटि: थप जानक�
 
 app_not_available = एप उपलब्ध छैन
 
-pref_onboarding_guide = अनबोर्डिङ गाइड
-
-onboarding_heading = स्वागत छ!
-
-onboarding_description = पहिले केहि चीजहरू सेट गरौं। तपाईं पछि पनि सेटिंग्समा गएर यसलाई परिवर्तन गर्न सक्नुहुन्छ।
-
-onboarding_action_next = अर्को
-
-onboarding_action_finish = सुरु
-
-onboarding_action_skip = छोड
-
 onboarding_storage_info = एउटा फोल्डर चयन गर्नुहोस् जहाँ { $arg1 } ले अध्याय डाउनलोड, ब्याकअप, र थप भण्डारण गर्नेछ।{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}एक समर्पित फोल्डर सिफारिस गरिएको छ।{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}चयन गरिएको फोल्डर: { $arg2 }
-
-onboarding_storage_action_select = फोल्डर चयन गर्नुहोस्
-
-onboarding_storage_selection_required = एउटा फोल्डर चयन गर्नुपर्छ
-
-onboarding_storage_help_info = पुरानो संस्करणबाट अपडेट गर्दै र के चयन गर्ने निश्चित छैन? थप जानकारीको लागि भण्डारण गाइड हेर्नुहोस्।
-
-onboarding_storage_help_action = भण्डारण गाइड
-
-onboarding_permission_install_apps = एप स्थापना गर्ने अनुमति
-
-onboarding_permission_install_apps_description = स्रोत एक्सटेन्शन स्थापना गर्न को लागि।
-
-onboarding_permission_notifications = सूचना अनुमति
-
-onboarding_permission_notifications_description = पुस्तकालय अपडेट्स र थपका लागि सूचना प्राप्त गर्नुहोस्।
-
-onboarding_permission_crashlytics = Crash logs पठाउनुहोस्
-
-onboarding_permission_crashlytics_description = विकासकर्ताहरूलाई अज्ञात Crash logs पठाउनुहोस्।
-
-onboarding_permission_analytics = Analytics लाई अनुमति दिनुहोस्
-
-onboarding_permission_analytics_description = अनुप्रयोग सुविधाहरू सुधार गर्न बेनामी उपयोग डेटा पठाउनुहोस्।
-
-onboarding_permission_action_grant = प्रदान गर्नुहोस्
-
-onboarding_guides_new_user = { $arg1 } मा नयाँ हुनुहुन्छ? हामी स्टार्टिङ गाइड जाँच गर्न सिफारिस गर्छौं।
-
-onboarding_guides_returning_user = { $arg1 } पुन: स्थापना गर्दै हुनुहुन्छ?
 
 pref_category_general = सामान्य
 
@@ -586,8 +544,6 @@ ext_install_service_notif = एक्सटेन्शन स्थापना
 
 ext_revoke_trust = विश्वसनीय अज्ञात एक्सटेन्शनहरू रद्द गर्नुहोस्
 
-label_extension_repos = एक्सटेन्शन रिपो
-
 information_empty_repos = तपाईंले कुनै पनि रिपो सेट गर्नु भएको छैन।
 
 action_add_repo = रिपो थप्नुहोस्
@@ -755,12 +711,6 @@ nav_zone_next = अर्को
 nav_zone_left = बायाँ
 
 nav_zone_right = दायाँ
-
-left_to_right_viewer = बायाँ देखि दायाँ
-
-right_to_left_viewer = दायाँ देखि बायाँ
-
-vertical_viewer = ठाडो
 
 webtoon_viewer = लामो स्ट्रिप
 
@@ -1525,8 +1475,6 @@ information_empty_library = तपाईंको पुस्तकालय �
 information_no_manga_category = वर्ग खाली छ
 
 information_no_entries_found = यस वर्गमा कुनै इन्ट्रीहरू फेला परेनन्
-
-getting_started_guide = सुरु गर्ने गाइड
 
 information_empty_category = तपाईंसँग कुनै वर्गहरू छैन। वर्ग बनाएर पुस्तकालय व्यवस्थित गर्न प्लस बटन थिच्नुहोस्।
 

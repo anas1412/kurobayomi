@@ -310,49 +310,7 @@ internal_error = InternalError: Kontrolu prikolapsajn protokolojn por pliaj info
 
 app_not_available = Apo maldisponebla
 
-pref_onboarding_guide = Komencanta gvidilo
-
-onboarding_heading = Bonvenon!
-
-onboarding_description = Komence ni agordu kelkajn aferojn. Vi ĉiam povas ŝanĝi ilin en la agordoj poste.
-
-onboarding_action_next = Sekva
-
-onboarding_action_finish = Komencu
-
-onboarding_action_skip = Preterpasi
-
 onboarding_storage_info = Elektu dosierujon kie { $arg1 } konservos ĉapitrajn elŝutojn, savkopiojn, kaj aliajn. {"\u000A"}{"\u000A"}Dediĉita dosierujo estas rekomendata.{"\u000A"}{"\u000A"}Elektita dosierujo: { $arg2 }
-
-onboarding_storage_action_select = Elekti dosierujon
-
-onboarding_storage_selection_required = Dosierujo devas esti elektita
-
-onboarding_storage_help_info = Ĉu vi ĝisdatigas de pli malnova versio kaj ne scias kion elekti? Kontrolu la konservejan gvidilon por pliaj informoj.
-
-onboarding_storage_help_action = Konserveja gvidilo
-
-onboarding_permission_install_apps = Permeso por instali apojn
-
-onboarding_permission_install_apps_description = Por instali fontajn etendaĵojn.
-
-onboarding_permission_notifications = Sciiga permeso
-
-onboarding_permission_notifications_description = Ricevi sciigojn pri bibliotekaj ĝisdatigoj kaj pli.
-
-onboarding_permission_crashlytics = Sendi prikolapsajn protokolojn
-
-onboarding_permission_crashlytics_description = Sendi anonimigajn prikolapsajn protokolojn al la programistoj.
-
-onboarding_permission_analytics = Permesi analizojn
-
-onboarding_permission_analytics_description = Sendi anonimigaj uzadaj datumoj por plibonigi funkciojn de apo.
-
-onboarding_permission_action_grant = Permesi
-
-onboarding_guides_new_user = Ĉu vi estas en { $arg1 } unua foje? Ni rekomendas kontroli komencantan gvidilon.
-
-onboarding_guides_returning_user = Ĉu vi reinstalas { $arg1 }?
 
 pref_category_general = Ĝeneralaj
 
@@ -572,8 +530,6 @@ ext_install_service_notif = Instalado de etendaĵo…
 
 ext_revoke_trust = Eksvalidigi fidintajn nekonatajn etendaĵojn
 
-label_extension_repos = Etendaĵaj deponejoj
-
 information_empty_repos = Vi ne havas deponejojn agorditajn.
 
 action_add_repo = Aldoni deponejon
@@ -739,12 +695,6 @@ nav_zone_next = Sekva
 nav_zone_left = Maldekstra
 
 nav_zone_right = Dekstra
-
-left_to_right_viewer = Paĝigita (maldekstre dekstren)
-
-right_to_left_viewer = Paĝigita (dekstre maldekstren)
-
-vertical_viewer = Paĝigita (vertikale)
 
 webtoon_viewer = Longa strio
 

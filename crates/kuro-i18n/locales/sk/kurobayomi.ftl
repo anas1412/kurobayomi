@@ -300,20 +300,6 @@ internal_error = InternalError: Skontrolujte záznmy pre ďalšie informácie
 
 app_not_available = Aplikácia nedostupná
 
-onboarding_heading = Vitajte!
-
-onboarding_action_next = Ďalšie
-
-onboarding_action_finish = Začíname
-
-onboarding_action_skip = Preskočiť
-
-onboarding_storage_action_select = Vyberte priečinok
-
-onboarding_storage_selection_required = Priečinok musí byť vybraný
-
-onboarding_permission_install_apps = Povolenie pre sťahovanie aplikácie
-
 pref_category_general = Všeobecné
 
 pref_category_appearance = Vzhľad
@@ -611,12 +597,6 @@ nav_zone_next = Ďalší
 nav_zone_left = Vľavo
 
 nav_zone_right = Vpravo
-
-left_to_right_viewer = Zľava doprava
-
-right_to_left_viewer = Sprava doľava
-
-vertical_viewer = Vertikálne
 
 webtoon_viewer = Ako Webtoon - Zhora dole a strany sa spájajú do jednej dlhej
 
@@ -1195,8 +1175,6 @@ information_no_recent = Žiadne nedávne aktualizácie
 information_no_recent_manga = Nič nedávno čítané
 
 information_empty_library = Vaša knižnica je prázdna
-
-getting_started_guide = Príručka Začíname
 
 information_empty_category = Nemáte žiadne kategórie. Ťuknutím na tlačidlo plus si ju vytvorte a usporiadajte knižnicu.
 

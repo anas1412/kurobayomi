@@ -80,14 +80,14 @@ fn parse_moko_counts_match_the_inventory() {
 }
 
 #[test]
-fn english_generation_counts_1381_messages() {
+fn english_generation_counts_1384_messages() {
     let (core, aniyomi) = base();
     let text = generate_english(&core, &aniyomi).expect("generates");
     let ids = text
         .lines()
         .filter(|l| l.contains(" =") && !l.starts_with('#') && !l.starts_with(' '))
         .count();
-    assert_eq!(ids, 1381, "1348 from the Aniyomi base (1434 minus the 86 dropped names) plus the 33 in kurobayomi-extra.ftl");
+    assert_eq!(ids, 1384, "1343 from the Aniyomi base (1434 minus the 91 dropped names) plus the 41 in kurobayomi-extra.ftl");
     assert_eq!(
         text, ENGLISH_FTL,
         "the committed English file is the generator output"
@@ -103,7 +103,7 @@ fn dropped_names_are_left_out_of_english_and_of_every_locale() {
         let id = format!("{name} =");
         assert!(!build.ftl.contains(&id), "{name} is in a locale");
         assert!(!has_warning(&build, name), "{name} is warned about, not skipped silently");
-        // the five replaced texts are the only dropped ids that English still has, from kurobayomi-extra.ftl
+        // the replaced texts are the only dropped ids that English still has, from kurobayomi-extra.ftl
         let in_english = english.lines().any(|l| l.starts_with(&id));
         assert_eq!(in_english, crate::import::REPLACED_NAMES.contains(name), "{name}");
     }

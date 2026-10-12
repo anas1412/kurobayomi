@@ -544,12 +544,6 @@ nav_zone_left = Ngiwa
 
 nav_zone_right = Nengen
 
-left_to_right_viewer = Ngiwa moro nengen
-
-right_to_left_viewer = Nengen moro ngiwa
-
-vertical_viewer = Vertikal
-
 vertical_plus_viewer = Vertikal sakteruse
 
 zoom_start_left = Ngiwa

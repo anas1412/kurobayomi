@@ -3843,6 +3843,7 @@ dependencies = [
  "kuro-track",
  "libc",
  "proptest",
+ "regex",
  "reqwest",
  "rusqlite",
  "serde",

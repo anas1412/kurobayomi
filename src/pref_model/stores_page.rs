@@ -675,7 +675,7 @@ mod tests {
         assert_eq!(repos.empty, REPOS_EMPTY);
         assert_eq!(repos.add_title, "Add a repository");
         assert_eq!(repos.input_label, "Repository link");
-        assert!(repos.add_intro.as_deref().is_some_and(|t| t.contains("index.min.json")));
+        assert_eq!(repos.add_intro.as_deref(), Some(ADD_INTRO));
     }
 
     #[test]
@@ -757,7 +757,7 @@ mod tests {
                 let open = inner.dialog.borrow();
                 let open = open.as_ref().expect("open");
                 assert!(!open.dialog.confirm.as_ref().expect("Add").is_sensitive());
-                assert_eq!(open.helper.as_ref().expect("helper").text(), "*required");
+                assert_eq!(open.helper.as_ref().expect("helper").text(), "", "nothing under an empty entry");
             }
             inner.dispatch(Event::Type("https://a/index.json".into()));
             {

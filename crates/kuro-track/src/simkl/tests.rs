@@ -11,7 +11,7 @@ use crate::base::{SECRET_SERVICE, account};
 use crate::fakes::MemSecrets;
 use crate::model::{AnimeTrack, TrackerId, copy_personal_from_anime};
 
-const TOKEN_BODY: &str = r#"{"code":"C1","client_id":"aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e","client_secret":"2bec9c1d0c00a1e9b0e9e096a71f88d555a6f52da7923df07906df3b21351783","redirect_uri":"aniyomi://simkl-auth","grant_type":"authorization_code"}"#;
+const TOKEN_BODY: &str = r#"{"code":"C1","client_id":"aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e","client_secret":"2bec9c1d0c00a1e9b0e9e096a71f88d555a6f52da7923df07906df3b21351783","redirect_uri":"kurobayomi://simkl-auth","grant_type":"authorization_code"}"#;
 
 fn tracker(server: &MockServer) -> (SimklTracker, Arc<MemSecrets>) {
     let secrets = MemSecrets::new();

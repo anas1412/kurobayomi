@@ -326,49 +326,7 @@ internal_error = Interntfel: Kontrollera kraschloggar för ytterligare informati
 
 app_not_available = Applikationen är inte tillgänglig
 
-pref_onboarding_guide = Introduktionsguide
-
-onboarding_heading = Välkommen!
-
-onboarding_description = Låt oss ställa in några saker först. Du kan alltid ändra dessa i inställningarna senare.
-
-onboarding_action_next = Nästa
-
-onboarding_action_finish = Kom igång
-
-onboarding_action_skip = Hoppa över
-
 onboarding_storage_info = Välj en mapp där { $arg1 } lagrar kapitelnedladdningar, säkerhetskopior och mer.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}En dedikerad mapp rekommenderas.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Vald mapp: { $arg2 }
-
-onboarding_storage_action_select = Välj en mapp
-
-onboarding_storage_selection_required = En mapp måste väljas
-
-onboarding_storage_help_info = Osäker på vad du ska välja då du uppdaterar från en äldre version? Se lagerhanteringsguiden för mer information.
-
-onboarding_storage_help_action = Lagerhanteringsguide
-
-onboarding_permission_install_apps = Installera app behörigheter
-
-onboarding_permission_install_apps_description = För att installera källtillägg.
-
-onboarding_permission_notifications = Aviseringsbehörigheter
-
-onboarding_permission_notifications_description = Få aviseringar om biblioteksuppdateringar och mer.
-
-onboarding_permission_crashlytics = Skicka kraschloggar
-
-onboarding_permission_crashlytics_description = Skicka anonymiserade kraschloggar till utvecklarna.
-
-onboarding_permission_analytics = Tillåt insamling av användningsdata
-
-onboarding_permission_analytics_description = Skicka anonymiserade användningsdata för att förbättra appens funktioner.
-
-onboarding_permission_action_grant = Bevilja
-
-onboarding_guides_new_user = Ny till { $arg1 }? Vi rekommenderar att du tar en titt på komma igång guiden.
-
-onboarding_guides_returning_user = Ominstalleras { $arg1 }?
 
 pref_category_general = Allmänt
 
@@ -590,8 +548,6 @@ ext_install_service_notif = Installerar tillägg…
 
 ext_revoke_trust = Återkalla tillförlitliga okända tillägg
 
-label_extension_repos = Tilläggsförråd
-
 information_empty_repos = Du har inga förråd inställda.
 
 action_add_repo = Lägg till förråd
@@ -757,12 +713,6 @@ nav_zone_next = Nästa
 nav_zone_left = Vänster
 
 nav_zone_right = Höger
-
-left_to_right_viewer = Sidor (vänster till höger)
-
-right_to_left_viewer = Sidor (höger till vänster)
-
-vertical_viewer = Sidformat (vertikalt)
 
 webtoon_viewer = Lång remsa
 
@@ -1525,8 +1475,6 @@ information_empty_library = Ditt bibliotek är tomt
 information_no_manga_category = Kategorin är tom
 
 information_no_entries_found = Inga inlägg hittades i denna kategori
-
-getting_started_guide = Komma igång guide
 
 information_empty_category = Du har inga kategorier. Tryck på plusknappen för att skapa en för att organisera ditt bibliotek.
 

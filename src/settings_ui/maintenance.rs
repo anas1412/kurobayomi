@@ -46,7 +46,7 @@ pub fn clear_webview_row() -> PreferenceItem {
 
 /// The cookie and WebView rows of Sources and tracking, in list order.
 pub fn networking_rows() -> Vec<PreferenceItem> {
-    vec![clear_cookies_row(), crate::settings_ui::cookie_import::cookie_import_row(), clear_webview_row()]
+    vec![clear_cookies_row(), clear_webview_row()]
 }
 
 /// Clears every manga's reader viewer flags (the reading mode) and says so in a toast.
@@ -333,10 +333,8 @@ mod tests {
     }
 
     #[test]
-    fn the_networking_rows_are_clear_cookies_import_and_clear_webview() {
+    fn the_networking_rows_are_clear_cookies_and_clear_webview() {
         let titles: Vec<String> = networking_rows().iter().map(|row| row.title().to_owned()).collect();
-        assert_eq!(titles.len(), 3);
-        assert_eq!(titles[0], "Clear cookies");
-        assert_eq!(titles[2], "Clear WebView data");
+        assert_eq!(titles, ["Clear cookies", "Clear WebView data"]);
     }
 }

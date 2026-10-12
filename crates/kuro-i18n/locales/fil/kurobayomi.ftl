@@ -478,8 +478,6 @@ action_mark_as_seen = Markahan bilang napanood na
 
 action_mark_as_unseen = Markahan bilang di pa napanood
 
-action_mark_previous_as_seen = Markahan ang nakaraan bilang nakita na
-
 action_play_internally = I-play sa loob
 
 action_play_externally = I-Play sa labas
@@ -721,8 +719,6 @@ unseen = Hindi pa nakikita
 label_manga_extension_repos = Extension repo ng manga
 
 label_anime_extension_repos = Extension repo ng anime
-
-onboarding_storage_action_create_folder = Lumikha ng default na Aniyomi folder
 
 download_speed_limit = Limito ng bilis ng pag-download
 
@@ -1064,49 +1060,7 @@ internal_error = InternalError: Tingnan ang mga crash log para sa karagdagang im
 
 app_not_available = Hindi magagamit ang app
 
-pref_onboarding_guide = Gabay sa onboarding
-
-onboarding_heading = Maligayang pagdating!
-
-onboarding_description = Mag-set up muna tayo ng ilang bagay. Maaari mo ring baguhin ang mga ito anumang oras sa mga setting sa ibang pagkakataon.
-
-onboarding_action_next = Susunod
-
-onboarding_action_finish = Magsimula
-
-onboarding_action_skip = Laktawan
-
 onboarding_storage_info = Pumili ng folder kung saan mag-imbak ang { $arg1 } ng mga na-download ng kabanata, mga backup, at higit pa.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Inirerekomenda ang isang nakalaang folder.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Napiling folder: { $arg2 }
-
-onboarding_storage_action_select = Pumili ng folder
-
-onboarding_storage_selection_required = Dapat pumili ng isang folder
-
-onboarding_storage_help_info = Nag-a-update mula sa isang mas lumang bersyon at hindi sigurado kung ano ang pipiliin? Sumangguni sa gabay sa storage para sa higit pang impormasyon.
-
-onboarding_storage_help_action = Gabay sa storage
-
-onboarding_permission_install_apps = Pahintulot sa pag-install ng mga app
-
-onboarding_permission_install_apps_description = Para mag-install ng mga extension ng source.
-
-onboarding_permission_notifications = Pahintulot sa mga abiso
-
-onboarding_permission_notifications_description = Maabisuhan para sa mga update sa aklatan at higit pa.
-
-onboarding_permission_crashlytics = Magpadala ang mga crash log
-
-onboarding_permission_crashlytics_description = Magpadala ng hindi nagpapakilalang mga crash log sa mga developer.
-
-onboarding_permission_analytics = Payagan ang analitiko
-
-onboarding_permission_analytics_description = Magpadala ng hindi nakikilalang data ng paggamit para mapahusay ang mga feature ng app.
-
-onboarding_permission_action_grant = Payagan
-
-onboarding_guides_new_user = Bago sa { $arg1 }? Inirerekomenda naming tingnan ang gabay sa pagsisimula.
-
-onboarding_guides_returning_user = Muling pag-install ng { $arg1 }?
 
 pref_category_general = Pangkalahatan
 
@@ -1330,8 +1284,6 @@ ext_install_service_notif = Ini-install ang extension…
 
 ext_revoke_trust = Bawiin ang mga pinagkakatiwalaang hindi kilalang extension
 
-label_extension_repos = Mga repo ng extension
-
 information_empty_repos = Wala kang na-set na repo.
 
 action_add_repo = Magdagdag ng repo
@@ -1499,12 +1451,6 @@ nav_zone_next = Susunod
 nav_zone_left = Kaliwa
 
 nav_zone_right = Kanan
-
-left_to_right_viewer = Pahina (kaliwa pakanan)
-
-right_to_left_viewer = Pahina (kanan pakaliwa)
-
-vertical_viewer = Pahina (patayo)
 
 webtoon_viewer = Pahabang strip
 
@@ -2269,8 +2215,6 @@ information_empty_library = Walang laman ang iyong aklatan
 information_no_manga_category = Walang laman ang kategoryang ito
 
 information_no_entries_found = Walang mga entry ang nahanap sa kategoryang ito
-
-getting_started_guide = Gabay sa Pagsisimula
 
 information_empty_category = Wala ka pang kategorya. Pindutin ang plus button para gumawa ng isa para sa pag-aayos ng iyong aklatan.
 

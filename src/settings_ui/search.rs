@@ -42,7 +42,7 @@ pub const MAIN_SCREENS: [&str; 6] = [
 ];
 
 /// The player index (Android `playerSettingScreens`), appended after the main index.
-pub const PLAYER_SCREENS: [&str; 2] = ["settings_player", "settings_player_torrents"];
+pub const PLAYER_SCREENS: [&str; 1] = ["settings_player"];
 
 /// The first breadcrumb node of a hit from the player index during a non-player search.
 pub const PLAYER_PREFIX: &str = "Player";
@@ -139,7 +139,7 @@ pub fn index() -> Vec<Row> {
 /// `Category > Group` (or `Category` for a top-level row); the player prefix comes first for a player row.
 pub fn crumb(row: &Row) -> String {
     let mut nodes: Vec<&str> = Vec::new();
-    if row.player {
+    if row.player && row.screen_title != PLAYER_PREFIX {
         nodes.push(PLAYER_PREFIX);
     }
     nodes.push(&row.screen_title);
@@ -287,7 +287,7 @@ mod tests {
         let expected: Vec<&str> = MAIN_SCREENS.iter().chain(PLAYER_SCREENS.iter()).copied().collect();
         assert_eq!(screens, expected);
         assert!(!screens.contains(&"settings_about"));
-        assert_eq!(rows.iter().filter(|r| r.player).count(), 2);
+        assert_eq!(rows.iter().filter(|r| r.player).count(), 1);
         assert_eq!(rows[0].screen_title, "Appearance", "titles come from the spec");
     }
 
@@ -321,11 +321,11 @@ mod tests {
 
     #[test]
     fn a_player_hit_gets_the_player_prefix_first() {
-        let mut row = row_of("Port", None, "settings_player_torrents", Some("Port"), true);
-        row.screen_title = "Torrent".into();
-        assert_eq!(crumb(&row), "Player > Torrent > Port");
-        row.player = false;
-        assert_eq!(crumb(&row), "Torrent > Port", "the prefix is only for the player index");
+        let mut row = row_of("Autoplay", None, "settings_player", Some("Video"), true);
+        row.screen_title = "Subtitles".into();
+        assert_eq!(crumb(&row), "Player > Subtitles > Video");
+        row.screen_title = "Player".into();
+        assert_eq!(crumb(&row), "Player > Video", "the Player page itself is not named twice");
     }
 
     #[test]

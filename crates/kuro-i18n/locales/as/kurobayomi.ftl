@@ -668,8 +668,6 @@ action_mark_as_seen = দেখা বুলি চিহ্নিত কৰক
 
 action_mark_as_unseen = নদেখা বুলি চিহ্নিত কৰক
 
-action_mark_previous_as_seen = আগৰটো দেখা বুলি চিহ্নিত কৰক
-
 action_play_internally = অভ্যন্তৰীণভাৱে চলাওক
 
 action_play_externally = বাহ্যিকভাৱে চলাওক
@@ -919,8 +917,6 @@ unseen = নদেখা
 label_manga_extension_repos = মাঙ্গাৰ এক্সটেনশ্যন ৰেপ’
 
 label_anime_extension_repos = এনিমেৰ এক্সটেনশ্যন ৰেপ’
-
-onboarding_storage_action_create_folder = ডিফল্ট Aniyomi ফ’ল্ডাৰ সৃষ্টি কৰক
 
 download_speed_limit = অধ্যায় ডাউনলোডৰ গতি সীমা
 
@@ -1220,49 +1216,7 @@ internal_error = আন্তৰিক সমস্যাঃ অধিক তথ
 
 app_not_available = এপ উপলব্ধ নাই
 
-pref_onboarding_guide = অ'নব’ৰ্ডিং গাইড
-
-onboarding_heading = স্বাগতম!
-
-onboarding_description = প্ৰথমে কিছুমান বস্তু ঠিক কৰি লওঁ আহক। এইবোৰ আপুনি পাছত ছেটিংছত গ’ই সলনি কৰিব পাৰে।
-
-onboarding_action_next = পৰৱৰ্তী
-
-onboarding_action_finish = আৰম্ভ কৰক
-
-onboarding_action_skip = স্কিপ কৰক
-
 onboarding_storage_info = { $arg1 }-এ অধ্যায় ডাউনলোড, বেকআপ আৰু আন বহু বস্তু সংৰক্ষণ কৰিব পৰাকৈ এখন ফ’ল্ডাৰ বাচি লওঁক।{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}এখন সজোৱা ফ’ল্ডাৰ বাচনি কৰা সুচিত।{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}বাচনি কৰা ফ’ল্ডাৰ: { $arg2 }
-
-onboarding_storage_action_select = এখন ফ’ল্ডাৰ বাচনি কৰক
-
-onboarding_storage_selection_required = এখন ফ’ল্ডাৰ বাচনি কৰিবই লাগিব
-
-onboarding_storage_help_info = আগৰ সংস্কৰণৰ পৰা আপডেট কৰি আছেনে আৰু কি বাচি ল’ব নাজানে? অধিক তথ্যৰ বাবে সঞ্চয় গাইডটো চাওক।
-
-onboarding_storage_help_action = সঞ্চয় গাইড
-
-onboarding_permission_install_apps = এপ স্থাপন অনুমতি
-
-onboarding_permission_install_apps_description = উৎস এক্সটেনচনসমূহ স্থাপন কৰিবলৈ।
-
-onboarding_permission_notifications = নটিফিকেচনৰ অনুমতি
-
-onboarding_permission_notifications_description = লাইব্ৰেৰীৰ আপডেট আৰু আন বহু বস্তুৰ বাবে সতৰ্কতা পাব।
-
-onboarding_permission_crashlytics = ক্ৰেছ লগসমূহ পঠাওক
-
-onboarding_permission_crashlytics_description = ডেভেলপাৰসকললৈ নামৰহিত ক্ৰেছ লগসমূহ পঠাওক|
-
-onboarding_permission_analytics = এনেলিটিক্সৰ অনুমতি দিয়ক
-
-onboarding_permission_analytics_description = এপৰ বৈশিষ্ট্য উন্নত কৰাৰ বাবে নামৰহিত ব্যৱহাৰ তথ্য পঠাওক।
-
-onboarding_permission_action_grant = অনুমতি দিয়ক
-
-onboarding_guides_new_user = { $arg1 }-ৰ নতুন ব্যৱহাৰকাৰী নেকি? আৰম্ভণি গাইড চাবলৈ আমাক সুপারিশ কৰা হৈছে।
-
-onboarding_guides_returning_user = { $arg1 } পুনৰ ইনষ্টল কৰি আছেনে?
 
 pref_category_general = সাধাৰণ
 
@@ -1484,8 +1438,6 @@ ext_install_service_notif = এক্সটেনচন ইন্সটল ক�
 
 ext_revoke_trust = অজ্ঞাত এক্সটেনচন বিশ্বাসৰ অধিকার বাতিল কৰক
 
-label_extension_repos = এক্সটেনচন ৰেপোৰসমূহ
-
 information_empty_repos = আপোনাৰ কোনো ৰেপো নাই।
 
 action_add_repo = ৰেপো যোগ কৰক
@@ -1651,12 +1603,6 @@ nav_zone_next = পৰৱৰ্তী
 nav_zone_left = বাঁও
 
 nav_zone_right = সোঁ
-
-left_to_right_viewer = পৃষ্ঠা (বাঁওৰ পৰা সোঁ)
-
-right_to_left_viewer = পৃষ্ঠা (সোঁৰ পৰা বাঁও)
-
-vertical_viewer = পৃষ্ঠা (উল্লম্ব)
 
 webtoon_viewer = দীঘল ফিতা
 
@@ -2405,8 +2351,6 @@ information_empty_library = আপোনাৰ লাইব্ৰেৰী খ�
 information_no_manga_category = বিভাগ খালী
 
 information_no_entries_found = এই বিভাগত কোনো প্ৰৱেশ পোৱা নগ'ল
-
-getting_started_guide = আৰম্ভ কৰিবলৈ গাইড
 
 information_empty_category = আপোনাৰ কোনো বিভাগ নাই। আপোনাৰ লাইব্ৰেৰী পৰিচালনা কৰিবলৈ এখন সৃষ্টি কৰিবলৈ প্লাছ বুটামত টেপ কৰক।
 

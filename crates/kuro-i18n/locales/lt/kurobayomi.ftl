@@ -578,12 +578,6 @@ nav_zone_left = Kairė
 
 nav_zone_right = Dešinė
 
-left_to_right_viewer = Iš kairės į dešinę
-
-right_to_left_viewer = Iš dešinės į kairę
-
-vertical_viewer = Vertikalus
-
 webtoon_viewer = Webtoon
 
 vertical_plus_viewer = Ištęstinis vertikalus
@@ -1229,8 +1223,6 @@ information_empty_library = Jūsų biblioteka tuščia
 information_no_manga_category = Kategorija yra tuščia
 
 information_no_entries_found = Šioje kategorijoje įrašų nerasta
-
-getting_started_guide = Darbo pradžios vadovas
 
 information_empty_category = Neturite jokių kategorijų. Paspauskite pliuso simbolį, kad sukurtumėte kategoriją jūsų bibliotekos organizavimui.
 

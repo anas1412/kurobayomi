@@ -304,32 +304,6 @@ action_start_downloading_now = ഡൌൺലോഡ് ചെയ്യാൻ ത�
 
 loading = ലോഡിങ്ങ്…
 
-onboarding_heading = സ്വാഗതം!
-
-onboarding_storage_action_select = ഒരു ഫോൾഡർ സെലക്ട് ചെയുക
-
-onboarding_storage_selection_required = ഒരു ഫോൾഡർ തിരഞ്ഞെടുക്കണം
-
-onboarding_storage_help_action = സ്റ്റോറേജ് ഗൈഡ്
-
-onboarding_permission_install_apps = ആപ്പ് ഇൻസ്റ്റാൾ ചെയ്യാനുള്ള അനുവാദം
-
-onboarding_permission_notifications = നോട്ടിഫിക്കേഷൻ കാണിക്കാനുള്ള അനുവാദം
-
-onboarding_permission_crashlytics = ക്രാഷ് ലോഗുകൾ അയയ്ക്കുക
-
-onboarding_permission_crashlytics_description = ഡവലപ്പർമാർക്ക് അനാമീകരിച്ച ക്രാഷ് ലോഗുകൾ അയയ്‌ക്കുക
-
-onboarding_permission_analytics = വിശകലനത്തിനുവഴി അനുവദിക്കുക
-
-onboarding_permission_analytics_description = അപ്ലിക്കേഷന്റെ ഫീച്ചറുകൾ മെച്ചപ്പെടുത്താൻ അനാമീകരിച്ച ഉപയോക്തൃ ഡാറ്റ അയയ്‌ക്കുക.
-
-onboarding_permission_action_grant = അനുവദിക്കുക
-
-onboarding_guides_new_user = { $arg1 }-ൽ പുതിയവനാവോ? ആരംഭിക്കാൻ മാർഗരേഖ കാണാൻ ഞങ്ങൾ ശുപാർശ ചെയ്യുന്നു.
-
-onboarding_guides_returning_user = { $arg1 }-നെ പുനഃസ്ഥാപിക്കുകയാണോ?
-
 pref_category_general = സാധാരണ
 
 pref_category_appearance = വീക്ഷണം

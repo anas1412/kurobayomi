@@ -558,12 +558,6 @@ nav_zone_left = Majtas
 
 nav_zone_right = Djathtas
 
-left_to_right_viewer = Nga e majta në të djathtë
-
-right_to_left_viewer = Nga e djathta në të majtë
-
-vertical_viewer = Vertikale
-
 webtoon_viewer = Webtoon
 
 vertical_plus_viewer = Vertikale e vazhdueshme
@@ -1223,8 +1217,6 @@ information_empty_library = Biblioteka juaj është bosh
 information_no_manga_category = Kategorija është bosh
 
 information_no_entries_found = Nuk u gjet asnjë element në këtë kategori
-
-getting_started_guide = Udhëzues për fillimin
 
 information_empty_category = Nuk ke kategori. Prekni butonin plus për të krijuar një për organizimin e bibliotekës tuaj.
 

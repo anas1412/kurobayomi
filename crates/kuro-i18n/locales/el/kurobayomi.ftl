@@ -322,49 +322,7 @@ internal_error = InternalError: Ελέγξτε τα αρχεία καταγρα�
 
 app_not_available = Μη διαθέσιμη εφαρμογή
 
-pref_onboarding_guide = Οδηγός εισαγωγής
-
-onboarding_heading = Καλώς ορίσατε!
-
-onboarding_description = Ας ρυθμίσουμε πρώτα κάποια πράγματα. Μπορείτε πάντα να τα αλλάξετε στις ρυθμίσεις αργότερα.
-
-onboarding_action_next = Επόμενο
-
-onboarding_action_finish = Ξεκινήστε
-
-onboarding_action_skip = Παράλειψη
-
 onboarding_storage_info = Επιλέξτε ένα φάκελο όπου το { $arg1 } θα αποθηκεύει λήψεις κεφαλαίων, αντίγραφα ασφαλείας και άλλα.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Συνιστάται ένας αποκλειστικός φάκελος.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Επιλεγμένος φάκελος: { $arg2 }
-
-onboarding_storage_action_select = Επιλέξτε ένα φάκελο
-
-onboarding_storage_selection_required = Ένας φάκελος πρέπει να επιλεγεί
-
-onboarding_storage_help_info = Ενημερώνετε από μια παλαιότερη έκδοση και δεν είστε σίγουροι τι να επιλέξετε; Ανατρέξτε στον οδηγό αποθήκευσης για περισσότερες πληροφορίες.
-
-onboarding_storage_help_action = Οδηγός αποθήκευσης
-
-onboarding_permission_install_apps = Άδεια εγκατάστασης εφαρμογών
-
-onboarding_permission_install_apps_description = Για εγκατάσταση επεκτάσεων πηγών.
-
-onboarding_permission_notifications = Άδεια ειδοποιήσεων
-
-onboarding_permission_notifications_description = Ειδοποιηθείτε για ενημερώσεις της βιβλιοθήκης και άλλων.
-
-onboarding_permission_crashlytics = Αποστολή αρχείων καταγραφής σφαλμάτων
-
-onboarding_permission_crashlytics_description = Αποστολή ανώνυμων αρχείων καταγραφής σφαλμάτων στους προγραμματιστές.
-
-onboarding_permission_analytics = Να επιτρέπονται τα αναλυτικά στοιχεία
-
-onboarding_permission_analytics_description = Αποστολή ανώνυμων δεδομένων χρήσης για τη βελτίωση των λειτουργιών της εφαρμογής.
-
-onboarding_permission_action_grant = Παραχώρηση
-
-onboarding_guides_new_user = Είστε νέοι στο { $arg1 }; Σας συνιστούμε να ανατρέξετε στον οδηγό έναρξης.
-
-onboarding_guides_returning_user = Επανεγκατάσταση { $arg1 };
 
 pref_category_general = Γενικά
 
@@ -592,8 +550,6 @@ ext_install_service_notif = Εγκατάσταση επέκτασης…
 
 ext_revoke_trust = Ανάκληση αξιόπιστων άγνωστων επεκτάσεων
 
-label_extension_repos = Αποθετήρια επεκτάσεων
-
 information_empty_repos = Δεν έχετε ορίσει αποθετήρια.
 
 action_add_repo = Προσθήκη αποθετηρίων
@@ -761,12 +717,6 @@ nav_zone_next = Επόμενο
 nav_zone_left = Αριστερά
 
 nav_zone_right = Δεξιά
-
-left_to_right_viewer = Σελιδοποιημένο (από αριστερά προς τα δεξιά)
-
-right_to_left_viewer = Σελιδοποιημένο (από δεξιά προς τα αριστερά)
-
-vertical_viewer = Σελιδοποιημένο (κατακόρυφα)
 
 webtoon_viewer = Μακριά λωρίδα
 
@@ -1531,8 +1481,6 @@ information_empty_library = Η βιβλιοθήκη σας είναι κενή
 information_no_manga_category = Η κατηγορία είναι άδεια
 
 information_no_entries_found = Δε βρέθηκαν καταχωρήσεις σε αυτή την κατηγορία
-
-getting_started_guide = Οδηγός για τα πρώτα βήματα
 
 information_empty_category = Δεν έχετε κατηγορίες. Πατήστε το κουμπί συν για να δημιουργήσετε μία για την οργάνωση της βιβλιοθήκης σας.
 

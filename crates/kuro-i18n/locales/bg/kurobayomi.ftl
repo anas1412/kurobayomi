@@ -558,12 +558,6 @@ nav_zone_left = Ляво
 
 nav_zone_right = Дясно
 
-left_to_right_viewer = От ляво надясно
-
-right_to_left_viewer = От дясно наляво
-
-vertical_viewer = Вертикално
-
 webtoon_viewer = Уебкомикс
 
 vertical_plus_viewer = Безкраен вертикален изглед
@@ -1149,8 +1143,6 @@ information_no_recent = Нямате нови глави
 information_no_recent_manga = Не сте чели нищо наскоро
 
 information_empty_library = Библиотеката Ви е празна
-
-getting_started_guide = Първи стъпки
 
 information_empty_category = Нямате категории. Натиснете плюса, за да създадете такава и да организирате библиотеката си.
 

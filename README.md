@@ -52,7 +52,7 @@ The step-by-step guide, with screenshots, is in **[docs/GETTING-STARTED.md](docs
 2. Paste the repository link.
 3. Search in **Browse**, open a title, click **Start**.
 
-Downloads and backups go to `~/Videos/Kurobayomi` unless you pick another folder in Settings.
+Downloads and backups go to `~/Kurobayomi` unless you pick another folder in Settings.
 
 ## Sources and repositories
 

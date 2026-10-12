@@ -320,49 +320,7 @@ internal_error = InternalError: ตรวจสอบบันทึกการ
 
 app_not_available = แอพไม่พร้อมใช้งาน
 
-pref_onboarding_guide = คู่มือการเริ่มต้นใช้งาน
-
-onboarding_heading = ยินดีต้อนรับ!
-
-onboarding_description = มาตั้งค่าอะไรสักอย่างกันก่อน คุณสามารถเปลี่ยนสิ่งเหล่านี้ในการตั้งค่าในภายหลังได้
-
-onboarding_action_next = ถัดไป
-
-onboarding_action_finish = เริ่มต้น
-
-onboarding_action_skip = ข้าม
-
 onboarding_storage_info = เลือกโฟลเดอร์ที่ { $arg1 } จะจัดเก็บการดาวน์โหลดบท การสำรองข้อมูล และอื่นๆ{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}แนะนำให้ใช้โฟลเดอร์เฉพาะ{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}โฟลเดอร์ที่เลือก: { $arg2 }
-
-onboarding_storage_action_select = เลือกโฟลเดอร์
-
-onboarding_storage_selection_required = จำเป็นต้องเลือกโฟลเดอร์
-
-onboarding_storage_help_info = กำลังอัปเดตจากเวอร์ชันเก่าและไม่แน่ใจว่าจะเลือกอะไรใช่ไหม? โปรดดูคู่มือการจัดเก็บข้อมูลสำหรับข้อมูลเพิ่มเติม
-
-onboarding_storage_help_action = คู่มือการจัดเก็บข้อมูล
-
-onboarding_permission_install_apps = สิทธิ์ในการติดตั้งแอป
-
-onboarding_permission_install_apps_description = ในการติดตั้งส่วนขยายแหล่งที่มา
-
-onboarding_permission_notifications = สิทธิ์ในการแจ้งเตือน
-
-onboarding_permission_notifications_description = รับการแจ้งเตือนการอัปเดตคลังและอื่น ๆ
-
-onboarding_permission_crashlytics = ส่งบันทึกข้อผิดพลาด
-
-onboarding_permission_crashlytics_description = ส่งบันทึกข้อผิดพลาดแบบไม่เปิดเผยตัวตนให้กับนักพัฒนา
-
-onboarding_permission_analytics = อนุญาตให้เก็บข้อมูลไปวิเคราะห์
-
-onboarding_permission_analytics_description = ส่งข้อมูลการใช้งานที่ไม่ระบุตัวตนเพื่อปรับปรุงคุณสมบัติของแอป
-
-onboarding_permission_action_grant = อนุญาต
-
-onboarding_guides_new_user = เพิ่งรู้จัก { $arg1 }? เราขอแนะนำให้ดูคู่มือการเริ่มต้นใช้งาน
-
-onboarding_guides_returning_user = กลับมาติดตั้ง { $arg1 } ใหม่?
 
 pref_category_general = ทั่วไป
 
@@ -582,8 +540,6 @@ ext_install_service_notif = กำลังติดตั้งส่วนข�
 
 ext_revoke_trust = เพิกถอนส่วนขยายที่ไม่รู้จักที่เชื่อถือไว้
 
-label_extension_repos = รีโพส่วนขยาย
-
 information_empty_repos = คุณไม่มีรีโพที่ตั้งค่าไว้
 
 action_add_repo = เพิ่มรีโพ
@@ -741,12 +697,6 @@ nav_zone_next = ถัดไป
 nav_zone_left = ซ้าย
 
 nav_zone_right = ขวา
-
-left_to_right_viewer = แสดงเป็นหน้า (จากซ้ายไปขวา)
-
-right_to_left_viewer = แสดงเป็นหน้า (จากขวาไปซ้าย)
-
-vertical_viewer = แสดงเป็นหน้า (แนวตั้ง)
 
 webtoon_viewer = หน้ายาว
 
@@ -1493,8 +1443,6 @@ information_empty_library = คลังว่างเปล่า
 information_no_manga_category = หมวดหมู่ว่างเปล่า
 
 information_no_entries_found = ไม่พบรายการใด ๆ ในหมวดหมู่นี้
-
-getting_started_guide = คู่มือเริ่มต้นใช้งาน
 
 information_empty_category = ไม่มีหมวดหมู่ แตะปุ่มบวกเพื่อสร้างปุ่มสำหรับจัดระเบียบคลัง
 

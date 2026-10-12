@@ -674,8 +674,6 @@ action_mark_as_seen = Marcar como assistido
 
 action_mark_as_unseen = Marcar como não assistido
 
-action_mark_previous_as_seen = Marcar anterior como visto
-
 action_play_internally = Reproduzir internamente
 
 action_play_externally = Reproduzir externamente
@@ -947,8 +945,6 @@ unseen = Desver
 label_manga_extension_repos = Repositório de extensões de mangás
 
 label_anime_extension_repos = Repositório de extensões de anime
-
-onboarding_storage_action_create_folder = Crie a pasta Aniyomi padrão
 
 download_speed_limit = Limite de velocidade de download
 
@@ -1327,49 +1323,7 @@ internal_error = Erro interno: Verifique os registros de travamento para mais in
 
 app_not_available = Aplicativo indisponível
 
-pref_onboarding_guide = Guia de introdução
-
-onboarding_heading = Bem-vindo(a)!
-
-onboarding_description = Vamos definir algumas coisas primeiro. Você sempre pode fazer alterações nas configurações depois também.
-
-onboarding_action_next = Próximo
-
-onboarding_action_finish = Começar
-
-onboarding_action_skip = Pular
-
 onboarding_storage_info = Escolha uma pasta onde o { $arg1 } irá armazenar os downloads de capítulos, backups e mais.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Uma pasta dedicada é recomendada.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Pasta selecionada: { $arg2 }
-
-onboarding_storage_action_select = Selecionar uma pasta
-
-onboarding_storage_selection_required = Uma pasta deve ser selecionada
-
-onboarding_storage_help_info = Atualizando de uma versão anterior e não tem certeza do que selecionar? Consulte o guia de armazenamento para mais informações.
-
-onboarding_storage_help_action = Guia de armazenamento
-
-onboarding_permission_install_apps = Permissão de instalação de aplicativos
-
-onboarding_permission_install_apps_description = Para instalar extensões de fontes.
-
-onboarding_permission_notifications = Permissão de notificação
-
-onboarding_permission_notifications_description = Seja notificado para atualizações da biblioteca e mais.
-
-onboarding_permission_crashlytics = Enviar logs de falhas
-
-onboarding_permission_crashlytics_description = Envie lgos de falhas anônimas para os desenvolvedores.
-
-onboarding_permission_analytics = Permitir análise
-
-onboarding_permission_analytics_description = Enviar dados de uso anônimos para melhorar os recursos do aplicativo.
-
-onboarding_permission_action_grant = Conceder
-
-onboarding_guides_new_user = Novo no { $arg1 }? Recomendamos dar uma olhada no guia de introdução.
-
-onboarding_guides_returning_user = Reinstalando o { $arg1 }?
 
 pref_category_general = Geral
 
@@ -1581,8 +1535,6 @@ ext_install_service_notif = Instalando a extensão…
 
 ext_revoke_trust = Revogar a confiabilidade de extensões desconhecidas
 
-label_extension_repos = Repositórios de extensões
-
 information_empty_repos = Você não tem repositórios definidos.
 
 action_add_repo = Adicionar repositório
@@ -1740,12 +1692,6 @@ nav_zone_next = Próxima
 nav_zone_left = Esquerda
 
 nav_zone_right = Direita
-
-left_to_right_viewer = Paginado (esquerda para direita)
-
-right_to_left_viewer = Paginado (direita para esquerda)
-
-vertical_viewer = Paginado (vertical)
 
 webtoon_viewer = Tira longa
 
@@ -2490,8 +2436,6 @@ information_empty_library = A sua biblioteca está vazia
 information_no_manga_category = A categoria está vazia
 
 information_no_entries_found = Nenhum item encontrado nesta categoria
-
-getting_started_guide = Guia de introdução
 
 information_empty_category = Você ainda não tem nenhuma categoria. Toque no botão Adicionar para criar uma e organizar a sua biblioteca.
 

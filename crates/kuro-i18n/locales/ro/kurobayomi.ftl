@@ -320,49 +320,7 @@ internal_error = InternalError: Verificați jurnalele de accident pentru informa
 
 app_not_available = Aplicația nu este accesibilă
 
-pref_onboarding_guide = Ghid de îmbarcare
-
-onboarding_heading = Bine ați venit!
-
-onboarding_description = Să configurăm câteva lucruri mai întâi. Le puteți schimba oricând în setări și mai târziu.
-
-onboarding_action_next = Următorul
-
-onboarding_action_finish = Începe
-
-onboarding_action_skip = Omite
-
 onboarding_storage_info = Selectează un folder unde { $arg1 } va păstra capitolele descărcate, copiile de rezervă, și altele.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Se recomanda folosirea unui folder dedicat.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Folder-ul selectat: { $arg2 }
-
-onboarding_storage_action_select = Selectează un folder
-
-onboarding_storage_selection_required = Un folder trebuie selectat
-
-onboarding_storage_help_info = Actualizați de la o versiune mai veche și nu sunteți sigur ce să selectați? Pentru mai multe informații, consultați ghidul de stocare.
-
-onboarding_storage_help_action = Ghid de stocare
-
-onboarding_permission_install_apps = Permisiunea de a instala aplicații
-
-onboarding_permission_install_apps_description = Pentru a instala extensii sursă.
-
-onboarding_permission_notifications = Permisiune de notificare
-
-onboarding_permission_notifications_description = Primiți notificări pentru actualizările bibliotecii și altele.
-
-onboarding_permission_crashlytics = Trimiteți jurnalele de eroare
-
-onboarding_permission_crashlytics_description = Trimiteți anonim jurnalele de blocare către dezvoltatorilor.
-
-onboarding_permission_analytics = Permiteți analizele
-
-onboarding_permission_analytics_description = Trimiteți date de utilizare anonimizate pentru a îmbunătăți funcțiile aplicației.
-
-onboarding_permission_action_grant = Acordă
-
-onboarding_guides_new_user = Nou pe { $arg1 }? Vă recomandăm să consultați ghidul introductiv.
-
-onboarding_guides_returning_user = Reinstalare { $arg1 }?
 
 pref_category_general = Generale
 
@@ -582,8 +540,6 @@ ext_install_service_notif = Se instalează extensia…
 
 ext_revoke_trust = Revocați încrederea extensiilor necunoscute
 
-label_extension_repos = Repozitoriu extensii
-
 information_empty_repos = Nu aveți nici un repozitoriu configurat.
 
 action_add_repo = Adăugați repozitoriu
@@ -749,12 +705,6 @@ nav_zone_next = Următorul
 nav_zone_left = Stânga
 
 nav_zone_right = Dreapta
-
-left_to_right_viewer = De la stânga la dreapta
-
-right_to_left_viewer = De la dreapta la stânga
-
-vertical_viewer = Paginat (vertical)
 
 webtoon_viewer = Benzi desenate web
 
@@ -1503,8 +1453,6 @@ information_empty_library = Biblioteca este goală
 information_no_manga_category = Categorie goala
 
 information_no_entries_found = Nu s-au găsit intrări în această categorie
-
-getting_started_guide = Ghidul de inceput
 
 information_empty_category = Nu aveți categorii. Apăsați butonul plus pentru a crea una pentru a vă organiza biblioteca.
 

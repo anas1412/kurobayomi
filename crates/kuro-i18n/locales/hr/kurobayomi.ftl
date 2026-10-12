@@ -668,8 +668,6 @@ action_mark_as_seen = Označi kao pogledano
 
 action_mark_as_unseen = Označi kao nepogledano
 
-action_mark_previous_as_seen = Označi prethodno kao pogledano
-
 action_play_internally = Reproduciraj s internim playerom
 
 action_play_externally = Reproduciraj s eksternim playerom
@@ -919,8 +917,6 @@ unseen = Nepogledano
 label_manga_extension_repos = Repozitoriji Manga proširenja
 
 label_anime_extension_repos = Repozitoriji Anime proširenja
-
-onboarding_storage_action_create_folder = Stvori standardnu mapu za Aniyomi
 
 download_speed_limit = Ograničenje brzine preuzimanja
 
@@ -1267,49 +1263,7 @@ internal_error = Interna greška: Provjeri zapisnike o prekidu aplikacije za dal
 
 app_not_available = Aplikacija nije dostupna
 
-pref_onboarding_guide = Vodič za početno pokretanje
-
-onboarding_heading = Dobro došao, dobro došla!
-
-onboarding_description = Hajdemo najprije postaviti neke stvari. Ako želiš možeš ih kasnije promijeniti u postavkama.
-
-onboarding_action_next = Dalje
-
-onboarding_action_finish = Započni
-
-onboarding_action_skip = Preskoči
-
 onboarding_storage_info = Odaberi mapu u koju će { $arg1 } spremati preuzimanja poglavlja, sigurnosne kopije i drugo.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Preporučujemo koristiti zasebnu mapu.{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}Odabrana mapa: { $arg2 }
-
-onboarding_storage_action_select = Odaberi mapu
-
-onboarding_storage_selection_required = Moraš odabrati jednu mapu
-
-onboarding_storage_help_info = Aktualiziraš sa starije verzije i ne znaš što odabrati? Potraži informacije u vodiču spremišta.
-
-onboarding_storage_help_action = Vodič spremišta
-
-onboarding_permission_install_apps = Dozvola za instaliranje aplikacija
-
-onboarding_permission_install_apps_description = Za instaliranje izvornih proširenja.
-
-onboarding_permission_notifications = Dozvola za obavijesti
-
-onboarding_permission_notifications_description = Primaj obavijesti o aktualiziranju biblioteke i više.
-
-onboarding_permission_crashlytics = Pošalji zapis o prekidu aplikacije
-
-onboarding_permission_crashlytics_description = Šalji anonimne zapise o prekidu aplikacije programerima.
-
-onboarding_permission_analytics = Dozvoli analizu
-
-onboarding_permission_analytics_description = Šalji anonimne podatke o korištenju aplikacije u svrhu poboljšanja njenih funkcija.
-
-onboarding_permission_action_grant = Odobri
-
-onboarding_guides_new_user = Koristiš { $arg1 } po prvi puta? Preporučujemo da pogledaš vodič za pokretanje.
-
-onboarding_guides_returning_user = Ponovo istalirati { $arg1 }?
 
 pref_category_general = Opće
 
@@ -1529,8 +1483,6 @@ ext_install_service_notif = Instaliranje proširenja …
 
 ext_revoke_trust = Opozovi pouzdana nepoznata proširenja
 
-label_extension_repos = Repozitoriji proširenja
-
 information_empty_repos = Nemaš postavljenih reopzitorija.
 
 action_add_repo = Dodaj repozitorij
@@ -1696,12 +1648,6 @@ nav_zone_next = Sljedeće
 nav_zone_left = Lijevo
 
 nav_zone_right = Desno
-
-left_to_right_viewer = Stranica (s lijeva na desno)
-
-right_to_left_viewer = Stranica (s desna na lijevo)
-
-vertical_viewer = Stranica (okomito)
 
 webtoon_viewer = Duga traka
 
@@ -2448,8 +2394,6 @@ information_empty_library = Tvoja je biblioteka prazna
 information_no_manga_category = Kategorija je prazna
 
 information_no_entries_found = Nije pronađen nijedan unos u ovoj kategoriji
-
-getting_started_guide = Vodič za pokretanje
 
 information_empty_category = Nemaš kategorija. Za stvaranje kategorije i organiziranje biblioteke dodirni gumb plus.
 

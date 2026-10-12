@@ -632,12 +632,6 @@ nav_zone_left = Pa kreisi
 
 nav_zone_right = Pa labi
 
-left_to_right_viewer = Lapaspuses (no kreisās puses uz labo)
-
-right_to_left_viewer = Lapaspuses (no labās puses uz kreiso)
-
-vertical_viewer = Lapaspuses (vertikāli)
-
 webtoon_viewer = Garā strīpā
 
 vertical_plus_viewer = Garā strīpā ar pārtraukumu
@@ -1343,8 +1337,6 @@ information_empty_library = Jūsu bibliotēka ir tukša
 information_no_manga_category = Kategorija ir tukša
 
 information_no_entries_found = Šajā kategorijā nav atrasts neviens ieraksts
-
-getting_started_guide = Darba sākšanas rokasgrāmata
 
 information_empty_category = Jums nav nevienas kategorijas. Pieskarieties plus pogai, lai izveidotu kategoriju savas bibliotēkas organizēšanai.
 

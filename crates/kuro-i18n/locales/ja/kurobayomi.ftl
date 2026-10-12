@@ -428,49 +428,7 @@ internal_error = InternalError: 詳しくはクラッシュ ログをご参照�
 
 app_not_available = アプリは利用不可
 
-pref_onboarding_guide = 初回設定ガイド
-
-onboarding_heading = ようこそ！
-
-onboarding_description = はじめに初回設定をしていきましょう。このあとも「設定」にていつも変更できます。
-
-onboarding_action_next = 次へ
-
-onboarding_action_finish = はじめる
-
-onboarding_action_skip = スキップ
-
 onboarding_storage_info = { $arg1 }のダウンロード、バックアップなどの保存先のフォルダを設定してください。{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}アプリ専用のフォルダの作成・使用がおすすめです。{"\u000A"}{"\u000A"}{"\u000A"}{"\u000A"}選択したフォルダ：{ $arg2 }
-
-onboarding_storage_action_select = フォルダを選択してください
-
-onboarding_storage_selection_required = フォルダを選択してください
-
-onboarding_storage_help_info = 古いバージョンからバージョンアップしたばかりで、選択に悩んでいますか？ストレージ ガイドにご参照ください。
-
-onboarding_storage_help_action = ストレージ ガイド
-
-onboarding_permission_install_apps = アプリのインストールの許可
-
-onboarding_permission_install_apps_description = ソース拡張機能をインストールするために必要です。
-
-onboarding_permission_notifications = 通知の許可
-
-onboarding_permission_notifications_description = ライブラリ更新などの通知を送信します。
-
-onboarding_permission_crashlytics = クラッシュログを送信する
-
-onboarding_permission_crashlytics_description = 匿名化されたクラッシュ ログを開発者に送信します。
-
-onboarding_permission_analytics = 分析を許可する
-
-onboarding_permission_analytics_description = アプリの機能を向上させるために、匿名化された使用状況データを送信します。
-
-onboarding_permission_action_grant = 許可
-
-onboarding_guides_new_user = { $arg1 }は初めて？入門ガイドをチェックしてみしましょう。
-
-onboarding_guides_returning_user = { $arg1 }を再インストールしていますか？
 
 pref_category_general = 全般
 
@@ -690,8 +648,6 @@ ext_install_service_notif = 拡張機能をインストール中…
 
 ext_revoke_trust = 不明な拡張機能の信頼を取り消す
 
-label_extension_repos = 拡張機能リポジトリ
-
 information_empty_repos = リポジトリを設定していません。
 
 action_add_repo = リポジトリを追加
@@ -857,12 +813,6 @@ nav_zone_next = 次へ
 nav_zone_left = 左
 
 nav_zone_right = 右
-
-left_to_right_viewer = ページ分割 (左から右)
-
-right_to_left_viewer = ページ分割 (右から左)
-
-vertical_viewer = ページ分割 (上から下)
 
 webtoon_viewer = 縦長のストリップ
 
@@ -1609,8 +1559,6 @@ information_empty_library = ライブラリは空です
 information_no_manga_category = カテゴリが空です
 
 information_no_entries_found = このカテゴリに項目がありません
-
-getting_started_guide = 入門ガイド
 
 information_empty_category = カテゴリーがありません。「+」をタップしてカテゴリーを追加し、ライブラリを整理できます。
 

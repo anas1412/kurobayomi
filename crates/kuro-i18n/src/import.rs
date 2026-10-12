@@ -535,7 +535,7 @@ fn render_entry(source: &Source, id: &str) -> Result<String> {
 
 /// Upstream names that the English base and every locale leave out, because the feature they belong to is not in the
 /// desktop app (the decisions are in `docs/drop-decisions.md`). The moko XML is the unchanged input, so the importer
-/// is where a name is dropped: running it again gives the same files. The last five names are not dropped for good:
+/// is where a name is dropped: running it again gives the same files. The names listed under "replaced" are not dropped for good:
 /// their upstream text names a removed feature, so `locales/en/kurobayomi-extra.ftl` carries the same id with a text
 /// that does not, and no locale has an out-of-date translation of it.
 pub const DROPPED_NAMES: &[&str] = &[
@@ -611,6 +611,12 @@ pub const DROPPED_NAMES: &[&str] = &[
     "pref_security_summary",
     "pref_advanced_summary",
     "pref_reset_viewer_flags_summary",
+    // texts the app words differently
+    "action_mark_previous_as_seen",
+    "label_extension_repos",
+    "left_to_right_viewer",
+    "right_to_left_viewer",
+    "vertical_viewer",
     // first-run wizard (removed 2026-10-12: the empty library and Settings replace it); onboarding_storage_info stays
     // because the placeholder test uses it as its fixture
     "getting_started_guide",
@@ -645,6 +651,11 @@ pub const REPLACED_NAMES: &[&str] = &[
     "pref_security_summary",
     "pref_advanced_summary",
     "pref_reset_viewer_flags_summary",
+    "action_mark_previous_as_seen",
+    "label_extension_repos",
+    "left_to_right_viewer",
+    "right_to_left_viewer",
+    "vertical_viewer",
 ];
 
 /// Base entries after the overlap rule: Aniyomi names first in source order, then core names that
