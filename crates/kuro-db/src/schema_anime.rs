@@ -3,8 +3,7 @@
 
 use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 
-pub use crate::codec::{GenreList, UpdateStrategy};
-use crate::error::DbError;
+pub use crate::codec::{FetchType, GenreList, Memo, UpdateStrategy};
 
 
 /// Epoch milliseconds (`AS Date` in SQLDelight): `animehistory.last_seen`.
@@ -23,160 +22,86 @@ impl ToSql for Millis {
     }
 }
 
-/// `animes.fetch_type`: 0 Seasons, 1 Episodes. Any other value reads as Episodes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum FetchType {
-    Seasons = 0,
-    #[default]
-    Episodes = 1,
-}
-
-impl FetchType {
-    pub fn from_db(v: i64) -> Self {
-        if v == 0 { Self::Seasons } else { Self::Episodes }
-    }
-}
-
-impl FromSql for FetchType {
-    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        i64::column_result(value).map(Self::from_db)
-    }
-}
-
-impl ToSql for FetchType {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok((*self as i64).into())
-    }
-}
-
-/// `memo`: a JSON object stored as BLOB (or TEXT in the fresh default `'{}'`). A cell that is not a
-/// JSON object reads as the empty object with a warning. `FromSql` has no table or row to report, so
-/// the read is tolerant rather than an error (the decision of `p1-rust-design.md` section 5).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Memo(pub serde_json::Map<String, serde_json::Value>);
-
-impl FromSql for Memo {
-    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        let bytes: &[u8] = match value {
-            ValueRef::Text(t) | ValueRef::Blob(t) => t,
-            _ => &[],
-        };
-        match serde_json::from_slice::<serde_json::Value>(bytes) {
-            Ok(serde_json::Value::Object(map)) => Ok(Self(map)),
-            _ => {
-                tracing::warn!("memo is not a JSON object; reading it as {{}}");
-                Ok(Self::default())
-            }
-        }
-    }
-}
-
-impl Memo {
-    /// Strict read of a `memo` cell: a TEXT or BLOB holding a JSON object, or `DbError::BadMemo` naming the
-    /// table and row. The row readers are tolerant (`FromSql` above) so one corrupt cell never fails a list
-    /// query; a caller that must know about the cell, such as a backup, uses this.
-    pub fn decode(value: ValueRef<'_>, table: &'static str, id: i64) -> Result<Self, DbError> {
-        let bytes = match value {
-            ValueRef::Text(t) | ValueRef::Blob(t) => t,
-            _ => return Err(DbError::BadMemo { table, id }),
-        };
-        match serde_json::from_slice::<serde_json::Value>(bytes) {
-            Ok(serde_json::Value::Object(map)) => Ok(Self(map)),
-            _ => Err(DbError::BadMemo { table, id }),
-        }
-    }
-}
-
-impl ToSql for Memo {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        let bytes = serde_json::to_vec(&self.0)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-        Ok(ToSqlOutput::Owned(rusqlite::types::Value::Blob(bytes)))
-    }
-}
-
 /// Bit layouts of `animes.episode_flags`, `animes.season_flags`, `animes.viewer` and
 /// `categories.flags` of the anime database. Values are copied from Aniyomi `Anime.kt`,
 /// `SeasonDisplayMode.kt` and `AnimeLibrarySortMode.kt`. The generic setter is
 /// `crate::flags::set_flag`.
 pub mod flags {
-    pub const EPISODE_SORT_DESC: i64 = 0x0;
-    pub const EPISODE_SORT_ASC: i64 = 0x1;
-    pub const EPISODE_SORT_DIR_MASK: i64 = 0x1;
-    pub const EPISODE_SHOW_UNSEEN: i64 = 0x2;
-    pub const EPISODE_SHOW_SEEN: i64 = 0x4;
-    pub const EPISODE_UNSEEN_MASK: i64 = 0x6;
-    pub const EPISODE_SHOW_DOWNLOADED: i64 = 0x8;
-    pub const EPISODE_SHOW_NOT_DOWNLOADED: i64 = 0x10;
-    pub const EPISODE_DOWNLOADED_MASK: i64 = 0x18;
-    pub const EPISODE_SHOW_BOOKMARKED: i64 = 0x20;
-    pub const EPISODE_SHOW_NOT_BOOKMARKED: i64 = 0x40;
-    pub const EPISODE_BOOKMARKED_MASK: i64 = 0x60;
-    pub const EPISODE_SHOW_FILLERMARKED: i64 = 0x80;
-    pub const EPISODE_SHOW_NOT_FILLERMARKED: i64 = 0x100;
-    pub const EPISODE_FILLERMARKED_MASK: i64 = 0x180;
-    pub const EPISODE_SORTING_SOURCE: i64 = 0x0;
-    pub const EPISODE_SORTING_NUMBER: i64 = 0x200;
-    pub const EPISODE_SORTING_UPLOAD_DATE: i64 = 0x400;
-    pub const EPISODE_SORTING_ALPHABET: i64 = 0x600;
-    pub const EPISODE_SORTING_MASK: i64 = 0x600;
-    pub const EPISODE_SHOW_PREVIEWS: i64 = 0x0;
-    pub const EPISODE_SHOW_NOT_PREVIEWS: i64 = 0x800;
-    pub const EPISODE_PREVIEWS_MASK: i64 = 0x800;
-    pub const EPISODE_SHOW_SUMMARIES: i64 = 0x0;
-    pub const EPISODE_SHOW_NOT_SUMMARIES: i64 = 0x1000;
-    pub const EPISODE_SUMMARIES_MASK: i64 = 0x1000;
-    pub const EPISODE_DISPLAY_NAME: i64 = 0x0;
-    pub const EPISODE_DISPLAY_NUMBER: i64 = 0x100000;
-    pub const EPISODE_DISPLAY_MASK: i64 = 0x100000;
-
-    pub const SEASON_SORT_DESC: i64 = 0x0;
-    pub const SEASON_SORT_ASC: i64 = 0x1;
-    pub const SEASON_SORT_DIR_MASK: i64 = 0x1;
-    pub const SEASON_SHOW_DOWNLOADED: i64 = 0x2;
-    pub const SEASON_SHOW_NOT_DOWNLOADED: i64 = 0x4;
-    pub const SEASON_DOWNLOADED_MASK: i64 = 0x6;
-    pub const SEASON_SHOW_UNSEEN: i64 = 0x8;
-    pub const SEASON_SHOW_SEEN: i64 = 0x10;
-    pub const SEASON_UNSEEN_MASK: i64 = 0x18;
-    pub const SEASON_SHOW_STARTED: i64 = 0x20;
-    pub const SEASON_SHOW_NOT_STARTED: i64 = 0x40;
-    pub const SEASON_STARTED_MASK: i64 = 0x60;
-    pub const SEASON_SHOW_COMPLETED: i64 = 0x80;
-    pub const SEASON_SHOW_NOT_COMPLETED: i64 = 0x100;
-    pub const SEASON_COMPLETED_MASK: i64 = 0x180;
-    pub const SEASON_SHOW_BOOKMARKED: i64 = 0x200;
-    pub const SEASON_SHOW_NOT_BOOKMARKED: i64 = 0x400;
-    pub const SEASON_BOOKMARKED_MASK: i64 = 0x600;
-    pub const SEASON_SHOW_FILLERMARKED: i64 = 0x800;
-    pub const SEASON_SHOW_NOT_FILLERMARKED: i64 = 0x1000;
-    pub const SEASON_FILLERMARKED_MASK: i64 = 0x1800;
-    pub const SEASON_SORT_SOURCE: i64 = 0x0;
-    pub const SEASON_SORT_SEASON: i64 = 0x2000;
-    pub const SEASON_SORT_UPLOAD: i64 = 0x4000;
-    pub const SEASON_SORT_ALPHABET: i64 = 0x6000;
-    pub const SEASON_SORT_COUNT: i64 = 0x8000;
-    pub const SEASON_SORT_LAST_SEEN: i64 = 0xA000;
-    pub const SEASON_SORT_FETCHED: i64 = 0xC000;
-    pub const SEASON_SORT_MASK: i64 = 0xE000;
-    pub const SEASON_GRID_DISPLAY_MODE_SHIFT: i64 = 16;
-    pub const SEASON_GRID_DISPLAY_MODE_MASK: i64 = 0x30000;
-    pub const SEASON_GRID_DISPLAY_SIZE_SHIFT: i64 = 18;
-    pub const SEASON_GRID_DISPLAY_SIZE_MASK: i64 = 0x3C0000;
-    pub const SEASON_OVERLAY_DOWNLOADED_MASK: i64 = 0x400000;
-    pub const SEASON_OVERLAY_UNSEEN_MASK: i64 = 0x800000;
-    pub const SEASON_OVERLAY_LOCAL_MASK: i64 = 0x1000000;
-    pub const SEASON_OVERLAY_LANG_MASK: i64 = 0x2000000;
-    pub const SEASON_OVERLAY_CONT_MASK: i64 = 0x4000000;
-    pub const SEASON_DISPLAY_MODE_SOURCE: i64 = 0x0;
-    pub const SEASON_DISPLAY_MODE_NUMBER: i64 = 0x8000000;
-    pub const SEASON_DISPLAY_MODE_MASK: i64 = 0x8000000;
-
-    pub const ANIME_INTRO_MASK: i64 = 0xFF;
-    pub const ANIME_AIRING_EPISODE_MASK: i64 = 0xFFFF00;
+    pub const EPISODE_SORT_DESC: i64 = crate::flags::item::SORT_DESC;
+    pub const EPISODE_SORT_ASC: i64 = crate::flags::item::SORT_ASC;
+    pub const EPISODE_SORT_DIR_MASK: i64 = crate::flags::item::SORT_DIR_MASK;
+    pub const EPISODE_SHOW_UNSEEN: i64 = crate::flags::item::SHOW_UNDONE;
+    pub const EPISODE_SHOW_SEEN: i64 = crate::flags::item::SHOW_DONE;
+    pub const EPISODE_UNSEEN_MASK: i64 = crate::flags::item::UNDONE_MASK;
+    pub const EPISODE_SHOW_DOWNLOADED: i64 = crate::flags::item::SHOW_DOWNLOADED;
+    pub const EPISODE_SHOW_NOT_DOWNLOADED: i64 = crate::flags::item::SHOW_NOT_DOWNLOADED;
+    pub const EPISODE_DOWNLOADED_MASK: i64 = crate::flags::item::DOWNLOADED_MASK;
+    pub const EPISODE_SHOW_BOOKMARKED: i64 = crate::flags::item::SHOW_BOOKMARKED;
+    pub const EPISODE_SHOW_NOT_BOOKMARKED: i64 = crate::flags::item::SHOW_NOT_BOOKMARKED;
+    pub const EPISODE_BOOKMARKED_MASK: i64 = crate::flags::item::BOOKMARKED_MASK;
+    pub const EPISODE_SHOW_FILLERMARKED: i64 = crate::flags::item::SHOW_FILLERMARKED;
+    pub const EPISODE_SHOW_NOT_FILLERMARKED: i64 = crate::flags::item::SHOW_NOT_FILLERMARKED;
+    pub const EPISODE_FILLERMARKED_MASK: i64 = crate::flags::item::FILLERMARKED_MASK;
+    pub const EPISODE_SORTING_SOURCE: i64 = crate::flags::item::SORTING_SOURCE;
+    pub const EPISODE_SORTING_NUMBER: i64 = crate::flags::item::SORTING_NUMBER;
+    pub const EPISODE_SORTING_UPLOAD_DATE: i64 = crate::flags::item::SORTING_UPLOAD_DATE;
+    pub const EPISODE_SORTING_ALPHABET: i64 = crate::flags::item::SORTING_ALPHABET;
+    pub const EPISODE_SORTING_MASK: i64 = crate::flags::item::SORTING_MASK;
+    pub const EPISODE_SHOW_PREVIEWS: i64 = crate::flags::item::SHOW_PREVIEWS;
+    pub const EPISODE_SHOW_NOT_PREVIEWS: i64 = crate::flags::item::SHOW_NOT_PREVIEWS;
+    pub const EPISODE_PREVIEWS_MASK: i64 = crate::flags::item::PREVIEWS_MASK;
+    pub const EPISODE_SHOW_SUMMARIES: i64 = crate::flags::item::SHOW_SUMMARIES;
+    pub const EPISODE_SHOW_NOT_SUMMARIES: i64 = crate::flags::item::SHOW_NOT_SUMMARIES;
+    pub const EPISODE_SUMMARIES_MASK: i64 = crate::flags::item::SUMMARIES_MASK;
+    pub const EPISODE_DISPLAY_NAME: i64 = crate::flags::item::DISPLAY_NAME;
+    pub const EPISODE_DISPLAY_NUMBER: i64 = crate::flags::item::DISPLAY_NUMBER;
+    pub const EPISODE_DISPLAY_MASK: i64 = crate::flags::item::DISPLAY_MASK;
+    pub const SEASON_SORT_DESC: i64 = crate::flags::season::SORT_DESC;
+    pub const SEASON_SORT_ASC: i64 = crate::flags::season::SORT_ASC;
+    pub const SEASON_SORT_DIR_MASK: i64 = crate::flags::season::SORT_DIR_MASK;
+    pub const SEASON_SHOW_DOWNLOADED: i64 = crate::flags::season::SHOW_DOWNLOADED;
+    pub const SEASON_SHOW_NOT_DOWNLOADED: i64 = crate::flags::season::SHOW_NOT_DOWNLOADED;
+    pub const SEASON_DOWNLOADED_MASK: i64 = crate::flags::season::DOWNLOADED_MASK;
+    pub const SEASON_SHOW_UNSEEN: i64 = crate::flags::season::SHOW_UNSEEN;
+    pub const SEASON_SHOW_SEEN: i64 = crate::flags::season::SHOW_SEEN;
+    pub const SEASON_UNSEEN_MASK: i64 = crate::flags::season::UNSEEN_MASK;
+    pub const SEASON_SHOW_STARTED: i64 = crate::flags::season::SHOW_STARTED;
+    pub const SEASON_SHOW_NOT_STARTED: i64 = crate::flags::season::SHOW_NOT_STARTED;
+    pub const SEASON_STARTED_MASK: i64 = crate::flags::season::STARTED_MASK;
+    pub const SEASON_SHOW_COMPLETED: i64 = crate::flags::season::SHOW_COMPLETED;
+    pub const SEASON_SHOW_NOT_COMPLETED: i64 = crate::flags::season::SHOW_NOT_COMPLETED;
+    pub const SEASON_COMPLETED_MASK: i64 = crate::flags::season::COMPLETED_MASK;
+    pub const SEASON_SHOW_BOOKMARKED: i64 = crate::flags::season::SHOW_BOOKMARKED;
+    pub const SEASON_SHOW_NOT_BOOKMARKED: i64 = crate::flags::season::SHOW_NOT_BOOKMARKED;
+    pub const SEASON_BOOKMARKED_MASK: i64 = crate::flags::season::BOOKMARKED_MASK;
+    pub const SEASON_SHOW_FILLERMARKED: i64 = crate::flags::season::SHOW_FILLERMARKED;
+    pub const SEASON_SHOW_NOT_FILLERMARKED: i64 = crate::flags::season::SHOW_NOT_FILLERMARKED;
+    pub const SEASON_FILLERMARKED_MASK: i64 = crate::flags::season::FILLERMARKED_MASK;
+    pub const SEASON_SORT_SOURCE: i64 = crate::flags::season::SORT_SOURCE;
+    pub const SEASON_SORT_SEASON: i64 = crate::flags::season::SORT_SEASON;
+    pub const SEASON_SORT_UPLOAD: i64 = crate::flags::season::SORT_UPLOAD;
+    pub const SEASON_SORT_ALPHABET: i64 = crate::flags::season::SORT_ALPHABET;
+    pub const SEASON_SORT_COUNT: i64 = crate::flags::season::SORT_COUNT;
+    pub const SEASON_SORT_LAST_SEEN: i64 = crate::flags::season::SORT_LAST_SEEN;
+    pub const SEASON_SORT_FETCHED: i64 = crate::flags::season::SORT_FETCHED;
+    pub const SEASON_SORT_MASK: i64 = crate::flags::season::SORT_MASK;
+    pub const SEASON_GRID_DISPLAY_MODE_SHIFT: i64 = crate::flags::season::GRID_DISPLAY_MODE_SHIFT;
+    pub const SEASON_GRID_DISPLAY_MODE_MASK: i64 = crate::flags::season::GRID_DISPLAY_MODE_MASK;
+    pub const SEASON_GRID_DISPLAY_SIZE_SHIFT: i64 = crate::flags::season::GRID_DISPLAY_SIZE_SHIFT;
+    pub const SEASON_GRID_DISPLAY_SIZE_MASK: i64 = crate::flags::season::GRID_DISPLAY_SIZE_MASK;
+    pub const SEASON_OVERLAY_DOWNLOADED_MASK: i64 = crate::flags::season::OVERLAY_DOWNLOADED_MASK;
+    pub const SEASON_OVERLAY_UNSEEN_MASK: i64 = crate::flags::season::OVERLAY_UNSEEN_MASK;
+    pub const SEASON_OVERLAY_LOCAL_MASK: i64 = crate::flags::season::OVERLAY_LOCAL_MASK;
+    pub const SEASON_OVERLAY_LANG_MASK: i64 = crate::flags::season::OVERLAY_LANG_MASK;
+    pub const SEASON_OVERLAY_CONT_MASK: i64 = crate::flags::season::OVERLAY_CONT_MASK;
+    pub const SEASON_DISPLAY_MODE_SOURCE: i64 = crate::flags::season::DISPLAY_MODE_SOURCE;
+    pub const SEASON_DISPLAY_MODE_NUMBER: i64 = crate::flags::season::DISPLAY_MODE_NUMBER;
+    pub const SEASON_DISPLAY_MODE_MASK: i64 = crate::flags::season::DISPLAY_MODE_MASK;
+    pub const ANIME_INTRO_MASK: i64 = crate::flags::viewer::anime::INTRO_MASK;
+    pub const ANIME_AIRING_EPISODE_MASK: i64 = crate::flags::viewer::anime::AIRING_EPISODE_MASK;
     /// Bits 24 to 55 (Kotlin `0x0FFFFFFFF000000L`).
-    pub const ANIME_AIRING_TIME_MASK: i64 = 0xFFFF_FFFF << 24;
-    pub const ANIME_INTRO_DISABLE_MASK: i64 = 0x0100_0000_0000_0000;
+    pub const ANIME_AIRING_TIME_MASK: i64 = crate::flags::viewer::anime::AIRING_TIME_MASK;
+    pub const ANIME_INTRO_DISABLE_MASK: i64 = crate::flags::viewer::anime::INTRO_DISABLE_MASK;
 
     pub const CATEGORY_SORT_TYPE_MASK: i64 = 0x3C;
     pub const CATEGORY_SORT_DIRECTION_MASK: i64 = 0x40;
@@ -194,24 +119,7 @@ pub mod flags {
     pub const CATEGORY_SORT_ASCENDING: i64 = 0x40;
     pub const CATEGORY_SORT_DESCENDING: i64 = 0x00;
 
-    /// Skip-intro length in seconds (`viewer & 0xFF`).
-    pub fn skip_intro_length(viewer: i64) -> i64 {
-        viewer & ANIME_INTRO_MASK
-    }
-
-    /// Episode number of the next episode to air (`(viewer & 0xFFFF00) / 16^2`).
-    pub fn next_episode_to_air(viewer: i64) -> i64 {
-        (viewer & ANIME_AIRING_EPISODE_MASK) >> 8
-    }
-
-    /// Airing time of the next episode, Unix seconds (`(viewer & 0x0FFFFFFFF000000) / 16^6`).
-    pub fn next_episode_airing_at(viewer: i64) -> i64 {
-        (viewer & ANIME_AIRING_TIME_MASK) >> 24
-    }
-
-    pub fn skip_intro_disabled(viewer: i64) -> bool {
-        viewer & ANIME_INTRO_DISABLE_MASK == ANIME_INTRO_DISABLE_MASK
-    }
+    pub use crate::flags::viewer::anime::{next_episode_airing_at, next_episode_to_air, skip_intro_disabled, skip_intro_length};
 
     /// Sort type of a `categories.flags` value. Unknown type bits fall back to Alphabetical.
     pub fn category_sort_type(flags: i64) -> i64 {
@@ -258,6 +166,7 @@ pub mod flags {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::DbError;
     use rusqlite::Connection;
     use crate::flags::set_flag;
     use crate::schema_anime::flags as f;

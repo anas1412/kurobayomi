@@ -2,6 +2,8 @@
 
 use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 
+use crate::error::DbError;
+
 /// TEXT column holding genres joined by ", " (Aniyomi `StringListColumnAdapter`).
 /// NULL is `None` through the `Option` impls; `''` is an empty list.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -51,6 +53,78 @@ impl FromSql for UpdateStrategy {
 impl ToSql for UpdateStrategy {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         Ok(self.to_db().into())
+    }
+}
+
+/// `animes.fetch_type`: 0 Seasons, 1 Episodes. Any other value reads as Episodes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FetchType {
+    Seasons = 0,
+    #[default]
+    Episodes = 1,
+}
+
+impl FetchType {
+    pub fn from_db(v: i64) -> Self {
+        if v == 0 { Self::Seasons } else { Self::Episodes }
+    }
+}
+
+impl FromSql for FetchType {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        i64::column_result(value).map(Self::from_db)
+    }
+}
+
+impl ToSql for FetchType {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok((*self as i64).into())
+    }
+}
+
+/// `memo`: a JSON object stored as BLOB (or TEXT in the fresh default `'{}'`). A cell that is not a
+/// JSON object reads as the empty object with a warning. `FromSql` has no table or row to report, so
+/// the read is tolerant rather than an error (the decision of `p1-rust-design.md` section 5).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Memo(pub serde_json::Map<String, serde_json::Value>);
+
+impl FromSql for Memo {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let bytes: &[u8] = match value {
+            ValueRef::Text(t) | ValueRef::Blob(t) => t,
+            _ => &[],
+        };
+        match serde_json::from_slice::<serde_json::Value>(bytes) {
+            Ok(serde_json::Value::Object(map)) => Ok(Self(map)),
+            _ => {
+                tracing::warn!("memo is not a JSON object; reading it as {{}}");
+                Ok(Self::default())
+            }
+        }
+    }
+}
+
+impl Memo {
+    /// Strict read of a `memo` cell: a TEXT or BLOB holding a JSON object, or `DbError::BadMemo` naming the
+    /// table and row. The row readers are tolerant (`FromSql` above) so one corrupt cell never fails a list
+    /// query; a caller that must know about the cell, such as a backup, uses this.
+    pub fn decode(value: ValueRef<'_>, table: &'static str, id: i64) -> Result<Self, DbError> {
+        let bytes = match value {
+            ValueRef::Text(t) | ValueRef::Blob(t) => t,
+            _ => return Err(DbError::BadMemo { table, id }),
+        };
+        match serde_json::from_slice::<serde_json::Value>(bytes) {
+            Ok(serde_json::Value::Object(map)) => Ok(Self(map)),
+            _ => Err(DbError::BadMemo { table, id }),
+        }
+    }
+}
+
+impl ToSql for Memo {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        let bytes = serde_json::to_vec(&self.0)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        Ok(ToSqlOutput::Owned(rusqlite::types::Value::Blob(bytes)))
     }
 }
 

@@ -5,7 +5,8 @@
 //! (column codecs), `flags` (bit layouts), `models` (row and patch structs), `notify` (change sets
 //! and hooks), `runtime` (the `Db` handle), `subscribe` (live queries), and the statement modules
 //! (`statements_manga` is exported as `sql`). One file holds both kinds (`schema_unified`); the two statement
-//! modules pin the kind in their SQL.
+//! modules pin the kind in their SQL. `tables` is the shared replacement (one function per statement, `kind` is a
+//! parameter, stored layout) that they give way to in phase E of docs/design/unified-model.md.
 
 pub mod error;
 pub mod open;
@@ -22,6 +23,7 @@ pub mod schema_unified;
 pub mod schema_anime;
 pub mod statements_manga;
 pub mod statements_anime;
+pub mod tables;
 pub mod episode_sanitizer;
 pub mod maintenance;
 #[cfg(test)]

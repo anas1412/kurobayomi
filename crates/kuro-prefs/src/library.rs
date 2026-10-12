@@ -5,10 +5,13 @@
 //! stored text is kept, as Aniyomi's `getEnum` and `getObject` do.
 
 use std::borrow::Cow;
+use crate::category::category_keys;
 use crate::pref::Pref;
+use crate::PrefError;
 use crate::registry;
 use crate::registry::define_prefs;
-use crate::sort::{AnimeLibrarySort, MangaLibrarySort};
+use kuro_platform::kind::Kind;
+use kuro_platform::sort::LibrarySort;
 use crate::store::PrefStore;
 use crate::tristate::TriState;
 use crate::values::{Decoded, PrefType, PrefValue};
@@ -127,18 +130,14 @@ impl<const ANIME: bool> PrefType for SortSetting<ANIME> {
     }
 
     /// Read like Kotlin's `getObject`: the text is parsed and the value comes back in canonical
-    /// form (an unknown type reads as the default type, see [`crate::sort::LibrarySort::deserialize`]).
+    /// form (an unknown type reads as the default type, see [`kuro_platform::sort::LibrarySort::parse`]).
     /// The stored text is not rewritten by a read. Empty text or text without a comma is `Invalid`.
     fn decode(v: &PrefValue) -> Decoded<Self> {
         let PrefValue::Str(s) = v else {
             return Decoded::WrongType;
         };
-        let canonical = if ANIME {
-            AnimeLibrarySort::deserialize(s).map(|sort| sort.serialize())
-        } else {
-            MangaLibrarySort::deserialize(s).map(|sort| sort.serialize())
-        };
-        canonical.map_or(Decoded::Invalid, |text| Decoded::Ok(Self(text)))
+        let kind = Kind::from_anime(ANIME);
+        LibrarySort::parse(kind, s).map_or(Decoded::Invalid, |sort| Decoded::Ok(Self(sort.serialize(kind))))
     }
 }
 
@@ -157,6 +156,73 @@ fn reg<T: PrefType>(store: &PrefStore, key: impl Into<Cow<'static, str>>) -> Pre
 }
 
 impl LibraryPrefs {
+    /// The default category of `kind` (`-1` asks every time).
+    pub fn default_category(&self, kind: Kind) -> &Pref<i32> {
+        match kind {
+            Kind::Manga => &self.default_manga_category,
+            Kind::Anime => &self.default_anime_category,
+        }
+    }
+
+    pub fn last_used_category(&self, kind: Kind) -> &Pref<i32> {
+        match kind {
+            Kind::Manga => &self.last_used_manga_category,
+            Kind::Anime => &self.last_used_anime_category,
+        }
+    }
+
+    pub fn new_updates_count(&self, kind: Kind) -> &Pref<i32> {
+        match kind {
+            Kind::Manga => &self.new_manga_updates_count,
+            Kind::Anime => &self.new_anime_updates_count,
+        }
+    }
+
+    pub fn filter_downloaded(&self, kind: Kind) -> &Pref<TriState> {
+        match kind {
+            Kind::Manga => &self.filter_downloaded_manga,
+            Kind::Anime => &self.filter_downloaded_anime,
+        }
+    }
+
+    /// The "unread" filter of manga, the "unseen" filter of anime.
+    pub fn filter_unread(&self, kind: Kind) -> &Pref<TriState> {
+        match kind {
+            Kind::Manga => &self.filter_unread,
+            Kind::Anime => &self.filter_unseen,
+        }
+    }
+
+    pub fn filter_completed(&self, kind: Kind) -> &Pref<TriState> {
+        match kind {
+            Kind::Manga => &self.filter_completed_manga,
+            Kind::Anime => &self.filter_completed_anime,
+        }
+    }
+
+    pub fn filter_tracked(&self, kind: Kind, tracker_id: i32) -> Pref<TriState> {
+        match kind {
+            Kind::Manga => self.filter_tracked_manga(tracker_id),
+            Kind::Anime => self.filter_tracked_anime(tracker_id),
+        }
+    }
+
+    /// The library sort of `kind` as canonical `<TYPE>,<DIRECTION>` text (the default when the stored text is invalid).
+    pub fn sorting_mode(&self, kind: Kind) -> String {
+        match kind {
+            Kind::Manga => self.manga_sorting_mode.get().0,
+            Kind::Anime => self.anime_sorting_mode.get().0,
+        }
+    }
+
+    /// Stores `text` as the library sort of `kind` (written as given, like the old per-kind fields).
+    pub fn set_sorting_mode(&self, kind: Kind, text: &str) -> Result<(), PrefError> {
+        match kind {
+            Kind::Manga => self.manga_sorting_mode.set(SortSetting(text.to_owned())),
+            Kind::Anime => self.anime_sorting_mode.set(SortSetting(text.to_owned())),
+        }
+    }
+
     pub fn filter_tracked_anime(&self, tracker_id: i32) -> Pref<TriState> {
         reg(
             &self.store,
@@ -189,12 +255,12 @@ pub const MARK_DUPLICATE_CHAPTER_READ_EXISTING: &str = "existing";
 pub const MARK_DUPLICATE_EPISODE_SEEN_NEW: &str = "new_episode";
 pub const MARK_DUPLICATE_EPISODE_SEEN_EXISTING: &str = "existing_episode";
 
-pub const DEFAULT_MANGA_CATEGORY_PREF_KEY: &str = "default_category";
-pub const DEFAULT_ANIME_CATEGORY_PREF_KEY: &str = "default_anime_category";
-pub const LIBRARY_UPDATE_MANGA_CATEGORIES_PREF_KEY: &str = "library_update_categories";
-pub const LIBRARY_UPDATE_ANIME_CATEGORIES_PREF_KEY: &str = "animelib_update_categories";
-pub const LIBRARY_UPDATE_MANGA_CATEGORIES_EXCLUDE_PREF_KEY: &str = "library_update_categories_exclude";
-pub const LIBRARY_UPDATE_ANIME_CATEGORIES_EXCLUDE_PREF_KEY: &str = "animelib_update_categories_exclude";
+pub const DEFAULT_MANGA_CATEGORY_PREF_KEY: &str = category_keys(Kind::Manga).default;
+pub const DEFAULT_ANIME_CATEGORY_PREF_KEY: &str = category_keys(Kind::Anime).default;
+pub const LIBRARY_UPDATE_MANGA_CATEGORIES_PREF_KEY: &str = category_keys(Kind::Manga).update;
+pub const LIBRARY_UPDATE_ANIME_CATEGORIES_PREF_KEY: &str = category_keys(Kind::Anime).update;
+pub const LIBRARY_UPDATE_MANGA_CATEGORIES_EXCLUDE_PREF_KEY: &str = category_keys(Kind::Manga).update_exclude;
+pub const LIBRARY_UPDATE_ANIME_CATEGORIES_EXCLUDE_PREF_KEY: &str = category_keys(Kind::Anime).update_exclude;
 
 /// The six keys that hold category ids (`categoryPreferenceKeys`). Backup restore remaps them.
 pub fn category_preference_keys() -> [&'static str; 6] {
@@ -247,6 +313,67 @@ mod tests {
         assert_eq!(lib.manga_sorting_mode.get().0, "ALPHABETICAL,ASCENDING");
         assert_eq!(lib.filter_downloaded_manga.get(), TriState::DISABLED);
         assert_eq!(lib.filter_completed_anime.get(), TriState::DISABLED);
+    }
+
+    #[test]
+    fn the_token_lists_are_the_platform_codec_tokens() {
+        assert_eq!(kuro_platform::sort::tokens(Kind::Manga), MANGA_SORT_TOKENS);
+        assert_eq!(kuro_platform::sort::tokens(Kind::Anime), ANIME_SORT_TOKENS);
+    }
+
+    #[test]
+    fn category_keys_cover_every_old_list() {
+        let old: std::collections::BTreeSet<&str> = [
+            "default_category", "library_update_categories", "library_update_categories_exclude",
+            "remove_exclude_categories", "download_new_categories", "download_new_categories_exclude",
+            "default_anime_category", "animelib_update_categories", "animelib_update_categories_exclude",
+            "remove_exclude_anime_categories", "download_new_anime_categories", "download_new_anime_categories_exclude",
+        ]
+        .into_iter()
+        .collect();
+        let new: std::collections::BTreeSet<&str> =
+            Kind::ALL.into_iter().flat_map(|k| category_keys(k).all()).collect();
+        assert_eq!(new, old);
+        let six: std::collections::BTreeSet<&str> = category_preference_keys().into_iter().collect();
+        assert!(six.is_subset(&old));
+        let download: std::collections::BTreeSet<&str> = crate::download::CATEGORY_SET_KEYS.into_iter().collect();
+        assert!(download.is_subset(&old));
+        assert_eq!(crate::category::category_id_set_keys().len(), 10);
+    }
+
+    #[test]
+    fn sorting_mode_accessor_matches_the_registry_keys() {
+        let store = PrefStore::in_memory();
+        let lib = LibraryPrefs::new(store.clone());
+        for (kind, key, text) in [
+            (Kind::Manga, "library_sorting_mode", "LAST_READ,DESCENDING"),
+            (Kind::Anime, "animelib_sorting_mode", "AIRING_TIME,ASCENDING"),
+        ] {
+            assert_eq!(lib.sorting_mode(kind), "ALPHABETICAL,ASCENDING");
+            lib.set_sorting_mode(kind, text).unwrap();
+            assert_eq!(store.get_raw(key), Some(PrefValue::Str(text.into())));
+            assert_eq!(lib.sorting_mode(kind), text);
+        }
+        // an unknown type reads as Alphabetical, and an unparsable text reads as the default; the stored text stays
+        lib.set_sorting_mode(Kind::Manga, "AIRING_TIME,ASCENDING").unwrap();
+        assert_eq!(lib.sorting_mode(Kind::Manga), "ALPHABETICAL,ASCENDING");
+        lib.set_sorting_mode(Kind::Manga, "RANDOM").unwrap();
+        assert_eq!(lib.sorting_mode(Kind::Manga), "ALPHABETICAL,ASCENDING");
+        assert_eq!(store.get_raw("library_sorting_mode"), Some(PrefValue::Str("RANDOM".into())));
+    }
+
+    #[test]
+    fn the_kind_accessors_pick_the_per_kind_fields() {
+        let lib = LibraryPrefs::new(PrefStore::in_memory());
+        assert_eq!(lib.default_category(Kind::Manga).key(), "default_category");
+        assert_eq!(lib.default_category(Kind::Anime).key(), "default_anime_category");
+        assert_eq!(lib.last_used_category(Kind::Anime).key(), "__APP_STATE_last_used_anime_category");
+        assert_eq!(lib.new_updates_count(Kind::Manga).key(), "library_unread_updates_count");
+        assert_eq!(lib.filter_downloaded(Kind::Anime).key(), "pref_filter_animelib_downloaded_v2");
+        assert_eq!(lib.filter_unread(Kind::Manga).key(), "pref_filter_library_unread_v2");
+        assert_eq!(lib.filter_unread(Kind::Anime).key(), "pref_filter_animelib_unread_v2");
+        assert_eq!(lib.filter_completed(Kind::Manga).key(), "pref_filter_library_completed_v2");
+        assert_eq!(lib.filter_tracked(Kind::Anime, 3).key(), "pref_filter_animelib_tracked_3_v2");
     }
 
     #[test]

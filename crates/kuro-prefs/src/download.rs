@@ -1,18 +1,21 @@
 //! Keys of the download preferences that hold category id sets. The backup importer uses them to
-//! remap category ids (T-02a-017). The strings are the Kotlin key names kept for backup parity.
+//! remap category ids (T-02a-017). The strings come from `category_keys`.
+
+use crate::category::category_keys;
+use kuro_platform::kind::Kind;
 
 /// Categories whose new chapters are downloaded.
-pub const DOWNLOAD_NEW_CHAPTER_CATEGORIES: &str = "download_new_categories";
+pub const DOWNLOAD_NEW_CHAPTER_CATEGORIES: &str = category_keys(Kind::Manga).download_new;
 /// Categories whose new episodes are downloaded.
-pub const DOWNLOAD_NEW_EPISODE_CATEGORIES: &str = "download_new_anime_categories";
+pub const DOWNLOAD_NEW_EPISODE_CATEGORIES: &str = category_keys(Kind::Anime).download_new;
 /// Categories whose new chapters are never downloaded.
-pub const DOWNLOAD_NEW_CHAPTER_CATEGORIES_EXCLUDE: &str = "download_new_categories_exclude";
+pub const DOWNLOAD_NEW_CHAPTER_CATEGORIES_EXCLUDE: &str = category_keys(Kind::Manga).download_new_exclude;
 /// Categories whose new episodes are never downloaded.
-pub const DOWNLOAD_NEW_EPISODE_CATEGORIES_EXCLUDE: &str = "download_new_anime_categories_exclude";
+pub const DOWNLOAD_NEW_EPISODE_CATEGORIES_EXCLUDE: &str = category_keys(Kind::Anime).download_new_exclude;
 /// Categories whose chapters are kept when remove-after-read runs.
-pub const REMOVE_EXCLUDE_CHAPTER_CATEGORIES: &str = "remove_exclude_categories";
+pub const REMOVE_EXCLUDE_CHAPTER_CATEGORIES: &str = category_keys(Kind::Manga).remove_exclude;
 /// Categories whose episodes are kept when remove-after-watched runs.
-pub const REMOVE_EXCLUDE_EPISODE_CATEGORIES: &str = "remove_exclude_anime_categories";
+pub const REMOVE_EXCLUDE_EPISODE_CATEGORIES: &str = category_keys(Kind::Anime).remove_exclude;
 
 /// The six category-set keys, in registry order.
 pub const CATEGORY_SET_KEYS: [&str; 6] = [

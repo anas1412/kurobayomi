@@ -16,25 +16,11 @@ pub struct CategoryMaps {
     pub anime: BTreeMap<i64, i64>,
 }
 
-/// The six manga-side category-id keys (library and download).
-pub const MANGA_CATEGORY_KEYS: [&str; 6] = [
-    "default_category",
-    "library_update_categories",
-    "library_update_categories_exclude",
-    "remove_exclude_categories",
-    "download_new_categories",
-    "download_new_categories_exclude",
-];
+/// The six manga-side category-id keys (library and download): `category_keys(Kind::Manga).all()`.
+pub const MANGA_CATEGORY_KEYS: [&str; 6] = crate::category::category_keys(kuro_platform::kind::Kind::Manga).all();
 
-/// The six anime-side category-id keys (library and download).
-pub const ANIME_CATEGORY_KEYS: [&str; 6] = [
-    "default_anime_category",
-    "animelib_update_categories",
-    "animelib_update_categories_exclude",
-    "remove_exclude_anime_categories",
-    "download_new_anime_categories",
-    "download_new_anime_categories_exclude",
-];
+/// The six anime-side category-id keys (library and download): `category_keys(Kind::Anime).all()`.
+pub const ANIME_CATEGORY_KEYS: [&str; 6] = crate::category::category_keys(kuro_platform::kind::Kind::Anime).all();
 
 /// Schedules that must be recomputed after an import, because their preferences may have changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

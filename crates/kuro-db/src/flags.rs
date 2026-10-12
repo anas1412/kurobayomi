@@ -1,4 +1,5 @@
-//! Bit layouts of `mangas.chapter_flags`, `categories.flags` and `mangas.viewer`.
+//! Bit layouts of `entries.item_flags` (`item`), `entries.season_flags` (`season`), `entries.viewer` (`viewer`),
+//! `categories.flags` (`library_sort`, a shim over `kuro_platform::sort`) and the old manga `chapter_flags` (`chapter`, a shim).
 //! Values are copied from Aniyomi `Manga.kt`, `MangaLibrarySortMode.kt`, `ReadingMode.kt` and
 //! `ReaderOrientation.kt`. Every mask is applied before comparing, so stray high bits are ignored.
 
@@ -46,6 +47,89 @@ pub const fn manga_item_flags_to_unified(x: i64) -> i64 {
 /// The inverse of [`manga_item_flags_to_unified`]. The statements use the same expression in SQL.
 pub const fn manga_item_flags_from_unified(x: i64) -> i64 {
     (x & !0x600) | ((x & 0x600) >> 1)
+}
+
+/// `entries.item_flags` for BOTH kinds: the anime superset layout (docs/design/unified-model.md section 0, item 5).
+/// A manga row only ever carries the groups of [`MANGA_MASK`]. Values are those of the old anime `episode_flags`;
+/// the manga `chapter_flags` layout differs only in the two sorting bits (0x300 there, 0x600 here).
+pub mod item {
+    pub const SORT_DESC: i64 = 0x0;
+    pub const SORT_ASC: i64 = 0x1;
+    pub const SORT_DIR_MASK: i64 = 0x1;
+    pub const SHOW_UNDONE: i64 = 0x2;
+    pub const SHOW_DONE: i64 = 0x4;
+    pub const UNDONE_MASK: i64 = 0x6;
+    pub const SHOW_DOWNLOADED: i64 = 0x8;
+    pub const SHOW_NOT_DOWNLOADED: i64 = 0x10;
+    pub const DOWNLOADED_MASK: i64 = 0x18;
+    pub const SHOW_BOOKMARKED: i64 = 0x20;
+    pub const SHOW_NOT_BOOKMARKED: i64 = 0x40;
+    pub const BOOKMARKED_MASK: i64 = 0x60;
+    pub const SHOW_FILLERMARKED: i64 = 0x80;
+    pub const SHOW_NOT_FILLERMARKED: i64 = 0x100;
+    pub const FILLERMARKED_MASK: i64 = 0x180;
+    pub const SORTING_SOURCE: i64 = 0x0;
+    pub const SORTING_NUMBER: i64 = 0x200;
+    pub const SORTING_UPLOAD_DATE: i64 = 0x400;
+    pub const SORTING_ALPHABET: i64 = 0x600;
+    pub const SORTING_MASK: i64 = 0x600;
+    pub const SHOW_PREVIEWS: i64 = 0x0;
+    pub const SHOW_NOT_PREVIEWS: i64 = 0x800;
+    pub const PREVIEWS_MASK: i64 = 0x800;
+    pub const SHOW_SUMMARIES: i64 = 0x0;
+    pub const SHOW_NOT_SUMMARIES: i64 = 0x1000;
+    pub const SUMMARIES_MASK: i64 = 0x1000;
+    pub const DISPLAY_NAME: i64 = 0x0;
+    pub const DISPLAY_NUMBER: i64 = 0x100000;
+    pub const DISPLAY_MASK: i64 = 0x100000;
+    /// The groups a manga row may carry (direction, undone, downloaded, bookmarked, sorting, display).
+    pub const MANGA_MASK: i64 =
+        SORT_DIR_MASK | UNDONE_MASK | DOWNLOADED_MASK | BOOKMARKED_MASK | SORTING_MASK | DISPLAY_MASK;
+}
+
+/// `entries.season_flags` (anime only), the `SEASON_*` constants of the old anime layout with the prefix dropped.
+pub mod season {
+    pub const SORT_DESC: i64 = 0x0;
+    pub const SORT_ASC: i64 = 0x1;
+    pub const SORT_DIR_MASK: i64 = 0x1;
+    pub const SHOW_DOWNLOADED: i64 = 0x2;
+    pub const SHOW_NOT_DOWNLOADED: i64 = 0x4;
+    pub const DOWNLOADED_MASK: i64 = 0x6;
+    pub const SHOW_UNSEEN: i64 = 0x8;
+    pub const SHOW_SEEN: i64 = 0x10;
+    pub const UNSEEN_MASK: i64 = 0x18;
+    pub const SHOW_STARTED: i64 = 0x20;
+    pub const SHOW_NOT_STARTED: i64 = 0x40;
+    pub const STARTED_MASK: i64 = 0x60;
+    pub const SHOW_COMPLETED: i64 = 0x80;
+    pub const SHOW_NOT_COMPLETED: i64 = 0x100;
+    pub const COMPLETED_MASK: i64 = 0x180;
+    pub const SHOW_BOOKMARKED: i64 = 0x200;
+    pub const SHOW_NOT_BOOKMARKED: i64 = 0x400;
+    pub const BOOKMARKED_MASK: i64 = 0x600;
+    pub const SHOW_FILLERMARKED: i64 = 0x800;
+    pub const SHOW_NOT_FILLERMARKED: i64 = 0x1000;
+    pub const FILLERMARKED_MASK: i64 = 0x1800;
+    pub const SORT_SOURCE: i64 = 0x0;
+    pub const SORT_SEASON: i64 = 0x2000;
+    pub const SORT_UPLOAD: i64 = 0x4000;
+    pub const SORT_ALPHABET: i64 = 0x6000;
+    pub const SORT_COUNT: i64 = 0x8000;
+    pub const SORT_LAST_SEEN: i64 = 0xA000;
+    pub const SORT_FETCHED: i64 = 0xC000;
+    pub const SORT_MASK: i64 = 0xE000;
+    pub const GRID_DISPLAY_MODE_SHIFT: i64 = 16;
+    pub const GRID_DISPLAY_MODE_MASK: i64 = 0x30000;
+    pub const GRID_DISPLAY_SIZE_SHIFT: i64 = 18;
+    pub const GRID_DISPLAY_SIZE_MASK: i64 = 0x3C0000;
+    pub const OVERLAY_DOWNLOADED_MASK: i64 = 0x400000;
+    pub const OVERLAY_UNSEEN_MASK: i64 = 0x800000;
+    pub const OVERLAY_LOCAL_MASK: i64 = 0x1000000;
+    pub const OVERLAY_LANG_MASK: i64 = 0x2000000;
+    pub const OVERLAY_CONT_MASK: i64 = 0x4000000;
+    pub const DISPLAY_MODE_SOURCE: i64 = 0x0;
+    pub const DISPLAY_MODE_NUMBER: i64 = 0x8000000;
+    pub const DISPLAY_MODE_MASK: i64 = 0x8000000;
 }
 
 /// `categories.flags`: the library sort of one category. The default is Alphabetical, Ascending.
@@ -120,20 +204,12 @@ pub mod library_sort {
     /// Flags of a stored sort such as `RANDOM,ASCENDING`. A string without a direction (including an
     /// empty one) gives the default, and an unknown type name gives Alphabetical.
     pub fn from_serialized(s: &str) -> i64 {
-        let mut parts = s.split(',');
-        let (Some(name), Some(direction)) = (parts.next(), parts.next()) else {
-            return DEFAULT;
-        };
-        let sort_type = NAMES.iter().find(|(n, _)| *n == name).map_or(ALPHABETICAL, |(_, t)| *t);
-        encode(sort_type, direction == "ASCENDING")
+        kuro_platform::sort::flags_from_text(kuro_platform::kind::Kind::Manga, s)
     }
 
     /// The stored string of a sort's flags, the inverse of [`from_serialized`].
     pub fn to_serialized(value: i64) -> String {
-        let t = sort_type(value);
-        let name = NAMES.iter().find(|(_, x)| *x == t).map_or("ALPHABETICAL", |(n, _)| n);
-        let direction = if is_ascending(value) { "ASCENDING" } else { "DESCENDING" };
-        format!("{name},{direction}")
+        kuro_platform::sort::text_from_flags(kuro_platform::kind::Kind::Manga, value)
     }
 }
 
@@ -175,6 +251,44 @@ pub mod viewer {
             ORIENTATION_REVERSE_PORTRAIT,
         ];
         if ORIENTATIONS.contains(&o) { o } else { ORIENTATION_DEFAULT }
+    }
+
+    /// The manga reader groups of `entries.viewer`.
+    pub mod manga {
+        pub use super::{
+            ORIENTATION_DEFAULT, ORIENTATION_FREE, ORIENTATION_LANDSCAPE, ORIENTATION_LOCKED_LANDSCAPE,
+            ORIENTATION_LOCKED_PORTRAIT, ORIENTATION_MASK, ORIENTATION_PORTRAIT, ORIENTATION_REVERSE_PORTRAIT,
+            MODE_CONTINUOUS_VERTICAL, MODE_DEFAULT, MODE_LEFT_TO_RIGHT, MODE_RIGHT_TO_LEFT, MODE_VERTICAL, MODE_WEBTOON,
+            READING_MODE_MASK, orientation, reading_mode,
+        };
+    }
+
+    /// The anime player groups of `entries.viewer`: skip-intro length, the next airing episode and its time.
+    pub mod anime {
+        pub const INTRO_MASK: i64 = 0xFF;
+        pub const AIRING_EPISODE_MASK: i64 = 0xFFFF00;
+        /// Bits 24 to 55 (Kotlin `0x0FFFFFFFF000000L`).
+        pub const AIRING_TIME_MASK: i64 = 0xFFFF_FFFF << 24;
+        pub const INTRO_DISABLE_MASK: i64 = 0x0100_0000_0000_0000;
+
+        /// Skip-intro length in seconds (`viewer & 0xFF`).
+        pub fn skip_intro_length(viewer: i64) -> i64 {
+            viewer & INTRO_MASK
+        }
+
+        /// Episode number of the next episode to air (`(viewer & 0xFFFF00) / 16^2`).
+        pub fn next_episode_to_air(viewer: i64) -> i64 {
+            (viewer & AIRING_EPISODE_MASK) >> 8
+        }
+
+        /// Airing time of the next episode, Unix seconds (`(viewer & 0x0FFFFFFFF000000) / 16^6`).
+        pub fn next_episode_airing_at(viewer: i64) -> i64 {
+            (viewer & AIRING_TIME_MASK) >> 24
+        }
+
+        pub fn skip_intro_disabled(viewer: i64) -> bool {
+            viewer & INTRO_DISABLE_MASK == INTRO_DISABLE_MASK
+        }
     }
 }
 
@@ -294,5 +408,33 @@ mod tests {
         assert_eq!(library_sort::from_serialized("RANDOM"), library_sort::DEFAULT, "no direction");
         assert_eq!(library_sort::to_serialized(library_sort::from_serialized("NOPE,ASCENDING")), "ALPHABETICAL,ASCENDING");
         assert_eq!(library_sort::to_serialized(library_sort::from_serialized("DATE_ADDED,OTHER")), "DATE_ADDED,DESCENDING");
+    }
+
+    #[test]
+    fn item_layout_is_the_anime_superset_and_manga_mask_is_its_manga_groups() {
+        assert_eq!(item::MANGA_MASK, 0x10_067F);
+        assert_eq!(item::SORTING_NUMBER, 0x200);
+        assert_eq!(item::SORTING_MASK, 0x600);
+        assert_eq!(item::SHOW_UNDONE | item::SHOW_DONE, item::UNDONE_MASK);
+        for (flag, mask) in [
+            (item::SHOW_NOT_DOWNLOADED, item::DOWNLOADED_MASK),
+            (item::SHOW_NOT_BOOKMARKED, item::BOOKMARKED_MASK),
+            (item::SHOW_NOT_FILLERMARKED, item::FILLERMARKED_MASK),
+            (item::SORTING_ALPHABET, item::SORTING_MASK),
+            (item::SHOW_NOT_PREVIEWS, item::PREVIEWS_MASK),
+            (item::SHOW_NOT_SUMMARIES, item::SUMMARIES_MASK),
+        ] {
+            assert_eq!(flag & !mask, 0);
+        }
+        // every manga-legal chapter_flags value lands inside MANGA_MASK
+        for x in 0..0x20_0000_i64 {
+            if x & !(0x7F | chapter::SORTING_MASK | chapter::DISPLAY_MASK) != 0 {
+                continue;
+            }
+            assert_eq!(manga_item_flags_to_unified(x) & !item::MANGA_MASK, 0, "{x:#x}");
+        }
+        assert_eq!(season::SORT_MASK, 0xE000);
+        assert_eq!(viewer::anime::INTRO_MASK, 0xFF);
+        assert_eq!(viewer::manga::MODE_WEBTOON, 4);
     }
 }

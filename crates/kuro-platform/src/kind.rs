@@ -31,6 +31,14 @@ impl Kind {
         self == Kind::Anime
     }
 
+    /// Upcoming statuses of the library's Upcoming view: manga `[1, 4]`, anime `[1, 4, 7]`.
+    pub const fn upcoming_statuses(self) -> &'static [i64] {
+        match self {
+            Kind::Manga => &[1, 4],
+            Kind::Anime => &[1, 4, 7],
+        }
+    }
+
     /// `Anime` when `anime` is true: for the places that still carry a flag.
     pub fn from_anime(anime: bool) -> Kind {
         if anime { Kind::Anime } else { Kind::Manga }
@@ -56,6 +64,8 @@ mod tests {
         assert_eq!(Kind::parse("novel"), None);
         assert_eq!(Kind::from_anime(true), Kind::Anime);
         assert_eq!(Kind::Manga.to_string(), "manga");
+        assert_eq!(Kind::Manga.upcoming_statuses(), &[1, 4]);
+        assert_eq!(Kind::Anime.upcoming_statuses(), &[1, 4, 7]);
         assert_eq!(serde_json::to_string(&Kind::Anime).unwrap(), "\"anime\"");
     }
 }

@@ -91,6 +91,7 @@ pub mod process;
 pub mod secrets;
 #[cfg(unix)]
 pub mod single_instance;
+pub mod sort;
 pub mod system;
 pub mod toast;
 pub mod webview;

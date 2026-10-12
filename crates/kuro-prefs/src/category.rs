@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 use crate::PrefError;
-use crate::library::{LibraryPrefs, SortSetting};
+use crate::library::LibraryPrefs;
 use crate::store::PrefStore;
 
 static RANDOM_SEEDS: [AtomicI32; 2] = [AtomicI32::new(0), AtomicI32::new(0)];
@@ -29,45 +29,68 @@ pub fn set_random_sort_seed(kind: Kind, seed: i32) {
     seed_slot(kind).store(seed, Ordering::Relaxed);
 }
 
-/// The five category-id sets of a kind: library update include and exclude, the remove-exclude set, and the
-/// download-new include and exclude sets. Manga's exclude set is cleaned too (EC-11).
-fn category_sets(kind: Kind) -> [&'static str; 5] {
+/// The six preference keys of one kind that hold category ids: the default category and the five id sets (library
+/// update include and exclude, remove-exclude, download-new include and exclude). The strings are the Kotlin key
+/// names, kept for backup parity. This is the ONE list: backup restore, domain and the importer read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CategoryKeys {
+    pub default: &'static str,
+    pub update: &'static str,
+    pub update_exclude: &'static str,
+    pub remove_exclude: &'static str,
+    pub download_new: &'static str,
+    pub download_new_exclude: &'static str,
+}
+
+/// The category-id keys of `kind`.
+pub const fn category_keys(kind: Kind) -> CategoryKeys {
     match kind {
-        Kind::Manga => [
-            "library_update_categories",
-            "library_update_categories_exclude",
-            "remove_exclude_categories",
-            "download_new_categories",
-            "download_new_categories_exclude",
-        ],
-        Kind::Anime => [
-            "animelib_update_categories",
-            "animelib_update_categories_exclude",
-            "remove_exclude_anime_categories",
-            "download_new_anime_categories",
-            "download_new_anime_categories_exclude",
-        ],
+        Kind::Manga => CategoryKeys {
+            default: "default_category",
+            update: "library_update_categories",
+            update_exclude: "library_update_categories_exclude",
+            remove_exclude: "remove_exclude_categories",
+            download_new: "download_new_categories",
+            download_new_exclude: "download_new_categories_exclude",
+        },
+        Kind::Anime => CategoryKeys {
+            default: "default_anime_category",
+            update: "animelib_update_categories",
+            update_exclude: "animelib_update_categories_exclude",
+            remove_exclude: "remove_exclude_anime_categories",
+            download_new: "download_new_anime_categories",
+            download_new_exclude: "download_new_anime_categories_exclude",
+        },
+    }
+}
+
+impl CategoryKeys {
+    /// The default-category key and the five set keys.
+    pub const fn all(&self) -> [&'static str; 6] {
+        [self.default, self.update, self.update_exclude, self.remove_exclude, self.download_new, self.download_new_exclude]
+    }
+
+    /// The five category-id sets (without the default). Manga's exclude set is cleaned too (EC-11).
+    pub const fn sets(&self) -> [&'static str; 5] {
+        [self.update, self.update_exclude, self.remove_exclude, self.download_new, self.download_new_exclude]
     }
 }
 
 /// The ten category-id preference sets of both kinds: the library update include and exclude sets, the
 /// remove-exclude set and the download-new include and exclude sets. Startup cleanup and backup restore walk them.
 pub fn category_id_set_keys() -> Vec<&'static str> {
-    category_sets(Kind::Manga).into_iter().chain(category_sets(Kind::Anime)).collect()
+    Kind::ALL.into_iter().flat_map(|kind| category_keys(kind).sets()).collect()
 }
 
 /// `DeleteMangaCategory` and `DeleteAnimeCategory`, preference side. The default category is reset when it
 /// is `id`, and `id` leaves each of the five category sets.
 pub fn forget_category(store: &PrefStore, lib: &LibraryPrefs, kind: Kind, id: i64) -> Result<(), PrefError> {
-    let default = match kind {
-        Kind::Manga => &lib.default_manga_category,
-        Kind::Anime => &lib.default_anime_category,
-    };
+    let default = lib.default_category(kind);
     if i64::from(default.get()) == id {
         default.delete()?;
     }
     let needle = id.to_string();
-    for key in category_sets(kind) {
+    for key in category_keys(kind).sets() {
         let set = store.pref::<BTreeSet<String>>(key, BTreeSet::new());
         let mut ids = set.get();
         if ids.remove(&needle) {
@@ -89,7 +112,7 @@ pub fn prune_dangling_category_ids(
     anime_ids: &BTreeSet<String>,
 ) -> Result<usize, PrefError> {
     let known = |id: &String| manga_ids.contains(id) || anime_ids.contains(id);
-    for default in [&lib.default_manga_category, &lib.default_anime_category] {
+    for default in Kind::ALL.map(|kind| lib.default_category(kind)) {
         let id = default.get();
         if default.is_set() && id != -1 && !known(&id.to_string()) {
             default.delete()?;
@@ -113,10 +136,7 @@ pub fn prune_dangling_category_ids(
 /// takes the change instead.
 pub fn write_sort_prefs(lib: &LibraryPrefs, kind: Kind, serialized_sort: &str, global: bool) -> Result<(), PrefError> {
     if global {
-        match kind {
-            Kind::Manga => lib.manga_sorting_mode.set(SortSetting(serialized_sort.to_owned()))?,
-            Kind::Anime => lib.anime_sorting_mode.set(SortSetting(serialized_sort.to_owned()))?,
-        }
+        lib.set_sorting_mode(kind, serialized_sort)?;
     }
     Ok(())
 }
@@ -143,15 +163,15 @@ mod tests {
     fn deleting_a_manga_category_removes_its_id_from_all_five_manga_sets() {
         let store = PrefStore::in_memory();
         let lib = LibraryPrefs::new(store.clone());
-        fill(&store, category_sets(Kind::Manga), &["5", "7"]);
-        fill(&store, category_sets(Kind::Anime), &["5"]);
+        fill(&store, category_keys(Kind::Manga).sets(), &["5", "7"]);
+        fill(&store, category_keys(Kind::Anime).sets(), &["5"]);
 
         forget_category(&store, &lib, Kind::Manga, 5).unwrap();
 
-        for key in category_sets(Kind::Manga) {
+        for key in category_keys(Kind::Manga).sets() {
             assert_eq!(set_of(&store, key), ids(&["7"]), "{key} lost the deleted id");
         }
-        for key in category_sets(Kind::Anime) {
+        for key in category_keys(Kind::Anime).sets() {
             assert_eq!(set_of(&store, key), ids(&["5"]), "{key} belongs to the other kind");
         }
     }
