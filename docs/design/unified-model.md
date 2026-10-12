@@ -806,3 +806,12 @@ opens in a step 3 build unchanged and a revert loses no data. Inside the step, e
 add code beside the old (revert = delete new files), C keeps the old domain names, D lanes are independent (a failed
 lane is reverted alone), E is the only irreversible-in-practice phase and runs last, after the full suite and the
 flows of 5.4 pass on the wrapper-backed tree.
+
+
+## 7. Added by the lead (2026-10-12, found in the user's library)
+
+**First sync is not an update.** When SyncItems inserts items into an entry that had none before, it stamps their
+date_fetch with the entry's date_added (not "now"), so the back catalogue never shows in Updates (updatesView keeps
+`date_fetch > date_added`). Today the result depends on timing: adding a title before its chapter list has loaded put
+all 1,195 One Piece chapters into Updates; adding after did not. Phase C implements it in the one SyncItems, with a test
+that adding before and after the first fetch both leave Updates empty, and that a later sync's new items do show.
