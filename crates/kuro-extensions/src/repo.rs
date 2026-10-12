@@ -19,6 +19,8 @@ use crate::anime::update::next_delay;
 pub const MAX_SOURCES_PER_KIND: usize = 10;
 /// The largest index or source file accepted. Both are small text files.
 pub const MAX_FILE_BYTES: usize = 1024 * 1024;
+/// The largest source icon accepted: a square PNG of about 192 px.
+pub const MAX_ICON_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -43,6 +45,12 @@ pub struct Entry {
     /// The hosts a plug-in may reach through the host's `http` import (`*.x` matches subdomains). Empty for a recipe.
     #[serde(default)]
     pub hosts: Vec<String>,
+    /// The https link of the source's square PNG icon, about 192 px. Optional: without one the row shows its letter tile.
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// The SHA-256 of the icon PNG, in hex. An icon is saved only when its bytes match this.
+    #[serde(rename = "iconSha256", default)]
+    pub icon_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,7 +69,7 @@ pub enum RepoError {
     BadId(String),
     #[error("the source {0:?} has a sha256 that is not 64 hex digits")]
     BadChecksum(String),
-    #[error("the source {0:?} has a file link that is not an https .toml or .wasm file")]
+    #[error("the source {0:?} has a link that is not an https .toml, .wasm or .png file")]
     BadLink(String),
     #[error("the repository link must be https")]
     BadRepoLink,
@@ -97,6 +105,12 @@ fn check(index: &Index) -> Result<(), RepoError> {
         }
         if !(entry.file.starts_with("https://") && (entry.file.ends_with(".toml") || entry.file.ends_with(".wasm"))) {
             return Err(RepoError::BadLink(entry.id.clone()));
+        }
+        if entry.icon.as_ref().is_some_and(|icon| !(icon.starts_with("https://") && icon.ends_with(".png"))) {
+            return Err(RepoError::BadLink(entry.id.clone()));
+        }
+        if entry.icon_sha256.as_ref().is_some_and(|sha| !is_sha256_hex(sha)) {
+            return Err(RepoError::BadChecksum(entry.id.clone()));
         }
         *per_kind.entry(entry.kind).or_default() += 1;
     }
@@ -193,6 +207,36 @@ pub async fn ensure_cached(client: &reqwest::Client, root: &Path, entry: &Entry)
     Ok(path)
 }
 
+/// Where a source's icon lives under `root`: `<id>.png` beside its file.
+pub fn cached_icon_path(root: &Path, entry: &Entry) -> PathBuf {
+    root.join(format!("{}.png", entry.id))
+}
+
+/// The saved icon of a source, when the source lists one and the saved bytes still match its `iconSha256`.
+pub fn read_icon(dir: &Path, entry: &Entry) -> Option<PathBuf> {
+    entry.icon.as_ref()?;
+    let want = entry.icon_sha256.as_deref()?;
+    let path = cached_icon_path(dir, entry);
+    let bytes = std::fs::read(&path).ok()?;
+    (sha256_hex(&bytes) == want.to_ascii_lowercase()).then_some(path)
+}
+
+/// Saves a source's icon under `root` once. A source without an icon or a checksum saves nothing. An icon whose bytes do
+/// not match is an error and leaves no file behind.
+async fn ensure_icon(client: &reqwest::Client, root: &Path, entry: &Entry) -> Result<(), RepoError> {
+    let (Some(url), Some(want)) = (&entry.icon, &entry.icon_sha256) else { return Ok(()) };
+    if read_icon(root, entry).is_some() {
+        return Ok(());
+    }
+    let path = cached_icon_path(root, entry);
+    let bytes = get_within(client, url, MAX_ICON_BYTES).await?;
+    if sha256_hex(&bytes) != want.to_ascii_lowercase() {
+        let _ = std::fs::remove_file(&path);
+        return Err(RepoError::Mismatch);
+    }
+    write_atomic(&path, &bytes).map_err(|e| RepoError::Write(e.to_string()))
+}
+
 /// The folder a link's copies live in: the SHA-256 of the link, so two links never share one.
 pub fn link_dir(root: &Path, link: &str) -> PathBuf {
     root.join(sha256_hex(link.as_bytes()))
@@ -224,6 +268,10 @@ pub async fn sync_link(client: &reqwest::Client, dir: &Path, link: &str) -> Resu
     let index = fetch_index(client, link).await?;
     for entry in &index.sources {
         ensure_cached(client, dir, entry).await?;
+        // an icon is only a picture: one that fails is logged and the repository is still added
+        if let Err(error) = ensure_icon(client, dir, entry).await {
+            tracing::warn!(id = entry.id.as_str(), %error, "a source icon could not be saved; the source shows its letter tile");
+        }
     }
     let text = serde_json::to_string(&index).map_err(|e| RepoError::Parse(e.to_string()))?;
     write_atomic(&dir.join(INDEX_FILE), text.as_bytes()).map_err(|e| RepoError::Write(e.to_string()))?;
@@ -246,17 +294,22 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 async fn get(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, RepoError> {
+    get_within(client, url, MAX_FILE_BYTES).await
+}
+
+/// Downloads `url`; an answer larger than `max` bytes is refused.
+async fn get_within(client: &reqwest::Client, url: &str, max: usize) -> Result<Vec<u8>, RepoError> {
     let mut response = client.get(url).send().await.map_err(|e| RepoError::Network(e.to_string()))?;
     let status = response.status();
     if !status.is_success() {
         return Err(RepoError::Status(status.as_u16()));
     }
-    if response.content_length().is_some_and(|n| n > MAX_FILE_BYTES as u64) {
+    if response.content_length().is_some_and(|n| n > max as u64) {
         return Err(RepoError::TooLarge);
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| RepoError::Network(e.to_string()))? {
-        if bytes.len() + chunk.len() > MAX_FILE_BYTES {
+        if bytes.len() + chunk.len() > max {
             return Err(RepoError::TooLarge);
         }
         bytes.extend_from_slice(&chunk);
@@ -426,5 +479,53 @@ mod tests {
         std::fs::write(&first, b"changed").expect("overwrite the copy");
         ensure_cached(&client, &root, &source).await.expect("fetched again");
         assert_eq!(std::fs::read(&first).expect("the copy"), b"abc");
+    }
+
+    /// An entry JSON with an icon link and its checksum added, as a published index writes them.
+    fn with_icon(entry: String, icon: &str, sha: &str) -> String {
+        format!(r#"{},"icon":"{icon}","iconSha256":"{sha}"}}"#, entry.trim_end_matches('}'))
+    }
+
+    #[test]
+    fn a_source_icon_is_read_with_or_without_its_link_and_checksum() {
+        let with = parse_index(&index_of(&[with_icon(entry("x", "manga", "en"), "https://raw.example/x.png", SHA_ABC)])).expect("valid icon");
+        assert_eq!(with.sources[0].icon.as_deref(), Some("https://raw.example/x.png"));
+        assert_eq!(with.sources[0].icon_sha256.as_deref(), Some(SHA_ABC));
+        let without = parse_index(&index_of(&[entry("y", "manga", "en")])).expect("an icon is optional");
+        assert_eq!((without.sources[0].icon.as_deref(), without.sources[0].icon_sha256.as_deref()), (None, None));
+        let plain = index_of(&[with_icon(entry("x", "manga", "en"), "http://raw.example/x.png", SHA_ABC)]);
+        assert_eq!(parse_index(&plain), Err(RepoError::BadLink("x".into())));
+        let jpg = index_of(&[with_icon(entry("x", "manga", "en"), "https://raw.example/x.jpg", SHA_ABC)]);
+        assert_eq!(parse_index(&jpg), Err(RepoError::BadLink("x".into())));
+        let short = index_of(&[with_icon(entry("x", "manga", "en"), "https://raw.example/x.png", "abc")]);
+        assert_eq!(parse_index(&short), Err(RepoError::BadChecksum("x".into())));
+    }
+
+    #[tokio::test]
+    async fn an_icon_is_saved_once_and_an_icon_with_a_bad_checksum_leaves_no_file() {
+        use wiremock::matchers::path;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        // one fetch: the second call finds the saved icon and does not ask again
+        Mock::given(path("/good.png"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"abc".to_vec()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(path("/bad.png")).respond_with(ResponseTemplate::new(200).set_body_bytes(b"xyz".to_vec())).mount(&server).await;
+        let client = reqwest::Client::new();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut good = parse_index(&index_of(&[with_icon(entry("ok", "manga", "en"), "https://raw.example/ok.png", SHA_ABC)])).expect("valid").sources.remove(0);
+        good.icon = Some(format!("{}/good.png", server.uri()));
+        ensure_icon(&client, dir.path(), &good).await.expect("saved");
+        ensure_icon(&client, dir.path(), &good).await.expect("kept");
+        assert_eq!(read_icon(dir.path(), &good), Some(cached_icon_path(dir.path(), &good)));
+
+        let mut bad = good.clone();
+        bad.id = "bad".into();
+        bad.icon = Some(format!("{}/bad.png", server.uri()));
+        assert_eq!(ensure_icon(&client, dir.path(), &bad).await, Err(RepoError::Mismatch));
+        assert!(!cached_icon_path(dir.path(), &bad).exists(), "a bad checksum leaves no file");
+        assert_eq!(read_icon(dir.path(), &bad), None);
     }
 }

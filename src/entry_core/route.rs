@@ -128,7 +128,8 @@ struct View {
     expansion: Rc<Cell<Expansion>>,
     ready_once: Cell<bool>,
     duplicate_open: Cell<bool>,
-    shown_header: RefCell<Option<HeaderModel>>,
+    /// The header on screen and the column width it was built for: either changing rebuilds it.
+    shown_header: RefCell<Option<(HeaderModel, i32)>>,
     /// What the description slot shows: the text and the genre chips under it.
     shown_description: RefCell<Option<(Description, Vec<GenreChip>)>>,
 }
@@ -864,11 +865,13 @@ impl View {
         } else {
             self.filter.remove_css_class("chapter-primary");
         }
-        if self.shown_header.borrow().as_ref() != Some(&model) {
+        // the cover is sized for its column, so a switch between the narrow and the two-pane layout rebuilds the header
+        // even when the manga did not change (it used to keep the wide narrow-layout size inside the 360 px pane)
+        let column = if large { LEFT_PANE_WIDTH } else { width };
+        if self.shown_header.borrow().as_ref().is_none_or(|(shown, at)| *shown != model || *at != column) {
             clear(&self.header_slot);
-            let column = if large { LEFT_PANE_WIDTH } else { width };
             self.header_slot.append(&header_view::build(&model, large, column, &self.handlers()));
-            *self.shown_header.borrow_mut() = Some(model);
+            *self.shown_header.borrow_mut() = Some((model, column));
         }
         let row = self.page.borrow().ready().map(|r| RowState {
             favorite: r.manga.favorite,

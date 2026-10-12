@@ -1,76 +1,101 @@
-# Kurobayomi
+<p align="center">
+  <img src="src/theme/icons/scalable/apps/io.github.anas1412.Kurobayomi.svg" width="96" alt="Kurobayomi logo">
+</p>
 
-A manga reader and anime player for the Linux desktop, written in Rust with GTK4 (no libadwaita, so your own GTK theme applies).
-It is a rewrite of [Aniyomi](https://github.com/aniyomiorg/aniyomi): same library, reader, player, sources and tracking model, built as a native app instead of an Android one.
+<h1 align="center">Kurobayomi</h1>
 
-The name is *kurobako* (黒箱, "black box") plus *-yomi* ("reading"), like Tachiyomi and Aniyomi.
+<p align="center">Watch anime and read manga on the Linux desktop.</p>
 
-![Kurobayomi mockup](docs/screenshot.png)
+Kurobayomi is a native desktop app, written in Rust with GTK4, that follows the model of
+[Aniyomi](https://github.com/aniyomiorg/aniyomi): a library, a reader, a video player, sources you add yourself, and
+progress tracking. It uses your GTK theme.
 
-## Status: early work in progress
+The name is *kurobako* (黒箱, "black box") plus *-yomi* ("reading").
 
-The window you see is a **mockup with placeholder data**. The real features are being built underneath it, crate by crate.
-The plan has about 3,800 tasks. Treat everything as unfinished.
+![The welcome screen](docs/images/getting-started/01-welcome.png)
 
-What exists today (library crates with tests, not yet wired to the screens):
-- preference store, databases (manga and anime SQLite schemas), repositories and domain rules
-- source API and an HTTP source layer, extension manager, local source
-- image pipeline and cover handling, archive (CBZ) reading
-- download queue, mpv-based player core
-- 67 mockup screens, sheets and dialogs that match Aniyomi's layout
+> **Status: early test version.** It runs, and the whole flow from adding a repository to watching or reading works, but
+> expect rough edges. There is no packaged release yet; see [Install](#install).
 
-What does not work yet: reading and playing from a real source, tracking, backups, downloads in the app.
+## What it does
 
-### Progress (audited 2026-10-11)
+- **Sources you add.** The app ships with no sources. Paste a repository link someone gave you and its sources appear
+  at once; there is nothing to install. Sources are small files (text recipes or sandboxed WASM plug-ins) that are
+  checked and updated every day.
+- **One search for everything.** Search all your sources at once from Browse.
+- **Anime player inside the app**, built on mpv: quality and server, subtitles and audio, speed, a Skip button for openings
+  and endings, and a full-screen mode that shows only the video. Your own `mpv.conf` and `input.conf` are honoured.
+- **Manga reader inside the app**: left to right by default, right to left or long strip per title, the next chapter
+  follows the last page.
+- **Library, Updates and History**, downloads for offline use, and AniList tracking (optional).
+- **Aniyomi and Tachiyomi backups** (`.tachibk`) restore into Kurobayomi, and `aniyomi://` / `tachiyomi://` repository
+  links open it.
 
-These states come from reading the code, not from running the app. The old percentages were estimates and are gone.
-The full list of what is left, in order of user impact, is in `docs/audit/LEFTOVERS.md`.
+<table>
+  <tr>
+    <td><img src="docs/images/getting-started/03-paste-link.png" alt="Adding a repository by link"></td>
+    <td><img src="docs/images/getting-started/07-source-titles.png" alt="A source's titles"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/getting-started/08-search.png" alt="Search across all sources"></td>
+    <td><img src="docs/images/getting-started/09-details.png" alt="A title's page with Start"></td>
+  </tr>
+</table>
 
-| Feature | What it means for you | State |
-|---|---|---|
-| Settings | Your choices are saved; eight pages | works; cut keys still registered; the Player page still shows Custom buttons and Script editor |
-| Databases and library | Library, chapters, episodes and history are stored on disk | works in code; an empty database at start is not tested |
-| Manga reader | Open a chapter, page through it, slider, per-manga direction | works in code; not checked in a window |
-| Video player | Play, audio, subtitle and quality menus, mpv config files | works in code; not run |
-| Manga downloads | Save chapters for offline reading | partial: queue page and notifications exist, the details page buttons do nothing |
-| Anime downloads | Save episodes for offline watching | partial; not run |
-| Backup and restore | Export and import, including Aniyomi backups | works in code; not run |
-| Palettes | Theme choice | partial: the UI offers System, Light and Dark, but the palette code is still in the build |
-| Data saver and detach | Removed | removed on 2026-10-11 |
-| Sources, browse, network, covers, local files, trackers | Not audited in this pass | see the older audit files in `docs/audit/` |
+<sub>Cover art and site names are blurred in these screenshots.</sub>
 
-## Sources
+## Getting started
 
-Like Aniyomi, the app ships with no online sources. You add a source repository by link and install sources from it.
-The local source (files on your computer) is built in.
+The step-by-step guide, with screenshots, is in **[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)**. In short:
 
-## Build and run
+1. Open the app and click **Add a source repository**.
+2. Paste the repository link.
+3. Search in **Browse**, open a title, click **Start**.
 
-Needs a recent stable Rust, GTK 4.14 or newer, and libmpv.
+Downloads and backups go to `~/Videos/Kurobayomi` unless you pick another folder in Settings.
+
+## Sources and repositories
+
+Kurobayomi does not host, list or recommend any content or website. A repository is a link to an `index.min.json` file
+that lists sources; anyone can publish one. The format, the plug-in interface and an example repository are in
+[kurobayomi-extensions](https://github.com/anas1412/kurobayomi-extensions).
+
+## Install
+
+A Flatpak is planned and comes first; an AppImage built by CI will follow. Until then, build it from source.
+
+You need a recent stable Rust, GTK 4.14 or newer, and libmpv (on Arch: `pacman -S gtk4 mpv`; on Fedora:
+`dnf install gtk4-devel mpv-libs-devel`; on Ubuntu 24.04: `apt install libgtk-4-dev libmpv-dev`).
 
 ```bash
-cargo run                      # the mockup window
-cargo run -- --version         # prints the version and exits
-cargo test --workspace         # all crate tests
+git clone https://github.com/anas1412/kurobayomi.git
+cd kurobayomi
+cargo build --release
+./target/release/kurobayomi
 ```
 
-Developer switches for the mockup: `KUROBAYOMI_OPEN=<screen id>`, `KUROBAYOMI_SIZE=WxH`, `KUROBAYOMI_SMOKE=1` (opens every screen once and exits).
+## For developers
 
-## Layout
+```bash
+cargo run                      # run the app
+cargo test --workspace         # all tests
+```
+
+Developer switches: `KUROBAYOMI_SIZE=WxH` (window size), `KUROBAYOMI_OPEN=<screen id>` (open a screen at start),
+`KUROBAYOMI_SHOT=file.png` (render the window to a PNG and quit), `KUROBAYOMI_SHOT_DIR=dir` (create `dir/take` to save
+every open window as a PNG; used for the guide's screenshots).
 
 | Path | What it is |
 |---|---|
-| `src/` | the GTK4 window (mockup) |
-| `crates/kuro-core` | shared helpers, logging, crash reports, image and storage utilities |
+| `src/` | the GTK4 app: screens, player and reader views |
 | `crates/kuro-platform` | all OS-specific code (paths, secrets), so a Windows port stays possible |
-| `crates/kuro-prefs`, `kuro-db`, `kuro-data`, `kuro-domain` | preferences, databases, repositories, domain logic |
-| `crates/kuro-source*`, `kuro-extensions`, `kuro-net` | sources, extension manager, HTTP |
-| `crates/kuro-local`, `kuro-archive`, `kuro-images`, `kuro-downloads`, `kuro-player` | local files, CBZ, images, downloads, mpv player |
-| `plans/` | the full port plan: per-area docs, catalogs, roadmap and the task list |
-| `spec/` | screen definitions extracted from Aniyomi's UI |
-
-Start with `plans/00-INDEX.md` for the plan and `plans/ROADMAP.md` for the order of work.
+| `crates/kuro-prefs`, `kuro-db`, `kuro-data`, `kuro-domain` | settings, databases, repositories, domain rules |
+| `crates/kuro-extensions`, `kuro-source*`, `kuro-net` | repositories, the recipe engine, the WASM plug-in host, HTTP |
+| `crates/kuro-player`, `kuro-downloads`, `kuro-images`, `kuro-local`, `kuro-archive` | mpv player, downloads, images, local files, CBZ |
+| `crates/kuro-backup`, `kuro-track` | backups (Aniyomi compatible), AniList tracking |
+| `docs/` | the user guide, design notes and audits |
 
 ## Licence
 
-Apache License 2.0, see `LICENSE`. Kurobayomi is derived from Aniyomi, Mihon and Tachiyomi, which use the same licence; see `NOTICE`.
+Apache License 2.0, see [LICENSE](LICENSE). Kurobayomi is derived from Aniyomi, Mihon and Tachiyomi, which use the same
+licence; see [NOTICE](NOTICE).

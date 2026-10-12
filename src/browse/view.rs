@@ -5,6 +5,7 @@ use gtk::{Align, Box as GBox, Button, Image, Label, Orientation as O, Spinner};
 use kuro_prefs::library::LibraryDisplayMode;
 use kuro_i18n::tr;
 
+use std::path::Path;
 use std::rc::Rc;
 
 use super::grid::{CELL_MARGIN_PX, LIST_COVER_PX, badge_visible, cell_alpha};
@@ -146,6 +147,18 @@ fn texture_of(width: u32, height: u32, rgba: &[u8]) -> gtk::gdk::MemoryTexture {
     )
 }
 
+/// The saved PNG icon of a repo source: 40 px square and cover-fitted, with the letter tile's rounded corners.
+pub fn repo_picture(path: &Path) -> gtk::Image {
+    // an Image at a fixed pixel size: a Picture would ask for the file's own size (192 px) and stretch the row
+    let image = gtk::Image::from_file(path);
+    image.set_pixel_size(ICON_HEIGHT_PX);
+    image.add_css_class("kb-row-cover");
+    image.set_overflow(gtk::Overflow::Hidden);
+    image.set_halign(Align::Start);
+    image.set_valign(Align::Center);
+    image
+}
+
 /// A source row: a 40 px icon, the name on one line with ellipsis, the language when shown, "Not installed" in the
 /// error colour for a stub, and an action slot.
 pub fn source_row(
@@ -156,16 +169,19 @@ pub fn source_row(
     stub: bool,
     action: Option<&gtk::Widget>,
 ) -> GBox {
-    source_row_with(name, language, icon, icon_file, stub, false, action)
+    source_row_with(name, language, icon, icon_file, None, stub, false, action)
 }
 
-/// [`source_row`] for the Sources lists: `failing` adds the "Not working right now" line of a source that failed
-/// several times in a row (`errors::is_failing`).
+/// [`source_row`] for the Sources lists: `picture` is the saved icon of a repo source, shown in place of the letter tile;
+/// `failing` adds the "Not working right now" line of a source that failed several times in a row
+/// (`errors::is_failing`).
+#[allow(clippy::too_many_arguments)]
 pub fn source_row_with(
     name: &str,
     language: Option<&str>,
     icon: SourceIcon,
     icon_file: Option<&str>,
+    picture: Option<&Path>,
     stub: bool,
     failing: bool,
     action: Option<&gtk::Widget>,
@@ -176,7 +192,9 @@ pub fn source_row_with(
     row.set_margin_end(8);
     row.set_margin_top(8);
     row.set_margin_bottom(8);
-    if icon == SourceIcon::Letter && icon_file.is_none() {
+    if let Some(path) = picture {
+        row.append(&repo_picture(path));
+    } else if icon == SourceIcon::Letter && icon_file.is_none() {
         row.append(&super::look::row_cover(name, None, ICON_HEIGHT_PX, ICON_HEIGHT_PX));
     } else {
         row.append(&icon_image(icon, icon_file));
@@ -471,6 +489,19 @@ pub(crate) mod tests {
             assert_eq!(tile.first_child().and_downcast::<Label>().expect("the letter").label(), "M");
             let plain = source_row("Local", None, SourceIcon::Local, None, false, None);
             assert!(plain.first_child().is_some_and(|w| w.is::<Image>()));
+        });
+    }
+
+    #[test]
+    fn a_repo_source_with_a_saved_icon_shows_that_picture_in_place_of_the_letter_tile() {
+        crate::testing::with_display(|| {
+            let dir = tempfile::tempdir().expect("dir");
+            let file = dir.path().join("icon.png");
+            image::RgbaImage::from_pixel(2, 2, image::Rgba([1, 2, 3, 255])).save(&file).expect("a png");
+            let row = source_row_with("Repo", None, SourceIcon::Letter, None, Some(&file), false, false, None);
+            let picture = row.first_child().and_downcast::<gtk::Image>().expect("the saved icon");
+            assert!(picture.has_css_class("kb-row-cover"), "the letter tile's rounded corners");
+            assert_eq!(picture.pixel_size(), ICON_HEIGHT_PX);
         });
     }
 

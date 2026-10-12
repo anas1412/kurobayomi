@@ -265,6 +265,12 @@ mod tests {
     }
 
     #[test]
+    fn a_source_without_a_saved_repo_icon_has_no_picture_and_keeps_the_letter_tile() {
+        assert_eq!(crate::recipe_sources::icon_path(-1), None, "no repo source has this id");
+        assert_eq!(resolve(false, false, false), SourceIcon::Letter);
+    }
+
+    #[test]
     fn an_http_value_is_a_url_and_anything_else_is_a_file() {
         assert_eq!(icon_ref("https://x.test/icon.png"), IconRef::Url("https://x.test/icon.png"));
         assert_eq!(icon_ref("http://x.test/icon.png"), IconRef::Url("http://x.test/icon.png"));

@@ -170,7 +170,8 @@ impl Inner {
         }
 
         let language = language_line(section, &source);
-        let row = source_row_with(&source.name, language.as_deref(), icon, file.as_deref(), source.is_stub, crate::browse::errors::is_failing(source.id), Some(actions.upcast_ref()));
+        let picture = crate::recipe_sources::icon_path(source.id);
+        let row = source_row_with(&source.name, language.as_deref(), icon, file.as_deref(), picture.as_deref(), source.is_stub, crate::browse::errors::is_failing(source.id), Some(actions.upcast_ref()));
         let (open, id) = (Rc::downgrade(self), source.id);
         list_row(
             &row,
