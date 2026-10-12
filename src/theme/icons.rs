@@ -522,11 +522,11 @@ mod tests {
         }
     }
 
-    /// T-49ba-017: the full-colour app icon (黒箱 on a dark tile) keeps its three colours.
+    /// T-49ba-017: the full-colour app icon (黒箱 in white on a black box) keeps its colours.
     #[test]
     fn app_icon_keeps_the_launcher_colours() {
         let text = std::fs::read_to_string(icon_file("scalable/apps/io.github.anas1412.Kurobayomi.svg")).expect("svg");
-        for colour in ["#141414", "#ffffff", "#e5484d"] {
+        for colour in ["#101012", "#ffffff"] {
             assert!(text.contains(&format!("fill=\"{colour}\"")), "missing {colour}");
         }
         assert!(!text.contains("#bebebe"));
