@@ -4,37 +4,43 @@
 //! only; the database keeps its title until a later update writes it.
 
 use kuro_data::anime::{Anime, AnimeRepo};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_data::legacy::{LegacyEntry, LegacyRepo};
 use kuro_data::manga::{Manga, MangaRepo};
 use kuro_data::{DataResult, LookupOrInsert};
 
-/// `NetworkToLocalManga.await(manga)`.
-pub fn network_to_local_manga(repo: &MangaRepo, manga: &Manga) -> DataResult<Manga> {
-    Ok(match repo.lookup_or_insert(manga)? {
-        LookupOrInsert::Inserted(id) => Manga {
-            id,
-            ..manga.clone()
-        },
-        LookupOrInsert::Found(local) if !local.favorite => Manga {
-            title: manga.title.clone(),
-            ..local
-        },
+/// The entry a lookup-or-insert stands for: the new row with its id, the stored row, or, for a stored non-favourite, the
+/// stored row with the listing's title (in memory only).
+fn resolve(new: &Entry, found: LookupOrInsert<Entry>) -> Entry {
+    match found {
+        LookupOrInsert::Inserted(id) => Entry { id, ..new.clone() },
+        LookupOrInsert::Found(local) if !local.favorite => Entry { title: new.title.clone(), ..local },
         LookupOrInsert::Found(local) => local,
-    })
+    }
 }
 
-/// `NetworkToLocalAnime.await(anime)`. The Kotlin variant's unused `sourceManager` is not carried over.
+/// `NetworkToLocalManga.await` and `NetworkToLocalAnime.await`: the one path.
+pub fn network_to_local(repo: &EntryRepo, e: &Entry) -> DataResult<Entry> {
+    Ok(resolve(e, repo.lookup_or_insert(e)?))
+}
+
+/// [`network_to_local`] over a legacy repository: same rule, through the old shape.
+fn network_to_local_legacy<T: LegacyEntry>(repo: &LegacyRepo<T>, shape: &T) -> DataResult<T> {
+    let found = match repo.lookup_or_insert(shape)? {
+        LookupOrInsert::Inserted(id) => LookupOrInsert::Inserted(id),
+        LookupOrInsert::Found(local) => LookupOrInsert::Found(local.to_entry()),
+    };
+    Ok(resolve(&shape.to_entry(), found).into())
+}
+
+/// `NetworkToLocalManga.await(manga)`.
+pub fn network_to_local_manga(repo: &MangaRepo, manga: &Manga) -> DataResult<Manga> {
+    network_to_local_legacy(repo, manga)
+}
+
+/// `NetworkToLocalAnime.await(anime)`.
 pub fn network_to_local_anime(repo: &AnimeRepo, anime: &Anime) -> DataResult<Anime> {
-    Ok(match repo.lookup_or_insert(anime)? {
-        LookupOrInsert::Inserted(id) => Anime {
-            id,
-            ..anime.clone()
-        },
-        LookupOrInsert::Found(local) if !local.favorite => Anime {
-            title: anime.title.clone(),
-            ..local
-        },
-        LookupOrInsert::Found(local) => local,
-    })
+    network_to_local_legacy(repo, anime)
 }
 
 #[cfg(test)]

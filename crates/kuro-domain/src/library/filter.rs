@@ -10,7 +10,7 @@ use super::model::LibraryRow;
 use crate::flags::{TriState, apply_filter};
 
 /// `SManga.COMPLETED` (and `SAnime.COMPLETED`).
-pub const COMPLETED_STATUS: i64 = 2;
+pub use crate::entries::flags::STATUS_COMPLETED as COMPLETED_STATUS;
 
 /// The filter preferences of one kind, already read from `LibraryPrefs`.
 #[derive(Clone, Debug, PartialEq, Eq)]

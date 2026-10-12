@@ -2,17 +2,54 @@
 //! settings" action. Each sets `viewer` to 0 on every row. For anime that also clears the skip-intro length, the
 //! skip-intro disable bit and the airing data, which all live in `viewer_flags`.
 
-use kuro_data::anime::AnimeRepo;
+use kuro_data::DataResult;
 use kuro_data::compat;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_platform::kind::Kind;
 
-/// `resetMangaViewerFlags`: `true` when the write succeeded. A failure is logged and reported as `false`.
-pub fn reset_viewer_flags_manga(repo: &MangaRepo) -> bool {
+use super::store::EntryFlagStore;
+
+pub use super::flags::{READING_MODE_MASK, airing_bits, effective_intro_length, skip_intro_bits};
+
+/// `Manga::reading_mode()`: the reading-mode bits of a manga `viewer` word, raw. Unknown values are the caller's to map.
+pub fn reading_mode(viewer: i64) -> i64 {
+    viewer & READING_MODE_MASK
+}
+
+/// `resetViewerFlags`: `viewer = 0` on every entry of the kind. `true` when the write succeeded; a failure is logged and
+/// reported as `false`. For anime that also clears the skip-intro length, its disable bit and the airing data.
+pub fn reset_viewer_flags(repo: &EntryRepo, kind: Kind) -> bool {
+    compat::reset_viewer_flags(repo, kind)
+}
+
+/// `awaitSetReadingMode`. Only bits 0-2 change; `flag` is masked. A missing entry gives `Ok(false)` (EC-24).
+pub fn set_reading_mode(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
+    repo.set_viewer_bits(id, flag, READING_MODE_MASK)
+}
+
+/// `awaitSetSkipIntroLength`: the length goes in its eight bits (`length and 0xFF`, EC-21: 300 stores 44). A masked zero
+/// sets the disable bit and clears the length; any other length clears the disable bit.
+pub fn set_skip_intro_length(repo: &impl EntryFlagStore, id: i64, length: i64) -> DataResult<bool> {
+    let (value, mask) = skip_intro_bits(length);
+    repo.set_viewer_bits(id, value, mask)
+}
+
+/// `awaitSetNextEpisodeAiring`: the episode (16 bits) and the airing time (32 bits) are written in one statement, so two
+/// setters on one entry never lose each other's bits (EC-23). `(0, 0)` clears both (EC-22).
+pub fn set_next_episode_airing(repo: &impl EntryFlagStore, id: i64, episode: i64, airing_at: i64) -> DataResult<bool> {
+    let (value, mask) = airing_bits(episode, airing_at);
+    repo.set_viewer_bits(id, value, mask)
+}
+
+// ----- the old per-kind names (phase E deletes them) -----
+
+/// `resetMangaViewerFlags`.
+pub fn reset_viewer_flags_manga(repo: &kuro_data::manga::MangaRepo) -> bool {
     compat::reset_manga_viewer_flags(repo)
 }
 
-/// `resetAnimeViewerFlags`: `true` when the write succeeded. A failure is logged and reported as `false`.
-pub fn reset_viewer_flags_anime(repo: &AnimeRepo) -> bool {
+/// `resetAnimeViewerFlags`.
+pub fn reset_viewer_flags_anime(repo: &kuro_data::anime::AnimeRepo) -> bool {
     compat::reset_anime_viewer_flags(repo)
 }
 

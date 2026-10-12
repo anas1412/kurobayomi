@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use tokio::sync::Mutex as AsyncMutex;
-use kuro_data::anime::{Anime, AnimeRepo, AnimeUpdate, SeasonAnime};
+use kuro_data::anime::{Anime, AnimeRepo, SeasonAnime};
+use kuro_data::entry::{Entry, EntryRepo, EntryUpdate};
 use kuro_data::episode::{Episode, EpisodeRepo};
 use kuro_db::handle::Db;
 use kuro_source::SourceError;
@@ -19,6 +20,8 @@ use kuro_source::anime::{AnimeSource, AnimeStatus, SAnime, SAnimeEpisodeUpdate, 
 
 use crate::error::{DomainError, NoEpisodes, NoSeasons};
 use crate::app::source::LOCAL_SOURCE_ID;
+use crate::entries::update::{CacheFiles as EntryCacheFiles, prepare_update, remote_from_anime};
+pub use crate::entries::update::CacheAction;
 use crate::source::model::Id;
 
 /// Which parts of the remote data to fetch, and the window and manual flags (`awaitEpisodesUpdate` and
@@ -172,7 +175,7 @@ pub trait RemoteStore: Send + Sync {
     fn episodes(&self, anime_id: i64) -> Result<Vec<Episode>, DomainError>;
     fn seasons(&self, parent_id: i64) -> Result<Vec<SeasonAnime>, DomainError>;
     /// Writes the metadata. An error stops the update before the list sync (E-S4).
-    fn update_anime(&self, update: &AnimeUpdate) -> Result<(), DomainError>;
+    fn update_entry(&self, update: &EntryUpdate) -> Result<(), DomainError>;
 }
 
 /// The cover and background files of an entry (`AnimeCoverCache`, `AnimeBackgroundCache`). Area 34 owns the files.
@@ -183,135 +186,22 @@ pub trait CacheFiles: Send + Sync {
     fn delete_background(&self, anime: &Anime);
 }
 
-/// What to do with a cached image and its timestamp (`CacheAction`, area 17 section 9).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CacheAction {
-    /// Keep the image and the timestamp.
-    Keep,
-    /// Keep the image, write the timestamp.
-    Set(i64),
-    /// Delete the cached image, keep the timestamp.
-    DeleteCacheThenKeep,
-    /// Delete the cached image, write the timestamp.
-    DeleteCacheThenSet(i64),
-}
+/// A legacy [`CacheFiles`] as the shared [`EntryCacheFiles`] port: the entry becomes the old anime shape.
+struct EntryFiles<'a>(&'a dyn CacheFiles);
 
-impl CacheAction {
-    /// The value for `*_last_modified`: `None` keeps the stored value.
-    pub fn last_modified(self) -> Option<i64> {
-        match self {
-            Self::Keep | Self::DeleteCacheThenKeep => None,
-            Self::Set(now) | Self::DeleteCacheThenSet(now) => Some(now),
-        }
+impl EntryCacheFiles for EntryFiles<'_> {
+    fn has_custom_cover(&self, e: &Entry) -> bool {
+        self.0.has_custom_cover(&Anime::from(e.clone()))
     }
-
-    /// True when the cached file must be deleted before the write.
-    pub fn deletes(self) -> bool {
-        matches!(self, Self::DeleteCacheThenKeep | Self::DeleteCacheThenSet(_))
+    fn has_custom_background(&self, e: &Entry) -> bool {
+        self.0.has_custom_background(&Anime::from(e.clone()))
     }
-}
-
-/// The 5-row rule shared by covers and backgrounds (`UpdateAnimeFromRemote.kt:142-191`). `stored_url` is the local
-/// thumbnail or background URL; `has_custom` is asked whenever row 4 is reached, including for a null stored URL (E-R7).
-/// A null stored URL has no cached file to delete, so with no custom file only the timestamp is written.
-fn image_action(
-    stored_url: Option<&str>,
-    is_local: bool,
-    remote_url: Option<&str>,
-    manual: bool,
-    has_custom: impl FnOnce() -> bool,
-    now_ms: i64,
-) -> CacheAction {
-    let Some(remote) = remote_url.filter(|url| !url.is_empty()) else {
-        return CacheAction::Keep;
-    };
-    if !manual && stored_url == Some(remote) {
-        return CacheAction::Keep;
+    fn delete_cover(&self, e: &Entry) {
+        self.0.delete_cover(&Anime::from(e.clone()));
     }
-    if is_local {
-        return CacheAction::Set(now_ms);
+    fn delete_background(&self, e: &Entry) {
+        self.0.delete_background(&Anime::from(e.clone()));
     }
-    if has_custom() {
-        return CacheAction::DeleteCacheThenKeep;
-    }
-    if stored_url.is_none() {
-        CacheAction::Set(now_ms)
-    } else {
-        CacheAction::DeleteCacheThenSet(now_ms)
-    }
-}
-
-/// The cover rule (`p1-topic-remote-entry-update.md` 5.2, vectors E-R1 to E-R7). `has_custom` answers whether the
-/// stored entry has a custom cover file.
-pub fn cover_last_modified(
-    local: &Anime,
-    remote_thumb: Option<&str>,
-    manual: bool,
-    has_custom: impl FnOnce() -> bool,
-    now_ms: i64,
-) -> CacheAction {
-    image_action(
-        local.thumbnail_url.as_deref(),
-        local.source == LOCAL_SOURCE_ID,
-        remote_thumb,
-        manual,
-        has_custom,
-        now_ms,
-    )
-}
-
-/// The background rule: the cover rule over the background URL (`p1-topic-remote-entry-update.md` 5.3).
-pub fn background_last_modified(
-    local: &Anime,
-    remote_bg: Option<&str>,
-    manual: bool,
-    has_custom: impl FnOnce() -> bool,
-    now_ms: i64,
-) -> CacheAction {
-    image_action(
-        local.background_url.as_deref(),
-        local.source == LOCAL_SOURCE_ID,
-        remote_bg,
-        manual,
-        has_custom,
-        now_ms,
-    )
-}
-
-/// The title rule (E-T1 to E-T3): the remote title, only for a non-favourite and only when it is not empty.
-pub fn title_update(local: &Anime, remote_title: Option<&str>) -> Option<String> {
-    remote_title.filter(|title| !title.is_empty()).filter(|_| !local.favorite).map(str::to_owned)
-}
-
-/// The metadata write of a remote update (`awaitUpdateFromSource`). A `None` field keeps the stored value. An empty
-/// thumbnail or background URL is never written (E-U8). `initialized` is always set (E-U10).
-pub fn metadata_update(
-    local: &Anime,
-    remote: &SAnime,
-    title: Option<String>,
-    cover: CacheAction,
-    background: CacheAction,
-) -> AnimeUpdate {
-    AnimeUpdate {
-        title,
-        cover_last_modified: cover.last_modified(),
-        background_last_modified: background.last_modified(),
-        author: remote.author.clone(),
-        artist: remote.artist.clone(),
-        description: remote.description.clone(),
-        genre: remote.genres(),
-        thumbnail_url: non_empty(remote.thumbnail_url.as_deref()),
-        background_url: non_empty(remote.background_url.as_deref()),
-        status: Some(i64::from(remote.status.to_i32())),
-        update_strategy: Some(crate::entries::source_convert::to_db_strategy(remote.update_strategy)),
-        initialized: Some(true),
-        memo: Some(remote.memo.clone()),
-        ..AnimeUpdate::new(local.id)
-    }
-}
-
-fn non_empty(value: Option<&str>) -> Option<String> {
-    value.filter(|text| !text.is_empty()).map(str::to_owned)
 }
 
 /// The source view of a stored anime (`Anime.toSAnime`).
@@ -353,11 +243,12 @@ pub fn to_s_episode(episode: &Episode) -> SEpisode {
 pub struct DbRemoteStore {
     anime: AnimeRepo,
     episodes: EpisodeRepo,
+    entries: EntryRepo,
 }
 
 impl DbRemoteStore {
     pub fn new(db: Arc<Db>) -> Self {
-        Self { anime: AnimeRepo::new(db.clone()), episodes: EpisodeRepo::new(db) }
+        Self { anime: AnimeRepo::new(db.clone()), episodes: EpisodeRepo::new(db.clone()), entries: EntryRepo::new(db) }
     }
 }
 
@@ -371,8 +262,8 @@ impl RemoteStore for DbRemoteStore {
     fn seasons(&self, parent_id: i64) -> Result<Vec<SeasonAnime>, DomainError> {
         Ok(self.anime.seasons_by_parent(parent_id)?)
     }
-    fn update_anime(&self, update: &AnimeUpdate) -> Result<(), DomainError> {
-        Ok(self.anime.update(update)?)
+    fn update_entry(&self, update: &EntryUpdate) -> Result<(), DomainError> {
+        Ok(self.entries.update(update)?)
     }
 }
 
@@ -488,30 +379,9 @@ impl UpdateFromRemote {
     /// `awaitUpdateFromSource`: decides the cache actions, deletes the files they name, then writes the metadata. A
     /// failed write is an error, so the list sync does not run (E-S4, the documented difference from Kotlin).
     fn apply_metadata(&self, local: &Anime, remote: &SAnime, manual: bool) -> Result<(), RemoteError> {
-        let now = (self.now_ms)();
-        let title = title_update(local, Some(remote.title.as_str()));
-        let cover = cover_last_modified(
-            local,
-            remote.thumbnail_url.as_deref(),
-            manual,
-            || self.files.has_custom_cover(local),
-            now,
-        );
-        let background = background_last_modified(
-            local,
-            remote.background_url.as_deref(),
-            manual,
-            || self.files.has_custom_background(local),
-            now,
-        );
-        if cover.deletes() {
-            self.files.delete_cover(local);
-        }
-        if background.deletes() {
-            self.files.delete_background(local);
-        }
-        let update = metadata_update(local, remote, title, cover, background);
-        self.store.update_anime(&update).map_err(RemoteError::Db)
+        let files = EntryFiles(self.files.as_ref());
+        let update = prepare_update(&Entry::from(local), &remote_from_anime(remote), manual, &files, (self.now_ms)());
+        self.store.update_entry(&update).map_err(RemoteError::Db)
     }
 }
 
@@ -526,139 +396,6 @@ fn log_failure<T>(result: &Result<T, RemoteError>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn local(source: i64, thumb: Option<&str>, bg: Option<&str>, favorite: bool) -> Anime {
-        let mut anime = Anime::create();
-        anime.id = 5;
-        anime.source = source;
-        anime.thumbnail_url = thumb.map(str::to_owned);
-        anime.background_url = bg.map(str::to_owned);
-        anime.favorite = favorite;
-        anime
-    }
-
-    const NOW: i64 = 1_700_000_000_123;
-
-    #[test]
-    fn e_r1_an_empty_remote_thumbnail_keeps_everything() {
-        let anime = local(7, Some("a"), None, false);
-        assert_eq!(cover_last_modified(&anime, Some(""), false, || true, NOW), CacheAction::Keep);
-        assert_eq!(cover_last_modified(&anime, None, true, || true, NOW), CacheAction::Keep);
-    }
-
-    #[test]
-    fn e_r2_an_unchanged_thumbnail_keeps_everything_when_not_manual() {
-        let anime = local(7, Some("b"), None, false);
-        assert_eq!(cover_last_modified(&anime, Some("b"), false, || false, NOW), CacheAction::Keep);
-    }
-
-    #[test]
-    fn e_r3_a_manual_fetch_rewrites_the_timestamp_and_deletes_the_non_custom_cover() {
-        let anime = local(7, Some("b"), None, false);
-        assert_eq!(cover_last_modified(&anime, Some("b"), true, || false, NOW), CacheAction::DeleteCacheThenSet(NOW));
-    }
-
-    #[test]
-    fn e_r4_a_local_source_sets_the_timestamp_and_deletes_nothing() {
-        let anime = local(LOCAL_SOURCE_ID, Some("a"), None, false);
-        assert_eq!(cover_last_modified(&anime, Some("b"), false, || true, NOW), CacheAction::Set(NOW));
-    }
-
-    #[test]
-    fn e_r5_a_custom_cover_is_deleted_but_the_timestamp_is_kept() {
-        let anime = local(7, Some("a"), None, false);
-        assert_eq!(cover_last_modified(&anime, Some("b"), false, || true, NOW), CacheAction::DeleteCacheThenKeep);
-    }
-
-    #[test]
-    fn e_r6_a_new_thumbnail_without_custom_cover_deletes_and_sets() {
-        let anime = local(7, Some("a"), None, false);
-        assert_eq!(cover_last_modified(&anime, Some("b"), false, || false, NOW), CacheAction::DeleteCacheThenSet(NOW));
-    }
-
-    #[test]
-    fn e_r7_a_null_local_url_sets_the_timestamp_and_deletes_nothing_without_a_custom_cover() {
-        let anime = local(7, None, None, false);
-        let action = cover_last_modified(&anime, Some("b"), false, || false, NOW);
-        assert_eq!(action, CacheAction::Set(NOW));
-        assert!(!action.deletes());
-    }
-
-    #[test]
-    fn e_r7_a_null_local_url_with_a_custom_cover_keeps_the_timestamp_and_asks_the_file() {
-        let anime = local(7, None, None, false);
-        assert_eq!(cover_last_modified(&anime, Some("b"), false, || true, NOW), CacheAction::DeleteCacheThenKeep);
-    }
-
-    #[test]
-    fn the_background_rule_is_the_cover_rule_over_the_background_url() {
-        let anime = local(7, None, Some("bg"), false);
-        assert_eq!(background_last_modified(&anime, Some("bg"), false, || false, NOW), CacheAction::Keep);
-        assert_eq!(background_last_modified(&anime, Some("bg2"), false, || true, NOW), CacheAction::DeleteCacheThenKeep);
-        assert_eq!(background_last_modified(&anime, Some("bg2"), false, || false, NOW), CacheAction::DeleteCacheThenSet(NOW));
-        let no_stored = local(7, None, None, false);
-        assert_eq!(background_last_modified(&no_stored, Some("bg"), false, || false, NOW), CacheAction::Set(NOW));
-        assert_eq!(background_last_modified(&no_stored, Some("bg"), false, || true, NOW), CacheAction::DeleteCacheThenKeep);
-    }
-
-    #[test]
-    fn timestamps_are_milliseconds_since_the_epoch() {
-        assert_eq!(CacheAction::Set(NOW).last_modified(), Some(1_700_000_000_123));
-        assert_eq!(CacheAction::Keep.last_modified(), None);
-        assert_eq!(CacheAction::DeleteCacheThenKeep.last_modified(), None);
-    }
-
-    #[test]
-    fn t_titles_follow_the_favourite_flag_and_the_initialised_state() {
-        let stored = local(7, None, None, true);
-        let plain = local(7, None, None, false);
-        assert_eq!(title_update(&stored, Some("X")), None, "E-T1");
-        assert_eq!(title_update(&plain, Some("X")), Some("X".into()), "E-T2");
-        assert_eq!(title_update(&plain, Some("")), None, "E-T3");
-        assert_eq!(title_update(&plain, None), None, "E-T4: not initialised");
-    }
-
-    #[test]
-    fn the_metadata_write_keeps_absent_fields_and_drops_empty_urls() {
-        let anime = local(7, Some("a"), None, false);
-        let mut remote = SAnime { url: "/x".into(), title: "T".into(), ..SAnime::default() };
-        remote.genre = Some(", ,A, A,B".into());
-        remote.thumbnail_url = Some(String::new());
-        remote.author = Some(String::new());
-        let update = metadata_update(&anime, &remote, None, CacheAction::Keep, CacheAction::Keep);
-        // Kotlin splits on ", " only (SAnime.getGenres), so the leading "," stays in the first part. The topic doc's
-        // ["A","B"] for E-U1 does not match that code; the code is followed (DECISIONS, T-17a-027).
-        assert_eq!(update.genre, Some(vec![",A".to_owned(), "A,B".to_owned()]), "E-U1");
-        assert_eq!(update.thumbnail_url, None, "E-U8");
-        assert_eq!(update.author, Some(String::new()), "E-U5: an empty author is written");
-        assert_eq!(update.initialized, Some(true), "E-U10");
-        assert_eq!(update.status, Some(0), "E-U4: the status code is written");
-        assert_eq!(update.id, 5);
-    }
-
-    #[test]
-    fn a_null_author_is_kept_and_an_empty_memo_and_the_strategy_are_written() {
-        let anime = local(7, None, None, false);
-        let mut remote = SAnime { url: "/x".into(), title: "T".into(), ..SAnime::default() };
-        assert_eq!(metadata_update(&anime, &remote, None, CacheAction::Keep, CacheAction::Keep).author, None, "E-U6");
-        remote.memo = serde_json::Map::new();
-        remote.update_strategy = kuro_source::model::UpdateStrategy::OnlyFetchOnce;
-        let update = metadata_update(&anime, &remote, None, CacheAction::Keep, CacheAction::Keep);
-        assert_eq!(update.memo, Some(serde_json::Map::new()), "E-U7: an empty memo is written");
-        let strategy =
-            crate::entries::source_convert::to_db_strategy(kuro_source::model::UpdateStrategy::OnlyFetchOnce);
-        assert_eq!(update.update_strategy, Some(strategy), "E-U9");
-    }
-
-    #[test]
-    fn a_null_or_blank_genre_keeps_the_stored_genres() {
-        let anime = local(7, None, None, false);
-        let mut remote = SAnime { url: "/x".into(), title: "T".into(), ..SAnime::default() };
-        remote.genre = None;
-        assert_eq!(metadata_update(&anime, &remote, None, CacheAction::Keep, CacheAction::Keep).genre, None, "E-U2");
-        remote.genre = Some("   ".into());
-        assert_eq!(metadata_update(&anime, &remote, None, CacheAction::Keep, CacheAction::Keep).genre, None, "E-U3");
-    }
 
     #[test]
     fn fetch_flags_default_to_nothing_fetched_and_a_zero_window() {

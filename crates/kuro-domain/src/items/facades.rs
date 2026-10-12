@@ -4,6 +4,50 @@
 
 use kuro_data::chapter::{Chapter, ChapterRepo, ChapterUpdate};
 use kuro_data::episode::{Episode, EpisodeRepo, EpisodeUpdate};
+use kuro_data::item::{Item, ItemRepo, ItemUpdate};
+
+/// `GetChapter.await(id)` and `GetEpisode.await(id)`: `None` for a missing row or on error (the error is logged).
+pub fn get_item(repo: &ItemRepo, id: i64) -> Option<Item> {
+    match repo.by_id(id) {
+        Ok(item) => item,
+        Err(e) => {
+            tracing::error!(id, error = %e, "cannot read item");
+            None
+        }
+    }
+}
+
+/// `GetChapterByUrlAndMangaId.await(url, mangaId)` and its episode twin: `None` on error, and the error is not logged
+/// (Kotlin swallows it). With several rows of one url the lowest id answers (the repository warns).
+pub fn get_item_by_url_and_entry_id(repo: &ItemRepo, url: &str, entry_id: i64) -> Option<Item> {
+    repo.by_url_and_entry_id(url, entry_id).ok().flatten()
+}
+
+/// `GetChaptersByMangaId.await` and `GetEpisodesByAnimeId.await`: an empty list on error (the error is logged).
+pub fn get_items_by_entry(repo: &ItemRepo, entry_id: i64, apply_scanlator_filter: bool) -> Vec<Item> {
+    match repo.by_entry_id(entry_id, apply_scanlator_filter) {
+        Ok(items) => items,
+        Err(e) => {
+            tracing::error!(entry_id, error = %e, "cannot read items");
+            Vec::new()
+        }
+    }
+}
+
+/// `UpdateChapter.await(update)` and its episode twin: the error is logged and swallowed, so the caller cannot tell a
+/// failed write.
+pub fn update_item(repo: &ItemRepo, update: &ItemUpdate) {
+    if let Err(e) = repo.update(update) {
+        tracing::error!(id = update.id, error = %e, "cannot update item");
+    }
+}
+
+/// `UpdateChapter.awaitAll(updates)` and its episode twin: one transaction. An error is logged and swallowed.
+pub fn update_all_items(repo: &ItemRepo, updates: &[ItemUpdate]) {
+    if let Err(e) = repo.update_all(updates) {
+        tracing::error!(count = updates.len(), error = %e, "cannot update items");
+    }
+}
 
 /// `GetChapter.await(id)`: `None` for a missing row or on error (the error is logged).
 pub fn get_chapter(repo: &ChapterRepo, id: i64) -> Option<Chapter> {

@@ -9,4 +9,3 @@ pub mod mappers;
 pub mod rx;
 pub mod source;
 pub mod status;
-pub mod update;

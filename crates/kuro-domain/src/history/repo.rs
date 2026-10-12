@@ -1,17 +1,16 @@
-//! History repository for both kinds: the list, the latest row, resets, clear-all and the upsert. The SQL is in
-//! `kuro-db` (manga `history`/`historyView`, anime `animehistory`/`animehistoryView`), except the by-entry query of
-//! anime, which is written here.
+//! History repository for both kinds: the list, the latest row, resets, clear-all and the upsert, over the shared
+//! `kuro_data::entry_history::HistoryRepo`. This layer adds the domain row shapes, the error type and the detached
+//! writer; the SQL (`kuro_db::tables::history`) and the rules of the rows are the shared ones. The 12 h session clamp
+//! and the incognito rules are in [`super::recorder`].
 
 use kuro_platform::kind::Kind;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use kuro_data::entry_history::{History, HistoryItem, HistoryRepo as SharedHistory};
 use kuro_db::handle::Db;
-use kuro_db::schema_anime::Millis;
-use kuro_db::statements_anime as anime;
-use kuro_db::statements_manga::history as manga_history;
-use kuro_db::statements_manga::views as manga_views;
+use kuro_db::tables::history as table;
 
 use super::model::{CoverKey, HistoryRow, HistoryUpdate, HistoryWithRelations};
 use crate::error::DomainError;
@@ -20,6 +19,7 @@ use crate::error::DomainError;
 #[derive(Clone)]
 pub struct HistoryRepo {
     db: Arc<Db>,
+    shared: SharedHistory,
 }
 
 /// Detached flushes that have not been joined yet (see [`HistoryRepo::record_detached`]).
@@ -50,36 +50,17 @@ pub fn join_pending_flushes(timeout: Duration) -> usize {
     still_running
 }
 
-fn manga_row(r: kuro_db::statements_manga::HistoryViewRow) -> HistoryWithRelations {
+fn view_row(r: HistoryItem) -> HistoryWithRelations {
     HistoryWithRelations {
         id: r.id,
-        item_id: r.chapter_id,
-        entry_id: r.manga_id,
+        item_id: r.item_id,
+        entry_id: r.entry_id,
         title: r.title,
-        item_number: r.chapter_number,
-        at: r.read_at,
-        duration_ms: r.read_duration,
+        item_number: r.item_number,
+        at: r.last_at,
+        duration_ms: r.duration_ms,
         cover: CoverKey {
-            entry_id: r.manga_id,
-            source_id: r.source,
-            favorite: r.favorite,
-            url: r.thumbnail_url,
-            cover_last_modified: r.cover_last_modified,
-        },
-    }
-}
-
-fn anime_row(r: anime::HistoryEntry) -> HistoryWithRelations {
-    HistoryWithRelations {
-        id: r.id,
-        item_id: r.episode_id,
-        entry_id: r.anime_id,
-        title: r.title,
-        item_number: r.episode_number,
-        at: r.seen_at.0,
-        duration_ms: 0,
-        cover: CoverKey {
-            entry_id: r.anime_id,
+            entry_id: r.entry_id,
             source_id: r.source,
             favorite: r.favorite,
             url: r.thumbnail_url,
@@ -90,77 +71,42 @@ fn anime_row(r: anime::HistoryEntry) -> HistoryWithRelations {
 
 impl HistoryRepo {
     pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
+        Self { shared: SharedHistory::new(db.clone()), db }
     }
 
     /// One row per entry (its newest row), only rows with a timestamp above 0, newest first. `query` is a
     /// case-insensitive substring of the title; `%`, `_` and `\` are literal.
     pub fn list(&self, kind: Kind, query: &str) -> Result<Vec<HistoryWithRelations>, DomainError> {
-        Ok(match kind {
-            Kind::Manga => {
-                self.db.read(|c| Ok(manga_views::history(c, query)?))?.into_iter().map(manga_row).collect()
-            }
-            Kind::Anime => self.db.read(|c| Ok(anime::history(c, query)?))?.into_iter().map(anime_row).collect(),
-        })
+        Ok(self.shared.list(kind, query)?.into_iter().map(view_row).collect())
     }
 
     /// Live list of [`HistoryRepo::list`]: re-runs after a change to the history, item or entry tables.
-    pub fn watch_list(
-        &self,
-        kind: Kind,
-        query: String,
-    ) -> kuro_db::subscribe::Subscription<Vec<HistoryWithRelations>> {
-        let tables: &'static [&'static str] = match kind {
-            Kind::Manga | Kind::Anime => &["history", "items", "entries"],
-        };
-        self.db.subscribe(tables, std::time::Duration::from_millis(30), move |c| match kind {
-            Kind::Manga => Ok(manga_views::history(c, &query)?.into_iter().map(manga_row).collect()),
-            Kind::Anime => Ok(anime::history(c, &query)?.into_iter().map(anime_row).collect()),
+    pub fn watch_list(&self, kind: Kind, query: String) -> kuro_db::subscribe::Subscription<Vec<HistoryWithRelations>> {
+        self.db.subscribe(&["history", "items", "entries"], Duration::from_millis(30), move |c| {
+            Ok(table::list(c, kind, &query)?.into_iter().map(|r| view_row(r.into())).collect())
         })
     }
 
     /// The newest row with a timestamp above 0, or `None`.
     pub fn latest(&self, kind: Kind) -> Result<Option<HistoryWithRelations>, DomainError> {
-        let rows = self.list(kind, "")?;
-        Ok(rows.into_iter().max_by_key(|r| r.at))
+        Ok(self.shared.latest(kind)?.map(view_row))
     }
 
-    /// Every history row of one entry, reset rows included.
-    pub fn by_entry(&self, kind: Kind, entry_id: i64) -> Result<Vec<HistoryRow>, DomainError> {
-        Ok(match kind {
-            Kind::Manga => self
-                .db
-                .read(|c| Ok(manga_history::get_by_manga_id(c, entry_id)?))?
-                .into_iter()
-                .map(|r| HistoryRow { id: r.id, item_id: r.chapter_id, at: r.last_read, time_read: r.time_read })
-                .collect(),
-            Kind::Anime => self.db.read(|c| {
-                let mut st = c.prepare(
-                    "SELECT H._id, H.item_id, H.last_at FROM history H \
-                     JOIN items E ON H.item_id = E._id WHERE E.entry_id = ?1",
-                )?;
-                let mut out = Vec::new();
-                for row in st.query_map([entry_id], |r| {
-                    Ok(HistoryRow { id: r.get(0)?, item_id: r.get(1)?, at: r.get(2)?, time_read: 0 })
-                })? {
-                    out.push(row?);
-                }
-                Ok(out)
-            })?,
-        })
+    /// Every history row of one entry, reset rows included. The rows of an entry are all of its kind, so `kind` does not
+    /// select anything.
+    pub fn by_entry(&self, _kind: Kind, entry_id: i64) -> Result<Vec<HistoryRow>, DomainError> {
+        Ok(self
+            .shared
+            .by_entry_id(entry_id)?
+            .into_iter()
+            .map(|r: History| HistoryRow { id: r.id, item_id: r.item_id, at: r.last_at, time_read: r.duration_ms })
+            .collect())
     }
 
-    /// Records a read or watch: sets the timestamp and adds the session to the duration (manga). A chapter or
-    /// episode that is already recorded keeps one row.
-    pub fn upsert(&self, kind: Kind, item_id: i64, at: i64, session_ms: i64) -> Result<(), DomainError> {
-        self.db.write(|tx| {
-            match kind {
-                Kind::Manga => manga_history::upsert(tx, item_id, at, session_ms)?,
-                Kind::Anime => anime::upsert_history(tx, item_id, Millis(at))?,
-            };
-            Ok(())
-        })?;
-        Ok(())
+    /// Records a read or watch: sets the timestamp and adds the session to the duration. An item that is already
+    /// recorded keeps one row. `kind` does not select anything: an item belongs to one entry of one kind.
+    pub fn upsert(&self, _kind: Kind, item_id: i64, at: i64, session_ms: i64) -> Result<(), DomainError> {
+        Ok(self.shared.upsert(item_id, at, session_ms)?)
     }
 
     /// Writes one recording. A failure (for example a chapter deleted meanwhile) is logged and swallowed, as the
@@ -182,39 +128,18 @@ impl HistoryRepo {
     }
 
     /// Sets the timestamp of one row to 0. The row and its duration stay, so the total is unchanged.
-    pub fn reset_one(&self, kind: Kind, history_id: i64) -> Result<(), DomainError> {
-        self.db.write(|tx| {
-            match kind {
-                Kind::Manga => manga_history::reset_by_id(tx, history_id)?,
-                Kind::Anime => anime::reset_history(tx, history_id)?,
-            };
-            Ok(())
-        })?;
-        Ok(())
+    pub fn reset_one(&self, _kind: Kind, history_id: i64) -> Result<(), DomainError> {
+        Ok(self.shared.reset_by_id(history_id)?)
     }
 
     /// Resets every row of one entry.
-    pub fn reset_entry(&self, kind: Kind, entry_id: i64) -> Result<(), DomainError> {
-        self.db.write(|tx| {
-            match kind {
-                Kind::Manga => manga_history::reset_by_manga_id(tx, entry_id)?,
-                Kind::Anime => anime::reset_history_by_anime(tx, entry_id)?,
-            };
-            Ok(())
-        })?;
-        Ok(())
+    pub fn reset_entry(&self, _kind: Kind, entry_id: i64) -> Result<(), DomainError> {
+        Ok(self.shared.reset_by_entry_id(entry_id)?)
     }
 
-    /// Deletes every row. Returns `false` (after logging) when the delete fails.
+    /// Deletes every row of the kind. Returns `false` (after logging) when the delete fails.
     pub fn clear_all(&self, kind: Kind) -> bool {
-        let result = self.db.write(|tx| {
-            match kind {
-                Kind::Manga => manga_history::remove_all(tx)?,
-                Kind::Anime => anime::delete_all_history(tx)?,
-            };
-            Ok(())
-        });
-        match result {
+        match self.shared.delete_all(kind) {
             Ok(()) => true,
             Err(e) => {
                 tracing::error!(error = %e, "cannot clear history");
@@ -225,17 +150,17 @@ impl HistoryRepo {
 
     /// Deletes the rows that were reset ("Clear database" maintenance action).
     pub fn remove_reset(&self, kind: Kind) -> Result<usize, DomainError> {
-        Ok(self.db.write(|tx| {
-            Ok(match kind {
-                Kind::Manga => manga_history::remove_resetted(tx)?,
-                Kind::Anime => anime::remove_resetted_history(tx)?,
-            })
-        })?)
+        Ok(self.db.write(|tx| Ok(SharedHistory::remove_resetted(tx, kind)?))?)
     }
 
-    /// Total reading time of every manga row, reset rows included. Anime has no duration.
+    /// Total time of every row of the kind, reset rows included.
+    pub fn total_duration_of(&self, kind: Kind) -> Result<i64, DomainError> {
+        Ok(self.shared.total_duration(kind)?)
+    }
+
+    /// [`Self::total_duration_of`] for manga, the old name.
     pub fn total_duration(&self) -> Result<i64, DomainError> {
-        Ok(self.db.read(|c| Ok(manga_history::get_read_duration(c)?))?)
+        self.total_duration_of(Kind::Manga)
     }
 }
 
@@ -413,5 +338,24 @@ mod tests {
         repo.reset_entry(Kind::Anime, anime).unwrap();
         assert!(repo.list(Kind::Anime, "").unwrap().is_empty());
         assert!(repo.clear_all(Kind::Anime));
+    }
+
+    /// The shared upsert adds the delta for both kinds (an anime keeps its watched time, as a manga its reading time).
+    #[test]
+    fn history_upsert_adds_the_delta_for_both_kinds() {
+        use kuro_data::entry::{Entry, EntryRepo};
+        use kuro_data::item::{Item, ItemRepo};
+        let (_d, db) = test_db();
+        let repo = HistoryRepo::new(db.clone());
+        for kind in [Kind::Manga, Kind::Anime] {
+            let entries = EntryRepo::new(db.clone());
+            let id = entries.insert(&Entry { url: format!("/{kind}"), title: "T".into(), favorite: true, ..Entry::create(kind) }).unwrap();
+            let item = ItemRepo::new(db.clone()).add_all(&[Item { entry_id: id, url: "i".into(), ..Item::create(kind) }]).unwrap()[0].id;
+            repo.upsert(kind, item, 1000, 5000).unwrap();
+            repo.upsert(kind, item, 2000, 3000).unwrap();
+            let rows = repo.by_entry(kind, id).unwrap();
+            assert_eq!((rows.len(), rows[0].at, rows[0].time_read), (1, 2000, 8000), "{kind}");
+            assert_eq!(repo.total_duration_of(kind).unwrap(), 8000, "{kind}: the total is scoped to the kind");
+        }
     }
 }

@@ -1,5 +1,8 @@
-//! Chapter, episode and season comparators (`ChapterSorter.kt`, `EpisodeSorter.kt`, `SeasonSorter.kt`) and
-//! the collator used for alphabetical order (`SortUtil.kt`). Table: `p1-topic-sorting-and-filtering.md`.
+//! Item and season comparators (`ChapterSorter.kt`, `EpisodeSorter.kt`, `SeasonSorter.kt`) and the collator used for
+//! alphabetical order (`SortUtil.kt`). Table: `p1-topic-sorting-and-filtering.md`.
+//!
+//! One comparator serves both kinds: the sort value is the unified `item_flags` group (`kuro_db::flags::item`). The
+//! per-kind `chapter_*` and `episode_*` names translate their word and call it.
 //!
 //! Numbers compare with `f64::total_cmp` (the same total order as `Double.compare`). Sorts are stable.
 //! An unknown sorting value falls back to SOURCE with a warning; the Kotlin code throws there.
@@ -7,14 +10,20 @@
 use std::cmp::Ordering;
 use std::sync::LazyLock;
 
-use crate::entries::anime::{AnimeExt, episode_flags, season_flags};
-use crate::entries::manga::chapter_flags;
+use crate::entries::anime::season_flags;
+use crate::entries::flags::{SeasonFlags, manga_sorting_to_unified};
 use icu_collator::options::{CollatorOptions, Strength};
 use icu_collator::{Collator, CollatorBorrowed, CollatorPreferences};
 use icu_locale::Locale;
 use kuro_data::anime::{Anime, SeasonAnime};
 use kuro_data::chapter::Chapter;
+use kuro_data::entry::{Entry, SeasonEntry};
 use kuro_data::episode::Episode;
+use kuro_data::item::Item;
+use kuro_db::flags::item;
+
+pub use crate::entries::anime::episode_flags;
+pub use crate::entries::manga::chapter_flags;
 
 /// The four item sort keys shared by chapters and episodes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +40,21 @@ pub trait SortItem {
     fn number(&self) -> f64;
     fn date_upload(&self) -> i64;
     fn name(&self) -> &str;
+}
+
+impl SortItem for Item {
+    fn source_order(&self) -> i64 {
+        self.source_order
+    }
+    fn number(&self) -> f64 {
+        self.number
+    }
+    fn date_upload(&self) -> i64 {
+        self.date_upload
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
 }
 
 impl SortItem for Chapter {
@@ -95,38 +119,30 @@ pub fn collate(a: &str, b: &str) -> Ordering {
     COLLATOR.compare(a, b)
 }
 
-/// The key of a chapter sorting value (`chapter_flags & SORTING_MASK`). Unknown values are `Source`.
-pub fn chapter_key(sorting: i64) -> SortKey {
+/// The key of a sorting value (`item_flags & SORTING_MASK`, unified layout). Unknown values are `Source`.
+pub fn item_key(sorting: i64) -> SortKey {
     match sorting {
-        chapter_flags::SORTING_SOURCE => SortKey::Source,
-        chapter_flags::SORTING_NUMBER => SortKey::Number,
-        chapter_flags::SORTING_UPLOAD_DATE => SortKey::UploadDate,
-        chapter_flags::SORTING_ALPHABET => SortKey::Alphabet,
-        other => {
-            tracing::warn!(
-                sorting = other,
-                "unknown chapter sorting, using source order"
-            );
-            SortKey::Source
-        }
+        item::SORTING_SOURCE => SortKey::Source,
+        item::SORTING_NUMBER => SortKey::Number,
+        item::SORTING_UPLOAD_DATE => SortKey::UploadDate,
+        item::SORTING_ALPHABET => SortKey::Alphabet,
+        other => unknown_key(other),
     }
 }
 
-/// The key of an episode sorting value (`episode_flags & SORTING_MASK`). Unknown values are `Source`.
+fn unknown_key(sorting: i64) -> SortKey {
+    tracing::warn!(sorting, "unknown item sorting, using source order");
+    SortKey::Source
+}
+
+/// The key of a chapter sorting value (`chapter_flags & SORTING_MASK`, the manga layout).
+pub fn chapter_key(sorting: i64) -> SortKey {
+    manga_sorting_to_unified(sorting).map_or_else(|| unknown_key(sorting), item_key)
+}
+
+/// The key of an episode sorting value (`episode_flags & SORTING_MASK`): the unified layout.
 pub fn episode_key(sorting: i64) -> SortKey {
-    match sorting {
-        episode_flags::SORTING_SOURCE => SortKey::Source,
-        episode_flags::SORTING_NUMBER => SortKey::Number,
-        episode_flags::SORTING_UPLOAD_DATE => SortKey::UploadDate,
-        episode_flags::SORTING_ALPHABET => SortKey::Alphabet,
-        other => {
-            tracing::warn!(
-                sorting = other,
-                "unknown episode sorting, using source order"
-            );
-            SortKey::Source
-        }
-    }
+    item_key(sorting)
 }
 
 /// Compares two items by `key`. Number, upload date and name are ascending when not descending. Source
@@ -149,7 +165,13 @@ pub fn compare_items<T: SortItem>(key: SortKey, descending: bool, a: &T, b: &T) 
     }
 }
 
-/// `getChapterSort(manga, sortDescending)`. `sorting` is `Manga::sorting()`.
+/// The comparator of an entry's item list: `sorting` is `Entry::sorting()` (unified layout).
+pub fn item_cmp(sorting: i64, descending: bool) -> impl Fn(&Item, &Item) -> Ordering {
+    let key = item_key(sorting);
+    move |a, b| compare_items(key, descending, a, b)
+}
+
+/// `getChapterSort(manga, sortDescending)`. `sorting` is `Manga::sorting()` (the manga layout).
 pub fn chapter_cmp(sorting: i64, descending: bool) -> impl Fn(&Chapter, &Chapter) -> Ordering {
     let key = chapter_key(sorting);
     move |a, b| compare_items(key, descending, a, b)
@@ -161,44 +183,115 @@ pub fn episode_cmp(sorting: i64, descending: bool) -> impl Fn(&Episode, &Episode
     move |a, b| compare_items(key, descending, a, b)
 }
 
-/// `getSeasonSortComparator(anime)`: ascending by the season sort code. Unknown codes (0xE000) fall back
-/// to SOURCE with a warning.
-pub fn season_cmp(anime: &Anime) -> impl Fn(&SeasonAnime, &SeasonAnime) -> Ordering {
-    let sorting = anime.season_sorting();
-    move |a: &SeasonAnime, b: &SeasonAnime| match sorting {
-        season_flags::SORT_SEASON => a.anime.season_number.total_cmp(&b.anime.season_number),
-        season_flags::SORT_UPLOAD => a.latest_upload.cmp(&b.latest_upload),
-        season_flags::SORT_ALPHABET => {
-            collate(&a.anime.title.to_lowercase(), &b.anime.title.to_lowercase())
-        }
-        season_flags::SORT_COUNT => a.unseen_count().cmp(&b.unseen_count()),
-        season_flags::SORT_LAST_SEEN => a.last_seen.cmp(&b.last_seen),
-        season_flags::SORT_FETCHED => a.fetched_at.cmp(&b.fetched_at),
-        season_flags::SORT_SOURCE => a
-            .anime
-            .season_source_order
-            .cmp(&b.anime.season_source_order),
+/// The fields the season comparator reads.
+pub trait SortSeason {
+    fn season_number(&self) -> f64;
+    fn season_source_order(&self) -> i64;
+    fn title(&self) -> &str;
+    fn latest_upload(&self) -> i64;
+    fn pending(&self) -> i64;
+    fn last_seen(&self) -> i64;
+    fn fetched_at(&self) -> i64;
+}
+
+impl SortSeason for SeasonEntry {
+    fn season_number(&self) -> f64 {
+        self.entry.season_number()
+    }
+    fn season_source_order(&self) -> i64 {
+        self.entry.season_source_order()
+    }
+    fn title(&self) -> &str {
+        &self.entry.title
+    }
+    fn latest_upload(&self) -> i64 {
+        self.latest_upload
+    }
+    fn pending(&self) -> i64 {
+        SeasonEntry::pending(self)
+    }
+    fn last_seen(&self) -> i64 {
+        self.last_activity
+    }
+    fn fetched_at(&self) -> i64 {
+        self.fetched_at
+    }
+}
+
+impl SortSeason for SeasonAnime {
+    fn season_number(&self) -> f64 {
+        self.anime.season_number
+    }
+    fn season_source_order(&self) -> i64 {
+        self.anime.season_source_order
+    }
+    fn title(&self) -> &str {
+        &self.anime.title
+    }
+    fn latest_upload(&self) -> i64 {
+        self.latest_upload
+    }
+    fn pending(&self) -> i64 {
+        self.unseen_count()
+    }
+    fn last_seen(&self) -> i64 {
+        self.last_seen
+    }
+    fn fetched_at(&self) -> i64 {
+        self.fetched_at
+    }
+}
+
+/// Ascending by the season sort code (`season_flags & SORT_MASK`). Unknown codes (0xE000) fall back to SOURCE with a
+/// warning.
+fn season_cmp_by<T: SortSeason>(sorting: i64) -> impl Fn(&T, &T) -> Ordering {
+    move |a: &T, b: &T| match sorting {
+        season_flags::SORT_SEASON => a.season_number().total_cmp(&b.season_number()),
+        season_flags::SORT_UPLOAD => a.latest_upload().cmp(&b.latest_upload()),
+        season_flags::SORT_ALPHABET => collate(&a.title().to_lowercase(), &b.title().to_lowercase()),
+        season_flags::SORT_COUNT => a.pending().cmp(&b.pending()),
+        season_flags::SORT_LAST_SEEN => a.last_seen().cmp(&b.last_seen()),
+        season_flags::SORT_FETCHED => a.fetched_at().cmp(&b.fetched_at()),
+        season_flags::SORT_SOURCE => a.season_source_order().cmp(&b.season_source_order()),
         other => {
-            tracing::warn!(
-                sorting = other,
-                "unknown season sorting, using source order"
-            );
-            a.anime
-                .season_source_order
-                .cmp(&b.anime.season_source_order)
+            tracing::warn!(sorting = other, "unknown season sorting, using source order");
+            a.season_source_order().cmp(&b.season_source_order())
         }
     }
 }
 
-/// `sort_seasons`: the key comparator, reversed when `season_sort_descending()`, then the alphabetical title
-/// as a tie-break that is never reversed.
-pub fn sort_seasons(list: &mut [SeasonAnime], anime: &Anime) {
-    let by_key = season_cmp(anime);
-    let descending = anime.season_sort_descending();
+/// The parent entry whose `season_flags` word orders its seasons: an [`Entry`] or the legacy [`Anime`].
+pub trait SeasonParent {
+    fn season_word(&self) -> i64;
+}
+
+impl SeasonParent for Entry {
+    fn season_word(&self) -> i64 {
+        self.season_flags()
+    }
+}
+
+impl SeasonParent for Anime {
+    fn season_word(&self) -> i64 {
+        self.season_flags
+    }
+}
+
+/// `getSeasonSortComparator(anime)`: ascending by the season sort code of the parent.
+pub fn season_cmp<T: SortSeason>(parent: &impl SeasonParent) -> impl Fn(&T, &T) -> Ordering {
+    season_cmp_by(SeasonFlags(parent.season_word()).sorting())
+}
+
+/// `sort_seasons`: the key comparator, reversed when the season sort is descending, then the alphabetical title as a
+/// tie-break that is never reversed.
+pub fn sort_seasons<T: SortSeason>(list: &mut [T], parent: &impl SeasonParent) {
+    let flags = SeasonFlags(parent.season_word());
+    let by_key = season_cmp_by::<T>(flags.sorting());
+    let descending = flags.sort_descending();
     list.sort_by(|a, b| {
         let ord = by_key(a, b);
         let ord = if descending { ord.reverse() } else { ord };
-        ord.then_with(|| collate(&a.anime.title.to_lowercase(), &b.anime.title.to_lowercase()))
+        ord.then_with(|| collate(&a.title().to_lowercase(), &b.title().to_lowercase()))
     });
 }
 
@@ -446,5 +539,34 @@ mod tests {
         let mut sorted_items = items.clone();
         sorted_items.sort_by(&cmp);
         assert_eq!(titles(&sorted_items), ["a", "b"]);
+    }
+
+    /// One comparator for both kinds: the shared `item_cmp` orders items exactly like the per-kind names for every stored
+    /// sorting value and direction.
+    #[test]
+    fn item_cmp_orders_like_chapter_cmp_and_episode_cmp() {
+        use kuro_db::flags::manga_item_flags_from_unified;
+        use kuro_platform::kind::Kind;
+        let numbers = [3.0, -1.0, 2.5, 0.0, 2.5, 7.0];
+        let names = ["b", "A", "c10", "c2", "a", "B"];
+        let rows: Vec<(String, i64, f64, i64)> = (0..6).map(|i| (names[i].to_owned(), i as i64, numbers[i], (i as i64 * 37) % 11)).collect();
+        let items: Vec<Item> = rows
+            .iter()
+            .map(|(n, order, number, upload)| Item { name: n.clone(), source_order: *order, number: *number, date_upload: *upload, ..Item::create(Kind::Manga) })
+            .collect();
+        let chapters: Vec<Chapter> = items.iter().cloned().map(Chapter::from).collect();
+        let episodes: Vec<Episode> = items.iter().cloned().map(Episode::from).collect();
+        for sorting in [item::SORTING_SOURCE, item::SORTING_NUMBER, item::SORTING_UPLOAD_DATE, item::SORTING_ALPHABET] {
+            for descending in [false, true] {
+                let mut by_item = items.clone();
+                by_item.sort_by(item_cmp(sorting, descending));
+                let mut by_chapter = chapters.clone();
+                by_chapter.sort_by(chapter_cmp(manga_item_flags_from_unified(sorting), descending));
+                let mut by_episode = episodes.clone();
+                by_episode.sort_by(episode_cmp(sorting, descending));
+                assert_eq!(by_item.iter().map(|i| i.name.clone()).collect::<Vec<_>>(), by_chapter.iter().map(|c| c.name.clone()).collect::<Vec<_>>(), "chapter {sorting:#x} {descending}");
+                assert_eq!(by_item.iter().map(|i| i.name.clone()).collect::<Vec<_>>(), by_episode.iter().map(|e| e.name.clone()).collect::<Vec<_>>(), "episode {sorting:#x} {descending}");
+            }
+        }
     }
 }

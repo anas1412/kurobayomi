@@ -1,10 +1,12 @@
 //! The library row: one favourite entry in one category, with the counts the library shows. Both kinds map to
-//! this shape (`LibraryManga` / `LibraryAnime`), so the page builder and the sorts never branch on kind.
+//! this shape (`LibraryEntry`), so the page builder and the sorts never branch on kind.
 
 use kuro_data::anime::LibraryAnime;
+use kuro_data::entry::{Entry, LibraryEntry};
 use kuro_data::manga::LibraryManga;
+use kuro_db::codecs::UpdateStrategy;
 
-/// One `libraryView` / `animelibView` row. `category` is 0 for an entry in no category.
+/// One `libraryView` row. `category` is 0 for an entry in no category.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LibraryRow {
     pub id: i64,
@@ -54,11 +56,38 @@ impl LibraryRow {
         self.source == 0
     }
 
-    pub fn from_manga(l: &LibraryManga) -> Self {
+    /// The row of a shared library entry. `viewer_flags` is the entry's for anime (the airing time is in it) and 0 for manga,
+    /// whose viewer bits are reader modes; `fillermarks` is 0 for manga by the view.
+    pub fn from_entry(l: &LibraryEntry) -> Self {
+        let e = &l.entry;
         Self {
-            id: l.manga.id,
-            source: l.manga.source,
-            title: l.manga.title.clone(),
+            id: e.id,
+            source: e.source,
+            title: e.title.clone(),
+            category: l.category,
+            total: l.total,
+            done: l.done,
+            bookmarks: l.bookmarks,
+            fillermarks: l.fillermarks,
+            latest_upload: l.latest_upload,
+            item_fetched_at: l.item_fetched_at,
+            last_activity: l.last_activity,
+            last_update: e.last_update,
+            date_added: e.date_added,
+            status: e.status,
+            fetch_interval: e.fetch_interval,
+            viewer_flags: if e.kind.is_anime() { e.viewer_flags } else { 0 },
+            always_update: e.update_strategy == UpdateStrategy::AlwaysUpdate,
+            next_update: e.next_update,
+        }
+    }
+}
+
+impl LibraryRow {
+    /// [`Self::from_entry`] for a legacy `LibraryManga` (phase E deletes it).
+    pub fn from_manga(l: &LibraryManga) -> Self {
+        Self::from_entry(&LibraryEntry {
+            entry: Entry::from(&l.manga),
             category: l.category,
             total: l.total_chapters,
             done: l.read_count,
@@ -67,21 +96,13 @@ impl LibraryRow {
             latest_upload: l.latest_upload,
             item_fetched_at: l.chapter_fetched_at,
             last_activity: l.last_read,
-            last_update: l.manga.last_update,
-            date_added: l.manga.date_added,
-            status: l.manga.status,
-            fetch_interval: l.manga.fetch_interval,
-            viewer_flags: 0,
-            always_update: l.manga.update_strategy == kuro_db::codecs::UpdateStrategy::AlwaysUpdate,
-            next_update: l.manga.next_update,
-        }
+        })
     }
 
+    /// [`Self::from_entry`] for a legacy `LibraryAnime` (phase E deletes it).
     pub fn from_anime(l: &LibraryAnime) -> Self {
-        Self {
-            id: l.anime.id,
-            source: l.anime.source,
-            title: l.anime.title.clone(),
+        Self::from_entry(&LibraryEntry {
+            entry: Entry::from(&l.anime),
             category: l.category,
             total: l.total_count,
             done: l.seen_count,
@@ -90,14 +111,7 @@ impl LibraryRow {
             latest_upload: l.latest_upload,
             item_fetched_at: l.episode_fetched_at,
             last_activity: l.last_seen,
-            last_update: l.anime.last_update,
-            date_added: l.anime.date_added,
-            status: l.anime.status,
-            fetch_interval: l.anime.fetch_interval,
-            viewer_flags: l.anime.viewer_flags,
-            always_update: l.anime.update_strategy == kuro_db::codecs::UpdateStrategy::AlwaysUpdate,
-            next_update: l.anime.next_update,
-        }
+        })
     }
 }
 

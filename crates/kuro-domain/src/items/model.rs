@@ -3,10 +3,12 @@
 
 use kuro_data::chapter::{Chapter, ChapterUpdate};
 use kuro_data::episode::{Episode, EpisodeUpdate};
+use kuro_data::item::{Item, ItemUpdate};
+use kuro_platform::kind::Kind;
 use kuro_source::model::normalize_scanlator;
 
 /// `s` as `None` when it is empty or only whitespace (`ifBlank { null }`).
-fn blank_to_none(s: Option<&str>) -> Option<String> {
+pub(crate) fn blank_to_none(s: Option<&str>) -> Option<String> {
     s.filter(|v| !v.trim().is_empty()).map(str::to_owned)
 }
 
@@ -21,6 +23,71 @@ pub fn widen_source_number(n: f32) -> f64 {
 pub use kuro_data::chapter::ChapterKey;
 pub use kuro_data::episode::EpisodeKey;
 
+/// The scanlator of a row: chapters are trimmed (`copyFromSChapter`), episodes only blanked (`copyFromSEpisode`). The one
+/// per-kind scanlator rule; the two source adapters and the copy of a refresh call it.
+pub fn scanlator_of(kind: Kind, raw: Option<&str>) -> Option<String> {
+    match kind {
+        Kind::Manga => normalize_scanlator(raw),
+        Kind::Anime => blank_to_none(raw),
+    }
+}
+
+/// Behaviour of an item row of either kind (`Chapter.kt`, `Episode.kt`).
+pub trait ItemExt {
+    /// `number >= 0`. `-1` (unknown) and `-2` (numberless sentinel) are not recognised.
+    fn is_recognized_number(&self) -> bool;
+    /// Copies the source's name, url, upload date, number and scanlator (per the kind's scanlator rule), and for an
+    /// anime item also the fillermark, summary and preview url (blank becomes `None`). Every other field of `self` is kept.
+    fn copy_from(&self, other: &Item) -> Item;
+    /// `toChapterUpdate` / `toEpisodeUpdate`: every field filled.
+    fn to_update(&self) -> ItemUpdate;
+}
+
+impl ItemExt for Item {
+    fn is_recognized_number(&self) -> bool {
+        self.number >= 0.0
+    }
+
+    fn copy_from(&self, other: &Item) -> Item {
+        let anime = self.kind.is_anime();
+        Item {
+            name: other.name.clone(),
+            url: other.url.clone(),
+            date_upload: other.date_upload,
+            number: other.number,
+            scanlator: scanlator_of(self.kind, other.scanlator.as_deref()),
+            fillermark: if anime { other.fillermark } else { self.fillermark },
+            summary: if anime { blank_to_none(other.summary.as_deref()) } else { self.summary.clone() },
+            preview_url: if anime { blank_to_none(other.preview_url.as_deref()) } else { self.preview_url.clone() },
+            ..self.clone()
+        }
+    }
+
+    fn to_update(&self) -> ItemUpdate {
+        let anime = self.kind.is_anime();
+        ItemUpdate {
+            id: self.id,
+            entry_id: Some(self.entry_id),
+            done: Some(self.done),
+            bookmark: Some(self.bookmark),
+            fillermark: anime.then_some(self.fillermark),
+            progress: Some(self.progress),
+            total_seconds: self.total_seconds,
+            date_fetch: Some(self.date_fetch),
+            source_order: Some(self.source_order),
+            url: Some(self.url.clone()),
+            name: Some(self.name.clone()),
+            date_upload: Some(self.date_upload),
+            number: Some(self.number),
+            scanlator: self.scanlator.clone(),
+            summary: self.summary.clone(),
+            preview_url: self.preview_url.clone(),
+            version: Some(self.version),
+            memo: self.memo.clone(),
+        }
+    }
+}
+
 /// Behaviour of a chapter row.
 pub trait ChapterExt {
     /// `chapterNumber >= 0`. `-1` (unknown) and `-2` (numberless sentinel) are not recognised.
@@ -34,18 +101,11 @@ pub trait ChapterExt {
 
 impl ChapterExt for Chapter {
     fn is_recognized_number(&self) -> bool {
-        self.chapter_number >= 0.0
+        Item::from(self).is_recognized_number()
     }
 
     fn copy_from(&self, other: &Chapter) -> Chapter {
-        Chapter {
-            name: other.name.clone(),
-            url: other.url.clone(),
-            date_upload: other.date_upload,
-            chapter_number: other.chapter_number,
-            scanlator: normalize_scanlator(other.scanlator.as_deref()),
-            ..self.clone()
-        }
+        Chapter::from(Item::from(self).copy_from(&Item::from(other)))
     }
 
     fn to_update(&self) -> ChapterUpdate {
@@ -80,21 +140,11 @@ pub trait EpisodeExt {
 
 impl EpisodeExt for Episode {
     fn is_recognized_number(&self) -> bool {
-        self.episode_number >= 0.0
+        Item::from(self).is_recognized_number()
     }
 
     fn copy_from(&self, other: &Episode) -> Episode {
-        Episode {
-            name: other.name.clone(),
-            url: other.url.clone(),
-            date_upload: other.date_upload,
-            episode_number: other.episode_number,
-            fillermark: other.fillermark,
-            scanlator: blank_to_none(other.scanlator.as_deref()),
-            summary: blank_to_none(other.summary.as_deref()),
-            preview_url: blank_to_none(other.preview_url.as_deref()),
-            ..self.clone()
-        }
+        Episode::from(Item::from(self).copy_from(&Item::from(other)))
     }
 
     fn to_update(&self) -> EpisodeUpdate {
@@ -278,5 +328,23 @@ mod tests {
             (e.anime_id, e.seen, e.fillermark, e.version),
             (Some(2), Some(true), Some(false), Some(2))
         );
+    }
+
+    #[test]
+    fn the_item_rules_serve_both_kinds() {
+        let manga = Item { name: "mine".into(), done: true, progress: 9, scanlator: Some("old".into()), ..Item::create(Kind::Manga) };
+        let source = Item { name: "new".into(), number: 4.5, scanlator: Some("  Team  ".into()), ..Item::create(Kind::Manga) };
+        let out = manga.copy_from(&source);
+        assert_eq!((out.name.as_str(), out.number, out.scanlator.as_deref(), out.done, out.progress), ("new", 4.5, Some("Team"), true, 9));
+        let anime = Item { done: true, progress: 30, total_seconds: Some(1400), ..Item::create(Kind::Anime) };
+        let from_source = Item { fillermark: true, scanlator: Some("  Sub ".into()), summary: Some(" ".into()), preview_url: Some("p".into()), ..Item::create(Kind::Anime) };
+        let out = anime.copy_from(&from_source);
+        assert_eq!((out.fillermark, out.scanlator.as_deref(), out.summary, out.preview_url.as_deref()), (true, Some("  Sub "), None, Some("p")));
+        assert_eq!((out.done, out.progress, out.total_seconds), (true, 30, Some(1400)), "the user's state is kept");
+        assert!(Item { number: 0.0, ..Item::create(Kind::Manga) }.is_recognized_number());
+        assert!(!Item { number: -2.0, ..Item::create(Kind::Anime) }.is_recognized_number());
+        let update = anime.to_update();
+        assert_eq!((update.fillermark, update.total_seconds, update.memo.is_some()), (Some(false), Some(1400), true));
+        assert_eq!(manga.to_update().fillermark, None, "a manga item has no fillermark column to write");
     }
 }

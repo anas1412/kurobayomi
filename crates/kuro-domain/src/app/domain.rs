@@ -16,6 +16,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use kuro_data::anime::AnimeRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_data::item::ItemRepo;
 use kuro_data::manga::MangaRepo;
 use kuro_db::handle::Db;
 use kuro_prefs::source::SourcePrefs;
@@ -46,6 +48,8 @@ pub struct Domain {
     toggles: Arc<SourceToggles>,
     manga: MangaRepo,
     anime: AnimeRepo,
+    entries: EntryRepo,
+    items: ItemRepo,
     db: Arc<Db>,
     delayed_store: Arc<DelayedTrackingStore>,
     delayed_worker: Arc<OnceLock<Arc<DelayedTrackingWorker>>>,
@@ -64,6 +68,8 @@ impl Domain {
             toggles: Arc::new(SourceToggles::default()),
             manga: MangaRepo::new(Arc::clone(&db)),
             anime: AnimeRepo::new(Arc::clone(&db)),
+            entries: EntryRepo::new(Arc::clone(&db)),
+            items: ItemRepo::new(Arc::clone(&db)),
             db,
             delayed_store: Arc::new(DelayedTrackingStore::new(default_storage.join(QUEUE_FILE))),
             delayed_worker: Arc::new(OnceLock::new()),
@@ -96,6 +102,16 @@ impl Domain {
 
     pub fn anime(&self) -> &AnimeRepo {
         &self.anime
+    }
+
+    /// The shared entry repository, both kinds (the per-kind `manga()` and `anime()` stay until phase E).
+    pub fn entries(&self) -> &EntryRepo {
+        &self.entries
+    }
+
+    /// The shared item repository, both kinds.
+    pub fn items(&self) -> &ItemRepo {
+        &self.items
     }
 
     /// The delayed tracking queue (`<data dir>/tracking_queue.json`).
@@ -154,6 +170,7 @@ mod tests {
         assert!(Arc::ptr_eq(&domain.source_toggles(), &clone.source_toggles()));
         assert!(Arc::ptr_eq(domain.db(), clone.db()), "clones share the database");
         assert!(domain.manga().by_id(1).is_err(), "an empty database has no entry 1");
+        assert!(domain.entries().by_id(1).is_err() && domain.items().by_id(1).unwrap().is_none());
     }
 
     struct Online;

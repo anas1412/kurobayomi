@@ -5,18 +5,18 @@ use kuro_platform::kind::Kind;
 use std::sync::{Arc, Mutex};
 
 use kuro_data::chapter::{Chapter, ChapterRepo};
-use kuro_data::episode::Episode;
 use kuro_data::manga::{Manga, MangaRepo};
 use kuro_db::Db;
 use kuro_db::sql::{chapters, excluded_scanlators};
-use kuro_domain::app::status::{ChapterDownloads, SetReadStatus, SetSeenResult, SetSeenStatus, SetStatusResult, EpisodeDownloads};
-use kuro_domain::app::update::{CoverCache, UpdateManga};
+use kuro_data::entry::{Entry, EntryRepo};
+use kuro_data::item::{Item, ItemRepo};
+use kuro_domain::items::status::{ItemDownloads, SetDoneResult, SetDoneStatus};
+use kuro_domain::entries::update::{CacheFiles, UpdateEntry, remote_from_manga};
 use kuro_domain::items::chapter_sync::{ChapterSyncOptions, NoRenames, SyncChapters};
 use kuro_domain::items::source_sync::MangaSyncLocks;
 use kuro_domain::track::delayed::{DelayedTrackingStore, DelayedTrackingWorker, QUEUE_FILE, ReplayOutcome, TrackReplay};
-use kuro_prefs::store::PrefStore;
 use kuro_source::model::SChapter;
-use kuro_testkit::{InMemorySettings, TempDir, TestDb};
+use kuro_testkit::{TempDir, TestDb};
 
 const NOW_MS: i64 = 1_000_000;
 
@@ -253,40 +253,45 @@ mod sync_episodes {
 
 mod update_manga {
     use super::*;
+    use kuro_data::entry::{Entry, EntryRepo, EntryUpdate};
+    use kuro_data::item::ItemRepo;
 
     #[derive(Default)]
-    struct Covers {
-        deleted: Mutex<Vec<bool>>,
+    struct Files {
+        deleted: Mutex<usize>,
     }
 
-    impl CoverCache for Covers {
-        fn has_custom_cover(&self, _manga: &Manga) -> bool {
+    impl CacheFiles for Files {
+        fn has_custom_cover(&self, _e: &Entry) -> bool {
             false
         }
-        fn delete_from_cache(&self, _manga: &Manga, delete_custom: bool) {
-            self.deleted.lock().expect("lock").push(delete_custom);
+        fn has_custom_background(&self, _e: &Entry) -> bool {
+            false
         }
+        fn delete_cover(&self, _e: &Entry) {
+            *self.deleted.lock().expect("lock") += 1;
+        }
+        fn delete_background(&self, _e: &Entry) {}
     }
 
     #[test]
     fn title_not_overwritten_for_favorite() {
         let (_dir, db, id) = manga_fixture("Kept");
-        let repo = MangaRepo::new(db.clone());
-        repo.update(&kuro_data::manga::MangaUpdate { favorite: Some(true), ..kuro_data::manga::MangaUpdate::new(id) }).expect("favorite");
-        let interactor = UpdateManga::new(repo.clone(), ChapterRepo::new(db));
+        let repo = EntryRepo::new(db.clone());
+        repo.update(&EntryUpdate { favorite: Some(true), ..EntryUpdate::new(id) }).expect("favorite");
+        let interactor = UpdateEntry::new(repo.clone(), ItemRepo::new(db));
         let local = repo.by_id(id).expect("read");
-        let remote = kuro_source::model::SManga { title: "Remote".into(), ..kuro_source::model::SManga::new("/m", "M") };
-        let covers = Covers::default();
+        let remote = remote_from_manga(&kuro_source::model::SManga { title: "Remote".into(), ..kuro_source::model::SManga::new("/m", "M") });
         let now = chrono::Local::now();
-        interactor.update_from_source(&local, &remote, false, &covers, &now).expect("update");
+        interactor.update_from_source(&local, &remote, false, &Files::default(), &now).expect("update");
         assert_eq!(repo.by_id(id).expect("read").title, "Kept", "EC-18");
     }
 
     #[test]
     fn favorite_sets_date_added() {
         let (_dir, db, id) = manga_fixture("Foo");
-        let repo = MangaRepo::new(db.clone());
-        let interactor = UpdateManga::new(repo.clone(), ChapterRepo::new(db));
+        let repo = EntryRepo::new(db.clone());
+        let interactor = UpdateEntry::new(repo.clone(), ItemRepo::new(db));
         let now = chrono::DateTime::from_timestamp_millis(1_700_000_000_000).expect("instant").with_timezone(&chrono::Local);
         interactor.update_favorite(id, true, &now).expect("on");
         assert_eq!(repo.by_id(id).expect("read").date_added, 1_700_000_000_000, "EC-25");
@@ -303,33 +308,24 @@ mod set_read_status {
         calls: Mutex<usize>,
     }
 
-    impl ChapterDownloads for Downloads {
-        fn delete_chapters(&self, _manga: &Manga, _chapters: &[Chapter]) {
+    impl ItemDownloads for Downloads {
+        fn delete(&self, _e: &Entry, _items: &[Item]) {
             *self.calls.lock().expect("lock") += 1;
         }
     }
 
-    fn pref(on: bool) -> kuro_prefs::pref::Pref<bool> {
-        let settings = InMemorySettings::new();
-        let store: PrefStore = PrefStore::clone(&settings);
-        let pref = store.pref("pref_remove_after_marked_as_read_key", false);
-        pref.set(on);
-        pref
-    }
 
     #[tokio::test]
     async fn results() {
         let (_dir, db, id) = manga_fixture("Foo");
         db.write(|tx| Ok(chapters::insert(tx, &chapter_row(id, "/a", "Ch 1", 1.0))?)).expect("insert");
-        let chapters_repo = ChapterRepo::new(db.clone());
-        let mangas = MangaRepo::new(db.clone());
         let downloads = Arc::new(Downloads::default());
-        let set = SetReadStatus::new(chapters_repo.clone(), mangas, pref(true), downloads.clone());
-        let rows = stored_chapters(&db, id);
-        assert_eq!(set.run(true, rows.clone()).await, SetStatusResult::Success);
+        let set = SetDoneStatus::new(ItemRepo::new(db.clone()), EntryRepo::new(db.clone()), downloads.clone());
+        let rows: Vec<Item> = stored_chapters(&db, id).iter().map(Item::from).collect();
+        assert_eq!(set.run(true, rows, true).await, SetDoneResult::Success);
         assert_eq!(*downloads.calls.lock().expect("lock"), 1, "downloads deleted once for the manga");
-        let read_rows = stored_chapters(&db, id);
-        assert_eq!(set.run(true, read_rows).await, SetStatusResult::NoItems, "already read: nothing to do");
+        let read_rows: Vec<Item> = stored_chapters(&db, id).iter().map(Item::from).collect();
+        assert_eq!(set.run(true, read_rows, true).await, SetDoneResult::NoItems, "already read: nothing to do");
     }
 }
 
@@ -339,8 +335,8 @@ mod set_seen_status {
     #[derive(Default)]
     struct EpisodeDl;
 
-    impl EpisodeDownloads for EpisodeDl {
-        fn delete_episodes(&self, _anime: &kuro_data::anime::Anime, _episodes: &[Episode]) {}
+    impl ItemDownloads for EpisodeDl {
+        fn delete(&self, _e: &Entry, _items: &[Item]) {}
     }
 
     #[tokio::test]
@@ -378,23 +374,16 @@ mod set_seen_status {
             )?)
         })
         .expect("insert");
-        let set = SetSeenStatus::new(episodes.clone(), animes, pref(false), Arc::new(EpisodeDl));
+        let set = SetDoneStatus::new(ItemRepo::new(db.clone()), EntryRepo::new(db.clone()), Arc::new(EpisodeDl));
         db.write(|tx| Ok(tx.execute("UPDATE items SET progress = 40 WHERE entry_id = ?1", [anime_id])?)).expect("progress");
-        let rows = episodes.by_anime_id(anime_id).expect("read");
-        assert_eq!(set.run(false, rows).await, SetSeenResult::Success);
+        let rows: Vec<Item> = episodes.by_anime_id(anime_id).expect("read").iter().map(Item::from).collect();
+        assert_eq!(set.run(false, rows, false).await, SetDoneResult::Success);
         let row = episodes.by_anime_id(anime_id).expect("read").remove(0);
         assert!(!row.seen);
         assert_eq!(row.last_second_seen, 0, "marking unseen resets the position");
         assert_eq!(row.total_seconds, 500, "total_seconds is untouched");
     }
 
-    fn pref(on: bool) -> kuro_prefs::pref::Pref<bool> {
-        let settings = InMemorySettings::new();
-        let store: PrefStore = PrefStore::clone(&settings);
-        let pref = store.pref("pref_remove_after_marked_as_read_key", false);
-        pref.set(on);
-        pref
-    }
 }
 
 mod domain_end_to_end {
@@ -411,20 +400,9 @@ mod domain_end_to_end {
         let added = sync(&db, &locks).run(raw.clone(), &manga, options(NOW_MS), &no_hook).await.expect("first sync");
         assert_eq!(added.len(), 2);
 
-        let read = stored_chapters(&db, id).into_iter().filter(|c| c.chapter_number == 1.0).collect::<Vec<_>>();
-        let set = SetReadStatus::new(
-            ChapterRepo::new(db.clone()),
-            MangaRepo::new(db.clone()),
-            {
-                let settings = InMemorySettings::new();
-                let store: PrefStore = PrefStore::clone(&settings);
-                let p = store.pref("pref_remove_after_marked_as_read_key", false);
-                p.set(false);
-                p
-            },
-            Arc::new(NoDownloads),
-        );
-        assert_eq!(set.run(true, read).await, SetStatusResult::Success);
+        let read: Vec<Item> = stored_chapters(&db, id).iter().filter(|c| c.chapter_number == 1.0).map(Item::from).collect();
+        let set = SetDoneStatus::new(ItemRepo::new(db.clone()), EntryRepo::new(db.clone()), Arc::new(NoDownloads));
+        assert_eq!(set.run(true, read, false).await, SetDoneResult::Success);
 
         let after = manga_row(&db, id);
         let again = sync(&db, &locks).run(raw, &after, options(NOW_MS + 1), &no_hook).await.expect("second sync");
@@ -462,17 +440,10 @@ mod domain_end_to_end {
         let manga = manga_row(&db, id);
         sync(&db, &locks).run(raw, &manga, options(NOW_MS), &no_hook).await.expect("sync");
 
-        let read: Vec<Chapter> = stored_chapters(&db, id).into_iter().filter(|c| c.chapter_number == 1.0).collect();
-        let progress = read.iter().map(|c| c.chapter_number).fold(0.0, f64::max);
-        let pref = {
-            let settings = InMemorySettings::new();
-            let store: PrefStore = PrefStore::clone(&settings);
-            let p = store.pref("pref_remove_after_marked_as_read_key", false);
-            p.set(false);
-            p
-        };
-        let set = SetReadStatus::new(ChapterRepo::new(db.clone()), MangaRepo::new(db.clone()), pref, Arc::new(NoDownloads));
-        assert_eq!(set.run(true, read).await, SetStatusResult::Success);
+        let read: Vec<Item> = stored_chapters(&db, id).iter().filter(|c| c.chapter_number == 1.0).map(Item::from).collect();
+        let progress = read.iter().map(|c| c.number).fold(0.0, f64::max);
+        let set = SetDoneStatus::new(ItemRepo::new(db.clone()), EntryRepo::new(db.clone()), Arc::new(NoDownloads));
+        assert_eq!(set.run(true, read, false).await, SetDoneResult::Success);
 
         // The tracker is offline: the push cannot happen, so the progress is queued under the track row id.
         let (up, _keep) = tokio::sync::watch::channel(false);
@@ -506,7 +477,7 @@ mod domain_end_to_end {
 
     struct NoDownloads;
 
-    impl ChapterDownloads for NoDownloads {
-        fn delete_chapters(&self, _manga: &Manga, _chapters: &[Chapter]) {}
+    impl ItemDownloads for NoDownloads {
+        fn delete(&self, _e: &Entry, _items: &[Item]) {}
     }
 }

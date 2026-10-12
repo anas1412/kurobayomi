@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use kuro_db::handle::Db;
 use kuro_db::open::DbResult;
-use kuro_db::statements_anime as anime;
-use kuro_db::statements_manga::{CategoryPatch, CategoryRow, categories as manga};
+use kuro_db::tables::CategoryPatch;
+use kuro_db::tables::categories as table;
 use kuro_prefs::category::{forget_category, set_random_sort_seed, write_sort_prefs};
 use kuro_prefs::library::LibraryPrefs;
 
@@ -23,12 +23,9 @@ use crate::library::sort::LibrarySort;
 /// A validation outcome inside a write transaction. `Err` is a domain rule, `Ok` carries the value.
 type Checked<T> = Result<T, DomainError>;
 
-fn manga_category(r: CategoryRow) -> Category {
-    Category { id: r.id, name: r.name, order: r.order, flags: r.flags, hidden: r.hidden }
-}
-
-fn anime_category(r: anime::AnimeCategory) -> Category {
-    Category { id: r.id, name: r.name, order: r.order, flags: r.flags, hidden: r.hidden }
+/// Every category of the kind in display order, read inside the write transaction.
+fn all_in(tx: &kuro_db::Transaction<'_>, kind: Kind) -> DbResult<Vec<Category>> {
+    Ok(table::all(tx, kind)?.into_iter().map(Category::from).collect())
 }
 
 /// Trims a name and rejects an empty result.
@@ -101,18 +98,12 @@ impl CategoryService {
         let flags = self.initial_flags();
         self.detached(move |db| {
             let out = db.write(|tx| -> DbResult<Checked<Category>> {
-                let all: Vec<Category> = match kind {
-                    Kind::Manga => manga::get_categories(tx)?.into_iter().map(manga_category).collect(),
-                    Kind::Anime => anime::categories(tx)?.into_iter().map(anime_category).collect(),
-                };
+                let all = all_in(tx, kind)?;
                 if name_taken(&all, &name, None) {
                     return Ok(Err(DomainError::DuplicateName));
                 }
                 let order = all.iter().map(|c| c.order).max().map_or(0, |max| max + 1);
-                let id = match kind {
-                    Kind::Manga => manga::insert(tx, &name, order, flags)?,
-                    Kind::Anime => anime::insert_category(tx, &name, order, flags)?,
-                };
+                let id = table::insert(tx, kind, &name, order, flags)?;
                 Ok(Ok(Category { id, name: name.clone(), order, flags, hidden: false }))
             })?;
             out
@@ -131,10 +122,7 @@ impl CategoryService {
         let kind = self.kind();
         self.detached(move |db| {
             let out = db.write(|tx| -> DbResult<Checked<()>> {
-                let current = match kind {
-                    Kind::Manga => manga::get_category(tx, id)?.map(manga_category),
-                    Kind::Anime => anime::category_by_id(tx, id)?.map(anime_category),
-                };
+                let current = table::get(tx, kind, id)?.map(Category::from);
                 let Some(current) = current else {
                     return Ok(Err(DomainError::NotFound));
                 };
@@ -142,14 +130,7 @@ impl CategoryService {
                     return Ok(Err(DomainError::SystemCategory));
                 }
                 let hidden = !current.hidden;
-                match kind {
-                    Kind::Manga => {
-                        manga::update(tx, &CategoryPatch { id, hidden: Some(hidden), ..Default::default() })?;
-                    }
-                    Kind::Anime => {
-                        anime::update_category(tx, id, None, None, None, Some(hidden))?;
-                    }
-                }
+                table::update(tx, kind, &CategoryPatch { id, hidden: Some(hidden), ..Default::default() })?;
                 Ok(Ok(()))
             })?;
             out
@@ -209,10 +190,7 @@ impl CategoryService {
         self.detached(move |db| {
             let _guard = guard;
             let out = db.write(|tx| -> DbResult<Checked<()>> {
-                let all: Vec<Category> = match kind {
-                    Kind::Manga => manga::get_categories(tx)?.into_iter().map(manga_category).collect(),
-                    Kind::Anime => anime::categories(tx)?.into_iter().map(anime_category).collect(),
-                };
+                let all = all_in(tx, kind)?;
                 let mut ids: Vec<i64> = all.iter().filter(|c| !c.is_system()).map(|c| c.id).collect();
                 let Some(from) = ids.iter().position(|&c| c == id) else {
                     return Ok(Err(DomainError::NotFound));
@@ -253,21 +231,8 @@ impl CategoryService {
         self.detached(move |db| {
             let _guard = guard;
             let out = db.write(|tx| -> DbResult<Checked<()>> {
-                match kind {
-                    Kind::Manga => {
-                        manga::delete(tx, id)?;
-                    }
-                    Kind::Anime => {
-                        anime::delete_category(tx, id)?;
-                    }
-                }
-                let all: Vec<i64> = match kind {
-                    Kind::Manga => manga::get_categories(tx)?.into_iter().map(|c| c.id).collect(),
-                    Kind::Anime => anime::categories(tx)?.into_iter().map(|c| c.id).collect(),
-                };
-                for (order, category) in all.iter().enumerate() {
-                    set_order(tx, kind, *category, order as i64)?;
-                }
+                table::delete(tx, kind, id)?;
+                table::renumber_all(tx, kind)?;
                 Ok(Ok(()))
             })?;
             out
@@ -289,15 +254,11 @@ impl CategoryService {
         wanted.sort_unstable();
         wanted.dedup();
         let db = self.repo.db().clone();
-        let kind = self.kind();
-        tokio::task::spawn_blocking(move || match kind {
-            Kind::Manga => kuro_data::manga::MangaRepo::new(db).set_categories(entry_id, &wanted),
-            Kind::Anime => kuro_data::anime::AnimeRepo::new(db).set_categories(entry_id, &wanted),
-        })
-        .await
-        .map_err(DomainError::Join)?
-        .map_err(DomainError::from)
-        .inspect_err(|e| tracing::error!(error = ?e, entry_id, "set entry categories failed"))
+        tokio::task::spawn_blocking(move || kuro_data::entry::EntryRepo::new(db).set_categories(entry_id, &wanted))
+            .await
+            .map_err(DomainError::Join)?
+            .map_err(DomainError::from)
+            .inspect_err(|e| tracing::error!(error = ?e, entry_id, "set entry categories failed"))
     }
 
     /// `SetSortModeForXCategory`. The global sort is written and every category takes the same flags (the settings
@@ -342,10 +303,7 @@ pub fn set_display_mode(prefs: &LibraryPrefs, mode: LibraryDisplayMode) {
 
 /// Applies one update inside a write transaction. A `None` field keeps the stored value.
 fn apply_update(tx: &kuro_db::Transaction<'_>, kind: Kind, u: &CategoryUpdate) -> DbResult<Checked<()>> {
-    let all: Vec<Category> = match kind {
-        Kind::Manga => manga::get_categories(tx)?.into_iter().map(manga_category).collect(),
-        Kind::Anime => anime::categories(tx)?.into_iter().map(anime_category).collect(),
-    };
+    let all = all_in(tx, kind)?;
     let Some(current) = all.iter().find(|c| c.id == u.id) else {
         return Ok(Err(DomainError::NotFound));
     };
@@ -357,48 +315,19 @@ fn apply_update(tx: &kuro_db::Transaction<'_>, kind: Kind, u: &CategoryUpdate) -
             return Ok(Err(DomainError::DuplicateName));
         }
     }
-    match kind {
-        Kind::Manga => {
-            manga::update(
-                tx,
-                &CategoryPatch {
-                    id: u.id,
-                    name: u.name.clone(),
-                    order: u.order,
-                    flags: u.flags,
-                    hidden: u.hidden,
-                },
-            )?;
-        }
-        Kind::Anime => {
-            anime::update_category(tx, u.id, u.name.as_deref(), u.order, u.flags, u.hidden)?;
-        }
-    }
+    let patch = CategoryPatch { id: u.id, name: u.name.clone(), order: u.order, flags: u.flags, hidden: u.hidden };
+    table::update(tx, kind, &patch)?;
     Ok(Ok(()))
 }
 
 fn set_order(tx: &kuro_db::Transaction<'_>, kind: Kind, id: i64, order: i64) -> DbResult<()> {
-    match kind {
-        Kind::Manga => {
-            manga::update(tx, &CategoryPatch { id, order: Some(order), ..Default::default() })?;
-        }
-        Kind::Anime => {
-            anime::update_category(tx, id, None, Some(order), None, None)?;
-        }
-    }
+    table::update(tx, kind, &CategoryPatch { id, order: Some(order), ..Default::default() })?;
     Ok(())
 }
 
 fn write_all_flags(db: &Db, kind: Kind, flags: i64) -> Result<(), DomainError> {
     db.write(|tx| {
-        match kind {
-            Kind::Manga => {
-                manga::update_all_flags(tx, Some(flags))?;
-            }
-            Kind::Anime => {
-                anime::update_all_category_flags(tx, Some(flags))?;
-            }
-        }
+        table::update_all_flags(tx, kind, Some(flags))?;
         Ok(())
     })
     .map_err(DomainError::from)

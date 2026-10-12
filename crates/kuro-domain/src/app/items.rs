@@ -4,12 +4,14 @@
 
 use kuro_data::anime::Anime;
 use kuro_data::chapter::Chapter;
+use kuro_data::entry::Entry;
 use kuro_data::episode::Episode;
+use kuro_data::item::Item;
 use kuro_data::manga::Manga;
+use kuro_db::flags::item;
 use kuro_prefs::tristate::TriState;
 
-use crate::entries::anime::{AnimeExt, episode_flags};
-use crate::entries::manga::{MangaExt, chapter_flags};
+use crate::entries::flags::{EntryFlags, manga_sorting_to_unified};
 use crate::error::DomainError;
 use crate::flags::tri;
 use crate::items::sorter::{SortItem, SortKey, compare_items};
@@ -21,6 +23,18 @@ pub trait FilterRow: SortItem + Clone {
     fn is_bookmarked(&self) -> bool;
     /// Episodes only; a chapter is never fillermarked.
     fn is_fillermarked(&self) -> bool;
+}
+
+impl FilterRow for Item {
+    fn is_read(&self) -> bool {
+        self.done
+    }
+    fn is_bookmarked(&self) -> bool {
+        self.bookmark
+    }
+    fn is_fillermarked(&self) -> bool {
+        self.fillermark
+    }
 }
 
 impl FilterRow for Chapter {
@@ -64,56 +78,32 @@ pub struct ListFilters {
     pub unread: TriState,
     pub bookmarked: TriState,
     pub downloaded: TriState,
-    /// Episodes only; `Disabled` for a chapter list.
+    /// Anime only; `Disabled` for a manga list.
     pub fillermarked: TriState,
     pub key: SortKey,
     pub descending: bool,
 }
 
-/// The chapter list filters of a manga (`ChapterFilter.kt`). Errors on an unknown sorting value.
-pub fn chapter_filters(manga: &Manga, downloaded_only: bool) -> Result<ListFilters, DomainError> {
+/// The item list filters of an entry of either kind (`ChapterFilter.kt`, `EpisodeFilter.kt`). Errors on an unknown
+/// sorting value.
+pub fn item_filters(e: &Entry, downloaded_only: bool) -> Result<ListFilters, DomainError> {
+    let flags = e.item_flags();
     Ok(ListFilters {
-        unread: manga.unread_filter(),
-        bookmarked: manga.bookmarked_filter(),
-        downloaded: downloaded_filter(
-            manga.downloaded_filter_raw(),
-            chapter_flags::SHOW_DOWNLOADED,
-            chapter_flags::SHOW_NOT_DOWNLOADED,
-            downloaded_only,
-        ),
-        fillermarked: TriState::DISABLED,
-        key: chapter_sort_key(manga.sorting())?,
-        descending: manga.sort_descending(),
+        unread: e.undone_filter(),
+        bookmarked: e.bookmarked_filter(),
+        downloaded: downloaded_filter(e.downloaded_filter_raw(), item::SHOW_DOWNLOADED, item::SHOW_NOT_DOWNLOADED, downloaded_only),
+        fillermarked: e.fillermarked_filter(),
+        key: sort_key(flags.sorting())?,
+        descending: flags.sort_descending(),
     })
 }
 
-/// The episode list filters of an anime (`EpisodeFilter.kt`). Errors on an unknown sorting value.
-pub fn episode_filters(anime: &Anime, downloaded_only: bool) -> Result<ListFilters, DomainError> {
-    Ok(ListFilters {
-        unread: anime.unseen_filter(),
-        bookmarked: anime.bookmarked_filter(),
-        downloaded: downloaded_filter(
-            anime.downloaded_filter_raw(),
-            episode_flags::SHOW_DOWNLOADED,
-            episode_flags::SHOW_NOT_DOWNLOADED,
-            downloaded_only,
-        ),
-        fillermarked: anime.fillermarked_filter(),
-        key: episode_sort_key(anime.sorting())?,
-        descending: anime.sort_descending(),
-    })
-}
-
-/// `episodes_filtered` (behavior 7): any of the four episode filters is on.
-pub fn episodes_filtered(filters: &ListFilters) -> bool {
+/// The one rule of a filtered list (behavior 7): any of the four filters is on. The fillermark filter is `Disabled` on a
+/// manga list, so it never counts there.
+pub fn items_filtered(filters: &ListFilters) -> bool {
     [filters.unread, filters.bookmarked, filters.downloaded, filters.fillermarked]
         .iter()
         .any(|f| *f != TriState::DISABLED)
-}
-
-/// `chapters_filtered` (behavior 7): unread, bookmarked or downloaded is on.
-pub fn chapters_filtered(filters: &ListFilters) -> bool {
-    [filters.unread, filters.bookmarked, filters.downloaded].iter().any(|f| *f != TriState::DISABLED)
 }
 
 /// `applyFilters`: keeps the rows that pass every filter, then sorts them stably. `is_downloaded` says whether a row is
@@ -135,26 +125,47 @@ pub fn apply_filters<T: FilterRow>(
     kept
 }
 
-/// The sort key of a chapter sorting value, strictly: an unknown value is an error (T-10a-012).
-pub fn chapter_sort_key(sorting: i64) -> Result<SortKey, DomainError> {
+/// The sort key of a sorting value (unified layout), strictly: an unknown value is an error (T-10a-012).
+pub fn sort_key(sorting: i64) -> Result<SortKey, DomainError> {
     match sorting {
-        chapter_flags::SORTING_SOURCE => Ok(SortKey::Source),
-        chapter_flags::SORTING_NUMBER => Ok(SortKey::Number),
-        chapter_flags::SORTING_UPLOAD_DATE => Ok(SortKey::UploadDate),
-        chapter_flags::SORTING_ALPHABET => Ok(SortKey::Alphabet),
-        _ => Err(DomainError::Invalid("unknown chapter sorting method")),
+        item::SORTING_SOURCE => Ok(SortKey::Source),
+        item::SORTING_NUMBER => Ok(SortKey::Number),
+        item::SORTING_UPLOAD_DATE => Ok(SortKey::UploadDate),
+        item::SORTING_ALPHABET => Ok(SortKey::Alphabet),
+        _ => Err(DomainError::Invalid("unknown item sorting method")),
     }
+}
+
+// ----- the old per-kind names (phase E deletes them) -----
+
+/// The chapter list filters of a manga (`ChapterFilter.kt`).
+pub fn chapter_filters(manga: &Manga, downloaded_only: bool) -> Result<ListFilters, DomainError> {
+    item_filters(&Entry::from(manga), downloaded_only)
+}
+
+/// The episode list filters of an anime (`EpisodeFilter.kt`).
+pub fn episode_filters(anime: &Anime, downloaded_only: bool) -> Result<ListFilters, DomainError> {
+    item_filters(&Entry::from(anime), downloaded_only)
+}
+
+/// `episodes_filtered` (behavior 7).
+pub fn episodes_filtered(filters: &ListFilters) -> bool {
+    items_filtered(filters)
+}
+
+/// `chapters_filtered` (behavior 7): a chapter list has no fillermark filter, so that one is not looked at.
+pub fn chapters_filtered(filters: &ListFilters) -> bool {
+    items_filtered(&ListFilters { fillermarked: TriState::DISABLED, ..*filters })
+}
+
+/// The sort key of a chapter sorting value (the manga layout), strictly.
+pub fn chapter_sort_key(sorting: i64) -> Result<SortKey, DomainError> {
+    manga_sorting_to_unified(sorting).map_or(Err(DomainError::Invalid("unknown item sorting method")), sort_key)
 }
 
 /// The sort key of an episode sorting value, strictly.
 pub fn episode_sort_key(sorting: i64) -> Result<SortKey, DomainError> {
-    match sorting {
-        episode_flags::SORTING_SOURCE => Ok(SortKey::Source),
-        episode_flags::SORTING_NUMBER => Ok(SortKey::Number),
-        episode_flags::SORTING_UPLOAD_DATE => Ok(SortKey::UploadDate),
-        episode_flags::SORTING_ALPHABET => Ok(SortKey::Alphabet),
-        _ => Err(DomainError::Invalid("unknown episode sorting method")),
-    }
+    sort_key(sorting)
 }
 
 #[cfg(test)]

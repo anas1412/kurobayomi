@@ -8,27 +8,31 @@
 use kuro_data::anime::Anime;
 use kuro_data::chapter::Chapter;
 use kuro_data::episode::Episode;
+use kuro_data::item::Item;
 
-/// Chapter: scanlator, name, date upload (skipped when the source date is 0), number and source order.
-pub fn should_update_db_chapter(db: &Chapter, src: &Chapter) -> bool {
+/// One item of either kind: scanlator, name, date upload (skipped when the source date is 0), number and source order,
+/// plus the anime fields summary, fillermark, preview url and memo. A manga item has none of those (they are equal
+/// `None`/false on both sides), so the one rule serves both kinds.
+pub fn should_update_db_item(db: &Item, src: &Item) -> bool {
     db.scanlator != src.scanlator
         || db.name != src.name
         || (src.date_upload != 0 && db.date_upload != src.date_upload)
-        || db.chapter_number != src.chapter_number
-        || db.source_order != src.source_order
-}
-
-/// Episode: the chapter fields plus summary, fillermark, preview url and memo.
-pub fn should_update_db_episode(db: &Episode, src: &Episode) -> bool {
-    db.scanlator != src.scanlator
-        || db.name != src.name
-        || (src.date_upload != 0 && db.date_upload != src.date_upload)
-        || db.episode_number != src.episode_number
+        || db.number != src.number
         || db.source_order != src.source_order
         || db.summary != src.summary
         || db.fillermark != src.fillermark
         || db.preview_url != src.preview_url
         || db.memo != src.memo
+}
+
+/// Chapter: [`should_update_db_item`] over the legacy shape.
+pub fn should_update_db_chapter(db: &Chapter, src: &Chapter) -> bool {
+    should_update_db_item(&Item::from(db), &Item::from(src))
+}
+
+/// Episode: [`should_update_db_item`] over the legacy shape.
+pub fn should_update_db_episode(db: &Episode, src: &Episode) -> bool {
+    should_update_db_item(&Item::from(db), &Item::from(src))
 }
 
 /// Season: title, season number and season source order. The memo is not compared (Q15).

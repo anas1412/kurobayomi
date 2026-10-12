@@ -64,6 +64,25 @@ async fn names_are_trimmed_and_checked_for_emptiness_and_duplicates() {
 }
 
 #[tokio::test]
+async fn category_service_refuses_duplicates_for_both_kinds() {
+    let (_d, db) = crate::testdb::test_db();
+    let prefs = Arc::new(LibraryPrefs::new(PrefStore::in_memory()));
+    for kind in [Kind::Manga, Kind::Anime] {
+        let svc = CategoryService::new(db.clone(), kind, prefs.clone());
+        assert!(matches!(svc.create("   ").await, Err(DomainError::InvalidName)), "{kind}");
+        let first = svc.create("  Reading ").await.unwrap();
+        assert_eq!(first.name, "Reading");
+        assert!(matches!(svc.create("Reading").await, Err(DomainError::DuplicateName)), "{kind}: the second create is refused");
+        let other = svc.create("Other").await.unwrap();
+        assert!(matches!(svc.rename(other.id, "Reading").await, Err(DomainError::DuplicateName)), "{kind}: renaming onto a name");
+        assert!(matches!(svc.update_partial(CategoryUpdate { id: other.id, name: Some("Reading".into()), ..Default::default() }).await, Err(DomainError::DuplicateName)));
+    }
+    // the kinds own their names: the same name is free in the other kind
+    let other_kind = CategoryService::new(db, Kind::Manga, prefs);
+    assert_eq!(other_kind.repo().all().unwrap().iter().filter(|c| c.name == "Reading").count(), 1);
+}
+
+#[tokio::test]
 async fn rename_to_own_name_is_a_no_op_and_to_another_name_is_a_duplicate() {
     let (_d, svc, _p) = service(Kind::Manga);
     let a = svc.create("A").await.unwrap();

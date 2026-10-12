@@ -1,13 +1,11 @@
-//! Track interactors (`GetMangaTracks.kt`, `InsertMangaTrack.kt`, `DeleteMangaTrack.kt`, `GetTracksPerManga.kt` and
-//! the anime twins). Parity call sites use the log-and-default functions: a failure is logged once and the caller
-//! gets `None`, an empty list, or nothing. New code uses the `try_` functions, which return the error (E-TRK-03).
-
 use std::collections::BTreeMap;
+
+use kuro_data::track::Track;
+use kuro_platform::kind::Kind;
 
 use crate::error::DomainError;
 use crate::source::model::Id;
-use crate::track::Track;
-use crate::track::repo::TrackRepo;
+use crate::track::repo::TrackPort;
 
 /// Returns the value, or logs the error once and returns `T::default()`.
 pub fn log_and_default<T: Default>(result: Result<T, DomainError>, what: &'static str) -> T {
@@ -21,89 +19,80 @@ pub fn log_and_default<T: Default>(result: Result<T, DomainError>, what: &'stati
 }
 
 /// Reads that return the error instead of swallowing it (new code; the `by_*` functions are the parity wrappers).
-pub fn try_by_row_id<T>(repo: &dyn TrackRepo<T>, row_id: Id) -> Result<Option<T>, DomainError> {
+pub fn try_by_row_id(repo: &dyn TrackPort, row_id: Id) -> Result<Option<Track>, DomainError> {
     repo.by_row_id(row_id)
 }
 
 /// Reads that return the error instead of swallowing it, for the tracks of one entry.
-pub fn try_by_entry<T>(repo: &dyn TrackRepo<T>, entry_id: Id) -> Result<Vec<T>, DomainError> {
+pub fn try_by_entry(repo: &dyn TrackPort, entry_id: Id) -> Result<Vec<Track>, DomainError> {
     repo.by_entry(entry_id)
 }
 
 /// `GetMangaTracks.awaitOne(id)`: the binding with row id `row_id`, or `None` on error (Q-TRK-1).
-pub fn by_row_id<T>(repo: &dyn TrackRepo<T>, row_id: Id) -> Option<T> {
+pub fn by_row_id(repo: &dyn TrackPort, row_id: Id) -> Option<Track> {
     log_and_default(repo.by_row_id(row_id), "cannot read track by row id")
 }
 
 /// `GetMangaTracks.await(mangaId)`: the bindings of one entry, or an empty list on error.
-pub fn by_entry<T>(repo: &dyn TrackRepo<T>, entry_id: Id) -> Vec<T> {
+pub fn by_entry(repo: &dyn TrackPort, entry_id: Id) -> Vec<Track> {
     log_and_default(repo.by_entry(entry_id), "cannot read tracks of an entry")
 }
 
 /// `InsertMangaTrack.await(track)`: the error is logged and not returned.
-pub fn insert<T>(repo: &dyn TrackRepo<T>, track: &T) {
+pub fn insert(repo: &dyn TrackPort, track: &Track) {
     log_and_default(repo.insert(track), "cannot insert track");
 }
 
 /// `InsertMangaTrack.awaitAll(tracks)`: the error is logged and not returned.
-pub fn insert_all<T>(repo: &dyn TrackRepo<T>, tracks: &[T]) {
+pub fn insert_all(repo: &dyn TrackPort, tracks: &[Track]) {
     log_and_default(repo.insert_all(tracks), "cannot insert tracks");
 }
 
 /// `DeleteMangaTrack.await(mangaId, trackerId)`: the error is logged and not returned.
-pub fn delete<T>(repo: &dyn TrackRepo<T>, entry_id: Id, tracker_id: Id) {
+pub fn delete(repo: &dyn TrackPort, entry_id: Id, tracker_id: Id) {
     log_and_default(repo.delete(entry_id, tracker_id), "cannot delete track");
 }
 
 /// Insert that returns the error to the caller.
-pub fn try_insert<T>(repo: &dyn TrackRepo<T>, track: &T) -> Result<(), DomainError> {
+pub fn try_insert(repo: &dyn TrackPort, track: &Track) -> Result<(), DomainError> {
     repo.insert(track)
 }
 
 /// Delete that returns the error to the caller.
-pub fn try_delete<T>(repo: &dyn TrackRepo<T>, entry_id: Id, tracker_id: Id) -> Result<(), DomainError> {
+pub fn try_delete(repo: &dyn TrackPort, entry_id: Id, tracker_id: Id) -> Result<(), DomainError> {
     repo.delete(entry_id, tracker_id)
 }
 
 /// `GetTracksPerManga` / `GetTracksPerAnime`: every track grouped by its entry. Entries without tracks are absent.
-pub fn tracks_per_entry<T: Track>(repo: &dyn TrackRepo<T>) -> BTreeMap<Id, Vec<T>> {
-    let mut grouped: BTreeMap<Id, Vec<T>> = BTreeMap::new();
-    for track in log_and_default(repo.all(), "cannot read tracks") {
-        grouped.entry(track.entry_id()).or_default().push(track);
+pub fn tracks_per_entry(repo: &dyn TrackPort, kind: Kind) -> BTreeMap<Id, Vec<Track>> {
+    let mut grouped: BTreeMap<Id, Vec<Track>> = BTreeMap::new();
+    for track in log_and_default(repo.all(kind), "cannot read tracks") {
+        grouped.entry(track.entry_id).or_default().push(track);
     }
     grouped
 }
+
 
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
 
     use super::*;
-    use crate::track::{AnimeTrack, MangaTrack};
-
-    fn track(manga_id: Id, tracker: Id, title: &str) -> MangaTrack {
-        MangaTrack {
-            id: manga_id * 10 + tracker,
-            manga_id,
-            tracker_id: tracker,
+    
+    fn track(entry_id: Id, tracker: Id, title: &str) -> Track {
+        Track {
+            id: entry_id * 10 + tracker,
+            entry_id,
             remote_id: 1,
-            library_id: None,
             title: title.into(),
-            last_chapter_read: 0.0,
-            total_chapters: 0,
-            status: 0,
-            score: 0.0,
-            remote_url: String::new(),
-            start_date: 0,
-            finish_date: 0,
-            private: false,
+            ..Track::new(Kind::Manga, tracker)
         }
     }
 
     /// Keeps rows in memory; `broken` makes every call fail with a database error.
     #[derive(Default)]
     struct Fake {
-        rows: Mutex<Vec<MangaTrack>>,
+        rows: Mutex<Vec<Track>>,
         broken: bool,
     }
 
@@ -111,43 +100,39 @@ mod tests {
         DomainError::Db(kuro_db::open::DbError::NotFound)
     }
 
-    impl TrackRepo<MangaTrack> for Fake {
-        fn by_row_id(&self, row_id: Id) -> Result<Option<MangaTrack>, DomainError> {
-            if self.broken {
-                return Err(fail());
-            }
+    impl Fake {
+        fn check(&self) -> Result<(), DomainError> {
+            if self.broken { Err(fail()) } else { Ok(()) }
+        }
+    }
+
+    impl TrackPort for Fake {
+        fn by_row_id(&self, row_id: Id) -> Result<Option<Track>, DomainError> {
+            self.check()?;
             Ok(self.rows.lock().unwrap().iter().find(|t| t.id == row_id).cloned())
         }
-        fn by_entry(&self, entry_id: Id) -> Result<Vec<MangaTrack>, DomainError> {
-            if self.broken {
-                return Err(fail());
-            }
-            Ok(self.rows.lock().unwrap().iter().filter(|t| t.manga_id == entry_id).cloned().collect())
+        fn by_entry(&self, entry_id: Id) -> Result<Vec<Track>, DomainError> {
+            self.check()?;
+            Ok(self.rows.lock().unwrap().iter().filter(|t| t.entry_id == entry_id).cloned().collect())
         }
-        fn all(&self) -> Result<Vec<MangaTrack>, DomainError> {
-            if self.broken {
-                return Err(fail());
-            }
-            Ok(self.rows.lock().unwrap().clone())
+        fn all(&self, kind: Kind) -> Result<Vec<Track>, DomainError> {
+            self.check()?;
+            Ok(self.rows.lock().unwrap().iter().filter(|t| t.kind == kind).cloned().collect())
         }
-        fn insert(&self, t: &MangaTrack) -> Result<(), DomainError> {
-            if self.broken {
-                return Err(fail());
-            }
+        fn insert(&self, t: &Track) -> Result<(), DomainError> {
+            self.check()?;
             self.rows.lock().unwrap().push(t.clone());
             Ok(())
         }
-        fn insert_all(&self, ts: &[MangaTrack]) -> Result<(), DomainError> {
+        fn insert_all(&self, ts: &[Track]) -> Result<(), DomainError> {
             for t in ts {
                 self.insert(t)?;
             }
             Ok(())
         }
         fn delete(&self, entry_id: Id, tracker_id: Id) -> Result<(), DomainError> {
-            if self.broken {
-                return Err(fail());
-            }
-            self.rows.lock().unwrap().retain(|t| !(t.manga_id == entry_id && t.tracker_id == tracker_id));
+            self.check()?;
+            self.rows.lock().unwrap().retain(|t| !(t.entry_id == entry_id && t.tracker_id == tracker_id));
             Ok(())
         }
     }
@@ -201,7 +186,7 @@ mod tests {
         assert!(try_by_row_id(&repo, 1).is_err());
         assert!(try_by_entry(&repo, 1).is_err());
         let ok = Fake::default();
-        assert_eq!(try_by_entry(&ok, 1).expect("read"), Vec::<MangaTrack>::new());
+        assert_eq!(try_by_entry(&ok, 1).expect("read"), Vec::<Track>::new());
     }
 
     #[test]
@@ -226,7 +211,7 @@ mod tests {
     fn tracks_per_entry_groups_by_entry_and_leaves_out_entries_without_tracks() {
         let repo = Fake::default();
         insert_all(&repo, &[track(1, 2, "a"), track(1, 3, "b"), track(4, 2, "c")]);
-        let grouped = tracks_per_entry(&repo);
+        let grouped = tracks_per_entry(&repo, Kind::Manga);
         assert_eq!(grouped.keys().copied().collect::<Vec<_>>(), vec![1, 4], "TC-TRK-07");
         assert_eq!(grouped[&1].len(), 2);
         assert!(!grouped.contains_key(&2));
@@ -241,23 +226,11 @@ mod tests {
     }
 
     #[test]
-    fn the_anime_track_implements_the_grouping_key() {
-        let a = AnimeTrack {
-            id: 1,
-            anime_id: 5,
-            tracker_id: 2,
-            remote_id: 0,
-            library_id: None,
-            title: String::new(),
-            last_episode_seen: 0.0,
-            total_episodes: 0,
-            status: 0,
-            score: 0.0,
-            remote_url: String::new(),
-            start_date: 0,
-            finish_date: 0,
-            private: false,
-        };
-        assert_eq!(a.entry_id(), 5);
+    fn the_grouping_is_scoped_to_one_kind() {
+        let repo = Fake::default();
+        let anime = Track { kind: Kind::Anime, ..track(5, 2, "a") };
+        insert_all(&repo, &[track(1, 2, "m"), anime]);
+        assert_eq!(tracks_per_entry(&repo, Kind::Anime).keys().copied().collect::<Vec<_>>(), vec![5]);
+        assert_eq!(tracks_per_entry(&repo, Kind::Manga).keys().copied().collect::<Vec<_>>(), vec![1]);
     }
 }

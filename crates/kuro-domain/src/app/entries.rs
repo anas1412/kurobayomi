@@ -6,51 +6,24 @@ use kuro_data::DataResult;
 use kuro_data::anime::AnimeRepo;
 use kuro_data::manga::MangaRepo;
 
-use crate::entries::anime::viewer_flags::{AIRING_EPISODE_MASK, AIRING_TIME_MASK, INTRO_DISABLE_MASK, INTRO_MASK};
+pub use crate::entries::viewer_flags::{READING_MODE_MASK, effective_intro_length, reading_mode};
+use crate::entries::viewer_flags::{set_next_episode_airing, set_reading_mode, set_skip_intro_length};
+#[cfg(test)]
+use crate::entries::flags::{AIRING_EPISODE_MASK, AIRING_TIME_MASK, INTRO_DISABLE_MASK, INTRO_MASK};
 
-/// Reading mode: bits 0-2 of `mangas.viewer` (`p1-data-and-config.md` 3.1).
-pub const READING_MODE_MASK: i64 = 0x7;
-
-/// `Manga::reading_mode()`: the reading-mode bits of a `viewer` word, raw. Unknown values are the caller's to map.
-pub fn reading_mode(viewer: i64) -> i64 {
-    viewer & READING_MODE_MASK
-}
-
-/// `SetMangaViewerFlags.awaitSetReadingMode`. Only bits 0-2 change; `flag` is masked, so other bits of `flag` are ignored.
+/// [`crate::entries::viewer_flags::set_reading_mode`] over a `MangaRepo`.
 pub fn set_manga_reading_mode(repo: &MangaRepo, manga_id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_viewer_bits(manga_id, flag, READING_MODE_MASK)
+    set_reading_mode(repo, manga_id, flag)
 }
 
-/// `SetAnimeViewerFlags.awaitSetSkipIntroLength`: the length goes in its eight bits (`length and 0xFF`, EC-21: 300 stores
-/// 44). A masked zero sets the disable bit and clears the length; any other length clears the disable bit.
+/// [`crate::entries::viewer_flags::set_skip_intro_length`] over an `AnimeRepo`.
 pub fn set_anime_skip_intro_length(repo: &AnimeRepo, anime_id: i64, length: i64) -> DataResult<bool> {
-    let masked = length & INTRO_MASK;
-    let disable = if masked == 0 { INTRO_DISABLE_MASK } else { 0 };
-    repo.set_viewer_bits(anime_id, masked | disable, INTRO_MASK | INTRO_DISABLE_MASK)
+    set_skip_intro_length(repo, anime_id, length)
 }
 
-/// `SetAnimeViewerFlags.awaitSetNextEpisodeAiring`: the episode (16 bits) and the airing time (32 bits) are written in one
-/// statement. Values above their width are truncated by the mask, without error (EC-22). `(0, 0)` clears both.
-pub fn set_anime_next_episode_airing(
-    repo: &AnimeRepo,
-    anime_id: i64,
-    episode: i64,
-    airing_at: i64,
-) -> DataResult<bool> {
-    let value = ((episode & 0xFFFF) << 8) | ((airing_at & 0xFFFF_FFFF) << 24);
-    repo.set_viewer_bits(anime_id, value, AIRING_EPISODE_MASK | AIRING_TIME_MASK)
-}
-
-/// The skip-intro length the player uses: `0` when the intro is disabled, the default preference when the stored length
-/// is `0`, and the stored length otherwise (T-10a-004).
-pub fn effective_intro_length(viewer: i64, default_intro_length: i64) -> i64 {
-    if viewer & INTRO_DISABLE_MASK == INTRO_DISABLE_MASK {
-        return 0;
-    }
-    match viewer & INTRO_MASK {
-        0 => default_intro_length,
-        stored => stored,
-    }
+/// [`crate::entries::viewer_flags::set_next_episode_airing`] over an `AnimeRepo`.
+pub fn set_anime_next_episode_airing(repo: &AnimeRepo, anime_id: i64, episode: i64, airing_at: i64) -> DataResult<bool> {
+    set_next_episode_airing(repo, anime_id, episode, airing_at)
 }
 
 #[cfg(test)]

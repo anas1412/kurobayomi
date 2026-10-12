@@ -5,13 +5,20 @@
 
 use kuro_data::DataResult;
 use kuro_data::anime::{Anime, AnimeRepo};
+use kuro_data::entry::Entry;
 use kuro_data::manga::{Manga, MangaRepo};
+use kuro_db::flags::{chapter, manga_item_flags_from_unified as from_unified, manga_item_flags_to_unified as to_unified};
+use kuro_platform::kind::Kind;
 use kuro_prefs::store::PrefStore;
 
 use crate::error::DomainError;
+use crate::flags::set_flag;
 
-use super::anime::{episode_flags as ep, season_flags as se};
-use super::flag_setters::{SeasonAll, SeasonOverlay, chapter_all, episode_all, season_all};
+#[cfg(test)]
+use super::anime::episode_flags as ep;
+use super::anime::season_flags as se;
+use super::flag_setters::{SeasonAll, SeasonOverlay, item_all, season_all};
+use super::store::EntryFlagStore;
 
 const CHAPTER_UNREAD: &str = "default_chapter_filter_by_read";
 const CHAPTER_DOWNLOADED: &str = "default_chapter_filter_by_downloaded";
@@ -58,31 +65,45 @@ fn put_long(store: &PrefStore, key: &'static str, value: i64) {
     store.pref::<i64>(key, 0).set(value);
 }
 
-/// The default chapter word, as the preferences describe it.
-pub fn chapter_default_word(store: &PrefStore) -> i64 {
-    chapter_all(
-        long(store, CHAPTER_UNREAD),
-        long(store, CHAPTER_DOWNLOADED),
-        long(store, CHAPTER_BOOKMARKED),
-        long(store, CHAPTER_SORT),
-        long(store, SHARED_DIRECTION),
-        long(store, CHAPTER_DISPLAY),
-    )
+/// The default item word of a kind (unified layout), as the preferences describe it. The two kinds read their own
+/// keys (the direction and display keys are shared, Q3). A manga word has only the six manga groups: the anime-only
+/// groups are not read for it.
+pub fn item_default_word(store: &PrefStore, kind: Kind) -> i64 {
+    match kind {
+        Kind::Manga => item_all(
+            long(store, CHAPTER_UNREAD),
+            long(store, CHAPTER_DOWNLOADED),
+            long(store, CHAPTER_BOOKMARKED),
+            0,
+            // the stored sort value is the manga layout; a stray bit outside its group is not a sort
+            to_unified(long(store, CHAPTER_SORT) & chapter::SORTING_MASK),
+            long(store, SHARED_DIRECTION),
+            long(store, CHAPTER_DISPLAY),
+            0,
+            0,
+        ),
+        Kind::Anime => item_all(
+            long(store, EPISODE_UNSEEN),
+            long(store, EPISODE_DOWNLOADED),
+            long(store, EPISODE_BOOKMARKED),
+            long(store, EPISODE_FILLERMARKED),
+            long(store, EPISODE_SORT),
+            long(store, SHARED_DIRECTION),
+            long(store, CHAPTER_DISPLAY),
+            long(store, EPISODE_PREVIEWS),
+            long(store, EPISODE_SUMMARIES),
+        ),
+    }
 }
 
-/// The default episode word, as the preferences describe it.
+/// The default chapter word in the manga layout (the old name of `item_default_word(Manga)`).
+pub fn chapter_default_word(store: &PrefStore) -> i64 {
+    from_unified(item_default_word(store, Kind::Manga))
+}
+
+/// The default episode word (the old name of `item_default_word(Anime)`).
 pub fn episode_default_word(store: &PrefStore) -> i64 {
-    episode_all(
-        long(store, EPISODE_UNSEEN),
-        long(store, EPISODE_DOWNLOADED),
-        long(store, EPISODE_BOOKMARKED),
-        long(store, EPISODE_FILLERMARKED),
-        long(store, EPISODE_SORT),
-        long(store, SHARED_DIRECTION),
-        long(store, CHAPTER_DISPLAY),
-        long(store, EPISODE_PREVIEWS),
-        long(store, EPISODE_SUMMARIES),
-    )
+    item_default_word(store, Kind::Anime)
 }
 
 /// The default season word, as the preferences describe it. With the registry defaults this is `0x5800000`.
@@ -109,119 +130,153 @@ pub fn season_default_word(store: &PrefStore) -> i64 {
     })
 }
 
+/// Writes the default item word of the entry's kind to it (on add to library, and "apply to all"). Returns whether the
+/// row changed.
+pub fn apply_item_defaults(repo: &impl EntryFlagStore, store: &PrefStore, e: &Entry) -> DataResult<bool> {
+    let word = item_default_word(store, e.kind);
+    repo.update_item_flags(e.id, |_| word)
+}
+
+/// Writes the default season word to an anime parent.
+pub fn apply_season_defaults(repo: &impl EntryFlagStore, store: &PrefStore, e: &Entry) -> DataResult<bool> {
+    let word = season_default_word(store);
+    repo.update_season_flags(e.id, |_| word)
+}
+
+/// Applies the item defaults (and, for anime, the season defaults) to every favourite of the kind. Callers run this on a
+/// detached task so closing the dialog does not stop it. Returns how many entries changed.
+pub fn apply_defaults_to_library(repo: &kuro_data::entry::EntryRepo, store: &PrefStore, kind: Kind) -> DataResult<usize> {
+    let mut changed = 0;
+    for entry in repo.favorites(kind)? {
+        let items = apply_item_defaults(repo, store, &entry)?;
+        let seasons = kind.is_anime() && apply_season_defaults(repo, store, &entry)?;
+        if items || seasons {
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
+/// [`apply_defaults_to_library`] on a blocking task the caller does not own: dropping the returned future (the dialog
+/// closed) does not stop the run, which continues to every favourite (`withNonCancellableContext`).
+pub async fn defaults_to_library_detached(
+    repo: kuro_data::entry::EntryRepo,
+    store: PrefStore,
+    kind: Kind,
+) -> Result<usize, DomainError> {
+    tokio::task::spawn_blocking(move || apply_defaults_to_library(&repo, &store, kind))
+        .await
+        .map_err(DomainError::Join)?
+        .map_err(DomainError::from)
+}
+
+/// The flags a page shows for an entry that is NOT in the library (decision 4): the library defaults, as a copy for this
+/// session. The row is never written by showing it; only a user flag change writes the row (and updates the copy, see
+/// [`Self::note_item_write`]). An entry in the library has no copy and follows its row.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SessionFlags {
+    pub item_flags: i64,
+    /// Anime only.
+    pub season_flags: Option<i64>,
+}
+
+impl SessionFlags {
+    /// The copy for a non-favourite entry, `None` for a favourite.
+    pub fn for_entry(store: &PrefStore, e: &Entry) -> Option<SessionFlags> {
+        (!e.favorite).then(|| SessionFlags {
+            item_flags: item_default_word(store, e.kind),
+            season_flags: e.kind.is_anime().then(|| season_default_word(store)),
+        })
+    }
+
+    /// Puts the copy over the flags of `e`.
+    pub fn overlay(&self, e: &mut Entry) {
+        e.item_flags = self.item_flags;
+        if self.season_flags.is_some() {
+            e.season_flags = self.season_flags;
+        }
+    }
+
+    /// The copy takes a user's write of one item group, as the row does, or the change would never show.
+    pub fn note_item_write(&mut self, flag: i64, mask: i64) {
+        self.item_flags = set_flag(self.item_flags, flag, mask);
+    }
+
+    /// As [`Self::note_item_write`], for the season word.
+    pub fn note_season_write(&mut self, flag: i64, mask: i64) {
+        if let Some(word) = &mut self.season_flags {
+            *word = set_flag(*word, flag, mask);
+        }
+    }
+}
+
 /// Writes the default chapter word to a manga (`applyDefaultChapterFlags`).
 pub fn apply_default_chapter_flags(repo: &MangaRepo, store: &PrefStore, manga: &Manga) -> DataResult<bool> {
-    let word = chapter_default_word(store);
-    repo.update_chapter_flags(manga.id, |_| word)
+    apply_item_defaults(repo, store, &Entry::from(manga))
 }
 
 /// Writes the default episode word to an anime.
 pub fn apply_default_episode_flags(repo: &AnimeRepo, store: &PrefStore, anime: &Anime) -> DataResult<bool> {
-    let word = episode_default_word(store);
-    repo.update_episode_flags(anime.id, |_| word)
+    apply_item_defaults(repo, store, &Entry::from(anime))
 }
 
 /// Writes the default season word to an anime parent.
 pub fn apply_default_season_flags(repo: &AnimeRepo, store: &PrefStore, anime: &Anime) -> DataResult<bool> {
-    let word = season_default_word(store);
-    repo.update_season_flags(anime.id, |_| word)
+    apply_season_defaults(repo, store, &Entry::from(anime))
 }
 
-/// The entry-details first open of a non-favourite manga: its chapter defaults are applied; a favourite keeps its
-/// stored word. Returns whether the defaults were written.
-pub fn on_open_manga(repo: &MangaRepo, store: &PrefStore, manga: &Manga) -> DataResult<bool> {
-    if manga.favorite {
-        return Ok(false);
-    }
-    apply_default_chapter_flags(repo, store, manga)
-}
-
-/// The first open of a non-favourite anime: episode and season defaults. A favourite keeps its stored words.
-pub fn on_open_anime(repo: &AnimeRepo, store: &PrefStore, anime: &Anime) -> DataResult<bool> {
-    if anime.favorite {
-        return Ok(false);
-    }
-    let episodes = apply_default_episode_flags(repo, store, anime)?;
-    let seasons = apply_default_season_flags(repo, store, anime)?;
-    Ok(episodes || seasons)
-}
-
-/// Browse "add to library" for a manga: chapter defaults (no season defaults exist for manga).
-pub fn on_add_to_library_manga(repo: &MangaRepo, store: &PrefStore, manga: &Manga) -> DataResult<bool> {
-    apply_default_chapter_flags(repo, store, manga)
-}
-
-/// Browse "add to library" for an anime: episode defaults only, not the season defaults.
-pub fn on_add_to_library_anime(repo: &AnimeRepo, store: &PrefStore, anime: &Anime) -> DataResult<bool> {
-    apply_default_episode_flags(repo, store, anime)
-}
-
-/// Applies the chapter defaults to every favourite manga. Callers run this on a detached task so closing the dialog
-/// does not stop it. Returns how many entries changed.
-pub fn apply_chapter_defaults_to_library(repo: &MangaRepo, store: &PrefStore) -> DataResult<usize> {
-    let mut changed = 0;
-    for manga in repo.favorites()? {
-        if apply_default_chapter_flags(repo, store, &manga)? {
-            changed += 1;
-        }
-    }
-    Ok(changed)
-}
-
-/// Applies the episode and season defaults to every favourite anime.
-pub fn apply_anime_defaults_to_library(repo: &AnimeRepo, store: &PrefStore) -> DataResult<usize> {
-    let mut changed = 0;
-    for anime in repo.favorites()? {
-        let episodes = apply_default_episode_flags(repo, store, &anime)?;
-        let seasons = apply_default_season_flags(repo, store, &anime)?;
-        if episodes || seasons {
-            changed += 1;
-        }
-    }
-    Ok(changed)
-}
-
-/// [`apply_chapter_defaults_to_library`] on a blocking task the caller does not own: dropping the returned future
-/// (the dialog closed) does not stop the run, which continues to every favourite (`withNonCancellableContext`).
+/// The old name of [`defaults_to_library_detached`] for manga.
 pub async fn chapter_defaults_to_library_detached(repo: MangaRepo, store: PrefStore) -> Result<usize, DomainError> {
-    tokio::task::spawn_blocking(move || apply_chapter_defaults_to_library(&repo, &store))
-        .await
-        .map_err(DomainError::Join)?
-        .map_err(DomainError::from)
+    tokio::task::spawn_blocking(move || {
+        let mut changed = 0;
+        for manga in repo.favorites()? {
+            if apply_default_chapter_flags(&repo, &store, &manga)? {
+                changed += 1;
+            }
+        }
+        Ok::<usize, kuro_data::DataError>(changed)
+    })
+    .await
+    .map_err(DomainError::Join)?
+    .map_err(DomainError::from)
 }
 
-/// [`apply_anime_defaults_to_library`] on a detached blocking task, as [`chapter_defaults_to_library_detached`].
-pub async fn anime_defaults_to_library_detached(repo: AnimeRepo, store: PrefStore) -> Result<usize, DomainError> {
-    tokio::task::spawn_blocking(move || apply_anime_defaults_to_library(&repo, &store))
-        .await
-        .map_err(DomainError::Join)?
-        .map_err(DomainError::from)
+/// "Set as default" for the items of a kind: writes the groups of the (unified) `word` into the kind's keys. The direction
+/// and display keys are the chapter ones for both kinds (Q3). Returns the snackbar key.
+pub fn set_item_settings_default(store: &PrefStore, kind: Kind, word: i64) -> &'static str {
+    use kuro_db::flags::item as i;
+    put_long(store, SHARED_DIRECTION, word & i::SORT_DIR_MASK);
+    put_long(store, CHAPTER_DISPLAY, word & i::DISPLAY_MASK);
+    match kind {
+        Kind::Manga => {
+            put_long(store, CHAPTER_UNREAD, word & i::UNDONE_MASK);
+            put_long(store, CHAPTER_DOWNLOADED, word & i::DOWNLOADED_MASK);
+            put_long(store, CHAPTER_BOOKMARKED, word & i::BOOKMARKED_MASK);
+            // the stored sort value is the manga layout
+            put_long(store, CHAPTER_SORT, from_unified(word & i::SORTING_MASK));
+            "updated_default_chapter_settings"
+        }
+        Kind::Anime => {
+            put_long(store, EPISODE_UNSEEN, word & i::UNDONE_MASK);
+            put_long(store, EPISODE_DOWNLOADED, word & i::DOWNLOADED_MASK);
+            put_long(store, EPISODE_BOOKMARKED, word & i::BOOKMARKED_MASK);
+            put_long(store, EPISODE_FILLERMARKED, word & i::FILLERMARKED_MASK);
+            put_long(store, EPISODE_SORT, word & i::SORTING_MASK);
+            put_long(store, EPISODE_PREVIEWS, word & i::PREVIEWS_MASK);
+            put_long(store, EPISODE_SUMMARIES, word & i::SUMMARIES_MASK);
+            "updated_default_episode_settings"
+        }
+    }
 }
 
-/// "Set as default" for chapters: writes the groups of `flags` into the chapter keys. Returns the snackbar key.
+/// "Set as default" for chapters (the manga layout in).
 pub fn set_chapter_settings_default(store: &PrefStore, flags: i64) -> &'static str {
-    use kuro_db::flags::chapter as c;
-    put_long(store, CHAPTER_UNREAD, flags & c::UNREAD_MASK);
-    put_long(store, CHAPTER_DOWNLOADED, flags & c::DOWNLOADED_MASK);
-    put_long(store, CHAPTER_BOOKMARKED, flags & c::BOOKMARKED_MASK);
-    put_long(store, CHAPTER_SORT, flags & c::SORTING_MASK);
-    put_long(store, SHARED_DIRECTION, flags & c::SORT_DIR_MASK);
-    put_long(store, CHAPTER_DISPLAY, flags & c::DISPLAY_MASK);
-    "updated_default_chapter_settings"
+    set_item_settings_default(store, Kind::Manga, to_unified(flags))
 }
 
-/// "Set as default" for episodes. The direction and display keys are the chapter ones (Q3).
+/// "Set as default" for episodes.
 pub fn set_episode_settings_default(store: &PrefStore, flags: i64) -> &'static str {
-    put_long(store, EPISODE_UNSEEN, flags & ep::UNSEEN_MASK);
-    put_long(store, EPISODE_DOWNLOADED, flags & ep::DOWNLOADED_MASK);
-    put_long(store, EPISODE_BOOKMARKED, flags & ep::BOOKMARKED_MASK);
-    put_long(store, EPISODE_FILLERMARKED, flags & ep::FILLERMARKED_MASK);
-    put_long(store, EPISODE_SORT, flags & ep::SORTING_MASK);
-    put_long(store, SHARED_DIRECTION, flags & ep::SORT_DIR_MASK);
-    put_long(store, CHAPTER_DISPLAY, flags & ep::DISPLAY_MASK);
-    put_long(store, EPISODE_PREVIEWS, flags & ep::PREVIEWS_MASK);
-    put_long(store, EPISODE_SUMMARIES, flags & ep::SUMMARIES_MASK);
-    "updated_default_episode_settings"
+    set_item_settings_default(store, Kind::Anime, flags)
 }
 
 /// "Set as default" for seasons. The downloaded key takes the downloaded bits (Q2).
@@ -253,6 +308,7 @@ pub fn set_season_settings_default(store: &PrefStore, flags: i64) -> &'static st
 mod tests {
     use super::*;
     use crate::testdb::test_db;
+    use kuro_data::entry::EntryRepo;
 
     fn store() -> PrefStore {
         PrefStore::in_memory()
@@ -266,40 +322,122 @@ mod tests {
         assert_eq!(season_default_word(&s), 0x5800000);
     }
 
-    #[test]
-    fn a_non_favourite_opened_with_defaults_zero_loses_its_stored_chapter_word() {
-        let (_d, db) = test_db();
-        let repo = MangaRepo::new(db);
-        let mut manga = Manga { favorite: false, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::manga() };
-        manga.id = repo.insert(&manga).unwrap();
-        repo.update_chapter_flags(manga.id, |_| 0x101).unwrap();
-        assert!(on_open_manga(&repo, &store(), &manga).unwrap());
-        assert_eq!(repo.by_id(manga.id).unwrap().chapter_flags, 0);
+    fn entry_repo(kind: Kind, favorite: bool) -> (tempfile::TempDir, EntryRepo, Entry) {
+        let (d, db) = test_db();
+        let repo = EntryRepo::new(db);
+        let mut e = Entry { favorite, source: 1, url: "u".into(), title: "T".into(), ..Entry::create(kind) };
+        e.id = repo.insert(&e).unwrap();
+        (d, repo, e)
     }
 
     #[test]
-    fn a_favourite_keeps_its_stored_word_when_opened() {
-        let (_d, db) = test_db();
-        let repo = MangaRepo::new(db);
-        let mut manga = Manga { favorite: true, source: 1, url: "u".into(), title: "T".into(), ..kuro_testkit::domain::manga() };
-        manga.id = repo.insert(&manga).unwrap();
-        repo.update_chapter_flags(manga.id, |_| 0x101).unwrap();
-        assert!(!on_open_manga(&repo, &store(), &manga).unwrap());
-        assert_eq!(repo.by_id(manga.id).unwrap().chapter_flags, 0x101);
+    fn the_default_word_of_a_manga_has_only_the_manga_groups() {
+        let s = store();
+        set_item_settings_default(&s, Kind::Anime, ep::SHOW_NOT_PREVIEWS | ep::SHOW_NOT_SUMMARIES | ep::SHOW_FILLERMARKED);
+        assert_eq!(item_default_word(&s, Kind::Manga) & !kuro_db::flags::item::MANGA_MASK, 0);
+        set_item_settings_default(&s, Kind::Manga, kuro_db::flags::item::SORTING_ALPHABET | 0x1);
+        assert_eq!(item_default_word(&s, Kind::Manga), kuro_db::flags::item::SORTING_ALPHABET | 0x1);
+        assert_eq!(chapter_default_word(&s), 0x300 | 0x1, "the old name answers in the manga layout");
     }
 
     #[test]
-    fn season_defaults_write_the_word_and_browse_add_applies_only_episode_defaults() {
+    fn apply_item_defaults_writes_the_kinds_word_to_the_row() {
+        for kind in [Kind::Manga, Kind::Anime] {
+            let (_d, repo, e) = entry_repo(kind, false);
+            repo.update_item_flags(e.id, |_| 0x201).unwrap();
+            let s = store();
+            assert!(apply_item_defaults(&repo, &s, &e).unwrap(), "{kind}: the row exists");
+            assert_eq!(repo.by_id(e.id).unwrap().item_flags, 0);
+            let missing = Entry { id: 9_999, ..e.clone() };
+            assert!(!apply_item_defaults(&repo, &s, &missing).unwrap(), "{kind}: a missing row gives false");
+        }
+    }
+
+    #[test]
+    fn season_defaults_write_the_word_and_add_to_library_applies_only_the_item_defaults() {
+        let (_d, repo, e) = entry_repo(Kind::Anime, false);
+        apply_item_defaults(&repo, &store(), &e).unwrap();
+        assert_eq!(repo.by_id(e.id).unwrap().season_flags, Some(0), "season defaults are not applied with the items");
+        apply_season_defaults(&repo, &store(), &e).unwrap();
+        assert_eq!(repo.by_id(e.id).unwrap().season_flags, Some(0x5800000));
+    }
+
+    /// Decision 4: a non-library entry shows the defaults as a copy and the row is never written by showing it.
+    #[test]
+    fn session_flags_overlay_never_writes_the_row() {
+        for kind in [Kind::Manga, Kind::Anime] {
+            let (_d, repo, e) = entry_repo(kind, false);
+            repo.update_item_flags(e.id, |_| 0x201).unwrap();
+            let s = store();
+            let mut shown = repo.by_id(e.id).unwrap();
+            let mut copy = SessionFlags::for_entry(&s, &shown).expect("a non-favourite has a copy");
+            copy.overlay(&mut shown);
+            assert_eq!(shown.item_flags, 0, "{kind}: the page shows the defaults");
+            assert_eq!(repo.by_id(e.id).unwrap().item_flags, 0x201, "{kind}: the row is untouched");
+            // a user write goes to the row (one masked statement) and to the copy
+            crate::entries::flag_setters::set_item_flag(&repo, e.id, crate::entries::flag_setters::ItemFlagGroup::Undone, ep::SHOW_UNSEEN).unwrap();
+            copy.note_item_write(ep::SHOW_UNSEEN, ep::UNSEEN_MASK);
+            assert_eq!(repo.by_id(e.id).unwrap().item_flags, 0x201 | ep::SHOW_UNSEEN);
+            assert_eq!(copy.item_flags & ep::UNSEEN_MASK, ep::SHOW_UNSEEN);
+            // joining the library drops the copy
+            repo.update(&{ let mut u = kuro_data::entry::EntryUpdate::new(e.id); u.favorite = Some(true); u }).unwrap();
+            assert_eq!(SessionFlags::for_entry(&s, &repo.by_id(e.id).unwrap()), None, "{kind}: a favourite follows its row");
+        }
+        let (_d, _repo, anime) = entry_repo(Kind::Anime, false);
+        let copy = SessionFlags::for_entry(&store(), &anime).unwrap();
+        assert_eq!(copy.season_flags, Some(0x5800000));
+        let (_d, _repo, manga) = entry_repo(Kind::Manga, false);
+        assert_eq!(SessionFlags::for_entry(&store(), &manga).unwrap().season_flags, None);
+    }
+
+    #[test]
+    fn apply_defaults_to_library_changes_only_favourites_and_counts_them() {
+        for kind in [Kind::Manga, Kind::Anime] {
+            let (_d, db) = test_db();
+            let repo = EntryRepo::new(db);
+            let fav = repo.insert(&Entry { favorite: true, source: 1, url: "f".into(), title: "F".into(), ..Entry::create(kind) }).unwrap();
+            let other = repo.insert(&Entry { favorite: false, source: 1, url: "o".into(), title: "O".into(), ..Entry::create(kind) }).unwrap();
+            repo.update_item_flags(fav, |_| 0x201).unwrap();
+            repo.update_item_flags(other, |_| 0x201).unwrap();
+            let s = store();
+            set_item_settings_default(&s, kind, ep::SHOW_UNSEEN);
+            let word = item_default_word(&s, kind);
+            assert_eq!(apply_defaults_to_library(&repo, &s, kind).unwrap(), 1, "{kind}: only the favourite counts");
+            assert_eq!(repo.by_id(fav).unwrap().item_flags, word);
+            assert_eq!(repo.by_id(other).unwrap().item_flags, 0x201, "non-favourites keep their word");
+        }
+    }
+
+    #[tokio::test]
+    async fn detached_apply_finishes_after_the_caller_is_aborted() {
+        let (_d, repo, e) = entry_repo(Kind::Manga, true);
+        repo.update_item_flags(e.id, |_| 0x201).unwrap();
+        let s = store();
+        set_item_settings_default(&s, Kind::Manga, ep::SHOW_UNSEEN);
+        let caller = tokio::spawn(defaults_to_library_detached(repo.clone(), s.clone(), Kind::Manga));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        caller.abort();
+        let expected = item_default_word(&s, Kind::Manga);
+        let finished = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while repo.by_id(e.id).unwrap().item_flags != expected {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(finished.is_ok(), "the detached run kept going after its caller was dropped");
+    }
+
+    #[test]
+    fn the_old_apply_names_go_through_the_legacy_repositories() {
         let (_d, db) = test_db();
-        let repo = AnimeRepo::new(db);
-        let mut anime = Anime { favorite: false, source: 1, url: "a".into(), title: "A".into(), ..kuro_testkit::domain::anime() };
-        anime.id = repo.insert(&anime).unwrap();
-        on_add_to_library_anime(&repo, &store(), &anime).unwrap();
-        let row = repo.by_id(anime.id).unwrap();
-        assert_eq!(row.episode_flags, 0);
-        assert_eq!(row.season_flags, 0, "season defaults are not applied on add");
-        on_open_anime(&repo, &store(), &anime).unwrap();
-        assert_eq!(repo.by_id(anime.id).unwrap().season_flags, 0x5800000);
+        let repo = MangaRepo::new(db);
+        let mut fav = Manga { favorite: true, source: 1, url: "f".into(), title: "F".into(), ..kuro_testkit::domain::manga() };
+        fav.id = repo.insert(&fav).unwrap();
+        repo.update_chapter_flags(fav.id, |_| 0x101).unwrap();
+        let s = store();
+        set_chapter_settings_default(&s, 0x2);
+        assert!(apply_default_chapter_flags(&repo, &s, &fav).unwrap());
+        assert_eq!(repo.by_id(fav.id).unwrap().chapter_flags, 0x2);
     }
 
     #[test]
@@ -327,58 +465,5 @@ mod tests {
         assert_eq!(set_chapter_settings_default(&s, 0), "updated_default_chapter_settings");
         assert_eq!(set_episode_settings_default(&s, 0), "updated_default_episode_settings");
         assert_eq!(set_season_settings_default(&s, 0), "updated_default_season_settings");
-    }
-
-    #[test]
-    fn apply_anime_defaults_to_library_changes_only_favourites_and_counts_them() {
-        let (_d, db) = test_db();
-        let repo = AnimeRepo::new(db);
-        let mut fav = Anime { favorite: true, source: 1, url: "f".into(), title: "F".into(), ..kuro_testkit::domain::anime() };
-        fav.id = repo.insert(&fav).unwrap();
-        let mut other = Anime { favorite: false, source: 1, url: "o".into(), title: "O".into(), ..kuro_testkit::domain::anime() };
-        other.id = repo.insert(&other).unwrap();
-        repo.update_episode_flags(fav.id, |_| 0x101).unwrap();
-        repo.update_episode_flags(other.id, |_| 0x101).unwrap();
-        let s = store();
-        set_episode_settings_default(&s, ep::SHOW_UNSEEN);
-        let word = episode_default_word(&s);
-        assert_eq!(apply_anime_defaults_to_library(&repo, &s).unwrap(), 1, "only the favourite counts");
-        assert_eq!(repo.by_id(fav.id).unwrap().episode_flags, word);
-        assert_eq!(repo.by_id(other.id).unwrap().episode_flags, 0x101, "non-favourites keep their word");
-    }
-
-    #[tokio::test]
-    async fn detached_apply_finishes_after_the_caller_is_aborted() {
-        let (_d, db) = test_db();
-        let repo = MangaRepo::new(db);
-        let mut fav = Manga { favorite: true, source: 1, url: "f".into(), title: "F".into(), ..kuro_testkit::domain::manga() };
-        fav.id = repo.insert(&fav).unwrap();
-        repo.update_chapter_flags(fav.id, |_| 0x101).unwrap();
-        let s = store();
-        set_chapter_settings_default(&s, 0x2);
-        let caller = tokio::spawn(chapter_defaults_to_library_detached(repo.clone(), s.clone()));
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        caller.abort();
-        let expected = chapter_default_word(&s);
-        let finished = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            while repo.by_id(fav.id).unwrap().chapter_flags != expected {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await;
-        assert!(finished.is_ok(), "the detached run kept going after its caller was dropped");
-    }
-
-    #[test]
-    fn apply_to_library_changes_only_favourites() {
-        let (_d, db) = test_db();
-        let repo = MangaRepo::new(db);
-        let mut fav = Manga { favorite: true, source: 1, url: "f".into(), title: "F".into(), ..kuro_testkit::domain::manga() };
-        fav.id = repo.insert(&fav).unwrap();
-        repo.update_chapter_flags(fav.id, |_| 0x101).unwrap();
-        let s = store();
-        set_chapter_settings_default(&s, 0x2);
-        assert_eq!(apply_chapter_defaults_to_library(&repo, &s).unwrap(), 1);
-        assert_eq!(repo.by_id(fav.id).unwrap().chapter_flags, 0x2);
     }
 }

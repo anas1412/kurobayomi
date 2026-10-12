@@ -1,20 +1,17 @@
 //! Next chapter and next episode (`GetNextChapters`, `GetNextEpisodes`, behaviour 3.5). The ordering is the entry's
-//! own sort, read in ascending reading order (`chapter_cmp(sorting, false)`). The filtering is pure, so the rules
+//! own sort, read in ascending reading order (`item_cmp(sorting, false)`). The filtering is pure, so the rules
 //! can be tested on plain lists; the repository reads of the entry happen in [`next_items`].
 
 use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
-use kuro_data::anime::AnimeRepo;
-use kuro_data::chapter::Chapter;
-use kuro_data::episode::Episode;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_data::item::ItemRepo;
 use kuro_db::handle::Db;
 
-use crate::entries::anime::AnimeExt;
-use crate::entries::manga::MangaExt;
-use crate::items::facades::{get_chapters_by_manga_id, get_episodes_by_anime_id};
-use crate::items::sorter::{chapter_cmp, episode_cmp};
+use crate::entries::flags::EntryFlags;
+use crate::items::facades::get_items_by_entry;
+use crate::items::sorter::item_cmp;
 
 /// What the history screen and the download-ahead need about a next item.
 #[derive(Clone, Debug, PartialEq)]
@@ -54,8 +51,8 @@ pub fn next_in_order<T: Clone>(
     out
 }
 
-/// The next items of one entry, from the repositories. An unknown entry or a failed read gives an empty list and a
-/// log line.
+/// The next items of one entry, from the repositories. An unknown entry (or one of the other kind) or a failed read gives
+/// an empty list and a log line.
 pub fn next_items(
     db: &Arc<Db>,
     kind: Kind,
@@ -63,53 +60,23 @@ pub fn next_items(
     from: Option<i64>,
     only_pending: bool,
 ) -> Vec<NextItem> {
-    match kind {
-        Kind::Manga => {
-            let manga = match MangaRepo::new(db.clone()).by_id(entry_id) {
-                Ok(m) => m,
-                Err(e) => {
-                    tracing::error!(error = %e, entry_id, "cannot read manga for next chapter");
-                    return Vec::new();
-                }
-            };
-            let mut chapters =
-                get_chapters_by_manga_id(&kuro_data::chapter::ChapterRepo::new(db.clone()), entry_id, true);
-            chapters.sort_by(chapter_cmp(manga.sorting(), false));
-            let ordered: Vec<Chapter> = chapters;
-            next_in_order(&ordered, |c| c.id, |c| c.read, from, only_pending)
-                .into_iter()
-                .map(|c| NextItem {
-                    id: c.id,
-                    entry_id: c.manga_id,
-                    number: c.chapter_number,
-                    name: c.name,
-                    done: c.read,
-                })
-                .collect()
+    let entry = match EntryRepo::new(db.clone()).by_id(entry_id) {
+        Ok(e) if e.kind == kind => e,
+        Ok(_) => {
+            tracing::error!(entry_id, %kind, "the entry is of the other kind; no next item");
+            return Vec::new();
         }
-        Kind::Anime => {
-            let anime = match AnimeRepo::new(db.clone()).by_id(entry_id) {
-                Ok(a) => a,
-                Err(e) => {
-                    tracing::error!(error = %e, entry_id, "cannot read anime for next episode");
-                    return Vec::new();
-                }
-            };
-            let mut episodes: Vec<Episode> =
-                get_episodes_by_anime_id(&kuro_data::episode::EpisodeRepo::new(db.clone()), entry_id);
-            episodes.sort_by(episode_cmp(anime.sorting(), false));
-            next_in_order(&episodes, |e| e.id, |e| e.seen, from, only_pending)
-                .into_iter()
-                .map(|e| NextItem {
-                    id: e.id,
-                    entry_id: e.anime_id,
-                    number: e.episode_number,
-                    name: e.name,
-                    done: e.seen,
-                })
-                .collect()
+        Err(e) => {
+            tracing::error!(error = %e, entry_id, %kind, "cannot read the entry for the next item");
+            return Vec::new();
         }
-    }
+    };
+    let mut items = get_items_by_entry(&ItemRepo::new(db.clone()), entry_id, true);
+    items.sort_by(item_cmp(entry.sorting(), false));
+    next_in_order(&items, |i| i.id, |i| i.done, from, only_pending)
+        .into_iter()
+        .map(|i| NextItem { id: i.id, entry_id: i.entry_id, number: i.number, name: i.name, done: i.done })
+        .collect()
 }
 
 /// The next items after the newest history row of any entry of this kind. No history gives an empty list.

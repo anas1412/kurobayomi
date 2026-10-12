@@ -5,119 +5,34 @@
 //! The struct lives in `kuro-data`, so the behaviour is an extension trait implemented here.
 
 use kuro_data::anime::{Anime, AnimeUpdate};
+use kuro_data::entry::{Entry, EntryUpdate};
 
 use super::cover::AnimeCover;
+use super::flags::{Cover, EntryFlags, ItemFlags, SeasonFlags, ViewerFlags};
 use super::season_display::SeasonDisplayMode;
-use crate::flags::{TriState, set_flag, tri};
+use crate::flags::TriState;
 
-/// `episode_flags` constants (`Anime.kt:216-255`). Kept separate from `chapter_flags` on purpose:
-/// the sorting group moved up one bit and the previews, summaries and fillermark groups are new.
+/// `episode_flags` constants: the unified item layout (`kuro_db::flags::item`) under the old names of the seen/unseen group.
 pub mod episode_flags {
-    pub const SORT_DESC: i64 = 0x0;
-    pub const SORT_ASC: i64 = 0x1;
-    pub const SORT_DIR_MASK: i64 = 0x1;
+    pub use kuro_db::flags::item::*;
 
     pub const SHOW_ALL: i64 = 0x0;
-    pub const SHOW_UNSEEN: i64 = 0x2;
-    pub const SHOW_SEEN: i64 = 0x4;
-    pub const UNSEEN_MASK: i64 = 0x6;
-
-    pub const SHOW_DOWNLOADED: i64 = 0x8;
-    pub const SHOW_NOT_DOWNLOADED: i64 = 0x10;
-    pub const DOWNLOADED_MASK: i64 = 0x18;
-
-    pub const SHOW_BOOKMARKED: i64 = 0x20;
-    pub const SHOW_NOT_BOOKMARKED: i64 = 0x40;
-    pub const BOOKMARKED_MASK: i64 = 0x60;
-
-    pub const SHOW_FILLERMARKED: i64 = 0x80;
-    pub const SHOW_NOT_FILLERMARKED: i64 = 0x100;
-    pub const FILLERMARKED_MASK: i64 = 0x180;
-
-    pub const SORTING_SOURCE: i64 = 0x0;
-    pub const SORTING_NUMBER: i64 = 0x200;
-    pub const SORTING_UPLOAD_DATE: i64 = 0x400;
-    pub const SORTING_ALPHABET: i64 = 0x600;
-    pub const SORTING_MASK: i64 = 0x600;
-
-    pub const SHOW_PREVIEWS: i64 = 0x0;
-    pub const SHOW_NOT_PREVIEWS: i64 = 0x800;
-    pub const PREVIEWS_MASK: i64 = 0x800;
-
-    pub const SHOW_SUMMARIES: i64 = 0x0;
-    pub const SHOW_NOT_SUMMARIES: i64 = 0x1000;
-    pub const SUMMARIES_MASK: i64 = 0x1000;
-
-    pub const DISPLAY_NAME: i64 = 0x0;
-    pub const DISPLAY_NUMBER: i64 = 0x100000;
-    pub const DISPLAY_MASK: i64 = 0x100000;
+    pub const SHOW_UNSEEN: i64 = SHOW_UNDONE;
+    pub const SHOW_SEEN: i64 = SHOW_DONE;
+    pub const UNSEEN_MASK: i64 = UNDONE_MASK;
 }
 
-/// `season_flags` constants (`Anime.kt:257-308`), stored on the parent entry.
+/// `season_flags` constants (`kuro_db::flags::season`), stored on the parent entry.
 pub mod season_flags {
-    pub const SORT_DESC: i64 = 0x0;
-    pub const SORT_ASC: i64 = 0x1;
-    pub const SORT_DIR_MASK: i64 = 0x1;
+    pub use kuro_db::flags::season::*;
 
-    pub const SHOW_DOWNLOADED: i64 = 0x2;
-    pub const SHOW_NOT_DOWNLOADED: i64 = 0x4;
-    pub const DOWNLOADED_MASK: i64 = 0x6;
-
-    pub const SHOW_UNSEEN: i64 = 0x8;
-    pub const SHOW_SEEN: i64 = 0x10;
-    pub const UNSEEN_MASK: i64 = 0x18;
-
-    pub const SHOW_STARTED: i64 = 0x20;
-    pub const SHOW_NOT_STARTED: i64 = 0x40;
-    pub const STARTED_MASK: i64 = 0x60;
-
-    pub const SHOW_COMPLETED: i64 = 0x80;
-    pub const SHOW_NOT_COMPLETED: i64 = 0x100;
-    pub const COMPLETED_MASK: i64 = 0x180;
-
-    pub const SHOW_BOOKMARKED: i64 = 0x200;
-    pub const SHOW_NOT_BOOKMARKED: i64 = 0x400;
-    pub const BOOKMARKED_MASK: i64 = 0x600;
-
-    pub const SHOW_FILLERMARKED: i64 = 0x800;
-    pub const SHOW_NOT_FILLERMARKED: i64 = 0x1000;
-    pub const FILLERMARKED_MASK: i64 = 0x1800;
-
-    pub const SORT_SOURCE: i64 = 0x0000;
-    pub const SORT_SEASON: i64 = 0x2000;
-    pub const SORT_UPLOAD: i64 = 0x4000;
-    pub const SORT_ALPHABET: i64 = 0x6000;
-    pub const SORT_COUNT: i64 = 0x8000;
-    pub const SORT_LAST_SEEN: i64 = 0xA000;
-    pub const SORT_FETCHED: i64 = 0xC000;
-    pub const SORT_MASK: i64 = 0xE000;
-
-    pub const GRID_DISPLAY_MODE_MASK: i64 = 0x30000;
-    pub const GRID_DISPLAY_MODE_BIT_OFFSET: u32 = 16;
-    pub const GRID_DISPLAY_SIZE_MASK: i64 = 0x3C0000;
-    pub const GRID_DISPLAY_SIZE_BIT_OFFSET: u32 = 18;
-
-    pub const OVERLAY_DOWNLOADED_MASK: i64 = 0x400000;
-    pub const OVERLAY_UNSEEN_MASK: i64 = 0x800000;
-    pub const OVERLAY_LOCAL_MASK: i64 = 0x1000000;
-    pub const OVERLAY_LANG_MASK: i64 = 0x2000000;
-    pub const OVERLAY_CONT_MASK: i64 = 0x4000000;
-
-    pub const DISPLAY_MODE_SOURCE: i64 = 0x0;
-    pub const DISPLAY_MODE_NUMBER: i64 = 0x8000000;
-    pub const DISPLAY_MODE_MASK: i64 = 0x8000000;
+    pub const GRID_DISPLAY_MODE_BIT_OFFSET: u32 = GRID_DISPLAY_MODE_SHIFT as u32;
+    pub const GRID_DISPLAY_SIZE_BIT_OFFSET: u32 = GRID_DISPLAY_SIZE_SHIFT as u32;
 }
 
-/// `viewer_flags` layout (`p1-data-and-config.md` 3.4).
+/// `viewer_flags` layout (`p1-data-and-config.md` 3.4): the shared masks of [`super::flags`].
 pub mod viewer_flags {
-    /// Skip-intro length in seconds, bits 0-7.
-    pub const INTRO_MASK: i64 = 0xFF;
-    /// Next episode to air, bits 8-23.
-    pub const AIRING_EPISODE_MASK: i64 = 0x00FF_FF00;
-    /// Next episode airing time in epoch seconds, bits 24-55.
-    pub const AIRING_TIME_MASK: i64 = 0xFFFF_FFFF << 24;
-    /// Skip-intro disabled, bit 56.
-    pub const INTRO_DISABLE_MASK: i64 = 1 << 56;
+    pub use super::super::flags::{AIRING_EPISODE_MASK, AIRING_TIME_MASK, INTRO_DISABLE_MASK, INTRO_MASK};
 }
 
 /// Accessors, setters and update helpers over an `Anime` row.
@@ -196,233 +111,143 @@ pub trait AnimeExt {
     fn apply_update(&mut self, u: &AnimeUpdate);
 }
 
+/// The three words of an anime, as the shared accessor types read them.
+fn item(a: &Anime) -> ItemFlags {
+    ItemFlags(a.episode_flags)
+}
+
+fn season(a: &Anime) -> SeasonFlags {
+    SeasonFlags(a.season_flags)
+}
+
+fn viewer(a: &Anime) -> ViewerFlags {
+    ViewerFlags(a.viewer_flags)
+}
+
 impl AnimeExt for Anime {
     fn sorting(&self) -> i64 {
-        self.episode_flags & episode_flags::SORTING_MASK
+        item(self).sorting()
     }
-
     fn display_mode(&self) -> i64 {
-        self.episode_flags & episode_flags::DISPLAY_MASK
+        item(self).display_mode()
     }
-
     fn unseen_filter_raw(&self) -> i64 {
-        self.episode_flags & episode_flags::UNSEEN_MASK
+        item(self).undone_filter_raw()
     }
-
     fn unseen_filter(&self) -> TriState {
-        tri(
-            self.unseen_filter_raw(),
-            episode_flags::SHOW_UNSEEN,
-            episode_flags::SHOW_SEEN,
-        )
+        item(self).undone_filter()
     }
-
     fn downloaded_filter_raw(&self) -> i64 {
-        self.episode_flags & episode_flags::DOWNLOADED_MASK
+        item(self).downloaded_filter_raw()
     }
-
     fn bookmarked_filter_raw(&self) -> i64 {
-        self.episode_flags & episode_flags::BOOKMARKED_MASK
+        item(self).bookmarked_filter_raw()
     }
-
     fn bookmarked_filter(&self) -> TriState {
-        tri(
-            self.bookmarked_filter_raw(),
-            episode_flags::SHOW_BOOKMARKED,
-            episode_flags::SHOW_NOT_BOOKMARKED,
-        )
+        item(self).bookmarked_filter()
     }
-
     fn fillermarked_filter_raw(&self) -> i64 {
-        self.episode_flags & episode_flags::FILLERMARKED_MASK
+        item(self).fillermarked_filter_raw()
     }
-
     fn fillermarked_filter(&self) -> TriState {
-        tri(
-            self.fillermarked_filter_raw(),
-            episode_flags::SHOW_FILLERMARKED,
-            episode_flags::SHOW_NOT_FILLERMARKED,
-        )
+        item(self).fillermarked_filter()
     }
-
     fn sort_descending(&self) -> bool {
-        self.episode_flags & episode_flags::SORT_DIR_MASK == episode_flags::SORT_DESC
+        item(self).sort_descending()
     }
-
     fn show_previews(&self) -> bool {
-        self.episode_flags & episode_flags::PREVIEWS_MASK == episode_flags::SHOW_PREVIEWS
+        item(self).show_previews()
     }
-
     fn show_summaries(&self) -> bool {
-        self.episode_flags & episode_flags::SUMMARIES_MASK == episode_flags::SHOW_SUMMARIES
+        item(self).show_summaries()
     }
-
     fn season_downloaded_filter_raw(&self) -> i64 {
-        self.season_flags & season_flags::DOWNLOADED_MASK
+        season(self).downloaded_filter_raw()
     }
-
     fn season_unseen_filter_raw(&self) -> i64 {
-        self.season_flags & season_flags::UNSEEN_MASK
+        season(self).unseen_filter_raw()
     }
-
     fn season_started_filter_raw(&self) -> i64 {
-        self.season_flags & season_flags::STARTED_MASK
+        season(self).started_filter_raw()
     }
-
     fn season_completed_filter_raw(&self) -> i64 {
-        self.season_flags & season_flags::COMPLETED_MASK
+        season(self).completed_filter_raw()
     }
-
     fn season_bookmarked_filter_raw(&self) -> i64 {
-        self.season_flags & season_flags::BOOKMARKED_MASK
+        season(self).bookmarked_filter_raw()
     }
-
     fn season_fillermarked_filter_raw(&self) -> i64 {
-        self.season_flags & season_flags::FILLERMARKED_MASK
+        season(self).fillermarked_filter_raw()
     }
-
     fn season_downloaded_filter(&self) -> TriState {
-        tri(
-            self.season_downloaded_filter_raw(),
-            season_flags::SHOW_DOWNLOADED,
-            season_flags::SHOW_NOT_DOWNLOADED,
-        )
+        season(self).downloaded_filter()
     }
-
     fn season_unseen_filter(&self) -> TriState {
-        tri(
-            self.season_unseen_filter_raw(),
-            season_flags::SHOW_UNSEEN,
-            season_flags::SHOW_SEEN,
-        )
+        season(self).unseen_filter()
     }
-
     fn season_started_filter(&self) -> TriState {
-        tri(
-            self.season_started_filter_raw(),
-            season_flags::SHOW_STARTED,
-            season_flags::SHOW_NOT_STARTED,
-        )
+        season(self).started_filter()
     }
-
     fn season_completed_filter(&self) -> TriState {
-        tri(
-            self.season_completed_filter_raw(),
-            season_flags::SHOW_COMPLETED,
-            season_flags::SHOW_NOT_COMPLETED,
-        )
+        season(self).completed_filter()
     }
-
     fn season_bookmarked_filter(&self) -> TriState {
-        tri(
-            self.season_bookmarked_filter_raw(),
-            season_flags::SHOW_BOOKMARKED,
-            season_flags::SHOW_NOT_BOOKMARKED,
-        )
+        season(self).bookmarked_filter()
     }
-
     fn season_fillermarked_filter(&self) -> TriState {
-        tri(
-            self.season_fillermarked_filter_raw(),
-            season_flags::SHOW_FILLERMARKED,
-            season_flags::SHOW_NOT_FILLERMARKED,
-        )
+        season(self).fillermarked_filter()
     }
-
     fn season_sorting(&self) -> i64 {
-        self.season_flags & season_flags::SORT_MASK
+        season(self).sorting()
     }
-
     fn season_sort_descending(&self) -> bool {
-        self.season_flags & season_flags::SORT_DIR_MASK == season_flags::SORT_DESC
+        season(self).sort_descending()
     }
-
     fn season_display_grid_mode(&self) -> SeasonDisplayMode {
-        let raw = (self.season_flags & season_flags::GRID_DISPLAY_MODE_MASK)
-            >> season_flags::GRID_DISPLAY_MODE_BIT_OFFSET;
-        // A two-bit field cannot hold a value without a mode; the fallback only satisfies the type.
-        SeasonDisplayMode::from_i64(raw).unwrap_or(SeasonDisplayMode::CompactGrid)
+        season(self).grid_mode()
     }
-
     fn season_display_grid_size(&self) -> i32 {
-        ((self.season_flags & season_flags::GRID_DISPLAY_SIZE_MASK)
-            >> season_flags::GRID_DISPLAY_SIZE_BIT_OFFSET) as i32
+        season(self).grid_size()
     }
-
     fn season_downloaded_overlay(&self) -> bool {
-        self.season_flags & season_flags::OVERLAY_DOWNLOADED_MASK
-            == season_flags::OVERLAY_DOWNLOADED_MASK
+        season(self).downloaded_overlay()
     }
-
     fn season_unseen_overlay(&self) -> bool {
-        self.season_flags & season_flags::OVERLAY_UNSEEN_MASK == season_flags::OVERLAY_UNSEEN_MASK
+        season(self).unseen_overlay()
     }
-
     fn season_local_overlay(&self) -> bool {
-        self.season_flags & season_flags::OVERLAY_LOCAL_MASK == season_flags::OVERLAY_LOCAL_MASK
+        season(self).local_overlay()
     }
-
     fn season_lang_overlay(&self) -> bool {
-        self.season_flags & season_flags::OVERLAY_LANG_MASK == season_flags::OVERLAY_LANG_MASK
+        season(self).lang_overlay()
     }
-
     fn season_continue_overlay(&self) -> bool {
-        self.season_flags & season_flags::OVERLAY_CONT_MASK == season_flags::OVERLAY_CONT_MASK
+        season(self).continue_overlay()
     }
-
     fn season_display_mode(&self) -> i64 {
-        self.season_flags & season_flags::DISPLAY_MODE_MASK
+        season(self).display_mode()
     }
-
     fn skip_intro_length(&self) -> i32 {
-        (self.viewer_flags & viewer_flags::INTRO_MASK) as i32
+        viewer(self).skip_intro_length()
     }
-
     fn skip_intro_disable(&self) -> bool {
-        self.viewer_flags & viewer_flags::INTRO_DISABLE_MASK == viewer_flags::INTRO_DISABLE_MASK
+        viewer(self).skip_intro_disable()
     }
-
     fn next_episode_to_air(&self) -> i32 {
-        ((self.viewer_flags & viewer_flags::AIRING_EPISODE_MASK) >> 8) as i32
+        viewer(self).next_episode_to_air()
     }
-
     fn next_episode_airing_at(&self) -> i64 {
-        (self.viewer_flags & viewer_flags::AIRING_TIME_MASK) >> 24
+        viewer(self).next_episode_airing_at()
     }
-
-    /// Stores the length in its eight bits (`length and 0xFF`, EC-21: 300 stores 44, -1 stores 255). A stored length of
-    /// zero sets the disable bit.
     fn set_skip_intro_length(&mut self, length: i32) {
-        let length = i64::from(length) & viewer_flags::INTRO_MASK;
-        let disable = if length == 0 {
-            viewer_flags::INTRO_DISABLE_MASK
-        } else {
-            0
-        };
-        self.viewer_flags = set_flag(self.viewer_flags, length, viewer_flags::INTRO_MASK);
-        self.viewer_flags = set_flag(self.viewer_flags, disable, viewer_flags::INTRO_DISABLE_MASK);
+        self.viewer_flags = viewer(self).with_skip_intro_length(length).0;
     }
-
-    /// Stores the episode in 16 bits and the airing time in 32 bits, each truncated by its mask (EC-22).
     fn set_next_episode_airing(&mut self, episode: i32, airing_at: i64) {
-        let episode = (i64::from(episode) & 0xFFFF) << 8;
-        let airing_at = (airing_at & 0xFFFF_FFFF) << 24;
-        self.viewer_flags = set_flag(
-            self.viewer_flags,
-            episode,
-            viewer_flags::AIRING_EPISODE_MASK,
-        );
-        self.viewer_flags = set_flag(self.viewer_flags, airing_at, viewer_flags::AIRING_TIME_MASK);
+        self.viewer_flags = viewer(self).with_next_episode_airing(episode, airing_at).0;
     }
 
     fn as_cover(&self) -> AnimeCover {
-        AnimeCover {
-            anime_id: self.id,
-            source_id: self.source,
-            is_anime_favorite: self.favorite,
-            url: self.thumbnail_url.clone(),
-            last_modified: self.cover_last_modified,
-        }
+        Cover { entry_id: self.id, source_id: self.source, favorite: self.favorite, url: self.thumbnail_url.clone(), last_modified: self.cover_last_modified }.into()
     }
 
     fn to_update(&self) -> AnimeUpdate {
@@ -460,112 +285,17 @@ impl AnimeExt for Anime {
     }
 
     fn apply_update(&mut self, u: &AnimeUpdate) {
-        if let Some(v) = u.source {
-            self.source = v;
-        }
-        if let Some(v) = &u.url {
-            self.url = v.clone();
-        }
-        if let Some(v) = &u.title {
-            self.title = v.clone();
-        }
-        if let Some(v) = &u.artist {
-            self.artist = Some(v.clone());
-        }
-        if let Some(v) = &u.author {
-            self.author = Some(v.clone());
-        }
-        if let Some(v) = &u.description {
-            self.description = Some(v.clone());
-        }
-        if let Some(v) = &u.genre {
-            self.genre = Some(v.clone());
-        }
-        if let Some(v) = u.status {
-            self.status = v;
-        }
-        if let Some(v) = &u.thumbnail_url {
-            self.thumbnail_url = Some(v.clone());
-        }
-        if let Some(v) = &u.background_url {
-            self.background_url = Some(v.clone());
-        }
-        if let Some(v) = u.favorite {
-            self.favorite = v;
-        }
-        if let Some(v) = u.last_update {
-            self.last_update = v;
-        }
-        if let Some(v) = u.next_update {
-            self.next_update = v;
-        }
-        if let Some(v) = u.fetch_interval {
-            self.fetch_interval = v;
-        }
-        if let Some(v) = u.date_added {
-            self.date_added = v;
-        }
-        if let Some(v) = u.viewer_flags {
-            self.viewer_flags = v;
-        }
-        if let Some(v) = u.episode_flags {
-            self.episode_flags = v;
-        }
-        if let Some(v) = u.cover_last_modified {
-            self.cover_last_modified = v;
-        }
-        if let Some(v) = u.background_last_modified {
-            self.background_last_modified = v;
-        }
-        if let Some(v) = u.update_strategy {
-            self.update_strategy = v;
-        }
-        if let Some(v) = u.initialized {
-            self.initialized = v;
-        }
-        if let Some(v) = u.version {
-            self.version = v;
-        }
-        if let Some(v) = u.fetch_type {
-            self.fetch_type = v;
-        }
-        if let Some(v) = u.parent_id {
-            self.parent_id = Some(v);
-        }
-        if let Some(v) = u.season_flags {
-            self.season_flags = v;
-        }
-        if let Some(v) = u.season_number {
-            self.season_number = v;
-        }
-        if let Some(v) = u.season_source_order {
-            self.season_source_order = v;
-        }
-        if let Some(v) = &u.memo {
-            self.memo = v.clone();
-        }
+        let mut entry = Entry::from(&*self);
+        entry.apply_update(&EntryUpdate::from(u));
+        *self = Anime::from(entry);
     }
 }
 
-/// `seasonsFiltered`: true when any of the six season filters is on. With downloaded-only mode the
-/// downloaded filter counts as `EnabledIs` whatever is stored.
+/// `seasonsFiltered`: true when any of the six season filters is on (see [`SeasonFlags::filtered`]).
 pub fn seasons_filtered(anime: &Anime, downloaded_only: bool) -> bool {
-    let downloaded = if downloaded_only {
-        TriState::ENABLED_IS
-    } else {
-        anime.season_downloaded_filter()
-    };
-    [
-        downloaded,
-        anime.season_unseen_filter(),
-        anime.season_started_filter(),
-        anime.season_completed_filter(),
-        anime.season_bookmarked_filter(),
-        anime.season_fillermarked_filter(),
-    ]
-    .iter()
-    .any(|f| *f != TriState::DISABLED)
+    season(anime).filtered(downloaded_only)
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

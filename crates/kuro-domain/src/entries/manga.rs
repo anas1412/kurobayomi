@@ -3,16 +3,17 @@
 //!
 //! The struct lives in `kuro-data`, so the behaviour is an extension trait implemented here.
 
+use kuro_data::entry::{Entry, EntryUpdate};
 use kuro_data::manga::{Manga, MangaUpdate};
 use kuro_db::codecs::UpdateStrategy;
+use kuro_db::flags::{manga_item_flags_from_unified as from_unified, manga_item_flags_to_unified as to_unified};
 
 pub use kuro_db::flags::chapter as chapter_flags;
 
 use super::cover::MangaCover;
-use crate::flags::{TriState, tri};
-
-/// `SManga.COMPLETED`. A completed manga has no predicted next release.
-pub const STATUS_COMPLETED: i64 = 2;
+use super::flags::{Cover, EntryFlags, ItemFlags, expected_next_update};
+pub use super::flags::STATUS_COMPLETED;
+use crate::flags::TriState;
 
 /// What a source reports for a manga, in domain types. The app layer converts the source model into this, so this
 /// crate does not depend on `kuro-source`.
@@ -62,59 +63,50 @@ pub trait MangaExt {
     fn copy_from(&mut self, remote: &SourceMetadata);
 }
 
+/// The unified word of a manga: the accessors below are the shared [`ItemFlags`] ones, read through the translation.
+fn words(m: &Manga) -> ItemFlags {
+    ItemFlags(to_unified(m.chapter_flags))
+}
+
 impl MangaExt for Manga {
     fn sorting(&self) -> i64 {
-        self.chapter_flags & chapter_flags::SORTING_MASK
+        from_unified(words(self).sorting())
     }
 
     fn display_mode(&self) -> i64 {
-        self.chapter_flags & chapter_flags::DISPLAY_MASK
+        words(self).display_mode()
     }
 
     fn unread_filter_raw(&self) -> i64 {
-        self.chapter_flags & chapter_flags::UNREAD_MASK
+        words(self).undone_filter_raw()
     }
 
     fn unread_filter(&self) -> TriState {
-        tri(
-            self.unread_filter_raw(),
-            chapter_flags::SHOW_UNREAD,
-            chapter_flags::SHOW_READ,
-        )
+        words(self).undone_filter()
     }
 
     fn downloaded_filter_raw(&self) -> i64 {
-        self.chapter_flags & chapter_flags::DOWNLOADED_MASK
+        words(self).downloaded_filter_raw()
     }
 
     fn bookmarked_filter_raw(&self) -> i64 {
-        self.chapter_flags & chapter_flags::BOOKMARKED_MASK
+        words(self).bookmarked_filter_raw()
     }
 
     fn bookmarked_filter(&self) -> TriState {
-        tri(
-            self.bookmarked_filter_raw(),
-            chapter_flags::SHOW_BOOKMARKED,
-            chapter_flags::SHOW_NOT_BOOKMARKED,
-        )
+        words(self).bookmarked_filter()
     }
 
     fn sort_descending(&self) -> bool {
-        self.chapter_flags & chapter_flags::SORT_DIR_MASK == chapter_flags::SORT_DESC
+        words(self).sort_descending()
     }
 
     fn expected_next_update(&self) -> Option<i64> {
-        (self.status != STATUS_COMPLETED).then_some(self.next_update)
+        expected_next_update(self.status, self.next_update)
     }
 
     fn as_cover(&self) -> MangaCover {
-        MangaCover {
-            manga_id: self.id,
-            source_id: self.source,
-            is_manga_favorite: self.favorite,
-            url: self.thumbnail_url.clone(),
-            last_modified: self.cover_last_modified,
-        }
+        Cover { entry_id: self.id, source_id: self.source, favorite: self.favorite, url: self.thumbnail_url.clone(), last_modified: self.cover_last_modified }.into()
     }
 
     fn to_update(&self) -> MangaUpdate {
@@ -144,66 +136,9 @@ impl MangaExt for Manga {
     }
 
     fn apply_update(&mut self, u: &MangaUpdate) {
-        if let Some(v) = u.source {
-            self.source = v;
-        }
-        if let Some(v) = &u.url {
-            self.url = v.clone();
-        }
-        if let Some(v) = &u.title {
-            self.title = v.clone();
-        }
-        if let Some(v) = &u.artist {
-            self.artist = Some(v.clone());
-        }
-        if let Some(v) = &u.author {
-            self.author = Some(v.clone());
-        }
-        if let Some(v) = &u.description {
-            self.description = Some(v.clone());
-        }
-        if let Some(v) = &u.genre {
-            self.genre = Some(v.clone());
-        }
-        if let Some(v) = u.status {
-            self.status = v;
-        }
-        if let Some(v) = &u.thumbnail_url {
-            self.thumbnail_url = Some(v.clone());
-        }
-        if let Some(v) = u.favorite {
-            self.favorite = v;
-        }
-        if let Some(v) = u.last_update {
-            self.last_update = v;
-        }
-        if let Some(v) = u.next_update {
-            self.next_update = v;
-        }
-        if let Some(v) = u.fetch_interval {
-            self.fetch_interval = v;
-        }
-        if let Some(v) = u.date_added {
-            self.date_added = v;
-        }
-        if let Some(v) = u.viewer_flags {
-            self.viewer_flags = v;
-        }
-        if let Some(v) = u.chapter_flags {
-            self.chapter_flags = v;
-        }
-        if let Some(v) = u.cover_last_modified {
-            self.cover_last_modified = v;
-        }
-        if let Some(v) = u.update_strategy {
-            self.update_strategy = v;
-        }
-        if let Some(v) = u.initialized {
-            self.initialized = v;
-        }
-        if let Some(v) = u.version {
-            self.version = v;
-        }
+        let mut entry = Entry::from(&*self);
+        entry.apply_update(&EntryUpdate::from(u));
+        *self = Manga::from(entry);
     }
 
     fn copy_from(&mut self, remote: &SourceMetadata) {

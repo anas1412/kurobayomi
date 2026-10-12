@@ -2,7 +2,7 @@
 //! the number of non-favourite rows, and for anime the ids that a "delete all" action removes.
 
 use kuro_data::DataResult;
-use kuro_data::anime::{Anime, AnimeRepo};
+use kuro_data::entry::{Entry, EntryRepo};
 
 use crate::source::model::{Id, Source};
 
@@ -76,7 +76,7 @@ pub fn anime_listing(sources: &[Source], ids: &[(Id, Id)], orphaned: &[(Id, Id)]
 }
 
 /// The children of anime `parent_id`, the only rows a "delete children" action touches (`getDeletableChildren`).
-pub fn get_deletable_children(repo: &AnimeRepo, parent_id: Id) -> DataResult<Vec<Anime>> {
+pub fn get_deletable_children(repo: &EntryRepo, parent_id: Id) -> DataResult<Vec<Entry>> {
     repo.children_by_parent(parent_id)
 }
 
@@ -108,27 +108,14 @@ mod tests {
     #[test]
     fn deletable_children_returns_only_the_children_of_that_parent() {
         use crate::testdb::test_db;
+        use kuro_platform::kind::Kind;
         let (_d, db) = test_db();
-        let repo = AnimeRepo::new(db);
-        let parent = repo.insert(&Anime { url: "/p".into(), title: "P".into(), source: 1, ..Anime::create() }).unwrap();
-        let other = repo.insert(&Anime { url: "/o".into(), title: "O".into(), source: 1, ..Anime::create() }).unwrap();
-        let child = repo
-            .insert(&Anime {
-                url: "/c".into(),
-                title: "C".into(),
-                source: 1,
-                parent_id: Some(parent),
-                ..Anime::create()
-            })
-            .unwrap();
-        repo.insert(&Anime {
-            url: "/x".into(),
-            title: "X".into(),
-            source: 1,
-            parent_id: Some(other),
-            ..Anime::create()
-        })
-        .unwrap();
+        let repo = EntryRepo::new(db);
+        let make = |url: &str, parent_id| Entry { url: url.into(), title: url.into(), source: 1, parent_id, ..Entry::create(Kind::Anime) };
+        let parent = repo.insert(&make("/p", None)).unwrap();
+        let other = repo.insert(&make("/o", None)).unwrap();
+        let child = repo.insert(&make("/c", Some(parent))).unwrap();
+        repo.insert(&make("/x", Some(other))).unwrap();
         let got = get_deletable_children(&repo, parent).unwrap();
         assert_eq!(got.iter().map(|a| a.id).collect::<Vec<_>>(), vec![child]);
     }

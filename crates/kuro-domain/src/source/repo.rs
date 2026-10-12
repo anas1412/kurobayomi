@@ -45,7 +45,7 @@ pub trait ExtensionCatalog: Send + Sync {
 }
 
 /// Persisted stub sources (T-09a-008). `upsert` inserts or replaces `lang` and `name`.
-pub trait StubSourceRepo: Send + Sync {
+pub trait StubSourcePort: Send + Sync {
     fn get(&self, id: Id) -> Result<Option<StubSource>, DomainError>;
     fn all(&self) -> Result<Vec<StubSource>, DomainError>;
     fn upsert(&self, id: Id, lang: &str, name: &str) -> Result<(), DomainError>;
@@ -53,35 +53,31 @@ pub trait StubSourceRepo: Send + Sync {
     fn subscribe_all(&self) -> Subscription<Vec<StubSource>>;
 }
 
-impl StubSourceRepo for kuro_data::source::MangaStubSourceRepo {
-    fn get(&self, id: Id) -> Result<Option<StubSource>, DomainError> {
-        Ok(kuro_data::source::MangaStubSourceRepo::get(self, id)?)
-    }
-    fn all(&self) -> Result<Vec<StubSource>, DomainError> {
-        Ok(kuro_data::source::MangaStubSourceRepo::all(self)?)
-    }
-    fn upsert(&self, id: Id, lang: &str, name: &str) -> Result<(), DomainError> {
-        Ok(kuro_data::source::MangaStubSourceRepo::upsert(self, id, lang, name)?)
-    }
-    fn subscribe_all(&self) -> Subscription<Vec<StubSource>> {
-        kuro_data::source::MangaStubSourceRepo::watch_all(self)
-    }
+/// The old name of [`StubSourcePort`] (phase E deletes it).
+pub use StubSourcePort as StubSourceRepo;
+
+/// The port over a repository with the stub-source methods: the shared `StubSourceRepo` and, until phase E, the two
+/// per-kind wrappers (their methods are the same, they only fix the kind).
+macro_rules! stub_port {
+    ($($repo:ty),+) => {$(
+        impl StubSourcePort for $repo {
+            fn get(&self, id: Id) -> Result<Option<StubSource>, DomainError> {
+                Ok(<$repo>::get(self, id)?)
+            }
+            fn all(&self) -> Result<Vec<StubSource>, DomainError> {
+                Ok(<$repo>::all(self)?)
+            }
+            fn upsert(&self, id: Id, lang: &str, name: &str) -> Result<(), DomainError> {
+                Ok(<$repo>::upsert(self, id, lang, name)?)
+            }
+            fn subscribe_all(&self) -> Subscription<Vec<StubSource>> {
+                <$repo>::watch_all(self)
+            }
+        }
+    )+};
 }
 
-impl StubSourceRepo for kuro_data::source::AnimeStubSourceRepo {
-    fn get(&self, id: Id) -> Result<Option<StubSource>, DomainError> {
-        Ok(kuro_data::source::AnimeStubSourceRepo::get(self, id)?)
-    }
-    fn all(&self) -> Result<Vec<StubSource>, DomainError> {
-        Ok(kuro_data::source::AnimeStubSourceRepo::all(self)?)
-    }
-    fn upsert(&self, id: Id, lang: &str, name: &str) -> Result<(), DomainError> {
-        Ok(kuro_data::source::AnimeStubSourceRepo::upsert(self, id, lang, name)?)
-    }
-    fn subscribe_all(&self) -> Subscription<Vec<StubSource>> {
-        kuro_data::source::AnimeStubSourceRepo::watch_all(self)
-    }
-}
+stub_port!(kuro_data::source::StubSourceRepo, kuro_data::source::MangaStubSourceRepo, kuro_data::source::AnimeStubSourceRepo);
 
 #[cfg(test)]
 mod tests {

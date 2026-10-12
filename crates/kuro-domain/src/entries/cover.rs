@@ -4,6 +4,8 @@
 //! There is no descriptor for the anime background image: the background cache is keyed by
 //! `background_url` and `background_last_modified` directly (area:13 and area:10).
 
+pub use super::flags::Cover;
+
 /// `MangaCover(mangaId, sourceId, isMangaFavorite, url, lastModified)`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MangaCover {
@@ -22,6 +24,18 @@ pub struct AnimeCover {
     pub is_anime_favorite: bool,
     pub url: Option<String>,
     pub last_modified: i64,
+}
+
+impl From<Cover> for MangaCover {
+    fn from(c: Cover) -> Self {
+        Self { manga_id: c.entry_id, source_id: c.source_id, is_manga_favorite: c.favorite, url: c.url, last_modified: c.last_modified }
+    }
+}
+
+impl From<Cover> for AnimeCover {
+    fn from(c: Cover) -> Self {
+        Self { anime_id: c.entry_id, source_id: c.source_id, is_anime_favorite: c.favorite, url: c.url, last_modified: c.last_modified }
+    }
 }
 
 #[cfg(test)]

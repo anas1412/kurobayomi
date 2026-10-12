@@ -1,20 +1,24 @@
-//! The per-entry lock of the chapter and episode syncs (race 2 of `SyncChaptersWithSource.kt`). The planner is
-//! [`crate::items::sync_plan`] and the applier is [`crate::items::chapter_sync`] / [`crate::items::episode_sync`].
+//! The per-entry lock of the item sync (race 2 of `SyncChaptersWithSource.kt`). The planner is
+//! [`crate::items::sync_plan`] and the applier is [`crate::items::sync`].
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
-/// RC-08: the syncs of one manga run one at a time, and syncs of different manga do not wait for each other.
-// ponytail: one lock entry is kept per manga id synced this session and never evicted; drop idle entries if that grows.
+/// RC-08: the syncs of one entry run one at a time, and syncs of different entries do not wait for each other. The key
+/// is the entry id, unique across both kinds.
+// ponytail: one lock entry is kept per entry id synced this session and never evicted; drop idle entries if that grows.
 #[derive(Default)]
-pub struct MangaSyncLocks {
+pub struct EntrySyncLocks {
     locks: Mutex<HashMap<i64, Arc<AsyncMutex<()>>>>,
 }
 
-impl MangaSyncLocks {
-    /// Waits until no other sync of `manga_id` holds the lock, then holds it until the guard is dropped.
+/// The old name of [`EntrySyncLocks`] (phase E deletes it).
+pub type MangaSyncLocks = EntrySyncLocks;
+
+impl EntrySyncLocks {
+    /// Waits until no other sync of `entry_id` holds the lock, then holds it until the guard is dropped.
     pub async fn lock(&self, manga_id: i64) -> OwnedMutexGuard<()> {
         let lock = {
             let mut locks = self.locks.lock().unwrap_or_else(PoisonError::into_inner);

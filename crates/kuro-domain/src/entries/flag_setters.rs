@@ -6,9 +6,12 @@
 use kuro_data::DataResult;
 use kuro_data::anime::AnimeRepo;
 use kuro_data::manga::MangaRepo;
+use kuro_db::flags::{manga_item_flags_from_unified as from_unified, manga_item_flags_to_unified as to_unified};
+use kuro_platform::kind::Kind;
 
 use super::anime::{episode_flags as ep, season_flags as se};
 use super::season_display::SeasonDisplayMode;
+use super::store::EntryFlagStore;
 use crate::flags::set_flag;
 
 /// Sort-or-flip state machine (`p1-behavior.md` 3.1.1). When `flag` is the sort already in use, the direction bit
@@ -56,16 +59,38 @@ pub fn clamp_grid_size(size: i64) -> i64 {
     size.clamp(0, 15)
 }
 
+/// The item set-all of either kind: the word built from 0 by applying the nine groups in the documented order (unread,
+/// downloaded, bookmarked, fillermarked, sorting, direction, display, previews, summaries), in the unified layout
+/// (`kuro_db::flags::item`). A manga word passes 0 for the three anime-only groups.
+#[allow(clippy::too_many_arguments)]
+pub fn item_all(
+    unread: i64,
+    downloaded: i64,
+    bookmarked: i64,
+    fillermarked: i64,
+    sorting: i64,
+    direction: i64,
+    display: i64,
+    previews: i64,
+    summaries: i64,
+) -> i64 {
+    let word = set_flag(0, unread, ep::UNSEEN_MASK);
+    let word = set_flag(word, downloaded, ep::DOWNLOADED_MASK);
+    let word = set_flag(word, bookmarked, ep::BOOKMARKED_MASK);
+    let word = set_flag(word, fillermarked, ep::FILLERMARKED_MASK);
+    let word = set_flag(word, sorting, ep::SORTING_MASK);
+    let word = set_flag(word, direction, ep::SORT_DIR_MASK);
+    let word = set_flag(word, display, ep::DISPLAY_MASK);
+    let word = set_flag(word, previews, ep::PREVIEWS_MASK);
+    set_flag(word, summaries, ep::SUMMARIES_MASK)
+}
+
 /// Words of the chapter set-all, applied from 0 in the order unread, downloaded, bookmarked, sorting, direction,
-/// display.
+/// display. The inputs and the result are the manga layout (`kuro_db::flags::chapter`).
 pub fn chapter_all(unread: i64, downloaded: i64, bookmarked: i64, sorting: i64, direction: i64, display: i64) -> i64 {
     use kuro_db::flags::chapter as c;
-    let word = set_flag(0, unread, c::UNREAD_MASK);
-    let word = set_flag(word, downloaded, c::DOWNLOADED_MASK);
-    let word = set_flag(word, bookmarked, c::BOOKMARKED_MASK);
-    let word = set_flag(word, sorting, c::SORTING_MASK);
-    let word = set_flag(word, direction, c::SORT_DIR_MASK);
-    set_flag(word, display, c::DISPLAY_MASK)
+    let sorting = to_unified(sorting & c::SORTING_MASK);
+    from_unified(item_all(unread, downloaded, bookmarked, 0, sorting, direction, display, 0, 0))
 }
 
 /// Words of the episode set-all, applied from 0 in the documented order.
@@ -81,15 +106,7 @@ pub fn episode_all(
     previews: i64,
     summaries: i64,
 ) -> i64 {
-    let word = set_flag(0, unseen, ep::UNSEEN_MASK);
-    let word = set_flag(word, downloaded, ep::DOWNLOADED_MASK);
-    let word = set_flag(word, bookmarked, ep::BOOKMARKED_MASK);
-    let word = set_flag(word, fillermarked, ep::FILLERMARKED_MASK);
-    let word = set_flag(word, sorting, ep::SORTING_MASK);
-    let word = set_flag(word, direction, ep::SORT_DIR_MASK);
-    let word = set_flag(word, display, ep::DISPLAY_MASK);
-    let word = set_flag(word, previews, ep::PREVIEWS_MASK);
-    set_flag(word, summaries, ep::SUMMARIES_MASK)
+    item_all(unseen, downloaded, bookmarked, fillermarked, sorting, direction, display, previews, summaries)
 }
 
 /// The season set-all inputs, in the order of `SetAnimeSeasonFlags.awaitSetAllFlags`.
@@ -126,153 +143,198 @@ pub fn season_all(a: SeasonAll) -> i64 {
     set_flag(word, a.display, se::DISPLAY_MODE_MASK)
 }
 
-// Chapter (manga) setters.
+// The setters. Each one is a single function over any [`EntryFlagStore`] (the shared `EntryRepo`, and until phase E the
+// two per-kind repositories); the `set_chapter_*` and `set_episode_*` names below are one-line views of them.
+
+/// The groups of the item word a user can set. The last three exist for anime only.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ItemFlagGroup {
+    Undone,
+    Downloaded,
+    Bookmarked,
+    Fillermarked,
+    Display,
+    Previews,
+    Summaries,
+}
+
+impl ItemFlagGroup {
+    pub const fn mask(self) -> i64 {
+        match self {
+            Self::Undone => ep::UNSEEN_MASK,
+            Self::Downloaded => ep::DOWNLOADED_MASK,
+            Self::Bookmarked => ep::BOOKMARKED_MASK,
+            Self::Fillermarked => ep::FILLERMARKED_MASK,
+            Self::Display => ep::DISPLAY_MASK,
+            Self::Previews => ep::PREVIEWS_MASK,
+            Self::Summaries => ep::SUMMARIES_MASK,
+        }
+    }
+
+    pub const fn anime_only(self) -> bool {
+        matches!(self, Self::Fillermarked | Self::Previews | Self::Summaries)
+    }
+}
+
+/// Sets one group of the item word (unified layout) in one masked statement, so two setters on different groups never
+/// overwrite each other (EC-23). `Ok(false)` for an entry that does not exist or a group its kind lacks.
+pub fn set_item_flag(repo: &impl EntryFlagStore, id: i64, group: ItemFlagGroup, flag: i64) -> DataResult<bool> {
+    if group.anime_only() && repo.kind_of(id)? != Some(Kind::Anime) {
+        return Ok(false);
+    }
+    repo.set_item_flags_masked(id, flag, group.mask())
+}
+
+/// Sort-or-flip of the item list (unified layout), read and written in one writer transaction.
+pub fn set_item_sort_or_flip(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
+    repo.update_item_flags(id, |cur| sort_or_flip(cur, flag, ep::SORTING_MASK, ep::SORT_DIR_MASK, ep::SORT_ASC))
+}
+
+/// Overwrites the whole item word (see [`item_all`]).
+pub fn set_item_all(repo: &impl EntryFlagStore, id: i64, word: i64) -> DataResult<bool> {
+    repo.update_item_flags(id, |_| word)
+}
+
+// Chapter (manga) setters: the manga layout in, the shared setter over the unified word.
 
 /// Sets the downloaded filter group.
 pub fn set_chapter_downloaded(repo: &MangaRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_chapter_flags_masked(id, flag, kuro_db::flags::chapter::DOWNLOADED_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Downloaded, flag)
 }
 
 /// Sets the unread filter group.
 pub fn set_chapter_unread(repo: &MangaRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_chapter_flags_masked(id, flag, kuro_db::flags::chapter::UNREAD_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Undone, flag)
 }
 
 /// Sets the bookmarked filter group.
 pub fn set_chapter_bookmarked(repo: &MangaRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_chapter_flags_masked(id, flag, kuro_db::flags::chapter::BOOKMARKED_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Bookmarked, flag)
 }
 
 /// Sets the display group (name or number).
 pub fn set_chapter_display(repo: &MangaRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_chapter_flags_masked(id, flag, kuro_db::flags::chapter::DISPLAY_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Display, flag)
 }
 
-/// Sort-or-flip of the chapter list.
+/// Sort-or-flip of the chapter list. `flag` is a manga-layout sorting value.
 pub fn set_chapter_sort_or_flip(repo: &MangaRepo, id: i64, flag: i64) -> DataResult<bool> {
-    use kuro_db::flags::chapter as c;
-    repo.update_chapter_flags(id, |cur| sort_or_flip(cur, flag, c::SORTING_MASK, c::SORT_DIR_MASK, c::SORT_ASC))
+    set_item_sort_or_flip(repo, id, to_unified(flag))
 }
 
-/// Overwrites the whole chapter word with the six groups.
+/// Overwrites the whole chapter word with the six groups (manga layout).
 pub fn set_chapter_all(repo: &MangaRepo, id: i64, groups: [i64; 6]) -> DataResult<bool> {
     let [unread, downloaded, bookmarked, sorting, direction, display] = groups;
-    let word = chapter_all(unread, downloaded, bookmarked, sorting, direction, display);
-    repo.update_chapter_flags(id, |_| word)
+    set_item_all(repo, id, to_unified(chapter_all(unread, downloaded, bookmarked, sorting, direction, display)))
 }
 
 // Episode (anime) setters.
 
 /// Sets the unseen filter group.
 pub fn set_episode_unseen(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_episode_flags_masked(id, flag, ep::UNSEEN_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Undone, flag)
 }
 
 /// Sets the downloaded filter group.
 pub fn set_episode_downloaded(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_episode_flags_masked(id, flag, ep::DOWNLOADED_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Downloaded, flag)
 }
 
 /// Sets the bookmarked filter group.
 pub fn set_episode_bookmarked(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_episode_flags_masked(id, flag, ep::BOOKMARKED_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Bookmarked, flag)
 }
 
 /// Sets the fillermarked filter group.
 pub fn set_episode_fillermarked(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_episode_flags_masked(id, flag, ep::FILLERMARKED_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Fillermarked, flag)
 }
 
 /// Sets the display group (name or number).
 pub fn set_episode_display(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_episode_flags_masked(id, flag, ep::DISPLAY_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Display, flag)
 }
 
 /// Sets the previews group.
 pub fn set_episode_previews(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_episode_flags_masked(id, flag, ep::PREVIEWS_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Previews, flag)
 }
 
 /// Sets the summaries group.
 pub fn set_episode_summaries(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.set_episode_flags_masked(id, flag, ep::SUMMARIES_MASK)
+    set_item_flag(repo, id, ItemFlagGroup::Summaries, flag)
 }
 
 /// Sort-or-flip of the episode list.
 pub fn set_episode_sort_or_flip(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
-    repo.update_episode_flags(id, |cur| sort_or_flip(cur, flag, ep::SORTING_MASK, ep::SORT_DIR_MASK, ep::SORT_ASC))
+    set_item_sort_or_flip(repo, id, flag)
 }
 
 /// Overwrites the whole episode word with the nine groups, in the documented order.
 pub fn set_episode_all(repo: &AnimeRepo, id: i64, groups: [i64; 9]) -> DataResult<bool> {
     let [unseen, downloaded, bookmarked, fillermarked, sorting, direction, display, previews, summaries] = groups;
-    let word = episode_all(unseen, downloaded, bookmarked, fillermarked, sorting, direction, display, previews, summaries);
-    repo.update_episode_flags(id, |_| word)
+    set_item_all(repo, id, item_all(unseen, downloaded, bookmarked, fillermarked, sorting, direction, display, previews, summaries))
 }
 
-// Season (anime parent) setters.
+// Season (anime parent) setters, over any entry repository.
 
 /// Sets the season downloaded filter.
-pub fn set_season_downloaded(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_downloaded(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::DOWNLOADED_MASK)
 }
 
 /// Sets the season unseen filter.
-pub fn set_season_unseen(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_unseen(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::UNSEEN_MASK)
 }
 
 /// Sets the season started filter.
-pub fn set_season_started(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_started(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::STARTED_MASK)
 }
 
 /// Sets the season completed filter.
-pub fn set_season_completed(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_completed(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::COMPLETED_MASK)
 }
 
 /// Sets the season bookmarked filter.
-pub fn set_season_bookmarked(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_bookmarked(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::BOOKMARKED_MASK)
 }
 
 /// Sets the season fillermarked filter.
-pub fn set_season_fillermarked(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_fillermarked(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::FILLERMARKED_MASK)
 }
 
 /// Sort-or-flip of the season list (mask `0xE000`, direction `0x1`).
-pub fn set_season_sort_or_flip(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_sort_or_flip(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
     repo.update_season_flags(id, |cur| sort_or_flip(cur, flag, se::SORT_MASK, se::SORT_DIR_MASK, se::SORT_ASC))
 }
 
 /// Grid layout of the season list (bits 16-17).
-pub fn set_season_grid_mode(repo: &AnimeRepo, id: i64, mode: SeasonDisplayMode) -> DataResult<bool> {
+pub fn set_season_grid_mode(repo: &impl EntryFlagStore, id: i64, mode: SeasonDisplayMode) -> DataResult<bool> {
     repo.set_season_flags_masked(id, mode.to_i64() << se::GRID_DISPLAY_MODE_BIT_OFFSET, se::GRID_DISPLAY_MODE_MASK)
 }
 
 /// Grid size (bits 18-21), clamped to 0..=15.
-pub fn set_season_grid_size(repo: &AnimeRepo, id: i64, size: i64) -> DataResult<bool> {
-    repo.set_season_flags_masked(
-        id,
-        clamp_grid_size(size) << se::GRID_DISPLAY_SIZE_BIT_OFFSET,
-        se::GRID_DISPLAY_SIZE_MASK,
-    )
+pub fn set_season_grid_size(repo: &impl EntryFlagStore, id: i64, size: i64) -> DataResult<bool> {
+    repo.set_season_flags_masked(id, clamp_grid_size(size) << se::GRID_DISPLAY_SIZE_BIT_OFFSET, se::GRID_DISPLAY_SIZE_MASK)
 }
 
 /// Sets exactly one overlay bit.
-pub fn set_season_overlay(repo: &AnimeRepo, id: i64, overlay: SeasonOverlay, on: bool) -> DataResult<bool> {
+pub fn set_season_overlay(repo: &impl EntryFlagStore, id: i64, overlay: SeasonOverlay, on: bool) -> DataResult<bool> {
     repo.set_season_flags_masked(id, if on { overlay.mask() } else { 0 }, overlay.mask())
 }
 
 /// Season display mode (`SEASON_DISPLAY_MODE`, one bit).
-pub fn set_season_display(repo: &AnimeRepo, id: i64, flag: i64) -> DataResult<bool> {
+pub fn set_season_display(repo: &impl EntryFlagStore, id: i64, flag: i64) -> DataResult<bool> {
     repo.set_season_flags_masked(id, flag, se::DISPLAY_MODE_MASK)
 }
 
 /// Overwrites the whole season word with the 16 inputs.
-pub fn set_season_all(repo: &AnimeRepo, id: i64, all: SeasonAll) -> DataResult<bool> {
+pub fn set_season_all(repo: &impl EntryFlagStore, id: i64, all: SeasonAll) -> DataResult<bool> {
     let word = season_all(all);
     repo.update_season_flags(id, |_| word)
 }

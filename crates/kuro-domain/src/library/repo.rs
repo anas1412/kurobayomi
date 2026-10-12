@@ -1,9 +1,10 @@
-//! Library read path: one `LibraryRow` per (favourite entry, category link). The SQL lives in `kuro-db`
-//! (`libraryView`, `animelibView`) and the row mapping in `kuro-data`; this file only joins them.
+//! Library read path: one `LibraryRow` per (favourite entry, category link). The SQL is `kuro_db::tables::library` and the
+//! row mapping is `kuro-data`'s `EntryRepo::library`; this file only turns the entries into the page-builder row.
 
 use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
+use kuro_data::entry::EntryRepo;
 use kuro_db::handle::Db;
 
 use super::model::LibraryRow;
@@ -11,29 +12,18 @@ use crate::error::DomainError;
 
 /// Reads the library rows of either kind.
 pub struct LibraryRepo {
-    db: Arc<Db>,
+    entries: EntryRepo,
 }
 
 impl LibraryRepo {
     pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
+        Self { entries: EntryRepo::new(db) }
     }
 
     /// Every favourite entry, once per category it is in (an entry in no category has `category = 0`).
     /// A database error is returned as `Err`; NULL aggregates are already coalesced in the view.
     pub fn all(&self, kind: Kind) -> Result<Vec<LibraryRow>, DomainError> {
-        Ok(match kind {
-            Kind::Manga => kuro_data::manga::MangaRepo::new(self.db.clone())
-                .library()?
-                .iter()
-                .map(LibraryRow::from_manga)
-                .collect(),
-            Kind::Anime => kuro_data::anime::AnimeRepo::new(self.db.clone())
-                .library()?
-                .iter()
-                .map(LibraryRow::from_anime)
-                .collect(),
-        })
+        Ok(self.entries.library(kind)?.iter().map(LibraryRow::from_entry).collect())
     }
 }
 

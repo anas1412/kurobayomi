@@ -9,10 +9,12 @@ use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Offset, TimeZone};
 use kuro_data::DataResult;
 use kuro_data::anime::{Anime, AnimeRepo, AnimeUpdate};
 use kuro_data::chapter::{Chapter, ChapterRepo};
+use kuro_data::entry::{Entry, EntryRepo, EntryUpdate};
 use kuro_data::episode::{Episode, EpisodeRepo};
+use kuro_data::item::{Item, ItemRepo};
 use kuro_data::manga::{Manga, MangaRepo, MangaUpdate};
 
-use crate::items::facades::{get_chapters_by_manga_id, get_episodes_by_anime_id};
+use crate::items::facades::{get_chapters_by_manga_id, get_episodes_by_anime_id, get_items_by_entry};
 
 /// Largest interval in days (`MAX_INTERVAL`).
 pub const MAX_INTERVAL: i32 = 28;
@@ -30,6 +32,15 @@ const MS_PER_DAY: i64 = 86_400_000;
 pub struct ItemDates {
     pub date_upload: i64,
     pub date_fetch: i64,
+}
+
+impl From<&Item> for ItemDates {
+    fn from(i: &Item) -> Self {
+        Self {
+            date_upload: i.date_upload,
+            date_fetch: i.date_fetch,
+        }
+    }
 }
 
 impl From<&Chapter> for ItemDates {
@@ -207,6 +218,49 @@ pub fn to_update<Tz: TimeZone>(
     }
 }
 
+/// The interval fields of an entry from its stored interval and a sample of its items. The sample is read only when the
+/// stored interval is automatic (a negative one is a user override and needs no items).
+pub fn interval_update<Tz: TimeZone>(
+    stored: Stored,
+    sample: impl FnOnce() -> Vec<ItemDates>,
+    now: &DateTime<Tz>,
+    window: (i64, i64),
+    clock_now_ms: i64,
+) -> IntervalUpdate {
+    let items = if stored.fetch_interval < 0 { Vec::new() } else { sample() };
+    to_update(stored, &items, now, window, clock_now_ms)
+}
+
+/// `toMangaUpdate` and `toAnimeUpdate`: the interval fields of an entry of either kind. Items are read only when the stored
+/// interval is automatic, and the scanlator-filtered list is the sample (filter on; an anime has no exclusions).
+pub fn to_entry_update<Tz: TimeZone>(
+    items: &ItemRepo,
+    e: &Entry,
+    now: &DateTime<Tz>,
+    window: (i64, i64),
+    clock_now_ms: i64,
+) -> EntryUpdate {
+    let stored = Stored { fetch_interval: e.fetch_interval, next_update: e.next_update, last_update: e.last_update };
+    let sample = || get_items_by_entry(items, e.id, true).iter().map(ItemDates::from).collect();
+    let out = interval_update(stored, sample, now, window, clock_now_ms);
+    EntryUpdate { next_update: Some(out.next_update), fetch_interval: Some(out.fetch_interval), ..EntryUpdate::new(e.id) }
+}
+
+/// `setFetchInterval(entry, wheel)`: `wheel` is stored as `-wheel` (0 means automatic), the interval fields are
+/// recomputed and the row is written.
+pub fn set_fetch_interval<Tz: TimeZone>(
+    repo: &EntryRepo,
+    items: &ItemRepo,
+    e: &Entry,
+    wheel: i32,
+    now: &DateTime<Tz>,
+    window: (i64, i64),
+    clock_now_ms: i64,
+) -> DataResult<()> {
+    let entry = Entry { fetch_interval: stored_for_wheel(wheel), ..e.clone() };
+    repo.update(&to_entry_update(items, &entry, now, window, clock_now_ms))
+}
+
 /// `MangaFetchInterval.toMangaUpdate`: the interval fields of `manga`. Chapters are read only when the stored
 /// interval is automatic, and the scanlator-filtered list is the sample (`getChaptersByMangaId`, filter on).
 pub fn to_manga_update<Tz: TimeZone>(
@@ -216,17 +270,13 @@ pub fn to_manga_update<Tz: TimeZone>(
     window: (i64, i64),
     clock_now_ms: i64,
 ) -> MangaUpdate {
-    let items: Vec<ItemDates> = if manga.fetch_interval < 0 {
-        Vec::new()
-    } else {
-        get_chapters_by_manga_id(chapters, manga.id, true).iter().map(ItemDates::from).collect()
-    };
     let stored = Stored {
         fetch_interval: manga.fetch_interval,
         next_update: manga.next_update,
         last_update: manga.last_update,
     };
-    let out = to_update(stored, &items, now, window, clock_now_ms);
+    let sample = || get_chapters_by_manga_id(chapters, manga.id, true).iter().map(ItemDates::from).collect();
+    let out = interval_update(stored, sample, now, window, clock_now_ms);
     MangaUpdate {
         next_update: Some(out.next_update),
         fetch_interval: Some(out.fetch_interval),
@@ -242,17 +292,13 @@ pub fn to_anime_update<Tz: TimeZone>(
     window: (i64, i64),
     clock_now_ms: i64,
 ) -> AnimeUpdate {
-    let items: Vec<ItemDates> = if anime.fetch_interval < 0 {
-        Vec::new()
-    } else {
-        get_episodes_by_anime_id(episodes, anime.id).iter().map(ItemDates::from).collect()
-    };
     let stored = Stored {
         fetch_interval: anime.fetch_interval,
         next_update: anime.next_update,
         last_update: anime.last_update,
     };
-    let out = to_update(stored, &items, now, window, clock_now_ms);
+    let sample = || get_episodes_by_anime_id(episodes, anime.id).iter().map(ItemDates::from).collect();
+    let out = interval_update(stored, sample, now, window, clock_now_ms);
     AnimeUpdate {
         next_update: Some(out.next_update),
         fetch_interval: Some(out.fetch_interval),

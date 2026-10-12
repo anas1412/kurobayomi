@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use async_trait::async_trait;
-use kuro_data::anime::{Anime, AnimeUpdate, SeasonAnime};
+use kuro_data::anime::{Anime, SeasonAnime};
+use kuro_data::entry::EntryUpdate;
 use kuro_data::episode::Episode;
 use kuro_db::subscribe::Subscription;
 use kuro_source::SourceError;
@@ -355,7 +356,7 @@ pub struct MemRemoteStore {
     pub episodes: Vec<Episode>,
     pub seasons: Vec<SeasonAnime>,
     pub fail_update: bool,
-    pub updates: Mutex<Vec<AnimeUpdate>>,
+    pub updates: Mutex<Vec<EntryUpdate>>,
 }
 
 impl MemRemoteStore {
@@ -387,7 +388,7 @@ impl RemoteStore for MemRemoteStore {
         Ok(self.seasons.clone())
     }
 
-    fn update_anime(&self, update: &AnimeUpdate) -> Result<(), DomainError> {
+    fn update_entry(&self, update: &EntryUpdate) -> Result<(), DomainError> {
         self.log.push("write.anime");
         if self.fail_update {
             return Err(DomainError::Store("metadata write failed"));

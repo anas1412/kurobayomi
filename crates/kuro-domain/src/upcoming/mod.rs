@@ -1,11 +1,10 @@
-//! Upcoming feeds (area 09): the status codes an entry carries, and the sets the upcoming list reads. The
-//! data layer keeps its own copy of the two sets (`kuro-data` cannot depend on this crate); the tests below pin
-//! both to the same values.
+//! Upcoming feeds (area 09): the status codes an entry carries, and the sets the upcoming list reads (the sets are
+//! `Kind::upcoming_statuses`, the one definition).
 
 /// Entry status codes (`SManga` and `SAnime` constants).
 pub const UNKNOWN: i64 = 0;
 pub const ONGOING: i64 = 1;
-pub const COMPLETED: i64 = 2;
+pub const COMPLETED: i64 = crate::entries::flags::STATUS_COMPLETED;
 pub const LICENSED: i64 = 3;
 pub const PUBLISHING_FINISHED: i64 = 4;
 pub const CANCELLED: i64 = 5;
@@ -13,11 +12,17 @@ pub const ON_HIATUS: i64 = 6;
 /// Anime only: a title that has not aired yet.
 pub const UPCOMING: i64 = 7;
 
-/// Manga statuses shown on the upcoming list (`GetUpcomingManga`).
-pub const UPCOMING_MANGA_STATUSES: [i64; 2] = [ONGOING, PUBLISHING_FINISHED];
+/// Manga statuses shown on the upcoming list (`GetUpcomingManga`): `Kind::Manga.upcoming_statuses()`.
+pub const UPCOMING_MANGA_STATUSES: [i64; 2] = {
+    let s = kuro_platform::kind::Kind::Manga.upcoming_statuses();
+    [s[0], s[1]]
+};
 
-/// Anime statuses shown on the upcoming list (`GetUpcomingAnime`), which adds [`UPCOMING`].
-pub const UPCOMING_ANIME_STATUSES: [i64; 3] = [ONGOING, PUBLISHING_FINISHED, UPCOMING];
+/// Anime statuses shown on the upcoming list (`GetUpcomingAnime`), which adds [`UPCOMING`]: `Kind::Anime.upcoming_statuses()`.
+pub const UPCOMING_ANIME_STATUSES: [i64; 3] = {
+    let s = kuro_platform::kind::Kind::Anime.upcoming_statuses();
+    [s[0], s[1], s[2]]
+};
 
 #[cfg(test)]
 mod tests {
@@ -41,7 +46,7 @@ mod tests {
     }
 
     #[test]
-    fn the_data_layer_copies_agree_with_these_sets() {
+    fn the_data_layer_agrees_with_these_sets() {
         assert_eq!(kuro_data::manga::UPCOMING_STATUSES, UPCOMING_MANGA_STATUSES);
         assert_eq!(kuro_data::anime::UPCOMING_STATUSES, UPCOMING_ANIME_STATUSES);
     }
