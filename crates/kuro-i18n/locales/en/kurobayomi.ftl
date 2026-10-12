@@ -3022,7 +3022,7 @@ backup_restore_missing_sources = Missing sources:
 backup_restore_missing_trackers = Trackers not logged into:
 
 # source: i18n
-backup_restore_content_full = You may need to install any missing extensions and log in to tracking services afterwards to use them.
+backup_restore_content_full = You may need to add the repositories of the missing sources, and log in to tracking services, to use them afterwards.
 
 # source: i18n
 restore_completed = Restore completed

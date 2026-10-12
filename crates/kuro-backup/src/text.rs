@@ -21,7 +21,7 @@ pub const INVALID_BACKUP_FILE: Text = Text { key: "invalid_backup_file", english
 pub const INVALID_BACKUP_FILE_ERROR: Text = Text { key: "invalid_backup_file_error", english: "Full error:" };
 pub const MISSING_HINT: Text = Text {
     key: "backup_restore_content_full",
-    english: "You may need to install any missing extensions and log in to tracking services afterwards to use them.",
+    english: "You may need to add the repositories of the missing sources, and log in to tracking services, to use them afterwards.",
 };
 // The seven restore option labels, in the order of `RestoreOptions::to_bits` (section 12).
 pub const LABEL_LIBRARY: Text = Text { key: "label_library", english: "Library" };

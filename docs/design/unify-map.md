@@ -222,6 +222,13 @@ title-page mark-as-read):
 | warm_neighbours prefetches in source_order, not the session list | src/reader/launch.rs:83-93 |
 
 ### Sources and plug-ins (steps 10-11)
+
+Added 2026-10-12 (found on the test display): `stub_sources` is never filled, so a backup made while the repository
+sources are not loaded (always the case for `--run-backup`, which runs without the GUI) writes source ids as their
+names, and the restore screen then lists missing sources as numbers. Aniyomi records every installed source (kind, id,
+lang, name) in its sources table when the sources load. Fix in step 10: upsert every loaded source into stub_sources
+(src/recipe_sources.rs load), and make LiveRegistry::name_of / stub_label fall back to the stub table.
+
 | Drift | Where | Step |
 |---|---|---|
 | WireAnime always sends status 0; drops artist/update_strategy/initialized/preview_url/memo | kuro-source-wasm/src/anime_wire.rs:111 | 10 |
