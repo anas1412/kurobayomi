@@ -27,7 +27,7 @@ impl Welcome {
         page.set_margin_start(24);
         page.set_margin_end(24);
 
-        let logo = gtk::Image::builder().icon_name(Icon::Logo.name()).pixel_size(128).margin_bottom(24).build();
+        let logo = gtk::Image::builder().icon_name(Icon::LogoShadow.name()).pixel_size(128).margin_bottom(24).build();
         page.append(&logo);
         page.append(&label(&tr(MsgKey::welcome_title), &["title-1"], 8));
         page.append(&label(&tr(MsgKey::welcome_intro), &["dim-label"], 24));

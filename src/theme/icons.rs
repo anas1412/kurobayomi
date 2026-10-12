@@ -64,11 +64,13 @@ pub enum Icon {
     FontFamily,
     Logo,
     LogoSymbolic,
+    /// The logo with the box drawn behind it (welcome screen, README); the app icon is `Logo`.
+    LogoShadow,
 }
 
 impl Icon {
     /// Every variant, in declaration order.
-    pub const ALL: [Icon; 47] = [
+    pub const ALL: [Icon; 48] = [
         Icon::Close,
         Icon::Play,
         Icon::Pause,
@@ -116,6 +118,7 @@ impl Icon {
         Icon::FontFamily,
         Icon::Logo,
         Icon::LogoSymbolic,
+        Icon::LogoShadow,
     ];
 
     /// The icon-theme name of this icon.
@@ -168,6 +171,7 @@ impl Icon {
             Icon::FontFamily => "kb-font-family-symbolic",
             Icon::Logo => APP_ID,
             Icon::LogoSymbolic => "io.github.anas1412.Kurobayomi-symbolic",
+            Icon::LogoShadow => "kb-logo-shadow",
         }
     }
 
@@ -177,6 +181,7 @@ impl Icon {
         Some(match self {
             Icon::Logo => "scalable/apps/io.github.anas1412.Kurobayomi.svg",
             Icon::LogoSymbolic => "symbolic/apps/io.github.anas1412.Kurobayomi-symbolic.svg",
+            Icon::LogoShadow => "scalable/apps/kb-logo-shadow.svg",
             Icon::AnimeLibraryOutline => "scalable/actions/kb-animelibrary-outline-symbolic.svg",
             Icon::AnimeLibraryFilled => "scalable/actions/kb-animelibrary-filled-symbolic.svg",
             Icon::LibraryManga => "scalable/actions/kb-library-symbolic.svg",

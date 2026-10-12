@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/theme/icons/scalable/apps/io.github.anas1412.Kurobayomi.svg" width="96" alt="Kurobayomi logo">
+  <img src="src/theme/icons/scalable/apps/kb-logo-shadow.svg" width="112" alt="Kurobayomi logo">
 </p>
 
 <h1 align="center">Kurobayomi</h1>
