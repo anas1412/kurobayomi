@@ -236,6 +236,17 @@ pub fn scrolled(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
 
 pub use crate::clamp::clamp;
 
+/// `child` shown at exactly `width` x `height`, whatever its own natural size: an image's size never reaches the layout.
+/// The child sits on an overlay over an empty base, so only the requested size counts; it is clipped to it.
+pub fn sized(child: &impl IsA<gtk::Widget>, width: i32, height: i32) -> gtk::Overlay {
+    let sized = gtk::Overlay::new();
+    sized.set_child(Some(&GBox::new(O::Vertical, 0)));
+    sized.add_overlay(child);
+    sized.set_size_request(width, height);
+    sized.set_overflow(gtk::Overflow::Hidden);
+    sized
+}
+
 pub fn margins(w: &impl IsA<gtk::Widget>, m: i32) {
     w.set_margin_top(m);
     w.set_margin_bottom(m);

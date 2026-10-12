@@ -11,14 +11,13 @@ pub fn is_local_thumbnail(url: &str) -> bool {
 }
 
 /// A cropped picture of the thumbnail, sized `width` by `height`. The library card calls it for a local entry.
-pub fn cover_widget(thumbnail_url: Option<&str>, width: i32, height: i32) -> gtk::Picture {
-    let picture = gtk::Picture::new();
-    picture.set_content_fit(gtk::ContentFit::Cover);
-    picture.set_size_request(width, height);
+pub fn cover_widget(thumbnail_url: Option<&str>, width: i32, height: i32) -> gtk::Overlay {
+    let picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).can_shrink(true).build();
     if let Some(url) = thumbnail_url.filter(|u| is_local_thumbnail(u)) {
         picture.set_file(Some(&gio::File::for_uri(url)));
     }
-    picture
+    // exactly `width` x `height`: a large thumbnail must not make the row or card larger
+    crate::ui::sized(&picture, width, height)
 }
 
 #[cfg(test)]

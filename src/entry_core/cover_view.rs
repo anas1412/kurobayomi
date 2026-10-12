@@ -85,9 +85,13 @@ impl CoverView {
         let stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).transition_duration(fade_ms(animations)).build();
         stack.add_named(&placeholder, Some("placeholder"));
         stack.add_named(&picture, Some("image"));
+        // the image sits on an overlay over an empty base, so its natural size never reaches the layout: the cover is
+        // always the size it is given (a large image made a history row as tall as the image)
+        let sized = crate::ui::sized(&stack, width, height);
         let frame = gtk::Frame::new(None);
         frame.set_size_request(width, height);
-        frame.set_child(Some(&stack));
+        frame.set_overflow(gtk::Overflow::Hidden);
+        frame.set_child(Some(&sized));
         let binding = Rc::new(RefCell::new(CoverBinding::default()));
         // a destroyed page cancels the load in flight
         frame.connect_destroy({
@@ -142,6 +146,19 @@ mod tests {
 
     fn art(last_modified: i64) -> ArtRef {
         ArtRef { owner: Kind::Anime, entry_id: 1, source_id: 7, kind: ArtKind::Cover, url: Some("https://x/a.jpg".into()), favorite: false, last_modified }
+    }
+
+    #[test]
+    fn a_large_image_does_not_make_the_cover_larger_than_its_size() {
+        crate::testing::with_display(|| {
+            let view = CoverView::new(64, 96);
+            let big = gdk::MemoryTexture::new(600, 900, gdk::MemoryFormat::R8g8b8a8, &glib::Bytes::from(&vec![0u8; 600 * 900 * 4][..]), 600 * 4);
+            view.picture.set_paintable(Some(&big));
+            view.stack.set_visible_child_name("image");
+            let (_, natural_h, _, _) = view.frame.measure(gtk::Orientation::Vertical, 64);
+            let (_, natural_w, _, _) = view.frame.measure(gtk::Orientation::Horizontal, -1);
+            assert_eq!((natural_w, natural_h), (64, 96), "the image's 600x900 never reaches the layout");
+        });
     }
 
     #[test]
