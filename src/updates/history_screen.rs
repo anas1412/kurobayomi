@@ -234,18 +234,16 @@ impl HistoryScreen {
             Ok(rows) => rows.into_iter().map(|(c, on)| (c.id, c.name, on)).collect(),
             Err(_) => return toast(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS),
         };
-        let labels = [tr(MsgKey::action_ok), tr(MsgKey::action_cancel), tr(MsgKey::action_edit_categories)];
         let on_store = Arc::clone(&store);
-        history_dialog::choose_categories(
-            tr(MsgKey::action_move_category),
-            rows,
-            labels,
-            move |picked| {
-                if history_add::confirm_chooser(on_store.as_ref(), entry_id, now, picked).is_err() {
+        crate::category_picker::open(
+            crate::entry_core::dialog::CategoryDialog::from_rows(rows),
+            move |d| {
+                if history_add::confirm_chooser(on_store.as_ref(), entry_id, now, d.checked_ids()).is_err() {
                     toast(&tr(MsgKey::internal_error), NOT_FOUND_TOAST_MS);
                 }
             },
-            move || crate::ui::open("categories"),
+            || crate::ui::open("categories"),
+            || {},
         );
     }
 

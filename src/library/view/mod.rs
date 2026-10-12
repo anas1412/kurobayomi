@@ -4,7 +4,6 @@
 //! Borrows of the shared state are never held across a widget call, because widget calls can re-enter the handlers.
 
 mod card;
-mod dialog;
 mod options;
 mod tabs;
 mod welcome;
@@ -1062,7 +1061,15 @@ fn open_categories(inner: &Rc<RefCell<Inner>>, entries: Vec<i64>, clear_selectio
             }
         });
     };
-    dialog::show(dialog, on_confirm, move || edit());
+    crate::category_picker::open(
+        dialog,
+        move |d| {
+            let (include, exclude) = d.confirm();
+            on_confirm(include, exclude);
+        },
+        move || edit(),
+        || {},
+    );
 }
 
 /// Builds one cell of the grid: the global search row, or the card of an entry. On a card, a primary click opens,

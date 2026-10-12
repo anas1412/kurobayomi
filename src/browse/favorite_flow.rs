@@ -197,34 +197,14 @@ impl FavoriteFlow {
     /// The category chooser: the user's categories with the entry's current links checked, OK, Cancel and Edit
     /// categories (which closes the chooser and opens the Categories page; nothing is written).
     fn choose_categories(self: &Rc<Self>, item: ListItem, categories: Vec<CategoryChoice>, linked: Vec<i64>) {
-        let column = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        let checks: Vec<(i64, gtk::CheckButton)> = chooser_rows(&categories, &linked)
-            .into_iter()
-            .map(|(category, on)| {
-                let check = gtk::CheckButton::with_label(&category.name);
-                check.set_active(on);
-                column.append(&check);
-                (category.id, check)
-            })
-            .collect();
-        let spec = DialogSpec {
-            title: tr(MsgKey::action_move_category),
-            body: None,
-            buttons: vec![
-                (tr(MsgKey::action_ok), ButtonStyle::Suggested),
-                (tr(MsgKey::action_cancel), ButtonStyle::Plain),
-                (tr(MsgKey::action_edit_categories), ButtonStyle::Plain),
-            ],
-        };
-        let this = Rc::clone(self);
-        self.show(spec, Some(column.upcast()), move |chosen| match chosen {
-            Some(0) => {
-                let picked = checks.iter().filter(|(_, check)| check.is_active()).map(|(id, _)| *id).collect();
-                this.add_to(item.clone(), picked);
-            }
-            Some(2) => (this.hooks.edit_categories)(),
-            _ => {}
-        });
+        let rows = chooser_rows(&categories, &linked).into_iter().map(|(c, on)| (c.id, c.name, on)).collect();
+        let (this, edit) = (Rc::clone(self), Rc::clone(self));
+        crate::category_picker::open(
+            crate::entry_core::dialog::CategoryDialog::from_rows(rows),
+            move |d| this.add_to(item.clone(), d.checked_ids()),
+            move || (edit.hooks.edit_categories)(),
+            || {},
+        );
     }
 
     fn add_to(self: &Rc<Self>, item: ListItem, categories: Vec<i64>) {

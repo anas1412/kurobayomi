@@ -57,7 +57,6 @@ use super::store::AnimeStore;
 use super::{duplicate_view, related_view};
 use crate::data;
 use crate::entry_core::banner_view::{self, BannerView};
-use crate::entry_core::category_dialog_view;
 use crate::entry_core::dialog::CategoryDialog;
 use crate::entry_core::handoff::{self, MigrateRequest, WebViewRequest};
 use crate::entry_core::header::SearchRequest;
@@ -1109,14 +1108,15 @@ impl View {
         let runner = Rc::clone(&self.runner);
         let id = self.claim_slot(AnimeDialog::ChangeCategory { anime_id });
         let (ok, dismissed) = (Rc::downgrade(self), Rc::downgrade(self));
-        let window = category_dialog_view::open(
+        let window = crate::category_picker::open(
             CategoryDialog::new(anime_id, false, all, linked),
-            move |category_ids| {
-                runner.send(AnimeCmd::SetCategories { anime_id, category_ids });
+            move |m| {
+                runner.send(AnimeCmd::SetCategories { anime_id, category_ids: m.checked_ids() });
                 if let Some(view) = ok.upgrade() {
                     view.confirm_category(id);
                 }
             },
+            || crate::ui::open("categories"),
             move || {
                 if let Some(view) = dismissed.upgrade() {
                     view.dismiss_dialog(id);
@@ -1143,14 +1143,15 @@ impl View {
         let id = self.claim_slot(AnimeDialog::ChangeCategory { anime_id });
         self.dialogs.borrow_mut().open_change_category_from_add(anime_id);
         let (ok, dismissed) = (Rc::downgrade(self), Rc::downgrade(self));
-        let window = category_dialog_view::open(
+        let window = crate::category_picker::open(
             CategoryDialog::new(anime_id, true, all, linked),
-            move |category_ids| {
-                runner.send(AnimeCmd::AddWithCategories { anime_id, category_ids });
+            move |m| {
+                runner.send(AnimeCmd::AddWithCategories { anime_id, category_ids: m.checked_ids() });
                 if let Some(view) = ok.upgrade() {
                     view.confirm_category(id);
                 }
             },
+            || crate::ui::open("categories"),
             move || {
                 if let Some(view) = dismissed.upgrade() {
                     view.dismiss_dialog(id);

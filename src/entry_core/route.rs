@@ -32,7 +32,6 @@ use crate::entry_core::info_pane::TwoPane;
 use crate::entry_core::tracking;
 use crate::entry_core::detail::{LatestWins, LoadContext, LoadState, StoreCmd, StoreEvent};
 use crate::entry_core::dialog::{CategoryDialog, Dialog};
-use crate::entry_core::category_dialog_view;
 use crate::entry_core::fetch_interval_dialog;
 use crate::entry_core::shortcut_help_view;
 use crate::entry_core::shortcuts::{HeaderKey, header_key};
@@ -1232,13 +1231,14 @@ impl View {
         let (weak_ok, weak_dismiss) = (Rc::downgrade(self), Rc::downgrade(self));
         // any other way out (Escape, the close button, Cancel) leaves without writing; in the add flow the tracking sheet
         // follows when a tracker is logged in and "open the track menu on adding" is on, both read now (E-TRK-5)
-        category_dialog_view::open_with(
+        crate::category_picker::open(
             model,
             move |m| {
                 if let Some(view) = weak_ok.upgrade() {
                     view.act(UiAction::ConfirmCategory(m.confirm()));
                 }
             },
+            || crate::ui::open("categories"),
             move || {
                 if let Some(view) = weak_dismiss.upgrade() {
                     let auto_open = view.auto_open_tracking();

@@ -2,7 +2,6 @@
 //! the confirm callback, Cancel and a confirm button. `show_dialog_then` of the shell passes no value to its callback,
 //! so the remove dialog with its "Reset all" checkbox is built here. Escape closes the dialog. A modal window has no scrim, so a click outside it cannot cancel; the parent window is blocked instead.
 
-use std::cell::OnceCell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
@@ -41,49 +40,6 @@ pub fn show(copy: ConfirmCopy, destructive: bool, on_ok: impl Fn(bool) + 'static
         on_close();
         gtk::glib::Propagation::Proceed
     });
-    win.present();
-}
-
-/// The category chooser of an add from History (T-42a-019): one check per user category, the entry's current links
-/// checked, then OK, Cancel and Edit categories. `on_ok` gets the checked ids; `on_edit` runs after the dialog closes.
-pub fn choose_categories(
-    title: String,
-    rows: Vec<(i64, String, bool)>,
-    labels: [String; 3],
-    on_ok: impl Fn(Vec<i64>) + 'static,
-    on_edit: impl Fn() + 'static,
-) {
-    let [ok, cancel, edit] = labels;
-    let col = GBox::new(O::Vertical, 4);
-    let checks: Vec<(i64, CheckButton)> = rows
-        .into_iter()
-        .map(|(id, name, on)| {
-            let check = CheckButton::with_label(&name);
-            check.set_active(on);
-            col.append(&check);
-            (id, check)
-        })
-        .collect();
-    let scroll = gtk::ScrolledWindow::builder()
-        .child(&col)
-        .propagate_natural_height(true)
-        .max_content_height(360)
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .build();
-    // Edit categories closes the dialog first and then runs `on_edit`, so it reaches its window through this cell
-    let this: Rc<OnceCell<gtk::glib::WeakRef<gtk::Window>>> = Rc::default();
-    let closing = Rc::clone(&this);
-    let edit_button = DialogButton::new(edit, Role::Normal, move || {
-        if let Some(win) = closing.get().and_then(|w| w.upgrade()) {
-            win.close();
-        }
-        on_edit();
-    });
-    let ok_button = DialogButton::new(ok, Role::Suggested, move || {
-        on_ok(checks.iter().filter(|(_, check)| check.is_active()).map(|(id, _)| *id).collect());
-    });
-    let win = crate::ui::dialog(&title, &scroll, 420, vec![DialogButton::cancel(cancel), edit_button, ok_button]);
-    let _ = this.set(win.downgrade());
     win.present();
 }
 

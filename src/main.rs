@@ -3,6 +3,7 @@ mod backup_host;
 mod backup_run;
 mod backup_schedule;
 mod bind;
+mod category_picker;
 mod clamp;
 mod cli;
 // the thumbnail renderer is called by the cover loader, which does not exist yet

@@ -56,6 +56,12 @@ impl CategoryDialog {
         }
     }
 
+    /// A plain picker over `(id, name, checked)` rows, for a screen outside the entry page (Browse, History).
+    pub fn from_rows(rows: Vec<(i64, String, bool)>) -> Self {
+        let items = rows.into_iter().map(|(id, name, checked)| CategoryItem { id, name, checked }).collect();
+        Self { manga_id: 0, add_flow: false, items }
+    }
+
     /// Flips the checkbox at `index`. Out-of-range indexes do nothing.
     pub fn toggle(&mut self, index: usize) {
         if let Some(item) = self.items.get_mut(index) {
