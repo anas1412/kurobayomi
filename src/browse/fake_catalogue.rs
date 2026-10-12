@@ -1,10 +1,13 @@
-//! A manga catalogue source over fixed answers for the tests of the Browse and entry flows. Every call is logged; `fail`
-//! makes every call answer HTTP 503.
+//! The test sources of the Browse and entry flows, one of each kind. `FakeCatalogue` is a manga source over fixed
+//! answers whose `fail` makes every call answer HTTP 503; `FakeAnime` is an anime source whose listing calls answer from
+//! a script. Every call is logged.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use kuro_source::anime::{AnimeSource, AnimesPage, SAnime};
 use kuro_source::filter_list::FilterList;
 use kuro_source::model::{MangasPage, Page, SChapter, SManga};
 use kuro_source::{CatalogueSource, MangaSource, SourceError};
@@ -85,5 +88,68 @@ impl CatalogueSource for FakeCatalogue {
     async fn latest(&self, page: i32) -> Result<MangasPage, SourceError> {
         self.log(format!("latest {page}"))?;
         Ok(MangasPage { mangas: Vec::new(), has_next_page: false })
+    }
+}
+
+/// An anime with `url` and `title`, and a thumbnail named after the url.
+pub fn anime(url: &str, title: &str) -> SAnime {
+    SAnime { url: url.to_owned(), title: title.to_owned(), thumbnail_url: Some(format!("{url}.jpg")), ..SAnime::default() }
+}
+
+pub fn anime_page(animes: Vec<SAnime>, has_next_page: bool) -> AnimesPage {
+    AnimesPage { animes, has_next_page }
+}
+
+/// An anime source whose listing calls answer from a script, one answer per call, in order. Every call is logged as
+/// `popular PAGE`, `latest PAGE` or `search PAGE TEXT FILTERS`. It supports latest and has no filters.
+pub struct FakeAnime {
+    id: i64,
+    script: Mutex<VecDeque<Result<AnimesPage, SourceError>>>,
+    calls: Mutex<Vec<String>>,
+}
+
+impl FakeAnime {
+    pub fn new(id: i64, script: Vec<Result<AnimesPage, SourceError>>) -> Arc<Self> {
+        Arc::new(Self { id, script: Mutex::new(script.into()), calls: Mutex::new(Vec::new()) })
+    }
+
+    pub fn calls(&self) -> Vec<String> {
+        self.calls.lock().expect("calls").clone()
+    }
+
+    fn answer(&self, call: String) -> Result<AnimesPage, SourceError> {
+        self.calls.lock().expect("calls").push(call);
+        self.script.lock().expect("script").pop_front().expect("a scripted answer for each call")
+    }
+}
+
+#[async_trait]
+impl AnimeSource for FakeAnime {
+    fn id(&self) -> i64 {
+        self.id
+    }
+
+    fn name(&self) -> &str {
+        "Scripted"
+    }
+
+    fn supports_latest(&self) -> bool {
+        true
+    }
+
+    fn provides_hosters(&self) -> bool {
+        false
+    }
+
+    async fn popular(&self, page: i32) -> Result<AnimesPage, SourceError> {
+        self.answer(format!("popular {page}"))
+    }
+
+    async fn latest(&self, page: i32) -> Result<AnimesPage, SourceError> {
+        self.answer(format!("latest {page}"))
+    }
+
+    async fn search(&self, page: i32, query: &str, filters: &FilterList) -> Result<AnimesPage, SourceError> {
+        self.answer(format!("search {page} {query} {}", filters.0.len()))
     }
 }

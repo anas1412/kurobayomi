@@ -7,7 +7,6 @@
 //! entered from the More list. The sidebar index below is the part this module owns; the Back target is the shell's
 //! (`src/shell/tabs.rs`, `TabState::back`), which has to remember the origin tab when the manga page opens.
 //!
-//! - Re-selecting the Library sidebar item opens the library settings sheet ([`reselect`], B-1.2).
 //! - Other screens can fill the search box ([`search_library`] and [`inject_search`], B-1.3).
 //! - The sidebar hides while entries are selected ([`selecting`] and [`on_selection_change`], B-1.4).
 
@@ -30,7 +29,7 @@ use kuro_platform::paths::Paths;
 use kuro_prefs::library::LibraryPrefs;
 
 use crate::library::actions::delete_plan;
-use crate::library::trackers::{self, Logins};
+use crate::library::trackers::Logins;
 use crate::library::download_facts;
 use crate::library::query::{Facts, SourceInfo};
 use crate::library::view::{Deps, LibraryView, Nav};
@@ -114,13 +113,6 @@ fn visible(kind: Option<EntryKind>) -> Option<LibraryView> {
             .or_else(|| views.iter().find(|(k, _)| kind.is_none_or(|want| want == *k)))
             .map(|(_, v)| v.clone())
     })
-}
-
-/// The Library sidebar item was selected while it was already showing: open the settings sheet of the visible kind.
-pub fn reselect() {
-    if let Some(view) = visible(None) {
-        view.open_settings(crate::library::view::sheet::Tab::Filter);
-    }
 }
 
 /// Reloads the library of `kind`, for changes made outside it such as a local folder scan.
@@ -369,7 +361,6 @@ fn deps(kind: EntryKind) -> Deps {
             }
         });
     }));
-    let (names_logins, ids_logins) = (logins.clone(), logins);
     Deps {
         kind,
         db,
@@ -380,8 +371,7 @@ fn deps(kind: EntryKind) -> Deps {
             source: Arc::new(move |id| source_info(&source_db, kind, id)),
         },
         downloaded_only: Rc::new(move || downloaded_only.get()),
-        logged_in: Rc::new(move || ids_logins.get()),
-        tracker_names: Rc::new(move || trackers::names(kind, &names_logins.get())),
+        logged_in: Rc::new(move || logins.get()),
         always_external: Rc::new(|| crate::misc::diet_defaults::PLAYER_ALWAYS_EXTERNAL),
         item_downloaded,
     }
@@ -449,31 +439,19 @@ pub fn build(anime: bool) -> Option<Built> {
         view.set_query(query);
     }
     let menu = header_menu(kind, &view);
-    // the menu icon takes the theme's selected colour while a filter is on, the forced downloaded-only view included
-    // (T-37a-056)
-    let tinted = menu.clone();
-    view.on_filters_active(move |active| {
-        if active {
-            tinted.add_css_class(crate::theme::style::class::ACTIVE);
-        } else {
-            tinted.remove_css_class(crate::theme::style::class::ACTIVE);
-        }
-    });
-    let (search, refresh) = view.controls();
-    Some(Built { content: view.widget(), end: vec![search.upcast(), refresh.upcast(), menu.upcast()] })
+    // the view options button carries its own dot while a filter is on (T-37a-056)
+    let (search, refresh, options) = view.controls();
+    Some(Built { content: view.widget(), end: vec![search.upcast(), refresh.upcast(), options, menu.upcast()] })
 }
 
-/// The labels of the header menu, section by section: the sheet tabs, the library actions, the local folders.
+/// The labels of the header menu, section by section: the library update, the local folders, the categories. How the
+/// covers are filtered, sorted and shown is the view options button's.
 pub fn menu_sections(kind: EntryKind) -> [Vec<(String, &'static str)>; 3] {
     let what = if kind == EntryKind::Anime { "anime" } else { "manga" };
     [
-        vec![
-            (format!("{}…", tr(MsgKey::action_filter)), "filter"),
-            (format!("{}…", tr(MsgKey::action_sort)), "sort"),
-            (format!("{}…", tr(MsgKey::action_display)), "display"),
-        ],
-        vec![(tr(MsgKey::action_update_library), "update-library"), ("Open random entry".to_owned(), "random")],
+        vec![(tr(MsgKey::action_update_library), "update-library")],
         vec![(format!("Add local {what} folder…"), "add-local"), (format!("Rescan local {what} folders"), "rescan-local")],
+        vec![(tr(MsgKey::categories), "categories")],
     ]
 }
 
@@ -495,34 +473,31 @@ fn header_menu(kind: EntryKind, view: &LibraryView) -> gtk::MenuButton {
 
 /// The `lib` actions behind the header menu's items.
 fn menu_actions(kind: EntryKind, view: &LibraryView) -> gtk::gio::SimpleActionGroup {
-    use crate::library::view::sheet::Tab;
     let group = gtk::gio::SimpleActionGroup::new();
     let add = |name: &str, run: Box<dyn Fn()>| {
         let action = gtk::gio::SimpleAction::new(name, None);
         action.connect_activate(move |_, _| run());
         group.add_action(&action);
     };
-    for (name, tab) in [("filter", Tab::Filter), ("sort", Tab::Sort), ("display", Tab::Display)] {
-        let v = view.clone();
-        add(name, Box::new(move || v.open_settings(tab)));
-    }
     let v = view.clone();
     add("update-library", Box::new(move || v.update_library()));
-    let v = view.clone();
-    add("random", Box::new(move || v.open_random()));
     let (folder, rescan) = local_folder_actions(kind);
     add("add-local", folder);
     add("rescan-local", rescan);
+    add("categories", Box::new(|| crate::ui::open("categories")));
     group
 }
 
-/// Add-folder and rescan, from the local modules of `kind`.
+/// Add-folder and rescan, from the local folder module, for `kind`.
 fn local_folder_actions(kind: EntryKind) -> (Box<dyn Fn()>, Box<dyn Fn()>) {
-    let [add, rescan]: [(&'static str, fn()); 2] = match kind {
-        EntryKind::Manga => [("manga add", crate::local_flow::ui::pick_folder), ("manga rescan", crate::local_flow::ui::rescan_all)],
-        EntryKind::Anime => [("anime add", crate::local_flow_anime::choose_folder), ("anime rescan", crate::local_flow_anime::rescan_in_background)],
+    let (add, rescan) = match kind {
+        EntryKind::Manga => ("manga add", "manga rescan"),
+        EntryKind::Anime => ("anime add", "anime rescan"),
     };
-    (Box::new(move || run_local(add)), Box::new(move || run_local(rescan)))
+    (
+        Box::new(move || run_local(add, || crate::local_flow::ui::add_folder(kind))),
+        Box::new(move || run_local(rescan, || crate::local_flow::ui::rescan(kind))),
+    )
 }
 
 #[cfg(test)]
@@ -530,7 +505,7 @@ thread_local! {
     static LOCAL_CALLS: RefCell<Option<Vec<&'static str>>> = const { RefCell::new(None) };
 }
 
-fn run_local((name, run): (&'static str, fn())) {
+fn run_local(name: &'static str, run: impl FnOnce()) {
     #[cfg(test)]
     if LOCAL_CALLS.with(|c| c.borrow_mut().as_mut().map(|calls| calls.push(name)).is_some()) {
         return;
@@ -664,16 +639,17 @@ mod tests {
     }
 
     #[test]
-    fn the_header_menu_holds_the_sheet_tabs_the_library_actions_and_the_local_folders_once_each() {
+    fn the_header_menu_holds_only_the_library_actions_once_each() {
         for kind in [EntryKind::Anime, EntryKind::Manga] {
             let sections = menu_sections(kind);
             let actions: Vec<&str> = sections.iter().flatten().map(|(_, a)| *a).collect();
-            assert_eq!(actions, ["filter", "sort", "display", "update-library", "random", "add-local", "rescan-local"]);
+            assert_eq!(actions, ["update-library", "add-local", "rescan-local", "categories"]);
             let labels: Vec<&str> = sections.iter().flatten().map(|(l, _)| l.as_str()).collect();
             assert!(!labels.iter().any(|l| l.contains("Update category")), "the header refresh button is the only category update");
         }
-        assert_eq!(menu_sections(EntryKind::Anime)[2][0].0, "Add local anime folder…");
-        assert_eq!(menu_sections(EntryKind::Manga)[2][1].0, "Rescan local manga folders");
+        assert_eq!(menu_sections(EntryKind::Anime)[1][0].0, "Add local anime folder…");
+        assert_eq!(menu_sections(EntryKind::Manga)[1][1].0, "Rescan local manga folders");
+        assert_eq!(menu_sections(EntryKind::Manga)[2][0].0, "Categories");
     }
 
     #[test]
@@ -690,7 +666,7 @@ mod tests {
                 let group = menu_actions(kind, &view);
                 let mut names: Vec<String> = group.list_actions().iter().map(|n| n.to_string()).collect();
                 names.sort();
-                assert_eq!(names, ["add-local", "display", "filter", "random", "rescan-local", "sort", "update-library"]);
+                assert_eq!(names, ["add-local", "categories", "rescan-local", "update-library"]);
                 for section in menu_sections(kind) {
                     for (_, action) in section {
                         assert!(group.has_action(action), "the menu item lib.{action} has an action");

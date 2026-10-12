@@ -50,15 +50,23 @@ pub mod flags;
 pub mod header;
 pub mod handoff;
 pub mod header_view;
+pub mod info_block;
+pub mod info_pane;
 pub mod list_model;
+pub mod list_options;
 pub mod list_view;
 pub mod live;
 pub mod message;
 pub mod numfmt;
 pub mod page;
+/// The GTK pieces both details pages build the same way (the state stack, the item header row, the Start button, Back,
+/// menu rows, the scroll fade).
+pub mod page_shell;
 pub mod readstate;
 pub mod route;
 pub mod runner;
+/// The runner handle and the entry-and-items live subscription both store runners use.
+pub mod runner_kit;
 pub mod scanlator_sheet;
 pub mod selection;
 pub mod store;
@@ -70,8 +78,6 @@ pub mod view;
 /// frames (T-38a-039), the header backdrop (T-38a-014) and the header shortcuts (T-38a-046).
 pub mod backdrop;
 pub mod backdrop_view;
-pub mod cover_model;
-pub mod full_cover_view;
 pub mod shortcut_help_view;
 pub mod constants;
 pub mod list_row;

@@ -39,3 +39,35 @@ pub trait ChapterSource: Send + Sync {
     async fn image_url(&self, page: &Page) -> Result<String, SourceError>;
     async fn fetch_image(&self, image_url: &str) -> Result<ImageResponse, SourceError>;
 }
+
+/// A source that is not installed, known only by its id and the download folder the index found for it
+/// ([`crate::index::DownloadIndex::manga_source_dir`]). It names that folder so the downloads can still be deleted; it
+/// fetches nothing.
+pub struct FolderOnlySource {
+    pub id: i64,
+    pub folder: String,
+}
+
+#[async_trait]
+impl ChapterSource for FolderOnlySource {
+    fn id(&self) -> i64 {
+        self.id
+    }
+
+    /// The folder name itself: the layout sanitises it again, which leaves a name it produced unchanged.
+    fn display_name(&self) -> String {
+        self.folder.clone()
+    }
+
+    async fn page_list(&self, _chapter: &ChapterRef) -> Result<Vec<Page>, SourceError> {
+        Err(SourceError::Unsupported("the source is not installed"))
+    }
+
+    async fn image_url(&self, _page: &Page) -> Result<String, SourceError> {
+        Err(SourceError::Unsupported("the source is not installed"))
+    }
+
+    async fn fetch_image(&self, _image_url: &str) -> Result<ImageResponse, SourceError> {
+        Err(SourceError::Unsupported("the source is not installed"))
+    }
+}

@@ -135,16 +135,17 @@ fn load_into(
     true
 }
 
-/// Installs the base stylesheet, then applies `settings` through the tint provider. Call once,
-/// before the first window is presented (T-49ba-001).
+/// Installs the palette and the base stylesheet, once, before the first window is presented (T-49ba-001). The palette
+/// goes first: the base sheet names `kuro_*` colours that only the palette defines, so they must exist when it is parsed.
 pub fn install(display: &gdk::Display, settings: ThemeSettings) -> bool {
     // before the first write, so System can restore what the desktop had
     dark::startup_prefer_dark();
+    let applied = set_settings(display, settings);
     let base = CssProvider::new();
     connect_parse_log(&base);
     base.load_from_string(style::BASE_CSS);
     gtk::style_context_add_provider_for_display(display, &base, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    set_settings(display, settings)
+    applied
 }
 
 /// Logs each parse error of a stylesheet with its location (T-49ba-045).
@@ -334,5 +335,33 @@ mod tests {
             assert!(!reapply(&display, "}}}} not css"), "a broken sheet is refused");
             assert_eq!(second.to_str(), reference.to_str(), "the previous text is kept");
         });
+    }
+
+    /// Only `theme` installs a stylesheet: the base sheet and the tint provider. A screen that adds its own provider
+    /// brings back the per-screen sheets this module replaced. Reads the source files, so it needs no display.
+    #[test]
+    fn no_screen_adds_a_css_provider() {
+        fn rust_files(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("a source directory") {
+                let path = entry.expect("a directory entry").path();
+                if path.is_dir() {
+                    rust_files(&path, found);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    found.push(path);
+                }
+            }
+        }
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&src, &mut files);
+        let offenders: Vec<_> = files
+            .into_iter()
+            .filter(|file| !file.starts_with(src.join("theme")))
+            .filter(|file| {
+                let text = std::fs::read_to_string(file).expect("a readable source file");
+                text.contains("style_context_add_provider_for_display")
+            })
+            .collect();
+        assert!(offenders.is_empty(), "install stylesheets through theme::apply, not here: {offenders:?}");
     }
 }

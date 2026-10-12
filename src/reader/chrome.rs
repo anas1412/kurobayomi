@@ -5,7 +5,10 @@
 
 use std::rc::Rc;
 
+use gtk::gio;
+use gtk::glib;
 use gtk::prelude::*;
+use kuro_prefs::reader::ReadingMode;
 
 use super::model::LoadError;
 use super::strings;
@@ -21,10 +24,133 @@ pub fn error_card_message(error: &LoadError) -> String {
     strings::failed_to_load_pages(message)
 }
 
-/// The menu entries of the top bar. HTTP sources get the three web entries; any other source (a local manga) gets
-/// Set as cover, which takes the page on screen.
-pub fn overflow_items(is_http_source: bool) -> &'static [&'static str] {
-    if is_http_source { &[strings::ACTION_OPEN_IN_WEB_VIEW, strings::ACTION_OPEN_IN_BROWSER, strings::ACTION_SHARE] } else { &[strings::SET_AS_COVER] }
+/// The action group the reader page installs, so the menu's items name their actions as `reader.<name>`.
+pub const ACTION_GROUP: &str = "reader";
+const ACTION_MODE: &str = "mode";
+const ACTION_CROP: &str = "crop";
+const ACTION_SETTINGS: &str = "settings";
+const ACTION_OPEN_BROWSER: &str = "open-browser";
+const ACTION_SHARE: &str = "share";
+const ACTION_SET_COVER: &str = "set-cover";
+
+/// The five modes the menu offers, with the string each radio item carries as its action target. Default is not a
+/// choice: a Default manga reads in the preference's mode, which is one of these.
+pub const MODES: [(&str, ReadingMode); 5] = [
+    ("ltr", ReadingMode::LeftToRight),
+    ("rtl", ReadingMode::RightToLeft),
+    ("vertical", ReadingMode::Vertical),
+    ("webtoon", ReadingMode::Webtoon),
+    ("webtoon-gaps", ReadingMode::ContinuousVertical),
+];
+
+/// The label of a mode, in the menu, the settings chips and the toast.
+pub fn mode_label(mode: ReadingMode) -> &'static str {
+    match mode {
+        ReadingMode::Default => strings::LABEL_DEFAULT,
+        ReadingMode::LeftToRight => strings::LEFT_TO_RIGHT_VIEWER,
+        ReadingMode::RightToLeft => strings::RIGHT_TO_LEFT_VIEWER,
+        ReadingMode::Vertical => strings::VERTICAL_VIEWER,
+        ReadingMode::Webtoon => strings::WEBTOON_VIEWER,
+        ReadingMode::ContinuousVertical => strings::VERTICAL_PLUS_VIEWER,
+    }
+}
+
+/// The action target of a mode; Default has none, so no radio item shows as chosen.
+fn mode_target(mode: ReadingMode) -> &'static str {
+    MODES.iter().find(|(_, m)| *m == mode).map_or("", |(target, _)| target)
+}
+
+fn mode_from_target(target: &str) -> Option<ReadingMode> {
+    MODES.iter().find(|(t, _)| *t == target).map(|(_, mode)| *mode)
+}
+
+fn detailed(action: &str) -> String {
+    format!("{ACTION_GROUP}.{action}")
+}
+
+/// The model of the top bar's menu: Reading mode (five radio items), Crop borders and Reader settings, then Open in
+/// browser and Share for an HTTP source, or Set as cover (the page on screen) for any other source (a local manga).
+pub fn overflow_menu(is_http_source: bool) -> gio::Menu {
+    let menu = gio::Menu::new();
+    let modes = gio::Menu::new();
+    for (target, mode) in MODES {
+        let item = gio::MenuItem::new(Some(mode_label(mode)), None);
+        item.set_action_and_target_value(Some(&detailed(ACTION_MODE)), Some(&target.to_variant()));
+        modes.append_item(&item);
+    }
+    menu.append_section(Some(strings::PREF_CATEGORY_READING_MODE), &modes);
+    let reader = gio::Menu::new();
+    reader.append(Some(strings::PREF_CROP_BORDERS), Some(&detailed(ACTION_CROP)));
+    reader.append(Some(strings::MENU_READER_SETTINGS), Some(&detailed(ACTION_SETTINGS)));
+    menu.append_section(None, &reader);
+    let page = gio::Menu::new();
+    if is_http_source {
+        page.append(Some(strings::ACTION_OPEN_IN_BROWSER), Some(&detailed(ACTION_OPEN_BROWSER)));
+        page.append(Some(strings::ACTION_SHARE), Some(&detailed(ACTION_SHARE)));
+    } else {
+        page.append(Some(strings::SET_AS_COVER), Some(&detailed(ACTION_SET_COVER)));
+    }
+    menu.append_section(None, &page);
+    menu
+}
+
+/// What the menu's actions do. Run on the GTK thread.
+pub struct MenuHandlers {
+    /// A radio item was chosen: apply the mode to this manga at once.
+    pub on_mode: Rc<dyn Fn(ReadingMode)>,
+    /// The Crop borders switch was flipped.
+    pub on_crop: Rc<dyn Fn()>,
+    pub on_settings: Rc<dyn Fn()>,
+    pub on_open_browser: Rc<dyn Fn()>,
+    pub on_share: Rc<dyn Fn()>,
+    pub on_set_cover: Rc<dyn Fn()>,
+}
+
+/// The actions the menu items name, with the mode and crop states as given. The page installs the group under
+/// [`ACTION_GROUP`]; [`sync_menu_state`] keeps the two states current.
+pub fn menu_actions(mode: ReadingMode, crop: bool, handlers: MenuHandlers) -> gio::SimpleActionGroup {
+    let MenuHandlers { on_mode, on_crop, on_settings, on_open_browser, on_share, on_set_cover } = handlers;
+    let group = gio::SimpleActionGroup::new();
+
+    let mode_action = gio::SimpleAction::new_stateful(ACTION_MODE, Some(glib::VariantTy::STRING), &mode_target(mode).to_variant());
+    mode_action.connect_change_state(move |action, value| {
+        let Some(value) = value else { return };
+        let Some(mode) = value.str().and_then(mode_from_target) else { return };
+        action.set_state(value);
+        on_mode(mode);
+    });
+    group.add_action(&mode_action);
+
+    let crop_action = gio::SimpleAction::new_stateful(ACTION_CROP, None, &crop.to_variant());
+    crop_action.connect_change_state(move |action, value| {
+        let Some(value) = value else { return };
+        action.set_state(value);
+        on_crop();
+    });
+    group.add_action(&crop_action);
+
+    for (name, run) in [
+        (ACTION_SETTINGS, on_settings),
+        (ACTION_OPEN_BROWSER, on_open_browser),
+        (ACTION_SHARE, on_share),
+        (ACTION_SET_COVER, on_set_cover),
+    ] {
+        let action = gio::SimpleAction::new(name, None);
+        action.connect_activate(move |_, _| run());
+        group.add_action(&action);
+    }
+    group
+}
+
+/// Writes the mode and crop states without running their handlers.
+pub fn sync_menu_state(group: &gio::SimpleActionGroup, mode: ReadingMode, crop: bool) {
+    let set = |name: &str, state: glib::Variant| {
+        if let Some(action) = group.lookup_action(name).and_then(|a| a.downcast::<gio::SimpleAction>().ok()) {
+            action.set_state(&state);
+        }
+    };
+    set(ACTION_MODE, mode_target(mode).to_variant());
+    set(ACTION_CROP, crop.to_variant());
 }
 
 /// The web address of a chapter for the overflow entries: only an absolute http or https url has one. A relative
@@ -70,12 +196,11 @@ pub struct TopBar {
     pub is_http_source: bool,
 }
 
-/// The top bar actions. `on_overflow` gets the index into [`overflow_items`].
+/// The top bar actions. The overflow menu's own actions are [`menu_actions`].
 pub struct TopBarActions {
     pub on_back: Box<dyn Fn()>,
     pub on_open_manga: Box<dyn Fn()>,
     pub on_bookmark: Box<dyn Fn()>,
-    pub on_overflow: Box<dyn Fn(usize)>,
 }
 
 /// The top bar before a chapter is known (the page list is loading, or the load failed): Back and the window buttons,
@@ -85,14 +210,18 @@ pub fn build_bare_top_bar(on_back: impl Fn() + 'static) -> gtk::HeaderBar {
 }
 
 /// The top bar: the themed header the player also uses (docs/design/player-reader.md). Back is on the left, the
-/// `<manga> - <chapter>` title is centred and opens the manga's page, and the bookmark and the menu are on the right.
-/// The bar is never hidden.
-pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> gtk::HeaderBar {
-    let TopBarActions { on_back, on_open_manga, on_bookmark, on_overflow } = actions;
-    let label = page_header::title_label(&page_header::page_title(&bar.manga_title, &bar.chapter_name));
-    let title = gtk::Button::builder().child(&label).has_frame(false).build();
-    title.connect_clicked(move |_| on_open_manga());
-    let header = page_header::header(&title, on_back);
+/// `<manga> - <chapter>` title is centred with the page position under it and opens the manga's page, and the
+/// bookmark and the menu are on the right. The bar is never hidden. The menu's actions come from the page's
+/// [`ACTION_GROUP`]; the returned title takes the page position.
+pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> (gtk::HeaderBar, page_header::TwoLineTitle) {
+    let TopBarActions { on_back, on_open_manga, on_bookmark } = actions;
+    let title = page_header::two_line_title(&page_header::page_title(&bar.manga_title, &bar.chapter_name));
+    // a gesture and not a Button: a button's padding around two lines would make this bar taller than the others
+    let click = gtk::GestureClick::new();
+    click.connect_released(move |_, _, _, _| on_open_manga());
+    title.root.add_controller(click);
+    title.root.set_cursor_from_name(Some("pointer"));
+    let header = page_header::header(&title.root, on_back);
 
     let bookmark = gtk::ToggleButton::builder()
         .icon_name(if bar.bookmarked { "bookmark-filled-symbolic" } else { "bookmark-new-symbolic" })
@@ -102,22 +231,9 @@ pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> gtk::HeaderBar {
     bookmark.connect_clicked(move |_| on_bookmark());
     bookmark.update_property(&[gtk::accessible::Property::Label(bookmark_label(bar.bookmarked))]);
 
-    let popover = gtk::Popover::new();
-    let entries = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let on_overflow = Rc::new(on_overflow);
-    for (index, text) in overflow_items(bar.is_http_source).iter().enumerate() {
-        let item = gtk::Button::with_label(text);
-        item.add_css_class("flat");
-        let on_overflow = Rc::clone(&on_overflow);
-        let closing = popover.clone();
-        item.connect_clicked(move |_| {
-            closing.popdown();
-            on_overflow(index);
-        });
-        entries.append(&item);
-    }
-    popover.set_child(Some(&entries));
-    let menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).tooltip_text(strings::OVERFLOW_MENU).build();
+    let popover = gtk::PopoverMenu::from_model(Some(&overflow_menu(bar.is_http_source)));
+    // no tooltip: it would sit on top of the open menu; the accessible label below still names the button
+    let menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).build();
     menu.update_property(&[gtk::accessible::Property::Label(strings::OVERFLOW_MENU)]);
 
     // pack_end puts the first widget packed at the far right: the menu, then the bookmark
@@ -125,7 +241,7 @@ pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> gtk::HeaderBar {
     header.pack_end(&bookmark);
     // the buttons packed here came after page_header::header made its pass, so they need their own
     crate::ui::no_sticky_focus(&header);
-    header
+    (header, title)
 }
 
 #[cfg(test)]
@@ -145,12 +261,6 @@ mod tests {
             error_card_message(&error),
             "The chapter is not downloaded. Turn off downloaded-only mode or download it first."
         );
-    }
-
-    #[test]
-    fn a_web_source_gets_the_web_entries_and_any_other_gets_set_as_cover() {
-        assert_eq!(overflow_items(true), ["Open in WebView", "Open in browser", "Share"]);
-        assert_eq!(overflow_items(false), ["Set as cover"]);
     }
 
     #[test]

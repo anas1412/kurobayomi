@@ -187,10 +187,13 @@ async fn fetch_all(ctx: &PipelineCtx, source: &dyn ChapterSource, pages: &mut [P
     }
 }
 
-/// Moves the finished tmp folder into place. An existing target is an error and the tmp folder is kept (EC-63).
+/// Moves the finished tmp folder into place. An older copy of the same chapter is replaced: the user asked for it again,
+/// and failing at the last step would leave a finished download marked as failed.
 fn finalise_folder(tmp: &Path, target: &Path) -> Result<(), DownloadError> {
-    if target.exists() {
-        return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists", target.display())).into());
+    if target.is_dir() {
+        std::fs::remove_dir_all(target)?;
+    } else if target.exists() {
+        std::fs::remove_file(target)?;
     }
     std::fs::rename(tmp, target)?;
     Ok(())
@@ -220,11 +223,8 @@ fn write_comic_info(tmp: &Path, manga: &MangaRef, chapter: &ChapterRef, source_n
 }
 
 /// Packs the finished tmp folder as a stored CBZ at `target` (`<name>.cbz`). The archive is written to `<name>.cbz.part`
-/// and renamed when complete, then the tmp folder is removed. An existing target is an error (EC-63).
+/// and renamed when complete (the rename replaces an older copy of the same chapter), then the tmp folder is removed.
 fn finalise_cbz(tmp: &Path, target: &Path) -> Result<(), DownloadError> {
-    if target.exists() {
-        return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists", target.display())).into());
-    }
     let part = PathBuf::from(format!("{}{CBZ_PART_SUFFIX}", target.display()));
     let mut writer = kuro_archive::CbzWriter::create(&part)?;
     let mut entries: Vec<PathBuf> = std::fs::read_dir(tmp)?.map(|e| e.map(|e| e.path())).collect::<io::Result<_>>()?;
@@ -705,13 +705,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_existing_chapter_folder_fails_the_finalise_and_keeps_tmp() {
+    async fn an_older_copy_of_the_chapter_is_replaced_not_an_error() {
         let h = harness();
         std::fs::create_dir_all(chapter_dir(&h)).unwrap();
+        std::fs::write(chapter_dir(&h).join("stale.jpg"), b"old").unwrap();
         let source = fake(1);
         let outcome = run_chapter(ctx(&h, plenty), job(source)).await;
-        assert!(matches!(outcome, ChapterOutcome::Errored(DownloadError::Io(_))), "{outcome:?}");
-        assert!(chapter_dir(&h).with_file_name("Chapter 7_tmp").is_dir());
+        assert!(matches!(outcome, ChapterOutcome::Downloaded), "{outcome:?}");
+        assert!(chapter_dir(&h).join("001.jpg").is_file(), "the new pages are in place");
+        assert!(!chapter_dir(&h).join("stale.jpg").exists(), "the older copy is gone");
+        assert!(!chapter_dir(&h).with_file_name("Chapter 7_tmp").exists(), "no stray tmp folder");
     }
 
     #[tokio::test]

@@ -12,10 +12,7 @@ pub enum AnimeDialog {
     SetAnimeFetchInterval { anime_id: i64 },
     ShowQualities { anime_id: i64, episode_id: i64 },
     ChangeAnimeSkipIntro,
-    EpisodeSettingsSheet,
-    SeasonSettingsSheet,
     TrackSheet,
-    FullImages,
 }
 
 /// The one open dialog, and the one-shot "track sheet after the category dialog" flag.
@@ -34,12 +31,6 @@ impl DialogSlot {
     #[cfg(test)]
     pub fn current(&self) -> Option<&AnimeDialog> {
         self.current.as_ref()
-    }
-
-    #[cfg(test)]
-    /// The settings sheet of the entry's kind: seasons get the season sheet, episodes the episode sheet.
-    pub fn open_settings(&mut self, seasons: bool) {
-        self.open(if seasons { AnimeDialog::SeasonSettingsSheet } else { AnimeDialog::EpisodeSettingsSheet });
     }
 
     /// The choose-category branch of an add: the category dialog opens and the track sheet may follow its dismiss.
@@ -73,20 +64,11 @@ mod tests {
     #[test]
     fn the_last_request_wins_and_dismiss_clears_the_slot() {
         let mut slot = DialogSlot::default();
-        slot.open(AnimeDialog::FullImages);
+        slot.open(AnimeDialog::TrackSheet);
         slot.open(AnimeDialog::ChangeAnimeSkipIntro);
         assert_eq!(slot.current(), Some(&AnimeDialog::ChangeAnimeSkipIntro));
         assert!(!slot.dismiss(false));
         assert_eq!(slot.current(), None);
-    }
-
-    #[test]
-    fn settings_opens_the_sheet_of_the_entry_kind() {
-        let mut slot = DialogSlot::default();
-        slot.open_settings(true);
-        assert_eq!(slot.current(), Some(&AnimeDialog::SeasonSettingsSheet));
-        slot.open_settings(false);
-        assert_eq!(slot.current(), Some(&AnimeDialog::EpisodeSettingsSheet));
     }
 
     #[test]
@@ -107,7 +89,7 @@ mod tests {
         slot.open_change_category_from_add(3);
         slot.confirm_category();
         assert_eq!(slot.current(), None);
-        slot.open(AnimeDialog::FullImages);
+        slot.open(AnimeDialog::TrackSheet);
         assert!(slot.dismiss(true), "the flag is not cleared by the confirm");
     }
 }

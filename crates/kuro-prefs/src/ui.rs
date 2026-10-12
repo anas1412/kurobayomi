@@ -48,7 +48,8 @@ impl AppTheme {
     }
 }
 
-/// A top-level destination (Kotlin `Tab`).
+/// A top-level destination (Kotlin `Tab`). Aniyomi's More tab is cut: its places are the panel items and the app
+/// menu. The old `bottom_rail_nav_style` key is a dropped key, so a stored value still loads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     AnimeLibrary,
@@ -56,41 +57,6 @@ pub enum Tab {
     Updates,
     History,
     Browse,
-    More,
-}
-
-pref_enum! {
-    /// `bottom_rail_nav_style`: which destination moves into More.
-    pub enum NavStyle {
-        MOVE_MANGA_TO_MORE, MOVE_UPDATES_TO_MORE, MOVE_HISTORY_TO_MORE, MOVE_BROWSE_TO_MORE,
-    }
-}
-
-impl NavStyle {
-    /// The destination this style moves into More.
-    pub fn more_tab(self) -> Tab {
-        match self {
-            Self::MOVE_MANGA_TO_MORE => Tab::MangaLibrary,
-            Self::MOVE_UPDATES_TO_MORE => Tab::Updates,
-            Self::MOVE_HISTORY_TO_MORE => Tab::History,
-            Self::MOVE_BROWSE_TO_MORE => Tab::Browse,
-        }
-    }
-
-    /// The visible navigation tabs: all six destinations minus [`NavStyle::more_tab`].
-    pub fn tabs(self) -> Vec<Tab> {
-        [
-            Tab::AnimeLibrary,
-            Tab::MangaLibrary,
-            Tab::Updates,
-            Tab::History,
-            Tab::Browse,
-            Tab::More,
-        ]
-        .into_iter()
-        .filter(|tab| *tab != self.more_tab())
-        .collect()
-    }
 }
 
 pref_enum! {
@@ -221,31 +187,6 @@ mod tests {
         let ui = UiPrefs::new(store);
         assert_eq!(ui.theme_mode.get(), ThemeMode::SYSTEM);
         assert_eq!(ui.start_screen.get(), StartScreen::ANIME);
-    }
-
-    #[test]
-    fn nav_style_shows_six_destinations_minus_the_moved_one() {
-        let tabs = NavStyle::MOVE_HISTORY_TO_MORE.tabs();
-        assert_eq!(
-            tabs,
-            vec![
-                Tab::AnimeLibrary,
-                Tab::MangaLibrary,
-                Tab::Updates,
-                Tab::Browse,
-                Tab::More,
-            ]
-        );
-        assert_eq!(
-            NavStyle::MOVE_MANGA_TO_MORE.tabs(),
-            vec![
-                Tab::AnimeLibrary,
-                Tab::Updates,
-                Tab::History,
-                Tab::Browse,
-                Tab::More,
-            ]
-        );
     }
 
     #[test]

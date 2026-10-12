@@ -2,15 +2,16 @@
 //! mode; the Display group holds the background colour; the Paged group holds the scale type, the zoom start position,
 //! crop borders and split wide pages. Every other reader setting is cut.
 use kuro_prefs::prefs::Prefs;
+use kuro_prefs::reader::ReaderPrefs;
 
 use crate::pref_model::model::Preference;
 use crate::settings_ui::rows::{group, int_choice, item, switch};
 
 /// `ReadingMode` codes (`pref_default_reading_mode_key`); 0 (Default) is not offered.
 pub const READING_MODES: [(i32, &str); 5] = [
-    (1, "Paged (left to right)"),
-    (2, "Paged (right to left)"),
-    (3, "Paged (vertical)"),
+    (1, "Paged, left to right"),
+    (2, "Paged, right to left"),
+    (3, "Paged, vertical"),
     (4, "Long strip"),
     (5, "Long strip with gaps"),
 ];
@@ -28,11 +29,10 @@ pub const SCALE_TYPES: [(i32, &str); 6] = [
 /// Zoom start codes (`pref_zoom_start_key`).
 pub const ZOOM_STARTS: [(i32, &str); 4] = [(1, "Automatic"), (2, "Left"), (3, "Right"), (4, "Center")];
 
-/// The reader settings rows, every one of them kept. The page is built from these rows alone; the spec only gives the title and toolbar.
-pub fn rows_all(prefs: &Prefs) -> Vec<Preference> {
-    let r = &prefs.reader;
+/// The Display and Paged groups: the background colour and the paged layout. The Settings reader page and the reader's
+/// own settings window both show them, so the rows are built here once.
+pub fn layout_rows(r: &ReaderPrefs) -> Vec<Preference> {
     vec![
-        item(int_choice("Default reading mode", &r.default_reading_mode, &READING_MODES, true)),
         group("Display", vec![int_choice("Background color", &r.reader_theme, &BACKGROUNDS, true)]),
         group(
             "Paged",
@@ -44,6 +44,13 @@ pub fn rows_all(prefs: &Prefs) -> Vec<Preference> {
             ],
         ),
     ]
+}
+
+/// The reader settings page: the default reading mode, then [`layout_rows`]. Every row is kept.
+pub fn rows_all(prefs: &Prefs) -> Vec<Preference> {
+    let mut tree = vec![item(int_choice("Default reading mode", &prefs.reader.default_reading_mode, &READING_MODES, true))];
+    tree.extend(layout_rows(&prefs.reader));
+    tree
 }
 
 #[cfg(test)]

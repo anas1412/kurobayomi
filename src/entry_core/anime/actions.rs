@@ -1,8 +1,10 @@
-//! Episode actions that are pure decisions: bulk bookmark and fillermark (T-39b-015) and the open routing of an episode
+//! Episode actions that are pure decisions: bulk bookmark and fillermark (T-39b-015), the flag write of a row menu item, and the open routing of an episode
 //! (T-39b-017). Upstream: `AnimeScreenModel.kt` (`onMultiBookmarkClicked`, `onMultiFillermarkClicked`) and
 //! `AnimeScreen.kt:136-144`. Behaviour 11.2 and 17.4 and 17.5. The caller writes the flags and clears the selection.
 
 use kuro_data::episode::Episode;
+
+use crate::entry_core::list_model::RowAction;
 
 /// The per-episode flags a bulk action sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,31 +41,17 @@ pub fn starts_torrent_server(is_torrent: bool) -> bool {
     is_torrent
 }
 
-/// What an item of an episode row's context menu does (T-39b-015).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EpisodeMenuAction {
-    ToggleSeen,
-    ToggleBookmark,
-    ToggleFillermark,
-    Download,
-}
-
-/// The write of a menu item on one episode, or `None` when it writes nothing: Download, while the page has no anime
-/// download queue. Bookmark and fillermark go through `bulk_mark_targets`, as the bottom bar does, so a menu item and
-/// a bulk action write the same way.
-pub fn menu_effect(action: EpisodeMenuAction, episode: &Episode) -> Option<MenuEffect> {
-    let one = std::slice::from_ref(episode);
+/// The write of a row menu item on one episode, or `None` for the items that are not a flag write (Mark previous,
+/// Download and Select, which the caller runs). Bookmark goes through `bulk_mark_targets`, as the bottom bar does, so
+/// a menu item and a bulk action write the same way.
+pub fn menu_effect(action: RowAction, episode: &Episode) -> Option<MenuEffect> {
     match action {
-        EpisodeMenuAction::ToggleSeen => Some(MenuEffect::Seen { id: episode.id, seen: !episode.seen }),
-        EpisodeMenuAction::ToggleBookmark => {
+        RowAction::ToggleRead => Some(MenuEffect::Seen { id: episode.id, seen: !episode.seen }),
+        RowAction::ToggleBookmark => {
             let on = !episode.bookmark;
-            Some(MenuEffect::Mark { ids: bulk_mark_targets(one, Mark::Bookmark, on), mark: Mark::Bookmark, on })
+            Some(MenuEffect::Mark { ids: bulk_mark_targets(std::slice::from_ref(episode), Mark::Bookmark, on), mark: Mark::Bookmark, on })
         }
-        EpisodeMenuAction::ToggleFillermark => {
-            let on = !episode.fillermark;
-            Some(MenuEffect::Mark { ids: bulk_mark_targets(one, Mark::Fillermark, on), mark: Mark::Fillermark, on })
-        }
-        EpisodeMenuAction::Download => None,
+        RowAction::MarkPrevious | RowAction::Download | RowAction::Select => None,
     }
 }
 
@@ -99,10 +87,11 @@ mod tests {
     #[test]
     fn a_menu_item_toggles_the_mark_it_names_through_the_same_targets_as_the_bar() {
         let marked = ep(1, true, false);
-        assert_eq!(menu_effect(EpisodeMenuAction::ToggleBookmark, &marked), Some(MenuEffect::Mark { ids: vec![1], mark: Mark::Bookmark, on: false }));
-        assert_eq!(menu_effect(EpisodeMenuAction::ToggleFillermark, &marked), Some(MenuEffect::Mark { ids: vec![1], mark: Mark::Fillermark, on: true }));
-        assert_eq!(menu_effect(EpisodeMenuAction::ToggleSeen, &marked), Some(MenuEffect::Seen { id: 1, seen: true }));
-        assert_eq!(menu_effect(EpisodeMenuAction::Download, &marked), None, "no anime download queue yet");
+        assert_eq!(menu_effect(RowAction::ToggleBookmark, &marked), Some(MenuEffect::Mark { ids: vec![1], mark: Mark::Bookmark, on: false }));
+        assert_eq!(menu_effect(RowAction::ToggleRead, &marked), Some(MenuEffect::Seen { id: 1, seen: true }));
+        for other in [RowAction::Download, RowAction::MarkPrevious, RowAction::Select] {
+            assert_eq!(menu_effect(other, &marked), None, "{other:?} is not a flag write");
+        }
     }
 
     #[test]

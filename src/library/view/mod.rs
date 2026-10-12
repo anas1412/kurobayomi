@@ -1,11 +1,11 @@
 //! The library view: category tabs, a context line, the cover grid of the active page, the selection row and bar,
-//! and the empty states. Its search entry and refresh button sit in the page header (`controls`, placed by
+//! and the empty states. Its search entry, refresh button and view options sit in the page header (`controls`, placed by
 //! `screens::libraries`). Pipeline work runs on the worker (`worker`); this file applies its replies.
 //! Borrows of the shared state are never held across a widget call, because widget calls can re-enter the handlers.
 
 mod card;
 mod dialog;
-pub mod sheet;
+mod options;
 mod tabs;
 mod welcome;
 
@@ -27,7 +27,6 @@ use kuro_domain::library::active::clamp_page;
 use kuro_domain::library::columns::columns_for_width;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::page::{LibraryItem, toolbar_title};
-use kuro_domain::library::sort::LibrarySort;
 use kuro_i18n::{MsgKey, tr, tr_plural};
 use kuro_domain::library::search::{SEARCH_DEBOUNCE, empty_page, shows_global_search};
 use kuro_images::art::{ArtKind, ArtRef, Owner};
@@ -37,15 +36,13 @@ use crate::library::actions;
 use crate::misc::diet_defaults as diet;
 use crate::library::cells::{self, Cell};
 use crate::library::category_dialog::CategoryDialog;
-use crate::library::display_tab;
 use crate::library::keys;
 use crate::library::layout;
-use crate::library::filter_tab;
 use crate::library::load;
-use crate::library::random;
 use crate::library::query::{Built, Facts};
 use crate::library::select::Selection;
 use crate::library::worker::{Gate, Job, Reply, Worker};
+use crate::widgets::context_menu::{self, Item};
 
 /// What the view reads from the app: storage, preferences and the lookups that live outside storage.
 pub struct Deps {
@@ -56,8 +53,6 @@ pub struct Deps {
     pub facts: Facts,
     pub downloaded_only: Rc<dyn Fn() -> bool>,
     pub logged_in: Rc<dyn Fn() -> BTreeSet<i64>>,
-    /// The logged-in trackers as (id, name), for the Filter tab's tracker rows.
-    pub tracker_names: Rc<dyn Fn() -> Vec<(i64, String)>>,
     /// `pref_always_use_external_player`, read when the continue button is clicked.
     pub always_external: Rc<dyn Fn() -> bool>,
     /// Whether the chapter or episode with this id is on disk; the entry's downloaded filter reads it.
@@ -119,8 +114,10 @@ struct Inner {
     selection: Selection,
     /// The last value sent to `Nav::selecting`.
     selecting_shown: bool,
-    /// Told on every render whether a filter (or the forced downloaded-only view) is active (T-37a-056).
-    on_filters: Option<Rc<dyn Fn(bool)>>,
+    /// The view options menu button of the page header; its dot shows while a filter is on (T-37a-056).
+    options: options::Options,
+    /// The logged-in trackers of the last load, so a render never asks the secret store again.
+    logged_in: BTreeSet<i64>,
     last_resume: HashMap<i64, Instant>,
     store: gio::ListStore,
     /// The context line: the category name and counts, shown only when the header switch does not already say it.
@@ -179,6 +176,7 @@ impl LibraryView {
         search.set_placeholder_text(Some(&tr(MsgKey::action_search_hint)));
         search.set_width_chars(28);
         let refresh_button = crate::ui::icon_button("view-refresh-symbolic", &tr(MsgKey::action_update_category));
+        let options = options::Options::new(deps.kind);
 
         let tabs = tabs::TabStrip::new();
         let grid = gtk::GridView::new(
@@ -262,7 +260,8 @@ impl LibraryView {
             search_turn: 0,
             selection: Selection::default(),
             selecting_shown: false,
-            on_filters: None,
+            options,
+            logged_in: BTreeSet::new(),
             last_resume: HashMap::new(),
             store,
             title,
@@ -314,10 +313,10 @@ impl LibraryView {
         self.shell.clone().upcast()
     }
 
-    /// The search entry and the refresh button, for the page header.
-    pub fn controls(&self) -> (gtk::SearchEntry, gtk::Button) {
+    /// The search entry, the refresh button and the view options button, for the page header.
+    pub fn controls(&self) -> (gtk::SearchEntry, gtk::Button, gtk::Widget) {
         let st = self.inner.borrow();
-        (st.search.clone(), st.refresh_button.clone())
+        (st.search.clone(), st.refresh_button.clone(), st.options.widget.clone().upcast())
     }
 
     /// Reruns the pipeline with the current preferences and query.
@@ -347,22 +346,6 @@ impl LibraryView {
         sync_refresh_button(&self.inner);
     }
 
-    /// "Open random entry": one uniformly chosen entry of the active page; a toast when the page is empty.
-    pub fn open_random(&self) {
-        let (id, open) = {
-            let st = self.inner.borrow();
-            let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(&st)));
-            let items = page.map_or(&[][..], |p| p.items.as_slice());
-            let nonce = u64::from(kuro_domain::library::order::new_seed().unsigned_abs());
-            let id = random::pick_index(items.len(), nonce).and_then(|i| items.get(i)).map(|item| item.row.id);
-            (id, st.nav.open.clone())
-        };
-        match id {
-            Some(id) => open(id),
-            None => crate::library::toast::notify(random::EMPTY_TOAST),
-        }
-    }
-
     /// How many cells the grid shows. Test-only.
     #[cfg(test)]
     pub(crate) fn cover_count(&self) -> usize {
@@ -373,28 +356,6 @@ impl LibraryView {
     /// Whether entries are selected (selection mode).
     pub fn selection_active(&self) -> bool {
         !self.inner.borrow().selection.is_empty()
-    }
-
-    /// Registers what runs on every render with whether a filter is active, and runs it once with the current value.
-    pub fn on_filters_active(&self, listener: impl Fn(bool) + 'static) {
-        let active = {
-            let mut st = self.inner.borrow_mut();
-            st.on_filters = Some(Rc::new(listener));
-            st.built.as_ref().is_some_and(|b| b.has_active_filters)
-        };
-        self.notify_filters(active);
-    }
-
-    fn notify_filters(&self, active: bool) {
-        let listener = self.inner.borrow().on_filters.clone();
-        if let Some(listener) = listener {
-            listener(active);
-        }
-    }
-
-    /// Opens the library settings sheet on one of its tabs: Filter, Sort and Display (B-1.2, T-37a-038, T-37a-039).
-    pub fn open_settings(&self, tab: sheet::Tab) {
-        open_settings(&self.inner, tab);
     }
 
     fn wire(&self, replies: &async_channel::Receiver<Reply>) {
@@ -415,6 +376,8 @@ impl LibraryView {
             });
         }
         self.wire_refresh(&weak);
+        let options = self.inner.borrow().options.clone();
+        options.wire(&weak);
 
         let weak_search = weak.clone();
         let search = self.inner.borrow().search.clone();
@@ -630,9 +593,12 @@ impl LibraryView {
         let bar_box = self.inner.borrow().bar.child().and_then(|w| w.downcast::<gtk::ActionBar>().ok());
         if let Some(bar_box) = bar_box {
             let buttons: Vec<(String, Action)> = vec![
-                (tr(MsgKey::action_move_category), Box::new(open_categories)),
-                (read_label, Box::new(|inner: &Rc<RefCell<Inner>>| mark(inner, true))),
-                (unread_label, Box::new(|inner: &Rc<RefCell<Inner>>| mark(inner, false))),
+                (tr(MsgKey::action_move_category), Box::new(|inner: &Rc<RefCell<Inner>>| {
+                    let ids = inner.borrow().selection.ids().to_vec();
+                    open_categories(inner, ids, true);
+                })),
+                (read_label, Box::new(|inner: &Rc<RefCell<Inner>>| mark_selected(inner, true))),
+                (unread_label, Box::new(|inner: &Rc<RefCell<Inner>>| mark_selected(inner, false))),
                 (tr(MsgKey::action_delete), Box::new(|inner: &Rc<RefCell<Inner>>| selected_action(inner, |nav| nav.delete.clone()))),
             ];
             for (label, action) in buttons {
@@ -696,6 +662,7 @@ fn submit(inner: &Rc<RefCell<Inner>>) {
     let downloaded_only = (st.deps.downloaded_only)();
     let logged_in = (st.deps.logged_in)();
     let request = load::request(&st.deps.prefs, st.deps.kind, downloaded_only, &logged_in, st.query.clone());
+    st.logged_in = logged_in;
     let job = Job { generation, db: st.deps.db.clone(), request, facts: st.deps.facts.clone() };
     if !st.worker.submit(job) {
         tracing::error!("the library worker has stopped");
@@ -847,7 +814,6 @@ fn render(inner: &Rc<RefCell<Inner>>) {
             bar_text,
             bar_open: !st.selection.is_empty(),
             download_visible: actions::download_visible(st.selection.rows()),
-            filters_active: st.built.as_ref().is_some_and(|b| b.has_active_filters),
         }
     };
 
@@ -863,7 +829,7 @@ fn render(inner: &Rc<RefCell<Inner>>) {
             st.global_button.clone(),
             st.bar.clone(),
             st.bar_label.clone(),
-            [st.search.clone().upcast::<gtk::Widget>(), st.refresh_button.clone().upcast()],
+            [st.search.clone().upcast::<gtk::Widget>(), st.refresh_button.clone().upcast(), st.options.widget.clone().upcast()],
             st.sel_header.clone(),
             st.download_button.clone(),
         )
@@ -900,10 +866,7 @@ fn render(inner: &Rc<RefCell<Inner>>) {
     header.iter().for_each(|w| w.set_visible(!view.bar_open));
     sel_header.set_visible(view.bar_open);
     download.set_visible(view.download_visible);
-    let on_filters = inner.borrow().on_filters.clone();
-    if let Some(listener) = on_filters {
-        listener(view.filters_active);
-    }
+    options::Options::sync(inner);
     let changed = {
         let mut st = inner.borrow_mut();
         let changed = st.selecting_shown != view.bar_open;
@@ -933,8 +896,7 @@ fn is_list_mode(st: &Inner) -> bool {
 
 /// The row height of List mode for the current page height and list size (T-37a-021).
 fn list_row_height(st: &Inner) -> f64 {
-    let landscape = display_tab::columns_pref(&st.deps.prefs, st.deps.kind).get();
-    let size = layout::list_size(window_width(&st.scroller), diet::LIBRARY_PORTRAIT_COLUMNS, landscape);
+    let size = layout::list_size(window_width(&st.scroller), diet::LIBRARY_COLUMNS, diet::LIBRARY_COLUMNS);
     layout::list_row_height(f64::from(st.scroller.height()), size)
 }
 
@@ -943,14 +905,13 @@ fn window_width(widget: &impl IsA<gtk::Widget>) -> i32 {
     widget.root().map_or_else(|| widget.width(), |root| root.width())
 }
 
-/// Sets the grid's column count from the window width and the portrait and landscape keys of this kind (T-08a-043):
-/// below 900 px the portrait key, from 900 px the landscape key, 0 meaning `max(2, width / 160)`.
+/// Sets the grid's column count from the window width (T-08a-043): the column settings are cut, so it is always the
+/// automatic count, `max(2, width / 160)`.
 fn apply_columns(inner: &Rc<RefCell<Inner>>) {
     let (grid, columns) = {
         let st = inner.borrow();
-        let landscape = display_tab::columns_pref(&st.deps.prefs, st.deps.kind).get();
         let width = window_width(&st.scroller);
-        (st.grid.clone(), columns_for_width(width, diet::LIBRARY_PORTRAIT_COLUMNS, landscape) as u32)
+        (st.grid.clone(), columns_for_width(width, diet::LIBRARY_COLUMNS, diet::LIBRARY_COLUMNS) as u32)
     };
     grid.set_min_columns(columns);
     grid.set_max_columns(columns);
@@ -970,7 +931,6 @@ struct Rendered {
     bar_text: String,
     bar_open: bool,
     download_visible: bool,
-    filters_active: bool,
 }
 
 /// Makes `index` the active tab and remembers its category.
@@ -1029,25 +989,32 @@ fn selected_action(inner: &Rc<RefCell<Inner>>, hook: impl Fn(&Nav) -> Rc<dyn Fn(
     render(inner);
 }
 
-/// Marks every selected entry, clears the selection once the writes are done (E-35) and reports a partial failure.
-fn mark(inner: &Rc<RefCell<Inner>>, read: bool) {
-    let (db, kind, ids) = {
+/// Marks every item of the entries `ids` read (or unread), reports a partial failure and reloads.
+fn mark(inner: &Rc<RefCell<Inner>>, ids: &[i64], read: bool) {
+    let (db, kind) = {
         let st = inner.borrow();
-        (st.deps.db.clone(), st.deps.kind, st.selection.ids().to_vec())
+        (st.deps.db.clone(), st.deps.kind)
     };
-    let ok = actions::mark_many(&db, kind, &ids, read);
-    inner.borrow_mut().selection.clear();
+    let ok = actions::mark_many(&db, kind, ids, read);
     if let Some(text) = actions::partial_failure_toast(ok, ids.len()) {
         crate::library::toast::notify(text);
     }
-    render(inner);
     submit(inner);
 }
 
-fn open_categories(inner: &Rc<RefCell<Inner>>) {
-    let (svc, entries, edit) = {
+/// Marks every selected entry and clears the selection once the writes are done (E-35).
+fn mark_selected(inner: &Rc<RefCell<Inner>>, read: bool) {
+    let ids = inner.borrow().selection.ids().to_vec();
+    mark(inner, &ids, read);
+    inner.borrow_mut().selection.clear();
+    render(inner);
+}
+
+/// The categories dialog for `entries`. `clear_selection`: the entries are the selection, which ends on OK.
+fn open_categories(inner: &Rc<RefCell<Inner>>, entries: Vec<i64>, clear_selection: bool) {
+    let (svc, edit) = {
         let st = inner.borrow();
-        (st.deps.categories.clone(), st.selection.ids().to_vec(), st.nav.edit_categories.clone())
+        (st.deps.categories.clone(), st.nav.edit_categories.clone())
     };
     let categories = match svc.repo().visible() {
         Ok(categories) => categories,
@@ -1070,8 +1037,10 @@ fn open_categories(inner: &Rc<RefCell<Inner>>) {
     let weak = Rc::downgrade(inner);
     let on_confirm = move |include: Vec<i64>, exclude: Vec<i64>| {
         let Some(inner) = weak.upgrade() else { return };
-        inner.borrow_mut().selection.clear();
-        render(&inner);
+        if clear_selection {
+            inner.borrow_mut().selection.clear();
+            render(&inner);
+        }
         let svc = svc.clone();
         let entries = entries.clone();
         let weak = Rc::downgrade(&inner);
@@ -1089,8 +1058,8 @@ fn open_categories(inner: &Rc<RefCell<Inner>>) {
     dialog::show(dialog, on_confirm, move || edit());
 }
 
-/// Builds one cell of the grid: the global search row, or the card of an entry. On a card, a click opens, toggles
-/// or selects a range (`keys::press`); a long press selects a range (Android parity).
+/// Builds one cell of the grid: the global search row, or the card of an entry. On a card, a primary click opens,
+/// toggles or selects a range (`keys::press`); a right click (a long press on a touch screen) opens its menu.
 fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
     let Some(inner) = weak.upgrade() else { return };
     let Some(boxed) = list_item.item().and_then(|o| o.downcast::<glib::BoxedAnyObject>().ok()) else { return };
@@ -1142,23 +1111,16 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
     };
     list_item.set_child(Some(&card.root));
 
-    // the action runs on release, so a long press can claim the sequence first and the release then does nothing
-    let long_pressed = Rc::new(FlagCell::new(false));
+    // the action runs on release, so the menu's touch long press can claim the sequence first
     let click = gtk::GestureClick::new();
-    click.set_button(0);
+    click.set_button(gdk::BUTTON_PRIMARY);
     let row: LibraryRow = item.row.clone();
-    let flag = long_pressed.clone();
-    click.connect_pressed(move |_, _, _, _| flag.set(false));
-    let (weak_click, flag, click_row) = (weak.clone(), long_pressed.clone(), row.clone());
+    let (weak_click, click_row) = (weak.clone(), row.clone());
     click.connect_released(move |gesture, _, _, _| {
         let Some(inner) = weak_click.upgrade() else { return };
-        if flag.replace(false) {
-            return;
-        }
         let modifiers = gesture.current_event_state();
         let selecting = !inner.borrow().selection.is_empty();
         let action = keys::press(
-            gesture.current_button(),
             modifiers.contains(gdk::ModifierType::SHIFT_MASK),
             modifiers.contains(gdk::ModifierType::CONTROL_MASK),
             selecting,
@@ -1173,16 +1135,8 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
         }
     });
     card.root.add_controller(click);
-
-    let long = gtk::GestureLongPress::new();
-    long.set_touch_only(true);
-    let (weak_long, long_row) = (weak.clone(), row.clone());
-    long.connect_pressed(move |_, _, _| {
-        let Some(inner) = weak_long.upgrade() else { return };
-        long_pressed.set(true);
-        select_with(&inner, |sel, page| sel.toggle_range(&long_row, page));
-    });
-    card.root.add_controller(long);
+    let weak_menu = weak.clone();
+    context_menu::attach(&card.root, move |_, _| cover_menu(&weak_menu, &row));
 
     if let Some(button) = card.continue_button {
         let weak_resume = weak.clone();
@@ -1223,50 +1177,38 @@ fn cover_art(st: &Inner, item: &LibraryItem) -> Option<ArtRef> {
     Some(ArtRef { owner, entry_id: item.row.id, source_id: source, kind: ArtKind::Cover, url: url.filter(|u| !u.is_empty()), favorite, last_modified })
 }
 
-/// The settings sheet over the active page. The sort tab writes through `CategoryService::set_sort_mode`, which
-/// draws a new Random seed itself; the library reloads when the write is done.
-fn open_settings(inner: &Rc<RefCell<Inner>>, tab: sheet::Tab) {
-    let (kind, prefs, categories, has_tracker, category, current_sort, downloaded_only, trackers) = {
-        let st = inner.borrow();
-        let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(&st)));
-        let categorized = diet::LIBRARY_CATEGORISED_DISPLAY;
-        let category = page.map(|p| p.category.id).filter(|_| categorized);
-        let current_sort = match page {
-            Some(p) if categorized => p.category.sort(st.deps.kind),
-            _ => st.deps.categories.global_sort(),
-        };
-        (
-            st.deps.kind,
-            st.deps.prefs.clone(),
-            st.deps.categories.clone(),
-            !(st.deps.logged_in)().is_empty(),
-            category,
-            current_sort,
-            (st.deps.downloaded_only)(),
-            (st.deps.tracker_names)(),
-        )
-    };
-    let weak = Rc::downgrade(inner);
-    let set_sort: Rc<dyn Fn(LibrarySort)> = Rc::new(move |sort| {
-        let (categories, weak) = (categories.clone(), weak.clone());
-        glib::spawn_future_local(async move {
-            if let Err(e) = categories.set_sort_mode(category, sort, kuro_domain::library::order::new_seed).await {
-                tracing::error!(error = %e, "saving the library sort failed");
-            }
-            if let Some(inner) = weak.upgrade() {
-                submit(&inner);
-            }
-        });
-    });
-    // a filter write reloads the page; the sheet may already be gone, so the reload goes through a weak handle
-    let weak_filter = Rc::downgrade(inner);
-    let on_change: Rc<dyn Fn()> = Rc::new(move || {
-        if let Some(inner) = weak_filter.upgrade() {
-            submit(&inner);
-        }
-    });
-    let filter_tab = filter_tab::build(kind, prefs.clone(), downloaded_only, &trackers, on_change);
-    sheet::show(sheet::Ctx { kind, prefs, has_tracker, current_sort, set_sort, filter_tab }, tab);
+/// The right-click menu of one cover (`actions::cover_menu`). Each item acts on this entry only and leaves any
+/// selection as it is; the items run on idle after the menu closed, so no borrow of the view is held.
+fn cover_menu(weak: &Weak<RefCell<Inner>>, row: &LibraryRow) -> Vec<Item> {
+    let Some(inner) = weak.upgrade() else { return Vec::new() };
+    let kind = inner.borrow().deps.kind;
+    let id = row.id;
+    actions::cover_menu(kind, row.is_local())
+        .into_iter()
+        .map(|(action, label, section)| {
+            let weak = weak.clone();
+            Item::new(label, section, move || {
+                let Some(inner) = weak.upgrade() else { return };
+                match action {
+                    actions::CoverAction::Open => {
+                        let open = inner.borrow().nav.open.clone();
+                        open(id);
+                    }
+                    actions::CoverAction::MarkAllViewed => mark(&inner, &[id], true),
+                    actions::CoverAction::DownloadUnviewed => {
+                        let download = inner.borrow().nav.download.clone();
+                        download(vec![id], actions::DownloadAmount::Unviewed);
+                    }
+                    actions::CoverAction::ChangeCategories => open_categories(&inner, vec![id], false),
+                    // the remove dialog is the confirmation
+                    actions::CoverAction::Remove => {
+                        let delete = inner.borrow().nav.delete.clone();
+                        delete(vec![id]);
+                    }
+                }
+            })
+        })
+        .collect()
 }
 
 /// The continue button: opens the entry's next item, in the external player when the preference is on, or says
@@ -1339,7 +1281,6 @@ fn test_view_of(kind: EntryKind, nav: Nav) -> (tempfile::TempDir, LibraryView) {
         },
         downloaded_only: Rc::new(|| false),
         logged_in: Rc::new(BTreeSet::new),
-        tracker_names: Rc::new(Vec::new),
         always_external: Rc::new(|| false),
         item_downloaded: Rc::new(|_| false),
     };
@@ -1432,6 +1373,18 @@ mod tests {
 
             // Escape typed in the header's search entry arrives as stop-search and clears the query
             view.controls().0.emit_by_name::<()>("stop-search", &[]);
+
+            // the view options write at once and the dot follows the filter
+            let options = inner.borrow().options.clone();
+            options.group().activate_action("unseen", None);
+            assert_eq!(inner.borrow().deps.prefs.filter_unread.get(), kuro_prefs::tristate::TriState::ENABLED_IS);
+            assert!(pump_until(|| options.dot_visible()), "the dot shows while a Show only filter is on");
+            options.group().activate_action("unseen", None);
+            assert_eq!(inner.borrow().deps.prefs.filter_unread.get(), kuro_prefs::tristate::TriState::DISABLED);
+            assert!(pump_until(|| !options.dot_visible()), "and hides once it is off");
+            options.group().activate_action("mode", Some(&"list".to_variant()));
+            assert_eq!(inner.borrow().deps.prefs.display_mode.get(), kuro_prefs::library::LibraryDisplayMode::List);
+            assert!(pump_until(|| is_list_mode(&inner.borrow()) && inner.borrow().scroller.child() == Some(inner.borrow().list.clone().upcast::<gtk::Widget>())), "List mode shows the list");
             assert_eq!(inner.borrow().search.text().as_str(), "");
             assert!(pump_until(|| inner.borrow().query.is_none()), "clearing the box clears the query");
         });

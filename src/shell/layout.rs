@@ -35,7 +35,7 @@ pub struct Visibility {
 }
 
 /// Visibility of both chrome elements. The reader and the player are immersive: both hide. The bottom bar also hides
-/// on the tab moved into More (`bar_allowed`, from `tabs::bar_visible`).
+/// while a page is pushed over the tab pages (`bar_allowed` is false then).
 pub fn visibility(chrome: Chrome, immersive: bool, bar_allowed: bool) -> Visibility {
     if immersive {
         return Visibility { sidebar: false, bottom_bar: false };
@@ -77,7 +77,7 @@ mod tests {
     }
 
     #[test]
-    fn bottom_bar_hides_on_the_more_tab_and_the_sidebar_stays() {
+    fn bottom_bar_hides_over_a_pushed_page_and_the_sidebar_stays() {
         assert_eq!(visibility(Chrome::BottomBar, false, false), Visibility { sidebar: false, bottom_bar: false });
         assert_eq!(visibility(Chrome::BottomBar, false, true), Visibility { sidebar: false, bottom_bar: true });
         assert_eq!(visibility(Chrome::Sidebar, false, false), Visibility { sidebar: true, bottom_bar: false });

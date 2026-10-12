@@ -1169,6 +1169,26 @@ mod run_tests {
     }
 
     #[tokio::test]
+    async fn a_source_that_is_not_installed_deletes_through_the_folder_the_index_knows() {
+        let env = setup();
+        let manga_dir = env.root.join("Gone Source (EN)").join("Berserk");
+        std::fs::create_dir_all(manga_dir.join("Chapter 1")).unwrap();
+        std::fs::create_dir_all(manga_dir.join("Chapter 2")).unwrap();
+        env.mgr.index().add_chapter(1, "Gone Source (EN)", "Berserk", "Chapter 1");
+        env.mgr.index().add_chapter(1, "Gone Source (EN)", "Berserk", "Chapter 2");
+        let folder = env.mgr.index().manga_source_dir(1, "Berserk").expect("the index knows the folder");
+        let src = crate::source::FolderOnlySource { id: 1, folder };
+        let deleted = env
+            .mgr
+            .delete_chapters(vec![chapter(1, 1, "Chapter 1")], &manga_title(1), &src, &DeleteRules::default())
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1);
+        assert!(!manga_dir.join("Chapter 1").exists() && manga_dir.join("Chapter 2").is_dir());
+        assert_eq!(env.mgr.index().manga_source_dir(2, "Berserk"), None, "another source has no folder");
+    }
+
+    #[tokio::test]
     async fn delete_chapters_keeps_bookmarked_chapters_by_default() {
         let env = setup();
         let src = fake(1);

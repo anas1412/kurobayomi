@@ -69,7 +69,10 @@ impl DialogSlot {
         column.append(&buttons);
 
         let parent = anchor.upcast_ref::<gtk::Widget>().root().and_downcast::<gtk::Window>();
-        let window = gtk::Window::builder().title(&spec.title).modal(true).resizable(false).child(&column).build();
+        // the shared modal window: it has the header bar that carries the window buttons (the top bar rule)
+        let title = gtk::Label::new(Some(&spec.title));
+        let window = crate::ui::modal(title.upcast_ref::<gtk::Widget>(), &column, 360, -1);
+        window.set_title(Some(&spec.title));
         window.set_transient_for(parent.as_ref());
 
         let answered = Rc::new(Cell::new(false));

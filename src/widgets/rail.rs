@@ -1,4 +1,4 @@
-//! Sidebar geometry (T-49b-017): the numbers `src/main.rs::sidebar` applies. The sidebar always shows icon, label and
+//! Sidebar geometry (T-49b-017): the numbers `shell::sidebar` applies. The sidebar always shows icon, label and
 //! badge, with the list at the top; there is no collapsed or icon-only state (docs/design/main-window.md).
 
 /// Sidebar width in px.
@@ -32,7 +32,7 @@ mod tests {
     #[test]
     fn the_sidebar_rows_always_show_their_labels_at_the_top() {
         crate::testing::with_display(|| {
-            let sidebar = crate::sidebar(&gtk::Stack::new());
+            let sidebar = crate::shell::sidebar::build(&gtk::Stack::new());
             let mut all = vec![];
             descendants(sidebar.upcast_ref(), &mut all);
             let titles: Vec<String> = crate::ui::with_spec(|s| s.nav.iter().map(|n| n.title.clone()).collect());
@@ -43,7 +43,8 @@ mod tests {
             }
             let list = all.iter().find_map(|w| w.downcast_ref::<gtk::ListBox>().cloned()).expect("the nav list");
             assert_eq!(list.valign(), gtk::Align::Start, "the nav list sits at the top");
-            assert!(all.iter().all(|w| !w.is::<gtk::ToggleButton>()), "no collapse toggle");
+            // the app menu's button is the only toggle (inside the menu button)
+            assert!(all.iter().all(|w| !w.is::<gtk::ToggleButton>() || w.parent().is_some_and(|p| p.is::<gtk::MenuButton>())), "no collapse toggle");
             assert_eq!(sidebar.width_request(), WIDTH);
         });
     }

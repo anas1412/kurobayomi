@@ -45,23 +45,6 @@ pub fn fab_expanded(first_visible: usize, first_offset: i32, last_scrolled_backw
     (first_visible == 0 && first_offset == 0) || last_scrolled_backward || !can_scroll_forward
 }
 
-/// The opacity of the title and of the header bar background in the narrow layout (T-39a-036, upstream `AnimeScreen.kt`
-/// 385-389): the title is opaque once the first item has scrolled out of view; the background is opaque when the first item
-/// is not visible or the list has scrolled. The two-pane layout is always opaque.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct HeaderFade {
-    pub title: f64,
-    pub background: f64,
-}
-
-pub fn header_fade(narrow: bool, first_visible: bool, scrolled: bool) -> HeaderFade {
-    let alpha = |opaque: bool| if opaque { 1.0 } else { 0.0 };
-    HeaderFade {
-        title: alpha(!narrow || !first_visible),
-        background: alpha(!narrow || !first_visible || scrolled),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,20 +77,5 @@ mod tests {
         assert!(fab_expanded(3, 0, true, true));
         assert!(fab_expanded(3, 0, false, false));
         assert!(!fab_expanded(3, 0, false, true));
-    }
-
-    #[test]
-    fn the_narrow_header_fades_in_as_the_first_item_scrolls_away() {
-        let top = header_fade(true, true, false);
-        assert_eq!((top.title, top.background), (0.0, 0.0));
-        let nudged = header_fade(true, true, true);
-        assert_eq!((nudged.title, nudged.background), (0.0, 1.0), "the background shows on any scroll, the title waits");
-        let away = header_fade(true, false, true);
-        assert_eq!((away.title, away.background), (1.0, 1.0));
-    }
-
-    #[test]
-    fn the_two_pane_header_is_always_opaque() {
-        assert_eq!(header_fade(false, true, false), HeaderFade { title: 1.0, background: 1.0 });
     }
 }

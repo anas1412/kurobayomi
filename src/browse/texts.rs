@@ -15,10 +15,16 @@ pub const MIGRATE_SOURCES_EMPTY: &str = "No source has favorites to migrate";
 /// `migrate_tracks_always`: the dim line under the migrate options. Tracking data is copied whatever is ticked (T-40a-045).
 pub const MIGRATE_TRACKS_ALWAYS: &str = "Tracking data is always transferred.";
 
-/// `migration_failed`: the inline error of a failed anime migration (T-41a-035, a Proposal over Aniyomi's silent path).
+/// `migration_failed`: the inline error of a failed migration (T-41a-035, a Proposal over Aniyomi's silent path).
 pub fn migration_failed(reason: &str) -> String {
     format!("Migration failed: {reason}")
 }
+
+/// `action_open`: the first item of a cover's or a source's right-click menu.
+pub const OPEN: &str = "Open";
+
+/// `action_open_website`: a source row's right-click item that opens the source's site in the browser.
+pub const OPEN_WEBSITE: &str = "Open website";
 
 /// The migrate tab's help action (T-41b-040, help URLs of `p2-data-and-config.md` section 5).
 pub const SOURCE_MIGRATION_HELP_URL: &str = "https://aniyomi.org/help/guides/source-migration/";

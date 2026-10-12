@@ -183,8 +183,6 @@ pub enum StoreCmd {
     FetchAll { manga_id: i64, manual: bool },
     /// One masked UPDATE of `mangas.chapter_flags`.
     SetFlagBits { manga_id: i64, flag: i64, mask: i64 },
-    /// Sort by `mode`, or flip the direction when `mode` is the stored key. Decided inside the write transaction.
-    SortBy { manga_id: i64, mode: i64 },
     MarkRead {
         manga_id: i64,
         chapter_ids: Vec<i64>,
@@ -215,8 +213,9 @@ pub enum StoreCmd {
     DeleteDownloads { manga_id: i64, chapter_ids: Vec<i64> },
     /// Writes the library's default chapter flags to this manga (the Reset item of the settings sheet).
     ResetFlags { manga_id: i64 },
-    /// The custom cover was edited or deleted: `cover_last_modified` moves forward (T-38a-038).
-    BumpCover { manga_id: i64 },
+    /// Reads the tracking count again, after the tracking page bound, edited or removed a tracker. Answered by
+    /// `StoreEvent::Tracking`.
+    ReadTracking { manga_id: i64, source_id: i64 },
     /// Drops the subscriptions and stops the runner. Detached writes keep running.
     Shutdown,
 }
@@ -262,6 +261,8 @@ pub enum StoreEvent {
     Queued,
     /// The available scanlators or the excluded ones changed (`watch_available`, `watch_excluded`).
     Scanlators { available: Vec<String>, excluded: BTreeSet<String> },
+    /// The tracking count and the logged-in flag, read again (`StoreCmd::ReadTracking`).
+    Tracking { count: i64, logged_in: bool },
 }
 
 /// A single slot that keeps only the newest value. A producer `put`s, the consumer `take`s, and an older value is
@@ -457,8 +458,8 @@ mod tests {
         let LoadState::Ready(mut state) = loaded.state else {
             panic!("expected Ready")
         };
-        state.dialog.open(Dialog::FullCover);
-        assert_eq!(state.dialog.current(), Some(&Dialog::FullCover));
+        state.dialog.open(Dialog::TrackSheet);
+        assert_eq!(state.dialog.current(), Some(&Dialog::TrackSheet));
     }
 
     #[test]

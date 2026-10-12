@@ -9,7 +9,7 @@ use std::sync::Arc;
 use kuro_downloads::index::DownloadIndex;
 use kuro_platform::notifier::Notifier;
 use kuro_platform::paths::Paths;
-use kuro_prefs::ui::{NavStyle, StartScreen};
+use kuro_prefs::ui::StartScreen;
 
 use super::argv::LaunchRequest;
 use super::bootstrap::Bootstrap;
@@ -21,7 +21,10 @@ pub struct Shell {
     runtime: tokio::runtime::Handle,
     boot: RefCell<Bootstrap<LaunchRequest>>,
     home: RefCell<Option<Rc<RefCell<HomeTabs>>>>,
-    downloads: DownloadIndex,
+    /// The manga download index, opened on first use (the storage location is a preference, read once the data is open).
+    downloads: OnceCell<DownloadIndex>,
+    /// Where the index keeps its snapshot.
+    index_cache: std::path::PathBuf,
     /// The running download managers, once [`Shell::start_downloads`] has started them.
     downloads_started: RefCell<Option<crate::downloads::Started>>,
 }
@@ -36,16 +39,16 @@ impl Shell {
     pub fn install(runtime: tokio::runtime::Handle, paths: &dyn Paths) -> Rc<Shell> {
         SHELL.with(|cell| {
             cell.get_or_init(|| {
-                let cache = paths.download_index_cache_dir();
-                if let Err(e) = std::fs::create_dir_all(&cache) {
+                let index_cache = paths.download_index_cache_dir();
+                if let Err(e) = std::fs::create_dir_all(&index_cache) {
                     tracing::warn!("the download index snapshot folder was not created: {e}");
                 }
-                let downloads = DownloadIndex::open(paths.default_downloads_dir(), &cache);
                 Rc::new(Shell {
                     runtime,
                     boot: RefCell::new(Bootstrap::new()),
                     home: RefCell::new(None),
-                    downloads,
+                    downloads: OnceCell::new(),
+                    index_cache,
                     downloads_started: RefCell::new(None),
                 })
             })
@@ -73,9 +76,24 @@ impl Shell {
         &self.runtime
     }
 
-    /// The download index, for the indexing banner and the downloaded-only filters.
+    /// The manga download index, for the indexing banner and the downloaded-only filters. It is opened on the first call,
+    /// over the manga downloads folder of the storage location; call it after the data is open. It rescans after each
+    /// load of the repository sources, so their downloads are recognised.
     pub fn downloads(&self) -> &DownloadIndex {
-        &self.downloads
+        self.downloads.get_or_init(|| {
+            let storage = crate::settings_ui::storage::manager(crate::data::app().base.store())
+                .expect("main resolved the platform folders before the shell");
+            let index = DownloadIndex::open(storage.downloads_path(kuro_domain::kind::EntryKind::Manga), &self.index_cache);
+            let follower = index.clone();
+            let _entered = self.runtime.enter();
+            crate::recipe_sources::follow_loads(move || {
+                let index = follower.clone();
+                async move {
+                    index.rescan(crate::recipe_sources::ready(), || crate::recipe_sources::folder_names(kuro_domain::kind::EntryKind::Manga)).await;
+                }
+            });
+            index
+        })
     }
 
     /// A launch request arrived. `Some` means the window exists and the caller applies it now; `None` means it is
@@ -117,7 +135,7 @@ impl Shell {
             }
         };
         let app = crate::data::app();
-        match crate::downloads::start(&paths, self.downloads.clone(), Arc::clone(&app.manga_db), Arc::clone(&app.anime_db), app.base.store().clone(), notifier) {
+        match crate::downloads::start(&paths, self.downloads().clone(), Arc::clone(&app.manga_db), Arc::clone(&app.anime_db), app.base.store().clone(), notifier) {
             Ok(started) => {
                 if let Some(queue) = &started.queues.anime {
                     crate::entry_core::anime::download_backend::install_queue(queue.clone());
@@ -134,8 +152,8 @@ impl Shell {
     }
 
     /// The home tab selection. It is built once, the first time this runs, so a wide or narrow switch keeps it.
-    pub fn home_tabs(&self, start: StartScreen, style: NavStyle) -> Rc<RefCell<HomeTabs>> {
-        self.home.borrow_mut().get_or_insert_with(|| Rc::new(RefCell::new(HomeTabs::new(start, style)))).clone()
+    pub fn home_tabs(&self, start: StartScreen) -> Rc<RefCell<HomeTabs>> {
+        self.home.borrow_mut().get_or_insert_with(|| Rc::new(RefCell::new(HomeTabs::new(start)))).clone()
     }
 }
 
@@ -154,7 +172,8 @@ mod tests {
             runtime: rt.handle().clone(),
             boot: RefCell::new(Bootstrap::new()),
             home: RefCell::new(None),
-            downloads: DownloadIndex::open(dir.path(), dir.path()),
+            downloads: OnceCell::from(DownloadIndex::open(dir.path(), dir.path())),
+            index_cache: dir.path().to_path_buf(),
             downloads_started: RefCell::new(None),
         }
     }
@@ -183,10 +202,10 @@ mod tests {
     fn one_home_selection_serves_every_layout() {
         let rt = rt();
         let shell = shell(&rt);
-        let first = shell.home_tabs(StartScreen::ANIME, NavStyle::MOVE_HISTORY_TO_MORE);
+        let first = shell.home_tabs(StartScreen::ANIME);
         first.borrow_mut().select(Tab::Browse);
         // a later layout asks again, even with other prefs: it gets the same selection
-        let again = shell.home_tabs(StartScreen::MANGA, NavStyle::MOVE_BROWSE_TO_MORE);
+        let again = shell.home_tabs(StartScreen::MANGA);
         assert!(Rc::ptr_eq(&first, &again));
         assert_eq!(again.borrow().current(), Tab::Browse);
     }

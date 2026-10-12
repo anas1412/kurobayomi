@@ -47,7 +47,8 @@ mod tests {
             config: base.join("config"),
             cache: base.join("cache"),
             state: base.join("state"),
-            videos: base.join("Videos"),
+            home: base.join("home"),
+            downloads: base.join("home/Downloads"),
         })
     }
 

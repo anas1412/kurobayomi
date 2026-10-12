@@ -9,9 +9,9 @@ use std::sync::Arc;
 use chrono::Local;
 use kuro_backup::auto::{AutoConfig, AutoHost, PowerState, run_loop};
 use kuro_backup::error::BackupError;
-use kuro_backup::settings::{automatic_dir_for, enabled_at_on_change, normalize_interval};
+use kuro_backup::settings::{enabled_at_on_change, normalize_interval};
 use kuro_platform::paths::Paths as _;
-use kuro_prefs::backup::{BackupPrefs, StoragePrefs};
+use kuro_prefs::backup::BackupPrefs;
 use tokio::sync::watch;
 
 use crate::backup_run::{CliHost, ENABLED_AT_KEY, Library, power_state};
@@ -65,12 +65,20 @@ pub fn start(app: &gtk::Application) {
     let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return };
     let state = crate::data::app();
     let store = state.base.store().clone();
-    let (backup, storage) = (BackupPrefs::new(store.clone()), StoragePrefs::new(store.clone()));
-    let base = crate::settings_ui::storage::decode(&storage.base_storage_directory.get());
+    let backup = BackupPrefs::new(store.clone());
+    // the backups folder of the storage location, resolved once: a new location applies after a restart
+    let auto_dir = match crate::settings_ui::storage::manager(&store).map(|storage| storage.backups_dir()) {
+        Some(Ok(dir)) => dir,
+        Some(Err(e)) => {
+            tracing::error!("automatic backups are off: the backups folder is not available: {e}");
+            return;
+        }
+        None => return,
+    };
     let library = Library { prefs: store, manga: state.manga_db.clone(), anime: state.anime_db.clone(), extensions_dir: paths.extensions_dir() };
     let host = CliHost {
         library,
-        auto_dir: automatic_dir_for(base.as_deref(), &paths),
+        auto_dir,
         now_ms: Box::new(|| Local::now().timestamp_millis()),
         power: power_state(),
     };

@@ -161,16 +161,7 @@ fn favourites(kind: BrowseKind, source_id: i64) -> Result<Vec<MigrateEntry>, Str
 
 /// The source of a route: the installed one, or a stub.
 fn source_of(kind: BrowseKind, source_id: i64) -> Source {
-    use kuro_data::anime::AnimeRepo;
-    use kuro_domain::kind::EntryKind;
-
-    match kind {
-        BrowseKind::Manga => source_or_stub(super::directory::current().as_deref(), source_id),
-        BrowseKind::Anime => {
-            let directory = super::anime::directory::AnimeDirectory::current(AnimeRepo::new(crate::data::app().db(EntryKind::Anime)));
-            source_or_stub(Some(&directory), source_id)
-        }
-    }
+    source_or_stub(Some(&*super::directory::current(kind)), source_id)
 }
 
 /// The page for the parked `MigrateEntries` route, as `screens::build` asks for it. `None` leaves the screen to its sample
@@ -188,13 +179,7 @@ pub fn page() -> Option<gtk::Box> {
         open_search: Rc::new(move |entry_id, title| {
             crate::entry_core::handoff::open_migrate(crate::entry_core::handoff::MigrateRequest { entry_id, anime, title: title.to_owned() });
         }),
-        open_entry: Rc::new(move |id| {
-            if anime {
-                crate::entry_core::anime::route::open(id);
-            } else {
-                crate::entry_core::route::open(id);
-            }
-        }),
+        open_entry: Rc::new(move |id| super::browse_screen::open_entry(kind, id)),
     };
     let view = MigrateEntriesView::new(env);
     load(&view, Arc::new(move || favourites(kind, source_id)));

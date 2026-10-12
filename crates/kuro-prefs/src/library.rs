@@ -22,10 +22,6 @@ define_prefs! {
         anime_sorting_mode: SortSetting<true> = "animelib_sorting_mode" => SortSetting("ALPHABETICAL,ASCENDING".to_owned());
         last_updated_timestamp: i64 = "__APP_STATE_library_update_last_timestamp" => 0;
         auto_update_interval: i32 = "pref_library_update_interval_key" => 0;
-        download_badge: bool = "display_download_badge" => false;
-        unread_badge: bool = "display_unread_badge" => true;
-        anime_landscape_columns: i32 = "pref_animelib_columns_landscape_key" => 0;
-        manga_landscape_columns: i32 = "pref_library_columns_landscape_key" => 0;
         filter_downloaded_anime: TriState = "pref_filter_animelib_downloaded_v2" => TriState::DISABLED;
         filter_downloaded_manga: TriState = "pref_filter_library_downloaded_v2" => TriState::DISABLED;
         filter_unseen: TriState = "pref_filter_animelib_unread_v2" => TriState::DISABLED;
@@ -248,17 +244,13 @@ mod tests {
     fn every_field_is_registered_under_the_library_table() {
         let lib = LibraryPrefs::new(PrefStore::in_memory());
         assert_eq!(LibraryPrefs::TABLE, "library");
-        assert_eq!(LibraryPrefs::FIELDS.len(), 21, "the settings diet kept 21 keys here, plus the tracked-filter families");
+        assert_eq!(LibraryPrefs::FIELDS.len(), 17, "the settings diet kept 17 keys here, plus the tracked-filter families");
         assert_section_registered(LibraryPrefs::TABLE, LibraryPrefs::FIELDS, &lib.defaults());
     }
 
     #[test]
     fn defaults_match_the_registry() {
         let lib = LibraryPrefs::new(PrefStore::in_memory());
-        assert!(!lib.download_badge.get());
-        assert!(lib.unread_badge.get());
-        assert_eq!(lib.anime_landscape_columns.get(), 0);
-        assert_eq!(lib.manga_landscape_columns.get(), 0);
         assert_eq!(lib.auto_update_interval.get(), 0);
         assert_eq!(lib.new_manga_updates_count.get(), 0);
         assert_eq!(lib.new_anime_updates_count.get(), 0);

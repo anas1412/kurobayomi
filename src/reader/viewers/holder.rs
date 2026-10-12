@@ -222,6 +222,9 @@ impl Image {
         status.add_css_class("background");
         status.set_hexpand(true);
         status.set_vexpand(true);
+        // a vertical box packs a non-expanding child at the top: the indicator must expand to be centred
+        indicator.widget().set_hexpand(true);
+        indicator.widget().set_vexpand(true);
         status.append(indicator.widget());
         stack.add_named(&status, Some("status"));
 
@@ -536,18 +539,25 @@ impl TransitionCard {
     pub fn new(host: &PageHost) -> Rc<Self> {
         let metrics: Metrics = if host.is_webtoon { transition::WEBTOON_METRICS } else { transition::PAGER_METRICS };
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.set_halign(gtk::Align::Center);
-        root.set_valign(gtk::Align::Center);
+        // the root fills its slot and the card sits centred in it, both ways
+        root.set_halign(gtk::Align::Fill);
+        root.set_valign(gtk::Align::Fill);
         root.set_margin_start(metrics.side);
         root.set_margin_end(metrics.side);
         root.set_margin_top(metrics.top);
         root.set_margin_bottom(metrics.bottom);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.set_halign(gtk::Align::Center);
+        content.set_valign(gtk::Align::Center);
+        content.set_hexpand(true);
+        content.set_vexpand(true);
         let card_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let status_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         status_slot.set_margin_top(metrics.status_margin);
         status_slot.set_margin_bottom(metrics.status_margin);
-        root.append(&card_slot);
-        root.append(&status_slot);
+        content.append(&card_slot);
+        content.append(&status_slot);
+        root.append(&content);
         Rc::new(Self {
             root,
             card_slot,

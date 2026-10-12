@@ -183,9 +183,13 @@ pub fn open(id: &str) {
         return;
     }
     if with_spec(|s| s.nav.iter().any(|n| n.id == id)) {
-        // sidebar destinations switch tabs instead of stacking a second copy
+        // sidebar destinations switch tabs instead of stacking a second copy; a hidden page (Downloads with an empty
+        // queue) shows while it is open
         pop_to_root();
         if let Some(tabs) = nav().0.first_child().and_downcast::<gtk::Stack>() {
+            if let Some(page) = tabs.child_by_name(id) {
+                page.set_visible(true);
+            }
             tabs.set_visible_child_name(id);
         }
         return;
@@ -215,7 +219,7 @@ pub fn opened_during(body: impl FnOnce()) -> Vec<String> {
 
 // ---------- layout helpers ----------
 
-/// The widest a list page's column gets (settings pages, More, the boxed lists); wider windows centre it.
+/// The widest a list page's column gets (settings pages, the boxed lists); wider windows centre it.
 pub const PAGE_WIDTH: i32 = 720;
 /// The widest a header search entry gets.
 pub const SEARCH_WIDTH: i32 = 420;
@@ -363,11 +367,7 @@ pub fn menu_button(icon: &str, entries: &[String], on: impl Fn(&str) + Clone + '
 
 pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
     Some(match item {
-        Item::Switch { title, subtitle, default } => {
-            // the More screen's two switches are the real preferences (T-01a-020)
-            let pref = crate::data::is_installed().then(|| more_switch_pref(&crate::data::app().base, title, subtitle.as_deref())).flatten();
-            switch_item_row(title, subtitle.as_deref(), default.as_bool().unwrap_or(false), pref)
-        }
+        Item::Switch { title, subtitle, default } => switch_item_row(title, subtitle.as_deref(), default.as_bool().unwrap_or(false)),
         Item::List { title, subtitle, options, default } => {
             let opts: Vec<&str> = options.iter().map(String::as_str).collect();
             let d = gtk::DropDown::from_strings(&opts);
@@ -495,26 +495,14 @@ pub fn item_row(item: &Item) -> Option<gtk::ListBoxRow> {
     })
 }
 
-/// A switch row; a click or Enter flips the switch. With `pref` the switch shows and writes that preference.
-fn switch_item_row(title: &str, subtitle: Option<&str>, default: bool, pref: Option<kuro_prefs::pref::Pref<bool>>) -> gtk::ListBoxRow {
+/// A switch row; a click or Enter flips the switch.
+fn switch_item_row(title: &str, subtitle: Option<&str>, default: bool) -> gtk::ListBoxRow {
     let s = gtk::Switch::new();
     s.set_active(default);
-    if let Some(pref) = pref {
-        crate::incognito::bind_switch(&s, pref);
-    }
     let r = row(title, subtitle, Some(s.clone().upcast()));
     r.set_activatable(true);
     crate::widgets::row_activate::on_activate(&r, move |_| s.set_active(!s.is_active()));
     r
-}
-
-/// The preference behind a More-screen switch row, picked by its spec title and subtitle.
-fn more_switch_pref(base: &kuro_prefs::base::BasePrefs, title: &str, subtitle: Option<&str>) -> Option<kuro_prefs::pref::Pref<bool>> {
-    match (title, subtitle?) {
-        ("Incognito mode", "Pauses your history") => Some(base.incognito_mode.clone()),
-        ("Downloaded only", "Filters all entries in your library") => Some(base.downloaded_only.clone()),
-        _ => None,
-    }
 }
 
 fn scrolled_max(child: &impl IsA<gtk::Widget>, h: i32) -> gtk::ScrolledWindow {
@@ -748,53 +736,6 @@ mod tests {
             let header = p.first_child().and_downcast::<gtk::HeaderBar>().expect("the header row");
             assert!(search.is_ancestor(&header.title_widget().expect("the middle")), "the entry is the title widget");
             assert!(!labels(header.upcast_ref()).iter().any(|l| l == "Search settings"), "no title beside the search");
-        });
-    }
-
-    #[test]
-    fn more_shows_three_lists_of_rows_with_icons_and_no_logo_or_title() {
-        crate::testing::with_display(|| {
-            let built = crate::screens::body("more").expect("the More page");
-            let mut found = Vec::new();
-            all(&built.content, &mut found);
-            let lists: Vec<&ListBox> = found.iter().filter_map(|w| w.downcast_ref::<ListBox>()).collect();
-            assert_eq!(lists.len(), 3);
-            assert!(lists.iter().all(|l| l.has_css_class("boxed-list")));
-            let rows: Vec<&gtk::ListBoxRow> = found.iter().filter_map(|w| w.downcast_ref::<gtk::ListBoxRow>()).collect();
-            assert_eq!(rows.len(), 10, "2 switches, 4 library rows, 4 settings and help rows");
-            for row in rows {
-                let first = row.child().and_then(|c| c.first_child());
-                assert!(first.is_some_and(|w| w.is::<gtk::Image>()), "every row starts with its icon");
-            }
-            let texts = labels(&built.content);
-            for gone in ["More", "Kurobayomi", "History"] {
-                assert!(!texts.iter().any(|l| l == gone), "{gone} is not on the page");
-            }
-            assert!(texts.iter().any(|l| l == "Help"));
-        });
-    }
-
-    #[test]
-    fn the_more_switches_write_their_preference_and_flip_once_per_click_or_key() {
-        crate::testing::with_display(|| {
-            let base = kuro_prefs::base::BasePrefs::new(kuro_prefs::store::PrefStore::in_memory());
-            let mut seen = Vec::new();
-            for item in screen("more").groups.into_iter().flat_map(|g| g.items) {
-                let Item::Switch { title, subtitle, default } = item else { continue };
-                let pref = more_switch_pref(&base, &title, subtitle.as_deref()).expect("each More switch has a preference");
-                let row = switch_item_row(&title, subtitle.as_deref(), default.as_bool().unwrap_or(false), Some(pref.clone()));
-                let list = ListBox::new();
-                list.append(&row);
-                crate::widgets::row_activate::click_row(&row);
-                assert!(pref.get(), "{title}: a click turns it on");
-                row.emit_by_name::<()>("activate", &[]);
-                assert!(!pref.get(), "{title}: Enter turns it off again");
-                seen.push(title);
-            }
-            assert_eq!(seen, ["Downloaded only", "Incognito mode"]);
-            let key = |t, s| more_switch_pref(&base, t, Some(s)).map(|p| p.key().to_owned());
-            assert_eq!(key("Downloaded only", "Filters all entries in your library").as_deref(), Some(base.downloaded_only.key()));
-            assert_eq!(key("Incognito mode", "Pauses your history").as_deref(), Some(base.incognito_mode.key()));
         });
     }
 }

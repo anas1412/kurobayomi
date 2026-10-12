@@ -414,7 +414,7 @@ impl ActionHost for GtkHost {
         use kuro_platform::paths::Paths as _;
         kuro_platform::linux::LinuxPaths::system()
             .map(|p| {
-                let mut roots = vec![p.data_dir(), p.default_downloads_dir(), p.cache_dir()];
+                let mut roots = vec![p.data_dir(), p.user_downloads_dir(), p.default_storage_dir(), p.cache_dir()];
                 roots.extend(crate::misc::reveal::announced_folders());
                 roots
             })

@@ -47,13 +47,15 @@ pub const READER_INVERTED_COLOURS: bool = false;
 pub const READER_CUSTOM_BRIGHTNESS: bool = false;
 
 // Library and its update jobs.
+pub const LIBRARY_DOWNLOAD_BADGE: bool = false;
+pub const LIBRARY_UNREAD_BADGE: bool = true;
 pub const LIBRARY_LOCAL_BADGE: bool = true;
 pub const LIBRARY_LANGUAGE_BADGE: bool = false;
 pub const LIBRARY_CONTINUE_BUTTON: bool = false;
 pub const LIBRARY_CATEGORY_TABS: bool = true;
 pub const LIBRARY_ITEM_COUNT: bool = false;
-/// Grid columns of a narrow window: 0 is automatic.
-pub const LIBRARY_PORTRAIT_COLUMNS: i32 = 0;
+/// Grid columns of the library and the source grids, at every window width: 0 is automatic.
+pub const LIBRARY_COLUMNS: i32 = 0;
 pub const LIBRARY_CATEGORISED_DISPLAY: bool = false;
 pub const LIBRARY_HIDE_HIDDEN_CATEGORIES: bool = false;
 pub const LIBRARY_UPDATES_COUNT: bool = true;

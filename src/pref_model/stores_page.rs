@@ -16,6 +16,7 @@ use super::stores_backend::{AddOutcome, Card, Ops};
 use super::strings;
 use super::widgets::dialog as dialog_widget;
 use crate::screens::Built;
+use crate::widgets::context_menu::Item;
 
 thread_local! {
     /// What runs after the stores or repos changed, so the available extensions are read again.
@@ -188,7 +189,6 @@ pub fn build<T: Keyed + Send + 'static>(
     texts: Texts,
     subscribe: impl FnOnce(Box<dyn Fn(Vec<T>)>),
 ) -> (Built, StoresPage<T>) {
-    super::style::install();
     let stack = gtk::Stack::new();
     let spinner_page = gtk::Spinner::builder().spinning(true).width_request(32).height_request(32).halign(gtk::Align::Center).valign(gtk::Align::Center).build();
     stack.add_named(&spinner_page, Some("loading"));
@@ -465,7 +465,33 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             }
         });
         h.append(&delete);
-        gtk::ListBoxRow::builder().child(&h).activatable(false).build()
+        let row = gtk::ListBoxRow::builder().child(&h).activatable(false).build();
+        let (weak, card) = (Rc::downgrade(self), card.clone());
+        crate::widgets::context_menu::attach(&row, move |_, _| weak.upgrade().map_or_else(Vec::new, |page| page.card_menu(&card)));
+        row
+    }
+
+    /// A card's right-click menu: Copy link, Refresh (every repository, as the header button; not while one runs) and
+    /// Remove, which asks first as the trash button does.
+    fn card_menu(self: &Rc<Self>, card: &Card) -> Vec<Item> {
+        let refreshing = matches!(&*self.state.borrow(), Page::Ready { refreshing: true, .. });
+        let text = card.copy.clone();
+        let mut items = vec![Item::new(tr(MsgKey::action_copy_link), 0, move || copy_to_clipboard(&text))];
+        if !refreshing {
+            let weak = Rc::downgrade(self);
+            items.push(Item::new(self.texts.refresh.clone(), 0, move || {
+                if let Some(page) = weak.upgrade() {
+                    page.dispatch(Event::Refresh);
+                }
+            }));
+        }
+        let (weak, key, name) = (Rc::downgrade(self), card.key.clone(), card.name.clone());
+        items.push(Item::new(tr(MsgKey::action_remove), 1, move || {
+            if let Some(page) = weak.upgrade() {
+                page.dispatch(Event::Open(Dialog::Remove { key: key.clone(), name: name.clone(), url: key.clone() }));
+            }
+        }));
+        items
     }
 
     /// Makes the dialog window match the state's dialog: opens it, updates it in place or closes it.

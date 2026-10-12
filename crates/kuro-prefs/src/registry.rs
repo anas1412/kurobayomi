@@ -240,10 +240,6 @@ define_prefs! {
     "animelib_sorting_mode", Normal, Str, "ALPHABETICAL,ASCENDING", "library", "anime_sorting_mode";
     "__APP_STATE_library_update_last_timestamp", AppState, Long, 0, "library", "last_updated_timestamp";
     "pref_library_update_interval_key", Normal, Int, 0, "library", "auto_update_interval";
-    "display_download_badge", Normal, Bool, false, "library", "download_badge";
-    "display_unread_badge", Normal, Bool, true, "library", "unread_badge";
-    "pref_animelib_columns_landscape_key", Normal, Int, 0, "library", "anime_landscape_columns";
-    "pref_library_columns_landscape_key", Normal, Int, 0, "library", "manga_landscape_columns";
     "pref_filter_animelib_downloaded_v2", Normal, Str, "DISABLED", "library", "filter_downloaded_anime";
     "pref_filter_library_downloaded_v2", Normal, Str, "DISABLED", "library", "filter_downloaded_manga";
     "pref_filter_animelib_unread_v2", Normal, Str, "DISABLED", "library", "filter_unseen";
@@ -289,7 +285,7 @@ define_prefs! {
 /// The registry holds no row for them, a restore skips them ([`is_dropped`]) and nothing reads them, so an old
 /// `config.toml` or an Aniyomi backup that still carries one loads and restores without it. Each key and its reason
 /// is recorded in `docs/drop-decisions.md`.
-pub const DROPPED_KEYS: [&str; 273] = [
+pub const DROPPED_KEYS: [&str; 277] = [
     "extension_installer",
     "pref_hardware_bitmap_threshold",
     "eh_enable_source_blacklist",
@@ -563,6 +559,11 @@ pub const DROPPED_KEYS: [&str; 273] = [
     "data_saver_downloader",
     "player_open_detached",
     "__APP_STATE_onboarding_complete",
+    // library badges and column count, cut after their controls went (round 5)
+    "display_download_badge",
+    "display_unread_badge",
+    "pref_animelib_columns_landscape_key",
+    "pref_library_columns_landscape_key",
 ];
 
 /// Whether `key` (as stored, without the backup prefix) belongs to a dropped feature.
@@ -662,9 +663,9 @@ mod tests {
     ];
 
     #[test]
-    fn registry_has_the_65_plan_rows_in_order() {
+    fn registry_has_the_61_plan_rows_in_order() {
         let rows = plan_rows();
-        assert_eq!(rows.len(), 65, "the plan's rows minus the derived animeext_updates_count and the dropped (cut) plan rows");
+        assert_eq!(rows.len(), 61, "the plan's rows minus the derived animeext_updates_count and the dropped (cut) plan rows");
         // two Kurobayomi rows after the plan's rows: `anime_ext_last_check` (T-19a-064) and `muted_notification_channels`
         // (T-req-platform-004)
         assert_eq!(REGISTRY.len(), rows.len() + 2);
@@ -733,8 +734,8 @@ mod tests {
 
     #[test]
     fn lookup_finds_exact_and_family_keys() {
-        let (meta, id) = lookup("display_unread_badge").unwrap();
-        assert_eq!(meta.key, "display_unread_badge");
+        let (meta, id) = lookup("crop_borders").unwrap();
+        assert_eq!(meta.key, "crop_borders");
         assert_eq!(id, None);
         let (meta, id) = lookup("pref_filter_library_tracked_7_v2").unwrap();
         assert_eq!(meta.key, "pref_filter_library_tracked_{id}_v2");

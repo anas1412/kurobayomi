@@ -169,24 +169,6 @@ mod site_tests {
         row.emit_by_name::<()>("activate", &[]);
     }
 
-    #[test]
-    fn the_more_page_links_open_their_screen_once_per_click_and_once_per_key() {
-        crate::testing::with_display(|| {
-            let page = crate::screens::build("more");
-            for (title, target) in [
-                ("Settings", "settings"),
-                ("Categories", "categories"),
-                ("Statistics", "stats"),
-                ("Data and storage", "settings_data_storage"),
-                ("About", "settings_about"),
-            ] {
-                let row = row_titled(&page, title);
-                assert_eq!(crate::ui::opened_during(|| click_row(&row)), [target], "{title}: a click");
-                assert_eq!(crate::ui::opened_during(|| keyboard(&row)), [target], "{title}: Enter or Space");
-            }
-        });
-    }
-
     /// A settings row (the shared preference row behind every settings page).
     #[test]
     fn a_settings_row_runs_its_handler_once_per_click_and_once_per_key() {
@@ -231,7 +213,10 @@ mod site_tests {
             let long = std::rc::Rc::clone(&menu);
             let icon = crate::browse::icons::resolve(false, false, false);
             let child = crate::browse::view::source_row("Source", None, icon, None, false, None);
-            let row = crate::browse::view::list_row(&child, move || seen.set(seen.get() + 1), move || long.set(long.get() + 1));
+            let row = crate::browse::view::list_row(&child, move || seen.set(seen.get() + 1), move || {
+                long.set(long.get() + 1);
+                Vec::new()
+            });
             let list = gtk::ListBox::new();
             list.append(&row);
             click_row(&row);

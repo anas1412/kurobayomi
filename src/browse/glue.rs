@@ -29,17 +29,10 @@ pub fn poll_pref_changes(checks: Vec<Box<dyn Fn() -> bool>>, alive: impl Fn() ->
     });
 }
 
-/// Opens the Categories page on its manga section (the category chooser's Edit categories, T-40b-045).
-pub fn open_manga_categories() {
+/// Opens the Categories page on the section of `kind` (the category chooser's Edit categories, T-40b-045).
+pub fn open_categories(kind: kuro_domain::kind::EntryKind) {
     let page = crate::screens::build("categories");
-    crate::settings_ui::view::show_kind(&page, crate::settings_ui::library::categories_tab(kuro_domain::kind::EntryKind::Manga));
-    crate::ui::push(&page);
-}
-
-/// Opens the Categories page on its anime section (the anime browse page's Edit categories).
-pub fn open_anime_categories() {
-    let page = crate::screens::build("categories");
-    crate::settings_ui::view::show_kind(&page, crate::settings_ui::library::categories_tab(kuro_domain::kind::EntryKind::Anime));
+    crate::settings_ui::view::show_kind(&page, crate::settings_ui::library::categories_tab(kind));
     crate::ui::push(&page);
 }
 
@@ -196,9 +189,9 @@ mod tests {
     #[test]
     fn a_new_page_request_replaces_one_that_nobody_read() {
         let channel = PageChannel::new();
-        channel.send(BrowsePage::AnimeExtensions);
-        channel.send(BrowsePage::MangaExtensions);
-        assert_eq!(channel.receiver().try_recv(), Ok(BrowsePage::MangaExtensions));
+        channel.send(BrowsePage::AnimeSources);
+        channel.send(BrowsePage::MangaSources);
+        assert_eq!(channel.receiver().try_recv(), Ok(BrowsePage::MangaSources));
         assert!(channel.receiver().try_recv().is_err(), "only the newest request was kept");
     }
 
@@ -210,15 +203,6 @@ mod tests {
         }
         assert_eq!(channel.receiver().len(), 1);
         assert_eq!(channel.receiver().try_recv(), Ok(BrowsePage::MangaMigrate));
-    }
-
-    #[test]
-    fn show_extension_after_show_anime_extension_wins_the_tab() {
-        use crate::browse::route::BrowseKind;
-        let channel = PageChannel::new();
-        channel.send(BrowsePage::extensions_of(BrowseKind::Anime));
-        channel.send(BrowsePage::extensions_of(BrowseKind::Manga));
-        assert_eq!(channel.receiver().try_recv().map(BrowsePage::index), Ok(3));
     }
 
     /// A main context of its own, so the test never shares the default one.

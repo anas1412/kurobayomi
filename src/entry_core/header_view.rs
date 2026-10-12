@@ -1,17 +1,20 @@
 //! The info header widget over `header.rs`: cover, title, author, artist, status and source. A click on a line runs
-//! its search, a right click or a long press copies it, and a stub source shows a warning icon in the error color.
+//! its search, a right click (a long press on a touch screen) opens Copy and Search for this, and a stub source shows a
+//! warning icon in the error color.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Label, Orientation as O};
+use kuro_i18n::{Arg, MsgKey, tr, trf};
 
 use crate::entry_core::action_row::{self, Tone, tone_alpha};
+use crate::entry_core::backdrop::BACKDROP_ALPHA;
 use crate::entry_core::backdrop_view;
 use crate::entry_core::header::{Field, HeaderModel, SearchRequest, cover_size};
 use crate::entry_core::cover_view::CoverView;
-use crate::entry_core::list_view::ensure_css;
+use crate::widgets::context_menu;
 
 /// Draws a button of the action row in `tone`: the primary colour at full opacity, or the foreground at 0.38 alpha.
 pub fn apply_tone(widget: &impl IsA<gtk::Widget>, tone: Tone) {
@@ -38,13 +41,15 @@ pub struct LibraryButton {
 
 impl LibraryButton {
     pub fn new() -> Self {
-        ensure_css();
         let icon = gtk::Image::new();
-        let label = Label::new(None);
-        let content = GBox::new(O::Horizontal, 8);
+        // the same shape as the row's other buttons (icon above a label that may shorten): a wider library label would
+        // widen the whole row of equal buttons, and with it the 360 px info pane
+        let label = Label::builder().ellipsize(gtk::pango::EllipsizeMode::End).max_width_chars(12).build();
+        let content = GBox::new(O::Vertical, 2);
+        content.set_halign(Align::Center);
         content.append(&icon);
         content.append(&label);
-        let button = gtk::Button::builder().child(&content).css_classes(["flat"]).halign(Align::Start).margin_start(8).margin_end(8).focus_on_click(false).build();
+        let button = gtk::Button::builder().child(&content).css_classes(["flat"]).focus_on_click(false).build();
         let this = Self { button, icon, label, content, favorite: Rc::new(Cell::new(false)) };
         this.set(false);
         this
@@ -54,7 +59,9 @@ impl LibraryButton {
         self.favorite.set(favorite);
         let shown = action_row::library(favorite);
         self.label.set_label(&kuro_i18n::tr(shown.label));
-        self.icon.set_icon_name(Some(if shown.filled { "emblem-favorite-symbolic" } else { "non-starred-symbolic" }));
+        // a star pair every stock icon theme ships (Adwaita has no emblem-favorite)
+        // the app's own heart pair (bundled), the same on every icon theme
+        self.icon.set_icon_name(Some(if shown.filled { "kb-heart-filled-symbolic" } else { "kb-heart-outline-symbolic" }));
         apply_tone(&self.content, shown.tone);
     }
 
@@ -92,41 +99,36 @@ impl LibraryButton {
 pub struct Handlers {
     pub on_search: Rc<dyn Fn(SearchRequest)>,
     pub on_copy: Rc<dyn Fn(String)>,
-    pub on_cover: Rc<dyn Fn()>,
 }
 
-/// A label that searches on click and copies on right click or long press, for the fields that have text.
+/// A label that searches on click, with the app's right-click menu (a long press on a touch screen) for the fields
+/// that have text: Copy, and Search for this across every source for the title, the author and the artist.
 fn field_label(model: &HeaderModel, field: Field, text: &str, css: &[&str], xalign: f32, h: &Handlers) -> Label {
     let label = Label::builder().label(text).xalign(xalign).wrap(true).css_classes(css.to_vec()).build();
     if let Some(request) = model.search(field) {
         label.set_cursor_from_name(Some("pointer"));
         let click = gtk::GestureClick::builder().button(1).build();
-        let (on_search, long_fired) = (Rc::clone(&h.on_search), Rc::new(Cell::new(false)));
-        let skip = Rc::clone(&long_fired);
-        click.connect_released(move |_, _, _, _| {
-            if !skip.replace(false) {
-                on_search(request.clone());
-            }
-        });
+        let on_search = Rc::clone(&h.on_search);
+        click.connect_released(move |_, _, _, _| on_search(request.clone()));
         label.add_controller(click);
-        if let Some(copy) = model.copy(field) {
-            let long = gtk::GestureLongPress::new();
-            let on_copy = Rc::clone(&h.on_copy);
-            let text = copy.clone();
-            long.connect_pressed(move |_, _, _| {
-                long_fired.set(true);
-                on_copy(text.clone());
-            });
-            label.add_controller(long);
-        }
     }
     if let Some(copy) = model.copy(field) {
-        let right = gtk::GestureClick::builder().button(3).build();
-        let on_copy = Rc::clone(&h.on_copy);
-        right.connect_pressed(move |_, _, _, _| on_copy(copy.clone()));
-        label.add_controller(right);
+        let (global, h) = (model.search(field).filter(|r| r.global), h.clone());
+        context_menu::attach(&label, move |_, _| field_menu(&copy, global.as_ref(), &h));
     }
     label
+}
+
+/// The right-click menu of a header line: Copy, then the global search when the line has one.
+fn field_menu(copy: &str, global: Option<&SearchRequest>, h: &Handlers) -> Vec<context_menu::Item> {
+    let (on_copy, text) = (Rc::clone(&h.on_copy), copy.to_owned());
+    let mut items = vec![context_menu::Item::new(tr(MsgKey::action_copy_to_clipboard), 0, move || on_copy(text.clone()))];
+    if let Some(request) = global {
+        let (on_search, request) = (Rc::clone(&h.on_search), request.clone());
+        let label = trf(MsgKey::action_global_search_query, &[("arg1", Arg::Str(&request.query))]);
+        items.push(context_menu::Item::new(label, 0, move || on_search(request.clone())));
+    }
+    items
 }
 
 fn icon_row(icon: &str, content: &impl IsA<gtk::Widget>, centered: bool) -> GBox {
@@ -137,20 +139,36 @@ fn icon_row(icon: &str, content: &impl IsA<gtk::Widget>, centered: bool) -> GBox
     row
 }
 
+/// The theme colour behind the header: `BACKDROP_ALPHA` at the top, fading out downward.
+fn fade() -> gtk::DrawingArea {
+    let area = gtk::DrawingArea::new();
+    area.set_can_target(false);
+    area.set_draw_func(|area, cr, w, h| {
+        let color = area.color();
+        let (r, g, b) = (f64::from(color.red()), f64::from(color.green()), f64::from(color.blue()));
+        let gradient = gtk::cairo::LinearGradient::new(0.0, 0.0, 0.0, f64::from(h));
+        gradient.add_color_stop_rgba(0.0, r, g, b, BACKDROP_ALPHA);
+        gradient.add_color_stop_rgba(1.0, r, g, b, 0.0);
+        let _ = cr.set_source(&gradient);
+        cr.rectangle(0.0, 0.0, f64::from(w), f64::from(h));
+        let _ = cr.fill();
+    });
+    area
+}
+
 /// Builds the header. The small layout puts the cover beside the text, the large layout puts a wider cover above
-/// centered text. `column_width` is the width of the column that holds the header.
-pub fn build(model: &HeaderModel, large: bool, column_width: i32, h: &Handlers) -> GBox {
-    let (w, ht) = cover_size(large, column_width);
+/// centered text. `column_width` is the width of the column that holds the header. The header sits inside 16 px side
+/// margins, over the backdrop: the theme colour fading out and the cover blurred behind it (T-38a-014).
+pub fn build(model: &HeaderModel, large: bool, column_width: i32, h: &Handlers) -> gtk::Overlay {
+    // the cover sits inside the header's 16 px side margins
+    let (w, ht) = cover_size(large, column_width - 32);
     let cover_view = CoverView::new(w, ht);
     if let Some(art) = &model.cover {
         cover_view.load(art.clone());
     }
+    // the cover is a plain picture: a click on it does nothing
     let cover = cover_view.frame.clone();
     cover.set_valign(Align::Start);
-    let on_cover = Rc::clone(&h.on_cover);
-    let tap = gtk::GestureClick::new();
-    tap.connect_released(move |_, _, _, _| on_cover());
-    cover.add_controller(tap);
 
     let xalign = if large { 0.5 } else { 0.0 };
     let info = GBox::new(O::Vertical, 4);
@@ -175,20 +193,22 @@ pub fn build(model: &HeaderModel, large: bool, column_width: i32, h: &Handlers) 
     info.append(&source_row);
 
     let root = GBox::new(if large { O::Vertical } else { O::Horizontal }, 16);
+    root.set_margin_start(16);
+    root.set_margin_end(16);
+    root.set_margin_top(16);
+    root.set_margin_bottom(8);
     if large {
         cover.set_halign(Align::Center);
     }
     root.append(&cover);
     root.append(&info);
-    // the cover blurred behind the header (T-38a-014): the backdrop is the main child and fills what the header measures
-    let backdrop = backdrop_view::build(model.cover.as_ref());
+    // the backdrop fills what the header measures; only the root is measured, so the header is as tall as its content
     let layered = gtk::Overlay::new();
-    layered.set_child(Some(&backdrop));
+    layered.set_child(Some(&fade()));
+    layered.add_overlay(&backdrop_view::build(model.cover.as_ref()));
     layered.add_overlay(&root);
     layered.set_measure_overlay(&root, true);
-    let outer = GBox::new(O::Vertical, 0);
-    outer.append(&layered);
-    outer
+    layered
 }
 
 #[cfg(test)]
@@ -238,5 +258,31 @@ mod tests {
             button.button.emit_clicked();
             assert_eq!(clicks.get(), 1, "a plain click runs");
         });
+    }
+
+    #[test]
+    fn a_header_line_menu_copies_and_searches_everywhere_for_the_title_and_the_author_only() {
+        let copied: Rc<std::cell::RefCell<Vec<String>>> = Rc::default();
+        let searched: Rc<std::cell::RefCell<Vec<SearchRequest>>> = Rc::default();
+        let h = Handlers {
+            on_search: Rc::new({
+                let searched = Rc::clone(&searched);
+                move |r: SearchRequest| searched.borrow_mut().push(r)
+            }),
+            on_copy: Rc::new({
+                let copied = Rc::clone(&copied);
+                move |t: String| copied.borrow_mut().push(t)
+            }),
+        };
+        let request = SearchRequest { query: "Berserk".into(), global: true, genre: false };
+        let items = field_menu("Berserk", Some(&request), &h);
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, ["Copy to clipboard", "Search for \"Berserk\" globally"]);
+        for item in &items {
+            (item.run)();
+        }
+        assert_eq!(copied.borrow().as_slice(), ["Berserk".to_owned()]);
+        assert_eq!(searched.borrow().as_slice(), [request]);
+        assert_eq!(field_menu("Source", None, &h).len(), 1, "the source line only copies");
     }
 }

@@ -68,25 +68,6 @@ pub fn apply_background(widget: &impl IsA<gtk::Widget>, theme: i32) {
     widget.add_css_class(text_class(theme, system_prefers_dark()));
 }
 
-/// The reader stylesheet: the background colours and the page indicator.
-pub fn css() -> &'static str {
-    ".reader-bg-white { background-color: #ffffff; }
-.reader-bg-black { background-color: #000000; }
-.reader-bg-gray { background-color: #202125; }
-.reader-text-light { color: #ffffff; }
-.reader-text-dark { color: #000000; }
-.reader-scrim { background-color: rgba(0, 0, 0, 0.5); }
-.reader-page-indicator { font-weight: bold; color: #ebebeb; text-shadow: 2px 2px 2px #2d2d2d; }"
-}
-
-/// Adds the reader stylesheet to the default display once. A missing display (headless tests) does nothing.
-pub fn install_css() {
-    let Some(display) = gtk::gdk::Display::default() else { return };
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(css());
-    gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,12 +98,7 @@ mod tests {
     }
 
     #[test]
-    fn the_gray_is_the_spec_colour() {
-        assert!(css().contains("#202125"));
-    }
-
-    #[test]
     fn grayscale_and_invert_are_not_css_filters() {
-        assert!(!css().contains("filter"), "they are colour-matrix nodes on the page area (T-43b-049)");
+        assert!(!crate::theme::style::BASE_CSS.contains("filter:"), "they are colour-matrix nodes on the page area (T-43b-049)");
     }
 }

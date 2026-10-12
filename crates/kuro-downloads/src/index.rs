@@ -141,6 +141,12 @@ impl DownloadIndex {
             .is_some_and(|m| m.chapters.contains(&chapter))
     }
 
+    /// The source folder that holds a manga's downloads, as found on disk. `None` when the index has no folder for it.
+    /// A caller whose source is not installed names the folder through this.
+    pub fn manga_source_dir(&self, source_id: i64, manga_title: &str) -> Option<String> {
+        self.read().tree.sources.get(&source_id)?.manga.get(&build_valid_filename(manga_title)).map(|m| m.source_dir.clone())
+    }
+
     pub fn chapter_count_total(&self) -> usize {
         self.read().tree.sources.values().flat_map(|s| s.manga.values()).map(|m| m.chapters.len()).sum()
     }
@@ -300,6 +306,16 @@ impl DownloadIndex {
         }
         self.touch();
         true
+    }
+
+    /// Rescans now, whatever the age of the tree: the sources changed (a repository load ended), so the folders of
+    /// sources that were not known before are matched. Waits and returns as [`Self::renew_if_stale`].
+    pub async fn rescan<F>(&self, ready: watch::Receiver<bool>, installed: F) -> bool
+    where
+        F: FnOnce() -> Vec<(i64, String)> + Send,
+    {
+        self.write().last_renew_ms = None;
+        self.renew_if_stale(crate::downloader::unix_millis(), ready, installed).await
     }
 
     /// Notes a change: the snapshot is written one second after the last change.
@@ -575,6 +591,25 @@ mod tests {
         assert!(index.renew_if_stale(10, rx.clone(), installed).await);
         index.invalidate();
         assert!(index.renew_if_stale(11, rx, installed).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_rescan_recognises_the_folder_of_a_source_added_after_the_last_scan() {
+        let tmp = tempfile::tempdir().unwrap();
+        fixture(tmp.path());
+        // a repository source whose name needs the sanitiser: its folder is the sanitised display name
+        let repo = (77, "Weeb: Central (EN)".to_owned());
+        fs::create_dir_all(tmp.path().join(build_valid_filename(&repo.1)).join("Solo").join("Chapter 1")).unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let index = DownloadIndex::open(tmp.path(), cache.path());
+        let (_tx, rx) = watch::channel(true);
+        assert!(index.renew_if_stale(crate::downloader::unix_millis(), rx.clone(), installed).await);
+        assert!(!index.is_chapter_downloaded(77, "Solo", "Chapter 1", None), "not known before the repository loaded");
+
+        let with_repo = move || -> Vec<(i64, String)> { installed().into_iter().chain([repo]).collect() };
+        assert!(index.rescan(rx, with_repo).await, "a fresh tree is scanned again");
+        assert!(index.is_chapter_downloaded(77, "Solo", "Chapter 1", None));
+        assert!(index.is_chapter_downloaded(1, "Berserk", "Ch 1", None), "the other sources stay");
     }
 
     // TST-39

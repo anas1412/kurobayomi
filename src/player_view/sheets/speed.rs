@@ -31,8 +31,13 @@ pub fn refresh(button: &gtk::MenuButton, shared: &Shared) {
 }
 
 fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared) {
+    section(column, None, choices(shared), popover);
+}
+
+/// The menu's rows: the presets with the playing one marked. The video's right-click menu lists the same.
+pub fn choices(shared: &Shared) -> Vec<Choice> {
     let playing = playing(shared);
-    let choices = PRESETS
+    PRESETS
         .iter()
         .map(|&speed| {
             let shared = Rc::clone(shared);
@@ -44,8 +49,7 @@ fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared) {
                 pick: Box::new(move || set_speed(&shared, speed)),
             }
         })
-        .collect();
-    section(column, None, choices, popover);
+        .collect()
 }
 
 /// The speed mpv plays at; 1.0 before the file has one.

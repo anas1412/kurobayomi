@@ -169,7 +169,7 @@ mod tests {
         for action in all {
             assert!(!kuro_i18n::tr(action.label()).is_empty() && !action.icon().is_empty(), "{action:?}");
         }
-        assert_eq!(kuro_i18n::tr(BottomAction::MarkPreviousViewed.label()), "Mark previous as seen");
+        assert_eq!(kuro_i18n::tr(BottomAction::MarkPreviousViewed.label()), "Mark previous as watched");
     }
 
     #[test]

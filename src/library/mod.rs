@@ -2,7 +2,7 @@
 //! service and preferences. GTK widgets are in `view`; `mount` puts the view in the window.
 //!
 //! Tests: the package is a binary, so there is no `--lib` target. Run them without a display with
-//! `cargo test -p kurobayomi --bin kurobayomi library::`. The widget checks in `view::sheet` need a display and skip
+//! `cargo test -p kurobayomi --bin kurobayomi library::`. The widget checks in `view::options` need a display and skip
 //! themselves without one (they run on the shared GTK thread of `crate::testing`). `t2` holds the T2-* tests of
 //! `p1-edge-cases-and-tests.md` section T-2.
 //!
@@ -27,22 +27,18 @@
 
 pub mod actions;
 pub mod cells;
-pub mod display_tab;
 pub mod download_facts;
-pub mod filter_tab;
 pub mod frame_cover;
 #[cfg(test)]
 mod fixtures;
 pub mod keys;
 pub mod mount;
-pub mod random;
 pub mod category_dialog;
 pub mod category_screen;
 pub mod delete_dialog;
 pub mod layout;
 pub mod load;
 pub mod query;
-pub mod sort_tab;
 pub mod toast;
 pub mod trackers;
 #[cfg(test)]

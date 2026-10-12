@@ -1,5 +1,5 @@
-//! The six static builders that replace the mockup rows of `entry.rs` (T-40a-034): `sources`, `extensions`,
-//! `migrate_sources`, `browse_source`, `global_search` and `migrate_entries`. Each takes a snapshot of its model and the
+//! The static builders that replace the mockup rows of `entry.rs` (T-40a-034): `sources`, `migrate_sources`,
+//! `browse_source`, `global_search` and `migrate_entries`. Each takes a snapshot of its model and the
 //! callbacks of its navigation, and draws no row that the snapshot does not hold: an empty snapshot is an empty page.
 //! The screen registry calls these in place of the sample-row builders.
 
@@ -15,7 +15,6 @@ use kuro_source::filter_list::FilterList;
 use tokio::sync::watch;
 
 use super::entries::FavoriteStore;
-use super::extensions_page::{ExtNav, ExtensionBackend, ExtensionsPage};
 use super::favorite_flow::{FavoriteFlow, FavoriteHooks};
 use super::filter_sheet::FilterSheetView;
 use super::filters::SourceFilters;
@@ -29,18 +28,15 @@ use super::listing_view::{ListingDeps, ListingView};
 use super::names::{localized_display_name, subtitle_display_name};
 use super::primitives::{ToastSpec, stub_source_label};
 use super::route::search_listing;
+use crate::widgets::view_options::{Item as MenuItem, Pick, Section, ViewOptions};
 use super::sources::LOCAL_SOURCE_ID;
 use super::sources_page::{SourcesNav, SourcesPage};
 use super::view::{CoverLoader, list_row, source_row, spinner_row};
+use crate::widgets::context_menu::{self, Item};
 
 /// `sources`: the installed-sources tab of one kind.
 pub fn sources(nav: SourcesNav, ready: watch::Receiver<bool>) -> SourcesPage {
     SourcesPage::new(nav, ready)
-}
-
-/// `extensions`: the extensions tab of one kind.
-pub fn extensions(backend: Arc<dyn ExtensionBackend>, nav: ExtNav) -> ExtensionsPage {
-    ExtensionsPage::new(backend, nav)
 }
 
 // ---------- migrate_sources ----------
@@ -61,7 +57,7 @@ pub struct MigrateSourcesSnapshot {
 pub struct MigrateSourcesNav {
     /// A row: the favourites of that source.
     pub open: Rc<dyn Fn(i64)>,
-    /// A long press copies the id.
+    /// The row menu's Copy: copies the id.
     pub copy_id: Rc<dyn Fn(i64)>,
     /// The header's help action: the source migration guide.
     pub open_help: Rc<dyn Fn()>,
@@ -103,7 +99,11 @@ pub fn migrate_sources(snapshot: &MigrateSourcesSnapshot, nav: MigrateSourcesNav
         let icon = resolve(source.is_stub, false, source.id == LOCAL_SOURCE_ID);
         let row = source_row(&source.name, language.as_deref(), icon, None, source.is_stub, Some(badge.upcast_ref()));
         let (open, copy, id) = (Rc::clone(&nav.open), Rc::clone(&nav.copy_id), source.id);
-        list.append(&list_row(&row, move || open(id), move || copy(id)));
+        let open_item = Rc::clone(&open);
+        list.append(&list_row(&row, move || open(id), move || {
+            let (open, copy) = (Rc::clone(&open_item), Rc::clone(&copy));
+            vec![Item::new(super::texts::OPEN, 0, move || open(id)), Item::new(tr(MsgKey::action_copy_to_clipboard), 1, move || copy(id))]
+        }));
     }
     column.append(&list);
     root.append(&crate::ui::scrolled(&column));
@@ -136,7 +136,7 @@ pub struct BrowseSourceDeps {
     pub supports_latest: bool,
     pub configurable: bool,
     pub prefs: Rc<super::prefs::BrowsePrefs>,
-    /// The source's id, name, language and stub flag are read from here. `on_long_press` and `favorite_urls` are filled
+    /// The source's id, name, language and stub flag are read from here. `menu` and `favorite_urls` are filled
     /// in by `browse_source` from `favorites`.
     pub listing: ListingDeps,
     /// `source_defaults`, and the sheet that edits a working copy of them.
@@ -149,8 +149,26 @@ pub struct BrowseSourceDeps {
     pub initial_query: BrowseQuery,
     pub on_back: Rc<dyn Fn()>,
     pub on_overflow: Rc<dyn Fn(OverflowItem)>,
-    /// Opens a url in the browser (the local source's help guide).
+    /// Opens a url in the browser (the local source's help guide, a cover's Open in browser).
     pub open_url: Rc<dyn Fn(&str)>,
+    /// The source's site: a cover whose url is a path opens in the browser on it.
+    pub home_url: Option<String>,
+}
+
+/// The right-click menu of a browsed cover: Open, Add to library or Remove from library (the favourite flow, which asks
+/// before a remove and about a duplicate), and Open in browser when the entry has a web address.
+pub fn cover_menu(item: &ListItem, open: Rc<dyn Fn(&ListItem)>, flow: Option<Rc<FavoriteFlow>>, web: Option<String>, open_url: Rc<dyn Fn(&str)>) -> Vec<Item> {
+    let entry = item.clone();
+    let mut items = vec![Item::new(super::texts::OPEN, 0, move || open(&entry))];
+    if let Some(flow) = flow {
+        let label = tr(if item.favorite { MsgKey::remove_from_library } else { MsgKey::add_to_library });
+        let entry = item.clone();
+        items.push(Item::new(label, 1, move || flow.long_press(entry.clone())));
+    }
+    if let Some(url) = web {
+        items.push(Item::new(tr(MsgKey::action_open_in_browser), 2, move || open_url(&url)));
+    }
+    items
 }
 
 /// One source's listing with its header, search and Popular, Latest and Filter chips.
@@ -161,7 +179,8 @@ pub struct BrowseSourcePage {
     pub search: gtk::SearchEntry,
     pub popular: gtk::ToggleButton,
     pub latest: Option<gtk::ToggleButton>,
-    pub filter: Option<gtk::Button>,
+    /// The Filter menu button; its popover is the filter sheet.
+    pub filter: Option<gtk::MenuButton>,
     /// Keeps the favourite flow alive with the page.
     pub flow: Option<Rc<FavoriteFlow>>,
 }
@@ -197,7 +216,7 @@ fn stub_page(listing: &ListingDeps, on_back: Rc<dyn Fn()>) -> gtk::Box {
 }
 
 pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
-    let BrowseSourceDeps { supports_latest, configurable, prefs, mut listing, filters, favorites, hide_in_library, initial_query, on_back, on_overflow, open_url } = deps;
+    let BrowseSourceDeps { supports_latest, configurable, prefs, mut listing, filters, favorites, hide_in_library, initial_query, on_back, on_overflow, open_url, home_url } = deps;
     if listing.stub {
         return SourcePage::Stub(stub_page(&listing, on_back));
     }
@@ -210,14 +229,13 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
         Some(url) => help_url(url),
         None => on_action(action),
     });
-    // the long press and the live favourite flags come from the library store; the flow is built once the listing exists
+    // the cover menu and the live favourite flags come from the library store; the flow is built once the listing exists
     let flow_slot: Rc<RefCell<Option<Rc<FavoriteFlow>>>> = Rc::default();
-    let on_long = Rc::clone(&flow_slot);
-    listing.on_long_press = Rc::new(move |item| {
-        let flow = on_long.borrow().clone();
-        if let Some(flow) = flow {
-            flow.long_press(item);
-        }
+    let (on_menu, open_cover, browser) = (Rc::clone(&flow_slot), Rc::clone(&listing.open_entry), Rc::clone(&open_url));
+    listing.menu = Rc::new(move |item: &ListItem| {
+        let flow = on_menu.borrow().clone();
+        let web = super::nav::entry_web_url(home_url.as_deref(), &item.url);
+        cover_menu(item, Rc::clone(&open_cover), flow, web, Rc::clone(&browser))
     });
     listing.favorite_urls = favorites.as_ref().map(|f| f.store.favorite_urls(source_id));
     // a page opened on a search starts from the source's defaults, like a search made from Popular
@@ -319,24 +337,20 @@ pub fn browse_source(deps: BrowseSourceDeps) -> SourcePage {
     });
     let mut filter_chip = None;
     if filters.has_filters() {
-        let chip = gtk::Button::with_label(&tr(MsgKey::action_filter));
-        let (view, filters, entry) = (listing_view.clone(), Rc::clone(&filters), search.clone());
-        chip.connect_clicked(move |chip| {
-            let (target, entry) = (view.clone(), entry.clone());
-            let sheet_window: Rc<RefCell<Option<gtk::Window>>> = Rc::default();
-            let closer = Rc::clone(&sheet_window);
-            let sheet = FilterSheetView::new(
-                Rc::clone(&filters),
-                // Filter searches with the sheet's values and the text in the search box
-                move |list| target.restart_with(search_listing(entry.text().as_str()), list),
-                move || {
-                    if let Some(window) = closer.borrow_mut().take() {
-                        window.close();
-                    }
-                },
-            );
-            *sheet_window.borrow_mut() = Some(sheet.present_over(chip));
-        });
+        // the filter sheet is the popover of this button (no separate window)
+        let chip = gtk::MenuButton::builder().label(tr(MsgKey::action_filter)).build();
+        let (target, entry, closer) = (listing_view.clone(), search.clone(), chip.downgrade());
+        let sheet = FilterSheetView::new(
+            Rc::clone(&filters),
+            // Apply searches with the sheet's values and the text in the search box
+            move |list| target.restart_with(search_listing(entry.text().as_str()), list),
+            move || {
+                if let Some(chip) = closer.upgrade() {
+                    chip.popdown();
+                }
+            },
+        );
+        chip.set_popover(Some(&sheet.popover()));
         chips.append(&chip);
         filter_chip = Some(chip);
     }
@@ -469,8 +483,8 @@ pub struct GlobalSearchNav {
     pub open_source: Rc<dyn Fn(i64, &str)>,
     /// A card.
     pub open_entry: Rc<dyn Fn(i64, &ListItem)>,
-    /// A long press on a card: the entry's preview.
-    pub preview: Rc<dyn Fn(i64, &ListItem)>,
+    /// The right-click menu of a card of the source with this id.
+    pub menu: Rc<dyn Fn(i64, &ListItem) -> Vec<Item>>,
     pub load_cover: CoverLoader,
     /// The chips as the page starts with them (the stored filter and toggle).
     pub chips: SearchChips,
@@ -501,10 +515,13 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let entry = gtk::SearchEntry::new();
     entry.set_placeholder_text(Some(&tr(MsgKey::action_global_search_hint)));
-    entry.set_margin_start(12);
-    entry.set_margin_end(12);
-    entry.set_margin_top(6);
-    body.append(&entry);
+    entry.set_hexpand(true);
+    let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    top.set_margin_start(12);
+    top.set_margin_end(12);
+    top.set_margin_top(6);
+    top.append(&entry);
+    body.append(&top);
     // Escape clears the typed query first; with none, it goes on and leaves the page
     {
         let (text, clear) = (entry.clone(), entry.clone());
@@ -520,7 +537,7 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     entry.connect_activate(move |entry| (search.nav.search)(entry.text().as_str()));
     let typing = Rc::clone(&view);
     entry.connect_changed(move |entry| *typing.typed.borrow_mut() = entry.text().to_string());
-    body.append(&search_chips(&view));
+    top.append(&search_options(&view).widget);
     body.append(&view.progress);
     body.append(&gtk::ScrolledWindow::builder().child(&view.column).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
     // the registry's readiness gates the whole page: the existing source gate shows the spinner, then crossfades in
@@ -528,26 +545,22 @@ pub fn global_search(nav: GlobalSearchNav, ready: watch::Receiver<bool>) -> Glob
     GlobalSearchPage { root, entry, view }
 }
 
-/// The chips: All (the source filter), a separator, then the Has results toggle (B§10.1).
-fn search_chips(view: &Rc<SearchView>) -> gtk::Box {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    row.set_margin_start(12);
-    row.set_margin_end(12);
-    let chips = view.chips.get();
-    let chip = |label: MsgKey, active: bool| {
-        let button = gtk::ToggleButton::with_label(&tr(label));
-        button.add_css_class("chip");
-        button.set_active(active);
-        button
-    };
-    let all = chip(MsgKey::all, chips.filter == SourceFilter::All);
-    let has_results = chip(MsgKey::has_results, chips.only_has_results);
+/// The tooltip of the search options button, and the name of its one check.
+pub const SEARCH_OPTIONS: &str = "Search options";
+const HAS_RESULTS: &str = "has_results";
+
+/// The search options (B§10.1) on the shared view-options button next to the search box: Show only "Has results". The
+/// source filter has one value (All) since the pinned-only filter was cut, so it has no item.
+fn search_options(view: &Rc<SearchView>) -> ViewOptions {
+    let menu = ViewOptions::new(SEARCH_OPTIONS, &[Section::filter("Show only", vec![MenuItem::toggle(HAS_RESULTS, tr(MsgKey::has_results))])]);
+    menu.set_toggle(HAS_RESULTS, view.chips.get().only_has_results);
     let toggled = Rc::clone(view);
-    has_results.connect_toggled(move |button| toggled.set_chips(SearchChips { only_has_results: button.is_active(), ..toggled.chips.get() }));
-    row.append(&all);
-    row.append(&gtk::Separator::new(gtk::Orientation::Vertical));
-    row.append(&has_results);
-    row
+    menu.connect(move |pick| {
+        if let Pick::Toggle(HAS_RESULTS, on) = pick {
+            toggled.set_chips(SearchChips { only_has_results: on, ..toggled.chips.get() });
+        }
+    });
+    menu
 }
 
 impl SearchView {
@@ -656,8 +669,8 @@ fn search_row(row: &SearchRow, nav: &GlobalSearchNav, typed: Rc<RefCell<String>>
                 let button = gtk::Button::builder().child(&cell).css_classes(["flat"]).valign(gtk::Align::Start).vexpand(false).build();
                 let (open, entry, id) = (Rc::clone(&nav.open_entry), item.clone(), row.source.id);
                 button.connect_clicked(move |_| open(id, &entry));
-                let (preview, entry) = (Rc::clone(&nav.preview), item.clone());
-                super::view::attach_long_press(&button, move || preview(id, &entry));
+                let (menu, entry) = (Rc::clone(&nav.menu), item.clone());
+                context_menu::attach(&button, move |_, _| menu(id, &entry));
                 covers.append(&button);
             }
             // the row is as tall as its cards; the page scrolls through the sources
@@ -701,7 +714,7 @@ pub fn migrate_entries(entries: &[MigrateEntry], error: Option<&str>, nav: Migra
         let (open_search, id) = (Rc::clone(&nav.open_search), entry.id);
         // a click on the row opens the migrate search; a click on the cover opens the entry and claims the click
         let cell = row.clone();
-        let row = list_row(&cell, move || open_search(id), || {});
+        let row = list_row(&cell, move || open_search(id), Vec::new);
         if let Some(cover) = cell.first_child() {
             let open_entry = Rc::clone(&nav.open_entry);
             let click = gtk::GestureClick::new();
@@ -845,12 +858,15 @@ pub(crate) mod tests {
 
     fn search_nav(chips: SearchChips) -> (GlobalSearchNav, SearchLog) {
         let log: SearchLog = Rc::default();
-        let (searched, opened, previewed, chipped) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
+        let (searched, opened, menus, chipped) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
         let nav = GlobalSearchNav {
             search: Rc::new(move |q| searched.borrow_mut().push(format!("search {q}"))),
             open_source: Rc::new(|_, _| {}),
             open_entry: Rc::new(move |id, item| opened.borrow_mut().push(format!("open {id} {}", item.title))),
-            preview: Rc::new(move |id, item| previewed.borrow_mut().push(format!("preview {id} {}", item.title))),
+            menu: Rc::new(move |id, item: &ListItem| {
+                menus.borrow_mut().push(format!("menu {id} {}", item.title));
+                Vec::new()
+            }),
             load_cover: Rc::new(|_, _| {}),
             chips,
             on_chips: Rc::new(move |c| chipped.borrow_mut().push(format!("chips {c:?}"))),
@@ -904,24 +920,30 @@ pub(crate) mod tests {
             assert!(text.iter().any(|t| t == expected), "{expected} in {text:?}: every source is searched and the origin is listed");
         }
 
-        // the chips: All, then Has results
-        let chips: Vec<gtk::ToggleButton> = descendants(page.widget());
-        let names: Vec<String> = chips.iter().map(|c| c.label().map(|l| l.to_string()).unwrap_or_default()).collect();
-        assert_eq!(names, [tr(MsgKey::all), tr(MsgKey::has_results)]);
-        assert!(chips[0].is_active() && !chips[1].is_active());
-        chips[1].set_active(true);
+        // the search options: one menu button with Show only "Has results", and no chip row
+        let toggles: Vec<gtk::ToggleButton> = descendants(page.widget());
+        assert!(toggles.iter().all(|c| c.label().is_none()), "no chips: {:?}", toggles.iter().map(|c| c.label()).collect::<Vec<_>>());
+        let menus: Vec<gtk::MenuButton> = descendants(page.widget());
+        let menu = menus.iter().find(|b| b.tooltip_text().as_deref() == Some(SEARCH_OPTIONS)).expect("the search options");
+        let labels = crate::widgets::view_options::menu_labels(&menu.menu_model().expect("the menu"));
+        assert_eq!(labels, ["Show only".to_owned(), tr(MsgKey::has_results)]);
+        menu.activate_action("viewopt.has_results", None).expect("the Has results check");
         let text = all_labels(page.widget());
         assert!(text.iter().any(|t| t == "Alpha") && !text.iter().any(|t| t == "Beta" || t == "\u{25B6} Gamma"), "Has results keeps only rows with results: {text:?}");
         assert!(log.borrow().iter().all(|entry| entry.starts_with("chips ")), "a chip change never runs the search: {:?}", log.borrow());
         assert_eq!(log.borrow().len(), 1);
 
-        // cards are 96 px wide and a long press previews
+        // cards are 96 px wide and a right click asks for the card's menu
         let card = descendants::<gtk::Button>(page.widget()).into_iter().find(|b| b.has_css_class("flat") && b.child().is_some_and(|c| c.is::<gtk::Box>())).expect("card");
         assert!(descendants::<gtk::Widget>(&card).iter().any(|w| w.width_request() == SEARCH_CARD_WIDTH_PX), "the cover is 96 px wide");
         let controllers = card.observe_controllers();
-        let long = (0..controllers.n_items()).filter_map(|i| controllers.item(i)).find_map(|c| c.downcast::<gtk::GestureLongPress>().ok()).expect("long press");
-        long.emit_by_name::<()>("pressed", &[&0.0_f64, &0.0_f64]);
-        assert_eq!(log.borrow().last().map(String::as_str), Some("preview 1 Berserk"));
+        let right = (0..controllers.n_items())
+            .filter_map(|i| controllers.item(i))
+            .filter_map(|c| c.downcast::<gtk::GestureClick>().ok())
+            .find(|c| c.button() == gtk::gdk::BUTTON_SECONDARY)
+            .expect("right click");
+        right.emit_by_name::<()>("pressed", &[&1_i32, &0.0_f64, &0.0_f64]);
+        assert_eq!(log.borrow().last().map(String::as_str), Some("menu 1 Berserk"));
         card.emit_clicked();
         assert_eq!(log.borrow().last().map(String::as_str), Some("open 1 Berserk"));
     }
@@ -991,7 +1013,7 @@ pub(crate) mod tests {
             Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_time().build().expect("runtime")));
         let entered = rt.enter();
         let script = Arc::new(Script { results: Mutex::new(results), requests: Mutex::default() });
-        let prefs = Rc::new(super::super::prefs::BrowsePrefs::new(PrefStore::in_memory()));
+        let prefs = Rc::new(super::super::prefs::BrowsePrefs::new(PrefStore::in_memory(), crate::browse::route::BrowseKind::Manga));
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let (back, action, overflow, url) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
         let (_tx, ready) = watch::channel(true);
@@ -1011,7 +1033,7 @@ pub(crate) mod tests {
                 source_lang: "en".into(),
                 load_cover: Rc::new(|_, _| {}),
                 open_entry: Rc::new(|_| {}),
-                on_long_press: Rc::new(|_| {}),
+                menu: Rc::new(|_: &ListItem| Vec::new()),
                 favorite_urls: None,
                 on_action: Rc::new(move |a| action.borrow_mut().push(format!("action {a:?}"))),
             },
@@ -1022,6 +1044,7 @@ pub(crate) mod tests {
             on_back: Rc::new(move || back.borrow_mut().push("back".into())),
             on_overflow: Rc::new(move |i| overflow.borrow_mut().push(format!("overflow {i:?}"))),
             open_url: Rc::new(move |u| url.borrow_mut().push(format!("url {u}"))),
+            home_url: None,
         });
         Rig { page, script, prefs, log, _runtime: entered }
     }
@@ -1116,17 +1139,12 @@ pub(crate) mod tests {
         assert_eq!((query, filters), (BrowseQuery::Latest, defaults()), "Latest takes a fresh clone of the defaults");
     }
 
-    fn the_filter_button_of_the_sheet_searches_with_the_sheet_values() {
+    fn the_apply_button_of_the_sheet_searches_with_the_sheet_values() {
         let rig = source_rig(false, defaults(), vec![]);
         let SourcePage::Browse(page) = &rig.page else { panic!("browse page") };
         assert!(pump_until(|| !rig.script.requests.lock().expect("lock").is_empty()));
         page.search.set_text("naruto");
-        page.filter.as_ref().expect("filter chip").emit_clicked();
-        let sheet = gtk::Window::list_toplevels()
-            .into_iter()
-            .filter_map(|w| w.downcast::<gtk::Window>().ok())
-            .find(|w| w.title().as_deref() == Some(tr(MsgKey::action_filter).as_str()))
-            .expect("the filter sheet window");
+        let sheet = page.filter.as_ref().expect("filter chip").popover().expect("the filter sheet is the button's popover");
         let buttons = all_buttons(&sheet);
         let check = {
             fn go(w: &gtk::Widget) -> Option<gtk::CheckButton> {
@@ -1145,8 +1163,8 @@ pub(crate) mod tests {
             go(sheet.child().expect("child").upcast_ref()).expect("check box")
         };
         check.set_active(true);
-        let filter = buttons.iter().find(|b| b.label().as_deref() == Some(tr(MsgKey::action_filter).as_str())).expect("Filter button");
-        filter.emit_clicked();
+        let apply = buttons.iter().find(|b| b.label().as_deref() == Some(tr(MsgKey::action_apply).as_str())).expect("Apply button");
+        apply.emit_clicked();
         assert!(pump_until(|| rig.script.requests.lock().expect("lock").len() == 2));
         let (query, filters, _) = rig.script.requests.lock().expect("lock")[1].clone();
         assert_eq!(query, BrowseQuery::Search("naruto".into()), "the text in the search box goes with it");
@@ -1190,7 +1208,7 @@ pub(crate) mod tests {
         a_stub_source_shows_only_its_title_back_and_the_missing_message();
         back_clears_the_search_text_first_and_then_leaves();
         popular_latest_and_a_search_from_them_start_from_fresh_defaults();
-        the_filter_button_of_the_sheet_searches_with_the_sheet_values();
+        the_apply_button_of_the_sheet_searches_with_the_sheet_values();
         the_error_state_has_only_retry_and_retry_asks_again();
         no_sample_rows_in_an_empty_snapshot();
         migrate_sources_lists_the_snapshot_with_counts_and_marks_stubs();
@@ -1220,6 +1238,23 @@ mod pure_tests {
 
     fn ids(rows: &[&SearchRow]) -> Vec<i64> {
         rows.iter().map(|r| r.source.id).collect()
+    }
+
+    #[test]
+    fn a_cover_menu_opens_the_entry_and_offers_the_browser_only_with_a_web_address() {
+        let opened: Rc<RefCell<Vec<String>>> = Rc::default();
+        let (seen, urls) = (Rc::clone(&opened), Rc::clone(&opened));
+        let open: Rc<dyn Fn(&ListItem)> = Rc::new(move |item: &ListItem| seen.borrow_mut().push(item.title.clone()));
+        let open_url: Rc<dyn Fn(&str)> = Rc::new(move |url: &str| urls.borrow_mut().push(url.to_owned()));
+        let item = ListItem { title: "Berserk".into(), ..ListItem::default() };
+        let plain = cover_menu(&item, Rc::clone(&open), None, None, Rc::clone(&open_url));
+        assert_eq!(plain.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), [super::super::texts::OPEN], "no library store, no web address");
+        let menu = cover_menu(&item, open, None, Some("https://a.test/b".into()), open_url);
+        assert_eq!(menu.len(), 2);
+        assert_eq!(menu[1].label, tr(MsgKey::action_open_in_browser));
+        (menu[0].run)();
+        (menu[1].run)();
+        assert_eq!(*opened.borrow(), ["Berserk", "https://a.test/b"]);
     }
 
     #[test]

@@ -112,7 +112,7 @@ pub struct ReaderSession {
     store: Rc<dyn ReaderStore>,
     events: Sender<ReaderEvent>,
     adjacent_busy: bool,
-    /// The visible page, 1-based, for the page indicator (`currentPage`).
+    /// The visible page, 1-based, for the page position in the top bar (`currentPage`).
     current_page: u32,
     /// `mark_duplicate_read_chapter_read` contains `existing` (T-43a-031). Off unless the caller turns it on.
     mark_duplicates_read: bool,
@@ -251,6 +251,11 @@ impl ReaderSession {
 
     pub fn current_page(&self) -> u32 {
         self.current_page
+    }
+
+    /// A transition card is on screen: no page is shown, so the counter has no number (`current_page` 0).
+    pub fn clear_current_page(&mut self) {
+        self.current_page = 0;
     }
 
     /// The chapter being read.

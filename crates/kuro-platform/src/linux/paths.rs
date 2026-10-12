@@ -16,13 +16,16 @@ pub struct Roots {
     pub config: PathBuf,
     pub cache: PathBuf,
     pub state: PathBuf,
-    /// The user's Videos folder, which holds the app's default storage folder.
-    pub videos: PathBuf,
+    /// The user's home folder, which holds the app's default storage folder.
+    pub home: PathBuf,
+    /// The user's Downloads folder, where app updates are saved.
+    pub downloads: PathBuf,
 }
 
-/// The user's Videos folder: the platform's video directory when it names one, else `Videos` in the home folder.
-pub fn video_folder(configured: Option<&Path>, home: &Path) -> PathBuf {
-    configured.map_or_else(|| home.join("Videos"), Path::to_path_buf)
+/// The user's Downloads folder: the platform's download directory when it names one, else `Downloads` in the home
+/// folder.
+pub fn downloads_folder(configured: Option<&Path>, home: &Path) -> PathBuf {
+    configured.map_or_else(|| home.join("Downloads"), Path::to_path_buf)
 }
 
 /// Failure to resolve the XDG directories.
@@ -49,14 +52,15 @@ impl LinuxPaths {
         let project =
             ProjectDirs::from_path(PathBuf::from(XDG_APP_DIR)).ok_or(PathError::NoHome)?;
         let user = UserDirs::new().ok_or(PathError::NoHome)?;
-        let videos = video_folder(user.video_dir(), user.home_dir());
+        let downloads = downloads_folder(user.download_dir(), user.home_dir());
         let state = project.state_dir().ok_or(PathError::NoHome)?.to_path_buf();
         Ok(Self::new(Roots {
             data: project.data_dir().to_path_buf(),
             config: project.config_dir().to_path_buf(),
             cache: project.cache_dir().to_path_buf(),
             state,
-            videos,
+            home: user.home_dir().to_path_buf(),
+            downloads,
         }))
     }
 }
@@ -90,8 +94,12 @@ impl Paths for LinuxPaths {
         self.roots.state.join("crashes")
     }
 
-    fn videos_dir(&self) -> PathBuf {
-        self.roots.videos.clone()
+    fn user_home_dir(&self) -> PathBuf {
+        self.roots.home.clone()
+    }
+
+    fn user_downloads_dir(&self) -> PathBuf {
+        self.roots.downloads.clone()
     }
 
     fn covers_dir(&self) -> PathBuf {
@@ -106,7 +114,6 @@ impl Paths for LinuxPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paths::FolderProvider;
 
     fn roots_under(base: &Path) -> Roots {
         Roots {
@@ -114,15 +121,16 @@ mod tests {
             config: base.join("config"),
             cache: base.join("cache"),
             state: base.join("state"),
-            videos: base.join("Videos"),
+            home: base.join("home"),
+            downloads: base.join("home/Downloads"),
         }
     }
 
     #[test]
-    fn the_configured_video_folder_wins_over_the_home_videos_folder() {
+    fn the_configured_downloads_folder_wins_over_the_home_downloads_folder() {
         let home = Path::new("/home/u");
-        assert_eq!(video_folder(Some(Path::new("/media/Clips")), home), PathBuf::from("/media/Clips"));
-        assert_eq!(video_folder(None, home), PathBuf::from("/home/u/Videos"));
+        assert_eq!(downloads_folder(Some(Path::new("/media/Get")), home), PathBuf::from("/media/Get"));
+        assert_eq!(downloads_folder(None, home), PathBuf::from("/home/u/Downloads"));
     }
 
     #[test]
@@ -137,10 +145,9 @@ mod tests {
         assert_eq!(paths.log_dir(), base.join("state/logs"));
         assert_eq!(paths.temp_dir(), base.join("cache/tmp"));
         assert_eq!(paths.crash_dir(), base.join("state/crashes"));
-        assert_eq!(paths.default_storage_dir(), base.join("Videos/Kurobayomi"));
-        assert_eq!(paths.default_downloads_dir(), base.join("Videos/Kurobayomi/Downloads"));
-        assert_eq!(paths.default_backups_dir(), base.join("Videos/Kurobayomi/Backups"));
-        assert_eq!(paths.auto_backups_dir(), base.join("Videos/Kurobayomi/Backups"));
+        assert_eq!(paths.user_home_dir(), base.join("home"));
+        assert_eq!(paths.user_downloads_dir(), base.join("home/Downloads"));
+        assert_eq!(paths.default_storage_dir(), base.join("home/Kurobayomi"));
         assert_eq!(paths.covers_dir(), base.join("cache/covers"));
         assert_eq!(paths.plugin_dir(), base.join("data/plugins"));
     }
@@ -157,17 +164,6 @@ mod tests {
             paths.plugin_dir(),
         );
         assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
-    }
-
-    #[test]
-    fn folder_provider_url_is_file_url_of_downloads() {
-        let tmp = tempfile::tempdir().unwrap();
-        let paths = LinuxPaths::new(roots_under(tmp.path()));
-        let folder = FolderProvider::new(&paths);
-        assert_eq!(folder.directory(), tmp.path().join("Videos/Kurobayomi/Downloads"));
-        let url = folder.url().unwrap().to_string();
-        assert!(url.starts_with("file://"), "{url}");
-        assert!(url.ends_with("Kurobayomi/Downloads"), "{url}");
     }
 
     #[test]

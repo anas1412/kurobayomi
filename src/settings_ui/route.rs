@@ -659,7 +659,7 @@ mod tests {
     fn the_search_index_finds_the_subtitle_and_mpv_rows_on_their_player_pages() {
         let prefs = Prefs::in_memory();
         let index = search::index_from(|id| tree_with(id, &prefs, &[], &[], browse::RepoCounts::default()));
-        let language = search::hits(&index, "subtitle languages");
+        let language = search::hits(&index, "subtitle language");
         assert!(language.iter().any(|hit| hit.screen == "settings_player"), "the subtitle language row is found on the Player page");
         let mpv = search::hits(&index, "mpv");
         assert!(mpv.is_empty(), "the Advanced page with the MPV rows is cut");

@@ -1,6 +1,6 @@
-//! The reader's sheet and dialog framework (T-043a-079). A bottom sheet is a revealer over a scrim inside the
-//! reader's overlay. Escape and a click outside the sheet dismiss it. The modal window is for the settings dialog.
-//! The confirm prompt uses `gtk::AlertDialog`. No libadwaita.
+//! The reader's bottom sheet (T-043a-079): the page actions. A revealer over a scrim inside the reader's overlay; Escape
+//! and a click outside the sheet dismiss it. The reader settings are a native window (`settings_window`). The confirm
+//! prompt uses `gtk::AlertDialog`. No libadwaita.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -137,27 +137,6 @@ fn first_focusable(root: &gtk::Widget) -> Option<gtk::Widget> {
         child = widget.next_sibling();
     }
     None
-}
-
-/// A modal window over `parent`, capped at 75 percent of the parent's height (`ReaderSettingsDialog.kt:38`).
-/// Escape closes it.
-pub fn modal_window(parent: &impl IsA<gtk::Window>, title: &str, child: &impl IsA<gtk::Widget>) -> gtk::Window {
-    let window = gtk::Window::builder().transient_for(parent).modal(true).title(title).child(child).build();
-    let max_height = parent.as_ref().height().max(1) * 3 / 4;
-    window.set_default_height(max_height);
-    let keys = gtk::EventControllerKey::new();
-    let weak = window.downgrade();
-    keys.connect_key_pressed(move |_, key, _, _| {
-        if key == gtk::gdk::Key::Escape {
-            if let Some(window) = weak.upgrade() {
-                window.close();
-            }
-            return glib::Propagation::Stop;
-        }
-        glib::Propagation::Proceed
-    });
-    window.add_controller(keys);
-    window
 }
 
 /// Asks a yes or no question with `gtk::AlertDialog`. `on_ok` runs only for OK. Cancel and outside dismissal do

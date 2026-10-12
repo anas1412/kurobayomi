@@ -7,6 +7,33 @@ pub fn help_url() -> Option<&'static str> {
     kuro_local::ux::LOCAL_HELP_URL
 }
 
+/// Opens an external page in the default browser through `gtk::UriLauncher`. A launch that fails is logged, not shown.
+pub fn open_external(url: &str, parent: Option<&gtk::Window>) {
+    gtk::UriLauncher::new(url).launch(parent, gtk::gio::Cancellable::NONE, |result| {
+        if let Err(error) = result {
+            tracing::warn!(%error, "could not open an external link");
+        }
+    });
+}
+
+/// The web address of a browsed entry for Open in browser: an `http` or `https` url as it is, or a path on the source's
+/// site joined to `home`. `None` when neither gives a web address.
+pub fn entry_web_url(home: Option<&str>, url: &str) -> Option<String> {
+    let url = url.trim();
+    let web = |text: &str| {
+        let lower = text.to_ascii_lowercase();
+        lower.starts_with("http://") || lower.starts_with("https://")
+    };
+    if web(url) {
+        return Some(url.to_owned());
+    }
+    let home = home.map(str::trim).filter(|home| web(home))?;
+    if url.is_empty() {
+        return None;
+    }
+    Some(format!("{}/{}", home.trim_end_matches('/'), url.trim_start_matches('/')))
+}
+
 /// What Back does on a browse page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackAction {
@@ -42,6 +69,16 @@ pub fn action_url(action: super::primitives::EmptyAction) -> Option<&'static str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_entry_opens_its_own_web_address_or_its_path_on_the_source_site() {
+        assert_eq!(entry_web_url(None, " https://a.test/m/1 ").as_deref(), Some("https://a.test/m/1"));
+        assert_eq!(entry_web_url(Some("https://a.test/"), "/m/1").as_deref(), Some("https://a.test/m/1"));
+        assert_eq!(entry_web_url(Some("https://a.test"), "m/1").as_deref(), Some("https://a.test/m/1"));
+        assert_eq!(entry_web_url(None, "/m/1"), None, "a path without a site");
+        assert_eq!(entry_web_url(Some("file:///x"), "/m/1"), None, "only a web site");
+        assert_eq!(entry_web_url(Some("https://a.test"), ""), None);
+    }
 
     #[test]
     fn no_action_opens_an_aniyomi_guide_and_the_others_open_nothing() {

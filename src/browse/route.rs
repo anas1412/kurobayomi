@@ -1,37 +1,24 @@
-//! Browse tab shell and route table (T-40a-001, T-40a-034, T-40a-050, T-40b-030). The six pages keep Aniyomi's order;
-//! manga pages are 1, 3 and 5. Routes replace the string screen ids of the manga browse branch.
+//! Browse tab shell and route table (T-40a-001, T-40a-034, T-40a-050, T-40b-030). The pages keep Aniyomi's order;
+//! manga pages are 1 and 3. Routes replace the string screen ids of the manga browse branch.
 
 use kuro_domain::source::browse::BrowseQuery;
 
-/// Which catalogue a page or search belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BrowseKind {
-    Anime,
-    Manga,
-}
+/// Which catalogue a page or search belongs to: the app's one entry kind.
+pub use kuro_domain::kind::EntryKind as BrowseKind;
 
-/// The six page ids of the Browse tab, in tab order. The tab shows only the two source pages (anime and manga); the
-/// extension and migrate pages have no place on the tab any more.
+/// The page ids of the Browse tab, in tab order. The tab shows only the two source pages (anime and manga); the migrate
+/// pages have no place on the tab either.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowsePage {
     AnimeSources = 0,
     MangaSources = 1,
-    AnimeExtensions = 2,
-    MangaExtensions = 3,
-    AnimeMigrate = 4,
-    MangaMigrate = 5,
+    AnimeMigrate = 2,
+    MangaMigrate = 3,
 }
 
 impl BrowsePage {
-    /// Tab order of the six pages (B§1).
-    pub const ALL: [BrowsePage; 6] = [
-        BrowsePage::AnimeSources,
-        BrowsePage::MangaSources,
-        BrowsePage::AnimeExtensions,
-        BrowsePage::MangaExtensions,
-        BrowsePage::AnimeMigrate,
-        BrowsePage::MangaMigrate,
-    ];
+    /// Tab order of the pages (B§1).
+    pub const ALL: [BrowsePage; 4] = [BrowsePage::AnimeSources, BrowsePage::MangaSources, BrowsePage::AnimeMigrate, BrowsePage::MangaMigrate];
 
     pub fn index(self) -> usize {
         self as usize
@@ -39,13 +26,9 @@ impl BrowsePage {
 
     pub fn kind(self) -> BrowseKind {
         match self {
-            BrowsePage::AnimeSources | BrowsePage::AnimeExtensions | BrowsePage::AnimeMigrate => BrowseKind::Anime,
-            BrowsePage::MangaSources | BrowsePage::MangaExtensions | BrowsePage::MangaMigrate => BrowseKind::Manga,
+            BrowsePage::AnimeSources | BrowsePage::AnimeMigrate => BrowseKind::Anime,
+            BrowsePage::MangaSources | BrowsePage::MangaMigrate => BrowseKind::Manga,
         }
-    }
-
-    pub fn is_extensions(self) -> bool {
-        matches!(self, BrowsePage::AnimeExtensions | BrowsePage::MangaExtensions)
     }
 
     /// The tab label.
@@ -54,37 +37,23 @@ impl BrowsePage {
         kuro_i18n::tr(match self {
             BrowsePage::AnimeSources => K::label_anime_sources,
             BrowsePage::MangaSources => K::label_manga_sources,
-            BrowsePage::AnimeExtensions => K::label_anime_extensions,
-            BrowsePage::MangaExtensions => K::label_manga_extensions,
             BrowsePage::AnimeMigrate => K::label_migration_anime,
             BrowsePage::MangaMigrate => K::label_migration_manga,
         })
     }
-
-    /// The extensions page of a kind: `show_extension()` selects manga (3), `show_anime_extension()` anime (2).
-    pub fn extensions_of(kind: BrowseKind) -> BrowsePage {
-        match kind {
-            BrowseKind::Anime => BrowsePage::AnimeExtensions,
-            BrowseKind::Manga => BrowsePage::MangaExtensions,
-        }
-    }
 }
 
-/// The manga browse routes. `kind` is carried where a search can belong to either catalogue.
+/// The browse routes. `kind` says which catalogue the page belongs to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BrowseRoute {
     Sources,
-    Extensions,
     MigrateSources,
     /// One source's listing. `migrating` selects the migrate search screen instead of the browse screen.
-    BrowseSource { source_id: i64, query: BrowseQuery, migrating: bool },
+    BrowseSource { kind: BrowseKind, source_id: i64, query: BrowseQuery, migrating: bool },
     /// Global search. `source_id` limits the search to one source (migrate), `query` is empty for a blank search.
     GlobalSearch { kind: BrowseKind, source_id: Option<i64>, query: String },
     /// The favourites of one source of `kind` that a migration can start from.
     MigrateEntries { kind: BrowseKind, source_id: i64 },
-    /// One anime source's listing. It is opened on the same screen as the manga listing; the screen tells them apart by
-    /// the route that was parked.
-    AnimeBrowseSource { source_id: i64, query: BrowseQuery },
 }
 
 impl BrowseRoute {
@@ -92,13 +61,11 @@ impl BrowseRoute {
     pub fn screen_id(&self) -> &'static str {
         match self {
             BrowseRoute::Sources => "sources",
-            BrowseRoute::Extensions => "extensions",
             BrowseRoute::MigrateSources => "migrate_sources",
             BrowseRoute::BrowseSource { migrating: false, .. } => "browse_source",
             BrowseRoute::BrowseSource { migrating: true, .. } => "migrate_source_search",
             BrowseRoute::GlobalSearch { .. } => "global_search",
             BrowseRoute::MigrateEntries { .. } => "migrate_entries",
-            BrowseRoute::AnimeBrowseSource { .. } => "browse_source",
         }
     }
 }
@@ -141,27 +108,19 @@ mod tests {
     }
 
     #[test]
-    fn six_pages_in_tab_order_and_manga_pages_are_1_3_5() {
-        assert_eq!(BrowsePage::ALL.len(), 6);
+    fn four_pages_in_tab_order_and_manga_pages_are_1_and_3() {
+        assert_eq!(BrowsePage::ALL.len(), 4);
         for (i, page) in BrowsePage::ALL.iter().enumerate() {
             assert_eq!(page.index(), i);
         }
         let manga: Vec<usize> = BrowsePage::ALL.iter().filter(|p| p.kind() == BrowseKind::Manga).map(|p| p.index()).collect();
-        assert_eq!(manga, [1, 3, 5]);
+        assert_eq!(manga, [1, 3]);
     }
 
     #[test]
-    fn every_tab_has_its_own_title_and_only_two_are_extension_pages() {
+    fn every_tab_has_its_own_title() {
         let titles: std::collections::BTreeSet<String> = BrowsePage::ALL.iter().map(|p| p.title()).collect();
-        assert_eq!(titles.len(), 6);
-        let extensions: Vec<usize> = BrowsePage::ALL.iter().filter(|p| p.is_extensions()).map(|p| p.index()).collect();
-        assert_eq!(extensions, [2, 3]);
-    }
-
-    #[test]
-    fn extension_requests_select_the_page_of_their_kind() {
-        assert_eq!(BrowsePage::extensions_of(BrowseKind::Manga).index(), 3);
-        assert_eq!(BrowsePage::extensions_of(BrowseKind::Anime).index(), 2);
+        assert_eq!(titles.len(), 4);
     }
 
     #[test]
@@ -185,12 +144,13 @@ mod tests {
 
     #[test]
     fn routes_map_to_their_screen_ids() {
-        let browse = BrowseRoute::BrowseSource { source_id: 7, query: BrowseQuery::Popular, migrating: false };
-        let migrate = BrowseRoute::BrowseSource { source_id: 7, query: BrowseQuery::Popular, migrating: true };
+        let browse = BrowseRoute::BrowseSource { kind: BrowseKind::Manga, source_id: 7, query: BrowseQuery::Popular, migrating: false };
+        let migrate = BrowseRoute::BrowseSource { kind: BrowseKind::Manga, source_id: 7, query: BrowseQuery::Popular, migrating: true };
         assert_eq!(browse.screen_id(), "browse_source");
         assert_eq!(migrate.screen_id(), "migrate_source_search");
         assert_eq!(BrowseRoute::MigrateEntries { kind: BrowseKind::Manga, source_id: 1 }.screen_id(), "migrate_entries");
-        assert_eq!(BrowseRoute::AnimeBrowseSource { source_id: 1, query: BrowseQuery::Popular }.screen_id(), "browse_source", "the anime listing shares the screen");
+        let anime = BrowseRoute::BrowseSource { kind: BrowseKind::Anime, source_id: 1, query: BrowseQuery::Popular, migrating: false };
+        assert_eq!(anime.screen_id(), "browse_source", "the anime listing shares the screen");
         assert_eq!(BrowseRoute::Sources.screen_id(), "sources");
     }
 }

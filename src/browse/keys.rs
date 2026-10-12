@@ -1,6 +1,5 @@
 //! The keyboard map of the browse pages (T-40a-035, U§9). Pure: the views apply the answer. Ctrl+F focuses the search,
-//! Escape closes the search and then leaves the page, F5 and Ctrl+R refresh the extension list, and Ctrl+1 to Ctrl+6 pick a
-//! Browse sub-tab. In the migrate dialog Ctrl+Enter migrates and Ctrl+Shift+Enter copies.
+//! Escape closes the search and then leaves the page, and Ctrl+1 to Ctrl+6 pick a Browse sub-tab. In the migrate dialog Ctrl+Enter migrates and Ctrl+Shift+Enter copies.
 
 use gtk::gdk::{Key, ModifierType};
 use gtk::prelude::*;
@@ -10,9 +9,6 @@ use kuro_i18n::{MsgKey, tr};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowseShortcut {
     FocusSearch,
-    RefreshExtensions,
-    /// Ctrl+U starts the update of every installed extension that has one (T-41a-014).
-    UpdateAll,
     /// Ctrl+1 is 1, and so on to Ctrl+6. The number is the position of the sub-tab, counted from one.
     SubTab(u8),
 }
@@ -21,16 +17,11 @@ pub enum BrowseShortcut {
 pub fn browse_shortcut(key: Key, modifiers: ModifierType) -> Option<BrowseShortcut> {
     let ctrl = modifiers.contains(ModifierType::CONTROL_MASK);
     let shift = modifiers.contains(ModifierType::SHIFT_MASK);
-    if key == Key::F5 && !ctrl && !shift {
-        return Some(BrowseShortcut::RefreshExtensions);
-    }
     if !ctrl || shift {
         return None;
     }
     match key.to_unicode()? {
         'f' | 'F' => Some(BrowseShortcut::FocusSearch),
-        'u' | 'U' => Some(BrowseShortcut::UpdateAll),
-        'r' | 'R' => Some(BrowseShortcut::RefreshExtensions),
         digit @ '1'..='6' => Some(BrowseShortcut::SubTab(digit as u8 - b'0')),
         _ => None,
     }
@@ -72,9 +63,6 @@ pub fn help_entries() -> Vec<(String, String)> {
     vec![
         line("Ctrl+F", MsgKey::action_search),
         line("Escape", MsgKey::action_cancel),
-        line("F5", MsgKey::action_webview_refresh),
-        line("Ctrl+R", MsgKey::action_webview_refresh),
-        line("Ctrl+U", MsgKey::ext_update_all),
         line("Ctrl+1 \u{2026} Ctrl+6", MsgKey::label_sources),
         line("Ctrl+Enter", MsgKey::migrate),
         line("Ctrl+Shift+Enter", MsgKey::copy),
@@ -138,25 +126,10 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_f_focuses_the_search_and_f5_refreshes_the_extensions() {
+    fn ctrl_f_focuses_the_search() {
         assert_eq!(browse_shortcut(Key::f, ctrl()), Some(BrowseShortcut::FocusSearch));
         assert_eq!(browse_shortcut(Key::F, ctrl()), Some(BrowseShortcut::FocusSearch));
-        assert_eq!(browse_shortcut(Key::F5, ModifierType::empty()), Some(BrowseShortcut::RefreshExtensions));
         assert_eq!(browse_shortcut(Key::F, ModifierType::empty()), None, "a plain F types into a field");
-    }
-
-    #[test]
-    fn ctrl_r_refreshes_the_extensions_like_f5() {
-        assert_eq!(browse_shortcut(Key::r, ctrl()), Some(BrowseShortcut::RefreshExtensions));
-        assert_eq!(browse_shortcut(Key::R, ctrl()), Some(BrowseShortcut::RefreshExtensions));
-        assert_eq!(browse_shortcut(Key::r, ModifierType::empty()), None, "a plain R types into a field");
-    }
-
-    #[test]
-    fn ctrl_u_starts_update_all_and_a_plain_u_types() {
-        assert_eq!(browse_shortcut(Key::u, ctrl()), Some(BrowseShortcut::UpdateAll));
-        assert_eq!(browse_shortcut(Key::U, ctrl()), Some(BrowseShortcut::UpdateAll));
-        assert_eq!(browse_shortcut(Key::u, ModifierType::empty()), None);
     }
 
     #[test]
@@ -185,7 +158,7 @@ mod tests {
     #[test]
     fn the_help_lists_every_shortcut_with_a_text() {
         let help = help_entries();
-        for keys in ["Ctrl+F", "Escape", "F5", "Ctrl+R", "Ctrl+U", "Ctrl+Enter", "Ctrl+Shift+Enter"] {
+        for keys in ["Ctrl+F", "Escape", "Ctrl+Enter", "Ctrl+Shift+Enter"] {
             assert!(help.iter().any(|(k, what)| k == keys && !what.is_empty()), "{keys}");
         }
         assert!(help.iter().any(|(k, _)| k.starts_with("Ctrl+1")), "the sub-tab keys");

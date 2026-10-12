@@ -129,6 +129,139 @@ pub async fn fetch_mal_id(client: &NetworkClient, anilist_id: i64) -> Option<i64
     parse_mal_id(&response.text().await.ok()?)
 }
 
+/// Whether the anime has no binding AniSkip can use, so its MAL id is looked up by title instead.
+pub fn needs_title_lookup(tracks: &[TrackerRef]) -> bool {
+    !matches!(
+        tracks.first(),
+        Some(TrackerRef::MyAnimeList(id) | TrackerRef::AniList(id)) if *id != 0
+    )
+}
+
+/// The AniList search body: one page of the best matches for `title`.
+pub fn title_search_body(title: &str) -> String {
+    serde_json::json!({
+        "query": "query($t:String){Page(perPage:5){media(search:$t,type:ANIME){id idMal title{romaji english native} synonyms seasonYear episodes}}}",
+        "variables": { "t": title },
+    })
+    .to_string()
+}
+
+/// Lowercase words only, with "2nd season" written as "season 2" so both spellings compare equal.
+fn canon(text: &str) -> String {
+    let plain: String = text
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c.to_lowercase().next().unwrap_or(c) } else { ' ' })
+        .collect();
+    let words: Vec<&str> = plain.split_whitespace().collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < words.len() {
+        let ordinal = words[i]
+            .strip_suffix("st")
+            .or_else(|| words[i].strip_suffix("nd"))
+            .or_else(|| words[i].strip_suffix("rd"))
+            .or_else(|| words[i].strip_suffix("th"))
+            .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+        if let (Some(n), Some(&"season")) = (ordinal, words.get(i + 1)) {
+            out.push("season".to_owned());
+            out.push(n.to_owned());
+            i += 2;
+        } else {
+            out.push(words[i].to_owned());
+            i += 1;
+        }
+    }
+    out.join(" ")
+}
+
+/// Dice coefficient over character bigrams, 0.0 to 1.0.
+fn similarity(a: &str, b: &str) -> f64 {
+    let bigrams = |s: &str| -> Vec<(char, char)> {
+        let c: Vec<char> = s.chars().collect();
+        c.windows(2).map(|w| (w[0], w[1])).collect()
+    };
+    let (mut x, y) = (bigrams(a), bigrams(b));
+    if x.is_empty() || y.is_empty() {
+        return 0.0;
+    }
+    let total = x.len() + y.len();
+    let mut hits = 0;
+    for g in &y {
+        if let Some(at) = x.iter().position(|h| h == g) {
+            x.swap_remove(at);
+            hits += 1;
+        }
+    }
+    2.0 * hits as f64 / total as f64
+}
+
+/// The MAL id of the AniList search result that is `title`: a title or synonym that is the same text (case, punctuation
+/// and "2nd season" / "season 2" spelling aside) in any result wins, else the first result when its closest title is
+/// almost identical. Anything else is `None`: a wrong id would show skip times of another show. Outer `None` is a body
+/// that did not decode, so the caller does not cache it.
+pub fn parse_title_match(body: &str, title: &str) -> Option<Option<i64>> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    let media = value.pointer("/data/Page/media")?.as_array()?;
+    let wanted = canon(title);
+    let names = |m: &Value| -> Vec<String> {
+        let mut out: Vec<String> = ["romaji", "english", "native"]
+            .iter()
+            .filter_map(|k| m.pointer(&format!("/title/{k}")).and_then(Value::as_str))
+            .map(canon)
+            .collect();
+        out.extend(m.get("synonyms").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(canon));
+        out.retain(|n| !n.is_empty());
+        out
+    };
+    let mal = |m: &Value| m.get("idMal").and_then(Value::as_i64).filter(|id| *id != 0);
+    if wanted.is_empty() {
+        return Some(None);
+    }
+    if let Some(m) = media.iter().find(|m| names(m).contains(&wanted)) {
+        return Some(mal(m));
+    }
+    let close = media
+        .first()
+        .filter(|m| names(m).iter().any(|n| similarity(n, &wanted) >= 0.9));
+    Some(close.and_then(mal))
+}
+
+/// MAL id by anime title, cached per anime id for the run: a hit for good, a miss for a day. A transport or decode
+/// failure is not cached, so the next episode tries again.
+// ponytail: the cache lives in memory (one lookup per anime per run), a table if it must survive restarts.
+pub async fn mal_id_by_title(client: &NetworkClient, anime_id: i64, title: &str) -> Option<i64> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    static CACHE: OnceLock<Mutex<HashMap<i64, (Option<i64>, Instant)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((found, at)) = cache.lock().ok()?.get(&anime_id).copied() {
+        if found.is_some() || at.elapsed() < Duration::from_secs(24 * 3600) {
+            return found;
+        }
+    }
+    let body = Body::Bytes {
+        content_type: "application/json; charset=utf-8".to_owned(),
+        data: Bytes::from(title_search_body(title)),
+    };
+    let found = async {
+        let response = client.post(ANILIST_URL, body).await.ok()?.await_success().ok()?;
+        parse_title_match(&response.text().await.ok()?, title)
+    }
+    .await;
+    match found {
+        Some(found) => {
+            tracing::debug!(anime_id, ?found, "aniskip: MAL id by title");
+            cache.lock().ok()?.insert(anime_id, (found, Instant::now()));
+            found
+        }
+        None => {
+            tracing::debug!(anime_id, "aniskip: the title lookup failed");
+            None
+        }
+    }
+}
+
 /// The two AniSkip requests the lookup makes, so the orchestration is tested without a network.
 /// `NetworkClient` is the real one.
 pub trait SkipApi {
@@ -346,6 +479,70 @@ mod tests {
         assert_eq!(lookup(&api, &[TrackerRef::MyAnimeList(5)], 1.0, None).await, None);
         assert_eq!(lookup(&api, &[], 1.0, Some(100.0)).await, None);
         assert!(api.calls.lock().unwrap().is_empty());
+    }
+
+    fn media(id_mal: Option<i64>, romaji: &str, english: &str, synonyms: &[&str]) -> Value {
+        serde_json::json!({"id": 1, "idMal": id_mal, "title": {"romaji": romaji, "english": english, "native": null},
+            "synonyms": synonyms, "seasonYear": 2020, "episodes": 12})
+    }
+
+    fn page(items: Vec<Value>) -> String {
+        serde_json::json!({"data": {"Page": {"media": items}}}).to_string()
+    }
+
+    #[test]
+    fn title_match_is_exact_and_ignores_case() {
+        let body = page(vec![media(Some(1), "Other Show", "", &[]), media(Some(21), "One Piece", "ONE PIECE", &[])]);
+        assert_eq!(parse_title_match(&body, "one piece!"), Some(Some(21)));
+    }
+
+    #[test]
+    fn title_match_reads_synonyms() {
+        let body = page(vec![media(Some(5114), "Hagane no Renkinjutsushi", "", &["Fullmetal Alchemist: Brotherhood"])]);
+        assert_eq!(parse_title_match(&body, "Fullmetal Alchemist Brotherhood"), Some(Some(5114)));
+    }
+
+    #[test]
+    fn season_spellings_match_each_other_but_not_the_first_season() {
+        let body = page(vec![
+            media(Some(10), "Foo", "Foo", &[]),
+            media(Some(20), "Foo 2nd Season", "Foo Season 2", &[]),
+        ]);
+        assert_eq!(parse_title_match(&body, "Foo Season 2"), Some(Some(20)));
+        assert_eq!(parse_title_match(&body, "Foo 2nd Season"), Some(Some(20)));
+        assert_eq!(parse_title_match(&body, "Foo"), Some(Some(10)));
+        // only season 1 came back for a season 2 title: no guess
+        let only_first = page(vec![media(Some(10), "Foo", "Foo", &[])]);
+        assert_eq!(parse_title_match(&only_first, "Foo Season 2"), Some(None));
+    }
+
+    #[test]
+    fn title_match_never_guesses_wildly() {
+        let body = page(vec![media(Some(7), "Totally Different", "", &[])]);
+        assert_eq!(parse_title_match(&body, "Foo Bar"), Some(None));
+        assert_eq!(parse_title_match(&page(vec![]), "Foo"), Some(None));
+        // a near-identical first result is accepted, a MAL-less one gives nothing
+        let near = page(vec![media(Some(8), "Kono Subarashii Sekai ni Shukufuku wo!", "", &[])]);
+        assert_eq!(parse_title_match(&near, "Kono Subarashii Sekai ni Shukufuku o!"), Some(Some(8)));
+        let no_mal = page(vec![media(None, "Foo", "", &[])]);
+        assert_eq!(parse_title_match(&no_mal, "Foo"), Some(None));
+        assert_eq!(parse_title_match("nope", "Foo"), None);
+    }
+
+    #[test]
+    fn only_unusable_bindings_need_the_title_lookup() {
+        use TrackerRef::*;
+        assert!(needs_title_lookup(&[]));
+        assert!(needs_title_lookup(&[Other]));
+        assert!(needs_title_lookup(&[MyAnimeList(0)]));
+        assert!(!needs_title_lookup(&[MyAnimeList(21)]));
+        assert!(!needs_title_lookup(&[AniList(5), Other]));
+    }
+
+    #[test]
+    fn title_search_body_sends_the_title_as_a_variable() {
+        let body: Value = serde_json::from_str(&title_search_body("A \"b\"")).unwrap();
+        assert_eq!(body["variables"]["t"], "A \"b\"");
     }
 
     #[test]

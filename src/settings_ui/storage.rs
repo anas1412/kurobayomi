@@ -17,7 +17,7 @@ use crate::pref_model::model::PreferenceItem;
 use crate::settings_ui::rows::{info, text};
 
 pub const NO_LOCATION: &str = "No storage location set";
-pub const INFO_TEXT: &str = "Used for automatic backups, chapter downloads, and local source.";
+pub const INFO_TEXT: &str = "Holds downloads (Anime, Manga), backups and local folders. A new location is used for new downloads after a restart; files already there stay where they are.";
 pub const REFUSED: &str = "Failed to acquire persistent folder access. The app may behave unexpectedly.";
 
 /// `No storage location set`, the stored path when it is usable, or `Invalid location: <path>`.
@@ -57,8 +57,9 @@ pub fn accept_choice(path: &Path) -> Result<(), &'static str> {
     tempfile::tempfile_in(path).map(drop).map_err(|_| REFUSED)
 }
 
-/// The storage manager over the stored base folder (the mpv-config tree and the downloads resolve through it). Nothing
-/// stored means the default storage folder.
+/// The storage manager over the stored base folder: the one resolver of the storage folders (downloads per kind,
+/// backups, local folders). Nothing stored means the default storage folder. The download managers and indexes resolve
+/// their folders once at startup, so a new location applies to downloads after a restart.
 pub fn manager(store: &PrefStore) -> Option<StorageManager> {
     let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
     Some(StorageManager::open(store, paths.default_storage_dir()))

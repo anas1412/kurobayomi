@@ -43,6 +43,7 @@ use neighbours::{Step, adjacent};
 use playback::{Playback, VOLUME_MAX, seek_delta_ms, seek_target_ms, volume_after_steps};
 use store::Tracker;
 
+use crate::widgets::context_menu::{self, Item};
 use crate::widgets::page_header;
 
 /// How often the page reads mpv, updates the controls and saves progress when one is due.
@@ -324,7 +325,8 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
         }
     });
     let menu = menu::tracks_menu(shared);
-    let quality = sheets::quality::button(shared);
+    let servers = sheets::quality::Servers::default();
+    let quality = sheets::quality::button(shared, &servers);
     header.pack_end(&menu);
     header.pack_end(&quality);
     // the buttons packed here came after page_header::header made its pass, so they need their own
@@ -335,6 +337,10 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
 
     wire_gl(&area, shared, start);
     watch_left(&page, shared, &area);
+    {
+        let (shared, page) = (Rc::clone(shared), page.downgrade());
+        context_menu::attach(&area, move |_, _| page.upgrade().map_or_else(Vec::new, |page| video_menu(&shared, &page, &servers)));
+    }
 
     {
         let shared = Rc::clone(shared);
@@ -416,6 +422,49 @@ fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     );
     start_ticks(&page, &title_label, &play, &seek, &time, &volume, &loading, &skip, shared);
     page
+}
+
+/// The video's right-click menu: Audio, Subtitles and Quality (the lists of the header's menus), Speed (the speed menu's
+/// presets) and Fullscreen. Each list marks what plays now; the rows run the menus' own picks.
+fn video_menu(shared: &Shared, page: &gtk::Box, servers: &sheets::quality::Servers) -> Vec<Item> {
+    let mut items: Vec<Item> = menu::track_sections(shared)
+        .into_iter()
+        .map(|(heading, choices)| Item::submenu(heading, 0, menu_items(choices)))
+        .filter(|item| !item.children.is_empty())
+        .collect();
+    if let Some(sections) = sheets::quality::menu_sections(shared, servers) {
+        // one section per server, each row named with its server
+        let choices: Vec<Item> = sections
+            .into_iter()
+            .enumerate()
+            .flat_map(|(index, (heading, choices))| {
+                choices.into_iter().filter(|choice| choice.enabled).map(move |choice| {
+                    let label = match &heading {
+                        Some(server) => format!("{server} · {}", choice.title),
+                        None => choice.title,
+                    };
+                    Item::new(label, u8::try_from(index).unwrap_or(u8::MAX), choice.pick).checked(choice.current)
+                })
+            })
+            .collect();
+        // the servers load on the first ask; the next right-click lists them
+        items.push(if choices.is_empty() { Item::new("Quality: loading…", 0, || {}) } else { Item::submenu("Quality", 0, choices) });
+    }
+    items.push(Item::submenu("Speed", 0, menu_items(sheets::speed::choices(shared))));
+    let fullscreen = window_of(page).is_some_and(|w| w.is_fullscreen());
+    let page = page.downgrade();
+    let toggle = move || {
+        if let Some(page) = page.upgrade() {
+            toggle_fullscreen(&page);
+        }
+    };
+    items.push(Item::new(tr(MsgKey::pref_fullscreen), 1, toggle).checked(fullscreen));
+    items
+}
+
+/// The rows of a player menu as right-click entries, the current one checked. A row that cannot be chosen is left out.
+fn menu_items(choices: Vec<sheets::Choice>) -> Vec<Item> {
+    choices.into_iter().filter(|choice| choice.enabled).map(|choice| Item::new(choice.title, 0, choice.pick).checked(choice.current)).collect()
 }
 
 /// Stops playback at once when the page leaves the main stack by a route the page does not see (Escape, Alt+Left, the
@@ -612,7 +661,7 @@ fn play_adjacent(shared: &Shared, step: Step, announce_end: bool) {
 /// Starts episode row `episode_id` in this window: a local file at once, a source's stream once it resolves.
 fn play_episode(shared: &Shared, episode_id: i64) {
     let db = crate::data::app().anime_db.clone();
-    match crate::local_flow_anime::open::opening_by_id(&db, episode_id) {
+    match crate::local_flow::open::opening_by_id(&db, episode_id) {
         Ok(Some(found)) => {
             let title = title_or_file(episode_id, Path::new(&found.path));
             let media = Media { target: found.path, title, headers: None, tracks: Vec::new() };

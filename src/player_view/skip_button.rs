@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use gtk::glib;
 use gtk::prelude::*;
+use kuro_data::anime::AnimeRepo;
 use kuro_data::episode::EpisodeRepo;
 use kuro_data::track::{AnimeTrack, AnimeTrackRepo};
 use kuro_player::aniskip::{self, TrackerRef};
@@ -178,6 +179,9 @@ pub fn tracker_refs(tracks: &[AnimeTrack]) -> Vec<TrackerRef> {
 /// What one AniSkip lookup needs: the episode, the file's load and the anime's bindings.
 struct Request {
     episode_id: i64,
+    anime_id: i64,
+    /// The anime's title, for the MAL id lookup when it has no usable tracker binding.
+    title: Option<String>,
     load: u64,
     episode_number: f64,
     tracks: Vec<TrackerRef>,
@@ -191,9 +195,12 @@ fn aniskip_request(episode_id: i64, load: u64, duration_s: f32) -> Option<Reques
     }
     let db = crate::data::app().anime_db.clone();
     let episode = EpisodeRepo::new(db.clone()).by_id(episode_id).ok()??;
+    let title = AnimeRepo::new(db.clone()).by_id(episode.anime_id).ok().map(|anime| anime.title);
     let tracks = AnimeTrackRepo::new(db).by_entry(episode.anime_id).ok()?;
     Some(Request {
         episode_id,
+        anime_id: episode.anime_id,
+        title,
         load,
         episode_number: episode.episode_number,
         tracks: tracker_refs(&tracks),
@@ -217,7 +224,16 @@ fn start_aniskip(shared: &Shared, request: Request) {
     let (episode_id, load, duration) = (request.episode_id, request.load, request.duration_s);
     let (tx, rx) = async_channel::bounded(1);
     handle.spawn(async move {
-        let stamps = aniskip::lookup(&client, &request.tracks, request.episode_number, Some(request.duration_s)).await;
+        let mut tracks = request.tracks;
+        if aniskip::needs_title_lookup(&tracks) {
+            if let Some(mal) = match &request.title {
+                Some(title) => aniskip::mal_id_by_title(&client, request.anime_id, title).await,
+                None => None,
+            } {
+                tracks = vec![TrackerRef::MyAnimeList(mal)];
+            }
+        }
+        let stamps = aniskip::lookup(&client, &tracks, request.episode_number, Some(request.duration_s)).await;
         let _ = tx.send((episode_id, load, duration, stamps)).await;
     });
     let shared = Rc::clone(shared);

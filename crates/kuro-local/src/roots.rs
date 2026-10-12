@@ -1,16 +1,16 @@
-//! `manga_root` and `anime_root`: the `local` and `localanime` folders under the storage base, created on first access
+//! `manga_root` and `anime_root`: the `Local/Manga` and `Local/Anime` folders under the storage base, created on first access
 //! (area:14 behavior section 2). The base comes from `kuro-domain`'s `StorageManager`, which owns the folder names.
 
 use std::path::PathBuf;
 
 use kuro_domain::storage::StorageManager;
 
-/// `<storage base>/local`. `None` when the base is missing, so every listing is empty rather than an error.
+/// `<storage base>/Local/Manga`. `None` when the base is missing, so every listing is empty rather than an error.
 pub fn manga_root(storage: &StorageManager) -> Option<PathBuf> {
     storage.local_manga_dir().ok()
 }
 
-/// `<storage base>/localanime`. `None` when the base is missing.
+/// `<storage base>/Local/Anime`. `None` when the base is missing.
 pub fn anime_root(storage: &StorageManager) -> Option<PathBuf> {
     storage.local_anime_dir().ok()
 }
@@ -26,11 +26,11 @@ mod tests {
         let store = PrefStore::in_memory();
         let storage = StorageManager::open(&store, base.path().to_path_buf());
         storage.ensure_tree().expect("tree");
-        std::fs::remove_dir(base.path().join("local")).expect("remove");
+        std::fs::remove_dir(base.path().join("Local/Manga")).expect("remove");
         let manga = manga_root(&storage).expect("manga root");
-        assert_eq!(manga, base.path().join("local"));
+        assert_eq!(manga, base.path().join("Local/Manga"));
         assert!(manga.is_dir(), "the accessor creates a missing folder");
-        assert_eq!(anime_root(&storage), Some(base.path().join("localanime")));
+        assert_eq!(anime_root(&storage), Some(base.path().join("Local/Anime")));
     }
 
     #[test]

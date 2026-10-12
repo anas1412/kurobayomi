@@ -1,13 +1,12 @@
-// Pages reached from the entry screens that have no module of their own yet: the tracking sheet and the tracker
-// search (an empty state until the tracking lane builds them), and the settings fallthrough. The entry
-// details, Browse, global search and migration pages are live (`entry_core`, `browse`).
+// Pages reached from the entry screens that have no module of their own: the settings fallthrough. The entry
+// details, the tracking pages, Browse, global search and migration pages are live (`entry_core`, `browse`).
 use crate::screens::Built;
 use gtk::Box as GBox;
 
 pub fn body(id: &str) -> Option<Built> {
     match id {
-        // the tracking sheet and the tracker search wait for the tracking lane: an empty state, never made-up titles
-        "tracking_sheet" | "tracker_search" => crate::screens::unavailable(id),
+        "tracking_sheet" => crate::entry_core::tracking::page::sheet(),
+        "tracker_search" => crate::entry_core::tracking::page::search(),
         "extension_repos" => crate::settings::body("settings_extension_repos"),
         _ => crate::settings::body(id),
     }

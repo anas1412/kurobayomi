@@ -5,6 +5,7 @@
 
 pub mod anime_io;
 pub mod anime_queue;
+pub mod live;
 pub mod manga_io;
 pub mod queue_page;
 
@@ -14,6 +15,8 @@ use std::sync::{Arc, RwLock};
 
 use kuro_db::handle::Db;
 use kuro_db::schema_manga;
+use kuro_domain::kind::EntryKind;
+use kuro_domain::storage::StorageManager;
 use kuro_downloads::anime::manager::AnimeQueue;
 use kuro_downloads::downloader::{Connectivity, DownloadSettings, NoHold};
 use kuro_downloads::index::DownloadIndex;
@@ -65,8 +68,9 @@ pub fn start(
 ) -> Result<Started, String> {
     let waiting = Arc::new(RwLock::new(Vec::new()));
     let (cancel_waiting, cancels) = mpsc::unbounded_channel();
-    let (manga, connectivity) = start_manga(paths, index, notifier.clone(), manga_db, waiting.clone(), cancels)?;
-    let anime = match anime_queue::start(paths, anime_db, prefs, notifier) {
+    let storage = crate::settings_ui::storage::manager(&prefs).ok_or("the storage folder could not be resolved")?;
+    let (manga, connectivity) = start_manga(paths, &storage, index, notifier.clone(), manga_db, waiting.clone(), cancels)?;
+    let anime = match anime_queue::start(paths, &storage, anime_db, prefs, notifier) {
         Ok(queue) => Some(queue),
         Err(e) => {
             tracing::error!("the anime download queue did not start: {e}");
@@ -104,7 +108,7 @@ fn spawn_restore(
             if loaded && !waiting.is_empty() {
                 let rows: Vec<QueueRow> = waiting.iter().map(|w| w.row.clone()).collect();
                 let pass = restore_rows(&rows, &db, &|id: i64| -> Option<Arc<dyn MangaSource>> {
-                    crate::browse::directory::current()?.manga_source(id)
+                    crate::browse::directory::current(crate::browse::route::BrowseKind::Manga).catalogue(id)?.manga()
                 });
                 let rest = pass.waiting;
                 match manga.restore(pass.ready, rest.iter().map(|w| w.row.clone()).collect()).await {
@@ -139,14 +143,14 @@ fn publish(shown: &RwLock<Vec<Waiting>>, waiting: &[Waiting]) {
 /// Starts the manga manager. Every saved row is kept until the first restore pass ([`spawn_restore`]) decides it.
 fn start_manga(
     paths: &dyn Paths,
+    storage: &StorageManager,
     index: DownloadIndex,
     notifier: Arc<dyn Notifier>,
     manga_db: Arc<Db>,
     shown: Arc<RwLock<Vec<Waiting>>>,
     cancels: mpsc::UnboundedReceiver<i64>,
 ) -> Result<(Arc<DownloadManager>, watch::Sender<Connectivity>), String> {
-    let root = paths.default_downloads_dir();
-    std::fs::create_dir_all(&root).map_err(|e| format!("the downloads folder was not created: {e}"))?;
+    let root = storage.downloads_dir(EntryKind::Manga).map_err(|e| format!("the manga downloads folder is not available: {e}"))?;
     let store = QueueStore::open(schema_manga::open_in_data_dir(paths).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let pending = MangaPendingStore::open(schema_manga::open_in_data_dir(paths).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let saved = saved_rows(&store);

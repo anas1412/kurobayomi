@@ -30,7 +30,8 @@ use super::listing::{ListItem, ListedPage, Listing, PageLoader};
 use super::prefs::BrowsePrefs;
 use super::primitives::{EmptyAction, ToastSpec, stub_source_label};
 use super::tasks::{PageTasks, Tagged};
-use super::view::{CoverGuard, CoverLoader, attach_long_press, empty_state, grid_cell, list_cell, spinner_row, toast_bar, toast_timeout_ms};
+use super::view::{CoverGuard, CoverLoader, empty_state, grid_cell, list_cell, spinner_row, toast_bar, toast_timeout_ms};
+use crate::widgets::context_menu::{self, Item};
 
 /// What the listing needs from the app.
 pub struct ListingDeps {
@@ -48,8 +49,8 @@ pub struct ListingDeps {
     pub load_cover: CoverLoader,
     /// A cover was activated.
     pub open_entry: Rc<dyn Fn(&ListItem)>,
-    /// A cover was long-pressed (or right-clicked).
-    pub on_long_press: Rc<dyn Fn(ListItem)>,
+    /// The right-click menu of a cover.
+    pub menu: Rc<dyn Fn(&ListItem) -> Vec<Item>>,
     /// The urls of this source's library entries, published again on every change: covers observe their favourite flag
     /// live (T-40b-033).
     pub favorite_urls: Option<watch::Receiver<BTreeSet<String>>>,
@@ -410,8 +411,8 @@ impl Inner {
         self.pump_if_near_end();
     }
 
-    /// The columns of the grid for the width of the window (T-41a-050): the landscape key from 720 px wide, the portrait key
-    /// otherwise; 0 means adaptive cells and `n` means exactly `n` columns.
+    /// The columns of the grid for the width of the window (T-41a-050): the column settings are cut, so the cells are
+    /// always adaptive.
     fn columns(&self) -> Option<(GridColumns, i32)> {
         let viewport = self.scroller.hadjustment().page_size() as i32;
         if viewport <= 0 {
@@ -422,12 +423,7 @@ impl Inner {
             .root()
             .map(|root| root.upcast::<gtk::Widget>())
             .map_or(viewport, |window| window.width());
-        let prefs = &self.deps.prefs;
-        let columns = grid_columns(
-            width,
-            BrowsePrefs::columns(crate::misc::diet_defaults::LIBRARY_PORTRAIT_COLUMNS),
-            BrowsePrefs::columns(prefs.library_columns_landscape.get()),
-        );
+        let columns = grid_columns(width, crate::misc::diet_defaults::LIBRARY_COLUMNS, crate::misc::diet_defaults::LIBRARY_COLUMNS);
         Some((columns, viewport))
     }
 
@@ -453,7 +449,7 @@ impl Inner {
     fn apply_display(self: &Rc<Self>) {
         let mode = self.display.get();
         let load = Rc::clone(&self.deps.load_cover);
-        let on_long = Rc::clone(&self.deps.on_long_press);
+        let menu = Rc::clone(&self.deps.menu);
         let cover_px = self.cover_px.get();
         // one ticket per recycled cell: a cover that arrives after its cell was rebound is dropped (edge R10)
         let binds: Rc<RefCell<CoverBinds>> = Rc::default();
@@ -461,15 +457,14 @@ impl Inner {
         factory.connect_setup(move |_, object| {
             let Some(item) = object.downcast_ref::<gtk::ListItem>() else { return };
             let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            let (weak, on_long) = (item.downgrade(), Rc::clone(&on_long));
-            attach_long_press(&holder, move || {
+            // the cell takes focus so the Menu key reaches its menu
+            holder.set_focusable(true);
+            let (weak, menu) = (item.downgrade(), Rc::clone(&menu));
+            context_menu::attach(&holder, move |_, _| {
                 let entry = weak.upgrade().and_then(|row| row.item()).and_downcast::<glib::BoxedAnyObject>();
-                if let Some(entry) = entry {
-                    let item = entry.borrow::<Option<ListItem>>().clone();
-                    if let Some(item) = item {
-                        on_long(item);
-                    }
-                }
+                // the item is copied out, so no borrow of the row is held while the menu is built or run
+                let item = entry.and_then(|entry| entry.borrow::<Option<ListItem>>().clone());
+                item.map_or_else(Vec::new, |item| menu(&item))
             });
             item.set_child(Some(&holder));
         });
@@ -634,7 +629,7 @@ pub(crate) mod tests {
         let (open_log, action_log) = (Rc::clone(&opened), Rc::clone(&actions));
         let deps = ListingDeps {
             loader: Arc::clone(&script) as Arc<dyn PageLoader>,
-            prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory())),
+            prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory(), crate::browse::route::BrowseKind::Manga)),
             ready: ready_rx,
             stub,
             is_local,
@@ -643,7 +638,7 @@ pub(crate) mod tests {
             source_lang: "en".into(),
             load_cover: Rc::new(|_, _| {}),
             open_entry: Rc::new(move |item| open_log.borrow_mut().push(item.title.clone())),
-            on_long_press: Rc::new(|_| {}),
+            menu: Rc::new(|_: &ListItem| Vec::new()),
             favorite_urls: None,
             on_action: Rc::new(move |action| action_log.borrow_mut().push(action)),
         };
@@ -852,7 +847,7 @@ pub(crate) mod tests {
         let view = ListingView::new(
             ListingDeps {
                 loader: Arc::new(Hang(Arc::clone(&live))),
-                prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory())),
+                prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory(), crate::browse::route::BrowseKind::Manga)),
                 ready,
                 stub: false,
                 is_local: false,
@@ -861,7 +856,7 @@ pub(crate) mod tests {
                 source_lang: String::new(),
                 load_cover: Rc::new(|_, _| {}),
                 open_entry: Rc::new(|_| {}),
-                on_long_press: Rc::new(|_| {}),
+                menu: Rc::new(|_: &ListItem| Vec::new()),
                 favorite_urls: None,
                 on_action: Rc::new(|_| {}),
             },

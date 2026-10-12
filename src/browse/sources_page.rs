@@ -1,5 +1,6 @@
-//! The Sources tab: language header rows, then source rows with a Latest button (T-40a-007, T-40a-005, T-40b-003). Sources
-//! are not pinned or hidden here: the language filter decides which rows show. `sources::source_list` decides what is listed; this file draws it and routes the clicks.
+//! The Sources tab of either kind: language header rows, then source rows with a Latest button (T-40a-007, T-40a-005,
+//! T-40b-003, T-41b-005). Sources are not pinned or hidden here: the language filter decides which rows show.
+//! `sources::source_list` decides what is listed; this file draws it and routes the clicks.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,6 +16,7 @@ use super::glue::{follow_ready, keep_alive};
 use super::icons::{IconCache, SourceIcon};
 use super::sources::{ListInput, LOCAL_SOURCE_ID, Section, SourceRow, language_line, section_title, shows_latest, source_list};
 use super::view::{list_row, loading_sources_row, source_row_with};
+use crate::widgets::context_menu::Item;
 
 /// The installed sources and the preferences that shape the list, as one snapshot of the models.
 #[derive(Clone, Debug, Default)]
@@ -32,17 +34,22 @@ pub struct SourcesSnapshot {
     pub last_used: i64,
     /// Icon files of the extensions that ship one, by source id.
     pub icon_files: BTreeMap<i64, String>,
+    /// The sites of the sources that have one, by source id: a row's Open website.
+    pub home_urls: BTreeMap<i64, String>,
 }
 
 /// What a click on the page does.
 pub struct SourcesNav {
     /// A row opens its popular listing; the Latest button opens its latest listing.
     pub open_listing: Rc<dyn Fn(i64, BrowseQuery)>,
+    /// A row menu's Open website: the source's site in the browser.
+    pub open_url: Rc<dyn Fn(&str)>,
 }
 
 struct Inner {
     stack: gtk::Stack,
     column: gtk::Box,
+    scroller: gtk::ScrolledWindow,
     state: RefCell<State>,
     nav: SourcesNav,
 }
@@ -74,6 +81,7 @@ impl SourcesPage {
         let inner = Rc::new(Inner {
             stack,
             column,
+            scroller,
             state: RefCell::new(State {
                 snapshot: SourcesSnapshot { last_used: -1, ..SourcesSnapshot::default() },
                 ready: false,
@@ -105,6 +113,15 @@ impl SourcesPage {
         self.inner.state.borrow_mut().snapshot = snapshot;
         self.inner.render();
     }
+
+    /// The vertical scroll offset of the list.
+    pub fn scroll_position(&self) -> f64 {
+        self.inner.scroller.vadjustment().value()
+    }
+
+    pub fn set_scroll_position(&self, value: f64) {
+        self.inner.scroller.vadjustment().set_value(value);
+    }
 }
 
 impl Inner {
@@ -124,6 +141,7 @@ impl Inner {
                 last_used: snapshot.last_used,
             })
         };
+        let scroll = self.scroller.vadjustment().value();
         while let Some(child) = self.column.first_child() {
             self.column.remove(&child);
         }
@@ -147,14 +165,17 @@ impl Inner {
             }
         }
         self.stack.set_visible_child_name("list");
+        // a rebuild resets the offset: put it back, so a refresh of the rows never jumps the list
+        self.scroller.vadjustment().set_value(scroll);
     }
 
     fn row(self: &Rc<Self>, section: &Section, source: Source) -> gtk::ListBoxRow {
-        let (icon, file) = {
+        let (icon, file, home) = {
             let mut state = self.state.borrow_mut();
             let file = state.snapshot.icon_files.get(&source.id).cloned();
+            let home = state.snapshot.home_urls.get(&source.id).cloned();
             let icon = state.icons.get(source.id, false, source.is_stub, file.is_some(), source.id == LOCAL_SOURCE_ID);
-            (icon, file)
+            (icon, file, home)
         };
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         if shows_latest(&source) {
@@ -172,7 +193,7 @@ impl Inner {
         let language = language_line(section, &source);
         let picture = crate::recipe_sources::icon_path(source.id);
         let row = source_row_with(&source.name, language.as_deref(), icon, file.as_deref(), picture.as_deref(), source.is_stub, crate::browse::errors::is_failing(source.id), Some(actions.upcast_ref()));
-        let (open, id) = (Rc::downgrade(self), source.id);
+        let (open, menu, id) = (Rc::downgrade(self), Rc::downgrade(self), source.id);
         list_row(
             &row,
             move || {
@@ -180,17 +201,28 @@ impl Inner {
                     (inner.nav.open_listing)(id, BrowseQuery::Popular);
                 }
             },
-            || {},
+            move || menu.upgrade().map_or_else(Vec::new, |inner| row_menu(&inner.nav, id, home.clone())),
         )
     }
 }
 
-pub(super) fn header_label(text: &str) -> gtk::Label {
+/// The right-click menu of a source row: Open (its Popular listing), and Open website when the source has a site.
+fn row_menu(nav: &SourcesNav, id: i64, home: Option<String>) -> Vec<Item> {
+    let open = Rc::clone(&nav.open_listing);
+    let mut items = vec![Item::new(super::texts::OPEN, 0, move || open(id, BrowseQuery::Popular))];
+    if let Some(url) = home {
+        let open_url = Rc::clone(&nav.open_url);
+        items.push(Item::new(super::texts::OPEN_WEBSITE, 0, move || open_url(&url)));
+    }
+    items
+}
+
+fn header_label(text: &str) -> gtk::Label {
     crate::ui::heading(text)
 }
 
-/// The boxed list of the current section, started under its heading on first use. The anime Sources tab uses it too.
-pub(super) fn section_list(column: &gtk::Box, list: &mut Option<gtk::ListBox>) -> gtk::ListBox {
+/// The boxed list of the current section, started under its heading on first use.
+fn section_list(column: &gtk::Box, list: &mut Option<gtk::ListBox>) -> gtk::ListBox {
     list.get_or_insert_with(|| {
         let list = crate::ui::boxed_list();
         column.append(&list);
@@ -231,8 +263,25 @@ pub(crate) mod tests {
     }
 
     fn nav(log: &Rc<RefCell<Vec<String>>>) -> SourcesNav {
-        let open = Rc::clone(log);
-        SourcesNav { open_listing: Rc::new(move |id, q| open.borrow_mut().push(format!("open {id} {q:?}"))) }
+        let (open, site) = (Rc::clone(log), Rc::clone(log));
+        SourcesNav {
+            open_listing: Rc::new(move |id, q| open.borrow_mut().push(format!("open {id} {q:?}"))),
+            open_url: Rc::new(move |url: &str| site.borrow_mut().push(format!("site {url}"))),
+        }
+    }
+
+    #[test]
+    fn a_source_row_menu_opens_the_listing_and_the_site_only_when_there_is_one() {
+        let log: Rc<RefCell<Vec<String>>> = Rc::default();
+        let nav = nav(&log);
+        let plain = row_menu(&nav, 1, None);
+        assert_eq!(plain.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), [crate::browse::texts::OPEN]);
+        let both = row_menu(&nav, 2, Some("https://two.test".into()));
+        assert_eq!(both.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), [crate::browse::texts::OPEN, crate::browse::texts::OPEN_WEBSITE]);
+        for item in &both {
+            (item.run)();
+        }
+        assert_eq!(*log.borrow(), ["open 2 Popular", "site https://two.test"]);
     }
 
     fn labels(column: &gtk::Box) -> Vec<String> {
@@ -356,7 +405,28 @@ pub(crate) mod tests {
         assert_eq!(icon_of(&Source { is_stub: true, ..source(9, "Gone", "en", false) }, false), SourceIcon::Warning);
     }
 
+    fn a_refresh_of_the_rows_keeps_the_scroll_offset() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let (_tx, rx) = watch::channel(true);
+        let page = SourcesPage::new(nav(&log), rx);
+        let window = gtk::Window::new();
+        window.set_default_size(300, 80);
+        window.set_child(Some(page.widget()));
+        window.present();
+        let many = SourcesSnapshot { sources: (1..=12).map(|id| source(id, &format!("Source {id}"), "en", false)).collect(), ..snapshot() };
+        page.update(many.clone());
+        let context = gtk::glib::MainContext::default();
+        while context.iteration(false) {}
+        let adjustment = page.inner.scroller.vadjustment();
+        let target = (adjustment.upper() - adjustment.page_size()).min(40.0);
+        page.set_scroll_position(target);
+        page.update(many);
+        assert_eq!(page.scroll_position(), target, "the list is rebuilt at the same offset");
+        window.close();
+    }
+
     pub(crate) fn smoke() {
+        a_refresh_of_the_rows_keeps_the_scroll_offset();
         the_page_waits_for_the_registry_then_lists_headers_and_rows();
         pre_init_sources_spinner();
         latest_shows_only_for_sources_that_support_it_and_no_row_has_a_pin_button();

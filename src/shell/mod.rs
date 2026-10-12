@@ -32,6 +32,7 @@ mod packaging;
 #[allow(dead_code)]
 #[allow(dead_code)]
 pub mod search;
+pub mod sidebar;
 pub mod tabs;
 pub mod uri;
 

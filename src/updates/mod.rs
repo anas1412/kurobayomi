@@ -1,4 +1,4 @@
-//! GUI logic of area 42 (History, Updates, the tab shell and the statistics and storage helpers).
+//! GUI logic of area 42 (History, Updates, the tab shell and the storage helpers).
 //!
 //! Pure modules come first and carry their own tests: `cargo test -p kurobayomi updates`. The widgets (`shell`) stay
 //! thin. The domain queries and writes live in `kuro-domain`; these modules decide what the screens do with them.
@@ -35,16 +35,12 @@ pub mod library_trigger;
 pub mod list;
 pub mod mount;
 pub mod open_route;
-pub mod nav;
 pub mod prefs;
 pub mod qualities;
 pub mod screen_toast;
 pub mod selection;
 pub mod signals;
 pub mod state_page;
-pub mod stats;
-pub mod stats_data;
-pub mod stats_screen;
 pub mod store;
 pub mod storage;
 pub mod storage_data;

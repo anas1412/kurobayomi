@@ -86,7 +86,7 @@ pub fn store(kind: EntryKind) -> Arc<dyn FavoriteStore> {
             Arc::new(track_binding::BindingStore::new(inner, lookup, track_binding::binder(kind)))
         }
         EntryKind::Anime => Arc::new(
-            crate::browse::anime::favorite_store::AnimeStore::new(
+            crate::browse::repo_store::AnimeStore::new(
                 AnimeRepo::new(db.clone()),
                 CategoryRepo::new(db, CategoryKind::Anime),
                 library.default_anime_category.clone(),

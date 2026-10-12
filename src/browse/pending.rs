@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn a_route_is_handed_out_only_to_the_screen_it_was_parked_for() {
-        park(BrowseRoute::BrowseSource { source_id: 3, query: kuro_domain::source::browse::BrowseQuery::Popular, migrating: false });
+        park(BrowseRoute::BrowseSource { kind: BrowseKind::Manga, source_id: 3, query: kuro_domain::source::browse::BrowseQuery::Popular, migrating: false });
         assert_eq!(take_for("global_search"), None, "another screen finds nothing");
         assert!(take_for("browse_source").is_some());
         assert_eq!(take_for("browse_source"), None, "and only once");

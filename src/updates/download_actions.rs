@@ -2,8 +2,6 @@
 //! work to do; the download queue and the disk are the caller's. The grouped work runs detached, so once a plan is
 //! handed over it is not cancelled by the screen.
 
-use kuro_i18n::MsgKey;
-
 use crate::updates::download_state::DownloadState;
 
 /// The actions of a download indicator or of the bulk bar (`ChapterDownloadAction` / `EpisodeDownloadAction`).
@@ -110,59 +108,6 @@ pub fn delete_skipped(rows: &[UnitTarget], facts: impl Fn(i64) -> Option<EntryFa
     by_entry(rows).into_iter().map(|(entry, _)| entry).filter(|entry| !facts(*entry).is_some_and(|f| f.source_installed)).collect()
 }
 
-/// The actions the download indicator of a row offers for its state (the menu of the indicator): a unit that is not
-/// downloaded starts, a queued one starts now or is cancelled, a running one is cancelled, a failed one retries or is
-/// cancelled, and a downloaded one is deleted. Delete here does not ask (parity, EC-42-U-08).
-pub fn row_actions(state: DownloadState) -> Vec<DownloadAction> {
-    match state {
-        DownloadState::NotDownloaded => vec![DownloadAction::Start],
-        DownloadState::Queue => vec![DownloadAction::StartNow, DownloadAction::Cancel],
-        DownloadState::Downloading => vec![DownloadAction::Cancel],
-        DownloadState::Error => vec![DownloadAction::Start, DownloadAction::Cancel],
-        DownloadState::Downloaded => vec![DownloadAction::Delete],
-    }
-}
-
-/// The symbolic icon of the download indicator for a state.
-pub fn indicator_icon(state: DownloadState) -> &'static str {
-    match state {
-        DownloadState::NotDownloaded => "folder-download-symbolic",
-        DownloadState::Queue => "view-list-symbolic",
-        DownloadState::Downloading => "emblem-synchronizing-symbolic",
-        DownloadState::Downloaded => "emblem-ok-symbolic",
-        DownloadState::Error => "dialog-error-symbolic",
-    }
-}
-
-/// The actions of a row's indicator menu: [`row_actions`], plus SHOW_QUALITIES for an anime unit that is not downloaded
-/// (the long press of the source's indicator) when an options sheet can open (`sheet`).
-pub fn indicator_actions(anime: bool, state: DownloadState, sheet: bool) -> Vec<DownloadAction> {
-    let mut actions = row_actions(state);
-    if anime && sheet && state == DownloadState::NotDownloaded {
-        actions.push(DownloadAction::ShowQualities);
-    }
-    actions
-}
-
-/// What a long press on the download indicator does (`EpisodeDownloadIndicator`: the long click of a unit that is not
-/// downloaded shows the qualities). Only an anime unit with an options sheet registered reacts; a long press elsewhere on
-/// the row still selects it.
-pub fn indicator_long_press(anime: bool, state: DownloadState, sheet: bool) -> Option<DownloadAction> {
-    (anime && sheet && state == DownloadState::NotDownloaded).then_some(DownloadAction::ShowQualities)
-}
-
-/// The label key of an indicator action in the state it is offered for.
-pub fn row_action_label(action: DownloadAction, state: DownloadState) -> MsgKey {
-    match (action, state) {
-        (DownloadAction::Start, DownloadState::Error) => MsgKey::action_retry,
-        (DownloadAction::Start, _) => MsgKey::action_download,
-        (DownloadAction::StartNow, _) => MsgKey::action_start_downloading_now,
-        (DownloadAction::Cancel, _) => MsgKey::action_cancel,
-        (DownloadAction::Delete, _) => MsgKey::action_delete,
-        (DownloadAction::ShowQualities, _) => MsgKey::player_sheets_qualities_title,
-    }
-}
-
 /// The downloads a mark-as-read removes when the option "remove after marked as read" is on (E-U33): only the units
 /// that were newly read (the caller passes the rows the read write changes) and that are downloaded, grouped per entry.
 pub fn remove_after_read(newly_read: &[UnitTarget]) -> Vec<(i64, Vec<i64>)> {
@@ -253,18 +198,6 @@ mod tests {
     }
 
     #[test]
-    fn download_row_actions_follow_the_state() {
-        assert_eq!(row_actions(DownloadState::NotDownloaded), vec![DownloadAction::Start]);
-        assert_eq!(row_actions(DownloadState::Queue), vec![DownloadAction::StartNow, DownloadAction::Cancel]);
-        assert_eq!(row_actions(DownloadState::Downloading), vec![DownloadAction::Cancel]);
-        assert_eq!(row_actions(DownloadState::Error), vec![DownloadAction::Start, DownloadAction::Cancel]);
-        assert_eq!(row_actions(DownloadState::Downloaded), vec![DownloadAction::Delete]);
-        assert_eq!(indicator_icon(DownloadState::Downloaded), "emblem-ok-symbolic");
-        assert_eq!(row_action_label(DownloadAction::Start, DownloadState::Error), MsgKey::action_retry);
-        assert_eq!(row_action_label(DownloadAction::Start, DownloadState::NotDownloaded), MsgKey::action_download);
-    }
-
-    #[test]
     fn download_delete_names_the_entries_it_skips() {
         let rows = [unit(1, 10, DownloadState::Downloaded), unit(2, 20, DownloadState::Downloaded), unit(2, 21, DownloadState::Downloaded), unit(3, 30, DownloadState::Downloaded)];
         let facts = |entry: i64| match entry {
@@ -277,15 +210,8 @@ mod tests {
     }
 
     #[test]
-    fn show_qualities_is_a_dialog_not_a_plan_and_only_offered_for_anime_not_downloaded() {
+    fn show_qualities_is_a_dialog_not_a_plan() {
         assert!(plan(DownloadAction::ShowQualities, &[unit(1, 10, DownloadState::NotDownloaded)], all_good).is_empty());
-        assert_eq!(
-            indicator_actions(true, DownloadState::NotDownloaded, true),
-            vec![DownloadAction::Start, DownloadAction::ShowQualities]
-        );
-        assert_eq!(indicator_actions(true, DownloadState::NotDownloaded, false), vec![DownloadAction::Start]);
-        assert_eq!(indicator_actions(false, DownloadState::NotDownloaded, true), vec![DownloadAction::Start]);
-        assert_eq!(indicator_actions(true, DownloadState::Downloaded, true), vec![DownloadAction::Delete]);
     }
 
     #[test]
@@ -294,14 +220,5 @@ mod tests {
         assert_eq!(quality_target(&[one]), Some(one));
         assert_eq!(quality_target(&[one, unit(2, 11, DownloadState::Queue)]), None);
         assert_eq!(quality_target(&[]), None);
-    }
-
-    #[test]
-    fn a_long_press_on_a_not_downloaded_anime_indicator_shows_the_qualities() {
-        assert_eq!(indicator_long_press(true, DownloadState::NotDownloaded, true), Some(DownloadAction::ShowQualities));
-        assert_eq!(indicator_long_press(true, DownloadState::NotDownloaded, false), None, "no sheet registered");
-        assert_eq!(indicator_long_press(false, DownloadState::NotDownloaded, true), None, "manga has no qualities");
-        assert_eq!(indicator_long_press(true, DownloadState::Downloaded, true), None);
-        assert_eq!(indicator_long_press(true, DownloadState::Queue, true), None);
     }
 }

@@ -155,12 +155,6 @@ pub fn decode_icon(bytes: &[u8]) -> Option<DecodedIcon> {
     (width > 0 && height > 0).then(|| DecodedIcon { width, height, rgba: rgba.into_raw() })
 }
 
-/// The cached `icon.png` of a manga package, as the path the list loads. `None` when the package has none or has vanished,
-/// which the row draws as the generic glyph (T-18a-011).
-pub fn cached_icon_file(icons: &Path, pkg: &str) -> Option<String> {
-    kuro_extensions::icon::lookup(icons, pkg).map(|path| path.to_string_lossy().into_owned())
-}
-
 /// Icon choices keyed by source id.
 #[derive(Debug, Default)]
 pub struct IconCache {

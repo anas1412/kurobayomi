@@ -108,25 +108,10 @@ impl NotificationSink for NotifierSink {
 }
 
 /// Pure mapping from an event to the notification it needs, if any.
-pub fn effect_for(event: &DownloadEvent, hide_content: bool) -> Option<Effect> {
+pub fn effect_for(event: &DownloadEvent, _hide_content: bool) -> Option<Effect> {
     match event {
-        DownloadEvent::Progress { manga_title, chapter_name, downloaded, total, .. } => {
-            let progress = format!("Downloading ({downloaded}/{total})");
-            let (title, body) = if hide_content {
-                (progress, None)
-            } else {
-                (progress_title(manga_title, chapter_name), Some(progress))
-            };
-            Some(Effect::Show(Notice {
-                id: PROGRESS_ID,
-                priority: Priority::Low,
-                title,
-                body,
-                ongoing: true,
-                actions: vec![Action::Pause, Action::ShowManga],
-                expire_secs: None,
-            }))
-        }
+        // no notification while downloading: the app's own Downloads item shows the progress; only the end is announced
+        DownloadEvent::Progress { .. } => None,
         DownloadEvent::Paused => Some(Effect::Show(Notice {
             id: PROGRESS_ID,
             priority: Priority::Low,
@@ -270,15 +255,9 @@ mod tests {
     }
 
     #[test]
-    fn hidden_content_shows_only_the_counts() {
-        let n = shown(&progress("Berserk", "Chapter 1", 3, 10), true);
-        assert_eq!(n.title, "Downloading (3/10)");
-        assert_eq!(n.body, None);
-        assert_eq!(n.id, PROGRESS_ID);
-        let open = shown(&progress("Berserk", "Chapter 1", 3, 10), false);
-        assert_eq!(open.body.as_deref(), Some("Downloading (3/10)"));
-        assert!(open.ongoing);
-        assert_eq!(open.actions, vec![Action::Pause, Action::ShowManga]);
+    fn downloading_shows_no_notification_only_the_end_does() {
+        assert!(effect_for(&progress("Berserk", "Chapter 1", 3, 10), false).is_none());
+        assert!(effect_for(&progress("Berserk", "Chapter 1", 3, 10), true).is_none());
     }
 
     #[test]
@@ -337,7 +316,6 @@ mod tests {
     #[test]
     fn every_downloader_notice_is_low_importance() {
         let events = [
-            progress("M", "C", 1, 2),
             DownloadEvent::Paused,
             DownloadEvent::Warning { text: "w".into(), timeout_secs: None, help_url: None },
             DownloadEvent::Error { chapter_id: None, manga_id: None, manga_title: None, chapter_name: None, message: "e".into() },
@@ -364,19 +342,6 @@ mod tests {
         fn withdraw(&self, _id: &str) {}
     }
 
-    #[test]
-    fn the_platform_sink_keeps_the_hidden_progress_text() {
-        let fake = Arc::new(FakeNotifier::default());
-        let sink = NotifierSink::new(fake.clone());
-        let event = progress("Berserk", "Chapter 1", 3, 10);
-        sink.show(&shown(&event, false));
-        sink.show(&shown(&event, true));
-        let calls = fake.0.lock().unwrap();
-        assert_eq!(calls[0], (PROGRESS_ID.into(), "Berserk - Chapter 1".into(), Some("Downloading (3/10)".into())));
-        // hide_notification_content on: the counts stay, names and body are gone (T-23a-043, T-24a-028).
-        assert_eq!(calls[1], (PROGRESS_ID.into(), "Downloading (3/10)".into(), None));
-    }
-
     #[derive(Default)]
     struct Recorder(Mutex<Vec<String>>);
 
@@ -397,7 +362,8 @@ mod tests {
         dispatch(&DownloadEvent::Complete, false, &sink);
         assert_eq!(
             *sink.0.lock().unwrap(),
-            vec![format!("show {PROGRESS_ID}"), format!("show {PROGRESS_ID}"), format!("withdraw {PROGRESS_ID}")]
+            vec![format!("show {PROGRESS_ID}"), format!("withdraw {PROGRESS_ID}")],
+            "progress shows nothing; pause shows, completion withdraws"
         );
     }
 }

@@ -3,9 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
-use url::Url;
-
-/// The folder under the Videos folder that holds the app's files when the user has not picked another one.
+/// The folder in the home folder that holds the app's files when the user has not picked another one.
 pub const STORAGE_DIR_NAME: &str = "Kurobayomi";
 
 /// Directories the app reads and writes, resolved for the current platform.
@@ -24,9 +22,14 @@ pub trait Paths {
     fn temp_dir(&self) -> PathBuf;
     /// Crash reports written by the panic hook.
     fn crash_dir(&self) -> PathBuf;
-    /// The user's Videos folder, the platform's video directory. Platforms that know it override this. The default is
-    /// the data directory, so a test double without a video folder still resolves to a path.
-    fn videos_dir(&self) -> PathBuf {
+    /// The user's home folder. Platforms that know it override this. The default is the data directory, so a test
+    /// double without a home folder still resolves to a path.
+    fn user_home_dir(&self) -> PathBuf {
+        self.data_dir()
+    }
+    /// The platform's usual folder for downloaded files (app updates go there, not into the storage folder). The
+    /// default is the data directory, for test doubles.
+    fn user_downloads_dir(&self) -> PathBuf {
         self.data_dir()
     }
     /// Cached cover images.
@@ -37,18 +40,11 @@ pub trait Paths {
     // The roles below have defaults built from the base directories, so an implementation only overrides one to
     // relocate it. They exist so no other crate joins a literal onto a base directory (T-req-platform-001).
 
-    /// The storage folder used until the user picks one: `<Videos>/Kurobayomi`. Nothing asks for it; it is created on
-    /// first use.
+    /// The storage folder used until the user picks one: `<home>/Kurobayomi`. The folders inside it (downloads per
+    /// kind, backups, local folders) are named by the storage manager (`kuro_domain::storage`), which resolves them under
+    /// this folder or the one the user picked. Nothing is created here.
     fn default_storage_dir(&self) -> PathBuf {
-        self.videos_dir().join(STORAGE_DIR_NAME)
-    }
-    /// Where downloads go when the user has not picked a folder.
-    fn default_downloads_dir(&self) -> PathBuf {
-        self.default_storage_dir().join("Downloads")
-    }
-    /// Where backups go when the user has not picked a folder.
-    fn default_backups_dir(&self) -> PathBuf {
-        self.default_storage_dir().join("Backups")
+        self.user_home_dir().join(STORAGE_DIR_NAME)
     }
 
     /// Decoded page and image cache (Aniyomi's `image_cache`).
@@ -96,10 +92,6 @@ pub trait Paths {
     fn extension_download_dir(&self) -> PathBuf {
         self.cache_dir().join("ext-download")
     }
-    /// Automatic backups when the user has not picked a folder.
-    fn auto_backups_dir(&self) -> PathBuf {
-        self.default_backups_dir()
-    }
     /// Snapshot of the download index, kept in the cache beside the downloads folder.
     fn download_index_cache_dir(&self) -> PathBuf {
         self.cache_dir().join("downloads")
@@ -133,27 +125,6 @@ pub trait Paths {
     /// `None` when no home directory exists.
     fn host_config_dir(&self) -> Option<PathBuf> {
         directories::BaseDirs::new().map(|base| base.config_dir().to_path_buf())
-    }
-}
-
-/// The default download folder as a path and as a `file://` URL.
-pub struct FolderProvider<'a> {
-    paths: &'a dyn Paths,
-}
-
-impl<'a> FolderProvider<'a> {
-    pub fn new(paths: &'a dyn Paths) -> Self {
-        Self { paths }
-    }
-
-    /// The default download folder.
-    pub fn directory(&self) -> PathBuf {
-        self.paths.default_downloads_dir()
-    }
-
-    /// The download folder as a `file://` URL. `None` when the folder path is not absolute.
-    pub fn url(&self) -> Option<Url> {
-        Url::from_file_path(self.directory()).ok()
     }
 }
 
@@ -238,8 +209,6 @@ mod role_tests {
         fn log_dir(&self) -> PathBuf { "/l".into() }
         fn temp_dir(&self) -> PathBuf { "/t".into() }
         fn crash_dir(&self) -> PathBuf { "/cr".into() }
-        fn default_downloads_dir(&self) -> PathBuf { "/dl".into() }
-        fn default_backups_dir(&self) -> PathBuf { "/b".into() }
         fn covers_dir(&self) -> PathBuf { "/k/covers".into() }
         fn plugin_dir(&self) -> PathBuf { "/d/plugins".into() }
     }
@@ -258,7 +227,6 @@ mod role_tests {
         assert_eq!(p.extension_icons_dir(), PathBuf::from("/k/extensions/icons"));
         assert_eq!(p.anime_extension_icons_dir(), PathBuf::from("/k/ext-icons"));
         assert_eq!(p.extension_download_dir(), PathBuf::from("/k/ext-download"));
-        assert_eq!(p.auto_backups_dir(), PathBuf::from("/b"), "automatic backups go to the backups folder");
         assert_eq!(p.download_index_cache_dir(), PathBuf::from("/k/downloads"));
         assert_eq!(p.library_update_log_file(), PathBuf::from("/k/update_errors.txt"));
         assert_eq!(p.cookie_jar_file(), PathBuf::from("/d/cookies.json"));
@@ -266,10 +234,10 @@ mod role_tests {
         assert_eq!(p.cookies_import_file(), PathBuf::from("/c/cookies.txt"));
     }
 
-    /// A fake that knows only its video folder, so the storage defaults resolve through the trait alone.
-    struct Videos(&'static str);
+    /// A fake that knows only its home folder, so the storage default resolves through the trait alone.
+    struct Home(&'static str);
 
-    impl Paths for Videos {
+    impl Paths for Home {
         fn data_dir(&self) -> PathBuf { "/d".into() }
         fn config_dir(&self) -> PathBuf { "/c".into() }
         fn state_dir(&self) -> PathBuf { "/s".into() }
@@ -279,21 +247,18 @@ mod role_tests {
         fn crash_dir(&self) -> PathBuf { "/cr".into() }
         fn covers_dir(&self) -> PathBuf { "/k/covers".into() }
         fn plugin_dir(&self) -> PathBuf { "/d/plugins".into() }
-        fn videos_dir(&self) -> PathBuf { self.0.into() }
+        fn user_home_dir(&self) -> PathBuf { self.0.into() }
     }
 
     #[test]
-    fn the_default_folders_hang_off_the_videos_folder() {
-        let p = Videos("/home/u/Videos");
-        assert_eq!(p.default_storage_dir(), PathBuf::from("/home/u/Videos/Kurobayomi"));
-        assert_eq!(p.default_downloads_dir(), PathBuf::from("/home/u/Videos/Kurobayomi/Downloads"));
-        assert_eq!(p.default_backups_dir(), PathBuf::from("/home/u/Videos/Kurobayomi/Backups"));
-        assert_eq!(p.auto_backups_dir(), p.default_backups_dir(), "automatic backups go to the backups folder");
+    fn the_default_storage_folder_is_kurobayomi_in_the_home_folder() {
+        assert_eq!(Home("/home/u").default_storage_dir(), PathBuf::from("/home/u/Kurobayomi"));
     }
 
     #[test]
-    fn a_double_without_a_video_folder_defaults_to_the_data_directory() {
+    fn a_double_without_a_home_folder_defaults_to_the_data_directory() {
         assert_eq!(Fixed.default_storage_dir(), PathBuf::from("/d/Kurobayomi"));
+        assert_eq!(Fixed.user_downloads_dir(), PathBuf::from("/d"));
     }
 
     #[test]

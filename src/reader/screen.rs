@@ -29,10 +29,9 @@ use kuro_data::manga::{Manga, MangaRepo, MangaUpdate};
 use kuro_prefs::reader::{ReaderPrefs, ReadingMode};
 use tokio::sync::watch;
 
-use super::bottom_bar::BottomBar;
 use super::chapters::ListOptions;
 use super::delete_queue::{Pending, QueueFile};
-use super::chrome::{self, TopBar, TopBarActions, build_bare_top_bar, build_error_card, build_top_bar};
+use super::chrome::{self, MenuHandlers, TopBar, TopBarActions, build_bare_top_bar, build_error_card, build_top_bar};
 use super::flags;
 use super::history_rules;
 use super::page_actions;
@@ -40,17 +39,16 @@ use super::page_save;
 use super::saved_notice;
 use super::restore;
 use crate::misc::diet_defaults as diet;
-use super::indicator::PageIndicator;
+use crate::widgets::page_header::{self, TwoLineTitle};
 use super::keep_awake::{self, KeepAwake};
 use super::loader::{LoadFailure, Loader, load_chapter};
-use super::mode_sheet::{self, Outcome};
 use super::model::{LoadError, PageStatus, ReaderChapter, ReaderPage, ViewerChapters};
 use super::nav::{self, Step};
 use super::nav_overlay::{self, NavOverlay};
 use super::navigator::{Navigator, NavigatorState};
 use super::overlay::Tint;
 use super::session::{AdjacentOutcome, ReaderEvent, ReaderSession, ReaderStore, TrackUpdate, open_list};
-use super::settings_window::{self, MangaChoices};
+use super::settings_window;
 use super::sheet::{self, Sheet};
 use super::source_pages;
 use super::sync::{self, Effect};
@@ -482,10 +480,6 @@ impl ReaderCore {
         }
     }
 
-    pub fn show_page_number(&self) -> bool {
-        diet::READER_SHOW_PAGE_NUMBER
-    }
-
     pub fn theme_pref(&self) -> i32 {
         self.deps.prefs.reader_theme.get()
     }
@@ -500,6 +494,13 @@ impl ReaderCore {
     ) -> Option<usize> {
         let build = Rc::clone(&self.deps.build);
         self.session.borrow_mut().as_mut().and_then(|s| s.on_page_selected(page, |c| build(c), download_ahead, flash))
+    }
+
+    /// A viewer shows a transition card: the page counter has no number.
+    pub fn transition_shown(&self) {
+        if let Some(session) = self.session.borrow_mut().as_mut() {
+            session.clear_current_page();
+        }
     }
 
     /// Hands the chapters download-ahead picked to the sink, when the app gave one (T-43a-034).
@@ -575,6 +576,10 @@ impl ReaderChrome {
                 sync_top_bar(&screen);
                 refresh(&screen);
             }
+            ViewerEvent::TransitionShown => {
+                screen.core.transition_shown();
+                refresh(&screen);
+            }
             ViewerEvent::RequestPreload(chapter) => screen.core.request_preload(&chapter),
             ViewerEvent::LongTap(page) => open_page_actions(&screen, page),
         }
@@ -622,6 +627,9 @@ impl ReaderChrome {
 
     pub fn hide_menu(&self) {
         if let Some(screen) = self.screen.upgrade() {
+            if screen.keep_menu_until.get().is_some_and(|until| std::time::Instant::now() < until) {
+                return;
+            }
             set_menu(&screen, false);
         }
     }
@@ -659,8 +667,13 @@ struct Screen {
     top: gtk::Revealer,
     bottom: gtk::Revealer,
     navigator: Rc<Navigator>,
-    bottom_bar: Rc<BottomBar>,
-    indicator: PageIndicator,
+    /// Until then a hide request from a viewer is ignored: the slider and the chapter buttons move the pages, and
+    /// that move must not read as a swipe that hides the bar.
+    keep_menu_until: Cell<Option<std::time::Instant>>,
+    /// The `reader` actions of the top bar's menu, installed on the root.
+    menu_actions: gtk::gio::SimpleActionGroup,
+    /// The title of the top bar shown now, which carries the page position. `None` while the bar is bare.
+    position: RefCell<Option<TwoLineTitle>>,
     sheet: Rc<Sheet>,
     ui: RefCell<UiState>,
     keep_awake: KeepAwake,
@@ -688,7 +701,6 @@ pub fn open_with(
     toaster: Toaster,
     on_close: impl Fn() + 'static,
 ) -> ReaderScreen {
-    theme::install_css();
     // Decodes started by an earlier reader are stale from now on (T-43b-059).
     crate::reader::decode_guard::new_session();
     // and so are the pages the last reader kept decoded
@@ -725,11 +737,11 @@ pub fn open_with(
     top.set_transition_duration(200);
     top.set_child(Some(&top_slot));
     top.set_reveal_child(true);
-    let bottom_bar = BottomBar::new();
-    // the page slider with the chapter buttons sits at the bottom, above the bottom bar
+    // the page slider with the chapter buttons is the only thing in the floating bottom bar
     let bottom_column = gtk::Box::new(gtk::Orientation::Vertical, 0);
     bottom_column.append(&navigator.root);
-    bottom_column.append(&bottom_bar.root);
+    // a press on the bar is picked by the bar (an overlay above the pages), so it never reaches the page's tap handler;
+    // no extra gesture here, as claiming the press on the bar would also steal the slider's own drag
     let bottom = gtk::Revealer::new();
     bottom.set_transition_type(gtk::RevealerTransitionType::SlideUp);
     bottom.set_transition_duration(200);
@@ -737,12 +749,14 @@ pub fn open_with(
     bottom.set_reveal_child(true);
 
     let sheet = Sheet::new(&page_layer);
-    let indicator = PageIndicator::new();
-    sheet.root().add_overlay(&indicator.label);
+    // the bottom bar floats over the pages (as in Aniyomi): showing it never resizes the page area, so the pages do
+    // not move and nothing reads the toggle as a scroll that hides it again
+    // it goes on the page layer, so the reader's sheets still open above it
+    bottom.set_valign(gtk::Align::End);
+    page_layer.add_overlay(&bottom);
     let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
     column.append(&top);
     column.append(sheet.root());
-    column.append(&bottom);
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.set_widget_name("screen:reader");
     root.set_focusable(true);
@@ -753,7 +767,7 @@ pub fn open_with(
 
     let root_ref = glib::WeakRef::new();
     root_ref.set(Some(&root));
-    let screen = Rc::new(Screen {
+    let screen = Rc::new_cyclic(|me| Screen {
         core: Rc::clone(&core),
         ready: RefCell::new(gate.ready_watch()),
         toaster,
@@ -773,13 +787,15 @@ pub fn open_with(
         top,
         bottom,
         navigator: Rc::clone(&navigator),
-        bottom_bar: Rc::clone(&bottom_bar),
-        indicator,
+        keep_menu_until: Cell::new(None),
+        menu_actions: chrome::menu_actions(core.reading_mode(), core.crop_on(), menu_handlers(me)),
+        position: RefCell::new(None),
         sheet: Rc::clone(&sheet),
         ui: RefCell::new(UiState::default()),
         keep_awake: KeepAwake::default(),
         stepping: Cell::new(false),
     });
+    root.insert_action_group(chrome::ACTION_GROUP, Some(&screen.menu_actions));
 
     let weak = Rc::downgrade(&screen);
     let (step_weak, slider_weak) = (weak.clone(), weak.clone());
@@ -806,24 +822,6 @@ pub fn open_with(
             None => false,
         }
     });
-    let (mode_weak, crop_weak, settings_weak) = (weak.clone(), weak.clone(), weak.clone());
-    bottom_bar.connect(
-        move || {
-            if let Some(s) = mode_weak.upgrade() {
-                open_mode_sheet(&s);
-            }
-        },
-        move || {
-            if let Some(s) = crop_weak.upgrade() {
-                toggle_crop(&s);
-            }
-        },
-        move || {
-            if let Some(s) = settings_weak.upgrade() {
-                open_settings(&s);
-            }
-        },
-    );
     let dismissed = weak.clone();
     sheet.connect_dismissed(move || {
         if let Some(s) = dismissed.upgrade() {
@@ -910,7 +908,7 @@ fn apply_effect(screen: &Screen, effect: Effect) {
     }
 }
 
-/// Applies the chrome state: navigator, bottom bar, page indicator and the window fullscreen state.
+/// Applies the chrome state: navigator, page position, menu state and the window fullscreen state.
 fn refresh(screen: &Screen) {
     let (previous, next) = screen.core.nav_enabled();
     let (page, total) = screen.core.page_counts();
@@ -924,8 +922,8 @@ fn refresh(screen: &Screen) {
     };
     screen.navigator.update(&state, size_of(screen));
     let ui = *screen.ui.borrow();
-    screen.indicator.update(page, total, ui.menu_visible, screen.core.show_page_number());
-    screen.bottom_bar.update(screen.core.manga_mode(), screen.core.crop_on());
+    update_position(screen);
+    chrome::sync_menu_state(&screen.menu_actions, screen.core.reading_mode(), screen.core.crop_on());
     apply_fullscreen(screen, ui.menu_visible);
 }
 
@@ -988,29 +986,6 @@ fn handle_key(screen: &Rc<Screen>, key: gtk::gdk::Key, modifiers: gtk::gdk::Modi
         }
         None => glib::Propagation::Proceed,
     }
-}
-
-fn open_mode_sheet(screen: &Rc<Screen>) {
-    let weak = Rc::downgrade(screen);
-    let done: Rc<dyn Fn(Outcome)> = Rc::new(move |outcome| {
-        let Some(s) = weak.upgrade() else { return };
-        let mode = match outcome {
-            Outcome::Apply { mode, toast } => {
-                if let Some(text) = toast {
-                    s.toaster.show(text, ToastLength::Short);
-                }
-                mode
-            }
-            Outcome::Revert => ReadingMode::Default,
-        };
-        s.core.apply_mode(mode);
-        drain_events(&s);
-        s.sheet.dismiss();
-        refresh(&s);
-    });
-    let content = mode_sheet::build(screen.core.manga_mode(), screen.core.show_reading_mode(), done);
-    screen.ui.borrow_mut().open(Dialog::ReadingModeSelect);
-    screen.sheet.show(&content);
 }
 
 /// The page actions sheet (T-43a-045). A long press, a right-click and Shift+F10 open it for the page.
@@ -1184,31 +1159,19 @@ fn toggle_crop(screen: &Screen) {
     refresh(screen);
 }
 
-/// The reader settings window (T-043a-046, T-043a-047). Its chips apply to this manga at once.
+/// The reader settings window (T-043a-046, T-043a-047). Its mode row applies to this manga at once; the other rows write
+/// their keys, which the open reader follows.
 fn open_settings(screen: &Rc<Screen>) {
     let Some(window) = window_of(screen) else { return };
     let mode_weak = Rc::downgrade(screen);
-    let choices = MangaChoices {
-        on_mode: Rc::new(move |mode| {
-            if let Some(s) = mode_weak.upgrade() {
-                s.core.apply_mode(mode);
-                drain_events(&s);
-                refresh(&s);
-            }
-        }),
-    };
-    let body = settings_window::notebook(&screen.core.deps.prefs, screen.core.manga_mode(), choices);
-    let dialog = sheet::modal_window(&window, strings::ACTION_SETTINGS, &body);
-    screen.ui.borrow_mut().open(Dialog::Settings);
-    let closed = Rc::downgrade(screen);
-    dialog.connect_close_request(move |_| {
-        if let Some(s) = closed.upgrade() {
-            s.ui.borrow_mut().close(Dialog::Settings);
+    let on_mode: Rc<dyn Fn(ReadingMode)> = Rc::new(move |mode| {
+        if let Some(s) = mode_weak.upgrade() {
+            s.core.apply_mode(mode);
+            drain_events(&s);
             refresh(&s);
         }
-        glib::Propagation::Proceed
     });
-    dialog.present();
+    settings_window::open(&window, &screen.core.deps.prefs, screen.core.manga_mode(), on_mode);
 }
 
 /// The initial load. Clears a failure card, shows the spinner, waits for the source manager, then loads.
@@ -1359,9 +1322,16 @@ fn show_card(screen: &Rc<Screen>, error: &LoadError) {
 /// The slider's page index goes to the attached viewer's `move_to_page`. With no viewer attached (the load has not
 /// finished) there is nothing to move.
 fn move_viewer(screen: &Screen, index: usize) {
+    keep_menu_for_a_moment(screen);
     if let Some(viewer) = screen.viewer_slot.borrow().as_ref() {
         screen.core.move_viewer_to(viewer.as_ref(), index);
     }
+}
+
+/// Page moves the slider and the chapter buttons cause (the pager settling, the strip scrolling) must not hide the bar.
+/// ponytail: a short time window shared by both viewers; a per-viewer "slider moving" flag if it ever swallows a real swipe.
+fn keep_menu_for_a_moment(screen: &Screen) {
+    screen.keep_menu_until.set(Some(std::time::Instant::now() + std::time::Duration::from_millis(1200)));
 }
 
 /// Rebuilds the top bar when the chapter shown is not the current one.
@@ -1384,11 +1354,12 @@ fn rebuild_top_bar(screen: &Rc<Screen>) {
     let back = Rc::clone(&screen.on_close);
     let Some(info) = info else {
         // no chapter yet (the page list is loading, or the load failed): the bar still holds Back and the window buttons
+        *screen.position.borrow_mut() = None;
         screen.top_slot.append(&build_bare_top_bar(move || back()));
         return;
     };
     let manga_id = screen.core.deps.manga_id;
-    let (bookmark, overflow) = (Rc::downgrade(screen), Rc::downgrade(screen));
+    let bookmark = Rc::downgrade(screen);
     let actions = TopBarActions {
         on_back: Box::new(move || back()),
         // the title pushes the manga's details page above the reader, so returning pops back to the same page
@@ -1401,41 +1372,77 @@ fn rebuild_top_bar(screen: &Rc<Screen>) {
             // the bar is rebuilt after the click has finished, so its icon and label follow the new state
             glib::idle_add_local_once(move || rebuild_top_bar(&screen));
         }),
-        on_overflow: Box::new(move |index| {
-            if let Some(screen) = overflow.upgrade() {
-                open_overflow(&screen, index);
-            }
-        }),
     };
-    let bar = build_top_bar(&info, actions);
+    let (bar, title) = build_top_bar(&info, actions);
+    *screen.position.borrow_mut() = Some(title);
     screen.top_slot.append(&bar);
+    update_position(screen);
 }
 
-/// A menu entry: Set as cover for the page on screen, or for a web source open in the web view or the browser, or share
-/// (copy) the chapter's web address.
-fn open_overflow(screen: &Rc<Screen>, index: usize) {
-    let web = screen.core.top_bar().is_some_and(|bar| bar.is_http_source);
-    let item = chrome::overflow_items(web).get(index).copied();
-    if item == Some(strings::SET_AS_COVER) {
-        match screen.core.visible_page() {
+/// Shows "Page n of total" under the title in the top bar; nothing on a transition card or before the pages are known.
+fn update_position(screen: &Screen) {
+    if let Some(title) = screen.position.borrow().as_ref() {
+        let (page, total) = screen.core.page_counts();
+        title.set_subtitle(page_header::page_position(page, total).as_deref());
+    }
+}
+
+/// The handlers of the top bar menu's actions. Each holds the screen weakly, as the actions live on its root.
+fn menu_handlers(me: &Weak<Screen>) -> MenuHandlers {
+    fn run(me: &Weak<Screen>, f: impl Fn(&Rc<Screen>) + 'static) -> Rc<dyn Fn()> {
+        let me = me.clone();
+        Rc::new(move || {
+            if let Some(screen) = me.upgrade() {
+                f(&screen);
+            }
+        })
+    }
+    let mode_me = me.clone();
+    MenuHandlers {
+        // a chosen mode applies to this manga at once, like the settings window's chips
+        on_mode: Rc::new(move |mode| {
+            let Some(s) = mode_me.upgrade() else { return };
+            s.core.apply_mode(mode);
+            if !s.core.show_reading_mode() {
+                s.toaster.show(chrome::mode_label(mode), ToastLength::Short);
+            }
+            drain_events(&s);
+            refresh(&s);
+        }),
+        on_crop: run(me, |s| toggle_crop(s)),
+        on_settings: run(me, open_settings),
+        on_open_browser: run(me, open_in_browser),
+        on_share: run(me, share_chapter),
+        on_set_cover: run(me, |screen| match screen.core.visible_page() {
             Some(page) => set_cover(screen, &page),
             None => {
                 screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
             }
-        }
-        return;
+        }),
     }
-    let Some(url) = screen.core.chapter_url().and_then(|u| chrome::web_url(&u)) else {
+}
+
+/// The chapter's web address, or an error toast when it has none.
+fn chapter_web_url(screen: &Screen) -> Option<String> {
+    let url = screen.core.chapter_url().and_then(|u| chrome::web_url(&u));
+    if url.is_none() {
         screen.toaster.show(strings::UNKNOWN_ERROR, ToastLength::Short);
-        return;
-    };
-    if item == Some(strings::ACTION_SHARE) {
-        if let Some(root) = screen.root.upgrade() {
-            root.clipboard().set_text(&url);
-        }
-        return;
     }
+    url
+}
+
+/// Opens the chapter in the web view or the browser.
+fn open_in_browser(screen: &Rc<Screen>) {
+    let Some(url) = chapter_web_url(screen) else { return };
     gtk::UriLauncher::new(&url).launch(window_of(screen).as_ref(), None::<&gtk::gio::Cancellable>, |_| {});
+}
+
+/// Shares (copies) the chapter's web address.
+fn share_chapter(screen: &Rc<Screen>) {
+    let Some(url) = chapter_web_url(screen) else { return };
+    if let Some(root) = screen.root.upgrade() {
+        root.clipboard().set_text(&url);
+    }
 }
 
 /// A press of a chapter button or of N or P. At the ends, or while a load runs, it does nothing.
@@ -1448,6 +1455,7 @@ fn press(screen: &Rc<Screen>, step: Step) {
     if !enabled || screen.stepping.replace(true) {
         return;
     }
+    keep_menu_for_a_moment(screen);
     refresh(screen);
     run_step(screen, step);
 }
@@ -1971,6 +1979,52 @@ mod tests {
             screen.core.apply_mode(ReadingMode::LeftToRight);
             assert!(pump_until(|| screen.viewer.first_child().is_some_and(|w| w.is::<gtk::ScrolledWindow>())));
             assert_eq!(screen.viewer.observe_children().n_items(), 1);
+            window.destroy();
+        });
+    }
+
+    /// Hiding and showing the bottom bar must not grow the window: the page area's minimum height stays small.
+    #[test]
+    fn toggling_the_menu_does_not_grow_the_window() {
+        crate::testing::with_display(|| {
+            let f = fixture(2);
+            let deps = ReaderDeps {
+                db: Arc::clone(&f.db),
+                manga_id: f.manga_id,
+                chapter_id: f.chapter_ids[0],
+                prefs: ReaderPrefs::new(PrefStore::in_memory()),
+                store: Rc::new(NoStore),
+                build: http_build("menu-toggle"),
+                is_downloaded: Rc::new(|_| false),
+                downloaded_only: false,
+                incognito: false,
+                prefs_store: PrefStore::in_memory(),
+            };
+            let (toaster, _feed) = kuro_platform::toast::toast_channel();
+            let screen = open(deps, &crate::reader::launch::open_gate(), toaster, || {});
+            let window = gtk::Window::new();
+            window.set_default_size(900, 600);
+            window.set_child(Some(&screen.root));
+            window.present();
+            assert!(pump_until(|| screen.viewer.first_child().is_some() && window.height() > 0));
+            let settle = || {
+                let (ctx, end) = (glib::MainContext::default(), std::time::Instant::now() + std::time::Duration::from_millis(300));
+                while std::time::Instant::now() < end {
+                    while ctx.iteration(false) {}
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            };
+            for mode in [ReadingMode::LeftToRight, ReadingMode::RightToLeft, ReadingMode::Vertical, ReadingMode::Webtoon] {
+                screen.core.apply_mode(mode);
+                settle();
+                for toggle in 0..4 {
+                    screen.chrome.toggle_menu();
+                    settle();
+                    assert_eq!(window.height(), 600, "the window keeps its height ({mode:?}, toggle {toggle})");
+                    let min = screen.viewer.measure(gtk::Orientation::Vertical, -1).0;
+                    assert!(min <= 100, "the page area asks for {min}px at least ({mode:?})");
+                }
+            }
             window.destroy();
         });
     }

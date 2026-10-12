@@ -39,12 +39,9 @@ pub const ACTION_SHARE: &str = "Share";
 /// The button of the share notice: shows the shared picture in the file manager (T-43a-056).
 pub const ACTION_SHOW_IN_FILE_MANAGER: &str = "Show in file manager";
 pub const ACTION_COPY_TO_CLIPBOARD: &str = "Copy to clipboard";
-pub const ACTION_APPLY: &str = "Apply";
-pub const ACTION_REVERT_TO_DEFAULT: &str = "Revert to default";
 
 pub const ACTION_BOOKMARK: &str = "Bookmark chapter";
 pub const ACTION_REMOVE_BOOKMARK: &str = "Unbookmark chapter";
-pub const ACTION_OPEN_IN_WEB_VIEW: &str = "Open in WebView";
 pub const ACTION_OPEN_IN_BROWSER: &str = "Open in browser";
 pub const ACTION_NEXT_CHAPTER: &str = "Next chapter";
 pub const ACTION_PREVIOUS_CHAPTER: &str = "Previous chapter";
@@ -57,13 +54,13 @@ pub const LABEL_DEFAULT: &str = "Default";
 pub const CUSTOM_BRIGHTNESS_UNAVAILABLE: &str = "Custom brightness is not available on this display";
 /// The accessible name and tooltip of the top bar overflow button (the Kotlin content description, in English).
 pub const OVERFLOW_MENU: &str = "More";
+pub const MENU_READER_SETTINGS: &str = "Reader settings…";
 
 pub fn name_collision_suffix(n: u32) -> String {
     format!(" ({n})")
 }
 
 pub const PREF_CATEGORY_READING_MODE: &str = "Reading mode";
-pub const PREF_CATEGORY_GENERAL: &str = "General";
 pub const CUSTOM_FILTER: &str = "Custom filter";
 pub const PREF_CATEGORY_FOR_THIS_SERIES: &str = "For this series";
 pub const PAGER_VIEWER: &str = "Paged";
@@ -74,14 +71,12 @@ pub const PREF_IMAGE_SCALE_TYPE: &str = "Scale type";
 pub const PREF_ZOOM_START: &str = "Zoom start position";
 pub const PREF_LANDSCAPE_ZOOM: &str = "Automatically zoom into wide images";
 pub const PREF_NAVIGATE_PAN: &str = "Pan wide images";
-pub const PREF_DUAL_PAGE_SPLIT: &str = "Split wide pages";
 pub const PREF_DUAL_PAGE_INVERT: &str = "Invert split page placement";
 pub const PREF_PAGE_ROTATE: &str = "Rotate wide pages to fit";
 pub const PREF_PAGE_ROTATE_INVERT: &str = "Flip orientation of rotated wide pages";
 pub const PREF_WEBTOON_SIDE_PADDING: &str = "Side padding";
 pub const PREF_DOUBLE_TAP_ZOOM: &str = "Double tap to zoom";
 pub const PREF_WEBTOON_DISABLE_ZOOM_OUT: &str = "Disable zoom out";
-pub const PREF_READER_THEME: &str = "Background color";
 pub const PREF_SHOW_PAGE_NUMBER: &str = "Show page number";
 pub const PREF_FULLSCREEN: &str = "Fullscreen";
 /// The help line that records the dropped cutout setting on Linux (T-43b-050). The key stays in the store.
@@ -117,10 +112,6 @@ pub const PREF_FLASH_WITH: &str = "Flash with";
 pub const PREF_FLASH_STYLE_BLACK: &str = "Black";
 pub const PREF_FLASH_STYLE_WHITE: &str = "White";
 pub const PREF_FLASH_STYLE_WHITE_BLACK: &str = "White and Black";
-pub const BLACK_BACKGROUND: &str = "Black";
-pub const GRAY_BACKGROUND: &str = "Gray";
-pub const WHITE_BACKGROUND: &str = "White";
-pub const AUTOMATIC_BACKGROUND: &str = "Auto";
 pub const PREF_CUSTOM_BRIGHTNESS: &str = "Custom brightness";
 pub const PREF_CUSTOM_COLOR_FILTER: &str = "Custom color filter";
 // The four colour labels were not re-read from strings.xml; verify before release (T-43a-061).
@@ -157,9 +148,9 @@ pub const ZOOM_START_RIGHT: &str = "Right";
 pub const ZOOM_START_CENTER: &str = "Center";
 
 // The four paged names match the base `strings.xml` of the upstream app (G-34 closed).
-pub const LEFT_TO_RIGHT_VIEWER: &str = "Paged (left to right)";
-pub const RIGHT_TO_LEFT_VIEWER: &str = "Paged (right to left)";
-pub const VERTICAL_VIEWER: &str = "Paged (vertical)";
+pub const LEFT_TO_RIGHT_VIEWER: &str = "Paged, left to right";
+pub const RIGHT_TO_LEFT_VIEWER: &str = "Paged, right to left";
+pub const VERTICAL_VIEWER: &str = "Paged, vertical";
 pub const VERTICAL_PLUS_VIEWER: &str = "Long strip with gaps";
 
 /// `Source not installed: %1$s` (`source_not_installed`).
@@ -214,6 +205,12 @@ mod tests {
     fn the_reading_mode_names_match_the_base_strings() {
         assert_eq!(VERTICAL_PLUS_VIEWER, "Long strip with gaps");
         assert_eq!(WEBTOON_VIEWER, "Long strip");
+    }
+
+    #[test]
+    fn the_menu_entries_for_the_moved_bottom_bar_actions() {
+        assert_eq!(MENU_READER_SETTINGS, "Reader settings…");
+        assert_eq!(PREF_CROP_BORDERS, "Crop borders");
     }
 
     #[test]

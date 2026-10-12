@@ -147,8 +147,6 @@ mod tests {
             fn log_dir(&self) -> PathBuf { self.0.join("log") }
             fn temp_dir(&self) -> PathBuf { self.0.join("tmp") }
             fn crash_dir(&self) -> PathBuf { self.0.join("crash") }
-            fn default_downloads_dir(&self) -> PathBuf { self.0.join("dl") }
-            fn default_backups_dir(&self) -> PathBuf { self.0.join("backups") }
             fn covers_dir(&self) -> PathBuf { self.0.join("covers") }
             fn plugin_dir(&self) -> PathBuf { self.0.join("plugins") }
         }

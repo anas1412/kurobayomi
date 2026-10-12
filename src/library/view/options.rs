@@ -1,0 +1,357 @@
+//! The library's view options (user decision 2026-10-12), on the shared menu button of `widgets::view_options`:
+//! "Show only" checks, "Sort by" radios with "Reverse order", and "View" radios Grid / List. Every change is written at
+//! once; the button shows a dot while a Show only filter is on. A filter is include-or-off: there is no exclude state
+//! (`load::include_only`).
+
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
+use std::rc::{Rc, Weak};
+
+use gtk::glib;
+use kuro_domain::kind::EntryKind;
+use kuro_domain::library::sort::{Direction, LibrarySort, SortType};
+use kuro_i18n::{MsgKey, tr};
+use kuro_prefs::library::{LibraryDisplayMode, LibraryPrefs};
+use kuro_prefs::pref::Pref;
+use kuro_prefs::tristate::TriState;
+
+use crate::library::load::include_only;
+use crate::misc::diet_defaults as diet;
+use crate::widgets::view_options::{Item, Pick, Section, ViewOptions};
+
+use super::{Inner, active_index, submit};
+
+/// One "Show only" check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Show {
+    Downloaded,
+    /// Unread for manga, Unwatched for anime.
+    Unseen,
+    Completed,
+    /// On any logged-in tracker; listed only while one is logged in.
+    Tracked,
+}
+
+impl Show {
+    pub const ALL: [Show; 4] = [Show::Downloaded, Show::Unseen, Show::Completed, Show::Tracked];
+
+    fn action(self) -> &'static str {
+        match self {
+            Show::Downloaded => "downloaded",
+            Show::Unseen => "unseen",
+            Show::Completed => "completed",
+            Show::Tracked => "tracked",
+        }
+    }
+
+    pub fn label(self, kind: EntryKind) -> String {
+        match (self, kind) {
+            (Show::Downloaded, _) => tr(MsgKey::label_downloaded),
+            (Show::Unseen, EntryKind::Manga) => tr(MsgKey::action_filter_unread),
+            (Show::Unseen, EntryKind::Anime) => "Unwatched".to_owned(),
+            (Show::Completed, _) => tr(MsgKey::completed),
+            (Show::Tracked, _) => tr(MsgKey::action_filter_tracked),
+        }
+    }
+}
+
+/// The stored keys behind one check: one key, or one per logged-in tracker for Tracked.
+fn keys(prefs: &LibraryPrefs, kind: EntryKind, show: Show, logged_in: &BTreeSet<i64>) -> Vec<Pref<TriState>> {
+    use EntryKind::{Anime, Manga};
+    match (kind, show) {
+        (Anime, Show::Downloaded) => vec![prefs.filter_downloaded_anime.clone()],
+        (Manga, Show::Downloaded) => vec![prefs.filter_downloaded_manga.clone()],
+        (Anime, Show::Unseen) => vec![prefs.filter_unseen.clone()],
+        (Manga, Show::Unseen) => vec![prefs.filter_unread.clone()],
+        (Anime, Show::Completed) => vec![prefs.filter_completed_anime.clone()],
+        (Manga, Show::Completed) => vec![prefs.filter_completed_manga.clone()],
+        (Anime, Show::Tracked) => logged_in.iter().map(|id| prefs.filter_tracked_anime(*id as i32)).collect(),
+        (Manga, Show::Tracked) => logged_in.iter().map(|id| prefs.filter_tracked_manga(*id as i32)).collect(),
+    }
+}
+
+/// Whether a check is on. The global downloaded-only switch forces Downloaded on; an old exclude value reads as off.
+pub fn is_on(prefs: &LibraryPrefs, kind: EntryKind, show: Show, logged_in: &BTreeSet<i64>, downloaded_only: bool) -> bool {
+    (show == Show::Downloaded && downloaded_only)
+        || keys(prefs, kind, show, logged_in).iter().any(|p| include_only(p.get()) == TriState::ENABLED_IS)
+}
+
+/// Writes a check: on is include, off is off. Tracked writes the key of every logged-in tracker.
+pub fn set(prefs: &LibraryPrefs, kind: EntryKind, show: Show, on: bool, logged_in: &BTreeSet<i64>) -> Result<(), kuro_prefs::PrefError> {
+    let state = if on { TriState::ENABLED_IS } else { TriState::DISABLED };
+    keys(prefs, kind, show, logged_in).iter().try_for_each(|p| p.set(state))
+}
+
+/// The "Sort by" radios of a kind, in its declaration order. Tracker score is offered only with a tracker logged in;
+/// airing time exists for anime only (through `SortType::types`).
+pub fn sort_rows(kind: EntryKind, has_tracker: bool) -> Vec<SortType> {
+    SortType::types(kind).iter().copied().filter(|ty| has_tracker || *ty != SortType::TrackerMean).collect()
+}
+
+/// The radio title from the string table (the labels differ between manga and anime).
+pub fn sort_label(kind: EntryKind, ty: SortType) -> MsgKey {
+    use EntryKind::{Anime, Manga};
+    match (kind, ty) {
+        (_, SortType::Alphabetical) => MsgKey::action_sort_alpha,
+        (Manga, SortType::LastActivity) => MsgKey::action_sort_last_read,
+        (Anime, SortType::LastActivity) => MsgKey::action_sort_last_seen,
+        (Manga, SortType::LastUpdate) => MsgKey::action_sort_last_manga_update,
+        (Anime, SortType::LastUpdate) => MsgKey::action_sort_last_anime_update,
+        (Manga, SortType::UnreadCount) => MsgKey::action_sort_unread_count,
+        (Anime, SortType::UnreadCount) => MsgKey::action_sort_unseen_count,
+        (Manga, SortType::TotalItems) => MsgKey::action_sort_total,
+        (Anime, SortType::TotalItems) => MsgKey::action_sort_total_episodes,
+        (Manga, SortType::LatestItem) => MsgKey::action_sort_latest_chapter,
+        (Anime, SortType::LatestItem) => MsgKey::action_sort_latest_episode,
+        (Manga, SortType::ItemFetchDate) => MsgKey::action_sort_chapter_fetch_date,
+        (Anime, SortType::ItemFetchDate) => MsgKey::action_sort_episode_fetch_date,
+        (_, SortType::DateAdded) => MsgKey::action_sort_date_added,
+        (_, SortType::TrackerMean) => MsgKey::action_sort_tracker_score,
+        (_, SortType::AiringTime) => MsgKey::action_sort_airing_time,
+        (_, SortType::Random) => MsgKey::action_sort_random,
+    }
+}
+
+/// Picking a sort key keeps the direction; Random has no order to reverse, so it is always ascending.
+pub fn pick(current: LibrarySort, ty: SortType) -> LibrarySort {
+    let dir = if ty == SortType::Random { Direction::Ascending } else { current.dir };
+    LibrarySort { ty, dir }
+}
+
+/// "Reverse order" is the descending direction.
+pub fn reversed(sort: LibrarySort) -> bool {
+    sort.ty != SortType::Random && sort.dir == Direction::Descending
+}
+
+pub fn reverse(sort: LibrarySort, on: bool) -> LibrarySort {
+    LibrarySort { dir: if on { Direction::Descending } else { Direction::Ascending }, ..sort }
+}
+
+/// The display mode the Grid / List radios write. Grid keeps a stored grid style and turns List into the default grid.
+pub fn mode(list: bool, current: LibraryDisplayMode) -> LibraryDisplayMode {
+    match (list, current) {
+        (true, _) => LibraryDisplayMode::List,
+        (false, LibraryDisplayMode::List) => LibraryDisplayMode::DEFAULT,
+        (false, grid) => grid,
+    }
+}
+
+fn mode_target(mode: LibraryDisplayMode) -> &'static str {
+    if mode == LibraryDisplayMode::List { "list" } else { "grid" }
+}
+
+/// The sort of the active page and the category it is stored on (`None`: the global sort).
+fn current_sort(st: &Inner) -> (Option<i64>, LibrarySort) {
+    let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(st)));
+    let categorized = diet::LIBRARY_CATEGORISED_DISPLAY;
+    let category = page.map(|p| p.category.id).filter(|_| categorized);
+    let sort = match page {
+        Some(p) if categorized => p.category.sort(st.deps.kind),
+        _ => st.deps.categories.global_sort(),
+    };
+    (category, sort)
+}
+
+/// The library's menu on the shared view-options button (`widgets::view_options`). Cheap to clone.
+#[derive(Clone)]
+pub(super) struct Options {
+    /// What the page header shows: the menu button with the dot over it.
+    pub widget: gtk::Overlay,
+    menu: ViewOptions,
+    /// Whether the menu lists the tracker items; the menu is rebuilt when this changes.
+    has_tracker: Rc<Cell<bool>>,
+}
+
+/// The menu: three titled sections. The Show only checks are named by `Show::action`, the sort radios carry their
+/// token, and the View radios "grid" or "list".
+fn sections(kind: EntryKind, has_tracker: bool) -> Vec<Section> {
+    let show = Show::ALL.into_iter().filter(|s| has_tracker || *s != Show::Tracked).map(|s| Item::toggle(s.action(), s.label(kind))).collect();
+    let mut sort: Vec<Item> =
+        sort_rows(kind, has_tracker).into_iter().filter_map(|ty| ty.token(kind).map(|token| Item::radio("sort", token, tr(sort_label(kind, ty))))).collect();
+    sort.push(Item::toggle("reverse", "Reverse order"));
+    vec![
+        Section::filter("Show only", show),
+        Section::new("Sort by", sort),
+        Section::new("View", vec![Item::radio("mode", "grid", "Grid"), Item::radio("mode", "list", tr(MsgKey::action_display_list))]),
+    ]
+}
+
+impl Options {
+    /// The button and its menu; `wire` connects the picks once the view exists.
+    pub fn new(kind: EntryKind) -> Self {
+        let menu = ViewOptions::new("View options", &sections(kind, false));
+        Self { widget: menu.widget.clone(), menu, has_tracker: Rc::new(Cell::new(false)) }
+    }
+
+    /// Connects the picks. A filter or view write reloads through the view's preference watch; a sort write goes
+    /// through `CategoryService::set_sort_mode` (which draws a new Random seed) and reloads when it is done.
+    pub fn wire(&self, weak: &Weak<RefCell<Inner>>) {
+        let weak = weak.clone();
+        self.menu.connect(move |choice| {
+            let Some(inner) = weak.upgrade() else { return };
+            match choice {
+                Pick::Toggle("reverse", on) => {
+                    let (category, current) = current_sort(&inner.borrow());
+                    write_sort(&inner, category, reverse(current, on));
+                }
+                Pick::Toggle(name, on) => {
+                    let Some(show) = Show::ALL.into_iter().find(|s| s.action() == name) else { return };
+                    let (prefs, kind, logged_in) = {
+                        let st = inner.borrow();
+                        (st.deps.prefs.clone(), st.deps.kind, (st.deps.logged_in)())
+                    };
+                    if let Err(e) = set(&prefs, kind, show, on, &logged_in) {
+                        tracing::error!(error = %e, ?show, "saving a library filter failed");
+                    }
+                }
+                Pick::Radio("sort", token) => {
+                    let kind = inner.borrow().deps.kind;
+                    let Some(ty) = SortType::from_token(kind, &token) else { return };
+                    let (category, current) = current_sort(&inner.borrow());
+                    write_sort(&inner, category, pick(current, ty));
+                }
+                Pick::Radio("mode", target) => {
+                    let prefs = inner.borrow().deps.prefs.clone();
+                    let next = mode(target == "list", prefs.display_mode.get());
+                    kuro_domain::category::service::set_display_mode(&prefs, next);
+                }
+                Pick::Radio(..) | Pick::Action(_) => {}
+            }
+        });
+    }
+
+    /// Brings the checks, radios and the dot in line with what is stored, and lists the tracker items only while a
+    /// tracker is logged in. Runs on every render, without a borrow of the view held.
+    pub fn sync(inner: &Rc<RefCell<Inner>>) {
+        let (options, kind, prefs, logged_in, downloaded_only, sort) = {
+            let st = inner.borrow();
+            (st.options.clone(), st.deps.kind, st.deps.prefs.clone(), st.logged_in.clone(), (st.deps.downloaded_only)(), current_sort(&st).1)
+        };
+        let menu = &options.menu;
+        let has_tracker = !logged_in.is_empty();
+        if options.has_tracker.replace(has_tracker) != has_tracker {
+            menu.set_sections(&sections(kind, has_tracker));
+        }
+        for show in Show::ALL {
+            menu.set_toggle(show.action(), is_on(&prefs, kind, show, &logged_in, downloaded_only));
+            // the global downloaded-only switch holds the Downloaded check on
+            menu.set_enabled(show.action(), !(show == Show::Downloaded && downloaded_only));
+        }
+        menu.set_radio("sort", sort.ty.token(kind).unwrap_or_default());
+        menu.set_toggle("reverse", reversed(sort));
+        menu.set_enabled("reverse", sort.ty != SortType::Random);
+        menu.set_radio("mode", mode_target(prefs.display_mode.get()));
+    }
+
+    #[cfg(test)]
+    pub fn group(&self) -> &gtk::gio::SimpleActionGroup {
+        self.menu.group()
+    }
+
+    #[cfg(test)]
+    pub fn dot_visible(&self) -> bool {
+        self.menu.dot_visible()
+    }
+}
+
+fn write_sort(inner: &Rc<RefCell<Inner>>, category: Option<i64>, sort: LibrarySort) {
+    let (categories, weak) = (inner.borrow().deps.categories.clone(), Rc::downgrade(inner));
+    glib::spawn_future_local(async move {
+        if let Err(e) = categories.set_sort_mode(category, sort, kuro_domain::library::order::new_seed).await {
+            tracing::error!(error = %e, "saving the library sort failed");
+        }
+        if let Some(inner) = weak.upgrade() {
+            submit(&inner);
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use kuro_prefs::store::PrefStore;
+
+    use super::*;
+
+    fn prefs() -> LibraryPrefs {
+        LibraryPrefs::new(PrefStore::in_memory())
+    }
+
+    #[test]
+    fn a_check_writes_include_or_off_and_reads_an_old_exclude_as_off() {
+        let p = prefs();
+        let none = BTreeSet::new();
+        assert!(!is_on(&p, EntryKind::Manga, Show::Unseen, &none, false));
+        set(&p, EntryKind::Manga, Show::Unseen, true, &none).expect("write");
+        assert_eq!(p.filter_unread.get(), TriState::ENABLED_IS);
+        assert!(is_on(&p, EntryKind::Manga, Show::Unseen, &none, false));
+        assert!(!is_on(&p, EntryKind::Anime, Show::Unseen, &none, false), "anime and manga keep separate keys");
+        set(&p, EntryKind::Manga, Show::Unseen, false, &none).expect("write");
+        assert_eq!(p.filter_unread.get(), TriState::DISABLED);
+        p.filter_completed_anime.set(TriState::ENABLED_NOT).expect("write");
+        assert!(!is_on(&p, EntryKind::Anime, Show::Completed, &none, false));
+    }
+
+    #[test]
+    fn downloaded_only_holds_the_downloaded_check_on() {
+        let p = prefs();
+        assert!(is_on(&p, EntryKind::Anime, Show::Downloaded, &BTreeSet::new(), true));
+        assert!(!is_on(&p, EntryKind::Anime, Show::Completed, &BTreeSet::new(), true));
+    }
+
+    #[test]
+    fn tracked_is_one_check_over_every_logged_in_tracker() {
+        let p = prefs();
+        let logged = BTreeSet::from([1, 2]);
+        assert!(!is_on(&p, EntryKind::Anime, Show::Tracked, &logged, false));
+        set(&p, EntryKind::Anime, Show::Tracked, true, &logged).expect("write");
+        assert_eq!(p.filter_tracked_anime(1).get(), TriState::ENABLED_IS);
+        assert_eq!(p.filter_tracked_anime(2).get(), TriState::ENABLED_IS);
+        assert!(is_on(&p, EntryKind::Anime, Show::Tracked, &BTreeSet::from([2]), false));
+        set(&p, EntryKind::Anime, Show::Tracked, false, &logged).expect("write");
+        assert!(!is_on(&p, EntryKind::Anime, Show::Tracked, &logged, false));
+    }
+
+    #[test]
+    fn the_labels_follow_the_kind() {
+        assert_eq!(Show::Unseen.label(EntryKind::Manga), "Unread");
+        assert_eq!(Show::Unseen.label(EntryKind::Anime), "Unwatched");
+        assert_eq!(Show::Tracked.label(EntryKind::Anime), "Tracked");
+        for kind in [EntryKind::Manga, EntryKind::Anime] {
+            for ty in sort_rows(kind, true) {
+                assert!(!tr(sort_label(kind, ty)).is_empty(), "{kind:?} {ty:?}");
+                assert!(ty.token(kind).is_some(), "every radio has a target");
+            }
+        }
+        assert_eq!(tr(sort_label(EntryKind::Anime, SortType::LastActivity)), "Last seen");
+    }
+
+    #[test]
+    fn tracker_score_needs_a_tracker_and_airing_time_is_anime_only() {
+        assert!(!sort_rows(EntryKind::Manga, false).contains(&SortType::TrackerMean));
+        assert!(sort_rows(EntryKind::Manga, true).contains(&SortType::TrackerMean));
+        assert!(sort_rows(EntryKind::Anime, false).contains(&SortType::AiringTime));
+        assert!(!sort_rows(EntryKind::Manga, true).contains(&SortType::AiringTime));
+    }
+
+    #[test]
+    fn a_sort_key_keeps_the_direction_and_reverse_is_descending() {
+        let desc = LibrarySort { ty: SortType::Alphabetical, dir: Direction::Descending };
+        assert!(reversed(desc));
+        assert_eq!(pick(desc, SortType::DateAdded), LibrarySort { ty: SortType::DateAdded, dir: Direction::Descending });
+        let random = pick(desc, SortType::Random);
+        assert_eq!(random.dir, Direction::Ascending);
+        assert!(!reversed(random), "Random has no order to reverse");
+        assert_eq!(reverse(LibrarySort::DEFAULT, true).dir, Direction::Descending);
+        assert_eq!(reverse(desc, false).dir, Direction::Ascending);
+        assert!(!reversed(LibrarySort::DEFAULT));
+    }
+
+    #[test]
+    fn grid_keeps_a_grid_style_and_list_is_list() {
+        assert_eq!(mode(true, LibraryDisplayMode::ComfortableGrid), LibraryDisplayMode::List);
+        assert_eq!(mode(false, LibraryDisplayMode::List), LibraryDisplayMode::DEFAULT);
+        assert_eq!(mode(false, LibraryDisplayMode::CoverOnlyGrid), LibraryDisplayMode::CoverOnlyGrid);
+        assert_eq!(mode_target(LibraryDisplayMode::CoverOnlyGrid), "grid");
+        assert_eq!(mode_target(LibraryDisplayMode::List), "list");
+    }
+}

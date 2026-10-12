@@ -45,7 +45,7 @@ impl Welcome {
             crate::pref_model::highlight::request(crate::pref_model::strings::label_backup());
             crate::ui::open(Destination::DataAndStorage.screen_id());
         }));
-        links.append(&link(&tr(MsgKey::welcome_guide), || crate::browse::anime::browse::open_external(GUIDE_URL, None)));
+        links.append(&link(&tr(MsgKey::welcome_guide), || crate::browse::nav::open_external(GUIDE_URL, None)));
         page.append(&links);
 
         Self { page }

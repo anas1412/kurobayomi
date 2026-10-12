@@ -31,7 +31,6 @@ const LOCAL_SOURCE_ID: i64 = kuro_source::local::LOCAL_SOURCE_ID;
 
 const MASKED_WRITE: &str =
     "UPDATE mangas SET chapter_flags = (chapter_flags & ~?2) | (?1 & ?2), version = version + 1 WHERE _id = ?3";
-const WORD_WRITE: &str = "UPDATE mangas SET chapter_flags = ?1, version = version + 1 WHERE _id = ?2";
 
 /// Every chapter-flag bit the library defaults write (`SetMangaDefaultChapterFlags`).
 pub const ALL_CHAPTER_FLAG_BITS: i64 = c::SORT_DIR_MASK
@@ -182,24 +181,6 @@ impl DbStore {
         self.db.write(|tx| Ok(tx.execute(MASKED_WRITE, (flag, mask, manga_id))? > 0))
     }
 
-    /// Sort by `mode`, or flip the direction when `mode` is the stored key. The stored word is read and written inside
-    /// one writer transaction, so two quick taps cannot both see the same word. One versioned write.
-    pub fn sort_by(&self, manga_id: i64, mode: i64) -> DataResult<bool> {
-        self.db.write(|tx| {
-            let stored = tx
-                .prepare_cached("SELECT chapter_flags FROM mangas WHERE _id = ?1")?
-                .query_map([manga_id], |r| r.get::<_, i64>(0))?
-                .next();
-            let Some(stored) = stored else { return Ok(false) };
-            let stored = stored?;
-            let word = ChapterFlags(stored)
-                .sort_writes(mode)
-                .into_iter()
-                .fold(stored, |word, (flag, mask)| ChapterFlags(word).with_masked(flag, mask).0);
-            Ok(tx.execute(WORD_WRITE, (word, manga_id))? > 0)
-        })
-    }
-
     /// Marks the given chapters read or unread in one transaction. Returns the plan that ran, or `None` when no row
     /// changed (the upstream `Result.NoChapters`).
     pub fn mark_read(
@@ -264,18 +245,6 @@ impl DbStore {
             id: manga_id,
             favorite: Some(false),
             date_added: Some(0),
-            ..MangaPatch::default()
-        };
-        self.db.write(|tx| Ok(sm::mangas::update(tx, &patch)? > 0))
-    }
-
-    /// An edit or a delete of the custom cover: `cover_last_modified` moves forward, so every cache keyed by it loads the
-    /// picture again (T-38a-038). `Ok(false)` when the row is gone.
-    pub fn bump_cover(&self, manga_id: i64, now_ms: i64) -> DataResult<bool> {
-        let Some(row) = self.manga(manga_id)? else { return Ok(false) };
-        let patch = MangaPatch {
-            id: manga_id,
-            cover_last_modified: Some(crate::entry_core::cover_model::bumped_last_modified(row.cover_last_modified, now_ms)),
             ..MangaPatch::default()
         };
         self.db.write(|tx| Ok(sm::mangas::update(tx, &patch)? > 0))
@@ -452,12 +421,12 @@ mod tests {
     }
 
     #[test]
-    fn a_sort_flip_is_one_versioned_write() {
+    fn a_new_sort_key_is_one_versioned_write() {
         let (_dir, store, id) = store(true, 0);
         let before = version(&store, id);
-        store.sort_by(id, c::SORTING_ALPHABET).unwrap(); // new key: two masks, one write
+        assert!(store.set_flag_bits(id, c::SORTING_ALPHABET, c::SORTING_MASK).unwrap());
         assert_eq!(version(&store, id), before + 1);
-        assert!(!store.sort_by(999, c::SORTING_ALPHABET).unwrap());
+        assert!(!store.set_flag_bits(999, c::SORTING_ALPHABET, c::SORTING_MASK).unwrap());
     }
 
     #[test]
@@ -478,22 +447,6 @@ mod tests {
             store.manga(id).unwrap().unwrap().flags.0,
             c::SHOW_UNREAD | c::SHOW_BOOKMARKED,
             "neither write lost the other's bits"
-        );
-    }
-
-    #[test]
-    fn sort_by_flips_from_the_stored_row_inside_the_transaction() {
-        let (_dir, store, id) = store(true, 0);
-        store.set_flag_bits(id, c::SORTING_NUMBER, i64::MAX).unwrap(); // number, descending
-        store.sort_by(id, c::SORTING_NUMBER).unwrap();
-        assert_eq!(store.manga(id).unwrap().unwrap().flags.0, c::SORTING_NUMBER | c::SORT_ASC);
-        store.sort_by(id, c::SORTING_NUMBER).unwrap();
-        assert_eq!(store.manga(id).unwrap().unwrap().flags.0, c::SORTING_NUMBER);
-        store.sort_by(id, c::SORTING_ALPHABET).unwrap();
-        assert_eq!(
-            store.manga(id).unwrap().unwrap().flags.0,
-            c::SORTING_ALPHABET | c::SORT_ASC,
-            "a new key starts ascending"
         );
     }
 
@@ -553,16 +506,6 @@ mod tests {
         assert_eq!(row.date_added, 0, "E-FAV-7");
         assert!(version(&store, id) > before);
         assert!(!store.remove_from_library(999).unwrap(), "a missing row changes nothing");
-    }
-
-    #[test]
-    fn bumping_the_cover_moves_cover_last_modified_forward_only() {
-        let (_dir, store, id) = store(true, 0);
-        assert!(store.bump_cover(id, 5_000).unwrap());
-        assert_eq!(store.manga(id).unwrap().unwrap().cover_last_modified, 5_000);
-        assert!(store.bump_cover(id, 100).unwrap());
-        assert_eq!(store.manga(id).unwrap().unwrap().cover_last_modified, 5_001, "never backwards");
-        assert!(!store.bump_cover(999, 1).unwrap());
     }
 
     #[test]

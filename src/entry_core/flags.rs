@@ -1,5 +1,6 @@
-//! Chapter flag word (`Manga.chapterFlags`) for the details page: typed reads, masked writes and the
-//! filter setters. Bit layout comes from `kuro_db::flags::chapter`; TriState rules from `kuro_domain::flags`.
+//! Chapter flag word (`Manga.chapterFlags`) for the details page: typed reads and masked writes. The writes a list
+//! options pick sends come from `list_options`. Bit layout comes from `kuro_db::flags::chapter`; TriState rules from
+//! `kuro_domain::flags`.
 //! Upstream: `Manga.kt:37-103`, `SetMangaChapterFlags.kt:11-70`, `TriState.kt`.
 
 use kuro_db::flags::chapter as c;
@@ -69,56 +70,6 @@ impl ChapterFlags {
             || self.downloaded(downloaded_only) != TriState::DISABLED
             || self.bookmarked() != TriState::DISABLED
     }
-
-    /// The masked writes for "sort by `mode`" (`awaitSetSortingModeOrFlipOrder`). Same key: flip the direction.
-    /// New key: set the key and make it ascending (two writes, applied in order).
-    pub fn sort_writes(self, mode: i64) -> Vec<Write> {
-        if self.0 & c::SORTING_MASK == mode {
-            let dir = if self.sort_descending() {
-                c::SORT_ASC
-            } else {
-                c::SORT_DESC
-            };
-            vec![(dir, c::SORT_DIR_MASK)]
-        } else {
-            vec![(mode, c::SORTING_MASK), (c::SORT_ASC, c::SORT_DIR_MASK)]
-        }
-    }
-}
-
-/// Masked write for a two-bit filter group: `DISABLED` clears the group, the other states set `is` / `not`.
-pub fn filter_write(state: TriState, is: i64, not: i64, mask: i64) -> Write {
-    let flag = match state {
-        TriState::DISABLED => 0,
-        TriState::ENABLED_IS => is,
-        TriState::ENABLED_NOT => not,
-    };
-    (flag, mask)
-}
-
-/// `setUnreadFilter` (MSM:878-925).
-pub fn unread_write(state: TriState) -> Write {
-    filter_write(state, c::SHOW_UNREAD, c::SHOW_READ, c::UNREAD_MASK)
-}
-
-/// `setDownloadedFilter`.
-pub fn downloaded_write(state: TriState) -> Write {
-    filter_write(
-        state,
-        c::SHOW_DOWNLOADED,
-        c::SHOW_NOT_DOWNLOADED,
-        c::DOWNLOADED_MASK,
-    )
-}
-
-/// `setBookmarkedFilter`.
-pub fn bookmarked_write(state: TriState) -> Write {
-    filter_write(
-        state,
-        c::SHOW_BOOKMARKED,
-        c::SHOW_NOT_BOOKMARKED,
-        c::BOOKMARKED_MASK,
-    )
 }
 
 /// `scanlatorFilterActive`: some excluded scanlator is also one the chapters have (E-43). A stale excluded name, one
@@ -127,23 +78,11 @@ pub fn scanlator_filter_active(available: &[String], excluded: &std::collections
     available.iter().any(|name| excluded.contains(name))
 }
 
-/// "Set as default": stores the groups of `flags` as the library's default chapter flags, and returns the text of the
-/// "Updated default chapter settings" message (`ChapterSettingsDialog`, `SetMangaDefaultChapterFlags`).
+/// "Use as default for all titles": stores the groups of `flags` as the library's default chapter flags, and returns the
+/// text of the "Updated default chapter settings" message (`SetMangaDefaultChapterFlags`).
 pub fn save_as_default(store: &kuro_prefs::store::PrefStore, flags: ChapterFlags) -> String {
     kuro_domain::entries::defaults::set_chapter_settings_default(store, flags.0);
     kuro_i18n::tr(kuro_i18n::MsgKey::chapter_settings_updated)
-}
-
-/// `setDisplayMode` (MSM:931-949).
-pub fn display_write(number: bool) -> Write {
-    (
-        if number {
-            c::DISPLAY_NUMBER
-        } else {
-            c::DISPLAY_NAME
-        },
-        c::DISPLAY_MASK,
-    )
 }
 
 #[cfg(test)]
@@ -262,44 +201,5 @@ mod tests {
         assert_eq!(f.0, 0x10);
         assert!(f.filter_active(true));
         assert!(!ChapterFlags(0).filter_active(false));
-    }
-
-    #[test]
-    fn first_sort_selection_is_ascending_and_same_key_flips() {
-        let f = ChapterFlags(0); // source, descending
-        assert_eq!(f.sort_writes(0x100), vec![(0x100, 0x300), (0x1, 0x1)]);
-        let asc = ChapterFlags(0x1); // source, ascending: same key, so flip to descending
-        assert_eq!(asc.sort_writes(0x0), vec![(0x0, 0x1)]);
-        let same = ChapterFlags(0x100);
-        assert_eq!(
-            same.sort_writes(0x100),
-            vec![(0x1, 0x1)],
-            "number descending flips to ascending"
-        );
-        let same_asc = ChapterFlags(0x101);
-        assert_eq!(
-            same_asc.sort_writes(0x100),
-            vec![(0x0, 0x1)],
-            "number ascending flips to descending"
-        );
-    }
-
-    #[test]
-    fn filter_setters_map_tri_states_to_flags() {
-        assert_eq!(unread_write(TriState::DISABLED), (0, c::UNREAD_MASK));
-        assert_eq!(
-            unread_write(TriState::ENABLED_IS),
-            (c::SHOW_UNREAD, c::UNREAD_MASK)
-        );
-        assert_eq!(
-            downloaded_write(TriState::ENABLED_NOT),
-            (c::SHOW_NOT_DOWNLOADED, c::DOWNLOADED_MASK)
-        );
-        assert_eq!(
-            bookmarked_write(TriState::ENABLED_NOT),
-            (c::SHOW_NOT_BOOKMARKED, c::BOOKMARKED_MASK)
-        );
-        assert_eq!(display_write(true), (c::DISPLAY_NUMBER, c::DISPLAY_MASK));
-        assert_eq!(display_write(false), (c::DISPLAY_NAME, c::DISPLAY_MASK));
     }
 }

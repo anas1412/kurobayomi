@@ -21,12 +21,10 @@ pub fn body(id: &str) -> Option<Built> {
         "manga_library" => Some(library(id, false)),
         "updates" => crate::updates::mount::updates().or_else(|| unavailable(id)),
         "history" => crate::updates::mount::history().or_else(|| unavailable(id)),
-        "more" => more(),
         "browse" => crate::browse::mount::browse().or_else(|| unavailable(id)),
         "global_search" | "migrate_search" => crate::browse::search_screen::body(id == "migrate_search").or_else(|| unavailable(id)),
         "download_queue" => downloads(),
         "categories" => categories(),
-        "stats" => stats(),
         "storage" => storage(),
         "new_update" | "crash" => info_screen(id),
         id if crate::settings_ui::handles(id) => crate::settings_ui::body(id),
@@ -102,7 +100,7 @@ pub fn open_unit(anime: bool, entry_id: i64, unit_id: i64) {
         push(&if is_local_manga(entry_id) { crate::local_flow::reader::open_local_chapter(entry_id, unit_id) } else { crate::reader::launch::open_chapter(entry_id, unit_id) });
         return;
     }
-    if crate::local_flow_anime::open_local_episode(unit_id) || crate::player_view::open_source_episode(&anime_sources(), unit_id) {
+    if crate::local_flow::open::open_local_episode(unit_id) || crate::player_view::open_source_episode(&anime_sources(), unit_id) {
         return;
     }
     let source = kuro_data::episode::EpisodeRepo::new(crate::data::app().anime_db.clone())
@@ -119,7 +117,7 @@ pub fn open_unit(anime: bool, entry_id: i64, unit_id: i64) {
 // ponytail: delete when entry_core opens its fallback by id.
 pub fn open_media(anime: bool, title: &str, unit: &str) {
     if anime {
-        if !crate::local_flow_anime::open_episode(title, unit) {
+        if !crate::local_flow::open::open_episode(title, unit) {
             crate::toast::notify(crate::reader::strings::source_not_installed(title));
         }
     } else {
@@ -248,128 +246,12 @@ fn library(id: &str, anime: bool) -> Built {
     crate::library::mount::build(anime).unwrap_or_else(|| empty_built(id))
 }
 
-// ---------- more & friends ----------
-
-/// The leading icon of a More row, by its spec title (the icons Aniyomi's `MoreScreen` uses, in GTK names).
-fn more_icon(title: &str) -> Option<&'static str> {
-    Some(match title {
-        "Downloaded only" => "network-offline-symbolic",
-        "Incognito mode" => "view-conceal-symbolic",
-        "Download queue" => "folder-download-symbolic",
-        "Categories" => "tag-symbolic",
-        "Statistics" => "x-office-spreadsheet-symbolic",
-        "Data and storage" => "drive-harddisk-symbolic",
-        "Settings" => "emblem-system-symbolic",
-        "Player settings" => "video-display-symbolic",
-        "About" => "help-about-symbolic",
-        "Help" => "help-browser-symbolic",
-        _ => return None,
-    })
-}
-
-/// More: three boxed lists with icons (switches, library pages, settings and help) in the page column. No logo and no
-/// title: the sidebar names the tab and its header names the app (docs/design/other-tabs.md).
-fn more() -> Option<Built> {
-    let s = screen("more");
-    let col = column();
-    // the three lists have no headings, so the column itself leaves the 24 px between groups
-    col.set_spacing(24);
-    // History has its own sidebar entry, so More drops the "moved tab" row (Aniyomi's nav-style rule)
-    let mut groups = s.groups.clone();
-    for g in &mut groups {
-        g.items.retain(|it| !matches!(it, crate::spec::Item::Link { target, .. } if target == "history"));
-        // The queue row shows the derived download state, not the mockup text; no manager runs in the app yet, so Stopped.
-        for it in &mut g.items {
-            if let crate::spec::Item::Link { subtitle, target, .. } = it {
-                if target == "download_queue" {
-                    *subtitle = crate::pref_model::more::queue_subtitle(crate::pref_model::queue_state::QueueState::Stopped);
-                }
-            }
-        }
-    }
-    for (at, g) in groups.iter().enumerate() {
-        let list = boxed_list();
-        // the tab the nav style moves into More leads the second list, when the sidebar does not carry it
-        if at == 1 {
-            if let Some(row) = moved_row() {
-                list.append(&row);
-            }
-        }
-        for it in &g.items {
-            let Some(r) = item_row(it) else { continue };
-            let title = crate::pref_model::spec_convert::item_title(it);
-            if let (Some(icon), Some(inner)) = (more_icon(&title), r.child().and_downcast::<GBox>()) {
-                inner.prepend(&gtk::Image::from_icon_name(icon));
-            }
-            if title == "Help" {
-                crate::widgets::row_activate::on_activate(&r, |_| open_help());
-            }
-            list.append(&r);
-        }
-        if list.first_child().is_some() {
-            col.append(&list);
-        }
-    }
-    tag(&col, "more");
-    built(scrolled(&col), vec![])
-}
-
-/// What the More row of the moved tab shows (title, icon, the page it opens): the tab `style` moves out of the
-/// navigation, when `nav_ids` (the sidebar's pages) no longer carry it. Both libraries are one sidebar page, so a
-/// moved manga library has no row of its own.
-fn moved_target(style: kuro_prefs::ui::NavStyle, nav_ids: &[&str]) -> Option<(String, &'static str, &'static str)> {
-    use kuro_prefs::ui::Tab;
-    let tab = style.more_tab();
-    let page = match tab {
-        Tab::Updates => "updates",
-        Tab::History => "history",
-        Tab::Browse => "browse",
-        _ => return None,
-    };
-    (!nav_ids.contains(&crate::shell::tabs::nav_id(tab))).then(|| (crate::pref_model::more::moved_title(tab), crate::pref_model::more::moved_icon(style), page))
-}
-
-// ponytail: dead until the sidebar (`main.rs`) lists only the tabs the nav style keeps; it lists every spec entry now.
-fn moved_row() -> Option<gtk::ListBoxRow> {
-    if !crate::data::is_installed() {
-        return None;
-    }
-    let style = kuro_prefs::ui::NavStyle::MOVE_HISTORY_TO_MORE;
-    with_spec(|s| moved_row_for(style, &s.nav.iter().map(|n| n.id.as_str()).collect::<Vec<_>>()))
-}
-
-/// The More row of the tab `style` moves out of the sidebar pages `nav_ids`, when it moves one.
-fn moved_row_for(style: kuro_prefs::ui::NavStyle, nav_ids: &[&str]) -> Option<gtk::ListBoxRow> {
-    let (title, icon, page) = moved_target(style, nav_ids)?;
-    let row = item_row(&crate::spec::Item::Link { title, subtitle: None, target: page.to_owned() })?;
-    if let Some(inner) = row.child().and_downcast::<GBox>() {
-        inner.prepend(&gtk::Image::from_icon_name(icon));
-    }
-    Some(row)
-}
-
-#[cfg(test)]
-thread_local! {
-    /// Test hook: how many times [`open_help`] ran; tests count instead of starting the browser.
-    static HELP_OPENED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-}
-
-/// Opens the help site in the browser (More, Help).
-fn open_help() {
-    #[cfg(test)]
-    HELP_OPENED.with(|n| n.set(n.get() + 1));
-    #[cfg(not(test))]
-    gtk::UriLauncher::new(crate::pref_model::widgets::HELP_URL).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-        if let Err(err) = result {
-            tracing::warn!(%err, "could not open the help page");
-        }
-    });
-}
+// ---------- downloads & categories ----------
 
 /// Download queue: the managers' queue page once they run, else the Library's empty state with one way forward.
 fn downloads() -> Option<Built> {
     if let Some(page) = crate::downloads::queue_page::page() {
-        return built(page, vec![]);
+        return built(scrolled(&page), vec![]);
     }
     let library = Button::with_label("Library");
     library.connect_clicked(|_| open("library"));
@@ -384,10 +266,6 @@ fn categories() -> Option<Built> {
     let visible = kinds.clone();
     add.connect_clicked(move |_| crate::live::add_category(visible.visible_child_name().as_deref() == Some("anime")));
     built(kinds, vec![switch.upcast(), add.upcast()])
-}
-
-fn stats() -> Option<Built> {
-    crate::updates::mount::stats()
 }
 
 fn storage() -> Option<Built> {
@@ -537,34 +415,6 @@ mod tests {
         Built { content: Label::new(Some(word)).upcast(), end: vec![search.upcast(), refresh.upcast(), menu.upcast()] }
     }
 
-    #[test]
-    fn the_moved_tab_gets_a_more_row_only_when_the_sidebar_lacks_it() {
-        use kuro_prefs::ui::NavStyle;
-        let full = ["library", "updates", "history", "browse", "more"];
-        assert_eq!(moved_target(NavStyle::MOVE_HISTORY_TO_MORE, &full), None, "the sidebar still has History");
-        let (title, icon, page) = moved_target(NavStyle::MOVE_HISTORY_TO_MORE, &["library", "updates", "browse", "more"]).expect("History moved");
-        assert_eq!((title.as_str(), icon, page), ("History", "document-open-recent-symbolic", "history"));
-        let (title, icon, page) = moved_target(NavStyle::MOVE_BROWSE_TO_MORE, &["library", "updates", "history", "more"]).expect("Browse moved");
-        assert_eq!((title.as_str(), icon, page), ("Browse", "compass-symbolic", "browse"));
-        assert_eq!(moved_target(NavStyle::MOVE_MANGA_TO_MORE, &["updates", "more"]), None, "the manga library has no page of its own");
-    }
-
-    /// Needs a display, and skips itself without one.
-    #[test]
-    fn the_moved_tab_row_is_on_the_more_page_and_opens_the_moved_tab() {
-        use kuro_prefs::ui::NavStyle;
-        crate::testing::with_display(|| {
-            let (_stack, _window) = crate::testing::nav();
-            let kept = ["library", "updates", "browse", "more"];
-            let list = boxed_list();
-            let row = moved_row_for(NavStyle::MOVE_HISTORY_TO_MORE, &kept).expect("History moved into More");
-            list.append(&row);
-            assert_eq!(crate::widgets::row_activate::row_titled(&list, "History"), row, "the row names the moved tab");
-            assert_eq!(crate::ui::opened_during(|| crate::widgets::row_activate::click_row(&row)), ["history"], "a click opens it");
-            assert!(moved_row_for(NavStyle::MOVE_HISTORY_TO_MORE, &["library", "updates", "history", "browse", "more"]).is_none(), "no row while the sidebar has the tab");
-        });
-    }
-
     /// Needs a display and runs in a child process with fresh app data (see [`alone`]).
     #[test]
     fn opening_by_id_reaches_the_entry_page_the_reader_and_the_source_not_installed_toast() {
@@ -622,20 +472,6 @@ mod tests {
     fn the_delete_category_question_names_the_category() {
         let text = screen("categories").dialogs.iter().find(|d| d.id == "category_delete").and_then(|d| d.text.clone()).expect("the dialog");
         assert_eq!(text.replace("%s", "Reading"), "Do you wish to delete the category \"Reading\"?");
-    }
-
-    /// Needs a display, and skips itself without one.
-    #[test]
-    fn more_help_opens_the_help_site_once_per_click_and_once_per_key() {
-        crate::testing::with_display(|| {
-            let page = build("more");
-            let row = crate::widgets::row_activate::row_titled(&page, "Help");
-            HELP_OPENED.with(|n| n.set(0));
-            crate::widgets::row_activate::click_row(&row);
-            assert_eq!(HELP_OPENED.with(|n| n.get()), 1, "a click");
-            row.emit_by_name::<()>("activate", &[]);
-            assert_eq!(HELP_OPENED.with(|n| n.get()), 2, "Enter or Space");
-        });
     }
 
     /// Needs a display, and skips itself without one.

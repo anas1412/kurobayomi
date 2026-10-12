@@ -76,6 +76,7 @@ pub fn filters(
         EntryKind::Anime => (prefs.filter_downloaded_anime.get(), prefs.filter_unseen.get(), prefs.filter_completed_anime.get()),
         EntryKind::Manga => (prefs.filter_downloaded_manga.get(), prefs.filter_unread.get(), prefs.filter_completed_manga.get()),
     };
+    let (downloaded, unread, completed) = (include_only(downloaded), include_only(unread), include_only(completed));
     let (started, bookmarked, interval_custom) = (TriState::DISABLED, TriState::DISABLED, TriState::DISABLED);
     let tracking = logged_in
         .iter()
@@ -84,7 +85,7 @@ pub fn filters(
                 EntryKind::Anime => prefs.filter_tracked_anime(*id as i32).get(),
                 EntryKind::Manga => prefs.filter_tracked_manga(*id as i32).get(),
             };
-            (*id, state)
+            (*id, include_only(state))
         })
         .collect();
     LibraryFilters {
@@ -100,13 +101,17 @@ pub fn filters(
     }
 }
 
+/// A library filter is include-or-off: an exclude value stored by an older version (or an Aniyomi backup) reads as
+/// off, so the view menu's checks and the pipeline always agree.
+pub fn include_only(stored: TriState) -> TriState {
+    if stored == TriState::ENABLED_IS { TriState::ENABLED_IS } else { TriState::DISABLED }
+}
+
 /// Whether a preference change can alter the library pipeline or its layout for `kind` (D-3, D-6). Other keys,
 /// such as the remembered tab, do not reload the library.
 pub fn affects_library(kind: EntryKind, key: &str) -> bool {
     const SHARED: &[&str] = &[
         "pref_display_mode_library",
-        "display_download_badge",
-        "display_unread_badge",
         "__APP_STATE_pref_downloaded_only",
     ];
     const ANIME: &[&str] = &[
@@ -115,7 +120,6 @@ pub fn affects_library(kind: EntryKind, key: &str) -> bool {
         "pref_filter_animelib_completed_v2",
         "animelib_sorting_mode",
         "library_random_anime_sort_seed",
-        "pref_animelib_columns_landscape_key",
     ];
     const MANGA: &[&str] = &[
         "pref_filter_library_downloaded_v2",
@@ -123,7 +127,6 @@ pub fn affects_library(kind: EntryKind, key: &str) -> bool {
         "pref_filter_library_completed_v2",
         "library_sorting_mode",
         "library_random_manga_sort_seed",
-        "pref_library_columns_landscape_key",
     ];
     if SHARED.contains(&key) {
         return true;
@@ -134,11 +137,11 @@ pub fn affects_library(kind: EntryKind, key: &str) -> bool {
     }
 }
 
-/// The badge switches. They are shared by both libraries.
-pub fn badges(prefs: &LibraryPrefs) -> BadgeSettings {
+/// The badges of both libraries: fixed, since their switches are cut.
+pub fn badges() -> BadgeSettings {
     BadgeSettings {
-        download: prefs.download_badge.get(),
-        unread: prefs.unread_badge.get(),
+        download: diet::LIBRARY_DOWNLOAD_BADGE,
+        unread: diet::LIBRARY_UNREAD_BADGE,
         local: diet::LIBRARY_LOCAL_BADGE,
         language: diet::LIBRARY_LANGUAGE_BADGE,
     }
@@ -159,7 +162,7 @@ pub fn request(
     Request {
         kind,
         filters: filters(prefs, kind, downloaded_only, logged_in),
-        badges: badges(prefs),
+        badges: badges(),
         query,
         random_seed,
         logged_in: logged_in.clone(),
@@ -208,8 +211,22 @@ mod tests {
         assert!(affects_library(EntryKind::Manga, "library_sorting_mode"));
         assert!(!affects_library(EntryKind::Anime, "library_sorting_mode"));
         assert!(affects_library(EntryKind::Anime, "pref_filter_animelib_tracked_3_v2"));
-        assert!(affects_library(EntryKind::Manga, "display_unread_badge"));
+        assert!(affects_library(EntryKind::Manga, "pref_display_mode_library"));
         assert!(!affects_library(EntryKind::Manga, "__APP_STATE_last_used_category"));
+    }
+
+    #[test]
+    fn a_stored_exclude_filter_reads_as_off() {
+        assert_eq!(include_only(TriState::ENABLED_NOT), TriState::DISABLED);
+        assert_eq!(include_only(TriState::ENABLED_IS), TriState::ENABLED_IS);
+        assert_eq!(include_only(TriState::DISABLED), TriState::DISABLED);
+        let prefs = LibraryPrefs::new(kuro_prefs::store::PrefStore::in_memory());
+        prefs.filter_unread.set(TriState::ENABLED_NOT).expect("write");
+        prefs.filter_tracked_manga(2).set(TriState::ENABLED_NOT).expect("write");
+        let f = filters(&prefs, EntryKind::Manga, false, &BTreeSet::from([2]));
+        assert_eq!(f.unread, TriState::DISABLED);
+        assert_eq!(f.tracking.get(&2), Some(&TriState::DISABLED));
+        assert!(!f.has_active(), "an old exclude value is no active filter");
     }
 
     #[test]

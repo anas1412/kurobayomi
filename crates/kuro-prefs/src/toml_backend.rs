@@ -506,7 +506,7 @@ mod tests {
             "pref_display_mode_library".into(),
             PrefValue::Str("LIST".into()),
         );
-        m.insert("display_unread_badge".into(), PrefValue::Bool(false));
+        m.insert("crop_borders".into(), PrefValue::Bool(true));
         m.insert(
             "pref_library_update_interval_key".into(),
             PrefValue::Int(12),
@@ -620,10 +620,10 @@ mod tests {
         let b = backend(&dir).unwrap();
         b.load().unwrap();
         let mut only = BTreeMap::new();
-        only.insert("display_unread_badge".to_owned(), PrefValue::Bool(true));
+        only.insert("crop_borders".to_owned(), PrefValue::Bool(true));
         b.save(&only).unwrap();
         let config = file(&dir, CONFIG_FILE);
-        assert!(config.contains("unread_badge = true"));
+        assert!(config.contains("crop_borders = true"));
         assert!(!config.contains("display_mode"));
         assert!(!config.contains("auto_update_interval"));
     }
@@ -634,24 +634,24 @@ mod tests {
         write_file(
             &dir,
             CONFIG_FILE,
-            "# my comment\nfoo = 1\n\n[mystery]\nx = \"y\"\n\n[library]\n# keep me\nunread_badge = true\n",
+            "# my comment\nfoo = 1\n\n[mystery]\nx = \"y\"\n\n[reader]\n# keep me\ncrop_borders = true\n",
         );
         let b = backend(&dir).unwrap();
         let loaded = b.load().unwrap();
         assert_eq!(
-            loaded.get("display_unread_badge"),
+            loaded.get("crop_borders"),
             Some(&PrefValue::Bool(true))
         );
         assert!(!loaded.contains_key("foo"));
         let mut next = loaded.clone();
-        next.insert("display_unread_badge".into(), PrefValue::Bool(false));
+        next.insert("crop_borders".into(), PrefValue::Bool(false));
         b.save(&next).unwrap();
         let config = file(&dir, CONFIG_FILE);
         assert!(config.contains("# my comment"));
         assert!(config.contains("foo = 1"));
         assert!(config.contains("[mystery]") && config.contains("x = \"y\""));
         assert!(config.contains("# keep me"));
-        assert!(config.contains("unread_badge = false"));
+        assert!(config.contains("crop_borders = false"));
     }
 
     #[test]
@@ -667,7 +667,7 @@ mod tests {
         let config = file(&dir, CONFIG_FILE);
         assert!(!config.contains("display_mode"));
         assert!(!config.contains("legacy_long"));
-        assert!(config.contains("unread_badge"));
+        assert!(config.contains("crop_borders"));
     }
 
     #[test]
@@ -712,13 +712,13 @@ mod tests {
         write_file(
             &dir,
             CONFIG_FILE,
-            "[library]\nunread_badge = true # inline note\n",
+            "[reader]\ncrop_borders = true # inline note\n",
         );
         let b = backend(&dir).unwrap();
         let mut next = b.load().unwrap();
-        next.insert("display_unread_badge".into(), PrefValue::Bool(false));
+        next.insert("crop_borders".into(), PrefValue::Bool(false));
         b.save(&next).unwrap();
-        assert!(file(&dir, CONFIG_FILE).contains("unread_badge = false # inline note"));
+        assert!(file(&dir, CONFIG_FILE).contains("crop_borders = false # inline note"));
     }
 
     #[test]
@@ -753,7 +753,7 @@ mod tests {
         // A directory in the way of the temp file makes the write fail before the rename.
         fs::create_dir(dir.path().join("config").join("config.toml.tmp")).unwrap();
         let mut next = sample();
-        next.insert("display_unread_badge".into(), PrefValue::Bool(true));
+        next.insert("crop_borders".into(), PrefValue::Bool(false));
         assert!(b.save(&next).is_err());
         assert_eq!(file(&dir, CONFIG_FILE), before);
     }
@@ -779,12 +779,12 @@ mod tests {
         write_file(
             &dir,
             CONFIG_FILE,
-            "[library]\nauto_update_interval = \"twelve\"\nunread_badge = false\n",
+            "[library]\nauto_update_interval = \"twelve\"\n\n[reader]\ncrop_borders = false\n",
         );
         let loaded = backend(&dir).unwrap().load().unwrap();
         assert!(!loaded.contains_key("pref_library_update_interval_key"));
         assert_eq!(
-            loaded.get("display_unread_badge"),
+            loaded.get("crop_borders"),
             Some(&PrefValue::Bool(false))
         );
     }

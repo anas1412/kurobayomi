@@ -20,6 +20,7 @@ use kuro_downloads::downloader::Command;
 use kuro_downloads::engine::{MangaEngine, QueueEngine};
 use kuro_downloads::manager::{DeleteRules, DownloadManager};
 use kuro_downloads::model::{ChapterRef, SourceRef};
+use kuro_downloads::source::FolderOnlySource;
 use kuro_source::model::SChapter;
 use kuro_source::MangaSource;
 
@@ -155,7 +156,7 @@ impl SourceBackend {
     /// The app's backend: the sources the Browse directory hands out (the recipe sources and the installed packages),
     /// with the app's manga download manager when it runs.
     pub fn live(db: Arc<Db>, _prefs: &kuro_prefs::store::PrefStore) -> Self {
-        let backend = Self::new(db, Arc::new(|id| crate::browse::directory::current()?.manga_source(id)), crate::misc::diet_defaults::LIBRARY_MARK_DUPLICATE_CHAPTER_READ);
+        let backend = Self::new(db, Arc::new(|id| crate::browse::directory::current(crate::browse::route::BrowseKind::Manga).catalogue(id)?.manga()), crate::misc::diet_defaults::LIBRARY_MARK_DUPLICATE_CHAPTER_READ);
         let manager = crate::shell::host::Shell::get().and_then(|shell| shell.download_queues()).map(|queues| queues.manga);
         match manager {
             Some(manager) => backend.with_downloads(manager),
@@ -247,13 +248,17 @@ impl Backend for SourceBackend {
     }
 
     /// Removes the downloads of these chapters: they leave the queue, then the folders and the index entries go. The
-    /// deletion runs on the runtime; a source that is not installed has no folder name, so nothing is deleted then.
+    /// deletion runs on the runtime. A source that is not installed is named by the folder the download index found for
+    /// the manga, so its downloads can always be deleted.
     fn delete_downloads(&self, manga_id: i64, chapter_ids: &[i64]) {
         let Some(manager) = self.downloads.clone() else { return };
         let Some((manga, chapters)) = self.chapters_of(manga_id, chapter_ids) else { return };
-        let Some(source) = self.download_source(manga.source) else {
-            tracing::warn!(source = manga.source, "the downloads of a source that is not installed are kept");
-            return;
+        let source: SourceRef = match self.download_source(manga.source) {
+            Some(source) => source,
+            None => match manager.index().manga_source_dir(manga.source, &manga.title) {
+                Some(folder) => Arc::new(FolderOnlySource { id: manga.source, folder }),
+                None => return, // nothing of this manga is on disk
+            },
         };
         let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
         // The user picked these chapters to delete, so the bookmark and category rules do not keep any back
@@ -320,18 +325,18 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let db = db_of(&dir.path().join("manga.db"));
-        let prefs = crate::browse::prefs::BrowsePrefs::new(kuro_prefs::store::PrefStore::in_memory());
+        let prefs = crate::browse::prefs::BrowsePrefs::new(kuro_prefs::store::PrefStore::in_memory(), crate::browse::route::BrowseKind::Manga);
         let store = Arc::new(crate::browse::repo_store::RepoStore::new(
             MangaRepo::new(Arc::clone(&db)),
             CategoryRepo::new(Arc::clone(&db), CategoryKind::Manga),
-            prefs.default_manga_category.clone(),
+            prefs.default_category.clone(),
             Arc::new(|_| 0),
         ));
         let fake = FakeCatalogue::new(41);
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
 
         // browse: two cards, each a library row of source 41
-        let loader = crate::recipe_sources::MangaLoader { source: fake.clone(), store: store.clone() };
+        let loader = crate::browse::loader::SourceLoader::new(crate::browse::loader::Catalogue::Manga(fake.clone()), store.clone());
         let page = rt.block_on(loader.load(BrowseQuery::Popular, FilterList::default(), 1)).expect("a page");
         assert_eq!(page.items.len(), 2);
         let id = page.items[0].id;

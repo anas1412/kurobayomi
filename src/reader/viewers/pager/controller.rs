@@ -122,7 +122,7 @@ impl PagerController {
             page_count: set.curr.page_count,
             loaded: set.curr.is_loaded(),
         });
-        self.view_index = self.view_index.min(self.items.len().saturating_sub(1));
+        self.reanchor();
         let mut fx = vec![Effect::Rebuilt];
         if let Some(jump) = list.jump {
             fx.extend(self.move_to_page(&jump));
@@ -138,6 +138,18 @@ impl PagerController {
             fx.push(Effect::Show);
         }
         fx
+    }
+
+    /// Keeps the strip on the item it shows when the list changes: a neighbour chapter that finished loading adds
+    /// pages in front of it, so the index alone would point at another item (`ViewPager.getItemPosition`).
+    fn reanchor(&mut self) {
+        let last = self.items.len().saturating_sub(1);
+        let kept = self.current.as_ref().and_then(|c| self.items.iter().position(|i| i == c));
+        self.view_index = kept.unwrap_or_else(|| self.view_index.min(last));
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.idle
     }
 
     /// The strip settled on `index` (ViewPager `onPageSelected`): hides the menu unless the slider is moving. The
@@ -193,11 +205,13 @@ impl PagerController {
     }
 
     fn on_transition_selected(&self, t: &Transition) -> Vec<Effect> {
+        let mut fx = vec![Effect::TransitionSelected];
         match (&t.to, t.dir) {
-            (Some(to), _) => vec![Effect::Preload(to.clone())],
-            (None, Dir::Next) => vec![Effect::ShowMenu],
-            (None, Dir::Prev) => Vec::new(),
+            (Some(to), _) => fx.push(Effect::Preload(to.clone())),
+            (None, Dir::Next) => fx.push(Effect::ShowMenu),
+            (None, Dir::Prev) => {}
         }
+        fx
     }
 
     /// `moveToPage` (B§6.6). A move to the index already shown runs the page change directly, since no
@@ -234,7 +248,11 @@ impl PagerController {
         let before = self.items.len();
         self.items.retain(|i| !i.page().is_some_and(PageRef::is_insert));
         self.preprocessed.clear();
-        if self.items.len() == before { Vec::new() } else { vec![Effect::Rebuilt] }
+        if self.items.len() == before {
+            return Vec::new();
+        }
+        self.reanchor();
+        vec![Effect::Rebuilt]
     }
 
     /// A dual-page split of `parent` (B§5.6). A split of a neighbour's page waits in `preprocessed`.
@@ -245,7 +263,11 @@ impl PagerController {
             return Vec::new();
         }
         let Some(index) = self.items.iter().position(|i| i.page() == Some(parent)) else { return Vec::new() };
-        if place_insert(&mut self.items, index, self.kind, insert) { vec![Effect::Rebuilt] } else { Vec::new() }
+        if !place_insert(&mut self.items, index, self.kind, insert) {
+            return Vec::new();
+        }
+        self.reanchor();
+        vec![Effect::Rebuilt]
     }
 }
 
@@ -437,5 +459,113 @@ mod tests {
         assert!(c.move_to_page(&first).is_empty());
         let second = c.items()[1].clone();
         assert_eq!(c.move_to_page(&second), vec![Effect::ScrollTo { index: 1, smooth: true }]);
+    }
+    fn at(c: &PagerController, chapter: i64, index: u32) -> usize {
+        c.items().iter().position(|i| i.page().is_some_and(|p| p.chapter.id == chapter && p.index == index && !p.is_insert())).unwrap()
+    }
+
+    /// One user step: the command, then the strip settling where it went.
+    fn turn(c: &mut PagerController, cmd: PageCmd) -> Vec<Effect> {
+        let moved = c.command(cmd, false);
+        assert!(moved.iter().any(|e| matches!(e, Effect::ScrollTo { .. })), "the step moves: {moved:?}");
+        let index = c.view_index();
+        c.on_settled(index)
+    }
+
+    /// Chapter 2 (24 pages) with chapter 1 (5 pages) before it and chapter 3 after it, opened and settled on page 1.
+    fn opened(kind: ViewerKind) -> PagerController {
+        let mut c = PagerController::new(kind, OPTS);
+        let fx = c.set_chapters(set(loaded(2, 2.0, 24), Some(loaded(1, 1.0, 5)), Some(loaded(3, 3.0, 4))));
+        assert!(fx.contains(&Effect::ScrollTo { index: at(&c, 2, 0), smooth: true }));
+        c.on_settled(at(&c, 2, 0));
+        c
+    }
+
+    #[test]
+    fn opening_lands_on_page_one_after_the_leading_prev_card_and_tail() {
+        for kind in [ViewerKind::LeftToRight, ViewerKind::RightToLeft, ViewerKind::Vertical] {
+            let c = opened(kind);
+            assert_eq!(c.view_index(), at(&c, 2, 0), "{kind:?}");
+            assert_eq!(c.current(), Some(&ItemKey::Page(loaded(2, 2.0, 24).page(0))), "{kind:?}");
+        }
+        let c = opened(ViewerKind::LeftToRight);
+        assert_eq!(c.view_index(), 3, "two tail pages and the card come first");
+    }
+
+    #[test]
+    fn a_neighbour_that_loads_later_keeps_the_strip_on_the_page_shown() {
+        let mut c = PagerController::new(ViewerKind::LeftToRight, OPTS);
+        c.set_chapters(set(loaded(2, 2.0, 24), Some(snap(1, 1.0, LoadState::Loading, 0)), None));
+        c.on_settled(at(&c, 2, 0));
+        assert_eq!(c.view_index(), 1);
+        let fx = c.set_chapters(set(loaded(2, 2.0, 24), Some(loaded(1, 1.0, 5)), None));
+        assert_eq!(c.view_index(), at(&c, 2, 0));
+        assert_eq!(c.view_index(), 3, "two tail pages were added in front");
+        assert!(!fx.iter().any(|e| matches!(e, Effect::ScrollTo { .. } | Effect::PageSelected(_))));
+    }
+
+    #[test]
+    fn back_from_page_one_shows_the_prev_card_and_a_card_has_no_page() {
+        let mut c = opened(ViewerKind::LeftToRight);
+        let fx = turn(&mut c, PageCmd::Prev);
+        assert_eq!(c.view_index(), 2);
+        assert!(matches!(c.current(), Some(ItemKey::Transition(t)) if t.dir == Dir::Prev));
+        assert!(fx.contains(&Effect::TransitionSelected));
+        assert!(!fx.iter().any(|e| matches!(e, Effect::PageSelected(_))));
+        assert_eq!(selected(&fx), ["hide".to_string(), "preload:1".to_string()]);
+    }
+
+    #[test]
+    fn back_from_the_prev_card_lands_on_the_previous_chapters_last_page_without_a_reload() {
+        let mut c = opened(ViewerKind::LeftToRight);
+        turn(&mut c, PageCmd::Prev);
+        let fx = turn(&mut c, PageCmd::Prev);
+        assert_eq!(c.view_index(), at(&c, 1, 4));
+        assert!(fx.contains(&Effect::PageSelected(loaded(1, 1.0, 5).page(4))));
+        assert!(!fx.contains(&Effect::Rebuilt));
+        // the screen switches the current chapter: the strip stays on that page and moves nothing
+        let fx = c.set_chapters(set(loaded(1, 1.0, 5), None, Some(loaded(2, 2.0, 24))));
+        assert_eq!(c.view_index(), at(&c, 1, 4));
+        assert_eq!(c.current(), Some(&ItemKey::Page(loaded(1, 1.0, 5).page(4))));
+        assert!(!fx.iter().any(|e| matches!(e, Effect::ScrollTo { .. } | Effect::PageSelected(_) | Effect::Show)));
+    }
+
+    #[test]
+    fn a_step_waits_on_the_card_while_the_previous_chapter_loads() {
+        let mut c = PagerController::new(ViewerKind::LeftToRight, OPTS);
+        c.set_chapters(set(loaded(2, 2.0, 3), Some(snap(1, 1.0, LoadState::Loading, 0)), None));
+        c.on_settled(1);
+        turn(&mut c, PageCmd::Prev);
+        assert!(matches!(c.current(), Some(ItemKey::Transition(t)) if t.dir == Dir::Prev));
+        assert!(c.command(PageCmd::Prev, false).is_empty(), "nothing before the card yet");
+        c.set_chapters(set(loaded(2, 2.0, 3), Some(loaded(1, 1.0, 5)), None));
+        assert!(c.items()[c.view_index()].transition().is_some(), "the strip still shows the card");
+        turn(&mut c, PageCmd::Prev);
+        assert_eq!(c.view_index(), at(&c, 1, 4));
+    }
+
+    #[test]
+    fn forward_from_the_last_page_shows_the_next_card_then_the_next_chapters_first_page() {
+        let mut c = opened(ViewerKind::LeftToRight);
+        c.on_settled(at(&c, 2, 23));
+        let fx = turn(&mut c, PageCmd::Next);
+        assert!(matches!(c.current(), Some(ItemKey::Transition(t)) if t.dir == Dir::Next));
+        assert_eq!(selected(&fx), ["hide".to_string(), "preload:3".to_string()]);
+        assert!(!fx.iter().any(|e| matches!(e, Effect::PageSelected(_))));
+        let fx = turn(&mut c, PageCmd::Next);
+        assert_eq!(c.view_index(), at(&c, 3, 0));
+        assert!(fx.contains(&Effect::PageSelected(loaded(3, 3.0, 4).page(0))));
+        let fx = c.set_chapters(set(loaded(3, 3.0, 4), Some(loaded(2, 2.0, 24)), None));
+        assert_eq!(c.view_index(), at(&c, 3, 0));
+        assert!(!fx.iter().any(|e| matches!(e, Effect::ScrollTo { .. })));
+    }
+
+    #[test]
+    fn a_right_to_left_pager_steps_back_through_the_cards_the_same_way() {
+        let mut c = opened(ViewerKind::RightToLeft);
+        turn(&mut c, PageCmd::Prev);
+        assert!(matches!(c.current(), Some(ItemKey::Transition(t)) if t.dir == Dir::Prev));
+        turn(&mut c, PageCmd::Prev);
+        assert_eq!(c.view_index(), at(&c, 1, 4));
     }
 }

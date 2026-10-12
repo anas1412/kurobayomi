@@ -64,12 +64,6 @@ pub fn resume_row(db: &Arc<Db>, kind: EntryKind, entry_id: i64, from_item: i64) 
     resume(next_units_from(&units, |u| u.id, |u| u.done, from_item, false), kind)
 }
 
-/// Resume-last: the newest history row of the kind decides the entry and the unit. No history gives `None`.
-pub fn resume_last(db: &Arc<Db>, kind: EntryKind) -> Option<(i64, Resume<Unit>)> {
-    let latest = kuro_domain::history::repo::HistoryRepo::new(db.clone()).latest(kind).ok().flatten()?;
-    Some((latest.entry_id, resume_row(db, kind, latest.entry_id, latest.item_id)))
-}
-
 /// The write of a confirmed remove dialog: one row reset, or every row of the entry (the checkbox).
 pub fn apply_remove(db: &Arc<Db>, kind: EntryKind, action: RemoveAction) -> Result<(), String> {
     let repo = HistoryRepo::new(db.clone());
@@ -136,15 +130,6 @@ mod tests {
     fn history_resume_after_the_last_read_unit_is_not_found() {
         let (_dir, db, manga, ids) = manga_with(2, 2);
         assert!(matches!(resume_row(&db, EntryKind::Manga, manga, ids[1]), Resume::NotFound { .. }));
-    }
-
-    #[test]
-    fn history_resume_last_follows_the_newest_row() {
-        let (_dir, db, manga, ids) = manga_with(3, 1);
-        assert!(resume_last(&db, EntryKind::Manga).is_none(), "no history, nothing to resume");
-        HistoryRepo::new(db.clone()).upsert(EntryKind::Manga, ids[0], 1_000, 5).expect("record");
-        let (entry, Resume::Open(unit)) = resume_last(&db, EntryKind::Manga).expect("a row exists") else { panic!("a unit follows") };
-        assert_eq!((entry, unit.id), (manga, ids[1]));
     }
 
     #[test]

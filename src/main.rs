@@ -23,7 +23,6 @@ mod misc;
 // no screen calls the client yet; the extension host and the trackers take it from here
 mod net_client;
 mod local_flow;
-mod local_flow_anime;
 mod live;
 mod gio_notifier;
 mod incognito;
@@ -230,24 +229,27 @@ fn build_window(app: &gtk::Application) {
     nav.set_hexpand(true);
     nav.set_hhomogeneous(false);
     ui::nav_init(&nav, &win);
-    let tabs = tabs();
-    nav.add_child(&tabs);
-    let sidebar = sidebar(&tabs);
-    let prefs = settings_ui::route::prefs();
-    settings_ui::appearance::open_start_tab(&tabs, &prefs);
-    // one selection for every layout: the sidebar and the bottom bar show the same tab (T-36a-004)
+    // the download managers start before the tab pages, so the Downloads page shows the live queue
     let host = shell::Shell::get().expect("the shell is installed in main");
     host.migration_done();
     host.start_downloads(std::sync::Arc::new(gio_notifier::GioNotifier::new(app, Vec::new())));
-    // the navigation style is cut from the settings: the History tab stays in the More tab
-    let home = host.home_tabs(prefs.ui.start_screen.get(), kuro_prefs::ui::NavStyle::MOVE_HISTORY_TO_MORE);
+    // `app.incognito` exists before the panel's app menu and title icon look it up
+    let base = &data::app().base;
+    let _ = incognito::attach(app, base.incognito_mode.clone(), base.downloaded_only.clone());
+    let tabs = tabs();
+    nav.add_child(&tabs);
+    let sidebar = shell::sidebar::build(&tabs);
+    let prefs = settings_ui::route::prefs();
+    settings_ui::appearance::open_start_tab(&tabs, &prefs);
+    // one selection for every layout: the sidebar and the bottom bar show the same tab (T-36a-004)
+    let home = host.home_tabs(prefs.ui.start_screen.get());
     shell::tabs::bind(&tabs, &home);
     let sep = gtk::Separator::new(O::Vertical);
     let row = GBox::new(O::Horizontal, 0);
     row.append(&sidebar);
     row.append(&sep);
     row.append(&nav);
-    let bottom = gtk::StackSwitcher::builder().stack(&tabs).halign(gtk::Align::Center).margin_top(6).margin_bottom(6).build();
+    let bottom = shell::sidebar::bottom_bar(&tabs);
     let outer = GBox::new(O::Vertical, 0);
     row.set_vexpand(true);
     outer.append(&row);
@@ -258,9 +260,7 @@ fn build_window(app: &gtk::Application) {
     net_client::set_toaster(toast::attach(&overlay));
     win.set_child(Some(&overlay));
     // the app-state banners above everything: indexing, downloaded only, incognito (T-36a-018). The incognito module
-    // keeps the action, the notification and the More switch; its own banner is not placed.
-    let base = &data::app().base;
-    let _ = incognito::attach(app, base.incognito_mode.clone(), base.downloaded_only.clone());
+    // keeps the actions and the notification; its own banner is not placed.
     let banners = std::rc::Rc::new(shell::banners::Banners::new());
     outer.prepend(&banners.widget);
     {
@@ -283,15 +283,14 @@ fn build_window(app: &gtk::Application) {
 
     // reader/player are immersive: no sidebar or tab bar while they're on screen
     let refresh = {
-        let (win, nav, tabs, home) = (win.clone(), nav.clone(), tabs.clone(), home.clone());
+        let (win, nav, tabs) = (win.clone(), nav.clone(), tabs.clone());
         move || {
             let immersive = nav.visible_child().is_some_and(|c| matches!(c.widget_name().as_str(), "screen:reader" | "screen:player"));
             let (width, _) = window_size::size_of(&win);
             let chrome = shell::layout::chrome_for(width, win.is_maximized());
-            // the bottom bar belongs to the tab pages, and it hides on the tab that moved into More
+            // the bottom bar belongs to the tab pages
             let on_tabs = nav.visible_child().as_ref() == Some(tabs.upcast_ref());
-            let bar_allowed = on_tabs && shell::tabs::bar_visible(home.borrow().current(), home.borrow().more_tab(), true);
-            let shown = shell::layout::visibility(chrome, immersive, bar_allowed);
+            let shown = shell::layout::visibility(chrome, immersive, on_tabs);
             // the sidebar also hides while library entries are selected (B-1.4)
             let selecting = library::mount::selecting();
             sidebar.set_visible(shown.sidebar && !selecting);
@@ -464,73 +463,4 @@ fn tabs() -> gtk::Stack {
         tabs.add_titled(&page, Some(&n.id), &n.title).set_icon_name(&n.icon);
     }
     tabs
-}
-
-/// The navigation sidebar: app name in a split header, then one row per destination (icon, label, badge) from the top.
-/// Always full width; there is no collapsed mode (docs/design/main-window.md).
-fn sidebar(tabs: &gtk::Stack) -> GBox {
-    let header = ui::header_bar();
-    header.set_decoration_layout(Some(&ui::decoration(true)));
-    header.set_title_widget(Some(&gtk::Label::builder().label("Kurobayomi").css_classes(["title"]).build()));
-    ui::no_sticky_focus(&header);
-
-    let list = gtk::ListBox::new();
-    list.add_css_class("navigation-sidebar");
-    list.set_margin_top(widgets::rail::PAD_V);
-    list.set_margin_bottom(widgets::rail::PAD_V);
-    let ids: Vec<String> = ui::with_spec(|s| s.nav.iter().map(|n| n.id.clone()).collect());
-    for n in ui::with_spec(|s| s.nav.clone()) {
-        let h = GBox::new(O::Horizontal, 12);
-        ui::margins(&h, widgets::rail::ROW_PAD);
-        h.append(&gtk::Image::from_icon_name(&n.icon));
-        h.append(&gtk::Label::builder().label(&n.title).xalign(0.0).hexpand(true).build());
-        // the Updates pill starts empty and follows the shared counts; no count is written here. The Browse pill has
-        // no count: the extension update count is cut from the settings.
-        if n.id == "updates" {
-            let b = gtk::Label::builder().css_classes(["kb-nav-badge", "numeric"]).valign(gtk::Align::Center).opacity(0.0).build();
-            h.append(&b);
-            if data::is_installed() {
-                let store = data::app().base.store().clone();
-                misc::badge::bind(&b, &kuro_prefs::library::LibraryPrefs::new(store));
-            }
-        }
-        let row = gtk::ListBoxRow::builder().child(&h).build();
-        row.set_margin_top(widgets::rail::ITEM_SPACING / 2);
-        row.set_margin_bottom(widgets::rail::ITEM_SPACING / 2);
-        list.append(&row);
-    }
-    {
-        let (tabs, ids) = (tabs.clone(), ids.clone());
-        list.connect_row_activated(move |_, r| {
-            ui::pop_to_root();
-            let id = &ids[r.index() as usize];
-            // choosing the item that is already showing opens the library settings sheet (B-1.2)
-            if id == "library" && tabs.visible_child_name().as_deref() == Some("library") {
-                library::mount::reselect();
-            }
-            updates::mount::reselect(id, tabs.visible_child_name().as_deref() == Some(id.as_str()));
-            // choosing More while it shows opens Settings (HomeScreen reselect)
-            let showing = tabs.visible_child_name().as_deref() == Some(id.as_str());
-            if showing && shell::tabs::tab_for_id(id, kuro_prefs::ui::Tab::AnimeLibrary).is_some_and(|t| shell::tabs::on_reselect(t) == shell::tabs::Reselect::OpenSettings) {
-                pref_model::shell::open(None);
-            }
-            tabs.set_visible_child_name(id);
-        });
-    }
-    // keep the selection in sync when the bottom bar (narrow mode) switches tabs
-    let l2 = list.clone();
-    tabs.connect_visible_child_name_notify(move |t| {
-        let i = t.visible_child_name().and_then(|n| ids.iter().position(|x| *x == n));
-        if let Some(r) = i.and_then(|i| l2.row_at_index(i as i32)) {
-            l2.select_row(Some(&r));
-        }
-    });
-    list.select_row(list.row_at_index(0).as_ref());
-
-    let b = GBox::new(O::Vertical, 0);
-    b.set_size_request(widgets::rail::WIDTH, -1);
-    b.add_css_class("kb-sidebar");
-    b.append(&header);
-    b.append(&gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build());
-    b
 }

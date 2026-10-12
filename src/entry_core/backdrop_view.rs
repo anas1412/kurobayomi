@@ -2,32 +2,23 @@
 //! window background (`backdrop.rs`). The blur is made once per cover and kept in a cache keyed by the cover's url and
 //! modification time, so a header drawn again shows it at once and a changed cover is blurred again.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::future::Future;
+use std::path::Path;
 
 use gtk::prelude::*;
 use gtk::{gdk, glib};
 use kuro_images::art::ArtRef;
+use kuro_images::fetch::{ImageService, Payload};
+use kuro_images::options::LoadOptions;
+use tokio_util::sync::CancellationToken;
 
-use super::anime::images_io;
-use super::backdrop::{BACKDROP_ALPHA, FADE_CLASS, cache_key, gradient_css, prepare};
+use super::backdrop::{BACKDROP_ALPHA, FADE_CLASS, cache_key, prepare};
 use super::cover_view;
-use super::full_cover_view::offload;
 
 thread_local! {
     static CACHE: RefCell<HashMap<String, gdk::Texture>> = RefCell::default();
-    static CSS_DONE: Cell<bool> = const { Cell::new(false) };
-}
-
-fn ensure_css() {
-    if CSS_DONE.with(|d| d.replace(true)) {
-        return;
-    }
-    if let Some(display) = gdk::Display::default() {
-        let provider = gtk::CssProvider::new();
-        provider.load_from_string(&gradient_css());
-        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
 }
 
 /// The blurred picture of a cover already made, if any.
@@ -35,9 +26,36 @@ fn cached(key: &str) -> Option<gdk::Texture> {
     CACHE.with(|c| c.borrow().get(key).cloned())
 }
 
+/// Runs `work` on the blocking pool of `handle` and yields its result on the GTK thread's receiver.
+fn offload<T, F>(handle: &tokio::runtime::Handle, work: impl FnOnce() -> F + Send + 'static) -> async_channel::Receiver<T>
+where
+    T: Send + 'static,
+    F: Future<Output = T>,
+{
+    let (tx, rx) = async_channel::bounded(1);
+    let driver = handle.clone();
+    handle.spawn_blocking(move || {
+        let _ = tx.send_blocking(driver.block_on(work()));
+    });
+    rx
+}
+
+/// The bytes of the cover: the custom file when there is one, else what the image service fetches (its disk cache
+/// first). No url or a failed fetch is no picture.
+async fn cover_bytes(service: &ImageService, art: &ArtRef, custom: &Path) -> Option<Vec<u8>> {
+    if tokio::fs::try_exists(custom).await.unwrap_or(false) {
+        return tokio::fs::read(custom).await.ok();
+    }
+    art.url.as_ref()?;
+    let fetched = service.fetch(art, &LoadOptions { use_custom_cover: false, ..LoadOptions::default() }, &CancellationToken::new()).await.ok()?;
+    match fetched.payload {
+        Payload::File(path) => tokio::fs::read(path).await.ok(),
+        Payload::Bytes(bytes) => Some(bytes.to_vec()),
+    }
+}
+
 /// The backdrop widget: it fills the space it is given and shows nothing until the picture is ready.
 pub fn build(art: Option<&ArtRef>) -> gtk::Overlay {
-    ensure_css();
     let picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).can_shrink(true).hexpand(true).vexpand(true).opacity(BACKDROP_ALPHA).build();
     let fade = gtk::Box::builder().css_classes([FADE_CLASS]).hexpand(true).vexpand(true).build();
     let overlay = gtk::Overlay::new();
@@ -59,7 +77,7 @@ fn load(art: ArtRef, picture: &gtk::Picture) {
     let (Some(service), Ok(runtime)) = (cover_view::service(), tokio::runtime::Handle::try_current()) else { return };
     let custom = kuro_platform::linux::LinuxPaths::system().ok().map(|paths| kuro_images::cover_paths::custom_file_for(&paths, &art)).unwrap_or_default();
     let rx = offload(&runtime, move || async move {
-        let bytes = images_io::current_bytes(Some(service.as_ref()), &art, &custom).await.ok()?;
+        let bytes = cover_bytes(&service, &art, &custom).await?;
         prepare(&bytes)
     });
     let picture = picture.downgrade();

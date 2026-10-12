@@ -1,4 +1,4 @@
-//! Which trackers are logged in (T-37a-056): the Filter tab's tracker rows, the tracker filters and the tracker-mean
+//! Which trackers are logged in (T-37a-056): the view menu's Tracked check, the tracker filters and the tracker-mean
 //! sort only see a tracker the user is logged in to. A login is a non-empty username and password in the secret
 //! store, the rule of `kuro_track::base`.
 //!
@@ -55,11 +55,6 @@ pub fn logged_in(secrets: &dyn SecretStore, kind: EntryKind) -> BTreeSet<i64> {
         .filter(|(id, _)| read(secrets, *id, Field::Username) && read(secrets, *id, Field::Password))
         .map(|(id, _)| id.0)
         .collect()
-}
-
-/// `(id, name)` of the logged-in trackers of `kind`, for the Filter tab.
-pub fn names(kind: EntryKind, logged_in: &BTreeSet<i64>) -> Vec<(i64, String)> {
-    candidates(kind).iter().filter(|(id, _)| logged_in.contains(&id.0)).map(|(id, name)| (id.0, (*name).to_owned())).collect()
 }
 
 /// The last known logins of one kind and the refresh that updates them.
@@ -171,16 +166,6 @@ mod tests {
         store.login(TrackerId::SIMKL);
         assert_eq!(logged_in(&store, EntryKind::Manga), BTreeSet::from([6]));
         assert_eq!(logged_in(&store, EntryKind::Anime), BTreeSet::from([101]));
-    }
-
-    #[test]
-    fn the_filter_tab_lists_the_logged_in_trackers_by_name() {
-        let on = BTreeSet::from([3, 2, 9]);
-        assert_eq!(
-            names(EntryKind::Manga, &on),
-            vec![(2, "AniList".to_owned()), (3, "Kitsu".to_owned()), (9, "Suwayomi".to_owned())]
-        );
-        assert!(names(EntryKind::Anime, &BTreeSet::new()).is_empty());
     }
 
     #[test]

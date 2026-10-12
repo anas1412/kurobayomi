@@ -237,18 +237,15 @@ pub fn pass_settings(kind: EntryKind, category: Option<i64>, inputs: &Inputs) ->
     }
 }
 
-/// The folder renames of the item sync: the shell's downloads folder and cache, and the source names of the one
-/// registry (a source the registry does not know keeps its folders).
+/// The folder renames of the item sync: the downloads folders of the storage location, the shell's manga download
+/// cache, and the source names of the one registry (a source the registry does not know keeps its folders).
 fn folder_renames() -> Arc<FolderRenames> {
-    let shell = crate::shell::host::Shell::get();
-    let root = shell
-        .as_ref()
-        .map(|s| s.downloads().root().to_path_buf())
-        .or_else(|| {
-            kuro_platform::linux::LinuxPaths::system().ok().map(|p| kuro_platform::paths::Paths::default_downloads_dir(&p))
-        })
-        .unwrap_or_default();
-    Arc::new(FolderRenames::new(root, Arc::new(|id: i64| LiveRegistry.name_of_known(id)), shell.map(|s| s.downloads().clone())))
+    use kuro_domain::kind::EntryKind;
+    let storage = crate::settings_ui::storage::manager(crate::data::app().base.store())
+        .expect("main resolved the platform folders before the runner");
+    let (manga_root, anime_root) = (storage.downloads_path(EntryKind::Manga), storage.downloads_path(EntryKind::Anime));
+    let index = crate::shell::host::Shell::get().map(|s| s.downloads().clone());
+    Arc::new(FolderRenames::new(manga_root, anime_root, Arc::new(|id: i64| LiveRegistry.name_of_known(id)), index))
 }
 
 fn runner() -> Arc<Runner> {

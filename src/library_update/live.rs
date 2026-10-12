@@ -30,14 +30,6 @@ pub enum LiveSource {
     Anime(Arc<dyn AnimeSource>),
 }
 
-/// The anime sources of the recipes and of the installed instances hook, by id.
-fn anime_source(source_id: i64) -> Option<Arc<dyn AnimeSource>> {
-    crate::recipe_sources::anime_sources()
-        .into_iter()
-        .find(|source| source.id() == source_id)
-        .or_else(|| crate::browse::anime::directory::instances()?.source(source_id))
-}
-
 impl SourceRegistry for LiveRegistry {
     type Source = LiveSource;
 
@@ -45,9 +37,10 @@ impl SourceRegistry for LiveRegistry {
         if source_id == LOCAL_SOURCE_ID {
             return Some(LiveSource::Local);
         }
+        let source = directory::current(kind).catalogue(source_id)?;
         match kind {
-            EntryKind::Manga => directory::current()?.manga_source(source_id).map(LiveSource::Manga),
-            EntryKind::Anime => anime_source(source_id).map(LiveSource::Anime),
+            EntryKind::Manga => source.manga().map(LiveSource::Manga),
+            EntryKind::Anime => source.anime().map(LiveSource::Anime),
         }
     }
 }

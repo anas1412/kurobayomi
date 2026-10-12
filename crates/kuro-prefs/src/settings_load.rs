@@ -85,7 +85,7 @@ mod tests {
         fs::create_dir_all(paths.config_dir()).unwrap();
         fs::write(config_file(&paths.config_dir()), "[[[ not toml").unwrap();
         let store = open(&paths).unwrap();
-        assert_eq!(store.get_raw("display_unread_badge"), None);
+        assert_eq!(store.get_raw("crop_borders"), None);
         let renamed = fs::read_dir(paths.config_dir()).unwrap().any(|e| {
             e.unwrap()
                 .file_name()
@@ -100,7 +100,7 @@ mod tests {
         let paths = TestPaths(TestDir::new("reopen"));
         {
             let store = open(&paths).unwrap();
-            store.set_raw("display_unread_badge", PrefValue::Bool(false));
+            store.set_raw("crop_borders", PrefValue::Bool(true));
             store.flush().unwrap();
         }
         // The flusher thread may still hold the last clone for a moment, so retry the lock.
@@ -114,8 +114,8 @@ mod tests {
         }
         let store = reopened.unwrap();
         assert_eq!(
-            store.get_raw("display_unread_badge"),
-            Some(PrefValue::Bool(false))
+            store.get_raw("crop_borders"),
+            Some(PrefValue::Bool(true))
         );
     }
 

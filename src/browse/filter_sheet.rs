@@ -1,7 +1,8 @@
-//! The filter sheet of a browse page: a container with Reset and Filter buttons over the rows of `SourceFilters`
-//! (T-40b-050, T-40b-053). Headers and separators draw as a heading and a divider, a group expands recursively, and
-//! select, text, check box, tri-state and sort rows write their changes through the sheet's edit methods. The rules are
-//! `kuro_source::filter_sheet` and `sheet`; nothing here decides anything.
+//! The filter sheet of a browse page: a native popover under the Filter button, with the rows of `SourceFilters` in a
+//! boxed list and Reset and Apply under them (T-40b-050, T-40b-053; no separate window since 2026-10-12). Headers and
+//! separators draw as a heading and a divider, a group expands recursively, and select, text, check box, tri-state and
+//! sort rows write their changes through the sheet's edit methods. The rules are `kuro_source::filter_sheet` and
+//! `sheet`; nothing here decides anything.
 
 use std::rc::Rc;
 
@@ -15,42 +16,48 @@ use super::filters::SourceFilters;
 use super::sheet::{SheetButton, on_button, select_label};
 
 const INDENT_PX: i32 = 16;
+/// The popover's width, and the height past which its rows scroll.
+const WIDTH_PX: i32 = 360;
+const MAX_HEIGHT_PX: i32 = 480;
 
-/// The sheet container. `on_filter` runs with the current filter values when Filter is pressed; `close` runs after it
-/// (the window or popover that holds the container).
+/// The sheet container. `on_filter` runs with the current filter values when Apply is pressed; `close` runs after it
+/// (it closes the popover that holds the container).
 pub struct FilterSheetView {
     pub root: gtk::Box,
     pub reset: gtk::Button,
-    pub filter: gtk::Button,
-    body: gtk::Box,
+    pub apply: gtk::Button,
+    body: gtk::ListBox,
     filters: Rc<SourceFilters>,
 }
 
 impl FilterSheetView {
     pub fn new(filters: Rc<SourceFilters>, on_filter: impl Fn(FilterList) + 'static, close: impl Fn() + 'static) -> Rc<Self> {
-        let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        for set in [gtk::Box::set_margin_start, gtk::Box::set_margin_end, gtk::Box::set_margin_top, gtk::Box::set_margin_bottom] {
-            set(&body, 12);
-        }
+        let body = crate::ui::boxed_list();
+        crate::ui::margins(&body, 12);
         let reset = gtk::Button::with_label(&tr(MsgKey::action_reset));
-        let filter = gtk::Button::with_label(&tr(MsgKey::action_filter));
-        filter.add_css_class("suggested-action");
+        let apply = gtk::Button::with_label(&tr(MsgKey::action_apply));
+        apply.add_css_class("suggested-action");
         let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         buttons.set_margin_start(12);
         buttons.set_margin_end(12);
-        buttons.set_margin_top(8);
-        buttons.set_margin_bottom(8);
+        buttons.set_margin_bottom(12);
         reset.set_hexpand(true);
         reset.set_halign(gtk::Align::Start);
         buttons.append(&reset);
-        buttons.append(&filter);
-        let scroller = gtk::ScrolledWindow::builder().child(&body).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+        buttons.append(&apply);
+        // a long filter list scrolls inside the popover; a short one keeps its natural height
+        let scroller = gtk::ScrolledWindow::builder()
+            .child(&body)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(MAX_HEIGHT_PX)
+            .build();
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.append(&buttons);
-        root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        root.set_width_request(WIDTH_PX);
         root.append(&scroller);
+        root.append(&buttons);
 
-        let view = Rc::new(Self { root, reset, filter, body, filters });
+        let view = Rc::new(Self { root, reset, apply, body, filters });
         view.render();
         let weak = Rc::downgrade(&view);
         view.reset.connect_clicked(move |_| {
@@ -63,7 +70,7 @@ impl FilterSheetView {
         });
         let weak = Rc::downgrade(&view);
         let (on_filter, close) = (Rc::new(on_filter), Rc::new(close));
-        view.filter.connect_clicked(move |_| {
+        view.apply.connect_clicked(move |_| {
             let Some(view) = weak.upgrade() else { return };
             let effect = on_button(SheetButton::Filter);
             if effect.search {
@@ -215,6 +222,13 @@ impl FilterSheetView {
             }
         };
         row.set_margin_start(depth * INDENT_PX);
+        if depth == 0 {
+            // a top-level item is one row of the boxed list, with the list's inner padding
+            row.set_margin_start(12);
+            row.set_margin_end(12);
+            row.set_margin_top(6);
+            row.set_margin_bottom(6);
+        }
         row
     }
 
@@ -233,17 +247,19 @@ impl FilterSheetView {
         button
     }
 
-    /// The sheet in a modal window over `anchor`. Filter closes it; Reset leaves it open.
-    pub fn present_over(self: &Rc<Self>, anchor: &impl IsA<gtk::Widget>) -> gtk::Window {
-        let parent = anchor.upcast_ref::<gtk::Widget>().root().and_downcast::<gtk::Window>();
-        let window = gtk::Window::builder().title(tr(MsgKey::action_filter)).modal(true).default_width(420).default_height(560).build();
-        window.set_transient_for(parent.as_ref());
-        window.set_child(Some(&self.root));
-        super::keys::close_on_escape(&window);
-        // the rows reach the sheet through weak links: the window owns it until it is destroyed
-        super::glue::keep_alive(&window, self);
-        window.present();
-        window
+    /// The sheet in a native popover, for the Filter menu button. The rows are drawn again each time it opens (a search
+    /// may have reset the values meanwhile); Escape or a click outside closes it and keeps the edits.
+    pub fn popover(self: &Rc<Self>) -> gtk::Popover {
+        let popover = gtk::Popover::builder().child(&self.root).build();
+        let weak = Rc::downgrade(self);
+        popover.connect_show(move |_| {
+            if let Some(view) = weak.upgrade() {
+                view.render();
+            }
+        });
+        // the rows reach the sheet through weak links: the popover owns it until it is destroyed
+        super::glue::keep_alive(&popover, self);
+        popover
     }
 }
 
@@ -361,7 +377,7 @@ pub(crate) mod tests {
         assert_eq!(rig.filters.current(), defaults(), "Reset restores the defaults");
         assert!(rig.searched.borrow().is_empty() && rig.closed.get() == 0, "and neither searches nor closes");
         rig.filters.edit(|sheet| sheet.toggle_check(&[2]).expect("check"));
-        rig.view.filter.emit_clicked();
+        rig.view.apply.emit_clicked();
         assert_eq!(rig.searched.borrow().len(), 1);
         assert!(matches!(&rig.searched.borrow()[0].0[2], Filter::CheckBox { state: true, .. }), "Filter searches with the current values");
         assert_eq!(rig.closed.get(), 1);
@@ -378,33 +394,20 @@ pub(crate) mod tests {
         assert!(icons.contains(&"view-sort-ascending-symbolic".to_owned()), "{icons:?}");
     }
 
-    fn escape_closes_the_sheet_window_and_keeps_the_edits() {
+    fn the_sheet_is_a_popover_with_a_boxed_list_and_apply() {
         let rig = rig();
         rig.filters.edit(|sheet| sheet.toggle_check(&[2]).expect("check"));
-        let anchor = gtk::Label::new(None);
-        let window = rig.view.present_over(&anchor);
-        let closes = Rc::new(Cell::new(0));
-        let count = Rc::clone(&closes);
-        window.connect_close_request(move |_| {
-            count.set(count.get() + 1);
-            gtk::glib::Propagation::Proceed
-        });
-        let controllers = window.observe_controllers();
-        let keys = (0..controllers.n_items())
-            .filter_map(|i| controllers.item(i))
-            .find_map(|c| c.downcast::<gtk::EventControllerKey>().ok())
-            .expect("key controller");
-        let none = gtk::gdk::ModifierType::empty();
-        assert!(!keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::a, &0_u32, &none]), "other keys go on");
-        assert_eq!(closes.get(), 0);
-        assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Escape, &0_u32, &none]));
-        assert_eq!(closes.get(), 1, "Escape closes the window");
-        assert!(matches!(&rig.filters.current().0[2], Filter::CheckBox { state: true, .. }), "and reverts nothing");
+        let popover = rig.view.popover();
+        assert_eq!(popover.child(), Some(rig.view.root.clone().upcast::<gtk::Widget>()), "no separate window");
+        assert!(rig.view.body.has_css_class("boxed-list"));
+        assert_eq!(rig.view.apply.label().as_deref(), Some(tr(MsgKey::action_apply).as_str()));
+        popover.popdown();
+        assert!(matches!(&rig.filters.current().0[2], Filter::CheckBox { state: true, .. }), "closing reverts nothing");
         assert!(rig.searched.borrow().is_empty(), "and searches nothing");
     }
 
     pub(crate) fn smoke() {
-        escape_closes_the_sheet_window_and_keeps_the_edits();
+        the_sheet_is_a_popover_with_a_boxed_list_and_apply();
         headers_and_separators_render_as_a_heading_and_a_divider_and_groups_expand_recursively();
         a_check_box_a_tri_state_and_a_text_write_into_the_sheet();
         a_select_shows_its_indexed_value_and_the_first_one_when_the_index_is_out_of_range();

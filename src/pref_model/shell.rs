@@ -238,6 +238,11 @@ fn pane(id: &str) -> gtk::Widget {
             (crate::ui::scrolled(&column).upcast(), crate::ui::toolbar(&screen))
         }
     };
+    // the window's header already has the one settings search, so a page's own search button is not repeated here
+    let end: Vec<gtk::Widget> = end
+        .into_iter()
+        .filter(|w| w.downcast_ref::<gtk::Button>().is_none_or(|b| b.icon_name().as_deref() != Some("system-search-symbolic")))
+        .collect();
     let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
     crate::ui::tag(&page, id);
     if !end.is_empty() {

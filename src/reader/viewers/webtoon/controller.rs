@@ -146,7 +146,7 @@ impl WebtoonController {
     }
 
     fn on_transition_selected(&self, t: &Transition) -> Vec<Effect> {
-        t.to.iter().cloned().map(Effect::Preload).collect()
+        std::iter::once(Effect::TransitionSelected).chain(t.to.iter().cloned().map(Effect::Preload)).collect()
     }
 }
 
@@ -257,5 +257,14 @@ mod tests {
     fn a_move_to_an_unknown_item_does_nothing() {
         let mut c = strip();
         assert!(c.move_to_page(&ItemKey::Page(loaded(9, 9.0, 1).page(0))).is_empty());
+    }
+
+    #[test]
+    fn a_card_on_screen_is_reported_as_a_card_and_not_as_a_page() {
+        let mut c = strip();
+        let next = c.items().iter().position(|i| i.transition().is_some_and(|t| t.dir == Dir::Next)).unwrap();
+        let fx = c.on_scroll(10, false, Some(next), None);
+        assert!(fx.contains(&Effect::TransitionSelected));
+        assert!(!fx.iter().any(|e| matches!(e, Effect::PageSelected(_))));
     }
 }

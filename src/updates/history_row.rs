@@ -1,6 +1,6 @@
 //! The history row (T-42a-014): a book-aspect cover (initials until an image draws) that opens the entry, a bold title (two lines, ellipsised), the
 //! subtitle, a favorite button only when the entry is not in the library, and a delete button. A click on the row
-//! resumes (T-42a-016).
+//! resumes (T-42a-016); its right-click menu offers Resume, Open details and Remove from history.
 
 use std::rc::Rc;
 
@@ -8,6 +8,7 @@ use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, GestureClick, Label, ListBoxRow, Orientation as O};
 
 use crate::library::layout::{SPACE_M, SPACE_S};
+use crate::widgets::context_menu::Item;
 use kuro_domain::dates::item_row_text;
 use kuro_i18n::{MsgKey, tr};
 
@@ -16,6 +17,11 @@ pub const ROW_MIN_HEIGHT: i32 = 96;
 /// Cover size of the row: the book aspect (2:3) of the library cards, filling the row's height inside its margins.
 pub const COVER_HEIGHT: i32 = ROW_MIN_HEIGHT - 2 * SPACE_S;
 pub const COVER_WIDTH: i32 = COVER_HEIGHT * 2 / 3;
+
+/// The right-click item that opens the entry's page (no catalogue key yet, as in `updates::copy`).
+pub const OPEN_DETAILS: &str = "Open details";
+/// The right-click item that asks to remove the row, as the trash button does.
+pub const REMOVE_FROM_HISTORY: &str = "Remove from history";
 
 /// The subtitle: `Ch. {n} - {time}` (or `Ep.`) when the unit number is above -1, else the time only.
 pub fn subtitle(prefix: &str, number: f64, time: &str) -> String {
@@ -84,12 +90,39 @@ pub fn history_row(title: &str, subtitle: &str, cover: &impl IsA<gtk::Widget>, i
     row.set_child(Some(&line));
     let resume = actions.resume.clone();
     crate::widgets::row_activate::on_activate(&row, move |_| resume());
+    crate::widgets::context_menu::attach(&row, move |_, _| menu(&actions));
     row
+}
+
+/// The row's right-click menu: Resume, Open details, then Remove from history (which asks first, as the trash button).
+fn menu(actions: &RowActions) -> Vec<Item> {
+    let (resume, open, remove) = (actions.resume.clone(), actions.open_entry.clone(), actions.remove.clone());
+    vec![
+        Item::new(tr(MsgKey::action_resume), 0, move || resume()),
+        Item::new(OPEN_DETAILS, 0, move || open()),
+        Item::new(REMOVE_FROM_HISTORY, 1, move || remove()),
+    ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_row_menu_resumes_opens_the_details_and_asks_to_remove() {
+        let log: Rc<std::cell::RefCell<Vec<&str>>> = Rc::default();
+        let call = |name: &'static str| -> Rc<dyn Fn()> {
+            let log = Rc::clone(&log);
+            Rc::new(move || log.borrow_mut().push(name))
+        };
+        let actions = RowActions { open_entry: call("open"), resume: call("resume"), remove: call("remove"), add_to_library: call("add") };
+        let items = menu(&actions);
+        assert_eq!(items.iter().map(|i| i.label.clone()).collect::<Vec<_>>(), [tr(MsgKey::action_resume), OPEN_DETAILS.to_owned(), REMOVE_FROM_HISTORY.to_owned()]);
+        for item in &items {
+            (item.run)();
+        }
+        assert_eq!(*log.borrow(), ["resume", "open", "remove"]);
+    }
 
     #[test]
     fn history_subtitle_rules() {

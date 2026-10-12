@@ -2,20 +2,11 @@
 //! thin GTK builders on top. CSS classes come from `theme::style` and `theme::css`.
 #![allow(dead_code)]
 
-pub mod action_button;
-pub mod adaptive_sheet;
-pub mod button;
-pub mod focus;
-pub mod keyboard;
-pub mod layout;
-pub mod numeric;
+pub mod download_button;
 pub mod page_header;
-pub mod pill;
-pub mod refresh;
-pub mod repeat_button;
+pub mod context_menu;
 pub mod int_slider;
 pub mod rail;
 pub mod row_activate;
-pub mod scaffold;
-pub mod settings_items;
 pub mod tabs;
+pub mod view_options;

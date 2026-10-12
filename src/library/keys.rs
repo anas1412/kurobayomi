@@ -29,7 +29,7 @@ pub fn shortcut(key: Key, ctrl: bool, has_selection: bool, typing: bool) -> Opti
     }
 }
 
-/// What a click or press on a cover does.
+/// What a primary click on a cover does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Press {
     Open,
@@ -37,10 +37,10 @@ pub enum Press {
     Range,
 }
 
-/// Right click and Shift+click select a range; Ctrl+click, or any click while something is selected, toggles;
-/// otherwise the entry opens. A long press is always `Range` (Android parity) and does not come through here.
-pub fn press(button: u32, shift: bool, ctrl: bool, selecting: bool) -> Press {
-    if button == 3 || shift {
+/// Shift+click selects a range; Ctrl+click, or any click while something is selected, toggles; otherwise the entry
+/// opens. A right click (or a touch long press) opens the cover's context menu and does not come through here.
+pub fn press(shift: bool, ctrl: bool, selecting: bool) -> Press {
+    if shift {
         Press::Range
     } else if ctrl || selecting {
         Press::Toggle
@@ -94,11 +94,10 @@ mod tests {
 
     #[test]
     fn press_matrix_follows_section_7() {
-        assert_eq!(press(1, false, false, false), Press::Open);
-        assert_eq!(press(1, false, false, true), Press::Toggle);
-        assert_eq!(press(1, false, true, false), Press::Toggle);
-        assert_eq!(press(1, true, false, false), Press::Range);
-        assert_eq!(press(3, false, false, false), Press::Range);
+        assert_eq!(press(false, false, false), Press::Open);
+        assert_eq!(press(false, false, true), Press::Toggle);
+        assert_eq!(press(false, true, false), Press::Toggle);
+        assert_eq!(press(true, false, false), Press::Range);
     }
 
     #[test]

@@ -55,8 +55,8 @@ mod tests {
     }
 
     #[test]
-    fn no_more_row_routes_to_the_storage_tab() {
-        // T-47ba-017: the Storage tab is reached from Updates; the More list opens the settings screens only
+    fn no_row_routes_to_the_storage_tab() {
+        // T-47ba-017: the Storage tab is reached from Updates; the settings list opens the settings screens only
         assert!(rows("x").iter().all(|r| !r.target.starts_with("storage")));
     }
 

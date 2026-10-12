@@ -13,6 +13,11 @@ pub fn display_title(title: &str) -> String {
     }
 }
 
+/// The scanlator to show: nothing for a blank one or the placeholder "Unknown" some sources send.
+pub fn shown_scanlator(scanlator: Option<&str>) -> Option<&str> {
+    scanlator.map(str::trim).filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("unknown"))
+}
+
 /// The author line: `author` or "Unknown author" when blank.
 pub fn display_author(author: Option<&str>) -> String {
     match author.filter(|a| !a.trim().is_empty()) {
@@ -77,11 +82,6 @@ pub fn description(raw: Option<&str>) -> Description {
     Description { expanded, shrunk }
 }
 
-/// Default expansion: the small layout starts expanded only when opened from a source, the large layout always.
-pub fn default_expanded(large_layout: bool, from_source: bool) -> bool {
-    if large_layout { true } else { from_source }
-}
-
 /// The collapsed description shows this many lines, with a scrim this tall over the last one.
 pub const COLLAPSED_LINES: i32 = 3;
 pub const SCRIM_PX: i32 = 24;
@@ -93,10 +93,9 @@ pub struct Expansion {
 }
 
 impl Expansion {
-    pub fn new(large_layout: bool, from_source: bool) -> Self {
-        Self {
-            expanded: default_expanded(large_layout, from_source),
-        }
+    /// Always collapsed when a page opens (user, 2026-10-12): opening a title again never remembers an expanded text.
+    pub fn new(_large_layout: bool, _from_source: bool) -> Self {
+        Self { expanded: false }
     }
 
     pub fn is_expanded(self) -> bool {
@@ -143,13 +142,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn expansion_starts_from_the_layout_default_and_toggles() {
+    fn a_blank_or_unknown_scanlator_shows_nothing() {
+        assert_eq!(shown_scanlator(None), None);
+        assert_eq!(shown_scanlator(Some("  ")), None);
+        assert_eq!(shown_scanlator(Some("Unknown")), None);
+        assert_eq!(shown_scanlator(Some(" unknown ")), None);
+        assert_eq!(shown_scanlator(Some("Official")), Some("Official"));
+    }
+
+    #[test]
+    fn expansion_always_starts_collapsed_and_toggles() {
         let mut small = Expansion::new(false, false);
         assert!(!small.is_expanded() && small.scrim());
         small.toggle();
         assert!(small.is_expanded() && !small.scrim());
-        assert!(Expansion::new(false, true).is_expanded());
-        assert!(Expansion::new(true, false).is_expanded());
+        assert!(!Expansion::new(false, true).is_expanded(), "opened from a source: collapsed too");
+        assert!(!Expansion::new(true, false).is_expanded(), "the two-pane layout: collapsed too");
     }
 
     #[test]
@@ -200,12 +208,5 @@ mod tests {
     fn single_newlines_are_kept() {
         assert_eq!(collapse_line_breaks("x\ny\rz"), "x\ny\rz");
         assert_eq!(collapse_line_breaks("x\r\ny"), "x\ny");
-    }
-
-    #[test]
-    fn default_expansion_by_layout() {
-        assert!(default_expanded(true, false));
-        assert!(default_expanded(false, true));
-        assert!(!default_expanded(false, false));
     }
 }

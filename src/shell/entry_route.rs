@@ -19,8 +19,8 @@ pub enum OpenTab {
     History,
     /// The browse tab, optionally on the extensions page of the anime or manga catalogue.
     Browse { to_extensions: bool, anime: bool },
-    /// The More tab, optionally on the downloads page.
-    More { to_downloads: bool },
+    /// The Downloads page.
+    Downloads,
 }
 
 /// One step of an open.
@@ -61,13 +61,7 @@ pub fn effects(open: OpenTab) -> Vec<Effect> {
             out.push(Effect::Select(Tab::Browse));
             out
         }
-        OpenTab::More { to_downloads } => {
-            let mut out = vec![Effect::Select(Tab::More)];
-            if to_downloads {
-                out.push(Effect::Push(Route::Downloads));
-            }
-            out
-        }
+        OpenTab::Downloads => vec![Effect::Push(Route::Downloads)],
     }
 }
 
@@ -85,7 +79,7 @@ pub fn open_tab(open: OpenTab, home: &mut HomeTabs, nav: &mut Navigator, mut sho
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_prefs::ui::{NavStyle, StartScreen};
+    use kuro_prefs::ui::StartScreen;
 
     #[test]
     fn an_anime_with_an_id_selects_the_anime_library_and_pushes_its_entry() {
@@ -111,9 +105,8 @@ mod tests {
     }
 
     #[test]
-    fn the_downloads_request_pushes_the_downloads_page_from_more() {
-        assert_eq!(effects(OpenTab::More { to_downloads: true }), vec![Effect::Select(Tab::More), Effect::Push(Route::Downloads)]);
-        assert_eq!(effects(OpenTab::More { to_downloads: false }), vec![Effect::Select(Tab::More)]);
+    fn the_downloads_request_opens_the_downloads_page_and_keeps_the_tab() {
+        assert_eq!(effects(OpenTab::Downloads), vec![Effect::Push(Route::Downloads)]);
     }
 
     #[test]
@@ -126,7 +119,7 @@ mod tests {
 
     #[test]
     fn open_tab_selects_the_tab_and_pushes_the_entry_on_the_navigator() {
-        let mut home = HomeTabs::new(StartScreen::ANIME, NavStyle::MOVE_HISTORY_TO_MORE);
+        let mut home = HomeTabs::new(StartScreen::ANIME);
         let mut nav = Navigator::new();
         let mut asked = None;
         open_tab(OpenTab::AnimeLib { anime_id: Some(3) }, &mut home, &mut nav, |anime| asked = Some(anime));

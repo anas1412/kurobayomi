@@ -36,7 +36,6 @@ use crate::pref_model::stores_backend::{Ops as _, RepoOps};
 pub(crate) const INTERVAL_KEY: &str = "backup_interval";
 const LAST_AUTO_KEY: &str = "__APP_STATE_last_auto_backup_timestamp";
 pub(crate) const ENABLED_AT_KEY: &str = "__APP_STATE_backup_enabled_at";
-const STORAGE_DIR_KEY: &str = "__APP_STATE_storage_dir";
 
 /// No tracker is signed in until the tracker area registers its own, so a check lists every tracker of a file as missing.
 /// Its source side is not used by the app: backups and checks read sources through `LiveRegistry`.
@@ -217,8 +216,17 @@ pub fn run_backup_cli() -> u8 {
             return 1;
         }
     };
-    let base = library.prefs.pref(STORAGE_DIR_KEY.to_owned(), String::new()).get();
-    let auto_dir = kuro_backup::settings::automatic_dir_for((!base.is_empty()).then(|| Path::new(&base)), &paths);
+    let auto_dir = match crate::settings_ui::storage::manager(&library.prefs).map(|storage| storage.backups_dir()) {
+        Some(Ok(dir)) => dir,
+        Some(Err(e)) => {
+            eprintln!("kurobayomi: the backups folder is not available: {e}");
+            return 1;
+        }
+        None => {
+            eprintln!("kurobayomi: the storage folder could not be resolved");
+            return 1;
+        }
+    };
     let host = CliHost {
         library,
         auto_dir: auto_dir.clone(),

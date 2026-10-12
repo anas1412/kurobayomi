@@ -151,13 +151,6 @@ fn launch(url: &str, failed: impl FnOnce() + 'static) {
 /// with the desktop's handler and closes the page; the button is disabled on the first click. Offline, the handler
 /// fails and a toast says so.
 fn show_update(release: &Release) {
-    let window = gtk::Window::builder()
-        .transient_for(&crate::ui::window())
-        .modal(true)
-        .default_width(520)
-        .default_height(560)
-        .title(tr(MsgKey::update_check_notification_update_available))
-        .build();
     let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
     column.set_margin_top(24);
     column.set_margin_bottom(16);
@@ -193,7 +186,8 @@ fn show_update(release: &Release) {
     buttons.append(&download);
     buttons.append(&not_now);
     column.append(&buttons);
-    window.set_child(Some(&column));
+    let title = gtk::Label::new(Some(&tr(MsgKey::update_check_notification_update_available)));
+    let window = crate::ui::modal(title.upcast_ref::<gtk::Widget>(), &column, 520, 560);
     window.set_default_widget(Some(&download));
 
     let file = release.download_link.clone();

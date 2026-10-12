@@ -77,14 +77,12 @@ proptest! {
     }
 
     #[test]
-    fn integer_and_boolean_accessors_keep_what_they_are_given(int32: i32, int64: i64, flag: bool) {
+    fn integer_accessors_keep_what_they_are_given(int32: i32, int64: i64) {
         let prefs = LibraryPrefs::new(PrefStore::in_memory());
         prefs.auto_update_interval.set(int32);
         prop_assert_eq!(prefs.auto_update_interval.get(), int32);
         prefs.last_updated_timestamp.set(int64);
         prop_assert_eq!(prefs.last_updated_timestamp.get(), int64);
-        prefs.download_badge.set(flag);
-        prop_assert_eq!(prefs.download_badge.get(), flag);
     }
 
     #[test]

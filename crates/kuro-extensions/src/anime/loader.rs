@@ -401,12 +401,6 @@ mod tests {
             fn crash_dir(&self) -> PathBuf {
                 self.0.join("crash")
             }
-            fn default_downloads_dir(&self) -> PathBuf {
-                self.0.join("downloads")
-            }
-            fn default_backups_dir(&self) -> PathBuf {
-                self.0.join("backups")
-            }
             fn covers_dir(&self) -> PathBuf {
                 self.0.join("covers")
             }

@@ -1,20 +1,15 @@
 //! Headless integration tests for the reader chrome (T-43a-085): the navigator with its RTL mirror, the bottom bar with its
-//! crop toggle, the top bar with the bookmark label, the reading-mode sheet, and the settings split binding (E-UI-3). They
-//! build real widgets under [`crate::testing::with_display`], find the buttons by walking the widget tree, and skip when
+//! crop toggle, and the top bar with the bookmark label and its menu. They build real widgets under [`crate::testing::with_display`], find the buttons by walking the widget tree, and skip when
 //! there is no display. CI runs them under a virtual display (`xvfb-run`) so they do not skip there.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use kuro_prefs::reader::{ReaderPrefs, ReadingMode};
-use kuro_prefs::store::PrefStore;
+use kuro_prefs::reader::ReadingMode;
 
-use super::bottom_bar::{BottomBar, bar_buttons};
-use super::chrome::{TopBar, TopBarActions, build_top_bar};
-use super::mode_sheet::{self, Outcome, SHEET_MODES};
+use super::chrome::{MODES, MenuHandlers, TopBar, TopBarActions, build_top_bar, menu_actions, mode_label, overflow_menu, sync_menu_state};
 use super::navigator::{Navigator, NavigatorState};
-use super::settings_window::{self, MangaChoices};
 use super::strings;
 
 /// Every button under `root`, in tree order.
@@ -72,17 +67,15 @@ fn the_navigator_keeps_previous_on_the_left_in_ltr() {
 }
 
 #[test]
-fn the_bottom_bar_shows_the_crop_button_toggled_while_crop_is_on() {
+fn the_navigator_is_the_whole_bottom_bar_and_has_no_settings_buttons() {
     crate::testing::with_display(|| {
-        let bar = BottomBar::new();
-        bar.update(ReadingMode::LeftToRight, true);
-        let buttons = buttons_under(bar.root.upcast_ref());
-        let crop = bar_buttons(ReadingMode::LeftToRight, true)[1].description;
-        let index = position_of(&buttons, crop).expect("the crop button");
-        assert!(buttons[index].has_css_class("toggled"));
-
-        bar.update(ReadingMode::LeftToRight, false);
-        assert!(!buttons[index].has_css_class("toggled"), "the same button follows the new state");
+        let navigator = Navigator::new();
+        navigator.update(&navigator_state(false, true, true), (800, 600));
+        let buttons = buttons_under(navigator.root.upcast_ref());
+        assert_eq!(buttons.len(), 2, "only the previous and next chapter buttons");
+        for gone in [strings::VIEWER, strings::PREF_CROP_BORDERS, strings::ACTION_SETTINGS] {
+            assert!(position_of(&buttons, gone).is_none());
+        }
     });
 }
 
@@ -90,16 +83,13 @@ fn the_bottom_bar_shows_the_crop_button_toggled_while_crop_is_on() {
 fn the_top_bar_labels_the_bookmark_by_its_state_and_has_a_named_back_button() {
     crate::testing::with_display(|| {
         let bar = TopBar { manga_title: "Manga".into(), chapter_name: "Chapter 1".into(), bookmarked: true, is_http_source: false };
-        let actions = TopBarActions {
-            on_back: Box::new(|| {}),
-            on_open_manga: Box::new(|| {}),
-            on_bookmark: Box::new(|| {}),
-            on_overflow: Box::new(|_| {}),
-        };
-        let header = build_top_bar(&bar, actions);
+        let actions = TopBarActions { on_back: Box::new(|| {}), on_open_manga: Box::new(|| {}), on_bookmark: Box::new(|| {}) };
+        let (header, _title) = build_top_bar(&bar, actions);
         let buttons = buttons_under(header.upcast_ref());
         assert!(position_of(&buttons, strings::ACTION_REMOVE_BOOKMARK).is_some(), "a bookmarked chapter offers to unbookmark");
         assert!(position_of(&buttons, "Back").is_some(), "the back button is named");
+        let menu = all_of::<gtk::MenuButton>(header.upcast_ref()).pop().expect("the menu button");
+        assert!(menu.tooltip_text().is_none(), "no tooltip to cover the open menu");
     });
 }
 
@@ -122,73 +112,93 @@ fn all_of<T: IsA<gtk::Widget>>(root: &gtk::Widget) -> Vec<T> {
     found
 }
 
-fn button_labelled(root: &gtk::Widget, label: &str) -> Option<gtk::Button> {
-    all_of::<gtk::Button>(root).into_iter().find(|b| b.label().as_deref() == Some(label))
+/// The labelled items of a menu model section: label, action, target.
+fn items_of(menu: &gtk::gio::MenuModel) -> Vec<(String, Option<String>, Option<String>)> {
+    (0..menu.n_items())
+        .map(|i| {
+            let text = |name: &str| menu.item_attribute_value(i, name, None).and_then(|v| v.get::<String>());
+            (text("label").unwrap_or_default(), text("action"), text("target"))
+        })
+        .collect()
 }
 
-/// A reading-mode sheet whose outcomes are collected.
-fn sheet(saved: ReadingMode, show_reading_mode: bool) -> (gtk::Box, Rc<RefCell<Vec<Outcome>>>) {
-    let outcomes: Rc<RefCell<Vec<Outcome>>> = Rc::default();
-    let sink = Rc::clone(&outcomes);
-    (mode_sheet::build(saved, show_reading_mode, Rc::new(move |outcome| sink.borrow_mut().push(outcome))), outcomes)
+/// The three sections of the top bar menu, each with its label and items.
+fn sections_of(is_http_source: bool) -> Vec<(Option<String>, Vec<(String, Option<String>, Option<String>)>)> {
+    let menu = overflow_menu(is_http_source);
+    (0..menu.n_items())
+        .map(|i| {
+            let label = menu.item_attribute_value(i, "label", None).and_then(|v| v.get::<String>());
+            let section = menu.item_link(i, "section").expect("a section");
+            (label, items_of(&section))
+        })
+        .collect()
 }
 
-#[test]
-fn the_reading_mode_sheet_selects_one_mode_and_apply_reports_it_with_the_toast_rule() {
-    crate::testing::with_display(|| {
-        let (sheet, outcomes) = sheet(ReadingMode::LeftToRight, false);
-        let toggles = all_of::<gtk::ToggleButton>(sheet.upcast_ref());
-        assert_eq!(toggles.len(), SHEET_MODES.len(), "five modes, Default is not one");
-        assert!(toggles[0].is_active(), "the saved mode starts selected");
-        let webtoon = SHEET_MODES.iter().position(|m| *m == ReadingMode::Webtoon).expect("webtoon is offered");
-        toggles[webtoon].set_active(true);
-        assert!(!toggles[0].is_active(), "one mode at a time");
-        assert!(outcomes.borrow().is_empty(), "a choice is local until Apply");
-        button_labelled(sheet.upcast_ref(), strings::ACTION_APPLY).expect("an Apply button").emit_clicked();
-        assert_eq!(
-            *outcomes.borrow(),
-            [Outcome::Apply { mode: ReadingMode::Webtoon, toast: Some(strings::WEBTOON_VIEWER) }],
-            "the mode label is toasted only while the reading-mode toast is off"
-        );
-
-        let (quiet, outcomes) = self::sheet(ReadingMode::RightToLeft, true);
-        button_labelled(quiet.upcast_ref(), strings::ACTION_APPLY).expect("an Apply button").emit_clicked();
-        assert_eq!(*outcomes.borrow(), [Outcome::Apply { mode: ReadingMode::RightToLeft, toast: None }]);
-    });
+fn item(label: &str, action: &str) -> (String, Option<String>, Option<String>) {
+    (label.to_owned(), Some(action.to_owned()), None)
 }
 
 #[test]
-fn the_reading_mode_sheet_offers_revert_only_for_a_manga_with_its_own_mode() {
-    crate::testing::with_display(|| {
-        let (own, outcomes) = sheet(ReadingMode::Vertical, true);
-        button_labelled(own.upcast_ref(), strings::ACTION_REVERT_TO_DEFAULT).expect("Revert for a saved mode").emit_clicked();
-        assert_eq!(*outcomes.borrow(), [Outcome::Revert]);
-
-        let (default, outcomes) = sheet(ReadingMode::Default, true);
-        assert!(button_labelled(default.upcast_ref(), strings::ACTION_REVERT_TO_DEFAULT).is_none(), "nothing to revert");
-        assert!(all_of::<gtk::ToggleButton>(default.upcast_ref()).iter().all(|t| !t.is_active()), "nothing is selected");
-        button_labelled(default.upcast_ref(), strings::ACTION_APPLY).expect("an Apply button").emit_clicked();
-        assert!(outcomes.borrow().is_empty(), "Apply with nothing selected does nothing");
-    });
-}
-
-fn settings_tab(prefs: &ReaderPrefs) -> gtk::Box {
-    let choices = MangaChoices { on_mode: Rc::new(|_| {}) };
-    settings_window::reading_tab(prefs, ReadingMode::LeftToRight, choices)
-}
-
-/// The nth check button with `label` in the tab: 0 is the pager block, 1 the webtoon block.
-fn check_labelled(tab: &gtk::Box, label: &str, nth: usize) -> gtk::CheckButton {
-    all_of::<gtk::CheckButton>(tab.upcast_ref()).into_iter().filter(|c| c.label().as_deref() == Some(label)).nth(nth).expect("the check")
+fn the_menu_model_has_five_radio_modes_then_crop_and_settings_then_the_source_entries() {
+    let web = sections_of(true);
+    assert_eq!(web.len(), 3);
+    assert_eq!(web[0].0.as_deref(), Some(strings::PREF_CATEGORY_READING_MODE));
+    let modes: Vec<_> = MODES
+        .iter()
+        .map(|(target, mode)| (mode_label(*mode).to_owned(), Some("reader.mode".to_owned()), Some((*target).to_owned())))
+        .collect();
+    assert_eq!(web[0].1, modes, "five radio items on one action, each with its mode as the target");
+    assert_eq!(modes.len(), 5);
+    assert_eq!(modes[0].0, "Paged, left to right");
+    assert_eq!(web[1].1, [item(strings::PREF_CROP_BORDERS, "reader.crop"), item(strings::MENU_READER_SETTINGS, "reader.settings")]);
+    assert_eq!(web[2].1, [item(strings::ACTION_OPEN_IN_BROWSER, "reader.open-browser"), item(strings::ACTION_SHARE, "reader.share")]);
+    assert_eq!(sections_of(false)[2].1, [item(strings::SET_AS_COVER, "reader.set-cover")], "a local manga sets the cover instead");
 }
 
 #[test]
-fn the_split_check_writes_the_split_key() {
-    crate::testing::with_display(|| {
-        let prefs = ReaderPrefs::new(PrefStore::in_memory());
-        let tab = settings_tab(&prefs);
-        check_labelled(&tab, strings::PREF_DUAL_PAGE_SPLIT, 0).set_active(true);
-        assert!(prefs.dual_page_split_paged.get(), "the paged split check writes pref_dual_page_split");
-    });
+fn choosing_a_radio_mode_applies_it_and_the_state_is_the_current_mode() {
+    let chosen: Rc<RefCell<Vec<ReadingMode>>> = Rc::default();
+    let crops = Rc::new(std::cell::Cell::new(0));
+    let (sink, crop_sink) = (Rc::clone(&chosen), Rc::clone(&crops));
+    let noop: Rc<dyn Fn()> = Rc::new(|| {});
+    let handlers = MenuHandlers {
+        on_mode: Rc::new(move |mode| sink.borrow_mut().push(mode)),
+        on_crop: Rc::new(move || crop_sink.set(crop_sink.get() + 1)),
+        on_settings: Rc::clone(&noop),
+        on_open_browser: Rc::clone(&noop),
+        on_share: Rc::clone(&noop),
+        on_set_cover: noop,
+    };
+    let group = menu_actions(ReadingMode::RightToLeft, true, handlers);
+    let state = |name: &str| group.action_state(name).expect("a stateful action");
+    assert_eq!(state("mode").str(), Some("rtl"), "the state is the current mode");
+    assert_eq!(state("crop").get::<bool>(), Some(true));
+
+    group.change_action_state("mode", &"webtoon".to_variant());
+    assert_eq!(*chosen.borrow(), [ReadingMode::Webtoon], "the choice applies at once");
+    assert_eq!(state("mode").str(), Some("webtoon"));
+    group.change_action_state("mode", &"nonsense".to_variant());
+    assert_eq!(chosen.borrow().len(), 1, "an unknown target does nothing");
+
+    group.change_action_state("crop", &false.to_variant());
+    assert_eq!((crops.get(), state("crop").get::<bool>()), (1, Some(false)));
+
+    sync_menu_state(&group, ReadingMode::LeftToRight, true);
+    assert_eq!((state("mode").str(), state("crop").get::<bool>()), (Some("ltr"), Some(true)));
+    assert_eq!((chosen.borrow().len(), crops.get()), (1, 1), "syncing the states runs no handler");
 }
 
+#[test]
+fn the_top_bar_menu_is_a_native_popover_menu_and_the_title_has_a_position_line() {
+    crate::testing::with_display(|| {
+        let bar = TopBar { manga_title: "M".into(), chapter_name: "C".into(), bookmarked: false, is_http_source: true };
+        let actions = TopBarActions { on_back: Box::new(|| {}), on_open_manga: Box::new(|| {}), on_bookmark: Box::new(|| {}) };
+        let (header, title) = build_top_bar(&bar, actions);
+        let menu = all_of::<gtk::MenuButton>(header.upcast_ref()).pop().expect("the menu button");
+        let popover = menu.popover().expect("the popover");
+        assert!(popover.downcast_ref::<gtk::PopoverMenu>().is_some_and(|p| p.menu_model().is_some()), "a menu model, not hand-made buttons");
+        assert_eq!(title.subtitle(), "", "no position before a page is shown");
+        title.set_subtitle(Some("Page 1 of 23"));
+        assert_eq!(title.subtitle(), "Page 1 of 23");
+    });
+}

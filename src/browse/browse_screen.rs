@@ -1,6 +1,7 @@
-//! The browse source screens (`browse_source`, `migrate_source_search`; T-40b-034, T-40b-038): one source's listing built
-//! over the installed source directory, and the open page that a genre search from a manga page reaches. The page itself is
-//! `pages::browse_source`; this builds its dependencies from the app, parks nothing and awaits nothing.
+//! The browse source screens (`browse_source`, `migrate_source_search`; T-40b-034, T-40b-038, T-41b-014, T-41b-024): one
+//! source's listing of either kind, built over that kind's source directory, and the open page that a genre search from an
+//! entry page reaches. The page itself is `pages::browse_source`; this builds its dependencies from the app, parks nothing
+//! and awaits nothing.
 //!
 //! A genre or source-line search of an entry page arrives through `entry_core::handoff`. When the page below the entry page
 //! is a browse page, that page runs the search on its own listing (`search_open`) and the entry page and the placeholder
@@ -27,12 +28,14 @@ use super::pages::{BrowseSourceDeps, FavoritesDeps, SourcePage, browse_source};
 use super::pending;
 use super::prefs::BrowsePrefs;
 use super::primitives::ToastSpec;
-use super::route::{BrowseRoute, search_listing};
+use super::route::{BrowseKind, BrowseRoute, search_listing};
 use super::sources::LOCAL_SOURCE_ID;
 use super::view::file_cover_loader;
 
 /// What a source page needs of the app.
 pub struct BrowseEnv {
+    /// The catalogue of the page: the duplicate dialog's wording.
+    pub kind: BrowseKind,
     pub prefs: Rc<BrowsePrefs>,
     pub directory: Arc<dyn SourceDirectory>,
     pub store: Arc<dyn FavoriteStore>,
@@ -44,6 +47,8 @@ pub struct BrowseEnv {
     pub open_url: Rc<dyn Fn(&str)>,
     /// Open in WebView: the url and the source's name.
     pub open_webview: Rc<dyn Fn(String, String)>,
+    /// The Settings item of a configurable source.
+    pub on_settings: Rc<dyn Fn(i64)>,
     pub toast: Rc<dyn Fn(ToastSpec)>,
     pub now_ms: Rc<dyn Fn() -> i64>,
 }
@@ -57,29 +62,35 @@ impl PageLoader for NoLoader {
     }
 }
 
-/// The page of `source_id` opened on `query`. A source the directory does not know gets the missing-source page. The
-/// hide-in-library preference is read here, when the page is made (T-40b-034).
+/// The page of `source_id` opened on `query`. A source the directory does not know, or one it lists but cannot run, gets
+/// the missing-source page. The hide-in-library preference is read here, when the page is made (T-40b-034).
 pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery) -> SourcePage {
     let listed = env.directory.sources().into_iter().find(|entry| entry.source.id == source_id && !entry.source.is_stub);
     let loader = listed.as_ref().and_then(|_| env.directory.loader(source_id));
     let stub = loader.is_none();
     let source = listed.as_ref().map_or_else(|| source_or_stub(Some(&*env.directory), source_id), |entry| entry.source.clone());
-    let home = listed.as_ref().and_then(|entry| entry.home_url.clone());
+    let home = listed.as_ref().and_then(|entry| entry.home_url.clone()).filter(|url| !url.is_empty());
+    let home_url = home.clone();
     let defaults = if stub { FilterList::default() } else { env.directory.filters(source_id).unwrap_or_default() };
     let filters = Rc::new(SourceFilters::new(defaults));
     let (_never_sent, ready) = watch::channel(true);
 
-    let open_web: Rc<dyn Fn()> = {
-        let (open, name) = (Rc::clone(&env.open_webview), source.name.clone());
-        Rc::new(move || {
-            if let Some(url) = &home {
-                open(url.clone(), name.clone());
+    // Help is the page's own (the local source's guide); Open in WebView needs the source's site
+    let on_overflow: Rc<dyn Fn(OverflowItem)> = {
+        let (open, settings, name) = (Rc::clone(&env.open_webview), Rc::clone(&env.on_settings), source.name.clone());
+        Rc::new(move |item| match item {
+            OverflowItem::OpenInWebView => {
+                if let Some(url) = &home {
+                    open(url.clone(), name.clone());
+                }
             }
+            OverflowItem::Settings => settings(source_id),
+            OverflowItem::Help => {}
         })
     };
     let page = browse_source(BrowseSourceDeps {
         supports_latest: source.supports_latest,
-        configurable: false,
+        configurable: env.directory.preferences(source_id).is_some(),
         prefs: Rc::clone(&env.prefs),
         listing: ListingDeps {
             loader: loader.unwrap_or_else(|| Arc::new(NoLoader)),
@@ -95,7 +106,7 @@ pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery) -> Sourc
                 let open = Rc::clone(&env.open_entry);
                 Rc::new(move |item| open(item.id))
             },
-            on_long_press: Rc::new(|_| {}),
+            menu: Rc::new(|_: &super::listing::ListItem| Vec::new()),
             favorite_urls: None,
             on_action: Rc::new(|_| {}),
         },
@@ -107,18 +118,16 @@ pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery) -> Sourc
             migrate: Rc::clone(&env.migrate),
             now_ms: Rc::clone(&env.now_ms),
             edit_categories: Rc::clone(&env.edit_categories),
-            anime: false,
+            anime: env.kind == BrowseKind::Anime,
         }),
         hide_in_library: env.prefs.hide_in_library(),
         initial_query: query,
         on_back: Rc::clone(&env.on_back),
-        on_overflow: Rc::new(move |item| {
-            if item == OverflowItem::OpenInWebView {
-                open_web();
-            }
-        }),
+        on_overflow,
         open_url: Rc::clone(&env.open_url),
+        home_url,
     });
+    // a genre or author search from an entry page runs on this page when it is the one below
     if let SourcePage::Browse(shown) = &page {
         register_page(shown, filters);
     }
@@ -142,8 +151,8 @@ fn register(page: OpenBrowse) {
     OPEN.with(|slot| *slot.borrow_mut() = Some(page));
 }
 
-/// Makes `shown` the page a genre search from an entry page reaches. The anime browse page registers itself the same way,
-/// so an anime entry's genre or author search runs on the anime listing below it (T-41b-024).
+/// Makes `shown` the page a genre search from an entry page reaches, of either kind: an anime entry's genre or author
+/// search runs on the anime listing below it (T-41b-024).
 pub fn register_page(shown: &super::pages::BrowseSourcePage, filters: Rc<SourceFilters>) {
     register(OpenBrowse {
         listing: shown.listing.downgrade(),
@@ -187,56 +196,50 @@ pub fn visible_page() -> String {
     names.get(shown).cloned().unwrap_or_default()
 }
 
-/// The app side of a source page, over the manga library.
-fn production_env(directory: Arc<dyn SourceDirectory>) -> BrowseEnv {
-    use kuro_data::category::{CategoryKind, CategoryRepo};
-    use kuro_data::manga::MangaRepo;
-    use kuro_domain::kind::EntryKind;
+/// Opens the entry page of `kind` for a library row.
+pub fn open_entry(kind: BrowseKind, id: i64) {
+    match kind {
+        BrowseKind::Manga => crate::entry_core::route::open(id),
+        BrowseKind::Anime => crate::entry_core::anime::route::open(id),
+    }
+}
 
-    let app = crate::data::app();
-    let db = app.db(EntryKind::Manga);
-    let prefs = Rc::new(BrowsePrefs::new(app.base.store().clone()));
-    let manga = MangaRepo::new(Arc::clone(&db));
-    let store = super::repo_store::RepoStore::new(
-        manga.clone(),
-        CategoryRepo::new(db, CategoryKind::Manga),
-        prefs.default_manga_category.clone(),
-        // the cover cache belongs to the image layer, which keeps no per-entry files here yet
-        Arc::new(|_| 0),
-    );
+/// Milliseconds since the epoch.
+pub(crate) fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
+}
+
+/// The app side of a source page of `kind`, over that kind's library.
+fn production_env(kind: BrowseKind) -> BrowseEnv {
+    use crate::entry_core::handoff::{self, SourcePrefsRequest, WebViewRequest};
+
     BrowseEnv {
-        prefs,
-        directory,
-        store: Arc::new(store),
-        open_entry: Rc::new(crate::entry_core::route::open),
-        // the migrate dialog opens at once with old = the duplicate and new = the browsed manga (T-40b-046)
-        migrate: Rc::new(|old, new| (super::search_screen::manga_migrate_dialog(old))(new)),
-        edit_categories: Rc::new(super::glue::open_manga_categories),
+        kind,
+        prefs: Rc::new(BrowsePrefs::new(crate::data::app().base.store().clone(), kind)),
+        directory: super::directory::current(kind),
+        store: crate::updates::history_add::store(kind),
+        open_entry: Rc::new(move |id| open_entry(kind, id)),
+        // the migrate dialog opens at once with old = the duplicate and new = the browsed entry (T-40b-046)
+        migrate: Rc::new(move |old, new| (super::search_screen::migrate_dialog(kind, old))(new)),
+        edit_categories: Rc::new(move || super::glue::open_categories(kind)),
         on_back: Rc::new(crate::ui::pop),
-        open_url: Rc::new(|url| super::anime::browse::open_external(url, None)),
-        open_webview: Rc::new(|url, title| crate::entry_core::handoff::open_webview(crate::entry_core::handoff::WebViewRequest { url, title })),
+        open_url: Rc::new(|url| super::nav::open_external(url, None)),
+        open_webview: Rc::new(|url, title| handoff::open_webview(WebViewRequest { url, title })),
+        on_settings: Rc::new(move |source_id| handoff::open_source_preferences(SourcePrefsRequest { source_id, anime: kind == BrowseKind::Anime })),
         toast: Rc::new(|spec| crate::toast::notify(spec.message)),
-        now_ms: Rc::new(|| {
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
-        }),
+        now_ms: Rc::new(now_ms),
     }
 }
 
 /// The page for `browse_source` or `migrate_source_search`, as `screens::build` asks for it. `None` leaves the screen to its
-/// sample page: no app data, no source directory, or nothing was parked for this screen.
+/// sample page: no app data, or nothing was parked for this screen.
 pub fn page(screen: &str) -> Option<gtk::Box> {
     if !crate::data::is_installed() {
         return None;
     }
-    let route = pending::take_for(screen);
-    // an anime source row, a global search row or an anime entry page parked the anime route for the same screen
-    if let Some(BrowseRoute::AnimeBrowseSource { source_id, query }) = route {
-        return super::anime::browse_screen::page(source_id, query);
-    }
-    if let Some(BrowseRoute::BrowseSource { source_id, query, .. }) = route {
-        let directory = super::directory::current()?;
-        let env = production_env(directory);
-        let root = source_page(&env, source_id, query).widget().clone();
+    // a Sources row, a global search row or an entry page parked the route of its kind
+    if let Some(BrowseRoute::BrowseSource { kind, source_id, query, .. }) = pending::take_for(screen) {
+        let root = source_page(&production_env(kind), source_id, query).widget().clone();
         crate::ui::tag(&root, screen);
         return Some(root);
     }
@@ -244,10 +247,10 @@ pub fn page(screen: &str) -> Option<gtk::Box> {
 }
 
 /// The entry page on show that a parked genre or title search comes from, and the kind of its catalogue.
-pub(super) fn search_caller() -> Option<super::route::BrowseKind> {
+pub(super) fn search_caller() -> Option<BrowseKind> {
     match visible_page().as_str() {
-        "screen:manga_entry_details" => Some(super::route::BrowseKind::Manga),
-        "screen:anime_entry_details" => Some(super::route::BrowseKind::Anime),
+        "screen:manga_entry_details" => Some(BrowseKind::Manga),
+        "screen:anime_entry_details" => Some(BrowseKind::Anime),
         _ => None,
     }
 }
@@ -328,9 +331,10 @@ pub(crate) mod tests {
             }),
         });
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
-        let (opened, web, back) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
+        let (opened, web, back, settings) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
         let env = BrowseEnv {
-            prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory())),
+            kind: BrowseKind::Manga,
+            prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory(), BrowseKind::Manga)),
             directory,
             store: Arc::new(FakeStore::default()),
             open_entry: Rc::new(move |id| opened.borrow_mut().push(format!("entry {id}"))),
@@ -339,6 +343,7 @@ pub(crate) mod tests {
             on_back: Rc::new(move || back.borrow_mut().push("back".into())),
             open_url: Rc::new(|_| {}),
             open_webview: Rc::new(move |url, name| web.borrow_mut().push(format!("webview {url} {name}"))),
+            on_settings: Rc::new(move |id| settings.borrow_mut().push(format!("settings {id}"))),
             toast: Rc::new(|_| {}),
             now_ms: Rc::new(|| 1),
         };
@@ -414,7 +419,61 @@ pub(crate) mod tests {
         assert!(rig.log.borrow().is_empty(), "and opens nothing in the web view");
     }
 
+    /// The rig over `directory::tests::catalogues` of `kind`: the source 42 runs, the source 43 is only listed.
+    fn rig_of(kind: BrowseKind) -> Rig {
+        let mut rig = rig();
+        rig.env.kind = kind;
+        rig.env.prefs = Rc::new(BrowsePrefs::new(PrefStore::in_memory(), kind));
+        rig.env.directory = Arc::new(crate::browse::directory::tests::catalogues(kind));
+        rig
+    }
+
+    fn a_listed_source_that_cannot_run_and_an_unknown_one_get_the_missing_source_page_for_either_kind() {
+        for kind in [BrowseKind::Manga, BrowseKind::Anime] {
+            let rig = rig_of(kind);
+            assert!(matches!(source_page(&rig.env, 43, BrowseQuery::Popular), SourcePage::Stub(_)), "{kind:?}: listed, but nothing to ask");
+            assert!(matches!(source_page(&rig.env, 99, BrowseQuery::Popular), SourcePage::Stub(_)), "{kind:?}");
+        }
+    }
+
+    fn a_runnable_source_of_either_kind_lists_offers_latest_and_opens_its_site_in_the_web_view() {
+        for kind in [BrowseKind::Manga, BrowseKind::Anime] {
+            let rig = rig_of(kind);
+            let page = source_page(&rig.env, 42, BrowseQuery::Popular);
+            let shown = browse(&page);
+            assert!(shown.latest.is_some(), "{kind:?}: the source states it supports latest");
+            assert!(pump_until(|| shown.listing.loaded_count() > 0), "{kind:?}: the listing loads");
+            let popover = shown.header.overflow.popover().expect("overflow popover");
+            let mut found = Vec::new();
+            fn buttons(widget: &gtk::Widget, out: &mut Vec<gtk::Button>) {
+                if let Some(button) = widget.downcast_ref::<gtk::Button>() {
+                    out.push(button.clone());
+                }
+                let mut child = widget.first_child();
+                while let Some(next) = child {
+                    buttons(&next, out);
+                    child = next.next_sibling();
+                }
+            }
+            buttons(popover.child().expect("child").upcast_ref(), &mut found);
+            let label = tr(MsgKey::action_open_in_web_view);
+            found.iter().find(|b| b.label().as_deref() == Some(label.as_str())).expect("item").emit_clicked();
+            assert_eq!(*rig.log.borrow(), ["webview https://src.example Src42"], "{kind:?}");
+        }
+    }
+
+    fn a_route_of_either_kind_is_taken_for_the_browse_source_screen() {
+        for kind in [BrowseKind::Manga, BrowseKind::Anime] {
+            let route = BrowseRoute::BrowseSource { kind, source_id: 42, query: BrowseQuery::Popular, migrating: false };
+            crate::browse::pending::park(route.clone());
+            assert_eq!(crate::browse::pending::take_for("browse_source"), Some(route));
+        }
+    }
+
     pub(crate) fn smoke() {
+        a_listed_source_that_cannot_run_and_an_unknown_one_get_the_missing_source_page_for_either_kind();
+        a_runnable_source_of_either_kind_lists_offers_latest_and_opens_its_site_in_the_web_view();
+        a_route_of_either_kind_is_taken_for_the_browse_source_screen();
         a_source_the_directory_does_not_know_gets_the_missing_source_page();
         a_page_opened_on_a_search_starts_with_that_search_and_shows_the_text();
         a_genre_search_reaches_the_open_page_and_restarts_its_listing_at_once();

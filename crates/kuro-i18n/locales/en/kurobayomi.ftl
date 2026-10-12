@@ -1147,7 +1147,7 @@ action_mark_as_seen = Mark as watched
 action_mark_as_unseen = Mark as unwatched
 
 # source: i18n-aniyomi
-action_mark_previous_as_seen = Mark previous as seen
+action_mark_previous_as_seen = Mark previous as watched
 
 # source: i18n-aniyomi
 action_play_internally = Play internally
@@ -2797,13 +2797,13 @@ nav_zone_left = Left
 nav_zone_right = Right
 
 # source: i18n
-left_to_right_viewer = Paged (left to right)
+left_to_right_viewer = Paged, left to right
 
 # source: i18n
-right_to_left_viewer = Paged (right to left)
+right_to_left_viewer = Paged, right to left
 
 # source: i18n
-vertical_viewer = Paged (vertical)
+vertical_viewer = Paged, vertical
 
 # source: i18n
 webtoon_viewer = Long strip
@@ -4282,3 +4282,12 @@ welcome_intro = Add a source repository to start watching anime and reading mang
 
 # source: kurobayomi
 welcome_guide = Getting started guide
+
+# source: kurobayomi
+action_select = Select
+
+# source: kurobayomi
+episode_time_left = { $arg1 } left
+
+# source: kurobayomi
+action_delete_download = Delete download

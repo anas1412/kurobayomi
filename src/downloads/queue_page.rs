@@ -1,19 +1,27 @@
 //! The download queue page (lane D): the manga queue and the anime queue as one list, with Pause or Resume for both,
-//! Clear, and Cancel on each row. The commands go through `kuro_downloads::engine::QueueEngine`, and the rows come from
-//! its models. The list is redrawn once a second, only when a row or a state changed.
+//! Clear, and the shared download button on each row (a click cancels, or retries a failed row). The commands go through
+//! `kuro_downloads::engine::QueueEngine`, and the rows come from its models. A row's right-click menu offers Cancel, Retry
+//! (a failed row), Move to top and Move to bottom. The list is rebuilt once a second, only
+//! when its rows or their states changed; the buttons follow the progress live (`downloads::live`).
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
 use gtk::glib::{self, prelude::*};
 use gtk::prelude::*;
+use kuro_domain::kind::EntryKind;
 use kuro_downloads::DownloadState;
 use kuro_downloads::engine::{AnimeEngine, MangaEngine, QueueEngine, anime_model, manga_model};
-use kuro_downloads::queue_model::{EntryKind, QueueItem};
+use kuro_downloads::queue_model::{self, QueueItem, QueueModel};
+use kuro_i18n::{MsgKey, tr};
 
 use crate::downloads::Queues;
+use crate::downloads::live;
 use crate::downloads::manga_io::Waiting;
+use crate::widgets::context_menu::{self, Item};
+use crate::widgets::download_button::{DownloadButton, Request};
 
 /// How often the page checks the queues.
 const REFRESH: Duration = Duration::from_secs(1);
@@ -35,7 +43,7 @@ pub fn page() -> Option<gtk::Widget> {
     column.append(&actions);
     column.append(&rows);
 
-    let page = Page { queues: queues.clone(), toggle: toggle.clone(), rows, shown: Rc::new(RefCell::new(None)) };
+    let page = Page { queues: queues.clone(), toggle: toggle.clone(), rows, shown: Rc::new(RefCell::new(None)), buttons: Rc::default() };
     let on_toggle = page.clone();
     toggle.connect_clicked(move |_| {
         let resume = !running(&on_toggle.queues);
@@ -52,6 +60,14 @@ pub fn page() -> Option<gtk::Widget> {
     clear.connect_clicked(move |_| for_each_engine(&on_clear, |engine| engine.clear()));
 
     page.draw();
+    live::follow(&column, {
+        let buttons = Rc::clone(&page.buttons);
+        move |change| {
+            if let Some(button) = buttons.borrow().get(&(change.kind, change.id)) {
+                button.set(change.state, change.percent);
+            }
+        }
+    });
     let weak = column.downgrade();
     let refresh = page.clone();
     glib::timeout_add_local(REFRESH, move || {
@@ -72,6 +88,8 @@ struct Page {
     rows: gtk::Box,
     /// The key of the rows last drawn. The list is rebuilt only when it changes.
     shown: Rc<RefCell<Option<String>>>,
+    /// The download button of each row drawn, by kind and item id, so the live progress reaches it.
+    buttons: Rc<RefCell<HashMap<(EntryKind, i64), DownloadButton>>>,
 }
 
 impl Page {
@@ -103,6 +121,7 @@ impl Page {
         while let Some(child) = self.rows.first_child() {
             self.rows.remove(&child);
         }
+        self.buttons.borrow_mut().clear();
         if items.is_empty() && waiting.is_empty() {
             self.rows.append(&gtk::Label::new(Some("No downloads are queued.")));
         }
@@ -123,8 +142,15 @@ impl Page {
         let status = gtk::Label::new(Some("Waiting for source"));
         let cancel = gtk::Button::with_label("Cancel");
         let (queues, chapter_id) = (self.queues.clone(), line.row.chapter_id);
+        let on_menu = queues.clone();
         cancel.connect_clicked(move |_| {
             let _ = queues.cancel_waiting.send(chapter_id);
+        });
+        context_menu::attach(&row, move |_, _| {
+            let queues = on_menu.clone();
+            vec![Item::new(tr(MsgKey::action_cancel), 0, move || {
+                let _ = queues.cancel_waiting.send(chapter_id);
+            })]
         });
         row.append(&text);
         row.append(&status);
@@ -138,13 +164,58 @@ impl Page {
         text.set_xalign(0.0);
         text.set_hexpand(true);
         let status = gtk::Label::new(Some(&status_line(item)));
-        let cancel = gtk::Button::with_label("Cancel");
-        let (queues, kind, id) = (self.queues.clone(), item.kind, item.item_id);
-        cancel.connect_clicked(move |_| remove_row(&queues, kind, id));
+        status.add_css_class("dim-label");
+        let (queues, kind, id) = (self.queues.clone(), kind_of(item.kind), item.item_id);
+        // a click on a queued or running row cancels it, and on a failed row starts its queue again
+        let button = DownloadButton::new(move |request| match request {
+            Request::Cancel => live::cancel(kind, id),
+            Request::Start => for_each_engine_of(&queues, kind, |engine| engine.start()),
+            Request::Delete => {}
+        });
+        let (state, percent) = live::queued(&self.queues, kind, id).unwrap_or((item.state, 0));
+        button.set(state, percent);
+        let (on_menu, drawn) = (self.queues.clone(), item.state);
+        context_menu::attach(&line, move |_, _| {
+            // the state now, not the one the row was drawn with
+            let failed = live::queued(&on_menu, kind, id).map_or(drawn, |(state, _)| state) == DownloadState::Error;
+            row_menu(&on_menu, kind, id, failed)
+        });
         line.append(&text);
         line.append(&status);
-        line.append(&cancel);
+        line.append(&button.widget);
+        self.buttons.borrow_mut().insert((kind, id), button);
         line
+    }
+}
+
+/// The right-click menu of a queued row: Cancel, Retry when it failed, Move to top and Move to bottom.
+fn row_menu(queues: &Queues, kind: EntryKind, id: i64, failed: bool) -> Vec<Item> {
+    let mut items = vec![Item::new(tr(MsgKey::action_cancel), 0, move || live::cancel(kind, id))];
+    if failed {
+        // as the row's button does on a failed row: the queue starts again
+        let queues = queues.clone();
+        items.push(Item::new(tr(MsgKey::action_retry), 0, move || for_each_engine_of(&queues, kind, |engine| engine.start())));
+    }
+    for (label, top) in [(MsgKey::action_move_to_top, true), (MsgKey::action_move_to_bottom, false)] {
+        let queues = queues.clone();
+        items.push(Item::new(tr(label), 1, move || move_item(&queues, kind, id, top)));
+    }
+    items
+}
+
+/// Moves one item to the top or the bottom of its source's section (`QueueModel::move_to_top`) and sends the new order.
+fn move_item(queues: &Queues, kind: EntryKind, id: i64, top: bool) {
+    let mut model: QueueModel = match kind {
+        EntryKind::Manga => manga_model(&queues.manga.snapshot()),
+        EntryKind::Anime => match &queues.anime {
+            Some(queue) => anime_model(&queue.snapshot()),
+            None => return,
+        },
+    };
+    let moved = if top { model.move_to_top(id) } else { model.move_to_bottom(id) };
+    if moved {
+        let order: Vec<i64> = model.flat().iter().map(|item| item.item_id).collect();
+        for_each_engine_of(queues, kind, |engine| engine.reorder(&order));
     }
 }
 
@@ -161,15 +232,23 @@ fn for_each_engine(queues: &Queues, mut f: impl FnMut(&dyn QueueEngine)) {
     }
 }
 
-/// Cancels one queued item of its kind. Downloaded files are not touched.
-fn remove_row(queues: &Queues, kind: EntryKind, item_id: i64) {
+/// Calls `f` on the engine of one kind's queue, when it is up.
+fn for_each_engine_of(queues: &Queues, kind: EntryKind, mut f: impl FnMut(&dyn QueueEngine)) {
     match kind {
-        EntryKind::Manga => MangaEngine::new(queues.manga.clone()).remove(&[item_id]),
+        EntryKind::Manga => f(&MangaEngine::new(queues.manga.clone())),
         EntryKind::Anime => {
-            if let Some(queue) = &queues.anime {
-                AnimeEngine::new(queue.clone()).remove(&[item_id]);
+            if let Some(anime) = &queues.anime {
+                f(&AnimeEngine::new(anime.clone()));
             }
         }
+    }
+}
+
+/// The app's kind of a queue row.
+fn kind_of(kind: queue_model::EntryKind) -> EntryKind {
+    match kind {
+        queue_model::EntryKind::Manga => EntryKind::Manga,
+        queue_model::EntryKind::Anime => EntryKind::Anime,
     }
 }
 
@@ -183,8 +262,8 @@ fn row_key(item: &QueueItem) -> String {
 fn status_line(item: &QueueItem) -> String {
     match item.state {
         DownloadState::Downloading => match (item.kind, item.pages_total) {
-            (EntryKind::Manga, Some(total)) => format!("{} of {total} pages", item.pages_done),
-            (EntryKind::Anime, _) if item.progress > 0 => format!("{}%", item.progress),
+            (queue_model::EntryKind::Manga, Some(total)) => format!("{} of {total} pages", item.pages_done),
+            (queue_model::EntryKind::Anime, _) if item.progress > 0 => format!("{}%", item.progress),
             _ => "Downloading…".to_owned(),
         },
         DownloadState::Queue => "Queued".to_owned(),
@@ -196,6 +275,8 @@ fn status_line(item: &QueueItem) -> String {
 
 #[cfg(test)]
 mod tests {
+    use kuro_downloads::queue_model::EntryKind;
+
     use super::*;
 
     fn item(kind: EntryKind, state: DownloadState, progress: i64, pages: Option<(u32, u32)>) -> QueueItem {

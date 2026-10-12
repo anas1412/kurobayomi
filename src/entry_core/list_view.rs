@@ -1,463 +1,394 @@
-//! The chapter list widget: a `gio::ListStore` of `RowItem`s behind a `gtk::ListView`. `sync` diffs the new rows
-//! against the shown ones (`list_model::diff`): a changed row gets one `items_changed`, a changed structure gets one
-//! splice. Rows report clicks and long presses; keys are handled by the page.
+//! The chapter and episode list, one widget for both kinds: a `gio::ListStore` behind a `gtk::ListView`, so only the
+//! rows on screen exist (3000 rows cost the same as 30). The rows are drawn as one card, centred and at most
+//! `ui::PAGE_WIDTH` wide: the unread dot (or the selection check), the title over a dim second line, an optional
+//! summary, the bookmark and filler marks, and the download button. The store may hold leading slots before the rows
+//! (widgets that scroll with the list, such as the info block of the narrow anime layout).
+//!
+//! `sync` diffs the new rows against the shown ones (`list_model::diff`): changed rows are one splice of new objects
+//! over their span, and a changed structure is one splice. Rows report clicks (with Ctrl and
+//! Shift), Enter, download presses and the items of their right-click menu (`list_model::row_menu`, through the app's
+//! one `context_menu`); a long press (mouse or touch) reports the row's Select. The page decides what they mean.
+//!
+//! No callback into the page runs while the list holds a borrow of its own state: the page redraws the list from
+//! inside a press (`act -> render -> sync`), so every handler copies the row out of its store item first.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::{Rc, Weak};
 
 use gtk::gdk::ModifierType;
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Label, Orientation as O, gio, glib, pango};
-use kuro_downloads::DownloadState;
-
+use kuro_domain::kind::EntryKind;
 use kuro_i18n::{MsgKey, tr};
 
-use crate::entry_core::chapter_actions::{IndicatorAction, Outcome, Press, menu_label, outcome, ring};
-use crate::entry_core::list_model::{DOT_SIZE, Diff, ROW_PADDING, RowItem, diff, row_alpha};
+use crate::entry_core::list_model::{DOT_SIZE, Diff, RowAction, RowItem, changed_span, diff, row_alpha, row_menu};
 use crate::entry_core::selection::Mods;
-use crate::entry_core::page::RowMenuAction;
+use crate::entry_core::text::COLLAPSED_LINES;
+use crate::widgets::context_menu::{self, Item as MenuItem};
+use crate::widgets::download_button::{DownloadButton, Request};
 
-/// A click or long press on a row: (chapter id, modifiers, long press or right click).
-pub type OnRow = Rc<dyn Fn(i64, Mods, bool)>;
+/// A click or Enter on a row.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Press {
+    /// Alt was held (the anime page then opens the other player).
+    pub alt: bool,
+    pub mods: Mods,
+}
 
-/// What a row reports by chapter id and action: the download action a press or a menu item of the indicator chose.
-pub type OnIndicator = Rc<dyn Fn(i64, IndicatorAction)>;
-
-/// What a row reports by chapter id alone: "Mark previous as read" from the context menu.
-pub type OnChapter = Rc<dyn Fn(i64)>;
-
-/// The row callbacks besides a click: the download indicator and the context menu's mark-previous item.
+/// What the rows report to the page, by chapter or episode id.
 #[derive(Clone)]
-pub struct RowActions {
-    pub on_indicator: OnIndicator,
-    pub on_previous: OnChapter,
+pub struct Callbacks {
+    /// A click or Enter: a plain one opens the row, Ctrl toggles it into the selection, Shift selects a range.
+    pub on_row: Rc<dyn Fn(i64, Press)>,
+    /// An item of the row's right-click menu (`list_model::row_menu`). It runs after the menu closed.
+    pub on_menu: Rc<dyn Fn(i64, RowAction)>,
+    /// A press on the row's download button.
+    pub on_download: Rc<dyn Fn(i64, Request)>,
+    /// A tap on an episode summary.
+    pub on_summary: Rc<dyn Fn(i64)>,
 }
 
-/// What to run for one row when an item of its context menu is chosen.
-pub type OnMenu = Rc<dyn Fn(i64, RowMenuAction)>;
-
-/// The items of a row's context menu after Select, with their labels.
-const MENU: [(RowMenuAction, &str); 3] = [
-    (RowMenuAction::ToggleRead, "Mark as read"),
-    (RowMenuAction::ToggleBookmark, "Bookmark chapter"),
-    (RowMenuAction::Download, "Download"),
-];
-
-pub struct ChapterList {
-    pub widget: gtk::ListView,
-    store: gio::ListStore,
-    shown: RefCell<Vec<RowItem>>,
+/// Where a row sits in the card: the first and the last row get the rounded corners.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Edge {
+    first: bool,
+    last: bool,
 }
 
-fn item_of(list_item: &gtk::ListItem) -> Option<glib::BoxedAnyObject> {
-    list_item.item().and_downcast::<glib::BoxedAnyObject>()
+fn edge(index: usize, len: usize) -> Edge {
+    Edge { first: index == 0, last: index + 1 == len }
+}
+
+/// One item of the store.
+#[derive(Clone)]
+enum Item {
+    /// The n-th leading widget.
+    Slot(usize),
+    Row(RowItem, Edge),
+}
+
+fn item_of(list_item: &gtk::ListItem) -> Option<Item> {
+    list_item.item().and_downcast::<glib::BoxedAnyObject>().map(|o| o.borrow::<Item>().clone())
+}
+
+/// The row behind a list item, when it is a chapter or an episode (not a slot, not a marker).
+fn row_of(list_item: &gtk::ListItem) -> Option<RowItem> {
+    match item_of(list_item) {
+        Some(Item::Row(row, _)) if row.missing.is_none() => Some(row),
+        _ => None,
+    }
 }
 
 fn mods_of(state: ModifierType) -> Mods {
-    Mods {
-        shift: state.contains(ModifierType::SHIFT_MASK),
-        ctrl: state.contains(ModifierType::CONTROL_MASK),
+    Mods { shift: state.contains(ModifierType::SHIFT_MASK), ctrl: state.contains(ModifierType::CONTROL_MASK) }
+}
+
+fn press_of(state: ModifierType) -> Press {
+    Press { alt: state.contains(ModifierType::ALT_MASK), mods: mods_of(state) }
+}
+
+fn set_class(widget: &impl IsA<gtk::Widget>, class: &str, on: bool) {
+    if on {
+        widget.add_css_class(class);
+    } else {
+        widget.remove_css_class(class);
     }
 }
 
-/// The icon of the three states that draw one. A queued or downloading row draws a ring instead (`chapter_actions::ring`).
-fn download_icon(state: DownloadState) -> Option<&'static str> {
-    match state {
-        DownloadState::NotDownloaded => Some("document-save-symbolic"),
-        DownloadState::Queue | DownloadState::Downloading => None,
-        DownloadState::Downloaded => Some("emblem-ok-symbolic"),
-        DownloadState::Error => Some("dialog-error-symbolic"),
-    }
-}
-
-/// The side of the indicator in px, the size of the ring and its arrow.
-const INDICATOR_SIZE: i32 = 24;
-
-/// The determinate ring: the filled wedge of `fraction` of a turn over a faint track, and the arrow on top. The arrow takes
-/// the background colour once the fill is half way round (`arrow_on_fill`), so it stays visible on it.
-fn draw_ring(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, w: i32, h: i32, fraction: f64, arrow_on_fill: bool) {
-    let fg = area.color();
-    #[allow(deprecated)]
-    let bg = area.style_context().lookup_color("theme_bg_color").unwrap_or_else(|| gtk::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0));
-    let (cx, cy) = (f64::from(w) / 2.0, f64::from(h) / 2.0);
-    let radius = f64::from(w.min(h)) / 2.0;
-    let rgba = |c: &gtk::gdk::RGBA, alpha: f64| (f64::from(c.red()), f64::from(c.green()), f64::from(c.blue()), alpha);
-    // the track
-    let (r, g, b, a) = rgba(&fg, 0.25);
-    cr.set_source_rgba(r, g, b, a);
-    cr.arc(cx, cy, radius, 0.0, std::f64::consts::TAU);
-    let _ = cr.fill();
-    // the fill: a stroke as wide as the radius, so it is a wedge
-    let (r, g, b, a) = rgba(&fg, 1.0);
-    cr.set_source_rgba(r, g, b, a);
-    cr.set_line_width(radius);
-    cr.new_path();
-    cr.arc(cx, cy, radius / 2.0, -std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2 + fraction * std::f64::consts::TAU);
-    let _ = cr.stroke();
-    // the arrow
-    let (r, g, b, a) = if arrow_on_fill { rgba(&bg, 1.0) } else { rgba(&fg, 1.0) };
-    cr.set_source_rgba(r, g, b, a);
-    cr.set_line_width(2.0);
-    cr.set_line_cap(gtk::cairo::LineCap::Round);
-    cr.set_line_join(gtk::cairo::LineJoin::Round);
-    let reach = radius * 0.4;
-    cr.move_to(cx, cy - reach);
-    cr.line_to(cx, cy + reach);
-    cr.move_to(cx - reach * 0.7, cy + reach * 0.3);
-    cr.line_to(cx, cy + reach);
-    cr.line_to(cx + reach * 0.7, cy + reach * 0.3);
-    let _ = cr.stroke();
-}
-
-/// The menu a press on the indicator opens: one flat button per item, each reporting its action.
-fn indicator_menu(button: &gtk::Button, id: i64, items: &[IndicatorAction], on_indicator: &OnIndicator) {
-    let popover = gtk::Popover::new();
-    popover.set_parent(button);
-    let column = GBox::new(O::Vertical, 0);
-    for &action in items {
-        let entry = gtk::Button::builder().label(tr(menu_label(action))).css_classes(["flat"]).build();
-        let (popover, on_indicator) = (popover.clone(), Rc::clone(on_indicator));
-        entry.connect_clicked(move |_| {
-            popover.popdown();
-            on_indicator(id, action);
-        });
-        column.append(&entry);
-    }
-    popover.set_child(Some(&column));
-    // the popover is parented to the button, so it is removed once closed
-    popover.connect_closed(|p| {
-        let p = p.clone();
-        glib::idle_add_local_once(move || p.unparent());
-    });
-    popover.popup();
-}
-
-/// The unread dot and the bookmark icon take the theme's primary colour (`kuro_primary`, looked up across every
-/// provider of the display).
-const CSS: &str = ".chapter-primary { color: @kuro_primary; }";
-
-pub fn ensure_css() {
-    thread_local! {
-        static DONE: Cell<bool> = const { Cell::new(false) };
-    }
-    if DONE.with(|d| d.replace(true)) {
-        return;
-    }
-    if let Some(display) = gtk::gdk::Display::default() {
-        let provider = gtk::CssProvider::new();
-        provider.load_from_string(CSS);
-        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
-}
-
-/// The row widget: unread dot, check mark, title and subtitle, download icon, bookmark icon, and the label a
-/// missing-count marker row shows instead of all of them.
+/// The widgets of one recycled list item: the row card, or a host for a leading slot.
 struct RowWidgets {
-    root: GBox,
-    dot: gtk::Image,
-    check: gtk::Image,
+    stack: gtk::Stack,
+    card: GBox,
+    lead: gtk::Image,
     text: GBox,
     title: Label,
     subtitle: Label,
-    download_button: gtk::Button,
-    /// The indicator's pages: "icon" (`download`), "busy" (a spinner under an arrow) and "ring" (`ring`).
-    indicator: gtk::Stack,
-    download: gtk::Image,
-    ring: gtk::DrawingArea,
-    spinner: gtk::Spinner,
-    bookmark: gtk::Image,
+    summary: Label,
     marker: Label,
+    bookmark: gtk::Image,
+    filler: Label,
+    download: DownloadButton,
+    slot: GBox,
 }
 
-impl RowWidgets {
-    /// Finds the inner widgets again from the root, in the order `row_widgets` appended them.
-    fn of(root: &gtk::Widget) -> Option<Self> {
-        let root = root.clone().downcast::<GBox>().ok()?;
-        let dot = root.first_child()?;
-        let check = dot.next_sibling()?;
-        let text = check.next_sibling()?;
-        let title = text.first_child()?;
-        let subtitle = title.next_sibling()?;
-        let download_button = text.next_sibling()?;
-        let bookmark = download_button.next_sibling()?;
-        let marker = bookmark.next_sibling()?;
-        let indicator = download_button.clone().downcast::<gtk::Button>().ok()?.child()?.downcast::<gtk::Stack>().ok()?;
-        let busy = indicator.child_by_name("busy")?.downcast::<gtk::Overlay>().ok()?;
-        Some(Self {
-            dot: dot.downcast().ok()?,
-            check: check.downcast().ok()?,
-            text: text.downcast().ok()?,
-            title: title.downcast().ok()?,
-            subtitle: subtitle.downcast().ok()?,
-            download: indicator.child_by_name("icon")?.downcast().ok()?,
-            ring: indicator.child_by_name("ring")?.downcast().ok()?,
-            spinner: busy.child()?.downcast().ok()?,
-            indicator,
-            download_button: download_button.downcast().ok()?,
-            bookmark: bookmark.downcast().ok()?,
-            marker: marker.downcast().ok()?,
-            root,
-        })
-    }
-}
-
-/// The right-click menu of a row: Select, the read, bookmark and download items, then Mark previous as read.
-fn context_menu(root: &GBox, list_item: &gtk::ListItem, on_menu: &OnMenu, on_row: &OnRow, on_previous: &OnChapter, at: (f64, f64)) {
-    let Some(item) = item_of(list_item) else { return };
-    let id = item.borrow::<RowItem>().id;
-    if item.borrow::<RowItem>().missing.is_some() {
-        return;
-    }
-    let popover = gtk::Popover::new();
-    popover.set_parent(root);
-    popover.set_has_arrow(false);
-    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(at.0 as i32, at.1 as i32, 1, 1)));
-    let column = GBox::new(O::Vertical, 0);
-    let entry = |label: &str, run: Box<dyn Fn()>| {
-        let button = gtk::Button::builder().label(label).css_classes(["flat"]).build();
-        let popover = popover.clone();
-        button.connect_clicked(move |_| {
-            popover.popdown();
-            run();
-        });
-        column.append(&button);
-    };
-    let on_row = Rc::clone(on_row);
-    entry("Select", Box::new(move || on_row(id, Mods::default(), true)));
-    for (action, label) in MENU {
-        let run = Rc::clone(on_menu);
-        entry(label, Box::new(move || run(id, action)));
-    }
-    let on_previous = Rc::clone(on_previous);
-    entry(&tr(MsgKey::action_mark_previous_as_read), Box::new(move || on_previous(id)));
-    popover.set_child(Some(&column));
-    // the popover is parented to the row, so it is removed once closed
-    popover.connect_closed(|p| {
-        let p = p.clone();
-        glib::idle_add_local_once(move || p.unparent());
-    });
-    popover.popup();
-}
-
-fn row_widgets() -> RowWidgets {
-    ensure_css();
-    let root = GBox::new(O::Horizontal, 10);
-    let (start, top, end, bottom) = ROW_PADDING;
-    root.set_margin_start(start);
-    root.set_margin_top(top);
-    root.set_margin_end(end);
-    root.set_margin_bottom(bottom);
-    let dot = gtk::Image::from_icon_name("media-record-symbolic");
-    dot.set_pixel_size(DOT_SIZE);
-    dot.add_css_class("chapter-primary");
-    let check = gtk::Image::from_icon_name("object-select-symbolic");
+fn row_widgets(on_download: Rc<dyn Fn(Request)>) -> RowWidgets {
+    let lead = gtk::Image::builder().width_request(16).halign(Align::Center).valign(Align::Center).build();
+    let title = Label::builder().xalign(0.0).ellipsize(pango::EllipsizeMode::End).single_line_mode(true).build();
+    let subtitle = Label::builder().xalign(0.0).ellipsize(pango::EllipsizeMode::End).single_line_mode(true).css_classes(["dim-label", "caption"]).build();
+    let summary = Label::builder().xalign(0.0).wrap(true).ellipsize(pango::EllipsizeMode::End).css_classes(["dim-label", "caption"]).build();
     let text = GBox::new(O::Vertical, 2);
     text.set_hexpand(true);
     text.set_valign(Align::Center);
-    let title = Label::builder().xalign(0.0).ellipsize(pango::EllipsizeMode::End).single_line_mode(true).build();
-    let subtitle = Label::builder().xalign(0.0).ellipsize(pango::EllipsizeMode::End).css_classes(["dim-label", "caption"]).build();
     text.append(&title);
     text.append(&subtitle);
-    let download = gtk::Image::new();
-    let ring = gtk::DrawingArea::builder().content_width(INDICATOR_SIZE).content_height(INDICATOR_SIZE).build();
-    let spinner = gtk::Spinner::builder().width_request(INDICATOR_SIZE).height_request(INDICATOR_SIZE).build();
-    let arrow = gtk::Image::from_icon_name("go-down-symbolic");
-    arrow.set_pixel_size(INDICATOR_SIZE / 2);
-    arrow.set_halign(Align::Center);
-    arrow.set_valign(Align::Center);
-    let busy = gtk::Overlay::new();
-    busy.set_child(Some(&spinner));
-    busy.add_overlay(&arrow);
-    let indicator = gtk::Stack::new();
-    indicator.add_named(&download, Some("icon"));
-    indicator.add_named(&busy, Some("busy"));
-    indicator.add_named(&ring, Some("ring"));
-    let download_button = gtk::Button::builder().child(&indicator).css_classes(["flat", "circular"]).focus_on_click(false).valign(Align::Center).build();
-    let bookmark = gtk::Image::from_icon_name("starred-symbolic");
-    bookmark.add_css_class("chapter-primary");
-    let marker = Label::builder().xalign(0.0).hexpand(true).visible(false).css_classes(["dim-label"]).build();
-    for w in [dot.upcast_ref::<gtk::Widget>(), check.upcast_ref(), bookmark.upcast_ref()] {
-        w.set_valign(Align::Center);
+    text.append(&summary);
+    let marker = Label::builder().xalign(0.0).hexpand(true).visible(false).css_classes(["dim-label", "caption"]).build();
+    let bookmark = gtk::Image::builder().icon_name("starred-symbolic").css_classes(["chapter-primary"]).valign(Align::Center).build();
+    let filler = Label::builder().label(tr(MsgKey::filler)).css_classes(["caption", "episode-tertiary"]).valign(Align::Center).build();
+    let download = DownloadButton::new(move |request| on_download(request));
+    let card = GBox::new(O::Horizontal, 12);
+    card.add_css_class("kb-item");
+    card.set_size_request(-1, crate::ui::ROW_MIN_HEIGHT);
+    card.set_margin_start(16);
+    card.set_margin_end(16);
+    for w in [lead.upcast_ref::<gtk::Widget>(), text.upcast_ref(), marker.upcast_ref(), filler.upcast_ref(), bookmark.upcast_ref(), download.widget.upcast_ref()] {
+        card.append(w);
     }
-    root.append(&dot);
-    root.append(&check);
-    root.append(&text);
-    root.append(&download_button);
-    root.append(&bookmark);
-    root.append(&marker);
-    RowWidgets { root, dot, check, text, title, subtitle, download_button, indicator, download, ring, spinner, bookmark, marker }
+    let slot = GBox::new(O::Vertical, 0);
+    let stack = gtk::Stack::new();
+    stack.add_named(&crate::clamp::clamp(&card, crate::ui::PAGE_WIDTH), Some("row"));
+    stack.add_named(&slot, Some("slot"));
+    RowWidgets { stack, card, lead, text, title, subtitle, summary, marker, bookmark, filler, download, slot }
 }
 
-fn bind(w: &RowWidgets, row: &RowItem) {
-    w.root.set_widget_name(&if row.missing.is_some() { row.key() } else { format!("row:{}", row.id) });
-    let chapter = row.missing.is_none();
-    for widget in [w.dot.upcast_ref::<gtk::Widget>(), w.check.upcast_ref(), w.text.upcast_ref()] {
-        widget.set_visible(chapter);
-    }
-    w.marker.set_visible(!chapter);
-    if !chapter {
-        // a marker is text only: no download or bookmark, nothing to select
-        w.marker.set_label(&row.subtitle);
-        w.download_button.set_visible(false);
-        w.bookmark.set_visible(false);
-        w.root.set_opacity(1.0);
-        return;
-    }
-    w.title.set_label(&row.title);
-    w.subtitle.set_label(&row.subtitle);
-    w.subtitle.set_visible(!row.subtitle.is_empty());
-    // the dot marks an unread chapter; it keeps its space when read, so the titles line up
-    w.dot.set_opacity(if row.read { 0.0 } else { 1.0 });
-    w.check.set_opacity(if row.selected { 1.0 } else { 0.0 });
-    w.bookmark.set_visible(row.bookmark);
-    w.root.set_opacity(row_alpha(row.read));
-    w.download_button.set_visible(row.indicator);
-    // the indicator answers presses only while nothing is selected
-    w.download_button.set_sensitive(row.indicator_enabled);
-    w.spinner.set_spinning(false);
-    match (ring(row.download, row.progress), download_icon(row.download)) {
-        (Some(ring), _) if ring.indeterminate => {
-            w.spinner.set_spinning(true);
-            w.indicator.set_visible_child_name("busy");
+impl RowWidgets {
+    fn show_row(&self, row: &RowItem, edge: Edge) {
+        self.empty_slot();
+        self.stack.set_visible_child_name("row");
+        set_class(&self.card, "kb-item-first", edge.first);
+        set_class(&self.card, "kb-item-last", edge.last);
+        set_class(&self.card, "kb-item-selected", row.selected);
+        let item = row.missing.is_none();
+        self.stack.set_widget_name(&if item { format!("row:{}", row.id) } else { String::new() });
+        for w in [self.lead.upcast_ref::<gtk::Widget>(), self.text.upcast_ref()] {
+            w.set_visible(item);
         }
-        (Some(ring), _) => {
-            let area = w.ring.clone();
-            w.ring.set_draw_func(move |_, cr, width, height| draw_ring(&area, cr, width, height, ring.fraction, ring.arrow_on_fill));
-            w.ring.queue_draw();
-            w.indicator.set_visible_child_name("ring");
+        self.marker.set_visible(!item);
+        if !item {
+            // a marker is one dim line: no marks, no download, nothing to select
+            self.marker.set_label(&row.subtitle);
+            self.bookmark.set_visible(false);
+            self.filler.set_visible(false);
+            self.download.widget.set_visible(false);
+            return;
         }
-        (None, Some(icon)) => {
-            w.download.set_icon_name(Some(icon));
-            w.indicator.set_visible_child_name("icon");
+        // the lead keeps its width in every state, so the titles line up
+        if row.selected {
+            self.lead.set_icon_name(Some("object-select-symbolic"));
+            self.lead.set_pixel_size(16);
+        } else if !row.read {
+            self.lead.set_icon_name(Some("media-record-symbolic"));
+            self.lead.set_pixel_size(DOT_SIZE);
+        } else {
+            self.lead.set_icon_name(None);
         }
-        (None, None) => {}
+        set_class(&self.lead, "chapter-primary", row.selected || !row.read);
+        self.title.set_label(&row.title);
+        self.subtitle.set_label(&row.subtitle);
+        self.subtitle.set_visible(!row.subtitle.is_empty());
+        self.summary.set_visible(row.summary.is_some());
+        self.summary.set_label(row.summary.as_deref().unwrap_or(""));
+        self.summary.set_lines(if row.summary_expanded { -1 } else { COLLAPSED_LINES });
+        self.text.set_opacity(row_alpha(row.read));
+        self.bookmark.set_visible(row.bookmark);
+        self.filler.set_visible(row.filler);
+        self.download.widget.set_visible(row.indicator);
+        // the button answers presses only while nothing is selected
+        self.download.widget.set_sensitive(row.indicator_enabled);
+        self.download.set(row.download, row.progress);
     }
-    w.download_button.set_tooltip_text((row.progress > 0 && row.indicator).then(|| format!("{}%", row.progress)).as_deref());
+
+    fn show_slot(&self, widget: &gtk::Widget) {
+        self.empty_slot();
+        self.stack.set_widget_name("");
+        if let Some(parent) = widget.parent().and_downcast::<GBox>() {
+            parent.remove(widget);
+        }
+        self.slot.append(widget);
+        self.stack.set_visible_child_name("slot");
+    }
+
+    fn empty_slot(&self) {
+        while let Some(child) = self.slot.first_child() {
+            self.slot.remove(&child);
+        }
+    }
 }
 
-impl ChapterList {
-    pub fn new(on_row: OnRow, on_menu: OnMenu, actions: RowActions) -> Rc<Self> {
-        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
-        let factory = gtk::SignalListItemFactory::new();
-        factory.connect_setup(move |_, object| {
-            let Some(list_item) = object.downcast_ref::<gtk::ListItem>() else { return };
-            let widgets = row_widgets();
-            let long_fired = Rc::new(Cell::new(false));
-            let report = |list_item: &gtk::ListItem, on_row: &OnRow, state: ModifierType, long: bool| {
-                if let Some(item) = item_of(list_item) {
-                    let row = item.borrow::<RowItem>();
-                    // a missing-count marker is not a chapter
-                    if row.missing.is_none() {
-                        on_row(row.id, mods_of(state), long);
-                    }
-                }
-            };
-            let left = gtk::GestureClick::builder().button(1).build();
-            left.connect_released({
-                let (list_item, on_row, long_fired) = (list_item.clone(), Rc::clone(&on_row), Rc::clone(&long_fired));
-                move |g, _, _, _| {
-                    if !long_fired.replace(false) {
-                        report(&list_item, &on_row, g.current_event_state(), false);
-                    }
-                }
-            });
-            let right = gtk::GestureClick::builder().button(3).build();
-            right.connect_pressed({
-                let (list_item, on_row, on_menu, root, actions) = (list_item.clone(), Rc::clone(&on_row), Rc::clone(&on_menu), widgets.root.clone(), actions.clone());
-                move |_, _, x, y| context_menu(&root, &list_item, &on_menu, &on_row, &actions.on_previous, (x, y))
-            });
-            let long = gtk::GestureLongPress::new();
-            long.connect_pressed({
-                let (list_item, on_row, long_fired) = (list_item.clone(), Rc::clone(&on_row), Rc::clone(&long_fired));
-                move |g, _, _| {
-                    long_fired.set(true);
-                    report(&list_item, &on_row, g.current_event_state(), true);
-                }
-            });
-            for c in [left.upcast_ref::<gtk::EventController>(), right.upcast_ref(), long.upcast_ref()] {
-                widgets.root.add_controller(c.clone());
+/// The items of the right-click menu of the row behind `list_item`, built when the menu opens so the labels match the
+/// row as it is now. The row is copied out of the store item before anything runs.
+fn menu_items(list_item: &glib::WeakRef<gtk::ListItem>, anime: bool, on_menu: &Rc<dyn Fn(i64, RowAction)>) -> Vec<MenuItem> {
+    let Some(row) = list_item.upgrade().and_then(|item| row_of(&item)) else { return Vec::new() };
+    row_menu(&row, anime)
+        .into_iter()
+        .map(|(label, section, action)| {
+            let (on_menu, id) = (Rc::clone(on_menu), row.id);
+            MenuItem::new(tr(label), section, move || on_menu(id, action))
+        })
+        .collect()
+}
+
+/// Brings the row part of `store` (everything from `offset`) from `shown` to `rows`; see the module text.
+fn sync_store(store: &gio::ListStore, offset: u32, shown: &[RowItem], rows: &[RowItem]) {
+    let item = |i: usize| Item::Row(rows[i].clone(), edge(i, rows.len()));
+    match diff(shown, rows) {
+        Diff::Same => {}
+        // always fresh objects: GTK does not rebind a row whose object is the same, so an edit in place (a download
+        // turning into progress, then a tick) would never reach the row's widgets
+        Diff::Rows(indices) => {
+            if let Some((start, len)) = changed_span(&indices) {
+                let objects: Vec<glib::BoxedAnyObject> = (start..start + len).map(|i| glib::BoxedAnyObject::new(item(i))).collect();
+                store.splice(offset + start as u32, len as u32, &objects);
             }
-            // a press on the indicator follows `chapter_actions::outcome` by the state of its row: an action at once, or a menu
-            let press_indicator = {
-                let (list_item, on_indicator, button) = (list_item.clone(), Rc::clone(&actions.on_indicator), widgets.download_button.clone());
-                Rc::new(move |press: Press| {
-                    let Some(item) = item_of(&list_item) else { return };
-                    let (id, state) = {
-                        let row = item.borrow::<RowItem>();
-                        (row.id, row.download)
-                    };
-                    match outcome(state, press) {
-                        Outcome::Run(action) => on_indicator(id, action),
-                        Outcome::Menu(items) => indicator_menu(&button, id, items, &on_indicator),
+        }
+        Diff::Reset => {
+            let objects: Vec<glib::BoxedAnyObject> = (0..rows.len()).map(|i| glib::BoxedAnyObject::new(item(i))).collect();
+            store.splice(offset, store.n_items() - offset, &objects);
+        }
+    }
+}
+
+pub struct ItemList {
+    pub widget: gtk::ListView,
+    store: gio::ListStore,
+    leading: RefCell<Vec<gtk::Widget>>,
+    shown: RefCell<Vec<RowItem>>,
+}
+
+impl ItemList {
+    /// The list of `kind`'s rows: the kind only words the menu (read or watched).
+    pub fn new(kind: EntryKind, callbacks: Callbacks) -> Rc<Self> {
+        let anime = kind == EntryKind::Anime;
+        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let registry: Rc<RefCell<HashMap<usize, Rc<RowWidgets>>>> = Rc::default();
+        let list: Rc<RefCell<Weak<Self>>> = Rc::default();
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup({
+            let (registry, callbacks) = (Rc::clone(&registry), callbacks.clone());
+            move |_, object| {
+                let Some(list_item) = object.downcast_ref::<gtk::ListItem>() else { return };
+                // Enter is the list's own (`key_controller`), so the item does not activate on it or on a double click
+                list_item.set_activatable(false);
+                let on_download: Rc<dyn Fn(Request)> = {
+                    let (list_item, on_download) = (list_item.clone(), Rc::clone(&callbacks.on_download));
+                    Rc::new(move |request: Request| {
+                        if let Some(row) = row_of(&list_item) {
+                            on_download(row.id, request);
+                        }
+                    })
+                };
+                let widgets = Rc::new(row_widgets(on_download));
+                // set by a long press, so the release that ends it does not also open the row
+                let long_pressed = Rc::new(std::cell::Cell::new(false));
+                let left = gtk::GestureClick::builder().button(1).build();
+                left.connect_pressed({
+                    let long_pressed = Rc::clone(&long_pressed);
+                    move |_, _, _, _| long_pressed.set(false)
+                });
+                left.connect_released({
+                    let (list_item, on_row, long_pressed) = (list_item.clone(), Rc::clone(&callbacks.on_row), Rc::clone(&long_pressed));
+                    move |gesture, _, _, _| {
+                        if long_pressed.get() {
+                            return;
+                        }
+                        if let Some(row) = row_of(&list_item) {
+                            on_row(row.id, press_of(gesture.current_event_state()));
+                        }
                     }
-                })
-            };
-            let indicator_long_fired = Rc::new(Cell::new(false));
-            widgets.download_button.connect_clicked({
-                let (press_indicator, long_fired) = (Rc::clone(&press_indicator), Rc::clone(&indicator_long_fired));
-                move |_| {
-                    // the release that ends a long press is not a click
-                    if !long_fired.replace(false) {
-                        press_indicator(Press::Click);
+                });
+                widgets.card.add_controller(left);
+                // a long press, with the mouse or on a touch screen, starts the selection on this row (the user's choice)
+                let long = gtk::GestureLongPress::new();
+                long.connect_pressed({
+                    let (list_item, on_menu) = (list_item.downgrade(), Rc::clone(&callbacks.on_menu));
+                    move |gesture, _, _| {
+                        gesture.set_state(gtk::EventSequenceState::Claimed);
+                        long_pressed.set(true);
+                        // the id is copied out of the store item, and the page runs on idle, so no borrow is held
+                        // while it redraws the list (`act -> render -> sync`)
+                        let Some(id) = list_item.upgrade().and_then(|item| row_of(&item)).map(|row| row.id) else { return };
+                        let on_menu = Rc::clone(&on_menu);
+                        glib::idle_add_local_once(move || on_menu(id, RowAction::Select));
                     }
-                }
-            });
-            let indicator_long = gtk::GestureLongPress::new();
-            indicator_long.connect_pressed({
-                let (press_indicator, long_fired) = (Rc::clone(&press_indicator), Rc::clone(&indicator_long_fired));
-                move |g, _, _| {
-                    // a long press on the indicator is its own, not the row's selection toggle
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    long_fired.set(true);
-                    press_indicator(Press::LongPress);
-                }
-            });
-            widgets.download_button.add_controller(indicator_long);
-            list_item.set_child(Some(&widgets.root));
+                });
+                widgets.card.add_controller(long);
+                // the right click (and the Menu key) open the row's menu
+                context_menu::attach_without_long_press(&widgets.card, {
+                    let (list_item, on_menu) = (list_item.downgrade(), Rc::clone(&callbacks.on_menu));
+                    move |_, _| menu_items(&list_item, anime, &on_menu)
+                });
+                // a tap on the summary toggles it and claims the press, so the row does not open (T-39a-012)
+                let summary_tap = gtk::GestureClick::builder().button(1).build();
+                summary_tap.connect_released({
+                    let (list_item, on_summary) = (list_item.clone(), Rc::clone(&callbacks.on_summary));
+                    move |gesture, _, _, _| {
+                        gesture.set_state(gtk::EventSequenceState::Claimed);
+                        if let Some(row) = row_of(&list_item) {
+                            on_summary(row.id);
+                        }
+                    }
+                });
+                widgets.summary.add_controller(summary_tap);
+                list_item.set_child(Some(&widgets.stack));
+                registry.borrow_mut().insert(list_item.as_ptr() as usize, widgets);
+            }
         });
-        factory.connect_bind(|_, object| {
-            let Some(list_item) = object.downcast_ref::<gtk::ListItem>() else { return };
-            let (Some(item), Some(child)) = (item_of(list_item), list_item.child()) else { return };
-            if let Some(widgets) = RowWidgets::of(&child) {
-                bind(&widgets, &item.borrow::<RowItem>());
+        factory.connect_bind({
+            let (registry, list) = (Rc::clone(&registry), Rc::clone(&list));
+            move |_, object| {
+                let Some(list_item) = object.downcast_ref::<gtk::ListItem>() else { return };
+                let (Some(item), Some(widgets)) = (item_of(list_item), registry.borrow().get(&(list_item.as_ptr() as usize)).cloned()) else { return };
+                match item {
+                    Item::Row(row, edge) => widgets.show_row(&row, edge),
+                    Item::Slot(i) => {
+                        let Some(this) = list.borrow().upgrade() else { return };
+                        if let Some(w) = this.leading.borrow().get(i) {
+                            widgets.show_slot(w);
+                        }
+                    }
+                }
+            }
+        });
+        factory.connect_unbind({
+            let registry = Rc::clone(&registry);
+            move |_, object| {
+                if let Some(list_item) = object.downcast_ref::<gtk::ListItem>()
+                    && let Some(widgets) = registry.borrow().get(&(list_item.as_ptr() as usize))
+                {
+                    widgets.empty_slot();
+                }
+            }
+        });
+        factory.connect_teardown({
+            let registry = Rc::clone(&registry);
+            move |_, object| {
+                if let Some(list_item) = object.downcast_ref::<gtk::ListItem>() {
+                    registry.borrow_mut().remove(&(list_item.as_ptr() as usize));
+                }
             }
         });
         let widget = gtk::ListView::new(Some(gtk::NoSelection::new(Some(store.clone()))), Some(factory));
         widget.set_focusable(true);
-        Rc::new(Self { widget, store, shown: RefCell::new(Vec::new()) })
+        widget.add_css_class("kb-item-list");
+        let this = Rc::new(Self { widget, store, leading: RefCell::new(Vec::new()), shown: RefCell::new(Vec::new()) });
+        *list.borrow_mut() = Rc::downgrade(&this);
+        this.widget.add_controller(key_controller(Rc::downgrade(&this), callbacks.on_row));
+        this
     }
 
-    /// Shows `rows`. A changed row is updated in place with one `items_changed`; a different set of rows replaces the
-    /// list with one splice.
+    /// Replaces the leading slots (widgets that scroll with the rows). One splice of the head of the store.
+    pub fn set_leading(&self, widgets: Vec<gtk::Widget>) {
+        let old = self.leading.borrow().len() as u32;
+        let objects: Vec<glib::BoxedAnyObject> = (0..widgets.len()).map(|i| glib::BoxedAnyObject::new(Item::Slot(i))).collect();
+        *self.leading.borrow_mut() = widgets;
+        self.store.splice(0, old, &objects);
+    }
+
+    /// Shows `rows`: see `sync_store`. The shown rows are swapped in before the store changes, so a handler that the
+    /// change runs (a rebind, a focus move) finds no borrow of them held.
     pub fn sync(&self, rows: Vec<RowItem>) {
-        let change = diff(&self.shown.borrow(), &rows);
-        match change {
-            Diff::Same => {}
-            Diff::Rows(indices) => {
-                for i in indices {
-                    if let Some(item) = self.store.item(i as u32).and_downcast::<glib::BoxedAnyObject>() {
-                        *item.borrow_mut::<RowItem>() = rows[i].clone();
-                    }
-                    self.store.items_changed(i as u32, 1, 1);
-                }
-            }
-            Diff::Reset => {
-                let objects: Vec<glib::BoxedAnyObject> = rows.iter().cloned().map(glib::BoxedAnyObject::new).collect();
-                self.store.splice(0, self.store.n_items(), &objects);
-            }
-        }
-        *self.shown.borrow_mut() = rows;
+        let offset = self.leading.borrow().len() as u32;
+        let old = self.shown.replace(rows.clone());
+        sync_store(&self.store, offset, &old, &rows);
     }
 
-    /// The chapter id of the row that holds keyboard focus.
+    /// The id of the row that holds keyboard focus.
     pub fn focused_id(&self) -> Option<i64> {
-        let focus = self.widget.root()?.focus()?;
-        let mut cur = Some(focus);
+        let row_id = |w: &gtk::Widget| w.widget_name().strip_prefix("row:").and_then(|n| n.parse().ok());
+        let mut cur = Some(self.widget.root()?.focus()?);
         while let Some(w) = cur {
-            if let Some(id) = w.widget_name().strip_prefix("row:").and_then(|n| n.parse().ok()) {
-                return Some(id);
-            }
-            if let Some(id) = w.first_child().and_then(|c| c.widget_name().strip_prefix("row:").and_then(|n| n.parse().ok())) {
+            if let Some(id) = row_id(&w).or_else(|| w.first_child().and_then(|c| row_id(&c))) {
                 return Some(id);
             }
             if w == *self.widget.upcast_ref::<gtk::Widget>() {
@@ -468,10 +399,223 @@ impl ChapterList {
         None
     }
 
-    /// Moves keyboard focus to the row of chapter `id`.
+    /// Moves keyboard focus to the row of `id`.
     pub fn focus_row(&self, id: i64) {
-        if let Some(index) = self.shown.borrow().iter().position(|r| r.id == id) {
-            self.widget.scroll_to(index as u32, gtk::ListScrollFlags::FOCUS, None);
+        let offset = self.leading.borrow().len();
+        let index = self.shown.borrow().iter().position(|r| r.id == id);
+        if let Some(index) = index {
+            self.widget.scroll_to((offset + index) as u32, gtk::ListScrollFlags::FOCUS, None);
         }
+    }
+}
+
+/// Enter on the focused row is a plain press of it, with the modifiers held.
+fn key_controller(list: Weak<ItemList>, on_row: Rc<dyn Fn(i64, Press)>) -> gtk::EventControllerKey {
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(move |_, key, _, state| {
+        if !matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter) {
+            return glib::Propagation::Proceed;
+        }
+        match list.upgrade().and_then(|list| list.focused_id()) {
+            Some(id) => {
+                on_row(id, press_of(state));
+                glib::Propagation::Stop
+            }
+            None => glib::Propagation::Proceed,
+        }
+    });
+    keys
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    fn rows(n: i64) -> Vec<RowItem> {
+        (1..=n).map(|id| RowItem::new(id, format!("Episode {id}"))).collect()
+    }
+
+    /// A store with two leading slots and `shown`, and a counter of its `items_changed` signals.
+    fn store_with(shown: &[RowItem]) -> (gio::ListStore, Rc<Cell<u32>>) {
+        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let items: Vec<glib::BoxedAnyObject> = (0..2).map(|i| glib::BoxedAnyObject::new(Item::Slot(i))).collect();
+        store.splice(0, 0, &items);
+        let items: Vec<glib::BoxedAnyObject> = shown.iter().enumerate().map(|(i, r)| glib::BoxedAnyObject::new(Item::Row(r.clone(), edge(i, shown.len())))).collect();
+        store.splice(2, 0, &items);
+        let signals = Rc::new(Cell::new(0));
+        store.connect_items_changed({
+            let signals = Rc::clone(&signals);
+            move |_, _, _, _| signals.set(signals.get() + 1)
+        });
+        (store, signals)
+    }
+
+    #[test]
+    fn one_changed_row_is_one_signal_and_an_identical_list_is_none() {
+        let shown = rows(5);
+        let (store, signals) = store_with(&shown);
+        let mut next = shown.clone();
+        next[3].read = true;
+        sync_store(&store, 2, &shown, &next);
+        assert_eq!(signals.get(), 1);
+        sync_store(&store, 2, &next, &next);
+        assert_eq!(signals.get(), 1, "nothing changed");
+    }
+
+    #[test]
+    fn one_changed_row_gets_a_new_object_so_the_row_is_bound_again() {
+        let shown = rows(3);
+        let (store, signals) = store_with(&shown);
+        let before = store.item(3).unwrap();
+        let mut changed = shown.clone();
+        changed[1].progress = 40;
+        sync_store(&store, 2, &shown, &changed);
+        assert_eq!(signals.get(), 1);
+        let after = store.item(3).unwrap();
+        assert_ne!(before, after, "GTK skips the rebind of an unchanged object");
+        assert!(matches!(&*after.downcast::<glib::BoxedAnyObject>().unwrap().borrow::<Item>(), Item::Row(r, _) if r.progress == 40));
+    }
+
+    #[test]
+    fn a_bulk_change_is_one_splice_that_keeps_the_list_the_same_length() {
+        let shown = rows(300);
+        let (store, signals) = store_with(&shown);
+        let all_selected: Vec<RowItem> = shown.iter().cloned().map(|r| RowItem { selected: true, ..r }).collect();
+        sync_store(&store, 2, &shown, &all_selected);
+        assert_eq!(signals.get(), 1, "select all is one signal, not 300");
+        assert_eq!(store.n_items(), 302);
+        let last = store.item(301).and_downcast::<glib::BoxedAnyObject>().unwrap();
+        assert!(matches!(&*last.borrow::<Item>(), Item::Row(r, e) if r.selected && e.last && !e.first));
+        let slot = store.item(1).and_downcast::<glib::BoxedAnyObject>().unwrap();
+        assert!(matches!(&*slot.borrow::<Item>(), Item::Slot(1)), "the leading slots are untouched");
+    }
+
+    #[test]
+    fn a_different_set_of_rows_is_one_splice_over_the_row_part() {
+        let shown = rows(4);
+        let (store, signals) = store_with(&shown);
+        sync_store(&store, 2, &shown, &rows(2));
+        assert_eq!((signals.get(), store.n_items()), (1, 4));
+        let first = store.item(2).and_downcast::<glib::BoxedAnyObject>().unwrap();
+        assert!(matches!(&*first.borrow::<Item>(), Item::Row(_, e) if e.first && !e.last));
+    }
+
+    #[test]
+    fn the_first_and_last_rows_round_the_card() {
+        assert_eq!(edge(0, 1), Edge { first: true, last: true });
+        assert_eq!(edge(0, 3), Edge { first: true, last: false });
+        assert_eq!(edge(1, 3), Edge { first: false, last: false });
+        assert_eq!(edge(2, 3), Edge { first: false, last: true });
+    }
+
+    /// One display test: a chapter and an episode draw the same row, a read one is dimmed with no dot, a marker shows
+    /// only its line, and a local item has no download button.
+    #[test]
+    fn chapters_and_episodes_draw_the_same_row() {
+        crate::testing::with_display(|| {
+            let widgets = row_widgets(Rc::new(|_: Request| {}));
+            let chapter = RowItem { subtitle: "2024-01-02 \u{2022} Group".into(), indicator: true, indicator_enabled: true, ..RowItem::new(1, "Chapter 1".into()) };
+            widgets.show_row(&chapter, edge(0, 3));
+            assert!(widgets.card.has_css_class("kb-item-first") && !widgets.card.has_css_class("kb-item-last"));
+            assert_eq!(widgets.lead.icon_name().as_deref(), Some("media-record-symbolic"), "the unread dot");
+            assert!(widgets.download.widget.is_visible() && widgets.subtitle.is_visible());
+            assert_eq!(widgets.stack.widget_name().as_str(), "row:1");
+            let episode = RowItem { read: true, filler: true, bookmark: true, ..RowItem::new(2, "Episode 2".into()) };
+            widgets.show_row(&episode, edge(2, 3));
+            assert!(widgets.card.has_css_class("kb-item-last") && !widgets.card.has_css_class("kb-item-first"));
+            assert_eq!(widgets.lead.icon_name(), None, "no dot on a seen episode");
+            assert!((widgets.text.opacity() - 0.38).abs() < 0.01, "a seen episode is dimmed");
+            assert!(widgets.filler.is_visible() && widgets.bookmark.is_visible());
+            assert!(!widgets.download.widget.is_visible(), "no download button without an indicator");
+            assert!(!widgets.subtitle.is_visible(), "an empty second line takes no space");
+            widgets.show_row(&RowItem::marker("1-4".into(), 2, "Missing 2 chapters".into()), edge(1, 3));
+            assert!(widgets.marker.is_visible() && !widgets.text.is_visible() && !widgets.download.widget.is_visible());
+            assert_eq!(widgets.marker.label().as_str(), "Missing 2 chapters");
+        });
+    }
+
+    /// The crash of round 3: a press whose page redraws the list from inside the handler (`act -> render -> sync`)
+    /// panicked with "already borrowed". A plain click, a right click, a touch long press and the menu's Select now
+    /// each run a handler that re-syncs the list, and nothing panics.
+    #[test]
+    fn a_press_that_redraws_the_list_from_its_handler_does_not_panic() {
+        crate::testing::with_display(|| {
+            use crate::entry_core::page_shell::test_util::{descendants, pump};
+            let ctx = glib::MainContext::default();
+            let shown = |selected: Option<i64>| -> Vec<RowItem> {
+                (1..=3).map(|id| RowItem { indicator: true, indicator_enabled: true, selected: Some(id) == selected, ..RowItem::new(id, format!("Chapter {id}")) }).collect()
+            };
+            let slot: Rc<RefCell<Weak<ItemList>>> = Rc::default();
+            let pressed: Rc<RefCell<Vec<(i64, Option<RowAction>)>>> = Rc::default();
+            let redraw = {
+                let slot = Rc::clone(&slot);
+                move |id: i64| {
+                    if let Some(list) = slot.borrow().upgrade() {
+                        list.sync(shown(Some(id)));
+                    }
+                }
+            };
+            let list = ItemList::new(
+                EntryKind::Manga,
+                Callbacks {
+                    on_row: Rc::new({
+                        let (pressed, redraw) = (Rc::clone(&pressed), redraw.clone());
+                        move |id: i64, _: Press| {
+                            pressed.borrow_mut().push((id, None));
+                            redraw(id);
+                        }
+                    }),
+                    on_menu: Rc::new({
+                        let pressed = Rc::clone(&pressed);
+                        move |id: i64, action: RowAction| {
+                            pressed.borrow_mut().push((id, Some(action)));
+                            redraw(id);
+                        }
+                    }),
+                    on_download: Rc::new(|_: i64, _: Request| {}),
+                    on_summary: Rc::new(|_: i64| {}),
+                },
+            );
+            *slot.borrow_mut() = Rc::downgrade(&list);
+            list.sync(shown(None));
+            let window = gtk::Window::builder().default_width(600).default_height(400).child(&list.widget).build();
+            window.present();
+            let card = || descendants(list.widget.upcast_ref()).into_iter().find(|w| w.has_css_class("kb-item") && w.is_visible());
+            assert!(pump(&ctx, || card().is_some()), "the list draws its rows");
+            let first = card().expect("a row");
+            let model = first.observe_controllers();
+            let controllers: Vec<gtk::EventController> = (0..model.n_items()).filter_map(|i| model.item(i).and_downcast::<gtk::EventController>()).collect();
+            let click = |button: u32| controllers.iter().filter_map(|c| c.downcast_ref::<gtk::GestureClick>()).find(|g| g.button() == button).expect("a click gesture").clone();
+            let longs: Vec<gtk::GestureLongPress> = controllers.iter().filter_map(|c| c.downcast_ref::<gtk::GestureLongPress>().cloned()).collect();
+            assert_eq!(longs.len(), 1, "one long press: the row's own, not the menu's");
+            let long = longs[0].clone();
+            assert!(!long.is_touch_only(), "a mouse long press selects too");
+            let selects = || pressed.borrow().iter().filter(|(_, a)| *a == Some(RowAction::Select)).count();
+
+            click(1).emit_by_name::<()>("released", &[&1i32, &4.0f64, &4.0f64]);
+            assert_eq!(pressed.borrow().len(), 1, "a plain click reached the page");
+            click(1).emit_by_name::<()>("pressed", &[&1i32, &4.0f64, &4.0f64]);
+            long.emit_by_name::<()>("pressed", &[&4.0f64, &4.0f64]);
+            assert!(pump(&ctx, || selects() == 1), "the long press selects the row, with no borrow held");
+            click(1).emit_by_name::<()>("released", &[&1i32, &4.0f64, &4.0f64]);
+            assert_eq!(pressed.borrow().len(), 2, "the release that ends a long press does not open the row");
+            let menu = || descendants(list.widget.upcast_ref()).into_iter().find_map(|w| w.downcast::<gtk::PopoverMenu>().ok());
+            assert!(menu().is_none(), "the long press opens no menu");
+            // the select redrew the row with a new item, so look the row's widget up again
+            let card = card().expect("a row");
+            let model = card.observe_controllers();
+            let right = (0..model.n_items())
+                .filter_map(|i| model.item(i).and_downcast::<gtk::GestureClick>())
+                .find(|g| g.button() == 3)
+                .expect("a right-click gesture");
+            right.emit_by_name::<()>("pressed", &[&1i32, &4.0f64, &4.0f64]);
+            assert!(pump(&ctx, || menu().is_some()), "the right click opens the row's menu");
+            let select = row_menu(&shown(None)[0], false).iter().position(|(_, _, a)| *a == RowAction::Select).expect("a Select item");
+            menu().expect("the menu").activate_action(&format!("ctx.item{select}"), None).expect("the Select item");
+            assert!(pump(&ctx, || selects() == 2), "Select from the menu reached the page");
+            window.close();
+        });
     }
 }

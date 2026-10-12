@@ -32,6 +32,8 @@ pub mod class {
     pub const SHEET_SHOWN: &str = "kb-sheet-shown";
     /// A glyph in the primary colour (the info screen icon).
     pub const PRIMARY_ICON: &str = "kb-primary-icon";
+    /// The app bar's count pill (shell/appbar.rs); its geometry is in style.css, its alpha in `system_rules`.
+    pub const COUNT_PILL: &str = "kuro-count-pill";
 }
 
 /// Alpha of the onSurface state layer under a hovered clickable surface; a press uses
@@ -45,12 +47,13 @@ pub fn selected_alpha(dark: bool) -> f32 {
 
 /// The dark-aware rules for the GTK-theme choice: the selection tint keeps the GTK theme's own
 /// selected colour, the active tint follows the resolved dark flag (T-49b-010, T-49b-029), and the
-/// pill takes a GTK-theme stand-in for `surface_container_high` (T-49a-034).
+/// pill takes a GTK-theme stand-in for `surface_container_high` (T-49a-034). The app bar's count pill
+/// takes the same pill alpha over the window foreground.
 pub fn system_rules(dark: bool) -> String {
     let active = Tokens::active_for(dark).to_css();
     // the tab pill follows the generic pill, so its alpha background wins at equal specificity
     format!(
-        ".{} {{ background-color: alpha(@theme_selected_bg_color, {}); }}\n.{} {{ color: {active}; }}\n.{} {{ background-color: mix(@theme_bg_color, @theme_fg_color, 0.1); }}\n.{} {{ background-color: alpha(@theme_fg_color, {}); }}\n.{} {{ color: @accent_color; }}\n.{}:hover {{ background-color: alpha(@theme_fg_color, {HOVER_ALPHA}); }}\n.{}:active {{ background-color: alpha(@theme_fg_color, {}); }}\n",
+        ".{} {{ background-color: alpha(@theme_selected_bg_color, {}); }}\n.{} {{ color: {active}; }}\n.{} {{ background-color: mix(@theme_bg_color, @theme_fg_color, 0.1); }}\n.{} {{ background-color: alpha(@theme_fg_color, {}); }}\n.{} {{ color: @accent_color; }}\n.{}:hover {{ background-color: alpha(@theme_fg_color, {HOVER_ALPHA}); }}\n.{}:active {{ background-color: alpha(@theme_fg_color, {}); }}\n.{count_pill} {{ background-color: alpha(@window_fg_color, {count_alpha}); }}\n",
         class::SELECTED,
         selected_alpha(dark),
         class::ACTIVE,
@@ -61,6 +64,8 @@ pub fn system_rules(dark: bool) -> String {
         class::SURFACE,
         class::SURFACE,
         crate::theme::tokens::RIPPLE_ALPHA,
+        count_pill = class::COUNT_PILL,
+        count_alpha = crate::widgets::tabs::pill_alpha(dark),
     )
 }
 
@@ -184,24 +189,9 @@ mod tests {
     }
 
     #[test]
-    fn base_stylesheet_names_only_gtk_default_colours() {
-        let allowed = [
-            "theme_bg_color",
-            "theme_fg_color",
-            "theme_base_color",
-            "theme_selected_bg_color",
-            "theme_selected_fg_color",
-        ];
-        let mut rest = BASE_CSS;
-        while let Some(pos) = rest.find('@') {
-            let after = &rest[pos + 1..];
-            let end = after.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(after.len());
-            assert!(allowed.contains(&&after[..end]), "unexpected @{}", &after[..end]);
-            rest = &after[end..];
-        }
+    fn base_stylesheet_braces_balance() {
         assert_eq!(BASE_CSS.matches('{').count(), BASE_CSS.matches('}').count());
     }
-
 }
 
 #[cfg(test)]
@@ -267,22 +257,72 @@ mod base_css_tests {
         BASE_CSS.contains(rule)
     }
 
-    /// T-49ba-045: only the GTK default named colours are referenced, so no rule is dropped.
+    /// T-49ba-045: the base sheet names only GTK named colours, or a palette colour that the tint provider defines
+    /// (`kuro_<role>`), so no rule refers to a colour that does not exist.
     #[test]
-    fn base_sheet_references_only_gtk_named_colours() {
-        const ALLOWED: [&str; 5] = [
+    fn base_sheet_references_only_gtk_named_colours_and_palette_roles() {
+        const GTK: [&str; 7] = [
             "theme_bg_color",
             "theme_fg_color",
             "theme_base_color",
             "theme_selected_bg_color",
             "theme_selected_fg_color",
+            "error_color",
+            "success_color",
         ];
         let mut rest = BASE_CSS;
         while let Some(at) = rest.find('@') {
             let name: String = rest[at + 1..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
-            assert!(ALLOWED.contains(&name.as_str()), "undefined colour @{name} in the base sheet");
+            let palette = name
+                .strip_prefix("kuro_")
+                .is_some_and(|role| crate::theme::tokens::Role::ALL.iter().any(|r| r.css_name() == role));
+            assert!(GTK.contains(&name.as_str()) || palette, "undefined colour @{name} in the base sheet");
             rest = &rest[at + 1..];
         }
+    }
+
+    /// The declarations of the base-sheet rule for `selector`, on one line, or `None` when the sheet has no such rule.
+    fn declarations(selector: &str) -> Option<String> {
+        let start = BASE_CSS.find(&format!("{selector} {{"))? + selector.len() + 2;
+        let end = BASE_CSS[start..].find('}')? + start;
+        Some(BASE_CSS[start..end].split_whitespace().collect::<Vec<_>>().join(" "))
+    }
+
+    /// The rules of the screens that used to add their own provider now live in the base sheet, with the same
+    /// declarations. Nothing outside `theme` adds a provider (`apply::no_screen_adds_a_css_provider`).
+    #[test]
+    fn screen_rules_live_in_the_base_sheet() {
+        let rules = [
+            (".pref-flash", "background-color: alpha(@theme_selected_bg_color, 0.18);"),
+            (".pref-error", "color: @error_color;"),
+            (".tracker-check", "color: @success_color;"),
+            (".reader-bg-black", "background-color: #000000;"),
+            (".reader-bg-gray", "background-color: #202125;"),
+            (".reader-scrim", "background-color: rgba(0, 0, 0, 0.5);"),
+            (".reader-text-light", "color: #ffffff;"),
+            (".kuro-backdrop-fade", "linear-gradient(to bottom, alpha(@theme_bg_color, 0) 0%, alpha(@theme_bg_color, 1) 100%);"),
+            (".kuro-warning-banner", "background-color: @kuro_error; color: @kuro_on_error; padding: 16px;"),
+            (".kuro-banner-secondary", "background-color: @kuro_secondary; color: @kuro_on_secondary; padding: 4px 16px;"),
+            (".kuro-banner-tertiary", "background-color: @kuro_tertiary; color: @kuro_on_tertiary; padding: 4px 16px;"),
+            (".kuro-banner-primary", "background-color: @kuro_primary; color: @kuro_on_primary; padding: 4px 16px;"),
+            (".chapter-primary", "color: @kuro_primary;"),
+            (".episode-tertiary", "color: @kuro_tertiary;"),
+            (".kuro-cal-day:focus-visible", "outline: 2px solid @theme_selected_bg_color;"),
+            (".kuro-cal-dot", "background-color: @theme_selected_bg_color;"),
+        ];
+        for (selector, declaration) in rules {
+            let body = declarations(selector).unwrap_or_else(|| panic!("{selector} is not in style.css"));
+            assert!(body.contains(declaration), "{selector}: {body}");
+        }
+    }
+
+    /// The count pill keeps its geometry in the base sheet; its alpha depends on the dark flag, so it is
+    /// generated with the other dark-aware rules.
+    #[test]
+    fn count_pill_alpha_follows_the_dark_flag() {
+        assert!(declarations(".kuro-count-pill").is_some_and(|b| b.contains("border-radius: 999px;")));
+        assert!(super::system_rules(true).contains(".kuro-count-pill { background-color: alpha(@window_fg_color, 0.12); }"));
+        assert!(super::system_rules(false).contains(".kuro-count-pill { background-color: alpha(@window_fg_color, 0.08); }"));
     }
 
     /// T-49ba-027: a dragged or selected download card gets alpha 0.08 of the selection colour.

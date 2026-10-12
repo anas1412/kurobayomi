@@ -50,6 +50,19 @@ pub struct HeaderModel {
 }
 
 impl HeaderModel {
+    /// Equal for drawing. The cover's library flag only decides where its file is cached, so adding to or removing from
+    /// the library must not rebuild the header and reload the cover.
+    pub fn looks_like(&self, other: &Self) -> bool {
+        let plain = |m: &Self| {
+            let mut m = m.clone();
+            if let Some(cover) = m.cover.as_mut() {
+                cover.favorite = false;
+            }
+            m
+        };
+        plain(self) == plain(other)
+    }
+
     pub fn new(page: &EntryState) -> Self {
         let m = &page.manga;
         Self::from_parts(

@@ -15,6 +15,7 @@ use tokio::sync::watch;
 
 use super::directory::{SourceDirectory, source_or_stub};
 use super::primitives::stub_source_label;
+use super::route::BrowseKind;
 use super::source_prefs_page::SourcePrefsPage;
 use crate::entry_core::handoff::SourcePrefsRequest;
 
@@ -45,16 +46,8 @@ pub fn prefs_page(store: PrefStore, source_id: i64, rows: Vec<SourcePref>) -> So
 }
 
 /// The directory the request's kind reads.
-fn directory_of(request: &SourcePrefsRequest) -> Option<Arc<dyn SourceDirectory>> {
-    use kuro_data::anime::AnimeRepo;
-    use kuro_domain::kind::EntryKind;
-
-    if request.anime {
-        let repo = AnimeRepo::new(crate::data::app().db(EntryKind::Anime));
-        Some(Arc::new(super::anime::directory::AnimeDirectory::current(repo)))
-    } else {
-        super::directory::current()
-    }
+fn directory_of(request: &SourcePrefsRequest) -> Arc<dyn SourceDirectory> {
+    super::directory::current(if request.anime { BrowseKind::Anime } else { BrowseKind::Manga })
 }
 
 /// The page for the parked request, as `screens::build` asks for it. `None` leaves the screen to its sample page: no app
@@ -65,7 +58,7 @@ pub fn page() -> Option<gtk::Box> {
     }
     let request = crate::entry_core::handoff::take_source_prefs()?;
     let directory = directory_of(&request);
-    let (source, rows) = rows_of(directory.as_deref(), request.source_id);
+    let (source, rows) = rows_of(Some(&*directory), request.source_id);
     let content = prefs_page(crate::data::app().base.store().clone(), request.source_id, rows);
     let page = crate::ui::page(&title_of(&source), content.widget(), Vec::new(), true);
     crate::ui::tag(&page, "source_preferences");

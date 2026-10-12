@@ -50,7 +50,6 @@ fn apply(boxes: &[gtk::CheckButton; 4], columns: Columns) {
 }
 
 fn open_dialog() {
-    let window = gtk::Window::builder().title(ROW_TITLE).modal(true).transient_for(&crate::ui::window()).default_width(320).resizable(false).build();
     let entries = std::rc::Rc::new(favourites());
     let boxes: [gtk::CheckButton; 4] = ["Title", "Type", "Author", "Artist"].map(|label| gtk::CheckButton::with_label(label));
     apply(&boxes, Columns::ALL);
@@ -82,7 +81,7 @@ fn open_dialog() {
     buttons.append(&cancel);
     buttons.append(&export);
     column.append(&buttons);
-    window.set_child(Some(&column));
+    let window = crate::ui::modal(gtk::Label::new(Some(ROW_TITLE)).upcast_ref::<gtk::Widget>(), &column, 320, -1);
     window.set_default_widget(Some(&export));
 
     let close = window.clone();

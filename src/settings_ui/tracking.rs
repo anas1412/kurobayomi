@@ -174,7 +174,6 @@ fn tapped(index: usize, changed: &Rc<dyn Fn()>) {
 fn check_mark() -> gtk::Widget {
     let label = crate::pref_model::strings::logged_in();
     let image = gtk::Image::from_icon_name("object-select-symbolic");
-    crate::pref_model::style::install();
     image.add_css_class("tracker-check");
     image.set_pixel_size(crate::pref_model::widgets::TRACKER_CHECK_SIZE);
     image.set_tooltip_text(Some(&label));
@@ -212,6 +211,14 @@ fn tracker_item(index: usize, view: LoginRowView, host: Option<&Host>, changed: 
         _ => None,
     };
     tap_item(view.row.name, subtitle(host, view.row).as_deref(), true, trailing, logo, on_tap)
+}
+
+/// Starts the AniList browser login from the tracking page: the same action as the AniList row here. `changed` redraws
+/// the page when the login starts, and again when it finishes (the redirect calls the page's refresh).
+pub fn connect_anilist(changed: Rc<dyn Fn()>) {
+    if let Some(index) = LOGIN_ROWS.iter().position(|row| row.tracker == kuro_track::model::TrackerId::ANILIST) {
+        tapped(index, &changed);
+    }
 }
 
 /// The trackers that have a row: AniList only. The others keep their code and their token keys.

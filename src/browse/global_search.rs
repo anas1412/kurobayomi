@@ -263,8 +263,8 @@ pub fn deep_link_fallback_for(kind: BrowseKind, query: &str) -> BrowseRoute {
 
 /// A source row tapped while the search box holds text that was never submitted: the source's browse page opens with that
 /// text (GS-EC-15, a documented quirk).
-pub fn row_text_route(source_id: i64, typed: &str) -> BrowseRoute {
-    BrowseRoute::BrowseSource { source_id, query: BrowseQuery::Search(typed.to_owned()), migrating: false }
+pub fn row_text_route(kind: BrowseKind, source_id: i64, typed: &str) -> BrowseRoute {
+    BrowseRoute::BrowseSource { kind, source_id, query: BrowseQuery::Search(typed.to_owned()), migrating: false }
 }
 
 /// The start of a migrate search (T-40b-067): the origin source and the title the search starts from. A missing manga

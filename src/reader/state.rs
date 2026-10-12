@@ -8,8 +8,6 @@ use super::model::ChapterState;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dialog {
     Loading,
-    Settings,
-    ReadingModeSelect,
     PageActions,
 }
 
@@ -112,7 +110,7 @@ mod tests {
     fn a_sheet_is_closed_only_by_its_own_close() {
         let mut s = UiState::default();
         s.open(Dialog::PageActions);
-        s.close(Dialog::Settings);
+        s.close(Dialog::Loading);
         assert_eq!(s.dialog, Some(Dialog::PageActions));
         s.close(Dialog::PageActions);
         assert_eq!(s.dialog, None);

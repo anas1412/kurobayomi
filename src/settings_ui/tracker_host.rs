@@ -106,7 +106,8 @@ pub fn set_refresh(redraw: Rc<dyn Fn()>) {
     REFRESH.with(|slot| *slot.borrow_mut() = Some(redraw));
 }
 
-fn refresh() {
+/// Redraws the page that registered itself with [`set_refresh`], if one is still alive.
+pub fn refresh() {
     if let Some(redraw) = REFRESH.with(|slot| slot.borrow().clone()) {
         redraw();
     }

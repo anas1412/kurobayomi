@@ -52,7 +52,6 @@ pub const DOWNLOAD_SLOTS: Constraint = Constraint::Range { min: 1, max: 5 };
 pub const REMOVE_AFTER_READ_SLOTS: Constraint = Constraint::Choices(&[-1, 0, 1, 2, 3, 4]);
 pub const LIBRARY_UPDATE_INTERVAL: Constraint = Constraint::Choices(&[0, 12, 24, 48, 72, 168]);
 pub const BACKUP_INTERVAL: Constraint = Constraint::Choices(&[0, 6, 12, 24, 48, 168]);
-pub const LIBRARY_COLUMNS: Constraint = Constraint::Range { min: 0, max: 10 };
 
 /// Registry key of every integer setting with a constraint.
 const CONSTRAINED: &[(&str, Constraint)] = &[
@@ -60,8 +59,6 @@ const CONSTRAINED: &[(&str, Constraint)] = &[
     ("remove_after_read_slots", REMOVE_AFTER_READ_SLOTS),
     ("pref_library_update_interval_key", LIBRARY_UPDATE_INTERVAL),
     ("backup_interval", BACKUP_INTERVAL),
-    ("pref_library_columns_landscape_key", LIBRARY_COLUMNS),
-    ("pref_animelib_columns_landscape_key", LIBRARY_COLUMNS),
 ];
 
 /// The constraint of `key`, or `None` when the key has none.

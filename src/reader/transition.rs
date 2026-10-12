@@ -190,7 +190,7 @@ fn chapter_text(line: &ChapterLine) -> gtk::Box {
     name_row.append(&name);
     block.append(&name_row);
 
-    if let Some(scanlator) = line.scanlator.as_deref().filter(|s| !s.is_empty()) {
+    if let Some(scanlator) = crate::entry_core::text::shown_scanlator(line.scanlator.as_deref()) {
         let by = gtk::Label::new(Some(scanlator));
         by.set_wrap(true);
         by.set_lines(2);

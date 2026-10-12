@@ -98,7 +98,6 @@ pub enum Dialog {
     SetFetchInterval(i64),
     SettingsSheet,
     TrackSheet,
-    FullCover,
 }
 
 /// One dialog at a time. Opening a dialog replaces the current one (E-DIALOG-2).
@@ -216,7 +215,7 @@ mod tests {
     #[test]
     fn opening_replaces_the_current_dialog() {
         let mut slot = DialogSlot::default();
-        slot.open(Dialog::FullCover);
+        slot.open(Dialog::TrackSheet);
         slot.open(Dialog::SettingsSheet);
         assert_eq!(slot.current(), Some(&Dialog::SettingsSheet));
         slot.dismiss();

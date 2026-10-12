@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
 use crate::anime::model::{AnimeRef, EpisodeRef};
-use crate::anime::naming::{anime_dir_name, valid_episode_dir_names};
+use crate::anime::naming::{anime_dir_name, fat_safe, valid_episode_dir_names};
 use crate::local::anime_episode_count;
 
 /// The index is trusted this long after a scan (`renewInterval`, 1 hour).
@@ -254,7 +254,7 @@ impl AnimeIndex {
 
     /// Rescans when the tree is older than an hour. The source registry is awaited for up to [`SOURCE_WAIT`]; when it
     /// never becomes ready the old tree is kept (the Kotlin code would wipe it). `installed` is read after the wait, and
-    /// gives `(source id, source folder name)` for each installed source. Returns `true` when a scan ran.
+    /// gives `(source id, "Name (LANG)")` for each installed source. Returns `true` when a scan ran.
     pub async fn renew_if_stale(
         &self,
         now_ms: i64,
@@ -272,21 +272,21 @@ impl AnimeIndex {
         if first_load {
             *self.shared.scanning_since.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
         }
-        let ran = match tokio::time::timeout(SOURCE_WAIT, ready.wait_for(|v| *v)).await {
-            Ok(_) => {
-                let sources = installed();
-                let root = self.shared.root.clone();
-                let tree = tokio::task::spawn_blocking(move || scan(&root, &sources)).await.unwrap_or_default();
-                let mut st = self.shared.state.write().unwrap_or_else(|e| e.into_inner());
-                st.tree = Arc::new(tree);
-                st.last_renew_ms = Some(now_ms);
-                true
-            }
-            Err(_) => {
-                let mut st = self.shared.state.write().unwrap_or_else(|e| e.into_inner());
-                st.last_renew_ms = Some(now_ms);
-                false
-            }
+        // The wait's result borrows the channel value; it is dropped here, before the scan, so the sender is never
+        // blocked by a running scan and the future stays `Send`.
+        let waited = tokio::time::timeout(SOURCE_WAIT, ready.wait_for(|v| *v)).await.is_ok();
+        let ran = if waited {
+            let sources = installed();
+            let root = self.shared.root.clone();
+            let tree = tokio::task::spawn_blocking(move || scan(&root, &sources)).await.unwrap_or_default();
+            let mut st = self.shared.state.write().unwrap_or_else(|e| e.into_inner());
+            st.tree = Arc::new(tree);
+            st.last_renew_ms = Some(now_ms);
+            true
+        } else {
+            let mut st = self.shared.state.write().unwrap_or_else(|e| e.into_inner());
+            st.last_renew_ms = Some(now_ms);
+            false
         };
         *self.shared.scanning_since.lock().unwrap_or_else(|e| e.into_inner()) = None;
         self.shared.scanning.store(false, Ordering::SeqCst);
@@ -295,6 +295,13 @@ impl AnimeIndex {
             self.schedule_write();
         }
         ran
+    }
+
+    /// Rescans now, whatever the age of the tree: the sources changed (a repository load ended), so the folders of
+    /// sources that were not known before are matched. Waits and returns as [`AnimeIndex::renew_if_stale`].
+    pub async fn rescan(&self, ready: watch::Receiver<bool>, installed: impl FnOnce() -> Vec<(i64, String)>) -> bool {
+        self.shared.state.write().unwrap_or_else(|e| e.into_inner()).last_renew_ms = None;
+        self.renew_if_stale(now_ms(), ready, installed).await
     }
 
     fn mutate(&self, change: impl FnOnce(&mut Tree)) {
@@ -334,10 +341,11 @@ impl AnimeIndex {
     }
 }
 
-/// Scans the downloads root for installed sources and their anime and episode folders (behaviour 8.5).
+/// Scans the downloads root for installed sources and their anime and episode folders (behaviour 8.5). `installed`
+/// gives `(source id, "Name (LANG)")`; a folder matches the sanitised name, ignoring case.
 pub fn scan(root: &Path, installed: &[(i64, String)]) -> Tree {
     let mut tree = Tree::default();
-    let by_name: BTreeMap<String, i64> = installed.iter().map(|(id, name)| (name.to_lowercase(), *id)).collect();
+    let by_name: BTreeMap<String, i64> = installed.iter().map(|(id, name)| (fat_safe(name).to_lowercase(), *id)).collect();
     for source_path in list_dirs(root) {
         let name = file_name(&source_path);
         let Some(&source_id) = by_name.get(&name.to_lowercase()) else {
@@ -582,6 +590,23 @@ mod tests {
         assert!(index.renew_if_stale(t0, rx.clone(), installed).await);
         assert!(!index.renew_if_stale(t0 + RENEW_INTERVAL_MS - 1, rx.clone(), installed).await, "still fresh");
         assert!(index.renew_if_stale(t0 + RENEW_INTERVAL_MS + 1, rx, installed).await, "an hour later it rescans");
+    }
+
+    #[tokio::test]
+    async fn a_rescan_recognises_the_folder_of_a_source_added_after_the_last_scan() {
+        let (_dir, root) = fixture();
+        // a repository source whose name needs the sanitiser: its folder is the sanitised display name
+        let repo = (88, "Kick: Ass (EN)".to_owned());
+        fs::create_dir_all(root.join(fat_safe(&repo.1)).join("Show").join("Episode 1")).unwrap();
+        let index = AnimeIndex::open(&root, &root.join("cache"));
+        let (_tx, rx) = watch::channel(true);
+        assert!(index.renew_if_stale(now_ms(), rx.clone(), installed).await);
+        assert!(!index.is_episode_downloaded(88, "Show", &ep("Episode 1")), "not known before the repository loaded");
+
+        let with_repo = move || -> Vec<(i64, String)> { installed().into_iter().chain([repo]).collect() };
+        assert!(index.rescan(rx, with_repo).await, "a fresh tree is scanned again");
+        assert!(index.is_episode_downloaded(88, "Show", &ep("Episode 1")));
+        assert!(index.is_episode_downloaded(7, "Show", &ep("Episode 1")), "the other sources stay");
     }
 
     #[tokio::test(start_paused = true)]

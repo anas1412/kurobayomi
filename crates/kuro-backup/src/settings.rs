@@ -58,15 +58,6 @@ pub fn automatic_dir(base: Option<&Path>, data_home: &Path) -> PathBuf {
     }
 }
 
-/// The automatic folder with the data folder taken from the platform (the platform data directory + `kurobayomi`, else
-/// `~/.local/share/kurobayomi`, resolved in kuro-platform). The settings page shows this path (T-21a-037).
-pub fn automatic_dir_for(base: Option<&Path>, paths: &dyn kuro_platform::paths::Paths) -> PathBuf {
-    match base {
-        Some(base) => base.join(AUTO_DIR_NAME),
-        None => paths.auto_backups_dir(),
-    }
-}
-
 /// Text for the "last automatic backup" info line (T-21a-031, B-10). Zero means never.
 pub fn last_auto_info(last_ms: i64, now_ms: i64) -> String {
     format!("{LAST_AUTO_PREFIX}{}", relative_time(last_ms, now_ms))
@@ -139,21 +130,6 @@ mod tests {
         let data = Path::new("/home/u/.local/share");
         assert_eq!(automatic_dir(None, data), PathBuf::from("/home/u/.local/share/kurobayomi/autobackup"));
         assert_eq!(automatic_dir(Some(Path::new("/mnt/bk")), data), PathBuf::from("/mnt/bk/autobackup"));
-    }
-
-    #[test]
-    fn automatic_dir_follows_the_default_storage_when_no_base_is_chosen() {
-        use kuro_platform::linux::paths::{LinuxPaths, Roots};
-        let r = |p: &str| PathBuf::from(p);
-        let paths = LinuxPaths::new(Roots {
-            data: r("/home/u/.local/share/kurobayomi"),
-            config: r("/c"),
-            cache: r("/k"),
-            state: r("/s"),
-            videos: r("/v"),
-        });
-        assert_eq!(automatic_dir_for(None, &paths), r("/v/Kurobayomi/Backups"));
-        assert_eq!(automatic_dir_for(Some(Path::new("/mnt/bk")), &paths), r("/mnt/bk/autobackup"));
     }
 
     #[test]

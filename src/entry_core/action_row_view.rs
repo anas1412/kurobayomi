@@ -9,7 +9,7 @@ use gtk::{Align, Box as GBox, Button, Label, Orientation as O};
 use kuro_i18n::{MsgKey, tr, tr_plural};
 
 use crate::entry_core::action_row::{
-    NextUpdate, Tone, TrackingLabel, interval_click_opens_dialog, interval_tone, tracking_label, tracking_tone,
+    NextUpdate, Tone, TrackingLabel, interval_click_opens_dialog, interval_tone, next_update, tracking_label, tracking_tone,
     tracking_visible, webview_visible,
 };
 use crate::entry_core::header_view::{LibraryButton, apply_tone};
@@ -26,6 +26,20 @@ pub struct RowState {
     pub has_tracking: bool,
     /// The source is HTTP and the page has a WebView callback.
     pub webview: bool,
+}
+
+impl RowState {
+    /// The row of a manga or an anime page: the next update is counted from now, and a completed entry has none.
+    pub fn of_entry(favorite: bool, next_update_ms: i64, status: i64, fetch_interval: i32, tracking_count: i64, http_source: bool) -> Self {
+        Self {
+            favorite,
+            next: next_update(Some(next_update_ms), chrono::Utc::now().timestamp_millis(), status == kuro_domain::entries::manga::STATUS_COMPLETED),
+            user_interval: fetch_interval < 0,
+            tracking_count,
+            has_tracking: true,
+            webview: http_source,
+        }
+    }
 }
 
 /// A button of the row with its icon and label, one child box so the icon and the text sit side by side.

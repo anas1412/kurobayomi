@@ -36,9 +36,9 @@
 //! - Volume keys (T-43a-071 against T-44a-015): the paging stays, as the opt-in of T-44a-015. `reader_volume_keys` is off by
 //!   default, the keys are claimed only while it is on and the menu is hidden (`viewers::keys`), and the preference keys are
 //!   kept. T-43a-071 (P3, drop) is read as "not used by default"; the plan text of T-43a-071 should be amended to say so.
-//! - The reader settings sheet (`settings_window`) is built from the preference keys directly, not from the spec items of
-//!   `src/spec.rs`: the spec `Item` has no preference key and `ui::item_row` binds no `ReaderPrefs`. Each row reads its default,
-//!   writes its key straight away. The settings diet kept six reader settings and cut the dependent rows, so no row is disabled by a rule.
+//! - The reader settings window (`settings_window`) is a native modal window whose page is built from the shared pref_model
+//!   rows (`settings_ui::reader::page::layout_rows`), not from the spec items of `src/spec.rs`: the spec `Item` has no preference
+//!   key. Each row writes its key straight away. The settings diet kept six reader settings and cut the dependent rows, so no row is disabled by a rule.
 //! - The reader's top bar is the shared header of `widgets::page_header`, the same design as the player's. Pages open at the
 //!   left-to-right default; right to left is a per-manga choice that the reader remembers. The page slider sits at the bottom.
 //! - A chapter whose page list is still being fetched shows the spinner and is asked for again (`source_pages::is_pending`);
@@ -47,7 +47,6 @@
 
 pub mod backlight;
 pub mod blend_box;
-pub mod bottom_bar;
 pub mod cache;
 pub mod crop_borders;
 pub mod decode_guard;
@@ -66,12 +65,10 @@ pub mod flags;
 pub mod golden;
 pub mod history_rules;
 pub mod image;
-pub mod indicator;
 pub mod keep_awake;
 pub mod launch;
 pub mod loader;
 pub mod long_press;
-pub mod mode_sheet;
 pub mod model;
 pub mod nav;
 pub mod nav_overlay;

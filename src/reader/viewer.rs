@@ -27,6 +27,8 @@ pub trait Viewer {
 pub enum ViewerEvent {
     /// A page became the visible one.
     PageSelected(Rc<ReaderPage>),
+    /// A chapter transition card became the visible item (no page is on screen).
+    TransitionShown,
     /// A tap toggled the chrome.
     ToggleMenu,
     ShowMenu,

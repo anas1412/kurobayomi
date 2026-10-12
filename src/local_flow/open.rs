@@ -1,61 +1,155 @@
-//! Which local manga entry a screen asks for. The entry screens name an entry by its title (see `screens::open_entry`),
-//! so the title is resolved over the local library rows only; any other title keeps the caller's own page. The id of
-//! the entry that was opened is remembered, so the reader can tell two local folders with the same name apart.
+//! Which local entry, chapter or episode a screen asks for. The title-based routes (see `screens::open_media`) name an
+//! entry by its title, which resolves over the local library rows only, so any other title keeps the caller's own page.
+//! The id of the manga entry opened last is remembered, so the reader can tell two local folders with one name apart. A
+//! local episode plays its file in the player at its saved position.
 
 use std::cell::Cell;
+use std::path::Path;
 use std::sync::Arc;
 
-use kuro_data::manga::MangaRepo;
+use kuro_data::DataResult;
+use kuro_data::anime::AnimeRepo;
+use kuro_data::episode::{Episode, EpisodeRepo};
 use kuro_db::Db;
+use kuro_domain::kind::EntryKind;
 use kuro_local::LOCAL_SOURCE_ID;
 
 thread_local! {
     static CURRENT: Cell<Option<i64>> = const { Cell::new(None) };
 }
 
-/// The id of the first local library entry with this title.
-pub fn local_id_with_title(db: &Arc<Db>, title: &str) -> Option<i64> {
-    let found = MangaRepo::new(Arc::clone(db)).favorites_by_source(LOCAL_SOURCE_ID).ok()?;
-    found.into_iter().find(|m| m.title == title).map(|m| m.id)
+/// The id of the first local library entry of `kind` with this title.
+pub fn local_id_with_title(db: &Arc<Db>, kind: EntryKind, title: &str) -> DataResult<Option<i64>> {
+    Ok(super::local_rows(db, kind)?.into_iter().find(|row| row.title == title).map(|row| row.id))
 }
 
-/// Opens the database-backed entry page of a local entry by its id, and remembers the id for the reader.
+/// Opens the database-backed entry page of a local manga by its id, and remembers the id for the reader.
 pub fn entry(manga_id: i64) {
     CURRENT.with(|c| c.set(Some(manga_id)));
     crate::entry_core::route::open(manga_id);
 }
 
-/// Opens the entry page of the local entry titled `title`. `false` when no local entry has that title.
-pub fn entry_for_title(title: &str) -> bool {
-    if !crate::data::is_installed() {
-        return false;
-    }
-    match local_id_with_title(&crate::data::app().db(kuro_domain::kind::EntryKind::Manga), title) {
-        Some(id) => {
-            entry(id);
-            true
-        }
-        None => false,
-    }
-}
-
-/// The local entry whose page was opened last, when it is still the one the reader is asked about.
+/// The local manga whose page was opened last, when it is still the one the reader is asked about.
 pub fn current() -> Option<i64> {
     CURRENT.with(Cell::get)
 }
 
+/// One episode ready for the player: its file, its row id and the saved position in milliseconds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Opening {
+    pub path: String,
+    pub episode_id: i64,
+    pub start_ms: i64,
+}
+
+impl Opening {
+    fn of(episode: Episode) -> Self {
+        Opening { path: episode.url, episode_id: episode.id, start_ms: episode.last_second_seen * 1000 }
+    }
+}
+
+/// The episode named `episode_name` of the local anime titled `title`, when both exist.
+pub fn opening_of(db: &Arc<Db>, title: &str, episode_name: &str) -> DataResult<Option<Opening>> {
+    let Some(anime_id) = local_id_with_title(db, EntryKind::Anime, title)? else {
+        return Ok(None);
+    };
+    let episodes = EpisodeRepo::new(Arc::clone(db)).by_anime_id(anime_id)?;
+    Ok(episodes.into_iter().find(|e| e.name == episode_name).map(Opening::of))
+}
+
+/// The opening of episode row `episode_id`, when its entry is local. `None` for a missing row or a remote entry.
+pub fn opening_by_id(db: &Arc<Db>, episode_id: i64) -> DataResult<Option<Opening>> {
+    let Some(episode) = EpisodeRepo::new(Arc::clone(db)).by_id(episode_id)? else {
+        return Ok(None);
+    };
+    if AnimeRepo::new(Arc::clone(db)).by_id(episode.anime_id)?.source != LOCAL_SOURCE_ID {
+        return Ok(None);
+    }
+    Ok(Some(Opening::of(episode)))
+}
+
+/// Plays a local episode by its row id in the player. `false` when the row is not a local episode, so the caller keeps
+/// its own player.
+pub fn open_local_episode(episode_id: i64) -> bool {
+    crate::data::is_installed() && play(opening_by_id(&crate::data::app().anime_db, episode_id))
+}
+
+/// Plays the episode named `episode_name` of the local anime titled `title`. `false` when they match no local episode,
+/// so the caller opens its own player instead.
+pub fn open_episode(title: &str, episode_name: &str) -> bool {
+    crate::data::is_installed() && play(opening_of(&crate::data::app().anime_db, title, episode_name))
+}
+
+fn play(found: DataResult<Option<Opening>>) -> bool {
+    match found {
+        Ok(Some(found)) => {
+            crate::player_view::open_episode(Path::new(&found.path), found.episode_id, found.start_ms);
+            true
+        }
+        Ok(None) => false,
+        Err(e) => {
+            tracing::error!(error = %e, "the local episode lookup failed");
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use kuro_data::anime::Anime;
+    use kuro_data::episode::EpisodeUpdate;
+
     use super::*;
-    use crate::local_flow::tests::{manga_db, series};
-    use crate::local_flow::{scan::scan, sync::sync};
+    use crate::local_flow::sync::add;
+    use crate::local_flow::tests::{anime_db, manga_db, series, video};
 
     #[test]
     fn only_a_local_library_title_resolves() {
         let root = tempfile::tempdir().expect("temp dir");
         let db = manga_db(root.path());
-        let done = sync(&db, &scan(&series(root.path())).expect("scan"), 1_000).expect("sync");
-        assert_eq!(local_id_with_title(&db, "Series"), Some(done.manga_id));
-        assert_eq!(local_id_with_title(&db, "Title 1"), None);
+        let done = add(&db, EntryKind::Manga, &series(root.path()), 1_000).expect("add").remove(0).result.expect("sync");
+        assert_eq!(local_id_with_title(&db, EntryKind::Manga, "Series").expect("lookup"), Some(done.entry_id));
+        assert_eq!(local_id_with_title(&db, EntryKind::Manga, "Title 1").expect("lookup"), None);
+    }
+
+    #[test]
+    fn a_local_episode_opens_at_its_saved_position_and_other_titles_do_not() {
+        let (_db_dir, db) = anime_db();
+        let root = tempfile::tempdir().expect("root");
+        video(root.path(), "Show", "Show - 1.mkv");
+        video(root.path(), "Show", "Show - 2.mkv");
+        add(&db, EntryKind::Anime, root.path(), 1_000).expect("scan");
+
+        let anime_id = local_id_with_title(&db, EntryKind::Anime, "Show").expect("lookup").expect("local Show");
+        let episodes = EpisodeRepo::new(Arc::clone(&db));
+        let first = episodes.by_anime_id(anime_id).expect("rows").into_iter().find(|e| e.name == "Show - 1").expect("episode 1 row");
+        episodes.update(&EpisodeUpdate { last_second_seen: Some(90), ..EpisodeUpdate::new(first.id) }).expect("position");
+
+        let opening = opening_of(&db, "Show", "Show - 1").expect("lookup").expect("opening");
+        let path = root.path().join("Show").join("Show - 1.mkv").to_string_lossy().into_owned();
+        assert_eq!(opening, Opening { path, episode_id: first.id, start_ms: 90_000 });
+        assert_eq!(opening_of(&db, "Show", "Show - 9").expect("lookup"), None, "an unknown episode name");
+        assert_eq!(opening_of(&db, "Berserk", "Show - 1").expect("lookup"), None, "a title with no local entry");
+    }
+
+    #[test]
+    fn an_episode_id_opens_only_a_local_episode() {
+        let (_db_dir, db) = anime_db();
+        let root = tempfile::tempdir().expect("root");
+        video(root.path(), "Show", "Show - 1.mkv");
+        add(&db, EntryKind::Anime, root.path(), 1_000).expect("scan");
+        let anime_id = local_id_with_title(&db, EntryKind::Anime, "Show").expect("lookup").expect("local Show");
+        let episode = EpisodeRepo::new(Arc::clone(&db)).by_anime_id(anime_id).expect("rows").remove(0);
+        assert_eq!(opening_by_id(&db, episode.id).expect("lookup").expect("local episode").path, episode.url);
+
+        let remote = AnimeRepo::new(Arc::clone(&db))
+            .insert(&Anime { source: 42, url: "remote/1".into(), title: "Remote".into(), favorite: true, ..Anime::create() })
+            .expect("remote row");
+        let remote_episode = Episode { anime_id: remote, url: "remote/1/ep1".into(), name: "1".into(), ..Episode::create() };
+        EpisodeRepo::new(Arc::clone(&db)).add_all(&[remote_episode]).expect("remote episode");
+        let remote_id = EpisodeRepo::new(Arc::clone(&db)).by_anime_id(remote).expect("rows").remove(0).id;
+        assert_eq!(opening_by_id(&db, remote_id).expect("lookup"), None, "a remote episode keeps its own player");
+        assert_eq!(opening_by_id(&db, 9_999).expect("lookup"), None, "a missing episode");
+        assert_eq!(local_id_with_title(&db, EntryKind::Anime, "Remote").expect("lookup"), None, "a remote title is not local");
     }
 }

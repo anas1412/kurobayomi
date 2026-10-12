@@ -13,11 +13,8 @@ use kuro_domain::source::toggles::toggle_language;
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::pref::Pref;
 
-use super::banner::{BannerSpec, InfoBanner};
-use super::extensions::Ext;
 use super::glue::keep_alive;
 use super::names::{case_insensitive_cmp, compare_languages, localized_display_name};
-use super::primitives::ToastDuration;
 use super::view::spinner_row;
 
 /// One source of a language group.
@@ -81,31 +78,6 @@ pub fn filter_screen(ready: bool, failed: bool, sources: &[Source], enabled: &BT
 /// What an error does: the page shows `internal_error` as a toast and pops itself (E-SF-05).
 pub fn error_pops_the_page(screen: &FilterScreen) -> bool {
     *screen == FilterScreen::Error
-}
-
-/// One switch of the extension language page.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LangRow {
-    pub lang: String,
-    pub title: String,
-    pub enabled: bool,
-}
-
-/// `GetMangaExtensionLanguages`: the language of every source of every extension (the extension's own language when it
-/// has no sources), each once, enabled languages first and each part in language order.
-pub fn extension_language_rows(exts: &[Ext], enabled: &BTreeSet<String>) -> Vec<LangRow> {
-    let mut langs: BTreeSet<String> = BTreeSet::new();
-    for ext in exts {
-        if ext.sources.is_empty() {
-            langs.insert(ext.lang.clone().unwrap_or_default());
-        } else {
-            langs.extend(ext.sources.iter().map(|s| s.lang.clone()));
-        }
-    }
-    let mut rows: Vec<LangRow> =
-        langs.into_iter().map(|lang| LangRow { title: localized_display_name(&lang), enabled: enabled.contains(&lang), lang }).collect();
-    rows.sort_by(|a, b| (!a.enabled).cmp(&(!b.enabled)).then_with(|| compare_languages(&a.lang, &b.lang)));
-    rows
 }
 
 /// A row with a title and a switch. `on_toggle` runs with the new position when the user flips it.
@@ -267,81 +239,9 @@ impl SourcesInner {
     }
 }
 
-// ---------- extension languages ----------
-
-struct ExtLangInner {
-    languages: Pref<BTreeSet<String>>,
-    banner: InfoBanner,
-    stack: gtk::Stack,
-    column: gtk::Box,
-}
-
-/// The extension language page: one switch per language of the extension lists. A failed language fetch shows the
-/// `internal_error` banner over the empty message (T-41a-018). Cloning shares the page.
-#[derive(Clone)]
-pub struct ExtensionLanguagesPage {
-    inner: Rc<ExtLangInner>,
-    root: gtk::Box,
-}
-
-impl ExtensionLanguagesPage {
-    pub fn new(languages: Pref<BTreeSet<String>>) -> Self {
-        let (stack, column) = page_stack(&tr(MsgKey::empty_screen));
-        let banner = InfoBanner::new();
-        let inner = Rc::new(ExtLangInner { languages, banner, stack, column });
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.append(inner.banner.widget());
-        root.append(&inner.stack);
-        keep_alive(&root, &inner);
-        Self { inner, root }
-    }
-
-    pub fn widget(&self) -> &gtk::Box {
-        &self.root
-    }
-
-    /// The extensions whose languages are offered, replacing the list. An empty list shows `empty_screen`.
-    pub fn set_exts(&self, exts: &[Ext]) {
-        let inner = &self.inner;
-        clear(&inner.column);
-        let rows = extension_language_rows(exts, &inner.languages.get());
-        if rows.is_empty() {
-            inner.stack.set_visible_child_name("empty");
-            return;
-        }
-        for row in rows {
-            let (weak, lang) = (Rc::downgrade(inner), row.lang.clone());
-            let (widget, _) = switch_row(&row.title, row.enabled, move |on| {
-                let Some(inner) = weak.upgrade() else { return };
-                let mut set = inner.languages.get();
-                if set.contains(&lang) != on {
-                    toggle_language(&mut set, &lang);
-                    write(&inner.languages, set);
-                }
-            });
-            inner.column.append(&widget);
-        }
-        inner.stack.set_visible_child_name("list");
-    }
-
-    /// The language fetch failed: the banner says `internal_error`, until the page is left, and the page shows its empty
-    /// message under it.
-    pub fn fetch_failed(&self) {
-        self.inner.banner.show(&BannerSpec { message: tr(MsgKey::internal_error), action: None, duration: ToastDuration::Indefinite }, None);
-        self.inner.stack.set_visible_child_name("empty");
-    }
-
-    /// Whether the failure banner shows, for the widget checks.
-    #[cfg(test)]
-    fn banner_shown(&self) -> bool {
-        self.inner.banner.widget().reveals_child()
-    }
-}
-
 #[cfg(test)]
 mod pure_tests {
     use super::*;
-    use crate::browse::extensions::{ExtSource, ExtState};
 
     fn set(items: &[&str]) -> BTreeSet<String> {
         items.iter().map(|s| (*s).to_owned()).collect()
@@ -366,31 +266,6 @@ mod pure_tests {
     fn no_sources_means_no_groups() {
         assert!(sources_filter_groups(&[], &set(&["en"])).is_empty());
     }
-
-    fn ext(lang: Option<&str>, sources: &[(i64, &str)]) -> Ext {
-        Ext {
-            name: "E".into(),
-            pkg: "p".into(),
-            version: String::new(),
-            lang: lang.map(str::to_owned),
-            nsfw: false,
-            sources: sources.iter().map(|(id, l)| ExtSource { id: *id, name: "S".into(), lang: (*l).into(), base_url: None }).collect(),
-            state: ExtState::Available,
-            icon_file: None,
-        }
-    }
-
-    #[test]
-    fn extension_languages_come_from_the_sources_or_the_extension_itself_once_each() {
-        let exts = vec![ext(Some("en"), &[(1, "ja"), (2, "ja"), (3, "de")]), ext(Some("fr"), &[]), ext(None, &[])];
-        let rows = extension_language_rows(&exts, &set(&["de"]));
-        let langs: Vec<&str> = rows.iter().map(|r| r.lang.as_str()).collect();
-        assert_eq!(langs[0], "de", "the enabled language is first");
-        assert_eq!(langs.len(), 4, "ja once, de, fr and the empty language");
-        assert!(langs.contains(&"") && langs.contains(&"fr") && langs.contains(&"ja"));
-        assert!(!langs.contains(&"en"), "the extension's own language is not used when it has sources");
-        assert!(rows[0].enabled && !rows[1].enabled);
-    }
 }
 
 #[cfg(test)]
@@ -398,7 +273,6 @@ pub(crate) mod tests {
     use kuro_prefs::store::PrefStore;
 
     use super::*;
-    use crate::browse::extensions::{ExtSource, ExtState};
 
     fn prefs() -> Pref<BTreeSet<String>> {
         PrefStore::in_memory().pref("source_languages", BTreeSet::from(["en".to_owned()]))
@@ -426,20 +300,6 @@ pub(crate) mod tests {
             child = w.next_sibling();
         }
         None
-    }
-
-    fn find_label_text(widget: &gtk::Widget, text: &str) -> bool {
-        if widget.downcast_ref::<gtk::Label>().is_some_and(|label| label.label().as_str() == text) {
-            return true;
-        }
-        let mut child = widget.first_child();
-        while let Some(next) = child {
-            if find_label_text(&next, text) {
-                return true;
-            }
-            child = next.next_sibling();
-        }
-        false
     }
 
     fn the_language_switches_write_the_set_and_a_switched_off_language_has_no_list() {
@@ -481,46 +341,10 @@ pub(crate) mod tests {
         assert_eq!(popped.borrow().len(), 1, "once");
     }
 
-    fn ext(lang: &str) -> Ext {
-        Ext {
-            name: "E".into(),
-            pkg: format!("p.{lang}"),
-            version: String::new(),
-            lang: Some(lang.into()),
-            nsfw: false,
-            sources: vec![ExtSource { id: 1, name: "S".into(), lang: lang.into(), base_url: None }],
-            state: ExtState::Available,
-            icon_file: None,
-        }
-    }
-
-    fn the_extension_language_switches_write_the_set_and_a_failed_fetch_shows_the_internal_error_banner() {
-        let languages = prefs();
-        let page = ExtensionLanguagesPage::new(languages.clone());
-        page.set_exts(&[ext("en"), ext("ja")]);
-        let list = rows(&page.inner.column);
-        assert_eq!(list.len(), 2);
-        let ja = find::<gtk::Switch>(&list[1]).expect("switch");
-        ja.emit_by_name::<bool>("state-set", &[&true]);
-        assert_eq!(languages.get(), BTreeSet::from(["en".to_owned(), "ja".to_owned()]));
-        let en = find::<gtk::Switch>(&list[0]).expect("switch");
-        en.emit_by_name::<bool>("state-set", &[&false]);
-        assert_eq!(languages.get(), BTreeSet::from(["ja".to_owned()]));
-
-        page.set_exts(&[]);
-        assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("empty"), "no languages: the empty screen");
-        assert!(!page.banner_shown(), "no failure, no banner");
-        page.fetch_failed();
-        assert!(page.banner_shown(), "T-41a-018: the failure is a banner, not a toast");
-        assert!(find_label_text(page.widget().upcast_ref(), &tr(MsgKey::internal_error)), "the banner says InternalError: Check crash logs for further information");
-        assert_eq!(page.inner.stack.visible_child_name().as_deref(), Some("empty"));
-    }
-
     pub(crate) fn smoke() {
         the_language_switches_write_the_set_and_a_switched_off_language_has_no_list();
         no_sources_shows_the_source_filter_empty_screen();
         the_filter_page_shows_loading_then_the_groups_and_an_error_toasts_and_pops_once();
-        the_extension_language_switches_write_the_set_and_a_failed_fetch_shows_the_internal_error_banner();
     }
 
     #[test]

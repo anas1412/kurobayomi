@@ -84,7 +84,7 @@ pub fn find_local_ids(db: &Arc<Db>, title: &str, chapter: &str, preferred: Optio
         .and_then(|id| manga.by_id(id).ok())
         .filter(|m| m.source == LOCAL_SOURCE_ID && m.title == title)
         .map(|m| m.id)
-        .or_else(|| super::open::local_id_with_title(db, title))?;
+        .or_else(|| super::open::local_id_with_title(db, EntryKind::Manga, title).ok().flatten())?;
     let chapters = ChapterRepo::new(Arc::clone(db)).by_manga_id(manga_id, false).ok()?;
     let by_id = chapter.parse::<i64>().ok().and_then(|id| chapters.iter().find(|c| c.id == id));
     let chapter_id = chapters.iter().find(|c| c.name == chapter).or(by_id).map_or(0, |c| c.id);

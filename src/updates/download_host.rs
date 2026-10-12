@@ -3,16 +3,16 @@
 //! The app has no live download manager object yet, so the screens talk to a [`DownloadBackend`] seam: the queue
 //! snapshot, the disk check, the source check and the four write actions. [`install`] replaces the default backend
 //! when the downloads layer is wired; until then the default answers the disk check from the shell's download index
-//! (manga) and reports that nothing can be queued or deleted. The [`Hub`] carries what the layer announces: unit status
-//! and progress events, and the cache or queue change signal that re-derives the visible rows.
+//! (manga), its queue state from the running queues (`downloads::live`), and reports that nothing can be queued or
+//! deleted. The [`Hub`] carries the cache or queue change signal that re-derives the visible rows; the live status and
+//! progress of each unit come from `downloads::live`.
 
 use std::sync::{Arc, OnceLock, RwLock};
 
 use kuro_domain::kind::EntryKind;
 use kuro_downloads::index::DownloadIndex;
-use tokio::sync::broadcast;
 
-use crate::updates::download_state::{Change, DiskKey, QueueEntry};
+use crate::updates::download_state::{DiskKey, QueueEntry};
 use crate::updates::signals::CacheSignals;
 
 /// What the Updates and Storage screens need from the downloads layer. Methods block, so callers run them off the GTK
@@ -42,41 +42,19 @@ pub trait DownloadBackend: Send + Sync {
     fn entry_usage(&self, kind: EntryKind, source_id: i64, title: &str) -> (u64, usize);
 }
 
-/// A status or progress change of one unit, as the downloads layer announces it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct UnitEvent {
-    pub unit_id: i64,
-    pub change: Change,
-}
-
-/// The announcements of the downloads layer. `cache` carries the download-cache and queue-membership changes and the
-/// `initializing` flag; `units` carries per-unit status and progress.
+/// The announcements of the downloads layer: `cache` carries the download-cache and queue-membership changes and the
+/// `initializing` flag.
 pub struct Hub {
     pub cache: CacheSignals,
-    units: broadcast::Sender<UnitEvent>,
 }
-
-/// Capacity of the unit event channel; a slow subscriber lags past it and then sees the newest.
-const UNIT_CAPACITY: usize = 256;
 
 impl Hub {
     fn new() -> Self {
-        let (units, _) = broadcast::channel(UNIT_CAPACITY);
         let cache = CacheSignals::new();
         // The index loads from its snapshot (or starts empty) without a scan the page must wait for. The downloads
         // layer sets the flag while it renews the index, so the Storage page shows "Scanning downloads…" only then.
         cache.set_initializing(false);
-        Self { cache, units }
-    }
-
-    /// Every unit event sent after this call.
-    pub fn subscribe_units(&self) -> broadcast::Receiver<UnitEvent> {
-        self.units.subscribe()
-    }
-
-    /// Announces a unit change. With no subscriber it is dropped.
-    pub fn publish_unit(&self, event: UnitEvent) {
-        let _ = self.units.send(event);
+        Self { cache }
     }
 }
 
@@ -103,19 +81,22 @@ pub fn current() -> Arc<dyn DownloadBackend> {
     Arc::new(IndexBackend {
         index: crate::shell::host::Shell::get().map(|shell| shell.downloads().clone()),
         runtime: crate::shell::host::Shell::get().map(|shell| shell.runtime().clone()),
+        queues: crate::downloads::live::queues(),
     })
 }
 
-/// The default backend: the disk check reads the shell's download index (manga only), and nothing can be queued or
-/// deleted because no download manager is installed.
+/// The default backend: the disk check reads the shell's download index (manga only), the queue state reads the
+/// running queues, and nothing can be queued or deleted through it.
 pub struct IndexBackend {
     index: Option<DownloadIndex>,
     runtime: Option<tokio::runtime::Handle>,
+    queues: Option<crate::downloads::Queues>,
 }
 
 impl DownloadBackend for IndexBackend {
-    fn queue_entry(&self, _kind: EntryKind, _unit_id: i64) -> Option<QueueEntry> {
-        None
+    fn queue_entry(&self, kind: EntryKind, unit_id: i64) -> Option<QueueEntry> {
+        let (status, percent) = crate::downloads::live::queued(self.queues.as_ref()?, kind, unit_id)?;
+        Some(QueueEntry { status, progress: i64::from(percent) })
     }
 
     fn on_disk(&self, kind: EntryKind, key: &DiskKey) -> bool {
@@ -149,10 +130,11 @@ impl DownloadBackend for IndexBackend {
     }
 }
 
-/// The anime download index (T-42a-045): the same downloads folder as the shell's manga index, with its own snapshot
-/// file (a different name) in the platform cache folder. Opened on first use and shared; `None` when the platform
-/// folders cannot be resolved.
-pub fn anime_index() -> Option<kuro_downloads::anime::cache::AnimeIndex> {
+/// The anime download index (T-42a-045): over the anime downloads folder of `storage`, with its own snapshot file in the
+/// platform cache folder. Opened on the first call and shared (later calls get the same index); `None` when the
+/// platform folders cannot be resolved. It rescans after each load of the repository sources, so their downloads are
+/// recognised; open it inside the app's runtime.
+pub fn anime_index(storage: &kuro_domain::storage::StorageManager) -> Option<kuro_downloads::anime::cache::AnimeIndex> {
     static INDEX: OnceLock<Option<kuro_downloads::anime::cache::AnimeIndex>> = OnceLock::new();
     INDEX
         .get_or_init(|| {
@@ -162,7 +144,15 @@ pub fn anime_index() -> Option<kuro_downloads::anime::cache::AnimeIndex> {
             if let Err(e) = std::fs::create_dir_all(&cache) {
                 tracing::warn!("the anime download index snapshot folder was not created: {e}");
             }
-            Some(kuro_downloads::anime::cache::AnimeIndex::open(paths.default_downloads_dir(), &cache))
+            let index = kuro_downloads::anime::cache::AnimeIndex::open(storage.downloads_path(EntryKind::Anime), &cache);
+            let follower = index.clone();
+            crate::recipe_sources::follow_loads(move || {
+                let index = follower.clone();
+                async move {
+                    index.rescan(crate::recipe_sources::ready(), || crate::recipe_sources::folder_names(EntryKind::Anime)).await;
+                }
+            });
+            Some(index)
         })
         .clone()
 }
@@ -277,7 +267,7 @@ mod tests {
 
     #[test]
     fn the_default_backend_has_no_queue_and_refuses_writes() {
-        let backend = IndexBackend { index: None, runtime: None };
+        let backend = IndexBackend { index: None, runtime: None, queues: None };
         assert_eq!(backend.queue_entry(EntryKind::Manga, 1), None);
         assert!(!backend.enqueue(EntryKind::Manga, 1, &[2], false));
         assert!(!backend.delete_entry(EntryKind::Manga, 1));
@@ -290,7 +280,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let index = DownloadIndex::open(dir.path(), dir.path());
         index.add_chapter(7, "Source", "Title", "Ch 1");
-        let backend = IndexBackend { index: Some(index), runtime: None };
+        let backend = IndexBackend { index: Some(index), runtime: None, queues: None };
         let key = DiskKey { source_id: 7, entry_title: "Title".into(), unit_name: "Ch 1".into(), scanlator: None };
         assert!(backend.on_disk(EntryKind::Manga, &key));
         assert!(!backend.on_disk(EntryKind::Anime, &key), "the anime cache is not in the shell yet");
@@ -299,13 +289,8 @@ mod tests {
     }
 
     #[test]
-    fn the_hub_delivers_unit_events_and_starts_not_initializing() {
-        let hub = hub();
-        assert!(!*hub.cache.initializing().borrow());
-        let mut rx = hub.subscribe_units();
-        let event = UnitEvent { unit_id: 5, change: Change::Progress(40) };
-        hub.publish_unit(event);
-        assert_eq!(rx.try_recv().ok(), Some(event));
+    fn the_hub_starts_not_initializing() {
+        assert!(!*hub().cache.initializing().borrow());
     }
 
     #[test]

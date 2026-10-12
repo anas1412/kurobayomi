@@ -126,15 +126,13 @@ pub(super) fn input_key(key: &gtk::gdk::Key, shift: bool) -> InputKey {
     }
 }
 
-fn scrolled(horizontal: bool) -> gtk::ScrolledWindow {
-    let (h, v) = if horizontal {
-        (gtk::PolicyType::External, gtk::PolicyType::Never)
-    } else {
-        (gtk::PolicyType::Never, gtk::PolicyType::External)
-    };
+/// Both axes are `External` (scrolling without bars) and never `Never`: a `Never` axis makes the window's minimum
+/// size on that axis the strip's, and the strip is sized to the viewport, so the page area would refuse to shrink
+/// and the toplevel would grow each time the bottom bar was hidden and shown again. The cross axis has no range anyway.
+fn scrolled() -> gtk::ScrolledWindow {
     gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(h)
-        .vscrollbar_policy(v)
+        .hscrollbar_policy(gtk::PolicyType::External)
+        .vscrollbar_policy(gtk::PolicyType::External)
         .hexpand(true)
         .vexpand(true)
         .focusable(true)
@@ -400,6 +398,10 @@ impl ViewerEngine for PagerEngine {
 
 struct PagerInner {
     me: Weak<PagerInner>,
+    /// Scroll gathered towards the next page turn (a touchpad sends many small steps for one swipe), and when the
+    /// last turn happened: one swipe or one wheel notch turns one page.
+    wheel_sum: Cell<f64>,
+    wheel_at: Cell<u64>,
     kind: ViewerKind,
     root: gtk::ScrolledWindow,
     fixed: gtk::Fixed,
@@ -431,7 +433,7 @@ fn pager_options(s: &ViewerSettings) -> PagerOptions {
 
 impl PagerInner {
     fn new(kind: ViewerKind, ctx: ViewerContext) -> Rc<Self> {
-        let root = scrolled(kind != ViewerKind::Vertical);
+        let root = scrolled();
         let fixed = gtk::Fixed::new();
         root.set_child(Some(&fixed));
         // The strip stays hidden until its first layout (`pager.isVisible = false`).
@@ -439,6 +441,8 @@ impl PagerInner {
         let settings = ctx.settings;
         let inner = Rc::new_cyclic(|me| PagerInner {
             me: me.clone(),
+            wheel_sum: Cell::new(0.0),
+            wheel_at: Cell::new(0),
             kind,
             root,
             fixed,
@@ -531,7 +535,10 @@ impl PagerInner {
     fn run(&self, fx: Vec<Effect>) {
         for effect in fx {
             match effect {
-                Effect::Rebuilt => self.rebuild(),
+                Effect::Rebuilt => {
+                    self.rebuild();
+                    self.realign();
+                }
                 Effect::Show => {
                     self.root.set_visible(true);
                     self.rebuild();
@@ -551,6 +558,7 @@ impl PagerInner {
                         self.emit.send(ViewerEvent::PageSelected(page));
                     }
                 }
+                Effect::TransitionSelected => self.emit.send(ViewerEvent::TransitionShown),
                 Effect::HideMenu => self.emit.send(ViewerEvent::HideMenu),
                 Effect::ShowMenu => self.emit.send(ViewerEvent::ShowMenu),
                 Effect::Preload(key) => {
@@ -563,6 +571,19 @@ impl PagerInner {
         }
     }
 
+    /// After the list changed, puts the strip back on the shown item, which may have a new index. Not while a move
+    /// runs: that one is heading for its own target.
+    fn realign(&self) {
+        let (idle, view) = {
+            let ctl = self.ctl.borrow();
+            (ctl.is_idle(), ctl.view_index())
+        };
+        if idle {
+            self.adjustment().set_value(view as f64 * f64::from(self.extent()));
+            self.settled.set(view);
+        }
+    }
+
     /// Realises the slots around the shown index (`current ± 1`) and places them on the strip.
     fn rebuild(&self) {
         let (items, view) = {
@@ -570,7 +591,7 @@ impl PagerInner {
             (ctl.items().to_vec(), ctl.view_index())
         };
         let (w, h) = (self.root.width().max(0), self.root.height().max(0));
-        self.laid_size.set((w, h));
+        let resized = self.laid_size.replace((w, h)) != (w, h);
         let count = items.len();
         let wanted: Range<usize> = if count == 0 { 0..0 } else { view.saturating_sub(1)..(view + 2).min(count) };
         let mut slots = self.slots.borrow_mut();
@@ -598,13 +619,21 @@ impl PagerInner {
                 .clone();
             let (x, y) = if self.horizontal() { (i as i32 * w, 0) } else { (0, i as i32 * h) };
             self.fixed.move_(&widget, f64::from(x), f64::from(y));
-            widget.set_size_request(w, h);
+            // a row's margins add to its request, so they are left out (a transition card has side margins)
+            let (mx, my) = (widget.margin_start() + widget.margin_end(), widget.margin_top() + widget.margin_bottom());
+            widget.set_size_request((w - mx).max(0), (h - my).max(0));
         }
         let total = count as i32;
         if self.horizontal() {
             self.fixed.set_size_request(total * w, h);
         } else {
             self.fixed.set_size_request(w, total * h);
+        }
+        drop(slots);
+        // the size is recorded here, so the strip is put on the shown item here too: the frame tick sees no change
+        // afterwards. A first scroll made before the strip had a size would otherwise stay at 0 (the Prev card).
+        if resized {
+            self.adjustment().set_value(view as f64 * f64::from(self.extent()));
         }
     }
 
@@ -787,9 +816,38 @@ impl PagerInner {
 
     /// A pointer scroll: down is the next page, and up or no movement is the previous one (E-24).
     fn wheel(&self, dy: f64) -> bool {
-        self.command(if dy > 0.0 { super::pager::nav::PageCmd::Next } else { super::pager::nav::PageCmd::Prev });
+        let now = now_ms();
+        match wheel_turn(self.wheel_sum.get() + dy, now.saturating_sub(self.wheel_at.get())) {
+            WheelTurn::Gather(sum) => self.wheel_sum.set(sum),
+            WheelTurn::Turn(next) => {
+                self.wheel_sum.set(0.0);
+                self.wheel_at.set(now);
+                self.command(if next { super::pager::nav::PageCmd::Next } else { super::pager::nav::PageCmd::Prev });
+            }
+        }
         true
     }
+}
+
+/// What a scroll step does in a paged viewer.
+#[derive(Debug, PartialEq)]
+enum WheelTurn {
+    /// Not enough yet, or too soon after the last turn: keep the sum.
+    Gather(f64),
+    /// Turn one page, forward when true.
+    Turn(bool),
+}
+
+/// A wheel notch is 1.0; a touchpad swipe arrives as many small steps. A page turns when the gathered scroll reaches
+/// one notch, and at most once per `WHEEL_GAP_MS`, so one swipe never flips several pages.
+const WHEEL_GAP_MS: u64 = 350;
+
+fn wheel_turn(sum: f64, since_last_ms: u64) -> WheelTurn {
+    if since_last_ms < WHEEL_GAP_MS {
+        // the rest of the swipe that just turned a page is dropped
+        return WheelTurn::Gather(0.0);
+    }
+    if sum.abs() >= 1.0 { WheelTurn::Turn(sum > 0.0) } else { WheelTurn::Gather(sum) }
 }
 
 fn key_context(s: &ViewerSettings, menu_visible: bool) -> KeyContext {
@@ -839,6 +897,11 @@ impl Surface for PagerInner {
 
     fn wheel(&self, dy: f64) -> bool {
         PagerInner::wheel(self, dy)
+    }
+
+    /// The pager turns pages itself; the scrolled window must not also scroll the strip with the same wheel event.
+    fn wheel_first(&self) -> bool {
+        true
     }
 }
 
@@ -920,6 +983,8 @@ struct WebtoonInner {
     /// strip was allocated; applied on the frame it has been.
     pending_scroll: Cell<Option<usize>>,
     last_scroll: Cell<i64>,
+    /// The viewport height at the last measure: a scroll that comes with a new height was the layout, not the user.
+    last_viewport: Cell<i32>,
     /// Set while `sync` measures and reconciles, so the value changes it causes do not re-enter it.
     busy: Cell<bool>,
     /// The viewport height at the first layout. Taps are normalised by it (B§2.1).
@@ -947,7 +1012,7 @@ fn webtoon_options(s: &ViewerSettings) -> WebtoonOptions {
 
 impl WebtoonInner {
     fn new(gapped: bool, ctx: ViewerContext) -> Rc<Self> {
-        let root = scrolled(false);
+        let root = scrolled();
         let fixed = gtk::Fixed::new();
         root.set_child(Some(&fixed));
         root.set_visible(false);
@@ -981,6 +1046,7 @@ impl WebtoonInner {
             laid_size: Cell::new((-1, -1)),
             pending_scroll: Cell::new(None),
             last_scroll: Cell::new(0),
+            last_viewport: Cell::new(0),
             busy: Cell::new(false),
             original_height: Cell::new(0),
             recognizer: RefCell::new(recognizer(false)),
@@ -1183,6 +1249,7 @@ impl WebtoonInner {
                         self.emit.send(ViewerEvent::PageSelected(page));
                     }
                 }
+                Effect::TransitionSelected => self.emit.send(ViewerEvent::TransitionShown),
                 Effect::HideMenu => self.emit.send(ViewerEvent::HideMenu),
                 Effect::ShowMenu => self.emit.send(ViewerEvent::ShowMenu),
                 Effect::Preload(key) => {
@@ -1211,8 +1278,12 @@ impl WebtoonInner {
     fn measure(&self) -> Vec<Effect> {
         let scroll = self.root.vadjustment().value().round() as i64;
         let dy = scroll - self.last_scroll.replace(scroll);
+        // showing or hiding the menu bar resizes the view and moves the scroll position to keep the page in place;
+        // that move must not count as the user scrolling, or it hides the menu it just showed
+        let vh = self.viewport();
+        let resized = self.last_viewport.replace(vh) != vh;
         let (last, first) = self.lay_out();
-        self.ctl.borrow_mut().on_scroll(dy as i32, true, last, first)
+        self.ctl.borrow_mut().on_scroll(if resized { 0 } else { dy as i32 }, true, last, first)
     }
 
     /// Realises the rows for the scroll position and sizes the strip. Returns the bottom-most item whose end is
@@ -1662,6 +1733,15 @@ impl Surface for WebtoonInner {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn one_wheel_notch_or_one_swipe_turns_one_page() {
+        assert_eq!(super::wheel_turn(1.0, 10_000), super::WheelTurn::Turn(true), "a notch down turns forward");
+        assert_eq!(super::wheel_turn(-1.0, 10_000), super::WheelTurn::Turn(false), "a notch up turns back");
+        assert_eq!(super::wheel_turn(0.3, 10_000), super::WheelTurn::Gather(0.3), "a small touchpad step waits");
+        assert_eq!(super::wheel_turn(5.0, 100), super::WheelTurn::Gather(0.0), "right after a turn the rest is dropped");
+    }
+
     use super::*;
     use crate::reader::model::PageSource;
     use crate::reader::viewers::ViewerContext;

@@ -1,87 +1,114 @@
-//! GTK glue for local manga (area 43): the window actions that pick a folder and rescan the local entries. Scanning
-//! runs on a plain thread; the database write and the toast run back on the GTK thread.
+//! GTK glue for local folders (area 43, wire-local-anime): the library menu's "Add local … folder" and "Rescan local …
+//! folders" for both kinds, and the add-manga shortcut. Scanning and storing run on a worker thread; the toast and the
+//! library refresh run back on the GTK thread.
 
-use std::path::PathBuf;
+use std::sync::Arc;
 
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
+use kuro_db::Db;
 use kuro_domain::kind::EntryKind;
-use kuro_data::manga::MangaRepo;
-use kuro_local::LOCAL_SOURCE_ID;
 
-use super::scan::{ScannedManga, scan};
-use super::sync::sync;
+use super::sync::{self, Failure, Outcome};
 
-/// The window action that asks for a folder and adds it (`win.add-local-manga`).
+/// The window action that asks for a manga folder and adds it (`win.add-local-manga`, `Ctrl+Shift+O`).
 pub const ADD_ACTION: &str = "add-local-manga";
-/// The window action that rescans every local entry in the library (`win.rescan-local-manga`).
-pub const RESCAN_ACTION: &str = "rescan-local-manga";
 
-/// Registers both window actions, with `Ctrl+Shift+O` for the add action.
+/// Registers the add-manga window action and its shortcut.
 pub fn attach(window: &gtk::ApplicationWindow) {
     let add = gio::SimpleAction::new(ADD_ACTION, None);
-    add.connect_activate(|_, _| pick_folder());
+    add.connect_activate(|_, _| add_folder(EntryKind::Manga));
     window.add_action(&add);
-    let rescan = gio::SimpleAction::new(RESCAN_ACTION, None);
-    rescan.connect_activate(|_, _| rescan_all());
-    window.add_action(&rescan);
     if let Some(app) = window.application() {
         app.set_accels_for_action(&format!("win.{ADD_ACTION}"), &["<Primary><Shift>o"]);
     }
 }
 
-/// Asks for a folder and adds it.
-pub fn pick_folder() {
-    let dialog = gtk::FileDialog::new();
-    dialog.set_title("Add local manga folder");
-    dialog.select_folder(Some(&crate::ui::window()), None::<&gio::Cancellable>, |result| {
-        if let Some(path) = result.ok().and_then(|folder| folder.path()) {
-            import(path);
-        }
+/// Asks for a folder and adds it: a manga folder is one entry, an anime folder holds one folder per series.
+pub fn add_folder(kind: EntryKind) {
+    let title = match kind {
+        EntryKind::Manga => "Add local manga folder",
+        EntryKind::Anime => "Add local anime folder",
+    };
+    let dialog = gtk::FileDialog::builder().title(title).modal(true).build();
+    dialog.select_folder(Some(&crate::ui::window()), gio::Cancellable::NONE, move |picked| {
+        let Some(folder) = picked.ok().and_then(|file| file.path()) else { return };
+        run(kind, move |db, now| sync::add(db, kind, &folder, now));
     });
 }
 
-/// Rescans every entry of the library that came from a local folder.
-pub fn rescan_all() {
-    let db = crate::data::app().db(EntryKind::Manga);
-    let folders: Vec<PathBuf> = MangaRepo::new(db)
-        .favorites_by_source(LOCAL_SOURCE_ID)
-        .unwrap_or_default()
-        .iter()
-        .map(|m| PathBuf::from(&m.url))
-        .collect();
-    for folder in folders {
-        import(folder);
+/// Rescans the local entries of `kind` already in the library.
+pub fn rescan(kind: EntryKind) {
+    run(kind, move |db, now| sync::rescan(db, kind, now));
+}
+
+/// Runs `job` on a worker thread with the database of `kind`, then shows its result as toasts and reloads the library.
+fn run(kind: EntryKind, job: impl FnOnce(&Arc<Db>, i64) -> Result<Vec<Outcome>, String> + Send + 'static) {
+    let db = crate::data::app().db(kind);
+    let (sender, receiver) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = sender.send_blocking(job(&db, chrono::Utc::now().timestamp_millis()));
+    });
+    glib::spawn_future_local(async move {
+        let Ok(result) = receiver.recv().await else { return };
+        for text in messages(kind, &result) {
+            crate::toast::notify(text);
+        }
+        crate::library::mount::refresh(kind);
+    });
+}
+
+/// The toast texts of a result: one per manga folder, one for a whole anime folder (a series that failed is logged).
+fn messages(kind: EntryKind, result: &Result<Vec<Outcome>, String>) -> Vec<String> {
+    let outcomes = match result {
+        Ok(outcomes) => outcomes,
+        Err(e) => return vec![format!("Could not scan the folder: {e}")],
+    };
+    match kind {
+        EntryKind::Manga => outcomes
+            .iter()
+            .map(|o| match &o.result {
+                Ok(done) => format!("{}: {} new, {} renamed chapters", o.title, done.added, done.updated),
+                Err(Failure::Read(e)) => format!("Could not read the folder: {e}"),
+                Err(Failure::Save(e)) => format!("Could not save {}: {e}", o.title),
+            })
+            .collect(),
+        EntryKind::Anime => {
+            let done: Vec<&sync::Synced> = outcomes.iter().filter_map(|o| o.result.as_ref().ok()).collect();
+            let added: usize = done.iter().map(|d| d.added).sum();
+            let removed: usize = done.iter().map(|d| d.removed).sum();
+            vec![format!("Local anime: {} series, {added} episodes added, {removed} removed", done.len())]
+        }
     }
 }
 
-/// Scans `folder` off the GTK thread, then stores it and tells the user what changed.
-fn import(folder: PathBuf) {
-    let (sender, receiver) = async_channel::bounded(1);
-    std::thread::spawn(move || {
-        let _ = sender.send_blocking(scan(&folder));
-    });
-    glib::spawn_future_local(async move {
-        let Ok(scanned) = receiver.recv().await else { return };
-        match scanned {
-            Ok(scanned) => store(&scanned),
-            Err(error) => crate::toast::notify(format!("Could not read the folder: {error}")),
-        }
-    });
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::local_flow::sync::Synced;
 
-fn store(scanned: &ScannedManga) {
-    let db = crate::data::app().db(EntryKind::Manga);
-    let now = chrono::Utc::now().timestamp_millis();
-    match sync(&db, scanned, now) {
-        Ok(done) => {
-            crate::toast::notify(format!(
-                "{}: {} new, {} renamed chapters",
-                scanned.title, done.new_chapters, done.renamed_chapters
-            ));
-            crate::library::mount::refresh(EntryKind::Manga);
-        }
-        Err(error) => crate::toast::notify(format!("Could not save {}: {error}", scanned.title)),
+    fn outcome(title: &str, result: Result<Synced, Failure>) -> Outcome {
+        Outcome { title: title.into(), result }
+    }
+
+    fn synced(added: usize, updated: usize, removed: usize) -> Synced {
+        Synced { entry_id: 1, added, updated, removed }
+    }
+
+    #[test]
+    fn a_manga_toast_per_folder_and_one_anime_toast_with_the_counts() {
+        let manga = Ok(vec![
+            outcome("Series", Ok(synced(2, 1, 0))),
+            outcome("Gone", Err(Failure::Read("no such folder".into()))),
+            outcome("Locked", Err(Failure::Save("disk full".into()))),
+        ]);
+        assert_eq!(
+            messages(EntryKind::Manga, &manga),
+            ["Series: 2 new, 1 renamed chapters", "Could not read the folder: no such folder", "Could not save Locked: disk full"]
+        );
+        let anime = Ok(vec![outcome("A", Ok(synced(2, 0, 1))), outcome("B", Ok(synced(1, 4, 0))), outcome("C", Err(Failure::Read("x".into())))]);
+        assert_eq!(messages(EntryKind::Anime, &anime), ["Local anime: 2 series, 3 episodes added, 1 removed"]);
+        assert_eq!(messages(EntryKind::Anime, &Err("disk gone".into())), ["Could not scan the folder: disk gone"]);
     }
 }

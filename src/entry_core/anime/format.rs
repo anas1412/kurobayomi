@@ -1,6 +1,6 @@
 //! Time and number text of the anime entry screen: `formatTime` (T-39a-022), the episode number (T-39a-048) and the
-//! watch progress line (T-39a-013). Upstream: `AnimeScreen.kt` (`formatTime`, lines 1091-1099 and 1153-1182) and
-//! `presentation/util/ItemNumberFormatter.kt`. Output is ASCII; the English words come from the message catalogue.
+//! time left of a partly watched episode (T-39a-013). Upstream: `AnimeScreen.kt` (`formatTime`, lines 1091-1099 and
+//! 1153-1182) and `presentation/util/ItemNumberFormatter.kt`. Output is ASCII; the English words come from the message catalogue.
 
 use kuro_i18n::{Arg, MsgKey, trf};
 
@@ -28,19 +28,13 @@ pub fn format_episode_number(number: f64) -> String {
     format_chapter_number(number)
 }
 
-/// The watch progress line `"{position}/{total}"` (both in milliseconds). It is shown only for an unseen episode with
-/// a saved position. A zero total renders as `0:00` with no special case (behaviour 3.4).
+/// The watch progress of a partly watched episode: "12:30 left", the time from the saved position to the end (both in
+/// milliseconds). Nothing for a seen episode, one never started, or one whose length is not known.
 pub fn watch_progress(seen: bool, last_second_seen_ms: i64, total_ms: i64) -> Option<String> {
-    if seen || last_second_seen_ms <= 0 {
+    if seen || last_second_seen_ms <= 0 || total_ms <= last_second_seen_ms {
         return None;
     }
-    Some(trf(
-        MsgKey::episode_progress,
-        &[
-            ("arg1", Arg::Str(&format_time_ms(last_second_seen_ms))),
-            ("arg2", Arg::Str(&format_time_ms(total_ms))),
-        ],
-    ))
+    Some(trf(MsgKey::episode_time_left, &[("arg1", Arg::Str(&format_time_ms(total_ms - last_second_seen_ms)))]))
 }
 
 #[cfg(test)]
@@ -72,14 +66,15 @@ mod tests {
     }
 
     #[test]
-    fn watch_progress_shown_only_for_unseen_with_a_position() {
-        assert_eq!(watch_progress(true, 754_000, 1_440_000), None);
-        assert_eq!(watch_progress(false, 0, 1_440_000), None);
-        assert_eq!(watch_progress(false, 754_000, 1_440_000).as_deref(), Some("12:34/24:00"));
+    fn watch_progress_is_the_time_left_of_a_partly_watched_episode() {
+        assert_eq!(watch_progress(true, 754_000, 1_440_000), None, "seen");
+        assert_eq!(watch_progress(false, 0, 1_440_000), None, "never started");
+        assert_eq!(watch_progress(false, 690_000, 1_440_000).as_deref(), Some("12:30 left"));
     }
 
     #[test]
-    fn zero_total_renders_without_a_special_case() {
-        assert_eq!(watch_progress(false, 65_000, 0).as_deref(), Some("1:05/0:00"));
+    fn an_unknown_length_shows_no_progress() {
+        assert_eq!(watch_progress(false, 65_000, 0), None);
+        assert_eq!(watch_progress(false, 65_000, 65_000), None, "at the very end nothing is left");
     }
 }

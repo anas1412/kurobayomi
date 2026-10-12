@@ -26,7 +26,6 @@ use tokio_util::sync::CancellationToken;
 use super::actions::Mark;
 use super::details_error::{DetailsError, join_failed};
 use super::entry_state::RefreshPlan;
-use super::images::ImageKind;
 use super::library::{RemoveOutcome, add_to_library_flag, remove_from_library};
 use super::model::{AnimeEntryModel, AnimeLoadContext};
 use super::refresh::{Begin, RefreshGate, Trigger, auto_download_targets, last_empty_open_fetch, record_empty_open_fetch};
@@ -36,6 +35,7 @@ use super::store::AnimeStore;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
 use crate::entry_core::favorite::AddRoute;
+use crate::entry_core::runner_kit::{RunnerHandle, abort_all, watch_pair};
 
 /// What a fetch hands back: the episodes the sync added, which a manual refresh queues for download (T-REF-4).
 pub type AnimeFetch = Pin<Box<dyn Future<Output = Result<Vec<Episode>, DetailError>> + Send>>;
@@ -161,19 +161,14 @@ pub enum AnimeCmd {
     SetFlagBits { anime_id: i64, flag: i64, mask: i64 },
     /// The skip-intro length in seconds; 0 turns the skip off (`setSkipIntroLength`).
     SetSkipIntroLength { anime_id: i64, length: i32 },
-    SortBy { anime_id: i64, mode: i64 },
-    /// A masked write of the season flag word (the season settings window).
+    /// A masked write of the season flag word (a pick of the season list options).
     SetSeasonFlagBits { anime_id: i64, flag: i64, mask: i64 },
-    /// A Sort click of the season settings window: flips the active key, or starts another one ascending.
-    SeasonSortBy { anime_id: i64, code: i64 },
-    /// "Set as default" with the library checkbox on: the default of this scope only goes to every favorite. Answered
-    /// by `AnimeEvent::DefaultsApplied`.
+    /// "Use as default for all titles": the default of this scope only goes to every favorite. Answered by
+    /// `AnimeEvent::DefaultsApplied`.
     ApplyDefaultsToLibrary { scope: Scope },
     /// The library button of an entry that is not in the library. With `check_duplicates` a same-named library entry
     /// stops the add and is answered by `AnimeEvent::Duplicate`; "Add anyway" sends it with the check off.
     AddToLibrary { anime_id: i64, check_duplicates: bool },
-    /// A custom image was edited or deleted: moves the last-modified of that image forward.
-    BumpImage { anime_id: i64, kind: ImageKind },
     /// The library button: removes a favorite, or adds an entry that is not one, with the library defaults.
     ToggleFavorite { anime_id: i64 },
     /// Sets or clears the bookmark or fillermark of exactly these episodes (`actions::bulk_mark_targets`).
@@ -190,6 +185,9 @@ pub enum AnimeCmd {
     DeleteEpisodeDownloads { anime_id: i64, ids: Vec<i64> },
     /// Reads the categories and the entry's links, for the category editor: answered by `AnimeEvent::Categories`.
     LoadCategories { anime_id: i64 },
+    /// Reads the tracking count again, after the tracking page bound, edited or removed a tracker. Answered by
+    /// `AnimeEvent::Tracking`.
+    ReadTracking { anime_id: i64, source_id: i64 },
     /// The category editor's OK: replaces the entry's category links.
     SetCategories { anime_id: i64, category_ids: Vec<i64> },
     /// The answer of the add dialog: the entry joins the library in these categories.
@@ -225,32 +223,12 @@ pub enum AnimeEvent {
     Categories { all: Vec<(i64, String)>, linked: Vec<i64> },
     /// The library button of an add with no default category: the category dialog asks which ones (T-39b-026).
     AddCategories { all: Vec<(i64, String)>, linked: Vec<i64> },
+    /// The tracking count, read again (`AnimeCmd::ReadTracking`).
+    Tracking(usize),
 }
 
 /// The page's handle on the runner. Dropping it stops the runner and the subscriptions.
-pub struct AnimeRunner {
-    cmds: Sender<AnimeCmd>,
-    events: Receiver<AnimeEvent>,
-    cancel: CancellationToken,
-}
-
-impl AnimeRunner {
-    /// Queues a command. The queue is unbounded, so this never blocks the GTK thread.
-    pub fn send(&self, cmd: AnimeCmd) {
-        let _ = self.cmds.try_send(cmd);
-    }
-
-    pub fn events(&self) -> Receiver<AnimeEvent> {
-        self.events.clone()
-    }
-}
-
-impl Drop for AnimeRunner {
-    fn drop(&mut self) {
-        self.cancel.cancel();
-        let _ = self.cmds.try_send(AnimeCmd::Shutdown);
-    }
-}
+pub type AnimeRunner = RunnerHandle<AnimeCmd, AnimeEvent>;
 
 struct Shared {
     store: AnimeStore,
@@ -271,25 +249,19 @@ pub fn spawn(
     backend: Arc<dyn AnimeBackend>,
     ctx: AnimeLoadContext,
 ) -> AnimeRunner {
-    let (cmd_tx, cmd_rx) = async_channel::unbounded();
-    let (event_tx, event_rx) = async_channel::unbounded();
-    let cancel = CancellationToken::new();
+    let (runner, cmd_rx, event_tx, cancel) = AnimeRunner::new(|| AnimeCmd::Shutdown);
     let shared = Arc::new(Shared {
         store,
         prefs,
         backend,
         ctx,
         events: event_tx,
-        cancel: cancel.clone(),
+        cancel,
         subscriptions: Mutex::new(Vec::new()),
         gate: Mutex::default(),
     });
     handle.spawn(run(shared, cmd_rx));
-    AnimeRunner {
-        cmds: cmd_tx,
-        events: event_rx,
-        cancel,
-    }
+    runner
 }
 
 async fn run(shared: Arc<Shared>, cmds: Receiver<AnimeCmd>) {
@@ -325,9 +297,7 @@ impl Shared {
     }
 
     fn drop_subscriptions(&self) {
-        for handle in self.subscriptions.lock().unwrap_or_else(PoisonError::into_inner).drain(..) {
-            handle.abort();
-        }
+        abort_all(&self.subscriptions);
     }
 
     /// Tells the page a store read or write failed: the detail goes to the log, the user message to the page.
@@ -566,42 +536,11 @@ impl Shared {
         }
     }
 
-    /// Two tasks, one per table, each publishing a snapshot of the pair when either side changes.
+    /// The entry and its episodes as one snapshot (`watch_pair`), and the related groups.
     fn subscribe(self: &Arc<Self>, anime_id: i64) {
-        type Latest = (Option<Anime>, Option<Vec<Episode>>);
-        let latest: Arc<Mutex<Latest>> = Arc::default();
-        let mut anime_sub = self.store.watch_anime(anime_id);
-        let mut episode_sub = self.store.watch_episodes(anime_id);
-        let publish = {
-            let (shared, latest) = (Arc::clone(self), Arc::clone(&latest));
-            move || {
-                let guard = latest.lock().unwrap_or_else(PoisonError::into_inner);
-                if let (Some(anime), Some(episodes)) = (&guard.0, &guard.1) {
-                    shared.emit(AnimeEvent::Snapshot {
-                        anime: Box::new(anime.clone()),
-                        episodes: episodes.clone(),
-                    });
-                }
-            }
-        };
-        let anime_task = tokio::spawn({
-            let (latest, publish) = (Arc::clone(&latest), publish.clone());
-            async move {
-                while let Some(published) = anime_sub.changed().await {
-                    if let Ok(Some(anime)) = published.map(|p| p.as_ref().clone()) {
-                        latest.lock().unwrap_or_else(PoisonError::into_inner).0 = Some(anime);
-                        publish();
-                    }
-                }
-            }
-        });
-        let episode_task = tokio::spawn(async move {
-            while let Some(published) = episode_sub.changed().await {
-                if let Ok(list) = published {
-                    latest.lock().unwrap_or_else(PoisonError::into_inner).1 = Some(list.as_ref().clone());
-                    publish();
-                }
-            }
+        let shared = Arc::clone(self);
+        let pair = watch_pair(self.store.watch_anime(anime_id), self.store.watch_episodes(anime_id), move |anime: &Anime, episodes: &[Episode]| {
+            shared.emit(AnimeEvent::Snapshot { anime: Box::new(anime.clone()), episodes: episodes.to_vec() });
         });
         let mut related_sub = self.store.watch_related(anime_id);
         let shared = Arc::clone(self);
@@ -613,8 +552,7 @@ impl Shared {
             }
         });
         let mut subs = self.subscriptions.lock().unwrap_or_else(PoisonError::into_inner);
-        subs.push(anime_task.abort_handle());
-        subs.push(episode_task.abort_handle());
+        subs.extend(pair);
         subs.push(related_task.abort_handle());
     }
 
@@ -627,11 +565,9 @@ impl Shared {
             AnimeCmd::SetSkipIntroLength { anime_id, length } => {
                 self.blocking(move |s| s.set_skip_intro_length(anime_id, length)).await
             }
-            AnimeCmd::SortBy { anime_id, mode } => self.blocking(move |s| s.sort_by(anime_id, mode)).await,
             AnimeCmd::SetSeasonFlagBits { anime_id, flag, mask } => {
                 self.blocking(move |s| s.set_season_flag_bits(anime_id, flag, mask)).await
             }
-            AnimeCmd::SeasonSortBy { anime_id, code } => self.blocking(move |s| s.season_sort_by(anime_id, code)).await,
             AnimeCmd::ApplyDefaultsToLibrary { scope } => {
                 let prefs = self.prefs.clone();
                 let applied = self
@@ -647,10 +583,6 @@ impl Shared {
             }
             AnimeCmd::AddToLibrary { anime_id, check_duplicates } => return self.add_to_library(anime_id, check_duplicates).await,
             AnimeCmd::AddWithCategories { anime_id, category_ids } => return self.add_with_categories(anime_id, category_ids).await,
-            AnimeCmd::BumpImage { anime_id, kind } => {
-                let now = now_ms();
-                self.blocking(move |s| s.bump_image(anime_id, kind, now)).await
-            }
             AnimeCmd::ToggleFavorite { anime_id } => return self.toggle_favorite(anime_id).await,
             AnimeCmd::SetMark { ids, mark, on } => self.blocking(move |s| s.set_marks(&ids, mark, on).map(|()| true)).await,
             AnimeCmd::SetSeen { ids, seen } => self.blocking(move |s| s.set_seen(&ids, seen).map(|()| true)).await,
@@ -679,6 +611,10 @@ impl Shared {
             AnimeCmd::SetCategories { anime_id, category_ids } => {
                 self.blocking(move |s| s.set_categories(anime_id, &category_ids).map(|()| true)).await
             }
+            AnimeCmd::ReadTracking { anime_id, source_id } => match self.blocking(move |s| s.track_summary(anime_id, source_id)).await {
+                Ok(summary) => return self.emit(AnimeEvent::Tracking(summary.count as usize)),
+                Err(e) => Err(e),
+            },
             AnimeCmd::Load { .. } | AnimeCmd::Refresh { .. } | AnimeCmd::Shutdown => return,
         };
         if let Err(e) = result {
@@ -1062,20 +998,6 @@ mod tests {
             runner.send(AnimeCmd::AddToLibrary { anime_id: id, check_duplicates: true });
             until(&runner.events(), |e| matches!(e, AnimeEvent::Added)).await;
             assert!(store.anime(id).unwrap().unwrap().favorite);
-        });
-    }
-
-    #[test]
-    fn an_image_bump_reaches_the_row_and_the_page_hears_of_it() {
-        let rt = rt();
-        let (_dir, store, id) = with_episodes(true, true, 0, 0);
-        rt.block_on(async {
-            let runner = start(&rt, store.clone(), Fake::new(0));
-            let rx = runner.events();
-            runner.send(AnimeCmd::Load { anime_id: id });
-            until(&rx, |e| matches!(e, AnimeEvent::Loaded(_))).await;
-            runner.send(AnimeCmd::BumpImage { anime_id: id, kind: ImageKind::Background });
-            until(&rx, |e| matches!(e, AnimeEvent::Snapshot { anime, .. } if anime.background_last_modified > 0)).await;
         });
     }
 

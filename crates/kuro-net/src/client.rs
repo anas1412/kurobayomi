@@ -607,8 +607,6 @@ mod preference_and_extension_tests {
         fn log_dir(&self) -> std::path::PathBuf { self.0.join("log") }
         fn temp_dir(&self) -> std::path::PathBuf { self.0.join("temp") }
         fn crash_dir(&self) -> std::path::PathBuf { self.0.join("crash") }
-        fn default_downloads_dir(&self) -> std::path::PathBuf { self.0.join("downloads") }
-        fn default_backups_dir(&self) -> std::path::PathBuf { self.0.join("backups") }
         fn covers_dir(&self) -> std::path::PathBuf { self.0.join("covers") }
         fn plugin_dir(&self) -> std::path::PathBuf { self.0.join("plugins") }
     }

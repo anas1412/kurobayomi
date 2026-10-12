@@ -77,7 +77,15 @@ pub fn wire(parts: Parts, shared: &Shared) {
     {
         let (activity, bar) = (Rc::clone(&activity), parts.bar.clone());
         let motion = gtk::EventControllerMotion::new();
-        motion.connect_motion(move |_, _, _| reveal(&activity, &bar));
+        // GTK also sends motion events when the widgets under a still pointer change (the time label and the seek bar
+        // update every tick), so only a real move of the pointer counts as activity; else the bar never hides
+        let last = Cell::new((f64::NAN, f64::NAN));
+        motion.connect_motion(move |_, x, y| {
+            let (px, py) = last.replace((x, y));
+            if (x - px).abs() >= 1.0 || (y - py).abs() >= 1.0 || px.is_nan() {
+                reveal(&activity, &bar);
+            }
+        });
         parts.page.add_controller(motion);
     }
     {

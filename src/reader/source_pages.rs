@@ -225,7 +225,7 @@ impl Prefetch {
 /// The page lists and pages of the manga `manga_id` of source `source_id`, when the directory knows that source and
 /// the app's runtime runs; `None` for a local or unknown source.
 pub fn online(source_id: i64, manga_id: i64) -> Option<Arc<Prefetch>> {
-    let source = crate::browse::directory::current()?.manga_source(source_id)?;
+    let source = crate::browse::directory::current(crate::browse::route::BrowseKind::Manga).catalogue(source_id)?.manga()?;
     let runtime = Handle::try_current().ok()?;
     let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
     let cache = DiskCache::open(paths.chapter_cache_dir(), CACHE_LIMIT_BYTES).map_err(|e| tracing::warn!(error = %e, "no chapter cache")).ok()?;

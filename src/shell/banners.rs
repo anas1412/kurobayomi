@@ -10,35 +10,6 @@ use kuro_i18n::{MsgKey, tr};
 /// How often the sources of the banner state are read.
 pub const POLL_MS: u64 = 300;
 
-/// The colour of each banner: its role and the role of its text (Material secondary, tertiary and primary).
-pub fn css() -> String {
-    BannerKind::ALL
-        .into_iter()
-        .map(|kind| {
-            let (bg, fg) = match kind {
-                BannerKind::Indexing => ("secondary", "on_secondary"),
-                BannerKind::DownloadedOnly => ("tertiary", "on_tertiary"),
-                BannerKind::Incognito => ("primary", "on_primary"),
-            };
-            format!(".{} {{ background-color: @kuro_{bg}; color: @kuro_{fg}; padding: 4px 16px; }}\n", kind.css_class())
-        })
-        .collect()
-}
-
-thread_local! {
-    static CSS_LOADED: Cell<bool> = const { Cell::new(false) };
-}
-
-fn ensure_css() {
-    if CSS_LOADED.with(|done| done.replace(true)) {
-        return;
-    }
-    let Some(display) = gtk::gdk::Display::default() else { return };
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(&css());
-    gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-}
-
 /// The state the banners show.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BannerState {
@@ -94,7 +65,6 @@ pub struct Banners {
 
 impl Banners {
     pub fn new() -> Self {
-        ensure_css();
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let revealers = BannerKind::ALL
             .into_iter()
@@ -143,14 +113,6 @@ impl Default for Banners {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn css_colours_each_banner_by_its_role_pair() {
-        let css = css();
-        assert!(css.contains(".kuro-banner-secondary { background-color: @kuro_secondary; color: @kuro_on_secondary; padding: 4px 16px; }"));
-        assert!(css.contains(".kuro-banner-tertiary { background-color: @kuro_tertiary; color: @kuro_on_tertiary; padding: 4px 16px; }"));
-        assert!(css.contains(".kuro-banner-primary { background-color: @kuro_primary; color: @kuro_on_primary; padding: 4px 16px; }"));
-    }
 
     #[test]
     fn banner_texts_are_the_three_catalogue_strings() {

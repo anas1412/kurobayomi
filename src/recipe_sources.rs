@@ -1,6 +1,5 @@
-//! Recipe sources in the app (`docs/source-recipes.md`). At start the recipes of the scrapers folder become sources: a
-//! manga recipe is listed by the manga source directory the Browse pages read, an anime recipe by the anime directory
-//! and the anime instances. Nothing is installed when the folder holds no recipe, so an app without recipes behaves as
+//! Recipe sources in the app (`docs/source-recipes.md`). At start the recipes of the scrapers folder become sources: each
+//! is installed into the Browse source directory of its kind. Nothing is installed when the folder holds no recipe, so an app without recipes behaves as
 //! before. A recipe that is not valid is logged and skipped.
 
 use std::collections::HashMap;
@@ -12,7 +11,6 @@ use std::time::Duration;
 use http::header::{HeaderMap, HeaderName, HeaderValue};
 use tokio::sync::watch;
 
-use kuro_domain::source::browse::BrowseQuery;
 use kuro_domain::source::model::Source;
 use kuro_extensions::instantiate::{RepoPlugin, instantiate_repo_plugin};
 use kuro_extensions::repo::{self, RepoError};
@@ -22,15 +20,13 @@ use kuro_platform::paths::Paths;
 use kuro_prefs::network::NetworkPrefs;
 use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
+use kuro_source::CatalogueSource;
 use kuro_source::anime::AnimeSource;
-use kuro_source::filter_list::FilterList;
-use kuro_source::{CatalogueSource, MangaSource};
 use kuro_source_scrape::{Kind, Recipe, ScrapeAnime, ScrapeManga};
 
-use crate::browse::anime::directory::{AnimeInstances, install_instances};
-use crate::browse::directory::{DirectorySource, SourceDirectory, install};
-use crate::browse::entries::FavoriteStore;
-use crate::browse::listing::{ListItem, ListedPage, LoadFuture, PageLoader};
+use crate::browse::directory::{Catalogues, DirectorySource, SourceDirectory, install};
+use crate::browse::loader::Catalogue;
+use crate::browse::route::BrowseKind;
 
 /// The package name a recipe source is listed under (the Browse pages group sources by package).
 fn package_of(recipe: &Recipe) -> String {
@@ -66,115 +62,6 @@ pub fn anime_list() -> Vec<Source> {
 /// The runnable anime recipe sources, for the anime entry page.
 pub fn anime_sources() -> Vec<Arc<dyn AnimeSource>> {
     loaded().anime.iter().map(|(source, _)| Arc::clone(source)).collect()
-}
-
-struct Instances(Arc<Loaded>);
-
-impl AnimeInstances for Instances {
-    fn source(&self, id: i64) -> Option<Arc<dyn AnimeSource>> {
-        self.0.anime.iter().find(|(source, _)| source.id() == id).map(|(source, _)| Arc::clone(source))
-    }
-}
-
-/// The manga recipe sources as the directory of the manga Browse pages.
-struct MangaDirectory {
-    sources: Vec<(Arc<dyn CatalogueSource>, DirectorySource)>,
-}
-
-impl SourceDirectory for MangaDirectory {
-    fn sources(&self) -> Vec<DirectorySource> {
-        self.sources.iter().map(|(_, row)| row.clone()).collect()
-    }
-
-    fn loader(&self, source_id: i64) -> Option<Arc<dyn PageLoader>> {
-        let (source, _) = self.sources.iter().find(|(_, row)| row.source.id == source_id)?;
-        Some(Arc::new(MangaLoader { source: Arc::clone(source), store: library_store()? }))
-    }
-
-    fn filters(&self, source_id: i64) -> Option<FilterList> {
-        self.sources.iter().find(|(_, row)| row.source.id == source_id).map(|(source, _)| source.filter_list())
-    }
-
-    fn manga_source(&self, source_id: i64) -> Option<Arc<dyn MangaSource>> {
-        self.sources.iter().find(|(_, row)| row.source.id == source_id).map(|(source, _)| Arc::clone(source) as Arc<dyn MangaSource>)
-    }
-}
-
-/// The library the listings map their entries to, built as the manga Browse screen builds its store.
-fn library_store() -> Option<Arc<dyn FavoriteStore>> {
-    use kuro_data::category::{CategoryKind, CategoryRepo};
-    use kuro_data::manga::MangaRepo;
-    use kuro_domain::kind::EntryKind;
-
-    if !crate::data::is_installed() {
-        return None;
-    }
-    let app = crate::data::app();
-    let db = app.db(EntryKind::Manga);
-    let prefs = crate::browse::prefs::BrowsePrefs::new(app.base.store().clone());
-    Some(Arc::new(crate::browse::repo_store::RepoStore::new(
-        MangaRepo::new(Arc::clone(&db)),
-        CategoryRepo::new(db, CategoryKind::Manga),
-        prefs.default_manga_category.clone(),
-        Arc::new(|_| 0),
-    )))
-}
-
-/// A manga source's popular, latest or search listing, each entry mapped to its library row (the manga twin of
-/// `browse::anime::loader::AnimeLoader`).
-pub(crate) struct MangaLoader {
-    pub(crate) source: Arc<dyn CatalogueSource>,
-    pub(crate) store: Arc<dyn FavoriteStore>,
-}
-
-impl PageLoader for MangaLoader {
-    fn load(&self, query: BrowseQuery, filters: FilterList, page: u32) -> LoadFuture {
-        let (source, store) = (Arc::clone(&self.source), Arc::clone(&self.store));
-        Box::pin(async move {
-            let name = source.name().to_owned();
-            let source_id = source.id();
-            let result = list_page(&name, source, store, query, filters, page).await;
-            crate::browse::errors::note(source_id, result.is_ok());
-            result
-        })
-    }
-}
-
-/// One page of a manga listing. A failure is the sentence for the user; the technical text goes to the log.
-async fn list_page(name: &str, source: Arc<dyn CatalogueSource>, store: Arc<dyn FavoriteStore>, query: BrowseQuery, filters: FilterList, page: u32) -> Result<ListedPage, String> {
-    use crate::browse::errors;
-    let page = i32::try_from(page).map_err(|error| error.to_string())?;
-    let found = errors::plain(name, async {
-        match query {
-            BrowseQuery::Popular => source.popular(page).await,
-            BrowseQuery::Latest => source.latest(page).await,
-            BrowseQuery::Search(text) => source.search(page, &text, &filters).await,
-        }
-    })
-    .await?;
-    let source_id = source.id();
-    let stored = tokio::task::spawn_blocking(move || -> Result<ListedPage, String> {
-        let mut items = Vec::with_capacity(found.mangas.len());
-        for manga in &found.mangas {
-            let local = store.local_entry(source_id, &manga.url, &manga.title, manga.thumbnail_url.as_deref())?;
-            items.push(ListItem {
-                id: local.id,
-                source_id,
-                url: manga.url.clone(),
-                title: local.title,
-                favorite: local.favorite,
-                cover: manga.thumbnail_url.clone(),
-            });
-        }
-        Ok(ListedPage { items, has_next: found.has_next_page })
-    })
-    .await
-    .map_err(|error| error.to_string())
-    .and_then(|stored| stored);
-    stored.map_err(|text| {
-        tracing::warn!(source = name, error = text.as_str(), "a listing could not be stored");
-        errors::GENERIC.to_owned()
-    })
 }
 
 /// The app values a reload reads, set once at start: the folders, the preferences and the runtime.
@@ -241,7 +128,7 @@ fn build(
     mut manga: Vec<(Arc<dyn CatalogueSource>, DirectorySource)>,
     mut anime: Vec<(Arc<dyn AnimeSource>, DirectorySource)>,
     client: &NetworkClient,
-) -> (MangaDirectory, Loaded) {
+) -> (Catalogues, Loaded) {
     for recipe in recipes {
         let recipe = Arc::new(recipe);
         match recipe.kind {
@@ -260,7 +147,8 @@ fn build(
         }
     }
     tracing::info!(manga = manga.len(), anime = anime.len(), "sources loaded");
-    (MangaDirectory { sources: manga }, Loaded { anime })
+    let manga = manga.into_iter().map(|(source, row)| (Catalogue::Manga(source), row)).collect();
+    (Catalogues::new(BrowseKind::Manga, manga), Loaded { anime })
 }
 
 /// Whether the sources are being (re)loaded, and a counter of finished loads. The Browse pages follow both: they show a
@@ -310,6 +198,59 @@ pub fn notify_changed() {
 /// A counter that moves each time a load has installed new sources. Pages read their lists again when it changes.
 pub fn changes() -> watch::Receiver<u64> {
     LOAD_STATE.changes.subscribe()
+}
+
+/// `(source id, "Name (LANG)")` of the loaded repository sources of a kind (recipes and plug-ins): the name each source's
+/// download folder is made from, for the download indexes.
+pub fn folder_names(kind: BrowseKind) -> Vec<(i64, String)> {
+    let rows = match kind {
+        BrowseKind::Manga => crate::browse::directory::current(BrowseKind::Manga).sources(),
+        BrowseKind::Anime => anime_rows(),
+    };
+    names_of(rows)
+}
+
+fn names_of(rows: Vec<DirectorySource>) -> Vec<(i64, String)> {
+    rows.into_iter().map(|row| (row.source.id, kuro_source::display_name(&row.source.name, &row.source.lang))).collect()
+}
+
+/// Runs `rescan` on the current runtime once the first load of the sources has ended, and again after each later load,
+/// each time once no load is running. A download index follows the loads through this, so the downloads of the
+/// repository sources are recognised at start and after a repository is added. Nothing runs outside a runtime.
+pub fn follow_loads<F, Fut>(rescan: F)
+where
+    F: FnMut() -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        tracing::warn!("the download index does not follow the source loads: no runtime");
+        return;
+    };
+    handle.spawn(follow(ready(), changes(), rescan));
+}
+
+async fn follow<F, Fut>(mut ready: watch::Receiver<bool>, mut changes: watch::Receiver<u64>, mut rescan: F)
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    // "ready" is true before the first load starts, so the counter tells whether a load has ended yet
+    let loaded = *changes.borrow_and_update() > 0;
+    if !loaded && changes.changed().await.is_err() {
+        return;
+    }
+    loop {
+        let idle = ready.wait_for(|loading_done| *loading_done).await.is_ok();
+        if !idle {
+            return;
+        }
+        // this rescan reads the sources of every load that has ended so far
+        changes.mark_unchanged();
+        rescan().await;
+        if changes.changed().await.is_err() {
+            return;
+        }
+    }
 }
 
 /// Ends the load it was made for, also when the load panics, so the spinner never stays.
@@ -441,10 +382,10 @@ fn load_sources() -> Vec<String> {
     let icon_paths: HashMap<i64, PathBuf> = rows.iter().filter_map(|row| Some((row.source.id, icons.get(&row.package)?.clone()))).collect();
     *IMAGE_HEADERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(headers);
     *ICON_PATHS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(icon_paths);
-    install(Arc::new(manga));
-    let loaded = Arc::new(anime);
-    install_instances(Arc::new(Instances(Arc::clone(&loaded))));
-    *LOADED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(loaded);
+    install(BrowseKind::Manga, manga);
+    let runnable = anime.anime.iter().map(|(source, row)| (Catalogue::Anime(Arc::clone(source)), row.clone())).collect();
+    install(BrowseKind::Anime, Catalogues::new(BrowseKind::Anime, runnable));
+    *LOADED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(anime));
     failed
 }
 
@@ -580,10 +521,8 @@ mod tests {
         assert_eq!(manga[0].package, "scraper.example-manga");
         assert_eq!(manga[0].home_url.as_deref(), Some("https://manga.example.org"));
 
-        let anime = Arc::new(anime);
         assert_eq!(anime.anime.iter().map(|(_, row)| row.source.name.as_str()).collect::<Vec<_>>(), ["Example Anime"]);
-        let id = anime.anime[0].1.source.id;
-        assert!(Instances(anime).source(id).is_some(), "the anime instance can be asked");
+        assert_eq!(anime.anime[0].0.id(), anime.anime[0].1.source.id, "the anime row names its runnable source");
     }
 
     #[test]
@@ -602,6 +541,73 @@ mod tests {
         assert_eq!(*changes.borrow(), 2);
         state.end();
         assert!(*ready.borrow(), "an extra end does not break the state");
+    }
+
+    /// A chapter downloaded from a repository source sits in `<root>/Name (LANG)/<title>/<chapter>`: the names the
+    /// indexes get match that folder.
+    #[test]
+    fn the_download_index_recognises_the_folder_of_a_repository_source() {
+        let recipe = recipe_from(MANGA.as_bytes()).unwrap();
+        let id = kuro_source::generate_id("Example Manga", "en", 1);
+        let names = names_of(vec![listed(&recipe, id)]);
+        assert_eq!(names, [(id, "Example Manga (EN)".to_owned())]);
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("Example Manga (EN)").join("Solo").join("Chapter 1")).unwrap();
+        let tree = kuro_downloads::index::scan(root.path(), &names);
+        assert!(tree.sources[&id].manga["Solo"].chapters.contains("Chapter 1"));
+        assert!(kuro_downloads::index::scan(root.path(), &[]).sources.is_empty(), "without the repository source the folder is unknown");
+    }
+
+    /// Lets the spawned follower run until it waits again (the test runtime has one thread).
+    async fn settle() {
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn the_indexes_rescan_after_the_first_load_and_after_each_later_one_once_no_load_runs() {
+        let state = LoadState::new();
+        let (tx, mut rescans) = tokio::sync::mpsc::unbounded_channel();
+        let task = tokio::spawn(follow(state.ready.subscribe(), state.changes.subscribe(), move || {
+            let tx = tx.clone();
+            async move {
+                let _ = tx.send(());
+            }
+        }));
+        settle().await;
+        assert!(rescans.try_recv().is_err(), "no rescan before the first load ends, though nothing is loading yet");
+        state.begin();
+        state.end();
+        settle().await;
+        assert!(rescans.try_recv().is_ok(), "the first load ended");
+        state.begin();
+        state.begin();
+        state.end();
+        settle().await;
+        assert!(rescans.try_recv().is_err(), "one load still runs");
+        state.end();
+        settle().await;
+        assert!(rescans.try_recv().is_ok(), "the last load ended");
+        assert!(rescans.try_recv().is_err(), "one rescan per wake");
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn a_follower_that_starts_after_the_first_load_rescans_at_once() {
+        let state = LoadState::new();
+        state.begin();
+        state.end();
+        let (tx, mut rescans) = tokio::sync::mpsc::unbounded_channel();
+        let task = tokio::spawn(follow(state.ready.subscribe(), state.changes.subscribe(), move || {
+            let tx = tx.clone();
+            async move {
+                let _ = tx.send(());
+            }
+        }));
+        settle().await;
+        assert!(rescans.try_recv().is_ok());
+        task.abort();
     }
 
     #[test]

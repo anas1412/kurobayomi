@@ -74,14 +74,6 @@ impl Paths for TestPaths {
         self.sub("crash")
     }
 
-    fn default_downloads_dir(&self) -> PathBuf {
-        self.sub("downloads")
-    }
-
-    fn default_backups_dir(&self) -> PathBuf {
-        self.sub("backups")
-    }
-
     fn covers_dir(&self) -> PathBuf {
         self.sub("covers")
     }

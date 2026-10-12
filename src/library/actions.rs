@@ -239,6 +239,32 @@ pub fn download_menu(kind: EntryKind) -> Vec<(DownloadAmount, String)> {
     ]
 }
 
+/// One entry of a cover's right-click menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoverAction {
+    Open,
+    MarkAllViewed,
+    DownloadUnviewed,
+    ChangeCategories,
+    Remove,
+}
+
+/// A cover's right-click menu for `kind`, in order, as (action, label, section). A local entry has nothing to
+/// download, as in the selection bar (T2-BULK-03).
+pub fn cover_menu(kind: EntryKind, local: bool) -> Vec<(CoverAction, String, u8)> {
+    let (mark, download) = match kind {
+        EntryKind::Manga => ("Mark all as read", "Download unread"),
+        EntryKind::Anime => ("Mark all as watched", "Download unwatched"),
+    };
+    let mut menu = vec![(CoverAction::Open, "Open".to_owned(), 0), (CoverAction::MarkAllViewed, mark.to_owned(), 1)];
+    if !local {
+        menu.push((CoverAction::DownloadUnviewed, download.to_owned(), 1));
+    }
+    menu.push((CoverAction::ChangeCategories, "Change categories".to_owned(), 2));
+    menu.push((CoverAction::Remove, kuro_i18n::tr(kuro_i18n::MsgKey::remove_from_library), 3));
+    menu
+}
+
 /// The two checkboxes of the remove dialog: take the entries out of the library, delete their downloads.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DeleteChoice {
@@ -359,6 +385,16 @@ pub fn continue_visible(button_on: bool, row: &LibraryRow) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cover_menu_lists_its_actions_and_skips_download_for_a_local_entry() {
+        use CoverAction::{ChangeCategories, DownloadUnviewed, MarkAllViewed, Open, Remove};
+        let actions = |kind, local| cover_menu(kind, local).into_iter().map(|(a, _, _)| a).collect::<Vec<_>>();
+        assert_eq!(actions(EntryKind::Manga, false), [Open, MarkAllViewed, DownloadUnviewed, ChangeCategories, Remove]);
+        assert_eq!(actions(EntryKind::Anime, true), [Open, MarkAllViewed, ChangeCategories, Remove]);
+        assert_eq!(cover_menu(EntryKind::Anime, false)[1].1, "Mark all as watched");
+        assert_eq!(cover_menu(EntryKind::Manga, false)[4].1, "Remove from library");
+    }
     use kuro_data::chapter::{Chapter, ChapterRepo};
     use kuro_data::manga::{Manga, MangaRepo};
     use std::collections::BTreeSet;

@@ -1,6 +1,7 @@
-//! Chapter row actions of the manga page that are pure decisions (T-38b-017): the download indicator mapping, which
-//! rows a download action may act on, and mark previous as read. Upstream: `MangaScreenModel.kt` (download actions,
-//! `markPreviousAsRead`) and `ChapterDownloadIndicator.kt`. Behaviour 6.9.1, 6.9.8; E-DL-1, E-DL-2, E-CANCEL-1, E-PREV-1.
+//! Chapter row actions of the manga page that are pure decisions (T-38b-017): which download action a row's menu runs,
+//! which rows a download action may act on, and mark previous as read. Upstream: `MangaScreenModel.kt` (download actions,
+//! `markPreviousAsRead`). The download button itself is `widgets::download_button`. Behaviour 6.9.1, 6.9.8; E-DL-1,
+//! E-DL-2, E-CANCEL-1, E-PREV-1.
 
 use kuro_downloads::DownloadState;
 
@@ -18,67 +19,9 @@ pub enum IndicatorAction {
     Delete,
 }
 
-/// A press on the indicator of a row.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Press {
-    Click,
-    LongPress,
-}
-
-/// What a press does (behaviour 7.5): runs an action at once, or opens the menu of the row's state with these items.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    Run(IndicatorAction),
-    Menu(&'static [IndicatorAction]),
-}
-
-/// The click and long-press table of the indicator, one entry for each of the five states and two presses. A queued or
-/// downloading row opens a menu on a click and cancels on a long press; a downloaded row opens its Delete menu on both;
-/// an error row retries on both; a row that is not downloaded starts on a click and starts now on a long press.
-pub fn outcome(state: DownloadState, press: Press) -> Outcome {
-    match (state, press) {
-        (DownloadState::NotDownloaded, Press::Click) => Outcome::Run(IndicatorAction::Start),
-        (DownloadState::NotDownloaded, Press::LongPress) => Outcome::Run(IndicatorAction::StartNow),
-        (DownloadState::Queue | DownloadState::Downloading, Press::Click) => Outcome::Menu(&[IndicatorAction::StartNow, IndicatorAction::Cancel]),
-        (DownloadState::Queue | DownloadState::Downloading, Press::LongPress) => Outcome::Run(IndicatorAction::Cancel),
-        (DownloadState::Downloaded, _) => Outcome::Menu(&[IndicatorAction::Delete]),
-        (DownloadState::Error, _) => Outcome::Run(IndicatorAction::Start),
-    }
-}
-
-/// The label of a menu item: "Start downloading now", "Cancel" or "Delete". `Start` is never in a menu.
-pub fn menu_label(action: IndicatorAction) -> kuro_i18n::MsgKey {
-    match action {
-        IndicatorAction::Cancel => kuro_i18n::MsgKey::action_cancel,
-        IndicatorAction::Delete => kuro_i18n::MsgKey::action_delete,
-        IndicatorAction::Start | IndicatorAction::StartNow => kuro_i18n::MsgKey::action_start_downloading_now,
-    }
-}
-
 /// The indicator answers presses only while no row is selected, and a local manga has none (E-27).
 pub fn indicator_enabled(local: bool, selected: usize) -> bool {
     !local && selected == 0
-}
-
-/// How the indicator of a queued or downloading row is drawn (`DownloadingIndicator`). A queued row, and a downloading
-/// one at 0 %, spins with no progress. Otherwise the ring fills to `fraction` (the percent over 100, clamped to
-/// [0, 1], E-39) and the arrow takes the background colour from half way on, so it stays visible on the filled ring.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Ring {
-    pub indeterminate: bool,
-    pub fraction: f64,
-    pub arrow_on_fill: bool,
-}
-
-/// The ring of a state, or `None` for the three states that draw an icon.
-pub fn ring(state: DownloadState, percent: u8) -> Option<Ring> {
-    let indeterminate = match state {
-        DownloadState::Queue => true,
-        DownloadState::Downloading => percent == 0,
-        _ => return None,
-    };
-    let fraction = (f64::from(percent) / 100.0).clamp(0.0, 1.0);
-    Some(Ring { indeterminate, fraction, arrow_on_fill: !indeterminate && fraction >= 0.5 })
 }
 
 pub fn indicator_action(state: DownloadState) -> IndicatorAction {
@@ -182,63 +125,10 @@ mod tests {
     use crate::entry_core::flags::ChapterFlags;
 
     #[test]
-    fn each_state_and_press_has_the_outcome_of_the_table() {
-        use DownloadState::*;
-        use IndicatorAction::*;
-        use Press::*;
-        let menu_now_cancel = Outcome::Menu(&[StartNow, Cancel]);
-        let menu_delete = Outcome::Menu(&[Delete]);
-        let table = [
-            (NotDownloaded, Click, Outcome::Run(Start)),
-            (NotDownloaded, LongPress, Outcome::Run(StartNow)),
-            (Queue, Click, menu_now_cancel),
-            (Queue, LongPress, Outcome::Run(Cancel)),
-            (Downloading, Click, menu_now_cancel),
-            (Downloading, LongPress, Outcome::Run(Cancel)),
-            (Downloaded, Click, menu_delete),
-            (Downloaded, LongPress, menu_delete),
-            (Error, Click, Outcome::Run(Start)),
-            (Error, LongPress, Outcome::Run(Start)),
-        ];
-        for (state, press, want) in table {
-            assert_eq!(outcome(state, press), want, "{state:?} {press:?}");
-        }
-    }
-
-    #[test]
-    fn the_menus_hold_only_labelled_actions_and_a_not_downloaded_or_error_row_has_none() {
-        for state in [DownloadState::Queue, DownloadState::Downloading, DownloadState::Downloaded] {
-            let Outcome::Menu(items) = outcome(state, Press::Click) else { panic!("{state:?} opens a menu") };
-            assert!(!items.contains(&IndicatorAction::Start));
-        }
-        for state in [DownloadState::NotDownloaded, DownloadState::Error] {
-            assert!(matches!(outcome(state, Press::Click), Outcome::Run(_)), "{state:?} has no menu");
-        }
-        assert_eq!(menu_label(IndicatorAction::Cancel), kuro_i18n::MsgKey::action_cancel);
-        assert_eq!(menu_label(IndicatorAction::Delete), kuro_i18n::MsgKey::action_delete);
-        assert_eq!(menu_label(IndicatorAction::StartNow), kuro_i18n::MsgKey::action_start_downloading_now);
-    }
-
-    #[test]
     fn the_indicator_is_off_for_a_local_manga_and_while_a_row_is_selected() {
         assert!(indicator_enabled(false, 0));
         assert!(!indicator_enabled(false, 1));
         assert!(!indicator_enabled(true, 0));
-    }
-
-    #[test]
-    fn the_ring_spins_when_queued_or_at_zero_and_switches_the_arrow_at_half() {
-        assert_eq!(ring(DownloadState::NotDownloaded, 0), None);
-        assert_eq!(ring(DownloadState::Downloaded, 100), None);
-        assert_eq!(ring(DownloadState::Error, 40), None);
-        assert!(ring(DownloadState::Queue, 60).unwrap().indeterminate, "a queued row never shows progress");
-        assert!(ring(DownloadState::Downloading, 0).unwrap().indeterminate);
-        let at = |percent| ring(DownloadState::Downloading, percent).unwrap();
-        assert_eq!((at(49).indeterminate, at(49).arrow_on_fill), (false, false));
-        assert!(at(50).arrow_on_fill, "from 0.5 the arrow takes the background colour");
-        assert_eq!(at(25).fraction, 0.25);
-        assert_eq!(at(250).fraction, 1.0, "the fraction is clamped to one (E-39)");
-        assert!(!ring(DownloadState::Queue, 90).unwrap().arrow_on_fill);
     }
 
     #[test]

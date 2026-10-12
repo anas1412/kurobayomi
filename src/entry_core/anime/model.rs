@@ -27,21 +27,22 @@ use kuro_domain::entries::defaults::{episode_default_word, season_default_word};
 use kuro_domain::entries::anime::AnimeExt;
 use kuro_domain::items::missing::{ListRow, insert_missing_separators};
 use kuro_domain::items::sorter::{SortKey, compare_items};
+use kuro_downloads::DownloadState;
+use kuro_i18n::{MsgKey, tr_plural};
 use kuro_prefs::store::PrefStore;
 
 use super::entry_state::{EntryFlow, RefreshPlan, refresh_on_open};
-use super::episode_row::{EpisodeRow, Line, row};
-use super::season_settings;
+use super::episode_row::row;
 use super::season_tile::SeasonExtra;
 use super::summary::SummaryExpansion;
 use super::selection::Selection;
 use super::header::{ItemHeader, header_missing_count, item_header};
 use super::layout::{Fab, fab};
 use super::refresh::open_refresh_due;
-use super::settings::{display_rows, sort_click};
 use super::store::AnimeStore;
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
+use crate::entry_core::list_model::RowItem;
 
 /// What the load reads besides the rows: values read once at open (behaviour 2.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -75,6 +76,8 @@ pub struct AnimeEntryModel {
     pub session_flags: Option<(i64, i64)>,
     /// The ids of the episodes on disk. The runner fills it after the load and after a download or a delete.
     pub downloaded: HashSet<i64>,
+    /// The queue state and percent of the queued episodes, from the live download adapter (`downloads::live`).
+    pub queued: HashMap<i64, (DownloadState, u8)>,
     /// How many trackers the entry is bound to, read when the page opens.
     pub tracking_count: usize,
     /// The download count and source language of each season, by season id. The runner sends them after the load, so
@@ -132,6 +135,7 @@ impl AnimeEntryModel {
             refresh_error: None,
             session_flags,
             downloaded: HashSet::new(),
+            queued: HashMap::new(),
             tracking_count,
             season_extras: HashMap::new(),
         }))
@@ -169,26 +173,10 @@ impl AnimeEntryModel {
         }
     }
 
-    /// The same for a Sort click: the key in use flips its direction, another key becomes the sort.
-    pub fn note_sort(&mut self, mode: i64) {
-        if let Some((episode_flags, _)) = &mut self.session_flags {
-            *episode_flags = sort_click(*episode_flags, mode);
-            self.anime.episode_flags = *episode_flags;
-        }
-    }
-
-    /// The same for a masked write of the season flag word (the season settings window).
+    /// The same for a masked write of the season flag word (the season list options).
     pub fn note_season_write(&mut self, flag: i64, mask: i64) {
         if let Some((_, season_flags)) = &mut self.session_flags {
             *season_flags = (*season_flags & !mask) | (flag & mask);
-            self.anime.season_flags = *season_flags;
-        }
-    }
-
-    /// And for a Sort click of the season settings window.
-    pub fn note_season_sort(&mut self, code: i64) {
-        if let Some((_, season_flags)) = &mut self.session_flags {
-            *season_flags = season_settings::sort_click(*season_flags, code);
             self.anime.season_flags = *season_flags;
         }
     }
@@ -236,29 +224,65 @@ impl AnimeEntryModel {
         self.processed().iter().map(|e| e.id).collect()
     }
 
-    /// One row per processed episode, in list order.
-    pub fn rows(&self) -> Vec<EpisodeRow> {
-        self.processed().iter().map(|ep| self.row_of(ep)).collect()
-    }
-
-    /// The row of one episode with the list settings, its selection and its summary state.
-    fn row_of(&self, ep: &Episode) -> EpisodeRow {
-        let flags = display_rows(self.anime.episode_flags);
-        EpisodeRow {
-            summary_expanded: self.summaries.is_expanded(ep.id),
-            ..row(ep, flags.episode_number, flags.previews, flags.summaries, self.selection.contains(ep.id))
+    /// A change the live download adapter reported for one episode: a queued, running or failed episode keeps its state
+    /// and percent; one that left the queue is on disk (`Downloaded`) or not (a cancel).
+    pub fn apply_live(&mut self, id: i64, state: DownloadState, percent: u8) {
+        match state {
+            DownloadState::Downloaded => {
+                self.queued.remove(&id);
+                self.downloaded.insert(id);
+            }
+            DownloadState::NotDownloaded => {
+                self.queued.remove(&id);
+            }
+            _ => {
+                self.queued.insert(id, (state, percent));
+            }
         }
     }
 
-    /// The list lines in view order: a row per processed episode, and a missing-count separator wherever two neighbours
-    /// skip numbers (`insertSeparators`, T-39a-015). The separators follow the filtered list (OD-1, Kotlin parity).
-    pub fn lines(&self) -> Vec<Line> {
+    /// The download state and percent of one episode: a local entry has every episode on disk, a queue entry wins over
+    /// the copy on disk (T-DL-6), and without either the episode is not downloaded.
+    fn download_of(&self, id: i64) -> (DownloadState, u8) {
+        if self.is_local() {
+            return (DownloadState::Downloaded, 0);
+        }
+        match self.queued.get(&id) {
+            Some(&queued) => queued,
+            None if self.downloaded.contains(&id) => (DownloadState::Downloaded, 0),
+            None => (DownloadState::NotDownloaded, 0),
+        }
+    }
+
+    /// One row per processed episode, in list order.
+    pub fn rows(&self) -> Vec<RowItem> {
+        self.processed().iter().map(|ep| self.row_of(ep)).collect()
+    }
+
+    /// The row of one episode with the list settings, its selection, its summary state and its download state. A local
+    /// entry has no download button, and the button is off while anything is selected.
+    fn row_of(&self, ep: &Episode) -> RowItem {
+        let number = self.anime.display_mode() == kuro_domain::entries::anime::episode_flags::DISPLAY_NUMBER;
+        let (download, progress) = self.download_of(ep.id);
+        RowItem {
+            summary_expanded: self.summaries.is_expanded(ep.id),
+            download,
+            progress,
+            indicator: !self.is_local(),
+            indicator_enabled: !self.selection.is_active(),
+            ..row(ep, number, self.anime.show_summaries(), self.selection.contains(ep.id))
+        }
+    }
+
+    /// The list rows in view order: a row per processed episode, and a missing-count marker wherever two neighbours
+    /// skip numbers (`insertSeparators`, T-39a-015). The markers follow the filtered list (OD-1, Kotlin parity).
+    pub fn lines(&self) -> Vec<RowItem> {
         let descending = self.anime.sort_descending();
         insert_missing_separators(self.processed(), descending)
             .into_iter()
             .map(|item| match item {
-                ListRow::Item(ep) => Line::Episode(self.row_of(&ep)),
-                ListRow::MissingCount { id, count } => Line::Missing { key: format!("missing-count-{id}"), count },
+                ListRow::Item(ep) => self.row_of(&ep),
+                ListRow::MissingCount { id, count } => RowItem::marker(id, count, tr_plural(MsgKey::missing_items, i64::from(count), &[])),
             })
             .collect()
     }
@@ -449,7 +473,7 @@ mod tests {
         model.apply_snapshot(Anime { episode_flags: 0, ..anime }, episodes);
         assert_eq!(model.anime.episode_flags & ep::UNSEEN_MASK, ep::SHOW_UNSEEN, "the session copy took the write");
         assert_eq!(model.rows().len(), 2, "only the unseen episodes show");
-        model.note_sort(ep::SORTING_NUMBER);
+        model.note_flag_write(ep::SORTING_NUMBER, ep::SORTING_MASK);
         assert_eq!(model.anime.episode_flags & ep::SORTING_MASK, ep::SORTING_NUMBER);
         assert_eq!(model.anime.episode_flags & ep::UNSEEN_MASK, ep::SHOW_UNSEEN, "the sort leaves the filter alone");
     }
@@ -461,7 +485,7 @@ mod tests {
         let mut model = load(&store, id);
         let episode_word = model.anime.episode_flags;
         model.note_season_write(sf::SHOW_STARTED, sf::STARTED_MASK);
-        model.note_season_sort(sf::SORT_UPLOAD);
+        model.note_season_write(sf::SORT_UPLOAD, sf::SORT_MASK);
         let (anime, episodes) = (model.anime.clone(), model.episodes.clone());
         model.apply_snapshot(Anime { season_flags: 0, ..anime }, episodes);
         assert_eq!(model.anime.season_flags & sf::STARTED_MASK, sf::SHOW_STARTED);
@@ -490,7 +514,7 @@ mod tests {
         let mut model = load(&store, id);
         let before = model.anime.episode_flags;
         model.note_flag_write(ep::SHOW_UNSEEN, ep::UNSEEN_MASK);
-        model.note_sort(ep::SORTING_NUMBER);
+        model.note_flag_write(ep::SORTING_NUMBER, ep::SORTING_MASK);
         assert_eq!(model.anime.episode_flags, before, "the row's own value shows");
     }
 
@@ -562,10 +586,27 @@ mod tests {
         model.episodes.retain(|e| e.episode_number != 2.0);
         let lines = model.lines();
         assert_eq!(lines.len(), 4, "three episodes and one separator");
-        assert!(matches!(&lines[2], Line::Missing { count: 1, .. }), "{lines:?}");
-        assert!(matches!(&lines[1], Line::Episode(_)));
+        assert_eq!(lines[2].missing, Some(1), "{lines:?}");
+        assert_eq!(lines[1].missing, None);
         let full = load(&store, id);
-        assert!(full.lines().iter().all(|l| matches!(l, Line::Episode(_))), "no gap, no separator");
+        assert!(full.lines().iter().all(|l| l.missing.is_none()), "no gap, no separator");
+    }
+
+    #[test]
+    fn a_queued_episode_shows_its_queue_state_until_it_lands_on_disk() {
+        let (_dir, store, id) = with_episodes(true, true, 2, 0);
+        let mut model = load(&store, id);
+        let ep = model.episodes[0].id;
+        let row = |model: &AnimeEntryModel| model.rows().into_iter().find(|r| r.id == ep).unwrap();
+        assert_eq!((row(&model).download, row(&model).progress), (DownloadState::NotDownloaded, 0));
+        assert!(row(&model).indicator && row(&model).indicator_enabled);
+        model.apply_live(ep, DownloadState::Downloading, 40);
+        assert_eq!((row(&model).download, row(&model).progress), (DownloadState::Downloading, 40));
+        model.apply_live(ep, DownloadState::Downloaded, 0);
+        assert_eq!(row(&model).download, DownloadState::Downloaded);
+        assert!(model.downloaded.contains(&ep), "the downloaded filter sees it too");
+        model.apply_live(ep, DownloadState::NotDownloaded, 0);
+        assert_eq!(row(&model).download, DownloadState::Downloaded, "a cancel later does not forget the copy on disk");
     }
 
     #[test]

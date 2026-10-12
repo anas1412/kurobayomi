@@ -139,13 +139,14 @@ pub fn build(description: &Description, expansion: Rc<Cell<Expansion>>, genres: 
     overlay.add_controller(tap);
     caret.connect_clicked(move |_| toggle());
 
+    // the text never touches the pane's edges, on the manga and the anime page alike
     let root = GBox::new(O::Vertical, 0);
+    root.set_margin_start(16);
+    root.set_margin_end(16);
     root.append(&overlay);
     root.append(&caret);
     if let Some((row, wrap)) = chips {
         for w in [row.upcast_ref::<gtk::Widget>(), wrap.upcast_ref()] {
-            w.set_margin_start(16);
-            w.set_margin_end(16);
             w.set_margin_bottom(8);
             root.append(w);
         }
@@ -187,7 +188,6 @@ mod tests {
                     let copied = Rc::clone(&copied);
                     move |t| copied.borrow_mut().push(t)
                 }),
-                on_cover: Rc::new(|| {}),
             };
             let text = description(Some("A long story."));
             let chips = genre_chips(Some(&["Action".to_owned(), "Drama".to_owned()]));

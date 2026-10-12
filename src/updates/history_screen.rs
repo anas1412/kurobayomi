@@ -291,13 +291,6 @@ impl HistoryScreen {
         self.finish_resume(line.entry_id, outcome);
     }
 
-    /// Resume-last: the newest history row of this kind. With no history nothing happens.
-    pub fn resume_last(self: &Rc<Self>) {
-        if let Some((entry_id, outcome)) = history_data::resume_last(&self.db(), self.kind) {
-            self.finish_resume(entry_id, outcome);
-        }
-    }
-
     fn finish_resume(&self, entry_id: i64, outcome: Resume<Unit>) {
         match outcome {
             Resume::Open(unit) => open_unit(self.kind, entry_id, &unit),

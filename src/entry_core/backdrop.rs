@@ -4,25 +4,15 @@
 
 use image::RgbaImage;
 
-/// The alpha of the cover backdrop.
+/// The alpha of the backdrop at its top edge: the blurred cover, and the theme colour fading out behind the header.
 pub const BACKDROP_ALPHA: f64 = 0.2;
 
 /// The blur strength in pixels at 1x (a Gaussian sigma of about 4 px).
 pub const BLUR_SIGMA_PX: f32 = 4.0;
 
-/// The gradient stops as `(offset, alpha)`, top to bottom: transparent at the top, the window background at the bottom.
-pub fn gradient_stops() -> [(f64, f64); 2] {
-    [(0.0, 0.0), (1.0, 1.0)]
-}
-
-/// The CSS class of the gradient layer over the backdrop.
+/// The CSS class of the gradient layer over the backdrop. Its rule is in `theme/style.css`: clear at the top, the window
+/// background at the bottom.
 pub const FADE_CLASS: &str = "kuro-backdrop-fade";
-
-/// The CSS rule of the gradient layer: `gradient_stops` as alpha steps of the window background, top to bottom.
-pub fn gradient_css() -> String {
-    let stops: Vec<String> = gradient_stops().iter().map(|(offset, alpha)| format!("alpha(@theme_bg_color, {alpha}) {}%", (offset * 100.0).round())).collect();
-    format!(".{FADE_CLASS} {{ background-image: linear-gradient(to bottom, {}); }}", stops.join(", "))
-}
 
 /// The longest side of the picture that is blurred. The blur hides the detail, so a small copy is enough and the widget
 /// stretches it over the header.
@@ -52,11 +42,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_backdrop_is_faint_and_the_gradient_runs_clear_to_solid() {
+    fn the_backdrop_is_faint() {
         assert_eq!(BACKDROP_ALPHA, 0.2);
-        let stops = gradient_stops();
-        assert_eq!(stops[0], (0.0, 0.0));
-        assert_eq!(stops[1], (1.0, 1.0));
     }
 
     #[test]
@@ -84,13 +71,6 @@ mod tests {
         let neighbour = ((4 * w + 5) * 4) as usize;
         assert!(out[neighbour] > 0, "the blur reaches the next pixel");
         assert!(out[centre] < 255, "the centre gets dimmer");
-    }
-
-    #[test]
-    fn the_gradient_css_runs_from_clear_to_the_window_background() {
-        let css = gradient_css();
-        assert!(css.starts_with(".kuro-backdrop-fade"));
-        assert!(css.contains("alpha(@theme_bg_color, 0) 0%") && css.contains("alpha(@theme_bg_color, 1) 100%"), "{css}");
     }
 
     #[test]

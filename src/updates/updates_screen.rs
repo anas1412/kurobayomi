@@ -1,5 +1,5 @@
 //! The Updates screen of one kind (T-42a-030, T-42a-034, T-42a-036): the feed under date headers, the selection gestures
-//! (long press, tap while selecting, Ctrl and Shift click, Escape) and the bulk bar (bookmark, fillermark, read
+//! (the row menu's Select, tap while selecting, Ctrl and Shift click, Escape) and the bulk bar (bookmark, fillermark, read
 //! state, download, delete, play). Each row shows its download state and offers the indicator's actions. In selection
 //! mode the cover tap is off and the bar shows; there is no search field.
 
@@ -13,7 +13,7 @@ use chrono::{Local, Months};
 use gtk::gdk::{self, ModifierType};
 use gtk::glib;
 use gtk::prelude::*;
-use gtk::{Box as GBox, Button, CheckButton, GestureClick, GestureLongPress, Image, Label, ListBox, Orientation as O};
+use gtk::{Box as GBox, Button, CheckButton, GestureClick, Image, Label, ListBox, Orientation as O};
 use kuro_domain::dates::ListRow;
 use kuro_domain::kind::EntryKind;
 use kuro_domain::updates::repo::UpdatesRepo;
@@ -27,7 +27,7 @@ use crate::updates::bulk::{self, BulkAction};
 use crate::updates::coalesce::watch_coalesced;
 use crate::updates::download_actions::{self, DownloadAction, EntryFacts, UnitTarget};
 use crate::updates::download_exec;
-use crate::updates::download_host::{self, UnitEvent};
+use crate::updates::download_host;
 use crate::updates::download_state::{Change, DiskCache, DownloadState};
 use crate::updates::feed::{self, FeedRow, Gesture, Press};
 use crate::updates::format;
@@ -39,6 +39,8 @@ use crate::updates::state_page::PageStates;
 use crate::updates::updates_dialog::confirm_bulk_delete;
 use crate::updates::updates_page::{self, BackAction, UpdatesLoad, back_action, cover_click_enabled};
 use crate::library::layout::{SPACE_L, SPACE_S};
+use crate::widgets::context_menu::{self, Item};
+use crate::widgets::download_button::{DownloadButton, Request};
 
 /// The icon of the empty feed.
 const EMPTY_ICON: &str = "software-update-available-symbolic";
@@ -445,7 +447,7 @@ impl UpdatesScreen {
         }
         texts.append(&detail);
         line.append(&texts);
-        line.append(&self.download_indicator(feed_row));
+        line.append(&self.download_button(feed_row, mode));
 
         let list_row = gtk::ListBoxRow::builder().child(&line).activatable(false).name(feed::row_name(row.item_id)).build();
         if feed_row.selected {
@@ -455,32 +457,19 @@ impl UpdatesScreen {
         list_row
     }
 
-    /// Long press, tap, Ctrl+click and Shift+click on a row. A long press that fired suppresses the release's tap.
+    /// Tap, Ctrl+click and Shift+click on a row, and its right-click menu (a long press on a touch screen), whose Select
+    /// starts the selection as the long press did.
     fn attach_gestures(self: &Rc<Self>, row: &gtk::ListBoxRow, id: i64) {
-        let long_fired = Rc::new(std::cell::Cell::new(false));
-        let long = GestureLongPress::new();
-        let (weak, fired) = (Rc::downgrade(self), Rc::clone(&long_fired));
-        long.connect_pressed(move |_, _, _| {
-            fired.set(true);
-            if let Some(screen) = weak.upgrade() {
-                screen.press_later(Gesture::LongPress, id);
-            }
-        });
-        let fired = Rc::clone(&long_fired);
-        long.connect_cancelled(move |_| fired.set(false));
-        row.add_controller(long);
-
         let click = GestureClick::new();
-        let (weak, fired) = (Rc::downgrade(self), long_fired);
+        let weak = Rc::downgrade(self);
         click.connect_released(move |gesture, _, _, _| {
-            if fired.replace(false) {
-                return;
-            }
             if let Some(screen) = weak.upgrade() {
                 screen.press_later(click_gesture(gesture.current_event_state()), id);
             }
         });
         row.add_controller(click);
+        let weak = Rc::downgrade(self);
+        context_menu::attach(row, move |_, _| weak.upgrade().map_or_else(Vec::new, |screen| screen.row_menu(id)));
         // Enter and Space on the focused row act as a tap
         let weak = Rc::downgrade(self);
         on_key_activate(row, move || {
@@ -488,6 +477,51 @@ impl UpdatesScreen {
                 screen.press_later(Gesture::Tap, id);
             }
         });
+    }
+
+    /// The right-click menu of the row of unit `id`: Open, Mark as read or unread (watched or unwatched), Download while
+    /// it is not downloaded or queued, and Select. The row's facts are copied out before the items are made.
+    fn row_menu(self: &Rc<Self>, id: i64) -> Vec<Item> {
+        let facts = match &*self.load.borrow() {
+            UpdatesLoad::Loaded(rows) => rows.iter().find(|r| r.row.item_id == id).map(|r| (r.row.done, r.download.state)),
+            _ => None,
+        };
+        let Some((done, state)) = facts else { return Vec::new() };
+        let anime = self.kind == EntryKind::Anime;
+        let weak = Rc::downgrade(self);
+        let act = move |run: Box<dyn Fn(&Rc<Self>)>| {
+            let weak = weak.clone();
+            move || {
+                if let Some(screen) = weak.upgrade() {
+                    run(&screen);
+                }
+            }
+        };
+        let mark = if done { BarAction::MarkUnread } else { BarAction::MarkRead };
+        let mut items = vec![
+            Item::new(crate::browse::texts::OPEN, 0, act(Box::new(move |screen: &Rc<Self>| screen.open_unit(id, false)))),
+            Item::new(tr(bottom_bar::label(mark, anime)), 1, act(Box::new(move |screen: &Rc<Self>| screen.mark_one(id, !done)))),
+        ];
+        if matches!(state, DownloadState::NotDownloaded | DownloadState::Error) {
+            items.push(Item::new(tr(MsgKey::action_download), 1, act(Box::new(move |screen: &Rc<Self>| screen.row_download(DownloadAction::Start, id)))));
+        }
+        items.push(Item::new(tr(MsgKey::action_select), 2, act(Box::new(move |screen: &Rc<Self>| screen.press(Gesture::LongPress, id)))));
+        items
+    }
+
+    /// Marks one unit read (or seen) or not, as the bar's action does for a selection; marking read removes its download
+    /// when the preference says so (E-U33).
+    fn mark_one(self: &Rc<Self>, id: i64, read: bool) {
+        let target = match &*self.load.borrow() {
+            UpdatesLoad::Loaded(rows) => rows.iter().find(|r| r.row.item_id == id).map(|r| UnitTarget { entry_id: r.row.entry_id, unit_id: id, state: r.download.state }),
+            _ => None,
+        };
+        let Some(target) = target else { return };
+        match bulk::apply(&self.db(), self.kind, &[id], BulkAction::MarkRead(read)) {
+            Ok(()) if read => self.remove_downloads_of_read(vec![target]),
+            Ok(()) => {}
+            Err(message) => self.show_toast(&message),
+        }
     }
 
     /// Handles the press after the gesture callback returns, because a change rebuilds the row that owns the gesture.
@@ -676,11 +710,10 @@ impl UpdatesScreen {
         });
     }
 
-    /// Follows the download hub: a unit event patches the row it names, a cache or queue change re-derives every
-    /// row (T-42b-002, T-42b-003). The feed query itself is not re-run for these.
+    /// Follows the downloads: a change of a queued unit (`downloads::live`) patches the row it names, and a cache or
+    /// queue change on the hub re-derives every row (T-42b-002, T-42b-003). The feed query itself is not re-run for these.
     fn watch_downloads(self: &Rc<Self>) {
-        let hub = download_host::hub();
-        let (mut changes, mut units) = (hub.cache.subscribe(), hub.subscribe_units());
+        let mut changes = download_host::hub().cache.subscribe();
         let weak = Rc::downgrade(self);
         let on_changes = glib::spawn_future_local(async move {
             use tokio::sync::broadcast::error::RecvError;
@@ -695,23 +728,16 @@ impl UpdatesScreen {
                 }
             }
         });
-        let weak = Rc::downgrade(self);
-        let on_units = glib::spawn_future_local(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            loop {
-                let event: Option<UnitEvent> = match units.recv().await {
-                    Ok(event) => Some(event),
-                    Err(RecvError::Lagged(_)) => None,
-                    Err(RecvError::Closed) => return,
-                };
-                let Some(screen) = weak.upgrade() else { return };
-                match event {
-                    Some(UnitEvent { unit_id, change }) => screen.patch_unit(unit_id, change),
-                    None => screen.refresh_later(true),
-                }
+        *self.download_watch.borrow_mut() = vec![on_changes];
+        let (weak, kind) = (Rc::downgrade(self), self.kind);
+        crate::downloads::live::follow(&self.root, move |live| {
+            if live.kind == kind
+                && let Some(screen) = weak.upgrade()
+            {
+                screen.patch_unit(live.id, Change::Status(live.state));
+                screen.patch_unit(live.id, Change::Progress(i64::from(live.percent)));
             }
         });
-        *self.download_watch.borrow_mut() = vec![on_changes, on_units];
     }
 
     /// One download event: patches the matching row, then redraws after the quiet period.
@@ -725,46 +751,23 @@ impl UpdatesScreen {
         }
     }
 
-    /// The download indicator of a row: the state's icon (with the percent while downloading) over a menu of the
-    /// state's actions (T-42a-031).
-    fn download_indicator(self: &Rc<Self>, feed_row: &FeedRow) -> gtk::MenuButton {
-        let state = feed_row.download.state;
-        let content = GBox::new(O::Horizontal, 4);
-        content.append(&Image::from_icon_name(download_actions::indicator_icon(state)));
-        if state == DownloadState::Downloading {
-            content.append(&Label::new(Some(&format!("{}%", feed_row.download.progress.clamp(0, 100)))));
-        }
-        let button = crate::ui::quiet_menu(gtk::MenuButton::builder().child(&content).has_frame(false).valign(gtk::Align::Center).build());
-        let popover = gtk::Popover::new();
-        let menu = GBox::new(O::Vertical, 2);
-        for action in download_actions::indicator_actions(self.kind == EntryKind::Anime, state, qualities::available()) {
-            let item = Button::with_label(&tr(download_actions::row_action_label(action, state)));
-            item.add_css_class("flat");
-            let (weak, popover, id) = (Rc::downgrade(self), popover.clone(), feed_row.row.item_id);
-            item.connect_clicked(move |_| {
-                popover.popdown();
-                if let Some(screen) = weak.upgrade() {
-                    screen.row_download(action, id);
-                }
-            });
-            menu.append(&item);
-        }
-        popover.set_child(Some(&menu));
-        button.set_popover(Some(&popover));
-        // the long press of a not-downloaded anime indicator shows the qualities instead of the menu, and the row's own
-        // long press (selection) does not see it
-        if let Some(action) = download_actions::indicator_long_press(self.kind == EntryKind::Anime, state, qualities::available()) {
-            let long = GestureLongPress::new();
-            let (weak, id) = (Rc::downgrade(self), feed_row.row.item_id);
-            long.connect_pressed(move |gesture, _, _| {
-                gesture.set_state(gtk::EventSequenceState::Claimed);
-                if let Some(screen) = weak.upgrade() {
-                    screen.row_download(action, id);
-                }
-            });
-            button.add_controller(long);
-        }
-        button
+    /// The download button of a row (`widgets::download_button`): a click starts, retries, cancels, or offers Delete. It
+    /// is off while selecting, as the cover tap is.
+    fn download_button(self: &Rc<Self>, feed_row: &FeedRow, mode: bool) -> gtk::Button {
+        let (weak, id) = (Rc::downgrade(self), feed_row.row.item_id);
+        let button = DownloadButton::new(move |request| {
+            let action = match request {
+                Request::Start => DownloadAction::Start,
+                Request::Cancel => DownloadAction::Cancel,
+                Request::Delete => DownloadAction::Delete,
+            };
+            if let Some(screen) = weak.upgrade() {
+                screen.row_download(action, id);
+            }
+        });
+        button.set(feed_row.download.state, feed_row.download.progress.clamp(0, 100) as u8);
+        button.widget.set_sensitive(cover_click_enabled(mode));
+        button.widget
     }
 }
 

@@ -12,8 +12,8 @@
 //! - T-47b-035 the MIUI banner, T-47b-042 the ART profile row, T-47b-051 the OneUI and MIUI rows: no such device on Linux.
 //! - T-47b-054 the persistable URI permission: paths are plain paths or `gio::File` URIs.
 //! - T-47b-056 the list item animations: lists update at once.
-//! - T-47ba-017 the More storage route: the More list opens the settings screens only.
-//! - T-47ba-075 `ActivityCompat.recreate` (the theme swaps live), Compose previews, the animated More icon, and the
+//! - T-47ba-017 the storage route: the settings list opens the settings screens only.
+//! - T-47ba-075 `ActivityCompat.recreate` (the theme swaps live), Compose previews, and the
 //!   Android storage-manager gate (the platform data directory replaces it).
 //! - T-48a-020 the system status bar row: not offered; the header bar stays in fullscreen unless the user hides it (area 36).
 //! - T-48a-053 the external player package list: cut with the external player settings (settings diet).
@@ -31,7 +31,6 @@ pub mod clipboard;
 pub mod cookie_import;
 pub mod downloads;
 pub mod jobs;
-pub mod lang;
 pub mod library;
 pub mod library_csv;
 pub mod library_export;

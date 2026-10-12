@@ -98,7 +98,6 @@ fn tracker_row(name: &str, logged_in: bool, on_login: std::rc::Rc<dyn Fn()>, on_
         image
     });
     let trailing = check.as_ref().map(|image| image.clone().upcast::<gtk::Widget>());
-    super::style::install();
     let built = row::build(row::RowSpec {
         title: name,
         subtitle: None,

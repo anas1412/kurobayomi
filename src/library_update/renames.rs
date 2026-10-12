@@ -82,23 +82,24 @@ fn episode_ref(e: &Episode) -> EpisodeRef {
 
 /// The folder renames behind the two sync ports.
 pub struct FolderRenames {
-    root: PathBuf,
+    manga_root: PathBuf,
+    anime_root: PathBuf,
     source_names: SourceNames,
     index: Option<DownloadIndex>,
 }
 
 impl FolderRenames {
-    /// `index` is the manga download cache; a rename moves the chapter in it so the page shows the chapter downloaded
-    /// without a rescan.
-    pub fn new(root: PathBuf, source_names: SourceNames, index: Option<DownloadIndex>) -> Self {
-        Self { root, source_names, index }
+    /// `manga_root` and `anime_root` are the downloads folders of each kind. `index` is the manga download cache; a
+    /// rename moves the chapter in it so the page shows the chapter downloaded without a rescan.
+    pub fn new(manga_root: PathBuf, anime_root: PathBuf, source_names: SourceNames, index: Option<DownloadIndex>) -> Self {
+        Self { manga_root, anime_root, source_names, index }
     }
 }
 
 impl ChapterRenames for FolderRenames {
     fn rename(&self, manga: &Manga, stored: &Chapter, prepared: &Chapter) {
         let Some(source_name) = (self.source_names)(manga.source) else { return };
-        let layout = DownloadLayout::new(&self.root);
+        let layout = DownloadLayout::new(&self.manga_root);
         let old = (stored.name.as_str(), stored.scanlator.as_deref());
         let new = (prepared.name.as_str(), prepared.scanlator.as_deref());
         match rename_chapter_folder(&layout, &source_name, &manga.title, old, new) {
@@ -121,7 +122,7 @@ impl EpisodeRenames for FolderRenames {
         let source = AnimeSource { id: anime.source, name, lang, is_http: true, unmetered: false };
         let show = AnimeRef { id: anime.id, source_id: anime.source, url: anime.url.clone(), title: anime.title.clone() };
         let (old, new) = (episode_ref(stored), episode_ref(prepared));
-        let layout = AnimeLayout::new(Some(self.root.clone()));
+        let layout = AnimeLayout::new(Some(self.anime_root.clone()));
         // The layout logs an error for an episode with no folder, and a rename creates the anime folder; only a
         // downloaded episode gets that far (S-17).
         if layout.find_episode_dir(&source, &show, &old).is_none() {
@@ -203,10 +204,10 @@ mod tests {
         let manga = Manga { source: 7, title: "Title".into(), ..Manga::create() };
         let stored = Chapter { name: "Ch 1".into(), ..Chapter::create() };
         let prepared = Chapter { name: "Ch 1 v2".into(), ..Chapter::create() };
-        let unknown = FolderRenames::new(dir.path().to_path_buf(), names("Other (EN)"), None);
+        let unknown = FolderRenames::new(dir.path().to_path_buf(), dir.path().to_path_buf(), names("Other (EN)"), None);
         ChapterRenames::rename(&unknown, &Manga { source: 8, ..manga.clone() }, &stored, &prepared);
         assert!(manga_folder.join("Ch 1").is_dir(), "a source the lookup does not know is not touched");
-        let known = FolderRenames::new(dir.path().to_path_buf(), names("Src (EN)"), None);
+        let known = FolderRenames::new(dir.path().to_path_buf(), dir.path().to_path_buf(), names("Src (EN)"), None);
         ChapterRenames::rename(&known, &manga, &stored, &prepared);
         assert!(manga_folder.join("Ch 1 v2").is_dir());
     }
@@ -218,7 +219,7 @@ mod tests {
         let anime = Anime { source: 7, title: "Show".into(), ..Anime::create() };
         let stored = Episode { name: "Ep 1".into(), ..Episode::create() };
         let prepared = Episode { name: "Ep 1 fixed".into(), ..Episode::create() };
-        let renames = FolderRenames::new(dir.path().to_path_buf(), names("Src (EN)"), None);
+        let renames = FolderRenames::new(dir.path().join("elsewhere"), dir.path().to_path_buf(), names("Src (EN)"), None);
         EpisodeRenames::rename(&renames, &anime, &stored, &prepared);
         assert!(!anime_dir.exists(), "not downloaded: nothing is renamed or created");
         fs::create_dir_all(anime_dir.join("Ep 1")).expect("episode folder");

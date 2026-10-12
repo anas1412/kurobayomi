@@ -36,7 +36,7 @@ pub const HIGHLIGHT_SCROLL_DELAY_MS: u64 = 500;
 pub const SLIDER_ROW_PADDING: i32 = 12;
 pub const TRACKER_CHECK_SIZE: i32 = 32;
 
-/// Where Help on the More page leads: the project page of this app (Aniyomi's help site is about the Android app).
+/// Where Help in the app menu leads: the project page of this app (Aniyomi's help site is about the Android app).
 pub const HELP_URL: &str = "https://github.com/anas1412/kurobayomi#readme";
 
 #[cfg(test)]

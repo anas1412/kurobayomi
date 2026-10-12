@@ -1,27 +1,23 @@
-//! The manga migration engine (`migrateMangaInternal` of `MigrateMangaDialog.kt`; T-40a-016, T-40a-041). Pure over the
-//! [`MigrateSteps`] seam: the database steps run in one transaction, the file steps after it commits, and a missing new
-//! source or a failed chapter fetch stops the run before anything is written.
+//! The migration engine of both kinds (`migrateMangaInternal` of `MigrateMangaDialog.kt`, `migrateAnimeInternal` of
+//! `MigrateAnimeDialog.kt`; T-40a-016, T-40a-041, T-41a-034). Pure over the [`MigrateSteps`] seam.
 //!
-//! Step order (B section 15): sync the new manga's chapters (an error there is ignored), copy the chapter state (flag 1),
-//! the categories (flag 2) and the tracks (always), flip the new manga to a favourite with the old one's flags and then,
-//! for a replace, un-favourite the old one (E-40-86). After the commit: delete the old downloads (flag 16, only when the
-//! old source is still installed) and copy the custom cover (flag 8, only when the old manga has one).
+//! Step order (B section 15, behavior 12): the new entry's chapters or episodes are fetched and stored first, outside the
+//! transaction, so a missing new source or a failed fetch stops the run before anything is written. Then, in one
+//! transaction: the item state (flag 1), the categories (flag 2) and the tracks (always), and the new entry becomes a
+//! favourite with the old one's flags before, for a replace, the old one stops being one (E-40-86). After the commit:
+//! delete the old downloads (flag 16, only while the old source is installed) and copy the custom cover (flag 8) and the
+//! custom background (flag 4, anime only), each only when the old entry has one. A file step that fails after the commit
+//! is a warning; the migration stands.
 
 use std::future::Future;
 use std::pin::Pin;
 
-use kuro_data::chapter::{Chapter, ChapterUpdate};
-use kuro_data::manga::{Manga, MangaUpdate};
-use kuro_data::track::MangaTrack;
-use kuro_source::model::SChapter;
-
-use super::migrate_flags::{CATEGORIES, CUSTOM_COVER, DELETE_DOWNLOADED, MANGA_CHAPTERS};
-use super::migrate_merge::merge_chapter_state;
+use super::migrate_flags::{CATEGORIES, CUSTOM_BACKGROUND, CUSTOM_COVER, DELETE_DOWNLOADED, ITEMS};
 
 /// A boxed future of the engine's seam. The engine runs on the GTK main context, so it need not be `Send`.
 pub type StepFuture<T> = Pin<Box<dyn Future<Output = T>>>;
 
-/// What a migrate action asks for: whether the old manga leaves the library (Migrate) or stays (Copy), and the option bits.
+/// What a migrate action asks for: whether the old entry leaves the library (Migrate) or stays (Copy), and the option bits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MigratePlan {
     pub replace: bool,
@@ -34,35 +30,69 @@ impl MigratePlan {
     }
 }
 
-/// Why a migration did not run to the end. Nothing was written for the first two.
+/// What the engine reads of the old or the new library entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Entry {
+    pub id: i64,
+    pub source: i64,
+    pub title: String,
+    /// The chapter or episode flags, carried over to the new entry.
+    pub item_flags: i64,
+    pub viewer_flags: i64,
+    pub date_added: i64,
+}
+
+/// Why a migration did not run to the end. Nothing was written for the first three.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MigrateError {
-    /// The old and the new manga are the same entry (`same_manga`, E-40-88). Nothing is fetched or written.
-    SameManga,
-    /// The new manga's source is not installed (E-40-74).
+    /// The old and the new entry are the same (`same_manga`, E-40-88). Nothing is fetched or written.
+    SameEntry,
+    /// The new entry's source is not installed (E-40-74).
     NewSourceMissing,
-    /// The new source could not list the chapters (TC-40-037).
-    FetchChapters(String),
+    /// The new entry's chapters or episodes could not be fetched (TC-40-037).
+    FetchItems(String),
     /// A database step failed: the transaction rolled back.
     Step(String),
+}
+
+impl std::fmt::Display for MigrateError {
+    /// The reason the dialog shows after "Migration failed: ".
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MigrateError::SameEntry => f.write_str("the old and the new entry are the same"),
+            MigrateError::NewSourceMissing => f.write_str("the source of the new entry is not installed"),
+            MigrateError::FetchItems(reason) => write!(f, "the chapters or episodes could not be fetched ({reason})"),
+            MigrateError::Step(reason) => f.write_str(reason),
+        }
+    }
 }
 
 /// What a finished migration reports besides success.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MigrateOutcome {
-    /// File steps that failed after the commit (the downloads delete, the cover copy). The migration still stands.
+    /// File steps that failed after the commit (the downloads delete, an image copy). The migration still stands.
     pub warnings: Vec<String>,
+}
+
+/// A custom image of an entry that a migration copies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CustomImage {
+    Cover,
+    /// Anime only.
+    Background,
 }
 
 /// The database steps. They all run inside the one transaction `MigrateSteps::transact` opens.
 pub trait MigrateTx {
-    fn chapters(&mut self, manga_id: i64) -> Result<Vec<Chapter>, String>;
-    fn update_chapters(&mut self, updates: &[ChapterUpdate]) -> Result<(), String>;
-    fn category_ids(&mut self, manga_id: i64) -> Result<Vec<i64>, String>;
-    fn set_categories(&mut self, manga_id: i64, ids: &[i64]) -> Result<(), String>;
-    fn tracks(&mut self, manga_id: i64) -> Result<Vec<MangaTrack>, String>;
-    fn insert_tracks(&mut self, tracks: &[MangaTrack]) -> Result<(), String>;
-    fn update_manga(&mut self, update: &MangaUpdate) -> Result<(), String>;
+    /// Carries the old entry's chapter or episode state over to the new entry's items with the same number.
+    fn copy_item_state(&mut self, old: i64, new: i64) -> Result<(), String>;
+    fn category_ids(&mut self, id: i64) -> Result<Vec<i64>, String>;
+    fn set_categories(&mut self, id: i64, ids: &[i64]) -> Result<(), String>;
+    /// Binds the old entry's tracks to the new entry as rows of their own. Enhanced trackers are not re-resolved: the
+    /// tracker page repairs a binding on its next refresh.
+    fn move_tracks(&mut self, old: i64, new: i64) -> Result<(), String>;
+    /// Writes the favourite flag and the date added, and the item and viewer flags when given.
+    fn set_favorite(&mut self, id: i64, favorite: bool, date_added: i64, flags: Option<(i64, i64)>) -> Result<(), String>;
 }
 
 /// The one body of work of a transaction.
@@ -72,180 +102,120 @@ pub type TxWork<'a> = &'a mut dyn FnMut(&mut dyn MigrateTx) -> Result<(), String
 pub trait MigrateSteps {
     /// Whether the source of this id is installed.
     fn source_present(&self, source_id: i64) -> bool;
-    /// The chapter list of the new manga from its source. `None` when the source cannot list chapters.
-    fn fetch_chapters(&self, new: &Manga) -> Option<StepFuture<Result<Vec<SChapter>, String>>>;
-    /// `syncChaptersWithSource` for the new manga.
-    fn sync_chapters(&self, new: &Manga, fetched: Vec<SChapter>) -> StepFuture<Result<(), String>>;
+    /// Fetches the new entry's chapters or episodes from its source and stores them.
+    fn fetch_items(&self, new: &Entry) -> StepFuture<Result<(), String>>;
     /// Runs `work` in one transaction: it commits when `work` returns `Ok` and rolls back otherwise.
     fn transact(&self, work: TxWork<'_>) -> Result<(), String>;
     fn now_ms(&self) -> i64;
-    fn delete_downloads(&self, old: &Manga) -> Result<(), String>;
-    fn old_has_custom_cover(&self, old: &Manga) -> bool;
-    fn copy_custom_cover(&self, old: &Manga, new: &Manga) -> Result<(), String>;
+    fn delete_downloads(&self, old: &Entry) -> Result<(), String>;
+    fn has_custom(&self, image: CustomImage, old: &Entry) -> bool;
+    fn copy_custom(&self, image: CustomImage, old: &Entry, new: &Entry) -> Result<(), String>;
 }
 
-/// The chapter updates that carry the old state over: only the rows whose read flag, bookmark or fetch date changed.
-fn chapter_updates(current: &[Chapter], merged: &[Chapter]) -> Vec<ChapterUpdate> {
-    current
-        .iter()
-        .zip(merged)
-        .filter(|(before, after)| (before.read, before.bookmark, before.date_fetch) != (after.read, after.bookmark, after.date_fetch))
-        .map(|(_, after)| ChapterUpdate { read: Some(after.read), bookmark: Some(after.bookmark), date_fetch: Some(after.date_fetch), ..ChapterUpdate::new(after.id) })
-        .collect()
-}
-
-/// The old manga's tracks, bound to the new manga as rows of their own (enhanced trackers are not re-resolved).
-fn moved_tracks(tracks: Vec<MangaTrack>, new_id: i64) -> Vec<MangaTrack> {
-    tracks.into_iter().map(|track| MangaTrack { id: -1, manga_id: new_id, ..track }).collect()
-}
-
-/// The database half of the migration (everything but the chapter sync).
-fn database_steps(tx: &mut dyn MigrateTx, old: &Manga, new: &Manga, plan: MigratePlan, now_ms: i64) -> Result<(), String> {
-    if plan.has(MANGA_CHAPTERS) {
-        let (prev, current) = (tx.chapters(old.id)?, tx.chapters(new.id)?);
-        let updates = chapter_updates(&current, &merge_chapter_state(&prev, &current));
-        if !updates.is_empty() {
-            tx.update_chapters(&updates)?;
-        }
+/// The database half of the migration.
+fn database_steps(tx: &mut dyn MigrateTx, old: &Entry, new: &Entry, plan: MigratePlan, now_ms: i64) -> Result<(), String> {
+    if plan.has(ITEMS) {
+        tx.copy_item_state(old.id, new.id)?;
     }
     if plan.has(CATEGORIES) {
         let ids = tx.category_ids(old.id)?;
         tx.set_categories(new.id, &ids)?;
     }
-    let tracks = moved_tracks(tx.tracks(old.id)?, new.id);
-    if !tracks.is_empty() {
-        tx.insert_tracks(&tracks)?;
-    }
-    // the new manga becomes a favourite before the old one stops being one (E-40-86)
-    tx.update_manga(&MangaUpdate {
-        favorite: Some(true),
-        chapter_flags: Some(old.chapter_flags),
-        viewer_flags: Some(old.viewer_flags),
-        date_added: Some(if plan.replace { old.date_added } else { now_ms }),
-        ..MangaUpdate::new(new.id)
-    })?;
+    // the tracks move whatever the flags say
+    tx.move_tracks(old.id, new.id)?;
+    // the new entry becomes a favourite before the old one stops being one (E-40-86)
+    let added = if plan.replace { old.date_added } else { now_ms };
+    tx.set_favorite(new.id, true, added, Some((old.item_flags, old.viewer_flags)))?;
     if plan.replace {
-        tx.update_manga(&MangaUpdate { favorite: Some(false), ..MangaUpdate::new(old.id) })?;
+        tx.set_favorite(old.id, false, 0, None)?;
     }
     Ok(())
 }
 
-/// Moves `old` to `new`. A missing new source and a failed chapter fetch return before any write.
-pub async fn migrate_manga(steps: &dyn MigrateSteps, old: &Manga, new: &Manga, plan: MigratePlan) -> Result<MigrateOutcome, MigrateError> {
+/// Moves `old` to `new`. A missing new source and a failed fetch return before any write.
+pub async fn migrate(steps: &dyn MigrateSteps, old: &Entry, new: &Entry, plan: MigratePlan) -> Result<MigrateOutcome, MigrateError> {
     if old.id == new.id {
-        return Err(MigrateError::SameManga);
+        return Err(MigrateError::SameEntry);
     }
     if !steps.source_present(new.source) {
         return Err(MigrateError::NewSourceMissing);
     }
-    let Some(fetch) = steps.fetch_chapters(new) else { return Err(MigrateError::FetchChapters("the source cannot list chapters".to_owned())) };
-    let fetched = fetch.await.map_err(MigrateError::FetchChapters)?;
-
-    if let Err(error) = steps.sync_chapters(new, fetched).await {
-        tracing::warn!(%error, "the chapters of the new manga were not synced, the migration goes on without them");
-    }
+    steps.fetch_items(new).await.map_err(MigrateError::FetchItems)?;
     let now_ms = steps.now_ms();
     steps.transact(&mut |tx| database_steps(tx, old, new, plan, now_ms)).map_err(MigrateError::Step)?;
 
     let mut warnings = Vec::new();
     if plan.has(DELETE_DOWNLOADED) && steps.source_present(old.source) {
         if let Err(error) = steps.delete_downloads(old) {
-            tracing::warn!(%error, "the downloads of the old manga were not deleted");
+            tracing::warn!(%error, "the downloads of the old entry were not deleted");
             warnings.push(error);
         }
     }
-    if plan.has(CUSTOM_COVER) && steps.old_has_custom_cover(old) {
-        if let Err(error) = steps.copy_custom_cover(old, new) {
-            tracing::warn!(%error, "the custom cover was not copied");
-            warnings.push(error);
+    for (bit, image) in [(CUSTOM_COVER, CustomImage::Cover), (CUSTOM_BACKGROUND, CustomImage::Background)] {
+        if plan.has(bit) && steps.has_custom(image, old) {
+            if let Err(error) = steps.copy_custom(image, old, new) {
+                tracing::warn!(%error, ?image, "a custom image was not copied");
+                warnings.push(error);
+            }
         }
     }
     Ok(MigrateOutcome { warnings })
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use std::cell::RefCell;
-    use std::sync::Mutex;
 
     use super::*;
 
-    /// Everything the fake saw, in order.
-    type Log = Mutex<Vec<String>>;
-
-    /// A scripted app: which sources exist, what the fetch answers, the old state to copy, and what fails.
-    pub(crate) struct Fake {
-        pub log: Log,
-        pub installed: Vec<i64>,
-        pub fetch: Option<Result<Vec<SChapter>, String>>,
-        pub sync_fails: bool,
-        pub transact_fails: bool,
-        pub downloads_fail: bool,
-        pub old_has_cover: bool,
-        pub old_chapters: Vec<Chapter>,
-        pub new_chapters: Vec<Chapter>,
-        pub old_categories: Vec<i64>,
-        pub old_tracks: Vec<MangaTrack>,
+    /// A scripted app: which sources exist, whether the fetch fails, which images the old entry has, and what fails.
+    struct Fake {
+        log: RefCell<Vec<String>>,
+        installed: Vec<i64>,
+        fetch_fails: Option<String>,
+        transact_fails: bool,
+        downloads_fail: bool,
+        old_cover: bool,
+        old_background: bool,
     }
 
     impl Fake {
-        pub(crate) fn new() -> Self {
-            Self {
-                log: Mutex::default(),
-                installed: vec![1, 2],
-                fetch: Some(Ok(vec![SChapter::new("/c1", "Chapter 1")])),
-                sync_fails: false,
-                transact_fails: false,
-                downloads_fail: false,
-                old_has_cover: true,
-                old_chapters: Vec::new(),
-                new_chapters: Vec::new(),
-                old_categories: vec![5, 6],
-                old_tracks: Vec::new(),
-            }
+        fn new() -> Self {
+            Self { log: RefCell::default(), installed: vec![1, 2], fetch_fails: None, transact_fails: false, downloads_fail: false, old_cover: true, old_background: true }
         }
 
         fn note(&self, line: impl Into<String>) {
-            self.log.lock().expect("log").push(line.into());
+            self.log.borrow_mut().push(line.into());
         }
 
-        pub(crate) fn lines(&self) -> Vec<String> {
-            self.log.lock().expect("log").clone()
+        fn lines(&self) -> Vec<String> {
+            self.log.borrow().clone()
         }
     }
 
-    struct Tx<'a> {
-        fake: &'a Fake,
-        writes: RefCell<Vec<String>>,
+    /// The writes of one transaction; they reach the log only when it commits.
+    struct Tx {
+        writes: Vec<String>,
     }
 
-    impl MigrateTx for Tx<'_> {
-        fn chapters(&mut self, manga_id: i64) -> Result<Vec<Chapter>, String> {
-            Ok(if manga_id == 10 { self.fake.old_chapters.clone() } else { self.fake.new_chapters.clone() })
-        }
-        fn update_chapters(&mut self, updates: &[ChapterUpdate]) -> Result<(), String> {
-            self.writes.borrow_mut().push(format!("chapters {}", updates.len()));
+    impl MigrateTx for Tx {
+        fn copy_item_state(&mut self, old: i64, new: i64) -> Result<(), String> {
+            self.writes.push(format!("items {old} {new}"));
             Ok(())
         }
         fn category_ids(&mut self, _: i64) -> Result<Vec<i64>, String> {
-            Ok(self.fake.old_categories.clone())
+            Ok(vec![5, 6])
         }
-        fn set_categories(&mut self, manga_id: i64, ids: &[i64]) -> Result<(), String> {
-            self.writes.borrow_mut().push(format!("categories {manga_id} {ids:?}"));
+        fn set_categories(&mut self, id: i64, ids: &[i64]) -> Result<(), String> {
+            self.writes.push(format!("categories {id} {ids:?}"));
             Ok(())
         }
-        fn tracks(&mut self, _: i64) -> Result<Vec<MangaTrack>, String> {
-            Ok(self.fake.old_tracks.clone())
-        }
-        fn insert_tracks(&mut self, tracks: &[MangaTrack]) -> Result<(), String> {
-            self.writes.borrow_mut().push(format!("tracks {:?}", tracks.iter().map(|t| (t.manga_id, t.id)).collect::<Vec<_>>()));
+        fn move_tracks(&mut self, old: i64, new: i64) -> Result<(), String> {
+            self.writes.push(format!("tracks {old} {new}"));
             Ok(())
         }
-        fn update_manga(&mut self, update: &MangaUpdate) -> Result<(), String> {
-            self.writes.borrow_mut().push(format!(
-                "manga {} favorite={:?} chapter_flags={:?} viewer_flags={:?} date_added={:?}",
-                update.id, update.favorite, update.chapter_flags, update.viewer_flags, update.date_added
-            ));
+        fn set_favorite(&mut self, id: i64, favorite: bool, date_added: i64, flags: Option<(i64, i64)>) -> Result<(), String> {
+            self.writes.push(format!("favorite {id} {favorite} {date_added} {flags:?}"));
             Ok(())
         }
     }
@@ -254,22 +224,17 @@ pub(crate) mod tests {
         fn source_present(&self, source_id: i64) -> bool {
             self.installed.contains(&source_id)
         }
-        fn fetch_chapters(&self, _: &Manga) -> Option<StepFuture<Result<Vec<SChapter>, String>>> {
+        fn fetch_items(&self, _: &Entry) -> StepFuture<Result<(), String>> {
             self.note("fetch");
-            let answer = self.fetch.clone()?;
-            Some(Box::pin(async move { answer }))
-        }
-        fn sync_chapters(&self, _: &Manga, _: Vec<SChapter>) -> StepFuture<Result<(), String>> {
-            self.note("sync");
-            let failed = self.sync_fails;
-            Box::pin(async move { if failed { Err("sync failed".to_owned()) } else { Ok(()) } })
+            let answer = self.fetch_fails.clone().map_or(Ok(()), Err);
+            Box::pin(async move { answer })
         }
         fn transact(&self, work: TxWork<'_>) -> Result<(), String> {
-            let mut tx = Tx { fake: self, writes: RefCell::default() };
+            let mut tx = Tx { writes: Vec::new() };
             let result = work(&mut tx).and_then(|()| if self.transact_fails { Err("disk full".to_owned()) } else { Ok(()) });
             // a failed transaction rolls everything back: only a commit keeps the writes
             if result.is_ok() {
-                for write in tx.writes.take() {
+                for write in tx.writes {
                     self.note(format!("write {write}"));
                 }
                 self.note("commit");
@@ -281,133 +246,115 @@ pub(crate) mod tests {
         fn now_ms(&self) -> i64 {
             777
         }
-        fn delete_downloads(&self, _: &Manga) -> Result<(), String> {
+        fn delete_downloads(&self, _: &Entry) -> Result<(), String> {
             self.note("delete downloads");
             if self.downloads_fail { Err("busy".to_owned()) } else { Ok(()) }
         }
-        fn old_has_custom_cover(&self, _: &Manga) -> bool {
-            self.old_has_cover
+        fn has_custom(&self, image: CustomImage, _: &Entry) -> bool {
+            match image {
+                CustomImage::Cover => self.old_cover,
+                CustomImage::Background => self.old_background,
+            }
         }
-        fn copy_custom_cover(&self, _: &Manga, _: &Manga) -> Result<(), String> {
-            self.note("copy cover");
+        fn copy_custom(&self, image: CustomImage, _: &Entry, _: &Entry) -> Result<(), String> {
+            self.note(format!("copy {image:?}"));
             Ok(())
         }
     }
 
-    fn manga(id: i64, source: i64) -> Manga {
-        Manga { id, source, chapter_flags: 11, viewer_flags: 22, date_added: 100, ..Manga::create() }
-    }
-
-    fn chapter(id: i64, number: f64, read: bool) -> Chapter {
-        Chapter { id, chapter_number: number, read, ..Chapter::create() }
+    fn entry(id: i64, source: i64) -> Entry {
+        Entry { id, source, title: format!("t{id}"), item_flags: 11, viewer_flags: 22, date_added: 100 }
     }
 
     fn run(fake: &Fake, replace: bool, flags: i32) -> Result<MigrateOutcome, MigrateError> {
         let runtime = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
-        runtime.block_on(migrate_manga(fake, &manga(10, 1), &manga(20, 2), MigratePlan { replace, flags }))
+        runtime.block_on(migrate(fake, &entry(10, 1), &entry(20, 2), MigratePlan { replace, flags }))
     }
 
     #[test]
-    fn migrating_a_manga_onto_itself_is_rejected_before_anything_is_fetched_or_written() {
+    fn migrating_an_entry_onto_itself_is_rejected_before_anything_is_fetched_or_written() {
         let fake = Fake::new();
         let runtime = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
-        let same = manga(10, 1);
-        assert_eq!(runtime.block_on(migrate_manga(&fake, &same, &same, MigratePlan { replace: true, flags: i32::MAX })), Err(MigrateError::SameManga), "E-40-88");
-        assert!(fake.lines().is_empty(), "no fetch, no sync, no write: {:?}", fake.lines());
+        let same = entry(10, 1);
+        assert_eq!(runtime.block_on(migrate(&fake, &same, &same, MigratePlan { replace: true, flags: i32::MAX })), Err(MigrateError::SameEntry), "E-40-88");
+        assert!(fake.lines().is_empty(), "no fetch, no write: {:?}", fake.lines());
     }
 
     #[test]
     fn a_missing_new_source_returns_before_anything_is_fetched_or_written() {
         let fake = Fake { installed: vec![1], ..Fake::new() };
         assert_eq!(run(&fake, true, i32::MAX), Err(MigrateError::NewSourceMissing), "TC-40-036");
-        assert!(fake.lines().is_empty(), "no fetch, no sync, no write: {:?}", fake.lines());
+        assert!(fake.lines().is_empty(), "{:?}", fake.lines());
     }
 
     #[test]
-    fn a_failed_chapter_fetch_aborts_before_any_write() {
-        let fake = Fake { fetch: Some(Err("offline".to_owned())), ..Fake::new() };
-        assert_eq!(run(&fake, true, i32::MAX), Err(MigrateError::FetchChapters("offline".to_owned())), "TC-40-037");
-        assert_eq!(fake.lines(), ["fetch"], "nothing was synced or written");
-        let cannot = Fake { fetch: None, ..Fake::new() };
-        assert!(matches!(run(&cannot, true, i32::MAX), Err(MigrateError::FetchChapters(_))), "a source that cannot list chapters stops too");
+    fn a_failed_fetch_stops_before_any_write() {
+        let fake = Fake { fetch_fails: Some("offline".to_owned()), ..Fake::new() };
+        assert_eq!(run(&fake, true, i32::MAX), Err(MigrateError::FetchItems("offline".to_owned())), "TC-40-037");
+        assert_eq!(fake.lines(), ["fetch"], "nothing was written");
     }
 
     #[test]
-    fn the_steps_run_in_the_documented_order_with_the_favourite_flip_before_the_unfavourite() {
-        let fake = Fake {
-            old_chapters: vec![chapter(1, 3.0, true)],
-            new_chapters: vec![chapter(2, 2.0, false), chapter(3, 4.0, false)],
-            old_tracks: vec![MangaTrack { manga_id: 10, id: 9, ..MangaTrack::new(1) }],
-            ..Fake::new()
-        };
+    fn each_error_has_the_reason_the_dialog_shows() {
+        assert_eq!(MigrateError::NewSourceMissing.to_string(), "the source of the new entry is not installed");
+        assert_eq!(MigrateError::FetchItems("timeout".into()).to_string(), "the chapters or episodes could not be fetched (timeout)");
+        assert_eq!(MigrateError::Step("disk full".into()).to_string(), "disk full");
+    }
+
+    #[test]
+    fn the_steps_run_in_order_with_the_favourite_flip_before_the_unfavourite_and_the_file_steps_after_the_commit() {
+        let fake = Fake::new();
         assert_eq!(run(&fake, true, i32::MAX), Ok(MigrateOutcome::default()));
         assert_eq!(
             fake.lines(),
             [
                 "fetch",
-                "sync",
-                "write chapters 1",
+                "write items 10 20",
                 "write categories 20 [5, 6]",
-                "write tracks [(20, -1)]",
-                "write manga 20 favorite=Some(true) chapter_flags=Some(11) viewer_flags=Some(22) date_added=Some(100)",
-                "write manga 10 favorite=Some(false) chapter_flags=None viewer_flags=None date_added=None",
+                "write tracks 10 20",
+                "write favorite 20 true 100 Some((11, 22))",
+                "write favorite 10 false 0 None",
                 "commit",
                 "delete downloads",
-                "copy cover",
+                "copy Cover",
+                "copy Background",
             ],
-            "T-40a-041: one transaction, then the file steps"
+            "T-40a-041, behavior 12: one transaction, then the file steps"
         );
     }
 
     #[test]
-    fn copy_keeps_the_old_manga_and_stamps_the_new_one_with_now() {
+    fn zero_flags_still_fetch_move_the_tracks_and_flip_the_favourite_and_copy_stamps_now() {
         let fake = Fake::new();
-        run(&fake, false, MANGA_CHAPTERS as i32).expect("copy");
-        let lines = fake.lines();
-        assert!(lines.contains(&"write manga 20 favorite=Some(true) chapter_flags=Some(11) viewer_flags=Some(22) date_added=Some(777)".to_owned()), "{lines:?}");
-        assert!(!lines.iter().any(|l| l.starts_with("write manga 10")), "the old manga stays a favourite");
-        assert!(!lines.iter().any(|l| l.starts_with("write categories")), "no categories without flag 2");
-        assert!(!lines.contains(&"delete downloads".to_owned()) && !lines.contains(&"copy cover".to_owned()), "no file steps without their flags");
+        run(&fake, false, 0).expect("copy with no options");
+        assert_eq!(fake.lines(), ["fetch", "write tracks 10 20", "write favorite 20 true 777 Some((11, 22))", "commit"], "T35: the old entry stays a favourite");
     }
 
     #[test]
     fn a_failed_transaction_writes_nothing_and_runs_no_file_step() {
         let fake = Fake { transact_fails: true, ..Fake::new() };
         assert_eq!(run(&fake, true, i32::MAX), Err(MigrateError::Step("disk full".to_owned())));
-        assert_eq!(fake.lines(), ["fetch", "sync", "rollback"], "E-40-85: all or nothing, and the files are untouched");
+        assert_eq!(fake.lines(), ["fetch", "rollback"], "E-40-85, T30: all or nothing, and the files are untouched");
     }
 
     #[test]
-    fn a_chapter_sync_error_is_ignored() {
-        let fake = Fake { sync_fails: true, ..Fake::new() };
-        assert!(run(&fake, false, i32::MAX).is_ok(), "worst case the chapters are not synced");
-        assert!(fake.lines().contains(&"commit".to_owned()));
-    }
-
-    #[test]
-    fn a_failing_file_step_is_a_warning_after_the_commit() {
+    fn a_failing_file_step_is_a_warning_and_the_next_file_steps_still_run() {
         let fake = Fake { downloads_fail: true, ..Fake::new() };
         let outcome = run(&fake, true, i32::MAX).expect("the migration stands");
         assert_eq!(outcome.warnings, ["busy"]);
-        assert!(fake.lines().contains(&"copy cover".to_owned()), "the next file step still runs");
+        assert!(fake.lines().contains(&"copy Cover".to_owned()) && fake.lines().contains(&"copy Background".to_owned()));
     }
 
     #[test]
-    fn downloads_are_deleted_only_while_the_old_source_is_installed_and_the_cover_only_when_there_is_one() {
+    fn downloads_go_only_while_the_old_source_is_installed_and_images_are_copied_only_when_flagged_and_present() {
         let no_old_source = Fake { installed: vec![2], ..Fake::new() };
         run(&no_old_source, true, i32::MAX).expect("migrates");
         assert!(!no_old_source.lines().contains(&"delete downloads".to_owned()), "no old source, no delete");
-        let no_cover = Fake { old_has_cover: false, ..Fake::new() };
+        let no_cover = Fake { old_cover: false, ..Fake::new() };
         run(&no_cover, true, i32::MAX).expect("migrates");
-        assert!(!no_cover.lines().contains(&"copy cover".to_owned()), "flag 8 needs a custom cover on the old manga");
-    }
-
-    #[test]
-    fn the_chapter_state_is_merged_and_only_changed_rows_are_written() {
-        let current = [chapter(2, 2.0, false), chapter(3, 4.0, false)];
-        let merged = merge_chapter_state(&[chapter(1, 3.0, true)], &current);
-        let updates = chapter_updates(&current, &merged);
-        assert_eq!(updates.len(), 1, "chapter 2 is below the read point, chapter 4 is not");
-        assert_eq!((updates[0].id, updates[0].read), (2, Some(true)));
+        assert!(!no_cover.lines().contains(&"copy Cover".to_owned()) && no_cover.lines().contains(&"copy Background".to_owned()));
+        let unflagged = Fake::new();
+        run(&unflagged, true, (ITEMS | CATEGORIES) as i32).expect("migrates");
+        assert!(!unflagged.lines().iter().any(|l| l.starts_with("copy") || l.starts_with("delete")));
     }
 }

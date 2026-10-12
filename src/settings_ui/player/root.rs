@@ -14,8 +14,6 @@ use crate::screens::{built, Built};
 use crate::settings_ui::rows::{group, switch};
 use crate::settings_ui::search;
 
-pub const SUBTITLE_LANGUAGE_INFO: &str = "Subtitle language(s) to be selected by default on a video with multiple subtitles, Two- or three-letter languages codes work. Multiple values can be delimited by a comma.";
-pub const AUDIO_LANGUAGE_INFO: &str = "Audio language(s) to be selected by default on a video with multiple audio streams, Two- or three-letter languages codes work. Multiple values can be delimited by a comma.";
 pub const VOLUME_TITLE: &str = "Default volume";
 /// The stored value that means "the volume the player was last left at" (`player_volume_value`, not stored yet).
 pub const LAST_USED: f32 = -1.0;
@@ -65,8 +63,8 @@ pub fn page_rows(prefs: &Prefs, open: Rc<dyn Fn(&'static str)>) -> Vec<Preferenc
     let mut tree = vec![group(
         "",
         vec![
-            language::language_row("Preferred subtitle languages", &subtitles, SUBTITLE_LANGUAGE_INFO),
-            language::language_row("Preferred audio languages", &audio, AUDIO_LANGUAGE_INFO),
+            language::language_row("Subtitle language", &subtitles),
+            language::language_row("Audio language", &audio),
             volume_row(&p.player_volume_value),
             switch("Autoplay next episode", &p.autoplay_enabled, true),
         ],
@@ -103,7 +101,7 @@ mod tests {
         let tree = page_rows(&prefs, Rc::new(|_| {}));
         let Preference::Group(first) = &tree[0] else { panic!("group") };
         let titles: Vec<&str> = first.items.iter().map(|i| i.title()).collect();
-        assert_eq!(titles, ["Preferred subtitle languages", "Preferred audio languages", VOLUME_TITLE, "Autoplay next episode"]);
+        assert_eq!(titles, ["Subtitle language", "Audio language", VOLUME_TITLE, "Autoplay next episode"]);
     }
 
     #[test]

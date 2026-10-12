@@ -15,6 +15,8 @@ use kuro_data::episode::EpisodeRepo;
 use kuro_data::source::AnimeStubSourceRepo;
 use kuro_db::handle::Db;
 use kuro_domain::download::prefs::DownloadPrefs;
+use kuro_domain::kind::EntryKind;
+use kuro_domain::storage::StorageManager;
 use kuro_db::schema_anime;
 use kuro_downloads::anime::downloader::EpisodeEngine;
 use kuro_downloads::anime::layout::AnimeLayout;
@@ -39,17 +41,17 @@ use crate::entry_core::detail::SourceInfo;
 /// How often the progress line is checked. The notifier itself shows at most one update a second.
 const TICK: Duration = Duration::from_secs(1);
 
-/// Starts the anime queue on the current runtime. `db` is the app's anime database (the restore reads it), `prefs` the
+/// Starts the anime queue on the current runtime, downloading into the anime folder of `storage`. `db` is the app's anime database (the restore reads it), `prefs` the
 /// store the network client reads, and `notifier` the desktop notifications.
 pub fn start(
     paths: &dyn Paths,
+    storage: &StorageManager,
     db: Arc<Db>,
     prefs: PrefStore,
     notifier: Arc<dyn Notifier>,
 ) -> Result<AnimeQueue, String> {
-    let root = paths.default_downloads_dir();
-    std::fs::create_dir_all(&root).map_err(|e| format!("the downloads folder was not created: {e}"))?;
-    let index = crate::updates::download_host::anime_index().ok_or("the anime download index has no folder")?;
+    let root = storage.downloads_dir(EntryKind::Anime).map_err(|e| format!("the anime downloads folder is not available: {e}"))?;
+    let index = crate::updates::download_host::anime_index(storage).ok_or("the anime download index has no folder")?;
     let layout = AnimeLayout::new(Some(root));
     let store = AnimeQueueStore::open(schema_anime::open_in_data_dir(paths).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
@@ -133,11 +135,8 @@ fn notices(queue: AnimeQueue, notifier: Arc<dyn Notifier>) {
                 _ = ticks.tick() => {
                     let running = queue.running();
                     let snapshot = queue.snapshot();
-                    if running {
-                        if let Some(item) = snapshot.iter().find(|d| d.status() == DownloadState::Downloading) {
-                            notice.progress(Instant::now(), &item.anime.title, &item.episode.name, item.progress.get(), !was_running);
-                        }
-                    } else if was_running {
+                    // no notification while downloading (the Downloads item shows it); only the end is announced
+                    if !running && was_running {
                         if snapshot.is_empty() {
                             notice.complete();
                         } else {

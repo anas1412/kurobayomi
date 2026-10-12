@@ -4,7 +4,9 @@
 
 use kuro_data::episode::Episode;
 
-use super::actions::{EpisodeMenuAction, MenuEffect, bulk_mark_targets, menu_effect};
+use crate::entry_core::list_model::RowAction;
+
+use super::actions::{MenuEffect, bulk_mark_targets, menu_effect};
 use super::bottom::Effect;
 use super::downloads::{selection_to_delete, selection_to_download};
 use super::model::AnimeEntryModel;
@@ -40,11 +42,9 @@ pub fn bottom_cmds(m: &AnimeEntryModel, effect: Effect, remove_after_seen: bool)
         Effect::Mark(mark, on) => out.cmds.push(AnimeCmd::SetMark { ids: bulk_mark_targets(&selected, mark, on), mark, on }),
         Effect::Seen(seen) => out.cmds = seen_cmds(m, &selected, seen, remove_after_seen),
         Effect::PreviousSeen => {
-            let pointer = selected.first().map(|e| e.id);
-            let ids = pointer.map(|p| previous_to_mark(&m.processed_ids(), p, m.filters().is_some_and(|f| f.descending))).unwrap_or_default();
-            // only the unseen ones change
-            let before: Vec<Episode> = m.episodes.iter().filter(|e| ids.contains(&e.id) && !e.seen).cloned().collect();
-            out.cmds = seen_cmds(m, &before, true, remove_after_seen);
+            if let Some(pointer) = selected.first() {
+                out.cmds = previous_seen_cmds(m, pointer.id, remove_after_seen);
+            }
         }
         Effect::Open { external } => out.open = selected.first().map(|e| (e.id, external)),
         Effect::Download => {
@@ -63,18 +63,27 @@ pub fn bottom_cmds(m: &AnimeEntryModel, effect: Effect, remove_after_seen: bool)
     out
 }
 
-/// What a context menu item on one row sends. The Download item deletes a downloaded episode and queues any other one, and only
-/// when the app can queue downloads.
-pub fn menu_cmds(m: &AnimeEntryModel, id: i64, action: EpisodeMenuAction, has_download_handler: bool, remove_after_seen: bool) -> Vec<AnimeCmd> {
+/// Marks every episode before `pointer`, in list order, as seen. Only the unseen ones change.
+fn previous_seen_cmds(m: &AnimeEntryModel, pointer: i64, remove_after_seen: bool) -> Vec<AnimeCmd> {
+    let ids = previous_to_mark(&m.processed_ids(), pointer, m.filters().is_some_and(|f| f.descending));
+    let before: Vec<Episode> = m.episodes.iter().filter(|e| ids.contains(&e.id) && !e.seen).cloned().collect();
+    seen_cmds(m, &before, true, remove_after_seen)
+}
+
+/// What an item of one row's right-click menu sends. Mark previous is the bar's, for this row. The Download item
+/// deletes a downloaded episode and queues any other one, and only when the app can queue downloads. Select is the
+/// page's own (it changes the selection, not the store).
+pub fn menu_cmds(m: &AnimeEntryModel, id: i64, action: RowAction, has_download_handler: bool, remove_after_seen: bool) -> Vec<AnimeCmd> {
     let Some(episode) = m.episodes.iter().find(|e| e.id == id) else { return Vec::new() };
-    match menu_effect(action, episode) {
-        Some(MenuEffect::Seen { seen, .. }) => seen_cmds(m, std::slice::from_ref(episode), seen, remove_after_seen),
-        Some(MenuEffect::Mark { ids, mark, on }) => vec![AnimeCmd::SetMark { ids, mark, on }],
-        None if action == EpisodeMenuAction::Download && has_download_handler => {
+    match (menu_effect(action, episode), action) {
+        (Some(MenuEffect::Seen { seen, .. }), _) => seen_cmds(m, std::slice::from_ref(episode), seen, remove_after_seen),
+        (Some(MenuEffect::Mark { ids, mark, on }), _) => vec![AnimeCmd::SetMark { ids, mark, on }],
+        (None, RowAction::MarkPrevious) => previous_seen_cmds(m, id, remove_after_seen),
+        (None, RowAction::Download) if has_download_handler => {
             let (anime_id, ids) = (m.anime.id, vec![id]);
             vec![if m.downloaded.contains(&id) { AnimeCmd::DeleteEpisodeDownloads { anime_id, ids } } else { AnimeCmd::Download { anime_id, ids, start_now: false } }]
         }
-        None => Vec::new(),
+        (None, _) => Vec::new(),
     }
 }
 
@@ -174,12 +183,26 @@ mod tests {
         m.downloaded.insert(id_of(&m, 1.0));
         let one = id_of(&m, 1.0);
         let menu = |m: &AnimeEntryModel, id, action, handler, remove| menu_cmds(m, id, action, handler, remove);
-        let seen = menu(&m, one, EpisodeMenuAction::ToggleSeen, false, true);
+        let seen = menu(&m, one, RowAction::ToggleRead, false, true);
         assert_eq!(seen.len(), 2, "the write and the delete");
-        assert_eq!(menu(&m, one, EpisodeMenuAction::Download, true, false), vec![AnimeCmd::DeleteEpisodeDownloads { anime_id: m.anime.id, ids: vec![one] }]);
+        assert_eq!(menu(&m, one, RowAction::Download, true, false), vec![AnimeCmd::DeleteEpisodeDownloads { anime_id: m.anime.id, ids: vec![one] }]);
         let two = id_of(&m, 2.0);
-        assert_eq!(menu(&m, two, EpisodeMenuAction::Download, true, false), vec![AnimeCmd::Download { anime_id: m.anime.id, ids: vec![two], start_now: false }]);
-        assert!(menu(&m, two, EpisodeMenuAction::Download, false, false).is_empty(), "no download handler");
-        assert!(menu(&m, 9999, EpisodeMenuAction::ToggleSeen, true, false).is_empty(), "a row that is gone");
+        assert_eq!(menu(&m, two, RowAction::Download, true, false), vec![AnimeCmd::Download { anime_id: m.anime.id, ids: vec![two], start_now: false }]);
+        assert!(menu(&m, two, RowAction::Download, false, false).is_empty(), "no download handler");
+        assert!(menu(&m, two, RowAction::Select, true, false).is_empty(), "Select writes nothing");
+        assert!(menu(&m, 9999, RowAction::ToggleRead, true, false).is_empty(), "a row that is gone");
+    }
+
+    #[test]
+    fn the_menu_mark_previous_marks_the_unseen_episodes_before_its_row_as_the_bar_does() {
+        let m = model(4, 0);
+        let mut written = match menu_cmds(&m, id_of(&m, 3.0), RowAction::MarkPrevious, true, false).as_slice() {
+            [AnimeCmd::SetSeen { ids, seen: true }] => ids.clone(),
+            other => panic!("one seen write, got {other:?}"),
+        };
+        written.sort_unstable();
+        let mut want = vec![id_of(&m, 1.0), id_of(&m, 2.0)];
+        want.sort_unstable();
+        assert_eq!(written, want);
     }
 }

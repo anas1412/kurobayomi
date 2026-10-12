@@ -65,7 +65,7 @@ impl RefreshOnOpen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry_core::action_row::{TrackingClick, TrackingLabel, tracking_click, tracking_label};
+    use crate::entry_core::action_row::{TrackingLabel, tracking_label};
 
     #[test]
     fn the_sheet_opens_after_a_category_change_only_from_this_flow() {
@@ -79,12 +79,6 @@ mod tests {
     fn the_button_reads_tracking_with_no_tracker_and_the_count_otherwise() {
         assert_eq!(tracking_label(0), TrackingLabel::Tracking);
         assert_eq!(tracking_label(2), TrackingLabel::Trackers(2));
-    }
-
-    #[test]
-    fn a_tap_opens_the_settings_without_a_logged_in_tracker() {
-        assert_eq!(tracking_click(false), TrackingClick::Settings);
-        assert_eq!(tracking_click(true), TrackingClick::Sheet);
     }
 
     #[test]

@@ -41,6 +41,14 @@ pub fn tracks_menu(shared: &Shared) -> gtk::MenuButton {
 }
 
 fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared) {
+    for (heading, choices) in track_sections(shared) {
+        sheets::section(column, Some(heading), choices, popover);
+    }
+}
+
+/// The two lists of the menu, read from mpv now: Audio, then Subtitles, each with the playing track marked. The video's
+/// right-click menu lists the same.
+pub fn track_sections(shared: &Shared) -> Vec<(&'static str, Vec<Choice>)> {
     let (lists, aid, sid) = {
         let player = shared.borrow();
         let mpv = player.playback.mpv();
@@ -49,10 +57,10 @@ fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared) {
     };
     let mut subtitles = vec![VideoTrack { id: TRACK_NONE, name: "Off".to_owned(), language: None }];
     subtitles.extend(lists.subtitles);
-    for (heading, property, tracks, selected) in [("Audio", "aid", lists.audio, aid), ("Subtitles", "sid", subtitles, sid)] {
-        let choices = tracks.into_iter().map(|track| choice(shared, property, track, selected)).collect();
-        sheets::section(column, Some(heading), choices, popover);
-    }
+    [("Audio", "aid", lists.audio, aid), ("Subtitles", "sid", subtitles, sid)]
+        .into_iter()
+        .map(|(heading, property, tracks, selected)| (heading, tracks.into_iter().map(|track| choice(shared, property, track, selected)).collect()))
+        .collect()
 }
 
 /// One track row. Choosing it selects the track in mpv under `property` (`aid` or `sid`).

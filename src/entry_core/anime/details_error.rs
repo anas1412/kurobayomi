@@ -5,8 +5,6 @@ use std::fmt;
 
 use kuro_data::DataError;
 
-use super::images::ImageError;
-
 #[derive(Debug)]
 pub enum DetailsError {
     EpisodeNotFound(i64),
@@ -14,7 +12,6 @@ pub enum DetailsError {
     SourceUnavailable(i64),
     /// The quality (hoster and video) options of an episode failed; the text is the cause.
     Quality(String),
-    Image(ImageError),
     /// A read or write of the anime database failed.
     Data(DataError),
     Db(rusqlite::Error),
@@ -29,12 +26,6 @@ impl DetailsError {
             Self::AnimeNotFound(_) => "This anime is no longer in the library".to_owned(),
             Self::SourceUnavailable(_) => "The source of this anime is not available".to_owned(),
             Self::Quality(_) => "No available videos".to_owned(),
-            Self::Image(error) => match error {
-                ImageError::NoImage => "No image is available".to_owned(),
-                ImageError::OpenFailed => "The image could not be opened".to_owned(),
-                ImageError::EmptyShare => "The image could not be shared".to_owned(),
-                ImageError::Io => "The image could not be written".to_owned(),
-            },
             Self::Data(_) | Self::Db(_) | Self::Io(_) => "Something went wrong while reading this entry".to_owned(),
         }
     }
@@ -53,7 +44,6 @@ impl fmt::Display for DetailsError {
             Self::AnimeNotFound(id) => write!(f, "anime {id} not found"),
             Self::SourceUnavailable(id) => write!(f, "source {id} unavailable"),
             Self::Quality(detail) => write!(f, "quality: {detail}"),
-            Self::Image(error) => write!(f, "image: {error:?}"),
             Self::Data(error) => write!(f, "data: {error}"),
             Self::Db(error) => write!(f, "db: {error}"),
             Self::Io(error) => write!(f, "io: {error}"),
@@ -62,12 +52,6 @@ impl fmt::Display for DetailsError {
 }
 
 impl std::error::Error for DetailsError {}
-
-impl From<ImageError> for DetailsError {
-    fn from(error: ImageError) -> Self {
-        Self::Image(error)
-    }
-}
 
 impl From<DataError> for DetailsError {
     fn from(error: DataError) -> Self {
@@ -115,7 +99,6 @@ mod tests {
             DetailsError::AnimeNotFound(2),
             DetailsError::SourceUnavailable(3),
             DetailsError::Quality("no hoster".into()),
-            DetailsError::Image(ImageError::NoImage),
             DetailsError::Data(DataError::NotFound),
             DetailsError::Db(rusqlite::Error::QueryReturnedNoRows),
             DetailsError::Io(std::io::Error::other("disk")),
@@ -129,7 +112,6 @@ mod tests {
 
     #[test]
     fn the_source_errors_convert_and_keep_their_variant() {
-        assert!(matches!(DetailsError::from(ImageError::OpenFailed), DetailsError::Image(ImageError::OpenFailed)));
         assert!(matches!(DetailsError::from(rusqlite::Error::QueryReturnedNoRows), DetailsError::Db(_)));
         assert!(matches!(DetailsError::from(std::io::Error::other("x")), DetailsError::Io(_)));
         assert!(matches!(DetailsError::from(DataError::NotFound), DetailsError::Data(_)));

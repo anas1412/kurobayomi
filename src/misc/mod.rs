@@ -27,11 +27,12 @@ pub fn start() {
     runner::start();
 }
 
-/// The app-update downloader writes into the downloads folder (see `download` for why).
+/// The app-update downloader writes into the platform's usual downloads folder, not the storage folder (see `download`
+/// for why).
 fn install_downloader() {
     use kuro_platform::paths::Paths as _;
     let (Ok(paths), Ok(handle)) = (kuro_platform::linux::LinuxPaths::system(), tokio::runtime::Handle::try_current()) else {
         return;
     };
-    download::install(paths.default_downloads_dir(), handle);
+    download::install(paths.user_downloads_dir(), handle);
 }

@@ -11,9 +11,10 @@ use kuro_prefs::pref::Pref;
 use kuro_prefs::store::PrefStore;
 use tokio::sync::watch;
 
-use super::{DOWNLOADS_PATH, FONTS_PATH, MPV_CONFIG_PATH, SCRIPTS_PATH, SCRIPT_OPTS_PATH, SHADERS_PATH, TREE};
-use super::{AUTOMATIC_BACKUPS_PATH, LOCAL_ANIMESOURCE_PATH, LOCAL_SOURCE_PATH};
+use super::{BACKUPS_PATH, FONTS_PATH, LOCAL_PATH, MPV_CONFIG_PATH, SCRIPTS_PATH, SCRIPT_OPTS_PATH, SHADERS_PATH, TREE};
+use super::kind_folder;
 use crate::error::DomainError;
+use crate::kind::EntryKind;
 
 /// The preference that holds the base directory (`Preference.appStateKey("storage_dir")`).
 pub const STORAGE_DIR_KEY: &str = "__APP_STATE_storage_dir";
@@ -105,21 +106,31 @@ impl StorageManager {
         Ok(path)
     }
 
-    pub fn automatic_backups_dir(&self) -> Result<PathBuf, DomainError> {
-        self.dir(&[AUTOMATIC_BACKUPS_PATH])
+    /// The backups folder, where the automatic backups go.
+    pub fn backups_dir(&self) -> Result<PathBuf, DomainError> {
+        self.dir(&[BACKUPS_PATH])
     }
 
-    pub fn downloads_dir(&self) -> Result<PathBuf, DomainError> {
-        self.dir(&[DOWNLOADS_PATH])
+    /// The downloads folder of one kind (`Anime` or `Manga`), created if missing.
+    pub fn downloads_dir(&self, kind: EntryKind) -> Result<PathBuf, DomainError> {
+        self.dir(&[kind_folder(kind)])
     }
 
-    /// The local manga source folder. Its name is `local`, not `localmanga` (Q-STO-1).
+    /// The same folder as [`Self::downloads_dir`], under the configured base, without touching the disk. The download
+    /// indexes and readers name it this way, so a chosen base that is unplugged reads as empty instead of as another
+    /// folder.
+    pub fn downloads_path(&self, kind: EntryKind) -> PathBuf {
+        join_all(self.configured(), &[kind_folder(kind)])
+    }
+
+    /// The local manga source folder, `Local/Manga`.
     pub fn local_manga_dir(&self) -> Result<PathBuf, DomainError> {
-        self.dir(&[LOCAL_SOURCE_PATH])
+        self.dir(&[LOCAL_PATH, kind_folder(EntryKind::Manga)])
     }
 
+    /// The local anime source folder, `Local/Anime`.
     pub fn local_anime_dir(&self) -> Result<PathBuf, DomainError> {
-        self.dir(&[LOCAL_ANIMESOURCE_PATH])
+        self.dir(&[LOCAL_PATH, kind_folder(EntryKind::Anime)])
     }
 
     pub fn mpv_config_dir(&self) -> Result<PathBuf, DomainError> {
@@ -187,7 +198,8 @@ mod tests {
             .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
             .collect();
         top.sort();
-        assert_eq!(top, ["autobackup", "downloads", "local", "localanime", "mpv-config"]);
+        assert_eq!(top, ["Anime", "Backups", "Local", "Manga", "mpv-config"]);
+        assert!(base.join("Local/Anime").is_dir() && base.join("Local/Manga").is_dir());
     }
 
     #[test]
@@ -203,10 +215,13 @@ mod tests {
     #[test]
     fn the_default_base_is_created_on_first_use_without_asking() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let default = dir.path().join("Videos").join("Kurobayomi");
+        let default = dir.path().join("Kurobayomi");
         let (_store, m) = manager(&default);
-        let downloads = m.downloads_dir().expect("first use creates the default base");
+        let downloads = m.downloads_dir(EntryKind::Manga).expect("first use creates the default base");
         assert!(downloads.is_dir() && downloads.starts_with(&default));
+        assert_eq!(m.downloads_path(EntryKind::Manga), downloads);
+        assert_eq!(m.downloads_path(EntryKind::Anime), default.join("Anime"));
+        assert_eq!(m.backups_dir().expect("backups"), default.join("Backups"));
     }
 
     #[test]
@@ -214,11 +229,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let (_store, m) = manager(dir.path());
         m.ensure_tree().expect("tree");
-        std::fs::remove_dir(dir.path().join("downloads")).expect("remove");
-        let downloads = m.downloads_dir().expect("accessor");
+        std::fs::remove_dir(dir.path().join("Anime")).expect("remove");
+        let downloads = m.downloads_dir(EntryKind::Anime).expect("accessor");
         assert!(downloads.is_dir());
-        assert_eq!(m.local_anime_dir().expect("anime").file_name().unwrap(), "localanime");
-        assert_eq!(m.local_manga_dir().expect("manga").file_name().unwrap(), "local");
+        assert!(m.local_anime_dir().expect("anime").ends_with("Local/Anime"));
+        assert!(m.local_manga_dir().expect("manga").ends_with("Local/Manga"));
         assert!(m.fonts_dir().expect("fonts").ends_with("mpv-config/fonts"));
     }
 
@@ -231,7 +246,8 @@ mod tests {
         m.set_base(&base).expect("set");
         std::fs::remove_dir_all(&base).expect("unplug");
         assert!(matches!(m.base(), Err(DomainError::StorageUnavailable)));
-        assert!(matches!(m.downloads_dir(), Err(DomainError::StorageUnavailable)));
+        assert!(matches!(m.downloads_dir(EntryKind::Manga), Err(DomainError::StorageUnavailable)));
+        assert_eq!(m.downloads_path(EntryKind::Manga), base.join("Manga"), "the path still names the chosen folder");
         assert!(matches!(m.ensure_tree(), Err(DomainError::StorageUnavailable)));
         assert!(!base.exists(), "no folder is created for a missing base");
     }
@@ -295,10 +311,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let (_store, m) = manager(dir.path());
         m.ensure_tree().expect("tree");
-        let downloads = dir.path().join("downloads");
+        let downloads = dir.path().join("Manga");
         std::fs::remove_dir(&downloads).expect("remove");
         std::fs::write(&downloads, b"in the way").expect("file");
-        assert!(matches!(m.downloads_dir(), Err(DomainError::Io(_))));
+        assert!(matches!(m.downloads_dir(EntryKind::Manga), Err(DomainError::Io(_))));
     }
 
     #[test]

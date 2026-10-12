@@ -13,6 +13,7 @@ pub mod dates;
 pub mod enhanced;
 pub mod facts;
 pub mod links;
+pub mod page;
 pub mod pickers;
 pub mod remove;
 pub mod search;

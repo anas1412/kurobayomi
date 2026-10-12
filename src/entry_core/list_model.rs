@@ -1,5 +1,6 @@
-//! The chapter list as the widget sees it: one `RowItem` per visible chapter, a diff between two lists that
-//! says which rows changed (one `items_changed` per changed row), and the focus rule. Nothing here imports GTK.
+//! The rows of the chapter and episode list as the widget sees them: one `RowItem` per chapter or episode (and per
+//! missing-count marker), the shared second line, a diff between two lists that says which rows changed, and the focus
+//! rule. Both kinds build the same `RowItem`, so the list draws them the same way. Nothing here imports GTK.
 //! Upstream: `MangaScreenModel.kt` (`chapterListItems`), `MangaScreen.kt` (`ChapterItem` subtitle).
 
 use kuro_domain::items::missing::{ListRow, Numbered, insert_missing_separators, missing_items_count};
@@ -12,38 +13,71 @@ use crate::entry_core::detail::EntryState;
 use crate::entry_core::numfmt::format_chapter_number;
 use crate::entry_core::view::view;
 
-/// The alpha of a read row: the disabled alpha of the theme (`ReadItemAlpha`, 0.38).
+/// The alpha of the text of a read or seen row: the disabled alpha of the theme (`ReadItemAlpha`, 0.38).
 pub const READ_ALPHA: f64 = 0.38;
-/// The row padding at 1x, as (start, top, end, bottom) (`MangaChapterListItem.kt`).
-pub const ROW_PADDING: (i32, i32, i32, i32) = (16, 12, 8, 12);
 /// The side of the unread dot.
 pub const DOT_SIZE: i32 = 8;
 
-/// The opacity of a row: read rows are dimmed.
+/// The opacity of a row's text: read rows are dimmed.
 pub fn row_alpha(read: bool) -> f64 {
     if read { READ_ALPHA } else { 1.0 }
 }
 
-/// One row of the list: the chapter with its download state and its selection, built from the models.
+/// One row of the list, a chapter or an episode, built from the models with its download state and its selection.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RowItem {
     pub id: i64,
     pub title: String,
+    /// The dim second line: date, progress and scanlator (`subtitle`).
     pub subtitle: String,
+    /// An episode summary under the second line, when the entry shows summaries.
+    pub summary: Option<String>,
+    /// The summary shows all its lines rather than three.
+    pub summary_expanded: bool,
+    /// Read or seen: the text is dimmed and the unread dot is off.
     pub read: bool,
     pub bookmark: bool,
+    /// An episode marked filler.
+    pub filler: bool,
     pub selected: bool,
     pub download: DownloadState,
     pub progress: u8,
-    /// The row has a download indicator. A local manga's chapters are always on disk and have none.
+    /// The row has a download button. A local entry's items are always on disk and have none.
     pub indicator: bool,
-    /// The indicator answers presses: not while any row is selected (E-27).
+    /// The button answers presses: not while any row is selected (E-27).
     pub indicator_enabled: bool,
-    /// `Some(count)` on a missing-chapters marker row: no chapter stands behind it, and its `id` is negative.
+    /// `Some(count)` on a missing-count marker row: no chapter or episode stands behind it, and its `id` is negative.
     pub missing: Option<i32>,
 }
 
 impl RowItem {
+    /// A plain row: unread, unmarked, unselected, not downloaded and with no download button.
+    pub fn new(id: i64, title: String) -> Self {
+        Self {
+            id,
+            title,
+            subtitle: String::new(),
+            summary: None,
+            summary_expanded: false,
+            read: false,
+            bookmark: false,
+            filler: false,
+            selected: false,
+            download: DownloadState::NotDownloaded,
+            progress: 0,
+            indicator: false,
+            indicator_enabled: false,
+            missing: None,
+        }
+    }
+
+    /// The marker of `count` missing items between two neighbours. `key` is the upstream `"{lower|null}-{higher}"` id
+    /// and `text` the line it shows ("Missing 2 chapters").
+    pub fn marker(key: String, count: i32, text: String) -> Self {
+        // the marker has no item: a negative id keeps it apart from them, and `title` carries its key id
+        Self { id: -marker_number(&key), subtitle: text, missing: Some(count), ..Self::new(0, key) }
+    }
+
     /// The list key of the row: `chapter-{id}`, or `missing-count-{id}` for a marker, where the marker id is the
     /// upstream `"{lower|null}-{higher}"` string (`MangaScreen.kt:776`).
     pub fn key(&self) -> String {
@@ -52,6 +86,26 @@ impl RowItem {
             None => format!("chapter-{}", self.id),
         }
     }
+}
+
+/// The upload date as `YYYY-MM-DD`; an unknown date (zero or negative) has no text.
+fn date_text(date_upload_ms: i64) -> Option<String> {
+    if date_upload_ms <= 0 {
+        return None;
+    }
+    let date = chrono::DateTime::from_timestamp_millis(date_upload_ms)?;
+    Some(date.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+}
+
+/// The dim second line of a chapter or an episode: the upload date, the progress and the scanlator or language, joined
+/// by a bullet. A missing part leaves no bullet behind, and an unknown scanlator is never shown.
+pub fn subtitle(date_upload_ms: i64, progress: Option<String>, scanlator: Option<&str>) -> String {
+    [date_text(date_upload_ms), progress, crate::entry_core::text::shown_scanlator(scanlator).map(str::to_owned)]
+        .into_iter()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" \u{2022} ")
 }
 
 impl Numbered for &ChapterRow {
@@ -72,21 +126,10 @@ fn title(row: &ChapterRow, number_mode: bool) -> String {
     }
 }
 
-/// The second line: the upload date, "Page: N" for a partly read chapter, and the scanlator, joined by a bullet.
-fn subtitle(row: &ChapterRow) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if row.date_upload > 0
-        && let Some(date) = chrono::DateTime::from_timestamp_millis(row.date_upload)
-    {
-        parts.push(date.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string());
-    }
-    if !row.read && row.last_page_read > 0 {
-        parts.push(trf(MsgKey::chapter_progress, &[("arg1", Arg::Int(row.last_page_read + 1))]));
-    }
-    if let Some(scanlator) = row.scanlator.as_deref().filter(|s| !s.trim().is_empty()) {
-        parts.push(scanlator.to_owned());
-    }
-    parts.join(" \u{2022} ")
+/// The second line of a chapter: "Page: N" while it is partly read.
+fn chapter_line(row: &ChapterRow) -> String {
+    let progress = (!row.read && row.last_page_read > 0).then(|| trf(MsgKey::chapter_progress, &[("arg1", Arg::Int(row.last_page_read + 1))]));
+    subtitle(row.date_upload, progress, row.scanlator.as_deref())
 }
 
 /// The rows the list shows, in view order, each with its download state and selection, with a missing-count marker
@@ -99,9 +142,7 @@ pub fn row_items(page: &EntryState) -> Vec<RowItem> {
         .into_iter()
         .map(|row| match row {
             ListRow::Item(row) => RowItem {
-                id: row.id,
-                title: title(row, flags.display_number()),
-                subtitle: subtitle(row),
+                subtitle: chapter_line(row),
                 read: row.read,
                 bookmark: row.bookmark,
                 selected: page.selection.contains(row.id),
@@ -109,22 +150,9 @@ pub fn row_items(page: &EntryState) -> Vec<RowItem> {
                 progress: row.download_progress,
                 indicator: !local,
                 indicator_enabled: indicator_enabled(local, page.selection.len()),
-                missing: None,
+                ..RowItem::new(row.id, title(row, flags.display_number()))
             },
-            ListRow::MissingCount { id, count } => RowItem {
-                // the marker has no chapter: a negative id keeps it apart from them, and `title` carries its key id
-                id: -marker_number(&id),
-                title: id,
-                subtitle: tr_plural(MsgKey::missing_chapters, i64::from(count), &[]),
-                read: false,
-                bookmark: false,
-                selected: false,
-                download: DownloadState::NotDownloaded,
-                progress: 0,
-                indicator: false,
-                indicator_enabled: false,
-                missing: Some(count),
-            },
+            ListRow::MissingCount { id, count } => RowItem::marker(id, count, tr_plural(MsgKey::missing_chapters, i64::from(count), &[])),
         })
         .collect()
 }
@@ -163,10 +191,62 @@ pub fn list_header(page: &EntryState) -> ListHeader {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Diff {
     Same,
-    /// Same rows in the same order: these indices changed. One `items_changed(i, 1, 1)` each.
+    /// Same rows in the same order: these indices changed (ascending). One row is one `items_changed(i, 1, 1)`;
+    /// several are one splice over their span (`changed_span`), so select all is one signal, not one per row.
     Rows(Vec<usize>),
-    /// Rows were added, removed or reordered: replace the whole list with one `items_changed`.
+    /// Rows were added, removed or reordered: replace the whole list with one splice.
     Reset,
+}
+
+/// What an item of a row's right-click menu does. Chapters and episodes have the same menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowAction {
+    ToggleRead,
+    MarkPrevious,
+    ToggleBookmark,
+    /// Downloads the row, cancels its download while it is queued, or deletes it once it is on disk.
+    Download,
+    /// Selects the row: the menu's Select item, and what a long press on a row reports.
+    Select,
+}
+
+/// The right-click menu of `row` as `(label, section, action)`, in section order. Each label says what a press does
+/// now (Mark as read or Mark as unread). A marker row has no menu, and Download shows only on a row with a download
+/// button. `anime` words read as watched.
+pub fn row_menu(row: &RowItem, anime: bool) -> Vec<(MsgKey, u8, RowAction)> {
+    if row.missing.is_some() {
+        return Vec::new();
+    }
+    let read = match (anime, row.read) {
+        (false, false) => MsgKey::action_mark_as_read,
+        (false, true) => MsgKey::action_mark_as_unread,
+        (true, false) => MsgKey::action_mark_as_seen,
+        (true, true) => MsgKey::action_mark_as_unseen,
+    };
+    let previous = if anime { MsgKey::action_mark_previous_as_seen } else { MsgKey::action_mark_previous_as_read };
+    let bookmark = match (anime, row.bookmark) {
+        (false, false) => MsgKey::action_bookmark,
+        (false, true) => MsgKey::action_remove_bookmark,
+        (true, false) => MsgKey::action_bookmark_episode,
+        (true, true) => MsgKey::action_remove_bookmark_episode,
+    };
+    let mut items = vec![(read, 0, RowAction::ToggleRead), (previous, 0, RowAction::MarkPrevious), (bookmark, 1, RowAction::ToggleBookmark)];
+    if row.indicator {
+        let download = match row.download {
+            DownloadState::Downloaded => MsgKey::action_delete_download,
+            DownloadState::Queue | DownloadState::Downloading => MsgKey::action_cancel,
+            DownloadState::NotDownloaded | DownloadState::Error => MsgKey::action_download,
+        };
+        items.push((download, 1, RowAction::Download));
+    }
+    items.push((MsgKey::action_select, 2, RowAction::Select));
+    items
+}
+
+/// The span `(start, len)` that covers every index of a `Diff::Rows`. `None` for no index.
+pub fn changed_span(indices: &[usize]) -> Option<(usize, usize)> {
+    let (first, last) = (indices.iter().min()?, indices.iter().max()?);
+    Some((*first, last - first + 1))
 }
 
 pub fn diff(old: &[RowItem], new: &[RowItem]) -> Diff {
@@ -202,19 +282,7 @@ mod tests {
     use crate::entry_core::flags::ChapterFlags;
 
     fn item(id: i64) -> RowItem {
-        RowItem {
-            id,
-            title: format!("c{id}"),
-            subtitle: String::new(),
-            read: false,
-            bookmark: false,
-            selected: false,
-            download: DownloadState::NotDownloaded,
-            progress: 0,
-            indicator: true,
-            indicator_enabled: true,
-            missing: None,
-        }
+        RowItem { indicator: true, indicator_enabled: true, ..RowItem::new(id, format!("c{id}")) }
     }
 
     fn page(flags: i64, rows: Vec<ChapterRow>) -> Box<EntryState> {
@@ -267,13 +335,25 @@ mod tests {
     }
 
     #[test]
-    fn subtitle_joins_page_and_scanlator() {
+    fn the_chapter_line_joins_page_and_scanlator() {
         let mut row = ChapterRow::new(1, "c", 1.0);
         row.last_page_read = 4;
         row.scanlator = Some("Group".into());
-        assert_eq!(subtitle(&row), "Page: 5 \u{2022} Group");
+        assert_eq!(chapter_line(&row), "Page: 5 \u{2022} Group");
         row.read = true;
-        assert_eq!(subtitle(&row), "Group");
+        assert_eq!(chapter_line(&row), "Group");
+        row.scanlator = Some("Unknown".into());
+        assert_eq!(chapter_line(&row), "");
+        row.read = false;
+        assert_eq!(chapter_line(&row), "Page: 5", "no dot is left behind");
+    }
+
+    #[test]
+    fn the_second_line_joins_only_present_parts() {
+        assert_eq!(subtitle(0, None, None), "");
+        assert_eq!(subtitle(0, Some("12:30 left".into()), Some("grp")), "12:30 left \u{2022} grp");
+        assert_eq!(subtitle(-5, None, Some(" ")), "", "an unknown date and a blank scanlator leave nothing");
+        assert!(subtitle(86_400_000, None, None).starts_with("1970-01-0"), "the date comes first");
     }
 
     #[test]
@@ -318,7 +398,6 @@ mod tests {
     fn row_style_follows_the_upstream_values() {
         assert_eq!(row_alpha(true), 0.38);
         assert_eq!(row_alpha(false), 1.0);
-        assert_eq!(ROW_PADDING, (16, 12, 8, 12));
         assert_eq!(DOT_SIZE, 8);
     }
 
@@ -332,6 +411,35 @@ mod tests {
         assert_eq!(diff(&old, &new), Diff::Rows(vec![1, 2]));
         assert_eq!(diff(&old, &old[..2]), Diff::Reset, "a removed row");
         assert_eq!(diff(&old, &[item(3), item(2), item(1)]), Diff::Reset, "a reorder");
+    }
+
+    #[test]
+    fn the_row_menu_is_one_menu_for_both_kinds_with_labels_of_what_a_press_does() {
+        let actions = |items: Vec<(MsgKey, u8, RowAction)>| items.into_iter().map(|(_, _, a)| a).collect::<Vec<_>>();
+        let all = [RowAction::ToggleRead, RowAction::MarkPrevious, RowAction::ToggleBookmark, RowAction::Download, RowAction::Select];
+        assert_eq!(actions(row_menu(&item(1), false)), all);
+        assert_eq!(actions(row_menu(&item(1), true)), all, "an episode has the same items");
+        let sections: Vec<u8> = row_menu(&item(1), false).iter().map(|(_, s, _)| *s).collect();
+        assert!(sections.windows(2).all(|w| w[0] <= w[1]), "already in section order, as the menu shows them");
+
+        let chapter = row_menu(&item(1), false);
+        assert_eq!((chapter[0].0, chapter[2].0, chapter[3].0), (MsgKey::action_mark_as_read, MsgKey::action_bookmark, MsgKey::action_download));
+        let done = RowItem { read: true, bookmark: true, download: DownloadState::Downloaded, ..item(1) };
+        let episode = row_menu(&done, true);
+        assert_eq!((episode[0].0, episode[1].0, episode[2].0, episode[3].0), (MsgKey::action_mark_as_unseen, MsgKey::action_mark_previous_as_seen, MsgKey::action_remove_bookmark_episode, MsgKey::action_delete_download));
+        let queued = RowItem { download: DownloadState::Queue, ..item(1) };
+        assert_eq!(row_menu(&queued, false)[3].0, MsgKey::action_cancel);
+
+        let local = RowItem { indicator: false, ..item(1) };
+        assert!(!actions(row_menu(&local, false)).contains(&RowAction::Download), "no download button, no Download item");
+        assert!(row_menu(&RowItem::marker("1-4".into(), 2, "Missing".into()), false).is_empty(), "a marker has no menu");
+    }
+
+    #[test]
+    fn the_span_covers_the_first_to_the_last_changed_row() {
+        assert_eq!(changed_span(&[]), None);
+        assert_eq!(changed_span(&[4]), Some((4, 1)));
+        assert_eq!(changed_span(&[2, 3, 9]), Some((2, 8)));
     }
 
     #[test]

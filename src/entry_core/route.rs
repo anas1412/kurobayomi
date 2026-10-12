@@ -3,9 +3,9 @@
 //! Back button when the row is missing. Toolbar actions stay disabled while `Loading`.
 //! `ui::screen("manga_entry_details")` resolves here through `build`, and `open(id)` pushes a page for one manga.
 //!
-//! The header bar is built from `toolbar.rs`: the Download menu (not for a local manga), the Filter menu (tinted while a
-//! filter is on) and the overflow menu; with a selection it shows the count and only Select all and Select inverse.
-//! The count row over the list opens the filter sheet. Back and Escape clear a selection before they pop the page.
+//! The header bar is built from `toolbar.rs`: the Download menu (not for a local manga), the list options menu
+//! (`list_options`, with a dot while a filter is on) and the overflow menu; with a selection it shows the count and only
+//! Select all and Select inverse. Back and Escape clear a selection before they pop the page.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -13,43 +13,47 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
-use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib, pango};
+use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib};
 use kuro_domain::entries::defaults::chapter_default_word;
 use kuro_domain::kind::EntryKind;
 use kuro_i18n::{Arg, MsgKey, tr, tr_plural, trf};
-use kuro_prefs::tristate::TriState;
 
 use crate::data;
 use crate::entry_core::backend::SourceBackend;
 use crate::entry_core::constants::{FALLBACK_HEIGHT, FALLBACK_WIDTH, LEFT_PANE_WIDTH};
-use crate::entry_core::action_row::{TrackingClick, interval_click_opens_dialog, next_update, tracking_click};
+use crate::entry_core::action_row::interval_click_opens_dialog;
 use crate::entry_core::action_row_view::{ActionRow, RowState};
 use crate::entry_core::banner_view::{self, BannerView};
 use crate::entry_core::bulk_bar::{BulkAction, bulk_actions};
 use crate::entry_core::chapter::ChapterRow;
 use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, fab_state};
-use crate::entry_core::description_view;
+use crate::entry_core::info_block::InfoBlock;
+use crate::entry_core::info_pane::TwoPane;
 use crate::entry_core::tracking;
 use crate::entry_core::detail::{LatestWins, LoadContext, LoadState, StoreCmd, StoreEvent};
 use crate::entry_core::dialog::{CategoryDialog, Dialog};
 use crate::entry_core::fetch_interval_dialog;
-use crate::entry_core::full_cover_view;
 use crate::entry_core::shortcut_help_view;
 use crate::entry_core::shortcuts::{HeaderKey, header_key};
 use crate::entry_core::handoff::{self, MigrateRequest, WebViewRequest};
 use crate::entry_core::flags::{ChapterFlags, save_as_default, scanlator_filter_active};
-use crate::entry_core::header::{GenreChip, HeaderModel, SearchRequest, is_large};
-use crate::entry_core::header_view::{self, Handlers, LibraryButton};
-use crate::entry_core::list_model::list_header;
-use crate::entry_core::list_view::{ChapterList, OnMenu, RowActions, ensure_css};
-use crate::entry_core::page::{Page, UiAction};
+use crate::entry_core::list_options::{self, Spec};
+use crate::entry_core::header::{HeaderModel, SearchRequest, is_large};
+use crate::entry_core::header_view::{Handlers, LibraryButton};
+use crate::entry_core::list_model::{RowAction, list_header};
+use crate::entry_core::list_view::{Callbacks, ItemList, Press};
+use crate::entry_core::live::DownloadEvent;
+use crate::entry_core::page::{Page, RowMenuAction, UiAction};
+use crate::entry_core::page_shell::{self, detach, plain_row};
 use crate::entry_core::runner::{self, Runner};
 use crate::entry_core::scanlator_sheet;
 use crate::entry_core::selection::{Key, Mods, key_command};
 use crate::entry_core::store::DbStore;
-use crate::entry_core::text::{Description, Expansion, description};
-use crate::entry_core::toolbar::{ActionMenu, Overflow, bar_state, background_opaque, title_opaque};
+use crate::entry_core::text::{Expansion, description};
+use crate::entry_core::toolbar::{ActionMenu, Overflow, bar_state};
 use crate::ui;
+use crate::widgets::download_button::Request;
+use crate::widgets::view_options::{Pick, ViewOptions};
 
 /// The Resume or Start button fades in and out over this long.
 const FAB_FADE_MS: u32 = 150;
@@ -85,16 +89,12 @@ struct View {
     runner: Rc<Runner>,
     clock: Instant,
     stack: gtk::Stack,
-    header_slot: GBox,
     library: LibraryButton,
-    action_row: ActionRow,
-    description_slot: GBox,
-    header_button: Button,
     count: Label,
     missing: Label,
     empty: Label,
     spinner: gtk::Spinner,
-    list: Rc<ChapterList>,
+    list: Rc<ItemList>,
     scroller: gtk::ScrolledWindow,
     selection_bar: gtk::Revealer,
     /// The buttons the selection bar shows, so it is rebuilt only when they change (T-38a-024).
@@ -105,33 +105,27 @@ struct View {
     /// The header bar: every widget that waits for the page to be `Ready`.
     toolbar: Vec<gtk::Widget>,
     download_menu: gtk::MenuButton,
-    filter: gtk::MenuButton,
+    /// The list options menu (Show only, Sort by, Display, Use as default) and what its items write.
+    options: ViewOptions,
+    list_spec: Spec,
     overflow: gtk::MenuButton,
     select_all: Button,
     select_inverse: Button,
     header_bar: Option<gtk::HeaderBar>,
     title: Option<Label>,
     large: Cell<bool>,
-    /// The two layouts (T-38a-036). The info block (header, actions, description) is the first thing of `col` in the small
-    /// layout, and the content of the left pane in the large one; the list head and the list are always in `col`, which
-    /// `scroller` scrolls.
+    /// The two layouts (T-38a-036). The info block is the first thing of `col` in the small layout, and the content of
+    /// the left pane in the large one; the list head and the list are always in `col`, which `scroller` scrolls.
     col: GBox,
-    info: GBox,
-    left_host: GBox,
-    left_scroll: gtk::ScrolledWindow,
-    separator: gtk::Separator,
+    info: InfoBlock,
+    panes: TwoPane,
     /// Which layout the widgets are in; `None` before the first render.
     layout_large: Cell<Option<bool>>,
     /// The scroll value and whether the last scroll went backward, for the expanded label of the button.
     scroll: Cell<(f64, bool)>,
-    handle: Option<tokio::runtime::Handle>,
     expansion: Rc<Cell<Expansion>>,
     ready_once: Cell<bool>,
     duplicate_open: Cell<bool>,
-    /// The header on screen and the column width it was built for: either changing rebuilds it.
-    shown_header: RefCell<Option<(HeaderModel, i32)>>,
-    /// What the description slot shows: the text and the genre chips under it.
-    shown_description: RefCell<Option<(Description, Vec<GenreChip>)>>,
 }
 
 fn now_ms(clock: Instant) -> u64 {
@@ -159,36 +153,12 @@ fn page_for(manga_id: i64) -> GBox {
 }
 
 fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
-    ensure_css();
     // the loading, ready and missing states are three children of one stack
-    let stack = gtk::Stack::new();
-    let spinner = gtk::Spinner::builder().spinning(true).width_request(32).height_request(32).build();
-    let loading = GBox::new(O::Vertical, 12);
-    loading.set_halign(Align::Center);
-    loading.set_valign(Align::Center);
-    loading.append(&spinner);
-    loading.append(&Label::new(Some(&tr(MsgKey::loading))));
-    stack.add_named(&loading, Some("loading"));
-
-    let missing_page = ui::status("dialog-error-symbolic", &tr(MsgKey::no_results_found));
-    let back_missing = Button::with_label(&tr(MsgKey::action_webview_back));
-    back_missing.set_halign(Align::Center);
-    back_missing.connect_clicked(|_| ui::pop());
-    missing_page.append(&back_missing);
-    stack.add_named(&missing_page, Some("missing"));
+    let stack = page_shell::state_stack();
 
     let col = ui::column();
-    let header_slot = GBox::new(O::Vertical, 0);
-    let description_slot = GBox::new(O::Vertical, 0);
-    // the item header (ItemHeader): "N chapters" over the processed list, the missing warning, and the filter icon. A
-    // click opens the filter sheet, and it is disabled while a row is selected.
-    let count = Label::builder().xalign(0.0).hexpand(true).ellipsize(pango::EllipsizeMode::End).css_classes(["heading"]).build();
-    let missing = Label::builder().xalign(1.0).ellipsize(pango::EllipsizeMode::End).css_classes(["dim-label", "caption"]).build();
-    let header_row = GBox::new(O::Horizontal, 8);
-    header_row.append(&count);
-    header_row.append(&missing);
-    header_row.append(&gtk::Image::from_icon_name("view-sort-descending-symbolic"));
-    let header_button = Button::builder().child(&header_row).css_classes(["flat"]).build();
+    // the item header (ItemHeader): "N chapters" over the processed list and the missing warning
+    let page_shell::ItemHeaderRow { row: header_row, count, missing } = page_shell::item_header_row();
     // UI parity 1: a spinner while refreshing, and a line when there are no chapters
     let spinner = gtk::Spinner::builder().halign(Align::Center).build();
     let empty = ui::dim(&tr(MsgKey::no_chapters_error));
@@ -223,49 +193,43 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         })),
     );
     let library = action_row.library.clone();
-    let on_menu: OnMenu = {
-        let weak = Rc::clone(&on_row_view);
-        Rc::new(move |id: i64, action| {
-            if let Some(view) = weak.borrow().upgrade() {
-                view.act(UiAction::RowMenu { id, action });
-            }
-        })
-    };
-    let list = ChapterList::new(
-        {
+    let list = ItemList::new(EntryKind::Manga, Callbacks {
+        on_row: {
             let weak = Rc::clone(&on_row_view);
-            Rc::new(move |id: i64, mods: Mods, long: bool| {
-                if let Some(view) = weak.borrow().upgrade() {
-                    view.act(UiAction::Row { id, mods, long_press_or_right: long });
+            Rc::new(move |id: i64, press: Press| {
+                let view = weak.borrow().upgrade();
+                if let Some(view) = view {
+                    view.act(UiAction::Row { id, mods: press.mods, long_press_or_right: false });
                 }
             })
         },
-        on_menu,
-        RowActions {
-            on_indicator: {
-                let weak = Rc::clone(&on_row_view);
-                Rc::new(move |id, action| {
-                    if let Some(view) = weak.borrow().upgrade() {
-                        view.act(UiAction::Download { ids: vec![id], action });
-                    }
-                })
-            },
-            on_previous: {
-                let weak = Rc::clone(&on_row_view);
-                Rc::new(move |id| {
-                    if let Some(view) = weak.borrow().upgrade() {
-                        view.act(UiAction::MarkPrevious(id));
-                    }
-                })
-            },
+        on_menu: {
+            let weak = Rc::clone(&on_row_view);
+            Rc::new(move |id: i64, action: RowAction| {
+                let view = weak.borrow().upgrade();
+                if let Some(view) = view {
+                    view.act(row_menu_action(id, action));
+                }
+            })
         },
-    );
-    let info = GBox::new(O::Vertical, 12);
-    info.append(&header_slot);
-    info.append(&action_row.root);
-    info.append(&description_slot);
-    col.append(&info);
-    col.append(&header_button);
+        on_download: {
+            let weak = Rc::clone(&on_row_view);
+            Rc::new(move |id: i64, request: Request| {
+                let action = match request {
+                    Request::Start => IndicatorAction::Start,
+                    Request::Cancel => IndicatorAction::Cancel,
+                    Request::Delete => IndicatorAction::Delete,
+                };
+                if let Some(view) = weak.borrow().upgrade() {
+                    view.act(UiAction::Download { ids: vec![id], action });
+                }
+            })
+        },
+        on_summary: Rc::new(|_: i64| {}),
+    });
+    let info = InfoBlock::new(action_row);
+    col.append(&info.root);
+    col.append(&header_row);
     col.append(&spinner);
     col.append(&empty);
     col.append(&list.widget);
@@ -292,12 +256,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     );
 
     // the Resume or Start button floats over the list and fades over 150 ms
-    let fab_label = Label::new(None);
-    let fab_box = GBox::new(O::Horizontal, 8);
-    fab_box.append(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
-    fab_box.append(&fab_label);
-    let fab_button = Button::builder().child(&fab_box).css_classes(["suggested-action", "pill"]).build();
-    fab_button.set_focus_on_click(false);
+    let (fab_button, fab_label) = page_shell::fab_button();
     let fab = gtk::Revealer::builder()
         .child(&fab_button)
         .transition_type(gtk::RevealerTransitionType::Crossfade)
@@ -312,23 +271,8 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     let overlay = gtk::Overlay::new();
     let scroller = ui::scrolled(&col);
     // large layout: the info block in a pane of its own on the left, the list on the right
-    let left_host = GBox::new(O::Vertical, 0);
-    let left_scroll = ui::scrolled(&left_host);
-    left_scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
-    // the info pane stays narrow so the chapter list keeps room for its titles
-    left_scroll.set_hexpand(false);
-    left_scroll.set_width_request(LEFT_PANE_WIDTH);
-    left_scroll.set_min_content_width(LEFT_PANE_WIDTH);
-    left_scroll.set_max_content_width(LEFT_PANE_WIDTH);
-    left_scroll.set_visible(false);
-    let separator = gtk::Separator::new(O::Vertical);
-    separator.set_visible(false);
-    let ready_row = GBox::new(O::Horizontal, 0);
-    ready_row.append(&left_scroll);
-    ready_row.append(&separator);
-    ready_row.append(&scroller);
-    scroller.set_hexpand(true);
-    stack.add_named(&ready_row, Some("ready"));
+    let panes = TwoPane::new(scroller.upcast_ref());
+    stack.add_named(&panes.root, Some("ready"));
     overlay.set_child(Some(&stack));
     overlay.add_overlay(&banner.widget);
     overlay.add_overlay(&fab);
@@ -338,7 +282,8 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
 
     // the header bar: created disabled, enabled when the page is Ready
     let download_menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("folder-download-symbolic").tooltip_text(tr(MsgKey::action_download)).build());
-    let filter = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-sort-descending-symbolic").tooltip_text(tr(MsgKey::action_filter)).build());
+    let list_spec = list_options::chapter_spec();
+    let options = ViewOptions::new(list_options::TOOLTIP, &list_spec.sections());
     let overflow = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-more-symbolic").build());
     let select_all = ui::icon_button("edit-select-all-symbolic", &tr(MsgKey::action_select_all));
     let select_inverse = ui::icon_button("object-flip-horizontal-symbolic", &tr(MsgKey::action_select_inverse));
@@ -346,34 +291,21 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     select_inverse.set_visible(false);
     let toolbar: Vec<gtk::Widget> = vec![
         download_menu.clone().upcast(),
-        filter.clone().upcast(),
+        options.widget.clone().upcast(),
         overflow.clone().upcast(),
         select_all.clone().upcast(),
         select_inverse.clone().upcast(),
     ];
     let page_widget = ui::page("", &body, toolbar.clone(), false);
     ui::tag(&page_widget, "manga_entry_details");
-    let header_bar = page_widget.first_child().and_downcast::<gtk::HeaderBar>();
-    let title = header_bar.as_ref().and_then(|h| h.title_widget()).and_downcast::<Label>();
-    // Back clears a selection before it pops, so the button is not the one `ui::page` wires to `ui::pop`
-    let back = Button::from_icon_name("go-previous-symbolic");
-    back.set_tooltip_text(Some(&tr(MsgKey::action_webview_back)));
-    back.set_focus_on_click(false);
-    if let Some(header) = &header_bar {
-        header.pack_start(&back);
-        ui::no_sticky_focus(header);
-    }
+    let (header_bar, title, back) = page_shell::header_with_back(&page_widget);
 
     let view = Rc::new(View {
         page: RefCell::new(page),
         runner: Rc::clone(&runner),
         clock: Instant::now(),
         stack,
-        header_slot,
         library: library.clone(),
-        action_row: action_row.clone(),
-        description_slot,
-        header_button: header_button.clone(),
         count,
         missing,
         empty,
@@ -387,7 +319,8 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         fab_label,
         toolbar,
         download_menu: download_menu.clone(),
-        filter: filter.clone(),
+        options: options.clone(),
+        list_spec,
         overflow: overflow.clone(),
         select_all: select_all.clone(),
         select_inverse: select_inverse.clone(),
@@ -396,17 +329,12 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         large: Cell::new(false),
         col,
         info,
-        left_host,
-        left_scroll,
-        separator,
+        panes,
         layout_large: Cell::new(None),
         scroll: Cell::new((0.0, false)),
-        handle: tokio::runtime::Handle::try_current().ok(),
         expansion: Rc::new(Cell::new(Expansion::new(false, false))),
         ready_once: Cell::new(false),
         duplicate_open: Cell::new(false),
-        shown_header: RefCell::new(None),
-        shown_description: RefCell::new(None),
     });
     let weak = Rc::downgrade(&view);
     *on_row_view.borrow_mut() = weak.clone();
@@ -431,11 +359,11 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
             }
         },
     );
-    header_button.connect_clicked({
+    options.connect({
         let weak = weak.clone();
-        move |button| {
+        move |pick| {
             if let Some(view) = weak.upgrade() {
-                view.open_settings_at(button);
+                view.list_option(pick);
             }
         }
     });
@@ -448,14 +376,6 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         move |button| {
             if let Some(view) = weak.upgrade() {
                 button.set_popover(Some(&view.download_popover()));
-            }
-        }
-    });
-    filter.set_create_popup_func({
-        let weak = weak.clone();
-        move |button| {
-            if let Some(view) = weak.upgrade() {
-                button.set_popover(Some(&view.settings_popover()));
             }
         }
     });
@@ -483,9 +403,20 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         let weak = weak.clone();
         move |_| {
             let Some(view) = weak.upgrade() else { return false };
-            *view.shown_header.borrow_mut() = None;
             view.render();
             true
+        }
+    });
+
+    // the download state of the chapters follows the download queue live
+    crate::downloads::live::follow(&page_widget, {
+        let weak = weak.clone();
+        move |live| {
+            if live.kind == EntryKind::Manga
+                && let Some(view) = weak.upgrade()
+            {
+                view.live_changed(live.id, live.state, live.percent);
+            }
         }
     });
 
@@ -518,6 +449,17 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     });
     page_widget.connect_destroy(move |_| runner.send(StoreCmd::Shutdown));
     page_widget
+}
+
+/// The page action of an item of a chapter's right-click menu. Select is also what a long press on a row reports.
+fn row_menu_action(id: i64, action: RowAction) -> UiAction {
+    match action {
+        RowAction::ToggleRead => UiAction::RowMenu { id, action: RowMenuAction::ToggleRead },
+        RowAction::ToggleBookmark => UiAction::RowMenu { id, action: RowMenuAction::ToggleBookmark },
+        RowAction::Download => UiAction::RowMenu { id, action: RowMenuAction::Download },
+        RowAction::MarkPrevious => UiAction::MarkPrevious(id),
+        RowAction::Select => UiAction::Row { id, mods: Mods::default(), long_press_or_right: true },
+    }
 }
 
 fn select_all_action() -> UiAction {
@@ -605,7 +547,7 @@ fn header_key_controller(weak: &Weak<View>) -> gtk::EventControllerKey {
             return glib::Propagation::Proceed;
         }
         match command {
-            HeaderKey::Filter => view.open_settings_at(&view.filter),
+            HeaderKey::Filter => view.options.popup(),
             HeaderKey::Refresh => view.act(UiAction::Refresh),
             // Migrate is in the overflow menu of a favorite only
             HeaderKey::Migrate => {
@@ -686,7 +628,7 @@ impl View {
             return;
         }
         if out.open_tracking {
-            ui::open("tracking_sheet");
+            self.open_tracking();
         }
         self.render();
         if let Some(id) = out.focus {
@@ -699,15 +641,15 @@ impl View {
         if !ui::first_within("reader", 1500) {
             return;
         }
-        let page = self.page.borrow();
-        let Some(ready) = page.ready() else { return };
-        if ready.manga.source == kuro_local::LOCAL_SOURCE_ID {
+        // copied out first: building and pushing the reader runs other handlers, which may redraw this page
+        let Some((manga_id, local)) = self.page.borrow().ready().map(|r| (r.manga.id, r.manga.source == kuro_local::LOCAL_SOURCE_ID)) else { return };
+        if local {
             // a local chapter is opened by ids, so two folders with one title keep apart
-            ui::push(&crate::local_flow::reader::open_local_chapter(ready.manga.id, id));
+            ui::push(&crate::local_flow::reader::open_local_chapter(manga_id, id));
             return;
         }
         // by ids, as the local chapter: a browsed manga is not a favourite, so a lookup by title would not find it
-        ui::push(&crate::reader::launch::open_chapter(ready.manga.id, id));
+        ui::push(&crate::reader::launch::open_chapter(manga_id, id));
     }
 
     /// The Resume or Start button: opens the next unread chapter, and does nothing when there is none.
@@ -738,6 +680,21 @@ impl View {
         self.banner.show(self.page.borrow().banners.current());
     }
 
+    /// A change of one chapter in the download queue: its state, then its percent; only the list is drawn again.
+    fn live_changed(&self, chapter_id: i64, state: kuro_downloads::DownloadState, percent: u8) {
+        let now = now_ms(self.clock);
+        let rows = {
+            let mut page = self.page.borrow_mut();
+            let status = page.apply_download(DownloadEvent::Status { chapter_id, state }, now);
+            let progress = page.apply_download(DownloadEvent::Progress { chapter_id, percent }, now);
+            if status.is_none() && progress.is_none() {
+                return;
+            }
+            page.rows()
+        };
+        self.list.sync(rows);
+    }
+
     fn toast(&self, text: String) {
         let now = now_ms(self.clock);
         self.page.borrow_mut().toast(text, now);
@@ -764,17 +721,6 @@ impl View {
                     if let Some(view) = weak.upgrade() {
                         view.toast(trf(MsgKey::copied_to_clipboard, &[("arg1", Arg::Str(&text))]));
                     }
-                }
-            }),
-            on_cover: Rc::new({
-                let weak = weak.clone();
-                move || {
-                    let Some(view) = weak.upgrade() else { return };
-                    let manga = view.page.borrow().ready().map(|ready| ready.manga.clone());
-                    let (Some(manga), Some(handle)) = (manga, view.handle.clone()) else { return };
-                    let (runner, manga_id) = (Rc::clone(&view.runner), manga.id);
-                    let bump = Rc::new(move || runner.send(StoreCmd::BumpCover { manga_id }));
-                    full_cover_view::open(manga, full_cover_view::Env { handle, bump });
                 }
             }),
         }
@@ -804,7 +750,7 @@ impl View {
     }
 
     fn render_ready(self: &Rc<Self>) {
-        let (model, desc, rows, refreshing, count_text, missing_text, header_enabled, title, from_source, no_chapters, bar, fab, favorite) = {
+        let (model, desc, rows, refreshing, count_text, missing_text, title, from_source, no_chapters, bar, fab, favorite, flags, downloaded_only, scanlators_on) = {
             let page = self.page.borrow();
             let Some(ready) = page.ready() else { return };
             let header = list_header(ready);
@@ -815,7 +761,6 @@ impl View {
                 ready.is_refreshing,
                 header.count,
                 header.missing,
-                header.enabled,
                 ready.manga.title.clone(),
                 ready.from_source,
                 ready.chapters.is_empty(),
@@ -823,6 +768,9 @@ impl View {
                 bar_state(ready, ready.http_source, false),
                 fab_state(ready),
                 ready.manga.favorite,
+                ready.manga.flags,
+                ready.downloaded_only,
+                scanlator_filter_active(&ready.available_scanlators, &ready.excluded_scanlators),
             )
         };
         let width = self
@@ -839,7 +787,6 @@ impl View {
             .map(|w| if w.height() > 0 { w.height() } else { w.default_height() })
             .filter(|h| *h > 0)
             .unwrap_or(FALLBACK_HEIGHT);
-        let genres = model.genres.clone();
         let large = is_large(width, height);
         self.large.set(large);
         self.apply_layout(large);
@@ -856,50 +803,28 @@ impl View {
             }
         }
         self.download_menu.set_visible(bar.download_menu && !selecting);
-        self.filter.set_visible(!selecting);
+        self.options.widget.set_visible(!selecting);
         self.overflow.set_visible(!selecting);
         self.select_all.set_visible(selecting);
         self.select_inverse.set_visible(selecting);
-        if bar.filter_active {
-            self.filter.add_css_class("chapter-primary");
-        } else {
-            self.filter.remove_css_class("chapter-primary");
-        }
+        self.list_spec.sync(&self.options, flags.0, downloaded_only);
+        self.options.set_extra_filter(scanlators_on);
         // the cover is sized for its column, so a switch between the narrow and the two-pane layout rebuilds the header
         // even when the manga did not change (it used to keep the wide narrow-layout size inside the 360 px pane)
         let column = if large { LEFT_PANE_WIDTH } else { width };
-        if self.shown_header.borrow().as_ref().is_none_or(|(shown, at)| *shown != model || *at != column) {
-            clear(&self.header_slot);
-            self.header_slot.append(&header_view::build(&model, large, column, &self.handlers()));
-            *self.shown_header.borrow_mut() = Some((model, column));
-        }
-        let row = self.page.borrow().ready().map(|r| RowState {
-            favorite: r.manga.favorite,
-            next: next_update(
-                Some(r.manga.next_update),
-                chrono::Utc::now().timestamp_millis(),
-                r.manga.status == kuro_domain::entries::manga::STATUS_COMPLETED,
-            ),
-            user_interval: r.manga.fetch_interval < 0,
-            tracking_count: r.tracking_count,
-            has_tracking: true,
-            webview: r.http_source,
+        let handlers = self.handlers();
+        self.info.set_header(&model, large, column, &handlers);
+        let row = self.page.borrow().ready().map(|r| {
+            RowState::of_entry(r.manga.favorite, r.manga.next_update, r.manga.status, r.manga.fetch_interval, r.tracking_count, r.http_source)
         });
         match row {
-            Some(row) => self.action_row.apply(&row),
+            Some(row) => self.info.action_row.apply(&row),
             None => self.library.set(favorite),
         }
-        let desc_key = (desc, genres);
-        if self.shown_description.borrow().as_ref() != Some(&desc_key) {
-            clear(&self.description_slot);
-            let handlers = self.handlers();
-            self.description_slot.append(&description_view::build(&desc_key.0, Rc::clone(&self.expansion), Some((&desc_key.1, &handlers))));
-            *self.shown_description.borrow_mut() = Some(desc_key);
-        }
+        self.info.set_description(&desc, &model.genres, &self.expansion, &handlers);
         self.count.set_label(&count_text);
         self.missing.set_label(missing_text.as_deref().unwrap_or(""));
         self.missing.set_visible(missing_text.is_some());
-        self.header_button.set_sensitive(header_enabled);
         self.spinner.set_spinning(refreshing);
         self.spinner.set_visible(refreshing);
         self.empty.set_visible(no_chapters && !refreshing);
@@ -929,15 +854,14 @@ impl View {
             return;
         }
         let adjustment = self.scroller.vadjustment();
-        let (offset, info_height) = (adjustment.value(), f64::from(self.info.height()));
-        detach(&self.info);
+        let (offset, info_height) = (adjustment.value(), f64::from(self.info.root.height()));
+        detach(&self.info.root);
         if large {
-            self.left_host.append(&self.info);
+            self.panes.left.append(&self.info.root);
         } else {
-            self.col.prepend(&self.info);
+            self.col.prepend(&self.info.root);
         }
-        self.left_scroll.set_visible(large);
-        self.separator.set_visible(large);
+        self.panes.set_large(large);
         let target = layout_scroll(offset, info_height, large);
         // the new layout is measured after this call, so the value is set once it has
         glib::idle_add_local_once(move || adjustment.set_value(target));
@@ -947,26 +871,11 @@ impl View {
     /// header bar background in the small layout (`MangaScreen.kt:295-308`).
     fn update_scroll(&self) {
         let adj = self.scroller.vadjustment();
-        let value = adj.value();
-        let (last, was_backward) = self.scroll.get();
-        let backward = if (value - last).abs() > f64::EPSILON { value < last } else { was_backward };
-        self.scroll.set((value, backward));
-        let can_forward = value + adj.page_size() < adj.upper() - 1.0;
-        self.fab_label.set_visible(crate::entry_core::anime::layout::fab_expanded(usize::from(value > 0.0), value as i32, backward, can_forward));
-        let small = !self.large.get();
-        let header_height = f64::from(self.header_slot.height());
-        let first_visible = value < header_height;
-        if let Some(label) = &self.title {
-            let selecting = self.select_all.is_visible();
-            label.set_opacity(if selecting || title_opaque(small, first_visible) { 1.0 } else { 0.0 });
-        }
-        if let Some(bar) = &self.header_bar {
-            if background_opaque(small, first_visible, value > 0.0) {
-                bar.remove_css_class("flat");
-            } else {
-                bar.add_css_class("flat");
-            }
-        }
+        self.fab_label.set_visible(page_shell::fab_label_shown(&self.scroll, &adj));
+        // the first item of the list is the info block, so the title waits until it has scrolled away; the selection
+        // count stays readable
+        let selecting = self.select_all.is_visible();
+        page_shell::fade_header(self.title.as_ref(), self.header_bar.as_ref(), !self.large.get(), adj.value(), self.info.root.height(), selecting);
     }
 
     /// The bar of actions on the selected chapters (T-38a-024). The buttons are `bulk_actions` of the selection, so they
@@ -1089,6 +998,7 @@ impl View {
                 }
             }
         });
+        window.present();
     }
 
     /// The Download menu: the next 1, 5, 10 or 25 unread chapters, or every unread one.
@@ -1151,13 +1061,25 @@ impl View {
         tracking::summary::open_track_sheet_on_add(pref_on, tracking::session::has_logged_in())
     }
 
-    /// The tracking button: the tracking sheet when a tracker is logged in, the tracking settings when none is (E-25).
-    fn tracking_pressed(&self) {
+    /// The tracking page of this manga. It explains the AniList login itself when AniList is not logged in.
+    fn open_tracking(&self) {
         tracking::session::refresh_from_host();
-        match tracking_click(tracking::session::has_logged_in()) {
-            TrackingClick::Sheet => ui::open("tracking_sheet"),
-            TrackingClick::Settings => ui::open("settings_browse"),
+        let loaded = self.page.borrow().ready().map(|ready| (ready.manga.id, ready.manga.source, ready.manga.title.clone()));
+        if let Some((id, source_id, title)) = loaded {
+            // a bind, an edit or a stop on the tracking page reads the count again, so the button follows at once
+            let runner = Rc::downgrade(&self.runner);
+            let changed = move || {
+                if let Some(runner) = runner.upgrade() {
+                    runner.send(StoreCmd::ReadTracking { manga_id: id, source_id });
+                }
+            };
+            tracking::page::open_sheet(tracking::page::Entry { kind: kuro_track::model::Kind::Manga, id, title }, changed);
         }
+    }
+
+    /// The tracking button.
+    fn tracking_pressed(&self) {
+        self.open_tracking();
     }
 
     /// The exclusion sheet of the Scanlator filter row. OK writes the set it hands back.
@@ -1206,217 +1128,58 @@ impl View {
         }
     }
 
-    /// The filter sheet opened from the count row.
-    fn open_settings_at(self: &Rc<Self>, anchor: &impl IsA<gtk::Widget>) {
-        let popover = self.settings_popover();
-        popover.set_parent(anchor);
-        // the popover is parented to the anchor, so it is removed once closed
-        popover.connect_closed(|p| {
-            let p = p.clone();
-            glib::idle_add_local_once(move || p.unparent());
-        });
-        popover.popup();
-    }
-
-    /// The filter, sort and display sheet: three tabs and an overflow menu with Set as default and Reset. It is built
-    /// from the stored flags each time it opens.
-    fn settings_popover(self: &Rc<Self>) -> gtk::Popover {
-        let popover = gtk::Popover::new();
-        let (flags, downloaded_only, scanlator_active) = {
-            let page = self.page.borrow();
-            match page.ready() {
-                Some(r) => (r.manga.flags, r.downloaded_only, scanlator_filter_active(&r.available_scanlators, &r.excluded_scanlators)),
-                None => (ChapterFlags::default(), false, false),
-            }
-        };
-        let weak = Rc::downgrade(self);
-        let page_box = || {
-            let b = GBox::new(O::Vertical, 2);
-            ui::margins(&b, 6);
-            b
-        };
-        let (filter_tab, sort_tab, display_tab) = (page_box(), page_box(), page_box());
-
-        // Filter: Downloaded, Unread and Bookmarked are tri-states, and the Scanlator row opens the exclusion list. The
-        // Downloaded row is disabled under downloaded-only (E-15), where the filter is forced on.
-        let tri: [(String, TriState, fn(TriState) -> UiAction, bool); 3] = [
-            (tr(MsgKey::label_downloaded), flags.downloaded(downloaded_only), UiAction::SetDownloaded, !downloaded_only),
-            (tr(MsgKey::action_filter_unread), flags.unread(), UiAction::SetUnread, true),
-            (tr(MsgKey::action_filter_bookmarked), flags.bookmarked(), UiAction::SetBookmarked, true),
-        ];
-        for (label, state, make, enabled) in tri {
-            let icon = match state {
-                TriState::DISABLED => "",
-                TriState::ENABLED_IS => "object-select-symbolic",
-                TriState::ENABLED_NOT => "window-close-symbolic",
-            };
-            let row = menu_row(&label, icon, &popover, on_view(&weak, move |v| v.act(make(state.next()))));
-            row.set_sensitive(enabled);
-            filter_tab.append(&row);
-        }
-        let scanlator = plain_row(&tr(MsgKey::scanlator), &popover, on_view(&weak, View::open_scanlator_sheet));
-        if scanlator_active {
-            scanlator.add_css_class("chapter-primary");
-        }
-        filter_tab.append(&scanlator);
-
-        // Sort: four rows, the arrow on the active one
-        let sorts = [
-            (tr(MsgKey::sort_by_source), kuro_db::flags::chapter::SORTING_SOURCE),
-            (tr(MsgKey::action_order_by_chapter_number), kuro_db::flags::chapter::SORTING_NUMBER),
-            (tr(MsgKey::action_order_by_upload_date), kuro_db::flags::chapter::SORTING_UPLOAD_DATE),
-            (tr(MsgKey::action_sort_alpha), kuro_db::flags::chapter::SORTING_ALPHABET),
-        ];
-        for (label, mode) in sorts {
-            let active = flags.0 & kuro_db::flags::chapter::SORTING_MASK == mode;
-            let icon = match (active, flags.sort_descending()) {
-                (false, _) => "",
-                (true, true) => "pan-down-symbolic",
-                (true, false) => "pan-up-symbolic",
-            };
-            sort_tab.append(&menu_row(&label, icon, &popover, on_view(&weak, move |v| v.act(UiAction::SortBy(mode)))));
-        }
-
-        // Display: two radio rows, writing the display bits only
-        let by_name = gtk::CheckButton::builder().label(tr(MsgKey::show_title)).build();
-        let by_number = gtk::CheckButton::builder().label(tr(MsgKey::show_chapter_number)).build();
-        by_number.set_group(Some(&by_name));
-        if flags.display_number() {
-            by_number.set_active(true);
-        } else {
-            by_name.set_active(true);
-        }
-        // a radio reports only when it becomes active, so the one it replaces sends nothing
-        for (radio, number) in [(&by_name, false), (&by_number, true)] {
-            let weak = weak.clone();
-            let popover = popover.clone();
-            radio.connect_toggled(move |r| {
-                if r.is_active() {
-                    popover.popdown();
+    /// A pick in the list options menu: a masked write of the chapter flags, the scanlator list, or "Use as default for
+    /// all titles" (asked first).
+    fn list_option(self: &Rc<Self>, pick: Pick) {
+        match pick {
+            Pick::Action(list_options::SCANLATORS) => self.open_scanlator_sheet(),
+            Pick::Action(list_options::DEFAULT) => {
+                let weak = Rc::downgrade(self);
+                list_options::confirm_default(move || {
                     if let Some(view) = weak.upgrade() {
-                        view.act(UiAction::SetDisplayNumber(number));
+                        view.use_as_default();
                     }
+                });
+            }
+            pick => {
+                if let Some(write) = self.list_spec.write(&pick) {
+                    self.act(UiAction::SetFlagBits(write));
                 }
-            });
-            display_tab.append(radio);
+            }
         }
-
-        let stack = gtk::Stack::new();
-        stack.add_titled(&filter_tab, Some("filter"), &tr(MsgKey::action_filter));
-        stack.add_titled(&sort_tab, Some("sort"), &tr(MsgKey::action_sort));
-        stack.add_titled(&display_tab, Some("display"), &tr(MsgKey::action_display));
-        let switcher = gtk::StackSwitcher::builder().stack(&stack).hexpand(true).build();
-        let menu = crate::ui::quiet_menu(gtk::MenuButton::builder().icon_name("view-more-symbolic").css_classes(["flat"]).build());
-        menu.set_popover(Some(&self.defaults_popover(&popover)));
-        let top = GBox::new(O::Horizontal, 6);
-        top.append(&switcher);
-        top.append(&menu);
-        let col = GBox::new(O::Vertical, 4);
-        ui::margins(&col, 6);
-        col.append(&top);
-        col.append(&stack);
-        popover.set_child(Some(&col));
-        popover
     }
 
-    /// The overflow menu of the sheet: Set as default and Reset.
-    fn defaults_popover(self: &Rc<Self>, sheet: &gtk::Popover) -> gtk::Popover {
-        let popover = gtk::Popover::new();
-        let col = GBox::new(O::Vertical, 2);
-        ui::margins(&col, 6);
-        let weak = Rc::downgrade(self);
-        let close = {
-            let (popover, sheet) = (popover.clone(), sheet.clone());
-            move || {
-                popover.popdown();
-                sheet.popdown();
-            }
-        };
-        let set_default = Button::builder().label(tr(MsgKey::set_chapter_settings_as_default)).css_classes(["flat"]).build();
-        set_default.connect_clicked({
-            let (weak, close) = (weak.clone(), close.clone());
-            move |_| {
-                close();
-                if let Some(view) = weak.upgrade() {
-                    view.confirm_set_default();
-                }
-            }
-        });
-        let reset = Button::builder().label(tr(MsgKey::action_reset)).css_classes(["flat"]).build();
-        reset.connect_clicked(move |_| {
-            close();
-            if let Some(view) = weak.upgrade() {
-                view.act(UiAction::ResetFlags);
-            }
-        });
-        col.append(&set_default);
-        col.append(&reset);
-        popover.set_child(Some(&col));
-        popover
-    }
-
-    /// "Set as default": a confirm dialog with the library checkbox. OK stores the flags of this manga as the library
-    /// default, and the checkbox also applies them to every favorite on a detached task.
-    fn confirm_set_default(self: &Rc<Self>) {
+    /// Stores the flags of this manga as the library default, and applies them to every favorite on a detached task.
+    /// The message says how many favorites took them, so it waits for the run (E-DEF-3).
+    fn use_as_default(self: &Rc<Self>) {
         let Some(flags) = self.page.borrow().ready().map(|p| p.manga.flags) else { return };
-        let also = gtk::CheckButton::builder().label(tr(MsgKey::also_set_chapter_settings_for_library)).build();
-        let ok = Button::builder().label(tr(MsgKey::action_ok)).css_classes(["suggested-action"]).build();
-        let cancel = Button::with_label(&tr(MsgKey::action_cancel));
-        let buttons = GBox::new(O::Horizontal, 8);
-        buttons.set_halign(Align::End);
-        buttons.append(&cancel);
-        buttons.append(&ok);
-        let col = ui::column();
-        col.append(&Label::builder().label(tr(MsgKey::confirm_set_chapter_settings)).wrap(true).xalign(0.0).build());
-        col.append(&also);
-        col.append(&buttons);
-        let window = ui::modal(Label::new(Some(&tr(MsgKey::chapter_settings))).upcast_ref(), &col, 360, 200);
-        cancel.connect_clicked({
-            let window = window.clone();
-            move |_| window.close()
-        });
-        let weak = Rc::downgrade(self);
-        ok.connect_clicked({
-            let window = window.clone();
-            move |_| {
-                window.close();
-                if let Some(view) = weak.upgrade() {
-                    view.save_default(flags, also.is_active());
-                }
-            }
-        });
-        window.present();
-    }
-
-    fn save_default(self: &Rc<Self>, flags: ChapterFlags, apply_all: bool) {
         if !data::is_installed() {
             return;
         }
         let app = data::app();
         let store = app.base.store().clone();
         let message = save_as_default(&store, flags);
-        if apply_all && let Some(handle) = &self.handle {
-            let repo = kuro_data::manga::MangaRepo::new(app.db(EntryKind::Manga));
-            let (done, count) = async_channel::bounded::<usize>(1);
-            // detached: closing the dialog or the page does not stop the run (`withNonCancellableContext`)
-            handle.spawn(async move {
-                match kuro_domain::entries::defaults::chapter_defaults_to_library_detached(repo, store).await {
-                    Ok(updated) => {
-                        let _ = done.send(updated).await;
-                    }
-                    Err(e) => tracing::warn!("could not apply the default chapter settings to the library: {e}"),
-                }
-            });
-            // the message says how many favorites took the settings, so it waits for the run (E-DEF-3)
-            let weak = Rc::downgrade(self);
-            glib::spawn_future_local(async move {
-                if let (Ok(updated), Some(view)) = (count.recv().await, weak.upgrade()) {
-                    view.toast(applied_to_library_text(&message, updated));
-                }
-            });
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            self.toast(message);
             return;
-        }
-        self.toast(message);
+        };
+        let repo = kuro_data::manga::MangaRepo::new(app.db(EntryKind::Manga));
+        let (done, count) = async_channel::bounded::<usize>(1);
+        // detached: closing the page does not stop the run (`withNonCancellableContext`)
+        handle.spawn(async move {
+            match kuro_domain::entries::defaults::chapter_defaults_to_library_detached(repo, store).await {
+                Ok(updated) => {
+                    let _ = done.send(updated).await;
+                }
+                Err(e) => tracing::warn!("could not apply the default chapter settings to the library: {e}"),
+            }
+        });
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            if let (Ok(updated), Some(view)) = (count.recv().await, weak.upgrade()) {
+                view.toast(applied_to_library_text(&message, updated));
+            }
+        });
     }
 
     /// The duplicate dialog of the library button: Add anyway, or Migrate existing entry. Cancel keeps nothing written.
@@ -1531,49 +1294,9 @@ impl View {
     }
 }
 
-/// The message after "Set as default" with the library checkbox: the saved text and how many favorites took it.
+/// The message after "Use as default for all titles": the saved text and how many favorites took it.
 fn applied_to_library_text(saved: &str, count: usize) -> String {
     format!("{saved} ({count})")
-}
-
-/// A row of a menu with no mark: it closes the popover and runs.
-fn plain_row(label: &str, popover: &gtk::Popover, on_click: impl Fn(&Button) + 'static) -> Button {
-    let button = Button::builder().css_classes(["flat"]).build();
-    button.set_child(Some(&Label::builder().label(label).xalign(0.0).build()));
-    let popover = popover.clone();
-    button.connect_clicked(move |b| {
-        popover.popdown();
-        on_click(b);
-    });
-    button
-}
-
-fn menu_row(label: &str, icon: &str, popover: &gtk::Popover, on_click: impl Fn(&Button) + 'static) -> Button {
-    let row = GBox::new(O::Horizontal, 12);
-    row.append(&Label::builder().label(label).xalign(0.0).hexpand(true).build());
-    let mark = gtk::Image::new();
-    mark.set_pixel_size(16);
-    if icon.is_empty() {
-        mark.set_opacity(0.0);
-        mark.set_icon_name(Some("object-select-symbolic"));
-    } else {
-        mark.set_icon_name(Some(icon));
-    }
-    row.append(&mark);
-    let button = Button::builder().child(&row).css_classes(["flat"]).build();
-    let popover = popover.clone();
-    button.connect_clicked(move |b| {
-        popover.popdown();
-        on_click(b);
-    });
-    button
-}
-
-/// Takes a widget out of the box that holds it, so it can be added to another.
-fn detach(widget: &impl IsA<gtk::Widget>) {
-    if let Some(parent) = widget.parent().and_downcast::<GBox>() {
-        parent.remove(widget);
-    }
 }
 
 /// The scroll value of the list after a layout switch. Small to large drops the info block that sat above the list; large
@@ -1586,16 +1309,8 @@ fn layout_scroll(offset: f64, info_height: f64, to_large: bool) -> f64 {
     }
 }
 
-fn clear(slot: &GBox) {
-    while let Some(child) = slot.first_child() {
-        slot.remove(&child);
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     #[test]
     fn a_layout_switch_moves_the_scroll_by_the_height_of_the_info_block() {
         // small to large: the info block that sat above the list is gone
@@ -1617,28 +1332,7 @@ mod tests {
 
     use super::*;
     use crate::entry_core::backend::StubBackend;
-
-    fn descendants(root: &gtk::Widget) -> Vec<gtk::Widget> {
-        let mut out = vec![root.clone()];
-        let mut child = root.first_child();
-        while let Some(c) = child {
-            out.extend(descendants(&c));
-            child = c.next_sibling();
-        }
-        out
-    }
-
-    fn pump(ctx: &glib::MainContext, done: impl Fn() -> bool) -> bool {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline {
-            while ctx.iteration(false) {}
-            if done() {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        done()
-    }
+    use crate::entry_core::page_shell::test_util::{descendants, pump};
 
     /// One display test (GTK is bound to the thread that starts it): Loading, then Ready with rows, a stub warning in
     /// the header, a non-focusable banner, and Missing with a Back button.
@@ -1693,14 +1387,16 @@ mod tests {
             assert!(texts(fab.upcast_ref()).iter().any(|t| t == "Start"), "no chapter is read, so Start");
             let window = gtk::Window::builder().default_width(900).default_height(700).child(&page).build();
             window.present();
-            let filter = all.iter().filter_map(|w| w.clone().downcast::<gtk::MenuButton>().ok()).find(|b| b.tooltip_text().as_deref() == Some("Filter")).expect("the Filter button");
-            filter.popup();
-            let sheet = filter.popover().expect("the filter sheet");
-            let labels = texts(sheet.upcast_ref());
-            for want in ["Filter", "Sort", "Display", "Downloaded", "Unread", "Bookmarked", "Scanlator", "By source", "Source title", "Chapter number"] {
-                assert!(labels.iter().any(|t| t == want), "the sheet has {want}: {labels:?}");
+            // one list options menu in the top bar; the count row over the list is no button any more
+            let options = all.iter().filter_map(|w| w.clone().downcast::<gtk::MenuButton>().ok()).filter(|b| b.tooltip_text().as_deref() == Some(list_options::TOOLTIP)).collect::<Vec<_>>();
+            assert_eq!(options.len(), 1, "one list options button");
+            let labels = crate::widgets::view_options::menu_labels(&options[0].menu_model().expect("the menu"));
+            for want in ["Show only", "Downloaded", "Unread", "Bookmarked", "Scanlator…", "Sort by", "Source order", "Number", "Upload date", "Reverse order", "Display", "Source title", "Chapter number", "Use as default for all titles"] {
+                assert!(labels.iter().any(|t| t == want), "the menu has {want}: {labels:?}");
             }
-            filter.popdown();
+            let count_row = all.iter().filter_map(|w| w.clone().downcast::<Label>().ok()).find(|l| l.label() == "3 chapters").expect("the count row");
+            assert!(count_row.ancestor(Button::static_type()).is_none(), "no second sort button above the list");
+            assert!(!all.iter().any(|w| w.type_().name() == "GtkStackSwitcher"), "no tabbed Filter / Sort / Display sheet");
             window.set_child(None::<&gtk::Widget>);
             window.close();
             let banner = banner_view::build(|| {}, || {});
@@ -1708,25 +1404,14 @@ mod tests {
 
             // the list model: one items_changed for a reset, one per changed row
             let rows: Vec<crate::entry_core::list_model::RowItem> = (1..=3)
-                .map(|id| crate::entry_core::list_model::RowItem {
-                    id,
-                    title: format!("c{id}"),
-                    subtitle: String::new(),
-                    read: false,
-                    bookmark: false,
-                    selected: false,
-                    download: kuro_downloads::DownloadState::NotDownloaded,
-                    progress: 0,
-                    indicator: true,
-                    indicator_enabled: true,
-                    missing: None,
-                })
+                .map(|id| crate::entry_core::list_model::RowItem { indicator: true, indicator_enabled: true, ..crate::entry_core::list_model::RowItem::new(id, format!("c{id}")) })
                 .collect();
-            let model_list = ChapterList::new(
-                Rc::new(|_: i64, _: Mods, _: bool| {}),
-                Rc::new(|_, _| {}),
-                RowActions { on_indicator: Rc::new(|_, _| {}), on_previous: Rc::new(|_| {}) },
-            );
+            let model_list = ItemList::new(EntryKind::Manga, Callbacks {
+                on_row: Rc::new(|_: i64, _: Press| {}),
+                on_menu: Rc::new(|_: i64, _: RowAction| {}),
+                on_download: Rc::new(|_: i64, _: Request| {}),
+                on_summary: Rc::new(|_: i64| {}),
+            });
             let signals = Rc::new(Cell::new(0));
             model_list.widget.model().expect("model").connect_items_changed({
                 let signals = Rc::clone(&signals);
@@ -1735,10 +1420,13 @@ mod tests {
             model_list.sync(rows.clone());
             assert_eq!(signals.get(), 1, "a new list is one items_changed");
             let mut changed = rows.clone();
-            changed[0].selected = true;
             changed[2].progress = 40;
             model_list.sync(changed.clone());
-            assert_eq!(signals.get(), 3, "one items_changed per changed row");
+            assert_eq!(signals.get(), 2, "one changed row is one items_changed");
+            changed[0].selected = true;
+            changed[1].selected = true;
+            model_list.sync(changed.clone());
+            assert_eq!(signals.get(), 3, "several changed rows are one splice");
             model_list.sync(changed.clone());
             assert_eq!(signals.get(), 3, "an identical list changes nothing");
             model_list.sync(changed[..2].to_vec());

@@ -2,24 +2,23 @@
 //! once the databases are open (T-18a-011, T-18a-023, T-18a-054, T-19a-064, T-19a-066):
 //!
 //! - the manga packages are scanned into an `ExtensionRegistry`, which caches their icons and keeps each folder's last
-//!   load problem for the details screen;
+//!   load problem;
 //! - the anime packages are scanned by `AnimeExtensions`, whose events feed one `ExtensionState` on the GTK thread. The
 //!   update count is derived from that state and never stored;
-//! - after every change the first-run language set is saved (once, while `source_languages` is unsaved), and the badges
-//!   of the listings that cannot run here and the per-store counts are published to the extension pages.
+//! - after every change the first-run language set is saved (once, while `source_languages` is unsaved) and the Browse
+//!   lists are rebuilt from the state.
 //!
 //! The pieces that are plain functions over the state are tested below; the start-up wiring needs a running app.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use gtk::glib;
 use kuro_core::crash_dump::ExtensionStatus;
 use kuro_data::extension_store::ExtensionStoreRepo;
-use kuro_extensions::anime::browse::{RowBadges, buckets, not_runnable_by_store};
+use kuro_extensions::anime::browse::buckets;
 use kuro_extensions::anime::icons::IconCache;
 use kuro_extensions::anime::languages::enable_first_run_languages;
 use kuro_extensions::anime::loader::PackageDir;
@@ -34,9 +33,6 @@ use kuro_platform::paths::Paths;
 use kuro_prefs::source::{SourcePrefs, system_locale};
 use kuro_prefs::store::PrefStore;
 
-use crate::browse::extensions::{Ext, ExtState};
-use crate::browse::ext_badges;
-use crate::browse::icons::cached_icon_file;
 
 /// Whether listings that cannot run here are shown: never (the settings diet cut the `show_not_runnable` switch).
 const SHOW_NOT_RUNNABLE: bool = false;
@@ -48,23 +44,9 @@ pub fn anime_buckets(state: &ExtensionState, prefs: &SourcePrefs) -> Buckets {
     buckets(state, &prefs.enabled_languages.get(), prefs.show_nsfw_source.get(), SHOW_NOT_RUNNABLE)
 }
 
-/// The badge of every row of `buckets` that cannot run here (none while the not-runnable rows are hidden), by package name.
-pub fn badges_of(buckets: &Buckets) -> BTreeMap<String, RowBadges> {
-    let mut badges = BTreeMap::new();
-    for row in &buckets.available {
-        let badge = RowBadges::of(row.ext.kind);
-        if !badge.install_enabled() {
-            badges.entry(row.ext.pkg.clone()).or_insert(badge);
-        }
-    }
-    badges
-}
-
-/// What the extension pages read: the newest models of both kinds.
+/// What the Browse pages read: the newest anime lists and sources.
 #[derive(Default)]
 struct Latest {
-    manga: Vec<Ext>,
-    problems: Vec<(String, String)>,
     anime: Buckets,
     anime_sources: Vec<Source>,
     anime_icons: BTreeMap<i64, String>,
@@ -72,18 +54,6 @@ struct Latest {
 
 thread_local! {
     static LATEST: RefCell<Latest> = RefCell::new(Latest::default());
-}
-
-/// The rows of the manga extension list, with their cached icons. Read by the Browse extension page when it mounts.
-#[allow(dead_code)] // read by the Browse extension pages, which no screen mounts yet
-pub fn manga_rows() -> Vec<Ext> {
-    LATEST.with(|l| l.borrow().manga.clone())
-}
-
-/// The manga load problems as `(folder, message)`, for the list under the extensions.
-#[allow(dead_code)] // read by the Browse extension pages, which no screen mounts yet
-pub fn problems() -> Vec<(String, String)> {
-    LATEST.with(|l| l.borrow().problems.clone())
 }
 
 /// The anime Browse lists as the last state change left them, built with the current preferences.
@@ -110,15 +80,13 @@ pub fn anime_sources() -> (Vec<Source>, BTreeMap<i64, String>) {
     })
 }
 
-/// What a state change publishes: the first-run languages (a no-op once `source_languages` is saved), the Browse lists
-/// built with the current preferences, and from them the badges and the per-store counts the pages read.
+/// What a state change publishes: the first-run languages (a no-op once `source_languages` is saved), then the Browse
+/// lists and sources built with the current preferences.
 fn publish(state: &ExtensionState, prefs: &SourcePrefs) {
     if let Err(e) = enable_first_run_languages(prefs, state.available(), &system_locale()) {
         tracing::warn!("could not save the first-run languages: {e}");
     }
     let lists = anime_buckets(state, prefs);
-    ext_badges::publish(badges_of(&lists));
-    ext_badges::publish_store_counts(not_runnable_by_store(state, SHOW_NOT_RUNNABLE));
     let (sources, icons) = anime_source_rows(state);
     LATEST.with(|l| {
         let mut latest = l.borrow_mut();
@@ -128,44 +96,12 @@ fn publish(state: &ExtensionState, prefs: &SourcePrefs) {
     });
 }
 
-/// The rows of the shared extension list for the manga packages in `snapshot`. Each row's icon is the cached `icon.png`
-/// of its package when there is one, and none otherwise, which the list draws as the generic glyph.
-pub fn manga_exts(snapshot: &Snapshot, icons: &Path) -> Vec<Ext> {
-    let icon = |pkg: &str| cached_icon_file(icons, pkg);
-    let installed = snapshot.installed.values().map(|ext| Ext {
-        name: ext.name.clone(),
-        pkg: ext.pkg.clone(),
-        version: ext.version_code.to_string(),
-        lang: Some(String::new()),
-        nsfw: false,
-        sources: Vec::new(),
-        state: ExtState::Installed { has_update: ext.has_update, obsolete: ext.is_obsolete },
-        icon_file: icon(&ext.pkg),
-    });
-    let untrusted = snapshot.untrusted.values().map(|ext| Ext {
-        name: ext.pkg.clone(),
-        pkg: ext.pkg.clone(),
-        version: ext.version_code.to_string(),
-        lang: None,
-        nsfw: false,
-        sources: Vec::new(),
-        state: ExtState::Untrusted,
-        icon_file: icon(&ext.pkg),
-    });
-    installed.chain(untrusted).collect()
-}
-
-/// The load problems of the manga packages as `(folder, message)` lines, in folder order.
-pub fn problem_lines(snapshot: &Snapshot) -> Vec<(String, String)> {
-    snapshot.problems.iter().map(|(file, message)| (file.clone(), message.clone())).collect()
-}
-
-/// The download folder names of every installed source (T-17a-048): `Name (LANG)` for the anime sources, and the
-/// extension names for the manga packages, whose sources the manga registry does not list.
-fn download_folder_names(state: &ExtensionState, manga: &Snapshot) -> Vec<String> {
+/// The download folder names of every installed source (T-17a-048), as (anime, manga): `Name (LANG)` for the anime
+/// sources, and the extension names for the manga packages, whose sources the manga registry does not list.
+fn download_folder_names(state: &ExtensionState, manga: &Snapshot) -> (Vec<String>, Vec<String>) {
     let anime = state.installed().values().flat_map(|ext| &ext.sources).map(|s| kuro_downloads::anime::naming::source_dir_name(&s.name, &s.lang));
     let manga = manga.installed.values().map(|ext| kuro_downloads::layout::DownloadLayout::source_dir_name(&ext.name));
-    anime.chain(manga).collect()
+    (anime.collect(), manga.collect())
 }
 
 /// Logs the download folders that match no installed source, once the first anime scan is in. Nothing is deleted.
@@ -182,11 +118,6 @@ fn log_orphans(root: std::path::PathBuf, names: Vec<String>, handle: &tokio::run
 struct Host {
     registry: Arc<ExtensionRegistry>,
     state: Rc<RefCell<ExtensionState>>,
-}
-
-/// The manga models and problems after a scan of `snapshot`.
-fn manga_models(snapshot: &Snapshot, icons: &Path) -> (Vec<Ext>, Vec<(String, String)>) {
-    (manga_exts(snapshot, icons), problem_lines(snapshot))
 }
 
 thread_local! {
@@ -278,23 +209,12 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
     let shared: Arc<dyn kuro_platform::paths::Paths + Send + Sync> = Arc::new(paths.clone());
     crate::startup::load_sources(store, &shared);
 
-    // manga packages: one scan, icons into the cache, problems kept by folder
+    // manga packages: one scan, icons into the cache
     let registry = Arc::new(ExtensionRegistry::new());
     {
         let (registry, dir, icons) = (registry.clone(), paths.extensions_dir(), kuro_extensions::icon::icon_cache_dir(&paths));
-        let (tx, rx) = async_channel::bounded(1);
         handle.spawn_blocking(move || {
             kuro_extensions::loader::scan_into(&registry, &dir, &BTreeMap::new(), &icons);
-            let _ = tx.send_blocking(manga_models(&registry.snapshot(), &icons));
-        });
-        glib::spawn_future_local(async move {
-            if let Ok((manga, problems)) = rx.recv().await {
-                LATEST.with(|l| {
-                    let mut latest = l.borrow_mut();
-                    latest.manga = manga;
-                    latest.problems = problems;
-                });
-            }
         });
     }
 
@@ -313,7 +233,9 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
     );
     let apply_state = state.clone();
     let apply_prefs = SourcePrefs::new(store.clone());
-    let (apply_registry, apply_handle, downloads) = (registry.clone(), tokio::runtime::Handle::current(), paths.default_downloads_dir());
+    let storage = crate::settings_ui::storage::manager(store);
+    let roots = storage.map(|s| (s.downloads_path(kuro_domain::kind::EntryKind::Anime), s.downloads_path(kuro_domain::kind::EntryKind::Manga)));
+    let (apply_registry, apply_handle) = (registry.clone(), tokio::runtime::Handle::current());
     let mut orphans_logged = false;
     glib::spawn_future_local(pump(inbox, move |event| {
         let mut state = apply_state.borrow_mut();
@@ -321,7 +243,11 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
         publish(&state, &apply_prefs);
         if state.initialized() && !orphans_logged {
             orphans_logged = true;
-            log_orphans(downloads.clone(), download_folder_names(&state, &apply_registry.snapshot()), &apply_handle);
+            if let Some((anime_root, manga_root)) = &roots {
+                let (anime, manga) = download_folder_names(&state, &apply_registry.snapshot());
+                log_orphans(anime_root.clone(), anime, &apply_handle);
+                log_orphans(manga_root.clone(), manga, &apply_handle);
+            }
         }
     }));
 
@@ -332,7 +258,7 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
 mod tests {
     use kuro_extensions::anime::abi::AbiVersion;
     use kuro_extensions::anime::model::{AnimeSourceRef, Available, Kind, StoreRef};
-    use kuro_extensions::registry::{Installed, Untrusted};
+    use kuro_extensions::registry::Installed;
 
     use super::*;
 
@@ -422,7 +348,7 @@ mod tests {
         let registry = ExtensionRegistry::new();
         registry.set_installed(vec![Installed { pkg: "eu.m".into(), name: "Manga".into(), version_code: 1, lib_version: 1.0, has_update: false, is_obsolete: false }]);
         let names = download_folder_names(&state, &registry.snapshot());
-        assert_eq!(names, vec!["Tube_One (EN)".to_owned(), "Manga".to_owned()]);
+        assert_eq!(names, (vec!["Tube_One (EN)".to_owned()], vec!["Manga".to_owned()]));
     }
 
     fn state() -> ExtensionState {
@@ -445,19 +371,6 @@ mod tests {
         assert_eq!(shown.not_runnable_hidden, 0);
     }
 
-    #[test]
-    fn only_the_listings_that_cannot_run_carry_a_badge() {
-        let prefs = SourcePrefs::new(PrefStore::in_memory());
-        prefs.enabled_languages.set(["en".to_owned()].into()).unwrap();
-        let badges = badges_of(&buckets(&state(), &["en".to_owned()].into(), true, true));
-        assert_eq!(badges.len(), 2);
-        assert_eq!(badges["eu.apk"], RowBadges { not_runnable: true, unsigned: false });
-        assert_eq!(badges["eu.unsigned"], RowBadges { not_runnable: false, unsigned: true });
-        assert!(!badges.contains_key("eu.ok"));
-        // hidden rows carry no badge: nothing is shown for them
-        assert!(badges_of(&anime_buckets(&state(), &prefs)).is_empty());
-    }
-
     /// T-18a-023: a state change saves the device language set once, and the user's later choice stays.
     #[test]
     fn a_listing_saves_the_first_run_languages_once_and_publishes_the_page_data() {
@@ -469,37 +382,6 @@ mod tests {
         prefs.enabled_languages.set(["ja".to_owned()].into()).unwrap();
         publish(&state(), &prefs);
         assert_eq!(prefs.enabled_languages.get(), ["ja".to_owned()].into(), "a later choice stays");
-        assert!(ext_badges::store_note_for("https://s/i.json").is_some_and(|n| n.starts_with("2 entries")));
         assert_eq!(anime_lists().not_runnable_hidden, 2);
-        assert_eq!(ext_badges::of("eu.apk"), None, "hidden rows carry no badge");
-        prefs.enabled_languages.set(["en".to_owned()].into()).unwrap();
-        publish(&state(), &prefs);
-        assert!(ext_badges::store_note_for("https://s/i.json").is_some(), "the not-runnable rows stay hidden");
-        ext_badges::publish(BTreeMap::new());
-        ext_badges::publish_store_counts(BTreeMap::new());
-    }
-
-    /// T-18a-011 and T-18a-054: the rows take the cached icon, a vanished package has none, and the problems list by folder.
-    #[test]
-    fn manga_rows_use_the_cached_icon_and_the_problems_list_by_folder() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("eu.ok.png"), b"png").unwrap();
-        let mut snapshot = Snapshot::default();
-        snapshot.installed.insert(
-            "eu.ok".into(),
-            Installed { pkg: "eu.ok".into(), name: "Ok".into(), version_code: 3, lib_version: 1.0, has_update: true, is_obsolete: false },
-        );
-        snapshot.installed.insert(
-            "eu.gone".into(),
-            Installed { pkg: "eu.gone".into(), name: "Gone".into(), version_code: 1, lib_version: 1.0, has_update: false, is_obsolete: false },
-        );
-        snapshot.untrusted.insert("eu.u".into(), Untrusted { pkg: "eu.u".into(), version_code: 2 });
-        snapshot.problems.insert("broken".into(), "component.wasm is missing".into());
-        let rows = manga_exts(&snapshot, dir.path());
-        let icon_of = |pkg: &str| rows.iter().find(|r| r.pkg == pkg).and_then(|r| r.icon_file.clone());
-        assert_eq!(icon_of("eu.ok").map(std::path::PathBuf::from), Some(dir.path().join("eu.ok.png")));
-        assert_eq!(icon_of("eu.gone"), None, "no cached icon: the generic glyph");
-        assert!(matches!(rows.iter().find(|r| r.pkg == "eu.u").map(|r| &r.state), Some(ExtState::Untrusted)));
-        assert_eq!(problem_lines(&snapshot), [("broken".to_owned(), "component.wasm is missing".to_owned())]);
     }
 }

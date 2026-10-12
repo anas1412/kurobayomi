@@ -74,7 +74,7 @@ pub struct MigrateDeps {
     pub directory: Rc<dyn Fn() -> Option<Arc<dyn SourceDirectory>>>,
     /// A row: the favourites of that source.
     pub open: Rc<dyn Fn(i64)>,
-    /// A long press copies the source id.
+    /// The row menu's Copy: copies the source id.
     pub copy_id: Rc<dyn Fn(i64)>,
     /// Opens a link in the browser: the header's help action opens `texts::SOURCE_MIGRATION_HELP_URL`.
     pub open_url: Rc<dyn Fn(&str)>,

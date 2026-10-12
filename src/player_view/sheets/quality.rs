@@ -2,7 +2,8 @@
 //! servers and their videos load on the source's runtime (a spinner until they do, then the list is kept for the
 //! episode). Choosing a video resolves its stream and reloads it at the playing position, with that video's headers,
 //! subtitles and audio. The last choice is kept for the session: the next episode plays the same server and title when
-//! its list has them, else the source's best video. A local episode has no menu.
+//! its list has them, else the source's best video. A local episode has no menu. The video's right-click menu lists the
+//! same choices through [`menu_sections`], over the same loaded servers ([`Servers`]).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -49,16 +50,64 @@ struct Loaded {
     states: Vec<HosterState>,
 }
 
-/// The quality and server button. Its list loads the first time it opens for an episode.
-pub fn button(shared: &Shared) -> gtk::MenuButton {
-    let cache: Rc<RefCell<Option<Loaded>>> = Rc::default();
-    let pending: Rc<Cell<Option<i64>>> = Rc::default();
+/// The servers of the playing episode, loaded once per episode and shared by the quality button and the video's
+/// right-click menu. Cloning shares them.
+#[derive(Clone, Default)]
+pub struct Servers(Rc<ServersInner>);
+
+#[derive(Default)]
+struct ServersInner {
+    loaded: RefCell<Option<Loaded>>,
+    /// The episode whose servers are loading: asking again meanwhile does not ask the source twice.
+    pending: Cell<Option<i64>>,
+}
+
+impl Servers {
+    /// The loaded servers of `episode_id`, or `None` while they load. The first ask starts the load and `done` runs with
+    /// its answer; an ask while it runs starts nothing and its `done` is dropped.
+    fn get_or_load(&self, episode_id: i64, source: Arc<dyn AnimeSource>, episode: SEpisode, done: impl FnOnce(Result<Vec<HosterState>, String>) + 'static) -> Option<Vec<HosterState>> {
+        let cached = self.0.loaded.borrow().as_ref().filter(|loaded| loaded.episode_id == episode_id).map(|loaded| loaded.states.clone());
+        if cached.is_some() {
+            return cached;
+        }
+        if self.0.pending.get() == Some(episode_id) {
+            return None;
+        }
+        self.0.pending.set(Some(episode_id));
+        let this = self.clone();
+        load(source, episode, move |answer| {
+            this.0.pending.set(None);
+            if let Ok(states) = &answer {
+                *this.0.loaded.borrow_mut() = Some(Loaded { episode_id, states: states.clone() });
+            }
+            done(answer);
+        });
+        None
+    }
+}
+
+/// The quality and server button over `servers`. Its list loads the first time it opens for an episode.
+pub fn button(shared: &Shared, servers: &Servers) -> gtk::MenuButton {
     let button = menu("Quality and server", {
-        let shared = Rc::clone(shared);
-        move |column, popover| fill(column, popover, &shared, &cache, &pending)
+        let (shared, servers) = (Rc::clone(shared), servers.clone());
+        move |column, popover| fill(column, popover, &shared, &servers)
     });
     button.set_icon_name("video-display-symbolic");
     button
+}
+
+/// The choices of the quality menu for the video's right-click menu: one list per server, with its heading. `None` for
+/// an episode that is not online; an empty list while the servers load (the first ask starts the load, and a failure
+/// shows its toast).
+pub fn menu_sections(shared: &Shared, servers: &Servers) -> Option<Vec<(Option<String>, Vec<Choice>)>> {
+    let episode_id = shared.borrow().episode_id;
+    let (source, episode) = online_episode(episode_id)?;
+    let states = servers.get_or_load(episode_id, Arc::clone(&source), episode, |answer| {
+        if let Err(text) = answer {
+            crate::toast::notify(text);
+        }
+    });
+    Some(states.map_or_else(Vec::new, |states| sections(shared, &source, &states)))
 }
 
 /// Whether the playing episode is online, which is the only time the menu has servers to choose from.
@@ -120,59 +169,58 @@ fn online_episode(episode_id: i64) -> Option<(Arc<dyn AnimeSource>, SEpisode)> {
     Some((source, to_s_episode(&episode)))
 }
 
-/// `pending` is the episode whose servers are loading: reopening the menu meanwhile shows the spinner again but does
-/// not ask the source twice.
-fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, cache: &Rc<RefCell<Option<Loaded>>>, pending: &Rc<Cell<Option<i64>>>) {
+/// Reopening the menu while the servers load shows the spinner again but does not ask the source twice.
+fn fill(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, servers: &Servers) {
     let episode_id = shared.borrow().episode_id;
     let Some((source, episode)) = online_episode(episode_id) else {
         return;
     };
-    let cached = cache.borrow().as_ref().filter(|loaded| loaded.episode_id == episode_id).map(|loaded| loaded.states.clone());
-    if let Some(states) = cached {
-        return list(column, popover, shared, &source, &states);
-    }
-    column.append(&gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).margin_top(12).margin_bottom(12).build());
-    if pending.get() == Some(episode_id) {
-        return;
-    }
-    pending.set(Some(episode_id));
-    let (column, popover, shared, cache, pending) = (column.clone(), popover.clone(), Rc::clone(shared), Rc::clone(cache), Rc::clone(pending));
-    let loaded_source = Arc::clone(&source);
-    load(Arc::clone(&source), episode, move |answer| {
-        pending.set(None);
-        match answer {
+    let (shown_column, shown_popover, shown_shared, loaded_source) = (column.clone(), popover.clone(), Rc::clone(shared), Arc::clone(&source));
+    let states = servers.get_or_load(episode_id, Arc::clone(&source), episode, move |answer| match answer {
         Ok(states) => {
-            *cache.borrow_mut() = Some(Loaded { episode_id, states: states.clone() });
-            if popover.is_visible() {
-                clear(&column);
-                list(&column, &popover, &shared, &loaded_source, &states);
+            if shown_popover.is_visible() {
+                clear(&shown_column);
+                list(&shown_column, &shown_popover, &shown_shared, &loaded_source, &states);
             }
         }
         Err(text) => {
-            clear(&column);
+            clear(&shown_column);
             crate::toast::notify(text);
         }
-        }
     });
+    match states {
+        Some(states) => list(column, popover, shared, &source, &states),
+        // a load that failed at once has already shown its toast
+        None if servers.0.pending.get() == Some(episode_id) => column.append(&gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).margin_top(12).margin_bottom(12).build()),
+        None => {}
+    }
 }
 
 /// One heading per server (none for the list of a source without servers), then its videos. A server that failed to
 /// load shows one row that cannot be chosen; a server with no videos is left out.
 fn list(column: &gtk::Box, popover: &gtk::Popover, shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterState]) {
+    for (heading, choices) in sections(shared, source, states) {
+        section(column, heading.as_deref(), choices, popover);
+    }
+}
+
+/// The lists `list` shows: each server's heading and its rows.
+fn sections(shared: &Shared, source: &Arc<dyn AnimeSource>, states: &[HosterState]) -> Vec<(Option<String>, Vec<Choice>)> {
     let last = last();
-    for state in states {
-        match state {
+    states
+        .iter()
+        .filter_map(|state| match state {
             HosterState::Ready { hoster_name, videos } if !videos.is_empty() => {
                 let choices = videos.iter().map(|entry| choice(shared, source, hoster_name, &entry.video, last.as_ref())).collect();
-                section(column, heading(hoster_name), choices, popover);
+                Some((heading(hoster_name).map(str::to_owned), choices))
             }
             HosterState::Error { hoster_name } => {
                 let failed = Choice { title: "Could not load".to_owned(), subtitle: None, current: false, enabled: false, pick: Box::new(|| {}) };
-                section(column, heading(hoster_name), vec![failed], popover);
+                Some((heading(hoster_name).map(str::to_owned), vec![failed]))
             }
-            _ => {}
-        }
-    }
+            _ => None,
+        })
+        .collect()
 }
 
 fn heading(hoster_name: &str) -> Option<&str> {

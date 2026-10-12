@@ -18,6 +18,8 @@ pub enum Effect {
     PageSelected(PageRef),
     /// The page's zoom-start hook (B§10.3). `forward` is the selection direction.
     ZoomStart { page: PageRef, forward: bool },
+    /// A chapter transition card became the visible item; the page counter shows no number on it.
+    TransitionSelected,
     HideMenu,
     ShowMenu,
     /// Ask for a chapter to load in the background.

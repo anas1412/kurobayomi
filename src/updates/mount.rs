@@ -1,6 +1,6 @@
 //! Mounts the History and Updates tabs (T-42a-021, T-42a-025): one screen per kind under an Anime | Manga switcher,
-//! the header actions, and the reselect of the sidebar item. The screens are the live ones of [`history_screen`] and
-//! [`updates_screen`]; the pages call [`history`] and [`updates`], and the sidebar calls [`reselect`].
+//! and the header actions. The screens are the live ones of [`history_screen`] and [`updates_screen`]; the pages call
+//! [`history`] and [`updates`].
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -19,10 +19,7 @@ use crate::misc::diet_defaults as diet;
 use crate::updates::download_host;
 use crate::updates::library_trigger::{self, Outcome};
 use crate::updates::history_screen::HistoryScreen;
-use crate::updates::nav::{Reselect, reselect_action};
 use crate::updates::qualities;
-use crate::updates::stats_data;
-use crate::updates::stats_screen::StatsScreen;
 use crate::updates::storage::{self, StorageRow};
 use crate::updates::storage_data;
 use crate::updates::storage_screen::StorageScreen;
@@ -33,11 +30,11 @@ const ANIME: &str = "anime";
 const MANGA: &str = "manga";
 
 thread_local! {
-    static HISTORY: RefCell<Option<(gtk::Stack, Rc<HistoryScreen>, Rc<HistoryScreen>)>> = const { RefCell::new(None) };
+    /// The History screens, kept alive with the page like the Updates ones.
+    static HISTORY: RefCell<Vec<Rc<HistoryScreen>>> = const { RefCell::new(Vec::new()) };
     /// The Updates screens; their widgets only hold weak references, so this keeps them alive.
     static UPDATES: RefCell<Vec<Rc<UpdatesScreen>>> = const { RefCell::new(Vec::new()) };
-    /// The Statistics and Storage screens of the last page built, with the tasks that feed them.
-    static STATS: RefCell<Vec<(Rc<StatsScreen>, glib::JoinHandle<()>)>> = const { RefCell::new(Vec::new()) };
+    /// The Storage screens of the last page built, with the tasks that feed them.
     static STORAGE: RefCell<Vec<(Rc<StorageScreen>, Vec<glib::JoinHandle<()>>)>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -50,7 +47,7 @@ fn refresh_index(kind: EntryKind) -> usize {
     usize::from(kind == EntryKind::Manga)
 }
 
-/// A pushed page with a view per kind (Statistics, Storage): the two views, and the Anime | Manga switch that goes in
+/// A pushed page with a view per kind (Storage): the two views, and the Anime | Manga switch that goes in
 /// the page's one header row as an `end` widget, as on Categories, not on a row of its own.
 fn kind_switch(anime: &gtk::Widget, manga: &gtk::Widget) -> Built {
     let stack = gtk::Stack::new();
@@ -82,8 +79,8 @@ pub fn history() -> Option<Built> {
         clear.connect_clicked(move |_| target.ask_clear());
         Built { content: screen.widget().clone().upcast(), end: vec![screen.search().clone().upcast(), clear.upcast()] }
     };
-    let (page, stack) = tab_page([view(&anime), view(&manga)]);
-    HISTORY.with(|h| *h.borrow_mut() = Some((stack, anime, manga)));
+    let (page, _) = tab_page([view(&anime), view(&manga)]);
+    HISTORY.with(|h| *h.borrow_mut() = vec![anime, manga]);
     Some(Built { content: page.upcast(), end: vec![] })
 }
 
@@ -218,43 +215,6 @@ fn spin_until_done(button: &gtk::Button, kind: EntryKind) {
     });
 }
 
-/// The Statistics page: one page per kind, the Anime | Manga switch in the header (opened from More, "stats"). `None` before the
-/// app data is open.
-pub fn stats() -> Option<Built> {
-    if !crate::data::is_installed() {
-        return None;
-    }
-    let screens = [EntryKind::Anime, EntryKind::Manga].map(|kind| {
-        let screen = Rc::new(StatsScreen::new());
-        let feed = Rc::clone(&screen);
-        let task = glib::spawn_future_local(async move { feed.set_loaded(stats_of(kind).await) });
-        (screen, task)
-    });
-    let page = kind_switch(screens[0].0.widget().upcast_ref(), screens[1].0.widget().upcast_ref());
-    STATS.with(|s| *s.borrow_mut() = screens.into());
-    Some(page)
-}
-
-/// Aggregates the statistics of one kind off the GTK thread.
-async fn stats_of(kind: EntryKind) -> Option<stats_data::Loaded> {
-    let db = crate::data::app().db(kind);
-    let index = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
-    let rules = stats_data::GlobalUpdateRules::hard_coded_rules();
-    download_host::blocking(move || {
-        let downloaded = match kind {
-            EntryKind::Manga => index.map_or(0, |i| i.chapter_count_total() as i64),
-            EntryKind::Anime => download_host::anime_index().map_or(0, |i| i.episode_count_total() as i64),
-        };
-        // a store that cannot be opened reads as nobody logged in (the tracker section then shows N/A)
-        let logged_in = match kuro_platform::linux::paths::LinuxPaths::system() {
-            Ok(paths) => crate::library::trackers::logged_in(&kuro_platform::linux::secrets::open(&paths), kind),
-            Err(_) => Default::default(),
-        };
-        stats_data::load(&db, kind, downloaded, &logged_in, &rules)
-    })
-    .await
-}
-
 /// The Storage page: one page per kind, with the same switch in the header. It follows the download cache: the
 /// first snapshot comes at once and a new one after each change, with `initializing` taken from the cache (T-42a-054).
 pub fn storage() -> Option<Built> {
@@ -328,32 +288,12 @@ fn storage_screen(kind: EntryKind) -> (Rc<StorageScreen>, Vec<glib::JoinHandle<(
     (screen, vec![watch_changes, watch_init])
 }
 
-/// The sidebar item `nav_id` was chosen. `already_visible` says it was the showing page: History then resumes the
-/// newest row of the visible sub-tab, and Updates opens the Downloads page.
-pub fn reselect(nav_id: &str, already_visible: bool) {
-    match reselect_action(nav_id, already_visible) {
-        Reselect::ResumeHistory => {
-            let screen = HISTORY.with(|h| {
-                h.borrow().as_ref().map(|(stack, anime, manga)| match kind_of(stack.visible_child_name().as_deref()) {
-                    EntryKind::Anime => anime.clone(),
-                    EntryKind::Manga => manga.clone(),
-                })
-            });
-            if let Some(screen) = screen {
-                screen.resume_last();
-            }
-        }
-        Reselect::OpenDownloads => crate::ui::open("download_queue"),
-        Reselect::Nothing => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// docs/design/other-tabs.md: Updates and History use the Library's one-row header, and the stack the page hands
-    /// back is the one the switch drives, so the header actions and the sidebar reselect act on the visible kind.
+    /// back is the one the switch drives, so the header actions act on the visible kind.
     #[test]
     fn updates_and_history_have_the_library_header_and_follow_the_switch() {
         crate::testing::with_display(|| {
@@ -378,7 +318,7 @@ mod tests {
         assert_eq!(refresh_index(kind_of(None)), 0, "before the stack has a page, anime");
     }
 
-    /// Statistics and Storage carry their Anime | Manga switch in the header row, driving the two views.
+    /// Storage carries its Anime | Manga switch in the header row, driving the two views.
     #[test]
     fn a_kind_page_puts_its_switch_in_the_header() {
         crate::testing::with_display(|| {

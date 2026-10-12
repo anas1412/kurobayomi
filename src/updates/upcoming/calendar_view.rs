@@ -21,31 +21,6 @@ const TITLE_SLIDE_MS: u32 = 200;
 /// The smallest side of a day cell, in pixels.
 const CELL_SIZE: i32 = 40;
 
-/// The cell look: the ring of today is 1 px in the text colour, the dots are the theme's selected colour, and the whole
-/// cell is a circle so its hover and ring follow the click area. Plain GTK theme colours only.
-const CSS: &str = "
-.kuro-cal-day { border-radius: 9999px; border: 1px solid transparent; }
-.kuro-cal-day:hover { background-color: alpha(currentColor, 0.08); }
-.kuro-cal-day:focus-visible { outline: 2px solid @theme_selected_bg_color; outline-offset: -2px; }
-.kuro-cal-today { border-color: currentColor; }
-.kuro-cal-dot { background-color: @theme_selected_bg_color; border-radius: 9999px; }
-";
-
-thread_local! {
-    static STYLED: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Adds the cell look once for the display.
-pub(super) fn ensure_css() {
-    if STYLED.with(|s| s.replace(true)) {
-        return;
-    }
-    let Some(display) = gdk::Display::default() else { return };
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(CSS);
-    gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-}
-
 /// The calendar key a GDK key stands for.
 pub fn cal_key(key: gdk::Key) -> Option<CalKey> {
     match key {
@@ -79,7 +54,6 @@ pub struct CalendarView {
 impl CalendarView {
     /// A calendar on the month of `today`, with weeks that start on `first`. `on_day` runs for a click or Enter on a day.
     pub fn new(first: Weekday, today: NaiveDate, on_day: impl Fn(NaiveDate) + 'static) -> Rc<Self> {
-        ensure_css();
         let month = (today.year(), today.month());
         let title = gtk::Stack::builder().transition_duration(TITLE_SLIDE_MS).halign(Align::Start).hexpand(true).build();
         for name in ["a", "b"] {

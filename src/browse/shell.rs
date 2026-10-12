@@ -143,11 +143,6 @@ impl BrowseShell {
         Self { root, end: Vec::new(), inner }
     }
 
-    /// Re-selecting the Browse tab opens global search for the visible kind (D-UI-1).
-    pub fn reselect(&self) {
-        (self.inner.deps.on_route)(reselect_route(self.inner.visible()));
-    }
-
     /// The tab that is showing.
     pub fn visible(&self) -> BrowsePage {
         self.inner.visible()
@@ -295,19 +290,6 @@ pub(crate) mod tests {
         assert!(shell.end.is_empty(), "the header is part of the page");
     }
 
-    fn reselecting_opens_global_search_for_the_visible_kind() {
-        let (shell, log) = shell();
-        shell.inner.select(BrowsePage::MangaSources);
-        shell.reselect();
-        assert_eq!(
-            log.routes.borrow().last(),
-            Some(&BrowseRoute::GlobalSearch { kind: BrowseKind::Manga, source_id: None, query: String::new() })
-        );
-        shell.inner.select(BrowsePage::AnimeSources);
-        shell.reselect();
-        assert!(matches!(log.routes.borrow().last(), Some(BrowseRoute::GlobalSearch { kind: BrowseKind::Anime, .. })));
-    }
-
     fn enter_runs_a_global_search_of_the_visible_kind() {
         let (shell, log) = shell();
         shell.inner.select(BrowsePage::MangaSources);
@@ -374,7 +356,6 @@ pub(crate) mod tests {
 
     pub(crate) fn smoke() {
         the_tab_has_only_the_two_source_pages_and_one_header_search();
-        reselecting_opens_global_search_for_the_visible_kind();
         enter_runs_a_global_search_of_the_visible_kind();
         the_switch_follows_the_page_and_ctrl_digits_pick_only_the_two_pages();
         ctrl_f_and_escape_drive_the_search_then_leave();

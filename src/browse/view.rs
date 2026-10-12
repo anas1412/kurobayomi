@@ -425,53 +425,14 @@ pub fn list_cell(item: Option<&ListItem>, load: &CoverLoader, guard: &CoverGuard
     row
 }
 
-/// The long press and its desktop aliases, the secondary click and the Menu key or Shift+F10, without a primary click.
-/// The cells of the listing activate through the view itself, so no primary click is added to them.
-pub fn attach_long_press(widget: &impl IsA<gtk::Widget>, on_long: impl Fn() + 'static) {
-    let on_long: Rc<dyn Fn()> = Rc::new(on_long);
-    let long = gtk::GestureLongPress::new();
-    long.connect_pressed({
-        let on_long = Rc::clone(&on_long);
-        move |gesture, _, _| {
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            on_long();
-        }
-    });
-    widget.add_controller(long);
-    let secondary = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build();
-    secondary.connect_pressed({
-        let on_long = Rc::clone(&on_long);
-        move |gesture, _, _, _| {
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            on_long();
-        }
-    });
-    widget.add_controller(secondary);
-    attach_menu_key(widget, on_long);
-}
-
-/// A boxed-list row around `child` with two callbacks: activating the row (a click, Enter or Space, through
-/// `widgets::row_activate`) runs `on_primary`; the long press, its desktop alias the secondary click (U9), and the Menu
-/// key or Shift+F10 run `on_long`. A long press claims its touch sequence, so it does not also activate the row.
-pub fn list_row(child: &impl IsA<gtk::Widget>, on_primary: impl Fn() + 'static, on_long: impl Fn() + 'static) -> gtk::ListBoxRow {
+/// A boxed-list row around `child`: activating the row (a click, Enter or Space, through `widgets::row_activate`) runs
+/// `on_primary`; a right-click, the Menu key or Shift+F10 (and a long press on a touch screen) opens the menu of the
+/// items `menu` returns (`widgets::context_menu`). The menu gestures never activate the row.
+pub fn list_row(child: &impl IsA<gtk::Widget>, on_primary: impl Fn() + 'static, menu: impl Fn() -> Vec<crate::widgets::context_menu::Item> + 'static) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::builder().child(child).build();
     crate::widgets::row_activate::on_activate(&row, move |_| on_primary());
-    attach_long_press(&row, on_long);
+    crate::widgets::context_menu::attach(&row, move |_, _| menu());
     row
-}
-
-/// The keyboard's way to a context menu: the Menu key, or Shift+F10. The widget takes focus so the keys reach it.
-pub fn attach_menu_key(widget: &impl IsA<gtk::Widget>, on_menu: Rc<dyn Fn()>) {
-    widget.set_focusable(true);
-    let keys = gtk::EventControllerKey::new();
-    keys.connect_key_pressed(move |_, key, _, state| {
-        let menu = key == gtk::gdk::Key::Menu || (key == gtk::gdk::Key::F10 && state.contains(gtk::gdk::ModifierType::SHIFT_MASK));
-        if menu {
-            on_menu();
-        }
-        if menu { gtk::glib::Propagation::Stop } else { gtk::glib::Propagation::Proceed }
-    });
-    widget.add_controller(keys);
 }
 
 #[cfg(test)]
@@ -600,52 +561,30 @@ pub(crate) mod tests {
         assert!(!drawn.get(), "a cancelled cover never reaches its picture");
     }
 
-    fn primary_click_and_long_press_call_different_callbacks() {
-        let (clicks, longs) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
-        let (c, l) = (Rc::clone(&clicks), Rc::clone(&longs));
-        let row = list_row(&GBox::new(O::Horizontal, 0), move || c.set(c.get() + 1), move || l.set(l.get() + 1));
+    fn a_row_click_activates_and_a_right_click_or_the_menu_key_asks_for_the_menu() {
+        let (clicks, menus) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+        let (c, m) = (Rc::clone(&clicks), Rc::clone(&menus));
+        let row = list_row(&GBox::new(O::Horizontal, 0), move || c.set(c.get() + 1), move || {
+            m.set(m.get() + 1);
+            Vec::new()
+        });
         let list = gtk::ListBox::new();
         list.append(&row);
         crate::widgets::row_activate::click_row(&row);
         assert_eq!(clicks.get(), 1, "a click activates the row once");
         row.emit_by_name::<()>("activate", &[]);
         assert_eq!(clicks.get(), 2, "so does Enter or Space");
-        let mut controllers = Vec::new();
         let all = row.observe_controllers();
-        for i in 0..all.n_items() {
-            controllers.push(all.item(i).expect("controller"));
-        }
-        assert_eq!(controllers.len(), 3, "long press, secondary click and the menu key; no primary click of its own");
-        for controller in &controllers {
-            if let Some(click) = controller.downcast_ref::<gtk::GestureClick>() {
-                assert_eq!(click.button(), gtk::gdk::BUTTON_SECONDARY);
+        for controller in (0..all.n_items()).filter_map(|i| all.item(i)) {
+            if let Some(click) = controller.downcast_ref::<gtk::GestureClick>().filter(|c| c.button() == gtk::gdk::BUTTON_SECONDARY) {
                 click.emit_by_name::<()>("pressed", &[&1_i32, &0.0_f64, &0.0_f64]);
-            } else if let Some(long) = controller.downcast_ref::<gtk::GestureLongPress>() {
-                long.emit_by_name::<()>("pressed", &[&0.0_f64, &0.0_f64]);
             } else if let Some(keys) = controller.downcast_ref::<gtk::EventControllerKey>() {
-                let shift = gtk::gdk::ModifierType::SHIFT_MASK;
                 let none = gtk::gdk::ModifierType::empty();
-                assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Menu, &0_u32, &none]), "the Menu key is handled");
-                assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::F10, &0_u32, &shift]), "so is Shift+F10");
-                assert!(!keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::F10, &0_u32, &none]), "F10 alone is not");
+                let _ = keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Menu, &0_u32, &none]);
             }
         }
         assert_eq!(clicks.get(), 2, "the menu gestures never activate the row");
-        assert_eq!(longs.get(), 4, "the long press, the right click and both menu keys reach the long-press callback");
-    }
-
-    fn a_listing_cell_opens_the_menu_from_the_keyboard_too() {
-        let cell = GBox::new(O::Horizontal, 0);
-        let opened = Rc::new(Cell::new(0));
-        let seen = Rc::clone(&opened);
-        attach_long_press(&cell, move || seen.set(seen.get() + 1));
-        assert!(cell.is_focusable(), "the cell takes focus so the keys reach it");
-        let list = cell.observe_controllers();
-        let keys = (0..list.n_items()).filter_map(|i| list.item(i)).find_map(|c| c.downcast::<gtk::EventControllerKey>().ok()).expect("key controller");
-        let shift = gtk::gdk::ModifierType::SHIFT_MASK;
-        assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Menu, &0_u32, &gtk::gdk::ModifierType::empty()]));
-        assert!(keys.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::F10, &0_u32, &shift]));
-        assert_eq!(opened.get(), 2);
+        assert_eq!(menus.get(), 2, "the right click and the Menu key ask for the menu");
     }
 
     /// Run by `smoke::browse_widgets_smoke`: every widget check of this lane runs in that one test, on the shared
@@ -657,7 +596,6 @@ pub(crate) mod tests {
         cover_only_has_no_title_and_comfortable_has_one_under_the_cover();
         the_cover_loader_is_called_with_the_item_cover();
         a_remote_cover_is_cancelled_with_its_picture_and_never_drawn();
-        primary_click_and_long_press_call_different_callbacks();
-        a_listing_cell_opens_the_menu_from_the_keyboard_too();
+        a_row_click_activates_and_a_right_click_or_the_menu_key_asks_for_the_menu();
     }
 }

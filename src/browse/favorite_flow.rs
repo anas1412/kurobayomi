@@ -1,6 +1,6 @@
-//! The long press on a browsed entry: the decision, the dialog it asks for and the library write that follows
-//! (T-40b-041, T-40b-042, T-40b-044, T-40b-047). The rules are `favorite` and `entries`; this file shows the dialogs and
-//! runs the store calls off the GTK thread.
+//! Add to library and Remove from library on a browsed entry (its right-click menu): the decision, the dialog it asks
+//! for and the library write that follows (T-40b-041, T-40b-042, T-40b-044, T-40b-047). The rules are `favorite` and
+//! `entries`; this file shows the dialogs and runs the store calls off the GTK thread.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -70,8 +70,8 @@ impl FavoriteFlow {
         self.dialogs.current()
     }
 
-    /// A long press (or secondary click) on a cover: a favourite asks to be removed, a new entry with a duplicate asks
-    /// first, anything else is added (B§4.8.4). A second press replaces the dialog the first one opened.
+    /// A cover menu's Add to library or Remove from library: a favourite asks to be removed, a new entry with a duplicate
+    /// asks first, anything else is added (B§4.8.4). A second ask replaces the dialog the first one opened.
     pub fn long_press(self: &Rc<Self>, item: ListItem) {
         let press = self.presses.get() + 1;
         self.presses.set(press);

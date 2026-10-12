@@ -94,13 +94,16 @@ mod tests {
     }
 
     fn word(unread: TriState, downloaded: TriState, bookmarked: TriState) -> ChapterFlags {
-        let (u, um) = crate::entry_core::flags::unread_write(unread);
-        let (d, dm) = crate::entry_core::flags::downloaded_write(downloaded);
-        let (b, bm) = crate::entry_core::flags::bookmarked_write(bookmarked);
-        ChapterFlags(0)
-            .with_masked(u, um)
-            .with_masked(d, dm)
-            .with_masked(b, bm)
+        let group = |state: TriState, is: i64, not: i64| match state {
+            TriState::DISABLED => 0,
+            TriState::ENABLED_IS => is,
+            TriState::ENABLED_NOT => not,
+        };
+        ChapterFlags(
+            group(unread, c::SHOW_UNREAD, c::SHOW_READ)
+                | group(downloaded, c::SHOW_DOWNLOADED, c::SHOW_NOT_DOWNLOADED)
+                | group(bookmarked, c::SHOW_BOOKMARKED, c::SHOW_NOT_BOOKMARKED),
+        )
     }
 
     #[test]

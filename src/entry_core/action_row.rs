@@ -93,17 +93,6 @@ pub fn tracking_tone(count: i64) -> Tone {
     if count == 0 { Tone::Inactive } else { Tone::Primary }
 }
 
-/// What a tracking click opens: the tracking settings when no tracker is logged in, else the tracking sheet (E-25).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TrackingClick {
-    Settings,
-    Sheet,
-}
-
-pub fn tracking_click(logged_in_tracker: bool) -> TrackingClick {
-    if logged_in_tracker { TrackingClick::Sheet } else { TrackingClick::Settings }
-}
-
 /// Whether the row shows the tracking button at all. Anime shows it only when a tracking callback exists; manga always has one.
 pub fn tracking_visible(has_callback: bool) -> bool {
     has_callback
@@ -171,13 +160,11 @@ mod tests {
     }
 
     #[test]
-    fn tracking_label_counts_trackers_and_the_click_routes_by_login() {
+    fn tracking_label_counts_trackers() {
         assert_eq!(tracking_label(0), TrackingLabel::Tracking);
         assert_eq!(tracking_label(2), TrackingLabel::Trackers(2));
         assert_eq!(tracking_tone(0), Tone::Inactive);
         assert_eq!(tracking_tone(1), Tone::Primary);
-        assert_eq!(tracking_click(false), TrackingClick::Settings);
-        assert_eq!(tracking_click(true), TrackingClick::Sheet);
     }
 
     #[test]

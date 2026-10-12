@@ -60,14 +60,6 @@ impl Paths for TestPaths {
         self.root.join("state/crashes")
     }
 
-    fn default_downloads_dir(&self) -> PathBuf {
-        self.root.join("downloads")
-    }
-
-    fn default_backups_dir(&self) -> PathBuf {
-        self.root.join("data/backups")
-    }
-
     fn covers_dir(&self) -> PathBuf {
         self.root.join("cache/covers")
     }

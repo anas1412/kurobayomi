@@ -7,11 +7,6 @@ use kuro_i18n::{MsgKey, tr};
 /// Count text size in points.
 pub const COUNT_PILL_PT: u32 = 14;
 
-/// Pill background alpha over the foreground colour: 0.12 in dark mode, 0.08 in light mode.
-pub fn pill_alpha(dark: bool) -> f32 {
-    if dark { 0.12 } else { 0.08 }
-}
-
 /// The count pill shows only for a positive count.
 pub fn show_count_pill(count: u32) -> bool {
     count > 0
@@ -47,14 +42,12 @@ pub fn overflow_visible(overflow_items: usize) -> bool {
 
 /// The title and subtitle box: title one line with ellipsis, the count pill beside it when it applies, and the subtitle
 /// one line with ellipsis and the full text as its tooltip (the marquee is dropped, behaviour 5.8).
-pub fn header_title(title: &str, subtitle: Option<&str>, count: u32, dark: bool) -> gtk::Box {
+pub fn header_title(title: &str, subtitle: Option<&str>, count: u32) -> gtk::Box {
     let column = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let label = gtk::Label::builder().label(title).ellipsize(gtk::pango::EllipsizeMode::End).single_line_mode(true).max_width_chars(28).css_classes(["title"]).build();
     column.append(&label);
     if show_count_pill(count) {
-        ensure_pill_css();
-        let class = if dark { "kuro-count-pill-dark" } else { "kuro-count-pill-light" };
-        let pill = gtk::Label::builder().label(count.to_string()).css_classes([class]).build();
+        let pill = gtk::Label::builder().label(count.to_string()).css_classes([crate::theme::style::class::COUNT_PILL]).build();
         pill.set_attributes(Some(&size_attrs(COUNT_PILL_PT)));
         column.append(&pill);
     }
@@ -118,26 +111,6 @@ pub fn cancel_on_escape(widget: &impl IsA<gtk::Widget>, in_action_mode: impl Fn(
     widget.add_controller(keys);
 }
 
-thread_local! {
-    static PILL_CSS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Installs the two pill rules once per display: the foreground colour at the light or the dark alpha.
-fn ensure_pill_css() {
-    if PILL_CSS.with(|done| done.replace(true)) {
-        return;
-    }
-    let Some(display) = gtk::gdk::Display::default() else { return };
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(&format!(
-        ".kuro-count-pill-light {{ background-color: alpha(@window_fg_color, {light}); border-radius: 999px; padding: 0 6px; }} \
-         .kuro-count-pill-dark {{ background-color: alpha(@window_fg_color, {dark}); border-radius: 999px; padding: 0 6px; }}",
-        light = pill_alpha(false),
-        dark = pill_alpha(true),
-    ));
-    gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-}
-
 fn size_attrs(points: u32) -> gtk::pango::AttrList {
     let list = gtk::pango::AttrList::new();
     list.insert(gtk::pango::AttrSize::new(points as i32 * gtk::pango::SCALE));
@@ -147,12 +120,6 @@ fn size_attrs(points: u32) -> gtk::pango::AttrList {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pill_alpha_is_8_percent_light_and_12_percent_dark() {
-        assert!((pill_alpha(false) - 0.08).abs() < f32::EPSILON);
-        assert!((pill_alpha(true) - 0.12).abs() < f32::EPSILON);
-    }
 
     #[test]
     fn count_pill_shows_only_above_zero() {

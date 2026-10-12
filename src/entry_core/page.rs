@@ -3,14 +3,13 @@
 //! Upstream: `MangaScreenModel.kt` (selection `:971-1057`, mark read `:788-840`, setters `:878-949`).
 
 use kuro_i18n::{MsgKey, tr};
-use kuro_prefs::tristate::TriState;
 
 use crate::entry_core::banner::{Banners, Length};
 use crate::entry_core::chapter_actions::{DownloadAction, IndicatorAction, acts_on, download_targets, indicator_action, previous_ids, state_after_cancel};
 use crate::entry_core::detail::{EntryState, LoadState, StoreCmd, StoreEvent, apply_snapshot};
 use crate::entry_core::dialog::{CategoryConfirm, Dialog};
 use crate::entry_core::errors::DetailError;
-use crate::entry_core::flags::{bookmarked_write, display_write, downloaded_write, unread_write};
+use crate::entry_core::flags::Write;
 use crate::entry_core::list_model::{RowItem, focus_after, row_items};
 use crate::entry_core::live::{DownloadEvent, ProgressThrottle, apply_event};
 use crate::entry_core::selection::{Command, Key, Mods, Pick, back_clears_selection, click_command, key_command};
@@ -47,13 +46,10 @@ pub enum UiAction {
         id: i64,
         action: RowMenuAction,
     },
-    SetUnread(TriState),
-    SetBookmarked(TriState),
+    /// A pick of the list options menu: a masked write `(flag, mask)` of the chapter flags (`list_options`).
+    SetFlagBits(Write),
     /// The interval dialog's OK or Reset: the wheel value (0 is automatic).
     SetFetchInterval(i32),
-    SetDownloaded(TriState),
-    SetDisplayNumber(bool),
-    SortBy(i64),
     OpenDialog(Dialog),
     ConfirmCategory(CategoryConfirm),
     DismissDialog,
@@ -221,6 +217,12 @@ impl Page {
                     page.excluded_scanlators = excluded;
                 }
             }
+            StoreEvent::Tracking { count, logged_in } => {
+                if let Some(page) = self.ready_mut() {
+                    page.tracking_count = count;
+                    page.has_logged_in_trackers = logged_in;
+                }
+            }
             StoreEvent::Queued => {
                 // the add-to-library prompt: once per open, and only for a manga that is not in the library
                 let (manga_id, default_category) = (self.manga_id, self.default_category);
@@ -257,16 +259,11 @@ impl Page {
         let Some(page) = self.ready_mut() else {
             return out;
         };
-        let write = |(flag, mask): (i64, i64)| StoreCmd::SetFlagBits { manga_id, flag, mask };
         match action {
             UiAction::Refresh => out.cmds.push(StoreCmd::FetchAll { manga_id, manual: true }),
-            UiAction::SetUnread(state) => out.cmds.push(write(unread_write(state))),
-            UiAction::SetBookmarked(state) => out.cmds.push(write(bookmarked_write(state))),
+            UiAction::SetFlagBits((flag, mask)) => out.cmds.push(StoreCmd::SetFlagBits { manga_id, flag, mask }),
             UiAction::SetFetchInterval(wheel) => out.cmds.push(StoreCmd::SetFetchInterval { manga_id, wheel }),
             UiAction::SetExcludedScanlators(excluded) => out.cmds.push(StoreCmd::SetExcludedScanlators { manga_id, excluded }),
-            UiAction::SetDownloaded(state) => out.cmds.push(write(downloaded_write(state))),
-            UiAction::SetDisplayNumber(number) => out.cmds.push(write(display_write(number))),
-            UiAction::SortBy(mode) => out.cmds.push(StoreCmd::SortBy { manga_id, mode }),
             UiAction::MarkRead(read) => {
                 if let Some(chapter_ids) = take_selection(page) {
                     out.cmds.push(StoreCmd::MarkRead {
@@ -551,7 +548,7 @@ mod tests {
     fn escape_closes_a_dialog_before_it_clears_the_selection() {
         let mut page = ready(2);
         page.act(UiAction::Key { key: Key::Space, mods: Mods::default(), focused: Some(1) });
-        page.act(UiAction::OpenDialog(Dialog::FullCover));
+        page.act(UiAction::OpenDialog(Dialog::TrackSheet));
         page.act(UiAction::Key { key: Key::Escape, mods: Mods::default(), focused: Some(1) });
         assert!(page.ready().unwrap().dialog.current().is_none());
         assert_eq!(page.ready().unwrap().selection.len(), 1);
@@ -588,12 +585,10 @@ mod tests {
     fn setters_become_masked_store_writes_and_never_touch_the_local_state() {
         let mut page = ready(1);
         let before = page.ready().unwrap().manga.flags;
-        let out = page.act(UiAction::SetUnread(TriState::ENABLED_IS));
+        let out = page.act(UiAction::SetFlagBits((c::SHOW_UNREAD, c::UNREAD_MASK)));
         assert_eq!(out.cmds, vec![StoreCmd::SetFlagBits { manga_id: 1, flag: c::SHOW_UNREAD, mask: c::UNREAD_MASK }]);
-        let out = page.act(UiAction::SetDisplayNumber(true));
+        let out = page.act(UiAction::SetFlagBits((c::DISPLAY_NUMBER, c::DISPLAY_MASK)));
         assert_eq!(out.cmds, vec![StoreCmd::SetFlagBits { manga_id: 1, flag: c::DISPLAY_NUMBER, mask: c::DISPLAY_MASK }]);
-        let out = page.act(UiAction::SortBy(c::SORTING_ALPHABET));
-        assert_eq!(out.cmds, vec![StoreCmd::SortBy { manga_id: 1, mode: c::SORTING_ALPHABET }]);
         assert_eq!(page.ready().unwrap().manga.flags, before, "the view changes only when the store snapshot arrives");
         page.apply(
             StoreEvent::Snapshot { manga: Box::new(manga(0x101 | c::SHOW_UNREAD)), chapters: vec![ChapterRow::new(1, "c1", 1.0)] },
@@ -671,6 +666,15 @@ mod tests {
     }
 
     #[test]
+    fn a_tracking_read_updates_the_count_the_tracking_button_shows() {
+        let mut page = ready(1);
+        assert_eq!(page.ready().expect("ready").tracking_count, 0);
+        page.apply(StoreEvent::Tracking { count: 1, logged_in: true }, 0);
+        let ready = page.ready().expect("ready");
+        assert_eq!((ready.tracking_count, ready.has_logged_in_trackers), (1, true));
+    }
+
+    #[test]
     fn download_events_patch_one_row() {
         let mut page = ready(3);
         let index = page.apply_download(DownloadEvent::Status { chapter_id: 2, state: DownloadState::Queue }, 0);
@@ -716,7 +720,7 @@ mod tests {
         assert!(!page.act(UiAction::Back).pop, "a hidden selection still counts (E-04)");
         assert!(page.ready().unwrap().selection.is_empty());
         // a dialog closes before the selection
-        page.act(UiAction::OpenDialog(Dialog::FullCover));
+        page.act(UiAction::OpenDialog(Dialog::TrackSheet));
         assert!(!page.act(UiAction::Back).pop);
         assert!(page.ready().unwrap().dialog.current().is_none());
     }

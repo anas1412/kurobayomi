@@ -3,7 +3,7 @@
 //! this lane owns only `src/updates`, so they live here and call the same public code of those crates. [`fixtures`] is
 //! the shared fixture of area 42: temporary manga and anime databases and their rows. The tests that already exist under
 //! another name in the module of the code they cover are not repeated here: `history_next_units_*` (history),
-//! `selection_*` (selection), `group_by_local_date_*` (kuro-domain) and the stats and storage ones named below.
+//! `selection_*` (selection), `group_by_local_date_*` (kuro-domain) and the storage ones named below.
 //!
 //! Sections: [`domain`] is 5.1, [`data`] is 5.2, [`ui`] is 5.3 and [`shared`] is 5.4.
 
@@ -92,7 +92,6 @@ mod domain {
 
     use crate::updates::format::{RelativeDate, RelativeTime, duration_string, format_size, progress_mmss, relative_date, relative_time_span};
     use crate::updates::selection::{Selectable, Selection};
-    use crate::updates::stats::{mean_score_text, tracker_stats};
     use crate::updates::storage::{Selection as Pick, StorageRow, build_snapshot, donut_arcs, entry_color};
 
     #[derive(Clone, Debug)]
@@ -235,32 +234,6 @@ mod domain {
         assert_eq!(relative_time_span(now - 60_000, now), RelativeTime::Ago("1 minute ago".into()));
     }
 
-    // 16 to 18: the tracker mean
-
-    #[test]
-    fn mean_of_entry_means_example() {
-        // EC-42-S-08: A tracks 8 and 10 (mean 9), B tracks 6, so the overall mean is 7.5
-        let stats = tracker_stats(&[vec![8.0, 10.0], vec![6.0]], 2);
-        assert_eq!(stats.mean_score, Some(7.5));
-        assert_eq!(stats.tracked_count, 2);
-    }
-
-    #[test]
-    fn mean_zero_scores_excluded() {
-        // EC-42-S-09: a 0 score is out of the mean, but the entry is still a tracked title
-        let stats = tracker_stats(&[vec![0.0, 8.0], vec![0.0]], 1);
-        assert_eq!(stats.mean_score, Some(8.0));
-        assert_eq!(stats.tracked_count, 2);
-    }
-
-    #[test]
-    fn mean_none_when_empty() {
-        // EC-42-S-10: no scored track is no mean, shown as N/A
-        assert_eq!(tracker_stats(&[], 0).mean_score, None);
-        assert_eq!(tracker_stats(&[vec![0.0]], 1).mean_score, None);
-        assert_eq!(mean_score_text(None), "N/A");
-    }
-
     // 21 to 27: the storage vectors
 
     fn row(entry_id: i64, size: i64, category_id: i64) -> StorageRow {
@@ -334,9 +307,7 @@ mod data {
     use kuro_domain::kind::EntryKind;
     use kuro_domain::updates::repo::UpdatesRepo;
 
-    use super::fixtures::{anime, anime_db, chapters, episodes, manga, manga_db};
-    use crate::updates::stats::StatsState;
-    use crate::updates::stats_data::{GlobalUpdateRules, load};
+    use super::fixtures::{chapters, manga, manga_db};
     use crate::updates::storage_data::library_entries;
 
     fn titles(repo: &HistoryRepo) -> Vec<String> {
@@ -497,37 +468,6 @@ mod data {
     }
 
     #[test]
-    fn anime_watch_time_uses_library_predicate() {
-        // EC-42-S-03: a non-library anime with seen episodes is not counted
-        let f = anime_db();
-        let inside = anime(&f.db, "In", true);
-        let outside = anime(&f.db, "Out", false);
-        episodes(&f.db, inside, &[(true, 1_000, 10), (false, 900, 250)]);
-        episodes(&f.db, outside, &[(true, 5_000, 5_000)]);
-        let StatsState::Anime(stats) = load(&f.db, EntryKind::Anime, 0, &Default::default(), &GlobalUpdateRules::default()).state else {
-            panic!("anime state")
-        };
-        assert_eq!(stats.overview.total_duration_ms, 1_250, "the length of the seen episode plus the position of the other");
-        assert_eq!(stats.overview.library_count, 1);
-    }
-
-    #[test]
-    fn manga_read_duration_sums_all_history() {
-        // EC-42-S-01: every history row counts, reset rows and entries outside the library included
-        let f = manga_db();
-        let (kept, left) = (manga(&f.db, "Kept", true), manga(&f.db, "Left", false));
-        let repo = HistoryRepo::new(f.db.clone());
-        let (a, b) = (chapters(&f.db, kept, 1)[0], chapters(&f.db, left, 1)[0]);
-        repo.upsert(EntryKind::Manga, a, 100, 4_000).expect("record");
-        repo.upsert(EntryKind::Manga, b, 200, 6_000).expect("record");
-        repo.reset_entry(EntryKind::Manga, left).expect("reset");
-        let StatsState::Manga(stats) = load(&f.db, EntryKind::Manga, 0, &Default::default(), &GlobalUpdateRules::default()).state else {
-            panic!("manga state")
-        };
-        assert_eq!(stats.overview.total_duration_ms, 10_000);
-    }
-
-    #[test]
     fn library_rows_dedupe_across_categories() {
         // an entry in two categories is one storage row
         use kuro_data::category::create_manga_category;
@@ -554,8 +494,6 @@ mod ui {
     use super::fixtures::{chapters, manga, manga_db};
     use crate::updates::history::Resume;
     use crate::updates::history_data::{apply_remove, resume_row};
-    use crate::updates::stats::{MangaStats, StatsState};
-    use crate::updates::stats_screen::StatsScreen;
     use crate::updates::updates_page::{BackAction, back_action, cover_click_enabled};
 
     #[test]
@@ -649,22 +587,9 @@ mod ui {
             assert_eq!(calls.get(), 1, "a double click deletes once");
         });
     }
-
-    #[test]
-    fn loading_then_values() {
-        crate::testing::with_display(|| {
-            let screen = StatsScreen::new();
-            assert_eq!(screen.widget().visible_child_name().as_deref(), Some("loading"));
-            screen.set_state(&StatsState::Loading);
-            assert_eq!(screen.widget().visible_child_name().as_deref(), Some("loading"), "no values yet");
-            screen.set_state(&StatsState::Manga(MangaStats::default()));
-            assert_eq!(screen.widget().visible_child_name().as_deref(), Some("content"), "the snapshot arrives");
-        });
-    }
 }
 
 mod shared {
-    use crate::updates::nav::{Reselect, reselect_action};
     use crate::updates::signals::CacheSignals;
 
     #[test]
@@ -677,13 +602,5 @@ mod shared {
         assert!(a.try_recv().is_ok() && b.try_recv().is_ok());
         let late = signals.initializing();
         assert!(!*late.borrow(), "a late subscriber sees `initializing == false`");
-    }
-
-    #[test]
-    fn reselect_resumes_visible_subtab() {
-        // EC-42-H-08: choosing History again while it shows resumes the newest row of the visible sub-tab
-        assert_eq!(reselect_action("history", true), Reselect::ResumeHistory);
-        assert_eq!(reselect_action("history", false), Reselect::Nothing);
-        assert_eq!(reselect_action("updates", true), Reselect::OpenDownloads);
     }
 }

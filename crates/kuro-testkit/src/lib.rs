@@ -80,14 +80,6 @@ impl Paths for TempPaths {
         self.dir("crash")
     }
 
-    fn default_downloads_dir(&self) -> PathBuf {
-        self.dir("downloads")
-    }
-
-    fn default_backups_dir(&self) -> PathBuf {
-        self.dir("backups")
-    }
-
     fn covers_dir(&self) -> PathBuf {
         self.dir("covers")
     }
@@ -274,8 +266,6 @@ mod tests {
             paths.log_dir(),
             paths.temp_dir(),
             paths.crash_dir(),
-            paths.default_downloads_dir(),
-            paths.default_backups_dir(),
             paths.covers_dir(),
             paths.plugin_dir(),
         ];

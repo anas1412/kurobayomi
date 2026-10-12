@@ -23,7 +23,7 @@ use crate::data;
 use crate::updates::download_host;
 use crate::misc::diet_defaults as diet;
 use crate::updates::upcoming::calendar::week_start_for;
-use crate::updates::upcoming::calendar_view::{CalendarView, ensure_css};
+use crate::updates::upcoming::calendar_view::CalendarView;
 use crate::updates::upcoming::layout::{self, Shape};
 use crate::updates::upcoming::model::{self, Entry, Row, Upcoming};
 use crate::updates::upcoming::{query, rows};
@@ -92,7 +92,6 @@ pub struct UpcomingPage {
 
 impl UpcomingPage {
     fn new(kind: EntryKind, env: Env) -> Rc<Self> {
-        ensure_css();
         let page = Rc::new_cyclic(|weak: &std::rc::Weak<Self>| {
             let jump = weak.clone();
             let calendar = CalendarView::new(env.first, env.today, move |day| {

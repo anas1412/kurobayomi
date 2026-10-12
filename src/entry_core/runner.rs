@@ -9,7 +9,6 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_channel::{Receiver, Sender};
-use kuro_data::manga::Manga;
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
@@ -21,56 +20,29 @@ use crate::entry_core::detail::{
 };
 use crate::entry_core::errors::DetailError;
 use crate::entry_core::favorite::{AddRoute, find_duplicate, route_add};
+use crate::entry_core::runner_kit::{RunnerHandle, abort_all, watch_pair};
 use crate::entry_core::store::{DbStore, chapter_rows, manga_row};
 
 /// The newest published rows of the page.
 pub type Snapshot = (Box<MangaRow>, Vec<ChapterRow>);
 
 /// The page's handle on the runner. Dropping it stops the runner and the subscriptions.
-pub struct Runner {
-    cmds: Sender<StoreCmd>,
-    events: Receiver<StoreEvent>,
-    cancel: CancellationToken,
-}
-
-impl Runner {
-    /// Queues a command. The queue is unbounded, so this never blocks the GTK thread.
-    pub fn send(&self, cmd: StoreCmd) {
-        let _ = self.cmds.try_send(cmd);
-    }
-
-    pub fn events(&self) -> Receiver<StoreEvent> {
-        self.events.clone()
-    }
-}
-
-impl Drop for Runner {
-    fn drop(&mut self) {
-        self.cancel.cancel();
-        let _ = self.cmds.try_send(StoreCmd::Shutdown);
-    }
-}
+pub type Runner = RunnerHandle<StoreCmd, StoreEvent>;
 
 /// Starts the runner on `handle`.
 pub fn spawn(handle: &Handle, store: DbStore, backend: Arc<dyn Backend>, ctx: LoadContext) -> Runner {
-    let (cmd_tx, cmd_rx) = async_channel::unbounded();
-    let (event_tx, event_rx) = async_channel::unbounded();
-    let cancel = CancellationToken::new();
+    let (runner, cmd_rx, event_tx, cancel) = Runner::new(|| StoreCmd::Shutdown);
     let shared = Arc::new(Shared {
         store,
         backend,
         ctx,
         events: event_tx,
-        cancel: cancel.clone(),
+        cancel,
         subscriptions: Mutex::new(Vec::new()),
         refreshing: Mutex::new(HashSet::new()),
     });
     handle.spawn(run(shared, cmd_rx));
-    Runner {
-        cmds: cmd_tx,
-        events: event_rx,
-        cancel,
-    }
+    runner
 }
 
 /// Drains the channel after `first` arrived. Snapshots go through `latest`, so a burst becomes one value, and it
@@ -136,9 +108,7 @@ impl Shared {
     }
 
     fn drop_subscriptions(&self) {
-        for handle in self.subscriptions.lock().unwrap_or_else(PoisonError::into_inner).drain(..) {
-            handle.abort();
-        }
+        abort_all(&self.subscriptions);
     }
 
     /// Runs blocking store work on the blocking pool. The work keeps running if the awaiting task is aborted.
@@ -207,42 +177,12 @@ impl Shared {
         }
     }
 
-    /// Two tasks, one per table, each publishing a snapshot of the pair when either side changes.
+    /// The manga row and its chapters as one snapshot (`watch_pair`), and the two scanlator sets.
     fn subscribe(self: &Arc<Self>, manga_id: i64) {
-        let latest: Arc<Mutex<(Option<Manga>, Option<Vec<kuro_data::chapter::Chapter>>)>> = Arc::default();
-        let mut manga_sub = self.store.watch_manga(manga_id);
-        let mut chapter_sub = self.store.watch_chapters(manga_id);
-        let publish = {
-            let (shared, latest) = (Arc::clone(self), Arc::clone(&latest));
-            move || {
-                let guard = latest.lock().unwrap_or_else(PoisonError::into_inner);
-                if let (Some(m), Some(c)) = (&guard.0, &guard.1) {
-                    let downloads = shared.backend.downloads(manga_id);
-                    shared.emit(StoreEvent::Snapshot {
-                        manga: Box::new(manga_row(m)),
-                        chapters: chapter_rows(c, &downloads),
-                    });
-                }
-            }
-        };
-        let manga_task = tokio::spawn({
-            let (latest, publish) = (Arc::clone(&latest), publish.clone());
-            async move {
-                while let Some(published) = manga_sub.changed().await {
-                    if let Ok(Some(m)) = published.map(|p| p.as_ref().clone()) {
-                        latest.lock().unwrap_or_else(PoisonError::into_inner).0 = Some(m);
-                        publish();
-                    }
-                }
-            }
-        });
-        let chapter_task = tokio::spawn(async move {
-            while let Some(published) = chapter_sub.changed().await {
-                if let Ok(list) = published {
-                    latest.lock().unwrap_or_else(PoisonError::into_inner).1 = Some(list.as_ref().clone());
-                    publish();
-                }
-            }
+        let shared = Arc::clone(self);
+        let pair = watch_pair(self.store.watch_manga(manga_id), self.store.watch_chapters(manga_id), move |m: &kuro_data::manga::Manga, c: &[kuro_data::chapter::Chapter]| {
+            let downloads = shared.backend.downloads(manga_id);
+            shared.emit(StoreEvent::Snapshot { manga: Box::new(manga_row(m)), chapters: chapter_rows(c, &downloads) });
         });
         // the scanlator sets have their own tables: an exclusion or a new chapter source changes them, and the sheet and
         // the filter tint follow (`watch_available`, `watch_excluded`)
@@ -274,8 +214,7 @@ impl Shared {
             }
         });
         let mut subs = self.subscriptions.lock().unwrap_or_else(PoisonError::into_inner);
-        subs.push(manga_task.abort_handle());
-        subs.push(chapter_task.abort_handle());
+        subs.extend(pair);
         subs.push(available_task.abort_handle());
         subs.push(excluded_task.abort_handle());
     }
@@ -322,9 +261,6 @@ impl Shared {
         match cmd {
             StoreCmd::SetFlagBits { manga_id, flag, mask } => {
                 self.write_result(move |s, _| s.set_flag_bits(manga_id, flag, mask).map(drop)).await;
-            }
-            StoreCmd::SortBy { manga_id, mode } => {
-                self.write_result(move |s, _| s.sort_by(manga_id, mode).map(drop)).await;
             }
             StoreCmd::MarkRead {
                 manga_id,
@@ -383,10 +319,10 @@ impl Shared {
                 let defaults = self.ctx.library_defaults;
                 self.write_result(move |s, _| s.write_defaults(manga_id, defaults).map(drop)).await;
             }
-            StoreCmd::BumpCover { manga_id } => {
-                let now = chrono::Utc::now().timestamp_millis();
-                self.write_result(move |s, _| s.bump_cover(manga_id, now).map(drop)).await;
-            }
+            StoreCmd::ReadTracking { manga_id, source_id } => match self.blocking(move |store, _| store.track_summary(manga_id, source_id)).await {
+                Ok(summary) => self.emit(StoreEvent::Tracking { count: summary.count, logged_in: summary.has_logged_in }),
+                Err(e) => self.fail("SQLiteException", e),
+            },
             StoreCmd::Load { .. } | StoreCmd::FetchAll { .. } | StoreCmd::Shutdown => {}
         }
     }

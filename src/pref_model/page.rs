@@ -11,7 +11,6 @@ use super::enabled::EnabledFlag;
 use super::highlight;
 use super::model::{Preference, PreferenceItem};
 use super::render;
-use super::style;
 use super::widgets::{group, GROUP_SPACER, PAGE_MAX_WIDTH};
 
 /// Slide-in time of a row that becomes enabled.
@@ -37,7 +36,6 @@ pub fn build(title: &str, on_back: Option<Rc<dyn Fn()>>, tree: &[Preference]) ->
 /// Builds `tree` without a header: the scrolled column of groups, for a caller that has a header of its own. The
 /// pending highlight request is taken here, so the page that is built next shows it.
 pub fn body(tree: &[Preference]) -> Built {
-    style::install();
     let pending = highlight::take();
 
     let content = GBox::new(Orientation::Vertical, GROUP_SPACER);
