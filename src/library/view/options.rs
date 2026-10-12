@@ -140,6 +140,23 @@ fn mode_target(mode: LibraryDisplayMode) -> &'static str {
     if mode == LibraryDisplayMode::List { "list" } else { "grid" }
 }
 
+/// The three grid styles of the Grid style radios: the title on the cover, under it, or no title.
+const GRID_STYLES: [(&str, &str, LibraryDisplayMode); 3] = [
+    ("compact", "Compact", LibraryDisplayMode::CompactGrid),
+    ("comfortable", "Comfortable", LibraryDisplayMode::ComfortableGrid),
+    ("cover", "Cover only", LibraryDisplayMode::CoverOnlyGrid),
+];
+
+/// The Grid style radio of `mode`; none in the list view.
+fn style_target(mode: LibraryDisplayMode) -> &'static str {
+    GRID_STYLES.iter().find(|(_, _, m)| *m == mode).map_or("", |(token, _, _)| token)
+}
+
+/// The grid a Grid style radio picks (from the list view too).
+fn style_mode(token: &str) -> Option<LibraryDisplayMode> {
+    GRID_STYLES.iter().find(|(t, _, _)| *t == token).map(|(_, _, m)| *m)
+}
+
 /// The sort of the active page and the category it is stored on (`None`: the global sort).
 fn current_sort(st: &Inner) -> (Option<i64>, LibrarySort) {
     let page = st.built.as_ref().and_then(|b| b.pages.get(active_index(st)));
@@ -162,7 +179,7 @@ pub(super) struct Options {
     has_tracker: Rc<Cell<bool>>,
 }
 
-/// The menu: three titled sections. The Show only checks are named by `Show::action`, the sort radios carry their
+/// The menu: four titled sections (Grid style picks how the grid shows titles). The Show only checks are named by `Show::action`, the sort radios carry their
 /// token, and the View radios "grid" or "list".
 fn sections(kind: Kind, has_tracker: bool) -> Vec<Section> {
     let show = Show::ALL.into_iter().filter(|s| has_tracker || *s != Show::Tracked).map(|s| Item::toggle(s.action(), s.label(kind))).collect();
@@ -173,6 +190,7 @@ fn sections(kind: Kind, has_tracker: bool) -> Vec<Section> {
         Section::filter("Show only", show),
         Section::new("Sort by", sort),
         Section::new("View", vec![Item::radio("mode", "grid", "Grid"), Item::radio("mode", "list", tr(MsgKey::action_display_list))]),
+        Section::new("Grid style", GRID_STYLES.iter().map(|(token, label, _)| Item::radio("style", *token, *label)).collect()),
     ]
 }
 
@@ -215,6 +233,11 @@ impl Options {
                     let next = mode(target == "list", prefs.display_mode.get());
                     kuro_domain::category::service::set_display_mode(&prefs, next);
                 }
+                Pick::Radio("style", token) => {
+                    let Some(next) = style_mode(&token) else { return };
+                    let prefs = inner.borrow().deps.prefs.clone();
+                    kuro_domain::category::service::set_display_mode(&prefs, next);
+                }
                 Pick::Radio(..) | Pick::Action(_) => {}
             }
         });
@@ -241,6 +264,7 @@ impl Options {
         menu.set_toggle("reverse", reversed(sort));
         menu.set_enabled("reverse", sort.ty != SortType::Random);
         menu.set_radio("mode", mode_target(prefs.display_mode.get()));
+        menu.set_radio("style", style_target(prefs.display_mode.get()));
     }
 
     #[cfg(test)]
@@ -271,6 +295,16 @@ mod tests {
     use kuro_prefs::store::PrefStore;
 
     use super::*;
+
+    #[test]
+    fn each_grid_style_picks_its_grid_and_the_list_view_marks_none() {
+        for (token, _, mode) in GRID_STYLES {
+            assert_eq!(style_mode(token), Some(mode));
+            assert_eq!(style_target(mode), token);
+        }
+        assert_eq!(style_target(LibraryDisplayMode::List), "", "no style is marked in the list view");
+        assert_eq!(style_mode("list"), None);
+    }
 
     fn prefs() -> LibraryPrefs {
         LibraryPrefs::new(PrefStore::in_memory())
