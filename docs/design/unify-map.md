@@ -30,6 +30,13 @@ The ten "Decide" items in section 5, settled:
 
 Also decided: dialogs have no GTK header bar; the desktop frames them (`ui::modal`).
 
+## 1c. Priority (user, 2026-10-12)
+
+Correctness and drift, duplication, and UI consistency come first. Order: finish step 3 (lane E), wire the tracker
+update for reader and player, then steps 4 to 12 one at a time, each fixing the drift items tied to it (section 5).
+The UI consistency fixes from docs/audit/ui-shared.md run in parallel lanes on screens the current step does not touch.
+The "never used" cleanup comes last. Every step ends with the full suite and real flows on the test display.
+
 ## 2. What stays two and why
 
 | Stays two | Why |
