@@ -3,7 +3,7 @@
   {
    "id": "settings_appearance",
    "title": "Appearance",
-   "subtitle": "Theme, start screen, app lock",
+   "subtitle": "Theme and start screen",
    "icon": "preferences-desktop-appearance-symbolic"
   },
   {
@@ -21,7 +21,7 @@
   {
    "id": "settings_player",
    "title": "Player",
-   "subtitle": "Languages, default volume, autoplay, buttons",
+   "subtitle": "Languages, default volume, autoplay",
    "icon": "video-display-symbolic"
   },
   {
@@ -252,11 +252,6 @@
         "Auto"
        ],
        "default": "Black"
-      },
-      {
-       "type": "switch",
-       "title": "Show content in cutout area",
-       "default": true
       }
      ]
     },
@@ -322,18 +317,6 @@
      "items": [
       {
        "type": "link",
-       "title": "Custom buttons",
-       "subtitle": "Execute lua code with custom buttons",
-       "target": "settings_player_custom_buttons"
-      },
-      {
-       "type": "link",
-       "title": "Script editor",
-       "subtitle": "Edit and create new scripts and script options",
-       "target": "settings_player_editor"
-      },
-      {
-       "type": "link",
        "title": "Torrent",
        "subtitle": "TorrServer options",
        "target": "settings_player_torrents"
@@ -344,191 +327,6 @@
    "sheets": [],
    "dialogs": [],
    "notes": "Second-level menu styled like the main settings menu: each row has a leading icon (play-circle, gesture, memory chip, subtitles, audio track, terminal, edit-note, magnet, code), title and summary. Title is \"Player\" when opened from Settings and \"Player settings\" when opened from inside the player. Search opens player-only settings search (placeholder \"Search player settings\")."
-  },
-  {
-   "id": "settings_player_custom_buttons",
-   "title": "Edit custom buttons",
-   "kind": "custom",
-   "toolbar": [
-    {
-     "label": "Custom buttons guide",
-     "icon": "help-browser-symbolic"
-    }
-   ],
-   "menu": [],
-   "tabs": [],
-   "groups": [],
-   "sheets": [],
-   "dialogs": [
-    {
-     "id": "add_button",
-     "title": "Add button",
-     "groups": [
-      {
-       "title": null,
-       "items": [
-        {
-         "type": "text",
-         "title": "Title"
-        },
-        {
-         "type": "text",
-         "title": "Lua code"
-        },
-        {
-         "type": "text",
-         "title": "Lua code (on long press)",
-         "subtitle": "(optional)"
-        },
-        {
-         "type": "text",
-         "title": "On startup",
-         "subtitle": "(optional)"
-        }
-       ]
-      }
-     ],
-     "buttons": [
-      "Cancel",
-      "Add"
-     ]
-    },
-    {
-     "id": "edit_button",
-     "title": "Edit button",
-     "groups": [
-      {
-       "title": null,
-       "items": [
-        {
-         "type": "text",
-         "title": "Title"
-        },
-        {
-         "type": "text",
-         "title": "Lua code"
-        },
-        {
-         "type": "text",
-         "title": "Lua code (on long press)",
-         "subtitle": "(optional)"
-        },
-        {
-         "type": "text",
-         "title": "On startup",
-         "subtitle": "(optional)"
-        }
-       ]
-      }
-     ],
-     "buttons": [
-      "Cancel",
-      "Edit"
-     ]
-    },
-    {
-     "id": "delete_button",
-     "title": "Delete button",
-     "text": "Do you wish to delete the button \"Button\"?",
-     "groups": [],
-     "buttons": [
-      "Cancel",
-      "OK"
-     ]
-    }
-   ],
-   "empty": "You have no custom buttons. Tap the plus button to create a custom button.",
-   "notes": "Reorderable list of custom player buttons (Lua). Each item is an outlined card: drag handle + button title on top row; bottom row has a star toggle (filled = primary/favourite button shown in player), edit (pencil) and delete (trash) icon buttons. Extended FAB bottom-right \"Add\". Edit dialog title row also shows \"(ID: 1)\". Title field errors: \"Button already exists!\" / \"*required\". Lua content fields are multi-line monospace."
-  },
-  {
-   "id": "settings_player_editor",
-   "title": "Script editor",
-   "kind": "custom",
-   "toolbar": [],
-   "menu": [],
-   "tabs": [],
-   "groups": [],
-   "sheets": [],
-   "dialogs": [
-    {
-     "id": "create_file",
-     "title": "Create file",
-     "groups": [
-      {
-       "title": null,
-       "items": [
-        {
-         "type": "text",
-         "title": "Filename"
-        }
-       ]
-      }
-     ],
-     "buttons": [
-      "Cancel",
-      "Add"
-     ]
-    },
-    {
-     "id": "rename_file",
-     "title": "Edit filename",
-     "groups": [
-      {
-       "title": null,
-       "items": [
-        {
-         "type": "text",
-         "title": "Filename"
-        }
-       ]
-      }
-     ],
-     "buttons": [
-      "Cancel",
-      "Edit"
-     ]
-    },
-    {
-     "id": "delete_file",
-     "title": "Delete file",
-     "text": "Do you wish to delete the file \"file\"?",
-     "groups": [],
-     "buttons": [
-      "Cancel",
-      "OK"
-     ]
-    }
-   ],
-   "empty": "Directory contains no items. Tap the plus button to add a new file.",
-   "notes": "App bar title is a dropdown selector switching between \"Scripts\" (lua files) and \"Script options\" (conf files). Body: list of files, each row has a type icon (lua = code icon, conf = settings icon), file name, and a trailing \"...\" button expanding a menu with \"Rename file\" and \"Delete file\". Tapping a file opens the code editor. FAB \"+\" adds a file. Filename errors: \"File already exists\", \"Invalid filename\"."
-  },
-  {
-   "id": "settings_player_code_editor",
-   "title": "file.lua",
-   "kind": "custom",
-   "toolbar": [
-    {
-     "label": "Save",
-     "icon": "document-save-symbolic"
-    }
-   ],
-   "menu": [],
-   "tabs": [],
-   "groups": [],
-   "sheets": [],
-   "dialogs": [
-    {
-     "id": "unsaved",
-     "title": "Warning",
-     "text": "You have unsaved changes. Do you still wish to go back?",
-     "groups": [],
-     "buttons": [
-      "Cancel",
-      "OK"
-     ]
-    }
-   ],
-   "notes": "Reached by tapping a file in the mpv script editor (not via a settings link). Title = file name. Full-screen monospace code editor with line numbers and Lua/conf syntax highlighting. Save action enabled only after modification; back with unsaved changes shows the warning dialog."
   },
   {
    "id": "settings_player_torrents",
@@ -665,31 +463,6 @@
    "sheets": [],
    "dialogs": [
     {
-     "id": "speed_limit",
-     "title": "Chapter download speed limit",
-     "text": "Set to 0 to disable the speed limit.",
-     "groups": [
-      {
-       "title": null,
-       "items": [
-        {
-         "type": "slider",
-         "title": "Chapter download speed limit",
-         "min": 0,
-         "max": 100000,
-         "step": 100,
-         "default": 0,
-         "unit": "KiB/s"
-        }
-       ]
-      }
-     ],
-     "buttons": [
-      "Cancel",
-      "OK"
-     ]
-    },
-    {
      "id": "auto_download_anime_categories",
      "title": "Anime Categories",
      "text": "Entries in excluded categories will not be downloaded even if they are also in included categories.",
@@ -753,15 +526,9 @@
      "items": [
       {
        "type": "link",
-       "title": "Anime extension repos",
-       "subtitle": "0 stores",
-       "target": "settings_anime_extension_stores"
-      },
-      {
-       "type": "link",
-       "title": "Manga extension repos",
-       "subtitle": "0 stores",
-       "target": "settings_manga_extension_repos"
+       "title": "Extension repos",
+       "subtitle": "0 repos",
+       "target": "settings_extension_repos"
       }
      ]
     },
@@ -808,65 +575,7 @@
    "notes": "Toggling the NSFW switch requires device authentication."
   },
   {
-   "id": "settings_anime_extension_stores",
-   "title": "Extension stores",
-   "kind": "custom",
-   "toolbar": [
-    {
-     "label": "Refresh",
-     "icon": "view-refresh-symbolic"
-    }
-   ],
-   "menu": [],
-   "tabs": [],
-   "groups": [],
-   "sheets": [],
-   "dialogs": [
-    {
-     "id": "add_store",
-     "title": "Add extension store",
-     "groups": [
-      {
-       "title": null,
-       "items": [
-        {
-         "type": "text",
-         "title": "Store index URL"
-        }
-       ]
-      }
-     ],
-     "buttons": [
-      "Cancel",
-      "Add"
-     ]
-    },
-    {
-     "id": "add_store_deeplink",
-     "title": "Add extension store",
-     "text": "Do you wish to add the extension store below?",
-     "groups": [],
-     "buttons": [
-      "Cancel",
-      "Add"
-     ]
-    },
-    {
-     "id": "delete_store",
-     "title": "Remove extension store",
-     "text": "Do you wish to remove the extension store \"Store\" (https://example.org/index.min.json)?",
-     "groups": [],
-     "buttons": [
-      "Cancel",
-      "OK"
-     ]
-    }
-   ],
-   "empty": "You haven't added an extension store yet",
-   "notes": "List of anime extension stores as elevated cards: top row = label icon + store name; bottom row of icon buttons: open website (globe), Discord (only if the store has one), copy URL, delete. Extended FAB \"Add\" bottom-right. While adding, the confirm button reads \"Processing…\"; duplicate error \"This extension store already exists\"."
-  },
-  {
-   "id": "settings_manga_extension_repos",
+   "id": "settings_extension_repos",
    "title": "Extension repos",
    "kind": "custom",
    "toolbar": [
@@ -932,7 +641,7 @@
     }
    ],
    "empty": "You have no repos set.",
-   "notes": "List of manga extension repos as elevated cards: label icon + repo name; icon buttons open in browser, copy to clipboard, delete. Extended FAB \"Add\". Errors: \"Invalid repo URL\", \"This repo already exists!\"."
+   "notes": "The one list of repository links, for both anime and manga sources: label icon + repo name; icon buttons open in browser, copy to clipboard, delete. Extended FAB \"Add\". Errors: \"Invalid repo URL\", \"This repo already exists!\"."
   },
   {
    "id": "settings_data_storage",

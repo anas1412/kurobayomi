@@ -13,7 +13,6 @@ pub mod page_header;
 pub mod pill;
 pub mod refresh;
 pub mod repeat_button;
-pub mod detachable;
 pub mod int_slider;
 pub mod rail;
 pub mod row_activate;

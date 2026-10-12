@@ -209,7 +209,7 @@ pub fn page(store: &PrefStore, on_leave: impl Fn() + 'static, on_restore: impl F
     root
 }
 
-/// Step 1: the theme mode, the app theme and AMOLED. Each choice is saved at once; the mode also applies to GTK at once.
+/// Step 1: the theme mode. The choice is saved at once and also applies to GTK at once.
 fn theme_step(ui: &UiPrefs) -> gtk::Box {
     let modes = theme_mode::SEGMENTS;
     let mode_labels: Vec<String> = modes.iter().map(|m| theme_mode::segment_label(*m)).collect();

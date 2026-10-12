@@ -860,42 +860,6 @@ pref_category_hide_hidden = إخفاء الفئات المخفية من شاشة
 
 pref_update_anime_release_grace_period = فترة السماح المتوقعة لإصدار الأنمي
 
-data_saver_exclude = تعطيل توفير البيانات
-
-data_saver_stop_exclude = إيقاف الاستبعاد من موفر البيانات
-
-data_saver = موفر البيانات
-
-data_saver_summary = ضغط الصور قبل التنزيل أو التحميل في القارئ
-
-data_saver_downloader = استخدم موفر البيانات عند التنزيل
-
-data_saver_ignore_jpeg = تجاهل الصور التي بصيغة (Jpeg)
-
-data_saver_ignore_gif = تجاهل مقاطع(Gif)
-
-data_saver_image_quality = جودة الصور
-
-data_saver_image_quality_summary = تعني أنه يتم حفظ نسبة مئوية أعلى من جودة الصورة ، ولكن هذا يعني أيضًا أن حجم الملف أكبر ، و 80% متوسط جيد بين حجم الملف وجودة الصورة
-
-data_saver_image_format = الضغط إلى Jpeg
-
-data_saver_image_format_summary_on = حجم ملف Jpeg أصغر بكثير من حجم ملف Webp (مما يعني حفظ المزيد من البيانات) ، ولكنه يجعل الصور تفقد المزيد من الجودة أيضًا.{"\u000A"}{"\u000A"} يضغط حاليًا على Jpeg
-
-data_saver_image_format_summary_off = حجم ملف Jpeg أصغر بكثير من حجم ملف Webp (مما يعني حفظ المزيد من البيانات) ، ولكنه يجعل الصور تفقد المزيد من الجودة أيضًا.{"\u000A"}{"\u000A"} يضغط حاليًا على Webp
-
-data_saver_color_bw = التحويل إلى الأبيض والأسود
-
-bandwidth_hero = عرض نطاق الترددي (يتطلب خادم وكيل لعرض النطاق الترددي)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = خادم وكيل لعرض (Bandwidth hero)
-
-data_saver_server_summary = ضع عنوان(url) لخادم الوكيل (Bandwidth Hero ) هنا
-
 download_slots_info = سيتم تنزيل الملفات بشكل متزامن فقط من مصادر مستضافة ذاتية أو غير محدودة في استهلاك البيانات
 
 unseen = إزالة المشاهدة

@@ -914,42 +914,6 @@ pref_category_hide_hidden = 将分类及分类存储占用中的隐藏分类完�
 
 pref_update_anime_release_grace_period = 预期动画播出截止时间
 
-data_saver_exclude = 从流量节省程序中排除
-
-data_saver_stop_exclude = 停止从流量节省程序中排除
-
-data_saver = 流量节省程序
-
-data_saver_summary = 在阅读器下载或加载图片前压缩图片
-
-data_saver_downloader = 在下载器中开启流量节省程序
-
-data_saver_ignore_jpeg = 忽略 Jpeg 图片
-
-data_saver_ignore_gif = 忽略 Gif 动图
-
-data_saver_image_quality = 图片质量
-
-data_saver_image_quality_summary = 数字越高代表存储的图片质量越好，同时文件会变大，80% 是控制文件大小和图片质量之间不错的中间数
-
-data_saver_image_format = 压缩为 Jpeg
-
-data_saver_image_format_summary_on = Jpeg 文件大小比 Webp 更小 （可以保存更多资料），但它会使图片损失更多质量。{"\u000A"}{"\u000A"}目前压缩为 Jpeg
-
-data_saver_image_format_summary_off = Jpeg 文件大小比 Webp 更小 （可以保存更多资料），但它会使图片损失更多质量。{"\u000A"}{"\u000A"}目前压缩为 Webp
-
-data_saver_color_bw = 转换为黑白图片
-
-bandwidth_hero = Bandwidth Hero（需要 Bandwidth Hero 代理服务器）
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Bandwidth Hero 代理服务器
-
-data_saver_server_summary = 在此处输入 Bandwidth Hero 代理服务器地址
-
 download_slots_info = 仅同时从自建或无限制资源下载
 
 unseen = 未看

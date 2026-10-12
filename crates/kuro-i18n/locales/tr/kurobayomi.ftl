@@ -942,40 +942,6 @@ pref_category_hide_hidden = Gizli kategorileri kategoriler menüsünde ve depola
 
 pref_update_anime_release_grace_period = Animenin tahmini çıkış tarihi
 
-data_saver_exclude = Veri tasarrufundan hariç tut
-
-data_saver_stop_exclude = Veri tasarrufuna dahil et
-
-data_saver = Veri Tasarrufu
-
-data_saver_summary = Okuyucuda göstermeden veya indirmeden önce resimleri sıkıştır
-
-data_saver_downloader = İndiricide veri tasarrufunu kullan
-
-data_saver_ignore_jpeg = Jpeg resimleri görmezden gel
-
-data_saver_ignore_gif = Gif animasyonlarını görmezden gel
-
-data_saver_image_quality = Resim kalitesi
-
-data_saver_image_format = Jpeg'e sıkıştır
-
-data_saver_image_format_summary_on = Jpeg dosya büyüklüğü Webp formatına göre ciddi anlamda daha küçüktür (daha fazla veri tasarrufu sağlar), ancak resimlerin daha fazla kalite kaybetmesine neden olur.{"\u000A"}{"\u000A"}Şu anda Jpeg'e sıkıştırılıyor
-
-data_saver_image_format_summary_off = Jpeg dosya büyüklüğü Webp'e göre ciddi anlamda daha küçüktur ancak resimler daha fazla kalite kaybeder(yani daha fazla veri tasarrufu sağlar){"\u000A"}{"\u000A"}Şu anda Webp'e sıkıştırıyor
-
-data_saver_color_bw = Siyah ve Beyaza Çevir
-
-bandwidth_hero = Bandwidth Hero (Bandwidth Hero ara sunucusu gerektirir)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Bandwidth Hero Ara Sunucusu
-
-data_saver_server_summary = Buraya Bandwidth Hero ara sunucusu bağlantısını koyun
-
 download_slots_info = Aynı anda indirmeler yalnızca tarifesiz veya kendinde barındırılan kaynaklardan yapılacaktır
 
 unseen = İzlenmemiş

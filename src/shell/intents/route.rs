@@ -39,7 +39,7 @@ pub enum Screen {
     GlobalSearch { kind: Kind, query: String, filter: Option<String> },
     DeepLink { kind: Kind, query: String },
     RestoreBackup(PathBuf),
-    ExtensionStores { kind: Kind, url: String },
+    ExtensionStores { url: String },
 }
 
 /// One navigation step, applied in order.
@@ -190,8 +190,7 @@ fn restore(path: &Path) -> Vec<NavAction> {
 
 fn open_uri(link: &str) -> Routed {
     match uri::parse_uri(link) {
-        Ok(UriRoute::MangaRepos { url }) => Routed::to(store(Kind::Manga, url)),
-        Ok(UriRoute::AnimeStores { url }) => Routed::to(store(Kind::Anime, url)),
+        Ok(UriRoute::MangaRepos { url } | UriRoute::AnimeStores { url }) => Routed::to(store(url)),
         // the tracker lane takes its own sign-in callbacks
         Ok(UriRoute::TrackerAuth { .. }) => Routed::to(vec![]),
         // a repository link without an address does nothing (behaviour 4.4)
@@ -200,8 +199,8 @@ fn open_uri(link: &str) -> Routed {
     }
 }
 
-fn store(kind: Kind, url: String) -> Vec<NavAction> {
-    vec![NavAction::PopToRoot, NavAction::Push(Screen::ExtensionStores { kind, url })]
+fn store(url: String) -> Vec<NavAction> {
+    vec![NavAction::PopToRoot, NavAction::Push(Screen::ExtensionStores { url })]
 }
 
 #[cfg(test)]
@@ -321,15 +320,16 @@ mod tests {
     }
 
     #[test]
-    fn repo_links_push_the_store_of_their_kind_and_a_missing_address_does_nothing() {
-        // T-36a-014: tachiyomi add-repo is manga; aniyomi add-repo and extension-store are anime
+    fn repo_links_push_the_one_repo_list_and_a_missing_address_does_nothing() {
+        // one repository list for both kinds: the tachiyomi and aniyomi add-repo links and the extension-store link all
+        // open it with their address
         let manga = launch_of(LaunchRequest::OpenUri("tachiyomi://add-repo?url=https%3A%2F%2Fa.test%2Fi.json".into()));
         assert_eq!(
             manga.actions,
-            vec![NavAction::PopToRoot, NavAction::Push(Screen::ExtensionStores { kind: Kind::Manga, url: "https://a.test/i.json".into() })]
+            vec![NavAction::PopToRoot, NavAction::Push(Screen::ExtensionStores { url: "https://a.test/i.json".into() })]
         );
         let anime = launch_of(LaunchRequest::OpenUri("aniyomi://extension-store?url=u".into()));
-        assert!(matches!(&anime.actions[1], NavAction::Push(Screen::ExtensionStores { kind: Kind::Anime, .. })));
+        assert!(matches!(&anime.actions[1], NavAction::Push(Screen::ExtensionStores { url }) if url == "u"));
         let missing = launch_of(LaunchRequest::OpenUri("aniyomi://add-repo".into()));
         assert!(missing.actions.is_empty() && missing.ready && missing.error.is_none());
     }

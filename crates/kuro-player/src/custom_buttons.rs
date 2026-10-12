@@ -1,10 +1,24 @@
 //! Custom buttons in the More sheet and the primary button (area 46 `MoreSheet.kt`, area 45
 //! `PlayerViewModel.kt` init block and `CustomButton.execute`; T-46b-020, T-45b-036). Pure: the
 //! fetch state, the primary button and its title, and the script messages mpv receives. The button
-//! model and the message names come from `kuro_domain::custom_buttons`.
+//! model is the stored row; the Lua scripts that ran it are cut, so no script is written from it.
 
-pub use kuro_domain::custom_buttons::CustomButton;
-use kuro_domain::custom_buttons::message_name;
+/// One user button as the player reads it (`CustomButton.kt`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CustomButton {
+    pub id: i64,
+    pub name: String,
+    pub is_favorite: bool,
+    pub sort_index: i64,
+    pub content: String,
+    pub long_press_content: String,
+    pub on_startup: String,
+}
+
+/// The message a button press sends through libmpv: `call_button_<id>`, or `call_button_<id>_long` for a long press.
+pub fn message_name(id: i64, long_press: bool) -> String {
+    if long_press { format!("call_button_{id}_long") } else { format!("call_button_{id}") }
+}
 
 /// Chips wrap in a flow box this wide.
 pub const FLOW_WIDTH: i32 = 420;

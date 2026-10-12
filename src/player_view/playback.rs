@@ -16,13 +16,6 @@ pub struct Playback {
     mpv: MpvHandle,
 }
 
-/// What a move between windows keeps across the render context swap: the video track and the pause state.
-#[derive(Debug)]
-pub struct Handoff {
-    vid: String,
-    paused: bool,
-}
-
 impl Playback {
     pub fn new(mpv: MpvHandle) -> Self {
         Self { mpv }
@@ -79,28 +72,6 @@ impl Playback {
     pub fn stop(&self) {
         if let Err(e) = self.mpv.command(&["stop"]) {
             tracing::warn!(error = %e, "mpv stop failed");
-        }
-    }
-
-    /// Before the GL render context is freed for a move to another window: turns the video track off. Freeing the
-    /// context with video still on makes mpv drop the track as failed, which ends a file that has no audio; switched
-    /// off first, the file keeps playing (audio goes on) and the video output is closed cleanly.
-    pub fn hand_off_video(&self) -> Handoff {
-        let handoff = Handoff { vid: self.mpv.get_string("vid").unwrap_or_else(|| "auto".to_owned()), paused: self.is_paused() };
-        if let Err(e) = self.mpv.set_property_str("vid", "no") {
-            tracing::warn!(error = %e, "player: video was not switched off for the move");
-        }
-        handoff
-    }
-
-    /// Once the new render context exists: the video track comes back at the current position (mpv catches the
-    /// picture up to the audio) with the pause state from before the move.
-    pub fn resume_video(&self, handoff: &Handoff) {
-        if let Err(e) = self.mpv.set_property_str("vid", &handoff.vid) {
-            tracing::warn!(error = %e, "player: video did not come back after the move");
-        }
-        if let Err(e) = self.mpv.set_property_flag("pause", handoff.paused) {
-            tracing::warn!(error = %e, "player: the pause state was not restored after the move");
         }
     }
 

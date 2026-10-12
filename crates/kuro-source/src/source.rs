@@ -43,6 +43,16 @@ pub trait MangaSource: Send + Sync {
     /// Called for every chapter on every library sync, before the database lookup. Only HTTP sources override it, so
     /// the default is a no-op. It may rewrite the chapter, so a rewritten URL makes the chapter look new (EC-CH-05).
     fn prepare_new_chapter(&self, _chapter: &mut SChapter, _manga: &SManga) {}
+    /// The headers the app sends with each page image of this source. `None` means the source declares none, so the
+    /// app's default set applies. Only a WASM source with ABI 1.5 answers it.
+    async fn request_headers(&self) -> Result<Option<Vec<(String, String)>>, SourceError> {
+        Ok(None)
+    }
+    /// The page-image fix-up of this source, given the image's response headers: the bytes to show. `None` means show
+    /// the bytes as fetched. Only a WASM source with ABI 1.5 answers it.
+    async fn unscramble(&self, _body: &[u8], _headers: &[(String, String)]) -> Result<Option<Vec<u8>>, SourceError> {
+        Ok(None)
+    }
 }
 
 /// A source with browsable listings. Pages start at 1.

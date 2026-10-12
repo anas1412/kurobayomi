@@ -230,15 +230,6 @@ define_prefs! {
     "hidden_catalogues", Normal, Set, &[], "sources", "disabled_manga_sources";
     "pinned_anime_catalogues", Normal, Set, &[], "sources", "pinned_anime_sources";
     "pinned_catalogues", Normal, Set, &[], "sources", "pinned_manga_sources";
-    "data_saver", Normal, Str, "NONE", "sources", "data_saver";
-    "ignore_jpeg", Normal, Bool, false, "sources", "data_saver_ignore_jpeg";
-    "ignore_gif", Normal, Bool, true, "sources", "data_saver_ignore_gif";
-    "data_saver_image_quality", Normal, Int, 80, "sources", "data_saver_image_quality";
-    "data_saver_image_format_jpeg", Normal, Bool, false, "sources", "data_saver_image_format_jpeg";
-    "data_saver_server", Normal, Str, "", "sources", "data_saver_server";
-    "data_saver_color_bw", Normal, Bool, false, "sources", "data_saver_color_bw";
-    "data_saver_excluded", Normal, Set, &[], "sources", "data_saver_excluded_sources";
-    "data_saver_downloader", Normal, Bool, true, "sources", "data_saver_downloader";
     "__PRIVATE_pref_mangasync_username_{id}", Private, Str, "", "secrets", "track_username";
     "__PRIVATE_pref_mangasync_password_{id}", Private, Str, "", "secrets", "track_password";
     "__PRIVATE_pref_tracker_auth_expired_{id}", Private, Bool, false, "tracking.auth_expired", "";
@@ -293,14 +284,13 @@ define_prefs! {
     "pref_subtitle_lang", Normal, Str, "", "player.subtitles", "preferred_sub_languages";
     "anime_ext_last_check", Normal, Long, 0, "sources", "anime_ext_last_check";
     "muted_notification_channels", Normal, Set, &[], "base", "muted_notification_channels";
-    "player_open_detached", Normal, Bool, false, "player.window", "open_detached";
 }
 
 /// Keys of features this desktop app does not have, and of settings the settings diet cut (docs/design/settings-diet.md).
 /// The registry holds no row for them, a restore skips them ([`is_dropped`]) and nothing reads them, so an old
 /// `config.toml` or an Aniyomi backup that still carries one loads and restores without it. Each key and its reason
 /// is recorded in `docs/drop-decisions.md`.
-pub const DROPPED_KEYS: [&str; 262] = [
+pub const DROPPED_KEYS: [&str; 272] = [
     "extension_installer",
     "pref_hardware_bitmap_threshold",
     "eh_enable_source_blacklist",
@@ -563,6 +553,16 @@ pub const DROPPED_KEYS: [&str; 262] = [
     "incognito_extensions",
     "upcoming.week_start",
     "upcoming.home_returns_today",
+    "data_saver",
+    "ignore_jpeg",
+    "ignore_gif",
+    "data_saver_image_quality",
+    "data_saver_image_format_jpeg",
+    "data_saver_server",
+    "data_saver_color_bw",
+    "data_saver_excluded",
+    "data_saver_downloader",
+    "player_open_detached",
 ];
 
 /// Whether `key` (as stored, without the backup prefix) belongs to a dropped feature.
@@ -662,15 +662,14 @@ mod tests {
     ];
 
     #[test]
-    fn registry_has_the_75_plan_rows_in_order() {
+    fn registry_has_the_66_plan_rows_in_order() {
         let rows = plan_rows();
-        assert_eq!(rows.len(), 75, "the plan's rows minus the derived animeext_updates_count and the dropped (cut) plan rows");
-        // three Kurobayomi rows after the plan's rows: `anime_ext_last_check` (T-19a-064), `muted_notification_channels`
-        // (T-req-platform-004) and `player_open_detached` (the player opens in its own window or in the main window)
-        assert_eq!(REGISTRY.len(), rows.len() + 3);
+        assert_eq!(rows.len(), 66, "the plan's rows minus the derived animeext_updates_count and the dropped (cut) plan rows");
+        // two Kurobayomi rows after the plan's rows: `anime_ext_last_check` (T-19a-064) and `muted_notification_channels`
+        // (T-req-platform-004)
+        assert_eq!(REGISTRY.len(), rows.len() + 2);
         assert_eq!(REGISTRY[rows.len()].key, "anime_ext_last_check");
         assert_eq!(REGISTRY[rows.len() + 1].key, "muted_notification_channels");
-        assert_eq!(REGISTRY[rows.len() + 2].key, "player_open_detached");
         let mut pinned = 0;
         for (meta, (key, store, kind, default)) in REGISTRY.iter().zip(&rows) {
             assert_eq!(meta.key, key);

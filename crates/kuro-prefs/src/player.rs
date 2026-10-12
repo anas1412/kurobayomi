@@ -1,9 +1,9 @@
-//! `[player]` and `[player.window]` preferences (Aniyomi `PlayerPreferences`, Kurobayomi's player window) and the
+//! `[player]` preferences (Aniyomi `PlayerPreferences`) and the
 //! "mark as seen" rule.
 //!
-//! The settings diet kept two player keys here, the volume and the autoplay switch, and the detach choice. The
-//! gesture, decoder, aspect, speed, subtitle and advanced player keys were cut: their hard-coded defaults are read
-//! where they are used, and the keys are in `registry::DROPPED_KEYS`.
+//! The settings diet kept two player keys here, the volume and the autoplay switch. The gesture, decoder, aspect,
+//! speed, subtitle, advanced player and detach-window keys were cut: their hard-coded defaults are read where they
+//! are used, and the keys are in `registry::DROPPED_KEYS`.
 
 use crate::registry::define_prefs;
 
@@ -26,14 +26,6 @@ define_prefs! {
     }
 }
 
-define_prefs! {
-    /// `[player.window]` section (Kurobayomi): the player opens detached in its own window when the last Detach or
-    /// Attach left it that way, and inside the main window otherwise.
-    pub struct PlayerWindowPrefs in "player.window" {
-        open_detached: bool = "player_open_detached" => false;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -47,17 +39,6 @@ mod tests {
         let player = PlayerPrefs::new(store.clone());
         assert_eq!(PlayerPrefs::FIELDS.len(), 2);
         assert_section_registered(PlayerPrefs::TABLE, PlayerPrefs::FIELDS, &player.defaults());
-        let window = PlayerWindowPrefs::new(store);
-        assert_section_registered(PlayerWindowPrefs::TABLE, PlayerWindowPrefs::FIELDS, &window.defaults());
-    }
-
-    #[test]
-    fn the_player_opens_embedded_until_a_detach_is_remembered() {
-        let store = PrefStore::in_memory();
-        let window = PlayerWindowPrefs::new(store.clone());
-        assert!(!window.open_detached.get(), "embedded by default");
-        window.open_detached.set(true).unwrap();
-        assert!(PlayerWindowPrefs::new(store).open_detached.get(), "the choice is read back by a new handle");
     }
 
     #[test]
@@ -78,6 +59,7 @@ mod tests {
             "pref_mpv_conf",
             "pref_mpv_input",
             "mpv_scripts",
+            "player_open_detached",
         ] {
             assert!(lookup(key).is_none(), "{key} is registered");
             assert!(crate::registry::is_dropped(key), "{key} is not in DROPPED_KEYS");

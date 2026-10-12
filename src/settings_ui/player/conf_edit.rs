@@ -7,7 +7,7 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use kuro_prefs::pref::Pref;
 
-use super::syntax::{self, Lang};
+use super::syntax;
 use crate::pref_model::bind::{self, Outcome, WriteGate};
 use crate::pref_model::model::{mpv_subtitle, PreferenceItem};
 use crate::pref_model::widgets::dialog::{self, Dialog};
@@ -17,23 +17,23 @@ use crate::settings_ui::rows::text_veto;
 
 /// A multi-line text row bound to `pref`, coloured with the conf rules. A blank text is stored only when `can_be_blank`.
 pub fn conf_row(title: &str, pref: &Pref<String>, can_be_blank: bool) -> PreferenceItem {
-    editor_row(title, pref, can_be_blank, Some(Lang::Conf))
+    editor_row(title, pref, can_be_blank, true)
 }
 
 /// A multi-line text row bound to `pref` with no syntax colouring (the generic multi-line field, T-47ba-044).
 pub fn multi_line_row(title: &str, pref: &Pref<String>, can_be_blank: bool) -> PreferenceItem {
-    editor_row(title, pref, can_be_blank, None)
+    editor_row(title, pref, can_be_blank, false)
 }
 
-fn editor_row(title: &str, pref: &Pref<String>, can_be_blank: bool, lang: Option<Lang>) -> PreferenceItem {
+fn editor_row(title: &str, pref: &Pref<String>, can_be_blank: bool, colour: bool) -> PreferenceItem {
     let (name, pref) = (title.to_owned(), pref.clone());
     PreferenceItem::Custom {
         title: title.to_owned(),
-        build: Rc::new(move || build(&name, &pref, can_be_blank, lang).upcast()),
+        build: Rc::new(move || build(&name, &pref, can_be_blank, colour).upcast()),
     }
 }
 
-fn build(title: &str, pref: &Pref<String>, can_be_blank: bool, lang: Option<Lang>) -> gtk::Box {
+fn build(title: &str, pref: &Pref<String>, can_be_blank: bool, colour: bool) -> gtk::Box {
     let built = row::build(RowSpec { title, subtitle: Some(&mpv_subtitle(&pref.get())), icon: None, trailing: None, on_click: None });
     let content = built.row.child().and_downcast::<gtk::Box>().expect("the row content");
     built.row.set_child(None::<&gtk::Widget>);
@@ -49,7 +49,7 @@ fn build(title: &str, pref: &Pref<String>, can_be_blank: bool, lang: Option<Lang
             let Some(parent) = content.root().and_downcast::<gtk::Window>() else { return };
             let snapshot = stored.borrow().clone();
             let (subtitle, pref, stored, veto, gate) = (subtitle.clone(), pref.clone(), stored.clone(), veto.clone(), gate.clone());
-            show(&parent, &title, &snapshot, can_be_blank, lang, move |text, dialog| {
+            show(&parent, &title, &snapshot, can_be_blank, colour, move |text, dialog| {
                 let (subtitle, stored) = (subtitle.clone(), stored.clone());
                 let written = text.clone();
                 bind::write(gate.clone(), veto.clone(), pref.clone(), text, move |outcome| match outcome {
@@ -87,11 +87,11 @@ fn build(title: &str, pref: &Pref<String>, can_be_blank: bool, lang: Option<Lang
     content
 }
 
-fn show(parent: &gtk::Window, title: &str, snapshot: &str, can_be_blank: bool, lang: Option<Lang>, on_ok: impl Fn(String, Dialog) + 'static) {
+fn show(parent: &gtk::Window, title: &str, snapshot: &str, can_be_blank: bool, colour: bool, on_ok: impl Fn(String, Dialog) + 'static) {
     let buffer = gtk::TextBuffer::new(None);
     buffer.set_text(snapshot);
-    if let Some(lang) = lang {
-        syntax::attach(&buffer, lang);
+    if colour {
+        syntax::attach(&buffer);
     }
     let view = gtk::TextView::builder().buffer(&buffer).monospace(true).left_margin(6).right_margin(6).top_margin(6).bottom_margin(6).build();
     let frame = gtk::ScrolledWindow::builder().child(&view).min_content_height(200).has_frame(true).build();

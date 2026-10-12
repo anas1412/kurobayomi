@@ -8,8 +8,7 @@ aspect modes, the lock, decoder and audio channel chips, statistics.
 ## Layout
 
 - **Header** (`widgets::page_header::header`, the helper shared with the reader): Back on the left, the title in the
-  middle. On the right: the Detach button, the quality and server menu, the audio and subtitle menu. The header never
-  hides.
+  middle. On the right: the quality and server menu, the audio and subtitle menu. The header never hides.
 - **Video**: the GL area. A click toggles pause. A double click toggles fullscreen. One press waits out the double
   click time (400 ms) before it pauses, so a double click does not also pause.
 - **Control bar** (bottom, over the video, `osd toolbar`): previous, play or pause, next, seek bar, time, speed,

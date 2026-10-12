@@ -85,7 +85,59 @@ async fn a_spinning_guest_is_stopped_by_the_epoch_deadline() {
         .await
         .map(|sources| sources.len());
     match outcome {
-        Err(WasmError::Instantiate(text)) => assert!(text.contains("interrupt"), "the epoch deadline stops it: {text}"),
+        Err(WasmError::Instantiate(text)) => assert!(text.contains("call deadline"), "the epoch deadline stops it: {text}"),
+        other => panic!("expected the deadline to stop the guest, got {other:?}"),
+    }
+    assert!(started.elapsed() < Duration::from_secs(20), "stopped by the deadline, not by the test");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn host_waits_do_not_count_against_the_call_deadline() {
+    // Five 150 ms waits are 750 ms of host time. The budget is 5 ticks (0.5 s) of guest run time, so the load passes only
+    // because the waits are not counted.
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_string("ok")
+                .set_delay(Duration::from_millis(150)),
+        )
+        .mount(&server)
+        .await;
+    let (host_env, _dir) = env();
+    let fetching = guest(Behaviour::Fetches {
+        url: format!("{}/page", server.uri()),
+        times: 5,
+        then_spin: false,
+    });
+    let outcome = instantiate_with_deadline(fetching, hosts(&["127.0.0.1"]), false, host_env, 5)
+        .await
+        .map(|sources| sources.len());
+    assert_eq!(outcome.expect("the host waits are not guest run time"), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_guest_that_spins_after_its_host_calls_is_still_stopped() {
+    // One host call, then a spin. The call's own wait is not counted, the spin after it is, so the 0.5 s budget ends it.
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(wiremock::ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let (host_env, _dir) = env();
+    let spinning = guest(Behaviour::Fetches {
+        url: format!("{}/page", server.uri()),
+        times: 1,
+        then_spin: true,
+    });
+    let started = Instant::now();
+    let outcome = instantiate_with_deadline(spinning, hosts(&["127.0.0.1"]), false, host_env, 5)
+        .await
+        .map(|sources| sources.len());
+    match outcome {
+        Err(WasmError::Instantiate(text)) => {
+            assert!(text.contains("call deadline"), "the run time after a host call is still limited: {text}")
+        }
         other => panic!("expected the deadline to stop the guest, got {other:?}"),
     }
     assert!(started.elapsed() < Duration::from_secs(20), "stopped by the deadline, not by the test");

@@ -40,6 +40,9 @@ pub struct Entry {
     pub file: String,
     /// The SHA-256 of the file, in hex.
     pub sha256: String,
+    /// The hosts a plug-in may reach through the host's `http` import (`*.x` matches subdomains). Empty for a recipe.
+    #[serde(default)]
+    pub hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,6 +193,43 @@ pub async fn ensure_cached(client: &reqwest::Client, root: &Path, entry: &Entry)
     Ok(path)
 }
 
+/// The folder a link's copies live in: the SHA-256 of the link, so two links never share one.
+pub fn link_dir(root: &Path, link: &str) -> PathBuf {
+    root.join(sha256_hex(link.as_bytes()))
+}
+
+/// The name of a repository's saved index inside its folder.
+const INDEX_FILE: &str = "index.min.json";
+
+/// The saved index of a link's folder, when it is there and still reads as a valid index.
+pub fn read_index(dir: &Path) -> Option<Index> {
+    parse_index(&std::fs::read_to_string(dir.join(INDEX_FILE)).ok()?).ok()
+}
+
+/// The saved copy of one source, when its bytes still match the checksum of the entry.
+pub fn read_source(dir: &Path, entry: &Entry) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(cached_path(dir, entry)).ok()?;
+    (sha256_hex(&bytes) == entry.sha256.to_ascii_lowercase()).then_some(bytes)
+}
+
+/// When the saved index was written, in Unix seconds. The daily check compares it with [`refresh_due`].
+pub fn checked_at(dir: &Path) -> Option<i64> {
+    let modified = std::fs::metadata(dir.join(INDEX_FILE)).ok()?.modified().ok()?;
+    i64::try_from(modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs()).ok()
+}
+
+/// Fetches a repository's index and each source it lists, and saves them under `dir`. A source is fetched again only when
+/// its copy is missing or does not match the index. Any failure is returned and the saved index stays as it was.
+pub async fn sync_link(client: &reqwest::Client, dir: &Path, link: &str) -> Result<Index, RepoError> {
+    let index = fetch_index(client, link).await?;
+    for entry in &index.sources {
+        ensure_cached(client, dir, entry).await?;
+    }
+    let text = serde_json::to_string(&index).map_err(|e| RepoError::Parse(e.to_string()))?;
+    write_atomic(&dir.join(INDEX_FILE), text.as_bytes()).map_err(|e| RepoError::Write(e.to_string()))?;
+    Ok(index)
+}
+
 /// Writes `bytes` to `path` through a `.part` file, so a crash never leaves a half-written copy under the final name.
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
@@ -290,6 +330,29 @@ mod tests {
         assert_eq!(cached_path(Path::new("/c"), &index.sources[0]), PathBuf::from("/c/x.wasm"));
         let recipe = parse_index(&index_of(&[entry("y", "manga", "en")])).expect("valid");
         assert_eq!(cached_path(Path::new("/c"), &recipe.sources[0]), PathBuf::from("/c/y.toml"));
+    }
+
+    #[test]
+    fn an_entry_with_a_type_field_is_read_and_the_kind_comes_from_the_link() {
+        // the published index names each file "recipe" or "wasm"; the reader ignores that field
+        let text = index_of(&[entry("x", "manga", "en").replace("\"kind\"", "\"type\":\"recipe\",\"kind\"")]);
+        let index = parse_index(&text).expect("a type field is tolerated");
+        assert_eq!(index.sources[0].kind, Kind::Manga);
+        assert_eq!(cached_path(Path::new("/c"), &index.sources[0]), PathBuf::from("/c/x.toml"));
+    }
+
+    #[test]
+    fn a_saved_copy_is_read_back_only_while_its_bytes_match_the_index() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let index = parse_index(&index_of(&[entry("ok", "manga", "en")])).expect("valid");
+        std::fs::write(dir.path().join(INDEX_FILE), serde_json::to_string(&index).expect("json")).expect("write index");
+        assert_eq!(read_index(dir.path()), Some(index.clone()));
+        let source = &index.sources[0];
+        std::fs::write(cached_path(dir.path(), source), b"abc").expect("write source");
+        assert_eq!(read_source(dir.path(), source), Some(b"abc".to_vec()));
+        std::fs::write(cached_path(dir.path(), source), b"changed").expect("overwrite source");
+        assert_eq!(read_source(dir.path(), source), None, "a changed copy is not used");
+        assert!(checked_at(dir.path()).is_some(), "the index file dates the last check");
     }
 
     #[test]

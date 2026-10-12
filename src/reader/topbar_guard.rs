@@ -1,4 +1,4 @@
-//! The reader's top bar (back, title, chapter, bookmark, detach) is never hidden: the user ruled that out. Only the
+//! The reader's top bar (back, title, chapter, bookmark, menu) is never hidden: the user ruled that out. Only the
 //! bottom bar follows the menu toggle. This guard fails when `set_menu` starts hiding the top bar again.
 
 #[cfg(test)]

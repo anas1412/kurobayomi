@@ -1,5 +1,5 @@
-//! The pure toggles of the source lists (`ToggleMangaSource`, `ToggleMangaSourcePin`, `ToggleLanguage`,
-//! `ToggleExcludeFromMangaDataSaver`; T-17a-019, T-17a-020, T-17a-022). Each function changes one set and returns the new
+//! The pure toggles of the source lists (`ToggleMangaSource`, `ToggleMangaSourcePin`, `ToggleLanguage`;
+//! T-17a-019, T-17a-020, T-17a-022). Each function changes one set and returns the new
 //! membership, so the UI can update without reading the set again. A set holds decimal source ids (`p1-data-and-config.md`
 //! section 7). The naming trap is gone: a "disabled" set is never read through a helper called `is_enabled`.
 
@@ -40,12 +40,6 @@ pub fn toggle_language(languages: &mut BTreeSet<String>, language: &str) -> bool
         languages.insert(language.to_owned());
         true
     }
-}
-
-/// Puts source `id` in or takes it out of the data-saver exclusion set (`ToggleExcludeFromMangaDataSaver`). Returns `true`
-/// when excluded after the call.
-pub fn toggle_data_saver_excluded(excluded: &mut BTreeSet<String>, id: Id) -> bool {
-    toggle_member(excluded, id)
 }
 
 /// Flips membership of the decimal form of `id`, and returns whether it is a member afterwards.
@@ -125,15 +119,6 @@ mod tests {
         toggle_language(&mut languages, "en");
         assert_eq!(disabled, set(&["3"]));
         assert_eq!(pinned, set(&["4"]));
-    }
-
-    #[test]
-    fn the_data_saver_exclusion_flips_membership() {
-        let mut excluded = set(&[]);
-        assert!(toggle_data_saver_excluded(&mut excluded, 12));
-        assert_eq!(excluded, set(&["12"]));
-        assert!(!toggle_data_saver_excluded(&mut excluded, 12));
-        assert!(excluded.is_empty());
     }
 
     proptest! {

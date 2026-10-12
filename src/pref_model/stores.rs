@@ -1,33 +1,22 @@
-//! Extension store and repo pages (T-47b-009 to T-47b-019). Pure: the page state machine, the add and deep-link
+//! The repository list page (T-47b-009 to T-47b-019). Pure: the page state machine, the add and deep-link
 //! entry rules, and what each card offers. Storage reads and network fetches are kuro-domain's; the GTK page runs
 //! the returned [`Effect`] and feeds the result back as an [`Event`].
 
 use kuro_i18n::{Arg, MsgKey, tr, trf};
 
-/// Store or repo identity: the key the database holds it by (`index_url` or `base_url`).
+/// Store or repo identity: the key the database holds it by (`index_url`, or the repo link).
 pub trait Keyed: Clone {
     fn key(&self) -> &str;
 }
 
-impl Keyed for kuro_domain::extension_store::AnimeExtensionStore {
+/// One repository link (an `index.min.json` address), keyed by the link itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepoLink(pub String);
+
+impl Keyed for RepoLink {
     fn key(&self) -> &str {
-        &self.index_url
+        &self.0
     }
-}
-
-/// A manga extension repo is keyed by its `base_url`.
-impl Keyed for kuro_data::extension_repo::ExtensionRepo {
-    fn key(&self) -> &str {
-        &self.base_url
-    }
-}
-
-pub fn empty_text() -> String {
-    tr(MsgKey::extensionStoresScreen_emptyLabel)
-}
-
-pub fn remove_title() -> String {
-    tr(MsgKey::extensionStoresScreen_deleteStore_title)
 }
 
 /// Shown when a failed add has no message of its own.
@@ -115,10 +104,6 @@ pub fn helper(entry: &Entry, existing_keys: &[&str]) -> Helper {
     } else {
         Helper::Plain
     }
-}
-
-pub fn remove_body(name: &str, url: &str) -> String {
-    trf(MsgKey::extensionStoresScreen_deleteStore_body, &[("arg1", Arg::Str(name)), ("arg2", Arg::Str(url))])
 }
 
 /// The text under the URL entry. `*required` is the normal line; a duplicate or an error replaces it and is drawn as an
@@ -222,8 +207,6 @@ pub fn reduce<T: Keyed>(state: &mut Page<T>, event: Event<T>) -> Effect {
 
 #[cfg(test)]
 mod tests {
-    use kuro_domain::extension_store::{AnimeExtensionStore, Contact};
-
     use super::*;
 
     #[derive(Clone, Debug)]
@@ -232,19 +215,6 @@ mod tests {
     impl Keyed for Repo {
         fn key(&self) -> &str {
             &self.0
-        }
-    }
-
-    fn store(url: &str) -> AnimeExtensionStore {
-        AnimeExtensionStore {
-            index_url: url.to_owned(),
-            name: url.to_owned(),
-            badge_label: String::new(),
-            signing_key: String::new(),
-            contact: Contact { website: String::new(), discord: None },
-            is_legacy: false,
-            extension_list_url: None,
-            resolved_index_url: url.to_owned(),
         }
     }
 
@@ -365,20 +335,8 @@ mod tests {
         assert_eq!(add_label(&Entry::default()), "Add");
     }
 
-    #[test]
-    fn t_47b_018_the_page_texts_come_from_the_string_table() {
-        assert_eq!(empty_text(), "You haven't added an extension store yet");
-        assert_eq!(remove_title(), "Remove extension store");
-    }
-
-    fn repo(base: &str) -> kuro_data::extension_repo::ExtensionRepo {
-        kuro_data::extension_repo::ExtensionRepo {
-            base_url: base.to_owned(),
-            name: base.to_owned(),
-            short_name: None,
-            website: String::new(),
-            signing_key_fingerprint: format!("fp-{base}"),
-        }
+    fn repo(base: &str) -> RepoLink {
+        RepoLink(base.to_owned())
     }
 
     #[test]
@@ -395,7 +353,7 @@ mod tests {
 
     #[test]
     fn t_47b_019_a_repo_page_is_loading_until_the_first_emission() {
-        let mut page: Page<kuro_data::extension_repo::ExtensionRepo> = Page::Loading;
+        let mut page: Page<RepoLink> = Page::Loading;
         assert_eq!(reduce(&mut page, Event::Open(Dialog::Add(Entry::default()))), Effect::None);
         assert!(matches!(page, Page::Loading), "no dialog opens while loading");
         reduce(&mut page, Event::Loaded(vec![repo("https://a")]));
@@ -411,8 +369,4 @@ mod tests {
         assert_eq!(reduce(&mut page, Event::ConfirmRemove), Effect::Delete("https://a".into()));
     }
 
-    #[test]
-    fn remove_body_quotes_name_and_url() {
-        assert_eq!(remove_body("Store A", "https://a"), "Do you wish to remove the extension store \"Store A\" (https://a)?");
-    }
 }

@@ -223,13 +223,21 @@ impl Role {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tokens {
     pub colors: [Rgba; ROLE_COUNT],
-    pub amoled: bool,
     pub dark: bool,
 }
 
 impl Tokens {
     pub fn get(&self, role: Role) -> Rgba {
         self.colors[role as usize]
+    }
+
+    /// One `@define-color kuro_<role>` line per role (`kuro_primary`, `kuro_on_error`, ...), so the
+    /// stylesheets name the palette colours the same way on every mode.
+    pub fn define_colors_css(&self) -> String {
+        Role::ALL
+            .iter()
+            .map(|role| format!("@define-color kuro_{} {};\n", role.css_name(), self.get(*role).to_css()))
+            .collect()
     }
 
     /// The active-filter tint (Compose `ColorScheme.active`): amber in dark, darker amber in light.
@@ -366,7 +374,6 @@ mod tests {
     fn active_tint_follows_dark_flag() {
         let mut t = Tokens {
             colors: [Rgba::argb(0); ROLE_COUNT],
-            amoled: false,
             dark: true,
         };
         assert_eq!(t.active(), Rgba::argb(0xFFFF_EB3B));

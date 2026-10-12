@@ -4,16 +4,22 @@
 //! before. A recipe that is not valid is logged and skipped.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::future::Future;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use http::header::{HeaderMap, HeaderName, HeaderValue};
 
 use kuro_domain::source::browse::BrowseQuery;
 use kuro_domain::source::model::Source;
+use kuro_extensions::instantiate::{RepoPlugin, instantiate_repo_plugin};
+use kuro_extensions::repo::{self, RepoError};
 use kuro_images::fetch::{ImageService, SourceClient, SourceHttp};
 use kuro_net::NetworkClient;
 use kuro_platform::paths::Paths;
 use kuro_prefs::network::NetworkPrefs;
+use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
 use kuro_source::anime::AnimeSource;
 use kuro_source::filter_list::FilterList;
@@ -37,7 +43,7 @@ fn listed(recipe: &Recipe, id: i64) -> DirectorySource {
 /// The anime recipe sources, as the anime pages and the anime entry page read them.
 #[derive(Default)]
 struct Loaded {
-    anime: Vec<(Arc<ScrapeAnime>, DirectorySource)>,
+    anime: Vec<(Arc<dyn AnimeSource>, DirectorySource)>,
 }
 
 static LOADED: Mutex<Option<Arc<Loaded>>> = Mutex::new(None);
@@ -58,14 +64,14 @@ pub fn anime_list() -> Vec<Source> {
 
 /// The runnable anime recipe sources, for the anime entry page.
 pub fn anime_sources() -> Vec<Arc<dyn AnimeSource>> {
-    loaded().anime.iter().map(|(source, _)| Arc::clone(source) as Arc<dyn AnimeSource>).collect()
+    loaded().anime.iter().map(|(source, _)| Arc::clone(source)).collect()
 }
 
 struct Instances(Arc<Loaded>);
 
 impl AnimeInstances for Instances {
     fn source(&self, id: i64) -> Option<Arc<dyn AnimeSource>> {
-        self.0.anime.iter().find(|(source, _)| source.id() == id).map(|(source, _)| Arc::clone(source) as Arc<dyn AnimeSource>)
+        self.0.anime.iter().find(|(source, _)| source.id() == id).map(|(source, _)| Arc::clone(source))
     }
 }
 
@@ -153,10 +159,70 @@ impl PageLoader for MangaLoader {
     }
 }
 
-/// The sources of the recipes: the manga directory and the anime ones, each only when there is one.
-fn build(recipes: Vec<Recipe>, client: &NetworkClient) -> (Option<MangaDirectory>, Option<Loaded>) {
-    let mut manga: Vec<(Arc<dyn CatalogueSource>, DirectorySource)> = Vec::new();
-    let mut anime = Vec::new();
+/// The app values a reload reads, set once at start: the folders, the preferences and the runtime.
+static PATHS: OnceLock<Arc<dyn Paths + Send + Sync>> = OnceLock::new();
+static PREFS: OnceLock<PrefStore> = OnceLock::new();
+static HANDLE: OnceLock<tokio::runtime::Handle> = OnceLock::new();
+
+/// Runs a future to its end on a plain thread, so the call works on the GTK thread and on a worker alike. `None` when the
+/// app runtime is not up or the future panics.
+fn block<T: Send>(future: impl Future<Output = T> + Send) -> Option<T> {
+    let handle = HANDLE.get()?.clone();
+    std::thread::scope(|scope| scope.spawn(move || handle.block_on(future)).join().ok())
+}
+
+/// The folder the repo links keep their copies in.
+fn repo_root() -> Option<PathBuf> {
+    PATHS.get().map(|paths| paths.repo_sources_dir())
+}
+
+/// The client the repo links are fetched with. It is built once and shared.
+pub fn repo_http() -> reqwest::Client {
+    static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
+    HTTP.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent(concat!("Kurobayomi/", env!("CARGO_PKG_VERSION")))
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+    .clone()
+}
+
+/// Fetches a repo link's index and its sources into the link's folder. Blocks, so call it off the GTK thread.
+pub fn sync_link(link: &str) -> Result<(), RepoError> {
+    let root = repo_root().ok_or_else(|| RepoError::Write("the app folders are not set".to_owned()))?;
+    let dir = repo::link_dir(&root, link);
+    let http = repo_http();
+    match block(repo::sync_link(&http, &dir, link)) {
+        Some(result) => result.map(|_| ()),
+        None => Err(RepoError::Network("the app runtime is not running".to_owned())),
+    }
+}
+
+/// Deletes a removed link's saved copies. A folder that is already gone is not an error.
+pub fn forget_link(link: &str) {
+    let Some(root) = repo_root() else { return };
+    match std::fs::remove_dir_all(repo::link_dir(&root, link)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => tracing::warn!(%error, "could not delete the saved copies of a repo"),
+    }
+}
+
+/// A recipe read from the bytes of a saved `.toml` copy.
+fn recipe_from(bytes: &[u8]) -> Result<Recipe, String> {
+    let text = std::str::from_utf8(bytes).map_err(|e| e.to_string())?;
+    Recipe::parse(text).map_err(|e| e.to_string())
+}
+
+/// Makes the lists the Browse pages read: the recipes and the plug-ins, each in the list of its kind.
+fn build(
+    recipes: Vec<Recipe>,
+    mut manga: Vec<(Arc<dyn CatalogueSource>, DirectorySource)>,
+    mut anime: Vec<(Arc<dyn AnimeSource>, DirectorySource)>,
+    client: &NetworkClient,
+) -> (MangaDirectory, Loaded) {
     for recipe in recipes {
         let recipe = Arc::new(recipe);
         match recipe.kind {
@@ -174,25 +240,101 @@ fn build(recipes: Vec<Recipe>, client: &NetworkClient) -> (Option<MangaDirectory
             }
         }
     }
-    tracing::info!(manga = manga.len(), anime = anime.len(), "recipe sources loaded");
-    ((!manga.is_empty()).then_some(MangaDirectory { sources: manga }), (!anime.is_empty()).then_some(Loaded { anime }))
+    tracing::info!(manga = manga.len(), anime = anime.len(), "sources loaded");
+    (MangaDirectory { sources: manga }, Loaded { anime })
 }
 
-/// Hands the sources to the Browse pages.
-fn register(recipes: Vec<Recipe>, client: &NetworkClient) {
+/// Reads the recipes of the scrapers folder and the saved copies of every repo link, instantiates the plug-ins, and
+/// installs the result for the Browse pages. A call replaces the last one, so a link that was added or removed shows at
+/// once. Plug-ins load on the runtime, and the call waits for them, so it runs off the GTK thread after start.
+pub fn reload() {
+    let (Some(paths), Some(store), Some(client)) = (PATHS.get(), PREFS.get(), client()) else { return };
+    let (mut recipes, problems) = kuro_source_scrape::load_dir(&paths.scrapers_dir());
+    for (file, reason) in problems {
+        tracing::warn!(file, "recipe skipped: {reason}");
+    }
+    let root = paths.repo_sources_dir();
+    let links: Vec<String> = SourcePrefs::new(store.clone()).manga_extension_repos.get().into_iter().collect();
+    // (id, is an anime plug-in, allowed hosts, bytes) for each plug-in of a link
+    let mut plugins = Vec::new();
+    for link in &links {
+        let dir = repo::link_dir(&root, link);
+        let Some(index) = repo::read_index(&dir) else {
+            tracing::warn!(link = link.as_str(), "the saved index of a repo is missing or not valid; its sources are skipped");
+            continue;
+        };
+        for entry in &index.sources {
+            let Some(bytes) = repo::read_source(&dir, entry) else {
+                tracing::warn!(id = entry.id.as_str(), "a repo source is missing or changed; it is skipped until the next check");
+                continue;
+            };
+            if entry.file.ends_with(".wasm") {
+                plugins.push((entry.id.clone(), entry.kind == repo::Kind::Anime, entry.hosts.clone(), bytes));
+                continue;
+            }
+            match recipe_from(&bytes) {
+                Ok(recipe) if recipes.iter().any(|known| known.id == recipe.id) => {
+                    tracing::warn!(id = entry.id.as_str(), "repo recipe skipped: its id is already used");
+                }
+                Ok(recipe) => recipes.push(recipe),
+                Err(reason) => tracing::warn!(id = entry.id.as_str(), "repo recipe skipped: {reason}"),
+            }
+        }
+    }
+
+    let (mut manga_plugins, mut anime_plugins) = (Vec::new(), Vec::new());
+    for (id, anime, hosts, bytes) in plugins {
+        let package = format!("repo.{id}");
+        match block(instantiate_repo_plugin(bytes, hosts, anime, client.clone(), store.clone())) {
+            Some(Ok(RepoPlugin::Manga(sources))) => {
+                for source in sources {
+                    let row = DirectorySource { source: Source::new(source.id(), source.name(), source.lang()), package: package.clone(), home_url: None };
+                    manga_plugins.push((source, row));
+                }
+            }
+            Some(Ok(RepoPlugin::Anime(sources))) => {
+                for source in sources {
+                    let row = DirectorySource { source: Source::new(source.id(), source.name(), source.lang()), package: package.clone(), home_url: None };
+                    anime_plugins.push((source, row));
+                }
+            }
+            Some(Err(reason)) => tracing::warn!(id = id.as_str(), "repo plug-in skipped: {reason}"),
+            None => tracing::warn!(id = id.as_str(), "repo plug-in skipped: the app runtime is not running"),
+        }
+    }
+
     let by_package: HashMap<String, HeaderMap> = recipes.iter().map(|recipe| (package_of(recipe), header_map(recipe))).collect();
-    let (manga, anime) = build(recipes, client);
-    let rows = manga.iter().flat_map(|directory| directory.sources()).chain(anime.iter().flat_map(|loaded| loaded.anime.iter().map(|(_, row)| row.clone())));
+    let (manga, anime) = build(recipes, manga_plugins, anime_plugins, &client);
+    let rows = manga.sources().into_iter().chain(anime.anime.iter().map(|(_, row)| row.clone()));
     let headers: HashMap<i64, HeaderMap> = rows.filter_map(|row| Some((row.source.id, by_package.get(&row.package)?.clone()))).collect();
     *IMAGE_HEADERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(headers);
-    if let Some(directory) = manga {
-        install(Arc::new(directory));
+    install(Arc::new(manga));
+    let loaded = Arc::new(anime);
+    install_instances(Arc::new(Instances(Arc::clone(&loaded))));
+    *LOADED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(loaded);
+}
+
+/// The daily check: each link whose saved index is older than a day is fetched again on a thread of its own, so the window
+/// does not wait for the network. The Browse pages are reloaded when it ends.
+fn schedule_daily_check(links: &[String]) {
+    let Some(root) = repo_root() else { return };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|elapsed| i64::try_from(elapsed.as_secs()).ok())
+        .unwrap_or_default();
+    let due: Vec<String> = links.iter().filter(|link| repo::refresh_due(repo::checked_at(&repo::link_dir(&root, link)), now)).cloned().collect();
+    if due.is_empty() {
+        return;
     }
-    if let Some(loaded) = anime {
-        let loaded = Arc::new(loaded);
-        install_instances(Arc::new(Instances(Arc::clone(&loaded))));
-        *LOADED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(loaded);
-    }
+    std::thread::spawn(move || {
+        for link in &due {
+            if let Err(error) = sync_link(link) {
+                tracing::warn!(link = link.as_str(), %error, "the daily repo check failed; the saved copy is kept");
+            }
+        }
+        reload();
+    });
 }
 
 /// The network client the sources and the reader's pages share, built once at start.
@@ -235,8 +377,8 @@ impl SourceHttp for RecipeImageHeaders {
     }
 }
 
-/// Builds the shared client, installs the image service the covers draw through, and registers the recipes of the
-/// scrapers folder. Call once at start, inside the app's runtime.
+/// Builds the shared client, installs the image service the covers draw through, and loads the sources: the recipes of
+/// the scrapers folder and the repo links. Call once at start, inside the app's runtime.
 pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
     let client = match crate::net_client::build(&NetworkPrefs::new(store.clone()), paths.as_ref()) {
         Ok(client) => client,
@@ -246,6 +388,11 @@ pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
         }
     };
     *CLIENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(client.clone());
+    let _ = PATHS.set(Arc::clone(paths));
+    let _ = PREFS.set(store.clone());
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let _ = HANDLE.set(handle);
+    }
     let images = Arc::clone(paths);
     let image_client = client.clone();
     tokio::spawn(async move {
@@ -254,13 +401,9 @@ pub fn start(store: &PrefStore, paths: &Arc<dyn Paths + Send + Sync>) {
             Err(error) => tracing::warn!("the image service does not start, covers show their placeholder: {error}"),
         }
     });
-    let (recipes, problems) = kuro_source_scrape::load_dir(&paths.scrapers_dir());
-    for (file, reason) in problems {
-        tracing::warn!(file, "recipe skipped: {reason}");
-    }
-    if !recipes.is_empty() {
-        register(recipes, &client);
-    }
+    reload();
+    let links: Vec<String> = SourcePrefs::new(store.clone()).manga_extension_repos.get().into_iter().collect();
+    schedule_daily_check(&links);
 }
 
 #[cfg(test)]
@@ -285,28 +428,28 @@ mod tests {
         let (recipes, problems) = kuro_source_scrape::load_dir(&dir);
         assert_eq!((recipes.len(), problems.len()), (2, 1));
         let client = crate::net_client::build(&NetworkPrefs::new(PrefStore::in_memory()), &paths).unwrap();
-        let (manga, anime) = build(recipes, &client);
+        let (manga, anime) = build(recipes, Vec::new(), Vec::new(), &client);
 
-        let manga = manga.expect("a manga directory").sources();
+        let manga = manga.sources();
         assert_eq!(manga.len(), 1);
         assert_eq!((manga[0].source.name.as_str(), manga[0].source.lang.as_str()), ("Example Manga", "en"));
         assert_eq!(manga[0].source.id, kuro_source::generate_id("Example Manga", "en", 1));
         assert_eq!(manga[0].package, "scraper.example-manga");
         assert_eq!(manga[0].home_url.as_deref(), Some("https://manga.example.org"));
 
-        let anime = Arc::new(anime.expect("anime sources"));
+        let anime = Arc::new(anime);
         assert_eq!(anime.anime.iter().map(|(_, row)| row.source.name.as_str()).collect::<Vec<_>>(), ["Example Anime"]);
         let id = anime.anime[0].1.source.id;
         assert!(Instances(anime).source(id).is_some(), "the anime instance can be asked");
     }
 
     #[test]
-    fn without_recipes_nothing_is_built() {
+    fn without_recipes_or_plug_ins_nothing_is_listed() {
         let paths = TempPaths::new().unwrap();
         let (recipes, problems) = kuro_source_scrape::load_dir(&paths.scrapers_dir());
         assert!(recipes.is_empty() && problems.is_empty());
         let client = crate::net_client::build(&NetworkPrefs::new(PrefStore::in_memory()), &paths).unwrap();
-        let (manga, anime) = build(Vec::new(), &client);
-        assert!(manga.is_none() && anime.is_none());
+        let (manga, anime) = build(Vec::new(), Vec::new(), Vec::new(), &client);
+        assert!(manga.sources().is_empty() && anime.anime.is_empty());
     }
 }

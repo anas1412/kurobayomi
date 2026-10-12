@@ -29,6 +29,30 @@ pub async fn instantiate_verified(result: LoadResult, env: HostEnv) -> LoadResul
     }
 }
 
+/// The sources of one plug-in of a repository link, by the kind its index entry names.
+pub enum RepoPlugin {
+    Manga(Vec<std::sync::Arc<dyn kuro_source::CatalogueSource>>),
+    Anime(Vec<std::sync::Arc<dyn kuro_source::anime::AnimeSource>>),
+}
+
+/// Instantiates a `.wasm` plug-in fetched from a repository link. It is a factory, as the packages are. `hosts` is the
+/// allow-list its index entry names; the plug-in cannot reach any other host.
+pub async fn instantiate_repo_plugin(
+    bytes: Vec<u8>,
+    hosts: Vec<String>,
+    anime: bool,
+    client: kuro_net::NetworkClient,
+    prefs: kuro_prefs::store::PrefStore,
+) -> Result<RepoPlugin, String> {
+    let env = HostEnv { client, prefs };
+    let loaded = if anime {
+        kuro_source_wasm::instantiate_anime(bytes, hosts, true, env).await.map(RepoPlugin::Anime)
+    } else {
+        kuro_source_wasm::instantiate(bytes, hosts, true, env).await.map(RepoPlugin::Manga)
+    };
+    loaded.map_err(|error| error.to_string())
+}
+
 /// The production load path of the manga packages (T-20a-001): discovers `extensions_dir`, instantiates every verified
 /// component through the WASM host, and publishes the outcome like [`crate::loader::scan_into`]. A component that fails
 /// to instantiate is kept as a problem of its folder and is not listed as installed.

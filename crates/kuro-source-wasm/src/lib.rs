@@ -1,6 +1,7 @@
 //! WASM source host (areas 18, 20): runs extension guests behind the `kuro-source` traits. P2, feature-gated.
 //!
-//! A package is one `source.wasm` component that implements the `kuro:source@1.4.0` world (`wit/kuro-source.wit`).
+//! A package is one `source.wasm` component that implements the `kuro:source@1.5.0` world (`wit/kuro-source.wit`); 1.4
+//! packages still load (see `bridge::link_v14`).
 //! [`instantiate`] compiles it, asks it for its sources, and returns each one as a `CatalogueSource`. Every guest call
 //! runs on a blocking thread, behind a per-source mutex, under an epoch deadline and a memory limit (see [`limits`]).
 

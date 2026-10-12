@@ -912,42 +912,6 @@ pref_category_hide_hidden = Sakrij skrivene kategorije s ekrana kategorija
 
 pref_update_anime_release_grace_period = Očekivano razdoblje odgode izdavanje animea
 
-data_saver_exclude = Isključi iz uštede podataka
-
-data_saver_stop_exclude = Prestani isključivati iz uštede podataka
-
-data_saver = Uštede podataka
-
-data_saver_summary = Komprimiraj slike prije preuzimanja ili učitavanja u čitač
-
-data_saver_downloader = Koristi uštedu podataka u programu za preuzimanje
-
-data_saver_ignore_jpeg = Zanemari Jpeg slike
-
-data_saver_ignore_gif = Zanemari Gif animacije
-
-data_saver_image_quality = Kvaliteta slike
-
-data_saver_image_quality_summary = Veće vrijednosti znače da je spremljen veći postotak kvalitete slike, ali to također znači da je veličina datoteke veća. 80 posto je dobra srednja vrijednost između veličine datoteke i kvalitete slike
-
-data_saver_image_format = Komprimiraj u Jpeg
-
-data_saver_image_format_summary_on = Veličina Jpeg datoteke je znatno manja od Webp formata (što znači da se sprema više podataka), ali zbog toga slike gube i na kvaliteti.{"\u000A"}{"\u000A"}Trenutačno se komprimira u Jpeg
-
-data_saver_image_format_summary_off = Veličina Jpeg datoteke je znatno manja od Webp formata (što znači da se sprema više podataka), ali zbog toga slike gube i na kvaliteti.{"\u000A"}{"\u000A"}Trenutačno se komprimira u Webp
-
-data_saver_color_bw = Konvertiraj u crno-bijelo
-
-bandwidth_hero = Bandwidth Hero (potreban je Bandwidth Hero Proxy server)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Bandwidth Hero Proxy Server
-
-data_saver_server_summary = Ovdje navedi URL Bandwidth Hero Proxy servera
-
 download_slots_info = Istodobno će se preuzimati samo iz izvora koji se sami hostiraju ili bez mjerenja
 
 unseen = Nepogledano

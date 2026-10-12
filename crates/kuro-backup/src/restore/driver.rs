@@ -15,7 +15,6 @@ use rusqlite::Connection;
 use super::RestoreError;
 use super::anime::{AnimeOutcome, existing_pairs as anime_pairs, plan_anime, restore_anime_entry, sort_anime};
 use super::categories::{CategoryRestore, Kind, restore_categories};
-use super::extensions::{restore_anime_store, restore_custom_buttons, restore_manga_repo};
 use super::manga::{existing_pairs as manga_pairs, restore_manga_entry, sort_manga};
 use super::merge::RunClock;
 use super::options::RestoreOptions;
@@ -264,14 +263,6 @@ impl DbRestorer<'_> {
             }
         }
     }
-
-    fn custom_buttons(&mut self) -> Result<Item, RestoreError> {
-        let title = text::CUSTOM_BUTTON_SETTINGS.english;
-        match in_tx(self.t.anime, |tx| restore_custom_buttons(tx, &self.backup.custom_buttons)) {
-            Ok(inserted) => done(format!("{title} ({inserted})"), Ok(())),
-            Err(e) => done(title.into(), Err(e.to_string())),
-        }
-    }
 }
 
 impl Restorer for DbRestorer<'_> {
@@ -291,16 +282,10 @@ impl Restorer for DbRestorer<'_> {
             Section::SourceSettings => self.source_settings(),
             Section::AnimeEntries => self.anime_entry(index),
             Section::MangaEntries => self.manga_entry(index),
-            Section::AnimeStores => {
-                let s = &self.backup.anime_extension_stores[i];
-                done(s.name.clone(), restore_anime_store(self.t.anime, s).map_err(|e| e.to_string()))
-            }
-            Section::MangaRepos => {
-                let r = &self.backup.manga_extension_repos[i];
-                // The message already carries the `Error Adding Manga Repo` text.
-                Ok(Item { title: r.name.clone(), error: restore_manga_repo(self.t.manga, r).err() })
-            }
-            Section::CustomButtons => self.custom_buttons(),
+            // The old store and repo rows are not written to their tables: after the restore their addresses become
+            // repository links (`LegacyImport`), and an address that is not a link is ignored without error.
+            Section::AnimeStores => done(self.backup.anime_extension_stores[i].name.clone(), Ok(())),
+            Section::MangaRepos => done(self.backup.manga_extension_repos[i].name.clone(), Ok(())),
             // Every payload is an APK, which does not run on Linux: each one is counted as skipped, and none is an error.
             Section::Extensions => {
                 self.skipped_extensions = self.backup.extensions.len();
@@ -492,9 +477,9 @@ mod tests {
         assert_eq!(anime_by_url_and_source(&e.anime, "root", 3).unwrap().unwrap().version, 6);
     }
 
-    /// F-02: the flag is read once per section (nine, in plan order), and for an entry before it and before its commit.
+    /// F-02: the flag is read once per section (eight, in plan order), and for an entry before it and before its commit.
     /// With only the library on and three manga, checks 1 to 5 are the four earlier sections and the manga section,
-    /// 6 and 7 are the first entry, 8 and 9 the second, 10 and 11 the third, 12 to 15 the later sections. A flag that
+    /// 6 and 7 are the first entry, 8 and 9 the second, 10 and 11 the third, 12 to 14 the later sections. A flag that
     /// turns true at check `n` leaves exactly the entries finished before it, and never lets the next one start.
     #[test]
     fn cancel_stops_at_the_exact_entry_through_the_driver() {
@@ -514,7 +499,7 @@ mod tests {
             };
             let run = restore_backup(backup, opts, now(), targets, &cancel, &mut |ev| events.push(ev));
             let finished = if n <= 7 { 0 } else { ((n as usize - 6) / 2).min(3) };
-            assert_eq!(run.stop, (n <= 15).then_some(RestoreError::Cancelled), "flag at check {n}");
+            assert_eq!(run.stop, (n <= 14).then_some(RestoreError::Cancelled), "flag at check {n}");
             assert!(run.errors.is_empty(), "a cancel writes no error line");
             assert_eq!(events.len(), finished, "flag at check {n}");
             let stored = mangas::get_all_source_and_url(&e.manga).unwrap().len();
@@ -523,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failing_repo_is_logged_and_the_run_goes_on() {
+    fn repo_rows_are_counted_and_written_nowhere_so_none_is_an_error() {
         let mut e = env();
         let mut backup = fixture();
         backup.manga_extension_repos.push(BackupExtensionRepos {
@@ -535,9 +520,11 @@ mod tests {
         });
         let total = amount(all_but_extensions(), counts(&backup));
         let (run, events) = run(&mut e, backup, all_but_extensions(), &|| false);
-        assert_eq!(run.errors.len(), 1);
-        assert!(run.errors[0].message.starts_with("Error Adding Manga Repo: Clash"));
+        // The old name clash is no longer an error: repo rows write no table row (the addresses become links later).
+        assert!(run.errors.is_empty(), "{:?}", run.errors);
         assert_eq!(events.len() as u32, total);
+        let rows: i64 = e.manga.query_row("SELECT count(*) FROM extension_repos", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 0);
     }
 
     #[test]

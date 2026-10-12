@@ -912,42 +912,6 @@ pref_category_hide_hidden = শ্ৰেণী আৰু সঞ্চয় প�
 
 pref_update_anime_release_grace_period = প্ৰত্যাশিত এনিমে মুক্তিৰ অনুমোদন সময়
 
-data_saver_exclude = ডাটা সঞ্চয়কাৰীৰ পৰা বাদ দিয়ক
-
-data_saver_stop_exclude = ডাটা সঞ্চয়কাৰীৰ পৰা বাদ দিয়া বন্ধ কৰক
-
-data_saver = ডাটা সঞ্চয়কাৰী
-
-data_saver_summary = ডাউনলোড বা পঢ়াৰ সময়ত ছবি সংকোচন কৰক
-
-data_saver_downloader = ডাউনলোডাৰত ডাটা সঞ্চয়কাৰী ব্যৱহাৰ কৰক
-
-data_saver_ignore_jpeg = JPEG ছবি উপেক্ষা কৰক
-
-data_saver_ignore_gif = GIF এনিমেশ্যন উপেক্ষা কৰক
-
-data_saver_image_quality = ছবিৰ গুণমান
-
-data_saver_image_quality_summary = উচ্চ মান মানে ছবিৰ গুণমানৰ অধিক শতাংশ সাঁচি থোৱা হয়, কিন্তু ফাইলৰ আকাৰো বাঢ়ে, ৮০ শতাংশ ফাইলৰ আকাৰ আৰু ছবিৰ গুণমানৰ মাজত এক ভাল মধ্যমান
-
-data_saver_image_format = JPEG-লৈ সংকোচন কৰক
-
-data_saver_image_format_summary_on = JPEG ফাইলৰ আকাৰ WebPতকৈ যথেষ্ট সৰু (অধিক ডাটা সঞ্চয় হয়), কিন্তু ছবিৰ গুণমানো অধিক হেৰায়।{"\u000A"}বৰ্তমান JPEG-লৈ সংকোচন কৰা হৈছে
-
-data_saver_image_format_summary_off = JPEG ফাইলৰ আকাৰ WebPতকৈ যথেষ্ট সৰু (অধিক ডাটা সঞ্চয় হয়), কিন্তু ছবিৰ গুণমানো অধিক হেৰায়।{"\u000A"}বৰ্তমান WebP-লৈ সংকোচন কৰা হৈছে
-
-data_saver_color_bw = ক’লা আৰু বগাৰ বাবে ৰূপান্তৰ কৰক
-
-bandwidth_hero = বেণ্ডউইড্থ হিৰ’ (বেণ্ডউইড্থ হিৰ’ প্ৰক্সি ছাৰ্ভাৰৰ প্ৰয়োজন)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = বেণ্ডউইড্থ হিৰ’ প্ৰক্সি ছাৰ্ভাৰ
-
-data_saver_server_summary = বেণ্ডউইড্থ হিৰ’ প্ৰক্সি ছাৰ্ভাৰৰ URL ইয়াত দিয়ক
-
 download_slots_info = কেৱল আত্ম-হ’ষ্টেড বা মিটাৰ নথকা উৎসৰ পৰা একে সময়ত ডাউনলোড কৰিব
 
 unseen = নদেখা

@@ -1,7 +1,7 @@
 //! Theme mode (task T-47a-011) and the start screen (T-48a-005). The App theme strip and the app lock are cut (settings
 //! diet).
 //!
-//! Theme mode changes the look through one path, `theme::apply` (`update_settings`, `picker::change_settings_in`): the
+//! Theme mode changes the look through one path, `theme::apply` (`update_settings`): the
 //! window marks and the GTK dark preference are set together, with no restart.
 use std::rc::Rc;
 

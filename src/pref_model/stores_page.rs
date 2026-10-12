@@ -1,5 +1,4 @@
-//! The GTK page over `stores::Page`, for the anime extension stores (T-47b-009 to T-47b-018) and the manga extension
-//! repos (T-47b-019): a spinner while loading, the empty text, the card list, the Add FAB that shrinks on scroll, the
+//! The GTK page over `stores::Page`, for the one repository list (T-47b-009 to T-47b-019): a spinner while loading, the empty text, the card list, the Add FAB that shrinks on scroll, the
 //! add, remove and deep-link dialogs, and the header Refresh with its spinner. The page owns no rules: each user action
 //! is an [`Event`] for the reducer, and the returned [`Effect`] runs on a worker through [`Ops`].
 
@@ -56,23 +55,6 @@ pub struct Texts {
 }
 
 impl Texts {
-    pub fn stores() -> Self {
-        Self {
-            empty: stores::empty_text(),
-            add_title: tr(MsgKey::extensionStoresScreen_addStore_title),
-            add_intro: None,
-            input_label: tr(MsgKey::extensionStoresScreen_addStoreInput_inputLabel),
-            deep_link_intro: Some(tr(MsgKey::extensionStoresScreen_addStoreDeeplink_bodyText)),
-            remove_title: stores::remove_title(),
-            remove_body: super::stores_backend::store_remove_body,
-            open_website: tr(MsgKey::action_open_in_browser),
-            copy: tr(MsgKey::action_copy_to_clipboard),
-            delete: tr(MsgKey::action_delete),
-            refresh: tr(MsgKey::action_webview_refresh),
-            add: tr(MsgKey::action_add),
-        }
-    }
-
     pub fn repos() -> Self {
         let app = "Kurobayomi";
         Self {
@@ -359,10 +341,6 @@ impl<T: Keyed + Send + 'static> Inner<T> {
                             crate::toast::notify(text);
                             page.dispatch(Event::AddSucceeded);
                         }
-                        Ok(AddOutcome::Conflict { old_name, new_name, replace }) => {
-                            page.dispatch(Event::AddSucceeded);
-                            page.show_conflict(&old_name, &new_name, replace);
-                        }
                         Err(_) if close => crate::toast::notify(stores::unknown_error()),
                         Err(_) => page.dispatch(Event::AddFailed(stores::unknown_error())),
                     }
@@ -588,34 +566,6 @@ impl<T: Keyed + Send + 'static> Inner<T> {
             self.update_entry_dialog(e);
         }
     }
-
-    /// The signing-key conflict of a repo add: Replace swaps the old row for the new one, Cancel changes nothing.
-    fn show_conflict(&self, old_name: &str, new_name: &str, replace: Box<dyn FnOnce() + Send>) {
-        let body = gtk::Label::builder()
-            .label(trf(MsgKey::action_replace_repo_message, &[("arg1", Arg::Str(new_name)), ("arg2", Arg::Str(old_name))]))
-            .wrap(true)
-            .xalign(0.0)
-            .build();
-        let replace = RefCell::new(Some(replace));
-        let confirm = tr(MsgKey::action_replace_repo);
-        dialog_widget::show(
-            &crate::ui::window(),
-            &tr(MsgKey::action_replace_repo_title),
-            &body,
-            Some(confirm.as_str()),
-            move |dialog| {
-                if let Some(replace) = replace.borrow_mut().take() {
-                    glib::spawn_future_local(async move {
-                        if gio::spawn_blocking(replace).await.is_ok() {
-                            reload_extensions();
-                        }
-                    });
-                }
-                dialog.finish();
-            },
-            || {},
-        );
-    }
 }
 
 #[cfg(test)]
@@ -663,12 +613,6 @@ mod tests {
 
     #[test]
     fn t_47b_016_the_texts_come_from_the_string_table() {
-        let stores = Texts::stores();
-        assert_eq!(stores.empty, "You haven't added an extension store yet");
-        assert_eq!(stores.add_title, "Add extension store");
-        assert_eq!(stores.input_label, "Store index URL");
-        assert_eq!(stores.remove_title, "Remove extension store");
-        assert_eq!(stores.refresh, "Refresh");
         let repos = Texts::repos();
         assert_eq!(repos.empty, "You have no repos set.");
         assert_eq!(repos.add_title, "Add repo");
@@ -678,7 +622,6 @@ mod tests {
 
     #[test]
     fn t_47b_017_the_remove_bodies_follow_the_kind() {
-        assert_eq!((Texts::stores().remove_body)("A", "https://a"), "Do you wish to remove the extension store \"A\" (https://a)?");
         assert_eq!((Texts::repos().remove_body)("A", "https://a"), "Do you wish to delete the repo \"https://a\"?");
     }
 
@@ -735,7 +678,7 @@ mod tests {
             let ops = Arc::new(Fake { fail_with: Some("HTTP 500".into()), added: Default::default(), closes: false });
             let feed: Rc<RefCell<Option<Box<dyn Fn(Vec<Item>)>>>> = Rc::new(RefCell::new(None));
             let sink = feed.clone();
-            let (built, page) = build(ops.clone(), Texts::stores(), move |push| *sink.borrow_mut() = Some(push));
+            let (built, page) = build(ops.clone(), Texts::repos(), move |push| *sink.borrow_mut() = Some(push));
             let push = |items: Vec<Item>| (feed.borrow().as_ref().expect("subscribed"))(items);
             let inner = page.inner.clone();
             let shown = || inner.stack.visible_child_name().map(|n| n.to_string()).unwrap_or_default();

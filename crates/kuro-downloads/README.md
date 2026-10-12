@@ -16,7 +16,6 @@ notification delivery are injected by the GUI crate.
 | `images` | page file names, extension resolution, resume lookup, integrity count |
 | `index` | source, manga and chapter tree: scan, hourly renew, debounced snapshot |
 | `layout` | folder names and lookups (never creates folders, except `manga_dir`); the startup sweep of stray `_tmp` folders and `.cbz.part` files (T-23a-044) |
-| `data_saver` | data-saver proxy for page requests: Bandwidth Hero and wsrv.nl, off by default (T-23a-017) |
 | `queue_model` | pure queue model of the Download page: sections, stable sort and reverse, moves, series moves, removals (T-25a-020, T-25a-031) |
 | `page` | `DownloadPage` (one `QueueModel` and at most one engine subscription per kind, T-25a-032) and the pure rules of the Download page: FAB, sort menu, row menu, row text and progress phase, empty state, keyboard; `RowProgressGate` (one repaint per 50 ms per row) and `poll_for_pages` (600 ticks of 50 ms, then a warning) for the row loops (T-25a-021 to T-25a-030) |
 | `sanitize` | `build_valid_filename` port and the Windows reserved-name rule |

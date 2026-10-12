@@ -4,11 +4,8 @@
 mod fixtures_gen;
 
 use kuro_backup::format::{decode_file, is_legacy, read_backup_bytes};
-use kuro_backup::restore::extensions::{restore_custom_buttons, restore_manga_repo};
+use kuro_backup::restore::extensions::legacy_repo_urls;
 use kuro_backup::schema::BackupExtension;
-use kuro_db::schema_anime;
-use kuro_db::schema_manga;
-use kuro_db::statements_anime::custom_buttons;
 use serde_json::Value;
 
 fn count(v: &Value, key: &str) -> usize {
@@ -135,32 +132,14 @@ fn q14_preferences_keep_every_key_for_the_restore_rules() {
 }
 
 #[test]
-fn q15_repos_add_once_and_the_two_conflicts_are_errors() {
+fn q15_repo_rows_become_legacy_urls_and_are_not_written_to_a_table() {
     let (dir, _) = generated();
     let b = decode_file(&dir.path().join("repos_dup.tachibk")).unwrap();
-    let dir_db = tempfile::tempdir().unwrap();
-    let c = schema_manga::open(&dir_db.path().join("m.db")).unwrap();
-    let results: Vec<Result<(), String>> = b.manga_extension_repos.iter().map(|r| restore_manga_repo(&c, r)).collect();
-    assert_eq!(results.iter().filter(|r| r.is_err()).count(), 2);
-    assert!(results[1].as_ref().unwrap_err().starts_with("Error Adding Manga Repo: Repo : Already Exists"));
-    // The same repo again is a success with no second row (D11).
-    assert!(restore_manga_repo(&c, &b.manga_extension_repos[0]).is_ok());
-    let rows: i64 = c.query_row("SELECT COUNT(*) FROM extension_repos", [], |r| r.get(0)).unwrap();
-    assert_eq!(rows, 1);
-}
-
-#[test]
-fn q16_two_favourite_buttons_leave_one_favourite() {
-    let (dir, fixtures) = generated();
-    let expected = &fixtures[15].expected;
-    let b = decode_file(&dir.path().join("buttons_two_fav.tachibk")).unwrap();
-    assert_eq!(b.custom_buttons.len(), count(expected, "custom_buttons"));
-    let dir_db = tempfile::tempdir().unwrap();
-    let c = schema_anime::open(&dir_db.path().join("a.db")).unwrap();
-    c.execute("DELETE FROM custom_buttons", []).unwrap();
-    restore_custom_buttons(&c, &b.custom_buttons).unwrap();
-    let favourites = custom_buttons(&c).unwrap().iter().filter(|x| x.is_favorite).count();
-    assert_eq!(favourites, count(expected, "favourites_after_restore"));
+    let urls = legacy_repo_urls(&b);
+    assert!(!urls.is_empty());
+    for r in &b.manga_extension_repos {
+        assert!(urls.contains(&r.base_url), "{}", r.base_url);
+    }
 }
 
 #[test]

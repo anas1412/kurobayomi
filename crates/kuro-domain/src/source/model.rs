@@ -1,5 +1,5 @@
 //! The source value model: visual name, the stable key and the last-used key (`Source.kt`, `AnimeSource.kt`).
-//! Manga and anime share this shape. The data-saver exclusion is a manga flag; an anime source leaves it false.
+//! Manga and anime share this shape.
 
 use super::pin::Pins;
 
@@ -35,12 +35,10 @@ pub struct Source {
     pub is_stub: bool,
     pub pin: Pins,
     pub is_used_last: bool,
-    /// Manga only: the source is left out of data saver. Always false for anime.
-    pub data_saver_excluded: bool,
 }
 
 impl Source {
-    /// A source with the defaults of both constructors: unpinned, not used last, data saver not excluded.
+    /// A source with the defaults of both constructors: unpinned, not used last.
     pub fn new(id: Id, name: &str, lang: &str) -> Self {
         Self {
             id,
@@ -50,7 +48,6 @@ impl Source {
             is_stub: false,
             pin: Pins::UNPINNED,
             is_used_last: false,
-            data_saver_excluded: false,
         }
     }
 
@@ -98,15 +95,5 @@ mod tests {
         assert_eq!(s.pin, Pins::UNPINNED);
         assert!(!s.is_used_last);
         assert!(!s.is_stub && !s.supports_latest);
-    }
-
-    #[test]
-    fn data_saver_exclusion_defaults_to_off_and_keeps_the_value_it_is_given() {
-        let mut source = Source::new(3, "Named", "en");
-        assert!(!source.data_saver_excluded);
-        source.data_saver_excluded = true;
-        let copy = source.clone();
-        assert!(copy.data_saver_excluded);
-        assert_eq!(copy, source);
     }
 }

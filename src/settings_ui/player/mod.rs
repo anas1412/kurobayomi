@@ -1,13 +1,11 @@
 //! Player settings. The root page holds the kept settings (the subtitle and audio languages, the default volume, autoplay
-//! and the mini player) and the links to the pages that stay: Custom buttons, Script editor and
-//! Torrent. The Internal player, Gestures, Decoder, Subtitles, Audio and Advanced pages are cut by the settings diet.
+//! and the mini player) and the link to the Torrent page, which stays. The Internal player, Gestures, Decoder, Subtitles,
+//! Audio, Advanced, Custom buttons and Script editor pages are cut by the settings diet.
 pub mod conf_edit;
 pub mod controls;
-pub mod files;
 pub mod highlight;
 pub mod language;
 pub mod root;
-pub mod scripts;
 pub mod syntax;
 pub mod torrent;
 
@@ -26,9 +24,7 @@ pub struct RootRow {
 }
 
 /// The links that stay on the root page, in order.
-pub const LINK_ROWS: [RootRow; 3] = [
-    RootRow { title: "Custom buttons", subtitle: "Execute lua code with custom buttons", icon: "utilities-terminal-symbolic", target: "settings_player_custom_buttons" },
-    RootRow { title: "Script editor", subtitle: "Edit and create new scripts and script options", icon: "document-edit-symbolic", target: "settings_player_editor" },
+pub const LINK_ROWS: [RootRow; 1] = [
     RootRow { title: "Torrent", subtitle: "TorrServer options", icon: "network-transmit-receive-symbolic", target: "settings_player_torrents" },
 ];
 
@@ -55,12 +51,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn three_link_rows_with_the_spec_targets_in_order() {
+    fn one_link_row_to_the_torrent_page() {
         let targets: Vec<&str> = LINK_ROWS.iter().map(|r| r.target).collect();
-        assert_eq!(targets, ["settings_player_custom_buttons", "settings_player_editor", "settings_player_torrents"]);
+        assert_eq!(targets, ["settings_player_torrents"]);
         let tree = link_rows(Rc::new(|_| {}));
         let Preference::Group(g) = &tree[0] else { panic!("group") };
-        assert_eq!(g.items.len(), 3);
+        assert_eq!(g.items.len(), 1);
     }
 
     #[test]
@@ -78,14 +74,11 @@ mod tests {
     }
 
     #[test]
-    fn every_link_target_is_a_spec_screen_and_the_icons_follow_the_spec_note() {
+    fn every_link_target_is_a_spec_screen() {
         crate::ui::with_spec(|spec| {
             for row in LINK_ROWS {
                 assert!(spec.screen(row.target).is_some(), "{}", row.target);
             }
         });
-        let icons: Vec<&str> = LINK_ROWS.iter().map(|r| r.icon).collect();
-        assert_eq!(icons[0], "utilities-terminal-symbolic", "terminal");
-        assert_eq!(icons[1], "document-edit-symbolic", "edit-note");
     }
 }

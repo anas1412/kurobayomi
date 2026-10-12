@@ -128,16 +128,6 @@ pub fn build_item(
     })
 }
 
-/// Spec rows (page id, title) that have no Linux counterpart: display cutout, the legacy long-strip decoder, the
-/// display profile and Aniyomi's privacy page. [`Registry::build`] leaves them out instead of showing a row that does
-/// nothing.
-pub const ANDROID_ONLY: [(&str, &str); 1] = [("settings_reader", "Show content in cutout area")];
-
-/// Whether the spec row `title` of page `page` is one of [`ANDROID_ONLY`].
-pub fn is_android_only(page: &str, title: &str) -> bool {
-    ANDROID_ONLY.iter().any(|(p, t)| *p == page && *t == title)
-}
-
 /// Settings pages by screen id, each a list of spec groups. Pages without groups are not registered.
 pub struct Registry {
     pages: HashMap<String, Vec<Group>>,
@@ -166,7 +156,7 @@ impl Registry {
         let mut tree = Vec::new();
         for group in groups {
             let mut items = Vec::new();
-            for item in group.items.iter().filter(|item| !is_android_only(id, &item_title(item))) {
+            for item in &group.items {
                 match build_item(store, id, item, navigate) {
                     Ok(built) => items.push(built),
                     Err(Skip::Unsupported(what)) => {
@@ -232,23 +222,6 @@ mod tests {
     }
 
     #[test]
-    fn the_android_only_rows_exist_in_the_spec_and_are_left_out_of_the_pages() {
-        let spec = Spec::load();
-        let registry = Registry::new(&spec);
-        let store = PrefStore::in_memory();
-        for (page, title) in ANDROID_ONLY {
-            let in_spec = spec.screens[page].groups.iter().flat_map(|g| &g.items).any(|i| item_title(i) == title);
-            assert!(in_spec, "{page}: {title} is a spec row, so this list is not stale");
-            let tree = registry.build(page, &store, &nav()).expect("registered page");
-            let shown = tree.iter().any(|entry| match entry {
-                Preference::Item(i) => i.title() == title,
-                Preference::Group(g) => g.items.iter().any(|i| i.title() == title),
-            });
-            assert!(!shown, "{page}: {title} is not shown");
-        }
-    }
-
-    #[test]
     fn no_spec_title_has_a_stray_space_that_would_stop_a_typed_row_from_replacing_it() {
         let spec = Spec::load();
         for screen in spec.screens.values() {
@@ -258,5 +231,4 @@ mod tests {
             }
         }
     }
-
 }

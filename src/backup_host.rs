@@ -19,10 +19,9 @@ use kuro_backup::restore::progress::ProgressEvent;
 use kuro_backup::restore::screen::{CLOSE_CHOICES, CloseAction, CloseChoice, StopFlag, on_close_choice, on_close_requested};
 use kuro_backup::schema::Backup;
 use kuro_backup::text::{self, Text};
-use kuro_data::extension_repo::ExtensionRepoRepo;
-use kuro_data::extension_store::ExtensionStoreRepo;
 use kuro_i18n::{MsgKey, tr};
 use kuro_platform::notifier::Notifier;
+use kuro_prefs::source::SourcePrefs;
 use kuro_platform::paths::Paths as _;
 
 use crate::backup_run::{LegacyImport, Library, run_restore};
@@ -205,12 +204,7 @@ fn restore_on_worker(
 ) -> Result<RestoreEnd, String> {
     let paths = kuro_platform::linux::LinuxPaths::system().map_err(|e| e.to_string())?;
     let http = BlockingHttp::shared();
-    let legacy = LegacyImport {
-        anime: ExtensionStoreRepo::new(library.anime.clone()),
-        manga: ExtensionRepoRepo::new(library.manga.clone()),
-        store_http: &*http,
-        repo_http: &*http,
-    };
+    let legacy = LegacyImport { links: SourcePrefs::new(library.prefs.clone()).manga_extension_repos, repo_http: &*http };
     run_restore(library, &paths.data_dir(), &paths.log_dir(), backup, options, stop, &mut |e| drop(tx.send_blocking(Msg::Progress(e))), Some(legacy))
 }
 

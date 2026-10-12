@@ -16,12 +16,11 @@ pub enum Section {
     MangaEntries,
     AnimeStores,
     MangaRepos,
-    CustomButtons,
     Extensions,
 }
 
 /// Run order. Categories first, so entries see the created categories (R-01, R-02).
-pub const ORDER: [Section; 9] = [
+pub const ORDER: [Section; 8] = [
     Section::Categories,
     Section::AppSettings,
     Section::SourceSettings,
@@ -29,7 +28,6 @@ pub const ORDER: [Section; 9] = [
     Section::MangaEntries,
     Section::AnimeStores,
     Section::MangaRepos,
-    Section::CustomButtons,
     Section::Extensions,
 ];
 
@@ -54,7 +52,6 @@ pub fn plan(opts: RestoreOptions, c: Counts) -> Vec<(Section, u32)> {
         (Section::MangaEntries, when(opts.library_entries, c.manga_entries)),
         (Section::AnimeStores, when(opts.extension_stores, c.anime_stores)),
         (Section::MangaRepos, when(opts.extension_stores, c.manga_repos)),
-        (Section::CustomButtons, when(opts.custom_buttons, 1)),
         (Section::Extensions, when(opts.extensions, 1)),
     ]
 }
@@ -183,9 +180,8 @@ mod tests {
             Section::MangaEntries,
             Section::AnimeStores,
             Section::MangaRepos,
-            Section::CustomButtons,
         ], "extensions is off by default");
-        assert_eq!(ORDER.len(), 9);
+        assert_eq!(ORDER.len(), 8);
     }
 
     #[test]

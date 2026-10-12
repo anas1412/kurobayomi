@@ -95,13 +95,11 @@ fn x101_current_file_restores_seasons_buttons_and_stores() {
     assert_eq!(counts(&backup).anime_entries as usize, expected(&fixtures, 2, "anime"));
     assert_eq!(count(&dbs.anime, "animes"), expected(&fixtures, 2, "anime"));
     assert_eq!(count(&dbs.manga, "mangas"), expected(&fixtures, 2, "manga"));
-    assert_eq!(statements_anime::extension_store_count(&dbs.anime).unwrap() as usize, expected(&fixtures, 2, "extension_stores"));
-
-    // X-108: two favourites in the file, one stored favourite.
-    let buttons = statements_anime::custom_buttons(&dbs.anime).unwrap();
-    let imported: Vec<_> = buttons.iter().collect();
-    assert_eq!(imported.len(), expected(&fixtures, 2, "custom_buttons"));
-    assert_eq!(imported.iter().filter(|b| b.is_favorite).count(), expected(&fixtures, 2, "favourite_buttons"));
+    // The file carries stores and buttons, but the restore writes neither: stores become links, buttons are not restored.
+    assert_eq!(counts(&backup).anime_stores as usize, expected(&fixtures, 2, "extension_stores"));
+    assert_eq!(backup.custom_buttons.len(), expected(&fixtures, 2, "custom_buttons"));
+    assert_eq!(statements_anime::extension_store_count(&dbs.anime).unwrap(), 0);
+    assert!(statements_anime::custom_buttons(&dbs.anime).unwrap().is_empty());
 
     // Seasons point at the database id of their root.
     let roots = backup.anime.iter().filter(|a| a.parent_id.is_none()).count();
@@ -273,26 +271,29 @@ fn x106_preferences_skip_app_state_and_a_type_mismatch() {
 }
 
 #[test]
-fn x107_repo_conflicts_are_logged_in_order_and_one_row_stays() {
+fn x107_repo_rows_are_not_written_so_there_are_no_conflicts_and_their_urls_become_links() {
     let dir = fixtures_dir();
-    let fixtures = fixtures_gen::all();
     let mut dbs = fresh();
-    let run = restore(&mut dbs, &dir.path().join("repos_dup.tachibk"), all_on(), &never);
-    assert_eq!(run.errors.len(), expected(&fixtures, 14, "errors_in_order"));
-    assert!(run.errors.iter().all(|e| e.message.starts_with("Error Adding Manga Repo")));
-    assert_eq!(count(&dbs.manga, "extension_repos"), expected(&fixtures, 14, "rows_after_restore"));
+    let path = dir.path().join("repos_dup.tachibk");
+    let run = restore(&mut dbs, &path, all_on(), &never);
+    assert!(run.errors.is_empty(), "{:?}", run.errors);
+    assert_eq!(count(&dbs.manga, "extension_repos"), 0);
+    let backup = decode_file(&path).unwrap();
+    let urls = kuro_backup::restore::extensions::legacy_repo_urls(&backup);
+    assert!(backup.manga_extension_repos.iter().all(|r| urls.contains(&r.base_url)));
 }
 
 #[test]
-fn x108_two_favourite_buttons_leave_one_favourite() {
+fn x108_custom_buttons_in_the_file_are_not_restored() {
     let dir = fixtures_dir();
     let fixtures = fixtures_gen::all();
     let mut dbs = fresh();
     dbs.anime.execute("DELETE FROM custom_buttons", []).unwrap();
+    let path = dir.path().join("buttons_two_fav.tachibk");
+    // The file still carries the two favourite buttons; the restore no longer writes custom buttons at all.
+    assert_eq!(decode_file(&path).unwrap().custom_buttons.len(), expected(&fixtures, 15, "custom_buttons"));
     restore_fixture(&mut dbs, dir.path(), "buttons_two_fav.tachibk");
-    let buttons = statements_anime::custom_buttons(&dbs.anime).unwrap();
-    assert_eq!(buttons.len(), expected(&fixtures, 15, "custom_buttons"));
-    assert_eq!(buttons.iter().filter(|b| b.is_favorite).count(), expected(&fixtures, 15, "favourites_after_restore"));
+    assert!(statements_anime::custom_buttons(&dbs.anime).unwrap().is_empty());
 }
 
 #[test]

@@ -1546,60 +1546,6 @@ pref_category_hide_hidden = Hide hidden categories from categories and storage s
 pref_update_anime_release_grace_period = Expected anime release grace period
 
 # source: i18n-aniyomi
-data_saver_exclude = Exclude from data saver
-
-# source: i18n-aniyomi
-data_saver_stop_exclude = Stop excluding from data saver
-
-# source: i18n-aniyomi
-data_saver = Data Saver
-
-# source: i18n-aniyomi
-data_saver_summary = Compress images before downloading or loading in reader
-
-# source: i18n-aniyomi
-data_saver_downloader = Use data saver in the downloader
-
-# source: i18n-aniyomi
-data_saver_ignore_jpeg = Ignore Jpeg Images
-
-# source: i18n-aniyomi
-data_saver_ignore_gif = Ignore Gif Animations
-
-# source: i18n-aniyomi
-data_saver_image_quality = Image Quality
-
-# source: i18n-aniyomi
-data_saver_image_quality_summary = Higher values mean that a higher percentage of the image quality is saved, but it also means the file size is larger, 80 percent is a good median between file size and image quality
-
-# source: i18n-aniyomi
-data_saver_image_format = Compress to Jpeg
-
-# source: i18n-aniyomi
-data_saver_image_format_summary_on = The Jpeg file size is considerably smaller then Webp is(meaning more data is saved), but it makes the images lose more quality as well.{"\u000A"}Currently compresses to Jpeg
-
-# source: i18n-aniyomi
-data_saver_image_format_summary_off = The Jpeg file size is considerably smaller then Webp is(meaning more data is saved), but it makes the images lose more quality as well.{"\u000A"}Currently compresses to Webp
-
-# source: i18n-aniyomi
-data_saver_color_bw = Convert to Black And White
-
-# source: i18n-aniyomi
-bandwidth_hero = Bandwidth Hero (requires a Bandwidth Hero Proxy server)
-
-# source: i18n-aniyomi
-wsrv = wsrv.nl
-
-# source: i18n-aniyomi
-resmush = resmush.it
-
-# source: i18n-aniyomi
-bandwidth_data_saver_server = Bandwidth Hero Proxy Server
-
-# source: i18n-aniyomi
-data_saver_server_summary = Put Bandwidth Hero Proxy server url here
-
-# source: i18n-aniyomi
 download_slots_info = Will only download concurrently from self-hosted or unmetered sources
 
 # source: i18n-aniyomi

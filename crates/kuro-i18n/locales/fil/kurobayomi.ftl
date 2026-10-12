@@ -714,42 +714,6 @@ pref_category_hide_hidden = Itago ang nakatagong kategorya mula sa screen ng mga
 
 pref_update_anime_release_grace_period = Inaasahan na paglabas ng anime
 
-data_saver_exclude = Hindi isali sa data saver
-
-data_saver_stop_exclude = Itigil ang di-pagsali mula sa data saver
-
-data_saver = Data Saver
-
-data_saver_summary = I-compress ang mga imahe bago mag-download o mag-load sa reader
-
-data_saver_downloader = Gumamit ng data saver sa downloader
-
-data_saver_ignore_jpeg = Di-pansinin ang mga imaheng Jpeg
-
-data_saver_ignore_gif = Di-pansinin ang mga Gif Animation
-
-data_saver_image_quality = Quality ng Imahe
-
-data_saver_image_quality_summary = Ang mas mataas na halaga ay nangangahulugan na ang isang mas mataas na porsyento ng kalidad ng imahe ay nai-save, ngunit nangangahulugan din ito na ang laki ng file ay mas malaki, 80 porsyento ay isang magandang median sa pagitan ng laki ng file at kalidad ng imahe
-
-data_saver_image_format = I-compress sa Jpeg
-
-data_saver_image_format_summary_on = Ang laki ng file na Jpeg ay mas maliit kaysa sa Webp ay (ibig sabihin, mas maraming data ang nai-save), ngunit ginagawa nitong mas mawalan din ng kalidad ang mga imahe.{"\u000A"}{"\u000A"}Kasalukuyang nag-compress sa Jpeg
-
-data_saver_image_format_summary_off = Ang laki ng file na Jpeg ay mas maliit kaysa sa Webp ay (ibig sabihin, mas maraming data ang nai-save), ngunit ginagawa nitong mas mawalan din ng kalidad ang mga imahe.{"\u000A"}{"\u000A"}Kasalukuyang nagko-compress sa Webp
-
-data_saver_color_bw = I-convert sa Itim at Puti
-
-bandwidth_hero = Bandwidth Hero (kinakailangan ng Bandwidth Hero Proxy server)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Bandwidth Hero Proxy Server
-
-data_saver_server_summary = Ilagay ang server url ng Bandwidth Hero Proxy dito
-
 download_slots_info = Magda-download lang nang sabay-sabay mula sa self-host o hindi nasusukat na mga source
 
 unseen = Hindi pa nakikita

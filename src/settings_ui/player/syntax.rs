@@ -1,16 +1,9 @@
-//! The syntax colours of the code editor and the conf dialogs as text tags (task T-48a-039). The rules and their
+//! The syntax colours of the conf dialogs as text tags (task T-48a-039). The rules and their
 //! colours are in `highlight.rs`; this turns their byte spans into one colour per character and paints a
 //! `gtk::TextBuffer` with them. Where two spans overlap, the one found later wins, as in the Kotlin app.
 use gtk::prelude::*;
 
 use super::highlight::{self, Span};
-
-/// The two rule sets.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Lang {
-    Lua,
-    Conf,
-}
 
 /// The coloured runs of `text` as `(start, end, colour)` in characters, in text order and never overlapping. Where
 /// spans overlap the later span in `spans` takes the characters.
@@ -47,23 +40,20 @@ fn tag(buffer: &gtk::TextBuffer, color: &str) -> gtk::TextTag {
         .unwrap_or_else(|| buffer.create_tag(Some(color), &[("foreground", &color)]).expect("a new tag"))
 }
 
-fn paint(buffer: &gtk::TextBuffer, lang: Lang) {
+fn paint(buffer: &gtk::TextBuffer) {
     let (start, end) = buffer.bounds();
     buffer.remove_all_tags(&start, &end);
     let text = buffer.text(&start, &end, false);
-    let spans = match lang {
-        Lang::Lua => highlight::lua(&text),
-        Lang::Conf => highlight::conf(&text),
-    };
+    let spans = highlight::conf(&text);
     for (from, to, color) in runs(&text, &spans) {
         buffer.apply_tag(&tag(buffer, color), &buffer.iter_at_offset(from), &buffer.iter_at_offset(to));
     }
 }
 
 /// Colours `buffer` now and again after every edit.
-pub fn attach(buffer: &gtk::TextBuffer, lang: Lang) {
-    paint(buffer, lang);
-    buffer.connect_changed(move |buffer| paint(buffer, lang));
+pub fn attach(buffer: &gtk::TextBuffer) {
+    paint(buffer);
+    buffer.connect_changed(paint);
 }
 
 #[cfg(test)]
@@ -95,10 +85,10 @@ mod tests {
     }
 
     #[test]
-    fn the_runs_of_a_real_lua_line_cover_the_keyword_and_the_comment() {
-        let text = "local x -- hi";
-        let found = runs(text, &highlight::lua(text));
-        assert!(found.contains(&(0, 5, color::KEYWORD)));
-        assert!(found.contains(&(8, 13, color::COMMENT)));
+    fn the_runs_of_a_real_conf_line_cover_the_key_and_the_comment() {
+        let text = "hwdec=auto # hi";
+        let found = runs(text, &highlight::conf(text));
+        assert!(found.contains(&(0, 5, color::LITERAL)));
+        assert!(found.contains(&(11, 15, color::COMMENT)));
     }
 }

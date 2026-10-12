@@ -103,7 +103,7 @@ impl Page {
         let text = gtk::Label::new(Some(&format!("{} · {}", item.title, item.item_name)));
         text.set_xalign(0.0);
         text.set_hexpand(true);
-        let status = gtk::Label::new(Some(&status_line(item.state, item.progress)));
+        let status = gtk::Label::new(Some(&status_line(item)));
         let cancel = gtk::Button::with_label("Cancel");
         let (queues, kind, id) = (self.queues.clone(), item.kind, item.item_id);
         cancel.connect_clicked(move |_| remove_row(&queues, kind, id));
@@ -144,11 +144,15 @@ fn row_key(item: &QueueItem) -> String {
     format!("{:?}:{}:{}:{}", item.kind, item.item_id, item.state as u8, item.progress)
 }
 
-/// The status text beside a row: the percent while downloading, else the state.
-fn status_line(state: DownloadState, progress: i64) -> String {
-    match state {
-        DownloadState::Downloading if progress > 0 => format!("{progress}%"),
-        DownloadState::Downloading => "Downloading…".to_owned(),
+/// The status text beside a row while it downloads: pages done of the list for a manga (its progress is a sum of page
+/// percents, so it is not a percent), the percent for an episode, else "Downloading…". Otherwise the state.
+fn status_line(item: &QueueItem) -> String {
+    match item.state {
+        DownloadState::Downloading => match (item.kind, item.pages_total) {
+            (EntryKind::Manga, Some(total)) => format!("{} of {total} pages", item.pages_done),
+            (EntryKind::Anime, _) if item.progress > 0 => format!("{}%", item.progress),
+            _ => "Downloading…".to_owned(),
+        },
         DownloadState::Queue => "Queued".to_owned(),
         DownloadState::Error => "Failed".to_owned(),
         DownloadState::Downloaded => "Downloaded".to_owned(),
@@ -160,12 +164,32 @@ fn status_line(state: DownloadState, progress: i64) -> String {
 mod tests {
     use super::*;
 
+    fn item(kind: EntryKind, state: DownloadState, progress: i64, pages: Option<(u32, u32)>) -> QueueItem {
+        QueueItem {
+            kind,
+            item_id: 1,
+            parent_id: 1,
+            source_id: 1,
+            source_name: "Source".into(),
+            title: "Title".into(),
+            item_name: "Name".into(),
+            date_upload: 0,
+            number: 1.0,
+            state,
+            pages_done: pages.map_or(0, |(done, _)| done),
+            pages_total: pages.map(|(_, total)| total),
+            progress,
+        }
+    }
+
     #[test]
-    fn a_row_shows_the_percent_while_it_downloads_and_its_state_otherwise() {
-        assert_eq!(status_line(DownloadState::Downloading, 40), "40%");
-        assert_eq!(status_line(DownloadState::Downloading, 0), "Downloading…");
-        assert_eq!(status_line(DownloadState::Queue, 0), "Queued");
-        assert_eq!(status_line(DownloadState::Error, 0), "Failed");
-        assert_eq!(status_line(DownloadState::Downloaded, 100), "Downloaded");
+    fn a_row_shows_its_progress_while_it_downloads_and_its_state_otherwise() {
+        assert_eq!(status_line(&item(EntryKind::Anime, DownloadState::Downloading, 40, None)), "40%");
+        assert_eq!(status_line(&item(EntryKind::Anime, DownloadState::Downloading, 0, None)), "Downloading…");
+        assert_eq!(status_line(&item(EntryKind::Manga, DownloadState::Downloading, 250, Some((2, 5)))), "2 of 5 pages", "a manga row counts pages, not the page percent sum");
+        assert_eq!(status_line(&item(EntryKind::Manga, DownloadState::Downloading, 0, None)), "Downloading…");
+        assert_eq!(status_line(&item(EntryKind::Manga, DownloadState::Queue, 0, None)), "Queued");
+        assert_eq!(status_line(&item(EntryKind::Anime, DownloadState::Error, 0, None)), "Failed");
+        assert_eq!(status_line(&item(EntryKind::Manga, DownloadState::Downloaded, 0, None)), "Downloaded");
     }
 }

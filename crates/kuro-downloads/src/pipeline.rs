@@ -18,7 +18,6 @@ use tracing::error;
 use crate::error::error_chain;
 
 use crate::comicinfo::{ComicInfo, FILE_NAME, to_xml, web_value};
-use crate::data_saver::DataSaver;
 use crate::error::DownloadError;
 use crate::images::{
     PageImageCache, copy_from_cache, find_finished, is_complete, page_digits, page_stem, resolve_extension,
@@ -72,8 +71,6 @@ pub struct PipelineCtx {
     pub split_tall_images: bool,
     /// Part height for the tall split, `2 * max(monitor)` from GDK, or `DEFAULT_OPTIMAL_HEIGHT`.
     pub optimal_height: u32,
-    /// Data-saver proxy for the page requests (T-23a-017). The default fetches the original URL.
-    pub data_saver: DataSaver,
     /// Shared speed limit of the downloader (T-23a-015).
     pub speed: Arc<crate::throttle::SpeedLimiter>,
     /// `save_chapter_as_cbz`: pack the finished chapter as a `.cbz` instead of keeping the folder (T-23a-022).
@@ -411,8 +408,7 @@ async fn stream_to_file(
     url: &str,
     partial: &Path,
 ) -> Result<(Option<String>, Vec<u8>), DownloadError> {
-    let request = ctx.data_saver.request_url(source.id(), url);
-    let mut response = source.fetch_image(&request).await?;
+    let mut response = source.fetch_image(url).await?;
     let total = response.content_length.filter(|t| *t > 0);
     let mut file = tokio::fs::File::create(partial).await?;
     let mut head = Vec::with_capacity(HEAD_LEN);
@@ -497,7 +493,6 @@ mod tests {
             page_cache: None,
             split_tall_images: false,
             optimal_height: crate::images::DEFAULT_OPTIMAL_HEIGHT,
-            data_saver: DataSaver::default(),
             speed: Arc::new(crate::throttle::SpeedLimiter::new(None)),
             save_as_cbz: false,
         }
@@ -795,7 +790,6 @@ mod cache_and_split_tests {
             page_cache: cache,
             split_tall_images: true,
             optimal_height: 2000,
-            data_saver: DataSaver::default(),
             speed: Arc::new(crate::throttle::SpeedLimiter::new(None)),
             save_as_cbz: false,
         };

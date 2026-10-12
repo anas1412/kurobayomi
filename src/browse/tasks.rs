@@ -87,6 +87,16 @@ impl<E: Send + 'static> PageTasks<E> {
     }
 }
 
+impl<E> Drop for PageTasks<E> {
+    /// Closes the channel here, on the thread that owns the page. The receiver's waker is a GLib source: if the last
+    /// sender were dropped by an aborted loader on a tokio thread, `close` would wake it there and could drop the
+    /// main context (and the ThreadGuard-ed consumer future in it) off the GTK thread. Once closed, loaders dropping
+    /// their senders notify nobody.
+    fn drop(&mut self) {
+        self.tx.close();
+    }
+}
+
 impl<E: Send + 'static> Default for PageTasks<E> {
     fn default() -> Self {
         Self::new()

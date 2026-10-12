@@ -8,6 +8,7 @@ use std::sync::Arc;
 use gtk::prelude::*;
 use kuro_domain::kind::EntryKind;
 use kuro_prefs::prefs::Prefs;
+use kuro_prefs::source::SourcePrefs;
 
 use crate::pref_model::model::{Preference, PreferenceItem};
 use crate::pref_model::page;
@@ -17,8 +18,6 @@ use crate::settings_ui::category::Category;
 use crate::settings_ui::merge::merge;
 use crate::settings_ui::tracker_host;
 use crate::settings_ui::{about, appearance, browse, cache, chooser, downloads, library, library_export, maintenance, player, reader, rows, search, storage, tracking, usage, view};
-use kuro_data::extension_repo::ExtensionRepoRepo;
-use kuro_data::extension_store::ExtensionStoreRepo;
 
 /// The settings ids this module builds.
 pub fn handles(id: &str) -> bool {
@@ -28,9 +27,6 @@ pub fn handles(id: &str) -> bool {
             | "settings_library"
             | "settings_reader"
             | "settings_player"
-            | "settings_player_custom_buttons"
-            | "settings_player_editor"
-            | "settings_player_code_editor"
             | "settings_browse"
             | "settings_search"
             | "settings_data_storage"
@@ -195,12 +191,11 @@ pub fn tree(id: &str) -> Vec<Preference> {
     tree_with(id, &prefs, &anime, &manga, repo_counts())
 }
 
-/// The stores and repos the Browse rows count (task T-47a-062), read from the app's databases.
+/// The repository links the Browse row counts (task T-47a-062), read from the one repository list.
 fn repo_counts() -> browse::RepoCounts {
     let app = crate::data::app();
-    let anime = ExtensionStoreRepo::new(app.anime_db.clone()).count().unwrap_or(0);
-    let manga = ExtensionRepoRepo::new(app.manga_db.clone()).all().map_or(0, |repos| repos.len() as i64);
-    browse::RepoCounts { anime, manga }
+    let repos = SourcePrefs::new(app.base.store().clone()).manga_extension_repos.get().len() as i64;
+    browse::RepoCounts { repos }
 }
 
 /// A page of loose typed rows: the spec page has no group titles on these rows, and the typed rows cover all of them.
@@ -342,9 +337,6 @@ pub fn body(id: &str) -> Option<Built> {
         "settings_player" => player::root::body(&prefs()),
         "settings_player_torrents" => loose_page(id, player::torrent::page_rows(&prefs())),
         "settings_downloads" => downloads_page(),
-        "settings_player_custom_buttons" => player::scripts::buttons_page(),
-        "settings_player_editor" => player::scripts::editor_page(),
-        "settings_player_code_editor" => player::scripts::code_editor_page(),
         "settings_browse" => browse_page(),
         "settings_search" => search::page(),
         "settings_data_storage" => data_storage_page(),
@@ -366,9 +358,6 @@ mod tests {
             "settings_library",
             "settings_reader",
             "settings_player",
-            "settings_player_custom_buttons",
-            "settings_player_editor",
-            "settings_player_code_editor",
             "settings_player_torrents",
             "settings_downloads",
             "settings_browse",
@@ -472,24 +461,16 @@ mod tests {
             let dir = kuro_testkit::TempDir::new().expect("a temporary folder");
             crate::data::install(crate::data::open_in(dir.path()).expect("fresh data")).expect("installed");
             let _nav = crate::testing::nav();
-            // pages whose rows come later or only on demand: a live list that loads, a search before a query, a
-            // script editor with no file open
+            // pages whose rows come later or only on demand: a live list that loads, a search before a query
             let may_be_empty = [
                 "settings_search",
-                "settings_player_custom_buttons",
-                "settings_player_editor",
-                "settings_player_code_editor",
-                "settings_anime_extension_stores",
-                "settings_manga_extension_repos",
+                "settings_extension_repos",
             ];
             let ids = [
                 "settings_appearance",
                 "settings_library",
                 "settings_reader",
                 "settings_player",
-                "settings_player_custom_buttons",
-                "settings_player_editor",
-                "settings_player_code_editor",
                 "settings_player_torrents",
                 "settings_downloads",
                 "settings_browse",
@@ -516,7 +497,7 @@ mod tests {
                 assert!(rows_under(&split) > 8, "the sidebar and the open page");
             }
             let player = crate::settings_ui::player::root::body(&prefs()).expect("the player page");
-            assert!(rows_under(&player.content) >= 7, "four kept settings and three links");
+            assert!(rows_under(&player.content) >= 5, "four kept settings and one link");
 
             // the split view: one sidebar (Player inside it shows its plain list), the open page's row selected, and a
             // selected row swaps the page beside it
@@ -589,13 +570,11 @@ mod tests {
             assert!(display.iter().any(|t| t == title), "{title} is on the Display group");
         }
         let browse = tree_with("settings_browse", &prefs, &[], &[], browse::RepoCounts::default());
-        assert_eq!(group_titles(&browse, "Sources"), ["Source languages", "Anime extension repos", "Manga extension repos"]);
+        assert_eq!(group_titles(&browse, "Sources"), ["Source languages", "Extension repos"]);
         let library = tree_with("settings_library", &prefs, &[], &[], browse::RepoCounts::default());
         assert!(group_titles(&library, "Season").is_empty(), "the season switches are cut");
         assert!(!group_titles(&library, "Categories").iter().any(|t| t == "Per-category settings for sort"), "per-category sort is cut");
         assert!(group_titles(&library, "Global update").iter().all(|t| t != "Smart update" && t != "Automatic updates device restrictions"));
-        let downloads = tree_with("settings_downloads", &prefs, &[], &[], browse::RepoCounts::default());
-        assert!(group_titles(&downloads, "Data Saver").is_empty(), "Data Saver is cut");
     }
 
     /// The key a row writes, when it has one a test can read. Every typed row that holds a pref is covered.

@@ -454,42 +454,6 @@ pref_category_hide_hidden = 카테고리 화면에서 카테고리 숨기기
 
 pref_update_anime_release_grace_period = 예상 애니메이션 예정 기간
 
-data_saver_exclude = 데이터 절약에서 제외
-
-data_saver_stop_exclude = 데이터 절약에서 제외 중지
-
-data_saver = 데이터 절약
-
-data_saver_summary = 다운로드/로딩 시 이미지 압축
-
-data_saver_downloader = 다운로드 시 데이터 절약 사용
-
-data_saver_ignore_jpeg = Jpeg 이미지 무시
-
-data_saver_ignore_gif = Gif 애니메이션 무시
-
-data_saver_image_quality = 이미지 품질
-
-data_saver_image_quality_summary = 값이 높으면 이미지 품질이 좋게 저장되지만 파일 크기가 커지게 됩니다. 80%는 좋은 파일 크기와 이미지 품질 사이의 중간값입니다
-
-data_saver_image_format = Jpeg로 압축
-
-data_saver_image_format_summary_on = Jpeg 파일은 Webp보다 파일 사이즈가 작지만(더 많은 데이터가 절약), 이미지의 품질이 더 떨어집니다.{"\u000A"}{"\u000A"}Jpeg로 압축을 진행합니다
-
-data_saver_image_format_summary_off = Jpeg 파일은 Webp보다 파일 사이즈가 작지만(더 많은 데이터가 절약), 이미지의 품질이 더 떨어집니다.{"\u000A"}{"\u000A"}Webp로 압축을 진행합니다
-
-data_saver_color_bw = 흑백으로 변환
-
-bandwidth_hero = Bandwidth Hero (Bandwidth Hero 프록시 서버가 필요합니다)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Bandwidth Hero 프록시 서버
-
-data_saver_server_summary = Bandwidth Hero 프록시 서버 URL 주소를 입력해 주세요
-
 download_slots_info = 자체 호스팅 또는 무제한 소스에서만 동시에 다운로드됩니다
 
 unseen = 보지 않음

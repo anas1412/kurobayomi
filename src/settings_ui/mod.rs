@@ -29,7 +29,6 @@ pub mod changelog;
 pub mod chooser;
 pub mod clipboard;
 pub mod cookie_import;
-pub mod data_saver;
 pub mod downloads;
 pub mod jobs;
 pub mod lang;

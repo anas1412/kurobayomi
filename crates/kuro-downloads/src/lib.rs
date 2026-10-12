@@ -5,8 +5,8 @@
 //! notification delivery are injected through [`ManagerParams`] and the [`ProcessHold`] and
 //! [`notify::NotificationSink`] traits.
 //!
-//! Dropped (user loss stated): the resmush.it data-saver service (D-DL-09, T-23a-017). Its Kotlin code is plain HTTP and
-//! reads JSON by string search. Bandwidth Hero and wsrv.nl stay, off unless the user chose one.
+//! Dropped (settings diet, docs/design/settings-diet.md): the data-saver image proxy (T-23a-017, D-DL-09), resmush.it,
+//! Bandwidth Hero and wsrv.nl alike. Page requests use the source's image URL as it is.
 //!
 //! Dropped Android machinery (T-23a-038): WorkManager and its foreground service types, FlexibleAdapter, the Voyager
 //! ScreenModel, Compose AndroidView, MediaScannerConnection, and the SAF and UniFile document trees. Nothing visible is
@@ -24,7 +24,6 @@
 pub mod anime;
 pub mod archive;
 pub mod comicinfo;
-pub mod data_saver;
 pub mod delete;
 pub mod download_prefs;
 pub mod downloader;

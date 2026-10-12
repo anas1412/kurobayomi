@@ -59,7 +59,7 @@ impl AnimeSourcesPage {
     pub fn new(nav: AnimeSourcesNav, ready: watch::Receiver<bool>) -> Self {
         let column = crate::ui::column();
         let scroller = crate::ui::scrolled(&column);
-        let empty = sources_empty(crate::browse::route::BrowseKind::Anime);
+        let empty = sources_empty();
         let stack = gtk::Stack::new();
         stack.set_vexpand(true);
         stack.add_named(&spinner_row(), Some("spinner"));

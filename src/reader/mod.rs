@@ -39,7 +39,6 @@
 //! - The reader settings sheet (`settings_window`) is built from the preference keys directly, not from the spec items of
 //!   `src/spec.rs`: the spec `Item` has no preference key and `ui::item_row` binds no `ReaderPrefs`. Each row reads its default,
 //!   writes its key straight away. The settings diet kept six reader settings and cut the dependent rows, so no row is disabled by a rule.
-//! - The data saver is cut (docs/design/settings-diet.md): the HTTP page loader requests every image as it is.
 //! - The reader's top bar is the shared header of `widgets::page_header`, the same design as the player's. Pages open at the
 //!   left-to-right default; right to left is a per-manga choice that the reader remembers. The page slider sits at the bottom.
 //! - A chapter whose page list is still being fetched shows the spinner and is asked for again (`source_pages::is_pending`);

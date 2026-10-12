@@ -402,6 +402,29 @@ mod tests {
         context.with_thread_default(|| body(&context)).expect("own main context");
     }
 
+    /// Dropping the runner and then the runtime with fetches still pending (no abort first) must not drop or wake a GLib
+    /// object on a tokio thread (the intermittent SIGABRT "Value dropped on a different thread").
+    #[test]
+    fn dropping_the_runner_and_the_runtime_with_a_search_pending_stays_on_the_gtk_thread() {
+        let rt = runtime();
+        let entered = rt.enter();
+        let context = glib::MainContext::new();
+        let rig = context
+            .with_thread_default(|| {
+                let rig = rig(3);
+                rig.runner.submit("pending");
+                assert!(pump(&context, || rig.started.load(Ordering::SeqCst) == 3), "all three are waiting on the gate");
+                rig
+            })
+            .expect("own main context");
+        let live = Arc::clone(&rig.live);
+        drop(rig);
+        drop(entered);
+        drop(rt);
+        assert_eq!(live.load(Ordering::SeqCst), 0, "the pending fetches were cancelled");
+        drop(context);
+    }
+
     #[test]
     fn at_most_five_fetches_are_in_flight_and_every_result_is_applied_by_the_gtk_thread() {
         with_loop(|context| {

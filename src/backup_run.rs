@@ -2,7 +2,7 @@
 //! preferences, and the `kurobayomi --run-backup` entry point (T-21a-041, T-22a-041). The GUI half is `backup_host`.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -22,14 +22,15 @@ use kuro_backup::restore::screen::StopFlag;
 use kuro_backup::restore::extensions::legacy_repo_urls;
 use kuro_backup::schema::Backup;
 use kuro_backup::validate::TrackerRegistry;
-use kuro_data::extension_repo::ExtensionRepoRepo;
-use kuro_data::extension_store::ExtensionStoreRepo;
 use kuro_db::handle::Db;
 use kuro_db::{schema_anime, schema_manga};
 use kuro_domain::extension_repo::{HttpGet, import_legacy_repos};
-use kuro_domain::extension_store::StoreHttp;
 use kuro_platform::paths::Paths;
+use kuro_prefs::pref::Pref;
+use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
+
+use crate::pref_model::stores_backend::{Ops as _, RepoOps};
 
 /// `backup_interval` (hours, default 12) and the two app-state stamps of the automatic backup.
 pub(crate) const INTERVAL_KEY: &str = "backup_interval";
@@ -231,12 +232,10 @@ pub fn run_backup_cli() -> u8 {
     exit_status(&outcome)
 }
 
-/// What a finished restore also imports: the old repo URL lists of the backup, after the user chose to restore the
-/// extension stores (T-19a-022, T-18a-019).
+/// What a finished restore also imports: the old repo addresses of the backup, as repository links, after the user
+/// chose to restore the extension stores (T-19a-022, T-18a-019).
 pub struct LegacyImport<'a> {
-    pub anime: ExtensionStoreRepo,
-    pub manga: ExtensionRepoRepo,
-    pub store_http: &'a dyn StoreHttp,
+    pub links: Pref<BTreeSet<String>>,
     pub repo_http: &'a dyn HttpGet,
 }
 
@@ -252,7 +251,7 @@ pub fn run_restore(
     emit: &mut dyn FnMut(ProgressEvent),
     legacy: Option<LegacyImport<'_>>,
 ) -> Result<RestoreEnd, String> {
-    let legacy_urls = (opts.extension_stores).then(|| legacy_repo_urls(&backup.preferences));
+    let legacy_urls = (opts.extension_stores).then(|| legacy_repo_urls(&backup));
     let (manga_entries, anime_entries) = (backup.manga.len(), backup.anime.len());
     let mut manga = schema_manga::open(&schema_manga::db_path(data_dir)).map_err(|e| e.to_string())?;
     let mut anime = schema_anime::open(&schema_anime::db_path(data_dir)).map_err(|e| e.to_string())?;
@@ -296,12 +295,10 @@ pub fn run_restore(
             library.prefs.set_raw(&format!("{name}.{key}"), value);
         }
     }
-    if let (Some(legacy), Some((anime_urls, manga_urls)), RestoreEnd::Completed(_)) = (legacy, legacy_urls, &end) {
-        let urls_exist = !anime_urls.is_empty() || !manga_urls.is_empty();
-        if urls_exist {
-            if let Err(e) = import_legacy_repos(&legacy.anime, &legacy.manga, &anime_urls, &manga_urls, legacy.store_http, legacy.repo_http) {
-                tracing::warn!("importing the old repo lists failed: {e}");
-            }
+    if let (Some(legacy), Some(urls), RestoreEnd::Completed(_)) = (legacy, legacy_urls, &end) {
+        if !import_legacy_repos(&legacy.links, &urls, legacy.repo_http).is_empty() {
+            // the imported links are fetched now, so their sources are listed without waiting for the daily check
+            RepoOps::new(legacy.links).refresh();
         }
     }
     Ok(end)
@@ -387,11 +384,6 @@ mod tests {
     }
 
     struct NoNet;
-    impl StoreHttp for NoNet {
-        fn get(&self, _url: &str) -> Result<Vec<u8>, String> {
-            Err("offline".into())
-        }
-    }
     impl HttpGet for NoNet {
         fn get_text(&self, _url: &str) -> Result<String, String> {
             Err("offline".into())
@@ -412,23 +404,16 @@ mod tests {
             ],
             ..Default::default()
         };
-        assert_eq!(legacy_repo_urls(&backup.preferences).0.len(), 1);
+        assert_eq!(legacy_repo_urls(&backup).len(), 2);
         let events = Mutex::new(Vec::new());
-        let legacy = LegacyImport {
-            anime: ExtensionStoreRepo::new(lib.anime.clone()),
-            manga: ExtensionRepoRepo::new(lib.manga.clone()),
-            store_http: &NoNet,
-            repo_http: &NoNet,
-        };
+        let links = SourcePrefs::new(lib.prefs.clone()).manga_extension_repos;
+        let legacy = LegacyImport { links: links.clone(), repo_http: &NoNet };
         let opts = RestoreOptions { app_settings: false, ..RestoreOptions::default() };
         let end = run_restore(&lib, dir.path(), &dir.path().join("logs"), backup, opts, &StopFlag::default(), &mut |e| events.lock().unwrap().push(e.title), Some(legacy)).unwrap();
         assert!(matches!(end, RestoreEnd::Completed(_)), "{end:?}");
         assert!(kuro_data::manga::MangaRepo::new(lib.manga.clone()).by_url_and_source("/m", 7).unwrap().is_some());
-        let stores = ExtensionStoreRepo::new(lib.anime.clone()).all().unwrap();
-        assert_eq!(stores.iter().map(|s| s.index_url.as_str()).collect::<Vec<_>>(), ["https://a.test/repo.json"]);
-        assert_eq!(stores[0].name, "Repo #1");
-        let repos = ExtensionRepoRepo::new(lib.manga.clone()).all().unwrap();
-        assert_eq!(repos.iter().map(|r| r.signing_key_fingerprint.as_str()).collect::<Vec<_>>(), ["NOFINGERPRINT-1"]);
+        // only the address that is a repository link is listed; the other one is ignored without error
+        assert_eq!(links.get().into_iter().collect::<Vec<_>>(), ["https://a.test/index.min.json"]);
     }
 
     #[test]
@@ -440,10 +425,11 @@ mod tests {
             preferences: vec![BackupPreference { key: "anime_extension_repos".into(), value: PrefValue::StringSet(["https://a.test".to_owned()].into()) }],
             ..Default::default()
         };
-        let legacy = LegacyImport { anime: ExtensionStoreRepo::new(lib.anime.clone()), manga: ExtensionRepoRepo::new(lib.manga.clone()), store_http: &NoNet, repo_http: &NoNet };
+        let links = SourcePrefs::new(lib.prefs.clone()).manga_extension_repos;
+        let legacy = LegacyImport { links: links.clone(), repo_http: &NoNet };
         let opts = RestoreOptions { extension_stores: false, ..RestoreOptions::default() };
         run_restore(&lib, dir.path(), &dir.path().join("logs"), backup, opts, &StopFlag::default(), &mut |_| {}, Some(legacy)).unwrap();
-        assert!(ExtensionStoreRepo::new(lib.anime.clone()).all().unwrap().is_empty());
+        assert!(links.get().is_empty());
     }
 
     #[test]

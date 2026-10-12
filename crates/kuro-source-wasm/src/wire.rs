@@ -1,5 +1,5 @@
-//! The JSON shapes of the ABI 1.4 ops. Field names are camelCase. They mirror the `kuro-source` models, which carry no
-//! serde derive of their own, so each model has a wire twin and a conversion.
+//! The JSON shapes of the ABI 1.4 ops, and the 1.5 additions (`requestGapMs`). Field names are camelCase. They mirror the
+//! `kuro-source` models, which carry no serde derive of their own, so each model has a wire twin and a conversion.
 
 use kuro_source::model::{MangasPage, Page, SChapter, SManga, UpdateStrategy};
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,16 @@ pub struct SourceDescriptor {
     pub lang: String,
     #[serde(default)]
     pub supports_latest: bool,
+    /// The least gap, in milliseconds, between two requests the host sends to one host for this source (ABI 1.5).
+    /// Absent means no spacing.
+    #[serde(default)]
+    pub request_gap_ms: Option<u64>,
+}
+
+impl SourceDescriptor {
+    pub fn request_gap(&self) -> Option<std::time::Duration> {
+        self.request_gap_ms.map(std::time::Duration::from_millis)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,5 +226,14 @@ mod tests {
         assert_eq!(ok.id, 9_007_199_254_740_993, "ids are exact integers, not floats");
         assert!(!ok.supports_latest);
         assert!(serde_json::from_str::<SourceDescriptor>(r#"{"name":"A","lang":"en"}"#).is_err());
+    }
+
+    #[test]
+    fn the_info_gap_is_read_in_milliseconds_and_absent_means_none() {
+        let spaced: SourceDescriptor =
+            serde_json::from_str(r#"{"id":1,"name":"A","lang":"en","requestGapMs":2000}"#).expect("valid");
+        assert_eq!(spaced.request_gap(), Some(std::time::Duration::from_secs(2)));
+        let plain: SourceDescriptor = serde_json::from_str(r#"{"id":1,"name":"A","lang":"en"}"#).expect("valid");
+        assert_eq!(plain.request_gap(), None, "a 1.4 info has no gap");
     }
 }

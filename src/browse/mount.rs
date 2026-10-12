@@ -45,13 +45,10 @@ pub fn reselect() {
     }
 }
 
-/// Opens the repository links of a kind: the anime extension stores or the manga extension repos. The empty Sources
-/// pages and the header menu both lead here.
-pub fn open_repos(kind: BrowseKind) {
-    crate::ui::open(match kind {
-        BrowseKind::Anime => "settings_anime_extension_stores",
-        BrowseKind::Manga => "settings_manga_extension_repos",
-    });
+/// Opens the one repository list, which holds the links of both kinds. The empty Sources pages and the header menu
+/// both lead here.
+pub fn open_repos() {
+    crate::ui::open("settings_extension_repos");
 }
 
 /// The extension rows the anime host published, as the shared list shows them (T-19a-066): the updates and installed
@@ -397,7 +394,7 @@ pub fn browse() -> Option<Built> {
         pages,
         on_route: Rc::new(|route| open_route(&route)),
         on_filter: Rc::new(move |page: BrowsePage| open_filter(page.kind(), &filter_prefs)),
-        on_repos: Rc::new(open_repos),
+        on_repos: Rc::new(|_kind| open_repos()),
         on_leave: Rc::new(crate::ui::pop),
     };
     let shell = Rc::new(BrowseShell::new(deps));
@@ -643,7 +640,7 @@ mod tests {
     fn the_empty_sources_action_names_the_repository_links() {
         crate::testing::with_display(|| {
             for kind in [BrowseKind::Manga, BrowseKind::Anime] {
-                let empty = super::super::sources_page::sources_empty(kind);
+                let empty = super::super::sources_page::sources_empty();
                 let action = empty.last_child().and_downcast::<gtk::Button>().expect("the one action");
                 assert_eq!(action.label().as_deref(), Some(tr(MsgKey::label_extension_repos).as_str()), "{kind:?}");
             }

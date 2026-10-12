@@ -1,9 +1,11 @@
-// ABI 1.4 (plans/18-extensions-manga/p1-rust-design.md section 2.2). Guests import `host` and export `invoke`.
-package kuro:source@1.4.0;
+// ABI 1.5 (docs/source-abi.md has the wire shapes). Guests import `host` and export `invoke`.
+// A 1.4 guest imports `kuro:source/host@1.4.0`, which the host still provides (bridge::link_v14), so it loads unchanged.
+package kuro:source@1.5.0;
 
 interface host {
-    /// Performs an HTTP request on behalf of the guest. Allowed only for hosts in the manifest allow-list.
-    /// Request and response are JSON (see `bridge.rs`).
+    /// Performs an HTTP request on behalf of the guest. Allowed only for hosts in the manifest allow-list. The host
+    /// spaces requests to one host by the `requestGapMs` of the source's info (ABI 1.5).
+    /// Request and response are JSON (see `bridge.rs`). The response carries the final `url` after redirects (ABI 1.5).
     http: func(request-json: string) -> result<string, string>;
     /// Reads a source preference by key. Returns "" when unset.
     pref-get: func(key: string) -> string;
@@ -11,6 +13,8 @@ interface host {
     pref-set: func(key: string, value-json: string) -> result<_, string>;
     /// Logs a message at level 0=debug, 1=info, 2=warn, 3=error.
     log: func(level: u8, message: string);
+    /// Unix time in whole seconds from the host clock (ABI 1.5), for chapter and episode dates.
+    unix-seconds: func() -> u64;
 }
 
 world source {
@@ -22,6 +26,8 @@ world source {
     /// Input is the envelope {"sourceId": n, "args": {...}}. Output is JSON in camelCase. An anime package answers
     /// "popular", "latest" and "search" with {"animes": [...], "hasNextPage": bool}, and an anime is {"url", "title",
     /// "description", "thumbnailUrl"}. The anime ops are additive to ABI 1.4: a guest that lacks one answers "unknown op".
+    ///   "search"    args {"page", "query", "filters": FilterList}; FilterList is the serde form of its filters (ABI 1.5,
+    ///               an array, empty when the app holds none). A 1.4 guest ignores the key.
     ///   "episodes"  args {"anime": Anime}                 → [Episode]
     ///               Episode {"url", "name", "episodeNumber", "fillermark", "scanlator", "dateUpload", "summary"}
     ///   "hosters"   args {"episode": Episode}             → [Hoster]
@@ -31,5 +37,11 @@ world source {
     ///                      "preferred", "subtitleTracks": [Track], "audioTracks": [Track], "internalData"}
     ///   "subtitles" args {"video": Video}                 → [Track]
     ///               Track {"url", "lang"}
+    ///
+    /// ABI 1.5 additive ops (a missing op, "unknown op: <op>", means "no change"):
+    ///   "request-headers" args {}                         → [[name, value]]: the headers the app sends with each page
+    ///               image and video request of this source. Replaces the app's default set.
+    ///   "unscramble"      args {"body": base64, "headers": [[name, value]]} → {"body": base64 | null}: the page image
+    ///               fix-up. null means show the bytes as fetched. Err("Failed to decode image") fails the page.
     export invoke: func(op: string, input-json: string) -> result<string, string>;
 }

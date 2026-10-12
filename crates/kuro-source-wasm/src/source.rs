@@ -5,8 +5,11 @@
 //! the instance, and the next call starts a fresh one, so a trapped instance is never entered again.
 
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use base64::Engine as _;
+use base64::prelude::BASE64_STANDARD;
 use kuro_net::NetworkClient;
 use kuro_prefs::store::PrefStore;
 use kuro_source::anime::{AnimeSource, AnimesPage, Hoster, SAnime, SEpisode, Track, Video};
@@ -14,16 +17,17 @@ use kuro_source::error::SourceError;
 use kuro_source::filter_list::FilterList;
 use kuro_source::model::{MangasPage, Page, SChapter, SManga};
 use kuro_source::source::{CatalogueSource, MangaSource};
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
-use wasmtime::Store;
 use wasmtime::component::{Component, HasSelf, Linker};
+use wasmtime::{Store, UpdateDeadline};
 
 use crate::anime_wire::{WireAnime, WireAnimesPage, WireEpisode, WireHoster, WireTrack, WireVideo};
 use crate::bindings::Source;
 use crate::bridge::HostState;
 use crate::error::WasmError;
-use crate::limits::{self, CALL_DEADLINE_TICKS, MAX_WASM_BYTES};
+use crate::limits::{self, CALL_DEADLINE_TICKS, CallClock, MAX_WASM_BYTES};
 use crate::wire::{SourceDescriptor, WireChapter, WireManga, WireMangasPage, WirePage};
 
 /// What the host gives every guest: the client behind `http` and the preference store behind `pref-get`.
@@ -112,7 +116,7 @@ fn load(
         deadline_ticks,
     });
 
-    let probe = Channel::new(Arc::clone(&package), 0);
+    let probe = Channel::new(Arc::clone(&package), 0, None);
     let op = if factory { "create-sources" } else { "info" };
     let text = probe.call(op, "{}").map_err(WasmError::Instantiate)?;
     let descriptors: Vec<SourceDescriptor> = if factory {
@@ -125,7 +129,7 @@ fn load(
     Ok(descriptors
         .into_iter()
         .map(|info| {
-            let channel = Channel::new(Arc::clone(&package), info.id);
+            let channel = Channel::new(Arc::clone(&package), info.id, info.request_gap());
             WasmSource {
                 info,
                 channel: Arc::new(channel),
@@ -147,14 +151,17 @@ fn reject_duplicate_ids(descriptors: &[SourceDescriptor]) -> Result<(), WasmErro
 struct Channel {
     package: Arc<Package>,
     source_id: i64,
+    /// The source's request gap (ABI 1.5 `requestGapMs`), which the host applies to the guest's `http` calls.
+    request_gap: Option<Duration>,
     guest: Mutex<Option<Guest>>,
 }
 
 impl Channel {
-    fn new(package: Arc<Package>, source_id: i64) -> Self {
+    fn new(package: Arc<Package>, source_id: i64, request_gap: Option<Duration>) -> Self {
         Self {
             package,
             source_id,
+            request_gap,
             guest: Mutex::new(None),
         }
     }
@@ -164,7 +171,7 @@ impl Channel {
         let mut slot = self.guest.lock().unwrap_or_else(PoisonError::into_inner);
         let mut guest = match slot.take() {
             Some(guest) => guest,
-            None => Guest::new(&self.package, self.source_id)?,
+            None => Guest::new(&self.package, self.source_id, self.request_gap)?,
         };
         match guest.invoke(op, input, self.package.deadline_ticks) {
             Ok(result) => {
@@ -183,27 +190,37 @@ struct Guest {
 }
 
 impl Guest {
-    fn new(package: &Package, source_id: i64) -> Result<Self, String> {
+    fn new(package: &Package, source_id: i64, request_gap: Option<Duration>) -> Result<Self, String> {
         let engine = limits::engine().map_err(|e| e.to_string())?;
         let mut linker = Linker::new(engine);
         Source::add_to_linker::<_, HasSelf<_>>(&mut linker, |state: &mut HostState| state)
             .map_err(|e| format!("{e:#}"))?;
+        crate::bridge::link_v14(&mut linker).map_err(|e| format!("{e:#}"))?;
         let state = HostState {
             source_id,
             hosts: package.hosts.clone(),
             client: package.env.client.clone(),
             prefs: package.env.prefs.clone(),
             limits: limits::store_limits(),
+            request_gap,
+            clock: CallClock::start(CALL_DEADLINE_TICKS),
         };
         let mut store = Store::new(engine, state);
         store.limiter(|state| &mut state.limits);
+        // Each epoch tick while the call runs, the guest's run time is checked against its clock. Host waits are not
+        // run time, so the store keeps running after a long host call. A call that is out of budget traps here.
+        store.epoch_deadline_callback(|ctx| match ctx.data().clock.stop_reason(Instant::now()) {
+            Some(reason) => Err(wasmtime::format_err!("{reason}")),
+            None => Ok(UpdateDeadline::Continue(1)),
+        });
         let bindings = Source::instantiate(&mut store, &package.component, &linker).map_err(|e| format!("{e:#}"))?;
         Ok(Self { store, bindings })
     }
 
     /// The outer `Err` is a trap. The inner `Err` is an error the guest returned.
     fn invoke(&mut self, op: &str, input: &str, deadline_ticks: u64) -> wasmtime::Result<Result<String, String>> {
-        self.store.set_epoch_deadline(deadline_ticks);
+        self.store.data_mut().clock = CallClock::start(deadline_ticks);
+        self.store.set_epoch_deadline(1);
         self.bindings.call_invoke(&mut self.store, op, input)
     }
 }
@@ -234,6 +251,29 @@ impl WasmSource {
         let page: WireMangasPage = self.typed(op, args).await?;
         Ok(MangasPage::from(page))
     }
+
+    /// An op a guest may not answer. `unknown op: <op>` is `None`, which means "no change"; any other failure is an
+    /// error.
+    async fn optional<T: DeserializeOwned>(&self, op: &'static str, args: serde_json::Value) -> Result<Option<T>, SourceError> {
+        match self.call(op, args).await {
+            Ok(text) => serde_json::from_str(&text).map(Some).map_err(|e| SourceError::Parse(e.to_string())),
+            Err(SourceError::Transport(text)) if text == format!("unknown op: {op}") => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// The args of a search: the page, the text, and the filters as JSON (ABI 1.5). The filters are the serde form of the
+/// list, so an empty list is `[]`.
+fn search_args(page: i32, query: &str, filters: &FilterList) -> serde_json::Value {
+    json!({ "page": page, "query": query, "filters": filters.0 })
+}
+
+/// The `unscramble` reply: `{"body": base64}`, or `{"body": null}` when the bytes are already right.
+#[derive(Deserialize)]
+struct Descrambled {
+    #[serde(default)]
+    body: Option<String>,
 }
 
 /// A source of an anime package: a [`WasmSource`] read through the anime ops, with the same guest, mutex and deadline. It
@@ -245,6 +285,12 @@ impl WasmAnimeSource {
     pub async fn subtitles(&self, video: &Video) -> Result<Vec<Track>, SourceError> {
         let wire: Vec<WireTrack> = self.0.typed("subtitles", json!({ "video": WireVideo::from(video) })).await?;
         Ok(wire.into_iter().map(Track::from).collect())
+    }
+
+    /// The headers of this source's video requests (ABI 1.5 `request-headers`, the same op as the page images). `None`
+    /// for a guest without it. Nothing in the app reads it yet: the player keeps the headers of each `Video`.
+    pub async fn request_headers(&self) -> Result<Option<Vec<(String, String)>>, SourceError> {
+        self.0.request_headers().await
     }
 }
 
@@ -300,10 +346,8 @@ impl AnimeSource for WasmAnimeSource {
         self.0.anime_page("latest", json!({ "page": page })).await
     }
 
-    async fn search(&self, page: i32, query: &str, _filters: &FilterList) -> Result<AnimesPage, SourceError> {
-        self.0
-            .anime_page("search", json!({ "page": page, "query": query, "filters": [] }))
-            .await
+    async fn search(&self, page: i32, query: &str, filters: &FilterList) -> Result<AnimesPage, SourceError> {
+        self.0.anime_page("search", search_args(page, query, filters)).await
     }
 
     async fn episode_list(&self, anime: &SAnime) -> Result<Vec<SEpisode>, SourceError> {
@@ -363,6 +407,25 @@ impl MangaSource for WasmSource {
             .map(|(index, page)| page.into_page(i32::try_from(index).unwrap_or(i32::MAX)))
             .collect())
     }
+
+    /// ABI 1.5 `request-headers`. `None` for a guest that does not answer it.
+    async fn request_headers(&self) -> Result<Option<Vec<(String, String)>>, SourceError> {
+        self.optional("request-headers", json!({})).await
+    }
+
+    /// ABI 1.5 `unscramble`. A guest without the op, or one that answers `body: null`, gives `None`: show the bytes.
+    /// ponytail: one guest call per page image, the base64 encode included. Remember "unknown op" per source if it shows.
+    async fn unscramble(&self, body: &[u8], headers: &[(String, String)]) -> Result<Option<Vec<u8>>, SourceError> {
+        let args = json!({ "body": BASE64_STANDARD.encode(body), "headers": headers });
+        let reply: Option<Descrambled> = self.optional("unscramble", args).await?;
+        match reply.and_then(|reply| reply.body) {
+            Some(text) => BASE64_STANDARD
+                .decode(text)
+                .map(Some)
+                .map_err(|e| SourceError::Parse(format!("unscramble: {e}"))),
+            None => Ok(None),
+        }
+    }
 }
 
 #[async_trait]
@@ -371,7 +434,7 @@ impl CatalogueSource for WasmSource {
         self.info.supports_latest
     }
 
-    /// Empty: ABI 1.4 has no filter op, so a guest declares no filters. The `filters` of a search are sent as `[]`.
+    /// Empty: no ABI version has a filter op, so a guest declares no filters. A search sends the filters it is given.
     fn filter_list(&self) -> FilterList {
         FilterList::default()
     }
@@ -380,9 +443,8 @@ impl CatalogueSource for WasmSource {
         self.listing("popular", json!({ "page": page })).await
     }
 
-    async fn search(&self, page: i32, query: &str, _filters: &FilterList) -> Result<MangasPage, SourceError> {
-        self.listing("search", json!({ "page": page, "query": query, "filters": [] }))
-            .await
+    async fn search(&self, page: i32, query: &str, filters: &FilterList) -> Result<MangasPage, SourceError> {
+        self.listing("search", search_args(page, query, filters)).await
     }
 
     async fn latest(&self, page: i32) -> Result<MangasPage, SourceError> {
@@ -393,10 +455,11 @@ impl CatalogueSource for WasmSource {
 #[cfg(test)]
 mod tests {
     use kuro_source::error::SourceError;
+    use kuro_source::filter::Filter;
     use serde_json::json;
 
     use super::*;
-    use crate::test_guest::{Behaviour, env, guest};
+    use crate::test_guest::{Behaviour, IMPORTS_HOST_V14, IMPORTS_HOST_V15, env, guest, guest_importing};
 
     /// One source of a single-guest package, built without the loader, so each test can pick the guest's answer.
     fn direct(bytes: Vec<u8>, id: i64, deadline_ticks: u64) -> WasmSource {
@@ -414,10 +477,11 @@ mod tests {
             name: "Fixture".into(),
             lang: "en".into(),
             supports_latest: true,
+            request_gap_ms: None,
         };
         WasmSource {
             info,
-            channel: Arc::new(Channel::new(package, id)),
+            channel: Arc::new(Channel::new(package, id, None)),
         }
     }
 
@@ -599,6 +663,53 @@ mod tests {
         assert_eq!(good.expect("good package loads").len(), 1);
         assert!(bad.is_err());
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_search_sends_its_filters_as_json() {
+        let filters = FilterList(vec![Filter::check_box("Flag")]);
+        let source = direct(guest(Behaviour::Echoes), 7, CALL_DEADLINE_TICKS);
+        let sent = source.call("search", search_args(3, "q", &filters)).await.expect("echo");
+        let sent: serde_json::Value = serde_json::from_str(&sent).expect("JSON");
+        assert_eq!(sent["args"]["page"], 3);
+        assert_eq!(sent["args"]["query"], "q");
+        assert_eq!(sent["args"]["filters"][0]["CheckBox"]["name"], "Flag");
+        assert_eq!(search_args(1, "", &FilterList::default())["filters"], json!([]), "no filters is an empty list");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_guest_gives_request_headers_or_none_when_it_lacks_the_op() {
+        let answers = direct(guest(Behaviour::Returns(r#"[["Accept","image/png"],["X-Auth","t"]]"#.into())), 1, CALL_DEADLINE_TICKS);
+        assert_eq!(
+            answers.request_headers().await,
+            Ok(Some(vec![("Accept".to_owned(), "image/png".to_owned()), ("X-Auth".to_owned(), "t".to_owned())]))
+        );
+        let old = direct(guest(Behaviour::Fails("unknown op: request-headers".into())), 1, CALL_DEADLINE_TICKS);
+        assert_eq!(old.request_headers().await, Ok(None), "an ABI 1.4 guest means no change");
+        let broken = direct(guest(Behaviour::Fails("boom".into())), 1, CALL_DEADLINE_TICKS);
+        assert_eq!(broken.request_headers().await, Err(SourceError::Transport("boom".into())));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_unscramble_reply_is_the_new_bytes_or_no_change() {
+        let fixed = direct(guest(Behaviour::Returns(r#"{"body":"AQI="}"#.into())), 1, CALL_DEADLINE_TICKS);
+        assert_eq!(fixed.unscramble(&[9], &[]).await, Ok(Some(vec![1, 2])), "the body comes back decoded");
+        let already = direct(guest(Behaviour::Returns(r#"{"body":null}"#.into())), 1, CALL_DEADLINE_TICKS);
+        assert_eq!(already.unscramble(&[9], &[]).await, Ok(None), "null shows the bytes as fetched");
+        let old = direct(guest(Behaviour::Fails("unknown op: unscramble".into())), 1, CALL_DEADLINE_TICKS);
+        assert_eq!(old.unscramble(&[9], &[]).await, Ok(None), "an ABI 1.4 guest means no change");
+        let grid = direct(guest(Behaviour::Fails("Failed to decode image".into())), 1, CALL_DEADLINE_TICKS);
+        assert_eq!(grid.unscramble(&[9], &[]).await, Err(SourceError::Transport("Failed to decode image".into())));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_guest_built_for_abi_1_4_and_one_built_for_1_5_both_load() {
+        for import in [IMPORTS_HOST_V14, IMPORTS_HOST_V15] {
+            let (host_env, _dir) = env();
+            let bytes = guest_importing(import, INFO_AND_LISTING);
+            let sources = instantiate(bytes, Vec::new(), false, host_env).await.expect("the host links the import");
+            assert_eq!(sources[0].id(), 42, "{import}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -636,8 +747,9 @@ mod anime_tests {
                 name: "Fixture".into(),
                 lang: "en".into(),
                 supports_latest: true,
+                request_gap_ms: None,
             },
-            channel: Arc::new(Channel::new(package, 42)),
+            channel: Arc::new(Channel::new(package, 42, None)),
         })
     }
 

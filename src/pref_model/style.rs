@@ -4,10 +4,8 @@
 use std::cell::Cell;
 
 
-/// The CSS. The theme card's size comes from the constants (`widgets::THEME_CARD_WIDTH`, the picker's border and
-/// radius), so no other file repeats those numbers.
+/// The CSS.
 pub fn css() -> String {
-    use crate::theme::picker::{CARD_BORDER, CARD_RADIUS_OUTER};
     format!(
         "\
 .pref-flash {{ background-color: alpha(@theme_selected_bg_color, 0.18); transition: background-color 200ms ease; }}
@@ -15,11 +13,7 @@ pub fn css() -> String {
 .pref-error {{ color: @error_color; }}
 .tracker-check {{ color: @success_color; }}
 .pref-slider-pill {{ border-radius: 999px; padding: 2px 10px; }}
-.theme-card {{ border: {CARD_BORDER}px solid transparent; border-radius: {CARD_RADIUS_OUTER}px; padding: {CARD_BORDER}px; min-width: {width}px; }}
-.theme-card.selected {{ border-color: @theme_selected_bg_color; }}
-.theme-button {{ padding: 0; min-height: 0; min-width: 0; }}
-",
-        width = super::widgets::THEME_CARD_WIDTH
+"
     )
 }
 
@@ -59,12 +53,5 @@ mod tests {
         }
         assert!(!css.contains("@accent"), "the theme's named colours only");
         assert!(!css.contains(".pref-title {"), "row titles keep the theme's body size");
-    }
-
-    #[test]
-    fn the_theme_card_takes_its_size_from_the_constants() {
-        let css = css();
-        assert!(css.contains("min-width: 114px"), "{css}");
-        assert!(css.contains("border-radius: 17px"));
     }
 }

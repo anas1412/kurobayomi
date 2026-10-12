@@ -940,42 +940,6 @@ pref_category_hide_hidden = Sembunyikan kategori tersembunyi dari layar kategori
 
 pref_update_anime_release_grace_period = Masa waktu rilis anime yang diharapkan
 
-data_saver_exclude = Mengecualikan dari penghemat data
-
-data_saver_stop_exclude = Menghentikan pengecualian dari penghemat data
-
-data_saver = Penghemat Data
-
-data_saver_summary = Kompres gambar sebelum mengunduh atau memuat di pembaca
-
-data_saver_downloader = Gunakan penghemat data pada pengunduh
-
-data_saver_ignore_jpeg = Abaikan Gambar Jpeg
-
-data_saver_ignore_gif = Abaikan Animasi Gif
-
-data_saver_image_quality = Kualitas Gambar
-
-data_saver_image_quality_summary = Nilai yang lebih tinggi berarti bahwa persentase kualitas gambar yang lebih tinggi disimpan, tetapi ini juga berarti ukuran file lebih besar, 80 persen adalah median yang baik antara ukuran file dan kualitas gambar
-
-data_saver_image_format = Mengompres ke Jpeg
-
-data_saver_image_format_summary_on = Ukuran file Jpeg jauh lebih kecil daripada Webp (artinya lebih banyak data yang disimpan), tetapi itu membuat gambar kehilangan lebih banyak kualitas.{"\u000A"}{"\u000A"}Saat ini kompres ke Jpeg
-
-data_saver_image_format_summary_off = Ukuran file Jpeg jauh lebih kecil daripada Webp (artinya lebih banyak data yang disimpan), tetapi itu membuat gambar kehilangan lebih banyak kualitas.{"\u000A"}{"\u000A"}Saat ini kompres ke Webp
-
-data_saver_color_bw = Konversi ke Hitam Putih
-
-bandwidth_hero = Bandwidth Hero (membutuhkan server Proxy Bandwidth Hero)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Server Proxy Bandwidth Hero
-
-data_saver_server_summary = Letakkan url server Bandwidth Hero Proxy di sini
-
 download_slots_info = Hanya akan mengunduh secara bersamaan dari sumber yang dihosting sendiri atau tidak diukur
 
 unseen = Tak terlihat

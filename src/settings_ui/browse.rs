@@ -16,21 +16,18 @@ pub const NSFW_SUBTITLE: &str = "Requires app restart to take effect";
 pub const NSFW_INFO: &str = "This does not prevent unofficial or potentially incorrectly flagged extensions from surfacing NSFW (18+) content within the app.";
 pub const NSFW_GATE_TITLE: &str = "NSFW (18+) sources";
 pub const NSFW_REFUSED: &str = "Authentication is required to change this setting";
-pub const ANIME_REPOS_TITLE: &str = "Anime extension repos";
-pub const MANGA_REPOS_TITLE: &str = "Manga extension repos";
-pub const ANIME_REPOS_SCREEN: &str = "settings_anime_extension_stores";
-pub const MANGA_REPOS_SCREEN: &str = "settings_manga_extension_repos";
+pub const REPOS_TITLE: &str = "Extension repos";
+pub const REPOS_SCREEN: &str = "settings_extension_repos";
 
-/// The number of stores (anime) or repos (manga) the two repo rows show.
+/// The number of repository links the one repo row shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RepoCounts {
-    pub anime: i64,
-    pub manga: i64,
+    pub repos: i64,
 }
 
-/// `0 stores`, `1 store`, `N stores` (the `num_repos` plural).
-pub fn store_count_label(count: i64) -> String {
-    if count == 1 { "1 store".to_owned() } else { format!("{count} stores") }
+/// `0 repos`, `1 repo`, `N repos` (the `num_repos` plural).
+pub fn repo_count_label(count: i64) -> String {
+    if count == 1 { "1 repo".to_owned() } else { format!("{count} repos") }
 }
 
 /// The Source languages filter: the languages whose sources show. It offers `all` (Multi) and every language the app
@@ -49,15 +46,14 @@ pub fn source_languages_row(prefs: &Prefs) -> PreferenceItem {
     multi_choice(SOURCE_LANGUAGES_TITLE, pref, &options, true)
 }
 
-/// The Sources group, the NSFW (18+) group. `counts` are the stores and repos the two repo rows show.
+/// The Sources group, the NSFW (18+) group. `counts` is the number of repository links the repo row shows.
 pub fn page_rows(prefs: &Prefs, counts: RepoCounts) -> Vec<Preference> {
     vec![
         group(
             "Sources",
             vec![
                 source_languages_row(prefs),
-                repo_row(ANIME_REPOS_TITLE, counts.anime, ANIME_REPOS_SCREEN),
-                repo_row(MANGA_REPOS_TITLE, counts.manga, MANGA_REPOS_SCREEN),
+                repo_row(REPOS_TITLE, counts.repos, REPOS_SCREEN),
             ],
         ),
         group(
@@ -72,7 +68,7 @@ pub fn page_rows(prefs: &Prefs, counts: RepoCounts) -> Vec<Preference> {
 
 /// A repo row: its subtitle is the count, a tap opens the repo screen.
 fn repo_row(title: &str, count: i64, screen: &'static str) -> PreferenceItem {
-    let mut row = text(title, Some(&store_count_label(count)), true);
+    let mut row = text(title, Some(&repo_count_label(count)), true);
     if let PreferenceItem::Text { common, on_click } = &mut row {
         *on_click = Some(Rc::new(move || crate::ui::open(screen)));
         common.link = true;
@@ -112,7 +108,7 @@ mod tests {
         let tree = page_rows(&prefs, RepoCounts::default());
         let sources = group_of(&tree, "Sources");
         let titles: Vec<&str> = sources.items.iter().map(|i| i.title()).collect();
-        assert_eq!(titles, [SOURCE_LANGUAGES_TITLE, ANIME_REPOS_TITLE, MANGA_REPOS_TITLE]);
+        assert_eq!(titles, [SOURCE_LANGUAGES_TITLE, REPOS_TITLE]);
         let PreferenceItem::MultiSelect { pref, entries, .. } = &sources.items[0] else { panic!("a multi-select") };
         assert_eq!(pref.key(), prefs.sources.enabled_languages.key());
         assert!(entries.iter().any(|(key, _)| key == "all") && entries.iter().any(|(key, _)| key == "en"));
@@ -121,17 +117,15 @@ mod tests {
 
     #[test]
     fn the_repo_rows_show_the_plural_count_and_open_their_screen() {
-        assert_eq!(store_count_label(0), "0 stores");
-        assert_eq!(store_count_label(1), "1 store");
-        assert_eq!(store_count_label(3), "3 stores");
-        let tree = page_rows(&Prefs::in_memory(), RepoCounts { anime: 2, manga: 1 });
+        assert_eq!(repo_count_label(0), "0 repos");
+        assert_eq!(repo_count_label(1), "1 repo");
+        assert_eq!(repo_count_label(3), "3 repos");
+        let tree = page_rows(&Prefs::in_memory(), RepoCounts { repos: 3 });
         let sources = group_of(&tree, "Sources");
         let PreferenceItem::Text { common, on_click } = &sources.items[1] else { panic!("an action row") };
-        assert_eq!(common.title, ANIME_REPOS_TITLE);
-        assert_eq!(common.subtitle.as_deref(), Some("2 stores"));
+        assert_eq!(common.title, REPOS_TITLE);
+        assert_eq!(common.subtitle.as_deref(), Some("3 repos"));
         assert!(on_click.is_some());
-        let PreferenceItem::Text { common, .. } = &sources.items[2] else { panic!("an action row") };
-        assert_eq!(common.subtitle.as_deref(), Some("1 store"));
     }
 
     #[test]

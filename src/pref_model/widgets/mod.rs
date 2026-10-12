@@ -2,7 +2,6 @@
 //! docs/design/other-tabs.md) and match `crate::ui::row`, so settings rows and the other boxed lists look alike. The
 //! flash timings come from Aniyomi's `Constants.kt`.
 
-pub mod app_theme;
 pub mod dialog;
 pub mod edit_text;
 pub mod group;
@@ -25,7 +24,6 @@ pub const ICON_END_MARGIN: i32 = 12;
 pub const SUBTITLE_MAX_LINES: i32 = 10;
 pub const TITLE_MAX_LINES: i32 = 2;
 pub const CHECK_ROW_MIN: i32 = 48;
-pub const THEME_CARD_WIDTH: i32 = 114;
 pub const DIALOG_WIDTH: i32 = 360;
 pub const PAGE_MAX_WIDTH: i32 = crate::ui::PAGE_WIDTH;
 pub const SECONDARY_ALPHA: f64 = 0.78;

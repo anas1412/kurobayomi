@@ -8,7 +8,6 @@
 pub mod app;
 pub mod backup;
 pub mod category;
-pub mod custom_buttons;
 pub mod dates;
 pub mod entries;
 pub mod error;

@@ -95,8 +95,7 @@ fn hex(b: u8) -> Option<u8> {
 /// The settings screen a route opens.
 pub fn screen_of(route: &UriRoute) -> Option<&'static str> {
     match route {
-        UriRoute::MangaRepos { .. } => Some("settings_manga_extension_repos"),
-        UriRoute::AnimeStores { .. } => Some("settings_anime_extension_stores"),
+        UriRoute::MangaRepos { .. } | UriRoute::AnimeStores { .. } => Some("settings_extension_repos"),
         UriRoute::TrackerAuth { .. } => None,
     }
 }
@@ -199,8 +198,8 @@ mod tests {
     fn routes_name_their_screen_and_a_parked_address_is_taken_once() {
         let manga = UriRoute::MangaRepos { url: "u".into() };
         let anime = UriRoute::AnimeStores { url: "u".into() };
-        assert_eq!(screen_of(&manga), Some("settings_manga_extension_repos"));
-        assert_eq!(screen_of(&anime), Some("settings_anime_extension_stores"));
+        assert_eq!(screen_of(&manga), Some("settings_extension_repos"));
+        assert_eq!(screen_of(&anime), Some("settings_extension_repos"));
         park_repo_url("u".into());
         assert_eq!(take_repo_url().as_deref(), Some("u"));
         assert_eq!(take_repo_url(), None);

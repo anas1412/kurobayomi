@@ -1,4 +1,4 @@
-//! The syntax highlighter of the script editor (task T-48a-039): the Lua and conf rule sets of the Kotlin app, in the
+//! The syntax highlighter of the conf dialogs (task T-48a-039): the conf rule set of the Kotlin app, in the
 //! same order and with the same colour per rule (`plans/48-settings-player-and-scripts/p1-topic-mpv-editor-and-
 //! highlight.md` sections 4.1 and 4.2). The patterns need look-around and back-references, so they run on
 //! `fancy-regex`. Java `\w`, `\d` and `\s` are written as explicit ASCII classes, so non-ASCII text colours as in the
@@ -56,64 +56,8 @@ pub struct RuleSet {
     compiled: OnceLock<Vec<Regex>>,
 }
 
-/// The Lua rules, in the order of the Kotlin app. The string rule is the eighth.
-pub static LUA: RuleSet = RuleSet { rules: &LUA_RULES, compiled: OnceLock::new() };
-
 /// The conf rules, in the order of the Kotlin app. The string rule is the fifth.
 pub static CONF: RuleSet = RuleSet { rules: &CONF_RULES, compiled: OnceLock::new() };
-
-const LUA_RULES: [Rule; 10] = [
-    Rule {
-        pattern: r"(?<![=<>~:/])(?:==|~=|<=|>=|\/\/|\.\.|[=+\-*/%^#<>])",
-        paint: Paint::Full(color::KEYWORD),
-        is_string: false,
-    },
-    Rule {
-        pattern: r"\b([a-zA-Z_][A-Za-z0-9_]*)(?=[ \t\n\x0B\f\r]*:)",
-        paint: Paint::Full(color::DEFINITION),
-        is_string: false,
-    },
-    Rule {
-        pattern: r"([a-zA-Z_][A-Za-z0-9_]*)(?=[ \t\n\x0B\f\r]*\()",
-        paint: Paint::Groups(&[color::LITERAL]),
-        is_string: false,
-    },
-    Rule {
-        pattern: r"function[ \t\n\x0B\f\r]+([a-zA-Z_][A-Za-z0-9_.]*)(?=[ \t\n\x0B\f\r]*\()",
-        paint: Paint::Groups(&[color::DEFINITION]),
-        is_string: false,
-    },
-    Rule {
-        pattern: r"\b(and|break|do|else|elseif|end|for|function|if|in|local|not|or|repeat|return|then|until|while)\b",
-        paint: Paint::Groups(&[color::KEYWORD]),
-        is_string: false,
-    },
-    Rule {
-        pattern: r"\b(true|false|nil)\b",
-        paint: Paint::Groups(&[color::LITERAL]),
-        is_string: false,
-    },
-    Rule {
-        pattern: r"(?i)(?<![A-Za-z0-9_])[+-]?(?:0x[0-9a-f]+|(?:(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:e[+\-]?[0-9]+)?))",
-        paint: Paint::Full(color::LITERAL),
-        is_string: false,
-    },
-    Rule {
-        pattern: r#"(?<!--[^\n]{0,120})("(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*')"#,
-        paint: Paint::Full(color::STRING),
-        is_string: true,
-    },
-    Rule {
-        pattern: r"(?m)--.*$",
-        paint: Paint::Full(color::COMMENT),
-        is_string: false,
-    },
-    Rule {
-        pattern: r"(?s)--\[(=*)\[.*?--\]\1\]",
-        paint: Paint::Full(color::COMMENT),
-        is_string: false,
-    },
-];
 
 const CONF_RULES: [Rule; 6] = [
     Rule {
@@ -147,11 +91,6 @@ const CONF_RULES: [Rule; 6] = [
         is_string: false,
     },
 ];
-
-/// The Lua spans of `text`.
-pub fn lua(text: &str) -> Vec<Span> {
-    highlight(&LUA, text)
-}
 
 /// The conf spans of `text`.
 pub fn conf(text: &str) -> Vec<Span> {
@@ -209,44 +148,10 @@ mod tests {
     }
 
     #[test]
-    fn every_rule_of_both_sets_compiles() {
-        for rule in LUA_RULES.iter().chain(CONF_RULES.iter()) {
+    fn every_conf_rule_compiles() {
+        for rule in CONF_RULES.iter() {
             let _ = compile(rule.pattern);
         }
-    }
-
-    #[test]
-    fn lua_keywords_numbers_and_comments_take_their_colours() {
-        let source = "local x = 1 -- note";
-        let spans = lua(source);
-        assert!(has(&spans, source, "local", color::KEYWORD));
-        assert!(has(&spans, source, "=", color::KEYWORD));
-        assert!(has(&spans, source, "1", color::LITERAL));
-        assert!(has(&spans, source, "-- note", color::COMMENT));
-    }
-
-    #[test]
-    fn a_lua_call_name_is_a_literal_and_a_function_name_is_a_definition() {
-        let source = "function greet(x)\n  print(x)\nend";
-        let spans = lua(source);
-        assert!(has(&spans, source, "greet", color::DEFINITION));
-        assert!(has(&spans, source, "print", color::LITERAL));
-        assert!(has(&spans, source, "function", color::KEYWORD));
-    }
-
-    #[test]
-    fn a_comment_marker_inside_a_string_is_not_a_comment() {
-        let source = r#"local s = "a -- b""#;
-        let spans = lua(source);
-        assert!(has(&spans, source, r#""a -- b""#, color::STRING));
-        assert!(!spans.iter().any(|s| s.color == color::COMMENT), "no comment inside the string");
-    }
-
-    #[test]
-    fn a_long_bracket_comment_spans_lines() {
-        let source = "--[==[ one\ntwo --]==] x";
-        let spans = lua(source);
-        assert!(has(&spans, source, "--[==[ one\ntwo --]==]", color::COMMENT), "rule 10 closes with --]==] as the Kotlin rule does");
     }
 
     #[test]
@@ -275,17 +180,7 @@ mod tests {
     #[test]
     fn a_text_over_the_limit_is_not_highlighted() {
         let long = "x".repeat(MAX_CHARS + 1);
-        assert!(lua(&long).is_empty());
         assert!(conf(&long).is_empty());
-        assert!(!lua(&"1".repeat(MAX_CHARS)).is_empty(), "a text of exactly the limit is highlighted");
-    }
-
-    #[test]
-    fn non_ascii_text_keeps_the_ascii_identifier_classes() {
-        let source = "local é = 2";
-        let spans = lua(source);
-        assert!(has(&spans, source, "local", color::KEYWORD));
-        assert!(has(&spans, source, "2", color::LITERAL));
-        assert!(!spans.iter().any(|s| text_of(source, s).contains('é')), "é is not an identifier character");
+        assert!(!conf(&"1".repeat(MAX_CHARS)).is_empty(), "a text of exactly the limit is highlighted");
     }
 }

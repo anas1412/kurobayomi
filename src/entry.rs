@@ -8,7 +8,7 @@ pub fn body(id: &str) -> Option<Built> {
     match id {
         // the tracking sheet and the tracker search wait for the tracking lane: an empty state, never made-up titles
         "tracking_sheet" | "tracker_search" => crate::screens::unavailable(id),
-        "extension_repos" => crate::settings::body("settings_manga_extension_repos"),
+        "extension_repos" => crate::settings::body("settings_extension_repos"),
         _ => crate::settings::body(id),
     }
 }

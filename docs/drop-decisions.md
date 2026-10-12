@@ -125,7 +125,7 @@ Source: `docs/design/settings-diet.md`. The registry CUT rows that still have a 
 
 Open, outside this lane: `kuro-downloads/src/download_prefs.rs`, `kuro-downloads/src/settings.rs` and `kuro-downloads/src/downloader.rs` still default `pref_download_only_over_wifi_key` to `true`; the remaining `true` defaults are `crates/kuro-downloads/src/download_prefs.rs:50`, `crates/kuro-downloads/src/settings.rs:11` and `62`, `crates/kuro-downloads/src/downloader.rs:88` and `102`, and `src/settings_ui/downloads.rs:160`. `src/misc/runner.rs` does not read this key; the only consumer is the engine's `DownloadSettings::default()` (`downloader.rs:88`), which the downloads lane must wire to the registry value, so the trap is not gone until then. The two download prefs structs (`kuro-domain::download::prefs::DownloadPrefs` and `kuro-downloads::download_prefs::DownloadPrefs`) are both live: the domain copy is read by `src/entry_core`, `src/reader`, `src/settings_ui/downloads.rs`; the downloads copy by `src/misc`, `src/updates`. Unifying them needs both lanes.
 
-Kept for now, per the user's list (not cut in this pass, the cut rows still exist): app lock (`use_biometric_lock`, `lock_app_after`), external player (`always_use_external_player` is not in this list; `external_player_preference`), mini player (`pref_enable_pip`, `pref_pip_episode_toasts`, `pref_pip_on_exit`, `pip_replace_with_previous`), Data Saver (`data_saver`, `data_saver_excluded`, `data_saver_image_quality`, `data_saver_image_format_jpeg`, `data_saver_server`, `data_saver_color_bw`, `data_saver_downloader`, `ignore_jpeg`, `ignore_gif`), Random sort (`library_random_anime_sort_seed`, `library_random_manga_sort_seed`), Custom buttons, Script editor and Code editor (`mpv_scripts`, `pref_mpv_conf`, `pref_mpv_input`).
+Kept for now, per the user's list (not cut in this pass, the cut rows still exist): app lock (`use_biometric_lock`, `lock_app_after`), external player (`always_use_external_player` is not in this list; `external_player_preference`), mini player (`pref_enable_pip`, `pref_pip_episode_toasts`, `pref_pip_on_exit`, `pip_replace_with_previous`), Random sort (`library_random_anime_sort_seed`, `library_random_manga_sort_seed`), Custom buttons, Script editor and Code editor (`mpv_scripts`, `pref_mpv_conf`, `pref_mpv_input`).
 
 Note: `pref_mpv_conf` and `pref_mpv_input` are kept for now with their Script and Code editor pages, so the diet's import rule (write the text to `mpv.conf` / `input.conf` when the file is missing) is not implemented yet.
 
@@ -293,7 +293,7 @@ These have no field-name reader outside the lane, but the key string or a functi
 
 ## Settings diet cut (diet-finish lane, 2026-10-11)
 
-Source: `docs/design/settings-diet.md`, section 6 tables ("If CUT: hard-code"). Every key below is in `DROPPED_KEYS` in `crates/kuro-prefs/src/registry.rs`, so an Aniyomi backup or an old `config.toml` that carries it still loads, and a restore skips it silently. The user kept Data Saver (undecided) and the Detach feature, so their keys are not in this list. Feature cuts decided by the user: app lock, external player, mini player, random sort, custom buttons, script editor, code editor and the Lua and mpv script bridge (no UI; the user's own `mpv.conf` and `input.conf` files are still honoured).
+Source: `docs/design/settings-diet.md`, section 6 tables ("If CUT: hard-code"). Every key below is in `DROPPED_KEYS` in `crates/kuro-prefs/src/registry.rs`, so an Aniyomi backup or an old `config.toml` that carries it still loads, and a restore skips it silently. Data Saver and the Detach feature were cut later on 2026-10-11 (see the last section); their keys are in `DROPPED_KEYS` too. Feature cuts decided by the user: app lock, external player, mini player, random sort, custom buttons, script editor, code editor and the Lua and mpv script bridge (no UI; the user's own `mpv.conf` and `input.conf` files are still honoured).
 
 | Key | Hard-coded value (diet) | Diet page |
 |---|---|---|
@@ -541,3 +541,21 @@ Source: `docs/design/settings-diet.md`, section 6 tables ("If CUT: hard-code"). 
 | `incognito_extensions` | {} | Base state and notifications (no settings page) |
 | `upcoming.week_start` | auto (locale) | Base state and notifications (no settings page) |
 | `upcoming.home_returns_today` | false | Base state and notifications (no settings page) |
+
+## Data saver and detach removed (user, 2026-10-11: "remove data saver and detach")
+
+| Item | What was removed | Where | Import |
+|---|---|---|---|
+| Data Saver (Bandwidth Hero, wsrv.nl proxy) | the proxy service in the download crate, the Advanced "Data Saver" settings group, the source exclusion flag and its toggle, the entries menu item "Exclude from data saver" | `crates/kuro-downloads` (`data_saver` module removed; page requests use the image URL as it is), `src/settings_ui/data_saver.rs`, `crates/kuro-domain/src/source` and `app/source.rs`, `spec/entries.json` | the nine `data_saver*` keys and `ignore_jpeg`, `ignore_gif`, `data_saver_*` are in `DROPPED_KEYS`, so an old `config.toml` or an Aniyomi backup still loads and restores without them |
+| Detach (player and reader pop-out window) | the Detach / Attach button, the `Detachable` host (`src/widgets/detachable.rs`), the GL unrealize handoff of the video track, the `[player.window] open_detached` choice | `src/player_view`, `src/reader/screen.rs`, `src/reader/chrome.rs` | `player_open_detached` is in `DROPPED_KEYS` |
+
+The stored keys of both features are in `DROPPED_KEYS` (`crates/kuro-prefs/src/registry.rs`): `data_saver`,
+`ignore_jpeg`, `ignore_gif`, `data_saver_image_quality`, `data_saver_image_format_jpeg`, `data_saver_server`,
+`data_saver_color_bw`, `data_saver_excluded`, `data_saver_downloader` and `player_open_detached`. An old `config.toml` or
+an Aniyomi backup that carries them loads, and a restore skips them.
+
+The translated strings of the removed settings (`data_saver_*`, `bandwidth_hero`, `wsrv`, `resmush` and
+`bandwidth_data_saver_server`) are removed from `crates/kuro-i18n/locales/*/kurobayomi.ftl` and listed in `DROPPED_NAMES`
+(`crates/kuro-i18n/src/import.rs`), so a regenerated catalog leaves them out. The moko fixture keeps them, because it is
+the unchanged importer input.
+

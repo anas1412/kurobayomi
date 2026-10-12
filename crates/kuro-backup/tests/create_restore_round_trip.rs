@@ -194,8 +194,9 @@ fn x112_default_backup_restores_into_an_empty_database_with_the_same_counts() {
     assert_eq!(rows(&dbs.manga, "chapters"), 1);
     assert_eq!(rows(&dbs.anime, "animes"), 1);
     assert_eq!(rows(&dbs.manga, "categories") - seeded, 1);
-    assert_eq!(rows(&dbs.manga, "extension_repos"), 1);
-    assert_eq!(rows(&dbs.anime, "custom_buttons"), 1);
+    // Repo rows become links in the prefs link list, and custom buttons are not restored: neither writes a row.
+    assert_eq!(rows(&dbs.manga, "extension_repos"), 0);
+    assert_eq!(rows(&dbs.anime, "custom_buttons"), 0);
     assert_eq!(dbs.app.get_raw("show_nsfw_source"), Some(Stored::Bool(true)));
     assert_eq!(dbs.source.get_raw("show_nsfw"), Some(Stored::Bool(true)));
 }
@@ -208,8 +209,8 @@ fn every_single_option_the_create_side_allows_restores() {
         ("library entries", BackupOptions { library_entries: true, ..none() }, |d| rows(&d.manga, "mangas") == 1 && rows(&d.anime, "animes") == 1),
         ("categories", BackupOptions { categories: true, ..none() }, |d| rows(&d.anime, "categories") >= 1),
         ("app settings", BackupOptions { app_settings: true, ..none() }, |d| d.app.get_raw("show_nsfw_source").is_some()),
-        ("extension stores", BackupOptions { extension_stores: true, ..none() }, |d| rows(&d.manga, "extension_repos") == 1),
-        ("custom buttons", BackupOptions { custom_button: true, ..none() }, |d| rows(&d.anime, "custom_buttons") == 1),
+        ("extension stores", BackupOptions { extension_stores: true, ..none() }, |d| rows(&d.manga, "extension_repos") == 0),
+        ("custom buttons", BackupOptions { custom_button: true, ..none() }, |d| rows(&d.anime, "custom_buttons") == 0),
         ("source settings", BackupOptions { source_settings: true, ..none() }, |d| d.source.get_raw("show_nsfw").is_some()),
     ];
     for (name, opts, applied) in singles {
@@ -218,6 +219,7 @@ fn every_single_option_the_create_side_allows_restores() {
         preflight_file(&path, &Sources, &Trackers).unwrap_or_else(|e| panic!("{name}: {e}"));
         let mut dbs = fresh();
         restore(&mut dbs, &path);
+        // Extension stores and custom buttons are accepted and restore without error, but write no row any more.
         assert!(applied(&dbs), "{name}: the restore wrote what the file carries");
     }
 }

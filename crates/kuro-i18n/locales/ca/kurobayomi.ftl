@@ -438,26 +438,6 @@ theme_mocha = Mocha
 
 pref_category_hide_hidden = Amaga les categories ocultes de categories i pantalla d'emmagatzematge
 
-data_saver = Estalviador de dades
-
-data_saver_summary = Comprimeix les imatges abans de descarregar o carregar al lector
-
-data_saver_ignore_jpeg = Ignorar imatges Jpeg
-
-data_saver_ignore_gif = Ignora animacions GIF
-
-data_saver_image_quality = Qualitat d'imatge
-
-data_saver_image_format = Comprimeix a Jpeg
-
-data_saver_color_bw = Converteix a Negre I Blanc
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Bandwidth Hero Proxy Server
-
 next_unseen_episodes =
     { $count ->
         [one] Següent episodi pendent de visualització

@@ -1,6 +1,7 @@
 //! The pages of an online chapter, from the manga's source (any source the directory answers for). The page list comes
-//! from `MangaSource::get_page_list`; the images go over the shared client (`recipe_sources::client`) with no extra
-//! headers. The reader's HTTP loader keeps both in the chapter cache, the folder the cache settings clear.
+//! from `MangaSource::get_page_list`; the images go over the shared client (`recipe_sources::client`). A source that
+//! declares request headers (ABI 1.5) sends its own; each image then goes through the source's `unscramble` fix-up with
+//! the response headers. The reader's HTTP loader keeps both in the chapter cache, the folder the cache settings clear.
 //!
 //! The loader calls a source from its worker thread, outside the runtime, so every call is spawned on the app's runtime
 //! and waited for. The GTK thread never asks the source: [`Prefetch`] fetches page lists on threads, and the reader
@@ -15,7 +16,7 @@ use kuro_net::NetworkClient;
 use kuro_platform::paths::Paths;
 use kuro_source::MangaSource;
 use kuro_source::model::SChapter;
-use reqwest::header::HeaderMap;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tokio::runtime::Handle;
 use tokio::sync::watch;
 
@@ -67,9 +68,36 @@ impl HttpPageSource for SourcePages {
     }
 
     fn image(&self, image_url: &str) -> Result<Vec<u8>, String> {
-        let (client, headers, url) = (self.client.clone(), self.headers.clone(), image_url.to_owned());
-        self.run(async move { fetch(&client, &url, &headers).await })?
+        let (source, client, headers, url) = (Arc::clone(&self.source), self.client.clone(), self.headers.clone(), image_url.to_owned());
+        self.run(async move {
+            let headers = page_image_headers(source.as_ref(), headers).await;
+            let fetched = fetch(&client, &url, &headers).await?;
+            shown(source.as_ref(), fetched).await
+        })?
     }
+}
+
+/// The headers of one page image request: the source's own set when it declares one (ABI 1.5), else the default.
+pub(crate) async fn page_image_headers(source: &dyn MangaSource, default: HeaderMap) -> HeaderMap {
+    match source.request_headers().await {
+        Ok(Some(pairs)) => header_map(&pairs),
+        Ok(None) => default,
+        Err(error) => {
+            tracing::warn!(%error, "the source gave no request headers, so the default set is sent");
+            default
+        }
+    }
+}
+
+/// The source's pairs as a header map. A pair that is not a valid header is left out.
+fn header_map(pairs: &[(String, String)]) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    for (name, value) in pairs {
+        if let (Ok(name), Ok(value)) = (HeaderName::from_bytes(name.as_bytes()), HeaderValue::from_str(value)) {
+            map.append(name, value);
+        }
+    }
+    map
 }
 
 /// The GET of one image with the source's headers.
@@ -77,11 +105,34 @@ fn request(url: &str, headers: &HeaderMap) -> Result<kuro_net::request::Request,
     Ok(kuro_net::get(url).map_err(|e| e.to_string())?.headers(headers.clone()))
 }
 
-/// The body of one image. A status other than 2xx or 304 is an error with that status.
-async fn fetch(client: &NetworkClient, url: &str, headers: &HeaderMap) -> Result<Vec<u8>, String> {
+/// One fetched page image: its body and the response headers, which the source's fix-up reads.
+struct Fetched {
+    body: Vec<u8>,
+    headers: Vec<(String, String)>,
+}
+
+/// The body and headers of one image. A status other than 2xx or 304 is an error with that status.
+async fn fetch(client: &NetworkClient, url: &str, headers: &HeaderMap) -> Result<Fetched, String> {
     let response = client.execute(request(url, headers)?).await.map_err(|e| e.to_string())?;
     kuro_images::http::check_status(response.status).map_err(|e| e.to_string())?;
-    Ok(response.bytes().await.map_err(|e| e.to_string())?.to_vec())
+    let headers = response
+        .headers
+        .iter()
+        .filter_map(|(name, value)| value.to_str().ok().map(|v| (name.as_str().to_owned(), v.to_owned())))
+        .collect();
+    let body = response.bytes().await.map_err(|e| e.to_string())?.to_vec();
+    Ok(Fetched { body, headers })
+}
+
+/// The bytes to show for a fetched image: the source's fix-up of them, or the bytes as fetched. A source without the
+/// fix-up, or with one that answers no change, shows them as fetched; a fix-up error fails the page.
+async fn shown(source: &dyn MangaSource, fetched: Fetched) -> Result<Vec<u8>, String> {
+    let outcome = source.unscramble(&fetched.body, &fetched.headers).await;
+    match outcome {
+        Ok(Some(bytes)) => Ok(bytes),
+        Ok(None) => Ok(fetched.body),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 /// A page-list fetch that has not reached the cache.
@@ -300,6 +351,51 @@ mod tests {
     fn only_the_still_loading_message_is_a_wait() {
         assert!(is_pending(STILL_LOADING));
         assert!(!is_pending("Failed to load pages: 404"));
+    }
+
+    /// A source whose images are fixed up by XOR with 0xff. A body that starts with 0 is an image it cannot decode.
+    struct Scrambled;
+
+    #[async_trait]
+    impl MangaSource for Scrambled {
+        fn id(&self) -> i64 {
+            1
+        }
+        fn name(&self) -> &str {
+            "Scrambled"
+        }
+        async fn get_manga_details(&self, manga: &SManga) -> Result<SManga, SourceError> {
+            Ok(manga.clone())
+        }
+        async fn get_chapter_list(&self, _manga: &SManga) -> Result<Vec<SChapter>, SourceError> {
+            Ok(Vec::new())
+        }
+        async fn get_page_list(&self, _chapter: &SChapter) -> Result<Vec<Page>, SourceError> {
+            Ok(Vec::new())
+        }
+        async fn unscramble(&self, body: &[u8], _headers: &[(String, String)]) -> Result<Option<Vec<u8>>, SourceError> {
+            if body.first() == Some(&0) {
+                return Err(SourceError::Transport("Failed to decode image".into()));
+            }
+            Ok(Some(body.iter().map(|byte| byte ^ 0xff).collect()))
+        }
+    }
+
+    #[test]
+    fn a_fetched_image_is_shown_as_the_source_fixes_it_or_as_fetched() {
+        let rt = runtime();
+        let fetched = |body: &[u8]| Fetched { body: body.to_vec(), headers: vec![("x-enc-seed".into(), "1".into())] };
+        assert_eq!(rt.block_on(shown(&Scrambled, fetched(&[0x0f]))), Ok(vec![0xf0]), "the fix-up's bytes are shown");
+        assert_eq!(rt.block_on(shown(&Scrambled, fetched(&[0]))), Err("Failed to decode image".to_owned()));
+        let plain = ThreePages(Mutex::default());
+        assert_eq!(rt.block_on(shown(&plain, fetched(&[1, 2]))), Ok(vec![1, 2]), "no fix-up: the bytes as fetched");
+    }
+
+    #[test]
+    fn the_source_request_headers_are_sent_and_an_invalid_pair_is_left_out() {
+        let map = header_map(&[("Accept".into(), "image/png".into()), ("bad name".into(), "x".into())]);
+        assert_eq!(map.get("accept").unwrap(), "image/png");
+        assert_eq!(map.len(), 1);
     }
 
     #[test]

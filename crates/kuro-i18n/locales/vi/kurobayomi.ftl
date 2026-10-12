@@ -504,42 +504,6 @@ pref_category_hide_hidden = Ẩn danh mục ẩn khỏi danh mục và mục b�
 
 pref_update_anime_release_grace_period = Thời gian ân hạn phát hành anime dự kiến
 
-data_saver_exclude = Loại trừ khỏi trình tiết kiệm dữ liệu
-
-data_saver_stop_exclude = Dừng loại trừ khỏi trình tiết kiệm dữ liệu
-
-data_saver = Trình tiết kiệm dữ liệu
-
-data_saver_summary = Nén hình ảnh trước khi tải xuống hoặc tải vào trình đọc
-
-data_saver_downloader = Sử dụng trình tiết kiệm dữ liệu trong trình tải xuống
-
-data_saver_ignore_jpeg = Bỏ qua ảnh Jpeg
-
-data_saver_ignore_gif = Bỏ qua ảnh động Gif
-
-data_saver_image_quality = Chất lượng hình ảnh
-
-data_saver_image_quality_summary = Giá trị cao hơn có nghĩa là phần trăm chất lượng hình ảnh được lưu cao hơn nhưng cũng có nghĩa là kích thước tệp lớn hơn, 80 phần trăm là mức trung bình tốt giữa kích thước tệp và chất lượng hình ảnh
-
-data_saver_image_format = Nén thành Jpeg
-
-data_saver_image_format_summary_on = Kích thước tệp Jpeg nhỏ hơn đáng kể so với Webp (có nghĩa là lưu được nhiều dữ liệu hơn), nhưng nó cũng khiến hình ảnh mất chất lượng nhiều hơn.{"\u000A"}{"\u000A"}Hiện đang nén thành Jpeg
-
-data_saver_image_format_summary_off = Kích thước tệp Jpeg nhỏ hơn đáng kể so với Webp (có nghĩa là lưu được nhiều dữ liệu hơn), nhưng nó cũng khiến hình ảnh mất chất lượng nhiều hơn.{"\u000A"}{"\u000A"}Hiện đang nén thành Webp
-
-data_saver_color_bw = Chuyển đổi sang Đen Trắng
-
-bandwidth_hero = Bandwidth Hero (yêu cầu máy chủ Bandwidth Hero Proxy)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Máy chủ Bandwidth Hero Proxy
-
-data_saver_server_summary = Điền url máy chủ Bandwidth Hero Proxy tại đây
-
 download_slots_info = Sẽ chỉ tải xuống đồng thời từ các nguồn tự lưu trữ hoặc không được kiểm soát
 
 unseen = Bỏ đã xem

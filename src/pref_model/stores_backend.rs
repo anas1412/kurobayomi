@@ -1,15 +1,10 @@
-//! The blocking work behind the extension store and repo pages (T-47b-009 to T-47b-013, T-47b-019, T-47b-020). The page
-//! runs these on a worker thread and feeds each result back to the reducer in `stores.rs`.
+use std::collections::BTreeSet;
 
-use std::sync::Arc;
-
-use kuro_data::extension_repo::{ExtensionRepo, ExtensionRepoRepo};
-use kuro_data::extension_store::ExtensionStoreRepo;
-use kuro_domain::extension_repo::{self, AddRepoOutcome, ExtensionRepoService, HttpGet};
-use kuro_domain::extension_store::{self, AnimeExtensionStore, StoreHttp};
+use kuro_extensions::repo::{RepoError, add_link, remove_link};
 use kuro_i18n::{Arg, MsgKey, tr, trf};
+use kuro_prefs::pref::Pref;
 
-use super::stores;
+use super::stores::RepoLink;
 
 /// What one card shows and does.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,8 +28,6 @@ pub enum AddOutcome {
     Failed(String),
     /// The dialog closes and the toast shows this text (repos).
     Notice(String),
-    /// Another repo owns the signing key: the conflict dialog offers to replace it (repos).
-    Conflict { old_name: String, new_name: String, replace: Box<dyn FnOnce() + Send> },
 }
 
 /// The operations of one kind of list. They block, so the page calls them off the GTK thread.
@@ -54,127 +47,88 @@ pub trait Ops<T>: Send + Sync + 'static {
 /// The toast of an add that failed for a reason the domain does not name (a deliberate deviation: Kotlin is silent).
 pub const COULD_NOT_ADD_REPO: &str = "Could not add the repo";
 
-/// The anime extension stores (`AnimeExtensionStoresScreenModel`).
-pub struct StoreOps {
-    repo: ExtensionStoreRepo,
-    http: Arc<dyn StoreHttp + Send>,
-}
-
-impl StoreOps {
-    pub fn new(repo: ExtensionStoreRepo, http: Arc<dyn StoreHttp + Send>) -> Self {
-        Self { repo, http }
-    }
-}
-
-impl Ops<AnimeExtensionStore> for StoreOps {
-    fn card(&self, store: &AnimeExtensionStore) -> Card {
-        Card {
-            key: store.index_url.clone(),
-            name: store.name.clone(),
-            website: store.contact.website.clone(),
-            discord: store.contact.discord.clone().filter(|d| !d.is_empty()),
-            copy: store.index_url.clone(),
-            note: crate::browse::ext_badges::store_note_for(&store.index_url),
-        }
-    }
-
-    fn add(&self, url: &str) -> AddOutcome {
-        match extension_store::add_store(&self.repo, &*self.http, url) {
-            Ok(()) => AddOutcome::Added,
-            Err(e) => {
-                tracing::warn!(error = %e, url, "adding the extension store failed");
-                AddOutcome::Failed(e.to_string())
-            }
-        }
-    }
-
-    fn refresh(&self) {
-        if let Err(e) = extension_store::refresh_all(&self.repo, &*self.http) {
-            tracing::error!(error = %e, "refreshing the extension stores failed");
-        }
-    }
-
-    fn remove(&self, key: &str) {
-        if let Err(e) = self.repo.remove(key) {
-            tracing::error!(error = %e, key, "removing the extension store failed");
-        }
-    }
-}
-
-/// The manga extension repos (`MangaExtensionReposScreenModel`).
+/// The repository links of the Browse page (`docs/design/app-flow.md`): one https link to an `index.min.json` lists the
+/// sources. The links are kept in the `[sources]` preference, so a backup carries them.
 pub struct RepoOps {
-    repos: ExtensionRepoRepo,
-    http: Arc<dyn HttpGet + Send>,
+    links: Pref<BTreeSet<String>>,
 }
 
 impl RepoOps {
-    pub fn new(repos: ExtensionRepoRepo, http: Arc<dyn HttpGet + Send>) -> Self {
-        Self { repos, http }
+    pub fn new(links: Pref<BTreeSet<String>>) -> Self {
+        Self { links }
     }
 }
 
-/// The toast text and dialog result of each add outcome (`MangaExtensionReposScreenModel.createRepo`).
-pub fn repo_outcome(outcome: AddRepoOutcome, repos: &ExtensionRepoRepo) -> AddOutcome {
-    match outcome {
-        AddRepoOutcome::Success => AddOutcome::Added,
-        AddRepoOutcome::InvalidUrl => AddOutcome::Notice(tr(MsgKey::invalid_repo_name)),
-        AddRepoOutcome::RepoAlreadyExists => AddOutcome::Notice(tr(MsgKey::error_repo_exists)),
-        // Kotlin is silent here; a toast is the one deliberate deviation (T-47b-020)
-        AddRepoOutcome::Error => AddOutcome::Notice(COULD_NOT_ADD_REPO.to_owned()),
-        AddRepoOutcome::DuplicateFingerprint { old, new } => {
-            let repos = repos.clone();
-            let (old_name, new_name) = (old.name.clone(), new.name.clone());
-            AddOutcome::Conflict {
-                old_name,
-                new_name,
-                replace: Box::new(move || {
-                    if let Err(e) = extension_repo::replace(&repos, &new) {
-                        tracing::error!(error = %e, repo = %new.base_url, "replacing the repo failed");
-                    }
-                }),
-            }
+/// The toast text of a repo link that could not be added.
+pub fn repo_error_text(error: &RepoError) -> String {
+    match error {
+        RepoError::BadRepoLink => tr(MsgKey::invalid_repo_name),
+        RepoError::Network(_) | RepoError::Status(_) => "The repo could not be reached".to_owned(),
+        RepoError::TooMany { .. } => "The repo lists more than 10 sources of one kind".to_owned(),
+        RepoError::Mismatch => "A source does not match its checksum in the repo index".to_owned(),
+        RepoError::Write(_) => COULD_NOT_ADD_REPO.to_owned(),
+        RepoError::Parse(_) | RepoError::BadId(_) | RepoError::BadChecksum(_) | RepoError::BadLink(_) | RepoError::TooLarge => {
+            "The repo index is not valid".to_owned()
         }
     }
 }
 
-impl Ops<ExtensionRepo> for RepoOps {
+impl Ops<RepoLink> for RepoOps {
     fn closes_on_submit(&self) -> bool {
         true
     }
 
-    fn card(&self, repo: &ExtensionRepo) -> Card {
-        Card {
-            key: repo.base_url.clone(),
-            name: repo.name.clone(),
-            website: repo.website.clone(),
-            discord: None,
-            copy: format!("{}/index.min.json", repo.base_url),
-            note: None,
-        }
+    fn card(&self, repo: &RepoLink) -> Card {
+        Card { key: repo.0.clone(), name: repo.0.clone(), website: String::new(), discord: None, copy: repo.0.clone(), note: None }
     }
 
+    /// Fetches the index and every source it lists, then saves the link. Nothing is saved when any of it fails.
     fn add(&self, url: &str) -> AddOutcome {
-        let service = ExtensionRepoService::new(&*self.http);
-        repo_outcome(extension_repo::add_manga_repo(&self.repos, &service, url), &self.repos)
+        let link = url.trim();
+        if !(link.starts_with("https://") && link.ends_with(".json")) {
+            return AddOutcome::Notice(tr(MsgKey::invalid_repo_name));
+        }
+        let mut links: Vec<String> = self.links.get().into_iter().collect();
+        if links.iter().any(|known| known.as_str() == link) {
+            return AddOutcome::Notice(tr(MsgKey::error_repo_exists));
+        }
+        if let Err(error) = crate::recipe_sources::sync_link(link) {
+            tracing::warn!(%error, link, "adding the repo failed");
+            return AddOutcome::Notice(repo_error_text(&error));
+        }
+        if let Err(error) = add_link(&mut links, link) {
+            return AddOutcome::Notice(repo_error_text(&error));
+        }
+        if let Err(error) = self.links.set(links.into_iter().collect()) {
+            tracing::error!(%error, link, "saving the repo link failed");
+            return AddOutcome::Notice(COULD_NOT_ADD_REPO.to_owned());
+        }
+        crate::recipe_sources::reload();
+        AddOutcome::Added
     }
 
+    /// Fetches every saved link again. A link that fails keeps the copy it has.
     fn refresh(&self) {
-        let service = ExtensionRepoService::new(&*self.http);
-        if let Err(e) = extension_repo::update_all(&self.repos, &service) {
-            tracing::error!(error = %e, "refreshing the extension repos failed");
+        for link in self.links.get() {
+            if let Err(error) = crate::recipe_sources::sync_link(&link) {
+                tracing::error!(%error, link = link.as_str(), "refreshing the repo failed; its saved copy is kept");
+            }
         }
+        crate::recipe_sources::reload();
     }
 
     fn remove(&self, key: &str) {
-        if let Err(e) = extension_repo::delete(&self.repos, key) {
-            tracing::error!(error = %e, key, "removing the extension repo failed");
+        let mut links: Vec<String> = self.links.get().into_iter().collect();
+        if !remove_link(&mut links, key) {
+            return;
         }
+        if let Err(error) = self.links.set(links.into_iter().collect()) {
+            tracing::error!(%error, key, "removing the repo link failed");
+            return;
+        }
+        crate::recipe_sources::forget_link(key);
+        crate::recipe_sources::reload();
     }
-}
-
-/// The body of the remove dialog for a store.
-pub fn store_remove_body(name: &str, url: &str) -> String {
-    stores::remove_body(name, url)
 }
 
 /// The body of the delete dialog for a repo: it names the base URL only.
@@ -184,209 +138,70 @@ pub fn repo_remove_body(_name: &str, base_url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    use kuro_db::handle::Db;
-    use kuro_domain::extension_store::Contact;
+    use kuro_extensions::repo::Kind;
+    use kuro_prefs::source::SourcePrefs;
+    use kuro_prefs::store::PrefStore;
 
     use super::*;
 
-    struct Canned {
-        routes: HashMap<String, Result<Vec<u8>, String>>,
-        calls: Mutex<Vec<String>>,
+    fn repo_ops(links: &[&str]) -> (Pref<BTreeSet<String>>, RepoOps) {
+        let saved = SourcePrefs::new(PrefStore::in_memory()).manga_extension_repos;
+        saved.set(links.iter().map(|link| (*link).to_owned()).collect()).expect("seed the links");
+        let ops = RepoOps::new(saved.clone());
+        (saved, ops)
     }
 
-    impl Canned {
-        fn new(routes: &[(&str, Result<&str, &str>)]) -> Arc<Self> {
-            Arc::new(Self {
-                routes: routes.iter().map(|(u, r)| ((*u).to_owned(), r.map(|b| b.as_bytes().to_vec()).map_err(str::to_owned))).collect(),
-                calls: Mutex::new(Vec::new()),
-            })
+    // T-47b-020: a link is https and ends in .json; anything else is "Invalid repo URL" and nothing is saved
+    #[test]
+    fn t_47b_020_a_link_that_is_not_https_json_says_invalid_repo_url() {
+        let (saved, ops) = repo_ops(&[]);
+        for url in ["http://a.test/index.min.json", "https://a.test/index.min.json/", "nonsense", "https://a.test/index.min.json?x=1"] {
+            let AddOutcome::Notice(text) = ops.add(url) else { panic!("{url} is a notice") };
+            assert_eq!(text, "Invalid repo URL", "{url}");
         }
-    }
-
-    impl StoreHttp for Canned {
-        fn get(&self, url: &str) -> Result<Vec<u8>, String> {
-            self.calls.lock().unwrap().push(url.to_owned());
-            self.routes.get(url).cloned().unwrap_or_else(|| Err("HTTP 404".into()))
-        }
-    }
-
-    impl HttpGet for Canned {
-        fn get_text(&self, url: &str) -> Result<String, String> {
-            self.calls.lock().unwrap().push(url.to_owned());
-            match self.routes.get(url).cloned().unwrap_or_else(|| Err("HTTP 404".into())) {
-                Ok(bytes) => String::from_utf8(bytes).map_err(|e| e.to_string()),
-                Err(e) => Err(e),
-            }
-        }
-    }
-
-    const STORE: &str = r#"{"name":"New Store","badgeLabel":"N","signingKey":"key","contact":{"website":"https://n.test","discord":"https://discord.gg/n"}}"#;
-    const REPO: &str = r#"{"meta":{"name":"Repo A","shortName":"A","website":"https://a.test","signingKeyFingerprint":"fp-a"}}"#;
-    const REPO_B_SAME_KEY: &str = r#"{"meta":{"name":"Repo B","shortName":"B","website":"https://b.test","signingKeyFingerprint":"fp-a"}}"#;
-
-    fn anime_db() -> (tempfile::TempDir, Arc<Db>) {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("anime.db");
-        let writer = kuro_db::schema_anime::open(&path).expect("anime schema");
-        (dir, Arc::new(Db::new(&path, writer).expect("anime handle")))
-    }
-
-    fn manga_db() -> (tempfile::TempDir, Arc<Db>) {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("manga.db");
-        let writer = kuro_db::schema_manga::open(&path).expect("manga schema");
-        (dir, Arc::new(Db::new(&path, writer).expect("manga handle")))
-    }
-
-    fn store_ops(routes: &[(&str, Result<&str, &str>)]) -> (tempfile::TempDir, ExtensionStoreRepo, StoreOps) {
-        let (dir, db) = anime_db();
-        let repo = ExtensionStoreRepo::new(db);
-        let ops = StoreOps::new(repo.clone(), Canned::new(routes));
-        (dir, repo, ops)
+        assert!(saved.get().is_empty(), "nothing is saved");
     }
 
     #[test]
-    fn t_47b_011_a_good_url_upserts_the_row() {
-        let (_dir, repo, ops) = store_ops(&[("https://n.test/index.json", Ok(STORE))]);
-        assert!(matches!(ops.add("https://n.test/index.json"), AddOutcome::Added));
-        let rows = repo.all().expect("rows");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].name, "New Store");
-        assert_eq!(rows[0].index_url, "https://n.test/index.json", "keyed by the entered URL");
-    }
-
-    #[test]
-    fn t_47b_011_garbage_and_unreachable_urls_fail_with_text_and_save_nothing() {
-        let (_dir, repo, ops) = store_ops(&[("https://bad.test/x.json", Ok("not json at all")), ("https://down.test/x.json", Err("HTTP 500"))]);
-        let AddOutcome::Failed(text) = ops.add("https://bad.test/x.json") else { panic!("garbage fails") };
-        assert!(!text.is_empty());
-        let AddOutcome::Failed(text) = ops.add("https://down.test/x.json") else { panic!("a failing GET fails") };
-        assert!(text.contains("HTTP 500"), "{text}");
-        assert_eq!(repo.count().expect("count"), 0);
-    }
-
-    #[test]
-    fn t_47b_012_refresh_updates_what_it_can_and_skips_a_failing_store() {
-        let (_dir, repo, ops) = store_ops(&[("https://ok.test/a.json", Ok(STORE))]);
-        for (url, name) in [("https://ok.test/a.json", "Old A"), ("https://gone.test/b.json", "Old B")] {
-            repo.add(&kuro_db::statements_anime::ExtensionStore {
-                index_url: url.into(),
-                name: name.into(),
-                badge_label: String::new(),
-                signing_key: "key".into(),
-                contact_website: String::new(),
-                contact_discord: None,
-                is_legacy: false,
-                extension_list_url: None,
-                resolved_index_url: url.into(),
-            })
-            .expect("seed");
-        }
-        ops.refresh();
-        assert_eq!(repo.get("https://ok.test/a.json").expect("get").expect("row").name, "New Store");
-        assert_eq!(repo.get("https://gone.test/b.json").expect("get").expect("row").name, "Old B", "the failing store is kept");
-    }
-
-    #[test]
-    fn t_47b_013_remove_deletes_by_index_url() {
-        let (_dir, repo, ops) = store_ops(&[("https://n.test/index.json", Ok(STORE))]);
-        let _ = ops.add("https://n.test/index.json");
-        ops.remove("https://n.test/index.json");
-        assert_eq!(repo.count().expect("count"), 0);
-    }
-
-    #[test]
-    fn t_47b_015_a_card_lists_discord_only_when_set() {
-        let (_dir, _repo, ops) = store_ops(&[]);
-        let mut store = AnimeExtensionStore {
-            index_url: "https://s/index.json".into(),
-            name: "S".into(),
-            badge_label: String::new(),
-            signing_key: String::new(),
-            contact: Contact { website: "https://s".into(), discord: Some("https://discord.gg/s".into()) },
-            is_legacy: false,
-            extension_list_url: None,
-            resolved_index_url: "https://s/index.json".into(),
-        };
-        let card = ops.card(&store);
-        assert_eq!(card.discord.as_deref(), Some("https://discord.gg/s"));
-        assert_eq!(card.copy, "https://s/index.json");
-        store.contact.discord = Some(String::new());
-        assert_eq!(ops.card(&store).discord, None, "an empty link is no link");
-        store.contact = Contact { website: String::new(), discord: None };
-        let none = ops.card(&store);
-        assert!(!stores::card_actions(&none.website, none.discord.as_deref()).globe_enabled);
-    }
-
-    fn repo_ops(routes: &[(&str, Result<&str, &str>)]) -> (tempfile::TempDir, ExtensionRepoRepo, RepoOps) {
-        let (dir, db) = manga_db();
-        let repos = ExtensionRepoRepo::new(db);
-        let ops = RepoOps::new(repos.clone(), Canned::new(routes));
-        (dir, repos, ops)
-    }
-
-    #[test]
-    fn t_47b_020_a_valid_index_url_adds_the_repo_and_a_second_add_says_it_exists() {
-        let (_dir, repos, ops) = repo_ops(&[("https://a.test/repo.json", Ok(REPO))]);
-        assert!(matches!(ops.add("https://a.test/index.min.json"), AddOutcome::Added));
-        assert_eq!(repos.all().expect("rows")[0].name, "Repo A");
+    fn t_47b_020_a_link_already_added_says_so() {
+        let (saved, ops) = repo_ops(&["https://a.test/index.min.json"]);
         let AddOutcome::Notice(text) = ops.add("https://a.test/index.min.json") else { panic!("a repeat is a notice") };
         assert_eq!(text, "This repo already exists!");
+        assert_eq!(saved.get().len(), 1);
     }
 
     #[test]
-    fn t_47b_020_an_unnamed_failure_toasts_could_not_add_the_repo_and_the_repo_dialog_closes_on_submit() {
-        let (_dir, repos, ops) = repo_ops(&[]);
-        let AddOutcome::Notice(text) = repo_outcome(AddRepoOutcome::Error, &repos) else { panic!("a notice") };
-        assert_eq!(text, "Could not add the repo");
+    fn t_47b_020_an_unreachable_index_is_a_notice_and_nothing_is_saved() {
+        let (saved, ops) = repo_ops(&[]);
+        assert!(matches!(ops.add("https://127.0.0.1:9/index.min.json"), AddOutcome::Notice(_)));
+        assert!(saved.get().is_empty());
+    }
+
+    #[test]
+    fn t_47b_020_each_failure_has_its_toast_text_and_the_dialog_closes_on_submit() {
+        assert_eq!(repo_error_text(&RepoError::Network("refused".into())), "The repo could not be reached");
+        assert_eq!(repo_error_text(&RepoError::Status(404)), "The repo could not be reached");
+        assert_eq!(repo_error_text(&RepoError::TooMany { kind: Kind::Manga, count: 11, limit: 10 }), "The repo lists more than 10 sources of one kind");
+        assert_eq!(repo_error_text(&RepoError::Parse("x".into())), "The repo index is not valid");
+        assert_eq!(repo_error_text(&RepoError::Mismatch), "A source does not match its checksum in the repo index");
+        assert_eq!(repo_error_text(&RepoError::Write("disk".into())), COULD_NOT_ADD_REPO);
+        let (_saved, ops) = repo_ops(&[]);
         assert!(ops.closes_on_submit(), "T-47b-024: Add closes the dialog at once");
     }
 
     #[test]
-    fn t_47b_020_bad_urls_and_unreachable_repos_say_invalid_url() {
-        let (_dir, _repos, ops) = repo_ops(&[]);
-        for url in ["http://a.test/index.min.json", "https://a.test/index.min.json/", "nonsense", "https://a.test/index.min.json"] {
-            let AddOutcome::Notice(text) = ops.add(url) else { panic!("{url} is a notice") };
-            assert_eq!(text, "Invalid repo URL", "{url}");
-        }
-    }
-
-    #[test]
-    fn t_47b_021_a_second_repo_with_the_same_key_offers_a_replace_that_swaps_the_rows() {
-        let (_dir, repos, ops) = repo_ops(&[("https://a.test/repo.json", Ok(REPO)), ("https://b.test/repo.json", Ok(REPO_B_SAME_KEY))]);
-        assert!(matches!(ops.add("https://a.test/index.min.json"), AddOutcome::Added));
-        let AddOutcome::Conflict { old_name, new_name, replace } = ops.add("https://b.test/index.min.json") else { panic!("same key conflicts") };
-        assert_eq!((old_name.as_str(), new_name.as_str()), ("Repo A", "Repo B"));
-        assert_eq!(repos.all().expect("rows").len(), 1, "nothing changes until Replace");
-        replace();
-        let rows = repos.all().expect("rows");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].base_url, "https://b.test");
-    }
-
-    #[test]
-    fn t_47b_019_the_repo_card_copies_the_index_url_and_has_no_discord() {
-        let (_dir, _repos, ops) = repo_ops(&[]);
-        let card = ops.card(&ExtensionRepo {
-            base_url: "https://a.test".into(),
-            name: "A".into(),
-            short_name: None,
-            website: "https://a.test".into(),
-            signing_key_fingerprint: "fp".into(),
-        });
+    fn t_47b_019_the_repo_card_copies_the_link_and_has_no_discord() {
+        let (_saved, ops) = repo_ops(&[]);
+        let card = ops.card(&RepoLink("https://a.test/index.min.json".into()));
         assert_eq!(card.copy, "https://a.test/index.min.json");
         assert_eq!(card.discord, None);
-        assert_eq!(repo_remove_body("A", "https://a.test"), "Do you wish to delete the repo \"https://a.test\"?");
+        assert_eq!(repo_remove_body("A", "https://a.test/index.min.json"), "Do you wish to delete the repo \"https://a.test/index.min.json\"?");
     }
 
     #[test]
-    fn t_47b_019_remove_deletes_by_base_url() {
-        let (_dir, repos, ops) = repo_ops(&[("https://a.test/repo.json", Ok(REPO))]);
-        let _ = ops.add("https://a.test/index.min.json");
-        ops.remove("https://a.test");
-        assert!(repos.all().expect("rows").is_empty());
+    fn t_47b_019_remove_deletes_the_link() {
+        let (saved, ops) = repo_ops(&["https://a.test/index.min.json", "https://b.test/index.min.json"]);
+        ops.remove("https://a.test/index.min.json");
+        assert_eq!(saved.get().into_iter().collect::<Vec<_>>(), vec!["https://b.test/index.min.json".to_owned()]);
     }
 }

@@ -96,9 +96,7 @@ fn the_top_bar_labels_the_bookmark_by_its_state_and_has_a_named_back_button() {
             on_bookmark: Box::new(|| {}),
             on_overflow: Box::new(|_| {}),
         };
-        let detach = gtk::Button::new();
-        let header = build_top_bar(&bar, actions, &detach);
-        assert!(detach.parent().is_some(), "Detach sits in the bar");
+        let header = build_top_bar(&bar, actions);
         let buttons = buttons_under(header.upcast_ref());
         assert!(position_of(&buttons, strings::ACTION_REMOVE_BOOKMARK).is_some(), "a bookmarked chapter offers to unbookmark");
         assert!(position_of(&buttons, "Back").is_some(), "the back button is named");

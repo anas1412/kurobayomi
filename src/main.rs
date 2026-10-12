@@ -30,7 +30,6 @@ mod incognito;
 mod open_link;
 #[allow(dead_code)]
 mod player_view;
-mod player_scripts;
 mod reader;
 mod recipe_sources;
 mod reporter;

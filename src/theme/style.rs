@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 
-use super::tokens::{self as tk, Role, Tokens};
+use super::tokens::{self as tk, Tokens};
 
 /// The base stylesheet: GTK named colours and static rules, loaded before the palette.
 pub const BASE_CSS: &str = include_str!("style.css");
@@ -124,90 +124,10 @@ pub fn ripple_rules(system_dark: bool) -> String {
     )
 }
 
-/// The palette-dependent `kb-*` rules, appended to the generated palette stylesheet.
-pub fn palette_rules(tokens: &Tokens) -> String {
-    let mut out = String::new();
-    // Interaction timings (T-49b-012, Elevation.kt): incoming 120 ms, outgoing (press) 150 ms, hover
-    // exit 120 ms. Plain CSS transitions; the Kotlin animation API is not ported.
-    let _ = writeln!(
-        out,
-        ".{} {{ transition: background-color 120ms cubic-bezier(0.4, 0.0, 0.2, 1.0); }}",
-        class::SURFACE
-    );
-    let _ = writeln!(
-        out,
-        ".{}:active {{ transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0.0, 0.6, 1.0); }}",
-        class::SURFACE
-    );
-    let _ = writeln!(out, ".{}:hover {{ transition-duration: 120ms; }}", class::SURFACE);
-    // the state layer: onSurface over a hovered or pressed clickable surface
-    let on_surface = tokens.get(Role::OnSurface);
-    let _ = writeln!(out, ".{}:hover {{ background-color: {}; }}", class::SURFACE, on_surface.to_css_with_alpha(HOVER_ALPHA));
-    let _ = writeln!(
-        out,
-        ".{}:active {{ background-color: {}; }}",
-        class::SURFACE,
-        on_surface.to_css_with_alpha(crate::theme::tokens::RIPPLE_ALPHA)
-    );
-    let _ = writeln!(
-        out,
-        ".{} {{ background-color: {}; }}",
-        class::SELECTED,
-        tokens.get(Role::Secondary).to_css_with_alpha(selected_alpha(tokens.dark))
-    );
-    // body medium: 14 px, semibold, on_surface_variant (T-49b-011)
-    let _ = writeln!(
-        out,
-        ".{} {{ font-weight: 600; font-size: 14px; color: {}; }}",
-        class::HEADER,
-        tokens.get(Role::OnSurfaceVariant).to_css()
-    );
-    let _ = writeln!(out, ".{} {{ color: {}; }}", class::ACTIVE, tokens.active().to_css());
-    let _ = writeln!(
-        out,
-        ".{} {{ background-color: {}; color: {}; }}",
-        class::PILL,
-        tokens.get(Role::SurfaceContainerHigh).to_css(),
-        tokens.get(Role::OnSurface).to_css()
-    );
-    // after the generic pill: equal specificity, so the later rule wins (T-49b-022)
-    let _ = writeln!(
-        out,
-        ".{} {{ background-color: {}; }}",
-        class::TAB_PILL,
-        tokens.get(Role::OnBackground).to_css_with_alpha(crate::widgets::tabs::pill_alpha(tokens.dark))
-    );
-    let _ = writeln!(out, ".{} {{ color: {}; }}", class::PRIMARY_ICON, tokens.get(Role::Primary).to_css());
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::resolve::{scheme_for, tokens_for};
     use crate::theme::tokens::Rgba;
-    use kuro_prefs::ui::AppTheme;
-
-    // T-49b-012: the interaction timings and curves of Elevation.kt, as generated CSS.
-    #[test]
-    fn surface_transitions_use_the_interaction_timings() {
-        let t = tokens_for(scheme_for(AppTheme::CLOUDFLARE), false, false);
-        let rules = palette_rules(&t);
-        assert!(rules.contains("transition: background-color 120ms cubic-bezier(0.4, 0.0, 0.2, 1.0);"));
-        assert!(rules.contains("transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0.0, 0.6, 1.0);"));
-        assert!(rules.contains(".kb-surface:hover { transition-duration: 120ms; }"));
-    }
-
-    #[test]
-    fn selected_tint_alpha_follows_the_dark_flag() {
-        assert_eq!(selected_alpha(true), 0.16);
-        assert_eq!(selected_alpha(false), 0.22);
-        let light = tokens_for(scheme_for(AppTheme::CLOUDFLARE), false, false);
-        let dark = tokens_for(scheme_for(AppTheme::CLOUDFLARE), true, false);
-        assert!(palette_rules(&light).contains(".kb-selected { background-color: rgba("));
-        assert!(palette_rules(&light).contains(", 0.22)"));
-        assert!(palette_rules(&dark).contains(", 0.16)"));
-    }
 
     #[test]
     fn system_rules_follow_the_dark_flag() {
@@ -219,28 +139,17 @@ mod tests {
         assert!(light.contains(&format!(".kb-active {{ color: {}; }}", Rgba::argb(0xFFFF_C107).to_css())));
     }
 
-    // T-49a-034: the pill geometry is always on; the colour is the token in a palette and a GTK
-    // mix in System mode.
+    // T-49a-034: the pill geometry is always on; the colour is a GTK mix.
     #[test]
-    fn pill_geometry_is_always_on_and_colour_is_surface_container_high() {
+    fn pill_geometry_is_always_on_and_colour_is_a_gtk_mix() {
         let rules = widget_rules(false);
         assert!(rules.contains(".kb-pill { padding: 1px 6px; border-radius: 999px; }"));
         assert!(system_rules(true).contains(".kb-pill { background-color: mix(@theme_bg_color"));
-        for dark in [false, true] {
-            let t = tokens_for(scheme_for(AppTheme::CLOUDFLARE), dark, false);
-            let want = format!(".kb-pill {{ background-color: {};", t.get(Role::SurfaceContainerHigh).to_css());
-            assert!(palette_rules(&t).contains(&want), "dark={dark}");
-        }
     }
 
     // T-49b-021: an indicated surface has a hover and a press background; .kb-noindication has none.
     #[test]
     fn clickable_surface_has_hover_and_press_backgrounds() {
-        let t = tokens_for(scheme_for(AppTheme::CLOUDFLARE), false, false);
-        let rules = palette_rules(&t);
-        let on_surface = t.get(Role::OnSurface);
-        assert!(rules.contains(&format!(".kb-surface:hover {{ background-color: {}; }}", on_surface.to_css_with_alpha(HOVER_ALPHA))));
-        assert!(rules.contains(&format!(".kb-surface:active {{ background-color: {}; }}", on_surface.to_css_with_alpha(0.1))));
         assert!(system_rules(false).contains(".kb-surface:hover { background-color: alpha(@theme_fg_color, 0.08); }"));
         assert!(system_rules(false).contains(".kb-surface:active { background-color: alpha(@theme_fg_color, 0.1); }"));
         assert!(widget_static_rules().contains(".kb-noindication:hover, .kb-noindication:active { background-image: none; background-color: transparent; }"));
@@ -250,13 +159,6 @@ mod tests {
     #[test]
     fn tab_pill_rule_follows_the_pill_rule() {
         for dark in [false, true] {
-            let t = tokens_for(scheme_for(AppTheme::CLOUDFLARE), dark, false);
-            let rules = palette_rules(&t);
-            let pill = rules.find(".kb-pill {").expect("pill rule");
-            let tab = rules.find(".kb-tab-pill {").expect("tab pill rule");
-            assert!(tab > pill, "dark={dark}");
-            let want = t.get(Role::OnBackground).to_css_with_alpha(if dark { 0.12 } else { 0.08 });
-            assert!(rules.contains(&format!(".kb-tab-pill {{ background-color: {want}; }}")), "dark={dark}");
             let system = system_rules(dark);
             assert!(system.find(".kb-tab-pill {").unwrap() > system.find(".kb-pill {").unwrap(), "dark={dark}");
         }
@@ -265,8 +167,6 @@ mod tests {
     // T-49b-026: the info icon is primary, not the amber filter tint.
     #[test]
     fn primary_icon_class_uses_the_primary_role() {
-        let t = tokens_for(scheme_for(AppTheme::CLOUDFLARE), false, false);
-        assert!(palette_rules(&t).contains(&format!(".kb-primary-icon {{ color: {}; }}", t.get(Role::Primary).to_css())));
         assert!(system_rules(true).contains(".kb-primary-icon { color: @accent_color; }"));
     }
 
@@ -281,14 +181,6 @@ mod tests {
     #[test]
     fn base_stylesheet_leaves_dark_aware_rules_to_the_generated_css() {
         assert!(!BASE_CSS.contains(".kb-active") && !BASE_CSS.contains(".kb-selected"));
-    }
-
-    #[test]
-    fn active_tint_rule_uses_the_dark_flag() {
-        let dark = tokens_for(scheme_for(AppTheme::DEFAULT), true, false);
-        let light = tokens_for(scheme_for(AppTheme::DEFAULT), false, false);
-        assert!(palette_rules(&dark).contains(&format!(".kb-active {{ color: {}; }}", Rgba::argb(0xFFFF_EB3B).to_css())));
-        assert!(palette_rules(&light).contains(&format!(".kb-active {{ color: {}; }}", Rgba::argb(0xFFFF_C107).to_css())));
     }
 
     #[test]
@@ -411,17 +303,6 @@ mod base_css_tests {
     fn splash_colours_match_the_android_resources() {
         assert!(has(".kb-splash {\n  background-color: #54759E;"));
         assert!(has(".kb-splash.kb-dark {\n  background-color: #202125;"));
-    }
-
-    /// T-49ba-003: the AMOLED surfaces match `values-night/themes.xml`, dark mode only.
-    #[test]
-    fn amoled_surfaces_match_values_night() {
-        assert!(has(".kb-dark.kb-amoled window,"));
-        assert!(has("background-color: #000000;"));
-        assert!(has(".kb-dark.kb-amoled .card,"));
-        assert!(has("background-color: #0C0C0C;"));
-        assert!(has("background-color: #131313;"));
-        assert!(has("background-color: #1B1B1B;"));
     }
 
     /// T-49ba-032: dividers are one pixel of the foreground at 0.12.

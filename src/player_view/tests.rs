@@ -152,166 +152,6 @@ fn a_stream_load_sets_its_headers_and_adds_its_subtitle_after_the_file_loads() {
     playback.stop();
 }
 
-/// The mpv side of a Detach or Attach: video goes off before the render context is freed and comes back after the
-/// new one exists. The file stays loaded (a clip with no audio would end if mpv dropped its video as failed), the
-/// playhead does not jump back, and the pause state is the one from before the move.
-#[test]
-fn a_handoff_keeps_the_file_its_position_and_its_pause_state() {
-    let dir = TempDir::new().unwrap();
-    let Some(clip) = make_clip(dir.path()) else {
-        eprintln!("skipped: ffmpeg is not installed, so no test clip was made");
-        return;
-    };
-    let playback = headless(dir.path());
-    playback.load(clip.to_str().unwrap(), None, 0).expect("loadfile");
-    assert!(wait_for(|| playback.position_ms().is_some_and(|p| p > 300)), "playback advances");
-
-    for paused in [false, true] {
-        playback.mpv().set_property_flag("pause", paused).expect("pause state");
-        let before = playback.position_ms().unwrap();
-        let handoff = playback.hand_off_video();
-        assert_eq!(playback.mpv().get_string("vid").as_deref(), Some("no"), "video is off during the move");
-        std::thread::sleep(Duration::from_millis(200));
-        assert_eq!(playback.mpv().get_flag("idle-active"), Some(false), "the file is still loaded with video off");
-        playback.resume_video(&handoff);
-        assert_ne!(playback.mpv().get_string("vid").as_deref(), Some("no"), "video is back");
-        assert_eq!(playback.is_paused(), paused, "the pause state survives the move");
-        assert!(playback.position_ms().is_some_and(|p| p + 100 >= before), "the playhead does not jump back");
-    }
-    playback.mpv().set_property_flag("pause", false).unwrap();
-    let resumed = playback.position_ms().unwrap();
-    assert!(wait_for(|| playback.position_ms().is_some_and(|p| p > resumed + 300)), "playback goes on after the move");
-    playback.stop();
-}
-
-/// The GL area going away: during a move the video is handed off and playback stays open; any other unrealize (Back,
-/// Alt+Left, a closed detached window, the app quitting) saves the progress and stops mpv, and stays a close.
-#[test]
-fn the_area_going_away_hands_off_on_a_move_and_saves_and_stops_otherwise() {
-    let dir = TempDir::new().unwrap();
-    let Some(clip) = make_clip(dir.path()) else {
-        eprintln!("skipped: ffmpeg is not installed, so no test clip was made");
-        return;
-    };
-    let (db, id) = library(&dir, &clip);
-    let playback = headless(dir.path());
-    playback.load(clip.to_str().unwrap(), None, 0).expect("loadfile");
-    assert!(wait_for(|| playback.position_ms().is_some_and(|p| p > 300)), "playback advances");
-    let media = super::Media { target: clip.display().to_string(), title: "clip".into(), headers: None, tracks: Vec::new() };
-    let mut player = super::Player {
-        playback,
-        tracker: Tracker::open(Arc::clone(&db), id, false),
-        media,
-        episode_id: id,
-        resolving: false,
-        finished_saved: false,
-        closed: false,
-        handoff: None,
-    };
-
-    assert!(!player.area_gone(true), "a move is not a close");
-    assert!(!player.closed && player.handoff.is_some());
-    assert_eq!(player.playback.mpv().get_flag("idle-active"), Some(false), "the file stays loaded");
-    let handoff = player.handoff.take().unwrap();
-    player.playback.resume_video(&handoff);
-    assert!(wait_for(|| player.playback.position_ms().is_some_and(|p| p > 1_200)), "playback goes on after the move");
-
-    let before = player.playback.position_ms().unwrap();
-    assert!(player.area_gone(false), "an unrealize that is not a move closes");
-    assert!(player.closed);
-    assert!(wait_for(|| player.playback.mpv().get_flag("idle-active") == Some(true)), "mpv stopped");
-    assert!(stored(&db, id).last_second_seen >= before / 1000, "the close saved the playhead");
-    assert!(player.area_gone(true), "after a close, a move is still a close");
-}
-
-/// Every Detach or Attach writes `player_open_detached`, which the next playback reads to open the same way.
-#[test]
-fn a_detach_or_attach_is_remembered_for_the_next_playback() {
-    crate::testing::with_display(|| {
-        use gtk::prelude::*;
-        let (_stack, window) = crate::testing::nav();
-        let was_visible = window.is_visible();
-        window.present();
-        let store = kuro_prefs::store::PrefStore::in_memory();
-        let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let host = crate::widgets::detachable::Detachable::new(&page, "clip", true);
-        host.show(false);
-        super::remember_choice(&host, kuro_prefs::player::PlayerWindowPrefs::new(store.clone()));
-        let stored = || kuro_prefs::player::PlayerWindowPrefs::new(store.clone()).open_detached.get();
-        assert!(!stored(), "embedded until a choice is made");
-        host.toggle();
-        assert!(stored(), "Detach is remembered");
-        host.toggle();
-        assert!(!stored(), "Attach is remembered");
-        window.set_visible(was_visible);
-    });
-}
-
-/// Opens the real player page in the test window, detaches it into its own window, pauses, attaches it back, plays
-/// on, detaches again and closes that window, pumping the main loop. mpv's config files go to a scratch folder. Needs
-/// a display (and ffmpeg for the clip); without them it says so and returns.
-#[test]
-fn window_plays_the_clip_on_screen() {
-    crate::testing::with_display(|| {
-        use gtk::prelude::*;
-        for name in ["glGetIntegerv", "glGetString", "glBindFramebuffer"] {
-            assert!(!super::gl::get_proc_address(name).is_null(), "{name} did not resolve once GTK had loaded GL");
-        }
-        let dir = TempDir::new().unwrap();
-        let Some(clip) = make_clip(dir.path()) else {
-            return;
-        };
-        let (_stack, window) = crate::testing::nav();
-        let was_visible = window.is_visible();
-        window.present();
-        let media = super::Media { target: clip.display().to_string(), title: "clip".into(), headers: None, tracks: Vec::new() };
-        let (host, shared) = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
-        assert_eq!(crate::ui::page_stack().0, ["screen:player"], "the player opens inside the main window by default");
-        let pump = |ms: u64| {
-            let end = Instant::now() + Duration::from_millis(ms);
-            while Instant::now() < end {
-                gtk::glib::MainContext::default().iteration(false);
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        };
-        let position = || shared.borrow().playback.position_ms().unwrap_or(0);
-        let video_on = || shared.borrow().playback.mpv().get_string("vid").is_some_and(|v| v != "no");
-        let paused = || shared.borrow().playback.is_paused();
-
-        pump(1_000);
-        let before = position();
-        assert!(before > 300, "the clip plays embedded, at {before} ms");
-        host.toggle();
-        assert!(host.is_detached());
-        pump(700);
-        assert!(video_on(), "video is back after the detach");
-        assert!(position() > before, "playback went on across the detach");
-        assert!(!shared.borrow().closed);
-
-        shared.borrow().playback.mpv().set_property_flag("pause", true).unwrap();
-        let before = position();
-        host.toggle();
-        assert!(!host.is_detached());
-        pump(500);
-        assert!(video_on(), "video is back after the attach");
-        assert!(paused(), "a paused player stays paused across the attach");
-        assert!(position() + 100 >= before, "the playhead did not jump back");
-
-        shared.borrow().playback.mpv().set_property_flag("pause", false).unwrap();
-        host.toggle();
-        assert!(host.is_detached());
-        let before = position();
-        pump(500);
-        assert!(video_on() && !paused() && position() > before, "playing again in its own window");
-
-        host.close();
-        pump(300);
-        assert!(shared.borrow().closed, "closing the detached window closes the player");
-        assert_eq!(shared.borrow().playback.mpv().get_flag("idle-active"), Some(true), "mpv stopped");
-        window.set_visible(was_visible);
-    });
-}
-
 /// Runs the main loop for `ms`.
 fn pump_for(ms: u64) {
     let end = Instant::now() + Duration::from_millis(ms);
@@ -336,7 +176,7 @@ fn popping_the_embedded_player_stops_playback_at_once() {
         window.present();
         crate::ui::push(&gtk::Label::new(Some("below")));
         let media = super::Media { target: clip.display().to_string(), title: "clip".into(), headers: None, tracks: Vec::new() };
-        let (_host, shared) = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
+        let shared = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
         pump_for(500);
         assert!(!shared.borrow().closed, "playing");
 
@@ -364,12 +204,11 @@ fn a_closed_player_is_freed_and_leaves_no_leak() {
         window.present();
         crate::ui::push(&gtk::Label::new(Some("below")));
         let media = super::Media { target: clip.display().to_string(), title: "clip".into(), headers: None, tracks: Vec::new() };
-        let (host, shared) = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
+        let shared = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
         pump_for(400);
         let weak = std::rc::Rc::downgrade(&shared);
         crate::ui::pop();
         drop(shared);
-        drop(host);
         pump_for(1200);
         assert!(weak.upgrade().is_none(), "nothing keeps the closed player (and its mpv handle) alive");
         assert!(!super::is_open(), "no player counts as open any more");
@@ -377,8 +216,8 @@ fn a_closed_player_is_freed_and_leaves_no_leak() {
     });
 }
 
-/// F11 and Escape act on the window that holds the page: the detached window, not the main one. Needs a display, a
-/// compositor that honours fullscreen, and ffmpeg; without them it says so and returns.
+/// F11 and Escape act on the main window, which holds the page. Needs a display, a compositor that honours fullscreen,
+/// and ffmpeg; without them it says so and returns.
 #[test]
 fn fullscreen_and_escape_act_on_the_window_that_holds_the_player() {
     crate::testing::with_display(|| {
@@ -387,32 +226,31 @@ fn fullscreen_and_escape_act_on_the_window_that_holds_the_player() {
         let Some(clip) = make_clip(dir.path()) else {
             return;
         };
-        let (_stack, window) = crate::testing::nav();
+        let (stack, window) = crate::testing::nav();
         let was_visible = window.is_visible();
         window.present();
+        // a page under the player, so that popping the player has somewhere to go back to
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        stack.add_child(&root);
+        stack.set_visible_child(&root);
         let media = super::Media { target: clip.display().to_string(), title: "clip".into(), headers: None, tracks: Vec::new() };
-        let (host, shared) = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
-        host.toggle();
-        let own = gtk::Window::list_toplevels()
-            .into_iter()
-            .filter_map(|w| w.downcast::<gtk::Window>().ok())
-            .find(|w| w.title().as_deref() == Some("clip") && w.is_visible())
-            .expect("the detached window");
-        let page = own.child().and_downcast::<gtk::Box>().expect("the page is the window's child");
+        let shared = super::open_in(dir.path().to_owned(), media, 0, 0).expect("the player opens");
+        let page = stack.visible_child().and_downcast::<gtk::Box>().expect("the page is the visible child");
 
         super::toggle_fullscreen(&page);
         pump_for(700);
-        if own.is_fullscreen() {
-            assert!(!window.is_fullscreen(), "the main window did not change");
+        if window.is_fullscreen() {
             assert!(super::apply_action(&shared, &page, kuro_player::shortcuts::Action::Escape), "Escape leaves fullscreen");
             pump_for(700);
-            assert!(!own.is_fullscreen() && !window.is_fullscreen(), "back to normal");
+            assert!(!window.is_fullscreen(), "back to normal");
         } else {
             eprintln!("skipped: the compositor did not fullscreen the window");
         }
-        host.close();
+        crate::ui::pop();
         pump_for(300);
         assert!(shared.borrow().closed);
+        pump_for(300);
+        stack.remove(&root);
         window.set_visible(was_visible);
     });
 }

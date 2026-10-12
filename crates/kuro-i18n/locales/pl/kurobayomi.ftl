@@ -646,34 +646,6 @@ choose_video_quality = Wybierz jakość wideo:
 
 extension_settings = Ustawienia rozszerzeń
 
-data_saver_summary = Kompresuj obrazy przed pobraniem lub załadowaniem do czytnika
-
-data_saver_ignore_jpeg = Ignoruj obrazy JPEG
-
-data_saver_ignore_gif = Ignoruj animacje GIF
-
-data_saver_image_quality = Jakość Obrazu
-
-data_saver_image_quality_summary = Wyższe wartości oznaczają, że zapisywany jest wyższy procent jakości obrazu, ale też oznacza że rozmiar pliku jest większy. 80 procent to dobra mediana między rozmiarem pliku a jakością obrazu
-
-data_saver_image_format = Kompresuj jako Jpeg
-
-data_saver_image_format_summary_on = Rozmiar pliku JPEG jest znacznie mniejszy niż rozmiar pliku WebP (co oznacza że jest oszczędzane więcej danych), ale powoduje to również większą utratę jakości obrazów.{"\u000A"}{"\u000A"}Obecnie kompresowane jako Jpeg
-
-data_saver_image_format_summary_off = Rozmiar pliku JPEG jest znacznie mniejszy niż rozmiar pliku WebP (co oznacza że jest oszczędzane więcej danych), ale powoduje to również większą utratę jakości obrazów{"\u000A"}{"\u000A"}Obecnie kompresowane jako Webp
-
-data_saver_color_bw = Konwertuj na czarno-białe
-
-bandwidth_hero = Bandwidth Hero (Wymaga serwera Proxy Bandwidth Hero)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Serwer Proxy Bandwidth Hero
-
-data_saver_server_summary = wpisz adres URL z serwera Bandwidth Hero Proxy
-
 next_unseen_episodes =
     { $count ->
         [one] Następny nieobejrzany odcinek

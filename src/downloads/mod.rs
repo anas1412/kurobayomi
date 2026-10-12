@@ -5,6 +5,7 @@
 
 pub mod anime_io;
 pub mod anime_queue;
+pub mod manga_io;
 pub mod queue_page;
 
 use std::path::Path;
@@ -64,9 +65,10 @@ pub fn start(
     Ok(Started { queues: Queues { manga, anime }, _connectivity: connectivity })
 }
 
-/// The saved manga queue rows, in saved order. Nothing in the app builds a manga `ChapterSource` yet, so no row can
-/// come back as a queued download: every row is a SourceMissing row (the manager's `kept_rows`), written back unchanged
-/// by each save instead of being erased. A table that cannot be read gives no rows, and the store then refuses to write.
+/// The saved manga queue rows, in saved order. The app's manga source port is `manga_io::LiveChapterSource`, but the saved
+/// rows are not turned back into queued downloads at startup yet: every row is a SourceMissing row (the manager's
+/// `kept_rows`), written back unchanged by each save instead of being erased. A table that cannot be read gives no rows,
+/// and the store then refuses to write.
 fn saved_rows(store: &QueueStore) -> Vec<QueueRow> {
     store.load().unwrap_or_else(|e| {
         tracing::error!("the saved manga queue could not be read, it is left as it is: {e}");

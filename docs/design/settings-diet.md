@@ -2,6 +2,8 @@
 
 Written 2026-10-11 for the "as simple as possible" pass. Read-only analysis: no build, no code changed. Sources read: `crates/kuro-prefs/src/registry.rs` (317 rows), the section structs in `crates/kuro-prefs/src`, `src/settings_ui/*`, `src/pref_model/*`, `spec/settings.json`, and every reader of each key in `src/` and `crates/`.
 
+**Status (user decision, 2026-10-11: "remove data saver and detach"):** Data Saver and Detach are CUT. Their code, settings rows, tests and strings are removed. Their stored keys are in `DROPPED_KEYS`, so an old `config.toml` or an Aniyomi backup still loads (see `docs/drop-decisions.md`). The counts and tables below are the analysis from before that cut and stay as the record.
+
 Rule used for every row: a setting is KEEP (a visible control) or CUT (code, row, tests and stored key removed, a hard-coded default put in its place). No hidden settings. The one exception is the player's own mpv.conf / input.conf files, which need no UI. KEEP-LATER (torrent server, WebView and Cloudflare window, the other trackers) is left untouched and not counted.
 
 ## 1. Counts
@@ -30,7 +32,7 @@ Key-backed visible settings: **38**. Add the action rows that are not preference
 | 2. Library | `default_anime_category`, `default_category`, `pref_library_update_interval_key`, `muted_notification_channels` | `__APP_STATE_library_update_last_timestamp`, `library_unread_updates_count`, `library_unseen_updates_count`, `__APP_STATE_last_used_anime_category`, `__APP_STATE_last_used_category` | Edit anime categories, Edit manga categories (actions), Default anime category, Default manga category, Automatic updates (interval), one switch Notify about new chapters and episodes. The library window sheets (not a page) keep: display mode, sort, items per row, Downloaded and Unread badges, filters Downloaded, Unread/Unseen, Completed, Tracked. |
 | 2b. Library window sheets (not a settings page) | `pref_display_mode_library`, `library_sorting_mode`, `animelib_sorting_mode`, `pref_animelib_columns_landscape_key`, `pref_library_columns_landscape_key`, `display_download_badge`, `display_unread_badge`, `pref_filter_animelib_downloaded_v2`, `pref_filter_library_downloaded_v2`, `pref_filter_animelib_unread_v2`, `pref_filter_library_unread_v2`, `pref_filter_animelib_completed_v2`, `pref_filter_library_completed_v2`, `pref_filter_animelib_tracked_{id}_v2`, `pref_filter_library_tracked_{id}_v2` | - | Sort, Filter and Display tabs of the library; they stay where they are. |
 | 3. Reader | `pref_default_reading_mode_key`, `pref_reader_theme_key`, `pref_image_scale_type_key`, `pref_zoom_start_key`, `crop_borders`, `pref_dual_page_split` | - | Default reading mode, Background color, Scale type, Zoom start position, Crop borders, Split wide pages. The reader window keeps the same six. |
-| 4. Player | `pref_subtitle_lang`, `pref_audio_lang`, `player_volume_value`, `pref_auto_play_enabled` | `player_open_detached` | Preferred subtitle languages, Preferred audio languages, Default volume, Autoplay next episode. The hoster and quality pickers stay in the player (no key). The mpv.conf and input.conf FILES in the mpv-config folder are the one advanced item, no UI. The Torrent sub-page stays as it is (KEEP-LATER keys, not counted). |
+| 4. Player | `pref_subtitle_lang`, `pref_audio_lang`, `player_volume_value`, `pref_auto_play_enabled` | - | Preferred subtitle languages, Preferred audio languages, Default volume, Autoplay next episode. The hoster and quality pickers stay in the player (no key). The mpv.conf and input.conf FILES in the mpv-config folder are the one advanced item, no UI. The Torrent sub-page stays as it is (KEEP-LATER keys, not counted). |
 | 5. Downloads and storage | `__APP_STATE_storage_dir`, `download_slots`, `download_new`, `download_new_episode`, `remove_after_read_slots` | - | Download location, Maximum downloads, Download new chapters, Download new episodes, Delete after reading/watching, plus the Clear chapter and episode cache action. |
 | 6. Sources and tracking | `source_languages`, `show_nsfw_source`, `anime_extension_repos`, `extension_repos`, `__PRIVATE_track_token_{id}`, `pref_auto_update_manga_sync_key` | `hidden_anime_catalogues`, `hidden_catalogues`, `pinned_anime_catalogues`, `pinned_catalogues`, `__APP_STATE_trusted_extensions`, `anime_ext_last_check`, `anilist_score_type` | Source languages, Show NSFW sources, Anime extension repos, Manga extension repos, AniList (login), Update progress after reading/watching. Revoke trusted extensions moves here as an action. |
 | 7. Backup and restore | `backup_interval` | `__APP_STATE_last_auto_backup_timestamp` | Automatic backup frequency, Create backup, Restore backup (both actions, no include/exclude dialogs). |
@@ -46,7 +48,7 @@ Pages removed: Security and privacy, Advanced, Data Saver, Player > Internal pla
 3. **Entry defaults: 29 `default_*` keys, 0 kept.** They only live behind the "Set as default" buttons of the entry sheets. The per-entry flags stay in the database; new entries get fixed defaults.
 4. **Downloads: 23 rows, 4 kept (plus the storage location from Data and storage).** The app has no download manager yet, so most of the 19 cuts remove code nobody calls, including the Android external-downloader hand-off.
 5. **Appearance: 22 palettes, pure black, navigation style, date format, relative time all gone.** Theme mode (System, Light, Dark) plus Start screen plus Language stay.
-6. **Data Saver: 9 keys and 9 rows in Advanced.** Nothing in the app builds a `DataSaver` from them.
+6. **Data Saver: 9 keys and 9 rows in Advanced.** Cut (2026-10-11). Nothing in the app built a `DataSaver` from them.
 7. **Security page and Advanced page deleted (9 keys, about 30 rows).** App lock, notification hiding, DoH, user agent, verbose logging, display profile, bitmap threshold.
 8. **Library page: 80 rows, 23 kept.** Smart update rules, update scopes (4 category sets), per-category sort, hidden-category and season switches, badges and tab micro toggles, Started/Bookmarked filters, Random sort, the portrait column keys.
 9. **Tracking: one login (AniList) and one switch.** Ten other tracker rows leave the UI; their code and the token, username, password and expired families stay (KEEP-LATER).
@@ -67,7 +69,7 @@ Cut here, but they are whole features. Say no and I keep them:
 - App lock (Security and privacy page, 4 keys). A working passphrase lock exists (`src/applock_host.rs`).
 - External player (`pref_always_use_external_player`, read by 4 screens today). Only the always-on switch and the Android picker go; the one-off "play in external player" action stays.
 - Mini player / PiP (4 keys): the feature stays on, the switches go.
-- Data Saver (Bandwidth Hero proxy): feature and 9 keys.
+- Data Saver (Bandwidth Hero proxy): feature and 9 keys. Cut by the user on 2026-10-11 (see the decisions table at the end).
 - Random sort of the library and per-extension incognito.
 - Player pages Custom buttons, Script editor, Code editor (no registry keys; stored in the database and the backup). Principle 4 says decide these one by one with you. The mpv.conf file covers the power-user need.
 - Library list CSV export, Reindex downloads, Clear Manga/Anime database, Refresh library covers, Reset per-series reader settings (actions, section 8).
@@ -331,7 +333,7 @@ Not a registry key but you asked for it: **player quality and server choice**. A
 | `pref_player_statistics_page` | In the player (stats overlay page) | Which mpv stats page shows. | **CUT** | 0 | Per-session; nothing in the app feeds it. | UNWIRED; import: keep accepting on import |
 | `pref_remember_decoder` | Nowhere (no row) | Opt-in: remember the decoder chosen last time. Kurobayomi-only. | **CUT** | false | Micro option; hwdec choice goes to mpv.conf. Read by src/player_view/mod.rs today, so remove that code too. | READ-BY-APP; import: n/a (Kurobayomi-only key, not in Aniyomi backups) |
 | `player_decoder` | Nowhere (state of the above) | The remembered decoder. Kurobayomi-only. | **CUT** | "" | Goes with remember decoder. | READ-BY-APP; import: n/a (Kurobayomi-only key, not in Aniyomi backups) |
-| `player_open_detached` | In the player (detach button) | Whether the player opens in its own window or in the main window, as left last time. Kurobayomi-only. | **KEEP** |  | State of a visible player button; not a settings row. | STATE |
+| `player_open_detached` | In the player (detach button) | Removed with the Detach button (user, 2026-10-11). | **CUT** |  | Detach feature cut. | DROPPED (in `DROPPED_KEYS`; import skips it) |
 | `pref_torrserver_enable` | Player > Torrent > Enable TorrServer | Turns the embedded torrent server on. | **KEEP-LATER** |  | Torrent server is being kept for later. | READ-BY-APP (entry route) |
 | `pref_torrserver_shownotice` | Nowhere | Remembers that the server notice was shown. | **KEEP-LATER** |  | Torrent server kept for later. | DEAD |
 | `pref_torrserver_port` | Player > Torrent > TorrServer port | Port of the torrent server. | **KEEP-LATER** |  | Torrent server kept for later. | UNWIRED |
@@ -397,15 +399,15 @@ Not a registry key but you asked for it: **player quality and server choice**. A
 | `anime_ext_last_check` | Nowhere (state; Kurobayomi-only) | When extensions were last checked for updates. | **KEEP** |  | State that throttles the update check. | STATE |
 | `browse_hide_in_anime_library_items` | Browse > Sources > Hide anime entries already in library | Hides library entries in source results. | **CUT** | false | Micro option; the in-library badge already tells. | import: keep accepting on import |
 | `browse_hide_in_library_items` | Browse > Sources > Hide manga entries already in library | Hides library entries in source results. | **CUT** | false | Micro option. | import: keep accepting on import |
-| `data_saver` | Advanced > Data Saver > Data Saver | Routes images through the Bandwidth Hero proxy (none or one service). | **CUT** | NONE | Phone data-plan idea; users of a desktop connection do not use it. | UNWIRED (loader and downloader take a DataSaver the app never builds from the stored mode); import: keep accepting on import |
-| `ignore_jpeg` | Advanced > Data Saver > Ignore Jpeg Images | Skip proxy for jpeg. | **CUT** | false | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: keep accepting on import |
-| `ignore_gif` | Advanced > Data Saver > Ignore Gif Animations | Skip proxy for gif. | **CUT** | true | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: keep accepting on import |
-| `data_saver_image_quality` | Advanced > Data Saver > Image Quality | Proxy image quality percent. | **CUT** | 80 | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: keep accepting on import |
-| `data_saver_image_format_jpeg` | Advanced > Data Saver > Compress to Jpeg | Proxy returns jpeg. | **CUT** | false | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: keep accepting on import |
-| `data_saver_server` | Advanced > Data Saver > Bandwidth Hero Proxy Server | Address of the proxy. | **CUT** | "" | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: keep accepting on import |
-| `data_saver_color_bw` | Advanced > Data Saver > Convert to Black And White | Proxy returns grey images. | **CUT** | false | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: keep accepting on import |
-| `data_saver_excluded` | Browse > source menu > exclude from data saver | Sources the proxy skips. | **CUT** | {} | Part of Data Saver. | READ-BY-APP (kuro-domain source app); import: keep accepting on import |
-| `data_saver_downloader` | Advanced > Data Saver > Use data saver in the downloader | Applies the proxy to downloads. | **CUT** | true | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: keep accepting on import |
+| `data_saver` | Advanced > Data Saver > Data Saver | Routes images through the Bandwidth Hero proxy (none or one service). | **CUT** | NONE | Phone data-plan idea; users of a desktop connection do not use it. | UNWIRED (loader and downloader take a DataSaver the app never builds from the stored mode); import: skipped on import (in `DROPPED_KEYS`) |
+| `ignore_jpeg` | Advanced > Data Saver > Ignore Jpeg Images | Skip proxy for jpeg. | **CUT** | false | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: skipped on import (in `DROPPED_KEYS`) |
+| `ignore_gif` | Advanced > Data Saver > Ignore Gif Animations | Skip proxy for gif. | **CUT** | true | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: skipped on import (in `DROPPED_KEYS`) |
+| `data_saver_image_quality` | Advanced > Data Saver > Image Quality | Proxy image quality percent. | **CUT** | 80 | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: skipped on import (in `DROPPED_KEYS`) |
+| `data_saver_image_format_jpeg` | Advanced > Data Saver > Compress to Jpeg | Proxy returns jpeg. | **CUT** | false | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: skipped on import (in `DROPPED_KEYS`) |
+| `data_saver_server` | Advanced > Data Saver > Bandwidth Hero Proxy Server | Address of the proxy. | **CUT** | "" | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: skipped on import (in `DROPPED_KEYS`) |
+| `data_saver_color_bw` | Advanced > Data Saver > Convert to Black And White | Proxy returns grey images. | **CUT** | false | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: skipped on import (in `DROPPED_KEYS`) |
+| `data_saver_excluded` | Browse > source menu > exclude from data saver | Sources the proxy skips. | **CUT** | {} | Part of Data Saver. | READ-BY-APP (kuro-domain source app); import: skipped on import (in `DROPPED_KEYS`) |
+| `data_saver_downloader` | Advanced > Data Saver > Use data saver in the downloader | Applies the proxy to downloads. | **CUT** | true | Part of Data Saver. | UNWIRED (kuro-downloads has a DataSaver; the app never builds it from this key); import: skipped on import (in `DROPPED_KEYS`) |
 
 ### Tracking (settings_tracking)
 
@@ -537,7 +539,7 @@ That is 11 keys: KEEP 3, CUT 7, KEEP-LATER 1. Cutting them follows the same rule
 | Random sort | CUT |
 | Custom buttons, Script editor, Code editor pages and the Lua bridge | CUT (the user's own `mpv.conf` and `input.conf` files are still honored; no editor UI) |
 | Maintenance actions | KEEP |
-| Data Saver | UNDECIDED (the user asked how it would work) |
-| Detach (the player and reader pop-out window) | UNDECIDED (being reconsidered) |
+| Data Saver | CUT (user, 2026-10-11: "remove data saver and detach") |
+| Detach (the player and reader pop-out window) | CUT (user, 2026-10-11: "remove data saver and detach"); the pages stay embedded in the main window |
 
 These cuts are applied in a follow-up pass after the code-first build, because the build's settings lanes ran with all seven kept.

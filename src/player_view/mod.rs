@@ -1,6 +1,5 @@
 //! The player page (areas 45 and 46): a GL area that shows libmpv's render output, a control bar and keyboard
-//! shortcuts. It opens inside the main window, or detached in its own window when that was the last choice, and the
-//! header's Detach / Attach button moves it while it plays (docs/design/player-reader.md). It is opened through
+//! shortcuts. It opens inside the main window (docs/design/player-reader.md). It is opened through
 //! [`open_episode`] for a file, or [`open_source_episode`] for an episode of an online source. Logic lives in `playback` (mpv), `source` (the source's video) and `store` (watch progress); this
 //! file is widget wiring. Main thread only.
 
@@ -19,7 +18,7 @@ pub use source::open_source_episode;
 
 use std::cell::{Cell, RefCell};
 use std::path::Path;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -40,10 +39,9 @@ use kuro_player::session::prepare_mpv_dir;
 use kuro_player::shortcuts::{Action, action_for};
 
 use neighbours::{Step, adjacent};
-use playback::{Handoff, Playback, VOLUME_MAX, seek_delta_ms, seek_target_ms, volume_after_steps};
+use playback::{Playback, VOLUME_MAX, seek_delta_ms, seek_target_ms, volume_after_steps};
 use store::Tracker;
 
-use crate::widgets::detachable::Detachable;
 use crate::widgets::page_header;
 
 /// How often the page reads mpv, updates the controls and saves progress when one is due.
@@ -78,7 +76,7 @@ thread_local! {
     static CURRENT: RefCell<std::rc::Weak<RefCell<Player>>> = RefCell::new(std::rc::Weak::new());
 }
 
-/// A player page is open (embedded or detached). A second click on an episode then opens nothing more.
+/// A player page is open. A second click on an episode then opens nothing more.
 pub fn is_open() -> bool {
     CURRENT.with(|c| c.borrow().upgrade().is_some_and(|p| p.try_borrow().map_or(true, |p| !p.closed)))
 }
@@ -97,9 +95,9 @@ fn open_media(media: Media, episode_id: i64, start_ms: i64) {
     }
 }
 
-/// Opens the player with mpv's config files under `data_dir`. Returns the host that places the page and the state
-/// the page shares, or `None` when libmpv did not start.
-fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms: i64) -> Option<(Rc<Detachable>, Shared)> {
+/// Opens the player with mpv's config files under `data_dir`. Returns the state the page shares, or `None` when libmpv
+/// did not start.
+fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms: i64) -> Option<Shared> {
     let mut prefs = PlayerPrefs {
         data_dir,
         ..PlayerPrefs::default()
@@ -130,34 +128,13 @@ fn open_in(data_dir: std::path::PathBuf, media: Media, episode_id: i64, start_ms
         tracker,
         finished_saved: false,
         closed: false,
-        handoff: None,
         media,
         episode_id,
         resolving: false,
     }));
     CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(&shared));
-    // the page is held here until the host places it; the host only keeps it weakly
-    let (_page, host) = build_page(&shared, start);
-    let window_prefs = window_prefs();
-    host.show(window_prefs.as_ref().is_some_and(|p| p.open_detached.get()));
-    if let Some(window_prefs) = window_prefs {
-        remember_choice(&host, window_prefs);
-    }
-    Some((host, shared))
-}
-
-/// Each Detach or Attach is stored, so the next playback opens the same way.
-fn remember_choice(host: &Detachable, prefs: kuro_prefs::player::PlayerWindowPrefs) {
-    host.connect_moved(move |detached| {
-        if let Err(e) = prefs.open_detached.set(detached) {
-            tracing::warn!(error = %e, "player: the detached choice was not stored");
-        }
-    });
-}
-
-/// The `[player.window]` preferences, or `None` before the app data is installed.
-fn window_prefs() -> Option<kuro_prefs::player::PlayerWindowPrefs> {
-    crate::data::is_installed().then(|| kuro_prefs::player::PlayerWindowPrefs::new(crate::data::app().base.store().clone()))
+    crate::ui::push(&build_page(&shared, start));
+    Some(shared)
 }
 
 /// Everything the page reads and writes on mpv and the database. Shared by the GTK closures; a `RefCell` borrow
@@ -174,8 +151,6 @@ struct Player {
     finished_saved: bool,
     /// Playback was stopped and saved for good (Back, or the page or its window went away).
     closed: bool,
-    /// Set while the page moves between windows: the GL area is between its old and new render context.
-    handoff: Option<Handoff>,
 }
 
 type Shared = Rc<RefCell<Player>>;
@@ -225,18 +200,6 @@ impl Player {
             self.playback.stop();
         }
     }
-
-    /// The GL area is going away. While the host moves the page (and playback is still open) the video is handed
-    /// off to the next area; any other unrealize closes. Returns `true` for a close.
-    fn area_gone(&mut self, moving: bool) -> bool {
-        if moving && !self.closed {
-            self.handoff = Some(self.playback.hand_off_video());
-            false
-        } else {
-            self.finish();
-            true
-        }
-    }
 }
 
 fn now_ms() -> i64 {
@@ -256,7 +219,7 @@ fn toggle_pause(shared: &Shared) {
     }
 }
 
-/// The window that holds the page now: the main window while embedded, its own while detached.
+/// The window that holds the page: the main window.
 fn window_of(page: &impl IsA<gtk::Widget>) -> Option<gtk::Window> {
     page.as_ref().root().and_downcast::<gtk::Window>()
 }
@@ -295,10 +258,9 @@ fn apply_action(shared: &Shared, page: &gtk::Box, action: Action) -> bool {
     true
 }
 
-/// The player page: a slim header (Back, title, Detach, the quality and tracks menus) over the video and its control bar. The
-/// page is named `screen:player`, so the main window hides its sidebar while it shows. Returns the host that places
-/// it in the main window or in its own window.
-fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
+/// The player page: a slim header (Back, title, the quality and tracks menus) over the video and its control bar. The
+/// page is named `screen:player`, so the main window hides its sidebar while it shows. The caller pushes it.
+fn build_page(shared: &Shared, start: i64) -> gtk::Box {
     let area = gtk::GLArea::new();
     area.set_hexpand(true);
     area.set_vexpand(true);
@@ -344,33 +306,26 @@ fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
     page.set_widget_name("screen:player");
     page.set_focusable(true);
-    let host = Detachable::new(&page, &title, true);
-    // the shared page header: Back stops and saves at once, then leaves the page (or closes its window)
+    // the shared page header: Back stops and saves at once, then leaves the page
     let header = page_header::header(&title_label, {
-        let (shared, host, page) = (Rc::clone(shared), Rc::clone(&host), page.downgrade());
+        let (shared, page) = (Rc::clone(shared), page.downgrade());
         move || {
             shared.borrow_mut().finish();
             if let Some(window) = page.upgrade().and_then(|p| window_of(&p)).filter(|w| w.is_fullscreen()) {
                 window.unfullscreen();
             }
-            host.close();
+            crate::ui::pop();
         }
     });
     let menu = menu::tracks_menu(shared);
     let quality = sheets::quality::button(shared);
     header.pack_end(&menu);
     header.pack_end(&quality);
-    header.pack_end(host.button());
     page.append(&header);
     page.append(&overlay);
 
-    wire_gl(&area, shared, start, Rc::downgrade(&host));
-    {
-        // Escape, Alt+Left and the mouse back button pop the page without this file knowing: stop at once, not when
-        // the stack removes the page 400 ms later
-        let shared = Rc::clone(shared);
-        host.connect_left(move || shared.borrow_mut().finish());
-    }
+    wire_gl(&area, shared, start);
+    watch_left(&page, shared, &area);
 
     {
         let shared = Rc::clone(shared);
@@ -451,14 +406,34 @@ fn build_page(shared: &Shared, start: i64) -> (gtk::Box, Rc<Detachable>) {
         shared,
     );
     start_ticks(&page, &title_label, &play, &seek, &time, &volume, &loading, shared);
-    (page, host)
+    page
+}
+
+/// Stops playback at once when the page leaves the main stack by a route the page does not see (Escape, Alt+Left, the
+/// mouse back button): the stack removes the page only after its 400 ms transition. The handler goes with the GL area.
+fn watch_left(page: &gtk::Box, shared: &Shared, area: &gtk::GLArea) {
+    let stack = crate::ui::stack();
+    let (page_ref, shared_ref) = (page.downgrade(), Rc::downgrade(shared));
+    let id = stack.connect_visible_child_notify(move |stack| {
+        let (Some(page), Some(shared)) = (page_ref.upgrade(), shared_ref.upgrade()) else { return };
+        let left = page.parent().as_ref() == Some(stack.upcast_ref::<gtk::Widget>())
+            && stack.visible_child().as_ref() != Some(page.upcast_ref::<gtk::Widget>());
+        if left {
+            shared.borrow_mut().finish();
+        }
+    });
+    let id = Cell::new(Some(id));
+    area.connect_unrealize(move |_| {
+        if let Some(id) = id.take() {
+            stack.disconnect(id);
+        }
+    });
 }
 
 /// Connects the GL area: the render context is made on realize, frames are drawn on render, and the context is
-/// freed on unrealize while the GL context is still current. An unrealize while `host` moves the page is a handoff:
-/// video is switched off before the context goes and comes back once the next realize made a new one. Any other
-/// unrealize is a close (the page was popped, its window closed, the app quit): progress is saved and playback stops.
-fn wire_gl(area: &gtk::GLArea, shared: &Shared, start: i64, host: Weak<Detachable>) {
+/// freed on unrealize while the GL context is still current. An unrealize closes the player (the page was popped, its
+/// window closed, the app quit): progress is saved and playback stops.
+fn wire_gl(area: &gtk::GLArea, shared: &Shared, start: i64) {
     let loaded = Rc::new(Cell::new(false));
     {
         let shared = Rc::clone(shared);
@@ -467,17 +442,15 @@ fn wire_gl(area: &gtk::GLArea, shared: &Shared, start: i64, host: Weak<Detachabl
     {
         let shared = Rc::clone(shared);
         area.connect_unrealize(move |area| {
-            let moving = host.upgrade().is_some_and(|h| h.is_moving());
-            let closed = {
+            {
                 let mut player = shared.borrow_mut();
-                let closed = player.area_gone(moving);
+                player.finish();
                 area.make_current();
                 player.playback.mpv_mut().destroy_render_context();
-                closed
-            };
-            // however the page left (Back, Escape, Alt+Left, the mouse back button, a closed window), the window
-            // that held it leaves fullscreen
-            if closed && let Some(window) = window_of(area).filter(|w| w.is_fullscreen()) {
+            }
+            // however the page left (Back, Escape, Alt+Left, the mouse back button), the window that held it leaves
+            // fullscreen
+            if let Some(window) = window_of(area).filter(|w| w.is_fullscreen()) {
                 window.unfullscreen();
             }
         });
@@ -526,8 +499,6 @@ fn realize(area: &gtk::GLArea, shared: &Shared, start: i64, loaded: &Cell<bool>)
             tracing::error!(error = %e, "player: could not load the file");
             crate::toast::notify(tr(MsgKey::player_hoster_failed));
         }
-    } else if let Some(handoff) = player.handoff.take() {
-        player.playback.resume_video(&handoff);
     }
 }
 

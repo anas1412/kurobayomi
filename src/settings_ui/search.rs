@@ -42,12 +42,7 @@ pub const MAIN_SCREENS: [&str; 6] = [
 ];
 
 /// The player index (Android `playerSettingScreens`), appended after the main index.
-pub const PLAYER_SCREENS: [&str; 4] = [
-    "settings_player",
-    "settings_player_custom_buttons",
-    "settings_player_editor",
-    "settings_player_torrents",
-];
+pub const PLAYER_SCREENS: [&str; 2] = ["settings_player", "settings_player_torrents"];
 
 /// The first breadcrumb node of a hit from the player index during a non-player search.
 pub const PLAYER_PREFIX: &str = "Player";
@@ -292,7 +287,7 @@ mod tests {
         let expected: Vec<&str> = MAIN_SCREENS.iter().chain(PLAYER_SCREENS.iter()).copied().collect();
         assert_eq!(screens, expected);
         assert!(!screens.contains(&"settings_about"));
-        assert_eq!(rows.iter().filter(|r| r.player).count(), 4);
+        assert_eq!(rows.iter().filter(|r| r.player).count(), 2);
         assert_eq!(rows[0].screen_title, "Appearance", "titles come from the spec");
     }
 
@@ -326,11 +321,11 @@ mod tests {
 
     #[test]
     fn a_player_hit_gets_the_player_prefix_first() {
-        let mut row = row_of("Buttons", None, "settings_player_custom_buttons", Some("Buttons"), true);
-        row.screen_title = "Custom buttons".into();
-        assert_eq!(crumb(&row), "Player > Custom buttons > Buttons");
+        let mut row = row_of("Port", None, "settings_player_torrents", Some("Port"), true);
+        row.screen_title = "Torrent".into();
+        assert_eq!(crumb(&row), "Player > Torrent > Port");
         row.player = false;
-        assert_eq!(crumb(&row), "Custom buttons > Buttons", "the prefix is only for the player index");
+        assert_eq!(crumb(&row), "Torrent > Port", "the prefix is only for the player index");
     }
 
     #[test]

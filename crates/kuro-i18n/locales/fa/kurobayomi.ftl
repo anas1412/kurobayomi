@@ -370,42 +370,6 @@ choose_video_quality = انتخاب کیفیت ویدیو:
 
 extension_settings = تنظیمات افزونه‌ها
 
-data_saver_exclude = استثناء از صرفه‌جویی داده
-
-data_saver_stop_exclude = توقف استثناء از صرفه‌جویی داده
-
-data_saver = صرفه‌جویی داده
-
-data_saver_summary = فشرده‌سازی عکس‌ها قبل از دانلود یا بارگیری در ریدر
-
-data_saver_downloader = صرفه‌جویی داده در دانلود
-
-data_saver_ignore_jpeg = نادیده گرفتن تصاویر Jpeg
-
-data_saver_ignore_gif = نادیده گرفتن انیمیشن‌های Gif
-
-data_saver_image_quality = کیفیت تصویر
-
-data_saver_image_quality_summary = مقدار بالاتر به معنی درصد ذخیره بالاتر کیفیت عکس میباشد، ولی فایل‌ها حجیم تر میشوند، 80 درصد میانه خوبی بین اندازه فایل و کیفیت تصویر است
-
-data_saver_image_format = فشرده‌سازی به Jpeg
-
-data_saver_image_format_summary_on = اندازه فایل Jpeg به مراتب از فایل Webp کمتر از (به معنی صرفه جویی بیشتر داده) ولی منجر به از دست رفتن کیفیت بیشتر عکس‌ها میشود.{"\u000A"}{"\u000A"}فعلا به Jpeg فشرده‌سازی شد
-
-data_saver_image_format_summary_off = اندازه فایل Jpeg به مراتب از فایل Webp کمتر از (به معنی صرفه جویی بیشتر داده) ولی منجر به از دست رفتن کیفیت بیشتر عکس‌ها میشود.{"\u000A"}{"\u000A"}فعلا به Jpeg فشرده‌سازی شد
-
-data_saver_color_bw = تبدیل به سیاه و سفید
-
-bandwidth_hero = Bandwidth Hero (نیازمند یک سرور پروکسی Bandwidth Hero میباشد)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = سرور پروکسی Bandwidth Hero
-
-data_saver_server_summary = آدرس سرور پروکسی Bandwidth Hero را اینجا قرار دهید
-
 next_unseen_episodes =
     { $count ->
         [one] قسمت‌های دیده نشده بعدی

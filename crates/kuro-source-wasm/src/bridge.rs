@@ -4,6 +4,10 @@
 //! same as for built-in sources. The import is synchronous: it runs on the blocking thread of the guest call and
 //! waits on the runtime handle, so it must never run on an async worker.
 
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex, PoisonError};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
 use base64::Engine as _;
 use base64::prelude::BASE64_STANDARD;
 use bytes::Bytes;
@@ -17,8 +21,10 @@ use kuro_source::prefs::preference_key;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use wasmtime::StoreLimits;
+use wasmtime::component::Linker;
 
 use crate::bindings::kuro::source::host::Host;
+use crate::limits::CallClock;
 
 /// The state of one guest store: who the source is, what it may reach, and its memory limit.
 pub struct HostState {
@@ -28,6 +34,21 @@ pub struct HostState {
     pub client: NetworkClient,
     pub prefs: PrefStore,
     pub limits: StoreLimits,
+    /// The least gap between two requests to one host, from the source's info (ABI 1.5). `None` spaces nothing.
+    pub request_gap: Option<Duration>,
+    /// The clock of the current guest call. Host waits are booked here, so they do not count against its deadline.
+    pub clock: CallClock,
+}
+
+/// The send time booked last for each host, across every source of the process: the host spacing reads it.
+static LAST_SENT: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(Mutex::default);
+
+/// Books the next send to `host` at `gap` or more after the last one booked for it, and returns how long to wait for
+/// that slot. A send with no gap is booked at `now`, so it waits only behind an earlier booking.
+fn book_send(sent: &mut HashMap<String, Instant>, host: &str, gap: Duration, now: Instant) -> Duration {
+    let slot = sent.get(host).map_or(now, |last| (*last + gap).max(now));
+    sent.insert(host.to_owned(), slot);
+    slot.duration_since(now)
 }
 
 #[derive(Deserialize)]
@@ -46,6 +67,8 @@ struct HttpRequest {
 struct HttpResponse {
     status: u16,
     headers: Vec<(String, String)>,
+    /// The final URL, after any redirects (ABI 1.5).
+    url: String,
     body: String,
     /// Present only when `body` is base64 of a non-UTF-8 payload.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -119,6 +142,7 @@ async fn send(client: NetworkClient, request: Request, hosts: &[String]) -> Resu
     let response = client.execute(request).await.map_err(|e| e.to_string())?;
     check_host(hosts, &response.url)?;
     let status = response.status.as_u16();
+    let final_url = response.url.as_str().to_owned();
     let headers = response
         .headers
         .iter()
@@ -132,6 +156,7 @@ async fn send(client: NetworkClient, request: Request, hosts: &[String]) -> Resu
     serde_json::to_string(&HttpResponse {
         status,
         headers,
+        url: final_url,
         body,
         body_encoding,
     })
@@ -143,13 +168,27 @@ impl HostState {
     fn pref_key(&self, key: &str) -> String {
         format!("{}.{key}", preference_key(self.source_id))
     }
+
+    /// Parses and allow-lists the request, waits for its slot after the last send to its host, then sends it.
+    fn send_spaced(&self, request_json: &str) -> Result<String, String> {
+        let request = parse_request(request_json, &self.hosts)?;
+        let host = request.url.host_str().unwrap_or_default().to_owned();
+        let gap = self.request_gap.unwrap_or_default();
+        let wait = book_send(&mut LAST_SENT.lock().unwrap_or_else(PoisonError::into_inner), &host, gap, Instant::now());
+        if !wait.is_zero() {
+            std::thread::sleep(wait);
+        }
+        let handle = tokio::runtime::Handle::try_current().map_err(|e| format!("no async runtime: {e}"))?;
+        handle.block_on(send(self.client.clone(), request, &self.hosts))
+    }
 }
 
 impl Host for HostState {
     fn http(&mut self, request_json: String) -> Result<String, String> {
-        let request = parse_request(&request_json, &self.hosts)?;
-        let handle = tokio::runtime::Handle::try_current().map_err(|e| format!("no async runtime: {e}"))?;
-        handle.block_on(send(self.client.clone(), request, &self.hosts))
+        let entered = Instant::now();
+        let outcome = self.send_spaced(&request_json);
+        self.clock.book_host_wait(entered.elapsed());
+        outcome
     }
 
     fn pref_get(&mut self, key: String) -> String {
@@ -174,6 +213,30 @@ impl Host for HostState {
             _ => tracing::info!(source, "{message}"),
         }
     }
+
+    fn unix_seconds(&mut self) -> u64 {
+        SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |now| now.as_secs())
+    }
+}
+
+/// Links the ABI 1.4 host instance, so a guest built against 1.4 (it imports `kuro:source/host@1.4.0`) still loads. The
+/// four functions are the 1.4 ones of [`Host`]; the clock is 1.5 only.
+pub fn link_v14(linker: &mut Linker<HostState>) -> wasmtime::Result<()> {
+    let mut host = linker.instance("kuro:source/host@1.4.0")?;
+    host.func_wrap("http", |mut store, (request_json,): (String,)| {
+        Ok((store.data_mut().http(request_json),))
+    })?;
+    host.func_wrap("pref-get", |mut store, (key,): (String,)| {
+        Ok((store.data_mut().pref_get(key),))
+    })?;
+    host.func_wrap("pref-set", |mut store, (key, value_json): (String, String)| {
+        Ok((store.data_mut().pref_set(key, value_json),))
+    })?;
+    host.func_wrap("log", |mut store, (level, message): (u8, String)| {
+        store.data_mut().log(level, message);
+        Ok(())
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -268,6 +331,8 @@ mod tests {
             client: env.client,
             prefs: env.prefs,
             limits: crate::limits::store_limits(),
+            request_gap: None,
+            clock: CallClock::start(crate::limits::CALL_DEADLINE_TICKS),
         };
         (host, dir)
     }
@@ -287,6 +352,8 @@ mod tests {
             client: first.client.clone(),
             prefs: first.prefs.clone(),
             limits: crate::limits::store_limits(),
+            request_gap: None,
+            clock: CallClock::start(crate::limits::CALL_DEADLINE_TICKS),
         };
         assert_eq!(
             other.pref_get("sort".into()),
@@ -324,6 +391,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&response).expect("response JSON");
         assert_eq!(value["status"], 200);
         assert_eq!(value["body"], "hi");
+        assert_eq!(value["url"], format!("{}/hello", server.uri()), "the reply names the final url");
         assert!(value.get("bodyEncoding").is_none(), "UTF-8 bodies are sent as text");
         assert!(value["headers"].to_string().contains("x-reply"));
     }
@@ -414,5 +482,48 @@ mod tests {
             .expect("same-host redirect allowed");
         let value: serde_json::Value = serde_json::from_str(&response).expect("response JSON");
         assert_eq!(value["body"], "ok");
+        assert_eq!(value["url"], format!("http://localhost:{port}/final"), "the url is the one after the redirect");
+    }
+
+    #[test]
+    fn a_booked_send_waits_for_the_gap_after_the_last_send_to_the_same_host() {
+        let gap = Duration::from_millis(100);
+        let start = Instant::now();
+        let mut sent = HashMap::new();
+        assert_eq!(book_send(&mut sent, "a.test", gap, start), Duration::ZERO, "the first send is not held");
+        let ms = Duration::from_millis;
+        assert_eq!(book_send(&mut sent, "a.test", gap, start + ms(30)), ms(70), "the second waits out the gap");
+        assert_eq!(book_send(&mut sent, "b.test", gap, start + ms(30)), Duration::ZERO, "another host has its own slot");
+        assert_eq!(book_send(&mut sent, "a.test", gap, start + ms(1000)), Duration::ZERO, "a late send waits for nothing");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn two_requests_to_one_host_are_spaced_by_the_source_gap() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&server)
+            .await;
+        let (mut host, _dir) = state(1, &["127.0.0.1"]);
+        host.request_gap = Some(Duration::from_millis(300));
+        let request = json!({ "method": "GET", "url": format!("{}/a", server.uri()), "headers": [], "body": null }).to_string();
+        let started = Instant::now();
+        tokio::task::spawn_blocking(move || {
+            host.http(request.clone()).expect("first request sent");
+            host.http(request).expect("second request sent");
+            assert!(started.elapsed() >= Duration::from_millis(300), "the second send waits for the gap");
+            assert!(host.clock.host_wait >= Duration::from_millis(300), "the spacing wait is host time, not guest run time");
+        })
+        .await
+        .expect("the calls finished");
+    }
+
+    #[test]
+    fn the_clock_reads_unix_seconds_now() {
+        let (mut host, _dir) = state(1, &[]);
+        let before = SystemTime::now().duration_since(UNIX_EPOCH).expect("after 1970").as_secs();
+        let now = host.unix_seconds();
+        let after = SystemTime::now().duration_since(UNIX_EPOCH).expect("after 1970").as_secs();
+        assert!(before <= now && now <= after, "{before} <= {now} <= {after}");
     }
 }

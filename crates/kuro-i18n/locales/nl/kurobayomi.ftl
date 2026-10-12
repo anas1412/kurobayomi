@@ -58,42 +58,6 @@ download_notifier_download_paused_chapters = Download gepauzeerd
 
 channel_new_chapters_episodes = Hoofdstukupdates
 
-data_saver_exclude = Uitsluiten van databesparing
-
-data_saver_stop_exclude = Stop met uitsluiten van databesparing
-
-data_saver = Databesparing
-
-data_saver_summary = Afbeeldingen comprimeren voordat je ze downloadt of in de reader laadt
-
-data_saver_downloader = Gebruik databespaarder voor downloads
-
-data_saver_ignore_jpeg = Negeer JPEG-afbeeldingen
-
-data_saver_ignore_gif = Negeer GIF-animaties
-
-data_saver_image_quality = Afbeeldingskwaliteit
-
-data_saver_image_quality_summary = Hogere waarden resulteren in een hogere beeldkwaliteit, maar ook in een grotere bestandsgrootte. 80% is een goed compromis tussen bestandsgrootte en beeldkwaliteit
-
-data_saver_image_format = Comprimeren naar JPEG
-
-data_saver_image_format_summary_on = JPEG-bestanden zijn aanzienlijk kleiner dan WebP (waardoor je data bespaart), maar ten koste van de beeldkwaliteit.{"\u000A"}{"\u000A"}Momenteel wordt er gecomprimeerd naar JPEG
-
-data_saver_image_format_summary_off = JPEG-bestanden zijn aanzienlijk kleiner dan WebP (waardoor je data bespaart), maar ten koste van de beeldkwaliteit.{"\u000A"}{"\u000A"}Momenteel wordt er gecomprimeerd naar WebP
-
-data_saver_color_bw = Omzetten naar zwart-wit
-
-bandwidth_hero = Bandwidth Hero (vereist een Bandwidth Hero Proxy server)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Bandwidth Hero Proxy Server
-
-data_saver_server_summary = Voer hier de URL van de Bandwidth Hero Proxy server in
-
 download_slots_info = Downloadt alleen gelijktijdig van zelf gehoste of onbeperkte bronnen
 
 unseen = Onbekeken

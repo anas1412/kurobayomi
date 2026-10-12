@@ -1792,11 +1792,6 @@
          "type": "action",
          "title": "Disable",
          "subtitle": "hidden for local source"
-        },
-        {
-         "type": "action",
-         "title": "Exclude from data saver",
-         "subtitle": "manga only; 'Stop excluding from data saver' when excluded"
         }
        ]
       }

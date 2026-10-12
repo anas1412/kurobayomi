@@ -7,8 +7,6 @@ const TOPIC: &str = include_str!("../../../plans/10-app-domain-layer/p1-topic-do
 /// The container whose accessors the area-10 rows need.
 const DOMAIN_SOURCE: &str = include_str!("../src/app/domain.rs");
 const OWNER_AREA10: &str = "area:10-app-domain-layer";
-/// The SY registration is in the topic text, not in its table.
-const SY_REGISTRATION: &str = "ToggleExcludeFromMangaDataSaver";
 
 /// Registrations owned by other areas: (registered type, owning area). A forgotten class cannot hide here,
 /// because every row of the topic must appear in one of the two lists.
@@ -196,7 +194,6 @@ const PENDING_AREA10: &[&str] = &[
     "GetAnimeIncognitoState",
     "ToggleMangaIncognito",
     "GetMangaIncognitoState",
-    "ToggleExcludeFromMangaDataSaver",
 ];
 
 struct Row {
@@ -252,7 +249,7 @@ fn the_topic_has_every_registration_and_the_counts_per_owner_are_printed() {
     let area10 = rows.iter().filter(|r| r.owner == OWNER_AREA10).count();
     let others = rows.len() - area10;
     println!("registry rows: {} total", rows.len());
-    println!("  {OWNER_AREA10}: {area10} rows, plus the SY registration {SY_REGISTRATION}");
+    println!("  {OWNER_AREA10}: {area10} rows");
     println!("  other areas: {others} rows");
     assert_eq!(area10, 47);
     assert_eq!(others, REGISTRY_OTHER_AREAS.len());
@@ -260,12 +257,11 @@ fn the_topic_has_every_registration_and_the_counts_per_owner_are_printed() {
 
 #[test]
 fn every_area10_registration_has_an_accessor_or_is_listed_as_pending() {
-    let mut names: Vec<String> = parse_rows()
+    let names: Vec<String> = parse_rows()
         .into_iter()
         .filter(|r| r.owner == OWNER_AREA10)
         .map(|r| r.type_name)
         .collect();
-    names.push(SY_REGISTRATION.to_owned());
     let unaccounted: Vec<&String> = names
         .iter()
         .filter(|n| !has_accessor(n) && !PENDING_AREA10.contains(&n.as_str()))
@@ -282,12 +278,11 @@ fn every_area10_registration_has_an_accessor_or_is_listed_as_pending() {
 #[test]
 #[ignore = "T-10a-037 PARTIAL: no area:10 accessor on Domain is built yet"]
 fn every_area10_registration_has_its_accessor() {
-    let mut names: Vec<String> = parse_rows()
+    let names: Vec<String> = parse_rows()
         .into_iter()
         .filter(|r| r.owner == OWNER_AREA10)
         .map(|r| r.type_name)
         .collect();
-    names.push(SY_REGISTRATION.to_owned());
     let missing: Vec<&String> = names.iter().filter(|n| !has_accessor(n)).collect();
     assert!(missing.is_empty(), "area:10 registrations with no Domain accessor: {missing:?}");
 }
@@ -301,7 +296,7 @@ fn a_pending_entry_is_removed_once_its_accessor_exists() {
         .collect();
     for pending in PENDING_AREA10 {
         assert!(
-            names.iter().any(|n| n == pending) || *pending == SY_REGISTRATION,
+            names.iter().any(|n| n == pending),
             "{pending} is pending but is not an area-10 registration"
         );
         assert!(

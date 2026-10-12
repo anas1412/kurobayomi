@@ -62,8 +62,8 @@ mod tests {
 
     #[test]
     fn amount_follows_the_behaviour_formula_with_d2_fix() {
-        // library 4+5, categories 2, app 1, source 1, stores 2+1, buttons 1, extensions 1
-        assert_eq!(amount(all_on(), counts()), 9 + 2 + 1 + 1 + 3 + 1 + 1);
+        // library 4+5, categories 2, app 1, source 1, stores 2+1, extensions 1 (custom buttons are no longer a section)
+        assert_eq!(amount(all_on(), counts()), 9 + 2 + 1 + 1 + 3 + 1);
         let none = RestoreOptions { library_entries: false, categories: false, app_settings: false, extension_stores: false, custom_buttons: false, source_settings: false, extensions: false };
         assert_eq!(amount(none, counts()), 0);
     }

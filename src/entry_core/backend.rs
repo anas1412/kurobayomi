@@ -8,6 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use kuro_data::chapter::ChapterRepo;
 use kuro_data::manga::{Manga, MangaRepo};
 use kuro_data::source::{MangaStubSourceRepo, StubSource};
 use kuro_db::handle::Db;
@@ -15,9 +16,14 @@ use kuro_domain::entries::source_convert::{refresh_update, to_s_manga};
 use kuro_domain::items::chapter_sync::{ChapterSyncError, ChapterSyncOptions, NoRenames, SyncChapters};
 use kuro_domain::items::source_sync::MangaSyncLocks;
 use kuro_downloads::DownloadState;
+use kuro_downloads::downloader::Command;
+use kuro_downloads::engine::{MangaEngine, QueueEngine};
+use kuro_downloads::manager::{DeleteRules, DownloadManager};
+use kuro_downloads::model::{ChapterRef, SourceRef};
 use kuro_source::model::SChapter;
 use kuro_source::{MangaSource, SourceError};
 
+use crate::downloads::manga_io::{LiveChapterSource, chapter_ref, manga_ref};
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::errors::DetailError;
 
@@ -128,17 +134,45 @@ pub struct SourceBackend {
     lookup: MangaLookup,
     chapters: Arc<SyncChapters>,
     mark_duplicate_read: bool,
+    /// The manga download manager. `None` when the app runs no download managers: nothing can be queued then.
+    downloads: Option<Arc<DownloadManager>>,
 }
 
 impl SourceBackend {
     pub fn new(db: Arc<Db>, lookup: MangaLookup, mark_duplicate_read: bool) -> Self {
         let chapters = Arc::new(SyncChapters::new(Arc::clone(&db), Arc::new(MangaSyncLocks::default()), Arc::new(NoRenames)));
-        Self { stub: StubBackend::new(Arc::clone(&db)), db, lookup, chapters, mark_duplicate_read }
+        Self { stub: StubBackend::new(Arc::clone(&db)), db, lookup, chapters, mark_duplicate_read, downloads: None }
     }
 
-    /// The app's backend: the sources the Browse directory hands out (the recipe sources and the installed packages).
+    /// Gives the backend the manga download manager of the app.
+    pub fn with_downloads(mut self, manager: Arc<DownloadManager>) -> Self {
+        self.downloads = Some(manager);
+        self
+    }
+
+    /// The app's backend: the sources the Browse directory hands out (the recipe sources and the installed packages),
+    /// with the app's manga download manager when it runs.
     pub fn live(db: Arc<Db>, _prefs: &kuro_prefs::store::PrefStore) -> Self {
-        Self::new(db, Arc::new(|id| crate::browse::directory::current()?.manga_source(id)), crate::misc::diet_defaults::LIBRARY_MARK_DUPLICATE_CHAPTER_READ)
+        let backend = Self::new(db, Arc::new(|id| crate::browse::directory::current()?.manga_source(id)), crate::misc::diet_defaults::LIBRARY_MARK_DUPLICATE_CHAPTER_READ);
+        let manager = crate::shell::host::Shell::get().and_then(|shell| shell.download_queues()).map(|queues| queues.manga);
+        match manager {
+            Some(manager) => backend.with_downloads(manager),
+            None => backend,
+        }
+    }
+
+    /// The chapters of a manga that the ids name, and the manga, read from the database. `None` when the manga is gone.
+    fn chapters_of(&self, manga_id: i64, ids: &[i64]) -> Option<(Manga, Vec<ChapterRef>)> {
+        let manga = MangaRepo::new(Arc::clone(&self.db)).by_id(manga_id).ok()?;
+        let chapters = ChapterRepo::new(Arc::clone(&self.db)).by_manga_id(manga_id, false).ok()?;
+        let picked = chapters.iter().filter(|c| ids.contains(&c.id)).map(chapter_ref).collect();
+        Some((manga, picked))
+    }
+
+    /// The live manga source of an id as a downloads source. `None` when the source is not installed.
+    fn download_source(&self, source_id: i64) -> Option<SourceRef> {
+        let source = (self.lookup)(source_id)?;
+        Some(Arc::new(LiveChapterSource::new(source)))
     }
 }
 
@@ -198,6 +232,73 @@ impl Backend for SourceBackend {
                 ChapterSyncError::Db(error) => db_error(error),
             })
         })
+    }
+
+    /// The state of each chapter that is queued or on disk. A queued chapter shows its queue state; a finished one
+    /// with a folder or archive in the index shows Downloaded. The index is read through the manager, so a manga with
+    /// no manager has no states.
+    fn downloads(&self, manga_id: i64) -> HashMap<i64, DownloadState> {
+        let Some(manager) = &self.downloads else { return HashMap::new() };
+        let Ok(manga) = MangaRepo::new(Arc::clone(&self.db)).by_id(manga_id) else { return HashMap::new() };
+        let Ok(chapters) = ChapterRepo::new(Arc::clone(&self.db)).by_manga_id(manga_id, false) else { return HashMap::new() };
+        let queued: HashMap<i64, DownloadState> = manager.snapshot().iter().map(|d| (d.chapter.id, d.status)).collect();
+        chapters
+            .iter()
+            .filter_map(|chapter| {
+                if let Some(state) = queued.get(&chapter.id) {
+                    return Some((chapter.id, *state));
+                }
+                let on_disk = manager.index().is_chapter_downloaded(manga.source, &manga.title, &chapter.name, chapter.scanlator.as_deref());
+                on_disk.then_some((chapter.id, DownloadState::Downloaded))
+            })
+            .collect()
+    }
+
+    /// Removes the downloads of these chapters: they leave the queue, then the folders and the index entries go. The
+    /// deletion runs on the runtime; a source that is not installed has no folder name, so nothing is deleted then.
+    fn delete_downloads(&self, manga_id: i64, chapter_ids: &[i64]) {
+        let Some(manager) = self.downloads.clone() else { return };
+        let Some((manga, chapters)) = self.chapters_of(manga_id, chapter_ids) else { return };
+        let Some(source) = self.download_source(manga.source) else {
+            tracing::warn!(source = manga.source, "the downloads of a source that is not installed are kept");
+            return;
+        };
+        let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
+        // The user picked these chapters to delete, so the bookmark and category rules do not keep any back
+        let rules = DeleteRules { remove_bookmarked: true, ..DeleteRules::default() };
+        let manga = manga_ref(&manga);
+        handle.spawn(async move {
+            if let Err(error) = manager.delete_chapters(chapters, &manga, source.as_ref(), &rules).await {
+                tracing::error!(%error, "the downloads were not deleted");
+            }
+        });
+    }
+
+    /// Queues the chapters: all of them, or with `start_now` the first one at the front, which starts the run. `false`
+    /// when there is no manager, the source is not installed, or none of the chapters exists.
+    fn enqueue_downloads(&self, manga_id: i64, chapter_ids: &[i64], start_now: bool) -> bool {
+        let Some(manager) = &self.downloads else { return false };
+        let ids = if start_now { &chapter_ids[..chapter_ids.len().min(1)] } else { chapter_ids };
+        let Some((manga, chapters)) = self.chapters_of(manga_id, ids) else { return false };
+        if chapters.is_empty() {
+            return false;
+        }
+        let Some(source) = self.download_source(manga.source) else { return false };
+        let manga = manga_ref(&manga);
+        let command = if start_now {
+            let (reply, _answer) = tokio::sync::oneshot::channel();
+            Command::EnqueueFront { source, manga, chapters, start: true, reply }
+        } else {
+            let (reply, _answer) = tokio::sync::oneshot::channel();
+            Command::Enqueue { source, manga, chapters, auto_start: true, reply }
+        };
+        manager.post(command).is_ok()
+    }
+
+    /// Takes one chapter out of the queue. Its downloaded files, if any, are not touched.
+    fn cancel_download(&self, chapter_id: i64) {
+        let Some(manager) = &self.downloads else { return };
+        MangaEngine::new(Arc::clone(manager)).remove(&[chapter_id]);
     }
 }
 
@@ -302,5 +403,57 @@ mod tests {
         assert!(!local.name.is_empty());
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         assert_eq!(rt.block_on(backend.fetch_details(1)), Err(DetailError::SourceNotInstalled));
+    }
+
+    /// Polls until `done` holds, for up to two seconds: the queue changes on the manager's own task.
+    fn wait_for(done: impl Fn() -> bool) {
+        for _ in 0..400 {
+            if done() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the download queue did not settle");
+    }
+
+    /// Queueing, cancelling and deleting go through the manager. A queued chapter shows its queue state, leaves the
+    /// queue when cancelled, and a delete takes it out of the queue too. The connectivity is offline in this test, so
+    /// nothing downloads. Without a manager nothing can be queued and no state is shown.
+    #[test]
+    fn queued_chapters_show_their_state_and_leave_the_queue_on_cancel_and_delete() {
+        use crate::browse::fake_catalogue::FakeCatalogue;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = db_of(&dir.path().join("manga.db"));
+        let fake = FakeCatalogue::new(41);
+        let source: Arc<dyn MangaSource> = fake.clone();
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let (manager, _connectivity) = rt.block_on(async { crate::downloads::manga_io::test_manager(dir.path()) });
+        let plain = SourceBackend::new(Arc::clone(&db), Arc::new(move |sid| (sid == 41).then(|| Arc::clone(&source))), false);
+        let source: Arc<dyn MangaSource> = fake.clone();
+        let backend = SourceBackend::new(Arc::clone(&db), Arc::new(move |sid| (sid == 41).then(|| Arc::clone(&source))), false).with_downloads(manager);
+
+        let id = MangaRepo::new(Arc::clone(&db)).insert(&Manga { source: 41, url: "/m/one".into(), title: "Remote title".into(), ..Manga::create() }).unwrap();
+        rt.block_on(backend.fetch_chapters(id)).expect("chapters");
+        let ids: Vec<i64> = ChapterRepo::new(Arc::clone(&db)).by_manga_id(id, false).unwrap().iter().map(|c| c.id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(backend.downloads(id).is_empty(), "nothing is queued or on disk yet");
+        assert!(!backend.enqueue_downloads(id, &[-1], false), "an unknown chapter queues nothing");
+
+        assert!(backend.enqueue_downloads(id, &ids[..1], false));
+        wait_for(|| backend.downloads(id).get(&ids[0]) == Some(&DownloadState::Queue));
+        assert_eq!(backend.downloads(id).len(), 1);
+
+        backend.cancel_download(ids[0]);
+        wait_for(|| backend.downloads(id).is_empty());
+
+        assert!(backend.enqueue_downloads(id, &ids, false));
+        wait_for(|| backend.downloads(id).len() == 2);
+        rt.block_on(async { backend.delete_downloads(id, &ids[..1]) });
+        wait_for(|| backend.downloads(id).len() == 1);
+        assert!(backend.downloads(id).contains_key(&ids[1]), "the chapter that was not picked stays queued");
+
+        assert!(!plain.enqueue_downloads(id, &ids, false), "no manager, nothing queued");
+        assert!(plain.downloads(id).is_empty());
     }
 }

@@ -79,9 +79,9 @@ pub struct TopBarActions {
 }
 
 /// The top bar: the themed header the player also uses (docs/design/player-reader.md). Back is on the left, the
-/// `<manga> - <chapter>` title is centred and opens the manga's page, and the bookmark, Detach and the menu are on the
-/// right. The bar is never hidden. `detach` is the page's Detach button, moved here from the bar it was in.
-pub fn build_top_bar(bar: &TopBar, actions: TopBarActions, detach: &gtk::Button) -> gtk::HeaderBar {
+/// `<manga> - <chapter>` title is centred and opens the manga's page, and the bookmark and the menu are on the right.
+/// The bar is never hidden.
+pub fn build_top_bar(bar: &TopBar, actions: TopBarActions) -> gtk::HeaderBar {
     let TopBarActions { on_back, on_open_manga, on_bookmark, on_overflow } = actions;
     let label = page_header::title_label(&page_header::page_title(&bar.manga_title, &bar.chapter_name));
     let title = gtk::Button::builder().child(&label).has_frame(false).build();
@@ -114,12 +114,8 @@ pub fn build_top_bar(bar: &TopBar, actions: TopBarActions, detach: &gtk::Button)
     let menu = gtk::MenuButton::builder().icon_name("view-more-symbolic").popover(&popover).tooltip_text(strings::OVERFLOW_MENU).build();
     menu.update_property(&[gtk::accessible::Property::Label(strings::OVERFLOW_MENU)]);
 
-    // pack_end puts the first widget packed at the far right: the menu, then Detach, then the bookmark
+    // pack_end puts the first widget packed at the far right: the menu, then the bookmark
     header.pack_end(&menu);
-    if let Some(old) = detach.ancestor(gtk::HeaderBar::static_type()).and_downcast::<gtk::HeaderBar>() {
-        old.remove(detach);
-    }
-    header.pack_end(detach);
     header.pack_end(&bookmark);
     header
 }

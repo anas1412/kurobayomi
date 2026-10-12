@@ -940,42 +940,6 @@ pref_category_hide_hidden = Nasconi le categorie nascoste dalla schermata delle 
 
 pref_update_anime_release_grace_period = Finestra di rilascio stimata per l'anime
 
-data_saver_exclude = Escludi dal risparmio dati
-
-data_saver_stop_exclude = Non escludere più dal risparmio dati
-
-data_saver = Risparmio dati
-
-data_saver_summary = Comprimi le immagini prima di scaricarle o mostrarle nel lettore
-
-data_saver_downloader = Usa il risparmio dati nel downloader
-
-data_saver_ignore_jpeg = Ignora le immagini Jpeg
-
-data_saver_ignore_gif = Ignora le animazioni GIF
-
-data_saver_image_quality = Qualità delle immagini
-
-data_saver_image_quality_summary = Valori alti si traducono in una maggiore qualità dell'immagine, ma questo implica file di dimensione più grande, 80 per cento è una buona media tra dimensione e qualità
-
-data_saver_image_format = Comprimi in JPEG
-
-data_saver_image_format_summary_on = La dimensione di un file JPEG e considerevole minore di un WEBP(quindi si risparmiano più dato), ma questo vuole dire che si perde più qualità.{"\u000A"}{"\u000A"}Attualmente comprime in un JPEG
-
-data_saver_image_format_summary_off = Salvare le immagini come Jpeg permette di risparmiare spazio rispetto a Webp, ma la qualità è minore.{"\u000A"}{"\u000A"}Attualmente viene utilizzata la compressione Webp
-
-data_saver_color_bw = Converte in bianco e nero
-
-bandwidth_hero = Bandwidth Hero (richiede il Bandwidth Hero server Proxy)
-
-wsrv = wsrv.nl
-
-resmush = resmush.it
-
-bandwidth_data_saver_server = Bandwidth Hero Proxy Server
-
-data_saver_server_summary = Scrivi qui l'url del Bandwidth Hero Proxy Server
-
 download_slots_info = Scaricherà in modo concorrenziale solo da fonti self-hosted o unmetered
 
 unseen = Non visto

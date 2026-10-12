@@ -32,7 +32,7 @@ const PRIORITY_VISIBLE: u8 = 1;
 const PRIORITY_RETRY: u8 = 2;
 
 /// What the HTTP loader needs from a source. Errors are plain messages; the loader turns them into page or
-/// chapter errors. The data saver is cut (docs/design/settings-diet.md), so the image url is requested as it is.
+/// chapter errors.
 pub trait HttpPageSource: Send + Sync {
     /// The page list of a chapter, from the network.
     fn page_list(&self, chapter_url: &str) -> Result<Vec<PageEntry>, String>;

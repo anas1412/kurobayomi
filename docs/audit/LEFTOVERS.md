@@ -1,0 +1,47 @@
+# Leftovers (audit of 2026-10-11)
+
+Read-only audit of lane C, plus the removals of this pass. Nothing was built or run (the lanes do not run cargo). Paths are relative to the repo root. States: **works** (wired end to end in code), **partial** (some of it is wired), **missing** (the button or feature does nothing), **UNSURE** (I could not decide from the code; see the list at the end).
+
+## Done in this pass (2026-10-11, user: "remove data saver and detach and tests")
+
+- **Data saver removed:** the proxy module in `crates/kuro-downloads/src/data_saver.rs` (deleted; page requests use the image URL as it is, `pipeline.rs`), the Advanced "Data Saver" settings module `src/settings_ui/data_saver.rs` (deleted), the source exclusion flag and toggle in `crates/kuro-domain/src/source/` and `app/source.rs`, the entries menu item "Exclude from data saver" in `spec/entries.json`, and the tests that pinned them.
+- **Prefs side** (`crates/kuro-prefs/src/source.rs`, `player.rs`, `registry.rs`: nine `data_saver*` fields and rows, `PlayerWindowPrefs`, `player_open_detached`, `DROPPED_KEYS` 262 to 272) was already being edited in the working tree by another writer when this pass started. I did not touch those files. See UNSURE.
+- **Detach removed:** `src/widgets/detachable.rs` deleted. The reader and the player are pushed on the main stack and pop from it. The top bar keeps back, title, bookmark and menu (CLAUDE.md top bar rule still holds). The player's pop-out handoff of the video track (`playback.rs` `Handoff`, `hand_off_video`, `resume_video`) is gone, along with four player tests and the reader detach test. `src/player_view/mod.rs` keeps Escape, Alt+Left and the back button stopping playback at once (`watch_left`).
+- **Stale text fixed:** Appearance row subtitle no longer mentions app lock (`src/settings_ui/menu.rs:24`).
+- **Docs:** `docs/design/player-reader.md` rewritten (embedded only), `player-controls.md`, `settings-diet.md` (Data Saver and Detach marked CUT), `docs/drop-decisions.md` (drop record), `crates/kuro-downloads/README.md` and the crate doc in `crates/kuro-downloads/src/lib.rs`.
+
+## Checklist, by user impact
+
+1. **[missing] Manga download buttons on the details page do nothing.** The `Backend` trait defaults are no-ops (`src/entry_core/backend.rs:34-45`: `downloads`, `delete_downloads`, `enqueue_downloads`, `cancel_download`). `SourceBackend` (`backend.rs:166` on) overrides none of them, yet the bulk bar offers Download (`src/entry_core/bulk_bar.rs:75-76`). Remaining: implement these four in `SourceBackend` on top of the manga download manager (`src/downloads/mod.rs`), the way `RemoteAnimeBackend` does for anime (`src/entry_core/anime/remote.rs:262-276`).
+
+2. **[partial] Anime downloads.** Enqueue is wired (`remote.rs:262-276`, `anime/runner.rs:470`, `:667`). The queue page is wired (`src/screens.rs:371`, `src/downloads/queue_page.rs:21`). Notifications are wired (`src/downloads/anime_queue.rs:22-28`). Remaining: check that the queue page lists anime rows (UNSURE below), and run one real anime download.
+
+3. **[partial] Player settings still show features the user cut.** "Custom buttons" and "Script editor" rows are built (`src/settings_ui/player/mod.rs:30-31`), with pages in `src/settings_ui/route.rs:345, 369-490` and the Lua script code in `src/settings_ui/player/scripts.rs`. The decision to cut them is in `docs/design/settings-diet.md` ("Decisions by the user"). Remaining: remove the two rows, the custom buttons, script and code editor pages, their routes and tests. The Player subtitle "buttons" (`src/settings_ui/menu.rs:27`) goes with them.
+
+4. **[partial] Palettes.** The UI is cut: the Appearance page shows only Theme mode and Start screen (`src/settings_ui/appearance.rs:76-81`). The code is not: `AppTheme` has 23 variants (`src/theme/app_theme.rs:46`, `PICKER` of 20 at `:73`), and the strip widget `src/pref_model/widgets/app_theme.rs` is declared (`src/pref_model/widgets/mod.rs:5`) with no caller. Remaining: reduce `AppTheme` to System, Light, Dark, keep the stored-value mapping (`src/theme/prefs.rs:26`), delete the strip and the palette CSS and their tests.
+
+5. **[partial] Settings diet.** The eight pages exist (`src/settings_ui/menu.rs:24-31`). The cut keys are still registered in `crates/kuro-prefs/src/registry.rs` (see UNSURE on the parallel prefs cut). Remaining: compare each page's rows with the KEEP column of `docs/design/settings-diet.md`, and remove the rows that are not in it, for example the Security and Advanced rows if any are still built.
+
+6. **[UNSURE] Reader.** The page slider exists (`src/reader/navigator.rs:101`, `:190`). Per-manga reading direction is saved to the database (`src/reader/session.rs:421-422`, `store.set_viewer_flags`). Previous on the left for left-to-right: the icon mapping is in `src/reader/bottom_bar.rs:26`, but I did not confirm the placement in a window. Remaining: one visual check.
+
+7. **[UNSURE] Entry page.** Start and Resume are wired (`src/entry_core/route.rs:822`, `src/entry_core/chapter_actions.rs:136-144`). Whether it is big enough is a visual question. The left pane width: `src/entry_core/constants.rs:35` has `LEFT_PANE_WIDTH = 360`, and `TWO_PANE_MIN_WIDTH = 900` on line 37. The player and the reader have no left-pane width constant (the player is full width, the reader has no left pane), so "the same width as the player and reader constants" has nothing to match. Remaining: ask the user what they want, then either share one constant or drop the requirement.
+
+8. **[works in code, not run] Player menus and mpv config.** Audio and subtitle menu (`src/player_view/menu.rs:50-52`), quality and server (`src/player_view/sheets/quality.rs:56`), speed (`src/player_view/sheets/speed.rs`). `mpv.conf` and `input.conf` are created when missing (`crates/kuro-player/src/config.rs:24-28`), and mpv is started with `config=yes` and the config folder (`crates/kuro-player/src/options.rs:330-331`). Remaining: one run to confirm that the `input.conf` bindings load.
+
+9. **[works in code, not run] Backup restore.** Attached to the main window (`src/main.rs:274`), host (`src/backup_host.rs:110`), start (`src/pref_model/backup_pages.rs:331`), run (`src/backup_run.rs:245`), tests (`src/backup_run.rs:404-463`). Startup readiness gate: `source_gate::mark_loaded()` runs after the recipe sources load (`src/startup.rs:95-103`).
+
+10. **[UNSURE] Startup with an empty database.** Onboarding shows on first run (`src/main.rs:326-327`, `src/shell/onboarding.rs:130-139`). Only a corrupt file is tested (`src/data.rs:192-197`); an empty database is not. The `expect` calls in `src/main.rs:111, 124, 211, 234` and `src/data.rs:174` are startup invariants, not database reads. Remaining: add an empty-database startup test.
+
+11. **[visible text] "Aniyomi" in the UI.** `crates/kuro-i18n/locales/en/kurobayomi.ftl:100` (download queue warning), `:1561` ("Create default Aniyomi folder"), `:4296` (legacy database error, which may stay because it names the file type), `:1726` (`app_name = Aniyomi`, not referenced in `src`). `dist/plasmoid/org.kurobayomi.updates.{anime,manga}/contents/code/grid.js` mentions it in a comment. Remaining: list only. The rename is the last step of the plan.
+
+12. **[done by another writer, check] Dead strings.** When this audit re-checked the tree, the `data_saver*` and `bandwidth_data_saver_server` strings were gone from all 67 `crates/kuro-i18n/locales/*/kurobayomi.ftl` files (none left in `en`), and `src/settings_ui/route.rs` had dropped its "Data Saver is cut" assert. Another writer is finishing this cut in parallel. Remaining: confirm the locale determinism test (`crates/kuro-i18n/tests/locale_determinism.rs`) still passes on the regenerated files.
+
+## UNSURE (not verified, no build)
+
+- Parallel prefs cut: `crates/kuro-prefs/src/{source,player,registry}.rs` were modified by another writer during this pass. My consumer edits assume `SourcePrefs` has no `data_saver*` fields, `PlayerWindowPrefs` is gone, and `DROPPED_KEYS` holds the ten keys. If that cut does not land, these fail to compile: `crates/kuro-domain/src/app/source.rs` (no longer reads them), `src/player_view/` (no longer reads `PlayerWindowPrefs`).
+- Compile risk spots in my edits: `src/player_view/mod.rs` (`watch_left`: `Cell::take` on a `SignalHandlerId`, `stack.disconnect`), `src/reader/screen.rs` (the `on_close` closure now moves the caller's closure), `crates/kuro-domain/src/app/source.rs` (`enabled_from` and `enabled_with` lost their `kind` argument; `section_two_vectors_hold` rewritten), `crates/kuro-domain/tests/registry_parity.rs` (`let mut names` became `let names`).
+- Behaviour change: with the main window hidden, a player used to open in its own window. It now pushes onto the hidden main stack.
+- Concurrent edits: while this pass ran, other writers changed `src/pref_model/pages.rs`, `src/pref_model/stores*.rs`, `src/reader/source_pages.rs`, `src/reader/loader/http.rs`, `src/reader/mod.rs` (a data saver comment), `src/settings_ui/route.rs` (the "Data Saver is cut" assert and a new `SourcePrefs` use), `crates/kuro-i18n/src/import.rs` and the locale files. Nothing I edited in those files; the lead should re-read them before the single build.
+- Whether the anime queue page lists anime rows (`src/downloads/queue_page.rs`).
+- Whether the Previous button sits on the left in left-to-right mode (item 6).
+- Whether `input.conf` bindings load in a real run (item 8).

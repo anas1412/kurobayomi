@@ -66,7 +66,7 @@ impl SourcesPage {
     pub fn new(nav: SourcesNav, ready: watch::Receiver<bool>) -> Self {
         let column = crate::ui::column();
         let scroller = crate::ui::scrolled(&column);
-        let empty = sources_empty(super::route::BrowseKind::Manga);
+        let empty = sources_empty();
         let stack = gtk::Stack::new();
         stack.add_named(&spinner_row(), Some("spinner"));
         stack.add_named(&empty, Some("empty"));
@@ -198,10 +198,10 @@ pub(super) fn section_list(column: &gtk::Box, list: &mut Option<gtk::ListBox>) -
     .clone()
 }
 
-/// The empty Sources tab: no source is listed yet, so its one action opens the repository links of the same kind.
-pub(super) fn sources_empty(kind: super::route::BrowseKind) -> gtk::Box {
+/// The empty Sources tab: no source is listed yet, so its one action opens the repository list.
+pub(super) fn sources_empty() -> gtk::Box {
     let repos = gtk::Button::with_label(&tr(MsgKey::label_extension_repos));
-    repos.connect_clicked(move |_| super::mount::open_repos(kind));
+    repos.connect_clicked(move |_| super::mount::open_repos());
     super::look::empty_state("system-search-symbolic", &tr(MsgKey::source_empty_screen), Some(&repos)).0
 }
 

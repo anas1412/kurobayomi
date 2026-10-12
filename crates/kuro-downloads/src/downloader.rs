@@ -14,7 +14,6 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::time::MissedTickBehavior;
 use tokio::task::{AbortHandle, Id, JoinError, JoinSet};
 
-use crate::data_saver::DataSaver;
 use crate::error::{DownloadError, FailureKind};
 use crate::events::DownloadEvent;
 use crate::images::PageImageCache;
@@ -73,8 +72,6 @@ pub struct DownloadSettings {
     pub split_tall_images: bool,
     /// Part height for the tall split: `2 * max(monitor width, height)` from GDK, set by the GUI. Not a user setting.
     pub optimal_image_height: u32,
-    /// Data-saver proxy preferences (T-23a-017). The service is `None` by default.
-    pub data_saver: DataSaver,
 }
 
 impl Default for DownloadSettings {
@@ -84,7 +81,6 @@ impl Default for DownloadSettings {
             save_as_cbz: true,
             split_tall_images: true,
             optimal_image_height: crate::images::DEFAULT_OPTIMAL_HEIGHT,
-            data_saver: DataSaver::default(),
         }
     }
 }
@@ -529,7 +525,6 @@ impl Downloader {
             page_cache: self.page_cache.clone(),
             split_tall_images: self.settings.split_tall_images,
             optimal_height: self.settings.optimal_image_height,
-            data_saver: self.settings.data_saver.clone(),
             speed: self.speed.clone(),
             save_as_cbz: self.settings.save_as_cbz,
         };
