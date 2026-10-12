@@ -4,8 +4,11 @@
 //! swallow the database error after logging it, so these wrappers do the same. Every other repository
 //! method returns its `DataResult` unchanged.
 
+use kuro_platform::kind::Kind;
+
 use crate::DataResult;
 use crate::anime::{AnimeRepo, AnimeUpdate};
+use crate::entry::{EntryRepo, EntryUpdate};
 use crate::manga::{MangaRepo, MangaUpdate};
 
 fn bool_or_log(operation: &str, result: DataResult<()>) -> bool {
@@ -24,37 +27,59 @@ fn unit_or_log(operation: &str, result: DataResult<()>) {
     }
 }
 
-/// `MangaRepo::update` as Kotlin's `Boolean`: `false` when the write failed.
+/// `EntryRepo::update` as Kotlin's `Boolean`: `false` when the write failed.
+pub fn update_entry(repo: &EntryRepo, u: &EntryUpdate) -> bool {
+    bool_or_log("entry.update", repo.update(u))
+}
+
+/// `EntryRepo::update_all` as Kotlin's `Boolean`: `false` when the transaction rolled back.
+pub fn update_all_entries(repo: &EntryRepo, updates: &[EntryUpdate]) -> bool {
+    bool_or_log("entry.update_all", repo.update_all(updates))
+}
+
+/// `EntryRepo::reset_viewer_flags` as Kotlin's `Boolean`.
+pub fn reset_viewer_flags(repo: &EntryRepo, kind: Kind) -> bool {
+    bool_or_log("entry.reset_viewer_flags", repo.reset_viewer_flags(kind))
+}
+
+/// `EntryRepo::remove_parent_ids` as Kotlin's unit return: the error is logged, not returned.
+pub fn remove_parent_ids(repo: &EntryRepo, ids: &[i64]) {
+    unit_or_log("entry.remove_parent_ids", repo.remove_parent_ids(ids))
+}
+
+// ----- the old per-kind names; phase E deletes them -----
+
+/// [`update_entry`] over a `MangaRepo`.
 pub fn update_manga(repo: &MangaRepo, u: &MangaUpdate) -> bool {
-    bool_or_log("manga.update", repo.update(u))
+    update_entry(&repo.entries, &u.into())
 }
 
-/// `MangaRepo::update_all` as Kotlin's `Boolean`: `false` when the transaction rolled back.
+/// [`update_all_entries`] over a `MangaRepo`.
 pub fn update_all_manga(repo: &MangaRepo, updates: &[MangaUpdate]) -> bool {
-    bool_or_log("manga.update_all", repo.update_all(updates))
+    update_all_entries(&repo.entries, &updates.iter().map(EntryUpdate::from).collect::<Vec<_>>())
 }
 
-/// `MangaRepo::reset_viewer_flags` as Kotlin's `Boolean`.
+/// [`reset_viewer_flags`] over a `MangaRepo`.
 pub fn reset_manga_viewer_flags(repo: &MangaRepo) -> bool {
-    bool_or_log("manga.reset_viewer_flags", repo.reset_viewer_flags())
+    reset_viewer_flags(&repo.entries, Kind::Manga)
 }
 
-/// `AnimeRepo::update` as Kotlin's `Boolean`.
+/// [`update_entry`] over an `AnimeRepo`.
 pub fn update_anime(repo: &AnimeRepo, u: &AnimeUpdate) -> bool {
-    bool_or_log("anime.update", repo.update(u))
+    update_entry(&repo.entries, &u.into())
 }
 
-/// `AnimeRepo::update_all` as Kotlin's `Boolean`.
+/// [`update_all_entries`] over an `AnimeRepo`.
 pub fn update_all_anime(repo: &AnimeRepo, updates: &[AnimeUpdate]) -> bool {
-    bool_or_log("anime.update_all", repo.update_all(updates))
+    update_all_entries(&repo.entries, &updates.iter().map(EntryUpdate::from).collect::<Vec<_>>())
 }
 
-/// `AnimeRepo::reset_viewer_flags` as Kotlin's `Boolean`.
+/// [`reset_viewer_flags`] over an `AnimeRepo`.
 pub fn reset_anime_viewer_flags(repo: &AnimeRepo) -> bool {
-    bool_or_log("anime.reset_viewer_flags", repo.reset_viewer_flags())
+    reset_viewer_flags(&repo.entries, Kind::Anime)
 }
 
-/// `AnimeRepo::remove_parent_ids` as Kotlin's unit return: the error is logged, not returned.
+/// [`remove_parent_ids`] over an `AnimeRepo`.
 pub fn remove_anime_parent_ids(repo: &AnimeRepo, ids: &[i64]) {
-    unit_or_log("anime.remove_parent_ids", repo.remove_parent_ids(ids))
+    remove_parent_ids(&repo.entries, ids)
 }

@@ -8,7 +8,6 @@ use kuro_db::handle::Db;
 use tempfile::TempDir;
 
 use crate::anime::{Anime, AnimeRepo};
-use crate::category::{Category, CategoryRepo};
 use crate::chapter::ChapterRepo;
 use crate::episode::EpisodeRepo;
 use crate::manga::{Manga, MangaRepo};
@@ -42,11 +41,6 @@ pub(crate) fn anime(url: &str, title: &str, favorite: bool) -> Anime {
     Anime { url: url.to_owned(), title: title.to_owned(), favorite, source: 1, status: 1, ..Anime::create() }
 }
 
-/// A user category with the given name and order, every other field default.
-pub(crate) fn category(name: &str, order: i64) -> Category {
-    Category { id: -1, name: name.to_owned(), order, flags: 0, hidden: false }
-}
-
 /// Inserts one manga and returns its id.
 pub(crate) fn insert_manga(db: &Arc<Db>, url: &str, favorite: bool) -> i64 {
     MangaRepo::new(Arc::clone(db)).insert(&manga(url, url, favorite)).expect("insert manga")
@@ -77,5 +71,5 @@ pub(crate) fn insert_episode(db: &Arc<Db>, anime_id: i64, url: &str) -> i64 {
 
 /// Inserts one category of the given kind and returns its id.
 pub(crate) fn insert_category(db: &Arc<Db>, kind: Kind, name: &str, order: i64) -> i64 {
-    CategoryRepo::new(Arc::clone(db), kind).insert(&category(name, order)).expect("insert category")
+    db.write(|tx| Ok(kuro_db::tables::categories::insert(tx, kind, name, order, 0)?)).expect("insert category")
 }

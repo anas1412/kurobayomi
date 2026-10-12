@@ -873,7 +873,7 @@ mod library_aggregates {
     }
 
     #[test]
-    fn the_related_query_returns_33_columns_and_maps_each_row_with_its_group() {
+    fn the_related_query_maps_each_row_with_its_group() {
         let (_d, db) = test_db();
         let repo = AnimeRepo::new(db.clone());
         let a = repo.insert(&new_anime("a", "A", true)).unwrap();
@@ -889,17 +889,8 @@ mod library_aggregates {
         })
         .unwrap();
 
-        let rows = db
-            .read(|conn| {
-                let mut st = conn.prepare(kuro_db::statements_anime::RELATED_BY_ANIME_ID)?;
-                assert_eq!(st.column_count(), 33);
-                let mapped = st
-                    .query_map(rusqlite::named_params! {":animeId": a}, crate::anime::map_related_anime)?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                Ok(mapped)
-            })
-            .unwrap();
-        let names: Vec<(String, i64)> = rows.into_iter().map(|(name, anime)| (name, anime.id)).collect();
+        let groups = crate::anime_relation::AnimeRelationRepo::new(db.clone()).related(a).unwrap();
+        let names: Vec<(String, i64)> = groups.into_iter().flat_map(|g| g.anime.into_iter().map(move |anime| (g.name.clone(), anime.id))).collect();
         assert_eq!(names, vec![("Sequels".to_owned(), b), ("Spin-offs".to_owned(), c)]);
     }
 }

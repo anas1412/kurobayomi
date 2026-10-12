@@ -1,18 +1,23 @@
-//! Category data access: create order for the manga and anime kinds (a write transaction each) and the
-//! [`CategoryRepo`] reads and updates. The preference half (exclude sets, default category, sort string,
+//! Category reads over `kuro_db::tables::categories`: one read-only [`CategoryRepo`] per kind. The writes are the
+//! `CategoryService` of `kuro-domain`; the two `create_*_category` helpers below stay for the callers that still
+//! build fixtures with them (phase E deletes them). The preference half (exclude sets, default category, sort string,
 //! seed) is `kuro-prefs::category`.
 
-use kuro_platform::kind::Kind;
 use std::sync::Arc;
+use std::time::Duration;
 
 use kuro_db::handle::Db;
 use kuro_db::open::DbResult;
-use kuro_db::statements_anime as anime;
-use kuro_db::statements_manga::{CategoryPatch, categories as manga};
 use kuro_db::subscribe::Subscription;
+use kuro_db::tables::categories as t;
+use kuro_db::tables::CategoryRow;
+use kuro_platform::kind::Kind;
 use rusqlite::Connection;
 
-use crate::{DataResult, ENTRY_DEBOUNCE};
+use crate::DataResult;
+
+/// Quiet time before a category subscription re-queries (the category service's value).
+const CATEGORY_DEBOUNCE: Duration = Duration::from_millis(20);
 
 /// `max(order) + 1` over every category, system row included. The system row has order -1, so the
 /// first user category gets 0. An empty table also gives 0.
@@ -20,21 +25,23 @@ fn next_order(orders: impl Iterator<Item = i64>) -> i64 {
     orders.max().map_or(0, |max| max + 1)
 }
 
-/// Creates a manga category at the end of the order and returns its id. `flags` are the sort flags of the
-/// global preference, `library_sort::from_serialized(&lib.manga_sorting_mode.get())`, composed by the caller.
-pub fn create_manga_category(db: &Db, name: &str, flags: i64) -> DataResult<i64> {
+/// Creates a category of `kind` at the end of the order and returns its id. `flags` are the sort flags of the global
+/// preference, composed by the caller.
+fn create_category(db: &Db, kind: Kind, name: &str, flags: i64) -> DataResult<i64> {
     db.write(|tx| {
-        let order = next_order(manga::get_categories(tx)?.iter().map(|c| c.order));
-        Ok(manga::insert(tx, name, order, flags)?)
+        let order = next_order(t::all(tx, kind)?.iter().map(|c| c.order));
+        Ok(t::insert(tx, kind, name, order, flags)?)
     })
+}
+
+/// Creates a manga category at the end of the order and returns its id.
+pub fn create_manga_category(db: &Db, name: &str, flags: i64) -> DataResult<i64> {
+    create_category(db, Kind::Manga, name, flags)
 }
 
 /// Creates an anime category at the end of the order and returns its id.
 pub fn create_anime_category(db: &Db, name: &str, flags: i64) -> DataResult<i64> {
-    db.write(|tx| {
-        let order = next_order(anime::categories(tx)?.iter().map(|c| c.order));
-        Ok(anime::insert_category(tx, name, order, flags)?)
-    })
+    create_category(db, Kind::Anime, name, flags)
 }
 
 /// One `categories` row. `order` is the `sort` column.
@@ -45,6 +52,12 @@ pub struct Category {
     pub order: i64,
     pub flags: i64,
     pub hidden: bool,
+}
+
+impl From<CategoryRow> for Category {
+    fn from(r: CategoryRow) -> Self {
+        Self { id: r.id, name: r.name, order: r.order, flags: r.flags, hidden: r.hidden }
+    }
 }
 
 /// Partial category update. `None` keeps the stored value.
@@ -66,51 +79,24 @@ enum Scope {
     VisibleByEntry(i64),
 }
 
-/// Category access for one kind (`MangaCategoryRepositoryImpl.kt`, `AnimeCategoryRepositoryImpl.kt`).
+/// Category reads for one kind, ordered `sort, _id` in every scope.
 #[derive(Clone)]
 pub struct CategoryRepo {
     db: Arc<Db>,
     kind: Kind,
 }
 
-/// Tables a category list reads, per kind.
-fn tables(_kind: Kind) -> &'static [&'static str] {
-    &["categories", "entry_categories"]
-}
-
-/// The column list of every category read. `hidden = 1` makes only the value 1 hidden (EC-30); a row with any
-/// other value reads as visible, and never fails the query.
-const CATEGORY_COLUMNS: &str = "C._id, C.name, C.sort, C.flags, C.hidden = 1";
-
-/// The SQL of one category read for `kind` and `scope`. The by-entry scopes join the link table; the order
-/// is `sort, _id` for every scope, which is what the upstream lists use.
-fn read_sql(kind: Kind, scope: Scope) -> String {
-    let k = kind.as_str();
-    let visible = "C.hidden != 1";
-    let by_entry = format!(" JOIN entry_categories L ON C.kind = L.kind AND C._id = L.category_id");
-    let (join, filter) = match scope {
-        Scope::All => (String::new(), format!(" WHERE C.kind = '{k}'")),
-        Scope::Visible => (String::new(), format!(" WHERE C.kind = '{k}' AND {visible}")),
-        Scope::ByEntry(_) => (by_entry, format!(" WHERE C.kind = '{k}' AND L.entry_id = :entry")),
-        Scope::VisibleByEntry(_) => (by_entry, format!(" WHERE C.kind = '{k}' AND L.entry_id = :entry AND {visible}")),
-    };
-    format!("SELECT {CATEGORY_COLUMNS} FROM categories C{join}{filter} ORDER BY C.sort, C._id")
-}
-
-fn category_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Category> {
-    Ok(Category { id: r.get(0)?, name: r.get(1)?, order: r.get(2)?, flags: r.get(3)?, hidden: r.get(4)? })
-}
+/// Tables a category list reads.
+const CATEGORY_TABLES: &[&str] = &["categories", "entry_categories"];
 
 fn list(c: &Connection, kind: Kind, scope: Scope) -> DbResult<Vec<Category>> {
-    let sql = read_sql(kind, scope);
-    let mut st = c.prepare_cached(&sql)?;
     let rows = match scope {
-        Scope::ByEntry(entry) | Scope::VisibleByEntry(entry) => {
-            st.query_map(rusqlite::named_params! {":entry": entry}, category_from_row)?
-        }
-        Scope::All | Scope::Visible => st.query_map([], category_from_row)?,
-    };
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        Scope::All => t::all(c, kind),
+        Scope::Visible => t::visible(c, kind),
+        Scope::ByEntry(entry) => t::by_entry(c, kind, entry),
+        Scope::VisibleByEntry(entry) => t::visible_by_entry(c, kind, entry),
+    }?;
+    Ok(rows.into_iter().map(Category::from).collect())
 }
 
 impl CategoryRepo {
@@ -118,25 +104,22 @@ impl CategoryRepo {
         Self { db, kind }
     }
 
-    /// The category with `id`, or `None`.
-    pub fn get(&self, id: i64) -> DataResult<Option<Category>> {
-        let sql = format!(
-            "SELECT {CATEGORY_COLUMNS} FROM categories C WHERE C.kind = '{}' AND C._id = :id",
-            self.kind.as_str()
-        );
-        let found = self.db.read(|c| {
-            let mut st = c.prepare_cached(&sql)?;
-            Ok(st.query_map(rusqlite::named_params! {":id": id}, category_from_row)?.next().transpose()?)
-        })?;
-        Ok(found)
+    pub fn kind(&self) -> Kind {
+        self.kind
     }
 
-    /// Every category, the system row (id 0, name "", order -1) first. Ordered `sort, _id` (EC-10).
+    /// The category with `id`, or `None`.
+    pub fn get(&self, id: i64) -> DataResult<Option<Category>> {
+        let kind = self.kind;
+        Ok(self.db.read(|c| Ok(t::get(c, kind, id)?))?.map(Category::from))
+    }
+
+    /// Every category, the system row (id 0, name "", order -1) first. Ordered `sort, _id`.
     pub fn all(&self) -> DataResult<Vec<Category>> {
         self.read(Scope::All)
     }
 
-    /// Every category except the hidden ones. Only `hidden = 1` hides a row (EC-30).
+    /// Every category except the hidden ones.
     pub fn all_visible(&self) -> DataResult<Vec<Category>> {
         self.read(Scope::Visible)
     }
@@ -166,69 +149,11 @@ impl CategoryRepo {
         self.subscribe(Scope::VisibleByEntry(entry_id))
     }
 
-    /// Creates a category and returns its id. The passed `id` and `hidden` are ignored.
+    /// Creates a category and returns its id. The passed `id` and `hidden` are ignored. The writes are the
+    /// `CategoryService`'s; this stays only for the callers that build fixtures with it (phase E deletes it).
     pub fn insert(&self, cat: &Category) -> DataResult<i64> {
         let kind = self.kind;
-        self.db.write(|tx| {
-            Ok(match kind {
-                Kind::Manga => manga::insert(tx, &cat.name, cat.order, cat.flags)?,
-                Kind::Anime => anime::insert_category(tx, &cat.name, cat.order, cat.flags)?,
-            })
-        })
-    }
-
-    /// Coalesce update of one category.
-    pub fn update_partial(&self, u: &CategoryUpdate) -> DataResult<()> {
-        self.update_partials(std::slice::from_ref(u))
-    }
-
-    /// Every update in one transaction: one failure rolls back all of them.
-    pub fn update_partials(&self, updates: &[CategoryUpdate]) -> DataResult<()> {
-        let kind = self.kind;
-        self.db.write(|tx| {
-            for u in updates {
-                match kind {
-                    Kind::Manga => {
-                        let patch = CategoryPatch {
-                            id: u.id,
-                            name: u.name.clone(),
-                            order: u.order,
-                            flags: u.flags,
-                            hidden: u.hidden,
-                        };
-                        manga::update(tx, &patch)?;
-                    }
-                    Kind::Anime => {
-                        anime::update_category(tx, u.id, u.name.as_deref(), u.order, u.flags, u.hidden)?;
-                    }
-                }
-            }
-            Ok(())
-        })
-    }
-
-    /// Sets `flags` on every category, the system row included. `None` changes nothing.
-    pub fn update_all_flags(&self, flags: Option<i64>) -> DataResult<()> {
-        let kind = self.kind;
-        self.db.write(|tx| {
-            match kind {
-                Kind::Manga => manga::update_all_flags(tx, flags)?,
-                Kind::Anime => anime::update_all_category_flags(tx, flags)?,
-            };
-            Ok(())
-        })
-    }
-
-    /// Deletes a category; its link rows cascade. The system category (0) cannot be deleted (EC-23).
-    pub fn delete(&self, id: i64) -> DataResult<()> {
-        let kind = self.kind;
-        self.db.write(|tx| {
-            match kind {
-                Kind::Manga => manga::delete(tx, id)?,
-                Kind::Anime => anime::delete_category(tx, id)?,
-            };
-            Ok(())
-        })
+        self.db.write(|tx| Ok(t::insert(tx, kind, &cat.name, cat.order, cat.flags)?))
     }
 
     fn read(&self, scope: Scope) -> DataResult<Vec<Category>> {
@@ -238,7 +163,7 @@ impl CategoryRepo {
 
     fn subscribe(&self, scope: Scope) -> Subscription<Vec<Category>> {
         let kind = self.kind;
-        self.db.subscribe(tables(kind), ENTRY_DEBOUNCE, move |c| list(c, kind, scope))
+        self.db.subscribe(CATEGORY_TABLES, CATEGORY_DEBOUNCE, move |c| list(c, kind, scope))
     }
 }
 
@@ -249,7 +174,7 @@ mod tests {
     use kuro_db::flags::library_sort;
 
     fn manga_orders(db: &Db) -> Vec<(i64, String, i64)> {
-        db.read(|c| Ok(manga::get_categories(c)?.into_iter().map(|c| (c.id, c.name, c.order)).collect()))
+        db.read(|c| Ok(t::all(c, Kind::Manga)?.into_iter().map(|c| (c.id, c.name, c.order)).collect()))
             .unwrap()
     }
 
@@ -272,7 +197,7 @@ mod tests {
     }
 
     fn manga_flags(db: &Db, id: i64) -> i64 {
-        db.read(|c| Ok(manga::get_categories(c)?.into_iter().find(|r| r.id == id).unwrap().flags)).unwrap()
+        db.read(|c| Ok(t::all(c, Kind::Manga)?.into_iter().find(|r| r.id == id).unwrap().flags)).unwrap()
     }
 }
 
@@ -312,89 +237,22 @@ mod repo_tests {
         let repo = CategoryRepo::new(db.clone(), Kind::Anime);
         let shown = insert_category(&db, Kind::Anime, "Shown", 0);
         let hidden = insert_category(&db, Kind::Anime, "Hidden", 1);
-        repo.update_partial(&CategoryUpdate { hidden: Some(true), ..CategoryUpdate { id: hidden, ..Default::default() } })
-            .unwrap();
+        db.write(|tx| Ok(tx.execute("UPDATE categories SET hidden = 1 WHERE kind = 'anime' AND _id = ?1", [hidden]).map(drop)?)).unwrap();
         assert!(names(&repo.all_visible().unwrap()).iter().all(|n| n != "Hidden"));
         assert!(repo.all().unwrap().iter().any(|c| c.id == hidden && c.hidden));
         assert!(repo.get(shown).unwrap().is_some());
     }
 
     #[test]
-    fn hidden_values_other_than_one_read_as_visible() {
+    fn deleting_a_category_cascades_its_links() {
         let (_d, db) = test_db();
         let repo = CategoryRepo::new(db.clone(), Kind::Manga);
-        let id = insert_category(&db, Kind::Manga, "Odd", 0);
-        db.write(|tx| Ok(tx.execute("UPDATE categories SET hidden = 2 WHERE kind = 'manga' AND _id = ?1", [id]).map(drop)?)).unwrap();
-        assert!(repo.all_visible().unwrap().iter().any(|c| c.id == id), "hidden = 2 is visible (EC-30)");
-    }
-
-    #[test]
-    fn insert_ignores_the_passed_id_and_hidden_and_returns_the_new_id() {
-        let (_d, db) = test_db();
-        let repo = CategoryRepo::new(db.clone(), Kind::Manga);
-        let id = repo.insert(&Category { id: 77, name: "New".into(), order: 3, flags: 9, hidden: true }).unwrap();
-        assert_ne!(id, 77);
-        let got = repo.get(id).unwrap().unwrap();
-        assert_eq!((got.name.as_str(), got.order, got.flags, got.hidden), ("New", 3, 9, false));
-    }
-
-    #[test]
-    fn update_partial_coalesces_and_writes_hidden_as_a_flag() {
-        let (_d, db) = test_db();
-        let repo = CategoryRepo::new(db.clone(), Kind::Anime);
-        let id = insert_category(&db, Kind::Anime, "Keep", 0);
-        repo.update_partial(&CategoryUpdate { id, flags: Some(5), hidden: Some(true), ..Default::default() }).unwrap();
-        let got = repo.get(id).unwrap().unwrap();
-        assert_eq!((got.name.as_str(), got.flags, got.hidden), ("Keep", 5, true));
-    }
-
-    #[test]
-    fn update_partials_is_atomic() {
-        let (_d, db) = test_db();
-        let repo = CategoryRepo::new(db.clone(), Kind::Manga);
-        let a = insert_category(&db, Kind::Manga, "A", 0);
-        db.write(|tx| {
-            Ok(tx.execute_batch(
-                "CREATE TRIGGER refuse_boom BEFORE UPDATE ON categories WHEN new.name = 'boom' \
-                 BEGIN SELECT RAISE(ABORT, 'boom'); END;",
-            )?)
-        })
-        .unwrap();
-        let failing = repo.update_partials(&[
-            CategoryUpdate { id: a, name: Some("Renamed".into()), ..Default::default() },
-            CategoryUpdate { id: a, name: Some("boom".into()), ..Default::default() },
-        ]);
-        assert!(failing.is_err());
-        assert_eq!(repo.get(a).unwrap().unwrap().name, "A", "the first update rolled back with the second");
-        repo.update_partials(&[CategoryUpdate { id: a, name: Some("Ok".into()), ..Default::default() }]).unwrap();
-        assert_eq!(repo.get(a).unwrap().unwrap().name, "Ok");
-    }
-
-    #[test]
-    fn update_all_flags_with_none_changes_nothing() {
-        let (_d, db) = test_db();
-        let repo = CategoryRepo::new(db.clone(), Kind::Manga);
-        let a = insert_category(&db, Kind::Manga, "A", 0);
-        repo.update_partial(&CategoryUpdate { id: a, flags: Some(4), ..Default::default() }).unwrap();
-        repo.update_all_flags(None).unwrap();
-        assert_eq!(repo.get(a).unwrap().unwrap().flags, 4);
-        repo.update_all_flags(Some(8)).unwrap();
-        assert_eq!(repo.get(a).unwrap().unwrap().flags, 8);
-    }
-
-    #[test]
-    fn deleting_the_system_category_fails_and_deleting_another_cascades_links() {
-        let (_d, db) = test_db();
-        let repo = CategoryRepo::new(db.clone(), Kind::Manga);
-        let err = repo.delete(0).unwrap_err();
-        assert!(err.to_string().contains("System category can't be deleted"), "{err}");
-
         let m = insert_manga(&db, "m", true);
         let cat = insert_category(&db, Kind::Manga, "Tag", 0);
         db.write(|tx| Ok(tx.execute("INSERT INTO entry_categories(entry_id, kind, category_id) VALUES (?1, 'manga', ?2)", [m, cat]).map(drop)?))
             .unwrap();
         assert_eq!(names(&repo.by_entry(m).unwrap()), ["Tag"]);
-        repo.delete(cat).unwrap();
+        db.write(|tx| Ok(t::delete(tx, Kind::Manga, cat).map(drop)?)).unwrap();
         assert!(repo.by_entry(m).unwrap().is_empty());
     }
 

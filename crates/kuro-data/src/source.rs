@@ -1,13 +1,13 @@
-//! Stub source rows (`MangaStubSourceRepositoryImpl.kt`, `AnimeStubSourceRepositoryImpl.kt`, `sources.sq`,
-//! `animesources.sq`): the id, language and name of a source whose extension is gone, so its library entries
+//! Stub source rows (`sources.sq`, `animesources.sq`): the id, language and name of a source whose extension is gone, so its library entries
 //! still show the source name. Behaviour that needs domain errors (the failing remote calls) is in `kuro-domain`.
 
 use std::sync::Arc;
 
 use kuro_db::handle::Db;
-use kuro_db::statements_anime as sa;
-use kuro_db::statements_manga::{self as sm, StubSourceRow};
 use kuro_db::subscribe::Subscription;
+use kuro_db::tables::stub_sources as t;
+use kuro_db::tables::StubSourceRow;
+use kuro_platform::kind::Kind;
 
 use crate::{DataResult, ENTRY_DEBOUNCE};
 
@@ -44,86 +44,83 @@ impl StubSource {
     }
 }
 
-/// Stub rows of manga sources, over the `sources` table.
+/// Stub rows of one kind, over the `stub_sources` table.
 #[derive(Clone)]
-pub struct MangaStubSourceRepo {
+pub struct StubSourceRepo {
     db: Arc<Db>,
+    kind: Kind,
 }
 
-impl MangaStubSourceRepo {
-    pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
+impl StubSourceRepo {
+    pub fn new(db: Arc<Db>, kind: Kind) -> Self {
+        Self { db, kind }
     }
 
     /// Inserts the stub, or replaces `lang` and `name` of the row with the same id.
     pub fn upsert(&self, id: i64, lang: &str, name: &str) -> DataResult<()> {
-        let row = StubSourceRow { id, lang: lang.to_owned(), name: name.to_owned() };
-        self.db.write(|tx| Ok(sm::sources::upsert(tx, &row).map(drop)?))
+        let kind = self.kind;
+        self.db.write(|tx| Ok(t::upsert(tx, kind, id, lang, name).map(drop)?))
     }
 
     /// The stub with `id`, or `None` for an unknown id.
     pub fn get(&self, id: i64) -> DataResult<Option<StubSource>> {
-        let row = self.db.read(|c| Ok(sm::sources::find_one(c, id)?))?;
-        Ok(row.map(map_manga))
+        let kind = self.kind;
+        Ok(self.db.read(|c| Ok(t::find_one(c, kind, id)?))?.map(StubSource::from))
     }
 
     /// Every stub, in table order.
     pub fn all(&self) -> DataResult<Vec<StubSource>> {
-        let rows = self.db.read(|c| Ok(sm::sources::find_all(c)?))?;
-        Ok(rows.into_iter().map(map_manga).collect())
+        let kind = self.kind;
+        Ok(self.db.read(|c| Ok(t::find_all(c, kind)?))?.into_iter().map(StubSource::from).collect())
     }
 
     /// Every stub, published again after each upsert.
     pub fn watch_all(&self) -> Subscription<Vec<StubSource>> {
-        self.db.subscribe(&["stub_sources"], ENTRY_DEBOUNCE, |c| {
-            Ok(sm::sources::find_all(c)?.into_iter().map(map_manga).collect::<Vec<_>>())
+        let kind = self.kind;
+        self.db.subscribe(&["stub_sources"], ENTRY_DEBOUNCE, move |c| {
+            Ok(t::find_all(c, kind)?.into_iter().map(StubSource::from).collect::<Vec<_>>())
         })
     }
 }
 
-/// Stub rows of anime sources, over the `animesources` table.
-#[derive(Clone)]
-pub struct AnimeStubSourceRepo {
-    db: Arc<Db>,
-}
-
-impl AnimeStubSourceRepo {
-    pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
-    }
-
-    /// Inserts the stub, or replaces `lang` and `name` of the row with the same id.
-    pub fn upsert(&self, id: i64, lang: &str, name: &str) -> DataResult<()> {
-        self.db.write(|tx| Ok(sa::upsert_stub_source(tx, id, lang, name).map(drop)?))
-    }
-
-    /// The stub with `id`, or `None` for an unknown id.
-    pub fn get(&self, id: i64) -> DataResult<Option<StubSource>> {
-        let row = self.db.read(|c| Ok(sa::stub_source(c, id)?))?;
-        Ok(row.map(map_anime))
-    }
-
-    /// Every stub, in table order.
-    pub fn all(&self) -> DataResult<Vec<StubSource>> {
-        let rows = self.db.read(|c| Ok(sa::stub_sources(c)?))?;
-        Ok(rows.into_iter().map(map_anime).collect())
-    }
-
-    /// Every stub, published again after each upsert.
-    pub fn watch_all(&self) -> Subscription<Vec<StubSource>> {
-        self.db.subscribe(&["stub_sources"], ENTRY_DEBOUNCE, |c| {
-            Ok(sa::stub_sources(c)?.into_iter().map(map_anime).collect::<Vec<_>>())
-        })
+impl From<StubSourceRow> for StubSource {
+    fn from(r: StubSourceRow) -> Self {
+        Self { id: r.id, lang: r.lang, name: r.name }
     }
 }
 
-fn map_manga(r: StubSourceRow) -> StubSource {
-    StubSource { id: r.id, lang: r.lang, name: r.name }
+/// A legacy per-kind name for [`StubSourceRepo`] (`new(db)` fixes the kind); phase E deletes them.
+macro_rules! legacy_stub_repo {
+    ($name:ident, $kind:expr) => {
+        #[derive(Clone)]
+        pub struct $name(StubSourceRepo);
+
+        impl $name {
+            pub fn new(db: Arc<Db>) -> Self {
+                Self(StubSourceRepo::new(db, $kind))
+            }
+
+            pub fn upsert(&self, id: i64, lang: &str, name: &str) -> DataResult<()> {
+                self.0.upsert(id, lang, name)
+            }
+
+            pub fn get(&self, id: i64) -> DataResult<Option<StubSource>> {
+                self.0.get(id)
+            }
+
+            pub fn all(&self) -> DataResult<Vec<StubSource>> {
+                self.0.all()
+            }
+
+            pub fn watch_all(&self) -> Subscription<Vec<StubSource>> {
+                self.0.watch_all()
+            }
+        }
+    };
 }
 
-fn map_anime(r: sa::StubSource) -> StubSource {
-    StubSource { id: r.id, lang: r.lang, name: r.name }
-}
+legacy_stub_repo!(MangaStubSourceRepo, Kind::Manga);
+legacy_stub_repo!(AnimeStubSourceRepo, Kind::Anime);
 
 #[cfg(test)]
 mod tests {

@@ -1,28 +1,213 @@
-//! Track bindings of manga and anime (`MangaTrackRepositoryImpl.kt`, `AnimeTrackRepositoryImpl.kt`, `manga_sync.sq`,
-//! `anime_sync.sq`): one row per (entry, tracker) pair. Writes are upserts that keep the row id (Q-TRK-2).
-//! The domain interactors (log-and-default policy) live in `kuro-domain::track`.
+//! Track bindings of both kinds (`manga_sync.sq`, `anime_sync.sq`): one row per (entry, tracker) pair. Writes are
+//! upserts that keep the row id (Q-TRK-2). One `Track` and one `TrackRepo` over `kuro_db::tables::tracks`; the
+//! `MangaTrack` / `AnimeTrack` shapes and their repos stay as wrappers until phase E. The domain interactors
+//! (log-and-default policy) live in `kuro-domain::track`.
 
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use kuro_db::handle::Db;
-use kuro_db::statements_anime::{self as sa, AnimeTrack as AnimeTrackRow};
-use kuro_db::statements_manga::{self as sm, TrackRow};
 use kuro_db::subscribe::Subscription;
-use rusqlite::{Connection, named_params};
+use kuro_db::tables::tracks as t;
+use kuro_db::tables::TrackRow;
+pub use kuro_db::tables::TrackPatch;
+use kuro_platform::kind::Kind;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::{DataResult, ENTRY_DEBOUNCE, none_if_not_found};
 
-/// Tables a manga track listing reads.
-const MANGA_SYNC: &[&str] = &["tracks"];
+/// Tables a track listing reads.
+const TRACK_TABLE: &[&str] = &["tracks"];
 
-/// Tables an anime track listing reads.
-const ANIME_SYNC: &[&str] = &["tracks"];
+/// One tracker binding of an entry. `id` is `-1` until a write assigns the row id and `-1` is never persisted
+/// (this type is read by `kuro-track`, `kuro-backup` and the app, so the sentinel stays and `kuro-track` keeps its own
+/// `Option` model for remote results). `last_item` and `total_items` are the chapters or the episodes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Track {
+    pub id: i64,
+    pub entry_id: i64,
+    pub kind: Kind,
+    pub tracker_id: i64,
+    pub remote_id: i64,
+    pub library_id: Option<i64>,
+    pub title: String,
+    pub last_item: f64,
+    pub total_items: i64,
+    pub status: i64,
+    pub score: f64,
+    pub remote_url: String,
+    pub start_date: i64,
+    pub finish_date: i64,
+    pub private: bool,
+}
 
-/// One tracker binding of a manga (`MangaTrack.kt`). `tracker_id` is the `sync_id` column. `id` is `-1` until a write
-/// assigns the row id and `-1` is never persisted (decision for T-10a-027: the plan asks for `Option<i64>`, but this
-/// type is read by `kuro-track`, `kuro-backup` and the app, so the sentinel stays and `kuro-track` keeps its own
-/// `Option` model for remote results).
+impl Track {
+    /// An unsaved binding to `tracker_id` with the `TrackImpl` defaults. `id <= 0` means unsaved.
+    pub fn new(kind: Kind, tracker_id: i64) -> Self {
+        Self {
+            id: -1,
+            entry_id: 0,
+            kind,
+            tracker_id,
+            remote_id: 0,
+            library_id: None,
+            title: String::new(),
+            last_item: 0.0,
+            total_items: 0,
+            status: 0,
+            score: 0.0,
+            remote_url: String::new(),
+            start_date: 0,
+            finish_date: 0,
+            private: false,
+        }
+    }
+
+    /// Copies exactly the six personal fields of `other`: progress, score, status, start and finish dates, and
+    /// `private` (`copyPersonalFrom`). Identity fields stay.
+    pub fn copy_personal_from(&mut self, other: &Track) {
+        self.copy_personal_keeping_private(other);
+        self.private = other.private;
+    }
+
+    /// [`Self::copy_personal_from`] without `private` (`copyRemotePrivate = false`).
+    pub fn copy_personal_keeping_private(&mut self, other: &Track) {
+        self.last_item = other.last_item;
+        self.score = other.score;
+        self.status = other.status;
+        self.start_date = other.start_date;
+        self.finish_date = other.finish_date;
+    }
+}
+
+impl From<TrackRow> for Track {
+    fn from(r: TrackRow) -> Self {
+        Self {
+            id: r.id,
+            entry_id: r.entry_id,
+            kind: r.kind,
+            tracker_id: r.tracker_id,
+            remote_id: r.remote_id,
+            library_id: r.library_id,
+            title: r.title,
+            last_item: r.last_item,
+            total_items: r.total_items,
+            status: r.status,
+            score: r.score,
+            remote_url: r.remote_url,
+            start_date: r.start_date,
+            finish_date: r.finish_date,
+            private: r.private,
+        }
+    }
+}
+
+impl From<&Track> for TrackRow {
+    fn from(t: &Track) -> Self {
+        Self {
+            id: t.id,
+            entry_id: t.entry_id,
+            kind: t.kind,
+            tracker_id: t.tracker_id,
+            remote_id: t.remote_id,
+            library_id: t.library_id,
+            title: t.title.clone(),
+            last_item: t.last_item,
+            total_items: t.total_items,
+            status: t.status,
+            score: t.score,
+            remote_url: t.remote_url.clone(),
+            start_date: t.start_date,
+            finish_date: t.finish_date,
+            private: t.private,
+        }
+    }
+}
+
+/// Updates the non-`None` columns of one `tracks` row inside the caller's connection or transaction (the restorer's
+/// coalesced update). `None` keeps the stored value, so a patch with every field `None` changes nothing. Zero rows
+/// matched is not an error.
+pub fn update_coalesced(c: &Connection, p: &TrackPatch) -> DataResult<()> {
+    t::update_coalesced(c, p)?;
+    Ok(())
+}
+
+/// Track access for both kinds.
+#[derive(Clone)]
+pub struct TrackRepo {
+    db: Arc<Db>,
+}
+
+impl TrackRepo {
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
+    }
+
+    /// The binding with row id `id` (`_id`, Q-TRK-1). It is never an entry id.
+    pub fn by_id(&self, id: i64) -> DataResult<Option<Track>> {
+        Ok(self.db.read(|c| none_if_not_found(t::by_id(c, id)))?.map(Track::from))
+    }
+
+    /// Every binding of the kind, in table order.
+    pub fn all(&self, kind: Kind) -> DataResult<Vec<Track>> {
+        Ok(self.db.read(|c| Ok(t::all(c, kind)?))?.into_iter().map(Track::from).collect())
+    }
+
+    /// Every binding of one entry.
+    pub fn by_entry(&self, entry_id: i64) -> DataResult<Vec<Track>> {
+        Ok(self.db.read(|c| Ok(t::by_entry(c, entry_id)?))?.into_iter().map(Track::from).collect())
+    }
+
+    /// Upserts one binding and returns its row id. A second binding of the same (entry, tracker) pair updates the row
+    /// in place, so the id does not change.
+    pub fn insert(&self, track: &Track) -> DataResult<i64> {
+        let row = TrackRow::from(track);
+        self.db.write(|tx| Ok(t::insert(tx, &row)?))
+    }
+
+    /// Upserts every binding in one transaction. A repeated pair leaves one row with the last values.
+    pub fn insert_all(&self, tracks: &[Track]) -> DataResult<()> {
+        self.db.write(|tx| {
+            for track in tracks {
+                t::insert(tx, &TrackRow::from(track))?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Removes the binding of the entry to the tracker. Zero rows affected is not an error.
+    pub fn delete(&self, entry_id: i64, tracker_id: i64) -> DataResult<()> {
+        self.db.write(|tx| Ok(t::delete(tx, entry_id, tracker_id).map(drop)?))
+    }
+
+    /// Every binding of the kind, published again after each write to `tracks`.
+    pub fn watch_all(&self, kind: Kind) -> Subscription<Vec<Track>> {
+        self.watch_all_mapped(kind, |track| track)
+    }
+
+    /// The bindings of one entry, published again after each write to `tracks`.
+    pub fn watch_by_entry(&self, entry_id: i64) -> Subscription<Vec<Track>> {
+        self.watch_by_entry_mapped(entry_id, |track| track)
+    }
+
+    /// [`Self::watch_all`] with each row turned into `T` inside the query, so the legacy shapes publish too.
+    fn watch_all_mapped<T: PartialEq + Send + Sync + 'static>(&self, kind: Kind, map: fn(Track) -> T) -> Subscription<Vec<T>> {
+        self.db.subscribe(TRACK_TABLE, ENTRY_DEBOUNCE, move |c| {
+            Ok(t::all(c, kind)?.into_iter().map(|r| map(r.into())).collect::<Vec<_>>())
+        })
+    }
+
+    fn watch_by_entry_mapped<T: PartialEq + Send + Sync + 'static>(&self, entry_id: i64, map: fn(Track) -> T) -> Subscription<Vec<T>> {
+        self.db.subscribe(TRACK_TABLE, ENTRY_DEBOUNCE, move |c| {
+            Ok(t::by_entry(c, entry_id)?.into_iter().map(|r| map(r.into())).collect::<Vec<_>>())
+        })
+    }
+}
+
+// ----- legacy per-kind shapes (phase E deletes everything below the tests of the shared types) -----
+
+/// One tracker binding of a manga (`MangaTrack.kt`). `tracker_id` is the `sync_id` column.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MangaTrack {
     pub id: i64,
@@ -60,85 +245,7 @@ pub struct AnimeTrack {
     pub private: bool,
 }
 
-impl MangaTrack {
-    /// An unsaved binding to `tracker_id` with the `MangaTrackImpl` defaults (`MangaTrack.create`). `id <= 0` means
-    /// unsaved, so the struct carries `-1` until a write assigns the row id.
-    pub fn new(tracker_id: i64) -> Self {
-        Self {
-            id: -1,
-            manga_id: 0,
-            tracker_id,
-            remote_id: 0,
-            library_id: None,
-            title: String::new(),
-            last_chapter_read: 0.0,
-            total_chapters: 0,
-            status: 0,
-            score: 0.0,
-            remote_url: String::new(),
-            start_date: 0,
-            finish_date: 0,
-            private: false,
-        }
-    }
-
-    /// Copies exactly the six personal fields of `other`: progress, score, status, start and finish dates, and
-    /// `private` (`MangaTrack.copyPersonalFrom`). Identity fields stay.
-    pub fn copy_personal_from(&mut self, other: &MangaTrack) {
-        self.copy_personal_keeping_private(other);
-        self.private = other.private;
-    }
-
-    /// [`Self::copy_personal_from`] without `private` (`copyRemotePrivate = false`).
-    pub fn copy_personal_keeping_private(&mut self, other: &MangaTrack) {
-        self.last_chapter_read = other.last_chapter_read;
-        self.score = other.score;
-        self.status = other.status;
-        self.start_date = other.start_date;
-        self.finish_date = other.finish_date;
-    }
-}
-
-impl AnimeTrack {
-    /// An unsaved binding to `tracker_id` with the `AnimeTrackImpl` defaults. `id <= 0` means unsaved.
-    pub fn new(tracker_id: i64) -> Self {
-        Self {
-            id: -1,
-            anime_id: 0,
-            tracker_id,
-            remote_id: 0,
-            library_id: None,
-            title: String::new(),
-            last_episode_seen: 0.0,
-            total_episodes: 0,
-            status: 0,
-            score: 0.0,
-            remote_url: String::new(),
-            start_date: 0,
-            finish_date: 0,
-            private: false,
-        }
-    }
-
-    /// Copies exactly the six personal fields of `other`: progress, score, status, watch dates and `private`
-    /// (`AnimeTrack.copyPersonalFrom`). Identity fields stay.
-    pub fn copy_personal_from(&mut self, other: &AnimeTrack) {
-        self.copy_personal_keeping_private(other);
-        self.private = other.private;
-    }
-
-    /// [`Self::copy_personal_from`] without `private` (`copyRemotePrivate = false`).
-    pub fn copy_personal_keeping_private(&mut self, other: &AnimeTrack) {
-        self.last_episode_seen = other.last_episode_seen;
-        self.score = other.score;
-        self.status = other.status;
-        self.start_date = other.start_date;
-        self.finish_date = other.finish_date;
-    }
-}
-
-/// Column values of a coalesced manga track update (`update_coalesced`). `None` keeps the stored value, so a patch
-/// with every field `None` changes nothing. The 13 data columns plus the row id make the 14 parameters.
+/// Column values of a coalesced manga track update (`update_manga_coalesced`). `None` keeps the stored value.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MangaTrackPatch {
     pub id: i64,
@@ -157,7 +264,7 @@ pub struct MangaTrackPatch {
     pub private: Option<bool>,
 }
 
-/// Column values of a coalesced anime track update (`update_coalesced`). Same contract as [`MangaTrackPatch`].
+/// Column values of a coalesced anime track update (`update_anime_coalesced`). Same contract as [`MangaTrackPatch`].
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AnimeTrackPatch {
     pub id: i64,
@@ -176,257 +283,248 @@ pub struct AnimeTrackPatch {
     pub private: Option<bool>,
 }
 
-const MANGA_UPDATE_COALESCED: &str = "UPDATE tracks SET \
-    entry_id = coalesce(:mangaId, entry_id), tracker_id = coalesce(:syncId, tracker_id), \
-    remote_id = coalesce(:remoteId, remote_id), library_id = coalesce(:libraryId, library_id), \
-    title = coalesce(:title, title), last_item = coalesce(:lastChapterRead, last_item), \
-    total_items = coalesce(:totalChapters, total_items), status = coalesce(:status, status), \
-    score = coalesce(:score, score), remote_url = coalesce(:remoteUrl, remote_url), \
-    start_date = coalesce(:startDate, start_date), finish_date = coalesce(:finishDate, finish_date), \
-    private = coalesce(:private, private) WHERE _id = :id";
+/// A legacy track shape: the conversions to and from the shared [`Track`].
+pub trait LegacyTrack: Clone + PartialEq + Send + Sync + 'static {
+    const KIND: Kind;
+    fn from_track(t: Track) -> Self;
+    fn to_track(&self) -> Track;
 
-const ANIME_UPDATE_COALESCED: &str = "UPDATE tracks SET \
-    entry_id = coalesce(:animeId, entry_id), tracker_id = coalesce(:syncId, tracker_id), \
-    remote_id = coalesce(:remoteId, remote_id), library_id = coalesce(:libraryId, library_id), \
-    title = coalesce(:title, title), last_item = coalesce(:lastEpisodeSeen, last_item), \
-    total_items = coalesce(:totalEpisodes, total_items), status = coalesce(:status, status), \
-    score = coalesce(:score, score), remote_url = coalesce(:remoteUrl, remote_url), \
-    start_date = coalesce(:startDate, start_date), finish_date = coalesce(:finishDate, finish_date), \
-    private = coalesce(:private, private) WHERE _id = :id";
+    /// `self` with `change` applied to its shared form (the shared type owns the rules).
+    fn changed(&self, other: &Self, change: fn(&mut Track, &Track)) -> Self {
+        let mut track = self.to_track();
+        change(&mut track, &other.to_track());
+        Self::from_track(track)
+    }
+}
 
-/// Updates the non-`None` columns of one `manga_sync` row inside the caller's connection or transaction
-/// (`MangaRestorer` coalesced update). Zero rows matched is not an error.
+impl LegacyTrack for MangaTrack {
+    const KIND: Kind = Kind::Manga;
+
+    fn from_track(t: Track) -> Self {
+        Self {
+            id: t.id,
+            manga_id: t.entry_id,
+            tracker_id: t.tracker_id,
+            remote_id: t.remote_id,
+            library_id: t.library_id,
+            title: t.title,
+            last_chapter_read: t.last_item,
+            total_chapters: t.total_items,
+            status: t.status,
+            score: t.score,
+            remote_url: t.remote_url,
+            start_date: t.start_date,
+            finish_date: t.finish_date,
+            private: t.private,
+        }
+    }
+
+    fn to_track(&self) -> Track {
+        Track {
+            id: self.id,
+            entry_id: self.manga_id,
+            kind: Self::KIND,
+            tracker_id: self.tracker_id,
+            remote_id: self.remote_id,
+            library_id: self.library_id,
+            title: self.title.clone(),
+            last_item: self.last_chapter_read,
+            total_items: self.total_chapters,
+            status: self.status,
+            score: self.score,
+            remote_url: self.remote_url.clone(),
+            start_date: self.start_date,
+            finish_date: self.finish_date,
+            private: self.private,
+        }
+    }
+}
+
+impl LegacyTrack for AnimeTrack {
+    const KIND: Kind = Kind::Anime;
+
+    fn from_track(t: Track) -> Self {
+        Self {
+            id: t.id,
+            anime_id: t.entry_id,
+            tracker_id: t.tracker_id,
+            remote_id: t.remote_id,
+            library_id: t.library_id,
+            title: t.title,
+            last_episode_seen: t.last_item,
+            total_episodes: t.total_items,
+            status: t.status,
+            score: t.score,
+            remote_url: t.remote_url,
+            start_date: t.start_date,
+            finish_date: t.finish_date,
+            private: t.private,
+        }
+    }
+
+    fn to_track(&self) -> Track {
+        Track {
+            id: self.id,
+            entry_id: self.anime_id,
+            kind: Self::KIND,
+            tracker_id: self.tracker_id,
+            remote_id: self.remote_id,
+            library_id: self.library_id,
+            title: self.title.clone(),
+            last_item: self.last_episode_seen,
+            total_items: self.total_episodes,
+            status: self.status,
+            score: self.score,
+            remote_url: self.remote_url.clone(),
+            start_date: self.start_date,
+            finish_date: self.finish_date,
+            private: self.private,
+        }
+    }
+}
+
+impl MangaTrack {
+    /// An unsaved binding to `tracker_id` with the `MangaTrackImpl` defaults. `id <= 0` means unsaved.
+    pub fn new(tracker_id: i64) -> Self {
+        Self::from_track(Track::new(Kind::Manga, tracker_id))
+    }
+
+    /// Copies exactly the six personal fields of `other` (`MangaTrack.copyPersonalFrom`). Identity fields stay.
+    pub fn copy_personal_from(&mut self, other: &MangaTrack) {
+        *self = self.changed(other, Track::copy_personal_from);
+    }
+
+    /// [`Self::copy_personal_from`] without `private` (`copyRemotePrivate = false`).
+    pub fn copy_personal_keeping_private(&mut self, other: &MangaTrack) {
+        *self = self.changed(other, Track::copy_personal_keeping_private);
+    }
+}
+
+impl AnimeTrack {
+    /// An unsaved binding to `tracker_id` with the `AnimeTrackImpl` defaults. `id <= 0` means unsaved.
+    pub fn new(tracker_id: i64) -> Self {
+        Self::from_track(Track::new(Kind::Anime, tracker_id))
+    }
+
+    /// Copies exactly the six personal fields of `other` (`AnimeTrack.copyPersonalFrom`). Identity fields stay.
+    pub fn copy_personal_from(&mut self, other: &AnimeTrack) {
+        *self = self.changed(other, Track::copy_personal_from);
+    }
+
+    /// [`Self::copy_personal_from`] without `private` (`copyRemotePrivate = false`).
+    pub fn copy_personal_keeping_private(&mut self, other: &AnimeTrack) {
+        *self = self.changed(other, Track::copy_personal_keeping_private);
+    }
+}
+
+impl From<&MangaTrackPatch> for TrackPatch {
+    fn from(p: &MangaTrackPatch) -> Self {
+        Self {
+            id: p.id,
+            entry_id: p.manga_id,
+            tracker_id: p.tracker_id,
+            remote_id: p.remote_id,
+            library_id: p.library_id,
+            title: p.title.clone(),
+            last_item: p.last_chapter_read,
+            total_items: p.total_chapters,
+            status: p.status,
+            score: p.score,
+            remote_url: p.remote_url.clone(),
+            start_date: p.start_date,
+            finish_date: p.finish_date,
+            private: p.private,
+        }
+    }
+}
+
+impl From<&AnimeTrackPatch> for TrackPatch {
+    fn from(p: &AnimeTrackPatch) -> Self {
+        Self {
+            id: p.id,
+            entry_id: p.anime_id,
+            tracker_id: p.tracker_id,
+            remote_id: p.remote_id,
+            library_id: p.library_id,
+            title: p.title.clone(),
+            last_item: p.last_episode_seen,
+            total_items: p.total_episodes,
+            status: p.status,
+            score: p.score,
+            remote_url: p.remote_url.clone(),
+            start_date: p.start_date,
+            finish_date: p.finish_date,
+            private: p.private,
+        }
+    }
+}
+
+/// `update_coalesced` over a [`MangaTrackPatch`] (`MangaRestorer` coalesced update).
 pub fn update_manga_coalesced(c: &Connection, p: &MangaTrackPatch) -> DataResult<()> {
-    c.execute(
-        MANGA_UPDATE_COALESCED,
-        named_params! {
-            ":mangaId": p.manga_id, ":syncId": p.tracker_id, ":remoteId": p.remote_id, ":libraryId": p.library_id,
-            ":title": p.title, ":lastChapterRead": p.last_chapter_read, ":totalChapters": p.total_chapters,
-            ":status": p.status, ":score": p.score, ":remoteUrl": p.remote_url, ":startDate": p.start_date,
-            ":finishDate": p.finish_date, ":private": p.private, ":id": p.id,
-        },
-    )?;
-    Ok(())
+    update_coalesced(c, &p.into())
 }
 
-/// Updates the non-`None` columns of one `anime_sync` row. Same contract as [`update_manga_coalesced`].
+/// `update_coalesced` over an [`AnimeTrackPatch`].
 pub fn update_anime_coalesced(c: &Connection, p: &AnimeTrackPatch) -> DataResult<()> {
-    c.execute(
-        ANIME_UPDATE_COALESCED,
-        named_params! {
-            ":animeId": p.anime_id, ":syncId": p.tracker_id, ":remoteId": p.remote_id, ":libraryId": p.library_id,
-            ":title": p.title, ":lastEpisodeSeen": p.last_episode_seen, ":totalEpisodes": p.total_episodes,
-            ":status": p.status, ":score": p.score, ":remoteUrl": p.remote_url, ":startDate": p.start_date,
-            ":finishDate": p.finish_date, ":private": p.private, ":id": p.id,
-        },
-    )?;
-    Ok(())
+    update_coalesced(c, &p.into())
 }
 
-/// Repository over `manga_sync`.
+/// The per-kind repository over `tracks`: `MangaTrackRepo` and `AnimeTrackRepo` are this with their shape.
 #[derive(Clone)]
-pub struct MangaTrackRepo {
-    db: Arc<Db>,
+pub struct LegacyTrackRepo<T> {
+    repo: TrackRepo,
+    shape: PhantomData<fn() -> T>,
 }
 
-impl MangaTrackRepo {
+/// Repository over the manga rows of `tracks`.
+pub type MangaTrackRepo = LegacyTrackRepo<MangaTrack>;
+/// Repository over the anime rows of `tracks`.
+pub type AnimeTrackRepo = LegacyTrackRepo<AnimeTrack>;
+
+impl<T: LegacyTrack> LegacyTrackRepo<T> {
     pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
+        Self { repo: TrackRepo::new(db), shape: PhantomData }
     }
 
-    /// The binding with row id `id` (`_id`, Q-TRK-1). It is never an entry id.
-    pub fn by_id(&self, id: i64) -> DataResult<Option<MangaTrack>> {
-        let row = self.db.read(|c| none_if_not_found(sm::manga_sync::get_track_by_id(c, id)))?;
-        Ok(row.map(map_manga))
+    /// The binding with row id `id` (`_id`, Q-TRK-1). It is never an entry id. A binding of the other kind is `None`.
+    pub fn by_id(&self, id: i64) -> DataResult<Option<T>> {
+        Ok(self.repo.by_id(id)?.filter(|t| t.kind == T::KIND).map(T::from_track))
     }
 
-    /// Every binding, in table order.
-    pub fn all(&self) -> DataResult<Vec<MangaTrack>> {
-        let rows = self.db.read(|c| Ok(sm::manga_sync::get_tracks(c)?))?;
-        Ok(rows.into_iter().map(map_manga).collect())
+    /// Every binding of the kind, in table order.
+    pub fn all(&self) -> DataResult<Vec<T>> {
+        Ok(self.repo.all(T::KIND)?.into_iter().map(T::from_track).collect())
     }
 
-    /// Every binding of manga `manga_id`.
-    pub fn by_entry(&self, manga_id: i64) -> DataResult<Vec<MangaTrack>> {
-        let rows = self.db.read(|c| Ok(sm::manga_sync::get_tracks_by_manga_id(c, manga_id)?))?;
-        Ok(rows.into_iter().map(map_manga).collect())
+    /// Every binding of entry `entry_id`.
+    pub fn by_entry(&self, entry_id: i64) -> DataResult<Vec<T>> {
+        Ok(self.repo.by_entry(entry_id)?.into_iter().map(T::from_track).collect())
     }
 
-    /// Upserts one binding and returns its row id. A second binding of the same (manga, tracker) pair updates the
-    /// row in place, so the id does not change.
-    pub fn insert(&self, t: &MangaTrack) -> DataResult<i64> {
-        let row = to_manga_row(t);
-        self.db.write(|tx| Ok(sm::manga_sync::upsert(tx, &row)?))
+    /// Upserts one binding and returns its row id. A second binding of the same (entry, tracker) pair updates the row
+    /// in place, so the id does not change.
+    pub fn insert(&self, t: &T) -> DataResult<i64> {
+        self.repo.insert(&t.to_track())
     }
 
     /// Upserts every binding in one transaction. A repeated pair leaves one row with the last values.
-    pub fn insert_all(&self, tracks: &[MangaTrack]) -> DataResult<()> {
-        self.db.write(|tx| {
-            for t in tracks {
-                sm::manga_sync::upsert(tx, &to_manga_row(t))?;
-            }
-            Ok(())
-        })
+    pub fn insert_all(&self, tracks: &[T]) -> DataResult<()> {
+        self.repo.insert_all(&tracks.iter().map(T::to_track).collect::<Vec<_>>())
     }
 
-    /// Removes the binding of manga `manga_id` to tracker `tracker_id`. Zero rows affected is not an error.
-    pub fn delete(&self, manga_id: i64, tracker_id: i64) -> DataResult<()> {
-        self.db.write(|tx| Ok(sm::manga_sync::delete(tx, manga_id, tracker_id).map(drop)?))
+    /// Removes the binding of the entry to tracker `tracker_id`. Zero rows affected is not an error.
+    pub fn delete(&self, entry_id: i64, tracker_id: i64) -> DataResult<()> {
+        self.repo.delete(entry_id, tracker_id)
     }
 
-    /// Every binding, published again after each write to `manga_sync`.
-    pub fn watch_all(&self) -> Subscription<Vec<MangaTrack>> {
-        self.db.subscribe(MANGA_SYNC, ENTRY_DEBOUNCE, |c| {
-            Ok(sm::manga_sync::get_tracks(c)?.into_iter().map(map_manga).collect::<Vec<_>>())
-        })
+    /// Every binding of the kind, published again after each write to `tracks`.
+    pub fn watch_all(&self) -> Subscription<Vec<T>> {
+        self.repo.watch_all_mapped(T::KIND, T::from_track)
     }
 
-    /// The bindings of one manga, published again after each write to `manga_sync`.
-    pub fn watch_by_entry(&self, manga_id: i64) -> Subscription<Vec<MangaTrack>> {
-        self.db.subscribe(MANGA_SYNC, ENTRY_DEBOUNCE, move |c| {
-            Ok(sm::manga_sync::get_tracks_by_manga_id(c, manga_id)?.into_iter().map(map_manga).collect::<Vec<_>>())
-        })
-    }
-}
-
-/// Repository over `anime_sync`.
-#[derive(Clone)]
-pub struct AnimeTrackRepo {
-    db: Arc<Db>,
-}
-
-impl AnimeTrackRepo {
-    pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
-    }
-
-    /// The binding with row id `id` (`_id`, Q-TRK-1). It is never an entry id.
-    pub fn by_id(&self, id: i64) -> DataResult<Option<AnimeTrack>> {
-        let row = self.db.read(|c| Ok(sa::track_by_id(c, id)?))?;
-        Ok(row.map(map_anime))
-    }
-
-    /// Every binding, in table order.
-    pub fn all(&self) -> DataResult<Vec<AnimeTrack>> {
-        let rows = self.db.read(|c| Ok(sa::tracks(c)?))?;
-        Ok(rows.into_iter().map(map_anime).collect())
-    }
-
-    /// Every binding of anime `anime_id`.
-    pub fn by_entry(&self, anime_id: i64) -> DataResult<Vec<AnimeTrack>> {
-        let rows = self.db.read(|c| Ok(sa::tracks_by_anime_id(c, anime_id)?))?;
-        Ok(rows.into_iter().map(map_anime).collect())
-    }
-
-    /// Upserts one binding and returns its row id (Q-TRK-2).
-    pub fn insert(&self, t: &AnimeTrack) -> DataResult<i64> {
-        let row = to_anime_row(t);
-        self.db.write(|tx| Ok(sa::upsert_track(tx, &row)?))
-    }
-
-    /// Upserts every binding in one transaction (Q-TRK-2, TC-TRK-06).
-    pub fn insert_all(&self, tracks: &[AnimeTrack]) -> DataResult<()> {
-        self.db.write(|tx| {
-            for t in tracks {
-                sa::upsert_track(tx, &to_anime_row(t))?;
-            }
-            Ok(())
-        })
-    }
-
-    /// Removes the binding of anime `anime_id` to tracker `tracker_id`. Zero rows affected is not an error.
-    pub fn delete(&self, anime_id: i64, tracker_id: i64) -> DataResult<()> {
-        self.db.write(|tx| Ok(sa::delete_track(tx, anime_id, tracker_id).map(drop)?))
-    }
-
-    /// Every binding, published again after each write to `anime_sync`.
-    pub fn watch_all(&self) -> Subscription<Vec<AnimeTrack>> {
-        self.db.subscribe(ANIME_SYNC, ENTRY_DEBOUNCE, |c| {
-            Ok(sa::tracks(c)?.into_iter().map(map_anime).collect::<Vec<_>>())
-        })
-    }
-
-    /// The bindings of one anime, published again after each write to `anime_sync`.
-    pub fn watch_by_entry(&self, anime_id: i64) -> Subscription<Vec<AnimeTrack>> {
-        self.db.subscribe(ANIME_SYNC, ENTRY_DEBOUNCE, move |c| {
-            Ok(sa::tracks_by_anime_id(c, anime_id)?.into_iter().map(map_anime).collect::<Vec<_>>())
-        })
-    }
-}
-
-fn map_manga(r: TrackRow) -> MangaTrack {
-    MangaTrack {
-        id: r.id,
-        manga_id: r.manga_id,
-        tracker_id: r.sync_id,
-        remote_id: r.remote_id,
-        library_id: r.library_id,
-        title: r.title,
-        last_chapter_read: r.last_chapter_read,
-        total_chapters: r.total_chapters,
-        status: r.status,
-        score: r.score,
-        remote_url: r.remote_url,
-        start_date: r.start_date,
-        finish_date: r.finish_date,
-        private: r.private,
-    }
-}
-
-fn to_manga_row(t: &MangaTrack) -> TrackRow {
-    TrackRow {
-        id: t.id,
-        manga_id: t.manga_id,
-        sync_id: t.tracker_id,
-        remote_id: t.remote_id,
-        library_id: t.library_id,
-        title: t.title.clone(),
-        last_chapter_read: t.last_chapter_read,
-        total_chapters: t.total_chapters,
-        status: t.status,
-        score: t.score,
-        remote_url: t.remote_url.clone(),
-        start_date: t.start_date,
-        finish_date: t.finish_date,
-        private: t.private,
-    }
-}
-
-fn map_anime(r: AnimeTrackRow) -> AnimeTrack {
-    AnimeTrack {
-        id: r.id,
-        anime_id: r.anime_id,
-        tracker_id: r.sync_id,
-        remote_id: r.remote_id,
-        library_id: r.library_id,
-        title: r.title,
-        last_episode_seen: r.last_episode_seen,
-        total_episodes: r.total_episodes,
-        status: r.status,
-        score: r.score,
-        remote_url: r.remote_url,
-        start_date: r.start_date,
-        finish_date: r.finish_date,
-        private: r.private,
-    }
-}
-
-fn to_anime_row(t: &AnimeTrack) -> AnimeTrackRow {
-    AnimeTrackRow {
-        id: t.id,
-        anime_id: t.anime_id,
-        sync_id: t.tracker_id,
-        remote_id: t.remote_id,
-        library_id: t.library_id,
-        title: t.title.clone(),
-        last_episode_seen: t.last_episode_seen,
-        total_episodes: t.total_episodes,
-        status: t.status,
-        score: t.score,
-        remote_url: t.remote_url.clone(),
-        start_date: t.start_date,
-        finish_date: t.finish_date,
-        private: t.private,
+    /// The bindings of one entry, published again after each write to `tracks`.
+    pub fn watch_by_entry(&self, entry_id: i64) -> Subscription<Vec<T>> {
+        self.repo.watch_by_entry_mapped(entry_id, T::from_track)
     }
 }
 

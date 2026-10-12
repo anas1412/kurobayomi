@@ -4,15 +4,22 @@
 use std::sync::Arc;
 
 use kuro_db::handle::Db;
-use kuro_db::statements_anime::{related_groups, relations_last_fetched_at};
 use kuro_db::subscribe::Subscription;
-use rusqlite::{Connection, named_params};
+use kuro_db::tables::EntryRow;
+use rusqlite::{Connection, OptionalExtension, named_params};
 
-use crate::anime::{AnimeRelationGroup, map_anime};
+use crate::anime::{Anime, AnimeRelationGroup};
+use crate::entry::Entry;
 use crate::{DataResult, ENTRY_DEBOUNCE};
 
 /// Tables a related-anime query reads.
 const RELATION_TABLES: &[&str] = &["anime_relations", "entries"];
+
+/// The related anime of one anime in `sort_order`, each with the name of its group. `e.*` is read by column name.
+const RELATED: &str = "SELECT e.*, r.name AS group_name FROM anime_relations r \
+     JOIN entries e ON e._id = r.related_id AND e.kind = 'anime' WHERE r.entry_id = :animeId ORDER BY r.sort_order";
+
+const LAST_FETCHED_AT: &str = "SELECT last_fetched_at FROM anime_relations WHERE entry_id = :animeId LIMIT 1";
 
 /// Deletes the rows of one anime (the `replace_relations` first step).
 const RELATION_DELETE: &str = "DELETE FROM anime_relations WHERE entry_id = :animeId";
@@ -56,7 +63,7 @@ impl AnimeRelationRepo {
 
     /// `last_fetched_at` of the relations of `anime_id`, or `None` when it has none.
     pub fn last_fetched_at(&self, anime_id: i64) -> DataResult<Option<i64>> {
-        self.db.read(|c| Ok(relations_last_fetched_at(c, anime_id)?))
+        self.db.read(|c| Ok(c.prepare_cached(LAST_FETCHED_AT)?.query_row(named_params! {":animeId": anime_id}, |r| r.get(0)).optional()?))
     }
 
     /// The groups of `anime_id`, published again after each change to the relations or the anime rows they link.
@@ -71,11 +78,20 @@ impl AnimeRelationRepo {
     }
 }
 
+/// The groups in the order of their first `sort_order`, and the anime of each group in `sort_order`.
 fn groups(c: &Connection, anime_id: i64) -> rusqlite::Result<Vec<AnimeRelationGroup>> {
-    Ok(related_groups(c, anime_id)?
-        .into_iter()
-        .map(|(name, rows)| AnimeRelationGroup { name, anime: rows.iter().map(map_anime).collect() })
-        .collect())
+    let mut groups: Vec<AnimeRelationGroup> = Vec::new();
+    let mut st = c.prepare_cached(RELATED)?;
+    let rows = st.query_map(named_params! {":animeId": anime_id}, |r| Ok((r.get::<_, String>("group_name")?, EntryRow::from_row(r)?)))?;
+    for row in rows {
+        let (name, entry) = row?;
+        let anime = Anime::from(Entry::from(entry));
+        match groups.iter_mut().find(|g| g.name == name) {
+            Some(group) => group.anime.push(anime),
+            None => groups.push(AnimeRelationGroup { name, anime: vec![anime] }),
+        }
+    }
+    Ok(groups)
 }
 
 #[cfg(test)]

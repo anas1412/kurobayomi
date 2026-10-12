@@ -1,28 +1,21 @@
-//! Read history (`MangaHistoryRepositoryImpl.kt`, `AnimeHistoryRepositoryImpl.kt`): the history list and its
-//! search (T-06a-012), the per-chapter and per-episode repositories (T-06a-010, T-06a-011), and the session
-//! timer that writes them (`HistoryRecorder`, T-06a-014).
+//! Legacy per-kind history names over `entry_history::HistoryRepo` (`MangaHistoryRepo`, `AnimeHistoryRepo`) and the
+//! session timer that writes them (`HistoryRecorder`). Phase E deletes the wrappers; the SQL lives in `kuro-db`.
 //!
-//! The `*_repo` write methods that Kotlin makes infallible log their failure and return `false` or nothing;
-//! their `try_*` twins return the error for callers and tests.
+//! The write methods that Kotlin makes infallible log their failure and return `false` or nothing; their `try_*`
+//! twins return the error for callers and tests.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use kuro_db::handle::Db;
-use kuro_db::models::{HistoryRow, HistoryViewRow};
-use kuro_db::schema_anime::Millis;
-use kuro_db::statements_anime as anime;
-use kuro_db::statements_manga::{history as manga_history, views as manga_views};
 use kuro_db::subscribe::Subscription;
-use rusqlite::{Connection, named_params};
+use kuro_platform::kind::Kind;
+use rusqlite::Connection;
 
-use crate::{DataResult, ENTRY_DEBOUNCE};
+pub use kuro_db::schema_anime::Millis;
 
-/// Tables a manga history list reads.
-const MANGA_HISTORY_TABLES: &[&str] = &["history", "items", "entries"];
-
-/// Tables an anime history list reads.
-const ANIME_HISTORY_TABLES: &[&str] = &["history", "items", "entries"];
+use crate::entry_history::{self as shared, HistoryRepo};
+use crate::DataResult;
 
 /// One `history` row of a chapter.
 #[derive(Clone, Debug, PartialEq)]
@@ -35,9 +28,9 @@ pub struct MangaHistory {
     pub time_read: i64,
 }
 
-impl From<&HistoryRow> for MangaHistory {
-    fn from(r: &HistoryRow) -> Self {
-        Self { id: r.id, chapter_id: r.chapter_id, last_read: r.last_read, time_read: r.time_read }
+impl From<shared::History> for MangaHistory {
+    fn from(r: shared::History) -> Self {
+        Self { id: r.id, chapter_id: r.item_id, last_read: r.last_at, time_read: r.duration_ms }
     }
 }
 
@@ -58,97 +51,63 @@ pub struct HistoryItem {
     pub read_duration: i64,
 }
 
-impl From<HistoryViewRow> for HistoryItem {
-    fn from(r: HistoryViewRow) -> Self {
+impl From<shared::HistoryItem> for HistoryItem {
+    fn from(r: shared::HistoryItem) -> Self {
         Self {
             id: r.id,
-            manga_id: r.manga_id,
-            chapter_id: r.chapter_id,
+            manga_id: r.entry_id,
+            chapter_id: r.item_id,
             title: r.title,
             thumbnail_url: r.thumbnail_url,
             source: r.source,
             favorite: r.favorite,
             cover_last_modified: r.cover_last_modified,
-            chapter_number: r.chapter_number,
-            read_at: r.read_at,
-            read_duration: r.read_duration,
+            chapter_number: r.item_number,
+            read_at: r.last_at,
+            read_duration: r.duration_ms,
         }
     }
-}
-
-/// `HISTORY_SEARCH_PARITY=1` restores Kotlin's search: the text goes to `LIKE` as typed, so `%` and `_` act
-/// as wildcards and only ASCII letters fold case.
-fn parity_search() -> bool {
-    std::env::var("HISTORY_SEARCH_PARITY").is_ok_and(|v| v == "1")
-}
-
-/// The manga history list for `query`, newest read first, ties broken by the higher id.
-///
-/// Default search: a substring match on the title with Unicode case folding (`str::to_lowercase`), so
-/// "éclair" finds "Éclair" and "100%" matches literally. Parity search passes the raw text to `LIKE`.
-pub(crate) fn manga_list(c: &Connection, query: &str, parity: bool) -> DataResult<Vec<HistoryItem>> {
-    let mut rows = if parity {
-        let mut st = c.prepare_cached(manga_views::HISTORY)?;
-        st.query_map(named_params! {":query": query}, HistoryViewRow::from_row)?.collect::<rusqlite::Result<Vec<_>>>()?
-    } else {
-        let needle = query.to_lowercase();
-        manga_views::history(c, "")?.into_iter().filter(|r| r.title.to_lowercase().contains(&needle)).collect()
-    };
-    rows.sort_by(|a, b| b.read_at.cmp(&a.read_at).then(b.id.cmp(&a.id)));
-    Ok(rows.into_iter().map(HistoryItem::from).collect())
-}
-
-/// The newest history row with `readAt > 0`, or `None`. Ties broken by the higher id, so it equals the first
-/// row of [`manga_list`] with an empty query.
-fn manga_latest(c: &Connection) -> DataResult<Option<HistoryItem>> {
-    let mut st = c.prepare_cached(manga_views::GET_LATEST_HISTORY)?;
-    let mut rows = st.query_map([], HistoryViewRow::from_row)?;
-    Ok(rows.next().transpose()?.map(HistoryItem::from))
 }
 
 /// Manga history access (`MangaHistoryRepositoryImpl.kt`).
 #[derive(Clone)]
 pub struct MangaHistoryRepo {
-    db: Arc<Db>,
+    repo: HistoryRepo,
 }
 
 impl MangaHistoryRepo {
     pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
+        Self { repo: HistoryRepo::new(db) }
     }
 
     /// The history list for `query`, published again after a change to history, chapters or mangas.
     pub fn watch(&self, query: &str) -> Subscription<Vec<HistoryItem>> {
-        let query = query.to_owned();
-        let parity = parity_search();
-        self.db.subscribe(MANGA_HISTORY_TABLES, ENTRY_DEBOUNCE, move |c| manga_list(c, &query, parity))
+        self.repo.watch_mapped(Kind::Manga, query, HistoryItem::from)
     }
 
-    /// The history list for `query` (see [`manga_list`]).
+    /// The history list for `query`, newest read first, ties broken by the higher id.
     pub fn list(&self, query: &str) -> DataResult<Vec<HistoryItem>> {
-        let parity = parity_search();
-        self.db.read(|c| manga_list(c, query, parity))
+        Ok(self.repo.list(Kind::Manga, query)?.into_iter().map(HistoryItem::from).collect())
     }
 
     /// The row with the greatest `readAt > 0`, or `None` when nothing was read.
     pub fn latest(&self) -> DataResult<Option<HistoryItem>> {
-        self.db.read(manga_latest)
+        Ok(self.repo.latest(Kind::Manga)?.map(HistoryItem::from))
     }
 
     /// Accumulated read time over every history row, reset rows included. Zero when there are none.
     pub fn total_read_duration(&self) -> DataResult<i64> {
-        self.db.read(|c| Ok(manga_history::get_read_duration(c)?))
+        self.repo.total_duration(Kind::Manga)
     }
 
     /// Every history row of one manga, reset rows included.
     pub fn by_manga_id(&self, manga_id: i64) -> DataResult<Vec<MangaHistory>> {
-        let rows = self.db.read(|c| Ok(manga_history::get_by_manga_id(c, manga_id)?))?;
-        Ok(rows.iter().map(MangaHistory::from).collect())
+        Ok(self.repo.by_entry_id(manga_id)?.into_iter().map(MangaHistory::from).collect())
     }
 
     /// The history row of the chapter with this url, as the backup restorer reads it.
     pub fn by_chapter_url(c: &Connection, url: &str) -> DataResult<Option<MangaHistory>> {
-        Ok(manga_history::get_by_chapter_url(c, url)?.as_ref().map(MangaHistory::from))
+        Ok(HistoryRepo::by_item_url(c, Kind::Manga, url)?.map(MangaHistory::from))
     }
 
     /// Sets `last_read = 0` on one row, logging a failure.
@@ -157,7 +116,7 @@ impl MangaHistoryRepo {
     }
 
     pub fn try_reset_by_id(&self, history_id: i64) -> DataResult<()> {
-        self.db.write(|tx| Ok(manga_history::reset_by_id(tx, history_id).map(drop)?))
+        self.repo.reset_by_id(history_id)
     }
 
     /// Resets every history row of one manga, logging a failure.
@@ -166,16 +125,16 @@ impl MangaHistoryRepo {
     }
 
     pub fn try_reset_by_manga_id(&self, manga_id: i64) -> DataResult<()> {
-        self.db.write(|tx| Ok(manga_history::reset_by_manga_id(tx, manga_id).map(drop)?))
+        self.repo.reset_by_entry_id(manga_id)
     }
 
-    /// Deletes every history row, time included. Returns `true` on success; a failure is logged.
+    /// Deletes every manga history row, time included. Returns `true` on success; a failure is logged.
     pub fn delete_all(&self) -> bool {
         logged("delete_all", self.try_delete_all())
     }
 
     pub fn try_delete_all(&self) -> DataResult<()> {
-        self.db.write(|tx| Ok(manga_history::remove_all(tx).map(drop)?))
+        self.repo.delete_all(Kind::Manga)
     }
 
     /// Records a read of `chapter_id`: sets `last_read` to `read_at` and adds `duration` to `time_read`.
@@ -185,22 +144,45 @@ impl MangaHistoryRepo {
     }
 
     pub fn try_upsert(&self, chapter_id: i64, read_at: i64, duration: i64) -> DataResult<()> {
-        self.db.write(|tx| Ok(manga_history::upsert(tx, chapter_id, read_at, duration).map(drop)?))
+        self.repo.upsert(chapter_id, read_at, duration)
     }
 
     /// Deletes the reset rows (`last_read = 0`) inside an open transaction, for the restore path.
     pub fn remove_resetted(c: &Connection) -> DataResult<usize> {
-        Ok(manga_history::remove_resetted(c)?)
+        HistoryRepo::remove_resetted(c, Kind::Manga)
     }
 }
 
-/// One `animehistory` row, as the anime history list shows it (the `animehistoryView` columns).
-pub type AnimeHistoryItem = anime::HistoryEntry;
+/// One line of the anime history list (the `animehistoryView` columns).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnimeHistoryItem {
+    pub id: i64,
+    pub anime_id: i64,
+    pub episode_id: i64,
+    pub title: String,
+    pub thumbnail_url: Option<String>,
+    pub source: i64,
+    pub favorite: bool,
+    pub cover_last_modified: i64,
+    pub episode_number: f64,
+    pub seen_at: Millis,
+}
 
-/// Anime history access (`AnimeHistoryRepositoryImpl.kt`). Same as the manga side, without durations.
-#[derive(Clone)]
-pub struct AnimeHistoryRepo {
-    db: Arc<Db>,
+impl From<shared::HistoryItem> for AnimeHistoryItem {
+    fn from(r: shared::HistoryItem) -> Self {
+        Self {
+            id: r.id,
+            anime_id: r.entry_id,
+            episode_id: r.item_id,
+            title: r.title,
+            thumbnail_url: r.thumbnail_url,
+            source: r.source,
+            favorite: r.favorite,
+            cover_last_modified: r.cover_last_modified,
+            episode_number: r.item_number,
+            seen_at: Millis(r.last_at),
+        }
+    }
 }
 
 /// One `animehistory` row of an episode.
@@ -208,57 +190,51 @@ pub struct AnimeHistoryRepo {
 pub struct AnimeHistory {
     pub id: i64,
     pub episode_id: i64,
-    /// Epoch milliseconds of the last view; `None` or zero after a reset.
+    /// Epoch milliseconds of the last view; zero after a reset.
     pub last_seen: Option<i64>,
+}
+
+impl From<shared::History> for AnimeHistory {
+    fn from(r: shared::History) -> Self {
+        Self { id: r.id, episode_id: r.item_id, last_seen: Some(r.last_at) }
+    }
+}
+
+/// Anime history access (`AnimeHistoryRepositoryImpl.kt`). The playback time is not recorded yet, so every upsert adds 0.
+#[derive(Clone)]
+pub struct AnimeHistoryRepo {
+    repo: HistoryRepo,
 }
 
 impl AnimeHistoryRepo {
     pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
+        Self { repo: HistoryRepo::new(db) }
     }
 
     /// The anime history list for `query`, published again after a change to history, episodes or animes.
     pub fn watch(&self, query: &str) -> Subscription<Vec<AnimeHistoryItem>> {
-        let query = query.to_owned();
-        self.db.subscribe(ANIME_HISTORY_TABLES, ENTRY_DEBOUNCE, move |c| anime_list(c, &query))
+        self.repo.watch_mapped(Kind::Anime, query, AnimeHistoryItem::from)
     }
 
     /// The anime history list for `query`, newest first, ties broken by the higher id.
     pub fn list(&self, query: &str) -> DataResult<Vec<AnimeHistoryItem>> {
-        self.db.read(|c| anime_list(c, query))
+        Ok(self.repo.list(Kind::Anime, query)?.into_iter().map(AnimeHistoryItem::from).collect())
     }
 
-    /// The history row of the episode with this url (`AnimeHistory.kt` lookup by episode url, used by the restorer).
-    /// The lowest history id wins when rows repeat. `None` when no episode has that url.
+    /// The history row of the episode with this url (used by the restorer). The lowest history id wins when rows
+    /// repeat. `None` when no episode has that url.
     pub fn by_episode_url(c: &Connection, url: &str) -> DataResult<Option<AnimeHistory>> {
-        let mut st = c.prepare_cached(
-            "SELECT H._id, H.item_id, H.last_at FROM history H \
-             JOIN items E ON E._id = H.item_id JOIN entries N ON N._id = E.entry_id \
-             WHERE N.kind = 'anime' AND E.url = :url ORDER BY H._id LIMIT 1",
-        )?;
-        let mut rows = st.query_map(named_params! {":url": url}, |r| {
-            Ok(AnimeHistory { id: r.get(0)?, episode_id: r.get(1)?, last_seen: r.get(2)? })
-        })?;
-        Ok(rows.next().transpose()?)
+        Ok(HistoryRepo::by_item_url(c, Kind::Anime, url)?.map(AnimeHistory::from))
     }
 
     /// Deletes the reset anime rows (`last_seen = 0`) inside an open transaction, for the restore path.
     pub fn remove_resetted(c: &Connection) -> DataResult<usize> {
-        Ok(anime::remove_resetted_history(c)?)
+        HistoryRepo::remove_resetted(c, Kind::Anime)
     }
 
     /// Every history row of one anime, reset rows included.
     pub fn by_anime_id(&self, anime_id: i64) -> DataResult<Vec<AnimeHistory>> {
-        self.db.read(|c| {
-            let mut st = c.prepare_cached(
-                "SELECT H._id, H.item_id, H.last_at FROM history H \
-                 JOIN items E ON E._id = H.item_id WHERE E.entry_id = :animeId ORDER BY H._id",
-            )?;
-            let rows = st.query_map(named_params! {":animeId": anime_id}, |r| {
-                Ok(AnimeHistory { id: r.get(0)?, episode_id: r.get(1)?, last_seen: r.get(2)? })
-            })?;
-            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-        })
+        Ok(self.repo.by_entry_id(anime_id)?.into_iter().map(AnimeHistory::from).collect())
     }
 
     /// Sets `last_seen = 0` on one row, logging a failure.
@@ -267,7 +243,7 @@ impl AnimeHistoryRepo {
     }
 
     pub fn try_reset_by_id(&self, history_id: i64) -> DataResult<()> {
-        self.db.write(|tx| Ok(anime::reset_history(tx, history_id).map(drop)?))
+        self.repo.reset_by_id(history_id)
     }
 
     /// Resets every history row of one anime, logging a failure.
@@ -276,7 +252,7 @@ impl AnimeHistoryRepo {
     }
 
     pub fn try_reset_by_anime_id(&self, anime_id: i64) -> DataResult<()> {
-        self.db.write(|tx| Ok(anime::reset_history_by_anime(tx, anime_id).map(drop)?))
+        self.repo.reset_by_entry_id(anime_id)
     }
 
     /// Deletes every anime history row. Returns `true` on success; a failure is logged.
@@ -285,7 +261,7 @@ impl AnimeHistoryRepo {
     }
 
     pub fn try_delete_all(&self) -> DataResult<()> {
-        self.db.write(|tx| Ok(anime::delete_all_history(tx).map(drop)?))
+        self.repo.delete_all(Kind::Anime)
     }
 
     /// Records that `episode_id` was seen at `seen_at`. An older row is overwritten, as Kotlin does. A failure is
@@ -295,14 +271,8 @@ impl AnimeHistoryRepo {
     }
 
     pub fn try_upsert(&self, episode_id: i64, seen_at: i64) -> DataResult<()> {
-        self.db.write(|tx| Ok(anime::upsert_history(tx, episode_id, Millis(seen_at)).map(drop)?))
+        self.repo.upsert(episode_id, seen_at, 0)
     }
-}
-
-fn anime_list(c: &Connection, query: &str) -> DataResult<Vec<AnimeHistoryItem>> {
-    let mut rows = anime::history(c, query)?;
-    rows.sort_by(|a, b| b.seen_at.cmp(&a.seen_at).then(b.id.cmp(&a.id)));
-    Ok(rows)
 }
 
 /// Logs a failed write (Kotlin catches and logs these) and reports whether it succeeded.
@@ -323,7 +293,7 @@ fn logged(op: &str, r: DataResult<()>) -> bool {
 /// upsert with the time since `start`, and clears `start`. In incognito a flush writes nothing and keeps
 /// `start`, as `ReaderViewModel.updateHistory` returns early before it clears the start time.
 ///
-/// The reader and player lanes own the hooks; this type holds only the state machine. [`HistoryWrites`] is the shutdown wait.
+/// The reader and player lanes own the hooks; this type holds only the state machine.
 #[derive(Debug)]
 pub struct HistoryRecorder {
     started_at: Option<i64>,
@@ -362,33 +332,6 @@ impl HistoryRecorder {
     /// The start of the open session, if one is running.
     pub fn started_at(&self) -> Option<i64> {
         self.started_at
-    }
-}
-
-/// The history writes that left the UI thread and have not finished yet. App shutdown calls [`drain`](Self::drain)
-/// so no flushed read time is lost (T-06a-014). Must be used inside a tokio runtime.
-#[derive(Debug, Default)]
-pub struct HistoryWrites {
-    pending: tokio::task::JoinSet<()>,
-}
-
-impl HistoryWrites {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Runs `write` (a repository call) on a blocking thread and tracks it until it finishes.
-    pub fn spawn(&mut self, write: impl FnOnce() + Send + 'static) {
-        self.pending.spawn_blocking(write);
-    }
-
-    /// Waits for every tracked write. A panicked write is logged, not propagated.
-    pub async fn drain(&mut self) {
-        while let Some(done) = self.pending.join_next().await {
-            if let Err(e) = done {
-                tracing::error!(error = %e, "history write task failed");
-            }
-        }
     }
 }
 
@@ -467,14 +410,6 @@ mod tests {
         assert_eq!(found, ["Éclair"]);
         let literal: Vec<String> = repo.list("100%").unwrap().into_iter().map(|h| h.title).collect();
         assert_eq!(literal, ["100% Pure"]);
-        // Parity search passes the text to LIKE unescaped: `%` is a wildcard, so "100%" matches every title
-        // that starts with "100", and "Éclair" stays case-sensitive for non-ASCII letters.
-        let parity: Vec<String> =
-            db.read(|c| manga_list(c, "100%", true)).unwrap().into_iter().map(|h| h.title).collect();
-        assert_eq!(parity, ["100% Pure"]);
-        let parity_ascii: Vec<String> =
-            db.read(|c| manga_list(c, "PLAIN", true)).unwrap().into_iter().map(|h| h.title).collect();
-        assert_eq!(parity_ascii, ["Plain"]);
     }
 
     #[test]
@@ -696,28 +631,6 @@ mod tests {
         let open = HistoryRecorder::new(Arc::new(AtomicBool::new(false)));
         open.record_episode(&repo, e, 10);
         assert_eq!(repo.by_anime_id(a).unwrap()[0].last_seen, Some(10));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn drain_waits_for_every_outstanding_write() {
-        let (_d, db) = test_db();
-        let m = insert_manga(&db, "m", false);
-        let first = insert_chapter(&db, m, "first");
-        let second = insert_chapter(&db, m, "second");
-        let repo = MangaHistoryRepo::new(db.clone());
-        let mut writes = HistoryWrites::new();
-        let slow = MangaHistoryRepo::new(db.clone());
-        writes.spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            slow.upsert(first, 1, 10);
-        });
-        let fast = MangaHistoryRepo::new(db.clone());
-        writes.spawn(move || {
-            fast.upsert(second, 2, 20);
-        });
-        writes.drain().await;
-        assert_eq!(repo.by_manga_id(m).unwrap().len(), 2, "both writes finished before drain returned");
-        writes.drain().await;
     }
 }
 

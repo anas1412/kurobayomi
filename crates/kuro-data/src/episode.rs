@@ -1,18 +1,16 @@
 //! Anime episode model and its partial update (`Episode.kt`, `EpisodeUpdate.kt`), and `EpisodeRepo`
-//! (`EpisodeRepositoryImpl.kt`). The behaviour (`copy_from`, `to_update`, recognition) lives in `kuro-domain::items`.
+//! (`EpisodeRepositoryImpl.kt`) over the shared `Item` and `ItemRepo`. The behaviour (`copy_from`, `to_update`,
+//! recognition) lives in `kuro-domain::items`. Phase E deletes this file.
 
-use std::sync::Arc;
-
-use kuro_db::handle::Db;
 use kuro_db::schema_anime::Memo;
-use kuro_db::statements_anime::{
-    EpisodeRow, EpisodeUpdate as DbEpisodeUpdate, bookmarked_episodes_by_anime_id, episode_by_id, episodes_by_anime_id,
-    episodes_by_url, episodes_by_url_and_anime_id, insert_episode, remove_episodes_with_ids, update_episode,
-};
+use kuro_db::statements_anime::EpisodeRow;
 use kuro_db::subscribe::Subscription;
+use kuro_platform::kind::Kind;
 
+use crate::DataResult;
+use crate::item::{Item, ItemKey, ItemUpdate};
+use crate::legacy::{LegacyItem, LegacyItemRepo};
 use crate::sanitize::sanitize_item_name;
-use crate::{DataResult, ENTRY_DEBOUNCE, ID_CHUNK};
 
 /// One `episodes` row as the domain sees it. Positions and durations are whole seconds.
 #[derive(Clone, Debug, PartialEq)]
@@ -42,26 +40,59 @@ pub struct Episode {
 impl Episode {
     /// `Episode.create()`: id and anime id -1, date upload -1, episode number -1.0, version 1, empty memo.
     pub fn create() -> Self {
+        Self::from(Item::create(Kind::Anime))
+    }
+}
+
+impl From<Item> for Episode {
+    fn from(i: Item) -> Self {
         Self {
-            id: -1,
-            anime_id: -1,
-            seen: false,
-            bookmark: false,
-            fillermark: false,
-            last_second_seen: 0,
-            total_seconds: 0,
-            date_fetch: 0,
-            source_order: 0,
-            url: String::new(),
-            name: String::new(),
-            date_upload: -1,
-            episode_number: -1.0,
-            scanlator: None,
-            summary: None,
-            preview_url: None,
-            last_modified_at: 0,
-            version: 1,
-            memo: serde_json::Map::new(),
+            total_seconds: i.total_seconds(),
+            memo: i.memo(),
+            id: i.id,
+            anime_id: i.entry_id,
+            seen: i.done,
+            bookmark: i.bookmark,
+            fillermark: i.fillermark,
+            last_second_seen: i.progress,
+            date_fetch: i.date_fetch,
+            source_order: i.source_order,
+            url: i.url,
+            name: i.name,
+            date_upload: i.date_upload,
+            episode_number: i.number,
+            scanlator: i.scanlator,
+            summary: i.summary,
+            preview_url: i.preview_url,
+            last_modified_at: i.last_modified_at,
+            version: i.version,
+        }
+    }
+}
+
+impl From<&Episode> for Item {
+    fn from(e: &Episode) -> Self {
+        Self {
+            id: e.id,
+            entry_id: e.anime_id,
+            kind: Kind::Anime,
+            url: e.url.clone(),
+            name: e.name.clone(),
+            scanlator: e.scanlator.clone(),
+            done: e.seen,
+            bookmark: e.bookmark,
+            fillermark: e.fillermark,
+            progress: e.last_second_seen,
+            number: e.episode_number,
+            source_order: e.source_order,
+            date_fetch: e.date_fetch,
+            date_upload: e.date_upload,
+            last_modified_at: e.last_modified_at,
+            version: e.version,
+            total_seconds: Some(e.total_seconds),
+            summary: e.summary.clone(),
+            preview_url: e.preview_url.clone(),
+            memo: Some(Memo(e.memo.clone())),
         }
     }
 }
@@ -98,107 +129,74 @@ impl EpisodeUpdate {
     }
 }
 
-/// Identity of an episode as Kotlin's `EpisodeImpl.equals`/`hashCode` define it: the pair (id, url).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct EpisodeKey {
-    pub id: i64,
-    pub url: String,
+impl From<&EpisodeUpdate> for ItemUpdate {
+    fn from(u: &EpisodeUpdate) -> Self {
+        Self {
+            id: u.id,
+            entry_id: u.anime_id,
+            done: u.seen,
+            bookmark: u.bookmark,
+            fillermark: u.fillermark,
+            progress: u.last_second_seen,
+            total_seconds: u.total_seconds,
+            date_fetch: u.date_fetch,
+            source_order: u.source_order,
+            url: u.url.clone(),
+            name: u.name.clone(),
+            date_upload: u.date_upload,
+            number: u.episode_number,
+            scanlator: u.scanlator.clone(),
+            summary: u.summary.clone(),
+            preview_url: u.preview_url.clone(),
+            version: u.version,
+            memo: u.memo.clone().map(Memo),
+        }
+    }
 }
 
-impl From<&Episode> for EpisodeKey {
+impl LegacyItem for Episode {
+    const KIND: Kind = Kind::Anime;
+    type Update = EpisodeUpdate;
+
+    fn to_item(&self) -> Item {
+        self.into()
+    }
+
+    fn to_update(u: &EpisodeUpdate) -> ItemUpdate {
+        u.into()
+    }
+}
+
+/// Identity of an episode as Kotlin's `EpisodeImpl.equals`/`hashCode` define it: the pair (id, url).
+pub type EpisodeKey = ItemKey;
+
+impl From<&Episode> for ItemKey {
     fn from(e: &Episode) -> Self {
         Self { id: e.id, url: e.url.clone() }
     }
 }
 
-/// Episode access over the anime database (`EpisodeRepositoryImpl.kt`).
-#[derive(Clone)]
-pub struct EpisodeRepo {
-    db: Arc<Db>,
-}
+/// Episode access over the anime items (`EpisodeRepositoryImpl.kt`).
+pub type EpisodeRepo = LegacyItemRepo<Episode>;
 
 impl EpisodeRepo {
-    pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
-    }
-
-    /// The row with `id`, or `None` when no row has it.
-    pub fn by_id(&self, id: i64) -> DataResult<Option<Episode>> {
-        let row = self.db.read(|c| Ok(episode_by_id(c, id)?))?;
-        Ok(row.as_ref().map(map_episode))
-    }
-
-    /// Every episode with this url, in any anime (`getEpisodeByUrl`). Empty when none matches.
-    pub fn by_url(&self, url: &str) -> DataResult<Vec<Episode>> {
-        let rows = self.db.read(|c| Ok(episodes_by_url(c, url)?))?;
-        Ok(rows.iter().map(map_episode).collect())
-    }
-
-    /// The first row with this url in the anime, or `None`.
+    /// The lowest-id row with this url in the anime, or `None`. A duplicate url logs a warning.
     pub fn by_url_and_anime_id(&self, url: &str, anime_id: i64) -> DataResult<Option<Episode>> {
-        let rows = self.db.read(|c| Ok(episodes_by_url_and_anime_id(c, url, anime_id)?))?;
-        Ok(rows.first().map(map_episode))
+        Ok(self.items.by_url_and_entry_id(url, anime_id)?.map(Episode::from))
     }
 
     /// Every episode of an anime, with no scanlator filter.
     pub fn by_anime_id(&self, anime_id: i64) -> DataResult<Vec<Episode>> {
-        let rows = self.db.read(|c| Ok(episodes_by_anime_id(c, anime_id)?))?;
-        Ok(rows.iter().map(map_episode).collect())
+        Ok(Self::list(self.items.by_entry_id(anime_id, false)?))
     }
 
     /// The episode list of an anime, published again after a change to its rows.
     pub fn subscribe_by_anime_id(&self, anime_id: i64) -> Subscription<Vec<Episode>> {
-        self.db.subscribe(EPISODE_TABLES, ENTRY_DEBOUNCE, move |c| {
-            Ok(episodes_by_anime_id(c, anime_id)?.iter().map(map_episode).collect::<Vec<_>>())
-        })
-    }
-
-    /// The bookmarked episodes of an anime.
-    pub fn bookmarked(&self, anime_id: i64) -> DataResult<Vec<Episode>> {
-        let rows = self.db.read(|c| Ok(bookmarked_episodes_by_anime_id(c, anime_id)?))?;
-        Ok(rows.iter().map(map_episode).collect())
-    }
-
-    /// Inserts the episodes in one transaction, in order. Returns them with their new ids, in the same order.
-    /// A failure on any row leaves the table unchanged.
-    pub fn add_all(&self, new: &[Episode]) -> DataResult<Vec<Episode>> {
-        let ids = self.db.write(|tx| {
-            new.iter().map(|e| Ok(insert_episode(tx, &to_row(e))?)).collect::<DataResult<Vec<i64>>>()
-        })?;
-        Ok(new.iter().zip(ids).map(|(e, id)| Episode { id, ..e.clone() }).collect())
-    }
-
-    /// Deletes the episodes with these ids, in chunks of [`ID_CHUNK`], in one transaction.
-    pub fn remove_with_ids(&self, ids: &[i64]) -> DataResult<()> {
-        self.db.write(|tx| {
-            for chunk in ids.chunks(ID_CHUNK) {
-                remove_episodes_with_ids(tx, chunk)?;
-            }
-            Ok(())
-        })
-    }
-
-    /// Updates one episode. A missing id matches no row and is not an error.
-    pub fn update(&self, u: &EpisodeUpdate) -> DataResult<()> {
-        let patch = to_update(u);
-        self.db.write(|tx| Ok(update_episode(tx, &patch).map(drop)?))
-    }
-
-    /// Every update in one transaction: one failure rolls back all of them.
-    pub fn update_all(&self, updates: &[EpisodeUpdate]) -> DataResult<()> {
-        self.db.write(|tx| {
-            for u in updates {
-                update_episode(tx, &to_update(u))?;
-            }
-            Ok(())
-        })
+        self.items.subscribe_by_entry_id_as(anime_id, false)
     }
 }
 
-/// Tables an episode list reads.
-const EPISODE_TABLES: &[&str] = &["items"];
-
-/// One `episodes` row as the domain sees it; `is_syncing` is dropped.
+/// One `episodes` row of `statements_anime` as the domain sees it; `is_syncing` is dropped.
 pub fn map_episode(r: &EpisodeRow) -> Episode {
     Episode {
         id: r.id,
@@ -223,60 +221,10 @@ pub fn map_episode(r: &EpisodeRow) -> Episode {
     }
 }
 
-/// A new `episodes` row. The id is assigned by the insert and `is_syncing` is always 0.
-fn to_row(e: &Episode) -> EpisodeRow {
-    EpisodeRow {
-        id: e.id,
-        anime_id: e.anime_id,
-        url: e.url.clone(),
-        name: e.name.clone(),
-        scanlator: e.scanlator.clone(),
-        seen: e.seen,
-        bookmark: e.bookmark,
-        last_second_seen: e.last_second_seen,
-        total_seconds: e.total_seconds,
-        episode_number: e.episode_number,
-        source_order: e.source_order,
-        date_fetch: e.date_fetch,
-        date_upload: e.date_upload,
-        last_modified_at: e.last_modified_at,
-        version: e.version,
-        is_syncing: 0,
-        summary: e.summary.clone(),
-        preview_url: e.preview_url.clone(),
-        fillermark: e.fillermark,
-        memo: kuro_db::schema_anime::Memo(e.memo.clone()),
-    }
-}
-
 /// `EpisodeSanitizer.sanitize`: the same algorithm as the chapter sanitizer, with the anime title as the prefix
 /// (T-05a-016). Sync code calls this with the episode name from the source and the anime title.
 pub fn sanitize_episode_name(name: &str, anime_title: &str) -> String {
     sanitize_item_name(name, anime_title)
-}
-
-/// Coalesce patch; `update_episode` always clears `is_syncing`.
-fn to_update(u: &EpisodeUpdate) -> DbEpisodeUpdate {
-    DbEpisodeUpdate {
-        id: u.id,
-        anime_id: u.anime_id,
-        url: u.url.clone(),
-        name: u.name.clone(),
-        scanlator: u.scanlator.clone(),
-        seen: u.seen,
-        bookmark: u.bookmark,
-        last_second_seen: u.last_second_seen,
-        total_seconds: u.total_seconds,
-        episode_number: u.episode_number,
-        source_order: u.source_order,
-        date_fetch: u.date_fetch,
-        date_upload: u.date_upload,
-        version: u.version,
-        summary: u.summary.clone(),
-        preview_url: u.preview_url.clone(),
-        fillermark: u.fillermark,
-        memo: u.memo.clone().map(Memo),
-    }
 }
 
 #[cfg(test)]

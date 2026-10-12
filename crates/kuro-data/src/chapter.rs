@@ -1,17 +1,14 @@
 //! Manga chapter model and its partial update (`Chapter.kt`, `ChapterUpdate.kt`), and `ChapterRepo`
-//! (`ChapterRepositoryImpl.kt`). The behaviour (`copy_from`, `to_update`, recognition) lives in `kuro-domain::items`.
+//! (`ChapterRepositoryImpl.kt`) over the shared `Item` and `ItemRepo`. The behaviour (`copy_from`, `to_update`,
+//! recognition) lives in `kuro-domain::items`. Phase E deletes this file.
 
-use std::sync::Arc;
-
-use kuro_db::handle::Db;
-use kuro_db::statements_manga::{ChapterPatch, ChapterRow, chapters};
+use kuro_db::statements_manga::ChapterRow;
 use kuro_db::subscribe::Subscription;
-use rusqlite::named_params;
+use kuro_platform::kind::Kind;
 
-use crate::{DataResult, ENTRY_DEBOUNCE, ID_CHUNK, none_if_not_found};
-
-/// Tables a chapter list reads: the rows and the scanlator exclusions of the filter.
-const CHAPTER_TABLES: &[&str] = &["items", "excluded_scanlators"];
+use crate::DataResult;
+use crate::item::{Item, ItemKey, ItemUpdate};
+use crate::legacy::{LegacyItem, LegacyItemRepo};
 
 /// One `chapters` row as the domain sees it. `scanlator` is `None` for a blank scanlator.
 #[derive(Clone, Debug, PartialEq)]
@@ -36,21 +33,49 @@ pub struct Chapter {
 impl Chapter {
     /// `Chapter.create()`: id and manga id -1, date upload -1, chapter number -1.0, version 1.
     pub fn create() -> Self {
+        Self::from(Item::create(Kind::Manga))
+    }
+}
+
+impl From<Item> for Chapter {
+    fn from(i: Item) -> Self {
         Self {
-            id: -1,
-            manga_id: -1,
-            read: false,
-            bookmark: false,
-            last_page_read: 0,
-            date_fetch: 0,
-            source_order: 0,
-            url: String::new(),
-            name: String::new(),
-            date_upload: -1,
-            chapter_number: -1.0,
-            scanlator: None,
-            last_modified_at: 0,
-            version: 1,
+            id: i.id,
+            manga_id: i.entry_id,
+            read: i.done,
+            bookmark: i.bookmark,
+            last_page_read: i.progress,
+            date_fetch: i.date_fetch,
+            source_order: i.source_order,
+            url: i.url,
+            name: i.name,
+            date_upload: i.date_upload,
+            chapter_number: i.number,
+            scanlator: i.scanlator,
+            last_modified_at: i.last_modified_at,
+            version: i.version,
+        }
+    }
+}
+
+impl From<&Chapter> for Item {
+    fn from(c: &Chapter) -> Self {
+        Self {
+            id: c.id,
+            entry_id: c.manga_id,
+            url: c.url.clone(),
+            name: c.name.clone(),
+            scanlator: c.scanlator.clone(),
+            done: c.read,
+            bookmark: c.bookmark,
+            progress: c.last_page_read,
+            number: c.chapter_number,
+            source_order: c.source_order,
+            date_fetch: c.date_fetch,
+            date_upload: c.date_upload,
+            last_modified_at: c.last_modified_at,
+            version: c.version,
+            ..Item::create(Kind::Manga)
         }
     }
 }
@@ -82,124 +107,75 @@ impl ChapterUpdate {
     }
 }
 
-/// Identity of a chapter as Kotlin's `ChapterImpl.equals`/`hashCode` define it: the pair (id, url).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ChapterKey {
-    pub id: i64,
-    pub url: String,
+impl From<&ChapterUpdate> for ItemUpdate {
+    fn from(u: &ChapterUpdate) -> Self {
+        Self {
+            id: u.id,
+            entry_id: u.manga_id,
+            done: u.read,
+            bookmark: u.bookmark,
+            progress: u.last_page_read,
+            date_fetch: u.date_fetch,
+            source_order: u.source_order,
+            url: u.url.clone(),
+            name: u.name.clone(),
+            date_upload: u.date_upload,
+            number: u.chapter_number,
+            scanlator: u.scanlator.clone(),
+            version: u.version,
+            ..Default::default()
+        }
+    }
 }
 
-impl From<&Chapter> for ChapterKey {
+impl LegacyItem for Chapter {
+    const KIND: Kind = Kind::Manga;
+    type Update = ChapterUpdate;
+
+    fn to_item(&self) -> Item {
+        self.into()
+    }
+
+    fn to_update(u: &ChapterUpdate) -> ItemUpdate {
+        u.into()
+    }
+}
+
+/// Identity of a chapter as Kotlin's `ChapterImpl.equals`/`hashCode` define it: the pair (id, url).
+pub type ChapterKey = ItemKey;
+
+impl From<&Chapter> for ItemKey {
     fn from(c: &Chapter) -> Self {
         Self { id: c.id, url: c.url.clone() }
     }
 }
 
-/// Chapter access over the manga database (`ChapterRepositoryImpl.kt`).
-#[derive(Clone)]
-pub struct ChapterRepo {
-    db: Arc<Db>,
-}
+/// Chapter access over the manga items (`ChapterRepositoryImpl.kt`).
+pub type ChapterRepo = LegacyItemRepo<Chapter>;
 
 impl ChapterRepo {
-    pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
-    }
-
-    /// The row with `id`, or `None` when no row has it.
-    pub fn by_id(&self, id: i64) -> DataResult<Option<Chapter>> {
-        let row = self.db.read(|c| none_if_not_found(chapters::get_by_id(c, id)))?;
-        Ok(row.as_ref().map(map_chapter))
-    }
-
-    /// The lowest-id row with this url in the manga, or `None`. A duplicate url logs a warning (EC-09).
+    /// The lowest-id row with this url in the manga, or `None`. A duplicate url logs a warning.
     pub fn by_url_and_manga_id(&self, url: &str, manga_id: i64) -> DataResult<Option<Chapter>> {
-        let rows = self.db.read(|c| {
-            let mut st = c.prepare_cached(
-                "SELECT _id, entry_id AS manga_id, url, name, scanlator, done AS read, bookmark, progress AS last_page_read, \
-                 number AS chapter_number, source_order, date_fetch, date_upload, last_modified_at, version, 0 AS is_syncing \
-                 FROM items WHERE url = :chapterUrl AND entry_id = :mangaId ORDER BY _id",
-            )?;
-            let rows = st
-                .query_map(named_params! {":chapterUrl": url, ":mangaId": manga_id}, ChapterRow::from_row)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(rows)
-        })?;
-        if rows.len() > 1 {
-            tracing::warn!(manga_id, url, count = rows.len(), "duplicate chapter url in one manga; using the lowest id");
-        }
-        Ok(rows.first().map(map_chapter))
-    }
-
-    /// Every chapter with this url, in any manga (`getChapterByUrl`). Empty when none matches.
-    pub fn by_url(&self, url: &str) -> DataResult<Vec<Chapter>> {
-        let rows = self.db.read(|c| Ok(chapters::get_all_by_url(c, url)?))?;
-        Ok(rows.iter().map(map_chapter).collect())
+        Ok(self.items.by_url_and_entry_id(url, manga_id)?.map(Chapter::from))
     }
 
     /// Chapters of a manga. With `apply_scanlator_filter`, chapters of excluded scanlators are dropped.
     pub fn by_manga_id(&self, manga_id: i64, apply_scanlator_filter: bool) -> DataResult<Vec<Chapter>> {
-        let rows = self.db.read(|c| Ok(chapters::get_by_manga_id(c, manga_id, apply_scanlator_filter)?))?;
-        Ok(rows.iter().map(map_chapter).collect())
-    }
-
-    /// The bookmarked chapters of a manga.
-    pub fn bookmarked(&self, manga_id: i64) -> DataResult<Vec<Chapter>> {
-        let rows = self.db.read(|c| Ok(chapters::get_bookmarked_by_manga_id(c, manga_id)?))?;
-        Ok(rows.iter().map(map_chapter).collect())
+        Ok(Self::list(self.items.by_entry_id(manga_id, apply_scanlator_filter)?))
     }
 
     /// The scanlators of a manga's chapters, one entry per chapter, with a missing scanlator as `""`.
     pub fn scanlators(&self, manga_id: i64) -> DataResult<Vec<String>> {
-        self.db.read(|c| Ok(chapters::get_scanlators_by_manga_id(c, manga_id)?))
+        self.items.scanlators(manga_id)
     }
 
     /// The chapter list of a manga, published again after a change to the chapters or to the exclusions.
     pub fn subscribe_by_manga_id(&self, manga_id: i64, apply_scanlator_filter: bool) -> Subscription<Vec<Chapter>> {
-        self.db.subscribe(CHAPTER_TABLES, ENTRY_DEBOUNCE, move |c| {
-            Ok(chapters::get_by_manga_id(c, manga_id, apply_scanlator_filter)?
-                .iter()
-                .map(map_chapter)
-                .collect::<Vec<_>>())
-        })
-    }
-
-    /// Inserts the chapters in one transaction, in order. Returns them with their new ids, in the same order.
-    /// A failure on any row leaves the table unchanged (EC-07).
-    pub fn add_all(&self, new: &[Chapter]) -> DataResult<Vec<Chapter>> {
-        let rows: Vec<ChapterRow> = new.iter().map(to_row).collect();
-        let ids = self.db.write(|tx| Ok(chapters::insert_all(tx, &rows)?))?;
-        Ok(new.iter().zip(ids).map(|(c, id)| Chapter { id, ..c.clone() }).collect())
-    }
-
-    /// Deletes the chapters with these ids, in chunks of [`ID_CHUNK`], in one transaction (EC-17).
-    pub fn remove_with_ids(&self, ids: &[i64]) -> DataResult<()> {
-        self.db.write(|tx| {
-            for chunk in ids.chunks(ID_CHUNK) {
-                chapters::remove_with_ids(tx, chunk)?;
-            }
-            Ok(())
-        })
-    }
-
-    /// Updates one chapter. A missing id matches no row and is not an error.
-    pub fn update(&self, u: &ChapterUpdate) -> DataResult<()> {
-        let patch = to_patch(u);
-        self.db.write(|tx| Ok(chapters::update(tx, &patch).map(drop)?))
-    }
-
-    /// Every update in one transaction: one failure rolls back all of them.
-    pub fn update_all(&self, updates: &[ChapterUpdate]) -> DataResult<()> {
-        self.db.write(|tx| {
-            for u in updates {
-                chapters::update(tx, &to_patch(u))?;
-            }
-            Ok(())
-        })
+        self.items.subscribe_by_entry_id_as(manga_id, apply_scanlator_filter)
     }
 }
 
-/// One `chapters` row as the domain sees it; `is_syncing` is dropped.
+/// One `chapters` row of `statements_manga` as the domain sees it; `is_syncing` is dropped.
 pub fn map_chapter(r: &ChapterRow) -> Chapter {
     Chapter {
         id: r.id,
@@ -216,47 +192,6 @@ pub fn map_chapter(r: &ChapterRow) -> Chapter {
         scanlator: r.scanlator.clone(),
         last_modified_at: r.last_modified_at,
         version: r.version,
-    }
-}
-
-/// A new `chapters` row. The id is assigned by the insert and `is_syncing` is always false.
-fn to_row(c: &Chapter) -> ChapterRow {
-    ChapterRow {
-        id: c.id,
-        manga_id: c.manga_id,
-        url: c.url.clone(),
-        name: c.name.clone(),
-        scanlator: c.scanlator.clone(),
-        read: c.read,
-        bookmark: c.bookmark,
-        last_page_read: c.last_page_read,
-        chapter_number: c.chapter_number,
-        source_order: c.source_order,
-        date_fetch: c.date_fetch,
-        date_upload: c.date_upload,
-        last_modified_at: c.last_modified_at,
-        version: c.version,
-        is_syncing: false,
-    }
-}
-
-/// `partialUpdate`: every set field is written, and `is_syncing` is always cleared.
-fn to_patch(u: &ChapterUpdate) -> ChapterPatch {
-    ChapterPatch {
-        id: u.id,
-        manga_id: u.manga_id,
-        url: u.url.clone(),
-        name: u.name.clone(),
-        scanlator: u.scanlator.clone(),
-        read: u.read,
-        bookmark: u.bookmark,
-        last_page_read: u.last_page_read,
-        chapter_number: u.chapter_number,
-        source_order: u.source_order,
-        date_fetch: u.date_fetch,
-        date_upload: u.date_upload,
-        version: u.version,
-        is_syncing: Some(false),
     }
 }
 
