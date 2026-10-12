@@ -234,6 +234,7 @@ impl SyncEpisodes {
             source,
             db: &stored,
             now_ms,
+            added_ms: if anime.favorite { anime.date_added } else { 0 },
             mark_duplicate_as_read: opts.mark_duplicate_as_seen,
             prepare: &prepare_row,
         });

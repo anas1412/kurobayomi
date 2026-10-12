@@ -240,6 +240,7 @@ impl SyncChapters {
             source,
             db: &stored,
             now_ms,
+            added_ms: if manga.favorite { manga.date_added } else { 0 },
             mark_duplicate_as_read: opts.mark_duplicate_as_read,
             prepare: &prepare_row,
         });

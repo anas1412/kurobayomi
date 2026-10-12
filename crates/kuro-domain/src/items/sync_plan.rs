@@ -57,6 +57,9 @@ pub struct PlanInput<'a, T> {
     pub source: Vec<T>,
     pub db: &'a [T],
     pub now_ms: i64,
+    /// When the entry joined the library (0 when it is not in it). A first sync, of an entry with no stored rows,
+    /// stamps its rows with this instead of `now_ms`: they are what the entry already had, not updates.
+    pub added_ms: i64,
     pub mark_duplicate_as_read: bool,
     pub prepare: &'a dyn Fn(T) -> T,
 }
@@ -69,7 +72,8 @@ fn number_key(number: f64) -> u64 {
 
 /// Steps 3 to 10 of the sync as a pure function.
 pub fn plan_sync<T: SyncRow>(input: PlanInput<'_, T>) -> SyncPlan<T> {
-    let PlanInput { source, db, now_ms, mark_duplicate_as_read, prepare } = input;
+    let PlanInput { source, db, now_ms, added_ms, mark_duplicate_as_read, prepare } = input;
+    let first_sync = db.is_empty();
 
     // Step 3: distinct by URL, first occurrence wins, then source_order is the position after de-duplication (EC-03).
     let mut seen_urls: HashSet<String> = HashSet::new();
@@ -141,7 +145,10 @@ pub fn plan_sync<T: SyncRow>(input: PlanInput<'_, T>) -> SyncPlan<T> {
     let count = new_rows.len();
     let mut added = Vec::with_capacity(count);
     for (position, mut row) in new_rows.into_iter().enumerate() {
-        row.set_date_fetch(now_ms + (count - position) as i64);
+        // a first sync's rows are the back catalogue: stamped at or before the time the entry was added, newest highest,
+        // so Updates (`date_fetch > date_added`) never lists them whether the entry was added before or after the fetch
+        let stamp = if first_sync { (added_ms - position as i64).max(0) } else { now_ms + (count - position) as i64 };
+        row.set_date_fetch(stamp);
         let key = number_key(row.number());
         if mark_duplicate_as_read && read_numbers.contains(&key) {
             changed_or_duplicate_urls.insert(row.url().to_owned());
@@ -262,9 +269,27 @@ mod tests {
         r
     }
 
+    #[test]
+    fn a_first_sync_is_the_back_catalogue_and_a_later_sync_brings_updates() {
+        let prepare: &dyn Fn(Row) -> Row = &identity;
+        let src = |n: usize| (0..n).map(|i| row(0, &format!("/{i}"), i as f64)).collect::<Vec<_>>();
+        // added at 1_000 and fetched later (the Add pressed before the list loaded): stamped at or before 1_000
+        let first = plan_sync(PlanInput { source: src(3), db: &[], now_ms: 5_000, added_ms: 1_000, mark_duplicate_as_read: false, prepare });
+        let stamps: Vec<i64> = first.added.iter().map(|r| r.date_fetch).collect();
+        assert_eq!(stamps, [1_000, 999, 998], "never after the time added, newest highest");
+        // not in the library yet: 0, still never an update once it is added
+        let browsing = plan_sync(PlanInput { source: src(2), db: &[], now_ms: 5_000, added_ms: 0, mark_duplicate_as_read: false, prepare });
+        assert!(browsing.added.iter().all(|r| r.date_fetch == 0));
+        // a later sync with one new item stamps it now: a real update
+        let stored = first.added.clone();
+        let later = plan_sync(PlanInput { source: src(4), db: &stored, now_ms: 9_000, added_ms: 1_000, mark_duplicate_as_read: false, prepare });
+        assert_eq!(later.added.len(), 1);
+        assert!(later.added[0].date_fetch > 1_000, "a new chapter after the first sync is an update");
+    }
+
     fn run(source: Vec<Row>, db: &[Row], now_ms: i64, mark: bool) -> SyncPlan<Row> {
         let prepare: &dyn Fn(Row) -> Row = &identity;
-        plan_sync(PlanInput { source, db, now_ms, mark_duplicate_as_read: mark, prepare })
+        plan_sync(PlanInput { source, db, now_ms, added_ms: 0, mark_duplicate_as_read: mark, prepare })
     }
 
     /// The worked example of `p1-topic-chapter-episode-sync.md` section 3, with the stored sourceOrder values that make
@@ -370,11 +395,13 @@ mod tests {
         assert_eq!(dates(&[2000, 0, 1000]), [2000, 2000, 1000]);
     }
 
-    /// EC-04: new rows get fetch dates counting down from `now + count`, so the first listed is the highest.
+    /// EC-04: new rows of a later sync (the entry already has rows) get fetch dates counting down from `now + count`,
+    /// so the first listed is the highest. A first sync is the back catalogue (see the first-sync test).
     #[test]
     fn new_rows_get_fetch_dates_counting_down_from_now_plus_count() {
-        let source = vec![row(0, "/a", -1.0), row(0, "/b", -1.0), row(0, "/c", -1.0)];
-        let fetch: Vec<i64> = run(source, &[], 1000, false).added.iter().map(|r| r.date_fetch).collect();
+        let stored = vec![row(1, "/old", -1.0)];
+        let source = vec![row(0, "/a", -1.0), row(0, "/b", -1.0), row(0, "/c", -1.0), row(0, "/old", -1.0)];
+        let fetch: Vec<i64> = run(source, &stored, 1000, false).added.iter().map(|r| r.date_fetch).collect();
         assert_eq!(fetch, [1003, 1002, 1001]);
     }
 
