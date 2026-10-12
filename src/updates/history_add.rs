@@ -6,9 +6,8 @@
 
 use std::sync::Arc;
 
-use kuro_data::anime::AnimeRepo;
 use kuro_data::category::CategoryRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
 use kuro_platform::kind::Kind;
 use kuro_prefs::library::LibraryPrefs;
 
@@ -64,38 +63,24 @@ pub fn confirm_chooser(store: &dyn FavoriteStore, id: i64, now_ms: i64, picked: 
     }
 }
 
-/// The production store of one kind over the app databases. An add also applies the default episode flags (anime) and
-/// binds the enhanced trackers through [`track_binding`] (EC-42-H-14); the confirm path reaches both through the same
-/// `after_add`.
+/// The production store of one kind over the app databases. An add also binds the enhanced trackers through
+/// [`track_binding`] (EC-42-H-14), and for anime applies the default item flags; the confirm path reaches both through
+/// the same `after_add`.
 pub fn store(kind: Kind) -> Arc<dyn FavoriteStore> {
     let app = crate::data::app();
     let db = app.db.clone();
     let library = LibraryPrefs::new(app.base.store().clone());
-    match kind {
-        Kind::Manga => {
-            let manga = MangaRepo::new(db.clone());
-            let inner = Arc::new(crate::browse::repo_store::RepoStore::new(
-                manga.clone(),
-                CategoryRepo::new(db, Kind::Manga),
-                library.default_manga_category.clone(),
-                Arc::new(|_| 0),
-            ));
-            let lookup: track_binding::EntryLookup = Arc::new(move |id| {
-                manga.by_id(id).map(|m| (m.title, m.source)).map_err(|e| e.to_string())
-            });
-            Arc::new(track_binding::BindingStore::new(inner, lookup, track_binding::binder(kind)))
-        }
-        Kind::Anime => Arc::new(
-            crate::browse::repo_store::AnimeStore::new(
-                AnimeRepo::new(db.clone()),
-                CategoryRepo::new(db, Kind::Anime),
-                library.default_anime_category.clone(),
-                Arc::new(|_| 0),
-                Arc::new(|_| 0),
-            )
-            .with_add_effects(app.base.store().clone(), track_binding::binder(kind)),
-        ),
-    }
+    let store = crate::browse::repo_store::RepoStore::new(
+        kind,
+        EntryRepo::new(db.clone()),
+        CategoryRepo::new(db, kind),
+        library.default_category(kind).clone(),
+        Arc::new(|_| 0),
+        Arc::new(|_| 0),
+    )
+    .with_tracker_binder(track_binding::binder(kind));
+    // Manga adds from History apply no default chapter flags, as before; drop the condition to give them the defaults.
+    Arc::new(if kind.is_anime() { store.with_default_flags(app.base.store().clone()) } else { store })
 }
 
 #[cfg(test)]

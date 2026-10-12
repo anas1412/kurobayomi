@@ -12,11 +12,10 @@ pub mod fixtures {
 
     use std::sync::Arc;
 
-    use kuro_data::anime::{Anime, AnimeRepo};
-    use kuro_data::chapter::{Chapter, ChapterRepo};
-    use kuro_data::episode::{Episode, EpisodeRepo};
-    use kuro_data::manga::{Manga, MangaRepo};
+    use kuro_data::entry::{Entry, EntryRepo};
+    use kuro_data::item::{Item, ItemRepo};
     use kuro_db::handle::Db;
+    use kuro_platform::kind::Kind;
 
     pub struct Fixture {
         pub _dir: tempfile::TempDir,
@@ -26,54 +25,30 @@ pub mod fixtures {
     pub fn test_db() -> Fixture {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("test.db");
-        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
-        Fixture { db: Arc::new(Db::new(&path, writer).expect("manga db handle")), _dir: dir }
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open db");
+        Fixture { db: Arc::new(Db::new(&path, writer).expect("db handle")), _dir: dir }
     }
 
-    /// A manga row; `favorite` says whether it is in the library.
-    pub fn manga(db: &Arc<Db>, title: &str, favorite: bool) -> i64 {
-        MangaRepo::new(db.clone())
-            .insert(&Manga { favorite, source: 7, url: format!("u/{title}"), title: title.into(), ..Manga::create() })
-            .expect("insert manga")
+    /// An entry row of `kind`; `favorite` says whether it is in the library.
+    pub fn entry(db: &Arc<Db>, kind: Kind, title: &str, favorite: bool) -> i64 {
+        EntryRepo::new(db.clone())
+            .insert(&Entry { favorite, source: 7, url: format!("u/{title}"), title: title.into(), ..Entry::create(kind) })
+            .expect("insert entry")
     }
 
-    /// `n` chapters of a manga in reading order (the first is the oldest).
-    pub fn chapters(db: &Arc<Db>, manga_id: i64, n: i64) -> Vec<i64> {
-        let rows: Vec<Chapter> = (0..n)
-            .map(|i| Chapter {
-                manga_id,
-                url: format!("{manga_id}/c{i}"),
-                name: format!("Chapter {i}"),
-                chapter_number: i as f64,
+    /// `n` items of an entry in reading order (the first is the oldest).
+    pub fn items(db: &Arc<Db>, kind: Kind, entry_id: i64, n: i64) -> Vec<i64> {
+        let rows: Vec<Item> = (0..n)
+            .map(|i| Item {
+                entry_id,
+                url: format!("{entry_id}/c{i}"),
+                name: format!("Item {i}"),
+                number: i as f64,
                 source_order: n - i,
-                ..Chapter::create()
+                ..Item::create(kind)
             })
             .collect();
-        ChapterRepo::new(db.clone()).add_all(&rows).expect("add chapters").into_iter().map(|c| c.id).collect()
-    }
-
-    pub fn anime(db: &Arc<Db>, title: &str, favorite: bool) -> i64 {
-        AnimeRepo::new(db.clone())
-            .insert(&Anime { favorite, source: 7, url: format!("u/{title}"), title: title.into(), ..Anime::create() })
-            .expect("insert anime")
-    }
-
-    /// Episodes `(seen, length, position)` of an anime.
-    pub fn episodes(db: &Arc<Db>, anime_id: i64, rows: &[(bool, i64, i64)]) {
-        let rows: Vec<Episode> = rows
-            .iter()
-            .enumerate()
-            .map(|(i, (seen, length, position))| Episode {
-                anime_id,
-                url: format!("{anime_id}/e{i}"),
-                name: format!("Episode {i}"),
-                seen: *seen,
-                total_seconds: *length,
-                last_second_seen: *position,
-                ..Episode::create()
-            })
-            .collect();
-        EpisodeRepo::new(db.clone()).add_all(&rows).expect("add episodes");
+        ItemRepo::new(db.clone()).add_all(&rows).expect("add items").into_iter().map(|c| c.id).collect()
     }
 }
 
@@ -146,7 +121,7 @@ mod data {
     use kuro_platform::kind::Kind;
     use kuro_domain::updates::repo::UpdatesRepo;
 
-    use super::fixtures::{chapters, manga, test_db};
+    use super::fixtures::{entry, items, test_db};
     use crate::updates::storage_data::library_entries;
 
     fn titles(repo: &HistoryRepo) -> Vec<String> {
@@ -161,8 +136,8 @@ mod data {
     fn manga_list_latest_chapter_only() {
         // EC-42-H-01: one row per manga, its newest chapter
         let f = test_db();
-        let m = manga(&f.db, "M", true);
-        let ids = chapters(&f.db, m, 3);
+        let m = entry(&f.db, Kind::Manga, "M", true);
+        let ids = items(&f.db, Kind::Manga, m, 3);
         let repo = HistoryRepo::new(f.db.clone());
         repo.upsert(Kind::Manga, ids[0], 100, 1).expect("record");
         repo.upsert(Kind::Manga, ids[1], 200, 1).expect("record");
@@ -177,8 +152,8 @@ mod data {
         let f = test_db();
         let repo = HistoryRepo::new(f.db.clone());
         for (n, title) in ["100%", "1000", "a_b", "axb"].into_iter().enumerate() {
-            let m = manga(&f.db, title, true);
-            repo.upsert(Kind::Manga, chapters(&f.db, m, 1)[0], 100 + n as i64, 1).expect("record");
+            let m = entry(&f.db, Kind::Manga, title, true);
+            repo.upsert(Kind::Manga, items(&f.db, Kind::Manga, m, 1)[0], 100 + n as i64, 1).expect("record");
         }
         assert_eq!(searched(&repo, "%"), ["100%"]);
         assert_eq!(searched(&repo, "a_b"), ["a_b"]);
@@ -188,9 +163,9 @@ mod data {
     fn manga_list_search_ascii_case_insensitive() {
         // EC-42-H-03
         let f = test_db();
-        let m = manga(&f.db, "Berserk", true);
+        let m = entry(&f.db, Kind::Manga, "Berserk", true);
         let repo = HistoryRepo::new(f.db.clone());
-        repo.upsert(Kind::Manga, chapters(&f.db, m, 1)[0], 100, 1).expect("record");
+        repo.upsert(Kind::Manga, items(&f.db, Kind::Manga, m, 1)[0], 100, 1).expect("record");
         assert_eq!(searched(&repo, "berserk"), ["Berserk"]);
         assert_eq!(searched(&repo, "BERSERK"), ["Berserk"]);
         assert!(searched(&repo, "vinland").is_empty());
@@ -200,8 +175,8 @@ mod data {
     fn reset_row_hides_from_list_keeps_time() {
         // EC-42-H-11 and EC-42-S-01: a reset row leaves the list but its time stays in the total
         let f = test_db();
-        let m = manga(&f.db, "M", true);
-        let ids = chapters(&f.db, m, 1);
+        let m = entry(&f.db, Kind::Manga, "M", true);
+        let ids = items(&f.db, Kind::Manga, m, 1);
         let repo = HistoryRepo::new(f.db.clone());
         repo.upsert(Kind::Manga, ids[0], 100, 5_000).expect("record");
         let history_id = repo.by_entry(Kind::Manga, m).expect("rows")[0].id;
@@ -214,8 +189,8 @@ mod data {
     fn reset_entry_resets_all_rows() {
         // EC-42-H-12
         let f = test_db();
-        let m = manga(&f.db, "M", true);
-        let ids = chapters(&f.db, m, 2);
+        let m = entry(&f.db, Kind::Manga, "M", true);
+        let ids = items(&f.db, Kind::Manga, m, 2);
         let repo = HistoryRepo::new(f.db.clone());
         repo.upsert(Kind::Manga, ids[0], 100, 1).expect("record");
         repo.upsert(Kind::Manga, ids[1], 200, 1).expect("record");
@@ -228,9 +203,9 @@ mod data {
     fn delete_all_drops_time_read() {
         // EC-42-H-10: clearing the history takes the read duration with it
         let f = test_db();
-        let m = manga(&f.db, "M", true);
+        let m = entry(&f.db, Kind::Manga, "M", true);
         let repo = HistoryRepo::new(f.db.clone());
-        repo.upsert(Kind::Manga, chapters(&f.db, m, 1)[0], 100, 9_000).expect("record");
+        repo.upsert(Kind::Manga, items(&f.db, Kind::Manga, m, 1)[0], 100, 9_000).expect("record");
         assert_eq!(repo.total_duration().expect("total"), 9_000);
         assert!(repo.clear_all(Kind::Manga));
         assert_eq!(repo.total_duration().expect("total"), 0);
@@ -240,8 +215,8 @@ mod data {
     fn latest_manga_not_limited_to_max_row() {
         // behaviour 1.1: the newest read decides, not the chapter with the highest number or the highest row id
         let f = test_db();
-        let (a, b) = (manga(&f.db, "A", true), manga(&f.db, "B", true));
-        let (ca, cb) = (chapters(&f.db, a, 2), chapters(&f.db, b, 1));
+        let (a, b) = (entry(&f.db, Kind::Manga, "A", true), entry(&f.db, Kind::Manga, "B", true));
+        let (ca, cb) = (items(&f.db, Kind::Manga, a, 2), items(&f.db, Kind::Manga, b, 1));
         let repo = HistoryRepo::new(f.db.clone());
         repo.upsert(Kind::Manga, ca[1], 100, 1).expect("record");
         repo.upsert(Kind::Manga, cb[0], 200, 1).expect("record");
@@ -255,15 +230,15 @@ mod data {
     const ADDED: i64 = 1_700_000_100_000;
 
     fn dated(db: &std::sync::Arc<kuro_db::handle::Db>, manga_id: i64, name: &str, fetch: i64, upload: i64) -> i64 {
-        use kuro_data::chapter::{Chapter, ChapterRepo};
-        let row = Chapter { manga_id, url: name.into(), name: name.into(), date_fetch: fetch, date_upload: upload, ..Chapter::create() };
-        ChapterRepo::new(db.clone()).add_all(&[row]).expect("add chapter")[0].id
+        use kuro_data::item::{Item, ItemRepo};
+        let row = Item { entry_id: manga_id, url: name.into(), name: name.into(), date_fetch: fetch, date_upload: upload, ..Item::create(Kind::Manga) };
+        ItemRepo::new(db.clone()).add_all(&[row]).expect("add chapter")[0].id
     }
 
     fn library_manga(db: &std::sync::Arc<kuro_db::handle::Db>, title: &str, favorite: bool) -> i64 {
-        use kuro_data::manga::{Manga, MangaRepo};
-        MangaRepo::new(db.clone())
-            .insert(&Manga { favorite, date_added: ADDED, source: 1, url: title.into(), title: title.into(), ..Manga::create() })
+        use kuro_data::entry::{Entry, EntryRepo};
+        EntryRepo::new(db.clone())
+            .insert(&Entry { favorite, date_added: ADDED, source: 1, url: title.into(), title: title.into(), ..Entry::create(Kind::Manga) })
             .expect("insert manga")
     }
 
@@ -309,11 +284,13 @@ mod data {
     #[test]
     fn library_rows_dedupe_across_categories() {
         // an entry in two categories is one storage row
-        use kuro_data::category::create_manga_category;
+        use kuro_data::category::{Category, CategoryRepo};
         let f = test_db();
-        let m = manga(&f.db, "M", true);
-        let (a, b) = (create_manga_category(&f.db, "a", 0).expect("category"), create_manga_category(&f.db, "b", 0).expect("category"));
-        kuro_data::manga::MangaRepo::new(f.db.clone()).set_categories(m, &[a, b]).expect("links");
+        let m = entry(&f.db, Kind::Manga, "M", true);
+        let categories = CategoryRepo::new(f.db.clone(), Kind::Manga);
+        let make = |name: &str, order: i64| categories.insert(&Category { id: 0, name: name.into(), order, flags: 0, hidden: false }).expect("category");
+        let (a, b) = (make("a", 1), make("b", 2));
+        kuro_data::entry::EntryRepo::new(f.db.clone()).set_categories(m, &[a, b]).expect("links");
         let entries = library_entries(&f.db, Kind::Manga).expect("entries");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].category_id, a.min(b), "the lowest category stands for it");
@@ -330,7 +307,7 @@ mod ui {
     use kuro_domain::history::model::CoverKey;
     use kuro_platform::kind::Kind;
 
-    use super::fixtures::{chapters, manga, test_db};
+    use super::fixtures::{entry, items, test_db};
     use crate::updates::history::Resume;
     use crate::updates::history_data::{apply_remove, resume_row};
     use crate::updates::updates_page::{BackAction, back_action, cover_click_enabled};
@@ -339,10 +316,10 @@ mod ui {
     fn resume_opens_next_unit() {
         // clicking a row opens the unit that follows the one the row names
         let f = test_db();
-        let m = manga(&f.db, "M", true);
-        let ids = chapters(&f.db, m, 3);
-        kuro_data::chapter::ChapterRepo::new(f.db.clone())
-            .update(&kuro_data::chapter::ChapterUpdate { read: Some(true), ..kuro_data::chapter::ChapterUpdate::new(ids[0]) })
+        let m = entry(&f.db, Kind::Manga, "M", true);
+        let ids = items(&f.db, Kind::Manga, m, 3);
+        kuro_data::item::ItemRepo::new(f.db.clone())
+            .update(&kuro_data::item::ItemUpdate { done: Some(true), ..kuro_data::item::ItemUpdate::new(ids[0]) })
             .expect("mark read");
         let Resume::Open(unit) = resume_row(&f.db, Kind::Manga, m, ids[0]) else { panic!("a unit follows") };
         assert_eq!(unit.id, ids[1], "the reader opens the next chapter");
@@ -351,8 +328,8 @@ mod ui {
     #[test]
     fn remove_dialog_checkbox_maps_to_entry_reset() {
         let f = test_db();
-        let m = manga(&f.db, "M", true);
-        let ids = chapters(&f.db, m, 2);
+        let m = entry(&f.db, Kind::Manga, "M", true);
+        let ids = items(&f.db, Kind::Manga, m, 2);
         let repo = HistoryRepo::new(f.db.clone());
         repo.upsert(Kind::Manga, ids[0], 100, 1).expect("record");
         repo.upsert(Kind::Manga, ids[1], 200, 1).expect("record");

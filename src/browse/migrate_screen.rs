@@ -140,19 +140,12 @@ pub fn load(view: &Rc<MigrateEntriesView>, read: Arc<dyn Fn() -> Result<Vec<Migr
 
 /// The favourites of `source_id` of `kind`, as rows.
 fn favourites(kind: Kind, source_id: i64) -> Result<Vec<MigrateEntry>, String> {
-    use kuro_data::anime::AnimeRepo;
-    use kuro_data::manga::MangaRepo;
+    use kuro_data::entry::EntryRepo;
 
-    match kind {
-        Kind::Manga => MangaRepo::new(crate::data::app().db.clone())
-            .favorites_by_source(source_id)
-            .map(|list| list.into_iter().map(|m| MigrateEntry { id: m.id, title: m.title, cover: m.thumbnail_url }).collect())
-            .map_err(|error| error.to_string()),
-        Kind::Anime => AnimeRepo::new(crate::data::app().db.clone())
-            .favorites_by_source(source_id)
-            .map(|list| list.into_iter().map(|a| MigrateEntry { id: a.id, title: a.title, cover: a.thumbnail_url }).collect())
-            .map_err(|error| error.to_string()),
-    }
+    EntryRepo::new(crate::data::app().db.clone())
+        .favorites_by_source(kind, source_id)
+        .map(|list| list.into_iter().map(|e| MigrateEntry { id: e.id, title: e.title, cover: e.thumbnail_url }).collect())
+        .map_err(|error| error.to_string())
 }
 
 /// The source of a route: the installed one, or a stub.

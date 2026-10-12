@@ -41,8 +41,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Instant;
 
-    use kuro_data::manga::{Manga, MangaRepo};
+    use kuro_data::entry::{Entry, EntryRepo};
     use kuro_db::handle::Db;
+    use kuro_platform::kind::Kind;
 
     use super::*;
 
@@ -69,8 +70,8 @@ mod tests {
             }
             let first = *seen.borrow().last().expect("the first result arrived");
             for n in 0..4 {
-                MangaRepo::new(db.clone())
-                    .insert(&Manga { source: 1, url: format!("u{n}"), title: format!("t{n}"), ..Manga::create() })
+                EntryRepo::new(db.clone())
+                    .insert(&Entry { source: 1, url: format!("u{n}"), title: format!("t{n}"), ..Entry::create(Kind::Manga) })
                     .expect("insert a manga");
             }
             let deadline = Instant::now() + Duration::from_secs(5);

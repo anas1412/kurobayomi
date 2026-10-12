@@ -7,8 +7,8 @@
 mod tests {
     use std::sync::Arc;
 
-    use kuro_data::chapter::{Chapter, ChapterRepo};
-    use kuro_data::manga::{Manga, MangaRepo};
+    use kuro_data::entry::{Entry, EntryRepo};
+    use kuro_data::item::{Item, ItemRepo};
     use kuro_db::handle::Db;
     use kuro_platform::kind::Kind;
     use kuro_domain::updates::repo::UpdatesRepo;
@@ -33,17 +33,17 @@ mod tests {
 
     /// A favourite manga added at `ADDED`, unless `favorite` is false.
     fn manga(db: &Arc<Db>, title: &str, favorite: bool) -> i64 {
-        MangaRepo::new(db.clone())
-            .insert(&Manga { favorite, date_added: ADDED, source: 1, url: title.into(), title: title.into(), ..Manga::create() })
+        EntryRepo::new(db.clone())
+            .insert(&Entry { favorite, date_added: ADDED, source: 1, url: title.into(), title: title.into(), ..Entry::create(Kind::Manga) })
             .expect("insert manga")
     }
 
-    fn chapter(manga_id: i64, name: &str, date_fetch: i64, date_upload: i64) -> Chapter {
-        Chapter { manga_id, url: name.into(), name: name.into(), date_fetch, date_upload, ..Chapter::create() }
+    fn chapter(manga_id: i64, name: &str, date_fetch: i64, date_upload: i64) -> Item {
+        Item { entry_id: manga_id, url: name.into(), name: name.into(), date_fetch, date_upload, ..Item::create(Kind::Manga) }
     }
 
-    fn add(db: &Arc<Db>, chapters: &[Chapter]) -> Vec<i64> {
-        ChapterRepo::new(db.clone()).add_all(chapters).expect("add chapters").iter().map(|c| c.id).collect()
+    fn add(db: &Arc<Db>, chapters: &[Item]) -> Vec<i64> {
+        ItemRepo::new(db.clone()).add_all(chapters).expect("add chapters").iter().map(|c| c.id).collect()
     }
 
     fn feed(db: &Arc<Db>) -> Vec<i64> {
@@ -88,11 +88,20 @@ mod tests {
     }
 
     #[test]
+    fn updates_with_one_fetch_date_come_back_newest_id_first() {
+        // the order is the SQL `datefetch DESC, itemId DESC`; there is no re-sort in Rust
+        let f = fixture();
+        let m = manga(&f.db, "M", true);
+        let ids = add(&f.db, &[chapter(m, "a", ADDED + 1, AFTER + 10), chapter(m, "b", ADDED + 1, AFTER + 10), chapter(m, "c", ADDED + 2, AFTER + 10)]);
+        assert_eq!(feed(&f.db), vec![ids[2], ids[1], ids[0]]);
+    }
+
+    #[test]
     fn updates_limit_500_keeps_at_most_500_rows() {
         // E-U5 (count): more than 500 qualifying rows give 500 rows.
         let f = fixture();
         let m = manga(&f.db, "M", true);
-        let rows: Vec<Chapter> = (0..520).map(|i| chapter(m, &format!("c{i}"), ADDED + 1 + i, AFTER + 1 + i)).collect();
+        let rows: Vec<Item> = (0..520).map(|i| chapter(m, &format!("c{i}"), ADDED + 1 + i, AFTER + 1 + i)).collect();
         add(&f.db, &rows);
         assert_eq!(feed(&f.db).len(), 500);
     }
@@ -102,7 +111,7 @@ mod tests {
         // E-U5 (order): the 500 most recently fetched rows are kept, not 500 arbitrary ones.
         let f = fixture();
         let m = manga(&f.db, "M", true);
-        let rows: Vec<Chapter> = (0..520).map(|i| chapter(m, &format!("c{i}"), ADDED + 1 + i, AFTER + 1 + i)).collect();
+        let rows: Vec<Item> = (0..520).map(|i| chapter(m, &format!("c{i}"), ADDED + 1 + i, AFTER + 1 + i)).collect();
         let ids = add(&f.db, &rows);
         let kept = feed(&f.db);
         assert_eq!(kept.len(), 500);

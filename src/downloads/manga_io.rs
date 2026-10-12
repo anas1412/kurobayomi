@@ -7,9 +7,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use kuro_data::chapter::{Chapter, ChapterRepo};
-use kuro_data::manga::{Manga, MangaRepo};
+use kuro_data::chapter::Chapter;
+use kuro_data::entry::EntryRepo;
+use kuro_data::item::ItemRepo;
+use kuro_data::manga::Manga;
 use kuro_db::handle::Db;
+use kuro_platform::kind::Kind;
 use kuro_downloads::model::{ChapterRef, DownloadState, MangaRef, Page, QueuedDownload};
 use kuro_downloads::source::{ChapterSource, ImageResponse};
 use kuro_downloads::store::QueueRow;
@@ -127,8 +130,9 @@ pub struct RestorePass {
 pub fn restore_rows(rows: &[QueueRow], db: &Arc<Db>, source_of: &dyn Fn(i64) -> Option<Arc<dyn MangaSource>>) -> RestorePass {
     let mut pass = RestorePass::default();
     for row in rows {
-        let manga = MangaRepo::new(Arc::clone(db)).by_id(row.manga_id).ok();
-        let chapter = ChapterRepo::new(Arc::clone(db)).by_id(row.chapter_id).ok().flatten();
+        // the downloader's refs still take the per-kind rows: converted here, at the seam
+        let manga = EntryRepo::new(Arc::clone(db)).by_id(row.manga_id).ok().filter(|e| e.kind == Kind::Manga).map(Manga::from);
+        let chapter = ItemRepo::new(Arc::clone(db)).by_id(row.chapter_id).ok().flatten().filter(|i| i.kind == Kind::Manga).map(Chapter::from);
         let (Some(manga), Some(chapter)) = (manga, chapter) else {
             tracing::info!(chapter_id = row.chapter_id, "dropped a saved download whose chapter or manga is gone");
             continue;

@@ -5,17 +5,14 @@
 
 use std::sync::Arc;
 
-use kuro_data::anime::AnimeRepo;
-use kuro_data::chapter::ChapterRepo;
-use kuro_data::episode::EpisodeRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
+use kuro_data::item::{Item, ItemRepo};
 use kuro_db::handle::Db;
-use kuro_domain::entries::anime::AnimeExt;
-use kuro_domain::entries::manga::MangaExt;
+use kuro_domain::entries::flags::EntryFlags;
 use kuro_domain::history::repo::HistoryRepo;
 use kuro_domain::history::view::RemoveAction;
-use kuro_domain::items::facades::{get_chapters_by_manga_id, get_episodes_by_anime_id};
-use kuro_domain::items::sorter::{chapter_cmp, episode_cmp};
+use kuro_domain::items::facades::get_items_by_entry;
+use kuro_domain::items::sorter::item_cmp;
 use kuro_platform::kind::Kind;
 
 use crate::updates::history::{Resume, next_units_from, resume};
@@ -30,32 +27,16 @@ pub struct Unit {
 
 /// The units of one entry in ascending reading order. An unknown entry gives an empty list and a log line.
 pub fn ordered_units(db: &Arc<Db>, kind: Kind, entry_id: i64) -> Vec<Unit> {
-    match kind {
-        Kind::Manga => {
-            let manga = match MangaRepo::new(db.clone()).by_id(entry_id) {
-                Ok(m) => m,
-                Err(e) => {
-                    tracing::error!(error = %e, entry_id, "cannot read manga for resume");
-                    return Vec::new();
-                }
-            };
-            let mut chapters = get_chapters_by_manga_id(&ChapterRepo::new(db.clone()), entry_id, true);
-            chapters.sort_by(chapter_cmp(manga.sorting(), false));
-            chapters.into_iter().map(|c| Unit { id: c.id, name: c.name, done: c.read }).collect()
+    let entry = match EntryRepo::new(db.clone()).by_id(entry_id) {
+        Ok(e) if e.kind == kind => e,
+        _ => {
+            tracing::error!(entry_id, %kind, "cannot read the entry for resume");
+            return Vec::new();
         }
-        Kind::Anime => {
-            let anime = match AnimeRepo::new(db.clone()).by_id(entry_id) {
-                Ok(a) => a,
-                Err(e) => {
-                    tracing::error!(error = %e, entry_id, "cannot read anime for resume");
-                    return Vec::new();
-                }
-            };
-            let mut episodes = get_episodes_by_anime_id(&EpisodeRepo::new(db.clone()), entry_id);
-            episodes.sort_by(episode_cmp(anime.sorting(), false));
-            episodes.into_iter().map(|e| Unit { id: e.id, name: e.name, done: e.seen }).collect()
-        }
-    }
+    };
+    let mut items: Vec<Item> = get_items_by_entry(&ItemRepo::new(db.clone()), entry_id, true);
+    items.sort_by(item_cmp(entry.sorting(), false));
+    items.into_iter().map(|i| Unit { id: i.id, name: i.name, done: i.done }).collect()
 }
 
 /// What a click on a history row of `entry_id` (whose row names `from_item`) does.
@@ -76,16 +57,12 @@ pub fn apply_remove(db: &Arc<Db>, kind: Kind, action: RemoveAction) -> Result<()
 
 /// The title of an entry, for the reader or player page. `None` when the entry is gone.
 pub fn entry_title(db: &Arc<Db>, kind: Kind, id: i64) -> Option<String> {
-    match kind {
-        Kind::Manga => MangaRepo::new(db.clone()).by_id(id).ok().map(|m| m.title),
-        Kind::Anime => AnimeRepo::new(db.clone()).by_id(id).ok().map(|a| a.title),
-    }
+    EntryRepo::new(db.clone()).by_id(id).ok().filter(|e| e.kind == kind).map(|e| e.title)
 }
 
 #[cfg(test)]
 mod tests {
-    use kuro_data::chapter::Chapter;
-    use kuro_data::manga::Manga;
+    use kuro_data::entry::Entry;
     use super::*;
 
     /// A manga of `n` chapters whose reading order is the insert order; the first `read` of them are read.
@@ -94,21 +71,21 @@ mod tests {
         let path = dir.path().join("test.db");
         let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
         let db = Arc::new(Db::new(&path, writer).expect("manga db handle"));
-        let manga = MangaRepo::new(db.clone())
-            .insert(&Manga { favorite: true, source: 1, url: "m".into(), title: "M".into(), ..Manga::create() })
+        let manga = EntryRepo::new(db.clone())
+            .insert(&Entry { favorite: true, source: 1, url: "m".into(), title: "M".into(), ..Entry::create(Kind::Manga) })
             .expect("insert manga");
-        let chapters: Vec<Chapter> = (0..n)
-            .map(|i| Chapter {
-                manga_id: manga,
+        let chapters: Vec<Item> = (0..n)
+            .map(|i| Item {
+                entry_id: manga,
                 url: format!("c{i}"),
                 name: format!("Chapter {i}"),
-                chapter_number: i as f64,
+                number: i as f64,
                 source_order: n - i,
-                read: i < read,
-                ..Chapter::create()
+                done: i < read,
+                ..Item::create(Kind::Manga)
             })
             .collect();
-        let ids = ChapterRepo::new(db.clone()).add_all(&chapters).expect("add").into_iter().map(|c| c.id).collect();
+        let ids = ItemRepo::new(db.clone()).add_all(&chapters).expect("add").into_iter().map(|c| c.id).collect();
         (dir, db, manga, ids)
     }
 

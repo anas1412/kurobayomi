@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
-use kuro_data::chapter::{ChapterRepo, ChapterUpdate};
-use kuro_data::episode::{EpisodeRepo, EpisodeUpdate};
+use kuro_data::item::{Item, ItemRepo, ItemUpdate};
 use kuro_db::handle::Db;
+use kuro_domain::items::status::done_update;
 use kuro_platform::kind::Kind;
 
 use crate::updates::selection::{Selectable, Selection};
@@ -30,49 +30,30 @@ pub enum BulkAction {
     Fillermark(bool),
 }
 
-/// The one batch write of `action` over `ids`. Fillermark exists for anime only, so on manga it writes nothing. An
-/// empty id list writes nothing and succeeds (every row already had the target value).
+/// The one batch write of `action` over `ids`, for both kinds. Fillermark exists for anime only, so on manga it writes
+/// nothing. An empty id list writes nothing and succeeds (every row already had the target value). Mark read is the
+/// shared `done_update` (unread resets the progress); the downloads of newly read rows are removed by the caller.
 pub fn apply(db: &Arc<Db>, kind: Kind, ids: &[i64], action: BulkAction) -> Result<(), String> {
-    if ids.is_empty() {
+    if !kind.is_anime() && matches!(action, BulkAction::Fillermark(_)) {
         return Ok(());
     }
-    match kind {
-        Kind::Manga => {
-            let updates: Vec<ChapterUpdate> = ids
-                .iter()
-                .filter_map(|&id| {
-                    let base = ChapterUpdate::new(id);
-                    match action {
-                        BulkAction::MarkRead(read) => {
-                            Some(ChapterUpdate { read: Some(read), last_page_read: (!read).then_some(0), ..base })
-                        }
-                        BulkAction::Bookmark(bookmark) => Some(ChapterUpdate { bookmark: Some(bookmark), ..base }),
-                        BulkAction::Fillermark(_) => None,
-                    }
-                })
-                .collect();
-            if updates.is_empty() {
-                return Ok(());
-            }
-            ChapterRepo::new(db.clone()).update_all(&updates).map_err(|e| e.to_string())
-        }
-        Kind::Anime => {
-            let updates: Vec<EpisodeUpdate> = ids
-                .iter()
-                .map(|&id| {
-                    let base = EpisodeUpdate::new(id);
-                    match action {
-                        BulkAction::MarkRead(seen) => {
-                            EpisodeUpdate { seen: Some(seen), last_second_seen: (!seen).then_some(0), ..base }
-                        }
-                        BulkAction::Bookmark(bookmark) => EpisodeUpdate { bookmark: Some(bookmark), ..base },
-                        BulkAction::Fillermark(fillermark) => EpisodeUpdate { fillermark: Some(fillermark), ..base },
-                    }
-                })
-                .collect();
-            EpisodeRepo::new(db.clone()).update_all(&updates).map_err(|e| e.to_string())
-        }
+    let updates: Vec<ItemUpdate> = ids
+        .iter()
+        .map(|&id| match action {
+            BulkAction::MarkRead(done) => done_update_by_id(done, id),
+            BulkAction::Bookmark(bookmark) => ItemUpdate { bookmark: Some(bookmark), ..ItemUpdate::new(id) },
+            BulkAction::Fillermark(fillermark) => ItemUpdate { fillermark: Some(fillermark), ..ItemUpdate::new(id) },
+        })
+        .collect();
+    if updates.is_empty() {
+        return Ok(());
     }
+    ItemRepo::new(db.clone()).update_all(&updates).map_err(|e| e.to_string())
+}
+
+/// `done_update` needs the row only for its id.
+fn done_update_by_id(done: bool, id: i64) -> ItemUpdate {
+    done_update(done, &Item { id, ..Item::create(Kind::Manga) })
 }
 
 /// What the selection does when the write ends. Bookmark and fillermark clear it on every outcome; mark read clears it
@@ -190,27 +171,28 @@ mod tests {
 
     #[test]
     fn bulk_apply_writes_one_batch_and_unread_resets_progress() {
-        use kuro_data::chapter::Chapter;
-        use kuro_data::manga::{Manga, MangaRepo};
+        use kuro_data::entry::{Entry, EntryRepo};
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("test.db");
-        let writer = kuro_db::schema_unified::open_file(&path).expect("open manga db");
-        let db = Arc::new(Db::new(&path, writer).expect("manga db handle"));
-        let manga = MangaRepo::new(db.clone())
-            .insert(&Manga { favorite: true, source: 1, url: "m".into(), title: "M".into(), ..Manga::create() })
-            .expect("insert manga");
-        let chapter = |url: &str| Chapter { manga_id: manga, url: url.into(), name: url.into(), read: true, last_page_read: 9, ..Chapter::create() };
-        let added = ChapterRepo::new(db.clone()).add_all(&[chapter("a"), chapter("b")]).expect("add chapters");
-        let ids: Vec<i64> = added.iter().map(|c| c.id).collect();
+        let writer = kuro_db::schema_unified::open_file(&path).expect("open db");
+        let db = Arc::new(Db::new(&path, writer).expect("db handle"));
+        for kind in [Kind::Manga, Kind::Anime] {
+            let entry = EntryRepo::new(db.clone())
+                .insert(&Entry { favorite: true, source: 1, url: format!("e-{kind}"), title: "E".into(), ..Entry::create(kind) })
+                .expect("insert entry");
+            let item = |url: &str| Item { entry_id: entry, url: url.into(), name: url.into(), done: true, progress: 9, ..Item::create(kind) };
+            let added = ItemRepo::new(db.clone()).add_all(&[item("a"), item("b")]).expect("add items");
+            let ids: Vec<i64> = added.iter().map(|c| c.id).collect();
 
-        apply(&db, Kind::Manga, &ids, BulkAction::Bookmark(true)).expect("bookmark");
-        apply(&db, Kind::Manga, &ids[..1], BulkAction::MarkRead(false)).expect("unread");
-        assert_eq!(apply(&db, Kind::Manga, &[], BulkAction::Bookmark(true)), Ok(()));
-        let repo = ChapterRepo::new(db);
-        let first = repo.by_id(ids[0]).expect("read").expect("stored");
-        let second = repo.by_id(ids[1]).expect("read").expect("stored");
-        assert!(first.bookmark && second.bookmark);
-        assert!(!first.read && first.last_page_read == 0);
-        assert!(second.read && second.last_page_read == 9);
+            apply(&db, kind, &ids, BulkAction::Bookmark(true)).expect("bookmark");
+            apply(&db, kind, &ids[..1], BulkAction::MarkRead(false)).expect("unread");
+            assert_eq!(apply(&db, kind, &[], BulkAction::Bookmark(true)), Ok(()));
+            let repo = ItemRepo::new(db.clone());
+            let first = repo.by_id(ids[0]).expect("read").expect("stored");
+            let second = repo.by_id(ids[1]).expect("read").expect("stored");
+            assert!(first.bookmark && second.bookmark, "{kind}");
+            assert!(!first.done && first.progress == 0, "{kind}");
+            assert!(second.done && second.progress == 9, "{kind}");
+        }
     }
 }

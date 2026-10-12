@@ -4,53 +4,35 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Local};
-use kuro_data::anime::AnimeRepo;
-use kuro_data::manga::MangaRepo;
+use kuro_data::entry::EntryRepo;
 use kuro_db::handle::Db;
 use kuro_platform::kind::Kind;
 
-use crate::updates::upcoming::model::{ANIME_STATUSES, Entry, MANGA_STATUSES, Upcoming, build};
+use crate::updates::upcoming::model::{Entry, Upcoming, build};
 
 /// The upcoming entries of `kind` from local midnight of `now`'s day, soonest first, grouped by day.
 pub fn load(db: &Arc<Db>, kind: Kind, now: DateTime<Local>) -> Result<Upcoming, String> {
-    let now_ms = now.timestamp_millis();
-    let entries = match kind {
-        Kind::Manga => MangaRepo::new(db.clone())
-            .upcoming(&MANGA_STATUSES, now_ms)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|m| Entry {
-                id: m.id,
-                title: m.title,
-                status: m.status,
-                source_id: m.source,
-                next_update_ms: m.next_update,
-                cover_url: m.thumbnail_url,
-                cover_last_modified: m.cover_last_modified,
-            })
-            .collect(),
-        Kind::Anime => AnimeRepo::new(db.clone())
-            .upcoming(&ANIME_STATUSES, now_ms)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|a| Entry {
-                id: a.id,
-                title: a.title,
-                status: a.status,
-                source_id: a.source,
-                next_update_ms: a.next_update,
-                cover_url: a.thumbnail_url,
-                cover_last_modified: a.cover_last_modified,
-            })
-            .collect(),
-    };
+    let entries = EntryRepo::new(db.clone())
+        .upcoming(kind, now.timestamp_millis())
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|e| Entry {
+            id: e.id,
+            title: e.title,
+            status: e.status,
+            source_id: e.source,
+            next_update_ms: e.next_update,
+            cover_url: e.thumbnail_url,
+            cover_last_modified: e.cover_last_modified,
+        })
+        .collect();
     Ok(build(entries, &Local))
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, TimeZone};
-    use kuro_data::manga::{Manga, MangaRepo};
+    use kuro_data::entry::Entry as Stored;
 
     use super::*;
 
@@ -68,9 +50,9 @@ mod tests {
         let midnight = Local.with_ymd_and_hms(2026, 10, 8, 0, 0, 0).single().expect("midnight");
         let yesterday_late = midnight - Duration::minutes(1);
         let far = Local.with_ymd_and_hms(2100, 1, 1, 0, 0, 0).single().expect("2100");
-        let repo = MangaRepo::new(db.clone());
+        let repo = EntryRepo::new(db.clone());
         let add = |title: &str, favorite: bool, status: i64, next: i64| {
-            repo.insert(&Manga { favorite, status, next_update: next, url: title.into(), title: title.into(), ..Manga::create() })
+            repo.insert(&Stored { favorite, status, next_update: next, url: title.into(), title: title.into(), ..Stored::create(Kind::Manga) })
                 .expect("insert")
         };
         let today = add("today", true, 1, midnight.timestamp_millis() + 3 * 3_600_000);

@@ -10,9 +10,11 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-use kuro_data::anime::AnimeRepo;
-use kuro_data::episode::EpisodeRepo;
-use kuro_data::source::AnimeStubSourceRepo;
+use kuro_data::anime::Anime;
+use kuro_data::entry::EntryRepo;
+use kuro_data::episode::Episode;
+use kuro_data::item::ItemRepo;
+use kuro_data::source::StubSourceRepo;
 use kuro_db::handle::Db;
 use kuro_domain::download::prefs::DownloadPrefs;
 use kuro_platform::kind::Kind;
@@ -92,8 +94,13 @@ fn restore(store: &AnimeQueueStore, db: &Arc<Db>) -> Result<Vec<QueueEntry>, Str
 
 /// One saved row as a queue entry, or `None` when its episode, anime or source name is unknown.
 fn restore_entry(db: &Arc<Db>, anime_id: i64, episode_id: i64) -> Option<QueueEntry> {
-    let episode = EpisodeRepo::new(Arc::clone(db)).by_id(episode_id).ok()??;
-    let anime = AnimeRepo::new(Arc::clone(db)).by_id(anime_id).ok()?;
+    // the download refs still take the per-kind rows: converted here, at the seam
+    let episode = ItemRepo::new(Arc::clone(db)).by_id(episode_id).ok()??;
+    let anime = EntryRepo::new(Arc::clone(db)).by_id(anime_id).ok()?;
+    if episode.kind != Kind::Anime || anime.kind != Kind::Anime {
+        return None;
+    }
+    let (episode, anime) = (Episode::from(episode), Anime::from(anime));
     let (name, stub) = source_name(db, anime.source)?;
     let info = SourceInfo { name, stub };
     Some(QueueEntry {
@@ -111,7 +118,7 @@ fn source_name(db: &Arc<Db>, source_id: i64) -> Option<(String, bool)> {
     if let Some(live) = live_source(source_id) {
         return Some((kuro_source::display_name(live.name(), live.lang()), false));
     }
-    AnimeStubSourceRepo::new(Arc::clone(db)).get(source_id).ok()?.map(|stub| (stub.display_name(), true))
+    StubSourceRepo::new(Arc::clone(db), Kind::Anime).get(source_id).ok()?.map(|stub| (stub.display_name(), true))
 }
 
 /// Forwards the queue's events to the desktop, and keeps the progress line on the downloading item while the run goes.
@@ -148,8 +155,8 @@ fn notices(queue: AnimeQueue, notifier: Arc<dyn Notifier>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuro_data::anime::Anime;
-    use kuro_data::episode::Episode;
+    use kuro_data::entry::Entry;
+    use kuro_data::item::Item;
 
     fn test_db() -> (tempfile::TempDir, Arc<Db>) {
         let dir = tempfile::tempdir().unwrap();
@@ -160,17 +167,17 @@ mod tests {
 
     /// An anime of `source` with one episode. Returns `(anime_id, episode_id)`.
     fn add(db: &Arc<Db>, url: &str, source: i64) -> (i64, i64) {
-        let anime = Anime { url: url.into(), title: url.into(), source, status: 1, ..Anime::create() };
-        let anime_id = AnimeRepo::new(Arc::clone(db)).insert(&anime).unwrap();
-        let episode = Episode { anime_id, url: url.into(), name: format!("Episode {url}"), ..Episode::create() };
-        let added = EpisodeRepo::new(Arc::clone(db)).add_all(&[episode]).unwrap();
+        let anime = Entry { url: url.into(), title: url.into(), source, status: 1, ..Entry::create(Kind::Anime) };
+        let anime_id = EntryRepo::new(Arc::clone(db)).insert(&anime).unwrap();
+        let episode = Item { entry_id: anime_id, url: url.into(), name: format!("Episode {url}"), ..Item::create(Kind::Anime) };
+        let added = ItemRepo::new(Arc::clone(db)).add_all(&[episode]).unwrap();
         (anime_id, added[0].id)
     }
 
     #[test]
     fn a_source_with_only_a_stub_row_is_named_by_it_and_flagged_as_a_stub() {
         let (_dir, db) = test_db();
-        AnimeStubSourceRepo::new(Arc::clone(&db)).upsert(77, "en", "Site").unwrap();
+        StubSourceRepo::new(Arc::clone(&db), Kind::Anime).upsert(77, "en", "Site").unwrap();
         assert_eq!(source_name(&db, 77), Some(("Site (EN)".to_owned(), true)));
     }
 
@@ -183,7 +190,7 @@ mod tests {
     #[test]
     fn a_saved_row_comes_back_with_its_stub_flag_and_ids() {
         let (_dir, db) = test_db();
-        AnimeStubSourceRepo::new(Arc::clone(&db)).upsert(77, "en", "Site").unwrap();
+        StubSourceRepo::new(Arc::clone(&db), Kind::Anime).upsert(77, "en", "Site").unwrap();
         let (anime_id, episode_id) = add(&db, "a", 77);
         let entry = restore_entry(&db, anime_id, episode_id).expect("the row is rebuilt");
         assert_eq!((entry.anime.id, entry.episode.id), (anime_id, episode_id));
@@ -195,7 +202,7 @@ mod tests {
     #[test]
     fn a_row_is_dropped_when_its_episode_anime_or_source_name_is_unknown() {
         let (_dir, db) = test_db();
-        AnimeStubSourceRepo::new(Arc::clone(&db)).upsert(77, "en", "Site").unwrap();
+        StubSourceRepo::new(Arc::clone(&db), Kind::Anime).upsert(77, "en", "Site").unwrap();
         let (anime_id, episode_id) = add(&db, "a", 77);
         let (no_name_anime, no_name_episode) = add(&db, "b", 88);
         assert!(restore_entry(&db, anime_id, 9999).is_none(), "unknown episode");
@@ -206,7 +213,7 @@ mod tests {
     #[test]
     fn restore_keeps_the_rebuilt_rows_in_saved_order_and_drops_the_rest_from_the_store() {
         let (_dir, db) = test_db();
-        AnimeStubSourceRepo::new(Arc::clone(&db)).upsert(77, "en", "Site").unwrap();
+        StubSourceRepo::new(Arc::clone(&db), Kind::Anime).upsert(77, "en", "Site").unwrap();
         let (a1, e1) = add(&db, "a", 77);
         let (a2, e2) = add(&db, "b", 77);
         let (a3, e3) = add(&db, "c", 88);

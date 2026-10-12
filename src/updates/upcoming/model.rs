@@ -7,11 +7,6 @@ use chrono::{NaiveDate, TimeZone};
 
 use kuro_domain::dates::local_date;
 
-/// Manga statuses that can have an upcoming update: ongoing (1) and publishing finished (4).
-pub const MANGA_STATUSES: [i64; 2] = [1, 4];
-/// Anime statuses that can have an upcoming update: ongoing (1), publishing finished (4) and upcoming (7).
-pub const ANIME_STATUSES: [i64; 3] = [1, 4, 7];
-
 /// One favourite entry with an upcoming update.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -156,8 +151,8 @@ mod tests {
 
     #[test]
     fn status_sets_match_the_spec() {
-        assert_eq!(MANGA_STATUSES, [1, 4]);
-        assert_eq!(ANIME_STATUSES, [1, 4, 7]);
+        assert_eq!(kuro_platform::kind::Kind::Manga.upcoming_statuses(), [1, 4], "ongoing and publishing finished");
+        assert_eq!(kuro_platform::kind::Kind::Anime.upcoming_statuses(), [1, 4, 7], "and upcoming");
     }
 
     #[test]

@@ -85,7 +85,7 @@ pub fn input(db: &Arc<Db>, kind: Kind, backend: &dyn DownloadBackend, hide_hidde
 
 #[cfg(test)]
 mod tests {
-    use kuro_data::manga::{Manga, MangaRepo};
+    use kuro_data::entry::{Entry, EntryRepo};
 
     use super::*;
     use crate::updates::download_host::fake::Fake;
@@ -98,8 +98,8 @@ mod tests {
     }
 
     fn manga(db: &Arc<Db>, title: &str, favorite: bool) -> i64 {
-        MangaRepo::new(db.clone())
-            .insert(&Manga { favorite, source: 7, url: title.into(), title: title.into(), ..Manga::create() })
+        EntryRepo::new(db.clone())
+            .insert(&Entry { favorite, source: 7, url: title.into(), title: title.into(), ..Entry::create(Kind::Manga) })
             .expect("insert manga")
     }
 

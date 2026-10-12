@@ -13,7 +13,7 @@ use kuro_source::filter_list::FilterList;
 use super::content::{ContentInput, ContentPlan, content_plan};
 use super::grid::{PageAsk, Pager, prefetch_due};
 
-/// One cover of a listing. `id` is the library row of the entry, found or inserted by `network_to_local_manga` when the
+/// One cover of a listing. `id` is the library row of the entry, found or inserted by `network_to_local` when the
 /// page was loaded (0 when a caller has none, as in global search).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ListItem {
