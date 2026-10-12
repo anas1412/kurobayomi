@@ -1,6 +1,7 @@
 //! The source value model: visual name, the stable key and the last-used key (`Source.kt`, `AnimeSource.kt`).
 //! Manga and anime share this shape.
 
+use kuro_platform::kind::Kind;
 use super::pin::Pins;
 
 pub type Id = i64;
@@ -8,16 +9,13 @@ pub type Id = i64;
 /// The name the source area uses for [`Source`] (`SourceEntry`, area 17 section 2.2). One type serves both kinds.
 pub type SourceEntry = Source;
 
-/// Which kind of source a stub belongs to. The kind decides the stub table (`sources` or `animesources`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SourceKind {
-    Manga,
-    Anime,
+pub trait SourceKindExt {
+    /// The table that holds this kind's stub rows (T-17a-004).
+    fn stub_table(self) -> &'static str;
 }
 
-impl SourceKind {
-    /// The table that holds this kind's stub rows (T-17a-004).
-    pub const fn stub_table(self) -> &'static str {
+impl SourceKindExt for Kind {
+    fn stub_table(self) -> &'static str {
         match self {
             Self::Manga => "sources",
             Self::Anime => "animesources",
@@ -68,8 +66,8 @@ mod tests {
 
     #[test]
     fn each_kind_names_its_own_stub_table() {
-        assert_eq!(SourceKind::Manga.stub_table(), "sources");
-        assert_eq!(SourceKind::Anime.stub_table(), "animesources");
+        assert_eq!(Kind::Manga.stub_table(), "sources");
+        assert_eq!(Kind::Anime.stub_table(), "animesources");
         let entry: SourceEntry = Source::new(3, "Named", "en");
         assert_eq!(entry.visual_name(), "Named (EN)");
     }

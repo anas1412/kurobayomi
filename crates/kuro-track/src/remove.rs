@@ -8,6 +8,7 @@
 //! acceptance anyway: `MalTracker`'s delete reports success after logging its own failure (ERROR, or WARN for a 404
 //! that means the title was already gone, E-DEL-1), so no toast is raised and the local row is always removed.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use tokio::task::JoinHandle;
@@ -17,7 +18,7 @@ use crate::detach::detached_locked;
 use crate::error::{TrackError, redact};
 use crate::events::TrackEvent;
 use crate::messages::MsgKey;
-use crate::model::{AnimeTrack, Kind, MangaTrack};
+use crate::model::{AnimeTrack, MangaTrack};
 use crate::repo::{AnimeTrackRepo, MangaTrackRepo};
 use crate::tracker::Tracker;
 

@@ -544,6 +544,8 @@ pub fn modal(title: &gtk::Widget, content: &impl IsA<gtk::Widget>, w: i32, h: i3
         .titlebar(&header)
         .child(content)
         .build();
+    // the 1px outline of `style.css`, so the dialog's edge shows over a dark window behind it
+    win.add_css_class("kb-dialog");
     win
 }
 

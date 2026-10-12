@@ -1,6 +1,6 @@
 //! Port of `LibraryFlagsTest.kt` (T-08a-002 and T-07a-035) plus the flag-algebra properties.
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::library::flags::{add_unmasked, contains, merge};
 use kuro_domain::library::sort::{Direction, LibrarySort, SORT_MASK, SortType};
 
@@ -59,7 +59,7 @@ fn plain_or_and_mask_aware_merge_differ_on_the_masked_bits() {
 
 #[test]
 fn contains_compares_only_the_masked_bits() {
-    assert!(contains(0b0101_1100, 0x1C, SortType::types(EntryKind::Manga)[7].flag() | 0x3C));
+    assert!(contains(0b0101_1100, 0x1C, SortType::types(Kind::Manga)[7].flag() | 0x3C));
     assert!(contains(0x5C, 0x40, Direction::Ascending.flag()));
     assert!(!contains(0x1C, 0x40, Direction::Ascending.flag()));
 }

@@ -8,7 +8,7 @@ use kuro_prefs::pref::Pref;
 use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
 
-use super::route::BrowseKind;
+use kuro_platform::kind::Kind;
 
 /// The typed browse preferences of one kind. Each field reads and writes one stored key.
 pub struct BrowsePrefs {
@@ -20,11 +20,11 @@ pub struct BrowsePrefs {
 }
 
 impl BrowsePrefs {
-    pub fn new(store: PrefStore, kind: BrowseKind) -> Self {
+    pub fn new(store: PrefStore, kind: Kind) -> Self {
         let library = LibraryPrefs::new(store.clone());
         let default_category = match kind {
-            BrowseKind::Manga => library.default_manga_category.clone(),
-            BrowseKind::Anime => library.default_anime_category.clone(),
+            Kind::Manga => library.default_manga_category.clone(),
+            Kind::Anime => library.default_anime_category.clone(),
         };
         Self { sources: SourcePrefs::new(store), default_category }
     }
@@ -47,7 +47,7 @@ mod tests {
     use kuro_prefs::toml_backend::TomlBackend;
 
     fn prefs() -> BrowsePrefs {
-        BrowsePrefs::new(PrefStore::in_memory(), BrowseKind::Manga)
+        BrowsePrefs::new(PrefStore::in_memory(), Kind::Manga)
     }
 
     #[test]
@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn each_kind_reads_its_own_category_key() {
-        let keys = [(BrowseKind::Manga, "default_category"), (BrowseKind::Anime, "default_anime_category")];
+        let keys = [(Kind::Manga, "default_category"), (Kind::Anime, "default_anime_category")];
         for (kind, category) in keys {
             let store = PrefStore::in_memory();
             let p = BrowsePrefs::new(store.clone(), kind);
@@ -93,7 +93,7 @@ mod tests {
         {
             let backend = TomlBackend::open(&config, &state).expect("open");
             let store = PrefStore::new(Box::new(backend)).expect("store");
-            let p = BrowsePrefs::new(store.clone(), BrowseKind::Manga);
+            let p = BrowsePrefs::new(store.clone(), Kind::Manga);
             p.default_category.set(3).expect("set");
             store.flush().expect("flush");
         }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use kuro_db::error::DbResult;
 use kuro_db::handle::Db;
 use kuro_domain::category::repo::CategoryRepo;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::updates::download_host::DownloadBackend;
 use crate::updates::storage::StorageRow;
@@ -26,10 +26,10 @@ pub struct EntryInfo {
 }
 
 /// The library entries of `kind`, each with its lowest category id (0 when uncategorized).
-pub fn library_entries(db: &Arc<Db>, kind: EntryKind) -> DbResult<Vec<EntryInfo>> {
+pub fn library_entries(db: &Arc<Db>, kind: Kind) -> DbResult<Vec<EntryInfo>> {
     let (entries, links, fk) = match kind {
-        EntryKind::Manga => ("mangas", "mangas_categories", "manga_id"),
-        EntryKind::Anime => ("animes", "animes_categories", "anime_id"),
+        Kind::Manga => ("mangas", "mangas_categories", "manga_id"),
+        Kind::Anime => ("animes", "animes_categories", "anime_id"),
     };
     db.read(|c| {
         let mut stmt = c.prepare(&format!(
@@ -69,7 +69,7 @@ pub fn rows(entries: &[EntryInfo], usage: impl Fn(&EntryInfo) -> (u64, usize)) -
 
 /// The dropdown categories and the visible ids. With `hide_hidden` on, a hidden category is out of the "All" view;
 /// the Default category (0) is always visible.
-pub fn categories(db: &Arc<Db>, kind: EntryKind, hide_hidden: bool) -> Result<(Vec<(i64, String)>, Vec<i64>), String> {
+pub fn categories(db: &Arc<Db>, kind: Kind, hide_hidden: bool) -> Result<(Vec<(i64, String)>, Vec<i64>), String> {
     let all = CategoryRepo::new(db.clone(), kind).all().map_err(|e| e.to_string())?;
     let mut visible: Vec<i64> = all.iter().filter(|c| !(hide_hidden && c.hidden)).map(|c| c.id).collect();
     if !visible.contains(&0) {
@@ -79,7 +79,7 @@ pub fn categories(db: &Arc<Db>, kind: EntryKind, hide_hidden: bool) -> Result<(V
 }
 
 /// The whole input of one push: entries, usage from the backend, categories. `initializing` is the cache's flag.
-pub fn input(db: &Arc<Db>, kind: EntryKind, backend: &dyn DownloadBackend, hide_hidden: bool, initializing: bool) -> Result<(StorageInput, HashMap<i64, i64>), String> {
+pub fn input(db: &Arc<Db>, kind: Kind, backend: &dyn DownloadBackend, hide_hidden: bool, initializing: bool) -> Result<(StorageInput, HashMap<i64, i64>), String> {
     let entries = library_entries(db, kind).map_err(|e| e.to_string())?;
     let sources: HashMap<i64, i64> = entries.iter().map(|e| (e.id, e.source_id)).collect();
     let rows = rows(&entries, |entry| backend.entry_usage(kind, entry.source_id, &entry.title));
@@ -112,7 +112,7 @@ mod tests {
         let (_dir, db) = manga_db();
         let kept = manga(&db, "Kept", true);
         manga(&db, "Left", false);
-        let entries = library_entries(&db, EntryKind::Manga).expect("entries");
+        let entries = library_entries(&db, Kind::Manga).expect("entries");
         assert_eq!(entries.len(), 1);
         assert_eq!((entries[0].id, entries[0].category_id, entries[0].source_id), (kept, 0, 7));
     }
@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn storage_categories_list_default_and_hide_hidden_ones_from_all() {
         let (_dir, db) = manga_db();
-        let (categories, visible) = categories(&db, EntryKind::Manga, true).expect("categories");
+        let (categories, visible) = categories(&db, Kind::Manga, true).expect("categories");
         assert!(categories.iter().any(|(id, _)| *id == 0), "Default is listed");
         assert!(visible.contains(&0));
     }
@@ -145,7 +145,7 @@ mod tests {
         let (_dir, db) = manga_db();
         let id = manga(&db, "Kept", true);
         let backend = Fake::default();
-        let (input, sources) = input(&db, EntryKind::Manga, &backend, false, true).expect("input");
+        let (input, sources) = input(&db, Kind::Manga, &backend, false, true).expect("input");
         assert!(input.initializing);
         assert!(input.rows.is_empty(), "the fake reports no downloads");
         assert_eq!(sources.get(&id), Some(&7));

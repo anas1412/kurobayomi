@@ -15,9 +15,9 @@ use gtk::glib;
 use gtk::glib::translate::IntoGlib;
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, ListBoxRow, Orientation as O};
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
-use kuro_images::art::{ArtKind, ArtRef, Owner};
+use kuro_images::art::{ArtKind, ArtRef};
 
 use crate::data;
 use crate::updates::download_host;
@@ -52,7 +52,7 @@ struct Env {
 
 impl Env {
     /// The live environment of one kind. Needs the app data.
-    fn current(kind: EntryKind) -> Self {
+    fn current(kind: Kind) -> Self {
         let locale = kuro_i18n::current_locale().tag;
         Self {
             first: week_start_for(diet::UPCOMING_WEEK_START, locale),
@@ -73,7 +73,7 @@ struct Loaded {
 }
 
 pub struct UpcomingPage {
-    kind: EntryKind,
+    kind: Kind,
     root: GBox,
     paned: gtk::Paned,
     scroll: gtk::ScrolledWindow,
@@ -91,7 +91,7 @@ pub struct UpcomingPage {
 }
 
 impl UpcomingPage {
-    fn new(kind: EntryKind, env: Env) -> Rc<Self> {
+    fn new(kind: Kind, env: Env) -> Rc<Self> {
         let page = Rc::new_cyclic(|weak: &std::rc::Weak<Self>| {
             let jump = weak.clone();
             let calendar = CalendarView::new(env.first, env.today, move |day| {
@@ -284,7 +284,7 @@ impl UpcomingPage {
         line.set_margin_top(layout::ROW_PADDING);
         line.set_margin_bottom(layout::ROW_PADDING);
         let art = ArtRef {
-            owner: if self.kind == EntryKind::Anime { Owner::Anime } else { Owner::Manga },
+            owner: self.kind,
             entry_id: entry.id,
             source_id: entry.source_id,
             kind: ArtKind::Cover,
@@ -335,10 +335,10 @@ fn heading(text: &str, count: u32) -> GBox {
 }
 
 /// Pushes the entry screen of the entry by its id.
-fn open_entry(kind: EntryKind, id: i64) {
+fn open_entry(kind: Kind, id: i64) {
     match kind {
-        EntryKind::Anime => crate::entry_core::anime::route::open(id),
-        EntryKind::Manga => crate::entry_core::route::open(id),
+        Kind::Anime => crate::entry_core::anime::route::open(id),
+        Kind::Manga => crate::entry_core::route::open(id),
     }
 }
 
@@ -357,7 +357,7 @@ fn help_button() -> Button {
 
 /// The navigation page of one kind: the title Upcoming, the back arrow, the help button, and Escape that goes back. `None`
 /// before the app data is open.
-pub fn build(kind: EntryKind) -> Option<GBox> {
+pub fn build(kind: Kind) -> Option<GBox> {
     if !data::is_installed() {
         return None;
     }
@@ -425,7 +425,7 @@ mod tests {
             home_today: false,
             open: Rc::new(move |id| log.borrow_mut().push(id)),
         };
-        let page = UpcomingPage::new(EntryKind::Anime, env);
+        let page = UpcomingPage::new(Kind::Anime, env);
         page.show(upcoming(), d(8));
         page
     }

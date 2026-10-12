@@ -1,12 +1,13 @@
 //! Refresh (pull remote state) and progress sync for enhanced trackers (`RefreshAnimeTracks.kt`,
 //! `RefreshMangaTracks.kt`, `SyncEpisodeProgressWithTrack.kt`, `SyncChapterProgressWithTrack.kt`).
 
+use kuro_platform::kind::Kind;
 use futures::future::join_all;
 
 use crate::ctx::TrackCtx;
 use crate::error::TrackError;
 use crate::error::redact;
-use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 use crate::remote::{with_server_anime, with_server_manga};
 use crate::repo::UnitRef;
 use crate::tracker::{AnimeTracker, MangaTracker, Tracker};

@@ -4,7 +4,8 @@
 
 use std::cell::RefCell;
 
-use super::route::{BrowseKind, BrowseRoute};
+use super::route::BrowseRoute;
+use kuro_platform::kind::Kind;
 
 /// `eu.kanade.tachiyomi.SEARCH`: the extras `query` and `filter` (an extension package). An extension filter forces All and
 /// limits the search to that package's sources.
@@ -13,7 +14,7 @@ pub struct SearchIntent {
     pub query: String,
     pub extension: Option<String>,
     /// The catalogue the search runs in: `animesearch` links are anime ones, the SEARCH intent is manga.
-    pub kind: BrowseKind,
+    pub kind: Kind,
 }
 
 thread_local! {
@@ -64,20 +65,19 @@ pub fn open_search_intent(intent: SearchIntent) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::browse::route::BrowseKind;
 
     #[test]
     fn a_parked_route_is_handed_out_once_and_a_new_one_replaces_it() {
         assert_eq!(take(), None);
-        park(BrowseRoute::MigrateEntries { kind: BrowseKind::Manga, source_id: 1 });
-        park(BrowseRoute::GlobalSearch { kind: BrowseKind::Manga, source_id: None, query: "q".into() });
-        assert_eq!(take(), Some(BrowseRoute::GlobalSearch { kind: BrowseKind::Manga, source_id: None, query: "q".into() }));
+        park(BrowseRoute::MigrateEntries { kind: Kind::Manga, source_id: 1 });
+        park(BrowseRoute::GlobalSearch { kind: Kind::Manga, source_id: None, query: "q".into() });
+        assert_eq!(take(), Some(BrowseRoute::GlobalSearch { kind: Kind::Manga, source_id: None, query: "q".into() }));
         assert_eq!(take(), None);
     }
 
     #[test]
     fn a_route_is_handed_out_only_to_the_screen_it_was_parked_for() {
-        park(BrowseRoute::BrowseSource { kind: BrowseKind::Manga, source_id: 3, query: kuro_domain::source::browse::BrowseQuery::Popular, migrating: false });
+        park(BrowseRoute::BrowseSource { kind: Kind::Manga, source_id: 3, query: kuro_domain::source::browse::BrowseQuery::Popular, migrating: false });
         assert_eq!(take_for("global_search"), None, "another screen finds nothing");
         assert!(take_for("browse_source").is_some());
         assert_eq!(take_for("browse_source"), None, "and only once");
@@ -85,8 +85,8 @@ mod tests {
 
     #[test]
     fn a_parked_intent_is_handed_out_once() {
-        park_intent(SearchIntent { query: "one".into(), extension: Some("eu.a".into()), kind: BrowseKind::Manga });
-        assert_eq!(take_intent(), Some(SearchIntent { query: "one".into(), extension: Some("eu.a".into()), kind: BrowseKind::Manga }));
+        park_intent(SearchIntent { query: "one".into(), extension: Some("eu.a".into()), kind: Kind::Manga });
+        assert_eq!(take_intent(), Some(SearchIntent { query: "one".into(), extension: Some("eu.a".into()), kind: Kind::Manga }));
         assert_eq!(take_intent(), None);
     }
 }

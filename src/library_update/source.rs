@@ -3,7 +3,7 @@
 
 use std::future::Future;
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::library_update::error::UpdateError;
 
@@ -56,7 +56,7 @@ pub trait Source: Send + Sync {
     /// The entry's details (when `with_details`) and its chapter or episode list.
     fn fetch(
         &self,
-        kind: EntryKind,
+        kind: Kind,
         url: &str,
         with_details: bool,
     ) -> impl Future<Output = Result<Fetched, UpdateError>> + Send;
@@ -64,7 +64,7 @@ pub trait Source: Send + Sync {
     /// `DETAILS_ONLY` the chapter or episode list endpoint is never called. `None` when the source returned no details.
     fn refresh(
         &self,
-        kind: EntryKind,
+        kind: Kind,
         url: &str,
         flags: RemoteFlags,
     ) -> impl Future<Output = Result<Option<SourceDetails>, UpdateError>> + Send;
@@ -74,10 +74,10 @@ pub trait SourceRegistry: Send + Sync {
     type Source: Source;
 
     /// The installed source of `kind` with this id, or `None`.
-    fn get(&self, kind: EntryKind, source_id: i64) -> Option<Self::Source>;
+    fn get(&self, kind: Kind, source_id: i64) -> Option<Self::Source>;
 
     /// The installed source, or a slot whose calls fail with `SourceNotInstalled`.
-    fn get_or_stub(&self, kind: EntryKind, source_id: i64) -> SourceSlot<Self::Source> {
+    fn get_or_stub(&self, kind: Kind, source_id: i64) -> SourceSlot<Self::Source> {
         match self.get(kind, source_id) {
             Some(source) => SourceSlot::Installed(source),
             None => SourceSlot::Missing,
@@ -91,7 +91,7 @@ pub enum SourceSlot<S> {
 }
 
 impl<S: Source> SourceSlot<S> {
-    pub async fn fetch(&self, kind: EntryKind, url: &str, with_details: bool) -> Result<Fetched, UpdateError> {
+    pub async fn fetch(&self, kind: Kind, url: &str, with_details: bool) -> Result<Fetched, UpdateError> {
         match self {
             Self::Installed(source) => source.fetch(kind, url, with_details).await,
             Self::Missing => Err(UpdateError::SourceNotInstalled),
@@ -176,7 +176,7 @@ pub(crate) mod fake {
             false
         }
 
-        async fn fetch(&self, _kind: EntryKind, _url: &str, _with_details: bool) -> Result<Fetched, UpdateError> {
+        async fn fetch(&self, _kind: Kind, _url: &str, _with_details: bool) -> Result<Fetched, UpdateError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active.fetch_max(now, Ordering::SeqCst);
@@ -188,7 +188,7 @@ pub(crate) mod fake {
             self.reply.clone()
         }
 
-        async fn refresh(&self, _kind: EntryKind, _url: &str, flags: RemoteFlags) -> Result<Option<SourceDetails>, UpdateError> {
+        async fn refresh(&self, _kind: Kind, _url: &str, flags: RemoteFlags) -> Result<Option<SourceDetails>, UpdateError> {
             self.refreshes.lock().unwrap().push(flags);
             self.details.clone()
         }
@@ -202,7 +202,7 @@ pub(crate) mod fake {
     impl SourceRegistry for FakeRegistry {
         type Source = FakeSource;
 
-        fn get(&self, _kind: EntryKind, source_id: i64) -> Option<FakeSource> {
+        fn get(&self, _kind: Kind, source_id: i64) -> Option<FakeSource> {
             self.sources.get(&source_id).cloned()
         }
     }
@@ -217,8 +217,8 @@ mod tests {
     async fn a_missing_source_stub_fails_with_source_not_installed() {
         // P-05
         let registry = FakeRegistry::default();
-        let slot = registry.get_or_stub(EntryKind::Manga, 9999);
-        let result = slot.fetch(EntryKind::Manga, "/x", false).await;
+        let slot = registry.get_or_stub(Kind::Manga, 9999);
+        let result = slot.fetch(Kind::Manga, "/x", false).await;
         assert_eq!(result, Err(UpdateError::SourceNotInstalled));
         assert_eq!(UpdateError::SourceNotInstalled.user_message(), "Source not installed");
     }
@@ -227,8 +227,8 @@ mod tests {
     fn metadata_lookup_is_none_for_a_missing_source() {
         // T-26a-053 relies on `get` returning None for a missing source.
         let registry = FakeRegistry::default();
-        assert!(registry.get(EntryKind::Manga, 42).is_none());
-        assert!(matches!(registry.get_or_stub(EntryKind::Anime, 42), SourceSlot::Missing));
+        assert!(registry.get(Kind::Manga, 42).is_none());
+        assert!(matches!(registry.get_or_stub(Kind::Anime, 42), SourceSlot::Missing));
     }
 
     #[tokio::test]
@@ -236,9 +236,9 @@ mod tests {
         // Q-18: the flag is read from the source.
         let mut registry = FakeRegistry::default();
         registry.sources.insert(1001, FakeSource::ok(vec![SourceItem { name: "c1".into(), ..SourceItem::default() }]));
-        let slot = registry.get_or_stub(EntryKind::Manga, 1001);
+        let slot = registry.get_or_stub(Kind::Manga, 1001);
         assert!(!slot.is_unmetered());
-        let fetched = slot.fetch(EntryKind::Manga, "/x", false).await.expect("installed source answers");
+        let fetched = slot.fetch(Kind::Manga, "/x", false).await.expect("installed source answers");
         assert_eq!(fetched.items.len(), 1);
         assert!(!SourceSlot::<FakeSource>::Missing.is_local());
     }

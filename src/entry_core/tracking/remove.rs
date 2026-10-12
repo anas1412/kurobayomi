@@ -3,7 +3,7 @@
 //! follows the kind of entry, not the tracker: a manga unlinks locally first and deletes remotely after (T-38b-036),
 //! an anime deletes remotely first and unlinks after (T-39b-046). Both errors are reported.
 
-use kuro_track::model::Kind;
+use kuro_platform::kind::Kind;
 
 /// One step of the removal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

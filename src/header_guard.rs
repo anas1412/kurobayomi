@@ -11,7 +11,7 @@ mod tests {
     use gtk::prelude::*;
 
     use crate::shell::deep_link_page::{self, Reply};
-    use crate::shell::nav::Kind;
+    use kuro_platform::kind::Kind;
 
     /// Builders whose page carries a header bar: `ui::page`, `page_header::header`, `screens::build`, and the pages the
     /// reader and the player build with `page_header::header`.

@@ -10,7 +10,7 @@
 
 use std::path::PathBuf;
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use serde::{Deserialize, Serialize};
 
 /// The `app.notice` action name without the `app.` prefix.
@@ -97,13 +97,13 @@ pub enum QueueOp {
 /// What [`route`] needs from the app. Calls come from the GTK thread; the work behind them runs off it.
 pub trait ActionHost {
     fn withdraw(&self, notice: &str);
-    fn open_entry(&self, kind: EntryKind, id: i64);
-    fn open_downloads(&self, kind: EntryKind);
-    fn open_item(&self, kind: EntryKind, entry_id: i64, item_id: i64);
-    fn mark_read(&self, kind: EntryKind, entry_id: i64, urls: Vec<String>);
-    fn download(&self, kind: EntryKind, entry_id: i64, urls: Vec<String>);
-    fn queue(&self, kind: EntryKind, op: QueueOp);
-    fn cancel_update(&self, kind: EntryKind);
+    fn open_entry(&self, kind: Kind, id: i64);
+    fn open_downloads(&self, kind: Kind);
+    fn open_item(&self, kind: Kind, entry_id: i64, item_id: i64);
+    fn mark_read(&self, kind: Kind, entry_id: i64, urls: Vec<String>);
+    fn download(&self, kind: Kind, entry_id: i64, urls: Vec<String>);
+    fn queue(&self, kind: Kind, op: QueueOp);
+    fn cancel_update(&self, kind: Kind);
     /// Stops the running restore (the same stop as the restore banner's Cancel).
     fn cancel_restore(&self);
     fn open_url(&self, url: &str);
@@ -152,20 +152,20 @@ pub fn route(host: &dyn ActionHost, action: AppAction) {
         }
     };
     match action {
-        OpenMangaDownloads => host.open_downloads(EntryKind::Manga),
-        OpenAnimeDownloads => host.open_downloads(EntryKind::Anime),
-        OpenChapter { manga_id, chapter_id } => host.open_item(EntryKind::Manga, manga_id, chapter_id),
-        OpenEpisode { anime_id, episode_id } => host.open_item(EntryKind::Anime, anime_id, episode_id),
+        OpenMangaDownloads => host.open_downloads(Kind::Manga),
+        OpenAnimeDownloads => host.open_downloads(Kind::Anime),
+        OpenChapter { manga_id, chapter_id } => host.open_item(Kind::Manga, manga_id, chapter_id),
+        OpenEpisode { anime_id, episode_id } => host.open_item(Kind::Anime, anime_id, episode_id),
         OpenManga { manga_id: id, notice } | OpenAnime { anime_id: id, notice } if id <= 0 => {
             tracing::warn!(id, ?notice, "a notice action named an entry id that is not positive");
         }
         OpenManga { manga_id, notice } => {
             withdraw(&notice);
-            host.open_entry(EntryKind::Manga, manga_id);
+            host.open_entry(Kind::Manga, manga_id);
         }
         OpenAnime { anime_id, notice } => {
             withdraw(&notice);
-            host.open_entry(EntryKind::Anime, anime_id);
+            host.open_entry(Kind::Anime, anime_id);
         }
         MarkChaptersRead { manga_id: id, urls, notice }
         | MarkEpisodesSeen { anime_id: id, urls, notice }
@@ -177,33 +177,33 @@ pub fn route(host: &dyn ActionHost, action: AppAction) {
         }
         MarkChaptersRead { manga_id, urls, notice } => {
             withdraw(&notice);
-            host.mark_read(EntryKind::Manga, manga_id, urls);
+            host.mark_read(Kind::Manga, manga_id, urls);
         }
         MarkEpisodesSeen { anime_id, urls, notice } => {
             withdraw(&notice);
-            host.mark_read(EntryKind::Anime, anime_id, urls);
+            host.mark_read(Kind::Anime, anime_id, urls);
         }
         DownloadChapters { manga_id, urls, notice } => {
             withdraw(&notice);
-            host.download(EntryKind::Manga, manga_id, urls);
+            host.download(Kind::Manga, manga_id, urls);
         }
         DownloadEpisodes { anime_id, urls, notice } => {
             withdraw(&notice);
-            host.download(EntryKind::Anime, anime_id, urls);
+            host.download(Kind::Anime, anime_id, urls);
         }
-        ResumeMangaDownloads => host.queue(EntryKind::Manga, QueueOp::Resume),
-        PauseMangaDownloads => host.queue(EntryKind::Manga, QueueOp::Pause),
-        ClearMangaDownloads => host.queue(EntryKind::Manga, QueueOp::Clear),
-        ResumeAnimeDownloads => host.queue(EntryKind::Anime, QueueOp::Resume),
-        PauseAnimeDownloads => host.queue(EntryKind::Anime, QueueOp::Pause),
-        ClearAnimeDownloads => host.queue(EntryKind::Anime, QueueOp::Clear),
+        ResumeMangaDownloads => host.queue(Kind::Manga, QueueOp::Resume),
+        PauseMangaDownloads => host.queue(Kind::Manga, QueueOp::Pause),
+        ClearMangaDownloads => host.queue(Kind::Manga, QueueOp::Clear),
+        ResumeAnimeDownloads => host.queue(Kind::Anime, QueueOp::Resume),
+        PauseAnimeDownloads => host.queue(Kind::Anime, QueueOp::Pause),
+        ClearAnimeDownloads => host.queue(Kind::Anime, QueueOp::Clear),
         CancelLibraryUpdate { notice } => {
             withdraw(&notice);
-            host.cancel_update(EntryKind::Manga);
+            host.cancel_update(Kind::Manga);
         }
         CancelAnimeLibraryUpdate { notice } => {
             withdraw(&notice);
-            host.cancel_update(EntryKind::Anime);
+            host.cancel_update(Kind::Anime);
         }
         CancelRestore => {
             host.withdraw(kuro_backup::notify::ID_RESTORE_PROGRESS);
@@ -252,25 +252,25 @@ mod tests {
         fn withdraw(&self, notice: &str) {
             self.log(format!("withdraw {notice}"));
         }
-        fn open_entry(&self, kind: EntryKind, id: i64) {
+        fn open_entry(&self, kind: Kind, id: i64) {
             self.log(format!("open_entry {kind:?} {id}"));
         }
-        fn open_downloads(&self, kind: EntryKind) {
+        fn open_downloads(&self, kind: Kind) {
             self.log(format!("open_downloads {kind:?}"));
         }
-        fn open_item(&self, kind: EntryKind, entry_id: i64, item_id: i64) {
+        fn open_item(&self, kind: Kind, entry_id: i64, item_id: i64) {
             self.log(format!("open_item {kind:?} {entry_id} {item_id}"));
         }
-        fn mark_read(&self, kind: EntryKind, entry_id: i64, urls: Vec<String>) {
+        fn mark_read(&self, kind: Kind, entry_id: i64, urls: Vec<String>) {
             self.log(format!("mark_read {kind:?} {entry_id} {}", urls.len()));
         }
-        fn download(&self, kind: EntryKind, entry_id: i64, urls: Vec<String>) {
+        fn download(&self, kind: Kind, entry_id: i64, urls: Vec<String>) {
             self.log(format!("download {kind:?} {entry_id} {}", urls.len()));
         }
-        fn queue(&self, kind: EntryKind, op: QueueOp) {
+        fn queue(&self, kind: Kind, op: QueueOp) {
             self.log(format!("queue {kind:?} {op:?}"));
         }
-        fn cancel_update(&self, kind: EntryKind) {
+        fn cancel_update(&self, kind: Kind) {
             self.log(format!("cancel_update {kind:?}"));
         }
         fn open_url(&self, url: &str) {
@@ -437,12 +437,12 @@ mod tests {
         // T-35a-020
         use QueueOp::*;
         let cases = [
-            (AppAction::ResumeMangaDownloads, EntryKind::Manga, Resume),
-            (AppAction::PauseMangaDownloads, EntryKind::Manga, Pause),
-            (AppAction::ClearMangaDownloads, EntryKind::Manga, Clear),
-            (AppAction::ResumeAnimeDownloads, EntryKind::Anime, Resume),
-            (AppAction::PauseAnimeDownloads, EntryKind::Anime, Pause),
-            (AppAction::ClearAnimeDownloads, EntryKind::Anime, Clear),
+            (AppAction::ResumeMangaDownloads, Kind::Manga, Resume),
+            (AppAction::PauseMangaDownloads, Kind::Manga, Pause),
+            (AppAction::ClearMangaDownloads, Kind::Manga, Clear),
+            (AppAction::ResumeAnimeDownloads, Kind::Anime, Resume),
+            (AppAction::PauseAnimeDownloads, Kind::Anime, Pause),
+            (AppAction::ClearAnimeDownloads, Kind::Anime, Clear),
         ];
         for (action, kind, op) in cases {
             assert_eq!(run(action), [format!("queue {kind:?} {op:?}")]);

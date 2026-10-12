@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_local::anime::episodes::episode_list;
 use kuro_local::archive::first_page_bytes;
 use kuro_local::epub::first_image_bytes;
@@ -44,19 +44,19 @@ pub struct ScannedFolder {
 }
 
 /// Scans `folder` as an entry of `kind`.
-pub fn scan(kind: EntryKind, folder: &Path) -> io::Result<ScannedFolder> {
+pub fn scan(kind: Kind, folder: &Path) -> io::Result<ScannedFolder> {
     let title = folder
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| io::Error::other("the folder name is not UTF-8"))?
         .to_owned();
     let (items, cover) = match kind {
-        EntryKind::Manga => {
+        Kind::Manga => {
             let chapters = chapters(folder, &title)?;
             let cover = cover_of(folder, chapters.last())?;
             (chapters, cover)
         }
-        EntryKind::Anime => (episodes(folder, &title)?, None),
+        Kind::Anime => (episodes(folder, &title)?, None),
     };
     Ok(ScannedFolder { path: folder.to_path_buf(), title, items, cover })
 }
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn episodes_get_absolute_urls_and_numbers() {
         let root = tree(&["Show/Show - 1.mkv", "Show/Show - 2.mp4", "Show/notes.txt"]);
-        let scanned = scan(EntryKind::Anime, &root.path().join("Show")).expect("scan");
+        let scanned = scan(Kind::Anime, &root.path().join("Show")).expect("scan");
         assert_eq!(scanned.title, "Show");
         assert_eq!(scanned.cover, None);
         let numbers: Vec<f64> = scanned.items.iter().map(|e| e.number).collect();
@@ -206,6 +206,6 @@ mod tests {
     #[test]
     fn an_anime_folder_without_episode_files_gives_no_items() {
         let root = tree(&["Show/cover.jpg"]);
-        assert!(scan(EntryKind::Anime, &root.path().join("Show")).expect("scan").items.is_empty());
+        assert!(scan(Kind::Anime, &root.path().join("Show")).expect("scan").items.is_empty());
     }
 }

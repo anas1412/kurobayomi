@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use kuro_domain::category::model::Category;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::library::filter::{EntryFacts, LibraryFilters};
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::order::{SortContext, sort_page};
@@ -51,7 +51,7 @@ pub struct Facts {
 /// The settings of one pass, read from the preferences on the GTK thread.
 #[derive(Clone, Debug)]
 pub struct Request {
-    pub kind: EntryKind,
+    pub kind: Kind,
     pub filters: LibraryFilters,
     pub badges: BadgeSettings,
     /// None when no search is active. `Some("")` matches every entry (E-03).
@@ -192,7 +192,7 @@ mod tests {
 
     fn request() -> Request {
         Request {
-            kind: EntryKind::Manga,
+            kind: Kind::Manga,
             filters: LibraryFilters::default(),
             badges: BadgeSettings::default(),
             query: None,

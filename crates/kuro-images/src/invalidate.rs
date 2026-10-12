@@ -4,12 +4,13 @@
 //! The functions return the entry the caller should store. The write itself goes through `TimestampStore`,
 //! which the database layer implements, so this crate does not depend on the database.
 
+use kuro_platform::kind::Kind;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kuro_platform::paths::Paths;
 
-use crate::art::{ArtKind, ArtRef, Owner};
+use crate::art::{ArtKind, ArtRef};
 use crate::cover_file::{delete_custom_cover, delete_from_cache, set_custom_from_file};
 use crate::cover_paths;
 use crate::error::ImageError;
@@ -100,7 +101,7 @@ pub enum Column {
 pub trait TimestampStore: Send + Sync {
     fn set_last_modified(
         &self,
-        owner: Owner,
+        owner: Kind,
         entry_id: i64,
         column: Column,
         ms: i64,
@@ -110,7 +111,7 @@ pub trait TimestampStore: Send + Sync {
 /// `awaitUpdateCoverLastModified`: writes `now_ms` to the cover column.
 pub fn await_update_cover_last_modified(
     store: &dyn TimestampStore,
-    owner: Owner,
+    owner: Kind,
     entry_id: i64,
     now_ms: i64,
 ) -> Result<(), ImageError> {
@@ -124,7 +125,7 @@ pub fn await_update_background_last_modified(
     now_ms: i64,
 ) -> Result<(), ImageError> {
     store.set_last_modified(
-        Owner::Anime,
+        Kind::Anime,
         entry_id,
         Column::BackgroundLastModified,
         now_ms,
@@ -135,7 +136,7 @@ pub fn await_update_background_last_modified(
 /// cover column otherwise.
 fn bump(store: &dyn TimestampStore, art: &ArtRef, now_ms: i64) -> Result<(), ImageError> {
     match (art.owner, art.kind) {
-        (Owner::Anime, ArtKind::Background) => {
+        (Kind::Anime, ArtKind::Background) => {
             await_update_background_last_modified(store, art.entry_id, now_ms)
         }
         _ => await_update_cover_last_modified(store, art.owner, art.entry_id, now_ms),
@@ -144,7 +145,7 @@ fn bump(store: &dyn TimestampStore, art: &ArtRef, now_ms: i64) -> Result<(), Ima
 
 fn outcome(art: &ArtRef, ok: bool) -> Message {
     match (
-        art.kind == ArtKind::Background && art.owner == Owner::Anime,
+        art.kind == ArtKind::Background && art.owner == Kind::Anime,
         ok,
     ) {
         (false, true) => Message::CoverUpdated,
@@ -165,7 +166,7 @@ pub async fn edit_custom(
     picked: &Path,
     now_ms: i64,
 ) -> Message {
-    let allowed = !art.is_local() && (art.owner == Owner::Manga || art.favorite);
+    let allowed = !art.is_local() && (art.owner == Kind::Manga || art.favorite);
     let ok = allowed
         && set_custom_from_file(paths, art.family(), art.entry_id, picked)
             .await
@@ -204,7 +205,7 @@ mod tests {
 
     fn entry(source_id: i64) -> ArtRef {
         ArtRef {
-            owner: Owner::Manga,
+            owner: Kind::Manga,
             entry_id: 7,
             source_id,
             kind: ArtKind::Cover,
@@ -356,12 +357,12 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<(Owner, i64, Column, i64)>>);
+    struct Recorder(Mutex<Vec<(Kind, i64, Column, i64)>>);
 
     impl TimestampStore for Recorder {
         fn set_last_modified(
             &self,
-            owner: Owner,
+            owner: Kind,
             entry_id: i64,
             column: Column,
             ms: i64,
@@ -374,10 +375,10 @@ mod tests {
     #[test]
     fn await_update_writes_only_the_cover_column() {
         let store = Recorder::default();
-        await_update_cover_last_modified(&store, Owner::Manga, 3, NOW).unwrap();
+        await_update_cover_last_modified(&store, Kind::Manga, 3, NOW).unwrap();
         assert_eq!(
             *store.0.lock().unwrap(),
-            vec![(Owner::Manga, 3, Column::CoverLastModified, NOW)]
+            vec![(Kind::Manga, 3, Column::CoverLastModified, NOW)]
         );
     }
 
@@ -387,7 +388,7 @@ mod tests {
         await_update_background_last_modified(&store, 4, NOW).unwrap();
         assert_eq!(
             *store.0.lock().unwrap(),
-            vec![(Owner::Anime, 4, Column::BackgroundLastModified, NOW)]
+            vec![(Kind::Anime, 4, Column::BackgroundLastModified, NOW)]
         );
     }
 
@@ -402,7 +403,7 @@ mod tests {
         assert_eq!(out.last_modified, NOW);
         assert_eq!(
             *store.0.lock().unwrap(),
-            vec![(Owner::Manga, 7, Column::CoverLastModified, NOW)]
+            vec![(Kind::Manga, 7, Column::CoverLastModified, NOW)]
         );
 
         let untouched = Recorder::default();
@@ -432,7 +433,7 @@ mod tests {
         );
         assert_eq!(
             *store.0.lock().unwrap(),
-            vec![(Owner::Manga, 7, Column::CoverLastModified, NOW)]
+            vec![(Kind::Manga, 7, Column::CoverLastModified, NOW)]
         );
     }
 
@@ -454,7 +455,7 @@ mod tests {
         std::fs::write(&picked, b"new").unwrap();
         let store = Recorder::default();
         let anime = ArtRef {
-            owner: Owner::Anime,
+            owner: Kind::Anime,
             favorite: false,
             kind: ArtKind::Background,
             ..entry(1)
@@ -476,7 +477,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let paths = TestPaths::new(tmp.path());
         let e = ArtRef {
-            owner: Owner::Anime,
+            owner: Kind::Anime,
             kind: ArtKind::Background,
             ..entry(1)
         };
@@ -495,8 +496,8 @@ mod tests {
         assert_eq!(
             *store.0.lock().unwrap(),
             vec![
-                (Owner::Anime, 7, Column::BackgroundLastModified, NOW),
-                (Owner::Anime, 7, Column::BackgroundLastModified, NOW + 1),
+                (Kind::Anime, 7, Column::BackgroundLastModified, NOW),
+                (Kind::Anime, 7, Column::BackgroundLastModified, NOW + 1),
             ]
         );
     }

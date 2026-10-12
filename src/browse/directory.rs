@@ -15,7 +15,7 @@ use kuro_source::filter_list::FilterList;
 use super::entries::FavoriteStore;
 use super::listing::{LinkFuture, PageLoader};
 use super::loader::{Catalogue, SourceLoader};
-use super::route::BrowseKind;
+use kuro_platform::kind::Kind;
 
 /// One installed catalogue source and the package it came from (`""` when it has none, as the local source).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,7 +65,7 @@ pub struct Catalogues {
 
 impl Catalogues {
     /// The runnable sources of `kind`; a listing maps its entries into the app's library of that kind.
-    pub fn new(kind: BrowseKind, runnable: Vec<(Catalogue, DirectorySource)>) -> Self {
+    pub fn new(kind: Kind, runnable: Vec<(Catalogue, DirectorySource)>) -> Self {
         Self::with_store(runnable, Arc::new(move || crate::data::is_installed().then(|| crate::updates::history_add::store(kind))))
     }
 
@@ -111,10 +111,10 @@ impl SourceDirectory for Catalogues {
     }
 }
 
-static INSTALLED: Mutex<Vec<(BrowseKind, Catalogues)>> = Mutex::new(Vec::new());
+static INSTALLED: Mutex<Vec<(Kind, Catalogues)>> = Mutex::new(Vec::new());
 
 /// Installs the sources of `kind` the pages read. A second call for the same kind replaces the first.
-pub fn install(kind: BrowseKind, catalogues: Catalogues) {
+pub fn install(kind: Kind, catalogues: Catalogues) {
     let mut installed = INSTALLED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     installed.retain(|(of, _)| *of != kind);
     installed.push((kind, catalogues));
@@ -122,12 +122,12 @@ pub fn install(kind: BrowseKind, catalogues: Catalogues) {
 
 /// The directory the pages of `kind` read: the installed sources (none before the first load) and, for anime, the
 /// packages of the extension host. It is a snapshot taken when a page is built.
-pub fn current(kind: BrowseKind) -> Arc<dyn SourceDirectory> {
+pub fn current(kind: Kind) -> Arc<dyn SourceDirectory> {
     let installed = INSTALLED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().find(|(of, _)| *of == kind).map(|(_, catalogues)| catalogues.clone());
     let catalogues = installed.unwrap_or_else(|| Catalogues::new(kind, Vec::new()));
     Arc::new(match kind {
-        BrowseKind::Anime => catalogues.with_listed(sources_of(&crate::ext_host::anime_lists())),
-        BrowseKind::Manga => catalogues,
+        Kind::Anime => catalogues.with_listed(sources_of(&crate::ext_host::anime_lists())),
+        Kind::Manga => catalogues,
     })
 }
 
@@ -209,10 +209,10 @@ pub(crate) mod tests {
 
     /// The source 42 of `kind`, runnable over a fake store (the anime one answers four listings), and the source 43,
     /// listed but not runnable.
-    pub fn catalogues(kind: BrowseKind) -> Catalogues {
+    pub fn catalogues(kind: Kind) -> Catalogues {
         let source = match kind {
-            BrowseKind::Manga => Catalogue::Manga(FakeCatalogue::new(42)),
-            BrowseKind::Anime => Catalogue::Anime(FakeAnime::new(42, (0..4).map(|_| Ok(anime_page(vec![anime("/a", "A")], false))).collect())),
+            Kind::Manga => Catalogue::Manga(FakeCatalogue::new(42)),
+            Kind::Anime => Catalogue::Anime(FakeAnime::new(42, (0..4).map(|_| Ok(anime_page(vec![anime("/a", "A")], false))).collect())),
         };
         let mut row = entry(42, "Src42", "en", "repo.alpha");
         row.home_url = Some("https://src.example".into());
@@ -257,7 +257,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_runnable_source_of_either_kind_has_a_loader_filters_and_its_latest_flag_and_a_listed_one_has_none() {
-        for kind in [BrowseKind::Manga, BrowseKind::Anime] {
+        for kind in [Kind::Manga, Kind::Anime] {
             let directory = catalogues(kind);
             assert_eq!(directory.sources().iter().map(|row| row.source.id).collect::<Vec<_>>(), [43, 42], "{kind:?}: the listed rows come first");
             assert!(directory.sources()[1].source.supports_latest, "{kind:?}: the row states the source's Latest listing");
@@ -290,17 +290,17 @@ pub(crate) mod tests {
     #[test]
     fn the_installed_sources_of_a_kind_are_read_back_and_replaced() {
         let one = Catalogues::with_store(vec![(Catalogue::Manga(FakeCatalogue::new(1)), entry(1, "A", "en", ""))], Arc::new(|| None));
-        install(BrowseKind::Manga, one);
-        assert_eq!(current(BrowseKind::Manga).sources().len(), 1);
+        install(Kind::Manga, one);
+        assert_eq!(current(Kind::Manga).sources().len(), 1);
         let two = Catalogues::with_store(
             vec![(Catalogue::Manga(FakeCatalogue::new(1)), entry(1, "A", "en", "")), (Catalogue::Manga(FakeCatalogue::new(2)), entry(2, "B", "en", ""))],
             Arc::new(|| None),
         );
-        install(BrowseKind::Manga, two);
-        let manga = current(BrowseKind::Manga);
+        install(Kind::Manga, two);
+        let manga = current(Kind::Manga);
         assert_eq!(manga.sources().len(), 2);
         assert!(manga.catalogue(2).and_then(|source| source.manga()).is_some() && manga.catalogue(3).is_none());
-        INSTALLED.lock().expect("lock").retain(|(kind, _)| *kind != BrowseKind::Manga);
-        assert!(current(BrowseKind::Manga).sources().is_empty(), "nothing installed lists nothing");
+        INSTALLED.lock().expect("lock").retain(|(kind, _)| *kind != Kind::Manga);
+        assert!(current(Kind::Manga).sources().is_empty(), "nothing installed lists nothing");
     }
 }

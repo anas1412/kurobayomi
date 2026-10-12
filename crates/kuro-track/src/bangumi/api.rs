@@ -2,6 +2,7 @@
 //! adds the bearer token, the User-Agent and `Cache-Control: no-cache`, and refreshes an expired token first. The code
 //! exchange and the refresh are sent without the bearer. Persistence goes through [`BaseTracker`].
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use kuro_platform::secrets::SecretStore;
@@ -19,7 +20,7 @@ use super::error::BangumiError;
 use super::status::BgmStatus;
 use crate::base::BaseTracker;
 use crate::events::EventBus;
-use crate::model::{Kind, TrackerId};
+use crate::model::TrackerId;
 use crate::shikimori::api::{OAuthClient, http_client};
 use crate::shikimori::dto::ensure_finite;
 

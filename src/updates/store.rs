@@ -10,7 +10,7 @@ mod tests {
     use kuro_data::chapter::{Chapter, ChapterRepo};
     use kuro_data::manga::{Manga, MangaRepo};
     use kuro_db::handle::Db;
-    use kuro_domain::kind::EntryKind;
+    use kuro_platform::kind::Kind;
     use kuro_domain::updates::repo::UpdatesRepo;
 
     /// The window cut-off used by every test: the feed shows uploads after this instant (epoch ms).
@@ -47,7 +47,7 @@ mod tests {
     }
 
     fn feed(db: &Arc<Db>) -> Vec<i64> {
-        UpdatesRepo::new(db.clone()).recent(EntryKind::Manga, AFTER).expect("feed").iter().map(|r| r.item_id).collect()
+        UpdatesRepo::new(db.clone()).recent(Kind::Manga, AFTER).expect("feed").iter().map(|r| r.item_id).collect()
     }
 
     #[test]
@@ -147,7 +147,7 @@ mod tests {
             ],
         );
         // d2 is already read; d1, d2 and d4 have files on disk (the fake matches `c<id>`, so name them by id)
-        bulk::apply(&f.db, EntryKind::Manga, &[ids[1]], BulkAction::MarkRead(true)).expect("pre-read");
+        bulk::apply(&f.db, Kind::Manga, &[ids[1]], BulkAction::MarkRead(true)).expect("pre-read");
         f.db.write(|tx| {
             for (id, name) in ids.iter().zip(["c1", "c2", "c3", "c4"]) {
                 tx.execute("UPDATE chapters SET name = ?1 WHERE _id = ?2", (name, id))?;
@@ -158,9 +158,9 @@ mod tests {
         let fake = Fake::installed();
         *fake.disk.lock().unwrap() = vec![1, 2, 4];
 
-        let rows = UpdatesRepo::new(f.db.clone()).recent(EntryKind::Manga, AFTER).expect("feed");
+        let rows = UpdatesRepo::new(f.db.clone()).recent(Kind::Manga, AFTER).expect("feed");
         let mut items = feed::replace_rows(rows, &[], &mut Selection::default());
-        rederive(&mut items, |_| None, &mut Default::default(), |key| fake.on_disk(EntryKind::Manga, key));
+        rederive(&mut items, |_| None, &mut Default::default(), |key| fake.on_disk(Kind::Manga, key));
         for item in &mut items {
             item.selected = true;
         }
@@ -170,14 +170,14 @@ mod tests {
 
         let changed = bulk::targets(&feed::selected_flags(&items), BulkAction::MarkRead(true));
         assert!(!changed.contains(&ids[1]), "the already read chapter is not written");
-        bulk::apply(&f.db, EntryKind::Manga, &changed, BulkAction::MarkRead(true)).expect("mark read");
+        bulk::apply(&f.db, Kind::Manga, &changed, BulkAction::MarkRead(true)).expect("mark read");
         let newly_read: Vec<UnitTarget> = items
             .iter()
             .filter(|r| changed.contains(&r.row.item_id))
             .map(|r| UnitTarget { entry_id: r.row.entry_id, unit_id: r.row.item_id, state: r.download.state })
             .collect();
 
-        remove_read_downloads(&fake, EntryKind::Manga, true, &newly_read);
+        remove_read_downloads(&fake, Kind::Manga, true, &newly_read);
         let mut calls = fake.calls();
         calls.sort_by_key(|c| match c {
             Call::Delete { entry_id, .. } => *entry_id,
@@ -189,7 +189,7 @@ mod tests {
             "grouped per manga; d2 was already read and d3 has no files"
         );
         let all_read: Vec<bool> = UpdatesRepo::new(f.db.clone())
-            .recent(EntryKind::Manga, AFTER)
+            .recent(Kind::Manga, AFTER)
             .expect("feed")
             .iter()
             .map(|r| r.done)

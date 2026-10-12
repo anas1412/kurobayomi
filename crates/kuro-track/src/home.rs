@@ -2,6 +2,7 @@
 //! re-assembles the rows on every store change and every login change, emits a list only when the rows differ, and
 //! keeps the last good list when the store fails. Refresh on open reports one toast per failed tracker.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use tokio::sync::watch;
@@ -11,7 +12,7 @@ use crate::error::{TrackError, redact};
 use crate::item::{TrackItem, assemble_items};
 use crate::manager::TrackerManager;
 use crate::messages::MsgKey;
-use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 use crate::picker::picker_day;
 use crate::record::TrackRecord;
 use crate::repo::RowsWatch;

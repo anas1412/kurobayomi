@@ -2,6 +2,7 @@
 //! `ToggleMangaSourcePin`, `ToggleLanguage`; T-10a-018, T-10a-020). The two kinds share one algorithm, parameterised by
 //! the preference handles of each kind.
 
+use kuro_platform::kind::Kind;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
@@ -17,13 +18,6 @@ use kuro_prefs::source::SourcePrefs;
 
 /// The id of the local source, which is listed whatever the language filter says (`LocalMangaSource.ID`).
 pub const LOCAL_SOURCE_ID: Id = 0;
-
-/// Manga or anime: which preference keys a source list reads.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Manga,
-    Anime,
-}
 
 /// The preference handles of one kind of source list.
 #[derive(Clone)]

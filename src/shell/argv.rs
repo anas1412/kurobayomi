@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use kuro_platform::deep_link::DeepLink;
 
-use super::nav::Kind;
+use kuro_platform::kind::Kind;
 
 /// The text printed for `--help`.
 pub const USAGE: &str = "Usage: kurobayomi [OPTIONS] [FILE.tachibk | URI]...

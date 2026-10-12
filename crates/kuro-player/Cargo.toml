@@ -8,24 +8,15 @@ license.workspace = true
 [dependencies]
 async-channel = { workspace = true }
 bytes = { workspace = true }
-kuro-core = { path = "../kuro-core" }
-kuro-data = { path = "../kuro-data" }
 kuro-domain = { path = "../kuro-domain" }
 kuro-i18n = { path = "../kuro-i18n" }
 kuro-net = { path = "../kuro-net" }
-kuro-platform = { path = "../kuro-platform" }
-kuro-source = { path = "../kuro-source" }
-kuro-source-http = { path = "../kuro-source-http" }
-reqwest = { workspace = true }
 libmpv2 = { version = "6.0.0", features = ["render"] }
-serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["process"] }
+tokio = { workspace = true }
 tracing = { workspace = true }
-url = { workspace = true }
 toml_edit = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-wiremock = { workspace = true }

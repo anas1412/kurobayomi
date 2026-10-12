@@ -9,6 +9,7 @@ use std::sync::Arc;
 use gtk::glib;
 use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
+use kuro_platform::kind::Kind;
 
 use super::dialogs::{ButtonStyle, DialogSlot, DialogSpec};
 use super::entries::{CategoryChoice, FavoriteStore, add_entry, add_entry_to, chooser_rows, remove_entry};
@@ -40,8 +41,8 @@ pub struct FavoriteFlow {
     anchor: glib::WeakRef<gtk::Widget>,
     /// Counts long presses, so the answer of an older one never opens its dialog over a newer one (B-EC-27).
     presses: Cell<u64>,
-    /// An anime page: the duplicate dialog says Show anime.
-    anime: bool,
+    /// The page's kind: the duplicate dialog of an anime page says Show anime.
+    kind: Kind,
 }
 
 /// Runs `work` on a worker thread and `then` with its result on the main loop.
@@ -56,12 +57,12 @@ fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static, then: 
 impl FavoriteFlow {
     #[cfg(test)]
     pub fn new(store: Arc<dyn FavoriteStore>, anchor: &impl IsA<gtk::Widget>, hooks: FavoriteHooks) -> Rc<Self> {
-        Self::new_for(store, anchor, hooks, false)
+        Self::new_for(store, anchor, hooks, Kind::Manga)
     }
 
-    /// `anime` is true on an anime page.
-    pub fn new_for(store: Arc<dyn FavoriteStore>, anchor: &impl IsA<gtk::Widget>, hooks: FavoriteHooks, anime: bool) -> Rc<Self> {
-        Rc::new(Self { store, dialogs: DialogSlot::new(), hooks, anchor: anchor.upcast_ref::<gtk::Widget>().downgrade(), presses: Cell::new(0), anime })
+    /// `kind` is the kind of the page.
+    pub fn new_for(store: Arc<dyn FavoriteStore>, anchor: &impl IsA<gtk::Widget>, hooks: FavoriteHooks, kind: Kind) -> Rc<Self> {
+        Rc::new(Self { store, dialogs: DialogSlot::new(), hooks, anchor: anchor.upcast_ref::<gtk::Widget>().downgrade(), presses: Cell::new(0), kind })
     }
 
     #[cfg(test)]
@@ -117,7 +118,7 @@ impl FavoriteFlow {
     }
 
     fn ask_duplicate(self: &Rc<Self>, item: ListItem, existing: i64) {
-        let text = duplicate_dialog_for(self.anime);
+        let text = duplicate_dialog_for(self.kind);
         let spec = DialogSpec {
             title: text.title,
             body: Some(text.body),
@@ -259,10 +260,10 @@ pub(crate) mod tests {
     }
 
     fn rig() -> Rig {
-        rig_for(false)
+        rig_for(Kind::Manga)
     }
 
-    fn rig_for(anime: bool) -> Rig {
+    fn rig_for(kind: Kind) -> Rig {
         let store = Arc::new(FakeStore::default());
         let anchor = gtk::Label::new(None);
         let (flags, toasts, opened): (Rc<RefCell<Vec<(i64, bool)>>>, Rc<RefCell<Vec<String>>>, Rc<RefCell<Vec<String>>>) =
@@ -276,7 +277,7 @@ pub(crate) mod tests {
             now_ms: Rc::new(|| 5_000),
             edit_categories: Rc::new(move || o3.borrow_mut().push("categories".to_owned())),
         };
-        let flow = FavoriteFlow::new_for(Arc::clone(&store) as Arc<dyn FavoriteStore>, &anchor, hooks, anime);
+        let flow = FavoriteFlow::new_for(Arc::clone(&store) as Arc<dyn FavoriteStore>, &anchor, hooks, kind);
         Rig { flow, store, flags, toasts, opened, _anchor: anchor }
     }
 
@@ -343,13 +344,13 @@ pub(crate) mod tests {
 
     /// T-41b-021: the anime page's duplicate dialog offers Show anime, Migrate existing entry, Add anyway and Cancel.
     fn the_anime_duplicate_dialog_says_show_anime_and_each_row_runs_its_action() {
-        let rig = rig_for(true);
+        let rig = rig_for(Kind::Anime);
         *rig.store.duplicates.lock().expect("lock") = vec![42];
         rig.flow.long_press(item(false));
         assert!(pump(|| rig.flow.dialog().is_some()));
         let window = rig.flow.dialog().expect("dialog");
         let labels: Vec<String> = buttons_of(&window).iter().filter_map(|b| b.label().map(|l| l.to_string())).collect();
-        let text = duplicate_dialog_for(true);
+        let text = duplicate_dialog_for(Kind::Anime);
         assert_eq!(labels, [text.show, text.migrate, text.add_anyway, text.cancel]);
         assert_eq!(labels[0], tr(MsgKey::action_show_anime));
         buttons_of(&window)[0].emit_clicked();

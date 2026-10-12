@@ -313,7 +313,8 @@ mod tests {
     /// a favourite, and the library then lists it with its chapters. A failing source is an error, never a panic.
     #[test]
     fn browse_then_details_then_add_to_library_lists_the_entry_with_its_chapters() {
-        use kuro_data::category::{CategoryKind, CategoryRepo};
+        use kuro_data::category::CategoryRepo;
+        use kuro_platform::kind::Kind;
         use kuro_data::chapter::ChapterRepo;
         use kuro_domain::source::browse::BrowseQuery;
         use kuro_source::filter_list::FilterList;
@@ -328,7 +329,7 @@ mod tests {
         let prefs = crate::browse::prefs::BrowsePrefs::new(kuro_prefs::store::PrefStore::in_memory(), crate::browse::route::BrowseKind::Manga);
         let store = Arc::new(crate::browse::repo_store::RepoStore::new(
             MangaRepo::new(Arc::clone(&db)),
-            CategoryRepo::new(Arc::clone(&db), CategoryKind::Manga),
+            CategoryRepo::new(Arc::clone(&db), Kind::Manga),
             prefs.default_category.clone(),
             Arc::new(|_| 0),
         ));

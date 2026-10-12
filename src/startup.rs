@@ -9,7 +9,7 @@ use std::time::Duration;
 use chrono::Local;
 use gtk::glib;
 use gtk::prelude::*;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::updates::repo::UpdatesRepo;
 use kuro_domain::updates::window::three_months_ago;
 use kuro_platform::linux::launcher;
@@ -159,7 +159,7 @@ pub fn publish_launcher_badge(app_id: &str) {
         }
     });
     let since = three_months_ago(&Local::now());
-    for (slot, kind) in [EntryKind::Manga, EntryKind::Anime].into_iter().enumerate() {
+    for (slot, kind) in [Kind::Manga, Kind::Anime].into_iter().enumerate() {
         let (counts, push) = (Rc::clone(&counts), Rc::clone(&push));
         let feed = UpdatesRepo::new(data::app().db(kind)).watch_with_read(kind, false, since);
         bind_watch(feed, move |rows| {

@@ -2,7 +2,6 @@
 //! The files live under `tests/fixtures/player/`.
 
 use kuro_player::chapters::{self, Segment};
-use kuro_player::dialog::picker_values;
 use kuro_player::time::format_episode_number;
 use kuro_player::types::ChapterType;
 use serde_json::Value;
@@ -73,43 +72,4 @@ fn episode_numbers_format_as_expected() {
         let value = case["value"].as_f64().expect("value");
         assert_eq!(format_episode_number(value), case["text"].as_str().unwrap());
     }
-}
-
-#[test]
-fn display_mode_flags_match_the_number_mask() {
-    use kuro_player::episode_list::EPISODE_DISPLAY_MASK;
-    for case in json("display_modes.json").as_array().expect("array") {
-        let mode = case["mode"].as_i64().expect("mode");
-        let number = case["number"].as_bool().expect("number");
-        assert_eq!(mode & EPISODE_DISPLAY_MASK == EPISODE_DISPLAY_MASK, number);
-    }
-}
-
-#[test]
-fn picker_specs_give_their_values() {
-    // The four specs of the fixture, read as (min, max, step) from the `start|stop|step` fields.
-    let specs: Vec<(i32, i32, i32)> = fixture("picker_specs.txt")
-        .lines()
-        .map(|line| {
-            let f: Vec<&str> = line.split('|').collect();
-            (
-                f[2].parse().unwrap(),
-                f[3].parse().unwrap(),
-                f[4].parse().unwrap(),
-            )
-        })
-        .collect();
-    assert_eq!(
-        picker_values(specs[0].0, specs[0].1, specs[0].2),
-        Some(vec![0, 3, 6, 9])
-    );
-    assert_eq!(picker_values(specs[1].0, specs[1].1, specs[1].2), None);
-    assert_eq!(
-        picker_values(specs[2].0, specs[2].1, specs[2].2),
-        Some(vec![5])
-    );
-    assert_eq!(
-        picker_values(specs[3].0, specs[3].1, specs[3].2).map(|v| v.len()),
-        Some(5)
-    );
 }

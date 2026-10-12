@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_platform::secrets::SecretStore;
 use kuro_track::base::{Field, SECRET_SERVICE, account};
 use kuro_track::model::TrackerId;
@@ -37,10 +37,10 @@ const ANIME: [(TrackerId, &str); 7] = [
     (TrackerId::JELLYFIN, "Jellyfin"),
 ];
 
-fn candidates(kind: EntryKind) -> &'static [(TrackerId, &'static str)] {
+fn candidates(kind: Kind) -> &'static [(TrackerId, &'static str)] {
     match kind {
-        EntryKind::Manga => &MANGA,
-        EntryKind::Anime => &ANIME,
+        Kind::Manga => &MANGA,
+        Kind::Anime => &ANIME,
     }
 }
 
@@ -49,7 +49,7 @@ fn read(secrets: &dyn SecretStore, tracker: TrackerId, field: Field) -> bool {
 }
 
 /// The ids of the trackers of `kind` that are logged in. An unreadable store reads as logged out.
-pub fn logged_in(secrets: &dyn SecretStore, kind: EntryKind) -> BTreeSet<i64> {
+pub fn logged_in(secrets: &dyn SecretStore, kind: Kind) -> BTreeSet<i64> {
     candidates(kind)
         .iter()
         .filter(|(id, _)| read(secrets, *id, Field::Username) && read(secrets, *id, Field::Password))
@@ -59,7 +59,7 @@ pub fn logged_in(secrets: &dyn SecretStore, kind: EntryKind) -> BTreeSet<i64> {
 
 /// The last known logins of one kind and the refresh that updates them.
 pub struct Logins {
-    kind: EntryKind,
+    kind: Kind,
     open: Arc<dyn Fn() -> Arc<dyn SecretStore> + Send + Sync>,
     known: Arc<Mutex<BTreeSet<i64>>>,
     refreshing: Arc<AtomicBool>,
@@ -70,7 +70,7 @@ pub struct Logins {
 impl Logins {
     /// `open` builds the secret store on the worker thread (it may block); `on_change` is called on the main context.
     pub fn new(
-        kind: EntryKind,
+        kind: Kind,
         open: impl Fn() -> Arc<dyn SecretStore> + Send + Sync + 'static,
         on_change: impl Fn() + Send + Sync + 'static,
     ) -> Self {
@@ -153,10 +153,10 @@ mod tests {
     fn a_tracker_needs_both_a_username_and_a_password_to_count() {
         let store = Mem::default();
         store.set(SECRET_SERVICE, &account(TrackerId::ANILIST, Field::Username), "me").unwrap();
-        assert!(logged_in(&store, EntryKind::Manga).is_empty(), "a username alone is not a login");
+        assert!(logged_in(&store, Kind::Manga).is_empty(), "a username alone is not a login");
         store.login(TrackerId::ANILIST);
         store.login(TrackerId::KITSU);
-        assert_eq!(logged_in(&store, EntryKind::Manga), BTreeSet::from([2, 3]));
+        assert_eq!(logged_in(&store, Kind::Manga), BTreeSet::from([2, 3]));
     }
 
     #[test]
@@ -164,8 +164,8 @@ mod tests {
         let store = Mem::default();
         store.login(TrackerId::KOMGA);
         store.login(TrackerId::SIMKL);
-        assert_eq!(logged_in(&store, EntryKind::Manga), BTreeSet::from([6]));
-        assert_eq!(logged_in(&store, EntryKind::Anime), BTreeSet::from([101]));
+        assert_eq!(logged_in(&store, Kind::Manga), BTreeSet::from([6]));
+        assert_eq!(logged_in(&store, Kind::Anime), BTreeSet::from([101]));
     }
 
     #[test]
@@ -175,14 +175,22 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let shared = store.clone();
         let tx = Mutex::new(tx);
+        // The worker's open() waits for this gate, so the first get() cannot race a fast worker that already
+        // finished; once the sender is dropped later opens pass at once.
+        let (release, gate) = mpsc::channel::<()>();
+        let gate = Mutex::new(gate);
         let logins = Logins::new(
-            EntryKind::Manga,
-            move || shared.clone() as Arc<dyn SecretStore>,
+            Kind::Manga,
+            move || {
+                let _ = gate.lock().unwrap().recv();
+                shared.clone() as Arc<dyn SecretStore>
+            },
             move || {
                 let _ = tx.lock().unwrap().send(());
             },
         );
         assert!(logins.get().is_empty(), "the secret store is never read on the caller's thread");
+        drop(release);
         rx.recv_timeout(Duration::from_secs(5)).expect("the change is announced");
         assert_eq!(logins.get(), BTreeSet::from([2]));
         // a second refresh finds the same set and announces nothing

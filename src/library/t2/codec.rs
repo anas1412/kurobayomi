@@ -1,11 +1,11 @@
 //! T2-CODEC-01 to T2-CODEC-08 (`p1-edge-cases-and-tests.md` section T-2): the flag codec and the display-mode tokens.
 
 use kuro_domain::library::flags::{contains, merge};
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::library::sort::{Direction, LibrarySort, SORT_MASK, SortType};
 use kuro_prefs::library::LibraryDisplayMode;
 
-const KINDS: [EntryKind; 2] = [EntryKind::Manga, EntryKind::Anime];
+const KINDS: [Kind; 2] = [Kind::Manga, Kind::Anime];
 
 fn sort(ty: SortType, dir: Direction) -> LibrarySort {
     LibrarySort { ty, dir }
@@ -14,8 +14,8 @@ fn sort(ty: SortType, dir: Direction) -> LibrarySort {
 #[test]
 fn t2_codec_01_counts() {
     assert_eq!(LibraryDisplayMode::ALL.len(), 4);
-    assert_eq!(SortType::types(EntryKind::Manga).len(), 10);
-    assert_eq!(SortType::types(EntryKind::Anime).len(), 11);
+    assert_eq!(SortType::types(Kind::Manga).len(), 10);
+    assert_eq!(SortType::types(Kind::Anime).len(), 11);
     assert_eq!(Direction::ALL.len(), 2);
 }
 
@@ -34,15 +34,15 @@ fn t2_codec_02_merge_keeps_the_bits_outside_the_mask() {
 #[test]
 fn t2_codec_03_decode_table() {
     let (alpha_asc, alpha_desc) = (sort(SortType::Alphabetical, Direction::Ascending), sort(SortType::Alphabetical, Direction::Descending));
-    assert_eq!(LibrarySort::deserialize(EntryKind::Manga, ""), alpha_asc);
-    assert_eq!(LibrarySort::deserialize(EntryKind::Anime, "UNSEEN_COUNT,DESCENDING"), sort(SortType::UnreadCount, Direction::Descending));
-    assert_eq!(LibrarySort::deserialize(EntryKind::Manga, "FOO,ASCENDING"), alpha_asc);
-    assert_eq!(LibrarySort::deserialize(EntryKind::Manga, "LAST_READ"), alpha_asc, "no comma reads the default");
-    assert_eq!(LibrarySort::from_flags(EntryKind::Manga, Some(0)), alpha_desc);
-    assert_eq!(LibrarySort::from_flags(EntryKind::Manga, Some(0x40)), alpha_asc);
-    assert_eq!(LibrarySort::from_flags(EntryKind::Manga, Some(124)), sort(SortType::Random, Direction::Ascending));
-    assert_eq!(LibrarySort::from_flags(EntryKind::Anime, Some(48)), sort(SortType::AiringTime, Direction::Descending));
-    assert_eq!(LibrarySort::from_flags(EntryKind::Manga, Some(48)), alpha_desc, "no manga type has the bits 110000");
+    assert_eq!(LibrarySort::deserialize(Kind::Manga, ""), alpha_asc);
+    assert_eq!(LibrarySort::deserialize(Kind::Anime, "UNSEEN_COUNT,DESCENDING"), sort(SortType::UnreadCount, Direction::Descending));
+    assert_eq!(LibrarySort::deserialize(Kind::Manga, "FOO,ASCENDING"), alpha_asc);
+    assert_eq!(LibrarySort::deserialize(Kind::Manga, "LAST_READ"), alpha_asc, "no comma reads the default");
+    assert_eq!(LibrarySort::from_flags(Kind::Manga, Some(0)), alpha_desc);
+    assert_eq!(LibrarySort::from_flags(Kind::Manga, Some(0x40)), alpha_asc);
+    assert_eq!(LibrarySort::from_flags(Kind::Manga, Some(124)), sort(SortType::Random, Direction::Ascending));
+    assert_eq!(LibrarySort::from_flags(Kind::Anime, Some(48)), sort(SortType::AiringTime, Direction::Descending));
+    assert_eq!(LibrarySort::from_flags(Kind::Manga, Some(48)), alpha_desc, "no manga type has the bits 110000");
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn t2_codec_07_every_token_round_trips() {
             }
         }
     }
-    assert_eq!(LibrarySort::deserialize(EntryKind::Manga, "RANDOM,ASCENDING"), sort(SortType::Random, Direction::Ascending));
+    assert_eq!(LibrarySort::deserialize(Kind::Manga, "RANDOM,ASCENDING"), sort(SortType::Random, Direction::Ascending));
 }
 
 #[test]

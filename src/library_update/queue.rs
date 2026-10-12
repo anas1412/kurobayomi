@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 pub use kuro_db::codec::UpdateStrategy;
 pub use kuro_db::schema_anime::FetchType;
-pub use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 /// `SManga.COMPLETED` / `SAnime.COMPLETED`.
 pub const COMPLETED_STATUS: i64 = 2;
@@ -17,7 +17,7 @@ pub struct LibraryEntry {
     pub source: i64,
     pub url: String,
     pub title: String,
-    pub kind: EntryKind,
+    pub kind: Kind,
     /// `0` for no category, `-1` for a season child.
     pub category: i64,
     pub update_strategy: UpdateStrategy,
@@ -204,7 +204,7 @@ mod tests {
             source: 1001,
             url: format!("/{id}"),
             title: title.into(),
-            kind: EntryKind::Manga,
+            kind: Kind::Manga,
             category,
             update_strategy: UpdateStrategy::AlwaysUpdate,
             status: 1,

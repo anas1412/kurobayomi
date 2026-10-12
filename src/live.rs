@@ -8,16 +8,12 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GBox, Button, Label, ListBox, Orientation as O};
 use kuro_domain::category::model::Category;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::data;
 use crate::screens::{dialog_then_named, list_row};
 use crate::ui::{boxed_list, column, icon_button, scrolled, screen, DialogButton, Role};
 use crate::watch::bind_watch;
-
-fn kind_of(anime: bool) -> EntryKind {
-    if anime { EntryKind::Anime } else { EntryKind::Manga }
-}
 
 /// A category write that failed is a toast; the list stays as the database has it.
 fn report<T, E: std::fmt::Display>(result: Result<T, E>) {
@@ -72,14 +68,14 @@ fn name_dialog(dialog: &str, initial: &str, taken: impl Fn(&str) -> bool + 'stat
 /// One category row list of one kind. Rename, hide and delete write through the category service. With no user
 /// category the list hides and `empty` (the empty state with its Add button) shows.
 struct CategoryList {
-    kind: EntryKind,
+    kind: Kind,
     list: ListBox,
     empty: GBox,
 }
 
 /// Whether a user category other than `except` already has the trimmed name `new` (the same exact-name rule the
 /// category service applies on create and rename; the system category is never a match).
-fn user_names_taken(kind: EntryKind, new: &str, except: Option<i64>) -> bool {
+fn user_names_taken(kind: Kind, new: &str, except: Option<i64>) -> bool {
     let all = data::app().categories(kind).repo().all().unwrap_or_default();
     taken_by_user(&all, new, except)
 }
@@ -164,10 +160,9 @@ impl CategoryList {
 
 /// The categories screen of one kind: a live list of the non-system categories in the page column, or the empty
 /// state with an Add button. The header's Add button (`screens::categories`) runs [`add_category`] too.
-pub fn categories_content(anime: bool) -> gtk::Widget {
-    let kind = kind_of(anime);
+pub fn categories_content(kind: Kind) -> gtk::Widget {
     let add = Button::with_label("Add category");
-    add.connect_clicked(move |_| add_category(anime));
+    add.connect_clicked(move |_| add_category(kind));
     let (empty, _) = crate::browse::look::empty_state("tag-symbolic", &screen("categories").empty.unwrap_or_default(), Some(&add));
     let column = column();
     column.append(&boxed_list());
@@ -180,8 +175,7 @@ pub fn categories_content(anime: bool) -> gtk::Widget {
 }
 
 /// The Add category dialog of one kind; the name is created through the category service.
-pub fn add_category(anime: bool) {
-    let kind = kind_of(anime);
+pub fn add_category(kind: Kind) {
     name_dialog("category_create", "", move |new| user_names_taken(kind, new, None), move |name| {
         let app = data::app();
         glib::spawn_future_local(async move {
@@ -239,11 +233,11 @@ mod tests {
         alone::run(module_path!(), "the_categories_screen_creates_renames_hides_reorders_and_deletes_and_shows_errors", |ctx| {
             let (_stack, _window) = crate::testing::nav();
             let toast = alone::toast_label();
-            let page = categories_content(false);
+            let page = categories_content(Kind::Manga);
             let names = || row_names(&page);
-            let kind = EntryKind::Manga;
+            let kind = Kind::Manga;
             let create = |name: &str| {
-                add_category(false);
+                add_category(Kind::Manga);
                 let (window, entry, buttons) = dialog();
                 entry.set_text(name);
                 buttons.last().expect("OK").emit_clicked();

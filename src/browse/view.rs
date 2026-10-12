@@ -280,8 +280,9 @@ pub fn file_cover_loader() -> CoverLoader {
 /// A listed entry's remote cover. The entry is not a library entry yet (entry id 0, not a favourite), so the image goes to
 /// the shared image cache only and no cover file is written; the source id picks the source's image headers.
 pub(super) fn remote_art(url: &str, source_id: i64) -> kuro_images::art::ArtRef {
-    use kuro_images::art::{ArtKind, ArtRef, Owner};
-    ArtRef { owner: Owner::Manga, entry_id: 0, source_id, kind: ArtKind::Cover, url: Some(url.to_owned()), favorite: false, last_modified: 0 }
+    use kuro_images::art::{ArtKind, ArtRef};
+    use kuro_platform::kind::Kind;
+    ArtRef { owner: Kind::Manga, entry_id: 0, source_id, kind: ArtKind::Cover, url: Some(url.to_owned()), favorite: false, last_modified: 0 }
 }
 
 /// Loads `art` through the image service. The load is cancelled when `picture` is destroyed (its cell was rebound or its

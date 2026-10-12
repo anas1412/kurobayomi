@@ -246,6 +246,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
+    use kuro_platform::kind::Kind;
     use kuro_db::handle::Db;
     use kuro_prefs::store::PrefStore;
 
@@ -258,7 +259,7 @@ mod tests {
         let writer = kuro_db::schema_manga::open(&path).expect("schema");
         let db = Arc::new(Db::new(&path, writer).expect("db"));
         let manga = MangaRepo::new(Arc::clone(&db));
-        let categories = CategoryRepo::new(db, kuro_data::category::CategoryKind::Manga);
+        let categories = CategoryRepo::new(db, Kind::Manga);
         let prefs = PrefStore::in_memory().pref("default_category", 0_i32);
         let clearer: CoverClearer = Arc::new(move |_| deleted.load(Ordering::SeqCst));
         (dir, RepoStore::new(manga.clone(), categories, prefs, clearer), manga)
@@ -327,7 +328,8 @@ mod anime_tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use kuro_data::category::{CategoryKind, create_anime_category};
+    use kuro_data::category::create_anime_category;
+    use kuro_platform::kind::Kind;
     use kuro_db::handle::Db;
     use kuro_domain::category::target::AddTarget;
     use kuro_prefs::store::PrefStore;
@@ -351,7 +353,7 @@ mod anime_tests {
         let writer = kuro_db::schema_anime::open(&path).expect("schema");
         let db = Arc::new(Db::new(&path, writer).expect("db"));
         let repo = AnimeRepo::new(Arc::clone(&db));
-        let categories = CategoryRepo::new(Arc::clone(&db), CategoryKind::Anime);
+        let categories = CategoryRepo::new(Arc::clone(&db), Kind::Anime);
         let default = PrefStore::in_memory().pref("default_anime_category", -1_i32);
         let clear_cover: CoverClearer = Arc::new(move |_| cover_files.load(Ordering::SeqCst));
         let clear_background: CoverClearer = Arc::new(move |_| background_files.load(Ordering::SeqCst));

@@ -112,8 +112,9 @@ pub fn create_nomedia(dir: &Path) -> io::Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    use kuro_platform::kind::Kind;
     use super::*;
-    use crate::art::{ArtKind, Owner};
+    use crate::art::ArtKind;
     use crate::testing::TestPaths;
 
     #[test]
@@ -194,7 +195,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let paths = TestPaths::new(tmp.path());
         let art = ArtRef {
-            owner: Owner::Manga,
+            owner: Kind::Manga,
             entry_id: 7,
             source_id: 1,
             kind: ArtKind::Cover,

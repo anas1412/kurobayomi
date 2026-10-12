@@ -4,6 +4,7 @@
 //! and the rest (hosts, which operations a kind needs) in [`Recipe::parse`]. After that a [`Recipe`] cannot fail on its
 //! own text, so the operations in `engine` only meet page problems.
 
+use kuro_platform::kind::Kind;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -20,13 +21,6 @@ pub enum RecipeError {
     Read { path: String, message: String },
     #[error("{0}")]
     Invalid(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Kind {
-    Manga,
-    Anime,
 }
 
 /// A CSS selector, parsed while the recipe is read.

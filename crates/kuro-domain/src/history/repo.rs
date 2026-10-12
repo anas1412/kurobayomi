@@ -2,6 +2,7 @@
 //! `kuro-db` (manga `history`/`historyView`, anime `animehistory`/`animehistoryView`), except the by-entry query of
 //! anime, which is written here.
 
+use kuro_platform::kind::Kind;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -14,7 +15,6 @@ use kuro_db::statements_manga::views as manga_views;
 
 use super::model::{CoverKey, HistoryRow, HistoryUpdate, HistoryWithRelations};
 use crate::error::DomainError;
-use crate::kind::EntryKind;
 
 /// Reads and writes the history rows of either kind.
 #[derive(Clone)]
@@ -95,47 +95,47 @@ impl HistoryRepo {
 
     /// One row per entry (its newest row), only rows with a timestamp above 0, newest first. `query` is a
     /// case-insensitive substring of the title; `%`, `_` and `\` are literal.
-    pub fn list(&self, kind: EntryKind, query: &str) -> Result<Vec<HistoryWithRelations>, DomainError> {
+    pub fn list(&self, kind: Kind, query: &str) -> Result<Vec<HistoryWithRelations>, DomainError> {
         Ok(match kind {
-            EntryKind::Manga => {
+            Kind::Manga => {
                 self.db.read(|c| Ok(manga_views::history(c, query)?))?.into_iter().map(manga_row).collect()
             }
-            EntryKind::Anime => self.db.read(|c| Ok(anime::history(c, query)?))?.into_iter().map(anime_row).collect(),
+            Kind::Anime => self.db.read(|c| Ok(anime::history(c, query)?))?.into_iter().map(anime_row).collect(),
         })
     }
 
     /// Live list of [`HistoryRepo::list`]: re-runs after a change to the history, item or entry tables.
     pub fn watch_list(
         &self,
-        kind: EntryKind,
+        kind: Kind,
         query: String,
     ) -> kuro_db::subscribe::Subscription<Vec<HistoryWithRelations>> {
         let tables: &'static [&'static str] = match kind {
-            EntryKind::Manga => &["history", "chapters", "mangas"],
-            EntryKind::Anime => &["animehistory", "episodes", "animes"],
+            Kind::Manga => &["history", "chapters", "mangas"],
+            Kind::Anime => &["animehistory", "episodes", "animes"],
         };
         self.db.subscribe(tables, std::time::Duration::from_millis(30), move |c| match kind {
-            EntryKind::Manga => Ok(manga_views::history(c, &query)?.into_iter().map(manga_row).collect()),
-            EntryKind::Anime => Ok(anime::history(c, &query)?.into_iter().map(anime_row).collect()),
+            Kind::Manga => Ok(manga_views::history(c, &query)?.into_iter().map(manga_row).collect()),
+            Kind::Anime => Ok(anime::history(c, &query)?.into_iter().map(anime_row).collect()),
         })
     }
 
     /// The newest row with a timestamp above 0, or `None`.
-    pub fn latest(&self, kind: EntryKind) -> Result<Option<HistoryWithRelations>, DomainError> {
+    pub fn latest(&self, kind: Kind) -> Result<Option<HistoryWithRelations>, DomainError> {
         let rows = self.list(kind, "")?;
         Ok(rows.into_iter().max_by_key(|r| r.at))
     }
 
     /// Every history row of one entry, reset rows included.
-    pub fn by_entry(&self, kind: EntryKind, entry_id: i64) -> Result<Vec<HistoryRow>, DomainError> {
+    pub fn by_entry(&self, kind: Kind, entry_id: i64) -> Result<Vec<HistoryRow>, DomainError> {
         Ok(match kind {
-            EntryKind::Manga => self
+            Kind::Manga => self
                 .db
                 .read(|c| Ok(manga_history::get_by_manga_id(c, entry_id)?))?
                 .into_iter()
                 .map(|r| HistoryRow { id: r.id, item_id: r.chapter_id, at: r.last_read, time_read: r.time_read })
                 .collect(),
-            EntryKind::Anime => self.db.read(|c| {
+            Kind::Anime => self.db.read(|c| {
                 let mut st = c.prepare(
                     "SELECT H._id, H.episode_id, H.last_seen FROM animehistory H \
                      JOIN episodes E ON H.episode_id = E._id WHERE E.anime_id = ?1",
@@ -153,11 +153,11 @@ impl HistoryRepo {
 
     /// Records a read or watch: sets the timestamp and adds the session to the duration (manga). A chapter or
     /// episode that is already recorded keeps one row.
-    pub fn upsert(&self, kind: EntryKind, item_id: i64, at: i64, session_ms: i64) -> Result<(), DomainError> {
+    pub fn upsert(&self, kind: Kind, item_id: i64, at: i64, session_ms: i64) -> Result<(), DomainError> {
         self.db.write(|tx| {
             match kind {
-                EntryKind::Manga => manga_history::upsert(tx, item_id, at, session_ms)?,
-                EntryKind::Anime => anime::upsert_history(tx, item_id, Millis(at))?,
+                Kind::Manga => manga_history::upsert(tx, item_id, at, session_ms)?,
+                Kind::Anime => anime::upsert_history(tx, item_id, Millis(at))?,
             };
             Ok(())
         })?;
@@ -183,11 +183,11 @@ impl HistoryRepo {
     }
 
     /// Sets the timestamp of one row to 0. The row and its duration stay, so the total is unchanged.
-    pub fn reset_one(&self, kind: EntryKind, history_id: i64) -> Result<(), DomainError> {
+    pub fn reset_one(&self, kind: Kind, history_id: i64) -> Result<(), DomainError> {
         self.db.write(|tx| {
             match kind {
-                EntryKind::Manga => manga_history::reset_by_id(tx, history_id)?,
-                EntryKind::Anime => anime::reset_history(tx, history_id)?,
+                Kind::Manga => manga_history::reset_by_id(tx, history_id)?,
+                Kind::Anime => anime::reset_history(tx, history_id)?,
             };
             Ok(())
         })?;
@@ -195,11 +195,11 @@ impl HistoryRepo {
     }
 
     /// Resets every row of one entry.
-    pub fn reset_entry(&self, kind: EntryKind, entry_id: i64) -> Result<(), DomainError> {
+    pub fn reset_entry(&self, kind: Kind, entry_id: i64) -> Result<(), DomainError> {
         self.db.write(|tx| {
             match kind {
-                EntryKind::Manga => manga_history::reset_by_manga_id(tx, entry_id)?,
-                EntryKind::Anime => anime::reset_history_by_anime(tx, entry_id)?,
+                Kind::Manga => manga_history::reset_by_manga_id(tx, entry_id)?,
+                Kind::Anime => anime::reset_history_by_anime(tx, entry_id)?,
             };
             Ok(())
         })?;
@@ -207,11 +207,11 @@ impl HistoryRepo {
     }
 
     /// Deletes every row. Returns `false` (after logging) when the delete fails.
-    pub fn clear_all(&self, kind: EntryKind) -> bool {
+    pub fn clear_all(&self, kind: Kind) -> bool {
         let result = self.db.write(|tx| {
             match kind {
-                EntryKind::Manga => manga_history::remove_all(tx)?,
-                EntryKind::Anime => anime::delete_all_history(tx)?,
+                Kind::Manga => manga_history::remove_all(tx)?,
+                Kind::Anime => anime::delete_all_history(tx)?,
             };
             Ok(())
         });
@@ -225,11 +225,11 @@ impl HistoryRepo {
     }
 
     /// Deletes the rows that were reset ("Clear database" maintenance action).
-    pub fn remove_reset(&self, kind: EntryKind) -> Result<usize, DomainError> {
+    pub fn remove_reset(&self, kind: Kind) -> Result<usize, DomainError> {
         Ok(self.db.write(|tx| {
             Ok(match kind {
-                EntryKind::Manga => manga_history::remove_resetted(tx)?,
-                EntryKind::Anime => anime::remove_resetted_history(tx)?,
+                Kind::Manga => manga_history::remove_resetted(tx)?,
+                Kind::Anime => anime::remove_resetted_history(tx)?,
             })
         })?)
     }
@@ -274,7 +274,7 @@ mod tests {
     }
 
     fn list_ids(repo: &HistoryRepo) -> Vec<i64> {
-        repo.list(EntryKind::Manga, "").unwrap().iter().map(|r| r.item_id).collect()
+        repo.list(Kind::Manga, "").unwrap().iter().map(|r| r.item_id).collect()
     }
 
     #[test]
@@ -282,9 +282,9 @@ mod tests {
         let (_d, db) = manga_db();
         let (_m, c) = manga_with_chapters(&db, "M", 1);
         let repo = HistoryRepo::new(db.clone());
-        repo.upsert(EntryKind::Manga, c[0], 1000, 5000).unwrap();
-        repo.upsert(EntryKind::Manga, c[0], 2000, 3000).unwrap();
-        let rows = repo.by_entry(EntryKind::Manga, _m).unwrap();
+        repo.upsert(Kind::Manga, c[0], 1000, 5000).unwrap();
+        repo.upsert(Kind::Manga, c[0], 2000, 3000).unwrap();
+        let rows = repo.by_entry(Kind::Manga, _m).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].at, rows[0].time_read), (2000, 8000));
     }
@@ -295,15 +295,15 @@ mod tests {
         let (m, mc) = manga_with_chapters(&db, "M", 3);
         let (n, nc) = manga_with_chapters(&db, "N", 1);
         let repo = HistoryRepo::new(db.clone());
-        repo.upsert(EntryKind::Manga, mc[0], 1000, 0).unwrap();
-        repo.upsert(EntryKind::Manga, mc[1], 3000, 0).unwrap();
-        repo.upsert(EntryKind::Manga, nc[0], 2000, 0).unwrap();
+        repo.upsert(Kind::Manga, mc[0], 1000, 0).unwrap();
+        repo.upsert(Kind::Manga, mc[1], 3000, 0).unwrap();
+        repo.upsert(Kind::Manga, nc[0], 2000, 0).unwrap();
         assert_eq!(list_ids(&repo), vec![mc[1], nc[0]]);
-        let row2 = repo.by_entry(EntryKind::Manga, m).unwrap().into_iter().find(|r| r.item_id == mc[1]).unwrap();
-        repo.reset_one(EntryKind::Manga, row2.id).unwrap();
+        let row2 = repo.by_entry(Kind::Manga, m).unwrap().into_iter().find(|r| r.item_id == mc[1]).unwrap();
+        repo.reset_one(Kind::Manga, row2.id).unwrap();
         assert_eq!(list_ids(&repo), vec![nc[0], mc[0]]);
-        assert_eq!(repo.latest(EntryKind::Manga).unwrap().map(|r| r.item_id), Some(nc[0]));
-        repo.reset_entry(EntryKind::Manga, n).unwrap();
+        assert_eq!(repo.latest(Kind::Manga).unwrap().map(|r| r.item_id), Some(nc[0]));
+        repo.reset_entry(Kind::Manga, n).unwrap();
         assert_eq!(list_ids(&repo), vec![mc[0]]);
     }
 
@@ -313,9 +313,9 @@ mod tests {
         let (_a, ca) = manga_with_chapters(&db, "100% Real", 1);
         let (_b, cb) = manga_with_chapters(&db, "Other", 1);
         let repo = HistoryRepo::new(db.clone());
-        repo.upsert(EntryKind::Manga, ca[0], 1, 0).unwrap();
-        repo.upsert(EntryKind::Manga, cb[0], 2, 0).unwrap();
-        let hits = |q: &str| repo.list(EntryKind::Manga, q).unwrap().into_iter().map(|r| r.title).collect::<Vec<_>>();
+        repo.upsert(Kind::Manga, ca[0], 1, 0).unwrap();
+        repo.upsert(Kind::Manga, cb[0], 2, 0).unwrap();
+        let hits = |q: &str| repo.list(Kind::Manga, q).unwrap().into_iter().map(|r| r.title).collect::<Vec<_>>();
         assert_eq!(hits("100%"), vec!["100% Real"]);
         assert_eq!(hits("%"), vec!["100% Real"]);
         assert_eq!(hits("REAL"), vec!["100% Real"]);
@@ -327,14 +327,14 @@ mod tests {
         let (_d, db) = manga_db();
         let (_m, c) = manga_with_chapters(&db, "M", 4);
         let repo = HistoryRepo::new(db.clone());
-        repo.upsert(EntryKind::Manga, c[0], 1, 0).unwrap();
-        repo.upsert(EntryKind::Manga, c[1], 2, 5000).unwrap();
-        repo.upsert(EntryKind::Manga, c[2], 3, 7000).unwrap();
-        repo.upsert(EntryKind::Manga, c[3], 4, 3000).unwrap();
-        let reset = repo.by_entry(EntryKind::Manga, _m).unwrap().into_iter().find(|r| r.item_id == c[3]).unwrap();
-        repo.reset_one(EntryKind::Manga, reset.id).unwrap();
+        repo.upsert(Kind::Manga, c[0], 1, 0).unwrap();
+        repo.upsert(Kind::Manga, c[1], 2, 5000).unwrap();
+        repo.upsert(Kind::Manga, c[2], 3, 7000).unwrap();
+        repo.upsert(Kind::Manga, c[3], 4, 3000).unwrap();
+        let reset = repo.by_entry(Kind::Manga, _m).unwrap().into_iter().find(|r| r.item_id == c[3]).unwrap();
+        repo.reset_one(Kind::Manga, reset.id).unwrap();
         assert_eq!(repo.total_duration().unwrap(), 15000);
-        assert!(repo.clear_all(EntryKind::Manga));
+        assert!(repo.clear_all(Kind::Manga));
         assert_eq!(repo.total_duration().unwrap(), 0);
         assert!(list_ids(&repo).is_empty());
     }
@@ -344,7 +344,7 @@ mod tests {
         let (_d, db) = manga_db();
         let (_m, c) = manga_with_chapters(&db, "M", 1);
         let repo = HistoryRepo::new(db.clone());
-        repo.record_detached(HistoryUpdate { kind: EntryKind::Manga, item_id: c[0], at: 1000, session_ms: 4000 });
+        repo.record_detached(HistoryUpdate { kind: Kind::Manga, item_id: c[0], at: 1000, session_ms: 4000 });
         assert_eq!(join_pending_flushes(Duration::from_secs(2)), 0, "the flush finished inside the deadline");
         assert_eq!(repo.total_duration().unwrap(), 4000);
     }
@@ -353,8 +353,8 @@ mod tests {
     fn a_failing_record_is_swallowed_and_a_foreign_key_error_is_reported_by_upsert() {
         let (_d, db) = manga_db();
         let repo = HistoryRepo::new(db.clone());
-        assert!(repo.upsert(EntryKind::Manga, 999_999, 1, 0).is_err(), "chapter does not exist");
-        repo.record(HistoryUpdate { kind: EntryKind::Manga, item_id: 999_999, at: 1, session_ms: 0 });
+        assert!(repo.upsert(Kind::Manga, 999_999, 1, 0).is_err(), "chapter does not exist");
+        repo.record(HistoryUpdate { kind: Kind::Manga, item_id: 999_999, at: 1, session_ms: 0 });
     }
 
     #[test]
@@ -362,20 +362,20 @@ mod tests {
         let (_d, db) = manga_db();
         let (m, c) = manga_with_chapters(&db, "M", 6);
         let repo = HistoryRepo::new(db.clone());
-        repo.upsert(EntryKind::Manga, c[1], 10, 0).unwrap();
+        repo.upsert(Kind::Manga, c[1], 10, 0).unwrap();
         db.write(|tx| {
             tx.execute("UPDATE chapters SET read = 1 WHERE _id = ?1", [c[1]])?;
             Ok(())
         })
         .unwrap();
-        let after = crate::history::next_item::next_items(&db, EntryKind::Manga, m, Some(c[1]), false);
+        let after = crate::history::next_item::next_items(&db, Kind::Manga, m, Some(c[1]), false);
         let ids: Vec<i64> = after.iter().map(|i| i.id).collect();
         assert_eq!(ids, vec![c[2], c[3], c[4], c[5]], "the read anchor is dropped");
-        let pending = crate::history::next_item::next_items(&db, EntryKind::Manga, m, None, true);
+        let pending = crate::history::next_item::next_items(&db, Kind::Manga, m, None, true);
         assert_eq!(pending.len(), 5, "c1 is read");
-        let unknown = crate::history::next_item::next_items(&db, EntryKind::Manga, 999_999, None, true);
+        let unknown = crate::history::next_item::next_items(&db, Kind::Manga, 999_999, None, true);
         assert!(unknown.is_empty());
-        let last = crate::history::next_item::next_after_last_history(&db, EntryKind::Manga, false);
+        let last = crate::history::next_item::next_after_last_history(&db, Kind::Manga, false);
         assert_eq!(last.first().map(|i| i.id), Some(c[2]));
     }
 
@@ -401,18 +401,18 @@ mod tests {
             })
             .collect();
         let repo = HistoryRepo::new(db.clone());
-        repo.upsert(EntryKind::Anime, eps[0], 1000, 0).unwrap();
-        repo.upsert(EntryKind::Anime, eps[0], 2000, 0).unwrap();
-        repo.upsert(EntryKind::Anime, eps[1], 1500, 0).unwrap();
-        let rows = repo.list(EntryKind::Anime, "sho").unwrap();
+        repo.upsert(Kind::Anime, eps[0], 1000, 0).unwrap();
+        repo.upsert(Kind::Anime, eps[0], 2000, 0).unwrap();
+        repo.upsert(Kind::Anime, eps[1], 1500, 0).unwrap();
+        let rows = repo.list(Kind::Anime, "sho").unwrap();
         assert_eq!(rows.iter().map(|r| (r.item_id, r.at)).collect::<Vec<_>>(), vec![(eps[0], 2000)]);
-        assert_eq!(repo.by_entry(EntryKind::Anime, anime).unwrap().len(), 2);
-        assert_eq!(repo.latest(EntryKind::Anime).unwrap().map(|r| r.item_id), Some(eps[0]));
-        let newest = repo.by_entry(EntryKind::Anime, anime).unwrap().into_iter().find(|r| r.item_id == eps[0]).unwrap();
-        repo.reset_one(EntryKind::Anime, newest.id).unwrap();
-        assert_eq!(repo.list(EntryKind::Anime, "").unwrap().first().map(|r| r.item_id), Some(eps[1]));
-        repo.reset_entry(EntryKind::Anime, anime).unwrap();
-        assert!(repo.list(EntryKind::Anime, "").unwrap().is_empty());
-        assert!(repo.clear_all(EntryKind::Anime));
+        assert_eq!(repo.by_entry(Kind::Anime, anime).unwrap().len(), 2);
+        assert_eq!(repo.latest(Kind::Anime).unwrap().map(|r| r.item_id), Some(eps[0]));
+        let newest = repo.by_entry(Kind::Anime, anime).unwrap().into_iter().find(|r| r.item_id == eps[0]).unwrap();
+        repo.reset_one(Kind::Anime, newest.id).unwrap();
+        assert_eq!(repo.list(Kind::Anime, "").unwrap().first().map(|r| r.item_id), Some(eps[1]));
+        repo.reset_entry(Kind::Anime, anime).unwrap();
+        assert!(repo.list(Kind::Anime, "").unwrap().is_empty());
+        assert!(repo.clear_all(Kind::Anime));
     }
 }

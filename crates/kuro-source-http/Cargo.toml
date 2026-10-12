@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-async-trait = { workspace = true }
 bytes = { workspace = true }
 encoding_rs = { workspace = true }
 http = { workspace = true }
@@ -19,8 +18,4 @@ tokio = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
-kuro-platform = { workspace = true }
-kuro-prefs = { workspace = true }
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
-wiremock = { workspace = true }

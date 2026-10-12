@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_track::ctx::TrackCtx;
 use tokio::sync::watch;
 
@@ -27,15 +27,15 @@ fn current() -> Option<Arc<TrackCtx>> {
 
 /// The binder of one kind: every logged-in enhanced tracker that accepts the entry's source is matched and bound, on the
 /// shell's runtime and detached, so the add does not wait (B§5.2). Built on the GTK thread, where the shell is found.
-pub fn binder(kind: EntryKind) -> TrackerBinder {
+pub fn binder(kind: Kind) -> TrackerBinder {
     let runtime = crate::shell::host::Shell::get().map(|shell| shell.runtime().clone()).or_else(|| tokio::runtime::Handle::try_current().ok());
     Arc::new(move |id, title, source| {
         let (Some(ctx), Some(runtime)) = (current(), runtime.as_ref()) else { return };
         let (title, source) = (title.to_owned(), source.to_string());
         runtime.spawn(async move {
             let failures = match kind {
-                EntryKind::Anime => kuro_track::bind::bind_enhanced_anime(&ctx, id, &title, &source).await,
-                EntryKind::Manga => kuro_track::bind::bind_enhanced_manga(&ctx, id, &title, &source).await,
+                Kind::Anime => kuro_track::bind::bind_enhanced_anime(&ctx, id, &title, &source).await,
+                Kind::Manga => kuro_track::bind::bind_enhanced_manga(&ctx, id, &title, &source).await,
             };
             for (tracker, error) in failures {
                 tracing::warn!(entry = id, tracker = tracker.0, %error, "an enhanced tracker could not be bound");
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn without_a_tracking_context_the_binder_does_nothing() {
         // no context is installed in a unit test: the call must return without a runtime or a panic
-        binder(EntryKind::Anime)(1, "T", 2);
-        binder(EntryKind::Manga)(1, "T", 2);
+        binder(Kind::Anime)(1, "T", 2);
+        binder(Kind::Manga)(1, "T", 2);
     }
 }

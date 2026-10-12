@@ -2,12 +2,13 @@
 //! databases, the preference read over the app store, and the installed extension artifacts read from disk. All of it
 //! is GTK-free, so the GUI and `kurobayomi --run-backup` share it.
 
+use kuro_platform::kind::Kind;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use kuro_data::DataError;
 use kuro_data::anime::AnimeRepo;
-use kuro_data::category::{Category, CategoryKind, CategoryRepo};
+use kuro_data::category::{Category, CategoryRepo};
 use kuro_data::chapter::ChapterRepo;
 use kuro_data::episode::EpisodeRepo;
 use kuro_data::extension_repo::{ExtensionRepo, ExtensionRepoRepo};
@@ -41,7 +42,7 @@ impl DbLibrary {
         Ok(MangaEntry {
             chapters: ChapterRepo::new(self.manga.clone()).by_manga_id(id, false).map_err(read)?,
             excluded_scanlators: MangaRepo::new(self.manga.clone()).excluded_scanlators(id).map_err(read)?,
-            categories: CategoryRepo::new(self.manga.clone(), CategoryKind::Manga).by_entry(id).map_err(read)?,
+            categories: CategoryRepo::new(self.manga.clone(), Kind::Manga).by_entry(id).map_err(read)?,
             tracks: MangaTrackRepo::new(self.manga.clone()).by_entry(id).map_err(read)?,
             history: MangaHistoryRepo::new(self.manga.clone()).by_manga_id(id).map_err(read)?,
             manga,
@@ -52,7 +53,7 @@ impl DbLibrary {
         let id = anime.id;
         Ok(AnimeEntry {
             episodes: EpisodeRepo::new(self.anime.clone()).by_anime_id(id).map_err(read)?,
-            categories: CategoryRepo::new(self.anime.clone(), CategoryKind::Anime).by_entry(id).map_err(read)?,
+            categories: CategoryRepo::new(self.anime.clone(), Kind::Anime).by_entry(id).map_err(read)?,
             tracks: AnimeTrackRepo::new(self.anime.clone()).by_entry(id).map_err(read)?,
             history: AnimeHistoryRepo::new(self.anime.clone()).by_anime_id(id).map_err(read)?,
             anime,
@@ -103,11 +104,11 @@ impl LibraryReader for DbLibrary {
     }
 
     fn manga_categories(&self) -> Result<Vec<Category>, BackupError> {
-        CategoryRepo::new(self.manga.clone(), CategoryKind::Manga).all().map_err(read)
+        CategoryRepo::new(self.manga.clone(), Kind::Manga).all().map_err(read)
     }
 
     fn anime_categories(&self) -> Result<Vec<Category>, BackupError> {
-        CategoryRepo::new(self.anime.clone(), CategoryKind::Anime).all().map_err(read)
+        CategoryRepo::new(self.anime.clone(), Kind::Anime).all().map_err(read)
     }
 
     fn manga_extension_repos(&self) -> Result<Vec<ExtensionRepo>, BackupError> {
@@ -146,7 +147,7 @@ fn is_source_setting(key: &str) -> bool {
 impl SourcePrefStore for StorePrefs<'_> {
     // ponytail: no installed source declares settings yet, so no source is configurable; list them through the source
     // registry once the extension host runs sources.
-    fn configurable(&self, _anime: bool) -> Vec<(String, Vec<(String, PrefValue)>)> {
+    fn configurable(&self, _kind: Kind) -> Vec<(String, Vec<(String, PrefValue)>)> {
         Vec::new()
     }
 }
@@ -281,7 +282,7 @@ mod tests {
         assert!(all.contains(&("volume".to_owned(), PrefValue::Int(3))));
         assert!(!all.iter().any(|(k, _)| k == "source_1234.show"));
         assert!(all.iter().any(|(k, _)| k == "source_languages"), "an app setting that starts with source_ stays");
-        assert!(StorePrefs(&store).configurable(false).is_empty());
+        assert!(StorePrefs(&store).configurable(Kind::Manga).is_empty());
     }
 
     #[test]

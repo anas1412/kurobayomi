@@ -10,7 +10,7 @@ use kuro_data::track::{AnimeTrackRepo, MangaTrackRepo};
 use kuro_db::handle::Db;
 use kuro_domain::category::repo::CategoryRepo;
 use kuro_domain::error::DomainError;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::library::filter::LibraryFilters;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::page::BadgeSettings;
@@ -22,11 +22,11 @@ use crate::misc::diet_defaults as diet;
 use super::query::{Details, Request, Snapshot};
 
 /// Reads the categories, the library rows, the search fields and the tracks of one kind.
-pub fn snapshot(db: &Arc<Db>, kind: EntryKind) -> Result<Snapshot, DomainError> {
+pub fn snapshot(db: &Arc<Db>, kind: Kind) -> Result<Snapshot, DomainError> {
     let categories = CategoryRepo::new(db.clone(), kind).visible()?;
     let mut snap = Snapshot { categories, ..Snapshot::default() };
     match kind {
-        EntryKind::Manga => {
+        Kind::Manga => {
             for l in MangaRepo::new(db.clone()).library()? {
                 snap.rows.push(LibraryRow::from_manga(&l));
                 snap.details.insert(
@@ -43,7 +43,7 @@ pub fn snapshot(db: &Arc<Db>, kind: EntryKind) -> Result<Snapshot, DomainError> 
                 snap.tracks.entry(t.manga_id).or_default().push((t.tracker_id, t.score));
             }
         }
-        EntryKind::Anime => {
+        Kind::Anime => {
             for l in AnimeRepo::new(db.clone()).library()? {
                 snap.rows.push(LibraryRow::from_anime(&l));
                 snap.details.insert(
@@ -67,14 +67,14 @@ pub fn snapshot(db: &Arc<Db>, kind: EntryKind) -> Result<Snapshot, DomainError> 
 /// The filter preferences of one kind, plus the global downloaded-only switch and the logged-in trackers.
 pub fn filters(
     prefs: &LibraryPrefs,
-    kind: EntryKind,
+    kind: Kind,
     downloaded_only: bool,
     logged_in: &BTreeSet<i64>,
 ) -> LibraryFilters {
     // The Started, Bookmarked and interval filters are cut from the settings: they stay off.
     let (downloaded, unread, completed) = match kind {
-        EntryKind::Anime => (prefs.filter_downloaded_anime.get(), prefs.filter_unseen.get(), prefs.filter_completed_anime.get()),
-        EntryKind::Manga => (prefs.filter_downloaded_manga.get(), prefs.filter_unread.get(), prefs.filter_completed_manga.get()),
+        Kind::Anime => (prefs.filter_downloaded_anime.get(), prefs.filter_unseen.get(), prefs.filter_completed_anime.get()),
+        Kind::Manga => (prefs.filter_downloaded_manga.get(), prefs.filter_unread.get(), prefs.filter_completed_manga.get()),
     };
     let (downloaded, unread, completed) = (include_only(downloaded), include_only(unread), include_only(completed));
     let (started, bookmarked, interval_custom) = (TriState::DISABLED, TriState::DISABLED, TriState::DISABLED);
@@ -82,8 +82,8 @@ pub fn filters(
         .iter()
         .map(|id| {
             let state = match kind {
-                EntryKind::Anime => prefs.filter_tracked_anime(*id as i32).get(),
-                EntryKind::Manga => prefs.filter_tracked_manga(*id as i32).get(),
+                Kind::Anime => prefs.filter_tracked_anime(*id as i32).get(),
+                Kind::Manga => prefs.filter_tracked_manga(*id as i32).get(),
             };
             (*id, include_only(state))
         })
@@ -109,7 +109,7 @@ pub fn include_only(stored: TriState) -> TriState {
 
 /// Whether a preference change can alter the library pipeline or its layout for `kind` (D-3, D-6). Other keys,
 /// such as the remembered tab, do not reload the library.
-pub fn affects_library(kind: EntryKind, key: &str) -> bool {
+pub fn affects_library(kind: Kind, key: &str) -> bool {
     const SHARED: &[&str] = &[
         "pref_display_mode_library",
         "__APP_STATE_pref_downloaded_only",
@@ -132,8 +132,8 @@ pub fn affects_library(kind: EntryKind, key: &str) -> bool {
         return true;
     }
     match kind {
-        EntryKind::Anime => ANIME.contains(&key) || key.starts_with("pref_filter_animelib_tracked_"),
-        EntryKind::Manga => MANGA.contains(&key) || key.starts_with("pref_filter_library_tracked_"),
+        Kind::Anime => ANIME.contains(&key) || key.starts_with("pref_filter_animelib_tracked_"),
+        Kind::Manga => MANGA.contains(&key) || key.starts_with("pref_filter_library_tracked_"),
     }
 }
 
@@ -150,15 +150,12 @@ pub fn badges() -> BadgeSettings {
 /// The complete settings of one pass.
 pub fn request(
     prefs: &LibraryPrefs,
-    kind: EntryKind,
+    kind: Kind,
     downloaded_only: bool,
     logged_in: &BTreeSet<i64>,
     query: Option<String>,
 ) -> Request {
-    let random_seed = kuro_prefs::category::random_sort_seed(match kind {
-        EntryKind::Anime => kuro_prefs::category::CategoryKind::Anime,
-        EntryKind::Manga => kuro_prefs::category::CategoryKind::Manga,
-    });
+    let random_seed = kuro_prefs::category::random_sort_seed(kind);
     Request {
         kind,
         filters: filters(prefs, kind, downloaded_only, logged_in),
@@ -198,7 +195,7 @@ mod tests {
         let a = kuro_data::category::create_manga_category(&db, "a", 0).expect("category a");
         let b = kuro_data::category::create_manga_category(&db, "b", 0).expect("category b");
         repo.set_categories(id, &[a, b]).expect("link");
-        let snap = snapshot(&db, EntryKind::Manga).expect("snapshot");
+        let snap = snapshot(&db, Kind::Manga).expect("snapshot");
         assert_eq!(snap.rows.len(), 2);
         assert!(snap.rows.iter().all(|r| r.id == id && r.title == "Title"));
         assert_eq!(snap.details.get(&id).and_then(|d| d.author.clone()).as_deref(), Some("Someone"));
@@ -208,11 +205,11 @@ mod tests {
 
     #[test]
     fn only_library_keys_of_this_kind_reload_the_library() {
-        assert!(affects_library(EntryKind::Manga, "library_sorting_mode"));
-        assert!(!affects_library(EntryKind::Anime, "library_sorting_mode"));
-        assert!(affects_library(EntryKind::Anime, "pref_filter_animelib_tracked_3_v2"));
-        assert!(affects_library(EntryKind::Manga, "pref_display_mode_library"));
-        assert!(!affects_library(EntryKind::Manga, "__APP_STATE_last_used_category"));
+        assert!(affects_library(Kind::Manga, "library_sorting_mode"));
+        assert!(!affects_library(Kind::Anime, "library_sorting_mode"));
+        assert!(affects_library(Kind::Anime, "pref_filter_animelib_tracked_3_v2"));
+        assert!(affects_library(Kind::Manga, "pref_display_mode_library"));
+        assert!(!affects_library(Kind::Manga, "__APP_STATE_last_used_category"));
     }
 
     #[test]
@@ -223,7 +220,7 @@ mod tests {
         let prefs = LibraryPrefs::new(kuro_prefs::store::PrefStore::in_memory());
         prefs.filter_unread.set(TriState::ENABLED_NOT).expect("write");
         prefs.filter_tracked_manga(2).set(TriState::ENABLED_NOT).expect("write");
-        let f = filters(&prefs, EntryKind::Manga, false, &BTreeSet::from([2]));
+        let f = filters(&prefs, Kind::Manga, false, &BTreeSet::from([2]));
         assert_eq!(f.unread, TriState::DISABLED);
         assert_eq!(f.tracking.get(&2), Some(&TriState::DISABLED));
         assert!(!f.has_active(), "an old exclude value is no active filter");
@@ -233,7 +230,7 @@ mod tests {
     fn request_reads_the_default_preferences_as_disabled_filters_and_no_search() {
         let store = kuro_prefs::store::PrefStore::in_memory();
         let prefs = LibraryPrefs::new(store);
-        let req = request(&prefs, EntryKind::Manga, false, &BTreeSet::new(), None);
+        let req = request(&prefs, Kind::Manga, false, &BTreeSet::new(), None);
         assert_eq!(req.filters.unread, kuro_prefs::tristate::TriState::DISABLED);
         assert!(req.badges.unread && !req.badges.download);
         assert!(req.query.is_none());

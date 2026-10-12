@@ -18,6 +18,7 @@ use kuro_data::chapter::Chapter;
 use kuro_data::extension_repo::ExtensionRepo;
 use kuro_data::manga::Manga;
 use kuro_db::{schema_anime, schema_manga};
+use kuro_platform::kind::Kind;
 use kuro_prefs::store::PrefStore as Store;
 use kuro_prefs::values::PrefValue as Stored;
 use rusqlite::Connection;
@@ -113,8 +114,8 @@ impl PrefStore for Prefs {
     }
 }
 impl SourcePrefStore for Prefs {
-    fn configurable(&self, anime: bool) -> Vec<(String, Vec<(String, PrefValue)>)> {
-        if anime { Vec::new() } else { vec![("1234".into(), vec![("show_nsfw".into(), PrefValue::Boolean(true))])] }
+    fn configurable(&self, kind: Kind) -> Vec<(String, Vec<(String, PrefValue)>)> {
+        if kind.is_anime() { Vec::new() } else { vec![("1234".into(), vec![("show_nsfw".into(), PrefValue::Boolean(true))])] }
     }
 }
 

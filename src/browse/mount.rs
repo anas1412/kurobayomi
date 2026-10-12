@@ -18,7 +18,8 @@ use tokio::sync::watch;
 
 use super::glue;
 use super::lang_pages::SourcesFilterPage;
-use super::route::{BrowseKind, BrowsePage, BrowseRoute};
+use super::route::{BrowsePage, BrowseRoute};
+use kuro_platform::kind::Kind;
 use super::shell::{BrowseShell, ShellDeps};
 use super::sources_page::{SourcesNav, SourcesSnapshot};
 use crate::screens::Built;
@@ -50,14 +51,14 @@ pub fn take_add_request() -> bool {
 }
 
 /// The installed sources of a kind, as the Sources filter and the Sources page list them.
-pub fn installed_sources(kind: BrowseKind) -> Vec<Source> {
+pub fn installed_sources(kind: Kind) -> Vec<Source> {
     super::directory::current(kind).sources().into_iter().map(|entry| entry.source).collect()
 }
 
 /// What a Sources page shows of its preferences (T-40b-015) and the sources the directory of its kind lists. The pin and
 /// hide sets are cut, so the lists get none of them: the language filter alone decides which sources show. The extension
 /// host's anime packages ship icon files; the repository sources draw theirs from `recipe_sources::icon_path`.
-fn sources_snapshot(kind: BrowseKind, prefs: &SourcePrefs) -> SourcesSnapshot {
+fn sources_snapshot(kind: Kind, prefs: &SourcePrefs) -> SourcesSnapshot {
     let listed = super::directory::current(kind).sources();
     let home_urls = listed.iter().filter_map(|entry| Some((entry.source.id, entry.home_url.clone()?))).collect();
     SourcesSnapshot {
@@ -66,7 +67,7 @@ fn sources_snapshot(kind: BrowseKind, prefs: &SourcePrefs) -> SourcesSnapshot {
         disabled: BTreeSet::new(),
         pinned: BTreeSet::new(),
         last_used: crate::misc::diet_defaults::BROWSE_LAST_USED_SOURCE,
-        icon_files: if kind == BrowseKind::Anime { crate::ext_host::anime_sources().1 } else { BTreeMap::new() },
+        icon_files: if kind == Kind::Anime { crate::ext_host::anime_sources().1 } else { BTreeMap::new() },
         home_urls,
     }
 }
@@ -107,7 +108,7 @@ fn open_route(route: &BrowseRoute) {
 }
 
 /// The language filter of a kind's Sources page (B§4): one switch per language, which decides which sources show.
-fn open_filter(kind: BrowseKind, prefs: &Rc<SourcePrefs>) {
+fn open_filter(kind: Kind, prefs: &Rc<SourcePrefs>) {
     let filter = SourcesFilterPage::new(prefs.enabled_languages.clone());
     let sources_now = Rc::new(move || installed_sources(kind));
     filter.set_sources(sources_now());
@@ -132,7 +133,7 @@ fn open_filter(kind: BrowseKind, prefs: &Rc<SourcePrefs>) {
 /// The Sources page of `kind` over `snapshot`, which reads the directory and the prefs. It reads again each time the page
 /// is shown: the tab is built before the repository sources load, so the first read lists none of them. A change to the
 /// languages also reaches the open page (T-40b-015), and so does each finished load.
-fn sources_page(kind: BrowseKind, prefs: &Rc<SourcePrefs>, ready: watch::Receiver<bool>, snapshot: Rc<dyn Fn(&SourcePrefs) -> SourcesSnapshot>) -> super::sources_page::SourcesPage {
+fn sources_page(kind: Kind, prefs: &Rc<SourcePrefs>, ready: watch::Receiver<bool>, snapshot: Rc<dyn Fn(&SourcePrefs) -> SourcesSnapshot>) -> super::sources_page::SourcesPage {
     let nav = SourcesNav {
         open_listing: Rc::new(move |source_id, query| open_route(&BrowseRoute::BrowseSource { kind, source_id, query, migrating: false })),
         open_url: Rc::new(|url: &str| super::nav::open_external(url, None)),
@@ -166,8 +167,8 @@ pub fn browse() -> Option<Built> {
     let ready = crate::recipe_sources::ready();
 
     // Sources: the lists wait for the repository sources; the language filter decides which sources show
-    let kind_page = |kind: BrowseKind| sources_page(kind, &prefs, ready.clone(), Rc::new(move |prefs: &SourcePrefs| sources_snapshot(kind, prefs)));
-    let (anime_sources, manga_sources) = (kind_page(BrowseKind::Anime), kind_page(BrowseKind::Manga));
+    let kind_page = |kind: Kind| sources_page(kind, &prefs, ready.clone(), Rc::new(move |prefs: &SourcePrefs| sources_snapshot(kind, prefs)));
+    let (anime_sources, manga_sources) = (kind_page(Kind::Anime), kind_page(Kind::Manga));
 
     let pages: Vec<(BrowsePage, gtk::Widget)> = vec![
         (BrowsePage::AnimeSources, anime_sources.widget().clone().upcast()),
@@ -208,7 +209,7 @@ mod tests {
                 })
             };
             let (_ready_tx, ready) = watch::channel(true);
-            let page = sources_page(BrowseKind::Manga, &prefs, ready, read);
+            let page = sources_page(Kind::Manga, &prefs, ready, read);
             arrived.borrow_mut().push(Source::new(kuro_source::generate_id("Fixture", "en", 1), "Fixture", "en"));
             let window = gtk::Window::builder().default_width(600).default_height(600).child(page.widget()).build();
             window.present();
@@ -240,7 +241,7 @@ mod tests {
     #[test]
     fn the_empty_sources_action_names_the_repository_links() {
         crate::testing::with_display(|| {
-            for kind in [BrowseKind::Manga, BrowseKind::Anime] {
+            for kind in [Kind::Manga, Kind::Anime] {
                 let empty = super::super::sources_page::sources_empty();
                 let action = empty.last_child().and_downcast::<gtk::Button>().expect("the one action");
                 assert_eq!(action.label().as_deref(), Some(tr(MsgKey::label_extension_repos).as_str()), "{kind:?}");

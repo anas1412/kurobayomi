@@ -2,15 +2,10 @@
 //!
 //! `Navigator` is pure.
 
+use kuro_platform::kind::Kind;
+
 /// Duration of a forward or back slide, in milliseconds (T-36a-002).
 pub const TRANSITION_MS: u32 = 250;
-
-/// Kind of catalogue an entry or search belongs to (Kotlin `DeepLinkScreenType`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Anime,
-    Manga,
-}
 
 /// One page of the stack. Only `Home` is ever the root.
 #[derive(Clone, Debug, PartialEq, Eq)]

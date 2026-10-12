@@ -1,13 +1,14 @@
 //! Test support for this crate: temp-file databases, entry and item builders, fixture helpers and an
 //! injectable clock. Compiled only for tests.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use kuro_db::handle::Db;
 use tempfile::TempDir;
 
 use crate::anime::{Anime, AnimeRepo};
-use crate::category::{Category, CategoryKind, CategoryRepo};
+use crate::category::{Category, CategoryRepo};
 use crate::chapter::ChapterRepo;
 use crate::episode::EpisodeRepo;
 use crate::manga::{Manga, MangaRepo};
@@ -83,6 +84,6 @@ pub(crate) fn insert_episode(db: &Arc<Db>, anime_id: i64, url: &str) -> i64 {
 }
 
 /// Inserts one category of the given kind and returns its id.
-pub(crate) fn insert_category(db: &Arc<Db>, kind: CategoryKind, name: &str, order: i64) -> i64 {
+pub(crate) fn insert_category(db: &Arc<Db>, kind: Kind, name: &str, order: i64) -> i64 {
     CategoryRepo::new(Arc::clone(db), kind).insert(&category(name, order)).expect("insert category")
 }

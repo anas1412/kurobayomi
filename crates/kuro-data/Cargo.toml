@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 kuro-db = { path = "../kuro-db" }
+kuro-platform = { path = "../kuro-platform", default-features = false }
 rusqlite = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }

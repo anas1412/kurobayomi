@@ -1,10 +1,11 @@
 //! Mark-read tracking policy (`AutoTrackState.kt`, behaviour section 11).
 
+use kuro_platform::kind::Kind;
 use kuro_prefs::pref_enum;
 
 use crate::manager::TrackerManager;
 use crate::messages::MsgKey;
-use crate::model::{Kind, TrackerId};
+use crate::model::TrackerId;
 use crate::prefs::TrackPrefs;
 
 pref_enum! {

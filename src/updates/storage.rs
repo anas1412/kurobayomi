@@ -3,6 +3,7 @@
 //! category options, the donut arcs and the delete outcome.
 
 use std::collections::HashSet;
+use kuro_platform::kind::Kind;
 
 use crate::updates::copy;
 use crate::updates::format::format_size;
@@ -183,12 +184,12 @@ pub fn donut_arcs(snapshot: &StorageSnapshot) -> Vec<Arc> {
 }
 
 /// The count text of an entry row: "12 chapters", "1 episode" (`manga_num_chapters` / `anime_num_episodes`).
-pub fn count_text(anime: bool, count: i64) -> String {
-    let noun = match (anime, count) {
-        (false, 1) => "chapter",
-        (false, _) => "chapters",
-        (true, 1) => "episode",
-        (true, _) => "episodes",
+pub fn count_text(kind: Kind, count: i64) -> String {
+    let noun = match (kind, count) {
+        (Kind::Manga, 1) => "chapter",
+        (Kind::Manga, _) => "chapters",
+        (Kind::Anime, 1) => "episode",
+        (Kind::Anime, _) => "episodes",
     };
     format!("{count} {noun}")
 }
@@ -289,9 +290,9 @@ mod tests {
 
     #[test]
     fn storage_count_text_is_pluralised() {
-        assert_eq!(count_text(false, 1), "1 chapter");
-        assert_eq!(count_text(false, 12), "12 chapters");
-        assert_eq!(count_text(true, 0), "0 episodes");
+        assert_eq!(count_text(Kind::Manga, 1), "1 chapter");
+        assert_eq!(count_text(Kind::Manga, 12), "12 chapters");
+        assert_eq!(count_text(Kind::Anime, 0), "0 episodes");
     }
 
     #[test]

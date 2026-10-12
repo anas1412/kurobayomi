@@ -1,8 +1,9 @@
 //! `cache_key` for an `ArtRef` (area:34 behavior section 10) and the MD5 hex used for file names (behavior section 18.2).
 
+use kuro_platform::kind::Kind;
 use md5::{Digest, Md5};
 
-use crate::art::{ArtRef, Owner};
+use crate::art::ArtRef;
 
 /// Lower-case hex MD5 of the UTF-8 bytes (`DiskUtil.hashKeyForDisk`). Every file name derived from a key or a
 /// URL goes through this, so a key never becomes a path.
@@ -21,8 +22,8 @@ pub fn hash_key(s: &str) -> String {
 /// caller decides where that `stat` runs.
 pub fn cache_key(art: &ArtRef, custom_exists: bool) -> String {
     let owner = match art.owner {
-        Owner::Manga => "manga",
-        Owner::Anime => "anime",
+        Kind::Manga => "manga",
+        Kind::Anime => "anime",
     };
     if custom_exists {
         format!("{owner};{};{}", art.entry_id, art.last_modified)
@@ -40,7 +41,7 @@ mod tests {
     use super::*;
     use crate::art::ArtKind;
 
-    fn art(owner: Owner, kind: ArtKind, url: Option<&str>, lm: i64) -> ArtRef {
+    fn art(owner: Kind, kind: ArtKind, url: Option<&str>, lm: i64) -> ArtRef {
         ArtRef {
             owner,
             entry_id: 7,
@@ -74,27 +75,27 @@ mod tests {
 
     #[test]
     fn manga_custom_key_uses_id() {
-        let a = art(Owner::Manga, ArtKind::Cover, Some("U"), 100);
+        let a = art(Kind::Manga, ArtKind::Cover, Some("U"), 100);
         assert_eq!(cache_key(&a, true), "manga;7;100");
     }
 
     #[test]
     fn manga_thumbnail_key_uses_url() {
-        let a = art(Owner::Manga, ArtKind::Cover, Some("U"), 100);
+        let a = art(Kind::Manga, ArtKind::Cover, Some("U"), 100);
         assert_eq!(cache_key(&a, false), "manga;U;100");
-        let moved = art(Owner::Manga, ArtKind::Cover, Some("U"), 101);
+        let moved = art(Kind::Manga, ArtKind::Cover, Some("U"), 101);
         assert_ne!(cache_key(&a, false), cache_key(&moved, false));
     }
 
     #[test]
     fn null_url_renders_as_null() {
-        let a = art(Owner::Manga, ArtKind::Cover, None, 100);
+        let a = art(Kind::Manga, ArtKind::Cover, None, 100);
         assert_eq!(cache_key(&a, false), "manga;null;100");
     }
 
     #[test]
     fn anime_background_keys() {
-        let custom = art(Owner::Anime, ArtKind::Background, Some("B"), 300);
+        let custom = art(Kind::Anime, ArtKind::Background, Some("B"), 300);
         assert_eq!(cache_key(&custom, true), "anime;7;300");
         assert_eq!(cache_key(&custom, false), "anime;B;300");
     }
@@ -142,7 +143,7 @@ mod tests {
 
     #[test]
     fn anime_cover_key_branches() {
-        let a = art(Owner::Anime, ArtKind::Cover, Some("https://x/y.jpg"), 1);
+        let a = art(Kind::Anime, ArtKind::Cover, Some("https://x/y.jpg"), 1);
         assert!(cache_key(&a, false).starts_with("anime;https://x/y.jpg;"));
         assert!(cache_key(&a, true).starts_with("anime;7;"));
     }

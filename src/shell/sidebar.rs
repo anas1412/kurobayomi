@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{Box as GBox, Orientation as O, gio, glib};
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
 
 use crate::ui;
@@ -41,9 +41,9 @@ pub fn downloads_summary(percents: &[u8]) -> Option<(usize, u8)> {
 fn queued_percents() -> (Vec<u8>, usize) {
     let Some(queues) = crate::downloads::live::queues() else { return (Vec::new(), 0) };
     let manga = queues.manga.snapshot();
-    let mut units: Vec<(EntryKind, i64)> = manga.iter().map(|d| (EntryKind::Manga, d.chapter.id)).collect();
+    let mut units: Vec<(Kind, i64)> = manga.iter().map(|d| (Kind::Manga, d.chapter.id)).collect();
     if let Some(anime) = &queues.anime {
-        units.extend(anime.snapshot().iter().map(|d| (EntryKind::Anime, d.episode.id)));
+        units.extend(anime.snapshot().iter().map(|d| (Kind::Anime, d.episode.id)));
     }
     let states: Vec<_> = units.into_iter().map(|(kind, id)| crate::downloads::live::queued(&queues, kind, id)).collect();
     let failed = states.iter().filter(|s| matches!(s, Some((kuro_downloads::DownloadState::Error, _)))).count();

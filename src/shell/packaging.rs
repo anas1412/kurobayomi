@@ -69,6 +69,16 @@ Exec=kurobayomi --action=show-browse
         Command::new(tool).args(args).output().unwrap_or_else(|e| panic!("{tool} is required for this test: {e}")).status.success()
     }
 
+    /// xmllint is required on CI (`CI` set); elsewhere a missing tool skips the check with a note.
+    fn xmllint_available() -> bool {
+        if Command::new("xmllint").arg("--version").output().is_ok() {
+            return true;
+        }
+        assert!(std::env::var_os("CI").is_none(), "xmllint is required for this test on CI (libxml2-utils)");
+        eprintln!("skipping the xmllint check: xmllint is not installed (package libxml2-utils)");
+        false
+    }
+
     #[test]
     fn tc_53_36_the_desktop_entry_is_the_golden_copy_and_has_the_launch_keys() {
         assert_eq!(DESKTOP, DESKTOP_GOLDEN);
@@ -103,7 +113,9 @@ Exec=kurobayomi --action=show-browse
     #[test]
     fn tc_53_37_the_mime_file_declares_the_backup_type_and_the_entry_lists_it() {
         assert_eq!(MIME, MIME_GOLDEN);
-        assert!(run("xmllint", &["--noout", &data("io.github.anas1412.Kurobayomi.xml")]));
+        if xmllint_available() {
+            assert!(run("xmllint", &["--noout", &data("io.github.anas1412.Kurobayomi.xml")]));
+        }
         let mime_types = DESKTOP.lines().find_map(|l| l.strip_prefix("MimeType=")).unwrap_or_default();
         for t in ["application/x-tachibk", "x-scheme-handler/kurobayomi", "x-scheme-handler/aniyomi", "x-scheme-handler/tachiyomi"] {
             assert!(mime_types.split(';').any(|m| m == t), "{t}");

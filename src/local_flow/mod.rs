@@ -10,7 +10,7 @@ use kuro_data::DataResult;
 use kuro_data::anime::AnimeRepo;
 use kuro_data::manga::MangaRepo;
 use kuro_db::Db;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_local::LOCAL_SOURCE_ID;
 
 pub mod cover;
@@ -33,14 +33,14 @@ pub struct LocalRow {
 }
 
 /// The library entries of `kind` that came from a local folder.
-pub fn local_rows(db: &Arc<Db>, kind: EntryKind) -> DataResult<Vec<LocalRow>> {
+pub fn local_rows(db: &Arc<Db>, kind: Kind) -> DataResult<Vec<LocalRow>> {
     Ok(match kind {
-        EntryKind::Manga => MangaRepo::new(Arc::clone(db))
+        Kind::Manga => MangaRepo::new(Arc::clone(db))
             .favorites_by_source(LOCAL_SOURCE_ID)?
             .into_iter()
             .map(|m| LocalRow { id: m.id, title: m.title, url: m.url })
             .collect(),
-        EntryKind::Anime => AnimeRepo::new(Arc::clone(db))
+        Kind::Anime => AnimeRepo::new(Arc::clone(db))
             .favorites_by_source(LOCAL_SOURCE_ID)?
             .into_iter()
             .map(|a| LocalRow { id: a.id, title: a.title, url: a.url })

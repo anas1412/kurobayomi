@@ -2,6 +2,7 @@
 //! job: it takes the binding's lock, reads the stored binding, applies one edit through the remote setter, and
 //! stores the result. Dropping the handle does not cancel it, because the user already pressed OK.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use tokio::task::JoinHandle;
@@ -10,7 +11,7 @@ use crate::ctx::{TrackCtx, now_ms};
 use crate::detach::detached_locked;
 use crate::error::TrackError;
 use crate::events::TrackEvent;
-use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 use crate::remote::{
     set_anime_finish_date, set_anime_private, set_anime_score, set_anime_start_date,
     set_anime_status, set_last_chapter_read, set_last_episode_seen, set_manga_finish_date,

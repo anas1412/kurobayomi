@@ -7,6 +7,7 @@
 //! after it. A bind cancelled mid-flight drops this future, so the caller runs bind on a spawned task when it must
 //! finish (the GUI bridge, outside this crate).
 
+use kuro_platform::kind::Kind;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,7 +26,7 @@ use crate::base::{Field, SECRET_SERVICE, account};
 use crate::error::TrackError;
 use crate::messages::MsgKey;
 use crate::model::search::{AnimeTrackSearch, MangaTrackSearch};
-use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 use crate::tracker::{
     AnimeTracker, DeletableAnimeTracker, DeletableMangaTracker, LogoRef, MangaTracker, Tracker,
 };

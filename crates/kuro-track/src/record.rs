@@ -7,7 +7,8 @@
 //! not used, because `None` cannot be mistaken for a real id. The accessors below are the one way the flows read a
 //! field.
 
-use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use kuro_platform::kind::Kind;
+use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TrackRecord {

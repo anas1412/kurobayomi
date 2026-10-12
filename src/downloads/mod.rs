@@ -15,7 +15,7 @@ use std::sync::{Arc, RwLock};
 
 use kuro_db::handle::Db;
 use kuro_db::schema_manga;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::storage::StorageManager;
 use kuro_downloads::anime::manager::AnimeQueue;
 use kuro_downloads::downloader::{Connectivity, DownloadSettings, NoHold};
@@ -150,7 +150,7 @@ fn start_manga(
     shown: Arc<RwLock<Vec<Waiting>>>,
     cancels: mpsc::UnboundedReceiver<i64>,
 ) -> Result<(Arc<DownloadManager>, watch::Sender<Connectivity>), String> {
-    let root = storage.downloads_dir(EntryKind::Manga).map_err(|e| format!("the manga downloads folder is not available: {e}"))?;
+    let root = storage.downloads_dir(Kind::Manga).map_err(|e| format!("the manga downloads folder is not available: {e}"))?;
     let store = QueueStore::open(schema_manga::open_in_data_dir(paths).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let pending = MangaPendingStore::open(schema_manga::open_in_data_dir(paths).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let saved = saved_rows(&store);

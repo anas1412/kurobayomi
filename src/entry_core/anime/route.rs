@@ -21,7 +21,7 @@ use kuro_db::schema_anime::FetchType;
 use kuro_domain::entries::anime::AnimeExt;
 use kuro_domain::entries::defaults::{set_episode_settings_default, set_season_settings_default};
 use kuro_domain::entries::season_display::SeasonDisplayMode;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_downloads::DownloadState;
 use kuro_downloads::anime::layout::AnimeLayout;
 use kuro_i18n::{MsgKey, tr, tr_plural};
@@ -115,7 +115,7 @@ pub const NO_ENTRY: i64 = 0;
 fn page_for(anime_id: i64) -> GBox {
     crate::entry_core::tracking::session::refresh_from_host();
     let app = data::app();
-    let db = app.db(EntryKind::Anime);
+    let db = app.db(Kind::Anime);
     let prefs = app.base.store().clone();
     let show_airing = crate::misc::diet_defaults::ENTRY_SHOW_AIRING_TIME;
     let ctx = AnimeLoadContext {
@@ -125,7 +125,7 @@ fn page_for(anime_id: i64) -> GBox {
     };
     let handle = tokio::runtime::Handle::current();
     // the live sources of this build; an id it does not know reports that the source is not installed
-    let root = crate::settings_ui::storage::manager(&prefs).map(|storage| storage.downloads_path(EntryKind::Anime));
+    let root = crate::settings_ui::storage::manager(&prefs).map(|storage| storage.downloads_path(Kind::Anime));
     let downloads = AnimeDownloads::new(AnimeLayout::new(root), installed_queue());
     let backend: Arc<dyn AnimeBackend> =
         Arc::new(RemoteAnimeBackend::new(Arc::clone(&db), &prefs, Arc::new(LiveSources::new(live_anime_sources())), handle.clone()).with_downloads(downloads));
@@ -290,7 +290,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
         })),
     );
     let library = action_row.library.clone();
-    let list = ItemList::new(EntryKind::Anime, Callbacks {
+    let list = ItemList::new(Kind::Anime, Callbacks {
         on_row: {
             let weak = Rc::clone(&weak_view);
             Rc::new(move |id: i64, press: Press| {
@@ -592,7 +592,7 @@ fn assemble(runner: Rc<AnimeRunner>, show_airing: bool, env: Env) -> GBox {
     crate::downloads::live::follow(&page, {
         let weak = weak.clone();
         move |live| {
-            if live.kind == EntryKind::Anime
+            if live.kind == Kind::Anime
                 && let Some(view) = weak.upgrade()
             {
                 view.live_changed(live.id, live.state, live.percent);
@@ -1047,7 +1047,7 @@ impl View {
         let id = self.claim_slot(AnimeDialog::DuplicateAnime { anime_id, duplicate_id: duplicate.id });
         let window = duplicate_view::open(move |choice| match choice {
             Choice::ShowAnime => open(duplicate.id),
-            Choice::Migrate => handoff::open_migrate(MigrateRequest { entry_id: duplicate.id, anime: true, title: duplicate.title.clone() }),
+            Choice::Migrate => handoff::open_migrate(MigrateRequest { entry_id: duplicate.id, kind: Kind::Anime, title: duplicate.title.clone() }),
             Choice::AddAnyway => runner.send(AnimeCmd::AddToLibrary { anime_id, check_duplicates: false }),
         });
         self.adopt(id, &window, true);
@@ -1065,7 +1065,7 @@ impl View {
                     runner.send(AnimeCmd::ReadTracking { anime_id: id, source_id });
                 }
             };
-            crate::entry_core::tracking::page::open_sheet(crate::entry_core::tracking::page::Entry { kind: kuro_track::model::Kind::Anime, id, title }, changed);
+            crate::entry_core::tracking::page::open_sheet(crate::entry_core::tracking::page::Entry { kind: Kind::Anime, id, title }, changed);
         }
     }
 
@@ -1260,7 +1260,7 @@ impl View {
     fn open_source_preferences(self: &Rc<Self>) {
         let source_id = self.model.borrow().as_ref().filter(|m| m.accepts_dispatch()).map(|m| m.anime.source);
         if let Some(source_id) = source_id {
-            handoff::open_source_preferences(handoff::SourcePrefsRequest { source_id, anime: true });
+            handoff::open_source_preferences(handoff::SourcePrefsRequest { source_id, kind: Kind::Anime });
         }
     }
 
@@ -1271,7 +1271,7 @@ impl View {
             .borrow()
             .as_ref()
             .filter(|m| m.accepts_dispatch())
-            .map(|m| MigrateRequest { entry_id: m.anime.id, anime: true, title: m.anime.title.clone() });
+            .map(|m| MigrateRequest { entry_id: m.anime.id, kind: Kind::Anime, title: m.anime.title.clone() });
         if let Some(request) = request {
             handoff::open_migrate(request);
         }
@@ -1350,7 +1350,7 @@ impl View {
                         let source = view.model.borrow().as_ref().map(|m| m.anime.source);
                         source.is_some_and(|source| view.env.backend.is_http_source(source))
                     });
-                    handoff::open_search(request, true, http_source);
+                    handoff::open_search(request, Kind::Anime, http_source);
                 }
             }),
             on_copy: Rc::new(|text: String| {
@@ -1442,7 +1442,7 @@ impl View {
         match request {
             Request::Start => self.runner.send(AnimeCmd::Download { anime_id, ids: vec![id], start_now: false }),
             Request::Cancel => {
-                crate::downloads::live::cancel(EntryKind::Anime, id);
+                crate::downloads::live::cancel(Kind::Anime, id);
                 self.live_changed(id, DownloadState::NotDownloaded, 0);
             }
             Request::Delete => self.runner.send(AnimeCmd::DeleteEpisodeDownloads { anime_id, ids: vec![id] }),
@@ -1521,7 +1521,7 @@ impl View {
         if crate::player_view::open_source_episode(&live_anime_sources(), episode_id) {
             return;
         }
-        crate::screens::open_media(true, title, name);
+        crate::screens::open_media(Kind::Anime, title, name);
     }
 
     /// Logs a typed error and shows its text in the snackbar.

@@ -6,6 +6,7 @@
 use std::fs;
 use std::path::Path;
 
+use kuro_platform::kind::Kind;
 use kuro_source_wasm::HostEnv;
 
 use crate::error::LoadError;
@@ -45,12 +46,12 @@ pub enum RepoPlugin {
 pub async fn instantiate_repo_plugin(
     bytes: Vec<u8>,
     hosts: Vec<String>,
-    anime: bool,
+    kind: Kind,
     client: kuro_net::NetworkClient,
     prefs: kuro_prefs::store::PrefStore,
 ) -> Result<RepoPlugin, String> {
     let env = HostEnv { client, prefs };
-    let loaded = if anime {
+    let loaded = if kind.is_anime() {
         kuro_source_wasm::instantiate_anime(bytes, hosts, true, env).await.map(RepoPlugin::Anime)
     } else {
         kuro_source_wasm::instantiate(bytes, hosts, true, env).await.map(RepoPlugin::Manga)

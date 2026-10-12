@@ -1,16 +1,11 @@
-//! `ArtRef`, `ArtKind` and `Owner`: one input type for manga and anime covers (area:34 behavior section 4 and 10).
+//! `ArtRef`, `ArtKind` and `Kind`: one input type for manga and anime covers (area:34 behavior section 4 and 10).
 
+use kuro_platform::kind::Kind;
 use crate::cover_paths::Family;
 
 /// Source id of the local source, the same for manga and anime (`LocalMangaSource.ID`, `LocalAnimeSource.ID`).
 /// Local entries keep their images in the entry folder, so they are never fetched or deleted here.
 pub const LOCAL_SOURCE_ID: i64 = 0;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Owner {
-    Manga,
-    Anime,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArtKind {
@@ -26,7 +21,7 @@ pub enum ArtKind {
 /// set for an anime request with `use_background` (behavior section 4.2).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArtRef {
-    pub owner: Owner,
+    pub owner: Kind,
     pub entry_id: i64,
     pub source_id: i64,
     pub kind: ArtKind,
@@ -57,7 +52,7 @@ impl ArtRef {
             (ArtKind::Cover, cover)
         };
         Self {
-            owner: Owner::Anime,
+            owner: Kind::Anime,
             entry_id,
             source_id,
             kind,
@@ -71,9 +66,9 @@ impl ArtRef {
     /// manga cover family.
     pub fn family(&self) -> Family {
         match (self.owner, self.kind) {
-            (Owner::Anime, ArtKind::Background) => Family::AnimeBackground,
-            (Owner::Anime, ArtKind::Cover) => Family::AnimeCover,
-            (Owner::Manga, _) => Family::MangaCover,
+            (Kind::Anime, ArtKind::Background) => Family::AnimeBackground,
+            (Kind::Anime, ArtKind::Cover) => Family::AnimeCover,
+            (Kind::Manga, _) => Family::MangaCover,
         }
     }
 
@@ -86,7 +81,7 @@ impl ArtRef {
 mod tests {
     use super::*;
 
-    fn art(owner: Owner, kind: ArtKind, source_id: i64) -> ArtRef {
+    fn art(owner: Kind, kind: ArtKind, source_id: i64) -> ArtRef {
         ArtRef {
             owner,
             entry_id: 7,
@@ -101,15 +96,15 @@ mod tests {
     #[test]
     fn family_follows_owner_and_kind() {
         assert_eq!(
-            art(Owner::Manga, ArtKind::Cover, 1).family(),
+            art(Kind::Manga, ArtKind::Cover, 1).family(),
             Family::MangaCover
         );
         assert_eq!(
-            art(Owner::Anime, ArtKind::Cover, 1).family(),
+            art(Kind::Anime, ArtKind::Cover, 1).family(),
             Family::AnimeCover
         );
         assert_eq!(
-            art(Owner::Anime, ArtKind::Background, 1).family(),
+            art(Kind::Anime, ArtKind::Background, 1).family(),
             Family::AnimeBackground
         );
     }
@@ -133,7 +128,7 @@ mod tests {
 
     #[test]
     fn local_is_source_zero() {
-        assert!(art(Owner::Manga, ArtKind::Cover, LOCAL_SOURCE_ID).is_local());
-        assert!(!art(Owner::Manga, ArtKind::Cover, 42).is_local());
+        assert!(art(Kind::Manga, ArtKind::Cover, LOCAL_SOURCE_ID).is_local());
+        assert!(!art(Kind::Manga, ArtKind::Cover, 42).is_local());
     }
 }

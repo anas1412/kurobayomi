@@ -5,7 +5,7 @@
 //! between the two kinds. Here an entry id is FNV-1a over the kind and the entry id, and each kind has its own pass
 //! ids (progress, error, warning). Documented deviation: the shared ids of Kotlin are split per kind.
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::library_update::pass::EntryUpdate;
 use crate::library_update::source::SourceItem;
@@ -32,23 +32,23 @@ pub fn fnv1a(bytes: &[u8]) -> u32 {
     bytes.iter().fold(FNV_OFFSET, |hash, byte| (hash ^ u32::from(*byte)).wrapping_mul(FNV_PRIME))
 }
 
-fn kind_tag(kind: EntryKind) -> &'static str {
+fn kind_tag(kind: Kind) -> &'static str {
     match kind {
-        EntryKind::Manga => "manga",
-        EntryKind::Anime => "anime",
+        Kind::Manga => "manga",
+        Kind::Anime => "anime",
     }
 }
 
 /// The notification id of one entry: FNV-1a over the kind and the entry id, so a manga and an anime with the same id
 /// get different ids (P-11).
-pub fn entry_id(kind: EntryKind, entry_id: i64) -> u32 {
+pub fn entry_id(kind: Kind, entry_id: i64) -> u32 {
     let mut bytes = format!("{}:", kind_tag(kind)).into_bytes();
     bytes.extend_from_slice(&entry_id.to_be_bytes());
     fnv1a(&bytes)
 }
 
 /// The id of a pass notification (`channel` is one of the `*_CHANNEL` names) of one kind.
-pub fn pass_id(channel: &str, kind: EntryKind) -> u32 {
+pub fn pass_id(channel: &str, kind: Kind) -> u32 {
     fnv1a(format!("{channel}:{}", kind_tag(kind)).as_bytes())
 }
 
@@ -62,12 +62,12 @@ pub enum EntryAction {
 
 impl EntryAction {
     /// The button label of the action for `kind`.
-    pub fn label(self, kind: EntryKind) -> &'static str {
+    pub fn label(self, kind: Kind) -> &'static str {
         match (self, kind) {
-            (Self::MarkRead, EntryKind::Manga) => "Mark as read",
-            (Self::MarkRead, EntryKind::Anime) => "Mark as watched",
-            (Self::ViewItems, EntryKind::Manga) => "View chapters",
-            (Self::ViewItems, EntryKind::Anime) => "View episodes",
+            (Self::MarkRead, Kind::Manga) => "Mark as read",
+            (Self::MarkRead, Kind::Anime) => "Mark as watched",
+            (Self::ViewItems, Kind::Manga) => "View chapters",
+            (Self::ViewItems, Kind::Anime) => "View episodes",
             (Self::Download, _) => "Download",
         }
     }
@@ -91,14 +91,14 @@ pub fn newest_item(items: &[SourceItem]) -> Option<usize> {
 
 /// The per-entry notification of an update, or `None` when content is hidden (`hide_content` suppresses it entirely)
 /// or the entry has no new items.
-pub fn entry_notice(kind: EntryKind, update: &EntryUpdate, hide_content: bool) -> Option<EntryNotice> {
+pub fn entry_notice(kind: Kind, update: &EntryUpdate, hide_content: bool) -> Option<EntryNotice> {
     if hide_content || update.items.is_empty() {
         return None;
     }
     let numbers: Vec<f64> = update.items.iter().map(|item| item.number).collect();
     let limit = match kind {
-        EntryKind::Manga => MANGA_DOWNLOAD_ACTION_LIMIT,
-        EntryKind::Anime => ANIME_DOWNLOAD_ACTION_LIMIT,
+        Kind::Manga => MANGA_DOWNLOAD_ACTION_LIMIT,
+        Kind::Anime => ANIME_DOWNLOAD_ACTION_LIMIT,
     };
     let mut actions = vec![EntryAction::MarkRead, EntryAction::ViewItems];
     if update.items.len() <= limit {
@@ -147,23 +147,23 @@ mod tests {
     #[test]
     fn manga_and_anime_with_the_same_entry_id_get_different_ids() {
         // P-11: no collision between kinds in the fixture.
-        assert_ne!(entry_id(EntryKind::Manga, 7), entry_id(EntryKind::Anime, 7));
+        assert_ne!(entry_id(Kind::Manga, 7), entry_id(Kind::Anime, 7));
         let mut seen = std::collections::HashSet::new();
         for id in 0..1_000 {
-            assert!(seen.insert(entry_id(EntryKind::Manga, id)));
-            assert!(seen.insert(entry_id(EntryKind::Anime, id)));
+            assert!(seen.insert(entry_id(Kind::Manga, id)));
+            assert!(seen.insert(entry_id(Kind::Anime, id)));
         }
     }
 
     #[test]
     fn pass_ids_are_distinct_per_kind_and_per_channel() {
         let ids = [
-            pass_id(PROGRESS_CHANNEL, EntryKind::Manga),
-            pass_id(PROGRESS_CHANNEL, EntryKind::Anime),
-            pass_id(ERROR_CHANNEL, EntryKind::Manga),
-            pass_id(ERROR_CHANNEL, EntryKind::Anime),
-            pass_id(WARNING_CHANNEL, EntryKind::Manga),
-            pass_id(WARNING_CHANNEL, EntryKind::Anime),
+            pass_id(PROGRESS_CHANNEL, Kind::Manga),
+            pass_id(PROGRESS_CHANNEL, Kind::Anime),
+            pass_id(ERROR_CHANNEL, Kind::Manga),
+            pass_id(ERROR_CHANNEL, Kind::Anime),
+            pass_id(WARNING_CHANNEL, Kind::Manga),
+            pass_id(WARNING_CHANNEL, Kind::Anime),
         ];
         let unique: std::collections::HashSet<u32> = ids.iter().copied().collect();
         assert_eq!(unique.len(), ids.len());
@@ -172,29 +172,29 @@ mod tests {
     #[test]
     fn download_is_offered_up_to_the_kind_limit() {
         let fifteen: Vec<SourceItem> = (1..=15).map(|n| item(f64::from(n), 0)).collect();
-        let manga = entry_notice(EntryKind::Manga, &update(1, fifteen.clone()), false).expect("shown");
+        let manga = entry_notice(Kind::Manga, &update(1, fifteen.clone()), false).expect("shown");
         assert!(manga.actions.contains(&EntryAction::Download));
         let sixteen: Vec<SourceItem> = (1..=16).map(|n| item(f64::from(n), 0)).collect();
-        let too_many = entry_notice(EntryKind::Manga, &update(1, sixteen), false).expect("shown");
+        let too_many = entry_notice(Kind::Manga, &update(1, sixteen), false).expect("shown");
         assert!(!too_many.actions.contains(&EntryAction::Download));
         let eleven: Vec<SourceItem> = (1..=11).map(|n| item(f64::from(n), 0)).collect();
-        let anime = entry_notice(EntryKind::Anime, &update(1, eleven), false).expect("shown");
+        let anime = entry_notice(Kind::Anime, &update(1, eleven), false).expect("shown");
         assert!(!anime.actions.contains(&EntryAction::Download), "anime keeps 10 as its limit");
-        assert_eq!(anime.actions[0].label(EntryKind::Anime), "Mark as watched");
+        assert_eq!(anime.actions[0].label(Kind::Anime), "Mark as watched");
     }
 
     #[test]
     fn the_tap_opens_the_newest_new_item_not_the_oldest() {
         // P-8: source_order 0 is the newest; the first listed item is not necessarily it.
         let items = vec![item(5.0, 2), item(6.0, 0), item(4.0, 3)];
-        let notice = entry_notice(EntryKind::Manga, &update(1, items), false).expect("shown");
+        let notice = entry_notice(Kind::Manga, &update(1, items), false).expect("shown");
         assert_eq!(notice.tap_item, 1);
     }
 
     #[test]
     fn hidden_content_suppresses_the_entry_notification() {
-        assert!(entry_notice(EntryKind::Manga, &update(1, vec![item(1.0, 0)]), true).is_none());
-        assert!(entry_notice(EntryKind::Manga, &update(1, Vec::new()), false).is_none());
+        assert!(entry_notice(Kind::Manga, &update(1, vec![item(1.0, 0)]), true).is_none());
+        assert!(entry_notice(Kind::Manga, &update(1, Vec::new()), false).is_none());
     }
 
     #[test]

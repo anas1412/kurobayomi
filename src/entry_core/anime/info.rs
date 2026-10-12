@@ -4,6 +4,7 @@
 
 use kuro_data::anime::Anime;
 use kuro_i18n::{MsgKey, tr};
+use kuro_platform::kind::Kind;
 
 use crate::entry_core::detail::SourceInfo;
 use crate::entry_core::header::HeaderModel;
@@ -49,7 +50,7 @@ pub fn header_model(anime: &Anime, source: &SourceInfo) -> HeaderModel {
         chip.search.global = true;
     }
     model.with_cover(
-        kuro_images::art::Owner::Anime,
+        Kind::Anime,
         anime.id,
         anime.source,
         anime.thumbnail_url.as_deref(),

@@ -5,7 +5,7 @@
 use super::api::{EntryFields, EntryMatch};
 use super::error::KitsuError;
 use super::{COMPLETED, dates, score, status};
-use crate::model::Kind;
+use kuro_platform::kind::Kind;
 
 /// The personal fields of one library entry (`copyPersonalFrom` of the source).
 #[derive(Debug, Clone, Copy, PartialEq)]

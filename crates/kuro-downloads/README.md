@@ -17,13 +17,11 @@ notification delivery are injected by the GUI crate.
 | `index` | source, manga and chapter tree: scan, hourly renew, debounced snapshot |
 | `layout` | folder names and lookups (never creates folders, except `manga_dir`); the startup sweep of stray `_tmp` folders and `.cbz.part` files (T-23a-044) |
 | `queue_model` | pure queue model of the Download page: sections, stable sort and reverse, moves, series moves, removals (T-25a-020, T-25a-031) |
-| `page` | `DownloadPage` (one `QueueModel` and at most one engine subscription per kind, T-25a-032) and the pure rules of the Download page: FAB, sort menu, row menu, row text and progress phase, empty state, keyboard; `RowProgressGate` (one repaint per 50 ms per row) and `poll_for_pages` (600 ticks of 50 ms, then a warning) for the row loops (T-25a-021 to T-25a-030) |
 | `sanitize` | `build_valid_filename` port and the Windows reserved-name rule |
-| `store` | SQLite queue table, written whole in one transaction; `manager::restore_queue` reads it back at startup and `ManagerParams::restored` keeps the staging folders of restored chapters through the startup sweep (T-23a-044) |
+| `store` | SQLite queue table, written whole in one transaction; `DownloadManager::restore` takes the rows read back at startup and `ManagerParams::restored` keeps the staging folders of restored chapters through the startup sweep (T-23a-044) |
 | `notify` | pure event-to-notice mapping and the `NotificationSink` trait |
 | `events` | `DownloadEvent` (broadcast, capacity 64) |
-| `view_model` | manga queue view: source groups, counts, row progress, `Msg` per event (T-23a-032, T-23a-034) |
-| `throttle` | `ProgressThrottle`: one update per 50 ms per chapter (T-23a-034); `SpeedLimiter`: one shared byte budget for page downloads (T-23a-015) |
+| `throttle` | `SpeedLimiter`: one shared byte budget for page downloads (T-23a-015) |
 | `retry` | shared 4-attempt schedule, 2 s, 4 s, 8 s, with cancellable waits (T-24a-015) |
 | `anime::naming` | `fat_safe`, episode, legacy and source folder names (T-24a-004, T-24a-005) |
 | `anime::layout` | anime folder lookups, creation, episode and source rename, free-space precheck (T-24a-006 to T-24a-008, T-24a-017) |
@@ -43,7 +41,6 @@ notification delivery are injected by the GUI crate.
 | `anime::offline` | offline playback file choice and `file://` video (T-24a-039) |
 | `anime::torrent` | torrent links: `is_torrent`, the `link=`/`index=` to magnet conversion, `check_torrent` (`TorrentUnavailable` without the `torrent-server` feature) (T-24a-023) |
 | `anime::handoff` | external downloader: location copy with its label (T-24a-025), aria2 `addUri` request and a plain HTTP JSON-RPC post (T-24a-024); routed from `EpisodeEngine::run` through `ExternalHandoff` |
-| `anime::queue_view` | queue page rules: source groups, row text and bar, menu visibility and plans, drag rules (T-24a-040 to T-24a-043); sort helper, footer Stop/Continue, 200 ms rebuild gate (T-24a-044 to T-24a-046) |
 | `anime::downloader` | `EpisodeEngine`, the `EpisodeRunner` for one episode: staging, resume, retry, success check, finalise with collision handling; startup `sweep_staging` (T-24a-016, T-24a-049, T-24a-062, T-24a-066) |
 | `engine` | `QueueEngine` adapters for the two kinds (start, stop, pause_and_stop, clear, reorder, remove) (T-25a-017) |
 | `download_prefs` | typed download preferences: 23 accessors returning `Pref<T>` on the area 02 store (T-25a-001) |
@@ -52,7 +49,6 @@ notification delivery are injected by the GUI crate.
 | `local` | local manga source counts (directories and archives) and recursive size (T-23a-042) |
 | `redact` | log redaction: URL query, fragment and userinfo removed, header values replaced by `<redacted>` (T-24a-060) |
 | `comicinfo` | `ComicInfo.xml` writer: element order, number and status text, `Web` value (T-23a-021) |
-| `messages` | English texts and i18n keys of the new messages (T-24a-074) |
 | `settings` | download preference keys and defaults (`PREFERENCE_KEYS`, data section 3), speed limit KiB/s to bytes/s (T-24a-054, T-25a-002, T-25a-003, T-25a-005) |
 
 ## Decisions
@@ -97,7 +93,7 @@ notification delivery are injected by the GUI crate.
 - **Drag across sections (T-25a-028, E-34).** Decision: refused, as in Kotlin. `AnimeDownloadAdapter.shouldMove`
   returns true only when both rows have the same header, so a cross-section drop never reaches `onItemReleased`.
   The plan bullet ("cross-section drops are allowed") and E-34 assumed the opposite; the Kotlin behaviour wins by the
-  port rule, and `queue_view::drag_within_group` keeps returning `None` for a cross-group target. The plans are read-only
+  port rule. The plans are read-only
   here, so the bullet is not amended in place.
 - **Hidden notification content (T-23a-043, T-24a-028).** `NotifierSink` passes each notice through as built. The text
   rules (`effect_for`, `progress_notice`) already hide names under `hide_notification_content` ("Downloading (x/y)" or

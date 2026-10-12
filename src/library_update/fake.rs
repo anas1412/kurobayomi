@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::library_update::error::UpdateError;
 use crate::library_update::fetch_interval::Window;
@@ -35,7 +35,7 @@ pub fn entry(id: i64, source: i64, title: &str) -> LibraryEntry {
         source,
         url: format!("/{id}"),
         title: title.into(),
-        kind: EntryKind::Manga,
+        kind: Kind::Manga,
         category: 0,
         update_strategy: UpdateStrategy::AlwaysUpdate,
         status: 1,
@@ -74,7 +74,7 @@ impl FakeStore {
 }
 
 impl LibraryStore for FakeStore {
-    async fn library(&self, kind: EntryKind) -> Result<Vec<LibraryEntry>, UpdateError> {
+    async fn library(&self, kind: Kind) -> Result<Vec<LibraryEntry>, UpdateError> {
         if let Some(error) = &self.library_error {
             return Err(error.clone());
         }
@@ -85,7 +85,7 @@ impl LibraryStore for FakeStore {
         self.seasons.get(&parent_id).cloned().unwrap_or_default()
     }
 
-    async fn is_favorite(&self, id: i64, _kind: EntryKind) -> Result<bool, UpdateError> {
+    async fn is_favorite(&self, id: i64, _kind: Kind) -> Result<bool, UpdateError> {
         let check = self.checks.fetch_add(1, Ordering::SeqCst) + 1;
         if self.revoke_after_checks.is_some_and(|limit| check > limit) {
             return Ok(false);
@@ -93,11 +93,11 @@ impl LibraryStore for FakeStore {
         Ok(self.favorites.lock().unwrap().contains(&id))
     }
 
-    async fn categories(&self, id: i64, _kind: EntryKind) -> Result<Vec<i64>, UpdateError> {
+    async fn categories(&self, id: i64, _kind: Kind) -> Result<Vec<i64>, UpdateError> {
         Ok(self.categories.get(&id).cloned().unwrap_or_default())
     }
 
-    async fn read_numbers(&self, id: i64, _kind: EntryKind) -> Result<Vec<f64>, UpdateError> {
+    async fn read_numbers(&self, id: i64, _kind: Kind) -> Result<Vec<f64>, UpdateError> {
         Ok(self.read.get(&id).cloned().unwrap_or_default())
     }
 }
@@ -145,43 +145,43 @@ impl Host for FakeHost {
         self.last_timestamp.store(now_ms, Ordering::SeqCst);
     }
 
-    fn add_new_updates(&self, _kind: EntryKind, count: usize) {
+    fn add_new_updates(&self, _kind: Kind, count: usize) {
         self.added.fetch_add(count, Ordering::SeqCst);
     }
 
-    fn show_progress(&self, _kind: EntryKind, _title: &str, body: Option<&str>) {
+    fn show_progress(&self, _kind: Kind, _title: &str, body: Option<&str>) {
         self.progress_updates.fetch_add(1, Ordering::SeqCst);
         self.progress_bodies.lock().unwrap().push(body.map(str::to_owned));
     }
 
-    fn cancel_progress(&self, _kind: EntryKind) {
+    fn cancel_progress(&self, _kind: Kind) {
         self.cancelled_progress.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn show_summary(&self, _kind: EntryKind, updates: &[EntryUpdate], hide_content: bool) {
+    fn show_summary(&self, _kind: Kind, updates: &[EntryUpdate], hide_content: bool) {
         self.summaries.lock().unwrap().push(updates.to_vec());
         self.hidden_flags.lock().unwrap().push(hide_content);
     }
 
-    fn enqueue_downloads(&self, _kind: EntryKind, entry_id: i64, items: &[SourceItem]) {
+    fn enqueue_downloads(&self, _kind: Kind, entry_id: i64, items: &[SourceItem]) {
         self.enqueued.lock().unwrap().push((entry_id, items.len()));
     }
 
-    fn start_downloads(&self, _kind: EntryKind) {
+    fn start_downloads(&self, _kind: Kind) {
         self.starts.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn write_error_log(&self, _kind: EntryKind, failures: &[Failure]) -> Option<PathBuf> {
+    fn write_error_log(&self, _kind: Kind, failures: &[Failure]) -> Option<PathBuf> {
         self.logged.lock().unwrap().push(failures.to_vec());
         Some(PathBuf::from("update_errors.txt"))
     }
 
-    fn show_error(&self, _kind: EntryKind, failed: usize, log: Option<&Path>) {
+    fn show_error(&self, _kind: Kind, failed: usize, log: Option<&Path>) {
         self.errors.lock().unwrap().push(failed);
         self.error_logs.lock().unwrap().push(log.map(Path::to_path_buf));
     }
 
-    fn show_queue_warning(&self, _kind: EntryKind) {
+    fn show_queue_warning(&self, _kind: Kind) {
         self.queue_warnings.fetch_add(1, Ordering::SeqCst);
     }
 }

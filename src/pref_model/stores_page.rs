@@ -5,6 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use kuro_platform::kind::Kind;
 
 use gtk::gio;
 use gtk::glib;
@@ -362,7 +363,7 @@ impl<T: Keyed + Send + 'static> Inner<T> {
                             reload_extensions();
                             // the new sources are what the user came for: show them, and let the library swap its
                             // welcome view for the 'search in Browse' one
-                            for kind in [kuro_domain::kind::EntryKind::Manga, kuro_domain::kind::EntryKind::Anime] {
+                            for kind in [Kind::Manga, Kind::Anime] {
                                 crate::library::mount::refresh(kind);
                             }
                             crate::ui::open("browse");

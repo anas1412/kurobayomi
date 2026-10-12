@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use kuro_domain::category::model::Category;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::library::active::clamp_page;
 use kuro_domain::library::filter::LibraryFilters;
 use kuro_domain::library::model::LibraryRow;
@@ -30,7 +30,7 @@ fn facts(downloads: i64) -> Facts {
 
 fn request() -> Request {
     Request {
-        kind: EntryKind::Manga,
+        kind: Kind::Manga,
         filters: LibraryFilters::default(),
         badges: BadgeSettings::default(),
         query: None,

@@ -168,13 +168,13 @@ pub fn press(gesture: Gesture, selection: &mut Selection, rows: &mut [FeedRow], 
 
 #[cfg(test)]
 mod tests {
-    use kuro_domain::kind::EntryKind;
+    use kuro_platform::kind::Kind;
 
     use super::*;
 
     fn update(id: i64) -> UpdateRow {
         UpdateRow {
-            kind: EntryKind::Manga,
+            kind: Kind::Manga,
             entry_id: 1,
             entry_title: "T".into(),
             item_id: id,

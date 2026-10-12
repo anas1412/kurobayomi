@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_prefs::Prefs;
 use kuro_prefs::pref::Pref;
 
@@ -46,12 +46,12 @@ impl<H: Host> Host for PrefsHost<H> {
         self.inner.set_last_update_ms(now_ms);
     }
 
-    fn add_new_updates(&self, kind: EntryKind, count: usize) {
+    fn add_new_updates(&self, kind: Kind, count: usize) {
         let _guard = self.counters.lock().unwrap_or_else(|p| p.into_inner());
         let add = i32::try_from(count).unwrap_or(i32::MAX);
         let (pref, name) = match kind {
-            EntryKind::Manga => (&self.manga_count, "manga"),
-            EntryKind::Anime => (&self.anime_count, "anime"),
+            Kind::Manga => (&self.manga_count, "manga"),
+            Kind::Anime => (&self.anime_count, "anime"),
         };
         if let Err(error) = pref.set(pref.get().saturating_add(add)) {
             tracing::warn!(%error, name, "could not save the library update counter");
@@ -59,35 +59,35 @@ impl<H: Host> Host for PrefsHost<H> {
         self.inner.add_new_updates(kind, count);
     }
 
-    fn show_progress(&self, kind: EntryKind, title: &str, body: Option<&str>) {
+    fn show_progress(&self, kind: Kind, title: &str, body: Option<&str>) {
         self.inner.show_progress(kind, title, body);
     }
 
-    fn cancel_progress(&self, kind: EntryKind) {
+    fn cancel_progress(&self, kind: Kind) {
         self.inner.cancel_progress(kind);
     }
 
-    fn show_summary(&self, kind: EntryKind, updates: &[EntryUpdate], hide_content: bool) {
+    fn show_summary(&self, kind: Kind, updates: &[EntryUpdate], hide_content: bool) {
         self.inner.show_summary(kind, updates, hide_content);
     }
 
-    fn enqueue_downloads(&self, kind: EntryKind, entry_id: i64, items: &[SourceItem]) {
+    fn enqueue_downloads(&self, kind: Kind, entry_id: i64, items: &[SourceItem]) {
         self.inner.enqueue_downloads(kind, entry_id, items);
     }
 
-    fn start_downloads(&self, kind: EntryKind) {
+    fn start_downloads(&self, kind: Kind) {
         self.inner.start_downloads(kind);
     }
 
-    fn write_error_log(&self, kind: EntryKind, failures: &[Failure]) -> Option<PathBuf> {
+    fn write_error_log(&self, kind: Kind, failures: &[Failure]) -> Option<PathBuf> {
         self.inner.write_error_log(kind, failures)
     }
 
-    fn show_error(&self, kind: EntryKind, failed: usize, log: Option<&Path>) {
+    fn show_error(&self, kind: Kind, failed: usize, log: Option<&Path>) {
         self.inner.show_error(kind, failed, log);
     }
 
-    fn show_queue_warning(&self, kind: EntryKind) {
+    fn show_queue_warning(&self, kind: Kind) {
         self.inner.show_queue_warning(kind);
     }
 }
@@ -109,7 +109,7 @@ mod tests {
         PassRunner::new(Deps { registry, store, sync: FakeSync::default(), host })
     }
 
-    fn settings(kind: EntryKind) -> PassSettings {
+    fn settings(kind: Kind) -> PassSettings {
         PassSettings { restrictions: QueueRestrictions::default(), ..PassSettings::new(kind) }
     }
 
@@ -121,7 +121,7 @@ mod tests {
         registry.sources.insert(1, FakeSource::ok(vec![item(1.0, 0), item(2.0, 1)]));
         let store = FakeStore::with(vec![entry(1, 1, "A"), entry(2, 1, "B")]);
         let runner = run(&prefs, store, registry);
-        runner.run(settings(EntryKind::Manga), Trigger::Manual).await;
+        runner.run(settings(Kind::Manga), Trigger::Manual).await;
         assert_eq!(prefs.library.new_manga_updates_count.get(), 4 + 4);
         assert_eq!(prefs.library.new_anime_updates_count.get(), 0);
         assert!(prefs.library.last_updated_timestamp.get() > 0);
@@ -131,7 +131,7 @@ mod tests {
     async fn an_empty_pass_still_stores_the_timestamp_and_leaves_the_counters() {
         let prefs = Prefs::in_memory();
         let runner = run(&prefs, FakeStore::default(), FakeRegistry::default());
-        runner.run(settings(EntryKind::Manga), Trigger::Manual).await;
+        runner.run(settings(Kind::Manga), Trigger::Manual).await;
         assert!(prefs.library.last_updated_timestamp.get() > 0);
         assert_eq!(prefs.library.new_manga_updates_count.get(), 0);
     }
@@ -140,8 +140,8 @@ mod tests {
     fn anime_updates_add_to_the_unseen_counter_only() {
         let prefs = Prefs::in_memory();
         let host = PrefsHost::new(FakeHost::default(), &prefs);
-        host.add_new_updates(EntryKind::Anime, 3);
-        host.add_new_updates(EntryKind::Anime, 2);
+        host.add_new_updates(Kind::Anime, 3);
+        host.add_new_updates(Kind::Anime, 2);
         assert_eq!(prefs.library.new_anime_updates_count.get(), 5);
         assert_eq!(prefs.library.new_manga_updates_count.get(), 0);
         host.set_last_update_ms(1234);

@@ -4,14 +4,9 @@
 
 use std::path::PathBuf;
 
-use kuro_data::episode::Episode;
 use kuro_domain::entries::anime::episode_flags as flags;
 use kuro_player::aniskip::{TrackerRef, parse_mal_id, parse_skip_times, resolve_mal_id};
-use kuro_player::aspect::aspect_property_writes;
 use kuro_player::chapters;
-use kuro_player::enums::VideoAspect;
-use kuro_player::intro_length::{effective_length, is_disabled, stored_length, with_length};
-use kuro_player::playlist;
 use kuro_player::progress::on_second;
 use kuro_player::seek::{absolute_flag, relative_flag};
 use kuro_player::track_select::{TrackCandidate, TrackPrefs, prefer_index, preferred_track};
@@ -30,119 +25,6 @@ fn fixture(name: &str) -> String {
 
 fn json(name: &str) -> Value {
     serde_json::from_str(&fixture(name)).expect("fixture is valid JSON")
-}
-
-/// The 20 episodes of `episodes_20.json` with their download state.
-fn episodes() -> Vec<(Episode, bool)> {
-    json("episodes_20.json")
-        .as_array()
-        .expect("array")
-        .iter()
-        .map(|e| {
-            let episode = Episode {
-                id: e["id"].as_i64().unwrap(),
-                source_order: e["source_order"].as_i64().unwrap(),
-                episode_number: e["episode_number"].as_f64().unwrap(),
-                name: e["name"].as_str().unwrap().to_owned(),
-                seen: e["seen"].as_bool().unwrap(),
-                bookmark: e["bookmark"].as_bool().unwrap(),
-                fillermark: e["fillermark"].as_bool().unwrap(),
-                ..Episode::create()
-            };
-            (episode, e["downloaded"].as_bool().unwrap())
-        })
-        .collect()
-}
-
-fn list() -> Vec<Episode> {
-    episodes().into_iter().map(|(e, _)| e).collect()
-}
-
-fn is_downloaded(episode: &Episode) -> bool {
-    episodes()
-        .into_iter()
-        .any(|(e, downloaded)| e.id == episode.id && downloaded)
-}
-
-fn filter_flags(name: &str) -> i64 {
-    json("anime_flags.json")["filters"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|f| f["name"] == name)
-        .unwrap_or_else(|| panic!("no filter named {name}"))["episode_flags"]
-        .as_i64()
-        .unwrap()
-}
-
-fn ids(episodes: &[Episode]) -> Vec<i64> {
-    episodes.iter().map(|e| e.id).collect()
-}
-
-fn none(_: &Episode) -> bool {
-    false
-}
-
-// 4.2 filter
-
-#[test]
-fn t6_filter_unseen() {
-    let out = playlist::filter(&list(), filter_flags("unseen"), 1, none).unwrap();
-    assert!(!out.is_empty());
-    assert!(out.iter().all(|e| !e.seen), "only unseen episodes are kept");
-    assert_eq!(out.len(), 20 - 6, "episodes 3, 6, ... 18 are seen");
-}
-
-#[test]
-fn t7_filter_downloaded_not() {
-    let out = playlist::filter(&list(), filter_flags("downloaded_not"), 1, is_downloaded).unwrap();
-    assert!(out.iter().all(|e| !is_downloaded(e)));
-    assert_eq!(out.len(), 10);
-}
-
-#[test]
-fn t8_selected_always_kept() {
-    // Show-seen hides the unseen episodes, and the selected episode 1 is unseen.
-    let out = playlist::filter(&list(), filter_flags("show_seen"), 1, none).unwrap();
-    assert_eq!(out.last().map(|e| e.id), Some(1));
-    assert!(out[..out.len() - 1].iter().all(|e| e.seen));
-}
-
-#[test]
-fn t9_missing_selected_is_an_error() {
-    assert_eq!(playlist::filter(&list(), 0, 99, none), None);
-}
-
-#[test]
-fn t10_combined_filters_remove_an_episode_that_violates_any_clause() {
-    let flags = filter_flags("unseen_and_bookmarked");
-    assert_eq!(flags, flags::SHOW_UNSEEN | flags::SHOW_BOOKMARKED);
-    // Episode 4 is unseen and bookmarked, so it can be the selected one.
-    let out = playlist::filter(&list(), flags, 4, none).unwrap();
-    assert_eq!(ids(&out), vec![4, 8, 16, 20]);
-    assert!(out.iter().all(|e| !e.seen && e.bookmark));
-}
-
-// 4.3 build on the 20-episode fixture
-
-#[test]
-fn t11_fixture_source_order_is_inverted() {
-    let out = playlist::build(&list(), flags::SORTING_SOURCE, false, none).unwrap();
-    assert_eq!(ids(&out), (1..=20).rev().collect::<Vec<_>>());
-}
-
-#[test]
-fn t12_fixture_number_order_is_ascending() {
-    let out = playlist::build(&list(), flags::SORTING_NUMBER, false, none).unwrap();
-    let numbers: Vec<f64> = out.iter().map(|e| e.episode_number).collect();
-    assert!(numbers.windows(2).all(|w| w[0] <= w[1]), "{numbers:?}");
-}
-
-#[test]
-fn t13_fixture_downloaded_only_keeps_the_downloaded() {
-    let out = playlist::build(&list(), flags::SORTING_NUMBER, true, is_downloaded).unwrap();
-    assert_eq!(out.len(), 10);
-    assert!(out.iter().all(is_downloaded));
 }
 
 // 4.4 TrackSelect on the mixed track list
@@ -364,32 +246,6 @@ fn t42_seek_to_flags() {
     assert_eq!(absolute_flag(false), "absolute+keyframes");
 }
 
-// 4.10 aspect
-
-#[test]
-fn t50_fit_sets_panscan_zero_and_override_minus_one() {
-    assert_eq!(
-        aspect_property_writes(VideoAspect::Fit, 1.5),
-        [("panscan", 0.0), ("video-aspect-override", -1.0)]
-    );
-}
-
-#[test]
-fn t51_crop_sets_panscan_one() {
-    assert_eq!(
-        aspect_property_writes(VideoAspect::Crop, 1.5),
-        [("panscan", 1.0), ("video-aspect-override", -1.0)]
-    );
-}
-
-#[test]
-fn t52_stretch_uses_the_monitor_ratio() {
-    let [pan, ratio] = aspect_property_writes(VideoAspect::Stretch, 1920.0 / 1080.0);
-    assert_eq!(pan, ("panscan", 0.0));
-    assert_eq!(ratio.0, "video-aspect-override");
-    assert!((ratio.1 - 1.7777).abs() < 0.001);
-}
-
 // 4.11 completion threshold
 
 #[test]
@@ -400,25 +256,6 @@ fn t53_completion_threshold_is_eighty_five_percent() {
 }
 
 // 4.15 flags and masks
-
-#[test]
-fn t77_intro_length_mask_round_trips() {
-    let written = with_length(0, 85);
-    assert_eq!(stored_length(written), 85);
-    assert_eq!(effective_length(Some(written), 85), 85);
-    let disabled = with_length(0, 0);
-    assert!(is_disabled(disabled));
-    assert_eq!(effective_length(Some(disabled), 85), 0);
-    assert_eq!(
-        with_length(
-            0,
-            json("anime_flags.json")["viewer"]["intro_length_85"]
-                .as_i64()
-                .unwrap()
-        ),
-        written
-    );
-}
 
 #[test]
 fn t79_episode_flag_masks_match_the_source_values() {

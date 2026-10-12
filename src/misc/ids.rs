@@ -5,7 +5,7 @@
 //! Decision: the registry lives in `misc` because `src/notify` is not part of this lane; the ids are the strings of
 //! p1-rust-design.md 3.2. A per-entry slot (one notice per manga or anime) is the base id plus `:` and the entry id.
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 pub const APP_UPDATE_PROGRESS: &str = "app-update.progress";
 pub const APP_UPDATE_INSTALL: &str = "app-update.install";
@@ -117,39 +117,39 @@ impl Category {
     }
 }
 
-fn kind_tag(kind: EntryKind) -> &'static str {
+fn kind_tag(kind: Kind) -> &'static str {
     match kind {
-        EntryKind::Manga => "manga",
-        EntryKind::Anime => "anime",
+        Kind::Manga => "manga",
+        Kind::Anime => "anime",
     }
 }
 
 /// The slot of the "new chapters / episodes" notice of one entry.
-pub fn new_items(kind: EntryKind, entry_id: i64) -> String {
+pub fn new_items(kind: Kind, entry_id: i64) -> String {
     let base = match kind {
-        EntryKind::Manga => NEW_CHAPTERS,
-        EntryKind::Anime => NEW_EPISODES,
+        Kind::Manga => NEW_CHAPTERS,
+        Kind::Anime => NEW_EPISODES,
     };
     format!("{base}:{entry_id}")
 }
 
 /// The slot of the failure notice of one pass. The two kinds keep apart slots so one pass never replaces the other's.
-pub fn library_error(kind: EntryKind) -> String {
+pub fn library_error(kind: Kind) -> String {
     format!("{LIBRARY_ERROR}:{}", kind_tag(kind))
 }
 
 /// The slot of the large-queue warning of one pass.
-pub fn library_size_warning(kind: EntryKind) -> String {
+pub fn library_size_warning(kind: Kind) -> String {
     format!("{LIBRARY_SIZE_WARNING}:{}", kind_tag(kind))
 }
 
 /// The slot of the summary notice of one update pass: the new items of all its entries.
-pub fn library_summary(kind: EntryKind) -> String {
+pub fn library_summary(kind: Kind) -> String {
     format!("{LIBRARY_SUMMARY}:{}", kind_tag(kind))
 }
 
 /// The slot of the progress notice of one update pass (T-26a-054 shares it with the update passes).
-pub fn library_progress(kind: EntryKind) -> String {
+pub fn library_progress(kind: Kind) -> String {
     format!("{LIBRARY_PROGRESS}:{}", kind_tag(kind))
 }
 
@@ -160,9 +160,9 @@ mod tests {
     #[test]
     fn every_category_id_has_a_category_and_backup_complete_is_high() {
         // T-35a-080, T-35a-081, T-35a-082
-        assert_eq!(Category::of(&library_progress(EntryKind::Manga)), Some(Category::LibraryProgress));
-        assert_eq!(Category::of(&library_error(EntryKind::Anime)), Some(Category::LibraryErrors));
-        assert_eq!(Category::of(&new_items(EntryKind::Anime, 3)), Some(Category::NewChapters));
+        assert_eq!(Category::of(&library_progress(Kind::Manga)), Some(Category::LibraryProgress));
+        assert_eq!(Category::of(&library_error(Kind::Anime)), Some(Category::LibraryErrors));
+        assert_eq!(Category::of(&new_items(Kind::Anime, 3)), Some(Category::NewChapters));
         assert_eq!(Category::of(DOWNLOAD_ANIME_ERROR), Some(Category::DownloadErrors));
         assert_eq!(Category::of(RESTORE_COMPLETE), Some(Category::BackupComplete));
         assert_eq!(Category::of(APP_UPDATE_INSTALL), Some(Category::AppUpdate));
@@ -192,14 +192,14 @@ mod tests {
 
     #[test]
     fn the_library_producers_build_their_slots_from_registry_ids() {
-        assert_eq!(new_items(EntryKind::Manga, 7), "new.chapters:7");
-        assert_eq!(new_items(EntryKind::Anime, 7), "new.episodes:7");
-        assert_ne!(new_items(EntryKind::Manga, 7), new_items(EntryKind::Anime, 7));
-        assert_ne!(library_error(EntryKind::Manga), library_error(EntryKind::Anime));
-        assert_ne!(library_size_warning(EntryKind::Manga), library_size_warning(EntryKind::Anime));
-        assert!(library_error(EntryKind::Manga).starts_with(LIBRARY_ERROR));
-        assert!(library_size_warning(EntryKind::Anime).starts_with(LIBRARY_SIZE_WARNING));
-        assert_ne!(library_progress(EntryKind::Manga), library_progress(EntryKind::Anime));
-        assert!(library_progress(EntryKind::Manga).starts_with(LIBRARY_PROGRESS));
+        assert_eq!(new_items(Kind::Manga, 7), "new.chapters:7");
+        assert_eq!(new_items(Kind::Anime, 7), "new.episodes:7");
+        assert_ne!(new_items(Kind::Manga, 7), new_items(Kind::Anime, 7));
+        assert_ne!(library_error(Kind::Manga), library_error(Kind::Anime));
+        assert_ne!(library_size_warning(Kind::Manga), library_size_warning(Kind::Anime));
+        assert!(library_error(Kind::Manga).starts_with(LIBRARY_ERROR));
+        assert!(library_size_warning(Kind::Anime).starts_with(LIBRARY_SIZE_WARNING));
+        assert_ne!(library_progress(Kind::Manga), library_progress(Kind::Anime));
+        assert!(library_progress(Kind::Manga).starts_with(LIBRARY_PROGRESS));
     }
 }

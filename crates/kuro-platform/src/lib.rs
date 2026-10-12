@@ -78,6 +78,7 @@ pub mod dropped;
 pub mod external_player;
 pub mod idle;
 pub mod incognito;
+pub mod kind;
 pub mod lifecycle;
 pub mod links;
 pub mod media;

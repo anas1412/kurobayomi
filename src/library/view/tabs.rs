@@ -1,4 +1,5 @@
-//! The category tab strip (T-37a-016): one toggle button per visible page, in a horizontal scroller.
+//! The category tab strip (T-37a-016): one toggle button per visible page, joined into one linked group like the
+//! Anime | Manga switch, in a horizontal scroller for when there are more categories than fit.
 
 use std::rc::Rc;
 
@@ -13,7 +14,9 @@ pub struct TabStrip {
 
 impl TabStrip {
     pub fn new() -> Self {
-        let row = gtk::Box::new(O::Horizontal, 4);
+        // `linked`: GTK draws the buttons as one segmented control, the look of the Anime | Manga switcher
+        let row = gtk::Box::builder().orientation(O::Horizontal).css_classes(["linked"]).build();
+        row.set_halign(gtk::Align::Start);
         row.set_margin_start(12);
         row.set_margin_end(12);
         let scroller = gtk::ScrolledWindow::builder()

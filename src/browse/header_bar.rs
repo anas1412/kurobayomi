@@ -3,6 +3,7 @@
 //! `header`. The display mode is cut from the settings: a radio selection changes the grid for this session only.
 
 use std::rc::Rc;
+use kuro_platform::kind::Kind;
 
 use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
@@ -157,7 +158,7 @@ pub(crate) mod tests {
 
     fn header_shows_the_two_radios_and_writes_the_chosen_mode() {
         let log = Rc::new(RefCell::new(Vec::new()));
-        let prefs = Rc::new(BrowsePrefs::new(PrefStore::in_memory(), crate::browse::route::BrowseKind::Manga));
+        let prefs = Rc::new(BrowsePrefs::new(PrefStore::in_memory(), Kind::Manga));
         let header = build(deps(Rc::clone(&prefs), &log, false, true));
         assert_eq!(header.radios.len(), 2, "the popover has two items");
         assert!(header.radios[0].is_active(), "compact grid is selected by default");

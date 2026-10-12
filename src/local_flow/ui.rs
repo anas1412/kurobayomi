@@ -8,7 +8,7 @@ use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 use kuro_db::Db;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use super::sync::{self, Failure, Outcome};
 
@@ -18,7 +18,7 @@ pub const ADD_ACTION: &str = "add-local-manga";
 /// Registers the add-manga window action and its shortcut.
 pub fn attach(window: &gtk::ApplicationWindow) {
     let add = gio::SimpleAction::new(ADD_ACTION, None);
-    add.connect_activate(|_, _| add_folder(EntryKind::Manga));
+    add.connect_activate(|_, _| add_folder(Kind::Manga));
     window.add_action(&add);
     if let Some(app) = window.application() {
         app.set_accels_for_action(&format!("win.{ADD_ACTION}"), &["<Primary><Shift>o"]);
@@ -26,10 +26,10 @@ pub fn attach(window: &gtk::ApplicationWindow) {
 }
 
 /// Asks for a folder and adds it: a manga folder is one entry, an anime folder holds one folder per series.
-pub fn add_folder(kind: EntryKind) {
+pub fn add_folder(kind: Kind) {
     let title = match kind {
-        EntryKind::Manga => "Add local manga folder",
-        EntryKind::Anime => "Add local anime folder",
+        Kind::Manga => "Add local manga folder",
+        Kind::Anime => "Add local anime folder",
     };
     let dialog = gtk::FileDialog::builder().title(title).modal(true).build();
     dialog.select_folder(Some(&crate::ui::window()), gio::Cancellable::NONE, move |picked| {
@@ -39,12 +39,12 @@ pub fn add_folder(kind: EntryKind) {
 }
 
 /// Rescans the local entries of `kind` already in the library.
-pub fn rescan(kind: EntryKind) {
+pub fn rescan(kind: Kind) {
     run(kind, move |db, now| sync::rescan(db, kind, now));
 }
 
 /// Runs `job` on a worker thread with the database of `kind`, then shows its result as toasts and reloads the library.
-fn run(kind: EntryKind, job: impl FnOnce(&Arc<Db>, i64) -> Result<Vec<Outcome>, String> + Send + 'static) {
+fn run(kind: Kind, job: impl FnOnce(&Arc<Db>, i64) -> Result<Vec<Outcome>, String> + Send + 'static) {
     let db = crate::data::app().db(kind);
     let (sender, receiver) = async_channel::bounded(1);
     std::thread::spawn(move || {
@@ -60,13 +60,13 @@ fn run(kind: EntryKind, job: impl FnOnce(&Arc<Db>, i64) -> Result<Vec<Outcome>, 
 }
 
 /// The toast texts of a result: one per manga folder, one for a whole anime folder (a series that failed is logged).
-fn messages(kind: EntryKind, result: &Result<Vec<Outcome>, String>) -> Vec<String> {
+fn messages(kind: Kind, result: &Result<Vec<Outcome>, String>) -> Vec<String> {
     let outcomes = match result {
         Ok(outcomes) => outcomes,
         Err(e) => return vec![format!("Could not scan the folder: {e}")],
     };
     match kind {
-        EntryKind::Manga => outcomes
+        Kind::Manga => outcomes
             .iter()
             .map(|o| match &o.result {
                 Ok(done) => format!("{}: {} new, {} renamed chapters", o.title, done.added, done.updated),
@@ -74,7 +74,7 @@ fn messages(kind: EntryKind, result: &Result<Vec<Outcome>, String>) -> Vec<Strin
                 Err(Failure::Save(e)) => format!("Could not save {}: {e}", o.title),
             })
             .collect(),
-        EntryKind::Anime => {
+        Kind::Anime => {
             let done: Vec<&sync::Synced> = outcomes.iter().filter_map(|o| o.result.as_ref().ok()).collect();
             let added: usize = done.iter().map(|d| d.added).sum();
             let removed: usize = done.iter().map(|d| d.removed).sum();
@@ -104,11 +104,11 @@ mod tests {
             outcome("Locked", Err(Failure::Save("disk full".into()))),
         ]);
         assert_eq!(
-            messages(EntryKind::Manga, &manga),
+            messages(Kind::Manga, &manga),
             ["Series: 2 new, 1 renamed chapters", "Could not read the folder: no such folder", "Could not save Locked: disk full"]
         );
         let anime = Ok(vec![outcome("A", Ok(synced(2, 0, 1))), outcome("B", Ok(synced(1, 4, 0))), outcome("C", Err(Failure::Read("x".into())))]);
-        assert_eq!(messages(EntryKind::Anime, &anime), ["Local anime: 2 series, 3 episodes added, 1 removed"]);
-        assert_eq!(messages(EntryKind::Anime, &Err("disk gone".into())), ["Could not scan the folder: disk gone"]);
+        assert_eq!(messages(Kind::Anime, &anime), ["Local anime: 2 series, 3 episodes added, 1 removed"]);
+        assert_eq!(messages(Kind::Anime, &Err("disk gone".into())), ["Could not scan the folder: disk gone"]);
     }
 }

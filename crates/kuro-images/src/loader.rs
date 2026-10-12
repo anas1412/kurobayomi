@@ -73,8 +73,9 @@ pub async fn start(
 
 #[cfg(test)]
 mod tests {
+    use kuro_platform::kind::Kind;
     use super::*;
-    use crate::art::{ArtKind, ArtRef, Owner};
+    use crate::art::{ArtKind, ArtRef};
     use crate::fetch::{DataSource, LoadRequest};
     use crate::options::LoadOptions;
     use crate::testing::{NoSources, TestPaths, encode, gradient, test_client};
@@ -113,7 +114,7 @@ mod tests {
         std::fs::write(&file, encode(&gradient(10, 10), image::ImageFormat::Png)).unwrap();
         let req = LoadRequest {
             art: ArtRef {
-                owner: Owner::Manga,
+                owner: Kind::Manga,
                 entry_id: 1,
                 source_id: 1,
                 kind: ArtKind::Cover,

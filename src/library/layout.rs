@@ -1,6 +1,7 @@
 //! Grid geometry and badge text (T-37a-018 to T-37a-020, T-37a-024). Pure numbers and strings, so the card widgets
 //! only place them.
 
+use kuro_platform::kind::Kind;
 use kuro_prefs::library::LibraryDisplayMode;
 
 /// Cover height for a cover of `width` pixels: the 2:3 book ratio.
@@ -89,7 +90,7 @@ pub fn initials(title: &str) -> String {
 }
 
 /// The unread badge: just the count (`6`); the tooltip says what it counts. None when hidden.
-pub fn unread_badge(count: i64, _anime: bool) -> Option<String> {
+pub fn unread_badge(count: i64, _kind: Kind) -> Option<String> {
     count_badge(count).map(|n| n.to_string())
 }
 
@@ -132,12 +133,12 @@ pub struct CardModel {
     pub language: Option<String>,
 }
 
-pub fn card_model(item: &kuro_domain::library::page::LibraryItem, mode: LibraryDisplayMode, anime: bool, season_parent: bool) -> CardModel {
+pub fn card_model(item: &kuro_domain::library::page::LibraryItem, mode: LibraryDisplayMode, kind: Kind, season_parent: bool) -> CardModel {
     CardModel {
         title: item.row.title.clone(),
         title_place: title_place(mode),
         initials: initials(&item.row.title),
-        unread: unread_badge(item.unread_count, anime),
+        unread: unread_badge(item.unread_count, kind),
         unread_tooltip: unread_badge_tooltip(season_parent),
         downloads: download_badge(item.download_count),
         local: item.is_local,
@@ -216,10 +217,10 @@ mod tests {
 
     #[test]
     fn badges_say_what_they_count() {
-        assert_eq!(unread_badge(6, true).as_deref(), Some("6"));
-        assert_eq!(unread_badge(6, false).as_deref(), Some("6"));
-        assert_eq!(unread_badge(0, true), None);
-        assert_eq!(unread_badge(-1, false), None, "not computed while the badge switch is off");
+        assert_eq!(unread_badge(6, Kind::Anime).as_deref(), Some("6"));
+        assert_eq!(unread_badge(6, Kind::Manga).as_deref(), Some("6"));
+        assert_eq!(unread_badge(0, Kind::Anime), None);
+        assert_eq!(unread_badge(-1, Kind::Manga), None, "not computed while the badge switch is off");
         assert_eq!(download_badge(3).as_deref(), Some("3"));
         assert_eq!(download_badge(0), None);
         assert_eq!(LOCAL_BADGE, "Local");
@@ -239,7 +240,7 @@ mod tests {
         use kuro_domain::library::page::LibraryItem;
         let row = kuro_domain::library::model::LibraryRow { title: "Core Concepts".into(), ..crate::library::fixtures::row(1, 0) };
         let local = LibraryItem { row: row.clone(), download_count: 0, unread_count: 6, is_local: true, source_language: "en".into() };
-        let model = card_model(&local, LibraryDisplayMode::ComfortableGrid, true, false);
+        let model = card_model(&local, LibraryDisplayMode::ComfortableGrid, Kind::Anime, false);
         assert_eq!(model.title, "Core Concepts");
         assert_eq!(model.title_place, TitlePlace::Below);
         assert_eq!(model.initials, "CC");
@@ -249,13 +250,13 @@ mod tests {
         assert_eq!(model.language, None, "a local entry shows Local, not a language");
 
         let source = LibraryItem { row, download_count: 2, unread_count: 0, is_local: false, source_language: "ja".into() };
-        let model = card_model(&source, LibraryDisplayMode::CompactGrid, false, false);
+        let model = card_model(&source, LibraryDisplayMode::CompactGrid, Kind::Manga, false);
         assert_eq!(model.title_place, TitlePlace::OnCover);
         assert_eq!(model.unread, None);
         assert_eq!(model.downloads.as_deref(), Some("2"));
         assert!(!model.local);
         assert_eq!(model.language.as_deref(), Some("JA"));
-        assert_eq!(card_model(&source, LibraryDisplayMode::CoverOnlyGrid, true, true).unread_tooltip, Some("unseen seasons"));
+        assert_eq!(card_model(&source, LibraryDisplayMode::CoverOnlyGrid, Kind::Anime, true).unread_tooltip, Some("unseen seasons"));
     }
 
     #[test]

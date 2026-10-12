@@ -8,7 +8,7 @@
 
 use kuro_data::anime::Anime;
 use kuro_data::manga::Manga;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 /// Which columns the export includes. Every column is on at first (`Default`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,15 +44,15 @@ impl Default for ExportOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportEntry {
     pub title: String,
-    pub kind: EntryKind,
+    pub kind: Kind,
     pub author: Option<String>,
     pub artist: Option<String>,
 }
 
-fn kind_text(kind: EntryKind) -> &'static str {
+fn kind_text(kind: Kind) -> &'static str {
     match kind {
-        EntryKind::Manga => "manga",
-        EntryKind::Anime => "anime",
+        Kind::Manga => "manga",
+        Kind::Anime => "anime",
     }
 }
 
@@ -67,13 +67,13 @@ pub fn by_id<T: Clone>(rows: &[T], id: impl Fn(&T) -> i64) -> Vec<T> {
 pub fn favourite_entries(anime: &[Anime], manga: &[Manga]) -> Vec<ExportEntry> {
     let from_anime = by_id(anime, |row| row.id).into_iter().map(|row| ExportEntry {
         title: row.title,
-        kind: EntryKind::Anime,
+        kind: Kind::Anime,
         author: row.author,
         artist: row.artist,
     });
     let from_manga = by_id(manga, |row| row.id).into_iter().map(|row| ExportEntry {
         title: row.title,
-        kind: EntryKind::Manga,
+        kind: Kind::Manga,
         author: row.author,
         artist: row.artist,
     });
@@ -121,16 +121,16 @@ mod tests {
 
     const NONE: ExportOptions = ExportOptions { title: false, kind: false, author: false, artist: false };
 
-    fn entry(title: &str, kind: EntryKind, author: Option<&str>, artist: Option<&str>) -> ExportEntry {
+    fn entry(title: &str, kind: Kind, author: Option<&str>, artist: Option<&str>) -> ExportEntry {
         ExportEntry { title: title.into(), kind, author: author.map(Into::into), artist: artist.map(Into::into) }
     }
 
     /// Section 6 worked example (T-35a-095 golden): the bytes, not the text, are compared.
     fn worked_example() -> Vec<ExportEntry> {
         vec![
-            entry("Frieren", EntryKind::Anime, Some("Kanehito Yamada"), None),
-            entry("He said \"hi\", then left", EntryKind::Manga, Some("line one\nline two"), Some("")),
-            entry("Padding  ", EntryKind::Manga, Some("   "), Some("Ayumi")),
+            entry("Frieren", Kind::Anime, Some("Kanehito Yamada"), None),
+            entry("He said \"hi\", then left", Kind::Manga, Some("line one\nline two"), Some("")),
+            entry("Padding  ", Kind::Manga, Some("   "), Some("Ayumi")),
         ]
     }
 

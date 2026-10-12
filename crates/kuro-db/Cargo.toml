@@ -5,11 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-[features]
-default = ["legacy-import"]
-# The Aniyomi tachiyomi.db importer: the embedded migrations 1..32 and `import_aniyomi_db` (T-03a-022, T-03a-023).
-legacy-import = []
-
 [dependencies]
 kuro-platform = { path = "../kuro-platform", default-features = false }
 rusqlite = { workspace = true, features = ["hooks", "backup"] }

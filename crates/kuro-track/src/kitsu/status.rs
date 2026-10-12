@@ -3,7 +3,7 @@
 
 use super::error::KitsuError;
 use super::{COMPLETED, DROPPED, ON_HOLD, PLAN_TO_READ, PLAN_TO_WATCH, READING, WATCHING};
-use crate::model::Kind;
+use kuro_platform::kind::Kind;
 
 /// The reading (manga) or watching (anime) code and the planned code of `kind`.
 fn current_and_planned(kind: Kind) -> (i64, i64) {

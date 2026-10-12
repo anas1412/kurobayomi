@@ -1,6 +1,7 @@
 //! Kitsu search through Algolia (T-30a-017, T-30a-018, T-30a-028). The key comes from Kitsu with the bearer token,
 //! then the query goes to Algolia without one. The hit mapping follows `p1-behavior.md` section 12.
 
+use kuro_platform::kind::Kind;
 use chrono::{DateTime, Local};
 use reqwest::Method;
 use reqwest::header::CONTENT_TYPE;
@@ -10,7 +11,7 @@ use super::api::{KitsuApi, read_success};
 use super::dto::{AlgoliaHit, AlgoliaKeyResponse, AlgoliaResponse};
 use super::error::KitsuError;
 use crate::model::search::{AnimeTrackSearch, MangaTrackSearch};
-use crate::model::{Kind, TrackerId};
+use crate::model::TrackerId;
 
 /// The Algolia application id (`X-Algolia-Application-Id`).
 pub const APP_ID: &str = "AWQO5J657S";

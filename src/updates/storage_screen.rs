@@ -9,6 +9,7 @@ use std::rc::{Rc, Weak};
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, DrawingArea, DropDown, Label, ListBox, Orientation as O, Overlay, Picture, StringList};
 use kuro_i18n::{MsgKey, tr};
+use kuro_platform::kind::Kind;
 
 use crate::updates::copy;
 use crate::updates::history_dialog::{ConfirmCopy, show as show_confirm};
@@ -29,7 +30,7 @@ pub struct StorageInput {
 }
 
 pub struct StorageScreen {
-    anime: bool,
+    kind: Kind,
     root: GBox,
     /// The two columns (dropdown and donut on the left, rows on the right); one column when narrow (T-42a-053).
     split: GBox,
@@ -55,7 +56,7 @@ pub struct StorageScreen {
 
 impl StorageScreen {
     /// Builds the page with nothing in it. The caller pushes its data with [`StorageScreen::set_input`].
-    pub fn new(anime: bool) -> Rc<Self> {
+    pub fn new(kind: Kind) -> Rc<Self> {
         Rc::new_cyclic(|weak: &Weak<Self>| {
             // the column spacing of the other pages (`ui::column`), unclamped: the page goes two columns from 720 px
             let root = GBox::new(O::Vertical, 12);
@@ -120,7 +121,7 @@ impl StorageScreen {
             });
 
             Self {
-                anime,
+                kind,
                 root,
                 split,
                 left,
@@ -228,7 +229,7 @@ impl StorageScreen {
                     }
                 }
             });
-            self.list.append(&crate::updates::storage_row::storage_row(row, self.anime, &cover, delete));
+            self.list.append(&crate::updates::storage_row::storage_row(row, self.kind, &cover, delete));
         }
     }
 
@@ -252,7 +253,7 @@ impl StorageScreen {
 
     /// The per-row confirm (T-42a-051): OK runs the delete hook, Cancel changes nothing.
     fn confirm_delete(self: &Rc<Self>, row: &StorageRow) {
-        let title = if self.anime { copy::delete_title_episodes() } else { copy::delete_title_chapters() };
+        let title = if self.kind.is_anime() { copy::delete_title_episodes() } else { copy::delete_title_chapters() };
         let copy_text = ConfirmCopy {
             title,
             text: storage::delete_text(&row.title),

@@ -5,7 +5,7 @@
 
 use std::cell::RefCell;
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::entry_core::header::SearchRequest;
 use crate::ui;
@@ -21,16 +21,16 @@ pub struct WebViewRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MigrateRequest {
     pub entry_id: i64,
-    pub anime: bool,
+    pub kind: Kind,
     /// The old entry's title, shown in the migrate dialog; a click on it opens the old entry (`open_old`).
     pub title: String,
 }
 
-/// The source whose preferences the Settings item of the overflow menu opens. `anime` picks the registry the id lives in.
+/// The source whose preferences the Settings item of the overflow menu opens. `kind` picks the registry the id lives in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SourcePrefsRequest {
     pub source_id: i64,
-    pub anime: bool,
+    pub kind: Kind,
 }
 
 thread_local! {
@@ -121,9 +121,9 @@ pub fn plan_search(request: &SearchRequest, http_source: bool, previous: Previou
     }
 }
 
-/// A genre, author, title or source click on an entry page. `anime` picks the library to search and `http_source` says
+/// A genre, author, title or source click on an entry page. `kind` picks the library to search and `http_source` says
 /// whether the entry's source is an HTTP one. The request is parked for the screen that opens (`take_search`).
-pub fn open_search(request: SearchRequest, anime: bool, http_source: bool) {
+pub fn open_search(request: SearchRequest, kind: Kind, http_source: bool) {
     let (names, shown) = ui::page_stack();
     match plan_search(&request, http_source, previous_of(&names, shown)) {
         SearchPlan::Nothing => {}
@@ -132,7 +132,6 @@ pub fn open_search(request: SearchRequest, anime: bool, http_source: bool) {
             ui::open("global_search");
         }
         SearchPlan::Library => {
-            let kind = if anime { EntryKind::Anime } else { EntryKind::Manga };
             crate::library::mount::search_library(kind, &request.query);
         }
         SearchPlan::BrowseGenre => {
@@ -230,18 +229,18 @@ mod tests {
 
     #[test]
     fn a_parked_migrate_request_carries_the_entry_and_the_kind() {
-        park_migrate(MigrateRequest { entry_id: 7, anime: true, title: "Frieren".into() });
+        park_migrate(MigrateRequest { entry_id: 7, kind: Kind::Anime, title: "Frieren".into() });
         let request = take_migrate().expect("parked");
-        assert_eq!((request.entry_id, request.anime, request.title.as_str()), (7, true, "Frieren"));
+        assert_eq!((request.entry_id, request.kind, request.title.as_str()), (7, Kind::Anime, "Frieren"));
         assert_eq!(take_migrate(), None);
     }
 
     #[test]
     fn a_parked_source_prefs_request_names_the_source_and_is_handed_out_once() {
         assert_eq!(take_source_prefs(), None);
-        park_source_prefs(SourcePrefsRequest { source_id: 4, anime: true });
-        park_source_prefs(SourcePrefsRequest { source_id: 9, anime: false });
-        assert_eq!(take_source_prefs(), Some(SourcePrefsRequest { source_id: 9, anime: false }));
+        park_source_prefs(SourcePrefsRequest { source_id: 4, kind: Kind::Anime });
+        park_source_prefs(SourcePrefsRequest { source_id: 9, kind: Kind::Manga });
+        assert_eq!(take_source_prefs(), Some(SourcePrefsRequest { source_id: 9, kind: Kind::Manga }));
         assert_eq!(take_source_prefs(), None);
     }
 

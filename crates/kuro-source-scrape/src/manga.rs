@@ -1,5 +1,6 @@
 //! A manga recipe as a catalogue source.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -10,7 +11,7 @@ use url::Url;
 
 use crate::engine::{self, Found};
 use crate::fetch::{Fetcher, outside};
-use crate::recipe::{Kind, Listing, Recipe, Template};
+use crate::recipe::{Listing, Recipe, Template};
 
 pub struct ScrapeManga {
     fetcher: Fetcher,

@@ -1,6 +1,6 @@
 //! Property tests of the section 5 accessors and the flag algebra (T-08a-040). Each property runs 256 cases.
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::library::flags::{contains, merge};
 use kuro_domain::library::sort::{Direction, LibrarySort, SortType};
 use kuro_prefs::library::{LibraryDisplayMode, LibraryPrefs, MANGA_SORT_TOKENS};
@@ -32,7 +32,7 @@ proptest! {
 
     #[test]
     fn every_sort_round_trips_through_its_stored_text_and_its_flags(kind_is_anime: bool, ty in 0usize..11, dir in 0usize..2) {
-        let kind = if kind_is_anime { EntryKind::Anime } else { EntryKind::Manga };
+        let kind = if kind_is_anime { Kind::Anime } else { Kind::Manga };
         let types = SortType::types(kind);
         let sort = LibrarySort { ty: types[ty % types.len()], dir: Direction::ALL[dir] };
         prop_assert_eq!(LibrarySort::deserialize(kind, &sort.serialize(kind)), sort);

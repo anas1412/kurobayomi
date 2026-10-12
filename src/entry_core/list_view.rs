@@ -19,7 +19,7 @@ use std::rc::{Rc, Weak};
 use gtk::gdk::ModifierType;
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Label, Orientation as O, gio, glib, pango};
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
 
 use crate::entry_core::list_model::{DOT_SIZE, Diff, RowAction, RowItem, changed_span, diff, row_alpha, row_menu};
@@ -210,9 +210,9 @@ impl RowWidgets {
 
 /// The items of the right-click menu of the row behind `list_item`, built when the menu opens so the labels match the
 /// row as it is now. The row is copied out of the store item before anything runs.
-fn menu_items(list_item: &glib::WeakRef<gtk::ListItem>, anime: bool, on_menu: &Rc<dyn Fn(i64, RowAction)>) -> Vec<MenuItem> {
+fn menu_items(list_item: &glib::WeakRef<gtk::ListItem>, kind: Kind, on_menu: &Rc<dyn Fn(i64, RowAction)>) -> Vec<MenuItem> {
     let Some(row) = list_item.upgrade().and_then(|item| row_of(&item)) else { return Vec::new() };
-    row_menu(&row, anime)
+    row_menu(&row, kind)
         .into_iter()
         .map(|(label, section, action)| {
             let (on_menu, id) = (Rc::clone(on_menu), row.id);
@@ -250,8 +250,7 @@ pub struct ItemList {
 
 impl ItemList {
     /// The list of `kind`'s rows: the kind only words the menu (read or watched).
-    pub fn new(kind: EntryKind, callbacks: Callbacks) -> Rc<Self> {
-        let anime = kind == EntryKind::Anime;
+    pub fn new(kind: Kind, callbacks: Callbacks) -> Rc<Self> {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let registry: Rc<RefCell<HashMap<usize, Rc<RowWidgets>>>> = Rc::default();
         let list: Rc<RefCell<Weak<Self>>> = Rc::default();
@@ -308,7 +307,7 @@ impl ItemList {
                 // the right click (and the Menu key) open the row's menu
                 context_menu::attach_without_long_press(&widgets.card, {
                     let (list_item, on_menu) = (list_item.downgrade(), Rc::clone(&callbacks.on_menu));
-                    move |_, _| menu_items(&list_item, anime, &on_menu)
+                    move |_, _| menu_items(&list_item, kind, &on_menu)
                 });
                 // a tap on the summary toggles it and claims the press, so the row does not open (T-39a-012)
                 let summary_tap = gtk::GestureClick::builder().button(1).build();
@@ -560,7 +559,7 @@ mod tests {
                 }
             };
             let list = ItemList::new(
-                EntryKind::Manga,
+                Kind::Manga,
                 Callbacks {
                     on_row: Rc::new({
                         let (pressed, redraw) = (Rc::clone(&pressed), redraw.clone());
@@ -614,7 +613,7 @@ mod tests {
                 .expect("a right-click gesture");
             right.emit_by_name::<()>("pressed", &[&1i32, &4.0f64, &4.0f64]);
             assert!(pump(&ctx, || menu().is_some()), "the right click opens the row's menu");
-            let select = row_menu(&shown(None)[0], false).iter().position(|(_, _, a)| *a == RowAction::Select).expect("a Select item");
+            let select = row_menu(&shown(None)[0], Kind::Manga).iter().position(|(_, _, a)| *a == RowAction::Select).expect("a Select item");
             menu().expect("the menu").activate_action(&format!("ctx.item{select}"), None).expect("the Select item");
             assert!(pump(&ctx, || selects() == 2), "Select from the menu reached the page");
             window.close();

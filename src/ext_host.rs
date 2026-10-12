@@ -234,7 +234,7 @@ pub fn start(store: &PrefStore, anime_db: Arc<kuro_db::handle::Db>) {
     let apply_state = state.clone();
     let apply_prefs = SourcePrefs::new(store.clone());
     let storage = crate::settings_ui::storage::manager(store);
-    let roots = storage.map(|s| (s.downloads_path(kuro_domain::kind::EntryKind::Anime), s.downloads_path(kuro_domain::kind::EntryKind::Manga)));
+    let roots = storage.map(|s| (s.downloads_path(kuro_platform::kind::Kind::Anime), s.downloads_path(kuro_platform::kind::Kind::Manga)));
     let (apply_registry, apply_handle) = (registry.clone(), tokio::runtime::Handle::current());
     let mut orphans_logged = false;
     glib::spawn_future_local(pump(inbox, move |event| {

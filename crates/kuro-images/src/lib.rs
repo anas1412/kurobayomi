@@ -37,7 +37,7 @@ pub mod texture;
 pub mod time_text;
 pub mod viewer;
 
-pub use art::{ArtKind, ArtRef, Owner};
+pub use art::{ArtKind, ArtRef};
 pub use decode::{DecodeOptions, Decoded};
 pub use error::ImageError;
 pub use fetch::{

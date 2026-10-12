@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use kuro_data::DataResult;
-use kuro_data::category::{CategoryKind, CategoryRepo};
+use kuro_data::category::CategoryRepo;
 use kuro_data::chapter::{Chapter, ChapterRepo, ChapterUpdate};
 use kuro_data::manga::{Manga, MangaRepo};
 use kuro_db::flags::chapter as c;
@@ -24,7 +24,7 @@ use crate::entry_core::flags::ChapterFlags;
 use crate::entry_core::readstate::{ReadPlan, plan_mark_read};
 use crate::entry_core::tracking::facts::Summary;
 use crate::entry_core::tracking::session;
-use kuro_track::model::Kind;
+use kuro_platform::kind::Kind;
 
 /// `LocalSource.ID`: rows of the local source are always downloaded.
 const LOCAL_SOURCE_ID: i64 = kuro_source::local::LOCAL_SOURCE_ID;
@@ -104,7 +104,7 @@ impl DbStore {
         Self {
             mangas: MangaRepo::new(Arc::clone(&db)),
             chapters: ChapterRepo::new(Arc::clone(&db)),
-            categories: CategoryRepo::new(Arc::clone(&db), CategoryKind::Manga),
+            categories: CategoryRepo::new(Arc::clone(&db), Kind::Manga),
             db,
         }
     }
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn add_to_library_sets_favorite_and_categories_together_and_rolls_back_together() {
         let (_dir, store, id) = store(false, 0);
-        let cat = kuro_data::category::CategoryRepo::new(Arc::clone(&store.db), CategoryKind::Manga)
+        let cat = kuro_data::category::CategoryRepo::new(Arc::clone(&store.db), Kind::Manga)
             .insert(&kuro_data::category::Category {
                 id: 0,
                 name: "Reading".into(),
@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn set_categories_replaces_the_links_and_categories_reload() {
         let (_dir, store, id) = store(true, 0);
-        let repo = kuro_data::category::CategoryRepo::new(Arc::clone(&store.db), CategoryKind::Manga);
+        let repo = kuro_data::category::CategoryRepo::new(Arc::clone(&store.db), Kind::Manga);
         let mk = |name: &str, order| kuro_data::category::Category {
             id: 0,
             name: name.into(),

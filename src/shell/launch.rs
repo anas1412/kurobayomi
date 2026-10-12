@@ -12,7 +12,7 @@ use kuro_platform::deep_link::{DeepLink, USAGE_EXIT_CODE};
 use super::argv::{self, LaunchRequest, RouteError};
 use super::uri::{self, UriRoute};
 use super::host::Shell;
-use super::nav::Kind;
+use kuro_platform::kind::Kind;
 
 /// Application flags: the command line and file opens are handled here, and a dev run (`unique` false) does not
 /// hand its command to a running window.

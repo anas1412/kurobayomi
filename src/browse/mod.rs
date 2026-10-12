@@ -3,7 +3,7 @@
 //! (`screens::body("browse")`) and opens its pages. The kind-specific parts are few: the listing calls of a runnable
 //! source (`loader::Catalogue`), the library store of each kind (`repo_store`) and the chapter or episode state a
 //! migration carries over (`migrate_live`); the screens, the Sources list, the directory, the preferences and migration
-//! exist once and take the kind (`route::BrowseKind`). Parts of the module still have no caller outside their tests, which
+//! exist once and take the kind (`Kind`). Parts of the module still have no caller outside their tests, which
 //! is what the allow below covers.
 //!
 //! Decision records (Android-only parts dropped or replaced):

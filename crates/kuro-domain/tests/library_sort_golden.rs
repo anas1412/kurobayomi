@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use kuro_platform::kind::Kind;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::order::{SortContext, sort_page};
 use kuro_domain::library::page::LibraryItem;
@@ -49,7 +50,7 @@ fn fixture() -> Vec<LibraryItem> {
 
 fn token_sort(token: &str) -> LibrarySort {
     let (kind_token, dir) = token.split_once(',').expect("ASCENDING or DESCENDING");
-    let ty = SortType::from_token(kuro_domain::kind::EntryKind::Manga, kind_token).expect("known sort token");
+    let ty = SortType::from_token(Kind::Manga, kind_token).expect("known sort token");
     let dir = if dir == "ASCENDING" { Direction::Ascending } else { Direction::Descending };
     LibrarySort { ty, dir }
 }

@@ -3,7 +3,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::library_update::error::UpdateError;
 use crate::library_update::fetch_interval::Window;
@@ -56,8 +56,8 @@ where
     let fetched = slot.fetch(kind, &entry.url, cx.settings.auto_update_metadata).await?;
     if fetched.items.is_empty() && !slot.is_local() {
         return Err(match kind {
-            EntryKind::Manga => UpdateError::NoChapters,
-            EntryKind::Anime => UpdateError::NoEpisodes,
+            Kind::Manga => UpdateError::NoChapters,
+            Kind::Anime => UpdateError::NoEpisodes,
         });
     }
     check_cancelled(cx.cancel)?;
@@ -118,7 +118,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use kuro_domain::kind::EntryKind;
+    use kuro_platform::kind::Kind;
 
     use super::*;
     use crate::library_update::fake::{FakeHost, FakeStore, FakeSync, entry, item};
@@ -151,7 +151,7 @@ mod tests {
         let source = FakeSource::ok(vec![item(1.0, 0)]);
         let calls = Arc::clone(&source.calls);
         let deps = deps(store, 1001, source);
-        let settings = PassSettings::new(EntryKind::Manga);
+        let settings = PassSettings::new(Kind::Manga);
         let outcome = run(&deps, &settings, &entry(1, 1001, "A"), false).await.expect("skipped, not failed");
         assert_eq!(outcome, EntryOutcome::default());
         assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -166,7 +166,7 @@ mod tests {
             sync: FakeSync::default(),
             host: FakeHost::default(),
         };
-        let settings = PassSettings::new(EntryKind::Manga);
+        let settings = PassSettings::new(Kind::Manga);
         let result = run(&deps, &settings, &entry(1, 7, "A"), false).await;
         assert_eq!(result, Err(UpdateError::SourceNotInstalled));
     }
@@ -174,7 +174,7 @@ mod tests {
     #[tokio::test]
     async fn an_empty_list_from_a_remote_source_is_no_chapters_and_from_a_local_one_is_fine() {
         // S-01, S-02
-        let settings = PassSettings::new(EntryKind::Manga);
+        let settings = PassSettings::new(Kind::Manga);
         let remote = deps(FakeStore::with(vec![entry(1, 1, "A")]), 1, FakeSource::ok(vec![]));
         assert_eq!(run(&remote, &settings, &entry(1, 1, "A"), false).await, Err(UpdateError::NoChapters));
         let mut local_source = FakeSource::ok(vec![]);
@@ -188,7 +188,7 @@ mod tests {
         // P-04: the favourite check passes at the gate and fails at the re-read.
         let store = FakeStore { revoke_after_checks: Some(1), ..FakeStore::with(vec![entry(1, 1, "A")]) };
         let deps = deps(store, 1, FakeSource::ok(vec![item(1.0, 0)]));
-        let settings = PassSettings::new(EntryKind::Manga);
+        let settings = PassSettings::new(Kind::Manga);
         let outcome = run(&deps, &settings, &entry(1, 1, "A"), false).await.expect("no error");
         assert!(outcome.new_items.is_empty());
         assert_eq!(deps.sync.calls.load(Ordering::SeqCst), 0);
@@ -200,7 +200,7 @@ mod tests {
         let mut child = entry(5, 1, "S1");
         child.parent_id = Some(9);
         let deps = deps(FakeStore::with(vec![]), 1, FakeSource::ok(vec![item(1.0, 0)]));
-        let settings = PassSettings::new(EntryKind::Anime);
+        let settings = PassSettings::new(Kind::Anime);
         let outcome = run(&deps, &settings, &child, false).await.expect("child is synced");
         assert_eq!(outcome.new_items.len(), 1);
         assert_eq!(deps.sync.calls.load(Ordering::SeqCst), 1);
@@ -209,7 +209,7 @@ mod tests {
     #[tokio::test]
     async fn new_items_come_back_newest_source_position_first() {
         let deps = deps(FakeStore::with(vec![entry(1, 1, "A")]), 1, FakeSource::ok(vec![item(1.0, 1), item(3.0, 3), item(2.0, 2)]));
-        let settings = PassSettings::new(EntryKind::Manga);
+        let settings = PassSettings::new(Kind::Manga);
         let outcome = run(&deps, &settings, &entry(1, 1, "A"), false).await.expect("ok");
         let order: Vec<i64> = outcome.new_items.iter().map(|i| i.source_order).collect();
         assert_eq!(order, vec![3, 2, 1]);
@@ -219,7 +219,7 @@ mod tests {
     async fn selected_downloads_are_queued_with_autostart_off_once_per_entry() {
         // P-13 (per entry): the policy selects, the host enqueues.
         let deps = deps(FakeStore::with(vec![entry(1, 1, "A")]), 1, FakeSource::ok(vec![item(1.0, 0), item(2.0, 1)]));
-        let mut settings = PassSettings::new(EntryKind::Anime);
+        let mut settings = PassSettings::new(Kind::Anime);
         settings.download.enabled = true;
         let outcome = run(&deps, &settings, &entry(1, 1, "A"), false).await.expect("ok");
         assert_eq!(outcome.downloads, 2);
@@ -229,7 +229,7 @@ mod tests {
     #[tokio::test]
     async fn downloads_stay_off_when_the_policy_is_disabled() {
         let deps = deps(FakeStore::with(vec![entry(1, 1, "A")]), 1, FakeSource::ok(vec![item(1.0, 0)]));
-        let settings = PassSettings::new(EntryKind::Manga);
+        let settings = PassSettings::new(Kind::Manga);
         let outcome = run(&deps, &settings, &entry(1, 1, "A"), false).await.expect("ok");
         assert_eq!(outcome.downloads, 0);
         assert!(deps.host.enqueued.lock().unwrap().is_empty());
@@ -239,7 +239,7 @@ mod tests {
     async fn a_cancel_seen_before_the_sync_is_a_cancellation_not_an_error() {
         // P-08 / T-26a-021
         let deps = deps(FakeStore::with(vec![entry(1, 1, "A")]), 1, FakeSource::ok(vec![item(1.0, 0)]));
-        let settings = PassSettings::new(EntryKind::Manga);
+        let settings = PassSettings::new(Kind::Manga);
         let result = run(&deps, &settings, &entry(1, 1, "A"), true).await;
         assert_eq!(result, Err(UpdateError::Cancelled));
         assert_eq!(deps.sync.calls.load(Ordering::SeqCst), 0);
@@ -249,7 +249,7 @@ mod tests {
     async fn a_source_error_comes_back_as_its_message() {
         // P-06 (per entry): the message is kept verbatim.
         let deps = deps(FakeStore::with(vec![entry(1, 1, "A")]), 1, FakeSource::err(UpdateError::Other("timeout".into())));
-        let settings = PassSettings::new(EntryKind::Manga);
+        let settings = PassSettings::new(Kind::Manga);
         let result = run(&deps, &settings, &entry(1, 1, "A"), false).await;
         assert_eq!(result.map_err(|e| e.user_message()), Err("timeout".to_owned()));
     }

@@ -8,6 +8,8 @@
 pub mod cache;
 mod manager;
 
+use kuro_platform::kind::Kind;
+
 pub use manager::{STORAGE_DIR_KEY, StorageManager};
 
 /// Folder of the automatic backups, under the base.
@@ -44,9 +46,9 @@ pub const TREE: &[&[&str]] = &[
 ];
 
 /// The folder of one kind (its downloads folder, and its folder under `Local`).
-pub fn kind_folder(kind: crate::kind::EntryKind) -> &'static str {
+pub fn kind_folder(kind: Kind) -> &'static str {
     match kind {
-        crate::kind::EntryKind::Anime => ANIME_DOWNLOADS_PATH,
-        crate::kind::EntryKind::Manga => MANGA_DOWNLOADS_PATH,
+        Kind::Anime => ANIME_DOWNLOADS_PATH,
+        Kind::Manga => MANGA_DOWNLOADS_PATH,
     }
 }

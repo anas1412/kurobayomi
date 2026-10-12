@@ -1,6 +1,7 @@
 //! `StorageManager` (`StorageManager.kt`): the base directory, the folders under it, and the change counter that
 //! replaces the Kotlin shared flow (T-09a-049).
 
+use kuro_platform::kind::Kind;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
@@ -14,7 +15,6 @@ use tokio::sync::watch;
 use super::{BACKUPS_PATH, FONTS_PATH, LOCAL_PATH, MPV_CONFIG_PATH, SCRIPTS_PATH, SCRIPT_OPTS_PATH, SHADERS_PATH, TREE};
 use super::kind_folder;
 use crate::error::DomainError;
-use crate::kind::EntryKind;
 
 /// The preference that holds the base directory (`Preference.appStateKey("storage_dir")`).
 pub const STORAGE_DIR_KEY: &str = "__APP_STATE_storage_dir";
@@ -112,25 +112,25 @@ impl StorageManager {
     }
 
     /// The downloads folder of one kind (`Anime` or `Manga`), created if missing.
-    pub fn downloads_dir(&self, kind: EntryKind) -> Result<PathBuf, DomainError> {
+    pub fn downloads_dir(&self, kind: Kind) -> Result<PathBuf, DomainError> {
         self.dir(&[kind_folder(kind)])
     }
 
     /// The same folder as [`Self::downloads_dir`], under the configured base, without touching the disk. The download
     /// indexes and readers name it this way, so a chosen base that is unplugged reads as empty instead of as another
     /// folder.
-    pub fn downloads_path(&self, kind: EntryKind) -> PathBuf {
+    pub fn downloads_path(&self, kind: Kind) -> PathBuf {
         join_all(self.configured(), &[kind_folder(kind)])
     }
 
     /// The local manga source folder, `Local/Manga`.
     pub fn local_manga_dir(&self) -> Result<PathBuf, DomainError> {
-        self.dir(&[LOCAL_PATH, kind_folder(EntryKind::Manga)])
+        self.dir(&[LOCAL_PATH, kind_folder(Kind::Manga)])
     }
 
     /// The local anime source folder, `Local/Anime`.
     pub fn local_anime_dir(&self) -> Result<PathBuf, DomainError> {
-        self.dir(&[LOCAL_PATH, kind_folder(EntryKind::Anime)])
+        self.dir(&[LOCAL_PATH, kind_folder(Kind::Anime)])
     }
 
     pub fn mpv_config_dir(&self) -> Result<PathBuf, DomainError> {
@@ -217,10 +217,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let default = dir.path().join("Kurobayomi");
         let (_store, m) = manager(&default);
-        let downloads = m.downloads_dir(EntryKind::Manga).expect("first use creates the default base");
+        let downloads = m.downloads_dir(Kind::Manga).expect("first use creates the default base");
         assert!(downloads.is_dir() && downloads.starts_with(&default));
-        assert_eq!(m.downloads_path(EntryKind::Manga), downloads);
-        assert_eq!(m.downloads_path(EntryKind::Anime), default.join("Anime"));
+        assert_eq!(m.downloads_path(Kind::Manga), downloads);
+        assert_eq!(m.downloads_path(Kind::Anime), default.join("Anime"));
         assert_eq!(m.backups_dir().expect("backups"), default.join("Backups"));
     }
 
@@ -230,7 +230,7 @@ mod tests {
         let (_store, m) = manager(dir.path());
         m.ensure_tree().expect("tree");
         std::fs::remove_dir(dir.path().join("Anime")).expect("remove");
-        let downloads = m.downloads_dir(EntryKind::Anime).expect("accessor");
+        let downloads = m.downloads_dir(Kind::Anime).expect("accessor");
         assert!(downloads.is_dir());
         assert!(m.local_anime_dir().expect("anime").ends_with("Local/Anime"));
         assert!(m.local_manga_dir().expect("manga").ends_with("Local/Manga"));
@@ -246,8 +246,8 @@ mod tests {
         m.set_base(&base).expect("set");
         std::fs::remove_dir_all(&base).expect("unplug");
         assert!(matches!(m.base(), Err(DomainError::StorageUnavailable)));
-        assert!(matches!(m.downloads_dir(EntryKind::Manga), Err(DomainError::StorageUnavailable)));
-        assert_eq!(m.downloads_path(EntryKind::Manga), base.join("Manga"), "the path still names the chosen folder");
+        assert!(matches!(m.downloads_dir(Kind::Manga), Err(DomainError::StorageUnavailable)));
+        assert_eq!(m.downloads_path(Kind::Manga), base.join("Manga"), "the path still names the chosen folder");
         assert!(matches!(m.ensure_tree(), Err(DomainError::StorageUnavailable)));
         assert!(!base.exists(), "no folder is created for a missing base");
     }
@@ -314,7 +314,7 @@ mod tests {
         let downloads = dir.path().join("Manga");
         std::fs::remove_dir(&downloads).expect("remove");
         std::fs::write(&downloads, b"in the way").expect("file");
-        assert!(matches!(m.downloads_dir(EntryKind::Manga), Err(DomainError::Io(_))));
+        assert!(matches!(m.downloads_dir(Kind::Manga), Err(DomainError::Io(_))));
     }
 
     #[test]

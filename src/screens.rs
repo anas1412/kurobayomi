@@ -3,6 +3,7 @@
 use crate::ui::*;
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O};
+use kuro_platform::kind::Kind;
 
 pub struct Built {
     pub content: gtk::Widget,
@@ -17,8 +18,8 @@ pub fn built(content: impl IsA<gtk::Widget>, end: Vec<gtk::Widget>) -> Option<Bu
 pub fn body(id: &str) -> Option<Built> {
     match id {
         "library" => libraries(),
-        "anime_library" => Some(library(id, true)),
-        "manga_library" => Some(library(id, false)),
+        "anime_library" => Some(library(id, Kind::Anime)),
+        "manga_library" => Some(library(id, Kind::Manga)),
         "updates" => crate::updates::mount::updates().or_else(|| unavailable(id)),
         "history" => crate::updates::mount::history().or_else(|| unavailable(id)),
         "browse" => crate::browse::mount::browse().or_else(|| unavailable(id)),
@@ -74,29 +75,27 @@ pub fn build(id: &str) -> GBox {
 
 /// Whether manga row `id` belongs to the local source.
 fn is_local_manga(id: i64) -> bool {
-    crate::data::is_installed() && kuro_data::manga::MangaRepo::new(crate::data::app().db(kuro_domain::kind::EntryKind::Manga)).by_id(id).is_ok_and(|m| m.source == kuro_local::LOCAL_SOURCE_ID)
+    crate::data::is_installed() && kuro_data::manga::MangaRepo::new(crate::data::app().db(Kind::Manga)).by_id(id).is_ok_and(|m| m.source == kuro_local::LOCAL_SOURCE_ID)
 }
 
 /// Opens the details page of entry `id`, by id. A local manga is opened through the local flow, which also remembers
 /// the id for the reader to tell two local folders with one name apart; any other manga is a plain entry page.
-pub fn open_entry(anime: bool, id: i64) {
-    if anime {
-        crate::entry_core::anime::route::open(id);
-    } else if is_local_manga(id) {
-        crate::local_flow::open::entry(id);
-    } else {
-        crate::entry_core::route::open(id);
+pub fn open_entry(kind: Kind, id: i64) {
+    match kind {
+        Kind::Anime => crate::entry_core::anime::route::open(id),
+        Kind::Manga if is_local_manga(id) => crate::local_flow::open::entry(id),
+        Kind::Manga => crate::entry_core::route::open(id),
     }
 }
 
 /// Opens unit `unit_id` (a chapter or an episode row id) of entry `entry_id` in the reader or the player, by id. A
 /// chapter opens in the reader. An episode plays from its file, or from the online source that owns it; when neither
 /// can, a toast says why.
-pub fn open_unit(anime: bool, entry_id: i64, unit_id: i64) {
+pub fn open_unit(kind: Kind, entry_id: i64, unit_id: i64) {
     if !crate::data::is_installed() {
         return;
     }
-    if !anime {
+    if !kind.is_anime() {
         push(&if is_local_manga(entry_id) { crate::local_flow::reader::open_local_chapter(entry_id, unit_id) } else { crate::reader::launch::open_chapter(entry_id, unit_id) });
         return;
     }
@@ -115,8 +114,8 @@ pub fn open_unit(anime: bool, entry_id: i64, unit_id: i64) {
 /// Opens a unit by its entry's title and its own name, which finds only a local entry's file. Kept for
 /// `entry_core::anime::route::open_player`, whose fallback should call [`open_unit`] with the episode id instead.
 // ponytail: delete when entry_core opens its fallback by id.
-pub fn open_media(anime: bool, title: &str, unit: &str) {
-    if anime {
+pub fn open_media(kind: Kind, title: &str, unit: &str) {
+    if kind.is_anime() {
         if !crate::local_flow::open::open_episode(title, unit) {
             crate::toast::notify(crate::reader::strings::source_not_installed(title));
         }
@@ -145,11 +144,11 @@ fn empty_built(id: &str) -> Built {
 
 /// A pushed page with a view per kind: the Anime | Manga switch goes in the page's one header row (as an `end` widget
 /// of `ui::page`), not on a row of its own under it. The stack pages are named `anime` and `manga`.
-fn kind_switch(f: impl Fn(bool) -> gtk::Widget) -> (gtk::Stack, gtk::StackSwitcher) {
+fn kind_switch(f: impl Fn(Kind) -> gtk::Widget) -> (gtk::Stack, gtk::StackSwitcher) {
     let stack = gtk::Stack::new();
     stack.set_transition_type(gtk::StackTransitionType::Crossfade);
-    stack.add_titled(&f(true), Some("anime"), "Anime");
-    stack.add_titled(&f(false), Some("manga"), "Manga");
+    stack.add_titled(&f(Kind::Anime), Some("anime"), "Anime");
+    stack.add_titled(&f(Kind::Manga), Some("manga"), "Manga");
     let switch = gtk::StackSwitcher::builder().stack(&stack).build();
     (stack, switch)
 }
@@ -205,7 +204,7 @@ pub(crate) fn fab(overlay: &gtk::Overlay, label: &str, icon: &str) -> Button {
 /// The Library destination as a whole page: one header row (Anime | Manga switch, the visible kind's search, its
 /// refresh and menu) over the two library views (docs/design/main-window.md). The page has no title of its own.
 fn libraries() -> Option<Built> {
-    built(library_page([true, false].map(|anime| library(if anime { "anime_library" } else { "manga_library" }, anime))), vec![])
+    built(library_page([Kind::Anime, Kind::Manga].map(|kind| library(if kind.is_anime() { "anime_library" } else { "manga_library" }, kind))), vec![])
 }
 
 /// The Library page from the Anime and the Manga views, in that order. Updates and History use the same header
@@ -242,8 +241,8 @@ pub(crate) fn library_page(views: [Built; 2]) -> GBox {
     page
 }
 
-fn library(id: &str, anime: bool) -> Built {
-    crate::library::mount::build(anime).unwrap_or_else(|| empty_built(id))
+fn library(id: &str, kind: Kind) -> Built {
+    crate::library::mount::build(kind).unwrap_or_else(|| empty_built(id))
 }
 
 // ---------- downloads & categories ----------
@@ -264,7 +263,7 @@ fn categories() -> Option<Built> {
     let (kinds, switch) = kind_switch(crate::live::categories_content);
     let add = icon_button("list-add-symbolic", "Add category");
     let visible = kinds.clone();
-    add.connect_clicked(move |_| crate::live::add_category(visible.visible_child_name().as_deref() == Some("anime")));
+    add.connect_clicked(move |_| crate::live::add_category(Kind::from_anime(visible.visible_child_name().as_deref() == Some("anime"))));
     built(kinds, vec![switch.upcast(), add.upcast()])
 }
 
@@ -422,13 +421,12 @@ mod tests {
         use kuro_data::chapter::{Chapter, ChapterRepo};
         use kuro_data::episode::{Episode, EpisodeRepo};
         use kuro_data::manga::{Manga, MangaRepo};
-        use kuro_domain::kind::EntryKind;
         alone::run(module_path!(), "opening_by_id_reaches_the_entry_page_the_reader_and_the_source_not_installed_toast", |ctx| {
             let (nav, _window) = crate::testing::nav();
             let toast = alone::toast_label();
             let app = crate::data::app();
             let top = || nav.visible_child().map(|c| c.widget_name().to_string());
-            let (mangas, chapters) = (MangaRepo::new(app.db(EntryKind::Manga)), ChapterRepo::new(app.db(EntryKind::Manga)));
+            let (mangas, chapters) = (MangaRepo::new(app.db(Kind::Manga)), ChapterRepo::new(app.db(Kind::Manga)));
             let manga = |source: i64, url: &str| {
                 let id = mangas.insert(&Manga { source, url: url.into(), title: url.into(), ..Manga::create() }).expect("manga");
                 let added = chapters.add_all(&[Chapter { manga_id: id, url: "/c1".into(), name: "Chapter 1".into(), chapter_number: 1.0, ..Chapter::create() }]).expect("chapter");
@@ -441,18 +439,18 @@ mod tests {
 
             // a remote manga's page leaves the reader's local-entry memory alone; a local one sets it
             assert_eq!(crate::local_flow::open::current(), None);
-            open_entry(false, remote);
+            open_entry(Kind::Manga, remote);
             assert!(alone::pump(ctx, || top().as_deref() == Some("screen:manga_entry_details")), "a remote manga opens its entry page");
             assert_eq!(crate::local_flow::open::current(), None, "a remote manga is not the local entry the reader disambiguates");
-            open_entry(false, local);
+            open_entry(Kind::Manga, local);
             assert!(alone::pump(ctx, || crate::local_flow::open::current() == Some(local)), "a local manga is remembered for the reader");
             assert_eq!(top().as_deref(), Some("screen:manga_entry_details"));
 
             // a chapter opens in the reader, from the online or the local path
-            open_unit(false, remote, remote_chapter);
+            open_unit(Kind::Manga, remote, remote_chapter);
             assert!(alone::pump(ctx, || top().as_deref() == Some("screen:reader")), "a remote chapter opens the reader");
             crate::testing::nav(); // an empty stack, so the second reader is the one that is seen
-            open_unit(false, local, local_chapter);
+            open_unit(Kind::Manga, local, local_chapter);
             assert!(alone::pump(ctx, || top().as_deref() == Some("screen:reader")), "a local chapter opens the reader");
 
             // an episode of a source that is not installed says so, and opens nothing
@@ -460,10 +458,10 @@ mod tests {
             let episodes = EpisodeRepo::new(app.anime_db.clone());
             let episode = episodes.add_all(&[Episode { anime_id: anime, url: "/e1".into(), name: "Episode 1".into(), episode_number: 1.0, ..Episode::create() }]).expect("episode")[0].id;
             let before = top();
-            open_unit(true, anime, episode);
+            open_unit(Kind::Anime, anime, episode);
             assert!(alone::pump(ctx, || toast.text() == crate::reader::strings::source_not_installed("7")), "the toast names the missing source, got {:?}", toast.text());
             assert_eq!(top(), before, "no page was opened");
-            open_entry(true, anime);
+            open_entry(Kind::Anime, anime);
             assert!(alone::pump(ctx, || top().as_deref() == Some("screen:anime_entry_details")), "an anime opens its entry page by id");
         });
     }

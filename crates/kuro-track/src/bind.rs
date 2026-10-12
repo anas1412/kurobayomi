@@ -2,6 +2,7 @@
 //! `register_anime` is the plain bind; `bind_anime` and `bind_manga` add the read history and the progress sync;
 //! `bind_enhanced_*` match the entry against the installed sources.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use tokio::task::JoinHandle;
@@ -13,7 +14,7 @@ use crate::error::redact;
 use crate::events::TrackEvent;
 use crate::messages::MsgKey;
 use crate::model::search::{AnimeTrackSearch, MangaTrackSearch};
-use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 use crate::remote::{
     set_anime_start_date, set_last_chapter_read, set_last_episode_seen, set_manga_start_date,
 };

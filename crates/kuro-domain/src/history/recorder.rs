@@ -2,8 +2,8 @@
 //! passes the clock in epoch ms and writes the returned [`HistoryUpdate`] through [`super::repo::HistoryRepo`].
 //! Incognito mode returns no update at all.
 
+use kuro_platform::kind::Kind;
 use crate::history::model::HistoryUpdate;
-use crate::kind::EntryKind;
 
 /// A reading session never counts for more than this (`12 h`), so a suspended laptop adds no days.
 pub const MAX_SESSION_MS: i64 = 12 * 60 * 60 * 1000;
@@ -29,7 +29,7 @@ impl ReadTimer {
         if incognito {
             return None;
         }
-        Some(HistoryUpdate { kind: EntryKind::Manga, item_id: chapter_id, at: now_ms, session_ms })
+        Some(HistoryUpdate { kind: Kind::Manga, item_id: chapter_id, at: now_ms, session_ms })
     }
 }
 
@@ -53,7 +53,7 @@ impl WatchTicker {
             return None;
         }
         self.last_write_ms = Some(now_ms);
-        Some(HistoryUpdate { kind: EntryKind::Anime, item_id: episode_id, at: now_ms, session_ms: 0 })
+        Some(HistoryUpdate { kind: Kind::Anime, item_id: episode_id, at: now_ms, session_ms: 0 })
     }
 }
 

@@ -90,7 +90,7 @@ pub fn install_episode_options() {
 mod tests {
     use std::cell::Cell;
 
-    use kuro_domain::kind::EntryKind;
+    use kuro_platform::kind::Kind;
     use kuro_domain::updates::model::UpdateRow;
 
     use super::*;
@@ -100,7 +100,7 @@ mod tests {
     fn row(id: i64) -> FeedRow {
         FeedRow {
             row: UpdateRow {
-                kind: EntryKind::Anime,
+                kind: Kind::Anime,
                 entry_id: 4,
                 entry_title: "T".into(),
                 item_id: id,

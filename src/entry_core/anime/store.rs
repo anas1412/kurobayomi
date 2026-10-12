@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use kuro_data::DataResult;
-use kuro_data::category::{Category, CategoryKind, CategoryRepo};
+use kuro_data::category::{Category, CategoryRepo};
 use kuro_data::anime::{Anime, AnimeRepo, AnimeUpdate, SeasonAnime};
 use kuro_data::episode::{Episode, EpisodeRepo, EpisodeUpdate};
 use kuro_db::handle::Db;
@@ -21,7 +21,7 @@ use super::actions::Mark;
 use crate::entry_core::favorite::{AddRoute, route_add};
 use crate::entry_core::tracking::facts::Summary;
 use crate::entry_core::tracking::session;
-use kuro_track::model::Kind;
+use kuro_platform::kind::Kind;
 
 /// Typed access to the tables of one anime page. Cheap to clone: it shares one `Db`.
 #[derive(Clone)]
@@ -37,7 +37,7 @@ impl AnimeStore {
         Self {
             animes: AnimeRepo::new(Arc::clone(&db)),
             episodes: EpisodeRepo::new(Arc::clone(&db)),
-            categories: CategoryRepo::new(Arc::clone(&db), CategoryKind::Anime),
+            categories: CategoryRepo::new(Arc::clone(&db), Kind::Anime),
             db,
         }
     }
@@ -310,7 +310,7 @@ mod tests {
     fn the_add_route_takes_the_default_category_and_asks_when_it_is_unset_or_deleted() {
         // T-39b-026: default category exists, default is Uncategorized, default unset or deleted
         let (_dir, store, id) = with_episodes(false, true, 0, 0);
-        let repo = CategoryRepo::new(store.db(), CategoryKind::Anime);
+        let repo = CategoryRepo::new(store.db(), Kind::Anime);
         let cat = repo.insert(&kuro_data::category::Category { id: 0, name: "Airing".into(), order: 1, flags: 0, hidden: false }).unwrap();
         let prefs = PrefStore::in_memory();
         kuro_prefs::library::LibraryPrefs::new(prefs.clone()).default_anime_category.set(cat as i32).unwrap();
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn categories_list_every_row_with_the_links_of_the_entry_and_set_replaces_them() {
         let (_dir, store, id) = with_episodes(true, true, 0, 0);
-        let repo = CategoryRepo::new(store.db(), CategoryKind::Anime);
+        let repo = CategoryRepo::new(store.db(), Kind::Anime);
         let a = repo.insert(&kuro_data::category::Category { id: 0, name: "Airing".into(), order: 1, flags: 0, hidden: false }).unwrap();
         let b = repo.insert(&kuro_data::category::Category { id: 0, name: "Later".into(), order: 2, flags: 0, hidden: false }).unwrap();
         store.set_categories(id, &[a]).unwrap();

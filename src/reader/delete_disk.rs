@@ -11,9 +11,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use kuro_data::category::{CategoryKind, CategoryRepo};
+use kuro_data::category::CategoryRepo;
 use kuro_data::chapter::{Chapter, ChapterRepo};
 use kuro_data::manga::MangaRepo;
+use kuro_platform::kind::Kind;
 use kuro_db::Db;
 use kuro_downloads::index::DownloadIndex;
 use kuro_downloads::manager::{DeleteRules, chapters_to_delete};
@@ -87,7 +88,7 @@ impl DiskDeleter {
         if is_local_source(manga.source) {
             return Ok(false);
         }
-        let categories: Vec<i64> = CategoryRepo::new(Arc::clone(&self.db), CategoryKind::Manga)
+        let categories: Vec<i64> = CategoryRepo::new(Arc::clone(&self.db), Kind::Manga)
             .by_entry(manga.id)
             .map_err(|e| e.to_string())?
             .iter()

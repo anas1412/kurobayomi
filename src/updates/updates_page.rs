@@ -1,6 +1,8 @@
 //! Updates page behaviour (T-42a-034, T-42a-038): what Escape and the cover do in selection mode, which controls stay
 //! enabled, what a finished read-state write leaves behind, and the page load state with its error row and retry.
 
+use kuro_platform::kind::Kind;
+
 use crate::updates::copy;
 use crate::updates::format;
 use crate::updates::list::PageState;
@@ -73,12 +75,12 @@ pub fn row_alpha(done: bool) -> f64 {
 
 /// The progress text of a row: only while unread and past the start (E-U10). Manga reads "Page: N" with N one-based
 /// (E-U11). Anime reads "position/total" in the clock form of `progress_mmss`, a zero total included (E-U12, E-U13).
-pub fn progress_text(anime: bool, done: bool, progress: i64, total_ms: i64) -> Option<String> {
+pub fn progress_text(kind: Kind, done: bool, progress: i64, total_ms: i64) -> Option<String> {
     use kuro_i18n::{Arg, MsgKey, trf};
     if done || progress <= 0 {
         return None;
     }
-    Some(if anime {
+    Some(if kind.is_anime() {
         trf(
             MsgKey::episode_progress,
             &[("arg1", Arg::Str(&format::progress_mmss(progress))), ("arg2", Arg::Str(&format::progress_mmss(total_ms)))],
@@ -120,27 +122,27 @@ mod tests {
 
     #[test]
     fn progress_only_when_unread_and_positive() {
-        assert_eq!(progress_text(false, true, 4, 0), None, "a read row never shows progress");
-        assert_eq!(progress_text(false, false, 0, 0), None);
-        assert_eq!(progress_text(true, true, 5_000, 9_000), None);
-        assert_eq!(progress_text(true, false, 0, 9_000), None);
+        assert_eq!(progress_text(Kind::Manga, true, 4, 0), None, "a read row never shows progress");
+        assert_eq!(progress_text(Kind::Manga, false, 0, 0), None);
+        assert_eq!(progress_text(Kind::Anime, true, 5_000, 9_000), None);
+        assert_eq!(progress_text(Kind::Anime, false, 0, 9_000), None);
     }
 
     #[test]
     fn manga_progress_is_one_based() {
-        assert_eq!(progress_text(false, false, 4, 0).as_deref(), Some("Page: 5"));
-        assert_eq!(progress_text(false, false, 1, 0).as_deref(), Some("Page: 2"));
+        assert_eq!(progress_text(Kind::Manga, false, 4, 0).as_deref(), Some("Page: 5"));
+        assert_eq!(progress_text(Kind::Manga, false, 1, 0).as_deref(), Some("Page: 2"));
     }
 
     #[test]
     fn format_progress_thresholds() {
-        assert_eq!(progress_text(true, false, 3_600_000, 3_600_000).as_deref(), Some("60:00/60:00"));
-        assert_eq!(progress_text(true, false, 3_600_001, 7_200_000).as_deref(), Some("1:00:00/2:00:00"));
+        assert_eq!(progress_text(Kind::Anime, false, 3_600_000, 3_600_000).as_deref(), Some("60:00/60:00"));
+        assert_eq!(progress_text(Kind::Anime, false, 3_600_001, 7_200_000).as_deref(), Some("1:00:00/2:00:00"));
     }
 
     #[test]
     fn anime_progress_with_zero_total() {
-        assert_eq!(progress_text(true, false, 754_000, 0).as_deref(), Some("12:34/0:00"));
+        assert_eq!(progress_text(Kind::Anime, false, 754_000, 0).as_deref(), Some("12:34/0:00"));
     }
 
     #[test]

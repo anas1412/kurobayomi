@@ -2,7 +2,7 @@
 //! these plain values, so they can be tested without a live tracker; [`facts_of`] is the only function that calls a
 //! tracker. Upstream: `TrackerManager` and the `mapToTrackItem` rules of the track sheet (behaviour 3.4, 2.8).
 
-use kuro_track::model::Kind;
+use kuro_platform::kind::Kind;
 use kuro_track::tracker::Tracker;
 
 /// The facts of one tracker for one entry.

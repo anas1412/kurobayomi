@@ -3,6 +3,7 @@
 //! what the repositories call; `read_async`/`write_async` run the same closures on tokio's blocking
 //! pool. Nothing here needs a runtime, except those two and the subscriptions (`subscribe.rs`).
 
+use kuro_platform::kind::Kind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -39,32 +40,32 @@ struct Upkeep {
     optimized_at: Instant,
 }
 
-/// Which database file a handle opens.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DbKind {
-    Manga,
-    Anime,
+/// What differs between the two database files.
+pub trait DbKindExt {
+    /// File name inside the data directory.
+    fn file_name(self) -> &'static str;
+    /// The file of this kind inside `data_dir`.
+    fn path(self, data_dir: &Path) -> PathBuf;
+    /// `PRAGMA user_version` a fresh file of this kind is created at.
+    fn schema_version(self) -> i64;
 }
 
-impl DbKind {
-    /// File name inside the data directory.
-    pub const fn file_name(self) -> &'static str {
+impl DbKindExt for Kind {
+    fn file_name(self) -> &'static str {
         match self {
             Self::Manga => schema_manga::MANGA_DB_FILE,
             Self::Anime => crate::anime::consts::FILE_NAME,
         }
     }
 
-    /// The file of this kind inside `data_dir`.
-    pub fn path(self, data_dir: &Path) -> PathBuf {
+    fn path(self, data_dir: &Path) -> PathBuf {
         match self {
             Self::Manga => schema_manga::db_path(data_dir),
             Self::Anime => schema_anime::db_path(data_dir),
         }
     }
 
-    /// `PRAGMA user_version` a fresh file of this kind is created at.
-    pub const fn schema_version(self) -> i64 {
+    fn schema_version(self) -> i64 {
         match self {
             Self::Manga => crate::schema::SCHEMA_VERSION,
             Self::Anime => crate::anime::consts::SCHEMA_VERSION,
@@ -89,11 +90,11 @@ pub struct Db {
 impl Db {
     /// Opens the database of `kind` in the data directory of `paths` (`<data_dir>/manga.db` or
     /// `<data_dir>/anime.db`), creating or migrating it through the schema's open gate.
-    pub fn open(kind: DbKind, paths: &dyn Paths) -> DbResult<Arc<Self>> {
+    pub fn open(kind: Kind, paths: &dyn Paths) -> DbResult<Arc<Self>> {
         let path = kind.path(&paths.data_dir());
         let writer = match kind {
-            DbKind::Manga => schema_manga::open(&path)?,
-            DbKind::Anime => schema_anime::open(&path)?,
+            Kind::Manga => schema_manga::open(&path)?,
+            Kind::Anime => schema_anime::open(&path)?,
         };
         Ok(Arc::new(Self::new(&path, writer)?))
     }
@@ -292,8 +293,8 @@ mod tests {
     #[test]
     fn the_dirty_marker_is_down_after_open_and_up_after_close() {
         let paths = kuro_testkit::TempPaths::new().unwrap();
-        let db = Db::open(DbKind::Manga, &paths).unwrap();
-        let marker = crate::open::dirty_marker(&DbKind::Manga.path(&paths.data_dir()));
+        let db = Db::open(Kind::Manga, &paths).unwrap();
+        let marker = crate::open::dirty_marker(&Kind::Manga.path(&paths.data_dir()));
         assert!(marker.is_file(), "created on open");
         db.close().unwrap();
         assert!(!marker.exists(), "removed on clean shutdown");
@@ -478,7 +479,7 @@ mod publication_tests {
     #[test]
     fn open_creates_each_file_in_the_data_dir_with_the_connection_pragmas() {
         let paths = TempPaths::new().unwrap();
-        for kind in [DbKind::Manga, DbKind::Anime] {
+        for kind in [Kind::Manga, Kind::Anime] {
             let db = Db::open(kind, &paths).unwrap();
             assert!(kind.path(&paths.data_dir()).is_file());
             db.read(|c| {
@@ -493,10 +494,10 @@ mod publication_tests {
             })
             .unwrap();
         }
-        assert_eq!(DbKind::Anime.file_name(), "anime.db");
-        assert_eq!(DbKind::Anime.schema_version(), 140);
-        assert_eq!(DbKind::Manga.file_name(), "manga.db");
-        assert_eq!(DbKind::Manga.schema_version(), 34);
+        assert_eq!(Kind::Anime.file_name(), "anime.db");
+        assert_eq!(Kind::Anime.schema_version(), 140);
+        assert_eq!(Kind::Manga.file_name(), "manga.db");
+        assert_eq!(Kind::Manga.schema_version(), 34);
     }
 
     #[tokio::test]
@@ -540,8 +541,8 @@ mod publication_tests {
     #[test]
     fn a_commit_on_one_database_never_publishes_on_the_other() {
         let paths = TempPaths::new().unwrap();
-        let manga = Db::open(DbKind::Manga, &paths).unwrap();
-        let anime = Db::open(DbKind::Anime, &paths).unwrap();
+        let manga = Db::open(Kind::Manga, &paths).unwrap();
+        let anime = Db::open(Kind::Anime, &paths).unwrap();
         let mut manga_rx = manga.changes.subscribe();
         let mut anime_rx = anime.changes.subscribe();
         manga.write(|tx| Ok(categories::insert(tx, "Reading", 1, 0)?)).unwrap();

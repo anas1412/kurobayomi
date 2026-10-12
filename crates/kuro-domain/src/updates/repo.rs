@@ -2,6 +2,7 @@
 //! newest fetch first, at most [`crate::UPDATES_LIMIT`] rows. The SQL is in `kuro-db` (the views filter favourites
 //! and `date_fetch > date_added`), so the excluded-scanlator filter does not apply here (documented upstream).
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +14,6 @@ use kuro_db::subscribe::Subscription;
 
 use super::model::UpdateRow;
 use crate::error::DomainError;
-use crate::kind::EntryKind;
 
 /// Tables the feed reads; a write to any of them re-runs the feed.
 const MANGA_TABLES: &[&str] = &["chapters", "mangas"];
@@ -27,7 +27,7 @@ pub struct UpdatesRepo {
 
 fn manga_row(r: kuro_db::statements_manga::UpdateViewRow) -> UpdateRow {
     UpdateRow {
-        kind: EntryKind::Manga,
+        kind: Kind::Manga,
         entry_id: r.manga_id,
         entry_title: r.manga_title,
         item_id: r.chapter_id,
@@ -48,7 +48,7 @@ fn manga_row(r: kuro_db::statements_manga::UpdateViewRow) -> UpdateRow {
 
 fn anime_row(r: anime::AnimeUpdateRow) -> UpdateRow {
     UpdateRow {
-        kind: EntryKind::Anime,
+        kind: Kind::Anime,
         entry_id: r.anime_id,
         entry_title: r.anime_title,
         item_id: r.episode_id,
@@ -68,21 +68,21 @@ fn anime_row(r: anime::AnimeUpdateRow) -> UpdateRow {
 }
 
 /// The rows of the feed whose read (anime: seen) flag equals `done`, uploaded after `after`, at most the feed limit.
-fn rows_with_read(c: &Connection, kind: EntryKind, done: bool, after: i64) -> rusqlite::Result<Vec<UpdateRow>> {
+fn rows_with_read(c: &Connection, kind: Kind, done: bool, after: i64) -> rusqlite::Result<Vec<UpdateRow>> {
     let limit = crate::UPDATES_LIMIT;
     Ok(match kind {
-        EntryKind::Manga => manga_views::get_updates_by_read_status(c, done, after, limit)?
+        Kind::Manga => manga_views::get_updates_by_read_status(c, done, after, limit)?
             .into_iter()
             .map(manga_row)
             .collect(),
-        EntryKind::Anime => anime::updates_by_seen(c, done, after, limit)?.into_iter().map(anime_row).collect(),
+        Kind::Anime => anime::updates_by_seen(c, done, after, limit)?.into_iter().map(anime_row).collect(),
     })
 }
 
-fn feed_tables(kind: EntryKind) -> &'static [&'static str] {
+fn feed_tables(kind: Kind) -> &'static [&'static str] {
     match kind {
-        EntryKind::Manga => MANGA_TABLES,
-        EntryKind::Anime => ANIME_TABLES,
+        Kind::Manga => MANGA_TABLES,
+        Kind::Anime => ANIME_TABLES,
     }
 }
 
@@ -99,16 +99,16 @@ impl UpdatesRepo {
     }
 
     /// Every feed row uploaded after `after` (epoch ms), read or not.
-    pub fn recent(&self, kind: EntryKind, after: i64) -> Result<Vec<UpdateRow>, DomainError> {
+    pub fn recent(&self, kind: Kind, after: i64) -> Result<Vec<UpdateRow>, DomainError> {
         let limit = crate::UPDATES_LIMIT;
         Ok(order(match kind {
-            EntryKind::Manga => self
+            Kind::Manga => self
                 .db
                 .read(|c| Ok(manga_views::get_recent_updates(c, after, limit)?))?
                 .into_iter()
                 .map(manga_row)
                 .collect(),
-            EntryKind::Anime => {
+            Kind::Anime => {
                 self.db.read(|c| Ok(anime::recent_updates(c, after, limit)?))?.into_iter().map(anime_row).collect()
             }
         }))
@@ -116,23 +116,23 @@ impl UpdatesRepo {
 
     /// The feed rows whose read (or seen) flag equals `done`, in the feed order. Anime uses its `seen` flag.
     /// Kept for parity with the Kotlin repository, which has no caller in the first release.
-    pub fn with_read(&self, kind: EntryKind, done: bool, after: i64) -> Result<Vec<UpdateRow>, DomainError> {
+    pub fn with_read(&self, kind: Kind, done: bool, after: i64) -> Result<Vec<UpdateRow>, DomainError> {
         Ok(order(self.db.read(|c| Ok(rows_with_read(c, kind, done, after)?))?))
     }
 
     /// Live feed of [`UpdatesRepo::recent`]. It publishes after each change to the feed's tables.
-    pub fn watch_recent(&self, kind: EntryKind, after: i64) -> Subscription<Vec<UpdateRow>> {
+    pub fn watch_recent(&self, kind: Kind, after: i64) -> Subscription<Vec<UpdateRow>> {
         let tables = match kind {
-            EntryKind::Manga => MANGA_TABLES,
-            EntryKind::Anime => ANIME_TABLES,
+            Kind::Manga => MANGA_TABLES,
+            Kind::Anime => ANIME_TABLES,
         };
         self.db.subscribe(tables, FEED_DEBOUNCE, move |c| {
             let rows: Vec<UpdateRow> = match kind {
-                EntryKind::Manga => manga_views::get_recent_updates(c, after, crate::UPDATES_LIMIT)?
+                Kind::Manga => manga_views::get_recent_updates(c, after, crate::UPDATES_LIMIT)?
                     .into_iter()
                     .map(manga_row)
                     .collect(),
-                EntryKind::Anime => {
+                Kind::Anime => {
                     anime::recent_updates(c, after, crate::UPDATES_LIMIT)?.into_iter().map(anime_row).collect()
                 }
             };
@@ -141,7 +141,7 @@ impl UpdatesRepo {
     }
 
     /// Live feed of [`UpdatesRepo::with_read`], published again after each change to the feed's tables.
-    pub fn watch_with_read(&self, kind: EntryKind, done: bool, after: i64) -> Subscription<Vec<UpdateRow>> {
+    pub fn watch_with_read(&self, kind: Kind, done: bool, after: i64) -> Subscription<Vec<UpdateRow>> {
         self.db.subscribe(feed_tables(kind), FEED_DEBOUNCE, move |c| Ok(order(rows_with_read(c, kind, done, after)?)))
     }
 }
@@ -192,9 +192,9 @@ mod tests {
         chapter(&db, m, "d", 4000, 6000, true);
         chapter(&db, n, "e", 9000, 9000, false);
         let repo = UpdatesRepo::new(db.clone());
-        assert_eq!(names(&repo.recent(EntryKind::Manga, 4000).unwrap()), vec!["d", "b"]);
-        assert_eq!(names(&repo.with_read(EntryKind::Manga, false, 4000).unwrap()), vec!["b"]);
-        assert_eq!(names(&repo.with_read(EntryKind::Manga, true, 4000).unwrap()), vec!["d"]);
+        assert_eq!(names(&repo.recent(Kind::Manga, 4000).unwrap()), vec!["d", "b"]);
+        assert_eq!(names(&repo.with_read(Kind::Manga, false, 4000).unwrap()), vec!["b"]);
+        assert_eq!(names(&repo.with_read(Kind::Manga, true, 4000).unwrap()), vec!["d"]);
     }
 
     /// The anime twin reads `seen`, not `read`, and keeps the same window.
@@ -223,8 +223,8 @@ mod tests {
         })
         .unwrap();
         let repo = UpdatesRepo::new(db.clone());
-        assert_eq!(names(&repo.with_read(EntryKind::Anime, false, 1000).unwrap()), vec!["new"]);
-        assert_eq!(names(&repo.with_read(EntryKind::Anime, true, 1000).unwrap()), vec!["done"]);
+        assert_eq!(names(&repo.with_read(Kind::Anime, false, 1000).unwrap()), vec!["new"]);
+        assert_eq!(names(&repo.with_read(Kind::Anime, true, 1000).unwrap()), vec!["done"]);
     }
 
     #[tokio::test]
@@ -232,7 +232,7 @@ mod tests {
         let (_d, db) = manga_db();
         let m = manga(&db, "M", true, 1000);
         chapter(&db, m, "b", 2000, 5000, false);
-        let mut sub = UpdatesRepo::new(db.clone()).watch_with_read(EntryKind::Manga, false, 1000);
+        let mut sub = UpdatesRepo::new(db.clone()).watch_with_read(Kind::Manga, false, 1000);
         let first = tokio::time::timeout(Duration::from_millis(500), sub.changed()).await.unwrap().unwrap().unwrap();
         assert_eq!(names(&first), vec!["b"]);
         chapter(&db, m, "c", 3000, 5000, false);
@@ -253,7 +253,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(names(&repo.recent(EntryKind::Manga, 4000).unwrap()), vec!["d"]);
+        assert_eq!(names(&repo.recent(Kind::Manga, 4000).unwrap()), vec!["d"]);
     }
 
     #[test]
@@ -263,7 +263,7 @@ mod tests {
         for i in 0..600 {
             chapter(&db, m, &format!("c{i}"), 1000 + i, 5000, false);
         }
-        let rows = UpdatesRepo::new(db.clone()).recent(EntryKind::Manga, 0).unwrap();
+        let rows = UpdatesRepo::new(db.clone()).recent(Kind::Manga, 0).unwrap();
         assert_eq!(rows.len(), 500);
         assert_eq!(rows[0].date_fetch, 1599);
         assert!(rows.windows(2).all(|w| w[0].date_fetch >= w[1].date_fetch));

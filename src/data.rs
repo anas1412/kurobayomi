@@ -10,7 +10,7 @@ use kuro_db::handle::Db;
 use kuro_domain::category::backup::startup_cleanup;
 use kuro_domain::category::repo::CategoryRepo;
 use kuro_domain::category::service::CategoryService;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_platform::linux::LinuxPaths;
 use kuro_platform::paths::Paths as _;
 use kuro_prefs::base::BasePrefs;
@@ -31,18 +31,18 @@ pub struct App {
 
 impl App {
     /// The category service of one kind.
-    pub fn categories(&self, kind: EntryKind) -> &CategoryService {
+    pub fn categories(&self, kind: Kind) -> &CategoryService {
         match kind {
-            EntryKind::Manga => &self.manga_categories,
-            EntryKind::Anime => &self.anime_categories,
+            Kind::Manga => &self.manga_categories,
+            Kind::Anime => &self.anime_categories,
         }
     }
 
     /// The database of one kind.
-    pub fn db(&self, kind: EntryKind) -> Arc<Db> {
+    pub fn db(&self, kind: Kind) -> Arc<Db> {
         match kind {
-            EntryKind::Manga => Arc::clone(&self.manga_db),
-            EntryKind::Anime => Arc::clone(&self.anime_db),
+            Kind::Manga => Arc::clone(&self.manga_db),
+            Kind::Anime => Arc::clone(&self.anime_db),
         }
     }
 }
@@ -137,15 +137,15 @@ pub fn install(opened: Opened) -> Result<(), String> {
     let Opened { prefs_store, manga_db, anime_db } = opened;
     watch_save_failures(&prefs_store);
     let prefs = Arc::new(LibraryPrefs::new(prefs_store.clone()));
-    let known_manga = known_ids(&CategoryRepo::new(Arc::clone(&manga_db), EntryKind::Manga))?;
-    let known_anime = known_ids(&CategoryRepo::new(Arc::clone(&anime_db), EntryKind::Anime))?;
+    let known_manga = known_ids(&CategoryRepo::new(Arc::clone(&manga_db), Kind::Manga))?;
+    let known_anime = known_ids(&CategoryRepo::new(Arc::clone(&anime_db), Kind::Anime))?;
     startup_cleanup(&prefs_store, &prefs, &known_manga, &known_anime);
 
     let base = BasePrefs::new(prefs_store.clone());
     crate::startup::probe_texture_limit();
     let app = App {
-        manga_categories: CategoryService::new(Arc::clone(&manga_db), EntryKind::Manga, Arc::clone(&prefs)),
-        anime_categories: CategoryService::new(Arc::clone(&anime_db), EntryKind::Anime, Arc::clone(&prefs)),
+        manga_categories: CategoryService::new(Arc::clone(&manga_db), Kind::Manga, Arc::clone(&prefs)),
+        anime_categories: CategoryService::new(Arc::clone(&anime_db), Kind::Anime, Arc::clone(&prefs)),
         manga_db,
         anime_db,
         base,

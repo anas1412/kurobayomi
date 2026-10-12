@@ -1,7 +1,8 @@
 mod common;
 
+use kuro_platform::kind::Kind;
 use common::{ANIME, MANGA, with};
-use kuro_source_scrape::{Kind, Recipe, load_dir};
+use kuro_source_scrape::{Recipe, load_dir};
 use url::Url;
 
 #[test]

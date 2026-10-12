@@ -13,6 +13,7 @@ use std::sync::{Arc, OnceLock};
 use gtk::prelude::*;
 use gtk::{gdk, glib};
 use kuro_images::art::ArtRef;
+use kuro_platform::kind::Kind;
 use kuro_images::cover_image::{CoverBinding, CoverState};
 use kuro_images::fetch::{ImageService, LoadRequest};
 use kuro_images::options::LoadOptions;
@@ -55,7 +56,7 @@ pub const TRACKER_COVER_SOURCE: i64 = -2;
 pub fn tracker_search_cover(width: i32, height: i32, cover_url: Option<&str>) -> CoverView {
     let view = CoverView::new(width, height);
     view.load(ArtRef {
-        owner: kuro_images::art::Owner::Manga,
+        owner: Kind::Manga,
         entry_id: 0,
         source_id: TRACKER_COVER_SOURCE,
         kind: kuro_images::art::ArtKind::Cover,
@@ -135,12 +136,12 @@ impl CoverView {
 
 #[cfg(test)]
 mod tests {
-    use kuro_images::art::{ArtKind, Owner};
+    use kuro_images::art::ArtKind;
 
     use super::*;
 
     fn art(last_modified: i64) -> ArtRef {
-        ArtRef { owner: Owner::Anime, entry_id: 1, source_id: 7, kind: ArtKind::Cover, url: Some("https://x/a.jpg".into()), favorite: false, last_modified }
+        ArtRef { owner: Kind::Anime, entry_id: 1, source_id: 7, kind: ArtKind::Cover, url: Some("https://x/a.jpg".into()), favorite: false, last_modified }
     }
 
     #[test]

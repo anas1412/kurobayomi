@@ -1,11 +1,11 @@
 //! The update feed row of both kinds: one chapter or episode of a favourite entry, fetched recently.
 
-use crate::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 /// One line of the updates feed (`MangaUpdatesWithRelations` / `AnimeUpdatesWithRelations`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateRow {
-    pub kind: EntryKind,
+    pub kind: Kind,
     pub entry_id: i64,
     pub entry_title: String,
     pub item_id: i64,

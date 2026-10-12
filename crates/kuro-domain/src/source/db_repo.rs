@@ -251,6 +251,7 @@ impl<E: 'static, F: 'static> AnimeSourceRepo<E, F> for AnimeSourceDb<E, F> {
 
 #[cfg(test)]
 mod tests {
+    use kuro_platform::kind::Kind;
     use std::time::Duration;
 
     use kuro_data::anime::Anime;
@@ -259,7 +260,6 @@ mod tests {
     use kuro_db::schema_anime::FetchType;
 
     use super::*;
-    use crate::source::model::SourceKind;
     use crate::source::repo::ExtensionCatalog;
     use crate::source::stub::StubSource;
     use crate::testdb::{anime_db, manga_db};
@@ -359,7 +359,7 @@ mod tests {
         repo.insert(&manga(2, "/a", false)).unwrap();
         repo.insert(&manga(2, "/b", false)).unwrap();
         repo.insert(&manga(2, "/fav2", true)).unwrap();
-        let registry = Arc::new(SourceRegistry::<Installed>::new(SourceKind::Manga, stubs, Arc::new(NoIndex)));
+        let registry = Arc::new(SourceRegistry::<Installed>::new(Kind::Manga, stubs, Arc::new(NoIndex)));
         let lists = MangaSourceDb::new(&repo, registry, Arc::new(Remote));
 
         let two = Source {
@@ -399,7 +399,7 @@ mod tests {
             .unwrap();
         let child = repo.insert(&anime(3, "/child", Some(parent), false)).unwrap();
         let orphan = repo.insert(&anime(3, "/kept", Some(parent), true)).unwrap();
-        let registry = Arc::new(SourceRegistry::<Installed>::new(SourceKind::Anime, stubs, Arc::new(NoIndex)));
+        let registry = Arc::new(SourceRegistry::<Installed>::new(Kind::Anime, stubs, Arc::new(NoIndex)));
         let lists = AnimeSourceDb::new(&repo, registry, Arc::new(Remote));
 
         let three = Source {
@@ -423,7 +423,7 @@ mod tests {
         let (_d, db) = manga_db();
         let repo = MangaRepo::new(db.clone());
         let registry = Arc::new(SourceRegistry::<Installed>::new(
-            SourceKind::Manga,
+            Kind::Manga,
             Arc::new(MangaStubSourceRepo::new(db)),
             Arc::new(NoIndex),
         ));

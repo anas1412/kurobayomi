@@ -1,6 +1,7 @@
 //! Category definitions and entry membership (area 22, T-22a-008 and T-22a-017). One code path serves manga and anime;
 //! only the table behind the connection differs.
 
+use kuro_platform::kind::Kind;
 use std::collections::{HashMap, HashSet};
 
 use kuro_db::statements_anime;
@@ -9,12 +10,6 @@ use kuro_db::DbResult;
 use rusqlite::Connection;
 
 use crate::schema::BackupCategory;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Manga,
-    Anime,
-}
 
 /// What the categories restore hands to the entry restore and the preference restore.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

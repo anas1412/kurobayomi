@@ -16,6 +16,7 @@ use kuro_data::extension_repo::ExtensionRepo;
 use kuro_data::history::{AnimeHistory, MangaHistory};
 use kuro_data::manga::Manga;
 use kuro_data::track::{AnimeTrack, MangaTrack};
+use kuro_platform::kind::Kind;
 
 use crate::error::BackupError;
 use crate::options::BackupOptions;
@@ -78,9 +79,9 @@ pub trait PrefStore {
     fn all(&self) -> Vec<(String, PrefValue)>;
 }
 
-/// Per-source preferences for configurable sources. `anime` selects the anime or manga list (B-08h).
+/// Per-source preferences for configurable sources. `kind` selects the manga or anime list (B-08h).
 pub trait SourcePrefStore {
-    fn configurable(&self, anime: bool) -> Vec<(String, Vec<(String, PrefValue)>)>;
+    fn configurable(&self, kind: Kind) -> Vec<(String, Vec<(String, PrefValue)>)>;
 }
 
 pub use extensions::ExtensionArtifacts;
@@ -151,8 +152,8 @@ fn build_pass(inputs: &CreateInputs<'_>, opts: &BackupOptions) -> Built {
         Vec::new()
     };
     let source_preferences = if opts.source_settings {
-        let mut list = preferences::sources(&inputs.source_prefs.configurable(true), opts.effective_private());
-        list.extend(preferences::sources(&inputs.source_prefs.configurable(false), opts.effective_private()));
+        let mut list = preferences::sources(&inputs.source_prefs.configurable(Kind::Anime), opts.effective_private());
+        list.extend(preferences::sources(&inputs.source_prefs.configurable(Kind::Manga), opts.effective_private()));
         list
     } else {
         Vec::new()
@@ -284,7 +285,7 @@ mod tests {
         }
     }
     impl SourcePrefStore for NoPrefs {
-        fn configurable(&self, _: bool) -> Vec<(String, Vec<(String, PrefValue)>)> {
+        fn configurable(&self, _: Kind) -> Vec<(String, Vec<(String, PrefValue)>)> {
             Vec::new()
         }
     }

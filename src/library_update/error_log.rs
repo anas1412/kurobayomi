@@ -12,7 +12,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_platform::paths::Paths;
 
 use crate::library_update::pass::Failure;
@@ -21,10 +21,10 @@ use crate::library_update::pass::Failure;
 pub const FILE_NAME: &str = "update_errors.txt";
 
 /// The help page of the header (`ERROR_LOG_HELP_URL` of each job).
-pub fn help_url(kind: EntryKind) -> &'static str {
+pub fn help_url(kind: Kind) -> &'static str {
     match kind {
-        EntryKind::Manga => "https://aniyomi.org/help/guides/troubleshooting",
-        EntryKind::Anime => "https://aniyomi.org/docs/guides/troubleshooting/",
+        Kind::Manga => "https://aniyomi.org/help/guides/troubleshooting",
+        Kind::Anime => "https://aniyomi.org/docs/guides/troubleshooting/",
     }
 }
 
@@ -34,7 +34,7 @@ pub fn path(paths: &dyn Paths) -> PathBuf {
 }
 
 /// The text of the log. `source_name` gives the display name of a source id (an uninstalled source shows its id).
-pub fn render(kind: EntryKind, failures: &[Failure], source_name: &dyn Fn(i64) -> String) -> String {
+pub fn render(kind: Kind, failures: &[Failure], source_name: &dyn Fn(i64) -> String) -> String {
     let mut out = format!("For help on how to fix library update errors, see {}\n\n", help_url(kind));
     // (message, sources of that message, entries of each source), each in order of first appearance.
     let mut messages: Vec<(&str, Vec<(i64, Vec<&str>)>)> = Vec::new();
@@ -68,7 +68,7 @@ pub fn render(kind: EntryKind, failures: &[Failure], source_name: &dyn Fn(i64) -
 /// are no failures (P-16): an old file stays as it was.
 pub fn write(
     file: &Path,
-    kind: EntryKind,
+    kind: Kind,
     failures: &[Failure],
     source_name: &dyn Fn(i64) -> String,
 ) -> io::Result<Option<PathBuf>> {
@@ -113,12 +113,12 @@ mod tests {
     fn the_output_equals_the_expected_fixture() {
         // P-17: two messages, three sources, grouped by message then source, in order of first appearance.
         let expected = include_str!("fixtures/errorlog_expected.txt");
-        assert_eq!(render(EntryKind::Manga, &fixture_failures(), &names), expected);
+        assert_eq!(render(Kind::Manga, &fixture_failures(), &names), expected);
     }
 
     #[test]
     fn the_anime_log_names_the_anime_help_page() {
-        let text = render(EntryKind::Anime, &[failure(9, "T", "x")], &names);
+        let text = render(Kind::Anime, &[failure(9, "T", "x")], &names);
         assert!(text.starts_with("For help on how to fix library update errors, see https://aniyomi.org/docs/guides/troubleshooting/\n\n"));
         assert!(text.contains("\n! x\n  # 9\n    - T\n"), "an unknown source shows its id");
     }
@@ -128,10 +128,10 @@ mod tests {
         // P-16
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join(FILE_NAME);
-        assert_eq!(write(&file, EntryKind::Manga, &[], &names).expect("no write"), None);
+        assert_eq!(write(&file, Kind::Manga, &[], &names).expect("no write"), None);
         assert!(!file.exists(), "no file without failures");
         std::fs::write(&file, "old").expect("old log");
-        assert_eq!(write(&file, EntryKind::Manga, &[], &names).expect("no write"), None);
+        assert_eq!(write(&file, Kind::Manga, &[], &names).expect("no write"), None);
         assert_eq!(std::fs::read_to_string(&file).expect("read"), "old", "an old log is not touched");
     }
 
@@ -154,9 +154,9 @@ mod tests {
         let paths = Fixed(dir.path().to_path_buf());
         let file = path(&paths);
         assert_eq!(file, dir.path().join("cache").join("update_errors.txt"));
-        let first = write(&file, EntryKind::Manga, &fixture_failures(), &names).expect("write").expect("path");
+        let first = write(&file, Kind::Manga, &fixture_failures(), &names).expect("write").expect("path");
         assert_eq!(first, file);
-        write(&file, EntryKind::Anime, &[failure(2, "Only", "boom")], &names).expect("second pass");
+        write(&file, Kind::Anime, &[failure(2, "Only", "boom")], &names).expect("second pass");
         let text = std::fs::read_to_string(&file).expect("read");
         assert!(text.contains("- Only") && !text.contains("A1"), "the second pass replaced the first log");
     }

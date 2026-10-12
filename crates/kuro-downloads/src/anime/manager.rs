@@ -47,6 +47,7 @@ use async_trait::async_trait;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
+use kuro_platform::kind::Kind;
 
 use crate::anime::cache::AnimeIndex;
 use crate::anime::delete_rules::{DeleteRules, episodes_to_delete};
@@ -60,7 +61,6 @@ use crate::anime::ffmpeg::{FfmpegNotice, startup_notice};
 use crate::anime::naming::{anime_dir_name, episode_dir_name, source_dir_name};
 use crate::anime::network::{GateAction, NetworkGate, NetworkState};
 use crate::anime::notify::WARNING_TIMEOUT_SECS;
-use crate::anime::queue_view::{SortKey, sorted_order};
 use crate::anime::pending::{AnimePendingStore, PendingGroup};
 use crate::anime::store::AnimeQueueStore;
 use crate::error::DownloadError;
@@ -314,16 +314,6 @@ impl AnimeQueue {
         self.send(Command::Network { at, state, wifi_only })
     }
 
-    /// Reorders the queue by the sort key inside each source group and sends `Reorder` (T-24a-045). An empty queue
-    /// sends nothing.
-    pub fn reorder_sorted(&self, key: SortKey, reverse: bool) -> Result<(), DownloadError> {
-        let episode_ids = sorted_order(&self.snapshot(), key, reverse);
-        if episode_ids.is_empty() {
-            return Ok(());
-        }
-        self.send(Command::Reorder { episode_ids })
-    }
-
     /// A receiver for the queue as the actor last published it (T-24a-046).
     pub fn subscribe_queue(&self) -> watch::Receiver<Arc<Vec<Arc<AnimeDownload>>>> {
         self.queue.clone()
@@ -505,7 +495,7 @@ impl Actor {
                 let (layout, index) = (self.layout.clone(), self.index.clone());
                 let (series, anime_id) = (self.series.clone(), anime.id);
                 tokio::spawn(async move {
-                    let _series = series.lock(crate::queue_model::EntryKind::Anime, anime_id).await;
+                    let _series = series.lock(Kind::Anime, anime_id).await;
                     let result =
                         tokio::task::spawn_blocking(move || delete_episodes_on_disk(&layout, &index, &source, &anime, &episodes))
                             .await
@@ -1021,7 +1011,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
     use tokio::sync::oneshot;
-    use crate::anime::queue_view::SortKey;
     use crate::anime::network::NetworkState;
 
     /// Runs for `delay`, then fails for the ids in `fail` and succeeds otherwise. Records the peak number in flight.
@@ -1323,28 +1312,6 @@ mod tests {
         assert!(matches!(answer.await.unwrap(), Err(DownloadError::AlreadyDownloaded)));
         assert!(env.queue.snapshot().is_empty(), "nothing is queued (E-Q06)");
         assert!(!env.queue.running());
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn sorted_reorder_sends_the_new_order_inside_the_groups() {
-        let env = setup(LONG, &[], AnimeSettings::default(), Vec::new());
-        let (a, b) = (src(1), src(2));
-        let show_a = anime(1, 1);
-        let show_b = anime(2, 2);
-        let mut e1 = ep(1, 1, 1);
-        e1.episode_number = 2.0;
-        let mut e2 = ep(2, 1, 2);
-        e2.episode_number = 1.0;
-        let mut e3 = ep(3, 2, 3);
-        e3.episode_number = 9.0;
-        env.queue.enqueue(a.clone(), show_a.clone(), vec![e1], false, false, None).await.unwrap();
-        env.queue.enqueue(a.clone(), show_a.clone(), vec![e2], false, false, None).await.unwrap();
-        env.queue.enqueue(b.clone(), show_b.clone(), vec![e3], false, false, None).await.unwrap();
-        settle(&env.queue, |q| q.snapshot().len() == 3).await;
-        env.queue.reorder_sorted(SortKey::EpisodeNumber, false).unwrap();
-        settle(&env.queue, |q| ids(q) == vec![2, 1, 3]).await;
-        env.queue.reorder_sorted(SortKey::EpisodeNumber, true).unwrap();
-        settle(&env.queue, |q| ids(q) == vec![1, 2, 3]).await;
     }
 
     #[tokio::test(start_paused = true)]

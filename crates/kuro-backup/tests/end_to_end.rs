@@ -18,6 +18,7 @@ use kuro_data::category::Category;
 use kuro_data::chapter::Chapter;
 use kuro_data::manga::Manga;
 use kuro_data::extension_repo::ExtensionRepo;
+use kuro_platform::kind::Kind;
 use tokio::sync::watch;
 
 struct Library {
@@ -79,7 +80,7 @@ impl PrefStore for NoPrefs {
     }
 }
 impl SourcePrefStore for NoPrefs {
-    fn configurable(&self, _: bool) -> Vec<(String, Vec<(String, PrefValue)>)> {
+    fn configurable(&self, _: Kind) -> Vec<(String, Vec<(String, PrefValue)>)> {
         Vec::new()
     }
 }
@@ -213,8 +214,8 @@ impl PrefStore for Prefs {
     }
 }
 impl SourcePrefStore for Prefs {
-    fn configurable(&self, anime: bool) -> Vec<(String, Vec<(String, PrefValue)>)> {
-        if anime {
+    fn configurable(&self, kind: Kind) -> Vec<(String, Vec<(String, PrefValue)>)> {
+        if kind.is_anime() {
             Vec::new()
         } else {
             vec![("source_7".into(), vec![("quality".into(), PrefValue::Int(2))])]

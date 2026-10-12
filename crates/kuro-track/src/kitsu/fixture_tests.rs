@@ -2,6 +2,7 @@
 //! the failure-mode tests KT-93, KT-96, KT-98 and KT-99. The fixtures are shaped like Kitsu answers and hold no
 //! credentials. `tests/T_ID_MAP.md` maps every KT id to its test.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,7 +19,7 @@ use super::tracker::KitsuTracker;
 use super::{COMPLETED, PLAN_TO_READ, READING};
 use crate::base::{Field, SECRET_SERVICE, account};
 use crate::fakes::MemSecrets;
-use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 use crate::tracker::Tracker;
 
 macro_rules! fixture {

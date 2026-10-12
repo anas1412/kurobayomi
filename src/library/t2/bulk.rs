@@ -46,17 +46,17 @@ fn t2_del_04_local_entries_never_lose_their_files_and_the_checkbox_is_not_offere
 fn t2_bulk_menu_offers_1_5_10_25_and_all_unviewed_with_per_kind_labels() {
     // T-37a-028: the menu labels are per kind; "all" is the unviewed amount.
     use crate::library::actions::download_menu;
-    use kuro_domain::kind::EntryKind;
+    use kuro_platform::kind::Kind;
     let labels = |kind| download_menu(kind).into_iter().map(|(_, label)| label).collect::<Vec<_>>();
     assert_eq!(
-        labels(EntryKind::Manga),
+        labels(Kind::Manga),
         ["Next chapter", "Next 5 chapters", "Next 10 chapters", "Next 25 chapters", "Unread"]
     );
     assert_eq!(
-        labels(EntryKind::Anime),
+        labels(Kind::Anime),
         ["Next episode", "Next 5 episodes", "Next 10 episodes", "Next 25 episodes", "Unwatched"]
     );
-    let amounts: Vec<DownloadAmount> = download_menu(EntryKind::Manga).into_iter().map(|(amount, _)| amount).collect();
+    let amounts: Vec<DownloadAmount> = download_menu(Kind::Manga).into_iter().map(|(amount, _)| amount).collect();
     assert_eq!(
         amounts,
         [DownloadAmount::Next(1), DownloadAmount::Next(5), DownloadAmount::Next(10), DownloadAmount::Next(25), DownloadAmount::Unviewed]

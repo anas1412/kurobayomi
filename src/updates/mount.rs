@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{Box as GBox, Orientation as O};
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use gtk::glib;
 use kuro_i18n::{MsgKey, tr};
 
@@ -38,13 +38,13 @@ thread_local! {
     static STORAGE: RefCell<Vec<(Rc<StorageScreen>, Vec<glib::JoinHandle<()>>)>> = const { RefCell::new(Vec::new()) };
 }
 
-fn kind_of(name: Option<&str>) -> EntryKind {
-    if name == Some(MANGA) { EntryKind::Manga } else { EntryKind::Anime }
+fn kind_of(name: Option<&str>) -> Kind {
+    if name == Some(MANGA) { Kind::Manga } else { Kind::Anime }
 }
 
 /// Which of the Updates refresh buttons (anime first, as the screens are built) belongs to `kind`.
-fn refresh_index(kind: EntryKind) -> usize {
-    usize::from(kind == EntryKind::Manga)
+fn refresh_index(kind: Kind) -> usize {
+    usize::from(kind == Kind::Manga)
 }
 
 /// A pushed page with a view per kind (Storage): the two views, and the Anime | Manga switch that goes in
@@ -72,7 +72,7 @@ pub fn history() -> Option<Built> {
     if !crate::data::is_installed() {
         return None;
     }
-    let (anime, manga) = (HistoryScreen::new(EntryKind::Anime), HistoryScreen::new(EntryKind::Manga));
+    let (anime, manga) = (HistoryScreen::new(Kind::Anime), HistoryScreen::new(Kind::Manga));
     let view = |screen: &Rc<HistoryScreen>| {
         let clear = crate::ui::icon_button("edit-clear-all-symbolic", &tr(MsgKey::pref_clear_history));
         let target = Rc::clone(screen);
@@ -91,7 +91,7 @@ const VIEW_UPCOMING: &str = "View Upcoming Updates";
 
 thread_local! {
     /// The kind whose Upcoming page the toolbar button last asked for; `screens::build("upcoming")` reads it.
-    static UPCOMING_KIND: std::cell::Cell<EntryKind> = const { std::cell::Cell::new(EntryKind::Anime) };
+    static UPCOMING_KIND: std::cell::Cell<Kind> = const { std::cell::Cell::new(Kind::Anime) };
 }
 
 /// The Upcoming page of the kind the Updates toolbar asked for (anime until it asks). `None` before the app data is open.
@@ -108,7 +108,7 @@ pub fn updates() -> Option<Built> {
     }
     // before the screens: their rows offer Show qualities only while a sheet is registered
     qualities::install_episode_options();
-    let screens = [UpdatesScreen::new(EntryKind::Anime), UpdatesScreen::new(EntryKind::Manga)];
+    let screens = [UpdatesScreen::new(Kind::Anime), UpdatesScreen::new(Kind::Manga)];
     let spec = crate::ui::screen("updates");
     let mut refresh: Vec<gtk::Button> = Vec::new();
     let views = screens.each_ref().map(|screen| {
@@ -189,7 +189,7 @@ fn reset_new_updates() {
 
 /// The refresh button of `kind`: starts a library pass for it, shows the outcome on that kind's page, and spins
 /// until the pass ends (T-42a-033). A refused start shows its toast and no spinner.
-fn update_library(button: &gtk::Button, kind: EntryKind) {
+fn update_library(button: &gtk::Button, kind: Kind) {
     let outcome = library_trigger::trigger(kind);
     UPDATES.with(|u| {
         if let Some(screen) = u.borrow().iter().find(|screen| screen.kind() == kind) {
@@ -202,7 +202,7 @@ fn update_library(button: &gtk::Button, kind: EntryKind) {
 }
 
 /// Puts a spinner on the button until the library pass of `kind` is no longer running.
-fn spin_until_done(button: &gtk::Button, kind: EntryKind) {
+fn spin_until_done(button: &gtk::Button, kind: Kind) {
     button.set_child(Some(&gtk::Spinner::builder().spinning(true).build()));
     let weak = button.downgrade();
     glib::timeout_add_local(Duration::from_millis(500), move || {
@@ -221,7 +221,7 @@ pub fn storage() -> Option<Built> {
     if !crate::data::is_installed() {
         return None;
     }
-    let screens = [EntryKind::Anime, EntryKind::Manga].map(|kind| storage_screen(kind));
+    let screens = [Kind::Anime, Kind::Manga].map(|kind| storage_screen(kind));
     let widgets = screens.each_ref().map(|(screen, _)| crate::ui::scrolled(screen.widget()).upcast::<gtk::Widget>());
     let page = kind_switch(&widgets[0], &widgets[1]);
     STORAGE.with(|s| *s.borrow_mut() = screens.into());
@@ -229,8 +229,8 @@ pub fn storage() -> Option<Built> {
 }
 
 /// One kind's Storage page and its watch on the download cache.
-fn storage_screen(kind: EntryKind) -> (Rc<StorageScreen>, Vec<glib::JoinHandle<()>>) {
-    let screen = StorageScreen::new(kind == EntryKind::Anime);
+fn storage_screen(kind: Kind) -> (Rc<StorageScreen>, Vec<glib::JoinHandle<()>>) {
+    let screen = StorageScreen::new(kind);
     // entry id -> source id of the rows on screen, for the delete hook
     let sources: Rc<RefCell<HashMap<i64, i64>>> = Rc::default();
     let known = Rc::clone(&sources);
@@ -304,9 +304,9 @@ mod tests {
             let (page, stack) = tab_page([view("anime list"), view("manga list")]);
             let header = page.first_child().and_downcast::<gtk::HeaderBar>().expect("the header row comes first");
             assert!(header.next_sibling().is_some_and(|w| w == stack), "then the two kinds");
-            assert_eq!(kind_of(stack.visible_child_name().as_deref()), EntryKind::Anime, "Anime shows first");
+            assert_eq!(kind_of(stack.visible_child_name().as_deref()), Kind::Anime, "Anime shows first");
             stack.set_visible_child_name(MANGA);
-            assert_eq!(kind_of(stack.visible_child_name().as_deref()), EntryKind::Manga);
+            assert_eq!(kind_of(stack.visible_child_name().as_deref()), Kind::Manga);
         });
     }
 
@@ -327,7 +327,7 @@ mod tests {
             let [switch] = page.end.as_slice() else { panic!("one header widget") };
             let switch = switch.downcast_ref::<gtk::StackSwitcher>().expect("the switch");
             assert_eq!(switch.stack().as_ref(), Some(&stack));
-            assert_eq!(kind_of(stack.visible_child_name().as_deref()), EntryKind::Anime, "Anime shows first");
+            assert_eq!(kind_of(stack.visible_child_name().as_deref()), Kind::Anime, "Anime shows first");
         });
     }
 }

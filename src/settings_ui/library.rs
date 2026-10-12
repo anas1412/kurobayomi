@@ -2,7 +2,7 @@
 //! (mark duplicate as read) and the hidden-category switch are cut (settings diet).
 use std::rc::Rc;
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_prefs::prefs::Prefs;
 use kuro_prefs::pref::Pref;
 
@@ -27,10 +27,10 @@ pub fn normalize_default(value: i32, ids: &[i32]) -> i32 {
 }
 
 /// The page of the Categories screen a kind opens on (`screens::kind_switch` names its pages `anime` and `manga`).
-pub fn categories_tab(kind: EntryKind) -> &'static str {
+pub fn categories_tab(kind: Kind) -> &'static str {
     match kind {
-        EntryKind::Anime => "anime",
-        EntryKind::Manga => "manga",
+        Kind::Anime => "anime",
+        Kind::Manga => "manga",
     }
 }
 
@@ -63,8 +63,8 @@ pub fn default_category_row(title: &str, pref: &Pref<i32>, categories: &[Categor
 /// The rows of the library page this module builds: the Categories group (edit rows that open the Categories screen,
 /// default category lists), the Global update group and the notification switch. `open` shows the Categories screen of
 /// a kind.
-pub fn page_rows(prefs: &Prefs, anime: &[Category], manga: &[Category], open: Rc<dyn Fn(EntryKind)>) -> Vec<Preference> {
-    let edit = |title: &str, kind: EntryKind, count: usize| {
+pub fn page_rows(prefs: &Prefs, anime: &[Category], manga: &[Category], open: Rc<dyn Fn(Kind)>) -> Vec<Preference> {
+    let edit = |title: &str, kind: Kind, count: usize| {
         let open = Rc::clone(&open);
         edit_categories_row(title, count, Rc::new(move || open(kind)))
     };
@@ -72,9 +72,9 @@ pub fn page_rows(prefs: &Prefs, anime: &[Category], manga: &[Category], open: Rc
     let mut tree = vec![group(
         "Categories",
         vec![
-            edit("Edit anime categories", EntryKind::Anime, anime.len()),
+            edit("Edit anime categories", Kind::Anime, anime.len()),
             default_category_row("Default anime category", &l.default_anime_category, anime),
-            edit("Edit manga categories", EntryKind::Manga, manga.len()),
+            edit("Edit manga categories", Kind::Manga, manga.len()),
             default_category_row("Default manga category", &l.default_manga_category, manga),
         ],
     )];

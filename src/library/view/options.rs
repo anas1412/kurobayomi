@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::rc::{Rc, Weak};
 
 use gtk::glib;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::library::sort::{Direction, LibrarySort, SortType};
 use kuro_i18n::{MsgKey, tr};
 use kuro_prefs::library::{LibraryDisplayMode, LibraryPrefs};
@@ -44,11 +44,11 @@ impl Show {
         }
     }
 
-    pub fn label(self, kind: EntryKind) -> String {
+    pub fn label(self, kind: Kind) -> String {
         match (self, kind) {
             (Show::Downloaded, _) => tr(MsgKey::label_downloaded),
-            (Show::Unseen, EntryKind::Manga) => tr(MsgKey::action_filter_unread),
-            (Show::Unseen, EntryKind::Anime) => "Unwatched".to_owned(),
+            (Show::Unseen, Kind::Manga) => tr(MsgKey::action_filter_unread),
+            (Show::Unseen, Kind::Anime) => "Unwatched".to_owned(),
             (Show::Completed, _) => tr(MsgKey::completed),
             (Show::Tracked, _) => tr(MsgKey::action_filter_tracked),
         }
@@ -56,8 +56,8 @@ impl Show {
 }
 
 /// The stored keys behind one check: one key, or one per logged-in tracker for Tracked.
-fn keys(prefs: &LibraryPrefs, kind: EntryKind, show: Show, logged_in: &BTreeSet<i64>) -> Vec<Pref<TriState>> {
-    use EntryKind::{Anime, Manga};
+fn keys(prefs: &LibraryPrefs, kind: Kind, show: Show, logged_in: &BTreeSet<i64>) -> Vec<Pref<TriState>> {
+    use Kind::{Anime, Manga};
     match (kind, show) {
         (Anime, Show::Downloaded) => vec![prefs.filter_downloaded_anime.clone()],
         (Manga, Show::Downloaded) => vec![prefs.filter_downloaded_manga.clone()],
@@ -71,26 +71,26 @@ fn keys(prefs: &LibraryPrefs, kind: EntryKind, show: Show, logged_in: &BTreeSet<
 }
 
 /// Whether a check is on. The global downloaded-only switch forces Downloaded on; an old exclude value reads as off.
-pub fn is_on(prefs: &LibraryPrefs, kind: EntryKind, show: Show, logged_in: &BTreeSet<i64>, downloaded_only: bool) -> bool {
+pub fn is_on(prefs: &LibraryPrefs, kind: Kind, show: Show, logged_in: &BTreeSet<i64>, downloaded_only: bool) -> bool {
     (show == Show::Downloaded && downloaded_only)
         || keys(prefs, kind, show, logged_in).iter().any(|p| include_only(p.get()) == TriState::ENABLED_IS)
 }
 
 /// Writes a check: on is include, off is off. Tracked writes the key of every logged-in tracker.
-pub fn set(prefs: &LibraryPrefs, kind: EntryKind, show: Show, on: bool, logged_in: &BTreeSet<i64>) -> Result<(), kuro_prefs::PrefError> {
+pub fn set(prefs: &LibraryPrefs, kind: Kind, show: Show, on: bool, logged_in: &BTreeSet<i64>) -> Result<(), kuro_prefs::PrefError> {
     let state = if on { TriState::ENABLED_IS } else { TriState::DISABLED };
     keys(prefs, kind, show, logged_in).iter().try_for_each(|p| p.set(state))
 }
 
 /// The "Sort by" radios of a kind, in its declaration order. Tracker score is offered only with a tracker logged in;
 /// airing time exists for anime only (through `SortType::types`).
-pub fn sort_rows(kind: EntryKind, has_tracker: bool) -> Vec<SortType> {
+pub fn sort_rows(kind: Kind, has_tracker: bool) -> Vec<SortType> {
     SortType::types(kind).iter().copied().filter(|ty| has_tracker || *ty != SortType::TrackerMean).collect()
 }
 
 /// The radio title from the string table (the labels differ between manga and anime).
-pub fn sort_label(kind: EntryKind, ty: SortType) -> MsgKey {
-    use EntryKind::{Anime, Manga};
+pub fn sort_label(kind: Kind, ty: SortType) -> MsgKey {
+    use Kind::{Anime, Manga};
     match (kind, ty) {
         (_, SortType::Alphabetical) => MsgKey::action_sort_alpha,
         (Manga, SortType::LastActivity) => MsgKey::action_sort_last_read,
@@ -164,7 +164,7 @@ pub(super) struct Options {
 
 /// The menu: three titled sections. The Show only checks are named by `Show::action`, the sort radios carry their
 /// token, and the View radios "grid" or "list".
-fn sections(kind: EntryKind, has_tracker: bool) -> Vec<Section> {
+fn sections(kind: Kind, has_tracker: bool) -> Vec<Section> {
     let show = Show::ALL.into_iter().filter(|s| has_tracker || *s != Show::Tracked).map(|s| Item::toggle(s.action(), s.label(kind))).collect();
     let mut sort: Vec<Item> =
         sort_rows(kind, has_tracker).into_iter().filter_map(|ty| ty.token(kind).map(|token| Item::radio("sort", token, tr(sort_label(kind, ty))))).collect();
@@ -178,7 +178,7 @@ fn sections(kind: EntryKind, has_tracker: bool) -> Vec<Section> {
 
 impl Options {
     /// The button and its menu; `wire` connects the picks once the view exists.
-    pub fn new(kind: EntryKind) -> Self {
+    pub fn new(kind: Kind) -> Self {
         let menu = ViewOptions::new("View options", &sections(kind, false));
         Self { widget: menu.widget.clone(), menu, has_tracker: Rc::new(Cell::new(false)) }
     }
@@ -280,57 +280,57 @@ mod tests {
     fn a_check_writes_include_or_off_and_reads_an_old_exclude_as_off() {
         let p = prefs();
         let none = BTreeSet::new();
-        assert!(!is_on(&p, EntryKind::Manga, Show::Unseen, &none, false));
-        set(&p, EntryKind::Manga, Show::Unseen, true, &none).expect("write");
+        assert!(!is_on(&p, Kind::Manga, Show::Unseen, &none, false));
+        set(&p, Kind::Manga, Show::Unseen, true, &none).expect("write");
         assert_eq!(p.filter_unread.get(), TriState::ENABLED_IS);
-        assert!(is_on(&p, EntryKind::Manga, Show::Unseen, &none, false));
-        assert!(!is_on(&p, EntryKind::Anime, Show::Unseen, &none, false), "anime and manga keep separate keys");
-        set(&p, EntryKind::Manga, Show::Unseen, false, &none).expect("write");
+        assert!(is_on(&p, Kind::Manga, Show::Unseen, &none, false));
+        assert!(!is_on(&p, Kind::Anime, Show::Unseen, &none, false), "anime and manga keep separate keys");
+        set(&p, Kind::Manga, Show::Unseen, false, &none).expect("write");
         assert_eq!(p.filter_unread.get(), TriState::DISABLED);
         p.filter_completed_anime.set(TriState::ENABLED_NOT).expect("write");
-        assert!(!is_on(&p, EntryKind::Anime, Show::Completed, &none, false));
+        assert!(!is_on(&p, Kind::Anime, Show::Completed, &none, false));
     }
 
     #[test]
     fn downloaded_only_holds_the_downloaded_check_on() {
         let p = prefs();
-        assert!(is_on(&p, EntryKind::Anime, Show::Downloaded, &BTreeSet::new(), true));
-        assert!(!is_on(&p, EntryKind::Anime, Show::Completed, &BTreeSet::new(), true));
+        assert!(is_on(&p, Kind::Anime, Show::Downloaded, &BTreeSet::new(), true));
+        assert!(!is_on(&p, Kind::Anime, Show::Completed, &BTreeSet::new(), true));
     }
 
     #[test]
     fn tracked_is_one_check_over_every_logged_in_tracker() {
         let p = prefs();
         let logged = BTreeSet::from([1, 2]);
-        assert!(!is_on(&p, EntryKind::Anime, Show::Tracked, &logged, false));
-        set(&p, EntryKind::Anime, Show::Tracked, true, &logged).expect("write");
+        assert!(!is_on(&p, Kind::Anime, Show::Tracked, &logged, false));
+        set(&p, Kind::Anime, Show::Tracked, true, &logged).expect("write");
         assert_eq!(p.filter_tracked_anime(1).get(), TriState::ENABLED_IS);
         assert_eq!(p.filter_tracked_anime(2).get(), TriState::ENABLED_IS);
-        assert!(is_on(&p, EntryKind::Anime, Show::Tracked, &BTreeSet::from([2]), false));
-        set(&p, EntryKind::Anime, Show::Tracked, false, &logged).expect("write");
-        assert!(!is_on(&p, EntryKind::Anime, Show::Tracked, &logged, false));
+        assert!(is_on(&p, Kind::Anime, Show::Tracked, &BTreeSet::from([2]), false));
+        set(&p, Kind::Anime, Show::Tracked, false, &logged).expect("write");
+        assert!(!is_on(&p, Kind::Anime, Show::Tracked, &logged, false));
     }
 
     #[test]
     fn the_labels_follow_the_kind() {
-        assert_eq!(Show::Unseen.label(EntryKind::Manga), "Unread");
-        assert_eq!(Show::Unseen.label(EntryKind::Anime), "Unwatched");
-        assert_eq!(Show::Tracked.label(EntryKind::Anime), "Tracked");
-        for kind in [EntryKind::Manga, EntryKind::Anime] {
+        assert_eq!(Show::Unseen.label(Kind::Manga), "Unread");
+        assert_eq!(Show::Unseen.label(Kind::Anime), "Unwatched");
+        assert_eq!(Show::Tracked.label(Kind::Anime), "Tracked");
+        for kind in [Kind::Manga, Kind::Anime] {
             for ty in sort_rows(kind, true) {
                 assert!(!tr(sort_label(kind, ty)).is_empty(), "{kind:?} {ty:?}");
                 assert!(ty.token(kind).is_some(), "every radio has a target");
             }
         }
-        assert_eq!(tr(sort_label(EntryKind::Anime, SortType::LastActivity)), "Last seen");
+        assert_eq!(tr(sort_label(Kind::Anime, SortType::LastActivity)), "Last seen");
     }
 
     #[test]
     fn tracker_score_needs_a_tracker_and_airing_time_is_anime_only() {
-        assert!(!sort_rows(EntryKind::Manga, false).contains(&SortType::TrackerMean));
-        assert!(sort_rows(EntryKind::Manga, true).contains(&SortType::TrackerMean));
-        assert!(sort_rows(EntryKind::Anime, false).contains(&SortType::AiringTime));
-        assert!(!sort_rows(EntryKind::Manga, true).contains(&SortType::AiringTime));
+        assert!(!sort_rows(Kind::Manga, false).contains(&SortType::TrackerMean));
+        assert!(sort_rows(Kind::Manga, true).contains(&SortType::TrackerMean));
+        assert!(sort_rows(Kind::Anime, false).contains(&SortType::AiringTime));
+        assert!(!sort_rows(Kind::Manga, true).contains(&SortType::AiringTime));
     }
 
     #[test]

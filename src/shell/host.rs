@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use kuro_downloads::index::DownloadIndex;
+use kuro_platform::kind::Kind;
 use kuro_platform::notifier::Notifier;
 use kuro_platform::paths::Paths;
 use kuro_prefs::ui::StartScreen;
@@ -83,13 +84,13 @@ impl Shell {
         self.downloads.get_or_init(|| {
             let storage = crate::settings_ui::storage::manager(crate::data::app().base.store())
                 .expect("main resolved the platform folders before the shell");
-            let index = DownloadIndex::open(storage.downloads_path(kuro_domain::kind::EntryKind::Manga), &self.index_cache);
+            let index = DownloadIndex::open(storage.downloads_path(Kind::Manga), &self.index_cache);
             let follower = index.clone();
             let _entered = self.runtime.enter();
             crate::recipe_sources::follow_loads(move || {
                 let index = follower.clone();
                 async move {
-                    index.rescan(crate::recipe_sources::ready(), || crate::recipe_sources::folder_names(kuro_domain::kind::EntryKind::Manga)).await;
+                    index.rescan(crate::recipe_sources::ready(), || crate::recipe_sources::folder_names(Kind::Manga)).await;
                 }
             });
             index

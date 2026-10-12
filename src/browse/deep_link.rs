@@ -9,7 +9,7 @@ use kuro_source::{DeepLinkOutcome, ResolvableSource, resolve_deep_link};
 
 use super::listing::{LinkFuture, ListItem};
 use super::pending::SearchIntent;
-use super::route::BrowseKind;
+use kuro_platform::kind::Kind;
 
 /// Whether `text` is a link a source could own: an `http` or `https` URL with a host.
 pub fn is_link(text: &str) -> bool {
@@ -24,7 +24,7 @@ pub fn anime_search_intent(uri: &str) -> Option<SearchIntent> {
         return None;
     }
     let param = |name: &str| url.query_pairs().find(|(key, _)| key == name).map(|(_, value)| value.into_owned());
-    Some(SearchIntent { query: param("query").unwrap_or_default(), extension: param("filter"), kind: BrowseKind::Anime })
+    Some(SearchIntent { query: param("query").unwrap_or_default(), extension: param("filter"), kind: Kind::Anime })
 }
 
 /// Opens global search for an `animesearch` link; `false` when `uri` is not one.
@@ -112,7 +112,7 @@ mod tests {
         let intent = |uri| anime_search_intent(uri).expect("an animesearch link");
         assert_eq!(
             intent("kurobayomi://animesearch?query=one%20piece&filter=eu.example.alpha"),
-            SearchIntent { query: "one piece".into(), extension: Some("eu.example.alpha".into()), kind: BrowseKind::Anime }
+            SearchIntent { query: "one piece".into(), extension: Some("eu.example.alpha".into()), kind: Kind::Anime }
         );
         assert_eq!(intent("kurobayomi://animesearch?query=a+b").extension, None, "no filter is no extension filter");
         assert_eq!(intent("kurobayomi://animesearch").query, "", "a blank query still opens the page");

@@ -5,6 +5,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
+use kuro_platform::kind::Kind;
 use kuro_prefs::source::SourcePrefs;
 use tokio::sync::watch;
 
@@ -180,14 +181,14 @@ where
 }
 
 /// The source rows of one extension as a stream: they are recomputed, and published when different, each time the hidden
-/// set changes, so `enabled` re-emits (`GetExtensionSources.subscribe`). `anime` picks the anime or manga hidden set.
+/// set changes, so `enabled` re-emits (`GetExtensionSources.subscribe`). `kind` picks the manga or anime hidden set.
 /// Must run inside a tokio runtime.
 pub fn subscribe_extension_sources(
     prefs: &SourcePrefs,
-    anime: bool,
+    kind: Kind,
     sources: Vec<ExtSource>,
 ) -> watch::Receiver<Vec<ExtensionSourceRow>> {
-    let hidden = if anime { pref_stream(&prefs.disabled_anime_sources) } else { pref_stream(&prefs.disabled_manga_sources) };
+    let hidden = if kind.is_anime() { pref_stream(&prefs.disabled_anime_sources) } else { pref_stream(&prefs.disabled_manga_sources) };
     derive(hidden, move |hidden| extension_source_rows(&sources, hidden))
 }
 
@@ -329,7 +330,7 @@ mod tests {
     #[tokio::test]
     async fn the_source_rows_re_emit_when_the_hidden_set_changes() {
         let prefs = SourcePrefs::new(kuro_prefs::store::PrefStore::in_memory());
-        let mut rows = subscribe_extension_sources(&prefs, false, vec![src(5, "Five", "en")]);
+        let mut rows = subscribe_extension_sources(&prefs, Kind::Manga, vec![src(5, "Five", "en")]);
         assert!(rows.borrow_and_update()[0].enabled);
         prefs.disabled_manga_sources.set(set(&["5"]));
         tokio::time::timeout(crate::app::rx::TEST_WAIT, rows.changed()).await.expect("waited").expect("open");

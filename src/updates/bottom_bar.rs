@@ -3,6 +3,7 @@
 //! `updates_screen` and calls these.
 
 use kuro_i18n::MsgKey;
+use kuro_platform::kind::Kind;
 
 use crate::updates::bulk::BulkAction;
 use crate::updates::download_actions::DownloadAction;
@@ -36,7 +37,7 @@ pub struct Selected {
 
 /// The actions that show for `selected` (empty selection shows none). `always_external` is the player preference
 /// used for the two play actions, which show only for a single unit.
-pub fn visible_actions(anime: bool, selected: &[Selected], always_external: bool) -> Vec<BarAction> {
+pub fn visible_actions(kind: Kind, selected: &[Selected], always_external: bool) -> Vec<BarAction> {
     if selected.is_empty() {
         return Vec::new();
     }
@@ -49,7 +50,7 @@ pub fn visible_actions(anime: bool, selected: &[Selected], always_external: bool
     if all(|s| s.bookmark) {
         out.push(BarAction::RemoveBookmark);
     }
-    if anime {
+    if kind.is_anime() {
         if any(|s| !s.fillermark) {
             out.push(BarAction::Fillermark);
         }
@@ -69,7 +70,7 @@ pub fn visible_actions(anime: bool, selected: &[Selected], always_external: bool
     if any(|s| s.state == DownloadState::Downloaded) {
         out.push(BarAction::Delete);
     }
-    if anime && selected.len() == 1 {
+    if kind.is_anime() && selected.len() == 1 {
         out.push(if always_external { BarAction::PlayInternally } else { BarAction::PlayExternally });
     }
     out
@@ -105,18 +106,18 @@ pub fn play_opens_external(always_external: bool, alt: bool) -> bool {
 }
 
 /// The label key of an action for the kind (manga "chapter" words, anime "episode" and "watched" words).
-pub fn label(action: BarAction, anime: bool) -> MsgKey {
-    match (action, anime) {
-        (BarAction::Bookmark, false) => MsgKey::action_bookmark,
-        (BarAction::Bookmark, true) => MsgKey::action_bookmark_episode,
-        (BarAction::RemoveBookmark, false) => MsgKey::action_remove_bookmark,
-        (BarAction::RemoveBookmark, true) => MsgKey::action_remove_bookmark_episode,
+pub fn label(action: BarAction, kind: Kind) -> MsgKey {
+    match (action, kind) {
+        (BarAction::Bookmark, Kind::Manga) => MsgKey::action_bookmark,
+        (BarAction::Bookmark, Kind::Anime) => MsgKey::action_bookmark_episode,
+        (BarAction::RemoveBookmark, Kind::Manga) => MsgKey::action_remove_bookmark,
+        (BarAction::RemoveBookmark, Kind::Anime) => MsgKey::action_remove_bookmark_episode,
         (BarAction::Fillermark, _) => MsgKey::action_fillermark_episode,
         (BarAction::RemoveFillermark, _) => MsgKey::action_remove_fillermark_episode,
-        (BarAction::MarkRead, false) => MsgKey::action_mark_as_read,
-        (BarAction::MarkRead, true) => MsgKey::action_mark_as_seen,
-        (BarAction::MarkUnread, false) => MsgKey::action_mark_as_unread,
-        (BarAction::MarkUnread, true) => MsgKey::action_mark_as_unseen,
+        (BarAction::MarkRead, Kind::Manga) => MsgKey::action_mark_as_read,
+        (BarAction::MarkRead, Kind::Anime) => MsgKey::action_mark_as_seen,
+        (BarAction::MarkUnread, Kind::Manga) => MsgKey::action_mark_as_unread,
+        (BarAction::MarkUnread, Kind::Anime) => MsgKey::action_mark_as_unseen,
         (BarAction::Download, _) => MsgKey::action_download,
         (BarAction::Delete, _) => MsgKey::action_delete,
         (BarAction::PlayExternally, _) => MsgKey::action_play_externally,
@@ -155,19 +156,19 @@ mod tests {
 
     #[test]
     fn bottom_bar_empty_selection_shows_nothing() {
-        assert!(visible_actions(false, &[], false).is_empty());
+        assert!(visible_actions(Kind::Manga, &[], false).is_empty());
     }
 
     #[test]
     fn bottom_bar_manga_predicates_follow_the_selection() {
         let mixed = [unit(true, false, 0, DownloadState::Downloaded), unit(false, true, 0, DownloadState::NotDownloaded)];
         assert_eq!(
-            visible_actions(false, &mixed, false),
+            visible_actions(Kind::Manga, &mixed, false),
             vec![BarAction::Bookmark, BarAction::MarkRead, BarAction::MarkUnread, BarAction::Download, BarAction::Delete]
         );
         let all_read_bookmarked = [unit(true, true, 0, DownloadState::Downloaded)];
         assert_eq!(
-            visible_actions(false, &all_read_bookmarked, false),
+            visible_actions(Kind::Manga, &all_read_bookmarked, false),
             vec![BarAction::RemoveBookmark, BarAction::MarkUnread, BarAction::Delete]
         );
     }
@@ -175,7 +176,7 @@ mod tests {
     #[test]
     fn bottom_bar_unread_shows_for_a_started_unit() {
         let started = [unit(false, true, 4, DownloadState::NotDownloaded)];
-        let actions = visible_actions(false, &started, false);
+        let actions = visible_actions(Kind::Manga, &started, false);
         assert!(actions.contains(&BarAction::MarkUnread), "unread with progress > 0 counts (EC-42-U-13)");
         assert!(actions.contains(&BarAction::MarkRead));
     }
@@ -183,20 +184,20 @@ mod tests {
     #[test]
     fn bottom_bar_anime_fillermark_and_single_player_action() {
         let one = [Selected { read: false, bookmark: true, fillermark: true, progress: 0, state: DownloadState::Queue }];
-        let actions = visible_actions(true, &one, false);
+        let actions = visible_actions(Kind::Anime, &one, false);
         assert!(actions.contains(&BarAction::RemoveFillermark));
         assert!(!actions.contains(&BarAction::Fillermark));
         assert!(actions.contains(&BarAction::PlayExternally));
         assert!(!actions.contains(&BarAction::PlayInternally));
-        assert!(visible_actions(true, &one, true).contains(&BarAction::PlayInternally));
+        assert!(visible_actions(Kind::Anime, &one, true).contains(&BarAction::PlayInternally));
         let two = [one[0], one[0]];
-        assert!(!visible_actions(true, &two, false).contains(&BarAction::PlayExternally), "players need one unit");
+        assert!(!visible_actions(Kind::Anime, &two, false).contains(&BarAction::PlayExternally), "players need one unit");
     }
 
     #[test]
     fn bottom_bar_labels_and_count_text() {
-        assert_eq!(label(BarAction::Bookmark, true), MsgKey::action_bookmark_episode);
-        assert_eq!(label(BarAction::MarkRead, true), MsgKey::action_mark_as_seen);
+        assert_eq!(label(BarAction::Bookmark, Kind::Anime), MsgKey::action_bookmark_episode);
+        assert_eq!(label(BarAction::MarkRead, Kind::Anime), MsgKey::action_mark_as_seen);
         assert_eq!(selected_text(3), "3 selected");
         assert!(!icon(BarAction::Delete).is_empty());
     }

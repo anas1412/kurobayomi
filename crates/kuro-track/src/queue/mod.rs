@@ -4,12 +4,13 @@
 pub mod retry;
 pub mod store;
 
+use kuro_platform::kind::Kind;
 use std::sync::{Arc, Mutex};
 
 use kuro_db::handle::Db;
 
 use crate::error::TrackError;
-use crate::model::{Kind, TrackerId};
+use crate::model::TrackerId;
 
 /// One pending progress update.
 #[derive(Debug, Clone, Copy, PartialEq)]

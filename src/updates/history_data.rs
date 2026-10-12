@@ -16,7 +16,7 @@ use kuro_domain::history::repo::HistoryRepo;
 use kuro_domain::history::view::RemoveAction;
 use kuro_domain::items::facades::{get_chapters_by_manga_id, get_episodes_by_anime_id};
 use kuro_domain::items::sorter::{chapter_cmp, episode_cmp};
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::updates::history::{Resume, next_units_from, resume};
 
@@ -29,9 +29,9 @@ pub struct Unit {
 }
 
 /// The units of one entry in ascending reading order. An unknown entry gives an empty list and a log line.
-pub fn ordered_units(db: &Arc<Db>, kind: EntryKind, entry_id: i64) -> Vec<Unit> {
+pub fn ordered_units(db: &Arc<Db>, kind: Kind, entry_id: i64) -> Vec<Unit> {
     match kind {
-        EntryKind::Manga => {
+        Kind::Manga => {
             let manga = match MangaRepo::new(db.clone()).by_id(entry_id) {
                 Ok(m) => m,
                 Err(e) => {
@@ -43,7 +43,7 @@ pub fn ordered_units(db: &Arc<Db>, kind: EntryKind, entry_id: i64) -> Vec<Unit> 
             chapters.sort_by(chapter_cmp(manga.sorting(), false));
             chapters.into_iter().map(|c| Unit { id: c.id, name: c.name, done: c.read }).collect()
         }
-        EntryKind::Anime => {
+        Kind::Anime => {
             let anime = match AnimeRepo::new(db.clone()).by_id(entry_id) {
                 Ok(a) => a,
                 Err(e) => {
@@ -59,13 +59,13 @@ pub fn ordered_units(db: &Arc<Db>, kind: EntryKind, entry_id: i64) -> Vec<Unit> 
 }
 
 /// What a click on a history row of `entry_id` (whose row names `from_item`) does.
-pub fn resume_row(db: &Arc<Db>, kind: EntryKind, entry_id: i64, from_item: i64) -> Resume<Unit> {
+pub fn resume_row(db: &Arc<Db>, kind: Kind, entry_id: i64, from_item: i64) -> Resume<Unit> {
     let units = ordered_units(db, kind, entry_id);
     resume(next_units_from(&units, |u| u.id, |u| u.done, from_item, false), kind)
 }
 
 /// The write of a confirmed remove dialog: one row reset, or every row of the entry (the checkbox).
-pub fn apply_remove(db: &Arc<Db>, kind: EntryKind, action: RemoveAction) -> Result<(), String> {
+pub fn apply_remove(db: &Arc<Db>, kind: Kind, action: RemoveAction) -> Result<(), String> {
     let repo = HistoryRepo::new(db.clone());
     match action {
         RemoveAction::ResetOne { history_id } => repo.reset_one(kind, history_id),
@@ -75,10 +75,10 @@ pub fn apply_remove(db: &Arc<Db>, kind: EntryKind, action: RemoveAction) -> Resu
 }
 
 /// The title of an entry, for the reader or player page. `None` when the entry is gone.
-pub fn entry_title(db: &Arc<Db>, kind: EntryKind, id: i64) -> Option<String> {
+pub fn entry_title(db: &Arc<Db>, kind: Kind, id: i64) -> Option<String> {
     match kind {
-        EntryKind::Manga => MangaRepo::new(db.clone()).by_id(id).ok().map(|m| m.title),
-        EntryKind::Anime => AnimeRepo::new(db.clone()).by_id(id).ok().map(|a| a.title),
+        Kind::Manga => MangaRepo::new(db.clone()).by_id(id).ok().map(|m| m.title),
+        Kind::Anime => AnimeRepo::new(db.clone()).by_id(id).ok().map(|a| a.title),
     }
 }
 
@@ -115,36 +115,36 @@ mod tests {
     #[test]
     fn history_resume_opens_the_first_unread_unit_after_a_read_one() {
         let (_dir, db, manga, ids) = manga_with(4, 2);
-        let Resume::Open(unit) = resume_row(&db, EntryKind::Manga, manga, ids[1]) else { panic!("a unit follows") };
+        let Resume::Open(unit) = resume_row(&db, Kind::Manga, manga, ids[1]) else { panic!("a unit follows") };
         assert_eq!(unit.id, ids[2]);
     }
 
     #[test]
     fn history_resume_with_a_deleted_unit_starts_at_the_first_unit() {
         let (_dir, db, manga, _ids) = manga_with(3, 0);
-        let Resume::Open(unit) = resume_row(&db, EntryKind::Manga, manga, 9_999) else { panic!("units exist") };
+        let Resume::Open(unit) = resume_row(&db, Kind::Manga, manga, 9_999) else { panic!("units exist") };
         assert_eq!(unit.name, "Chapter 0");
     }
 
     #[test]
     fn history_resume_after_the_last_read_unit_is_not_found() {
         let (_dir, db, manga, ids) = manga_with(2, 2);
-        assert!(matches!(resume_row(&db, EntryKind::Manga, manga, ids[1]), Resume::NotFound { .. }));
+        assert!(matches!(resume_row(&db, Kind::Manga, manga, ids[1]), Resume::NotFound { .. }));
     }
 
     #[test]
     fn history_remove_resets_one_row_or_the_whole_entry() {
         let (_dir, db, manga, ids) = manga_with(3, 0);
         let repo = HistoryRepo::new(db.clone());
-        repo.upsert(EntryKind::Manga, ids[0], 1_000, 5).expect("record");
-        repo.upsert(EntryKind::Manga, ids[1], 2_000, 5).expect("record");
-        let rows = repo.by_entry(EntryKind::Manga, manga).expect("rows");
+        repo.upsert(Kind::Manga, ids[0], 1_000, 5).expect("record");
+        repo.upsert(Kind::Manga, ids[1], 2_000, 5).expect("record");
+        let rows = repo.by_entry(Kind::Manga, manga).expect("rows");
         let first = rows.iter().find(|r| r.item_id == ids[0]).expect("row").id;
-        apply_remove(&db, EntryKind::Manga, RemoveAction::ResetOne { history_id: first }).expect("reset one");
-        let live: Vec<i64> = repo.by_entry(EntryKind::Manga, manga).expect("rows").iter().filter(|r| r.at > 0).map(|r| r.item_id).collect();
+        apply_remove(&db, Kind::Manga, RemoveAction::ResetOne { history_id: first }).expect("reset one");
+        let live: Vec<i64> = repo.by_entry(Kind::Manga, manga).expect("rows").iter().filter(|r| r.at > 0).map(|r| r.item_id).collect();
         assert_eq!(live, vec![ids[1]], "the other row stays");
-        apply_remove(&db, EntryKind::Manga, RemoveAction::ResetEntry { entry_id: manga }).expect("reset entry");
-        assert!(repo.by_entry(EntryKind::Manga, manga).expect("rows").iter().all(|r| r.at == 0));
+        apply_remove(&db, Kind::Manga, RemoveAction::ResetEntry { entry_id: manga }).expect("reset entry");
+        assert!(repo.by_entry(Kind::Manga, manga).expect("rows").iter().all(|r| r.at == 0));
     }
 
 }

@@ -16,7 +16,7 @@ pub mod recipe;
 
 pub use anime::ScrapeAnime;
 pub use manga::ScrapeManga;
-pub use recipe::{Kind, Recipe, RecipeError};
+pub use recipe::{Recipe, RecipeError};
 
 use std::path::Path;
 

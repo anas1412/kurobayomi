@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use kuro_data::manga::MangaRepo;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_prefs::prefs::Prefs;
 
 use crate::pref_model::model::PreferenceItem;
@@ -51,7 +51,7 @@ pub fn networking_rows() -> Vec<PreferenceItem> {
 
 /// Clears every manga's reader viewer flags (the reading mode) and says so in a toast.
 pub fn reset_reader_settings() {
-    let repo = MangaRepo::new(crate::data::app().db(EntryKind::Manga));
+    let repo = MangaRepo::new(crate::data::app().db(Kind::Manga));
     if kuro_domain::entries::viewer_flags::reset_viewer_flags_manga(&repo) {
         crate::toast::notify("All reader settings reset");
     } else {
@@ -212,7 +212,7 @@ pub fn reindex_downloads_row() -> PreferenceItem {
 /// Starts the manga and anime library update and the manga and anime metadata update (task T-47a-079). A job already
 /// running is left alone, and nothing is shown.
 pub fn refresh_covers() {
-    for kind in [EntryKind::Manga, EntryKind::Anime] {
+    for kind in [Kind::Manga, Kind::Anime] {
         crate::updates::library_trigger::start(kind);
     }
     crate::misc::runner::refresh_library_covers();

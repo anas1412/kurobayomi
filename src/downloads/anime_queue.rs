@@ -15,7 +15,7 @@ use kuro_data::episode::EpisodeRepo;
 use kuro_data::source::AnimeStubSourceRepo;
 use kuro_db::handle::Db;
 use kuro_domain::download::prefs::DownloadPrefs;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::storage::StorageManager;
 use kuro_db::schema_anime;
 use kuro_downloads::anime::downloader::EpisodeEngine;
@@ -48,7 +48,7 @@ pub fn start(
     prefs: PrefStore,
     notifier: Arc<dyn Notifier>,
 ) -> Result<AnimeQueue, String> {
-    let root = storage.downloads_dir(EntryKind::Anime).map_err(|e| format!("the anime downloads folder is not available: {e}"))?;
+    let root = storage.downloads_dir(Kind::Anime).map_err(|e| format!("the anime downloads folder is not available: {e}"))?;
     let index = crate::updates::download_host::anime_index(storage).ok_or("the anime download index has no folder")?;
     let layout = AnimeLayout::new(Some(root));
     let store = AnimeQueueStore::open(schema_anime::open_in_data_dir(paths).map_err(|e| e.to_string())?)

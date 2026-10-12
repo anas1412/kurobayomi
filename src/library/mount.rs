@@ -20,9 +20,9 @@ use kuro_data::anime::{AnimeRepo, AnimeUpdate};
 use kuro_data::chapter::ChapterRepo;
 use kuro_data::manga::{MangaRepo, MangaUpdate};
 use kuro_db::handle::Db;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
-use kuro_images::art::{ArtKind, ArtRef, Owner};
+use kuro_images::art::{ArtKind, ArtRef};
 use kuro_images::invalidate::remove_covers;
 use kuro_platform::linux::LinuxPaths;
 use kuro_platform::paths::Paths;
@@ -37,19 +37,19 @@ use crate::browse::route::{BrowseKind, BrowseRoute};
 use crate::screens::Built;
 
 thread_local! {
-    static VIEWS: RefCell<Vec<(EntryKind, LibraryView)>> = const { RefCell::new(Vec::new()) };
+    static VIEWS: RefCell<Vec<(Kind, LibraryView)>> = const { RefCell::new(Vec::new()) };
     /// Bit 0: the anime view is selecting. Bit 1: the manga view is.
     static SELECTING: Cell<u8> = const { Cell::new(0) };
     /// The kinds whose database watch is bound (same bits as `SELECTING`): one watch serves every view of a kind.
     static WATCHED: Cell<u8> = const { Cell::new(0) };
     static LISTENER: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
     /// Searches injected before the view of their kind was built; each is applied when that view mounts.
-    static PENDING_SEARCH: RefCell<Vec<(EntryKind, String)>> = const { RefCell::new(Vec::new()) };
+    static PENDING_SEARCH: RefCell<Vec<(Kind, String)>> = const { RefCell::new(Vec::new()) };
     /// What the selection Download action does with its entries (the app's download manager registers here).
-    static DELETE_DOWNLOADS_SINK: RefCell<Option<Rc<dyn Fn(EntryKind, Vec<i64>)>>> = const { RefCell::new(None) };
+    static DELETE_DOWNLOADS_SINK: RefCell<Option<Rc<dyn Fn(Kind, Vec<i64>)>>> = const { RefCell::new(None) };
     /// What the refresh button does (the update runner in `crate::misc` registers here).
     static UPDATE_HOST: RefCell<Option<UpdateHost>> = const { RefCell::new(None) };
-    static DOWNLOAD_SINK: RefCell<Option<Rc<dyn Fn(EntryKind, Vec<i64>, DownloadAmount)>>> = const { RefCell::new(None) };
+    static DOWNLOAD_SINK: RefCell<Option<Rc<dyn Fn(Kind, Vec<i64>, DownloadAmount)>>> = const { RefCell::new(None) };
 }
 
 pub use crate::library::actions::DownloadAmount;
@@ -58,9 +58,9 @@ pub use crate::library::actions::DownloadAmount;
 #[derive(Clone)]
 pub struct UpdateHost {
     /// Starts a pass of one category of a kind; `false` when a pass of that kind is already running.
-    pub start: Rc<dyn Fn(EntryKind, Option<i64>) -> bool>,
+    pub start: Rc<dyn Fn(Kind, Option<i64>) -> bool>,
     /// Whether a pass of that kind is running.
-    pub running: Rc<dyn Fn(EntryKind) -> bool>,
+    pub running: Rc<dyn Fn(Kind) -> bool>,
 }
 
 /// Registers the update runner behind the refresh button. Replaces an earlier one.
@@ -69,19 +69,19 @@ pub fn on_update(host: UpdateHost) {
 }
 
 /// Registers what "delete downloads" in the remove dialog does. Replaces an earlier one.
-pub fn on_delete_downloads(sink: impl Fn(EntryKind, Vec<i64>) + 'static) {
+pub fn on_delete_downloads(sink: impl Fn(Kind, Vec<i64>) + 'static) {
     DELETE_DOWNLOADS_SINK.with(|s| *s.borrow_mut() = Some(Rc::new(sink)));
 }
 
 /// Registers what the Download action of a selection does. Replaces an earlier one.
-pub fn on_download(sink: impl Fn(EntryKind, Vec<i64>, DownloadAmount) + 'static) {
+pub fn on_download(sink: impl Fn(Kind, Vec<i64>, DownloadAmount) + 'static) {
     DOWNLOAD_SINK.with(|s| *s.borrow_mut() = Some(Rc::new(sink)));
 }
 
-const fn bit(kind: EntryKind) -> u8 {
+const fn bit(kind: Kind) -> u8 {
     match kind {
-        EntryKind::Anime => 1,
-        EntryKind::Manga => 2,
+        Kind::Anime => 1,
+        Kind::Manga => 2,
     }
 }
 
@@ -95,7 +95,7 @@ pub fn on_selection_change(listener: impl Fn() + 'static) {
     LISTENER.with(|l| *l.borrow_mut() = Some(Rc::new(listener)));
 }
 
-fn set_selecting(kind: EntryKind, on: bool) {
+fn set_selecting(kind: Kind, on: bool) {
     SELECTING.with(|s| s.set(if on { s.get() | bit(kind) } else { s.get() & !bit(kind) }));
     let listener = LISTENER.with(|l| l.borrow().clone());
     if let Some(listener) = listener {
@@ -104,7 +104,7 @@ fn set_selecting(kind: EntryKind, on: bool) {
 }
 
 /// The view of `kind` that is on screen, or the first one when none is mapped yet.
-fn visible(kind: Option<EntryKind>) -> Option<LibraryView> {
+fn visible(kind: Option<Kind>) -> Option<LibraryView> {
     VIEWS.with(|views| {
         let views = views.borrow();
         views
@@ -116,14 +116,14 @@ fn visible(kind: Option<EntryKind>) -> Option<LibraryView> {
 }
 
 /// Reloads the library of `kind`, for changes made outside it such as a local folder scan.
-pub fn refresh(kind: EntryKind) {
+pub fn refresh(kind: Kind) {
     if let Some(view) = visible(Some(kind)) {
         view.refresh();
     }
 }
 
 /// Puts `query` in the search box of one kind's library (B-1.3). A view that is not built yet gets it on mount.
-pub fn inject_search(kind: EntryKind, query: &str) {
+pub fn inject_search(kind: Kind, query: &str) {
     match visible(Some(kind)) {
         Some(view) => view.set_query(query),
         None => PENDING_SEARCH.with(|p| p.borrow_mut().push((kind, query.to_owned()))),
@@ -132,7 +132,7 @@ pub fn inject_search(kind: EntryKind, query: &str) {
 
 /// Opens the Library destination on `kind`'s page with `query` in its search box. This is the entry point for
 /// screens that search the library (B-1.3).
-pub fn search_library(kind: EntryKind, query: &str) {
+pub fn search_library(kind: Kind, query: &str) {
     crate::ui::pop_to_root();
     crate::ui::open("library");
     inject_search(kind, query);
@@ -140,9 +140,9 @@ pub fn search_library(kind: EntryKind, query: &str) {
 }
 
 /// Switches the Library tab to `kind`'s page (T-36a-060: a deep link to an entry selects the matching library).
-pub fn show_kind(kind: EntryKind) {
+pub fn show_kind(kind: Kind) {
     if let Some(view) = visible(Some(kind)) {
-        let page = if kind == EntryKind::Anime { "anime" } else { "manga" };
+        let page = kind.as_str();
         if let Some(stack) = view.widget().ancestor(gtk::Stack::static_type()).and_downcast::<gtk::Stack>() {
             stack.set_visible_child_name(page);
         }
@@ -150,24 +150,24 @@ pub fn show_kind(kind: EntryKind) {
 }
 
 /// The route of "search globally" from the library of `kind`: the global search page, with `query` in its box.
-fn global_search_route(kind: EntryKind, query: &str) -> BrowseRoute {
-    let kind = if kind == EntryKind::Anime { BrowseKind::Anime } else { BrowseKind::Manga };
+fn global_search_route(kind: Kind, query: &str) -> BrowseRoute {
+    let kind = if kind == Kind::Anime { BrowseKind::Anime } else { BrowseKind::Manga };
     BrowseRoute::GlobalSearch { kind, source_id: None, query: query.to_owned() }
 }
 
 /// Opens the global search page with `query` in its search box (T-37a-022). The request is parked first, because the
 /// page builds itself from it (`browse::search_screen::body`).
-fn open_global_search(kind: EntryKind, query: &str) {
+fn open_global_search(kind: Kind, query: &str) {
     crate::browse::pending::open(global_search_route(kind, query));
 }
 
 /// `(id, is_local)` for each entry. An entry that cannot be read counts as local, so its files are never deleted.
-fn local_flags(db: &Arc<Db>, kind: EntryKind, ids: &[i64]) -> Vec<(i64, bool)> {
+fn local_flags(db: &Arc<Db>, kind: Kind, ids: &[i64]) -> Vec<(i64, bool)> {
     ids.iter()
         .map(|id| {
             let source = match kind {
-                EntryKind::Manga => MangaRepo::new(db.clone()).by_id(*id).map(|m| m.source),
-                EntryKind::Anime => AnimeRepo::new(db.clone()).by_id(*id).map(|a| a.source),
+                Kind::Manga => MangaRepo::new(db.clone()).by_id(*id).map(|m| m.source),
+                Kind::Anime => AnimeRepo::new(db.clone()).by_id(*id).map(|a| a.source),
             };
             (*id, source.map_or(true, |s| s == 0))
         })
@@ -175,12 +175,12 @@ fn local_flags(db: &Arc<Db>, kind: EntryKind, ids: &[i64]) -> Vec<(i64, bool)> {
 }
 
 /// Source name and language for the search and the language badge. A source with no stored row shows its id.
-pub fn source_info(db: &Arc<Db>, kind: EntryKind, id: i64) -> SourceInfo {
+pub fn source_info(db: &Arc<Db>, kind: Kind, id: i64) -> SourceInfo {
     let found = db
         .read(|c| {
             Ok(match kind {
-                EntryKind::Manga => kuro_db::statements_manga::sources::find_one(c, id)?.map(|s| (s.name, s.lang)),
-                EntryKind::Anime => kuro_db::statements_anime::stub_source(c, id)?.map(|s| (s.name, s.lang)),
+                Kind::Manga => kuro_db::statements_manga::sources::find_one(c, id)?.map(|s| (s.name, s.lang)),
+                Kind::Anime => kuro_db::statements_anime::stub_source(c, id)?.map(|s| (s.name, s.lang)),
             })
         })
         .ok()
@@ -194,13 +194,13 @@ pub fn source_info(db: &Arc<Db>, kind: EntryKind, id: i64) -> SourceInfo {
 /// Takes the selected entries out of the library: favorite off, and the cached covers (an anime's background too)
 /// deleted. A cover timestamp moves only when a file was deleted, as Kotlin's `removeCovers` does, and it is written
 /// with the removal (E-27). Downloads stay (T2-DEL-01, T2-DEL-03). Local entries keep their files.
-pub fn remove_from_library(paths: &dyn Paths, db: &Arc<Db>, kind: EntryKind, ids: &[i64]) -> usize {
+pub fn remove_from_library(paths: &dyn Paths, db: &Arc<Db>, kind: Kind, ids: &[i64]) -> usize {
     let now = kuro_data::time::now_millis();
     ids.iter()
         .filter(|id| {
             let done = match kind {
-                EntryKind::Manga => remove_manga(paths, db, **id, now).map_err(|e| e.to_string()),
-                EntryKind::Anime => remove_anime(paths, db, **id, now).map_err(|e| e.to_string()),
+                Kind::Manga => remove_manga(paths, db, **id, now).map_err(|e| e.to_string()),
+                Kind::Anime => remove_anime(paths, db, **id, now).map_err(|e| e.to_string()),
             };
             done.inspect_err(|e| tracing::error!(error = %e, entry = id, "removing from the library failed")).is_ok()
         })
@@ -211,7 +211,7 @@ fn remove_manga(paths: &dyn Paths, db: &Arc<Db>, id: i64, now: i64) -> kuro_data
     let repo = MangaRepo::new(db.clone());
     let manga = repo.by_id(id)?;
     let cover = ArtRef {
-        owner: Owner::Manga,
+        owner: Kind::Manga,
         entry_id: id,
         source_id: manga.source,
         kind: ArtKind::Cover,
@@ -231,7 +231,7 @@ fn remove_anime(paths: &dyn Paths, db: &Arc<Db>, id: i64, now: i64) -> kuro_data
     let repo = AnimeRepo::new(db.clone());
     let anime = repo.by_id(id)?;
     let cover = ArtRef {
-        owner: Owner::Anime,
+        owner: Kind::Anime,
         entry_id: id,
         source_id: anime.source,
         kind: ArtKind::Cover,
@@ -255,13 +255,12 @@ fn remove_anime(paths: &dyn Paths, db: &Arc<Db>, id: i64, now: i64) -> kuro_data
     })
 }
 
-fn nav(kind: EntryKind, db: Arc<Db>) -> Nav {
-    let anime = kind == EntryKind::Anime;
+fn nav(kind: Kind, db: Arc<Db>) -> Nav {
     // every entry opens by its id: the page for its kind, and the reader or the player for a chapter or an episode
-    let open = Rc::new(move |id| crate::screens::open_entry(anime, id));
+    let open = Rc::new(move |id| crate::screens::open_entry(kind, id));
     // one launcher hook for every opener: the external player when the preference says so and a launcher is installed
     let resume = Rc::new(move |r: crate::library::view::Resume| {
-        crate::updates::open_route::open(anime, r.entry, r.item, crate::updates::open_route::route(anime, r.external, false))
+        crate::updates::open_route::open(kind, r.entry, r.item, crate::updates::open_route::route(kind, r.external, false))
     });
     let delete = {
         let db = db.clone();
@@ -328,9 +327,9 @@ fn open_secrets() -> Arc<dyn kuro_platform::secrets::SecretStore> {
 
 /// Whether a chapter is on disk, for the continue button's downloaded filter. A local manga has every chapter; the
 /// app keeps no anime download cache yet, so an episode is never downloaded.
-fn item_downloaded(kind: EntryKind, db: Arc<Db>, index: Option<kuro_downloads::index::DownloadIndex>) -> Rc<dyn Fn(i64) -> bool> {
+fn item_downloaded(kind: Kind, db: Arc<Db>, index: Option<kuro_downloads::index::DownloadIndex>) -> Rc<dyn Fn(i64) -> bool> {
     Rc::new(move |id| {
-        if kind == EntryKind::Anime {
+        if kind == Kind::Anime {
             return false;
         }
         let Some(chapter) = ChapterRepo::new(db.clone()).by_id(id).ok().flatten() else { return false };
@@ -339,7 +338,7 @@ fn item_downloaded(kind: EntryKind, db: Arc<Db>, index: Option<kuro_downloads::i
     })
 }
 
-fn deps(kind: EntryKind) -> Deps {
+fn deps(kind: Kind) -> Deps {
     let app = crate::data::app();
     let db = app.db(kind);
     let store = app.base.store().clone();
@@ -378,7 +377,7 @@ fn deps(kind: EntryKind) -> Deps {
 }
 
 /// Marks `kind` as watched in `slot`; `false` when it already was.
-fn claim_watch(slot: &Cell<u8>, kind: EntryKind) -> bool {
+fn claim_watch(slot: &Cell<u8>, kind: Kind) -> bool {
     let fresh = slot.get() & bit(kind) == 0;
     slot.set(slot.get() | bit(kind));
     fresh
@@ -388,7 +387,7 @@ fn claim_watch(slot: &Cell<u8>, kind: EntryKind) -> bool {
 /// library update, a category renamed (T-08a-032). The first publication of each watch is the state the view loads
 /// itself, so it is skipped; an error publication is logged and the next change tries again. Bound once per kind:
 /// `refresh` reloads the visible view, so a second watch (another build of the page) would only reload it twice.
-fn watch_database(kind: EntryKind) {
+fn watch_database(kind: Kind) {
     use crate::watch::bind_watch;
     if !WATCHED.with(|w| claim_watch(w, kind)) {
         return;
@@ -397,8 +396,8 @@ fn watch_database(kind: EntryKind) {
     let rows = on_change("library", move || refresh(kind));
     let categories = on_change("categories", move || refresh(kind));
     match kind {
-        EntryKind::Anime => bind_watch(AnimeRepo::new(app.db(kind)).subscribe_library(), move |p| rows(p.and_then(|s| (*s).as_ref().map(drop).map_err(String::clone)))),
-        EntryKind::Manga => bind_watch(MangaRepo::new(app.db(kind)).subscribe_library(), move |p| rows(p.and_then(|s| (*s).as_ref().map(drop).map_err(String::clone)))),
+        Kind::Anime => bind_watch(AnimeRepo::new(app.db(kind)).subscribe_library(), move |p| rows(p.and_then(|s| (*s).as_ref().map(drop).map_err(String::clone)))),
+        Kind::Manga => bind_watch(MangaRepo::new(app.db(kind)).subscribe_library(), move |p| rows(p.and_then(|s| (*s).as_ref().map(drop).map_err(String::clone)))),
     }
     bind_watch(app.categories(kind).repo().watch_all(), move |p| categories(p.map(drop)));
 }
@@ -416,8 +415,7 @@ fn on_change(label: &'static str, reload: impl Fn() + 'static) -> impl Fn(Result
 
 /// The library page of one kind: the view, and for the page header its search entry, its refresh button and the one
 /// menu (docs/design/main-window.md). `None` when the worker thread cannot start, so the caller keeps its fallback.
-pub fn build(anime: bool) -> Option<Built> {
-    let kind = if anime { EntryKind::Anime } else { EntryKind::Manga };
+pub fn build(kind: Kind) -> Option<Built> {
     let app = crate::data::app();
     // subscribed before the view's first load, so a write between the two is not missed
     watch_database(kind);
@@ -446,8 +444,8 @@ pub fn build(anime: bool) -> Option<Built> {
 
 /// The labels of the header menu, section by section: the library update, the local folders, the categories. How the
 /// covers are filtered, sorted and shown is the view options button's.
-pub fn menu_sections(kind: EntryKind) -> [Vec<(String, &'static str)>; 3] {
-    let what = if kind == EntryKind::Anime { "anime" } else { "manga" };
+pub fn menu_sections(kind: Kind) -> [Vec<(String, &'static str)>; 3] {
+    let what = kind.as_str();
     [
         vec![(tr(MsgKey::action_update_library), "update-library")],
         vec![(format!("Add local {what} folder…"), "add-local"), (format!("Rescan local {what} folders"), "rescan-local")],
@@ -456,7 +454,7 @@ pub fn menu_sections(kind: EntryKind) -> [Vec<(String, &'static str)>; 3] {
 }
 
 /// The one header menu: a `GtkPopoverMenu` over the actions of a `lib` group on the button.
-fn header_menu(kind: EntryKind, view: &LibraryView) -> gtk::MenuButton {
+fn header_menu(kind: Kind, view: &LibraryView) -> gtk::MenuButton {
     let model = gtk::gio::Menu::new();
     for section in menu_sections(kind) {
         let part = gtk::gio::Menu::new();
@@ -472,7 +470,7 @@ fn header_menu(kind: EntryKind, view: &LibraryView) -> gtk::MenuButton {
 }
 
 /// The `lib` actions behind the header menu's items.
-fn menu_actions(kind: EntryKind, view: &LibraryView) -> gtk::gio::SimpleActionGroup {
+fn menu_actions(kind: Kind, view: &LibraryView) -> gtk::gio::SimpleActionGroup {
     let group = gtk::gio::SimpleActionGroup::new();
     let add = |name: &str, run: Box<dyn Fn()>| {
         let action = gtk::gio::SimpleAction::new(name, None);
@@ -489,10 +487,10 @@ fn menu_actions(kind: EntryKind, view: &LibraryView) -> gtk::gio::SimpleActionGr
 }
 
 /// Add-folder and rescan, from the local folder module, for `kind`.
-fn local_folder_actions(kind: EntryKind) -> (Box<dyn Fn()>, Box<dyn Fn()>) {
+fn local_folder_actions(kind: Kind) -> (Box<dyn Fn()>, Box<dyn Fn()>) {
     let (add, rescan) = match kind {
-        EntryKind::Manga => ("manga add", "manga rescan"),
-        EntryKind::Anime => ("anime add", "anime rescan"),
+        Kind::Manga => ("manga add", "manga rescan"),
+        Kind::Anime => ("anime add", "anime rescan"),
     };
     (
         Box::new(move || run_local(add, || crate::local_flow::ui::add_folder(kind))),
@@ -524,9 +522,9 @@ mod tests {
     #[test]
     fn the_database_watch_binds_once_per_kind() {
         let slot = Cell::new(0);
-        assert!(claim_watch(&slot, EntryKind::Manga), "the first build binds it");
-        assert!(!claim_watch(&slot, EntryKind::Manga), "a second build of the page does not");
-        assert!(claim_watch(&slot, EntryKind::Anime), "the other kind has its own");
+        assert!(claim_watch(&slot, Kind::Manga), "the first build binds it");
+        assert!(!claim_watch(&slot, Kind::Manga), "a second build of the page does not");
+        assert!(claim_watch(&slot, Kind::Anime), "the other kind has its own");
     }
 
     /// Needs a display and runs in a child process with fresh app data (see `screens::alone`).
@@ -534,11 +532,11 @@ mod tests {
     fn a_favourite_added_to_the_database_shows_in_the_mounted_library() {
         crate::screens::alone::run(module_path!(), "a_favourite_added_to_the_database_shows_in_the_mounted_library", |ctx| {
             let (_stack, _window) = crate::testing::nav();
-            let built = build(false).expect("the library mounts");
-            build(false).expect("a second build of the page");
-            let view = visible(Some(EntryKind::Manga)).expect("the manga view is registered");
+            let built = build(Kind::Manga).expect("the library mounts");
+            build(Kind::Manga).expect("a second build of the page");
+            let view = visible(Some(Kind::Manga)).expect("the manga view is registered");
             assert!(crate::screens::alone::pump(ctx, || view.cover_count() == 0), "an empty library loads");
-            let repo = MangaRepo::new(crate::data::app().db(EntryKind::Manga));
+            let repo = MangaRepo::new(crate::data::app().db(Kind::Manga));
             let id = repo.insert(&Manga { source: 7, url: "/b".into(), title: "Berserk".into(), ..Manga::create() }).expect("insert");
             repo.update(&MangaUpdate { favorite: Some(true), ..MangaUpdate::new(id) }).expect("favourite");
             assert!(crate::screens::alone::pump(ctx, || view.cover_count() == 1), "the favourite shows without a refresh");
@@ -559,12 +557,12 @@ mod tests {
         let seen = calls.clone();
         on_selection_change(move || seen.set(seen.get() + 1));
         assert!(!selecting());
-        set_selecting(EntryKind::Anime, true);
-        set_selecting(EntryKind::Manga, true);
+        set_selecting(Kind::Anime, true);
+        set_selecting(Kind::Manga, true);
         assert!(selecting());
-        set_selecting(EntryKind::Anime, false);
+        set_selecting(Kind::Anime, false);
         assert!(selecting(), "the manga view is still selecting");
-        set_selecting(EntryKind::Manga, false);
+        set_selecting(Kind::Manga, false);
         assert!(!selecting());
         assert_eq!(calls.get(), 4);
     }
@@ -576,7 +574,7 @@ mod tests {
         let id = repo.insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() }).expect("insert");
         assert_eq!(repo.by_id(id).expect("stored").title, "Berserk");
         let paths = TempPaths::new().expect("temp paths");
-        assert_eq!(remove_from_library(&paths, &db, EntryKind::Manga, &[id]), 1);
+        assert_eq!(remove_from_library(&paths, &db, Kind::Manga, &[id]), 1);
         assert!(!repo.by_id(id).expect("still stored").favorite);
     }
 
@@ -589,7 +587,7 @@ mod tests {
             .insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), thumbnail_url: Some("https://img.test/c.jpg".into()), ..Manga::create() })
             .expect("insert");
         let art = ArtRef {
-            owner: Owner::Manga,
+            owner: Kind::Manga,
             entry_id: id,
             source_id: 7,
             kind: ArtKind::Cover,
@@ -600,7 +598,7 @@ mod tests {
         let file = kuro_images::cover_paths::cover_file_for(&paths, &art).expect("a cover path");
         std::fs::create_dir_all(file.parent().expect("a directory")).expect("cover dir");
         std::fs::write(&file, b"png").expect("cover file");
-        remove_from_library(&paths, &db, EntryKind::Manga, &[id]);
+        remove_from_library(&paths, &db, Kind::Manga, &[id]);
         assert!(!file.exists(), "the cached cover is deleted");
         assert!(repo.by_id(id).expect("stored").cover_last_modified > 0);
     }
@@ -612,7 +610,7 @@ mod tests {
         let paths = TempPaths::new().expect("temp paths");
         let repo = MangaRepo::new(db.clone());
         let id = repo.insert(&Manga { favorite: true, source: 7, url: "u".into(), title: "Berserk".into(), ..Manga::create() }).expect("insert");
-        remove_from_library(&paths, &db, EntryKind::Manga, &[id]);
+        remove_from_library(&paths, &db, Kind::Manga, &[id]);
         assert_eq!(repo.by_id(id).expect("stored").cover_last_modified, 0);
     }
 
@@ -632,37 +630,37 @@ mod tests {
     #[test]
     fn t_37a_061_a_search_for_an_unbuilt_view_waits_for_its_mount() {
         PENDING_SEARCH.with(|p| p.borrow_mut().clear());
-        inject_search(EntryKind::Manga, "one piece");
+        inject_search(Kind::Manga, "one piece");
         let waiting = PENDING_SEARCH.with(|p| p.borrow().clone());
-        assert_eq!(waiting, vec![(EntryKind::Manga, "one piece".to_owned())]);
+        assert_eq!(waiting, vec![(Kind::Manga, "one piece".to_owned())]);
         PENDING_SEARCH.with(|p| p.borrow_mut().clear());
     }
 
     #[test]
     fn the_header_menu_holds_only_the_library_actions_once_each() {
-        for kind in [EntryKind::Anime, EntryKind::Manga] {
+        for kind in [Kind::Anime, Kind::Manga] {
             let sections = menu_sections(kind);
             let actions: Vec<&str> = sections.iter().flatten().map(|(_, a)| *a).collect();
             assert_eq!(actions, ["update-library", "add-local", "rescan-local", "categories"]);
             let labels: Vec<&str> = sections.iter().flatten().map(|(l, _)| l.as_str()).collect();
             assert!(!labels.iter().any(|l| l.contains("Update category")), "the header refresh button is the only category update");
         }
-        assert_eq!(menu_sections(EntryKind::Anime)[1][0].0, "Add local anime folder…");
-        assert_eq!(menu_sections(EntryKind::Manga)[1][1].0, "Rescan local manga folders");
-        assert_eq!(menu_sections(EntryKind::Manga)[2][0].0, "Categories");
+        assert_eq!(menu_sections(Kind::Anime)[1][0].0, "Add local anime folder…");
+        assert_eq!(menu_sections(Kind::Manga)[1][1].0, "Rescan local manga folders");
+        assert_eq!(menu_sections(Kind::Manga)[2][0].0, "Categories");
     }
 
     #[test]
     fn an_unknown_source_shows_its_id_and_no_language() {
         let (_dir, db) = manga_db();
-        assert_eq!(source_info(&db, EntryKind::Manga, 42), SourceInfo { name: "42".into(), language: String::new() });
+        assert_eq!(source_info(&db, Kind::Manga, 42), SourceInfo { name: "42".into(), language: String::new() });
     }
 
     #[test]
     fn the_real_header_menu_registers_every_action_and_reaches_the_local_flow() {
         crate::testing::with_display(|| {
             let (_dir, view) = crate::library::view::test_view(crate::library::view::test_nav());
-            for (kind, word) in [(EntryKind::Manga, "manga"), (EntryKind::Anime, "anime")] {
+            for (kind, word) in [(Kind::Manga, "manga"), (Kind::Anime, "anime")] {
                 let group = menu_actions(kind, &view);
                 let mut names: Vec<String> = group.list_actions().iter().map(|n| n.to_string()).collect();
                 names.sort();

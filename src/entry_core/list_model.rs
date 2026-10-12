@@ -6,6 +6,7 @@
 use kuro_domain::items::missing::{ListRow, Numbered, insert_missing_separators, missing_items_count};
 use kuro_downloads::DownloadState;
 use kuro_i18n::{Arg, MsgKey, tr_plural, trf};
+use kuro_platform::kind::Kind;
 
 use crate::entry_core::chapter::ChapterRow;
 use crate::entry_core::chapter_actions::indicator_enabled;
@@ -215,23 +216,23 @@ pub enum RowAction {
 
 /// The right-click menu of `row` as `(label, section, action)`, in section order. Each label says what a press does
 /// now (Mark as read or Mark as unread). A marker row has no menu, and Download shows only on a row with a download
-/// button. `anime` words read as watched.
-pub fn row_menu(row: &RowItem, anime: bool) -> Vec<(MsgKey, u8, RowAction)> {
+/// button. `kind` words read as watched.
+pub fn row_menu(row: &RowItem, kind: Kind) -> Vec<(MsgKey, u8, RowAction)> {
     if row.missing.is_some() {
         return Vec::new();
     }
-    let read = match (anime, row.read) {
-        (false, false) => MsgKey::action_mark_as_read,
-        (false, true) => MsgKey::action_mark_as_unread,
-        (true, false) => MsgKey::action_mark_as_seen,
-        (true, true) => MsgKey::action_mark_as_unseen,
+    let read = match (kind, row.read) {
+        (Kind::Manga, false) => MsgKey::action_mark_as_read,
+        (Kind::Manga, true) => MsgKey::action_mark_as_unread,
+        (Kind::Anime, false) => MsgKey::action_mark_as_seen,
+        (Kind::Anime, true) => MsgKey::action_mark_as_unseen,
     };
-    let previous = if anime { MsgKey::action_mark_previous_as_seen } else { MsgKey::action_mark_previous_as_read };
-    let bookmark = match (anime, row.bookmark) {
-        (false, false) => MsgKey::action_bookmark,
-        (false, true) => MsgKey::action_remove_bookmark,
-        (true, false) => MsgKey::action_bookmark_episode,
-        (true, true) => MsgKey::action_remove_bookmark_episode,
+    let previous = if kind.is_anime() { MsgKey::action_mark_previous_as_seen } else { MsgKey::action_mark_previous_as_read };
+    let bookmark = match (kind, row.bookmark) {
+        (Kind::Manga, false) => MsgKey::action_bookmark,
+        (Kind::Manga, true) => MsgKey::action_remove_bookmark,
+        (Kind::Anime, false) => MsgKey::action_bookmark_episode,
+        (Kind::Anime, true) => MsgKey::action_remove_bookmark_episode,
     };
     let mut items = vec![(read, 0, RowAction::ToggleRead), (previous, 0, RowAction::MarkPrevious), (bookmark, 1, RowAction::ToggleBookmark)];
     if row.indicator {
@@ -420,22 +421,22 @@ mod tests {
     fn the_row_menu_is_one_menu_for_both_kinds_with_labels_of_what_a_press_does() {
         let actions = |items: Vec<(MsgKey, u8, RowAction)>| items.into_iter().map(|(_, _, a)| a).collect::<Vec<_>>();
         let all = [RowAction::ToggleRead, RowAction::MarkPrevious, RowAction::ToggleBookmark, RowAction::Download, RowAction::Select];
-        assert_eq!(actions(row_menu(&item(1), false)), all);
-        assert_eq!(actions(row_menu(&item(1), true)), all, "an episode has the same items");
-        let sections: Vec<u8> = row_menu(&item(1), false).iter().map(|(_, s, _)| *s).collect();
+        assert_eq!(actions(row_menu(&item(1), Kind::Manga)), all);
+        assert_eq!(actions(row_menu(&item(1), Kind::Anime)), all, "an episode has the same items");
+        let sections: Vec<u8> = row_menu(&item(1), Kind::Manga).iter().map(|(_, s, _)| *s).collect();
         assert!(sections.windows(2).all(|w| w[0] <= w[1]), "already in section order, as the menu shows them");
 
-        let chapter = row_menu(&item(1), false);
+        let chapter = row_menu(&item(1), Kind::Manga);
         assert_eq!((chapter[0].0, chapter[2].0, chapter[3].0), (MsgKey::action_mark_as_read, MsgKey::action_bookmark, MsgKey::action_download));
         let done = RowItem { read: true, bookmark: true, download: DownloadState::Downloaded, ..item(1) };
-        let episode = row_menu(&done, true);
+        let episode = row_menu(&done, Kind::Anime);
         assert_eq!((episode[0].0, episode[1].0, episode[2].0, episode[3].0), (MsgKey::action_mark_as_unseen, MsgKey::action_mark_previous_as_seen, MsgKey::action_remove_bookmark_episode, MsgKey::action_delete_download));
         let queued = RowItem { download: DownloadState::Queue, ..item(1) };
-        assert_eq!(row_menu(&queued, false)[3].0, MsgKey::action_cancel);
+        assert_eq!(row_menu(&queued, Kind::Manga)[3].0, MsgKey::action_cancel);
 
         let local = RowItem { indicator: false, ..item(1) };
-        assert!(!actions(row_menu(&local, false)).contains(&RowAction::Download), "no download button, no Download item");
-        assert!(row_menu(&RowItem::marker("1-4".into(), 2, "Missing".into()), false).is_empty(), "a marker has no menu");
+        assert!(!actions(row_menu(&local, Kind::Manga)).contains(&RowAction::Download), "no download button, no Download item");
+        assert!(row_menu(&RowItem::marker("1-4".into(), 2, "Missing".into()), Kind::Manga).is_empty(), "a marker has no menu");
     }
 
     #[test]

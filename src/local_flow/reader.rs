@@ -11,7 +11,7 @@ use kuro_core::sources::SourceGate;
 use kuro_data::chapter::ChapterRepo;
 use kuro_data::manga::MangaRepo;
 use kuro_db::Db;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_local::LOCAL_SOURCE_ID;
 use kuro_local::format::{Format, format_of};
 use kuro_platform::toast::{Toaster, toast_channel};
@@ -48,11 +48,11 @@ pub fn open_local_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     let app = crate::data::app();
     let store = app.base.store().clone();
     let deps = ReaderDeps {
-        db: app.db(EntryKind::Manga),
+        db: app.db(Kind::Manga),
         manga_id,
         chapter_id,
         prefs: ReaderPrefs::new(store.clone()),
-        store: Rc::new(WriterHandle::spawn(app.db(EntryKind::Manga))),
+        store: Rc::new(WriterHandle::spawn(app.db(Kind::Manga))),
         build: Rc::new(build_loader),
         is_downloaded: Rc::new(|_| false),
         downloaded_only: app.base.downloaded_only.get(),
@@ -66,7 +66,7 @@ pub fn open_local_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
 /// A title that names a local entry in the library opens the local reader; any other title keeps the old route. The
 /// library's Continue button passes a chapter id as the name, which `find_local_ids` also accepts.
 pub fn page_for(title: &str, chapter_name: &str) -> gtk::Box {
-    let db = crate::data::app().db(EntryKind::Manga);
+    let db = crate::data::app().db(Kind::Manga);
     match find_local_ids(&db, title, chapter_name, super::open::current()) {
         Some((manga_id, chapter_id)) => open_local_chapter(manga_id, chapter_id),
         None => launch::page_for(title, chapter_name),
@@ -84,7 +84,7 @@ pub fn find_local_ids(db: &Arc<Db>, title: &str, chapter: &str, preferred: Optio
         .and_then(|id| manga.by_id(id).ok())
         .filter(|m| m.source == LOCAL_SOURCE_ID && m.title == title)
         .map(|m| m.id)
-        .or_else(|| super::open::local_id_with_title(db, EntryKind::Manga, title).ok().flatten())?;
+        .or_else(|| super::open::local_id_with_title(db, Kind::Manga, title).ok().flatten())?;
     let chapters = ChapterRepo::new(Arc::clone(db)).by_manga_id(manga_id, false).ok()?;
     let by_id = chapter.parse::<i64>().ok().and_then(|id| chapters.iter().find(|c| c.id == id));
     let chapter_id = chapters.iter().find(|c| c.name == chapter).or(by_id).map_or(0, |c| c.id);

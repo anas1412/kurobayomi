@@ -22,11 +22,11 @@ use kuro_prefs::source::SourcePrefs;
 use kuro_prefs::store::PrefStore;
 use kuro_source::CatalogueSource;
 use kuro_source::anime::AnimeSource;
-use kuro_source_scrape::{Kind, Recipe, ScrapeAnime, ScrapeManga};
+use kuro_platform::kind::Kind;
+use kuro_source_scrape::{Recipe, ScrapeAnime, ScrapeManga};
 
 use crate::browse::directory::{Catalogues, DirectorySource, SourceDirectory, install};
 use crate::browse::loader::Catalogue;
-use crate::browse::route::BrowseKind;
 
 /// The package name a recipe source is listed under (the Browse pages group sources by package).
 fn package_of(recipe: &Recipe) -> String {
@@ -148,7 +148,7 @@ fn build(
     }
     tracing::info!(manga = manga.len(), anime = anime.len(), "sources loaded");
     let manga = manga.into_iter().map(|(source, row)| (Catalogue::Manga(source), row)).collect();
-    (Catalogues::new(BrowseKind::Manga, manga), Loaded { anime })
+    (Catalogues::new(Kind::Manga, manga), Loaded { anime })
 }
 
 /// Whether the sources are being (re)loaded, and a counter of finished loads. The Browse pages follow both: they show a
@@ -202,10 +202,10 @@ pub fn changes() -> watch::Receiver<u64> {
 
 /// `(source id, "Name (LANG)")` of the loaded repository sources of a kind (recipes and plug-ins): the name each source's
 /// download folder is made from, for the download indexes.
-pub fn folder_names(kind: BrowseKind) -> Vec<(i64, String)> {
+pub fn folder_names(kind: Kind) -> Vec<(i64, String)> {
     let rows = match kind {
-        BrowseKind::Manga => crate::browse::directory::current(BrowseKind::Manga).sources(),
-        BrowseKind::Anime => anime_rows(),
+        Kind::Manga => crate::browse::directory::current(Kind::Manga).sources(),
+        Kind::Anime => anime_rows(),
     };
     names_of(rows)
 }
@@ -301,7 +301,7 @@ fn load_sources() -> Vec<String> {
     }
     let root = paths.repo_sources_dir();
     let links: Vec<String> = SourcePrefs::new(store.clone()).manga_extension_repos.get().into_iter().collect();
-    // (id, is an anime plug-in, allowed hosts, bytes) for each plug-in of a link
+    // (id, kind, allowed hosts, bytes) for each plug-in of a link
     let mut plugins = Vec::new();
     // the saved icon of each repo package ("scraper.<id>" or "repo.<id>"), as the rows name their packages
     let mut icons: HashMap<String, PathBuf> = HashMap::new();
@@ -323,7 +323,7 @@ fn load_sources() -> Vec<String> {
                 if let Some(path) = icon {
                     icons.insert(format!("repo.{}", entry.id), path);
                 }
-                plugins.push((entry.id.clone(), entry.kind == repo::Kind::Anime, entry.hosts.clone(), bytes));
+                plugins.push((entry.id.clone(), entry.kind, entry.hosts.clone(), bytes));
                 continue;
             }
             match recipe_from(&bytes) {
@@ -347,7 +347,7 @@ fn load_sources() -> Vec<String> {
     let (mut manga_plugins, mut anime_plugins) = (Vec::new(), Vec::new());
     // the plug-ins compile side by side (the compile cache makes a later start fast)
     let ids: Vec<String> = plugins.iter().map(|(id, ..)| id.clone()).collect();
-    let loads = plugins.into_iter().map(|(_id, anime, hosts, bytes)| instantiate_repo_plugin(bytes, hosts, anime, client.clone(), store.clone()));
+    let loads = plugins.into_iter().map(|(_id, kind, hosts, bytes)| instantiate_repo_plugin(bytes, hosts, kind, client.clone(), store.clone()));
     let results = block(futures::future::join_all(loads));
     for (index, id) in ids.iter().enumerate() {
         let package = format!("repo.{id}");
@@ -382,9 +382,9 @@ fn load_sources() -> Vec<String> {
     let icon_paths: HashMap<i64, PathBuf> = rows.iter().filter_map(|row| Some((row.source.id, icons.get(&row.package)?.clone()))).collect();
     *IMAGE_HEADERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(headers);
     *ICON_PATHS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(icon_paths);
-    install(BrowseKind::Manga, manga);
+    install(Kind::Manga, manga);
     let runnable = anime.anime.iter().map(|(source, row)| (Catalogue::Anime(Arc::clone(source)), row.clone())).collect();
-    install(BrowseKind::Anime, Catalogues::new(BrowseKind::Anime, runnable));
+    install(Kind::Anime, Catalogues::new(Kind::Anime, runnable));
     *LOADED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(anime));
     failed
 }

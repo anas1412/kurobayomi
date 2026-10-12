@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::Local;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -44,24 +44,24 @@ pub trait Host: Send + Sync {
     /// `library_update_last_timestamp`, written at pass start even for an empty queue.
     fn set_last_update_ms(&self, now_ms: i64);
     /// Adds to `library_unread_updates_count` (manga) or `library_unseen_updates_count` (anime).
-    fn add_new_updates(&self, kind: EntryKind, count: usize);
+    fn add_new_updates(&self, kind: Kind, count: usize);
     /// The progress notification; `body` is `None` when content is hidden.
-    fn show_progress(&self, kind: EntryKind, title: &str, body: Option<&str>);
-    fn cancel_progress(&self, kind: EntryKind);
+    fn show_progress(&self, kind: Kind, title: &str, body: Option<&str>);
+    fn cancel_progress(&self, kind: Kind);
     /// The summary and per-entry notifications for the entries with new items.
-    fn show_summary(&self, kind: EntryKind, updates: &[EntryUpdate], hide_content: bool);
+    fn show_summary(&self, kind: Kind, updates: &[EntryUpdate], hide_content: bool);
     /// Queues the items with autostart off.
-    fn enqueue_downloads(&self, kind: EntryKind, entry_id: i64, items: &[SourceItem]);
-    fn start_downloads(&self, kind: EntryKind);
+    fn enqueue_downloads(&self, kind: Kind, entry_id: i64, items: &[SourceItem]);
+    fn start_downloads(&self, kind: Kind);
     /// Writes the error log of a pass that had failures (T-26a-095) and returns the file, or `None` when none was written.
     /// Called only when there are failures and the pass was not cancelled.
-    fn write_error_log(&self, _kind: EntryKind, _failures: &[Failure]) -> Option<PathBuf> {
+    fn write_error_log(&self, _kind: Kind, _failures: &[Failure]) -> Option<PathBuf> {
         None
     }
     /// The failure notice; `log` is the file its tap opens (T-26a-096).
-    fn show_error(&self, kind: EntryKind, failed: usize, log: Option<&Path>);
+    fn show_error(&self, kind: Kind, failed: usize, log: Option<&Path>);
     /// The large-queue warning: a source of this pass has more queued entries than the threshold (not unmetered).
-    fn show_queue_warning(&self, kind: EntryKind);
+    fn show_queue_warning(&self, kind: Kind);
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,7 +88,7 @@ pub enum Trigger {
 /// The choices of one pass, read from the preferences by the caller.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PassSettings {
-    pub kind: EntryKind,
+    pub kind: Kind,
     /// `Some(id)` for a manual run of one category.
     pub category: Option<i64>,
     pub include_categories: Vec<i64>,
@@ -102,7 +102,7 @@ pub struct PassSettings {
 
 impl PassSettings {
     /// The defaults: all categories, the default restriction set, nothing else enabled.
-    pub fn new(kind: EntryKind) -> Self {
+    pub fn new(kind: Kind) -> Self {
         Self {
             kind,
             category: None,
@@ -160,10 +160,10 @@ impl PassOutcome {
     }
 }
 
-fn slot_index(kind: EntryKind) -> usize {
+fn slot_index(kind: Kind) -> usize {
     match kind {
-        EntryKind::Manga => 0,
-        EntryKind::Anime => 1,
+        Kind::Manga => 0,
+        Kind::Anime => 1,
     }
 }
 
@@ -184,7 +184,7 @@ impl PassLocks {
     }
 
     /// The guard of a new pass, or the trigger of the pass that holds the kind.
-    pub fn acquire(this: &Arc<Self>, kind: EntryKind, trigger: Trigger) -> Result<PassGuard, Trigger> {
+    pub fn acquire(this: &Arc<Self>, kind: Kind, trigger: Trigger) -> Result<PassGuard, Trigger> {
         let mut slots = this.lock();
         let index = slot_index(kind);
         if let Some(slot) = &slots[index] {
@@ -197,7 +197,7 @@ impl PassLocks {
 
     /// Cancels the running pass of `kind`. Returns the trigger of that pass (a stopped automatic pass re-arms its
     /// loop), or `None` when nothing runs.
-    pub fn stop(&self, kind: EntryKind) -> Option<Trigger> {
+    pub fn stop(&self, kind: Kind) -> Option<Trigger> {
         let slots = self.lock();
         slots[slot_index(kind)].as_ref().map(|slot| {
             slot.cancel.store(true, Ordering::SeqCst);
@@ -205,7 +205,7 @@ impl PassLocks {
         })
     }
 
-    pub fn holder(&self, kind: EntryKind) -> Option<Trigger> {
+    pub fn holder(&self, kind: Kind) -> Option<Trigger> {
         self.lock()[slot_index(kind)].as_ref().map(|slot| slot.trigger)
     }
 }
@@ -213,7 +213,7 @@ impl PassLocks {
 /// Held while a pass runs. Dropping it frees the kind.
 pub struct PassGuard {
     locks: Arc<PassLocks>,
-    kind: EntryKind,
+    kind: Kind,
     trigger: Trigger,
     cancel: Arc<AtomicBool>,
 }
@@ -271,7 +271,7 @@ struct Progress {
 }
 
 impl Shared {
-    fn publish<H: Host>(&self, host: &H, kind: EntryKind, hide_content: bool) {
+    fn publish<H: Host>(&self, host: &H, kind: Kind, hide_content: bool) {
         let (completed, titles) = {
             let progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
             (progress.completed, progress.running.iter().map(|(_, title)| title.clone()).collect::<Vec<_>>())
@@ -329,7 +329,7 @@ where
     }
 
     /// Cancels the running pass of `kind`; returns its trigger.
-    pub fn stop(&self, kind: EntryKind) -> Option<Trigger> {
+    pub fn stop(&self, kind: Kind) -> Option<Trigger> {
         self.locks.stop(kind)
     }
 
@@ -482,7 +482,7 @@ where
 /// Files one entry's result: new items, counters, or a failure. A cancelled entry is not a failure.
 fn record_entry<H: Host>(
     host: &H,
-    kind: EntryKind,
+    kind: Kind,
     shared: &Shared,
     entry: &LibraryEntry,
     result: Result<crate::library_update::entry::EntryOutcome, UpdateError>,
@@ -510,10 +510,10 @@ fn record_entry<H: Host>(
 }
 
 /// The name of the job a library pass of `kind` records under in the job registry.
-pub fn job_name(kind: EntryKind) -> &'static str {
+pub fn job_name(kind: Kind) -> &'static str {
     match kind {
-        EntryKind::Manga => "library-update-manga",
-        EntryKind::Anime => "library-update-anime",
+        Kind::Manga => "library-update-manga",
+        Kind::Anime => "library-update-anime",
     }
 }
 
@@ -535,14 +535,14 @@ mod tests {
 
     /// No item restrictions, so the fixture entries (nothing read) reach the source.
     fn settings() -> PassSettings {
-        PassSettings { restrictions: QueueRestrictions::default(), ..PassSettings::new(EntryKind::Manga) }
+        PassSettings { restrictions: QueueRestrictions::default(), ..PassSettings::new(Kind::Manga) }
     }
 
     #[tokio::test]
     async fn an_empty_library_succeeds_writes_the_timestamp_and_clears_progress() {
         // Q-01 and P-19: the timestamp is written even with nothing to update.
         let runner = runner(FakeStore::default(), FakeRegistry::default());
-        let outcome = runner.run_with(PassLocks::acquire(runner.locks(), EntryKind::Manga, Trigger::Manual).unwrap(), settings(), window(), 4242).await;
+        let outcome = runner.run_with(PassLocks::acquire(runner.locks(), Kind::Manga, Trigger::Manual).unwrap(), settings(), window(), 4242).await;
         assert_eq!(outcome.status, PassStatus::Success);
         assert_eq!(runner.deps.host.last_timestamp.load(Ordering::SeqCst), 4242);
         assert_eq!(runner.deps.host.cancelled_progress.load(Ordering::SeqCst), 1);
@@ -553,22 +553,22 @@ mod tests {
     async fn a_busy_kind_refuses_a_manual_start_and_a_scheduled_pass_retries() {
         // P-09, P-10, R-01
         let runner = runner(FakeStore::with(vec![entry(1, 1, "A")]), FakeRegistry::default());
-        let held = PassLocks::acquire(runner.locks(), EntryKind::Manga, Trigger::Manual).expect("first lock");
+        let held = PassLocks::acquire(runner.locks(), Kind::Manga, Trigger::Manual).expect("first lock");
         assert!(!Arc::clone(&runner).start_now(settings()), "start now is refused while a pass runs");
         let scheduled = runner.run(settings(), Trigger::Auto).await;
         assert_eq!(scheduled.status, PassStatus::Retry);
         let manual = runner.run(settings(), Trigger::Manual).await;
         assert_eq!(manual.status, PassStatus::Skipped);
         drop(held);
-        assert!(runner.locks().holder(EntryKind::Manga).is_none(), "dropping the guard frees the kind");
+        assert!(runner.locks().holder(Kind::Manga).is_none(), "dropping the guard frees the kind");
     }
 
     #[tokio::test]
     async fn an_automatic_anime_pass_yields_to_a_running_manual_anime_pass() {
         // T-26a-015: anime follows the manga rule (the deliberate fix of P-5).
         let runner = runner(FakeStore::default(), FakeRegistry::default());
-        let _held = PassLocks::acquire(runner.locks(), EntryKind::Anime, Trigger::Manual).expect("anime lock");
-        let scheduled = runner.run(PassSettings::new(EntryKind::Anime), Trigger::Auto).await;
+        let _held = PassLocks::acquire(runner.locks(), Kind::Anime, Trigger::Manual).expect("anime lock");
+        let scheduled = runner.run(PassSettings::new(Kind::Anime), Trigger::Auto).await;
         assert_eq!(scheduled.status, PassStatus::Retry);
     }
 
@@ -576,8 +576,8 @@ mod tests {
     async fn an_automatic_pass_of_the_other_kind_is_not_blocked() {
         // Kinds lock independently (SC-12).
         let runner = runner(FakeStore::default(), FakeRegistry::default());
-        let _manga = PassLocks::acquire(runner.locks(), EntryKind::Manga, Trigger::Manual).expect("manga");
-        let anime = PassSettings::new(EntryKind::Anime);
+        let _manga = PassLocks::acquire(runner.locks(), Kind::Manga, Trigger::Manual).expect("manga");
+        let anime = PassSettings::new(Kind::Anime);
         assert_eq!(runner.run(anime, Trigger::Auto).await.status, PassStatus::Success);
     }
 
@@ -593,9 +593,9 @@ mod tests {
     async fn stop_reports_the_trigger_of_the_running_pass() {
         // SC-09 / SC-10: the caller re-arms only an automatic pass.
         let runner = runner(FakeStore::default(), FakeRegistry::default());
-        assert_eq!(runner.stop(EntryKind::Manga), None);
-        let _auto = PassLocks::acquire(runner.locks(), EntryKind::Manga, Trigger::Auto).expect("auto");
-        assert_eq!(runner.stop(EntryKind::Manga), Some(Trigger::Auto));
+        assert_eq!(runner.stop(Kind::Manga), None);
+        let _auto = PassLocks::acquire(runner.locks(), Kind::Manga, Trigger::Auto).expect("auto");
+        assert_eq!(runner.stop(Kind::Manga), Some(Trigger::Auto));
     }
 
     #[tokio::test]
@@ -606,8 +606,8 @@ mod tests {
         let calls = Arc::clone(&source.calls);
         registry.sources.insert(1, source);
         let runner = runner(FakeStore::with(vec![entry(1, 1, "A"), entry(2, 1, "B")]), registry);
-        let guard = PassLocks::acquire(runner.locks(), EntryKind::Manga, Trigger::Manual).expect("lock");
-        assert_eq!(runner.stop(EntryKind::Manga), Some(Trigger::Manual));
+        let guard = PassLocks::acquire(runner.locks(), Kind::Manga, Trigger::Manual).expect("lock");
+        assert_eq!(runner.stop(Kind::Manga), Some(Trigger::Manual));
         let outcome = runner.run_with(guard, settings(), window(), 1).await;
         assert_eq!(outcome.status, PassStatus::Cancelled);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn each_kind_records_its_own_job() {
-        assert_ne!(job_name(EntryKind::Manga), job_name(EntryKind::Anime));
+        assert_ne!(job_name(Kind::Manga), job_name(Kind::Anime));
     }
 
     #[tokio::test]
@@ -627,7 +627,7 @@ mod tests {
         let runner = runner(store, FakeRegistry::default());
         let outcome = runner.run(settings(), Trigger::Manual).await;
         assert_eq!(outcome.status, PassStatus::Failed("db gone".into()));
-        assert!(runner.locks().holder(EntryKind::Manga).is_none());
+        assert!(runner.locks().holder(Kind::Manga).is_none());
     }
 
     #[tokio::test]

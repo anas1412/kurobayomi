@@ -2,7 +2,7 @@
 //! `kuro_track::policy::mark_read_plan`; this file gathers its inputs: the largest number of the items marked, the
 //! "changed" check of a re-mark, and the success toast rule.
 
-use kuro_track::model::Kind;
+use kuro_platform::kind::Kind;
 use kuro_track::policy::{AutoTrackState, MarkReadPlan, mark_read_plan};
 
 /// Everything the mark-read flow knows about one marking.

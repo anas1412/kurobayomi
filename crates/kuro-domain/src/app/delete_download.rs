@@ -124,11 +124,12 @@ impl<S: InstalledSource + ?Sized + 'static> EpisodeDownloads for DeleteEpisodeDo
 
 #[cfg(test)]
 mod tests {
+    use kuro_platform::kind::Kind;
     use std::sync::Mutex;
 
     use super::*;
     use crate::source::fakes::{FakeCatalog, Installed, MemStubStore};
-    use crate::source::model::{Id, Source, SourceKind};
+    use crate::source::model::{Id, Source};
 
     /// Records `(entry id, item ids, source id)` of every deletion call.
     #[derive(Default)]
@@ -153,7 +154,7 @@ mod tests {
         }
     }
 
-    fn registry(kind: SourceKind, installed: &[Id]) -> Arc<SourceRegistry<Installed>> {
+    fn registry(kind: Kind, installed: &[Id]) -> Arc<SourceRegistry<Installed>> {
         let registry =
             SourceRegistry::new(kind, Arc::new(MemStubStore::default()), Arc::new(FakeCatalog::default()));
         registry.finish_loading(
@@ -208,7 +209,7 @@ mod tests {
     #[test]
     fn the_whole_slice_goes_to_one_call_with_the_resolved_source() {
         let downloads = Arc::new(Recorder::default());
-        let interactor = DeleteChapterDownload::new(registry(SourceKind::Manga, &[7]), downloads.clone());
+        let interactor = DeleteChapterDownload::new(registry(Kind::Manga, &[7]), downloads.clone());
         runtime().block_on(interactor.await_all(&manga(3, 7), &chapters(&[1, 2, 3])));
         assert_eq!(*downloads.calls.lock().unwrap(), vec![(3, vec![1, 2, 3], 7)]);
     }
@@ -216,7 +217,7 @@ mod tests {
     #[test]
     fn an_absent_source_logs_a_warning_and_deletes_nothing() {
         let downloads = Arc::new(Recorder::default());
-        let interactor = DeleteChapterDownload::new(registry(SourceKind::Manga, &[7]), downloads.clone());
+        let interactor = DeleteChapterDownload::new(registry(Kind::Manga, &[7]), downloads.clone());
         let logs = Logs::default();
         let subscriber = tracing_subscriber::fmt()
             .with_writer(logs.clone())
@@ -235,7 +236,7 @@ mod tests {
     #[test]
     fn the_deletion_finishes_when_the_caller_stops_waiting() {
         let downloads = Arc::new(Recorder::default());
-        let interactor = DeleteChapterDownload::new(registry(SourceKind::Manga, &[7]), downloads.clone());
+        let interactor = DeleteChapterDownload::new(registry(Kind::Manga, &[7]), downloads.clone());
         runtime().block_on(async {
             let (entry, rows) = (manga(3, 7), chapters(&[1]));
             let work = interactor.await_all(&entry, &rows);
@@ -249,7 +250,7 @@ mod tests {
     #[test]
     fn the_status_port_adapter_hands_the_chapters_to_the_interactor() {
         let downloads = Arc::new(Recorder::default());
-        let interactor = DeleteChapterDownload::new(registry(SourceKind::Manga, &[7]), downloads.clone());
+        let interactor = DeleteChapterDownload::new(registry(Kind::Manga, &[7]), downloads.clone());
         runtime().block_on(async {
             ChapterDownloads::delete_chapters(&interactor, &manga(4, 7), &chapters(&[5, 6]));
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -260,7 +261,7 @@ mod tests {
     #[test]
     fn the_episode_interactor_has_the_same_contract() {
         let downloads = Arc::new(Recorder::default());
-        let interactor = DeleteEpisodeDownload::new(registry(SourceKind::Anime, &[9]), downloads.clone());
+        let interactor = DeleteEpisodeDownload::new(registry(Kind::Anime, &[9]), downloads.clone());
         let anime = Anime { id: 2, source: 9, ..Anime::create() };
         let episodes: Vec<Episode> = [10, 11].iter().map(|&id| Episode { id, ..Episode::create() }).collect();
         runtime().block_on(interactor.await_all(&anime, &episodes));

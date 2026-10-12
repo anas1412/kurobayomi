@@ -13,7 +13,8 @@ use kuro_domain::source::pin::Pin;
 
 use super::listing::ListItem;
 use super::pages::{GlobalSearchSnapshot, SearchChips, SearchRow, SearchState, SourceFilter, visible_rows};
-use super::route::{BrowseKind, BrowseRoute};
+use super::route::BrowseRoute;
+use kuro_platform::kind::Kind;
 
 /// Source fetches that run at once (R§5: a 5-permit semaphore, held only for the source call).
 pub const MAX_IN_FLIGHT: usize = 5;
@@ -257,13 +258,13 @@ pub fn auto_open(query: &str, extension: &str, total_sources: usize, rows: &[Sea
 
 /// The same fallback for either catalogue: an anime entry page's search that no browse page can take opens the anime
 /// global search.
-pub fn deep_link_fallback_for(kind: BrowseKind, query: &str) -> BrowseRoute {
+pub fn deep_link_fallback_for(kind: Kind, query: &str) -> BrowseRoute {
     BrowseRoute::GlobalSearch { kind, source_id: None, query: query.to_owned() }
 }
 
 /// A source row tapped while the search box holds text that was never submitted: the source's browse page opens with that
 /// text (GS-EC-15, a documented quirk).
-pub fn row_text_route(kind: BrowseKind, source_id: i64, typed: &str) -> BrowseRoute {
+pub fn row_text_route(kind: Kind, source_id: i64, typed: &str) -> BrowseRoute {
     BrowseRoute::BrowseSource { kind, source_id, query: BrowseQuery::Search(typed.to_owned()), migrating: false }
 }
 

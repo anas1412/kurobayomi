@@ -5,7 +5,8 @@
 
 use kuro_prefs::ui::Tab;
 
-use super::nav::{Kind, Navigator, Route};
+use kuro_platform::kind::Kind;
+use super::nav::{Navigator, Route};
 use super::tabs::HomeTabs;
 
 /// A tab event with its payload (Kotlin `HomeScreen.Tab`).
@@ -18,7 +19,7 @@ pub enum OpenTab {
     Updates,
     History,
     /// The browse tab, optionally on the extensions page of the anime or manga catalogue.
-    Browse { to_extensions: bool, anime: bool },
+    Browse { to_extensions: bool, kind: Kind },
     /// The Downloads page.
     Downloads,
 }
@@ -30,8 +31,8 @@ pub enum Effect {
     Select(Tab),
     /// Push this route onto the navigator.
     Push(Route),
-    /// Show the extensions page of the anime (`true`) or manga (`false`) catalogue before the browse tab is selected.
-    BrowseExtensions { anime: bool },
+    /// Show the extensions page of the anime or manga catalogue before the browse tab is selected.
+    BrowseExtensions { kind: Kind },
 }
 
 /// The steps for an open, in the order HomeScreen runs them: the tab first, then the page it names.
@@ -53,10 +54,10 @@ pub fn effects(open: OpenTab) -> Vec<Effect> {
         }
         OpenTab::Updates => vec![Effect::Select(Tab::Updates)],
         OpenTab::History => vec![Effect::Select(Tab::History)],
-        OpenTab::Browse { to_extensions, anime } => {
+        OpenTab::Browse { to_extensions, kind } => {
             let mut out = Vec::new();
             if to_extensions {
-                out.push(Effect::BrowseExtensions { anime });
+                out.push(Effect::BrowseExtensions { kind });
             }
             out.push(Effect::Select(Tab::Browse));
             out
@@ -66,12 +67,12 @@ pub fn effects(open: OpenTab) -> Vec<Effect> {
 }
 
 /// Applies an open: selects the tab, pushes the page, and hands the extensions request to `show_extensions`.
-pub fn open_tab(open: OpenTab, home: &mut HomeTabs, nav: &mut Navigator, mut show_extensions: impl FnMut(bool)) {
+pub fn open_tab(open: OpenTab, home: &mut HomeTabs, nav: &mut Navigator, mut show_extensions: impl FnMut(Kind)) {
     for effect in effects(open) {
         match effect {
             Effect::Select(tab) => home.select(tab),
             Effect::Push(route) => nav.push(route),
-            Effect::BrowseExtensions { anime } => show_extensions(anime),
+            Effect::BrowseExtensions { kind } => show_extensions(kind),
         }
     }
 }
@@ -112,8 +113,8 @@ mod tests {
     #[test]
     fn browse_asks_for_the_extensions_page_before_selecting_browse() {
         assert_eq!(
-            effects(OpenTab::Browse { to_extensions: true, anime: true }),
-            vec![Effect::BrowseExtensions { anime: true }, Effect::Select(Tab::Browse)]
+            effects(OpenTab::Browse { to_extensions: true, kind: Kind::Anime }),
+            vec![Effect::BrowseExtensions { kind: Kind::Anime }, Effect::Select(Tab::Browse)]
         );
     }
 
@@ -122,13 +123,13 @@ mod tests {
         let mut home = HomeTabs::new(StartScreen::ANIME);
         let mut nav = Navigator::new();
         let mut asked = None;
-        open_tab(OpenTab::AnimeLib { anime_id: Some(3) }, &mut home, &mut nav, |anime| asked = Some(anime));
+        open_tab(OpenTab::AnimeLib { anime_id: Some(3) }, &mut home, &mut nav, |kind| asked = Some(kind));
         assert_eq!(home.current(), Tab::AnimeLibrary);
         assert_eq!(nav.stack(), &[Route::Home, Route::Entry { kind: Kind::Anime, id: 3, from_source: false }]);
         assert_eq!(asked, None);
 
-        open_tab(OpenTab::Browse { to_extensions: true, anime: false }, &mut home, &mut nav, |anime| asked = Some(anime));
-        assert_eq!(asked, Some(false));
+        open_tab(OpenTab::Browse { to_extensions: true, kind: Kind::Manga }, &mut home, &mut nav, |kind| asked = Some(kind));
+        assert_eq!(asked, Some(Kind::Manga));
         assert_eq!(home.current(), Tab::Browse);
     }
 }

@@ -6,7 +6,7 @@ use crate::screens::{built, Built};
 use crate::ui::*;
 use gtk::prelude::*;
 use gtk::{Box as GBox, Button, Label, Orientation as O};
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 pub fn body(id: &str) -> Option<Built> {
     // the settings shell, the language picker, the extension lists, the backup pages and Debug info (area 47b)
@@ -177,14 +177,13 @@ fn backup_schema(id: &str) -> Option<Built> {
 /// The clear-database screens: one row per source that has non-library entries in the database, a
 /// check per row, and Delete (after the spec's confirm dialog) removes the checked sources' entries.
 fn clear_db(id: &str) -> Option<Built> {
-    let anime = id == "settings_clear_anime_database";
-    let kind = if anime { EntryKind::Anime } else { EntryKind::Manga };
+    let kind = Kind::from_anime(id == "settings_clear_anime_database");
     let db = crate::data::app().db(kind);
     // (source id, row title, non-library count), read from the database; a failed read shows nothing to clear.
     let sources: Vec<(i64, String, i64)> = db
         .read(|c| {
             let mut out = Vec::new();
-            if anime {
+            if kind.is_anime() {
                 for (source, count) in kuro_db::statements_anime::non_library_counts_by_source(c)? {
                     let name = kuro_db::statements_anime::stub_source(c, source)?.map(|s| s.name);
                     out.push((source, name.filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Source {source}")), count));
@@ -246,10 +245,10 @@ fn clear_db(id: &str) -> Option<Built> {
                     return;
                 }
                 let written = db.write(|tx| {
-                    let table = if anime { "episodes" } else { "chapters" };
+                    let table = if kind.is_anime() { "episodes" } else { "chapters" };
                     let sql = format!("SELECT count(*) FROM {table}");
                     let before = tx.query_row(&sql, [], |r| r.get::<_, i64>(0))?;
-                    if anime {
+                    if kind.is_anime() {
                         kuro_db::statements_anime::clear_non_library_anime_by_sources(tx, &selected)?;
                     } else {
                         kuro_db::statements_manga::clear_non_library_by_sources(tx, &selected)?;
@@ -259,7 +258,7 @@ fn clear_db(id: &str) -> Option<Built> {
                 });
                 match written {
                     Ok(removed) => {
-                        after_clear(anime, removed);
+                        after_clear(kind, removed);
                         for (source, check, r) in entries.iter() {
                             if selected.contains(source) {
                                 list.remove(r);
@@ -294,12 +293,12 @@ fn sorted_by_name(mut sources: Vec<(i64, String, i64)>) -> Vec<(i64, String, i64
 
 /// Housekeeping after "Clear database" committed (T-03a-028): above 1000 removed chapters or episodes the WAL is
 /// checkpointed and the user is offered VACUUM. Both run on their own connection to the file, off the open handle.
-fn after_clear(anime: bool, removed: usize) {
+fn after_clear(kind: Kind, removed: usize) {
     use crate::ui::{DialogButton, Role};
     use kuro_platform::paths::Paths as _;
     let Ok(paths) = kuro_platform::linux::LinuxPaths::system() else { return };
-    let path = if anime { kuro_db::schema_anime::db_path(&paths.data_dir()) } else { kuro_db::schema_manga::db_path(&paths.data_dir()) };
-    let open = move || if anime { kuro_db::schema_anime::open(&path) } else { kuro_db::schema_manga::open(&path) };
+    let path = if kind.is_anime() { kuro_db::schema_anime::db_path(&paths.data_dir()) } else { kuro_db::schema_manga::db_path(&paths.data_dir()) };
+    let open = move || if kind.is_anime() { kuro_db::schema_anime::open(&path) } else { kuro_db::schema_manga::open(&path) };
     let after = match open().and_then(|c| kuro_db::maintenance::after_chapter_delete(&c, removed)) {
         Ok(after) => after,
         Err(e) => {

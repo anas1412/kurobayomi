@@ -7,6 +7,7 @@ use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, DrawingArea, Label, ListBoxRow, Orientation as O};
 
 use kuro_i18n::{MsgKey, tr};
+use kuro_platform::kind::Kind;
 
 use crate::updates::format::format_size;
 use crate::updates::storage::{Rgba, StorageRow, count_text};
@@ -31,7 +32,7 @@ fn colour_dot(colour: Rgba) -> DrawingArea {
 }
 
 /// The row. `cover` is the thumbnail widget, already loaded by the caller; `on_delete` runs the confirm dialog.
-pub fn storage_row(row: &StorageRow, anime: bool, cover: &impl IsA<gtk::Widget>, on_delete: Rc<dyn Fn()>) -> ListBoxRow {
+pub fn storage_row(row: &StorageRow, kind: Kind, cover: &impl IsA<gtk::Widget>, on_delete: Rc<dyn Fn()>) -> ListBoxRow {
     let line = GBox::new(O::Horizontal, 12);
     crate::ui::margins(&line, 8);
 
@@ -54,7 +55,7 @@ pub fn storage_row(row: &StorageRow, anime: bool, cover: &impl IsA<gtk::Widget>,
     let meta = GBox::new(O::Horizontal, 6);
     meta.append(&colour_dot(row.color));
     let size = format_size(row.size_bytes);
-    let count = count_text(anime, row.entries_count);
+    let count = count_text(kind, row.entries_count);
     for text in [size.as_str(), "·", count.as_str()] {
         meta.append(&Label::builder().label(text).xalign(0.0).css_classes(["dim-label", "caption"]).build());
     }

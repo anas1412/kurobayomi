@@ -2,6 +2,7 @@
 //! compact grid, none in the cover-only grid), and the List mode row. What shows is decided by `layout::card_model`;
 //! this file only places widgets, and the click handling lives in the view.
 
+use kuro_platform::kind::Kind;
 use gtk::prelude::*;
 use gtk::{Align, Orientation as O};
 use kuro_domain::library::columns::COLUMN_WIDTH_PX;
@@ -17,11 +18,11 @@ pub struct Card {
     pub continue_button: Option<gtk::Button>,
 }
 
-/// What a card needs besides the item: the cover art (any entry with a stored thumbnail), whether the entry is anime,
+/// What a card needs besides the item: the cover art (any entry with a stored thumbnail), its kind,
 /// and whether its unread count counts seasons (T-37a-048).
 pub struct Extras<'a> {
     pub art: Option<&'a ArtRef>,
-    pub anime: bool,
+    pub kind: Kind,
     pub season_parent: bool,
 }
 
@@ -112,7 +113,7 @@ fn title_label(text: &str, class: &str) -> gtk::Label {
 
 /// Builds the grid card of `item`. `selected` marks it; `show_continue` adds the continue button.
 pub fn build(item: &LibraryItem, mode: LibraryDisplayMode, selected: bool, show_continue: bool, extras: &Extras) -> Card {
-    let model = layout::card_model(item, mode, extras.anime, extras.season_parent);
+    let model = layout::card_model(item, mode, extras.kind, extras.season_parent);
     let width = COLUMN_WIDTH_PX;
     let overlay = gtk::Overlay::new();
     overlay.add_css_class("kb-card-cover");
@@ -160,7 +161,7 @@ pub fn build(item: &LibraryItem, mode: LibraryDisplayMode, selected: bool, show_
 /// Builds the List mode row of `item` (T-37a-021): a small 2:3 cover, the title, the badges, then the continue
 /// button. `row_height` comes from `layout::list_row_height`.
 pub fn build_list(item: &LibraryItem, selected: bool, show_continue: bool, row_height: f64, extras: &Extras) -> Card {
-    let model = layout::card_model(item, LibraryDisplayMode::List, extras.anime, extras.season_parent);
+    let model = layout::card_model(item, LibraryDisplayMode::List, extras.kind, extras.season_parent);
     let height = (row_height.round() as i32 - 2 * SPACE_XS).max(40);
     let overlay = gtk::Overlay::new();
     overlay.add_css_class("kb-card-cover");
@@ -223,7 +224,7 @@ mod tests {
     #[test]
     fn a_card_without_a_cover_shows_initials_worded_badges_and_the_title_below() {
         crate::testing::with_display(|| {
-            let extras = Extras { art: None, anime: true, season_parent: false };
+            let extras = Extras { art: None, kind: Kind::Anime, season_parent: false };
             let card = build(&local_anime(), LibraryDisplayMode::ComfortableGrid, false, false, &extras);
             let mut text = vec![];
             labels(&card.root, &mut text);
@@ -241,7 +242,7 @@ mod tests {
     #[test]
     fn t_49b_029_a_selected_list_row_takes_the_selected_tint_and_an_unselected_one_none() {
         crate::testing::with_display(|| {
-            let extras = Extras { art: None, anime: true, season_parent: false };
+            let extras = Extras { art: None, kind: Kind::Anime, season_parent: false };
             let selected = build_list(&local_anime(), true, false, 76.0, &extras);
             assert!(selected.root.has_css_class("kb-selected") && selected.root.has_css_class("kb-card-selected"));
             let plain = build_list(&local_anime(), false, false, 76.0, &extras);
@@ -252,7 +253,7 @@ mod tests {
     #[test]
     fn the_cover_only_grid_has_no_title_and_the_compact_grid_puts_it_on_the_cover() {
         crate::testing::with_display(|| {
-            let extras = Extras { art: None, anime: false, season_parent: false };
+            let extras = Extras { art: None, kind: Kind::Manga, season_parent: false };
             let bare = build(&local_anime(), LibraryDisplayMode::CoverOnlyGrid, false, true, &extras);
             let mut text = vec![];
             labels(&bare.root, &mut text);

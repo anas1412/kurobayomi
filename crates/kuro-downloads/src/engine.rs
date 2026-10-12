@@ -4,6 +4,7 @@
 //! The anime engine stops with `Pause`, and the manga engine stops with `Pause` too (its pause already ends the run).
 //! Kotlin's manga `pauseDownloads` is `pause(); stop()`, and the Rust actor does both in one step.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use crate::anime::manager::{AnimeQueue, Command as AnimeCommand};
@@ -11,7 +12,7 @@ use crate::anime::model::AnimeDownload;
 use crate::downloader::{Command as MangaCommand, RemoveTarget};
 use crate::manager::DownloadManager;
 use crate::model::QueuedDownload;
-use crate::queue_model::{EntryKind, QueueItem, QueueModel};
+use crate::queue_model::{QueueItem, QueueModel};
 
 /// The commands the page sends. Calls return at once; the result shows up in the next snapshot.
 pub trait QueueEngine: Send + Sync {
@@ -136,7 +137,7 @@ pub fn anime_model(snapshot: &[Arc<AnimeDownload>]) -> QueueModel {
             .map(|d| {
                 let progress = i64::from(d.progress.get());
                 QueueItem {
-                    kind: EntryKind::Anime,
+                    kind: Kind::Anime,
                     item_id: d.episode.id,
                     parent_id: d.anime.id,
                     source_id: d.source.id,
@@ -161,7 +162,7 @@ pub fn manga_model(snapshot: &[Arc<QueuedDownload>]) -> QueueModel {
         snapshot
             .iter()
             .map(|d| QueueItem {
-                kind: EntryKind::Manga,
+                kind: Kind::Manga,
                 item_id: d.chapter.id,
                 parent_id: d.manga.id,
                 source_id: d.source.id(),
@@ -261,7 +262,7 @@ mod tests {
         let item = crate::testing::download(&src, 9, 5, DownloadState::Queue);
         let model = manga_model(&[Arc::new(item)]);
         let row = &model.flat()[0];
-        assert_eq!((row.kind, row.item_id, row.parent_id, row.source_id), (EntryKind::Manga, 9, 5, 4));
+        assert_eq!((row.kind, row.item_id, row.parent_id, row.source_id), (Kind::Manga, 9, 5, 4));
         assert_eq!(row.state, DownloadState::Queue);
         assert_eq!(row.pages_total, None, "no page list yet");
     }

@@ -7,6 +7,7 @@
 //! `track_retry_queue` table with a different policy (doubling backoff to 5 hours, items kept after the last run); the app
 //! must use one of the two, and this one follows the acceptance text.
 
+use kuro_platform::kind::Kind;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
@@ -18,8 +19,6 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
-
-use crate::kind::EntryKind;
 
 /// Runs of the worker before it gives up (`runAttemptCount > 3` stops it): attempts 0 to 3.
 pub const MAX_RUNS: u32 = 4;
@@ -39,10 +38,10 @@ struct Queue {
 }
 
 impl Queue {
-    fn map(&mut self, kind: EntryKind) -> &mut BTreeMap<i64, f32> {
+    fn map(&mut self, kind: Kind) -> &mut BTreeMap<i64, f32> {
         match kind {
-            EntryKind::Manga => &mut self.manga,
-            EntryKind::Anime => &mut self.anime,
+            Kind::Manga => &mut self.manga,
+            Kind::Anime => &mut self.anime,
         }
     }
 }
@@ -90,7 +89,7 @@ impl DelayedTrackingStore {
     }
 
     /// Queues `last` for the track, only when it is greater than the stored value (default 0), as an `f32` (EC-46, EC-54).
-    pub fn add(&self, kind: EntryKind, track_id: i64, last: f64) -> io::Result<()> {
+    pub fn add(&self, kind: Kind, track_id: i64, last: f64) -> io::Result<()> {
         let value = last as f32;
         self.with(|queue| {
             if value > queue.map(kind).get(&track_id).copied().unwrap_or(0.0) {
@@ -102,7 +101,7 @@ impl DelayedTrackingStore {
         })
     }
 
-    pub fn remove(&self, kind: EntryKind, track_id: i64) -> io::Result<()> {
+    pub fn remove(&self, kind: Kind, track_id: i64) -> io::Result<()> {
         self.with(|queue| {
             if queue.map(kind).remove(&track_id).is_some() {
                 self.write(queue)
@@ -113,7 +112,7 @@ impl DelayedTrackingStore {
     }
 
     /// The queued `(track id, progress)` pairs of one kind, in id order.
-    pub fn items(&self, kind: EntryKind) -> Vec<(i64, f32)> {
+    pub fn items(&self, kind: Kind) -> Vec<(i64, f32)> {
         self.with(|queue| queue.map(kind).iter().map(|(id, v)| (*id, *v)).collect())
     }
 
@@ -141,7 +140,7 @@ pub trait TrackReplay: Send + Sync {
     /// Returns when the device is online.
     async fn wait_online(&self);
     /// `TrackChapter`/`TrackEpisode` for one queued item, with `setup_job_on_failure = false`.
-    async fn replay(&self, kind: EntryKind, track_id: i64, progress: f32) -> ReplayOutcome;
+    async fn replay(&self, kind: Kind, track_id: i64, progress: f32) -> ReplayOutcome;
 }
 
 struct Control {
@@ -201,7 +200,7 @@ async fn run(store: Arc<DelayedTrackingStore>, replay: Arc<dyn TrackReplay>, con
     'runs: loop {
         replay.wait_online().await;
         let last_run = attempt + 1 >= MAX_RUNS;
-        for kind in EntryKind::ALL {
+        for kind in Kind::ALL {
             for (track_id, progress) in store.items(kind) {
                 let outcome = replay.replay(kind, track_id, progress).await;
                 let drop_entry = match outcome {
@@ -251,13 +250,13 @@ mod tests {
     #[test]
     fn add_keeps_only_the_greater_progress_as_f32_and_the_kinds_stay_apart() {
         let (dir, store) = store();
-        store.add(EntryKind::Manga, 12, 10.0).unwrap();
-        store.add(EntryKind::Manga, 12, 9.5).unwrap();
-        store.add(EntryKind::Manga, 12, 10.1).unwrap();
-        store.add(EntryKind::Anime, 12, 3.0).unwrap();
-        store.add(EntryKind::Manga, 13, 0.0).unwrap();
-        assert_eq!(store.items(EntryKind::Manga), vec![(12, 10.1_f32)], "EC-46, EC-54: greater only, truncated to f32");
-        assert_eq!(store.items(EntryKind::Anime), vec![(12, 3.0)], "the same id in the other kind is another entry");
+        store.add(Kind::Manga, 12, 10.0).unwrap();
+        store.add(Kind::Manga, 12, 9.5).unwrap();
+        store.add(Kind::Manga, 12, 10.1).unwrap();
+        store.add(Kind::Anime, 12, 3.0).unwrap();
+        store.add(Kind::Manga, 13, 0.0).unwrap();
+        assert_eq!(store.items(Kind::Manga), vec![(12, 10.1_f32)], "EC-46, EC-54: greater only, truncated to f32");
+        assert_eq!(store.items(Kind::Anime), vec![(12, 3.0)], "the same id in the other kind is another entry");
         let json: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.path().join(QUEUE_FILE)).unwrap()).unwrap();
         assert_eq!(json["anime"]["12"], 3.0);
         assert!(json["manga"].is_object());
@@ -266,14 +265,14 @@ mod tests {
     #[test]
     fn the_queue_is_read_back_from_the_file_and_a_stray_tmp_file_is_ignored_and_replaced() {
         let (dir, store) = store();
-        store.add(EntryKind::Manga, 1, 4.0).unwrap();
+        store.add(Kind::Manga, 1, 4.0).unwrap();
         std::fs::write(dir.path().join("tracking_queue.json.tmp"), "{ broken").unwrap();
         let reopened = DelayedTrackingStore::new(dir.path().join(QUEUE_FILE));
-        assert_eq!(reopened.items(EntryKind::Manga), vec![(1, 4.0)], "the stray tmp file is not read");
-        reopened.add(EntryKind::Anime, 2, 1.0).unwrap();
+        assert_eq!(reopened.items(Kind::Manga), vec![(1, 4.0)], "the stray tmp file is not read");
+        reopened.add(Kind::Anime, 2, 1.0).unwrap();
         assert!(!dir.path().join("tracking_queue.json.tmp").exists(), "the next write replaced it");
-        reopened.remove(EntryKind::Manga, 1).unwrap();
-        assert_eq!(DelayedTrackingStore::new(dir.path().join(QUEUE_FILE)).items(EntryKind::Manga), vec![]);
+        reopened.remove(Kind::Manga, 1).unwrap();
+        assert_eq!(DelayedTrackingStore::new(dir.path().join(QUEUE_FILE)).items(Kind::Manga), vec![]);
         assert!(!reopened.is_empty());
     }
 
@@ -312,7 +311,7 @@ mod tests {
         async fn wait_online(&self) {
             self.runs_waited.fetch_add(1, Ordering::SeqCst);
         }
-        async fn replay(&self, _kind: EntryKind, track_id: i64, _progress: f32) -> ReplayOutcome {
+        async fn replay(&self, _kind: Kind, track_id: i64, _progress: f32) -> ReplayOutcome {
             self.calls.lock().unwrap().push((self.start.elapsed(), track_id));
             *self.outcome.lock().unwrap().get(&track_id).unwrap_or(&ReplayOutcome::Done)
         }
@@ -332,22 +331,22 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn worker_backoff_schedule() {
         let (_dir, store) = store();
-        store.add(EntryKind::Manga, 1, 5.0).unwrap();
+        store.add(Kind::Manga, 1, 5.0).unwrap();
         let script = Script::new(&[(1, ReplayOutcome::Failed)]);
         let worker = DelayedTrackingWorker::new(store.clone(), script.clone());
         worker.schedule();
         settle(&worker, 60).await;
         assert_eq!(script.minutes(), vec![0, 5, 15, 35], "5, 10, 20 minutes between four runs");
         assert!(!worker.is_running(), "it gives up after four runs");
-        assert_eq!(store.items(EntryKind::Manga), vec![(1, 5.0)], "a failing entry is kept");
+        assert_eq!(store.items(Kind::Manga), vec![(1, 5.0)], "a failing entry is kept");
         assert_eq!(script.runs_waited.load(Ordering::SeqCst), 4, "each run waits for the network");
     }
 
     #[tokio::test(start_paused = true)]
     async fn done_and_missing_entries_leave_the_queue_and_an_empty_queue_stops_the_worker() {
         let (_dir, store) = store();
-        store.add(EntryKind::Manga, 1, 5.0).unwrap();
-        store.add(EntryKind::Anime, 2, 6.0).unwrap();
+        store.add(Kind::Manga, 1, 5.0).unwrap();
+        store.add(Kind::Anime, 2, 6.0).unwrap();
         let script = Script::new(&[(1, ReplayOutcome::Done), (2, ReplayOutcome::TrackMissing)]);
         let worker = DelayedTrackingWorker::new(store.clone(), script.clone());
         worker.schedule();
@@ -361,21 +360,21 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_logged_out_entry_is_dropped_after_the_final_run_only() {
         let (_dir, store) = store();
-        store.add(EntryKind::Manga, 1, 5.0).unwrap();
-        store.add(EntryKind::Manga, 2, 5.0).unwrap();
+        store.add(Kind::Manga, 1, 5.0).unwrap();
+        store.add(Kind::Manga, 2, 5.0).unwrap();
         let script = Script::new(&[(1, ReplayOutcome::LoggedOut), (2, ReplayOutcome::Failed)]);
         let worker = DelayedTrackingWorker::new(store.clone(), script.clone());
         worker.schedule();
         settle(&worker, 5).await;
-        assert_eq!(store.items(EntryKind::Manga).len(), 2, "kept after the first run");
+        assert_eq!(store.items(Kind::Manga).len(), 2, "kept after the first run");
         settle(&worker, 60).await;
-        assert_eq!(store.items(EntryKind::Manga), vec![(2, 5.0)], "logged out dropped, failing kept");
+        assert_eq!(store.items(Kind::Manga), vec![(2, 5.0)], "logged out dropped, failing kept");
     }
 
     #[tokio::test(start_paused = true)]
     async fn schedule_while_running_restarts_the_backoff() {
         let (_dir, store) = store();
-        store.add(EntryKind::Manga, 1, 5.0).unwrap();
+        store.add(Kind::Manga, 1, 5.0).unwrap();
         let script = Script::new(&[(1, ReplayOutcome::Failed)]);
         let worker = DelayedTrackingWorker::new(store.clone(), script.clone());
         worker.schedule();
@@ -395,7 +394,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_second_schedule_on_a_running_worker_does_not_start_a_second_task() {
         let (_dir, store) = store();
-        store.add(EntryKind::Manga, 1, 5.0).unwrap();
+        store.add(Kind::Manga, 1, 5.0).unwrap();
         let script = Script::new(&[(1, ReplayOutcome::Failed)]);
         let worker = DelayedTrackingWorker::new(store, script.clone());
         worker.schedule();

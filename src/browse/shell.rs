@@ -14,7 +14,8 @@ use kuro_i18n::{MsgKey, tr};
 
 use super::glue::keep_alive;
 use super::keys::{BrowseShortcut, EscapeStep, browse_shortcut, escape_step};
-use super::route::{BrowseKind, BrowsePage, BrowseRoute, reselect_route};
+use super::route::{BrowsePage, BrowseRoute, reselect_route};
+use kuro_platform::kind::Kind;
 
 /// What the tab needs from the app.
 pub struct ShellDeps {
@@ -25,7 +26,7 @@ pub struct ShellDeps {
     /// The filter button, for the visible page: its kind's language filter.
     pub on_filter: Rc<dyn Fn(BrowsePage)>,
     /// The menu's repository entry, for the visible kind: where source repository links are added.
-    pub on_repos: Rc<dyn Fn(BrowseKind)>,
+    pub on_repos: Rc<dyn Fn(Kind)>,
     /// Escape with an empty search: back out of the Browse page.
     pub on_leave: Rc<dyn Fn()>,
 }
@@ -201,7 +202,7 @@ impl Inner {
         }
         let page = self.visible();
         self.syncing.set(true);
-        self.kinds[usize::from(page.kind() == BrowseKind::Manga)].set_active(true);
+        self.kinds[usize::from(page.kind() == Kind::Manga)].set_active(true);
         self.syncing.set(false);
         self.search.set_placeholder_text(Some(&tr(MsgKey::action_global_search_hint)));
     }
@@ -245,7 +246,7 @@ pub(crate) mod tests {
     struct Log {
         routes: Rc<RefCell<Vec<BrowseRoute>>>,
         left: Rc<RefCell<u32>>,
-        repos: Rc<RefCell<Vec<BrowseKind>>>,
+        repos: Rc<RefCell<Vec<Kind>>>,
     }
 
     fn shell() -> (BrowseShell, Log) {
@@ -298,7 +299,7 @@ pub(crate) mod tests {
         shell.inner.search.emit_by_name::<()>("activate", &[]);
         assert_eq!(
             log.routes.borrow().last(),
-            Some(&BrowseRoute::GlobalSearch { kind: BrowseKind::Manga, source_id: None, query: "berserk".into() }),
+            Some(&BrowseRoute::GlobalSearch { kind: Kind::Manga, source_id: None, query: "berserk".into() }),
             "the text is trimmed and every source of the kind is searched"
         );
         assert!(shell.inner.search.text().is_empty(), "the entry is cleared after the search");
@@ -347,11 +348,11 @@ pub(crate) mod tests {
         };
         shell.inner.select(BrowsePage::MangaSources);
         press(MsgKey::action_global_search);
-        assert_eq!(log.routes.borrow().last(), Some(&BrowseRoute::GlobalSearch { kind: BrowseKind::Manga, source_id: None, query: String::new() }));
+        assert_eq!(log.routes.borrow().last(), Some(&BrowseRoute::GlobalSearch { kind: Kind::Manga, source_id: None, query: String::new() }));
         press(MsgKey::label_extension_repos);
         shell.inner.select(BrowsePage::AnimeSources);
         press(MsgKey::label_extension_repos);
-        assert_eq!(*log.repos.borrow(), [BrowseKind::Manga, BrowseKind::Anime], "the repository entry follows the visible kind");
+        assert_eq!(*log.repos.borrow(), [Kind::Manga, Kind::Anime], "the repository entry follows the visible kind");
     }
 
     pub(crate) fn smoke() {

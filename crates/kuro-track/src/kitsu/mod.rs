@@ -18,9 +18,10 @@ pub mod tracker;
 #[cfg(test)]
 mod wire_tests;
 
+use kuro_platform::kind::Kind;
 pub use tracker::KitsuTracker;
 
-use crate::model::{Kind, TrackerId};
+use crate::model::TrackerId;
 
 /// Registry id of Kitsu (`TrackerManager.kt`).
 pub const TRACKER_ID: TrackerId = TrackerId::KITSU;

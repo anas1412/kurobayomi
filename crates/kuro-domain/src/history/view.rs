@@ -1,11 +1,11 @@
 //! The history list view model: date headers, row text, resume and remove actions, and the texts of the empty
 //! states and dialogs. Pure; the screen calls the repository and passes the rows in.
 
+use kuro_platform::kind::Kind;
 use chrono::{NaiveDate, TimeZone};
 
 use super::model::{CoverKey, HistoryWithRelations};
 use crate::dates::{ListRow, header_label, item_row_text, local_date, short_time, with_date_headers};
-use crate::kind::EntryKind;
 
 /// One history line as the screen shows it.
 #[derive(Clone, Debug, PartialEq)]
@@ -28,15 +28,15 @@ pub struct HistoryTexts {
     pub resume_missing: &'static str,
 }
 
-pub fn texts(kind: EntryKind) -> HistoryTexts {
+pub fn texts(kind: Kind) -> HistoryTexts {
     match kind {
-        EntryKind::Manga => HistoryTexts {
+        Kind::Manga => HistoryTexts {
             empty: "Nothing read recently",
             remove_text: "This will remove the read date of this chapter. Are you sure?",
             reset_all_label: "Reset all chapters for this manga",
             resume_missing: "Next chapter not found",
         },
-        EntryKind::Anime => HistoryTexts {
+        Kind::Anime => HistoryTexts {
             empty: "Nothing watched recently",
             remove_text: "This will remove the watch date of this episode. Are you sure?",
             reset_all_label: "Reset all episodes for this anime",
@@ -46,22 +46,22 @@ pub fn texts(kind: EntryKind) -> HistoryTexts {
 }
 
 /// The text of an empty list: with a search active it is "No results found", otherwise the kind's empty text.
-pub fn empty_text(kind: EntryKind, search_active: bool) -> &'static str {
+pub fn empty_text(kind: Kind, search_active: bool) -> &'static str {
     if search_active { "No results found" } else { texts(kind).empty }
 }
 
 /// The date-grouped lines of the list. Headers follow the local date of `at`.
 pub fn build_lines<Tz: TimeZone>(
     rows: &[HistoryWithRelations],
-    kind: EntryKind,
+    kind: Kind,
     today: NaiveDate,
     zone: &Tz,
     relative: bool,
     date_format: Option<&str>,
 ) -> Vec<ListRow<HistoryLine>> {
     let prefix = match kind {
-        EntryKind::Manga => "Ch.",
-        EntryKind::Anime => "Ep.",
+        Kind::Manga => "Ch.",
+        Kind::Anime => "Ep.",
     };
     let dated: Vec<(HistoryLine, NaiveDate)> = rows
         .iter()
@@ -133,7 +133,7 @@ mod tests {
             row(3, 2, ms("2025-03-01T12:00:00Z"), 0.5),
         ];
         let today = NaiveDate::from_ymd_opt(2025, 3, 10).unwrap();
-        let lines = build_lines(&rows, EntryKind::Manga, today, &Utc, false, None);
+        let lines = build_lines(&rows, Kind::Manga, today, &Utc, false, None);
         let headers: Vec<&str> = lines
             .iter()
             .filter_map(|l| match l {
@@ -151,10 +151,10 @@ mod tests {
 
     #[test]
     fn the_empty_text_depends_on_search_and_kind() {
-        assert_eq!(empty_text(EntryKind::Manga, false), "Nothing read recently");
-        assert_eq!(empty_text(EntryKind::Anime, false), "Nothing watched recently");
-        assert_eq!(empty_text(EntryKind::Anime, true), "No results found");
-        assert_eq!(texts(EntryKind::Anime).resume_missing, "Next Episode not found!");
+        assert_eq!(empty_text(Kind::Manga, false), "Nothing read recently");
+        assert_eq!(empty_text(Kind::Anime, false), "Nothing watched recently");
+        assert_eq!(empty_text(Kind::Anime, true), "No results found");
+        assert_eq!(texts(Kind::Anime).resume_missing, "Next Episode not found!");
     }
 
     #[test]

@@ -2,8 +2,8 @@
 //! `AnimeLibrarySortMode.kt`). One `SortType` serves both kinds: the flag numbers are shared, only the
 //! stored tokens differ, and `AiringTime` exists for anime alone.
 
+use kuro_platform::kind::Kind;
 use super::flags::merge;
-use crate::kind::EntryKind;
 
 /// Bits 2 to 5: the sort type.
 pub const SORT_TYPE_MASK: i64 = 0b0011_1100;
@@ -97,10 +97,10 @@ const ANIME_TYPES: [SortType; 11] = [
 
 impl SortType {
     /// The types of one kind, in declaration order (`MangaLibrarySort.types` / `AnimeLibrarySort.types`).
-    pub const fn types(kind: EntryKind) -> &'static [SortType] {
+    pub const fn types(kind: Kind) -> &'static [SortType] {
         match kind {
-            EntryKind::Manga => &MANGA_TYPES,
-            EntryKind::Anime => &ANIME_TYPES,
+            Kind::Manga => &MANGA_TYPES,
+            Kind::Anime => &ANIME_TYPES,
         }
     }
 
@@ -122,42 +122,42 @@ impl SortType {
     }
 
     /// `AiringTime` is anime only; every other type is valid for both kinds.
-    pub const fn valid_for(self, kind: EntryKind) -> bool {
-        !matches!((self, kind), (Self::AiringTime, EntryKind::Manga))
+    pub const fn valid_for(self, kind: Kind) -> bool {
+        !matches!((self, kind), (Self::AiringTime, Kind::Manga))
     }
 
     /// Stored token of this type for `kind`, or `None` when the kind does not have the type.
-    pub const fn token(self, kind: EntryKind) -> Option<&'static str> {
+    pub const fn token(self, kind: Kind) -> Option<&'static str> {
         Some(match (kind, self) {
             (_, Self::Alphabetical) => "ALPHABETICAL",
             (_, Self::DateAdded) => "DATE_ADDED",
             (_, Self::TrackerMean) => "TRACKER_MEAN",
             (_, Self::Random) => "RANDOM",
-            (EntryKind::Manga, Self::LastActivity) => "LAST_READ",
-            (EntryKind::Manga, Self::LastUpdate) => "LAST_MANGA_UPDATE",
-            (EntryKind::Manga, Self::UnreadCount) => "UNREAD_COUNT",
-            (EntryKind::Manga, Self::TotalItems) => "TOTAL_CHAPTERS",
-            (EntryKind::Manga, Self::LatestItem) => "LATEST_CHAPTER",
-            (EntryKind::Manga, Self::ItemFetchDate) => "CHAPTER_FETCH_DATE",
-            (EntryKind::Manga, Self::AiringTime) => return None,
-            (EntryKind::Anime, Self::LastActivity) => "LAST_SEEN",
-            (EntryKind::Anime, Self::LastUpdate) => "LAST_ANIME_UPDATE",
-            (EntryKind::Anime, Self::UnreadCount) => "UNSEEN_COUNT",
-            (EntryKind::Anime, Self::TotalItems) => "TOTAL_EPISODES",
-            (EntryKind::Anime, Self::LatestItem) => "LATEST_EPISODE",
-            (EntryKind::Anime, Self::ItemFetchDate) => "EPISODE_FETCH_DATE",
-            (EntryKind::Anime, Self::AiringTime) => "AIRING_TIME",
+            (Kind::Manga, Self::LastActivity) => "LAST_READ",
+            (Kind::Manga, Self::LastUpdate) => "LAST_MANGA_UPDATE",
+            (Kind::Manga, Self::UnreadCount) => "UNREAD_COUNT",
+            (Kind::Manga, Self::TotalItems) => "TOTAL_CHAPTERS",
+            (Kind::Manga, Self::LatestItem) => "LATEST_CHAPTER",
+            (Kind::Manga, Self::ItemFetchDate) => "CHAPTER_FETCH_DATE",
+            (Kind::Manga, Self::AiringTime) => return None,
+            (Kind::Anime, Self::LastActivity) => "LAST_SEEN",
+            (Kind::Anime, Self::LastUpdate) => "LAST_ANIME_UPDATE",
+            (Kind::Anime, Self::UnreadCount) => "UNSEEN_COUNT",
+            (Kind::Anime, Self::TotalItems) => "TOTAL_EPISODES",
+            (Kind::Anime, Self::LatestItem) => "LATEST_EPISODE",
+            (Kind::Anime, Self::ItemFetchDate) => "EPISODE_FETCH_DATE",
+            (Kind::Anime, Self::AiringTime) => "AIRING_TIME",
         })
     }
 
     /// Exact, case-sensitive token lookup for `kind`.
-    pub fn from_token(kind: EntryKind, token: &str) -> Option<Self> {
+    pub fn from_token(kind: Kind, token: &str) -> Option<Self> {
         Self::types(kind).iter().copied().find(|t| t.token(kind) == Some(token))
     }
 
     /// `valueOf(flag)`: the type whose bits match `flags & SORT_TYPE_MASK`, or `Alphabetical` when none does
     /// (the unassigned patterns of the table in `p1-topic-flag-algebra-and-sort-modes.md`).
-    pub fn from_flags(kind: EntryKind, flags: i64) -> Self {
+    pub fn from_flags(kind: Kind, flags: i64) -> Self {
         Self::types(kind).iter().copied().find(|t| t.flag() == flags & SORT_TYPE_MASK).unwrap_or(Self::Alphabetical)
     }
 }
@@ -178,7 +178,7 @@ impl LibrarySort {
     }
 
     /// `valueOf(flags)`: `None` is the default sort; otherwise the type and direction are decoded.
-    pub fn from_flags(kind: EntryKind, flags: Option<i64>) -> Self {
+    pub fn from_flags(kind: Kind, flags: Option<i64>) -> Self {
         match flags {
             None => Self::DEFAULT,
             Some(f) => Self { ty: SortType::from_flags(kind, f), dir: Direction::from_flags(f) },
@@ -195,14 +195,14 @@ impl LibrarySort {
     }
 
     /// `"<TYPE>,<DIRECTION>"`, for example `LAST_READ,ASCENDING`.
-    pub fn serialize(self, kind: EntryKind) -> String {
+    pub fn serialize(self, kind: Kind) -> String {
         let token = self.ty.token(kind).unwrap_or("ALPHABETICAL");
         format!("{token},{}", self.dir.token())
     }
 
     /// Lenient decode (never fails). A string with no comma (`"LAST_READ"`) is the default sort, as
     /// upstream's `values[1]` exception is caught.
-    pub fn deserialize(kind: EntryKind, stored: &str) -> Self {
+    pub fn deserialize(kind: Kind, stored: &str) -> Self {
         if stored.is_empty() {
             return Self::DEFAULT;
         }
@@ -221,7 +221,7 @@ impl LibrarySort {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use EntryKind::{Anime, Manga};
+    use Kind::{Anime, Manga};
 
     #[test]
     fn type_counts_and_flag_numbers_follow_the_table() {
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn every_token_round_trips_for_its_kind() {
-        for kind in EntryKind::ALL {
+        for kind in Kind::ALL {
             for ty in SortType::types(kind).iter().copied() {
                 for dir in Direction::ALL {
                     let sort = LibrarySort { ty, dir };

@@ -17,7 +17,7 @@ use kuro_data::episode::{Episode, EpisodeRepo, EpisodeUpdate};
 use kuro_data::manga::{Manga, MangaRepo, MangaUpdate};
 use kuro_data::{DataResult, LookupOrInsert};
 use kuro_db::Db;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_local::LOCAL_SOURCE_ID;
 
 use super::scan::{ScannedFolder, scan, series_in};
@@ -52,24 +52,24 @@ pub struct Outcome {
 /// Adds the folder the user picked. A manga folder is one entry; an anime folder holds one folder per series, and a
 /// series folder with no video file is skipped until it has one. Picking a folder again is a rescan that also puts its
 /// entries back in the library. `Err` when the anime folder cannot be listed.
-pub fn add(db: &Arc<Db>, kind: EntryKind, picked: &Path, now_ms: i64) -> Result<Vec<Outcome>, String> {
+pub fn add(db: &Arc<Db>, kind: Kind, picked: &Path, now_ms: i64) -> Result<Vec<Outcome>, String> {
     let folders = match kind {
-        EntryKind::Manga => vec![picked.to_path_buf()],
-        EntryKind::Anime => series_in(picked).map_err(|e| e.to_string())?,
+        Kind::Manga => vec![picked.to_path_buf()],
+        Kind::Anime => series_in(picked).map_err(|e| e.to_string())?,
     };
     Ok(folders.iter().filter_map(|folder| import(db, kind, folder, now_ms)).collect())
 }
 
 /// Rescans every local entry of `kind` in the library, each from its own folder. An entry the user took out of the
 /// library is not added back.
-pub fn rescan(db: &Arc<Db>, kind: EntryKind, now_ms: i64) -> Result<Vec<Outcome>, String> {
+pub fn rescan(db: &Arc<Db>, kind: Kind, now_ms: i64) -> Result<Vec<Outcome>, String> {
     let rows = super::local_rows(db, kind).map_err(|e| e.to_string())?;
     Ok(rows.iter().filter_map(|row| import(db, kind, Path::new(&row.url), now_ms)).collect())
 }
 
 /// Scans and stores one folder. `None` for an anime folder with no video file that is not stored yet. A failure is
 /// logged as well as returned.
-fn import(db: &Arc<Db>, kind: EntryKind, folder: &Path, now_ms: i64) -> Option<Outcome> {
+fn import(db: &Arc<Db>, kind: Kind, folder: &Path, now_ms: i64) -> Option<Outcome> {
     let outcome = match scan(kind, folder) {
         Err(e) => {
             let title = folder.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
@@ -78,7 +78,7 @@ fn import(db: &Arc<Db>, kind: EntryKind, folder: &Path, now_ms: i64) -> Option<O
         Ok(scanned) => {
             // an anime folder with no video file becomes a series once it has one
             let stored = || AnimeRepo::new(Arc::clone(db)).by_url_and_source(&url_of(&scanned.path), LOCAL_SOURCE_ID);
-            if kind == EntryKind::Anime && scanned.items.is_empty() && matches!(stored(), Ok(None)) {
+            if kind == Kind::Anime && scanned.items.is_empty() && matches!(stored(), Ok(None)) {
                 return None;
             }
             let result = sync(db, kind, &scanned, now_ms).map_err(|e| Failure::Save(e.to_string()));
@@ -92,10 +92,10 @@ fn import(db: &Arc<Db>, kind: EntryKind, folder: &Path, now_ms: i64) -> Option<O
 }
 
 /// Inserts or updates the entry and its items, and puts the entry in the library when it is not there yet.
-pub fn sync(db: &Arc<Db>, kind: EntryKind, scanned: &ScannedFolder, now_ms: i64) -> DataResult<Synced> {
+pub fn sync(db: &Arc<Db>, kind: Kind, scanned: &ScannedFolder, now_ms: i64) -> DataResult<Synced> {
     match kind {
-        EntryKind::Manga => sync_manga(db, scanned, now_ms),
-        EntryKind::Anime => sync_anime(db, scanned, now_ms),
+        Kind::Manga => sync_manga(db, scanned, now_ms),
+        Kind::Anime => sync_anime(db, scanned, now_ms),
     }
 }
 

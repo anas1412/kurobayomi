@@ -261,8 +261,10 @@ mod base_css_tests {
     /// (`kuro_<role>`), so no rule refers to a colour that does not exist.
     #[test]
     fn base_sheet_references_only_gtk_named_colours_and_palette_roles() {
-        const GTK: [&str; 7] = [
+        const GTK: [&str; 8] = [
             "theme_bg_color",
+            // the standard border colour (GTK's default theme and Breeze define it): the dialog outline
+            "borders",
             "theme_fg_color",
             "theme_base_color",
             "theme_selected_bg_color",

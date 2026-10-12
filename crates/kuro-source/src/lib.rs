@@ -5,7 +5,6 @@
 pub mod anime;
 pub mod browse;
 pub mod error;
-pub mod factory;
 pub mod filter;
 pub mod filter_list;
 pub mod filter_sheet;

@@ -4,6 +4,7 @@
 
 use kuro_domain::category::target::AddTarget;
 use kuro_i18n::{Arg, MsgKey, tr, trf};
+use kuro_platform::kind::Kind;
 
 use super::primitives::{DEFAULT_TOAST, ToastSpec};
 
@@ -135,15 +136,15 @@ pub struct DuplicateDialog {
 }
 
 pub fn duplicate_dialog() -> DuplicateDialog {
-    duplicate_dialog_for(false)
+    duplicate_dialog_for(Kind::Manga)
 }
 
 /// The dialog of an anime page: Aniyomi's `DuplicateAnimeDialog` has the manga body and its own Show anime button.
-pub fn duplicate_dialog_for(anime: bool) -> DuplicateDialog {
+pub fn duplicate_dialog_for(kind: Kind) -> DuplicateDialog {
     DuplicateDialog {
         title: tr(MsgKey::are_you_sure),
         body: tr(MsgKey::confirm_add_duplicate_manga),
-        show: tr(if anime { MsgKey::action_show_anime } else { MsgKey::action_show_manga }),
+        show: tr(if kind.is_anime() { MsgKey::action_show_anime } else { MsgKey::action_show_manga }),
         migrate: tr(MsgKey::action_migrate_duplicate),
         add_anyway: tr(MsgKey::action_add_anyway),
         cancel: tr(MsgKey::action_cancel),
@@ -188,9 +189,9 @@ mod tests {
 
     #[test]
     fn the_anime_duplicate_dialog_says_show_anime_and_the_manga_one_says_show_manga() {
-        assert_eq!(duplicate_dialog_for(true).show, tr(MsgKey::action_show_anime));
-        assert_eq!(duplicate_dialog_for(false).show, tr(MsgKey::action_show_manga));
-        assert_eq!(duplicate_dialog_for(true).body, duplicate_dialog_for(false).body);
+        assert_eq!(duplicate_dialog_for(Kind::Anime).show, tr(MsgKey::action_show_anime));
+        assert_eq!(duplicate_dialog_for(Kind::Manga).show, tr(MsgKey::action_show_manga));
+        assert_eq!(duplicate_dialog_for(Kind::Anime).body, duplicate_dialog_for(Kind::Manga).body);
     }
 
     #[test]

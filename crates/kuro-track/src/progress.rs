@@ -3,6 +3,7 @@
 //! Offline and failed updates go to the retry queue. Every error is logged at info, and each tracker's outcome is
 //! returned as a value, so no error is rethrown to the caller.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,7 +15,7 @@ use crate::detach::detached_locked;
 use crate::error::TrackError;
 use crate::error::redact;
 use crate::events::TrackEvent;
-use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 use crate::policy::auto_update_allowed;
 use crate::queue::QueueItem;
 use crate::queue::retry::{ItemOutcome, RetryRunner};

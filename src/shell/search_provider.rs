@@ -18,7 +18,7 @@ use gtk::glib::Variant;
 use gtk::prelude::*;
 
 use super::argv::LaunchRequest;
-use super::nav::Kind;
+use kuro_platform::kind::Kind;
 
 pub const DESKTOP_ID: &str = "io.github.anas1412.Kurobayomi.desktop";
 pub const BUS_NAME: &str = "io.github.anas1412.Kurobayomi.SearchProvider";

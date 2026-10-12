@@ -22,14 +22,14 @@ use kuro_data::manga::MangaRepo;
 use kuro_db::handle::Db;
 use kuro_db::schema_anime::FetchType;
 use kuro_domain::category::service::CategoryService;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::library::active::clamp_page;
 use kuro_domain::library::columns::columns_for_width;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::page::{LibraryItem, toolbar_title};
 use kuro_i18n::{MsgKey, tr, tr_plural};
 use kuro_domain::library::search::{SEARCH_DEBOUNCE, empty_page, shows_global_search};
-use kuro_images::art::{ArtKind, ArtRef, Owner};
+use kuro_images::art::{ArtKind, ArtRef};
 use kuro_prefs::library::LibraryPrefs;
 
 use crate::library::actions;
@@ -46,7 +46,7 @@ use crate::widgets::context_menu::{self, Item};
 
 /// What the view reads from the app: storage, preferences and the lookups that live outside storage.
 pub struct Deps {
-    pub kind: EntryKind,
+    pub kind: Kind,
     pub db: Arc<Db>,
     pub prefs: Rc<LibraryPrefs>,
     pub categories: Rc<CategoryService>,
@@ -192,7 +192,8 @@ impl LibraryView {
         );
         list.set_vexpand(true);
         list.set_single_click_activate(false);
-        let scroller = gtk::ScrolledWindow::builder().child(&grid).vexpand(true).build();
+        // the shared page scroller: it scrolls down only, so a wide grid never shows a sideways scrollbar
+        let scroller = crate::ui::scrolled(&grid);
 
         let empty_label = gtk::Label::new(None);
         empty_label.add_css_class("kb-empty-title");
@@ -203,8 +204,8 @@ impl LibraryView {
         empty.set_valign(gtk::Align::Center);
         empty.set_vexpand(true);
         let empty_icon = gtk::Image::from_icon_name(match deps.kind {
-            EntryKind::Anime => "video-x-generic-symbolic",
-            EntryKind::Manga => "accessories-dictionary-symbolic",
+            Kind::Anime => "video-x-generic-symbolic",
+            Kind::Manga => "accessories-dictionary-symbolic",
         });
         empty_icon.set_pixel_size(64);
         empty_icon.add_css_class("dim-label");
@@ -520,8 +521,8 @@ impl LibraryView {
             }
         }
         match kind {
-            EntryKind::Anime => runtime.spawn(forward(AnimeRepo::new(db).subscribe_library(), shown_rx, changed_tx)),
-            EntryKind::Manga => runtime.spawn(forward(MangaRepo::new(db).subscribe_library(), shown_rx, changed_tx)),
+            Kind::Anime => runtime.spawn(forward(AnimeRepo::new(db).subscribe_library(), shown_rx, changed_tx)),
+            Kind::Manga => runtime.spawn(forward(MangaRepo::new(db).subscribe_library(), shown_rx, changed_tx)),
         };
         let shown_tx = Rc::new(shown_tx);
         let shown_map = shown_tx.clone();
@@ -564,8 +565,8 @@ impl LibraryView {
     fn wire_bar(&self, weak: &Weak<RefCell<Inner>>) {
         let kind = self.inner.borrow().deps.kind;
         let (read_label, unread_label) = match kind {
-            EntryKind::Manga => (tr(MsgKey::action_mark_as_read), tr(MsgKey::action_mark_as_unread)),
-            EntryKind::Anime => (tr(MsgKey::action_mark_as_seen), tr(MsgKey::action_mark_as_unseen)),
+            Kind::Manga => (tr(MsgKey::action_mark_as_read), tr(MsgKey::action_mark_as_unread)),
+            Kind::Anime => (tr(MsgKey::action_mark_as_seen), tr(MsgKey::action_mark_as_unseen)),
         };
         type Action = Box<dyn Fn(&Rc<RefCell<Inner>>)>;
         let connect = |button: &gtk::Button, action: Action| {
@@ -725,10 +726,10 @@ fn escape(inner: &Rc<RefCell<Inner>>) -> bool {
 }
 
 /// The category the library showed last (`last_used_*_category`, written by `select_tab`).
-fn remembered_category(prefs: &LibraryPrefs, kind: EntryKind) -> i64 {
+fn remembered_category(prefs: &LibraryPrefs, kind: Kind) -> i64 {
     i64::from(match kind {
-        EntryKind::Manga => prefs.last_used_manga_category.get(),
-        EntryKind::Anime => prefs.last_used_anime_category.get(),
+        Kind::Manga => prefs.last_used_manga_category.get(),
+        Kind::Anime => prefs.last_used_anime_category.get(),
     })
 }
 
@@ -754,8 +755,8 @@ fn render(inner: &Rc<RefCell<Inner>>) {
         let show_tabs = tabs_on && pages.len() > 1;
         let default_label = tr(MsgKey::label_default);
         let default_title = match st.deps.kind {
-            EntryKind::Anime => tr(MsgKey::label_anime_library),
-            EntryKind::Manga => tr(MsgKey::label_manga_library),
+            Kind::Anime => tr(MsgKey::label_anime_library),
+            Kind::Manga => tr(MsgKey::label_manga_library),
         };
         let show_counts = diet::LIBRARY_ITEM_COUNT || search_active;
         let labels: Vec<String> = if show_tabs {
@@ -947,8 +948,8 @@ fn select_tab(inner: &Rc<RefCell<Inner>>, index: usize) {
     };
     if let Some(id) = id {
         let saved = match kind {
-            EntryKind::Manga => prefs.last_used_manga_category.set(id as i32),
-            EntryKind::Anime => prefs.last_used_anime_category.set(id as i32),
+            Kind::Manga => prefs.last_used_manga_category.set(id as i32),
+            Kind::Anime => prefs.last_used_anime_category.set(id as i32),
         };
         if let Err(e) = saved {
             tracing::warn!(error = %e, "remembering the library tab failed");
@@ -1097,7 +1098,7 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
         (st.deps.kind, st.deps.db.clone())
     };
     // a local anime without a cover gets one from its folder or a video frame, once; the cards then reload
-    if kind == EntryKind::Anime && item.row.is_local() && art.as_ref().is_none_or(|a| a.url.is_none()) {
+    if kind == Kind::Anime && item.row.is_local() && art.as_ref().is_none_or(|a| a.url.is_none()) {
         let weak_cover = weak.clone();
         crate::library::frame_cover::ensure(db, item.row.id, move || {
             if let Some(inner) = weak_cover.upgrade() {
@@ -1105,7 +1106,7 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
             }
         });
     }
-    let extras = card::Extras { art: art.as_ref(), anime: kind == EntryKind::Anime, season_parent: is_season_parent(&inner.borrow(), &item) };
+    let extras = card::Extras { art: art.as_ref(), kind, season_parent: is_season_parent(&inner.borrow(), &item) };
     let card = if mode == kuro_prefs::library::LibraryDisplayMode::List {
         let row_height = list_row_height(&inner.borrow());
         card::build_list(&item, selected, show_continue, row_height, &extras)
@@ -1165,7 +1166,7 @@ fn bind_item(weak: &Weak<RefCell<Inner>>, list_item: &gtk::ListItem) {
 
 /// Whether the item is an anime season parent: its unread badge counts seasons (T-37a-048).
 fn is_season_parent(st: &Inner, item: &LibraryItem) -> bool {
-    st.deps.kind == EntryKind::Anime
+    st.deps.kind == Kind::Anime
         && AnimeRepo::new(st.deps.db.clone()).by_id(item.row.id).is_ok_and(|a| a.fetch_type == FetchType::Seasons)
 }
 
@@ -1174,8 +1175,8 @@ fn is_season_parent(st: &Inner, item: &LibraryItem) -> bool {
 fn cover_art(st: &Inner, item: &LibraryItem) -> Option<ArtRef> {
     let db = st.deps.db.clone();
     let (owner, source, url, favorite, last_modified) = match st.deps.kind {
-        EntryKind::Manga => MangaRepo::new(db).by_id(item.row.id).ok().map(|m| (Owner::Manga, m.source, m.thumbnail_url, m.favorite, m.cover_last_modified))?,
-        EntryKind::Anime => AnimeRepo::new(db).by_id(item.row.id).ok().map(|a| (Owner::Anime, a.source, a.thumbnail_url, a.favorite, a.cover_last_modified))?,
+        Kind::Manga => MangaRepo::new(db).by_id(item.row.id).ok().map(|m| (Kind::Manga, m.source, m.thumbnail_url, m.favorite, m.cover_last_modified))?,
+        Kind::Anime => AnimeRepo::new(db).by_id(item.row.id).ok().map(|a| (Kind::Anime, a.source, a.thumbnail_url, a.favorite, a.cover_last_modified))?,
     };
     Some(ArtRef { owner, entry_id: item.row.id, source_id: source, kind: ArtKind::Cover, url: url.filter(|u| !u.is_empty()), favorite, last_modified })
 }
@@ -1241,19 +1242,19 @@ fn resume_entry(inner: &Rc<RefCell<Inner>>, row: &LibraryRow) {
 /// A manga library view over a temporary database holding one favorite, "Berserk", for tests.
 #[cfg(test)]
 pub(crate) fn test_view(nav: Nav) -> (tempfile::TempDir, LibraryView) {
-    test_view_of(EntryKind::Manga, nav)
+    test_view_of(Kind::Manga, nav)
 }
 
 /// A library view of `kind` over a temporary database holding one favorite, "Berserk", for tests.
 #[cfg(test)]
-fn test_view_of(kind: EntryKind, nav: Nav) -> (tempfile::TempDir, LibraryView) {
+fn test_view_of(kind: Kind, nav: Nav) -> (tempfile::TempDir, LibraryView) {
     use crate::library::query::SourceInfo;
     use kuro_data::anime::Anime;
     use kuro_data::manga::Manga;
     use kuro_prefs::store::PrefStore;
     let dir = tempfile::tempdir().expect("temp dir");
     let db = match kind {
-        EntryKind::Manga => {
+        Kind::Manga => {
             let path = dir.path().join("manga.db");
             let db = Arc::new(Db::new(&path, kuro_db::schema_manga::open(&path).expect("open manga db")).expect("manga db handle"));
             MangaRepo::new(db.clone())
@@ -1261,7 +1262,7 @@ fn test_view_of(kind: EntryKind, nav: Nav) -> (tempfile::TempDir, LibraryView) {
                 .expect("insert");
             db
         }
-        EntryKind::Anime => {
+        Kind::Anime => {
             let path = dir.path().join("anime.db");
             let db = Arc::new(Db::new(&path, kuro_db::schema_anime::open(&path).expect("open anime db")).expect("anime db handle"));
             AnimeRepo::new(db.clone())
@@ -1329,11 +1330,11 @@ mod tests {
     #[test]
     fn t_37a_017_the_library_reopens_on_the_category_it_was_left_on() {
         let prefs = LibraryPrefs::new(kuro_prefs::store::PrefStore::in_memory());
-        assert_eq!(remembered_category(&prefs, EntryKind::Manga), 0, "the Default category before any tab was picked");
+        assert_eq!(remembered_category(&prefs, Kind::Manga), 0, "the Default category before any tab was picked");
         prefs.last_used_manga_category.set(7).expect("write");
         prefs.last_used_anime_category.set(9).expect("write");
-        assert_eq!(remembered_category(&prefs, EntryKind::Manga), 7);
-        assert_eq!(remembered_category(&prefs, EntryKind::Anime), 9);
+        assert_eq!(remembered_category(&prefs, Kind::Manga), 7);
+        assert_eq!(remembered_category(&prefs, Kind::Anime), 9);
     }
 
     #[test]
@@ -1422,7 +1423,7 @@ mod tests {
             let _owner = ctx.acquire().expect("main context");
             let rt = kuro_core::runtime::build().expect("runtime");
             let _enter = rt.enter();
-            let (_dir, view) = test_view_of(EntryKind::Anime, test_nav());
+            let (_dir, view) = test_view_of(Kind::Anime, test_nav());
             let window = gtk::Window::new();
             window.set_child(Some(&view.widget()));
             window.present();

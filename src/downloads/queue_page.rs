@@ -11,10 +11,10 @@ use std::time::Duration;
 
 use gtk::glib::{self, prelude::*};
 use gtk::prelude::*;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_downloads::DownloadState;
 use kuro_downloads::engine::{AnimeEngine, MangaEngine, QueueEngine, anime_model, manga_model};
-use kuro_downloads::queue_model::{self, QueueItem, QueueModel};
+use kuro_downloads::queue_model::{QueueItem, QueueModel};
 use kuro_i18n::{MsgKey, tr};
 
 use crate::downloads::Queues;
@@ -89,7 +89,7 @@ struct Page {
     /// The key of the rows last drawn. The list is rebuilt only when it changes.
     shown: Rc<RefCell<Option<String>>>,
     /// The download button of each row drawn, by kind and item id, so the live progress reaches it.
-    buttons: Rc<RefCell<HashMap<(EntryKind, i64), DownloadButton>>>,
+    buttons: Rc<RefCell<HashMap<(Kind, i64), DownloadButton>>>,
 }
 
 impl Page {
@@ -165,7 +165,7 @@ impl Page {
         text.set_hexpand(true);
         let status = gtk::Label::new(Some(&status_line(item)));
         status.add_css_class("dim-label");
-        let (queues, kind, id) = (self.queues.clone(), kind_of(item.kind), item.item_id);
+        let (queues, kind, id) = (self.queues.clone(), item.kind, item.item_id);
         // a click on a queued or running row cancels it, and on a failed row starts its queue again
         let button = DownloadButton::new(move |request| match request {
             Request::Cancel => live::cancel(kind, id),
@@ -189,7 +189,7 @@ impl Page {
 }
 
 /// The right-click menu of a queued row: Cancel, Retry when it failed, Move to top and Move to bottom.
-fn row_menu(queues: &Queues, kind: EntryKind, id: i64, failed: bool) -> Vec<Item> {
+fn row_menu(queues: &Queues, kind: Kind, id: i64, failed: bool) -> Vec<Item> {
     let mut items = vec![Item::new(tr(MsgKey::action_cancel), 0, move || live::cancel(kind, id))];
     if failed {
         // as the row's button does on a failed row: the queue starts again
@@ -204,10 +204,10 @@ fn row_menu(queues: &Queues, kind: EntryKind, id: i64, failed: bool) -> Vec<Item
 }
 
 /// Moves one item to the top or the bottom of its source's section (`QueueModel::move_to_top`) and sends the new order.
-fn move_item(queues: &Queues, kind: EntryKind, id: i64, top: bool) {
+fn move_item(queues: &Queues, kind: Kind, id: i64, top: bool) {
     let mut model: QueueModel = match kind {
-        EntryKind::Manga => manga_model(&queues.manga.snapshot()),
-        EntryKind::Anime => match &queues.anime {
+        Kind::Manga => manga_model(&queues.manga.snapshot()),
+        Kind::Anime => match &queues.anime {
             Some(queue) => anime_model(&queue.snapshot()),
             None => return,
         },
@@ -233,22 +233,14 @@ fn for_each_engine(queues: &Queues, mut f: impl FnMut(&dyn QueueEngine)) {
 }
 
 /// Calls `f` on the engine of one kind's queue, when it is up.
-fn for_each_engine_of(queues: &Queues, kind: EntryKind, mut f: impl FnMut(&dyn QueueEngine)) {
+fn for_each_engine_of(queues: &Queues, kind: Kind, mut f: impl FnMut(&dyn QueueEngine)) {
     match kind {
-        EntryKind::Manga => f(&MangaEngine::new(queues.manga.clone())),
-        EntryKind::Anime => {
+        Kind::Manga => f(&MangaEngine::new(queues.manga.clone())),
+        Kind::Anime => {
             if let Some(anime) = &queues.anime {
                 f(&AnimeEngine::new(anime.clone()));
             }
         }
-    }
-}
-
-/// The app's kind of a queue row.
-fn kind_of(kind: queue_model::EntryKind) -> EntryKind {
-    match kind {
-        queue_model::EntryKind::Manga => EntryKind::Manga,
-        queue_model::EntryKind::Anime => EntryKind::Anime,
     }
 }
 
@@ -262,8 +254,8 @@ fn row_key(item: &QueueItem) -> String {
 fn status_line(item: &QueueItem) -> String {
     match item.state {
         DownloadState::Downloading => match (item.kind, item.pages_total) {
-            (queue_model::EntryKind::Manga, Some(total)) => format!("{} of {total} pages", item.pages_done),
-            (queue_model::EntryKind::Anime, _) if item.progress > 0 => format!("{}%", item.progress),
+            (Kind::Manga, Some(total)) => format!("{} of {total} pages", item.pages_done),
+            (Kind::Anime, _) if item.progress > 0 => format!("{}%", item.progress),
             _ => "Downloading…".to_owned(),
         },
         DownloadState::Queue => "Queued".to_owned(),
@@ -275,11 +267,11 @@ fn status_line(item: &QueueItem) -> String {
 
 #[cfg(test)]
 mod tests {
-    use kuro_downloads::queue_model::EntryKind;
+    use kuro_platform::kind::Kind;
 
     use super::*;
 
-    fn item(kind: EntryKind, state: DownloadState, progress: i64, pages: Option<(u32, u32)>) -> QueueItem {
+    fn item(kind: Kind, state: DownloadState, progress: i64, pages: Option<(u32, u32)>) -> QueueItem {
         QueueItem {
             kind,
             item_id: 1,
@@ -299,12 +291,12 @@ mod tests {
 
     #[test]
     fn a_row_shows_its_progress_while_it_downloads_and_its_state_otherwise() {
-        assert_eq!(status_line(&item(EntryKind::Anime, DownloadState::Downloading, 40, None)), "40%");
-        assert_eq!(status_line(&item(EntryKind::Anime, DownloadState::Downloading, 0, None)), "Downloading…");
-        assert_eq!(status_line(&item(EntryKind::Manga, DownloadState::Downloading, 250, Some((2, 5)))), "2 of 5 pages", "a manga row counts pages, not the page percent sum");
-        assert_eq!(status_line(&item(EntryKind::Manga, DownloadState::Downloading, 0, None)), "Downloading…");
-        assert_eq!(status_line(&item(EntryKind::Manga, DownloadState::Queue, 0, None)), "Queued");
-        assert_eq!(status_line(&item(EntryKind::Anime, DownloadState::Error, 0, None)), "Failed");
-        assert_eq!(status_line(&item(EntryKind::Manga, DownloadState::Downloaded, 0, None)), "Downloaded");
+        assert_eq!(status_line(&item(Kind::Anime, DownloadState::Downloading, 40, None)), "40%");
+        assert_eq!(status_line(&item(Kind::Anime, DownloadState::Downloading, 0, None)), "Downloading…");
+        assert_eq!(status_line(&item(Kind::Manga, DownloadState::Downloading, 250, Some((2, 5)))), "2 of 5 pages", "a manga row counts pages, not the page percent sum");
+        assert_eq!(status_line(&item(Kind::Manga, DownloadState::Downloading, 0, None)), "Downloading…");
+        assert_eq!(status_line(&item(Kind::Manga, DownloadState::Queue, 0, None)), "Queued");
+        assert_eq!(status_line(&item(Kind::Anime, DownloadState::Error, 0, None)), "Failed");
+        assert_eq!(status_line(&item(Kind::Manga, DownloadState::Downloaded, 0, None)), "Downloaded");
     }
 }

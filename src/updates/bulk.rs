@@ -7,7 +7,7 @@ use std::sync::Arc;
 use kuro_data::chapter::{ChapterRepo, ChapterUpdate};
 use kuro_data::episode::{EpisodeRepo, EpisodeUpdate};
 use kuro_db::handle::Db;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::updates::selection::{Selectable, Selection};
 
@@ -32,12 +32,12 @@ pub enum BulkAction {
 
 /// The one batch write of `action` over `ids`. Fillermark exists for anime only, so on manga it writes nothing. An
 /// empty id list writes nothing and succeeds (every row already had the target value).
-pub fn apply(db: &Arc<Db>, kind: EntryKind, ids: &[i64], action: BulkAction) -> Result<(), String> {
+pub fn apply(db: &Arc<Db>, kind: Kind, ids: &[i64], action: BulkAction) -> Result<(), String> {
     if ids.is_empty() {
         return Ok(());
     }
     match kind {
-        EntryKind::Manga => {
+        Kind::Manga => {
             let updates: Vec<ChapterUpdate> = ids
                 .iter()
                 .filter_map(|&id| {
@@ -56,7 +56,7 @@ pub fn apply(db: &Arc<Db>, kind: EntryKind, ids: &[i64], action: BulkAction) -> 
             }
             ChapterRepo::new(db.clone()).update_all(&updates).map_err(|e| e.to_string())
         }
-        EntryKind::Anime => {
+        Kind::Anime => {
             let updates: Vec<EpisodeUpdate> = ids
                 .iter()
                 .map(|&id| {
@@ -203,9 +203,9 @@ mod tests {
         let added = ChapterRepo::new(db.clone()).add_all(&[chapter("a"), chapter("b")]).expect("add chapters");
         let ids: Vec<i64> = added.iter().map(|c| c.id).collect();
 
-        apply(&db, EntryKind::Manga, &ids, BulkAction::Bookmark(true)).expect("bookmark");
-        apply(&db, EntryKind::Manga, &ids[..1], BulkAction::MarkRead(false)).expect("unread");
-        assert_eq!(apply(&db, EntryKind::Manga, &[], BulkAction::Bookmark(true)), Ok(()));
+        apply(&db, Kind::Manga, &ids, BulkAction::Bookmark(true)).expect("bookmark");
+        apply(&db, Kind::Manga, &ids[..1], BulkAction::MarkRead(false)).expect("unread");
+        assert_eq!(apply(&db, Kind::Manga, &[], BulkAction::Bookmark(true)), Ok(()));
         let repo = ChapterRepo::new(db);
         let first = repo.by_id(ids[0]).expect("read").expect("stored");
         let second = repo.by_id(ids[1]).expect("read").expect("stored");

@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_local::LOCAL_SOURCE_ID;
 use kuro_source::anime::{AnimeSource, SAnime, SEpisode};
 use kuro_source::model::{SChapter, SManga};
@@ -33,14 +33,14 @@ pub enum LiveSource {
 impl SourceRegistry for LiveRegistry {
     type Source = LiveSource;
 
-    fn get(&self, kind: EntryKind, source_id: i64) -> Option<LiveSource> {
+    fn get(&self, kind: Kind, source_id: i64) -> Option<LiveSource> {
         if source_id == LOCAL_SOURCE_ID {
             return Some(LiveSource::Local);
         }
         let source = directory::current(kind).catalogue(source_id)?;
         match kind {
-            EntryKind::Manga => source.manga().map(LiveSource::Manga),
-            EntryKind::Anime => source.anime().map(LiveSource::Anime),
+            Kind::Manga => source.manga().map(LiveSource::Manga),
+            Kind::Anime => source.anime().map(LiveSource::Anime),
         }
     }
 }
@@ -48,7 +48,7 @@ impl SourceRegistry for LiveRegistry {
 impl LiveRegistry {
     /// The source with this id under either kind: the backup preflight does not know the kind of a row.
     fn find(&self, source_id: i64) -> Option<LiveSource> {
-        self.get(EntryKind::Manga, source_id).or_else(|| self.get(EntryKind::Anime, source_id))
+        self.get(Kind::Manga, source_id).or_else(|| self.get(Kind::Anime, source_id))
     }
 
     /// The name of the source with this id under either kind, when the app holds it. The folder renames read it.
@@ -93,7 +93,7 @@ impl Source for LiveSource {
         }
     }
 
-    async fn fetch(&self, _kind: EntryKind, url: &str, with_details: bool) -> Result<Fetched, UpdateError> {
+    async fn fetch(&self, _kind: Kind, url: &str, with_details: bool) -> Result<Fetched, UpdateError> {
         match self {
             Self::Local => Ok(Fetched::default()),
             Self::Manga(source) => fetch_manga(&**source, url, with_details).await,
@@ -102,7 +102,7 @@ impl Source for LiveSource {
     }
 
     /// The details only: a metadata pass never reads the item list, so `fetch_items` is not answered here.
-    async fn refresh(&self, _kind: EntryKind, url: &str, flags: RemoteFlags) -> Result<Option<SourceDetails>, UpdateError> {
+    async fn refresh(&self, _kind: Kind, url: &str, flags: RemoteFlags) -> Result<Option<SourceDetails>, UpdateError> {
         if !flags.fetch_details {
             return Ok(None);
         }
@@ -258,15 +258,15 @@ mod tests {
 
     #[tokio::test]
     async fn the_local_source_lists_nothing_without_an_error() {
-        let slot = LiveRegistry.get_or_stub(EntryKind::Anime, LOCAL_SOURCE_ID);
+        let slot = LiveRegistry.get_or_stub(Kind::Anime, LOCAL_SOURCE_ID);
         assert!(slot.is_local() && slot.is_unmetered());
-        assert_eq!(slot.fetch(EntryKind::Anime, "Show", true).await, Ok(Fetched::default()));
+        assert_eq!(slot.fetch(Kind::Anime, "Show", true).await, Ok(Fetched::default()));
     }
 
     #[test]
     fn an_id_nothing_knows_is_missing_under_both_kinds() {
-        assert!(LiveRegistry.get(EntryKind::Manga, 987_654).is_none());
-        assert!(LiveRegistry.get(EntryKind::Anime, 987_654).is_none());
+        assert!(LiveRegistry.get(Kind::Manga, 987_654).is_none());
+        assert!(LiveRegistry.get(Kind::Anime, 987_654).is_none());
     }
 
     #[test]

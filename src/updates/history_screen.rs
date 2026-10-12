@@ -1,4 +1,4 @@
-//! The History screen of one kind (T-42a-013 to T-42a-024): one implementation over [`EntryKind`] that the live
+//! The History screen of one kind (T-42a-013 to T-42a-024): one implementation over [`Kind`] that the live
 //! screen mounts for Anime and for Manga. State is `{ list, dialog, search }` ([`HistoryState`]); the query re-runs
 //! on a table change with the 50 ms coalesce and on every search change, which cancels the previous query. Rows are
 //! [`history_row`]; a click resumes, the cover opens the entry, the trash button asks the remove dialog.
@@ -11,14 +11,14 @@ use chrono::Local;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GBox, ListBox};
-use kuro_images::art::{ArtKind, ArtRef, Owner};
+use kuro_images::art::{ArtKind, ArtRef};
 use crate::browse::entries::FavoriteStore;
 use crate::browse::favorite::{DuplicateAnswer, duplicate_answer, duplicate_dialog};
 use kuro_domain::dates::ListRow;
 use kuro_domain::history::model::HistoryWithRelations;
 use kuro_domain::history::repo::HistoryRepo;
 use kuro_domain::history::view::{HistoryLine, remove_action};
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
 
 use crate::data;
@@ -38,21 +38,21 @@ use crate::updates::screen_toast::ScreenToast;
 use crate::updates::state_page::PageStates;
 
 /// The icon of the empty History page of a kind, the same as the empty Library page's.
-pub fn empty_icon(kind: EntryKind) -> &'static str {
+pub fn empty_icon(kind: Kind) -> &'static str {
     match kind {
-        EntryKind::Anime => "video-x-generic-symbolic",
-        EntryKind::Manga => "accessories-dictionary-symbolic",
+        Kind::Anime => "video-x-generic-symbolic",
+        Kind::Manga => "accessories-dictionary-symbolic",
     }
 }
 
 /// Whether a resume plays in the external player: the preference applies to anime only (the reader has no external
 /// mode).
-pub fn uses_external(always_external: bool, kind: EntryKind) -> bool {
-    always_external && kind == EntryKind::Anime
+pub fn uses_external(always_external: bool, kind: Kind) -> bool {
+    always_external && kind == Kind::Anime
 }
 
 pub struct HistoryScreen {
-    kind: EntryKind,
+    kind: Kind,
     root: gtk::Overlay,
     search: gtk::SearchEntry,
     /// The empty page's way to the Library; hidden while a search finds nothing.
@@ -66,7 +66,7 @@ pub struct HistoryScreen {
 
 impl HistoryScreen {
     /// Builds the screen and starts its query.
-    pub fn new(kind: EntryKind) -> Rc<Self> {
+    pub fn new(kind: Kind) -> Rc<Self> {
         let screen = Rc::new_cyclic(|weak: &Weak<Self>| {
             let col = crate::ui::column();
             let list = crate::ui::scrolled(&col);
@@ -206,7 +206,7 @@ impl HistoryScreen {
             add_to_library: act(Self::add_to_library),
         };
         let art = ArtRef {
-            owner: if self.kind == EntryKind::Anime { Owner::Anime } else { Owner::Manga },
+            owner: self.kind,
             entry_id: line.cover.entry_id,
             source_id: line.cover.source_id,
             kind: ArtKind::Cover,
@@ -219,7 +219,7 @@ impl HistoryScreen {
     }
 
     fn open_entry(self: &Rc<Self>, line: &HistoryLine) {
-        crate::screens::open_entry(self.kind == EntryKind::Anime, line.entry_id);
+        crate::screens::open_entry(self.kind, line.entry_id);
     }
 
     /// The favourite button: duplicate check, then the default category, as the Browse add does (T-42a-019).
@@ -262,18 +262,18 @@ impl HistoryScreen {
     fn duplicate_dialog(self: &Rc<Self>, store: Arc<dyn FavoriteStore>, entry_id: i64, existing: i64, now: i64) {
         let copy = duplicate_dialog();
         let labels = vec![copy.show, copy.migrate, copy.add_anyway, copy.cancel];
-        let (weak, anime) = (Rc::downgrade(self), self.kind == EntryKind::Anime);
+        let weak = Rc::downgrade(self);
         let db = self.db();
         let kind = self.kind;
         history_dialog::pick(copy.title, copy.body, labels, move |index| {
             let Some(screen) = weak.upgrade() else { return };
             match duplicate_answer(Some(index)) {
                 DuplicateAnswer::ShowExisting => {
-                    crate::screens::open_entry(anime, existing);
+                    crate::screens::open_entry(kind, existing);
                 }
                 DuplicateAnswer::MigrateExisting => {
                     let title = history_data::entry_title(&db, kind, existing).unwrap_or_default();
-                    crate::entry_core::handoff::open_migrate(crate::entry_core::handoff::MigrateRequest { entry_id: existing, anime, title });
+                    crate::entry_core::handoff::open_migrate(crate::entry_core::handoff::MigrateRequest { entry_id: existing, kind, title });
                 }
                 DuplicateAnswer::AddAnyway => match history_add::add_anyway(store.as_ref(), entry_id, now) {
                     Ok(Step::Chooser) => screen.choose_categories(Arc::clone(&store), entry_id, now),
@@ -356,9 +356,9 @@ impl HistoryScreen {
 /// Opens a unit in the reader or the player. The always-external choice is the hard-coded default (the setting is cut)
 /// and the external player opens through `open_route`, the one launcher hook; without a launcher the internal player
 /// is the fallback.
-fn open_unit(kind: EntryKind, entry_id: i64, unit: &Unit) {
+fn open_unit(kind: Kind, entry_id: i64, unit: &Unit) {
     let route = if uses_external(crate::misc::diet_defaults::PLAYER_ALWAYS_EXTERNAL, kind) { Route::External } else { Route::Internal };
-    open_route::open(kind == EntryKind::Anime, entry_id, unit.id, route);
+    open_route::open(kind, entry_id, unit.id, route);
 }
 
 #[cfg(test)]
@@ -367,8 +367,8 @@ mod tests {
 
     #[test]
     fn history_external_player_applies_to_anime_only() {
-        assert!(uses_external(true, EntryKind::Anime));
-        assert!(!uses_external(true, EntryKind::Manga));
-        assert!(!uses_external(false, EntryKind::Anime));
+        assert!(uses_external(true, Kind::Anime));
+        assert!(!uses_external(true, Kind::Manga));
+        assert!(!uses_external(false, Kind::Anime));
     }
 }

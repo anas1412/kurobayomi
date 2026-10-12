@@ -99,7 +99,6 @@ impl Domain {
         &self.anime
     }
 
-
     /// The delayed tracking queue (`<data dir>/tracking_queue.json`).
     pub fn delayed_tracking(&self) -> Arc<DelayedTrackingStore> {
         Arc::clone(&self.delayed_store)
@@ -132,6 +131,7 @@ impl Domain {
 mod tests {
     use kuro_testkit::{InMemorySettings, TempDir, TestDb};
 
+    use kuro_platform::kind::Kind;
     use super::*;
 
     /// The container's inputs built from `kuro-testkit` fakes: in-memory settings, and migrated databases in `dir`.
@@ -163,7 +163,7 @@ mod tests {
     #[async_trait::async_trait]
     impl TrackReplay for Online {
         async fn wait_online(&self) {}
-        async fn replay(&self, _kind: crate::kind::EntryKind, _track_id: i64, _progress: f32) -> crate::track::delayed::ReplayOutcome {
+        async fn replay(&self, _kind: Kind, _track_id: i64, _progress: f32) -> crate::track::delayed::ReplayOutcome {
             crate::track::delayed::ReplayOutcome::Done
         }
     }
@@ -177,7 +177,7 @@ mod tests {
         let worker = domain.delayed_worker().expect("built by start");
         assert!(!worker.is_running(), "an empty queue schedules nothing");
 
-        domain.delayed_tracking().add(crate::kind::EntryKind::Manga, 1, 3.0).expect("queue");
+        domain.delayed_tracking().add(Kind::Manga, 1, 3.0).expect("queue");
         let again = Domain::new(deps(&dir, &settings));
         again.start(Arc::new(Online));
         for _ in 0..200 {

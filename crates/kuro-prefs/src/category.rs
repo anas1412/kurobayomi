@@ -2,6 +2,7 @@
 //! sets and resets the default category. A sort-mode change writes the sort string. The Random sort seed is
 //! app memory (the settings diet cut its keys), one per kind. The category rows are in `kuro-data::category`, and the sort codec is `kuro_db::flags::library_sort`.
 
+use kuro_platform::kind::Kind;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -9,44 +10,37 @@ use crate::PrefError;
 use crate::library::{LibraryPrefs, SortSetting};
 use crate::store::PrefStore;
 
-/// The kind of category. It selects the keys of its preferences.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CategoryKind {
-    Manga,
-    Anime,
-}
-
 static RANDOM_SEEDS: [AtomicI32; 2] = [AtomicI32::new(0), AtomicI32::new(0)];
 
-fn seed_slot(kind: CategoryKind) -> &'static AtomicI32 {
+fn seed_slot(kind: Kind) -> &'static AtomicI32 {
     match kind {
-        CategoryKind::Manga => &RANDOM_SEEDS[0],
-        CategoryKind::Anime => &RANDOM_SEEDS[1],
+        Kind::Manga => &RANDOM_SEEDS[0],
+        Kind::Anime => &RANDOM_SEEDS[1],
     }
 }
 
 /// The seed of the Random sort of `kind`, `0` until a Random sort is picked. It lives in memory only.
-pub fn random_sort_seed(kind: CategoryKind) -> i32 {
+pub fn random_sort_seed(kind: Kind) -> i32 {
     seed_slot(kind).load(Ordering::Relaxed)
 }
 
 /// Remembers `seed` as the Random sort seed of `kind` until the app closes.
-pub fn set_random_sort_seed(kind: CategoryKind, seed: i32) {
+pub fn set_random_sort_seed(kind: Kind, seed: i32) {
     seed_slot(kind).store(seed, Ordering::Relaxed);
 }
 
 /// The five category-id sets of a kind: library update include and exclude, the remove-exclude set, and the
 /// download-new include and exclude sets. Manga's exclude set is cleaned too (EC-11).
-fn category_sets(kind: CategoryKind) -> [&'static str; 5] {
+fn category_sets(kind: Kind) -> [&'static str; 5] {
     match kind {
-        CategoryKind::Manga => [
+        Kind::Manga => [
             "library_update_categories",
             "library_update_categories_exclude",
             "remove_exclude_categories",
             "download_new_categories",
             "download_new_categories_exclude",
         ],
-        CategoryKind::Anime => [
+        Kind::Anime => [
             "animelib_update_categories",
             "animelib_update_categories_exclude",
             "remove_exclude_anime_categories",
@@ -59,15 +53,15 @@ fn category_sets(kind: CategoryKind) -> [&'static str; 5] {
 /// The ten category-id preference sets of both kinds: the library update include and exclude sets, the
 /// remove-exclude set and the download-new include and exclude sets. Startup cleanup and backup restore walk them.
 pub fn category_id_set_keys() -> Vec<&'static str> {
-    category_sets(CategoryKind::Manga).into_iter().chain(category_sets(CategoryKind::Anime)).collect()
+    category_sets(Kind::Manga).into_iter().chain(category_sets(Kind::Anime)).collect()
 }
 
 /// `DeleteMangaCategory` and `DeleteAnimeCategory`, preference side. The default category is reset when it
 /// is `id`, and `id` leaves each of the five category sets.
-pub fn forget_category(store: &PrefStore, lib: &LibraryPrefs, kind: CategoryKind, id: i64) -> Result<(), PrefError> {
+pub fn forget_category(store: &PrefStore, lib: &LibraryPrefs, kind: Kind, id: i64) -> Result<(), PrefError> {
     let default = match kind {
-        CategoryKind::Manga => &lib.default_manga_category,
-        CategoryKind::Anime => &lib.default_anime_category,
+        Kind::Manga => &lib.default_manga_category,
+        Kind::Anime => &lib.default_anime_category,
     };
     if i64::from(default.get()) == id {
         default.delete()?;
@@ -117,11 +111,11 @@ pub fn prune_dangling_category_ids(
 /// The preference writes of `SetSortModeForMangaCategory`. `serialized_sort` is the stored sort string such
 /// as `RANDOM,ASCENDING`. `global` writes the sort into the global preference, which is false when a category
 /// takes the change instead.
-pub fn write_sort_prefs(lib: &LibraryPrefs, kind: CategoryKind, serialized_sort: &str, global: bool) -> Result<(), PrefError> {
+pub fn write_sort_prefs(lib: &LibraryPrefs, kind: Kind, serialized_sort: &str, global: bool) -> Result<(), PrefError> {
     if global {
         match kind {
-            CategoryKind::Manga => lib.manga_sorting_mode.set(SortSetting(serialized_sort.to_owned()))?,
-            CategoryKind::Anime => lib.anime_sorting_mode.set(SortSetting(serialized_sort.to_owned()))?,
+            Kind::Manga => lib.manga_sorting_mode.set(SortSetting(serialized_sort.to_owned()))?,
+            Kind::Anime => lib.anime_sorting_mode.set(SortSetting(serialized_sort.to_owned()))?,
         }
     }
     Ok(())
@@ -149,15 +143,15 @@ mod tests {
     fn deleting_a_manga_category_removes_its_id_from_all_five_manga_sets() {
         let store = PrefStore::in_memory();
         let lib = LibraryPrefs::new(store.clone());
-        fill(&store, category_sets(CategoryKind::Manga), &["5", "7"]);
-        fill(&store, category_sets(CategoryKind::Anime), &["5"]);
+        fill(&store, category_sets(Kind::Manga), &["5", "7"]);
+        fill(&store, category_sets(Kind::Anime), &["5"]);
 
-        forget_category(&store, &lib, CategoryKind::Manga, 5).unwrap();
+        forget_category(&store, &lib, Kind::Manga, 5).unwrap();
 
-        for key in category_sets(CategoryKind::Manga) {
+        for key in category_sets(Kind::Manga) {
             assert_eq!(set_of(&store, key), ids(&["7"]), "{key} lost the deleted id");
         }
-        for key in category_sets(CategoryKind::Anime) {
+        for key in category_sets(Kind::Anime) {
             assert_eq!(set_of(&store, key), ids(&["5"]), "{key} belongs to the other kind");
         }
     }
@@ -169,7 +163,7 @@ mod tests {
         store.pref::<BTreeSet<String>>("library_update_categories", BTreeSet::new()).set(ids(&["5"])).unwrap();
         store.pref::<BTreeSet<String>>("library_update_categories_exclude", BTreeSet::new()).set(ids(&["5", "6"])).unwrap();
 
-        forget_category(&store, &lib, CategoryKind::Manga, 5).unwrap();
+        forget_category(&store, &lib, Kind::Manga, 5).unwrap();
 
         assert_eq!(set_of(&store, "library_update_categories_exclude"), ids(&["6"]));
         assert!(set_of(&store, "library_update_categories").is_empty());
@@ -182,8 +176,8 @@ mod tests {
         lib.default_manga_category.set(5).unwrap();
         lib.default_anime_category.set(3).unwrap();
 
-        forget_category(&store, &lib, CategoryKind::Manga, 5).unwrap();
-        forget_category(&store, &lib, CategoryKind::Anime, 5).unwrap();
+        forget_category(&store, &lib, Kind::Manga, 5).unwrap();
+        forget_category(&store, &lib, Kind::Anime, 5).unwrap();
 
         assert_eq!(lib.default_manga_category.get(), -1, "the default named the deleted category");
         assert_eq!(lib.default_anime_category.get(), 3, "another category is still the default");
@@ -240,19 +234,19 @@ mod tests {
         let store = PrefStore::in_memory();
         let lib = LibraryPrefs::new(store.clone());
 
-        write_sort_prefs(&lib, CategoryKind::Manga, "LAST_MANGA_UPDATE,DESCENDING", true).unwrap();
+        write_sort_prefs(&lib, Kind::Manga, "LAST_MANGA_UPDATE,DESCENDING", true).unwrap();
         assert_eq!(lib.manga_sorting_mode.get().0, "LAST_MANGA_UPDATE,DESCENDING");
 
-        write_sort_prefs(&lib, CategoryKind::Manga, "RANDOM,ASCENDING", false).unwrap();
+        write_sort_prefs(&lib, Kind::Manga, "RANDOM,ASCENDING", false).unwrap();
         assert_eq!(lib.manga_sorting_mode.get().0, "LAST_MANGA_UPDATE,DESCENDING", "a category took the change");
     }
 
     #[test]
     fn the_random_seed_is_kept_in_memory_per_kind() {
-        set_random_sort_seed(CategoryKind::Anime, 4242);
-        assert_eq!(random_sort_seed(CategoryKind::Anime), 4242);
-        set_random_sort_seed(CategoryKind::Manga, -7);
-        assert_eq!(random_sort_seed(CategoryKind::Manga), -7);
-        assert_eq!(random_sort_seed(CategoryKind::Anime), 4242, "the other kind keeps its own seed");
+        set_random_sort_seed(Kind::Anime, 4242);
+        assert_eq!(random_sort_seed(Kind::Anime), 4242);
+        set_random_sort_seed(Kind::Manga, -7);
+        assert_eq!(random_sort_seed(Kind::Manga), -7);
+        assert_eq!(random_sort_seed(Kind::Anime), 4242, "the other kind keeps its own seed");
     }
 }

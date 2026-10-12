@@ -14,7 +14,7 @@ use kuro_prefs::source::{MigrationDirection, MigrationSortingMode, SourcePrefs};
 
 use super::directory::{SourceDirectory, source_or_stub};
 use super::pages::{MigrateSourcesNav, MigrateSourcesSnapshot, migrate_sources};
-use super::route::BrowseKind;
+use kuro_platform::kind::Kind;
 
 /// The order of the migration list (T-41b-039, E-MS-03, E-MS-04): the local source is left out; a stub comes first when
 /// ascending and last when descending; then the name (lowercase, collated) or the favourite count. Ties go by source id
@@ -55,16 +55,16 @@ pub fn migrate_list(counts: Vec<(i64, i64)>, directory: Option<&dyn SourceDirect
 
 /// The empty state of the picker: upstream's "Your library is empty" for manga, and for anime the plan's own text, since
 /// that one is a text bug there (T-41a-036).
-pub fn empty_text(kind: BrowseKind) -> String {
+pub fn empty_text(kind: Kind) -> String {
     match kind {
-        BrowseKind::Manga => kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library),
-        BrowseKind::Anime => super::texts::MIGRATE_SOURCES_EMPTY.to_owned(),
+        Kind::Manga => kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library),
+        Kind::Anime => super::texts::MIGRATE_SOURCES_EMPTY.to_owned(),
     }
 }
 
 pub struct MigrateDeps {
     /// Which catalogue the tab lists: it words the empty state.
-    pub kind: BrowseKind,
+    pub kind: Kind,
     pub prefs: Rc<SourcePrefs>,
     /// `(source id, favourite count)` for every source with a favourite, handed to the callback on the GTK thread. A read
     /// that fails is an error, not an empty library (E-MS-06).
@@ -191,7 +191,7 @@ pub(crate) mod tests {
 
     fn deps(counts: Vec<(i64, i64)>, prefs: Rc<SourcePrefs>, opened: Rc<RefCell<Vec<i64>>>) -> MigrateDeps {
         MigrateDeps {
-            kind: BrowseKind::Manga,
+            kind: Kind::Manga,
             prefs,
             counts: Rc::new(move |deliver| deliver(Ok(counts.clone()))),
             toast: Rc::new(|_| {}),
@@ -269,11 +269,11 @@ pub(crate) mod tests {
 
     fn the_anime_picker_says_no_source_has_favorites_and_the_manga_picker_keeps_the_library_text() {
         let prefs = Rc::new(SourcePrefs::new(PrefStore::in_memory()));
-        let tab = migrate_tab(MigrateDeps { kind: BrowseKind::Anime, ..deps(Vec::new(), prefs, Rc::default()) });
+        let tab = migrate_tab(MigrateDeps { kind: Kind::Anime, ..deps(Vec::new(), prefs, Rc::default()) });
         let text = labels(tab.upcast_ref());
         assert!(text.contains(&crate::browse::texts::MIGRATE_SOURCES_EMPTY.to_owned()), "T-41a-036: {text:?}");
         assert!(!text.contains(&kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library)), "not the library text bug");
-        assert_eq!(empty_text(BrowseKind::Manga), kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library));
+        assert_eq!(empty_text(Kind::Manga), kuro_i18n::tr(kuro_i18n::MsgKey::information_empty_library));
     }
 
     pub(crate) fn smoke() {

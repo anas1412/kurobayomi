@@ -30,7 +30,7 @@ use kuro_core::sources::SourceGate;
 use kuro_data::chapter::{Chapter, ChapterRepo};
 use kuro_data::manga::{Manga, MangaRepo};
 use kuro_db::Db;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_downloads::index::DownloadIndex;
 use kuro_local::is_local_source;
 use kuro_platform::paths::Paths;
@@ -136,7 +136,7 @@ fn delete_sink(db: Arc<Db>, index: DownloadIndex, data_dir: PathBuf) -> DeleteSi
 pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
     let app = crate::data::app();
     let store = app.base.store().clone();
-    let db = app.db(EntryKind::Manga);
+    let db = app.db(Kind::Manga);
     let data_dir = kuro_platform::linux::LinuxPaths::system().ok().map(|paths| paths.data_dir());
     let index = crate::shell::host::Shell::get().map(|shell| shell.downloads().clone());
     let manga = MangaRepo::new(Arc::clone(&db)).by_id(manga_id).ok();
@@ -199,7 +199,7 @@ pub fn open_chapter(manga_id: i64, chapter_id: i64) -> gtk::Box {
 
 /// The reader page for the entry screens' title and chapter name.
 pub fn page_for(title: &str, chapter_name: &str) -> gtk::Box {
-    let (manga_id, chapter_id) = find_ids(&crate::data::app().db(EntryKind::Manga), title, chapter_name);
+    let (manga_id, chapter_id) = find_ids(&crate::data::app().db(Kind::Manga), title, chapter_name);
     open_chapter(manga_id, chapter_id)
 }
 

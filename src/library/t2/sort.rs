@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use kuro_domain::category::service::CategoryService;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::library::order::{SortContext, sort_page, tracker_mean};
 use kuro_domain::library::page::LibraryItem;
 use kuro_domain::library::sort::{Direction, LibrarySort, SortType};
@@ -114,15 +114,15 @@ fn t2_sort_06_tracker_mean_uses_minus_one_for_unscored() {
     assert_eq!(tracker_mean(&[f64::NAN]), -1.0, "a NaN mean counts as unscored (E-14)");
 }
 
-fn service(kind: EntryKind) -> (tempfile::TempDir, CategoryService, Arc<LibraryPrefs>) {
+fn service(kind: Kind) -> (tempfile::TempDir, CategoryService, Arc<LibraryPrefs>) {
     let dir = tempfile::tempdir().expect("temp dir");
     let (path, db) = match kind {
-        EntryKind::Manga => {
+        Kind::Manga => {
             let path = dir.path().join("manga.db");
             let writer = kuro_db::schema_manga::open(&path).expect("manga db");
             (path.clone(), Arc::new(kuro_db::handle::Db::new(&path, writer).expect("handle")))
         }
-        EntryKind::Anime => {
+        Kind::Anime => {
             let path = dir.path().join("anime.db");
             let writer = kuro_db::schema_anime::open(&path).expect("anime db");
             (path.clone(), Arc::new(kuro_db::handle::Db::new(&path, writer).expect("handle")))
@@ -139,10 +139,10 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
 
 #[test]
 fn t2_sort_07_the_random_seed_is_kept_in_memory_per_kind() {
-    let (_d, manga, _prefs) = service(EntryKind::Manga);
+    let (_d, manga, _prefs) = service(Kind::Manga);
     let random = LibrarySort { ty: SortType::Random, dir: Direction::Ascending };
     block_on(manga.set_sort_mode(None, random, || 4242)).expect("set the manga sort");
-    assert_eq!(kuro_prefs::category::random_sort_seed(kuro_prefs::category::CategoryKind::Manga), 4242);
+    assert_eq!(kuro_prefs::category::random_sort_seed(Kind::Manga), 4242);
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn t2_sort_09_equal_keys_break_by_title_ascending_even_when_descending() {
 
 #[test]
 fn t2_sort_10_the_sort_reaches_every_category() {
-    let (_d, svc, _prefs) = service(EntryKind::Manga);
+    let (_d, svc, _prefs) = service(Kind::Manga);
     let a = block_on(svc.create("A")).expect("a");
     let b = block_on(svc.create("B")).expect("b");
     let date_added = LibrarySort { ty: SortType::DateAdded, dir: Direction::Descending };

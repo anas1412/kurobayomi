@@ -3,6 +3,7 @@
 //! first episode's videos) and says what each one returned. A [`Feed`] supplies the pages: saved fixtures, or the
 //! real site.
 
+use kuro_platform::kind::Kind;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -10,7 +11,7 @@ use url::Url;
 
 use crate::engine;
 use crate::fetch::Fetcher;
-use crate::recipe::{Kind, Recipe};
+use crate::recipe::Recipe;
 
 #[async_trait]
 pub trait Feed: Send {

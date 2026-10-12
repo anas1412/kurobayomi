@@ -1,7 +1,7 @@
 //! Notification texts of a library pass (behaviour 8.3, 8.5, 8.6, 8.7). Pure string builders; the notifier
 //! only posts them.
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 pub const PROGRESS_TITLE_CHOP: usize = 40;
 pub const SUMMARY_TITLE_CHOP: usize = 45;
@@ -68,10 +68,10 @@ fn plural(count: usize, one: &str, other: &str) -> String {
 }
 
 /// The summary of the entries that have new items. `titles` has one entry per updated entry.
-pub fn summary(kind: EntryKind, titles: &[String], hide_content: bool) -> SummaryText {
+pub fn summary(kind: Kind, titles: &[String], hide_content: bool) -> SummaryText {
     let (title, entry_word) = match kind {
-        EntryKind::Manga => ("New chapters found", ("entry", "entries")),
-        EntryKind::Anime => ("New episodes found", ("title", "titles")),
+        Kind::Manga => ("New chapters found", ("entry", "entries")),
+        Kind::Anime => ("New episodes found", ("title", "titles")),
     };
     if titles.len() == 1 && !hide_content {
         return SummaryText { title, text: chop(&titles[0], SUMMARY_TITLE_CHOP), big_text: None };
@@ -91,10 +91,10 @@ pub fn format_number(number: f64) -> String {
 
 /// Description of the new items of one entry (`getNewChaptersDescription`). `numbers` has one value per new
 /// item; a negative or NaN value is an unrecognised number.
-pub fn new_items_description(kind: EntryKind, numbers: &[f64]) -> String {
+pub fn new_items_description(kind: Kind, numbers: &[f64]) -> String {
     let (generic_one, generic_many, single, single_more, multi, multi_more) = match kind {
-        EntryKind::Manga => ("new chapter", "new chapters", "Chapter", "Chapter", "Chapters", "Chapters"),
-        EntryKind::Anime => ("new episode", "new episodes", "Episode", "Episode", "Episodes", "Episodes"),
+        Kind::Manga => ("new chapter", "new chapters", "Chapter", "Chapter", "Chapters", "Chapters"),
+        Kind::Anime => ("new episode", "new episodes", "Episode", "Episode", "Episodes", "Episodes"),
     };
     let total = numbers.len();
 
@@ -132,8 +132,8 @@ pub fn new_items_description(kind: EntryKind, numbers: &[f64]) -> String {
 mod tests {
     use super::*;
 
-    const M: EntryKind = EntryKind::Manga;
-    const A: EntryKind = EntryKind::Anime;
+    const M: Kind = Kind::Manga;
+    const A: Kind = Kind::Anime;
 
     #[test]
     fn large_queue_warning_needs_more_than_sixty_entries_from_a_metered_source() {

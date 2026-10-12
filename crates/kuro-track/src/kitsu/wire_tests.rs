@@ -1,6 +1,7 @@
 //! Kitsu tracker tests (T-30a-033): wiremock fixtures for the endpoints of the tracker operations, plus the mapping
 //! and concurrency checks of T-30a-017 to T-30a-027. The client-level tests are in `api.rs`.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,7 +18,7 @@ use super::tracker::KitsuTracker;
 use super::{COMPLETED, PLAN_TO_READ, READING, WATCHING};
 use crate::base::{Field, SECRET_SERVICE, account};
 use crate::fakes::MemSecrets;
-use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 use crate::tracker::Tracker;
 
 const UA_PREFIX: &str = "Kurobayomi v";

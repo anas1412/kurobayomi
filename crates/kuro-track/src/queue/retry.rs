@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 
 use crate::connectivity::Connectivity;
 use crate::error::{TrackError, redact};
-use crate::model::Kind;
+use kuro_platform::kind::Kind;
 use crate::queue::{QueueItem, RetryQueue};
 
 /// Runs of an item before it is parked: the body runs for attempts 0 to 3 (`runAttemptCount > 3`).

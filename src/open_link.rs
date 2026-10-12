@@ -4,7 +4,7 @@
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_platform::deep_link::{DeepLink, NAMES};
 
 use crate::{screens, ui};
@@ -14,14 +14,14 @@ enum Dest {
     /// A nav tab or a pushed screen of the spec, by id.
     Open(&'static str),
     /// Library tab, then the entry's page, opened by its id.
-    Entry { anime: bool, id: i64 },
+    Entry { kind: Kind, id: i64 },
 }
 
 fn dest(link: &DeepLink) -> Dest {
     match link {
         DeepLink::AnimeLibrary | DeepLink::Library => Dest::Open("library"),
-        DeepLink::Manga(id) => Dest::Entry { anime: false, id: *id },
-        DeepLink::Anime(id) => Dest::Entry { anime: true, id: *id },
+        DeepLink::Manga(id) => Dest::Entry { kind: Kind::Manga, id: *id },
+        DeepLink::Anime(id) => Dest::Entry { kind: Kind::Anime, id: *id },
         DeepLink::Updates => Dest::Open("updates"),
         DeepLink::History => Dest::Open("history"),
         DeepLink::Sources | DeepLink::AnimeExtensions | DeepLink::Extensions => Dest::Open("browse"),
@@ -35,10 +35,10 @@ fn go(win: &gtk::ApplicationWindow, link: &DeepLink) {
     ui::pop_to_root();
     match dest(link) {
         Dest::Open(id) => ui::open(id),
-        Dest::Entry { anime, id } => {
+        Dest::Entry { kind, id } => {
             ui::open("library");
-            crate::library::mount::show_kind(if anime { EntryKind::Anime } else { EntryKind::Manga });
-            screens::open_entry(anime, id);
+            crate::library::mount::show_kind(kind);
+            screens::open_entry(kind, id);
         }
     }
 }
@@ -83,8 +83,8 @@ mod tests {
     #[test]
     fn every_link_has_a_destination() {
         assert_eq!(dest(&DeepLink::Updates), Dest::Open("updates"));
-        assert_eq!(dest(&DeepLink::Manga(7)), Dest::Entry { anime: false, id: 7 });
-        assert_eq!(dest(&DeepLink::Anime(3)), Dest::Entry { anime: true, id: 3 });
+        assert_eq!(dest(&DeepLink::Manga(7)), Dest::Entry { kind: Kind::Manga, id: 7 });
+        assert_eq!(dest(&DeepLink::Anime(3)), Dest::Entry { kind: Kind::Anime, id: 3 });
         for name in NAMES {
             let link = DeepLink::parse(name).or_else(|| DeepLink::parse(&format!("{name}=1"))).unwrap();
             if let Dest::Open(id) = dest(&link) {

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use kuro_db::handle::Db;
 use kuro_domain::items::source_sync::MangaSyncLocks;
 use kuro_data::source::{AnimeStubSourceRepo, MangaStubSourceRepo};
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_downloads::download_prefs::DownloadPrefs;
 use kuro_prefs::Prefs;
 use kuro_prefs::library::LibraryPrefs;
@@ -63,23 +63,23 @@ impl ToastHost {
         Self { manga_db, anime_db }
     }
 
-    fn db(&self, kind: EntryKind) -> &Arc<Db> {
+    fn db(&self, kind: Kind) -> &Arc<Db> {
         match kind {
-            EntryKind::Manga => &self.manga_db,
-            EntryKind::Anime => &self.anime_db,
+            Kind::Manga => &self.manga_db,
+            Kind::Anime => &self.anime_db,
         }
     }
 
     /// What the error log calls a source: `Name (LANG)` for a source the app holds, else the name its stub row keeps
     /// (a backup restore writes it for a source that is not installed), else the number.
-    fn label(&self, kind: EntryKind, id: i64) -> String {
+    fn label(&self, kind: Kind, id: i64) -> String {
         if let Some(source) = LiveRegistry.get(kind, id) {
             return source.label();
         }
         let db = Arc::clone(self.db(kind));
         let stored = match kind {
-            EntryKind::Manga => MangaStubSourceRepo::new(db).get(id),
-            EntryKind::Anime => AnimeStubSourceRepo::new(db).get(id),
+            Kind::Manga => MangaStubSourceRepo::new(db).get(id),
+            Kind::Anime => AnimeStubSourceRepo::new(db).get(id),
         };
         match stored.ok().flatten() {
             Some(stub) if stub.name.trim().is_empty() => id.to_string(),
@@ -93,17 +93,17 @@ impl ToastHost {
 impl Host for ToastHost {
     fn set_last_update_ms(&self, _now_ms: i64) {}
 
-    fn add_new_updates(&self, _kind: EntryKind, _count: usize) {}
+    fn add_new_updates(&self, _kind: Kind, _count: usize) {}
 
-    fn show_progress(&self, kind: EntryKind, title: &str, body: Option<&str>) {
+    fn show_progress(&self, kind: Kind, title: &str, body: Option<&str>) {
         notify::post(notify::progress_post(kind, title, body));
     }
 
-    fn cancel_progress(&self, kind: EntryKind) {
+    fn cancel_progress(&self, kind: Kind) {
         notify::send(notify::Op::Withdraw(crate::misc::ids::library_progress(kind)));
     }
 
-    fn show_summary(&self, kind: EntryKind, updates: &[EntryUpdate], hide_content: bool) {
+    fn show_summary(&self, kind: Kind, updates: &[EntryUpdate], hide_content: bool) {
         if updates.is_empty() {
             return;
         }
@@ -119,7 +119,7 @@ impl Host for ToastHost {
         }
     }
 
-    fn enqueue_downloads(&self, kind: EntryKind, entry_id: i64, items: &[crate::library_update::source::SourceItem]) {
+    fn enqueue_downloads(&self, kind: Kind, entry_id: i64, items: &[crate::library_update::source::SourceItem]) {
         let urls: Vec<String> = items.iter().map(|item| item.url.clone()).collect();
         let ids = crate::library::actions::item_ids_by_url(self.db(kind), kind, entry_id, &urls);
         if ids.is_empty() {
@@ -130,11 +130,11 @@ impl Host for ToastHost {
         }
     }
 
-    fn start_downloads(&self, kind: EntryKind) {
+    fn start_downloads(&self, kind: Kind) {
         download_host::current().start_queue(kind);
     }
 
-    fn write_error_log(&self, kind: EntryKind, failures: &[Failure]) -> Option<PathBuf> {
+    fn write_error_log(&self, kind: Kind, failures: &[Failure]) -> Option<PathBuf> {
         let paths = kuro_platform::linux::LinuxPaths::system().ok()?;
         match error_log::write(&error_log::path(&paths), kind, failures, &|id| self.label(kind, id)) {
             Ok(file) => file,
@@ -145,7 +145,7 @@ impl Host for ToastHost {
         }
     }
 
-    fn show_error(&self, kind: EntryKind, failed: usize, log: Option<&Path>) {
+    fn show_error(&self, kind: Kind, failed: usize, log: Option<&Path>) {
         if let Some(post) = notify::error_post(kind, failed, log) {
             let toast = post.title.clone();
             if !notify::post(post) {
@@ -154,7 +154,7 @@ impl Host for ToastHost {
         }
     }
 
-    fn show_queue_warning(&self, kind: EntryKind) {
+    fn show_queue_warning(&self, kind: Kind) {
         if !notify::post(notify::warning_post(kind)) {
             crate::toast::notify(format!("{}: {}", text::QUEUE_WARNING_TITLE, text::QUEUE_WARNING_TEXT));
         }
@@ -201,15 +201,15 @@ pub struct Inputs {
 
 /// The download policy of a pass (T-26a-090, T-26a-091): the chapter or episode toggle. The unread-only switch and the
 /// category lists are cut from the settings and hard-coded (off and empty).
-pub fn download_policy(kind: EntryKind, download: &DownloadPrefs) -> DownloadPolicy {
+pub fn download_policy(kind: Kind, download: &DownloadPrefs) -> DownloadPolicy {
     match kind {
-        EntryKind::Manga => DownloadPolicy {
+        Kind::Manga => DownloadPolicy {
             enabled: download.download_new_chapters().get(),
             unread_only: diet::DOWNLOAD_NEW_UNREAD_ONLY,
             include_categories: Vec::new(),
             exclude_categories: Vec::new(),
         },
-        EntryKind::Anime => DownloadPolicy {
+        Kind::Anime => DownloadPolicy {
             enabled: download.download_new_episodes().get(),
             unread_only: diet::DOWNLOAD_NEW_UNREAD_ONLY,
             include_categories: Vec::new(),
@@ -220,7 +220,7 @@ pub fn download_policy(kind: EntryKind, download: &DownloadPrefs) -> DownloadPol
 
 /// The settings of one pass of `kind`. A manual pass of one category passes `category`; the include and exclude lists
 /// are then ignored by the queue.
-pub fn pass_settings(kind: EntryKind, category: Option<i64>, inputs: &Inputs) -> PassSettings {
+pub fn pass_settings(kind: Kind, category: Option<i64>, inputs: &Inputs) -> PassSettings {
     // The update category lists, the Smart update switch and the season switch are cut: all categories, the default
     // item restrictions, no metadata refresh and no season refresh. Notifications never hide their content.
     let tokens: Vec<String> = diet::LIBRARY_UPDATE_ITEM_RESTRICTIONS.iter().map(|token| token.to_string()).collect();
@@ -240,10 +240,9 @@ pub fn pass_settings(kind: EntryKind, category: Option<i64>, inputs: &Inputs) ->
 /// The folder renames of the item sync: the downloads folders of the storage location, the shell's manga download
 /// cache, and the source names of the one registry (a source the registry does not know keeps its folders).
 fn folder_renames() -> Arc<FolderRenames> {
-    use kuro_domain::kind::EntryKind;
     let storage = crate::settings_ui::storage::manager(crate::data::app().base.store())
         .expect("main resolved the platform folders before the runner");
-    let (manga_root, anime_root) = (storage.downloads_path(EntryKind::Manga), storage.downloads_path(EntryKind::Anime));
+    let (manga_root, anime_root) = (storage.downloads_path(Kind::Manga), storage.downloads_path(Kind::Anime));
     let index = crate::shell::host::Shell::get().map(|s| s.downloads().clone());
     Arc::new(FolderRenames::new(manga_root, anime_root, Arc::new(|id: i64| LiveRegistry.name_of_known(id)), index))
 }
@@ -277,7 +276,7 @@ fn runner_over(manga_db: Arc<Db>, anime_db: Arc<Db>, store: &PrefStore) -> Arc<R
 
 /// Hands the runner's two closures to the library's refresh button and to the Updates page's refresh button, so both
 /// start the same runner and share one single-flight lock (T-26a-102, T-26a-103).
-fn register_buttons(start: std::rc::Rc<dyn Fn(EntryKind, Option<i64>) -> bool>, running: std::rc::Rc<dyn Fn(EntryKind) -> bool>) {
+fn register_buttons(start: std::rc::Rc<dyn Fn(Kind, Option<i64>) -> bool>, running: std::rc::Rc<dyn Fn(Kind) -> bool>) {
     crate::library::mount::on_update(crate::library::mount::UpdateHost { start: start.clone(), running: running.clone() });
     crate::updates::library_trigger::install_shared(start, running);
 }
@@ -292,7 +291,7 @@ thread_local! {
 
 /// Cancels the running update pass of `kind` (the cancel button of a progress notice, T-35a-021). `false` when no pass
 /// runs or the runner has not started. Call from the GTK main thread.
-pub fn stop(kind: EntryKind) -> bool {
+pub fn stop(kind: Kind) -> bool {
     let updates = RUNNING.with(|r| r.borrow().as_ref().and_then(|runner| runner.stop(kind))).is_some();
     let metadata = METADATA.with(|m| m.borrow().as_ref().is_some_and(|runner| runner.stop(kind)));
     updates || metadata
@@ -302,11 +301,11 @@ pub fn stop(kind: EntryKind) -> bool {
 struct MetadataNotices;
 
 impl MetadataProgress for MetadataNotices {
-    fn show(&self, kind: EntryKind, title: &str) {
+    fn show(&self, kind: Kind, title: &str) {
         notify::post(notify::progress_post(kind, title, None));
     }
 
-    fn done(&self, kind: EntryKind) {
+    fn done(&self, kind: Kind) {
         notify::send(notify::Op::Withdraw(crate::misc::ids::library_progress(kind)));
     }
 }
@@ -325,10 +324,10 @@ fn metadata_passes() -> Arc<MetadataPasses> {
 /// (T-26a-109). The passes have no schedule, and each is refused only by a metadata pass of its own kind (T-26a-051).
 /// Returns, per kind, whether its pass started. Call from the GTK main thread inside the app's runtime, after [`start`];
 /// before that nothing starts.
-pub fn refresh_library_covers() -> [(EntryKind, bool); 2] {
+pub fn refresh_library_covers() -> [(Kind, bool); 2] {
     let runner = METADATA.with(|m| m.borrow().clone());
     let now_ms = chrono::Local::now().timestamp_millis();
-    [EntryKind::Anime, EntryKind::Manga].map(|kind| (kind, runner.as_ref().is_some_and(|r| r.start_now(kind, now_ms))))
+    [Kind::Anime, Kind::Manga].map(|kind| (kind, runner.as_ref().is_some_and(|r| r.start_now(kind, now_ms))))
 }
 
 /// Builds the runner, hands it to the library's refresh button and starts one schedule loop per kind on the
@@ -348,15 +347,15 @@ pub fn start() {
 
     let (start_runner, start_inputs) = (runner.clone(), inputs.clone());
     let running_runner = runner.clone();
-    let start: std::rc::Rc<dyn Fn(EntryKind, Option<i64>) -> bool> =
+    let start: std::rc::Rc<dyn Fn(Kind, Option<i64>) -> bool> =
         std::rc::Rc::new(move |kind, category| start_runner.start_now(pass_settings(kind, category, &start_inputs)));
-    let running: std::rc::Rc<dyn Fn(EntryKind) -> bool> =
+    let running: std::rc::Rc<dyn Fn(Kind) -> bool> =
         std::rc::Rc::new(move |kind| running_runner.locks().holder(kind).is_some());
     register_update_action(start.clone());
     register_buttons(start, running);
 
     let mut senders = Vec::new();
-    for kind in [EntryKind::Manga, EntryKind::Anime] {
+    for kind in [Kind::Manga, Kind::Anime] {
         let (tx, rx) = watch::channel(0_u32);
         senders.push(tx);
         let (runner, inputs) = (runner.clone(), inputs.clone());
@@ -379,12 +378,12 @@ pub const UPDATE_ACTION: &str = "library-update";
 
 /// Starts a manual pass of every kind through `start`, which holds the single-flight lock of the runner: a kind that is
 /// already running answers `false`, so a forwarded request never adds a second lock holder (test F-11).
-pub fn start_all(start: &dyn Fn(EntryKind, Option<i64>) -> bool) -> [(EntryKind, bool); 2] {
-    [EntryKind::Manga, EntryKind::Anime].map(|kind| (kind, start(kind, None)))
+pub fn start_all(start: &dyn Fn(Kind, Option<i64>) -> bool) -> [(Kind, bool); 2] {
+    [Kind::Manga, Kind::Anime].map(|kind| (kind, start(kind, None)))
 }
 
 /// `app.library-update("manual")`: what `kurobayomi --library-update=manual` asks of the running app (T-26a-029).
-fn register_update_action(start: std::rc::Rc<dyn Fn(EntryKind, Option<i64>) -> bool>) {
+fn register_update_action(start: std::rc::Rc<dyn Fn(Kind, Option<i64>) -> bool>) {
     use gtk::prelude::*;
     let Some(app) = gtk::gio::Application::default() else { return };
     let action = gtk::gio::SimpleAction::new(UPDATE_ACTION, Some(gtk::glib::VariantTy::STRING));
@@ -409,7 +408,7 @@ async fn headless_passes(runner: &Runner, inputs: &Inputs, trigger: Trigger) -> 
         return 0;
     }
     let mut statuses = Vec::new();
-    for kind in [EntryKind::Manga, EntryKind::Anime] {
+    for kind in [Kind::Manga, Kind::Anime] {
         let status = runner.run(pass_settings(kind, None, inputs), trigger).await.status;
         match &status {
             PassStatus::Skipped => println!("kurobayomi: an update of this kind is already running"),
@@ -471,7 +470,7 @@ mod tests {
     #[test]
     fn a_pass_uses_the_hard_coded_category_and_restriction_settings() {
         let (_store, inputs) = inputs();
-        let manga = pass_settings(EntryKind::Manga, None, &inputs);
+        let manga = pass_settings(Kind::Manga, None, &inputs);
         assert!(manga.include_categories.is_empty() && manga.exclude_categories.is_empty(), "all categories");
         assert!(!manga.auto_update_metadata && !manga.hide_content, "cut settings keep their hard-coded values");
     }
@@ -479,36 +478,36 @@ mod tests {
     #[test]
     fn a_manual_pass_names_its_category() {
         let (_store, inputs) = inputs();
-        let settings = pass_settings(EntryKind::Manga, Some(5), &inputs);
+        let settings = pass_settings(Kind::Manga, Some(5), &inputs);
         assert_eq!(settings.category, Some(5));
-        assert_eq!(settings.kind, EntryKind::Manga);
+        assert_eq!(settings.kind, Kind::Manga);
     }
 
     #[test]
     fn stopping_before_the_runner_starts_cancels_nothing() {
-        assert!(!stop(EntryKind::Manga));
+        assert!(!stop(Kind::Manga));
     }
 
     #[test]
     fn the_download_policy_follows_the_new_item_toggles_only() {
         // T-26a-090, T-26a-091
         let (_store, inputs) = inputs();
-        let off = pass_settings(EntryKind::Manga, None, &inputs).download;
+        let off = pass_settings(Kind::Manga, None, &inputs).download;
         assert_eq!(off, DownloadPolicy::default(), "download_new is off by default");
-        assert!(!pass_settings(EntryKind::Anime, None, &inputs).download.enabled);
+        assert!(!pass_settings(Kind::Anime, None, &inputs).download.enabled);
         inputs.download.download_new_chapters().set(true).unwrap();
-        let manga = pass_settings(EntryKind::Manga, None, &inputs).download;
+        let manga = pass_settings(Kind::Manga, None, &inputs).download;
         assert_eq!(manga, DownloadPolicy { enabled: true, unread_only: false, include_categories: vec![], exclude_categories: vec![] });
-        assert!(!pass_settings(EntryKind::Anime, None, &inputs).download.enabled, "the chapter toggle does not turn anime on");
+        assert!(!pass_settings(Kind::Anime, None, &inputs).download.enabled, "the chapter toggle does not turn anime on");
         inputs.download.download_new_episodes().set(true).unwrap();
-        assert!(pass_settings(EntryKind::Anime, None, &inputs).download.enabled);
+        assert!(pass_settings(Kind::Anime, None, &inputs).download.enabled);
     }
     #[test]
     fn t_26a_103_the_updates_button_reaches_the_registered_runner_and_shares_its_single_flight() {
         use crate::updates::library_trigger::{self, Outcome};
         use std::cell::{Cell, RefCell};
         use std::rc::Rc;
-        assert_eq!(library_trigger::trigger(EntryKind::Anime), Outcome::Refused, "no runner, no start");
+        assert_eq!(library_trigger::trigger(Kind::Anime), Outcome::Refused, "no runner, no start");
         let (busy, calls) = (Rc::new(Cell::new(false)), Rc::new(RefCell::new(Vec::new())));
         let (start_busy, start_calls, running_busy) = (busy.clone(), calls.clone(), busy.clone());
         register_buttons(
@@ -519,9 +518,9 @@ mod tests {
             }),
             Rc::new(move |_| running_busy.get()),
         );
-        assert_eq!(library_trigger::trigger(EntryKind::Anime), Outcome::Started, "the page starts a pass of the visible kind");
-        assert_eq!(*calls.borrow(), vec![(EntryKind::Anime, None)], "a whole-library pass, no category");
-        assert_eq!(library_trigger::trigger(EntryKind::Anime), Outcome::AlreadyRunning, "a pass is already running");
+        assert_eq!(library_trigger::trigger(Kind::Anime), Outcome::Started, "the page starts a pass of the visible kind");
+        assert_eq!(*calls.borrow(), vec![(Kind::Anime, None)], "a whole-library pass, no category");
+        assert_eq!(library_trigger::trigger(Kind::Anime), Outcome::AlreadyRunning, "a pass is already running");
         assert_eq!(calls.borrow().len(), 1);
         assert_eq!(library_trigger::message(Outcome::Started), "Updating library");
         assert_eq!(library_trigger::message(Outcome::AlreadyRunning), "An update is already running");
@@ -535,8 +534,8 @@ mod tests {
 
     #[test]
     fn t_26a_109_the_cover_refresh_starts_the_anime_metadata_pass_before_the_manga_one() {
-        let kinds: Vec<EntryKind> = refresh_library_covers().iter().map(|(kind, _)| *kind).collect();
-        assert_eq!(kinds, vec![EntryKind::Anime, EntryKind::Manga]);
+        let kinds: Vec<Kind> = refresh_library_covers().iter().map(|(kind, _)| *kind).collect();
+        assert_eq!(kinds, vec![Kind::Anime, Kind::Manga]);
     }
 
     fn conditions(connected: bool) -> kuro_platform::power_network::Conditions {
@@ -576,16 +575,16 @@ mod tests {
     async fn an_unknown_source_gives_the_stub_slot_and_a_missing_source_error() {
         use crate::library_update::error::UpdateError;
         use crate::library_update::source::SourceSlot;
-        let slot = LiveRegistry.get_or_stub(EntryKind::Manga, 9);
+        let slot = LiveRegistry.get_or_stub(Kind::Manga, 9);
         assert!(matches!(slot, SourceSlot::Missing));
-        assert_eq!(slot.fetch(EntryKind::Manga, "/m", false).await, Err(UpdateError::SourceNotInstalled));
+        assert_eq!(slot.fetch(Kind::Manga, "/m", false).await, Err(UpdateError::SourceNotInstalled));
     }
 
     #[test]
     fn a_forwarded_manual_request_starts_each_kind_once_and_a_second_one_adds_no_lock_holder() {
         // T-26a-029, test F-11: the closure stands for the runner's single-flight `start_now`
         let holders = RefCell::new(Vec::new());
-        let start = |kind: EntryKind, category: Option<i64>| {
+        let start = |kind: Kind, category: Option<i64>| {
             assert_eq!(category, None, "a forwarded request updates the whole library");
             let mut holders = holders.borrow_mut();
             let free = !holders.contains(&kind);
@@ -594,8 +593,8 @@ mod tests {
             }
             free
         };
-        assert_eq!(start_all(&start), [(EntryKind::Manga, true), (EntryKind::Anime, true)]);
-        assert_eq!(start_all(&start), [(EntryKind::Manga, false), (EntryKind::Anime, false)]);
+        assert_eq!(start_all(&start), [(Kind::Manga, true), (Kind::Anime, true)]);
+        assert_eq!(start_all(&start), [(Kind::Manga, false), (Kind::Anime, false)]);
         assert_eq!(holders.borrow().len(), 2);
     }
 

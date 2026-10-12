@@ -229,9 +229,5 @@ mod tests {
         assert_eq!(zone_key_code(Zone::Left), CustomKeyCode::DoubleTapLeft);
         assert_eq!(zone_key_code(Zone::Center), CustomKeyCode::DoubleTapCenter);
         assert_eq!(zone_key_code(Zone::Right), CustomKeyCode::DoubleTapRight);
-        assert_eq!(
-            crate::mpris::keypress_args(zone_key_code(Zone::Center)),
-            ["keypress", "0x10002"]
-        );
     }
 }

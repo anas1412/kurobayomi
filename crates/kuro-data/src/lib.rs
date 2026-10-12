@@ -27,7 +27,6 @@ pub mod sanitize;
 pub mod source;
 pub mod time;
 pub mod track;
-pub mod updates;
 
 pub use kuro_db::open::{DbError as DataError, DbResult as DataResult};
 
@@ -109,6 +108,7 @@ mod open_tests {
     use std::time::Duration;
 
     use kuro_db::handle::{Db, READERS};
+    use kuro_platform::kind::Kind;
     use rusqlite::Connection;
 
     use crate::support::{anime_db, manga_db};
@@ -164,7 +164,7 @@ mod open_tests {
     #[test]
     fn a_thousand_subscriptions_created_and_dropped_leave_no_task_behind() {
         let (_dir, db) = manga_db();
-        let repo = crate::category::CategoryRepo::new(db.clone(), crate::category::CategoryKind::Manga);
+        let repo = crate::category::CategoryRepo::new(db.clone(), Kind::Manga);
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
         rt.block_on(async {
             for _ in 0..1000 {

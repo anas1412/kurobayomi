@@ -1,7 +1,8 @@
 //! The info header, GTK-free: the lines it shows, what a click searches, what a long press copies, and the cover size.
 //! Upstream: `MangaInfoHeader.kt:336-414` (layouts), `:424-520` (title, author, artist, source rows).
 
-use kuro_images::art::{ArtKind, ArtRef, Owner};
+use kuro_images::art::{ArtKind, ArtRef};
+use kuro_platform::kind::Kind;
 
 use crate::entry_core::detail::EntryState;
 use crate::entry_core::text::{artist_row, display_author, display_title, status_icon, status_text};
@@ -74,7 +75,7 @@ impl HeaderModel {
             page.source.stub,
         )
         .with_genres(Some(&m.genres))
-        .with_cover(Owner::Manga, m.id, m.source, m.thumbnail_url.as_deref(), m.favorite, m.cover_last_modified)
+        .with_cover(Kind::Manga, m.id, m.source, m.thumbnail_url.as_deref(), m.favorite, m.cover_last_modified)
     }
 
     /// The header of any entry kind: the caller supplies the status icon and text, because manga and anime have
@@ -103,7 +104,7 @@ impl HeaderModel {
     }
 
     /// The same header with the cover of an entry: `(id, source, thumbnail url, favorite, cover_last_modified)`.
-    pub fn with_cover(mut self, owner: Owner, id: i64, source: i64, url: Option<&str>, favorite: bool, last_modified: i64) -> Self {
+    pub fn with_cover(mut self, owner: Kind, id: i64, source: i64, url: Option<&str>, favorite: bool, last_modified: i64) -> Self {
         self.cover = Some(ArtRef { owner, entry_id: id, source_id: source, kind: ArtKind::Cover, url: url.map(str::to_owned), favorite, last_modified });
         self
     }
@@ -309,9 +310,9 @@ mod genre_tests {
     fn the_header_carries_the_cover_of_its_entry_and_a_newer_stamp_makes_it_differ() {
         let plain = HeaderModel::from_parts("t", None, None, ("x", String::new()), "S", false);
         assert_eq!(plain.cover, None);
-        let at = |stamp| plain.clone().with_cover(Owner::Anime, 4, 9, Some("u"), true, stamp);
+        let at = |stamp| plain.clone().with_cover(Kind::Anime, 4, 9, Some("u"), true, stamp);
         let art = at(5).cover.expect("a cover");
-        assert_eq!((art.entry_id, art.source_id, art.last_modified, art.owner), (4, 9, 5, Owner::Anime));
+        assert_eq!((art.entry_id, art.source_id, art.last_modified, art.owner), (4, 9, 5, Kind::Anime));
         assert_ne!(at(5), at(6), "the header is rebuilt, or its cover reloaded, when the stamp changes");
     }
 

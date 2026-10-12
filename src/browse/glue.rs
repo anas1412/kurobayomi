@@ -5,6 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+use kuro_platform::kind::Kind;
 
 use async_channel::{Receiver, Sender, TrySendError, bounded};
 use gtk::glib;
@@ -30,7 +31,7 @@ pub fn poll_pref_changes(checks: Vec<Box<dyn Fn() -> bool>>, alive: impl Fn() ->
 }
 
 /// Opens the Categories page on the section of `kind` (the category chooser's Edit categories, T-40b-045).
-pub fn open_categories(kind: kuro_domain::kind::EntryKind) {
+pub fn open_categories(kind: Kind) {
     let page = crate::screens::build("categories");
     crate::settings_ui::view::show_kind(&page, crate::settings_ui::library::categories_tab(kind));
     crate::ui::push(&page);

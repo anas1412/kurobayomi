@@ -21,7 +21,7 @@ use kuro_source::anime::model::FetchType;
 use super::dialogs::DialogSlot;
 use super::migrate_engine::MigratePlan;
 use super::migrate_flags::{self, RunGuard, options, preselected};
-use super::route::BrowseKind;
+use kuro_platform::kind::Kind;
 use crate::ui::{DialogButton, Role};
 
 /// A button of the dialog, in display order.
@@ -35,10 +35,10 @@ pub enum Action {
 }
 
 impl Action {
-    fn label(self, kind: BrowseKind) -> String {
+    fn label(self, kind: Kind) -> String {
         tr(match (self, kind) {
-            (Action::ShowEntry, BrowseKind::Manga) => MsgKey::action_show_manga,
-            (Action::ShowEntry, BrowseKind::Anime) => MsgKey::action_show_anime,
+            (Action::ShowEntry, Kind::Manga) => MsgKey::action_show_manga,
+            (Action::ShowEntry, Kind::Anime) => MsgKey::action_show_anime,
             (Action::ShowSeasons, _) => MsgKey::label_show_seasons,
             (Action::Copy, _) => MsgKey::copy,
             (Action::Migrate, _) => MsgKey::migrate,
@@ -49,7 +49,7 @@ impl Action {
 /// What the old and the new title are, which decides what the dialog offers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Facts {
-    pub kind: BrowseKind,
+    pub kind: Kind,
     /// How the old and the new title list their items. A manga is always `Episodes` (a list of chapters).
     pub old: FetchType,
     pub new: FetchType,
@@ -59,9 +59,9 @@ pub struct Facts {
 }
 
 /// The label of one option bit.
-fn option_label(bit: u32, kind: BrowseKind) -> String {
+fn option_label(bit: u32, kind: Kind) -> String {
     tr(match bit {
-        migrate_flags::ITEMS if kind == BrowseKind::Manga => MsgKey::chapters,
+        migrate_flags::ITEMS if kind == Kind::Manga => MsgKey::chapters,
         migrate_flags::ITEMS => MsgKey::episodes,
         migrate_flags::CATEGORIES => MsgKey::categories,
         migrate_flags::CUSTOM_COVER => MsgKey::custom_cover,
@@ -265,27 +265,27 @@ pub fn show(slot: &DialogSlot, anchor: &impl IsA<gtk::Widget>, facts: Facts, sav
 mod pure_tests {
     use super::*;
 
-    fn facts(kind: BrowseKind, old: FetchType, new: FetchType) -> Facts {
+    fn facts(kind: Kind, old: FetchType, new: FetchType) -> Facts {
         Facts { kind, old, new, custom_cover: false, custom_background: false, downloads: false }
     }
 
     #[test]
     fn a_mismatch_shows_the_error_for_the_old_kind_and_only_the_show_buttons() {
-        let to_seasons = plan(facts(BrowseKind::Anime, FetchType::Episodes, FetchType::Seasons), i32::MAX);
+        let to_seasons = plan(facts(Kind::Anime, FetchType::Episodes, FetchType::Seasons), i32::MAX);
         assert_eq!(to_seasons.message, Some(tr(MsgKey::label_cant_migrate_episode)), "E41");
         assert_eq!(to_seasons.actions, [Action::ShowEntry, Action::ShowSeasons]);
         assert!(to_seasons.flags.is_empty(), "no options when migrating is off");
-        let to_episodes = plan(facts(BrowseKind::Anime, FetchType::Seasons, FetchType::Episodes), i32::MAX);
+        let to_episodes = plan(facts(Kind::Anime, FetchType::Seasons, FetchType::Episodes), i32::MAX);
         assert_eq!(to_episodes.message, Some(tr(MsgKey::label_cant_migrate_season)), "E42");
         assert_eq!(to_episodes.actions, [Action::ShowEntry], "an episodes title has no Show seasons");
-        let seasons = plan(facts(BrowseKind::Anime, FetchType::Seasons, FetchType::Seasons), i32::MAX);
+        let seasons = plan(facts(Kind::Anime, FetchType::Seasons, FetchType::Seasons), i32::MAX);
         assert_eq!((seasons.message, seasons.actions), (None, vec![Action::ShowEntry, Action::ShowSeasons, Action::Copy, Action::Migrate]));
         assert!(!seasons.flags.iter().any(|(bit, _)| *bit == migrate_flags::ITEMS), "the episodes option only for an episodes title");
     }
 
     #[test]
     fn the_options_follow_the_old_title_and_start_from_the_saved_bitmap() {
-        let all = Facts { custom_cover: true, custom_background: true, downloads: true, ..facts(BrowseKind::Anime, FetchType::Episodes, FetchType::Episodes) };
+        let all = Facts { custom_cover: true, custom_background: true, downloads: true, ..facts(Kind::Anime, FetchType::Episodes, FetchType::Episodes) };
         let plan_all = plan(all, i32::MAX);
         assert_eq!(
             plan_all.flags.iter().map(|(flag, _)| *flag).collect::<Vec<_>>(),
@@ -293,20 +293,20 @@ mod pure_tests {
             "T-41a-032: the five options in order"
         );
         assert_eq!(plan_all.selected.len(), 5, "the saved default selects all five");
-        assert_eq!(plan(facts(BrowseKind::Anime, FetchType::Episodes, FetchType::Episodes), i32::MAX).flags.len(), 2, "cover, background and delete only when they apply");
+        assert_eq!(plan(facts(Kind::Anime, FetchType::Episodes, FetchType::Episodes), i32::MAX).flags.len(), 2, "cover, background and delete only when they apply");
         let saved = plan(all, migrate_flags::CATEGORIES as i32 | migrate_flags::DELETE_DOWNLOADED as i32);
         assert_eq!(saved.selected, [migrate_flags::CATEGORIES, migrate_flags::DELETE_DOWNLOADED], "only the saved bits start ticked");
     }
 
     #[test]
     fn a_manga_offers_its_chapters_and_the_show_manga_button() {
-        let manga = Facts { custom_cover: true, downloads: true, ..facts(BrowseKind::Manga, FetchType::Episodes, FetchType::Episodes) };
+        let manga = Facts { custom_cover: true, downloads: true, ..facts(Kind::Manga, FetchType::Episodes, FetchType::Episodes) };
         let shown = plan(manga, i32::MAX);
         assert_eq!(shown.flags.iter().map(|(bit, _)| *bit).collect::<Vec<_>>(), [migrate_flags::ITEMS, migrate_flags::CATEGORIES, migrate_flags::CUSTOM_COVER, migrate_flags::DELETE_DOWNLOADED]);
         assert_eq!(shown.flags[0].1, tr(MsgKey::chapters));
         assert_eq!(shown.actions, [Action::ShowEntry, Action::Copy, Action::Migrate]);
-        assert_eq!(Action::ShowEntry.label(BrowseKind::Manga), tr(MsgKey::action_show_manga));
-        assert_eq!(Action::ShowEntry.label(BrowseKind::Anime), tr(MsgKey::action_show_anime));
+        assert_eq!(Action::ShowEntry.label(Kind::Manga), tr(MsgKey::action_show_manga));
+        assert_eq!(Action::ShowEntry.label(Kind::Anime), tr(MsgKey::action_show_anime));
     }
 }
 
@@ -368,7 +368,7 @@ pub(crate) mod tests {
             show(&self.slot, &self.anchor, facts, saved, handlers(&self.log, &self.pending))
         }
 
-        fn plain(&self, kind: BrowseKind) -> gtk::Window {
+        fn plain(&self, kind: Kind) -> gtk::Window {
             self.open(Facts { kind, old: FetchType::Episodes, new: FetchType::Episodes, custom_cover: false, custom_background: false, downloads: false }, i32::MAX)
         }
 
@@ -381,15 +381,15 @@ pub(crate) mod tests {
 
     fn the_dialog_follows_the_plan_and_the_buttons_run_their_handlers() {
         let rig = rig();
-        let window = rig.open(Facts { kind: BrowseKind::Anime, old: FetchType::Episodes, new: FetchType::Seasons, custom_cover: false, custom_background: false, downloads: false }, i32::MAX);
-        assert_eq!(labels(&window), [Action::ShowEntry.label(BrowseKind::Anime), Action::ShowSeasons.label(BrowseKind::Anime)], "a mismatch offers the Show buttons");
+        let window = rig.open(Facts { kind: Kind::Anime, old: FetchType::Episodes, new: FetchType::Seasons, custom_cover: false, custom_background: false, downloads: false }, i32::MAX);
+        assert_eq!(labels(&window), [Action::ShowEntry.label(Kind::Anime), Action::ShowSeasons.label(Kind::Anime)], "a mismatch offers the Show buttons");
         let text: Vec<String> = all::<gtk::Label>(&window).iter().map(|l| l.label().to_string()).collect();
         assert!(text.contains(&tr(MsgKey::label_cant_migrate_episode)), "the mismatch message is on the dialog: {text:?}");
         buttons_of(&window)[1].emit_clicked();
         assert_eq!(*rig.log.borrow(), ["show"], "Show seasons opens the new entry");
         assert!(rig.slot.current().is_none(), "and closes the dialog");
 
-        for kind in [BrowseKind::Manga, BrowseKind::Anime] {
+        for kind in [Kind::Manga, Kind::Anime] {
             rig.log.borrow_mut().clear();
             let window = rig.plain(kind);
             assert_eq!(labels(&window), [Action::ShowEntry.label(kind), Action::Copy.label(kind), Action::Migrate.label(kind)], "{kind:?}");
@@ -411,7 +411,7 @@ pub(crate) mod tests {
 
     fn a_run_shows_the_spinner_over_a_dimmed_body_hides_the_buttons_and_refuses_a_second_start() {
         let rig = rig();
-        let facts = Facts { kind: BrowseKind::Anime, old: FetchType::Episodes, new: FetchType::Episodes, custom_cover: true, custom_background: true, downloads: true };
+        let facts = Facts { kind: Kind::Anime, old: FetchType::Episodes, new: FetchType::Episodes, custom_cover: true, custom_background: true, downloads: true };
         let window = rig.open(facts, migrate_flags::ITEMS as i32);
         let checks = all::<gtk::CheckButton>(&window);
         assert_eq!(checks.iter().map(|c| c.is_active()).collect::<Vec<_>>(), [true, false, false, false, false], "only the saved bit starts ticked");
@@ -434,7 +434,7 @@ pub(crate) mod tests {
 
     fn escape_and_the_close_button_do_nothing_while_a_run_goes() {
         let rig = rig();
-        let window = rig.plain(BrowseKind::Manga);
+        let window = rig.plain(Kind::Manga);
         let closes = Rc::new(Cell::new(0));
         let counted = Rc::clone(&closes);
         window.connect_close_request(move |_| {
@@ -451,7 +451,7 @@ pub(crate) mod tests {
 
     fn a_failure_shows_the_reason_in_the_dialog_and_lets_it_run_again() {
         let rig = rig();
-        let window = rig.plain(BrowseKind::Manga);
+        let window = rig.plain(Kind::Manga);
         let buttons = buttons_of(&window);
         buttons[2].emit_clicked();
         rig.answer(Err("disk full".into()));
@@ -468,14 +468,14 @@ pub(crate) mod tests {
 
     fn the_keys_migrate_and_copy() {
         let rig = rig();
-        let window = rig.plain(BrowseKind::Manga);
+        let window = rig.plain(Kind::Manga);
         let controllers = window.observe_controllers();
         let keys: Vec<gtk::EventControllerKey> = (0..controllers.n_items()).filter_map(|i| controllers.item(i)).filter_map(|c| c.downcast().ok()).collect();
         let ctrl = gtk::gdk::ModifierType::CONTROL_MASK;
         assert!(keys.iter().any(|k| k.emit_by_name::<bool>("key-pressed", &[&gtk::gdk::Key::Return, &0_u32, &ctrl])), "Ctrl+Enter is taken");
         assert_eq!(rig.log.borrow().last().map(String::as_str), Some("run replace=true flags=3"));
         rig.answer(Ok(()));
-        let window = rig.plain(BrowseKind::Manga);
+        let window = rig.plain(Kind::Manga);
         let controllers = window.observe_controllers();
         let keys: Vec<gtk::EventControllerKey> = (0..controllers.n_items()).filter_map(|i| controllers.item(i)).filter_map(|c| c.downcast().ok()).collect();
         let shift = gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::SHIFT_MASK;

@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use kuro_i18n::{MsgKey, tr};
+use kuro_platform::kind::Kind;
 
 /// The title: the page title when the page has one, otherwise the title the screen was opened with.
 pub fn title(page_title: Option<&str>, initial_title: &str) -> String {
@@ -23,7 +24,7 @@ pub struct OpenRequest {
     pub source_id: Option<i64>,
     /// `title_key`: the title shown until the page has one.
     pub title_key: Option<String>,
-    pub anime: bool,
+    pub kind: Kind,
 }
 
 impl OpenRequest {
@@ -234,7 +235,7 @@ mod tests {
 
     #[test]
     fn the_initial_title_is_the_title_key_value() {
-        let request = OpenRequest { url: "https://x.test".into(), source_id: Some(3), title_key: Some("Source".into()), anime: false };
+        let request = OpenRequest { url: "https://x.test".into(), source_id: Some(3), title_key: Some("Source".into()), kind: Kind::Manga };
         assert_eq!(request.initial_title(), "Source");
         assert_eq!(title(None, request.initial_title()), "Source");
         assert_eq!(OpenRequest { title_key: None, ..request }.initial_title(), "");

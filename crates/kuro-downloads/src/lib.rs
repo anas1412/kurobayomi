@@ -22,7 +22,6 @@
 //! multi-part range downloads are not offered for anime.
 
 pub mod anime;
-pub mod archive;
 pub mod comicinfo;
 pub mod delete;
 pub mod download_prefs;
@@ -35,10 +34,8 @@ pub mod index;
 pub mod layout;
 pub mod local;
 pub mod manager;
-pub mod messages;
 pub mod model;
 pub mod notify;
-pub mod page;
 pub mod pending;
 pub mod pipeline;
 pub mod queue;
@@ -51,7 +48,6 @@ pub mod settings;
 pub mod source;
 pub mod store;
 pub mod throttle;
-pub mod view_model;
 pub mod watch;
 
 #[cfg(test)]
@@ -59,10 +55,9 @@ mod testdata_tests;
 #[cfg(test)]
 mod testing;
 
-pub use delete::{DeleteChapterDownload, DeleteEpisodeDownload, DeleteError, DeleteSettings};
 pub use downloader::{Connectivity, DownloadSettings, ProcessHold};
 pub use engine::{AnimeEngine, MangaEngine, QueueEngine};
 pub use error::DownloadError;
 pub use events::DownloadEvent;
-pub use manager::{DeleteRules, DownloadManager, EnqueueOutcome, LocalPage, ManagerParams, restore_queue};
+pub use manager::{DeleteRules, DownloadManager, EnqueueOutcome, LocalPage, ManagerParams};
 pub use model::DownloadState;

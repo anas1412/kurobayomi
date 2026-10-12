@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use kuro_platform::deep_link::DeepLink;
 
 use crate::shell::argv::{self, LaunchRequest, RouteError};
-use crate::shell::nav::Kind;
+use kuro_platform::kind::Kind;
 use crate::shell::uri::{self, UriError, UriRoute};
 
 /// The extras of a notification dismiss (`notificationId` and `groupId`, behaviour 4.1 step 1).

@@ -349,8 +349,9 @@ fn file_name(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    use kuro_platform::kind::Kind;
     use super::*;
-    use crate::art::{ArtKind, Owner};
+    use crate::art::ArtKind;
     use crate::options::CachePolicy;
     use crate::testing::{FixedSource, JPEG, NoSources, TestPaths, test_client};
     use ::http::HeaderValue;
@@ -361,7 +362,7 @@ mod tests {
 
     fn cover(url: Option<&str>, favorite: bool, source_id: i64) -> ArtRef {
         ArtRef {
-            owner: Owner::Manga,
+            owner: Kind::Manga,
             entry_id: 7,
             source_id,
             kind: ArtKind::Cover,

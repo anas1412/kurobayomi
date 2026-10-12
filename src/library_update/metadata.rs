@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use kuro_data::anime::{AnimeRepo, AnimeUpdate};
 use kuro_data::manga::{MangaRepo, MangaUpdate};
 use kuro_db::handle::Db;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -41,10 +41,10 @@ pub const MANGA_LOCK: &str = "MetadataUpdate-manga";
 pub const ANIME_LOCK: &str = "MetadataUpdate-anime";
 
 /// The lock name of the metadata pass of `kind`.
-pub fn lock_name(kind: EntryKind) -> &'static str {
+pub fn lock_name(kind: Kind) -> &'static str {
     match kind {
-        EntryKind::Manga => MANGA_LOCK,
-        EntryKind::Anime => ANIME_LOCK,
+        Kind::Manga => MANGA_LOCK,
+        Kind::Anime => ANIME_LOCK,
     }
 }
 
@@ -61,7 +61,7 @@ impl MetadataLocks {
     }
 
     /// The guard of a new metadata pass of `kind`, or `None` when one of that kind is already running.
-    pub fn acquire(this: &Arc<Self>, kind: EntryKind) -> Option<MetadataGuard> {
+    pub fn acquire(this: &Arc<Self>, kind: Kind) -> Option<MetadataGuard> {
         let name = lock_name(kind);
         let mut held = this.lock();
         if held.contains_key(name) {
@@ -72,12 +72,12 @@ impl MetadataLocks {
         Some(MetadataGuard { locks: Arc::clone(this), name, cancel })
     }
 
-    pub fn is_running(&self, kind: EntryKind) -> bool {
+    pub fn is_running(&self, kind: Kind) -> bool {
         self.lock().contains_key(lock_name(kind))
     }
 
     /// Cancels the running pass of `kind`. A stopped metadata pass is not started again (SC-11). `false` when none runs.
-    pub fn stop(&self, kind: EntryKind) -> bool {
+    pub fn stop(&self, kind: Kind) -> bool {
         match self.lock().get(lock_name(kind)) {
             Some(cancel) => {
                 cancel.store(true, Ordering::SeqCst);
@@ -154,7 +154,7 @@ impl MetadataStore for DbMetadataStore {
         let (id, kind) = (entry.id, entry.kind);
         let (manga, anime) = (Arc::clone(&self.manga), Arc::clone(&self.anime));
         tokio::task::spawn_blocking(move || match kind {
-            EntryKind::Manga => MangaRepo::new(manga).update(&MangaUpdate {
+            Kind::Manga => MangaRepo::new(manga).update(&MangaUpdate {
                 title: change.title,
                 status: Some(change.status),
                 thumbnail_url: change.thumbnail_url,
@@ -162,7 +162,7 @@ impl MetadataStore for DbMetadataStore {
                 initialized: Some(true),
                 ..MangaUpdate::new(id)
             }),
-            EntryKind::Anime => AnimeRepo::new(anime).update(&AnimeUpdate {
+            Kind::Anime => AnimeRepo::new(anime).update(&AnimeUpdate {
                 title: change.title,
                 status: Some(change.status),
                 thumbnail_url: change.thumbnail_url,
@@ -189,9 +189,9 @@ pub struct MetadataDeps<R, S, M> {
 /// Where a metadata pass reports its progress: the same title as an update pass (`text::progress_title`).
 pub trait MetadataProgress: Send + Sync {
     /// The pass of `kind` has finished `title`'s share of its entries.
-    fn show(&self, kind: EntryKind, title: &str);
+    fn show(&self, kind: Kind, title: &str);
     /// The pass ended (completed, cancelled or failed): the notice goes.
-    fn done(&self, kind: EntryKind);
+    fn done(&self, kind: Kind);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,7 +252,7 @@ where
     }
 
     /// Runs a pass of `kind` on the caller's task. Refused when a pass of that kind is running.
-    pub async fn run(&self, kind: EntryKind, now_ms: i64) -> MetadataOutcome {
+    pub async fn run(&self, kind: Kind, now_ms: i64) -> MetadataOutcome {
         match MetadataLocks::acquire(&self.locks, kind) {
             Some(guard) => self.run_with(guard, kind, now_ms).await,
             None => MetadataOutcome::ended(MetadataStatus::Refused),
@@ -261,7 +261,7 @@ where
 
     /// The manual start: `false` without starting when a pass of `kind` is running, otherwise the pass runs on a
     /// spawned task. Call from inside the runtime.
-    pub fn start_now(self: &Arc<Self>, kind: EntryKind, now_ms: i64) -> bool {
+    pub fn start_now(self: &Arc<Self>, kind: Kind, now_ms: i64) -> bool {
         let Some(guard) = MetadataLocks::acquire(&self.locks, kind) else { return false };
         let this = Arc::clone(self);
         tokio::spawn(async move {
@@ -270,15 +270,15 @@ where
         true
     }
 
-    pub fn stop(&self, kind: EntryKind) -> bool {
+    pub fn stop(&self, kind: Kind) -> bool {
         self.locks.stop(kind)
     }
 
-    pub fn is_running(&self, kind: EntryKind) -> bool {
+    pub fn is_running(&self, kind: Kind) -> bool {
         self.locks.is_running(kind)
     }
 
-    async fn run_with(&self, guard: MetadataGuard, kind: EntryKind, now_ms: i64) -> MetadataOutcome {
+    async fn run_with(&self, guard: MetadataGuard, kind: Kind, now_ms: i64) -> MetadataOutcome {
         let deps = Arc::clone(&self.deps);
         let library = match deps.store.library(kind).await {
             Ok(library) => library,
@@ -389,7 +389,7 @@ mod tests {
     }
 
     fn anime(id: i64, source: i64, title: &str) -> LibraryEntry {
-        LibraryEntry { kind: EntryKind::Anime, ..entry(id, source, title) }
+        LibraryEntry { kind: Kind::Anime, ..entry(id, source, title) }
     }
 
     fn details() -> SourceDetails {
@@ -401,13 +401,13 @@ mod tests {
         // T-26a-051
         assert_ne!(MANGA_LOCK, ANIME_LOCK);
         let locks = Arc::new(MetadataLocks::default());
-        let manga = MetadataLocks::acquire(&locks, EntryKind::Manga).expect("manga metadata starts");
-        assert!(MetadataLocks::acquire(&locks, EntryKind::Manga).is_none(), "a second manga pass is refused");
-        let anime = MetadataLocks::acquire(&locks, EntryKind::Anime).expect("anime metadata is not refused by manga");
+        let manga = MetadataLocks::acquire(&locks, Kind::Manga).expect("manga metadata starts");
+        assert!(MetadataLocks::acquire(&locks, Kind::Manga).is_none(), "a second manga pass is refused");
+        let anime = MetadataLocks::acquire(&locks, Kind::Anime).expect("anime metadata is not refused by manga");
         drop(manga);
-        assert!(!locks.is_running(EntryKind::Manga) && locks.is_running(EntryKind::Anime));
+        assert!(!locks.is_running(Kind::Manga) && locks.is_running(Kind::Anime));
         drop(anime);
-        assert!(MetadataLocks::acquire(&locks, EntryKind::Manga).is_some(), "dropping the guard frees the name");
+        assert!(MetadataLocks::acquire(&locks, Kind::Manga).is_some(), "dropping the guard frees the name");
     }
 
     #[test]
@@ -415,10 +415,10 @@ mod tests {
         // T-26a-051: the metadata locks are not the update pass locks.
         let metadata = Arc::new(MetadataLocks::default());
         let updates = Arc::new(PassLocks::default());
-        let _update = PassLocks::acquire(&updates, EntryKind::Manga, Trigger::Manual).expect("update pass");
-        assert!(MetadataLocks::acquire(&metadata, EntryKind::Manga).is_some());
-        let _meta = MetadataLocks::acquire(&metadata, EntryKind::Anime).expect("anime metadata");
-        assert!(PassLocks::acquire(&updates, EntryKind::Anime, Trigger::Manual).is_ok());
+        let _update = PassLocks::acquire(&updates, Kind::Manga, Trigger::Manual).expect("update pass");
+        assert!(MetadataLocks::acquire(&metadata, Kind::Manga).is_some());
+        let _meta = MetadataLocks::acquire(&metadata, Kind::Anime).expect("anime metadata");
+        assert!(PassLocks::acquire(&updates, Kind::Anime, Trigger::Manual).is_ok());
     }
 
     #[test]
@@ -440,7 +440,7 @@ mod tests {
         let refreshes = Arc::clone(&source.refreshes);
         registry.sources.insert(7, source);
         let runner = runner(FakeStore::with(vec![entry(1, 7, "A"), twin]), registry);
-        let outcome = runner.run(EntryKind::Manga, 10).await;
+        let outcome = runner.run(Kind::Manga, 10).await;
         assert_eq!((outcome.queued, outcome.updated), (1, 1));
         assert_eq!(refreshes.lock().unwrap().len(), 1);
     }
@@ -449,7 +449,7 @@ mod tests {
     async fn a_missing_source_is_skipped_with_no_error() {
         // T-26a-053
         let runner = runner(FakeStore::with(vec![entry(1, 99, "A")]), FakeRegistry::default());
-        let outcome = runner.run(EntryKind::Manga, 10).await;
+        let outcome = runner.run(Kind::Manga, 10).await;
         assert_eq!(outcome.status, MetadataStatus::Completed);
         assert_eq!((outcome.skipped, outcome.failed, outcome.updated), (1, 0, 0));
         assert!(runner.deps.writer.applied.lock().unwrap().is_empty(), "nothing is written");
@@ -462,7 +462,7 @@ mod tests {
         registry.sources.insert(1, FakeSource::ok(vec![]).failing_refresh(UpdateError::Other("boom".into())));
         registry.sources.insert(2, FakeSource::ok(vec![]).with_details(details()));
         let runner = runner(FakeStore::with(vec![entry(1, 1, "A"), entry(2, 2, "B")]), registry);
-        let outcome = runner.run(EntryKind::Manga, 10).await;
+        let outcome = runner.run(Kind::Manga, 10).await;
         assert_eq!(outcome.status, MetadataStatus::Completed);
         assert_eq!((outcome.failed, outcome.updated), (1, 1), "the failing entry did not stop the other");
         assert_eq!(*runner.deps.writer.applied.lock().unwrap(), vec![2]);
@@ -476,7 +476,7 @@ mod tests {
         let (refreshes, list_calls) = (Arc::clone(&source.refreshes), Arc::clone(&source.calls));
         registry.sources.insert(5, source);
         let runner = runner(FakeStore::with(vec![anime(3, 5, "Frieren")]), registry);
-        let outcome = runner.run(EntryKind::Anime, 10).await;
+        let outcome = runner.run(Kind::Anime, 10).await;
         assert_eq!(outcome.updated, 1);
         let flags = refreshes.lock().unwrap().clone();
         assert_eq!(flags, vec![RemoteFlags { fetch_details: true, fetch_items: false }]);
@@ -487,22 +487,22 @@ mod tests {
     async fn a_pass_is_refused_while_one_of_its_kind_runs_and_the_other_kind_still_starts() {
         // T-26a-050 and T-26a-051
         let runner = runner(FakeStore::with(vec![entry(1, 1, "A")]), FakeRegistry::default());
-        let held = MetadataLocks::acquire(runner.locks(), EntryKind::Manga).expect("running manga pass");
-        assert_eq!(runner.run(EntryKind::Manga, 1).await.status, MetadataStatus::Refused);
-        assert!(!Arc::clone(&runner).start_now(EntryKind::Manga, 1), "the manual start is refused too");
-        assert_eq!(runner.run(EntryKind::Anime, 1).await.status, MetadataStatus::Completed);
+        let held = MetadataLocks::acquire(runner.locks(), Kind::Manga).expect("running manga pass");
+        assert_eq!(runner.run(Kind::Manga, 1).await.status, MetadataStatus::Refused);
+        assert!(!Arc::clone(&runner).start_now(Kind::Manga, 1), "the manual start is refused too");
+        assert_eq!(runner.run(Kind::Anime, 1).await.status, MetadataStatus::Completed);
         drop(held);
-        assert!(!runner.is_running(EntryKind::Manga));
+        assert!(!runner.is_running(Kind::Manga));
     }
 
     #[derive(Default)]
     struct Log(Mutex<Vec<String>>);
 
     impl MetadataProgress for Log {
-        fn show(&self, kind: EntryKind, title: &str) {
+        fn show(&self, kind: Kind, title: &str) {
             self.0.lock().unwrap().push(format!("show {kind:?} {title}"));
         }
-        fn done(&self, kind: EntryKind) {
+        fn done(&self, kind: Kind) {
             self.0.lock().unwrap().push(format!("done {kind:?}"));
         }
     }
@@ -519,7 +519,7 @@ mod tests {
             writer: FakeWriter::default(),
             progress: Some(log.clone()),
         });
-        runner.run(EntryKind::Manga, 1).await;
+        runner.run(Kind::Manga, 1).await;
         assert_eq!(
             *log.0.lock().unwrap(),
             [
@@ -536,9 +536,9 @@ mod tests {
         let mut registry = FakeRegistry::default();
         registry.sources.insert(1, FakeSource::ok(vec![]).with_details(details()));
         let runner = runner(FakeStore::with(vec![entry(1, 1, "A"), entry(2, 1, "B")]), registry);
-        let guard = MetadataLocks::acquire(runner.locks(), EntryKind::Manga).expect("lock");
-        assert!(runner.stop(EntryKind::Manga));
-        let outcome = runner.run_with(guard, EntryKind::Manga, 1).await;
+        let guard = MetadataLocks::acquire(runner.locks(), Kind::Manga).expect("lock");
+        assert!(runner.stop(Kind::Manga));
+        let outcome = runner.run_with(guard, Kind::Manga, 1).await;
         assert_eq!(outcome.status, MetadataStatus::Cancelled);
         assert_eq!(outcome.updated, 0, "no entry runs after the stop");
     }

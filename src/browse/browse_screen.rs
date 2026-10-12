@@ -28,14 +28,15 @@ use super::pages::{BrowseSourceDeps, FavoritesDeps, SourcePage, browse_source};
 use super::pending;
 use super::prefs::BrowsePrefs;
 use super::primitives::ToastSpec;
-use super::route::{BrowseKind, BrowseRoute, search_listing};
+use super::route::{BrowseRoute, search_listing};
+use kuro_platform::kind::Kind;
 use super::sources::LOCAL_SOURCE_ID;
 use super::view::file_cover_loader;
 
 /// What a source page needs of the app.
 pub struct BrowseEnv {
     /// The catalogue of the page: the duplicate dialog's wording.
-    pub kind: BrowseKind,
+    pub kind: Kind,
     pub prefs: Rc<BrowsePrefs>,
     pub directory: Arc<dyn SourceDirectory>,
     pub store: Arc<dyn FavoriteStore>,
@@ -118,7 +119,7 @@ pub fn source_page(env: &BrowseEnv, source_id: i64, query: BrowseQuery) -> Sourc
             migrate: Rc::clone(&env.migrate),
             now_ms: Rc::clone(&env.now_ms),
             edit_categories: Rc::clone(&env.edit_categories),
-            anime: env.kind == BrowseKind::Anime,
+            kind: env.kind,
         }),
         hide_in_library: env.prefs.hide_in_library(),
         initial_query: query,
@@ -197,10 +198,10 @@ pub fn visible_page() -> String {
 }
 
 /// Opens the entry page of `kind` for a library row.
-pub fn open_entry(kind: BrowseKind, id: i64) {
+pub fn open_entry(kind: Kind, id: i64) {
     match kind {
-        BrowseKind::Manga => crate::entry_core::route::open(id),
-        BrowseKind::Anime => crate::entry_core::anime::route::open(id),
+        Kind::Manga => crate::entry_core::route::open(id),
+        Kind::Anime => crate::entry_core::anime::route::open(id),
     }
 }
 
@@ -210,7 +211,7 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 /// The app side of a source page of `kind`, over that kind's library.
-fn production_env(kind: BrowseKind) -> BrowseEnv {
+fn production_env(kind: Kind) -> BrowseEnv {
     use crate::entry_core::handoff::{self, SourcePrefsRequest, WebViewRequest};
 
     BrowseEnv {
@@ -225,7 +226,7 @@ fn production_env(kind: BrowseKind) -> BrowseEnv {
         on_back: Rc::new(crate::ui::pop),
         open_url: Rc::new(|url| super::nav::open_external(url, None)),
         open_webview: Rc::new(|url, title| handoff::open_webview(WebViewRequest { url, title })),
-        on_settings: Rc::new(move |source_id| handoff::open_source_preferences(SourcePrefsRequest { source_id, anime: kind == BrowseKind::Anime })),
+        on_settings: Rc::new(move |source_id| handoff::open_source_preferences(SourcePrefsRequest { source_id, kind })),
         toast: Rc::new(|spec| crate::toast::notify(spec.message)),
         now_ms: Rc::new(now_ms),
     }
@@ -247,10 +248,10 @@ pub fn page(screen: &str) -> Option<gtk::Box> {
 }
 
 /// The entry page on show that a parked genre or title search comes from, and the kind of its catalogue.
-pub(super) fn search_caller() -> Option<BrowseKind> {
+pub(super) fn search_caller() -> Option<Kind> {
     match visible_page().as_str() {
-        "screen:manga_entry_details" => Some(BrowseKind::Manga),
-        "screen:anime_entry_details" => Some(BrowseKind::Anime),
+        "screen:manga_entry_details" => Some(Kind::Manga),
+        "screen:anime_entry_details" => Some(Kind::Anime),
         _ => None,
     }
 }
@@ -333,8 +334,8 @@ pub(crate) mod tests {
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let (opened, web, back, settings) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
         let env = BrowseEnv {
-            kind: BrowseKind::Manga,
-            prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory(), BrowseKind::Manga)),
+            kind: Kind::Manga,
+            prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory(), Kind::Manga)),
             directory,
             store: Arc::new(FakeStore::default()),
             open_entry: Rc::new(move |id| opened.borrow_mut().push(format!("entry {id}"))),
@@ -420,7 +421,7 @@ pub(crate) mod tests {
     }
 
     /// The rig over `directory::tests::catalogues` of `kind`: the source 42 runs, the source 43 is only listed.
-    fn rig_of(kind: BrowseKind) -> Rig {
+    fn rig_of(kind: Kind) -> Rig {
         let mut rig = rig();
         rig.env.kind = kind;
         rig.env.prefs = Rc::new(BrowsePrefs::new(PrefStore::in_memory(), kind));
@@ -429,7 +430,7 @@ pub(crate) mod tests {
     }
 
     fn a_listed_source_that_cannot_run_and_an_unknown_one_get_the_missing_source_page_for_either_kind() {
-        for kind in [BrowseKind::Manga, BrowseKind::Anime] {
+        for kind in [Kind::Manga, Kind::Anime] {
             let rig = rig_of(kind);
             assert!(matches!(source_page(&rig.env, 43, BrowseQuery::Popular), SourcePage::Stub(_)), "{kind:?}: listed, but nothing to ask");
             assert!(matches!(source_page(&rig.env, 99, BrowseQuery::Popular), SourcePage::Stub(_)), "{kind:?}");
@@ -437,7 +438,7 @@ pub(crate) mod tests {
     }
 
     fn a_runnable_source_of_either_kind_lists_offers_latest_and_opens_its_site_in_the_web_view() {
-        for kind in [BrowseKind::Manga, BrowseKind::Anime] {
+        for kind in [Kind::Manga, Kind::Anime] {
             let rig = rig_of(kind);
             let page = source_page(&rig.env, 42, BrowseQuery::Popular);
             let shown = browse(&page);
@@ -463,7 +464,7 @@ pub(crate) mod tests {
     }
 
     fn a_route_of_either_kind_is_taken_for_the_browse_source_screen() {
-        for kind in [BrowseKind::Manga, BrowseKind::Anime] {
+        for kind in [Kind::Manga, Kind::Anime] {
             let route = BrowseRoute::BrowseSource { kind, source_id: 42, query: BrowseQuery::Popular, migrating: false };
             crate::browse::pending::park(route.clone());
             assert_eq!(crate::browse::pending::take_for("browse_source"), Some(route));

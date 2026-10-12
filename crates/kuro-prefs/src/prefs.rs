@@ -114,7 +114,6 @@ mod tests {
     use kuro_platform::paths::Paths;
 
     use super::*;
-    use crate::sort::MangaLibrarySort;
     use crate::testutil::{MemorySecrets, TestDir, TestPaths};
     use crate::toml_backend::config_file;
     use crate::values::PrefValue;
@@ -149,8 +148,7 @@ mod tests {
     #[test]
     fn open_builds_defaults_on_first_run() {
         let paths = TestPaths(TestDir::new("prefs-first-run"));
-        let prefs = Prefs::open(&paths, secrets(), 1).unwrap();
-        assert_eq!(prefs.library.manga_sorting_mode.get().sort(), MangaLibrarySort::default_sort());
+        Prefs::open(&paths, secrets(), 1).unwrap();
     }
 
 

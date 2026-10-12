@@ -2,11 +2,12 @@
 //! the dialogs; this module decides the rows, the start position, the bounds and the value that OK sends. The
 //! value is then written through the remote setters in `remote.rs`.
 
+use crate::entry_kind::KindExt;
 use std::ops::RangeInclusive;
 
 use chrono::{DateTime, Datelike, Duration, LocalResult, NaiveDate, Offset, TimeZone};
 
-use crate::model::Kind;
+use kuro_platform::kind::Kind;
 use crate::tracker::{AnimeTracker, MangaTracker};
 
 /// Ceiling of the number wheel when the total is unknown (behaviour 14.3).
@@ -19,12 +20,8 @@ pub fn progress_range(total: i64) -> RangeInclusive<i64> {
 }
 
 /// Title key of the number picker: "Chapters" for manga, "Episodes" for anime.
-pub fn number_title_key(is_manga: bool) -> &'static str {
-    if is_manga {
-        Kind::Manga.progress_label_key()
-    } else {
-        Kind::Anime.progress_label_key()
-    }
+pub fn number_title_key(kind: Kind) -> &'static str {
+    kind.progress_label_key()
 }
 
 // ---- status (14.2)
@@ -507,8 +504,8 @@ mod tests {
             [1, 0, 2]
         );
         assert_eq!(p.selection(), 2);
-        assert_eq!(number_title_key(false), "episodes");
-        assert_eq!(number_title_key(true), "chapters");
+        assert_eq!(number_title_key(Kind::Anime), "episodes");
+        assert_eq!(number_title_key(Kind::Manga), "chapters");
     }
 
     #[test]

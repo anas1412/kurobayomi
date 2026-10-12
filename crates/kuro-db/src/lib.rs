@@ -26,13 +26,6 @@ pub mod views_anime;
 pub mod episode_sanitizer;
 pub mod conformance;
 pub mod maintenance;
-pub mod restore;
-#[cfg(feature = "legacy-import")]
-pub mod legacy;
-#[cfg(feature = "legacy-import")]
-pub mod import;
-#[cfg(feature = "legacy-import")]
-pub mod anime_legacy;
 #[cfg(test)]
 mod testdb;
 #[cfg(test)]
@@ -51,7 +44,7 @@ pub mod sql {
 }
 
 pub use error::{DbError, DbResult};
-pub use runtime::{Db, DbKind, Savepoint, TxExt};
+pub use runtime::{Db, DbKindExt, Savepoint, TxExt};
 
 /// The write transaction handed to `Db::write` closures, re-exported so dependants can name it without
 /// depending on `rusqlite` themselves.

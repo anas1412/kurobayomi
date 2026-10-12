@@ -1,6 +1,7 @@
 //! Public facade for the other areas (port of MangaDownloadManager.kt). Queue commands go to the downloader actor.
 //! Disk work (delete, folder cleanup) runs on the blocking pool, and the index is updated on the calling task.
 
+use kuro_platform::kind::Kind;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
@@ -21,7 +22,6 @@ use crate::events::{DownloadEvent, EVENT_CAPACITY};
 use crate::index::DownloadIndex;
 use crate::layout::{CBZ_EXTENSION, DownloadLayout, TMP_DIR_SUFFIX, chapter_dir_name, sweep_stray_chapters};
 use crate::model::{ChapterRef, DownloadState, MangaRef, QueuedDownload, SourceRef};
-use crate::queue_model::EntryKind;
 use crate::pending::{MangaPendingStore, flush_plan};
 use crate::pipeline::FreeSpaceFn;
 use crate::source::ChapterSource;
@@ -63,67 +63,11 @@ pub struct ManagerParams {
     pub page_cache: Option<Arc<dyn crate::images::PageImageCache>>,
     pub connectivity: watch::Receiver<Connectivity>,
     pub hold: Arc<dyn ProcessHold>,
-    /// The queue read back at startup, in order ([`restore_queue`]). They come back as QUEUE, nothing starts until `Start`,
+    /// The queue read back at startup, in order ([`DownloadManager::restore`]). They come back as QUEUE, nothing starts until `Start`,
     /// and their staging folders survive the startup sweep so a resume continues them (T-23a-044).
     pub restored: Vec<QueuedDownload>,
     /// Saved rows whose source was not registered at startup (T-23a-035). They are written back unchanged.
     pub kept_rows: Vec<QueueRow>,
-}
-
-/// What one saved queue row becomes at startup (T-23a-035).
-pub enum RestoreRow {
-    /// Source, manga and chapter are known. The download comes back as QUEUE, never as DOWNLOADING.
-    Ready(Box<QueuedDownload>),
-    /// The source is not registered (yet). The row is kept in the store for a later start, not deleted.
-    SourceMissing,
-    /// The manga or the chapter is gone. The row is dropped and logged at info.
-    Gone,
-}
-
-/// The result of [`restore_queue`]: the downloads to queue, and the rows whose source was missing, which the
-/// downloader writes back on every save so they are not lost.
-#[derive(Default)]
-pub struct Restored {
-    pub downloads: Vec<QueuedDownload>,
-    pub kept_rows: Vec<QueueRow>,
-}
-
-/// Reads the persisted queue and turns each row with `resolve`. It waits for `ready` (the source registry gate, RC-10)
-/// for up to [`crate::index::SOURCE_WAIT`] first, otherwise every row of a source not yet registered would be taken
-/// for a missing source. When the gate does not open, every row is kept for a later start. A store that cannot be
-/// read gives an empty result and the store refuses to overwrite the rows it could not read ([`QueueStore::load`]).
-pub async fn restore_queue(
-    store: &QueueStore,
-    mut ready: watch::Receiver<bool>,
-    resolve: impl Fn(&QueueRow) -> RestoreRow,
-) -> Restored {
-    let gate_open = matches!(tokio::time::timeout(crate::index::SOURCE_WAIT, ready.wait_for(|v| *v)).await, Ok(Ok(_)));
-    let rows = match store.load() {
-        Ok(rows) => rows,
-        Err(err) => {
-            tracing::error!(target: "kuro_downloads", error = %err, "could not read the saved queue; leaving it as it is");
-            return Restored::default();
-        }
-    };
-    if !gate_open {
-        tracing::warn!(target: "kuro_downloads", "source registry not ready; the saved queue is kept for a later start");
-        return Restored { downloads: Vec::new(), kept_rows: rows };
-    }
-    let mut restored = Restored::default();
-    for row in rows {
-        match resolve(&row) {
-            RestoreRow::Ready(download) => {
-                let mut download = *download;
-                download.status = DownloadState::Queue;
-                restored.downloads.push(download);
-            }
-            RestoreRow::SourceMissing => restored.kept_rows.push(row),
-            RestoreRow::Gone => {
-                tracing::info!(target: "kuro_downloads", chapter_id = row.chapter_id, "dropped a saved download whose chapter is gone");
-            }
-        }
-    }
-    restored
 }
 
 /// Which chapters a delete applies to, from the category and bookmark settings (`getChaptersToDelete`).
@@ -146,13 +90,13 @@ pub fn chapters_to_delete(chapters: Vec<ChapterRef>, rules: &DeleteRules) -> Vec
 /// concurrent deletes never race on the same folder or index entry.
 #[derive(Default)]
 pub struct SeriesLocks {
-    map: std::sync::Mutex<HashMap<(EntryKind, i64), SeriesGate>>,
+    map: std::sync::Mutex<HashMap<(Kind, i64), SeriesGate>>,
 }
 
 type SeriesGate = Arc<tokio::sync::Mutex<()>>;
 
 impl SeriesLocks {
-    pub async fn lock(&self, kind: EntryKind, id: i64) -> tokio::sync::OwnedMutexGuard<()> {
+    pub async fn lock(&self, kind: Kind, id: i64) -> tokio::sync::OwnedMutexGuard<()> {
         let gate = {
             let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
             map.entry((kind, id)).or_default().clone()
@@ -425,7 +369,7 @@ impl DownloadManager {
         let ids: Vec<i64> = selected.iter().map(|c| c.id).collect();
         self.remove_from_queue(RemoveTarget::Chapters(ids)).await?;
         // Steps after the queue removal run under the series lock (E-22).
-        let _series = self.series.lock(EntryKind::Manga, manga.id).await;
+        let _series = self.series.lock(Kind::Manga, manga.id).await;
 
         let display = source.display_name();
         let layout = self.layout.clone();
@@ -456,7 +400,7 @@ impl DownloadManager {
     /// `remove_queued`, the manga's queued chapters are removed first. Chapters of the manga that stay queued are
     /// paused while the folder is deleted and start again afterwards (RC-04, RC-11).
     pub async fn delete_manga(&self, manga: &MangaRef, source: &dyn ChapterSource, remove_queued: bool) -> Result<(), DownloadError> {
-        let _series = self.series.lock(EntryKind::Manga, manga.id).await;
+        let _series = self.series.lock(Kind::Manga, manga.id).await;
         self.delete_manga_locked(manga, source, remove_queued).await
     }
 
@@ -1455,107 +1399,15 @@ mod run_tests {
     }
 
     #[tokio::test]
-    async fn a_restored_queue_keeps_its_staging_folder_through_the_startup_sweep() {
-        let base = tempfile::tempdir().unwrap();
-        let root = base.path().join("downloads");
-        let src = fake(1);
-        let source: SourceRef = src.clone();
-        let queued = crate::testing::download(&source, 5, 1, DownloadState::Queue);
-        let manga_dir = root.join("Source 1 (EN)").join("Manga 1");
-        let kept = manga_dir.join("Chapter 5_tmp");
-        let stray = manga_dir.join("Chapter 6_tmp");
-        let part = manga_dir.join("Chapter 7.cbz.part");
-        std::fs::create_dir_all(&kept).unwrap();
-        std::fs::create_dir_all(&stray).unwrap();
-        std::fs::write(kept.join("001.jpg"), b"x").unwrap();
-        std::fs::write(&part, b"x").unwrap();
-
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE mangas(_id INTEGER PRIMARY KEY); CREATE TABLE chapters(_id INTEGER PRIMARY KEY);
-             INSERT INTO mangas(_id) VALUES (1); INSERT INTO chapters(_id) VALUES (5), (9);",
-        )
-        .unwrap();
-        let store = Arc::new(QueueStore::open(conn).unwrap());
-        store
-            .replace_all(&[
-                QueueRow { chapter_id: 5, manga_id: 1, source_id: 1, position: 0, status: 1, enqueued_at: 0 },
-                QueueRow { chapter_id: 9, manga_id: 1, source_id: 1, position: 1, status: 1, enqueued_at: 0 },
-            ])
-            .unwrap();
-        let (_gate, ready) = watch::channel(true);
-        let restored = restore_queue(&store, ready, |row| match row.chapter_id {
-            5 => RestoreRow::Ready(Box::new(queued.clone())),
-            _ => RestoreRow::Gone,
-        })
-        .await;
-        assert_eq!(restored.downloads.len(), 1, "a row whose chapter is gone is dropped");
-
-        let (_conn, rx) = watch::channel(Connectivity { online: true, metered: false });
-        let mgr = DownloadManager::spawn(ManagerParams {
-            layout: Arc::new(DownloadLayout::new(&root)),
-            index: Arc::new(DownloadIndex::open(&root, &base.path().join("cache"))),
-            store,
-            free_space: plenty,
-            settings: DownloadSettings { save_as_cbz: false, ..DownloadSettings::default() },
-            page_cache: None,
-            connectivity: rx,
-            hold: Arc::new(crate::downloader::NoHold),
-            restored: restored.downloads,
-            kept_rows: restored.kept_rows,
-            pending: Arc::new(crate::pending::MangaPendingStore::open_in_memory().unwrap()),
-        });
-
-        assert!(kept.join("001.jpg").is_file(), "the staging folder of a queued chapter stays for resume (EC-62)");
-        assert!(!stray.exists(), "a staging folder with no queue row is removed");
-        assert!(!part.exists(), ".cbz.part files are removed");
-        for _ in 0..200 {
-            if !mgr.snapshot().is_empty() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-        let ids: Vec<i64> = mgr.snapshot().iter().map(|d| d.chapter.id).collect();
-        assert_eq!(ids, vec![5], "the restored chapter is queued");
-        assert_eq!(mgr.snapshot()[0].status, DownloadState::Queue);
-    }
-
-    #[tokio::test]
-    async fn restore_keeps_rows_of_missing_sources_and_drops_gone_ones() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE mangas(_id INTEGER PRIMARY KEY); CREATE TABLE chapters(_id INTEGER PRIMARY KEY);
-             INSERT INTO mangas(_id) VALUES (1); INSERT INTO chapters(_id) VALUES (1), (2), (3);",
-        )
-        .unwrap();
-        let store = QueueStore::open(conn).unwrap();
-        let row = |chapter_id, position| QueueRow { chapter_id, manga_id: 1, source_id: 1, position, status: 2, enqueued_at: 0 };
-        store.replace_all(&[row(1, 0), row(2, 1), row(3, 2)]).unwrap();
-        let source: SourceRef = fake(1);
-        let queued = crate::testing::download(&source, 1, 1, DownloadState::Downloading);
-        let (_gate, ready) = watch::channel(true);
-        let out = restore_queue(&store, ready, |r| match r.chapter_id {
-            1 => RestoreRow::Ready(Box::new(queued.clone())),
-            2 => RestoreRow::SourceMissing,
-            _ => RestoreRow::Gone,
-        })
-        .await;
-        assert_eq!(out.downloads.len(), 1);
-        assert_eq!(out.downloads[0].status, DownloadState::Queue, "DOWNLOADING is never restored");
-        let kept: Vec<i64> = out.kept_rows.iter().map(|r| r.chapter_id).collect();
-        assert_eq!(kept, vec![2], "a missing source keeps its row; a gone chapter does not");
-    }
-
-    #[tokio::test]
     async fn the_series_lock_serialises_one_series_and_leaves_the_others_free() {
         let locks = SeriesLocks::default();
-        let held = locks.lock(EntryKind::Manga, 1).await;
-        let other = tokio::time::timeout(Duration::from_millis(50), locks.lock(EntryKind::Manga, 2)).await;
+        let held = locks.lock(Kind::Manga, 1).await;
+        let other = tokio::time::timeout(Duration::from_millis(50), locks.lock(Kind::Manga, 2)).await;
         assert!(other.is_ok(), "another series is not blocked");
-        let same = tokio::time::timeout(Duration::from_millis(50), locks.lock(EntryKind::Manga, 1)).await;
+        let same = tokio::time::timeout(Duration::from_millis(50), locks.lock(Kind::Manga, 1)).await;
         assert!(same.is_err(), "E-22: the same series waits for the first delete");
         drop(held);
-        let again = tokio::time::timeout(Duration::from_millis(500), locks.lock(EntryKind::Manga, 1)).await;
+        let again = tokio::time::timeout(Duration::from_millis(500), locks.lock(Kind::Manga, 1)).await;
         assert!(again.is_ok(), "the lock is released when the guard drops");
     }
 
@@ -1577,100 +1429,6 @@ mod run_tests {
         assert!(env.mgr.queued(1).is_none(), "EC-21: the chapter leaves the queue");
         assert!(dir.join("001.jpg").is_file(), "EC-21: the _tmp folder stays");
         assert!(!dir.with_file_name("Chapter 1.cbz").exists(), "no archive is written");
-    }
-
-    fn gate_rows(store: &QueueStore) {
-        store
-            .replace_all(&[
-                QueueRow { chapter_id: 5, manga_id: 1, source_id: 1, position: 0, status: 1, enqueued_at: 0 },
-                QueueRow { chapter_id: 6, manga_id: 1, source_id: 1, position: 1, status: 1, enqueued_at: 0 },
-            ])
-            .unwrap();
-    }
-
-    fn store_with_chapters(conn: rusqlite::Connection) -> QueueStore {
-        conn.execute_batch(
-            "CREATE TABLE mangas(_id INTEGER PRIMARY KEY); CREATE TABLE chapters(_id INTEGER PRIMARY KEY);
-             INSERT INTO mangas(_id) VALUES (1); INSERT INTO chapters(_id) VALUES (5), (6), (7);",
-        )
-        .unwrap();
-        QueueStore::open(conn).unwrap()
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn restore_waits_for_the_source_gate_before_it_resolves_any_row() {
-        let store = Arc::new(store_with_chapters(rusqlite::Connection::open_in_memory().unwrap()));
-        gate_rows(&store);
-        let (gate, ready) = watch::channel(false);
-        let source: SourceRef = fake(1);
-        let queued = crate::testing::download(&source, 5, 1, DownloadState::Queue);
-        let resolved = Arc::new(Mutex::new(0));
-        let seen = resolved.clone();
-        let task = {
-            let store = store.clone();
-            tokio::spawn(async move {
-                restore_queue(&store, ready, move |row| {
-                    *seen.lock().unwrap() += 1;
-                    match row.chapter_id {
-                        5 => RestoreRow::Ready(Box::new(queued.clone())),
-                        _ => RestoreRow::SourceMissing,
-                    }
-                })
-                .await
-            })
-        };
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        assert!(!task.is_finished(), "RC-10: restore waits while the registry is not ready");
-        assert_eq!(*resolved.lock().unwrap(), 0, "RC-10: no row is judged before the gate opens");
-        gate.send(true).unwrap();
-        let out = task.await.unwrap();
-        assert_eq!(out.downloads.len(), 1);
-        assert_eq!(out.kept_rows.len(), 1);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_gate_that_never_opens_keeps_every_saved_row() {
-        let store = store_with_chapters(rusqlite::Connection::open_in_memory().unwrap());
-        gate_rows(&store);
-        let (_gate, ready) = watch::channel(false);
-        let out = restore_queue(&store, ready, |_| RestoreRow::Gone).await;
-        assert!(out.downloads.is_empty());
-        assert_eq!(out.kept_rows.iter().map(|r| r.chapter_id).collect::<Vec<_>>(), vec![5, 6], "RC-10: nothing is dropped");
-    }
-
-    #[tokio::test]
-    async fn an_unreadable_saved_queue_is_not_wiped_by_the_next_save() {
-        let base = tempfile::tempdir().unwrap();
-        let db = base.path().join("queue.db");
-        let store = Arc::new(store_with_chapters(rusqlite::Connection::open(&db).unwrap()));
-        gate_rows(&store);
-        let raw = rusqlite::Connection::open(&db).unwrap();
-        raw.execute("UPDATE manga_download_queue SET status = 'bad'", []).unwrap();
-
-        let (_gate, ready) = watch::channel(true);
-        let restored = restore_queue(&store, ready, |_| RestoreRow::Gone).await;
-        assert!(restored.downloads.is_empty() && restored.kept_rows.is_empty(), "the load failed");
-
-        let root = base.path().join("downloads");
-        std::fs::create_dir_all(&root).unwrap();
-        let (_conn, rx) = watch::channel(online());
-        let mgr = DownloadManager::spawn(ManagerParams {
-            layout: Arc::new(DownloadLayout::new(&root)),
-            index: Arc::new(DownloadIndex::open(&root, &base.path().join("cache"))),
-            store,
-            free_space: plenty,
-            settings: DownloadSettings::default(),
-            page_cache: None,
-            connectivity: rx,
-            hold: Arc::new(crate::downloader::NoHold),
-            restored: restored.downloads,
-            kept_rows: restored.kept_rows,
-            pending: Arc::new(MangaPendingStore::open_in_memory().unwrap()),
-        });
-        let src = fake(1);
-        mgr.enqueue(source_ref(&src), manga_title(1), chapters(&[7]), false).await.unwrap();
-        let rows: i64 = raw.query_row("SELECT COUNT(*) FROM manga_download_queue", [], |r| r.get(0)).unwrap();
-        assert_eq!(rows, 2, "T-23a-035: the saved rows survive a save made after a failed load");
     }
 
     #[tokio::test]

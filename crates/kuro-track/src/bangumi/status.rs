@@ -3,7 +3,7 @@
 //! `UnknownStatus` error, never a panic.
 
 use super::error::BangumiError;
-use crate::model::Kind;
+use kuro_platform::kind::Kind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i64)]

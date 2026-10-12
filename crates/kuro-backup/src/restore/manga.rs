@@ -341,6 +341,7 @@ mod tests {
     use rusqlite::Connection;
 
     use super::*;
+    use kuro_platform::kind::Kind;
     use crate::schema::BackupCategory;
 
     fn clock() -> RunClock {
@@ -738,7 +739,7 @@ mod tests {
         let (_d, c) = db();
         let out = super::super::categories::restore_categories(
             &c,
-            super::super::categories::Kind::Manga,
+            Kind::Manga,
             &[BackupCategory { name: "Z".into(), order: 3, id: 1, flags: 0 }],
         )
         .unwrap();

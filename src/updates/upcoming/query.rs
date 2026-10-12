@@ -7,15 +7,15 @@ use chrono::{DateTime, Local};
 use kuro_data::anime::AnimeRepo;
 use kuro_data::manga::MangaRepo;
 use kuro_db::handle::Db;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::updates::upcoming::model::{ANIME_STATUSES, Entry, MANGA_STATUSES, Upcoming, build};
 
 /// The upcoming entries of `kind` from local midnight of `now`'s day, soonest first, grouped by day.
-pub fn load(db: &Arc<Db>, kind: EntryKind, now: DateTime<Local>) -> Result<Upcoming, String> {
+pub fn load(db: &Arc<Db>, kind: Kind, now: DateTime<Local>) -> Result<Upcoming, String> {
     let now_ms = now.timestamp_millis();
     let entries = match kind {
-        EntryKind::Manga => MangaRepo::new(db.clone())
+        Kind::Manga => MangaRepo::new(db.clone())
             .upcoming(&MANGA_STATUSES, now_ms)
             .map_err(|e| e.to_string())?
             .into_iter()
@@ -29,7 +29,7 @@ pub fn load(db: &Arc<Db>, kind: EntryKind, now: DateTime<Local>) -> Result<Upcom
                 cover_last_modified: m.cover_last_modified,
             })
             .collect(),
-        EntryKind::Anime => AnimeRepo::new(db.clone())
+        Kind::Anime => AnimeRepo::new(db.clone())
             .upcoming(&ANIME_STATUSES, now_ms)
             .map_err(|e| e.to_string())?
             .into_iter()
@@ -79,7 +79,7 @@ mod tests {
         let far_away = add("far", true, 4, far.timestamp_millis());
         add("not favourite", false, 1, far.timestamp_millis());
 
-        let up = load(&db, EntryKind::Manga, now).expect("load");
+        let up = load(&db, Kind::Manga, now).expect("load");
         let ids: Vec<i64> = up.entries.iter().map(|e| e.id).collect();
         assert!(ids.contains(&today), "E-C1: today from local midnight is included");
         assert!(ids.contains(&far_away), "E-C2: no upper bound");

@@ -7,6 +7,7 @@
 //! that call, a lookup reads the store (ponytail: the first lookup after start pays the read, load at start-up to avoid
 //! it).
 
+use kuro_platform::kind::Kind;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -15,7 +16,7 @@ use tokio::sync::watch;
 use kuro_source::SourceError;
 
 use crate::error::DomainError;
-use crate::source::model::{Id, Source, SourceKind};
+use crate::source::model::{Id, Source};
 use crate::source::repo::{ExtensionCatalog, StubSourceRepo};
 use crate::source::stub::StubSource;
 
@@ -52,7 +53,7 @@ pub enum SourceHandle<S: ?Sized> {
 /// loader publishes a new one with `send_replace`, and the UI subscribes to it. The dedupe by id in `finish_loading`
 /// gives the map's lookups.
 pub struct SourceRegistry<S: ?Sized> {
-    kind: SourceKind,
+    kind: Kind,
     initialized: watch::Sender<bool>,
     installed: watch::Sender<Vec<Arc<S>>>,
     stubs: Arc<dyn StubSourceRepo>,
@@ -68,7 +69,7 @@ pub struct SourceRegistry<S: ?Sized> {
 impl<S: InstalledSource + ?Sized> SourceRegistry<S> {
     /// A registry for one kind of source. Manga hides only its HTTP sources from the stub list and anime hides every
     /// live source (behaviour 1.4). `catalog` answers the index branch of [`SourceRegistry::get_or_stub`].
-    pub fn new(kind: SourceKind, stubs: Arc<dyn StubSourceRepo>, catalog: Arc<dyn ExtensionCatalog>) -> Self {
+    pub fn new(kind: Kind, stubs: Arc<dyn StubSourceRepo>, catalog: Arc<dyn ExtensionCatalog>) -> Self {
         Self {
             kind,
             initialized: watch::channel(false).0,
@@ -214,8 +215,8 @@ impl<S: InstalledSource + ?Sized> SourceRegistry<S> {
     /// every live source, local included (behaviour 1.4).
     fn hides_stub(&self, source: &S) -> bool {
         match self.kind {
-            SourceKind::Manga => source.is_http(),
-            SourceKind::Anime => true,
+            Kind::Manga => source.is_http(),
+            Kind::Anime => true,
         }
     }
 
@@ -410,7 +411,7 @@ mod tests {
     ) -> (tempfile::TempDir, SourceRegistry<Fake>, Arc<kuro_data::source::MangaStubSourceRepo>) {
         let (dir, db) = manga_db();
         let stubs = Arc::new(kuro_data::source::MangaStubSourceRepo::new(db));
-        let reg = SourceRegistry::new(SourceKind::Manga, stubs.clone(), index);
+        let reg = SourceRegistry::new(Kind::Manga, stubs.clone(), index);
         (dir, reg, stubs)
     }
 
@@ -548,7 +549,7 @@ mod tests {
     fn watched() -> (tempfile::TempDir, SourceRegistry<Fake>, Arc<Watched>) {
         let (dir, db) = manga_db();
         let store = Arc::new(Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db))));
-        let reg = SourceRegistry::new(SourceKind::Manga, store.clone(), Arc::new(NoIndex));
+        let reg = SourceRegistry::new(Kind::Manga, store.clone(), Arc::new(NoIndex));
         (dir, reg, store)
     }
 
@@ -621,7 +622,7 @@ mod tests {
         let (_d, db) = manga_db();
         let mut store = Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db)));
         store.fail_id = Some(13);
-        let reg: SourceRegistry<Fake> = SourceRegistry::new(SourceKind::Manga, Arc::new(store), Arc::new(NoIndex));
+        let reg: SourceRegistry<Fake> = SourceRegistry::new(Kind::Manga, Arc::new(store), Arc::new(NoIndex));
         let failed = reg.register_stubs(&[stub(13, "en", "Bad"), stub(14, "en", "Good")], &|_, _| {});
         assert_eq!(failed, 1);
         assert_eq!(reg.stub_sources().unwrap(), vec![stub(14, "en", "Good")], "only the good row was written");
@@ -659,10 +660,10 @@ mod tests {
                 Arc::new(Fake { id: 2, http: false, configurable: false, catalogue: false }),
             ]
         };
-        let manga = SourceRegistry::new(SourceKind::Manga, store.clone(), Arc::new(NoIndex));
+        let manga = SourceRegistry::new(Kind::Manga, store.clone(), Arc::new(NoIndex));
         manga.finish_loading(installed());
         assert_eq!(stub_ids(&manga), vec![2, 3], "manga hides the HTTP id only");
-        let anime = SourceRegistry::new(SourceKind::Anime, store, Arc::new(NoIndex));
+        let anime = SourceRegistry::new(Kind::Anime, store, Arc::new(NoIndex));
         anime.finish_loading(installed());
         assert_eq!(stub_ids(&anime), vec![3], "anime hides every live id");
     }
@@ -754,7 +755,7 @@ mod tests {
             delay: Duration::from_millis(200),
             ..Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db)))
         });
-        let reg = Arc::new(SourceRegistry::new(SourceKind::Manga, store.clone(), Arc::new(NoIndex)));
+        let reg = Arc::new(SourceRegistry::new(Kind::Manga, store.clone(), Arc::new(NoIndex)));
         let (tx, rx) = watch::channel(Vec::<Arc<Fake>>::new());
         let _loader = reg.clone().follow_snapshots(rx, Arc::new(|_: &str, _: &str| {}));
         tx.send(vec![Arc::new(Fake { id: 1, http: true, configurable: false, catalogue: false })]).unwrap();
@@ -786,7 +787,7 @@ mod tests {
             ..Watched::new(Arc::new(kuro_data::source::MangaStubSourceRepo::new(db)))
         });
         let reg: SourceRegistry<Fake> =
-            SourceRegistry::new(SourceKind::Manga, store.clone(), Index::with(&[(30, "de", "Indexed")]));
+            SourceRegistry::new(Kind::Manga, store.clone(), Index::with(&[(30, "de", "Indexed")]));
         match reg.get_or_stub(30).unwrap() {
             SourceHandle::Stub(found) => assert_eq!(found.name, "Indexed"),
             _ => panic!("the index row is the stub"),
@@ -823,7 +824,7 @@ mod system_tests {
     }
 
     fn registry(store: Arc<MemStubStore>, index: Arc<FakeCatalog>) -> SourceRegistry<Installed> {
-        SourceRegistry::new(SourceKind::Manga, store, index)
+        SourceRegistry::new(Kind::Manga, store, index)
     }
 
     #[test]
@@ -843,7 +844,7 @@ mod system_tests {
         let manga_store = Arc::new(MemStubStore::with_rows(&five_rows()));
         let anime_store = Arc::new(MemStubStore::with_rows(&five_rows()));
         let manga = Arc::new(registry(manga_store.clone(), Arc::new(FakeCatalog::default())));
-        let anime = Arc::new(SourceRegistry::new(SourceKind::Anime, anime_store.clone(), Arc::new(FakeCatalog::default())));
+        let anime = Arc::new(SourceRegistry::new(Kind::Anime, anime_store.clone(), Arc::new(FakeCatalog::default())));
         let (_manga_tx, manga_rx) = watch::channel(vec![installed(1, true, true)]);
         let (_anime_tx, anime_rx) = watch::channel(Vec::<Arc<Installed>>::new());
 
@@ -870,7 +871,7 @@ mod system_tests {
         let store = Arc::new(MemStubStore::unavailable());
         let reg = Arc::new(registry(store, Arc::new(FakeCatalog::default())));
         let anime = Arc::new(SourceRegistry::new(
-            SourceKind::Anime,
+            Kind::Anime,
             Arc::new(MemStubStore::unavailable()),
             Arc::new(FakeCatalog::default()),
         ));
@@ -887,7 +888,7 @@ mod system_tests {
         let reg = Arc::new(registry(Arc::new(MemStubStore::default()), Arc::new(FakeCatalog::default())));
         let mut ready = reg.subscribe_initialized();
         assert!(!*ready.borrow(), "E-B3: false before start");
-        let anime = Arc::new(SourceRegistry::new(SourceKind::Anime, Arc::new(MemStubStore::default()), Arc::new(FakeCatalog::default())));
+        let anime = Arc::new(SourceRegistry::new(Kind::Anime, Arc::new(MemStubStore::default()), Arc::new(FakeCatalog::default())));
         let (_m, manga_rx) = watch::channel(vec![installed(1, true, true)]);
         let (_a, anime_rx) = watch::channel(Vec::<Arc<Installed>>::new());
         let _system = SourceSystem::start(reg.clone(), anime, manga_rx, anime_rx, Arc::new(|_: &str, _: &str| {}));
@@ -902,7 +903,7 @@ mod system_tests {
         let store = Arc::new(MemStubStore::with_rows(&[stub(1, "en", "Old")]));
         let renames = Arc::new(RenameLog::default());
         let reg = Arc::new(registry(store.clone(), Arc::new(FakeCatalog::default())));
-        let anime = Arc::new(SourceRegistry::new(SourceKind::Anime, Arc::new(MemStubStore::default()), Arc::new(FakeCatalog::default())));
+        let anime = Arc::new(SourceRegistry::new(Kind::Anime, Arc::new(MemStubStore::default()), Arc::new(FakeCatalog::default())));
         reg.load_stubs().expect("load");
         let (_m, manga_rx) = watch::channel(vec![Arc::new(Installed {
             id: 1,

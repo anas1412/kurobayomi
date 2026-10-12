@@ -142,20 +142,6 @@ impl<const ANIME: bool> PrefType for SortSetting<ANIME> {
     }
 }
 
-impl SortSetting<false> {
-    /// The typed manga sort. Text without a comma gives the default sort.
-    pub fn sort(&self) -> MangaLibrarySort {
-        MangaLibrarySort::deserialize(&self.0).unwrap_or_else(MangaLibrarySort::default_sort)
-    }
-}
-
-impl SortSetting<true> {
-    /// The typed anime sort. Text without a comma gives the default sort.
-    pub fn sort(&self) -> AnimeLibrarySort {
-        AnimeLibrarySort::deserialize(&self.0).unwrap_or_else(AnimeLibrarySort::default_sort)
-    }
-}
-
 /// A handle for a family key, with its default taken from the registry row for that key.
 /// Panics when the key is not registered or its default does not decode as `T`. Both are
 /// programming errors, and the test that builds [`LibraryPrefs`] catches them.
@@ -442,15 +428,5 @@ mod tests {
         assert_eq!(LibraryDisplayMode::deserialize("COVER_ONLY_GRID"), LibraryDisplayMode::CoverOnlyGrid);
         assert_eq!(LibraryDisplayMode::deserialize("cover"), LibraryDisplayMode::CompactGrid);
         assert_eq!(LibraryDisplayMode::deserialize(""), LibraryDisplayMode::CompactGrid);
-    }
-
-    #[test]
-    fn the_typed_sort_reads_the_stored_text() {
-        let store = PrefStore::in_memory();
-        let lib = LibraryPrefs::new(store);
-        lib.manga_sorting_mode.set(SortSetting("LAST_READ,DESCENDING".into())).unwrap();
-        assert_eq!(lib.manga_sorting_mode.get().sort(), crate::sort::MangaLibrarySort::deserialize("LAST_READ,DESCENDING").unwrap());
-        lib.anime_sorting_mode.set(SortSetting("AIRING_TIME,ASCENDING".into())).unwrap();
-        assert_eq!(lib.anime_sorting_mode.get().sort().to_flag(), 0x30 | 0x40);
     }
 }

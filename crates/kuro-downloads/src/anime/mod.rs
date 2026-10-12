@@ -17,7 +17,6 @@ pub mod notify;
 pub mod offline;
 pub mod pending;
 pub mod progress;
-pub mod queue_view;
 pub mod resolve;
 pub mod store;
 pub mod torrent;

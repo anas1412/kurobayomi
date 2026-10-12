@@ -1,7 +1,8 @@
 //! Golden tables of area:34 (`p1-edge-cases-and-tests.md` section 6), through the public API only. No network
 //! and no display.
 
-use kuro_images::art::{ArtKind, ArtRef, Owner};
+use kuro_platform::kind::Kind;
+use kuro_images::art::{ArtKind, ArtRef};
 use kuro_images::exception::{AppError, user_message};
 use kuro_images::format::item_number_text;
 use kuro_images::keys::{cache_key, hash_key};
@@ -33,7 +34,7 @@ fn g_md5() {
 #[test]
 fn g_md5_of_a_real_cache_key() {
     let art = ArtRef {
-        owner: Owner::Manga,
+        owner: Kind::Manga,
         entry_id: 7,
         source_id: 1,
         kind: ArtKind::Cover,

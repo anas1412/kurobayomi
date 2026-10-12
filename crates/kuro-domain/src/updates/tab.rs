@@ -85,6 +85,7 @@ pub fn nav_badge(show_count: bool, manga_new: i32, anime_new: i32) -> Option<i32
 mod tests {
     use super::*;
     use chrono::Utc;
+    use kuro_platform::kind::Kind;
 
     #[test]
     fn a_long_press_selects_the_span_between_the_anchor_and_the_pressed_row() {
@@ -113,7 +114,7 @@ mod tests {
 
     fn feed_row(item_id: i64, date_fetch: i64, name: &str) -> UpdateRow {
         UpdateRow {
-            kind: crate::kind::EntryKind::Manga,
+            kind: Kind::Manga,
             entry_id: 1,
             entry_title: "Show".into(),
             item_id,

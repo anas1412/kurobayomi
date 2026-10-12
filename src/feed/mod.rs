@@ -12,22 +12,7 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 /// Which library a feed reads.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Kind {
-    Manga,
-    Anime,
-}
-
-impl Kind {
-    pub fn parse(s: &str) -> Option<Kind> {
-        match s {
-            "manga" => Some(Kind::Manga),
-            "anime" => Some(Kind::Anime),
-            _ => None,
-        }
-    }
-}
+pub use kuro_platform::kind::Kind;
 
 /// One unread update as the database returns it.
 #[derive(Clone, Debug, PartialEq, Eq)]

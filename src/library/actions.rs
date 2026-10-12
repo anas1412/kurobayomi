@@ -13,7 +13,7 @@ use kuro_domain::app::status::{chapter_status_update, chapters_to_change, episod
 use kuro_domain::category::bulk;
 use kuro_domain::category::service::CategoryService;
 use kuro_domain::error::DomainError;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::library::model::LibraryRow;
 use kuro_domain::library::search::EmptyPage;
 
@@ -81,13 +81,13 @@ pub struct ChangedItem {
 /// (T-26a-034), and returns the ones that changed; urls the entry does not hold are ignored.
 pub fn mark_items_by_url_changed(
     db: &Arc<Db>,
-    kind: EntryKind,
+    kind: Kind,
     entry_id: i64,
     urls: &[String],
     read: bool,
 ) -> Result<Vec<ChangedItem>, DomainError> {
     match kind {
-        EntryKind::Manga => {
+        Kind::Manga => {
             let repo = ChapterRepo::new(db.clone());
             let named: Vec<_> = repo.by_manga_id(entry_id, false)?.into_iter().filter(|c| urls.contains(&c.url)).collect();
             let changed = chapters_to_change(read, &named);
@@ -96,7 +96,7 @@ pub fn mark_items_by_url_changed(
             repo.update_all(&updates)?;
             Ok(items)
         }
-        EntryKind::Anime => {
+        Kind::Anime => {
             let repo = EpisodeRepo::new(db.clone());
             let named: Vec<_> = repo.by_anime_id(entry_id)?.into_iter().filter(|e| urls.contains(&e.url)).collect();
             let changed = episodes_to_change(read, &named);
@@ -109,10 +109,10 @@ pub fn mark_items_by_url_changed(
 }
 
 /// The title and source id of an entry, for the download disk check. `None` when the entry is gone.
-fn entry_facts(db: &Arc<Db>, kind: EntryKind, entry_id: i64) -> Option<(String, i64)> {
+fn entry_facts(db: &Arc<Db>, kind: Kind, entry_id: i64) -> Option<(String, i64)> {
     match kind {
-        EntryKind::Manga => MangaRepo::new(db.clone()).by_id(entry_id).ok().map(|m| (m.title, m.source)),
-        EntryKind::Anime => AnimeRepo::new(db.clone()).by_id(entry_id).ok().map(|a| (a.title, a.source)),
+        Kind::Manga => MangaRepo::new(db.clone()).by_id(entry_id).ok().map(|m| (m.title, m.source)),
+        Kind::Anime => AnimeRepo::new(db.clone()).by_id(entry_id).ok().map(|a| (a.title, a.source)),
     }
 }
 
@@ -121,7 +121,7 @@ fn entry_facts(db: &Arc<Db>, kind: EntryKind, entry_id: i64) -> Option<(String, 
 pub fn mark_notified_read(
     db: &Arc<Db>,
     backend: &dyn DownloadBackend,
-    kind: EntryKind,
+    kind: Kind,
     entry_id: i64,
     urls: &[String],
     remove_downloads: bool,
@@ -148,12 +148,12 @@ pub fn mark_notified_read(
 }
 
 /// The ids of the chapters or episodes of an entry whose url is in `urls`. Empty when the entry is gone.
-pub fn item_ids_by_url(db: &Arc<Db>, kind: EntryKind, entry_id: i64, urls: &[String]) -> Vec<i64> {
+pub fn item_ids_by_url(db: &Arc<Db>, kind: Kind, entry_id: i64, urls: &[String]) -> Vec<i64> {
     match kind {
-        EntryKind::Manga => ChapterRepo::new(db.clone())
+        Kind::Manga => ChapterRepo::new(db.clone())
             .by_manga_id(entry_id, false)
             .map(|rows| rows.into_iter().filter(|c| urls.contains(&c.url)).map(|c| c.id).collect()),
-        EntryKind::Anime => EpisodeRepo::new(db.clone())
+        Kind::Anime => EpisodeRepo::new(db.clone())
             .by_anime_id(entry_id)
             .map(|rows| rows.into_iter().filter(|e| urls.contains(&e.url)).map(|e| e.id).collect()),
     }
@@ -165,7 +165,7 @@ pub fn item_ids_by_url(db: &Arc<Db>, kind: EntryKind, entry_id: i64, urls: &[Str
 pub fn download_notified(
     db: &Arc<Db>,
     backend: &dyn DownloadBackend,
-    kind: EntryKind,
+    kind: Kind,
     entry_id: i64,
     urls: &[String],
     external: bool,
@@ -181,12 +181,12 @@ pub fn download_notified(
 
 /// Marks every selected entry and returns how many entries were written. A failed entry is logged and the rest
 /// still change (T-37a-027).
-pub fn mark_many(db: &Arc<Db>, kind: EntryKind, ids: &[i64], read: bool) -> usize {
+pub fn mark_many(db: &Arc<Db>, kind: Kind, ids: &[i64], read: bool) -> usize {
     ids.iter()
         .filter(|id| {
             let done = match kind {
-                EntryKind::Manga => mark_manga(db, **id, read).map(drop),
-                EntryKind::Anime => mark_anime(db, **id, read).map(drop),
+                Kind::Manga => mark_manga(db, **id, read).map(drop),
+                Kind::Anime => mark_anime(db, **id, read).map(drop),
             };
             if let Err(e) = &done {
                 tracing::error!(error = %e, entry = **id, "marking the entry failed");
@@ -225,10 +225,10 @@ pub fn plan_download(unseen: &[i64], amount: DownloadAmount, skip: impl Fn(i64) 
 }
 
 /// The Download menu of the selection bar for `kind`: next 1, 5, 10 or 25 items, then every unviewed one (T-37a-028).
-pub fn download_menu(kind: EntryKind) -> Vec<(DownloadAmount, String)> {
+pub fn download_menu(kind: Kind) -> Vec<(DownloadAmount, String)> {
     let (one, many, unviewed) = match kind {
-        EntryKind::Manga => ("chapter", "chapters", "Unread"),
-        EntryKind::Anime => ("episode", "episodes", "Unwatched"),
+        Kind::Manga => ("chapter", "chapters", "Unread"),
+        Kind::Anime => ("episode", "episodes", "Unwatched"),
     };
     vec![
         (DownloadAmount::Next(1), format!("Next {one}")),
@@ -251,10 +251,10 @@ pub enum CoverAction {
 
 /// A cover's right-click menu for `kind`, in order, as (action, label, section). A local entry has nothing to
 /// download, as in the selection bar (T2-BULK-03).
-pub fn cover_menu(kind: EntryKind, local: bool) -> Vec<(CoverAction, String, u8)> {
+pub fn cover_menu(kind: Kind, local: bool) -> Vec<(CoverAction, String, u8)> {
     let (mark, download) = match kind {
-        EntryKind::Manga => ("Mark all as read", "Download unread"),
-        EntryKind::Anime => ("Mark all as watched", "Download unwatched"),
+        Kind::Manga => ("Mark all as read", "Download unread"),
+        Kind::Anime => ("Mark all as watched", "Download unwatched"),
     };
     let mut menu = vec![(CoverAction::Open, "Open".to_owned(), 0), (CoverAction::MarkAllViewed, mark.to_owned(), 1)];
     if !local {
@@ -348,19 +348,19 @@ pub const NO_NEXT_ITEM: &str = "Next chapter not found";
 /// entry's filters and sort (the last pending one when sorted descending). `is_downloaded` takes the item id.
 pub fn next_item(
     db: &Arc<Db>,
-    kind: EntryKind,
+    kind: Kind,
     row: &LibraryRow,
     downloaded_only: bool,
     is_downloaded: impl Fn(i64) -> bool,
 ) -> Result<Option<i64>, DomainError> {
     // the one next-unread rule, shared with the player's "resume next" (`crate::selection`)
     match kind {
-        EntryKind::Manga => {
+        Kind::Manga => {
             let manga = MangaRepo::new(db.clone()).by_id(row.id)?;
             let list = ChapterRepo::new(db.clone()).by_manga_id(row.id, true)?;
             Ok(crate::selection::next_unread(&manga, &list, downloaded_only, |c| is_downloaded(c.id)).map(|c| c.id))
         }
-        EntryKind::Anime => {
+        Kind::Anime => {
             let anime = AnimeRepo::new(db.clone()).by_id(row.id)?;
             let list = EpisodeRepo::new(db.clone()).by_anime_id(row.id)?;
             Ok(crate::selection::next_unseen(&anime, &list, downloaded_only, |e| is_downloaded(e.id)).map(|e| e.id))
@@ -390,10 +390,10 @@ mod tests {
     fn the_cover_menu_lists_its_actions_and_skips_download_for_a_local_entry() {
         use CoverAction::{ChangeCategories, DownloadUnviewed, MarkAllViewed, Open, Remove};
         let actions = |kind, local| cover_menu(kind, local).into_iter().map(|(a, _, _)| a).collect::<Vec<_>>();
-        assert_eq!(actions(EntryKind::Manga, false), [Open, MarkAllViewed, DownloadUnviewed, ChangeCategories, Remove]);
-        assert_eq!(actions(EntryKind::Anime, true), [Open, MarkAllViewed, ChangeCategories, Remove]);
-        assert_eq!(cover_menu(EntryKind::Anime, false)[1].1, "Mark all as watched");
-        assert_eq!(cover_menu(EntryKind::Manga, false)[4].1, "Remove from library");
+        assert_eq!(actions(Kind::Manga, false), [Open, MarkAllViewed, DownloadUnviewed, ChangeCategories, Remove]);
+        assert_eq!(actions(Kind::Anime, true), [Open, MarkAllViewed, ChangeCategories, Remove]);
+        assert_eq!(cover_menu(Kind::Anime, false)[1].1, "Mark all as watched");
+        assert_eq!(cover_menu(Kind::Manga, false)[4].1, "Remove from library");
     }
     use kuro_data::chapter::{Chapter, ChapterRepo};
     use kuro_data::manga::{Manga, MangaRepo};
@@ -426,7 +426,7 @@ mod tests {
             .set_excluded_scanlators(manga_id, &BTreeSet::from(["bad".to_string()]))
             .expect("exclude scanlator");
         let entry = LibraryRow { id: manga_id, ..row(2, 1) };
-        assert_eq!(next_item(&db, EntryKind::Manga, &entry, false, |_| false).expect("next item"), None);
+        assert_eq!(next_item(&db, Kind::Manga, &entry, false, |_| false).expect("next item"), None);
     }
 
     fn row(total: i64, done: i64) -> LibraryRow {
@@ -520,7 +520,7 @@ mod tests {
         for (dir, want) in [(SORT_ASC, 2.0), (SORT_DESC, 2.0)] {
             let (_dir, db) = db();
             let row = manga_with_chapters(&db, SORTING_NUMBER | dir, &chapters);
-            let id = next_item(&db, EntryKind::Manga, &row, false, |_| false).expect("target").expect("some");
+            let id = next_item(&db, Kind::Manga, &row, false, |_| false).expect("target").expect("some");
             assert_eq!(chapter_number_of(&db, row.id, id), want);
         }
     }
@@ -534,11 +534,11 @@ mod tests {
             SORTING_NUMBER | SORT_ASC | SHOW_BOOKMARKED,
             &[(1, true, false), (2, false, false), (3, false, true)],
         );
-        let id = next_item(&db1, EntryKind::Manga, &row, false, |_| false).expect("target").expect("some");
+        let id = next_item(&db1, Kind::Manga, &row, false, |_| false).expect("target").expect("some");
         assert_eq!(chapter_number_of(&db1, row.id, id), 3.0, "the unbookmarked chapter 2 is filtered out");
         let (_dir2, db2) = db();
         let row = manga_with_chapters(&db2, SORTING_NUMBER | SORT_ASC, &[(1, true, false)]);
-        assert_eq!(next_item(&db2, EntryKind::Manga, &row, false, |_| false).expect("target"), None);
+        assert_eq!(next_item(&db2, Kind::Manga, &row, false, |_| false).expect("target"), None);
         assert_eq!(NO_NEXT_ITEM, "Next chapter not found", "the toast text of E-25");
     }
 
@@ -553,7 +553,7 @@ mod tests {
             Ok(())
         })
         .expect("exclude a scanlator");
-        let id = next_item(&db, EntryKind::Manga, &row, false, |_| false).expect("target").expect("some");
+        let id = next_item(&db, Kind::Manga, &row, false, |_| false).expect("target").expect("some");
         assert_eq!(chapter_number_of(&db, row.id, id), 3.0);
     }
 
@@ -567,7 +567,7 @@ mod tests {
     fn mark_many_counts_the_entries_written() {
         let (_dir, db) = db();
         let row = manga_with_chapters(&db, 0, &[(1, false, false)]);
-        assert_eq!(mark_many(&db, EntryKind::Manga, &[row.id, row.id], true), 2);
+        assert_eq!(mark_many(&db, Kind::Manga, &[row.id, row.id], true), 2);
     }
 
     #[test]
@@ -624,13 +624,13 @@ mod tests {
         backend.disk.lock().unwrap().extend([1, 2]);
         let urls = ["u1".to_owned(), "u2".to_owned(), "u3".to_owned()];
         // option off: the items are marked, nothing is deleted
-        assert_eq!(mark_notified_read(&db, &backend, EntryKind::Manga, id, &urls[..1], false).expect("mark"), 1);
+        assert_eq!(mark_notified_read(&db, &backend, Kind::Manga, id, &urls[..1], false).expect("mark"), 1);
         assert!(backend.calls().is_empty(), "remove-after-read is off");
         // option on: only the changed, downloaded item goes (c1 was already read, c3 is not on disk)
-        assert_eq!(mark_notified_read(&db, &backend, EntryKind::Manga, id, &urls, true).expect("mark"), 2);
+        assert_eq!(mark_notified_read(&db, &backend, Kind::Manga, id, &urls, true).expect("mark"), 2);
         assert_eq!(backend.calls(), vec![Call::Delete { entry_id: id, unit_ids: vec![id_of(&ids, "u2")] }]);
         // nothing changes the second time, so nothing is deleted again
-        assert_eq!(mark_notified_read(&db, &backend, EntryKind::Manga, id, &urls, true).expect("mark"), 0);
+        assert_eq!(mark_notified_read(&db, &backend, Kind::Manga, id, &urls, true).expect("mark"), 0);
         assert_eq!(backend.calls().len(), 1);
     }
 
@@ -641,7 +641,7 @@ mod tests {
         let (id, ids) = notified_manga(&db);
         let backend = Fake::installed();
         let urls = ["u2".to_owned(), "u3".to_owned(), "gone".to_owned()];
-        assert_eq!(download_notified(&db, &backend, EntryKind::Manga, id, &urls, false), 2);
+        assert_eq!(download_notified(&db, &backend, Kind::Manga, id, &urls, false), 2);
         assert_eq!(
             backend.calls(),
             vec![
@@ -651,7 +651,7 @@ mod tests {
             "autostart: the queue starts right after the enqueue"
         );
         let other = Fake::installed();
-        assert_eq!(download_notified(&db, &other, EntryKind::Manga, 9_999, &urls, false), 0);
+        assert_eq!(download_notified(&db, &other, Kind::Manga, 9_999, &urls, false), 0);
         assert!(other.calls().is_empty(), "a missing entry is a silent no-op");
     }
 

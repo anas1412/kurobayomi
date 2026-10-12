@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use gtk::glib;
 use gtk::prelude::*;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_downloads::DownloadState;
 use kuro_downloads::anime::model::AnimeDownload;
 use kuro_downloads::engine::{AnimeEngine, MangaEngine, QueueEngine};
@@ -23,7 +23,7 @@ const TICK: Duration = Duration::from_millis(250);
 /// One change of a unit, as a download button draws it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Live {
-    pub kind: EntryKind,
+    pub kind: Kind,
     pub id: i64,
     pub state: DownloadState,
     pub percent: u8,
@@ -69,10 +69,10 @@ impl Entry {
 }
 
 /// Every queued unit of both queues.
-fn entries(queues: &Queues) -> HashMap<(EntryKind, i64), Entry> {
-    let mut out: HashMap<(EntryKind, i64), Entry> = queues.manga.snapshot().into_iter().map(|d| ((EntryKind::Manga, d.chapter.id), Entry::Manga(d))).collect();
+fn entries(queues: &Queues) -> HashMap<(Kind, i64), Entry> {
+    let mut out: HashMap<(Kind, i64), Entry> = queues.manga.snapshot().into_iter().map(|d| ((Kind::Manga, d.chapter.id), Entry::Manga(d))).collect();
     if let Some(anime) = &queues.anime {
-        out.extend(anime.snapshot().iter().map(|d| ((EntryKind::Anime, d.episode.id), Entry::Anime(Arc::clone(d)))));
+        out.extend(anime.snapshot().iter().map(|d| ((Kind::Anime, d.episode.id), Entry::Anime(Arc::clone(d)))));
     }
     out
 }
@@ -83,19 +83,19 @@ pub fn queues() -> Option<Queues> {
 }
 
 /// The queue state and percent of one unit now, or `None` when it is not queued.
-pub fn queued(queues: &Queues, kind: EntryKind, id: i64) -> Option<(DownloadState, u8)> {
+pub fn queued(queues: &Queues, kind: Kind, id: i64) -> Option<(DownloadState, u8)> {
     match kind {
-        EntryKind::Manga => queues.manga.queued(id).map(|d| Entry::Manga(d).now()),
-        EntryKind::Anime => queues.anime.as_ref()?.queued(id).map(|d| Entry::Anime(d).now()),
+        Kind::Manga => queues.manga.queued(id).map(|d| Entry::Manga(d).now()),
+        Kind::Anime => queues.anime.as_ref()?.queued(id).map(|d| Entry::Anime(d).now()),
     }
 }
 
 /// Takes one unit out of its queue (a cancel, with no question). Files already on disk are not touched.
-pub fn cancel(kind: EntryKind, id: i64) {
+pub fn cancel(kind: Kind, id: i64) {
     let Some(queues) = queues() else { return };
     match kind {
-        EntryKind::Manga => MangaEngine::new(queues.manga.clone()).remove(&[id]),
-        EntryKind::Anime => {
+        Kind::Manga => MangaEngine::new(queues.manga.clone()).remove(&[id]),
+        Kind::Anime => {
             if let Some(queue) = &queues.anime {
                 AnimeEngine::new(queue.clone()).remove(&[id]);
             }
@@ -109,7 +109,7 @@ pub fn cancel(kind: EntryKind, id: i64) {
 pub fn follow(owner: &impl IsA<gtk::Widget>, on_change: impl Fn(Live) + 'static) {
     let Some(queues) = queues() else { return };
     let owner = owner.as_ref().downgrade();
-    let mut seen: HashMap<(EntryKind, i64), (Entry, (DownloadState, u8))> = HashMap::new();
+    let mut seen: HashMap<(Kind, i64), (Entry, (DownloadState, u8))> = HashMap::new();
     glib::timeout_add_local(TICK, move || {
         if owner.upgrade().is_none() {
             return glib::ControlFlow::Break;

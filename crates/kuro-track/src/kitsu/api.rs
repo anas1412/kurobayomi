@@ -9,6 +9,7 @@
 //! [`KitsuApi::on_blocking_pool`] (T-30a-026). `logout` is synchronous by the tracker trait; its caller runs it on
 //! the blocking pool.
 
+use kuro_platform::kind::Kind;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -25,7 +26,7 @@ use super::error::KitsuError;
 use super::score;
 use super::status;
 use crate::base::{Field, SECRET_SERVICE, account};
-use crate::model::{Kind, TrackerId};
+use crate::model::TrackerId;
 
 /// The public client credentials Aniyomi sends. They are not user secrets.
 pub const CLIENT_ID: &str = "dd031b32d2f56c990b1425efe6c42ad847e7fe3ab46bf1299f05ecd856bdb7dd";

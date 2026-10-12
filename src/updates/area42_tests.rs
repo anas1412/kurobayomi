@@ -150,18 +150,18 @@ mod domain {
 
 mod data {
     use kuro_domain::history::repo::HistoryRepo;
-    use kuro_domain::kind::EntryKind;
+    use kuro_platform::kind::Kind;
     use kuro_domain::updates::repo::UpdatesRepo;
 
     use super::fixtures::{chapters, manga, manga_db};
     use crate::updates::storage_data::library_entries;
 
     fn titles(repo: &HistoryRepo) -> Vec<String> {
-        repo.list(EntryKind::Manga, "").expect("list").into_iter().map(|r| r.title).collect()
+        repo.list(Kind::Manga, "").expect("list").into_iter().map(|r| r.title).collect()
     }
 
     fn searched(repo: &HistoryRepo, query: &str) -> Vec<String> {
-        repo.list(EntryKind::Manga, query).expect("list").into_iter().map(|r| r.title).collect()
+        repo.list(Kind::Manga, query).expect("list").into_iter().map(|r| r.title).collect()
     }
 
     #[test]
@@ -171,9 +171,9 @@ mod data {
         let m = manga(&f.db, "M", true);
         let ids = chapters(&f.db, m, 3);
         let repo = HistoryRepo::new(f.db.clone());
-        repo.upsert(EntryKind::Manga, ids[0], 100, 1).expect("record");
-        repo.upsert(EntryKind::Manga, ids[1], 200, 1).expect("record");
-        let rows = repo.list(EntryKind::Manga, "").expect("list");
+        repo.upsert(Kind::Manga, ids[0], 100, 1).expect("record");
+        repo.upsert(Kind::Manga, ids[1], 200, 1).expect("record");
+        let rows = repo.list(Kind::Manga, "").expect("list");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].item_id, ids[1]);
     }
@@ -185,7 +185,7 @@ mod data {
         let repo = HistoryRepo::new(f.db.clone());
         for (n, title) in ["100%", "1000", "a_b", "axb"].into_iter().enumerate() {
             let m = manga(&f.db, title, true);
-            repo.upsert(EntryKind::Manga, chapters(&f.db, m, 1)[0], 100 + n as i64, 1).expect("record");
+            repo.upsert(Kind::Manga, chapters(&f.db, m, 1)[0], 100 + n as i64, 1).expect("record");
         }
         assert_eq!(searched(&repo, "%"), ["100%"]);
         assert_eq!(searched(&repo, "a_b"), ["a_b"]);
@@ -197,7 +197,7 @@ mod data {
         let f = manga_db();
         let m = manga(&f.db, "Berserk", true);
         let repo = HistoryRepo::new(f.db.clone());
-        repo.upsert(EntryKind::Manga, chapters(&f.db, m, 1)[0], 100, 1).expect("record");
+        repo.upsert(Kind::Manga, chapters(&f.db, m, 1)[0], 100, 1).expect("record");
         assert_eq!(searched(&repo, "berserk"), ["Berserk"]);
         assert_eq!(searched(&repo, "BERSERK"), ["Berserk"]);
         assert!(searched(&repo, "vinland").is_empty());
@@ -210,9 +210,9 @@ mod data {
         let m = manga(&f.db, "M", true);
         let ids = chapters(&f.db, m, 1);
         let repo = HistoryRepo::new(f.db.clone());
-        repo.upsert(EntryKind::Manga, ids[0], 100, 5_000).expect("record");
-        let history_id = repo.by_entry(EntryKind::Manga, m).expect("rows")[0].id;
-        repo.reset_one(EntryKind::Manga, history_id).expect("reset");
+        repo.upsert(Kind::Manga, ids[0], 100, 5_000).expect("record");
+        let history_id = repo.by_entry(Kind::Manga, m).expect("rows")[0].id;
+        repo.reset_one(Kind::Manga, history_id).expect("reset");
         assert!(titles(&repo).is_empty());
         assert_eq!(repo.total_duration().expect("total"), 5_000);
     }
@@ -224,11 +224,11 @@ mod data {
         let m = manga(&f.db, "M", true);
         let ids = chapters(&f.db, m, 2);
         let repo = HistoryRepo::new(f.db.clone());
-        repo.upsert(EntryKind::Manga, ids[0], 100, 1).expect("record");
-        repo.upsert(EntryKind::Manga, ids[1], 200, 1).expect("record");
-        repo.reset_entry(EntryKind::Manga, m).expect("reset");
+        repo.upsert(Kind::Manga, ids[0], 100, 1).expect("record");
+        repo.upsert(Kind::Manga, ids[1], 200, 1).expect("record");
+        repo.reset_entry(Kind::Manga, m).expect("reset");
         assert!(titles(&repo).is_empty());
-        assert!(repo.by_entry(EntryKind::Manga, m).expect("rows").iter().all(|r| r.at == 0));
+        assert!(repo.by_entry(Kind::Manga, m).expect("rows").iter().all(|r| r.at == 0));
     }
 
     #[test]
@@ -237,9 +237,9 @@ mod data {
         let f = manga_db();
         let m = manga(&f.db, "M", true);
         let repo = HistoryRepo::new(f.db.clone());
-        repo.upsert(EntryKind::Manga, chapters(&f.db, m, 1)[0], 100, 9_000).expect("record");
+        repo.upsert(Kind::Manga, chapters(&f.db, m, 1)[0], 100, 9_000).expect("record");
         assert_eq!(repo.total_duration().expect("total"), 9_000);
-        assert!(repo.clear_all(EntryKind::Manga));
+        assert!(repo.clear_all(Kind::Manga));
         assert_eq!(repo.total_duration().expect("total"), 0);
     }
 
@@ -250,10 +250,10 @@ mod data {
         let (a, b) = (manga(&f.db, "A", true), manga(&f.db, "B", true));
         let (ca, cb) = (chapters(&f.db, a, 2), chapters(&f.db, b, 1));
         let repo = HistoryRepo::new(f.db.clone());
-        repo.upsert(EntryKind::Manga, ca[1], 100, 1).expect("record");
-        repo.upsert(EntryKind::Manga, cb[0], 200, 1).expect("record");
-        repo.upsert(EntryKind::Manga, ca[0], 300, 1).expect("record");
-        let latest = repo.latest(EntryKind::Manga).expect("latest").expect("a row");
+        repo.upsert(Kind::Manga, ca[1], 100, 1).expect("record");
+        repo.upsert(Kind::Manga, cb[0], 200, 1).expect("record");
+        repo.upsert(Kind::Manga, ca[0], 300, 1).expect("record");
+        let latest = repo.latest(Kind::Manga).expect("latest").expect("a row");
         assert_eq!((latest.entry_id, latest.item_id), (a, ca[0]), "the lower chapter of A was read last");
     }
 
@@ -275,7 +275,7 @@ mod data {
     }
 
     fn feed(db: &std::sync::Arc<kuro_db::handle::Db>) -> Vec<i64> {
-        UpdatesRepo::new(db.clone()).recent(EntryKind::Manga, AFTER).expect("feed").iter().map(|r| r.item_id).collect()
+        UpdatesRepo::new(db.clone()).recent(Kind::Manga, AFTER).expect("feed").iter().map(|r| r.item_id).collect()
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod data {
         let m = manga(&f.db, "M", true);
         let (a, b) = (create_manga_category(&f.db, "a", 0).expect("category"), create_manga_category(&f.db, "b", 0).expect("category"));
         kuro_data::manga::MangaRepo::new(f.db.clone()).set_categories(m, &[a, b]).expect("links");
-        let entries = library_entries(&f.db, EntryKind::Manga).expect("entries");
+        let entries = library_entries(&f.db, Kind::Manga).expect("entries");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].category_id, a.min(b), "the lowest category stands for it");
     }
@@ -335,7 +335,7 @@ mod ui {
     use kuro_domain::history::repo::HistoryRepo;
     use kuro_domain::history::view::{HistoryLine, RemoveAction, remove_action};
     use kuro_domain::history::model::CoverKey;
-    use kuro_domain::kind::EntryKind;
+    use kuro_platform::kind::Kind;
 
     use super::fixtures::{chapters, manga, manga_db};
     use crate::updates::history::Resume;
@@ -351,7 +351,7 @@ mod ui {
         kuro_data::chapter::ChapterRepo::new(f.db.clone())
             .update(&kuro_data::chapter::ChapterUpdate { read: Some(true), ..kuro_data::chapter::ChapterUpdate::new(ids[0]) })
             .expect("mark read");
-        let Resume::Open(unit) = resume_row(&f.db, EntryKind::Manga, m, ids[0]) else { panic!("a unit follows") };
+        let Resume::Open(unit) = resume_row(&f.db, Kind::Manga, m, ids[0]) else { panic!("a unit follows") };
         assert_eq!(unit.id, ids[1], "the reader opens the next chapter");
     }
 
@@ -361,9 +361,9 @@ mod ui {
         let m = manga(&f.db, "M", true);
         let ids = chapters(&f.db, m, 2);
         let repo = HistoryRepo::new(f.db.clone());
-        repo.upsert(EntryKind::Manga, ids[0], 100, 1).expect("record");
-        repo.upsert(EntryKind::Manga, ids[1], 200, 1).expect("record");
-        let rows = repo.by_entry(EntryKind::Manga, m).expect("rows");
+        repo.upsert(Kind::Manga, ids[0], 100, 1).expect("record");
+        repo.upsert(Kind::Manga, ids[1], 200, 1).expect("record");
+        let rows = repo.by_entry(Kind::Manga, m).expect("rows");
         let line = HistoryLine {
             history_id: rows[0].id,
             item_id: ids[0],
@@ -374,10 +374,10 @@ mod ui {
         };
         assert_eq!(remove_action(&line, false), RemoveAction::ResetOne { history_id: rows[0].id });
         assert_eq!(remove_action(&line, true), RemoveAction::ResetEntry { entry_id: m });
-        apply_remove(&f.db, EntryKind::Manga, remove_action(&line, false)).expect("reset one");
-        assert_eq!(repo.by_entry(EntryKind::Manga, m).expect("rows").iter().filter(|r| r.at > 0).count(), 1, "without the box one row resets");
-        apply_remove(&f.db, EntryKind::Manga, remove_action(&line, true)).expect("reset entry");
-        assert!(repo.by_entry(EntryKind::Manga, m).expect("rows").iter().all(|r| r.at == 0), "with the box every row resets");
+        apply_remove(&f.db, Kind::Manga, remove_action(&line, false)).expect("reset one");
+        assert_eq!(repo.by_entry(Kind::Manga, m).expect("rows").iter().filter(|r| r.at > 0).count(), 1, "without the box one row resets");
+        apply_remove(&f.db, Kind::Manga, remove_action(&line, true)).expect("reset entry");
+        assert!(repo.by_entry(Kind::Manga, m).expect("rows").iter().all(|r| r.at == 0), "with the box every row resets");
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! persisted values of `sync_id` 4. A code or string outside the table is an error, never a panic (D4).
 
 use super::error::ShikimoriError;
-use crate::model::Kind;
+use kuro_platform::kind::Kind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i64)]

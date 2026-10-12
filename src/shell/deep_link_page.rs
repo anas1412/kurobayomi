@@ -5,10 +5,10 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use kuro_platform::kind::Kind;
 
 use gtk::prelude::*;
 
-use super::nav::Kind;
 
 /// What a resolved link points to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -218,16 +218,9 @@ fn leave(page: &Page, nav: &Nav) {
     run(nav);
 }
 
-fn browse_kind(kind: Kind) -> crate::browse::route::BrowseKind {
-    match kind {
-        Kind::Anime => crate::browse::route::BrowseKind::Anime,
-        Kind::Manga => crate::browse::route::BrowseKind::Manga,
-    }
-}
-
 /// Opens the global search of `kind` with `query` in its box.
 pub fn open_search(kind: Kind, query: &str) {
-    crate::browse::pending::open(crate::browse::global_search::deep_link_fallback_for(browse_kind(kind), query));
+    crate::browse::pending::open(crate::browse::global_search::deep_link_fallback_for(kind, query));
 }
 
 fn run(nav: &Nav) {

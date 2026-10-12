@@ -5,7 +5,7 @@
 use std::sync::Mutex;
 
 use async_channel::{Receiver, Sender};
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::library_update::pass::PassEvent;
 
@@ -36,7 +36,7 @@ pub fn attach_to_main_loop(rx: Receiver<PassEvent>, apply: impl FnMut(PassEvent)
 }
 
 /// A live event, tagged with the kind of the pass that sent it (the two kinds run side by side).
-pub type LiveEvent = (EntryKind, PassEvent);
+pub type LiveEvent = (Kind, PassEvent);
 
 /// Fans the live events of the passes out to every subscriber (the library header bars). A subscriber that went away is
 /// dropped on the next publish.
@@ -55,7 +55,7 @@ impl Feed {
         rx
     }
 
-    pub fn publish(&self, kind: EntryKind, event: PassEvent) {
+    pub fn publish(&self, kind: Kind, event: PassEvent) {
         let mut subscribers = self.subscribers.lock().unwrap_or_else(|e| e.into_inner());
         subscribers.retain(|tx| tx.try_send((kind, event.clone())).is_ok());
     }
@@ -70,7 +70,7 @@ pub fn subscribe() -> Receiver<LiveEvent> {
 }
 
 /// Called by the pass at its start, after each entry and at its end (T-26a-111).
-pub fn publish(kind: EntryKind, event: PassEvent) {
+pub fn publish(kind: Kind, event: PassEvent) {
     LIVE.publish(kind, event);
 }
 
@@ -87,11 +87,11 @@ fn show_fraction(bar: &gtk::ProgressBar, fraction: Option<f64>) {
 
 /// The determinate bar for the library header of `kind`: hidden while idle, filled while a pass of that kind runs
 /// (T-26a-111). The library header appends it once; it follows the live events on the main context.
-pub fn header_bar(kind: EntryKind) -> gtk::ProgressBar {
+pub fn header_bar(kind: Kind) -> gtk::ProgressBar {
     header_bar_from(subscribe(), kind)
 }
 
-fn header_bar_from(rx: Receiver<LiveEvent>, kind: EntryKind) -> gtk::ProgressBar {
+fn header_bar_from(rx: Receiver<LiveEvent>, kind: Kind) -> gtk::ProgressBar {
     use gtk::prelude::*;
     let bar = gtk::ProgressBar::new();
     bar.set_visible(false);
@@ -234,17 +234,17 @@ mod bar_tests {
         // T-26a-111
         crate::testing::with_display(|| {
             let feed = Feed::new();
-            let bar = header_bar_from(feed.subscribe(), EntryKind::Manga);
+            let bar = header_bar_from(feed.subscribe(), Kind::Manga);
             assert!(!bar.is_visible());
-            feed.publish(EntryKind::Manga, PassEvent::Started { total: 4 });
-            feed.publish(EntryKind::Anime, PassEvent::EntryFinished { entry_id: 9, done: 4 });
+            feed.publish(Kind::Manga, PassEvent::Started { total: 4 });
+            feed.publish(Kind::Anime, PassEvent::EntryFinished { entry_id: 9, done: 4 });
             settle();
             assert!(bar.is_visible());
             assert_eq!(bar.fraction(), 0.0);
-            feed.publish(EntryKind::Manga, PassEvent::EntryFinished { entry_id: 1, done: 2 });
+            feed.publish(Kind::Manga, PassEvent::EntryFinished { entry_id: 1, done: 2 });
             settle();
             assert_eq!(bar.fraction(), 0.5);
-            feed.publish(EntryKind::Manga, PassEvent::Finished { status: PassStatus::Success });
+            feed.publish(Kind::Manga, PassEvent::Finished { status: PassStatus::Success });
             settle();
             assert!(!bar.is_visible());
         });
@@ -255,8 +255,8 @@ mod bar_tests {
         let feed = Feed::new();
         let kept = feed.subscribe();
         drop(feed.subscribe());
-        feed.publish(EntryKind::Anime, PassEvent::Started { total: 1 });
+        feed.publish(Kind::Anime, PassEvent::Started { total: 1 });
         assert_eq!(feed.subscribers.lock().unwrap().len(), 1);
-        assert_eq!(kept.try_recv().ok(), Some((EntryKind::Anime, PassEvent::Started { total: 1 })));
+        assert_eq!(kept.try_recv().ok(), Some((Kind::Anime, PassEvent::Started { total: 1 })));
     }
 }

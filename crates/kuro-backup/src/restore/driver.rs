@@ -2,6 +2,7 @@
 //! writers into `run_sections`: one transaction per entry, one `(source, url)` snapshot per entry section, one run
 //! clock, and the category maps handed from the categories section to the entries and the preferences.
 
+use kuro_platform::kind::Kind;
 use std::collections::HashMap;
 
 use chrono::{DateTime, Local};
@@ -14,7 +15,7 @@ use rusqlite::Connection;
 
 use super::RestoreError;
 use super::anime::{AnimeOutcome, existing_pairs as anime_pairs, plan_anime, restore_anime_entry, sort_anime};
-use super::categories::{CategoryRestore, Kind, restore_categories};
+use super::categories::{CategoryRestore, restore_categories};
 use super::manga::{existing_pairs as manga_pairs, restore_manga_entry, sort_manga};
 use super::merge::RunClock;
 use super::options::RestoreOptions;

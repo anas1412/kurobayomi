@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 pub const UPDATING: &str = "Updating library";
 pub const ALREADY_RUNNING: &str = "An update is already running";
@@ -15,9 +15,9 @@ pub const COULD_NOT_START: &str = "Could not start library update";
 #[derive(Clone)]
 pub struct Host {
     /// Starts a pass of one kind; `false` when a pass of that kind is already running.
-    pub start: Rc<dyn Fn(EntryKind) -> bool>,
+    pub start: Rc<dyn Fn(Kind) -> bool>,
     /// Whether a pass of that kind is running.
-    pub running: Rc<dyn Fn(EntryKind) -> bool>,
+    pub running: Rc<dyn Fn(Kind) -> bool>,
 }
 
 thread_local! {
@@ -33,7 +33,7 @@ pub fn install(host: Host) {
 /// The Updates page starts a pass of the whole kind, so the category is `None`. This is the one call the runner's
 /// start-up makes beside `library::mount::on_update`, handing it the same two closures, so both buttons share one
 /// single-flight lock.
-pub fn install_shared(start: Rc<dyn Fn(EntryKind, Option<i64>) -> bool>, running: Rc<dyn Fn(EntryKind) -> bool>) {
+pub fn install_shared(start: Rc<dyn Fn(Kind, Option<i64>) -> bool>, running: Rc<dyn Fn(Kind) -> bool>) {
     install(Host { start: Rc::new(move |kind| start(kind, None)), running });
 }
 
@@ -47,7 +47,7 @@ pub enum Outcome {
 }
 
 /// Asks the runner for a pass of `kind`. A pass that is already running is never started twice (E-U38).
-pub fn trigger(kind: EntryKind) -> Outcome {
+pub fn trigger(kind: Kind) -> Outcome {
     let Some(host) = HOST.with(|h| h.borrow().clone()) else { return Outcome::Refused };
     if (host.running)(kind) {
         Outcome::AlreadyRunning
@@ -59,12 +59,12 @@ pub fn trigger(kind: EntryKind) -> Outcome {
 }
 
 /// `true` when a new pass of `kind` was started, `false` when one is running or none can start (T-42b-041).
-pub fn start(kind: EntryKind) -> bool {
+pub fn start(kind: Kind) -> bool {
     trigger(kind) == Outcome::Started
 }
 
 /// Whether a pass of `kind` is running. `false` without a runner.
-pub fn running(kind: EntryKind) -> bool {
+pub fn running(kind: Kind) -> bool {
     HOST.with(|h| h.borrow().as_ref().is_some_and(|host| (host.running)(kind)))
 }
 
@@ -110,8 +110,8 @@ mod tests {
 
     #[test]
     fn no_runner_is_refused_with_the_error_text() {
-        assert_eq!(trigger(EntryKind::Manga), Outcome::Refused);
-        assert!(!running(EntryKind::Manga));
+        assert_eq!(trigger(Kind::Manga), Outcome::Refused);
+        assert!(!running(Kind::Manga));
         assert_eq!(message(Outcome::Refused), "Could not start library update");
     }
 
@@ -119,8 +119,8 @@ mod tests {
     fn a_run_in_progress_is_not_started_again() {
         let (h, starts) = host(true, true);
         install(h);
-        assert_eq!(trigger(EntryKind::Anime), Outcome::AlreadyRunning);
-        assert_eq!(trigger(EntryKind::Anime), Outcome::AlreadyRunning, "a second click while running starts nothing");
+        assert_eq!(trigger(Kind::Anime), Outcome::AlreadyRunning);
+        assert_eq!(trigger(Kind::Anime), Outcome::AlreadyRunning, "a second click while running starts nothing");
         assert_eq!(starts.get(), 0);
         assert_eq!(message(Outcome::AlreadyRunning), "An update is already running");
     }
@@ -129,7 +129,7 @@ mod tests {
     fn an_idle_runner_that_accepts_reports_updating() {
         let (h, starts) = host(false, true);
         install(h);
-        assert_eq!(trigger(EntryKind::Manga), Outcome::Started);
+        assert_eq!(trigger(Kind::Manga), Outcome::Started);
         assert_eq!(starts.get(), 1);
         assert_eq!(message(Outcome::Started), "Updating library");
     }
@@ -148,18 +148,18 @@ mod tests {
             }),
             Rc::new(move |_| flag_running.get()),
         );
-        assert!(start(EntryKind::Manga));
-        assert!(!start(EntryKind::Manga), "the pass is still running");
-        assert!(running(EntryKind::Manga));
-        assert_eq!(*seen.borrow(), vec![(EntryKind::Manga, None)]);
+        assert!(start(Kind::Manga));
+        assert!(!start(Kind::Manga), "the pass is still running");
+        assert!(running(Kind::Manga));
+        assert_eq!(*seen.borrow(), vec![(Kind::Manga, None)]);
         busy.set(false);
-        assert!(!running(EntryKind::Manga));
+        assert!(!running(Kind::Manga));
     }
 
     #[test]
     fn a_refused_start_reads_as_already_running() {
         let (h, _) = host(false, false);
         install(h);
-        assert_eq!(trigger(EntryKind::Manga), Outcome::AlreadyRunning);
+        assert_eq!(trigger(Kind::Manga), Outcome::AlreadyRunning);
     }
 }

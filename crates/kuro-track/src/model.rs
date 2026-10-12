@@ -2,6 +2,7 @@
 
 pub mod search;
 
+use kuro_platform::kind::Kind;
 use crate::error::TrackError;
 
 /// Tracker service id, stored as `sync_id`.
@@ -20,32 +21,6 @@ impl TrackerId {
     pub const SUWAYOMI: Self = Self(9);
     pub const SIMKL: Self = Self(101);
     pub const JELLYFIN: Self = Self(102);
-}
-
-/// Entry kind of a binding or a retry item.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Kind {
-    Anime,
-    Manga,
-}
-
-impl Kind {
-    /// The text stored in `track_retry_queue.kind`.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Kind::Anime => "anime",
-            Kind::Manga => "manga",
-        }
-    }
-
-    /// The kind stored under `s`, if any.
-    pub fn from_str_opt(s: &str) -> Option<Kind> {
-        match s {
-            "anime" => Some(Kind::Anime),
-            "manga" => Some(Kind::Manga),
-            _ => None,
-        }
-    }
 }
 
 /// One tracker binding of an anime. `id` is `None` before the first insert.
@@ -320,7 +295,7 @@ mod tests {
 
     #[test]
     fn kind_text_round_trips() {
-        assert_eq!(Kind::from_str_opt(Kind::Manga.as_str()), Some(Kind::Manga));
-        assert_eq!(Kind::from_str_opt("novel"), None);
+        assert_eq!(Kind::parse(Kind::Manga.as_str()), Some(Kind::Manga));
+        assert_eq!(Kind::parse("novel"), None);
     }
 }

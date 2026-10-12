@@ -1,13 +1,16 @@
-//! The entry kind of the tracking flows (`EntryKind` of `p2-rust-design.md` section 3). It is the binding kind
-//! `model::Kind`, so anime and manga share one type and one code path.
+//! The entry kind of the tracking flows (`Kind` of `p2-rust-design.md` section 3). It is the binding kind, the
+//! shared `Kind`, so anime and manga share one type and one code path.
 
-pub use crate::model::Kind as EntryKind;
+use kuro_platform::kind::Kind;
 
-use crate::model::Kind;
-
-impl Kind {
+/// What tracking adds to the shared [`Kind`].
+pub trait KindExt {
     /// Fluent id of the progress unit label: "Episodes" for anime, "Chapters" for manga (`U§4`).
-    pub fn progress_label_key(self) -> &'static str {
+    fn progress_label_key(self) -> &'static str;
+}
+
+impl KindExt for Kind {
+    fn progress_label_key(self) -> &'static str {
         match self {
             Kind::Anime => "episodes",
             Kind::Manga => "chapters",
@@ -22,8 +25,8 @@ mod tests {
 
     #[test]
     fn tr_27b_002_progress_label_follows_the_kind() {
-        assert_eq!(EntryKind::Anime.progress_label_key(), "episodes");
-        assert_eq!(EntryKind::Manga.progress_label_key(), "chapters");
+        assert_eq!(Kind::Anime.progress_label_key(), "episodes");
+        assert_eq!(Kind::Manga.progress_label_key(), "chapters");
     }
 
     #[test]

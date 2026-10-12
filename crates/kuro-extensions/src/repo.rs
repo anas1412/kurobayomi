@@ -5,6 +5,7 @@
 //! A source's file is a recipe (`.toml`, `docs/source-recipes.md`) or a plug-in component (`.wasm`, `wit/kuro-source.wit`).
 //! The index is read here; the GTK side stores the links and the index text, and decides where a fetched file goes.
 
+use kuro_platform::kind::Kind;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -21,13 +22,6 @@ pub const MAX_SOURCES_PER_KIND: usize = 10;
 pub const MAX_FILE_BYTES: usize = 1024 * 1024;
 /// The largest source icon accepted: a square PNG of about 192 px.
 pub const MAX_ICON_BYTES: usize = 256 * 1024;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Kind {
-    Manga,
-    Anime,
-}
 
 /// One source a repository lists. `id` names the file the source is saved under, so it is limited to lower-case letters,
 /// digits, `.`, `_` and `-`.

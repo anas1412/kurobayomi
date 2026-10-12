@@ -2,6 +2,7 @@
 //! own sort, read in ascending reading order (`chapter_cmp(sorting, false)`). The filtering is pure, so the rules
 //! can be tested on plain lists; the repository reads of the entry happen in [`next_items`].
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use kuro_data::anime::AnimeRepo;
@@ -14,7 +15,6 @@ use crate::entries::anime::AnimeExt;
 use crate::entries::manga::MangaExt;
 use crate::items::facades::{get_chapters_by_manga_id, get_episodes_by_anime_id};
 use crate::items::sorter::{chapter_cmp, episode_cmp};
-use crate::kind::EntryKind;
 
 /// What the history screen and the download-ahead need about a next item.
 #[derive(Clone, Debug, PartialEq)]
@@ -58,13 +58,13 @@ pub fn next_in_order<T: Clone>(
 /// log line.
 pub fn next_items(
     db: &Arc<Db>,
-    kind: EntryKind,
+    kind: Kind,
     entry_id: i64,
     from: Option<i64>,
     only_pending: bool,
 ) -> Vec<NextItem> {
     match kind {
-        EntryKind::Manga => {
+        Kind::Manga => {
             let manga = match MangaRepo::new(db.clone()).by_id(entry_id) {
                 Ok(m) => m,
                 Err(e) => {
@@ -87,7 +87,7 @@ pub fn next_items(
                 })
                 .collect()
         }
-        EntryKind::Anime => {
+        Kind::Anime => {
             let anime = match AnimeRepo::new(db.clone()).by_id(entry_id) {
                 Ok(a) => a,
                 Err(e) => {
@@ -113,7 +113,7 @@ pub fn next_items(
 }
 
 /// The next items after the newest history row of any entry of this kind. No history gives an empty list.
-pub fn next_after_last_history(db: &Arc<Db>, kind: EntryKind, only_pending: bool) -> Vec<NextItem> {
+pub fn next_after_last_history(db: &Arc<Db>, kind: Kind, only_pending: bool) -> Vec<NextItem> {
     let latest = match crate::history::repo::HistoryRepo::new(db.clone()).latest(kind) {
         Ok(Some(row)) => row,
         Ok(None) => return Vec::new(),

@@ -6,7 +6,7 @@ use chrono::{NaiveDate, TimeZone};
 use kuro_domain::dates::{ListRow, local_date, short_time};
 use kuro_domain::history::model::HistoryWithRelations;
 use kuro_domain::history::view::HistoryLine;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
 
 use crate::updates::dates::grouped;
@@ -49,7 +49,7 @@ pub enum Resume<T> {
     NotFound { message: String, toast_ms: u64 },
 }
 
-pub fn resume<T>(next: Vec<T>, kind: EntryKind) -> Resume<T> {
+pub fn resume<T>(next: Vec<T>, kind: Kind) -> Resume<T> {
     match next.into_iter().next() {
         Some(unit) => Resume::Open(unit),
         None => Resume::NotFound { message: not_found_message(kind), toast_ms: NOT_FOUND_TOAST_MS },
@@ -57,19 +57,19 @@ pub fn resume<T>(next: Vec<T>, kind: EntryKind) -> Resume<T> {
 }
 
 /// The toast of a resume that finds no unit (`no_next_chapter`, `no_next_episode`).
-pub fn not_found_message(kind: EntryKind) -> String {
+pub fn not_found_message(kind: Kind) -> String {
     tr(match kind {
-        EntryKind::Manga => MsgKey::no_next_chapter,
-        EntryKind::Anime => MsgKey::no_next_episode,
+        Kind::Manga => MsgKey::no_next_chapter,
+        Kind::Anime => MsgKey::no_next_episode,
     })
 }
 
 /// The text of an empty list: "No results found" while a search is active, else the kind's own text.
-pub fn empty_message(kind: EntryKind, search_active: bool) -> String {
+pub fn empty_message(kind: Kind, search_active: bool) -> String {
     tr(match (search_active, kind) {
         (true, _) => MsgKey::no_results_found,
-        (false, EntryKind::Manga) => MsgKey::information_no_recent_manga,
-        (false, EntryKind::Anime) => MsgKey::information_no_recent_anime,
+        (false, Kind::Manga) => MsgKey::information_no_recent_manga,
+        (false, Kind::Anime) => MsgKey::information_no_recent_anime,
     })
 }
 
@@ -83,14 +83,14 @@ pub fn clear_outcome(cleared: bool) -> String {
 /// row text `Ch. {n} - {time}` / `Ep. {n} - {time}`.
 pub fn history_lines<Tz: TimeZone>(
     rows: &[HistoryWithRelations],
-    kind: EntryKind,
+    kind: Kind,
     today: NaiveDate,
     zone: &Tz,
     relative: bool,
     date_pref: &str,
     locale: &str,
 ) -> Vec<ListRow<HistoryLine>> {
-    let prefix = if kind == EntryKind::Manga { "Ch." } else { "Ep." };
+    let prefix = if kind == Kind::Manga { "Ch." } else { "Ep." };
     let lines = rows.iter().filter(|r| local_date(r.at, zone).is_some()).map(|r| {
         let time = short_time(r.at, zone).unwrap_or_default();
         let line = HistoryLine {
@@ -176,10 +176,10 @@ pub struct RemoveDialog {
     pub cancel: String,
 }
 
-pub fn remove_dialog(kind: EntryKind) -> RemoveDialog {
+pub fn remove_dialog(kind: Kind) -> RemoveDialog {
     let (text, reset) = match kind {
-        EntryKind::Manga => (MsgKey::dialog_with_checkbox_remove_description, MsgKey::dialog_with_checkbox_reset),
-        EntryKind::Anime => {
+        Kind::Manga => (MsgKey::dialog_with_checkbox_remove_description, MsgKey::dialog_with_checkbox_reset),
+        Kind::Anime => {
             (MsgKey::dialog_with_checkbox_remove_description_anime, MsgKey::dialog_with_checkbox_reset_anime)
         }
     };
@@ -227,13 +227,13 @@ mod tests {
 
     #[test]
     fn history_resume_opens_first_or_shows_not_found() {
-        assert_eq!(resume(vec![7, 8], EntryKind::Manga), Resume::Open(7));
+        assert_eq!(resume(vec![7, 8], Kind::Manga), Resume::Open(7));
         assert_eq!(
-            resume(Vec::<i64>::new(), EntryKind::Manga),
+            resume(Vec::<i64>::new(), Kind::Manga),
             Resume::NotFound { message: "Next chapter not found".to_owned(), toast_ms: 4_000 }
         );
         assert_eq!(
-            resume(Vec::<i64>::new(), EntryKind::Anime),
+            resume(Vec::<i64>::new(), Kind::Anime),
             Resume::NotFound { message: "Next Episode not found!".to_owned(), toast_ms: 4_000 }
         );
     }
@@ -266,12 +266,12 @@ mod tests {
 
     #[test]
     fn history_remove_dialog_copy_is_kind_specific() {
-        let manga = remove_dialog(EntryKind::Manga);
+        let manga = remove_dialog(Kind::Manga);
         assert_eq!(manga.title, "Remove");
         assert_eq!(manga.text, "This will remove the read date of this chapter. Are you sure?");
         assert_eq!(manga.reset_label, "Reset all chapters for this manga");
         assert_eq!((manga.confirm.as_str(), manga.cancel.as_str()), ("Remove", "Cancel"));
-        assert_eq!(remove_dialog(EntryKind::Anime).text, "This will remove the watch date of this episode. Are you sure?");
+        assert_eq!(remove_dialog(Kind::Anime).text, "This will remove the watch date of this episode. Are you sure?");
     }
 
     #[test]
@@ -287,14 +287,14 @@ mod tests {
     #[test]
     fn history_empty_text_depends_on_search_and_kind() {
         use kuro_domain::history::view::empty_text;
-        for kind in [EntryKind::Manga, EntryKind::Anime] {
+        for kind in [Kind::Manga, Kind::Anime] {
             for search in [false, true] {
                 assert_eq!(empty_message(kind, search), empty_text(kind, search), "same words as the domain table");
             }
         }
-        assert_eq!(empty_message(EntryKind::Manga, false), "Nothing read recently");
-        assert_eq!(empty_message(EntryKind::Anime, false), "Nothing watched recently");
-        assert_eq!(empty_message(EntryKind::Anime, true), "No results found");
+        assert_eq!(empty_message(Kind::Manga, false), "Nothing read recently");
+        assert_eq!(empty_message(Kind::Anime, false), "Nothing watched recently");
+        assert_eq!(empty_message(Kind::Anime, true), "No results found");
     }
 
     #[test]
@@ -313,7 +313,7 @@ mod tests {
         };
         let day = |d: u32, h: u32| Utc.with_ymd_and_hms(2026, 10, d, h, 5, 0).unwrap().timestamp_millis();
         let today = NaiveDate::from_ymd_opt(2026, 10, 9).unwrap();
-        let lines = history_lines(&[row(1, day(9, 14), 12.0), row(2, day(8, 9), -1.0)], EntryKind::Manga, today, &Utc, true, "", "en");
+        let lines = history_lines(&[row(1, day(9, 14), 12.0), row(2, day(8, 9), -1.0)], Kind::Manga, today, &Utc, true, "", "en");
         let texts: Vec<String> = lines
             .iter()
             .map(|l| match l {

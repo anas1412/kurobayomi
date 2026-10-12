@@ -15,9 +15,9 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GBox, Button, CheckButton, GestureClick, Image, Label, ListBox, Orientation as O};
 use kuro_domain::dates::ListRow;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_domain::updates::repo::UpdatesRepo;
-use kuro_images::art::{ArtKind, ArtRef, Owner};
+use kuro_images::art::{ArtKind, ArtRef};
 use kuro_i18n::{MsgKey, tr};
 
 use crate::data;
@@ -75,7 +75,7 @@ fn on_key_activate(row: &gtk::ListBoxRow, run: impl Fn() + 'static) {
 }
 
 pub struct UpdatesScreen {
-    kind: EntryKind,
+    kind: Kind,
     root: gtk::Overlay,
     /// The selection row under the header: the count, then Select all, Select inverse and Cancel.
     sel_header: GBox,
@@ -103,7 +103,7 @@ pub struct UpdatesScreen {
 
 impl UpdatesScreen {
     /// Builds the screen and starts its query.
-    pub fn new(kind: EntryKind) -> Rc<Self> {
+    pub fn new(kind: Kind) -> Rc<Self> {
         let screen = Rc::new_cyclic(|weak: &Weak<Self>| {
             let col = crate::ui::column();
             let list = crate::ui::scrolled(&col);
@@ -218,7 +218,7 @@ impl UpdatesScreen {
         });
     }
 
-    pub fn kind(&self) -> EntryKind {
+    pub fn kind(&self) -> Kind {
         self.kind
     }
 
@@ -381,7 +381,6 @@ impl UpdatesScreen {
     /// indicator. A read or seen row dims the title and the unit name to 0.38.
     fn row(self: &Rc<Self>, feed_row: &FeedRow, mode: bool) -> gtk::ListBoxRow {
         let row = &feed_row.row;
-        let anime = self.kind == EntryKind::Anime;
         let line = GBox::new(O::Horizontal, 12);
         line.set_size_request(-1, updates_page::ROW_HEIGHT);
         line.set_margin_start(12);
@@ -396,7 +395,7 @@ impl UpdatesScreen {
         line.append(&dot);
 
         let art = ArtRef {
-            owner: if anime { Owner::Anime } else { Owner::Manga },
+            owner: self.kind,
             entry_id: row.entry_id,
             source_id: row.source_id,
             kind: ArtKind::Cover,
@@ -412,7 +411,7 @@ impl UpdatesScreen {
             let Some(screen) = weak.upgrade() else { return };
             if cover_click_enabled(screen.selection_mode()) {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                crate::screens::open_entry(screen.kind == EntryKind::Anime, entry_id);
+                crate::screens::open_entry(screen.kind, entry_id);
             }
         });
         cover.add_controller(cover_tap);
@@ -432,7 +431,7 @@ impl UpdatesScreen {
             star.add_css_class("accent");
             detail.append(&star);
         }
-        if row.fillermark && anime {
+        if row.fillermark && self.kind.is_anime() {
             // the stock theme has no tertiary colour; the warning colour keeps it apart from the bookmark
             let tag = Image::from_icon_name("tag-symbolic");
             tag.set_pixel_size(14);
@@ -442,7 +441,7 @@ impl UpdatesScreen {
         let name = Label::builder().label(&row.item_name).xalign(0.0).single_line_mode(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
         name.set_opacity(alpha);
         detail.append(&name);
-        if let Some(progress) = updates_page::progress_text(anime, row.done, row.progress, row.total_seconds) {
+        if let Some(progress) = updates_page::progress_text(self.kind, row.done, row.progress, row.total_seconds) {
             detail.append(&Label::builder().label(progress).css_classes(["dim-label"]).build());
         }
         texts.append(&detail);
@@ -487,7 +486,6 @@ impl UpdatesScreen {
             _ => None,
         };
         let Some((done, state)) = facts else { return Vec::new() };
-        let anime = self.kind == EntryKind::Anime;
         let weak = Rc::downgrade(self);
         let act = move |run: Box<dyn Fn(&Rc<Self>)>| {
             let weak = weak.clone();
@@ -500,7 +498,7 @@ impl UpdatesScreen {
         let mark = if done { BarAction::MarkUnread } else { BarAction::MarkRead };
         let mut items = vec![
             Item::new(crate::browse::texts::OPEN, 0, act(Box::new(move |screen: &Rc<Self>| screen.open_unit(id, false)))),
-            Item::new(tr(bottom_bar::label(mark, anime)), 1, act(Box::new(move |screen: &Rc<Self>| screen.mark_one(id, !done)))),
+            Item::new(tr(bottom_bar::label(mark, self.kind)), 1, act(Box::new(move |screen: &Rc<Self>| screen.mark_one(id, !done)))),
         ];
         if matches!(state, DownloadState::NotDownloaded | DownloadState::Error) {
             items.push(Item::new(tr(MsgKey::action_download), 1, act(Box::new(move |screen: &Rc<Self>| screen.row_download(DownloadAction::Start, id)))));
@@ -553,10 +551,9 @@ impl UpdatesScreen {
             UpdatesLoad::Loaded(rows) => rows.iter().find(|r| r.row.item_id == id).map(|r| r.row.entry_id),
             _ => None,
         };
-        let anime = self.kind == EntryKind::Anime;
         if let Some(entry_id) = target {
-            let always_external = anime && crate::misc::diet_defaults::PLAYER_ALWAYS_EXTERNAL;
-            open_route::open(anime, entry_id, id, open_route::route(anime, always_external, alt));
+            let always_external = self.kind.is_anime() && crate::misc::diet_defaults::PLAYER_ALWAYS_EXTERNAL;
+            open_route::open(self.kind, entry_id, id, open_route::route(self.kind, always_external, alt));
         }
     }
 
@@ -783,7 +780,6 @@ impl UpdatesScreen {
         if !mode {
             return;
         }
-        let anime = self.kind == EntryKind::Anime;
         let selected: Vec<Selected> = rows
             .iter()
             .filter(|r| r.selected)
@@ -797,15 +793,15 @@ impl UpdatesScreen {
             .collect();
         self.sel_label.set_label(&bottom_bar::selected_text(selected.len()));
         let always_external = crate::misc::diet_defaults::PLAYER_ALWAYS_EXTERNAL;
-        for action in bottom_bar::visible_actions(anime, &selected, always_external) {
-            self.bar.append(&self.bar_button(action, anime));
+        for action in bottom_bar::visible_actions(self.kind, &selected, always_external) {
+            self.bar.append(&self.bar_button(action, self.kind));
         }
     }
 
-    fn bar_button(self: &Rc<Self>, action: BarAction, anime: bool) -> Button {
+    fn bar_button(self: &Rc<Self>, action: BarAction, kind: Kind) -> Button {
         let content = GBox::new(O::Horizontal, 6);
         content.append(&Image::from_icon_name(bottom_bar::icon(action)));
-        content.append(&Label::new(Some(&tr(bottom_bar::label(action, anime)))));
+        content.append(&Label::new(Some(&tr(bottom_bar::label(action, kind)))));
         let button = Button::new();
         button.set_child(Some(&content));
         let weak = Rc::downgrade(self);
@@ -816,7 +812,7 @@ impl UpdatesScreen {
                 BarCommand::Download(DownloadAction::Delete) => {
                     // the bar's delete always asks; OK runs the delete plan (T-42a-032)
                     let confirm = Rc::downgrade(&screen);
-                    confirm_bulk_delete(screen.kind == EntryKind::Anime, move || {
+                    confirm_bulk_delete(screen.kind, move || {
                         if let Some(screen) = confirm.upgrade() {
                             screen.bulk_download(DownloadAction::Delete);
                         }

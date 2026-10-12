@@ -9,7 +9,7 @@
 
 use std::sync::{Arc, OnceLock, RwLock};
 
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_downloads::index::DownloadIndex;
 
 use crate::updates::download_state::{DiskKey, QueueEntry};
@@ -19,27 +19,27 @@ use crate::updates::signals::CacheSignals;
 /// thread when they write (see [`spawn_detached`]); the reads are in-memory lookups.
 pub trait DownloadBackend: Send + Sync {
     /// The queue entry of one unit, when it is queued, running or failed.
-    fn queue_entry(&self, kind: EntryKind, unit_id: i64) -> Option<QueueEntry>;
+    fn queue_entry(&self, kind: Kind, unit_id: i64) -> Option<QueueEntry>;
     /// Whether the unit's files are on disk (the disk check of the download cache).
-    fn on_disk(&self, kind: EntryKind, key: &DiskKey) -> bool;
+    fn on_disk(&self, kind: Kind, key: &DiskKey) -> bool;
     /// Whether the source of an entry is installed (a download needs it).
-    fn source_installed(&self, kind: EntryKind, source_id: i64) -> bool;
+    fn source_installed(&self, kind: Kind, source_id: i64) -> bool;
     /// Queues units of one entry. `external` is the anime "use external downloader" choice read at screen construction.
     /// `false`: nothing was queued.
-    fn enqueue(&self, kind: EntryKind, entry_id: i64, unit_ids: &[i64], external: bool) -> bool;
+    fn enqueue(&self, kind: Kind, entry_id: i64, unit_ids: &[i64], external: bool) -> bool;
     /// Starts the queue.
-    fn start_queue(&self, kind: EntryKind);
+    fn start_queue(&self, kind: Kind);
     /// Starts one unit now.
-    fn start_now(&self, kind: EntryKind, unit_id: i64);
+    fn start_now(&self, kind: Kind, unit_id: i64);
     /// Removes one unit from the queue.
-    fn cancel(&self, kind: EntryKind, unit_id: i64);
+    fn cancel(&self, kind: Kind, unit_id: i64);
     /// Deletes the downloads of these units of one entry.
-    fn delete(&self, kind: EntryKind, entry_id: i64, unit_ids: &[i64]);
+    fn delete(&self, kind: Kind, entry_id: i64, unit_ids: &[i64]);
     /// Deletes every download of an entry (the Storage delete). `false` when its source is not installed and nothing
     /// was deleted (EC-42-T-15).
-    fn delete_entry(&self, kind: EntryKind, entry_id: i64) -> bool;
+    fn delete_entry(&self, kind: Kind, entry_id: i64) -> bool;
     /// The downloaded size in bytes and the unit count of one entry. Blocking; the Storage page calls it off the GTK thread.
-    fn entry_usage(&self, kind: EntryKind, source_id: i64, title: &str) -> (u64, usize);
+    fn entry_usage(&self, kind: Kind, source_id: i64, title: &str) -> (u64, usize);
 }
 
 /// The announcements of the downloads layer: `cache` carries the download-cache and queue-membership changes and the
@@ -94,38 +94,38 @@ pub struct IndexBackend {
 }
 
 impl DownloadBackend for IndexBackend {
-    fn queue_entry(&self, kind: EntryKind, unit_id: i64) -> Option<QueueEntry> {
+    fn queue_entry(&self, kind: Kind, unit_id: i64) -> Option<QueueEntry> {
         let (status, percent) = crate::downloads::live::queued(self.queues.as_ref()?, kind, unit_id)?;
         Some(QueueEntry { status, progress: i64::from(percent) })
     }
 
-    fn on_disk(&self, kind: EntryKind, key: &DiskKey) -> bool {
-        kind == EntryKind::Manga
+    fn on_disk(&self, kind: Kind, key: &DiskKey) -> bool {
+        kind == Kind::Manga
             && self.index.as_ref().is_some_and(|i| i.is_chapter_downloaded(key.source_id, &key.entry_title, &key.unit_name, key.scanlator.as_deref()))
     }
 
-    fn source_installed(&self, _kind: EntryKind, _source_id: i64) -> bool {
+    fn source_installed(&self, _kind: Kind, _source_id: i64) -> bool {
         false
     }
 
-    fn enqueue(&self, _kind: EntryKind, _entry_id: i64, _unit_ids: &[i64], _external: bool) -> bool {
+    fn enqueue(&self, _kind: Kind, _entry_id: i64, _unit_ids: &[i64], _external: bool) -> bool {
         false
     }
 
-    fn start_queue(&self, _kind: EntryKind) {}
+    fn start_queue(&self, _kind: Kind) {}
 
-    fn start_now(&self, _kind: EntryKind, _unit_id: i64) {}
+    fn start_now(&self, _kind: Kind, _unit_id: i64) {}
 
-    fn cancel(&self, _kind: EntryKind, _unit_id: i64) {}
+    fn cancel(&self, _kind: Kind, _unit_id: i64) {}
 
-    fn delete(&self, _kind: EntryKind, _entry_id: i64, _unit_ids: &[i64]) {}
+    fn delete(&self, _kind: Kind, _entry_id: i64, _unit_ids: &[i64]) {}
 
-    fn delete_entry(&self, _kind: EntryKind, _entry_id: i64) -> bool {
+    fn delete_entry(&self, _kind: Kind, _entry_id: i64) -> bool {
         false
     }
 
-    fn entry_usage(&self, kind: EntryKind, source_id: i64, title: &str) -> (u64, usize) {
-        let (EntryKind::Manga, Some(index), Some(runtime)) = (kind, &self.index, &self.runtime) else { return (0, 0) };
+    fn entry_usage(&self, kind: Kind, source_id: i64, title: &str) -> (u64, usize) {
+        let (Kind::Manga, Some(index), Some(runtime)) = (kind, &self.index, &self.runtime) else { return (0, 0) };
         (runtime.block_on(index.size_manga(source_id, title)), index.chapter_count_manga(source_id, title))
     }
 }
@@ -144,12 +144,12 @@ pub fn anime_index(storage: &kuro_domain::storage::StorageManager) -> Option<kur
             if let Err(e) = std::fs::create_dir_all(&cache) {
                 tracing::warn!("the anime download index snapshot folder was not created: {e}");
             }
-            let index = kuro_downloads::anime::cache::AnimeIndex::open(storage.downloads_path(EntryKind::Anime), &cache);
+            let index = kuro_downloads::anime::cache::AnimeIndex::open(storage.downloads_path(Kind::Anime), &cache);
             let follower = index.clone();
             crate::recipe_sources::follow_loads(move || {
                 let index = follower.clone();
                 async move {
-                    index.rescan(crate::recipe_sources::ready(), || crate::recipe_sources::folder_names(EntryKind::Anime)).await;
+                    index.rescan(crate::recipe_sources::ready(), || crate::recipe_sources::folder_names(Kind::Anime)).await;
                 }
             });
             Some(index)
@@ -226,36 +226,36 @@ pub mod fake {
     }
 
     impl DownloadBackend for Fake {
-        fn queue_entry(&self, _: EntryKind, unit_id: i64) -> Option<QueueEntry> {
+        fn queue_entry(&self, _: Kind, unit_id: i64) -> Option<QueueEntry> {
             self.queue.lock().unwrap().get(&unit_id).copied()
         }
-        fn on_disk(&self, _: EntryKind, key: &DiskKey) -> bool {
+        fn on_disk(&self, _: Kind, key: &DiskKey) -> bool {
             self.disk.lock().unwrap().iter().any(|id| key.unit_name == format!("c{id}"))
         }
-        fn source_installed(&self, _: EntryKind, _: i64) -> bool {
+        fn source_installed(&self, _: Kind, _: i64) -> bool {
             self.installed
         }
-        fn enqueue(&self, _: EntryKind, entry_id: i64, unit_ids: &[i64], external: bool) -> bool {
+        fn enqueue(&self, _: Kind, entry_id: i64, unit_ids: &[i64], external: bool) -> bool {
             self.calls.lock().unwrap().push(Call::Enqueue { entry_id, unit_ids: unit_ids.to_vec(), external });
             true
         }
-        fn start_queue(&self, _: EntryKind) {
+        fn start_queue(&self, _: Kind) {
             self.calls.lock().unwrap().push(Call::StartQueue);
         }
-        fn start_now(&self, _: EntryKind, unit_id: i64) {
+        fn start_now(&self, _: Kind, unit_id: i64) {
             self.calls.lock().unwrap().push(Call::StartNow(unit_id));
         }
-        fn cancel(&self, _: EntryKind, unit_id: i64) {
+        fn cancel(&self, _: Kind, unit_id: i64) {
             self.calls.lock().unwrap().push(Call::Cancel(unit_id));
         }
-        fn delete(&self, _: EntryKind, entry_id: i64, unit_ids: &[i64]) {
+        fn delete(&self, _: Kind, entry_id: i64, unit_ids: &[i64]) {
             self.calls.lock().unwrap().push(Call::Delete { entry_id, unit_ids: unit_ids.to_vec() });
         }
-        fn delete_entry(&self, _: EntryKind, entry_id: i64) -> bool {
+        fn delete_entry(&self, _: Kind, entry_id: i64) -> bool {
             self.calls.lock().unwrap().push(Call::DeleteEntry(entry_id));
             self.installed
         }
-        fn entry_usage(&self, _: EntryKind, _: i64, _: &str) -> (u64, usize) {
+        fn entry_usage(&self, _: Kind, _: i64, _: &str) -> (u64, usize) {
             (0, 0)
         }
     }
@@ -268,11 +268,11 @@ mod tests {
     #[test]
     fn the_default_backend_has_no_queue_and_refuses_writes() {
         let backend = IndexBackend { index: None, runtime: None, queues: None };
-        assert_eq!(backend.queue_entry(EntryKind::Manga, 1), None);
-        assert!(!backend.enqueue(EntryKind::Manga, 1, &[2], false));
-        assert!(!backend.delete_entry(EntryKind::Manga, 1));
-        assert!(!backend.source_installed(EntryKind::Anime, 3));
-        assert_eq!(backend.entry_usage(EntryKind::Manga, 1, "T"), (0, 0));
+        assert_eq!(backend.queue_entry(Kind::Manga, 1), None);
+        assert!(!backend.enqueue(Kind::Manga, 1, &[2], false));
+        assert!(!backend.delete_entry(Kind::Manga, 1));
+        assert!(!backend.source_installed(Kind::Anime, 3));
+        assert_eq!(backend.entry_usage(Kind::Manga, 1, "T"), (0, 0));
     }
 
     #[test]
@@ -282,10 +282,10 @@ mod tests {
         index.add_chapter(7, "Source", "Title", "Ch 1");
         let backend = IndexBackend { index: Some(index), runtime: None, queues: None };
         let key = DiskKey { source_id: 7, entry_title: "Title".into(), unit_name: "Ch 1".into(), scanlator: None };
-        assert!(backend.on_disk(EntryKind::Manga, &key));
-        assert!(!backend.on_disk(EntryKind::Anime, &key), "the anime cache is not in the shell yet");
+        assert!(backend.on_disk(Kind::Manga, &key));
+        assert!(!backend.on_disk(Kind::Anime, &key), "the anime cache is not in the shell yet");
         let other = DiskKey { unit_name: "Ch 2".into(), ..key };
-        assert!(!backend.on_disk(EntryKind::Manga, &other));
+        assert!(!backend.on_disk(Kind::Manga, &other));
     }
 
     #[test]

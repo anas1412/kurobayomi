@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use gtk::prelude::*;
 use gtk::{Align, Box as GBox, Button, Label, Orientation as O, glib};
 use kuro_domain::entries::defaults::chapter_default_word;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_i18n::{Arg, MsgKey, tr, tr_plural, trf};
 
 use crate::data;
@@ -79,7 +79,7 @@ pub fn open(manga_id: i64) {
 pub fn build() -> GBox {
     match TARGET.with(Cell::take) {
         Some(id) => page_for(id),
-        None => crate::entry::entry("Title 1", false),
+        None => crate::entry::entry("Title 1", Kind::Manga),
     }
 }
 
@@ -136,7 +136,7 @@ fn now_ms(clock: Instant) -> u64 {
 fn page_for(manga_id: i64) -> GBox {
     tracking::session::refresh_from_host();
     let app = data::app();
-    let db = app.db(EntryKind::Manga);
+    let db = app.db(Kind::Manga);
     let store = app.base.store().clone();
     let ctx = LoadContext {
         library_defaults: ChapterFlags(chapter_default_word(&store)),
@@ -194,7 +194,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
         })),
     );
     let library = action_row.library.clone();
-    let list = ItemList::new(EntryKind::Manga, Callbacks {
+    let list = ItemList::new(Kind::Manga, Callbacks {
         on_row: {
             let weak = Rc::clone(&on_row_view);
             Rc::new(move |id: i64, press: Press| {
@@ -413,7 +413,7 @@ fn assemble(page: Page, runner: Rc<Runner>) -> GBox {
     crate::downloads::live::follow(&page_widget, {
         let weak = weak.clone();
         move |live| {
-            if live.kind == EntryKind::Manga
+            if live.kind == Kind::Manga
                 && let Some(view) = weak.upgrade()
             {
                 view.live_changed(live.id, live.state, live.percent);
@@ -710,7 +710,7 @@ impl View {
                 let weak = weak.clone();
                 move |request: SearchRequest| {
                     let http_source = weak.upgrade().is_some_and(|view| view.page.borrow().ready().is_some_and(|ready| ready.http_source));
-                    handoff::open_search(request, false, http_source);
+                    handoff::open_search(request, Kind::Manga, http_source);
                 }
             }),
             on_copy: Rc::new({
@@ -1038,7 +1038,7 @@ impl View {
     fn open_source_preferences(self: &Rc<Self>) {
         let source_id = self.page.borrow().ready().map(|ready| ready.manga.source);
         if let Some(source_id) = source_id {
-            handoff::open_source_preferences(handoff::SourcePrefsRequest { source_id, anime: false });
+            handoff::open_source_preferences(handoff::SourcePrefsRequest { source_id, kind: Kind::Manga });
         }
     }
 
@@ -1061,7 +1061,7 @@ impl View {
                     runner.send(StoreCmd::ReadTracking { manga_id: id, source_id });
                 }
             };
-            tracking::page::open_sheet(tracking::page::Entry { kind: kuro_track::model::Kind::Manga, id, title }, changed);
+            tracking::page::open_sheet(tracking::page::Entry { kind: Kind::Manga, id, title }, changed);
         }
     }
 
@@ -1104,7 +1104,7 @@ impl View {
     /// Opens the migrate flow for the entry `id`: the request carries its id and title, so the flow can name it, link
     /// to it and replace its page when it finishes.
     fn migrate_entry(&self, id: i64, title: String) {
-        handoff::open_migrate(MigrateRequest { entry_id: id, anime: false, title });
+        handoff::open_migrate(MigrateRequest { entry_id: id, kind: Kind::Manga, title });
     }
 
     /// Copies the link of the entry.
@@ -1151,7 +1151,7 @@ impl View {
             self.toast(message);
             return;
         };
-        let repo = kuro_data::manga::MangaRepo::new(app.db(EntryKind::Manga));
+        let repo = kuro_data::manga::MangaRepo::new(app.db(Kind::Manga));
         let (done, count) = async_channel::bounded::<usize>(1);
         // detached: closing the page does not stop the run (`withNonCancellableContext`)
         handle.spawn(async move {
@@ -1189,7 +1189,7 @@ impl View {
             ui::DialogButton::new(tr(MsgKey::action_migrate_duplicate), ui::Role::Normal, move || {
                 if let Some(view) = weak_migrate.upgrade() {
                     // one primary-key read names the old entry for the migrate dialog
-                    let title = kuro_data::manga::MangaRepo::new(data::app().db(EntryKind::Manga)).by_id(duplicate_id).map(|m| m.title).unwrap_or_default();
+                    let title = kuro_data::manga::MangaRepo::new(data::app().db(Kind::Manga)).by_id(duplicate_id).map(|m| m.title).unwrap_or_default();
                     view.migrate_entry(duplicate_id, title);
                 }
             }),
@@ -1351,7 +1351,7 @@ mod tests {
             let rows: Vec<crate::entry_core::list_model::RowItem> = (1..=3)
                 .map(|id| crate::entry_core::list_model::RowItem { indicator: true, indicator_enabled: true, ..crate::entry_core::list_model::RowItem::new(id, format!("c{id}")) })
                 .collect();
-            let model_list = ItemList::new(EntryKind::Manga, Callbacks {
+            let model_list = ItemList::new(Kind::Manga, Callbacks {
                 on_row: Rc::new(|_: i64, _: Press| {}),
                 on_menu: Rc::new(|_: i64, _: RowAction| {}),
                 on_download: Rc::new(|_: i64, _: Request| {}),
@@ -1416,7 +1416,7 @@ mod tests {
             let dir = tempfile::tempdir().expect("a temporary folder");
             crate::data::install(crate::data::open_in(dir.path()).expect("fresh data")).expect("installed");
             let (nav, _window) = crate::testing::nav();
-            let db = crate::data::app().db(EntryKind::Manga);
+            let db = crate::data::app().db(Kind::Manga);
             let mangas = MangaRepo::new(Arc::clone(&db));
             let id = mangas.insert(&Manga { source: kuro_source::generate_id("Fixture", "en", 1), url: "/series/1".into(), title: "Browsed".into(), ..Manga::create() }).unwrap();
             mangas.update(&MangaUpdate { initialized: Some(true), ..MangaUpdate::new(id) }).unwrap();

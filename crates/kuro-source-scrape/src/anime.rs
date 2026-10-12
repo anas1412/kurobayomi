@@ -1,6 +1,7 @@
 //! An anime recipe as an anime source. Videos are the direct addresses the page gives (a file or an HLS playlist); no
 //! extractors.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -10,7 +11,7 @@ use kuro_source::{FilterList, SourceError};
 
 use crate::engine;
 use crate::fetch::{Fetcher, outside};
-use crate::recipe::{Kind, Listing, Recipe, Template};
+use crate::recipe::{Listing, Recipe, Template};
 
 pub struct ScrapeAnime {
     fetcher: Fetcher,

@@ -1,6 +1,6 @@
 //! History rows of both kinds, the cover key shown next to a row, and the upsert payload.
 
-use crate::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 /// The cover of a history row's entry (`MangaCover`): where the image comes from and whether it is cached.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,7 +65,7 @@ pub struct HistoryRow {
 /// One recording: the item was read or watched at `at`, for `session_ms` (0 for anime).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HistoryUpdate {
-    pub kind: EntryKind,
+    pub kind: Kind,
     pub item_id: i64,
     pub at: i64,
     pub session_ms: i64,

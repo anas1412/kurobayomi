@@ -17,7 +17,8 @@ use super::directory::source_or_stub;
 use super::pages::{MigrateEntriesNav, MigrateEntry, migrate_entries};
 use super::pending;
 use super::primitives::ToastDuration;
-use super::route::{BrowseKind, BrowseRoute};
+use super::route::BrowseRoute;
+use kuro_platform::kind::Kind;
 use super::view::{file_cover_loader, spinner_row};
 
 /// What the screen shows.
@@ -142,17 +143,16 @@ pub fn load(view: &Rc<MigrateEntriesView>, read: Arc<dyn Fn() -> Result<Vec<Migr
 }
 
 /// The favourites of `source_id` of `kind`, as rows.
-fn favourites(kind: BrowseKind, source_id: i64) -> Result<Vec<MigrateEntry>, String> {
+fn favourites(kind: Kind, source_id: i64) -> Result<Vec<MigrateEntry>, String> {
     use kuro_data::anime::AnimeRepo;
     use kuro_data::manga::MangaRepo;
-    use kuro_domain::kind::EntryKind;
 
     match kind {
-        BrowseKind::Manga => MangaRepo::new(crate::data::app().db(EntryKind::Manga))
+        Kind::Manga => MangaRepo::new(crate::data::app().db(Kind::Manga))
             .favorites_by_source(source_id)
             .map(|list| list.into_iter().map(|m| MigrateEntry { id: m.id, title: m.title, cover: m.thumbnail_url }).collect())
             .map_err(|error| error.to_string()),
-        BrowseKind::Anime => AnimeRepo::new(crate::data::app().db(EntryKind::Anime))
+        Kind::Anime => AnimeRepo::new(crate::data::app().db(Kind::Anime))
             .favorites_by_source(source_id)
             .map(|list| list.into_iter().map(|a| MigrateEntry { id: a.id, title: a.title, cover: a.thumbnail_url }).collect())
             .map_err(|error| error.to_string()),
@@ -160,7 +160,7 @@ fn favourites(kind: BrowseKind, source_id: i64) -> Result<Vec<MigrateEntry>, Str
 }
 
 /// The source of a route: the installed one, or a stub.
-fn source_of(kind: BrowseKind, source_id: i64) -> Source {
+fn source_of(kind: Kind, source_id: i64) -> Source {
     source_or_stub(Some(&*super::directory::current(kind)), source_id)
 }
 
@@ -171,13 +171,12 @@ pub fn page() -> Option<gtk::Box> {
         return None;
     }
     let Some(BrowseRoute::MigrateEntries { kind, source_id }) = pending::take_for("migrate_entries") else { return None };
-    let anime = kind == BrowseKind::Anime;
     let source = source_of(kind, source_id);
     let title = page_title(&source);
     let env = MigrateEnv {
         source,
         open_search: Rc::new(move |entry_id, title| {
-            crate::entry_core::handoff::open_migrate(crate::entry_core::handoff::MigrateRequest { entry_id, anime, title: title.to_owned() });
+            crate::entry_core::handoff::open_migrate(crate::entry_core::handoff::MigrateRequest { entry_id, kind, title: title.to_owned() });
         }),
         open_entry: Rc::new(move |id| super::browse_screen::open_entry(kind, id)),
     };

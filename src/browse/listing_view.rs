@@ -14,6 +14,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use kuro_platform::kind::Kind;
 
 use gtk::glib;
 use gtk::prelude::*;
@@ -629,7 +630,7 @@ pub(crate) mod tests {
         let (open_log, action_log) = (Rc::clone(&opened), Rc::clone(&actions));
         let deps = ListingDeps {
             loader: Arc::clone(&script) as Arc<dyn PageLoader>,
-            prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory(), crate::browse::route::BrowseKind::Manga)),
+            prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory(), Kind::Manga)),
             ready: ready_rx,
             stub,
             is_local,
@@ -847,7 +848,7 @@ pub(crate) mod tests {
         let view = ListingView::new(
             ListingDeps {
                 loader: Arc::new(Hang(Arc::clone(&live))),
-                prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory(), crate::browse::route::BrowseKind::Manga)),
+                prefs: Rc::new(BrowsePrefs::new(PrefStore::in_memory(), Kind::Manga)),
                 ready,
                 stub: false,
                 is_local: false,

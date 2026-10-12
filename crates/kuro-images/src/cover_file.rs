@@ -4,13 +4,14 @@
 //! Cover files are plain files under `<data>`, so they survive a cache clear. `write_atomic` is the
 //! `write_source_to_cover_file` of Kotlin with a rename at the end, so a reader never sees a partial file (design section 6.4).
 
+use kuro_platform::kind::Kind;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use kuro_platform::paths::Paths;
 use tokio::io::{AsyncRead, AsyncWriteExt};
 
-use crate::art::{ArtRef, Owner};
+use crate::art::ArtRef;
 use crate::cover_paths::{self, Family};
 use crate::disk_image_cache::DiskImageCache;
 
@@ -136,10 +137,10 @@ pub fn copy_custom(paths: &dyn Paths, family: Family, from_id: i64, to_id: i64) 
 /// The migration step (T-34a-051): copies the custom cover of `from_id` to `to_id`, and for an anime entry its custom
 /// background too. Nothing here can fail the migration: a missing source or a failed copy is skipped (and logged by
 /// `copy_custom`). Returns how many files were copied.
-pub fn migrate_custom(paths: &dyn Paths, owner: Owner, from_id: i64, to_id: i64) -> usize {
+pub fn migrate_custom(paths: &dyn Paths, owner: Kind, from_id: i64, to_id: i64) -> usize {
     let families: &[Family] = match owner {
-        Owner::Manga => &[Family::MangaCover],
-        Owner::Anime => &[Family::AnimeCover, Family::AnimeBackground],
+        Kind::Manga => &[Family::MangaCover],
+        Kind::Anime => &[Family::AnimeCover, Family::AnimeBackground],
     };
     families.iter().filter(|family| copy_custom(paths, **family, from_id, to_id)).count()
 }
@@ -329,12 +330,12 @@ mod tests {
         };
         let read = |family: Family, id: i64| std::fs::read(cover_paths::custom_file(&paths, family, id)).ok();
         put(Family::MangaCover, 1, b"manga");
-        assert_eq!(migrate_custom(&paths, Owner::Manga, 1, 2), 1);
+        assert_eq!(migrate_custom(&paths, Kind::Manga, 1, 2), 1);
         assert_eq!(read(Family::MangaCover, 2).as_deref(), Some(&b"manga"[..]));
 
         put(Family::AnimeCover, 1, b"cover");
         put(Family::AnimeBackground, 1, b"background");
-        assert_eq!(migrate_custom(&paths, Owner::Anime, 1, 2), 2);
+        assert_eq!(migrate_custom(&paths, Kind::Anime, 1, 2), 2);
         assert_eq!(read(Family::AnimeCover, 2).as_deref(), Some(&b"cover"[..]));
         assert_eq!(read(Family::AnimeBackground, 2).as_deref(), Some(&b"background"[..]));
     }
@@ -350,9 +351,9 @@ mod tests {
         }
         // the cover target is a folder, so that copy fails; the background still copies
         std::fs::create_dir_all(cover_paths::custom_file(&paths, Family::AnimeCover, 2)).unwrap();
-        assert_eq!(migrate_custom(&paths, Owner::Anime, 1, 2), 1);
+        assert_eq!(migrate_custom(&paths, Kind::Anime, 1, 2), 1);
         assert!(cover_paths::custom_file(&paths, Family::AnimeBackground, 2).is_file());
         // and an entry with no custom files migrates cleanly
-        assert_eq!(migrate_custom(&paths, Owner::Manga, 8, 9), 0);
+        assert_eq!(migrate_custom(&paths, Kind::Manga, 8, 9), 0);
     }
 }

@@ -13,7 +13,7 @@ use kuro_db::handle::Db;
 use kuro_domain::items::chapter_sync::{ChapterRenames, ChapterSyncError, ChapterSyncOptions, NoRenames, SyncChapters};
 use kuro_domain::items::episode_sync::{EpisodeRenames, EpisodeSyncError, EpisodeSyncOptions, NoEpisodeRenames, SyncEpisodes};
 use kuro_domain::items::source_sync::MangaSyncLocks;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_source::anime::SEpisode;
 use kuro_source::local::LOCAL_SOURCE_ID;
 use kuro_source::model::chapter::SChapter;
@@ -152,7 +152,7 @@ impl ItemSync for DbItemSync {
         let is_local = entry.source == LOCAL_SOURCE_ID;
         let prepare = |_: &mut SChapter| {};
         match entry.kind {
-            EntryKind::Manga => {
+            Kind::Manga => {
                 let manga = load_manga(self.manga_db.clone(), entry.id).await?;
                 let raw: Vec<SChapter> = fetched.items.iter().map(to_source_chapter).collect();
                 let opts = ChapterSyncOptions {
@@ -165,7 +165,7 @@ impl ItemSync for DbItemSync {
                 let new = self.chapters.run(raw, &manga, opts, &prepare).await.map_err(chapter_error)?;
                 Ok(new.iter().map(chapter_item).collect())
             }
-            EntryKind::Anime => {
+            Kind::Anime => {
                 let anime = load_anime(self.anime_db.clone(), entry.id).await?;
                 let raw: Vec<SEpisode> = fetched.items.iter().map(to_source_episode).collect();
                 let opts = EpisodeSyncOptions {

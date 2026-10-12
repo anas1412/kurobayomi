@@ -5,7 +5,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use kuro_track::model::{Kind, TrackerId};
+use kuro_platform::kind::Kind;
+use kuro_track::model::TrackerId;
 use kuro_track::tracker::Tracker;
 
 use super::facts::{facts_of, summarize, Summary};

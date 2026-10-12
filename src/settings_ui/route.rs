@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gtk::prelude::*;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_prefs::prefs::Prefs;
 use kuro_prefs::source::SourcePrefs;
 
@@ -75,7 +75,7 @@ fn data_storage_toolbar() -> Vec<gtk::Widget> {
 }
 
 /// The user categories of a kind (the Default category is not one of them), as the settings lists need them.
-fn categories_of(kind: EntryKind) -> Vec<Category> {
+fn categories_of(kind: Kind) -> Vec<Category> {
     let all = crate::data::app().categories(kind).repo().all().unwrap_or_else(|e| {
         tracing::warn!(error = %e, "the categories could not be read");
         Vec::new()
@@ -87,7 +87,7 @@ fn categories_of(kind: EntryKind) -> Vec<Category> {
 }
 
 /// Pushes the Categories screen on the tab of `kind`.
-fn open_categories(kind: EntryKind) {
+fn open_categories(kind: Kind) {
     let page = crate::screens::build("categories");
     view::show_kind(&page, library::categories_tab(kind));
     crate::ui::push(&page);
@@ -110,12 +110,12 @@ fn library_page() -> Option<Built> {
     let prefs = Rc::new(prefs());
     let store = prefs.store().clone();
     let (for_state, for_tree) = (Rc::clone(&prefs), Rc::clone(&prefs));
-    let open: Rc<dyn Fn(EntryKind)> = Rc::new(open_categories);
+    let open: Rc<dyn Fn(Kind)> = Rc::new(open_categories);
     Some(view::live_page(
         &store,
         move || crate::settings_ui::library_update::rule_state(&for_state),
         move || {
-            let typed = library::page_rows(&for_tree, &categories_of(EntryKind::Anime), &categories_of(EntryKind::Manga), Rc::clone(&open));
+            let typed = library::page_rows(&for_tree, &categories_of(Kind::Anime), &categories_of(Kind::Manga), Rc::clone(&open));
             merge(spec_tree("settings_library", for_tree.store()), typed)
         },
         toolbar("settings_library"),
@@ -186,7 +186,7 @@ fn loose_page(id: &str, rows: Vec<PreferenceItem>) -> Option<Built> {
 /// The rows of a settings screen for the search index: the spec rows, with this module's typed rows merged in.
 pub fn tree(id: &str) -> Vec<Preference> {
     let prefs = prefs();
-    let (anime, manga) = (categories_of(EntryKind::Anime), categories_of(EntryKind::Manga));
+    let (anime, manga) = (categories_of(Kind::Anime), categories_of(Kind::Manga));
     tree_with(id, &prefs, &anime, &manga, repo_counts())
 }
 
@@ -205,7 +205,7 @@ fn loose(rows: Vec<PreferenceItem>) -> Vec<Preference> {
 /// [`tree`] over the given preferences and category lists.
 pub fn tree_with(id: &str, prefs: &Prefs, anime: &[Category], manga: &[Category], counts: browse::RepoCounts) -> Vec<Preference> {
     let spec = spec_tree(id, prefs.store());
-    let open: Rc<dyn Fn(EntryKind)> = Rc::new(|_| {});
+    let open: Rc<dyn Fn(Kind)> = Rc::new(|_| {});
     match id {
         "settings_appearance" => merge(spec, appearance::page_rows(prefs)),
         "settings_library" => merge(spec, library::page_rows(prefs, anime, manga, open)),

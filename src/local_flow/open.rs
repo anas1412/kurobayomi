@@ -11,7 +11,7 @@ use kuro_data::DataResult;
 use kuro_data::anime::AnimeRepo;
 use kuro_data::episode::{Episode, EpisodeRepo};
 use kuro_db::Db;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_local::LOCAL_SOURCE_ID;
 
 thread_local! {
@@ -19,7 +19,7 @@ thread_local! {
 }
 
 /// The id of the first local library entry of `kind` with this title.
-pub fn local_id_with_title(db: &Arc<Db>, kind: EntryKind, title: &str) -> DataResult<Option<i64>> {
+pub fn local_id_with_title(db: &Arc<Db>, kind: Kind, title: &str) -> DataResult<Option<i64>> {
     Ok(super::local_rows(db, kind)?.into_iter().find(|row| row.title == title).map(|row| row.id))
 }
 
@@ -50,7 +50,7 @@ impl Opening {
 
 /// The episode named `episode_name` of the local anime titled `title`, when both exist.
 pub fn opening_of(db: &Arc<Db>, title: &str, episode_name: &str) -> DataResult<Option<Opening>> {
-    let Some(anime_id) = local_id_with_title(db, EntryKind::Anime, title)? else {
+    let Some(anime_id) = local_id_with_title(db, Kind::Anime, title)? else {
         return Ok(None);
     };
     let episodes = EpisodeRepo::new(Arc::clone(db)).by_anime_id(anime_id)?;
@@ -107,9 +107,9 @@ mod tests {
     fn only_a_local_library_title_resolves() {
         let root = tempfile::tempdir().expect("temp dir");
         let db = manga_db(root.path());
-        let done = add(&db, EntryKind::Manga, &series(root.path()), 1_000).expect("add").remove(0).result.expect("sync");
-        assert_eq!(local_id_with_title(&db, EntryKind::Manga, "Series").expect("lookup"), Some(done.entry_id));
-        assert_eq!(local_id_with_title(&db, EntryKind::Manga, "Title 1").expect("lookup"), None);
+        let done = add(&db, Kind::Manga, &series(root.path()), 1_000).expect("add").remove(0).result.expect("sync");
+        assert_eq!(local_id_with_title(&db, Kind::Manga, "Series").expect("lookup"), Some(done.entry_id));
+        assert_eq!(local_id_with_title(&db, Kind::Manga, "Title 1").expect("lookup"), None);
     }
 
     #[test]
@@ -118,9 +118,9 @@ mod tests {
         let root = tempfile::tempdir().expect("root");
         video(root.path(), "Show", "Show - 1.mkv");
         video(root.path(), "Show", "Show - 2.mkv");
-        add(&db, EntryKind::Anime, root.path(), 1_000).expect("scan");
+        add(&db, Kind::Anime, root.path(), 1_000).expect("scan");
 
-        let anime_id = local_id_with_title(&db, EntryKind::Anime, "Show").expect("lookup").expect("local Show");
+        let anime_id = local_id_with_title(&db, Kind::Anime, "Show").expect("lookup").expect("local Show");
         let episodes = EpisodeRepo::new(Arc::clone(&db));
         let first = episodes.by_anime_id(anime_id).expect("rows").into_iter().find(|e| e.name == "Show - 1").expect("episode 1 row");
         episodes.update(&EpisodeUpdate { last_second_seen: Some(90), ..EpisodeUpdate::new(first.id) }).expect("position");
@@ -137,8 +137,8 @@ mod tests {
         let (_db_dir, db) = anime_db();
         let root = tempfile::tempdir().expect("root");
         video(root.path(), "Show", "Show - 1.mkv");
-        add(&db, EntryKind::Anime, root.path(), 1_000).expect("scan");
-        let anime_id = local_id_with_title(&db, EntryKind::Anime, "Show").expect("lookup").expect("local Show");
+        add(&db, Kind::Anime, root.path(), 1_000).expect("scan");
+        let anime_id = local_id_with_title(&db, Kind::Anime, "Show").expect("lookup").expect("local Show");
         let episode = EpisodeRepo::new(Arc::clone(&db)).by_anime_id(anime_id).expect("rows").remove(0);
         assert_eq!(opening_by_id(&db, episode.id).expect("lookup").expect("local episode").path, episode.url);
 
@@ -150,6 +150,6 @@ mod tests {
         let remote_id = EpisodeRepo::new(Arc::clone(&db)).by_anime_id(remote).expect("rows").remove(0).id;
         assert_eq!(opening_by_id(&db, remote_id).expect("lookup"), None, "a remote episode keeps its own player");
         assert_eq!(opening_by_id(&db, 9_999).expect("lookup"), None, "a missing episode");
-        assert_eq!(local_id_with_title(&db, EntryKind::Anime, "Remote").expect("lookup"), None, "a remote title is not local");
+        assert_eq!(local_id_with_title(&db, Kind::Anime, "Remote").expect("lookup"), None, "a remote title is not local");
     }
 }

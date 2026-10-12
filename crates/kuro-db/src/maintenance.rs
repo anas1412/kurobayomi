@@ -27,12 +27,6 @@ pub fn after_chapter_delete(c: &Connection, removed_chapters: usize) -> DbResult
     Ok(AfterDelete { checkpointed: true, offer_vacuum: true })
 }
 
-/// Call after a legacy import. ANALYZE always runs: an imported file has no statistics for the new indexes.
-pub fn after_legacy_import(c: &Connection) -> DbResult<()> {
-    c.execute_batch("ANALYZE")?;
-    Ok(())
-}
-
 /// Call after a restore. ANALYZE runs when more than [`BULK_ENTRY_RESTORE`] entries were restored. Returns whether
 /// it ran.
 pub fn after_restore(c: &Connection, restored_entries: usize) -> DbResult<bool> {
@@ -81,17 +75,13 @@ mod tests {
     }
 
     #[test]
-    fn analyze_runs_after_a_legacy_import_and_after_a_large_restore_only() {
+    fn analyze_runs_after_a_large_restore_only() {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch("CREATE TABLE t(x); CREATE INDEX ti ON t(x);").unwrap();
         assert!(!after_restore(&c, 10).unwrap());
         assert!(!has_stats(&c), "a small restore does not analyze");
         assert!(after_restore(&c, BULK_ENTRY_RESTORE + 1).unwrap());
         assert!(has_stats(&c));
-        let c2 = Connection::open_in_memory().unwrap();
-        c2.execute_batch("CREATE TABLE t(x);").unwrap();
-        after_legacy_import(&c2).unwrap();
-        assert!(has_stats(&c2));
     }
 
     #[test]

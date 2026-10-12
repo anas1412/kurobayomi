@@ -1,13 +1,13 @@
 //! Library read path: one `LibraryRow` per (favourite entry, category link). The SQL lives in `kuro-db`
 //! (`libraryView`, `animelibView`) and the row mapping in `kuro-data`; this file only joins them.
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use kuro_db::handle::Db;
 
 use super::model::LibraryRow;
 use crate::error::DomainError;
-use crate::kind::EntryKind;
 
 /// Reads the library rows of either kind.
 pub struct LibraryRepo {
@@ -21,14 +21,14 @@ impl LibraryRepo {
 
     /// Every favourite entry, once per category it is in (an entry in no category has `category = 0`).
     /// A database error is returned as `Err`; NULL aggregates are already coalesced in the view.
-    pub fn all(&self, kind: EntryKind) -> Result<Vec<LibraryRow>, DomainError> {
+    pub fn all(&self, kind: Kind) -> Result<Vec<LibraryRow>, DomainError> {
         Ok(match kind {
-            EntryKind::Manga => kuro_data::manga::MangaRepo::new(self.db.clone())
+            Kind::Manga => kuro_data::manga::MangaRepo::new(self.db.clone())
                 .library()?
                 .iter()
                 .map(LibraryRow::from_manga)
                 .collect(),
-            EntryKind::Anime => kuro_data::anime::AnimeRepo::new(self.db.clone())
+            Kind::Anime => kuro_data::anime::AnimeRepo::new(self.db.clone())
                 .library()?
                 .iter()
                 .map(LibraryRow::from_anime)
@@ -80,7 +80,7 @@ mod tests {
             .map(|n| kuro_data::category::create_manga_category(&db, &format!("c{n}"), 0).unwrap())
             .collect();
         repo.set_categories(in_three, &cats).unwrap();
-        let rows = LibraryRepo::new(db).all(EntryKind::Manga).unwrap();
+        let rows = LibraryRepo::new(db).all(Kind::Manga).unwrap();
         assert_eq!(rows.iter().filter(|r| r.id == in_three).count(), 3);
         let lone: Vec<&LibraryRow> = rows.iter().filter(|r| r.id == none).collect();
         assert_eq!((lone.len(), lone[0].category), (1, 0));
@@ -96,7 +96,7 @@ mod tests {
         chapter(&db, id, Some("B"), true);
         chapter(&db, id, None, false);
         exclude(&db, id, "B");
-        let row = LibraryRepo::new(db).all(EntryKind::Manga).unwrap().remove(0);
+        let row = LibraryRepo::new(db).all(Kind::Manga).unwrap().remove(0);
         assert_eq!((row.total, row.done, row.pending()), (3, 1, 2));
         assert!(row.has_started());
         assert_eq!(row.fillermarks, 0, "manga has no fillermarks");
@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn an_empty_library_gives_no_rows_and_anime_rows_follow_the_same_rule() {
         let (_d, db) = manga_db();
-        assert!(LibraryRepo::new(db).all(EntryKind::Manga).unwrap().is_empty());
+        assert!(LibraryRepo::new(db).all(Kind::Manga).unwrap().is_empty());
         let (_d2, adb) = anime_db();
         let anime = kuro_data::anime::AnimeRepo::new(adb.clone());
         let id = anime
@@ -114,7 +114,7 @@ mod tests {
         let c1 = kuro_data::category::create_anime_category(&adb, "one", 0).unwrap();
         let c2 = kuro_data::category::create_anime_category(&adb, "two", 0).unwrap();
         anime.set_categories(id, &[c1, c2]).unwrap();
-        let rows = LibraryRepo::new(adb).all(EntryKind::Anime).unwrap();
+        let rows = LibraryRepo::new(adb).all(Kind::Anime).unwrap();
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|r| r.id == id && r.done == 0 && r.total == 0));
     }

@@ -15,7 +15,6 @@ use tokio::sync::watch;
 
 use super::directory::{SourceDirectory, source_or_stub};
 use super::primitives::stub_source_label;
-use super::route::BrowseKind;
 use super::source_prefs_page::SourcePrefsPage;
 use crate::entry_core::handoff::SourcePrefsRequest;
 
@@ -47,7 +46,7 @@ pub fn prefs_page(store: PrefStore, source_id: i64, rows: Vec<SourcePref>) -> So
 
 /// The directory the request's kind reads.
 fn directory_of(request: &SourcePrefsRequest) -> Arc<dyn SourceDirectory> {
-    super::directory::current(if request.anime { BrowseKind::Anime } else { BrowseKind::Manga })
+    super::directory::current(request.kind)
 }
 
 /// The page for the parked request, as `screens::build` asks for it. `None` leaves the screen to its sample page: no app

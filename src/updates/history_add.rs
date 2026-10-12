@@ -7,9 +7,9 @@
 use std::sync::Arc;
 
 use kuro_data::anime::AnimeRepo;
-use kuro_data::category::{CategoryKind, CategoryRepo};
+use kuro_data::category::CategoryRepo;
 use kuro_data::manga::MangaRepo;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_prefs::library::LibraryPrefs;
 
 use crate::browse::entries::{CategoryChoice, FavoriteStore, add_entry, add_entry_to, chooser_rows};
@@ -67,16 +67,16 @@ pub fn confirm_chooser(store: &dyn FavoriteStore, id: i64, now_ms: i64, picked: 
 /// The production store of one kind over the app databases. An add also applies the default episode flags (anime) and
 /// binds the enhanced trackers through [`track_binding`] (EC-42-H-14); the confirm path reaches both through the same
 /// `after_add`.
-pub fn store(kind: EntryKind) -> Arc<dyn FavoriteStore> {
+pub fn store(kind: Kind) -> Arc<dyn FavoriteStore> {
     let app = crate::data::app();
     let db = app.db(kind);
     let library = LibraryPrefs::new(app.base.store().clone());
     match kind {
-        EntryKind::Manga => {
+        Kind::Manga => {
             let manga = MangaRepo::new(db.clone());
             let inner = Arc::new(crate::browse::repo_store::RepoStore::new(
                 manga.clone(),
-                CategoryRepo::new(db, CategoryKind::Manga),
+                CategoryRepo::new(db, Kind::Manga),
                 library.default_manga_category.clone(),
                 Arc::new(|_| 0),
             ));
@@ -85,10 +85,10 @@ pub fn store(kind: EntryKind) -> Arc<dyn FavoriteStore> {
             });
             Arc::new(track_binding::BindingStore::new(inner, lookup, track_binding::binder(kind)))
         }
-        EntryKind::Anime => Arc::new(
+        Kind::Anime => Arc::new(
             crate::browse::repo_store::AnimeStore::new(
                 AnimeRepo::new(db.clone()),
-                CategoryRepo::new(db, CategoryKind::Anime),
+                CategoryRepo::new(db, Kind::Anime),
                 library.default_anime_category.clone(),
                 Arc::new(|_| 0),
                 Arc::new(|_| 0),

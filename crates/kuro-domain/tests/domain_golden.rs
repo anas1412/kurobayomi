@@ -1,6 +1,7 @@
 //! Golden and integration tests of the domain layer (T-10a-036). They use only the public API, `kuro-testkit` and a
 //! migrated database in a temporary directory. Test names follow `p1-edge-cases-and-tests.md` section 4.
 
+use kuro_platform::kind::Kind;
 use std::sync::{Arc, Mutex};
 
 use kuro_data::chapter::{Chapter, ChapterRepo};
@@ -12,7 +13,6 @@ use kuro_domain::app::status::{ChapterDownloads, SetReadStatus, SetSeenResult, S
 use kuro_domain::app::update::{CoverCache, UpdateManga};
 use kuro_domain::items::chapter_sync::{ChapterSyncOptions, NoRenames, SyncChapters};
 use kuro_domain::items::source_sync::MangaSyncLocks;
-use kuro_domain::kind::EntryKind;
 use kuro_domain::track::delayed::{DelayedTrackingStore, DelayedTrackingWorker, QUEUE_FILE, ReplayOutcome, TrackReplay};
 use kuro_prefs::store::PrefStore;
 use kuro_source::model::SChapter;
@@ -436,7 +436,7 @@ mod domain_end_to_end {
     /// A tracker the test switches online: `replay` pushes the progress and records it.
     struct FakeTracker {
         online: tokio::sync::watch::Sender<bool>,
-        pushed: Mutex<Vec<(EntryKind, i64, f32)>>,
+        pushed: Mutex<Vec<(Kind, i64, f32)>>,
     }
 
     #[async_trait::async_trait]
@@ -446,7 +446,7 @@ mod domain_end_to_end {
             let _ = rx.wait_for(|up| *up).await;
         }
 
-        async fn replay(&self, kind: EntryKind, track_id: i64, progress: f32) -> ReplayOutcome {
+        async fn replay(&self, kind: Kind, track_id: i64, progress: f32) -> ReplayOutcome {
             self.pushed.lock().expect("lock").push((kind, track_id, progress));
             ReplayOutcome::Done
         }
@@ -479,12 +479,12 @@ mod domain_end_to_end {
         let tracker = Arc::new(FakeTracker { online: up, pushed: Mutex::default() });
         let queue_path = dir.path().join(QUEUE_FILE);
         let store = Arc::new(DelayedTrackingStore::new(queue_path.clone()));
-        store.add(EntryKind::Manga, 7, progress).expect("queue");
+        store.add(Kind::Manga, 7, progress).expect("queue");
         let worker = DelayedTrackingWorker::new(store.clone(), tracker.clone());
         worker.schedule();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(tracker.pushed.lock().expect("lock").is_empty(), "offline: nothing is pushed");
-        assert_eq!(store.items(EntryKind::Manga), vec![(7, 1.0_f32)], "and the progress waits in the queue");
+        assert_eq!(store.items(Kind::Manga), vec![(7, 1.0_f32)], "and the progress waits in the queue");
 
         // Online again: the worker replays the item and empties the queue.
         tracker.online.send_replace(true);
@@ -496,7 +496,7 @@ mod domain_end_to_end {
         .await
         .expect("the worker finishes");
 
-        assert_eq!(*tracker.pushed.lock().expect("lock"), vec![(EntryKind::Manga, 7, 1.0_f32)], "tracker state");
+        assert_eq!(*tracker.pushed.lock().expect("lock"), vec![(Kind::Manga, 7, 1.0_f32)], "tracker state");
         assert!(store.is_empty(), "queue state");
         assert!(DelayedTrackingStore::new(queue_path).is_empty(), "the queue file is empty too");
         let c1 = stored_chapters(&db, id).into_iter().find(|c| c.url == "/c1").expect("c1");

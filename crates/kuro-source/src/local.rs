@@ -2,6 +2,7 @@
 //! source with id 0 that reads the user's own files. This module holds only its identity: the file reading lives in
 //! `kuro-local`. The identity is built once and every caller gets the same `Arc`.
 
+use kuro_platform::kind::Kind;
 use std::sync::{Arc, OnceLock};
 
 use crate::identity::display_name;
@@ -15,33 +16,26 @@ pub const LOCAL_MANGA_NAME: &str = "Local manga source";
 /// `AYMR.strings.local_anime_source`.
 pub const LOCAL_ANIME_NAME: &str = "Local anime source";
 
-/// Which local source an identity names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LocalKind {
-    Manga,
-    Anime,
-}
-
 /// The identity of a local source: its id, language and name.
 #[derive(Debug, PartialEq, Eq)]
 pub struct LocalSource {
-    kind: LocalKind,
+    kind: Kind,
 }
 
 static MANGA: OnceLock<Arc<LocalSource>> = OnceLock::new();
 static ANIME: OnceLock<Arc<LocalSource>> = OnceLock::new();
 
 /// The local source of `kind`. Built on the first call; later calls return the same `Arc`.
-pub fn local_source(kind: LocalKind) -> Arc<LocalSource> {
+pub fn local_source(kind: Kind) -> Arc<LocalSource> {
     let cell = match kind {
-        LocalKind::Manga => &MANGA,
-        LocalKind::Anime => &ANIME,
+        Kind::Manga => &MANGA,
+        Kind::Anime => &ANIME,
     };
     Arc::clone(cell.get_or_init(|| Arc::new(LocalSource { kind })))
 }
 
 impl LocalSource {
-    pub fn kind(&self) -> LocalKind {
+    pub fn kind(&self) -> Kind {
         self.kind
     }
 
@@ -55,8 +49,8 @@ impl LocalSource {
 
     pub fn name(&self) -> &'static str {
         match self.kind {
-            LocalKind::Manga => LOCAL_MANGA_NAME,
-            LocalKind::Anime => LOCAL_ANIME_NAME,
+            Kind::Manga => LOCAL_MANGA_NAME,
+            Kind::Anime => LOCAL_ANIME_NAME,
         }
     }
 
@@ -83,7 +77,7 @@ mod tests {
 
     #[test]
     fn the_manga_local_source_has_id_zero_other_language_and_its_name() {
-        let local = local_source(LocalKind::Manga);
+        let local = local_source(Kind::Manga);
         assert_eq!(local.id(), 0);
         assert_eq!(local.lang(), "other");
         assert_eq!(local.name(), "Local manga source");
@@ -92,17 +86,17 @@ mod tests {
 
     #[test]
     fn the_anime_local_source_has_the_same_id_and_language_and_its_own_name() {
-        let local = local_source(LocalKind::Anime);
+        let local = local_source(Kind::Anime);
         assert_eq!((local.id(), local.lang()), (0, "other"));
         assert_eq!(local.name(), "Local anime source");
     }
 
     #[test]
     fn the_registry_gets_the_same_arc_on_every_call() {
-        let first = local_source(LocalKind::Manga);
-        let second = local_source(LocalKind::Manga);
+        let first = local_source(Kind::Manga);
+        let second = local_source(Kind::Manga);
         assert!(Arc::ptr_eq(&first, &second), "the identity is built once");
-        assert!(!Arc::ptr_eq(&first, &local_source(LocalKind::Anime)));
+        assert!(!Arc::ptr_eq(&first, &local_source(Kind::Anime)));
     }
 
     #[test]

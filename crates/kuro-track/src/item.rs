@@ -1,8 +1,9 @@
 //! One row of the tracking sheet and the assembly of the rows of an entry (`mapToTrackItem`, behaviour 3.4).
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
-use crate::model::{Kind, TrackerId};
+use crate::model::TrackerId;
 use crate::record::TrackRecord;
 use crate::tracker::Tracker;
 

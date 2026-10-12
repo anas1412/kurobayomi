@@ -1,7 +1,7 @@
 //! `Category`, `CategoryUpdate` and the system ("Default") category rules (`Category.kt`).
 
+use kuro_platform::kind::Kind;
 use crate::SYSTEM_CATEGORY_ID;
-use crate::kind::EntryKind;
 use crate::library::sort::LibrarySort;
 
 /// One row of `categories`. `order` is the `sort` column.
@@ -27,13 +27,13 @@ impl Category {
     }
 
     /// The sort this category shows (`Category.sort(kind)`).
-    pub fn sort(&self, kind: EntryKind) -> LibrarySort {
+    pub fn sort(&self, kind: Kind) -> LibrarySort {
         LibrarySort::from_flags(kind, Some(self.flags))
     }
 }
 
 /// The sort of an optional category: `Category?.sort`, where a missing category gives the default sort.
-pub fn sort_of(category: Option<&Category>, kind: EntryKind) -> LibrarySort {
+pub fn sort_of(category: Option<&Category>, kind: Kind) -> LibrarySort {
     match category {
         Some(c) => c.sort(kind),
         None => LibrarySort::from_flags(kind, None),
@@ -69,9 +69,9 @@ mod tests {
     #[test]
     fn sort_of_handles_the_null_case() {
         let asc_date = cat(2, 0x5C);
-        assert_eq!(sort_of(Some(&asc_date), EntryKind::Manga).ty, crate::library::sort::SortType::DateAdded);
-        assert_eq!(sort_of(None, EntryKind::Manga), LibrarySort::DEFAULT);
-        assert_eq!(cat(2, 0).sort(EntryKind::Manga).dir, crate::library::sort::Direction::Descending);
+        assert_eq!(sort_of(Some(&asc_date), Kind::Manga).ty, crate::library::sort::SortType::DateAdded);
+        assert_eq!(sort_of(None, Kind::Manga), LibrarySort::DEFAULT);
+        assert_eq!(cat(2, 0).sort(Kind::Manga).dir, crate::library::sort::Direction::Descending);
     }
 
     #[test]

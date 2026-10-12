@@ -5,17 +5,17 @@
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 use kuro_i18n::{MsgKey, tr};
 
 use crate::library::actions::DeleteChoice;
 use crate::ui::{DialogButton, Role};
 
 /// Shows the dialog. `on_confirm` gets the choice when OK is pressed.
-pub fn show(kind: EntryKind, downloads_offered: bool, on_confirm: impl Fn(DeleteChoice) + 'static) {
+pub fn show(kind: Kind, downloads_offered: bool, on_confirm: impl Fn(DeleteChoice) + 'static) {
     let (library_label, downloads_label) = match kind {
-        EntryKind::Manga => (MsgKey::manga_from_library, MsgKey::downloaded_chapters),
-        EntryKind::Anime => (MsgKey::anime_from_library, MsgKey::downloaded_episodes),
+        Kind::Manga => (MsgKey::manga_from_library, MsgKey::downloaded_chapters),
+        Kind::Anime => (MsgKey::anime_from_library, MsgKey::downloaded_episodes),
     };
     let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
     let from_library = gtk::CheckButton::with_label(&tr(library_label));

@@ -158,7 +158,7 @@ pub fn repo_remove_body(_name: &str, base_url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use kuro_extensions::repo::Kind;
+    use kuro_platform::kind::Kind;
     use kuro_prefs::source::SourcePrefs;
     use kuro_prefs::store::PrefStore;
 

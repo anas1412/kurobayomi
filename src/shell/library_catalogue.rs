@@ -10,7 +10,7 @@ use kuro_data::anime::AnimeRepo;
 use kuro_data::manga::MangaRepo;
 use kuro_db::handle::Db;
 
-use super::nav::Kind;
+use kuro_platform::kind::Kind;
 use super::search_provider::{self, Catalogue, Hit, Provider};
 
 /// The library databases as a [`Catalogue`].

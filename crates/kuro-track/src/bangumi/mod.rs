@@ -10,6 +10,7 @@ pub mod status;
 #[cfg(test)]
 mod tests;
 
+use kuro_platform::kind::Kind;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -24,7 +25,7 @@ use self::status::BgmStatus;
 use crate::error::TrackError;
 use crate::messages::MsgKey;
 use crate::model::search::{AnimeTrackSearch, MangaTrackSearch};
-use crate::model::{AnimeTrack, Kind, MangaTrack, TrackerId};
+use crate::model::{AnimeTrack, MangaTrack, TrackerId};
 use crate::shikimori::api::OAuthClient;
 use crate::tracker::{AnimeTracker, LogoRef, MangaTracker, Tracker};
 

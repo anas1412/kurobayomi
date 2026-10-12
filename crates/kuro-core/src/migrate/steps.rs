@@ -6,6 +6,7 @@
 //! The job names are the unique names the scheduler keys on. Calling a function twice replaces the job; an interval
 //! of 0 cancels it. Changing one media type never touches the other's job.
 
+use kuro_platform::kind::Kind;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
@@ -29,15 +30,12 @@ pub const RESTRICTION_UNMETERED: &str = "network_not_metered";
 /// Restriction value: the update needs external power (`DEVICE_CHARGING`).
 pub const RESTRICTION_CHARGING: &str = "ac";
 
-/// Which library the update job belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Media {
-    Manga,
-    Anime,
+pub trait MediaExt {
+    fn job_name(self) -> &'static str;
 }
 
-impl Media {
-    pub fn job_name(self) -> &'static str {
+impl MediaExt for Kind {
+    fn job_name(self) -> &'static str {
         match self {
             Self::Manga => MANGA_UPDATE_JOB,
             Self::Anime => ANIME_UPDATE_JOB,
@@ -81,7 +79,7 @@ pub fn library_update_constraints(restrictions: &BTreeSet<String>) -> Constraint
 /// hours, or no job when it is 0. `override_hours` stands in for the stored interval when a caller runs before the
 /// store holds the new value.
 pub fn setup_library_update(
-    media: Media,
+    media: Kind,
     store: &PrefStore,
     scheduler: &dyn JobScheduler,
     override_hours: Option<u32>,
@@ -124,7 +122,7 @@ pub fn backup_create(ctx: &MigrationContext) -> MigrationFuture<'_> {
 pub fn manga_library_update(ctx: &MigrationContext) -> MigrationFuture<'_> {
     Box::pin(async move {
         let Some((store, scheduler)) = services(ctx) else { return Ok(false) };
-        setup_library_update(Media::Manga, store, scheduler, None);
+        setup_library_update(Kind::Manga, store, scheduler, None);
         Ok(true)
     })
 }
@@ -133,7 +131,7 @@ pub fn manga_library_update(ctx: &MigrationContext) -> MigrationFuture<'_> {
 pub fn anime_library_update(ctx: &MigrationContext) -> MigrationFuture<'_> {
     Box::pin(async move {
         let Some((store, scheduler)) = services(ctx) else { return Ok(false) };
-        setup_library_update(Media::Anime, store, scheduler, None);
+        setup_library_update(Kind::Anime, store, scheduler, None);
         Ok(true)
     })
 }
@@ -229,7 +227,7 @@ mod tests {
         let store = PrefStore::in_memory();
         set_hours(&store, "pref_library_update_interval_key", 6);
         let sched = InProcessScheduler::default();
-        setup_library_update(Media::Manga, &store, &sched, None);
+        setup_library_update(Kind::Manga, &store, &sched, None);
         let jobs = sched.snapshot();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].name, "LibraryUpdate");
@@ -260,8 +258,8 @@ mod tests {
     fn a_library_interval_of_zero_cancels_only_that_job() {
         let store = PrefStore::in_memory();
         let rec = Recording::default();
-        setup_library_update(Media::Manga, &store, &rec, None);
-        setup_library_update(Media::Anime, &store, &rec, None);
+        setup_library_update(Kind::Manga, &store, &rec, None);
+        setup_library_update(Kind::Anime, &store, &rec, None);
         assert_eq!(rec.calls(), vec!["cancel LibraryUpdate", "cancel AnimeLibraryUpdate"], "the default interval is 0");
     }
 
@@ -270,10 +268,10 @@ mod tests {
         let store = PrefStore::in_memory();
         set_hours(&store, "pref_library_update_interval_key", 12);
         let rec = Recording::default();
-        setup_library_update(Media::Manga, &store, &rec, Some(48));
+        setup_library_update(Kind::Manga, &store, &rec, Some(48));
         assert_eq!(rec.only_spec().interval, Duration::from_secs(48 * 3600));
         let off = Recording::default();
-        setup_library_update(Media::Manga, &store, &off, Some(0));
+        setup_library_update(Kind::Manga, &store, &off, Some(0));
         assert_eq!(off.calls(), vec!["cancel LibraryUpdate"], "an override of 0 turns the job off");
     }
 
@@ -282,12 +280,12 @@ mod tests {
         let store = PrefStore::in_memory();
         set_hours(&store, "pref_library_update_interval_key", 24);
         let sched = InProcessScheduler::default();
-        setup_library_update(Media::Manga, &store, &sched, None);
-        setup_library_update(Media::Anime, &store, &sched, None);
+        setup_library_update(Kind::Manga, &store, &sched, None);
+        setup_library_update(Kind::Anime, &store, &sched, None);
         let names: Vec<&str> = sched.snapshot().iter().map(|j| j.name).collect();
         assert_eq!(names, vec!["AnimeLibraryUpdate", "LibraryUpdate"]);
 
-        setup_library_update(Media::Anime, &store, &sched, Some(0));
+        setup_library_update(Kind::Anime, &store, &sched, Some(0));
         let names: Vec<&str> = sched.snapshot().iter().map(|j| j.name).collect();
         assert_eq!(names, vec!["LibraryUpdate"], "cancel anime, the manga job is still present");
     }

@@ -7,21 +7,21 @@ use std::sync::Arc;
 use kuro_db::handle::Db;
 use kuro_db::statements_anime::{LibraryAnimeRow, SeasonAnimeRow};
 use kuro_db::models::LibraryRow;
-use kuro_domain::kind::EntryKind;
+use kuro_platform::kind::Kind;
 
 use crate::library_update::error::UpdateError;
 use crate::library_update::queue::{FetchType, LibraryEntry};
 
 pub trait LibraryStore: Send + Sync {
     /// Every favourite entry, one row per category it is in.
-    fn library(&self, kind: EntryKind) -> impl Future<Output = Result<Vec<LibraryEntry>, UpdateError>> + Send;
+    fn library(&self, kind: Kind) -> impl Future<Output = Result<Vec<LibraryEntry>, UpdateError>> + Send;
     /// The season children of an anime parent. Empty on a query error, which is logged (Q-16).
     fn season_children(&self, parent_id: i64) -> impl Future<Output = Vec<LibraryEntry>> + Send;
-    fn is_favorite(&self, id: i64, kind: EntryKind) -> impl Future<Output = Result<bool, UpdateError>> + Send;
+    fn is_favorite(&self, id: i64, kind: Kind) -> impl Future<Output = Result<bool, UpdateError>> + Send;
     /// The category ids the entry is in (empty when it has none).
-    fn categories(&self, id: i64, kind: EntryKind) -> impl Future<Output = Result<Vec<i64>, UpdateError>> + Send;
+    fn categories(&self, id: i64, kind: Kind) -> impl Future<Output = Result<Vec<i64>, UpdateError>> + Send;
     /// The numbers of the read chapters or seen episodes that have a recognised number.
-    fn read_numbers(&self, id: i64, kind: EntryKind) -> impl Future<Output = Result<Vec<f64>, UpdateError>> + Send;
+    fn read_numbers(&self, id: i64, kind: Kind) -> impl Future<Output = Result<Vec<f64>, UpdateError>> + Send;
 }
 
 pub struct SqliteLibraryStore {
@@ -34,10 +34,10 @@ impl SqliteLibraryStore {
         Self { manga, anime }
     }
 
-    fn db(&self, kind: EntryKind) -> &Arc<Db> {
+    fn db(&self, kind: Kind) -> &Arc<Db> {
         match kind {
-            EntryKind::Manga => &self.manga,
-            EntryKind::Anime => &self.anime,
+            Kind::Manga => &self.manga,
+            Kind::Anime => &self.anime,
         }
     }
 }
@@ -48,7 +48,7 @@ fn manga_entry(row: LibraryRow) -> LibraryEntry {
         source: row.manga.source,
         url: row.manga.url,
         title: row.manga.title,
-        kind: EntryKind::Manga,
+        kind: Kind::Manga,
         category: row.category,
         update_strategy: row.manga.update_strategy,
         status: row.manga.status,
@@ -69,7 +69,7 @@ fn anime_entry(row: LibraryAnimeRow) -> LibraryEntry {
         source: row.anime.source,
         url: row.anime.url,
         title: row.anime.title,
-        kind: EntryKind::Anime,
+        kind: Kind::Anime,
         category: row.category,
         update_strategy: row.anime.update_strategy,
         status: row.anime.status,
@@ -90,7 +90,7 @@ fn season_entry(row: SeasonAnimeRow) -> LibraryEntry {
         source: row.anime.source,
         url: row.anime.url,
         title: row.anime.title,
-        kind: EntryKind::Anime,
+        kind: Kind::Anime,
         category: -1,
         update_strategy: row.anime.update_strategy,
         status: row.anime.status,
@@ -106,16 +106,16 @@ fn season_entry(row: SeasonAnimeRow) -> LibraryEntry {
 }
 
 impl LibraryStore for SqliteLibraryStore {
-    async fn library(&self, kind: EntryKind) -> Result<Vec<LibraryEntry>, UpdateError> {
+    async fn library(&self, kind: Kind) -> Result<Vec<LibraryEntry>, UpdateError> {
         let entries = match kind {
-            EntryKind::Manga => self
+            Kind::Manga => self
                 .manga
                 .read_async(|c| {
                     let rows = kuro_db::statements_manga::views::library(c)?;
                     Ok(rows.into_iter().map(manga_entry).collect::<Vec<_>>())
                 })
                 .await?,
-            EntryKind::Anime => self
+            Kind::Anime => self
                 .anime
                 .read_async(|c| {
                     let rows = kuro_db::statements_anime::library(c)?;
@@ -143,10 +143,10 @@ impl LibraryStore for SqliteLibraryStore {
         }
     }
 
-    async fn is_favorite(&self, id: i64, kind: EntryKind) -> Result<bool, UpdateError> {
+    async fn is_favorite(&self, id: i64, kind: Kind) -> Result<bool, UpdateError> {
         let table = match kind {
-            EntryKind::Manga => "mangas",
-            EntryKind::Anime => "animes",
+            Kind::Manga => "mangas",
+            Kind::Anime => "animes",
         };
         let sql = format!("SELECT favorite FROM {table} WHERE _id = ?1");
         let rows = self
@@ -163,10 +163,10 @@ impl LibraryStore for SqliteLibraryStore {
         Ok(rows.first().copied().unwrap_or(false))
     }
 
-    async fn categories(&self, id: i64, kind: EntryKind) -> Result<Vec<i64>, UpdateError> {
+    async fn categories(&self, id: i64, kind: Kind) -> Result<Vec<i64>, UpdateError> {
         let sql = match kind {
-            EntryKind::Manga => "SELECT category_id FROM mangas_categories WHERE manga_id = ?1 ORDER BY category_id",
-            EntryKind::Anime => "SELECT category_id FROM animes_categories WHERE anime_id = ?1 ORDER BY category_id",
+            Kind::Manga => "SELECT category_id FROM mangas_categories WHERE manga_id = ?1 ORDER BY category_id",
+            Kind::Anime => "SELECT category_id FROM animes_categories WHERE anime_id = ?1 ORDER BY category_id",
         };
         let ids = self
             .db(kind)
@@ -182,10 +182,10 @@ impl LibraryStore for SqliteLibraryStore {
         Ok(ids)
     }
 
-    async fn read_numbers(&self, id: i64, kind: EntryKind) -> Result<Vec<f64>, UpdateError> {
+    async fn read_numbers(&self, id: i64, kind: Kind) -> Result<Vec<f64>, UpdateError> {
         let sql = match kind {
-            EntryKind::Manga => "SELECT chapter_number FROM chapters WHERE manga_id = ?1 AND read = 1 AND chapter_number >= 0",
-            EntryKind::Anime => "SELECT episode_number FROM episodes WHERE anime_id = ?1 AND seen = 1 AND episode_number >= 0",
+            Kind::Manga => "SELECT chapter_number FROM chapters WHERE manga_id = ?1 AND read = 1 AND chapter_number >= 0",
+            Kind::Anime => "SELECT episode_number FROM episodes WHERE anime_id = ?1 AND seen = 1 AND episode_number >= 0",
         };
         let numbers = self
             .db(kind)
@@ -238,7 +238,7 @@ mod tests {
             })
             .expect("insert anime");
         let store = SqliteLibraryStore::new(manga_db, anime_db);
-        let rows = store.library(EntryKind::Anime).await.expect("library");
+        let rows = store.library(Kind::Anime).await.expect("library");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].fetch_interval, -3);
         assert_eq!(rows[0].fetch_type, FetchType::Episodes);
@@ -257,12 +257,12 @@ mod tests {
             })
             .expect("insert anime");
         let store = SqliteLibraryStore::new(manga_db, anime_db.clone());
-        let rows = store.library(EntryKind::Anime).await.expect("library");
+        let rows = store.library(Kind::Anime).await.expect("library");
         // Only favourites are in the library view.
         assert_eq!(rows.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), vec!["Fav"]);
         let fav_id = rows[0].id;
-        assert!(store.is_favorite(fav_id, EntryKind::Anime).await.expect("favourite read"));
-        assert!(!store.is_favorite(999_999, EntryKind::Anime).await.expect("missing row"));
+        assert!(store.is_favorite(fav_id, Kind::Anime).await.expect("favourite read"));
+        assert!(!store.is_favorite(999_999, Kind::Anime).await.expect("missing row"));
         assert_eq!(rows[0].unread_or_unseen(), rows[0].total - rows[0].read);
         assert!(store.season_children(999_999).await.is_empty());
     }
