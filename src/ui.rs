@@ -124,7 +124,8 @@ pub fn header_bar() -> gtk::HeaderBar {
 
 /// A navigation page: one header row above `content` (docs/design/other-tabs.md). A pushed page (`back`) shows the
 /// back button and its title; a sidebar destination shows no title, because the sidebar already names it. When the
-/// first `end` widget is a search entry it takes the middle of the row in place of the title.
+/// first `end` widget is a search entry it takes the middle of the row in place of the title. An Anime | Manga switch
+/// (a stack switcher) among `end` goes to the start of the row, after Back, where the Library has its switch.
 pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>, back: bool) -> GBox {
     let header = header_bar();
     header.set_decoration_layout(Some(&decoration(false)));
@@ -146,7 +147,10 @@ pub fn page(title: &str, content: &impl IsA<gtk::Widget>, end: Vec<gtk::Widget>,
         b.connect_clicked(|_| pop());
         header.pack_start(&b);
     }
-    let end: Vec<gtk::Widget> = end.collect();
+    let (switches, end): (Vec<gtk::Widget>, Vec<gtk::Widget>) = end.partition(|w| w.is::<gtk::StackSwitcher>());
+    for w in &switches {
+        header.pack_start(w);
+    }
     for w in end.iter().rev() {
         header.pack_end(w);
     }

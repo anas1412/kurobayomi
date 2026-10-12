@@ -136,7 +136,9 @@ fn row_widgets(on_download: Rc<dyn Fn(Request)>) -> RowWidgets {
         card.append(w);
     }
     let slot = GBox::new(O::Vertical, 0);
-    let stack = gtk::Stack::new();
+    // a row is as tall as what it shows: a stack is as tall as its tallest child by default, which padded a leading
+    // slot (the "11 episodes" line) to the height of an episode card
+    let stack = gtk::Stack::builder().vhomogeneous(false).hhomogeneous(false).build();
     stack.add_named(&crate::clamp::clamp(&card, crate::ui::PAGE_WIDTH), Some("row"));
     stack.add_named(&slot, Some("slot"));
     RowWidgets { stack, card, lead, text, title, subtitle, summary, marker, bookmark, filler, download, slot }
