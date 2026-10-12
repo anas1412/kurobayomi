@@ -71,7 +71,7 @@ impl PagerController {
         &self.items
     }
 
-    #[cfg(test)]
+    /// The item the reader has settled on, if any (the engine's settle check reads it).
     pub fn current(&self) -> Option<&ItemKey> {
         self.current.as_ref()
     }

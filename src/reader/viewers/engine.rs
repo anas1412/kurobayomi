@@ -668,7 +668,13 @@ impl PagerInner {
     /// The strip arrived on `index` (ViewPager `onPageSelected`). A scroll that ends where it started is not a
     /// page change.
     fn settle(&self, index: usize) {
-        if self.settled.replace(index) == index {
+        // `realign` also records the shown index, so an unchanged index is a page change only while the controller
+        // has not yet made that item current (the opening scroll onto page 1 of a one-page chapter).
+        let unchanged = {
+            let ctl = self.ctl.borrow();
+            ctl.items().get(index).is_none_or(|item| ctl.current() == Some(item))
+        };
+        if self.settled.replace(index) == index && unchanged {
             self.rebuild();
             return;
         }
@@ -2006,6 +2012,34 @@ mod tests {
         assert!(pump_until(ready), "the shown page is decoded");
         pump_ms(300);
         (engine, window)
+    }
+
+    #[test]
+    fn a_one_page_chapter_shows_its_page_after_the_opening_transition_and_selects_it() {
+        crate::testing::with_display(|| {
+            use super::super::pager::nav::PageCmd;
+            let selected = Rc::new(Cell::new(0));
+            let seen = Rc::clone(&selected);
+            let mut ctx = context(ViewerSettings::from_prefs(&prefs()));
+            ctx.emit = Emitter::new(Rc::new(move |e| {
+                if matches!(e, ViewerEvent::PageSelected(_)) {
+                    seen.set(seen.get() + 1);
+                }
+            }));
+            let chapter = chapter(1, &[image("one-page", 400, 3000)]);
+            let engine = PagerEngine::new(ViewerKind::LeftToRight, ctx);
+            let window = show(engine.widget());
+            engine.set_chapters(handed(&chapter));
+            let inner = Rc::clone(&engine.0);
+            assert!(pump_until(|| inner.slots.borrow().get(&1).is_some_and(|(_, row)| row.page_ready())), "the page is decoded");
+            pump_ms(300);
+            assert_eq!(inner.ctl.borrow().view_index(), 1, "opens on page 1, not the Prev card");
+            assert_eq!(selected.get(), 1, "the opening page is selected, which marks the chapter read");
+            inner.command(PageCmd::Next);
+            pump_ms(300);
+            assert_eq!(inner.ctl.borrow().view_index(), 2);
+            window.destroy();
+        });
     }
 
     #[test]
