@@ -141,9 +141,10 @@ fn old_files_are_untouched_and_listed_by_legacy_files() {
 
     // an empty or missing old file is not listed
     let empty = TempPaths::new().unwrap();
-    std::fs::create_dir_all(empty.data_dir()).unwrap();
-    std::fs::write(empty.data_dir().join("manga.db"), b"").unwrap();
-    assert!(legacy_files(&empty.data_dir()).is_empty());
+    let folder = empty.data_dir();
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join(kuro_db::schema_unified::LEGACY_FILES[0]), b"").unwrap();
+    assert!(legacy_files(&folder).is_empty());
 }
 
 #[test]

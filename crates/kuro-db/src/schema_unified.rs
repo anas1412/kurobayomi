@@ -21,7 +21,7 @@ pub const APPLICATION_ID: i64 = 0x4B55_5232;
 pub const SCHEMA_VERSION: i64 = 1;
 
 /// The old per-kind files, only for [`legacy_files`].
-const LEGACY_FILES: [&str; 2] = ["manga.db", "anime.db"];
+pub const LEGACY_FILES: [&str; 2] = ["manga.db", "anime.db"];
 
 /// Tables, indexes, triggers and seed rows.
 pub const SCHEMA_SQL: &str = include_str!("../sql/unified/schema.sql");
